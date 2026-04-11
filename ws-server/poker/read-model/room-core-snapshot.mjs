@@ -68,6 +68,17 @@ function normalizeStacks(value) {
   return Object.fromEntries(entries.map(([userId, amount]) => [userId, Number(amount)]));
 }
 
+function normalizeLastBettingRoundActionByUserId(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const allowed = new Set(["fold", "check", "call", "raise", "all_in"]);
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([userId, action]) => typeof userId === "string" && userId && typeof action === "string" && allowed.has(action))
+  );
+}
+
 function normalizeMemberSeatRows(value) {
   if (!Array.isArray(value)) {
     return [];
@@ -332,6 +343,7 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
       maxRaiseTo: Number.isFinite(legalInfo.maxRaiseTo) ? legalInfo.maxRaiseTo : null,
       maxBetAmount: Number.isFinite(legalInfo.maxBetAmount) ? legalInfo.maxBetAmount : null
     },
+    lastBettingRoundActionByUserId: normalizeLastBettingRoundActionByUserId(statePublic.lastBettingRoundActionByUserId),
     private: resolvePrivateBranch({ state, userId, youSeat })
   };
 

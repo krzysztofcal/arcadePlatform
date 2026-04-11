@@ -133,6 +133,7 @@ test("projectRoomCoreSnapshot reuses poker legal-actions/public stripping semant
   assert.equal(seated.hand.status, "PREFLOP");
   assert.deepEqual(seated.board.cards, ["AS", "KD"]);
   assert.deepEqual(seated.legalActions.actions, ["CHECK", "BET"]);
+  assert.deepEqual(seated.lastBettingRoundActionByUserId, {});
   assert.deepEqual(seated.private, { userId: "seated_user", seat: 2, holeCards: ["AH", "AD"] });
   assert.deepEqual(observer.hand, seated.hand);
   assert.deepEqual(observer.board, seated.board);
@@ -144,6 +145,44 @@ test("projectRoomCoreSnapshot reuses poker legal-actions/public stripping semant
   assert.equal(seated.turn.startedAt, null);
   assert.equal(seated.turn.deadlineAt, null);
   assert.equal(observer.private, null);
+});
+
+test("projectRoomCoreSnapshot exposes last betting-round actions with canonical labels", () => {
+  const snapshot = projectRoomCoreSnapshot({
+    tableId: "table_action_badges",
+    roomId: "table_action_badges",
+    coreState: {
+      seats: { user_a: 1, user_b: 2 },
+      pokerState: {
+        roomId: "table_action_badges",
+        handId: "hand_actions",
+        phase: "TURN",
+        dealerSeatNo: 1,
+        turnUserId: "user_b",
+        community: ["AS", "KD", "QC", "3H"],
+        potTotal: 14,
+        stacks: { user_a: 92, user_b: 88 },
+        betThisRoundByUserId: { user_a: 4, user_b: 4 },
+        toCallByUserId: { user_a: 0, user_b: 0 },
+        actedThisRoundByUserId: { user_a: true, user_b: true },
+        lastBettingRoundActionByUserId: { user_a: "call", user_b: "raise", ignored: "weird" },
+        foldedByUserId: { user_a: false, user_b: false },
+        leftTableByUserId: { user_a: false, user_b: false },
+        sitOutByUserId: { user_a: false, user_b: false },
+        holeCardsByUserId: { user_a: ["AH", "AD"], user_b: ["2C", "2D"] },
+        handSeed: "sensitive",
+        deck: ["QS"]
+      }
+    },
+    members: [
+      { userId: "user_a", seat: 1 },
+      { userId: "user_b", seat: 2 }
+    ],
+    userId: "user_a",
+    youSeat: 1
+  });
+
+  assert.deepEqual(snapshot.lastBettingRoundActionByUserId, { user_a: "call", user_b: "raise" });
 });
 
 test("projectRoomCoreSnapshot projects settled showdown fields without leaking private cards", () => {

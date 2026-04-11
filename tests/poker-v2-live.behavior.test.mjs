@@ -433,6 +433,7 @@ test('poker v2 shows a live turn clock only on the active seat avatar', async ()
 
   assert.ok(activeClock, 'active seat should show a turn clock overlay');
   assert.equal(Math.abs(Number(activeClock.style['--turn-progress']) - 0.5) < 0.02, true);
+  assert.equal(activeClock.style['--turn-hue'], '60');
   assert.equal(heroClock, undefined, 'inactive seats should not show the turn clock overlay');
 });
 
@@ -471,6 +472,61 @@ test('poker v2 turns the live clock red when five seconds remain', async () => {
 
   assert.ok(heroClock);
   assert.match(heroClock.className, /poker-seat-turn-clock--warning/);
+  assert.equal(heroClock.style['--turn-hue'], '27');
+});
+
+test('poker v2 renders last-action badges and dims folded seats', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 6,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' },
+          { userId: 'villain-2', seat: 3, displayName: 'Villain 2', status: 'FOLDED' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-5', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'villain-1', startedAt: Date.now() - 15_500, deadlineAt: Date.now() + 4_500 },
+        pot: { total: 4, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CALL'] },
+        actionConstraints: { toCall: 2, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+        lastBettingRoundActionByUserId: { 'user-1': 'call', 'villain-1': 'raise', 'villain-2': 'fold' }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  const villainRaiseSeat = findSeatByLabel(harness, 'Villain 1');
+  const foldedSeat = findSeatByLabel(harness, 'Villain 2');
+  const heroBadge = (heroSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
+  const villainBadge = (villainRaiseSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
+  const foldedBadge = (foldedSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
+
+  assert.ok(heroBadge);
+  assert.equal(heroBadge.textContent, 'Call');
+  assert.match(heroBadge.className, /poker-seat-action-badge--call/);
+  assert.ok(villainBadge);
+  assert.equal(villainBadge.textContent, 'Raise');
+  assert.match(villainBadge.className, /poker-seat-action-badge--raise/);
+  assert.ok(foldedBadge);
+  assert.equal(foldedBadge.textContent, 'Fold');
+  assert.match(foldedBadge.className, /poker-seat-action-badge--fold/);
+  assert.match(foldedSeat.className, /poker-seat--folded/);
 });
 
 test('poker v2 keeps the dealer chip fixed while action moves between players', async () => {

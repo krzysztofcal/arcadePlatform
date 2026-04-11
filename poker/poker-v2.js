@@ -22,6 +22,13 @@
     error: 'Live table unavailable'
   };
   var WINNER_REVEAL_MS = 4_000;
+  var LAST_ACTION_LABEL = {
+    fold: 'Fold',
+    check: 'Check',
+    call: 'Call',
+    raise: 'Raise',
+    all_in: 'All in'
+  };
   var seatAnchors = [
     { x: 50, y: 10 },
     { x: 86, y: 28 },
@@ -60,6 +67,7 @@
     turnUserId: 'hero',
     phase: 'TURN',
     handId: 'demo-hand',
+    lastBettingRoundActionByUserId: { victor: 'call', marcus: 'raise', nico: 'fold' },
     legalActions: ['FOLD', 'CHECK', 'BET'],
     actionConstraints: { toCall: 0, maxBetAmount: 240, minRaiseTo: null, maxRaiseTo: null },
     currentUserId: 'hero',
@@ -115,6 +123,7 @@
       turnDeadlineAt: null,
       phase: 'LOBBY',
       handId: null,
+      lastBettingRoundActionByUserId: {},
       legalActions: [],
       actionConstraints: {},
       currentUserId: nextUserId || null,
@@ -515,6 +524,17 @@
     };
   }
 
+  function normalizeLastBettingRoundActionByUserId(source){
+    var raw = isObject(source) ? source : {};
+    var allowed = { fold: true, check: true, call: true, raise: true, all_in: true };
+    var next = {};
+    Object.keys(raw).forEach(function(userId){
+      var action = typeof raw[userId] === 'string' ? raw[userId].trim().toLowerCase() : '';
+      if (userId && allowed[action]) next[userId] = action;
+    });
+    return next;
+  }
+
   function normalizeShowdown(source){
     if (!isObject(source)) return null;
     var showdown = {
@@ -655,6 +675,7 @@
     var handSettlementObj = isObject(payload.handSettlement) ? payload.handSettlement : isObject(publicObj.handSettlement) ? publicObj.handSettlement : null;
     var legalSource = payload.legalActions != null ? payload.legalActions : publicObj.legalActions;
     var constraintsPrimary = payload.actionConstraints != null ? payload.actionConstraints : publicObj.actionConstraints;
+    var lastActionMapSource = payload.lastBettingRoundActionByUserId != null ? payload.lastBettingRoundActionByUserId : publicObj.lastBettingRoundActionByUserId;
 
     if (snapshotTableId && state.tableId && snapshotTableId !== state.tableId) return;
     if (snapshotTableId) state.tableId = snapshotTableId;
@@ -716,6 +737,7 @@
     state.showdown = normalizeShowdown(showdownObj);
     state.handSettlement = normalizeHandSettlement(handSettlementObj);
     state.revealedShowdownCardsByUserId = mapRevealedShowdownCards(state.showdown);
+    state.lastBettingRoundActionByUserId = normalizeLastBettingRoundActionByUserId(lastActionMapSource);
     if (state.handId && previousHandId && state.handId !== previousHandId && (previousPhase === 'SETTLED' || stickyWinnerReveal.handId === previousHandId)){
       clearWinnerRevealTimer();
       stickyWinnerReveal.visibleUntilMs = 0;
@@ -863,6 +885,29 @@
     return seat.displayName || (seat.isBot ? 'Bot' : shortId(seat.userId)) || 'Player';
   }
 
+  function getSeatLastBettingRoundAction(seat){
+    if (!seat || typeof seat.userId !== 'string') return null;
+    return state.lastBettingRoundActionByUserId && state.lastBettingRoundActionByUserId[seat.userId]
+      ? state.lastBettingRoundActionByUserId[seat.userId]
+      : null;
+  }
+
+  function getSeatActionBadgePosition(slotIndex, hero){
+    var radius = hero ? 48 : 38;
+    var centerX = 50;
+    var centerY = hero ? 48 : 38;
+    var distance = radius + 8;
+    var x = centerX;
+    var y = centerY;
+    if (slotIndex === 0) y -= distance;
+    else if (slotIndex === 1) { x += distance; y -= 4; }
+    else if (slotIndex === 2) { x += distance; y += 4; }
+    else if (slotIndex === 3) y += distance;
+    else if (slotIndex === 4) { x -= distance; y += 4; }
+    else if (slotIndex === 5) { x -= distance; y -= 4; }
+    return { left: x + 'px', top: y + 'px' };
+  }
+
   function shortId(value){
     var text = typeof value === 'string' ? value.trim() : '';
     if (!text) return '';
@@ -934,7 +979,8 @@
       var article = document.createElement('article');
       var active = !!(seat && seat.userId && state.turnUserId && seat.userId === state.turnUserId);
       var hero = !!(seat && seat.userId && state.currentUserId && seat.userId === state.currentUserId);
-      var folded = !!(seat && /FOLD/i.test(seat.status || ''));
+      var lastAction = getSeatLastBettingRoundAction(seat);
+      var folded = !!(seat && (/FOLD/i.test(seat.status || '') || lastAction === 'fold'));
       var rotatedIndex = rotateSeatIndex(i, state.maxSeats);
       var anchor = getSeatAnchor(rotatedIndex, state.maxSeats);
       if (hero && state.maxSeats >= 4) anchor = { x: 34, y: 91 };
@@ -964,6 +1010,7 @@
           var clock = document.createElement('div');
           clock.className = 'poker-seat-turn-clock' + (turnClock.remainingSeconds <= 5 ? ' poker-seat-turn-clock--warning' : '');
           clock.style.setProperty('--turn-progress', String(turnClock.ratio));
+          clock.style.setProperty('--turn-hue', String(Math.max(0, Math.min(120, Math.round(turnClock.ratio * 120)))));
           clock.setAttribute('aria-hidden', 'true');
           avatar.appendChild(clock);
         }
@@ -996,6 +1043,15 @@
       status.textContent = seat ? String(seat.status || 'ACTIVE').replace(/_/g, ' ') : 'OPEN';
 
       article.appendChild(avatar);
+      if (seat && lastAction){
+        var actionBadge = document.createElement('div');
+        var badgePosition = getSeatActionBadgePosition(rotatedIndex, hero);
+        actionBadge.className = 'poker-seat-action-badge poker-seat-action-badge--' + lastAction.replace(/_/g, '-');
+        actionBadge.textContent = LAST_ACTION_LABEL[lastAction] || lastAction;
+        actionBadge.style.left = badgePosition.left;
+        actionBadge.style.top = badgePosition.top;
+        article.appendChild(actionBadge);
+      }
       if (seat && isWinnerSeat(seat)){
         var winnerBadge = document.createElement('div');
         winnerBadge.className = 'poker-seat-winner-badge';

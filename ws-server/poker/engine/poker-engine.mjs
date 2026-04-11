@@ -98,6 +98,7 @@ export function buildBootstrappedPokerState({ tableId, coreState, dealerSeatNo =
   const betThisRoundByUserId = Object.fromEntries(userIds.map((userId) => [userId, 0]));
   const toCallByUserId = Object.fromEntries(userIds.map((userId) => [userId, 0]));
   const actedThisRoundByUserId = Object.fromEntries(userIds.map((userId) => [userId, false]));
+  const lastBettingRoundActionByUserId = Object.fromEntries(userIds.map((userId) => [userId, null]));
   const foldedByUserId = Object.fromEntries(userIds.map((userId) => [userId, false]));
   const contributionsByUserId = Object.fromEntries(userIds.map((userId) => [userId, 0]));
 
@@ -138,6 +139,7 @@ export function buildBootstrappedPokerState({ tableId, coreState, dealerSeatNo =
     toCallByUserId,
     betThisRoundByUserId,
     actedThisRoundByUserId,
+    lastBettingRoundActionByUserId,
     foldedByUserId,
     contributionsByUserId,
     holeCardsByUserId: toHoleCardCodeMap(dealt.holeCardsByUserId),

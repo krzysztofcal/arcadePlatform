@@ -120,6 +120,7 @@ test("buildStateSnapshotPayload projects bootstrapped PREFLOP state from table m
   assert.deepEqual(seatedPayload.public.pot, { total: 3, sidePots: [] });
   assert.deepEqual(seatedPayload.public.legalActions, { seat: 1, actions: ["FOLD", "CALL", "RAISE"] });
   assert.deepEqual(seatedPayload.public.actionConstraints, { toCall: 1, minRaiseTo: 4, maxRaiseTo: 100, maxBetAmount: null });
+  assert.deepEqual(seatedPayload.public.lastBettingRoundActionByUserId, {});
   assert.equal(Array.isArray(seatedPayload.private.holeCards), true);
   assert.equal(seatedPayload.private.holeCards.length, 2);
   assert.equal("private" in observerPayload, false);
@@ -129,6 +130,33 @@ test("buildStateSnapshotPayload projects bootstrapped PREFLOP state from table m
     actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null }
   });
   assert.equal(seatedPayload.table.memberCount, seatedPayload.table.members.length);
+});
+
+test("buildStateSnapshotPayload serializes last betting-round action labels", () => {
+  const payload = buildStateSnapshotPayload({
+    userId: "user_a",
+    tableSnapshot: {
+      tableId: "table_action_badges",
+      roomId: "table_action_badges",
+      stateVersion: 13,
+      members: [
+        { userId: "user_a", seat: 1 },
+        { userId: "user_b", seat: 2 }
+      ],
+      memberCount: 2,
+      youSeat: 1,
+      hand: { handId: "h_actions", status: "TURN", round: "TURN", dealerSeatNo: 2 },
+      board: { cards: ["AS", "KD", "QC", "3H"] },
+      pot: { total: 14, sidePots: [] },
+      turn: { userId: "user_b", seat: 2, startedAt: 1710000000000, deadlineAt: 1710000015000 },
+      legalActions: { seat: 1, actions: ["FOLD", "CALL"] },
+      actionConstraints: { toCall: 4, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+      lastBettingRoundActionByUserId: { user_a: "call", user_b: "raise", ignored: "bad" },
+      private: { holeCards: ["AS", "AD"] }
+    }
+  });
+
+  assert.deepEqual(payload.public.lastBettingRoundActionByUserId, { user_a: "call", user_b: "raise" });
 });
 
 test("buildStateSnapshotPayload includes terminal showdown/settlement fields when present", () => {

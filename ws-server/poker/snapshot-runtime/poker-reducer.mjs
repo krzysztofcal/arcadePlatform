@@ -298,9 +298,19 @@ const resetRoundState = (state) => ({
   toCallByUserId: buildDefaultMap(getSeatsForHand(state), 0),
   betThisRoundByUserId: buildDefaultMap(getSeatsForHand(state), 0),
   actedThisRoundByUserId: buildDefaultMap(getSeatsForHand(state), false),
+  lastBettingRoundActionByUserId: buildDefaultMap(getSeatsForHand(state), null),
   currentBet: 0,
   lastRaiseSize: null,
 });
+
+const resolveLastBettingRoundAction = ({ actionType, stackAfterAction }) => {
+  if (actionType === "FOLD") return "fold";
+  if (actionType === "CHECK") return "check";
+  if (stackAfterAction <= 0) return "all_in";
+  if (actionType === "CALL") return "call";
+  if (actionType === "BET" || actionType === "RAISE") return "raise";
+  return null;
+};
 
 const stampTurnTimer = (state, nowMs) => {
   const now = Number.isFinite(nowMs) ? nowMs : Date.now();
@@ -378,6 +388,7 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
     toCallByUserId: buildDefaultMap(orderedSeats, 0),
     betThisRoundByUserId: buildDefaultMap(orderedSeats, 0),
     actedThisRoundByUserId: buildDefaultMap(orderedSeats, false),
+    lastBettingRoundActionByUserId: buildDefaultMap(orderedSeats, null),
     foldedByUserId,
     allInByUserId,
     contributionsByUserId,
@@ -500,6 +511,7 @@ const resetToNextHand = (state, options = {}) => {
     toCallByUserId: buildDefaultMap(seats, 0),
     betThisRoundByUserId: buildDefaultMap(seats, 0),
     actedThisRoundByUserId: buildDefaultMap(seats, false),
+    lastBettingRoundActionByUserId: buildDefaultMap(seats, null),
     foldedByUserId,
     contributionsByUserId: buildDefaultMap(seats, 0),
     lastAggressorUserId: null,
@@ -584,6 +596,7 @@ const applyAction = (state, action) => {
     toCallByUserId: copyMap(state.toCallByUserId),
     betThisRoundByUserId: copyMap(state.betThisRoundByUserId),
     actedThisRoundByUserId: copyMap(state.actedThisRoundByUserId),
+    lastBettingRoundActionByUserId: copyMap(state.lastBettingRoundActionByUserId),
     foldedByUserId: copyMap(state.foldedByUserId),
     allInByUserId: copyMap(state.allInByUserId || buildDefaultMap(safeSeats, false)),
     contributionsByUserId: copyMap(state.contributionsByUserId || buildDefaultMap(safeSeats, 0)),
@@ -673,6 +686,10 @@ const applyAction = (state, action) => {
 
   next.allInByUserId = deriveAllInByUserId(next);
   next.actedThisRoundByUserId[userId] = true;
+  next.lastBettingRoundActionByUserId[userId] = resolveLastBettingRoundAction({
+    actionType: action.type,
+    stackAfterAction: Number(next.stacks?.[userId] ?? 0),
+  });
   next.turnUserId = getNextBettingUserId(next, userId);
 
   const done = checkHandDone(next, events);
@@ -735,6 +752,7 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
     toCallByUserId: copyMap(state.toCallByUserId),
     betThisRoundByUserId: copyMap(state.betThisRoundByUserId),
     actedThisRoundByUserId: copyMap(state.actedThisRoundByUserId),
+    lastBettingRoundActionByUserId: copyMap(state.lastBettingRoundActionByUserId),
     foldedByUserId: copyMap(state.foldedByUserId),
     allInByUserId: copyMap(state.allInByUserId || buildDefaultMap(sanitizeSeats, false)),
     contributionsByUserId: copyMap(state.contributionsByUserId || buildDefaultMap(sanitizeSeats, 0)),
@@ -757,6 +775,7 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
   if (wasParticipatingInHand) {
     next.foldedByUserId[userId] = true;
     next.actedThisRoundByUserId[userId] = true;
+    next.lastBettingRoundActionByUserId[userId] = "fold";
   }
   next.missedTurnsByUserId[userId] = 0;
   if (next.pendingAutoSitOutByUserId) {

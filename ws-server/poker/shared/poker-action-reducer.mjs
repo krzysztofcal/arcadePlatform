@@ -35,6 +35,7 @@ function asStateCopy(state) {
     toCallByUserId: { ...(state.toCallByUserId || {}) },
     betThisRoundByUserId: { ...(state.betThisRoundByUserId || {}) },
     actedThisRoundByUserId: { ...(state.actedThisRoundByUserId || {}) },
+    lastBettingRoundActionByUserId: { ...(state.lastBettingRoundActionByUserId || {}) },
     foldedByUserId: { ...(state.foldedByUserId || {}) },
     contributionsByUserId: { ...(state.contributionsByUserId || {}) },
     sidePots: Array.isArray(state.sidePots) ? state.sidePots.slice() : [],
@@ -233,7 +234,27 @@ function resetRoundState(state) {
     state.betThisRoundByUserId[userId] = 0;
     state.toCallByUserId[userId] = 0;
     state.actedThisRoundByUserId[userId] = false;
+    state.lastBettingRoundActionByUserId[userId] = null;
   }
+}
+
+function resolveLastBettingRoundAction({ action, stackAfterAction }) {
+  if (action === "FOLD") {
+    return "fold";
+  }
+  if (action === "CHECK") {
+    return "check";
+  }
+  if (stackAfterAction <= 0) {
+    return "all_in";
+  }
+  if (action === "CALL") {
+    return "call";
+  }
+  if (action === "BET" || action === "RAISE") {
+    return "raise";
+  }
+  return null;
 }
 
 function resolveStreetTurnUserId(state) {
@@ -346,6 +367,10 @@ export function applyAction({ pokerState, userId, action, amount, nowIso = "1970
     nextState.potTotal = Number(nextState.potTotal ?? 0) + contribution;
     nextState.actedThisRoundByUserId[userId] = true;
   }
+  nextState.lastBettingRoundActionByUserId[userId] = resolveLastBettingRoundAction({
+    action: normalizedAction,
+    stackAfterAction: Number(nextState.stacks?.[userId] ?? 0)
+  });
 
   recomputeToCall(nextState);
 

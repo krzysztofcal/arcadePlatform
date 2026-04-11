@@ -54,6 +54,17 @@ function normalizeTurnTimerField(value) {
   return Number.isFinite(value) ? value : null;
 }
 
+function normalizeLastBettingRoundActionByUserId(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const allowed = new Set(["fold", "check", "call", "raise", "all_in"]);
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([userId, action]) => typeof userId === "string" && userId && typeof action === "string" && allowed.has(action))
+  );
+}
+
 function normalizeShowdown(showdown) {
   if (!showdown || typeof showdown !== "object" || Array.isArray(showdown)) {
     return null;
@@ -165,7 +176,8 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId }) {
         minRaiseTo: Number.isFinite(tableSnapshot?.actionConstraints?.minRaiseTo) ? Number(tableSnapshot.actionConstraints.minRaiseTo) : null,
         maxRaiseTo: Number.isFinite(tableSnapshot?.actionConstraints?.maxRaiseTo) ? Number(tableSnapshot.actionConstraints.maxRaiseTo) : null,
         maxBetAmount: Number.isFinite(tableSnapshot?.actionConstraints?.maxBetAmount) ? Number(tableSnapshot.actionConstraints.maxBetAmount) : null
-      }
+      },
+      lastBettingRoundActionByUserId: normalizeLastBettingRoundActionByUserId(tableSnapshot?.lastBettingRoundActionByUserId)
     }
   };
 
