@@ -202,6 +202,7 @@ test("projectRoomCoreSnapshot projects settled showdown fields without leaking p
   assert.deepEqual(seated.turn, { userId: null, seat: null, startedAt: null, deadlineAt: null });
   assert.deepEqual(seated.showdown.winners, ["other_user"]);
   assert.deepEqual(seated.showdown.revealedWinners, [
+    { userId: "seated_user", holeCards: ["AH", "AD"] },
     { userId: "other_user", holeCards: ["2C", "2D"] }
   ]);
   assert.deepEqual(seated.handSettlement.payouts, { other_user: 6 });

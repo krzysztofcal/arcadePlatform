@@ -215,14 +215,32 @@ function resolveRevealedWinners({ statePublic, state }) {
   if (statePublic?.showdown?.reason !== "computed") {
     return [];
   }
-  const winners = Array.isArray(statePublic?.showdown?.winners)
-    ? statePublic.showdown.winners.filter((value) => typeof value === "string" && value)
-    : [];
-  if (winners.length === 0) {
+  const potsAwarded = Array.isArray(statePublic?.showdown?.potsAwarded) ? statePublic.showdown.potsAwarded : [];
+  const comparedUserIds = [];
+  const comparedUserIdSet = new Set();
+  potsAwarded.forEach((pot) => {
+    if (!pot || typeof pot !== "object" || !Array.isArray(pot.eligibleUserIds)) return;
+    pot.eligibleUserIds.forEach((userId) => {
+      if (typeof userId !== "string" || !userId || comparedUserIdSet.has(userId)) return;
+      comparedUserIdSet.add(userId);
+      comparedUserIds.push(userId);
+    });
+  });
+  if (comparedUserIds.length === 0) {
+    const winners = Array.isArray(statePublic?.showdown?.winners)
+      ? statePublic.showdown.winners.filter((value) => typeof value === "string" && value)
+      : [];
+    winners.forEach((userId) => {
+      if (comparedUserIdSet.has(userId)) return;
+      comparedUserIdSet.add(userId);
+      comparedUserIds.push(userId);
+    });
+  }
+  if (comparedUserIds.length === 0) {
     return [];
   }
   const holeCardsByUserId = asObject(state?.holeCardsByUserId) || {};
-  return winners
+  return comparedUserIds
     .map((userId) => ({
       userId,
       holeCards: normalizeCards(holeCardsByUserId[userId])
