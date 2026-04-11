@@ -660,6 +660,85 @@ test('poker v2 keeps winner badges and revealed cards visible through the local 
   assert.equal(harness.elements.pokerCommunityCards.children.length, 5);
 });
 
+test('poker v2 does not compute hero best hand from sticky winner reveal board after the next hand starts', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 11,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-10', status: 'SETTLED', dealerSeatNo: 2 },
+        turn: { userId: null, seat: null, startedAt: null, deadlineAt: null },
+        board: { cards: ['2H', '3H', '4H', '9C', 'KD'] },
+        pot: { total: 0, sidePots: [] },
+        legalActions: { seat: 1, actions: [] },
+        showdown: {
+          handId: 'hand-10',
+          winners: ['villain-1'],
+          reason: 'computed',
+          revealedWinners: [
+            { userId: 'villain-1', holeCards: ['AS', 'AD'] }
+          ]
+        },
+        handSettlement: {
+          handId: 'hand-10',
+          settledAt: '2026-04-11T10:00:00.000Z'
+        }
+      },
+      private: { holeCards: [{ r: 'K', s: 'H' }, { r: 'K', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 12,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-11', status: 'PREFLOP', dealerSeatNo: 1 },
+        turn: { userId: 'user-1', seat: 1, startedAt: Date.now(), deadlineAt: Date.now() + 20_000 },
+        pot: { total: 3, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CALL'] },
+        actionConstraints: { toCall: 1 }
+      },
+      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'J', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  const bestHand = findSeatChild(heroSeat, 'poker-seat-best-hand');
+
+  assert.equal(harness.elements.pokerCommunityCards.children.length, 5, 'sticky reveal board should still render');
+  assert.equal(bestHand, undefined, 'hero best hand should not use sticky reveal board from the previous hand');
+});
+
 test('poker v2 keeps winner cards hidden when the hand ends without showdown comparison', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();

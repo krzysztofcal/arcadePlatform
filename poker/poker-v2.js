@@ -633,6 +633,7 @@
     var nextStacks = normalizeStacks(payload);
     if (nextStacks) state.stacks = nextStacks;
 
+    var previousHandId = state.handId;
     if (typeof handObj.status === 'string' && handObj.status) state.phase = handObj.status.toUpperCase();
     if (typeof handObj.handId === 'string' && handObj.handId) state.handId = handObj.handId;
     if (Number.isInteger(payload.dealerSeat)) state.dealerSeat = payload.dealerSeat;
@@ -655,6 +656,7 @@
     else if (Array.isArray(publicObj.board)) boardSource = publicObj.board;
     else if (isObject(publicObj.board) && Array.isArray(publicObj.board.cards)) boardSource = publicObj.board.cards;
     if (boardSource) state.communityCards = normalizeCards(boardSource);
+    else if (state.handId && previousHandId && state.handId !== previousHandId) state.communityCards = [];
 
     var nextHeroCards = null;
     if (Array.isArray(payload.myHoleCards)) nextHeroCards = normalizeCards(payload.myHoleCards);
@@ -709,7 +711,7 @@
   }
 
   function getHeroBestHand(){
-    var mergedCards = (Array.isArray(state.heroCards) ? state.heroCards.slice(0, 2) : []).concat(getDisplayCommunityCards());
+    var mergedCards = (Array.isArray(state.heroCards) ? state.heroCards.slice(0, 2) : []).concat(Array.isArray(state.communityCards) ? state.communityCards.slice(0, 5) : []);
     var best = evaluateViewerBestHand(mergedCards);
     if (!best || !Array.isArray(best.cards) || best.cards.length !== 5) return null;
     return best;
