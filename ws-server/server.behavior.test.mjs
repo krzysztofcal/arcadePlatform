@@ -1536,7 +1536,15 @@ test("WS table_join missing persisted table returns protocol-safe error and late
     }
   };
 
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...persistedBootstrapFixturesEnv(fixtures) } });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_POKER_SETTLED_REVEAL_MS: "60000",
+      SUPABASE_DB_URL: "",
+      ...persistedBootstrapFixturesEnv(fixtures)
+    }
+  });
 
   try {
     await waitForListening(child, 5000);
@@ -2136,6 +2144,16 @@ test("duplicate act requestId is idempotent and does not emit extra advancing st
     assert.equal(firstResult.payload.status, "accepted");
     const firstUpdate = await nextStateUpdate(ws, { baseline: baseline.payload, timeoutMs: 4000 });
     assert.equal(firstUpdate.payload.stateVersion > baseline.payload.stateVersion, true);
+    let latestVersion = firstUpdate.payload.stateVersion;
+    for (;;) {
+      const maybeFrame = await attemptMessage(ws, 300);
+      if (!maybeFrame) {
+        break;
+      }
+      if (maybeFrame.type === "stateSnapshot") {
+        latestVersion = maybeFrame.payload.stateVersion;
+      }
+    }
 
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-idem", ts: "2026-02-28T01:03:03Z", payload: { tableId, handId, action: "fold" } });
     const replayResult = await nextMessageOfType(ws, "commandResult");
@@ -2144,7 +2162,7 @@ test("duplicate act requestId is idempotent and does not emit extra advancing st
 
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-idem-after", ts: "2026-02-28T01:03:04Z", payload: { tableId, view: "snapshot" } });
     const afterReplay = await nextMessageOfType(ws, "stateSnapshot");
-    assert.equal(afterReplay.payload.stateVersion, firstUpdate.payload.stateVersion);
+    assert.equal(afterReplay.payload.stateVersion, latestVersion);
 
     ws.close();
   } finally {
