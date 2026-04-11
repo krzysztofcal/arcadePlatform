@@ -86,7 +86,8 @@
     handId: null,
     visibleUntilMs: 0,
     winners: [],
-    revealedWinnerCardsByUserId: {}
+    revealedWinnerCardsByUserId: {},
+    communityCards: []
   };
   var els = {};
 
@@ -578,7 +579,8 @@
         handId: handId,
         visibleUntilMs: Date.now() + WINNER_REVEAL_MS,
         winners: winners.slice(),
-        revealedWinnerCardsByUserId: cloneRevealedWinnerCards(state.revealedWinnerCardsByUserId)
+        revealedWinnerCardsByUserId: cloneRevealedWinnerCards(state.revealedWinnerCardsByUserId),
+        communityCards: Array.isArray(state.communityCards) ? state.communityCards.slice(0, 5) : []
       };
     }
   }
@@ -956,7 +958,10 @@
   function renderCommunityCards(){
     if (!els.communityCards) return;
     els.communityCards.innerHTML = '';
-    state.communityCards.forEach(function(card){
+    var cards = Array.isArray(state.communityCards) && state.communityCards.length
+      ? state.communityCards
+      : (getActiveWinnerReveal() ? stickyWinnerReveal.communityCards : []);
+    cards.forEach(function(card){
       els.communityCards.appendChild(createCard(card));
     });
   }
@@ -1000,8 +1005,8 @@
     }
     var chipOffset = { x: 0, y: -8 };
     if (slotIndex === 0) chipOffset = { x: 0, y: 8 };
-    else if (slotIndex === 1) chipOffset = { x: -9, y: 5 };
-    else if (slotIndex === 2) chipOffset = { x: -9, y: -5 };
+    else if (slotIndex === 1) chipOffset = { x: -12, y: -2 };
+    else if (slotIndex === 2) chipOffset = { x: -12, y: -12 };
     else if (slotIndex === 3) chipOffset = { x: 11, y: -7 };
     else if (slotIndex === 4) chipOffset = { x: 9, y: -5 };
     else if (slotIndex === 5) chipOffset = { x: 9, y: 5 };

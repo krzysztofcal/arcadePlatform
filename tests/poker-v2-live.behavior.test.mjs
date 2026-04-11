@@ -356,8 +356,8 @@ test('poker v2 aligns the right rail seats and keeps the chip on the dealer seat
   assert.ok(rightBottomSeat);
   assert.equal(rightTopSeat.style.left, '80%');
   assert.equal(rightBottomSeat.style.left, '80%');
-  assert.equal(harness.elements.pokerDealerChip.style.left, '71%');
-  assert.equal(harness.elements.pokerDealerChip.style.top, '34%');
+  assert.equal(harness.elements.pokerDealerChip.style.left, '68%');
+  assert.equal(harness.elements.pokerDealerChip.style.top, '27%');
 });
 
 test('poker v2 shows a live turn clock only on the active seat avatar', async () => {
@@ -592,6 +592,7 @@ test('poker v2 keeps winner badges and revealed cards visible through the local 
       public: {
         hand: { handId: 'hand-8', status: 'SETTLED', dealerSeatNo: 2 },
         turn: { userId: null, seat: null, startedAt: null, deadlineAt: null },
+        board: { cards: ['2H', '3H', '4H', '9C', 'KD'] },
         pot: { total: 0, sidePots: [] },
         legalActions: { seat: 1, actions: [] },
         showdown: {
@@ -649,6 +650,7 @@ test('poker v2 keeps winner badges and revealed cards visible through the local 
   assert.equal(villainCards.children.length, 2);
   assert.equal(villainCards.children[0].className.includes('poker-card--back'), false);
   assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
+  assert.equal(harness.elements.pokerCommunityCards.children.length, 5);
 });
 
 test('poker v2 keeps winner cards hidden when the hand ends without showdown comparison', async () => {
