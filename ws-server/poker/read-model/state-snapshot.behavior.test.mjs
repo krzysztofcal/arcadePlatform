@@ -154,7 +154,7 @@ test("buildStateSnapshotPayload includes terminal showdown/settlement fields whe
         potsAwarded: [{ amount: 5, winners: ["user_a"] }],
         potAwardedTotal: 5,
         reason: "computed",
-        revealedWinners: [{ userId: "user_a", holeCards: ["AS", "AD"] }]
+        revealedShowdownParticipants: [{ userId: "user_a", holeCards: ["AS", "AD"] }]
       },
       handSettlement: {
         handId: "h_terminal",
@@ -165,7 +165,7 @@ test("buildStateSnapshotPayload includes terminal showdown/settlement fields whe
   });
 
   assert.deepEqual(payload.public.showdown.winners, ["user_a"]);
-  assert.deepEqual(payload.public.showdown.revealedWinners, [{ userId: "user_a", holeCards: ["AS", "AD"] }]);
+  assert.deepEqual(payload.public.showdown.revealedShowdownParticipants, [{ userId: "user_a", holeCards: ["AS", "AD"] }]);
   assert.equal(payload.public.showdown.potAwardedTotal, 5);
   assert.deepEqual(payload.public.turn, { userId: null, seat: null, startedAt: null, deadlineAt: null });
   assert.deepEqual(payload.public.actionConstraints, { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null });
@@ -173,7 +173,7 @@ test("buildStateSnapshotPayload includes terminal showdown/settlement fields whe
   assert.deepEqual(payload.private, { userId: "user_a", seat: 1, holeCards: ["AS", "AD"] });
 });
 
-test("buildStateSnapshotPayload omits revealed winner cards for all-folded settlements", () => {
+test("buildStateSnapshotPayload omits revealed showdown participant cards for all-folded settlements", () => {
   const payload = buildStateSnapshotPayload({
     userId: "user_a",
     tableSnapshot: {
@@ -199,7 +199,7 @@ test("buildStateSnapshotPayload omits revealed winner cards for all-folded settl
     }
   });
 
-  assert.equal("revealedWinners" in payload.public.showdown, false);
+  assert.equal("revealedShowdownParticipants" in payload.public.showdown, false);
 });
 
 test("buildStateSnapshotPayload serializes fresh next hand without stale terminal fields", () => {

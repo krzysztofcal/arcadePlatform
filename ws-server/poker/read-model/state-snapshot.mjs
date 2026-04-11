@@ -69,8 +69,8 @@ function normalizeShowdown(showdown) {
     reason: typeof showdown.reason === "string" ? showdown.reason : null,
     handId: typeof showdown.handId === "string" ? showdown.handId : null
   };
-  if (Array.isArray(showdown.revealedWinners)) {
-    normalized.revealedWinners = showdown.revealedWinners
+  if (Array.isArray(showdown.revealedShowdownParticipants)) {
+    normalized.revealedShowdownParticipants = showdown.revealedShowdownParticipants
       .filter((entry) => entry && typeof entry.userId === "string")
       .map((entry) => ({
         userId: entry.userId,

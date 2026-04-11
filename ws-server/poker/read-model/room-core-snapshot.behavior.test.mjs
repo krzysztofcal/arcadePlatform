@@ -201,7 +201,7 @@ test("projectRoomCoreSnapshot projects settled showdown fields without leaking p
   assert.equal(seated.pot.total, 0);
   assert.deepEqual(seated.turn, { userId: null, seat: null, startedAt: null, deadlineAt: null });
   assert.deepEqual(seated.showdown.winners, ["other_user"]);
-  assert.deepEqual(seated.showdown.revealedWinners, [
+  assert.deepEqual(seated.showdown.revealedShowdownParticipants, [
     { userId: "seated_user", holeCards: ["AH", "AD"] },
     { userId: "other_user", holeCards: ["2C", "2D"] }
   ]);
@@ -211,7 +211,7 @@ test("projectRoomCoreSnapshot projects settled showdown fields without leaking p
   assert.deepEqual(seated.private, { userId: "seated_user", seat: 1, holeCards: ["AH", "AD"] });
 });
 
-test("projectRoomCoreSnapshot does not reveal winner cards when hand ends by folds", () => {
+test("projectRoomCoreSnapshot does not reveal showdown participant cards when hand ends by folds", () => {
   const snapshot = projectRoomCoreSnapshot({
     tableId: "table_settled_folded",
     roomId: "table_settled_folded",
@@ -244,7 +244,7 @@ test("projectRoomCoreSnapshot does not reveal winner cards when hand ends by fol
     youSeat: 1
   });
 
-  assert.equal("revealedWinners" in snapshot.showdown, false);
+  assert.equal("revealedShowdownParticipants" in snapshot.showdown, false);
 });
 
 test("projectRoomCoreSnapshot omits terminal fields for fresh next-hand PREFLOP state", () => {

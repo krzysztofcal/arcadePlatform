@@ -540,7 +540,7 @@ test('poker v2 keeps the dealer chip fixed while action moves between players', 
   assert.equal(harness.elements.pokerDealerChip.style.top, initialTop);
 });
 
-test('poker v2 shows winner badges and reveals showdown winner cards during settled state', async () => {
+test('poker v2 shows winner badges and reveals showdown participant cards during settled state', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -571,7 +571,7 @@ test('poker v2 shows winner badges and reveals showdown winner cards during sett
           handId: 'hand-6',
           winners: ['villain-1', 'user-1'],
           reason: 'computed',
-          revealedWinners: [
+          revealedShowdownParticipants: [
             { userId: 'villain-1', holeCards: ['AS', 'AD'] },
             { userId: 'user-1', holeCards: ['KH', 'KD'] }
           ]
@@ -643,7 +643,7 @@ test('poker v2 reveals showdown cards for compared losing players without winner
           handId: 'hand-7',
           winners: ['villain-1'],
           reason: 'computed',
-          revealedWinners: [
+          revealedShowdownParticipants: [
             { userId: 'villain-1', holeCards: ['AS', 'AD'] },
             { userId: 'villain-2', holeCards: ['QS', 'QD'] }
           ]
@@ -698,7 +698,7 @@ test('poker v2 keeps the previous reveal visible for the full local window befor
           handId: 'hand-8',
           winners: ['villain-1'],
           reason: 'computed',
-          revealedWinners: [
+          revealedShowdownParticipants: [
             { userId: 'villain-1', holeCards: ['AS', 'AD'] }
           ]
         },
@@ -794,7 +794,7 @@ test('poker v2 does not switch away from the settled reveal scene before the loc
           handId: 'hand-10',
           winners: ['villain-1'],
           reason: 'computed',
-          revealedWinners: [
+          revealedShowdownParticipants: [
             { userId: 'villain-1', holeCards: ['AS', 'AD'] }
           ]
         },
@@ -845,7 +845,7 @@ test('poker v2 does not switch away from the settled reveal scene before the loc
   assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
 });
 
-test('poker v2 keeps winner cards hidden when the hand ends without showdown comparison', async () => {
+test('poker v2 keeps showdown participant cards hidden when the hand ends without showdown comparison', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();

@@ -88,7 +88,7 @@
     handId: null,
     visibleUntilMs: 0,
     winners: [],
-    revealedWinnerCardsByUserId: {},
+    revealedShowdownCardsByUserId: {},
     communityCards: []
   };
   var pendingPostRevealSnapshot = null;
@@ -124,7 +124,7 @@
       wsReady: false,
       showdown: null,
       handSettlement: null,
-      revealedWinnerCardsByUserId: {}
+      revealedShowdownCardsByUserId: {}
     };
   }
 
@@ -524,8 +524,8 @@
       reason: typeof source.reason === 'string' ? source.reason : null,
       handId: typeof source.handId === 'string' ? source.handId : null
     };
-    if (Array.isArray(source.revealedWinners)){
-      showdown.revealedWinners = source.revealedWinners
+    if (Array.isArray(source.revealedShowdownParticipants)){
+      showdown.revealedShowdownParticipants = source.revealedShowdownParticipants
         .filter(function(entry){
           return entry && typeof entry.userId === 'string';
         })
@@ -550,10 +550,10 @@
     };
   }
 
-  function mapRevealedWinnerCards(showdown){
+  function mapRevealedShowdownCards(showdown){
     var revealed = {};
-    if (!showdown || !Array.isArray(showdown.revealedWinners)) return revealed;
-    showdown.revealedWinners.forEach(function(entry){
+    if (!showdown || !Array.isArray(showdown.revealedShowdownParticipants)) return revealed;
+    showdown.revealedShowdownParticipants.forEach(function(entry){
       if (!entry || typeof entry.userId !== 'string') return;
       if (!Array.isArray(entry.holeCards) || entry.holeCards.length !== 2) return;
       revealed[entry.userId] = entry.holeCards.slice(0, 2);
@@ -582,7 +582,7 @@
         handId: handId,
         visibleUntilMs: Date.now() + WINNER_REVEAL_MS,
         winners: winners.slice(),
-        revealedWinnerCardsByUserId: cloneRevealedWinnerCards(state.revealedWinnerCardsByUserId),
+        revealedShowdownCardsByUserId: cloneRevealedWinnerCards(state.revealedShowdownCardsByUserId),
         communityCards: Array.isArray(state.communityCards) ? state.communityCards.slice(0, 5) : []
       };
     }
@@ -715,7 +715,7 @@
     }
     state.showdown = normalizeShowdown(showdownObj);
     state.handSettlement = normalizeHandSettlement(handSettlementObj);
-    state.revealedWinnerCardsByUserId = mapRevealedWinnerCards(state.showdown);
+    state.revealedShowdownCardsByUserId = mapRevealedShowdownCards(state.showdown);
     if (state.handId && previousHandId && state.handId !== previousHandId && (previousPhase === 'SETTLED' || stickyWinnerReveal.handId === previousHandId)){
       clearWinnerRevealTimer();
       stickyWinnerReveal.visibleUntilMs = 0;
@@ -894,9 +894,9 @@
 
   function getSeatRevealCards(seat){
     if (!seat || typeof seat.userId !== 'string') return null;
-    var revealed = state.revealedWinnerCardsByUserId && state.revealedWinnerCardsByUserId[seat.userId];
+    var revealed = state.revealedShowdownCardsByUserId && state.revealedShowdownCardsByUserId[seat.userId];
     if ((!Array.isArray(revealed) || revealed.length !== 2) && getActiveWinnerReveal()){
-      revealed = stickyWinnerReveal.revealedWinnerCardsByUserId[seat.userId];
+      revealed = stickyWinnerReveal.revealedShowdownCardsByUserId[seat.userId];
     }
     return Array.isArray(revealed) && revealed.length === 2 ? revealed : null;
   }

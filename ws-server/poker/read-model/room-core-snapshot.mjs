@@ -170,8 +170,8 @@ function normalizeShowdown(showdown) {
     reason: typeof showdown.reason === "string" ? showdown.reason : null,
     handId: typeof showdown.handId === "string" ? showdown.handId : null
   };
-  if (Array.isArray(showdown.revealedWinners)) {
-    normalized.revealedWinners = showdown.revealedWinners
+  if (Array.isArray(showdown.revealedShowdownParticipants)) {
+    normalized.revealedShowdownParticipants = showdown.revealedShowdownParticipants
       .filter((entry) => entry && typeof entry.userId === "string")
       .map((entry) => ({
         userId: entry.userId,
@@ -208,7 +208,7 @@ function resolvePrivateBranch({ state, userId, youSeat }) {
   };
 }
 
-function resolveRevealedWinners({ statePublic, state }) {
+function resolveRevealedShowdownParticipants({ statePublic, state }) {
   if (statePublic?.phase !== "SETTLED") {
     return [];
   }
@@ -337,9 +337,9 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
 
   const showdown = normalizeShowdown(statePublic.showdown);
   if (showdown) {
-    const revealedWinners = resolveRevealedWinners({ statePublic, state });
-    if (revealedWinners.length > 0) {
-      showdown.revealedWinners = revealedWinners;
+    const revealedShowdownParticipants = resolveRevealedShowdownParticipants({ statePublic, state });
+    if (revealedShowdownParticipants.length > 0) {
+      showdown.revealedShowdownParticipants = revealedShowdownParticipants;
     }
     snapshot.showdown = showdown;
   }
