@@ -574,7 +574,7 @@ test('poker v2 shows winner badges and reveals showdown winner cards during sett
   assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
 });
 
-test('poker v2 keeps winner badges and revealed cards visible through the local reveal window after the next hand snapshot arrives', async () => {
+test('poker v2 clears the table briefly when the next hand starts after winner reveal', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -647,17 +647,10 @@ test('poker v2 keeps winner badges and revealed cards visible through the local 
   await harness.flush();
 
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
-  const villainBadge = findSeatChild(villainSeat, 'poker-seat-winner-badge');
-  const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
-
-  assert.ok(villainBadge);
-  assert.equal(findSeatChild(villainBadge, 'poker-seat-winner-title').textContent, 'Winner');
-  assert.ok(findSeatChild(villainBadge, 'poker-seat-winner-label'));
-  assert.equal(findSeatChild(villainBadge, 'poker-seat-winner-cards').children.length, 5);
-  assert.equal(villainCards.children.length, 2);
-  assert.equal(villainCards.children[0].className.includes('poker-card--back'), false);
-  assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
-  assert.equal(harness.elements.pokerCommunityCards.children.length, 5);
+  assert.equal(findSeatChild(villainSeat, 'poker-seat-winner-badge'), undefined);
+  assert.equal(findSeatChild(villainSeat, 'poker-seat-cards'), undefined);
+  assert.equal(harness.elements.pokerCommunityCards.children.length, 0);
+  assert.equal(harness.elements.pokerHeroCards.children.length, 0);
 });
 
 test('poker v2 does not compute hero best hand from sticky winner reveal board after the next hand starts', async () => {
@@ -735,7 +728,7 @@ test('poker v2 does not compute hero best hand from sticky winner reveal board a
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
   const bestHand = findSeatChild(heroSeat, 'poker-seat-best-hand');
 
-  assert.equal(harness.elements.pokerCommunityCards.children.length, 5, 'sticky reveal board should still render');
+  assert.equal(harness.elements.pokerCommunityCards.children.length, 0, 'new hand should clear the previous board immediately');
   assert.equal(bestHand, undefined, 'hero best hand should not use sticky reveal board from the previous hand');
 });
 
