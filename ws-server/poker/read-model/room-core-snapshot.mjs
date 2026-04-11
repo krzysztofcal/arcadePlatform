@@ -159,7 +159,7 @@ function normalizeShowdown(showdown) {
   if (!showdown || typeof showdown !== "object" || Array.isArray(showdown)) {
     return null;
   }
-  return {
+  const normalized = {
     winners: Array.isArray(showdown.winners) ? showdown.winners.filter((userId) => typeof userId === "string") : [],
     potsAwarded: Array.isArray(showdown.potsAwarded) ? showdown.potsAwarded : [],
     potAwardedTotal: Number.isFinite(showdown.potAwardedTotal)
@@ -170,6 +170,16 @@ function normalizeShowdown(showdown) {
     reason: typeof showdown.reason === "string" ? showdown.reason : null,
     handId: typeof showdown.handId === "string" ? showdown.handId : null
   };
+  if (Array.isArray(showdown.revealedShowdownParticipants)) {
+    normalized.revealedShowdownParticipants = showdown.revealedShowdownParticipants
+      .filter((entry) => entry && typeof entry.userId === "string")
+      .map((entry) => ({
+        userId: entry.userId,
+        holeCards: normalizeCards(entry.holeCards)
+      }))
+      .filter((entry) => entry.holeCards.length === 2);
+  }
+  return normalized;
 }
 
 function normalizeHandSettlement(handSettlement) {
@@ -196,6 +206,46 @@ function resolvePrivateBranch({ state, userId, youSeat }) {
     seat: youSeat,
     holeCards
   };
+}
+
+function resolveRevealedShowdownParticipants({ statePublic, state }) {
+  if (statePublic?.phase !== "SETTLED") {
+    return [];
+  }
+  if (statePublic?.showdown?.reason !== "computed") {
+    return [];
+  }
+  const potsAwarded = Array.isArray(statePublic?.showdown?.potsAwarded) ? statePublic.showdown.potsAwarded : [];
+  const comparedUserIds = [];
+  const comparedUserIdSet = new Set();
+  potsAwarded.forEach((pot) => {
+    if (!pot || typeof pot !== "object" || !Array.isArray(pot.eligibleUserIds)) return;
+    pot.eligibleUserIds.forEach((userId) => {
+      if (typeof userId !== "string" || !userId || comparedUserIdSet.has(userId)) return;
+      comparedUserIdSet.add(userId);
+      comparedUserIds.push(userId);
+    });
+  });
+  if (comparedUserIds.length === 0) {
+    const winners = Array.isArray(statePublic?.showdown?.winners)
+      ? statePublic.showdown.winners.filter((value) => typeof value === "string" && value)
+      : [];
+    winners.forEach((userId) => {
+      if (comparedUserIdSet.has(userId)) return;
+      comparedUserIdSet.add(userId);
+      comparedUserIds.push(userId);
+    });
+  }
+  if (comparedUserIds.length === 0) {
+    return [];
+  }
+  const holeCardsByUserId = asObject(state?.holeCardsByUserId) || {};
+  return comparedUserIds
+    .map((userId) => ({
+      userId,
+      holeCards: normalizeCards(holeCardsByUserId[userId])
+    }))
+    .filter((entry) => entry.holeCards.length === 2);
 }
 
 export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, userId, youSeat }) {
@@ -287,6 +337,10 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
 
   const showdown = normalizeShowdown(statePublic.showdown);
   if (showdown) {
+    const revealedShowdownParticipants = resolveRevealedShowdownParticipants({ statePublic, state });
+    if (revealedShowdownParticipants.length > 0) {
+      showdown.revealedShowdownParticipants = revealedShowdownParticipants;
+    }
     snapshot.showdown = showdown;
   }
 

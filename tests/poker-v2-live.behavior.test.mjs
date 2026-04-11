@@ -104,6 +104,18 @@ function createHarness(options = {}){
   };
 
   const intervalTimers = [];
+  const timeoutTimers = [];
+  let nextTimeoutId = 1;
+  let nowMs = Number.isFinite(options.nowMs) ? options.nowMs : 1_700_000_000_000;
+  const FakeDate = class extends Date {
+    constructor(...args){
+      if (args.length) super(...args);
+      else super(nowMs);
+    }
+    static now(){ return nowMs; }
+  };
+  FakeDate.parse = Date.parse;
+  FakeDate.UTC = Date.UTC;
   const sandbox = {
     window: {
       location: {
@@ -125,8 +137,15 @@ function createHarness(options = {}){
         return intervalTimers.length;
       },
       clearInterval(){},
-      clearTimeout(){},
-      setTimeout(fn){ fn(); return 1; }
+      clearTimeout(id){
+        const timer = timeoutTimers.find((entry) => entry.id === id);
+        if (timer) timer.cleared = true;
+      },
+      setTimeout(fn, delay){
+        const timer = { id: nextTimeoutId++, fn, at: nowMs + Math.max(0, Number(delay) || 0), cleared: false };
+        timeoutTimers.push(timer);
+        return timer.id;
+      }
     },
     document: {
       readyState: 'loading',
@@ -135,6 +154,7 @@ function createHarness(options = {}){
       createElement(tag){ return makeElement(tag); }
     },
     URLSearchParams,
+    Date: FakeDate,
     atob(value){ return Buffer.from(String(value), 'base64').toString('binary'); },
     Buffer,
     console
@@ -161,6 +181,17 @@ async function flush(){
     handlers.forEach((fn) => fn(event || {}));
   }
 
+  function advanceTime(ms){
+    nowMs += Math.max(0, Number(ms) || 0);
+    const due = timeoutTimers
+      .filter((timer) => !timer.cleared && timer.at <= nowMs)
+      .sort((left, right) => left.at - right.at);
+    due.forEach((timer) => {
+      timer.cleared = true;
+      timer.fn();
+    });
+  }
+
   return {
     elements,
     logs,
@@ -171,6 +202,7 @@ async function flush(){
     fireDomContentLoaded,
     fireDocumentEvent,
     flush,
+    advanceTime,
     getCreateOptions(){ return createOptions; },
     getIntervalCount(){ return intervalTimers.length; }
   };
@@ -188,6 +220,10 @@ function findSeatByLabel(harness, label){
   return harness.elements.pokerSeatLayer.children.find((node) => (
     node.children || []
   ).some((child) => child.className === 'poker-seat-name' && child.textContent === label));
+}
+
+function findSeatChild(seatNode, className){
+  return (seatNode.children || []).find((child) => child.className === className);
 }
 
 test('poker v2 boots live mode, preserves table links, and sends WS commands', async () => {
@@ -255,8 +291,8 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   const bestHand = heroSeat.children.find((node) => node.className === 'poker-seat-best-hand');
   assert.ok(bestHand, 'hero seat should surface a best-hand summary');
   assert.equal(harness.elements.pokerDealerChip.hidden, false, 'dealer chip should be visible when the dealer seat is known');
-  assert.equal(harness.elements.pokerDealerChip.style.left, '25%');
-  assert.equal(harness.elements.pokerDealerChip.style.top, '62%');
+  assert.equal(harness.elements.pokerDealerChip.style.left, '24%');
+  assert.equal(harness.elements.pokerDealerChip.style.top, '74%');
 
   harness.elements.pokerV2AmountInput.value = '77';
   harness.elements.pokerV2AmountBtn.click();
@@ -352,13 +388,13 @@ test('poker v2 aligns the right rail seats and keeps the chip on the dealer seat
   assert.ok(rightBottomSeat);
   assert.equal(rightTopSeat.style.left, '80%');
   assert.equal(rightBottomSeat.style.left, '80%');
-  assert.equal(harness.elements.pokerDealerChip.style.left, '71%');
-  assert.equal(harness.elements.pokerDealerChip.style.top, '34%');
+  assert.equal(harness.elements.pokerDealerChip.style.left, '72%');
+  assert.equal(harness.elements.pokerDealerChip.style.top, '37%');
 });
 
 test('poker v2 shows a live turn clock only on the active seat avatar', async () => {
-  const nowMs = Date.now();
-  const harness = createHarness();
+  const nowMs = 1_700_000_100_000;
+  const harness = createHarness({ nowMs });
   harness.fireDomContentLoaded();
   await harness.flush();
 
@@ -401,8 +437,8 @@ test('poker v2 shows a live turn clock only on the active seat avatar', async ()
 });
 
 test('poker v2 turns the live clock red when five seconds remain', async () => {
-  const nowMs = Date.now();
-  const harness = createHarness();
+  const nowMs = 1_700_000_200_000;
+  const harness = createHarness({ nowMs });
   harness.fireDomContentLoaded();
   await harness.flush();
 
@@ -502,6 +538,364 @@ test('poker v2 keeps the dealer chip fixed while action moves between players', 
 
   assert.equal(harness.elements.pokerDealerChip.style.left, initialLeft);
   assert.equal(harness.elements.pokerDealerChip.style.top, initialTop);
+});
+
+test('poker v2 shows winner badges and reveals showdown participant cards during settled state', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 7,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' },
+          { userId: 'villain-2', seat: 3, displayName: 'Villain 2' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-6', status: 'SETTLED', dealerSeatNo: 2 },
+        turn: { userId: null, seat: null, startedAt: null, deadlineAt: null },
+        board: { cards: ['2H', '3H', '4H', '9C', 'KD'] },
+        pot: { total: 0, sidePots: [] },
+        legalActions: { seat: 1, actions: [] },
+        showdown: {
+          handId: 'hand-6',
+          winners: ['villain-1', 'user-1'],
+          reason: 'computed',
+          revealedShowdownParticipants: [
+            { userId: 'villain-1', holeCards: ['AS', 'AD'] },
+            { userId: 'user-1', holeCards: ['KH', 'KD'] }
+          ]
+        },
+        handSettlement: {
+          handId: 'hand-6',
+          settledAt: '2026-04-11T10:00:00.000Z'
+        }
+      },
+      private: { holeCards: [{ r: 'K', s: 'H' }, { r: 'K', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const villainSeat = findSeatByLabel(harness, 'Villain 1');
+  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  const villainBadge = findSeatChild(villainSeat, 'poker-seat-winner-badge');
+  const heroBadge = findSeatChild(heroSeat, 'poker-seat-winner-badge');
+  const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
+  const villainBadgeLabel = findSeatChild(villainBadge, 'poker-seat-winner-label');
+  const villainBadgeCards = findSeatChild(villainBadge, 'poker-seat-winner-cards');
+
+  assert.ok(villainBadge);
+  assert.equal(findSeatChild(villainBadge, 'poker-seat-winner-title').textContent, 'Winner');
+  assert.ok(heroBadge);
+  assert.ok(villainBadgeLabel);
+  assert.equal(villainBadgeLabel.textContent.length > 0, true);
+  assert.equal(villainBadgeCards.children.length, 5);
+  assert.equal(villainCards.children.length, 2);
+  assert.equal(villainCards.children[0].className.includes('poker-card--back'), false);
+  assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
+  const losingSeat = findSeatByLabel(harness, 'Villain 2');
+  const losingCards = findSeatChild(losingSeat, 'poker-seat-cards');
+  assert.ok(losingCards);
+  assert.equal(losingCards.children.length, 2);
+  assert.equal(losingCards.children[0].className.includes('poker-card--back'), true);
+  assert.equal(losingCards.children[1].className.includes('poker-card--back'), true);
+});
+
+test('poker v2 reveals showdown cards for compared losing players without winner badge', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 8,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' },
+          { userId: 'villain-2', seat: 3, displayName: 'Villain 2' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-7', status: 'SETTLED', dealerSeatNo: 2 },
+        turn: { userId: null, seat: null, startedAt: null, deadlineAt: null },
+        board: { cards: ['2H', '3H', '4H', '9C', 'KD'] },
+        pot: { total: 0, sidePots: [] },
+        legalActions: { seat: 1, actions: [] },
+        showdown: {
+          handId: 'hand-7',
+          winners: ['villain-1'],
+          reason: 'computed',
+          revealedShowdownParticipants: [
+            { userId: 'villain-1', holeCards: ['AS', 'AD'] },
+            { userId: 'villain-2', holeCards: ['QS', 'QD'] }
+          ]
+        },
+        handSettlement: {
+          handId: 'hand-7',
+          settledAt: '2026-04-11T10:00:00.000Z'
+        }
+      },
+      private: { holeCards: [{ r: 'K', s: 'H' }, { r: 'K', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const losingSeat = findSeatByLabel(harness, 'Villain 2');
+  const losingCards = findSeatChild(losingSeat, 'poker-seat-cards');
+  assert.ok(losingCards);
+  assert.equal(losingCards.children.length, 2);
+  assert.equal(losingCards.children[0].className.includes('poker-card--back'), false);
+  assert.equal(losingCards.children[1].className.includes('poker-card--back'), false);
+  assert.equal(findSeatChild(losingSeat, 'poker-seat-winner-badge'), undefined);
+});
+
+test('poker v2 keeps the previous reveal visible for the full local window before switching to the next hand', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 9,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-8', status: 'SETTLED', dealerSeatNo: 2 },
+        turn: { userId: null, seat: null, startedAt: null, deadlineAt: null },
+        board: { cards: ['2H', '3H', '4H', '9C', 'KD'] },
+        pot: { total: 0, sidePots: [] },
+        legalActions: { seat: 1, actions: [] },
+        showdown: {
+          handId: 'hand-8',
+          winners: ['villain-1'],
+          reason: 'computed',
+          revealedShowdownParticipants: [
+            { userId: 'villain-1', holeCards: ['AS', 'AD'] }
+          ]
+        },
+        handSettlement: {
+          handId: 'hand-8',
+          settledAt: '2026-04-11T10:00:00.000Z'
+        }
+      },
+      private: { holeCards: [{ r: 'K', s: 'H' }, { r: 'K', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 10,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-9', status: 'PREFLOP', dealerSeatNo: 1 },
+        turn: { userId: 'user-1', seat: 1, startedAt: Date.now(), deadlineAt: Date.now() + 20_000 },
+        pot: { total: 3, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CALL'] },
+        actionConstraints: { toCall: 1 }
+      },
+      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'J', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const villainSeat = findSeatByLabel(harness, 'Villain 1');
+  assert.ok(findSeatChild(villainSeat, 'poker-seat-winner-badge'));
+  const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
+  assert.ok(villainCards);
+  assert.equal(villainCards.children.length, 2);
+  assert.equal(villainCards.children[0].className.includes('poker-card--back'), false);
+  assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
+  assert.equal(harness.elements.pokerCommunityCards.children.length, 5);
+  assert.equal(harness.elements.pokerHeroCards.children.length, 2);
+
+  harness.advanceTime(4000);
+  await harness.flush();
+
+  const switchedVillainSeat = findSeatByLabel(harness, 'Villain 1');
+  assert.equal(findSeatChild(switchedVillainSeat, 'poker-seat-winner-badge'), undefined);
+  const switchedVillainCards = findSeatChild(switchedVillainSeat, 'poker-seat-cards');
+  assert.ok(switchedVillainCards);
+  assert.equal(switchedVillainCards.children.length, 2);
+  assert.equal(switchedVillainCards.children[0].className.includes('poker-card--back'), true);
+  assert.equal(switchedVillainCards.children[1].className.includes('poker-card--back'), true);
+  assert.equal(harness.elements.pokerCommunityCards.children.length, 0);
+  assert.equal(harness.elements.pokerHeroCards.children.length, 2);
+});
+
+test('poker v2 does not switch away from the settled reveal scene before the local window ends', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 11,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-10', status: 'SETTLED', dealerSeatNo: 2 },
+        turn: { userId: null, seat: null, startedAt: null, deadlineAt: null },
+        board: { cards: ['2H', '3H', '4H', '9C', 'KD'] },
+        pot: { total: 0, sidePots: [] },
+        legalActions: { seat: 1, actions: [] },
+        showdown: {
+          handId: 'hand-10',
+          winners: ['villain-1'],
+          reason: 'computed',
+          revealedShowdownParticipants: [
+            { userId: 'villain-1', holeCards: ['AS', 'AD'] }
+          ]
+        },
+        handSettlement: {
+          handId: 'hand-10',
+          settledAt: '2026-04-11T10:00:00.000Z'
+        }
+      },
+      private: { holeCards: [{ r: 'K', s: 'H' }, { r: 'K', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 12,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-11', status: 'PREFLOP', dealerSeatNo: 1 },
+        turn: { userId: 'user-1', seat: 1, startedAt: Date.now(), deadlineAt: Date.now() + 20_000 },
+        pot: { total: 3, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CALL'] },
+        actionConstraints: { toCall: 1 }
+      },
+      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'J', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerCommunityCards.children.length, 5, 'reveal board should stay visible until the local reveal window ends');
+  const villainSeat = findSeatByLabel(harness, 'Villain 1');
+  assert.ok(findSeatChild(villainSeat, 'poker-seat-winner-badge'));
+  const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
+  assert.ok(villainCards);
+  assert.equal(villainCards.children[0].className.includes('poker-card--back'), false);
+  assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
+});
+
+test('poker v2 keeps showdown participant cards hidden when the hand ends without showdown comparison', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 8,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-7', status: 'SETTLED', dealerSeatNo: 1 },
+        turn: { userId: null, seat: null, startedAt: null, deadlineAt: null },
+        pot: { total: 0, sidePots: [] },
+        legalActions: { seat: 1, actions: [] },
+        showdown: {
+          handId: 'hand-7',
+          winners: ['villain-1'],
+          reason: 'all_folded'
+        },
+        handSettlement: {
+          handId: 'hand-7',
+          settledAt: '2026-04-11T10:00:01.000Z'
+        }
+      },
+      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'J', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const villainSeat = findSeatByLabel(harness, 'Villain 1');
+  const villainBadge = findSeatChild(villainSeat, 'poker-seat-winner-badge');
+  const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
+
+  assert.ok(villainBadge);
+  assert.equal(findSeatChild(villainBadge, 'poker-seat-winner-title').textContent, 'Winner');
+  assert.equal(findSeatChild(villainBadge, 'poker-seat-winner-label'), undefined);
+  assert.equal(findSeatChild(villainBadge, 'poker-seat-winner-cards'), undefined);
+  assert.equal(villainCards.children[0].className, 'poker-card poker-card--back');
+  assert.equal(villainCards.children[1].className, 'poker-card poker-card--back');
 });
 
 test('poker v2 falls back to demo mode when tableId is missing', async () => {

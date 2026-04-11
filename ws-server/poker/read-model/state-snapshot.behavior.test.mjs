@@ -153,7 +153,8 @@ test("buildStateSnapshotPayload includes terminal showdown/settlement fields whe
         winners: ["user_a"],
         potsAwarded: [{ amount: 5, winners: ["user_a"] }],
         potAwardedTotal: 5,
-        reason: "computed"
+        reason: "computed",
+        revealedShowdownParticipants: [{ userId: "user_a", holeCards: ["AS", "AD"] }]
       },
       handSettlement: {
         handId: "h_terminal",
@@ -164,11 +165,41 @@ test("buildStateSnapshotPayload includes terminal showdown/settlement fields whe
   });
 
   assert.deepEqual(payload.public.showdown.winners, ["user_a"]);
+  assert.deepEqual(payload.public.showdown.revealedShowdownParticipants, [{ userId: "user_a", holeCards: ["AS", "AD"] }]);
   assert.equal(payload.public.showdown.potAwardedTotal, 5);
   assert.deepEqual(payload.public.turn, { userId: null, seat: null, startedAt: null, deadlineAt: null });
   assert.deepEqual(payload.public.actionConstraints, { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null });
   assert.deepEqual(payload.public.handSettlement.payouts, { user_a: 5 });
   assert.deepEqual(payload.private, { userId: "user_a", seat: 1, holeCards: ["AS", "AD"] });
+});
+
+test("buildStateSnapshotPayload omits revealed showdown participant cards for all-folded settlements", () => {
+  const payload = buildStateSnapshotPayload({
+    userId: "user_a",
+    tableSnapshot: {
+      tableId: "table_terminal_folded",
+      roomId: "table_terminal_folded",
+      stateVersion: 11,
+      members: [{ userId: "user_a", seat: 1 }],
+      memberCount: 1,
+      youSeat: 1,
+      hand: { handId: "h_terminal_folded", status: "SETTLED", round: null, dealerSeatNo: 1 },
+      board: { cards: ["2H", "3H", "4H", "9C", "KD"] },
+      pot: { total: 0, sidePots: [] },
+      turn: { userId: null, seat: null, startedAt: null, deadlineAt: null },
+      legalActions: { seat: 1, actions: [] },
+      actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+      showdown: {
+        handId: "h_terminal_folded",
+        winners: ["user_a"],
+        potsAwarded: [{ amount: 5, winners: ["user_a"] }],
+        potAwardedTotal: 5,
+        reason: "all_folded"
+      }
+    }
+  });
+
+  assert.equal("revealedShowdownParticipants" in payload.public.showdown, false);
 });
 
 test("buildStateSnapshotPayload serializes fresh next hand without stale terminal fields", () => {

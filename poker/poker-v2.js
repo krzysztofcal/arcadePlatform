@@ -21,6 +21,7 @@
     disconnected: 'Live connection closed',
     error: 'Live table unavailable'
   };
+  var WINNER_REVEAL_MS = 4_000;
   var seatAnchors = [
     { x: 50, y: 10 },
     { x: 86, y: 28 },
@@ -74,13 +75,23 @@
   var currentAccessToken = null;
   var authWatchTimer = null;
   var turnClockTimer = null;
+  var revealDismissTimer = null;
   var authUnsubscribe = null;
   var renderedSeatAnchors = {};
   var renderedSeatSlots = {};
+  var renderedSeatAvatars = {};
   var suggestedSeatNoParam = null;
   var shouldAutoJoin = false;
   var autoJoinAttempted = false;
   var bootReady = false;
+  var stickyWinnerReveal = {
+    handId: null,
+    visibleUntilMs: 0,
+    winners: [],
+    revealedShowdownCardsByUserId: {},
+    communityCards: []
+  };
+  var pendingPostRevealSnapshot = null;
   var els = {};
 
   function cloneState(source){
@@ -110,7 +121,10 @@
       youSeat: null,
       statusText: LIVE_STATUS_COPY.connecting,
       errorText: '',
-      wsReady: false
+      wsReady: false,
+      showdown: null,
+      handSettlement: null,
+      revealedShowdownCardsByUserId: {}
     };
   }
 
@@ -501,6 +515,132 @@
     };
   }
 
+  function normalizeShowdown(source){
+    if (!isObject(source)) return null;
+    var showdown = {
+      winners: Array.isArray(source.winners) ? source.winners.filter(function(userId){
+        return typeof userId === 'string' && !!userId;
+      }) : [],
+      reason: typeof source.reason === 'string' ? source.reason : null,
+      handId: typeof source.handId === 'string' ? source.handId : null
+    };
+    if (Array.isArray(source.revealedShowdownParticipants)){
+      showdown.revealedShowdownParticipants = source.revealedShowdownParticipants
+        .filter(function(entry){
+          return entry && typeof entry.userId === 'string';
+        })
+        .map(function(entry){
+          return {
+            userId: entry.userId,
+            holeCards: normalizeCards(entry.holeCards)
+          };
+        })
+        .filter(function(entry){
+          return entry.holeCards.length === 2;
+        });
+    }
+    return showdown;
+  }
+
+  function normalizeHandSettlement(source){
+    if (!isObject(source)) return null;
+    return {
+      handId: typeof source.handId === 'string' ? source.handId : null,
+      settledAt: typeof source.settledAt === 'string' ? source.settledAt : null
+    };
+  }
+
+  function mapRevealedShowdownCards(showdown){
+    var revealed = {};
+    if (!showdown || !Array.isArray(showdown.revealedShowdownParticipants)) return revealed;
+    showdown.revealedShowdownParticipants.forEach(function(entry){
+      if (!entry || typeof entry.userId !== 'string') return;
+      if (!Array.isArray(entry.holeCards) || entry.holeCards.length !== 2) return;
+      revealed[entry.userId] = entry.holeCards.slice(0, 2);
+    });
+    return revealed;
+  }
+
+  function cloneRevealedShowdownCards(source){
+    var next = {};
+    if (!isObject(source)) return next;
+    Object.keys(source).forEach(function(userId){
+      if (!Array.isArray(source[userId])) return;
+      next[userId] = source[userId].slice(0, 2);
+    });
+    return next;
+  }
+
+  function syncStickyWinnerReveal(){
+    var handId = state.handId || (state.handSettlement && state.handSettlement.handId) || (state.showdown && state.showdown.handId) || null;
+    var winners = state.showdown && Array.isArray(state.showdown.winners) ? state.showdown.winners.filter(Boolean) : [];
+    if (!handId || !winners.length || state.phase !== 'SETTLED'){
+      return;
+    }
+    if (stickyWinnerReveal.handId !== handId || stickyWinnerReveal.visibleUntilMs <= Date.now()){
+      stickyWinnerReveal = {
+        handId: handId,
+        visibleUntilMs: Date.now() + WINNER_REVEAL_MS,
+        winners: winners.slice(),
+        revealedShowdownCardsByUserId: cloneRevealedShowdownCards(state.revealedShowdownCardsByUserId),
+        communityCards: Array.isArray(state.communityCards) ? state.communityCards.slice(0, 5) : []
+      };
+    }
+  }
+
+  function getActiveWinnerReveal(){
+    if (!stickyWinnerReveal.handId) return null;
+    if (stickyWinnerReveal.visibleUntilMs <= Date.now()) return null;
+    return stickyWinnerReveal;
+  }
+
+  function clearWinnerRevealTimer(){
+    if (!revealDismissTimer) return;
+    try { window.clearTimeout(revealDismissTimer); } catch (_err){}
+    revealDismissTimer = null;
+  }
+
+  function extractSnapshotHandId(payload){
+    if (!isObject(payload)) return null;
+    if (typeof payload.handId === 'string' && payload.handId) return payload.handId;
+    if (isObject(payload.hand) && typeof payload.hand.handId === 'string' && payload.hand.handId) return payload.hand.handId;
+    if (isObject(payload.public) && isObject(payload.public.hand) && typeof payload.public.hand.handId === 'string' && payload.public.hand.handId) return payload.public.hand.handId;
+    return null;
+  }
+
+  function scheduleRevealDismiss(){
+    var sticky = getActiveWinnerReveal();
+    clearWinnerRevealTimer();
+    if (!sticky) return;
+    var remainingMs = Math.max(0, sticky.visibleUntilMs - Date.now());
+    revealDismissTimer = window.setTimeout(function(){
+      revealDismissTimer = null;
+      stickyWinnerReveal.visibleUntilMs = 0;
+      if (pendingPostRevealSnapshot){
+        var nextPayload = pendingPostRevealSnapshot;
+        pendingPostRevealSnapshot = null;
+        mergeSnapshot(nextPayload);
+      }
+      render();
+      autoJoinSeat();
+    }, remainingMs);
+  }
+
+  function shouldDeferSnapshotUntilRevealEnds(payload){
+    var sticky = getActiveWinnerReveal();
+    if (!sticky) return false;
+    var nextHandId = extractSnapshotHandId(payload);
+    return !!(nextHandId && sticky.handId && nextHandId !== sticky.handId);
+  }
+
+  function getDisplayWinnerUserIds(){
+    if (state.showdown && Array.isArray(state.showdown.winners) && state.showdown.winners.length){
+      return state.showdown.winners;
+    }
+    var sticky = getActiveWinnerReveal();
+    return sticky ? sticky.winners.slice() : [];
+  }
+
   function mergeSnapshot(payload){
     if (!isObject(payload)) return;
     var snapshotTableId = typeof payload.tableId === 'string' && payload.tableId ? payload.tableId : null;
@@ -511,6 +651,8 @@
     var handObj = isObject(payload.hand) ? payload.hand : isObject(publicObj.hand) ? publicObj.hand : {};
     var turnObj = isObject(payload.turn) ? payload.turn : isObject(publicObj.turn) ? publicObj.turn : {};
     var potObj = isObject(payload.pot) ? payload.pot : isObject(publicObj.pot) ? publicObj.pot : {};
+    var showdownObj = isObject(payload.showdown) ? payload.showdown : isObject(publicObj.showdown) ? publicObj.showdown : null;
+    var handSettlementObj = isObject(payload.handSettlement) ? payload.handSettlement : isObject(publicObj.handSettlement) ? publicObj.handSettlement : null;
     var legalSource = payload.legalActions != null ? payload.legalActions : publicObj.legalActions;
     var constraintsPrimary = payload.actionConstraints != null ? payload.actionConstraints : publicObj.actionConstraints;
 
@@ -533,6 +675,8 @@
     var nextStacks = normalizeStacks(payload);
     if (nextStacks) state.stacks = nextStacks;
 
+    var previousHandId = state.handId;
+    var previousPhase = state.phase;
     if (typeof handObj.status === 'string' && handObj.status) state.phase = handObj.status.toUpperCase();
     if (typeof handObj.handId === 'string' && handObj.handId) state.handId = handObj.handId;
     if (Number.isInteger(payload.dealerSeat)) state.dealerSeat = payload.dealerSeat;
@@ -555,6 +699,7 @@
     else if (Array.isArray(publicObj.board)) boardSource = publicObj.board;
     else if (isObject(publicObj.board) && Array.isArray(publicObj.board.cards)) boardSource = publicObj.board.cards;
     if (boardSource) state.communityCards = normalizeCards(boardSource);
+    else if (state.handId && previousHandId && state.handId !== previousHandId) state.communityCards = [];
 
     var nextHeroCards = null;
     if (Array.isArray(payload.myHoleCards)) nextHeroCards = normalizeCards(payload.myHoleCards);
@@ -568,6 +713,14 @@
     if (legalActions.length || Array.isArray(legalSource) || (isObject(legalSource) && Array.isArray(legalSource.actions))){
       state.legalActions = legalActions;
     }
+    state.showdown = normalizeShowdown(showdownObj);
+    state.handSettlement = normalizeHandSettlement(handSettlementObj);
+    state.revealedShowdownCardsByUserId = mapRevealedShowdownCards(state.showdown);
+    if (state.handId && previousHandId && state.handId !== previousHandId && (previousPhase === 'SETTLED' || stickyWinnerReveal.handId === previousHandId)){
+      clearWinnerRevealTimer();
+      stickyWinnerReveal.visibleUntilMs = 0;
+    }
+    syncStickyWinnerReveal();
     state.actionConstraints = normalizeConstraints(constraintsPrimary, legalSource && legalSource.actionConstraints);
     state.statusText = LIVE_STATUS_COPY.live;
     state.errorText = '';
@@ -609,6 +762,12 @@
     var best = evaluateViewerBestHand(mergedCards);
     if (!best || !Array.isArray(best.cards) || best.cards.length !== 5) return null;
     return best;
+  }
+
+  function getDisplayCommunityCards(){
+    if (Array.isArray(state.communityCards) && state.communityCards.length) return state.communityCards.slice(0, 5);
+    var sticky = getActiveWinnerReveal();
+    return sticky && Array.isArray(sticky.communityCards) ? sticky.communityCards.slice(0, 5) : [];
   }
 
   function resolveStack(userId){
@@ -728,11 +887,40 @@
     };
   }
 
+  function isWinnerSeat(seat){
+    if (!seat || typeof seat.userId !== 'string') return false;
+    return getDisplayWinnerUserIds().indexOf(seat.userId) !== -1;
+  }
+
+  function getSeatRevealCards(seat){
+    if (!seat || typeof seat.userId !== 'string') return null;
+    var revealed = state.revealedShowdownCardsByUserId && state.revealedShowdownCardsByUserId[seat.userId];
+    if ((!Array.isArray(revealed) || revealed.length !== 2) && getActiveWinnerReveal()){
+      revealed = stickyWinnerReveal.revealedShowdownCardsByUserId[seat.userId];
+    }
+    return Array.isArray(revealed) && revealed.length === 2 ? revealed : null;
+  }
+
+  function getWinnerHandSummary(seat){
+    if (!seat || typeof seat.userId !== 'string') return null;
+    var revealCards = getSeatRevealCards(seat);
+    if (!Array.isArray(revealCards) || revealCards.length !== 2) return null;
+    var boardCards = getDisplayCommunityCards();
+    if (!Array.isArray(boardCards) || boardCards.length < 3) return null;
+    var best = evaluateViewerBestHand(revealCards.concat(boardCards));
+    if (!best || !Array.isArray(best.cards) || best.cards.length !== 5) return null;
+    return {
+      label: formatViewerHandCategory(best.category),
+      cards: best.cards.slice(0, 5)
+    };
+  }
+
   function renderSeats(){
     if (!els.seatLayer) return;
     els.seatLayer.innerHTML = '';
     renderedSeatAnchors = {};
     renderedSeatSlots = {};
+    renderedSeatAvatars = {};
     var offset = getSeatNumberingOffset();
     var seatsByIndex = {};
     state.seats.forEach(function(seat){
@@ -756,6 +944,7 @@
       article.className = 'poker-seat'
         + (active ? ' poker-seat--active' : '')
         + (folded ? ' poker-seat--folded' : '')
+        + (seat && isWinnerSeat(seat) ? ' poker-seat--winner' : '')
         + (hero ? ' poker-seat--hero' : '')
         + (!seat ? ' poker-seat--empty' : '');
       article.style.left = anchor.x + '%';
@@ -768,6 +957,7 @@
       var avatar = document.createElement('div');
       avatar.className = 'poker-seat-avatar';
       avatar.textContent = seat ? initials(getDisplayName(seat)) : '+';
+      if (seat && Number.isInteger(seat.seatNo)) renderedSeatAvatars[seat.seatNo] = avatar;
       if (active){
         var turnClock = getTurnClockState();
         if (turnClock){
@@ -786,8 +976,15 @@
       var cards = document.createElement('div');
       cards.className = 'poker-seat-cards';
       if (!hero && seat && seat.userId){
-        cards.appendChild(createCard(null, { faceDown: true }));
-        cards.appendChild(createCard(null, { faceDown: true }));
+        var revealCards = getSeatRevealCards(seat);
+        if (revealCards){
+          revealCards.forEach(function(card){
+            cards.appendChild(createCard(card));
+          });
+        } else {
+          cards.appendChild(createCard(null, { faceDown: true }));
+          cards.appendChild(createCard(null, { faceDown: true }));
+        }
       }
 
       var name = document.createElement('div');
@@ -799,6 +996,32 @@
       status.textContent = seat ? String(seat.status || 'ACTIVE').replace(/_/g, ' ') : 'OPEN';
 
       article.appendChild(avatar);
+      if (seat && isWinnerSeat(seat)){
+        var winnerBadge = document.createElement('div');
+        winnerBadge.className = 'poker-seat-winner-badge';
+        var winnerTitle = document.createElement('div');
+        winnerTitle.className = 'poker-seat-winner-title';
+        winnerTitle.textContent = 'Winner';
+        winnerBadge.appendChild(winnerTitle);
+        var winnerSummary = getWinnerHandSummary(seat);
+        if (winnerSummary){
+          var winnerLabel = document.createElement('div');
+          winnerLabel.className = 'poker-seat-winner-label';
+          winnerLabel.textContent = winnerSummary.label;
+          winnerBadge.appendChild(winnerLabel);
+          var winnerCards = document.createElement('div');
+          winnerCards.className = 'poker-seat-winner-cards';
+          winnerSummary.cards.forEach(function(card){
+            var normalizedWinnerCard = normalizeCard(card);
+            var chip = document.createElement('span');
+            chip.className = 'poker-seat-winner-card' + (normalizedWinnerCard && (normalizedWinnerCard.s === 'H' || normalizedWinnerCard.s === 'D') ? ' poker-seat-winner-card--red' : '');
+            chip.textContent = normalizedWinnerCard ? (normalizedWinnerCard.r + SUIT_SYMBOLS[normalizedWinnerCard.s]) : '?';
+            winnerCards.appendChild(chip);
+          });
+          winnerBadge.appendChild(winnerCards);
+        }
+        article.appendChild(winnerBadge);
+      }
       article.appendChild(stack);
       if (cards.children.length) article.appendChild(cards);
       article.appendChild(name);
@@ -826,7 +1049,8 @@
   function renderCommunityCards(){
     if (!els.communityCards) return;
     els.communityCards.innerHTML = '';
-    state.communityCards.forEach(function(card){
+    var cards = getDisplayCommunityCards();
+    cards.forEach(function(card){
       els.communityCards.appendChild(createCard(card));
     });
   }
@@ -852,6 +1076,38 @@
       els.dealerChip.hidden = true;
       return;
     }
+    var heroSeat = deriveCurrentSeat();
+    var heroHasDealerChip = !!(heroSeat && Number.isInteger(heroSeat.seatNo) && heroSeat.seatNo === targetSeatNo);
+    var scene = els.dealerChip.parentElement || null;
+    var avatarEl = renderedSeatAvatars[targetSeatNo] || null;
+    if (scene && avatarEl && typeof scene.getBoundingClientRect === 'function' && typeof avatarEl.getBoundingClientRect === 'function'){
+      var sceneRect = scene.getBoundingClientRect();
+      var avatarRect = avatarEl.getBoundingClientRect();
+      var chipRect = els.dealerChip.getBoundingClientRect();
+      if (sceneRect.width > 0 && sceneRect.height > 0 && avatarRect.width > 0 && avatarRect.height > 0){
+        var avatarCenterX = (avatarRect.left - sceneRect.left) + avatarRect.width / 2;
+        var avatarCenterY = (avatarRect.top - sceneRect.top) + avatarRect.height / 2;
+        var sceneCenterX = sceneRect.width / 2;
+        var sceneCenterY = sceneRect.height / 2;
+        var deltaX = sceneCenterX - avatarCenterX;
+        var deltaY = sceneCenterY - avatarCenterY;
+        var magnitude = Math.sqrt((deltaX * deltaX) + (deltaY * deltaY));
+        if (magnitude > 0){
+          var unitX = deltaX / magnitude;
+          var unitY = deltaY / magnitude;
+          var avatarRadius = Math.min(avatarRect.width, avatarRect.height) / 2;
+          var chipRadius = Math.min(chipRect.width || 38, chipRect.height || 38) / 2;
+          var contactDistance = avatarRadius + chipRadius - 2;
+          var chipLeftPx = avatarCenterX + (unitX * contactDistance);
+          var chipTopPx = avatarCenterY + (unitY * contactDistance);
+          if (heroHasDealerChip) chipLeftPx -= chipRadius;
+          els.dealerChip.hidden = false;
+          els.dealerChip.style.left = Math.round(chipLeftPx) + 'px';
+          els.dealerChip.style.top = Math.round(chipTopPx) + 'px';
+          return;
+        }
+      }
+    }
     var anchor = renderedSeatAnchors[targetSeatNo] || null;
     var slotIndex = Number.isInteger(renderedSeatSlots[targetSeatNo]) ? renderedSeatSlots[targetSeatNo] : null;
     if (!anchor || slotIndex == null){
@@ -868,13 +1124,13 @@
         slotIndex = 3;
       }
     }
-    var chipOffset = { x: 0, y: -8 };
-    if (slotIndex === 0) chipOffset = { x: 0, y: 8 };
-    else if (slotIndex === 1) chipOffset = { x: -9, y: 5 };
-    else if (slotIndex === 2) chipOffset = { x: -9, y: -5 };
-    else if (slotIndex === 3) chipOffset = { x: 11, y: -7 };
-    else if (slotIndex === 4) chipOffset = { x: 9, y: -5 };
-    else if (slotIndex === 5) chipOffset = { x: 9, y: 5 };
+    var chipOffset = { x: 0, y: 7 };
+    if (slotIndex === 0) chipOffset = { x: 8, y: 7 };
+    else if (slotIndex === 1) chipOffset = { x: -8, y: 8 };
+    else if (slotIndex === 2) chipOffset = { x: -8, y: 7 };
+    else if (slotIndex === 3) chipOffset = { x: -32, y: 3 };
+    else if (slotIndex === 4) chipOffset = { x: 8, y: 7 };
+    else if (slotIndex === 5) chipOffset = { x: 8, y: 8 };
     els.dealerChip.hidden = false;
     els.dealerChip.style.left = (anchor.x + chipOffset.x) + '%';
     els.dealerChip.style.top = (anchor.y + chipOffset.y) + '%';
@@ -1233,6 +1489,8 @@
 
   function stopLiveMode(){
     stopTurnClock();
+    clearWinnerRevealTimer();
+    pendingPostRevealSnapshot = null;
     state.wsReady = false;
     if (wsClient && typeof wsClient.destroy === 'function'){
       try { wsClient.destroy(); } catch (_err){}
@@ -1297,7 +1555,13 @@
         }
       },
       onSnapshot: function(snapshot){
-        mergeSnapshot(snapshot && snapshot.payload ? snapshot.payload : null);
+        var payload = snapshot && snapshot.payload ? snapshot.payload : null;
+        if (shouldDeferSnapshotUntilRevealEnds(payload)){
+          pendingPostRevealSnapshot = payload;
+          scheduleRevealDismiss();
+          return;
+        }
+        mergeSnapshot(payload);
         render();
         autoJoinSeat();
       },

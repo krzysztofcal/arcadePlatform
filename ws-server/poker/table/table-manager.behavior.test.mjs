@@ -55,6 +55,75 @@ test("resolveNextDealerSeatNo skips ineligible seats based on settled continuati
 
   assert.equal(nextDealer, 3);
 });
+
+test("rolloverSettledHand delays next-hand bootstrap until explicitly invoked", () => {
+  const tableManager = createTableManager({ maxSeats: 6 });
+  const tableId = "table_settled_rollover";
+  const wsA = fakeWs("ws-rollover-a");
+  const wsB = fakeWs("ws-rollover-b");
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-rollover-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-rollover-b", nowTs: 2 }).ok, true);
+
+  const restored = tableManager.restoreTableFromPersisted(tableId, {
+    coreState: {
+      version: 7,
+      roomId: tableId,
+      maxSeats: 6,
+      members: [
+        { userId: "user_a", seat: 1 },
+        { userId: "user_b", seat: 2 }
+      ],
+      seats: { user_a: 1, user_b: 2 },
+      publicStacks: { user_a: 102, user_b: 98 },
+      seatDetailsByUserId: {
+        user_a: { isBot: false, botProfile: null, leaveAfterHand: false },
+        user_b: { isBot: false, botProfile: null, leaveAfterHand: false }
+      },
+      pokerState: {
+        roomId: tableId,
+        handId: "hand_settled_rollover",
+        phase: "SETTLED",
+        dealerSeatNo: 1,
+        seats: [
+          { userId: "user_a", seatNo: 1, status: "ACTIVE" },
+          { userId: "user_b", seatNo: 2, status: "ACTIVE" }
+        ],
+        stacks: { user_a: 102, user_b: 98 },
+        showdown: {
+          handId: "hand_settled_rollover",
+          winners: ["user_a"],
+          potsAwarded: [{ amount: 4, winners: ["user_a"] }],
+          potAwardedTotal: 4,
+          reason: "computed"
+        },
+        handSettlement: {
+          handId: "hand_settled_rollover",
+          settledAt: "2026-04-11T10:00:00.000Z",
+          payouts: { user_a: 4 }
+        },
+        holeCardsByUserId: { user_a: ["AS", "KD"], user_b: ["2C", "2D"] }
+      }
+    },
+    presenceByUserId: new Map([
+      ["user_a", { userId: "user_a", seat: 1, connected: true, lastSeenAt: 1, expiresAt: null }],
+      ["user_b", { userId: "user_b", seat: 2, connected: true, lastSeenAt: 2, expiresAt: null }]
+    ])
+  });
+
+  assert.equal(restored.ok, true);
+  assert.equal(tableManager.persistedPokerState(tableId).phase, "SETTLED");
+
+  const rollover = tableManager.rolloverSettledHand({ tableId, nowMs: 5_000 });
+
+  assert.equal(rollover.ok, true);
+  assert.equal(rollover.changed, true);
+  const nextState = tableManager.persistedPokerState(tableId);
+  assert.equal(nextState.phase, "PREFLOP");
+  assert.equal(nextState.dealerSeatNo, 2);
+  assert.equal(nextState.turnStartedAt, 5_000);
+  assert.equal(nextState.turnDeadlineAt > nextState.turnStartedAt, true);
+});
 test("table manager exposes connected members as sorted {userId, seat} and reuses freed seats", () => {
   const tableManager = createTableManager({ maxSeats: 3, presenceTtlMs: 0 });
   const ws1 = fakeWs("ws-1");
@@ -1224,7 +1293,7 @@ test("first FLOP CHECK keeps FLOP and passes turn", () => {
   assert.equal(flopAfter.turn.userId, "user_a");
 });
 
-test("preflop fold-win auto-bootstraps next PREFLOP hand with preserved stacks", () => {
+test("preflop fold-win settles first and boots next hand only after explicit rollover", () => {
   const tableManager = createTableManager({ maxSeats: 4 });
   const wsA = fakeWs("fold-a");
   const wsB = fakeWs("fold-b");
@@ -1237,9 +1306,16 @@ test("preflop fold-win auto-bootstraps next PREFLOP hand with preserved stacks",
   const pre = tableManager.tableSnapshot(tableId, "user_b");
   const before = tableManager.tableSnapshot(tableId, "user_a");
   const close = tableManager.applyAction({ tableId, handId: pre.hand.handId, userId: pre.turn.userId, requestId: "req-fold-close", action: "FOLD", amount: 0 });
-  const after = tableManager.tableSnapshot(tableId, "user_a");
+  const settled = tableManager.tableSnapshot(tableId, "user_a");
 
   assert.equal(close.accepted, true);
+  assert.equal(settled.hand.status, "SETTLED");
+  assert.equal(settled.hand.handId, before.hand.handId);
+  assert.equal(Array.isArray(settled.showdown.winners), true);
+  assert.equal(typeof settled.handSettlement.settledAt, "string");
+  const rollover = tableManager.rolloverSettledHand({ tableId, nowMs: 3_000 });
+  const after = tableManager.tableSnapshot(tableId, "user_a");
+  assert.equal(rollover.changed, true);
   assert.equal(after.hand.status, "PREFLOP");
   assert.notEqual(after.hand.handId, before.hand.handId);
   assert.equal(after.board.cards.length, 0);
@@ -1250,7 +1326,7 @@ test("preflop fold-win auto-bootstraps next PREFLOP hand with preserved stacks",
   assert.equal(Array.isArray(after.legalActions.actions), true);
 });
 
-test("closing RIVER action auto-bootstraps next PREFLOP hand and replay is idempotent", () => {
+test("closing RIVER action settles first and replay is idempotent before rollover", () => {
   const tableManager = createTableManager({ maxSeats: 4 });
   const wsA = fakeWs("river-a");
   const wsB = fakeWs("river-b");
@@ -1274,19 +1350,11 @@ test("closing RIVER action auto-bootstraps next PREFLOP hand and replay is idemp
   assert.equal(river.hand.status, "RIVER");
   assert.equal(tableManager.applyAction({ tableId, handId: river.hand.handId, userId: "user_b", requestId: "req-river-check-1", action: "CHECK", amount: 0 }).accepted, true);
   const close = tableManager.applyAction({ tableId, handId: river.hand.handId, userId: "user_a", requestId: "req-river-check-2", action: "CHECK", amount: 0 });
-  const after = tableManager.tableSnapshot(tableId, "user_a");
+  const settled = tableManager.tableSnapshot(tableId, "user_a");
 
   assert.equal(close.accepted, true);
-  assert.equal(after.hand.status, "PREFLOP");
-  assert.notEqual(after.hand.handId, river.hand.handId);
-  assert.equal(after.board.cards.length, 0);
-  assert.equal(typeof after.turn.userId, "string");
-  assert.equal(after.pot.total, 3);
-  assert.equal("showdown" in after, false);
-  assert.equal("handSettlement" in after, false);
-  const nextHandId = after.hand.handId;
-  const nextStateVersion = after.stateVersion;
-  const nextDealerSeat = after.turn.seat;
+  assert.equal(settled.hand.status, "SETTLED");
+  assert.equal(settled.hand.handId, river.hand.handId);
 
   const replayClose = tableManager.applyAction({ tableId, handId: river.hand.handId, userId: "user_a", requestId: "req-river-check-2", action: "CHECK", amount: 0 });
   assert.equal(replayClose.accepted, true);
@@ -1295,14 +1363,23 @@ test("closing RIVER action auto-bootstraps next PREFLOP hand and replay is idemp
   assert.equal(replayClose.stateVersion, close.stateVersion);
 
   const afterReplay = tableManager.tableSnapshot(tableId, "user_a");
-  assert.equal(afterReplay.hand.handId, nextHandId);
-  assert.equal(afterReplay.stateVersion, nextStateVersion);
-  assert.equal(afterReplay.turn.seat, nextDealerSeat);
+  assert.equal(afterReplay.hand.handId, settled.hand.handId);
+  assert.equal(afterReplay.stateVersion, settled.stateVersion);
 
   const rejected = tableManager.applyAction({ tableId, handId: river.hand.handId, userId: "user_b", requestId: "req-river-check-3", action: "CHECK", amount: 0 });
   assert.equal(rejected.accepted, false);
-  assert.equal(rejected.reason, "hand_mismatch");
+  assert.equal(rejected.reason, "hand_not_live");
   assert.equal(rejected.stateVersion, close.stateVersion);
+
+  assert.equal(tableManager.rolloverSettledHand({ tableId, nowMs: 9_000 }).changed, true);
+  const after = tableManager.tableSnapshot(tableId, "user_a");
+  assert.equal(after.hand.status, "PREFLOP");
+  assert.notEqual(after.hand.handId, river.hand.handId);
+  assert.equal(after.board.cards.length, 0);
+  assert.equal(typeof after.turn.userId, "string");
+  assert.equal(after.pot.total, 3);
+  assert.equal("showdown" in after, false);
+  assert.equal("handSettlement" in after, false);
 });
 
 test("next hand rotates dealer for heads-up and three-player tables", () => {
@@ -1317,6 +1394,7 @@ test("next hand rotates dealer for heads-up and three-player tables", () => {
   const preHu = headsUpManager.tableSnapshot(headsUpTableId, "user_a");
   const dealerBeforeHu = preHu.turn.userId;
   assert.equal(headsUpManager.applyAction({ tableId: headsUpTableId, handId: preHu.hand.handId, userId: preHu.turn.userId, requestId: "hu-fold-close", action: "FOLD", amount: 0 }).accepted, true);
+  assert.equal(headsUpManager.rolloverSettledHand({ tableId: headsUpTableId, nowMs: 4_000 }).changed, true);
   const nextHu = headsUpManager.tableSnapshot(headsUpTableId, "user_a");
   assert.equal(nextHu.hand.status, "PREFLOP");
   assert.notEqual(nextHu.turn.userId, dealerBeforeHu);
@@ -1329,11 +1407,50 @@ test("next hand rotates dealer for heads-up and three-player tables", () => {
   assert.equal(ringManager.join({ ws: wsR1, userId: "user_a", tableId: ringTableId, requestId: "join-r-a" }).ok, true);
   assert.equal(ringManager.join({ ws: wsR2, userId: "user_b", tableId: ringTableId, requestId: "join-r-b" }).ok, true);
   assert.equal(ringManager.join({ ws: wsR3, userId: "user_c", tableId: ringTableId, requestId: "join-r-c" }).ok, true);
-  assert.equal(ringManager.bootstrapHand(ringTableId).ok, true);
-
-  const preRing = ringManager.tableSnapshot(ringTableId, "user_a");
-  assert.equal(preRing.turn.userId, "user_a");
-  assert.equal(ringManager.applyAction({ tableId: ringTableId, handId: preRing.hand.handId, userId: preRing.turn.userId, requestId: "ring-fold-close", action: "FOLD", amount: 0 }).accepted, true);
+  assert.equal(ringManager.restoreTableFromPersisted(ringTableId, {
+    coreState: {
+      version: 4,
+      roomId: ringTableId,
+      maxSeats: 6,
+      members: [
+        { userId: "user_a", seat: 1 },
+        { userId: "user_b", seat: 2 },
+        { userId: "user_c", seat: 3 }
+      ],
+      seats: { user_a: 1, user_b: 2, user_c: 3 },
+      publicStacks: { user_a: 100, user_b: 100, user_c: 100 },
+      seatDetailsByUserId: {
+        user_a: { isBot: false, botProfile: null, leaveAfterHand: false },
+        user_b: { isBot: false, botProfile: null, leaveAfterHand: false },
+        user_c: { isBot: false, botProfile: null, leaveAfterHand: false }
+      },
+      pokerState: {
+        roomId: ringTableId,
+        handId: "ring_settled",
+        phase: "SETTLED",
+        dealerSeatNo: 1,
+        stacks: { user_a: 100, user_b: 100, user_c: 100 },
+        showdown: {
+          handId: "ring_settled",
+          winners: ["user_b"],
+          potsAwarded: [{ amount: 9, winners: ["user_b"] }],
+          potAwardedTotal: 9,
+          reason: "computed"
+        },
+        handSettlement: {
+          handId: "ring_settled",
+          settledAt: "2026-04-11T10:00:02.000Z",
+          payouts: { user_b: 9 }
+        }
+      }
+    },
+    presenceByUserId: new Map([
+      ["user_a", { userId: "user_a", seat: 1, connected: true, lastSeenAt: 1, expiresAt: null }],
+      ["user_b", { userId: "user_b", seat: 2, connected: true, lastSeenAt: 1, expiresAt: null }],
+      ["user_c", { userId: "user_c", seat: 3, connected: true, lastSeenAt: 1, expiresAt: null }]
+    ])
+  }).ok, true);
+  assert.equal(ringManager.rolloverSettledHand({ tableId: ringTableId, nowMs: 4_000 }).changed, true);
 
   const nextRing = ringManager.tableSnapshot(ringTableId, "user_a");
   assert.equal(nextRing.hand.status, "PREFLOP");
@@ -1388,7 +1505,7 @@ test("maybeApplyTurnTimeout does nothing when deadline is unexpired", () => {
   assert.equal(after.stateVersion, before.stateVersion);
 });
 
-test("timeout progression can settle hand and auto-start next hand using supplied logical clock", () => {
+test("timeout progression can settle hand and next hand starts only after explicit rollover", () => {
   const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
   const wsA = fakeWs("timeout-cycle-a");
   const wsB = fakeWs("timeout-cycle-b");
@@ -1403,23 +1520,31 @@ test("timeout progression can settle hand and auto-start next hand using supplie
   const previousHandId = before.hand.handId;
 
   const timeoutResult = tableManager.maybeApplyTurnTimeout({ tableId, nowMs: fixedFutureMs });
-  const after = tableManager.tableSnapshot(tableId, "user_a");
-  const livePokerState = tableManager.__debugPokerState(tableId);
+  const settled = tableManager.tableSnapshot(tableId, "user_a");
+  const settledPokerState = tableManager.__debugPokerState(tableId);
 
   assert.equal(timeoutResult.ok, true);
   assert.equal(timeoutResult.changed, true);
+  assert.equal(settled.hand.handId, previousHandId);
+  assert.equal(settled.hand.status, "SETTLED");
+  assert.equal(settledPokerState.turnStartedAt, null);
+  assert.equal(settledPokerState.turnDeadlineAt, null);
+
+  const secondSweep = tableManager.maybeApplyTurnTimeout({ tableId, nowMs: fixedFutureMs });
+  assert.equal(secondSweep.changed, false);
+
+  assert.equal(tableManager.rolloverSettledHand({ tableId, nowMs: fixedFutureMs }).changed, true);
+  const after = tableManager.tableSnapshot(tableId, "user_a");
+  const livePokerState = tableManager.__debugPokerState(tableId);
   assert.notEqual(after.hand.handId, previousHandId);
   assert.equal(after.hand.status, "PREFLOP");
   assert.equal(typeof after.turn.userId, "string");
   assert.equal(livePokerState.turnStartedAt, fixedFutureMs);
   assert.equal(livePokerState.turnDeadlineAt > fixedFutureMs, true);
-
-  const secondSweep = tableManager.maybeApplyTurnTimeout({ tableId, nowMs: fixedFutureMs });
-  assert.equal(secondSweep.changed, false);
 });
 
 
-test("applyAction resets turn deadline using supplied action clock", () => {
+test("rolloverSettledHand stamps next-turn deadline using supplied action clock", () => {
   const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
   const wsA = fakeWs("action-clock-a");
   const wsB = fakeWs("action-clock-b");
@@ -1442,6 +1567,8 @@ test("applyAction resets turn deadline using supplied action clock", () => {
   });
 
   assert.equal(acted.accepted, true);
+  assert.equal(tableManager.__debugPokerState(tableId).turnStartedAt, null);
+  assert.equal(tableManager.rolloverSettledHand({ tableId, nowMs: actionNowMs }).changed, true);
   const livePokerState = tableManager.__debugPokerState(tableId);
   assert.equal(livePokerState.turnStartedAt, actionNowMs);
   assert.equal(livePokerState.turnDeadlineAt > actionNowMs, true);
