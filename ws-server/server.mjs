@@ -101,7 +101,7 @@ function resolveObserveOnlyJoin(rawValue) {
 function resolveSettledRevealMs(rawValue) {
   const parsed = Number(rawValue);
   if (!Number.isFinite(parsed) || parsed < 0) {
-    return 2_000;
+    return 4_000;
   }
   return Math.trunc(parsed);
 }

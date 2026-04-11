@@ -569,6 +569,88 @@ test('poker v2 shows winner badges and reveals showdown winner cards during sett
   assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
 });
 
+test('poker v2 keeps winner badges and revealed cards visible through the local reveal window after the next hand snapshot arrives', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 9,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-8', status: 'SETTLED', dealerSeatNo: 2 },
+        turn: { userId: null, seat: null, startedAt: null, deadlineAt: null },
+        pot: { total: 0, sidePots: [] },
+        legalActions: { seat: 1, actions: [] },
+        showdown: {
+          handId: 'hand-8',
+          winners: ['villain-1'],
+          reason: 'computed',
+          revealedWinners: [
+            { userId: 'villain-1', holeCards: ['AS', 'AD'] }
+          ]
+        },
+        handSettlement: {
+          handId: 'hand-8',
+          settledAt: '2026-04-11T10:00:00.000Z'
+        }
+      },
+      private: { holeCards: [{ r: 'K', s: 'H' }, { r: 'K', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 10,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-9', status: 'PREFLOP', dealerSeatNo: 1 },
+        turn: { userId: 'user-1', seat: 1, startedAt: Date.now(), deadlineAt: Date.now() + 20_000 },
+        pot: { total: 3, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CALL'] },
+        actionConstraints: { toCall: 1 }
+      },
+      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'J', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const villainSeat = findSeatByLabel(harness, 'Villain 1');
+  const villainBadge = findSeatChild(villainSeat, 'poker-seat-winner-badge');
+  const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
+
+  assert.ok(villainBadge);
+  assert.equal(villainBadge.textContent, 'Winner');
+  assert.equal(villainCards.children.length, 2);
+  assert.equal(villainCards.children[0].className.includes('poker-card--back'), false);
+  assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
+});
+
 test('poker v2 keeps winner cards hidden when the hand ends without showdown comparison', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();

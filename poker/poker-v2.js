@@ -21,6 +21,7 @@
     disconnected: 'Live connection closed',
     error: 'Live table unavailable'
   };
+  var WINNER_REVEAL_MS = 4_000;
   var seatAnchors = [
     { x: 50, y: 10 },
     { x: 86, y: 28 },
@@ -81,6 +82,12 @@
   var shouldAutoJoin = false;
   var autoJoinAttempted = false;
   var bootReady = false;
+  var stickyWinnerReveal = {
+    handId: null,
+    visibleUntilMs: 0,
+    winners: [],
+    revealedWinnerCardsByUserId: {}
+  };
   var els = {};
 
   function cloneState(source){
@@ -550,6 +557,46 @@
     return revealed;
   }
 
+  function cloneRevealedWinnerCards(source){
+    var next = {};
+    if (!isObject(source)) return next;
+    Object.keys(source).forEach(function(userId){
+      if (!Array.isArray(source[userId])) return;
+      next[userId] = source[userId].slice(0, 2);
+    });
+    return next;
+  }
+
+  function syncStickyWinnerReveal(){
+    var handId = state.handId || (state.handSettlement && state.handSettlement.handId) || (state.showdown && state.showdown.handId) || null;
+    var winners = state.showdown && Array.isArray(state.showdown.winners) ? state.showdown.winners.filter(Boolean) : [];
+    if (!handId || !winners.length || state.phase !== 'SETTLED'){
+      return;
+    }
+    if (stickyWinnerReveal.handId !== handId || stickyWinnerReveal.visibleUntilMs <= Date.now()){
+      stickyWinnerReveal = {
+        handId: handId,
+        visibleUntilMs: Date.now() + WINNER_REVEAL_MS,
+        winners: winners.slice(),
+        revealedWinnerCardsByUserId: cloneRevealedWinnerCards(state.revealedWinnerCardsByUserId)
+      };
+    }
+  }
+
+  function getActiveWinnerReveal(){
+    if (!stickyWinnerReveal.handId) return null;
+    if (stickyWinnerReveal.visibleUntilMs <= Date.now()) return null;
+    return stickyWinnerReveal;
+  }
+
+  function getDisplayWinnerUserIds(){
+    if (state.showdown && Array.isArray(state.showdown.winners) && state.showdown.winners.length){
+      return state.showdown.winners;
+    }
+    var sticky = getActiveWinnerReveal();
+    return sticky ? sticky.winners.slice() : [];
+  }
+
   function mergeSnapshot(payload){
     if (!isObject(payload)) return;
     var snapshotTableId = typeof payload.tableId === 'string' && payload.tableId ? payload.tableId : null;
@@ -622,6 +669,7 @@
     state.showdown = normalizeShowdown(showdownObj);
     state.handSettlement = normalizeHandSettlement(handSettlementObj);
     state.revealedWinnerCardsByUserId = mapRevealedWinnerCards(state.showdown);
+    syncStickyWinnerReveal();
     state.actionConstraints = normalizeConstraints(constraintsPrimary, legalSource && legalSource.actionConstraints);
     state.statusText = LIVE_STATUS_COPY.live;
     state.errorText = '';
@@ -783,13 +831,16 @@
   }
 
   function isWinnerSeat(seat){
-    if (!seat || typeof seat.userId !== 'string' || !state.showdown) return false;
-    return Array.isArray(state.showdown.winners) && state.showdown.winners.indexOf(seat.userId) !== -1;
+    if (!seat || typeof seat.userId !== 'string') return false;
+    return getDisplayWinnerUserIds().indexOf(seat.userId) !== -1;
   }
 
   function getSeatRevealCards(seat){
     if (!seat || typeof seat.userId !== 'string') return null;
     var revealed = state.revealedWinnerCardsByUserId && state.revealedWinnerCardsByUserId[seat.userId];
+    if ((!Array.isArray(revealed) || revealed.length !== 2) && getActiveWinnerReveal()){
+      revealed = stickyWinnerReveal.revealedWinnerCardsByUserId[seat.userId];
+    }
     return Array.isArray(revealed) && revealed.length === 2 ? revealed : null;
   }
 
