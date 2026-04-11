@@ -574,7 +574,7 @@ test('poker v2 shows winner badges and reveals showdown winner cards during sett
   assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
 });
 
-test('poker v2 clears the table briefly when the next hand starts after winner reveal', async () => {
+test('poker v2 clears the previous reveal immediately when the next hand starts', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -648,9 +648,13 @@ test('poker v2 clears the table briefly when the next hand starts after winner r
 
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
   assert.equal(findSeatChild(villainSeat, 'poker-seat-winner-badge'), undefined);
-  assert.equal(findSeatChild(villainSeat, 'poker-seat-cards'), undefined);
+  const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
+  assert.ok(villainCards);
+  assert.equal(villainCards.children.length, 2);
+  assert.equal(villainCards.children[0].className.includes('poker-card--back'), true);
+  assert.equal(villainCards.children[1].className.includes('poker-card--back'), true);
   assert.equal(harness.elements.pokerCommunityCards.children.length, 0);
-  assert.equal(harness.elements.pokerHeroCards.children.length, 0);
+  assert.equal(harness.elements.pokerHeroCards.children.length, 2);
 });
 
 test('poker v2 does not compute hero best hand from sticky winner reveal board after the next hand starts', async () => {

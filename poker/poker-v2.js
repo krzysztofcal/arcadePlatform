@@ -22,7 +22,6 @@
     error: 'Live table unavailable'
   };
   var WINNER_REVEAL_MS = 4_000;
-  var HAND_CLEAR_MS = 500;
   var seatAnchors = [
     { x: 50, y: 10 },
     { x: 86, y: 28 },
@@ -90,10 +89,6 @@
     winners: [],
     revealedWinnerCardsByUserId: {},
     communityCards: []
-  };
-  var handClearWindow = {
-    handId: null,
-    visibleUntilMs: 0
   };
   var els = {};
 
@@ -597,20 +592,7 @@
     return stickyWinnerReveal;
   }
 
-  function activateHandClearWindow(nextHandId){
-    if (typeof nextHandId !== 'string' || !nextHandId) return;
-    handClearWindow = {
-      handId: nextHandId,
-      visibleUntilMs: Date.now() + HAND_CLEAR_MS
-    };
-  }
-
-  function isHandClearWindowActive(){
-    return !!(handClearWindow.handId && handClearWindow.handId === state.handId && handClearWindow.visibleUntilMs > Date.now());
-  }
-
   function getDisplayWinnerUserIds(){
-    if (isHandClearWindowActive()) return [];
     if (state.showdown && Array.isArray(state.showdown.winners) && state.showdown.winners.length){
       return state.showdown.winners;
     }
@@ -694,7 +676,6 @@
     state.handSettlement = normalizeHandSettlement(handSettlementObj);
     state.revealedWinnerCardsByUserId = mapRevealedWinnerCards(state.showdown);
     if (state.handId && previousHandId && state.handId !== previousHandId && (previousPhase === 'SETTLED' || stickyWinnerReveal.handId === previousHandId)){
-      activateHandClearWindow(state.handId);
       stickyWinnerReveal.visibleUntilMs = 0;
     }
     syncStickyWinnerReveal();
@@ -742,7 +723,6 @@
   }
 
   function getDisplayCommunityCards(){
-    if (isHandClearWindowActive()) return [];
     if (Array.isArray(state.communityCards) && state.communityCards.length) return state.communityCards.slice(0, 5);
     var sticky = getActiveWinnerReveal();
     return sticky && Array.isArray(sticky.communityCards) ? sticky.communityCards.slice(0, 5) : [];
@@ -871,7 +851,6 @@
   }
 
   function getSeatRevealCards(seat){
-    if (isHandClearWindowActive()) return null;
     if (!seat || typeof seat.userId !== 'string') return null;
     var revealed = state.revealedWinnerCardsByUserId && state.revealedWinnerCardsByUserId[seat.userId];
     if ((!Array.isArray(revealed) || revealed.length !== 2) && getActiveWinnerReveal()){
@@ -954,7 +933,7 @@
 
       var cards = document.createElement('div');
       cards.className = 'poker-seat-cards';
-      if (!hero && seat && seat.userId && !isHandClearWindowActive()){
+      if (!hero && seat && seat.userId){
         var revealCards = getSeatRevealCards(seat);
         if (revealCards){
           revealCards.forEach(function(card){
@@ -975,7 +954,7 @@
       status.textContent = seat ? String(seat.status || 'ACTIVE').replace(/_/g, ' ') : 'OPEN';
 
       article.appendChild(avatar);
-      if (!isHandClearWindowActive() && seat && isWinnerSeat(seat)){
+      if (seat && isWinnerSeat(seat)){
         var winnerBadge = document.createElement('div');
         winnerBadge.className = 'poker-seat-winner-badge';
         var winnerTitle = document.createElement('div');
@@ -1037,7 +1016,6 @@
   function renderHeroCards(){
     if (!els.heroCards) return;
     els.heroCards.innerHTML = '';
-    if (isHandClearWindowActive()) return;
     var cards = Array.isArray(state.heroCards) ? state.heroCards : [];
     if (!cards.length){
       els.heroCards.appendChild(createCard(null, { faceDown: true }));
