@@ -926,6 +926,11 @@
     return code === 'STALE_SESSION' || code === 'session_rebound';
   }
 
+  function isRetryableLeaveError(err){
+    var code = err && (err.code || err.message) ? String(err.code || err.message) : '';
+    return code === 'STALE_SESSION' || code === 'session_rebound' || code === 'ws_closed' || code === 'timeout' || code === 'ws_unavailable';
+  }
+
   function getGameplayWsSender(client, methodName, action, fallbackMessage){
     if (!client || typeof client.isReady !== 'function' || !client.isReady()) return null;
     if (typeof client[methodName] !== 'function') return null;
@@ -2554,6 +2559,15 @@
           tableId: tableId,
           stateVersion: resolveTableDataVersion(tableData),
           snapshotKind: opts.snapshotKind || null
+        });
+      }
+      if (pendingLeaveNavigation && pendingLeaveRetryAfterReconnect && isSeated === true){
+        pendingLeaveRetryAfterReconnect = false;
+        leaveTable().catch(function(err){
+          pendingLeaveRetryAfterReconnect = false;
+          pendingLeaveNavigation = false;
+          clearLeavePending();
+          setActionError('leave', WS_LEAVE_ENDPOINT, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrLeave', 'Failed to leave'));
         });
       }
       var seatedCount = getSeatedCount(tableData);
@@ -4290,7 +4304,7 @@
           });
           return;
         }
-        if (isStaleSessionError(err) && currentUserId && !pendingLeaveRetryAfterReconnect){
+        if (isRetryableLeaveError(err) && currentUserId && !pendingLeaveRetryAfterReconnect){
           pendingLeaveRetryAfterReconnect = true;
           pauseLeavePending();
           stopWsClient();

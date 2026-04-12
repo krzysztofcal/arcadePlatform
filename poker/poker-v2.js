@@ -757,6 +757,11 @@
       pendingLeaveRetryAfterReconnect = false;
       pendingLeaveNavigation = false;
       navigateToLobby();
+      return;
+    }
+    if (pendingLeaveNavigation && pendingLeaveRetryAfterReconnect && deriveCurrentSeat() && isWsReady()){
+      pendingLeaveRetryAfterReconnect = false;
+      leaveAndReturnToLobby();
     }
   }
 
@@ -1482,6 +1487,11 @@
     return code === 'STALE_SESSION' || code === 'session_rebound';
   }
 
+  function isRetryableLeaveError(error){
+    var code = error && (error.code || error.message) ? String(error.code || error.message) : '';
+    return code === 'STALE_SESSION' || code === 'session_rebound' || code === 'ws_closed' || code === 'timeout' || code === 'ws_unavailable';
+  }
+
   function leaveAndReturnToLobby(){
     pendingLeaveNavigation = true;
     return sendCommand('sendLeave', { tableId: state.tableId }).then(function(){
@@ -1491,7 +1501,7 @@
       renderInfoPanel();
       navigateToLobby();
     }).catch(function(err){
-      if (isStaleSessionError(err) && currentAccessToken && !pendingLeaveRetryAfterReconnect){
+      if (isRetryableLeaveError(err) && currentAccessToken && !pendingLeaveRetryAfterReconnect){
         pendingLeaveRetryAfterReconnect = true;
         state.statusText = LIVE_STATUS_COPY.connecting;
         renderInfoPanel();
