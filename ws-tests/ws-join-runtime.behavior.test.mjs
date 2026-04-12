@@ -332,6 +332,8 @@ function runtimeJoinEnv({ secret, filePath }) {
     POKER_BOTS_MAX_PER_TABLE: "2",
     POKER_BOT_BUYIN_BB: "100",
     POKER_BOT_PROFILE_DEFAULT: "TRIVIAL",
+    WS_BOT_REACTION_MIN_MS: "0",
+    WS_BOT_REACTION_MAX_MS: "0",
     WS_POKER_TURN_MS: "250",
     WS_TIMEOUT_SWEEP_MS: "20"
   };
