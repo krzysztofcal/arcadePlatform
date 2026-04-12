@@ -733,9 +733,9 @@
     else if (Array.isArray(privateObj.holeCards)) nextHeroCards = normalizeCards(privateObj.holeCards);
     if (nextHeroCards) state.heroCards = nextHeroCards;
 
-    if (payload.youSeat == null || youObj.seat == null) state.youSeat = null;
-    else if (Number.isInteger(payload.youSeat)) state.youSeat = payload.youSeat;
+    if (Number.isInteger(payload.youSeat)) state.youSeat = payload.youSeat;
     else if (Number.isInteger(youObj.seat)) state.youSeat = youObj.seat;
+    else if (payload.youSeat == null && youObj.seat == null) state.youSeat = null;
 
     var legalActions = normalizeLegalActions(legalSource);
     if (legalActions.length || Array.isArray(legalSource) || (isObject(legalSource) && Array.isArray(legalSource.actions))){
