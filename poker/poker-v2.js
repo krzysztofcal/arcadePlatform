@@ -1696,7 +1696,7 @@
           applySignedOutState();
           return;
         }
-        if (info && info.code === 'STALE_SESSION' && currentAccessToken){
+        if (info && info.code === 'STALE_SESSION' && currentAccessToken && pendingLeaveRetryAfterReconnect){
           restartLiveMode(currentAccessToken);
           return;
         }
