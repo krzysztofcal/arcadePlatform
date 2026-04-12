@@ -980,7 +980,7 @@
       var active = !!(seat && seat.userId && state.turnUserId && seat.userId === state.turnUserId);
       var hero = !!(seat && seat.userId && state.currentUserId && seat.userId === state.currentUserId);
       var lastAction = getSeatLastBettingRoundAction(seat);
-      var folded = !!(seat && (/FOLD/i.test(seat.status || '') || lastAction === 'fold'));
+      var folded = !!(seat && /FOLD/i.test(seat.status || ''));
       var rotatedIndex = rotateSeatIndex(i, state.maxSeats);
       var anchor = getSeatAnchor(rotatedIndex, state.maxSeats);
       if (hero && state.maxSeats >= 4) anchor = { x: 34, y: 91 };

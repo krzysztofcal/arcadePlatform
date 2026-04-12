@@ -529,6 +529,48 @@ test('poker v2 renders last-action badges and dims folded seats', async () => {
   assert.match(foldedSeat.className, /poker-seat--folded/);
 });
 
+test('poker v2 does not dim a seat from fold badge alone without folded status', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 7,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1', status: 'ACTIVE' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-6', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'user-1', startedAt: Date.now() - 2_000, deadlineAt: Date.now() + 18_000 },
+        pot: { total: 6, sidePots: [] },
+        legalActions: { seat: 1, actions: ['CHECK'] },
+        actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+        lastBettingRoundActionByUserId: { 'villain-1': 'fold' }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const villainSeat = findSeatByLabel(harness, 'Villain 1');
+  const villainBadge = (villainSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
+
+  assert.ok(villainBadge);
+  assert.equal(villainBadge.textContent, 'Fold');
+  assert.doesNotMatch(villainSeat.className, /poker-seat--folded/);
+});
+
 test('poker v2 keeps the dealer chip fixed while action moves between players', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
