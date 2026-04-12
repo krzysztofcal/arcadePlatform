@@ -135,6 +135,35 @@ const raiseAllIn = hooks.resolveAllInPlan(
 assert.equal(raiseAllIn && raiseAllIn.type, 'RAISE', 'raise spot should map ALL IN to RAISE');
 assert.equal(raiseAllIn && raiseAllIn.amount, 70, 'raise spot should map ALL IN to maxRaiseTo');
 
+const cappedRaiseAllIn = hooks.resolveAllInPlan(
+  hooks.sanitizeAllowedActions(new Set(['CALL', 'RAISE', 'FOLD']), { toCall: 10, minRaiseTo: 20, maxRaiseTo: 100 }),
+  {
+    seats: [
+      { userId: 'user-1', seatNo: 1, status: 'ACTIVE' },
+      { userId: 'user-2', seatNo: 2, status: 'ACTIVE' },
+      { userId: 'user-3', seatNo: 3, status: 'FOLDED' }
+    ],
+    state: { state: { stacks: { 'user-1': 100, 'user-2': 35, 'user-3': 250 } } }
+  },
+  'user-1'
+);
+assert.equal(cappedRaiseAllIn && cappedRaiseAllIn.type, 'RAISE', 'raise all-in should remain a raise when another active player can cover part of the shove');
+assert.equal(cappedRaiseAllIn && cappedRaiseAllIn.amount, 35, 'raise all-in should cap to the biggest active opponent stack');
+
+const coveredRaiseAllIn = hooks.resolveAllInPlan(
+  hooks.sanitizeAllowedActions(new Set(['CALL', 'RAISE', 'FOLD']), { toCall: 10, minRaiseTo: 20, maxRaiseTo: 70 }),
+  {
+    seats: [
+      { userId: 'user-1', seatNo: 1, status: 'ACTIVE' },
+      { userId: 'user-2', seatNo: 2, status: 'ACTIVE' }
+    ],
+    state: { state: { stacks: { 'user-1': 70, 'user-2': 140 } } }
+  },
+  'user-1'
+);
+assert.equal(coveredRaiseAllIn && coveredRaiseAllIn.type, 'RAISE', 'full all-in should remain unchanged when another active player covers the stack');
+assert.equal(coveredRaiseAllIn && coveredRaiseAllIn.amount, 70, 'covered all-in should still use full stack raiseTo');
+
 const noAllIn = hooks.resolveAllInPlan(
   hooks.sanitizeAllowedActions(new Set(['CHECK', 'FOLD']), { toCall: 0 }),
   { state: { state: { stacks: { 'user-1': 50 } } } },

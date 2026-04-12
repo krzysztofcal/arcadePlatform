@@ -340,6 +340,52 @@ test('poker v2 shows compact call amount in the primary action label', async () 
   assert.equal(harness.elements.pokerV2AmountValue.textContent, '2k');
 });
 
+test('poker v2 caps all-in to the biggest active opponent stack', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 4,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' },
+          { userId: 'villain-2', seat: 3, displayName: 'Villain 2' }
+        ]
+      },
+      public: {
+        seats: [
+          { userId: 'user-1', seatNo: 1, status: 'ACTIVE' },
+          { userId: 'villain-1', seatNo: 2, status: 'ACTIVE' },
+          { userId: 'villain-2', seatNo: 3, status: 'FOLDED' }
+        ],
+        hand: { handId: 'hand-all-in', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 48, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CALL', 'RAISE'] },
+        actionConstraints: { toCall: 10, minRaiseTo: 20, maxRaiseTo: 100, maxBetAmount: null },
+        stacks: { 'user-1': 100, 'villain-1': 35, 'villain-2': 250 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  harness.elements.pokerV2AllInBtn.click();
+  await harness.flush();
+
+  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-all-in', action: 'RAISE', amount: 35 }));
+});
+
 test('poker v2 auto-joins from query params after live auth', async () => {
   const harness = createHarness({ search: '?tableId=table-1&seatNo=4&autoJoin=1' });
   harness.fireDomContentLoaded();
