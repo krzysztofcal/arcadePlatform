@@ -83,6 +83,41 @@ test("projectRoomCoreSnapshot preserves bot seat metadata when public seats fall
   ]);
 });
 
+test("projectRoomCoreSnapshot marks folded seats from authoritative folded state when public seats omit status", () => {
+  const snapshot = projectRoomCoreSnapshot({
+    tableId: "table_fold_projection",
+    roomId: "table_fold_projection",
+    coreState: {
+      seats: { user_a: 1, user_b: 2 },
+      pokerState: {
+        roomId: "table_fold_projection",
+        handId: "hand_fold_projection",
+        phase: "TURN",
+        turnUserId: "user_b",
+        community: ["AS", "KD", "QC", "3H"],
+        potTotal: 10,
+        stacks: { user_a: 98, user_b: 92 },
+        foldedByUserId: { user_a: true, user_b: false },
+        leftTableByUserId: { user_a: false, user_b: false },
+        sitOutByUserId: { user_a: false, user_b: false },
+        holeCardsByUserId: { user_a: ["AH", "AD"], user_b: ["2C", "2D"] },
+        deck: ["QS"]
+      }
+    },
+    members: [
+      { userId: "user_a", seat: 1 },
+      { userId: "user_b", seat: 2 }
+    ],
+    userId: "user_b",
+    youSeat: 2
+  });
+
+  assert.deepEqual(snapshot.seats, [
+    { userId: "user_a", seatNo: 1, status: "FOLDED" },
+    { userId: "user_b", seatNo: 2, status: "ACTIVE" }
+  ]);
+});
+
 test("projectRoomCoreSnapshot reuses poker legal-actions/public stripping semantics", () => {
   const coreState = {
     seats: { seated_user: 2, other_user: 1 },

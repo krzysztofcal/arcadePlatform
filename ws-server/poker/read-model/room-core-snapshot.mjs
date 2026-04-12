@@ -91,11 +91,15 @@ function normalizeMemberSeatRows(value) {
 function resolvePublicSeats({ statePublic, members, coreState }) {
   const stateSeats = normalizeSeatRows(statePublic?.seats);
   const seatDetailsByUserId = normalizeSeatDetails(coreState?.seatDetailsByUserId);
+  const foldedByUserId = asObject(statePublic?.foldedByUserId) || {};
   const baseSeats = stateSeats.length > 0 ? stateSeats : normalizeMemberSeatRows(members);
   return baseSeats.map((seat) => {
     const details = seatDetailsByUserId[seat.userId] || null;
-    if (!details) return seat;
     const merged = { ...seat };
+    if (foldedByUserId[seat.userId] === true) {
+      merged.status = "FOLDED";
+    }
+    if (!details) return merged;
     if (details.isBot) merged.isBot = true;
     if (details.botProfile) merged.botProfile = details.botProfile;
     if (details.leaveAfterHand) merged.leaveAfterHand = true;
