@@ -340,7 +340,7 @@ test('poker v2 shows compact call amount in the primary action label', async () 
   assert.equal(harness.elements.pokerV2AmountValue.textContent, '2k');
 });
 
-test('poker v2 caps all-in to the biggest active opponent stack', async () => {
+test('poker v2 caps raise all-in to call plus the biggest active opponent stack behind', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -383,7 +383,7 @@ test('poker v2 caps all-in to the biggest active opponent stack', async () => {
   harness.elements.pokerV2AllInBtn.click();
   await harness.flush();
 
-  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-all-in', action: 'RAISE', amount: 35 }));
+  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-all-in', action: 'RAISE', amount: 45 }));
 });
 
 test('poker v2 auto-joins from query params after live auth', async () => {

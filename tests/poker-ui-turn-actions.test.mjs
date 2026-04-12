@@ -148,7 +148,7 @@ const cappedRaiseAllIn = hooks.resolveAllInPlan(
   'user-1'
 );
 assert.equal(cappedRaiseAllIn && cappedRaiseAllIn.type, 'RAISE', 'raise all-in should remain a raise when another active player can cover part of the shove');
-assert.equal(cappedRaiseAllIn && cappedRaiseAllIn.amount, 35, 'raise all-in should cap to the biggest active opponent stack');
+assert.equal(cappedRaiseAllIn && cappedRaiseAllIn.amount, 45, 'raise all-in should include toCall plus the biggest active opponent stack behind');
 
 const coveredRaiseAllIn = hooks.resolveAllInPlan(
   hooks.sanitizeAllowedActions(new Set(['CALL', 'RAISE', 'FOLD']), { toCall: 10, minRaiseTo: 20, maxRaiseTo: 70 }),

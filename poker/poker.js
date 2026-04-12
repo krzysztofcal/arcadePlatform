@@ -494,7 +494,7 @@
     return true;
   }
 
-  function resolveMaxContestableOpponentStackAmount(data, currentUserId){
+  function resolveMaxContestableOpponentBehindAmount(data, currentUserId){
     if (!data || !currentUserId) return null;
     var seats = Array.isArray(data.seats) ? data.seats : [];
     var stateObj = data && data.state ? data.state : null;
@@ -521,11 +521,11 @@
     var stackAmount = resolveCurrentUserStackAmount(data, userId);
     if (stackAmount == null || stackAmount < 1) return null;
     var constraints = normalizeActionConstraints(info.constraints);
-    var contestableOpponentStack = resolveMaxContestableOpponentStackAmount(data, userId);
-    var cappedAdditional = contestableOpponentStack == null
-      ? stackAmount
-      : Math.max(0, Math.min(stackAmount, Math.trunc(contestableOpponentStack)));
     var toCall = constraints.toCall != null ? Math.max(0, Math.trunc(constraints.toCall)) : null;
+    var contestableOpponentBehind = resolveMaxContestableOpponentBehindAmount(data, userId);
+    var cappedTotalContribution = contestableOpponentBehind == null
+      ? stackAmount
+      : Math.max(0, Math.min(stackAmount, (toCall || 0) + Math.trunc(contestableOpponentBehind)));
     if (allowed.has('CALL') && toCall != null && toCall > 0 && stackAmount <= toCall){
       return { type: 'CALL', amount: null };
     }
@@ -534,7 +534,7 @@
       if (raiseTo != null && raiseTo >= 1){
         var minRaiseTo = constraints.minRaiseTo != null ? Math.max(1, Math.trunc(constraints.minRaiseTo)) : 1;
         var currentUserBet = Math.max(0, raiseTo - stackAmount);
-        var cappedRaiseTo = Math.min(raiseTo, Math.max(currentUserBet + cappedAdditional, minRaiseTo));
+        var cappedRaiseTo = Math.min(raiseTo, Math.max(currentUserBet + cappedTotalContribution, minRaiseTo));
         if (toCall != null && toCall > 0 && cappedRaiseTo <= currentUserBet + toCall){
           return { type: 'CALL', amount: null };
         }
@@ -544,7 +544,7 @@
     if (allowed.has('BET')){
       var betAmount = constraints.maxBetAmount != null ? Math.trunc(constraints.maxBetAmount) : stackAmount;
       if (betAmount >= 1){
-        return { type: 'BET', amount: Math.max(1, Math.min(betAmount, cappedAdditional || betAmount)) };
+        return { type: 'BET', amount: Math.max(1, Math.min(betAmount, cappedTotalContribution || betAmount)) };
       }
     }
     return null;
