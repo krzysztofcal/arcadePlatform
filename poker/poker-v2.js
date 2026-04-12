@@ -464,12 +464,12 @@
       });
     }
 
-    if (Array.isArray(payload.seats)) sourceSeats = sourceSeats.concat(payload.seats);
     var tableObj = isObject(payload.table) ? payload.table : {};
     var publicObj = isObject(payload.public) ? payload.public : {};
-    if (Array.isArray(publicObj.seats)) sourceSeats = sourceSeats.concat(publicObj.seats);
     if (Array.isArray(tableObj.members)) sourceSeats = sourceSeats.concat(tableObj.members);
     if (Array.isArray(payload.authoritativeMembers)) sourceSeats = sourceSeats.concat(payload.authoritativeMembers);
+    if (Array.isArray(payload.seats)) sourceSeats = sourceSeats.concat(payload.seats);
+    if (Array.isArray(publicObj.seats)) sourceSeats = sourceSeats.concat(publicObj.seats);
 
     sourceSeats.forEach(function(rawSeat){
       if (!rawSeat) return;

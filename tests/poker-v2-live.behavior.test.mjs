@@ -572,6 +572,49 @@ test('poker v2 dims hero hole cards when the current player folds', async () => 
   assert.match(harness.elements.pokerHeroCards.className, /poker-hero-cards--folded/);
 });
 
+test('poker v2 prefers authoritative folded seat status over table member fallback rows', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 9,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        seats: [
+          { userId: 'user-1', seatNo: 1, status: 'FOLDED' },
+          { userId: 'villain-1', seatNo: 2, status: 'ACTIVE' }
+        ],
+        hand: { handId: 'hand-8', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'villain-1', startedAt: Date.now() - 2_000, deadlineAt: Date.now() + 18_000 },
+        pot: { total: 6, sidePots: [] },
+        legalActions: { seat: 1, actions: [] },
+        actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+        lastBettingRoundActionByUserId: { 'user-1': 'fold' }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  assert.match(heroSeat.className, /poker-seat--folded/);
+  assert.match(harness.elements.pokerHeroCards.className, /poker-hero-cards--folded/);
+});
+
 test('poker v2 does not dim a seat from fold badge alone without folded status', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
