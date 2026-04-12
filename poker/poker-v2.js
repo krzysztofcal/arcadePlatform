@@ -771,6 +771,11 @@
     return Math.max(0, currentSeat.seatNo - offset);
   }
 
+  function isCurrentUserFolded(){
+    var currentSeat = deriveCurrentSeat();
+    return !!(currentSeat && /FOLD/i.test(currentSeat.status || ''));
+  }
+
   function rotateSeatIndex(index, total){
     var heroIndex = getHeroVisualIndex();
     var safeTotal = Math.max(1, total || 1);
@@ -1114,6 +1119,8 @@
   function renderHeroCards(){
     if (!els.heroCards) return;
     els.heroCards.innerHTML = '';
+    if (isCurrentUserFolded()) els.heroCards.className = 'poker-hero-cards poker-hero-cards--folded';
+    else els.heroCards.className = 'poker-hero-cards';
     var cards = Array.isArray(state.heroCards) ? state.heroCards : [];
     if (!cards.length){
       els.heroCards.appendChild(createCard(null, { faceDown: true }));

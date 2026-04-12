@@ -104,6 +104,8 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-card--red{color:#c82323;}
 
 .poker-hero-cards{position:absolute; left:50%; bottom:124px; transform:translateX(-50%); display:flex; gap:9px; z-index:3;}
+.poker-hero-cards--folded{opacity:0.56;}
+.poker-hero-cards--folded .poker-card{filter:grayscale(0.8);}
 
 .poker-hero-cards .poker-card:first-child{transform:rotate(-10deg);}
 
