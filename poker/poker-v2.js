@@ -86,6 +86,7 @@
   var revealDismissTimer = null;
   var authUnsubscribe = null;
   var pendingLeaveRetryAfterReconnect = false;
+  var pendingLeaveNavigation = false;
   var renderedSeatAnchors = {};
   var renderedSeatSlots = {};
   var renderedSeatAvatars = {};
@@ -694,7 +695,9 @@
     if (resolvedMaxSeats) state.maxSeats = resolvedMaxSeats;
 
     var nextSeats = normalizeSeatRows(payload, state.seats);
-    if (nextSeats.length) state.seats = nextSeats;
+    if (nextSeats.length || Array.isArray(payload.seats) || Array.isArray(tableObj.members) || Array.isArray(payload.authoritativeMembers) || Array.isArray(publicObj.seats)) {
+      state.seats = nextSeats;
+    }
 
     var nextStacks = normalizeStacks(payload);
     if (nextStacks) state.stacks = nextStacks;
@@ -730,7 +733,8 @@
     else if (Array.isArray(privateObj.holeCards)) nextHeroCards = normalizeCards(privateObj.holeCards);
     if (nextHeroCards) state.heroCards = nextHeroCards;
 
-    if (Number.isInteger(payload.youSeat)) state.youSeat = payload.youSeat;
+    if (payload.youSeat == null || youObj.seat == null) state.youSeat = null;
+    else if (Number.isInteger(payload.youSeat)) state.youSeat = payload.youSeat;
     else if (Number.isInteger(youObj.seat)) state.youSeat = youObj.seat;
 
     var legalActions = normalizeLegalActions(legalSource);
@@ -749,6 +753,11 @@
     state.actionConstraints = normalizeConstraints(constraintsPrimary, legalSource && legalSource.actionConstraints);
     state.statusText = LIVE_STATUS_COPY.live;
     state.errorText = '';
+    if (pendingLeaveNavigation && !deriveCurrentSeat()){
+      pendingLeaveRetryAfterReconnect = false;
+      pendingLeaveNavigation = false;
+      navigateToLobby();
+    }
   }
 
   function isSignedIn(){
@@ -1474,8 +1483,10 @@
   }
 
   function leaveAndReturnToLobby(){
+    pendingLeaveNavigation = true;
     return sendCommand('sendLeave', { tableId: state.tableId }).then(function(){
       pendingLeaveRetryAfterReconnect = false;
+      pendingLeaveNavigation = false;
       state.statusText = 'Leave accepted';
       renderInfoPanel();
       navigateToLobby();
@@ -1488,6 +1499,7 @@
         return;
       }
       pendingLeaveRetryAfterReconnect = false;
+      pendingLeaveNavigation = false;
       setError(err && err.message ? err.message : 'Failed to leave');
     });
   }

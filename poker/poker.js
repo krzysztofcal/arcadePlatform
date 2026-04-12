@@ -1769,6 +1769,7 @@
     var pendingStartHandTimer = null;
     var pendingActTimer = null;
     var pendingLeaveRetryAfterReconnect = false;
+    var pendingLeaveNavigation = false;
     var postActSnapshotTimer = null;
     var joinPending = false;
     var leavePending = false;
@@ -2541,6 +2542,12 @@
       });
       renderTable(tableData);
       if (wasSeatedBefore && isSeated !== true){
+        if (pendingLeaveNavigation){
+          pendingLeaveRetryAfterReconnect = false;
+          pendingLeaveNavigation = false;
+          navigateToPokerLobby();
+          return true;
+        }
         var removalMessage = t('pokerRemovedFromTable', 'You were removed from the table and cashed out.');
         setError(errorEl, removalMessage);
         klog('poker_user_removed_from_table_snapshot', {
@@ -4230,6 +4237,7 @@
 
     async function leaveTable(requestIdOverride){
       setPendingState('leave', true);
+      pendingLeaveNavigation = true;
       try {
         var resolved = resolveRequestId(pendingLeaveRequestId, requestIdOverride);
         if (resolved.nextPending){
@@ -4260,6 +4268,7 @@
         }
         clearLeavePending();
         pendingLeaveRetryAfterReconnect = false;
+        pendingLeaveNavigation = false;
         setError(errorEl, null);
         if (!isPageActive()) return;
         applyOptimisticLeaveCleanup();
@@ -4289,6 +4298,7 @@
           return;
         }
         pendingLeaveRetryAfterReconnect = false;
+        pendingLeaveNavigation = false;
         clearLeavePending();
         klog('poker_leave_error', { tableId: tableId, error: err.message || err.code });
         setActionError('leave', WS_LEAVE_ENDPOINT, err.code || 'request_failed', err.message || t('pokerErrLeave', 'Failed to leave'));
