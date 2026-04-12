@@ -71,10 +71,10 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 
 .poker-seat--winner .poker-seat-avatar{border-color:rgba(255,219,133,0.88); box-shadow:0 0 0 3px rgba(255,210,99,0.15), 0 12px 22px rgba(0,0,0,0.5);}
 
-.poker-seat--folded{opacity:0.56;}
+.poker-seat--folded{opacity:0.42;}
 
 .poker-seat--folded .poker-seat-avatar{filter:grayscale(0.8); border-color:rgba(168,175,190,0.45);}
-.poker-seat--folded .poker-seat-stack,.poker-seat--folded .poker-seat-cards,.poker-seat--folded .poker-seat-name,.poker-seat--folded .poker-seat-action-badge,.poker-seat--folded .poker-seat-best-hand{opacity:0.62;}
+.poker-seat--folded .poker-seat-stack,.poker-seat--folded .poker-seat-cards,.poker-seat--folded .poker-seat-name,.poker-seat--folded .poker-seat-action-badge,.poker-seat--folded .poker-seat-best-hand{opacity:0.46;}
 
 .poker-seat--folded .poker-seat-status{color:#f9c1c1; border-color:rgba(236,132,132,0.52); background:rgba(73,17,17,0.66);}
 
@@ -104,7 +104,7 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-card--red{color:#c82323;}
 
 .poker-hero-cards{position:absolute; left:50%; bottom:124px; transform:translateX(-50%); display:flex; gap:9px; z-index:3;}
-.poker-hero-cards--folded{opacity:0.56;}
+.poker-hero-cards--folded{opacity:0.42;}
 .poker-hero-cards--folded .poker-card{filter:grayscale(0.8);}
 
 .poker-hero-cards .poker-card:first-child{transform:rotate(-10deg);}

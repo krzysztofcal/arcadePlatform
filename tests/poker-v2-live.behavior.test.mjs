@@ -550,6 +550,10 @@ test('poker v2 dims hero hole cards when the current player folds', async () => 
         ]
       },
       public: {
+        seats: [
+          { userId: 'user-1', seatNo: 1, status: 'FOLDED' },
+          { userId: 'villain-1', seatNo: 2, status: 'ACTIVE' }
+        ],
         hand: { handId: 'hand-7', status: 'TURN', dealerSeatNo: 2 },
         turn: { userId: 'villain-1', startedAt: Date.now() - 2_000, deadlineAt: Date.now() + 18_000 },
         pot: { total: 6, sidePots: [] },
@@ -563,6 +567,8 @@ test('poker v2 dims hero hole cards when the current player folds', async () => 
   });
   await harness.flush();
 
+  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  assert.match(heroSeat.className, /poker-seat--folded/);
   assert.match(harness.elements.pokerHeroCards.className, /poker-hero-cards--folded/);
 });
 

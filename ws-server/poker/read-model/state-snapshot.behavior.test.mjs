@@ -118,6 +118,10 @@ test("buildStateSnapshotPayload projects bootstrapped PREFLOP state from table m
   assert.equal(typeof seatedPayload.public.hand.handId, "string");
   assert.deepEqual(seatedPayload.public.stacks, { user_a: 99, user_b: 98 });
   assert.deepEqual(seatedPayload.public.pot, { total: 3, sidePots: [] });
+  assert.deepEqual(seatedPayload.public.seats, [
+    { userId: "user_a", seatNo: 1, status: "ACTIVE" },
+    { userId: "user_b", seatNo: 2, status: "ACTIVE" }
+  ]);
   assert.deepEqual(seatedPayload.public.legalActions, { seat: 1, actions: ["FOLD", "CALL", "RAISE"] });
   assert.deepEqual(seatedPayload.public.actionConstraints, { toCall: 1, minRaiseTo: 4, maxRaiseTo: 100, maxBetAmount: null });
   assert.deepEqual(seatedPayload.public.lastBettingRoundActionByUserId, {});
@@ -157,6 +161,39 @@ test("buildStateSnapshotPayload serializes last betting-round action labels", ()
   });
 
   assert.deepEqual(payload.public.lastBettingRoundActionByUserId, { user_a: "call", user_b: "raise" });
+});
+
+test("buildStateSnapshotPayload serializes folded seat statuses for live table snapshots", () => {
+  const payload = buildStateSnapshotPayload({
+    userId: "user_a",
+    tableSnapshot: {
+      tableId: "table_folded_seats",
+      roomId: "table_folded_seats",
+      stateVersion: 14,
+      members: [
+        { userId: "user_a", seat: 1 },
+        { userId: "user_b", seat: 2 }
+      ],
+      memberCount: 2,
+      youSeat: 1,
+      seats: [
+        { userId: "user_a", seatNo: 1, status: "FOLDED" },
+        { userId: "user_b", seatNo: 2, status: "ACTIVE" }
+      ],
+      hand: { handId: "h_folded", status: "TURN", round: "TURN", dealerSeatNo: 2 },
+      board: { cards: ["AS", "KD", "QC", "3H"] },
+      pot: { total: 14, sidePots: [] },
+      turn: { userId: "user_b", seat: 2, startedAt: 1710000000000, deadlineAt: 1710000015000 },
+      legalActions: { seat: 1, actions: [] },
+      actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+      private: { holeCards: ["AS", "AD"] }
+    }
+  });
+
+  assert.deepEqual(payload.public.seats, [
+    { userId: "user_a", seatNo: 1, status: "FOLDED" },
+    { userId: "user_b", seatNo: 2, status: "ACTIVE" }
+  ]);
 });
 
 test("buildStateSnapshotPayload includes terminal showdown/settlement fields when present", () => {

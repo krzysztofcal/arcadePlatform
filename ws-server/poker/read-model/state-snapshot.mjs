@@ -40,6 +40,25 @@ function normalizeActionList(actions) {
   return actions.filter((action) => typeof action === "string");
 }
 
+function normalizeSeatRows(seats) {
+  if (!Array.isArray(seats)) {
+    return [];
+  }
+  return seats
+    .filter((seat) => seat && typeof seat.userId === "string" && Number.isInteger(seat.seatNo))
+    .map((seat) => {
+      const normalized = {
+        userId: seat.userId,
+        seatNo: seat.seatNo,
+        status: typeof seat.status === "string" ? seat.status : "ACTIVE"
+      };
+      if (seat.isBot === true) normalized.isBot = true;
+      if (typeof seat.botProfile === "string" && seat.botProfile) normalized.botProfile = seat.botProfile;
+      if (seat.leaveAfterHand === true) normalized.leaveAfterHand = true;
+      return normalized;
+    });
+}
+
 function normalizeStacks(stacks) {
   if (!stacks || typeof stacks !== "object" || Array.isArray(stacks)) {
     return {};
@@ -156,6 +175,7 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId }) {
       board: {
         cards: normalizeCards(tableSnapshot?.board?.cards)
       },
+      seats: normalizeSeatRows(tableSnapshot?.seats),
       stacks: normalizeStacks(tableSnapshot?.stacks),
       pot: {
         total: Number.isFinite(tableSnapshot?.pot?.total) ? tableSnapshot.pot.total : null,
