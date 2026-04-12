@@ -68,6 +68,17 @@ function normalizeStacks(value) {
   return Object.fromEntries(entries.map(([userId, amount]) => [userId, Number(amount)]));
 }
 
+function normalizeLastBettingRoundActionByUserId(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const allowed = new Set(["fold", "check", "call", "raise", "all_in"]);
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([userId, action]) => typeof userId === "string" && userId && typeof action === "string" && allowed.has(action))
+  );
+}
+
 function normalizeMemberSeatRows(value) {
   if (!Array.isArray(value)) {
     return [];
@@ -80,11 +91,15 @@ function normalizeMemberSeatRows(value) {
 function resolvePublicSeats({ statePublic, members, coreState }) {
   const stateSeats = normalizeSeatRows(statePublic?.seats);
   const seatDetailsByUserId = normalizeSeatDetails(coreState?.seatDetailsByUserId);
+  const foldedByUserId = asObject(statePublic?.foldedByUserId) || {};
   const baseSeats = stateSeats.length > 0 ? stateSeats : normalizeMemberSeatRows(members);
   return baseSeats.map((seat) => {
     const details = seatDetailsByUserId[seat.userId] || null;
-    if (!details) return seat;
     const merged = { ...seat };
+    if (foldedByUserId[seat.userId] === true) {
+      merged.status = "FOLDED";
+    }
+    if (!details) return merged;
     if (details.isBot) merged.isBot = true;
     if (details.botProfile) merged.botProfile = details.botProfile;
     if (details.leaveAfterHand) merged.leaveAfterHand = true;
@@ -332,6 +347,7 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
       maxRaiseTo: Number.isFinite(legalInfo.maxRaiseTo) ? legalInfo.maxRaiseTo : null,
       maxBetAmount: Number.isFinite(legalInfo.maxBetAmount) ? legalInfo.maxBetAmount : null
     },
+    lastBettingRoundActionByUserId: normalizeLastBettingRoundActionByUserId(statePublic.lastBettingRoundActionByUserId),
     private: resolvePrivateBranch({ state, userId, youSeat })
   };
 

@@ -84,6 +84,67 @@ test("applyAction second CHECK closes zero-bet FLOP and advances to TURN", () =>
   assert.equal(closed.state.community.length, 4);
   assert.equal(closed.state.currentBet, 0);
   assert.deepEqual(closed.state.actedThisRoundByUserId, { u1: false, u2: false });
+  assert.deepEqual(closed.state.lastBettingRoundActionByUserId, { u1: null, u2: null });
+});
+
+test("applyAction records last betting-round action labels including all-in", () => {
+  const preflopCall = stateFixture({
+    seats: [
+      { userId: "u1", seatNo: 1 },
+      { userId: "u2", seatNo: 2 },
+      { userId: "u3", seatNo: 3 }
+    ],
+    stacks: { u1: 99, u2: 98, u3: 97 },
+    toCallByUserId: { u1: 1, u2: 0, u3: 2 },
+    betThisRoundByUserId: { u1: 1, u2: 2, u3: 0 },
+    actedThisRoundByUserId: { u1: false, u2: false, u3: false },
+    foldedByUserId: { u1: false, u2: false, u3: false },
+    contributionsByUserId: { u1: 1, u2: 2, u3: 0 },
+    holeCardsByUserId: { u1: ["AS", "KD"], u2: ["2C", "2D"], u3: ["3C", "3D"] }
+  });
+  const called = applyAction({ pokerState: preflopCall, userId: "u1", action: "CALL", amount: 0 });
+  assert.equal(called.ok, true);
+  assert.equal(called.state.lastBettingRoundActionByUserId.u1, "call");
+
+  const flopCheck = stateFixture({
+    phase: "FLOP",
+    community: ["3H", "4H", "5H"],
+    communityDealt: 3,
+    deck: ["6H", "7H"],
+    currentBet: 0,
+    turnUserId: "u1",
+    toCallByUserId: { u1: 0, u2: 0 },
+    betThisRoundByUserId: { u1: 0, u2: 0 },
+    actedThisRoundByUserId: { u1: false, u2: false }
+  });
+  const checked = applyAction({ pokerState: flopCheck, userId: "u1", action: "CHECK", amount: 0 });
+  assert.equal(checked.state.lastBettingRoundActionByUserId.u1, "check");
+
+  const foldPending = stateFixture();
+  const folded = applyAction({ pokerState: foldPending, userId: "u1", action: "FOLD", amount: 0 });
+  assert.equal(folded.state.lastBettingRoundActionByUserId.u1, "fold");
+
+  const allInRaise = stateFixture({
+    phase: "TURN",
+    seats: [
+      { userId: "u1", seatNo: 1 },
+      { userId: "u2", seatNo: 2 },
+      { userId: "u3", seatNo: 3 }
+    ],
+    currentBet: 8,
+    lastRaiseSize: 4,
+    turnUserId: "u1",
+    stacks: { u1: 12, u2: 18, u3: 22 },
+    toCallByUserId: { u1: 4, u2: 0, u3: 0 },
+    betThisRoundByUserId: { u1: 4, u2: 8, u3: 8 },
+    actedThisRoundByUserId: { u1: false, u2: true, u3: true },
+    foldedByUserId: { u1: false, u2: false, u3: false },
+    contributionsByUserId: { u1: 4, u2: 8, u3: 8 },
+    holeCardsByUserId: { u1: ["AS", "KD"], u2: ["2C", "2D"], u3: ["3C", "3D"] }
+  });
+  const raisedAllIn = applyAction({ pokerState: allInRaise, userId: "u1", action: "RAISE", amount: 16 });
+  assert.equal(raisedAllIn.ok, true);
+  assert.equal(raisedAllIn.state.lastBettingRoundActionByUserId.u1, "all_in");
 });
 
 test("applyAction RIVER-closing action settles hand with showdown metadata", () => {
