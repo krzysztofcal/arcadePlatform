@@ -921,6 +921,11 @@
     return err;
   }
 
+  function isStaleSessionError(err){
+    var code = err && (err.code || err.message) ? String(err.code || err.message) : '';
+    return code === 'STALE_SESSION' || code === 'session_rebound';
+  }
+
   function getGameplayWsSender(client, methodName, action, fallbackMessage){
     if (!client || typeof client.isReady !== 'function' || !client.isReady()) return null;
     if (typeof client[methodName] !== 'function') return null;
@@ -1763,6 +1768,7 @@
     var pendingLeaveTimer = null;
     var pendingStartHandTimer = null;
     var pendingActTimer = null;
+    var pendingLeaveRetryAfterReconnect = false;
     var postActSnapshotTimer = null;
     var joinPending = false;
     var leavePending = false;
@@ -2648,6 +2654,14 @@
             reason: data && data.reason ? data.reason : null
           });
           if (status === 'auth_ok'){
+            if (pendingLeaveRetryAfterReconnect){
+              leaveTable().catch(function(err){
+                pendingLeaveRetryAfterReconnect = false;
+                clearLeavePending();
+                setActionError('leave', WS_LEAVE_ENDPOINT, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrLeave', 'Failed to leave'));
+              });
+              return;
+            }
             maybeAutoJoin();
           }
         },
@@ -2661,6 +2675,10 @@
             code: info && info.code ? info.code : 'unknown_error',
             detail: info && info.detail ? info.detail : null
           });
+          if (info && info.code === 'STALE_SESSION' && pendingLeaveRetryAfterReconnect){
+            bootstrapWsAfterBaseline('stale_session_leave_retry');
+            return;
+          }
           startPollingFallback(info && info.code ? info.code : 'protocol_error');
         }
       });
@@ -4241,6 +4259,7 @@
           return;
         }
         clearLeavePending();
+        pendingLeaveRetryAfterReconnect = false;
         setError(errorEl, null);
         if (!isPageActive()) return;
         applyOptimisticLeaveCleanup();
@@ -4262,6 +4281,14 @@
           });
           return;
         }
+        if (isStaleSessionError(err) && currentUserId && !pendingLeaveRetryAfterReconnect){
+          pendingLeaveRetryAfterReconnect = true;
+          pauseLeavePending();
+          stopWsClient();
+          bootstrapWsAfterBaseline('leave_stale_session_retry');
+          return;
+        }
+        pendingLeaveRetryAfterReconnect = false;
         clearLeavePending();
         klog('poker_leave_error', { tableId: tableId, error: err.message || err.code });
         setActionError('leave', WS_LEAVE_ENDPOINT, err.code || 'request_failed', err.message || t('pokerErrLeave', 'Failed to leave'));

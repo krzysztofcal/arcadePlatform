@@ -118,3 +118,89 @@ test('poker UI WS smoke sends leave over WS and waits for the live snapshot with
 
   assert.equal(harness.fetchState.getCalls, getCallsBeforeLeave, 'WS leave snapshot must stay off the HTTP reload path');
 });
+
+test('poker UI retries leave after stale session reconnect and then returns to lobby', async () => {
+  var leavePayloads = [];
+  var snapshotHandler = null;
+  var wsCreateCount = 0;
+  var harness = createPokerTableHarness({
+    responses: [
+      {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxPlayers: 6,
+        seats: [
+          { seatNo: 1, userId: 'user-1', status: 'ACTIVE', stack: 150 },
+          { seatNo: 2, userId: 'bot-2', status: 'ACTIVE', stack: 150 }
+        ],
+        legalActions: [],
+        actionConstraints: {},
+        state: {
+          version: 1,
+          state: {
+            phase: 'PREFLOP',
+            pot: 15,
+            community: [],
+            stacks: { 'user-1': 150, 'bot-2': 150 },
+            turnUserId: 'user-1',
+            handId: 'hand-1'
+          }
+        }
+      }
+    ],
+    wsFactory(createOptions){
+      wsCreateCount += 1;
+      snapshotHandler = createOptions.onSnapshot;
+      return {
+        start(){
+          Promise.resolve().then(function(){
+            if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
+          });
+        },
+        destroy(){},
+        isReady(){ return true; },
+        sendLeave(payload){
+          leavePayloads.push(payload);
+          if (leavePayloads.length === 1) {
+            var err = new Error('STALE_SESSION');
+            err.code = 'STALE_SESSION';
+            return Promise.reject(err);
+          }
+          return Promise.resolve({ ok: true });
+        }
+      };
+    }
+  });
+
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  snapshotHandler({
+    kind: 'table_state',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      seats: [
+        { seatNo: 1, userId: 'user-1', status: 'ACTIVE' },
+        { seatNo: 2, userId: 'bot-2', status: 'ACTIVE' }
+      ],
+      stacks: { 'user-1': 150, 'bot-2': 150 },
+      authoritativeMembers: [
+        { userId: 'user-1', seat: 1 },
+        { userId: 'bot-2', seat: 2 }
+      ],
+      hand: { status: 'PREFLOP', handId: 'hand-1' },
+      turn: { userId: 'user-1' },
+      legalActions: { actions: ['FOLD', 'CALL'] }
+    }
+  });
+  await harness.flush();
+
+  harness.elements.pokerLeave.click();
+  await harness.flush();
+  await harness.flush();
+
+  assert.equal(leavePayloads.length, 2, 'stale session leave should retry once after reconnect');
+  assert.equal(wsCreateCount, 2, 'stale session leave should recreate the WS client once');
+  assert.equal(harness.windowLocation.href, '/poker/', 'successful leave retry should navigate back to poker lobby');
+});
