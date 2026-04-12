@@ -568,6 +568,11 @@
     return map;
   }
 
+  function navigateToPokerLobby(){
+    if (!window || !window.location) return;
+    window.location.href = '/poker/';
+  }
+
   function shouldShowTurnActions(params){
     var phaseValue = params && params.phase;
     var phase = typeof phaseValue === 'string' ? phaseValue.trim().toUpperCase() : '';
@@ -4239,6 +4244,7 @@
         setError(errorEl, null);
         if (!isPageActive()) return;
         applyOptimisticLeaveCleanup();
+        navigateToPokerLobby();
       } catch (err){
         if (isAbortError(err)){
           pauseLeavePending();

@@ -228,6 +228,7 @@ export function createPokerTableHarness(options = {}){
   return {
     elements,
     fetchState,
+    windowLocation: sandbox.window.location,
     wsCreates,
     wsDestroys,
     logs,

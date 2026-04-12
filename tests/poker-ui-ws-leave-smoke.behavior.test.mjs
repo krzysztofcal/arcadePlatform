@@ -86,6 +86,7 @@ test('poker UI WS smoke sends leave over WS and waits for the live snapshot with
   assert.equal(leavePayloads.length, 1, 'smoke leave should send one WS leave payload');
   assert.equal(harness.fetchState.leaveCalls, 0, 'smoke leave should not use the HTTP leave path');
   assert.equal(harness.fetchState.getCalls, getCallsBeforeLeave, 'WS leave must not trigger HTTP reload');
+  assert.equal(harness.windowLocation.href, '/poker/', 'accepted leave should navigate back to poker lobby');
   assert.equal(harness.elements.pokerYourStack.textContent, '-', 'accepted leave should clear the current user stack immediately');
   const seatOneCard = seatCardFor(harness.elements.pokerSeatsGrid, 1);
   const seatOneUserNode = seatOneCard && seatOneCard.children ? seatOneCard.children[1] : null;

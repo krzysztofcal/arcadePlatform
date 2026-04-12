@@ -1462,6 +1462,11 @@
     els.menuToggle.setAttribute('aria-expanded', 'false');
   }
 
+  function navigateToLobby(){
+    if (!window || !window.location) return;
+    window.location.href = '/poker/';
+  }
+
   function bindMenu(){
     if (!els.menuToggle || !els.menuPanel) return;
     els.menuToggle.addEventListener('click', function(){
@@ -1508,6 +1513,7 @@
       sendCommand('sendLeave', { tableId: state.tableId }).then(function(){
         state.statusText = 'Leave accepted';
         renderInfoPanel();
+        navigateToLobby();
       }).catch(function(err){
         setError(err && err.message ? err.message : 'Failed to leave');
       });

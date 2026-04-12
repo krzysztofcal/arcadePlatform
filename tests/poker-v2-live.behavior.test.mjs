@@ -195,6 +195,7 @@ async function flush(){
   return {
     elements,
     logs,
+    windowLocation: sandbox.window.location,
     joinPayloads,
     actPayloads,
     startPayloads,
@@ -309,6 +310,7 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(JSON.stringify(harness.startPayloads[0]), JSON.stringify({ tableId: 'table-1' }));
   assert.equal(harness.leavePayloads.length, 1);
   assert.equal(JSON.stringify(harness.leavePayloads[0]), JSON.stringify({ tableId: 'table-1' }));
+  assert.equal(harness.windowLocation.href, '/poker/');
 });
 
 test('poker v2 shows compact call amount in the primary action label', async () => {
