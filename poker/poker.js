@@ -487,6 +487,33 @@
     return stackAmount;
   }
 
+  function isContestableOpponentSeat(seat, currentUserId){
+    if (!seat || typeof seat.userId !== 'string' || !seat.userId) return false;
+    if (seat.userId === currentUserId) return false;
+    if (typeof seat.status === 'string' && /FOLD/i.test(seat.status)) return false;
+    return true;
+  }
+
+  function resolveMaxContestableOpponentBehindAmount(data, currentUserId){
+    if (!data || !currentUserId) return null;
+    var seats = Array.isArray(data.seats) ? data.seats : [];
+    var stateObj = data && data.state ? data.state : null;
+    var gameState = stateObj && stateObj.state ? stateObj.state : null;
+    var stacks = gameState && typeof gameState.stacks === 'object' && !Array.isArray(gameState.stacks) ? gameState.stacks : null;
+    if (!stacks) return null;
+    var max = null;
+    seats.forEach(function(seat){
+      if (!isContestableOpponentSeat(seat, currentUserId)) return;
+      var raw = stacks[seat.userId];
+      var amount = parseInt(raw, 10);
+      if (!isFinite(amount)) return;
+      amount = Math.trunc(amount);
+      if (amount <= 0) return;
+      max = max == null ? amount : Math.max(max, amount);
+    });
+    return max;
+  }
+
   function resolveAllInPlan(allowedInfo, data, userId){
     var info = allowedInfo || {};
     var allowed = info.allowed;
@@ -495,19 +522,29 @@
     if (stackAmount == null || stackAmount < 1) return null;
     var constraints = normalizeActionConstraints(info.constraints);
     var toCall = constraints.toCall != null ? Math.max(0, Math.trunc(constraints.toCall)) : null;
+    var contestableOpponentBehind = resolveMaxContestableOpponentBehindAmount(data, userId);
+    var cappedTotalContribution = contestableOpponentBehind == null
+      ? stackAmount
+      : Math.max(0, Math.min(stackAmount, (toCall || 0) + Math.trunc(contestableOpponentBehind)));
     if (allowed.has('CALL') && toCall != null && toCall > 0 && stackAmount <= toCall){
       return { type: 'CALL', amount: null };
     }
     if (allowed.has('RAISE')){
       var raiseTo = constraints.maxRaiseTo != null ? Math.trunc(constraints.maxRaiseTo) : null;
       if (raiseTo != null && raiseTo >= 1){
-        return { type: 'RAISE', amount: raiseTo };
+        var minRaiseTo = constraints.minRaiseTo != null ? Math.max(1, Math.trunc(constraints.minRaiseTo)) : 1;
+        var currentUserBet = Math.max(0, raiseTo - stackAmount);
+        var cappedRaiseTo = Math.min(raiseTo, Math.max(currentUserBet + cappedTotalContribution, minRaiseTo));
+        if (toCall != null && toCall > 0 && cappedRaiseTo <= currentUserBet + toCall){
+          return { type: 'CALL', amount: null };
+        }
+        return { type: 'RAISE', amount: cappedRaiseTo };
       }
     }
     if (allowed.has('BET')){
       var betAmount = constraints.maxBetAmount != null ? Math.trunc(constraints.maxBetAmount) : stackAmount;
       if (betAmount >= 1){
-        return { type: 'BET', amount: betAmount };
+        return { type: 'BET', amount: Math.max(1, Math.min(betAmount, cappedTotalContribution || betAmount)) };
       }
     }
     return null;
