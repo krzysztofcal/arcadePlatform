@@ -1350,9 +1350,9 @@ wss.on("connection", (ws) => {
       sendError(ws, connState, {
         code: "STALE_SESSION",
         message: "socket no longer owns session",
-        requestId: frame.requestId ?? null,
-        closeCode: SESSION_REBOUND_CLOSE_CODE
+        requestId: frame.requestId ?? null
       });
+      setImmediate(() => invalidateSocketSession(ws, { reason: "session_rebound" }));
       return;
     }
     touchSession(connState.session, nowTs);
