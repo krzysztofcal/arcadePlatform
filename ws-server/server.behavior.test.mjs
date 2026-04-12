@@ -1199,9 +1199,6 @@ test("valid token returns authOk and unlocks protected messages", async () => {
 
 
 
-
-
-
 test("snapshot view keeps table memberCount consistent with members after actor disconnect", async () => {
   const secret = "test-secret";
   const snapshotToken = makeHs256Jwt({ secret, sub: "snapshot_consistency_user" });

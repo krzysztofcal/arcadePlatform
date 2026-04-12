@@ -85,6 +85,7 @@
   var turnClockTimer = null;
   var revealDismissTimer = null;
   var authUnsubscribe = null;
+  var pendingLeaveRetryAfterReconnect = false;
   var renderedSeatAnchors = {};
   var renderedSeatSlots = {};
   var renderedSeatAvatars = {};
@@ -1467,6 +1468,30 @@
     window.location.href = '/poker/';
   }
 
+  function isStaleSessionError(error){
+    var code = error && (error.code || error.message) ? String(error.code || error.message) : '';
+    return code === 'STALE_SESSION' || code === 'session_rebound';
+  }
+
+  function leaveAndReturnToLobby(){
+    return sendCommand('sendLeave', { tableId: state.tableId }).then(function(){
+      pendingLeaveRetryAfterReconnect = false;
+      state.statusText = 'Leave accepted';
+      renderInfoPanel();
+      navigateToLobby();
+    }).catch(function(err){
+      if (isStaleSessionError(err) && currentAccessToken && !pendingLeaveRetryAfterReconnect){
+        pendingLeaveRetryAfterReconnect = true;
+        state.statusText = LIVE_STATUS_COPY.connecting;
+        renderInfoPanel();
+        restartLiveMode(currentAccessToken);
+        return;
+      }
+      pendingLeaveRetryAfterReconnect = false;
+      setError(err && err.message ? err.message : 'Failed to leave');
+    });
+  }
+
   function bindMenu(){
     if (!els.menuToggle || !els.menuPanel) return;
     els.menuToggle.addEventListener('click', function(){
@@ -1510,13 +1535,7 @@
     });
     if (els.leaveBtn) els.leaveBtn.addEventListener('click', function(){
       setError('');
-      sendCommand('sendLeave', { tableId: state.tableId }).then(function(){
-        state.statusText = 'Leave accepted';
-        renderInfoPanel();
-        navigateToLobby();
-      }).catch(function(err){
-        setError(err && err.message ? err.message : 'Failed to leave');
-      });
+      leaveAndReturnToLobby();
     });
     if (els.startBtn) els.startBtn.addEventListener('click', function(){
       setError('');
@@ -1639,6 +1658,10 @@
           state.statusText = LIVE_STATUS_COPY.live;
           state.errorText = '';
           render();
+          if (pendingLeaveRetryAfterReconnect){
+            leaveAndReturnToLobby();
+            return;
+          }
           autoJoinSeat();
         } else if (status === 'failed'){
           state.wsReady = false;
@@ -1671,6 +1694,10 @@
         state.statusText = LIVE_STATUS_COPY.error;
         if (info && info.code === 'missing_access_token'){
           applySignedOutState();
+          return;
+        }
+        if (info && info.code === 'STALE_SESSION' && currentAccessToken){
+          restartLiveMode(currentAccessToken);
           return;
         }
         setError(info && info.code ? info.code : 'Protocol error');

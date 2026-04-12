@@ -100,7 +100,11 @@ function createHarness(options = {}){
     sendJoin(payload){ joinPayloads.push(payload); return Promise.resolve({ ok: true, seatNo: payload.seatNo || 1 }); },
     sendAct(payload){ actPayloads.push(payload); return Promise.resolve({ ok: true }); },
     sendStartHand(payload){ startPayloads.push(payload); return Promise.resolve({ ok: true }); },
-    sendLeave(payload){ leavePayloads.push(payload); return Promise.resolve({ ok: true }); }
+    sendLeave(payload){
+      leavePayloads.push(payload);
+      if (typeof options.sendLeave === 'function') return options.sendLeave(payload, { attempt: leavePayloads.length });
+      return Promise.resolve({ ok: true });
+    }
   };
 
   const intervalTimers = [];
@@ -1169,4 +1173,46 @@ test('poker v2 waits for auth before enabling join and starts auth watch when si
   assert.equal(harness.elements.pokerV2JoinBtn.hidden, false);
   assert.equal(harness.elements.pokerV2JoinBtn.disabled, true);
   assert.equal(harness.getIntervalCount(), 1, 'signed-out mode should start auth polling for later login');
+});
+
+test('poker v2 retries leave once after stale session reconnect', async () => {
+  const harness = createHarness({
+    sendLeave(_payload, ctx){
+      if (ctx.attempt === 1) {
+        const err = new Error('STALE_SESSION');
+        err.code = 'STALE_SESSION';
+        return Promise.reject(err);
+      }
+      return Promise.resolve({ ok: true });
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        seats: [{ userId: 'user-1', seatNo: 1, status: 'ACTIVE' }],
+        hand: { handId: 'hand-leave', status: 'TURN', dealerSeatNo: 1 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 4, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CALL'] }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  harness.elements.pokerV2LeaveBtn.click();
+  await harness.flush();
+  await harness.flush();
+
+  assert.equal(harness.leavePayloads.length, 2);
+  assert.equal(harness.windowLocation.href, '/poker/');
 });
