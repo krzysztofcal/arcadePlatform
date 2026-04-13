@@ -119,6 +119,86 @@ test('poker UI WS smoke sends leave over WS and waits for the live snapshot with
   assert.equal(harness.fetchState.getCalls, getCallsBeforeLeave, 'WS leave snapshot must stay off the HTTP reload path');
 });
 
+test('poker UI queued leave navigates to lobby immediately without waiting for snapshot removal', async () => {
+  var leavePayloads = [];
+  var snapshotHandler = null;
+  var harness = createPokerTableHarness({
+    responses: [
+      {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxPlayers: 6,
+        seats: [
+          { seatNo: 1, userId: 'user-1', status: 'ACTIVE', stack: 96 },
+          { seatNo: 2, userId: 'bot-2', status: 'ACTIVE', stack: 104 }
+        ],
+        legalActions: [],
+        actionConstraints: {},
+        state: {
+          version: 1,
+          state: {
+            phase: 'TURN',
+            pot: 10,
+            community: ['AS', 'KD', 'QC', '3H'],
+            stacks: { 'user-1': 96, 'bot-2': 104 },
+            turnUserId: 'bot-2',
+            handId: 'hand-immediate-leave'
+          }
+        }
+      }
+    ],
+    wsFactory(createOptions){
+      snapshotHandler = createOptions.onSnapshot;
+      return {
+        start(){
+          Promise.resolve().then(function(){
+            if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
+          });
+        },
+        destroy(){},
+        isReady(){ return true; },
+        sendLeaveQueued(payload, requestId){
+          leavePayloads.push({ payload: payload, requestId: requestId });
+          return requestId || 'leave-classic-queued';
+        }
+      };
+    }
+  });
+
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  var getCallsBeforeLeave = harness.fetchState.getCalls;
+
+  snapshotHandler({
+    kind: 'table_state',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      seats: [
+        { seatNo: 1, userId: 'user-1', status: 'ACTIVE' },
+        { seatNo: 2, userId: 'bot-2', status: 'ACTIVE' }
+      ],
+      stacks: { 'user-1': 96, 'bot-2': 104 },
+      authoritativeMembers: [
+        { userId: 'user-1', seat: 1 },
+        { userId: 'bot-2', seat: 2 }
+      ],
+      hand: { status: 'TURN', handId: 'hand-immediate-leave' },
+      turn: { userId: 'bot-2' },
+      legalActions: { seat: 1, actions: ['FOLD'] }
+    }
+  });
+  await harness.flush();
+
+  harness.elements.pokerLeave.click();
+  await harness.flush();
+
+  assert.equal(leavePayloads.length, 1, 'immediate leave should queue one WS leave payload');
+  assert.equal(harness.fetchState.leaveCalls, 0, 'immediate leave should stay on the WS path');
+  assert.equal(harness.fetchState.getCalls, getCallsBeforeLeave, 'immediate leave should not trigger HTTP reload');
+  assert.equal(harness.windowLocation.href, '/poker/', 'queued leave should navigate back to the poker lobby immediately');
+});
+
 test('poker UI retries leave after stale session reconnect and then returns to lobby', async () => {
   var leavePayloads = [];
   var snapshotHandler = null;

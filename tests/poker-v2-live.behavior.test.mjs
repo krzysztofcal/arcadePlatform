@@ -106,6 +106,15 @@ function createHarness(options = {}){
       return Promise.resolve({ ok: true });
     }
   };
+  if (typeof options.sendLeaveQueued === 'function' || options.enableQueuedLeave === true) {
+    wsClient.sendLeaveQueued = function(payload, requestId){
+      leavePayloads.push(payload);
+      if (typeof options.sendLeaveQueued === 'function') {
+        return options.sendLeaveQueued(payload, { attempt: leavePayloads.length, requestId });
+      }
+      return requestId || ('leave_queued_' + leavePayloads.length);
+    };
+  }
 
   const intervalTimers = [];
   const timeoutTimers = [];
@@ -1214,6 +1223,43 @@ test('poker v2 retries leave once after stale session reconnect', async () => {
   await harness.flush();
 
   assert.equal(harness.leavePayloads.length, 2);
+  assert.equal(harness.windowLocation.href, '/poker/');
+});
+
+test('poker v2 queued leave navigates to lobby immediately without waiting for leave ack', async () => {
+  const harness = createHarness({
+    sendLeaveQueued(_payload, ctx){
+      return ctx.requestId || 'leave-v2-queued';
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        seats: [{ userId: 'user-1', seatNo: 1, status: 'ACTIVE' }, { userId: 'bot-2', seatNo: 2, status: 'ACTIVE', isBot: true }],
+        hand: { handId: 'hand-immediate-leave', status: 'TURN', dealerSeatNo: 1 },
+        turn: { userId: 'bot-2', deadlineAt: Date.now() + 5000 },
+        pot: { total: 10, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD'] },
+        stacks: { 'user-1': 96, 'bot-2': 104 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  harness.elements.pokerV2LeaveBtn.click();
+  await harness.flush();
+
+  assert.equal(harness.leavePayloads.length, 1);
   assert.equal(harness.windowLocation.href, '/poker/');
 });
 

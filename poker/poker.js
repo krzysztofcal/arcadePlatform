@@ -943,6 +943,14 @@
     };
   }
 
+  function getGameplayWsQueuedSender(client, methodName){
+    if (!client || typeof client.isReady !== 'function' || !client.isReady()) return null;
+    if (typeof client[methodName] !== 'function') return null;
+    return function(payload, requestId){
+      return client[methodName](payload, requestId);
+    };
+  }
+
   function resolveGameplayWsSender(client, methodName, action, fallbackMessage){
     var sender = getGameplayWsSender(client, methodName, action, fallbackMessage);
     if (sender) return sender;
@@ -4323,6 +4331,29 @@
       }
     }
 
+    function queueLeaveAndNavigateImmediately(requestIdOverride){
+      var leaveSender = getGameplayWsQueuedSender(wsClient, 'sendLeaveQueued');
+      if (!leaveSender) return false;
+      var resolved = resolveRequestId(pendingLeaveRequestId, requestIdOverride);
+      if (resolved.nextPending){
+        pendingLeaveRequestId = normalizeRequestId(resolved.nextPending);
+        pendingLeaveRetries = 0;
+        pendingLeaveStartedAt = null;
+      } else if (!pendingLeaveRequestId) {
+        pendingLeaveRequestId = normalizeRequestId(resolved.requestId);
+      }
+      var leaveRequestId = normalizeRequestId(resolved.requestId);
+      leaveSender({ tableId: tableId, requestId: leaveRequestId }, leaveRequestId);
+      clearLeavePending();
+      pendingLeaveRetryAfterReconnect = false;
+      pendingLeaveNavigation = false;
+      setError(errorEl, null);
+      if (!isPageActive()) return true;
+      applyOptimisticLeaveCleanup();
+      navigateToPokerLobby();
+      return true;
+    }
+
     function handleVisibility(){
       if (document.visibilityState === 'hidden'){
         stopPolling();
@@ -4377,6 +4408,11 @@
       if (joinPending || leavePending) return;
       klog('poker_leave_click', { tableId: tableId, hasToken: !!state.token });
       setError(errorEl, null);
+      try {
+        if (queueLeaveAndNavigateImmediately()) return;
+      } catch (err){
+        klog('poker_leave_queue_error', { tableId: tableId, error: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
+      }
       leaveTable().catch(function(err){
         if (isAbortError(err)){
           pauseLeavePending();

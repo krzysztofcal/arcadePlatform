@@ -1447,6 +1447,17 @@
     return wsClient[methodName](payload || {});
   }
 
+  function queueLeaveAndNavigateImmediately(){
+    if (!wsClient || typeof wsClient.sendLeaveQueued !== 'function' || !isWsReady()) return false;
+    wsClient.sendLeaveQueued({ tableId: state.tableId });
+    pendingLeaveRetryAfterReconnect = false;
+    pendingLeaveNavigation = false;
+    state.statusText = 'Leaving...';
+    renderInfoPanel();
+    navigateToLobby();
+    return true;
+  }
+
   function handleAction(actionType, amount){
     if (!actionType) return Promise.resolve();
     var payload = { handId: state.handId || null, action: actionType };
@@ -1503,6 +1514,9 @@
 
   function leaveAndReturnToLobby(){
     pendingLeaveNavigation = true;
+    try {
+      if (queueLeaveAndNavigateImmediately()) return Promise.resolve({ ok: true, queued: true });
+    } catch (_err){}
     return sendCommand('sendLeave', { tableId: state.tableId }).then(function(){
       pendingLeaveRetryAfterReconnect = false;
       pendingLeaveNavigation = false;

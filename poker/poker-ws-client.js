@@ -111,6 +111,13 @@
       });
     }
 
+    function queueCommand(type, payload, requestId){
+      if (!authOk || !ws || ws.readyState !== 1) throw createError('ws_unavailable');
+      var rid = send(type, payload, requestId || null);
+      if (!rid) throw createError('ws_unavailable');
+      return rid;
+    }
+
     function isSnapshotFrameType(type){
       return type === 'table_state' || type === 'stateSnapshot' || type === 'statePatch';
     }
@@ -235,6 +242,7 @@
       sendAct: function(payload, requestId){ return sendCommand('act', payload || {}, requestId); },
       sendJoin: function(payload, requestId){ return sendCommand('join', payload || { tableId: tableId }, requestId); },
       sendLeave: function(payload, requestId){ return sendCommand('leave', payload || { tableId: tableId }, requestId); },
+      sendLeaveQueued: function(payload, requestId){ return queueCommand('leave', payload || { tableId: tableId }, requestId); },
       sendStartHand: function(payload, requestId){ return sendCommand('start_hand', payload || { tableId: tableId }, requestId); }
     };
   }
