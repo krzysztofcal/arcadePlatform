@@ -411,7 +411,7 @@ function sendFrame(ws, frame) {
   }
 }
 
-function invalidateSocketSession(ws, { reason = "session_rebound", closeCode = SESSION_REBOUND_CLOSE_CODE } = {}) {
+function invalidateSocketSession(ws, { reason = "session_rebound", closeCode = SESSION_REBOUND_CLOSE_CODE, send_stale = true } = {}) {
   if (!ws) {
     return;
   }
@@ -426,6 +426,28 @@ function invalidateSocketSession(ws, { reason = "session_rebound", closeCode = S
   if (staleConnState && typeof staleConnState === "object") {
     staleConnState.sessionInvalidated = true;
     staleConnState.sessionInvalidatedReason = reason;
+  }
+
+  // If caller opted out of sending a STALE_SESSION frame here, just close the socket
+  // deterministically without emitting a second STALE frame (the caller may have
+  // already emitted one with the relevant requestId).
+  if (!send_stale) {
+    try {
+      if (ws.readyState === WebSocket.OPEN) {
+        try { ws.close(closeCode, reason); } catch (_err) {}
+        return;
+      }
+
+      if (ws.readyState === WebSocket.CONNECTING) {
+        try { ws.close(closeCode, reason); } catch (_e) {}
+        return;
+      }
+
+      return;
+    } catch (_err) {
+      try { ws.close(closeCode, reason); } catch (_e) {}
+      return;
+    }
   }
 
   // Ensure STALE_SESSION is delivered to the socket before closing it.
@@ -1406,7 +1428,7 @@ wss.on("connection", (ws) => {
         try {
           klogSafe("ws_invalidate_before_close", { sessionId: connState.session.sessionId, socketRemoteAddr: ws && ws._socket && ws._socket.remoteAddress ? ws._socket.remoteAddress : null });
         } catch (_err) {}
-        invalidateSocketSession(ws, { reason: "session_rebound" });
+        invalidateSocketSession(ws, { reason: "session_rebound", send_stale: false });
       });
       return;
     }
