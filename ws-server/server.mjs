@@ -443,7 +443,11 @@ function invalidateSocketSession(ws, { reason = "session_rebound", closeCode = S
         // Attempt to send error and close in callback so the frame is flushed first.
         ws.send(JSON.stringify(errorFrame), (err) => {
           try {
-            ws.close(closeCode, reason);
+            // Give a short, deterministic grace period for the peer to receive and process
+            // the error frame before closing the socket. This improves test determinism.
+            setTimeout(() => {
+              try { ws.close(closeCode, reason); } catch (_err) {}
+            }, 25);
           } catch (_err) {}
         });
       } catch (_err) {
