@@ -258,10 +258,11 @@ for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
     phase: "FLOP",
     handId: "hand-bots-only-leave",
     handSeed: "seed-bots-only-leave",
-    seats: [{ userId, seatNo: 1 }, { userId: "bot-1", seatNo: 2, isBot: true }],
-    stacks: { [userId]: 48, "bot-1": 52 },
+    seats: [{ userId, seatNo: 1 }, { userId: "bot-1", seatNo: 2, isBot: true }, { userId: "bot-2", seatNo: 3, isBot: true }],
+    handSeats: [{ userId, seatNo: 1 }, { userId: "bot-1", seatNo: 2, isBot: true }],
+    stacks: { [userId]: 48, "bot-1": 52, "bot-2": 80 },
     leftTableByUserId: {},
-    foldedByUserId: { [userId]: false, "bot-1": false },
+    foldedByUserId: { [userId]: false, "bot-1": false, "bot-2": false },
     actedThisRoundByUserId: { [userId]: true, "bot-1": false },
     betThisRoundByUserId: { [userId]: 2, "bot-1": 2 },
     toCallByUserId: { [userId]: 0, "bot-1": 0 },
@@ -296,10 +297,11 @@ for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
     responseFinalState: {
       ...ctx.state.value,
       phase: "HAND_DONE",
-      seats: [{ userId, seatNo: 1 }, { userId: "bot-1", seatNo: 2, isBot: true }],
-      stacks: { [userId]: 48, "bot-1": 52 },
+      seats: [{ userId, seatNo: 1 }, { userId: "bot-1", seatNo: 2, isBot: true }, { userId: "bot-2", seatNo: 3, isBot: true }],
+      handSeats: [{ userId, seatNo: 1 }, { userId: "bot-1", seatNo: 2, isBot: true }],
+      stacks: { [userId]: 48, "bot-1": 52, "bot-2": 80 },
       leftTableByUserId: { [userId]: true },
-      foldedByUserId: { [userId]: true, "bot-1": false },
+      foldedByUserId: { [userId]: true, "bot-1": false, "bot-2": false },
       turnUserId: null,
     },
     loopVersion: ctx.state.version,
@@ -320,7 +322,6 @@ for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
 
 {
   const ctx = makeMocks();
-  let requiredUserIdsSeen = null;
   ctx.state.value = {
     tableId,
     phase: "TURN",
@@ -352,40 +353,22 @@ for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
   ctx.mocks.buildSeatBotMap = (rows) => rows.reduce((acc, row) => ({ ...acc, [row.user_id]: row.is_bot === true }), {});
   ctx.mocks.isBotTurn = (turnUserId, seatBotMap) => !!seatBotMap?.[turnUserId];
   ctx.mocks.hasParticipatingHumanInHand = () => false;
-  ctx.mocks.loadHoleCardsByUserId = async (_tx, args) => {
-    requiredUserIdsSeen = Array.isArray(args.requiredUserIds) ? args.requiredUserIds.slice() : null;
-    return {
-      holeCardsByUserId: {
-        "bot-1": [{ r: "A", s: "S" }, { r: "K", s: "S" }],
-      }
-    };
+  ctx.mocks.loadHoleCardsByUserId = async () => {
+    throw new Error("loadHoleCardsByUserId should not run for already folded leave");
   };
-  ctx.mocks.runBotAutoplayLoop = async () => ({
-    responseFinalState: {
-      ...ctx.state.value,
-      phase: "SETTLED",
-      seats: [{ userId, seatNo: 1 }, { userId: "bot-1", seatNo: 2, isBot: true }],
-      stacks: { [userId]: 47, "bot-1": 53 },
-      leftTableByUserId: { [userId]: true },
-      foldedByUserId: { [userId]: true, "bot-1": false },
-      turnUserId: null,
-      showdown: { handId: "hand-fold-then-leave", winners: ["bot-1"], reason: "computed", potsAwarded: [], potAwardedTotal: 6 },
-      handSettlement: { handId: "hand-fold-then-leave", settledAt: "2026-04-13T00:00:00.000Z", payouts: { "bot-1": 6 } },
-    },
-    loopVersion: ctx.state.version,
-    botActionCount: 2,
-    botStopReason: "completed",
-  });
+  ctx.mocks.runBotAutoplayLoop = async () => {
+    throw new Error("runBotAutoplayLoop should not run for already folded leave");
+  };
   const executePokerLeave = loadExecutePokerLeave(ctx.mocks);
   const result = await executePokerLeave({ beginSql: ctx.beginSql, tableId, userId, requestId: "r8", includeState: true, klog: () => {} });
   assert.equal(result.ok, true);
   assert.equal(result.cashedOut, 47);
-  assert.deepEqual(requiredUserIdsSeen, ["bot-1"]);
   assert.equal(ctx.calls.cashouts, 1);
   assert.equal(ctx.calls.deleteSeat, 1);
-  assert.equal(ctx.calls.closeTable, 1);
+  assert.equal(ctx.calls.closeTable, 0);
+  assert.equal(result.state.state.phase, "TURN");
   assert.equal(result.state.state.seats.some((seat) => seat.userId === userId), false);
-  assert.equal(result.state.state.handSettlement.payouts["bot-1"], 6);
+  assert.equal(result.state.state.stacks[userId], undefined);
 }
 
 console.log("poker-domain leave behavior test passed");

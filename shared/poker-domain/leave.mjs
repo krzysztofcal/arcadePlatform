@@ -199,6 +199,24 @@ const normalizeSeatOrderFromActiveSeatRows = (activeSeatRows) => {
   return [...new Set(orderedUserIds)];
 };
 
+const normalizeSeatOrderFromState = (seats) => {
+  if (!Array.isArray(seats)) return [];
+  const orderedSeats = seats
+    .filter((seat) => Number.isInteger(Number(seat?.seatNo)) && typeof seat?.userId === "string" && seat.userId.trim())
+    .slice()
+    .sort((a, b) => Number(a.seatNo) - Number(b.seatNo));
+  const userIds = orderedSeats.map((seat) => seat.userId);
+  return [...new Set(userIds)];
+};
+
+const resolveHandSeatUserIdsInOrder = (state, fallbackSeatUserIdsInOrder) => {
+  const handSeatUserIds = normalizeSeatOrderFromState(Array.isArray(state?.handSeats) ? state.handSeats : []);
+  if (handSeatUserIds.length > 0) return handSeatUserIds;
+  const stateSeatUserIds = normalizeSeatOrderFromState(Array.isArray(state?.seats) ? state.seats : []);
+  if (stateSeatUserIds.length > 0) return stateSeatUserIds;
+  return Array.isArray(fallbackSeatUserIdsInOrder) ? [...new Set(fallbackSeatUserIdsInOrder)] : [];
+};
+
 const selectRequiredHoleCardUserIds = (state, seatUserIdsInOrder) =>
   (Array.isArray(seatUserIdsInOrder) ? seatUserIdsInOrder : []).filter((candidateUserId) => {
     if (typeof candidateUserId !== "string" || !candidateUserId.trim()) return false;
@@ -243,14 +261,18 @@ const maybeBuildPrivateStateForBotAutoplay = async ({ tx, tableId, state, seatUs
   if (!Number.isInteger(state?.communityDealt) || state.communityDealt < 0 || state.communityDealt > 5) {
     return { ok: false, reason: "invalid_community_dealt" };
   }
+  const resolvedSeatUserIdsInOrder = resolveHandSeatUserIdsInOrder(state, seatUserIdsInOrder);
+  if (resolvedSeatUserIdsInOrder.length === 0) {
+    return { ok: false, reason: "invalid_hand_seats" };
+  }
 
   let holeCardsByUserId;
   try {
-    const requiredUserIds = selectRequiredHoleCardUserIds(state, seatUserIdsInOrder);
+    const requiredUserIds = selectRequiredHoleCardUserIds(state, resolvedSeatUserIdsInOrder);
     const holeCards = await loadHoleCardsByUserId(tx, {
       tableId,
       handId,
-      activeUserIds: seatUserIdsInOrder,
+      activeUserIds: resolvedSeatUserIdsInOrder,
       requiredUserIds,
       mode: "strict",
     });
@@ -266,12 +288,12 @@ const maybeBuildPrivateStateForBotAutoplay = async ({ tx, tableId, state, seatUs
   try {
     derivedCommunity = deriveCommunityCards({
       handSeed,
-      seatUserIdsInOrder,
+      seatUserIdsInOrder: resolvedSeatUserIdsInOrder,
       communityDealt: state.communityDealt,
     });
     derivedDeck = deriveRemainingDeck({
       handSeed,
-      seatUserIdsInOrder,
+      seatUserIdsInOrder: resolvedSeatUserIdsInOrder,
       communityDealt: state.communityDealt,
     });
   } catch {
@@ -578,8 +600,9 @@ export async function executePokerLeave({ beginSql, tableId, userId, requestId =
           throw makeError(409, "state_invalid");
         }
 
+        const wasAlreadyFoldedBeforeLeave = currentState?.foldedByUserId?.[userId] === true;
         const leaveState = normalizeState(leaveApplied.state);
-        const deferDetachUntilHandComplete = hasLiveHandSignal(leaveState);
+        const deferDetachUntilHandComplete = hasLiveHandSignal(leaveState) && !wasAlreadyFoldedBeforeLeave;
         const baseSeats = deferDetachUntilHandComplete
           ? parseSeats(currentState.seats)
           : (Array.isArray(leaveState.seats) ? leaveState.seats : parseSeats(currentState.seats));
@@ -711,7 +734,10 @@ export async function executePokerLeave({ beginSql, tableId, userId, requestId =
             [tableId]
           );
           const seatBotMap = buildSeatBotMap(activeSeatRows);
-          const seatUserIdsInOrder = normalizeSeatOrderFromActiveSeatRows(activeSeatRows);
+          const seatUserIdsInOrder = resolveHandSeatUserIdsInOrder(
+            latestState,
+            normalizeSeatOrderFromActiveSeatRows(activeSeatRows)
+          );
           const botsOnlyInHand = !hasParticipatingHumanInHand(latestState, seatBotMap);
           if (isBotTurn(latestState.turnUserId, seatBotMap) || botsOnlyInHand) {
             const autoplayResult = await executePostLeaveBotAutoplayLoop({
@@ -735,7 +761,7 @@ export async function executePokerLeave({ beginSql, tableId, userId, requestId =
           }
         }
 
-        const shouldDetachSeatAndStack = !hasLiveHandSignal(latestState);
+        const shouldDetachSeatAndStack = !hasLiveHandSignal(latestState) || wasAlreadyFoldedBeforeLeave;
         let detachedCashOutAmount = 0;
         if (shouldDetachSeatAndStack) {
           const latestStacks = parseStacks(latestState.stacks);
@@ -808,7 +834,7 @@ export async function executePokerLeave({ beginSql, tableId, userId, requestId =
           "select user_id, status, is_bot, stack from public.poker_seats where table_id = $1 for update;",
           [tableId]
         );
-        if (!hasAnyActiveHuman(allSeatRows)) {
+        if (!hasAnyActiveHuman(allSeatRows) && !hasLiveHandSignal(latestState)) {
           const closedStacks = parseStacks(latestState.stacks);
           for (const row of allSeatRows || []) {
             if (row?.is_bot === true) continue;

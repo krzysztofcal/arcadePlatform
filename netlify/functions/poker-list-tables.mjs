@@ -58,8 +58,10 @@ select t.id, t.stakes, t.max_players, t.status, t.created_by, t.created_at, t.up
 from public.poker_tables t
 left join (
   select table_id, count(*)::int as seat_count
-  from public.poker_seats
-  where status = 'ACTIVE'
+  from public.poker_seats s
+  left join public.poker_state ps on ps.table_id = s.table_id
+  where s.status = 'ACTIVE'
+    and coalesce((ps.state->'leftTableByUserId'->>s.user_id)::boolean, false) = false
   group by table_id
 ) s on s.table_id = t.id${statusFilter}
 order by t.created_at desc

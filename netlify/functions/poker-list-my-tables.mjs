@@ -68,13 +68,18 @@ select
   coalesce(cnt.seat_count, 0) as seat_count
 from public.poker_seats s
 join public.poker_tables t on t.id = s.table_id
+left join public.poker_state ps on ps.table_id = t.id
 left join (
   select table_id, count(*)::int as seat_count
-  from public.poker_seats
-  where status = 'ACTIVE'
+  from public.poker_seats s
+  left join public.poker_state ps on ps.table_id = s.table_id
+  where s.status = 'ACTIVE'
+    and coalesce((ps.state->'leftTableByUserId'->>s.user_id)::boolean, false) = false
   group by table_id
 ) cnt on cnt.table_id = t.id
 where s.user_id = $1
+  and s.status = 'ACTIVE'
+  and coalesce((ps.state->'leftTableByUserId'->>s.user_id)::boolean, false) = false
   and ($2 = 'ALL' or t.status = 'OPEN')
 order by t.updated_at desc, t.created_at desc
 limit $3;
