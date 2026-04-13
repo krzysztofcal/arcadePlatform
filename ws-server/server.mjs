@@ -1357,11 +1357,20 @@ wss.on("connection", (ws) => {
       && connState.session.userId
       && !sessionStore.socketOwnsSession({ ws, sessionId: connState.session.sessionId })
     ) {
-      klogSafe("ws_stale_session_socket_rejected", {
-        frameType: frame.type,
-        sessionId: connState.session.sessionId,
-        userId: connState.session.userId
-      });
+      try {
+        const ownerConns = sessionStore.connectionsForUser(connState.session.userId || null) || [];
+        const ownerConnsInfo = ownerConns.map((s) => ({ remoteAddr: s && s._socket && s._socket.remoteAddress ? s._socket.remoteAddress : null, sessionId: s && s.__connState && s.__connState.sessionId ? s.__connState.sessionId : null }));
+        klogSafe("ws_stale_session_socket_rejected", {
+          event: "stale_frame_rejected",
+          frameType: frame.type,
+          requestId: frame.requestId ?? null,
+          sessionId: connState.session.sessionId,
+          userId: connState.session.userId,
+          socketRemoteAddr: ws && ws._socket && ws._socket.remoteAddress ? ws._socket.remoteAddress : null,
+          ownerConnections: ownerConnsInfo
+        });
+      } catch (_err) { }
+
       connState.sessionInvalidated = true;
       connState.sessionInvalidatedReason = "session_rebound";
       sendError(ws, connState, {
@@ -1369,7 +1378,12 @@ wss.on("connection", (ws) => {
         message: "socket no longer owns session",
         requestId: frame.requestId ?? null
       });
-      setImmediate(() => invalidateSocketSession(ws, { reason: "session_rebound" }));
+      setImmediate(() => {
+        try {
+          klogSafe("ws_invalidate_before_close", { sessionId: connState.session.sessionId, socketRemoteAddr: ws && ws._socket && ws._socket.remoteAddress ? ws._socket.remoteAddress : null });
+        } catch (_err) {}
+        invalidateSocketSession(ws, { reason: "session_rebound" });
+      });
       return;
     }
     touchSession(connState.session, nowTs);
@@ -1582,18 +1596,37 @@ wss.on("connection", (ws) => {
       const replay = streamLog.eventsAfter({ tableId, lastSeq: resumeLastSeq, receiverKey: resumeSessionId });
       if (rebound.priorSocket && rebound.priorSocket !== ws) {
         try {
+          // Emit detailed instrumentation so tests can reconstruct timeline and ownership
+          const priorRemote = rebound.priorSocket && rebound.priorSocket._socket && rebound.priorSocket._socket.remoteAddress ? rebound.priorSocket._socket.remoteAddress : null;
+          const priorConnSid = rebound.priorSocket && rebound.priorSocket.__connState && rebound.priorSocket.__connState.sessionId ? rebound.priorSocket.__connState.sessionId : null;
+          const newRemote = ws && ws._socket && ws._socket.remoteAddress ? ws._socket.remoteAddress : null;
+          const userConns = sessionStore.connectionsForUser(connState.session.userId || null) || [];
+          const userConnsInfo = userConns.map((s) => ({ remoteAddr: s && s._socket && s._socket.remoteAddress ? s._socket._socket ? null : (s._socket.remoteAddress) : (s && s._socket && s._socket.remoteAddress) || null, sessionId: s && s.__connState && s.__connState.sessionId ? s.__connState.sessionId : null })).slice(0,10);
+
           klogSafe("ws_session_rebound", {
+            event: "session_rebound",
             sessionId: resumeSessionId,
             userId: connState.session.userId,
-            priorSocketSessionId: rebound.priorSocket && rebound.priorSocket.__connState ? rebound.priorSocket.__connState.sessionId : null,
-            priorSocketRemoteAddr: rebound.priorSocket && rebound.priorSocket._socket && rebound.priorSocket._socket.remoteAddress ? rebound.priorSocket._socket.remoteAddress : null,
-            newSocketRemoteAddr: ws && ws._socket && ws._socket.remoteAddress ? ws._socket.remoteAddress : null
+            priorSocketSessionId: priorConnSid,
+            priorSocketRemoteAddr: priorRemote,
+            newSocketRemoteAddr: newRemote,
+            userConnections: userConnsInfo
           });
         } catch (_err) {}
+
         // Enforce deny semantics: invalidate prior socket immediately after rebind.
         try {
+          klogSafe("ws_invalidating_stale_socket", {
+            event: "invalidate_prior_socket",
+            sessionId: resumeSessionId,
+            priorSocketSessionId: rebound.priorSocket && rebound.priorSocket.__connState ? rebound.priorSocket.__connState.sessionId : null,
+            priorSocketRemoteAddr: rebound.priorSocket && rebound.priorSocket._socket && rebound.priorSocket._socket.remoteAddress ? rebound.priorSocket._socket.remoteAddress : null
+          });
           invalidateSocketSession(rebound.priorSocket, { reason: "session_rebound" });
-        } catch (_err) {}
+          klogSafe("ws_invalidated_prior_socket", { sessionId: resumeSessionId, reason: "session_rebound" });
+        } catch (_err) {
+          klogSafe("ws_invalidated_prior_socket_error", { sessionId: resumeSessionId, message: _err && _err.message ? _err.message : String(_err) });
+        }
       }
 
       connState.session = rebound.session;
