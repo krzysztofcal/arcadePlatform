@@ -1590,17 +1590,9 @@ wss.on("connection", (ws) => {
             newSocketRemoteAddr: ws && ws._socket && ws._socket.remoteAddress ? ws._socket.remoteAddress : null
           });
         } catch (_err) {}
-        // Do not invalidate prior socket immediately. Schedule a safe invalidate to allow any in-flight protected frames to complete.
+        // Enforce deny semantics: invalidate prior socket immediately after rebind.
         try {
-          if (rebound.priorSocket && typeof rebound.priorSocket === 'object') {
-            if (rebound.priorSocket.__rebindInvalidateTimer) {
-              clearTimeout(rebound.priorSocket.__rebindInvalidateTimer);
-            }
-            rebound.priorSocket.__rebindInvalidateTimer = setTimeout(function(){
-              try { invalidateSocketSession(rebound.priorSocket, { reason: "session_rebound" }); } catch (_e){}
-              try { rebound.priorSocket.__rebindInvalidateTimer = null; } catch (_e){}
-            }, 500);
-          }
+          invalidateSocketSession(rebound.priorSocket, { reason: "session_rebound" });
         } catch (_err) {}
       }
 
