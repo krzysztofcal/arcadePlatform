@@ -779,11 +779,15 @@ export function createTableManager({
     const normalizedState = pokerState && typeof pokerState === "object" && !Array.isArray(pokerState) ? pokerState : null;
     const stateTableId = typeof normalizedState?.tableId === "string" ? normalizedState.tableId : "";
     const stateSeats = normalizedState?.seats;
+    const leftTableByUserId = normalizedState?.leftTableByUserId && typeof normalizedState.leftTableByUserId === "object" && !Array.isArray(normalizedState.leftTableByUserId)
+      ? normalizedState.leftTableByUserId
+      : {};
+    const leavingUserRetainedInState = authoritativeSeatsContainUser(stateSeats, userId) && leftTableByUserId?.[userId] === true;
     const authoritativeStateValid = normalizedState
       && stateTableId === tableId
       && hasValidAuthoritativeSeats(stateSeats);
 
-    if (!authoritativeStateValid || authoritativeSeatsContainUser(stateSeats, userId)) {
+    if (!authoritativeStateValid || (authoritativeSeatsContainUser(stateSeats, userId) && !leavingUserRetainedInState)) {
       return {
         ok: false,
         code: "authoritative_state_invalid"
@@ -810,6 +814,7 @@ export function createTableManager({
         };
       })
       .filter(Boolean)
+      .filter((member) => leftTableByUserId?.[member.userId] !== true)
       .sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
 
     const nextSeats = {};

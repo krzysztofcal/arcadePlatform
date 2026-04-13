@@ -69,7 +69,11 @@ function isValidAuthoritativeLeaveSuccessShape(result, expectedTableId, leavingU
     return false;
   }
 
-  return !authoritativeSeatsContainUser(state.seats, leavingUserId);
+  if (!authoritativeSeatsContainUser(state.seats, leavingUserId)) {
+    return true;
+  }
+
+  return state?.leftTableByUserId?.[leavingUserId] === true;
 }
 
 function normalizeValidatedResult({ result, tableId, userId, requestId, klog }) {

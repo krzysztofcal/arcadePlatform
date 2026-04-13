@@ -167,9 +167,13 @@ const makeMocks = () => {
   const executePokerLeave = loadExecutePokerLeave(ctx.mocks);
   const result = await executePokerLeave({ beginSql: ctx.beginSql, tableId, userId, requestId: "r5", includeState: true, klog: () => {} });
   assert.equal(result.ok, true);
-  assert.equal(result.cashedOut, 48);
+  assert.equal(result.cashedOut, 0);
   assert.equal(result.state.state.communityDealt, 3);
   assert.deepEqual(result.state.state.community, ["3H", "AH", "7S"]);
+  assert.equal(result.state.state.leftTableByUserId[userId], true);
+  assert.equal(result.state.state.seats.some((seat) => seat.userId === userId), true);
+  assert.equal(ctx.calls.cashouts, 0);
+  assert.equal(ctx.calls.deleteSeat, 0);
 }
 
 {
@@ -187,6 +191,74 @@ const makeMocks = () => {
   assert.equal(ctx.calls.closeTable, 1, "table should be closed when no active humans remain");
   assert.equal(result.state.state.phase, "HAND_DONE");
   assert.deepEqual(result.state.state.stacks, {});
+}
+
+{
+  const ctx = makeMocks();
+  let requiredUserIdsSeen = null;
+  ctx.state.value = {
+    tableId,
+    phase: "FLOP",
+    handId: "hand-bots-only-leave",
+    handSeed: "seed-bots-only-leave",
+    seats: [{ userId, seatNo: 1 }, { userId: "bot-1", seatNo: 2, isBot: true }],
+    stacks: { [userId]: 48, "bot-1": 52 },
+    leftTableByUserId: {},
+    foldedByUserId: { [userId]: false, "bot-1": false },
+    actedThisRoundByUserId: { [userId]: true, "bot-1": false },
+    betThisRoundByUserId: { [userId]: 2, "bot-1": 2 },
+    toCallByUserId: { [userId]: 0, "bot-1": 0 },
+    contributionsByUserId: { [userId]: 2, "bot-1": 2 },
+    communityDealt: 3,
+    community: ["3H", "AH", "7S"],
+    turnUserId: "bot-1",
+  };
+  ctx.mocks.isStateStorageValid = realIsStateStorageValid;
+  ctx.mocks.applyLeaveTable = (s) => ({
+    state: {
+      ...s,
+      seats: s.seats.filter((seat) => seat.userId !== userId),
+      stacks: { "bot-1": 52 },
+      leftTableByUserId: { ...s.leftTableByUserId, [userId]: true },
+      foldedByUserId: { ...s.foldedByUserId, [userId]: true },
+      actedThisRoundByUserId: { ...s.actedThisRoundByUserId, [userId]: true },
+    }
+  });
+  ctx.mocks.buildSeatBotMap = (rows) => rows.reduce((acc, row) => ({ ...acc, [row.user_id]: row.is_bot === true }), {});
+  ctx.mocks.isBotTurn = (turnUserId, seatBotMap) => !!seatBotMap?.[turnUserId];
+  ctx.mocks.hasParticipatingHumanInHand = () => false;
+  ctx.mocks.loadHoleCardsByUserId = async (_tx, args) => {
+    requiredUserIdsSeen = Array.isArray(args.requiredUserIds) ? args.requiredUserIds.slice() : null;
+    return {
+      holeCardsByUserId: {
+        "bot-1": [{ r: "A", s: "S" }, { r: "K", s: "S" }],
+      }
+    };
+  };
+  ctx.mocks.runBotAutoplayLoop = async () => ({
+    responseFinalState: {
+      ...ctx.state.value,
+      phase: "HAND_DONE",
+      seats: [{ userId, seatNo: 1 }, { userId: "bot-1", seatNo: 2, isBot: true }],
+      stacks: { [userId]: 48, "bot-1": 52 },
+      leftTableByUserId: { [userId]: true },
+      foldedByUserId: { [userId]: true, "bot-1": false },
+      turnUserId: null,
+    },
+    loopVersion: ctx.state.version,
+    botActionCount: 1,
+    botStopReason: "completed",
+  });
+  const executePokerLeave = loadExecutePokerLeave(ctx.mocks);
+  const result = await executePokerLeave({ beginSql: ctx.beginSql, tableId, userId, requestId: "r7", includeState: true, klog: () => {} });
+  assert.equal(result.ok, true);
+  assert.equal(result.cashedOut, 48);
+  assert.deepEqual(requiredUserIdsSeen, ["bot-1"]);
+  assert.equal(ctx.calls.cashouts, 1);
+  assert.equal(ctx.calls.deleteSeat, 1);
+  assert.equal(ctx.calls.closeTable, 1);
+  assert.equal(result.state.state.phase, "HAND_DONE");
+  assert.equal(result.state.state.seats.some((seat) => seat.userId === userId), false);
 }
 
 console.log("poker-domain leave behavior test passed");
