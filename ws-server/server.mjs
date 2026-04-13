@@ -428,12 +428,41 @@ function invalidateSocketSession(ws, { reason = "session_rebound", closeCode = S
     staleConnState.sessionInvalidatedReason = reason;
   }
 
+  // Ensure STALE_SESSION is delivered to the socket before closing it.
+  // Use ws.send callback to wait for the write to be handed to the kernel where possible.
   try {
-    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-      ws.close(closeCode, reason);
+    if (ws.readyState === WebSocket.OPEN) {
+      try {
+        const errorFrame = makeErrorFrame({
+          code: "STALE_SESSION",
+          message: "socket no longer owns session",
+          requestId: null,
+          sessionId: staleConnState && staleConnState.session ? staleConnState.session.sessionId : null,
+          ts: nowTs()
+        });
+        // Attempt to send error and close in callback so the frame is flushed first.
+        ws.send(JSON.stringify(errorFrame), (err) => {
+          try {
+            ws.close(closeCode, reason);
+          } catch (_err) {}
+        });
+      } catch (_err) {
+        // If send throws, still attempt close.
+        try { ws.close(closeCode, reason); } catch (_e) {}
+      }
+      return;
     }
-  } catch {
+
+    if (ws.readyState === WebSocket.CONNECTING) {
+      // If still connecting, just close — nothing to flush.
+      try { ws.close(closeCode, reason); } catch (_e) {}
+      return;
+    }
+
+    // Otherwise, already closed.
+  } catch (_err) {
     // Socket invalidation is best-effort and must not throw into command handling.
+    try { ws.close(closeCode, reason); } catch (_e) {}
   }
 }
 
