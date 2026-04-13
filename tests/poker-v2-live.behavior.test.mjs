@@ -62,7 +62,7 @@ function createHarness(options = {}){
     'pokerSeatLayer', 'pokerPotPill', 'pokerCommunityCards', 'pokerDealerChip',
     'pokerHeroCards', 'pokerV2LiveStatus', 'pokerV2TableMeta', 'pokerV2TurnText',
     'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2SignInBtn', 'pokerV2SeatNo',
-    'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn',
+    'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
     'pokerV2DemoPill', 'pokerV2FoldBtn', 'pokerV2PrimaryBtn', 'pokerV2AmountBtn',
     'pokerV2AllInBtn', 'pokerV2AmountInput', 'pokerV2AmountInputWrap', 'pokerV2AmountValue',
     'pokerTableScreen', 'pokerBootSplash'
@@ -72,6 +72,7 @@ function createHarness(options = {}){
   elements.pokerV2SeatNo.value = '1';
   elements.pokerV2BuyIn.value = '100';
   elements.pokerV2AmountInput.value = '20';
+  elements.pokerV2LeaveConfirmModal.hidden = true;
   elements.pokerMenuPanel.setAttribute('hidden', 'hidden');
 
   const documentEvents = {};
@@ -222,6 +223,11 @@ async function flush(){
   };
 }
 
+function confirmLeave(harness){
+  harness.elements.pokerV2LeaveBtn.click();
+  harness.elements.pokerV2LeaveConfirmYes.click();
+}
+
 async function waitFor(predicate, attempts = 6){
   for (let i = 0; i < attempts; i += 1){
     if (predicate()) return;
@@ -316,7 +322,7 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-1', action: 'BET', amount: 77 }));
 
   harness.elements.pokerV2StartBtn.click();
-  harness.elements.pokerV2LeaveBtn.click();
+  confirmLeave(harness);
   await harness.flush();
 
   assert.equal(harness.startPayloads.length, 1);
@@ -1218,7 +1224,7 @@ test('poker v2 retries leave once after stale session reconnect', async () => {
   });
   await harness.flush();
 
-  harness.elements.pokerV2LeaveBtn.click();
+  confirmLeave(harness);
   await harness.flush();
   await harness.flush();
 
@@ -1256,11 +1262,50 @@ test('poker v2 queued leave navigates to lobby immediately without waiting for l
   });
   await harness.flush();
 
-  harness.elements.pokerV2LeaveBtn.click();
+  confirmLeave(harness);
   await harness.flush();
 
   assert.equal(harness.leavePayloads.length, 1);
   assert.equal(harness.windowLocation.href, '/poker/');
+});
+
+test('poker v2 cancel leave keeps the player on the table and sends no leave payload', async () => {
+  const harness = createHarness({
+    sendLeaveQueued(){
+      throw new Error('leave should not be queued on cancel');
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        seats: [{ userId: 'user-1', seatNo: 1, status: 'ACTIVE' }, { userId: 'bot-2', seatNo: 2, status: 'ACTIVE', isBot: true }],
+        hand: { handId: 'hand-cancel-leave', status: 'TURN', dealerSeatNo: 1 },
+        turn: { userId: 'bot-2', deadlineAt: Date.now() + 5000 },
+        pot: { total: 10, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD'] },
+        stacks: { 'user-1': 96, 'bot-2': 104 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  harness.elements.pokerV2LeaveBtn.click();
+  harness.elements.pokerV2LeaveConfirmCancel.click();
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2LeaveConfirmModal.hidden, true);
+  assert.equal(harness.leavePayloads.length, 0);
+  assert.equal(harness.windowLocation.href, '');
 });
 
 test('poker v2 leaves cleanly before the first live snapshot even when the removal snapshot arrives first', async () => {
@@ -1274,7 +1319,7 @@ test('poker v2 leaves cleanly before the first live snapshot even when the remov
   await harness.flush();
 
   const ws = harness.getCreateOptions();
-  harness.elements.pokerV2LeaveBtn.click();
+  confirmLeave(harness);
   await harness.flush();
 
   assert.equal(harness.leavePayloads.length, 1);
@@ -1332,7 +1377,7 @@ test('poker v2 redirects to lobby when leave snapshot confirms the seat is gone 
   });
   await harness.flush();
 
-  harness.elements.pokerV2LeaveBtn.click();
+  confirmLeave(harness);
   await harness.flush();
 
   ws.onSnapshot({
@@ -1391,7 +1436,7 @@ test('poker v2 call then leave returns to lobby while the remaining hand continu
 
   harness.elements.pokerV2PrimaryBtn.click();
   await harness.flush();
-  harness.elements.pokerV2LeaveBtn.click();
+  confirmLeave(harness);
   await harness.flush();
 
   ws.onSnapshot({
@@ -1454,7 +1499,7 @@ test('poker v2 fold then leave returns to lobby when settlement snapshot removes
 
   harness.elements.pokerV2FoldBtn.click();
   await harness.flush();
-  harness.elements.pokerV2LeaveBtn.click();
+  confirmLeave(harness);
   await harness.flush();
 
   ws.onSnapshot({
@@ -1516,7 +1561,7 @@ test('poker v2 redirects to lobby on deferred leave even if the snapshot still c
   });
   await harness.flush();
 
-  harness.elements.pokerV2LeaveBtn.click();
+  confirmLeave(harness);
   await harness.flush();
 
   ws.onSnapshot({

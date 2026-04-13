@@ -87,6 +87,7 @@
   var authUnsubscribe = null;
   var pendingLeaveRetryAfterReconnect = false;
   var pendingLeaveNavigation = false;
+  var leaveConfirmOpen = false;
   var renderedSeatAnchors = {};
   var renderedSeatSlots = {};
   var renderedSeatAvatars = {};
@@ -1349,6 +1350,7 @@
     if (els.leaveBtn) els.leaveBtn.hidden = !signedIn || !seated;
     if (els.startBtn) els.startBtn.disabled = !liveReady;
     if (els.leaveBtn) els.leaveBtn.disabled = !liveReady;
+    if ((!signedIn || !seated) && leaveConfirmOpen) closeLeaveConfirm();
     if (els.stackText) els.stackText.textContent = stackAmount == null ? '—' : formatNumber(stackAmount);
 
     if (els.foldBtn){
@@ -1456,6 +1458,17 @@
     renderInfoPanel();
     navigateToLobby();
     return true;
+  }
+
+  function closeLeaveConfirm(){
+    leaveConfirmOpen = false;
+    if (els.leaveConfirmModal) els.leaveConfirmModal.hidden = true;
+  }
+
+  function openLeaveConfirm(){
+    if (!els.leaveConfirmModal) return;
+    leaveConfirmOpen = true;
+    els.leaveConfirmModal.hidden = false;
   }
 
   function handleAction(actionType, amount){
@@ -1580,7 +1593,15 @@
     });
     if (els.leaveBtn) els.leaveBtn.addEventListener('click', function(){
       setError('');
+      openLeaveConfirm();
+    });
+    if (els.leaveConfirmYes) els.leaveConfirmYes.addEventListener('click', function(){
+      closeLeaveConfirm();
+      setError('');
       leaveAndReturnToLobby();
+    });
+    if (els.leaveConfirmCancel) els.leaveConfirmCancel.addEventListener('click', function(){
+      closeLeaveConfirm();
     });
     if (els.startBtn) els.startBtn.addEventListener('click', function(){
       setError('');
@@ -1634,6 +1655,9 @@
     els.joinSeat = document.getElementById('pokerV2SeatNo');
     els.joinBuyIn = document.getElementById('pokerV2BuyIn');
     els.leaveBtn = document.getElementById('pokerV2LeaveBtn');
+    els.leaveConfirmModal = document.getElementById('pokerV2LeaveConfirmModal');
+    els.leaveConfirmYes = document.getElementById('pokerV2LeaveConfirmYes');
+    els.leaveConfirmCancel = document.getElementById('pokerV2LeaveConfirmCancel');
     els.startBtn = document.getElementById('pokerV2StartBtn');
     els.foldBtn = document.getElementById('pokerV2FoldBtn');
     els.primaryBtn = document.getElementById('pokerV2PrimaryBtn');

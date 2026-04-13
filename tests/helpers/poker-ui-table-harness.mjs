@@ -71,8 +71,8 @@ export function createPokerTableHarness(options = {}){
   };
 
   const elementIds = [
-    'pokerError', 'pokerAuthMsg', 'pokerTableContent', 'pokerTableId', 'pokerStakes', 'pokerStatus', 'pokerSeatsGrid', 'pokerTurnTimer',
-    'pokerJoin', 'pokerLeave', 'pokerJoinStatus', 'pokerLeaveStatus', 'pokerSeatNo', 'pokerBuyIn', 'pokerYourStack', 'pokerPot', 'pokerPhase',
+     'pokerError', 'pokerAuthMsg', 'pokerTableContent', 'pokerTableId', 'pokerStakes', 'pokerStatus', 'pokerSeatsGrid', 'pokerTurnTimer',
+    'pokerJoin', 'pokerLeave', 'pokerJoinStatus', 'pokerLeaveStatus', 'pokerLeaveConfirmModal', 'pokerLeaveConfirmYes', 'pokerLeaveConfirmCancel', 'pokerSeatNo', 'pokerBuyIn', 'pokerYourStack', 'pokerPot', 'pokerPhase',
     'pokerVersion', 'pokerMyCards', 'pokerMyCardsStatus', 'pokerJsonToggle', 'pokerJsonBox', 'pokerSignIn', 'pokerStartHandBtn',
     'pokerStartHandStatus', 'pokerActionsRow', 'pokerActAmountWrap', 'pokerActAmount', 'pokerActCheckBtn', 'pokerActCallBtn', 'pokerActFoldBtn',
     'pokerActBetBtn', 'pokerActRaiseBtn', 'pokerActStatus', 'pokerCopyLogBtn', 'pokerCopyLogStatus', 'pokerDevActionsPanel', 'pokerBoard',
@@ -83,6 +83,7 @@ export function createPokerTableHarness(options = {}){
   elements.pokerActAmountWrap.parentNode = { insertBefore(){} };
   elements.pokerSeatNo.value = '0';
   elements.pokerBuyIn.value = '100';
+  elements.pokerLeaveConfirmModal.hidden = true;
 
   const windowEvents = {};
   const documentEvents = {};

@@ -1714,6 +1714,9 @@
     var leaveBtn = document.getElementById('pokerLeave');
     var joinStatusEl = document.getElementById('pokerJoinStatus');
     var leaveStatusEl = document.getElementById('pokerLeaveStatus');
+    var leaveConfirmModal = document.getElementById('pokerLeaveConfirmModal');
+    var leaveConfirmYesBtn = document.getElementById('pokerLeaveConfirmYes');
+    var leaveConfirmCancelBtn = document.getElementById('pokerLeaveConfirmCancel');
     var seatNoInput = document.getElementById('pokerSeatNo');
     var buyInInput = document.getElementById('pokerBuyIn');
     var yourStackEl = document.getElementById('pokerYourStack');
@@ -1787,6 +1790,7 @@
     var pendingActTimer = null;
     var pendingLeaveRetryAfterReconnect = false;
     var pendingLeaveNavigation = false;
+    var leaveConfirmOpen = false;
     var postActSnapshotTimer = null;
     var joinPending = false;
     var leavePending = false;
@@ -2494,6 +2498,7 @@
       nextData.state = stateObj;
       tableData = nextData;
       isSeated = false;
+      closeLeaveConfirm();
       clearDeadlineNudge();
       renderTable(tableData);
     }
@@ -2558,6 +2563,7 @@
         seatUserSeatMap: buildSeatUserSeatMap(tableData.seats || [])
       });
       renderTable(tableData);
+      if (!isSeated && leaveConfirmOpen) closeLeaveConfirm();
       if (pendingLeaveNavigation && isSeated !== true){
         pendingLeaveRetryAfterReconnect = false;
         pendingLeaveNavigation = false;
@@ -2808,7 +2814,21 @@
         leaveStatusEl.textContent = leavePending ? t('pokerLeavePending', 'Leaving...') : '';
         leaveStatusEl.hidden = !leavePending;
       }
+      if (leaveConfirmYesBtn) setDisabled(leaveConfirmYesBtn, leavePending);
+      if (leaveConfirmCancelBtn) setDisabled(leaveConfirmCancelBtn, leavePending);
       updateDevActionsUi();
+    }
+
+    function closeLeaveConfirm(){
+      leaveConfirmOpen = false;
+      if (leaveConfirmModal) leaveConfirmModal.hidden = true;
+    }
+
+    function openLeaveConfirm(){
+      if (!leaveConfirmModal) return;
+      leaveConfirmOpen = true;
+      leaveConfirmModal.hidden = false;
+      updatePendingUi();
     }
 
     function shouldEnableDevActions(){
@@ -4408,6 +4428,12 @@
       if (joinPending || leavePending) return;
       klog('poker_leave_click', { tableId: tableId, hasToken: !!state.token });
       setError(errorEl, null);
+      openLeaveConfirm();
+    }
+
+    function confirmLeave(){
+      closeLeaveConfirm();
+      setError(errorEl, null);
       try {
         if (queueLeaveAndNavigateImmediately()) return;
       } catch (err){
@@ -4572,6 +4598,8 @@
 
     if (joinBtn) joinBtn.addEventListener('click', handleJoinClick);
     if (leaveBtn) leaveBtn.addEventListener('click', handleLeaveClick);
+    if (leaveConfirmYesBtn) leaveConfirmYesBtn.addEventListener('click', confirmLeave);
+    if (leaveConfirmCancelBtn) leaveConfirmCancelBtn.addEventListener('click', closeLeaveConfirm);
     if (startHandBtn) startHandBtn.addEventListener('click', handleStartHandClick);
     if (dumpLogsBtn) dumpLogsBtn.addEventListener('click', handleDumpLogsClick);
     if (copyLogBtn) copyLogBtn.addEventListener('click', handleCopyLogClick);
