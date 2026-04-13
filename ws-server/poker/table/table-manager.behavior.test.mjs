@@ -1020,7 +1020,7 @@ test("applyAction accepts legal turn CALL and increments state version once", ()
   assert.equal(after.hand.status, "FLOP");
   assert.equal(after.board.cards.length, 3);
   assert.equal(after.turn.userId, "user_b");
-  assert.deepEqual(after.legalActions, { seat: 1, actions: [] });
+  assert.deepEqual(after.legalActions, { seat: 1, actions: ["FOLD"] });
   assert.equal(after.private.holeCards.length, 2);
 });
 
@@ -1050,7 +1050,7 @@ test("applyAction CALL closes initial heads-up preflop loop coherently", () => {
   assert.equal(actorAfter.hand.status, "FLOP");
   assert.equal(actorAfter.board.cards.length, 3);
   assert.equal(actorAfter.turn.userId, "user_b");
-  assert.deepEqual(actorAfter.legalActions, { seat: 1, actions: [] });
+  assert.deepEqual(actorAfter.legalActions, { seat: 1, actions: ["FOLD"] });
   assert.deepEqual(otherAfter.legalActions.actions.includes("CHECK"), true);
 });
 
