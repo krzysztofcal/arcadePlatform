@@ -416,6 +416,13 @@ function invalidateSocketSession(ws, { reason = "session_rebound", closeCode = S
     return;
   }
   const staleConnState = ws.__connState;
+  try {
+    klogSafe("ws_invalidating_stale_socket", {
+      sessionId: staleConnState && staleConnState.session ? staleConnState.session.sessionId : null,
+      userId: staleConnState && staleConnState.session ? staleConnState.session.userId : null,
+      reason
+    });
+  } catch (_err) {}
   if (staleConnState && typeof staleConnState === "object") {
     staleConnState.sessionInvalidated = true;
     staleConnState.sessionInvalidatedReason = reason;
@@ -1564,6 +1571,15 @@ wss.on("connection", (ws) => {
 
       const replay = streamLog.eventsAfter({ tableId, lastSeq: resumeLastSeq, receiverKey: resumeSessionId });
       if (rebound.priorSocket && rebound.priorSocket !== ws) {
+        try {
+          klogSafe("ws_session_rebound", {
+            sessionId: resumeSessionId,
+            userId: connState.session.userId,
+            priorSocketSessionId: rebound.priorSocket && rebound.priorSocket.__connState ? rebound.priorSocket.__connState.sessionId : null,
+            priorSocketRemoteAddr: rebound.priorSocket && rebound.priorSocket._socket && rebound.priorSocket._socket.remoteAddress ? rebound.priorSocket._socket.remoteAddress : null,
+            newSocketRemoteAddr: ws && ws._socket && ws._socket.remoteAddress ? ws._socket.remoteAddress : null
+          });
+        } catch (_err) {}
         invalidateSocketSession(rebound.priorSocket, { reason: "session_rebound" });
       }
 
