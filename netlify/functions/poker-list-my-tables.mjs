@@ -74,12 +74,12 @@ left join (
   from public.poker_seats s
   left join public.poker_state ps on ps.table_id = s.table_id
   where s.status = 'ACTIVE'
-    and coalesce((ps.state->'leftTableByUserId'->>s.user_id)::boolean, false) = false
+    and coalesce((ps.state->'leftTableByUserId'->>(s.user_id::text))::boolean, false) = false
   group by table_id
 ) cnt on cnt.table_id = t.id
 where s.user_id = $1
   and s.status = 'ACTIVE'
-  and coalesce((ps.state->'leftTableByUserId'->>s.user_id)::boolean, false) = false
+  and coalesce((ps.state->'leftTableByUserId'->>(s.user_id::text))::boolean, false) = false
   and ($2 = 'ALL' or t.status = 'OPEN')
 order by t.updated_at desc, t.created_at desc
 limit $3;

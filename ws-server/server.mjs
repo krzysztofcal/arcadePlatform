@@ -1749,6 +1749,7 @@ wss.on("connection", (ws) => {
           sendCommandResult,
           broadcastStateSnapshots,
           broadcastTableState,
+          scheduleBotStep,
           klog: klogSafe
         })
       });

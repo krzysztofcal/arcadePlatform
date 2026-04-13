@@ -142,6 +142,7 @@ export function createAuthoritativeLeaveExecutor({
           userId,
           requestId,
           includeState: true,
+          runPostLeaveBotAutoplay: false,
           klog
         });
         return normalizeValidatedResult({ result, tableId, userId, requestId, klog });

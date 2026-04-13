@@ -452,7 +452,7 @@ const buildAlreadyLeftResultPayload = ({ tableId, seatNo, includeState, state, u
 };
 
 
-export async function executePokerLeave({ beginSql, tableId, userId, requestId = null, nowMs = Date.now(), klog, includeState = false }) {
+export async function executePokerLeave({ beginSql, tableId, userId, requestId = null, nowMs = Date.now(), klog, includeState = false, runPostLeaveBotAutoplay = true }) {
   void nowMs;
   let txId = null;
   const result = await beginSql(async (tx) => {
@@ -600,9 +600,8 @@ export async function executePokerLeave({ beginSql, tableId, userId, requestId =
           throw makeError(409, "state_invalid");
         }
 
-        const wasAlreadyFoldedBeforeLeave = currentState?.foldedByUserId?.[userId] === true;
         const leaveState = normalizeState(leaveApplied.state);
-        const deferDetachUntilHandComplete = hasLiveHandSignal(leaveState) && !wasAlreadyFoldedBeforeLeave;
+        const deferDetachUntilHandComplete = hasLiveHandSignal(leaveState);
         const baseSeats = deferDetachUntilHandComplete
           ? parseSeats(currentState.seats)
           : (Array.isArray(leaveState.seats) ? leaveState.seats : parseSeats(currentState.seats));
@@ -739,7 +738,7 @@ export async function executePokerLeave({ beginSql, tableId, userId, requestId =
             normalizeSeatOrderFromActiveSeatRows(activeSeatRows)
           );
           const botsOnlyInHand = !hasParticipatingHumanInHand(latestState, seatBotMap);
-          if (isBotTurn(latestState.turnUserId, seatBotMap) || botsOnlyInHand) {
+          if (runPostLeaveBotAutoplay && (isBotTurn(latestState.turnUserId, seatBotMap) || botsOnlyInHand)) {
             const autoplayResult = await executePostLeaveBotAutoplayLoop({
               tx,
               tableId,
@@ -761,7 +760,7 @@ export async function executePokerLeave({ beginSql, tableId, userId, requestId =
           }
         }
 
-        const shouldDetachSeatAndStack = !hasLiveHandSignal(latestState) || wasAlreadyFoldedBeforeLeave;
+        const shouldDetachSeatAndStack = !hasLiveHandSignal(latestState);
         let detachedCashOutAmount = 0;
         if (shouldDetachSeatAndStack) {
           const latestStacks = parseStacks(latestState.stacks);

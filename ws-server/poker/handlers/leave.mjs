@@ -8,6 +8,7 @@ export async function handleLeaveCommand({
   sendCommandResult,
   broadcastStateSnapshots,
   broadcastTableState,
+  scheduleBotStep = () => {},
   klog = () => {}
 }) {
   try {
@@ -102,6 +103,20 @@ export async function handleLeaveCommand({
     if (left?.status !== "already_left" || detached?.changed) {
       broadcastStateSnapshots(tableId);
       broadcastTableState(tableId);
+      try {
+        scheduleBotStep({
+          tableId,
+          trigger: "leave",
+          requestId: frame.requestId ?? null,
+          frameTs: frame.ts ?? null
+        });
+      } catch (error) {
+        klog("ws_leave_schedule_bot_step_failed", {
+          tableId,
+          requestId: frame.requestId ?? null,
+          message: error?.message || "unknown_error"
+        });
+      }
     }
   } catch (error) {
     const reason = typeof error?.code === "string" ? error.code : "state_invalid";

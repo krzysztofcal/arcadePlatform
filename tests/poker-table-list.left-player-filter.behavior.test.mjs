@@ -39,6 +39,7 @@ test("poker-list-tables excludes left seats from open seat counts", async () => 
 
   assert.equal(response.statusCode, 200);
   assert.match(seenQuery, /leftTableByUserId/);
+  assert.match(seenQuery, /user_id::text/);
   const payload = JSON.parse(response.body);
   assert.equal(payload.tables[0].seatCount, 0);
 });
@@ -61,6 +62,7 @@ test("poker-list-my-tables excludes rows for users already marked as left", asyn
 
   assert.equal(response.statusCode, 200);
   assert.match(seenQuery, /leftTableByUserId/);
+  assert.match(seenQuery, /user_id::text/);
   const payload = JSON.parse(response.body);
   assert.deepEqual(payload.tables, []);
 });
