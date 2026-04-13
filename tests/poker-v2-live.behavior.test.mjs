@@ -1438,3 +1438,61 @@ test('poker v2 fold then leave returns to lobby when settlement snapshot removes
   assert.equal(harness.windowLocation.href, '/poker/');
   if (resolveLeave) resolveLeave({ ok: true });
 });
+
+test('poker v2 redirects to lobby on deferred leave even if the snapshot still carries you.seat', async () => {
+  let resolveLeave = null;
+  const harness = createHarness({
+    sendLeave(){
+      return new Promise(function(resolve){ resolveLeave = resolve; });
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        seats: [{ userId: 'user-1', seatNo: 1, status: 'ACTIVE' }, { userId: 'bot-2', seatNo: 2, status: 'ACTIVE', isBot: true }],
+        hand: { handId: 'hand-retained-you-seat', status: 'TURN', dealerSeatNo: 1 },
+        turn: { userId: 'bot-2', deadlineAt: Date.now() + 5000 },
+        pot: { total: 10, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD'] },
+        stacks: { 'user-1': 96, 'bot-2': 104 }
+      },
+      private: { holeCards: [{ r: '9', s: 'S' }, { r: '9', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  harness.elements.pokerV2LeaveBtn.click();
+  await harness.flush();
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'bot-2', seat: 2 }] },
+      public: {
+        seats: [{ userId: 'bot-2', seatNo: 2, status: 'ACTIVE', isBot: true }],
+        hand: { handId: 'hand-retained-you-seat', status: 'RIVER', dealerSeatNo: 1 },
+        turn: { userId: 'bot-2', deadlineAt: Date.now() + 3000 },
+        pot: { total: 10, sidePots: [] },
+        legalActions: { seat: 1, actions: [] },
+        stacks: { 'bot-2': 104 }
+      },
+      private: { holeCards: [] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.windowLocation.href, '/poker/');
+  if (resolveLeave) resolveLeave({ ok: true });
+});

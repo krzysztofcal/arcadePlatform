@@ -317,6 +317,7 @@ export function applyAction({ pokerState, userId, action, amount, nowIso = "1970
   }
 
   const nextState = asStateCopy(pokerState);
+  const wasOutOfTurnFold = normalizedAction === "FOLD" && nextState.turnUserId !== userId;
   const stack = Number(nextState.stacks?.[userId] ?? 0);
   const currentUserBet = Number(nextState.betThisRoundByUserId?.[userId] ?? 0);
   const toCall = Math.max(0, Number(legalInfo.toCall ?? 0));
@@ -391,7 +392,9 @@ export function applyAction({ pokerState, userId, action, amount, nowIso = "1970
   }
 
   const closedRound = advanceStreetIfClosed(nextState);
-  if (!closedRound) {
+  if (wasOutOfTurnFold) {
+    nextState.turnUserId = pokerState.turnUserId;
+  } else if (!closedRound) {
     nextState.turnUserId = resolveNextTurnUserId(nextState, userId);
   }
 

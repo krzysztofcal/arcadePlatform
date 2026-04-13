@@ -197,6 +197,31 @@ test("applyAction fold-win awards full pot exactly once and settles", () => {
   assert.deepEqual(folded.state.handSettlement, replay.state.handSettlement);
 });
 
+test("applyAction accepts out-of-turn fold without stealing the current turn", () => {
+  const pending = stateFixture({
+    seats: [
+      { userId: "u1", seatNo: 1 },
+      { userId: "u2", seatNo: 2 },
+      { userId: "u3", seatNo: 3 }
+    ],
+    turnUserId: "u1",
+    stacks: { u1: 99, u2: 98, u3: 97 },
+    toCallByUserId: { u1: 1, u2: 0, u3: 2 },
+    betThisRoundByUserId: { u1: 1, u2: 2, u3: 0 },
+    actedThisRoundByUserId: { u1: false, u2: false, u3: false },
+    foldedByUserId: { u1: false, u2: false, u3: false },
+    contributionsByUserId: { u1: 1, u2: 2, u3: 0 },
+    holeCardsByUserId: { u1: ["AS", "KD"], u2: ["2C", "2D"], u3: ["3C", "3D"] }
+  });
+
+  const folded = applyAction({ pokerState: pending, userId: "u2", action: "FOLD", amount: 0 });
+
+  assert.equal(folded.ok, true);
+  assert.equal(folded.state.turnUserId, "u1");
+  assert.equal(folded.state.foldedByUserId.u2, true);
+  assert.equal(folded.state.lastBettingRoundActionByUserId.u2, "fold");
+});
+
 test("applyAction showdown side-pot payout remains deterministic", () => {
   const riverSidePot = stateFixture({
     phase: "RIVER",

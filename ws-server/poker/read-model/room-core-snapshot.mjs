@@ -224,6 +224,14 @@ function resolvePrivateBranch({ state, userId, youSeat }) {
   };
 }
 
+function hasLeftTable(statePublic, userId) {
+  if (typeof userId !== "string" || !userId) {
+    return false;
+  }
+  const leftTableByUserId = asObject(statePublic?.leftTableByUserId) || {};
+  return leftTableByUserId[userId] === true;
+}
+
 function resolveRevealedShowdownParticipants({ statePublic, state }) {
   if (statePublic?.phase !== "SETTLED") {
     return [];
@@ -269,6 +277,7 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
   const statePublic = state ? withoutPrivateState(state) : null;
   const publicSeats = resolvePublicSeats({ statePublic, members, coreState });
   const publicStacks = resolvePublicStacks({ statePublic, coreState, seats: publicSeats });
+  const effectiveYouSeat = hasLeftTable(statePublic, userId) ? null : youSeat;
 
   if (!statePublic) {
     return {
@@ -298,10 +307,10 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
         seat: null,
         actions: []
       },
-      private: Number.isInteger(youSeat)
+      private: Number.isInteger(effectiveYouSeat)
         ? {
             userId,
-            seat: youSeat,
+            seat: effectiveYouSeat,
             holeCards: []
           }
         : null
@@ -313,7 +322,9 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
   const turnSeat = Number.isInteger(seatByUserId[turnUserId]) ? seatByUserId[turnUserId] : null;
   const turnIdentity = resolveTurnIdentity({ statePublic, turnUserId, turnSeat });
   const turnTimer = resolveTurnTimer({ statePublic, turnUserId: turnIdentity.userId });
-  const legalInfo = computeSharedLegalActions({ statePublic, userId });
+  const legalInfo = Number.isInteger(effectiveYouSeat)
+    ? computeSharedLegalActions({ statePublic, userId })
+    : { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
 
   const snapshot = {
     roomId: typeof statePublic.roomId === "string" ? statePublic.roomId : roomId || tableId,
@@ -339,8 +350,8 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
       deadlineAt: turnTimer.deadlineAt
     },
     legalActions: {
-      seat: Number.isInteger(youSeat) ? youSeat : null,
-      actions: Number.isInteger(youSeat) ? normalizeActions(legalInfo.actions) : []
+      seat: Number.isInteger(effectiveYouSeat) ? effectiveYouSeat : null,
+      actions: Number.isInteger(effectiveYouSeat) ? normalizeActions(legalInfo.actions) : []
     },
     actionConstraints: {
       toCall: Number.isFinite(legalInfo.toCall) ? legalInfo.toCall : null,
@@ -349,7 +360,7 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
       maxBetAmount: Number.isFinite(legalInfo.maxBetAmount) ? legalInfo.maxBetAmount : null
     },
     lastBettingRoundActionByUserId: normalizeLastBettingRoundActionByUserId(statePublic.lastBettingRoundActionByUserId),
-    private: resolvePrivateBranch({ state, userId, youSeat })
+    private: resolvePrivateBranch({ state, userId, youSeat: effectiveYouSeat })
   };
 
   const showdown = normalizeShowdown(statePublic.showdown);

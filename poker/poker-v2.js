@@ -753,13 +753,13 @@
     state.actionConstraints = normalizeConstraints(constraintsPrimary, legalSource && legalSource.actionConstraints);
     state.statusText = LIVE_STATUS_COPY.live;
     state.errorText = '';
-    if (pendingLeaveNavigation && !deriveCurrentSeat()){
+    if (pendingLeaveNavigation && !hasRenderableCurrentSeat()){
       pendingLeaveRetryAfterReconnect = false;
       pendingLeaveNavigation = false;
       navigateToLobby();
       return;
     }
-    if (pendingLeaveNavigation && pendingLeaveRetryAfterReconnect && deriveCurrentSeat() && isWsReady()){
+    if (pendingLeaveNavigation && pendingLeaveRetryAfterReconnect && hasRenderableCurrentSeat() && isWsReady()){
       pendingLeaveRetryAfterReconnect = false;
       leaveAndReturnToLobby();
     }
@@ -779,6 +779,15 @@
       return { seatNo: state.youSeat, userId: currentUserId, status: 'ACTIVE', displayName: 'You' };
     }
     return null;
+  }
+
+  function hasRenderableCurrentSeat(){
+    var currentUserId = state.currentUserId;
+    if (!currentUserId) return false;
+    for (var i = 0; i < state.seats.length; i++){
+      if (state.seats[i] && state.seats[i].userId === currentUserId) return true;
+    }
+    return false;
   }
 
   function getHeroVisualIndex(){

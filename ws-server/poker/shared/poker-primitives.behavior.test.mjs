@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dealHoleCards, deriveDeck, toCardCodes, toHoleCardCodeMap } from "./poker-primitives.mjs";
+import { computeSharedLegalActions, dealHoleCards, deriveDeck, toCardCodes, toHoleCardCodeMap } from "./poker-primitives.mjs";
 
 function allUnique(cards) {
   return new Set(cards).size === cards.length;
@@ -31,4 +31,33 @@ test("dealHoleCards emits two unique cards per player with no duplicates across 
   const allCards = [...players.flatMap((id) => holeByUser[id]), ...remainder];
   assert.equal(allCards.length, 52);
   assert.equal(allUnique(allCards), true);
+});
+
+test("computeSharedLegalActions allows fold outside the current turn for an active live-hand participant", () => {
+  const legal = computeSharedLegalActions({
+    statePublic: {
+      phase: "TURN",
+      turnUserId: "u1",
+      seats: [
+        { userId: "u1", seatNo: 1 },
+        { userId: "u2", seatNo: 2 },
+        { userId: "u3", seatNo: 3 }
+      ],
+      stacks: { u1: 90, u2: 80, u3: 70 },
+      betThisRoundByUserId: { u1: 10, u2: 10, u3: 10 },
+      currentBet: 10,
+      foldedByUserId: { u1: false, u2: false, u3: false },
+      leftTableByUserId: { u1: false, u2: false, u3: false },
+      sitOutByUserId: { u1: false, u2: false, u3: false }
+    },
+    userId: "u2"
+  });
+
+  assert.deepEqual(legal, {
+    actions: ["FOLD"],
+    toCall: 0,
+    minRaiseTo: null,
+    maxRaiseTo: null,
+    maxBetAmount: null
+  });
 });

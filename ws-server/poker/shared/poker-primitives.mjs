@@ -152,6 +152,16 @@ function isActivePlayer(state, userId) {
   return !folded && !allIn;
 }
 
+function isSeatedPlayer(state, userId) {
+  if (!state || !userId) {
+    return false;
+  }
+  if (Array.isArray(state.seats)) {
+    return state.seats.some((seat) => seat && seat.userId === userId);
+  }
+  return !!(state.stacks && typeof state.stacks === "object" && Object.prototype.hasOwnProperty.call(state.stacks, userId));
+}
+
 function computeSharedLegalActions({ statePublic, userId } = {}) {
   const state = statePublic || {};
   if (!state || typeof state !== "object" || Array.isArray(state)) {
@@ -164,11 +174,11 @@ function computeSharedLegalActions({ statePublic, userId } = {}) {
   if (!userId || typeof userId !== "string") {
     return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
   }
-  const turnUserId = typeof state.turnUserId === "string" ? state.turnUserId : "";
-  if (!turnUserId || turnUserId !== userId) {
+  if (!isSeatedPlayer(state, userId) || !isActivePlayer(state, userId)) {
     return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
   }
-  if (!isActivePlayer(state, userId)) {
+  const turnUserId = typeof state.turnUserId === "string" ? state.turnUserId : "";
+  if (!turnUserId) {
     return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
   }
 
@@ -179,6 +189,9 @@ function computeSharedLegalActions({ statePublic, userId } = {}) {
   const toCall = Math.max(0, currentBet - currentUserBet);
   if (stack <= 0) {
     return { actions: [], toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
+  }
+  if (turnUserId !== userId) {
+    return { actions: ["FOLD"], toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
   }
 
   if (toCall > 0) {
