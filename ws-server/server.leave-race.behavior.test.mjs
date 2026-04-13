@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHmac } from 'node:crypto';
 import WebSocket from "ws";
 
 async function getFreePort() {
@@ -82,7 +83,7 @@ test("resume takeover rejects protected leave from prior socket", async () => {
   const token = (function makeHs256Jwt({ secret, sub }) {
     const encodedHeader = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
     const encodedPayload = Buffer.from(JSON.stringify({ sub })).toString("base64url");
-    const signature = require('crypto').createHmac('sha256', secret).update(`${encodedHeader}.${encodedPayload}`).digest('base64url');
+    const signature = createHmac('sha256', secret).update(`${encodedHeader}.${encodedPayload}`).digest('base64url');
     return `${encodedHeader}.${encodedPayload}.${signature}`;
   })({ secret, sub: "race_user" });
 
@@ -125,20 +126,20 @@ test("resume takeover rejects protected leave from prior socket", async () => {
     // clientB sends resume to take over the session
     sendFrame(clientB, { version: "1.0", type: "resume", roomId: "table_leave_race", requestId: "req-resume-b", ts: "2026-02-28T00:00:01Z", payload: { tableId: "table_leave_race", sessionId: sessionId, lastSeq: 0 } });
 
-    // Immediately have clientA attempt to send leave (protected frame)
-    sendFrame(clientA, { version: "1.0", type: "leave", requestId: "req-leave-a", ts: "2026-02-28T00:00:01Z", payload: { tableId: "table_leave_race" } });
+    // Wait for clientB to receive a resume ack (commandResult accepted)
+    const msgB = await nextMessage(clientB, 3000).catch(() => null);
+    assert.ok(msgB, 'clientB should receive resume ack');
+    assert.equal(msgB.type, 'commandResult');
+    assert.equal(msgB.payload.status, 'accepted');
+
+    // Now have clientA attempt to send leave (protected frame) — deterministic: after rebind
+    sendFrame(clientA, { version: "1.0", type: "leave", requestId: "req-leave-a", ts: "2026-02-28T00:00:02Z", payload: { tableId: "table_leave_race" } });
 
     // Expect clientA to receive an error STALE_SESSION for its leave
     const msgA = await nextMessage(clientA, 3000).catch(() => null);
     assert.ok(msgA, 'clientA should receive a response');
     assert.equal(msgA.type, 'error');
     assert.equal(msgA.payload.code, 'STALE_SESSION');
-
-    // Meanwhile, clientB should receive a resume ack (commandResult accepted)
-    const msgB = await nextMessage(clientB, 3000).catch(() => null);
-    assert.ok(msgB, 'clientB should receive resume ack');
-    assert.equal(msgB.type, 'commandResult');
-    assert.equal(msgB.payload.status, 'accepted');
 
     // Now clientB sends leave and it should be accepted
     sendFrame(clientB, { version: "1.0", type: "leave", requestId: "req-leave-b", ts: "2026-02-28T00:00:02Z", payload: { tableId: "table_leave_race" } });
