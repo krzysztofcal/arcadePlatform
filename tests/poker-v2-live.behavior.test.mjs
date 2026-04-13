@@ -1217,6 +1217,45 @@ test('poker v2 retries leave once after stale session reconnect', async () => {
   assert.equal(harness.windowLocation.href, '/poker/');
 });
 
+test('poker v2 leaves cleanly before the first live snapshot even when the removal snapshot arrives first', async () => {
+  let resolveLeave = null;
+  const harness = createHarness({
+    sendLeave(){
+      return new Promise(function(resolve){ resolveLeave = resolve; });
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  harness.elements.pokerV2LeaveBtn.click();
+  await harness.flush();
+
+  assert.equal(harness.leavePayloads.length, 1);
+  assert.equal(harness.windowLocation.href, '', 'leave should stay pending until the client learns the seat is gone');
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'bot-2', seat: 2 }] },
+      public: {
+        seats: [{ userId: 'bot-2', seatNo: 2, status: 'ACTIVE' }],
+        hand: { handId: 'hand-pre-snapshot-leave', status: 'SHOWDOWN', dealerSeatNo: 2 },
+        pot: { total: 8, sidePots: [] },
+        legalActions: { actions: [] }
+      },
+      private: { holeCards: [] },
+      you: { seat: null }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.windowLocation.href, '/poker/');
+  if (resolveLeave) resolveLeave({ ok: true });
+});
+
 test('poker v2 redirects to lobby when leave snapshot confirms the seat is gone even before leave promise resolves', async () => {
   var resolveLeave = null;
   const harness = createHarness({

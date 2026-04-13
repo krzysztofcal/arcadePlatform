@@ -148,11 +148,7 @@ const hasAnyActiveHuman = (seats) =>
 
 const hasLiveHandSignal = (state) => {
   const phase = typeof state?.phase === "string" ? state.phase : "";
-  if (["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(phase)) {
-    return true;
-  }
-  const handId = typeof state?.handId === "string" ? state.handId.trim() : "";
-  return !phase && Boolean(handId);
+  return ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(phase);
 };
 
 const toClosedInertState = (stateInput, stacks) => ({

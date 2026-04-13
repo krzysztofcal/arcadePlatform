@@ -135,6 +135,31 @@ const makeMocks = () => {
   await assert.rejects(() => executePokerLeave({ beginSql: ctx.beginSql, tableId, userId, requestId: "r4", klog: () => {} }), /state_conflict/);
 }
 
+for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
+  const ctx = makeMocks();
+  ctx.state.value = {
+    tableId,
+    phase: settledPhase,
+    handId: `hand-${settledPhase.toLowerCase()}-leave`,
+    seats: [{ userId, seatNo: 1 }, { userId: "bot-1", seatNo: 2, isBot: true }],
+    stacks: { [userId]: 41, "bot-1": 59 },
+    leftTableByUserId: {},
+    foldedByUserId: { [userId]: true, "bot-1": false },
+    actedThisRoundByUserId: { [userId]: true, "bot-1": true },
+    handSettlement: settledPhase === "SETTLED"
+      ? { handId: `hand-${settledPhase.toLowerCase()}-leave`, settledAt: "2026-04-13T00:00:00.000Z", payouts: { "bot-1": 4 } }
+      : null,
+  };
+  const executePokerLeave = loadExecutePokerLeave(ctx.mocks);
+  const result = await executePokerLeave({ beginSql: ctx.beginSql, tableId, userId, requestId: `r4-${settledPhase.toLowerCase()}`, includeState: true, klog: () => {} });
+  assert.equal(result.ok, true);
+  assert.equal(result.cashedOut, 41);
+  assert.equal(ctx.calls.cashouts, 1);
+  assert.equal(ctx.calls.deleteSeat, 1);
+  assert.equal(result.state.state.seats.some((seat) => seat.userId === userId), false);
+  assert.equal(result.state.state.stacks[userId], undefined);
+}
+
 {
   const ctx = makeMocks();
   ctx.state.value = {
