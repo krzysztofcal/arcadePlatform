@@ -1,6 +1,76 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createServer, connectClient, waitForListening, hello, auth, sendFrame, nextMessage, waitForExit } from "./server.test-helpers.mjs";
+import WebSocket from "ws";
+
+async function getFreePort() {
+  const net = await import('node:net');
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.listen(0, '127.0.0.1', () => {
+      const address = srv.address();
+      const port = address && typeof address === 'object' ? address.port : null;
+      srv.close((err) => {
+        if (err) return reject(err);
+        if (!port) return reject(new Error('Port allocation failed'));
+        resolve(port);
+      });
+    });
+    srv.on('error', reject);
+  });
+}
+
+function connectClient(port) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+    ws.once('open', () => resolve(ws));
+    ws.once('error', reject);
+  });
+}
+
+function sendFrame(ws, frame) {
+  ws.send(JSON.stringify(frame));
+}
+
+function nextMessage(ws, timeoutMs = 10000) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      ws.off('message', onMessage);
+      ws.off('error', onError);
+      ws.off('close', onClose);
+    };
+
+    const onMessage = (data) => {
+      cleanup();
+      resolve(JSON.parse(String(data)));
+    };
+
+    const onError = (err) => { cleanup(); reject(err); };
+    const onClose = (code) => { cleanup(); reject(new Error(`Socket closed before message: ${code}`)); };
+
+    const timer = setTimeout(() => { cleanup(); reject(new Error('Timed out waiting for websocket message')); }, timeoutMs);
+
+    ws.on('message', onMessage);
+    ws.on('error', onError);
+    ws.on('close', onClose);
+  });
+}
+
+async function hello(ws, requestId = 'req-hello') {
+  sendFrame(ws, { version: '1.0', type: 'hello', requestId, ts: new Date().toISOString(), payload: { supportedVersions: ['1.0'] } });
+  return nextMessage(ws, 5000);
+}
+
+async function auth(ws, token, requestId = 'req-auth') {
+  sendFrame(ws, { version: '1.0', type: 'auth', requestId, ts: new Date().toISOString(), payload: { token } });
+  return nextMessage(ws, 5000);
+}
+
+function waitForExit(proc) {
+  if (proc.exitCode !== null) return Promise.resolve();
+  return new Promise((resolve) => proc.once('exit', resolve));
+}
+
 
 // This test reproduces the ownership race: socket A owns a session and is joined to a table.
 // socket B resumes/takes over the session. Socket A immediately attempts to send a protected
@@ -16,28 +86,24 @@ test("resume takeover rejects protected leave from prior socket", async () => {
     return `${encodedHeader}.${encodedPayload}.${signature}`;
   })({ secret, sub: "race_user" });
 
-  const { port, child } = await (async () => {
-    const { getFreePort } = await import("./server.behavior.test.mjs");
-    const srv = await getFreePort();
-    const spawn = (await import('node:child_process')).spawn;
-    const child = spawn(process.execPath, ["ws-server/server.mjs"], {
-      env: { ...process.env, PORT: String(srv), WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret },
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-    await (async function waitForListeningProc(proc, timeoutMs = 5000) {
-      return new Promise((resolve, reject) => {
-        const onStdout = (buf) => { if (String(buf).includes('WS listening on')) { cleanup(); resolve(); } };
-        const onStderr = () => {};
-        const onExit = (code) => { cleanup(); reject(new Error('server exited before ready')); };
-        const cleanup = () => { proc.stdout.off('data', onStdout); proc.stderr.off('data', onStderr); proc.off('exit', onExit); };
-        proc.stdout.on('data', onStdout);
-        proc.stderr.on('data', onStderr);
-        proc.once('exit', onExit);
-        setTimeout(() => { cleanup(); reject(new Error('server start timeout')); }, timeoutMs);
-      });
-    })(child);
-    return { port: srv, child };
-  })();
+  const port = await getFreePort();
+  const { spawn } = await import('node:child_process');
+  const child = spawn(process.execPath, ["ws-server/server.mjs"], {
+    env: { ...process.env, PORT: String(port), WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  // wait for server stdout signal
+  await new Promise((resolve, reject) => {
+    const onStdout = (buf) => { if (String(buf).includes('WS listening on')) { cleanup(); resolve(); } };
+    const onStderr = () => {};
+    const onExit = (code) => { cleanup(); reject(new Error('server exited before ready')); };
+    const cleanup = () => { child.stdout.off('data', onStdout); child.stderr.off('data', onStderr); child.off('exit', onExit); };
+    child.stdout.on('data', onStdout);
+    child.stderr.on('data', onStderr);
+    child.once('exit', onExit);
+    setTimeout(() => { cleanup(); reject(new Error('server start timeout')); }, 5000);
+  });
+
 
   try {
     // connect client A and authenticate
