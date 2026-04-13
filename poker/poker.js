@@ -578,10 +578,14 @@
     var phase = typeof phaseValue === 'string' ? phaseValue.trim().toUpperCase() : '';
     var isActionPhase = phase === 'PREFLOP' || phase === 'FLOP' || phase === 'TURN' || phase === 'RIVER';
     if (!isActionPhase) return false;
+    var legalActions = Array.isArray(params && params.legalActions) ? params.legalActions : [];
+    for (var i = 0; i < legalActions.length; i++){
+      if (typeof legalActions[i] === 'string' && legalActions[i].trim().toUpperCase() === 'FOLD') return true;
+    }
     var turnUserId = params && typeof params.turnUserId === 'string' ? params.turnUserId.trim() : '';
     var currentUserId = params && typeof params.currentUserId === 'string' ? params.currentUserId.trim() : '';
     if (!turnUserId || !currentUserId || turnUserId !== currentUserId) return false;
-    return Array.isArray(params.legalActions) && params.legalActions.length > 0;
+    return legalActions.length > 0;
   }
   function resolveDevLogActionAvailability(flags){
     var info = flags || {};

@@ -383,6 +383,15 @@ export function applyAction({ pokerState, userId, action, amount, nowIso = "1970
     };
   }
 
+  if (wasOutOfTurnFold) {
+    nextState.turnUserId = pokerState.turnUserId;
+    return {
+      ok: true,
+      action: normalizedAction,
+      state: nextState
+    };
+  }
+
   if (shouldSettleAtShowdown(nextState)) {
     return {
       ok: true,
@@ -392,9 +401,7 @@ export function applyAction({ pokerState, userId, action, amount, nowIso = "1970
   }
 
   const closedRound = advanceStreetIfClosed(nextState);
-  if (wasOutOfTurnFold) {
-    nextState.turnUserId = pokerState.turnUserId;
-  } else if (!closedRound) {
+  if (!closedRound) {
     nextState.turnUserId = resolveNextTurnUserId(nextState, userId);
   }
 
