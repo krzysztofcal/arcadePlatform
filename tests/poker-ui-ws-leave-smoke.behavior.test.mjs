@@ -301,3 +301,102 @@ test('poker UI redirects to lobby when leave snapshot confirms the seat is gone 
   assert.equal(harness.windowLocation.href, '/poker/', 'leave confirmation snapshot should navigate back to poker lobby');
   if (resolveLeave) resolveLeave({ ok: true });
 });
+
+test('poker UI leaves to lobby when settlement snapshot removes the player while the table stays open for the remaining bot', async () => {
+  var leavePayloads = [];
+  var snapshotHandler = null;
+  var resolveLeave = null;
+  var harness = createPokerTableHarness({
+    responses: [
+      {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxPlayers: 6,
+        seats: [
+          { seatNo: 1, userId: 'user-1', status: 'ACTIVE', stack: 96 },
+          { seatNo: 2, userId: 'bot-2', status: 'ACTIVE', stack: 104 }
+        ],
+        legalActions: [],
+        actionConstraints: {},
+        state: {
+          version: 1,
+          state: {
+            phase: 'TURN',
+            pot: 10,
+            community: ['AS', 'KD', 'QC', '3H'],
+            stacks: { 'user-1': 96, 'bot-2': 104 },
+            turnUserId: 'user-1',
+            handId: 'hand-settle-leave'
+          }
+        }
+      }
+    ],
+    wsFactory(createOptions){
+      snapshotHandler = createOptions.onSnapshot;
+      return {
+        start(){
+          Promise.resolve().then(function(){
+            if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
+          });
+        },
+        destroy(){},
+        isReady(){ return true; },
+        sendLeave(payload){
+          leavePayloads.push(payload);
+          return new Promise(function(resolve){ resolveLeave = resolve; });
+        }
+      };
+    }
+  });
+
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  snapshotHandler({
+    kind: 'table_state',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      seats: [
+        { seatNo: 1, userId: 'user-1', status: 'ACTIVE' },
+        { seatNo: 2, userId: 'bot-2', status: 'ACTIVE' }
+      ],
+      stacks: { 'user-1': 96, 'bot-2': 104 },
+      authoritativeMembers: [
+        { userId: 'user-1', seat: 1 },
+        { userId: 'bot-2', seat: 2 }
+      ],
+      hand: { status: 'TURN', handId: 'hand-settle-leave' },
+      turn: { userId: 'user-1' },
+      legalActions: { actions: ['FOLD', 'CALL'] }
+    }
+  });
+  await harness.flush();
+
+  harness.elements.pokerLeave.click();
+  await harness.flush();
+
+  snapshotHandler({
+    kind: 'table_state',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      seats: [
+        { seatNo: 2, userId: 'bot-2', status: 'ACTIVE' }
+      ],
+      stacks: { 'bot-2': 110 },
+      authoritativeMembers: [
+        { userId: 'bot-2', seat: 2 }
+      ],
+      hand: { status: 'SETTLED', handId: 'hand-settle-leave' },
+      showdown: { handId: 'hand-settle-leave', winners: ['bot-2'], reason: 'computed', potsAwarded: [], potAwardedTotal: 10 },
+      handSettlement: { handId: 'hand-settle-leave', settledAt: '2026-04-13T00:00:00.000Z', payouts: { 'bot-2': 10 } },
+      legalActions: { actions: [] }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(leavePayloads.length, 1);
+  assert.equal(harness.windowLocation.href, '/poker/', 'settlement confirmation snapshot should navigate back to poker lobby');
+  if (resolveLeave) resolveLeave({ ok: true });
+});

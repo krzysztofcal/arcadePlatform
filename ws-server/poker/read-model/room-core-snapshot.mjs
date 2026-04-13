@@ -92,8 +92,9 @@ function resolvePublicSeats({ statePublic, members, coreState }) {
   const stateSeats = normalizeSeatRows(statePublic?.seats);
   const seatDetailsByUserId = normalizeSeatDetails(coreState?.seatDetailsByUserId);
   const foldedByUserId = asObject(statePublic?.foldedByUserId) || {};
+  const leftTableByUserId = asObject(statePublic?.leftTableByUserId) || {};
   const baseSeats = stateSeats.length > 0 ? stateSeats : normalizeMemberSeatRows(members);
-  return baseSeats.map((seat) => {
+  return baseSeats.filter((seat) => leftTableByUserId[seat.userId] !== true).map((seat) => {
     const details = seatDetailsByUserId[seat.userId] || null;
     const merged = { ...seat };
     if (foldedByUserId[seat.userId] === true) {

@@ -1271,3 +1271,131 @@ test('poker v2 redirects to lobby when leave snapshot confirms the seat is gone 
   assert.equal(harness.windowLocation.href, '/poker/');
   if (resolveLeave) resolveLeave({ ok: true });
 });
+
+test('poker v2 call then leave returns to lobby while the remaining hand continues without the leaver', async () => {
+  let resolveLeave = null;
+  const harness = createHarness({
+    sendLeave(){
+      return new Promise(function(resolve){ resolveLeave = resolve; });
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        seats: [{ userId: 'user-1', seatNo: 1, status: 'ACTIVE' }, { userId: 'bot-2', seatNo: 2, status: 'ACTIVE', isBot: true }],
+        hand: { handId: 'hand-call-leave', status: 'TURN', dealerSeatNo: 1 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 6, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CALL'] },
+        actionConstraints: { toCall: 2, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+        stacks: { 'user-1': 98, 'bot-2': 102 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'Q', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  harness.elements.pokerV2PrimaryBtn.click();
+  await harness.flush();
+  harness.elements.pokerV2LeaveBtn.click();
+  await harness.flush();
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'bot-2', seat: 2 }] },
+      public: {
+        seats: [{ userId: 'bot-2', seatNo: 2, status: 'ACTIVE', isBot: true }],
+        hand: { handId: 'hand-call-leave', status: 'SHOWDOWN', dealerSeatNo: 1 },
+        turn: { userId: null, deadlineAt: null },
+        pot: { total: 8, sidePots: [] },
+        legalActions: { actions: [] },
+        stacks: { 'bot-2': 104 }
+      },
+      private: { holeCards: [] },
+      you: { seat: null }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-call-leave', action: 'CALL' }));
+  assert.equal(harness.leavePayloads.length, 1);
+  assert.equal(harness.windowLocation.href, '/poker/');
+  if (resolveLeave) resolveLeave({ ok: true });
+});
+
+test('poker v2 fold then leave returns to lobby when settlement snapshot removes the player from view', async () => {
+  let resolveLeave = null;
+  const harness = createHarness({
+    sendLeave(){
+      return new Promise(function(resolve){ resolveLeave = resolve; });
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        seats: [{ userId: 'user-1', seatNo: 1, status: 'ACTIVE' }, { userId: 'bot-2', seatNo: 2, status: 'ACTIVE', isBot: true }],
+        hand: { handId: 'hand-fold-leave', status: 'RIVER', dealerSeatNo: 1 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 10, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CALL'] },
+        actionConstraints: { toCall: 4, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+        stacks: { 'user-1': 96, 'bot-2': 104 }
+      },
+      private: { holeCards: [{ r: '9', s: 'S' }, { r: '9', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  harness.elements.pokerV2FoldBtn.click();
+  await harness.flush();
+  harness.elements.pokerV2LeaveBtn.click();
+  await harness.flush();
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'bot-2', seat: 2 }] },
+      public: {
+        seats: [{ userId: 'bot-2', seatNo: 2, status: 'ACTIVE', isBot: true }],
+        hand: { handId: 'hand-fold-leave', status: 'SETTLED', dealerSeatNo: 1 },
+        turn: { userId: null, deadlineAt: null },
+        pot: { total: 0, sidePots: [] },
+        legalActions: { actions: [] },
+        showdown: { handId: 'hand-fold-leave', winners: ['bot-2'], reason: 'computed', potsAwarded: [], potAwardedTotal: 10 },
+        handSettlement: { handId: 'hand-fold-leave', settledAt: '2026-04-13T00:00:00.000Z', payouts: { 'bot-2': 10 } },
+        stacks: { 'bot-2': 110 }
+      },
+      private: { holeCards: [] },
+      you: { seat: null }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-fold-leave', action: 'FOLD' }));
+  assert.equal(harness.leavePayloads.length, 1);
+  assert.equal(harness.windowLocation.href, '/poker/');
+  if (resolveLeave) resolveLeave({ ok: true });
+});
