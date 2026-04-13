@@ -437,6 +437,16 @@ function invalidateSocketSession(ws, { reason = "session_rebound", closeCode = S
   }
 }
 
+// Helper: cancel any scheduled rebind invalidation for a socket (called on untrack/cleanup).
+function cancelScheduledRebindInvalidate(ws) {
+  try {
+    if (ws && ws.__rebindInvalidateTimer) {
+      clearTimeout(ws.__rebindInvalidateTimer);
+      ws.__rebindInvalidateTimer = null;
+    }
+  } catch (_err) {}
+}
+
 function sendError(ws, connState, { code, message, requestId = null, closeCode = null }) {
   sendFrame(
     ws,
@@ -1580,7 +1590,18 @@ wss.on("connection", (ws) => {
             newSocketRemoteAddr: ws && ws._socket && ws._socket.remoteAddress ? ws._socket.remoteAddress : null
           });
         } catch (_err) {}
-        invalidateSocketSession(rebound.priorSocket, { reason: "session_rebound" });
+        // Do not invalidate prior socket immediately. Schedule a safe invalidate to allow any in-flight protected frames to complete.
+        try {
+          if (rebound.priorSocket && typeof rebound.priorSocket === 'object') {
+            if (rebound.priorSocket.__rebindInvalidateTimer) {
+              clearTimeout(rebound.priorSocket.__rebindInvalidateTimer);
+            }
+            rebound.priorSocket.__rebindInvalidateTimer = setTimeout(function(){
+              try { invalidateSocketSession(rebound.priorSocket, { reason: "session_rebound" }); } catch (_e){}
+              try { rebound.priorSocket.__rebindInvalidateTimer = null; } catch (_e){}
+            }, 500);
+          }
+        } catch (_err) {}
       }
 
       connState.session = rebound.session;
