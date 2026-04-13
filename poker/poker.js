@@ -2546,13 +2546,13 @@
         seatUserSeatMap: buildSeatUserSeatMap(tableData.seats || [])
       });
       renderTable(tableData);
+      if (pendingLeaveNavigation && isSeated !== true){
+        pendingLeaveRetryAfterReconnect = false;
+        pendingLeaveNavigation = false;
+        navigateToPokerLobby();
+        return true;
+      }
       if (wasSeatedBefore && isSeated !== true){
-        if (pendingLeaveNavigation){
-          pendingLeaveRetryAfterReconnect = false;
-          pendingLeaveNavigation = false;
-          navigateToPokerLobby();
-          return true;
-        }
         var removalMessage = t('pokerRemovedFromTable', 'You were removed from the table and cashed out.');
         setError(errorEl, removalMessage);
         klog('poker_user_removed_from_table_snapshot', {

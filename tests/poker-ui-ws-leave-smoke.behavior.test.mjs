@@ -205,6 +205,84 @@ test('poker UI retries leave after stale session reconnect and then returns to l
   assert.equal(harness.windowLocation.href, '/poker/', 'successful leave retry should navigate back to poker lobby');
 });
 
+test('poker UI leaves cleanly before the first live snapshot when the removal snapshot arrives first', async () => {
+  var leavePayloads = [];
+  var snapshotHandler = null;
+  var resolveLeave = null;
+  var harness = createPokerTableHarness({
+    responses: [
+      {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxPlayers: 6,
+        seats: [
+          { seatNo: 1, userId: 'user-1', status: 'ACTIVE', stack: 150 },
+          { seatNo: 2, userId: 'bot-2', status: 'ACTIVE', stack: 150 }
+        ],
+        legalActions: [],
+        actionConstraints: {},
+        state: {
+          version: 1,
+          state: {
+            phase: 'PREFLOP',
+            pot: 15,
+            community: [],
+            stacks: { 'user-1': 150, 'bot-2': 150 },
+            turnUserId: 'user-1',
+            handId: 'hand-pre-snapshot-leave'
+          }
+        }
+      }
+    ],
+    wsFactory(createOptions){
+      snapshotHandler = createOptions.onSnapshot;
+      return {
+        start(){
+          Promise.resolve().then(function(){
+            if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
+          });
+        },
+        destroy(){},
+        isReady(){ return true; },
+        sendLeave(payload){
+          leavePayloads.push(payload);
+          return new Promise(function(resolve){ resolveLeave = resolve; });
+        }
+      };
+    }
+  });
+
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  harness.elements.pokerLeave.click();
+  await harness.flush();
+
+  assert.equal(leavePayloads.length, 1);
+  assert.equal(harness.windowLocation.href, '', 'leave should stay pending until the first live snapshot confirms the seat is gone');
+
+  snapshotHandler({
+    kind: 'table_state',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      seats: [
+        { seatNo: 2, userId: 'bot-2', status: 'ACTIVE' }
+      ],
+      stacks: { 'bot-2': 150 },
+      authoritativeMembers: [
+        { userId: 'bot-2', seat: 2 }
+      ],
+      hand: { status: 'SHOWDOWN', handId: 'hand-pre-snapshot-leave' },
+      legalActions: { actions: [] }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.windowLocation.href, '/poker/', 'first live removal snapshot should return the player to the poker lobby');
+  if (resolveLeave) resolveLeave({ ok: true });
+});
+
 test('poker UI redirects to lobby when leave snapshot confirms the seat is gone before leave promise resolves', async () => {
   var leavePayloads = [];
   var snapshotHandler = null;
