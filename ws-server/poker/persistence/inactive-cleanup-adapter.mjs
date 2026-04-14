@@ -15,6 +15,7 @@ function isTerminalLoaderFailure(error) {
 export function createInactiveCleanupExecutor({
   env = process.env,
   klog = () => {},
+  hasConnectedHumanPresence = () => false,
   loadInactiveCleanupModule = () => import(DEFAULT_INACTIVE_CLEANUP_MODULE_URL),
   loadDepsModule = () => import(DEFAULT_INACTIVE_CLEANUP_DEPS_MODULE_URL),
   beginSql = beginSqlDefault
@@ -38,7 +39,8 @@ export function createInactiveCleanupExecutor({
         env,
         klog,
         postTransaction: deps?.postTransaction,
-        isHoleCardsTableMissing: deps?.isHoleCardsTableMissing
+        isHoleCardsTableMissing: deps?.isHoleCardsTableMissing,
+        hasConnectedHumanPresence
       });
     } catch (error) {
       klog("ws_inactive_cleanup_failed", {

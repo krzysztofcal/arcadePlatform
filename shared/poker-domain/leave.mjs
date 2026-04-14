@@ -452,7 +452,17 @@ const buildAlreadyLeftResultPayload = ({ tableId, seatNo, includeState, state, u
 };
 
 
-export async function executePokerLeave({ beginSql, tableId, userId, requestId = null, nowMs = Date.now(), klog, includeState = false, runPostLeaveBotAutoplay = true }) {
+export async function executePokerLeave({
+  beginSql,
+  tableId,
+  userId,
+  requestId = null,
+  nowMs = Date.now(),
+  klog,
+  includeState = false,
+  runPostLeaveBotAutoplay = true,
+  hasConnectedHumanPresence = () => false
+}) {
   void nowMs;
   let txId = null;
   const result = await beginSql(async (tx) => {
@@ -833,7 +843,7 @@ export async function executePokerLeave({ beginSql, tableId, userId, requestId =
           "select user_id, status, is_bot, stack from public.poker_seats where table_id = $1 for update;",
           [tableId]
         );
-        if (!hasAnyActiveHuman(allSeatRows) && !hasLiveHandSignal(latestState)) {
+        if (!hasAnyActiveHuman(allSeatRows) && !hasLiveHandSignal(latestState) && hasConnectedHumanPresence({ tableId }) !== true) {
           const closedStacks = parseStacks(latestState.stacks);
           for (const row of allSeatRows || []) {
             if (row?.is_bot === true) continue;

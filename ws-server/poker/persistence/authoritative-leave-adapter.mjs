@@ -102,6 +102,7 @@ function isRetryableSqlFailure(error) {
 export function createAuthoritativeLeaveExecutor({
   env = process.env,
   klog = () => {},
+  hasConnectedHumanPresence = () => false,
   loadAuthoritativeLeaveModule = () => {
     const configuredPath = typeof env?.WS_AUTHORITATIVE_LEAVE_MODULE_PATH === "string"
       ? env.WS_AUTHORITATIVE_LEAVE_MODULE_PATH.trim()
@@ -143,6 +144,7 @@ export function createAuthoritativeLeaveExecutor({
           requestId,
           includeState: true,
           runPostLeaveBotAutoplay: false,
+          hasConnectedHumanPresence,
           klog
         });
         return normalizeValidatedResult({ result, tableId, userId, requestId, klog });

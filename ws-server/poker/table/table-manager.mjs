@@ -1150,6 +1150,24 @@ export function createTableManager({
     return seatDetails?.[normalizedUserId]?.isBot === true;
   }
 
+  function hasActiveHumanMember(tableId) {
+    const table = tables.get(tableId);
+    if (!table) {
+      return false;
+    }
+    const members = Array.isArray(table?.coreState?.members) ? table.coreState.members : [];
+    return members.some((member) => !isBotUser(tableId, member?.userId));
+  }
+
+  function hasConnectedHumanPresence(tableId) {
+    for (const conn of connStateBySocket.values()) {
+      if (conn?.joinedTableId === tableId || conn?.subscribedTableId === tableId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   function __debugCore(tableId) {
     const table = tables.get(tableId);
     if (!table) {
@@ -1229,7 +1247,9 @@ export function createTableManager({
     restoreTableFromPersisted,
     buildAuthoritativeLeaveRestore,
     isTableClosed,
-    isBotUser
+    isBotUser,
+    hasActiveHumanMember,
+    hasConnectedHumanPresence
   };
 
   if (enableDebugCore && nodeEnv !== "production") {

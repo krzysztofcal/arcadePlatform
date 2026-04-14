@@ -392,4 +392,36 @@ for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
   assert.equal(result.state.state.handSettlement.payouts["bot-1"], 6);
 }
 
+{
+  const ctx = makeMocks();
+  ctx.state.value = {
+    tableId,
+    phase: "HAND_DONE",
+    seats: [{ userId, seatNo: 1 }, { userId: "bot-1", seatNo: 2, isBot: true }],
+    stacks: { [userId]: 47, "bot-1": 53 },
+    leftTableByUserId: {}
+  };
+  ctx.mocks.applyLeaveTable = (s) => ({
+    state: {
+      ...s,
+      seats: s.seats.filter((seat) => seat.userId !== userId),
+      stacks: { "bot-1": 53 },
+      leftTableByUserId: { ...s.leftTableByUserId, [userId]: true }
+    }
+  });
+  const executePokerLeave = loadExecutePokerLeave(ctx.mocks);
+  const result = await executePokerLeave({
+    beginSql: ctx.beginSql,
+    tableId,
+    userId,
+    requestId: "r9",
+    includeState: true,
+    hasConnectedHumanPresence: () => true,
+    klog: () => {}
+  });
+  assert.equal(result.ok, true);
+  assert.equal(ctx.calls.closeTable, 0);
+  assert.equal(result.state.state.seats.some((seat) => seat.userId === userId), false);
+}
+
 console.log("poker-domain leave behavior test passed");

@@ -128,6 +128,74 @@ test('singleton human disconnect closes table, ignores bots keep-alive, and clos
   assert.deepEqual(closedState.actedThisRoundByUserId, {});
 });
 
+test('bots-only live hand stays open until the hand is finished', async () => {
+  const ctx = makeTx({
+    seat: null,
+    state: {
+      phase: 'TURN',
+      handId: 'hand-live-bots-only',
+      turnUserId: 'bot-1',
+      stacks: { 'bot-1': 50, 'user-ghost': 20 }
+    },
+    allSeats: [
+      { user_id: 'user-ghost', status: 'INACTIVE', is_bot: false, stack: 0 },
+      { user_id: 'bot-1', status: 'ACTIVE', is_bot: true, stack: 50 }
+    ],
+    tableStatus: 'OPEN'
+  });
+
+  const result = await executeInactiveCleanup({
+    tableId: 'table-live-bots-only',
+    userId: null,
+    requestId: 'req-live-bots-only',
+    env: {},
+    beginSql: async (fn) => fn(ctx.tx),
+    postTransaction: async (payload) => ctx.ledgerCalls.push(payload),
+    isHoleCardsTableMissing: () => false
+  });
+
+  assert.equal(result.status, 'live_hand_preserved');
+  assert.equal(result.closed, false);
+  const closedUpdate = ctx.updates.find((u) => String(u.query).includes("set status = 'CLOSED'"));
+  assert.equal(closedUpdate, undefined);
+  const stateUpdate = ctx.updates.find((u) => u.kind === 'state');
+  assert.ok(stateUpdate);
+  assert.equal(stateUpdate.value.phase, 'TURN');
+  assert.equal(stateUpdate.value.turnUserId, 'bot-1');
+});
+
+test('terminal bots-only table stays open when a human observer is still connected', async () => {
+  const ctx = makeTx({
+    seat: null,
+    state: {
+      phase: 'HAND_DONE',
+      handId: '',
+      turnUserId: null,
+      stacks: { 'bot-1': 80 }
+    },
+    allSeats: [
+      { user_id: 'bot-1', status: 'ACTIVE', is_bot: true, stack: 80 }
+    ],
+    tableStatus: 'OPEN'
+  });
+
+  const result = await executeInactiveCleanup({
+    tableId: 'table-human-observer',
+    userId: null,
+    requestId: 'req-human-observer',
+    env: {},
+    beginSql: async (fn) => fn(ctx.tx),
+    postTransaction: async (payload) => ctx.ledgerCalls.push(payload),
+    isHoleCardsTableMissing: () => false,
+    hasConnectedHumanPresence: () => true
+  });
+
+  assert.equal(result.status, 'human_presence_present');
+  assert.equal(result.closed, false);
+  const closedUpdate = ctx.updates.find((u) => String(u.query).includes("set status = 'CLOSED'"));
+  assert.equal(closedUpdate, undefined);
+});
+
 test('idempotent no-op when seat is already inactive', async () => {
   const ctx = makeTx({
     seat: { table_id: 'table-4', user_id: 'user-4', seat_no: 4, status: 'INACTIVE', is_bot: false, stack: 0 },

@@ -407,6 +407,28 @@ test("syncAuthoritativeLeave intentionally drops caller subscription while prese
 
 
 
+test("table presence helpers distinguish seated humans from connected observers", () => {
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const tableId = "table_presence_helpers";
+  const wsSeat = fakeWs("ws-presence-seat");
+  const wsObserver = fakeWs("ws-presence-observer");
+
+  tableManager.join({ ws: wsSeat, userId: "human_user", tableId, requestId: "join-presence-seat", nowTs: 1 });
+  tableManager.subscribe({ ws: wsObserver, tableId });
+
+  assert.equal(tableManager.hasActiveHumanMember(tableId), true);
+  assert.equal(tableManager.hasConnectedHumanPresence(tableId), true);
+
+  const left = tableManager.leave({ ws: wsSeat, userId: "human_user", tableId, requestId: "leave-presence-seat" });
+  assert.equal(left.ok, true);
+  assert.equal(tableManager.hasActiveHumanMember(tableId), false);
+  assert.equal(tableManager.hasConnectedHumanPresence(tableId), true);
+
+  const observerLeft = tableManager.leave({ ws: wsObserver, userId: "observer_user", tableId, requestId: "leave-presence-observer" });
+  assert.equal(observerLeft.ok, true);
+  assert.equal(tableManager.hasConnectedHumanPresence(tableId), false);
+});
+
 test("syncAuthoritativeLeave rejects mismatched authoritative tableId without mutating state", () => {
   const tableId = "table_sync_leave_mismatch";
   const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
