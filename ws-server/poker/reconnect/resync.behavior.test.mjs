@@ -32,6 +32,8 @@ function waitForListening(proc, timeoutMs) {
         clearTimeout(timer);
         proc.stdout.off("data", onData);
         proc.off("exit", onExit);
+        proc.stdout.resume();
+        proc.stderr.resume();
         resolve();
       }
     };
