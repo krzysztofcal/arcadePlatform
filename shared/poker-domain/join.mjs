@@ -542,7 +542,14 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       );
       const persistedSeatRow = persistedSeatRows?.[0] || null;
       if (persistedSeatRow) {
-        const stateRow = normalizeLockedStateResult(await loadStateForUpdate(tx, tableId));
+        const lockedStateResult = await loadStateForUpdate(tx, tableId);
+        if (!lockedStateResult?.ok) {
+          if (lockedStateResult?.reason === "not_found") {
+            throw makeError("seat_taken");
+          }
+          normalizeLockedStateResult(lockedStateResult);
+        }
+        const stateRow = normalizeLockedStateResult(lockedStateResult);
         const retainedLiveHandSeat = resolveRetainedLiveHandSeat(stateRow.state, userId);
         if (retainedLiveHandSeat) {
           return completeRetainedLiveHandJoin({
@@ -562,6 +569,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
             klog
           });
         }
+        throw makeError("seat_taken");
       }
 
     const occupiedRows = await tx.unsafe(

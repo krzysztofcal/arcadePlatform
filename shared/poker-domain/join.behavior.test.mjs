@@ -180,6 +180,30 @@ test("maps unique insert conflicts to seat_taken", async () => {
   );
 });
 
+test("historical non-ACTIVE seat still rejects with seat_taken when no authoritative state exists", async () => {
+  await assert.rejects(
+    () => executePokerJoinAuthoritative(withLockedState({
+      beginSql: async (fn) => fn({
+        unsafe: async (sql) => {
+          if (sql.includes("from public.poker_tables")) return [{ id: "t1", status: "OPEN", max_players: 6 }];
+          if (sql.includes("from public.poker_seats") && sql.includes("status = 'ACTIVE'") && sql.includes("user_id = $2")) return [];
+          if (sql.includes("select seat_no, status, stack from public.poker_seats")) {
+            return [{ seat_no: 1, status: "INACTIVE", stack: 0 }];
+          }
+          if (sql.includes("select version, state from public.poker_state")) return [];
+          return [];
+        }
+      }),
+      tableId: "t1",
+      userId: "u1",
+      requestId: "historical-seat",
+      buyIn: 100,
+      postTransactionFn: async () => ({ ok: true })
+    })),
+    (error) => error?.code === "seat_taken"
+  );
+});
+
 test("authoritative join rejects when financial mutation fails", async () => {
   const writes = [];
   await assert.rejects(
