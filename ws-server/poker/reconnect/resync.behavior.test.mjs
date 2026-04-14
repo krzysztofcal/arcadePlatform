@@ -185,21 +185,47 @@ async function writePersistedFile(fixture) {
 }
 
 async function nextMessageOfType(ws, type, { timeoutMs = 5000, skipTypes = [] } = {}) {
-  const started = Date.now();
-  while (true) {
-    const remaining = timeoutMs - (Date.now() - started);
-    if (remaining <= 0) {
-      throw new Error(`Timed out waiting for message type: ${type}`);
-    }
-    const frame = await nextMessage(ws, remaining, `nextMessageOfType(${type})`);
-    if (frame?.type === type) {
-      return frame;
-    }
-    if (skipTypes.includes(frame?.type)) {
-      continue;
-    }
-    throw new Error(`Unexpected frame while waiting for ${type}: ${frame?.type || "unknown"}`);
-  }
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      ws.off("error", onError);
+      ws.off("close", onClose);
+    };
+
+    const onMessage = (data) => {
+      const frame = JSON.parse(String(data));
+      if (frame?.type === type) {
+        cleanup();
+        resolve(frame);
+        return;
+      }
+      if (skipTypes.includes(frame?.type)) {
+        return;
+      }
+      cleanup();
+      reject(new Error(`Unexpected frame while waiting for ${type}: ${frame?.type || "unknown"}`));
+    };
+
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+
+    const onClose = (code) => {
+      cleanup();
+      reject(new Error(`Socket closed before message type ${type}: ${code}`));
+    };
+
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for message type: ${type}`));
+    }, timeoutMs);
+
+    ws.on("message", onMessage);
+    ws.on("error", onError);
+    ws.on("close", onClose);
+  });
 }
 
 

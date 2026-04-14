@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { writeUtf8FileAtomic } from "./atomic-file-write.mjs";
 
 function emptyStore() {
   return { tables: {} };
@@ -17,7 +18,7 @@ async function readStore(filePath) {
 }
 
 async function writeStore(filePath, value) {
-  await fs.writeFile(filePath, `${JSON.stringify(value)}\n`, "utf8");
+  await writeUtf8FileAtomic(filePath, `${JSON.stringify(value)}\n`);
 }
 
 export async function loadPersistedTableFromFile({ filePath, tableId }) {

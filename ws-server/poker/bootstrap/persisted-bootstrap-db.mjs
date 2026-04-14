@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import postgres from "postgres";
+import { writeUtf8FileAtomic } from "../persistence/atomic-file-write.mjs";
 
 const clientsByDbUrl = new Map();
 
@@ -129,8 +130,8 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
   };
 
   const result = await fn(tx);
-  await fs.writeFile(filePath, `${JSON.stringify(doc)}
-`, "utf8");
+  await writeUtf8FileAtomic(filePath, `${JSON.stringify(doc)}
+`);
   return result;
 }
 

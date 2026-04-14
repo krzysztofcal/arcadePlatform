@@ -95,7 +95,14 @@ test("resume takeover rejects protected leave from prior socket", async () => {
   });
   // wait for server stdout signal
   await new Promise((resolve, reject) => {
-    const onStdout = (buf) => { if (String(buf).includes('WS listening on')) { cleanup(); resolve(); } };
+    const onStdout = (buf) => {
+      if (String(buf).includes('WS listening on')) {
+        cleanup();
+        child.stdout.resume();
+        child.stderr.resume();
+        resolve();
+      }
+    };
     const onStderr = () => {};
     const onExit = (code) => { cleanup(); reject(new Error('server exited before ready')); };
     const cleanup = () => { child.stdout.off('data', onStdout); child.stderr.off('data', onStderr); child.off('exit', onExit); };
