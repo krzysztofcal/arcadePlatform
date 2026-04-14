@@ -14,6 +14,15 @@ export function isLiveHandPhase(phase) {
   return LIVE_HAND_PHASES.has(normalized);
 }
 
+export function shouldRetainStateSeatUser(state, userId) {
+  const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+  if (!normalizedUserId) return false;
+  const waitingForNextHandByUserId = isPlainObject(state?.waitingForNextHandByUserId) ? state.waitingForNextHandByUserId : {};
+  if (waitingForNextHandByUserId[normalizedUserId] === true) return true;
+  const leftTableByUserId = isPlainObject(state?.leftTableByUserId) ? state.leftTableByUserId : {};
+  return isLiveHandPhase(state?.phase) && leftTableByUserId[normalizedUserId] === true;
+}
+
 export function resolveRetainedLiveHandSeat(state, userId) {
   if (!isLiveHandPhase(state?.phase)) return null;
   const normalizedUserId = typeof userId === "string" ? userId.trim() : "";

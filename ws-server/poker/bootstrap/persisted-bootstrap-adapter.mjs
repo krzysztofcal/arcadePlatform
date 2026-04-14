@@ -1,3 +1,5 @@
+import { shouldRetainStateSeatUser } from "../../../shared/poker-domain/retained-live-hand-seat.mjs";
+
 function asPlainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
@@ -149,20 +151,12 @@ function snapshotSeatFromMetadata(seat) {
 }
 
 function resolveRetainedStateSeatUserIds(pokerState) {
-  const leftTableByUserId = asPlainObject(pokerState?.leftTableByUserId) || {};
-  const waitingForNextHandByUserId = asPlainObject(pokerState?.waitingForNextHandByUserId) || {};
   const retainedUserIds = new Set();
-  for (const [userId, leftTable] of Object.entries(leftTableByUserId)) {
-    if (!leftTable && waitingForNextHandByUserId[userId] !== true) continue;
-    if (typeof userId === "string" && userId.trim()) {
-      retainedUserIds.add(userId.trim());
-    }
-  }
-  for (const [userId, waiting] of Object.entries(waitingForNextHandByUserId)) {
-    if (waiting !== true) continue;
-    if (typeof userId === "string" && userId.trim()) {
-      retainedUserIds.add(userId.trim());
-    }
+  const stateSeats = Array.isArray(pokerState?.seats) ? pokerState.seats : [];
+  for (const seat of stateSeats) {
+    const userId = typeof seat?.userId === "string" ? seat.userId.trim() : "";
+    if (!userId || !shouldRetainStateSeatUser(pokerState, userId)) continue;
+    retainedUserIds.add(userId);
   }
   return retainedUserIds;
 }

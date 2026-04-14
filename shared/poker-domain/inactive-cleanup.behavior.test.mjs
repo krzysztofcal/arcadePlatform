@@ -154,7 +154,7 @@ test("inactive cleanup preserves retained live-hand stack for later rejoin witho
   const result = await harness.run();
 
   assert.equal(result.ok, true);
-  assert.equal(result.changed, false);
+  assert.equal(result.changed, true);
   assert.equal(result.status, "retained_live_hand_preserved");
   assert.equal(harness.cashouts.length, 0);
   assert.equal(harness.seatState.find((row) => row.user_id === "human_1")?.status, "INACTIVE");

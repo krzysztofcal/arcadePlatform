@@ -174,7 +174,7 @@ export async function executeInactiveCleanup({
       });
       return {
         ok: true,
-        changed: false,
+        changed: seatWasActive,
         status: "retained_live_hand_preserved",
         closed: false,
         retryable: false
