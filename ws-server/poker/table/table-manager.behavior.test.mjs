@@ -407,6 +407,76 @@ test("syncAuthoritativeLeave intentionally drops caller subscription while prese
 
 
 
+test("table presence helpers distinguish seated humans from connected observers", () => {
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const tableId = "table_presence_helpers";
+  const wsSeat = fakeWs("ws-presence-seat");
+  const wsObserver = fakeWs("ws-presence-observer");
+
+  tableManager.join({ ws: wsSeat, userId: "human_user", tableId, requestId: "join-presence-seat", nowTs: 1 });
+  tableManager.subscribe({ ws: wsObserver, tableId });
+
+  assert.equal(tableManager.hasActiveHumanMember(tableId), true);
+  assert.equal(tableManager.hasConnectedHumanPresence(tableId), true);
+
+  const left = tableManager.leave({ ws: wsSeat, userId: "human_user", tableId, requestId: "leave-presence-seat" });
+  assert.equal(left.ok, true);
+  assert.equal(tableManager.hasActiveHumanMember(tableId), false);
+  assert.equal(tableManager.hasConnectedHumanPresence(tableId), true);
+
+  const observerLeft = tableManager.leave({ ws: wsObserver, userId: "observer_user", tableId, requestId: "leave-presence-observer" });
+  assert.equal(observerLeft.ok, true);
+  assert.equal(tableManager.hasConnectedHumanPresence(tableId), false);
+});
+
+test("table presence helpers ignore session-invalidated stale sockets", () => {
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const tableId = "table_presence_invalidated";
+  const wsObserver = fakeWs("ws-presence-invalidated");
+
+  tableManager.subscribe({ ws: wsObserver, tableId });
+  assert.equal(tableManager.hasConnectedHumanPresence(tableId), true);
+
+  wsObserver.__connState = { sessionInvalidated: true };
+  assert.equal(tableManager.hasConnectedHumanPresence(tableId), false);
+});
+
+test("observer disconnect from settled table emits update so rollover can re-evaluate presence", () => {
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const tableId = "table_settled_observer_disconnect";
+  const wsObserver = fakeWs("ws-settled-observer");
+
+  tableManager.subscribe({ ws: wsObserver, tableId });
+  tableManager.restoreTableFromPersisted(tableId, {
+    tableStatus: "OPEN",
+    coreState: {
+      version: 5,
+      roomId: tableId,
+      maxSeats: 4,
+      appliedRequestIds: [],
+      members: [{ userId: "bot_1", seat: 1 }],
+      seats: { bot_1: 1 },
+      publicStacks: { bot_1: 100 },
+      seatDetailsByUserId: {
+        bot_1: { isBot: true, botProfile: null, leaveAfterHand: false }
+      },
+      pokerState: {
+        tableId,
+        phase: "SETTLED",
+        seats: [{ userId: "bot_1", seatNo: 1, isBot: true }],
+        stacks: { bot_1: 100 },
+        handSettlement: { settledAt: "2026-04-14T10:00:00.000Z" }
+      }
+    },
+    presenceByUserId: new Map()
+  });
+
+  const updates = tableManager.cleanupConnection({ ws: wsObserver, userId: "observer_user", nowTs: 10, activeSockets: [] });
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].tableId, tableId);
+  assert.equal(tableManager.hasConnectedHumanPresence(tableId), false);
+});
+
 test("syncAuthoritativeLeave rejects mismatched authoritative tableId without mutating state", () => {
   const tableId = "table_sync_leave_mismatch";
   const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
@@ -1020,7 +1090,7 @@ test("applyAction accepts legal turn CALL and increments state version once", ()
   assert.equal(after.hand.status, "FLOP");
   assert.equal(after.board.cards.length, 3);
   assert.equal(after.turn.userId, "user_b");
-  assert.deepEqual(after.legalActions, { seat: 1, actions: [] });
+  assert.deepEqual(after.legalActions, { seat: 1, actions: ["FOLD"] });
   assert.equal(after.private.holeCards.length, 2);
 });
 
@@ -1050,7 +1120,7 @@ test("applyAction CALL closes initial heads-up preflop loop coherently", () => {
   assert.equal(actorAfter.hand.status, "FLOP");
   assert.equal(actorAfter.board.cards.length, 3);
   assert.equal(actorAfter.turn.userId, "user_b");
-  assert.deepEqual(actorAfter.legalActions, { seat: 1, actions: [] });
+  assert.deepEqual(actorAfter.legalActions, { seat: 1, actions: ["FOLD"] });
   assert.deepEqual(otherAfter.legalActions.actions.includes("CHECK"), true);
 });
 

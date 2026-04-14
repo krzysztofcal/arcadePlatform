@@ -18,6 +18,7 @@ const normalizeNonNegativeInt = (n) => {
 };
 
 const DEFAULT_TABLE_CLOSE_GRACE_MS = 60_000;
+const LIVE_HAND_PHASES = new Set(["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"]);
 
 function normalizePositiveInt(n) {
   const value = Number(n);
@@ -38,6 +39,11 @@ function parseTimestampMs(value) {
 
 function resolveCloseGraceMs(env) {
   return normalizePositiveInt(env?.POKER_TABLE_CLOSE_GRACE_MS) ?? DEFAULT_TABLE_CLOSE_GRACE_MS;
+}
+
+function hasLiveHandSignal(state) {
+  const phase = typeof state?.phase === "string" ? state.phase : "";
+  return LIVE_HAND_PHASES.has(phase);
 }
 
 function resolveStateStacks(state) {
@@ -130,7 +136,8 @@ export async function executeInactiveCleanup({
   env = process.env,
   klog = () => {},
   postTransaction,
-  isHoleCardsTableMissing = () => false
+  isHoleCardsTableMissing = () => false,
+  hasConnectedHumanPresence = () => false
 }) {
   const normalizedUserId = typeof userId === "string" && userId.trim() ? userId.trim() : null;
   const sweepActorUserId = String(env?.POKER_SYSTEM_ACTOR_USER_ID || "").trim() || normalizedUserId || "system";
@@ -177,8 +184,9 @@ export async function executeInactiveCleanup({
       [tableId]
     );
 
+    let nextState = state;
     if (stateRow) {
-      const nextState = { ...state, stacks };
+      nextState = { ...state, stacks };
       const turnUserId = typeof nextState.turnUserId === "string" ? nextState.turnUserId : null;
       if (turnUserId && !activeSeatUserIdSet(allSeatRows).has(turnUserId)) {
         nextState.turnUserId = null;
@@ -193,6 +201,38 @@ export async function executeInactiveCleanup({
       return { ok: true, changed: seatWasActive, status: seatWasActive ? "cleaned" : "already_inactive", closed: false, retryable: false };
     }
 
+    if (hasLiveHandSignal(nextState)) {
+      klog("poker_inactive_cleanup_live_hand_preserved", {
+        tableId,
+        userId: normalizedUserId,
+        phase: typeof nextState?.phase === "string" ? nextState.phase : null,
+        seatWasActive
+      });
+      return {
+        ok: true,
+        changed: seatWasActive,
+        status: seatWasActive ? "cleaned_live_hand_preserved" : "live_hand_preserved",
+        closed: false,
+        retryable: false
+      };
+    }
+
+    if (hasConnectedHumanPresence({ tableId }) === true) {
+      klog("poker_inactive_cleanup_table_close_skipped_human_presence", {
+        tableId,
+        userId: normalizedUserId,
+        phase: typeof nextState?.phase === "string" ? nextState.phase : null,
+        seatWasActive
+      });
+      return {
+        ok: true,
+        changed: seatWasActive,
+        status: seatWasActive ? "cleaned_human_presence_present" : "human_presence_present",
+        closed: false,
+        retryable: false
+      };
+    }
+
     const tableRows = await tx.unsafe("select status, created_at from public.poker_tables where id = $1 limit 1 for update;", [tableId]);
     const tableStatus = tableRows?.[0]?.status || null;
     const tableCreatedAtMs = parseTimestampMs(tableRows?.[0]?.created_at);
@@ -204,6 +244,12 @@ export async function executeInactiveCleanup({
     for (const row of allSeatRows || []) {
       if (row?.is_bot === true) continue;
       const closeCashout = stateFirstStackAmount({ state: { stacks }, seat: row, userId: row.user_id });
+      klog("poker_inactive_cleanup_post_hand_cashout", {
+        tableId,
+        userId: row?.user_id ?? null,
+        amount: closeCashout.amount,
+        source: closeCashout.source
+      });
       await postCashout({
         postTransaction,
         tx,
@@ -235,6 +281,13 @@ export async function executeInactiveCleanup({
       }
       closed = true;
     }
+
+    klog("poker_inactive_cleanup_table_closed_terminal_bots_only", {
+      tableId,
+      userId: normalizedUserId,
+      closed,
+      phase: typeof nextState?.phase === "string" ? nextState.phase : null
+    });
 
     return { ok: true, changed: seatWasActive || closed, status: closed ? "cleaned_closed" : "already_closed", closed, retryable: false };
   });

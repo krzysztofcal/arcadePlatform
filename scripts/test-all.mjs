@@ -73,6 +73,7 @@ run("node", ["tests/poker-handSeats-seats-undefined.behavior.test.mjs"], "poker-
 run("node", ["tests/poker-handSeats-reset.behavior.test.mjs"], "poker-handseats-reset-behavior");
 run("node", ["tests/poker-legal-actions.left-player.invalid-player.behavior.test.mjs"], "poker-legal-actions-left-player-invalid-player-behavior");
 run("node", ["shared/poker-domain/leave.behavior.test.mjs"], "poker-domain-leave-behavior");
+run("node", ["tests/poker-table-list.left-player-filter.behavior.test.mjs"], "poker-table-list-left-player-filter-behavior");
 run("node", ["shared/poker-domain/inactive-cleanup.behavior.test.mjs"], "poker-domain-inactive-cleanup-behavior");
 run("node", ["tests/poker-inactive-cleanup.behavior.test.mjs"], "poker-inactive-cleanup-behavior");
 run("node", ["tests/poker-materialize-settlement.payouts.test.mjs"], "poker-materialize-settlement-payouts");

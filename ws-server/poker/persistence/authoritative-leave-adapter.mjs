@@ -69,7 +69,11 @@ function isValidAuthoritativeLeaveSuccessShape(result, expectedTableId, leavingU
     return false;
   }
 
-  return !authoritativeSeatsContainUser(state.seats, leavingUserId);
+  if (!authoritativeSeatsContainUser(state.seats, leavingUserId)) {
+    return true;
+  }
+
+  return state?.leftTableByUserId?.[leavingUserId] === true;
 }
 
 function normalizeValidatedResult({ result, tableId, userId, requestId, klog }) {
@@ -98,6 +102,7 @@ function isRetryableSqlFailure(error) {
 export function createAuthoritativeLeaveExecutor({
   env = process.env,
   klog = () => {},
+  hasConnectedHumanPresence = () => false,
   loadAuthoritativeLeaveModule = () => {
     const configuredPath = typeof env?.WS_AUTHORITATIVE_LEAVE_MODULE_PATH === "string"
       ? env.WS_AUTHORITATIVE_LEAVE_MODULE_PATH.trim()
@@ -138,6 +143,8 @@ export function createAuthoritativeLeaveExecutor({
           userId,
           requestId,
           includeState: true,
+          runPostLeaveBotAutoplay: false,
+          hasConnectedHumanPresence,
           klog
         });
         return normalizeValidatedResult({ result, tableId, userId, requestId, klog });

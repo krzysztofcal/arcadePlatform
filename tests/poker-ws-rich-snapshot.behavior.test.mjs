@@ -20,6 +20,9 @@ test("rich ws snapshot merge updates public fields and preserves constraints whe
     function getSafeConstraints(data){ var constraints = getConstraintsFromResponse(data); return { toCall: toFiniteOrNull(constraints ? constraints.toCall : null), minRaiseTo: toFiniteOrNull(constraints ? constraints.minRaiseTo : null), maxRaiseTo: toFiniteOrNull(constraints ? constraints.maxRaiseTo : null), maxBetAmount: toFiniteOrNull(constraints ? constraints.maxBetAmount : null) }; }
     function getSeatedCount(data){ var seats = data && Array.isArray(data.seats) ? data.seats : []; var activeCount = 0; for (var i = 0; i < seats.length; i++){ var seat = seats[i]; if (!seat || !seat.userId) continue; var status = typeof seat.status === 'string' ? seat.status.toUpperCase() : ''; if (!status || status === 'ACTIVE' || status === 'SEATED') activeCount++; } return activeCount; }
     var wsAppliedSnapshotSeq = 0;
+    var pendingLeaveNavigation = false;
+    var leaveConfirmOpen = false;
+    function closeLeaveConfirm(){ leaveConfirmOpen = false; }
     ${fnSource}
     return { mergeWsStateIntoTableData, getSafeConstraints };
   `);
@@ -92,6 +95,9 @@ test("card normalization helpers parse classic string cards and reject invalid e
     function getSafeConstraints(data){ var constraints = getConstraintsFromResponse(data); return { toCall: toFiniteOrNull(constraints ? constraints.toCall : null), minRaiseTo: toFiniteOrNull(constraints ? constraints.minRaiseTo : null), maxRaiseTo: toFiniteOrNull(constraints ? constraints.maxRaiseTo : null), maxBetAmount: toFiniteOrNull(constraints ? constraints.maxBetAmount : null) }; }
     function getSeatedCount(){ return 0; }
     var wsAppliedSnapshotSeq = 0;
+    var pendingLeaveNavigation = false;
+    var leaveConfirmOpen = false;
+    function closeLeaveConfirm(){ leaveConfirmOpen = false; }
     ${fnSource}
     return { normalizeCardForRender, normalizeCardsForRender };
   `);
@@ -127,6 +133,9 @@ test("ws snapshot gating upgrades on higher version and ignores stale payloads",
     function getSafeConstraints(data){ var constraints = getConstraintsFromResponse(data); return { toCall: toFiniteOrNull(constraints ? constraints.toCall : null), minRaiseTo: toFiniteOrNull(constraints ? constraints.minRaiseTo : null), maxRaiseTo: toFiniteOrNull(constraints ? constraints.maxRaiseTo : null), maxBetAmount: toFiniteOrNull(constraints ? constraints.maxBetAmount : null) }; }
     function getSeatedCount(data){ var seats = data && Array.isArray(data.seats) ? data.seats : []; var activeCount = 0; for (var i = 0; i < seats.length; i++){ var seat = seats[i]; if (!seat || !seat.userId) continue; var status = typeof seat.status === 'string' ? seat.status.toUpperCase() : ''; if (!status || status === 'ACTIVE' || status === 'SEATED') activeCount++; } return activeCount; }
     var wsAppliedSnapshotSeq = 0;
+    var pendingLeaveNavigation = false;
+    var leaveConfirmOpen = false;
+    function closeLeaveConfirm(){ leaveConfirmOpen = false; }
     ${wsFns}
     return {
       applyWsSnapshot,
@@ -196,6 +205,9 @@ test("equal-version rich snapshot applies when it adds private hole cards", () =
     function getSafeConstraints(data){ var constraints = getConstraintsFromResponse(data); return { toCall: toFiniteOrNull(constraints ? constraints.toCall : null), minRaiseTo: toFiniteOrNull(constraints ? constraints.minRaiseTo : null), maxRaiseTo: toFiniteOrNull(constraints ? constraints.maxRaiseTo : null), maxBetAmount: toFiniteOrNull(constraints ? constraints.maxBetAmount : null) }; }
     function getSeatedCount(){ return 1; }
     var wsAppliedSnapshotSeq = 0;
+    var pendingLeaveNavigation = false;
+    var leaveConfirmOpen = false;
+    function closeLeaveConfirm(){ leaveConfirmOpen = false; }
     ${wsFns}
     return {
       applyWsSnapshot,
@@ -253,6 +265,9 @@ test("rich snapshot public board maps into community cards", () => {
     function getSafeConstraints(data){ var constraints = getConstraintsFromResponse(data); return { toCall: toFiniteOrNull(constraints ? constraints.toCall : null), minRaiseTo: toFiniteOrNull(constraints ? constraints.minRaiseTo : null), maxRaiseTo: toFiniteOrNull(constraints ? constraints.maxRaiseTo : null), maxBetAmount: toFiniteOrNull(constraints ? constraints.maxBetAmount : null) }; }
     function getSeatedCount(){ return 1; }
     var wsAppliedSnapshotSeq = 0;
+    var pendingLeaveNavigation = false;
+    var leaveConfirmOpen = false;
+    function closeLeaveConfirm(){ leaveConfirmOpen = false; }
     ${wsFns}
     return {
       applyWsSnapshot,
@@ -311,6 +326,9 @@ test("invalid rich board cards do not clobber existing valid community cards", (
     function getSafeConstraints(data){ var constraints = getConstraintsFromResponse(data); return { toCall: toFiniteOrNull(constraints ? constraints.toCall : null), minRaiseTo: toFiniteOrNull(constraints ? constraints.minRaiseTo : null), maxRaiseTo: toFiniteOrNull(constraints ? constraints.maxRaiseTo : null), maxBetAmount: toFiniteOrNull(constraints ? constraints.maxBetAmount : null) }; }
     function getSeatedCount(){ return 1; }
     var wsAppliedSnapshotSeq = 0;
+    var pendingLeaveNavigation = false;
+    var leaveConfirmOpen = false;
+    function closeLeaveConfirm(){ leaveConfirmOpen = false; }
     ${wsFns}
     return {
       applyWsSnapshot,

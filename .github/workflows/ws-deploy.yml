@@ -73,6 +73,9 @@ jobs:
       - name: Run WS behavior test
         run: node --test ws-server/server.behavior.test.mjs
 
+      - name: Run ws leave-race behavior test
+        run: node --test ws-server/server.leave-race.behavior.test.mjs
+
       - name: Run ws auth verifier behavior test
         run: node --test ws-server/poker/auth/verify-token.behavior.test.mjs
 

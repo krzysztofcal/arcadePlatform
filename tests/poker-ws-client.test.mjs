@@ -174,6 +174,24 @@ test('poker ws client sendJoin/sendLeave/sendStartHand/sendAct resolve and rejec
   await assert.rejects(actPromise, (err) => err && err.code === 'hand_not_live');
 });
 
+test('poker ws client can queue leave without waiting for commandResult', async () => {
+  const h = loadClientHarness();
+  h.client.start();
+  const ws = h.FakeWebSocket.instances[0];
+  ws.open();
+  ws.message({ type: 'helloAck', payload: { version: '1.0' } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  ws.message({ type: 'authOk', payload: { roomId: 'table_test_1' } });
+
+  const sentBefore = h.sentFrames.length;
+  const requestId = h.client.sendLeaveQueued({ tableId: 'table_test_1' }, 'leave_req_queued');
+
+  assert.equal(requestId, 'leave_req_queued');
+  assert.equal(h.sentFrames.length, sentBefore + 1);
+  assert.equal(h.sentFrames[sentBefore].type, 'leave');
+  assert.equal(h.sentFrames[sentBefore].payload.tableId, 'table_test_1');
+});
+
 test('poker ws client auto-requests resync when server marks session stale', async () => {
   const h = loadClientHarness();
   h.client.start();

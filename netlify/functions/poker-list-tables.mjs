@@ -1,5 +1,6 @@
 import { baseHeaders, corsHeaders, executeSql, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { parseStakes } from "./_shared/poker-stakes.mjs";
+import { shouldHideSeatRowFromReadModel } from "./_shared/poker-list-seat-visibility.mjs";
 
 const parseLimit = (value) => {
   if (value == null || value === "") return { ok: true, value: 20 };
@@ -14,6 +15,16 @@ const parseStatus = (value) => {
   const normalized = String(value).trim().toUpperCase();
   if (normalized !== "OPEN" && normalized !== "ALL") return { ok: false, value: null };
   return { ok: true, value: normalized };
+};
+
+const buildSeatCountsByTableId = (rows) => {
+  const counts = Object.create(null);
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const tableId = typeof row?.table_id === "string" ? row.table_id : null;
+    if (!tableId || shouldHideSeatRowFromReadModel(row)) continue;
+    counts[tableId] = (counts[tableId] || 0) + 1;
+  }
+  return counts;
 };
 
 export async function handler(event) {
@@ -53,21 +64,33 @@ export async function handler(event) {
 
   const statusFilter = status === "OPEN" ? " where t.status = 'OPEN'" : "";
   const query = `
-select t.id, t.stakes, t.max_players, t.status, t.created_by, t.created_at, t.updated_at, t.last_activity_at,
-       coalesce(s.seat_count, 0) as seat_count
-from public.poker_tables t
-left join (
-  select table_id, count(*)::int as seat_count
-  from public.poker_seats
-  where status = 'ACTIVE'
-  group by table_id
-) s on s.table_id = t.id${statusFilter}
+select t.id, t.stakes, t.max_players, t.status, t.created_by, t.created_at, t.updated_at, t.last_activity_at
+from public.poker_tables t${statusFilter}
 order by t.created_at desc
 limit $1;
   `;
 
   try {
     const rows = await executeSql(query, [limit]);
+    const tableIds = Array.isArray(rows)
+      ? rows.map((row) => (typeof row?.id === "string" ? row.id : null)).filter(Boolean)
+      : [];
+    let seatCountsByTableId = Object.create(null);
+    if (tableIds.length > 0) {
+      const seatParams = tableIds.slice();
+      const placeholders = seatParams.map((_, idx) => `$${idx + 1}`).join(", ");
+      const seatRows = await executeSql(
+        `
+select s.table_id, s.user_id, ps.state
+from public.poker_seats s
+left join public.poker_state ps on ps.table_id = s.table_id
+where s.status = 'ACTIVE'
+  and s.table_id in (${placeholders});
+        `,
+        seatParams
+      );
+      seatCountsByTableId = buildSeatCountsByTableId(seatRows);
+    }
     const tables = Array.isArray(rows)
       ? rows.map((row) => {
           const stakesParsed = parseStakes(row.stakes);
@@ -80,7 +103,7 @@ limit $1;
             createdAt: row.created_at,
             updatedAt: row.updated_at,
             lastActivityAt: row.last_activity_at,
-            seatCount: row.seat_count ?? 0,
+            seatCount: seatCountsByTableId[row.id] ?? 0,
           };
         })
       : [];

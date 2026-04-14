@@ -24,6 +24,9 @@ function buildHarness(){
     var isSeated = false;
     var stopPollingCalls = 0;
     var wsAppliedSnapshotSeq = 0;
+    var pendingLeaveNavigation = false;
+    var leaveConfirmOpen = false;
+    function closeLeaveConfirm(){ leaveConfirmOpen = false; }
     function klog(){}
     function isCurrentUserSeated(){ return false; }
     function renderTable(data){ renderCount++; lastRendered = data; }

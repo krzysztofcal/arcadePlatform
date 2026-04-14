@@ -85,6 +85,9 @@
   var turnClockTimer = null;
   var revealDismissTimer = null;
   var authUnsubscribe = null;
+  var pendingLeaveRetryAfterReconnect = false;
+  var pendingLeaveNavigation = false;
+  var leaveConfirmOpen = false;
   var renderedSeatAnchors = {};
   var renderedSeatSlots = {};
   var renderedSeatAvatars = {};
@@ -693,7 +696,9 @@
     if (resolvedMaxSeats) state.maxSeats = resolvedMaxSeats;
 
     var nextSeats = normalizeSeatRows(payload, state.seats);
-    if (nextSeats.length) state.seats = nextSeats;
+    if (nextSeats.length || Array.isArray(payload.seats) || Array.isArray(tableObj.members) || Array.isArray(payload.authoritativeMembers) || Array.isArray(publicObj.seats)) {
+      state.seats = nextSeats;
+    }
 
     var nextStacks = normalizeStacks(payload);
     if (nextStacks) state.stacks = nextStacks;
@@ -731,6 +736,7 @@
 
     if (Number.isInteger(payload.youSeat)) state.youSeat = payload.youSeat;
     else if (Number.isInteger(youObj.seat)) state.youSeat = youObj.seat;
+    else if (payload.youSeat == null && youObj.seat == null) state.youSeat = null;
 
     var legalActions = normalizeLegalActions(legalSource);
     if (legalActions.length || Array.isArray(legalSource) || (isObject(legalSource) && Array.isArray(legalSource.actions))){
@@ -748,6 +754,16 @@
     state.actionConstraints = normalizeConstraints(constraintsPrimary, legalSource && legalSource.actionConstraints);
     state.statusText = LIVE_STATUS_COPY.live;
     state.errorText = '';
+    if (pendingLeaveNavigation && !hasRenderableCurrentSeat()){
+      pendingLeaveRetryAfterReconnect = false;
+      pendingLeaveNavigation = false;
+      navigateToLobby();
+      return;
+    }
+    if (pendingLeaveNavigation && pendingLeaveRetryAfterReconnect && hasRenderableCurrentSeat() && isWsReady()){
+      pendingLeaveRetryAfterReconnect = false;
+      leaveAndReturnToLobby();
+    }
   }
 
   function isSignedIn(){
@@ -764,6 +780,15 @@
       return { seatNo: state.youSeat, userId: currentUserId, status: 'ACTIVE', displayName: 'You' };
     }
     return null;
+  }
+
+  function hasRenderableCurrentSeat(){
+    var currentUserId = state.currentUserId;
+    if (!currentUserId) return false;
+    for (var i = 0; i < state.seats.length; i++){
+      if (state.seats[i] && state.seats[i].userId === currentUserId) return true;
+    }
+    return false;
   }
 
   function getHeroVisualIndex(){
@@ -1325,6 +1350,7 @@
     if (els.leaveBtn) els.leaveBtn.hidden = !signedIn || !seated;
     if (els.startBtn) els.startBtn.disabled = !liveReady;
     if (els.leaveBtn) els.leaveBtn.disabled = !liveReady;
+    if ((!signedIn || !seated) && leaveConfirmOpen) closeLeaveConfirm();
     if (els.stackText) els.stackText.textContent = stackAmount == null ? '—' : formatNumber(stackAmount);
 
     if (els.foldBtn){
@@ -1423,6 +1449,28 @@
     return wsClient[methodName](payload || {});
   }
 
+  function queueLeaveAndNavigateImmediately(){
+    if (!wsClient || typeof wsClient.sendLeaveQueued !== 'function' || !isWsReady()) return false;
+    wsClient.sendLeaveQueued({ tableId: state.tableId });
+    pendingLeaveRetryAfterReconnect = false;
+    pendingLeaveNavigation = false;
+    state.statusText = 'Leaving...';
+    renderInfoPanel();
+    navigateToLobby();
+    return true;
+  }
+
+  function closeLeaveConfirm(){
+    leaveConfirmOpen = false;
+    if (els.leaveConfirmModal) els.leaveConfirmModal.hidden = true;
+  }
+
+  function openLeaveConfirm(){
+    if (!els.leaveConfirmModal) return;
+    leaveConfirmOpen = true;
+    els.leaveConfirmModal.hidden = false;
+  }
+
   function handleAction(actionType, amount){
     if (!actionType) return Promise.resolve();
     var payload = { handId: state.handId || null, action: actionType };
@@ -1460,6 +1508,46 @@
     if (!els.menuToggle || !els.menuPanel) return;
     els.menuPanel.setAttribute('hidden', 'hidden');
     els.menuToggle.setAttribute('aria-expanded', 'false');
+  }
+
+  function navigateToLobby(){
+    if (!window || !window.location) return;
+    window.location.href = '/poker/';
+  }
+
+  function isStaleSessionError(error){
+    var code = error && (error.code || error.message) ? String(error.code || error.message) : '';
+    return code === 'STALE_SESSION' || code === 'session_rebound';
+  }
+
+  function isRetryableLeaveError(error){
+    var code = error && (error.code || error.message) ? String(error.code || error.message) : '';
+    return code === 'STALE_SESSION' || code === 'session_rebound' || code === 'ws_closed' || code === 'timeout' || code === 'ws_unavailable';
+  }
+
+  function leaveAndReturnToLobby(){
+    pendingLeaveNavigation = true;
+    try {
+      if (queueLeaveAndNavigateImmediately()) return Promise.resolve({ ok: true, queued: true });
+    } catch (_err){}
+    return sendCommand('sendLeave', { tableId: state.tableId }).then(function(){
+      pendingLeaveRetryAfterReconnect = false;
+      pendingLeaveNavigation = false;
+      state.statusText = 'Leave accepted';
+      renderInfoPanel();
+      navigateToLobby();
+    }).catch(function(err){
+      if (isRetryableLeaveError(err) && currentAccessToken && !pendingLeaveRetryAfterReconnect){
+        pendingLeaveRetryAfterReconnect = true;
+        state.statusText = LIVE_STATUS_COPY.connecting;
+        renderInfoPanel();
+        restartLiveMode(currentAccessToken);
+        return;
+      }
+      pendingLeaveRetryAfterReconnect = false;
+      pendingLeaveNavigation = false;
+      setError(err && err.message ? err.message : 'Failed to leave');
+    });
   }
 
   function bindMenu(){
@@ -1505,12 +1593,15 @@
     });
     if (els.leaveBtn) els.leaveBtn.addEventListener('click', function(){
       setError('');
-      sendCommand('sendLeave', { tableId: state.tableId }).then(function(){
-        state.statusText = 'Leave accepted';
-        renderInfoPanel();
-      }).catch(function(err){
-        setError(err && err.message ? err.message : 'Failed to leave');
-      });
+      openLeaveConfirm();
+    });
+    if (els.leaveConfirmYes) els.leaveConfirmYes.addEventListener('click', function(){
+      closeLeaveConfirm();
+      setError('');
+      leaveAndReturnToLobby();
+    });
+    if (els.leaveConfirmCancel) els.leaveConfirmCancel.addEventListener('click', function(){
+      closeLeaveConfirm();
     });
     if (els.startBtn) els.startBtn.addEventListener('click', function(){
       setError('');
@@ -1564,6 +1655,9 @@
     els.joinSeat = document.getElementById('pokerV2SeatNo');
     els.joinBuyIn = document.getElementById('pokerV2BuyIn');
     els.leaveBtn = document.getElementById('pokerV2LeaveBtn');
+    els.leaveConfirmModal = document.getElementById('pokerV2LeaveConfirmModal');
+    els.leaveConfirmYes = document.getElementById('pokerV2LeaveConfirmYes');
+    els.leaveConfirmCancel = document.getElementById('pokerV2LeaveConfirmCancel');
     els.startBtn = document.getElementById('pokerV2StartBtn');
     els.foldBtn = document.getElementById('pokerV2FoldBtn');
     els.primaryBtn = document.getElementById('pokerV2PrimaryBtn');
@@ -1633,6 +1727,10 @@
           state.statusText = LIVE_STATUS_COPY.live;
           state.errorText = '';
           render();
+          if (pendingLeaveRetryAfterReconnect){
+            leaveAndReturnToLobby();
+            return;
+          }
           autoJoinSeat();
         } else if (status === 'failed'){
           state.wsReady = false;
@@ -1665,6 +1763,10 @@
         state.statusText = LIVE_STATUS_COPY.error;
         if (info && info.code === 'missing_access_token'){
           applySignedOutState();
+          return;
+        }
+        if (info && info.code === 'STALE_SESSION' && currentAccessToken && pendingLeaveRetryAfterReconnect){
+          restartLiveMode(currentAccessToken);
           return;
         }
         setError(info && info.code ? info.code : 'Protocol error');

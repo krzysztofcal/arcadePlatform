@@ -87,7 +87,15 @@ const hideActions = base.hooks.shouldShowTurnActions({
   currentUserId: 'user-1',
   legalActions: ['FOLD', 'CALL'],
 });
-assert.equal(hideActions, false, 'actions should be hidden for the non-acting player');
+assert.equal(hideActions, true, 'action row should stay visible when fold is legal outside the current turn');
+
+const hideActionsWithoutFold = base.hooks.shouldShowTurnActions({
+  phase: 'PREFLOP',
+  turnUserId: 'user-2',
+  currentUserId: 'user-1',
+  legalActions: ['CALL'],
+});
+assert.equal(hideActionsWithoutFold, false, 'non-acting player should still hide action row when fold is not legal');
 
 const mixedLogs = [
   '[t] poker_join_click {"tableId":"1"}',

@@ -444,6 +444,335 @@ test("nextMessageOfType rejects within bounded timeout budget when only non-matc
   assert.equal(elapsed < timeoutMs + 300, true);
 });
 
+test("zombie cleanup keeps live bots-only table open while the hand is still running", async () => {
+  const tableId = "table_zombie_live_bots_only";
+  const botSeat1 = makeBotUserId(tableId, 1);
+  const botSeat2 = makeBotUserId(tableId, 2);
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+        seatRows: [
+          { user_id: botSeat1, seat_no: 1, status: "ACTIVE", is_bot: true, stack: 101 },
+          { user_id: botSeat2, seat_no: 2, status: "ACTIVE", is_bot: true, stack: 99 }
+        ],
+        stateRow: {
+          version: 7,
+          state: {
+            tableId,
+            handId: "hand_zombie_live",
+            phase: "TURN",
+            turnUserId: botSeat1,
+            seats: [
+              { userId: botSeat1, seatNo: 1, status: "ACTIVE", isBot: true },
+              { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true }
+            ],
+            stacks: { [botSeat1]: 101, [botSeat2]: 99 }
+          }
+        }
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const { port, child } = await createServer({
+    env: {
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_ZOMBIE_TABLE_SWEEP_MS: "25",
+      WS_POKER_SETTLED_REVEAL_MS: "60000"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    await new Promise((resolve) => setTimeout(resolve, 220));
+    const persisted = await readPersistedFile(filePath);
+    assert.equal(persisted.tables[tableId].tableRow.status, "OPEN");
+    assert.equal(persisted.tables[tableId].stateRow.state.phase, "TURN");
+    assert.equal(persisted.tables[tableId].stateRow.state.turnUserId, botSeat1);
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("settled rollover closes unwatched bots-only table instead of starting the next hand", async () => {
+  const secret = "settled-bots-only-close-secret";
+  const tableId = "table_settled_bots_only_close";
+  const botSeat1 = makeBotUserId(tableId, 1);
+  const botSeat2 = makeBotUserId(tableId, 2);
+  const settledAtIso = new Date().toISOString();
+  const { dir, filePath } = await writePersistedFile({
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+        seatRows: [
+          { user_id: botSeat1, seat_no: 1, status: "ACTIVE", is_bot: true, stack: 104 },
+          { user_id: botSeat2, seat_no: 2, status: "ACTIVE", is_bot: true, stack: 96 }
+        ],
+        stateRow: {
+          version: 9,
+          state: {
+            tableId,
+            roomId: tableId,
+            handId: "hand_settled_bots_only",
+            phase: "SETTLED",
+            dealerSeatNo: 1,
+            seats: [
+              { userId: botSeat1, seatNo: 1, status: "ACTIVE", isBot: true },
+              { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true }
+            ],
+            stacks: { [botSeat1]: 104, [botSeat2]: 96 },
+            showdown: {
+              handId: "hand_settled_bots_only",
+              winners: [botSeat1],
+              potsAwarded: [{ amount: 8, winners: [botSeat1] }],
+              potAwardedTotal: 8,
+              reason: "computed"
+            },
+            handSettlement: {
+              handId: "hand_settled_bots_only",
+              settledAt: settledAtIso,
+              payouts: { [botSeat1]: 8 }
+            },
+            holeCardsByUserId: {
+              [botSeat1]: ["AS", "KD"],
+              [botSeat2]: ["2C", "2D"]
+            }
+          }
+        }
+      }
+    }
+  });
+  const cleanupModule = await writeTestModule(`
+import fs from "node:fs/promises";
+export function createInactiveCleanupExecutor({ env }) {
+  return async ({ tableId }) => {
+    const raw = await fs.readFile(env.WS_PERSISTED_STATE_FILE, "utf8");
+    const doc = JSON.parse(raw || "{}");
+    const table = doc?.tables?.[tableId];
+    if (!table) return { ok: true, changed: false, status: "seat_missing", retryable: false };
+    table.tableRow = { ...(table.tableRow || {}), status: "CLOSED" };
+    table.seatRows = (Array.isArray(table.seatRows) ? table.seatRows : []).map((row) => ({ ...row, status: "INACTIVE", stack: 0 }));
+    const state = table?.stateRow?.state && typeof table.stateRow.state === "object" ? table.stateRow.state : {};
+    table.stateRow = {
+      ...(table.stateRow || { version: 0 }),
+      state: {
+        ...state,
+        phase: "HAND_DONE",
+        handId: "",
+        handSeed: "",
+        showdown: null,
+        community: [],
+        communityDealt: 0,
+        pot: 0,
+        potTotal: 0,
+        sidePots: [],
+        turnUserId: null,
+        turnStartedAt: null,
+        turnDeadlineAt: null,
+        currentBet: 0,
+        toCallByUserId: {},
+        betThisRoundByUserId: {},
+        actedThisRoundByUserId: {}
+      }
+    };
+    await fs.writeFile(env.WS_PERSISTED_STATE_FILE, JSON.stringify(doc) + "\\n", "utf8");
+    return { ok: true, changed: true, status: "cleaned_closed", closed: true, retryable: false };
+  };
+}
+`, "inactive-cleanup-test-adapter-settled-close.mjs");
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_POKER_SETTLED_REVEAL_MS: "250",
+      WS_INACTIVE_CLEANUP_ADAPTER_MODULE_PATH: `file://${cleanupModule.filePath}`
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const observerWs = await connectClient(port);
+    await hello(observerWs);
+    await auth(observerWs, makeHs256Jwt({ secret, sub: "observer_user" }), "auth-settled-bots-only");
+    sendFrame(observerWs, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "snap-settled-bots-only",
+      ts: "2026-04-14T09:00:01Z",
+      payload: { tableId, view: "snapshot" }
+    });
+    const initialSnapshot = await nextMessageOfType(observerWs, "stateSnapshot");
+    assert.equal(initialSnapshot.payload.public.hand.status, "SETTLED");
+    const observerClosed = new Promise((resolve) => observerWs.once("close", resolve));
+    observerWs.close();
+    await observerClosed;
+
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const persisted = await readPersistedFile(filePath);
+    assert.equal(persisted.tables[tableId].tableRow.status, "CLOSED");
+    assert.equal(persisted.tables[tableId].stateRow.state.phase, "HAND_DONE");
+    assert.equal(persisted.tables[tableId].stateRow.state.handId, "");
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(cleanupModule.dir, { recursive: true, force: true });
+  }
+});
+
+test("settled rollover keeps observer-watched bots-only table open through reveal and closes after observer disconnect", async () => {
+  const secret = "settled-observer-hold-secret";
+  const tableId = "table_settled_observer_hold";
+  const botSeat1 = makeBotUserId(tableId, 1);
+  const botSeat2 = makeBotUserId(tableId, 2);
+  const settledAtIso = new Date().toISOString();
+  const { dir, filePath } = await writePersistedFile({
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+        seatRows: [
+          { user_id: botSeat1, seat_no: 1, status: "ACTIVE", is_bot: true, stack: 101 },
+          { user_id: botSeat2, seat_no: 2, status: "ACTIVE", is_bot: true, stack: 99 }
+        ],
+        stateRow: {
+          version: 10,
+          state: {
+            tableId,
+            roomId: tableId,
+            handId: "hand_settled_observer_hold",
+            phase: "SETTLED",
+            dealerSeatNo: 1,
+            seats: [
+              { userId: botSeat1, seatNo: 1, status: "ACTIVE", isBot: true },
+              { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true }
+            ],
+            stacks: { [botSeat1]: 101, [botSeat2]: 99 },
+            showdown: {
+              handId: "hand_settled_observer_hold",
+              winners: [botSeat1],
+              potsAwarded: [{ amount: 4, winners: [botSeat1] }],
+              potAwardedTotal: 4,
+              reason: "computed"
+            },
+            handSettlement: {
+              handId: "hand_settled_observer_hold",
+              settledAt: settledAtIso,
+              payouts: { [botSeat1]: 4 }
+            },
+            holeCardsByUserId: {
+              [botSeat1]: ["AS", "KD"],
+              [botSeat2]: ["2C", "2D"]
+            }
+          }
+        }
+      }
+    }
+  });
+  const cleanupModule = await writeTestModule(`
+import fs from "node:fs/promises";
+export function createInactiveCleanupExecutor({ env }) {
+  return async ({ tableId }) => {
+    const raw = await fs.readFile(env.WS_PERSISTED_STATE_FILE, "utf8");
+    const doc = JSON.parse(raw || "{}");
+    const table = doc?.tables?.[tableId];
+    if (!table) return { ok: true, changed: false, status: "seat_missing", retryable: false };
+    table.tableRow = { ...(table.tableRow || {}), status: "CLOSED" };
+    table.seatRows = (Array.isArray(table.seatRows) ? table.seatRows : []).map((row) => ({ ...row, status: "INACTIVE", stack: 0 }));
+    const state = table?.stateRow?.state && typeof table.stateRow.state === "object" ? table.stateRow.state : {};
+    table.stateRow = {
+      ...(table.stateRow || { version: 0 }),
+      state: {
+        ...state,
+        phase: "HAND_DONE",
+        handId: "",
+        handSeed: "",
+        showdown: null,
+        community: [],
+        communityDealt: 0,
+        pot: 0,
+        potTotal: 0,
+        sidePots: [],
+        turnUserId: null,
+        turnStartedAt: null,
+        turnDeadlineAt: null,
+        currentBet: 0,
+        toCallByUserId: {},
+        betThisRoundByUserId: {},
+        actedThisRoundByUserId: {}
+      }
+    };
+    await fs.writeFile(env.WS_PERSISTED_STATE_FILE, JSON.stringify(doc) + "\\n", "utf8");
+    return { ok: true, changed: true, status: "cleaned_closed", closed: true, retryable: false };
+  };
+}
+`, "inactive-cleanup-test-adapter-settled-observer-hold.mjs");
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_POKER_SETTLED_REVEAL_MS: "250",
+      WS_INACTIVE_CLEANUP_ADAPTER_MODULE_PATH: `file://${cleanupModule.filePath}`
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const serverLogs = [];
+    child.stdout.on("data", (buf) => {
+      const text = String(buf || "");
+      if (text.includes("ws_settled_rollover_close_skipped_human_presence") || text.includes("ws_settled_rollover_close_restore_success")) {
+        serverLogs.push(text.trim());
+      }
+    });
+
+    const observerWs = await connectClient(port);
+    await hello(observerWs);
+    await auth(observerWs, makeHs256Jwt({ secret, sub: "observer_user_hold" }), "auth-settled-observer-hold");
+    sendFrame(observerWs, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "sub-settled-observer-hold",
+      ts: "2026-04-14T09:05:01Z",
+      payload: { tableId }
+    });
+    await nextMessageOfType(observerWs, "table_state");
+    sendFrame(observerWs, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "snap-settled-observer-hold",
+      ts: "2026-04-14T09:05:02Z",
+      payload: { tableId, view: "snapshot" }
+    });
+    const initialSnapshot = await nextMessageOfType(observerWs, "stateSnapshot");
+    assert.equal(initialSnapshot.payload.public.hand.status, "SETTLED");
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const heldOpen = await readPersistedFile(filePath);
+    assert.equal(heldOpen.tables[tableId].tableRow.status, "OPEN");
+    assert.equal(heldOpen.tables[tableId].stateRow.state.phase, "SETTLED");
+    assert.equal(serverLogs.some((line) => line.includes("ws_settled_rollover_close_skipped_human_presence")), true);
+
+    const observerClosed = new Promise((resolve) => observerWs.once("close", resolve));
+    observerWs.close();
+    await observerClosed;
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const closed = await readPersistedFile(filePath);
+    assert.equal(closed.tables[tableId].tableRow.status, "CLOSED");
+    assert.equal(closed.tables[tableId].stateRow.state.phase, "HAND_DONE");
+    assert.equal(serverLogs.some((line) => line.includes("ws_settled_rollover_close_restore_success")), true);
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(cleanupModule.dir, { recursive: true, force: true });
+  }
+});
+
 test("server supports healthz and hello/helloAck smoke flow", async () => {
   const { port, child } = await createServer();
 
@@ -1195,9 +1524,6 @@ test("valid token returns authOk and unlocks protected messages", async () => {
     await waitForExit(child);
   }
 });
-
-
-
 
 
 

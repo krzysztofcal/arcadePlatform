@@ -12,6 +12,41 @@
 
 .poker-btn--primary{background:rgba(110,231,231,.25); border-color:rgba(110,231,231,.5);}
 
+.poker-confirm-modal{
+  position:fixed;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:20px;
+  background:rgba(3, 7, 18, .72);
+  z-index:2400;
+}
+
+.poker-confirm-modal[hidden]{display:none;}
+
+.poker-confirm-dialog{
+  width:min(320px, 100%);
+  padding:20px;
+  border:1px solid rgba(110,231,231,.22);
+  border-radius:14px;
+  background:linear-gradient(180deg, rgba(17, 25, 40, .98), rgba(9, 14, 24, .98));
+  box-shadow:0 20px 48px rgba(0,0,0,.48);
+}
+
+.poker-confirm-title{
+  margin-bottom:14px;
+  color:#e8eeff;
+  font:700 16px Poppins, sans-serif;
+  text-align:center;
+}
+
+.poker-confirm-actions{
+  display:flex;
+  gap:12px;
+  justify-content:center;
+}
+
 .poker-panel{background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px; margin-bottom:16px;}
 
 .poker-panel h3{margin:0 0 12px; font:600 15px Poppins, sans-serif; color:#cdd6ff;}

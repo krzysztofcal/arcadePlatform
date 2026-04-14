@@ -779,11 +779,15 @@ export function createTableManager({
     const normalizedState = pokerState && typeof pokerState === "object" && !Array.isArray(pokerState) ? pokerState : null;
     const stateTableId = typeof normalizedState?.tableId === "string" ? normalizedState.tableId : "";
     const stateSeats = normalizedState?.seats;
+    const leftTableByUserId = normalizedState?.leftTableByUserId && typeof normalizedState.leftTableByUserId === "object" && !Array.isArray(normalizedState.leftTableByUserId)
+      ? normalizedState.leftTableByUserId
+      : {};
+    const leavingUserRetainedInState = authoritativeSeatsContainUser(stateSeats, userId) && leftTableByUserId?.[userId] === true;
     const authoritativeStateValid = normalizedState
       && stateTableId === tableId
       && hasValidAuthoritativeSeats(stateSeats);
 
-    if (!authoritativeStateValid || authoritativeSeatsContainUser(stateSeats, userId)) {
+    if (!authoritativeStateValid || (authoritativeSeatsContainUser(stateSeats, userId) && !leavingUserRetainedInState)) {
       return {
         ok: false,
         code: "authoritative_state_invalid"
@@ -810,6 +814,7 @@ export function createTableManager({
         };
       })
       .filter(Boolean)
+      .filter((member) => leftTableByUserId?.[member.userId] !== true)
       .sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
 
     const nextSeats = {};
@@ -1020,13 +1025,18 @@ export function createTableManager({
     if (conn.subscribedTableId) {
       const subscribedTableId = conn.subscribedTableId;
       const table = tables.get(subscribedTableId);
+      let shouldEmitUpdate = false;
       if (table) {
         table.subscribers.delete(ws);
+        shouldEmitUpdate = persistedPokerState(subscribedTableId)?.phase === "SETTLED";
         if (table.coreState.members.length === 0 && table.subscribers.size === 0) {
           tables.delete(subscribedTableId);
         }
       }
       conn.subscribedTableId = null;
+      if (shouldEmitUpdate) {
+        updates.push({ tableId: subscribedTableId, tableState: tableState(subscribedTableId), disconnectedUserId: null });
+      }
     }
 
     connStateBySocket.delete(ws);
@@ -1145,6 +1155,27 @@ export function createTableManager({
     return seatDetails?.[normalizedUserId]?.isBot === true;
   }
 
+  function hasActiveHumanMember(tableId) {
+    const table = tables.get(tableId);
+    if (!table) {
+      return false;
+    }
+    const members = Array.isArray(table?.coreState?.members) ? table.coreState.members : [];
+    return members.some((member) => !isBotUser(tableId, member?.userId));
+  }
+
+  function hasConnectedHumanPresence(tableId) {
+    for (const [socket, conn] of connStateBySocket.entries()) {
+      if (conn?.joinedTableId === tableId || conn?.subscribedTableId === tableId) {
+        if (socket?.__connState?.sessionInvalidated === true) {
+          continue;
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
   function __debugCore(tableId) {
     const table = tables.get(tableId);
     if (!table) {
@@ -1224,7 +1255,9 @@ export function createTableManager({
     restoreTableFromPersisted,
     buildAuthoritativeLeaveRestore,
     isTableClosed,
-    isBotUser
+    isBotUser,
+    hasActiveHumanMember,
+    hasConnectedHumanPresence
   };
 
   if (enableDebugCore && nodeEnv !== "production") {

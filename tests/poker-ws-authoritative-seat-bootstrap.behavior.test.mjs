@@ -15,6 +15,9 @@ test("ws bootstrap can hydrate occupied seats from authoritativeMembers when liv
     var wsSnapshotSeen = false;
     var pendingWsSnapshot = null;
     var wsAppliedSnapshotSeq = 0;
+    var pendingLeaveNavigation = false;
+    var leaveConfirmOpen = false;
+    function closeLeaveConfirm(){ leaveConfirmOpen = false; }
     var renderCount = 0;
     var lastRendered = null;
     var isSeated = false;

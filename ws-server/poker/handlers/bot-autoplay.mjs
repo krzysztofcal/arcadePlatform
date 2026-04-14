@@ -30,6 +30,22 @@ export async function handleBotStepCommand({
     });
   }
 
+  klog("ws_bot_autoplay_finish", {
+    tableId,
+    trigger: trigger || null,
+    requestId: requestId || null,
+    ok: botStepResult?.ok !== false,
+    changed: botStepResult?.changed === true,
+    actionCount: Number(botStepResult?.actionCount || 0),
+    reason: botStepResult?.reason || "unknown",
+    phase: typeof botStepResult?.phase === "string" ? botStepResult.phase : null,
+    turnUserId: typeof botStepResult?.turnUserId === "string" ? botStepResult.turnUserId : null,
+    finalStateVersion: Number.isFinite(Number(botStepResult?.finalStateVersion))
+      ? Number(botStepResult.finalStateVersion)
+      : null,
+    shouldContinue: botStepResult?.shouldContinue === true
+  });
+
   const lastBroadcastStateVersion = Number(botStepResult?.lastBroadcastStateVersion);
   const finalStateVersion = Number(botStepResult?.finalStateVersion);
   const finalStateAlreadyBroadcast =

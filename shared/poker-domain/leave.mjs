@@ -146,6 +146,11 @@ const normalizeNonNegativeInt = (n) =>
 const hasAnyActiveHuman = (seats) =>
   Array.isArray(seats) && seats.some((row) => row?.is_bot !== true && row?.status === "ACTIVE");
 
+const hasLiveHandSignal = (state) => {
+  const phase = typeof state?.phase === "string" ? state.phase : "";
+  return ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(phase);
+};
+
 const toClosedInertState = (stateInput, stacks) => ({
   ...stateInput,
   phase: "HAND_DONE",
@@ -194,6 +199,34 @@ const normalizeSeatOrderFromActiveSeatRows = (activeSeatRows) => {
   return [...new Set(orderedUserIds)];
 };
 
+const normalizeSeatOrderFromState = (seats) => {
+  if (!Array.isArray(seats)) return [];
+  const orderedSeats = seats
+    .filter((seat) => Number.isInteger(Number(seat?.seatNo)) && typeof seat?.userId === "string" && seat.userId.trim())
+    .slice()
+    .sort((a, b) => Number(a.seatNo) - Number(b.seatNo));
+  const userIds = orderedSeats.map((seat) => seat.userId);
+  return [...new Set(userIds)];
+};
+
+const resolveHandSeatUserIdsInOrder = (state, fallbackSeatUserIdsInOrder) => {
+  const handSeatUserIds = normalizeSeatOrderFromState(Array.isArray(state?.handSeats) ? state.handSeats : []);
+  if (handSeatUserIds.length > 0) return handSeatUserIds;
+  const stateSeatUserIds = normalizeSeatOrderFromState(Array.isArray(state?.seats) ? state.seats : []);
+  if (stateSeatUserIds.length > 0) return stateSeatUserIds;
+  return Array.isArray(fallbackSeatUserIdsInOrder) ? [...new Set(fallbackSeatUserIdsInOrder)] : [];
+};
+
+const selectRequiredHoleCardUserIds = (state, seatUserIdsInOrder) =>
+  (Array.isArray(seatUserIdsInOrder) ? seatUserIdsInOrder : []).filter((candidateUserId) => {
+    if (typeof candidateUserId !== "string" || !candidateUserId.trim()) return false;
+    if (state?.foldedByUserId?.[candidateUserId]) return false;
+    if (state?.leftTableByUserId?.[candidateUserId]) return false;
+    if (state?.sitOutByUserId?.[candidateUserId]) return false;
+    if (state?.pendingAutoSitOutByUserId?.[candidateUserId]) return false;
+    return true;
+  });
+
 const selectFallbackBotTurnUserId = (state, seatUserIdsInOrder, seatBotMap) => {
   for (const userId of seatUserIdsInOrder) {
     if (!isBotTurn(userId, seatBotMap)) continue;
@@ -228,14 +261,19 @@ const maybeBuildPrivateStateForBotAutoplay = async ({ tx, tableId, state, seatUs
   if (!Number.isInteger(state?.communityDealt) || state.communityDealt < 0 || state.communityDealt > 5) {
     return { ok: false, reason: "invalid_community_dealt" };
   }
+  const resolvedSeatUserIdsInOrder = resolveHandSeatUserIdsInOrder(state, seatUserIdsInOrder);
+  if (resolvedSeatUserIdsInOrder.length === 0) {
+    return { ok: false, reason: "invalid_hand_seats" };
+  }
 
   let holeCardsByUserId;
   try {
+    const requiredUserIds = selectRequiredHoleCardUserIds(state, resolvedSeatUserIdsInOrder);
     const holeCards = await loadHoleCardsByUserId(tx, {
       tableId,
       handId,
-      activeUserIds: seatUserIdsInOrder,
-      requiredUserIds: seatUserIdsInOrder,
+      activeUserIds: resolvedSeatUserIdsInOrder,
+      requiredUserIds,
       mode: "strict",
     });
     holeCardsByUserId = holeCards.holeCardsByUserId;
@@ -250,12 +288,12 @@ const maybeBuildPrivateStateForBotAutoplay = async ({ tx, tableId, state, seatUs
   try {
     derivedCommunity = deriveCommunityCards({
       handSeed,
-      seatUserIdsInOrder,
+      seatUserIdsInOrder: resolvedSeatUserIdsInOrder,
       communityDealt: state.communityDealt,
     });
     derivedDeck = deriveRemainingDeck({
       handSeed,
-      seatUserIdsInOrder,
+      seatUserIdsInOrder: resolvedSeatUserIdsInOrder,
       communityDealt: state.communityDealt,
     });
   } catch {
@@ -376,7 +414,7 @@ const executePostLeaveBotAutoplayLoop = async ({
     },
   });
 
-  klog("poker_leave_bot_autoplay_stop", {
+  klog("poker_leave_bot_autoplay_finish", {
     tableId,
     userId,
     requestId: requestId || null,
@@ -414,7 +452,17 @@ const buildAlreadyLeftResultPayload = ({ tableId, seatNo, includeState, state, u
 };
 
 
-export async function executePokerLeave({ beginSql, tableId, userId, requestId = null, nowMs = Date.now(), klog, includeState = false }) {
+export async function executePokerLeave({
+  beginSql,
+  tableId,
+  userId,
+  requestId = null,
+  nowMs = Date.now(),
+  klog,
+  includeState = false,
+  runPostLeaveBotAutoplay = true,
+  hasConnectedHumanPresence = () => false
+}) {
   void nowMs;
   let txId = null;
   const result = await beginSql(async (tx) => {
@@ -563,56 +611,22 @@ export async function executePokerLeave({ beginSql, tableId, userId, requestId =
         }
 
         const leaveState = normalizeState(leaveApplied.state);
-        const leavePhase = typeof leaveState.phase === "string" ? leaveState.phase : "";
-        const hasActiveHandId = typeof leaveState.handId === "string" && leaveState.handId.trim() !== "";
-        const isActiveHandPhase = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(leavePhase);
-        const hasAnyActiveHandSignal = hasActiveHandId || isActiveHandPhase;
-        const shouldDetachSeatAndStack = true;
-
-        if (cashOutAmount > 0) {
-          const escrowSystemKey = `POKER_TABLE:${tableId}`;
-          const idempotencyKey = requestId
-            ? `poker:leave:${tableId}:${userId}:${requestId}`
-            : `poker:leave:${tableId}:${userId}:${cashOutAmount}`;
-
-          const txResult = await postTransaction({
-            userId: userId,
-            txType: "TABLE_CASH_OUT",
-            idempotencyKey,
-            entries: [
-              { accountType: "ESCROW", systemKey: escrowSystemKey, amount: -cashOutAmount },
-              { accountType: "USER", amount: cashOutAmount },
-            ],
-            createdBy: userId,
-            tx,
-          });
-          txId = txResult?.transaction?.id || null;
-          mutated = true;
-        }
-        klog("poker_leave_cashout", {
-          tableId,
-          userId: userId,
-          amount: shouldDetachSeatAndStack ? cashOutAmount : 0,
-          seatNo,
-          stackSource: stateStack != null ? "state" : seatStack != null ? "seat" : "none",
-          hadStack: stackValue != null,
-          deferred: !shouldDetachSeatAndStack,
-        });
-
-        const baseSeats = Array.isArray(leaveState.seats) ? leaveState.seats : parseSeats(currentState.seats);
-        const baseStacks = isPlainObject(leaveState.stacks) ? leaveState.stacks : parseStacks(currentState.stacks);
-        const seats = shouldDetachSeatAndStack
-          ? parseSeats(baseSeats).filter((seatItem) => seatItem?.userId !== userId)
-          : parseSeats(baseSeats);
+        const deferDetachUntilHandComplete = hasLiveHandSignal(leaveState);
+        const baseSeats = deferDetachUntilHandComplete
+          ? parseSeats(currentState.seats)
+          : (Array.isArray(leaveState.seats) ? leaveState.seats : parseSeats(currentState.seats));
+        const baseStacks = deferDetachUntilHandComplete
+          ? parseStacks(currentState.stacks)
+          : (isPlainObject(leaveState.stacks) ? leaveState.stacks : parseStacks(currentState.stacks));
+        const seats = parseSeats(baseSeats);
         const updatedStacks = parseStacks(baseStacks);
-        const seatRetained = seats.some((seatItem) => seatItem?.userId === userId);
-        if (shouldDetachSeatAndStack) {
-          delete updatedStacks[userId];
-        } else if (seatRetained) {
+        if (deferDetachUntilHandComplete) {
           const restoredStack = stateStack ?? seatStack;
           if (normalizeNonNegativeInt(restoredStack) != null && normalizeNonNegativeInt(updatedStacks[userId]) == null) {
             updatedStacks[userId] = restoredStack;
           }
+        } else {
+          delete updatedStacks[userId];
         }
 
         const nextLeftTableByUserId = isPlainObject(leaveState.leftTableByUserId) ? { ...leaveState.leftTableByUserId } : {};
@@ -649,7 +663,16 @@ export async function executePokerLeave({ beginSql, tableId, userId, requestId =
 
         let latestState = updatedState;
         let latestVersion = updateResult.newVersion;
-        if (hasAnyActiveHandSignal) {
+        if (deferDetachUntilHandComplete) {
+          klog("poker_leave_retained_live_hand", {
+            tableId,
+            userId,
+            requestId: requestId || null,
+            handId: typeof updatedState.handId === "string" ? updatedState.handId : null,
+            phase: typeof updatedState.phase === "string" ? updatedState.phase : null,
+            turnUserId: typeof updatedState.turnUserId === "string" ? updatedState.turnUserId : null,
+            runPostLeaveBotAutoplay
+          });
           const actionHandId = typeof leaveState.handId === "string" && leaveState.handId.trim() ? leaveState.handId.trim() : null;
           let leaveActionRows = [];
           if (requestId) {
@@ -729,9 +752,21 @@ export async function executePokerLeave({ beginSql, tableId, userId, requestId =
             [tableId]
           );
           const seatBotMap = buildSeatBotMap(activeSeatRows);
-          const seatUserIdsInOrder = normalizeSeatOrderFromActiveSeatRows(activeSeatRows);
+          const seatUserIdsInOrder = resolveHandSeatUserIdsInOrder(
+            latestState,
+            normalizeSeatOrderFromActiveSeatRows(activeSeatRows)
+          );
           const botsOnlyInHand = !hasParticipatingHumanInHand(latestState, seatBotMap);
-          if (isBotTurn(latestState.turnUserId, seatBotMap) || botsOnlyInHand) {
+          if (runPostLeaveBotAutoplay && (isBotTurn(latestState.turnUserId, seatBotMap) || botsOnlyInHand)) {
+            klog("poker_leave_bot_autoplay_start", {
+              tableId,
+              userId,
+              requestId: requestId || null,
+              handId: typeof latestState.handId === "string" ? latestState.handId : null,
+              phase: typeof latestState.phase === "string" ? latestState.phase : null,
+              turnUserId: typeof latestState.turnUserId === "string" ? latestState.turnUserId : null,
+              botsOnlyInHand
+            });
             const autoplayResult = await executePostLeaveBotAutoplayLoop({
               tx,
               tableId,
@@ -753,18 +788,117 @@ export async function executePokerLeave({ beginSql, tableId, userId, requestId =
           }
         }
 
+        const shouldDetachSeatAndStack = !hasLiveHandSignal(latestState);
+        let detachedCashOutAmount = 0;
         if (shouldDetachSeatAndStack) {
+          const latestStacks = parseStacks(latestState.stacks);
+          const latestSeats = parseSeats(latestState.seats);
+          klog("poker_leave_detach_start", {
+            tableId,
+            userId,
+            requestId: requestId || null,
+            handId: typeof latestState.handId === "string" ? latestState.handId : null,
+            phase: typeof latestState.phase === "string" ? latestState.phase : null,
+            hasSeatInState: latestSeats.some((seatItem) => seatItem?.userId === userId),
+            hasStackInState: Object.prototype.hasOwnProperty.call(latestStacks, userId)
+          });
+          detachedCashOutAmount = normalizeNonNegativeInt(Number(latestStacks[userId])) ?? cashOutAmount;
+          klog("poker_leave_post_hand_cashout", {
+            tableId,
+            userId,
+            requestId: requestId || null,
+            handId: typeof latestState.handId === "string" ? latestState.handId : null,
+            phase: typeof latestState.phase === "string" ? latestState.phase : null,
+            amount: detachedCashOutAmount
+          });
+          if (detachedCashOutAmount > 0) {
+            const escrowSystemKey = `POKER_TABLE:${tableId}`;
+            const idempotencyKey = requestId
+              ? `poker:leave:${tableId}:${userId}:${requestId}`
+              : `poker:leave:${tableId}:${userId}:${detachedCashOutAmount}`;
+
+            const txResult = await postTransaction({
+              userId: userId,
+              txType: "TABLE_CASH_OUT",
+              idempotencyKey,
+              entries: [
+                { accountType: "ESCROW", systemKey: escrowSystemKey, amount: -detachedCashOutAmount },
+                { accountType: "USER", amount: detachedCashOutAmount },
+              ],
+              createdBy: userId,
+              tx,
+            });
+            txId = txResult?.transaction?.id || null;
+            mutated = true;
+          }
+          const detachedSeats = parseSeats(latestState.seats).filter((seatItem) => seatItem?.userId !== userId);
+          const detachedStacks = parseStacks(latestState.stacks);
+          delete detachedStacks[userId];
+          if (detachedSeats.length !== parseSeats(latestState.seats).length
+            || Object.prototype.hasOwnProperty.call(parseStacks(latestState.stacks), userId)) {
+            const detachedState = sanitizePersistedState({
+              ...latestState,
+              seats: detachedSeats,
+              stacks: detachedStacks,
+              leftTableByUserId: {
+                ...(isPlainObject(latestState.leftTableByUserId) ? latestState.leftTableByUserId : {}),
+                [userId]: true,
+              },
+            });
+            validatePersistedStateOrThrow(detachedState, makeError);
+            const detachUpdateResult = await updatePokerStateOptimistic(tx, {
+              tableId,
+              expectedVersion: latestVersion,
+              nextState: detachedState,
+            });
+            if (!detachUpdateResult.ok) {
+              if (detachUpdateResult.reason === "conflict") throw makeError(409, "state_conflict");
+              throw makeError(409, "state_invalid");
+            }
+            latestVersion = detachUpdateResult.newVersion;
+            latestState = detachedState;
+            mutated = true;
+          }
           await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [
             tableId,
             userId,
           ]);
+          klog("poker_leave_detach_finish", {
+            tableId,
+            userId,
+            requestId: requestId || null,
+            handId: typeof latestState.handId === "string" ? latestState.handId : null,
+            phase: typeof latestState.phase === "string" ? latestState.phase : null,
+            amount: detachedCashOutAmount
+          });
         }
+
+        klog("poker_leave_cashout", {
+          tableId,
+          userId: userId,
+          amount: shouldDetachSeatAndStack ? detachedCashOutAmount : 0,
+          seatNo,
+          stackSource: stateStack != null ? "state" : seatStack != null ? "seat" : "none",
+          hadStack: stackValue != null,
+          deferred: !shouldDetachSeatAndStack,
+        });
 
         const allSeatRows = await tx.unsafe(
           "select user_id, status, is_bot, stack from public.poker_seats where table_id = $1 for update;",
           [tableId]
         );
-        if (!hasAnyActiveHuman(allSeatRows)) {
+        const connectedHumanPresence = hasConnectedHumanPresence({ tableId }) === true;
+        if (!hasAnyActiveHuman(allSeatRows) && !hasLiveHandSignal(latestState) && connectedHumanPresence) {
+          klog("poker_leave_table_close_skipped_human_presence", {
+            tableId,
+            userId,
+            requestId: requestId || null,
+            handId: typeof latestState.handId === "string" ? latestState.handId : null,
+            phase: typeof latestState.phase === "string" ? latestState.phase : null,
+            remainingSeats: allSeatRows.length
+          });
+        }
+        if (!hasAnyActiveHuman(allSeatRows) && !hasLiveHandSignal(latestState) && !connectedHumanPresence) {
           const closedStacks = parseStacks(latestState.stacks);
           for (const row of allSeatRows || []) {
             if (row?.is_bot === true) continue;
@@ -819,7 +953,14 @@ export async function executePokerLeave({ beginSql, tableId, userId, requestId =
               klog("poker_hole_cards_missing", { tableId, error: error?.message || "unknown_error" });
             }
           }
-          klog("poker_leave_closed_table_no_active_humans", { tableId, userId: userId, remainingSeats: allSeatRows.length });
+          klog("poker_leave_table_closed_terminal_bots_only", {
+            tableId,
+            userId,
+            requestId: requestId || null,
+            handId: typeof latestState.handId === "string" ? latestState.handId : null,
+            phase: typeof latestState.phase === "string" ? latestState.phase : null,
+            remainingSeats: allSeatRows.length
+          });
         }
 
         if (mutated) {
@@ -830,18 +971,18 @@ export async function executePokerLeave({ beginSql, tableId, userId, requestId =
         }
 
         const publicState = withoutPrivateState(latestState);
-        const responseState = sanitizeNoopResponseState(publicState, userId);
         const resultPayload = {
           ok: true,
           tableId,
-          cashedOut: shouldDetachSeatAndStack ? cashOutAmount : 0,
+          cashedOut: shouldDetachSeatAndStack ? detachedCashOutAmount : 0,
           seatNo: seatNo ?? null,
           ...(includeState
             ? {
                 state: {
                   version: latestVersion,
-                  state: responseState,
+                  state: publicState,
                 },
+                viewState: sanitizeNoopResponseState(publicState, userId),
               }
             : {}),
         };

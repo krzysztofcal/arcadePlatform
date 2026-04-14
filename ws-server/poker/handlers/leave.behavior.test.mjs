@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { handleLeaveCommand } from "./leave.mjs";
 
 function createCtx() {
-  const calls = { command: [], snapshots: 0, tableState: 0, executorArgs: null, buildArgs: null, restoreArgs: [], leaveArgs: [] };
+  const calls = { command: [], snapshots: 0, tableState: 0, autoplay: 0, executorArgs: null, buildArgs: null, restoreArgs: [], leaveArgs: [] };
   return {
     calls,
     ctx: {
@@ -44,6 +44,9 @@ function createCtx() {
       },
       broadcastTableState: () => {
         calls.tableState += 1;
+      },
+      scheduleBotStep: () => {
+        calls.autoplay += 1;
       }
     }
   };
@@ -61,6 +64,7 @@ test("handleLeaveCommand accepts and broadcasts when authoritative leave changes
   assert.equal(calls.command[0].status, "accepted");
   assert.equal(calls.snapshots, 1);
   assert.equal(calls.tableState, 1);
+  assert.equal(calls.autoplay, 1);
 });
 
 test("handleLeaveCommand maps pending authoritative leave to rejected request_pending", async () => {
@@ -72,6 +76,7 @@ test("handleLeaveCommand maps pending authoritative leave to rejected request_pe
   assert.equal(calls.command[0].reason, "request_pending");
   assert.equal(calls.snapshots, 0);
   assert.equal(calls.tableState, 0);
+  assert.equal(calls.autoplay, 0);
 });
 
 test("handleLeaveCommand rejects invalid authoritative restore shape without broadcast", async () => {
@@ -84,6 +89,7 @@ test("handleLeaveCommand rejects invalid authoritative restore shape without bro
   assert.equal(calls.command[0].reason, "authoritative_state_invalid");
   assert.equal(calls.snapshots, 0);
   assert.equal(calls.tableState, 0);
+  assert.equal(calls.autoplay, 0);
 });
 
 test("handleLeaveCommand rejects when authoritative restore cannot be applied", async () => {
@@ -96,6 +102,7 @@ test("handleLeaveCommand rejects when authoritative restore cannot be applied", 
   assert.equal(calls.command[0].reason, "authoritative_state_invalid");
   assert.equal(calls.snapshots, 0);
   assert.equal(calls.tableState, 0);
+  assert.equal(calls.autoplay, 0);
 });
 
 test("handleLeaveCommand maps thrown executor errors to stable rejection", async () => {
@@ -109,4 +116,5 @@ test("handleLeaveCommand maps thrown executor errors to stable rejection", async
 
   assert.equal(calls.command.length, 1);
   assert.equal(calls.command[0].reason, "state_conflict");
+  assert.equal(calls.autoplay, 0);
 });

@@ -1,5 +1,6 @@
 import { baseHeaders, corsHeaders, executeSql, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { parseStakes } from "./_shared/poker-stakes.mjs";
+import { shouldHideSeatRowFromReadModel } from "./_shared/poker-list-seat-visibility.mjs";
 
 const parseLimit = (value) => {
   if (value == null || value === "") return { ok: true, value: 20 };
@@ -14,6 +15,16 @@ const parseStatus = (value) => {
   const normalized = String(value).trim().toUpperCase();
   if (normalized !== "OPEN" && normalized !== "ALL") return { ok: false, value: null };
   return { ok: true, value: normalized };
+};
+
+const buildSeatCountsByTableId = (rows) => {
+  const counts = Object.create(null);
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const tableId = typeof row?.table_id === "string" ? row.table_id : null;
+    if (!tableId || shouldHideSeatRowFromReadModel(row)) continue;
+    counts[tableId] = (counts[tableId] || 0) + 1;
+  }
+  return counts;
 };
 
 export async function handler(event) {
@@ -65,16 +76,13 @@ select
   s.status as seat_status,
   s.created_at as seat_created_at,
   s.last_seen_at as seat_last_seen_at,
-  coalesce(cnt.seat_count, 0) as seat_count
+  s.user_id,
+  ps.state
 from public.poker_seats s
 join public.poker_tables t on t.id = s.table_id
-left join (
-  select table_id, count(*)::int as seat_count
-  from public.poker_seats
-  where status = 'ACTIVE'
-  group by table_id
-) cnt on cnt.table_id = t.id
+left join public.poker_state ps on ps.table_id = t.id
 where s.user_id = $1
+  and s.status = 'ACTIVE'
   and ($2 = 'ALL' or t.status = 'OPEN')
 order by t.updated_at desc, t.created_at desc
 limit $3;
@@ -82,8 +90,28 @@ limit $3;
 
   try {
     const rows = await executeSql(query, [auth.userId, status, limit]);
-    const tables = Array.isArray(rows)
-      ? rows.map((row) => {
+    const visibleRows = Array.isArray(rows) ? rows.filter((row) => !shouldHideSeatRowFromReadModel(row)) : [];
+    const tableIds = visibleRows
+      .map((row) => (typeof row?.id === "string" ? row.id : null))
+      .filter(Boolean);
+    let seatCountsByTableId = Object.create(null);
+    if (tableIds.length > 0) {
+      const seatParams = tableIds.slice();
+      const placeholders = seatParams.map((_, idx) => `$${idx + 1}`).join(", ");
+      const seatRows = await executeSql(
+        `
+select s.table_id, s.user_id, ps.state
+from public.poker_seats s
+left join public.poker_state ps on ps.table_id = s.table_id
+where s.status = 'ACTIVE'
+  and s.table_id in (${placeholders});
+        `,
+        seatParams
+      );
+      seatCountsByTableId = buildSeatCountsByTableId(seatRows);
+    }
+    const tables = visibleRows
+      ? visibleRows.map((row) => {
           const stakesParsed = parseStakes(row.stakes);
           return {
             id: row.id,
@@ -98,7 +126,7 @@ limit $3;
             seatStatus: row.seat_status,
             seatCreatedAt: row.seat_created_at,
             seatLastSeenAt: row.seat_last_seen_at,
-            seatCount: row.seat_count ?? 0,
+            seatCount: seatCountsByTableId[row.id] ?? 0,
           };
         })
       : [];

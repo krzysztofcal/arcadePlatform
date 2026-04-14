@@ -83,6 +83,82 @@ test("projectRoomCoreSnapshot preserves bot seat metadata when public seats fall
   ]);
 });
 
+test("projectRoomCoreSnapshot hides left-table users from public seats and stacks even when poker state retains them", () => {
+  const snapshot = projectRoomCoreSnapshot({
+    tableId: "table_left_hidden",
+    roomId: "table_left_hidden",
+    coreState: {
+      seats: { leaver_user: 1, bot_user: 2 },
+      publicStacks: { leaver_user: 48, bot_user: 52 },
+      seatDetailsByUserId: {
+        leaver_user: { isBot: false, botProfile: null, leaveAfterHand: false },
+        bot_user: { isBot: true, botProfile: "TRIVIAL", leaveAfterHand: false }
+      },
+      pokerState: {
+        roomId: "table_left_hidden",
+        handId: "hand_left_hidden",
+        phase: "TURN",
+        turnUserId: "bot_user",
+        community: ["AS", "KD", "QC", "3H"],
+        potTotal: 12,
+        seats: [
+          { userId: "leaver_user", seatNo: 1, status: "ACTIVE" },
+          { userId: "bot_user", seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" }
+        ],
+        stacks: { leaver_user: 48, bot_user: 52 },
+        leftTableByUserId: { leaver_user: true, bot_user: false },
+        foldedByUserId: { leaver_user: true, bot_user: false },
+        sitOutByUserId: { leaver_user: false, bot_user: false }
+      }
+    },
+    members: [{ userId: "bot_user", seat: 2 }],
+    userId: "observer_user",
+    youSeat: null
+  });
+
+  assert.deepEqual(snapshot.seats, [
+    { userId: "bot_user", seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" }
+  ]);
+  assert.deepEqual(snapshot.stacks, { bot_user: 52 });
+  assert.equal(snapshot.private, null);
+});
+
+test("projectRoomCoreSnapshot hides youSeat, legal actions, and private cards for users already flagged left", () => {
+  const snapshot = projectRoomCoreSnapshot({
+    tableId: "table_left_self_hidden",
+    roomId: "table_left_self_hidden",
+    coreState: {
+      seats: { leaver_user: 1, bot_user: 2 },
+      publicStacks: { leaver_user: 48, bot_user: 52 },
+      pokerState: {
+        roomId: "table_left_self_hidden",
+        handId: "hand_left_self_hidden",
+        phase: "TURN",
+        turnUserId: "bot_user",
+        community: ["AS", "KD", "QC", "3H"],
+        potTotal: 12,
+        seats: [
+          { userId: "leaver_user", seatNo: 1, status: "ACTIVE" },
+          { userId: "bot_user", seatNo: 2, status: "ACTIVE" }
+        ],
+        stacks: { leaver_user: 48, bot_user: 52 },
+        leftTableByUserId: { leaver_user: true, bot_user: false },
+        foldedByUserId: { leaver_user: true, bot_user: false },
+        sitOutByUserId: { leaver_user: false, bot_user: false },
+        holeCardsByUserId: { leaver_user: ["AH", "AD"], bot_user: ["2C", "2D"] }
+      }
+    },
+    members: [{ userId: "bot_user", seat: 2 }],
+    userId: "leaver_user",
+    youSeat: 1
+  });
+
+  assert.deepEqual(snapshot.seats, [{ userId: "bot_user", seatNo: 2, status: "ACTIVE" }]);
+  assert.deepEqual(snapshot.stacks, { bot_user: 52 });
+  assert.deepEqual(snapshot.legalActions, { seat: null, actions: [] });
+  assert.equal(snapshot.private, null);
+});
+
 test("projectRoomCoreSnapshot marks folded seats from authoritative folded state when public seats omit status", () => {
   const snapshot = projectRoomCoreSnapshot({
     tableId: "table_fold_projection",

@@ -195,7 +195,11 @@ const settledRevealMs = resolveSettledRevealMs(process.env.WS_POKER_SETTLED_REVE
 async function loadAuthoritativeLeaveExecutor() {
   if (!authoritativeLeaveExecutorPromise) {
     authoritativeLeaveExecutorPromise = import("./poker/persistence/authoritative-leave-adapter.mjs")
-      .then((module) => module.createAuthoritativeLeaveExecutor({ env: process.env, klog: klogSafe }));
+      .then((module) => module.createAuthoritativeLeaveExecutor({
+        env: process.env,
+        klog: klogSafe,
+        hasConnectedHumanPresence: ({ tableId }) => tableManager.hasConnectedHumanPresence(tableId)
+      }));
   }
   return authoritativeLeaveExecutorPromise;
 }
@@ -216,7 +220,11 @@ async function loadInactiveCleanupExecutor() {
         : "";
       const adapterModulePath = configured || DEFAULT_INACTIVE_CLEANUP_ADAPTER_URL;
       const module = await import(adapterModulePath);
-      return module.createInactiveCleanupExecutor({ env: process.env, klog: klogSafe });
+      return module.createInactiveCleanupExecutor({
+        env: process.env,
+        klog: klogSafe,
+        hasConnectedHumanPresence: ({ tableId }) => tableManager.hasConnectedHumanPresence(tableId)
+      });
     })();
   }
   return inactiveCleanupExecutorPromise;
@@ -411,24 +419,87 @@ function sendFrame(ws, frame) {
   }
 }
 
-function invalidateSocketSession(ws, { reason = "session_rebound", closeCode = SESSION_REBOUND_CLOSE_CODE } = {}) {
+function invalidateSocketSession(ws, { reason = "session_rebound", closeCode = SESSION_REBOUND_CLOSE_CODE, send_stale = true } = {}) {
   if (!ws) {
     return;
   }
   const staleConnState = ws.__connState;
+  try {
+    klogSafe("ws_invalidating_stale_socket", {
+      sessionId: staleConnState && staleConnState.session ? staleConnState.session.sessionId : null,
+      userId: staleConnState && staleConnState.session ? staleConnState.session.userId : null,
+      reason
+    });
+  } catch (_err) {}
   if (staleConnState && typeof staleConnState === "object") {
     staleConnState.sessionInvalidated = true;
     staleConnState.sessionInvalidatedReason = reason;
   }
 
-  try {
-    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-      ws.close(closeCode, reason);
+  // If caller opted out of sending a STALE_SESSION frame here, just close the socket
+  // deterministically without emitting a second STALE frame (the caller may have
+  // already emitted one with the relevant requestId).
+  if (!send_stale) {
+    try {
+      if (ws.readyState === WebSocket.OPEN) {
+        try { ws.close(closeCode, reason); } catch (_err) {}
+        return;
+      }
+
+      if (ws.readyState === WebSocket.CONNECTING) {
+        try { ws.close(closeCode, reason); } catch (_e) {}
+        return;
+      }
+
+      return;
+    } catch (_err) {
+      try { ws.close(closeCode, reason); } catch (_e) {}
+      return;
     }
-  } catch {
+  }
+
+  // Ensure STALE_SESSION is delivered to the socket before closing it.
+  // Use ws.send callback to wait for the write to be handed to the kernel where possible.
+  try {
+    if (ws.readyState === WebSocket.OPEN) {
+      try {
+        const errorFrame = makeErrorFrame({
+          code: "STALE_SESSION",
+          message: "socket no longer owns session",
+          requestId: null,
+          sessionId: staleConnState && staleConnState.session ? staleConnState.session.sessionId : null,
+          ts: nowTs()
+        });
+        // Attempt to send error and close in callback so the frame is flushed first.
+        ws.send(JSON.stringify(errorFrame), (err) => {
+          try {
+            // Give a short, deterministic grace period for the peer to receive and process
+            // the error frame before closing the socket. This improves test determinism.
+            setTimeout(() => {
+              try { ws.close(closeCode, reason); } catch (_err) {}
+            }, 25);
+          } catch (_err) {}
+        });
+      } catch (_err) {
+        // If send throws, still attempt close.
+        try { ws.close(closeCode, reason); } catch (_e) {}
+      }
+      return;
+    }
+
+    if (ws.readyState === WebSocket.CONNECTING) {
+      // If still connecting, just close — nothing to flush.
+      try { ws.close(closeCode, reason); } catch (_e) {}
+      return;
+    }
+
+    // Otherwise, already closed.
+  } catch (_err) {
     // Socket invalidation is best-effort and must not throw into command handling.
+    try { ws.close(closeCode, reason); } catch (_e) {}
   }
 }
+
 
 function sendError(ws, connState, { code, message, requestId = null, closeCode = null }) {
   sendFrame(
@@ -727,6 +798,7 @@ function sendGameplaySnapshot(ws, connState, { requestId = null, tableId, snapsh
 }
 
 function broadcastTableState(tableId, { excludeWs = null } = {}) {
+  maybeScheduleSettledRollover(tableId);
   const tableState = tableManager.tableState(tableId);
   const subscribers = tableManager.orderedSubscribers(tableId, (socket) => socket.__connState?.sessionId ?? "");
 
@@ -820,6 +892,33 @@ function clearSettledRolloverTimer(tableId) {
   settledRolloverTimerByTableId.delete(tableId);
 }
 
+async function applyInactiveCleanupAndBroadcast({ tableId, requestId, logPrefix }) {
+  const executor = await loadInactiveCleanupExecutor();
+  const result = await executor({
+    tableId,
+    userId: null,
+    requestId
+  });
+  if (result?.ok !== true) {
+    if (result?.retryable !== false) {
+      klogSafe(`${logPrefix}_retry`, { tableId, code: result?.code || "unknown" });
+    }
+    return result;
+  }
+  if (result?.changed === true) {
+    klogSafe(`${logPrefix}_restore_start`, { tableId, status: result?.status || null });
+    const restored = await restoreTableFromPersisted(tableId);
+    if (!restored?.ok) {
+      klogSafe(`${logPrefix}_restore_failed`, { tableId, reason: restored?.reason || "unknown" });
+      return result;
+    }
+    klogSafe(`${logPrefix}_restore_success`, { tableId, status: result?.status || null });
+    broadcastStateSnapshots(tableId);
+    broadcastTableState(tableId);
+  }
+  return result;
+}
+
 function maybeScheduleSettledRollover(tableId) {
   if (settledRevealMs <= 0) {
     clearSettledRolloverTimer(tableId);
@@ -852,6 +951,25 @@ function maybeScheduleSettledRollover(tableId) {
       commandName: "settled_rollover",
       dedupeKey: "settled_rollover",
       run: async () => {
+        if (!tableManager.hasActiveHumanMember(tableId)) {
+          if (tableManager.hasConnectedHumanPresence(tableId)) {
+            klogSafe("ws_settled_rollover_close_skipped_human_presence", {
+              tableId,
+              phase: pokerState?.phase || null
+            });
+            return {
+              ok: true,
+              changed: false,
+              deferred: true,
+              reason: "human_presence_present"
+            };
+          }
+          return applyInactiveCleanupAndBroadcast({
+            tableId,
+            requestId: `ws-settled-rollover-close:${tableId}`,
+            logPrefix: "ws_settled_rollover_close"
+          });
+        }
         const rollover = tableManager.rolloverSettledHand({ tableId, nowMs: Date.now() });
         if (!rollover?.ok) {
           return rollover;
@@ -955,6 +1073,19 @@ const disconnectCleanupRuntime = createDisconnectCleanupRuntime({
           broadcastStateSnapshots(tableId);
           broadcastTableState(tableId);
           klogSafe("ws_disconnect_cleanup_broadcast_after_restore", { tableId });
+          try {
+            scheduleBotStep({
+              tableId,
+              trigger: "disconnect_cleanup",
+              requestId: requestId || null,
+              frameTs: null
+            });
+          } catch (error) {
+            klogSafe("ws_disconnect_cleanup_schedule_bot_step_failed", {
+              tableId,
+              message: error?.message || "unknown"
+            });
+          }
           return result;
         }
         klogSafe("ws_disconnect_cleanup_noop", { tableId, status: result?.status || null });
@@ -1207,30 +1338,14 @@ async function sweepZombieTablesAndBroadcast() {
     commandName: "zombie_cleanup",
     dedupeKey: "zombie_cleanup",
     run: async () => {
-      const executor = await loadInactiveCleanupExecutor();
-      const result = await executor({
+      if (tableManager.hasConnectedHumanPresence(tableId)) {
+        return { ok: true, changed: false, status: "human_presence_present" };
+      }
+      return applyInactiveCleanupAndBroadcast({
         tableId,
-        userId: null,
-        requestId: `ws-zombie-cleanup:${tableId}`
+        requestId: `ws-zombie-cleanup:${tableId}`,
+        logPrefix: "ws_zombie_cleanup"
       });
-      if (result?.ok !== true) {
-        if (result?.retryable !== false) {
-          klogSafe("ws_zombie_cleanup_retry", { tableId, code: result?.code || "unknown" });
-        }
-        return result;
-      }
-      if (result?.changed === true) {
-        klogSafe("ws_zombie_cleanup_restore_start", { tableId, status: result?.status || null });
-        const restored = await restoreTableFromPersisted(tableId);
-        if (!restored?.ok) {
-          klogSafe("ws_zombie_cleanup_restore_failed", { tableId, reason: restored?.reason || "unknown" });
-          return result;
-        }
-        klogSafe("ws_zombie_cleanup_restore_success", { tableId, status: result?.status || null });
-        broadcastStateSnapshots(tableId);
-        broadcastTableState(tableId);
-      }
-      return result;
     }
   })));
 }
@@ -1340,12 +1455,33 @@ wss.on("connection", (ws) => {
       && connState.session.userId
       && !sessionStore.socketOwnsSession({ ws, sessionId: connState.session.sessionId })
     ) {
-      klogSafe("ws_stale_session_socket_rejected", {
-        frameType: frame.type,
-        sessionId: connState.session.sessionId,
-        userId: connState.session.userId
+      try {
+        const ownerConns = sessionStore.connectionsForUser(connState.session.userId || null) || [];
+        const ownerConnsInfo = ownerConns.map((s) => ({ remoteAddr: s && s._socket && s._socket.remoteAddress ? s._socket.remoteAddress : null, sessionId: s && s.__connState && s.__connState.sessionId ? s.__connState.sessionId : null }));
+        klogSafe("ws_stale_session_socket_rejected", {
+          event: "stale_frame_rejected",
+          frameType: frame.type,
+          requestId: frame.requestId ?? null,
+          sessionId: connState.session.sessionId,
+          userId: connState.session.userId,
+          socketRemoteAddr: ws && ws._socket && ws._socket.remoteAddress ? ws._socket.remoteAddress : null,
+          ownerConnections: ownerConnsInfo
+        });
+      } catch (_err) { }
+
+      connState.sessionInvalidated = true;
+      connState.sessionInvalidatedReason = "session_rebound";
+      sendError(ws, connState, {
+        code: "STALE_SESSION",
+        message: "socket no longer owns session",
+        requestId: frame.requestId ?? null
       });
-      invalidateSocketSession(ws, { reason: "session_rebound" });
+      setImmediate(() => {
+        try {
+          klogSafe("ws_invalidate_before_close", { sessionId: connState.session.sessionId, socketRemoteAddr: ws && ws._socket && ws._socket.remoteAddress ? ws._socket.remoteAddress : null });
+        } catch (_err) {}
+        invalidateSocketSession(ws, { reason: "session_rebound", send_stale: false });
+      });
       return;
     }
     touchSession(connState.session, nowTs);
@@ -1557,7 +1693,38 @@ wss.on("connection", (ws) => {
 
       const replay = streamLog.eventsAfter({ tableId, lastSeq: resumeLastSeq, receiverKey: resumeSessionId });
       if (rebound.priorSocket && rebound.priorSocket !== ws) {
-        invalidateSocketSession(rebound.priorSocket, { reason: "session_rebound" });
+        try {
+          // Emit detailed instrumentation so tests can reconstruct timeline and ownership
+          const priorRemote = rebound.priorSocket && rebound.priorSocket._socket && rebound.priorSocket._socket.remoteAddress ? rebound.priorSocket._socket.remoteAddress : null;
+          const priorConnSid = rebound.priorSocket && rebound.priorSocket.__connState && rebound.priorSocket.__connState.sessionId ? rebound.priorSocket.__connState.sessionId : null;
+          const newRemote = ws && ws._socket && ws._socket.remoteAddress ? ws._socket.remoteAddress : null;
+          const userConns = sessionStore.connectionsForUser(connState.session.userId || null) || [];
+          const userConnsInfo = userConns.map((s) => ({ remoteAddr: s && s._socket && s._socket.remoteAddress ? s._socket._socket ? null : (s._socket.remoteAddress) : (s && s._socket && s._socket.remoteAddress) || null, sessionId: s && s.__connState && s.__connState.sessionId ? s.__connState.sessionId : null })).slice(0,10);
+
+          klogSafe("ws_session_rebound", {
+            event: "session_rebound",
+            sessionId: resumeSessionId,
+            userId: connState.session.userId,
+            priorSocketSessionId: priorConnSid,
+            priorSocketRemoteAddr: priorRemote,
+            newSocketRemoteAddr: newRemote,
+            userConnections: userConnsInfo
+          });
+        } catch (_err) {}
+
+        // Enforce deny semantics: invalidate prior socket immediately after rebind.
+        try {
+          klogSafe("ws_invalidating_stale_socket", {
+            event: "invalidate_prior_socket",
+            sessionId: resumeSessionId,
+            priorSocketSessionId: rebound.priorSocket && rebound.priorSocket.__connState ? rebound.priorSocket.__connState.sessionId : null,
+            priorSocketRemoteAddr: rebound.priorSocket && rebound.priorSocket._socket && rebound.priorSocket._socket.remoteAddress ? rebound.priorSocket._socket.remoteAddress : null
+          });
+          invalidateSocketSession(rebound.priorSocket, { reason: "session_rebound" });
+          klogSafe("ws_invalidated_prior_socket", { sessionId: resumeSessionId, reason: "session_rebound" });
+        } catch (_err) {
+          klogSafe("ws_invalidated_prior_socket_error", { sessionId: resumeSessionId, message: _err && _err.message ? _err.message : String(_err) });
+        }
       }
 
       connState.session = rebound.session;
@@ -1634,6 +1801,7 @@ wss.on("connection", (ws) => {
           sendCommandResult,
           broadcastStateSnapshots,
           broadcastTableState,
+          scheduleBotStep,
           klog: klogSafe
         })
       });

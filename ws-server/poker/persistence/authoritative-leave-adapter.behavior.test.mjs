@@ -19,7 +19,6 @@ test("ws-local authoritative leave module bridges to repo-root authoritative con
   assert.doesNotMatch(source, /seats\s*:\s*\[/);
 });
 
-
 test("default loader resolves in artifact-shaped layout without loader-unavailable taxonomy", async () => {
   const stageDir = await fs.mkdtemp(path.join(os.tmpdir(), "ws-adapter-default-loader-"));
   try {
@@ -145,9 +144,6 @@ test("authoritative adapter masks retryable SQL deadlock after final retry", asy
   assert.deepEqual(result, { ok: false, code: "temporarily_unavailable" });
 });
 
-
-
-
 test("authoritative success payload with post-leave seats excluding leaver remains accepted", async () => {
   const execute = createAuthoritativeLeaveExecutor({
     env: {},
@@ -173,6 +169,7 @@ test("authoritative success payload with post-leave seats excluding leaver remai
   assert.equal(result.code, undefined);
   assert.equal(result.state.state.seats.some((seat) => seat.userId === "u1"), false);
 });
+
 test("authoritative success payload with mismatched tableId downgrades to authoritative_state_invalid", async () => {
   const logs = [];
   const execute = createAuthoritativeLeaveExecutor({
@@ -238,4 +235,61 @@ test("authoritative success payload that still contains leaving user downgrades 
   const result = await execute({ tableId: "t1", userId: "u1", requestId: "req-still-present" });
   assert.deepEqual(result, { ok: false, code: "authoritative_state_invalid" });
   assert.equal(logs.some((entry) => entry.kind === "ws_leave_authoritative_failed"), true);
+});
+
+test("authoritative leave accepts retained seat when user is flagged leftTableByUserId", async () => {
+  const execute = createAuthoritativeLeaveExecutor({
+    env: {},
+    klog: () => {},
+    beginSql: async (fn) => fn({}),
+    loadAuthoritativeLeaveModule: async () => ({
+      executePokerLeave: async () => ({
+        ok: true,
+        state: {
+          version: 3,
+          state: {
+            tableId: "t1",
+            seats: [
+              { userId: "u1", seatNo: 1 },
+              { userId: "bot-1", seatNo: 2, isBot: true }
+            ],
+            leftTableByUserId: {
+              u1: true
+            }
+          }
+        }
+      })
+    })
+  });
+
+  const result = await execute({ tableId: "t1", userId: "u1", requestId: "leave-r1" });
+  assert.equal(result.ok, true);
+});
+
+test("authoritative leave still rejects retained seat without leftTable flag", async () => {
+  const execute = createAuthoritativeLeaveExecutor({
+    env: {},
+    klog: () => {},
+    beginSql: async (fn) => fn({}),
+    loadAuthoritativeLeaveModule: async () => ({
+      executePokerLeave: async () => ({
+        ok: true,
+        state: {
+          version: 3,
+          state: {
+            tableId: "t1",
+            seats: [
+              { userId: "u1", seatNo: 1 },
+              { userId: "bot-1", seatNo: 2, isBot: true }
+            ],
+            leftTableByUserId: {}
+          }
+        }
+      })
+    })
+  });
+
+  const result = await execute({ tableId: "t1", userId: "u1", requestId: "leave-r2" });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "authoritative_state_invalid");
 });

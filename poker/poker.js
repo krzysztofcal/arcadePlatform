@@ -568,15 +568,24 @@
     return map;
   }
 
+  function navigateToPokerLobby(){
+    if (!window || !window.location) return;
+    window.location.href = '/poker/';
+  }
+
   function shouldShowTurnActions(params){
     var phaseValue = params && params.phase;
     var phase = typeof phaseValue === 'string' ? phaseValue.trim().toUpperCase() : '';
     var isActionPhase = phase === 'PREFLOP' || phase === 'FLOP' || phase === 'TURN' || phase === 'RIVER';
     if (!isActionPhase) return false;
+    var legalActions = Array.isArray(params && params.legalActions) ? params.legalActions : [];
+    for (var i = 0; i < legalActions.length; i++){
+      if (typeof legalActions[i] === 'string' && legalActions[i].trim().toUpperCase() === 'FOLD') return true;
+    }
     var turnUserId = params && typeof params.turnUserId === 'string' ? params.turnUserId.trim() : '';
     var currentUserId = params && typeof params.currentUserId === 'string' ? params.currentUserId.trim() : '';
     if (!turnUserId || !currentUserId || turnUserId !== currentUserId) return false;
-    return Array.isArray(params.legalActions) && params.legalActions.length > 0;
+    return legalActions.length > 0;
   }
   function resolveDevLogActionAvailability(flags){
     var info = flags || {};
@@ -916,7 +925,25 @@
     return err;
   }
 
+  function isStaleSessionError(err){
+    var code = err && (err.code || err.message) ? String(err.code || err.message) : '';
+    return code === 'STALE_SESSION' || code === 'session_rebound';
+  }
+
+  function isRetryableLeaveError(err){
+    var code = err && (err.code || err.message) ? String(err.code || err.message) : '';
+    return code === 'STALE_SESSION' || code === 'session_rebound' || code === 'ws_closed' || code === 'timeout' || code === 'ws_unavailable';
+  }
+
   function getGameplayWsSender(client, methodName, action, fallbackMessage){
+    if (!client || typeof client.isReady !== 'function' || !client.isReady()) return null;
+    if (typeof client[methodName] !== 'function') return null;
+    return function(payload, requestId){
+      return client[methodName](payload, requestId);
+    };
+  }
+
+  function getGameplayWsQueuedSender(client, methodName){
     if (!client || typeof client.isReady !== 'function' || !client.isReady()) return null;
     if (typeof client[methodName] !== 'function') return null;
     return function(payload, requestId){
@@ -1687,6 +1714,9 @@
     var leaveBtn = document.getElementById('pokerLeave');
     var joinStatusEl = document.getElementById('pokerJoinStatus');
     var leaveStatusEl = document.getElementById('pokerLeaveStatus');
+    var leaveConfirmModal = document.getElementById('pokerLeaveConfirmModal');
+    var leaveConfirmYesBtn = document.getElementById('pokerLeaveConfirmYes');
+    var leaveConfirmCancelBtn = document.getElementById('pokerLeaveConfirmCancel');
     var seatNoInput = document.getElementById('pokerSeatNo');
     var buyInInput = document.getElementById('pokerBuyIn');
     var yourStackEl = document.getElementById('pokerYourStack');
@@ -1758,6 +1788,9 @@
     var pendingLeaveTimer = null;
     var pendingStartHandTimer = null;
     var pendingActTimer = null;
+    var pendingLeaveRetryAfterReconnect = false;
+    var pendingLeaveNavigation = false;
+    var leaveConfirmOpen = false;
     var postActSnapshotTimer = null;
     var joinPending = false;
     var leavePending = false;
@@ -2465,6 +2498,7 @@
       nextData.state = stateObj;
       tableData = nextData;
       isSeated = false;
+      closeLeaveConfirm();
       clearDeadlineNudge();
       renderTable(tableData);
     }
@@ -2529,6 +2563,13 @@
         seatUserSeatMap: buildSeatUserSeatMap(tableData.seats || [])
       });
       renderTable(tableData);
+      if (!isSeated && leaveConfirmOpen) closeLeaveConfirm();
+      if (pendingLeaveNavigation && isSeated !== true){
+        pendingLeaveRetryAfterReconnect = false;
+        pendingLeaveNavigation = false;
+        navigateToPokerLobby();
+        return true;
+      }
       if (wasSeatedBefore && isSeated !== true){
         var removalMessage = t('pokerRemovedFromTable', 'You were removed from the table and cashed out.');
         setError(errorEl, removalMessage);
@@ -2536,6 +2577,15 @@
           tableId: tableId,
           stateVersion: resolveTableDataVersion(tableData),
           snapshotKind: opts.snapshotKind || null
+        });
+      }
+      if (pendingLeaveNavigation && pendingLeaveRetryAfterReconnect && isSeated === true){
+        pendingLeaveRetryAfterReconnect = false;
+        leaveTable().catch(function(err){
+          pendingLeaveRetryAfterReconnect = false;
+          pendingLeaveNavigation = false;
+          clearLeavePending();
+          setActionError('leave', WS_LEAVE_ENDPOINT, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrLeave', 'Failed to leave'));
         });
       }
       var seatedCount = getSeatedCount(tableData);
@@ -2643,6 +2693,14 @@
             reason: data && data.reason ? data.reason : null
           });
           if (status === 'auth_ok'){
+            if (pendingLeaveRetryAfterReconnect){
+              leaveTable().catch(function(err){
+                pendingLeaveRetryAfterReconnect = false;
+                clearLeavePending();
+                setActionError('leave', WS_LEAVE_ENDPOINT, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrLeave', 'Failed to leave'));
+              });
+              return;
+            }
             maybeAutoJoin();
           }
         },
@@ -2656,6 +2714,10 @@
             code: info && info.code ? info.code : 'unknown_error',
             detail: info && info.detail ? info.detail : null
           });
+          if (info && info.code === 'STALE_SESSION' && pendingLeaveRetryAfterReconnect){
+            bootstrapWsAfterBaseline('stale_session_leave_retry');
+            return;
+          }
           startPollingFallback(info && info.code ? info.code : 'protocol_error');
         }
       });
@@ -2752,7 +2814,21 @@
         leaveStatusEl.textContent = leavePending ? t('pokerLeavePending', 'Leaving...') : '';
         leaveStatusEl.hidden = !leavePending;
       }
+      if (leaveConfirmYesBtn) setDisabled(leaveConfirmYesBtn, leavePending);
+      if (leaveConfirmCancelBtn) setDisabled(leaveConfirmCancelBtn, leavePending);
       updateDevActionsUi();
+    }
+
+    function closeLeaveConfirm(){
+      leaveConfirmOpen = false;
+      if (leaveConfirmModal) leaveConfirmModal.hidden = true;
+    }
+
+    function openLeaveConfirm(){
+      if (!leaveConfirmModal) return;
+      leaveConfirmOpen = true;
+      leaveConfirmModal.hidden = false;
+      updatePendingUi();
     }
 
     function shouldEnableDevActions(){
@@ -4207,6 +4283,7 @@
 
     async function leaveTable(requestIdOverride){
       setPendingState('leave', true);
+      pendingLeaveNavigation = true;
       try {
         var resolved = resolveRequestId(pendingLeaveRequestId, requestIdOverride);
         if (resolved.nextPending){
@@ -4236,9 +4313,12 @@
           return;
         }
         clearLeavePending();
+        pendingLeaveRetryAfterReconnect = false;
+        pendingLeaveNavigation = false;
         setError(errorEl, null);
         if (!isPageActive()) return;
         applyOptimisticLeaveCleanup();
+        navigateToPokerLobby();
       } catch (err){
         if (isAbortError(err)){
           pauseLeavePending();
@@ -4256,10 +4336,42 @@
           });
           return;
         }
+        if (isRetryableLeaveError(err) && currentUserId && !pendingLeaveRetryAfterReconnect){
+          pendingLeaveRetryAfterReconnect = true;
+          pauseLeavePending();
+          stopWsClient();
+          bootstrapWsAfterBaseline('leave_stale_session_retry');
+          return;
+        }
+        pendingLeaveRetryAfterReconnect = false;
+        pendingLeaveNavigation = false;
         clearLeavePending();
         klog('poker_leave_error', { tableId: tableId, error: err.message || err.code });
         setActionError('leave', WS_LEAVE_ENDPOINT, err.code || 'request_failed', err.message || t('pokerErrLeave', 'Failed to leave'));
       }
+    }
+
+    function queueLeaveAndNavigateImmediately(requestIdOverride){
+      var leaveSender = getGameplayWsQueuedSender(wsClient, 'sendLeaveQueued');
+      if (!leaveSender) return false;
+      var resolved = resolveRequestId(pendingLeaveRequestId, requestIdOverride);
+      if (resolved.nextPending){
+        pendingLeaveRequestId = normalizeRequestId(resolved.nextPending);
+        pendingLeaveRetries = 0;
+        pendingLeaveStartedAt = null;
+      } else if (!pendingLeaveRequestId) {
+        pendingLeaveRequestId = normalizeRequestId(resolved.requestId);
+      }
+      var leaveRequestId = normalizeRequestId(resolved.requestId);
+      leaveSender({ tableId: tableId, requestId: leaveRequestId }, leaveRequestId);
+      clearLeavePending();
+      pendingLeaveRetryAfterReconnect = false;
+      pendingLeaveNavigation = false;
+      setError(errorEl, null);
+      if (!isPageActive()) return true;
+      applyOptimisticLeaveCleanup();
+      navigateToPokerLobby();
+      return true;
     }
 
     function handleVisibility(){
@@ -4316,6 +4428,17 @@
       if (joinPending || leavePending) return;
       klog('poker_leave_click', { tableId: tableId, hasToken: !!state.token });
       setError(errorEl, null);
+      openLeaveConfirm();
+    }
+
+    function confirmLeave(){
+      closeLeaveConfirm();
+      setError(errorEl, null);
+      try {
+        if (queueLeaveAndNavigateImmediately()) return;
+      } catch (err){
+        klog('poker_leave_queue_error', { tableId: tableId, error: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
+      }
       leaveTable().catch(function(err){
         if (isAbortError(err)){
           pauseLeavePending();
@@ -4475,6 +4598,8 @@
 
     if (joinBtn) joinBtn.addEventListener('click', handleJoinClick);
     if (leaveBtn) leaveBtn.addEventListener('click', handleLeaveClick);
+    if (leaveConfirmYesBtn) leaveConfirmYesBtn.addEventListener('click', confirmLeave);
+    if (leaveConfirmCancelBtn) leaveConfirmCancelBtn.addEventListener('click', closeLeaveConfirm);
     if (startHandBtn) startHandBtn.addEventListener('click', handleStartHandClick);
     if (dumpLogsBtn) dumpLogsBtn.addEventListener('click', handleDumpLogsClick);
     if (copyLogBtn) copyLogBtn.addEventListener('click', handleCopyLogClick);
