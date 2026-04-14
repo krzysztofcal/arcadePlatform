@@ -1,3 +1,5 @@
+import { isLiveHandPhase, resolveRetainedLiveHandSeat } from "./retained-live-hand-seat.mjs";
+
 const normalizeState = (value) => {
   if (!value) return {};
   if (typeof value === "string") {
@@ -18,8 +20,6 @@ const normalizeNonNegativeInt = (n) => {
 };
 
 const DEFAULT_TABLE_CLOSE_GRACE_MS = 60_000;
-const LIVE_HAND_PHASES = new Set(["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"]);
-
 function normalizePositiveInt(n) {
   const value = Number(n);
   if (!Number.isInteger(value) || value <= 0 || Math.abs(value) > Number.MAX_SAFE_INTEGER) return null;
@@ -39,11 +39,6 @@ function parseTimestampMs(value) {
 
 function resolveCloseGraceMs(env) {
   return normalizePositiveInt(env?.POKER_TABLE_CLOSE_GRACE_MS) ?? DEFAULT_TABLE_CLOSE_GRACE_MS;
-}
-
-function hasLiveHandSignal(state) {
-  const phase = typeof state?.phase === "string" ? state.phase : "";
-  return LIVE_HAND_PHASES.has(phase);
 }
 
 function resolveStateStacks(state) {
@@ -162,7 +157,29 @@ export async function executeInactiveCleanup({
     }
 
     const stacks = { ...resolveStateStacks(state) };
+    const retainedLiveHandSeat = resolveRetainedLiveHandSeat(state, normalizedUserId);
     const seatWasActive = seat?.status === "ACTIVE";
+    if (retainedLiveHandSeat) {
+      if (seatWasActive) {
+        await tx.unsafe(
+          "update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2;",
+          [tableId, normalizedUserId]
+        );
+      }
+      klog("poker_inactive_cleanup_retained_live_hand_preserved", {
+        tableId,
+        userId: normalizedUserId,
+        phase: typeof state?.phase === "string" ? state.phase : null,
+        seatWasActive
+      });
+      return {
+        ok: true,
+        changed: false,
+        status: "retained_live_hand_preserved",
+        closed: false,
+        retryable: false
+      };
+    }
     if (seatWasActive) {
       const targetCashout = stateFirstStackAmount({ state, seat, userId: normalizedUserId });
       await postCashout({
@@ -207,7 +224,7 @@ export async function executeInactiveCleanup({
       return { ok: true, changed: seatWasActive, status: seatWasActive ? "cleaned" : "already_inactive", closed: false, retryable: false };
     }
 
-    if (hasLiveHandSignal(nextState)) {
+    if (isLiveHandPhase(nextState?.phase)) {
       klog("poker_inactive_cleanup_live_hand_preserved", {
         tableId,
         userId: normalizedUserId,

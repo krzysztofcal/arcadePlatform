@@ -136,14 +136,50 @@ function normalizeSeatRows(seatRows, maxSeats) {
   return activeSeats;
 }
 
-function mergeStateSeatsWithSeatRows(stateSeats, normalizedSeatRows) {
+function snapshotSeatFromMetadata(seat) {
+  const snapshot = {
+    userId: seat.userId,
+    seatNo: seat.seat,
+    status: "ACTIVE"
+  };
+  if (seat.isBot) snapshot.isBot = true;
+  if (seat.botProfile) snapshot.botProfile = seat.botProfile;
+  if (seat.leaveAfterHand) snapshot.leaveAfterHand = true;
+  return snapshot;
+}
+
+function resolveRetainedStateSeatUserIds(pokerState) {
+  const leftTableByUserId = asPlainObject(pokerState?.leftTableByUserId) || {};
+  const waitingForNextHandByUserId = asPlainObject(pokerState?.waitingForNextHandByUserId) || {};
+  const retainedUserIds = new Set();
+  for (const [userId, leftTable] of Object.entries(leftTableByUserId)) {
+    if (!leftTable && waitingForNextHandByUserId[userId] !== true) continue;
+    if (typeof userId === "string" && userId.trim()) {
+      retainedUserIds.add(userId.trim());
+    }
+  }
+  for (const [userId, waiting] of Object.entries(waitingForNextHandByUserId)) {
+    if (waiting !== true) continue;
+    if (typeof userId === "string" && userId.trim()) {
+      retainedUserIds.add(userId.trim());
+    }
+  }
+  return retainedUserIds;
+}
+
+function mergeStateSeatsWithSeatRows(stateSeats, normalizedSeatRows, pokerState) {
   const seatRows = Array.isArray(normalizedSeatRows) ? normalizedSeatRows : [];
   const metadataByUserId = new Map(seatRows.map((seat) => [seat.userId, seat]));
+  const retainedStateSeatUserIds = resolveRetainedStateSeatUserIds(pokerState);
   const mergedStateSeats = Array.isArray(stateSeats)
     ? stateSeats
-        .filter((seat) => seat && typeof seat.userId === "string" && metadataByUserId.has(seat.userId))
+        .filter((seat) => {
+          const userId = typeof seat?.userId === "string" ? seat.userId.trim() : "";
+          return !!userId && (metadataByUserId.has(userId) || retainedStateSeatUserIds.has(userId));
+        })
         .map((seat) => {
-          const metadata = metadataByUserId.get(seat.userId) || null;
+          const userId = typeof seat?.userId === "string" ? seat.userId.trim() : "";
+          const metadata = metadataByUserId.get(userId) || null;
           const mergedSeat = { ...seat };
           if (metadata?.isBot) mergedSeat.isBot = true;
           if (metadata?.botProfile) mergedSeat.botProfile = metadata.botProfile;
@@ -151,22 +187,26 @@ function mergeStateSeatsWithSeatRows(stateSeats, normalizedSeatRows) {
           return mergedSeat;
         })
     : [];
+  const seenUserIds = new Set(
+    mergedStateSeats
+      .map((seat) => (typeof seat?.userId === "string" ? seat.userId.trim() : ""))
+      .filter(Boolean)
+  );
+  for (const seat of seatRows) {
+    if (seenUserIds.has(seat.userId)) continue;
+    mergedStateSeats.push(snapshotSeatFromMetadata(seat));
+  }
+  mergedStateSeats.sort((left, right) => {
+    const leftSeatNo = Number(left?.seatNo ?? left?.seat);
+    const rightSeatNo = Number(right?.seatNo ?? right?.seat);
+    return leftSeatNo - rightSeatNo || String(left?.userId || "").localeCompare(String(right?.userId || ""));
+  });
 
   if (mergedStateSeats.length > 0) {
     return mergedStateSeats;
   }
 
-  return seatRows.map((seat) => {
-    const snapshot = {
-      userId: seat.userId,
-      seatNo: seat.seat,
-      status: "ACTIVE"
-    };
-    if (seat.isBot) snapshot.isBot = true;
-    if (seat.botProfile) snapshot.botProfile = seat.botProfile;
-    if (seat.leaveAfterHand) snapshot.leaveAfterHand = true;
-    return snapshot;
-  });
+  return seatRows.map(snapshotSeatFromMetadata);
 }
 
 export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow }) {
@@ -197,7 +237,7 @@ export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow 
 
   const members = seats.map((seat) => ({ userId: seat.userId, seat: seat.seat }));
   const publicStacks = normalizePublicStacks(seatRows);
-  const stateSeats = mergeStateSeatsWithSeatRows(pokerState.seats, seats);
+  const stateSeats = mergeStateSeatsWithSeatRows(pokerState.seats, seats, pokerState);
   const seatDetailsByUserId = {};
   for (const seat of seats) {
     seatDetailsByUserId[seat.userId] = {

@@ -1,4 +1,5 @@
 import { applySeatsAndStacksToState, asSeatSnapshot, computeTargetBotCount, getBotConfig, loadSeatRows, seedBotsForJoin, shouldSeedBotsOnJoin } from "./bots.mjs";
+import { resolveRetainedLiveHandSeat } from "./retained-live-hand-seat.mjs";
 
 const BUY_IN_IDEMPOTENCY_CONSTRAINT = "chips_transactions_idempotency_key_unique";
 
@@ -96,38 +97,6 @@ function requirePostMutationVersion({ previousVersion, nextVersion }) {
 
 function isPlainObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function normalizeSeatNo(value) {
-  const seatNo = Number(value);
-  return Number.isInteger(seatNo) && seatNo >= 1 ? seatNo : null;
-}
-
-function isLiveHandPhase(phase) {
-  const normalized = typeof phase === "string" ? phase.trim().toUpperCase() : "";
-  return ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(normalized);
-}
-
-function resolveStateSeatForUser(state, userId) {
-  const stateSeats = Array.isArray(state?.seats) ? state.seats : [];
-  const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
-  if (!normalizedUserId) return null;
-  for (const seat of stateSeats) {
-    const seatUserId = typeof seat?.userId === "string" ? seat.userId.trim() : "";
-    if (seatUserId !== normalizedUserId) continue;
-    const seatNo = normalizeSeatNo(seat?.seatNo ?? seat?.seat);
-    if (seatNo !== null) {
-      return { seatNo };
-    }
-  }
-  return null;
-}
-
-function resolveRetainedLiveHandSeat(state, userId) {
-  if (!isLiveHandPhase(state?.phase)) return null;
-  const leftTableByUserId = isPlainObject(state?.leftTableByUserId) ? state.leftTableByUserId : {};
-  if (leftTableByUserId[userId] !== true) return null;
-  return resolveStateSeatForUser(state, userId);
 }
 
 function buildWaitingForNextHandState(state, { tableId, userId, seatNo, stack }) {
@@ -483,6 +452,29 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         );
         const persisted = await readPersistedSeatStack({ tx, tableId, userId });
         const stateRow = normalizeLockedStateResult(await loadStateForUpdate(tx, tableId));
+        const retainedLiveHandSeat = resolveRetainedLiveHandSeat(stateRow.state, userId);
+        if (retainedLiveHandSeat) {
+          return completeRetainedLiveHandJoin({
+            tx,
+            tableId,
+            userId,
+            requestId,
+            retainedSeatNo: retainedLiveHandSeat.seatNo,
+            resolvedBuyIn,
+            existingSeatRow: {
+              seat_no: persisted.seatNo,
+              status: "ACTIVE",
+              stack: persisted.stack
+            },
+            stateRow,
+            runPostTransaction,
+            loadStateForUpdate,
+            updateStateLocked,
+            validateStateForStorage,
+            maxPlayers,
+            klog
+          });
+        }
         const seatRows = await loadSeatRows(tx, tableId);
         if (stateAlreadyRepresentsActiveSeatRows(stateRow.state, seatRows, userId)) {
           if (!Number.isInteger(stateRow.version) || stateRow.version <= 0) {

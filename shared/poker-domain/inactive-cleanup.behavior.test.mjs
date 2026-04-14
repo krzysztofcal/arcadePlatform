@@ -22,6 +22,15 @@ function createCleanupHarness({ seatRows, state, tableStatus = "OPEN", createdAt
       if (sql.includes("select state from public.poker_state")) {
         return [{ state: { ...tableState.stateRow.state } }];
       }
+      if (sql.includes("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2")) {
+        const [, userId] = params;
+        for (let i = 0; i < seatState.length; i += 1) {
+          if (seatState[i].user_id === userId) {
+            seatState[i] = { ...seatState[i], status: "INACTIVE" };
+          }
+        }
+        return [];
+      }
       if (sql.includes("update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2")) {
         const [, userId] = params;
         for (let i = 0; i < seatState.length; i += 1) {
@@ -121,6 +130,37 @@ test("inactive cleanup preserves valid bot turn holder", async () => {
   assert.equal(harness.seatState.find((row) => row.user_id === "bot_1")?.status, "ACTIVE");
   assert.equal(harness.tableState.stateRow.state.turnUserId, "bot_1");
   assert.deepEqual(harness.tableState.stateRow.state.stacks, { human_2: 600, bot_1: 400 });
+});
+
+test("inactive cleanup preserves retained live-hand stack for later rejoin without cashout", async () => {
+  const harness = createCleanupHarness({
+    seatRows: [
+      { user_id: "human_1", status: "ACTIVE", is_bot: false, stack: 500 },
+      { user_id: "bot_1", status: "ACTIVE", is_bot: true, stack: 400 }
+    ],
+    state: {
+      phase: "turn",
+      handId: "h-retained",
+      turnUserId: "bot_1",
+      seats: [
+        { userId: "human_1", seatNo: 1, status: "ACTIVE" },
+        { userId: "bot_1", seatNo: 2, status: "ACTIVE", isBot: true }
+      ],
+      stacks: { human_1: 500, bot_1: 400 },
+      leftTableByUserId: { human_1: true, bot_1: false }
+    }
+  });
+
+  const result = await harness.run();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, false);
+  assert.equal(result.status, "retained_live_hand_preserved");
+  assert.equal(harness.cashouts.length, 0);
+  assert.equal(harness.seatState.find((row) => row.user_id === "human_1")?.status, "INACTIVE");
+  assert.equal(harness.seatState.find((row) => row.user_id === "human_1")?.stack, 500);
+  assert.deepEqual(harness.tableState.stateRow.state.stacks, { human_1: 500, bot_1: 400 });
+  assert.equal(harness.tableState.stateRow.state.leftTableByUserId.human_1, true);
 });
 
 test("inactive cleanup clears removed disconnected turn holder", async () => {

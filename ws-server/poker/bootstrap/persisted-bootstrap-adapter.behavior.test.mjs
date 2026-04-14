@@ -108,3 +108,34 @@ test("adapter drops stale state seats that are no longer ACTIVE in persisted sea
   assert.deepEqual(result.table.coreState.seats, { user_a: 1 });
   assert.deepEqual(result.table.coreState.pokerState.seats, [{ userId: "user_a", seatNo: 1, status: "ACTIVE" }]);
 });
+
+test("adapter preserves retained left state seats even when persisted seat rows are already inactive", () => {
+  const result = adaptPersistedBootstrap({
+    tableId: "table_retained_state_seat",
+    tableRow: { id: "table_retained_state_seat", max_players: 6 },
+    seatRows: [
+      { user_id: "user_left", seat_no: 1, status: "INACTIVE", is_bot: false, stack: 120 },
+      { user_id: "bot_a", seat_no: 2, status: "ACTIVE", is_bot: true, stack: 80 }
+    ],
+    stateRow: {
+      version: 11,
+      state: {
+        phase: "TURN",
+        seats: [
+          { userId: "user_left", seatNo: 1, status: "ACTIVE" },
+          { userId: "bot_a", seatNo: 2, status: "ACTIVE", isBot: true }
+        ],
+        stacks: { user_left: 120, bot_a: 80 },
+        leftTableByUserId: { user_left: true, bot_a: false }
+      }
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.table.coreState.members, [{ userId: "bot_a", seat: 2 }]);
+  assert.deepEqual(result.table.coreState.seats, { bot_a: 2 });
+  assert.deepEqual(result.table.coreState.pokerState.seats, [
+    { userId: "user_left", seatNo: 1, status: "ACTIVE" },
+    { userId: "bot_a", seatNo: 2, status: "ACTIVE", isBot: true }
+  ]);
+});
