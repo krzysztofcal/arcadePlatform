@@ -7,5 +7,8 @@ export function shouldHideSeatRowFromReadModel(row) {
   if (!userId) return false;
   const state = normalizeJsonState(row?.state);
   const leftTableByUserId = state?.leftTableByUserId;
-  return isPlainObject(leftTableByUserId) && leftTableByUserId[userId] === true;
+  const waitingForNextHandByUserId = state?.waitingForNextHandByUserId;
+  return isPlainObject(leftTableByUserId)
+    && leftTableByUserId[userId] === true
+    && (!isPlainObject(waitingForNextHandByUserId) || waitingForNextHandByUserId[userId] !== true);
 }

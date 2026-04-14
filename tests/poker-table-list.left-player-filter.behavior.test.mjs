@@ -51,6 +51,88 @@ test("poker-list-tables excludes left seats from open seat counts", async () => 
   assert.equal(payload.tables[0].seatCount, 1);
 });
 
+test("poker-list-tables counts retained waiting seats in seatCount", async () => {
+  const handler = loadPokerHandler(
+    "netlify/functions/poker-list-tables.mjs",
+    makeAuthMocks(async (query) => {
+      const text = String(query);
+      if (text.includes("from public.poker_tables t")) {
+        return [{
+          id: "table-1",
+          stakes: JSON.stringify({ sb: 1, bb: 2 }),
+          max_players: 6,
+          status: "OPEN",
+          created_by: "user-2",
+          created_at: "2026-04-13T00:00:00.000Z",
+          updated_at: "2026-04-13T00:00:00.000Z",
+          last_activity_at: "2026-04-13T00:00:00.000Z",
+        }];
+      }
+      return [
+        {
+          table_id: "table-1",
+          user_id: "user-2",
+          state: {
+            leftTableByUserId: { "user-2": true },
+            waitingForNextHandByUserId: { "user-2": true }
+          }
+        }
+      ];
+    })
+  );
+
+  const response = await handler({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { status: "OPEN", limit: "20" },
+  });
+
+  assert.equal(response.statusCode, 200);
+  const payload = JSON.parse(response.body);
+  assert.equal(payload.tables[0].seatCount, 1);
+});
+
+test("poker-list-tables still hides left seats when waiting flag is explicitly false", async () => {
+  const handler = loadPokerHandler(
+    "netlify/functions/poker-list-tables.mjs",
+    makeAuthMocks(async (query) => {
+      const text = String(query);
+      if (text.includes("from public.poker_tables t")) {
+        return [{
+          id: "table-1",
+          stakes: JSON.stringify({ sb: 1, bb: 2 }),
+          max_players: 6,
+          status: "OPEN",
+          created_by: "user-2",
+          created_at: "2026-04-13T00:00:00.000Z",
+          updated_at: "2026-04-13T00:00:00.000Z",
+          last_activity_at: "2026-04-13T00:00:00.000Z",
+        }];
+      }
+      return [
+        {
+          table_id: "table-1",
+          user_id: "user-2",
+          state: {
+            leftTableByUserId: { "user-2": true },
+            waitingForNextHandByUserId: { "user-2": false }
+          }
+        }
+      ];
+    })
+  );
+
+  const response = await handler({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { status: "OPEN", limit: "20" },
+  });
+
+  assert.equal(response.statusCode, 200);
+  const payload = JSON.parse(response.body);
+  assert.equal(payload.tables[0].seatCount, 0);
+});
+
 test("poker-list-my-tables excludes rows for users already marked as left", async () => {
   const seenQueries = [];
   const handler = loadPokerHandler(
@@ -91,6 +173,48 @@ test("poker-list-my-tables excludes rows for users already marked as left", asyn
   assert.match(seenQueries[0], /where s\.user_id = \$1/);
   const payload = JSON.parse(response.body);
   assert.deepEqual(payload.tables, []);
+});
+
+test("poker-list-my-tables keeps retained waiting row visible", async () => {
+  const handler = loadPokerHandler(
+    "netlify/functions/poker-list-my-tables.mjs",
+    makeAuthMocks(async (query) => {
+      const text = String(query);
+      if (text.includes("where s.user_id = $1")) {
+        return [{
+          id: "table-1",
+          stakes: JSON.stringify({ sb: 1, bb: 2 }),
+          max_players: 6,
+          status: "OPEN",
+          created_by: "user-2",
+          created_at: "2026-04-13T00:00:00.000Z",
+          updated_at: "2026-04-13T00:00:00.000Z",
+          last_activity_at: "2026-04-13T00:00:00.000Z",
+          seat_no: 1,
+          seat_status: "ACTIVE",
+          seat_created_at: "2026-04-13T00:00:00.000Z",
+          seat_last_seen_at: "2026-04-13T00:00:00.000Z",
+          user_id: "user-1",
+          state: {
+            leftTableByUserId: { "user-1": true },
+            waitingForNextHandByUserId: { "user-1": true }
+          }
+        }];
+      }
+      return [];
+    })
+  );
+
+  const response = await handler({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { status: "OPEN", limit: "20" },
+  });
+
+  assert.equal(response.statusCode, 200);
+  const payload = JSON.parse(response.body);
+  assert.equal(payload.tables.length, 1);
+  assert.equal(payload.tables[0].id, "table-1");
 });
 
 test("poker-list-tables keeps active seats visible when poker_state row is missing", async () => {
