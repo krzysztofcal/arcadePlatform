@@ -441,16 +441,16 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       const maxPlayers = Number(table.max_players);
       if (!Number.isInteger(maxPlayers) || maxPlayers < 1) throw makeError("table_not_open");
       const existingRows = await tx.unsafe(
-        "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 and status = 'ACTIVE' limit 1;",
+        "select seat_no, stack from public.poker_seats where table_id = $1 and user_id = $2 and status = 'ACTIVE' limit 1;",
         [tableId, userId]
       );
-      const existingSeatNo = Number(existingRows?.[0]?.seat_no);
+      const existingActiveSeatRow = existingRows?.[0] || null;
+      const existingSeatNo = Number(existingActiveSeatRow?.seat_no);
       if (Number.isInteger(existingSeatNo) && existingSeatNo >= 1) {
         await tx.unsafe(
           "update public.poker_seats set status = 'ACTIVE', last_seen_at = now() where table_id = $1 and user_id = $2;",
           [tableId, userId]
         );
-        const persisted = await readPersistedSeatStack({ tx, tableId, userId });
         const stateRow = normalizeLockedStateResult(await loadStateForUpdate(tx, tableId));
         const retainedLiveHandSeat = resolveRetainedLiveHandSeat(stateRow.state, userId);
         if (retainedLiveHandSeat) {
@@ -462,9 +462,9 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
             retainedSeatNo: retainedLiveHandSeat.seatNo,
             resolvedBuyIn,
             existingSeatRow: {
-              seat_no: persisted.seatNo,
+              seat_no: existingActiveSeatRow.seat_no,
               status: "ACTIVE",
-              stack: persisted.stack
+              stack: existingActiveSeatRow.stack
             },
             stateRow,
             runPostTransaction,
@@ -475,6 +475,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
             klog
           });
         }
+        const persisted = await readPersistedSeatStack({ tx, tableId, userId });
         const seatRows = await loadSeatRows(tx, tableId);
         if (stateAlreadyRepresentsActiveSeatRows(stateRow.state, seatRows, userId)) {
           if (!Number.isInteger(stateRow.version) || stateRow.version <= 0) {
