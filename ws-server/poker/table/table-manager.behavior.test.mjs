@@ -208,6 +208,26 @@ test("table manager authoritative join bumps version only for material membershi
   assert.deepEqual(tableManager.tableSnapshot(tableId, "user_authoritative").stacks, { user_authoritative: 220 });
 });
 
+test("table manager authoritative join prefers authoritative stack over requested buy-in", () => {
+  const tableManager = createTableManager({ maxSeats: 6 });
+  const ws = fakeWs("ws-authoritative-stack");
+  const tableId = "table_authoritative_stack";
+
+  const joined = tableManager.join({
+    ws,
+    userId: "user_authoritative",
+    tableId,
+    requestId: "join-authoritative-stack",
+    nowTs: 100,
+    authoritativeSeatNo: 4,
+    authoritativeStack: 330,
+    buyIn: 175
+  });
+
+  assert.equal(joined.ok, true);
+  assert.deepEqual(tableManager.tableSnapshot(tableId, "user_authoritative").stacks, { user_authoritative: 330 });
+});
+
 test("table manager authoritative attach uses provided authoritativeSeatNo without local recompute", () => {
   const tableManager = createTableManager({ maxSeats: 6 });
   const ws = fakeWs("ws-authoritative-attach");
@@ -247,6 +267,45 @@ test("table manager authoritative attach normalizes existing in-memory seat to a
   assert.equal(normalized.changed, true);
   assert.deepEqual(memberPairs(normalized.tableState.members), [["user_norm", 2]]);
   assert.deepEqual(memberPairs(tableManager.tableState("table_authoritative_normalize").members), [["user_norm", 2]]);
+});
+
+test("syncAuthoritativeLeave keeps waiting-for-next-hand seats in the authoritative snapshot", () => {
+  const tableManager = createTableManager({ maxSeats: 6 });
+  const tableId = "table_sync_leave_waiting";
+  const wsWaiting = fakeWs("ws-sync-waiting");
+  const wsActive = fakeWs("ws-sync-active");
+
+  assert.equal(tableManager.join({ ws: wsWaiting, userId: "waiting_user", tableId, requestId: "join-sync-waiting", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsActive, userId: "active_user", tableId, requestId: "join-sync-active", nowTs: 2 }).ok, true);
+
+  const synced = tableManager.syncAuthoritativeLeave({
+    ws: wsWaiting,
+    userId: "waiting_user",
+    tableId,
+    stateVersion: 5,
+    pokerState: {
+      tableId,
+      phase: "TURN",
+      seats: [
+        { userId: "waiting_user", seatNo: 1, status: "ACTIVE" },
+        { userId: "active_user", seatNo: 2, status: "ACTIVE" }
+      ],
+      stacks: { waiting_user: 150, active_user: 190 },
+      leftTableByUserId: { waiting_user: true, active_user: false },
+      waitingForNextHandByUserId: { waiting_user: true, active_user: false }
+    }
+  });
+
+  assert.equal(synced.ok, true);
+  const snapshot = tableManager.tableSnapshot(tableId, "waiting_user");
+  assert.deepEqual(memberPairs(snapshot.members), [
+    ["waiting_user", 1],
+    ["active_user", 2]
+  ]);
+  assert.deepEqual(snapshot.seats, [
+    { userId: "waiting_user", seatNo: 1, status: "WAITING_NEXT_HAND" },
+    { userId: "active_user", seatNo: 2, status: "ACTIVE" }
+  ]);
 });
 
 

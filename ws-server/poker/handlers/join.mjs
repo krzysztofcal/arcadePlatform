@@ -52,14 +52,46 @@ function countObjectKeys(value) {
   return Object.keys(value).length;
 }
 
-function restoredAuthoritativeStateLooksComplete({ restoredTable, userId, seatNo, seededBots = [], expectedStateVersion = null }) {
+function asObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function normalizeExpectedPositiveNumber(value) {
+  const normalized = Number(value);
+  return Number.isFinite(normalized) && normalized > 0 ? normalized : null;
+}
+
+function restoredStackMatchesExpected(actualValue, expectedValue) {
+  const actual = normalizeExpectedPositiveNumber(actualValue);
+  if (actual === null) return false;
+  const expected = normalizeExpectedPositiveNumber(expectedValue);
+  if (expected === null) return true;
+  return actual === expected;
+}
+
+function restoredWaitingSeatLooksComplete({ coreState, userId, seatNo, expectedStack = null }) {
+  const pokerState = asObject(coreState?.pokerState) || asObject(coreState?.state);
+  const stateSeats = Array.isArray(pokerState?.seats) ? pokerState.seats : [];
+  const retainedSeat = stateSeats.find((seat) => seat && seat.userId === userId) || null;
+  const stacks = asObject(pokerState?.stacks) || {};
+  const leftTableByUserId = asObject(pokerState?.leftTableByUserId) || {};
+  const waitingForNextHandByUserId = asObject(pokerState?.waitingForNextHandByUserId) || {};
+  return Number(retainedSeat?.seatNo) === Number(seatNo)
+    && restoredStackMatchesExpected(stacks[userId], expectedStack)
+    && leftTableByUserId[userId] === true
+    && waitingForNextHandByUserId[userId] === true;
+}
+
+function restoredAuthoritativeStateLooksComplete({ restoredTable, userId, seatNo, seededBots = [], expectedStateVersion = null, expectedStack = null }) {
   const coreState = restoredTable?.coreState && typeof restoredTable.coreState === "object" ? restoredTable.coreState : null;
   const seats = coreState?.seats && typeof coreState.seats === "object" && !Array.isArray(coreState.seats) ? coreState.seats : {};
   const stacks = coreState?.publicStacks && typeof coreState.publicStacks === "object" && !Array.isArray(coreState.publicStacks) ? coreState.publicStacks : {};
   const restoredVersion = Number(coreState?.version);
   if (!Number.isInteger(restoredVersion) || restoredVersion <= 0) return false;
   if (expectedStateVersion !== null && restoredVersion !== Number(expectedStateVersion)) return false;
-  if (Number(seats[userId]) !== Number(seatNo) || Number(stacks[userId]) <= 0) return false;
+  const restoredNormally = Number(seats[userId]) === Number(seatNo) && restoredStackMatchesExpected(stacks[userId], expectedStack);
+  const restoredWaiting = restoredWaitingSeatLooksComplete({ coreState, userId, seatNo, expectedStack });
+  if (!restoredNormally && !restoredWaiting) return false;
   for (const bot of seededBots) {
     const botUserId = typeof bot?.userId === "string" ? bot.userId : "";
     const botSeatNo = Number(bot?.seatNo);
@@ -190,7 +222,7 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
       : {};
     const seededBots = Array.isArray(authoritativeJoinResult?.seededBots) ? authoritativeJoinResult.seededBots : [];
     const userSeatMatch = Number(restoredSeats[connState.session.userId]) === Number(authoritativeJoinResult?.seatNo);
-    const userStackValid = Number(restoredStacks[connState.session.userId]) > 0;
+    const userStackValid = restoredStackMatchesExpected(restoredStacks[connState.session.userId], authoritativeJoinResult?.stack);
     const botsValidated = seededBots.every((bot) => Number(restoredSeats[bot?.userId]) === Number(bot?.seatNo) && Number(restoredStacks[bot?.userId]) > 0);
     klog("ws_join_restore_validate", {
       restoredVersion: Number.isInteger(restoredVersion) ? restoredVersion : null,
@@ -204,7 +236,8 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
       userId: connState.session.userId,
       seatNo: authoritativeJoinResult?.seatNo,
       seededBots,
-      expectedStateVersion: expectedVersionRaw
+      expectedStateVersion: expectedVersionRaw,
+      expectedStack: authoritativeJoinResult?.stack
     })) {
       klog("ws_join_restore_invalid", {
         reason: "validation_failed",
@@ -237,7 +270,8 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
     autoSeat: joinIntent.autoSeat,
     preferredSeatNo: joinIntent.preferredSeatNo,
     buyIn: joinIntent.buyIn,
-    authoritativeSeatNo: authoritativeJoinResult?.seatNo ?? null
+    authoritativeSeatNo: authoritativeJoinResult?.seatNo ?? null,
+    authoritativeStack: authoritativeJoinResult?.stack ?? null
   });
   klog("ws_join_attach_result", {
     ok: joined?.ok === true,

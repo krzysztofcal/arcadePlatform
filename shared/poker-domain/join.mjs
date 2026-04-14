@@ -94,6 +94,84 @@ function requirePostMutationVersion({ previousVersion, nextVersion }) {
   return nextVersion;
 }
 
+function isPlainObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeSeatNo(value) {
+  const seatNo = Number(value);
+  return Number.isInteger(seatNo) && seatNo >= 1 ? seatNo : null;
+}
+
+function isLiveHandPhase(phase) {
+  const normalized = typeof phase === "string" ? phase.trim().toUpperCase() : "";
+  return ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(normalized);
+}
+
+function resolveStateSeatForUser(state, userId) {
+  const stateSeats = Array.isArray(state?.seats) ? state.seats : [];
+  const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+  if (!normalizedUserId) return null;
+  for (const seat of stateSeats) {
+    const seatUserId = typeof seat?.userId === "string" ? seat.userId.trim() : "";
+    if (seatUserId !== normalizedUserId) continue;
+    const seatNo = normalizeSeatNo(seat?.seatNo ?? seat?.seat);
+    if (seatNo !== null) {
+      return { seatNo };
+    }
+  }
+  return null;
+}
+
+function resolveRetainedLiveHandSeat(state, userId) {
+  if (!isLiveHandPhase(state?.phase)) return null;
+  const leftTableByUserId = isPlainObject(state?.leftTableByUserId) ? state.leftTableByUserId : {};
+  if (leftTableByUserId[userId] !== true) return null;
+  return resolveStateSeatForUser(state, userId);
+}
+
+function buildWaitingForNextHandState(state, { tableId, userId, seatNo, stack }) {
+  const nextState = applySeatsAndStacksToState(state, {
+    tableId,
+    seatEntries: [{ userId, seatNo, status: "ACTIVE" }],
+    stackEntries: [[userId, stack]]
+  });
+  const nextLeftTableByUserId = isPlainObject(nextState.leftTableByUserId) ? { ...nextState.leftTableByUserId } : {};
+  const nextWaitingForNextHandByUserId = isPlainObject(nextState.waitingForNextHandByUserId)
+    ? { ...nextState.waitingForNextHandByUserId }
+    : {};
+  const nextFoldedByUserId = isPlainObject(nextState.foldedByUserId) ? { ...nextState.foldedByUserId } : {};
+  const nextActedThisRoundByUserId = isPlainObject(nextState.actedThisRoundByUserId) ? { ...nextState.actedThisRoundByUserId } : {};
+  const nextSitOutByUserId = isPlainObject(nextState.sitOutByUserId) ? { ...nextState.sitOutByUserId } : {};
+  const nextPendingAutoSitOutByUserId = isPlainObject(nextState.pendingAutoSitOutByUserId)
+    ? { ...nextState.pendingAutoSitOutByUserId }
+    : {};
+
+  nextLeftTableByUserId[userId] = true;
+  nextWaitingForNextHandByUserId[userId] = true;
+  nextFoldedByUserId[userId] = true;
+  nextActedThisRoundByUserId[userId] = true;
+  nextSitOutByUserId[userId] = false;
+  delete nextPendingAutoSitOutByUserId[userId];
+
+  return {
+    ...nextState,
+    leftTableByUserId: nextLeftTableByUserId,
+    waitingForNextHandByUserId: nextWaitingForNextHandByUserId,
+    foldedByUserId: nextFoldedByUserId,
+    actedThisRoundByUserId: nextActedThisRoundByUserId,
+    sitOutByUserId: nextSitOutByUserId,
+    pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId
+  };
+}
+
+function buildJoinBuyInIdempotencyKey({ tableId, userId, requestId, seatNo, buyIn, rejoin = false }) {
+  if (requestId) {
+    return `${rejoin ? "rejoin" : "join"}-buyin:${tableId}:${userId}:${requestId}`;
+  }
+  return `${rejoin ? "rejoin" : "join"}-buyin:${tableId}:${userId}:${seatNo}:${buyIn}`;
+}
+
 function stateAlreadyRepresentsActiveSeatRows(state, seatRows, userId) {
   const stateSeats = Array.isArray(state?.seats) ? state.seats : [];
   const activeSeatRows = Array.isArray(seatRows)
@@ -186,14 +264,20 @@ function assertAuthoritativeJoinStateComplete({ seatRows, state, version, userId
   if (activeBotCount < expectedBotCount) throw makeError("authoritative_state_invalid");
 }
 
-async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, stack, loadStateForUpdate, updateStateLocked, validateStateForStorage, maxPlayers, botCfg }) {
-  const stateRow = normalizeLockedStateResult(await loadStateForUpdate(tx, tableId));
+async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, stack, loadStateForUpdate, updateStateLocked, validateStateForStorage, maxPlayers, botCfg, preloadedStateRow = null, mapState = null }) {
+  const stateRow = preloadedStateRow || normalizeLockedStateResult(await loadStateForUpdate(tx, tableId));
   const seatRows = await loadSeatRows(tx, tableId);
-  const nextState = applySeatsAndStacksToState(stateRow.state, {
+  let nextState = applySeatsAndStacksToState(stateRow.state, {
     tableId,
     seatEntries: activeSeatRows(seatRows).map(asSeatSnapshot).filter(Boolean),
     stackEntries: activeStackEntries(seatRows)
   });
+  if (typeof mapState === "function") {
+    nextState = mapState(nextState);
+    if (!isPlainObject(nextState)) {
+      throw makeError("state_invalid");
+    }
+  }
   if (!validateStateForStorage(nextState)) {
     throw makeError("state_invalid");
   }
@@ -216,6 +300,155 @@ async function readPersistedSeatStack({ tx, tableId, userId }) {
   return { seatNo, stack };
 }
 
+async function upsertActiveSeatRow({ tx, tableId, userId, seatNo, stack, existingSeatRow }) {
+  try {
+    if (existingSeatRow) {
+      await tx.unsafe(
+        "update public.poker_seats set seat_no = $3, status = 'ACTIVE', last_seen_at = now(), stack = $4 where table_id = $1 and user_id = $2;",
+        [tableId, userId, seatNo, stack]
+      );
+      return;
+    }
+    await tx.unsafe(
+      "insert into public.poker_seats (table_id, user_id, seat_no, status, last_seen_at, joined_at, stack) values ($1, $2, $3, 'ACTIVE', now(), now(), $4);",
+      [tableId, userId, seatNo, stack]
+    );
+  } catch (error) {
+    if (isSeatConflictError(error)) throw makeError("seat_taken");
+    throw error;
+  }
+}
+
+async function completeRetainedLiveHandJoin({
+  tx,
+  tableId,
+  userId,
+  requestId,
+  retainedSeatNo,
+  resolvedBuyIn,
+  existingSeatRow,
+  stateRow,
+  runPostTransaction,
+  loadStateForUpdate,
+  updateStateLocked,
+  validateStateForStorage,
+  maxPlayers,
+  klog
+}) {
+  const persistedStateStack = normalizePositiveInt(stateRow.state?.stacks?.[userId]);
+  const existingSeatStack = normalizePositiveInt(existingSeatRow?.stack);
+  let fundedStack = persistedStateStack ?? existingSeatStack;
+
+  if (fundedStack === null) {
+    await upsertActiveSeatRow({
+      tx,
+      tableId,
+      userId,
+      seatNo: retainedSeatNo,
+      stack: 0,
+      existingSeatRow
+    });
+    const escrowSystemKey = `POKER_TABLE:${tableId}`;
+    const idempotencyKey = buildJoinBuyInIdempotencyKey({
+      tableId,
+      userId,
+      requestId,
+      seatNo: retainedSeatNo,
+      buyIn: resolvedBuyIn,
+      rejoin: true
+    });
+    let buyInDuplicated = false;
+    klog("shared_join_ledger_start", { buyIn: resolvedBuyIn, retainedRejoin: true });
+    try {
+      await runPostTransaction({
+        userId,
+        txType: "TABLE_BUY_IN",
+        idempotencyKey,
+        entries: [
+          { accountType: "USER", amount: -resolvedBuyIn },
+          { accountType: "ESCROW", systemKey: escrowSystemKey, amount: resolvedBuyIn }
+        ],
+        createdBy: userId,
+        tx
+      });
+    } catch (error) {
+      if (!isBuyInIdempotencyDuplicate(error)) throw error;
+      buyInDuplicated = true;
+      klog("ws_join_authoritative_buyin_duplicate_idempotency", { tableId, userId, idempotencyKey, retainedRejoin: true });
+    }
+    klog("shared_join_ledger_result", { ok: true, retainedRejoin: true });
+
+    if (buyInDuplicated) {
+      const persisted = await readPersistedSeatStack({ tx, tableId, userId });
+      if (persisted.seatNo !== retainedSeatNo) {
+        throw makeError("state_invalid");
+      }
+      fundedStack = persisted.stack;
+    } else {
+      await tx.unsafe(
+        "update public.poker_seats set stack = $4 where table_id = $1 and user_id = $2 and seat_no = $3;",
+        [tableId, userId, retainedSeatNo, resolvedBuyIn]
+      );
+      fundedStack = resolvedBuyIn;
+    }
+  } else {
+    await upsertActiveSeatRow({
+      tx,
+      tableId,
+      userId,
+      seatNo: retainedSeatNo,
+      stack: fundedStack,
+      existingSeatRow
+    });
+  }
+
+  klog("shared_join_stack_updated", { userId, stack: fundedStack, retainedRejoin: true });
+  const botCfg = getBotConfig(process.env);
+  const stateResult = await syncStateSeatAndStack({
+    tx,
+    tableId,
+    userId,
+    seatNo: retainedSeatNo,
+    stack: fundedStack,
+    loadStateForUpdate,
+    updateStateLocked,
+    validateStateForStorage,
+    maxPlayers,
+    botCfg,
+    preloadedStateRow: stateRow,
+    mapState: (nextState) => buildWaitingForNextHandState(nextState, {
+      tableId,
+      userId,
+      seatNo: retainedSeatNo,
+      stack: fundedStack
+    })
+  });
+  await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
+  klog("shared_join_waiting_for_next_hand", {
+    tableId,
+    userId,
+    seatNo: retainedSeatNo,
+    stack: fundedStack,
+    snapshotVersion: stateResult.version
+  });
+  return {
+    ok: true,
+    tableId,
+    userId,
+    seatNo: retainedSeatNo,
+    stack: fundedStack,
+    rejoin: true,
+    waitingForNextHand: true,
+    requestId: requestId || null,
+    me: { seated: true },
+    snapshot: {
+      stateVersion: stateResult.version,
+      seats: Array.isArray(stateResult.state?.seats) ? stateResult.state.seats : [],
+      stacks: stateResult.state?.stacks && typeof stateResult.state.stacks === "object" ? stateResult.state.stacks : {}
+    }
+  };
+}
+
 export async function executePokerJoinAuthoritative({ beginSql, tableId, userId, requestId, seatNo = null, autoSeat = false, preferredSeatNo = null, buyIn = null, klog = () => {}, postTransactionFn = null, loadStateForUpdate, updateStateLocked, validateStateForStorage }) {
   if (typeof loadStateForUpdate !== "function" || typeof updateStateLocked !== "function" || typeof validateStateForStorage !== "function") {
     throw makeError("temporarily_unavailable");
@@ -233,14 +466,17 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       );
       const table = tableRows?.[0] || null;
       if (!table) throw makeError("table_not_found");
-
+      const status = String(table.status || "").toUpperCase();
+      if (status === "CLOSED") throw makeError("table_closed");
+      if (status && status !== "OPEN") throw makeError("table_not_open");
+      const maxPlayers = Number(table.max_players);
+      if (!Number.isInteger(maxPlayers) || maxPlayers < 1) throw makeError("table_not_open");
       const existingRows = await tx.unsafe(
         "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 and status = 'ACTIVE' limit 1;",
         [tableId, userId]
       );
       const existingSeatNo = Number(existingRows?.[0]?.seat_no);
       if (Number.isInteger(existingSeatNo) && existingSeatNo >= 1) {
-        if (String(table.status || "").toUpperCase() === "CLOSED") throw makeError("table_closed");
         await tx.unsafe(
           "update public.poker_seats set status = 'ACTIVE', last_seen_at = now() where table_id = $1 and user_id = $2;",
           [tableId, userId]
@@ -300,12 +536,33 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         };
       }
 
-    const status = String(table.status || "").toUpperCase();
-    if (status === "CLOSED") throw makeError("table_closed");
-    if (status && status !== "OPEN") throw makeError("table_not_open");
-
-    const maxPlayers = Number(table.max_players);
-    if (!Number.isInteger(maxPlayers) || maxPlayers < 1) throw makeError("table_not_open");
+      const persistedSeatRows = await tx.unsafe(
+        "select seat_no, status, stack from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
+        [tableId, userId]
+      );
+      const persistedSeatRow = persistedSeatRows?.[0] || null;
+      if (persistedSeatRow) {
+        const stateRow = normalizeLockedStateResult(await loadStateForUpdate(tx, tableId));
+        const retainedLiveHandSeat = resolveRetainedLiveHandSeat(stateRow.state, userId);
+        if (retainedLiveHandSeat) {
+          return completeRetainedLiveHandJoin({
+            tx,
+            tableId,
+            userId,
+            requestId,
+            retainedSeatNo: retainedLiveHandSeat.seatNo,
+            resolvedBuyIn,
+            existingSeatRow: persistedSeatRow,
+            stateRow,
+            runPostTransaction,
+            loadStateForUpdate,
+            updateStateLocked,
+            validateStateForStorage,
+            maxPlayers,
+            klog
+          });
+        }
+      }
 
     const occupiedRows = await tx.unsafe(
       "select seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
@@ -350,9 +607,13 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
     }
 
     const escrowSystemKey = `POKER_TABLE:${tableId}`;
-    const idempotencyKey = requestId
-      ? `join-buyin:${tableId}:${userId}:${requestId}`
-      : `join-buyin:${tableId}:${userId}:${resolvedSeatNo}:${resolvedBuyIn}`;
+    const idempotencyKey = buildJoinBuyInIdempotencyKey({
+      tableId,
+      userId,
+      requestId,
+      seatNo: resolvedSeatNo,
+      buyIn: resolvedBuyIn
+    });
 
       let buyInDuplicated = false;
       klog("shared_join_ledger_start", { buyIn: resolvedBuyIn });
@@ -405,7 +666,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         botCount: Array.isArray(seededBots) ? seededBots.length : 0,
         botSeats: Array.isArray(seededBots) ? seededBots.map((bot) => Number(bot?.seatNo)).filter((botSeatNo) => Number.isInteger(botSeatNo) && botSeatNo >= 1) : []
       });
-      const stateRow = await syncStateSeatAndStack({
+      const synchronizedState = await syncStateSeatAndStack({
       tx,
       tableId,
       userId,
@@ -417,10 +678,10 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       maxPlayers,
       botCfg
       });
-      klog("shared_join_state_written", { previousVersion: null, newVersion: stateRow.version });
+      klog("shared_join_state_written", { previousVersion: null, newVersion: synchronizedState.version });
       await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
       klog("ws_join_authoritative_persisted", { tableId, userId, seatNo: resolvedSeatNo, autoSeat: autoSeat === true, preferredSeatNo: preferredSeatNoRequested, buyIn: resolvedBuyIn, fundedStack });
-      klog("shared_join_success", { seatNo: resolvedSeatNo, stack: fundedStack, snapshotVersion: stateRow.version });
+      klog("shared_join_success", { seatNo: resolvedSeatNo, stack: fundedStack, snapshotVersion: synchronizedState.version });
       return {
         ok: true,
         tableId,
@@ -432,9 +693,9 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         me: { seated: true },
         seededBots,
         snapshot: {
-          stateVersion: stateRow.version,
-          seats: Array.isArray(stateRow.state?.seats) ? stateRow.state.seats : [],
-          stacks: stateRow.state?.stacks && typeof stateRow.state.stacks === "object" ? stateRow.state.stacks : {}
+          stateVersion: synchronizedState.version,
+          seats: Array.isArray(synchronizedState.state?.seats) ? synchronizedState.state.seats : [],
+          stacks: synchronizedState.state?.stacks && typeof synchronizedState.state.stacks === "object" ? synchronizedState.state.stacks : {}
         }
       };
     } catch (error) {

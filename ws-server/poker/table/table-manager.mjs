@@ -518,7 +518,7 @@ export function createTableManager({
     member.expiresAt = nowMs + presenceTtlMs;
   }
 
-  function join({ ws, userId, tableId, requestId, nowTs = Date.now(), authoritativeSeatNo = null, buyIn = null }) {
+  function join({ ws, userId, tableId, requestId, nowTs = Date.now(), authoritativeSeatNo = null, authoritativeStack = null, buyIn = null }) {
     const conn = ensureConn(ws);
     const activeTableId = conn.joinedTableId || conn.subscribedTableId;
     if (activeTableId && activeTableId !== tableId) {
@@ -555,11 +555,13 @@ export function createTableManager({
           ? table.coreState.publicStacks
           : {};
         const nextPublicStacks = { ...currentPublicStacks };
-        const nextBuyIn = Number.isFinite(Number(buyIn)) && Number(buyIn) > 0 ? Number(buyIn) : null;
+        const nextAuthoritativeStack = Number.isFinite(Number(authoritativeStack)) && Number(authoritativeStack) > 0
+          ? Number(authoritativeStack)
+          : (Number.isFinite(Number(buyIn)) && Number(buyIn) > 0 ? Number(buyIn) : null);
         const membershipChanged = !existingMember || existingMember.seat !== authoritativeSeat;
-        const stackChanged = nextBuyIn !== null && currentPublicStacks[userId] !== nextBuyIn;
+        const stackChanged = nextAuthoritativeStack !== null && currentPublicStacks[userId] !== nextAuthoritativeStack;
         if (stackChanged) {
-          nextPublicStacks[userId] = nextBuyIn;
+          nextPublicStacks[userId] = nextAuthoritativeStack;
         }
         const changed = membershipChanged || stackChanged;
         table.coreState = {
@@ -782,6 +784,9 @@ export function createTableManager({
     const leftTableByUserId = normalizedState?.leftTableByUserId && typeof normalizedState.leftTableByUserId === "object" && !Array.isArray(normalizedState.leftTableByUserId)
       ? normalizedState.leftTableByUserId
       : {};
+    const waitingForNextHandByUserId = normalizedState?.waitingForNextHandByUserId && typeof normalizedState.waitingForNextHandByUserId === "object" && !Array.isArray(normalizedState.waitingForNextHandByUserId)
+      ? normalizedState.waitingForNextHandByUserId
+      : {};
     const leavingUserRetainedInState = authoritativeSeatsContainUser(stateSeats, userId) && leftTableByUserId?.[userId] === true;
     const authoritativeStateValid = normalizedState
       && stateTableId === tableId
@@ -814,7 +819,7 @@ export function createTableManager({
         };
       })
       .filter(Boolean)
-      .filter((member) => leftTableByUserId?.[member.userId] !== true)
+      .filter((member) => leftTableByUserId?.[member.userId] !== true || waitingForNextHandByUserId?.[member.userId] === true)
       .sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
 
     const nextSeats = {};

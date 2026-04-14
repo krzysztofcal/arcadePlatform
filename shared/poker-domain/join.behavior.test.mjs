@@ -621,3 +621,90 @@ test("fresh authoritative join starting from version 0 returns the persisted pos
   assert.equal(result.snapshot.stateVersion, store.updateVersions.at(-1));
   assert.notEqual(result.snapshot.stateVersion, 0);
 }));
+
+test("retained live-hand rejoin restores the seat as waiting for next hand without a new buy-in", async () => withBotsDisabled(async () => {
+  let stateVersion = 7;
+  let storedState = {
+    tableId: "t_waiting_rejoin",
+    phase: "TURN",
+    seats: [
+      { userId: "u2", seatNo: 1, status: "ACTIVE" },
+      { userId: "u1", seatNo: 3, status: "ACTIVE" }
+    ],
+    stacks: { u2: 320, u1: 275 },
+    leftTableByUserId: { u2: false, u1: true },
+    waitingForNextHandByUserId: {},
+    foldedByUserId: { u2: false, u1: true },
+    actedThisRoundByUserId: { u2: false, u1: true },
+    sitOutByUserId: { u2: false, u1: false },
+    pendingAutoSitOutByUserId: {}
+  };
+  const seatRows = [
+    { user_id: "u2", seat_no: 1, status: "ACTIVE", stack: 320, is_bot: false, bot_profile: null, leave_after_hand: false },
+    { user_id: "u1", seat_no: 3, status: "INACTIVE", stack: 0, is_bot: false, bot_profile: null, leave_after_hand: false }
+  ];
+  let ledgerCalls = 0;
+
+  const result = await executePokerJoinAuthoritative(withLockedState({
+    beginSql: async (fn) => fn({
+      unsafe: async (sql, params) => {
+        if (sql.includes("from public.poker_tables")) {
+          return [{ id: "t_waiting_rejoin", status: "OPEN", max_players: 6, stakes: null }];
+        }
+        if (sql.includes("select version, state from public.poker_state")) {
+          return [{ version: stateVersion, state: storedState }];
+        }
+        if (sql.includes("from public.poker_seats") && sql.includes("status = 'ACTIVE'") && sql.includes("user_id = $2")) {
+          return seatRows
+            .filter((row) => row.user_id === params[1] && row.status === "ACTIVE")
+            .map((row) => ({ seat_no: row.seat_no }));
+        }
+        if (sql.includes("select seat_no, status, stack from public.poker_seats")) {
+          return seatRows
+            .filter((row) => row.user_id === params[1])
+            .map((row) => ({ seat_no: row.seat_no, status: row.status, stack: row.stack }));
+        }
+        if (sql.includes("update public.poker_seats set seat_no = $3, status = 'ACTIVE'")) {
+          const row = seatRows.find((entry) => entry.user_id === params[1]);
+          row.seat_no = params[2];
+          row.status = "ACTIVE";
+          row.stack = params[3];
+          return [{ ok: true }];
+        }
+        if (sql.includes("from public.poker_seats where table_id = $1 order by seat_no asc;")) {
+          return seatRows.map((row) => ({ ...row }));
+        }
+        if (sql.includes("update public.poker_state set state")) {
+          storedState = JSON.parse(params[1]);
+          stateVersion += 1;
+          return [{ version: stateVersion }];
+        }
+        if (sql.includes("update public.poker_tables")) {
+          return [{ ok: true }];
+        }
+        throw new Error(`unexpected sql: ${sql}`);
+      }
+    }),
+    tableId: "t_waiting_rejoin",
+    userId: "u1",
+    requestId: "rejoin-waiting",
+    buyIn: 150,
+    postTransactionFn: async () => {
+      ledgerCalls += 1;
+      return { ok: true };
+    }
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.rejoin, true);
+  assert.equal(result.waitingForNextHand, true);
+  assert.equal(result.seatNo, 3);
+  assert.equal(result.stack, 275);
+  assert.equal(ledgerCalls, 0);
+  assert.equal(seatRows[1].status, "ACTIVE");
+  assert.equal(seatRows[1].stack, 275);
+  assert.equal(storedState.leftTableByUserId.u1, true);
+  assert.equal(storedState.waitingForNextHandByUserId.u1, true);
+  assert.equal(storedState.foldedByUserId.u1, true);
+  assert.equal(storedState.actedThisRoundByUserId.u1, true);
+}));

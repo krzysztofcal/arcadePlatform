@@ -803,6 +803,20 @@
     return !!(currentSeat && /FOLD/i.test(currentSeat.status || ''));
   }
 
+  function isWaitingForNextHandSeat(seat){
+    return !!(seat && String(seat.status || '').toUpperCase() === 'WAITING_NEXT_HAND');
+  }
+
+  function isCurrentUserWaitingForNextHand(){
+    return isWaitingForNextHandSeat(deriveCurrentSeat());
+  }
+
+  function getSeatStatusLabel(seat){
+    if (!seat) return 'OPEN';
+    if (isWaitingForNextHandSeat(seat)) return 'Waiting next hand';
+    return String(seat.status || 'ACTIVE').replace(/_/g, ' ');
+  }
+
   function rotateSeatIndex(index, total){
     var heroIndex = getHeroVisualIndex();
     var safeTotal = Math.max(1, total || 1);
@@ -812,7 +826,9 @@
   }
 
   function getHeroBestHand(){
-    var mergedCards = (Array.isArray(state.heroCards) ? state.heroCards.slice(0, 2) : []).concat(Array.isArray(state.communityCards) ? state.communityCards.slice(0, 5) : []);
+    var heroCards = Array.isArray(state.heroCards) ? state.heroCards.slice(0, 2) : [];
+    if (heroCards.length < 2) return null;
+    var mergedCards = heroCards.concat(Array.isArray(state.communityCards) ? state.communityCards.slice(0, 5) : []);
     var best = evaluateViewerBestHand(mergedCards);
     if (!best || !Array.isArray(best.cards) || best.cards.length !== 5) return null;
     return best;
@@ -835,6 +851,7 @@
     if (!seat || typeof seat.userId !== 'string' || !seat.userId) return false;
     if (seat.userId === currentUserId) return false;
     if (/FOLD/i.test(seat.status || '')) return false;
+    if (isWaitingForNextHandSeat(seat)) return false;
     return true;
   }
 
@@ -1032,6 +1049,7 @@
       var hero = !!(seat && seat.userId && state.currentUserId && seat.userId === state.currentUserId);
       var lastAction = getSeatLastBettingRoundAction(seat);
       var folded = !!(seat && /FOLD/i.test(seat.status || ''));
+      var waitingForNextHand = isWaitingForNextHandSeat(seat);
       var rotatedIndex = rotateSeatIndex(i, state.maxSeats);
       var anchor = getSeatAnchor(rotatedIndex, state.maxSeats);
       if (hero && state.maxSeats >= 4) anchor = { x: 34, y: 91 };
@@ -1041,6 +1059,7 @@
       article.className = 'poker-seat'
         + (active ? ' poker-seat--active' : '')
         + (folded ? ' poker-seat--folded' : '')
+        + (waitingForNextHand ? ' poker-seat--waiting' : '')
         + (seat && isWinnerSeat(seat) ? ' poker-seat--winner' : '')
         + (hero ? ' poker-seat--hero' : '')
         + (!seat ? ' poker-seat--empty' : '');
@@ -1073,7 +1092,7 @@
 
       var cards = document.createElement('div');
       cards.className = 'poker-seat-cards';
-      if (!hero && seat && seat.userId){
+      if (!hero && seat && seat.userId && !waitingForNextHand){
         var revealCards = getSeatRevealCards(seat);
         if (revealCards){
           revealCards.forEach(function(card){
@@ -1090,11 +1109,11 @@
       name.textContent = seat ? getDisplayName(seat) : 'Seat ' + String(i + offset);
 
       var status = document.createElement('div');
-      status.className = 'poker-seat-status';
-      status.textContent = seat ? String(seat.status || 'ACTIVE').replace(/_/g, ' ') : 'OPEN';
+      status.className = 'poker-seat-status' + (waitingForNextHand ? ' poker-seat-status--waiting' : '');
+      status.textContent = getSeatStatusLabel(seat);
 
       article.appendChild(avatar);
-      if (seat && lastAction){
+      if (seat && lastAction && !waitingForNextHand){
         var actionBadge = document.createElement('div');
         var badgePosition = getSeatActionBadgePosition(rotatedIndex, hero);
         actionBadge.className = 'poker-seat-action-badge poker-seat-action-badge--' + lastAction.replace(/_/g, '-');
@@ -1132,7 +1151,7 @@
       article.appendChild(stack);
       if (cards.children.length) article.appendChild(cards);
       article.appendChild(name);
-      if (!(hero && seat)) article.appendChild(status);
+      if (!(hero && seat) || waitingForNextHand) article.appendChild(status);
       if (hero && heroBestHand){
         var bestHand = document.createElement('div');
         bestHand.className = 'poker-seat-best-hand';
@@ -1165,6 +1184,12 @@
   function renderHeroCards(){
     if (!els.heroCards) return;
     els.heroCards.innerHTML = '';
+    els.heroCards.hidden = false;
+    if (isCurrentUserWaitingForNextHand()){
+      els.heroCards.hidden = true;
+      els.heroCards.className = 'poker-hero-cards';
+      return;
+    }
     if (isCurrentUserFolded()) els.heroCards.className = 'poker-hero-cards poker-hero-cards--folded';
     else els.heroCards.className = 'poker-hero-cards';
     var cards = Array.isArray(state.heroCards) ? state.heroCards : [];
@@ -1270,7 +1295,9 @@
       els.errorText.hidden = !state.errorText;
     }
     if (els.turnText){
-      if (isUsersTurn()){
+      if (isCurrentUserWaitingForNextHand()){
+        els.turnText.textContent = 'Waiting for next hand';
+      } else if (isUsersTurn()){
         els.turnText.textContent = 'Your turn';
       } else if (state.turnUserId){
         els.turnText.textContent = 'Acting: ' + shortId(state.turnUserId);

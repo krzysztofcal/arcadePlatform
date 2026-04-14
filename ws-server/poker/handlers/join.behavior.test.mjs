@@ -202,6 +202,48 @@ test('handleJoinCommand accepts restored authoritative state before live members
   assert.equal(calls.snapshots, 0);
 });
 
+test('handleJoinCommand accepts waiting-for-next-hand authoritative restore and forwards authoritative stack', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 200 });
+  ctx.authoritativeJoinEnabled = true;
+  ctx.persistedBootstrapEnabled = true;
+  ctx.loadAuthoritativeJoinExecutor = async () => async () => ({
+    ok: true,
+    seatNo: 1,
+    stack: 240,
+    snapshot: {
+      stateVersion: 2,
+      seats: [{ userId: 'u1', seatNo: 1, status: 'ACTIVE' }],
+      stacks: { u1: 240 }
+    }
+  });
+  ctx.restoreTableFromPersisted = async () => ({
+    ok: true,
+    restoredTable: {
+      coreState: {
+        version: 2,
+        seats: {},
+        publicStacks: {},
+        pokerState: {
+          seats: [
+            { userId: 'u1', seatNo: 1, status: 'ACTIVE' },
+            { userId: 'u2', seatNo: 2, status: 'ACTIVE' }
+          ],
+          stacks: { u1: 240, u2: 160 },
+          leftTableByUserId: { u1: true, u2: false },
+          waitingForNextHandByUserId: { u1: true, u2: false }
+        }
+      }
+    }
+  });
+
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.command.length, 1);
+  assert.equal(calls.command[0].status, 'accepted');
+  assert.equal(calls.joinArgs.authoritativeSeatNo, 1);
+  assert.equal(calls.joinArgs.authoritativeStack, 240);
+});
+
 test('handleJoinCommand rejects restored authoritative state when restore version diverges from join snapshot version', async () => {
   const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 200 });
   ctx.authoritativeJoinEnabled = true;

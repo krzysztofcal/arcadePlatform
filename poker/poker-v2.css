@@ -78,6 +78,15 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 
 .poker-seat--folded .poker-seat-status{color:#f9c1c1; border-color:rgba(236,132,132,0.52); background:rgba(73,17,17,0.66);}
 
+.poker-seat--waiting{opacity:0.56;}
+
+.poker-seat--waiting .poker-seat-avatar{filter:saturate(0.62); border-color:rgba(255,209,128,0.42);}
+.poker-seat--waiting .poker-seat-stack,.poker-seat--waiting .poker-seat-name,.poker-seat--waiting .poker-seat-best-hand{opacity:0.7;}
+
+.poker-seat--waiting .poker-seat-status{color:#ffe5a8; border-color:rgba(246,196,96,0.5); background:rgba(88,62,14,0.6);}
+
+.poker-seat-status--waiting{font-size:0.58rem; letter-spacing:0.02em;}
+
 .poker-seat--hero{width:124px; z-index:2;}
 
 .poker-seat--hero .poker-seat-avatar{width:96px; height:96px; font-size:0.9rem; box-shadow:0 12px 24px rgba(0,0,0,0.54);}

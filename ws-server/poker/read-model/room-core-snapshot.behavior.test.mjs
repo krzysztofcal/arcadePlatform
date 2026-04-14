@@ -159,6 +159,49 @@ test("projectRoomCoreSnapshot hides youSeat, legal actions, and private cards fo
   assert.equal(snapshot.private, null);
 });
 
+test("projectRoomCoreSnapshot keeps waiting-for-next-hand users visible without cards or legal actions", () => {
+  const snapshot = projectRoomCoreSnapshot({
+    tableId: "table_waiting_snapshot",
+    roomId: "table_waiting_snapshot",
+    coreState: {
+      seats: { waiting_user: 1, active_user: 2 },
+      publicStacks: { waiting_user: 48, active_user: 52 },
+      pokerState: {
+        roomId: "table_waiting_snapshot",
+        handId: "hand_waiting_snapshot",
+        phase: "TURN",
+        turnUserId: "active_user",
+        community: ["AS", "KD", "QC", "3H"],
+        potTotal: 12,
+        seats: [
+          { userId: "waiting_user", seatNo: 1, status: "ACTIVE" },
+          { userId: "active_user", seatNo: 2, status: "ACTIVE" }
+        ],
+        stacks: { waiting_user: 48, active_user: 52 },
+        leftTableByUserId: { waiting_user: true, active_user: false },
+        waitingForNextHandByUserId: { waiting_user: true, active_user: false },
+        foldedByUserId: { waiting_user: true, active_user: false },
+        sitOutByUserId: { waiting_user: false, active_user: false },
+        holeCardsByUserId: { waiting_user: ["AH", "AD"], active_user: ["2C", "2D"] }
+      }
+    },
+    members: [
+      { userId: "waiting_user", seat: 1 },
+      { userId: "active_user", seat: 2 }
+    ],
+    userId: "waiting_user",
+    youSeat: 1
+  });
+
+  assert.deepEqual(snapshot.seats, [
+    { userId: "waiting_user", seatNo: 1, status: "WAITING_NEXT_HAND" },
+    { userId: "active_user", seatNo: 2, status: "ACTIVE" }
+  ]);
+  assert.deepEqual(snapshot.stacks, { waiting_user: 48, active_user: 52 });
+  assert.deepEqual(snapshot.legalActions, { seat: 1, actions: [] });
+  assert.deepEqual(snapshot.private, { userId: "waiting_user", seat: 1, holeCards: [] });
+});
+
 test("projectRoomCoreSnapshot marks folded seats from authoritative folded state when public seats omit status", () => {
   const snapshot = projectRoomCoreSnapshot({
     tableId: "table_fold_projection",

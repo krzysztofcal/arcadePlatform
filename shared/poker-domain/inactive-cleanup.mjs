@@ -186,7 +186,13 @@ export async function executeInactiveCleanup({
 
     let nextState = state;
     if (stateRow) {
-      nextState = { ...state, stacks };
+      const waitingForNextHandByUserId = state?.waitingForNextHandByUserId && typeof state.waitingForNextHandByUserId === "object" && !Array.isArray(state.waitingForNextHandByUserId)
+        ? { ...state.waitingForNextHandByUserId }
+        : {};
+      if (normalizedUserId) {
+        delete waitingForNextHandByUserId[normalizedUserId];
+      }
+      nextState = { ...state, stacks, waitingForNextHandByUserId };
       const turnUserId = typeof nextState.turnUserId === "string" ? nextState.turnUserId : null;
       if (turnUserId && !activeSeatUserIdSet(allSeatRows).has(turnUserId)) {
         nextState.turnUserId = null;

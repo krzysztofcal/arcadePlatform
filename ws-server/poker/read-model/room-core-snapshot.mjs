@@ -88,16 +88,27 @@ function normalizeMemberSeatRows(value) {
     .map((member) => ({ userId: member.userId, seatNo: member.seat, status: "ACTIVE" }));
 }
 
+function isWaitingForNextHand(statePublic, userId) {
+  if (typeof userId !== "string" || !userId) {
+    return false;
+  }
+  const waitingForNextHandByUserId = asObject(statePublic?.waitingForNextHandByUserId) || {};
+  return waitingForNextHandByUserId[userId] === true;
+}
+
 function resolvePublicSeats({ statePublic, members, coreState }) {
   const stateSeats = normalizeSeatRows(statePublic?.seats);
   const seatDetailsByUserId = normalizeSeatDetails(coreState?.seatDetailsByUserId);
   const foldedByUserId = asObject(statePublic?.foldedByUserId) || {};
   const leftTableByUserId = asObject(statePublic?.leftTableByUserId) || {};
+  const waitingForNextHandByUserId = asObject(statePublic?.waitingForNextHandByUserId) || {};
   const baseSeats = stateSeats.length > 0 ? stateSeats : normalizeMemberSeatRows(members);
-  return baseSeats.filter((seat) => leftTableByUserId[seat.userId] !== true).map((seat) => {
+  return baseSeats.filter((seat) => leftTableByUserId[seat.userId] !== true || waitingForNextHandByUserId[seat.userId] === true).map((seat) => {
     const details = seatDetailsByUserId[seat.userId] || null;
     const merged = { ...seat };
-    if (foldedByUserId[seat.userId] === true) {
+    if (waitingForNextHandByUserId[seat.userId] === true) {
+      merged.status = "WAITING_NEXT_HAND";
+    } else if (foldedByUserId[seat.userId] === true) {
       merged.status = "FOLDED";
     }
     if (!details) return merged;
@@ -211,12 +222,12 @@ function normalizeHandSettlement(handSettlement) {
   };
 }
 
-function resolvePrivateBranch({ state, userId, youSeat }) {
+function resolvePrivateBranch({ state, userId, youSeat, allowHoleCards = true }) {
   if (!Number.isInteger(youSeat)) {
     return null;
   }
 
-  const holeCards = normalizeCards(state?.holeCardsByUserId?.[userId]);
+  const holeCards = allowHoleCards ? normalizeCards(state?.holeCardsByUserId?.[userId]) : [];
   return {
     userId,
     seat: youSeat,
@@ -226,6 +237,9 @@ function resolvePrivateBranch({ state, userId, youSeat }) {
 
 function hasLeftTable(statePublic, userId) {
   if (typeof userId !== "string" || !userId) {
+    return false;
+  }
+  if (isWaitingForNextHand(statePublic, userId)) {
     return false;
   }
   const leftTableByUserId = asObject(statePublic?.leftTableByUserId) || {};
@@ -277,6 +291,7 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
   const statePublic = state ? withoutPrivateState(state) : null;
   const publicSeats = resolvePublicSeats({ statePublic, members, coreState });
   const publicStacks = resolvePublicStacks({ statePublic, coreState, seats: publicSeats });
+  const waitingForNextHand = isWaitingForNextHand(statePublic, userId);
   const effectiveYouSeat = hasLeftTable(statePublic, userId) ? null : youSeat;
 
   if (!statePublic) {
@@ -360,7 +375,7 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
       maxBetAmount: Number.isFinite(legalInfo.maxBetAmount) ? legalInfo.maxBetAmount : null
     },
     lastBettingRoundActionByUserId: normalizeLastBettingRoundActionByUserId(statePublic.lastBettingRoundActionByUserId),
-    private: resolvePrivateBranch({ state, userId, youSeat: effectiveYouSeat })
+    private: resolvePrivateBranch({ state, userId, youSeat: effectiveYouSeat, allowHoleCards: !waitingForNextHand })
   };
 
   const showdown = normalizeShowdown(statePublic.showdown);

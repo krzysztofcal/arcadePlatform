@@ -117,6 +117,7 @@ const sanitizeBoolMapBySeats = (value, seats) => {
 const sanitizeSitOutByUserId = (value, seats) => sanitizeBoolMapBySeats(value, seats);
 const sanitizeLeftTableByUserId = (value, seats) => sanitizeBoolMapBySeats(value, seats);
 const sanitizePendingAutoSitOutByUserId = (value, seats) => sanitizeBoolMapBySeats(value, seats);
+const sanitizeWaitingForNextHandByUserId = (value, seats) => sanitizeBoolMapBySeats(value, seats);
 
 
 const mergeSeatUniverse = (...seatLists) => {
@@ -387,6 +388,7 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
     missedTurnsByUserId: {},
     sitOutByUserId,
     pendingAutoSitOutByUserId: {},
+    waitingForNextHandByUserId: {},
     leftTableByUserId,
   };
   const now = Date.now();
@@ -406,7 +408,13 @@ const resetToNextHand = (state, options = {}) => {
     nextSitOutByUserId[userId] = true;
   }
   const nextPendingAutoSitOutByUserId = {};
-  const leftTableByUserId = sanitizeLeftTableByUserId(state.leftTableByUserId, seats);
+  const waitingForNextHandByUserId = sanitizeWaitingForNextHandByUserId(state.waitingForNextHandByUserId, seats);
+  const nextWaitingForNextHandByUserId = {};
+  const nextLeftTableByUserId = sanitizeLeftTableByUserId(state.leftTableByUserId, seats);
+  for (const [userId, waiting] of Object.entries(waitingForNextHandByUserId)) {
+    if (!waiting) continue;
+    nextLeftTableByUserId[userId] = false;
+  }
   const seatedUserIds = orderedSeats.map((seat) => seat.userId).filter(Boolean);
   if (seatedUserIds.length === 0) {
     return {
@@ -416,6 +424,8 @@ const resetToNextHand = (state, options = {}) => {
           handSeats: null,
           sitOutByUserId: nextSitOutByUserId,
           pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId,
+          waitingForNextHandByUserId: nextWaitingForNextHandByUserId,
+          leftTableByUserId: nextLeftTableByUserId,
           missedTurnsByUserId: {},
         },
         Date.now()
@@ -427,7 +437,7 @@ const resetToNextHand = (state, options = {}) => {
     orderedSeats: orderSeats(seats),
     stacks,
     sitOutByUserId: nextSitOutByUserId,
-    leftTableByUserId,
+    leftTableByUserId: nextLeftTableByUserId,
   });
   if (eligibleUserIds.length < 2) {
     return {
@@ -437,6 +447,8 @@ const resetToNextHand = (state, options = {}) => {
           handSeats: null,
           sitOutByUserId: nextSitOutByUserId,
           pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId,
+          waitingForNextHandByUserId: nextWaitingForNextHandByUserId,
+          leftTableByUserId: nextLeftTableByUserId,
           missedTurnsByUserId: {},
         },
         Date.now()
@@ -449,7 +461,7 @@ const resetToNextHand = (state, options = {}) => {
     currentDealerSeatNo: state.dealerSeatNo,
     stacks,
     sitOutByUserId: nextSitOutByUserId,
-    leftTableByUserId,
+    leftTableByUserId: nextLeftTableByUserId,
   });
   const foldedByUserId = buildDefaultMap(seats, false);
   const turnUserId = getFirstBettingAfterDealerEligible({
@@ -457,7 +469,7 @@ const resetToNextHand = (state, options = {}) => {
     dealerSeatNo,
     stacks,
     sitOutByUserId: nextSitOutByUserId,
-    leftTableByUserId,
+    leftTableByUserId: nextLeftTableByUserId,
     foldedByUserId,
   });
   if (!turnUserId) {
@@ -468,6 +480,8 @@ const resetToNextHand = (state, options = {}) => {
           handSeats: null,
           sitOutByUserId: nextSitOutByUserId,
           pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId,
+          waitingForNextHandByUserId: nextWaitingForNextHandByUserId,
+          leftTableByUserId: nextLeftTableByUserId,
           missedTurnsByUserId: {},
         },
         Date.now()
@@ -511,7 +525,8 @@ const resetToNextHand = (state, options = {}) => {
     missedTurnsByUserId: {},
     sitOutByUserId: nextSitOutByUserId,
     pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId,
-    leftTableByUserId,
+    waitingForNextHandByUserId: nextWaitingForNextHandByUserId,
+    leftTableByUserId: nextLeftTableByUserId,
   };
   const nextWithAllIn = { ...nextState, allInByUserId: deriveAllInByUserId(nextState) };
   const stamped = stampTurnTimer(nextWithAllIn, Date.now());
@@ -724,6 +739,7 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
   const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, sanitizeSeats);
   const leftTableByUserId = sanitizeLeftTableByUserId(state.leftTableByUserId, sanitizeSeats);
   const pendingAutoSitOutByUserId = sanitizePendingAutoSitOutByUserId(state.pendingAutoSitOutByUserId, sanitizeSeats);
+  const waitingForNextHandByUserId = sanitizeWaitingForNextHandByUserId(state.waitingForNextHandByUserId, sanitizeSeats);
   const missedTurnsByUserId =
     state.missedTurnsByUserId && typeof state.missedTurnsByUserId === "object" && !Array.isArray(state.missedTurnsByUserId)
       ? { ...state.missedTurnsByUserId }
@@ -743,6 +759,7 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
     missedTurnsByUserId,
     sitOutByUserId,
     pendingAutoSitOutByUserId,
+    waitingForNextHandByUserId,
     leftTableByUserId,
   };
   const wasParticipatingInHand =
@@ -761,6 +778,9 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
   next.missedTurnsByUserId[userId] = 0;
   if (next.pendingAutoSitOutByUserId) {
     delete next.pendingAutoSitOutByUserId[userId];
+  }
+  if (next.waitingForNextHandByUserId) {
+    delete next.waitingForNextHandByUserId[userId];
   }
 
   const events = [
