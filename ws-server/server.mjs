@@ -798,6 +798,7 @@ function sendGameplaySnapshot(ws, connState, { requestId = null, tableId, snapsh
 }
 
 function broadcastTableState(tableId, { excludeWs = null } = {}) {
+  maybeScheduleSettledRollover(tableId);
   const tableState = tableManager.tableState(tableId);
   const subscribers = tableManager.orderedSubscribers(tableId, (socket) => socket.__connState?.sessionId ?? "");
 
@@ -950,7 +951,19 @@ function maybeScheduleSettledRollover(tableId) {
       commandName: "settled_rollover",
       dedupeKey: "settled_rollover",
       run: async () => {
-        if (!tableManager.hasActiveHumanMember(tableId) && !tableManager.hasConnectedHumanPresence(tableId)) {
+        if (!tableManager.hasActiveHumanMember(tableId)) {
+          if (tableManager.hasConnectedHumanPresence(tableId)) {
+            klogSafe("ws_settled_rollover_close_skipped_human_presence", {
+              tableId,
+              phase: pokerState?.phase || null
+            });
+            return {
+              ok: true,
+              changed: false,
+              deferred: true,
+              reason: "human_presence_present"
+            };
+          }
           return applyInactiveCleanupAndBroadcast({
             tableId,
             requestId: `ws-settled-rollover-close:${tableId}`,

@@ -429,6 +429,54 @@ test("table presence helpers distinguish seated humans from connected observers"
   assert.equal(tableManager.hasConnectedHumanPresence(tableId), false);
 });
 
+test("table presence helpers ignore session-invalidated stale sockets", () => {
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const tableId = "table_presence_invalidated";
+  const wsObserver = fakeWs("ws-presence-invalidated");
+
+  tableManager.subscribe({ ws: wsObserver, tableId });
+  assert.equal(tableManager.hasConnectedHumanPresence(tableId), true);
+
+  wsObserver.__connState = { sessionInvalidated: true };
+  assert.equal(tableManager.hasConnectedHumanPresence(tableId), false);
+});
+
+test("observer disconnect from settled table emits update so rollover can re-evaluate presence", () => {
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const tableId = "table_settled_observer_disconnect";
+  const wsObserver = fakeWs("ws-settled-observer");
+
+  tableManager.subscribe({ ws: wsObserver, tableId });
+  tableManager.restoreTableFromPersisted(tableId, {
+    tableStatus: "OPEN",
+    coreState: {
+      version: 5,
+      roomId: tableId,
+      maxSeats: 4,
+      appliedRequestIds: [],
+      members: [{ userId: "bot_1", seat: 1 }],
+      seats: { bot_1: 1 },
+      publicStacks: { bot_1: 100 },
+      seatDetailsByUserId: {
+        bot_1: { isBot: true, botProfile: null, leaveAfterHand: false }
+      },
+      pokerState: {
+        tableId,
+        phase: "SETTLED",
+        seats: [{ userId: "bot_1", seatNo: 1, isBot: true }],
+        stacks: { bot_1: 100 },
+        handSettlement: { settledAt: "2026-04-14T10:00:00.000Z" }
+      }
+    },
+    presenceByUserId: new Map()
+  });
+
+  const updates = tableManager.cleanupConnection({ ws: wsObserver, userId: "observer_user", nowTs: 10, activeSockets: [] });
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].tableId, tableId);
+  assert.equal(tableManager.hasConnectedHumanPresence(tableId), false);
+});
+
 test("syncAuthoritativeLeave rejects mismatched authoritative tableId without mutating state", () => {
   const tableId = "table_sync_leave_mismatch";
   const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });

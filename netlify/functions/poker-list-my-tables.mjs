@@ -1,5 +1,6 @@
 import { baseHeaders, corsHeaders, executeSql, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { parseStakes } from "./_shared/poker-stakes.mjs";
+import { shouldHideSeatRowFromReadModel } from "./_shared/poker-list-seat-visibility.mjs";
 
 const parseLimit = (value) => {
   if (value == null || value === "") return { ok: true, value: 20 };
@@ -16,32 +17,11 @@ const parseStatus = (value) => {
   return { ok: true, value: normalized };
 };
 
-const parseStateObject = (raw) => {
-  if (!raw) return null;
-  if (typeof raw === "string") {
-    try {
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
-    } catch {
-      return null;
-    }
-  }
-  return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : null;
-};
-
-const isSeatLeft = (row) => {
-  const userId = typeof row?.user_id === "string" ? row.user_id : null;
-  if (!userId) return false;
-  const state = parseStateObject(row?.state);
-  const flags = state?.leftTableByUserId;
-  return !!(flags && typeof flags === "object" && flags[userId] === true);
-};
-
 const buildSeatCountsByTableId = (rows) => {
   const counts = Object.create(null);
   for (const row of Array.isArray(rows) ? rows : []) {
     const tableId = typeof row?.table_id === "string" ? row.table_id : null;
-    if (!tableId || isSeatLeft(row)) continue;
+    if (!tableId || shouldHideSeatRowFromReadModel(row)) continue;
     counts[tableId] = (counts[tableId] || 0) + 1;
   }
   return counts;
@@ -110,7 +90,7 @@ limit $3;
 
   try {
     const rows = await executeSql(query, [auth.userId, status, limit]);
-    const visibleRows = Array.isArray(rows) ? rows.filter((row) => !isSeatLeft(row)) : [];
+    const visibleRows = Array.isArray(rows) ? rows.filter((row) => !shouldHideSeatRowFromReadModel(row)) : [];
     const tableIds = visibleRows
       .map((row) => (typeof row?.id === "string" ? row.id : null))
       .filter(Boolean);

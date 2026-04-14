@@ -414,7 +414,7 @@ const executePostLeaveBotAutoplayLoop = async ({
     },
   });
 
-  klog("poker_leave_bot_autoplay_stop", {
+  klog("poker_leave_bot_autoplay_finish", {
     tableId,
     userId,
     requestId: requestId || null,
@@ -664,6 +664,15 @@ export async function executePokerLeave({
         let latestState = updatedState;
         let latestVersion = updateResult.newVersion;
         if (deferDetachUntilHandComplete) {
+          klog("poker_leave_retained_live_hand", {
+            tableId,
+            userId,
+            requestId: requestId || null,
+            handId: typeof updatedState.handId === "string" ? updatedState.handId : null,
+            phase: typeof updatedState.phase === "string" ? updatedState.phase : null,
+            turnUserId: typeof updatedState.turnUserId === "string" ? updatedState.turnUserId : null,
+            runPostLeaveBotAutoplay
+          });
           const actionHandId = typeof leaveState.handId === "string" && leaveState.handId.trim() ? leaveState.handId.trim() : null;
           let leaveActionRows = [];
           if (requestId) {
@@ -749,6 +758,15 @@ export async function executePokerLeave({
           );
           const botsOnlyInHand = !hasParticipatingHumanInHand(latestState, seatBotMap);
           if (runPostLeaveBotAutoplay && (isBotTurn(latestState.turnUserId, seatBotMap) || botsOnlyInHand)) {
+            klog("poker_leave_bot_autoplay_start", {
+              tableId,
+              userId,
+              requestId: requestId || null,
+              handId: typeof latestState.handId === "string" ? latestState.handId : null,
+              phase: typeof latestState.phase === "string" ? latestState.phase : null,
+              turnUserId: typeof latestState.turnUserId === "string" ? latestState.turnUserId : null,
+              botsOnlyInHand
+            });
             const autoplayResult = await executePostLeaveBotAutoplayLoop({
               tx,
               tableId,
@@ -774,7 +792,25 @@ export async function executePokerLeave({
         let detachedCashOutAmount = 0;
         if (shouldDetachSeatAndStack) {
           const latestStacks = parseStacks(latestState.stacks);
+          const latestSeats = parseSeats(latestState.seats);
+          klog("poker_leave_detach_start", {
+            tableId,
+            userId,
+            requestId: requestId || null,
+            handId: typeof latestState.handId === "string" ? latestState.handId : null,
+            phase: typeof latestState.phase === "string" ? latestState.phase : null,
+            hasSeatInState: latestSeats.some((seatItem) => seatItem?.userId === userId),
+            hasStackInState: Object.prototype.hasOwnProperty.call(latestStacks, userId)
+          });
           detachedCashOutAmount = normalizeNonNegativeInt(Number(latestStacks[userId])) ?? cashOutAmount;
+          klog("poker_leave_post_hand_cashout", {
+            tableId,
+            userId,
+            requestId: requestId || null,
+            handId: typeof latestState.handId === "string" ? latestState.handId : null,
+            phase: typeof latestState.phase === "string" ? latestState.phase : null,
+            amount: detachedCashOutAmount
+          });
           if (detachedCashOutAmount > 0) {
             const escrowSystemKey = `POKER_TABLE:${tableId}`;
             const idempotencyKey = requestId
@@ -827,6 +863,14 @@ export async function executePokerLeave({
             tableId,
             userId,
           ]);
+          klog("poker_leave_detach_finish", {
+            tableId,
+            userId,
+            requestId: requestId || null,
+            handId: typeof latestState.handId === "string" ? latestState.handId : null,
+            phase: typeof latestState.phase === "string" ? latestState.phase : null,
+            amount: detachedCashOutAmount
+          });
         }
 
         klog("poker_leave_cashout", {
@@ -843,7 +887,18 @@ export async function executePokerLeave({
           "select user_id, status, is_bot, stack from public.poker_seats where table_id = $1 for update;",
           [tableId]
         );
-        if (!hasAnyActiveHuman(allSeatRows) && !hasLiveHandSignal(latestState) && hasConnectedHumanPresence({ tableId }) !== true) {
+        const connectedHumanPresence = hasConnectedHumanPresence({ tableId }) === true;
+        if (!hasAnyActiveHuman(allSeatRows) && !hasLiveHandSignal(latestState) && connectedHumanPresence) {
+          klog("poker_leave_table_close_skipped_human_presence", {
+            tableId,
+            userId,
+            requestId: requestId || null,
+            handId: typeof latestState.handId === "string" ? latestState.handId : null,
+            phase: typeof latestState.phase === "string" ? latestState.phase : null,
+            remainingSeats: allSeatRows.length
+          });
+        }
+        if (!hasAnyActiveHuman(allSeatRows) && !hasLiveHandSignal(latestState) && !connectedHumanPresence) {
           const closedStacks = parseStacks(latestState.stacks);
           for (const row of allSeatRows || []) {
             if (row?.is_bot === true) continue;
@@ -898,7 +953,14 @@ export async function executePokerLeave({
               klog("poker_hole_cards_missing", { tableId, error: error?.message || "unknown_error" });
             }
           }
-          klog("poker_leave_closed_table_no_active_humans", { tableId, userId: userId, remainingSeats: allSeatRows.length });
+          klog("poker_leave_table_closed_terminal_bots_only", {
+            tableId,
+            userId,
+            requestId: requestId || null,
+            handId: typeof latestState.handId === "string" ? latestState.handId : null,
+            phase: typeof latestState.phase === "string" ? latestState.phase : null,
+            remainingSeats: allSeatRows.length
+          });
         }
 
         if (mutated) {

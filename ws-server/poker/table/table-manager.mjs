@@ -1025,13 +1025,18 @@ export function createTableManager({
     if (conn.subscribedTableId) {
       const subscribedTableId = conn.subscribedTableId;
       const table = tables.get(subscribedTableId);
+      let shouldEmitUpdate = false;
       if (table) {
         table.subscribers.delete(ws);
+        shouldEmitUpdate = persistedPokerState(subscribedTableId)?.phase === "SETTLED";
         if (table.coreState.members.length === 0 && table.subscribers.size === 0) {
           tables.delete(subscribedTableId);
         }
       }
       conn.subscribedTableId = null;
+      if (shouldEmitUpdate) {
+        updates.push({ tableId: subscribedTableId, tableState: tableState(subscribedTableId), disconnectedUserId: null });
+      }
     }
 
     connStateBySocket.delete(ws);
@@ -1160,8 +1165,11 @@ export function createTableManager({
   }
 
   function hasConnectedHumanPresence(tableId) {
-    for (const conn of connStateBySocket.values()) {
+    for (const [socket, conn] of connStateBySocket.entries()) {
       if (conn?.joinedTableId === tableId || conn?.subscribedTableId === tableId) {
+        if (socket?.__connState?.sessionInvalidated === true) {
+          continue;
+        }
         return true;
       }
     }
