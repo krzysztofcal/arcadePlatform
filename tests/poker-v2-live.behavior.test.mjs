@@ -98,7 +98,7 @@ function createHarness(options = {}){
     },
     destroy(){ this._ready = false; },
     isReady(){ return this._ready; },
-    sendJoin(payload){ joinPayloads.push(payload); return Promise.resolve({ ok: true, seatNo: payload.seatNo || 1 }); },
+    sendJoin(payload){ joinPayloads.push(payload); return Promise.resolve({ ok: true, seatNo: payload.seatNo || payload.preferredSeatNo || 1 }); },
     sendAct(payload){ actPayloads.push(payload); return Promise.resolve({ ok: true }); },
     sendStartHand(payload){ startPayloads.push(payload); return Promise.resolve({ ok: true }); },
     sendLeave(payload){
@@ -266,7 +266,7 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   await harness.flush();
 
   assert.equal(harness.joinPayloads.length, 1);
-  assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({ tableId: 'table-1', buyIn: 240, seatNo: 3 }));
+  assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({ tableId: 'table-1', buyIn: 240, autoSeat: true, preferredSeatNo: 3 }));
   assert.equal(harness.elements.pokerTableScreen.attributes['data-boot-ready'], '1');
   assert.equal(harness.elements.pokerBootSplash.hidden, true);
 
@@ -413,7 +413,7 @@ test('poker v2 auto-joins from query params after live auth', async () => {
   await harness.flush();
   await waitFor(() => harness.joinPayloads.length === 1);
 
-  assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({ tableId: 'table-1', buyIn: 100, seatNo: 4 }));
+  assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({ tableId: 'table-1', buyIn: 100, autoSeat: true, preferredSeatNo: 4 }));
 });
 
 test('poker v2 aligns the right rail seats and keeps the chip on the dealer seat', async () => {

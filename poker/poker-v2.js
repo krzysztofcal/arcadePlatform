@@ -1433,11 +1433,31 @@
   }
 
   function buildJoinPayload(){
+    return buildJoinPayloadWithOptions();
+  }
+
+  function resolvePreferredSeatNo(){
+    var rawSeatNo = els.joinSeat ? parseInt(els.joinSeat.value, 10) : NaN;
+    var maxSeats = Number.isInteger(state.maxSeats) && state.maxSeats >= 1 ? state.maxSeats : 1;
+    var preferredSeatNo = Number.isFinite(rawSeatNo) ? Math.trunc(rawSeatNo) : 1;
+    if (preferredSeatNo < 1) preferredSeatNo = 1;
+    if (preferredSeatNo > maxSeats) preferredSeatNo = maxSeats;
+    if (els.joinSeat) els.joinSeat.value = String(preferredSeatNo);
+    return preferredSeatNo;
+  }
+
+  function buildJoinPayloadWithOptions(options){
+    var opts = options || {};
     var payload = { tableId: state.tableId };
     var buyIn = els.joinBuyIn ? parseInt(els.joinBuyIn.value, 10) : 100;
     if (Number.isFinite(buyIn) && buyIn > 0) payload.buyIn = buyIn;
-    var seatNo = els.joinSeat ? parseInt(els.joinSeat.value, 10) : NaN;
-    if (Number.isFinite(seatNo)) payload.seatNo = seatNo;
+    var preferredSeatNo = resolvePreferredSeatNo();
+    if (opts.autoSeat === true) {
+      payload.autoSeat = true;
+      payload.preferredSeatNo = preferredSeatNo;
+    } else {
+      payload.seatNo = preferredSeatNo;
+    }
     return payload;
   }
 
@@ -1495,7 +1515,7 @@
     autoJoinAttempted = true;
     if (suggestedSeatNoParam && els.joinSeat) els.joinSeat.value = String(suggestedSeatNoParam);
     setError('');
-    sendCommand('sendJoin', buildJoinPayload()).then(function(result){
+    sendCommand('sendJoin', buildJoinPayloadWithOptions({ autoSeat: true })).then(function(result){
       state.statusText = result && result.seatNo != null ? ('Joined seat ' + result.seatNo) : 'Join accepted';
       renderInfoPanel();
     }).catch(function(err){
@@ -1584,7 +1604,7 @@
     });
     if (els.joinBtn) els.joinBtn.addEventListener('click', function(){
       setError('');
-      sendCommand('sendJoin', buildJoinPayload()).then(function(result){
+      sendCommand('sendJoin', buildJoinPayloadWithOptions({ autoSeat: true })).then(function(result){
         state.statusText = result && result.seatNo != null ? ('Joined seat ' + result.seatNo) : 'Join accepted';
         renderInfoPanel();
       }).catch(function(err){
