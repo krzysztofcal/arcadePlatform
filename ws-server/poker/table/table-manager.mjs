@@ -897,6 +897,67 @@ export function createTableManager({
     });
   }
 
+  function preserveAuthoritativeRuntimePrivateState({ currentPokerState, authoritativePokerState }) {
+    const currentState = currentPokerState && typeof currentPokerState === "object" && !Array.isArray(currentPokerState)
+      ? currentPokerState
+      : null;
+    const nextState = authoritativePokerState && typeof authoritativePokerState === "object" && !Array.isArray(authoritativePokerState)
+      ? authoritativePokerState
+      : null;
+    if (!currentState || !nextState) {
+      return nextState;
+    }
+
+    const currentHandId = typeof currentState.handId === "string" ? currentState.handId.trim() : "";
+    const nextHandId = typeof nextState.handId === "string" ? nextState.handId.trim() : "";
+    if (!currentHandId || currentHandId !== nextHandId) {
+      return nextState;
+    }
+
+    const leftTableByUserId = nextState.leftTableByUserId && typeof nextState.leftTableByUserId === "object" && !Array.isArray(nextState.leftTableByUserId)
+      ? nextState.leftTableByUserId
+      : {};
+    const sitOutByUserId = nextState.sitOutByUserId && typeof nextState.sitOutByUserId === "object" && !Array.isArray(nextState.sitOutByUserId)
+      ? nextState.sitOutByUserId
+      : {};
+    const pendingAutoSitOutByUserId =
+      nextState.pendingAutoSitOutByUserId && typeof nextState.pendingAutoSitOutByUserId === "object" && !Array.isArray(nextState.pendingAutoSitOutByUserId)
+        ? nextState.pendingAutoSitOutByUserId
+        : {};
+
+    const nextHoleCardsByUserId =
+      nextState.holeCardsByUserId && typeof nextState.holeCardsByUserId === "object" && !Array.isArray(nextState.holeCardsByUserId)
+        ? { ...nextState.holeCardsByUserId }
+        : {};
+    const currentHoleCardsByUserId =
+      currentState.holeCardsByUserId && typeof currentState.holeCardsByUserId === "object" && !Array.isArray(currentState.holeCardsByUserId)
+        ? currentState.holeCardsByUserId
+        : {};
+    for (const [candidateUserId, cards] of Object.entries(currentHoleCardsByUserId)) {
+      if (leftTableByUserId?.[candidateUserId] || sitOutByUserId?.[candidateUserId] || pendingAutoSitOutByUserId?.[candidateUserId]) {
+        continue;
+      }
+      if (Array.isArray(nextHoleCardsByUserId[candidateUserId]) && nextHoleCardsByUserId[candidateUserId].length === 2) {
+        continue;
+      }
+      if (!Array.isArray(cards) || cards.length !== 2) {
+        continue;
+      }
+      nextHoleCardsByUserId[candidateUserId] = cards.slice();
+    }
+
+    return {
+      ...nextState,
+      ...(Object.keys(nextHoleCardsByUserId).length > 0 ? { holeCardsByUserId: nextHoleCardsByUserId } : {}),
+      ...(!Array.isArray(nextState.deck) && Array.isArray(currentState.deck) ? { deck: currentState.deck.slice() } : {}),
+      ...((typeof nextState.handSeed !== "string" || !nextState.handSeed.trim())
+        && typeof currentState.handSeed === "string"
+        && currentState.handSeed.trim()
+        ? { handSeed: currentState.handSeed }
+        : {})
+    };
+  }
+
   function buildAuthoritativeLeaveRestore({ tableId, userId, stateVersion = null, pokerState = null }) {
     const table = ensureTable(tableId);
     const normalizedState = pokerState && typeof pokerState === "object" && !Array.isArray(pokerState) ? pokerState : null;
@@ -998,7 +1059,10 @@ export function createTableManager({
           seats: nextSeats,
           seatDetailsByUserId: nextSeatDetails,
           publicStacks: nextPublicStacks,
-          pokerState: { ...normalizedState }
+          pokerState: preserveAuthoritativeRuntimePrivateState({
+            currentPokerState: table.coreState?.pokerState,
+            authoritativePokerState: { ...normalizedState }
+          })
         },
         presenceByUserId: nextPresenceByUserId
       }

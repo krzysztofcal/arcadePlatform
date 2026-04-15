@@ -23,7 +23,13 @@ const normalizeSidePots = (sidePots) => {
 };
 
 const listShowdownUserIds = (state, seatUserIdsInOrder) => {
-  return seatUserIdsInOrder.filter((userId) => typeof userId === "string" && !state.foldedByUserId?.[userId]);
+  return seatUserIdsInOrder.filter((userId) => (
+    typeof userId === "string"
+    && !state.foldedByUserId?.[userId]
+    && !state.leftTableByUserId?.[userId]
+    && !state.sitOutByUserId?.[userId]
+    && !state.pendingAutoSitOutByUserId?.[userId]
+  ));
 };
 
 const ensureHoleCardsPresent = ({ holeCardsByUserId, userId }) => {

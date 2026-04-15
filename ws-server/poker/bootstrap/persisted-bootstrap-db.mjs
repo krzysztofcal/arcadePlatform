@@ -3,13 +3,31 @@ import postgres from "postgres";
 
 const clientsByDbUrl = new Map();
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function readFileStoreDoc(filePath) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      const raw = await fs.readFile(filePath, "utf8");
+      return JSON.parse(raw || "{}");
+    } catch (error) {
+      if (attempt >= 4) {
+        throw error;
+      }
+      await sleep(20);
+    }
+  }
+  return {};
+}
+
 async function beginSqlFileStore(fn, { env = process.env } = {}) {
   const filePath = typeof env?.WS_PERSISTED_STATE_FILE === "string" ? env.WS_PERSISTED_STATE_FILE.trim() : "";
   if (!filePath) {
     throw new Error("Persisted state file not configured (WS_PERSISTED_STATE_FILE missing)");
   }
-  const raw = await fs.readFile(filePath, "utf8");
-  const doc = JSON.parse(raw || "{}");
+  const doc = await readFileStoreDoc(filePath);
   const tables = doc && typeof doc === "object" && doc.tables && typeof doc.tables === "object" ? doc.tables : {};
 
   const tx = {
@@ -87,8 +105,13 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
 
       if (sql.includes("update public.poker_state") && sql.includes("state")) {
         if (!table?.stateRow) throw Object.assign(new Error("state_missing"), { code: "state_missing" });
-        table.stateRow.state = params?.[1];
         const currentVersion = Number(table.stateRow.version);
+        const expectsVersionMatch = sql.includes("where table_id = $1 and version = $2");
+        const expectedVersion = expectsVersionMatch ? Number(params?.[1]) : null;
+        if (expectsVersionMatch && (!Number.isInteger(expectedVersion) || currentVersion !== expectedVersion)) {
+          return [];
+        }
+        table.stateRow.state = expectsVersionMatch ? params?.[2] : params?.[1];
         if (sql.includes("version = version + 1")) {
           table.stateRow.version = Number.isInteger(currentVersion) ? currentVersion + 1 : 1;
         }
