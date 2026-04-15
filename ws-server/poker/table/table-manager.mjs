@@ -120,6 +120,10 @@ function buildEmptyLobbyPokerState(tableId) {
   };
 }
 
+function needsPersistedBootstrap(table) {
+  return table?.pendingPersistedBootstrap === true;
+}
+
 export function createTableManager({
   presenceTtlMs = DEFAULT_PRESENCE_TTL_MS,
   maxSeats = DEFAULT_MAX_SEATS,
@@ -205,6 +209,7 @@ export function createTableManager({
         }),
         coreState: initialCoreState,
         persistedStateVersion: Number.isInteger(initialCoreState.version) ? initialCoreState.version : 0,
+        pendingPersistedBootstrap: false,
         presenceByUserId: new Map(),
         subscribers: new Set(),
         actionResultsByRequestId: new Map()
@@ -230,6 +235,9 @@ export function createTableManager({
     }
     const existed = tables.has(normalizedTableId);
     const table = ensureTable(normalizedTableId);
+    if (!existed) {
+      table.pendingPersistedBootstrap = true;
+    }
     if (!table.coreState?.pokerState || typeof table.coreState.pokerState !== "object" || Array.isArray(table.coreState.pokerState)) {
       table.coreState = {
         ...table.coreState,
@@ -245,8 +253,9 @@ export function createTableManager({
   }
 
   async function ensureTableLoaded(tableId, { allowCreate = false } = {}) {
-    if (tables.has(tableId)) {
-      return { ok: true, table: tables.get(tableId), cached: true };
+    const existingTable = tables.get(tableId);
+    if (existingTable && !needsPersistedBootstrap(existingTable)) {
+      return { ok: true, table: existingTable, cached: true };
     }
 
     if (pendingBootstrapByTableId.has(tableId)) {
@@ -255,6 +264,9 @@ export function createTableManager({
 
     const bootstrapPromise = (async () => {
       if (typeof tableBootstrapLoader !== "function") {
+        if (existingTable) {
+          return { ok: true, table: existingTable, cached: true };
+        }
         if (!allowCreate) {
           return {
             ok: false,
@@ -280,6 +292,19 @@ export function createTableManager({
       loadedTable.tableMeta = normalizeTableMeta(loadedTable.tableMeta, loadedTable?.coreState?.maxSeats || maxSeats);
       const loadedVersion = Number(loadedTable?.coreState?.version);
       loadedTable.persistedStateVersion = Number.isInteger(loadedVersion) && loadedVersion >= 0 ? loadedVersion : 0;
+      const currentTable = tables.get(tableId);
+      if (needsPersistedBootstrap(currentTable)) {
+        const restored = restoreTableFromPersisted(tableId, loadedTable);
+        if (!restored?.ok) {
+          return {
+            ok: false,
+            code: restored?.reason || "invalid_restored_table",
+            message: restored?.reason || "invalid_restored_table"
+          };
+        }
+        return { ok: true, table: tables.get(tableId), cached: false };
+      }
+      loadedTable.pendingPersistedBootstrap = false;
       tables.set(tableId, loadedTable);
       return { ok: true, table: loadedTable, cached: false };
     })();
@@ -1225,6 +1250,7 @@ export function createTableManager({
     table.persistedStateVersion = Number.isInteger(restoredCoreState.version) && restoredCoreState.version >= 0
       ? restoredCoreState.version
       : table.persistedStateVersion;
+    table.pendingPersistedBootstrap = false;
     table.presenceByUserId = nextPresenceByUserId;
     table.actionResultsByRequestId.clear();
     return { ok: true };

@@ -1999,6 +1999,56 @@ test("WS lobby removes empty joinable tables after runtime grace expires", async
   }
 });
 
+test("WS lobby materialization does not shadow persisted bootstrap on later table_join", async () => {
+  const secret = "lobby-materialized-join-secret";
+  const internalToken = "lobby-materialized-join-internal";
+  const token = makeHs256Jwt({ secret, sub: "user_a" });
+  const tableId = "table_materialized_join";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "active", stakes: '{"sb":1,"bb":2}' },
+      seatRows: [{ user_id: "user_a", seat_no: 3, status: "ACTIVE", is_bot: false }],
+      stateRow: { version: 21, state: { handId: "h21", phase: "PREFLOP", turnUserId: "user_a", holeCardsByUserId: { user_a: ["As", "Kd"] } } }
+    }
+  };
+
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      POKER_WS_INTERNAL_TOKEN: internalToken,
+      SUPABASE_DB_URL: "",
+      ...persistedBootstrapFixturesEnv(fixtures)
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    await materializeLobbyTableRuntime({ port, token: internalToken, tableId });
+
+    const ws = await connectClient(port);
+    await hello(ws);
+    assert.equal((await auth(ws, token)).type, "authOk");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "req-materialized-join", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
+    const joinAck = await nextMessageOfType(ws, "commandResult");
+    assert.equal(joinAck.payload.status, "accepted");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "req-materialized-snap", ts: "2026-02-28T00:00:03Z", payload: { tableId, view: "snapshot" } });
+    const snapshot = await nextMessageOfType(ws, "stateSnapshot");
+    assert.equal(snapshot.payload.table.tableId, tableId);
+    assert.equal(snapshot.payload.stateVersion, 21);
+    assert.equal(snapshot.payload.you.userId, "user_a");
+    assert.equal(snapshot.payload.you.seat, 3);
+    assert.deepEqual(snapshot.payload.private.holeCards, ["As", "Kd"]);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 test("WS lobby_subscribe publishes runtime-visible tables only and removes them live", async () => {
   const secret = "lobby-runtime-secret";
   const lobbyToken = makeHs256Jwt({ secret, sub: "lobby_user" });
