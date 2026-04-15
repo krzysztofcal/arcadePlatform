@@ -620,11 +620,18 @@ test("table_join is observe-only and does not emit membership mutation broadcast
       ts: "2026-02-28T00:00:03Z",
       payload: { tableId: "table_A" }
     });
-    const joinA = await nextMessage(userA, 5000, "joinAAck");
+    const joinA = await nextMessageOfType(userA, "commandResult", 5000, "joinAAck");
     assert.equal(joinA.type, "commandResult");
     assert.equal(joinA.payload.status, "accepted");
 
-    const joinAState = await nextMessage(userA, 5000, "joinAState");
+    sendFrame(userA, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-join-A-state",
+      ts: "2026-02-28T00:00:03Z",
+      payload: { tableId: "table_A" }
+    });
+    const joinAState = await nextMessageOfType(userA, "table_state", 5000, "joinAState");
     assert.equal(joinAState.type, "table_state");
     assert.deepEqual(joinAState.payload.members, []);
 
@@ -635,11 +642,18 @@ test("table_join is observe-only and does not emit membership mutation broadcast
       ts: "2026-02-28T00:00:04Z",
       payload: { tableId: "table_A" }
     });
-    const joinB = await nextMessage(userB, 5000, "joinBAck");
+    const joinB = await nextMessageOfType(userB, "commandResult", 5000, "joinBAck");
     assert.equal(joinB.type, "commandResult");
     assert.equal(joinB.payload.status, "accepted");
 
-    const joinBState = await nextMessage(userB, 5000, "joinBState");
+    sendFrame(userB, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-join-B-state",
+      ts: "2026-02-28T00:00:04Z",
+      payload: { tableId: "table_A" }
+    });
+    const joinBState = await nextMessageOfType(userB, "table_state", 5000, "joinBState");
     assert.equal(joinBState.type, "table_state");
     assert.deepEqual(joinBState.payload.members, []);
 
@@ -651,11 +665,18 @@ test("table_join is observe-only and does not emit membership mutation broadcast
       payload: { tableId: "table_A" }
     });
 
-    const joinC = await nextMessage(userC, 5000, "joinCAck");
+    const joinC = await nextMessageOfType(userC, "commandResult", 5000, "joinCAck");
     assert.equal(joinC.type, "commandResult");
     assert.equal(joinC.payload.status, "accepted");
 
-    const joinCState = await nextMessage(userC, 5000, "joinCState");
+    sendFrame(userC, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-join-C-state",
+      ts: "2026-02-28T00:00:05Z",
+      payload: { tableId: "table_A" }
+    });
+    const joinCState = await nextMessageOfType(userC, "table_state", 5000, "joinCState");
     assert.equal(joinCState.type, "table_state");
     assert.deepEqual(joinCState.payload.members, []);
 
@@ -1499,6 +1520,16 @@ test("persisted table_join does not immediately resync due to false bootstrap co
       ts: "2026-02-28T05:00:02Z",
       payload: { tableId }
     });
+    const repeatAck = await nextMessageOfType(ws, "commandResult", 5000, "joinChain2Ack", ["table_state"]);
+    assert.equal(repeatAck.payload.status, "accepted");
+    assert.equal(repeatAck.payload.reason, "already_joined");
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "join-chain-state-2",
+      ts: "2026-02-28T05:00:02Z",
+      payload: { tableId }
+    });
     const joinedRepeat = await nextMessageOfType(ws, "table_state", 5000, "joinedChain2");
     assert.deepEqual(joinedRepeat.payload.members, joined.payload.members);
 
@@ -1696,13 +1727,14 @@ test("real authoritative join generic insert failure is not mislabeled seat_take
   }
 }));
 
-test("real authoritative join does not auto-rejoin historical non-ACTIVE seat", async () => runSerial(async () => {
+test("real authoritative join with historical non-ACTIVE seat retries to the next seat", async () => runSerial(async () => {
   const secret = "real-auth-historical-seat-secret";
   const tableId = "table_protocol_real_auth_historical_non_active";
   const fixtures = {
     [tableId]: {
       tableRow: { id: tableId, max_players: 6, status: "OPEN" },
-      seatRows: [{ user_id: "historical_proto_user", seat_no: 1, status: "INACTIVE", is_bot: false }]
+      seatRows: [{ user_id: "historical_proto_user", seat_no: 1, status: "INACTIVE", is_bot: false }],
+      stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
     }
   };
   const { dir, filePath } = await writePersistedStateFile(fixtures);
@@ -1717,9 +1749,18 @@ test("real authoritative join does not auto-rejoin historical non-ACTIVE seat", 
     await auth(ws, secret, "historical_proto_user", "auth-real-auth-historical-seat");
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "real-auth-historical-seat-join", ts: "2026-02-28T05:56:00Z", payload: { tableId, buyIn: 100 } });
-    const error = await nextMessageOfType(ws, "commandResult", 5000, "realAuthHistoricalSeatError");
-    assert.equal(error.payload.status, "rejected");
-    assert.equal(error.payload.reason, "seat_taken");
+    const ack = await nextMessageOfType(ws, "commandResult", 5000, "realAuthHistoricalSeatAck", ["table_state"]);
+    assert.equal(ack.payload.status, "accepted");
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "real-auth-historical-seat-snapshot",
+      ts: "2026-02-28T05:56:01Z",
+      payload: { tableId, view: "snapshot" }
+    });
+    const snapshot = await nextMessageOfType(ws, "stateSnapshot", 5000, "realAuthHistoricalSeatSnapshot");
+    assert.equal(snapshot.payload.you.userId, "historical_proto_user");
+    assert.equal(snapshot.payload.you.seat, 2);
 
     ws.close();
   } finally {
