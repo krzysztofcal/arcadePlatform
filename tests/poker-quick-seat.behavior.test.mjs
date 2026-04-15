@@ -49,7 +49,7 @@ const makeHandler = ({ mode, queries, notifications = [] }) =>
             return [];
           }
 
-          if (text.includes("where table_id = $1 and status = 'active' order by seat_no asc")) {
+          if (text.includes("where table_id = $1 order by seat_no asc")) {
             if (mode === "prefer_humans") return [{ seat_no: 1 }, { seat_no: 2 }];
             if (mode === "any_open") return [{ seat_no: 1 }];
             return [];
@@ -100,8 +100,8 @@ const run = async () => {
     );
     assertCanonicalLockKey(queries, "quickseat:6:1:2");
     assert.ok(
-      queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 and status = 'active' order by seat_no asc")),
-      "quick seat should read active seats to suggest a seat"
+      queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 order by seat_no asc")),
+      "quick seat should read occupied seats to suggest a reusable seat"
     );
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")),
@@ -123,8 +123,8 @@ const run = async () => {
     assert.ok(body.seatNo >= 1 && body.seatNo <= 6);
     assertCanonicalLockKey(queries, "quickseat:6:1:2");
     assert.ok(
-      queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 and status = 'active' order by seat_no asc")),
-      "quick seat should read active seats before returning a recommendation"
+      queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 order by seat_no asc")),
+      "quick seat should read occupied seats before returning a recommendation"
     );
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")),
@@ -258,7 +258,7 @@ const run = async () => {
             }
 
             if (text.includes("where table_id = $1 and user_id = $2 limit 1")) return [];
-            if (text.includes("where table_id = $1 and status = 'active' order by seat_no asc")) return [];
+            if (text.includes("where table_id = $1 order by seat_no asc")) return [];
             if (text.includes("insert into public.poker_tables")) {
               state.created = true;
               return [{ id: "table-created" }];

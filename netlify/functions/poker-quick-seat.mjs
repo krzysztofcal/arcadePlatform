@@ -95,7 +95,7 @@ const recommendSeatAtTable = async (tx, { tableId, userId, maxPlayers, allowCrea
   }
 
   const activeSeatRows = await tx.unsafe(
-    "select seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
+    "select seat_no from public.poker_seats where table_id = $1 order by seat_no asc;",
     [tableId]
   );
   const seatNoDb = pickSeatNo(activeSeatRows, maxPlayers);

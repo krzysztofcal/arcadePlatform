@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { applyAction, applyPreflopAction } from "./poker-action-reducer.mjs";
+import { dealHoleCards, deriveDeck, toCardCodes } from "../shared/poker-primitives.mjs";
 
 function stateFixture(overrides = {}) {
   return {
@@ -172,6 +173,33 @@ test("applyAction RIVER-closing action settles hand with showdown metadata", () 
   const replay = applyAction({ pokerState: riverPending, userId: "u2", action: "CHECK", amount: 0 });
   assert.deepEqual(closed.state.showdown, replay.state.showdown);
   assert.deepEqual(closed.state.handSettlement, replay.state.handSettlement);
+});
+
+test("applyAction repairs missing river community from handSeed before showdown settlement", () => {
+  const handSeed = "ws_seed_table_action_river_repair";
+  const dealt = dealHoleCards(deriveDeck(handSeed), ["u1", "u2"]);
+  const fullCommunity = toCardCodes(dealt.deck.slice(0, 5));
+  const remainingDeck = toCardCodes(dealt.deck.slice(5));
+  const riverPending = stateFixture({
+    handSeed,
+    phase: "RIVER",
+    community: fullCommunity.slice(0, 4),
+    communityDealt: 5,
+    deck: remainingDeck,
+    currentBet: 0,
+    turnUserId: "u2",
+    toCallByUserId: { u1: 0, u2: 0 },
+    betThisRoundByUserId: { u1: 0, u2: 0 },
+    actedThisRoundByUserId: { u1: true, u2: false }
+  });
+
+  const closed = applyAction({ pokerState: riverPending, userId: "u2", action: "CHECK", amount: 0 });
+
+  assert.equal(closed.ok, true);
+  assert.equal(closed.state.phase, "SETTLED");
+  assert.deepEqual(closed.state.community, fullCommunity);
+  assert.equal(closed.state.communityDealt, 5);
+  assert.equal(closed.state.turnUserId, null);
 });
 
 test("applyAction fold-win awards full pot exactly once and settles", () => {

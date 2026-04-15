@@ -1,4 +1,4 @@
-import { computeSharedLegalActions } from "./poker-primitives.mjs";
+import { computeSharedLegalActions, dealHoleCards, deriveDeck, toCardCodes } from "./poker-primitives.mjs";
 import { materializeShowdownAndPayout } from "./settlement/poker-materialize-showdown.mjs";
 import { awardPotsAtShowdown } from "./settlement/poker-payout.mjs";
 import { computeShowdown } from "./settlement/poker-showdown.mjs";
@@ -93,6 +93,32 @@ function seatUserIdsInOrder(state) {
   return orderedSeats(state).map((seat) => seat.userId);
 }
 
+function deriveCommunityForSettlement(state) {
+  const handSeed = typeof state?.handSeed === "string" ? state.handSeed.trim() : "";
+  const communityDealt = Number.isInteger(state?.communityDealt)
+    ? state.communityDealt
+    : (Array.isArray(state?.community) ? state.community.length : -1);
+  const seatOrder = seatUserIdsInOrder(state);
+  if (!handSeed || seatOrder.length === 0 || communityDealt < 0 || communityDealt > 5) {
+    return [];
+  }
+  try {
+    const dealt = dealHoleCards(deriveDeck(handSeed), seatOrder);
+    return toCardCodes(dealt.deck.slice(0, communityDealt));
+  } catch {
+    return [];
+  }
+}
+
+function resolveSettlementCommunity(state) {
+  const community = Array.isArray(state?.community) ? state.community.slice() : [];
+  if (community.length === 5) {
+    return community;
+  }
+  const derivedCommunity = deriveCommunityForSettlement(state);
+  return derivedCommunity.length === 5 ? derivedCommunity : community;
+}
+
 function eligibleUserIdsForSettlement(state) {
   return seatUserIdsInOrder(state).filter((userId) => !state.foldedByUserId?.[userId]);
 }
@@ -102,12 +128,13 @@ function settleHandState(state, nowIso) {
   if (!handId) {
     return state;
   }
+  const settlementCommunity = resolveSettlementCommunity(state);
 
   const materialized = materializeShowdownAndPayout({
     state: {
       ...state,
       pot: Number(state.potTotal ?? state.pot ?? 0),
-      community: (state.community || []).map(cardCodeToCard).filter(Boolean)
+      community: settlementCommunity.map(cardCodeToCard).filter(Boolean)
     },
     seatUserIdsInOrder: seatUserIdsInOrder(state),
     holeCardsByUserId: toShowdownHoleCardsByUserId(state.holeCardsByUserId),
@@ -127,7 +154,8 @@ function settleHandState(state, nowIso) {
     turnUserId: null,
     turnStartedAt: null,
     turnDeadlineAt: null,
-    community: Array.isArray(state.community) ? state.community.slice() : [],
+    community: settlementCommunity,
+    communityDealt: settlementCommunity.length,
     holeCardsByUserId: { ...(state.holeCardsByUserId || {}) },
     deck: Array.isArray(state.deck) ? state.deck.slice() : [],
     potTotal: Number(materialized.nextState.pot ?? state.potTotal ?? 0),
