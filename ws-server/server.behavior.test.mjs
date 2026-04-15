@@ -5224,14 +5224,15 @@ test("authoritative join missing state row returns protocol-safe state_missing",
 });
 
 
-test("authoritative join with historical non-ACTIVE seat does not rejoin shortcut", async () => {
+test("authoritative join with historical non-ACTIVE seat retries to the next seat", async () => {
   const secret = "auth-join-historical-seat-secret";
   const tableId = "table_auth_join_historical_non_active";
   const store = {
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN" },
-        seatRows: [{ user_id: "historical_user", seat_no: 1, status: "INACTIVE", is_bot: false }]
+        seatRows: [{ user_id: "historical_user", seat_no: 1, status: "INACTIVE", is_bot: false }],
+        stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
       }
     }
   };
@@ -5252,9 +5253,19 @@ test("authoritative join with historical non-ACTIVE seat does not rejoin shortcu
     await auth(ws, makeHs256Jwt({ secret, sub: "historical_user" }), "auth-join-historical");
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-historical", ts: "2026-02-28T05:50:00Z", payload: { tableId, buyIn: 100 } });
-    const error = await nextMessageOfType(ws, "commandResult");
-    assert.equal(error.payload.status, "rejected");
-    assert.equal(error.payload.reason, "seat_taken");
+    const ack = await nextCommandResultForRequest(ws, "join-historical");
+    assert.equal(ack.payload.status, "accepted");
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "join-historical-sub",
+      ts: "2026-02-28T05:50:01Z",
+      payload: { tableId }
+    });
+    const state = await nextMessageOfType(ws, "table_state");
+    assert.deepEqual(state.payload.seats, [
+      { userId: "historical_user", seatNo: 2, status: "ACTIVE" }
+    ]);
     ws.close();
   } finally {
     child.kill("SIGTERM");
