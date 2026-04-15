@@ -1740,6 +1740,7 @@ test("resume fallback snapshot on settled table still schedules delayed rollover
     const ws2 = await connectClient(port);
     await hello(ws2);
     await auth(ws2, makeHs256Jwt({ secret, sub: "user_resume" }), "auth-settled-r2");
+    const resumeMessages = nextNMessages(ws2, 2, 10000);
     sendFrame(ws2, {
       version: "1.0",
       type: "resume",
@@ -1749,8 +1750,9 @@ test("resume fallback snapshot on settled table still schedules delayed rollover
       payload: { tableId, sessionId: helloAck.payload.sessionId, lastSeq: 0 }
     });
 
-    const resync = await nextMessageOfType(ws2, "resync");
-    const resumedSnapshot = await nextMessageOfType(ws2, "stateSnapshot");
+    const [resync, resumedSnapshot] = await resumeMessages;
+    assert.equal(resync.type, "resync");
+    assert.equal(resumedSnapshot.type, "stateSnapshot");
     assert.equal(resync.payload.mode, "required");
     assert.ok(["SETTLED", "PREFLOP"].includes(resumedSnapshot.payload.public.hand.status));
     if (resumedSnapshot.payload.public.hand.status === "SETTLED") {
@@ -2472,6 +2474,7 @@ test("slow bootstrap on one socket does not block another socket", async () => {
     await hello(wsB);
     await auth(wsB, tokenB);
 
+    const joinMessages = nextNMessages(wsA, 2, 3000);
     sendFrame(wsA, { version: "1.0", type: "table_join", requestId: "join-a-slow", ts: "2026-02-28T00:22:00Z", payload: { tableId } });
 
     sendFrame(wsB, {
@@ -2485,8 +2488,9 @@ test("slow bootstrap on one socket does not block another socket", async () => {
     const echoResponse = await nextMessageOfType(wsB, "protectedEchoOk", 2000);
     assert.equal(echoResponse.payload.echo, "B");
 
-    const joinAckA = await nextMessageOfType(wsA, "commandResult", 3000);
-    const joinStateA = await nextMessageOfType(wsA, "table_state", 3000);
+    const [joinAckA, joinStateA] = await joinMessages;
+    assert.equal(joinAckA.type, "commandResult");
+    assert.equal(joinStateA.type, "table_state");
     assert.equal(joinStateA.requestId, "join-a-slow");
     assert.equal(joinAckA.payload.requestId, "join-a-slow");
     assert.equal(joinAckA.payload.status, "accepted");
