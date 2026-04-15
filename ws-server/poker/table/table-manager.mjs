@@ -13,6 +13,7 @@ import {
   replaceBrokeBotsForNextHand,
   resolveNextDealerSeatNo
 } from "../engine/poker-engine.mjs";
+import { dealHoleCards, deriveDeck, toCardCodes, toHoleCardCodeMap } from "../shared/poker-primitives.mjs";
 import { stampTurnDeadline } from "../shared/poker-turn-timeout.mjs";
 
 const DEFAULT_PRESENCE_TTL_MS = 10_000;
@@ -897,6 +898,63 @@ export function createTableManager({
     });
   }
 
+  function normalizeSeatOrderFromPokerState(pokerState) {
+    const sourceSeats = Array.isArray(pokerState?.handSeats) && pokerState.handSeats.length > 0
+      ? pokerState.handSeats
+      : pokerState?.seats;
+    if (!Array.isArray(sourceSeats)) {
+      return [];
+    }
+    return sourceSeats
+      .filter((seatEntry) => typeof seatEntry?.userId === "string" && Number.isInteger(Number(seatEntry?.seatNo)))
+      .slice()
+      .sort((left, right) => Number(left.seatNo) - Number(right.seatNo) || left.userId.localeCompare(right.userId))
+      .map((seatEntry) => seatEntry.userId.trim())
+      .filter(Boolean);
+  }
+
+  function cardsMatchExact(left, right) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+      return false;
+    }
+    for (let index = 0; index < left.length; index += 1) {
+      if (left[index] !== right[index]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function deriveAuthoritativeRuntimeHandState(pokerState) {
+    const handSeed = typeof pokerState?.handSeed === "string" ? pokerState.handSeed.trim() : "";
+    const seatOrder = normalizeSeatOrderFromPokerState(pokerState);
+    const communityDealt = Number.isInteger(pokerState?.communityDealt)
+      ? pokerState.communityDealt
+      : (Array.isArray(pokerState?.community) ? pokerState.community.length : -1);
+    if (!handSeed || seatOrder.length === 0 || communityDealt < 0 || communityDealt > 5) {
+      return null;
+    }
+
+    try {
+      const shuffledDeck = deriveDeck(handSeed);
+      const dealt = dealHoleCards(shuffledDeck, seatOrder);
+      const derivedCommunity = toCardCodes(dealt.deck.slice(0, communityDealt));
+      const authoritativeCommunity = Array.isArray(pokerState?.community) ? pokerState.community.slice() : null;
+      if (authoritativeCommunity && authoritativeCommunity.length > 0 && !cardsMatchExact(authoritativeCommunity, derivedCommunity)) {
+        return null;
+      }
+      return {
+        handSeed,
+        communityDealt,
+        community: derivedCommunity,
+        holeCardsByUserId: toHoleCardCodeMap(dealt.holeCardsByUserId),
+        deck: toCardCodes(dealt.deck.slice(communityDealt))
+      };
+    } catch {
+      return null;
+    }
+  }
+
   function preserveAuthoritativeRuntimePrivateState({ currentPokerState, authoritativePokerState }) {
     const currentState = currentPokerState && typeof currentPokerState === "object" && !Array.isArray(currentPokerState)
       ? currentPokerState
@@ -912,6 +970,14 @@ export function createTableManager({
     const nextHandId = typeof nextState.handId === "string" ? nextState.handId.trim() : "";
     if (!currentHandId || currentHandId !== nextHandId) {
       return nextState;
+    }
+
+    const derivedRuntimeHandState = deriveAuthoritativeRuntimeHandState(nextState);
+    if (derivedRuntimeHandState) {
+      return {
+        ...nextState,
+        ...derivedRuntimeHandState
+      };
     }
 
     const leftTableByUserId = nextState.leftTableByUserId && typeof nextState.leftTableByUserId === "object" && !Array.isArray(nextState.leftTableByUserId)

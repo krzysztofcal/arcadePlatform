@@ -9,6 +9,7 @@ import path from "node:path";
 import net from "node:net";
 import WebSocket from "ws";
 import { makeBotUserId } from "../shared/poker-domain/bots.mjs";
+import { dealHoleCards, deriveDeck, toCardCodes } from "./poker/shared/poker-primitives.mjs";
 import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
 
 function getFreePort() {
@@ -2141,8 +2142,11 @@ test("table_leave closes live runtime table without showdown errors and removes 
   const secret = "leave-live-lobby-cleanup-secret";
   const humanUserId = "leave_live_human";
   const tableId = "table_leave_live_lobby_cleanup";
+  const handSeed = "seed_leave_live_cleanup";
   const botSeat2 = makeBotUserId(tableId, 2);
   const botSeat3 = makeBotUserId(tableId, 3);
+  const dealt = dealHoleCards(deriveDeck(handSeed), [humanUserId, botSeat2, botSeat3]);
+  const turnCommunity = toCardCodes(dealt.deck.slice(0, 4));
   const livePhases = new Set(["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"]);
   const { dir, filePath } = await writePersistedFile({
     tables: {
@@ -2159,8 +2163,8 @@ test("table_leave closes live runtime table without showdown errors and removes 
             tableId,
             roomId: tableId,
             handId: "hand_leave_live_cleanup",
-            handSeed: "seed_leave_live_cleanup",
-            phase: "RIVER",
+            handSeed,
+            phase: "TURN",
             dealerSeatNo: 1,
             seats: [
               { userId: humanUserId, seatNo: 1, status: "ACTIVE" },
@@ -2177,8 +2181,8 @@ test("table_leave closes live runtime table without showdown errors and removes 
               [botSeat2]: 100,
               [botSeat3]: 100
             },
-            community: ["AS", "KD", "QC", "JH", "9S"],
-            communityDealt: 5,
+            community: turnCommunity,
+            communityDealt: 4,
             currentBet: 0,
             toCallByUserId: {
               [humanUserId]: 0,
@@ -2216,12 +2220,6 @@ test("table_leave closes live runtime table without showdown errors and removes 
             },
             turnUserId: botSeat3,
             turnNo: 1,
-            deck: [],
-            holeCardsByUserId: {
-              [humanUserId]: ["AH", "AD"],
-              [botSeat2]: ["KC", "KS"],
-              [botSeat3]: ["2C", "2D"]
-            },
             pot: 30,
             potTotal: 30,
             sidePots: []
@@ -2265,12 +2263,7 @@ export async function executePokerLeave({ tableId, userId, includeState = false 
   };
   delete nextStateWithPrivate.stacks[userId];
 
-  const {
-    holeCardsByUserId: _ignoredHoleCards,
-    deck: _ignoredDeck,
-    handSeed: _ignoredHandSeed,
-    ...publicState
-  } = nextStateWithPrivate;
+    const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...publicState } = nextStateWithPrivate;
 
   table.stateRow = {
     version: currentVersion + 1,
@@ -2363,6 +2356,7 @@ export function createInactiveCleanupExecutor({ env }) {
         || text.includes("apply_action_failed")
         || text.includes("ws_bot_autoplay_finish")
         || text.includes("ws_settled_rollover")
+        || text.includes("showdown_incomplete_community")
       ) {
         serverLogs.push(text.trim());
       }
@@ -2379,7 +2373,7 @@ export function createInactiveCleanupExecutor({ env }) {
       payload: { tableId, view: "snapshot" }
     });
     const baseline = await nextMessageOfType(humanWs, "stateSnapshot");
-    assert.equal(baseline.payload.public.hand.status, "RIVER");
+    assert.equal(baseline.payload.public.hand.status, "TURN");
 
     const lobbyWs = await connectClient(port);
     await hello(lobbyWs);
@@ -2459,6 +2453,7 @@ export function createInactiveCleanupExecutor({ env }) {
     assert.equal(livePhases.has(finalTable.stateRow.state.phase), false);
     assert.equal(finalTable.tableRow.status, "CLOSED");
     assert.equal(serverLogs.some((line) => line.includes("showdown_missing_hole_cards")), false, serverLogs.join("\n"));
+    assert.equal(serverLogs.some((line) => line.includes("showdown_incomplete_community")), false, serverLogs.join("\n"));
     assert.equal(serverLogs.some((line) => line.includes("\"reason\":\"apply_action_failed\"")), false, serverLogs.join("\n"));
     assert.equal(serverLogs.some((line) => line.includes("ws_bot_autoplay_finish") && line.includes("\"trigger\":\"leave\"")), true, serverLogs.join("\n"));
 
