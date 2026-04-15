@@ -1897,46 +1897,37 @@ function observeOnlyJoinEnv() {
   return { WS_OBSERVE_ONLY_JOIN: "1" };
 }
 
-test("WS lobby_subscribe includes preloaded recent runtime-joinable tables before any player joins", async () => {
+async function materializeLobbyTableRuntime({ port, token, tableId, maxPlayers = 6, stakes = { sb: 1, bb: 2 } }) {
+  const response = await fetch(`http://127.0.0.1:${port}/internal/lobby/materialize-table`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ tableId, maxPlayers, stakes })
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, tableId });
+}
+
+test("WS lobby_subscribe includes explicit runtime-materialized joinable tables before any player joins", async () => {
   const secret = "lobby-joinable-secret";
+  const internalToken = "lobby-internal-token";
   const lobbyToken = makeHs256Jwt({ secret, sub: "lobby_user" });
   const tableId = "table_runtime_joinable_recent";
   const nowIso = new Date().toISOString();
-  const fixtures = {
-    [tableId]: {
-      tableRow: {
-        id: tableId,
-        max_players: 6,
-        status: "OPEN",
-        stakes: '{"sb":1,"bb":2}',
-        created_at: nowIso,
-        last_activity_at: nowIso
-      },
-      seatRows: [],
-      stateRow: {
-        version: 0,
-        state: {
-          tableId,
-          phase: "INIT",
-          seats: [],
-          stacks: {},
-          leftTableByUserId: {},
-          waitingForNextHandByUserId: {}
-        }
-      }
-    }
-  };
   const { port, child } = await createServer({
     env: {
       WS_AUTH_REQUIRED: "1",
       WS_AUTH_TEST_SECRET: secret,
-      SUPABASE_DB_URL: "",
-      ...persistedBootstrapFixturesEnv(fixtures)
+      POKER_WS_INTERNAL_TOKEN: internalToken,
+      SUPABASE_DB_URL: ""
     }
   });
 
   try {
     await waitForListening(child, 5000);
+    await materializeLobbyTableRuntime({ port, token: internalToken, tableId });
     const lobby = await connectClient(port);
     await hello(lobby);
     assert.equal((await auth(lobby, lobbyToken, "auth-lobby-joinable")).type, "authOk");
@@ -1964,46 +1955,24 @@ test("WS lobby_subscribe includes preloaded recent runtime-joinable tables befor
 
 test("WS lobby removes empty joinable tables after runtime grace expires", async () => {
   const secret = "lobby-joinable-expiry-secret";
+  const internalToken = "lobby-expiry-internal-token";
   const lobbyToken = makeHs256Jwt({ secret, sub: "lobby_user" });
   const tableId = "table_runtime_joinable_expiring";
   const nowIso = new Date().toISOString();
-  const fixtures = {
-    [tableId]: {
-      tableRow: {
-        id: tableId,
-        max_players: 6,
-        status: "OPEN",
-        stakes: '{"sb":1,"bb":2}',
-        created_at: nowIso,
-        last_activity_at: nowIso
-      },
-      seatRows: [],
-      stateRow: {
-        version: 0,
-        state: {
-          tableId,
-          phase: "INIT",
-          seats: [],
-          stacks: {},
-          leftTableByUserId: {},
-          waitingForNextHandByUserId: {}
-        }
-      }
-    }
-  };
   const { port, child } = await createServer({
     env: {
       WS_AUTH_REQUIRED: "1",
       WS_AUTH_TEST_SECRET: secret,
+      POKER_WS_INTERNAL_TOKEN: internalToken,
       POKER_TABLE_CLOSE_GRACE_MS: "1200",
       WS_LOBBY_VISIBILITY_SWEEP_MS: "50",
-      SUPABASE_DB_URL: "",
-      ...persistedBootstrapFixturesEnv(fixtures)
+      SUPABASE_DB_URL: ""
     }
   });
 
   try {
     await waitForListening(child, 5000);
+    await materializeLobbyTableRuntime({ port, token: internalToken, tableId });
     const lobby = await connectClient(port);
     await hello(lobby);
     assert.equal((await auth(lobby, lobbyToken, "auth-lobby-expiry")).type, "authOk");

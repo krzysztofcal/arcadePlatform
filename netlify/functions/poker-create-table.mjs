@@ -14,9 +14,9 @@ const parseBody = (body) => {
   }
 };
 
-const triggerWsLobbyMaterialize = ({ tableId, klog }) => {
+const triggerWsLobbyMaterialize = ({ tableId, maxPlayers, stakes, klog }) => {
   if (typeof tableId !== "string" || !tableId) return;
-  void notifyWsLobbyMaterialize({ tableId, klog });
+  void notifyWsLobbyMaterialize({ tableId, maxPlayers, stakes, klog });
 };
 
 const isPlainObject = (value) =>
@@ -87,7 +87,7 @@ export async function handler(event) {
   }
 
   const escrowSystemKey = `POKER_TABLE:${tableId}`;
-  triggerWsLobbyMaterialize({ tableId, klog });
+  triggerWsLobbyMaterialize({ tableId, maxPlayers, stakes: stakesParsed.value, klog });
   return {
     statusCode: 200,
     headers: mergeHeaders(cors),

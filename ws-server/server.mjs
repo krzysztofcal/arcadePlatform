@@ -28,6 +28,7 @@ import { handleLeaveCommand } from "./poker/handlers/leave.mjs";
 import { createTableCommandQueue } from "./poker/runtime/table-command-queue.mjs";
 import { recoverFromPersistConflict } from "./poker/runtime/persist-conflict-recovery.mjs";
 import { resolveSettledRevealDueAt } from "./poker/runtime/settled-reveal-timing.mjs";
+import { parseStakes } from "../shared/poker-domain/bots.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const PROTECTED_MESSAGE_TYPES = new Set([
@@ -92,6 +93,14 @@ function resolveMaxSeats(rawValue) {
   return parsed;
 }
 
+function resolveLobbyMaterializeMaxPlayers(rawValue) {
+  const parsed = Number(rawValue);
+  if (!Number.isInteger(parsed) || parsed < 2 || parsed > 10) {
+    return null;
+  }
+  return parsed;
+}
+
 function resolveActionResultCacheMax(rawValue) {
   const parsed = Number(rawValue);
   if (!Number.isInteger(parsed) || parsed < 1) {
@@ -143,7 +152,7 @@ const authoritativeJoinEnabled = resolveAuthoritativeJoinEnabled(process.env.WS_
   observeOnlyJoinEnabled
 });
 
-function createPersistedBootstrapRuntime({ env = process.env } = {}) {
+function createPersistedBootstrapLoader({ env = process.env } = {}) {
   let repositoryPromise = null;
 
   async function loadRepository() {
@@ -154,26 +163,19 @@ function createPersistedBootstrapRuntime({ env = process.env } = {}) {
     return repositoryPromise;
   }
 
-  return {
-    async loadPersistedTableBootstrap({ tableId }) {
-      const repository = await loadRepository();
-      const loaded = await repository.load(tableId);
-      return adaptPersistedBootstrap({
-        tableId,
-        tableRow: loaded?.tableRow,
-        seatRows: loaded?.seatRows,
-        stateRow: loaded?.stateRow
-      });
-    },
-    async listDiscoverableTableIds({ limit, emptyJoinableGraceMs }) {
-      const repository = await loadRepository();
-      return repository.listDiscoverableTableIds({ limit, emptyJoinableGraceMs });
-    }
+  return async function loadPersistedTableBootstrap({ tableId }) {
+    const repository = await loadRepository();
+    const loaded = await repository.load(tableId);
+    return adaptPersistedBootstrap({
+      tableId,
+      tableRow: loaded?.tableRow,
+      seatRows: loaded?.seatRows,
+      stateRow: loaded?.stateRow
+    });
   };
 }
 
-const persistedBootstrapRuntime = persistedBootstrapEnabled ? createPersistedBootstrapRuntime() : null;
-const loadPersistedTableBootstrap = persistedBootstrapRuntime?.loadPersistedTableBootstrap ?? null;
+const loadPersistedTableBootstrap = persistedBootstrapEnabled ? createPersistedBootstrapLoader() : null;
 
 const tableManager = createTableManager({
   presenceTtlMs: resolvePresenceTtlMs(process.env.WS_PRESENCE_TTL_MS),
@@ -201,9 +203,7 @@ const lastSnapshotBySessionAndTable = new Map();
 const lobbySubscribers = new Set();
 const activeLobbyTablesById = new Map();
 const lobbyEmptyJoinableGraceMs = resolveEmptyJoinableGraceMs(process.env.POKER_TABLE_CLOSE_GRACE_MS);
-const lobbyDiscoveryLimit = resolvePositiveInt(process.env.WS_LOBBY_DISCOVERY_BATCH, 100, { min: 1, max: 500 });
 const internalRuntimeToken = typeof process.env.POKER_WS_INTERNAL_TOKEN === "string" ? process.env.POKER_WS_INTERNAL_TOKEN.trim() : "";
-let lobbyDiscoveryPromise = null;
 
 function snapshotCacheKey(sessionId, tableId) {
   return `${sessionId}:${tableId}`;
@@ -738,42 +738,6 @@ function syncLobbyRegistry() {
     changed = true;
   }
   return changed;
-}
-
-async function preloadDiscoverableLobbyTables() {
-  if (!persistedBootstrapRuntime) {
-    return [];
-  }
-  if (lobbyDiscoveryPromise) {
-    return lobbyDiscoveryPromise;
-  }
-  lobbyDiscoveryPromise = (async () => {
-    const discoveredIds = await persistedBootstrapRuntime.listDiscoverableTableIds({
-      limit: lobbyDiscoveryLimit,
-      emptyJoinableGraceMs: lobbyEmptyJoinableGraceMs
-    });
-    if (!Array.isArray(discoveredIds) || discoveredIds.length === 0) {
-      return [];
-    }
-    const results = await Promise.allSettled(discoveredIds.map((tableId) => tableManager.ensureTableLoaded(tableId)));
-    for (let index = 0; index < results.length; index += 1) {
-      const result = results[index];
-      const tableId = discoveredIds[index];
-      if (result.status === "fulfilled" && result.value?.ok) {
-        continue;
-      }
-      const message = result.status === "rejected"
-        ? result.reason?.message || "unknown"
-        : result.value?.message || result.value?.code || "unknown";
-      klogSafe("ws_lobby_preload_failed", { tableId, message });
-    }
-    return discoveredIds;
-  })();
-  try {
-    return await lobbyDiscoveryPromise;
-  } finally {
-    lobbyDiscoveryPromise = null;
-  }
 }
 
 function buildLobbySnapshotPayload() {
@@ -1641,11 +1605,29 @@ async function handleInternalLobbyMaterialize(req, res) {
     res.end(JSON.stringify({ error: "invalid_table_id" }));
     return;
   }
-  const ensured = await tableManager.ensureTableLoaded(tableId);
-  if (!ensured?.ok) {
-    const statusCode = ensured?.code === "table_not_found" ? 404 : 500;
-    res.writeHead(statusCode, { "content-type": "application/json" });
-    res.end(JSON.stringify({ error: ensured?.code || "table_materialize_failed" }));
+  const maxPlayers = resolveLobbyMaterializeMaxPlayers(payload?.maxPlayers);
+  if (!Number.isInteger(maxPlayers)) {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid_max_players" }));
+    return;
+  }
+  const stakesParsed = parseStakes(payload?.stakes);
+  if (!stakesParsed?.ok) {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid_stakes" }));
+    return;
+  }
+  const materialized = tableManager.materializeLobbyTable({
+    tableId,
+    tableMeta: {
+      maxPlayers,
+      stakes: stakesParsed.value
+    },
+    nowMs: Date.now()
+  });
+  if (!materialized?.ok) {
+    res.writeHead(500, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: materialized?.code || "table_materialize_failed" }));
     return;
   }
   syncLobbyRegistry();
@@ -2351,12 +2333,6 @@ const lobbyVisibilitySweepTimer = setInterval(() => {
 lobbyVisibilitySweepTimer.unref();
 
 async function startServer() {
-  try {
-    await preloadDiscoverableLobbyTables();
-    syncLobbyRegistry();
-  } catch (error) {
-    klogSafe("ws_lobby_preload_unavailable", { message: error?.message || "unknown" });
-  }
   server.listen(PORT, "0.0.0.0", () => {
     klogSafe("ws_listening", { message: `WS listening on ${PORT}`, port: PORT });
   });

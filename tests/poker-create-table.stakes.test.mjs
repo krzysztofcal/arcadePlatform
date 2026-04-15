@@ -84,6 +84,8 @@ const runSlashStakes = async () => {
   assert.equal(isStateStorageValid(storedState), true, "create-table should persist a storage-valid init state");
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0]?.tableId, "table-1");
+  assert.equal(notifications[0]?.maxPlayers, 6);
+  assert.deepEqual(notifications[0]?.stakes, { sb: 1, bb: 2 });
   assert.equal(typeof notifications[0]?.klog, "function");
 };
 

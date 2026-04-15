@@ -55,9 +55,9 @@ const createAndRecommend = async (tx, { userId, maxPlayers, stakesJson }) => {
   return { tableId, seatNo: seatNoUi, strategy: "create" };
 };
 
-const triggerWsLobbyMaterialize = ({ tableId, klog }) => {
+const triggerWsLobbyMaterialize = ({ tableId, maxPlayers, stakes, klog }) => {
   if (typeof tableId !== "string" || !tableId) return;
-  void notifyWsLobbyMaterialize({ tableId, klog });
+  void notifyWsLobbyMaterialize({ tableId, maxPlayers, stakes, klog });
 };
 
 const selectCandidate = async (tx, { stakesJson, maxPlayers, requireHuman }) => {
@@ -191,7 +191,7 @@ export async function handler(event) {
     });
 
     if (result?.strategy === "create" && typeof result?.tableId === "string" && result.tableId) {
-      triggerWsLobbyMaterialize({ tableId: result.tableId, klog });
+      triggerWsLobbyMaterialize({ tableId: result.tableId, maxPlayers, stakes: stakesParsed.value, klog });
     }
 
     klog("poker_quick_seat_ok", { tableId: result.tableId, seatNo: result.seatNo, userId: auth.userId, strategy: result.strategy });

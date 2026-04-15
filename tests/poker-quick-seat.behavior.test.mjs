@@ -189,6 +189,8 @@ const run = async () => {
     );
     assert.equal(notifications.length, 1);
     assert.equal(notifications[0]?.tableId, "table-new");
+    assert.equal(notifications[0]?.maxPlayers, 6);
+    assert.deepEqual(notifications[0]?.stakes, { sb: 1, bb: 2 });
   }
   {
     const queries = [];

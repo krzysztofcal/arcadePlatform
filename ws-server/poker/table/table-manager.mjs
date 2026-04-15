@@ -109,6 +109,17 @@ function normalizeTableMeta(value, fallbackMaxPlayers, { defaultCreatedAtMs = nu
   };
 }
 
+function buildEmptyLobbyPokerState(tableId) {
+  return {
+    tableId,
+    phase: "INIT",
+    seats: [],
+    stacks: {},
+    leftTableByUserId: {},
+    waitingForNextHandByUserId: {}
+  };
+}
+
 export function createTableManager({
   presenceTtlMs = DEFAULT_PRESENCE_TTL_MS,
   maxSeats = DEFAULT_MAX_SEATS,
@@ -210,6 +221,27 @@ export function createTableManager({
       defaultCreatedAtMs: table?.tableMeta?.createdAtMs ?? nowMs,
       defaultLastActivityAtMs: nowMs
     });
+  }
+
+  function materializeLobbyTable({ tableId, tableMeta = null, nowMs = Date.now() } = {}) {
+    const normalizedTableId = typeof tableId === "string" ? tableId.trim() : "";
+    if (!normalizedTableId) {
+      return { ok: false, code: "invalid_table_id" };
+    }
+    const existed = tables.has(normalizedTableId);
+    const table = ensureTable(normalizedTableId);
+    if (!table.coreState?.pokerState || typeof table.coreState.pokerState !== "object" || Array.isArray(table.coreState.pokerState)) {
+      table.coreState = {
+        ...table.coreState,
+        pokerState: buildEmptyLobbyPokerState(normalizedTableId)
+      };
+    }
+    table.tableStatus = normalizeTableStatus(table.tableStatus);
+    table.tableMeta = normalizeTableMeta({ ...table.tableMeta, ...(tableMeta || {}) }, table?.coreState?.maxSeats || maxSeats, {
+      defaultCreatedAtMs: table?.tableMeta?.createdAtMs ?? nowMs,
+      defaultLastActivityAtMs: nowMs
+    });
+    return { ok: true, existed, table };
   }
 
   async function ensureTableLoaded(tableId, { allowCreate = false } = {}) {
@@ -1335,6 +1367,7 @@ export function createTableManager({
     orderedConnectionsForTable,
     listTableIds,
     tableMeta,
+    materializeLobbyTable,
     resolveImplicitLeaveTableId,
     sweepExpiredPresence,
     persistedPokerState,
