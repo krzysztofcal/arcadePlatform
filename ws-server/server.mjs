@@ -740,7 +740,7 @@ function syncLobbyRegistry() {
   return changed;
 }
 
-async function materializeDiscoverableLobbyTables() {
+async function preloadDiscoverableLobbyTables() {
   if (!persistedBootstrapRuntime) {
     return [];
   }
@@ -765,7 +765,7 @@ async function materializeDiscoverableLobbyTables() {
       const message = result.status === "rejected"
         ? result.reason?.message || "unknown"
         : result.value?.message || result.value?.code || "unknown";
-      klogSafe("ws_lobby_materialize_failed", { tableId, message });
+      klogSafe("ws_lobby_preload_failed", { tableId, message });
     }
     return discoveredIds;
   })();
@@ -1876,7 +1876,6 @@ wss.on("connection", (ws) => {
     if (frame.type === "lobby_subscribe") {
       sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
       lobbySubscribers.add(ws);
-      await materializeDiscoverableLobbyTables();
       syncLobbyRegistry();
       sendLobbySnapshot(ws, connState, { requestId: frame.requestId ?? null });
       return;
@@ -2345,6 +2344,22 @@ const zombieTableSweepTimer = setInterval(() => {
 }, Number.isFinite(zombieTableSweepMs) && zombieTableSweepMs > 0 ? zombieTableSweepMs : 30_000);
 zombieTableSweepTimer.unref();
 
-server.listen(PORT, "0.0.0.0", () => {
-  klogSafe("ws_listening", { message: `WS listening on ${PORT}`, port: PORT });
-});
+const lobbyVisibilitySweepMs = resolvePositiveInt(process.env.WS_LOBBY_VISIBILITY_SWEEP_MS, 1_000, { min: 250, max: 60_000 });
+const lobbyVisibilitySweepTimer = setInterval(() => {
+  maybeBroadcastLobbySnapshot();
+}, lobbyVisibilitySweepMs);
+lobbyVisibilitySweepTimer.unref();
+
+async function startServer() {
+  try {
+    await preloadDiscoverableLobbyTables();
+    syncLobbyRegistry();
+  } catch (error) {
+    klogSafe("ws_lobby_preload_unavailable", { message: error?.message || "unknown" });
+  }
+  server.listen(PORT, "0.0.0.0", () => {
+    klogSafe("ws_listening", { message: `WS listening on ${PORT}`, port: PORT });
+  });
+}
+
+void startServer();

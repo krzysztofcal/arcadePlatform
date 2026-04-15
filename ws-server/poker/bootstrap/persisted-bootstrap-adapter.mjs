@@ -1,4 +1,4 @@
-import { parseStakes } from "../../../netlify/functions/_shared/poker-stakes.mjs";
+import { parseStakes } from "../../../shared/poker-domain/bots.mjs";
 function asPlainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }

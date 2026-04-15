@@ -47,6 +47,9 @@ export async function notifyWsLobbyMaterialize({
   const timeoutMs = resolveTimeoutMs(env);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  if (typeof timer?.unref === "function") {
+    timer.unref();
+  }
   const headers = { "content-type": "application/json" };
   const token = resolveToken(env);
   if (token) {

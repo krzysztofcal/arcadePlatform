@@ -87,6 +87,30 @@ const runSlashStakes = async () => {
   assert.equal(typeof notifications[0]?.klog, "function");
 };
 
+const runSlowNotifyDoesNotDelayResponse = async () => {
+  const queries = [];
+  let resolveNotify;
+  let notifyCalled = false;
+  const pendingNotify = new Promise((resolve) => {
+    resolveNotify = resolve;
+  });
+  const handler = makeHandler(queries, {
+    notifyWsLobbyMaterialize: async () => {
+      notifyCalled = true;
+      return pendingNotify;
+    }
+  });
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ maxPlayers: 6, stakes: "1/2" }),
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(notifyCalled, true, "create-table should trigger runtime notify");
+  resolveNotify({ ok: true });
+};
+
 await runMissingStakes();
 await runInvalidStakes();
 await runSlashStakes();
+await runSlowNotifyDoesNotDelayResponse();

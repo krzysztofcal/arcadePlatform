@@ -192,6 +192,45 @@ const run = async () => {
   }
   {
     const queries = [];
+    let resolveNotify;
+    let notifyCalled = false;
+    const pendingNotify = new Promise((resolve) => {
+      resolveNotify = resolve;
+    });
+    const handler = loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
+      baseHeaders: () => ({}),
+      corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+      extractBearerToken: () => "token",
+      verifySupabaseJwt: async () => ({ valid: true, userId }),
+      beginSql: async (fn) => fn({
+        unsafe: async (query, params) => {
+          queries.push({ query: String(query), params });
+          const text = String(query).toLowerCase();
+          if (text.includes("pg_advisory_xact_lock")) return [];
+          if (text.includes("from public.poker_tables t")) return [];
+          if (text.includes("insert into public.poker_tables")) return [{ id: "table-slow-notify" }];
+          if (text.includes("insert into public.poker_state")) return [];
+          if (text.includes("from public.chips_accounts")) return [{ id: "escrow-1" }];
+          if (text.includes("update public.poker_tables")) return [];
+          return [];
+        }
+      }),
+      notifyWsLobbyMaterialize: async () => {
+        notifyCalled = true;
+        return pendingNotify;
+      },
+      klog: () => {},
+    });
+
+    const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
+    const body = JSON.parse(res.body);
+    assert.equal(res.statusCode, 200);
+    assert.equal(body.tableId, "table-slow-notify");
+    assert.equal(notifyCalled, true, "quick seat should trigger runtime notify");
+    resolveNotify({ ok: true });
+  }
+  {
+    const queries = [];
     const state = { created: false };
     const handler = loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
       baseHeaders: () => ({}),
