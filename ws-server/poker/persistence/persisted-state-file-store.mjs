@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { writeJsonFileAtomic } from "./persisted-state-file-io.mjs";
 
 function emptyStore() {
   return { tables: {} };
@@ -27,7 +28,7 @@ async function readStore(filePath) {
 }
 
 async function writeStore(filePath, value) {
-  await fs.writeFile(filePath, `${JSON.stringify(value)}\n`, "utf8");
+  await writeJsonFileAtomic(filePath, value);
 }
 
 export async function loadPersistedTableFromFile({ filePath, tableId }) {
