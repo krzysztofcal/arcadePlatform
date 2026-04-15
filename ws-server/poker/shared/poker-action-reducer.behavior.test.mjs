@@ -202,6 +202,62 @@ test("applyAction repairs missing river community from handSeed before showdown 
   assert.equal(closed.state.turnUserId, null);
 });
 
+test("applyAction restores missing board cards from handSeed when private deck is absent", () => {
+  const handSeed = "ws_seed_table_action_board_restore";
+  const dealt = dealHoleCards(deriveDeck(handSeed), ["u1", "u2"]);
+  const fullCommunity = toCardCodes(dealt.deck.slice(0, 5));
+  const turnDeck = toCardCodes(dealt.deck.slice(4));
+  const remainingDeck = toCardCodes(dealt.deck.slice(5));
+  const flopPending = stateFixture({
+    handSeed,
+    phase: "FLOP",
+    community: fullCommunity.slice(0, 3),
+    communityDealt: 3,
+    deck: [],
+    currentBet: 0,
+    turnUserId: "u2",
+    toCallByUserId: { u1: 0, u2: 0 },
+    betThisRoundByUserId: { u1: 0, u2: 0 },
+    actedThisRoundByUserId: { u1: true, u2: false }
+  });
+
+  const advancedToTurn = applyAction({ pokerState: flopPending, userId: "u2", action: "CHECK", amount: 0 });
+  assert.equal(advancedToTurn.ok, true);
+  assert.equal(advancedToTurn.state.phase, "TURN");
+  assert.deepEqual(advancedToTurn.state.community, fullCommunity.slice(0, 4));
+  assert.deepEqual(advancedToTurn.state.deck, turnDeck);
+  assert.equal(advancedToTurn.state.communityDealt, 4);
+
+  const turnPending = {
+    ...advancedToTurn.state,
+    currentBet: 0,
+    turnUserId: "u2",
+    toCallByUserId: { u1: 0, u2: 0 },
+    betThisRoundByUserId: { u1: 0, u2: 0 },
+    actedThisRoundByUserId: { u1: true, u2: false }
+  };
+  const advancedToRiver = applyAction({ pokerState: turnPending, userId: "u2", action: "CHECK", amount: 0 });
+  assert.equal(advancedToRiver.ok, true);
+  assert.equal(advancedToRiver.state.phase, "RIVER");
+  assert.deepEqual(advancedToRiver.state.community, fullCommunity);
+  assert.deepEqual(advancedToRiver.state.deck, remainingDeck);
+  assert.equal(advancedToRiver.state.communityDealt, 5);
+
+  const riverPending = {
+    ...advancedToRiver.state,
+    currentBet: 0,
+    turnUserId: "u2",
+    toCallByUserId: { u1: 0, u2: 0 },
+    betThisRoundByUserId: { u1: 0, u2: 0 },
+    actedThisRoundByUserId: { u1: true, u2: false }
+  };
+  const settled = applyAction({ pokerState: riverPending, userId: "u2", action: "CHECK", amount: 0 });
+  assert.equal(settled.ok, true);
+  assert.equal(settled.state.phase, "SETTLED");
+  assert.deepEqual(settled.state.community, fullCommunity);
+  assert.deepEqual(settled.state.deck, remainingDeck);
+});
+
 test("applyAction fold-win awards full pot exactly once and settles", () => {
   const foldPending = stateFixture({
     phase: "PREFLOP",

@@ -93,20 +93,21 @@ function seatUserIdsInOrder(state) {
   return orderedSeats(state).map((seat) => seat.userId);
 }
 
-function deriveCommunityForSettlement(state) {
+function deriveBoardStateFromHandSeed(state, communityCount) {
   const handSeed = typeof state?.handSeed === "string" ? state.handSeed.trim() : "";
-  const communityDealt = Number.isInteger(state?.communityDealt)
-    ? state.communityDealt
-    : (Array.isArray(state?.community) ? state.community.length : -1);
   const seatOrder = seatUserIdsInOrder(state);
-  if (!handSeed || seatOrder.length === 0 || communityDealt < 0 || communityDealt > 5) {
-    return [];
+  if (!handSeed || seatOrder.length === 0 || !Number.isInteger(communityCount) || communityCount < 0 || communityCount > 5) {
+    return null;
   }
   try {
     const dealt = dealHoleCards(deriveDeck(handSeed), seatOrder);
-    return toCardCodes(dealt.deck.slice(0, communityDealt));
+    const derivedDeck = toCardCodes(dealt.deck);
+    return {
+      community: derivedDeck.slice(0, communityCount),
+      deck: derivedDeck.slice(communityCount)
+    };
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -115,8 +116,10 @@ function resolveSettlementCommunity(state) {
   if (community.length === 5) {
     return community;
   }
-  const derivedCommunity = deriveCommunityForSettlement(state);
-  return derivedCommunity.length === 5 ? derivedCommunity : community;
+  const derivedBoardState = deriveBoardStateFromHandSeed(state, 5);
+  return Array.isArray(derivedBoardState?.community) && derivedBoardState.community.length === 5
+    ? derivedBoardState.community
+    : community;
 }
 
 function eligibleUserIdsForSettlement(state) {
@@ -249,10 +252,28 @@ function revealCommunityCards(state, count) {
   }
   const deck = Array.isArray(state.deck) ? state.deck : [];
   const community = Array.isArray(state.community) ? state.community : [];
-  const dealt = deck.slice(0, normalized);
+  const revealedCount = Number.isInteger(state.communityDealt)
+    ? Math.max(community.length, Math.min(5, state.communityDealt))
+    : community.length;
+  const targetCommunityCount = Math.min(5, revealedCount + normalized);
+  const missingCount = Math.max(0, targetCommunityCount - community.length);
+  const dealt = deck.slice(0, missingCount);
+  if (dealt.length === missingCount) {
+    state.community = community.concat(dealt);
+    state.deck = deck.slice(dealt.length);
+    state.communityDealt = targetCommunityCount;
+    return;
+  }
+  const derivedBoardState = deriveBoardStateFromHandSeed(state, targetCommunityCount);
+  if (Array.isArray(derivedBoardState?.community) && derivedBoardState.community.length === targetCommunityCount) {
+    state.community = derivedBoardState.community;
+    state.deck = Array.isArray(derivedBoardState.deck) ? derivedBoardState.deck : [];
+    state.communityDealt = targetCommunityCount;
+    return;
+  }
   state.community = community.concat(dealt);
   state.deck = deck.slice(dealt.length);
-  state.communityDealt = Number(state.communityDealt ?? community.length) + dealt.length;
+  state.communityDealt = Math.max(revealedCount, state.community.length);
 }
 
 function resetRoundState(state) {

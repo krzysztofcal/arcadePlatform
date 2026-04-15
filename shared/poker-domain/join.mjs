@@ -318,6 +318,17 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
     if (requestedSeatNo !== null && requestedSeatNo < 1) throw makeError("invalid_seat_no");
     if (preferredSeatNoRequested !== null && preferredSeatNoRequested < 1) throw makeError("invalid_seat_no");
 
+    const startSeat = Number.isInteger(preferredSeatNoRequested) && preferredSeatNoRequested >= 1 && preferredSeatNoRequested <= maxPlayers ? preferredSeatNoRequested : 1;
+    const nextAutoSeatCandidate = () => {
+      for (let offset = 0; offset < maxPlayers; offset += 1) {
+        const candidate = ((startSeat - 1 + offset) % maxPlayers) + 1;
+        if (!occupied.has(candidate)) {
+          return candidate;
+        }
+      }
+      return null;
+    };
+
     let resolvedSeatNo = null;
     if (requestedSeatNo !== null && !autoSeat) {
       if (requestedSeatNo < 1 || requestedSeatNo > maxPlayers) throw makeError("invalid_seat_no");
@@ -326,27 +337,28 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
     }
 
     if (!Number.isInteger(resolvedSeatNo)) {
-      const startSeat = Number.isInteger(preferredSeatNoRequested) && preferredSeatNoRequested >= 1 && preferredSeatNoRequested <= maxPlayers ? preferredSeatNoRequested : 1;
-      for (let offset = 0; offset < maxPlayers; offset += 1) {
-        const candidate = ((startSeat - 1 + offset) % maxPlayers) + 1;
-        if (!occupied.has(candidate)) {
-          resolvedSeatNo = candidate;
-          break;
-        }
-      }
+      resolvedSeatNo = nextAutoSeatCandidate();
     }
 
-      if (!Number.isInteger(resolvedSeatNo)) throw makeError("table_full");
-      klog("shared_join_seat_selected", { seatNo: resolvedSeatNo, occupiedCount: occupied.size });
+    if (!Number.isInteger(resolvedSeatNo)) throw makeError("table_full");
+    klog("shared_join_seat_selected", { seatNo: resolvedSeatNo, occupiedCount: occupied.size });
 
-    try {
-      await tx.unsafe(
-        "insert into public.poker_seats (table_id, user_id, seat_no, status, last_seen_at, joined_at, stack) values ($1, $2, $3, 'ACTIVE', now(), now(), 0);",
-        [tableId, userId, resolvedSeatNo]
-      );
-    } catch (error) {
-      if (isSeatConflictError(error)) throw makeError("seat_taken");
-      throw error;
+    while (true) {
+      try {
+        await tx.unsafe(
+          "insert into public.poker_seats (table_id, user_id, seat_no, status, last_seen_at, joined_at, stack) values ($1, $2, $3, 'ACTIVE', now(), now(), 0);",
+          [tableId, userId, resolvedSeatNo]
+        );
+        break;
+      } catch (error) {
+        if (!isSeatConflictError(error)) throw error;
+        if (requestedSeatNo !== null && !autoSeat) throw makeError("seat_taken");
+        occupied.add(resolvedSeatNo);
+        const retrySeatNo = nextAutoSeatCandidate();
+        if (!Number.isInteger(retrySeatNo)) throw makeError("table_full");
+        resolvedSeatNo = retrySeatNo;
+        klog("shared_join_seat_retry", { seatNo: resolvedSeatNo, occupiedCount: occupied.size });
+      }
     }
 
     const escrowSystemKey = `POKER_TABLE:${tableId}`;

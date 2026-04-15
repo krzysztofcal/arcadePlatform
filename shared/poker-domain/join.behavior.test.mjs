@@ -173,6 +173,7 @@ test("maps unique insert conflicts to seat_taken", async () => {
       tableId: "t1",
       userId: "u1",
       requestId: "r3",
+      seatNo: 2,
       buyIn: 100,
       postTransactionFn: async () => ({ ok: true })
     })),
@@ -285,6 +286,50 @@ test("authoritative auto-seat respects preferred seat and initializes stack from
   assert.equal(result.stack, 180);
   assert.equal(writes.length, 1);
   assert.equal(writes[0].stacks.u2, 180);
+}));
+
+test("authoritative auto-seat retries past stale seat conflicts and uses the next free seat", async () => withBotsDisabled(async () => {
+  const seatRows = [];
+  const selectedSeats = [];
+  const result = await executePokerJoinAuthoritative(withLockedState({
+    beginSql: async (fn) => fn({
+      unsafe: async (sql, params) => {
+        if (sql.includes("from public.poker_tables")) return [{ id: "t1", status: "OPEN", max_players: 6 }];
+        if (sql.includes("status = 'ACTIVE'") && sql.includes("user_id = $2")) return [];
+        if (sql.includes("status = 'ACTIVE'") && sql.includes("order by seat_no asc")) return [{ seat_no: 2 }, { seat_no: 3 }];
+        if (sql.includes("from public.poker_seats") && sql.includes("order by seat_no asc;") && !sql.includes("status = 'ACTIVE'")) return seatRows.map((seat) => ({ ...seat }));
+        if (sql.includes("insert into public.poker_seats")) {
+          selectedSeats.push(params[2]);
+          if (params[2] === 1) {
+            const err = new Error("duplicate key");
+            err.code = "23505";
+            err.constraint = "poker_seats_table_id_seat_no_key";
+            throw err;
+          }
+          seatRows.push({ user_id: params[1], seat_no: params[2], status: "ACTIVE", stack: 0, is_bot: false, bot_profile: null, leave_after_hand: false });
+          return [{ seat_no: params[2] }];
+        }
+        if (sql.includes("update public.poker_seats set stack")) {
+          seatRows[0].stack = params[3];
+          return [{ ok: true }];
+        }
+        if (sql.includes("select version, state from public.poker_state")) return [{ version: 1, state: { tableId: "t1", seats: [], stacks: {} } }];
+        if (sql.includes("update public.poker_state set state")) return [{ version: 2 }];
+        return [];
+      }
+    }),
+    tableId: "t1",
+    userId: "u4",
+    requestId: "r7-retry",
+    autoSeat: true,
+    preferredSeatNo: 1,
+    buyIn: 140,
+    postTransactionFn: async () => ({ ok: true })
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.seatNo, 4);
+  assert.deepEqual(selectedSeats, [1, 4]);
 }));
 
 
