@@ -6,6 +6,46 @@ import vm from 'node:vm';
 const root = process.cwd();
 const source = fs.readFileSync(path.join(root, 'poker/poker.js'), 'utf8');
 
+function makeElement(id){
+  const element = {
+    id,
+    hidden: false,
+    textContent: '',
+    value: '0',
+    className: '',
+    classList: { add(){}, remove(){}, contains(){ return false; } },
+    disabled: false,
+    dataset: {},
+    style: {},
+    children: [],
+    parentNode: null,
+    appendChild(child){ this.children.push(child); child.parentNode = this; return child; },
+    removeChild(child){ this.children = this.children.filter((it) => it !== child); },
+    setAttribute(){},
+    removeAttribute(){},
+    focus(){},
+    blur(){},
+    _listeners: {},
+    addEventListener(type, fn){ this._listeners[type] = this._listeners[type] || []; this._listeners[type].push(fn); },
+    removeEventListener(){},
+    click(){
+      const handlers = this._listeners.click || [];
+      handlers.forEach((fn) => fn({ preventDefault(){}, stopPropagation(){}, target: this }));
+    }
+  };
+  let innerHtmlValue = '';
+  Object.defineProperty(element, 'innerHTML', {
+    get(){ return innerHtmlValue; },
+    set(value){
+      innerHtmlValue = String(value == null ? '' : value);
+      if (innerHtmlValue === '') {
+        this.children = [];
+      }
+    }
+  });
+  return element;
+}
+
 function loadHooks(overrides){
   const localStorageStub = {
     getItem: () => null,
@@ -194,3 +234,116 @@ fallback.sandbox.document.execCommand = (cmd) => {
 };
 assert.equal(await fallback.hooks.copyTextToClipboard('fallback poker logs'), true, 'fallback copy should succeed when async clipboard is unavailable');
 assert.equal(fallbackCopied, true, 'fallback path should use execCommand copy');
+
+function loadLobbyHarness(){
+  const elements = {
+    pokerError: makeElement('pokerError'),
+    pokerAuthMsg: makeElement('pokerAuthMsg'),
+    pokerLobbyContent: makeElement('pokerLobbyContent'),
+    pokerTableList: makeElement('pokerTableList'),
+    pokerRefresh: makeElement('pokerRefresh'),
+    pokerQuickSeat: makeElement('pokerQuickSeat'),
+    pokerCreate: makeElement('pokerCreate'),
+    pokerSb: makeElement('pokerSb'),
+    pokerBb: makeElement('pokerBb'),
+    pokerMaxPlayers: makeElement('pokerMaxPlayers'),
+    pokerSignIn: makeElement('pokerSignIn'),
+  };
+  elements.pokerSb.value = '1';
+  elements.pokerBb.value = '2';
+  elements.pokerMaxPlayers.value = '6';
+
+  const fetchCalls = [];
+  const wsCreates = [];
+  let requestLobbySnapshotCalls = 0;
+  let lobbyOptions = null;
+  const sandbox = {
+    Buffer,
+    window: {
+      location: { pathname: '/poker/', search: '', href: '' },
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      __RUNNING_POKER_UI_TESTS__: false,
+      KLog: { log: () => {} },
+      SupabaseAuthBridge: { getAccessToken: async () => 'token' },
+      PokerWsClient: {
+        create: (options) => {
+          lobbyOptions = options;
+          const client = {
+            start(){ wsCreates.push('start'); },
+            destroy(){ wsCreates.push('destroy'); },
+            isReady(){ return true; },
+            requestLobbySnapshot(){ requestLobbySnapshotCalls += 1; return true; }
+          };
+          wsCreates.push(client);
+          return client;
+        }
+      }
+    },
+    document: {
+      readyState: 'complete',
+      visibilityState: 'visible',
+      addEventListener: () => {},
+      getElementById: (id) => elements[id] || null,
+      createElement: (tag) => makeElement(tag),
+      body: makeElement('body'),
+    },
+    URLSearchParams,
+    Date,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    navigator: { userAgent: 'node' },
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    fetch: async (url) => {
+      fetchCalls.push(String(url));
+      return { ok: true, json: async () => ({ ok: true }) };
+    },
+    atob: (value) => Buffer.from(String(value), 'base64').toString('binary'),
+    btoa: (value) => Buffer.from(String(value), 'binary').toString('base64'),
+  };
+
+  sandbox.window.document = sandbox.document;
+  sandbox.window.navigator = sandbox.navigator;
+  sandbox.window.localStorage = sandbox.localStorage;
+  sandbox.window.fetch = sandbox.fetch;
+  sandbox.window.atob = sandbox.atob;
+  sandbox.window.btoa = sandbox.btoa;
+
+  vm.createContext(sandbox);
+  vm.runInContext(source, sandbox, { filename: 'poker/poker.js' });
+
+  return {
+    elements,
+    fetchCalls,
+    wsCreates,
+    getLobbyOptions: () => lobbyOptions,
+    getRequestLobbySnapshotCalls: () => requestLobbySnapshotCalls,
+  };
+}
+
+const lobbyHarness = loadLobbyHarness();
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(lobbyHarness.wsCreates.length > 0, true, 'lobby should bootstrap websocket client when authenticated');
+assert.equal(lobbyHarness.fetchCalls.some((url) => url.includes('/.netlify/functions/poker-list-tables')), false, 'lobby should not fetch poker-list-tables');
+
+const lobbyOptions = lobbyHarness.getLobbyOptions();
+assert.ok(lobbyOptions, 'lobby should provide websocket callbacks');
+assert.equal(lobbyOptions.mode, 'lobby', 'lobby websocket client should run in lobby mode');
+
+lobbyOptions.onLobbySnapshot({
+  kind: 'lobby_snapshot',
+  initial: true,
+  payload: {
+    tables: [
+      { tableId: 'table_lobby_ws', status: 'LOBBY', seatCount: 1, maxPlayers: 6, stakes: { sb: 1, bb: 2 } }
+    ]
+  }
+});
+assert.equal(lobbyHarness.elements.pokerTableList.children.length, 1, 'lobby should render rows from websocket snapshot payloads');
+assert.equal(lobbyHarness.elements.pokerTableList.children[0].children[0].textContent, 'table_lo', 'lobby row should render table id from runtime snapshot');
+
+lobbyHarness.elements.pokerRefresh.click();
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(lobbyHarness.getRequestLobbySnapshotCalls(), 1, 'lobby refresh should request a fresh websocket lobby snapshot');

@@ -36,6 +36,7 @@ const PROTECTED_MESSAGE_TYPES = new Set([
   "leave",
   "table_join",
   "table_leave",
+  "lobby_subscribe",
   "table_state_sub",
   "table_snapshot",
   "act",
@@ -44,7 +45,7 @@ const PROTECTED_MESSAGE_TYPES = new Set([
   "resume",
   "ack"
 ]);
-const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "table_state_sub", "table_snapshot", "act", "start_hand", "resync", "resume"]);
+const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "lobby_subscribe", "table_state_sub", "table_snapshot", "act", "start_hand", "resync", "resume"]);
 const TABLE_SNAPSHOT_KNOWN_FAILURE_CODES = new Set([
   "invalid_table_id",
   "table_not_found",
@@ -53,6 +54,7 @@ const TABLE_SNAPSHOT_KNOWN_FAILURE_CODES = new Set([
   "contract_mismatch_empty_legal_actions"
 ]);
 const SESSION_REBOUND_CLOSE_CODE = 4001;
+const LIVE_HAND_PHASES = new Set(["POSTING_BLINDS", "PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"]);
 
 function resolvePresenceTtlMs(rawValue) {
   const parsed = Number(rawValue);
@@ -60,6 +62,13 @@ function resolvePresenceTtlMs(rawValue) {
     return 10_000;
   }
   return parsed;
+}
+
+function isLiveHandPhase(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
+  return LIVE_HAND_PHASES.has(value.trim().toUpperCase());
 }
 
 
@@ -173,6 +182,8 @@ const streamLog = createStreamLog({ cap: Number(process.env.WS_STREAM_REPLAY_CAP
 const tableSnapshotLoader = createTableSnapshotLoader({ env: process.env });
 const persistedStateWriter = persistedStateWriteEnabled ? createPersistedStateWriter({ env: process.env, klog: klogSafe }) : null;
 const lastSnapshotBySessionAndTable = new Map();
+const lobbySubscribers = new Set();
+const activeLobbyTablesById = new Map();
 
 function snapshotCacheKey(sessionId, tableId) {
   return `${sessionId}:${tableId}`;
@@ -607,6 +618,121 @@ function recordStatefulFrame({ ws, connState, tableId, frame }) {
   return replayFrame;
 }
 
+function normalizeLobbyHandStatus(value) {
+  if (typeof value !== "string") {
+    return "LOBBY";
+  }
+  const normalized = value.trim().toUpperCase();
+  return normalized || "LOBBY";
+}
+
+function hasVisibleHumanLobbySeat(seats) {
+  if (!Array.isArray(seats)) {
+    return false;
+  }
+  return seats.some((seat) => (
+    seat?.isBot !== true
+    && (seat?.status === "ACTIVE" || seat?.status === "WAITING_NEXT_HAND")
+  ));
+}
+
+function buildLobbyTableEntry(tableId) {
+  if (tableManager.isTableClosed(tableId) === true) {
+    return null;
+  }
+  const tableSnapshot = tableManager.tableSnapshot(tableId, null);
+  const tableMeta = tableManager.tableMeta(tableId);
+  const seats = Array.isArray(tableSnapshot?.seats) ? tableSnapshot.seats : [];
+  const handStatus = normalizeLobbyHandStatus(tableSnapshot?.hand?.status);
+  const liveHand = isLiveHandPhase(handStatus);
+  if (!liveHand && !hasVisibleHumanLobbySeat(seats)) {
+    return null;
+  }
+  const humanCount = seats.filter((seat) => seat?.isBot !== true).length;
+  return {
+    id: tableId,
+    tableId,
+    roomId: typeof tableSnapshot?.roomId === "string" && tableSnapshot.roomId ? tableSnapshot.roomId : tableId,
+    stateVersion: Number.isInteger(tableSnapshot?.stateVersion) ? tableSnapshot.stateVersion : 0,
+    status: handStatus,
+    live: liveHand,
+    stakes: tableMeta?.stakes ?? null,
+    maxPlayers: Number.isInteger(tableMeta?.maxPlayers)
+      ? tableMeta.maxPlayers
+      : (Number.isInteger(tableSnapshot?.maxSeats) ? tableSnapshot.maxSeats : null),
+    seatCount: seats.length,
+    humanCount
+  };
+}
+
+function syncLobbyTable(tableId) {
+  const previous = activeLobbyTablesById.get(tableId) ?? null;
+  const next = buildLobbyTableEntry(tableId);
+  const previousJson = previous ? JSON.stringify(previous) : null;
+  const nextJson = next ? JSON.stringify(next) : null;
+  if (nextJson === previousJson) {
+    return false;
+  }
+  if (next) {
+    activeLobbyTablesById.set(tableId, next);
+  } else {
+    activeLobbyTablesById.delete(tableId);
+  }
+  return true;
+}
+
+function syncLobbyRegistry() {
+  let changed = false;
+  const loadedTableIds = new Set(tableManager.listTableIds());
+  for (const tableId of loadedTableIds) {
+    if (syncLobbyTable(tableId)) {
+      changed = true;
+    }
+  }
+  for (const tableId of [...activeLobbyTablesById.keys()]) {
+    if (loadedTableIds.has(tableId)) {
+      continue;
+    }
+    activeLobbyTablesById.delete(tableId);
+    changed = true;
+  }
+  return changed;
+}
+
+function buildLobbySnapshotPayload() {
+  return {
+    tables: [...activeLobbyTablesById.values()].sort((left, right) => left.tableId.localeCompare(right.tableId))
+  };
+}
+
+function sendLobbySnapshot(ws, connState, { requestId = null } = {}) {
+  const frame = {
+    version: "1.0",
+    type: "lobby_snapshot",
+    ts: nowTs(),
+    sessionId: connState.sessionId,
+    payload: buildLobbySnapshotPayload()
+  };
+  if (requestId) {
+    frame.requestId = requestId;
+  }
+  sendFrame(ws, frame);
+}
+
+function maybeBroadcastLobbySnapshot({ force = false } = {}) {
+  const changed = syncLobbyRegistry();
+  if (!force && !changed) {
+    return;
+  }
+  for (const recipient of lobbySubscribers) {
+    const recipientConnState = recipient?.__connState;
+    if (!recipientConnState) {
+      continue;
+    }
+    sendLobbySnapshot(recipient, recipientConnState);
+  }
+}
+
 function buildTableStatePayload({ tableState, tableSnapshot }) {
   const payload = {
     tableId: tableState.tableId,
@@ -798,6 +924,7 @@ function sendGameplaySnapshot(ws, connState, { requestId = null, tableId, snapsh
 }
 
 function broadcastTableState(tableId, { excludeWs = null } = {}) {
+  maybeBroadcastLobbySnapshot();
   maybeScheduleSettledRollover(tableId);
   const tableState = tableManager.tableState(tableId);
   const subscribers = tableManager.orderedSubscribers(tableId, (socket) => socket.__connState?.sessionId ?? "");
@@ -1023,6 +1150,7 @@ function maybeScheduleSettledRollover(tableId) {
 }
 
 function broadcastStateSnapshots(tableId) {
+  maybeBroadcastLobbySnapshot();
   maybeScheduleSettledRollover(tableId);
   const recipients = tableManager.orderedConnectionsForTable(tableId, (socket) => socket.__connState?.sessionId ?? "");
   for (const recipient of recipients) {
@@ -1586,6 +1714,14 @@ wss.on("connection", (ws) => {
       return;
     }
 
+    if (frame.type === "lobby_subscribe") {
+      sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
+      lobbySubscribers.add(ws);
+      syncLobbyRegistry();
+      sendLobbySnapshot(ws, connState, { requestId: frame.requestId ?? null });
+      return;
+    }
+
     if (frame.type === "table_join" || frame.type === "join") {
       const resolvedRoomId = resolveRoomId(frame);
       if (!resolvedRoomId.ok) {
@@ -1990,6 +2126,7 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("error", (err) => {
+    lobbySubscribers.delete(ws);
     sessionStore.untrackConnection({ ws, userId: connState.session.userId });
     const cleanupUpdates = tableManager.cleanupConnection({
       ws,
@@ -2009,6 +2146,7 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("close", () => {
+    lobbySubscribers.delete(ws);
     sessionStore.untrackConnection({ ws, userId: connState.session.userId });
     const cleanupUpdates = tableManager.cleanupConnection({
       ws,

@@ -72,6 +72,25 @@ function normalizeTableStatus(value) {
   return normalized || "OPEN";
 }
 
+function normalizeTableMeta(value, fallbackMaxPlayers) {
+  const maxPlayersRaw = Number(value?.maxPlayers);
+  const maxPlayers = Number.isInteger(maxPlayersRaw) && maxPlayersRaw >= 1
+    ? maxPlayersRaw
+    : fallbackMaxPlayers;
+  const stakes = value?.stakes && typeof value.stakes === "object" && !Array.isArray(value.stakes)
+    ? {
+        sb: Number.isInteger(Number(value.stakes.sb)) ? Number(value.stakes.sb) : null,
+        bb: Number.isInteger(Number(value.stakes.bb)) ? Number(value.stakes.bb) : null
+      }
+    : null;
+  return {
+    maxPlayers,
+    stakes: stakes && Number.isInteger(stakes.sb) && Number.isInteger(stakes.bb)
+      ? stakes
+      : null
+  };
+}
+
 export function createTableManager({
   presenceTtlMs = DEFAULT_PRESENCE_TTL_MS,
   maxSeats = DEFAULT_MAX_SEATS,
@@ -150,6 +169,7 @@ export function createTableManager({
       tables.set(tableId, {
         tableId,
         tableStatus: "OPEN",
+        tableMeta: normalizeTableMeta(null, initialCoreState.maxSeats),
         coreState: initialCoreState,
         persistedStateVersion: Number.isInteger(initialCoreState.version) ? initialCoreState.version : 0,
         presenceByUserId: new Map(),
@@ -193,6 +213,7 @@ export function createTableManager({
 
       const loadedTable = loaded.table;
       loadedTable.tableStatus = normalizeTableStatus(loadedTable.tableStatus);
+      loadedTable.tableMeta = normalizeTableMeta(loadedTable.tableMeta, loadedTable?.coreState?.maxSeats || maxSeats);
       const loadedVersion = Number(loadedTable?.coreState?.version);
       loadedTable.persistedStateVersion = Number.isInteger(loadedVersion) && loadedVersion >= 0 ? loadedVersion : 0;
       tables.set(tableId, loadedTable);
@@ -1116,6 +1137,7 @@ export function createTableManager({
 
     table.coreState = restoredCoreState;
     table.tableStatus = normalizeTableStatus(restoredTable?.tableStatus);
+    table.tableMeta = normalizeTableMeta(restoredTable?.tableMeta ?? table.tableMeta, restoredCoreState.maxSeats);
     table.persistedStateVersion = Number.isInteger(restoredCoreState.version) && restoredCoreState.version >= 0
       ? restoredCoreState.version
       : table.persistedStateVersion;
@@ -1208,6 +1230,18 @@ export function createTableManager({
     return sockets.sort((a, b) => getOrderKey(a).localeCompare(getOrderKey(b)));
   }
 
+  function listTableIds() {
+    return [...tables.keys()].sort((left, right) => left.localeCompare(right));
+  }
+
+  function tableMeta(tableId) {
+    const table = tables.get(tableId);
+    if (!table) {
+      return null;
+    }
+    return normalizeTableMeta(table.tableMeta, table?.coreState?.maxSeats || maxSeats);
+  }
+
   function resolveImplicitLeaveTableId({ ws, userId }) {
     const conn = connStateBySocket.get(ws);
     if (conn?.joinedTableId) {
@@ -1247,6 +1281,8 @@ export function createTableManager({
     cleanupConnection,
     orderedSubscribers,
     orderedConnectionsForTable,
+    listTableIds,
+    tableMeta,
     resolveImplicitLeaveTableId,
     sweepExpiredPresence,
     persistedPokerState,

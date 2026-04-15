@@ -1895,6 +1895,94 @@ function observeOnlyJoinEnv() {
   return { WS_OBSERVE_ONLY_JOIN: "1" };
 }
 
+test("WS lobby_subscribe publishes runtime-visible tables only and removes them live", async () => {
+  const secret = "lobby-runtime-secret";
+  const lobbyToken = makeHs256Jwt({ secret, sub: "lobby_user" });
+  const playerToken = makeHs256Jwt({ secret, sub: "player_user" });
+  const tableId = "table_runtime_lobby_only";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+      seatRows: [],
+      stateRow: {
+        version: 1,
+        state: {
+          tableId,
+          phase: "LOBBY",
+          seats: [],
+          stacks: {},
+          leftTableByUserId: {},
+          waitingForNextHandByUserId: {}
+        }
+      }
+    }
+  };
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "0",
+      SUPABASE_DB_URL: "",
+      ...persistedBootstrapFixturesEnv(fixtures)
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const lobby = await connectClient(port);
+    await hello(lobby);
+    assert.equal((await auth(lobby, lobbyToken, "auth-lobby-runtime")).type, "authOk");
+    sendFrame(lobby, {
+      version: "1.0",
+      type: "lobby_subscribe",
+      requestId: "req-lobby-subscribe",
+      ts: "2026-02-28T00:00:02Z",
+      payload: {}
+    });
+    const emptySnapshot = await nextMessageOfType(lobby, "lobby_snapshot");
+    assert.deepEqual(emptySnapshot.payload.tables, []);
+
+    const player = await connectClient(port);
+    await hello(player);
+    assert.equal((await auth(player, playerToken, "auth-player-runtime")).type, "authOk");
+    sendFrame(player, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-runtime-join",
+      ts: "2026-02-28T00:00:03Z",
+      payload: { tableId }
+    });
+    const joinAck = await nextCommandResultForRequest(player, "req-runtime-join");
+    assert.equal(joinAck.payload.status, "accepted");
+
+    const visibleSnapshot = await nextMessageMatching(
+      lobby,
+      (frame) => frame?.type === "lobby_snapshot" && frame?.payload?.tables?.some((table) => table?.tableId === tableId),
+      10000
+    );
+    const lobbyTable = visibleSnapshot.payload.tables.find((table) => table.tableId === tableId);
+    assert.ok(lobbyTable, "joined table should appear in runtime lobby snapshot");
+    assert.equal(lobbyTable.status, "LOBBY");
+    assert.equal(lobbyTable.seatCount, 1);
+    assert.equal(lobbyTable.maxPlayers, 6);
+    assert.deepEqual(lobbyTable.stakes, { sb: 1, bb: 2 });
+
+    player.close();
+
+    const removedSnapshot = await nextMessageMatching(
+      lobby,
+      (frame) => frame?.type === "lobby_snapshot" && Array.isArray(frame?.payload?.tables) && frame.payload.tables.length === 0,
+      10000
+    );
+    assert.deepEqual(removedSnapshot.payload.tables, []);
+    lobby.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 test("WS table_join hydrates from persisted bootstrap fixture", async () => {
   const secret = "test-secret";
   const token = makeHs256Jwt({ secret, sub: "user_a" });

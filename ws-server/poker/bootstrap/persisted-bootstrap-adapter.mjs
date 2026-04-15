@@ -1,3 +1,4 @@
+import { parseStakes } from "../../../netlify/functions/_shared/poker-stakes.mjs";
 function asPlainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
@@ -71,6 +72,15 @@ function normalizeTableStatus(rawStatus) {
   }
   const normalized = rawStatus.trim().toUpperCase();
   return normalized || "OPEN";
+}
+
+function normalizeTableMeta(tableRow, maxSeats) {
+  const maxPlayers = normalizeMaxSeats(tableRow?.max_players ?? tableRow?.maxPlayers) ?? maxSeats;
+  const stakesParsed = parseStakes(tableRow?.stakes);
+  return {
+    maxPlayers,
+    stakes: stakesParsed.ok ? stakesParsed.value : null
+  };
 }
 
 function normalizePublicStacks(seatRows) {
@@ -224,6 +234,7 @@ export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow 
     table: {
       tableId,
       tableStatus: normalizeTableStatus(tableRow.status),
+      tableMeta: normalizeTableMeta(tableRow, maxSeats),
       coreState: {
         roomId: tableId,
         maxSeats,

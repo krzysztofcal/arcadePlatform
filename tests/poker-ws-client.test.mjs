@@ -9,6 +9,7 @@ function loadClientHarness(options = {}){
   const logs = [];
   const statuses = [];
   const snapshots = [];
+  const lobbySnapshots = [];
   const protocolErrors = [];
   let fetchCalls = [];
 
@@ -68,15 +69,16 @@ function loadClientHarness(options = {}){
   if (pokerWsEndpointOverride !== undefined) context.window.__POKER_WS_ENDPOINT = pokerWsEndpointOverride;
   vm.runInNewContext(source, context);
 
-  const client = context.window.PokerWsClient.create({
+  const client = context.window.PokerWsClient.create(Object.assign({
     tableId: 'table_test_1',
     getAccessToken: async () => 'supabase_token_value',
     onStatus: (status, data) => statuses.push({ status, data }),
     onSnapshot: (snapshot) => snapshots.push(snapshot),
+    onLobbySnapshot: (snapshot) => lobbySnapshots.push(snapshot),
     onProtocolError: (info) => protocolErrors.push(info)
-  });
+  }, options.clientOptions || {}));
 
-  return { client, FakeWebSocket, sentFrames, logs, statuses, snapshots, protocolErrors, getFetchCalls: () => fetchCalls };
+  return { client, FakeWebSocket, sentFrames, logs, statuses, snapshots, lobbySnapshots, protocolErrors, getFetchCalls: () => fetchCalls };
 }
 
 function getLogEntries(logs, kind){
@@ -233,6 +235,31 @@ test('poker ws client can request an explicit gameplay snapshot over the live so
   assert.equal(h.sentFrames[sentBefore].type, 'table_state_sub');
   assert.equal(h.sentFrames[sentBefore].payload.tableId, 'table_test_1');
   assert.equal(h.sentFrames[sentBefore].payload.view, 'snapshot');
+});
+
+test('poker ws client supports lobby subscription snapshots without a table id', async () => {
+  const h = loadClientHarness({
+    clientOptions: {
+      mode: 'lobby',
+      tableId: ''
+    }
+  });
+  h.client.start();
+  const ws = h.FakeWebSocket.instances[0];
+  ws.open();
+  ws.message({ type: 'helloAck', payload: { version: '1.0' } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  ws.message({ type: 'authOk', payload: { sessionId: 'session_lobby' } });
+
+  assert.equal(h.sentFrames[2].type, 'lobby_subscribe');
+  assert.equal(Object.prototype.hasOwnProperty.call(h.sentFrames[2], 'roomId'), false);
+
+  ws.message({ type: 'lobby_snapshot', payload: { tables: [{ tableId: 'table_a', status: 'LOBBY', seatCount: 1, maxPlayers: 6 }] } });
+
+  assert.equal(h.lobbySnapshots.length, 1);
+  assert.equal(h.lobbySnapshots[0].kind, 'lobby_snapshot');
+  assert.equal(h.lobbySnapshots[0].initial, true);
+  assert.equal(h.lobbySnapshots[0].payload.tables[0].tableId, 'table_a');
 });
 
 test('poker ws client rejects pending commands on close', async () => {

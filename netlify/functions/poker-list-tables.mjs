@@ -108,7 +108,18 @@ where s.status = 'ACTIVE'
         })
       : [];
 
-    return { statusCode: 200, headers: cors, body: JSON.stringify({ ok: true, tables }) };
+    klog("poker_list_tables_legacy_ok", { userId: auth.userId, count: tables.length, authoritative: false });
+    return {
+      statusCode: 200,
+      headers: cors,
+      body: JSON.stringify({
+        ok: true,
+        legacy: true,
+        authoritative: false,
+        discoverySource: "persisted_db_legacy",
+        tables
+      })
+    };
   } catch (error) {
     klog("poker_list_tables_error", { message: error?.message || "unknown_error" });
     return { statusCode: 500, headers: cors, body: JSON.stringify({ error: "server_error" }) };

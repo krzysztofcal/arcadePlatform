@@ -63,10 +63,12 @@
 
   function createClient(opts){
     var options = opts || {};
+    var mode = options.mode === 'lobby' ? 'lobby' : 'table';
     var tableId = typeof options.tableId === 'string' ? options.tableId.trim() : '';
     var getAccessToken = typeof options.getAccessToken === 'function' ? options.getAccessToken : null;
     var onStatus = typeof options.onStatus === 'function' ? options.onStatus : function(){};
     var onSnapshot = typeof options.onSnapshot === 'function' ? options.onSnapshot : function(){};
+    var onLobbySnapshot = typeof options.onLobbySnapshot === 'function' ? options.onLobbySnapshot : function(){};
     var onProtocolError = typeof options.onProtocolError === 'function' ? options.onProtocolError : function(){};
     var log = typeof options.klog === 'function' ? options.klog : klog;
     var mintUrl = typeof options.mintUrl === 'string' && options.mintUrl ? options.mintUrl : DEFAULT_MINT_URL;
@@ -75,6 +77,7 @@
     var started = false;
     var authOk = false;
     var initialSnapshotDelivered = false;
+    var initialLobbySnapshotDelivered = false;
     var pending = new Map();
 
     function emitStatus(status, data){ try { onStatus(status, data || {}); } catch (_err){} }
@@ -145,12 +148,23 @@
       send('auth', { token: mintBody.token });
     }
 
-    function requestLiveState(){ if (authOk) send('table_state_sub', { tableId: tableId }); }
+    function requestLiveState(){
+      if (!authOk) return null;
+      if (mode === 'lobby') return send('lobby_subscribe', {});
+      return send('table_state_sub', { tableId: tableId });
+    }
     function requestGameplaySnapshot(){
+      if (mode === 'lobby') return null;
       if (!authOk || !ws || ws.readyState !== 1) return null;
       return send('table_state_sub', { tableId: tableId, view: 'snapshot' });
     }
+    function requestLobbySnapshot(){
+      if (mode !== 'lobby') return null;
+      if (!authOk || !ws || ws.readyState !== 1) return null;
+      return send('lobby_subscribe', {});
+    }
     function requestResync(payload){
+      if (mode === 'lobby') return null;
       if (!authOk || !ws || ws.readyState !== 1) return null;
       var body = payload && typeof payload === 'object' ? payload : {};
       return send('resync', {
@@ -183,6 +197,19 @@
       log('poker_ws_recv', summarizeFrame(frame.type, frame.payload || null, frame.requestId || null, frame.roomId || null, tableId || null));
       if (frame.type === 'helloAck') { emitStatus('hello_ack', {}); mintAndAuth().catch(function(err){ var code = safeErrorCode(err); log('poker_ws_auth_error', { tableId: tableId, code: code }); emitStatus('failed', { stage: 'auth', code: code }); emitProtocolError(code, 'auth_failed'); destroy(); }); return; }
       if (frame.type === 'authOk') { authOk = true; emitStatus('auth_ok', { roomId: frame.payload && frame.payload.roomId ? frame.payload.roomId : null }); requestLiveState(); return; }
+      if (frame.type === 'lobby_snapshot') {
+        var initialLobby = !initialLobbySnapshotDelivered;
+        initialLobbySnapshotDelivered = true;
+        try {
+          onLobbySnapshot({
+            kind: 'lobby_snapshot',
+            payload: frame.payload || {},
+            rawType: frame.type,
+            initial: initialLobby
+          });
+        } catch (_err){}
+        return;
+      }
       if (isSnapshotFrameType(frame.type)) { var initial = !initialSnapshotDelivered; initialSnapshotDelivered = true; var normalized = normalizeSnapshot(frame, initial); if (normalized) onSnapshot(normalized); return; }
       if (frame.type === 'commandResult') { handleCommandResult(frame); emitStatus('command_result', { status: frame.payload && frame.payload.status ? frame.payload.status : null, reason: frame.payload && frame.payload.reason ? frame.payload.reason : null }); return; }
       if (frame.type === 'resync') {
@@ -206,7 +233,7 @@
 
     function start(){
       if (destroyed || started) return;
-      if (!tableId){ emitProtocolError('missing_table_id'); return; }
+      if (mode !== 'lobby' && !tableId){ emitProtocolError('missing_table_id'); return; }
       if (typeof window.WebSocket !== 'function'){ emitProtocolError('ws_unavailable'); return; }
       log('poker_ws_bootstrap_begin', { tableId: tableId });
       var wsUrl = resolveWsUrl();
@@ -237,6 +264,7 @@
       start: start,
       destroy: destroy,
       isReady: function(){ return !!authOk && !!ws && ws.readyState === 1; },
+      requestLobbySnapshot: requestLobbySnapshot,
       requestGameplaySnapshot: requestGameplaySnapshot,
       requestResync: requestResync,
       sendAct: function(payload, requestId){ return sendCommand('act', payload || {}, requestId); },
