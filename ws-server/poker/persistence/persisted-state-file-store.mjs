@@ -33,6 +33,18 @@ export async function loadPersistedTableFromFile({ filePath, tableId }) {
   };
 }
 
+export async function listPersistedTablesFromFile({ filePath }) {
+  const store = await readStore(filePath);
+  return Object.entries(store.tables || {})
+    .filter(([tableId, row]) => typeof tableId === "string" && tableId && row && typeof row === "object")
+    .map(([tableId, row]) => ({
+      tableId,
+      tableRow: row.tableRow ?? null,
+      seatRows: Array.isArray(row.seatRows) ? row.seatRows : [],
+      stateRow: row.stateRow ?? null
+    }));
+}
+
 export async function writePersistedTableToFile({ filePath, tableId, expectedVersion, nextState }) {
   if (!filePath || !tableId || !Number.isInteger(expectedVersion) || expectedVersion < 0) {
     return { ok: false, reason: "invalid" };

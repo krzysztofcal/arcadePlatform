@@ -7,6 +7,7 @@ import { clearMissedTurns } from "../../netlify/functions/_shared/poker-missed-t
 import { patchSitOutByUserId } from "../../netlify/functions/_shared/poker-sitout-flag.mjs";
 import { createPokerTableWithState } from "../../netlify/functions/_shared/poker-table-init.mjs";
 import { shouldHideSeatRowFromReadModel } from "../../netlify/functions/_shared/poker-list-seat-visibility.mjs";
+import { notifyWsLobbyMaterialize } from "../../netlify/functions/_shared/poker-ws-runtime-notify.mjs";
 import {
   buildSeatBotMap,
   chooseBotActionTrivial,
@@ -131,6 +132,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "upgradeLegacyInitState",
     "upgradeLegacyInitStateWithSeats",
     "createPokerTableWithState",
+    "notifyWsLobbyMaterialize",
     "PRESENCE_TTL_SEC",
     "HEARTBEAT_INTERVAL_SEC",
     "storePokerRequestResult",
@@ -187,6 +189,7 @@ return handler;`
       patchSitOutByUserId,
       shouldHideSeatRowFromReadModel,
       createPokerTableWithState,
+      notifyWsLobbyMaterialize,
       computeTargetBotCount,
       getBotAutoplayConfig,
       chooseBotActionTrivial,

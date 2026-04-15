@@ -55,6 +55,7 @@ const TABLE_SNAPSHOT_KNOWN_FAILURE_CODES = new Set([
 ]);
 const SESSION_REBOUND_CLOSE_CODE = 4001;
 const LIVE_HAND_PHASES = new Set(["POSTING_BLINDS", "PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"]);
+const DEFAULT_EMPTY_JOINABLE_GRACE_MS = 60_000;
 
 function resolvePresenceTtlMs(rawValue) {
   const parsed = Number(rawValue);
@@ -115,6 +116,14 @@ function resolveSettledRevealMs(rawValue) {
   return Math.trunc(parsed);
 }
 
+function resolveEmptyJoinableGraceMs(rawValue) {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return DEFAULT_EMPTY_JOINABLE_GRACE_MS;
+  }
+  return Math.trunc(parsed);
+}
+
 function resolveAuthoritativeJoinEnabled(rawValue, { hasSupabaseDbUrl = false, observeOnlyJoinEnabled = false } = {}) {
   if (rawValue === undefined || rawValue === null || String(rawValue).trim() === "") {
     return Boolean(hasSupabaseDbUrl && !observeOnlyJoinEnabled);
@@ -134,7 +143,7 @@ const authoritativeJoinEnabled = resolveAuthoritativeJoinEnabled(process.env.WS_
   observeOnlyJoinEnabled
 });
 
-function createPersistedBootstrapLoader({ env = process.env } = {}) {
+function createPersistedBootstrapRuntime({ env = process.env } = {}) {
   let repositoryPromise = null;
 
   async function loadRepository() {
@@ -145,19 +154,26 @@ function createPersistedBootstrapLoader({ env = process.env } = {}) {
     return repositoryPromise;
   }
 
-  return async function loadPersistedTableBootstrap({ tableId }) {
-    const repository = await loadRepository();
-    const loaded = await repository.load(tableId);
-    return adaptPersistedBootstrap({
-      tableId,
-      tableRow: loaded?.tableRow,
-      seatRows: loaded?.seatRows,
-      stateRow: loaded?.stateRow
-    });
+  return {
+    async loadPersistedTableBootstrap({ tableId }) {
+      const repository = await loadRepository();
+      const loaded = await repository.load(tableId);
+      return adaptPersistedBootstrap({
+        tableId,
+        tableRow: loaded?.tableRow,
+        seatRows: loaded?.seatRows,
+        stateRow: loaded?.stateRow
+      });
+    },
+    async listDiscoverableTableIds({ limit, emptyJoinableGraceMs }) {
+      const repository = await loadRepository();
+      return repository.listDiscoverableTableIds({ limit, emptyJoinableGraceMs });
+    }
   };
 }
 
-const loadPersistedTableBootstrap = persistedBootstrapEnabled ? createPersistedBootstrapLoader() : null;
+const persistedBootstrapRuntime = persistedBootstrapEnabled ? createPersistedBootstrapRuntime() : null;
+const loadPersistedTableBootstrap = persistedBootstrapRuntime?.loadPersistedTableBootstrap ?? null;
 
 const tableManager = createTableManager({
   presenceTtlMs: resolvePresenceTtlMs(process.env.WS_PRESENCE_TTL_MS),
@@ -184,6 +200,10 @@ const persistedStateWriter = persistedStateWriteEnabled ? createPersistedStateWr
 const lastSnapshotBySessionAndTable = new Map();
 const lobbySubscribers = new Set();
 const activeLobbyTablesById = new Map();
+const lobbyEmptyJoinableGraceMs = resolveEmptyJoinableGraceMs(process.env.POKER_TABLE_CLOSE_GRACE_MS);
+const lobbyDiscoveryLimit = resolvePositiveInt(process.env.WS_LOBBY_DISCOVERY_BATCH, 100, { min: 1, max: 500 });
+const internalRuntimeToken = typeof process.env.POKER_WS_INTERNAL_TOKEN === "string" ? process.env.POKER_WS_INTERNAL_TOKEN.trim() : "";
+let lobbyDiscoveryPromise = null;
 
 function snapshotCacheKey(sessionId, tableId) {
   return `${sessionId}:${tableId}`;
@@ -636,6 +656,20 @@ function hasVisibleHumanLobbySeat(seats) {
   ));
 }
 
+function isLobbyTableJoinable({ seats, maxPlayers, lastActivityAtMs }) {
+  const seatCount = Array.isArray(seats) ? seats.length : 0;
+  if (!Number.isInteger(maxPlayers) || maxPlayers < 1 || seatCount >= maxPlayers) {
+    return false;
+  }
+  if (seatCount > 0) {
+    return true;
+  }
+  if (!Number.isFinite(lastActivityAtMs)) {
+    return false;
+  }
+  return Date.now() - lastActivityAtMs <= lobbyEmptyJoinableGraceMs;
+}
+
 function buildLobbyTableEntry(tableId) {
   if (tableManager.isTableClosed(tableId) === true) {
     return null;
@@ -645,7 +679,15 @@ function buildLobbyTableEntry(tableId) {
   const seats = Array.isArray(tableSnapshot?.seats) ? tableSnapshot.seats : [];
   const handStatus = normalizeLobbyHandStatus(tableSnapshot?.hand?.status);
   const liveHand = isLiveHandPhase(handStatus);
-  if (!liveHand && !hasVisibleHumanLobbySeat(seats)) {
+  const maxPlayers = Number.isInteger(tableMeta?.maxPlayers)
+    ? tableMeta.maxPlayers
+    : (Number.isInteger(tableSnapshot?.maxSeats) ? tableSnapshot.maxSeats : null);
+  const joinable = isLobbyTableJoinable({
+    seats,
+    maxPlayers,
+    lastActivityAtMs: Number(tableMeta?.lastActivityAtMs)
+  });
+  if (!liveHand && !hasVisibleHumanLobbySeat(seats) && !joinable) {
     return null;
   }
   const humanCount = seats.filter((seat) => seat?.isBot !== true).length;
@@ -656,10 +698,9 @@ function buildLobbyTableEntry(tableId) {
     stateVersion: Number.isInteger(tableSnapshot?.stateVersion) ? tableSnapshot.stateVersion : 0,
     status: handStatus,
     live: liveHand,
+    joinable,
     stakes: tableMeta?.stakes ?? null,
-    maxPlayers: Number.isInteger(tableMeta?.maxPlayers)
-      ? tableMeta.maxPlayers
-      : (Number.isInteger(tableSnapshot?.maxSeats) ? tableSnapshot.maxSeats : null),
+    maxPlayers,
     seatCount: seats.length,
     humanCount
   };
@@ -697,6 +738,42 @@ function syncLobbyRegistry() {
     changed = true;
   }
   return changed;
+}
+
+async function materializeDiscoverableLobbyTables() {
+  if (!persistedBootstrapRuntime) {
+    return [];
+  }
+  if (lobbyDiscoveryPromise) {
+    return lobbyDiscoveryPromise;
+  }
+  lobbyDiscoveryPromise = (async () => {
+    const discoveredIds = await persistedBootstrapRuntime.listDiscoverableTableIds({
+      limit: lobbyDiscoveryLimit,
+      emptyJoinableGraceMs: lobbyEmptyJoinableGraceMs
+    });
+    if (!Array.isArray(discoveredIds) || discoveredIds.length === 0) {
+      return [];
+    }
+    const results = await Promise.allSettled(discoveredIds.map((tableId) => tableManager.ensureTableLoaded(tableId)));
+    for (let index = 0; index < results.length; index += 1) {
+      const result = results[index];
+      const tableId = discoveredIds[index];
+      if (result.status === "fulfilled" && result.value?.ok) {
+        continue;
+      }
+      const message = result.status === "rejected"
+        ? result.reason?.message || "unknown"
+        : result.value?.message || result.value?.code || "unknown";
+      klogSafe("ws_lobby_materialize_failed", { tableId, message });
+    }
+    return discoveredIds;
+  })();
+  try {
+    return await lobbyDiscoveryPromise;
+  } finally {
+    lobbyDiscoveryPromise = null;
+  }
 }
 
 function buildLobbySnapshotPayload() {
@@ -1513,15 +1590,97 @@ async function sweepTurnTimeoutsAndBroadcast() {
   })));
 }
 
-const server = http.createServer((req, res) => {
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      const raw = Buffer.concat(chunks).toString("utf8");
+      if (!raw.trim()) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(raw));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+async function handleInternalLobbyMaterialize(req, res) {
+  if (req.method !== "POST") {
+    res.writeHead(405, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "method_not_allowed" }));
+    return;
+  }
+  if (!internalRuntimeToken) {
+    res.writeHead(503, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "internal_runtime_token_missing" }));
+    return;
+  }
+  const authHeader = typeof req.headers?.authorization === "string" ? req.headers.authorization.trim() : "";
+  if (authHeader !== `Bearer ${internalRuntimeToken}`) {
+    res.writeHead(401, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "unauthorized" }));
+    return;
+  }
+  let payload;
+  try {
+    payload = await readJsonBody(req);
+  } catch {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid_json" }));
+    return;
+  }
+  const tableId = typeof payload?.tableId === "string" ? payload.tableId.trim() : "";
+  if (!tableId) {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid_table_id" }));
+    return;
+  }
+  const ensured = await tableManager.ensureTableLoaded(tableId);
+  if (!ensured?.ok) {
+    const statusCode = ensured?.code === "table_not_found" ? 404 : 500;
+    res.writeHead(statusCode, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: ensured?.code || "table_materialize_failed" }));
+    return;
+  }
+  syncLobbyRegistry();
+  maybeBroadcastLobbySnapshot({ force: true });
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify({ ok: true, tableId }));
+}
+
+async function handleHttpRequest(req, res) {
   if (req.url === "/healthz") {
     res.writeHead(200, { "content-type": "text/plain" });
     res.end("ok");
     return;
   }
 
+  if (req.url === "/internal/lobby/materialize-table") {
+    await handleInternalLobbyMaterialize(req, res);
+    return;
+  }
+
   res.writeHead(404);
   res.end();
+}
+
+const server = http.createServer((req, res) => {
+  Promise.resolve(handleHttpRequest(req, res)).catch((error) => {
+    klogSafe("ws_http_request_failed", {
+      url: req?.url || null,
+      message: error?.message || "unknown"
+    });
+    if (!res.headersSent) {
+      res.writeHead(500, { "content-type": "application/json" });
+    }
+    res.end(JSON.stringify({ error: "internal_server_error" }));
+  });
 });
 
 const wss = new WebSocketServer({ server });
@@ -1717,6 +1876,7 @@ wss.on("connection", (ws) => {
     if (frame.type === "lobby_subscribe") {
       sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
       lobbySubscribers.add(ws);
+      await materializeDiscoverableLobbyTables();
       syncLobbyRegistry();
       sendLobbySnapshot(ws, connState, { requestId: frame.requestId ?? null });
       return;

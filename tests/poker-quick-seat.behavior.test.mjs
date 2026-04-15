@@ -12,7 +12,7 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ mode, queries }) =>
+const makeHandler = ({ mode, queries, notifications = [] }) =>
   loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -66,6 +66,10 @@ const makeHandler = ({ mode, queries }) =>
         },
       });
     },
+    notifyWsLobbyMaterialize: async (payload) => {
+      notifications.push(payload);
+      return { ok: true };
+    },
     klog: () => {},
   });
 
@@ -81,7 +85,8 @@ const assertCanonicalLockKey = (queries, expectedKey) => {
 const run = async () => {
   {
     const queries = [];
-    const handler = makeHandler({ mode: "prefer_humans", queries });
+    const notifications = [];
+    const handler = makeHandler({ mode: "prefer_humans", queries, notifications });
     const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -102,11 +107,13 @@ const run = async () => {
       queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")),
       "quick seat should bump table activity when recommending"
     );
+    assert.equal(notifications.length, 0, "quick seat should not materialize runtime for an existing table recommendation");
   }
 
   {
     const queries = [];
-    const handler = makeHandler({ mode: "any_open", queries });
+    const notifications = [];
+    const handler = makeHandler({ mode: "any_open", queries, notifications });
     const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -123,11 +130,13 @@ const run = async () => {
       queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")),
       "quick seat should bump table activity when recommending"
     );
+    assert.equal(notifications.length, 0, "quick seat should not materialize runtime for an existing open table recommendation");
   }
 
   {
     const queries = [];
-    const handler = makeHandler({ mode: "already_seated", queries });
+    const notifications = [];
+    const handler = makeHandler({ mode: "already_seated", queries, notifications });
     const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -143,11 +152,13 @@ const run = async () => {
       queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")),
       "quick seat should bump table activity when returning existing seat"
     );
+    assert.equal(notifications.length, 0, "quick seat should not materialize runtime when returning an existing seat");
   }
 
   {
     const queries = [];
-    const handler = makeHandler({ mode: "create", queries });
+    const notifications = [];
+    const handler = makeHandler({ mode: "create", queries, notifications });
     const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -176,6 +187,8 @@ const run = async () => {
       !queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_seats")),
       "quick seat should not seat the user directly"
     );
+    assert.equal(notifications.length, 1);
+    assert.equal(notifications[0]?.tableId, "table-new");
   }
   {
     const queries = [];

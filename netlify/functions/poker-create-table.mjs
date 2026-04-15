@@ -1,6 +1,7 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { formatStakes, parseStakes } from "./_shared/poker-stakes.mjs";
 import { createPokerTableWithState } from "./_shared/poker-table-init.mjs";
+import { notifyWsLobbyMaterialize } from "./_shared/poker-ws-runtime-notify.mjs";
 
 const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
 
@@ -81,6 +82,7 @@ export async function handler(event) {
   }
 
   const escrowSystemKey = `POKER_TABLE:${tableId}`;
+  await notifyWsLobbyMaterialize({ tableId, klog });
   return {
     statusCode: 200,
     headers: mergeHeaders(cors),

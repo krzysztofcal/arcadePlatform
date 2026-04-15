@@ -9,6 +9,7 @@ const makeHandler = (queries, options = {}) =>
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId: "user-1" }),
     klog: options.klog || (() => {}),
+    notifyWsLobbyMaterialize: options.notifyWsLobbyMaterialize || (async () => ({ ok: true, skipped: true })),
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -59,7 +60,13 @@ const runInvalidStakes = async () => {
 
 const runSlashStakes = async () => {
   const queries = [];
-  const handler = makeHandler(queries);
+  const notifications = [];
+  const handler = makeHandler(queries, {
+    notifyWsLobbyMaterialize: async (payload) => {
+      notifications.push(payload);
+      return { ok: true };
+    }
+  });
   const response = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
@@ -75,6 +82,9 @@ const runSlashStakes = async () => {
   assert.ok(stateInsertCall, "expected insert into poker_state");
   const storedState = normalizeJsonState(stateInsertCall?.params?.[1]);
   assert.equal(isStateStorageValid(storedState), true, "create-table should persist a storage-valid init state");
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0]?.tableId, "table-1");
+  assert.equal(typeof notifications[0]?.klog, "function");
 };
 
 await runMissingStakes();

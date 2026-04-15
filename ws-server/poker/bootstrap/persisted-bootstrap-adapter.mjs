@@ -74,12 +74,27 @@ function normalizeTableStatus(rawStatus) {
   return normalized || "OPEN";
 }
 
+function normalizeTimestampMs(value) {
+  if (Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function normalizeTableMeta(tableRow, maxSeats) {
   const maxPlayers = normalizeMaxSeats(tableRow?.max_players ?? tableRow?.maxPlayers) ?? maxSeats;
   const stakesParsed = parseStakes(tableRow?.stakes);
+  const createdAtMs = normalizeTimestampMs(tableRow?.created_at ?? tableRow?.createdAt);
+  const lastActivityAtMs = normalizeTimestampMs(tableRow?.last_activity_at ?? tableRow?.lastActivityAt) ?? createdAtMs;
   return {
     maxPlayers,
-    stakes: stakesParsed.ok ? stakesParsed.value : null
+    stakes: stakesParsed.ok ? stakesParsed.value : null,
+    createdAtMs,
+    lastActivityAtMs
   };
 }
 

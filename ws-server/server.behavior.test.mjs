@@ -1895,6 +1895,71 @@ function observeOnlyJoinEnv() {
   return { WS_OBSERVE_ONLY_JOIN: "1" };
 }
 
+test("WS lobby_subscribe materializes recent runtime-joinable tables before any player joins", async () => {
+  const secret = "lobby-joinable-secret";
+  const lobbyToken = makeHs256Jwt({ secret, sub: "lobby_user" });
+  const tableId = "table_runtime_joinable_recent";
+  const nowIso = new Date().toISOString();
+  const fixtures = {
+    [tableId]: {
+      tableRow: {
+        id: tableId,
+        max_players: 6,
+        status: "OPEN",
+        stakes: '{"sb":1,"bb":2}',
+        created_at: nowIso,
+        last_activity_at: nowIso
+      },
+      seatRows: [],
+      stateRow: {
+        version: 0,
+        state: {
+          tableId,
+          phase: "INIT",
+          seats: [],
+          stacks: {},
+          leftTableByUserId: {},
+          waitingForNextHandByUserId: {}
+        }
+      }
+    }
+  };
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      SUPABASE_DB_URL: "",
+      ...persistedBootstrapFixturesEnv(fixtures)
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const lobby = await connectClient(port);
+    await hello(lobby);
+    assert.equal((await auth(lobby, lobbyToken, "auth-lobby-joinable")).type, "authOk");
+    sendFrame(lobby, {
+      version: "1.0",
+      type: "lobby_subscribe",
+      requestId: "req-lobby-joinable",
+      ts: nowIso,
+      payload: {}
+    });
+    const snapshot = await nextMessageOfType(lobby, "lobby_snapshot");
+    const lobbyTable = snapshot.payload.tables.find((table) => table.tableId === tableId);
+    assert.ok(lobbyTable, "recent joinable table should be visible in the first lobby snapshot");
+    assert.equal(lobbyTable.status, "INIT");
+    assert.equal(lobbyTable.seatCount, 0);
+    assert.equal(lobbyTable.maxPlayers, 6);
+    assert.equal(lobbyTable.joinable, true);
+    assert.deepEqual(lobbyTable.stakes, { sb: 1, bb: 2 });
+    lobby.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 test("WS lobby_subscribe publishes runtime-visible tables only and removes them live", async () => {
   const secret = "lobby-runtime-secret";
   const lobbyToken = makeHs256Jwt({ secret, sub: "lobby_user" });

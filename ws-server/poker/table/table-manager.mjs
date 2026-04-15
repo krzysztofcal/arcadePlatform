@@ -72,7 +72,18 @@ function normalizeTableStatus(value) {
   return normalized || "OPEN";
 }
 
-function normalizeTableMeta(value, fallbackMaxPlayers) {
+function normalizeTimestampMs(value) {
+  if (Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeTableMeta(value, fallbackMaxPlayers, { defaultCreatedAtMs = null, defaultLastActivityAtMs = null } = {}) {
   const maxPlayersRaw = Number(value?.maxPlayers);
   const maxPlayers = Number.isInteger(maxPlayersRaw) && maxPlayersRaw >= 1
     ? maxPlayersRaw
@@ -83,11 +94,18 @@ function normalizeTableMeta(value, fallbackMaxPlayers) {
         bb: Number.isInteger(Number(value.stakes.bb)) ? Number(value.stakes.bb) : null
       }
     : null;
+  const createdAtMs = normalizeTimestampMs(value?.createdAtMs ?? value?.created_at ?? value?.createdAt) ?? defaultCreatedAtMs;
+  const lastActivityAtMs = normalizeTimestampMs(value?.lastActivityAtMs ?? value?.last_activity_at ?? value?.lastActivityAt)
+    ?? createdAtMs
+    ?? defaultLastActivityAtMs
+    ?? defaultCreatedAtMs;
   return {
     maxPlayers,
     stakes: stakes && Number.isInteger(stakes.sb) && Number.isInteger(stakes.bb)
       ? stakes
-      : null
+      : null,
+    createdAtMs,
+    lastActivityAtMs
   };
 }
 
@@ -166,10 +184,14 @@ export function createTableManager({
   function ensureTable(tableId) {
     if (!tables.has(tableId)) {
       const initialCoreState = createInitialCoreState({ roomId: tableId, maxSeats });
+      const nowMs = Date.now();
       tables.set(tableId, {
         tableId,
         tableStatus: "OPEN",
-        tableMeta: normalizeTableMeta(null, initialCoreState.maxSeats),
+        tableMeta: normalizeTableMeta(null, initialCoreState.maxSeats, {
+          defaultCreatedAtMs: nowMs,
+          defaultLastActivityAtMs: nowMs
+        }),
         coreState: initialCoreState,
         persistedStateVersion: Number.isInteger(initialCoreState.version) ? initialCoreState.version : 0,
         presenceByUserId: new Map(),
@@ -178,6 +200,16 @@ export function createTableManager({
       });
     }
     return tables.get(tableId);
+  }
+
+  function touchTableActivity(table, nowMs = Date.now()) {
+    if (!table) {
+      return;
+    }
+    table.tableMeta = normalizeTableMeta(table.tableMeta, table?.coreState?.maxSeats || maxSeats, {
+      defaultCreatedAtMs: table?.tableMeta?.createdAtMs ?? nowMs,
+      defaultLastActivityAtMs: nowMs
+    });
   }
 
   async function ensureTableLoaded(tableId, { allowCreate = false } = {}) {
@@ -298,8 +330,12 @@ export function createTableManager({
       return { ok: false, code: "table_missing", bootstrap: "table_missing" };
     }
 
-    const result = bootstrapCoreStateHand({ tableId, coreState: table.coreState, nowMs: resolveNowMs({ nowMs }) });
+    const resolvedNowMs = resolveNowMs({ nowMs });
+    const result = bootstrapCoreStateHand({ tableId, coreState: table.coreState, nowMs: resolvedNowMs });
     table.coreState = result.coreState;
+    if (result.changed) {
+      touchTableActivity(table, resolvedNowMs);
+    }
 
     return {
       ok: result.ok,
@@ -321,6 +357,7 @@ export function createTableManager({
       return asReplayedResult(table.actionResultsByRequestId.get(replayKey));
     }
 
+    const resolvedNowMs = resolveNowMs({ nowMs });
     const applied = applyCoreStateAction({
       tableId,
       coreState: table.coreState,
@@ -329,7 +366,7 @@ export function createTableManager({
       action,
       amount,
       nowIso,
-      nowMs: resolveNowMs({ nowMs })
+      nowMs: resolvedNowMs
     });
 
     if (!applied.accepted) {
@@ -339,6 +376,7 @@ export function createTableManager({
     }
 
     table.coreState = applied.coreState;
+    touchTableActivity(table, resolvedNowMs);
 
     const accepted = {
       ok: true,
@@ -425,6 +463,7 @@ export function createTableManager({
     }
 
     table.coreState = timeoutApplied.coreState;
+    touchTableActivity(table, nowMs);
     rememberActionResult(table, requestId, {
       ok: true,
       accepted: true,
@@ -489,6 +528,7 @@ export function createTableManager({
       version: nextVersion,
       pokerState: stampTurnDeadline(nextHandState, resolveNowMs({ nowMs }))
     };
+    touchTableActivity(table, nowMs);
 
     return {
       ok: true,
@@ -610,6 +650,7 @@ export function createTableManager({
         table.subscribers.add(ws);
         conn.joinedTableId = tableId;
         conn.subscribedTableId = tableId;
+        touchTableActivity(table, nowTs);
         return {
           ok: true,
           changed,
@@ -653,6 +694,7 @@ export function createTableManager({
     table.subscribers.add(ws);
     conn.joinedTableId = (isAuthoritativeMember || shouldMutateMembership) ? tableId : null;
     conn.subscribedTableId = tableId;
+    touchTableActivity(table, nowTs);
 
     return {
       ok: true,
@@ -737,6 +779,9 @@ export function createTableManager({
       table.coreState = leaveResult.state;
       effects = leaveResult.effects;
       changed = leaveResult.effects.some((effect) => effect.type === "member_left");
+      if (changed) {
+        touchTableActivity(table);
+      }
 
       const stillMember = table.coreState.members.some((member) => member.userId === userId);
       if (!stillMember) {
@@ -944,6 +989,7 @@ export function createTableManager({
     table.coreState = restored.restoredTable.coreState;
     table.tableStatus = restored.restoredTable.tableStatus;
     table.presenceByUserId = restored.restoredTable.presenceByUserId;
+    touchTableActivity(table);
 
     table.subscribers.delete(ws);
     if (conn.joinedTableId === resolvedTableId) {
@@ -1019,6 +1065,9 @@ export function createTableManager({
               table.coreState = leaveResult.state;
               table.presenceByUserId.delete(userId);
               membershipChanged = leaveResult.effects.some((effect) => effect.type === "member_left");
+              if (membershipChanged) {
+                touchTableActivity(table, nowTs);
+              }
             }
           } else if (member.connected) {
             markDisconnected(member, nowTs);
@@ -1137,7 +1186,10 @@ export function createTableManager({
 
     table.coreState = restoredCoreState;
     table.tableStatus = normalizeTableStatus(restoredTable?.tableStatus);
-    table.tableMeta = normalizeTableMeta(restoredTable?.tableMeta ?? table.tableMeta, restoredCoreState.maxSeats);
+    table.tableMeta = normalizeTableMeta(restoredTable?.tableMeta ?? table.tableMeta, restoredCoreState.maxSeats, {
+      defaultCreatedAtMs: table?.tableMeta?.createdAtMs ?? Date.now(),
+      defaultLastActivityAtMs: table?.tableMeta?.lastActivityAtMs ?? Date.now()
+    });
     table.persistedStateVersion = Number.isInteger(restoredCoreState.version) && restoredCoreState.version >= 0
       ? restoredCoreState.version
       : table.persistedStateVersion;

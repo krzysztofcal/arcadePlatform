@@ -1,6 +1,7 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { formatStakes, parseStakes } from "./_shared/poker-stakes.mjs";
 import { createPokerTableWithState } from "./_shared/poker-table-init.mjs";
+import { notifyWsLobbyMaterialize } from "./_shared/poker-ws-runtime-notify.mjs";
 
 const DEFAULT_MAX_PLAYERS = 6;
 const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
@@ -183,6 +184,10 @@ export async function handler(event) {
       klog("poker_quick_seat_selected", { tableId: createdRecommendation.tableId, strategy: "create", maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb });
       return createdRecommendation;
     });
+
+    if (result?.strategy === "create" && typeof result?.tableId === "string" && result.tableId) {
+      await notifyWsLobbyMaterialize({ tableId: result.tableId, klog });
+    }
 
     klog("poker_quick_seat_ok", { tableId: result.tableId, seatNo: result.seatNo, userId: auth.userId, strategy: result.strategy });
     return {
