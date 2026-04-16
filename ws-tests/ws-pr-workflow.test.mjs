@@ -57,8 +57,7 @@ function assertRequiredOrder(text) {
   const runtimeDepsGuard = block.indexOf("node --test ws-tests/ws-server-package-runtime-deps.guard.test.mjs");
   const sharedJoinBehavior = block.indexOf("node --test shared/poker-domain/join.behavior.test.mjs");
   const wsClientBehavior = block.indexOf("node --test tests/poker-ws-client.test.mjs");
-  const joinSmoke = block.indexOf("node --test tests/poker-ui-ws-join-smoke.behavior.test.mjs");
-  const leaveSmoke = block.indexOf("node --test tests/poker-ui-ws-leave-smoke.behavior.test.mjs");
+  const pokerV2Live = block.indexOf("node --test tests/poker-v2-live.behavior.test.mjs");
   const joinRuntimeBehavior = block.indexOf("node --test ws-tests/ws-join-runtime.behavior.test.mjs");
   const behavior = block.indexOf("node --test ws-server/server.behavior.test.mjs");
   const infraVpcCaddyGuard = block.indexOf("node --test ws-tests/infra-vps-caddy.guard.test.mjs");
@@ -86,9 +85,11 @@ function assertRequiredOrder(text) {
   assert.notEqual(runtimeDepsGuard, -1);
   assert.notEqual(sharedJoinBehavior, -1);
   assert.notEqual(wsClientBehavior, -1);
-  assert.notEqual(joinSmoke, -1);
+  assert.notEqual(pokerV2Live, -1);
   assert.equal(block.indexOf("node --test tests/poker-ui-ws-act-smoke.behavior.test.mjs"), -1);
-  assert.notEqual(leaveSmoke, -1);
+  assert.equal(block.indexOf("node --test tests/poker-ui-ws-join-smoke.behavior.test.mjs"), -1);
+  assert.equal(block.indexOf("node --test tests/poker-ui-ws-write-path.guard.test.mjs"), -1);
+  assert.equal(block.indexOf("node --test tests/poker-ui-ws-leave-smoke.behavior.test.mjs"), -1);
   assert.notEqual(joinRuntimeBehavior, -1);
   assert.notEqual(behavior, -1);
   assert.notEqual(infraVpcCaddyGuard, -1);
@@ -97,9 +98,8 @@ function assertRequiredOrder(text) {
   assert.equal(install < runtimeDepsGuard, true);
   assert.equal(runtimeDepsGuard < sharedJoinBehavior, true);
   assert.equal(sharedJoinBehavior < wsClientBehavior, true);
-  assert.equal(wsClientBehavior < joinSmoke, true);
-  assert.equal(joinSmoke < leaveSmoke, true);
-  assert.equal(leaveSmoke < joinRuntimeBehavior, true);
+  assert.equal(wsClientBehavior < pokerV2Live, true);
+  assert.equal(pokerV2Live < joinRuntimeBehavior, true);
   assert.equal(joinRuntimeBehavior < behavior, true);
   assert.equal(behavior < infraVpcCaddyGuard, true);
   assert.equal(infraVpcCaddyGuard < imageCheck, true);
@@ -155,16 +155,18 @@ test("ws pr workflow uses read-only token permissions", () => {
   assert.match(text, /permissions:\s*\n\s*contents:\s*read/);
 });
 
-test("ws pr workflow wires poker UI smoke tests and join/leave guards", () => {
+test("ws pr workflow wires poker v2-only browser coverage", () => {
   const text = workflowText();
-  assert.match(text, /Run poker UI ws join smoke test/);
-  assert.match(text, /node --test tests\/poker-ui-ws-join-smoke\.behavior\.test\.mjs/);
+  assert.match(text, /Run poker table v2 live behavior test/);
+  assert.match(text, /node --test tests\/poker-v2-live\.behavior\.test\.mjs/);
   assert.doesNotMatch(text, /Run poker UI ws act smoke test/);
   assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-act-smoke\.behavior\.test\.mjs/);
-  assert.match(text, /Run poker UI ws write-path guard test/);
-  assert.match(text, /node --test tests\/poker-ui-ws-write-path\.guard\.test\.mjs/);
-  assert.match(text, /Run poker UI ws leave smoke test/);
-  assert.match(text, /node --test tests\/poker-ui-ws-leave-smoke\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /Run poker UI ws join smoke test/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-join-smoke\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /Run poker UI ws write-path guard test/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-write-path\.guard\.test\.mjs/);
+  assert.doesNotMatch(text, /Run poker UI ws leave smoke test/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-leave-smoke\.behavior\.test\.mjs/);
   assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-health-fallback\.behavior\.test\.mjs/);
   assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-startup-order\.behavior\.test\.mjs/);
   assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-snapshot-equal-version\.behavior\.test\.mjs/);

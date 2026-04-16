@@ -58,7 +58,7 @@ function createHarness(options = {}){
   const source = fs.readFileSync(path.join(process.cwd(), 'poker', 'poker-v2.js'), 'utf8');
   const elements = {};
   [
-    'pokerMenuToggle', 'pokerMenuPanel', 'pokerClassicLink', 'pokerV2Link',
+    'pokerMenuToggle', 'pokerMenuPanel', 'pokerLobbyLink',
     'pokerSeatLayer', 'pokerPotPill', 'pokerCommunityCards', 'pokerDealerChip',
     'pokerHeroCards', 'pokerV2LiveStatus', 'pokerV2TableMeta', 'pokerV2TurnText',
     'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2SignInBtn', 'pokerV2SeatNo',
@@ -69,6 +69,7 @@ function createHarness(options = {}){
   ].forEach((id) => {
     elements[id] = makeElement(id);
   });
+  elements.pokerLobbyLink.href = '/poker/';
   elements.pokerV2SeatNo.value = '1';
   elements.pokerV2BuyIn.value = '100';
   elements.pokerV2AmountInput.value = '20';
@@ -290,8 +291,7 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   });
   await harness.flush();
 
-  assert.equal(harness.elements.pokerClassicLink.href, '/poker/table.html?tableId=table-1');
-  assert.equal(harness.elements.pokerV2Link.href, '/poker/table-v2.html?tableId=table-1');
+  assert.equal(harness.elements.pokerLobbyLink.href, '/poker/');
   assert.equal(harness.elements.pokerSeatLayer.children.length, 6, 'v2 should render all seats for the table');
   assert.equal(harness.elements.pokerCommunityCards.children.length, 4, 'v2 should render live board cards');
   assert.equal(harness.elements.pokerHeroCards.children.length, 2, 'v2 should render live hole cards');
@@ -1169,7 +1169,7 @@ test('poker v2 closes menu on link click and outside click', async () => {
   assert.equal(harness.elements.pokerMenuToggle.attributes['aria-expanded'], 'true');
   assert.equal(harness.elements.pokerMenuPanel.hasAttribute('hidden'), false);
 
-  harness.elements.pokerClassicLink.click();
+  harness.elements.pokerLobbyLink.click();
   assert.equal(harness.elements.pokerMenuToggle.attributes['aria-expanded'], 'false');
   assert.equal(harness.elements.pokerMenuPanel.hasAttribute('hidden'), true);
 

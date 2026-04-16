@@ -3,10 +3,10 @@
 This document gives a concise map of the poker realtime pieces in Arcade Portal and points to the deeper poker docs already in the repository.
 
 ## What it covers
-- Browser poker entry points live in `poker/index.html` (lobby) and `poker/table.html` (table view).
-- Browser client logic lives under `poker/`, including the realtime client files such as `poker-ws-client.js` and `poker-realtime.js`.
+- Browser poker entry points live in `poker/index.html` (lobby) and `poker/table-v2.html` (table view).
+- Browser client logic lives under `poker/`, including the realtime client files such as `poker-ws-client.js`, `poker.js`, and `poker-v2.js`.
 - Active gameplay runtime ownership is WS-only in `ws-server/` (join/start/act/leave/timeout/autoplay/next-hand/disconnect cleanup).
-- Table page runtime (`/poker/table.html`) is strictly WS-only for active game state: no HTTP bootstrap, no HTTP refresh path, no gameplay HTTP fallback, and no heartbeat/polling gameplay read path.
+- Table page runtime (`/poker/table-v2.html`) is strictly WS-only for active game state: no HTTP bootstrap, no HTTP refresh path, no gameplay HTTP fallback, and no heartbeat/polling gameplay read path.
 - Netlify HTTP gameplay endpoints are retired (`410`) and non-authoritative for runtime gameplay (including `poker-get-table`).
 - The realtime transport lives in `ws-server/`, which provides the WebSocket server used by poker clients.
 - Bot support is part of the poker flow and is covered by the poker tests and supporting docs already in `docs/`.
@@ -19,7 +19,7 @@ This document gives a concise map of the poker realtime pieces in Arcade Portal 
 - Hole-card normalization: [docs/poker-hole-cards-normalization.md](poker-hole-cards-normalization.md)
 
 ## Runtime components
-- `poker/` renders the lobby and table experience in the browser.
+- `poker/` renders the lobby and table_v2 experience in the browser.
 - `netlify/functions/poker-*.mjs` gameplay endpoints are retired/non-authoritative (`410`) for active gameplay commands.
 - `netlify/functions/ws-mint-token.mjs` supports websocket authentication token minting.
 - `ws-server/server.mjs` runs the realtime poker websocket server.

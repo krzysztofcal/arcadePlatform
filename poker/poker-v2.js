@@ -1245,13 +1245,6 @@
     els.dealerChip.style.top = (anchor.y + chipOffset.y) + '%';
   }
 
-  function updateMenuLinks(){
-    if (!els.classicLink || !els.v2Link) return;
-    var suffix = state.tableId ? ('?tableId=' + encodeURIComponent(state.tableId)) : '';
-    els.classicLink.href = '/poker/table.html' + suffix;
-    els.v2Link.href = '/poker/table-v2.html' + suffix;
-  }
-
   function isWsReady(){
     return !!(state.wsReady && wsClient && typeof wsClient.isReady === 'function' && wsClient.isReady());
   }
@@ -1415,7 +1408,6 @@
     renderHeroCards();
     renderSeats();
     renderDealerChip();
-    updateMenuLinks();
     renderInfoPanel();
     renderControls();
   }
@@ -1578,7 +1570,7 @@
       else els.menuPanel.setAttribute('hidden', 'hidden');
       els.menuToggle.setAttribute('aria-expanded', hidden ? 'true' : 'false');
     });
-    ['lobbyLink', 'classicLink', 'v2Link'].forEach(function(key){
+    ['lobbyLink'].forEach(function(key){
       if (!els[key]) return;
       els[key].addEventListener('click', function(){
         closeMenu();
@@ -1658,8 +1650,6 @@
     els.menuToggle = document.getElementById('pokerMenuToggle');
     els.menuPanel = document.getElementById('pokerMenuPanel');
     els.lobbyLink = document.getElementById('pokerLobbyLink');
-    els.classicLink = document.getElementById('pokerClassicLink');
-    els.v2Link = document.getElementById('pokerV2Link');
     els.seatLayer = document.getElementById('pokerSeatLayer');
     els.potPill = document.getElementById('pokerPotPill');
     els.communityCards = document.getElementById('pokerCommunityCards');

@@ -8,7 +8,7 @@ const deploymentDoc = fs.readFileSync('docs/poker-deployment.md', 'utf8');
 
 test('realtime docs assign table runtime ownership to WS-only path', () => {
   assert.match(realtimeDoc, /Active gameplay runtime ownership is WS-only/);
-  assert.match(realtimeDoc, /table\.html`\) is strictly WS-only/i);
+  assert.match(realtimeDoc, /table-v2\.html`\) is strictly WS-only/i);
   assert.match(realtimeDoc, /no HTTP bootstrap/i);
   assert.match(realtimeDoc, /no gameplay HTTP fallback/i);
 });

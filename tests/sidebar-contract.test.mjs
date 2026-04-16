@@ -31,7 +31,7 @@ const gameHtml = await readFile(path.join(repoRoot, 'game.html'), 'utf8');
 const gameCatsHtml = await readFile(path.join(repoRoot, 'game_cats.html'), 'utf8');
 const gameTrexHtml = await readFile(path.join(repoRoot, 'game_trex.html'), 'utf8');
 const pokerIndexHtml = await readFile(path.join(repoRoot, 'poker', 'index.html'), 'utf8');
-const pokerTableHtml = await readFile(path.join(repoRoot, 'poker', 'table.html'), 'utf8');
+const pokerTableHtml = await readFile(path.join(repoRoot, 'poker', 'table-v2.html'), 'utf8');
 
 const rootPages = [
   accountHtml,
@@ -55,16 +55,13 @@ const nestedPages = [
   privacyPlHtml,
 ];
 
-const pokerPages = [
-  pokerIndexHtml,
-  pokerTableHtml,
-];
+const pokerPages = [pokerIndexHtml];
 
 test('sidebar model includes required entries', () => {
   assert.match(sidebarModelSource, /id:\s*['"]poker['"]/);
   assert.match(sidebarModelSource, /href:\s*['"]\/poker\//);
-  assert.match(sidebarModelSource, /id:\s*['"]pokerTableV2['"]/);
-  assert.match(sidebarModelSource, /href:\s*['"]\/poker\/table-v2\.html['"]/);
+  assert.doesNotMatch(sidebarModelSource, /id:\s*['"]pokerTableV2['"]/);
+  assert.doesNotMatch(sidebarModelSource, /href:\s*['"]\/poker\/table-v2\.html['"]/);
   assert.match(sidebarModelSource, /id:\s*['"]favorites['"]/);
   assert.match(sidebarModelSource, /id:\s*['"]recentlyPlayed['"]/);
 });
@@ -116,4 +113,11 @@ test('poker pages load sidebar scripts and shell', () => {
     assert.match(content, /id="sbToggle"/);
     assert.match(content, /id="sidebar"/);
   });
+});
+
+test('poker table v2 keeps the fullscreen layout without sidebar shell', () => {
+  assert.doesNotMatch(pokerTableHtml, /src="\/js\/core\/sidebar-model\.js"/);
+  assert.doesNotMatch(pokerTableHtml, /src="\/js\/sidebar\.js"/);
+  assert.doesNotMatch(pokerTableHtml, /id="sbToggle"/);
+  assert.doesNotMatch(pokerTableHtml, /id="sidebar"/);
 });

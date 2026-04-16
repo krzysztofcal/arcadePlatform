@@ -15,7 +15,7 @@ const sandbox = {
     dispatchEvent: () => {},
   },
   navigator: { language: 'en-US' },
-  location: { search: '', href: 'https://example.com/poker/table.html?lang=en' },
+  location: { search: '', href: 'https://example.com/poker/table-v2.html?lang=en' },
   history: { replaceState: () => {} },
   localStorage: { getItem: () => null, setItem: () => {} },
   URL,
