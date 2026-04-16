@@ -2,7 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { executeInactiveCleanup } from '../shared/poker-domain/inactive-cleanup.mjs';
 
-function makeTx({ seat, state, allSeats = [], tableStatus = 'OPEN', createdAt = '2026-03-01T00:00:00.000Z' } = {}) {
+function makeTx({
+  seat,
+  state,
+  allSeats = [],
+  tableStatus = 'OPEN',
+  createdAt = '2026-03-01T00:00:00.000Z',
+  lastActivityAt = null,
+  updatedAt = null
+} = {}) {
   const ledgerCalls = [];
   const updates = [];
   let mutableState = state || {};
@@ -15,7 +23,14 @@ function makeTx({ seat, state, allSeats = [], tableStatus = 'OPEN', createdAt = 
         if (q.includes('from public.poker_seats') && q.includes('user_id = $2')) return seat ? [seat] : [];
         if (q.includes('from public.poker_state')) return [{ state: mutableState }];
         if (q.includes('select user_id, status, is_bot, stack from public.poker_seats')) return allSeats;
-        if (q.includes('select status, created_at from public.poker_tables')) return [{ status: tableStatus, created_at: createdAt }];
+        if (q.includes('select status, created_at') && q.includes('from public.poker_tables')) {
+          return [{
+            status: tableStatus,
+            created_at: createdAt,
+            last_activity_at: lastActivityAt,
+            updated_at: updatedAt
+          }];
+        }
         if (q.startsWith('update public.poker_state set state')) {
           mutableState = JSON.parse(params[1]);
           updates.push({ kind: 'state', value: mutableState });
@@ -141,7 +156,8 @@ test('bots-only live hand stays open until the hand is finished', async () => {
       { user_id: 'user-ghost', status: 'INACTIVE', is_bot: false, stack: 0 },
       { user_id: 'bot-1', status: 'ACTIVE', is_bot: true, stack: 50 }
     ],
-    tableStatus: 'OPEN'
+    tableStatus: 'OPEN',
+    lastActivityAt: new Date(Date.now()).toISOString()
   });
 
   const result = await executeInactiveCleanup({
