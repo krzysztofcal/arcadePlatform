@@ -150,6 +150,7 @@ test('bots-only live hand stays open until the hand is finished', async () => {
       phase: 'TURN',
       handId: 'hand-live-bots-only',
       turnUserId: 'bot-1',
+      turnDeadlineAt: Date.now() + 60_000,
       stacks: { 'bot-1': 50, 'user-ghost': 20 }
     },
     allSeats: [
@@ -340,4 +341,47 @@ test('system sweep closes settled bots-only table without requiring a UUID syste
   assert.equal(result.status, 'cleaned_closed');
   assert.equal(ctx.ledgerCalls.length, 1);
   assert.equal(ctx.ledgerCalls[0].createdBy, null);
+});
+
+test('system sweep closes recent bots-only river when turn deadline is long expired', async () => {
+  const nowMs = Date.parse('2026-03-01T00:02:00.000Z');
+  const ctx = makeTx({
+    seat: null,
+    state: {
+      phase: 'RIVER',
+      handId: 'hand-expired-deadline',
+      turnUserId: 'bot-1',
+      turnDeadlineAt: nowMs - 20_000,
+      stacks: { 'bot-1': 80, 'user-left': 20 }
+    },
+    allSeats: [
+      { user_id: 'user-left', status: 'INACTIVE', is_bot: false, stack: 0 },
+      { user_id: 'bot-1', status: 'ACTIVE', is_bot: true, stack: 80 }
+    ],
+    tableStatus: 'OPEN',
+    createdAt: '2026-03-01T00:00:00.000Z',
+    lastActivityAt: '2026-03-01T00:01:55.000Z'
+  });
+  const originalDateNow = Date.now;
+  Date.now = () => nowMs;
+  try {
+    const result = await executeInactiveCleanup({
+      tableId: 'table-recent-stuck',
+      userId: null,
+      requestId: 'req-recent-stuck',
+      env: {},
+      beginSql: async (fn) => fn(ctx.tx),
+      postTransaction: async (payload) => ctx.ledgerCalls.push(payload),
+      isHoleCardsTableMissing: () => false
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.closed, true);
+    assert.equal(result.status, 'cleaned_closed');
+    const closedState = ctx.updates.filter((u) => u.kind === 'state').at(-1)?.value;
+    assert.equal(closedState.phase, 'HAND_DONE');
+    assert.equal(closedState.turnUserId, null);
+  } finally {
+    Date.now = originalDateNow;
+  }
 });
