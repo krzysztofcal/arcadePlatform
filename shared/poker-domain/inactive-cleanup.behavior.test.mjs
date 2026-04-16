@@ -41,7 +41,7 @@ function createCleanupHarness({
         }
         return [];
       }
-      if (sql.includes("select user_id, status, is_bot, stack from public.poker_seats")) {
+      if (sql.includes("select user_id, seat_no, status, is_bot, stack from public.poker_seats")) {
         return seatState.map((row) => ({ ...row }));
       }
       if (sql.includes("update public.poker_state set state = $2 where table_id = $1")) {
@@ -154,6 +154,36 @@ test("inactive cleanup clears removed disconnected turn holder", async () => {
   assert.equal(result.ok, true);
   assert.equal(harness.tableState.stateRow.state.turnUserId, null);
   assert.deepEqual(harness.tableState.stateRow.state.stacks, {});
+});
+
+test("inactive cleanup preserves replacement bot turn holder when seat rows still reference prior bot id", async () => {
+  const harness = createCleanupHarness({
+    seatRows: [
+      { user_id: "human_1", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 250 },
+      { user_id: "bot_old_2", seat_no: 2, status: "ACTIVE", is_bot: true, stack: 1 },
+      { user_id: "bot_keep_3", seat_no: 3, status: "ACTIVE", is_bot: true, stack: 170 }
+    ],
+    state: {
+      phase: "TURN",
+      turnUserId: "bot_auto_2_38",
+      seats: [
+        { userId: "human_1", seatNo: 1, status: "ACTIVE" },
+        { userId: "bot_auto_2_38", seatNo: 2, status: "ACTIVE" },
+        { userId: "bot_keep_3", seatNo: 3, status: "ACTIVE" }
+      ],
+      stacks: { human_1: 250, bot_auto_2_38: 100, bot_keep_3: 170 }
+    }
+  });
+
+  const result = await harness.run();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, true);
+  assert.equal(harness.tableState.stateRow.state.turnUserId, "bot_auto_2_38");
+  assert.deepEqual(harness.tableState.stateRow.state.stacks, {
+    bot_auto_2_38: 100,
+    bot_keep_3: 170
+  });
 });
 
 test("inactive cleanup system sweep keeps bots-only live table open until hand completion", async () => {

@@ -86,6 +86,14 @@ function normalizeTimestampMs(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeSeatNo(value) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 10) {
+    return null;
+  }
+  return parsed;
+}
+
 function normalizeTableMeta(tableRow, maxSeats) {
   const maxPlayers = normalizeMaxSeats(tableRow?.max_players ?? tableRow?.maxPlayers) ?? maxSeats;
   const stakesParsed = parseStakes(tableRow?.stakes);
@@ -99,18 +107,19 @@ function normalizeTableMeta(tableRow, maxSeats) {
   };
 }
 
-function normalizePublicStacks(seatRows) {
-  if (!Array.isArray(seatRows)) {
+function normalizePublicStacks(runtimeSeats, pokerState) {
+  if (!Array.isArray(runtimeSeats)) {
     return {};
   }
+  const stateStacks = asPlainObject(pokerState?.stacks) || {};
   const entries = [];
-  for (const seatRow of seatRows) {
-    const status = typeof seatRow?.status === "string" ? seatRow.status.trim().toUpperCase() : "ACTIVE";
-    if (status !== "ACTIVE") {
-      continue;
-    }
-    const userId = typeof seatRow?.user_id === "string" ? seatRow.user_id.trim() : "";
-    const stack = Number(seatRow?.stack);
+  for (const seat of runtimeSeats) {
+    const userId = typeof seat?.userId === "string" ? seat.userId.trim() : "";
+    const stateStack = Number(stateStacks[userId]);
+    const seatStack = Number(seat?.stack);
+    const stack = seat?.preferStatePublicStack === true && Number.isFinite(stateStack) && stateStack >= 0
+      ? stateStack
+      : seatStack;
     if (!userId || !Number.isFinite(stack)) {
       continue;
     }
@@ -155,6 +164,10 @@ function normalizeSeatRows(seatRows, maxSeats) {
     if (seatRow?.leave_after_hand === true) {
       normalizedSeat.leaveAfterHand = true;
     }
+    const stack = Number(seatRow?.stack);
+    if (Number.isFinite(stack) && stack >= 0) {
+      normalizedSeat.stack = stack;
+    }
     activeSeats.push(normalizedSeat);
   }
 
@@ -162,42 +175,100 @@ function normalizeSeatRows(seatRows, maxSeats) {
   return activeSeats;
 }
 
+function mergeSeatMetadata(seat, metadata) {
+  const mergedSeat = { ...seat };
+  if (metadata?.isBot === true) mergedSeat.isBot = true;
+  if (!mergedSeat.botProfile && metadata?.botProfile) mergedSeat.botProfile = metadata.botProfile;
+  if (metadata?.leaveAfterHand === true || mergedSeat.leaveAfterHand === true) mergedSeat.leaveAfterHand = true;
+  return mergedSeat;
+}
+
+function toSeatSnapshot(seat) {
+  const snapshot = {
+    userId: seat.userId,
+    seatNo: seat.seat,
+    status: "ACTIVE"
+  };
+  if (seat.isBot) snapshot.isBot = true;
+  if (seat.botProfile) snapshot.botProfile = seat.botProfile;
+  if (seat.leaveAfterHand) snapshot.leaveAfterHand = true;
+  return snapshot;
+}
+
 function mergeStateSeatsWithSeatRows(pokerState, normalizedSeatRows) {
   const stateSeats = Array.isArray(pokerState?.seats) ? pokerState.seats : [];
   const seatRows = Array.isArray(normalizedSeatRows) ? normalizedSeatRows : [];
   const metadataByUserId = new Map(seatRows.map((seat) => [seat.userId, seat]));
+  const metadataBySeatNo = new Map(seatRows.map((seat) => [seat.seat, seat]));
   const leftTableByUserId = asPlainObject(pokerState?.leftTableByUserId) || {};
+  const replacementSeatNos = new Set();
   const mergedStateSeats = Array.isArray(stateSeats)
     ? stateSeats
-        .filter((seat) => {
-          const userId = typeof seat?.userId === "string" ? seat.userId : "";
-          return Boolean(userId) && (metadataByUserId.has(userId) || leftTableByUserId[userId] === true);
-        })
         .map((seat) => {
-          const metadata = metadataByUserId.get(seat.userId) || null;
-          const mergedSeat = { ...seat };
-          if (metadata?.isBot) mergedSeat.isBot = true;
-          if (metadata?.botProfile) mergedSeat.botProfile = metadata.botProfile;
-          if (metadata?.leaveAfterHand) mergedSeat.leaveAfterHand = true;
-          return mergedSeat;
+          const userId = typeof seat?.userId === "string" ? seat.userId : "";
+          const seatNo = normalizeSeatNo(seat?.seatNo ?? seat?.seat_no ?? seat?.seat);
+          if (!userId || !seatNo) {
+            return null;
+          }
+          const directMetadata = metadataByUserId.get(userId) || null;
+          const sameSeatMetadata = metadataBySeatNo.get(seatNo) || null;
+          const replacementBotMetadata = !directMetadata && sameSeatMetadata?.isBot === true ? sameSeatMetadata : null;
+          if (!directMetadata && !replacementBotMetadata && leftTableByUserId[userId] !== true) {
+            return null;
+          }
+          if (replacementBotMetadata) replacementSeatNos.add(seatNo);
+          return mergeSeatMetadata({ ...seat, seatNo }, directMetadata || replacementBotMetadata);
         })
+        .filter(Boolean)
     : [];
 
-  if (mergedStateSeats.length > 0) {
-    return mergedStateSeats;
+  return {
+    stateSeats: mergedStateSeats.length > 0 ? mergedStateSeats : seatRows.map(toSeatSnapshot),
+    replacementSeatNos,
+    leftTableByUserId
+  };
+}
+
+function buildRuntimeSeats({ seatRows, stateSeats, replacementSeatNos, leftTableByUserId }) {
+  const runtimeSeats = [];
+  const seenUserIds = new Set();
+  const seenSeatNos = new Set();
+  const metadataByUserId = new Map((seatRows || []).map((seat) => [seat.userId, seat]));
+  const metadataBySeatNo = new Map((seatRows || []).map((seat) => [seat.seat, seat]));
+
+  for (const stateSeat of stateSeats || []) {
+    const userId = typeof stateSeat?.userId === "string" ? stateSeat.userId : "";
+    const seatNo = normalizeSeatNo(stateSeat?.seatNo ?? stateSeat?.seat_no ?? stateSeat?.seat);
+    if (!userId || !seatNo || leftTableByUserId?.[userId] === true) {
+      continue;
+    }
+    const seatMetadata = metadataByUserId.get(userId) || metadataBySeatNo.get(seatNo) || null;
+    const isReplacementSeat = replacementSeatNos?.has(seatNo) === true && !metadataByUserId.has(userId);
+    runtimeSeats.push({
+      seat: seatNo,
+      userId,
+      isBot: stateSeat?.isBot === true || seatMetadata?.isBot === true,
+      ...(stateSeat?.botProfile ? { botProfile: stateSeat.botProfile } : seatMetadata?.botProfile ? { botProfile: seatMetadata.botProfile } : {}),
+      ...(stateSeat?.leaveAfterHand === true || seatMetadata?.leaveAfterHand === true ? { leaveAfterHand: true } : {}),
+      ...(isReplacementSeat ? { preferStatePublicStack: true } : {}),
+      ...(Number.isFinite(Number(stateSeat?.stack))
+        ? { stack: Number(stateSeat.stack) }
+        : Number.isFinite(Number(seatMetadata?.stack))
+          ? { stack: Number(seatMetadata.stack) }
+          : {})
+    });
+    seenUserIds.add(userId);
+    seenSeatNos.add(seatNo);
   }
 
-  return seatRows.map((seat) => {
-    const snapshot = {
-      userId: seat.userId,
-      seatNo: seat.seat,
-      status: "ACTIVE"
-    };
-    if (seat.isBot) snapshot.isBot = true;
-    if (seat.botProfile) snapshot.botProfile = seat.botProfile;
-    if (seat.leaveAfterHand) snapshot.leaveAfterHand = true;
-    return snapshot;
-  });
+  for (const seat of seatRows || []) {
+    if (replacementSeatNos?.has(seat.seat)) continue;
+    if (seenUserIds.has(seat.userId) || seenSeatNos.has(seat.seat)) continue;
+    runtimeSeats.push({ ...seat });
+  }
+
+  runtimeSeats.sort((left, right) => left.seat - right.seat || left.userId.localeCompare(right.userId));
+  return runtimeSeats;
 }
 
 export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow }) {
@@ -226,13 +297,14 @@ export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow 
     return { ok: false, code: "invalid_table_state", message: "invalid_table_state" };
   }
 
-  const members = seats.map((seat) => ({ userId: seat.userId, seat: seat.seat }));
-  const publicStacks = normalizePublicStacks(seatRows);
-  const stateSeats = mergeStateSeatsWithSeatRows(pokerState, seats);
+  const { stateSeats, replacementSeatNos, leftTableByUserId } = mergeStateSeatsWithSeatRows(pokerState, seats);
+  const runtimeSeats = buildRuntimeSeats({ seatRows: seats, stateSeats, replacementSeatNos, leftTableByUserId });
+  const members = runtimeSeats.map((seat) => ({ userId: seat.userId, seat: seat.seat }));
+  const publicStacks = normalizePublicStacks(runtimeSeats, pokerState);
   const normalizedPokerState = { ...pokerState, seats: stateSeats };
   const derivedRuntimeHandState = deriveDeterministicRuntimeHandState(normalizedPokerState);
   const seatDetailsByUserId = {};
-  for (const seat of seats) {
+  for (const seat of runtimeSeats) {
     seatDetailsByUserId[seat.userId] = {
       isBot: seat.isBot === true,
       botProfile: seat.botProfile || null,
@@ -241,7 +313,7 @@ export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow 
   }
   const seatByUserId = {};
   const presenceByUserId = new Map();
-  for (const seat of seats) {
+  for (const seat of runtimeSeats) {
     seatByUserId[seat.userId] = seat.seat;
     presenceByUserId.set(seat.userId, {
       userId: seat.userId,
