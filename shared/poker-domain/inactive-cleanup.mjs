@@ -19,7 +19,8 @@ const normalizeNonNegativeInt = (n) => {
 
 const DEFAULT_TABLE_CLOSE_GRACE_MS = 60_000;
 const DEFAULT_LIVE_HAND_STALE_MS = 15_000;
-const LIVE_HAND_PHASES = new Set(["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"]);
+const ACTION_HAND_PHASES = new Set(["PREFLOP", "FLOP", "TURN", "RIVER"]);
+const LIVE_HAND_PHASES = new Set([...ACTION_HAND_PHASES, "SHOWDOWN"]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function normalizePositiveInt(n) {
@@ -54,6 +55,17 @@ function resolveLiveHandStaleMs(env) {
 function hasLiveHandSignal(state) {
   const phase = typeof state?.phase === "string" ? state.phase : "";
   return LIVE_HAND_PHASES.has(phase);
+}
+
+function resolveLiveHandLogicalStaleReason({ state, nowMs, staleAfterMs }) {
+  const phase = typeof state?.phase === "string" ? state.phase : "";
+  if (!ACTION_HAND_PHASES.has(phase)) return null;
+  const turnUserId = typeof state?.turnUserId === "string" && state.turnUserId.trim() ? state.turnUserId.trim() : null;
+  if (!turnUserId) return "missing_turn_user";
+  const turnDeadlineAt = Number(state?.turnDeadlineAt);
+  if (!Number.isFinite(turnDeadlineAt) || turnDeadlineAt <= 0) return null;
+  if (nowMs >= turnDeadlineAt + staleAfterMs) return "turn_deadline_expired";
+  return null;
 }
 
 function resolveStateStacks(state) {
@@ -243,10 +255,17 @@ export async function executeInactiveCleanup({
       ?? tableCreatedAtMs;
     const nowMs = Date.now();
     if (hasLiveHandSignal(nextState)) {
+      const logicalStaleReason =
+        normalizedUserId == null
+          ? resolveLiveHandLogicalStaleReason({ state: nextState, nowMs, staleAfterMs: liveHandStaleMs })
+          : null;
       const liveHandIsFresh =
-        normalizedUserId !== null
-        || tableLastActivityAtMs == null
-        || nowMs - tableLastActivityAtMs < liveHandStaleMs;
+        !logicalStaleReason
+        && (
+          normalizedUserId !== null
+          || tableLastActivityAtMs == null
+          || nowMs - tableLastActivityAtMs < liveHandStaleMs
+        );
       if (liveHandIsFresh) {
         klog("poker_inactive_cleanup_live_hand_preserved", {
           tableId,
@@ -262,13 +281,16 @@ export async function executeInactiveCleanup({
           retryable: false
         };
       }
-      klog("poker_inactive_cleanup_stale_live_hand_closing", {
-        tableId,
-        userId: normalizedUserId,
-        phase: typeof nextState?.phase === "string" ? nextState.phase : null,
-        lastActivityAtMs: tableLastActivityAtMs,
-        staleForMs: tableLastActivityAtMs == null ? null : Math.max(0, nowMs - tableLastActivityAtMs)
-      });
+        klog("poker_inactive_cleanup_stale_live_hand_closing", {
+          tableId,
+          userId: normalizedUserId,
+          phase: typeof nextState?.phase === "string" ? nextState.phase : null,
+          staleReason: logicalStaleReason ?? "table_activity_stale",
+          turnUserId: typeof nextState?.turnUserId === "string" ? nextState.turnUserId : null,
+          turnDeadlineAt: Number.isFinite(Number(nextState?.turnDeadlineAt)) ? Number(nextState.turnDeadlineAt) : null,
+          lastActivityAtMs: tableLastActivityAtMs,
+          staleForMs: tableLastActivityAtMs == null ? null : Math.max(0, nowMs - tableLastActivityAtMs)
+        });
     }
 
     if (tableCreatedAtMs != null && nowMs - tableCreatedAtMs < closeGraceMs) {
