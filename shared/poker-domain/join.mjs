@@ -216,6 +216,20 @@ async function readPersistedSeatStack({ tx, tableId, userId }) {
   return { seatNo, stack };
 }
 
+async function insertSeatRow({ tx, tableId, userId, seatNo }) {
+  try {
+    return await tx.unsafe(
+      "insert into public.poker_seats (table_id, user_id, seat_no, status, last_seen_at, joined_at, stack) values ($1, $2, $3, 'ACTIVE', now(), now(), 0) on conflict do nothing returning seat_no;",
+      [tableId, userId, seatNo]
+    );
+  } catch (error) {
+    if (!isSeatConflictError(error)) {
+      throw error;
+    }
+    return [];
+  }
+}
+
 export async function executePokerJoinAuthoritative({ beginSql, tableId, userId, requestId, seatNo = null, autoSeat = false, preferredSeatNo = null, buyIn = null, klog = () => {}, postTransactionFn = null, loadStateForUpdate, updateStateLocked, validateStateForStorage }) {
   if (typeof loadStateForUpdate !== "function" || typeof updateStateLocked !== "function" || typeof validateStateForStorage !== "function") {
     throw makeError("temporarily_unavailable");
@@ -344,21 +358,22 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
     klog("shared_join_seat_selected", { seatNo: resolvedSeatNo, occupiedCount: occupied.size });
 
     while (true) {
-      try {
-        await tx.unsafe(
-          "insert into public.poker_seats (table_id, user_id, seat_no, status, last_seen_at, joined_at, stack) values ($1, $2, $3, 'ACTIVE', now(), now(), 0);",
-          [tableId, userId, resolvedSeatNo]
-        );
+      const insertedRows = await insertSeatRow({
+        tx,
+        tableId,
+        userId,
+        seatNo: resolvedSeatNo
+      });
+      const insertedSeatNo = Number(insertedRows?.[0]?.seat_no);
+      if (Number.isInteger(insertedSeatNo) && insertedSeatNo >= 1) {
         break;
-      } catch (error) {
-        if (!isSeatConflictError(error)) throw error;
-        if (requestedSeatNo !== null && !autoSeat) throw makeError("seat_taken");
-        occupied.add(resolvedSeatNo);
-        const retrySeatNo = nextAutoSeatCandidate();
-        if (!Number.isInteger(retrySeatNo)) throw makeError("table_full");
-        resolvedSeatNo = retrySeatNo;
-        klog("shared_join_seat_retry", { seatNo: resolvedSeatNo, occupiedCount: occupied.size });
       }
+      if (requestedSeatNo !== null && !autoSeat) throw makeError("seat_taken");
+      occupied.add(resolvedSeatNo);
+      const retrySeatNo = nextAutoSeatCandidate();
+      if (!Number.isInteger(retrySeatNo)) throw makeError("table_full");
+      resolvedSeatNo = retrySeatNo;
+      klog("shared_join_seat_retry", { seatNo: resolvedSeatNo, occupiedCount: occupied.size });
     }
 
     const escrowSystemKey = `POKER_TABLE:${tableId}`;

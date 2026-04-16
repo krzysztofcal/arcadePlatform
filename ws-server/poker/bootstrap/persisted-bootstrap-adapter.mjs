@@ -1,4 +1,5 @@
 import { parseStakes } from "../../../shared/poker-domain/bots.mjs";
+import { deriveDeterministicRuntimeHandState } from "../shared/runtime-hand-state.mjs";
 function asPlainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
@@ -161,12 +162,17 @@ function normalizeSeatRows(seatRows, maxSeats) {
   return activeSeats;
 }
 
-function mergeStateSeatsWithSeatRows(stateSeats, normalizedSeatRows) {
+function mergeStateSeatsWithSeatRows(pokerState, normalizedSeatRows) {
+  const stateSeats = Array.isArray(pokerState?.seats) ? pokerState.seats : [];
   const seatRows = Array.isArray(normalizedSeatRows) ? normalizedSeatRows : [];
   const metadataByUserId = new Map(seatRows.map((seat) => [seat.userId, seat]));
+  const leftTableByUserId = asPlainObject(pokerState?.leftTableByUserId) || {};
   const mergedStateSeats = Array.isArray(stateSeats)
     ? stateSeats
-        .filter((seat) => seat && typeof seat.userId === "string" && metadataByUserId.has(seat.userId))
+        .filter((seat) => {
+          const userId = typeof seat?.userId === "string" ? seat.userId : "";
+          return Boolean(userId) && (metadataByUserId.has(userId) || leftTableByUserId[userId] === true);
+        })
         .map((seat) => {
           const metadata = metadataByUserId.get(seat.userId) || null;
           const mergedSeat = { ...seat };
@@ -222,7 +228,9 @@ export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow 
 
   const members = seats.map((seat) => ({ userId: seat.userId, seat: seat.seat }));
   const publicStacks = normalizePublicStacks(seatRows);
-  const stateSeats = mergeStateSeatsWithSeatRows(pokerState.seats, seats);
+  const stateSeats = mergeStateSeatsWithSeatRows(pokerState, seats);
+  const normalizedPokerState = { ...pokerState, seats: stateSeats };
+  const derivedRuntimeHandState = deriveDeterministicRuntimeHandState(normalizedPokerState);
   const seatDetailsByUserId = {};
   for (const seat of seats) {
     seatDetailsByUserId[seat.userId] = {
@@ -259,7 +267,9 @@ export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow 
         seatDetailsByUserId,
         publicStacks,
         appliedRequestIds: [],
-        pokerState: { ...pokerState, seats: stateSeats }
+        pokerState: derivedRuntimeHandState
+          ? { ...normalizedPokerState, ...derivedRuntimeHandState }
+          : normalizedPokerState
       },
       presenceByUserId,
       subscribers: new Set(),

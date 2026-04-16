@@ -107,6 +107,7 @@ test("rejects malformed stringified state with state_invalid", async () => {
         unsafe: async (sql) => {
           if (sql.includes("from public.poker_tables")) return [{ id: "t1", status: "OPEN", max_players: 6 }];
           if (sql.includes("status = 'ACTIVE'")) return [];
+          if (sql.includes("insert into public.poker_seats")) return [{ seat_no: 1 }];
           if (sql.includes("select version, state from public.poker_state")) return [{ version: 1, state: "{bad" }];
           return [];
         }
@@ -190,6 +191,7 @@ test("authoritative join rejects when financial mutation fails", async () => {
           if (sql.includes("from public.poker_tables")) return [{ id: "t1", status: "OPEN", max_players: 6 }];
           if (sql.includes("from public.poker_seats") && sql.includes("status = 'ACTIVE'") && sql.includes("user_id = $2")) return [];
           if (sql.includes("status = 'ACTIVE'") && sql.includes("order by seat_no asc")) return [];
+          if (sql.includes("insert into public.poker_seats")) return [{ seat_no: 1 }];
           if (sql.includes("update public.poker_state set state")) { writes.push(params[1]); return [{ ok: true }]; }
           return [];
         }
@@ -321,6 +323,47 @@ test("authoritative auto-seat retries past stale seat conflicts and uses the nex
     tableId: "t1",
     userId: "u4",
     requestId: "r7-retry",
+    autoSeat: true,
+    preferredSeatNo: 1,
+    buyIn: 140,
+    postTransactionFn: async () => ({ ok: true })
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.seatNo, 4);
+  assert.deepEqual(selectedSeats, [1, 4]);
+}));
+
+test("authoritative auto-seat retries when insert is skipped by unique conflict without aborting the transaction", async () => withBotsDisabled(async () => {
+  const seatRows = [];
+  const selectedSeats = [];
+  const result = await executePokerJoinAuthoritative(withLockedState({
+    beginSql: async (fn) => fn({
+      unsafe: async (sql, params) => {
+        if (sql.includes("from public.poker_tables")) return [{ id: "t1", status: "OPEN", max_players: 6 }];
+        if (sql.includes("status = 'ACTIVE'") && sql.includes("user_id = $2")) return [];
+        if (sql.includes("status = 'ACTIVE'") && sql.includes("order by seat_no asc")) return [{ seat_no: 2 }, { seat_no: 3 }];
+        if (sql.includes("from public.poker_seats") && sql.includes("order by seat_no asc;") && !sql.includes("status = 'ACTIVE'")) return seatRows.map((seat) => ({ ...seat }));
+        if (sql.includes("insert into public.poker_seats")) {
+          selectedSeats.push(params[2]);
+          if (params[2] === 1) {
+            return [];
+          }
+          seatRows.push({ user_id: params[1], seat_no: params[2], status: "ACTIVE", stack: 0, is_bot: false, bot_profile: null, leave_after_hand: false });
+          return [{ seat_no: params[2] }];
+        }
+        if (sql.includes("update public.poker_seats set stack")) {
+          seatRows[0].stack = params[3];
+          return [{ ok: true }];
+        }
+        if (sql.includes("select version, state from public.poker_state")) return [{ version: 1, state: { tableId: "t1", seats: [], stacks: {} } }];
+        if (sql.includes("update public.poker_state set state")) return [{ version: 2 }];
+        return [];
+      }
+    }),
+    tableId: "t1",
+    userId: "u5",
+    requestId: "r7-retry-noabort",
     autoSeat: true,
     preferredSeatNo: 1,
     buyIn: 140,
