@@ -116,7 +116,10 @@ function normalizePublicStacks(runtimeSeats, pokerState) {
   for (const seat of runtimeSeats) {
     const userId = typeof seat?.userId === "string" ? seat.userId.trim() : "";
     const stateStack = Number(stateStacks[userId]);
-    const stack = Number.isFinite(stateStack) && stateStack >= 0 ? stateStack : Number(seat?.stack);
+    const seatStack = Number(seat?.stack);
+    const stack = seat?.preferStatePublicStack === true && Number.isFinite(stateStack) && stateStack >= 0
+      ? stateStack
+      : seatStack;
     if (!userId || !Number.isFinite(stack)) {
       continue;
     }
@@ -240,12 +243,14 @@ function buildRuntimeSeats({ seatRows, stateSeats, replacementSeatNos, leftTable
       continue;
     }
     const seatMetadata = metadataByUserId.get(userId) || metadataBySeatNo.get(seatNo) || null;
+    const isReplacementSeat = replacementSeatNos?.has(seatNo) === true && !metadataByUserId.has(userId);
     runtimeSeats.push({
       seat: seatNo,
       userId,
       isBot: stateSeat?.isBot === true || seatMetadata?.isBot === true,
       ...(stateSeat?.botProfile ? { botProfile: stateSeat.botProfile } : seatMetadata?.botProfile ? { botProfile: seatMetadata.botProfile } : {}),
       ...(stateSeat?.leaveAfterHand === true || seatMetadata?.leaveAfterHand === true ? { leaveAfterHand: true } : {}),
+      ...(isReplacementSeat ? { preferStatePublicStack: true } : {}),
       ...(Number.isFinite(Number(stateSeat?.stack))
         ? { stack: Number(stateSeat.stack) }
         : Number.isFinite(Number(seatMetadata?.stack))

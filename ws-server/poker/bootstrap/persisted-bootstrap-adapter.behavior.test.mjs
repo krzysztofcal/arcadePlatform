@@ -220,3 +220,37 @@ test("adapter restores replacement bot identity from persisted state when seat r
   assert.equal(result.table.presenceByUserId.has("bot_auto_2_38"), true);
   assert.equal(result.table.presenceByUserId.has("bot_old_2"), false);
 });
+
+test("adapter keeps public stacks from active seat rows for non-replacement members", () => {
+  const result = adaptPersistedBootstrap({
+    tableId: "table_public_stack_restore",
+    tableRow: { id: "table_public_stack_restore", max_players: 6, status: "OPEN" },
+    seatRows: [
+      { user_id: "user_a", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 150 },
+      { user_id: "bot_2", seat_no: 2, status: "ACTIVE", is_bot: true, bot_profile: "TRIVIAL", stack: 100 }
+    ],
+    stateRow: {
+      version: 11,
+      state: {
+        tableId: "table_public_stack_restore",
+        phase: "PREFLOP",
+        handId: "hand_public_stack_restore",
+        turnUserId: "user_a",
+        seats: [
+          { userId: "user_a", seatNo: 1, status: "ACTIVE" },
+          { userId: "bot_2", seatNo: 2, status: "ACTIVE", isBot: true }
+        ],
+        stacks: {
+          user_a: 149,
+          bot_2: 98
+        }
+      }
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.table.coreState.publicStacks, {
+    user_a: 150,
+    bot_2: 100
+  });
+});
