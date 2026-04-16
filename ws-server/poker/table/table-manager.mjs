@@ -13,6 +13,7 @@ import {
   replaceBrokeBotsForNextHand,
   resolveNextDealerSeatNo
 } from "../engine/poker-engine.mjs";
+import { deriveDeterministicRuntimeHandState } from "../shared/runtime-hand-state.mjs";
 import { stampTurnDeadline } from "../shared/poker-turn-timeout.mjs";
 
 const DEFAULT_PRESENCE_TTL_MS = 10_000;
@@ -70,6 +71,58 @@ function normalizeTableStatus(value) {
   if (typeof value !== "string") return "OPEN";
   const normalized = value.trim().toUpperCase();
   return normalized || "OPEN";
+}
+
+function normalizeTimestampMs(value) {
+  if (Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeTableMeta(value, fallbackMaxPlayers, { defaultCreatedAtMs = null, defaultLastActivityAtMs = null } = {}) {
+  const maxPlayersRaw = Number(value?.maxPlayers);
+  const maxPlayers = Number.isInteger(maxPlayersRaw) && maxPlayersRaw >= 1
+    ? maxPlayersRaw
+    : fallbackMaxPlayers;
+  const stakes = value?.stakes && typeof value.stakes === "object" && !Array.isArray(value.stakes)
+    ? {
+        sb: Number.isInteger(Number(value.stakes.sb)) ? Number(value.stakes.sb) : null,
+        bb: Number.isInteger(Number(value.stakes.bb)) ? Number(value.stakes.bb) : null
+      }
+    : null;
+  const createdAtMs = normalizeTimestampMs(value?.createdAtMs ?? value?.created_at ?? value?.createdAt) ?? defaultCreatedAtMs;
+  const lastActivityAtMs = normalizeTimestampMs(value?.lastActivityAtMs ?? value?.last_activity_at ?? value?.lastActivityAt)
+    ?? createdAtMs
+    ?? defaultLastActivityAtMs
+    ?? defaultCreatedAtMs;
+  return {
+    maxPlayers,
+    stakes: stakes && Number.isInteger(stakes.sb) && Number.isInteger(stakes.bb)
+      ? stakes
+      : null,
+    createdAtMs,
+    lastActivityAtMs
+  };
+}
+
+function buildEmptyLobbyPokerState(tableId) {
+  return {
+    tableId,
+    phase: "INIT",
+    seats: [],
+    stacks: {},
+    leftTableByUserId: {},
+    waitingForNextHandByUserId: {}
+  };
+}
+
+function needsPersistedBootstrap(table) {
+  return table?.pendingPersistedBootstrap === true;
 }
 
 export function createTableManager({
@@ -147,11 +200,17 @@ export function createTableManager({
   function ensureTable(tableId) {
     if (!tables.has(tableId)) {
       const initialCoreState = createInitialCoreState({ roomId: tableId, maxSeats });
+      const nowMs = Date.now();
       tables.set(tableId, {
         tableId,
         tableStatus: "OPEN",
+        tableMeta: normalizeTableMeta(null, initialCoreState.maxSeats, {
+          defaultCreatedAtMs: nowMs,
+          defaultLastActivityAtMs: nowMs
+        }),
         coreState: initialCoreState,
         persistedStateVersion: Number.isInteger(initialCoreState.version) ? initialCoreState.version : 0,
+        pendingPersistedBootstrap: false,
         presenceByUserId: new Map(),
         subscribers: new Set(),
         actionResultsByRequestId: new Map()
@@ -160,9 +219,44 @@ export function createTableManager({
     return tables.get(tableId);
   }
 
+  function touchTableActivity(table, nowMs = Date.now()) {
+    if (!table) {
+      return;
+    }
+    table.tableMeta = normalizeTableMeta(table.tableMeta, table?.coreState?.maxSeats || maxSeats, {
+      defaultCreatedAtMs: table?.tableMeta?.createdAtMs ?? nowMs,
+      defaultLastActivityAtMs: nowMs
+    });
+  }
+
+  function materializeLobbyTable({ tableId, tableMeta = null, nowMs = Date.now() } = {}) {
+    const normalizedTableId = typeof tableId === "string" ? tableId.trim() : "";
+    if (!normalizedTableId) {
+      return { ok: false, code: "invalid_table_id" };
+    }
+    const existed = tables.has(normalizedTableId);
+    const table = ensureTable(normalizedTableId);
+    if (!existed) {
+      table.pendingPersistedBootstrap = true;
+    }
+    if (!table.coreState?.pokerState || typeof table.coreState.pokerState !== "object" || Array.isArray(table.coreState.pokerState)) {
+      table.coreState = {
+        ...table.coreState,
+        pokerState: buildEmptyLobbyPokerState(normalizedTableId)
+      };
+    }
+    table.tableStatus = normalizeTableStatus(table.tableStatus);
+    table.tableMeta = normalizeTableMeta({ ...table.tableMeta, ...(tableMeta || {}) }, table?.coreState?.maxSeats || maxSeats, {
+      defaultCreatedAtMs: table?.tableMeta?.createdAtMs ?? nowMs,
+      defaultLastActivityAtMs: nowMs
+    });
+    return { ok: true, existed, table };
+  }
+
   async function ensureTableLoaded(tableId, { allowCreate = false } = {}) {
-    if (tables.has(tableId)) {
-      return { ok: true, table: tables.get(tableId), cached: true };
+    const existingTable = tables.get(tableId);
+    if (existingTable && !needsPersistedBootstrap(existingTable)) {
+      return { ok: true, table: existingTable, cached: true };
     }
 
     if (pendingBootstrapByTableId.has(tableId)) {
@@ -171,6 +265,9 @@ export function createTableManager({
 
     const bootstrapPromise = (async () => {
       if (typeof tableBootstrapLoader !== "function") {
+        if (existingTable) {
+          return { ok: true, table: existingTable, cached: true };
+        }
         if (!allowCreate) {
           return {
             ok: false,
@@ -193,8 +290,22 @@ export function createTableManager({
 
       const loadedTable = loaded.table;
       loadedTable.tableStatus = normalizeTableStatus(loadedTable.tableStatus);
+      loadedTable.tableMeta = normalizeTableMeta(loadedTable.tableMeta, loadedTable?.coreState?.maxSeats || maxSeats);
       const loadedVersion = Number(loadedTable?.coreState?.version);
       loadedTable.persistedStateVersion = Number.isInteger(loadedVersion) && loadedVersion >= 0 ? loadedVersion : 0;
+      const currentTable = tables.get(tableId);
+      if (needsPersistedBootstrap(currentTable)) {
+        const restored = restoreTableFromPersisted(tableId, loadedTable);
+        if (!restored?.ok) {
+          return {
+            ok: false,
+            code: restored?.reason || "invalid_restored_table",
+            message: restored?.reason || "invalid_restored_table"
+          };
+        }
+        return { ok: true, table: tables.get(tableId), cached: false };
+      }
+      loadedTable.pendingPersistedBootstrap = false;
       tables.set(tableId, loadedTable);
       return { ok: true, table: loadedTable, cached: false };
     })();
@@ -277,8 +388,12 @@ export function createTableManager({
       return { ok: false, code: "table_missing", bootstrap: "table_missing" };
     }
 
-    const result = bootstrapCoreStateHand({ tableId, coreState: table.coreState, nowMs: resolveNowMs({ nowMs }) });
+    const resolvedNowMs = resolveNowMs({ nowMs });
+    const result = bootstrapCoreStateHand({ tableId, coreState: table.coreState, nowMs: resolvedNowMs });
     table.coreState = result.coreState;
+    if (result.changed) {
+      touchTableActivity(table, resolvedNowMs);
+    }
 
     return {
       ok: result.ok,
@@ -300,6 +415,7 @@ export function createTableManager({
       return asReplayedResult(table.actionResultsByRequestId.get(replayKey));
     }
 
+    const resolvedNowMs = resolveNowMs({ nowMs });
     const applied = applyCoreStateAction({
       tableId,
       coreState: table.coreState,
@@ -308,7 +424,7 @@ export function createTableManager({
       action,
       amount,
       nowIso,
-      nowMs: resolveNowMs({ nowMs })
+      nowMs: resolvedNowMs
     });
 
     if (!applied.accepted) {
@@ -318,6 +434,7 @@ export function createTableManager({
     }
 
     table.coreState = applied.coreState;
+    touchTableActivity(table, resolvedNowMs);
 
     const accepted = {
       ok: true,
@@ -404,6 +521,7 @@ export function createTableManager({
     }
 
     table.coreState = timeoutApplied.coreState;
+    touchTableActivity(table, nowMs);
     rememberActionResult(table, requestId, {
       ok: true,
       accepted: true,
@@ -468,6 +586,7 @@ export function createTableManager({
       version: nextVersion,
       pokerState: stampTurnDeadline(nextHandState, resolveNowMs({ nowMs }))
     };
+    touchTableActivity(table, nowMs);
 
     return {
       ok: true,
@@ -589,6 +708,7 @@ export function createTableManager({
         table.subscribers.add(ws);
         conn.joinedTableId = tableId;
         conn.subscribedTableId = tableId;
+        touchTableActivity(table, nowTs);
         return {
           ok: true,
           changed,
@@ -632,6 +752,7 @@ export function createTableManager({
     table.subscribers.add(ws);
     conn.joinedTableId = (isAuthoritativeMember || shouldMutateMembership) ? tableId : null;
     conn.subscribedTableId = tableId;
+    touchTableActivity(table, nowTs);
 
     return {
       ok: true,
@@ -716,6 +837,9 @@ export function createTableManager({
       table.coreState = leaveResult.state;
       effects = leaveResult.effects;
       changed = leaveResult.effects.some((effect) => effect.type === "member_left");
+      if (changed) {
+        touchTableActivity(table);
+      }
 
       const stillMember = table.coreState.members.some((member) => member.userId === userId);
       if (!stillMember) {
@@ -772,6 +896,75 @@ export function createTableManager({
       const seatUserId = typeof seatEntry?.userId === "string" ? seatEntry.userId.trim() : "";
       return seatUserId === normalizedUserId;
     });
+  }
+
+  function preserveAuthoritativeRuntimePrivateState({ currentPokerState, authoritativePokerState }) {
+    const currentState = currentPokerState && typeof currentPokerState === "object" && !Array.isArray(currentPokerState)
+      ? currentPokerState
+      : null;
+    const nextState = authoritativePokerState && typeof authoritativePokerState === "object" && !Array.isArray(authoritativePokerState)
+      ? authoritativePokerState
+      : null;
+    if (!currentState || !nextState) {
+      return nextState;
+    }
+
+    const currentHandId = typeof currentState.handId === "string" ? currentState.handId.trim() : "";
+    const nextHandId = typeof nextState.handId === "string" ? nextState.handId.trim() : "";
+    if (!currentHandId || currentHandId !== nextHandId) {
+      return nextState;
+    }
+
+    const derivedRuntimeHandState = deriveDeterministicRuntimeHandState(nextState);
+    if (derivedRuntimeHandState) {
+      return {
+        ...nextState,
+        ...derivedRuntimeHandState
+      };
+    }
+
+    const leftTableByUserId = nextState.leftTableByUserId && typeof nextState.leftTableByUserId === "object" && !Array.isArray(nextState.leftTableByUserId)
+      ? nextState.leftTableByUserId
+      : {};
+    const sitOutByUserId = nextState.sitOutByUserId && typeof nextState.sitOutByUserId === "object" && !Array.isArray(nextState.sitOutByUserId)
+      ? nextState.sitOutByUserId
+      : {};
+    const pendingAutoSitOutByUserId =
+      nextState.pendingAutoSitOutByUserId && typeof nextState.pendingAutoSitOutByUserId === "object" && !Array.isArray(nextState.pendingAutoSitOutByUserId)
+        ? nextState.pendingAutoSitOutByUserId
+        : {};
+
+    const nextHoleCardsByUserId =
+      nextState.holeCardsByUserId && typeof nextState.holeCardsByUserId === "object" && !Array.isArray(nextState.holeCardsByUserId)
+        ? { ...nextState.holeCardsByUserId }
+        : {};
+    const currentHoleCardsByUserId =
+      currentState.holeCardsByUserId && typeof currentState.holeCardsByUserId === "object" && !Array.isArray(currentState.holeCardsByUserId)
+        ? currentState.holeCardsByUserId
+        : {};
+    for (const [candidateUserId, cards] of Object.entries(currentHoleCardsByUserId)) {
+      if (leftTableByUserId?.[candidateUserId] || sitOutByUserId?.[candidateUserId] || pendingAutoSitOutByUserId?.[candidateUserId]) {
+        continue;
+      }
+      if (Array.isArray(nextHoleCardsByUserId[candidateUserId]) && nextHoleCardsByUserId[candidateUserId].length === 2) {
+        continue;
+      }
+      if (!Array.isArray(cards) || cards.length !== 2) {
+        continue;
+      }
+      nextHoleCardsByUserId[candidateUserId] = cards.slice();
+    }
+
+    return {
+      ...nextState,
+      ...(Object.keys(nextHoleCardsByUserId).length > 0 ? { holeCardsByUserId: nextHoleCardsByUserId } : {}),
+      ...(!Array.isArray(nextState.deck) && Array.isArray(currentState.deck) ? { deck: currentState.deck.slice() } : {}),
+      ...((typeof nextState.handSeed !== "string" || !nextState.handSeed.trim())
+        && typeof currentState.handSeed === "string"
+        && currentState.handSeed.trim()
+        ? { handSeed: currentState.handSeed }
+        : {})
+    };
   }
 
   function buildAuthoritativeLeaveRestore({ tableId, userId, stateVersion = null, pokerState = null }) {
@@ -875,7 +1068,10 @@ export function createTableManager({
           seats: nextSeats,
           seatDetailsByUserId: nextSeatDetails,
           publicStacks: nextPublicStacks,
-          pokerState: { ...normalizedState }
+          pokerState: preserveAuthoritativeRuntimePrivateState({
+            currentPokerState: table.coreState?.pokerState,
+            authoritativePokerState: { ...normalizedState }
+          })
         },
         presenceByUserId: nextPresenceByUserId
       }
@@ -923,6 +1119,7 @@ export function createTableManager({
     table.coreState = restored.restoredTable.coreState;
     table.tableStatus = restored.restoredTable.tableStatus;
     table.presenceByUserId = restored.restoredTable.presenceByUserId;
+    touchTableActivity(table);
 
     table.subscribers.delete(ws);
     if (conn.joinedTableId === resolvedTableId) {
@@ -998,6 +1195,9 @@ export function createTableManager({
               table.coreState = leaveResult.state;
               table.presenceByUserId.delete(userId);
               membershipChanged = leaveResult.effects.some((effect) => effect.type === "member_left");
+              if (membershipChanged) {
+                touchTableActivity(table, nowTs);
+              }
             }
           } else if (member.connected) {
             markDisconnected(member, nowTs);
@@ -1116,9 +1316,14 @@ export function createTableManager({
 
     table.coreState = restoredCoreState;
     table.tableStatus = normalizeTableStatus(restoredTable?.tableStatus);
+    table.tableMeta = normalizeTableMeta(restoredTable?.tableMeta ?? table.tableMeta, restoredCoreState.maxSeats, {
+      defaultCreatedAtMs: table?.tableMeta?.createdAtMs ?? Date.now(),
+      defaultLastActivityAtMs: table?.tableMeta?.lastActivityAtMs ?? Date.now()
+    });
     table.persistedStateVersion = Number.isInteger(restoredCoreState.version) && restoredCoreState.version >= 0
       ? restoredCoreState.version
       : table.persistedStateVersion;
+    table.pendingPersistedBootstrap = false;
     table.presenceByUserId = nextPresenceByUserId;
     table.actionResultsByRequestId.clear();
     return { ok: true };
@@ -1208,6 +1413,18 @@ export function createTableManager({
     return sockets.sort((a, b) => getOrderKey(a).localeCompare(getOrderKey(b)));
   }
 
+  function listTableIds() {
+    return [...tables.keys()].sort((left, right) => left.localeCompare(right));
+  }
+
+  function tableMeta(tableId) {
+    const table = tables.get(tableId);
+    if (!table) {
+      return null;
+    }
+    return normalizeTableMeta(table.tableMeta, table?.coreState?.maxSeats || maxSeats);
+  }
+
   function resolveImplicitLeaveTableId({ ws, userId }) {
     const conn = connStateBySocket.get(ws);
     if (conn?.joinedTableId) {
@@ -1247,6 +1464,9 @@ export function createTableManager({
     cleanupConnection,
     orderedSubscribers,
     orderedConnectionsForTable,
+    listTableIds,
+    tableMeta,
+    materializeLobbyTable,
     resolveImplicitLeaveTableId,
     sweepExpiredPresence,
     persistedPokerState,

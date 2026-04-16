@@ -28,6 +28,7 @@ import { handleLeaveCommand } from "./poker/handlers/leave.mjs";
 import { createTableCommandQueue } from "./poker/runtime/table-command-queue.mjs";
 import { recoverFromPersistConflict } from "./poker/runtime/persist-conflict-recovery.mjs";
 import { resolveSettledRevealDueAt } from "./poker/runtime/settled-reveal-timing.mjs";
+import { parseStakes } from "../shared/poker-domain/bots.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const PROTECTED_MESSAGE_TYPES = new Set([
@@ -36,6 +37,7 @@ const PROTECTED_MESSAGE_TYPES = new Set([
   "leave",
   "table_join",
   "table_leave",
+  "lobby_subscribe",
   "table_state_sub",
   "table_snapshot",
   "act",
@@ -44,7 +46,7 @@ const PROTECTED_MESSAGE_TYPES = new Set([
   "resume",
   "ack"
 ]);
-const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "table_state_sub", "table_snapshot", "act", "start_hand", "resync", "resume"]);
+const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "lobby_subscribe", "table_state_sub", "table_snapshot", "act", "start_hand", "resync", "resume"]);
 const TABLE_SNAPSHOT_KNOWN_FAILURE_CODES = new Set([
   "invalid_table_id",
   "table_not_found",
@@ -53,6 +55,8 @@ const TABLE_SNAPSHOT_KNOWN_FAILURE_CODES = new Set([
   "contract_mismatch_empty_legal_actions"
 ]);
 const SESSION_REBOUND_CLOSE_CODE = 4001;
+const LIVE_HAND_PHASES = new Set(["POSTING_BLINDS", "PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"]);
+const DEFAULT_EMPTY_JOINABLE_GRACE_MS = 60_000;
 
 function resolvePresenceTtlMs(rawValue) {
   const parsed = Number(rawValue);
@@ -60,6 +64,13 @@ function resolvePresenceTtlMs(rawValue) {
     return 10_000;
   }
   return parsed;
+}
+
+function isLiveHandPhase(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
+  return LIVE_HAND_PHASES.has(value.trim().toUpperCase());
 }
 
 
@@ -78,6 +89,14 @@ function resolveMaxSeats(rawValue) {
   }
   if (parsed > 10) {
     return 10;
+  }
+  return parsed;
+}
+
+function resolveLobbyMaterializeMaxPlayers(rawValue) {
+  const parsed = Number(rawValue);
+  if (!Number.isInteger(parsed) || parsed < 2 || parsed > 10) {
+    return null;
   }
   return parsed;
 }
@@ -102,6 +121,14 @@ function resolveSettledRevealMs(rawValue) {
   const parsed = Number(rawValue);
   if (!Number.isFinite(parsed) || parsed < 0) {
     return 4_000;
+  }
+  return Math.trunc(parsed);
+}
+
+function resolveEmptyJoinableGraceMs(rawValue) {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return DEFAULT_EMPTY_JOINABLE_GRACE_MS;
   }
   return Math.trunc(parsed);
 }
@@ -173,6 +200,10 @@ const streamLog = createStreamLog({ cap: Number(process.env.WS_STREAM_REPLAY_CAP
 const tableSnapshotLoader = createTableSnapshotLoader({ env: process.env });
 const persistedStateWriter = persistedStateWriteEnabled ? createPersistedStateWriter({ env: process.env, klog: klogSafe }) : null;
 const lastSnapshotBySessionAndTable = new Map();
+const lobbySubscribers = new Set();
+const activeLobbyTablesById = new Map();
+const lobbyEmptyJoinableGraceMs = resolveEmptyJoinableGraceMs(process.env.POKER_TABLE_CLOSE_GRACE_MS);
+const internalRuntimeToken = typeof process.env.POKER_WS_INTERNAL_TOKEN === "string" ? process.env.POKER_WS_INTERNAL_TOKEN.trim() : "";
 
 function snapshotCacheKey(sessionId, tableId) {
   return `${sessionId}:${tableId}`;
@@ -607,6 +638,142 @@ function recordStatefulFrame({ ws, connState, tableId, frame }) {
   return replayFrame;
 }
 
+function normalizeLobbyHandStatus(value) {
+  if (typeof value !== "string") {
+    return "LOBBY";
+  }
+  const normalized = value.trim().toUpperCase();
+  return normalized || "LOBBY";
+}
+
+function hasVisibleHumanLobbySeat(seats) {
+  if (!Array.isArray(seats)) {
+    return false;
+  }
+  return seats.some((seat) => (
+    seat?.isBot !== true
+    && (seat?.status === "ACTIVE" || seat?.status === "WAITING_NEXT_HAND")
+  ));
+}
+
+function isLobbyTableJoinable({ seats, maxPlayers, lastActivityAtMs }) {
+  const seatCount = Array.isArray(seats) ? seats.length : 0;
+  if (!Number.isInteger(maxPlayers) || maxPlayers < 1 || seatCount >= maxPlayers) {
+    return false;
+  }
+  if (seatCount > 0) {
+    return true;
+  }
+  if (!Number.isFinite(lastActivityAtMs)) {
+    return false;
+  }
+  return Date.now() - lastActivityAtMs <= lobbyEmptyJoinableGraceMs;
+}
+
+function buildLobbyTableEntry(tableId) {
+  if (tableManager.isTableClosed(tableId) === true) {
+    return null;
+  }
+  const tableSnapshot = tableManager.tableSnapshot(tableId, null);
+  const tableMeta = tableManager.tableMeta(tableId);
+  const seats = Array.isArray(tableSnapshot?.seats) ? tableSnapshot.seats : [];
+  const handStatus = normalizeLobbyHandStatus(tableSnapshot?.hand?.status);
+  const liveHand = isLiveHandPhase(handStatus);
+  const maxPlayers = Number.isInteger(tableMeta?.maxPlayers)
+    ? tableMeta.maxPlayers
+    : (Number.isInteger(tableSnapshot?.maxSeats) ? tableSnapshot.maxSeats : null);
+  const joinable = isLobbyTableJoinable({
+    seats,
+    maxPlayers,
+    lastActivityAtMs: Number(tableMeta?.lastActivityAtMs)
+  });
+  if (!liveHand && !hasVisibleHumanLobbySeat(seats) && !joinable) {
+    return null;
+  }
+  const humanCount = seats.filter((seat) => seat?.isBot !== true).length;
+  return {
+    id: tableId,
+    tableId,
+    roomId: typeof tableSnapshot?.roomId === "string" && tableSnapshot.roomId ? tableSnapshot.roomId : tableId,
+    stateVersion: Number.isInteger(tableSnapshot?.stateVersion) ? tableSnapshot.stateVersion : 0,
+    status: handStatus,
+    live: liveHand,
+    joinable,
+    stakes: tableMeta?.stakes ?? null,
+    maxPlayers,
+    seatCount: seats.length,
+    humanCount
+  };
+}
+
+function syncLobbyTable(tableId) {
+  const previous = activeLobbyTablesById.get(tableId) ?? null;
+  const next = buildLobbyTableEntry(tableId);
+  const previousJson = previous ? JSON.stringify(previous) : null;
+  const nextJson = next ? JSON.stringify(next) : null;
+  if (nextJson === previousJson) {
+    return false;
+  }
+  if (next) {
+    activeLobbyTablesById.set(tableId, next);
+  } else {
+    activeLobbyTablesById.delete(tableId);
+  }
+  return true;
+}
+
+function syncLobbyRegistry() {
+  let changed = false;
+  const loadedTableIds = new Set(tableManager.listTableIds());
+  for (const tableId of loadedTableIds) {
+    if (syncLobbyTable(tableId)) {
+      changed = true;
+    }
+  }
+  for (const tableId of [...activeLobbyTablesById.keys()]) {
+    if (loadedTableIds.has(tableId)) {
+      continue;
+    }
+    activeLobbyTablesById.delete(tableId);
+    changed = true;
+  }
+  return changed;
+}
+
+function buildLobbySnapshotPayload() {
+  return {
+    tables: [...activeLobbyTablesById.values()].sort((left, right) => left.tableId.localeCompare(right.tableId))
+  };
+}
+
+function sendLobbySnapshot(ws, connState, { requestId = null } = {}) {
+  const frame = {
+    version: "1.0",
+    type: "lobby_snapshot",
+    ts: nowTs(),
+    sessionId: connState.sessionId,
+    payload: buildLobbySnapshotPayload()
+  };
+  if (requestId) {
+    frame.requestId = requestId;
+  }
+  sendFrame(ws, frame);
+}
+
+function maybeBroadcastLobbySnapshot({ force = false } = {}) {
+  const changed = syncLobbyRegistry();
+  if (!force && !changed) {
+    return;
+  }
+  for (const recipient of lobbySubscribers) {
+    const recipientConnState = recipient?.__connState;
+    if (!recipientConnState) {
+      continue;
+    }
+    sendLobbySnapshot(recipient, recipientConnState);
+  }
+}
+
 function buildTableStatePayload({ tableState, tableSnapshot }) {
   const payload = {
     tableId: tableState.tableId,
@@ -798,6 +965,7 @@ function sendGameplaySnapshot(ws, connState, { requestId = null, tableId, snapsh
 }
 
 function broadcastTableState(tableId, { excludeWs = null } = {}) {
+  maybeBroadcastLobbySnapshot();
   maybeScheduleSettledRollover(tableId);
   const tableState = tableManager.tableState(tableId);
   const subscribers = tableManager.orderedSubscribers(tableId, (socket) => socket.__connState?.sessionId ?? "");
@@ -1023,6 +1191,7 @@ function maybeScheduleSettledRollover(tableId) {
 }
 
 function broadcastStateSnapshots(tableId) {
+  maybeBroadcastLobbySnapshot();
   maybeScheduleSettledRollover(tableId);
   const recipients = tableManager.orderedConnectionsForTable(tableId, (socket) => socket.__connState?.sessionId ?? "");
   for (const recipient of recipients) {
@@ -1385,15 +1554,115 @@ async function sweepTurnTimeoutsAndBroadcast() {
   })));
 }
 
-const server = http.createServer((req, res) => {
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      const raw = Buffer.concat(chunks).toString("utf8");
+      if (!raw.trim()) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(raw));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+async function handleInternalLobbyMaterialize(req, res) {
+  if (req.method !== "POST") {
+    res.writeHead(405, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "method_not_allowed" }));
+    return;
+  }
+  if (!internalRuntimeToken) {
+    res.writeHead(503, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "internal_runtime_token_missing" }));
+    return;
+  }
+  const authHeader = typeof req.headers?.authorization === "string" ? req.headers.authorization.trim() : "";
+  if (authHeader !== `Bearer ${internalRuntimeToken}`) {
+    res.writeHead(401, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "unauthorized" }));
+    return;
+  }
+  let payload;
+  try {
+    payload = await readJsonBody(req);
+  } catch {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid_json" }));
+    return;
+  }
+  const tableId = typeof payload?.tableId === "string" ? payload.tableId.trim() : "";
+  if (!tableId) {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid_table_id" }));
+    return;
+  }
+  const maxPlayers = resolveLobbyMaterializeMaxPlayers(payload?.maxPlayers);
+  if (!Number.isInteger(maxPlayers)) {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid_max_players" }));
+    return;
+  }
+  const stakesParsed = parseStakes(payload?.stakes);
+  if (!stakesParsed?.ok) {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid_stakes" }));
+    return;
+  }
+  const materialized = tableManager.materializeLobbyTable({
+    tableId,
+    tableMeta: {
+      maxPlayers,
+      stakes: stakesParsed.value
+    },
+    nowMs: Date.now()
+  });
+  if (!materialized?.ok) {
+    res.writeHead(500, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: materialized?.code || "table_materialize_failed" }));
+    return;
+  }
+  syncLobbyRegistry();
+  maybeBroadcastLobbySnapshot({ force: true });
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify({ ok: true, tableId }));
+}
+
+async function handleHttpRequest(req, res) {
   if (req.url === "/healthz") {
     res.writeHead(200, { "content-type": "text/plain" });
     res.end("ok");
     return;
   }
 
+  if (req.url === "/internal/lobby/materialize-table") {
+    await handleInternalLobbyMaterialize(req, res);
+    return;
+  }
+
   res.writeHead(404);
   res.end();
+}
+
+const server = http.createServer((req, res) => {
+  Promise.resolve(handleHttpRequest(req, res)).catch((error) => {
+    klogSafe("ws_http_request_failed", {
+      url: req?.url || null,
+      message: error?.message || "unknown"
+    });
+    if (!res.headersSent) {
+      res.writeHead(500, { "content-type": "application/json" });
+    }
+    res.end(JSON.stringify({ error: "internal_server_error" }));
+  });
 });
 
 const wss = new WebSocketServer({ server });
@@ -1583,6 +1852,14 @@ wss.on("connection", (ws) => {
     if (frame.type === "protected_echo") {
       const response = handleProtectedEcho({ frame, connState, nowTs });
       sendFrame(ws, response.frame);
+      return;
+    }
+
+    if (frame.type === "lobby_subscribe") {
+      sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
+      lobbySubscribers.add(ws);
+      syncLobbyRegistry();
+      sendLobbySnapshot(ws, connState, { requestId: frame.requestId ?? null });
       return;
     }
 
@@ -1990,6 +2267,7 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("error", (err) => {
+    lobbySubscribers.delete(ws);
     sessionStore.untrackConnection({ ws, userId: connState.session.userId });
     const cleanupUpdates = tableManager.cleanupConnection({
       ws,
@@ -2009,6 +2287,7 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("close", () => {
+    lobbySubscribers.delete(ws);
     sessionStore.untrackConnection({ ws, userId: connState.session.userId });
     const cleanupUpdates = tableManager.cleanupConnection({
       ws,
@@ -2047,6 +2326,16 @@ const zombieTableSweepTimer = setInterval(() => {
 }, Number.isFinite(zombieTableSweepMs) && zombieTableSweepMs > 0 ? zombieTableSweepMs : 30_000);
 zombieTableSweepTimer.unref();
 
-server.listen(PORT, "0.0.0.0", () => {
-  klogSafe("ws_listening", { message: `WS listening on ${PORT}`, port: PORT });
-});
+const lobbyVisibilitySweepMs = resolvePositiveInt(process.env.WS_LOBBY_VISIBILITY_SWEEP_MS, 1_000, { min: 250, max: 60_000 });
+const lobbyVisibilitySweepTimer = setInterval(() => {
+  maybeBroadcastLobbySnapshot();
+}, lobbyVisibilitySweepMs);
+lobbyVisibilitySweepTimer.unref();
+
+async function startServer() {
+  server.listen(PORT, "0.0.0.0", () => {
+    klogSafe("ws_listening", { message: `WS listening on ${PORT}`, port: PORT });
+  });
+}
+
+void startServer();

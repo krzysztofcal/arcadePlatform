@@ -9,6 +9,7 @@ import path from "node:path";
 import net from "node:net";
 import WebSocket from "ws";
 import { makeBotUserId } from "../shared/poker-domain/bots.mjs";
+import { dealHoleCards, deriveDeck, toCardCodes } from "./poker/shared/poker-primitives.mjs";
 import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
 
 function getFreePort() {
@@ -1740,6 +1741,7 @@ test("resume fallback snapshot on settled table still schedules delayed rollover
     const ws2 = await connectClient(port);
     await hello(ws2);
     await auth(ws2, makeHs256Jwt({ secret, sub: "user_resume" }), "auth-settled-r2");
+    const resumeMessages = nextNMessages(ws2, 2, 10000);
     sendFrame(ws2, {
       version: "1.0",
       type: "resume",
@@ -1749,8 +1751,9 @@ test("resume fallback snapshot on settled table still schedules delayed rollover
       payload: { tableId, sessionId: helloAck.payload.sessionId, lastSeq: 0 }
     });
 
-    const resync = await nextMessageOfType(ws2, "resync");
-    const resumedSnapshot = await nextMessageOfType(ws2, "stateSnapshot");
+    const [resync, resumedSnapshot] = await resumeMessages;
+    assert.equal(resync.type, "resync");
+    assert.equal(resumedSnapshot.type, "stateSnapshot");
     assert.equal(resync.payload.mode, "required");
     assert.ok(["SETTLED", "PREFLOP"].includes(resumedSnapshot.payload.public.hand.status));
     if (resumedSnapshot.payload.public.hand.status === "SETTLED") {
@@ -1894,6 +1897,576 @@ function persistedBootstrapFixturesEnv(fixtures) {
 function observeOnlyJoinEnv() {
   return { WS_OBSERVE_ONLY_JOIN: "1" };
 }
+
+async function materializeLobbyTableRuntime({ port, token, tableId, maxPlayers = 6, stakes = { sb: 1, bb: 2 } }) {
+  const response = await fetch(`http://127.0.0.1:${port}/internal/lobby/materialize-table`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ tableId, maxPlayers, stakes })
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, tableId });
+}
+
+test("WS lobby_subscribe includes explicit runtime-materialized joinable tables before any player joins", async () => {
+  const secret = "lobby-joinable-secret";
+  const internalToken = "lobby-internal-token";
+  const lobbyToken = makeHs256Jwt({ secret, sub: "lobby_user" });
+  const tableId = "table_runtime_joinable_recent";
+  const nowIso = new Date().toISOString();
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      POKER_WS_INTERNAL_TOKEN: internalToken,
+      SUPABASE_DB_URL: ""
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    await materializeLobbyTableRuntime({ port, token: internalToken, tableId });
+    const lobby = await connectClient(port);
+    await hello(lobby);
+    assert.equal((await auth(lobby, lobbyToken, "auth-lobby-joinable")).type, "authOk");
+    sendFrame(lobby, {
+      version: "1.0",
+      type: "lobby_subscribe",
+      requestId: "req-lobby-joinable",
+      ts: nowIso,
+      payload: {}
+    });
+    const snapshot = await nextMessageOfType(lobby, "lobby_snapshot");
+    const lobbyTable = snapshot.payload.tables.find((table) => table.tableId === tableId);
+    assert.ok(lobbyTable, "recent joinable table should be visible in the first lobby snapshot");
+    assert.equal(lobbyTable.status, "INIT");
+    assert.equal(lobbyTable.seatCount, 0);
+    assert.equal(lobbyTable.maxPlayers, 6);
+    assert.equal(lobbyTable.joinable, true);
+    assert.deepEqual(lobbyTable.stakes, { sb: 1, bb: 2 });
+    lobby.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("WS lobby removes empty joinable tables after runtime grace expires", async () => {
+  const secret = "lobby-joinable-expiry-secret";
+  const internalToken = "lobby-expiry-internal-token";
+  const lobbyToken = makeHs256Jwt({ secret, sub: "lobby_user" });
+  const tableId = "table_runtime_joinable_expiring";
+  const nowIso = new Date().toISOString();
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      POKER_WS_INTERNAL_TOKEN: internalToken,
+      POKER_TABLE_CLOSE_GRACE_MS: "1200",
+      WS_LOBBY_VISIBILITY_SWEEP_MS: "50",
+      SUPABASE_DB_URL: ""
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    await materializeLobbyTableRuntime({ port, token: internalToken, tableId });
+    const lobby = await connectClient(port);
+    await hello(lobby);
+    assert.equal((await auth(lobby, lobbyToken, "auth-lobby-expiry")).type, "authOk");
+    sendFrame(lobby, {
+      version: "1.0",
+      type: "lobby_subscribe",
+      requestId: "req-lobby-expiry",
+      ts: nowIso,
+      payload: {}
+    });
+    const snapshot = await nextMessageOfType(lobby, "lobby_snapshot");
+    assert.ok(snapshot.payload.tables.some((table) => table.tableId === tableId), "joinable table should be visible before grace expiry");
+
+    const removedSnapshot = await nextMessageMatching(
+      lobby,
+      (frame) => frame?.type === "lobby_snapshot" && Array.isArray(frame?.payload?.tables) && !frame.payload.tables.some((table) => table?.tableId === tableId),
+      6000
+    );
+    assert.ok(Array.isArray(removedSnapshot.payload.tables));
+    lobby.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("WS lobby materialization does not shadow persisted bootstrap on later table_join", async () => {
+  const secret = "lobby-materialized-join-secret";
+  const internalToken = "lobby-materialized-join-internal";
+  const token = makeHs256Jwt({ secret, sub: "user_a" });
+  const tableId = "table_materialized_join";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "active", stakes: '{"sb":1,"bb":2}' },
+      seatRows: [{ user_id: "user_a", seat_no: 3, status: "ACTIVE", is_bot: false }],
+      stateRow: { version: 21, state: { handId: "h21", phase: "PREFLOP", turnUserId: "user_a", holeCardsByUserId: { user_a: ["As", "Kd"] } } }
+    }
+  };
+
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      POKER_WS_INTERNAL_TOKEN: internalToken,
+      SUPABASE_DB_URL: "",
+      ...persistedBootstrapFixturesEnv(fixtures)
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    await materializeLobbyTableRuntime({ port, token: internalToken, tableId });
+
+    const ws = await connectClient(port);
+    await hello(ws);
+    assert.equal((await auth(ws, token)).type, "authOk");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "req-materialized-join", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
+    const joinAck = await nextMessageOfType(ws, "commandResult");
+    assert.equal(joinAck.payload.status, "accepted");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "req-materialized-snap", ts: "2026-02-28T00:00:03Z", payload: { tableId, view: "snapshot" } });
+    const snapshot = await nextMessageOfType(ws, "stateSnapshot");
+    assert.equal(snapshot.payload.table.tableId, tableId);
+    assert.equal(snapshot.payload.stateVersion, 21);
+    assert.equal(snapshot.payload.you.userId, "user_a");
+    assert.equal(snapshot.payload.you.seat, 3);
+    assert.deepEqual(snapshot.payload.private.holeCards, ["As", "Kd"]);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("WS lobby_subscribe publishes runtime-visible tables only and removes them live", async () => {
+  const secret = "lobby-runtime-secret";
+  const lobbyToken = makeHs256Jwt({ secret, sub: "lobby_user" });
+  const playerToken = makeHs256Jwt({ secret, sub: "player_user" });
+  const tableId = "table_runtime_lobby_only";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+      seatRows: [],
+      stateRow: {
+        version: 1,
+        state: {
+          tableId,
+          phase: "LOBBY",
+          seats: [],
+          stacks: {},
+          leftTableByUserId: {},
+          waitingForNextHandByUserId: {}
+        }
+      }
+    }
+  };
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "0",
+      SUPABASE_DB_URL: "",
+      ...persistedBootstrapFixturesEnv(fixtures)
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const lobby = await connectClient(port);
+    await hello(lobby);
+    assert.equal((await auth(lobby, lobbyToken, "auth-lobby-runtime")).type, "authOk");
+    sendFrame(lobby, {
+      version: "1.0",
+      type: "lobby_subscribe",
+      requestId: "req-lobby-subscribe",
+      ts: "2026-02-28T00:00:02Z",
+      payload: {}
+    });
+    const emptySnapshot = await nextMessageOfType(lobby, "lobby_snapshot");
+    assert.deepEqual(emptySnapshot.payload.tables, []);
+
+    const player = await connectClient(port);
+    await hello(player);
+    assert.equal((await auth(player, playerToken, "auth-player-runtime")).type, "authOk");
+    sendFrame(player, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-runtime-join",
+      ts: "2026-02-28T00:00:03Z",
+      payload: { tableId }
+    });
+    const joinAck = await nextCommandResultForRequest(player, "req-runtime-join");
+    assert.equal(joinAck.payload.status, "accepted");
+
+    const visibleSnapshot = await nextMessageMatching(
+      lobby,
+      (frame) => frame?.type === "lobby_snapshot" && frame?.payload?.tables?.some((table) => table?.tableId === tableId),
+      10000
+    );
+    const lobbyTable = visibleSnapshot.payload.tables.find((table) => table.tableId === tableId);
+    assert.ok(lobbyTable, "joined table should appear in runtime lobby snapshot");
+    assert.equal(lobbyTable.status, "LOBBY");
+    assert.equal(lobbyTable.seatCount, 1);
+    assert.equal(lobbyTable.maxPlayers, 6);
+    assert.deepEqual(lobbyTable.stakes, { sb: 1, bb: 2 });
+
+    player.close();
+
+    const removedSnapshot = await nextMessageMatching(
+      lobby,
+      (frame) => frame?.type === "lobby_snapshot" && Array.isArray(frame?.payload?.tables) && frame.payload.tables.length === 0,
+      10000
+    );
+    assert.deepEqual(removedSnapshot.payload.tables, []);
+    lobby.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("table_leave closes live runtime table without showdown errors and removes it from lobby", async () => {
+  const secret = "leave-live-lobby-cleanup-secret";
+  const humanUserId = "leave_live_human";
+  const tableId = "table_leave_live_lobby_cleanup";
+  const handSeed = "seed_leave_live_cleanup";
+  const botSeat2 = makeBotUserId(tableId, 2);
+  const botSeat3 = makeBotUserId(tableId, 3);
+  const dealt = dealHoleCards(deriveDeck(handSeed), [humanUserId, botSeat2, botSeat3]);
+  const turnCommunity = toCardCodes(dealt.deck.slice(0, 4));
+  const livePhases = new Set(["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"]);
+  const { dir, filePath } = await writePersistedFile({
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+        seatRows: [
+          { user_id: humanUserId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 },
+          { user_id: botSeat2, seat_no: 2, status: "ACTIVE", is_bot: true, stack: 100 },
+          { user_id: botSeat3, seat_no: 3, status: "ACTIVE", is_bot: true, stack: 100 }
+        ],
+        stateRow: {
+          version: 12,
+          state: {
+            tableId,
+            roomId: tableId,
+            handId: "hand_leave_live_cleanup",
+            handSeed,
+            phase: "TURN",
+            dealerSeatNo: 1,
+            seats: [
+              { userId: humanUserId, seatNo: 1, status: "ACTIVE" },
+              { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true },
+              { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true }
+            ],
+            handSeats: [
+              { userId: humanUserId, seatNo: 1, status: "ACTIVE" },
+              { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true },
+              { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true }
+            ],
+            stacks: {
+              [humanUserId]: 100,
+              [botSeat2]: 100,
+              [botSeat3]: 100
+            },
+            community: turnCommunity,
+            communityDealt: 4,
+            currentBet: 0,
+            toCallByUserId: {
+              [humanUserId]: 0,
+              [botSeat2]: 0,
+              [botSeat3]: 0
+            },
+            betThisRoundByUserId: {
+              [humanUserId]: 0,
+              [botSeat2]: 0,
+              [botSeat3]: 0
+            },
+            actedThisRoundByUserId: {
+              [humanUserId]: true,
+              [botSeat2]: true,
+              [botSeat3]: false
+            },
+            lastBettingRoundActionByUserId: {
+              [humanUserId]: "check",
+              [botSeat2]: "check",
+              [botSeat3]: null
+            },
+            foldedByUserId: {},
+            leftTableByUserId: {},
+            sitOutByUserId: {},
+            pendingAutoSitOutByUserId: {},
+            allInByUserId: {
+              [humanUserId]: false,
+              [botSeat2]: false,
+              [botSeat3]: false
+            },
+            contributionsByUserId: {
+              [humanUserId]: 10,
+              [botSeat2]: 10,
+              [botSeat3]: 10
+            },
+            turnUserId: botSeat3,
+            turnNo: 1,
+            pot: 30,
+            potTotal: 30,
+            sidePots: []
+          }
+        }
+      }
+    }
+  });
+  const leaveModule = await writeTestModule(`
+import fs from "node:fs/promises";
+
+export async function executePokerLeave({ tableId, userId, includeState = false }) {
+  const raw = await fs.readFile(process.env.WS_PERSISTED_STATE_FILE, "utf8");
+  const doc = JSON.parse(raw || "{}");
+  const table = doc?.tables?.[tableId];
+  if (!table) {
+    return { ok: false, code: "table_not_found" };
+  }
+
+  const seatRows = Array.isArray(table.seatRows) ? table.seatRows : [];
+  const seatRow = seatRows.find((row) => row?.user_id === userId) || null;
+  const seatNo = Number.isInteger(Number(seatRow?.seat_no)) ? Number(seatRow.seat_no) : null;
+  const currentVersion = Number(table?.stateRow?.version || 0);
+  const state = table?.stateRow?.state && typeof table.stateRow.state === "object" && !Array.isArray(table.stateRow.state)
+    ? table.stateRow.state
+    : {};
+
+  table.seatRows = seatRows.map((row) => (
+    row?.user_id === userId
+      ? { ...row, status: "INACTIVE", stack: 0 }
+      : row
+  ));
+
+  const nextStateWithPrivate = {
+    ...state,
+    stacks: { ...(state.stacks || {}) },
+    leftTableByUserId: { ...(state.leftTableByUserId || {}), [userId]: true },
+    foldedByUserId: { ...(state.foldedByUserId || {}), [userId]: true },
+    actedThisRoundByUserId: { ...(state.actedThisRoundByUserId || {}), [userId]: true },
+    lastBettingRoundActionByUserId: { ...(state.lastBettingRoundActionByUserId || {}), [userId]: "fold" }
+  };
+  delete nextStateWithPrivate.stacks[userId];
+
+    const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...publicState } = nextStateWithPrivate;
+
+  table.stateRow = {
+    version: currentVersion + 1,
+    state: publicState
+  };
+
+  await fs.writeFile(process.env.WS_PERSISTED_STATE_FILE, JSON.stringify(doc) + "\\n", "utf8");
+
+  return {
+    ok: true,
+    tableId,
+    cashedOut: 0,
+    seatNo,
+    ...(includeState
+      ? {
+          state: {
+            version: currentVersion + 1,
+            state: publicState
+          },
+          viewState: publicState
+        }
+      : {})
+  };
+}
+`, "leave-live-lobby-cleanup.mjs");
+  const cleanupModule = await writeTestModule(`
+import fs from "node:fs/promises";
+
+export function createInactiveCleanupExecutor({ env }) {
+  return async ({ tableId }) => {
+    const raw = await fs.readFile(env.WS_PERSISTED_STATE_FILE, "utf8");
+    const doc = JSON.parse(raw || "{}");
+    const table = doc?.tables?.[tableId];
+    if (!table) {
+      return { ok: true, changed: false, status: "seat_missing", retryable: false };
+    }
+
+    table.tableRow = { ...(table.tableRow || {}), status: "CLOSED" };
+    table.seatRows = (Array.isArray(table.seatRows) ? table.seatRows : []).map((row) => ({ ...row, status: "INACTIVE", stack: 0 }));
+    const state = table?.stateRow?.state && typeof table.stateRow.state === "object" && !Array.isArray(table.stateRow.state)
+      ? table.stateRow.state
+      : {};
+    table.stateRow = {
+      version: Number(table?.stateRow?.version || 0),
+      state: {
+        ...state,
+        phase: "HAND_DONE",
+        handId: "",
+        handSeed: "",
+        showdown: null,
+        community: [],
+        communityDealt: 0,
+        pot: 0,
+        potTotal: 0,
+        sidePots: [],
+        turnUserId: null,
+        turnStartedAt: null,
+        turnDeadlineAt: null,
+        currentBet: 0,
+        toCallByUserId: {},
+        betThisRoundByUserId: {},
+        actedThisRoundByUserId: {},
+        stacks: {}
+      }
+    };
+
+    await fs.writeFile(env.WS_PERSISTED_STATE_FILE, JSON.stringify(doc) + "\\n", "utf8");
+    return { ok: true, changed: true, status: "cleaned_closed", closed: true, retryable: false };
+  };
+}
+`, "inactive-cleanup-leave-live-lobby.mjs");
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_AUTHORITATIVE_LEAVE_MODULE_PATH: leaveModule.filePath,
+      WS_INACTIVE_CLEANUP_ADAPTER_MODULE_PATH: cleanupModule.filePath,
+      WS_POKER_SETTLED_REVEAL_MS: "80"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const serverLogs = [];
+    child.stdout.on("data", (buf) => {
+      const text = String(buf || "");
+      if (
+        text.includes("showdown_missing_hole_cards")
+        || text.includes("apply_action_failed")
+        || text.includes("ws_bot_autoplay_finish")
+        || text.includes("ws_settled_rollover")
+        || text.includes("showdown_incomplete_community")
+      ) {
+        serverLogs.push(text.trim());
+      }
+    });
+
+    const humanWs = await connectClient(port);
+    await hello(humanWs);
+    await auth(humanWs, makeHs256Jwt({ secret, sub: humanUserId }), "auth-leave-live-human");
+    sendFrame(humanWs, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "sub-leave-live-human",
+      ts: "2026-02-28T00:00:01Z",
+      payload: { tableId, view: "snapshot" }
+    });
+    const baseline = await nextMessageOfType(humanWs, "stateSnapshot");
+    assert.equal(baseline.payload.public.hand.status, "TURN");
+
+    const lobbyWs = await connectClient(port);
+    await hello(lobbyWs);
+    await auth(lobbyWs, makeHs256Jwt({ secret, sub: "leave_live_lobby_user" }), "auth-leave-live-lobby");
+    sendFrame(lobbyWs, {
+      version: "1.0",
+      type: "lobby_subscribe",
+      requestId: "lobby-leave-live",
+      ts: "2026-02-28T00:00:02Z",
+      payload: {}
+    });
+    const initialLobbySnapshot = await nextMessageOfType(lobbyWs, "lobby_snapshot");
+    assert.equal(initialLobbySnapshot.payload.tables.some((table) => table?.tableId === tableId), true);
+
+    sendFrame(humanWs, {
+      version: "1.0",
+      type: "table_leave",
+      requestId: "leave-live-human",
+      ts: "2026-02-28T00:00:03Z",
+      payload: { tableId }
+    });
+    const leaveAck = await nextCommandResultForRequest(humanWs, "leave-live-human");
+    assert.equal(leaveAck.payload.status, "accepted");
+
+    let removedSnapshot = null;
+    const observedLobbySnapshots = [];
+    const removedDeadline = Date.now() + 8000;
+    while (Date.now() < removedDeadline) {
+      const remaining = Math.max(50, removedDeadline - Date.now());
+      const frame = await attemptMessage(lobbyWs, Math.min(remaining, 1000));
+      if (!frame) {
+        continue;
+      }
+      if (frame?.type !== "lobby_snapshot" || !Array.isArray(frame?.payload?.tables)) {
+        continue;
+      }
+      observedLobbySnapshots.push(frame.payload.tables.map((table) => ({
+        tableId: table?.tableId || null,
+        status: table?.status || null,
+        live: table?.live === true,
+        joinable: table?.joinable === true,
+        humanCount: Number(table?.humanCount || 0),
+        seatCount: Number(table?.seatCount || 0)
+      })));
+      if (!frame.payload.tables.some((table) => table?.tableId === tableId)) {
+        removedSnapshot = frame;
+        break;
+      }
+    }
+
+    let finalPersisted = null;
+    const finalDeadline = Date.now() + 8000;
+    while (Date.now() < finalDeadline) {
+      let current;
+      try {
+        current = await readPersistedFile(filePath);
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        continue;
+      }
+      const table = current?.tables?.[tableId];
+      const finalPhase = table?.stateRow?.state?.phase || null;
+      if (table?.tableRow?.status === "CLOSED" && !livePhases.has(finalPhase)) {
+        finalPersisted = current;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    const finalTable = finalPersisted?.tables?.[tableId];
+    assert.ok(
+      removedSnapshot,
+      `lobby table was not removed\nLOBBY:\n${JSON.stringify(observedLobbySnapshots)}\nLOGS:\n${serverLogs.slice(-40).join("\n")}\nFINAL:\n${JSON.stringify(finalTable || null, null, 2)}`
+    );
+    assert.deepEqual(removedSnapshot.payload.tables.some((table) => table?.tableId === tableId), false);
+    assert.ok(finalTable, `missing final persisted table\nLOGS:\n${serverLogs.slice(-20).join("\n")}`);
+    assert.equal(livePhases.has(finalTable.stateRow.state.phase), false);
+    assert.equal(finalTable.tableRow.status, "CLOSED");
+    assert.equal(serverLogs.some((line) => line.includes("showdown_missing_hole_cards")), false, serverLogs.join("\n"));
+    assert.equal(serverLogs.some((line) => line.includes("showdown_incomplete_community")), false, serverLogs.join("\n"));
+    assert.equal(serverLogs.some((line) => line.includes("\"reason\":\"apply_action_failed\"")), false, serverLogs.join("\n"));
+    assert.equal(serverLogs.some((line) => line.includes("ws_bot_autoplay_finish") && line.includes("\"trigger\":\"leave\"")), true, serverLogs.join("\n"));
+
+    humanWs.close();
+    lobbyWs.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(leaveModule.dir, { recursive: true, force: true });
+    await fs.rm(cleanupModule.dir, { recursive: true, force: true });
+  }
+});
 
 test("WS table_join hydrates from persisted bootstrap fixture", async () => {
   const secret = "test-secret";
@@ -2251,6 +2824,7 @@ test("slow bootstrap on one socket does not block another socket", async () => {
     await hello(wsB);
     await auth(wsB, tokenB);
 
+    const joinMessages = nextNMessages(wsA, 2, 3000);
     sendFrame(wsA, { version: "1.0", type: "table_join", requestId: "join-a-slow", ts: "2026-02-28T00:22:00Z", payload: { tableId } });
 
     sendFrame(wsB, {
@@ -2264,8 +2838,9 @@ test("slow bootstrap on one socket does not block another socket", async () => {
     const echoResponse = await nextMessageOfType(wsB, "protectedEchoOk", 2000);
     assert.equal(echoResponse.payload.echo, "B");
 
-    const joinAckA = await nextMessageOfType(wsA, "commandResult", 3000);
-    const joinStateA = await nextMessageOfType(wsA, "table_state", 3000);
+    const [joinAckA, joinStateA] = await joinMessages;
+    assert.equal(joinAckA.type, "commandResult");
+    assert.equal(joinStateA.type, "table_state");
     assert.equal(joinStateA.requestId, "join-a-slow");
     assert.equal(joinAckA.payload.requestId, "join-a-slow");
     assert.equal(joinAckA.payload.status, "accepted");
@@ -4649,14 +5224,15 @@ test("authoritative join missing state row returns protocol-safe state_missing",
 });
 
 
-test("authoritative join with historical non-ACTIVE seat does not rejoin shortcut", async () => {
+test("authoritative join with historical non-ACTIVE seat retries to the next seat", async () => {
   const secret = "auth-join-historical-seat-secret";
   const tableId = "table_auth_join_historical_non_active";
   const store = {
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN" },
-        seatRows: [{ user_id: "historical_user", seat_no: 1, status: "INACTIVE", is_bot: false }]
+        seatRows: [{ user_id: "historical_user", seat_no: 1, status: "INACTIVE", is_bot: false }],
+        stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
       }
     }
   };
@@ -4677,9 +5253,19 @@ test("authoritative join with historical non-ACTIVE seat does not rejoin shortcu
     await auth(ws, makeHs256Jwt({ secret, sub: "historical_user" }), "auth-join-historical");
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-historical", ts: "2026-02-28T05:50:00Z", payload: { tableId, buyIn: 100 } });
-    const error = await nextMessageOfType(ws, "commandResult");
-    assert.equal(error.payload.status, "rejected");
-    assert.equal(error.payload.reason, "seat_taken");
+    const ack = await nextCommandResultForRequest(ws, "join-historical");
+    assert.equal(ack.payload.status, "accepted");
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "join-historical-sub",
+      ts: "2026-02-28T05:50:01Z",
+      payload: { tableId }
+    });
+    const state = await nextMessageOfType(ws, "table_state");
+    assert.deepEqual(state.payload.seats, [
+      { userId: "historical_user", seatNo: 2, status: "ACTIVE" }
+    ]);
     ws.close();
   } finally {
     child.kill("SIGTERM");

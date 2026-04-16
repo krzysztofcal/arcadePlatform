@@ -1900,6 +1900,66 @@ test("bootstraps table from persisted poker state and reuses cache without write
   assert.equal(calls.writes, 0);
 });
 
+test("lobby-materialized stub bootstraps persisted state on first real load", async () => {
+  const calls = { reads: 0 };
+  const tableId = "table_lobby_materialized_stub";
+  const tableManager = createTableManager({
+    tableBootstrapLoader: async ({ tableId: loadedTableId }) => {
+      calls.reads += 1;
+      assert.equal(loadedTableId, tableId);
+      return {
+        ok: true,
+        table: {
+          tableId: loadedTableId,
+          tableStatus: "OPEN",
+          tableMeta: { maxPlayers: 6, stakes: { sb: 1, bb: 2 } },
+          coreState: {
+            roomId: loadedTableId,
+            maxSeats: 6,
+            version: 12,
+            members: [{ userId: "user_a", seat: 3 }],
+            seats: { user_a: 3 },
+            appliedRequestIds: [],
+            pokerState: {
+              handId: "h12",
+              phase: "PREFLOP",
+              turnUserId: "user_a",
+              holeCardsByUserId: { user_a: ["As", "Kd"] }
+            }
+          },
+          presenceByUserId: new Map([["user_a", { userId: "user_a", seat: 3, connected: false, lastSeenAt: null, expiresAt: null }]]),
+          subscribers: new Set(),
+          actionResultsByRequestId: new Map()
+        }
+      };
+    }
+  });
+
+  const materialized = tableManager.materializeLobbyTable({
+    tableId,
+    tableMeta: { maxPlayers: 6, stakes: { sb: 1, bb: 2 } },
+    nowMs: 100
+  });
+  assert.equal(materialized.ok, true);
+  assert.equal(tableManager.tableSnapshot(tableId, "user_a").stateVersion, 0);
+  assert.equal(tableManager.persistedPokerState(tableId).phase, "INIT");
+
+  const ensured = await tableManager.ensureTableLoaded(tableId);
+  assert.equal(ensured.ok, true);
+  assert.equal(ensured.cached, false);
+  assert.equal(tableManager.tableSnapshot(tableId, "user_a").stateVersion, 12);
+  assert.equal(tableManager.persistedPokerState(tableId).phase, "PREFLOP");
+
+  const ws = fakeWs("materialized-persisted-ws");
+  const joined = tableManager.join({ ws, userId: "user_a", tableId, requestId: "join-materialized", nowTs: 10 });
+  assert.equal(joined.ok, true);
+  assert.deepEqual(memberPairs(joined.tableState.members), [["user_a", 3]]);
+
+  const ensuredAgain = await tableManager.ensureTableLoaded(tableId);
+  assert.equal(ensuredAgain.ok, true);
+  assert.equal(calls.reads, 1);
+});
+
 test("bootstrap rejects missing table without creating synthetic room", async () => {
   const tableManager = createTableManager({
     tableBootstrapLoader: async () => ({ ok: false, code: "table_not_found", message: "table_not_found" })

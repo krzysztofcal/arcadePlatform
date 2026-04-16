@@ -1,23 +1,34 @@
 import fs from "node:fs/promises";
+import { writeJsonFileAtomic } from "./persisted-state-file-io.mjs";
 
 function emptyStore() {
   return { tables: {} };
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function readStore(filePath) {
-  try {
-    const raw = await fs.readFile(filePath, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return emptyStore();
-    if (!parsed.tables || typeof parsed.tables !== "object" || Array.isArray(parsed.tables)) return emptyStore();
-    return parsed;
-  } catch {
-    return emptyStore();
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      const raw = await fs.readFile(filePath, "utf8");
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return emptyStore();
+      if (!parsed.tables || typeof parsed.tables !== "object" || Array.isArray(parsed.tables)) return emptyStore();
+      return parsed;
+    } catch {
+      if (attempt >= 4) {
+        return emptyStore();
+      }
+      await sleep(20);
+    }
   }
+  return emptyStore();
 }
 
 async function writeStore(filePath, value) {
-  await fs.writeFile(filePath, `${JSON.stringify(value)}\n`, "utf8");
+  await writeJsonFileAtomic(filePath, value);
 }
 
 export async function loadPersistedTableFromFile({ filePath, tableId }) {

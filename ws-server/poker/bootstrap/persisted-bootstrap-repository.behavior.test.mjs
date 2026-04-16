@@ -30,7 +30,6 @@ test("fixture repository load is deterministic without DB env", async () => {
   });
 });
 
-
 test("db bootstrap module resolves from ws-server runtime boundary", async () => {
   const dbModule = await import("./persisted-bootstrap-db.mjs");
   assert.equal(typeof dbModule.beginSqlWs, "function");

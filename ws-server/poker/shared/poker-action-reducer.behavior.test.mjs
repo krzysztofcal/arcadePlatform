@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { applyAction, applyPreflopAction } from "./poker-action-reducer.mjs";
+import { dealHoleCards, deriveDeck, toCardCodes } from "../shared/poker-primitives.mjs";
 
 function stateFixture(overrides = {}) {
   return {
@@ -172,6 +173,89 @@ test("applyAction RIVER-closing action settles hand with showdown metadata", () 
   const replay = applyAction({ pokerState: riverPending, userId: "u2", action: "CHECK", amount: 0 });
   assert.deepEqual(closed.state.showdown, replay.state.showdown);
   assert.deepEqual(closed.state.handSettlement, replay.state.handSettlement);
+});
+
+test("applyAction repairs missing river community from handSeed before showdown settlement", () => {
+  const handSeed = "ws_seed_table_action_river_repair";
+  const dealt = dealHoleCards(deriveDeck(handSeed), ["u1", "u2"]);
+  const fullCommunity = toCardCodes(dealt.deck.slice(0, 5));
+  const remainingDeck = toCardCodes(dealt.deck.slice(5));
+  const riverPending = stateFixture({
+    handSeed,
+    phase: "RIVER",
+    community: fullCommunity.slice(0, 4),
+    communityDealt: 5,
+    deck: remainingDeck,
+    currentBet: 0,
+    turnUserId: "u2",
+    toCallByUserId: { u1: 0, u2: 0 },
+    betThisRoundByUserId: { u1: 0, u2: 0 },
+    actedThisRoundByUserId: { u1: true, u2: false }
+  });
+
+  const closed = applyAction({ pokerState: riverPending, userId: "u2", action: "CHECK", amount: 0 });
+
+  assert.equal(closed.ok, true);
+  assert.equal(closed.state.phase, "SETTLED");
+  assert.deepEqual(closed.state.community, fullCommunity);
+  assert.equal(closed.state.communityDealt, 5);
+  assert.equal(closed.state.turnUserId, null);
+});
+
+test("applyAction restores missing board cards from handSeed when private deck is absent", () => {
+  const handSeed = "ws_seed_table_action_board_restore";
+  const dealt = dealHoleCards(deriveDeck(handSeed), ["u1", "u2"]);
+  const fullCommunity = toCardCodes(dealt.deck.slice(0, 5));
+  const turnDeck = toCardCodes(dealt.deck.slice(4));
+  const remainingDeck = toCardCodes(dealt.deck.slice(5));
+  const flopPending = stateFixture({
+    handSeed,
+    phase: "FLOP",
+    community: fullCommunity.slice(0, 3),
+    communityDealt: 3,
+    deck: [],
+    currentBet: 0,
+    turnUserId: "u2",
+    toCallByUserId: { u1: 0, u2: 0 },
+    betThisRoundByUserId: { u1: 0, u2: 0 },
+    actedThisRoundByUserId: { u1: true, u2: false }
+  });
+
+  const advancedToTurn = applyAction({ pokerState: flopPending, userId: "u2", action: "CHECK", amount: 0 });
+  assert.equal(advancedToTurn.ok, true);
+  assert.equal(advancedToTurn.state.phase, "TURN");
+  assert.deepEqual(advancedToTurn.state.community, fullCommunity.slice(0, 4));
+  assert.deepEqual(advancedToTurn.state.deck, turnDeck);
+  assert.equal(advancedToTurn.state.communityDealt, 4);
+
+  const turnPending = {
+    ...advancedToTurn.state,
+    currentBet: 0,
+    turnUserId: "u2",
+    toCallByUserId: { u1: 0, u2: 0 },
+    betThisRoundByUserId: { u1: 0, u2: 0 },
+    actedThisRoundByUserId: { u1: true, u2: false }
+  };
+  const advancedToRiver = applyAction({ pokerState: turnPending, userId: "u2", action: "CHECK", amount: 0 });
+  assert.equal(advancedToRiver.ok, true);
+  assert.equal(advancedToRiver.state.phase, "RIVER");
+  assert.deepEqual(advancedToRiver.state.community, fullCommunity);
+  assert.deepEqual(advancedToRiver.state.deck, remainingDeck);
+  assert.equal(advancedToRiver.state.communityDealt, 5);
+
+  const riverPending = {
+    ...advancedToRiver.state,
+    currentBet: 0,
+    turnUserId: "u2",
+    toCallByUserId: { u1: 0, u2: 0 },
+    betThisRoundByUserId: { u1: 0, u2: 0 },
+    actedThisRoundByUserId: { u1: true, u2: false }
+  };
+  const settled = applyAction({ pokerState: riverPending, userId: "u2", action: "CHECK", amount: 0 });
+  assert.equal(settled.ok, true);
+  assert.equal(settled.state.phase, "SETTLED");
+  assert.deepEqual(settled.state.community, fullCommunity);
+  assert.deepEqual(settled.state.deck, remainingDeck);
 });
 
 test("applyAction fold-win awards full pot exactly once and settles", () => {

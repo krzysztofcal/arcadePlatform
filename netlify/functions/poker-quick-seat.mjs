@@ -1,6 +1,7 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { formatStakes, parseStakes } from "./_shared/poker-stakes.mjs";
 import { createPokerTableWithState } from "./_shared/poker-table-init.mjs";
+import { notifyWsLobbyMaterialize } from "./_shared/poker-ws-runtime-notify.mjs";
 
 const DEFAULT_MAX_PLAYERS = 6;
 const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
@@ -54,6 +55,11 @@ const createAndRecommend = async (tx, { userId, maxPlayers, stakesJson }) => {
   return { tableId, seatNo: seatNoUi, strategy: "create" };
 };
 
+const triggerWsLobbyMaterialize = ({ tableId, maxPlayers, stakes, klog }) => {
+  if (typeof tableId !== "string" || !tableId) return;
+  void notifyWsLobbyMaterialize({ tableId, maxPlayers, stakes, klog });
+};
+
 const selectCandidate = async (tx, { stakesJson, maxPlayers, requireHuman }) => {
   return tx.unsafe(
     `
@@ -63,6 +69,21 @@ where t.status = 'OPEN'
   and t.max_players = $1
   and t.stakes = $2::jsonb
   and (select count(*)::int from public.poker_seats s where s.table_id = t.id and s.status = 'ACTIVE') < t.max_players
+  and (
+    exists (
+      select 1
+      from public.poker_seats hs
+      where hs.table_id = t.id
+        and hs.status = 'ACTIVE'
+        and coalesce(hs.is_bot, false) = false
+    )
+    or coalesce((
+      select ps.state ->> 'phase'
+      from public.poker_state ps
+      where ps.table_id = t.id
+      limit 1
+    ), 'INIT') not in ('POSTING_BLINDS', 'PREFLOP', 'FLOP', 'TURN', 'RIVER', 'SHOWDOWN', 'SETTLED', 'HAND_DONE')
+  )
   and ($3::boolean = false or exists (
     select 1
     from public.poker_seats hs
@@ -89,7 +110,7 @@ const recommendSeatAtTable = async (tx, { tableId, userId, maxPlayers, allowCrea
   }
 
   const activeSeatRows = await tx.unsafe(
-    "select seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
+    "select seat_no from public.poker_seats where table_id = $1 order by seat_no asc;",
     [tableId]
   );
   const seatNoDb = pickSeatNo(activeSeatRows, maxPlayers);
@@ -183,6 +204,10 @@ export async function handler(event) {
       klog("poker_quick_seat_selected", { tableId: createdRecommendation.tableId, strategy: "create", maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb });
       return createdRecommendation;
     });
+
+    if (result?.strategy === "create" && typeof result?.tableId === "string" && result.tableId) {
+      triggerWsLobbyMaterialize({ tableId: result.tableId, maxPlayers, stakes: stakesParsed.value, klog });
+    }
 
     klog("poker_quick_seat_ok", { tableId: result.tableId, seatNo: result.seatNo, userId: auth.userId, strategy: result.strategy });
     return {

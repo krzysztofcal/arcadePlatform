@@ -12,7 +12,7 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ mode, queries }) =>
+const makeHandler = ({ mode, queries, notifications = [] }) =>
   loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -49,7 +49,7 @@ const makeHandler = ({ mode, queries }) =>
             return [];
           }
 
-          if (text.includes("where table_id = $1 and status = 'active' order by seat_no asc")) {
+          if (text.includes("where table_id = $1 order by seat_no asc")) {
             if (mode === "prefer_humans") return [{ seat_no: 1 }, { seat_no: 2 }];
             if (mode === "any_open") return [{ seat_no: 1 }];
             return [];
@@ -66,6 +66,10 @@ const makeHandler = ({ mode, queries }) =>
         },
       });
     },
+    notifyWsLobbyMaterialize: async (payload) => {
+      notifications.push(payload);
+      return { ok: true };
+    },
     klog: () => {},
   });
 
@@ -81,7 +85,8 @@ const assertCanonicalLockKey = (queries, expectedKey) => {
 const run = async () => {
   {
     const queries = [];
-    const handler = makeHandler({ mode: "prefer_humans", queries });
+    const notifications = [];
+    const handler = makeHandler({ mode: "prefer_humans", queries, notifications });
     const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -95,18 +100,20 @@ const run = async () => {
     );
     assertCanonicalLockKey(queries, "quickseat:6:1:2");
     assert.ok(
-      queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 and status = 'active' order by seat_no asc")),
-      "quick seat should read active seats to suggest a seat"
+      queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 order by seat_no asc")),
+      "quick seat should read occupied seats to suggest a reusable seat"
     );
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")),
       "quick seat should bump table activity when recommending"
     );
+    assert.equal(notifications.length, 0, "quick seat should not materialize runtime for an existing table recommendation");
   }
 
   {
     const queries = [];
-    const handler = makeHandler({ mode: "any_open", queries });
+    const notifications = [];
+    const handler = makeHandler({ mode: "any_open", queries, notifications });
     const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -116,18 +123,28 @@ const run = async () => {
     assert.ok(body.seatNo >= 1 && body.seatNo <= 6);
     assertCanonicalLockKey(queries, "quickseat:6:1:2");
     assert.ok(
-      queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 and status = 'active' order by seat_no asc")),
-      "quick seat should read active seats before returning a recommendation"
+      queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 order by seat_no asc")),
+      "quick seat should read occupied seats before returning a recommendation"
+    );
+    assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("state ->> 'phase'")),
+      "quick seat should exclude bots-only live-hand tables from generic open-table fallback"
+    );
+    assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("'settled'") && entry.query.toLowerCase().includes("'hand_done'")),
+      "quick seat should also exclude terminal bots-only tables that still expose the previous hand result"
     );
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")),
       "quick seat should bump table activity when recommending"
     );
+    assert.equal(notifications.length, 0, "quick seat should not materialize runtime for an existing open table recommendation");
   }
 
   {
     const queries = [];
-    const handler = makeHandler({ mode: "already_seated", queries });
+    const notifications = [];
+    const handler = makeHandler({ mode: "already_seated", queries, notifications });
     const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -143,11 +160,13 @@ const run = async () => {
       queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")),
       "quick seat should bump table activity when returning existing seat"
     );
+    assert.equal(notifications.length, 0, "quick seat should not materialize runtime when returning an existing seat");
   }
 
   {
     const queries = [];
-    const handler = makeHandler({ mode: "create", queries });
+    const notifications = [];
+    const handler = makeHandler({ mode: "create", queries, notifications });
     const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -176,6 +195,49 @@ const run = async () => {
       !queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_seats")),
       "quick seat should not seat the user directly"
     );
+    assert.equal(notifications.length, 1);
+    assert.equal(notifications[0]?.tableId, "table-new");
+    assert.equal(notifications[0]?.maxPlayers, 6);
+    assert.deepEqual(notifications[0]?.stakes, { sb: 1, bb: 2 });
+  }
+  {
+    const queries = [];
+    let resolveNotify;
+    let notifyCalled = false;
+    const pendingNotify = new Promise((resolve) => {
+      resolveNotify = resolve;
+    });
+    const handler = loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
+      baseHeaders: () => ({}),
+      corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+      extractBearerToken: () => "token",
+      verifySupabaseJwt: async () => ({ valid: true, userId }),
+      beginSql: async (fn) => fn({
+        unsafe: async (query, params) => {
+          queries.push({ query: String(query), params });
+          const text = String(query).toLowerCase();
+          if (text.includes("pg_advisory_xact_lock")) return [];
+          if (text.includes("from public.poker_tables t")) return [];
+          if (text.includes("insert into public.poker_tables")) return [{ id: "table-slow-notify" }];
+          if (text.includes("insert into public.poker_state")) return [];
+          if (text.includes("from public.chips_accounts")) return [{ id: "escrow-1" }];
+          if (text.includes("update public.poker_tables")) return [];
+          return [];
+        }
+      }),
+      notifyWsLobbyMaterialize: async () => {
+        notifyCalled = true;
+        return pendingNotify;
+      },
+      klog: () => {},
+    });
+
+    const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
+    const body = JSON.parse(res.body);
+    assert.equal(res.statusCode, 200);
+    assert.equal(body.tableId, "table-slow-notify");
+    assert.equal(notifyCalled, true, "quick seat should trigger runtime notify");
+    resolveNotify({ ok: true });
   }
   {
     const queries = [];
@@ -204,7 +266,7 @@ const run = async () => {
             }
 
             if (text.includes("where table_id = $1 and user_id = $2 limit 1")) return [];
-            if (text.includes("where table_id = $1 and status = 'active' order by seat_no asc")) return [];
+            if (text.includes("where table_id = $1 order by seat_no asc")) return [];
             if (text.includes("insert into public.poker_tables")) {
               state.created = true;
               return [{ id: "table-created" }];

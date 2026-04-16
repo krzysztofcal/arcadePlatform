@@ -1,7 +1,6 @@
 (function(){
   if (typeof window === 'undefined') return;
 
-  var LIST_URL = '/.netlify/functions/poker-list-tables';
   var CREATE_URL = '/.netlify/functions/poker-create-table';
   var QUICK_SEAT_URL = '/.netlify/functions/poker-quick-seat';
   var WS_JOIN_ENDPOINT = 'ws:join';
@@ -1478,6 +1477,7 @@
     var signInBtn = document.getElementById('pokerSignIn');
 
     var authTimer = null;
+    var lobbyWsClient = null;
 
     function stopAuthWatch(){
       if (authTimer){
@@ -1486,23 +1486,51 @@
       }
     }
 
+    function stopLobbyWs(){
+      if (!lobbyWsClient) return;
+      try {
+        lobbyWsClient.destroy();
+      } catch (_err){}
+      lobbyWsClient = null;
+    }
+
+    function setLobbyLoading(){
+      if (!tableList) return;
+      tableList.innerHTML = '<div class="poker-loading">' + t('loading', 'Loading...') + '</div>';
+    }
+
     function startAuthWatch(){
       if (authTimer) return;
       authTimer = setInterval(function(){
         checkAuth().then(function(authed){
           if (authed){
             stopAuthWatch();
-            loadTables();
+            ensureLobbyWs();
           }
         });
       }, 3000);
     }
 
+    function isLobbyAuthProtocolError(code){
+      var normalized = typeof code === 'string' ? code.trim().toLowerCase() : '';
+      return normalized === 'missing_access_token'
+        || normalized === 'missing_token'
+        || normalized === 'expired'
+        || normalized === 'invalid_signature'
+        || normalized === 'unsupported_alg'
+        || normalized === 'missing_sub'
+        || normalized === 'missing_jwt_secret'
+        || normalized === 'unauthorized'
+        || normalized === 'auth_failed';
+    }
+
     async function checkAuth(){
       var token = await getAccessToken();
       if (!token){
+        stopLobbyWs();
         if (authMsg) authMsg.hidden = false;
         if (lobbyContent) lobbyContent.hidden = true;
+        if (tableList) tableList.innerHTML = '';
         startAuthWatch();
         return false;
       }
@@ -1512,27 +1540,66 @@
       return true;
     }
 
-    async function loadTables(){
-      setError(errorEl, null);
-      if (tableList) tableList.innerHTML = '<div class="poker-loading">' + t('loading', 'Loading...') + '</div>';
-      try {
-        var data = await apiGet(LIST_URL + '?status=OPEN&limit=20');
-        renderTables(data.tables || []);
-      } catch (err){
-        if (isAuthError(err)){
-          handleAuthExpired({
-            authMsg: authMsg,
-            content: lobbyContent,
-            errorEl: errorEl,
-            onAuthExpired: startAuthWatch
-          });
-          if (tableList) tableList.innerHTML = '';
-          return;
-        }
-        klog('poker_lobby_load_error', { error: err.message || err.code });
-        setError(errorEl, err.message || t('pokerErrLoadTables', 'Failed to load tables'));
-        if (tableList) tableList.innerHTML = '';
+    function ensureLobbyWs(){
+      if (lobbyWsClient && lobbyWsClient.isReady()) {
+        return;
       }
+      stopLobbyWs();
+      if (!window.PokerWsClient || typeof window.PokerWsClient.create !== 'function'){
+        setError(errorEl, t('pokerErrLoadTables', 'Failed to load tables'));
+        if (tableList) tableList.innerHTML = '';
+        return;
+      }
+      setError(errorEl, null);
+      setLobbyLoading();
+      lobbyWsClient = window.PokerWsClient.create({
+        mode: 'lobby',
+        getAccessToken: getAccessToken,
+        onLobbySnapshot: function(snapshot){
+          setError(errorEl, null);
+          renderTables(snapshot && snapshot.payload ? snapshot.payload.tables : []);
+        },
+        onStatus: function(status, data){
+          if (status === 'closed'){
+            klog('poker_lobby_ws_closed', { code: data && data.code != null ? data.code : null });
+            lobbyWsClient = null;
+            return;
+          }
+          if (status === 'failed'){
+            klog('poker_lobby_ws_failed', { stage: data && data.stage ? data.stage : null, code: data && data.code ? data.code : null });
+          }
+        },
+        onProtocolError: function(info){
+          var code = info && info.code ? info.code : 'ws_error';
+          if (isLobbyAuthProtocolError(code)){
+            handleAuthExpired({
+              authMsg: authMsg,
+              content: lobbyContent,
+              errorEl: errorEl,
+              stopPolling: stopLobbyWs,
+              onAuthExpired: startAuthWatch
+            });
+            if (tableList) tableList.innerHTML = '';
+            return;
+          }
+          klog('poker_lobby_ws_error', { code: code, detail: info && info.detail ? info.detail : null });
+          setError(errorEl, t('pokerErrLoadTables', 'Failed to load tables'));
+          if (tableList) tableList.innerHTML = '';
+        }
+      });
+      lobbyWsClient.start();
+    }
+
+    function refreshLobby(){
+      checkAuth().then(function(authed){
+        if (!authed) return;
+        setError(errorEl, null);
+        setLobbyLoading();
+        if (lobbyWsClient && lobbyWsClient.isReady()){
+          if (lobbyWsClient.requestLobbySnapshot()) return;
+        }
+        ensureLobbyWs();
+      });
     }
 
     function renderTables(tables){
@@ -1543,6 +1610,7 @@
       }
       tableList.innerHTML = '';
       tables.forEach(function(tbl){
+        var tableId = tbl && typeof tbl.tableId === 'string' ? tbl.tableId : tbl.id;
         var row = document.createElement('div');
         row.className = 'poker-table-row';
         var stakes = tbl.stakes;
@@ -1550,7 +1618,7 @@
         var seatCount = tbl.seatCount != null ? tbl.seatCount : 0;
         var tid = document.createElement('span');
         tid.className = 'tid';
-        tid.textContent = shortId(tbl.id);
+        tid.textContent = shortId(tableId);
         var stakesEl = document.createElement('span');
         stakesEl.className = 'stakes';
         stakesEl.textContent = formatStakesUi(stakes);
@@ -1562,11 +1630,11 @@
         statusEl.textContent = tbl.status || 'OPEN';
         var openBtn = document.createElement('button');
         openBtn.className = 'poker-btn';
-        openBtn.dataset.open = tbl.id;
+        openBtn.dataset.open = tableId;
         openBtn.textContent = t('open', 'Open V2');
         var openClassicBtn = document.createElement('button');
         openClassicBtn.className = 'poker-btn';
-        openClassicBtn.dataset.openClassic = tbl.id;
+        openClassicBtn.dataset.openClassic = tableId;
         openClassicBtn.textContent = t('pokerOpenClassic', 'Open Classic');
         row.appendChild(tid);
         row.appendChild(stakesEl);
@@ -1606,6 +1674,7 @@
             authMsg: authMsg,
             content: lobbyContent,
             errorEl: errorEl,
+            stopPolling: stopLobbyWs,
             onAuthExpired: startAuthWatch
           });
           return;
@@ -1641,6 +1710,7 @@
             authMsg: authMsg,
             content: lobbyContent,
             errorEl: errorEl,
+            stopPolling: stopLobbyWs,
             onAuthExpired: startAuthWatch
           });
           return;
@@ -1663,11 +1733,7 @@
 
     if (refreshBtn){
       refreshBtn.addEventListener('click', function(){
-        checkAuth().then(function(authed){
-          if (authed){
-            loadTables();
-          }
-        });
+        refreshLobby();
       });
     }
     if (quickSeatBtn){
@@ -1684,9 +1750,10 @@
     }
 
     window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-lobby(2026-01-01)
+    window.addEventListener('beforeunload', stopLobbyWs); // xp-lifecycle-allow:poker-lobby-ws(2026-01-01)
 
     checkAuth().then(function(authed){
-      if (authed) loadTables();
+      if (authed) ensureLobbyWs();
     });
   }
 

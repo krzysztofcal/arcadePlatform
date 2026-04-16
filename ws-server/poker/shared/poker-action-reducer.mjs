@@ -1,4 +1,4 @@
-import { computeSharedLegalActions } from "./poker-primitives.mjs";
+import { computeSharedLegalActions, dealHoleCards, deriveDeck, toCardCodes } from "./poker-primitives.mjs";
 import { materializeShowdownAndPayout } from "./settlement/poker-materialize-showdown.mjs";
 import { awardPotsAtShowdown } from "./settlement/poker-payout.mjs";
 import { computeShowdown } from "./settlement/poker-showdown.mjs";
@@ -93,6 +93,35 @@ function seatUserIdsInOrder(state) {
   return orderedSeats(state).map((seat) => seat.userId);
 }
 
+function deriveBoardStateFromHandSeed(state, communityCount) {
+  const handSeed = typeof state?.handSeed === "string" ? state.handSeed.trim() : "";
+  const seatOrder = seatUserIdsInOrder(state);
+  if (!handSeed || seatOrder.length === 0 || !Number.isInteger(communityCount) || communityCount < 0 || communityCount > 5) {
+    return null;
+  }
+  try {
+    const dealt = dealHoleCards(deriveDeck(handSeed), seatOrder);
+    const derivedDeck = toCardCodes(dealt.deck);
+    return {
+      community: derivedDeck.slice(0, communityCount),
+      deck: derivedDeck.slice(communityCount)
+    };
+  } catch {
+    return null;
+  }
+}
+
+function resolveSettlementCommunity(state) {
+  const community = Array.isArray(state?.community) ? state.community.slice() : [];
+  if (community.length === 5) {
+    return community;
+  }
+  const derivedBoardState = deriveBoardStateFromHandSeed(state, 5);
+  return Array.isArray(derivedBoardState?.community) && derivedBoardState.community.length === 5
+    ? derivedBoardState.community
+    : community;
+}
+
 function eligibleUserIdsForSettlement(state) {
   return seatUserIdsInOrder(state).filter((userId) => !state.foldedByUserId?.[userId]);
 }
@@ -102,12 +131,13 @@ function settleHandState(state, nowIso) {
   if (!handId) {
     return state;
   }
+  const settlementCommunity = resolveSettlementCommunity(state);
 
   const materialized = materializeShowdownAndPayout({
     state: {
       ...state,
       pot: Number(state.potTotal ?? state.pot ?? 0),
-      community: (state.community || []).map(cardCodeToCard).filter(Boolean)
+      community: settlementCommunity.map(cardCodeToCard).filter(Boolean)
     },
     seatUserIdsInOrder: seatUserIdsInOrder(state),
     holeCardsByUserId: toShowdownHoleCardsByUserId(state.holeCardsByUserId),
@@ -127,7 +157,8 @@ function settleHandState(state, nowIso) {
     turnUserId: null,
     turnStartedAt: null,
     turnDeadlineAt: null,
-    community: Array.isArray(state.community) ? state.community.slice() : [],
+    community: settlementCommunity,
+    communityDealt: settlementCommunity.length,
     holeCardsByUserId: { ...(state.holeCardsByUserId || {}) },
     deck: Array.isArray(state.deck) ? state.deck.slice() : [],
     potTotal: Number(materialized.nextState.pot ?? state.potTotal ?? 0),
@@ -221,10 +252,28 @@ function revealCommunityCards(state, count) {
   }
   const deck = Array.isArray(state.deck) ? state.deck : [];
   const community = Array.isArray(state.community) ? state.community : [];
-  const dealt = deck.slice(0, normalized);
+  const revealedCount = Number.isInteger(state.communityDealt)
+    ? Math.max(community.length, Math.min(5, state.communityDealt))
+    : community.length;
+  const targetCommunityCount = Math.min(5, revealedCount + normalized);
+  const missingCount = Math.max(0, targetCommunityCount - community.length);
+  const dealt = deck.slice(0, missingCount);
+  if (dealt.length === missingCount) {
+    state.community = community.concat(dealt);
+    state.deck = deck.slice(dealt.length);
+    state.communityDealt = targetCommunityCount;
+    return;
+  }
+  const derivedBoardState = deriveBoardStateFromHandSeed(state, targetCommunityCount);
+  if (Array.isArray(derivedBoardState?.community) && derivedBoardState.community.length === targetCommunityCount) {
+    state.community = derivedBoardState.community;
+    state.deck = Array.isArray(derivedBoardState.deck) ? derivedBoardState.deck : [];
+    state.communityDealt = targetCommunityCount;
+    return;
+  }
   state.community = community.concat(dealt);
   state.deck = deck.slice(dealt.length);
-  state.communityDealt = Number(state.communityDealt ?? community.length) + dealt.length;
+  state.communityDealt = Math.max(revealedCount, state.community.length);
 }
 
 function resetRoundState(state) {

@@ -7,6 +7,7 @@ import {
   buildNextHandStateFromSettled,
   replaceBrokeBotsForNextHand
 } from "./poker-engine.mjs";
+import { dealHoleCards, deriveDeck, toCardCodes } from "../shared/poker-primitives.mjs";
 
 function initialCore() {
   return {
@@ -24,6 +25,10 @@ function initialCore() {
 test("engine terminal action settles hand before explicit rollover", () => {
   let coreState = bootstrapCoreStateHand({ tableId: "table_engine_roll", coreState: initialCore(), nowMs: 1000 }).coreState;
   const oldHandId = coreState.pokerState.handId;
+  const expectedCommunity = toCardCodes(dealHoleCards(
+    deriveDeck(coreState.pokerState.handSeed),
+    coreState.pokerState.seats.map((seat) => seat.userId)
+  ).deck.slice(0, 5));
 
   const folded = applyCoreStateAction({
     tableId: "table_engine_roll",
@@ -39,9 +44,11 @@ test("engine terminal action settles hand before explicit rollover", () => {
   coreState = folded.coreState;
   assert.equal(coreState.pokerState.phase, "SETTLED");
   assert.equal(coreState.pokerState.handId, oldHandId);
-  assert.deepEqual(coreState.pokerState.community, []);
-  assert.equal(coreState.pokerState.communityDealt, 0);
+  assert.deepEqual(coreState.pokerState.community, expectedCommunity);
+  assert.equal(coreState.pokerState.communityDealt, 5);
   assert.equal(coreState.pokerState.turnUserId, null);
+  assert.equal(coreState.pokerState.showdown?.reason, "all_folded");
+  assert.deepEqual(coreState.pokerState.handSettlement?.payouts, { user_b: 3 });
 });
 
 test("fold settlement carryover preserves stack-eligible members and deterministic dealer rotation", () => {

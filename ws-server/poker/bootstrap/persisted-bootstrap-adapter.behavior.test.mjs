@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { adaptPersistedBootstrap } from "./persisted-bootstrap-adapter.mjs";
+import { dealHoleCards, deriveDeck, toCardCodes } from "../shared/poker-primitives.mjs";
 
 test("adapter maps persisted rows into deterministic ws table/core state", () => {
   const result = adaptPersistedBootstrap({
@@ -107,4 +108,57 @@ test("adapter drops stale state seats that are no longer ACTIVE in persisted sea
   assert.deepEqual(result.table.coreState.members, [{ userId: "user_a", seat: 1 }]);
   assert.deepEqual(result.table.coreState.seats, { user_a: 1 });
   assert.deepEqual(result.table.coreState.pokerState.seats, [{ userId: "user_a", seatNo: 1, status: "ACTIVE" }]);
+});
+
+test("adapter rehydrates runtime hand data for retained live-hand leaver during persisted restore", () => {
+  const handSeed = "seed_adapter_restore_turn";
+  const seatOrder = ["user_a", "bot_1", "bot_2"];
+  const dealt = dealHoleCards(deriveDeck(handSeed), seatOrder);
+  const turnCommunity = toCardCodes(dealt.deck.slice(0, 4));
+  const riverDeck = toCardCodes(dealt.deck.slice(4));
+
+  const result = adaptPersistedBootstrap({
+    tableId: "table_live_restore",
+    tableRow: { id: "table_live_restore", max_players: 6, status: "OPEN" },
+    seatRows: [
+      { user_id: "user_a", seat_no: 1, status: "INACTIVE", is_bot: false, stack: 0 },
+      { user_id: "bot_1", seat_no: 2, status: "ACTIVE", is_bot: true, stack: 101 },
+      { user_id: "bot_2", seat_no: 3, status: "ACTIVE", is_bot: true, stack: 99 }
+    ],
+    stateRow: {
+      version: 18,
+      state: {
+        tableId: "table_live_restore",
+        handId: "hand_live_restore",
+        handSeed,
+        phase: "TURN",
+        community: turnCommunity,
+        communityDealt: 4,
+        leftTableByUserId: { user_a: true },
+        turnUserId: "bot_2",
+        seats: [
+          { userId: "user_a", seatNo: 1, status: "ACTIVE" },
+          { userId: "bot_1", seatNo: 2, status: "ACTIVE", isBot: true },
+          { userId: "bot_2", seatNo: 3, status: "ACTIVE", isBot: true }
+        ],
+        stacks: { bot_1: 101, bot_2: 99 }
+      }
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.table.coreState.members, [
+    { userId: "bot_1", seat: 2 },
+    { userId: "bot_2", seat: 3 }
+  ]);
+  assert.deepEqual(result.table.coreState.pokerState.seats, [
+    { userId: "user_a", seatNo: 1, status: "ACTIVE" },
+    { userId: "bot_1", seatNo: 2, status: "ACTIVE", isBot: true },
+    { userId: "bot_2", seatNo: 3, status: "ACTIVE", isBot: true }
+  ]);
+  assert.deepEqual(result.table.coreState.pokerState.community, turnCommunity);
+  assert.deepEqual(result.table.coreState.pokerState.deck, riverDeck);
+  assert.deepEqual(result.table.coreState.pokerState.holeCardsByUserId.user_a, toCardCodes(dealt.holeCardsByUserId.user_a));
+  assert.deepEqual(result.table.coreState.pokerState.holeCardsByUserId.bot_1, toCardCodes(dealt.holeCardsByUserId.bot_1));
+  assert.deepEqual(result.table.coreState.pokerState.holeCardsByUserId.bot_2, toCardCodes(dealt.holeCardsByUserId.bot_2));
 });

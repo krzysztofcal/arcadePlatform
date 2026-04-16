@@ -1,16 +1,36 @@
 import fs from "node:fs/promises";
 import postgres from "postgres";
+import { writeJsonFileAtomic } from "../persistence/persisted-state-file-io.mjs";
 
 const clientsByDbUrl = new Map();
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function readFileStoreDoc(filePath) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      const raw = await fs.readFile(filePath, "utf8");
+      return JSON.parse(raw || "{}");
+    } catch (error) {
+      if (attempt >= 4) {
+        throw error;
+      }
+      await sleep(20);
+    }
+  }
+  return {};
+}
 
 async function beginSqlFileStore(fn, { env = process.env } = {}) {
   const filePath = typeof env?.WS_PERSISTED_STATE_FILE === "string" ? env.WS_PERSISTED_STATE_FILE.trim() : "";
   if (!filePath) {
     throw new Error("Persisted state file not configured (WS_PERSISTED_STATE_FILE missing)");
   }
-  const raw = await fs.readFile(filePath, "utf8");
-  const doc = JSON.parse(raw || "{}");
+  const doc = await readFileStoreDoc(filePath);
   const tables = doc && typeof doc === "object" && doc.tables && typeof doc.tables === "object" ? doc.tables : {};
+  let dirty = false;
 
   const tx = {
     unsafe: async (query, params = []) => {
@@ -77,6 +97,7 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
           stack: isBot ? Number(params?.[4]) || 0 : 0
         });
         table.seatRows = seatRows;
+        dirty = true;
         return [{ seat_no: seatNo }];
       }
 
@@ -87,11 +108,17 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
 
       if (sql.includes("update public.poker_state") && sql.includes("state")) {
         if (!table?.stateRow) throw Object.assign(new Error("state_missing"), { code: "state_missing" });
-        table.stateRow.state = params?.[1];
         const currentVersion = Number(table.stateRow.version);
+        const expectsVersionMatch = sql.includes("where table_id = $1 and version = $2");
+        const expectedVersion = expectsVersionMatch ? Number(params?.[1]) : null;
+        if (expectsVersionMatch && (!Number.isInteger(expectedVersion) || currentVersion !== expectedVersion)) {
+          return [];
+        }
+        table.stateRow.state = expectsVersionMatch ? params?.[2] : params?.[1];
         if (sql.includes("version = version + 1")) {
           table.stateRow.version = Number.isInteger(currentVersion) ? currentVersion + 1 : 1;
         }
+        dirty = true;
         return [{ version: table.stateRow.version }];
       }
 
@@ -101,26 +128,40 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
         const seatNo = Number(params?.[2]);
         const stack = Number(params?.[3]);
         const row = (table?.seatRows || []).find((r) => r?.user_id === userId && Number(r?.seat_no) === seatNo);
-        if (row) row.stack = stack;
+        if (row) {
+          row.stack = stack;
+          dirty = true;
+        }
         return [];
       }
 
       if (sql.includes("delete from public.poker_seats")) {
         const userId = params?.[1];
         const seatNo = Number(params?.[2]);
-        table.seatRows = (table?.seatRows || []).filter((row) => !(row?.user_id === userId && Number(row?.seat_no) === seatNo));
+        const seatRows = Array.isArray(table?.seatRows) ? table.seatRows : [];
+        const nextSeatRows = seatRows.filter((row) => !(row?.user_id === userId && Number(row?.seat_no) === seatNo));
+        if (table && nextSeatRows.length !== seatRows.length) {
+          table.seatRows = nextSeatRows;
+          dirty = true;
+        }
         return [];
       }
 
       if (sql.includes("update public.poker_tables set last_activity_at")) {
-        if (table) table.lastActivityAt = new Date().toISOString();
+        if (table) {
+          table.lastActivityAt = new Date().toISOString();
+          dirty = true;
+        }
         return [];
       }
 
       if (sql.includes("update public.poker_seats set status = 'active'")) {
         const userId = params?.[1];
         const row = (table?.seatRows || []).find((r) => r?.user_id === userId);
-        if (row) row.status = "ACTIVE";
+        if (row && row.status !== "ACTIVE") {
+          row.status = "ACTIVE";
+          dirty = true;
+        }
         return [];
       }
 
@@ -129,8 +170,9 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
   };
 
   const result = await fn(tx);
-  await fs.writeFile(filePath, `${JSON.stringify(doc)}
-`, "utf8");
+  if (dirty) {
+    await writeJsonFileAtomic(filePath, doc);
+  }
   return result;
 }
 
