@@ -63,7 +63,7 @@ function resolveLiveHandLogicalStaleReason({ state, nowMs, staleAfterMs }) {
   const turnUserId = typeof state?.turnUserId === "string" && state.turnUserId.trim() ? state.turnUserId.trim() : null;
   if (!turnUserId) return "missing_turn_user";
   const turnDeadlineAt = Number(state?.turnDeadlineAt);
-  if (!Number.isFinite(turnDeadlineAt) || turnDeadlineAt <= 0) return "missing_turn_deadline";
+  if (!Number.isFinite(turnDeadlineAt) || turnDeadlineAt <= 0) return null;
   if (nowMs >= turnDeadlineAt + staleAfterMs) return "turn_deadline_expired";
   return null;
 }

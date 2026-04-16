@@ -184,6 +184,32 @@ test("inactive cleanup system sweep keeps bots-only live table open until hand c
   assert.deepEqual(harness.tableState.stateRow.state.stacks, { bot_1: 200, human_inactive: 10 });
 });
 
+test("inactive cleanup system sweep keeps fresh bots-only live table open when deadline is missing", async () => {
+  const harness = createCleanupHarness({
+    seatRows: [
+      { user_id: "bot_1", status: "ACTIVE", is_bot: true, stack: 200 },
+      { user_id: "human_inactive", status: "INACTIVE", is_bot: false, stack: 10 }
+    ],
+    state: {
+      phase: "FLOP",
+      handId: "h-missing-deadline",
+      stacks: { bot_1: 200, human_inactive: 10 },
+      turnUserId: "bot_1",
+      turnDeadlineAt: null
+    },
+    lastActivityAt: "2026-03-01T00:01:55.000Z"
+  });
+
+  const result = await harness.runSystemSweep();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.closed, false);
+  assert.equal(result.status, "live_hand_preserved");
+  assert.equal(harness.tableState.tableStatus, "OPEN");
+  assert.equal(harness.tableState.stateRow.state.phase, "FLOP");
+  assert.equal(harness.tableState.stateRow.state.turnUserId, "bot_1");
+});
+
 test("inactive cleanup system sweep closes stale bots-only live table after activity timeout", async () => {
   const harness = createCleanupHarness({
     seatRows: [

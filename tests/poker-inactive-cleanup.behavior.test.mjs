@@ -181,6 +181,40 @@ test('bots-only live hand stays open until the hand is finished', async () => {
   assert.equal(stateUpdate.value.turnUserId, 'bot-1');
 });
 
+test('fresh bots-only live hand without turn deadline stays open', async () => {
+  const ctx = makeTx({
+    seat: null,
+    state: {
+      phase: 'TURN',
+      handId: 'hand-live-no-deadline',
+      turnUserId: 'bot-1',
+      turnDeadlineAt: null,
+      stacks: { 'bot-1': 50, 'user-ghost': 20 }
+    },
+    allSeats: [
+      { user_id: 'user-ghost', status: 'INACTIVE', is_bot: false, stack: 0 },
+      { user_id: 'bot-1', status: 'ACTIVE', is_bot: true, stack: 50 }
+    ],
+    tableStatus: 'OPEN',
+    lastActivityAt: new Date(Date.now()).toISOString()
+  });
+
+  const result = await executeInactiveCleanup({
+    tableId: 'table-live-no-deadline',
+    userId: null,
+    requestId: 'req-live-no-deadline',
+    env: {},
+    beginSql: async (fn) => fn(ctx.tx),
+    postTransaction: async (payload) => ctx.ledgerCalls.push(payload),
+    isHoleCardsTableMissing: () => false
+  });
+
+  assert.equal(result.status, 'live_hand_preserved');
+  assert.equal(result.closed, false);
+  const closedUpdate = ctx.updates.find((u) => String(u.query).includes("set status = 'CLOSED'"));
+  assert.equal(closedUpdate, undefined);
+});
+
 test('terminal bots-only table stays open when a human observer is still connected', async () => {
   const ctx = makeTx({
     seat: null,
