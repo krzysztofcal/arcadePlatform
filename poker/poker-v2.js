@@ -95,6 +95,8 @@
   var shouldAutoJoin = false;
   var autoJoinAttempted = false;
   var bootReady = false;
+  var queuedPreaction = null;
+  var queuedPreactionInFlight = false;
   var stickyWinnerReveal = {
     handId: null,
     visibleUntilMs: 0,
@@ -858,6 +860,32 @@
     return !!(state.currentUserId && state.turnUserId && state.currentUserId === state.turnUserId);
   }
 
+  function hasActiveHand(){
+    return !!(state.handId && state.phase !== 'LOBBY' && state.phase !== 'SETTLED');
+  }
+
+  function isFoldAvailable(){
+    return !!(isWsReady() && deriveCurrentSeat() && hasActiveHand() && !isCurrentUserFolded());
+  }
+
+  function resolveProjectedAllowedActions(){
+    if (!isFoldAvailable()) return [];
+    var allowed = ['FOLD'];
+    var constraints = state.actionConstraints || {};
+    var stackAmount = resolveStack(state.currentUserId);
+    var toCall = Number.isFinite(constraints.toCall) ? Math.max(0, Math.trunc(constraints.toCall)) : 0;
+    if (toCall > 0) allowed.push('CALL');
+    else allowed.push('CHECK');
+    if (toCall > 0){
+      if (Number.isFinite(constraints.maxRaiseTo) || Number.isFinite(constraints.minRaiseTo) || (Number.isFinite(stackAmount) && stackAmount > toCall)){
+        allowed.push('RAISE');
+      }
+    } else if ((Number.isFinite(constraints.maxBetAmount) && Math.max(0, Math.trunc(constraints.maxBetAmount)) > 0) || (Number.isFinite(stackAmount) && stackAmount > 0)){
+      allowed.push('BET');
+    }
+    return allowed;
+  }
+
   function createCard(cardData, opts){
     var card = document.createElement('div');
     var normalized = normalizeCard(cardData);
@@ -1314,16 +1342,149 @@
     return null;
   }
 
+  function resolveAmountBounds(amountAction, stackAmount){
+    if (!amountAction) return null;
+    var constraints = state.actionConstraints || {};
+    var min = amountAction === 'RAISE' && Number.isFinite(constraints.minRaiseTo) ? Math.max(1, Math.trunc(constraints.minRaiseTo)) : 1;
+    var max = amountAction === 'RAISE'
+      ? (Number.isFinite(constraints.maxRaiseTo) ? Math.max(min, Math.trunc(constraints.maxRaiseTo)) : null)
+      : (Number.isFinite(constraints.maxBetAmount) ? Math.max(1, Math.trunc(constraints.maxBetAmount)) : stackAmount);
+    var defaultAmount = Math.min(max != null ? max : 20, Math.max(min, 20));
+    return {
+      min: min,
+      max: max != null ? max : null,
+      defaultAmount: defaultAmount
+    };
+  }
+
+  function syncAmountInput(bounds){
+    if (!els.amountInput) return null;
+    if (!bounds) return parseInt(els.amountInput.value, 10) || 20;
+    els.amountInput.min = String(bounds.min);
+    if (bounds.max != null) els.amountInput.max = String(bounds.max);
+    else els.amountInput.removeAttribute('max');
+    var value = parseInt(els.amountInput.value, 10);
+    if (!Number.isFinite(value) || value < bounds.min || (bounds.max != null && value > bounds.max)){
+      value = bounds.defaultAmount;
+      els.amountInput.value = String(value);
+    }
+    return value;
+  }
+
+  function clearQueuedPreaction(){
+    queuedPreaction = null;
+  }
+
+  function resetQueuedPreactionState(){
+    queuedPreaction = null;
+    queuedPreactionInFlight = false;
+  }
+
+  function getPreactionInput(slot){
+    if (slot === 'fold') return els.foldPreaction;
+    if (slot === 'primary') return els.primaryPreaction;
+    if (slot === 'amount') return els.amountPreaction;
+    if (slot === 'allIn') return els.allInPreaction;
+    return null;
+  }
+
+  function readQueuedAmount(){
+    var value = els.amountInput ? parseInt(els.amountInput.value, 10) : NaN;
+    return Number.isFinite(value) ? Math.trunc(value) : null;
+  }
+
+  function buildQueuedPreaction(slot){
+    if (slot === 'fold') return { slot: 'fold', action: 'FOLD', amount: null };
+    if (slot === 'primary'){
+      var primaryAction = els.primaryPreaction ? (els.primaryPreaction.dataset.action || '') : '';
+      return primaryAction ? { slot: 'primary', action: primaryAction, amount: null } : null;
+    }
+    if (slot === 'amount'){
+      var amountAction = els.amountPreaction ? (els.amountPreaction.dataset.action || '') : '';
+      var amount = readQueuedAmount();
+      return amountAction && Number.isFinite(amount) ? { slot: 'amount', action: amountAction, amount: amount } : null;
+    }
+    if (slot === 'allIn') return { slot: 'allIn', action: null, amount: null };
+    return null;
+  }
+
+  function syncQueuedPreactionWithPreactionState(preactionState){
+    if (!queuedPreaction || !preactionState) return;
+    if (queuedPreaction.slot === 'fold'){
+      if (!preactionState.foldVisible) clearQueuedPreaction();
+      return;
+    }
+    if (queuedPreaction.slot === 'primary'){
+      if (!preactionState.primaryAction || queuedPreaction.action !== preactionState.primaryAction) clearQueuedPreaction();
+      return;
+    }
+    if (queuedPreaction.slot === 'amount'){
+      if (!preactionState.amountAction || queuedPreaction.action !== preactionState.amountAction || !preactionState.amountBounds){
+        clearQueuedPreaction();
+        return;
+      }
+      var queuedAmount = readQueuedAmount();
+      if (!Number.isFinite(queuedAmount) || queuedAmount < preactionState.amountBounds.min || (preactionState.amountBounds.max != null && queuedAmount > preactionState.amountBounds.max)){
+        clearQueuedPreaction();
+        return;
+      }
+      queuedPreaction.amount = queuedAmount;
+      return;
+    }
+    if (queuedPreaction.slot === 'allIn' && !preactionState.allInPlan) clearQueuedPreaction();
+  }
+
+  function resolveQueuedPreactionExecution(liveState){
+    if (!queuedPreaction || !liveState) return null;
+    if (queuedPreaction.slot === 'fold') return liveState.foldVisible ? { action: 'FOLD', amount: null } : null;
+    if (queuedPreaction.slot === 'primary'){
+      return queuedPreaction.action && queuedPreaction.action === liveState.primaryAction
+        ? { action: queuedPreaction.action, amount: null }
+        : null;
+    }
+    if (queuedPreaction.slot === 'amount'){
+      if (!queuedPreaction.action || queuedPreaction.action !== liveState.amountAction || !liveState.amountBounds) return null;
+      if (!Number.isFinite(queuedPreaction.amount) || queuedPreaction.amount < liveState.amountBounds.min || (liveState.amountBounds.max != null && queuedPreaction.amount > liveState.amountBounds.max)) return null;
+      return { action: queuedPreaction.action, amount: queuedPreaction.amount };
+    }
+    if (queuedPreaction.slot === 'allIn'){
+      return liveState.allInPlan
+        ? { action: liveState.allInPlan.type, amount: liveState.allInPlan.amount == null ? null : liveState.allInPlan.amount }
+        : null;
+    }
+    return null;
+  }
+
   function renderControls(){
     var signedIn = isSignedIn();
     var seated = !!deriveCurrentSeat();
     var liveReady = isWsReady();
-    var allowed = liveReady && isUsersTurn() ? getAllowedActions() : [];
+    var activeHand = hasActiveHand();
+    var usersTurn = isUsersTurn();
+    var controlsLocked = queuedPreactionInFlight;
+    var allowed = liveReady && usersTurn ? getAllowedActions() : [];
     var primary = resolvePrimaryAction(allowed);
     var amountAction = resolveAmountAction(allowed);
     var allInPlan = resolveAllInPlan(allowed);
     var stackAmount = resolveStack(state.currentUserId);
+    var amountBounds = resolveAmountBounds(amountAction, stackAmount);
+    var preactionMode = !!(signedIn && seated && liveReady && activeHand && !usersTurn && !isCurrentUserFolded());
+    var projectedAllowed = preactionMode ? resolveProjectedAllowedActions() : [];
+    var preactionPrimary = resolvePrimaryAction(projectedAllowed);
+    var preactionAmountAction = resolveAmountAction(projectedAllowed);
+    var preactionAllInPlan = resolveAllInPlan(projectedAllowed);
+    var preactionAmountBounds = resolveAmountBounds(preactionAmountAction, stackAmount);
     var joinDisabled = !signedIn || seated || !state.tableId || !liveReady;
+    if (!seated || !activeHand || isCurrentUserFolded()) clearQueuedPreaction();
+    if (preactionMode) {
+      syncQueuedPreactionWithPreactionState({
+        foldVisible: isFoldAvailable(),
+        primaryAction: preactionPrimary,
+        amountAction: preactionAmountAction,
+        allInPlan: preactionAllInPlan,
+        amountBounds: preactionAmountBounds
+      });
+    }
 
     if (els.signInBtn) els.signInBtn.hidden = signedIn;
     if (els.joinBtn) els.joinBtn.hidden = false;
@@ -1347,12 +1508,12 @@
     if (els.stackText) els.stackText.textContent = stackAmount == null ? '—' : formatNumber(stackAmount);
 
     if (els.foldBtn){
-      els.foldBtn.hidden = allowed.indexOf('FOLD') === -1;
+      els.foldBtn.hidden = !usersTurn || !isFoldAvailable();
       els.foldBtn.dataset.action = 'FOLD';
-      els.foldBtn.disabled = !liveReady;
+      els.foldBtn.disabled = !liveReady || controlsLocked;
     }
     if (els.primaryBtn){
-      els.primaryBtn.hidden = !primary;
+      els.primaryBtn.hidden = !usersTurn || !primary;
       var toCall = Number.isFinite(state.actionConstraints && state.actionConstraints.toCall)
         ? Math.max(0, Math.trunc(state.actionConstraints.toCall))
         : null;
@@ -1360,44 +1521,67 @@
         ? 'Check'
         : ('Call (' + formatCompactAmount(toCall) + ')');
       els.primaryBtn.dataset.action = primary || '';
-      els.primaryBtn.disabled = !liveReady;
+      els.primaryBtn.disabled = !liveReady || controlsLocked;
     }
     if (els.amountBtn){
-      els.amountBtn.hidden = !amountAction;
+      els.amountBtn.hidden = !usersTurn || !amountAction;
       els.amountBtn.textContent = amountAction === 'RAISE' ? 'Raise' : 'Bet';
       els.amountBtn.dataset.action = amountAction || '';
-      els.amountBtn.disabled = !liveReady;
+      els.amountBtn.disabled = !liveReady || controlsLocked;
     }
     if (els.allInBtn){
-      els.allInBtn.hidden = !allInPlan;
+      els.allInBtn.hidden = !usersTurn || !allInPlan;
       els.allInBtn.dataset.action = allInPlan ? allInPlan.type : '';
-      els.allInBtn.disabled = !liveReady;
+      els.allInBtn.disabled = !liveReady || controlsLocked;
+    }
+    if (els.foldPreactionWrap) els.foldPreactionWrap.hidden = !preactionMode || !isFoldAvailable();
+    if (els.foldPreaction) {
+      els.foldPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'fold');
+      els.foldPreaction.disabled = !liveReady;
+      els.foldPreaction.dataset.slot = 'fold';
+    }
+    if (els.primaryPreactionWrap) els.primaryPreactionWrap.hidden = !preactionMode || !preactionPrimary;
+    if (els.primaryPreaction) {
+      els.primaryPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'primary');
+      els.primaryPreaction.disabled = !liveReady || !preactionPrimary;
+      els.primaryPreaction.dataset.slot = 'primary';
+      els.primaryPreaction.dataset.action = preactionPrimary || '';
+    }
+    if (els.primaryPreactionText) {
+      var projectedToCall = Number.isFinite(state.actionConstraints && state.actionConstraints.toCall)
+        ? Math.max(0, Math.trunc(state.actionConstraints.toCall))
+        : null;
+      els.primaryPreactionText.textContent = preactionPrimary === 'CALL'
+        ? ('Call (' + formatCompactAmount(projectedToCall) + ')')
+        : 'Check';
+    }
+    if (els.amountPreactionWrap) els.amountPreactionWrap.hidden = !preactionMode || !preactionAmountAction;
+    if (els.amountPreaction) {
+      els.amountPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'amount');
+      els.amountPreaction.disabled = !liveReady || !preactionAmountAction;
+      els.amountPreaction.dataset.slot = 'amount';
+      els.amountPreaction.dataset.action = preactionAmountAction || '';
+    }
+    if (els.amountPreactionText) els.amountPreactionText.textContent = preactionAmountAction === 'RAISE' ? 'Raise' : 'Bet';
+    if (els.allInPreactionWrap) els.allInPreactionWrap.hidden = !preactionMode || !preactionAllInPlan;
+    if (els.allInPreaction) {
+      els.allInPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'allIn');
+      els.allInPreaction.disabled = !liveReady || !preactionAllInPlan;
+      els.allInPreaction.dataset.slot = 'allIn';
     }
     if (els.amountInputWrap){
       els.amountInputWrap.hidden = false;
-      if (amountAction){
-        var constraints = state.actionConstraints || {};
-        var min = amountAction === 'RAISE' && Number.isFinite(constraints.minRaiseTo) ? Math.max(1, Math.trunc(constraints.minRaiseTo)) : 1;
-        var max = amountAction === 'RAISE'
-          ? (Number.isFinite(constraints.maxRaiseTo) ? Math.max(min, Math.trunc(constraints.maxRaiseTo)) : null)
-          : (Number.isFinite(constraints.maxBetAmount) ? Math.max(1, Math.trunc(constraints.maxBetAmount)) : stackAmount);
-        if (els.amountInput){
-          els.amountInput.min = String(min);
-          if (max != null) els.amountInput.max = String(max);
-          else els.amountInput.removeAttribute('max');
-          var defaultAmount = Math.min(max != null ? max : 20, Math.max(min, 20));
-          if (!els.amountInput.value || Number(els.amountInput.value) < min || (max != null && Number(els.amountInput.value) > max)){
-            els.amountInput.value = String(defaultAmount);
-          }
-        }
-        if (els.amountValue) els.amountValue.textContent = formatCompactAmount(Number(els.amountInput && els.amountInput.value ? els.amountInput.value : min));
+      var activeAmountBounds = usersTurn ? amountBounds : preactionMode ? preactionAmountBounds : null;
+      if (activeAmountBounds){
+        var syncedAmount = syncAmountInput(activeAmountBounds);
+        if (els.amountValue) els.amountValue.textContent = formatCompactAmount(Number.isFinite(syncedAmount) ? syncedAmount : activeAmountBounds.min);
         if (els.amountInputWrap.classList && typeof els.amountInputWrap.classList.remove === 'function') els.amountInputWrap.classList.remove('is-disabled');
       } else if (els.amountInputWrap.classList && typeof els.amountInputWrap.classList.add === 'function') {
         els.amountInputWrap.classList.add('is-disabled');
       }
     }
-    if (els.amountInput) els.amountInput.disabled = !liveReady || !amountAction;
-    if (els.amountValue && !amountAction) {
+    if (els.amountInput) els.amountInput.disabled = !liveReady || controlsLocked || !(usersTurn ? amountAction : preactionMode ? preactionAmountAction : null);
+    if (els.amountValue && !(usersTurn ? amountAction : preactionMode ? preactionAmountAction : null)) {
       els.amountValue.textContent = formatCompactAmount(parseInt(els.amountInput && els.amountInput.value ? els.amountInput.value : '20', 10) || 20);
     }
   }
@@ -1496,6 +1680,26 @@
     });
   }
 
+  function maybeExecuteQueuedPreaction(){
+    if (!queuedPreaction || queuedPreactionInFlight || !isUsersTurn()) return;
+    var allowed = getAllowedActions();
+    var liveState = {
+      foldVisible: isFoldAvailable(),
+      primaryAction: resolvePrimaryAction(allowed),
+      amountAction: resolveAmountAction(allowed),
+      allInPlan: resolveAllInPlan(allowed),
+      amountBounds: resolveAmountBounds(resolveAmountAction(allowed), resolveStack(state.currentUserId))
+    };
+    var nextAction = resolveQueuedPreactionExecution(liveState);
+    clearQueuedPreaction();
+    if (!nextAction || !nextAction.action) return;
+    queuedPreactionInFlight = true;
+    handleAction(nextAction.action, nextAction.amount == null ? undefined : nextAction.amount).then(function(){
+      queuedPreactionInFlight = false;
+      renderControls();
+    });
+  }
+
   function isSeatTakenError(error){
     var message = error && error.message ? String(error.message) : '';
     return /seat_taken/i.test(message);
@@ -1590,6 +1794,29 @@
   }
 
   function bindControls(){
+    function bindPreaction(slot){
+      var input = getPreactionInput(slot);
+      if (!input) return;
+      input.addEventListener('change', function(){
+        if (!input.checked){
+          if (queuedPreaction && queuedPreaction.slot === slot) clearQueuedPreaction();
+          renderControls();
+          return;
+        }
+        queuedPreaction = buildQueuedPreaction(slot);
+        if (!queuedPreaction) {
+          input.checked = false;
+          renderControls();
+          return;
+        }
+        ['fold', 'primary', 'amount', 'allIn'].forEach(function(otherSlot){
+          if (otherSlot === slot) return;
+          var otherInput = getPreactionInput(otherSlot);
+          if (otherInput) otherInput.checked = false;
+        });
+        renderControls();
+      });
+    }
     if (els.signInBtn) els.signInBtn.addEventListener('click', openSignIn);
     if (els.foldBtn) els.foldBtn.addEventListener('click', function(){
       handleAction('FOLD');
@@ -1633,6 +1860,10 @@
     });
     if (els.amountInput) els.amountInput.addEventListener('input', function(){
       if (els.amountValue) els.amountValue.textContent = formatCompactAmount(parseInt(els.amountInput.value, 10) || 0);
+      if (queuedPreaction && queuedPreaction.slot === 'amount'){
+        var queuedAmount = readQueuedAmount();
+        if (Number.isFinite(queuedAmount)) queuedPreaction.amount = queuedAmount;
+      }
     });
     if (els.joinSeat) els.joinSeat.addEventListener('input', function(){
       els.joinSeat.dataset.userEdited = '1';
@@ -1642,6 +1873,10 @@
       if (!plan) return;
       handleAction(plan.type, plan.amount == null ? undefined : plan.amount);
     });
+    bindPreaction('fold');
+    bindPreaction('primary');
+    bindPreaction('amount');
+    bindPreaction('allIn');
   }
 
   function selectElements(){
@@ -1670,9 +1905,21 @@
     els.leaveConfirmCancel = document.getElementById('pokerV2LeaveConfirmCancel');
     els.startBtn = document.getElementById('pokerV2StartBtn');
     els.foldBtn = document.getElementById('pokerV2FoldBtn');
+    els.foldPreactionWrap = document.getElementById('pokerV2FoldPreactionWrap');
+    els.foldPreaction = document.getElementById('pokerV2FoldPreaction');
+    els.foldPreactionText = document.getElementById('pokerV2FoldPreactionText');
     els.primaryBtn = document.getElementById('pokerV2PrimaryBtn');
+    els.primaryPreactionWrap = document.getElementById('pokerV2PrimaryPreactionWrap');
+    els.primaryPreaction = document.getElementById('pokerV2PrimaryPreaction');
+    els.primaryPreactionText = document.getElementById('pokerV2PrimaryPreactionText');
     els.amountBtn = document.getElementById('pokerV2AmountBtn');
+    els.amountPreactionWrap = document.getElementById('pokerV2AmountPreactionWrap');
+    els.amountPreaction = document.getElementById('pokerV2AmountPreaction');
+    els.amountPreactionText = document.getElementById('pokerV2AmountPreactionText');
     els.allInBtn = document.getElementById('pokerV2AllInBtn');
+    els.allInPreactionWrap = document.getElementById('pokerV2AllInPreactionWrap');
+    els.allInPreaction = document.getElementById('pokerV2AllInPreaction');
+    els.allInPreactionText = document.getElementById('pokerV2AllInPreactionText');
     els.amountInput = document.getElementById('pokerV2AmountInput');
     els.amountValue = document.getElementById('pokerV2AmountValue');
     els.amountInputWrap = document.getElementById('pokerV2AmountInputWrap');
@@ -1680,6 +1927,7 @@
 
   function startDemoMode(){
     startTurnClock();
+    resetQueuedPreactionState();
     state = cloneState(demoState);
     state.wsReady = false;
     render();
@@ -1699,6 +1947,7 @@
 
   function applySignedOutState(){
     stopLiveMode();
+    resetQueuedPreactionState();
     state = createEmptyLiveState(tableId, null);
     state.statusText = LIVE_STATUS_COPY.auth;
     render();
@@ -1765,6 +2014,7 @@
           return;
         }
         mergeSnapshot(payload);
+        maybeExecuteQueuedPreaction();
         render();
         autoJoinSeat();
       },
