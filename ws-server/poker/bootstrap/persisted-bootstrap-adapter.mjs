@@ -1,4 +1,4 @@
-import { parseStakes } from "../../../shared/poker-domain/bots.mjs";
+import { parseStakes } from "../../shared/poker-domain/bots.mjs";
 import { deriveDeterministicRuntimeHandState } from "../shared/runtime-hand-state.mjs";
 function asPlainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;

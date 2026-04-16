@@ -99,6 +99,8 @@ test("ws server defaults authoritative join only for db-backed runtime when env 
   const serverText = fs.readFileSync("ws-server/server.mjs", "utf8");
   assert.match(serverText, /const hasSupabaseDbUrl = Boolean\(process\.env\.SUPABASE_DB_URL\)/);
   assert.match(serverText, /return Boolean\(hasSupabaseDbUrl && !observeOnlyJoinEnabled\)/);
+  assert.match(serverText, /from\s+["']\.\/shared\/poker-domain\/bots\.mjs["']/);
+  assert.doesNotMatch(serverText, /from\s+["']\.\.\/shared\/poker-domain\/bots\.mjs["']/);
 });
 
 test("ws-server package declares postgres dependency for db-backed bootstrap runtime", () => {
@@ -300,6 +302,22 @@ test("ws-local poker autoplay wrapper is the only allowed bridge to repo-root sh
     if (file === wrapperFile) continue;
     const text = fs.readFileSync(file, "utf8");
     assert.doesNotMatch(text, /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/poker-autoplay\.mjs/, `Only ${wrapperFile} may bridge to repo-root shared autoplay module`);
+  }
+});
+
+test("ws-local bots wrapper is the only allowed bridge to repo-root shared bots module", () => {
+  const wrapperFile = "ws-server/shared/poker-domain/bots.mjs";
+  const wrapperText = fs.readFileSync(wrapperFile, "utf8");
+  assert.match(wrapperText, /export\s*\{\s*makeBotUserId,\s*parseStakes\s*\}\s*from\s*["']\.\.\/\.\.\/\.\.\/shared\/poker-domain\/bots\.mjs["']/);
+
+  const wsFiles = fs.readdirSync("ws-server", { recursive: true })
+    .filter((entry) => typeof entry === "string" && entry.endsWith(".mjs"))
+    .map((entry) => `ws-server/${entry.replaceAll("\\", "/")}`);
+
+  for (const file of wsFiles) {
+    if (file === wrapperFile) continue;
+    const text = fs.readFileSync(file, "utf8");
+    assert.doesNotMatch(text, /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/bots\.mjs/, `Only ${wrapperFile} may bridge to repo-root shared bots module`);
   }
 });
 
