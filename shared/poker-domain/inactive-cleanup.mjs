@@ -20,11 +20,16 @@ const normalizeNonNegativeInt = (n) => {
 const DEFAULT_TABLE_CLOSE_GRACE_MS = 60_000;
 const DEFAULT_LIVE_HAND_STALE_MS = 15_000;
 const LIVE_HAND_PHASES = new Set(["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"]);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function normalizePositiveInt(n) {
   const value = Number(n);
   if (!Number.isInteger(value) || value <= 0 || Math.abs(value) > Number.MAX_SAFE_INTEGER) return null;
   return value;
+}
+
+function isUuidLike(value) {
+  return UUID_RE.test(String(value || "").trim());
 }
 
 function parseTimestampMs(value) {
@@ -145,7 +150,10 @@ export async function executeInactiveCleanup({
   hasConnectedHumanPresence = () => false
 }) {
   const normalizedUserId = typeof userId === "string" && userId.trim() ? userId.trim() : null;
-  const sweepActorUserId = String(env?.POKER_SYSTEM_ACTOR_USER_ID || "").trim() || normalizedUserId || "system";
+  const configuredSystemActorUserId = String(env?.POKER_SYSTEM_ACTOR_USER_ID || "").trim();
+  const sweepActorUserId =
+    (isUuidLike(configuredSystemActorUserId) ? configuredSystemActorUserId : null)
+    ?? (isUuidLike(normalizedUserId) ? normalizedUserId : null);
   const closeGraceMs = resolveCloseGraceMs(env);
   const liveHandStaleMs = resolveLiveHandStaleMs(env);
   return beginSql(async (tx) => {

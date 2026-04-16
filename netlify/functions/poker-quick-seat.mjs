@@ -82,7 +82,7 @@ where t.status = 'OPEN'
       from public.poker_state ps
       where ps.table_id = t.id
       limit 1
-    ), 'INIT') not in ('POSTING_BLINDS', 'PREFLOP', 'FLOP', 'TURN', 'RIVER', 'SHOWDOWN')
+    ), 'INIT') not in ('POSTING_BLINDS', 'PREFLOP', 'FLOP', 'TURN', 'RIVER', 'SHOWDOWN', 'SETTLED', 'HAND_DONE')
   )
   and ($3::boolean = false or exists (
     select 1

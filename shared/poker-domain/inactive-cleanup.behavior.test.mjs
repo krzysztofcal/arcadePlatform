@@ -209,6 +209,7 @@ test("inactive cleanup system sweep closes stale bots-only live table after acti
   assert.equal(harness.tableState.stateRow.state.phase, "HAND_DONE");
   assert.equal(harness.tableState.stateRow.state.turnUserId, null);
   assert.deepEqual(harness.tableState.stateRow.state.stacks, { bot_1: 200 });
+  assert.equal(harness.cashouts[0]?.createdBy, null);
 });
 
 test("inactive cleanup system sweep closes bots-only settled table", async () => {
@@ -234,6 +235,7 @@ test("inactive cleanup system sweep closes bots-only settled table", async () =>
   assert.equal(harness.tableState.stateRow.state.phase, "HAND_DONE");
   assert.equal(harness.tableState.stateRow.state.turnUserId, null);
   assert.deepEqual(harness.tableState.stateRow.state.stacks, { bot_1: 200 });
+  assert.equal(harness.cashouts[0]?.createdBy, null);
 });
 
 test("inactive cleanup keeps fresh table open during close grace period", async () => {

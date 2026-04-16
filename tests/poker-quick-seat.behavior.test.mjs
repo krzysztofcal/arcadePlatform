@@ -131,6 +131,10 @@ const run = async () => {
       "quick seat should exclude bots-only live-hand tables from generic open-table fallback"
     );
     assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("'settled'") && entry.query.toLowerCase().includes("'hand_done'")),
+      "quick seat should also exclude terminal bots-only tables that still expose the previous hand result"
+    );
+    assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")),
       "quick seat should bump table activity when recommending"
     );

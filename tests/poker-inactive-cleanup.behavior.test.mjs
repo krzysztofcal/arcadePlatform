@@ -307,3 +307,37 @@ test('fresh empty table remains open during close grace period', async () => {
     Date.now = originalDateNow;
   }
 });
+
+test('system sweep closes settled bots-only table without requiring a UUID system actor', async () => {
+  const ctx = makeTx({
+    seat: null,
+    state: {
+      phase: 'SETTLED',
+      handId: 'hand-settled',
+      turnUserId: null,
+      stacks: { 'bot-1': 80, 'user-left': 20 }
+    },
+    allSeats: [
+      { user_id: 'user-left', status: 'INACTIVE', is_bot: false, stack: 0 },
+      { user_id: 'bot-1', status: 'ACTIVE', is_bot: true, stack: 80 }
+    ],
+    tableStatus: 'OPEN',
+    createdAt: '2026-03-01T00:00:00.000Z'
+  });
+
+  const result = await executeInactiveCleanup({
+    tableId: 'table-system-sweep',
+    userId: null,
+    requestId: 'req-system-sweep',
+    env: {},
+    beginSql: async (fn) => fn(ctx.tx),
+    postTransaction: async (payload) => ctx.ledgerCalls.push(payload),
+    isHoleCardsTableMissing: () => false
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.closed, true);
+  assert.equal(result.status, 'cleaned_closed');
+  assert.equal(ctx.ledgerCalls.length, 1);
+  assert.equal(ctx.ledgerCalls[0].createdBy, null);
+});
