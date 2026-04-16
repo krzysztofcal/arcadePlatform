@@ -28,7 +28,7 @@ import { handleLeaveCommand } from "./poker/handlers/leave.mjs";
 import { createTableCommandQueue } from "./poker/runtime/table-command-queue.mjs";
 import { recoverFromPersistConflict } from "./poker/runtime/persist-conflict-recovery.mjs";
 import { resolveSettledRevealDueAt } from "./poker/runtime/settled-reveal-timing.mjs";
-import { parseStakes } from "../shared/poker-domain/bots.mjs";
+import { parseStakes } from "./shared/poker-domain/bots.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const PROTECTED_MESSAGE_TYPES = new Set([
