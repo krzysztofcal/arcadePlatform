@@ -29,6 +29,12 @@ function normalizePositiveInt(n) {
   return value;
 }
 
+function normalizeSeatNo(value) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || Math.abs(parsed) > Number.MAX_SAFE_INTEGER) return null;
+  return parsed;
+}
+
 function isUuidLike(value) {
   return UUID_RE.test(String(value || "").trim());
 }
@@ -103,6 +109,19 @@ function activeSeatUserIdSet(seats) {
     }
   }
   return ids;
+}
+
+function hasReplacementBotSeatMatch({ state, seats, userId }) {
+  if (typeof userId !== "string" || !userId) return false;
+  const stateSeats = Array.isArray(state?.seats) ? state.seats : [];
+  const turnSeat = stateSeats.find((seat) => seat?.userId === userId) || null;
+  const seatNo = normalizeSeatNo(turnSeat?.seatNo ?? turnSeat?.seat_no ?? turnSeat?.seat);
+  if (!seatNo) return false;
+  return (seats || []).some((row) => (
+    row?.status === "ACTIVE"
+    && row?.is_bot === true
+    && normalizeSeatNo(row?.seat_no) === seatNo
+  ));
 }
 
 function toClosedInertState({ state, stacks }) {
@@ -206,7 +225,7 @@ export async function executeInactiveCleanup({
     }
 
     const allSeatRows = await tx.unsafe(
-      "select user_id, status, is_bot, stack from public.poker_seats where table_id = $1 for update;",
+      "select user_id, seat_no, status, is_bot, stack from public.poker_seats where table_id = $1 for update;",
       [tableId]
     );
 
@@ -214,7 +233,11 @@ export async function executeInactiveCleanup({
     if (stateRow) {
       nextState = { ...state, stacks };
       const turnUserId = typeof nextState.turnUserId === "string" ? nextState.turnUserId : null;
-      if (turnUserId && !activeSeatUserIdSet(allSeatRows).has(turnUserId)) {
+      if (
+        turnUserId
+        && !activeSeatUserIdSet(allSeatRows).has(turnUserId)
+        && !hasReplacementBotSeatMatch({ state: nextState, seats: allSeatRows, userId: turnUserId })
+      ) {
         nextState.turnUserId = null;
       }
       await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(nextState)]);

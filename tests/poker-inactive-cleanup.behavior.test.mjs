@@ -22,7 +22,7 @@ function makeTx({
         const q = String(query);
         if (q.includes('from public.poker_seats') && q.includes('user_id = $2')) return seat ? [seat] : [];
         if (q.includes('from public.poker_state')) return [{ state: mutableState }];
-        if (q.includes('select user_id, status, is_bot, stack from public.poker_seats')) return allSeats;
+        if (q.includes('select user_id, seat_no, status, is_bot, stack from public.poker_seats')) return allSeats;
         if (q.includes('select status, created_at') && q.includes('from public.poker_tables')) {
           return [{
             status: tableStatus,

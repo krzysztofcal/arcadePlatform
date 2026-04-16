@@ -162,3 +162,61 @@ test("adapter rehydrates runtime hand data for retained live-hand leaver during 
   assert.deepEqual(result.table.coreState.pokerState.holeCardsByUserId.bot_1, toCardCodes(dealt.holeCardsByUserId.bot_1));
   assert.deepEqual(result.table.coreState.pokerState.holeCardsByUserId.bot_2, toCardCodes(dealt.holeCardsByUserId.bot_2));
 });
+
+test("adapter restores replacement bot identity from persisted state when seat rows still reference prior bot id", () => {
+  const result = adaptPersistedBootstrap({
+    tableId: "table_replacement_bot_restore",
+    tableRow: { id: "table_replacement_bot_restore", max_players: 6, status: "OPEN" },
+    seatRows: [
+      { user_id: "user_a", seat_no: 1, status: "INACTIVE", is_bot: false, stack: 0 },
+      { user_id: "bot_old_2", seat_no: 2, status: "ACTIVE", is_bot: true, bot_profile: "TRIVIAL", stack: 1 },
+      { user_id: "bot_keep_3", seat_no: 3, status: "ACTIVE", is_bot: true, bot_profile: "TRIVIAL", stack: 87 }
+    ],
+    stateRow: {
+      version: 22,
+      state: {
+        tableId: "table_replacement_bot_restore",
+        handId: "hand_replacement_bot_restore",
+        handSeed: "seed_replacement_bot_restore",
+        phase: "TURN",
+        community: ["2c", "3d", "4h", "5s"],
+        communityDealt: 4,
+        turnUserId: "bot_auto_2_38",
+        leftTableByUserId: { user_a: true },
+        seats: [
+          { userId: "user_a", seatNo: 1, status: "ACTIVE" },
+          { userId: "bot_auto_2_38", seatNo: 2, status: "ACTIVE" },
+          { userId: "bot_keep_3", seatNo: 3, status: "ACTIVE", isBot: true }
+        ],
+        stacks: {
+          bot_auto_2_38: 100,
+          bot_keep_3: 87
+        }
+      }
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.table.coreState.members, [
+    { userId: "bot_auto_2_38", seat: 2 },
+    { userId: "bot_keep_3", seat: 3 }
+  ]);
+  assert.deepEqual(result.table.coreState.seats, {
+    bot_auto_2_38: 2,
+    bot_keep_3: 3
+  });
+  assert.deepEqual(result.table.coreState.publicStacks, {
+    bot_auto_2_38: 100,
+    bot_keep_3: 87
+  });
+  assert.equal(result.table.coreState.seatDetailsByUserId.bot_auto_2_38?.isBot, true);
+  assert.equal(result.table.coreState.seatDetailsByUserId.bot_auto_2_38?.botProfile, "TRIVIAL");
+  assert.equal(result.table.coreState.pokerState.turnUserId, "bot_auto_2_38");
+  assert.deepEqual(result.table.coreState.pokerState.seats, [
+    { userId: "user_a", seatNo: 1, status: "ACTIVE" },
+    { userId: "bot_auto_2_38", seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" },
+    { userId: "bot_keep_3", seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" }
+  ]);
+  assert.equal(result.table.presenceByUserId.has("bot_auto_2_38"), true);
+  assert.equal(result.table.presenceByUserId.has("bot_old_2"), false);
+});
