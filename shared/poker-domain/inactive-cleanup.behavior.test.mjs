@@ -2,12 +2,22 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { executeInactiveCleanup } from "./inactive-cleanup.mjs";
 
-function createCleanupHarness({ seatRows, state, tableStatus = "OPEN", createdAt = "2026-03-01T00:00:00.000Z", nowMs = Date.parse("2026-03-01T00:02:00.000Z") }) {
+function createCleanupHarness({
+  seatRows,
+  state,
+  tableStatus = "OPEN",
+  createdAt = "2026-03-01T00:00:00.000Z",
+  lastActivityAt = null,
+  updatedAt = null,
+  nowMs = Date.parse("2026-03-01T00:02:00.000Z")
+}) {
   const seatState = seatRows.map((row) => ({ ...row }));
   const tableState = {
     stateRow: { state: { ...state } },
     tableStatus,
-    createdAt
+    createdAt,
+    lastActivityAt,
+    updatedAt
   };
   const cashouts = [];
   const originalDateNow = Date.now;
@@ -38,8 +48,13 @@ function createCleanupHarness({ seatRows, state, tableStatus = "OPEN", createdAt
         tableState.stateRow = { state: JSON.parse(params[1]) };
         return [];
       }
-      if (sql.includes("select status, created_at from public.poker_tables")) {
-        return [{ status: tableState.tableStatus, created_at: tableState.createdAt }];
+      if (sql.includes("select status, created_at") && sql.includes("from public.poker_tables")) {
+        return [{
+          status: tableState.tableStatus,
+          created_at: tableState.createdAt,
+          last_activity_at: tableState.lastActivityAt,
+          updated_at: tableState.updatedAt
+        }];
       }
       if (sql.includes("update public.poker_tables set status = 'CLOSED'")) {
         tableState.tableStatus = "CLOSED";
@@ -152,7 +167,8 @@ test("inactive cleanup system sweep keeps bots-only live table open until hand c
       handId: "h-1",
       stacks: { bot_1: 200, human_inactive: 10 },
       turnUserId: "bot_1"
-    }
+    },
+    lastActivityAt: "2026-03-01T00:01:55.000Z"
   });
 
   const result = await harness.runSystemSweep();
@@ -165,6 +181,34 @@ test("inactive cleanup system sweep keeps bots-only live table open until hand c
   assert.equal(harness.tableState.stateRow.state.phase, "FLOP");
   assert.equal(harness.tableState.stateRow.state.turnUserId, "bot_1");
   assert.deepEqual(harness.tableState.stateRow.state.stacks, { bot_1: 200, human_inactive: 10 });
+});
+
+test("inactive cleanup system sweep closes stale bots-only live table after activity timeout", async () => {
+  const harness = createCleanupHarness({
+    seatRows: [
+      { user_id: "bot_1", status: "ACTIVE", is_bot: true, stack: 200 },
+      { user_id: "human_inactive", status: "INACTIVE", is_bot: false, stack: 10 }
+    ],
+    state: {
+      phase: "RIVER",
+      handId: "h-stale-live",
+      stacks: { bot_1: 200, human_inactive: 10 },
+      turnUserId: "bot_1"
+    },
+    createdAt: "2026-03-01T00:00:00.000Z",
+    lastActivityAt: "2026-03-01T00:00:10.000Z",
+    nowMs: Date.parse("2026-03-01T00:02:00.000Z")
+  });
+
+  const result = await harness.runSystemSweep();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.closed, true);
+  assert.equal(harness.tableState.tableStatus, "CLOSED");
+  assert.equal(harness.seatState.every((row) => row.status === "INACTIVE"), true);
+  assert.equal(harness.tableState.stateRow.state.phase, "HAND_DONE");
+  assert.equal(harness.tableState.stateRow.state.turnUserId, null);
+  assert.deepEqual(harness.tableState.stateRow.state.stacks, { bot_1: 200 });
 });
 
 test("inactive cleanup system sweep closes bots-only settled table", async () => {

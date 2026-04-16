@@ -127,6 +127,10 @@ const run = async () => {
       "quick seat should read occupied seats before returning a recommendation"
     );
     assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("state ->> 'phase'")),
+      "quick seat should exclude bots-only live-hand tables from generic open-table fallback"
+    );
+    assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")),
       "quick seat should bump table activity when recommending"
     );

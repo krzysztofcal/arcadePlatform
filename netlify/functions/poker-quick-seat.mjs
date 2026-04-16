@@ -69,6 +69,21 @@ where t.status = 'OPEN'
   and t.max_players = $1
   and t.stakes = $2::jsonb
   and (select count(*)::int from public.poker_seats s where s.table_id = t.id and s.status = 'ACTIVE') < t.max_players
+  and (
+    exists (
+      select 1
+      from public.poker_seats hs
+      where hs.table_id = t.id
+        and hs.status = 'ACTIVE'
+        and coalesce(hs.is_bot, false) = false
+    )
+    or coalesce((
+      select ps.state ->> 'phase'
+      from public.poker_state ps
+      where ps.table_id = t.id
+      limit 1
+    ), 'INIT') not in ('POSTING_BLINDS', 'PREFLOP', 'FLOP', 'TURN', 'RIVER', 'SHOWDOWN')
+  )
   and ($3::boolean = false or exists (
     select 1
     from public.poker_seats hs

@@ -18,6 +18,7 @@ const normalizeNonNegativeInt = (n) => {
 };
 
 const DEFAULT_TABLE_CLOSE_GRACE_MS = 60_000;
+const DEFAULT_LIVE_HAND_STALE_MS = 15_000;
 const LIVE_HAND_PHASES = new Set(["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"]);
 
 function normalizePositiveInt(n) {
@@ -39,6 +40,10 @@ function parseTimestampMs(value) {
 
 function resolveCloseGraceMs(env) {
   return normalizePositiveInt(env?.POKER_TABLE_CLOSE_GRACE_MS) ?? DEFAULT_TABLE_CLOSE_GRACE_MS;
+}
+
+function resolveLiveHandStaleMs(env) {
+  return normalizePositiveInt(env?.POKER_LIVE_HAND_STALE_MS) ?? DEFAULT_LIVE_HAND_STALE_MS;
 }
 
 function hasLiveHandSignal(state) {
@@ -142,6 +147,7 @@ export async function executeInactiveCleanup({
   const normalizedUserId = typeof userId === "string" && userId.trim() ? userId.trim() : null;
   const sweepActorUserId = String(env?.POKER_SYSTEM_ACTOR_USER_ID || "").trim() || normalizedUserId || "system";
   const closeGraceMs = resolveCloseGraceMs(env);
+  const liveHandStaleMs = resolveLiveHandStaleMs(env);
   return beginSql(async (tx) => {
     let seat = null;
     if (normalizedUserId) {
@@ -201,22 +207,6 @@ export async function executeInactiveCleanup({
       return { ok: true, changed: seatWasActive, status: seatWasActive ? "cleaned" : "already_inactive", closed: false, retryable: false };
     }
 
-    if (hasLiveHandSignal(nextState)) {
-      klog("poker_inactive_cleanup_live_hand_preserved", {
-        tableId,
-        userId: normalizedUserId,
-        phase: typeof nextState?.phase === "string" ? nextState.phase : null,
-        seatWasActive
-      });
-      return {
-        ok: true,
-        changed: seatWasActive,
-        status: seatWasActive ? "cleaned_live_hand_preserved" : "live_hand_preserved",
-        closed: false,
-        retryable: false
-      };
-    }
-
     if (hasConnectedHumanPresence({ tableId }) === true) {
       klog("poker_inactive_cleanup_table_close_skipped_human_presence", {
         tableId,
@@ -233,10 +223,46 @@ export async function executeInactiveCleanup({
       };
     }
 
-    const tableRows = await tx.unsafe("select status, created_at from public.poker_tables where id = $1 limit 1 for update;", [tableId]);
+    const tableRows = await tx.unsafe(
+      "select status, created_at, last_activity_at, updated_at from public.poker_tables where id = $1 limit 1 for update;",
+      [tableId]
+    );
     const tableStatus = tableRows?.[0]?.status || null;
     const tableCreatedAtMs = parseTimestampMs(tableRows?.[0]?.created_at);
+    const tableLastActivityAtMs =
+      parseTimestampMs(tableRows?.[0]?.last_activity_at)
+      ?? parseTimestampMs(tableRows?.[0]?.updated_at)
+      ?? tableCreatedAtMs;
     const nowMs = Date.now();
+    if (hasLiveHandSignal(nextState)) {
+      const liveHandIsFresh =
+        normalizedUserId !== null
+        || tableLastActivityAtMs == null
+        || nowMs - tableLastActivityAtMs < liveHandStaleMs;
+      if (liveHandIsFresh) {
+        klog("poker_inactive_cleanup_live_hand_preserved", {
+          tableId,
+          userId: normalizedUserId,
+          phase: typeof nextState?.phase === "string" ? nextState.phase : null,
+          seatWasActive
+        });
+        return {
+          ok: true,
+          changed: seatWasActive,
+          status: seatWasActive ? "cleaned_live_hand_preserved" : "live_hand_preserved",
+          closed: false,
+          retryable: false
+        };
+      }
+      klog("poker_inactive_cleanup_stale_live_hand_closing", {
+        tableId,
+        userId: normalizedUserId,
+        phase: typeof nextState?.phase === "string" ? nextState.phase : null,
+        lastActivityAtMs: tableLastActivityAtMs,
+        staleForMs: tableLastActivityAtMs == null ? null : Math.max(0, nowMs - tableLastActivityAtMs)
+      });
+    }
+
     if (tableCreatedAtMs != null && nowMs - tableCreatedAtMs < closeGraceMs) {
       return { ok: false, code: "grace_period", retryable: true, status: "grace_period", closed: false };
     }
