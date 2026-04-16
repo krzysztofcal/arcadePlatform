@@ -19,7 +19,7 @@ Arcade Portal is a browser-based gaming hub that combines quick arcade games wit
 
 ### Poker
 - Open `poker/index.html` for the lobby.
-- Join a table, take a seat, and play hands in `poker/table.html`.
+- Join a table, take a seat, and play hands in `poker/table-v2.html`.
 - Live table updates are supported by the poker API functions and the WebSocket server in `ws-server/`.
 
 ## Live Preview

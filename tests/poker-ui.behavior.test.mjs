@@ -55,7 +55,7 @@ function loadHooks(overrides){
   const sandbox = {
     Buffer,
     window: {
-      location: { pathname: '/poker/table.html', search: '' },
+      location: { pathname: '/poker/', search: '' },
       addEventListener: () => {},
       removeEventListener: () => {},
       __RUNNING_POKER_UI_TESTS__: true,
@@ -198,14 +198,9 @@ const baseFlags = {
 assert.equal(availability(baseFlags).canDumpLogs, true, 'dump logs should be enabled when no action is pending');
 assert.equal(availability(baseFlags).canCopyLog, true, 'copy log should be enabled when no action is pending');
 assert.equal(
-  base.hooks.buildPokerTableUrl('table-1', { useV2: true, seatNo: 3, autoJoin: true }),
+  base.hooks.buildPokerTableUrl('table-1', { seatNo: 3, autoJoin: true }),
   '/poker/table-v2.html?tableId=table-1&seatNo=3&autoJoin=1',
   'lobby routing helper should default user flows to v2 table url'
-);
-assert.equal(
-  base.hooks.buildPokerTableUrl('table-1', { useV2: false }),
-  '/poker/table.html?tableId=table-1',
-  'lobby routing helper should keep classic table url available for testing'
 );
 assert.match(source, /window\.location\.href = '\/account\.html';/, 'poker auth fallback should route to account page on the current deploy');
 

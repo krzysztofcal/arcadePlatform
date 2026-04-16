@@ -129,7 +129,7 @@ Optional runtime mode: deployments may explicitly enable observe-only `table_joi
 
 Authoritative seat acquisition/buy-in remains server-authoritative, and browser gameplay runtime MUST use WS as the only write path for `table_join`/`join`, `leave`, `start_hand`, and `act`.
 
-Table runtime policy is strict: `/poker/table.html` MUST be 100% WS-only for active gameplay state (bootstrap + refresh + resync). The browser runtime MUST NOT use `poker-get-table`, `poker-heartbeat`, or any gameplay HTTP read fallback.
+Table runtime policy is strict: `/poker/table-v2.html` MUST be 100% WS-only for active gameplay state (bootstrap + refresh + resync). The browser runtime MUST NOT use `poker-get-table`, `poker-heartbeat`, or any gameplay HTTP read fallback.
 
 The HTTP gameplay endpoints (`poker-join`, `poker-heartbeat`, `poker-get-table`, `poker-start-hand`, `poker-act`, `poker-leave`, `poker-sweep`) are retired and return explicit non-authoritative errors (`410`) instead of mutating or sourcing live gameplay state.
 

@@ -33,7 +33,7 @@ const gameHtml = await readFile(path.join(repoRoot, 'game.html'), 'utf8');
 const gameCatsHtml = await readFile(path.join(repoRoot, 'game_cats.html'), 'utf8');
 const gameTrexHtml = await readFile(path.join(repoRoot, 'game_trex.html'), 'utf8');
 const pokerIndex = await readFile(path.join(repoRoot, 'poker', 'index.html'), 'utf8');
-const pokerTable = await readFile(path.join(repoRoot, 'poker', 'table.html'), 'utf8');
+const pokerTable = await readFile(path.join(repoRoot, 'poker', 'table-v2.html'), 'utf8');
 const portalCss = await readFile(path.join(repoRoot, 'css', 'portal.css'), 'utf8');
 const gameCss = await readFile(path.join(repoRoot, 'css', 'game.css'), 'utf8');
 const xpHtmlFiles = [
@@ -72,7 +72,7 @@ test('topbar pages load topbar script', () => {
   assert.match(gameHtml, topbarScript);
   assert.match(gameTrexHtml, topbarScript);
   assert.match(pokerIndex, topbarScript);
-  assert.match(pokerTable, topbarScript);
+  assert.doesNotMatch(pokerTable, topbarScript);
 });
 
 test('root pages use relative topbar and format scripts', () => {
@@ -106,11 +106,11 @@ test('root pages use relative topbar and format scripts', () => {
   });
   assert.match(accountHtml, /src="js\/chips\/client\.js"/);
   assert.match(pokerIndex, absoluteTopbar);
-  assert.match(pokerTable, absoluteTopbar);
   assert.match(pokerIndex, absoluteFormat);
-  assert.match(pokerTable, absoluteFormat);
   assert.match(pokerIndex, absoluteChips);
-  assert.match(pokerTable, absoluteChips);
+  assert.doesNotMatch(pokerTable, absoluteTopbar);
+  assert.doesNotMatch(pokerTable, absoluteFormat);
+  assert.doesNotMatch(pokerTable, absoluteChips);
 });
 
 test('topbar scripts load once per page', () => {
@@ -144,11 +144,15 @@ test('topbar scripts load once per page', () => {
     /src="\/js\/core\/number-format\.js"/g,
     /src="\/js\/chips\/client\.js"/g,
   ];
-  [pokerIndex, pokerTable].forEach((content) => {
+  [pokerIndex].forEach((content) => {
     pokerScripts.forEach((pattern) => {
       const matches = content.match(pattern) || [];
       assert.equal(matches.length, 1);
     });
+  });
+  pokerScripts.forEach((pattern) => {
+    const matches = pokerTable.match(pattern) || [];
+    assert.equal(matches.length, 0);
   });
 });
 
@@ -222,5 +226,6 @@ test('xp badge placeholders are compact', () => {
 
 test('poker pages place xp badge inside topbar', () => {
   assert.match(pokerIndex, /topbar-right[\s\S]*id="xpBadge"/);
-  assert.match(pokerTable, /topbar-right[\s\S]*id="xpBadge"/);
+  assert.doesNotMatch(pokerTable, /topbar-right[\s\S]*id="xpBadge"/);
+  assert.match(pokerTable, /id="xpBadge"/);
 });
