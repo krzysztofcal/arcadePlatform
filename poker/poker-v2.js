@@ -772,11 +772,17 @@
     return !!state.currentUserId;
   }
 
+  function isCurrentUserSeat(seat){
+    if (!seat) return false;
+    if (seat.userId && state.currentUserId && seat.userId === state.currentUserId) return true;
+    return !!(Number.isInteger(state.youSeat) && Number.isInteger(seat.seatNo) && seat.seatNo === state.youSeat);
+  }
+
   function deriveCurrentSeat(){
     var currentUserId = state.currentUserId;
     if (!currentUserId) return null;
     for (var i = 0; i < state.seats.length; i++){
-      if (state.seats[i] && state.seats[i].userId === currentUserId) return state.seats[i];
+      if (isCurrentUserSeat(state.seats[i])) return state.seats[i];
     }
     if (Number.isInteger(state.youSeat)){
       return { seatNo: state.youSeat, userId: currentUserId, status: 'ACTIVE', displayName: 'You' };
@@ -788,7 +794,7 @@
     var currentUserId = state.currentUserId;
     if (!currentUserId) return false;
     for (var i = 0; i < state.seats.length; i++){
-      if (state.seats[i] && state.seats[i].userId === currentUserId) return true;
+      if (isCurrentUserSeat(state.seats[i])) return true;
     }
     return false;
   }
@@ -960,15 +966,19 @@
 
   function getDisplayName(seat){
     if (!seat) return 'Open seat';
-    if (seat.userId && state.currentUserId && seat.userId === state.currentUserId) return 'You';
+    if (isCurrentUserSeat(seat)) return 'You';
     return seat.displayName || (seat.isBot ? 'Bot' : shortId(seat.userId)) || 'Player';
   }
 
   function getSeatLastBettingRoundAction(seat){
-    if (!seat || typeof seat.userId !== 'string') return null;
-    return state.lastBettingRoundActionByUserId && state.lastBettingRoundActionByUserId[seat.userId]
-      ? state.lastBettingRoundActionByUserId[seat.userId]
-      : null;
+    if (!seat || !state.lastBettingRoundActionByUserId) return null;
+    if (typeof seat.userId === 'string' && state.lastBettingRoundActionByUserId[seat.userId]){
+      return state.lastBettingRoundActionByUserId[seat.userId];
+    }
+    if (isCurrentUserSeat(seat) && state.currentUserId && state.lastBettingRoundActionByUserId[state.currentUserId]){
+      return state.lastBettingRoundActionByUserId[state.currentUserId];
+    }
+    return null;
   }
 
   function getSeatActionBadgePosition(slotIndex, hero){
@@ -1057,7 +1067,7 @@
       var seat = seatsByIndex[i] || null;
       var article = document.createElement('article');
       var active = !!(seat && seat.userId && state.turnUserId && seat.userId === state.turnUserId);
-      var hero = !!(seat && seat.userId && state.currentUserId && seat.userId === state.currentUserId);
+      var hero = isCurrentUserSeat(seat);
       var lastAction = getSeatLastBettingRoundAction(seat);
       var folded = !!(seat && /FOLD/i.test(seat.status || ''));
       var rotatedIndex = rotateSeatIndex(i, state.maxSeats);

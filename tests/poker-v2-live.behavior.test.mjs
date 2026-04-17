@@ -908,6 +908,51 @@ test('poker v2 renders last-action badges and dims folded seats', async () => {
   assert.match(foldedSeat.className, /poker-seat--folded/);
 });
 
+test('poker v2 renders the hero last-action badge when hero seat is resolved from youSeat fallback', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 6,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'viewer-seat-row', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-5b', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'villain-1', startedAt: Date.now() - 15_500, deadlineAt: Date.now() + 4_500 },
+        pot: { total: 4, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CALL'] },
+        actionConstraints: { toCall: 2, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+        lastBettingRoundActionByUserId: { 'user-1': 'call', 'villain-1': 'raise' }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  const heroBadge = (heroSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
+  const heroName = (heroSeat.children || []).find((node) => node.className === 'poker-seat-name');
+
+  assert.ok(heroSeat);
+  assert.ok(heroBadge);
+  assert.equal(heroBadge.textContent, 'Call');
+  assert.match(heroBadge.className, /poker-seat-action-badge--call/);
+  assert.equal(heroName.textContent, 'You');
+});
+
 test('poker v2 dims hero hole cards when the current player folds', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
