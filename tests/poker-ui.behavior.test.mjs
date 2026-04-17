@@ -230,7 +230,7 @@ fallback.sandbox.document.execCommand = (cmd) => {
 assert.equal(await fallback.hooks.copyTextToClipboard('fallback poker logs'), true, 'fallback copy should succeed when async clipboard is unavailable');
 assert.equal(fallbackCopied, true, 'fallback path should use execCommand copy');
 
-function loadLobbyHarness(){
+function loadLobbyHarness(options = {}){
   const elements = {
     pokerError: makeElement('pokerError'),
     pokerAuthMsg: makeElement('pokerAuthMsg'),
@@ -251,25 +251,64 @@ function loadLobbyHarness(){
   const fetchCalls = [];
   const wsCreates = [];
   let requestLobbySnapshotCalls = 0;
-  let lobbyOptions = null;
+  const lobbyClients = [];
+  const windowEvents = {};
+  const documentEvents = {};
+  const timeoutTimers = [];
+  let nextTimeoutId = 1;
+  let nextIntervalId = 1;
+  let nowMs = 0;
+
+  function registerEvent(store, type, fn){
+    store[type] = store[type] || [];
+    store[type].push(fn);
+  }
+
+  function clearTimer(id){
+    const timer = timeoutTimers.find((entry) => entry.id === id);
+    if (timer) timer.cleared = true;
+  }
+
+  function flushTimers(){
+    const due = timeoutTimers
+      .filter((timer) => !timer.cleared && timer.at <= nowMs)
+      .sort((left, right) => left.at - right.at);
+    due.forEach((timer) => {
+      timer.cleared = true;
+      timer.fn();
+    });
+  }
+
   const sandbox = {
     Buffer,
     window: {
       location: { pathname: '/poker/', search: '', href: '' },
-      addEventListener: () => {},
+      addEventListener: (type, fn) => { registerEvent(windowEvents, type, fn); },
       removeEventListener: () => {},
       __RUNNING_POKER_UI_TESTS__: false,
       KLog: { log: () => {} },
-      SupabaseAuthBridge: { getAccessToken: async () => 'token' },
+        SupabaseAuthBridge: { getAccessToken: options.getAccessToken || (async () => 'token') },
       PokerWsClient: {
         create: (options) => {
-          lobbyOptions = options;
-          const client = {
-            start(){ wsCreates.push('start'); },
-            destroy(){ wsCreates.push('destroy'); },
-            isReady(){ return true; },
-            requestLobbySnapshot(){ requestLobbySnapshotCalls += 1; return true; }
+          const record = {
+            options,
+            ready: true,
+            requestLobbySnapshotCalls: 0,
+            startCalls: 0,
+            destroyCalls: 0,
           };
+          const client = {
+            start(){ record.startCalls += 1; wsCreates.push('start'); },
+            destroy(){ record.destroyCalls += 1; record.ready = false; wsCreates.push('destroy'); },
+            isReady(){ return record.ready; },
+            requestLobbySnapshot(){
+              record.requestLobbySnapshotCalls += 1;
+              requestLobbySnapshotCalls += 1;
+              return record.ready;
+            }
+          };
+          record.client = client;
+          lobbyClients.push(record);
           wsCreates.push(client);
           return client;
         }
@@ -278,17 +317,21 @@ function loadLobbyHarness(){
     document: {
       readyState: 'complete',
       visibilityState: 'visible',
-      addEventListener: () => {},
+      addEventListener: (type, fn) => { registerEvent(documentEvents, type, fn); },
       getElementById: (id) => elements[id] || null,
       createElement: (tag) => makeElement(tag),
       body: makeElement('body'),
     },
     URLSearchParams,
     Date,
-    setTimeout,
-    clearTimeout,
-    setInterval,
-    clearInterval,
+    setTimeout: (fn, delay) => {
+      const timer = { id: nextTimeoutId++, fn, at: nowMs + Math.max(0, Number(delay) || 0), cleared: false };
+      timeoutTimers.push(timer);
+      return timer.id;
+    },
+    clearTimeout: clearTimer,
+    setInterval: () => nextIntervalId++,
+    clearInterval: () => {},
     navigator: { userAgent: 'node' },
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
     fetch: async (url) => {
@@ -313,8 +356,17 @@ function loadLobbyHarness(){
     elements,
     fetchCalls,
     wsCreates,
-    getLobbyOptions: () => lobbyOptions,
+    getLobbyOptions: () => lobbyClients.length ? lobbyClients[lobbyClients.length - 1].options : null,
+    getLobbyClient: (index) => lobbyClients[index == null ? lobbyClients.length - 1 : index] || null,
     getRequestLobbySnapshotCalls: () => requestLobbySnapshotCalls,
+    advanceTime(ms){
+      nowMs += Math.max(0, Number(ms) || 0);
+      flushTimers();
+    },
+    fireVisibilityChange(state){
+      sandbox.document.visibilityState = state;
+      (documentEvents.visibilitychange || []).forEach((fn) => fn({ target: sandbox.document }));
+    }
   };
 }
 
@@ -342,3 +394,70 @@ assert.equal(lobbyHarness.elements.pokerTableList.children[0].children[0].textCo
 lobbyHarness.elements.pokerRefresh.click();
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(lobbyHarness.getRequestLobbySnapshotCalls(), 1, 'lobby refresh should request a fresh websocket lobby snapshot');
+
+{
+  const reconnectHarness = loadLobbyHarness();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const firstClient = reconnectHarness.getLobbyClient(0);
+  assert.ok(firstClient, 'lobby should create an initial websocket client');
+
+  firstClient.options.onStatus('closed', { code: 1006 });
+  assert.equal(reconnectHarness.elements.pokerError.hidden, false, 'lobby should surface reconnecting state after close');
+  reconnectHarness.advanceTime(999);
+  assert.equal(reconnectHarness.wsCreates.filter((entry) => entry && typeof entry === 'object').length, 1, 'lobby should wait for reconnect backoff before creating another socket');
+  reconnectHarness.advanceTime(1);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(reconnectHarness.wsCreates.filter((entry) => entry && typeof entry === 'object').length, 2, 'lobby should automatically reconnect after the backoff');
+
+  const secondClient = reconnectHarness.getLobbyClient(1);
+  secondClient.options.onLobbySnapshot({
+    kind: 'lobby_snapshot',
+    initial: true,
+    payload: {
+      tables: [
+        { tableId: 'table_reconnected', status: 'LOBBY', seatCount: 3, maxPlayers: 6, stakes: { sb: 2, bb: 4 } }
+      ]
+    }
+  });
+  assert.equal(reconnectHarness.elements.pokerError.hidden, true, 'lobby should clear reconnect state after recovering a snapshot');
+  assert.equal(reconnectHarness.elements.pokerTableList.children[0].children[0].textContent, 'table_re', 'lobby should render the recovered snapshot after reconnect');
+}
+
+{
+  const dedupeHarness = loadLobbyHarness();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const firstClient = dedupeHarness.getLobbyClient(0);
+  firstClient.options.onStatus('closed', { code: 1006 });
+  dedupeHarness.elements.pokerRefresh.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(dedupeHarness.wsCreates.filter((entry) => entry && typeof entry === 'object').length, 2, 'manual refresh should trigger only one replacement socket while reconnect is pending');
+  dedupeHarness.advanceTime(1000);
+  assert.equal(dedupeHarness.wsCreates.filter((entry) => entry && typeof entry === 'object').length, 2, 'pending reconnect timer should be cancelled once refresh reconnects immediately');
+}
+
+{
+  const gatedHarness = loadLobbyHarness();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  gatedHarness.fireVisibilityChange('hidden');
+  const firstClient = gatedHarness.getLobbyClient(0);
+  firstClient.options.onStatus('closed', { code: 1006 });
+  gatedHarness.advanceTime(1000);
+  assert.equal(gatedHarness.wsCreates.filter((entry) => entry && typeof entry === 'object').length, 1, 'hidden lobby should not reconnect while the page is inactive');
+  gatedHarness.fireVisibilityChange('visible');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(gatedHarness.wsCreates.filter((entry) => entry && typeof entry === 'object').length, 2, 'visible lobby should reconnect again after returning to the page');
+}
+
+{
+  const authState = { token: 'token' };
+  const authHarness = loadLobbyHarness({
+    getAccessToken: async () => authState.token
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const firstClient = authHarness.getLobbyClient(0);
+  authState.token = null;
+  firstClient.options.onStatus('closed', { code: 1006 });
+  authHarness.advanceTime(1000);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(authHarness.wsCreates.filter((entry) => entry && typeof entry === 'object').length, 1, 'lobby should not reconnect once auth is no longer available');
+}
