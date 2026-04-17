@@ -400,9 +400,19 @@ assert.equal(lobbyHarness.getRequestLobbySnapshotCalls(), 1, 'lobby refresh shou
   await new Promise((resolve) => setTimeout(resolve, 0));
   const firstClient = reconnectHarness.getLobbyClient(0);
   assert.ok(firstClient, 'lobby should create an initial websocket client');
+  firstClient.options.onLobbySnapshot({
+    kind: 'lobby_snapshot',
+    initial: true,
+    payload: {
+      tables: [
+        { tableId: 'table_before_reconnect', status: 'LOBBY', seatCount: 2, maxPlayers: 6, stakes: { sb: 1, bb: 2 } }
+      ]
+    }
+  });
 
   firstClient.options.onStatus('closed', { code: 1006 });
   assert.equal(reconnectHarness.elements.pokerError.hidden, false, 'lobby should surface reconnecting state after close');
+  assert.equal(reconnectHarness.elements.pokerTableList.children[0].children[0].textContent, 'table_be', 'lobby should preserve the last rendered snapshot while reconnecting');
   reconnectHarness.advanceTime(999);
   assert.equal(reconnectHarness.wsCreates.filter((entry) => entry && typeof entry === 'object').length, 1, 'lobby should wait for reconnect backoff before creating another socket');
   reconnectHarness.advanceTime(1);

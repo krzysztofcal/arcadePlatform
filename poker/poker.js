@@ -1481,7 +1481,6 @@
     var lobbyReconnectTimer = null;
     var lobbyReconnectAttempt = 0;
     var lobbyWsGeneration = 0;
-    var lobbyWsPending = false;
 
     function stopAuthWatch(){
       if (authTimer){
@@ -1518,15 +1517,21 @@
       return isLobbyPageActive() && isLobbyPageVisible();
     }
 
+    function ensureLobbyLoadingVisible(){
+      if (!tableList) return;
+      if ((tableList.children && tableList.children.length > 0) || (typeof tableList.innerHTML === 'string' && tableList.innerHTML.trim())) {
+        return;
+      }
+      setLobbyLoading();
+    }
+
     function setLobbyConnectingState(message){
       setError(errorEl, message || null);
-      setLobbyLoading();
     }
 
     function stopLobbyWs(){
       clearLobbyReconnectTimer();
       lobbyReconnectAttempt = 0;
-      lobbyWsPending = false;
       var client = lobbyWsClient;
       lobbyWsClient = null;
       lobbyWsGeneration += 1;
@@ -1538,7 +1543,7 @@
 
     function requestLiveLobbySnapshot(reason){
       setError(errorEl, null);
-      setLobbyLoading();
+      ensureLobbyLoadingVisible();
       if (lobbyWsClient && lobbyWsClient.isReady()) {
         if (lobbyWsClient.requestLobbySnapshot()) {
           klog('poker_lobby_ws_snapshot_request', { reason: reason || 'refresh' });
@@ -1630,14 +1635,13 @@
       var generation = lobbyWsGeneration + 1;
       var reason = typeof opts.reason === 'string' && opts.reason ? opts.reason : 'connect';
       lobbyWsGeneration = generation;
-      lobbyWsPending = true;
       setLobbyConnectingState(null);
+      ensureLobbyLoadingVisible();
       lobbyWsClient = window.PokerWsClient.create({
         mode: 'lobby',
         getAccessToken: getAccessToken,
         onLobbySnapshot: function(snapshot){
           if (generation !== lobbyWsGeneration) return;
-          lobbyWsPending = false;
           lobbyReconnectAttempt = 0;
           setError(errorEl, null);
           renderTables(snapshot && snapshot.payload ? snapshot.payload.tables : []);
@@ -1649,7 +1653,6 @@
             return;
           }
           if (status === 'auth_ok'){
-            lobbyWsPending = false;
             lobbyReconnectAttempt = 0;
             setLobbyConnectingState(null);
             klog('poker_lobby_ws_connected', { reason: reason });
@@ -1658,12 +1661,10 @@
           if (status === 'closed'){
             klog('poker_lobby_ws_closed', { code: data && data.code != null ? data.code : null });
             lobbyWsClient = null;
-            lobbyWsPending = false;
             scheduleLobbyReconnect(data);
             return;
           }
           if (status === 'failed'){
-            lobbyWsPending = false;
             klog('poker_lobby_ws_failed', { stage: data && data.stage ? data.stage : null, code: data && data.code ? data.code : null });
           }
         },
@@ -1686,7 +1687,7 @@
           if (tableList) tableList.innerHTML = '';
         }
       });
-      klog('poker_lobby_ws_connect_start', { reason: reason, pending: lobbyWsPending });
+      klog('poker_lobby_ws_connect_start', { reason: reason });
       lobbyWsClient.start();
     }
 
