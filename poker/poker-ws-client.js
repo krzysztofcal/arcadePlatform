@@ -150,7 +150,7 @@
 
     function requestLiveState(){
       if (!authOk) return null;
-      if (mode === 'lobby') return send('lobby_subscribe', {});
+      if (mode === 'lobby') return requestLobbySnapshot();
       return send('table_state_sub', { tableId: tableId });
     }
     function requestGameplaySnapshot(){

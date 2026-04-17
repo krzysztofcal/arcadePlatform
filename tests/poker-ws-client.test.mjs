@@ -262,6 +262,18 @@ test('poker ws client supports lobby subscription snapshots without a table id',
   assert.equal(h.lobbySnapshots[0].payload.tables[0].tableId, 'table_a');
 });
 
+test('poker ws client start is idempotent and avoids duplicate sockets', () => {
+  const h = loadClientHarness({
+    clientOptions: {
+      mode: 'lobby',
+      tableId: ''
+    }
+  });
+  h.client.start();
+  h.client.start();
+  assert.equal(h.FakeWebSocket.instances.length, 1);
+});
+
 test('poker ws client rejects pending commands on close', async () => {
   const h = loadClientHarness();
   h.client.start();

@@ -1475,8 +1475,12 @@
     var maxPlayersInput = document.getElementById('pokerMaxPlayers');
     var signInBtn = document.getElementById('pokerSignIn');
 
+    var LOBBY_RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000];
     var authTimer = null;
     var lobbyWsClient = null;
+    var lobbyReconnectTimer = null;
+    var lobbyReconnectAttempt = 0;
+    var lobbyWsGeneration = 0;
 
     function stopAuthWatch(){
       if (authTimer){
@@ -1485,12 +1489,90 @@
       }
     }
 
+    function clearLobbyReconnectTimer(){
+      if (lobbyReconnectTimer){
+        clearTimeout(lobbyReconnectTimer);
+        lobbyReconnectTimer = null;
+      }
+    }
+
+    function currentLobbyReconnectDelay(){
+      var index = Math.min(lobbyReconnectAttempt, LOBBY_RECONNECT_DELAYS_MS.length - 1);
+      return LOBBY_RECONNECT_DELAYS_MS[index];
+    }
+
+    function isLobbyPageVisible(){
+      if (typeof document === 'undefined') return true;
+      if (typeof document.visibilityState !== 'string') return true;
+      return document.visibilityState === 'visible';
+    }
+
+    function isLobbyPageActive(){
+      var pathname = window && window.location && typeof window.location.pathname === 'string' ? window.location.pathname : '';
+      if (!pathname) return true;
+      return pathname === '/poker/' || pathname === '/poker';
+    }
+
+    function canMaintainLobbyConnection(){
+      return isLobbyPageActive() && isLobbyPageVisible();
+    }
+
+    function ensureLobbyLoadingVisible(){
+      if (!tableList) return;
+      if ((tableList.children && tableList.children.length > 0) || (typeof tableList.innerHTML === 'string' && tableList.innerHTML.trim())) {
+        return;
+      }
+      setLobbyLoading();
+    }
+
+    function setLobbyConnectingState(message){
+      setError(errorEl, message || null);
+    }
+
     function stopLobbyWs(){
-      if (!lobbyWsClient) return;
-      try {
-        lobbyWsClient.destroy();
-      } catch (_err){}
+      clearLobbyReconnectTimer();
+      lobbyReconnectAttempt = 0;
+      var client = lobbyWsClient;
       lobbyWsClient = null;
+      lobbyWsGeneration += 1;
+      if (!client) return;
+      try {
+        client.destroy();
+      } catch (_err){}
+    }
+
+    function requestLiveLobbySnapshot(reason){
+      setError(errorEl, null);
+      ensureLobbyLoadingVisible();
+      if (lobbyWsClient && lobbyWsClient.isReady()) {
+        if (lobbyWsClient.requestLobbySnapshot()) {
+          klog('poker_lobby_ws_snapshot_request', { reason: reason || 'refresh' });
+          return true;
+        }
+      }
+      ensureLobbyWs({ reason: reason || 'refresh' });
+      return false;
+    }
+
+    function scheduleLobbyReconnect(data){
+      if (!canMaintainLobbyConnection()) return;
+      clearLobbyReconnectTimer();
+      var delayMs = currentLobbyReconnectDelay();
+      var attempt = lobbyReconnectAttempt + 1;
+      lobbyReconnectAttempt = attempt;
+      setLobbyConnectingState(t('pokerLobbyReconnecting', 'Live connection lost. Reconnecting...'));
+      klog('poker_lobby_ws_reconnect_scheduled', {
+        attempt: attempt,
+        delayMs: delayMs,
+        code: data && data.code != null ? data.code : null
+      });
+      lobbyReconnectTimer = setTimeout(function(){
+        lobbyReconnectTimer = null;
+        checkAuth().then(function(authed){
+          if (!authed || !canMaintainLobbyConnection()) return;
+          requestLiveLobbySnapshot('reconnect');
+        });
+      }, delayMs);
     }
 
     function setLobbyLoading(){
@@ -1504,7 +1586,7 @@
         checkAuth().then(function(authed){
           if (authed){
             stopAuthWatch();
-            ensureLobbyWs();
+            requestLiveLobbySnapshot('auth_watch');
           }
         });
       }, 3000);
@@ -1539,29 +1621,47 @@
       return true;
     }
 
-    function ensureLobbyWs(){
-      if (lobbyWsClient && lobbyWsClient.isReady()) {
+    function ensureLobbyWs(options){
+      var opts = options || {};
+      if (lobbyWsClient) {
         return;
       }
-      stopLobbyWs();
+      clearLobbyReconnectTimer();
       if (!window.PokerWsClient || typeof window.PokerWsClient.create !== 'function'){
         setError(errorEl, t('pokerErrLoadTables', 'Failed to load tables'));
         if (tableList) tableList.innerHTML = '';
         return;
       }
-      setError(errorEl, null);
-      setLobbyLoading();
+      var generation = lobbyWsGeneration + 1;
+      var reason = typeof opts.reason === 'string' && opts.reason ? opts.reason : 'connect';
+      lobbyWsGeneration = generation;
+      setLobbyConnectingState(null);
+      ensureLobbyLoadingVisible();
       lobbyWsClient = window.PokerWsClient.create({
         mode: 'lobby',
         getAccessToken: getAccessToken,
         onLobbySnapshot: function(snapshot){
+          if (generation !== lobbyWsGeneration) return;
+          lobbyReconnectAttempt = 0;
           setError(errorEl, null);
           renderTables(snapshot && snapshot.payload ? snapshot.payload.tables : []);
         },
         onStatus: function(status, data){
+          if (generation !== lobbyWsGeneration) return;
+          if (status === 'hello_ack' || status === 'minting_token' || status === 'authenticating'){
+            setLobbyConnectingState(null);
+            return;
+          }
+          if (status === 'auth_ok'){
+            lobbyReconnectAttempt = 0;
+            setLobbyConnectingState(null);
+            klog('poker_lobby_ws_connected', { reason: reason });
+            return;
+          }
           if (status === 'closed'){
             klog('poker_lobby_ws_closed', { code: data && data.code != null ? data.code : null });
             lobbyWsClient = null;
+            scheduleLobbyReconnect(data);
             return;
           }
           if (status === 'failed'){
@@ -1569,6 +1669,7 @@
           }
         },
         onProtocolError: function(info){
+          if (generation !== lobbyWsGeneration) return;
           var code = info && info.code ? info.code : 'ws_error';
           if (isLobbyAuthProtocolError(code)){
             handleAuthExpired({
@@ -1586,19 +1687,23 @@
           if (tableList) tableList.innerHTML = '';
         }
       });
+      klog('poker_lobby_ws_connect_start', { reason: reason });
       lobbyWsClient.start();
     }
 
-    function refreshLobby(){
+    function refreshLobby(reason){
       checkAuth().then(function(authed){
         if (!authed) return;
-        setError(errorEl, null);
-        setLobbyLoading();
-        if (lobbyWsClient && lobbyWsClient.isReady()){
-          if (lobbyWsClient.requestLobbySnapshot()) return;
-        }
-        ensureLobbyWs();
+        requestLiveLobbySnapshot(reason || 'refresh');
       });
+    }
+
+    function handleLobbyVisibilityChange(){
+      if (!isLobbyPageVisible()){
+        clearLobbyReconnectTimer();
+        return;
+      }
+      refreshLobby('visibility');
     }
 
     function renderTables(tables){
@@ -1724,7 +1829,7 @@
 
     if (refreshBtn){
       refreshBtn.addEventListener('click', function(){
-        refreshLobby();
+        refreshLobby('manual_refresh');
       });
     }
     if (quickSeatBtn){
@@ -1742,9 +1847,10 @@
 
     window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-lobby(2026-01-01)
     window.addEventListener('beforeunload', stopLobbyWs); // xp-lifecycle-allow:poker-lobby-ws(2026-01-01)
+    document.addEventListener('visibilitychange', handleLobbyVisibilityChange); // xp-lifecycle-allow:poker-lobby-visibility(2027-01-01)
 
     checkAuth().then(function(authed){
-      if (authed) ensureLobbyWs();
+      if (authed) requestLiveLobbySnapshot('initial');
     });
   }
 
