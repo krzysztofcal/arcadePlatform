@@ -37,6 +37,7 @@ function makeElement(id){
       return this.children.includes(target);
     },
     addEventListener(type, fn){ this._listeners[type] = this._listeners[type] || []; this._listeners[type].push(fn); },
+    getBoundingClientRect(){ return { left: 0, top: 0, width: 320, height: 640, right: 320, bottom: 640 }; },
     setAttribute(name, value){ this.attributes[name] = String(value); },
     removeAttribute(name){ delete this.attributes[name]; },
     hasAttribute(name){ return Object.prototype.hasOwnProperty.call(this.attributes, name); },
@@ -67,7 +68,7 @@ function createHarness(options = {}){
   const elements = {};
   [
     'pokerMenuToggle', 'pokerMenuPanel', 'pokerLobbyLink',
-    'pokerSeatLayer', 'pokerPotPill', 'pokerCommunityCards', 'pokerDealerChip',
+    'pokerSeatLayer', 'pokerSeatChipLayer', 'pokerChipFxLayer', 'pokerPotPill', 'pokerPotChipStack', 'pokerCommunityCards', 'pokerDealerChip',
     'pokerHeroCards', 'pokerV2LiveStatus', 'pokerV2TableMeta', 'pokerV2TurnText',
     'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2SignInBtn', 'pokerV2SeatNo',
     'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
@@ -182,6 +183,7 @@ function createHarness(options = {}){
       readyState: 'loading',
       addEventListener(type, fn){ documentEvents[type] = documentEvents[type] || []; documentEvents[type].push(fn); },
       getElementById(id){ return elements[id] || null; },
+      querySelector(selector){ if (selector === '.poker-scene') return elements.pokerTableScreen || null; return null; },
       createElement(tag){ return makeElement(tag); }
     },
     URLSearchParams,

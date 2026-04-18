@@ -68,6 +68,14 @@ function normalizeStacks(value) {
   return Object.fromEntries(entries.map(([userId, amount]) => [userId, Number(amount)]));
 }
 
+function normalizeNumericUserMap(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const entries = Object.entries(value).filter(([userId, amount]) => typeof userId === "string" && userId && Number.isFinite(Number(amount)));
+  return Object.fromEntries(entries.map(([userId, amount]) => [userId, Number(amount)]));
+}
+
 function normalizeLastBettingRoundActionByUserId(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
@@ -307,6 +315,8 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
         seat: null,
         actions: []
       },
+      betThisRoundByUserId: {},
+      committedByUserId: {},
       private: Number.isInteger(effectiveYouSeat)
         ? {
             userId,
@@ -359,6 +369,8 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
       maxRaiseTo: Number.isFinite(legalInfo.maxRaiseTo) ? legalInfo.maxRaiseTo : null,
       maxBetAmount: Number.isFinite(legalInfo.maxBetAmount) ? legalInfo.maxBetAmount : null
     },
+    betThisRoundByUserId: normalizeNumericUserMap(statePublic.betThisRoundByUserId),
+    committedByUserId: normalizeNumericUserMap(statePublic.betThisRoundByUserId),
     lastBettingRoundActionByUserId: normalizeLastBettingRoundActionByUserId(statePublic.lastBettingRoundActionByUserId),
     private: resolvePrivateBranch({ state, userId, youSeat: effectiveYouSeat })
   };
