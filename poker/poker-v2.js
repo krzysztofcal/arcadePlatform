@@ -23,7 +23,14 @@
   };
   var WINNER_REVEAL_MS = 4_000;
   var CHIP_FLY_MS = 420;
-  var CHIP_COLOR_ORDER = ['white', 'red', 'green', 'black', 'purple', 'yellow'];
+  var CHIP_DENOMINATIONS = [
+    { value: 1000, color: 'purple' },
+    { value: 500, color: 'yellow' },
+    { value: 100, color: 'black' },
+    { value: 25, color: 'green' },
+    { value: 5, color: 'red' },
+    { value: 1, color: 'white' }
+  ];
   var LAST_ACTION_LABEL = {
     fold: 'Fold',
     check: 'Check',
@@ -1088,37 +1095,79 @@
     };
   }
 
-  function buildChipColumns(amount, maxColumns, maxHeight){
-    var safeAmount = Math.max(0, Number(amount) || 0);
-    var normalized = Math.max(0, Math.round(Math.log10(safeAmount + 10) * 9));
-    var columns = [];
-    var totalColumns = Math.max(1, Math.min(maxColumns || 4, 2 + Math.round(normalized / 10)));
-    var chipsRemaining = Math.max(1, normalized);
-    for (var i = 0; i < totalColumns; i++){
-      var weight = 0.78 + ((i % 3) * 0.12);
-      var chips = Math.max(1, Math.min(maxHeight || 9, Math.round((chipsRemaining / (totalColumns - i)) * weight)));
-      columns.push(chips);
-      chipsRemaining = Math.max(0, chipsRemaining - chips);
+  function buildChipBreakdown(amount){
+    var safeAmount = Math.max(0, Math.floor(Number(amount) || 0));
+    var out = [];
+    for (var i = 0; i < CHIP_DENOMINATIONS.length; i++){
+      var denom = CHIP_DENOMINATIONS[i];
+      var count = Math.floor(safeAmount / denom.value);
+      safeAmount = safeAmount % denom.value;
+      if (count > 0) out.push({ value: denom.value, color: denom.color, count: count });
     }
-    return columns;
+    return out;
+  }
+
+  function compressChipBreakdown(breakdown, maxVisible){
+    var total = 0;
+    (breakdown || []).forEach(function(entry){ total += entry.count; });
+    if (!total || total <= maxVisible) return breakdown || [];
+    var visible = [];
+    var allocated = 0;
+    (breakdown || []).forEach(function(entry){
+      var scaled = Math.floor((entry.count / total) * maxVisible);
+      if (scaled < 1) scaled = 1;
+      visible.push({ value: entry.value, color: entry.color, count: scaled });
+      allocated += scaled;
+    });
+    while (allocated > maxVisible){
+      for (var i = 0; i < visible.length && allocated > maxVisible; i++){
+        if (visible[i].count > 1){
+          visible[i].count -= 1;
+          allocated -= 1;
+        }
+      }
+    }
+    return visible;
+  }
+
+  function expandChipTokens(amount, maxVisible){
+    var tokens = [];
+    var compressed = compressChipBreakdown(buildChipBreakdown(amount), maxVisible);
+    compressed.forEach(function(entry){
+      for (var i = 0; i < entry.count; i++) tokens.push(entry.color);
+    });
+    return tokens;
+  }
+
+  function resolveFlyChipColorFromAmount(amount){
+    var breakdown = buildChipBreakdown(amount);
+    if (breakdown.length) return breakdown[0].color;
+    return 'white';
   }
 
   function createChipStackVisual(amount, variant){
     var wrap = document.createElement('div');
     wrap.className = 'poker-chip-visual-stack' + (variant ? (' poker-chip-visual-stack--' + variant) : '');
-    var columns = buildChipColumns(amount, variant === 'pot' ? 4 : 3, variant === 'pot' ? 11 : 8);
-    var width = variant === 'pot' ? 20 : 19;
+    var maxVisible = variant === 'pot' ? 40 : variant === 'seat-stack' ? 28 : 14;
+    var tokens = expandChipTokens(amount, maxVisible);
+    if (!tokens.length) return wrap;
+    var totalColumns = variant === 'pot' ? 4 : 3;
+    var columns = [];
+    for (var c = 0; c < totalColumns; c++) columns.push([]);
+    for (var i = 0; i < tokens.length; i++){
+      columns[i % totalColumns].push(tokens[i]);
+    }
+    var width = variant === 'pot' ? 21 : 20;
     var gap = variant === 'pot' ? 4 : 3;
     for (var i = 0; i < columns.length; i++){
       var col = document.createElement('div');
       col.className = 'poker-chip-column';
       col.style.left = ((i * (width + gap)) + (variant === 'pot' ? 6 : 8)) + 'px';
       col.style.width = width + 'px';
-      for (var j = 0; j < columns[i]; j++){
+      for (var j = 0; j < columns[i].length; j++){
         var chip = document.createElement('span');
-        var color = CHIP_COLOR_ORDER[(i + j) % CHIP_COLOR_ORDER.length];
-        chip.className = 'poker-chip poker-chip--' + color;
-        chip.style.bottom = (j * 4) + 'px';
+        chip.className = 'poker-chip poker-chip--' + columns[i][j];
+        chip.style.bottom = (j * 5) + 'px';
         col.appendChild(chip);
       }
       wrap.appendChild(col);
@@ -1199,7 +1248,7 @@
   function spawnChipFly(fromPoint, toPoint, color, delayMs){
     if (!els.chipFxLayer || !fromPoint || !toPoint) return;
     var fly = document.createElement('span');
-    var tone = CHIP_COLOR_ORDER.indexOf(color) === -1 ? 'red' : color;
+    var tone = color || 'white';
     fly.className = 'poker-chip-fly poker-chip-fly--' + tone;
     fly.style.left = Math.round(fromPoint.x) + 'px';
     fly.style.top = Math.round(fromPoint.y) + 'px';
@@ -1255,8 +1304,10 @@
         var from = resolvePointFromPercent(renderedSeatBetAnchors[seat.seatNo] || renderedSeatStackAnchors[seat.seatNo], sceneRect);
         if (!from) return;
         var chips = 2;
+        var committedDelta = Math.max(0, (Number(nextVisual.committedByUserId[seat.userId]) || 0) - (Number(previousVisual.committedByUserId[seat.userId]) || 0));
+        var chipColor = resolveFlyChipColorFromAmount(committedDelta || Math.max(1, Math.round(potIncrease / Math.max(1, candidateUsers.length))));
         for (var i = 0; i < chips; i++){
-          spawnChipFly(from, potTo, CHIP_COLOR_ORDER[(sent + i) % CHIP_COLOR_ORDER.length], sent * 28 + i * 44);
+          spawnChipFly(from, potTo, chipColor, sent * 28 + i * 44);
         }
         sent += chips;
       });
@@ -1273,8 +1324,10 @@
         if (!winnerSeat || !Number.isInteger(winnerSeat.seatNo)) return;
         var target = resolvePointFromPercent(renderedSeatStackAnchors[winnerSeat.seatNo] || renderedSeatBetAnchors[winnerSeat.seatNo], sceneRect);
         if (!target) return;
+        var payoutAmount = Math.max(1, Math.round((previousPot - nextPot) / Math.max(1, winners.length)));
+        var payoutColor = resolveFlyChipColorFromAmount(payoutAmount);
         for (var i = 0; i < 4; i++){
-          spawnChipFly(potFrom, target, CHIP_COLOR_ORDER[(index + i) % CHIP_COLOR_ORDER.length], (index * 50) + (i * 36));
+          spawnChipFly(potFrom, target, payoutColor, (index * 50) + (i * 36));
         }
       });
     }
