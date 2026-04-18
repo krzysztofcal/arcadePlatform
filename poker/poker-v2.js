@@ -22,6 +22,23 @@
     error: 'Live table unavailable'
   };
   var WINNER_REVEAL_MS = 4_000;
+  var CHIP_FLY_MS = 420;
+  var CHIP_DENOMINATIONS = [
+    { value: 1000, color: 'purple' },
+    { value: 500, color: 'yellow' },
+    { value: 100, color: 'black' },
+    { value: 25, color: 'green' },
+    { value: 5, color: 'red' },
+    { value: 1, color: 'white' }
+  ];
+  var CHIP_PALETTE = {
+    white: { light: '#ffffff', base: '#e8edf7', dark: '#b5bfd4', stripe: '#f8fafc', stroke: '#cfd8e6' },
+    red: { light: '#ff9d9d', base: '#dc4444', dark: '#7e1b1b', stripe: '#ffd5d5', stroke: '#a62525' },
+    green: { light: '#86ecab', base: '#24b362', dark: '#0e6035', stripe: '#d7ffe5', stroke: '#17784b' },
+    black: { light: '#717c8f', base: '#273245', dark: '#070b13', stripe: '#e5ebf6', stroke: '#1b2433' },
+    purple: { light: '#d6a1ff', base: '#9c51df', dark: '#492078', stripe: '#f1dcff', stroke: '#6b34aa' },
+    yellow: { light: '#ffe29a', base: '#e4a82a', dark: '#8a5712', stripe: '#fff2cc', stroke: '#b97d1d' }
+  };
   var LAST_ACTION_LABEL = {
     fold: 'Fold',
     check: 'Check',
@@ -91,6 +108,9 @@
   var renderedSeatAnchors = {};
   var renderedSeatSlots = {};
   var renderedSeatAvatars = {};
+  var renderedSeatBetAnchors = {};
+  var renderedSeatStackAnchors = {};
+  var seatCommittedByUserId = {};
   var suggestedSeatNoParam = null;
   var shouldAutoJoin = false;
   var autoJoinAttempted = false;
@@ -507,6 +527,39 @@
     return null;
   }
 
+  function normalizeNumericUserMap(source){
+    if (!isObject(source)) return null;
+    var next = {};
+    Object.keys(source).forEach(function(userId){
+      if (!userId) return;
+      var value = Number(source[userId]);
+      if (!Number.isFinite(value) || value < 0) return;
+      next[userId] = value;
+    });
+    return Object.keys(next).length ? next : null;
+  }
+
+  function extractSeatCommittedByUserId(payload){
+    var publicObj = isObject(payload && payload.public) ? payload.public : {};
+    var next = normalizeNumericUserMap(payload && payload.betThisRoundByUserId)
+      || normalizeNumericUserMap(publicObj.betThisRoundByUserId)
+      || normalizeNumericUserMap(payload && payload.committedByUserId)
+      || normalizeNumericUserMap(publicObj.committedByUserId)
+      || {};
+    return next;
+  }
+
+  function captureVisualSnapshot(){
+    return {
+      potTotal: Number(state.potTotal) || 0,
+      phase: state.phase || null,
+      handId: state.handId || null,
+      committedByUserId: Object.assign({}, seatCommittedByUserId),
+      lastActionByUserId: Object.assign({}, state.lastBettingRoundActionByUserId || {}),
+      winners: getDisplayWinnerUserIds()
+    };
+  }
+
   function normalizeLegalActions(source){
     var list = [];
     var raw = source;
@@ -701,6 +754,7 @@
     if (nextSeats.length || Array.isArray(payload.seats) || Array.isArray(tableObj.members) || Array.isArray(payload.authoritativeMembers) || Array.isArray(publicObj.seats)) {
       state.seats = nextSeats;
     }
+    seatCommittedByUserId = extractSeatCommittedByUserId(payload);
 
     var nextStacks = normalizeStacks(payload);
     if (nextStacks) state.stacks = nextStacks;
@@ -1049,12 +1103,286 @@
     };
   }
 
+  function buildChipBreakdown(amount){
+    var safeAmount = Math.max(0, Math.floor(Number(amount) || 0));
+    var out = [];
+    for (var i = 0; i < CHIP_DENOMINATIONS.length; i++){
+      var denom = CHIP_DENOMINATIONS[i];
+      var count = Math.floor(safeAmount / denom.value);
+      safeAmount = safeAmount % denom.value;
+      if (count > 0) out.push({ value: denom.value, color: denom.color, count: count });
+    }
+    return out;
+  }
+
+  function compressChipBreakdown(breakdown, maxVisible){
+    var total = 0;
+    (breakdown || []).forEach(function(entry){ total += entry.count; });
+    if (!total || total <= maxVisible) return breakdown || [];
+    var visible = [];
+    var allocated = 0;
+    (breakdown || []).forEach(function(entry){
+      var scaled = Math.floor((entry.count / total) * maxVisible);
+      if (scaled < 1) scaled = 1;
+      visible.push({ value: entry.value, color: entry.color, count: scaled });
+      allocated += scaled;
+    });
+    while (allocated > maxVisible){
+      for (var i = 0; i < visible.length && allocated > maxVisible; i++){
+        if (visible[i].count > 1){
+          visible[i].count -= 1;
+          allocated -= 1;
+        }
+      }
+    }
+    return visible;
+  }
+
+  function expandChipTokens(amount, maxVisible){
+    var tokens = [];
+    var compressed = compressChipBreakdown(buildChipBreakdown(amount), maxVisible);
+    compressed.forEach(function(entry){
+      for (var i = 0; i < entry.count; i++) tokens.push(entry.color);
+    });
+    return tokens;
+  }
+
+  function resolveFlyChipColorFromAmount(amount){
+    var breakdown = buildChipBreakdown(amount);
+    if (breakdown.length) return breakdown[0].color;
+    return 'white';
+  }
+
+  function createProceduralChip(color, fly){
+    var palette = CHIP_PALETTE[color] || CHIP_PALETTE.white;
+    var wrap = document.createElement('span');
+    wrap.className = fly ? ('poker-chip-fly poker-chip-fly--' + color) : ('poker-chip poker-chip--' + color);
+    if (typeof document.createElementNS !== 'function'){
+      wrap.style.borderRadius = '999px';
+      wrap.style.background = 'linear-gradient(180deg, ' + palette.light + ', ' + palette.base + ' 52%, ' + palette.dark + ')';
+      wrap.style.boxShadow = fly ? '0 6px 10px rgba(0,0,0,0.42), inset 0 1px 1px rgba(255,255,255,0.4)' : '0 3px 5px rgba(0,0,0,0.42), inset 0 1px 1px rgba(255,255,255,0.4)';
+      return wrap;
+    }
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 120 52');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.className = 'poker-chip-svg';
+    var stripes = '';
+    var stripeCount = 10;
+    for (var i = 0; i < stripeCount; i++){
+      var theta = (Math.PI * 2 * i) / stripeCount;
+      var x = 60 + (Math.cos(theta) * 42);
+      var y = 26 + (Math.sin(theta) * 15);
+      stripes += '<ellipse cx="' + x.toFixed(2) + '" cy="' + y.toFixed(2) + '" rx="4.8" ry="1.7" fill="' + palette.stripe + '" opacity="0.92"/>';
+    }
+    svg.innerHTML = ''
+      + '<ellipse cx="60" cy="27" rx="57" ry="21" fill="' + palette.dark + '" opacity="0.95"/>'
+      + '<ellipse cx="60" cy="25.5" rx="56" ry="20" fill="' + palette.base + '"/>'
+      + '<ellipse cx="60" cy="25.5" rx="56" ry="20" fill="none" stroke="' + palette.stroke + '" stroke-width="1.6"/>'
+      + stripes
+      + '<ellipse cx="60" cy="25.2" rx="40" ry="14.1" fill="' + palette.light + '" opacity="0.26"/>'
+      + '<ellipse cx="60" cy="25.2" rx="23" ry="8.2" fill="' + palette.base + '" opacity="0.9"/>'
+      + '<ellipse cx="60" cy="25.2" rx="23" ry="8.2" fill="none" stroke="' + palette.stripe + '" stroke-width="1" opacity="0.68"/>'
+      + '<ellipse cx="60" cy="20.7" rx="30" ry="6.2" fill="#ffffff" opacity="0.32"/>'
+      + '<ellipse cx="60" cy="33.2" rx="53" ry="7.4" fill="#000000" opacity="0.2"/>';
+    wrap.appendChild(svg);
+    return wrap;
+  }
+
+  function createChipStackVisual(amount, variant){
+    var wrap = document.createElement('div');
+    wrap.className = 'poker-chip-visual-stack' + (variant ? (' poker-chip-visual-stack--' + variant) : '');
+    var maxVisible = variant === 'pot' ? 40 : variant === 'seat-stack' ? 28 : 14;
+    var tokens = expandChipTokens(amount, maxVisible);
+    if (!tokens.length) return wrap;
+    var totalColumns = variant === 'pot' ? 4 : 3;
+    var columns = [];
+    for (var c = 0; c < totalColumns; c++) columns.push([]);
+    for (var i = 0; i < tokens.length; i++){
+      columns[i % totalColumns].push(tokens[i]);
+    }
+    var width = variant === 'pot' ? 21 : 20;
+    var gap = variant === 'pot' ? 4 : 3;
+    for (var i = 0; i < columns.length; i++){
+      var col = document.createElement('div');
+      col.className = 'poker-chip-column';
+      col.style.left = ((i * (width + gap)) + (variant === 'pot' ? 6 : 8)) + 'px';
+      col.style.width = width + 'px';
+      for (var j = 0; j < columns[i].length; j++){
+        var chip = createProceduralChip(columns[i][j], false);
+        chip.style.bottom = (j * 5) + 'px';
+        col.appendChild(chip);
+      }
+      wrap.appendChild(col);
+    }
+    return wrap;
+  }
+
+  function getSeatChipAnchor(anchor, slot){
+    var betOffsets = {
+      0: { x: 0, y: 14 },
+      1: { x: -11, y: 8 },
+      2: { x: -12, y: -8 },
+      3: { x: 0, y: -12 },
+      4: { x: 11, y: -8 },
+      5: { x: 11, y: 8 }
+    };
+    var stackOffsets = {
+      0: { x: 0, y: 20 },
+      1: { x: -14, y: 14 },
+      2: { x: -14, y: -14 },
+      3: { x: 0, y: -18 },
+      4: { x: 14, y: -14 },
+      5: { x: 14, y: 14 }
+    };
+    var bet = betOffsets[slot] || { x: 0, y: 12 };
+    var stack = stackOffsets[slot] || { x: 0, y: 18 };
+    return {
+      bet: { x: anchor.x + bet.x, y: anchor.y + bet.y },
+      stack: { x: anchor.x + stack.x, y: anchor.y + stack.y }
+    };
+  }
+
+  function renderSeatChips(){
+    if (!els.seatChipLayer) return;
+    els.seatChipLayer.innerHTML = '';
+    renderedSeatBetAnchors = {};
+    renderedSeatStackAnchors = {};
+    state.seats.forEach(function(seat){
+      if (!seat || !Number.isInteger(seat.seatNo) || !seat.userId) return;
+      var anchor = renderedSeatAnchors[seat.seatNo];
+      var slot = renderedSeatSlots[seat.seatNo];
+      if (!anchor || !Number.isInteger(slot)) return;
+      var chipAnchor = getSeatChipAnchor(anchor, slot);
+      renderedSeatBetAnchors[seat.seatNo] = chipAnchor.bet;
+      renderedSeatStackAnchors[seat.seatNo] = chipAnchor.stack;
+      var committed = Math.max(0, Number(seatCommittedByUserId[seat.userId]) || 0);
+      if (committed > 0){
+        var betStack = createChipStackVisual(committed, 'seat-bet');
+        betStack.style.left = chipAnchor.bet.x + '%';
+        betStack.style.top = chipAnchor.bet.y + '%';
+        els.seatChipLayer.appendChild(betStack);
+      }
+      var stackAmount = Math.max(0, Number(resolveStack(seat.userId)) || 0);
+      if (stackAmount > 0){
+        var seatStack = createChipStackVisual(stackAmount, 'seat-stack');
+        seatStack.style.left = chipAnchor.stack.x + '%';
+        seatStack.style.top = chipAnchor.stack.y + '%';
+        els.seatChipLayer.appendChild(seatStack);
+      }
+    });
+  }
+
+  function renderPotChips(){
+    if (!els.potChipStack) return;
+    els.potChipStack.innerHTML = '';
+    if ((Number(state.potTotal) || 0) <= 0) return;
+    els.potChipStack.appendChild(createChipStackVisual(state.potTotal, 'pot'));
+  }
+
+  function resolvePointFromPercent(anchor, rect){
+    if (!anchor || !rect || rect.width <= 0 || rect.height <= 0) return null;
+    return {
+      x: rect.width * (anchor.x / 100),
+      y: rect.height * (anchor.y / 100)
+    };
+  }
+
+  function spawnChipFly(fromPoint, toPoint, color, delayMs){
+    if (!els.chipFxLayer || !fromPoint || !toPoint) return;
+    var tone = color || 'white';
+    var fly = createProceduralChip(tone, true);
+    fly.style.left = Math.round(fromPoint.x) + 'px';
+    fly.style.top = Math.round(fromPoint.y) + 'px';
+    fly.style.animationDuration = CHIP_FLY_MS + 'ms';
+    fly.style.animationDelay = Math.max(0, delayMs || 0) + 'ms';
+    fly.style.setProperty('--chip-dx', Math.round(toPoint.x - fromPoint.x) + 'px');
+    fly.style.setProperty('--chip-dy', Math.round(toPoint.y - fromPoint.y) + 'px');
+    els.chipFxLayer.appendChild(fly);
+    window.setTimeout(function(){ if (fly && fly.parentNode) fly.parentNode.removeChild(fly); }, CHIP_FLY_MS + Math.max(0, delayMs || 0) + 40);
+  }
+
+  function resolveBetAnimationUserIds(previousVisual, nextVisual){
+    var ids = [];
+    var seen = {};
+    state.seats.forEach(function(seat){
+      if (!seat || !seat.userId) return;
+      var beforeCommit = Number(previousVisual.committedByUserId[seat.userId]) || 0;
+      var afterCommit = Number(nextVisual.committedByUserId[seat.userId]) || 0;
+      var delta = Math.max(0, Math.round(afterCommit - beforeCommit));
+      if (!delta) return;
+      seen[seat.userId] = true;
+      ids.push(seat.userId);
+    });
+    if (ids.length) return ids;
+    state.seats.forEach(function(seat){
+      if (!seat || !seat.userId || seen[seat.userId]) return;
+      var beforeAction = previousVisual.lastActionByUserId[seat.userId] || null;
+      var afterAction = nextVisual.lastActionByUserId[seat.userId] || null;
+      if (beforeAction === afterAction) return;
+      if (afterAction === 'call' || afterAction === 'raise' || afterAction === 'all_in'){
+        seen[seat.userId] = true;
+        ids.push(seat.userId);
+      }
+    });
+    return ids;
+  }
+
+  function animateChipDiff(previousVisual, nextVisual){
+    if (!previousVisual || !nextVisual || !els.scene || !els.chipFxLayer) return;
+    if (typeof els.scene.getBoundingClientRect !== 'function') return;
+    var sceneRect = els.scene.getBoundingClientRect();
+    if (sceneRect.width <= 0 || sceneRect.height <= 0) return;
+    var potFrom = resolvePointFromPercent({ x: 50, y: 44 }, sceneRect);
+    var potTo = resolvePointFromPercent({ x: 50, y: 44 }, sceneRect);
+    if (!potFrom || !potTo) return;
+    var potIncrease = Math.max(0, Math.round((nextVisual.potTotal || 0) - (previousVisual.potTotal || 0)));
+    if (potIncrease > 0){
+      var candidateUsers = resolveBetAnimationUserIds(previousVisual, nextVisual);
+      var sent = 0;
+      state.seats.forEach(function(seat){
+        if (!seat || !seat.userId || !Number.isInteger(seat.seatNo)) return;
+        if (candidateUsers.indexOf(seat.userId) === -1) return;
+        var from = resolvePointFromPercent(renderedSeatBetAnchors[seat.seatNo] || renderedSeatStackAnchors[seat.seatNo], sceneRect);
+        if (!from) return;
+        var chips = 2;
+        var committedDelta = Math.max(0, (Number(nextVisual.committedByUserId[seat.userId]) || 0) - (Number(previousVisual.committedByUserId[seat.userId]) || 0));
+        var chipColor = resolveFlyChipColorFromAmount(committedDelta || Math.max(1, Math.round(potIncrease / Math.max(1, candidateUsers.length))));
+        for (var i = 0; i < chips; i++){
+          spawnChipFly(from, potTo, chipColor, sent * 28 + i * 44);
+        }
+        sent += chips;
+      });
+    }
+    var previousPot = Math.max(0, Number(previousVisual.potTotal) || 0);
+    var nextPot = Math.max(0, Number(nextVisual.potTotal) || 0);
+    var winners = Array.isArray(nextVisual.winners) ? nextVisual.winners : [];
+    var payoutLike = previousPot > 0 && nextPot < previousPot && winners.length > 0 && nextVisual.phase === 'SETTLED';
+    if (payoutLike){
+      var seatByUser = {};
+      state.seats.forEach(function(seat){ if (seat && seat.userId) seatByUser[seat.userId] = seat; });
+      winners.forEach(function(userId, index){
+        var winnerSeat = seatByUser[userId];
+        if (!winnerSeat || !Number.isInteger(winnerSeat.seatNo)) return;
+        var target = resolvePointFromPercent(renderedSeatStackAnchors[winnerSeat.seatNo] || renderedSeatBetAnchors[winnerSeat.seatNo], sceneRect);
+        if (!target) return;
+        var payoutAmount = Math.max(1, Math.round((previousPot - nextPot) / Math.max(1, winners.length)));
+        var payoutColor = resolveFlyChipColorFromAmount(payoutAmount);
+        for (var i = 0; i < 4; i++){
+          spawnChipFly(potFrom, target, payoutColor, (index * 50) + (i * 36));
+        }
+      });
+    }
+  }
+
   function renderSeats(){
     if (!els.seatLayer) return;
     els.seatLayer.innerHTML = '';
     renderedSeatAnchors = {};
     renderedSeatSlots = {};
     renderedSeatAvatars = {};
+    renderedSeatBetAnchors = {};
+    renderedSeatStackAnchors = {};
     var offset = getSeatNumberingOffset();
     var seatsByIndex = {};
     state.seats.forEach(function(seat){
@@ -1601,6 +1929,8 @@
     renderCommunityCards();
     renderHeroCards();
     renderSeats();
+    renderSeatChips();
+    renderPotChips();
     renderDealerChip();
     renderInfoPanel();
     renderControls();
@@ -1891,12 +2221,17 @@
 
   function selectElements(){
     els.screen = document.getElementById('pokerTableScreen');
+    if (typeof document.querySelector === 'function') els.scene = document.querySelector('.poker-scene');
+    if (!els.scene) els.scene = els.screen;
     els.bootSplash = document.getElementById('pokerBootSplash');
     els.menuToggle = document.getElementById('pokerMenuToggle');
     els.menuPanel = document.getElementById('pokerMenuPanel');
     els.lobbyLink = document.getElementById('pokerLobbyLink');
     els.seatLayer = document.getElementById('pokerSeatLayer');
+    els.seatChipLayer = document.getElementById('pokerSeatChipLayer');
+    els.chipFxLayer = document.getElementById('pokerChipFxLayer');
     els.potPill = document.getElementById('pokerPotPill');
+    els.potChipStack = document.getElementById('pokerPotChipStack');
     els.communityCards = document.getElementById('pokerCommunityCards');
     els.dealerChip = document.getElementById('pokerDealerChip');
     els.heroCards = document.getElementById('pokerHeroCards');
@@ -2023,9 +2358,12 @@
           scheduleRevealDismiss();
           return;
         }
+        var previousVisual = captureVisualSnapshot();
         mergeSnapshot(payload);
         maybeExecuteQueuedPreaction();
         render();
+        var nextVisual = captureVisualSnapshot();
+        animateChipDiff(previousVisual, nextVisual);
         autoJoinSeat();
       },
       onProtocolError: function(info){

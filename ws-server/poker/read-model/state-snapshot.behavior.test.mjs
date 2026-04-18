@@ -33,6 +33,8 @@ test("buildStateSnapshotPayload returns canonical room-core payload for seated a
   assert.deepEqual(payload.public.pot, { total: 0, sidePots: [] });
   assert.deepEqual(payload.public.turn, { userId: "user_b", seat: 1, startedAt: null, deadlineAt: null });
   assert.deepEqual(payload.public.legalActions, { seat: null, actions: [] });
+  assert.deepEqual(payload.public.betThisRoundByUserId, {});
+  assert.deepEqual(payload.public.committedByUserId, {});
 });
 
 test("buildStateSnapshotPayload for observer never exposes private branch", () => {
@@ -124,6 +126,8 @@ test("buildStateSnapshotPayload projects bootstrapped PREFLOP state from table m
   ]);
   assert.deepEqual(seatedPayload.public.legalActions, { seat: 1, actions: ["FOLD", "CALL", "RAISE"] });
   assert.deepEqual(seatedPayload.public.actionConstraints, { toCall: 1, minRaiseTo: 4, maxRaiseTo: 100, maxBetAmount: null });
+  assert.deepEqual(seatedPayload.public.betThisRoundByUserId, { user_a: 1, user_b: 2 });
+  assert.deepEqual(seatedPayload.public.committedByUserId, { user_a: 1, user_b: 2 });
   assert.deepEqual(seatedPayload.public.lastBettingRoundActionByUserId, {});
   assert.equal(Array.isArray(seatedPayload.private.holeCards), true);
   assert.equal(seatedPayload.private.holeCards.length, 2);
