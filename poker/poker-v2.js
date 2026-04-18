@@ -24,28 +24,24 @@
   var WINNER_REVEAL_MS = 4_000;
   var CHIP_FLY_MS = 420;
   var CHIP_DENOMINATIONS = [
-    { value: 1000, color: 'purple' },
-    { value: 500, color: 'black' },
+    { value: 1000, color: 'yellow' },
+    { value: 500, color: 'purple' },
     { value: 100, color: 'black' },
     { value: 25, color: 'green' },
+    { value: 10, color: 'blue' },
     { value: 5, color: 'red' },
     { value: 1, color: 'white' }
   ];
-  var CHIP_STACK_ASSETS = {
-    white: 'assets/chips/stack-white.svg',
-    red: 'assets/chips/stack-red.svg',
-    green: 'assets/chips/stack-green.svg',
-    black: 'assets/chips/stack-black.svg',
-    purple: 'assets/chips/stack-purple.svg',
-    mixed: 'assets/chips/stack-mixed.svg'
+  var CHIP_ASSET_COLORS = {
+    white: true,
+    red: true,
+    blue: true,
+    green: true,
+    black: true,
+    purple: true,
+    yellow: true
   };
-  var CHIP_FLY_ASSETS = {
-    white: 'assets/chips/chip-white.svg',
-    red: 'assets/chips/chip-red.svg',
-    green: 'assets/chips/chip-green.svg',
-    black: 'assets/chips/chip-black.svg',
-    purple: 'assets/chips/chip-purple.svg'
-  };
+  var CHIP_STACK_MAX_HEIGHT = 5;
   var LAST_ACTION_LABEL = {
     fold: 'Fold',
     check: 'Check',
@@ -1123,25 +1119,37 @@
   }
 
   function compressChipBreakdown(breakdown, maxVisible){
+    var max = Math.max(1, Math.floor(Number(maxVisible) || 1));
     var total = 0;
     (breakdown || []).forEach(function(entry){ total += entry.count; });
-    if (!total || total <= maxVisible) return breakdown || [];
+    if (!total || total <= max) return breakdown || [];
     var visible = [];
     var allocated = 0;
     (breakdown || []).forEach(function(entry){
-      var scaled = Math.floor((entry.count / total) * maxVisible);
+      var exact = (entry.count / total) * max;
+      var scaled = Math.floor(exact);
       if (scaled < 1) scaled = 1;
-      visible.push({ value: entry.value, color: entry.color, count: scaled });
+      visible.push({ value: entry.value, color: entry.color, count: scaled, remainder: exact - scaled });
       allocated += scaled;
     });
-    while (allocated > maxVisible){
-      for (var i = 0; i < visible.length && allocated > maxVisible; i++){
+    while (allocated > max){
+      var reduced = false;
+      for (var i = 0; i < visible.length && allocated > max; i++){
         if (visible[i].count > 1){
           visible[i].count -= 1;
           allocated -= 1;
+          reduced = true;
         }
       }
+      if (!reduced) break;
     }
+    while (allocated < max && visible.length){
+      visible.sort(function(left, right){ return right.remainder - left.remainder; });
+      visible[0].count += 1;
+      allocated += 1;
+    }
+    visible.sort(function(left, right){ return right.value - left.value; });
+    visible.forEach(function(entry){ delete entry.remainder; });
     return visible;
   }
 
@@ -1151,11 +1159,56 @@
     return 'white';
   }
 
-  function resolveStackAssetColor(amount){
-    var compressed = compressChipBreakdown(buildChipBreakdown(amount), 3);
-    if (!compressed.length) return null;
-    if (compressed.length > 1) return 'mixed';
-    return compressed[0].color;
+  function splitChipBreakdownIntoStacks(breakdown){
+    var stacks = [];
+    (breakdown || []).slice().reverse().forEach(function(entry){
+      var remaining = Math.max(0, Math.floor(entry.count || 0));
+      while (remaining > 0){
+        var chipCount = Math.min(CHIP_STACK_MAX_HEIGHT, remaining);
+        stacks.push({ value: entry.value, color: entry.color, count: chipCount });
+        remaining -= chipCount;
+      }
+    });
+    return stacks;
+  }
+
+  function buildVisibleChipModels(amount, maxVisibleStacks){
+    var maxVisibleChips = Math.max(1, Math.floor(Number(maxVisibleStacks) || 1)) * CHIP_STACK_MAX_HEIGHT;
+    return splitChipBreakdownIntoStacks(compressChipBreakdown(buildChipBreakdown(amount), maxVisibleChips));
+  }
+
+  function resolveStackMaxVisible(variant){
+    if (variant === 'pot') return 9;
+    if (variant === 'seat-stack') return 7;
+    return 5;
+  }
+
+  function resolveTotalVisibleChipCount(stacks){
+    var total = 0;
+    (stacks || []).forEach(function(stack){ total += stack.count; });
+    return total;
+  }
+
+  function resolveStackSizeClass(stacks){
+    var stackCount = (stacks || []).length;
+    var chipCount = resolveTotalVisibleChipCount(stacks);
+    if (chipCount <= 1) return 'tiny';
+    if (chipCount <= 5 && stackCount <= 1) return 'small';
+    if (chipCount <= 15 && stackCount <= 4) return 'medium';
+    if (chipCount <= 30) return 'large';
+    return 'huge';
+  }
+
+  function resolveStackColumnCount(stackCount){
+    if (stackCount > 6) return 3;
+    if (stackCount > 2) return 2;
+    return 1;
+  }
+
+  function resolveChipStackAsset(color, chipCount){
+    var safeColor = CHIP_ASSET_COLORS[color] ? color : 'white';
+    var safeCount = Math.max(1, Math.min(CHIP_STACK_MAX_HEIGHT, Math.floor(Number(chipCount) || 1)));
+    return 'assets/chips/chip-' + safeColor + '-' + safeCount + '.png';
   }
 
   function createChipFlyAsset(color){
@@ -1166,23 +1219,41 @@
     img.alt = '';
     img.setAttribute('aria-hidden', 'true');
     img.decoding = 'async';
-    img.src = CHIP_FLY_ASSETS[color] || CHIP_FLY_ASSETS.white;
+    img.src = resolveChipStackAsset(color, 1);
     wrap.appendChild(img);
     return wrap;
   }
 
   function createChipStackVisual(amount, variant){
     var wrap = document.createElement('div');
-    wrap.className = 'poker-chip-visual-stack' + (variant ? (' poker-chip-visual-stack--' + variant) : '');
-    var color = resolveStackAssetColor(amount);
-    if (!color) return wrap;
-    var img = document.createElement('img');
-    img.className = 'poker-chip-stack-img';
-    img.alt = '';
-    img.setAttribute('aria-hidden', 'true');
-    img.decoding = 'async';
-    img.src = CHIP_STACK_ASSETS[color] || CHIP_STACK_ASSETS.mixed;
-    wrap.appendChild(img);
+    var chips = buildVisibleChipModels(amount, resolveStackMaxVisible(variant));
+    var sizeClass = resolveStackSizeClass(chips);
+    wrap.className = 'poker-chip-visual-stack poker-chip-visual-stack--' + sizeClass + (variant ? (' poker-chip-visual-stack--' + variant) : '');
+    wrap.setAttribute('data-chip-count', String(resolveTotalVisibleChipCount(chips)));
+    wrap.setAttribute('data-stack-count', String(chips.length));
+    wrap.setAttribute('data-amount', String(Math.max(0, Math.floor(Number(amount) || 0))));
+    if (!chips.length) return wrap;
+    var columns = resolveStackColumnCount(chips.length);
+    for (var i = 0; i < chips.length; i++){
+      var chip = chips[i];
+      var column = columns === 1 ? 0 : i % columns;
+      var row = columns === 1 ? i : Math.floor(i / columns);
+      var columnOffset = (column - ((columns - 1) / 2)) * (columns === 3 ? 33 : 39);
+      var stagger = columns > 1 && row % 2 ? 3 : 0;
+      var verticalOffset = row * 12 + (columns > 1 ? column * 3 : 0);
+      var img = document.createElement('img');
+      img.className = 'poker-chip-stack-chip poker-chip-stack-chip--' + chip.color;
+      img.alt = '';
+      img.setAttribute('aria-hidden', 'true');
+      img.setAttribute('data-value', String(chip.value));
+      img.setAttribute('data-chip-count', String(chip.count));
+      img.decoding = 'async';
+      img.src = resolveChipStackAsset(chip.color, chip.count);
+      img.style.setProperty('--chip-x', Math.round(columnOffset + stagger) + 'px');
+      img.style.setProperty('--chip-y', '-' + Math.round(verticalOffset) + 'px');
+      img.style.setProperty('--chip-z', String(10 + i));
+      wrap.appendChild(img);
+    }
     return wrap;
   }
 

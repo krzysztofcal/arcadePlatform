@@ -379,6 +379,56 @@ test('poker v2 shows compact call amount in the primary action label', async () 
   assert.equal(harness.elements.pokerV2AmountValue.textContent, '2k');
 });
 
+test('poker v2 renders chip atlas stack variants from pot amount breakdown', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  const snapshot = (potTotal, stateVersion) => ({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        hand: { handId: 'hand-chip-visuals', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: potTotal, sidePots: [] },
+        legalActions: { seat: 1, actions: ['CHECK'] },
+        actionConstraints: { toCall: 0 }
+      },
+      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  });
+
+  ws.onSnapshot(snapshot(1, 10));
+  await harness.flush();
+
+  let visual = harness.elements.pokerPotChipStack.children[0];
+  assert.equal(visual.attributes['data-amount'], '1');
+  assert.equal(visual.attributes['data-chip-count'], '1');
+  assert.equal(visual.attributes['data-stack-count'], '1');
+  assert.equal(visual.children[0].src, 'assets/chips/chip-white-1.png');
+
+  ws.onSnapshot(snapshot(124, 11));
+  await harness.flush();
+
+  visual = harness.elements.pokerPotChipStack.children[0];
+  assert.equal(visual.attributes['data-amount'], '124');
+  assert.equal(visual.attributes['data-chip-count'], '7');
+  assert.equal(visual.attributes['data-stack-count'], '3');
+  assert.deepEqual(
+    visual.children.map((child) => child.src),
+    [
+      'assets/chips/chip-white-4.png',
+      'assets/chips/chip-blue-2.png',
+      'assets/chips/chip-black-1.png'
+    ]
+  );
+});
+
 test('poker v2 keeps fold available even when live legalActions omit fold', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();

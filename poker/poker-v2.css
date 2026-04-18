@@ -88,16 +88,21 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-seat--hero .poker-seat-name{padding-right:78px;}
 
 .poker-center-layer{position:absolute; left:50%; top:42%; transform:translate(-50%, -50%); width:min(86%, 350px); text-align:center;}
-.poker-pot-chip-stack{position:relative; margin:10px auto 0; width:92px; height:54px;}
+.poker-pot-chip-stack{position:relative; margin:10px auto 0; width:112px; height:78px;}
 
 .poker-pot-pill{display:inline-flex; padding:8px 24px; border-radius:22px; border:1px solid rgba(255,208,128,0.38); background:linear-gradient(180deg, rgba(8,16,26,0.88), rgba(2,6,10,0.95)); font-size:2rem; font-weight:700; line-height:1; color:#f8efd6; box-shadow:0 10px 20px rgba(0,0,0,0.45), inset 0 1px 1px rgba(255,255,255,0.13);}
 
 .poker-community-cards{margin:18px auto 0; display:flex; align-items:center; justify-content:center; gap:5px;}
-.poker-chip-visual-stack{position:absolute; transform:translate(-50%, -50%); width:84px; height:52px; pointer-events:none;}
-.poker-chip-visual-stack--seat-bet{z-index:2; opacity:0.96; transform:translate(-50%, -50%) scale(0.94);}
-.poker-chip-visual-stack--seat-stack{z-index:1; opacity:0.94;}
+.poker-chip-visual-stack{position:absolute; transform:translate(-50%, -50%); width:112px; height:82px; pointer-events:none;}
+.poker-chip-visual-stack--seat-bet{z-index:2; opacity:0.96; transform:translate(-50%, -50%) scale(0.72);}
+.poker-chip-visual-stack--seat-stack{z-index:1; opacity:0.94; transform:translate(-50%, -50%) scale(0.78);}
 .poker-chip-visual-stack--pot{position:relative; transform:none; width:100%; height:100%;}
-.poker-chip-stack-img{display:block; width:100%; height:100%; object-fit:contain; filter:drop-shadow(0 4px 7px rgba(0,0,0,0.46));}
+.poker-chip-stack-chip{position:absolute; left:50%; bottom:4px; width:58px; height:auto; transform:translate(calc(-50% + var(--chip-x, 0px)), var(--chip-y, 0px)); z-index:var(--chip-z, 1); filter:drop-shadow(0 4px 7px rgba(0,0,0,0.46));}
+.poker-chip-visual-stack--tiny .poker-chip-stack-chip{width:52px;}
+.poker-chip-visual-stack--small .poker-chip-stack-chip{width:55px;}
+.poker-chip-visual-stack--large .poker-chip-stack-chip,
+.poker-chip-visual-stack--huge .poker-chip-stack-chip{width:56px;}
+.poker-chip-visual-stack--pot .poker-chip-stack-chip{width:62px;}
 .poker-chip-fly{position:absolute; left:0; top:0; width:24px; height:13px; filter:drop-shadow(0 6px 10px rgba(0,0,0,0.42)); animation:poker-chip-fly 420ms cubic-bezier(.22,.7,.2,1) forwards;}
 .poker-chip-fly-img{display:block; width:100%; height:100%; object-fit:contain;}
 
