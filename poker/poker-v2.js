@@ -1257,28 +1257,82 @@
     return wrap;
   }
 
-  function getSeatChipAnchor(anchor, slot){
-    var betOffsets = {
-      0: { x: 9, y: 13 },
-      1: { x: -17, y: 8 },
-      2: { x: -17, y: -7 },
-      3: { x: 9, y: -13 },
-      4: { x: 17, y: -7 },
-      5: { x: 17, y: 8 }
-    };
-    var stackOffsets = {
-      0: { x: -9, y: 13 },
-      1: { x: -17, y: -8 },
-      2: { x: -17, y: 8 },
-      3: { x: -9, y: -13 },
-      4: { x: 17, y: 8 },
-      5: { x: 17, y: -8 }
-    };
-    var bet = betOffsets[slot] || { x: 0, y: 12 };
-    var stack = stackOffsets[slot] || { x: 0, y: 18 };
+  function clampNumber(value, min, max){
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function getSeatAvatarAnchorFromRect(seatNo){
+    if (!els.scene || !renderedSeatAvatars[seatNo]) return null;
+    if (typeof els.scene.getBoundingClientRect !== 'function' || typeof renderedSeatAvatars[seatNo].getBoundingClientRect !== 'function') return null;
+    var sceneRect = els.scene.getBoundingClientRect();
+    var avatarRect = renderedSeatAvatars[seatNo].getBoundingClientRect();
+    if (!sceneRect || !avatarRect || sceneRect.width <= 0 || sceneRect.height <= 0 || avatarRect.width <= 0 || avatarRect.height <= 0) return null;
+    var centerX = ((avatarRect.left + avatarRect.width / 2) - sceneRect.left) / sceneRect.width * 100;
+    var centerY = ((avatarRect.top + avatarRect.height / 2) - sceneRect.top) / sceneRect.height * 100;
+    var radiusX = (avatarRect.width / 2) / sceneRect.width * 100;
+    var radiusY = (avatarRect.height / 2) / sceneRect.height * 100;
+    return { x: centerX, y: centerY, radiusX: radiusX, radiusY: radiusY };
+  }
+
+  function resolveSeatChipDirections(anchor){
+    var dx = anchor.x - 50;
+    var dy = anchor.y - 50;
+    var horizontal = Math.abs(dx) >= Math.abs(dy);
+    if (horizontal){
+      var sideX = dx >= 0 ? -1 : 1;
+      return {
+        bet: { x: sideX, y: -0.42 },
+        stack: { x: sideX, y: 0.42 }
+      };
+    }
+    var sideY = dy >= 0 ? -1 : 1;
     return {
-      bet: { x: anchor.x + bet.x, y: anchor.y + bet.y },
-      stack: { x: anchor.x + stack.x, y: anchor.y + stack.y }
+      bet: { x: -0.42, y: sideY },
+      stack: { x: 0.42, y: sideY }
+    };
+  }
+
+  function normalizeDirection(vector){
+    var length = Math.sqrt(vector.x * vector.x + vector.y * vector.y) || 1;
+    return {
+      x: vector.x / length,
+      y: vector.y / length
+    };
+  }
+
+  function keepSeatChipOutOfCenterLane(point, source){
+    var centerLane = { left: 33, right: 67, top: 31, bottom: 57 };
+    if (point.x < centerLane.left || point.x > centerLane.right || point.y < centerLane.top || point.y > centerLane.bottom) return point;
+    var dx = source.x - 50;
+    var dy = source.y - 50;
+    if (Math.abs(dx) >= Math.abs(dy)){
+      point.x = dx >= 0 ? centerLane.right + 3 : centerLane.left - 3;
+    } else {
+      point.y = dy >= 0 ? centerLane.bottom + 3 : centerLane.top - 3;
+    }
+    return point;
+  }
+
+  function resolveSeatChipPoint(source, direction){
+    var unit = normalizeDirection(direction);
+    var edgeDistance = Math.sqrt(Math.pow(unit.x * source.radiusX, 2) + Math.pow(unit.y * source.radiusY, 2));
+    var gap = 7;
+    var point = {
+      x: source.x + unit.x * (edgeDistance + gap),
+      y: source.y + unit.y * (edgeDistance + gap)
+    };
+    point = keepSeatChipOutOfCenterLane(point, source);
+    point.x = clampNumber(point.x, 10, 90);
+    point.y = clampNumber(point.y, 12, 88);
+    return point;
+  }
+
+  function getSeatChipAnchor(anchor, seatNo){
+    var source = getSeatAvatarAnchorFromRect(seatNo) || { x: anchor.x, y: anchor.y, radiusX: 8, radiusY: 5 };
+    var directions = resolveSeatChipDirections(source);
+    return {
+      bet: resolveSeatChipPoint(source, directions.bet),
+      stack: resolveSeatChipPoint(source, directions.stack)
     };
   }
 
@@ -1292,7 +1346,7 @@
       var anchor = renderedSeatAnchors[seat.seatNo];
       var slot = renderedSeatSlots[seat.seatNo];
       if (!anchor || !Number.isInteger(slot)) return;
-      var chipAnchor = getSeatChipAnchor(anchor, slot);
+      var chipAnchor = getSeatChipAnchor(anchor, seat.seatNo);
       renderedSeatBetAnchors[seat.seatNo] = chipAnchor.bet;
       renderedSeatStackAnchors[seat.seatNo] = chipAnchor.stack;
       var committed = Math.max(0, Number(seatCommittedByUserId[seat.userId]) || 0);

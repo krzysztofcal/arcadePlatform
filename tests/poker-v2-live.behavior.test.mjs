@@ -5,11 +5,19 @@ import path from 'node:path';
 import vm from 'node:vm';
 
 function makeElement(id){
+  const sceneRect = { left: 0, top: 0, width: 320, height: 640, right: 320, bottom: 640 };
   const style = {
     setProperty(name, value){ this[name] = String(value); },
     getPropertyValue(name){ return this[name] || ''; },
     removeProperty(name){ delete this[name]; }
   };
+  function hasClass(node, className){
+    return String(node && node.className || '').split(/\s+/).includes(className);
+  }
+  function parsePercent(value, fallback){
+    const parsed = Number.parseFloat(String(value || ''));
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
   const element = {
     id,
     hidden: false,
@@ -37,7 +45,24 @@ function makeElement(id){
       return this.children.includes(target);
     },
     addEventListener(type, fn){ this._listeners[type] = this._listeners[type] || []; this._listeners[type].push(fn); },
-    getBoundingClientRect(){ return { left: 0, top: 0, width: 320, height: 640, right: 320, bottom: 640 }; },
+    getBoundingClientRect(){
+      if (this._rect) return this._rect;
+      if (hasClass(this, 'poker-seat-avatar') && this.parentNode){
+        const seat = this.parentNode;
+        const size = hasClass(seat, 'poker-seat--hero') ? 96 : 76;
+        const centerX = sceneRect.width * parsePercent(seat.style.left, 50) / 100;
+        const centerY = sceneRect.height * parsePercent(seat.style.top, 50) / 100;
+        return {
+          left: centerX - size / 2,
+          top: centerY - size / 2,
+          width: size,
+          height: size,
+          right: centerX + size / 2,
+          bottom: centerY + size / 2
+        };
+      }
+      return sceneRect;
+    },
     setAttribute(name, value){ this.attributes[name] = String(value); },
     removeAttribute(name){ delete this.attributes[name]; },
     hasAttribute(name){ return Object.prototype.hasOwnProperty.call(this.attributes, name); },
@@ -507,10 +532,31 @@ test('poker v2 keeps side-seat chip stacks beside avatars instead of the communi
 
   const betStack = harness.elements.pokerSeatChipLayer.children[0];
   const seatStack = harness.elements.pokerSeatChipLayer.children[1];
-  assert.equal(betStack.style.left, '63%');
-  assert.equal(betStack.style.top, '51%');
-  assert.equal(seatStack.style.left, '63%');
-  assert.equal(seatStack.style.top, '66%');
+  const centerLane = { left: 33, right: 67, top: 31, bottom: 57 };
+  const isInsideCenterLane = (point) => (
+    point.x >= centerLane.left
+    && point.x <= centerLane.right
+    && point.y >= centerLane.top
+    && point.y <= centerLane.bottom
+  );
+  const parsePoint = (stack) => ({
+    x: Number.parseFloat(stack.style.left),
+    y: Number.parseFloat(stack.style.top)
+  });
+  const betPoint = parsePoint(betStack);
+  const stackPoint = parsePoint(seatStack);
+
+  assert.ok(betPoint.x >= 10 && betPoint.x <= 90);
+  assert.ok(betPoint.y >= 12 && betPoint.y <= 88);
+  assert.ok(stackPoint.x >= 10 && stackPoint.x <= 90);
+  assert.ok(stackPoint.y >= 12 && stackPoint.y <= 88);
+  assert.ok(!isInsideCenterLane(betPoint));
+  assert.ok(!isInsideCenterLane(stackPoint));
+  assert.ok(betPoint.x < 80);
+  assert.ok(stackPoint.x < 80);
+  assert.ok(Math.abs(betPoint.x - 80) <= 30);
+  assert.ok(Math.abs(stackPoint.x - 80) <= 30);
+  assert.notEqual(betPoint.y, stackPoint.y);
 });
 
 test('poker v2 keeps fold available even when live legalActions omit fold', async () => {
