@@ -31,6 +31,14 @@
     { value: 5, color: 'red' },
     { value: 1, color: 'white' }
   ];
+  var CHIP_PALETTE = {
+    white: { light: '#ffffff', base: '#e8edf7', dark: '#b5bfd4', stripe: '#f8fafc', stroke: '#cfd8e6' },
+    red: { light: '#ff9d9d', base: '#dc4444', dark: '#7e1b1b', stripe: '#ffd5d5', stroke: '#a62525' },
+    green: { light: '#86ecab', base: '#24b362', dark: '#0e6035', stripe: '#d7ffe5', stroke: '#17784b' },
+    black: { light: '#717c8f', base: '#273245', dark: '#070b13', stripe: '#e5ebf6', stroke: '#1b2433' },
+    purple: { light: '#d6a1ff', base: '#9c51df', dark: '#492078', stripe: '#f1dcff', stroke: '#6b34aa' },
+    yellow: { light: '#ffe29a', base: '#e4a82a', dark: '#8a5712', stripe: '#fff2cc', stroke: '#b97d1d' }
+  };
   var LAST_ACTION_LABEL = {
     fold: 'Fold',
     check: 'Check',
@@ -1145,6 +1153,42 @@
     return 'white';
   }
 
+  function createProceduralChip(color, fly){
+    var palette = CHIP_PALETTE[color] || CHIP_PALETTE.white;
+    var wrap = document.createElement('span');
+    wrap.className = fly ? ('poker-chip-fly poker-chip-fly--' + color) : ('poker-chip poker-chip--' + color);
+    if (typeof document.createElementNS !== 'function'){
+      wrap.style.borderRadius = '999px';
+      wrap.style.background = 'linear-gradient(180deg, ' + palette.light + ', ' + palette.base + ' 52%, ' + palette.dark + ')';
+      wrap.style.boxShadow = fly ? '0 6px 10px rgba(0,0,0,0.42), inset 0 1px 1px rgba(255,255,255,0.4)' : '0 3px 5px rgba(0,0,0,0.42), inset 0 1px 1px rgba(255,255,255,0.4)';
+      return wrap;
+    }
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 120 52');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.className = 'poker-chip-svg';
+    var stripes = '';
+    var stripeCount = 10;
+    for (var i = 0; i < stripeCount; i++){
+      var theta = (Math.PI * 2 * i) / stripeCount;
+      var x = 60 + (Math.cos(theta) * 42);
+      var y = 26 + (Math.sin(theta) * 15);
+      stripes += '<ellipse cx="' + x.toFixed(2) + '" cy="' + y.toFixed(2) + '" rx="4.8" ry="1.7" fill="' + palette.stripe + '" opacity="0.92"/>';
+    }
+    svg.innerHTML = ''
+      + '<ellipse cx="60" cy="27" rx="57" ry="21" fill="' + palette.dark + '" opacity="0.95"/>'
+      + '<ellipse cx="60" cy="25.5" rx="56" ry="20" fill="' + palette.base + '"/>'
+      + '<ellipse cx="60" cy="25.5" rx="56" ry="20" fill="none" stroke="' + palette.stroke + '" stroke-width="1.6"/>'
+      + stripes
+      + '<ellipse cx="60" cy="25.2" rx="40" ry="14.1" fill="' + palette.light + '" opacity="0.26"/>'
+      + '<ellipse cx="60" cy="25.2" rx="23" ry="8.2" fill="' + palette.base + '" opacity="0.9"/>'
+      + '<ellipse cx="60" cy="25.2" rx="23" ry="8.2" fill="none" stroke="' + palette.stripe + '" stroke-width="1" opacity="0.68"/>'
+      + '<ellipse cx="60" cy="20.7" rx="30" ry="6.2" fill="#ffffff" opacity="0.32"/>'
+      + '<ellipse cx="60" cy="33.2" rx="53" ry="7.4" fill="#000000" opacity="0.2"/>';
+    wrap.appendChild(svg);
+    return wrap;
+  }
+
   function createChipStackVisual(amount, variant){
     var wrap = document.createElement('div');
     wrap.className = 'poker-chip-visual-stack' + (variant ? (' poker-chip-visual-stack--' + variant) : '');
@@ -1165,8 +1209,7 @@
       col.style.left = ((i * (width + gap)) + (variant === 'pot' ? 6 : 8)) + 'px';
       col.style.width = width + 'px';
       for (var j = 0; j < columns[i].length; j++){
-        var chip = document.createElement('span');
-        chip.className = 'poker-chip poker-chip--' + columns[i][j];
+        var chip = createProceduralChip(columns[i][j], false);
         chip.style.bottom = (j * 5) + 'px';
         col.appendChild(chip);
       }
@@ -1247,9 +1290,8 @@
 
   function spawnChipFly(fromPoint, toPoint, color, delayMs){
     if (!els.chipFxLayer || !fromPoint || !toPoint) return;
-    var fly = document.createElement('span');
     var tone = color || 'white';
-    fly.className = 'poker-chip-fly poker-chip-fly--' + tone;
+    var fly = createProceduralChip(tone, true);
     fly.style.left = Math.round(fromPoint.x) + 'px';
     fly.style.top = Math.round(fromPoint.y) + 'px';
     fly.style.animationDuration = CHIP_FLY_MS + 'ms';

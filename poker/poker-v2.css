@@ -98,24 +98,9 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-chip-visual-stack--seat-stack{z-index:1; opacity:0.94;}
 .poker-chip-visual-stack--pot{position:relative; transform:none; width:100%; height:100%;}
 .poker-chip-column{position:absolute; bottom:0; width:21px;}
-.poker-chip{position:absolute; left:0; width:100%; height:12px; border-radius:999px; border:1px solid rgba(255,255,255,0.34); box-shadow:0 4px 7px rgba(0,0,0,0.44), inset 0 1px 1px rgba(255,255,255,0.42), inset 0 -2px 3px rgba(0,0,0,0.28);}
-.poker-chip::before{content:""; position:absolute; inset:2px 1px; border-radius:inherit; background:radial-gradient(circle at 50% 26%, rgba(255,255,255,0.66), rgba(255,255,255,0.14) 52%, rgba(255,255,255,0) 82%);}
-.poker-chip::after{content:""; position:absolute; left:50%; top:50%; width:38%; height:54%; border-radius:999px; transform:translate(-50%, -50%); border:1px solid rgba(255,255,255,0.28); background:radial-gradient(circle at 50% 20%, rgba(255,255,255,0.5), rgba(255,255,255,0.08) 68%);}
-.poker-chip--white{background:linear-gradient(180deg, #ffffff, #d9e4f3 42%, #b4c1d7);}
-.poker-chip--red{background:linear-gradient(180deg, #ef6c6c, #d83838 44%, #861a1a);}
-.poker-chip--green{background:linear-gradient(180deg, #44d57f, #1ea85a 44%, #0f5f34);}
-.poker-chip--black{background:linear-gradient(180deg, #3f495a, #1b2433 44%, #070b13);}
-.poker-chip--purple{background:linear-gradient(180deg, #c27bff, #9543db 44%, #4a1d79);}
-.poker-chip--yellow{background:linear-gradient(180deg, #ffd064, #e7a721 44%, #8a5510);}
-.poker-chip-fly{position:absolute; left:0; top:0; width:24px; height:13px; border-radius:999px; border:1px solid rgba(255,255,255,0.38); box-shadow:0 7px 11px rgba(0,0,0,0.45), inset 0 1px 1px rgba(255,255,255,0.36), inset 0 -2px 3px rgba(0,0,0,0.26); animation:poker-chip-fly 420ms cubic-bezier(.22,.7,.2,1) forwards;}
-.poker-chip-fly::before{content:""; position:absolute; inset:2px 1px; border-radius:inherit; background:radial-gradient(circle at 50% 24%, rgba(255,255,255,0.64), rgba(255,255,255,0.1) 62%, rgba(255,255,255,0) 82%);}
-.poker-chip-fly::after{content:""; position:absolute; left:50%; top:50%; width:40%; height:52%; border-radius:999px; transform:translate(-50%, -50%); border:1px solid rgba(255,255,255,0.3);}
-.poker-chip-fly--white{background:linear-gradient(180deg, #ffffff, #d9e4f3 44%, #b4c1d7);}
-.poker-chip-fly--red{background:linear-gradient(180deg, #ef6c6c, #d83838 44%, #861a1a);}
-.poker-chip-fly--green{background:linear-gradient(180deg, #44d57f, #1ea85a 44%, #0f5f34);}
-.poker-chip-fly--black{background:linear-gradient(180deg, #3f495a, #1b2433 44%, #070b13);}
-.poker-chip-fly--purple{background:linear-gradient(180deg, #c27bff, #9543db 44%, #4a1d79);}
-.poker-chip-fly--yellow{background:linear-gradient(180deg, #ffd064, #e7a721 44%, #8a5510);}
+.poker-chip{position:absolute; left:0; width:100%; height:13px; filter:drop-shadow(0 3px 5px rgba(0,0,0,0.44));}
+.poker-chip-svg{display:block; width:100%; height:100%;}
+.poker-chip-fly{position:absolute; left:0; top:0; width:24px; height:13px; filter:drop-shadow(0 6px 10px rgba(0,0,0,0.42)); animation:poker-chip-fly 420ms cubic-bezier(.22,.7,.2,1) forwards;}
 
 .poker-dealer-chip{position:absolute; left:50%; top:50%; transform:translate(-50%, -50%); z-index:4; pointer-events:none; width:38px; height:38px; border-radius:50%; border:2px solid rgba(96,71,26,0.9); background:linear-gradient(180deg, #fee7a4, #d9ab4e); color:#2f1e09; font-size:1.25rem; font-weight:700; display:flex; align-items:center; justify-content:center; box-shadow:0 7px 16px rgba(0,0,0,0.45);}
 
