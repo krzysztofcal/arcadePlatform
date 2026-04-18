@@ -370,7 +370,7 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
       maxBetAmount: Number.isFinite(legalInfo.maxBetAmount) ? legalInfo.maxBetAmount : null
     },
     betThisRoundByUserId: normalizeNumericUserMap(statePublic.betThisRoundByUserId),
-    committedByUserId: normalizeNumericUserMap(statePublic.betThisRoundByUserId),
+    committedByUserId: normalizeNumericUserMap(statePublic.committedByUserId),
     lastBettingRoundActionByUserId: normalizeLastBettingRoundActionByUserId(statePublic.lastBettingRoundActionByUserId),
     private: resolvePrivateBranch({ state, userId, youSeat: effectiveYouSeat })
   };

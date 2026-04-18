@@ -429,6 +429,43 @@ test('poker v2 renders chip atlas stack variants from pot amount breakdown', asy
   );
 });
 
+test('poker v2 prefers committed chip maps for seat bet stacks', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 12,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        hand: { handId: 'hand-seat-chip-visuals', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        stacks: { 'user-1': 124 },
+        betThisRoundByUserId: { 'user-1': 4 },
+        committedByUserId: { 'user-1': 9 },
+        pot: { total: 9, sidePots: [] },
+        legalActions: { seat: 1, actions: ['CHECK'] },
+        actionConstraints: { toCall: 0 }
+      },
+      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const betStack = harness.elements.pokerSeatChipLayer.children[0];
+  const stack = harness.elements.pokerSeatChipLayer.children[1];
+  assert.equal(betStack.attributes['data-amount'], '9');
+  assert.equal(betStack.attributes['data-chip-count'], '5');
+  assert.equal(betStack.children[0].src, 'assets/chips/chip-white-4.png');
+  assert.equal(betStack.children[1].src, 'assets/chips/chip-red-1.png');
+  assert.equal(stack.attributes['data-amount'], '124');
+});
+
 test('poker v2 keeps fold available even when live legalActions omit fold', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();

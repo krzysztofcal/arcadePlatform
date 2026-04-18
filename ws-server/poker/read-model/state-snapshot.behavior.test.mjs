@@ -127,7 +127,7 @@ test("buildStateSnapshotPayload projects bootstrapped PREFLOP state from table m
   assert.deepEqual(seatedPayload.public.legalActions, { seat: 1, actions: ["FOLD", "CALL", "RAISE"] });
   assert.deepEqual(seatedPayload.public.actionConstraints, { toCall: 1, minRaiseTo: 4, maxRaiseTo: 100, maxBetAmount: null });
   assert.deepEqual(seatedPayload.public.betThisRoundByUserId, { user_a: 1, user_b: 2 });
-  assert.deepEqual(seatedPayload.public.committedByUserId, { user_a: 1, user_b: 2 });
+  assert.deepEqual(seatedPayload.public.committedByUserId, {});
   assert.deepEqual(seatedPayload.public.lastBettingRoundActionByUserId, {});
   assert.equal(Array.isArray(seatedPayload.private.holeCards), true);
   assert.equal(seatedPayload.private.holeCards.length, 2);
@@ -138,6 +138,36 @@ test("buildStateSnapshotPayload projects bootstrapped PREFLOP state from table m
     actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null }
   });
   assert.equal(seatedPayload.table.memberCount, seatedPayload.table.members.length);
+});
+
+test("buildStateSnapshotPayload keeps committed chips distinct from current-round bets", () => {
+  const payload = buildStateSnapshotPayload({
+    userId: "user_a",
+    tableSnapshot: {
+      tableId: "table_distinct_commit",
+      roomId: "table_distinct_commit",
+      stateVersion: 15,
+      members: [
+        { userId: "user_a", seat: 1 },
+        { userId: "user_b", seat: 2 }
+      ],
+      memberCount: 2,
+      youSeat: 1,
+      hand: { handId: "h_distinct_commit", status: "TURN", round: "TURN", dealerSeatNo: 2 },
+      board: { cards: ["AS", "KD", "QC", "3H"] },
+      stacks: { user_a: 91, user_b: 86 },
+      betThisRoundByUserId: { user_a: 4, user_b: 8 },
+      committedByUserId: { user_a: 9, user_b: 14 },
+      pot: { total: 23, sidePots: [] },
+      turn: { userId: "user_a", seat: 1, startedAt: null, deadlineAt: null },
+      legalActions: { seat: 1, actions: ["CHECK"] },
+      actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+      private: { holeCards: ["AS", "AD"] }
+    }
+  });
+
+  assert.deepEqual(payload.public.betThisRoundByUserId, { user_a: 4, user_b: 8 });
+  assert.deepEqual(payload.public.committedByUserId, { user_a: 9, user_b: 14 });
 });
 
 test("buildStateSnapshotPayload serializes last betting-round action labels", () => {

@@ -189,7 +189,7 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId }) {
       seats: normalizeSeatRows(tableSnapshot?.seats),
       stacks: normalizeStacks(tableSnapshot?.stacks),
       betThisRoundByUserId: normalizeNumericUserMap(tableSnapshot?.betThisRoundByUserId),
-      committedByUserId: normalizeNumericUserMap(tableSnapshot?.betThisRoundByUserId),
+      committedByUserId: normalizeNumericUserMap(tableSnapshot?.committedByUserId),
       pot: {
         total: Number.isFinite(tableSnapshot?.pot?.total) ? tableSnapshot.pot.total : null,
         sidePots: Array.isArray(tableSnapshot?.pot?.sidePots) ? tableSnapshot.pot.sidePots : []

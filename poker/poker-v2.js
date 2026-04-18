@@ -544,10 +544,10 @@
 
   function extractSeatCommittedByUserId(payload){
     var publicObj = isObject(payload && payload.public) ? payload.public : {};
-    var next = normalizeNumericUserMap(payload && payload.betThisRoundByUserId)
-      || normalizeNumericUserMap(publicObj.betThisRoundByUserId)
-      || normalizeNumericUserMap(payload && payload.committedByUserId)
+    var next = normalizeNumericUserMap(payload && payload.committedByUserId)
       || normalizeNumericUserMap(publicObj.committedByUserId)
+      || normalizeNumericUserMap(payload && payload.betThisRoundByUserId)
+      || normalizeNumericUserMap(publicObj.betThisRoundByUserId)
       || {};
     return next;
   }
