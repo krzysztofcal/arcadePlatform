@@ -466,6 +466,53 @@ test('poker v2 prefers committed chip maps for seat bet stacks', async () => {
   assert.equal(stack.attributes['data-amount'], '124');
 });
 
+test('poker v2 keeps side-seat chip stacks beside avatars instead of the community-card lane', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 13,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1 },
+          { userId: 'bot-2', seat: 2 },
+          { userId: 'bot-3', seat: 3 },
+          { userId: 'bot-4', seat: 4 },
+          { userId: 'bot-5', seat: 5 },
+          { userId: 'bot-6', seat: 6 }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-side-chip-position', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        stacks: { 'bot-6': 124 },
+        committedByUserId: { 'bot-6': 9 },
+        pot: { total: 9, sidePots: [] },
+        legalActions: { seat: 1, actions: ['CHECK'] },
+        actionConstraints: { toCall: 0 }
+      },
+      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const betStack = harness.elements.pokerSeatChipLayer.children[0];
+  const seatStack = harness.elements.pokerSeatChipLayer.children[1];
+  assert.equal(betStack.style.left, '63%');
+  assert.equal(betStack.style.top, '51%');
+  assert.equal(seatStack.style.left, '63%');
+  assert.equal(seatStack.style.top, '66%');
+});
+
 test('poker v2 keeps fold available even when live legalActions omit fold', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
