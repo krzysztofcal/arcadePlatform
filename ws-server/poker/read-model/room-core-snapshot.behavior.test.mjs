@@ -207,6 +207,7 @@ test("projectRoomCoreSnapshot reuses poker legal-actions/public stripping semant
       sidePots: [{ total: 10 }],
       stacks: { seated_user: 150, other_user: 300 },
       betThisRoundByUserId: { seated_user: 25, other_user: 25 },
+      committedByUserId: { seated_user: 40, other_user: 35 },
       currentBet: 25,
       foldedByUserId: { seated_user: false, other_user: false },
       leftTableByUserId: { seated_user: false, other_user: false },
@@ -243,6 +244,8 @@ test("projectRoomCoreSnapshot reuses poker legal-actions/public stripping semant
   assert.equal(seated.hand.handId, "hand_42");
   assert.equal(seated.hand.status, "PREFLOP");
   assert.deepEqual(seated.board.cards, ["AS", "KD"]);
+  assert.deepEqual(seated.betThisRoundByUserId, { seated_user: 25, other_user: 25 });
+  assert.deepEqual(seated.committedByUserId, { seated_user: 40, other_user: 35 });
   assert.deepEqual(seated.legalActions.actions, ["CHECK", "BET"]);
   assert.deepEqual(seated.lastBettingRoundActionByUserId, {});
   assert.deepEqual(seated.private, { userId: "seated_user", seat: 2, holeCards: ["AH", "AD"] });

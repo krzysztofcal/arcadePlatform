@@ -5,11 +5,19 @@ import path from 'node:path';
 import vm from 'node:vm';
 
 function makeElement(id){
+  const sceneRect = { left: 0, top: 0, width: 320, height: 640, right: 320, bottom: 640 };
   const style = {
     setProperty(name, value){ this[name] = String(value); },
     getPropertyValue(name){ return this[name] || ''; },
     removeProperty(name){ delete this[name]; }
   };
+  function hasClass(node, className){
+    return String(node && node.className || '').split(/\s+/).includes(className);
+  }
+  function parsePercent(value, fallback){
+    const parsed = Number.parseFloat(String(value || ''));
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
   const element = {
     id,
     hidden: false,
@@ -37,6 +45,24 @@ function makeElement(id){
       return this.children.includes(target);
     },
     addEventListener(type, fn){ this._listeners[type] = this._listeners[type] || []; this._listeners[type].push(fn); },
+    getBoundingClientRect(){
+      if (this._rect) return this._rect;
+      if (hasClass(this, 'poker-seat-avatar') && this.parentNode){
+        const seat = this.parentNode;
+        const size = hasClass(seat, 'poker-seat--hero') ? 96 : 76;
+        const centerX = sceneRect.width * parsePercent(seat.style.left, 50) / 100;
+        const centerY = sceneRect.height * parsePercent(seat.style.top, 50) / 100;
+        return {
+          left: centerX - size / 2,
+          top: centerY - size / 2,
+          width: size,
+          height: size,
+          right: centerX + size / 2,
+          bottom: centerY + size / 2
+        };
+      }
+      return sceneRect;
+    },
     setAttribute(name, value){ this.attributes[name] = String(value); },
     removeAttribute(name){ delete this.attributes[name]; },
     hasAttribute(name){ return Object.prototype.hasOwnProperty.call(this.attributes, name); },
@@ -67,7 +93,7 @@ function createHarness(options = {}){
   const elements = {};
   [
     'pokerMenuToggle', 'pokerMenuPanel', 'pokerLobbyLink',
-    'pokerSeatLayer', 'pokerPotPill', 'pokerCommunityCards', 'pokerDealerChip',
+    'pokerSeatLayer', 'pokerSeatChipLayer', 'pokerChipFxLayer', 'pokerPotPill', 'pokerPotChipStack', 'pokerCommunityCards', 'pokerDealerChip',
     'pokerHeroCards', 'pokerV2LiveStatus', 'pokerV2TableMeta', 'pokerV2TurnText',
     'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2SignInBtn', 'pokerV2SeatNo',
     'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
@@ -182,6 +208,7 @@ function createHarness(options = {}){
       readyState: 'loading',
       addEventListener(type, fn){ documentEvents[type] = documentEvents[type] || []; documentEvents[type].push(fn); },
       getElementById(id){ return elements[id] || null; },
+      querySelector(selector){ if (selector === '.poker-scene') return elements.pokerTableScreen || null; return null; },
       createElement(tag){ return makeElement(tag); }
     },
     URLSearchParams,
@@ -375,6 +402,161 @@ test('poker v2 shows compact call amount in the primary action label', async () 
 
   assert.equal(harness.elements.pokerV2PrimaryBtn.textContent, 'Call (1k)');
   assert.equal(harness.elements.pokerV2AmountValue.textContent, '2k');
+});
+
+test('poker v2 renders chip atlas stack variants from pot amount breakdown', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  const snapshot = (potTotal, stateVersion) => ({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        hand: { handId: 'hand-chip-visuals', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: potTotal, sidePots: [] },
+        legalActions: { seat: 1, actions: ['CHECK'] },
+        actionConstraints: { toCall: 0 }
+      },
+      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  });
+
+  ws.onSnapshot(snapshot(1, 10));
+  await harness.flush();
+
+  let visual = harness.elements.pokerPotChipStack.children[0];
+  assert.equal(visual.attributes['data-amount'], '1');
+  assert.equal(visual.attributes['data-chip-count'], '1');
+  assert.equal(visual.attributes['data-stack-count'], '1');
+  assert.equal(visual.children[0].src, 'assets/chips/chip-white-1.png');
+
+  ws.onSnapshot(snapshot(124, 11));
+  await harness.flush();
+
+  visual = harness.elements.pokerPotChipStack.children[0];
+  assert.equal(visual.attributes['data-amount'], '124');
+  assert.equal(visual.attributes['data-chip-count'], '7');
+  assert.equal(visual.attributes['data-stack-count'], '3');
+  assert.deepEqual(
+    visual.children.map((child) => child.src),
+    [
+      'assets/chips/chip-white-4.png',
+      'assets/chips/chip-blue-2.png',
+      'assets/chips/chip-black-1.png'
+    ]
+  );
+});
+
+test('poker v2 prefers committed chip maps for seat bet stacks', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 12,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        hand: { handId: 'hand-seat-chip-visuals', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        stacks: { 'user-1': 124 },
+        betThisRoundByUserId: { 'user-1': 4 },
+        committedByUserId: { 'user-1': 9 },
+        pot: { total: 9, sidePots: [] },
+        legalActions: { seat: 1, actions: ['CHECK'] },
+        actionConstraints: { toCall: 0 }
+      },
+      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const betStack = harness.elements.pokerSeatChipLayer.children[0];
+  const stack = harness.elements.pokerSeatChipLayer.children[1];
+  assert.equal(betStack.attributes['data-amount'], '9');
+  assert.equal(betStack.attributes['data-chip-count'], '5');
+  assert.equal(betStack.children[0].src, 'assets/chips/chip-white-4.png');
+  assert.equal(betStack.children[1].src, 'assets/chips/chip-red-1.png');
+  assert.equal(stack.attributes['data-amount'], '124');
+});
+
+test('poker v2 keeps side-seat chip stacks beside avatars instead of the community-card lane', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 13,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1 },
+          { userId: 'bot-2', seat: 2 },
+          { userId: 'bot-3', seat: 3 },
+          { userId: 'bot-4', seat: 4 },
+          { userId: 'bot-5', seat: 5 },
+          { userId: 'bot-6', seat: 6 }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-side-chip-position', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        stacks: { 'bot-6': 124 },
+        committedByUserId: { 'bot-6': 9 },
+        pot: { total: 9, sidePots: [] },
+        legalActions: { seat: 1, actions: ['CHECK'] },
+        actionConstraints: { toCall: 0 }
+      },
+      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const betStack = harness.elements.pokerSeatChipLayer.children[0];
+  const seatStack = harness.elements.pokerSeatChipLayer.children[1];
+  const centerLane = { left: 33, right: 67, top: 31, bottom: 57 };
+  const isInsideCenterLane = (point) => (
+    point.x >= centerLane.left
+    && point.x <= centerLane.right
+    && point.y >= centerLane.top
+    && point.y <= centerLane.bottom
+  );
+  const parsePoint = (stack) => ({
+    x: Number.parseFloat(stack.style.left),
+    y: Number.parseFloat(stack.style.top)
+  });
+  const betPoint = parsePoint(betStack);
+  const stackPoint = parsePoint(seatStack);
+
+  assert.ok(betPoint.x >= 10 && betPoint.x <= 90);
+  assert.ok(betPoint.y >= 12 && betPoint.y <= 88);
+  assert.ok(stackPoint.x >= 10 && stackPoint.x <= 90);
+  assert.ok(stackPoint.y >= 12 && stackPoint.y <= 88);
+  assert.ok(!isInsideCenterLane(betPoint));
+  assert.ok(!isInsideCenterLane(stackPoint));
+  assert.ok(betPoint.x < 80);
+  assert.ok(stackPoint.x < 80);
+  assert.ok(Math.abs(betPoint.x - 80) <= 30);
+  assert.ok(Math.abs(stackPoint.x - 80) <= 30);
+  assert.notEqual(betPoint.y, stackPoint.y);
 });
 
 test('poker v2 keeps fold available even when live legalActions omit fold', async () => {
