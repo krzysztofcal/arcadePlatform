@@ -1703,18 +1703,23 @@
         var avatarCenterY = (avatarRect.top - sceneRect.top) + avatarRect.height / 2;
         var sceneCenterX = sceneRect.width / 2;
         var sceneCenterY = sceneRect.height / 2;
+        var avatarRadius = Math.min(avatarRect.width, avatarRect.height) / 2;
+        var chipRadius = Math.min(chipRect.width || 34, chipRect.height || 34) / 2;
+        if (heroHasDealerChip){
+          els.dealerChip.hidden = false;
+          els.dealerChip.style.left = Math.round(avatarCenterX + avatarRadius + chipRadius - 2) + 'px';
+          els.dealerChip.style.top = Math.round(avatarCenterY) + 'px';
+          return;
+        }
         var deltaX = sceneCenterX - avatarCenterX;
         var deltaY = sceneCenterY - avatarCenterY;
         var magnitude = Math.sqrt((deltaX * deltaX) + (deltaY * deltaY));
         if (magnitude > 0){
           var unitX = deltaX / magnitude;
           var unitY = deltaY / magnitude;
-          var avatarRadius = Math.min(avatarRect.width, avatarRect.height) / 2;
-          var chipRadius = Math.min(chipRect.width || 38, chipRect.height || 38) / 2;
           var contactDistance = avatarRadius + chipRadius - 2;
           var chipLeftPx = avatarCenterX + (unitX * contactDistance);
           var chipTopPx = avatarCenterY + (unitY * contactDistance);
-          if (heroHasDealerChip) chipLeftPx -= chipRadius;
           els.dealerChip.hidden = false;
           els.dealerChip.style.left = Math.round(chipLeftPx) + 'px';
           els.dealerChip.style.top = Math.round(chipTopPx) + 'px';
@@ -1739,7 +1744,8 @@
       }
     }
     var chipOffset = { x: 0, y: 7 };
-    if (slotIndex === 0) chipOffset = { x: 8, y: 7 };
+    if (heroHasDealerChip) chipOffset = { x: 20, y: 0 };
+    else if (slotIndex === 0) chipOffset = { x: 8, y: 7 };
     else if (slotIndex === 1) chipOffset = { x: -8, y: 8 };
     else if (slotIndex === 2) chipOffset = { x: -8, y: 7 };
     else if (slotIndex === 3) chipOffset = { x: -32, y: 3 };

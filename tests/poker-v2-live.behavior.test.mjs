@@ -359,6 +359,7 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.ok(bestHand, 'hero seat should surface a best-hand summary');
   const css = fs.readFileSync(path.join(process.cwd(), 'poker', 'poker-v2.css'), 'utf8').replace(/\s+/g, '');
   assert.match(css, /\.poker-seat--hero\.poker-seat-best-hand\{[^}]*left:auto;[^}]*right:calc\(50%\+70px\)/);
+  assert.match(css, /\.poker-dealer-chip\{[^}]*z-index:2;[^}]*width:34px;[^}]*height:34px;[^}]*font-size:1\.13rem/);
   assert.equal(harness.elements.pokerDealerChip.hidden, false, 'dealer chip should be visible when the dealer seat is known');
   assert.equal(harness.elements.pokerDealerChip.style.left, '24%');
   assert.equal(harness.elements.pokerDealerChip.style.top, '74%');
@@ -1099,6 +1100,8 @@ test('poker v2 turns the live clock red when five seconds remain', async () => {
   assert.ok(heroClock);
   assert.match(heroClock.className, /poker-seat-turn-clock--warning/);
   assert.equal(heroClock.style['--turn-hue'], '27');
+  assert.equal(harness.elements.pokerDealerChip.style.left, '54%');
+  assert.equal(harness.elements.pokerDealerChip.style.top, '91%');
 });
 
 test('poker v2 renders last-action badges and dims folded seats', async () => {
