@@ -354,7 +354,7 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   const heroStatus = heroSeat.children.find((node) => node.className === 'poker-seat-status');
   assert.ok(heroStatus, 'hero seat should render status as an avatar-edge badge');
   assert.equal(heroStatus.textContent, 'ACTIVE');
-  assert.ok(Number.parseFloat(heroStatus.style.top) > 100, 'hero status badge should sit near the avatar edge below the action badge slot');
+  assert.ok(Number.parseFloat(heroStatus.style.top) < 0, 'hero status badge should sit above the avatar');
   const bestHand = heroSeat.children.find((node) => node.className === 'poker-seat-best-hand');
   assert.ok(bestHand, 'hero seat should surface a best-hand summary');
   const css = fs.readFileSync(path.join(process.cwd(), 'poker', 'poker-v2.css'), 'utf8').replace(/\s+/g, '');
@@ -1140,20 +1140,24 @@ test('poker v2 renders last-action badges and dims folded seats', async () => {
   const villainRaiseSeat = findSeatByLabel(harness, 'Villain 1');
   const foldedSeat = findSeatByLabel(harness, 'Villain 2');
   const heroBadge = (heroSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
+  const heroStatus = (heroSeat.children || []).find((node) => node.className === 'poker-seat-status');
   const villainBadge = (villainRaiseSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
   const foldedBadge = (foldedSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
   const villainStatus = (villainRaiseSeat.children || []).find((node) => node.className === 'poker-seat-status');
 
   assert.ok(heroBadge);
+  assert.ok(heroStatus);
   assert.equal(heroBadge.textContent, 'Call');
   assert.match(heroBadge.className, /poker-seat-action-badge--call/);
+  assert.ok(Number.parseFloat(heroBadge.style.top) < Number.parseFloat(heroStatus.style.top), 'hero action badge should sit above the hero status badge');
+  assert.ok(Number.parseFloat(heroStatus.style.top) < 0, 'hero badges should stay above the avatar and away from the name');
   assert.ok(villainBadge);
   assert.equal(villainBadge.textContent, 'Raise');
   assert.match(villainBadge.className, /poker-seat-action-badge--raise/);
   assert.ok(villainStatus);
   assert.equal(villainStatus.textContent, 'ACTIVE');
   assert.equal(villainStatus.style.left, villainBadge.style.left);
-  assert.ok(Number.parseFloat(villainStatus.style.top) > Number.parseFloat(villainBadge.style.top), 'status badge should sit below the last-action badge');
+  assert.ok(Number.parseFloat(villainStatus.style.top) >= Number.parseFloat(villainBadge.style.top) + 22, 'status badge should sit below the last-action badge without overlapping it');
   assert.ok(foldedBadge);
   assert.equal(foldedBadge.textContent, 'Fold');
   assert.match(foldedBadge.className, /poker-seat-action-badge--fold/);

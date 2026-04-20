@@ -1046,6 +1046,7 @@
     var distance = radius + 8;
     var x = centerX;
     var y = centerY;
+    if (hero) return { left: x + 'px', top: '-28px' };
     if (slotIndex === 0) y -= distance;
     else if (slotIndex === 1) { x += distance; y -= 4; }
     else if (slotIndex === 2) { x += distance; y += 4; }
@@ -1059,7 +1060,7 @@
     var actionPosition = getSeatActionBadgePosition(slotIndex, hero);
     return {
       left: actionPosition.left,
-      top: (parseFloat(actionPosition.top) + 15) + 'px'
+      top: (parseFloat(actionPosition.top) + 24) + 'px'
     };
   }
 
