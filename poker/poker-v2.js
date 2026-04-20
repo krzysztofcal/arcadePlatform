@@ -1046,7 +1046,7 @@
     var distance = radius + 8;
     var x = centerX;
     var y = centerY;
-    if (hero) return { left: x + 'px', top: '-28px' };
+    if (hero) return { left: '38px', top: '-28px' };
     if (slotIndex === 0) y -= distance;
     else if (slotIndex === 1) { x += distance; y -= 4; }
     else if (slotIndex === 2) { x += distance; y += 4; }

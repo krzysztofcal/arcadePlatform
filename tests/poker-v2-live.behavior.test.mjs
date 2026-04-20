@@ -1149,6 +1149,8 @@ test('poker v2 renders last-action badges and dims folded seats', async () => {
   assert.ok(heroStatus);
   assert.equal(heroBadge.textContent, 'Call');
   assert.match(heroBadge.className, /poker-seat-action-badge--call/);
+  assert.equal(heroBadge.style.left, '38px');
+  assert.equal(heroStatus.style.left, heroBadge.style.left);
   assert.ok(Number.parseFloat(heroBadge.style.top) < Number.parseFloat(heroStatus.style.top), 'hero action badge should sit above the hero status badge');
   assert.ok(Number.parseFloat(heroStatus.style.top) < 0, 'hero badges should stay above the avatar and away from the name');
   assert.ok(villainBadge);
