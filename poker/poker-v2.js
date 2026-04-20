@@ -1334,10 +1334,10 @@
     var halfY = resolveVisualHalfPercent(source, 'y', 4);
     var gapX = source.sceneWidth ? Math.max(2, 8 / source.sceneWidth * 100) : 3;
     var point = {
-      x: source.x - source.radiusX - halfX - gapX,
+      x: source.x + source.radiusX + halfX + gapX,
       y: source.y + Math.min(1.6, source.radiusY * 0.15)
     };
-    point.x = clampNumber(point.x, 7, 90);
+    point.x = clampNumber(point.x, 10, 90);
     point.y = clampNumber(point.y, 12 + halfY, 86);
     return point;
   }

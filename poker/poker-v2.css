@@ -86,6 +86,8 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-seat--hero.poker-seat--active .poker-seat-avatar{border-color:rgba(84,245,152,0.88); box-shadow:0 0 0 4px rgba(99,247,166,0.2), 0 12px 24px rgba(0,0,0,0.54);}
 
 .poker-seat--hero .poker-seat-name{padding-right:78px;}
+.poker-seat--hero .poker-seat-best-hand{left:auto; right:calc(50% + 70px); align-items:flex-end; margin-left:0; margin-right:0;}
+.poker-seat--hero .poker-seat-best-hand-label{text-align:right;}
 
 .poker-center-layer{position:absolute; left:50%; top:42%; transform:translate(-50%, -50%); width:min(86%, 350px); text-align:center; z-index:7;}
 .poker-pot-chip-stack{position:relative; margin:10px auto 0; width:112px; height:78px;}

@@ -353,6 +353,8 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(heroStatus, undefined, 'hero seat should not repeat the active status pill');
   const bestHand = heroSeat.children.find((node) => node.className === 'poker-seat-best-hand');
   assert.ok(bestHand, 'hero seat should surface a best-hand summary');
+  const css = fs.readFileSync(path.join(process.cwd(), 'poker', 'poker-v2.css'), 'utf8').replace(/\s+/g, '');
+  assert.match(css, /\.poker-seat--hero\.poker-seat-best-hand\{[^}]*left:auto;[^}]*right:calc\(50%\+70px\)/);
   assert.equal(harness.elements.pokerDealerChip.hidden, false, 'dealer chip should be visible when the dealer seat is known');
   assert.equal(harness.elements.pokerDealerChip.style.left, '24%');
   assert.equal(harness.elements.pokerDealerChip.style.top, '74%');
@@ -559,7 +561,7 @@ test('poker v2 keeps side-seat chip stacks beside avatars instead of the communi
   assert.notEqual(betPoint.y, stackPoint.y);
 });
 
-test('poker v2 moves the current player chip stack outside the avatar footprint', async () => {
+test('poker v2 moves the current player chip stack to the right of the avatar', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -606,9 +608,9 @@ test('poker v2 moves the current player chip stack outside the avatar footprint'
 
   assert.match(seatStack.className, /poker-chip-visual-stack--hero-seat-stack/);
   assert.equal(seatStack.attributes['data-amount'], '1560');
-  assert.ok(stackPoint.x <= 12, 'hero stack should sit on the outside-left rail');
+  assert.ok(stackPoint.x >= 56 && stackPoint.x <= 68, 'hero stack should sit to the right of the avatar');
   assert.ok(stackPoint.y >= 82, 'hero stack should stay next to the avatar instead of moving into the card lane');
-  assert.ok(betPoint.x > stackPoint.x + 15, 'committed bet chips should not cover the hero stack');
+  assert.ok(betPoint.x < stackPoint.x - 15, 'committed bet chips should not cover the hero stack');
   assert.ok(betPoint.y < stackPoint.y - 5, 'committed bet chips should remain closer to the felt');
 });
 
