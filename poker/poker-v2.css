@@ -96,6 +96,7 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-chip-visual-stack{position:absolute; transform:translate(-50%, -50%); width:112px; height:82px; pointer-events:none;}
 .poker-chip-visual-stack--seat-bet{z-index:2; opacity:0.96; transform:translate(-50%, -50%) scale(0.72);}
 .poker-chip-visual-stack--seat-stack{z-index:1; opacity:0.94; transform:translate(-50%, -50%) scale(0.78);}
+.poker-chip-visual-stack--hero-seat-stack{z-index:1; opacity:0.98; transform:translate(-50%, -50%) scale(0.62);}
 .poker-chip-visual-stack--pot{position:relative; transform:none; width:100%; height:100%;}
 .poker-chip-stack-chip{position:absolute; left:50%; bottom:4px; width:58px; height:auto; transform:translate(calc(-50% + var(--chip-x, 0px)), var(--chip-y, 0px)); z-index:var(--chip-z, 1); filter:drop-shadow(0 4px 7px rgba(0,0,0,0.46));}
 .poker-chip-visual-stack--tiny .poker-chip-stack-chip{width:52px;}

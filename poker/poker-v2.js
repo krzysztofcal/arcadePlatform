@@ -42,6 +42,7 @@
     yellow: true
   };
   var CHIP_STACK_MAX_HEIGHT = 5;
+  var HERO_SEAT_STACK_VISUAL = { width: 112, height: 82, scale: 0.62 };
   var LAST_ACTION_LABEL = {
     fold: 'Fold',
     check: 'Check',
@@ -1179,7 +1180,7 @@
 
   function resolveStackMaxVisible(variant){
     if (variant === 'pot') return 9;
-    if (variant === 'seat-stack') return 7;
+    if (variant === 'seat-stack' || variant === 'hero-seat-stack') return 7;
     return 5;
   }
 
@@ -1271,7 +1272,14 @@
     var centerY = ((avatarRect.top + avatarRect.height / 2) - sceneRect.top) / sceneRect.height * 100;
     var radiusX = (avatarRect.width / 2) / sceneRect.width * 100;
     var radiusY = (avatarRect.height / 2) / sceneRect.height * 100;
-    return { x: centerX, y: centerY, radiusX: radiusX, radiusY: radiusY };
+    return {
+      x: centerX,
+      y: centerY,
+      radiusX: radiusX,
+      radiusY: radiusY,
+      sceneWidth: sceneRect.width,
+      sceneHeight: sceneRect.height
+    };
   }
 
   function resolveSeatChipDirections(anchor){
@@ -1313,6 +1321,27 @@
     return point;
   }
 
+  function resolveVisualHalfPercent(source, axis, fallback){
+    if (!source) return fallback;
+    var sceneSize = axis === 'x' ? source.sceneWidth : source.sceneHeight;
+    var visualSize = axis === 'x' ? HERO_SEAT_STACK_VISUAL.width : HERO_SEAT_STACK_VISUAL.height;
+    if (!Number.isFinite(sceneSize) || sceneSize <= 0) return fallback;
+    return ((visualSize * HERO_SEAT_STACK_VISUAL.scale) / 2) / sceneSize * 100;
+  }
+
+  function resolveHeroSeatStackPoint(source){
+    var halfX = resolveVisualHalfPercent(source, 'x', 8);
+    var halfY = resolveVisualHalfPercent(source, 'y', 4);
+    var gapX = source.sceneWidth ? Math.max(2, 8 / source.sceneWidth * 100) : 3;
+    var point = {
+      x: source.x - source.radiusX - halfX - gapX,
+      y: source.y + Math.min(1.6, source.radiusY * 0.15)
+    };
+    point.x = clampNumber(point.x, 7, 90);
+    point.y = clampNumber(point.y, 12 + halfY, 86);
+    return point;
+  }
+
   function resolveSeatChipPoint(source, direction){
     var unit = normalizeDirection(direction);
     var edgeDistance = Math.sqrt(Math.pow(unit.x * source.radiusX, 2) + Math.pow(unit.y * source.radiusY, 2));
@@ -1327,12 +1356,13 @@
     return point;
   }
 
-  function getSeatChipAnchor(anchor, seatNo){
+  function getSeatChipAnchor(anchor, seat){
+    var seatNo = seat && Number.isInteger(seat.seatNo) ? seat.seatNo : null;
     var source = getSeatAvatarAnchorFromRect(seatNo) || { x: anchor.x, y: anchor.y, radiusX: 8, radiusY: 5 };
     var directions = resolveSeatChipDirections(source);
     return {
       bet: resolveSeatChipPoint(source, directions.bet),
-      stack: resolveSeatChipPoint(source, directions.stack)
+      stack: isCurrentUserSeat(seat) ? resolveHeroSeatStackPoint(source) : resolveSeatChipPoint(source, directions.stack)
     };
   }
 
@@ -1346,7 +1376,7 @@
       var anchor = renderedSeatAnchors[seat.seatNo];
       var slot = renderedSeatSlots[seat.seatNo];
       if (!anchor || !Number.isInteger(slot)) return;
-      var chipAnchor = getSeatChipAnchor(anchor, seat.seatNo);
+      var chipAnchor = getSeatChipAnchor(anchor, seat);
       renderedSeatBetAnchors[seat.seatNo] = chipAnchor.bet;
       renderedSeatStackAnchors[seat.seatNo] = chipAnchor.stack;
       var committed = Math.max(0, Number(seatCommittedByUserId[seat.userId]) || 0);
@@ -1358,7 +1388,7 @@
       }
       var stackAmount = Math.max(0, Number(resolveStack(seat.userId)) || 0);
       if (stackAmount > 0){
-        var seatStack = createChipStackVisual(stackAmount, 'seat-stack');
+        var seatStack = createChipStackVisual(stackAmount, isCurrentUserSeat(seat) ? 'hero-seat-stack' : 'seat-stack');
         seatStack.style.left = chipAnchor.stack.x + '%';
         seatStack.style.top = chipAnchor.stack.y + '%';
         els.seatChipLayer.appendChild(seatStack);
