@@ -1055,6 +1055,14 @@
     return { left: x + 'px', top: y + 'px' };
   }
 
+  function getSeatStatusBadgePosition(slotIndex, hero){
+    var actionPosition = getSeatActionBadgePosition(slotIndex, hero);
+    return {
+      left: actionPosition.left,
+      top: (parseFloat(actionPosition.top) + 15) + 'px'
+    };
+  }
+
   function shortId(value){
     var text = typeof value === 'string' ? value.trim() : '';
     if (!text) return '';
@@ -1258,6 +1266,14 @@
     return wrap;
   }
 
+  function appendSeatStackAmountLabel(stackEl, amount){
+    if (!stackEl) return;
+    var label = document.createElement('span');
+    label.className = 'poker-chip-stack-label';
+    label.textContent = formatNumber(amount);
+    stackEl.appendChild(label);
+  }
+
   function clampNumber(value, min, max){
     return Math.max(min, Math.min(max, value));
   }
@@ -1389,6 +1405,7 @@
       var stackAmount = Math.max(0, Number(resolveStack(seat.userId)) || 0);
       if (stackAmount > 0){
         var seatStack = createChipStackVisual(stackAmount, isCurrentUserSeat(seat) ? 'hero-seat-stack' : 'seat-stack');
+        appendSeatStackAmountLabel(seatStack, stackAmount);
         seatStack.style.left = chipAnchor.stack.x + '%';
         seatStack.style.top = chipAnchor.stack.y + '%';
         els.seatChipLayer.appendChild(seatStack);
@@ -1556,10 +1573,6 @@
         }
       }
 
-      var stack = document.createElement('div');
-      stack.className = 'poker-seat-stack';
-      stack.textContent = seat && seat.userId ? formatNumber(resolveStack(seat.userId)) : 'Open';
-
       var cards = document.createElement('div');
       cards.className = 'poker-seat-cards';
       if (!hero && seat && seat.userId){
@@ -1579,8 +1592,11 @@
       name.textContent = seat ? getDisplayName(seat) : 'Seat ' + String(i + offset);
 
       var status = document.createElement('div');
+      var statusPosition = getSeatStatusBadgePosition(rotatedIndex, hero);
       status.className = 'poker-seat-status';
       status.textContent = seat ? String(seat.status || 'ACTIVE').replace(/_/g, ' ') : 'OPEN';
+      status.style.left = statusPosition.left;
+      status.style.top = statusPosition.top;
 
       article.appendChild(avatar);
       if (seat && lastAction){
@@ -1618,10 +1634,9 @@
         }
         article.appendChild(winnerBadge);
       }
-      article.appendChild(stack);
       if (cards.children.length) article.appendChild(cards);
       article.appendChild(name);
-      if (!(hero && seat)) article.appendChild(status);
+      article.appendChild(status);
       if (hero && heroBestHand){
         var bestHand = document.createElement('div');
         bestHand.className = 'poker-seat-best-hand';

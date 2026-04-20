@@ -349,8 +349,12 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(heroSeat.style.top, '91%', 'hero seat should stay near the bottom edge');
   const seatCards = heroSeat.children.find((node) => node.className === 'poker-seat-cards');
   assert.equal(seatCards, undefined, 'hero seat should not duplicate the bottom hole cards');
+  const heroStackText = heroSeat.children.find((node) => node.className === 'poker-seat-stack');
+  assert.equal(heroStackText, undefined, 'hero seat should not render stack text below the avatar');
   const heroStatus = heroSeat.children.find((node) => node.className === 'poker-seat-status');
-  assert.equal(heroStatus, undefined, 'hero seat should not repeat the active status pill');
+  assert.ok(heroStatus, 'hero seat should render status as an avatar-edge badge');
+  assert.equal(heroStatus.textContent, 'ACTIVE');
+  assert.ok(Number.parseFloat(heroStatus.style.top) > 100, 'hero status badge should sit near the avatar edge below the action badge slot');
   const bestHand = heroSeat.children.find((node) => node.className === 'poker-seat-best-hand');
   assert.ok(bestHand, 'hero seat should surface a best-hand summary');
   const css = fs.readFileSync(path.join(process.cwd(), 'poker', 'poker-v2.css'), 'utf8').replace(/\s+/g, '');
@@ -491,6 +495,9 @@ test('poker v2 prefers committed chip maps for seat bet stacks', async () => {
   assert.equal(betStack.children[0].src, 'assets/chips/chip-white-4.png');
   assert.equal(betStack.children[1].src, 'assets/chips/chip-red-1.png');
   assert.equal(stack.attributes['data-amount'], '124');
+  const stackLabel = stack.children.find((node) => node.className === 'poker-chip-stack-label');
+  assert.ok(stackLabel, 'seat stack amount should render below the visual chip stack');
+  assert.equal(stackLabel.textContent, '124');
 });
 
 test('poker v2 keeps side-seat chip stacks beside avatars instead of the community-card lane', async () => {
@@ -608,6 +615,9 @@ test('poker v2 moves the current player chip stack to the right of the avatar', 
 
   assert.match(seatStack.className, /poker-chip-visual-stack--hero-seat-stack/);
   assert.equal(seatStack.attributes['data-amount'], '1560');
+  const stackLabel = seatStack.children.find((node) => node.className === 'poker-chip-stack-label');
+  assert.ok(stackLabel, 'hero stack amount should render below the visual stack');
+  assert.equal(stackLabel.textContent, '1,560');
   assert.ok(stackPoint.x >= 56 && stackPoint.x <= 68, 'hero stack should sit to the right of the avatar');
   assert.ok(stackPoint.y >= 82, 'hero stack should stay next to the avatar instead of moving into the card lane');
   assert.ok(betPoint.x < stackPoint.x - 15, 'committed bet chips should not cover the hero stack');
@@ -1132,6 +1142,7 @@ test('poker v2 renders last-action badges and dims folded seats', async () => {
   const heroBadge = (heroSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
   const villainBadge = (villainRaiseSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
   const foldedBadge = (foldedSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
+  const villainStatus = (villainRaiseSeat.children || []).find((node) => node.className === 'poker-seat-status');
 
   assert.ok(heroBadge);
   assert.equal(heroBadge.textContent, 'Call');
@@ -1139,6 +1150,10 @@ test('poker v2 renders last-action badges and dims folded seats', async () => {
   assert.ok(villainBadge);
   assert.equal(villainBadge.textContent, 'Raise');
   assert.match(villainBadge.className, /poker-seat-action-badge--raise/);
+  assert.ok(villainStatus);
+  assert.equal(villainStatus.textContent, 'ACTIVE');
+  assert.equal(villainStatus.style.left, villainBadge.style.left);
+  assert.ok(Number.parseFloat(villainStatus.style.top) > Number.parseFloat(villainBadge.style.top), 'status badge should sit below the last-action badge');
   assert.ok(foldedBadge);
   assert.equal(foldedBadge.textContent, 'Fold');
   assert.match(foldedBadge.className, /poker-seat-action-badge--fold/);
