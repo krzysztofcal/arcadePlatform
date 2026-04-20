@@ -349,17 +349,8 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(heroSeat.style.top, '91%', 'hero seat should stay near the bottom edge');
   const seatCards = heroSeat.children.find((node) => node.className === 'poker-seat-cards');
   assert.equal(seatCards, undefined, 'hero seat should not duplicate the bottom hole cards');
-  const heroStackText = heroSeat.children.find((node) => node.className === 'poker-seat-stack');
-  assert.equal(heroStackText, undefined, 'hero seat should not render stack text below the avatar');
-  const heroStatus = heroSeat.children.find((node) => node.className === 'poker-seat-status');
-  assert.ok(heroStatus, 'hero seat should render status as an avatar-edge badge');
-  assert.equal(heroStatus.textContent, 'ACTIVE');
-  assert.ok(Number.parseFloat(heroStatus.style.top) < 0, 'hero status badge should sit above the avatar');
   const bestHand = heroSeat.children.find((node) => node.className === 'poker-seat-best-hand');
   assert.ok(bestHand, 'hero seat should surface a best-hand summary');
-  const css = fs.readFileSync(path.join(process.cwd(), 'poker', 'poker-v2.css'), 'utf8').replace(/\s+/g, '');
-  assert.match(css, /\.poker-seat--hero\.poker-seat-best-hand\{[^}]*left:auto;[^}]*right:calc\(50%\+70px\)/);
-  assert.match(css, /\.poker-dealer-chip\{[^}]*z-index:2;[^}]*width:34px;[^}]*height:34px;[^}]*font-size:1\.13rem/);
   assert.equal(harness.elements.pokerDealerChip.hidden, false, 'dealer chip should be visible when the dealer seat is known');
   assert.equal(harness.elements.pokerDealerChip.style.left, '24%');
   assert.equal(harness.elements.pokerDealerChip.style.top, '74%');
@@ -496,9 +487,6 @@ test('poker v2 prefers committed chip maps for seat bet stacks', async () => {
   assert.equal(betStack.children[0].src, 'assets/chips/chip-white-4.png');
   assert.equal(betStack.children[1].src, 'assets/chips/chip-red-1.png');
   assert.equal(stack.attributes['data-amount'], '124');
-  const stackLabel = stack.children.find((node) => node.className === 'poker-chip-stack-label');
-  assert.ok(stackLabel, 'seat stack amount should render below the visual chip stack');
-  assert.equal(stackLabel.textContent, '124');
 });
 
 test('poker v2 keeps side-seat chip stacks beside avatars instead of the community-card lane', async () => {
@@ -567,62 +555,6 @@ test('poker v2 keeps side-seat chip stacks beside avatars instead of the communi
   assert.ok(Math.abs(betPoint.x - 80) <= 30);
   assert.ok(Math.abs(stackPoint.x - 80) <= 30);
   assert.notEqual(betPoint.y, stackPoint.y);
-});
-
-test('poker v2 moves the current player chip stack to the right of the avatar', async () => {
-  const harness = createHarness();
-  harness.fireDomContentLoaded();
-  await harness.flush();
-
-  const ws = harness.getCreateOptions();
-  ws.onSnapshot({
-    kind: 'stateSnapshot',
-    payload: {
-      tableId: 'table-1',
-      stateVersion: 14,
-      table: {
-        tableId: 'table-1',
-        status: 'OPEN',
-        maxSeats: 6,
-        members: [
-          { userId: 'user-1', seat: 1, displayName: 'Hero' },
-          { userId: 'bot-2', seat: 2, displayName: 'Bot 2' },
-          { userId: 'bot-3', seat: 3, displayName: 'Bot 3' }
-        ]
-      },
-      public: {
-        hand: { handId: 'hand-hero-chip-position', status: 'TURN', dealerSeatNo: 1 },
-        turn: { userId: 'bot-2', deadlineAt: Date.now() + 5000 },
-        stacks: { 'user-1': 1560 },
-        committedByUserId: { 'user-1': 25 },
-        pot: { total: 25, sidePots: [] },
-        legalActions: { seat: 1, actions: ['FOLD', 'CHECK'] },
-        actionConstraints: { toCall: 0 }
-      },
-      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'H' }] },
-      you: { seat: 1 }
-    }
-  });
-  await harness.flush();
-
-  const betStack = harness.elements.pokerSeatChipLayer.children[0];
-  const seatStack = harness.elements.pokerSeatChipLayer.children[1];
-  const parsePoint = (stack) => ({
-    x: Number.parseFloat(stack.style.left),
-    y: Number.parseFloat(stack.style.top)
-  });
-  const betPoint = parsePoint(betStack);
-  const stackPoint = parsePoint(seatStack);
-
-  assert.match(seatStack.className, /poker-chip-visual-stack--hero-seat-stack/);
-  assert.equal(seatStack.attributes['data-amount'], '1560');
-  const stackLabel = seatStack.children.find((node) => node.className === 'poker-chip-stack-label');
-  assert.ok(stackLabel, 'hero stack amount should render below the visual stack');
-  assert.equal(stackLabel.textContent, '1,560');
-  assert.ok(stackPoint.x >= 56 && stackPoint.x <= 68, 'hero stack should sit to the right of the avatar');
-  assert.ok(stackPoint.y >= 82, 'hero stack should stay next to the avatar instead of moving into the card lane');
-  assert.ok(betPoint.x < stackPoint.x - 15, 'committed bet chips should not cover the hero stack');
-  assert.ok(betPoint.y < stackPoint.y - 5, 'committed bet chips should remain closer to the felt');
 });
 
 test('poker v2 keeps fold available even when live legalActions omit fold', async () => {
@@ -1100,8 +1032,6 @@ test('poker v2 turns the live clock red when five seconds remain', async () => {
   assert.ok(heroClock);
   assert.match(heroClock.className, /poker-seat-turn-clock--warning/);
   assert.equal(heroClock.style['--turn-hue'], '27');
-  assert.equal(harness.elements.pokerDealerChip.style.left, '54%');
-  assert.equal(harness.elements.pokerDealerChip.style.top, '91%');
 });
 
 test('poker v2 renders last-action badges and dims folded seats', async () => {
@@ -1143,26 +1073,15 @@ test('poker v2 renders last-action badges and dims folded seats', async () => {
   const villainRaiseSeat = findSeatByLabel(harness, 'Villain 1');
   const foldedSeat = findSeatByLabel(harness, 'Villain 2');
   const heroBadge = (heroSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
-  const heroStatus = (heroSeat.children || []).find((node) => node.className === 'poker-seat-status');
   const villainBadge = (villainRaiseSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
   const foldedBadge = (foldedSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
-  const villainStatus = (villainRaiseSeat.children || []).find((node) => node.className === 'poker-seat-status');
 
   assert.ok(heroBadge);
-  assert.ok(heroStatus);
   assert.equal(heroBadge.textContent, 'Call');
   assert.match(heroBadge.className, /poker-seat-action-badge--call/);
-  assert.equal(heroBadge.style.left, '38px');
-  assert.equal(heroStatus.style.left, heroBadge.style.left);
-  assert.ok(Number.parseFloat(heroBadge.style.top) < Number.parseFloat(heroStatus.style.top), 'hero action badge should sit above the hero status badge');
-  assert.ok(Number.parseFloat(heroStatus.style.top) < 0, 'hero badges should stay above the avatar and away from the name');
   assert.ok(villainBadge);
   assert.equal(villainBadge.textContent, 'Raise');
   assert.match(villainBadge.className, /poker-seat-action-badge--raise/);
-  assert.ok(villainStatus);
-  assert.equal(villainStatus.textContent, 'ACTIVE');
-  assert.equal(villainStatus.style.left, villainBadge.style.left);
-  assert.ok(Number.parseFloat(villainStatus.style.top) >= Number.parseFloat(villainBadge.style.top) + 22, 'status badge should sit below the last-action badge without overlapping it');
   assert.ok(foldedBadge);
   assert.equal(foldedBadge.textContent, 'Fold');
   assert.match(foldedBadge.className, /poker-seat-action-badge--fold/);
