@@ -44,7 +44,8 @@ export async function handleLeaveCommand({
           tableId,
           userId: connState.session.userId,
           stateVersion: left?.state?.version ?? null,
-          pokerState: left?.state?.state ?? null
+          pokerState: left?.state?.state ?? null,
+          tableStatus: left?.tableStatus ?? null
         })
       : { ok: false, code: "authoritative_state_invalid" };
     if (!restored?.ok || !restored?.restoredTable) {

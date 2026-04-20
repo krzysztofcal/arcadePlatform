@@ -544,6 +544,7 @@ for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
   assert.equal(first.ok, true);
   assert.deepEqual(second, first);
   assert.equal(first.cashedOut, 44);
+  assert.equal(first.tableStatus, "CLOSED");
   assert.equal(ctx.calls.cashouts, 1);
   assert.equal(ctx.calls.deleteSeat, 1);
   assert.equal(ctx.calls.closeTable, 1);
@@ -625,6 +626,7 @@ for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
   });
   assert.equal(result.ok, true);
   assert.equal(result.cashedOut, 45);
+  assert.equal(result.tableStatus, "OPEN");
   assert.equal(ctx.calls.cashouts, 1);
   assert.equal(ctx.calls.deleteSeat, 1);
   assert.equal(ctx.calls.closeTable, 0);

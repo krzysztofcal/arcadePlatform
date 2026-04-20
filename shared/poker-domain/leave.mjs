@@ -47,6 +47,12 @@ const sanitizePersistedState = (stateInput) => {
   return sanitizePerHandArtifacts(rest);
 };
 
+const normalizeTableStatus = (value) => {
+  if (typeof value !== "string") return "OPEN";
+  const normalized = value.trim().toUpperCase();
+  return normalized || "OPEN";
+};
+
 const normalizeCardCodeForValidation = (cardCode) => {
   if (typeof cardCode !== "string") return null;
   const code = cardCode.trim().toUpperCase();
@@ -430,13 +436,14 @@ const executePostLeaveBotAutoplayLoop = async ({
   };
 };
 
-const buildAlreadyLeftResultPayload = ({ tableId, seatNo, includeState, state, userId }) => {
+const buildAlreadyLeftResultPayload = ({ tableId, seatNo, includeState, state, userId, tableStatus = "OPEN" }) => {
   const viewState = withoutPrivateState(sanitizeNoopResponseState(state, userId));
   return {
     ok: true,
     tableId,
     cashedOut: 0,
     seatNo: Number.isInteger(seatNo) ? seatNo : null,
+    tableStatus: normalizeTableStatus(tableStatus),
     status: "already_left",
     ...(includeState
       ? {
@@ -486,6 +493,7 @@ export async function executePokerLeave({
         if (!table) {
           throw makeError(404, "table_not_found");
         }
+        let finalTableStatus = normalizeTableStatus(table.status);
 
         const stateRows = await tx.unsafe(
           "select version, state from public.poker_state where table_id = $1 for update;",
@@ -531,6 +539,7 @@ export async function executePokerLeave({
             includeState,
             state: currentState,
             userId: userId,
+            tableStatus: finalTableStatus,
           });
           if (requestId) {
             await storePokerRequestResult(tx, {
@@ -584,6 +593,7 @@ export async function executePokerLeave({
               includeState,
               state: currentState,
               userId: userId,
+              tableStatus: finalTableStatus,
             });
             if (requestId) {
               await storePokerRequestResult(tx, {
@@ -941,6 +951,7 @@ export async function executePokerLeave({
             "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1;",
             [tableId]
           );
+          finalTableStatus = "CLOSED";
           if (table.status !== "CLOSED") {
             await tx.unsafe(
               "update public.poker_tables set status = 'CLOSED', updated_at = now(), last_activity_at = now() where id = $1;",
@@ -976,6 +987,7 @@ export async function executePokerLeave({
           tableId,
           cashedOut: shouldDetachSeatAndStack ? detachedCashOutAmount : 0,
           seatNo: seatNo ?? null,
+          tableStatus: finalTableStatus,
           ...(includeState
             ? {
                 state: {

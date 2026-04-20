@@ -34,7 +34,7 @@ function createCtx() {
       },
       loadAuthoritativeLeaveExecutor: async () => async (args) => {
         calls.executorArgs = args;
-        return { ok: true, state: { version: 3, state: { handId: "h1" } } };
+        return { ok: true, tableStatus: "CLOSED", state: { version: 3, state: { handId: "h1" } } };
       },
       sendCommandResult: (_ws, _connState, payload) => {
         calls.command.push(payload);
@@ -58,6 +58,7 @@ test("handleLeaveCommand accepts and broadcasts when authoritative leave changes
 
   assert.equal(calls.executorArgs.tableId, "t1");
   assert.equal(calls.buildArgs.tableId, "t1");
+  assert.equal(calls.buildArgs.tableStatus, "CLOSED");
   assert.equal(calls.restoreArgs[0].tableId, "t1");
   assert.equal(calls.leaveArgs[0].tableId, "t1");
   assert.equal(calls.command.length, 1);
