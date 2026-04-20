@@ -42,6 +42,7 @@
     yellow: true
   };
   var CHIP_STACK_MAX_HEIGHT = 5;
+  var HERO_SEAT_STACK_VISUAL = { width: 112, height: 82, scale: 0.62 };
   var LAST_ACTION_LABEL = {
     fold: 'Fold',
     check: 'Check',
@@ -1045,6 +1046,7 @@
     var distance = radius + 8;
     var x = centerX;
     var y = centerY;
+    if (hero) return { left: '38px', top: '-28px' };
     if (slotIndex === 0) y -= distance;
     else if (slotIndex === 1) { x += distance; y -= 4; }
     else if (slotIndex === 2) { x += distance; y += 4; }
@@ -1052,6 +1054,14 @@
     else if (slotIndex === 4) { x -= distance; y += 4; }
     else if (slotIndex === 5) { x -= distance; y -= 4; }
     return { left: x + 'px', top: y + 'px' };
+  }
+
+  function getSeatStatusBadgePosition(slotIndex, hero){
+    var actionPosition = getSeatActionBadgePosition(slotIndex, hero);
+    return {
+      left: actionPosition.left,
+      top: (parseFloat(actionPosition.top) + 24) + 'px'
+    };
   }
 
   function shortId(value){
@@ -1179,7 +1189,7 @@
 
   function resolveStackMaxVisible(variant){
     if (variant === 'pot') return 9;
-    if (variant === 'seat-stack') return 7;
+    if (variant === 'seat-stack' || variant === 'hero-seat-stack') return 7;
     return 5;
   }
 
@@ -1257,6 +1267,14 @@
     return wrap;
   }
 
+  function appendSeatStackAmountLabel(stackEl, amount){
+    if (!stackEl) return;
+    var label = document.createElement('span');
+    label.className = 'poker-chip-stack-label';
+    label.textContent = formatNumber(amount);
+    stackEl.appendChild(label);
+  }
+
   function clampNumber(value, min, max){
     return Math.max(min, Math.min(max, value));
   }
@@ -1271,7 +1289,14 @@
     var centerY = ((avatarRect.top + avatarRect.height / 2) - sceneRect.top) / sceneRect.height * 100;
     var radiusX = (avatarRect.width / 2) / sceneRect.width * 100;
     var radiusY = (avatarRect.height / 2) / sceneRect.height * 100;
-    return { x: centerX, y: centerY, radiusX: radiusX, radiusY: radiusY };
+    return {
+      x: centerX,
+      y: centerY,
+      radiusX: radiusX,
+      radiusY: radiusY,
+      sceneWidth: sceneRect.width,
+      sceneHeight: sceneRect.height
+    };
   }
 
   function resolveSeatChipDirections(anchor){
@@ -1313,6 +1338,27 @@
     return point;
   }
 
+  function resolveVisualHalfPercent(source, axis, fallback){
+    if (!source) return fallback;
+    var sceneSize = axis === 'x' ? source.sceneWidth : source.sceneHeight;
+    var visualSize = axis === 'x' ? HERO_SEAT_STACK_VISUAL.width : HERO_SEAT_STACK_VISUAL.height;
+    if (!Number.isFinite(sceneSize) || sceneSize <= 0) return fallback;
+    return ((visualSize * HERO_SEAT_STACK_VISUAL.scale) / 2) / sceneSize * 100;
+  }
+
+  function resolveHeroSeatStackPoint(source){
+    var halfX = resolveVisualHalfPercent(source, 'x', 8);
+    var halfY = resolveVisualHalfPercent(source, 'y', 4);
+    var gapX = source.sceneWidth ? Math.max(2, 8 / source.sceneWidth * 100) : 3;
+    var point = {
+      x: source.x + source.radiusX + halfX + gapX,
+      y: source.y + Math.min(1.6, source.radiusY * 0.15)
+    };
+    point.x = clampNumber(point.x, 10, 90);
+    point.y = clampNumber(point.y, 12 + halfY, 86);
+    return point;
+  }
+
   function resolveSeatChipPoint(source, direction){
     var unit = normalizeDirection(direction);
     var edgeDistance = Math.sqrt(Math.pow(unit.x * source.radiusX, 2) + Math.pow(unit.y * source.radiusY, 2));
@@ -1327,12 +1373,13 @@
     return point;
   }
 
-  function getSeatChipAnchor(anchor, seatNo){
+  function getSeatChipAnchor(anchor, seat){
+    var seatNo = seat && Number.isInteger(seat.seatNo) ? seat.seatNo : null;
     var source = getSeatAvatarAnchorFromRect(seatNo) || { x: anchor.x, y: anchor.y, radiusX: 8, radiusY: 5 };
     var directions = resolveSeatChipDirections(source);
     return {
       bet: resolveSeatChipPoint(source, directions.bet),
-      stack: resolveSeatChipPoint(source, directions.stack)
+      stack: isCurrentUserSeat(seat) ? resolveHeroSeatStackPoint(source) : resolveSeatChipPoint(source, directions.stack)
     };
   }
 
@@ -1346,7 +1393,7 @@
       var anchor = renderedSeatAnchors[seat.seatNo];
       var slot = renderedSeatSlots[seat.seatNo];
       if (!anchor || !Number.isInteger(slot)) return;
-      var chipAnchor = getSeatChipAnchor(anchor, seat.seatNo);
+      var chipAnchor = getSeatChipAnchor(anchor, seat);
       renderedSeatBetAnchors[seat.seatNo] = chipAnchor.bet;
       renderedSeatStackAnchors[seat.seatNo] = chipAnchor.stack;
       var committed = Math.max(0, Number(seatCommittedByUserId[seat.userId]) || 0);
@@ -1358,7 +1405,8 @@
       }
       var stackAmount = Math.max(0, Number(resolveStack(seat.userId)) || 0);
       if (stackAmount > 0){
-        var seatStack = createChipStackVisual(stackAmount, 'seat-stack');
+        var seatStack = createChipStackVisual(stackAmount, isCurrentUserSeat(seat) ? 'hero-seat-stack' : 'seat-stack');
+        appendSeatStackAmountLabel(seatStack, stackAmount);
         seatStack.style.left = chipAnchor.stack.x + '%';
         seatStack.style.top = chipAnchor.stack.y + '%';
         els.seatChipLayer.appendChild(seatStack);
@@ -1526,10 +1574,6 @@
         }
       }
 
-      var stack = document.createElement('div');
-      stack.className = 'poker-seat-stack';
-      stack.textContent = seat && seat.userId ? formatNumber(resolveStack(seat.userId)) : 'Open';
-
       var cards = document.createElement('div');
       cards.className = 'poker-seat-cards';
       if (!hero && seat && seat.userId){
@@ -1549,8 +1593,11 @@
       name.textContent = seat ? getDisplayName(seat) : 'Seat ' + String(i + offset);
 
       var status = document.createElement('div');
+      var statusPosition = getSeatStatusBadgePosition(rotatedIndex, hero);
       status.className = 'poker-seat-status';
       status.textContent = seat ? String(seat.status || 'ACTIVE').replace(/_/g, ' ') : 'OPEN';
+      status.style.left = statusPosition.left;
+      status.style.top = statusPosition.top;
 
       article.appendChild(avatar);
       if (seat && lastAction){
@@ -1588,10 +1635,9 @@
         }
         article.appendChild(winnerBadge);
       }
-      article.appendChild(stack);
       if (cards.children.length) article.appendChild(cards);
       article.appendChild(name);
-      if (!(hero && seat)) article.appendChild(status);
+      article.appendChild(status);
       if (hero && heroBestHand){
         var bestHand = document.createElement('div');
         bestHand.className = 'poker-seat-best-hand';
@@ -1657,18 +1703,23 @@
         var avatarCenterY = (avatarRect.top - sceneRect.top) + avatarRect.height / 2;
         var sceneCenterX = sceneRect.width / 2;
         var sceneCenterY = sceneRect.height / 2;
+        var avatarRadius = Math.min(avatarRect.width, avatarRect.height) / 2;
+        var chipRadius = Math.min(chipRect.width || 34, chipRect.height || 34) / 2;
+        if (heroHasDealerChip){
+          els.dealerChip.hidden = false;
+          els.dealerChip.style.left = Math.round(avatarCenterX + avatarRadius + chipRadius - 2) + 'px';
+          els.dealerChip.style.top = Math.round(avatarCenterY) + 'px';
+          return;
+        }
         var deltaX = sceneCenterX - avatarCenterX;
         var deltaY = sceneCenterY - avatarCenterY;
         var magnitude = Math.sqrt((deltaX * deltaX) + (deltaY * deltaY));
         if (magnitude > 0){
           var unitX = deltaX / magnitude;
           var unitY = deltaY / magnitude;
-          var avatarRadius = Math.min(avatarRect.width, avatarRect.height) / 2;
-          var chipRadius = Math.min(chipRect.width || 38, chipRect.height || 38) / 2;
           var contactDistance = avatarRadius + chipRadius - 2;
           var chipLeftPx = avatarCenterX + (unitX * contactDistance);
           var chipTopPx = avatarCenterY + (unitY * contactDistance);
-          if (heroHasDealerChip) chipLeftPx -= chipRadius;
           els.dealerChip.hidden = false;
           els.dealerChip.style.left = Math.round(chipLeftPx) + 'px';
           els.dealerChip.style.top = Math.round(chipTopPx) + 'px';
@@ -1693,7 +1744,8 @@
       }
     }
     var chipOffset = { x: 0, y: 7 };
-    if (slotIndex === 0) chipOffset = { x: 8, y: 7 };
+    if (heroHasDealerChip) chipOffset = { x: 20, y: 0 };
+    else if (slotIndex === 0) chipOffset = { x: 8, y: 7 };
     else if (slotIndex === 1) chipOffset = { x: -8, y: 8 };
     else if (slotIndex === 2) chipOffset = { x: -8, y: 7 };
     else if (slotIndex === 3) chipOffset = { x: -32, y: 3 };

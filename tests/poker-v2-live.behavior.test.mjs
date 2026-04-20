@@ -349,8 +349,6 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(heroSeat.style.top, '91%', 'hero seat should stay near the bottom edge');
   const seatCards = heroSeat.children.find((node) => node.className === 'poker-seat-cards');
   assert.equal(seatCards, undefined, 'hero seat should not duplicate the bottom hole cards');
-  const heroStatus = heroSeat.children.find((node) => node.className === 'poker-seat-status');
-  assert.equal(heroStatus, undefined, 'hero seat should not repeat the active status pill');
   const bestHand = heroSeat.children.find((node) => node.className === 'poker-seat-best-hand');
   assert.ok(bestHand, 'hero seat should surface a best-hand summary');
   assert.equal(harness.elements.pokerDealerChip.hidden, false, 'dealer chip should be visible when the dealer seat is known');
