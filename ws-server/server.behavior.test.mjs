@@ -2468,6 +2468,181 @@ export function createInactiveCleanupExecutor({ env }) {
   }
 });
 
+test("table_leave authoritative close removes closed bots-only table from lobby immediately", async () => {
+  const secret = "leave-closed-lobby-sync-secret";
+  const humanUserId = "leave_closed_human";
+  const tableId = "table_leave_closed_lobby_sync";
+  const botSeat2 = makeBotUserId(tableId, 2);
+  const botSeat3 = makeBotUserId(tableId, 3);
+  const { dir, filePath } = await writePersistedFile({
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+        seatRows: [
+          { user_id: humanUserId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 },
+          { user_id: botSeat2, seat_no: 2, status: "ACTIVE", is_bot: true, stack: 100 },
+          { user_id: botSeat3, seat_no: 3, status: "ACTIVE", is_bot: true, stack: 100 }
+        ],
+        stateRow: {
+          version: 7,
+          state: {
+            tableId,
+            roomId: tableId,
+            phase: "HAND_DONE",
+            handId: "",
+            seats: [
+              { userId: humanUserId, seatNo: 1, status: "ACTIVE" },
+              { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true },
+              { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true }
+            ],
+            stacks: {
+              [humanUserId]: 100,
+              [botSeat2]: 100,
+              [botSeat3]: 100
+            },
+            leftTableByUserId: {}
+          }
+        }
+      }
+    }
+  });
+  const leaveModule = await writeTestModule(`
+import fs from "node:fs/promises";
+
+export async function executePokerLeave({ tableId, userId, includeState = false }) {
+  const raw = await fs.readFile(process.env.WS_PERSISTED_STATE_FILE, "utf8");
+  const doc = JSON.parse(raw || "{}");
+  const table = doc?.tables?.[tableId];
+  if (!table) {
+    return { ok: false, code: "table_not_found" };
+  }
+
+  const seatRows = Array.isArray(table.seatRows) ? table.seatRows : [];
+  const seatRow = seatRows.find((row) => row?.user_id === userId) || null;
+  const seatNo = Number.isInteger(Number(seatRow?.seat_no)) ? Number(seatRow.seat_no) : null;
+  const currentVersion = Number(table?.stateRow?.version || 0);
+  const state = table?.stateRow?.state && typeof table.stateRow.state === "object" && !Array.isArray(table.stateRow.state)
+    ? table.stateRow.state
+    : {};
+
+  table.tableRow = { ...(table.tableRow || {}), status: "CLOSED" };
+  table.seatRows = seatRows.map((row) => (
+    row?.user_id === userId
+      ? { ...row, status: "INACTIVE", stack: 0 }
+      : row
+  ));
+
+  const publicState = {
+    ...state,
+    phase: "HAND_DONE",
+    handId: "",
+    turnUserId: null,
+    seats: [
+      { userId, seatNo: 1, status: "ACTIVE" },
+      { userId: "${botSeat2}", seatNo: 2, status: "ACTIVE", isBot: true },
+      { userId: "${botSeat3}", seatNo: 3, status: "ACTIVE", isBot: true }
+    ],
+    stacks: {
+      "${botSeat2}": 100,
+      "${botSeat3}": 100
+    },
+    leftTableByUserId: {
+      ...(state.leftTableByUserId || {}),
+      [userId]: true
+    }
+  };
+
+  table.stateRow = {
+    version: currentVersion + 1,
+    state: publicState
+  };
+
+  await fs.writeFile(process.env.WS_PERSISTED_STATE_FILE, JSON.stringify(doc) + "\\n", "utf8");
+
+  return {
+    ok: true,
+    tableId,
+    seatNo,
+    cashedOut: 100,
+    tableStatus: "CLOSED",
+    ...(includeState
+      ? {
+          state: {
+            version: currentVersion + 1,
+            state: publicState
+          },
+          viewState: publicState
+        }
+      : {})
+  };
+}
+`, "leave-closed-lobby-sync.mjs");
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_AUTHORITATIVE_LEAVE_MODULE_PATH: leaveModule.filePath
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const humanWs = await connectClient(port);
+    await hello(humanWs);
+    await auth(humanWs, makeHs256Jwt({ secret, sub: humanUserId }), "auth-leave-closed-human");
+    sendFrame(humanWs, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "sub-leave-closed-human",
+      ts: "2026-02-28T00:10:01Z",
+      payload: { tableId, view: "snapshot" }
+    });
+    await nextMessageOfType(humanWs, "stateSnapshot");
+
+    const lobbyWs = await connectClient(port);
+    await hello(lobbyWs);
+    await auth(lobbyWs, makeHs256Jwt({ secret, sub: "leave_closed_lobby_user" }), "auth-leave-closed-lobby");
+    sendFrame(lobbyWs, {
+      version: "1.0",
+      type: "lobby_subscribe",
+      requestId: "lobby-leave-closed",
+      ts: "2026-02-28T00:10:02Z",
+      payload: {}
+    });
+    const initialLobbySnapshot = await nextMessageOfType(lobbyWs, "lobby_snapshot");
+    assert.equal(initialLobbySnapshot.payload.tables.some((table) => table?.tableId === tableId), true);
+
+    sendFrame(humanWs, {
+      version: "1.0",
+      type: "table_leave",
+      requestId: "leave-closed-human",
+      ts: "2026-02-28T00:10:03Z",
+      payload: { tableId }
+    });
+    const leaveAck = await nextCommandResultForRequest(humanWs, "leave-closed-human");
+    assert.equal(leaveAck.payload.status, "accepted");
+
+    const removedSnapshot = await nextMessageMatching(
+      lobbyWs,
+      (frame) => frame?.type === "lobby_snapshot"
+        && Array.isArray(frame?.payload?.tables)
+        && !frame.payload.tables.some((table) => table?.tableId === tableId),
+      5000
+    );
+    assert.deepEqual(removedSnapshot.payload.tables.some((table) => table?.tableId === tableId), false);
+
+    const persisted = await readPersistedFile(filePath);
+    assert.equal(persisted.tables[tableId].tableRow.status, "CLOSED");
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(leaveModule.dir, { recursive: true, force: true });
+  }
+});
+
 test("WS table_join hydrates from persisted bootstrap fixture", async () => {
   const secret = "test-secret";
   const token = makeHs256Jwt({ secret, sub: "user_a" });

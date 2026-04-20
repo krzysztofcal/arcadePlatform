@@ -967,7 +967,7 @@ export function createTableManager({
     };
   }
 
-  function buildAuthoritativeLeaveRestore({ tableId, userId, stateVersion = null, pokerState = null }) {
+  function buildAuthoritativeLeaveRestore({ tableId, userId, stateVersion = null, pokerState = null, tableStatus = null }) {
     const table = ensureTable(tableId);
     const normalizedState = pokerState && typeof pokerState === "object" && !Array.isArray(pokerState) ? pokerState : null;
     const stateTableId = typeof normalizedState?.tableId === "string" ? normalizedState.tableId : "";
@@ -1060,7 +1060,9 @@ export function createTableManager({
       ok: true,
       restoredTable: {
         tableId,
-        tableStatus: table.tableStatus,
+        tableStatus: typeof tableStatus === "string" && tableStatus.trim()
+          ? normalizeTableStatus(tableStatus)
+          : table.tableStatus,
         coreState: {
           ...table.coreState,
           version: Number.isInteger(stateVersion) && stateVersion >= 0 ? stateVersion : table.coreState.version,

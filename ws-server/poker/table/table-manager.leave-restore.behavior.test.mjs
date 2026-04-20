@@ -224,3 +224,59 @@ test("buildAuthoritativeLeaveRestore rehydrates deterministic runtime hand state
   assert.equal(manager.persistedPokerState("t3").phase, "RIVER");
   assert.equal(manager.persistedPokerState("t3").community.length, 5);
 });
+
+test("buildAuthoritativeLeaveRestore applies authoritative closed table status", () => {
+  const manager = createTableManager();
+  manager.restoreTableFromPersisted("t4", {
+    tableId: "t4",
+    tableStatus: "OPEN",
+    coreState: {
+      roomId: "t4",
+      maxSeats: 6,
+      version: 4,
+      members: [
+        { userId: "u1", seat: 1 },
+        { userId: "bot-1", seat: 2 }
+      ],
+      seats: { u1: 1, "bot-1": 2 },
+      seatDetailsByUserId: {
+        u1: { isBot: false, botProfile: null, leaveAfterHand: false },
+        "bot-1": { isBot: true, botProfile: "TRIVIAL", leaveAfterHand: false }
+      },
+      publicStacks: { u1: 50, "bot-1": 50 },
+      pokerState: {
+        tableId: "t4",
+        phase: "HAND_DONE",
+        seats: [
+          { userId: "u1", seatNo: 1 },
+          { userId: "bot-1", seatNo: 2, isBot: true }
+        ],
+        stacks: { u1: 50, "bot-1": 50 },
+        leftTableByUserId: {}
+      }
+    },
+    presenceByUserId: new Map()
+  });
+
+  const restored = manager.buildAuthoritativeLeaveRestore({
+    tableId: "t4",
+    userId: "u1",
+    stateVersion: 5,
+    tableStatus: "CLOSED",
+    pokerState: {
+      tableId: "t4",
+      phase: "HAND_DONE",
+      seats: [
+        { userId: "u1", seatNo: 1 },
+        { userId: "bot-1", seatNo: 2, isBot: true }
+      ],
+      stacks: { "bot-1": 50 },
+      leftTableByUserId: { u1: true }
+    }
+  });
+
+  assert.equal(restored.ok, true);
+  assert.equal(restored.restoredTable.tableStatus, "CLOSED");
+  manager.restoreTableFromPersisted("t4", restored.restoredTable);
+  assert.equal(manager.isTableClosed("t4"), true);
+});
