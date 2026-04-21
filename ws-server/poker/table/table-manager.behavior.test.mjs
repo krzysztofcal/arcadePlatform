@@ -379,6 +379,33 @@ test("syncAuthoritativeLeave replay remains changed=false for identical authorit
   assert.equal(replay.changed, false);
 });
 
+test("syncAuthoritativeLeave applies authoritative closed table status", () => {
+  const tableId = "table_sync_leave_closed_status";
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const wsA = fakeWs("ws-sync-closed-a");
+  const wsB = fakeWs("ws-sync-closed-b");
+
+  tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-closed-a", nowTs: 1 });
+  tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-closed-b", nowTs: 2 });
+
+  const synced = tableManager.syncAuthoritativeLeave({
+    ws: wsA,
+    userId: "user_a",
+    tableId,
+    stateVersion: 4,
+    tableStatus: "CLOSED",
+    pokerState: {
+      tableId,
+      seats: [{ seatNo: 2, userId: "user_b" }],
+      phase: "HAND_DONE"
+    }
+  });
+
+  assert.equal(synced.ok, true);
+  assert.equal(synced.changed, true);
+  assert.equal(tableManager.isTableClosed(tableId), true);
+});
+
 test("syncAuthoritativeLeave intentionally drops caller subscription while preserving non-leaving observer", () => {
   const tableId = "table_sync_leave_subscription_policy";
   const tableManager = createTableManager({ maxSeats: 4 });

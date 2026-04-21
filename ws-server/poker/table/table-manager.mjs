@@ -1080,7 +1080,7 @@ export function createTableManager({
     };
   }
 
-  function syncAuthoritativeLeave({ ws, userId, tableId, stateVersion = null, pokerState = null }) {
+  function syncAuthoritativeLeave({ ws, userId, tableId, stateVersion = null, pokerState = null, tableStatus = null }) {
     const conn = ensureConn(ws);
     const resolvedTableId = tableId || conn.joinedTableId || conn.subscribedTableId;
     if (!resolvedTableId) {
@@ -1102,11 +1102,13 @@ export function createTableManager({
     const previousSeats = JSON.stringify(table.coreState.seats || {});
     const previousVersion = Number(table.coreState.version);
     const previousPokerState = JSON.stringify(table.coreState.pokerState ?? null);
+    const previousTableStatus = normalizeTableStatus(table.tableStatus);
     const restored = buildAuthoritativeLeaveRestore({
       tableId: resolvedTableId,
       userId,
       stateVersion,
-      pokerState
+      pokerState,
+      tableStatus
     });
     if (!restored?.ok || !restored?.restoredTable) {
       return {
@@ -1139,10 +1141,12 @@ export function createTableManager({
     const nextSeatsJson = JSON.stringify(nextSeats);
     const nextVersion = Number(table.coreState.version);
     const nextPokerState = JSON.stringify(table.coreState.pokerState ?? null);
+    const nextTableStatus = normalizeTableStatus(table.tableStatus);
     const changed = previousMembers !== nextMembersJson
       || previousSeats !== nextSeatsJson
       || previousVersion !== nextVersion
-      || previousPokerState !== nextPokerState;
+      || previousPokerState !== nextPokerState
+      || previousTableStatus !== nextTableStatus;
 
     return {
       ok: true,
