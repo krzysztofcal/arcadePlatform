@@ -38,6 +38,17 @@
     return false;
   }
 
+  function isDiagEnabled(win) {
+    if (!win) return false;
+    if (win.XP_DIAG) return true;
+    try {
+      if (win.location && typeof win.location.search === 'string') {
+        return /\bxpdiag=1\b/.test(win.location.search);
+      }
+    } catch (_) {}
+    return false;
+  }
+
   // State
   const state = {
     enabled: false,
@@ -109,7 +120,7 @@
       if (win) {
         win.XP_SERVER_CALC = enable;
       }
-      if (win && win.console && typeof win.console.debug === 'function') {
+      if (isDiagEnabled(win) && win && win.console && typeof win.console.debug === 'function') {
         win.console.debug('[xp] Server calc auto-config', {
           host: win && win.location && win.location.hostname,
           XP_SERVER_CALC: enable,
@@ -134,13 +145,15 @@
    */
   function init(options = {}) {
     if (state.initialized) {
-      console.warn('[XP-ServerCalc] Already initialized');
+      if (isDiagEnabled(window) && window.console && console.warn) {
+        console.warn('[XP-ServerCalc] Already initialized');
+      }
       return state;
     }
 
     state.enabled = isEnabled();
     if (!state.enabled) {
-      if (window.console && console.debug) {
+      if (isDiagEnabled(window) && window.console && console.debug) {
         console.debug('[XP-ServerCalc] Server-side calculation not enabled');
       }
       return state;
@@ -171,7 +184,7 @@
 
     state.initialized = true;
 
-    if (window.console && console.log) {
+    if (isDiagEnabled(window) && window.console && console.log) {
       console.log('[XP-ServerCalc] Initialized for game:', state.gameId);
     }
 

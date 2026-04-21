@@ -36,11 +36,12 @@ const CORS_ALLOW = buildCorsAllowlist({ xpCorsAllow: process.env.XP_CORS_ALLOW, 
 
 const RAW_LOCK_TTL = Number(process.env.XP_LOCK_TTL_MS ?? 3_000);
 const LOCK_TTL_MS = Number.isFinite(RAW_LOCK_TTL) && RAW_LOCK_TTL >= 0 ? RAW_LOCK_TTL : 3_000;
-klog("xp_lock_config", {
-  lockTtlMs: LOCK_TTL_MS,
-  rawLockTtl: RAW_LOCK_TTL,
-  lockPrefix: LOCK_KEY_PREFIX,
-});
+if (DEBUG_ENABLED) {
+  klog("xp_lock_config", {
+    lockTtlMs: LOCK_TTL_MS,
+    rawLockTtl: RAW_LOCK_TTL,
+  });
+}
 
 // SECURITY: Rate limiting configuration
 const RATE_LIMIT_PER_USER_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_USER_PER_MIN, 30));
@@ -130,7 +131,7 @@ async function persistUserProfile({ userId, totalXp, now }) {
   try {
     await saveUserProfile({ userId, totalXp, now });
   } catch (err) {
-    klog("xp_save_user_profile_failed", { userId, error: err?.message });
+    klog("xp_save_user_profile_failed", { error: err?.message });
   }
 }
 
@@ -250,7 +251,7 @@ async function registerSession({ userId, sessionId }) {
     await store.setex(key, ttlSeconds, Date.now().toString());
     return { registered: true };
   } catch (err) {
-    klog("xp_session_registration_failed", { userId, sessionId, error: err?.message });
+    klog("xp_session_registration_failed", { error: err?.message });
     return { registered: false };
   }
 }
@@ -285,7 +286,7 @@ async function checkRateLimit({ userId, ip }) {
           exceeded: count > RATE_LIMIT_PER_USER_PER_MIN,
         }))
         .catch((err) => {
-          klog("xp_rate_limit_atomic_failed", { keyType: "user", userId, error: err?.message });
+          klog("xp_rate_limit_atomic_failed", { keyType: "user", error: err?.message });
           return { type: 'user', count: 0, limit: RATE_LIMIT_PER_USER_PER_MIN, exceeded: false };
         })
     );
@@ -343,18 +344,7 @@ async function getTotals({ userId, sessionId, now = Date.now() }) {
     const lifetime = Number(values[1] ?? "0") || 0;
     const sessionTotal = sessionKeyK ? (Number(values[2] ?? "0") || 0) : 0;
     const lastSync = sessionSyncKeyK ? (Number(values[sessionKeyK ? 3 : 2] ?? "0") || 0) : 0;
-    const totals = { current, lifetime, sessionTotal, lastSync };
-    klog("award_getTotals_debug", {
-      xpIdentityUserId: userId,
-      sessionId,
-      now,
-      totals,
-      keys: {
-        todayKey,
-        totalKey: totalKeyK,
-      },
-    });
-    return totals;
+    return { current, lifetime, sessionTotal, lastSync };
   } catch {
     return { current: 0, lifetime: 0, sessionTotal: 0, lastSync: 0 };
   }
@@ -506,16 +496,6 @@ export async function handler(event) {
 
   xpIdentity = supabaseUserId || anonId || null;
 
-  klog("auth_debug", {
-    provided: authContext.provided,
-    valid: authContext.valid,
-    reason: authContext.reason,
-    identityId: xpIdentity,
-    xpIdentity: xpIdentity,
-    supabaseUserId,
-    anonId,
-  });
-
   // If we have a Supabase user and a prior anon id, migrate anon totals once into the
   // authenticated bucket so status reads and new awards share the same keys.
   if (supabaseUserId && anonId && anonId !== supabaseUserId) {
@@ -532,17 +512,12 @@ export async function handler(event) {
           pipe.del(anonTotalKey);
           pipe.set(markerKey, String(anonTotals.lifetime));
           await pipe.exec();
-          klog("xp_migrated_anon_to_account", {
-            from: anonId,
-            to: supabaseUserId,
-            amount: anonTotals.lifetime,
-          });
         } else {
           await store.set(markerKey, "0");
         }
       }
     } catch (err) {
-      klog("xp_migration_failed", { from: anonId, to: supabaseUserId, error: err?.message });
+      klog("xp_migration_failed", { error: err?.message });
     }
   }
 
@@ -610,10 +585,8 @@ export async function handler(event) {
             sessionError = `session_${serverValidation.reason}`;
             if (serverValidation.suspicious) {
               klog("xp_session_validation_suspicious", {
-                userId: xpIdentity,
-                fingerprint,
-                ip: clientIp,
                 reason: serverValidation.reason,
+                identityType: supabaseUserId ? "authenticated" : "anonymous",
               });
             }
           } else {
@@ -643,10 +616,9 @@ export async function handler(event) {
         } else if (serverSessionWarnMode) {
           // Warn mode: log but don't block
           klog("xp_session_validation_warn_mode_failed", {
-            userId: xpIdentity,
             sessionError,
             hasToken: !!sessionToken,
-            ip: clientIp,
+            identityType: supabaseUserId ? "authenticated" : "anonymous",
           });
         }
       }
@@ -712,13 +684,6 @@ export async function handler(event) {
     }
 
     const totals = await fetchTotals();
-    klog('xp_statusOnly_debug', {
-      xpIdentity,
-      userId: supabaseUserId,
-      anonId,
-      supabaseUserId,
-      totals,
-    });
     if (supabaseUserId) {
       await persistUserProfile({ userId: supabaseUserId, totalXp: totals.lifetime, now });
     }
@@ -769,9 +734,6 @@ export async function handler(event) {
       // Auto-register on first XP-bearing request for backward compatibility
       // In a future version, this could be enforced by rejecting unregistered sessions
       await registerSession({ userId: xpIdentity, sessionId });
-      if (DEBUG_ENABLED) {
-        klog("xp_auto_registered_session", { userId: xpIdentity, sessionId: sessionId.substring(0, 8) });
-      }
     }
   }
 
@@ -861,20 +823,6 @@ export async function handler(event) {
       });
     }
   }
-
-  klog("award_identity", {
-    anonymous: !supabaseUserId,
-    supabaseUserId,
-    xpIdentity,
-  });
-
-  klog('award_attempt', {
-    xpIdentity,
-    supabaseUserId,
-    anonId,
-    sessionId,
-    hasSessionToken: !!sessionToken,
-  });
 
   const script = `
     local sessionKey = KEYS[1]
@@ -971,14 +919,6 @@ export async function handler(event) {
     : Math.min(normalizedDelta, cookieRemainingBefore);
   const cookieClamped = !supabaseUserId && effectiveDelta < normalizedDelta;
 
-  klog("award_cookie_delta_adjust", {
-    anonId,
-    supabaseUserId,
-    normalizedDelta,
-    cookieRemainingBefore,
-    effectiveDelta,
-  });
-
   const runAwardScript = () => store.eval(
     script,
     [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK, lockKeyK],
@@ -1009,15 +949,6 @@ export async function handler(event) {
   const lockedAt = Number(res?.[6]) || 0;
   const lockTtlRemainingRaw = Number(res?.[7]);
   const lockTtlRemainingMs = Number.isFinite(lockTtlRemainingRaw) ? lockTtlRemainingRaw : null;
-
-  klog('award_result', {
-    xpIdentity,
-    supabaseUserId,
-    anonId,
-    status,
-    granted,
-    totalLifetime,
-  });
 
   const totalTodayRedis = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(redisDailyTotalRaw)));
   const remaining = Math.max(0, DAILY_CAP - totalTodayRedis);
@@ -1130,7 +1061,6 @@ export async function handler(event) {
     debugExtra.lockTtlRemainingMs = lockTtlRemainingMs;
     if (DEBUG_ENABLED) {
       klog("xp_lock_contention", {
-        lockKey: lockKeyK,
         lockAgeMs,
         lockTtlMs: LOCK_TTL_MS,
         lockTtlRemainingMs,
