@@ -176,7 +176,7 @@ test("bootstrapHand excludes disconnected human ghost seats from the next hand",
 });
 
 test("rolloverSettledHand requires a connected human and excludes disconnected human ghosts", () => {
-  const tableManager = createTableManager({ maxSeats: 6 });
+  const tableManager = createTableManager({ maxSeats: 6, presenceTtlMs: 100 });
   const tableId = "table_rollover_connected_human_gate";
   const wsHuman = fakeWs("ws-rollover-human");
 
