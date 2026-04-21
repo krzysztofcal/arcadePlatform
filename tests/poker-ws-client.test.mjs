@@ -61,10 +61,10 @@ function loadClientHarness(options = {}){
     Date,
     Math,
     JSON,
-    setTimeout,
-    clearTimeout,
-    setInterval,
-    clearInterval
+    setTimeout: options.setTimeout || setTimeout,
+    clearTimeout: options.clearTimeout || clearTimeout,
+    setInterval: options.setInterval || setInterval,
+    clearInterval: options.clearInterval || clearInterval
   };
   context.window.window = context.window;
   if (pokerWsUrlOverride !== undefined) context.window.__POKER_WS_URL = pokerWsUrlOverride;
@@ -221,21 +221,63 @@ test('poker ws client auto-requests resync when server marks session stale', asy
 });
 
 test('poker ws client starts heartbeat loop from helloAck heartbeatMs', async () => {
+  const intervalCalls = [];
   const h = loadClientHarness({
+    setInterval(fn, delay){
+      intervalCalls.push(delay);
+      fn();
+      return { fn, delay, unref(){} };
+    },
     clientOptions: {
-      heartbeatFallbackMs: 5,
+      heartbeatFallbackMs: 1000,
       autoReconnect: false
     }
   });
   h.client.start();
   const ws = h.FakeWebSocket.instances[0];
   ws.open();
-  ws.message({ type: 'helloAck', payload: { version: '1.0', heartbeatMs: 5 } });
-  await new Promise((resolve) => setTimeout(resolve, 18));
+  ws.message({ type: 'helloAck', payload: { version: '1.0', heartbeatMs: 1000 } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
 
   const pingFrames = h.sentFrames.filter((frame) => frame.type === 'ping');
   assert.equal(pingFrames.length > 0, true);
+  assert.deepEqual(intervalCalls, [1000]);
   assert.equal(typeof pingFrames[0].payload.clientTime, 'string');
+});
+
+test('poker ws client clamps server-provided heartbeatMs before scheduling interval', async () => {
+  const intervalCalls = [];
+  const clearedIntervals = [];
+  const h = loadClientHarness({
+    setInterval(fn, delay){
+      intervalCalls.push(delay);
+      return { fn, delay, unref(){} };
+    },
+    clearInterval(timer){
+      clearedIntervals.push(timer);
+    },
+    clientOptions: {
+      heartbeatFallbackMs: 15000,
+      autoReconnect: false
+    }
+  });
+  h.client.start();
+  const ws = h.FakeWebSocket.instances[0];
+  ws.open();
+
+  ws.message({ type: 'helloAck', payload: { version: '1.0', heartbeatMs: 1 } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(intervalCalls, [1000]);
+  const helloAckStatus = h.statuses.find((entry) => entry.status === 'hello_ack');
+  assert.equal(!!helloAckStatus, true);
+  assert.equal(helloAckStatus.data.heartbeatMs, 1000);
+
+  ws.message({ type: 'helloAck', payload: { version: '1.0', heartbeatMs: 9999999 } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(intervalCalls, [1000, 60000]);
+  assert.equal(clearedIntervals.length, 1);
 });
 
 test('poker ws client auto-reconnects after abnormal close and re-authenticates', async () => {

@@ -4,6 +4,8 @@
   var DEFAULT_MINT_URL = '/.netlify/functions/ws-mint-token';
   var COMMAND_TIMEOUT_MS = 12000;
   var DEFAULT_HEARTBEAT_MS = 15000;
+  var MIN_HEARTBEAT_MS = 1000;
+  var MAX_HEARTBEAT_MS = 60000;
   var DEFAULT_RECONNECT_BASE_MS = 500;
   var DEFAULT_RECONNECT_MAX_MS = 5000;
   var SESSION_REBOUND_CLOSE_CODE = 4001;
@@ -46,6 +48,17 @@
     if (!text) return null;
     return text.length > 240 ? text.slice(0, 240) : text;
   }
+  function resolveBoundedHeartbeatMs(value, fallbackMs){
+    var fallback = Number.isFinite(Number(fallbackMs)) && Number(fallbackMs) > 0
+      ? Math.trunc(Number(fallbackMs))
+      : DEFAULT_HEARTBEAT_MS;
+    var parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    var normalized = Math.trunc(parsed);
+    if (normalized < MIN_HEARTBEAT_MS) return MIN_HEARTBEAT_MS;
+    if (normalized > MAX_HEARTBEAT_MS) return MAX_HEARTBEAT_MS;
+    return normalized;
+  }
   function safeReadyState(socket){
     return socket && typeof socket.readyState === 'number' ? socket.readyState : null;
   }
@@ -76,9 +89,7 @@
     var onProtocolError = typeof options.onProtocolError === 'function' ? options.onProtocolError : function(){};
     var log = typeof options.klog === 'function' ? options.klog : klog;
     var mintUrl = typeof options.mintUrl === 'string' && options.mintUrl ? options.mintUrl : DEFAULT_MINT_URL;
-    var heartbeatFallbackMs = Number.isFinite(Number(options.heartbeatFallbackMs)) && Number(options.heartbeatFallbackMs) > 0
-      ? Math.trunc(Number(options.heartbeatFallbackMs))
-      : DEFAULT_HEARTBEAT_MS;
+    var heartbeatFallbackMs = resolveBoundedHeartbeatMs(options.heartbeatFallbackMs, DEFAULT_HEARTBEAT_MS);
     var reconnectBaseMs = Number.isFinite(Number(options.reconnectBaseMs)) && Number(options.reconnectBaseMs) > 0
       ? Math.trunc(Number(options.reconnectBaseMs))
       : DEFAULT_RECONNECT_BASE_MS;
@@ -148,8 +159,7 @@
     }
 
     function scheduleHeartbeat(nextHeartbeatMs){
-      var parsed = Number(nextHeartbeatMs);
-      heartbeatMs = Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : heartbeatFallbackMs;
+      heartbeatMs = resolveBoundedHeartbeatMs(nextHeartbeatMs, heartbeatFallbackMs);
       clearHeartbeat();
       if (!ws || ws.readyState !== 1) return;
       heartbeatTimer = setInterval(function(){
