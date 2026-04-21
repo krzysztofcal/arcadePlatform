@@ -324,10 +324,6 @@ export function applyCoreStateAction({ tableId, coreState, handId, userId, actio
     return { ok: true, accepted: false, changed: false, reason: "not_seated", stateVersion: coreState.version, coreState };
   }
 
-  if (liveState.turnUserId !== userId) {
-    return { ok: true, accepted: false, changed: false, reason: "illegal_action", stateVersion: coreState.version, coreState };
-  }
-
   const normalizedAction = normalizeEngineAction(action);
   if (!normalizedAction) {
     return { ok: true, accepted: false, changed: false, reason: "illegal_action", stateVersion: coreState.version, coreState };

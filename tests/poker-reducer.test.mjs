@@ -31,7 +31,7 @@ const run = async () => {
     const { seats, stacks } = makeBase();
     const { state } = initHandState({ tableId: "t1", seats, stacks, rng: makeRng(1) });
     const actionsZero = getLegalActions(state, state.turnUserId).map((action) => action.type);
-    assert.deepEqual(actionsZero, ["CHECK", "BET"]);
+    assert.deepEqual(actionsZero, ["FOLD", "CHECK", "BET"]);
 
     const nextState = {
       ...state,
@@ -45,11 +45,12 @@ const run = async () => {
   {
     const { seats, stacks } = makeBase();
     const { state } = initHandState({ tableId: "t1", seats, stacks, rng: makeRng(2) });
-    assert.deepEqual(getLegalActions(state, "user-3"), []);
+    assert.deepEqual(getLegalActions(state, "user-3").map((action) => action.type), ["FOLD"]);
     assert.throws(
       () => applyAction(state, { type: "CHECK", userId: "user-3" }),
       (error) => error?.message === "invalid_action"
     );
+    assert.doesNotThrow(() => applyAction(state, { type: "FOLD", userId: "user-3" }));
   }
 
   {

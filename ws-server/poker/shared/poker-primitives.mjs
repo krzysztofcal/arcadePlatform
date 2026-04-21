@@ -209,7 +209,7 @@ function computeSharedLegalActions({ statePublic, userId } = {}) {
     };
   }
 
-  const actions = ["CHECK"];
+  const actions = ["FOLD", "CHECK"];
   if (stack > 0) actions.push("BET");
   return { actions, toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: stack };
 }

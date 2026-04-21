@@ -246,7 +246,7 @@ test("projectRoomCoreSnapshot reuses poker legal-actions/public stripping semant
   assert.deepEqual(seated.board.cards, ["AS", "KD"]);
   assert.deepEqual(seated.betThisRoundByUserId, { seated_user: 25, other_user: 25 });
   assert.deepEqual(seated.committedByUserId, { seated_user: 40, other_user: 35 });
-  assert.deepEqual(seated.legalActions.actions, ["CHECK", "BET"]);
+  assert.deepEqual(seated.legalActions.actions, ["FOLD", "CHECK", "BET"]);
   assert.deepEqual(seated.lastBettingRoundActionByUserId, {});
   assert.deepEqual(seated.private, { userId: "seated_user", seat: 2, holeCards: ["AH", "AD"] });
   assert.deepEqual(observer.hand, seated.hand);

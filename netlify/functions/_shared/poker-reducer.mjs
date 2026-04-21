@@ -527,13 +527,15 @@ const getLegalActions = (state, userId) => {
     throw new Error("invalid_player");
   }
   if (!state.turnUserId) return [];
-  if (userId !== state.turnUserId) return [];
   const stack = state.stacks?.[userId] ?? 0;
   const currentBet = deriveCurrentBet(state);
   const lastRaiseSize = deriveLastRaiseSize(state, currentBet);
   const currentUserBet = state.betThisRoundByUserId?.[userId] || 0;
   const toCall = Math.max(0, currentBet - currentUserBet);
   if (stack === 0) return [];
+  if (userId !== state.turnUserId) {
+    return [{ type: "FOLD" }];
+  }
   if (toCall > 0) {
     const actions = [
       { type: "FOLD" },
@@ -551,6 +553,7 @@ const getLegalActions = (state, userId) => {
     return actions;
   }
   return [
+    { type: "FOLD" },
     { type: "CHECK" },
     { type: "BET", min: 1, max: stack },
   ];
@@ -563,7 +566,7 @@ const applyAction = (state, action) => {
   if (!state.turnUserId) {
     throw new Error("invalid_action");
   }
-  if (action?.userId !== state.turnUserId) {
+  if (action?.userId !== state.turnUserId && action?.type !== "FOLD") {
     throw new Error("invalid_action");
   }
   assertPlayer(state, action.userId);

@@ -61,3 +61,31 @@ test("computeSharedLegalActions allows fold outside the current turn for an acti
     maxBetAmount: null
   });
 });
+
+test("computeSharedLegalActions keeps fold available when check is legal on the acting turn", () => {
+  const legal = computeSharedLegalActions({
+    statePublic: {
+      phase: "TURN",
+      turnUserId: "u1",
+      seats: [
+        { userId: "u1", seatNo: 1 },
+        { userId: "u2", seatNo: 2 }
+      ],
+      stacks: { u1: 90, u2: 80 },
+      betThisRoundByUserId: { u1: 10, u2: 10 },
+      currentBet: 10,
+      foldedByUserId: { u1: false, u2: false },
+      leftTableByUserId: { u1: false, u2: false },
+      sitOutByUserId: { u1: false, u2: false }
+    },
+    userId: "u1"
+  });
+
+  assert.deepEqual(legal, {
+    actions: ["FOLD", "CHECK", "BET"],
+    toCall: 0,
+    minRaiseTo: null,
+    maxRaiseTo: null,
+    maxBetAmount: 90
+  });
+});
