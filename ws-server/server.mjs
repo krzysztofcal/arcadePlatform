@@ -1060,6 +1060,69 @@ function clearSettledRolloverTimer(tableId) {
   settledRolloverTimerByTableId.delete(tableId);
 }
 
+function clearSnapshotCacheForTable(tableId) {
+  for (const key of [...lastSnapshotBySessionAndTable.keys()]) {
+    if (key.endsWith(`:${tableId}`)) {
+      lastSnapshotBySessionAndTable.delete(key);
+    }
+  }
+}
+
+function shouldEvictClosedRuntimeTable(tableId, result) {
+  if (result?.changed !== true) {
+    return false;
+  }
+  const status = typeof result?.status === "string" ? result.status : null;
+  const isClosedResult = result?.closed === true || status === "cleaned_closed" || status === "already_closed";
+  if (!isClosedResult) {
+    return false;
+  }
+  return tableManager.hasConnectedHumanPresence(tableId) !== true;
+}
+
+function evictClosedRuntimeTable({ tableId, logPrefix, status = null }) {
+  clearSettledRolloverTimer(tableId);
+  clearTurnTimeoutFailureTracker(tableId);
+  clearSnapshotCacheForTable(tableId);
+  const evicted = typeof tableManager?.evictTable === "function"
+    ? tableManager.evictTable(tableId)
+    : { ok: false, existed: false };
+  const removedFromLobby = activeLobbyTablesById.delete(tableId);
+  if (removedFromLobby || evicted?.existed === true) {
+    maybeBroadcastLobbySnapshot({ force: true });
+  }
+  klogSafe(`${logPrefix}_evict_closed_success`, {
+    tableId,
+    status,
+    evicted: evicted?.existed === true
+  });
+  return evicted;
+}
+
+async function syncCleanupRuntimeState({ tableId, result, logPrefix, onRestore = null }) {
+  if (result?.changed !== true) {
+    return { ok: true, changed: false, evicted: false, restored: false };
+  }
+  if (shouldEvictClosedRuntimeTable(tableId, result)) {
+    klogSafe(`${logPrefix}_evict_closed_start`, { tableId, status: result?.status || null });
+    evictClosedRuntimeTable({ tableId, logPrefix, status: result?.status || null });
+    return { ok: true, changed: true, evicted: true, restored: false };
+  }
+  klogSafe(`${logPrefix}_restore_start`, { tableId, status: result?.status || null });
+  const restored = await restoreTableFromPersisted(tableId);
+  if (!restored?.ok) {
+    klogSafe(`${logPrefix}_restore_failed`, { tableId, reason: restored?.reason || "unknown" });
+    return { ok: false, changed: true, evicted: false, restored: false };
+  }
+  klogSafe(`${logPrefix}_restore_success`, { tableId, status: result?.status || null });
+  broadcastStateSnapshots(tableId);
+  broadcastTableState(tableId);
+  if (typeof onRestore === "function") {
+    await onRestore();
+  }
+  return { ok: true, changed: true, evicted: false, restored: true };
+}
+
 async function applyInactiveCleanupAndBroadcast({ tableId, requestId, logPrefix }) {
   const executor = await loadInactiveCleanupExecutor();
   const result = await executor({
@@ -1074,15 +1137,7 @@ async function applyInactiveCleanupAndBroadcast({ tableId, requestId, logPrefix 
     return result;
   }
   if (result?.changed === true) {
-    klogSafe(`${logPrefix}_restore_start`, { tableId, status: result?.status || null });
-    const restored = await restoreTableFromPersisted(tableId);
-    if (!restored?.ok) {
-      klogSafe(`${logPrefix}_restore_failed`, { tableId, reason: restored?.reason || "unknown" });
-      return result;
-    }
-    klogSafe(`${logPrefix}_restore_success`, { tableId, status: result?.status || null });
-    broadcastStateSnapshots(tableId);
-    broadcastTableState(tableId);
+    await syncCleanupRuntimeState({ tableId, result, logPrefix });
   }
   return result;
 }
@@ -1232,29 +1287,27 @@ const disconnectCleanupRuntime = createDisconnectCleanupRuntime({
           return result;
         }
         if (result?.changed === true) {
-          klogSafe("ws_disconnect_cleanup_restore_start", { tableId, status: result?.status || null });
-          const restored = await restoreTableFromPersisted(tableId);
-          if (!restored?.ok) {
-            klogSafe("ws_disconnect_cleanup_restore_failed", { tableId, reason: restored?.reason || "unknown" });
-            return result;
-          }
-          klogSafe("ws_disconnect_cleanup_restore_success", { tableId });
-          broadcastStateSnapshots(tableId);
-          broadcastTableState(tableId);
-          klogSafe("ws_disconnect_cleanup_broadcast_after_restore", { tableId });
-          try {
-            scheduleBotStep({
-              tableId,
-              trigger: "disconnect_cleanup",
-              requestId: requestId || null,
-              frameTs: null
-            });
-          } catch (error) {
-            klogSafe("ws_disconnect_cleanup_schedule_bot_step_failed", {
-              tableId,
-              message: error?.message || "unknown"
-            });
-          }
+          await syncCleanupRuntimeState({
+            tableId,
+            result,
+            logPrefix: "ws_disconnect_cleanup",
+            onRestore: async () => {
+              klogSafe("ws_disconnect_cleanup_broadcast_after_restore", { tableId });
+              try {
+                scheduleBotStep({
+                  tableId,
+                  trigger: "disconnect_cleanup",
+                  requestId: requestId || null,
+                  frameTs: null
+                });
+              } catch (error) {
+                klogSafe("ws_disconnect_cleanup_schedule_bot_step_failed", {
+                  tableId,
+                  message: error?.message || "unknown"
+                });
+              }
+            }
+          });
           return result;
         }
         klogSafe("ws_disconnect_cleanup_noop", { tableId, status: result?.status || null });
@@ -1394,10 +1447,12 @@ async function quarantineTurnTimeoutTable({ tableId, reason, nowMs }) {
       requestId: `ws-timeout-quarantine:${tableId}:${nowMs}`
     });
     if (cleanupResult?.ok === true && cleanupResult?.changed === true) {
-      const restored = await restoreTableFromPersisted(tableId);
-      if (restored?.ok) {
-        broadcastStateSnapshots(tableId);
-        broadcastTableState(tableId);
+      const synced = await syncCleanupRuntimeState({
+        tableId,
+        result: cleanupResult,
+        logPrefix: "ws_turn_timeout_quarantine_cleanup"
+      });
+      if (synced?.ok === true) {
         clearTurnTimeoutFailureTracker(tableId);
         klogSafe("ws_turn_timeout_quarantine_recovered", { tableId, mode: "inactive_cleanup" });
         return;

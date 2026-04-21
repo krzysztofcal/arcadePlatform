@@ -1335,6 +1335,11 @@ export function createTableManager({
     return { ok: true };
   }
 
+  function evictTable(tableId) {
+    const existed = tables.delete(tableId);
+    return { ok: true, existed };
+  }
+
   function __debugPokerState(tableId) {
     const table = tables.get(tableId);
     if (!table) {
@@ -1479,6 +1484,7 @@ export function createTableManager({
     persistedStateVersion,
     setPersistedStateVersion,
     restoreTableFromPersisted,
+    evictTable,
     buildAuthoritativeLeaveRestore,
     isTableClosed,
     isBotUser,
