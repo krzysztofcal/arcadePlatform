@@ -20,6 +20,7 @@ const DEFAULT_BOT_REACTION_MIN_MS = 2_000;
 const DEFAULT_BOT_REACTION_MAX_MS = 4_000;
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
+const isCurrentHandPhase = (phase) => isActionPhase(phase) || phase === "SHOWDOWN" || phase === "HAND_DONE";
 const noopAdvanceIfNeeded = (state) => ({ state, events: [] });
 
 function isPlainObject(value) {
@@ -126,7 +127,9 @@ function buildSeatBotMap(seats) {
 }
 
 function buildSeatUserIdsInOrder(state) {
-  const seats = Array.isArray(state?.seats) ? state.seats.slice() : [];
+  const seats = isCurrentHandPhase(state?.phase) && Array.isArray(state?.handSeats) && state.handSeats.length > 0
+    ? state.handSeats.slice()
+    : (Array.isArray(state?.seats) ? state.seats.slice() : []);
   return seats
     .filter((seat) => typeof seat?.userId === "string" && seat.userId.trim() && Number.isInteger(Number(seat?.seatNo)))
     .sort((a, b) => Number(a.seatNo) - Number(b.seatNo))
@@ -227,7 +230,9 @@ function hasTrustedRuntimeShape(state) {
   if (!state || typeof state !== "object") return false;
   const isPlainMap = (value) => !!(value && typeof value === "object" && !Array.isArray(value));
   const hasEntries = (value) => isPlainMap(value) && Object.keys(value).length > 0;
-  const seats = Array.isArray(state.seats) ? state.seats : [];
+  const seats = isCurrentHandPhase(state?.phase) && Array.isArray(state?.handSeats) && state.handSeats.length > 0
+    ? state.handSeats
+    : (Array.isArray(state?.seats) ? state.seats : []);
   if (seats.length < 2) return false;
   if (!hasEntries(state.holeCardsByUserId)) return false;
   if (!isPlainMap(state.foldedByUserId) || !isPlainMap(state.leftTableByUserId) || !isPlainMap(state.sitOutByUserId)) return false;
@@ -484,7 +489,9 @@ function materializeShowdownState(stateToMaterialize, seatOrder, holeCardsByUser
 }
 
 function buildDiagnosticSnapshot(state) {
-  const seats = Array.isArray(state?.seats) ? state.seats : [];
+  const seats = isCurrentHandPhase(state?.phase) && Array.isArray(state?.handSeats) && state.handSeats.length > 0
+    ? state.handSeats
+    : (Array.isArray(state?.seats) ? state.seats : []);
   const seatUserIds = seats
     .filter((seat) => typeof seat?.userId === "string" && seat.userId.trim())
     .sort((a, b) => Number(a?.seatNo ?? 0) - Number(b?.seatNo ?? 0))

@@ -9,6 +9,7 @@ const NEXT_PHASE = {
   FLOP: "TURN",
   TURN: "RIVER"
 };
+const ACTION_PHASES = new Set(["PREFLOP", "FLOP", "TURN", "RIVER"]);
 
 function toInt(value) {
   if (!Number.isFinite(value)) {
@@ -175,7 +176,11 @@ function shouldSettleAtShowdown(state) {
 }
 
 function orderedSeats(state) {
-  return (Array.isArray(state.seats) ? state.seats : [])
+  const phase = typeof state?.phase === "string" ? state.phase : "";
+  const seats = ACTION_PHASES.has(phase) && Array.isArray(state?.handSeats) && state.handSeats.length > 0
+    ? state.handSeats
+    : state?.seats;
+  return (Array.isArray(seats) ? seats : [])
     .filter((seat) => typeof seat?.userId === "string" && Number.isInteger(seat?.seatNo))
     .slice()
     .sort((a, b) => a.seatNo - b.seatNo || a.userId.localeCompare(b.userId));
