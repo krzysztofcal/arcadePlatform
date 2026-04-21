@@ -1283,7 +1283,7 @@ const disconnectCleanupRuntime = createDisconnectCleanupRuntime({
         if (result?.ok !== true) {
           return result;
         }
-        if (result?.protected === true) {
+        if (result?.protected === true || result?.deferred === true) {
           return result;
         }
         if (result?.changed === true) {
