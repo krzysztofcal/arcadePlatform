@@ -49,11 +49,9 @@ async function getFavorites(userId, origin) {
       createdAt: row.created_at,
     }));
 
-    klog("favorites_get", { userId, count: favorites.length });
-
     return json(200, { ok: true, favorites }, origin);
   } catch (error) {
-    klog("favorites_get_error", { userId, error: error?.message });
+    klog("favorites_get_error", { error: error?.message });
     return json(500, { error: "database_error", message: "Failed to get favorites" }, origin);
   }
 }
@@ -77,11 +75,9 @@ async function addFavorite(userId, gameId, origin) {
       [userId, sanitizedGameId]
     );
 
-    klog("favorites_add", { userId, gameId: sanitizedGameId });
-
     return json(200, { ok: true, gameId: sanitizedGameId, action: "added" }, origin);
   } catch (error) {
-    klog("favorites_add_error", { userId, gameId: sanitizedGameId, error: error?.message });
+    klog("favorites_add_error", { error: error?.message });
     return json(500, { error: "database_error", message: "Failed to add favorite" }, origin);
   }
 }
@@ -103,11 +99,9 @@ async function removeFavorite(userId, gameId, origin) {
       [userId, sanitizedGameId]
     );
 
-    klog("favorites_remove", { userId, gameId: sanitizedGameId });
-
     return json(200, { ok: true, gameId: sanitizedGameId, action: "removed" }, origin);
   } catch (error) {
-    klog("favorites_remove_error", { userId, gameId: sanitizedGameId, error: error?.message });
+    klog("favorites_remove_error", { error: error?.message });
     return json(500, { error: "database_error", message: "Failed to remove favorite" }, origin);
   }
 }
@@ -131,7 +125,7 @@ async function checkFavorite(userId, gameId, origin) {
 
     return json(200, { ok: true, gameId: sanitizedGameId, isFavorite }, origin);
   } catch (error) {
-    klog("favorites_check_error", { userId, gameId: sanitizedGameId, error: error?.message });
+    klog("favorites_check_error", { error: error?.message });
     return json(500, { error: "database_error", message: "Failed to check favorite" }, origin);
   }
 }

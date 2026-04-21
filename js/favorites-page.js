@@ -159,7 +159,6 @@
 
   function initSearchPopup() {
     if (!searchInput) {
-      console.debug('Favorites: No search input found');
       return;
     }
 
@@ -169,8 +168,6 @@
     }
 
     try {
-      console.debug('Favorites: Initializing search popup');
-
       const popup = new global.SearchPopup({
         searchInput: searchInput,
         catalog: global.ArcadeCatalog,
@@ -182,9 +179,7 @@
         doc: document
       });
 
-      popup.init().then(() => {
-        console.debug('Favorites: Search popup initialized successfully');
-      }).catch(err => {
+      popup.init().catch(err => {
         console.error('Favorites: Search popup initialization failed:', err);
       });
     } catch (err) {

@@ -3,10 +3,8 @@
  * Requires authentication - only works for logged-in users
  * Cross-browser support via database storage
  */
-console.log('[FavoritesService] Script loading...');
 (function(global){
   'use strict';
-  console.log('[FavoritesService] IIFE executing, global=', typeof global);
 
   const API_ENDPOINT = '/api/favorites';
   const CACHE_KEY = 'kcswh:favorites-cache';
@@ -58,21 +56,17 @@ console.log('[FavoritesService] Script loading...');
      */
     async getAccessToken() {
       const bridge = getAuthBridge(global);
-      console.log('[FavoritesService] getAccessToken: bridge=', !!bridge, 'SupabaseAuthBridge=', !!global.SupabaseAuthBridge);
       if (bridge && typeof bridge.getAccessToken === 'function') {
         const token = await bridge.getAccessToken();
-        console.log('[FavoritesService] getAccessToken: bridge token=', !!token);
         if (token) return token;
       }
 
       if (global.SupabaseAuth && typeof global.SupabaseAuth.getAccessToken === 'function') {
         try {
           const token = await global.SupabaseAuth.getAccessToken();
-          console.log('[FavoritesService] getAccessToken: SupabaseAuth token=', !!token);
           if (token) return token;
         } catch (_err) {}
       }
-      console.log('[FavoritesService] getAccessToken: NO TOKEN FOUND');
       return null;
     }
 
@@ -231,19 +225,15 @@ console.log('[FavoritesService] Script loading...');
      * @returns {Promise<boolean>}
      */
     async addFavorite(gameId) {
-      console.log('[FavoritesService] addFavorite called:', gameId);
       if (!gameId) {
-        console.log('[FavoritesService] addFavorite: no gameId');
         return false;
       }
 
       const token = await this.getAccessToken();
       if (!token) {
-        console.warn('[FavoritesService] Cannot add favorite: NOT AUTHENTICATED (no token)');
         return false;
       }
 
-      console.log('[FavoritesService] addFavorite: making API call to', this.apiEndpoint);
       try {
         const response = await fetch(this.apiEndpoint, {
           method: 'POST',
@@ -254,15 +244,11 @@ console.log('[FavoritesService] Script loading...');
           body: JSON.stringify({ gameId })
         });
 
-        console.log('[FavoritesService] addFavorite: response status=', response.status);
         if (!response.ok) {
-          const errorText = await response.text();
-          console.error('[FavoritesService] addFavorite: API error response:', errorText);
           throw new Error(`API error: ${response.status}`);
         }
 
         const data = await response.json();
-        console.log('[FavoritesService] addFavorite: response data=', data);
         if (!data.ok) {
           throw new Error(data.error || 'Failed to add favorite');
         }
@@ -272,7 +258,6 @@ console.log('[FavoritesService] Script loading...');
         this.saveToCache();
         this.notifyListeners();
 
-        console.log('[FavoritesService] addFavorite: SUCCESS');
         return true;
       } catch (err) {
         console.error('[FavoritesService] Failed to add favorite:', err);
@@ -290,7 +275,6 @@ console.log('[FavoritesService] Script loading...');
 
       const token = await this.getAccessToken();
       if (!token) {
-        console.warn('[FavoritesService] Cannot remove favorite: not authenticated');
         return false;
       }
 
@@ -331,17 +315,13 @@ console.log('[FavoritesService] Script loading...');
      * @returns {Promise<{success: boolean, isFavorite: boolean}>}
      */
     async toggleFavorite(gameId) {
-      console.log('[FavoritesService] toggleFavorite called:', gameId);
       const currentlyFavorite = this.isFavoriteSync(gameId);
-      console.log('[FavoritesService] currentlyFavorite:', currentlyFavorite);
 
       if (currentlyFavorite) {
         const success = await this.removeFavorite(gameId);
-        console.log('[FavoritesService] removeFavorite result:', success);
         return { success, isFavorite: !success };
       } else {
         const success = await this.addFavorite(gameId);
-        console.log('[FavoritesService] addFavorite result:', success);
         return { success, isFavorite: success };
       }
     }
