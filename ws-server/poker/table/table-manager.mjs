@@ -1276,7 +1276,8 @@ export function createTableManager({
     if (!pokerState || typeof pokerState !== "object" || Array.isArray(pokerState)) {
       return null;
     }
-    return { ...pokerState };
+    const { deck: _ignoredDeck, holeCardsByUserId: _ignoredHoleCards, ...persistedState } = pokerState;
+    return { ...persistedState };
   }
 
   function setPersistedStateVersion(tableId, stateVersion) {

@@ -125,6 +125,52 @@ test("rolloverSettledHand delays next-hand bootstrap until explicitly invoked", 
   assert.equal(nextState.turnDeadlineAt > nextState.turnStartedAt, true);
 });
 
+test("persistedPokerState strips private cards while keeping handSeed", () => {
+  const tableManager = createTableManager({ maxSeats: 6 });
+  const tableId = "table_persisted_public_state";
+
+  const restored = tableManager.restoreTableFromPersisted(tableId, {
+    coreState: {
+      version: 7,
+      roomId: tableId,
+      maxSeats: 6,
+      members: [
+        { userId: "user_a", seat: 1 },
+        { userId: "user_b", seat: 2 }
+      ],
+      seats: { user_a: 1, user_b: 2 },
+      publicStacks: { user_a: 102, user_b: 98 },
+      seatDetailsByUserId: {
+        user_a: { isBot: false, botProfile: null, leaveAfterHand: false },
+        user_b: { isBot: false, botProfile: null, leaveAfterHand: false }
+      },
+      pokerState: {
+        tableId,
+        handId: "hand_public_state",
+        handSeed: "seed_public_state",
+        phase: "TURN",
+        dealerSeatNo: 1,
+        communityDealt: 4,
+        community: ["AS", "KS", "QS", "JD"],
+        seats: [
+          { userId: "user_a", seatNo: 1, status: "ACTIVE" },
+          { userId: "user_b", seatNo: 2, status: "ACTIVE" }
+        ],
+        stacks: { user_a: 102, user_b: 98 },
+        holeCardsByUserId: { user_a: ["AH", "AD"], user_b: ["2C", "2D"] },
+        deck: ["TC"]
+      }
+    },
+    presenceByUserId: new Map()
+  });
+
+  assert.equal(restored.ok, true);
+  const persistedState = tableManager.persistedPokerState(tableId);
+  assert.equal(persistedState.handSeed, "seed_public_state");
+  assert.equal(Object.prototype.hasOwnProperty.call(persistedState, "holeCardsByUserId"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(persistedState, "deck"), false);
+});
+
 test("evictTable removes restored runtime table state", () => {
   const tableManager = createTableManager({ maxSeats: 6 });
   const tableId = "table_evict_runtime";

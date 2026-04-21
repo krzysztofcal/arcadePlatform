@@ -51,24 +51,33 @@ function normalizeCardCodeForValidation(cardCode) {
   return { r: rank, s: suit };
 }
 
-function normalizeStateForStorageValidation(stateInput) {
+function normalizeCardArrayForValidation(cardsInput) {
+  if (!Array.isArray(cardsInput)) {
+    return cardsInput;
+  }
+  const normalizedCards = cardsInput.map((card) =>
+    typeof card === "string" ? normalizeCardCodeForValidation(card) : card
+  );
+  if (normalizedCards.some((card) => !card)) {
+    return cardsInput;
+  }
+  return normalizedCards;
+}
+
+function sanitizeStateForStorageValidation(stateInput) {
   if (!stateInput || typeof stateInput !== "object" || Array.isArray(stateInput)) {
     return stateInput;
   }
-  if (!Array.isArray(stateInput.community)) {
-    return stateInput;
+  const { deck: _ignoredDeck, holeCardsByUserId: _ignoredHoleCards, ...stateBase } = stateInput;
+  const normalizedCommunity = normalizeCardArrayForValidation(stateBase.community);
+  if (normalizedCommunity === stateBase.community) {
+    return stateBase;
   }
-  const normalizedCommunity = stateInput.community.map((card) =>
-    typeof card === "string" ? normalizeCardCodeForValidation(card) : card
-  );
-  if (normalizedCommunity.some((card) => !card)) {
-    return stateInput;
-  }
-  return { ...stateInput, community: normalizedCommunity };
+  return { ...stateBase, community: normalizedCommunity };
 }
 
 function isStorageStateValid(validateStateForStorage, state) {
-  return validateStateForStorage(normalizeStateForStorageValidation(state));
+  return validateStateForStorage(sanitizeStateForStorageValidation(state));
 }
 
 function makeError(code) {
@@ -235,13 +244,14 @@ async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, stack, loadS
     seatEntries: activeSeatRows(seatRows).map(asSeatSnapshot).filter(Boolean),
     stackEntries: activeStackEntries(seatRows)
   });
-  if (!isStorageStateValid(validateStateForStorage, nextState)) {
+  const nextStateForStorage = sanitizeStateForStorageValidation(nextState);
+  if (!isStorageStateValid(validateStateForStorage, nextStateForStorage)) {
     throw makeError("state_invalid");
   }
-  const updated = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState }));
+  const updated = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState: nextStateForStorage }));
   const version = requirePostMutationVersion({ previousVersion: stateRow.version, nextVersion: updated.version });
-  assertAuthoritativeJoinStateComplete({ seatRows, state: nextState, version, userId, seatNo, stack, maxPlayers, botCfg });
-  return { version, state: nextState };
+  assertAuthoritativeJoinStateComplete({ seatRows, state: nextStateForStorage, version, userId, seatNo, stack, maxPlayers, botCfg });
+  return { version, state: nextStateForStorage };
 }
 
 async function readPersistedSeatStack({ tx, tableId, userId }) {
@@ -330,10 +340,11 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           seatEntries: seatRows.map(asSeatSnapshot).filter(Boolean),
           stackEntries: activeStackEntries(seatRows)
         });
-        if (!isStorageStateValid(validateStateForStorage, nextState)) {
+        const nextStateForStorage = sanitizeStateForStorageValidation(nextState);
+        if (!isStorageStateValid(validateStateForStorage, nextStateForStorage)) {
           throw makeError("state_invalid");
         }
-        const updatedState = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState }));
+        const updatedState = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState: nextStateForStorage }));
         const snapshotVersion = requirePostMutationVersion({ previousVersion: stateRow.version, nextVersion: updatedState.version });
         klog("shared_join_state_written", { previousVersion: stateRow.version, newVersion: snapshotVersion });
         await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
@@ -349,8 +360,8 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           me: { seated: true },
           snapshot: {
             stateVersion: snapshotVersion,
-            seats: Array.isArray(nextState.seats) ? nextState.seats : [],
-            stacks: nextState.stacks && typeof nextState.stacks === "object" ? nextState.stacks : {}
+            seats: Array.isArray(nextStateForStorage.seats) ? nextStateForStorage.seats : [],
+            stacks: nextStateForStorage.stacks && typeof nextStateForStorage.stacks === "object" ? nextStateForStorage.stacks : {}
           }
         };
       }
