@@ -53,7 +53,7 @@ const computeLegalActions = ({ statePublic, userId } = {}) => {
     return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
   }
   const turnUserId = typeof state.turnUserId === "string" ? state.turnUserId : "";
-  if (!turnUserId || turnUserId !== userId) {
+  if (!turnUserId) {
     return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
   }
   if (!isActivePlayer(state, userId)) {
@@ -67,6 +67,9 @@ const computeLegalActions = ({ statePublic, userId } = {}) => {
   const toCall = Math.max(0, currentBet - currentUserBet);
   if (stack <= 0) {
     return { actions: [], toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
+  }
+  if (turnUserId !== userId) {
+    return { actions: ["FOLD"], toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
   }
 
   if (toCall > 0) {
@@ -84,7 +87,7 @@ const computeLegalActions = ({ statePublic, userId } = {}) => {
     };
   }
 
-  const actions = ["CHECK"];
+  const actions = ["FOLD", "CHECK"];
   if (stack > 0) actions.push("BET");
   return { actions, toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: stack };
 };

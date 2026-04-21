@@ -183,6 +183,27 @@ test("engine accepts short-stack CALL as all-in contribution", () => {
   assert.equal(shortCall.coreState.pokerState.contributionsByUserId.user_b, 5);
 });
 
+test("engine accepts out-of-turn fold when a seated player wants to leave the hand immediately", () => {
+  const boot = bootstrapCoreStateHand({ tableId: "table_engine_act", coreState: initialCore(), nowMs: 3_000 });
+  const initial = boot.coreState;
+  const waitingUserId = initial.pokerState.turnUserId === "user_a" ? "user_b" : "user_a";
+
+  const folded = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState: initial,
+    handId: initial.pokerState.handId,
+    userId: waitingUserId,
+    action: "FOLD",
+    nowIso: new Date(3_001).toISOString(),
+    nowMs: 3_001
+  });
+
+  assert.equal(folded.accepted, true);
+  assert.equal(folded.coreState.pokerState.phase, "SETTLED");
+  assert.equal(folded.coreState.pokerState.turnUserId, null);
+  assert.equal(folded.coreState.pokerState.foldedByUserId[waitingUserId], true);
+});
+
 test("engine accepts flop bet when action is unopened on the street", () => {
   let coreState = bootstrapCoreStateHand({ tableId: "table_engine_act", coreState: initialCore(), nowMs: 6_000 }).coreState;
 
