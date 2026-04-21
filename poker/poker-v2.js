@@ -1775,7 +1775,7 @@
     }
     if (els.turnText){
       if (isUsersTurn()){
-        els.turnText.textContent = 'Your turn';
+        els.turnText.textContent = 'Your turn.';
       } else if (state.turnUserId){
         els.turnText.textContent = 'Acting: ' + shortId(state.turnUserId);
       } else {

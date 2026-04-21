@@ -49,19 +49,11 @@
         <div class="poker-live-turn" id="pokerV2TurnText">Waiting for action</div>
       </div>
       <div class="poker-live-actions">
-        <span class="poker-live-pill">Stack <strong id="pokerV2StackText">—</strong></span>
         <button type="button" class="poker-live-btn" id="pokerV2SignInBtn">Sign in</button>
-        <label class="poker-live-input">
-          <span>Seat</span>
-          <input type="number" id="pokerV2SeatNo" value="1" min="1" step="1">
-        </label>
-        <label class="poker-live-input">
-          <span>Buy-in</span>
-          <input type="number" id="pokerV2BuyIn" value="100" min="1" step="1">
-        </label>
         <button type="button" class="poker-live-btn poker-live-btn--accent" id="pokerV2JoinBtn">Join</button>
-        <button type="button" class="poker-live-btn" id="pokerV2StartBtn" hidden>Start hand</button>
         <button type="button" class="poker-live-btn" id="pokerV2LeaveBtn" hidden>Leave</button>
+        <input type="hidden" id="pokerV2SeatNo" value="1">
+        <input type="hidden" id="pokerV2BuyIn" value="100">
       </div>
       <div class="poker-live-error" id="pokerV2ErrorText" hidden></div>
     </section>
