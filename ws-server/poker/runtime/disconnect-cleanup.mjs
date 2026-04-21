@@ -17,11 +17,18 @@ export function createDisconnectCleanupRuntime({
     if (typeof tableId !== 'string' || !tableId) return false;
     if (typeof userId !== 'string' || !userId) return false;
     const existing = candidates.get(key(tableId, userId));
+    const graceDelayMs = Number.isFinite(seatedReconnectGraceMs) && seatedReconnectGraceMs > 0
+      ? Math.trunc(seatedReconnectGraceMs)
+      : 0;
+    const enqueuedAt = Number.isFinite(existing?.enqueuedAt) ? existing.enqueuedAt : nowMs();
+    const retryNotBeforeMs = Number.isFinite(existing?.retryNotBeforeMs)
+      ? existing.retryNotBeforeMs
+      : (graceDelayMs > 0 ? enqueuedAt + graceDelayMs : null);
     candidates.set(key(tableId, userId), {
       tableId,
       userId,
-      enqueuedAt: Number.isFinite(existing?.enqueuedAt) ? existing.enqueuedAt : nowMs(),
-      retryNotBeforeMs: Number.isFinite(existing?.retryNotBeforeMs) ? existing.retryNotBeforeMs : null
+      enqueuedAt,
+      retryNotBeforeMs
     });
     return true;
   }
@@ -49,7 +56,7 @@ export function createDisconnectCleanupRuntime({
       });
 
       if (result?.ok && result?.protected) {
-        if (Number.isFinite(seatedReconnectGraceMs) && seatedReconnectGraceMs > 0 && !Number.isFinite(candidate.retryNotBeforeMs)) {
+        if (Number.isFinite(seatedReconnectGraceMs) && seatedReconnectGraceMs > 0) {
           candidate.retryNotBeforeMs = currentNowMs + seatedReconnectGraceMs;
           candidates.set(key(candidate.tableId, candidate.userId), candidate);
         }
@@ -61,7 +68,7 @@ export function createDisconnectCleanupRuntime({
         continue;
       }
       if (result?.ok && result?.deferred) {
-        if (Number.isFinite(seatedReconnectGraceMs) && seatedReconnectGraceMs > 0 && !Number.isFinite(candidate.retryNotBeforeMs)) {
+        if (Number.isFinite(seatedReconnectGraceMs) && seatedReconnectGraceMs > 0) {
           candidate.retryNotBeforeMs = currentNowMs + seatedReconnectGraceMs;
           candidates.set(key(candidate.tableId, candidate.userId), candidate);
         }
