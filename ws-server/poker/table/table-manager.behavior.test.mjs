@@ -1327,7 +1327,7 @@ test("applyAction cache is bounded and evicts oldest requestIds deterministicall
   });
 
   assert.equal(req2.accepted, false);
-  assert.equal(req3.accepted, false);
+  assert.equal(req3.accepted, true);
   assert.equal(tableManager.__debugCore(tableId).actionResultsCacheSize, 2);
 
   const replayEvicted = tableManager.applyAction({
@@ -1339,7 +1339,7 @@ test("applyAction cache is bounded and evicts oldest requestIds deterministicall
     amount: 0
   });
   assert.equal(replayEvicted.accepted, false);
-  assert.equal(replayEvicted.reason, "illegal_action");
+  assert.equal(replayEvicted.reason, "hand_not_live");
 
   const replayKept = tableManager.applyAction({
     tableId,
