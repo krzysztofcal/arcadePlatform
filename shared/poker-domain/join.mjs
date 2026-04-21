@@ -64,20 +64,28 @@ function normalizeCardArrayForValidation(cardsInput) {
   return normalizedCards;
 }
 
-function sanitizeStateForStorageValidation(stateInput) {
+function sanitizeStateForStorage(stateInput) {
   if (!stateInput || typeof stateInput !== "object" || Array.isArray(stateInput)) {
     return stateInput;
   }
   const { deck: _ignoredDeck, holeCardsByUserId: _ignoredHoleCards, ...stateBase } = stateInput;
-  const normalizedCommunity = normalizeCardArrayForValidation(stateBase.community);
-  if (normalizedCommunity === stateBase.community) {
-    return stateBase;
+  return stateBase;
+}
+
+function normalizeStateForStorageValidation(stateInput) {
+  const sanitizedState = sanitizeStateForStorage(stateInput);
+  if (!sanitizedState || typeof sanitizedState !== "object" || Array.isArray(sanitizedState)) {
+    return sanitizedState;
   }
-  return { ...stateBase, community: normalizedCommunity };
+  const normalizedCommunity = normalizeCardArrayForValidation(sanitizedState.community);
+  if (normalizedCommunity === sanitizedState.community) {
+    return sanitizedState;
+  }
+  return { ...sanitizedState, community: normalizedCommunity };
 }
 
 function isStorageStateValid(validateStateForStorage, state) {
-  return validateStateForStorage(sanitizeStateForStorageValidation(state));
+  return validateStateForStorage(normalizeStateForStorageValidation(state));
 }
 
 function makeError(code) {
@@ -244,7 +252,7 @@ async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, stack, loadS
     seatEntries: activeSeatRows(seatRows).map(asSeatSnapshot).filter(Boolean),
     stackEntries: activeStackEntries(seatRows)
   });
-  const nextStateForStorage = sanitizeStateForStorageValidation(nextState);
+  const nextStateForStorage = sanitizeStateForStorage(nextState);
   if (!isStorageStateValid(validateStateForStorage, nextStateForStorage)) {
     throw makeError("state_invalid");
   }
@@ -340,7 +348,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           seatEntries: seatRows.map(asSeatSnapshot).filter(Boolean),
           stackEntries: activeStackEntries(seatRows)
         });
-        const nextStateForStorage = sanitizeStateForStorageValidation(nextState);
+        const nextStateForStorage = sanitizeStateForStorage(nextState);
         if (!isStorageStateValid(validateStateForStorage, nextStateForStorage)) {
           throw makeError("state_invalid");
         }
