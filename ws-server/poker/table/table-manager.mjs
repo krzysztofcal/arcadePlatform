@@ -79,8 +79,9 @@ function isCoreStateBotUser(coreState, userId) {
   return seatDetails?.[normalizedUserId]?.isBot === true;
 }
 
-function normalizeHandEligibleMembers({ table, coreState = table?.coreState } = {}) {
+function normalizeHandEligibleMembers({ table, coreState = table?.coreState, nowMs = Date.now() } = {}) {
   const sourceMembers = Array.isArray(coreState?.members) ? coreState.members : [];
+  const hasBotMembers = sourceMembers.some((member) => isCoreStateBotUser(coreState, member?.userId));
   const members = sourceMembers
     .map((member) => {
       const userId = typeof member?.userId === "string" ? member.userId.trim() : "";
@@ -91,8 +92,13 @@ function normalizeHandEligibleMembers({ table, coreState = table?.coreState } = 
       if (isCoreStateBotUser(coreState, userId)) {
         return { userId, seat };
       }
+      if (!hasBotMembers) {
+        return { userId, seat };
+      }
       const presence = table?.presenceByUserId instanceof Map ? table.presenceByUserId.get(userId) : null;
-      if (!presence || presence.connected !== true) {
+      const expiresAt = Number(presence?.expiresAt);
+      const withinDisconnectGrace = Number.isFinite(expiresAt) && expiresAt > nowMs;
+      if (!presence || (presence.connected !== true && !withinDisconnectGrace)) {
         return null;
       }
       return { userId, seat };
@@ -107,20 +113,25 @@ function normalizeHandEligibleMembers({ table, coreState = table?.coreState } = 
   });
 }
 
-function hasConnectedHumanHandEligibleMember({ table, coreState = table?.coreState } = {}) {
+function hasHandEligibleHumanMember({ table, coreState = table?.coreState, nowMs = Date.now() } = {}) {
   const sourceMembers = Array.isArray(coreState?.members) ? coreState.members : [];
+  const hasBotMembers = sourceMembers.some((member) => isCoreStateBotUser(coreState, member?.userId));
   return sourceMembers.some((member) => {
     const userId = typeof member?.userId === "string" ? member.userId.trim() : "";
     if (!userId || isCoreStateBotUser(coreState, userId)) {
       return false;
     }
+    if (!hasBotMembers) {
+      return true;
+    }
     const presence = table?.presenceByUserId instanceof Map ? table.presenceByUserId.get(userId) : null;
-    return presence?.connected === true;
+    const expiresAt = Number(presence?.expiresAt);
+    return presence?.connected === true || (Number.isFinite(expiresAt) && expiresAt > nowMs);
   });
 }
 
-function buildHandEligibleCoreState({ table, coreState = table?.coreState } = {}) {
-  const members = normalizeHandEligibleMembers({ table, coreState });
+function buildHandEligibleCoreState({ table, coreState = table?.coreState, nowMs = Date.now() } = {}) {
+  const members = normalizeHandEligibleMembers({ table, coreState, nowMs });
   return {
     ...coreState,
     members
@@ -450,7 +461,7 @@ export function createTableManager({
 
     const resolvedNowMs = resolveNowMs({ nowMs });
     const existingLiveState = asLiveHandState(table.coreState?.pokerState);
-    if (!existingLiveState && !hasConnectedHumanHandEligibleMember({ table })) {
+    if (!existingLiveState && !hasHandEligibleHumanMember({ table, nowMs: resolvedNowMs })) {
       return {
         ok: true,
         changed: false,
@@ -461,7 +472,7 @@ export function createTableManager({
     }
     const handEligibleCoreState = existingLiveState
       ? table.coreState
-      : buildHandEligibleCoreState({ table });
+      : buildHandEligibleCoreState({ table, nowMs: resolvedNowMs });
     const result = bootstrapCoreStateHand({ tableId, coreState: handEligibleCoreState, nowMs: resolvedNowMs });
     table.coreState = result.changed && !existingLiveState
       ? {
@@ -644,7 +655,7 @@ export function createTableManager({
       settledState,
       nextVersion
     });
-    if (!hasConnectedHumanHandEligibleMember({ table, coreState: recycled.coreState })) {
+    if (!hasHandEligibleHumanMember({ table, coreState: recycled.coreState, nowMs })) {
       return {
         ok: true,
         changed: false,
@@ -654,7 +665,7 @@ export function createTableManager({
     }
     const nextHandState = buildNextHandStateFromSettled({
       tableId,
-      coreState: buildHandEligibleCoreState({ table, coreState: recycled.coreState }),
+      coreState: buildHandEligibleCoreState({ table, coreState: recycled.coreState, nowMs }),
       settledState: recycled.settledState,
       nextVersion
     });
