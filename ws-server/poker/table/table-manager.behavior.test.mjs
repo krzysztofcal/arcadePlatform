@@ -125,7 +125,7 @@ test("rolloverSettledHand delays next-hand bootstrap until explicitly invoked", 
   assert.equal(nextState.turnDeadlineAt > nextState.turnStartedAt, true);
 });
 
-test("persistedPokerState strips private cards while keeping handSeed", () => {
+test("persistedPokerState keeps runtime private cards available for autoplay", () => {
   const tableManager = createTableManager({ maxSeats: 6 });
   const tableId = "table_persisted_public_state";
 
@@ -167,8 +167,8 @@ test("persistedPokerState strips private cards while keeping handSeed", () => {
   assert.equal(restored.ok, true);
   const persistedState = tableManager.persistedPokerState(tableId);
   assert.equal(persistedState.handSeed, "seed_public_state");
-  assert.equal(Object.prototype.hasOwnProperty.call(persistedState, "holeCardsByUserId"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(persistedState, "deck"), false);
+  assert.deepEqual(persistedState.holeCardsByUserId, { user_a: ["AH", "AD"], user_b: ["2C", "2D"] });
+  assert.deepEqual(persistedState.deck, ["TC"]);
 });
 
 test("evictTable removes restored runtime table state", () => {
