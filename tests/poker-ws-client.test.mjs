@@ -280,6 +280,42 @@ test('poker ws client clamps server-provided heartbeatMs before scheduling inter
   assert.equal(clearedIntervals.length, 1);
 });
 
+test('poker ws client heartbeat ping does not create pending command timeouts', async () => {
+  const timeoutCalls = [];
+  const intervalTimers = [];
+  const h = loadClientHarness({
+    setTimeout(fn, delay){
+      timeoutCalls.push(delay);
+      return { fn, delay };
+    },
+    clearTimeout(){},
+    setInterval(fn, delay){
+      var timer = { fn, delay, unref(){} };
+      intervalTimers.push(timer);
+      return timer;
+    },
+    clearInterval(){},
+    clientOptions: {
+      heartbeatFallbackMs: 1000,
+      autoReconnect: false
+    }
+  });
+  h.client.start();
+  const ws = h.FakeWebSocket.instances[0];
+  ws.open();
+  ws.message({ type: 'helloAck', payload: { version: '1.0', heartbeatMs: 1000 } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(intervalTimers.length, 1);
+  intervalTimers[0].fn();
+  intervalTimers[0].fn();
+
+  const pingFrames = h.sentFrames.filter((frame) => frame.type === 'ping');
+  assert.equal(pingFrames.length, 2);
+  assert.equal(timeoutCalls.includes(12000), false);
+  assert.equal(h.protocolErrors.length, 0);
+});
+
 test('poker ws client auto-reconnects after abnormal close and re-authenticates', async () => {
   const h = loadClientHarness({
     clientOptions: {
