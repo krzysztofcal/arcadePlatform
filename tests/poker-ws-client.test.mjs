@@ -62,7 +62,9 @@ function loadClientHarness(options = {}){
     Math,
     JSON,
     setTimeout,
-    clearTimeout
+    clearTimeout,
+    setInterval,
+    clearInterval
   };
   context.window.window = context.window;
   if (pokerWsUrlOverride !== undefined) context.window.__POKER_WS_URL = pokerWsUrlOverride;
@@ -216,6 +218,58 @@ test('poker ws client auto-requests resync when server marks session stale', asy
   assert.equal(!!resyncStatus, true);
   assert.equal(resyncStatus.data.reason, 'persistence_conflict');
   assert.equal(resyncStatus.data.mode, 'required');
+});
+
+test('poker ws client starts heartbeat loop from helloAck heartbeatMs', async () => {
+  const h = loadClientHarness({
+    clientOptions: {
+      heartbeatFallbackMs: 5,
+      autoReconnect: false
+    }
+  });
+  h.client.start();
+  const ws = h.FakeWebSocket.instances[0];
+  ws.open();
+  ws.message({ type: 'helloAck', payload: { version: '1.0', heartbeatMs: 5 } });
+  await new Promise((resolve) => setTimeout(resolve, 18));
+
+  const pingFrames = h.sentFrames.filter((frame) => frame.type === 'ping');
+  assert.equal(pingFrames.length > 0, true);
+  assert.equal(typeof pingFrames[0].payload.clientTime, 'string');
+});
+
+test('poker ws client auto-reconnects after abnormal close and re-authenticates', async () => {
+  const h = loadClientHarness({
+    clientOptions: {
+      reconnectBaseMs: 5,
+      reconnectMaxMs: 5,
+      heartbeatFallbackMs: 5
+    }
+  });
+  h.client.start();
+  const ws1 = h.FakeWebSocket.instances[0];
+  ws1.open();
+  ws1.message({ type: 'helloAck', payload: { version: '1.0', heartbeatMs: 5 } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  ws1.message({ type: 'authOk', payload: { roomId: 'table_test_1' } });
+
+  ws1.close(1006, 'abnormal_close');
+  await new Promise((resolve) => setTimeout(resolve, 12));
+
+  assert.equal(h.FakeWebSocket.instances.length, 2);
+  const ws2 = h.FakeWebSocket.instances[1];
+  ws2.open();
+  ws2.message({ type: 'helloAck', payload: { version: '1.0', heartbeatMs: 5 } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  ws2.message({ type: 'authOk', payload: { roomId: 'table_test_1' } });
+
+  const reconnectStatus = h.statuses.find((entry) => entry.status === 'reconnecting');
+  assert.equal(!!reconnectStatus, true);
+  assert.equal(reconnectStatus.data.code, 1006);
+  const sendTypes = h.sentFrames.map((frame) => frame.type);
+  assert.equal(sendTypes.filter((type) => type === 'hello').length >= 2, true);
+  assert.equal(sendTypes.filter((type) => type === 'auth').length >= 2, true);
+  assert.equal(sendTypes.filter((type) => type === 'table_state_sub').length >= 2, true);
 });
 
 test('poker ws client can request an explicit gameplay snapshot over the live socket', async () => {

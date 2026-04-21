@@ -79,6 +79,14 @@ function isCoreStateBotUser(coreState, userId) {
   return seatDetails?.[normalizedUserId]?.isBot === true;
 }
 
+function isObservedRuntimeDisconnectPresence(presence) {
+  const rawExpiresAt = presence?.expiresAt;
+  const expiresAt = rawExpiresAt === null || rawExpiresAt === undefined
+    ? Number.NaN
+    : Number(rawExpiresAt);
+  return presence?.connected === false && Number.isFinite(expiresAt);
+}
+
 function normalizeHandEligibleMembers({ table, coreState = table?.coreState, nowMs = Date.now() } = {}) {
   const sourceMembers = Array.isArray(coreState?.members) ? coreState.members : [];
   const hasBotMembers = sourceMembers.some((member) => isCoreStateBotUser(coreState, member?.userId));
@@ -92,10 +100,14 @@ function normalizeHandEligibleMembers({ table, coreState = table?.coreState, now
       if (isCoreStateBotUser(coreState, userId)) {
         return { userId, seat };
       }
+      const presence = table?.presenceByUserId instanceof Map ? table.presenceByUserId.get(userId) : null;
+      const observedRuntimeDisconnect = isObservedRuntimeDisconnectPresence(presence);
+      if (!hasBotMembers && observedRuntimeDisconnect) {
+        return null;
+      }
       if (!hasBotMembers) {
         return { userId, seat };
       }
-      const presence = table?.presenceByUserId instanceof Map ? table.presenceByUserId.get(userId) : null;
       const expiresAt = Number(presence?.expiresAt);
       const withinDisconnectGrace = Number.isFinite(expiresAt) && expiresAt > nowMs;
       if (!presence || (presence.connected !== true && !withinDisconnectGrace)) {
@@ -121,10 +133,14 @@ function hasHandEligibleHumanMember({ table, coreState = table?.coreState, nowMs
     if (!userId || isCoreStateBotUser(coreState, userId)) {
       return false;
     }
+    const presence = table?.presenceByUserId instanceof Map ? table.presenceByUserId.get(userId) : null;
+    const observedRuntimeDisconnect = isObservedRuntimeDisconnectPresence(presence);
+    if (!hasBotMembers && observedRuntimeDisconnect) {
+      return false;
+    }
     if (!hasBotMembers) {
       return true;
     }
-    const presence = table?.presenceByUserId instanceof Map ? table.presenceByUserId.get(userId) : null;
     const expiresAt = Number(presence?.expiresAt);
     return presence?.connected === true || (Number.isFinite(expiresAt) && expiresAt > nowMs);
   });

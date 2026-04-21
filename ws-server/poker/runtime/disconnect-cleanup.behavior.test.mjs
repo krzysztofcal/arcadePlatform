@@ -19,6 +19,38 @@ test('reconnect before sweep skips cleanup and removes candidate', async () => {
   assert.equal(runtime.size(), 0);
 });
 
+test('seated reconnect grace delays deferred cleanup retry until grace expires', async () => {
+  let currentNowMs = 1_000;
+  let cleanupCalls = 0;
+  const runtime = createDisconnectCleanupRuntime({
+    executeCleanup: async () => {
+      cleanupCalls += 1;
+      return cleanupCalls === 1
+        ? { ok: true, changed: false, deferred: true, status: 'cleaned_live_hand_preserved' }
+        : { ok: true, changed: true, status: 'cleaned' };
+    },
+    listActiveSocketsForUser: () => [],
+    socketMatchesTable: () => false,
+    seatedReconnectGraceMs: 5_000,
+    nowMs: () => currentNowMs
+  });
+
+  runtime.enqueue({ tableId: 't_grace', userId: 'u_grace' });
+  await runtime.sweep();
+  assert.equal(cleanupCalls, 1);
+  assert.equal(runtime.size(), 1);
+
+  currentNowMs = 5_999;
+  await runtime.sweep();
+  assert.equal(cleanupCalls, 1);
+  assert.equal(runtime.size(), 1);
+
+  currentNowMs = 6_000;
+  await runtime.sweep();
+  assert.equal(cleanupCalls, 2);
+  assert.equal(runtime.size(), 0);
+});
+
 test('success cleanup triggers onChanged', async () => {
   const changed = [];
   const runtime = createDisconnectCleanupRuntime({

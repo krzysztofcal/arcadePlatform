@@ -57,6 +57,7 @@ const TABLE_SNAPSHOT_KNOWN_FAILURE_CODES = new Set([
 const SESSION_REBOUND_CLOSE_CODE = 4001;
 const LIVE_HAND_PHASES = new Set(["POSTING_BLINDS", "PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"]);
 const DEFAULT_EMPTY_JOINABLE_GRACE_MS = 60_000;
+const DEFAULT_SEATED_RECONNECT_GRACE_MS = 90_000;
 
 function resolvePresenceTtlMs(rawValue) {
   const parsed = Number(rawValue);
@@ -64,6 +65,14 @@ function resolvePresenceTtlMs(rawValue) {
     return 10_000;
   }
   return parsed;
+}
+
+function resolveSeatedReconnectGraceMs(rawValue) {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_SEATED_RECONNECT_GRACE_MS;
+  }
+  return Math.trunc(parsed);
 }
 
 function isLiveHandPhase(value) {
@@ -1322,6 +1331,7 @@ const disconnectCleanupRuntime = createDisconnectCleanupRuntime({
     const subscribed = conn?.subscribedTableId || null;
     return joined === tableId || subscribed === tableId;
   },
+  seatedReconnectGraceMs: resolveSeatedReconnectGraceMs(process.env.WS_SEATED_RECONNECT_GRACE_MS),
   onChanged: async () => {},
   klog: klogSafe
 });
