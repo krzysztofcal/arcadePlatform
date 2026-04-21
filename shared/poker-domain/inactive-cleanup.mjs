@@ -206,8 +206,58 @@ export async function executeInactiveCleanup({
       return { ok: true, changed: false, protected: true, status: "turn_protected", retryable: true };
     }
 
-    const stacks = { ...resolveStateStacks(state) };
+    const tableRows = await tx.unsafe(
+      "select status, created_at, last_activity_at, updated_at from public.poker_tables where id = $1 limit 1 for update;",
+      [tableId]
+    );
+    const tableStatus = tableRows?.[0]?.status || null;
+    const tableCreatedAtMs = parseTimestampMs(tableRows?.[0]?.created_at);
+    const tableLastActivityAtMs =
+      parseTimestampMs(tableRows?.[0]?.last_activity_at)
+      ?? parseTimestampMs(tableRows?.[0]?.updated_at)
+      ?? tableCreatedAtMs;
+    const nowMs = Date.now();
     const seatWasActive = seat?.status === "ACTIVE";
+    if (hasLiveHandSignal(state)) {
+      const logicalStaleReason =
+        normalizedUserId == null
+          ? resolveLiveHandLogicalStaleReason({ state, nowMs, staleAfterMs: liveHandStaleMs })
+          : null;
+      const liveHandIsFresh =
+        !logicalStaleReason
+        && (
+          normalizedUserId !== null
+          || tableLastActivityAtMs == null
+          || nowMs - tableLastActivityAtMs < liveHandStaleMs
+        );
+      if (liveHandIsFresh) {
+        klog("poker_inactive_cleanup_live_hand_preserved", {
+          tableId,
+          userId: normalizedUserId,
+          phase: typeof state?.phase === "string" ? state.phase : null,
+          seatWasActive
+        });
+        return {
+          ok: true,
+          changed: false,
+          status: seatWasActive ? "cleaned_live_hand_preserved" : "live_hand_preserved",
+          closed: false,
+          retryable: false
+        };
+      }
+      klog("poker_inactive_cleanup_stale_live_hand_closing", {
+        tableId,
+        userId: normalizedUserId,
+        phase: typeof state?.phase === "string" ? state.phase : null,
+        staleReason: logicalStaleReason ?? "table_activity_stale",
+        turnUserId: typeof state?.turnUserId === "string" ? state.turnUserId : null,
+        turnDeadlineAt: Number.isFinite(Number(state?.turnDeadlineAt)) ? Number(state.turnDeadlineAt) : null,
+        lastActivityAtMs: tableLastActivityAtMs,
+        staleForMs: tableLastActivityAtMs == null ? null : Math.max(0, nowMs - tableLastActivityAtMs)
+      });
+    }
+
+    const stacks = { ...resolveStateStacks(state) };
     if (seatWasActive) {
       const targetCashout = stateFirstStackAmount({ state, seat, userId: normalizedUserId });
       await postCashout({
@@ -264,56 +314,6 @@ export async function executeInactiveCleanup({
         closed: false,
         retryable: false
       };
-    }
-
-    const tableRows = await tx.unsafe(
-      "select status, created_at, last_activity_at, updated_at from public.poker_tables where id = $1 limit 1 for update;",
-      [tableId]
-    );
-    const tableStatus = tableRows?.[0]?.status || null;
-    const tableCreatedAtMs = parseTimestampMs(tableRows?.[0]?.created_at);
-    const tableLastActivityAtMs =
-      parseTimestampMs(tableRows?.[0]?.last_activity_at)
-      ?? parseTimestampMs(tableRows?.[0]?.updated_at)
-      ?? tableCreatedAtMs;
-    const nowMs = Date.now();
-    if (hasLiveHandSignal(nextState)) {
-      const logicalStaleReason =
-        normalizedUserId == null
-          ? resolveLiveHandLogicalStaleReason({ state: nextState, nowMs, staleAfterMs: liveHandStaleMs })
-          : null;
-      const liveHandIsFresh =
-        !logicalStaleReason
-        && (
-          normalizedUserId !== null
-          || tableLastActivityAtMs == null
-          || nowMs - tableLastActivityAtMs < liveHandStaleMs
-        );
-      if (liveHandIsFresh) {
-        klog("poker_inactive_cleanup_live_hand_preserved", {
-          tableId,
-          userId: normalizedUserId,
-          phase: typeof nextState?.phase === "string" ? nextState.phase : null,
-          seatWasActive
-        });
-        return {
-          ok: true,
-          changed: seatWasActive,
-          status: seatWasActive ? "cleaned_live_hand_preserved" : "live_hand_preserved",
-          closed: false,
-          retryable: false
-        };
-      }
-        klog("poker_inactive_cleanup_stale_live_hand_closing", {
-          tableId,
-          userId: normalizedUserId,
-          phase: typeof nextState?.phase === "string" ? nextState.phase : null,
-          staleReason: logicalStaleReason ?? "table_activity_stale",
-          turnUserId: typeof nextState?.turnUserId === "string" ? nextState.turnUserId : null,
-          turnDeadlineAt: Number.isFinite(Number(nextState?.turnDeadlineAt)) ? Number(nextState.turnDeadlineAt) : null,
-          lastActivityAtMs: tableLastActivityAtMs,
-          staleForMs: tableLastActivityAtMs == null ? null : Math.max(0, nowMs - tableLastActivityAtMs)
-        });
     }
 
     if (tableCreatedAtMs != null && nowMs - tableCreatedAtMs < closeGraceMs) {

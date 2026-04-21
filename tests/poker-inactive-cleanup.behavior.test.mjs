@@ -92,6 +92,41 @@ test('off-turn cleanup cashes out state-first amount and clears stack entry', as
   assert.equal(stateUpdate.value.stacks['user-2'], undefined);
 });
 
+test('fresh live hand disconnect preserves active seat and state without cashout', async () => {
+  const ctx = makeTx({
+    seat: { table_id: 'table-live-preserve', user_id: 'user-1', seat_no: 1, status: 'ACTIVE', is_bot: false, stack: 25 },
+    state: {
+      phase: 'RIVER',
+      handId: 'hand-live-preserve',
+      turnUserId: 'user-2',
+      turnDeadlineAt: Date.now() + 60_000,
+      stacks: { 'user-1': 40, 'user-2': 90, 'bot-1': 50 }
+    },
+    allSeats: [
+      { user_id: 'user-1', status: 'ACTIVE', is_bot: false, stack: 25 },
+      { user_id: 'user-2', status: 'ACTIVE', is_bot: false, stack: 90 },
+      { user_id: 'bot-1', status: 'ACTIVE', is_bot: true, stack: 50 }
+    ],
+    lastActivityAt: new Date(Date.now()).toISOString()
+  });
+
+  const result = await executeInactiveCleanup({
+    tableId: 'table-live-preserve',
+    userId: 'user-1',
+    requestId: 'req-live-preserve',
+    env: {},
+    beginSql: async (fn) => fn(ctx.tx),
+    postTransaction: async (payload) => ctx.ledgerCalls.push(payload),
+    isHoleCardsTableMissing: () => false
+  });
+
+  assert.equal(result.status, 'cleaned_live_hand_preserved');
+  assert.equal(result.changed, false);
+  assert.equal(result.closed, false);
+  assert.equal(ctx.ledgerCalls.length, 0);
+  assert.equal(ctx.updates.length, 0);
+});
+
 test('singleton human disconnect closes table, ignores bots keep-alive, and close cashout uses state-first', async () => {
   const ctx = makeTx({
     seat: { table_id: 'table-3', user_id: 'user-3', seat_no: 3, status: 'ACTIVE', is_bot: false, stack: 5 },
@@ -176,9 +211,8 @@ test('bots-only live hand stays open until the hand is finished', async () => {
   const closedUpdate = ctx.updates.find((u) => String(u.query).includes("set status = 'CLOSED'"));
   assert.equal(closedUpdate, undefined);
   const stateUpdate = ctx.updates.find((u) => u.kind === 'state');
-  assert.ok(stateUpdate);
-  assert.equal(stateUpdate.value.phase, 'TURN');
-  assert.equal(stateUpdate.value.turnUserId, 'bot-1');
+  assert.equal(stateUpdate, undefined);
+  assert.equal(ctx.ledgerCalls.length, 0);
 });
 
 test('fresh bots-only live hand without turn deadline stays open', async () => {
