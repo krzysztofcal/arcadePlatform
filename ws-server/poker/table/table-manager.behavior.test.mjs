@@ -125,6 +125,165 @@ test("rolloverSettledHand delays next-hand bootstrap until explicitly invoked", 
   assert.equal(nextState.turnDeadlineAt > nextState.turnStartedAt, true);
 });
 
+test("bootstrapHand excludes disconnected human ghost seats from the next hand", () => {
+  const tableManager = createTableManager({ maxSeats: 6 });
+  const tableId = "table_bootstrap_connected_human_only";
+  const wsHuman = fakeWs("ws-bootstrap-human");
+
+  assert.equal(tableManager.join({ ws: wsHuman, userId: "human_live", tableId, requestId: "join-bootstrap-human", nowTs: 1 }).ok, true);
+
+  const restored = tableManager.restoreTableFromPersisted(tableId, {
+    coreState: {
+      version: 9,
+      roomId: tableId,
+      maxSeats: 6,
+      appliedRequestIds: [],
+      members: [
+        { userId: "human_live", seat: 1 },
+        { userId: "bot_2", seat: 2 },
+        { userId: "ghost_human", seat: 4 }
+      ],
+      seats: { human_live: 1, bot_2: 2, ghost_human: 4 },
+      publicStacks: { human_live: 120, bot_2: 100, ghost_human: 100 },
+      seatDetailsByUserId: {
+        human_live: { isBot: false, botProfile: null, leaveAfterHand: false },
+        bot_2: { isBot: true, botProfile: "TRIVIAL", leaveAfterHand: false },
+        ghost_human: { isBot: false, botProfile: null, leaveAfterHand: false }
+      },
+      pokerState: null
+    },
+    presenceByUserId: new Map([
+      ["human_live", { userId: "human_live", seat: 1 }],
+      ["bot_2", { userId: "bot_2", seat: 2 }],
+      ["ghost_human", { userId: "ghost_human", seat: 4 }]
+    ])
+  });
+
+  assert.equal(restored.ok, true);
+
+  const bootstrapped = tableManager.bootstrapHand(tableId, { nowMs: 1_000 });
+
+  assert.equal(bootstrapped.ok, true);
+  assert.equal(bootstrapped.changed, true);
+
+  const nextState = tableManager.persistedPokerState(tableId);
+  assert.deepEqual(nextState.seats, [
+    { userId: "human_live", seatNo: 1 },
+    { userId: "bot_2", seatNo: 2 }
+  ]);
+  assert.equal(nextState.foldedByUserId.human_live, false);
+  assert.equal(Object.prototype.hasOwnProperty.call(nextState.foldedByUserId, "ghost_human"), false);
+});
+
+test("rolloverSettledHand requires a connected human and excludes disconnected human ghosts", () => {
+  const tableManager = createTableManager({ maxSeats: 6 });
+  const tableId = "table_rollover_connected_human_gate";
+  const wsHuman = fakeWs("ws-rollover-human");
+
+  assert.equal(tableManager.join({ ws: wsHuman, userId: "human_live", tableId, requestId: "join-rollover-human", nowTs: 1 }).ok, true);
+
+  let restored = tableManager.restoreTableFromPersisted(tableId, {
+    coreState: {
+      version: 11,
+      roomId: tableId,
+      maxSeats: 6,
+      appliedRequestIds: [],
+      members: [
+        { userId: "human_live", seat: 1 },
+        { userId: "bot_2", seat: 2 },
+        { userId: "ghost_human", seat: 4 }
+      ],
+      seats: { human_live: 1, bot_2: 2, ghost_human: 4 },
+      publicStacks: { human_live: 118, bot_2: 102, ghost_human: 100 },
+      seatDetailsByUserId: {
+        human_live: { isBot: false, botProfile: null, leaveAfterHand: false },
+        bot_2: { isBot: true, botProfile: "TRIVIAL", leaveAfterHand: false },
+        ghost_human: { isBot: false, botProfile: null, leaveAfterHand: false }
+      },
+      pokerState: {
+        tableId,
+        handId: "hand_rollover_gate",
+        phase: "SETTLED",
+        dealerSeatNo: 1,
+        seats: [
+          { userId: "human_live", seatNo: 1, status: "ACTIVE" },
+          { userId: "bot_2", seatNo: 2, status: "ACTIVE", isBot: true },
+          { userId: "ghost_human", seatNo: 4, status: "ACTIVE" }
+        ],
+        stacks: { human_live: 118, bot_2: 102, ghost_human: 100 }
+      }
+    },
+    presenceByUserId: new Map([
+      ["human_live", { userId: "human_live", seat: 1 }],
+      ["bot_2", { userId: "bot_2", seat: 2 }],
+      ["ghost_human", { userId: "ghost_human", seat: 4 }]
+    ])
+  });
+
+  assert.equal(restored.ok, true);
+
+  let rollover = tableManager.rolloverSettledHand({ tableId, nowMs: 5_000 });
+
+  assert.equal(rollover.ok, true);
+  assert.equal(rollover.changed, true);
+  let nextState = tableManager.persistedPokerState(tableId);
+  assert.deepEqual(nextState.seats, [
+    { userId: "human_live", seatNo: 1 },
+    { userId: "bot_2", seatNo: 2 }
+  ]);
+  assert.equal(nextState.foldedByUserId.human_live, false);
+  assert.equal(Object.prototype.hasOwnProperty.call(nextState.foldedByUserId, "ghost_human"), false);
+
+  tableManager.cleanupConnection({ ws: wsHuman, userId: "human_live", nowTs: 6_000, activeSockets: [] });
+  restored = tableManager.restoreTableFromPersisted(tableId, {
+    coreState: {
+      version: 12,
+      roomId: tableId,
+      maxSeats: 6,
+      appliedRequestIds: [],
+      members: [
+        { userId: "human_live", seat: 1 },
+        { userId: "bot_2", seat: 2 },
+        { userId: "ghost_human", seat: 4 }
+      ],
+      seats: { human_live: 1, bot_2: 2, ghost_human: 4 },
+      publicStacks: { human_live: 116, bot_2: 104, ghost_human: 100 },
+      seatDetailsByUserId: {
+        human_live: { isBot: false, botProfile: null, leaveAfterHand: false },
+        bot_2: { isBot: true, botProfile: "TRIVIAL", leaveAfterHand: false },
+        ghost_human: { isBot: false, botProfile: null, leaveAfterHand: false }
+      },
+      pokerState: {
+        tableId,
+        handId: "hand_rollover_gate_2",
+        phase: "SETTLED",
+        dealerSeatNo: 2,
+        seats: [
+          { userId: "human_live", seatNo: 1, status: "ACTIVE" },
+          { userId: "bot_2", seatNo: 2, status: "ACTIVE", isBot: true },
+          { userId: "ghost_human", seatNo: 4, status: "ACTIVE" }
+        ],
+        stacks: { human_live: 116, bot_2: 104, ghost_human: 100 }
+      }
+    },
+    presenceByUserId: new Map([
+      ["human_live", { userId: "human_live", seat: 1 }],
+      ["bot_2", { userId: "bot_2", seat: 2 }],
+      ["ghost_human", { userId: "ghost_human", seat: 4 }]
+    ])
+  });
+
+  assert.equal(restored.ok, true);
+
+  rollover = tableManager.rolloverSettledHand({ tableId, nowMs: 6_500 });
+
+  assert.equal(rollover.ok, true);
+  assert.equal(rollover.changed, false);
+  assert.equal(rollover.reason, "not_enough_players");
+  nextState = tableManager.persistedPokerState(tableId);
+  assert.equal(nextState.phase, "SETTLED");
+});
+
 test("persistedPokerState keeps runtime private cards available for autoplay", () => {
   const tableManager = createTableManager({ maxSeats: 6 });
   const tableId = "table_persisted_public_state";
