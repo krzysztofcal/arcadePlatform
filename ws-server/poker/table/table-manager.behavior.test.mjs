@@ -124,6 +124,41 @@ test("rolloverSettledHand delays next-hand bootstrap until explicitly invoked", 
   assert.equal(nextState.turnStartedAt, 5_000);
   assert.equal(nextState.turnDeadlineAt > nextState.turnStartedAt, true);
 });
+
+test("evictTable removes restored runtime table state", () => {
+  const tableManager = createTableManager({ maxSeats: 6 });
+  const tableId = "table_evict_runtime";
+
+  const restored = tableManager.restoreTableFromPersisted(tableId, {
+    tableId,
+    tableStatus: "CLOSED",
+    coreState: {
+      version: 3,
+      roomId: tableId,
+      maxSeats: 6,
+      members: [{ userId: "bot_a", seat: 1 }],
+      seats: { bot_a: 1 },
+      publicStacks: { bot_a: 50 },
+      seatDetailsByUserId: {
+        bot_a: { isBot: true, botProfile: "TRIVIAL", leaveAfterHand: false }
+      },
+      pokerState: {
+        tableId,
+        phase: "HAND_DONE",
+        seats: [{ userId: "bot_a", seatNo: 1, isBot: true }],
+        stacks: { bot_a: 50 }
+      }
+    },
+    presenceByUserId: new Map()
+  });
+
+  assert.equal(restored.ok, true);
+  assert.equal(tableManager.listTableIds().includes(tableId), true);
+  assert.equal(tableManager.evictTable(tableId).existed, true);
+  assert.equal(tableManager.listTableIds().includes(tableId), false);
+  assert.deepEqual(tableManager.tableState(tableId), { tableId, members: [] });
+});
+
 test("table manager exposes connected members as sorted {userId, seat} and reuses freed seats", () => {
   const tableManager = createTableManager({ maxSeats: 3, presenceTtlMs: 0 });
   const ws1 = fakeWs("ws-1");

@@ -595,6 +595,13 @@ export function createInactiveCleanupExecutor({ env }) {
 
   try {
     await waitForListening(child, 5000);
+    const serverLogs = [];
+    child.stdout.on("data", (buf) => {
+      const text = String(buf || "");
+      if (text.includes("ws_settled_rollover_close_evict_closed_success")) {
+        serverLogs.push(text.trim());
+      }
+    });
     const observerWs = await connectClient(port);
     await hello(observerWs);
     await auth(observerWs, makeHs256Jwt({ secret, sub: "observer_user" }), "auth-settled-bots-only");
@@ -616,6 +623,7 @@ export function createInactiveCleanupExecutor({ env }) {
     assert.equal(persisted.tables[tableId].tableRow.status, "CLOSED");
     assert.equal(persisted.tables[tableId].stateRow.state.phase, "HAND_DONE");
     assert.equal(persisted.tables[tableId].stateRow.state.handId, "");
+    assert.equal(serverLogs.some((line) => line.includes("ws_settled_rollover_close_evict_closed_success")), true);
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
@@ -725,7 +733,11 @@ export function createInactiveCleanupExecutor({ env }) {
     const serverLogs = [];
     child.stdout.on("data", (buf) => {
       const text = String(buf || "");
-      if (text.includes("ws_settled_rollover_close_skipped_human_presence") || text.includes("ws_settled_rollover_close_restore_success")) {
+      if (
+        text.includes("ws_settled_rollover_close_skipped_human_presence")
+        || text.includes("ws_settled_rollover_close_restore_success")
+        || text.includes("ws_settled_rollover_close_evict_closed_success")
+      ) {
         serverLogs.push(text.trim());
       }
     });
@@ -765,7 +777,7 @@ export function createInactiveCleanupExecutor({ env }) {
     const closed = await readPersistedFile(filePath);
     assert.equal(closed.tables[tableId].tableRow.status, "CLOSED");
     assert.equal(closed.tables[tableId].stateRow.state.phase, "HAND_DONE");
-    assert.equal(serverLogs.some((line) => line.includes("ws_settled_rollover_close_restore_success")), true);
+    assert.equal(serverLogs.some((line) => line.includes("ws_settled_rollover_close_evict_closed_success")), true);
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
