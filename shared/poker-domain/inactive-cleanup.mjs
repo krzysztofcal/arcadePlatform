@@ -240,6 +240,7 @@ export async function executeInactiveCleanup({
         return {
           ok: true,
           changed: false,
+          deferred: normalizedUserId !== null,
           status: seatWasActive ? "cleaned_live_hand_preserved" : "live_hand_preserved",
           closed: false,
           retryable: false

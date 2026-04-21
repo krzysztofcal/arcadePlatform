@@ -67,6 +67,77 @@ function normalizeAuthoritativeMembers(table) {
   });
 }
 
+function isCoreStateBotUser(coreState, userId) {
+  const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+  if (!normalizedUserId) {
+    return false;
+  }
+  const seatDetails = coreState?.seatDetailsByUserId;
+  if (!seatDetails || typeof seatDetails !== "object" || Array.isArray(seatDetails)) {
+    return false;
+  }
+  return seatDetails?.[normalizedUserId]?.isBot === true;
+}
+
+function normalizeHandEligibleMembers({ table, coreState = table?.coreState, nowMs = Date.now() } = {}) {
+  const sourceMembers = Array.isArray(coreState?.members) ? coreState.members : [];
+  const hasBotMembers = sourceMembers.some((member) => isCoreStateBotUser(coreState, member?.userId));
+  const members = sourceMembers
+    .map((member) => {
+      const userId = typeof member?.userId === "string" ? member.userId.trim() : "";
+      const seat = Number.isInteger(member?.seat) ? member.seat : null;
+      if (!userId || !Number.isInteger(seat)) {
+        return null;
+      }
+      if (isCoreStateBotUser(coreState, userId)) {
+        return { userId, seat };
+      }
+      if (!hasBotMembers) {
+        return { userId, seat };
+      }
+      const presence = table?.presenceByUserId instanceof Map ? table.presenceByUserId.get(userId) : null;
+      const expiresAt = Number(presence?.expiresAt);
+      const withinDisconnectGrace = Number.isFinite(expiresAt) && expiresAt > nowMs;
+      if (!presence || (presence.connected !== true && !withinDisconnectGrace)) {
+        return null;
+      }
+      return { userId, seat };
+    })
+    .filter(Boolean);
+
+  return members.sort((a, b) => {
+    if (a.seat !== b.seat) {
+      return a.seat - b.seat;
+    }
+    return a.userId.localeCompare(b.userId);
+  });
+}
+
+function hasHandEligibleHumanMember({ table, coreState = table?.coreState, nowMs = Date.now() } = {}) {
+  const sourceMembers = Array.isArray(coreState?.members) ? coreState.members : [];
+  const hasBotMembers = sourceMembers.some((member) => isCoreStateBotUser(coreState, member?.userId));
+  return sourceMembers.some((member) => {
+    const userId = typeof member?.userId === "string" ? member.userId.trim() : "";
+    if (!userId || isCoreStateBotUser(coreState, userId)) {
+      return false;
+    }
+    if (!hasBotMembers) {
+      return true;
+    }
+    const presence = table?.presenceByUserId instanceof Map ? table.presenceByUserId.get(userId) : null;
+    const expiresAt = Number(presence?.expiresAt);
+    return presence?.connected === true || (Number.isFinite(expiresAt) && expiresAt > nowMs);
+  });
+}
+
+function buildHandEligibleCoreState({ table, coreState = table?.coreState, nowMs = Date.now() } = {}) {
+  const members = normalizeHandEligibleMembers({ table, coreState, nowMs });
+  return {
+    ...coreState,
+    members
+  };
+}
+
 function normalizeTableStatus(value) {
   if (typeof value !== "string") return "OPEN";
   const normalized = value.trim().toUpperCase();
@@ -389,8 +460,27 @@ export function createTableManager({
     }
 
     const resolvedNowMs = resolveNowMs({ nowMs });
-    const result = bootstrapCoreStateHand({ tableId, coreState: table.coreState, nowMs: resolvedNowMs });
-    table.coreState = result.coreState;
+    const existingLiveState = asLiveHandState(table.coreState?.pokerState);
+    if (!existingLiveState && !hasHandEligibleHumanMember({ table, nowMs: resolvedNowMs })) {
+      return {
+        ok: true,
+        changed: false,
+        bootstrap: "not_eligible",
+        stateVersion: table.coreState.version,
+        handId: null
+      };
+    }
+    const handEligibleCoreState = existingLiveState
+      ? table.coreState
+      : buildHandEligibleCoreState({ table, nowMs: resolvedNowMs });
+    const result = bootstrapCoreStateHand({ tableId, coreState: handEligibleCoreState, nowMs: resolvedNowMs });
+    table.coreState = result.changed && !existingLiveState
+      ? {
+          ...table.coreState,
+          version: result.stateVersion,
+          pokerState: result.coreState?.pokerState ?? table.coreState.pokerState
+        }
+      : result.coreState;
     if (result.changed) {
       touchTableActivity(table, resolvedNowMs);
     }
@@ -565,9 +655,17 @@ export function createTableManager({
       settledState,
       nextVersion
     });
+    if (!hasHandEligibleHumanMember({ table, coreState: recycled.coreState, nowMs })) {
+      return {
+        ok: true,
+        changed: false,
+        reason: "not_enough_players",
+        stateVersion: table.coreState.version
+      };
+    }
     const nextHandState = buildNextHandStateFromSettled({
       tableId,
-      coreState: recycled.coreState,
+      coreState: buildHandEligibleCoreState({ table, coreState: recycled.coreState, nowMs }),
       settledState: recycled.settledState,
       nextVersion
     });
@@ -1364,11 +1462,7 @@ export function createTableManager({
       return false;
     }
     const table = tables.get(tableId);
-    const seatDetails = table?.coreState?.seatDetailsByUserId;
-    if (!seatDetails || typeof seatDetails !== "object" || Array.isArray(seatDetails)) {
-      return false;
-    }
-    return seatDetails?.[normalizedUserId]?.isBot === true;
+    return isCoreStateBotUser(table?.coreState, normalizedUserId);
   }
 
   function hasActiveHumanMember(tableId) {

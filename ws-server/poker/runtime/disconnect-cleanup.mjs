@@ -44,6 +44,14 @@ export function createDisconnectCleanupRuntime({
         });
         continue;
       }
+      if (result?.ok && result?.deferred) {
+        klog('ws_disconnect_cleanup_deferred', {
+          tableId: candidate.tableId,
+          userId: candidate.userId,
+          status: result?.status || 'deferred'
+        });
+        continue;
+      }
       if (result?.ok) {
         candidates.delete(key(candidate.tableId, candidate.userId));
         await onChanged(candidate.tableId, result);

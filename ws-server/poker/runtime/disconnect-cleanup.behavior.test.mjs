@@ -71,6 +71,49 @@ test('protected cleanup keeps candidate queued and skips onChanged', async () =>
   assert.equal(changed.length, 0);
 });
 
+test('deferred cleanup keeps candidate queued and skips onChanged', async () => {
+  const changed = [];
+  const runtime = createDisconnectCleanupRuntime({
+    executeCleanup: async () => ({ ok: true, changed: false, deferred: true, status: 'cleaned_live_hand_preserved' }),
+    listActiveSocketsForUser: () => [],
+    socketMatchesTable: () => false,
+    onChanged: (tableId, result) => changed.push({ tableId, result })
+  });
+
+  runtime.enqueue({ tableId: 't_deferred', userId: 'u10' });
+  await runtime.sweep();
+
+  assert.equal(runtime.size(), 1);
+  assert.equal(changed.length, 0);
+});
+
+test('deferred cleanup completes on a later sweep after the hand ends', async () => {
+  const changed = [];
+  let cleanupCalls = 0;
+  const runtime = createDisconnectCleanupRuntime({
+    executeCleanup: async () => {
+      cleanupCalls += 1;
+      return cleanupCalls === 1
+        ? { ok: true, changed: false, deferred: true, status: 'cleaned_live_hand_preserved' }
+        : { ok: true, changed: true, status: 'cleaned' };
+    },
+    listActiveSocketsForUser: () => [],
+    socketMatchesTable: () => false,
+    onChanged: (tableId, result) => changed.push({ tableId, result })
+  });
+
+  runtime.enqueue({ tableId: 't_deferred_done', userId: 'u11' });
+  await runtime.sweep();
+  assert.equal(runtime.size(), 1);
+  assert.equal(changed.length, 0);
+
+  await runtime.sweep();
+  assert.equal(runtime.size(), 0);
+  assert.equal(changed.length, 1);
+  assert.equal(changed[0].tableId, 't_deferred_done');
+  assert.equal(changed[0].result.status, 'cleaned');
+});
+
 test('repeated cleanup idempotency', async () => {
   let cleanupCalls = 0;
   const changed = [];

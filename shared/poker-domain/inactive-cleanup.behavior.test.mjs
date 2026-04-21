@@ -179,6 +179,7 @@ test("inactive cleanup preserves replacement bot turn holder when seat rows stil
 
   assert.equal(result.ok, true);
   assert.equal(result.changed, false);
+  assert.equal(result.deferred, true);
   assert.equal(result.status, "cleaned_live_hand_preserved");
   assert.equal(harness.cashouts.length, 0);
   assert.equal(harness.seatState.find((row) => row.user_id === "human_1")?.status, "ACTIVE");
@@ -216,6 +217,7 @@ test("inactive cleanup preserves fresh live hand without mutating disconnected a
 
   assert.equal(result.ok, true);
   assert.equal(result.changed, false);
+  assert.equal(result.deferred, true);
   assert.equal(result.status, "cleaned_live_hand_preserved");
   assert.equal(harness.cashouts.length, 0);
   assert.equal(harness.seatState.find((row) => row.user_id === "human_1")?.status, "ACTIVE");
@@ -243,6 +245,7 @@ test("inactive cleanup system sweep keeps bots-only live table open until hand c
 
   assert.equal(result.ok, true);
   assert.equal(result.closed, false);
+  assert.equal(result.deferred, false);
   assert.equal(result.status, "live_hand_preserved");
   assert.equal(harness.tableState.tableStatus, "OPEN");
   assert.equal(harness.seatState.find((row) => row.user_id === "bot_1")?.status, "ACTIVE");
@@ -271,6 +274,7 @@ test("inactive cleanup system sweep keeps fresh bots-only live table open when d
 
   assert.equal(result.ok, true);
   assert.equal(result.closed, false);
+  assert.equal(result.deferred, false);
   assert.equal(result.status, "live_hand_preserved");
   assert.equal(harness.tableState.tableStatus, "OPEN");
   assert.equal(harness.tableState.stateRow.state.phase, "FLOP");
