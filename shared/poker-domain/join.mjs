@@ -30,6 +30,47 @@ function parseStateValue(value) {
   return value;
 }
 
+function normalizeCardCodeForValidation(cardCode) {
+  if (typeof cardCode !== "string") return null;
+  const code = cardCode.trim().toUpperCase();
+  if (!/^(10|[2-9TJQKA])[CDHS]$/.test(code)) return null;
+  const suit = code.slice(-1);
+  const rankCode = code.slice(0, -1);
+  const rank = rankCode === "A"
+    ? 14
+    : rankCode === "K"
+      ? 13
+      : rankCode === "Q"
+        ? 12
+        : rankCode === "J"
+          ? 11
+          : rankCode === "T"
+            ? 10
+            : Number(rankCode);
+  if (!Number.isInteger(rank) || rank < 2 || rank > 14) return null;
+  return { r: rank, s: suit };
+}
+
+function normalizeStateForStorageValidation(stateInput) {
+  if (!stateInput || typeof stateInput !== "object" || Array.isArray(stateInput)) {
+    return stateInput;
+  }
+  if (!Array.isArray(stateInput.community)) {
+    return stateInput;
+  }
+  const normalizedCommunity = stateInput.community.map((card) =>
+    typeof card === "string" ? normalizeCardCodeForValidation(card) : card
+  );
+  if (normalizedCommunity.some((card) => !card)) {
+    return stateInput;
+  }
+  return { ...stateInput, community: normalizedCommunity };
+}
+
+function isStorageStateValid(validateStateForStorage, state) {
+  return validateStateForStorage(normalizeStateForStorageValidation(state));
+}
+
 function makeError(code) {
   const error = new Error(code);
   error.code = code;
@@ -194,7 +235,7 @@ async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, stack, loadS
     seatEntries: activeSeatRows(seatRows).map(asSeatSnapshot).filter(Boolean),
     stackEntries: activeStackEntries(seatRows)
   });
-  if (!validateStateForStorage(nextState)) {
+  if (!isStorageStateValid(validateStateForStorage, nextState)) {
     throw makeError("state_invalid");
   }
   const updated = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState }));
@@ -289,7 +330,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           seatEntries: seatRows.map(asSeatSnapshot).filter(Boolean),
           stackEntries: activeStackEntries(seatRows)
         });
-        if (!validateStateForStorage(nextState)) {
+        if (!isStorageStateValid(validateStateForStorage, nextState)) {
           throw makeError("state_invalid");
         }
         const updatedState = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState }));

@@ -122,6 +122,89 @@ test("rejects malformed stringified state with state_invalid", async () => {
   );
 });
 
+test("allows second human join during live post-flop hand when persisted community uses string card codes", async () => withBotsDisabled(async () => {
+  const seatRows = [
+    { user_id: "human_1", seat_no: 1, status: "ACTIVE", stack: 98, is_bot: false, bot_profile: null, leave_after_hand: false },
+    { user_id: "bot_1", seat_no: 2, status: "ACTIVE", stack: 101, is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false },
+    { user_id: "bot_2", seat_no: 3, status: "ACTIVE", stack: 101, is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false }
+  ];
+  const stateRow = {
+    version: 5,
+    state: {
+      tableId: "t-live",
+      phase: "FLOP",
+      handId: "hand_live_join",
+      seats: [
+        { userId: "human_1", seatNo: 1, status: "ACTIVE" },
+        { userId: "bot_1", seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" },
+        { userId: "bot_2", seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" }
+      ],
+      stacks: { human_1: 98, bot_1: 101, bot_2: 101 },
+      community: ["AS", "KS", "QS"],
+      communityDealt: 3,
+      dealerSeatNo: 1,
+      turnUserId: "bot_1",
+      toCallByUserId: { human_1: 0, bot_1: 0, bot_2: 0 },
+      betThisRoundByUserId: { human_1: 0, bot_1: 0, bot_2: 0 },
+      actedThisRoundByUserId: { human_1: true, bot_1: false, bot_2: false },
+      foldedByUserId: { human_1: false, bot_1: false, bot_2: false },
+      lastBettingRoundActionByUserId: { human_1: "check", bot_1: null, bot_2: null },
+      contributionsByUserId: { human_1: 2, bot_1: 2, bot_2: 2 },
+      leftTableByUserId: {},
+      sitOutByUserId: {},
+      pendingAutoSitOutByUserId: {},
+      sidePots: []
+    }
+  };
+
+  const result = await executePokerJoinAuthoritative(withLockedState({
+    beginSql: async (fn) => fn({
+      unsafe: async (sql, params = []) => {
+        if (sql.includes("from public.poker_tables")) return [{ id: "t-live", status: "OPEN", max_players: 6 }];
+        if (sql.includes("from public.poker_seats") && sql.includes("status = 'ACTIVE'") && sql.includes("user_id = $2") && !sql.includes("seat_no, stack")) return [];
+        if (sql.includes("from public.poker_seats") && sql.includes("status = 'ACTIVE'") && sql.includes("order by seat_no asc;")) {
+          return seatRows.map((seat) => ({ seat_no: seat.seat_no }));
+        }
+        if (sql.includes("from public.poker_seats") && sql.includes("order by seat_no asc;")) {
+          return seatRows.map((seat) => ({ ...seat }));
+        }
+        if (sql.includes("insert into public.poker_seats")) {
+          seatRows.push({ user_id: params[1], seat_no: params[2], status: "ACTIVE", stack: 0, is_bot: false, bot_profile: null, leave_after_hand: false });
+          return [{ seat_no: params[2] }];
+        }
+        if (sql.includes("update public.poker_seats set stack")) {
+          const row = seatRows.find((seat) => seat.user_id === params[1] && seat.seat_no === params[2]);
+          if (row) row.stack = params[3];
+          return [{ ok: true }];
+        }
+        if (sql.includes("select version, state from public.poker_state")) return [stateRow];
+        if (sql.includes("update public.poker_state set state")) {
+          stateRow.state = JSON.parse(params[1]);
+          stateRow.version += 1;
+          return [{ version: stateRow.version }];
+        }
+        if (sql.includes("update public.poker_tables set last_activity_at")) return [];
+        return [];
+      }
+    }),
+    tableId: "t-live",
+    userId: "human_2",
+    requestId: "join-live-2",
+    autoSeat: true,
+    preferredSeatNo: 1,
+    buyIn: 100,
+    postTransactionFn: async () => ({ ok: true })
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.seatNo, 4);
+  assert.equal(result.stack, 100);
+  assert.equal(result.snapshot.stateVersion, 6);
+  assert.equal(result.snapshot.seats.length, 4);
+  assert.equal(result.snapshot.stacks.human_2, 100);
+  assert.deepEqual(stateRow.state.community, ["AS", "KS", "QS"]);
+}));
+
 test("returns canonical db seat number and persisted stack on rejoin", async () => {
   let reads = 0;
   const result = await executePokerJoinAuthoritative(withLockedState({
