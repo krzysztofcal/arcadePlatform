@@ -121,6 +121,8 @@ export function buildBootstrappedPokerState({ tableId, coreState, dealerSeatNo =
     toCallByUserId[userId] = Math.max(0, currentBet - Number(betThisRoundByUserId[userId] ?? 0));
   }
 
+  const handSeats = members.map((member) => ({ userId: member.userId, seatNo: member.seat }));
+
   return {
     roomId: coreState.roomId || tableId,
     handId: nextHandId(tableId, versionForHand, members.length),
@@ -128,7 +130,8 @@ export function buildBootstrappedPokerState({ tableId, coreState, dealerSeatNo =
     phase: "PREFLOP",
     dealerSeatNo: members[dealerIndex]?.seat ?? null,
     turnUserId,
-    seats: members.map((member) => ({ userId: member.userId, seatNo: member.seat })),
+    seats: handSeats.map((seat) => ({ ...seat })),
+    handSeats,
     community: [],
     communityDealt: 0,
     potTotal: sbPosted + bbPosted,

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { applyAction, applyPreflopAction } from "./poker-action-reducer.mjs";
+import { computeSharedLegalActions } from "../shared/poker-primitives.mjs";
 import { dealHoleCards, deriveDeck, toCardCodes } from "../shared/poker-primitives.mjs";
 
 function stateFixture(overrides = {}) {
@@ -86,6 +87,38 @@ test("applyAction second CHECK closes zero-bet FLOP and advances to TURN", () =>
   assert.equal(closed.state.currentBet, 0);
   assert.deepEqual(closed.state.actedThisRoundByUserId, { u1: false, u2: false });
   assert.deepEqual(closed.state.lastBettingRoundActionByUserId, { u1: null, u2: null });
+});
+
+test("applyAction keeps current hand turn order on handSeats when seated joiner appears only in seats", () => {
+  const flop = stateFixture({
+    phase: "FLOP",
+    seats: [
+      { userId: "u1", seatNo: 1 },
+      { userId: "u2", seatNo: 2 },
+      { userId: "u3", seatNo: 3 }
+    ],
+    handSeats: [
+      { userId: "u1", seatNo: 1 },
+      { userId: "u2", seatNo: 2 }
+    ],
+    stacks: { u1: 99, u2: 98, u3: 100 },
+    holeCardsByUserId: { u1: ["AS", "KD"], u2: ["2C", "2D"] },
+    community: ["3H", "4H", "5H"],
+    communityDealt: 3,
+    deck: ["6H", "7H"],
+    currentBet: 0,
+    turnUserId: "u1",
+    toCallByUserId: { u1: 0, u2: 0, u3: 0 },
+    betThisRoundByUserId: { u1: 0, u2: 0, u3: 0 },
+    actedThisRoundByUserId: { u1: false, u2: false, u3: false },
+    foldedByUserId: { u1: false, u2: false, u3: false },
+    contributionsByUserId: { u1: 2, u2: 2, u3: 100 }
+  });
+
+  const checked = applyAction({ pokerState: flop, userId: "u1", action: "CHECK", amount: 0 });
+  assert.equal(checked.ok, true);
+  assert.equal(checked.state.turnUserId, "u2");
+  assert.deepEqual(computeSharedLegalActions({ statePublic: checked.state, userId: "u3" }).actions, []);
 });
 
 test("applyAction records last betting-round action labels including all-in", () => {

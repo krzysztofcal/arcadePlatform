@@ -30,6 +30,64 @@ function parseStateValue(value) {
   return value;
 }
 
+function normalizeCardCodeForValidation(cardCode) {
+  if (typeof cardCode !== "string") return null;
+  const code = cardCode.trim().toUpperCase();
+  if (!/^(10|[2-9TJQKA])[CDHS]$/.test(code)) return null;
+  const suit = code.slice(-1);
+  const rankCode = code.slice(0, -1);
+  const rank = rankCode === "A"
+    ? 14
+    : rankCode === "K"
+      ? 13
+      : rankCode === "Q"
+        ? 12
+        : rankCode === "J"
+          ? 11
+          : rankCode === "T"
+            ? 10
+            : Number(rankCode);
+  if (!Number.isInteger(rank) || rank < 2 || rank > 14) return null;
+  return { r: rank, s: suit };
+}
+
+function normalizeCardArrayForValidation(cardsInput) {
+  if (!Array.isArray(cardsInput)) {
+    return cardsInput;
+  }
+  const normalizedCards = cardsInput.map((card) =>
+    typeof card === "string" ? normalizeCardCodeForValidation(card) : card
+  );
+  if (normalizedCards.some((card) => !card)) {
+    return cardsInput;
+  }
+  return normalizedCards;
+}
+
+function sanitizeStateForStorage(stateInput) {
+  if (!stateInput || typeof stateInput !== "object" || Array.isArray(stateInput)) {
+    return stateInput;
+  }
+  const { deck: _ignoredDeck, holeCardsByUserId: _ignoredHoleCards, ...stateBase } = stateInput;
+  return stateBase;
+}
+
+function normalizeStateForStorageValidation(stateInput) {
+  const sanitizedState = sanitizeStateForStorage(stateInput);
+  if (!sanitizedState || typeof sanitizedState !== "object" || Array.isArray(sanitizedState)) {
+    return sanitizedState;
+  }
+  const normalizedCommunity = normalizeCardArrayForValidation(sanitizedState.community);
+  if (normalizedCommunity === sanitizedState.community) {
+    return sanitizedState;
+  }
+  return { ...sanitizedState, community: normalizedCommunity };
+}
+
+function isStorageStateValid(validateStateForStorage, state) {
+  return validateStateForStorage(normalizeStateForStorageValidation(state));
+}
+
 function makeError(code) {
   const error = new Error(code);
   error.code = code;
@@ -194,13 +252,14 @@ async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, stack, loadS
     seatEntries: activeSeatRows(seatRows).map(asSeatSnapshot).filter(Boolean),
     stackEntries: activeStackEntries(seatRows)
   });
-  if (!validateStateForStorage(nextState)) {
+  const nextStateForStorage = sanitizeStateForStorage(nextState);
+  if (!isStorageStateValid(validateStateForStorage, nextStateForStorage)) {
     throw makeError("state_invalid");
   }
-  const updated = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState }));
+  const updated = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState: nextStateForStorage }));
   const version = requirePostMutationVersion({ previousVersion: stateRow.version, nextVersion: updated.version });
-  assertAuthoritativeJoinStateComplete({ seatRows, state: nextState, version, userId, seatNo, stack, maxPlayers, botCfg });
-  return { version, state: nextState };
+  assertAuthoritativeJoinStateComplete({ seatRows, state: nextStateForStorage, version, userId, seatNo, stack, maxPlayers, botCfg });
+  return { version, state: nextStateForStorage };
 }
 
 async function readPersistedSeatStack({ tx, tableId, userId }) {
@@ -289,10 +348,11 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           seatEntries: seatRows.map(asSeatSnapshot).filter(Boolean),
           stackEntries: activeStackEntries(seatRows)
         });
-        if (!validateStateForStorage(nextState)) {
+        const nextStateForStorage = sanitizeStateForStorage(nextState);
+        if (!isStorageStateValid(validateStateForStorage, nextStateForStorage)) {
           throw makeError("state_invalid");
         }
-        const updatedState = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState }));
+        const updatedState = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState: nextStateForStorage }));
         const snapshotVersion = requirePostMutationVersion({ previousVersion: stateRow.version, nextVersion: updatedState.version });
         klog("shared_join_state_written", { previousVersion: stateRow.version, newVersion: snapshotVersion });
         await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
@@ -308,8 +368,8 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           me: { seated: true },
           snapshot: {
             stateVersion: snapshotVersion,
-            seats: Array.isArray(nextState.seats) ? nextState.seats : [],
-            stacks: nextState.stacks && typeof nextState.stacks === "object" ? nextState.stacks : {}
+            seats: Array.isArray(nextStateForStorage.seats) ? nextStateForStorage.seats : [],
+            stacks: nextStateForStorage.stacks && typeof nextStateForStorage.stacks === "object" ? nextStateForStorage.stacks : {}
           }
         };
       }

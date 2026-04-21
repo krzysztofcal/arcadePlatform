@@ -918,6 +918,67 @@ test("accepted bot autoplay emits focused showdown-input log and restores on mis
   assert.equal(preflightLog.payload.communityLen, 5);
 });
 
+test("accepted bot autoplay showdown comparison ignores mid-hand joiners outside handSeats", async () => {
+  const logs = [];
+  const calls = { restore: 0, resync: 0 };
+  const privateState = {
+    tableId: "t-mid-join-showdown",
+    handId: "h-mid-join-showdown-1",
+    phase: "RIVER",
+    turnUserId: "bot_2",
+    seats: [
+      { userId: "human_1", seatNo: 1 },
+      { userId: "bot_2", seatNo: 2, isBot: true },
+      { userId: "human_2", seatNo: 3 }
+    ],
+    handSeats: [
+      { userId: "human_1", seatNo: 1 },
+      { userId: "bot_2", seatNo: 2, isBot: true }
+    ],
+    community: [{ r: "A", s: "S" }, { r: "K", s: "S" }, { r: "Q", s: "S" }, { r: "J", s: "S" }, { r: "2", s: "D" }],
+    stacks: { human_1: 100, bot_2: 100, human_2: 100 },
+    foldedByUserId: { human_1: false, bot_2: false, human_2: false },
+    sitOutByUserId: {},
+    leftTableByUserId: {},
+    pot: 30,
+    sidePots: [],
+    contributionsByUserId: { human_1: 15, bot_2: 15, human_2: 100 },
+    holeCardsByUserId: {
+      human_1: [{ r: "9", s: "S" }, { r: "9", s: "D" }],
+      bot_2: [{ r: "A", s: "H" }, { r: "A", s: "D" }]
+    }
+  };
+  const tableManager = {
+    persistedPokerState: () => ({ ...privateState }),
+    persistedStateVersion: () => 12,
+    tableSnapshot: () => ({ seats: privateState.seats }),
+    applyAction: () => ({ accepted: true, changed: true, replayed: false, stateVersion: 13 })
+  };
+  const moduleUrl = new URL("./fixtures/autoplay-showdown-reload-private-fixture.mjs", import.meta.url).href;
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => {
+      calls.restore += 1;
+      return { ok: true };
+    },
+    broadcastResyncRequired: () => {
+      calls.resync += 1;
+    },
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    klog: (event, payload) => logs.push({ event, payload })
+  });
+
+  const result = await run({ tableId: "t-mid-join-showdown", trigger: "act", requestId: "r-mid-join-showdown" });
+  assert.equal(result.ok, true);
+  assert.equal(calls.restore, 0);
+  assert.equal(calls.resync, 0);
+  const preflightLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_preflight");
+  assert.ok(preflightLog);
+  assert.deepEqual(preflightLog.payload.eligibleUserIds, ["human_1", "bot_2"]);
+  assert.deepEqual(preflightLog.payload.showdownComparedUserIds, ["human_1", "bot_2"]);
+});
+
 test("accepted bot autoplay rejects cross-hand fallback for degraded showdown runtime state", async () => {
   const logs = [];
   const calls = { restore: 0, resync: 0 };

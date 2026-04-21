@@ -38,6 +38,7 @@ test("engine bootstrap creates deterministic preflop hand with expected invarian
   assert.equal(pokerState.turnStartedAt, nowMs);
   assert.ok(pokerState.turnDeadlineAt > nowMs);
   assert.equal(Array.isArray(pokerState.seats), true);
+  assert.deepEqual(pokerState.handSeats, pokerState.seats);
   assert.equal(typeof pokerState.roomId, "string");
 });
 

@@ -156,8 +156,12 @@ function isSeatedPlayer(state, userId) {
   if (!state || !userId) {
     return false;
   }
-  if (Array.isArray(state.seats)) {
-    return state.seats.some((seat) => seat && seat.userId === userId);
+  const phase = typeof state?.phase === "string" ? state.phase : "";
+  const seats = ACTION_PHASES.has(phase) && Array.isArray(state?.handSeats) && state.handSeats.length > 0
+    ? state.handSeats
+    : state?.seats;
+  if (Array.isArray(seats)) {
+    return seats.some((seat) => seat && seat.userId === userId);
   }
   return !!(state.stacks && typeof state.stacks === "object" && Object.prototype.hasOwnProperty.call(state.stacks, userId));
 }
