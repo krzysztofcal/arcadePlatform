@@ -148,7 +148,7 @@
     })
       .then(() => { done(); return true; })
       .catch((err) => {
-        if (window.console && console.debug) {
+        if (window.XP_DIAG && window.console && console.debug) {
           console.debug('XP flush failed', err);
         }
         persist();

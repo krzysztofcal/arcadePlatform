@@ -143,7 +143,6 @@
     createResultItem(game, lang){
       const href = this.getGameHref(game, lang);
       if (!href) {
-        console.debug('SearchPopup: No href generated for game', game.slug || game.id);
         return null;
       }
 
@@ -156,7 +155,6 @@
       icon.className = 'search-popup__icon';
 
       const thumbnailUrl = this.safeImageUrl(game.thumbnail);
-      console.debug('SearchPopup: Game', game.slug || game.id, 'thumbnail:', game.thumbnail, '→', thumbnailUrl);
 
       if (thumbnailUrl){
         icon.classList.add('search-popup__icon--has-image');
@@ -258,8 +256,6 @@
     }
 
     handleSearch(query){
-      console.debug('SearchPopup: handleSearch called with query:', query);
-
       if (!query || typeof query !== 'string' || !query.trim()){
         this.hidePopup();
         return;
@@ -279,7 +275,6 @@
         });
       }
 
-      console.debug('SearchPopup: Found', filtered.length, 'matching games');
       this.renderResults(filtered);
       this.showPopup();
 
@@ -311,11 +306,8 @@
     }
 
     async init(){
-      console.debug('SearchPopup: Starting initialization');
-
       try {
         this.allGames = await this.loadGames();
-        console.debug('SearchPopup: Loaded', this.allGames.length, 'games');
       } catch (err) {
         if (global.console && typeof global.console.error === 'function'){
           global.console.error('Failed to load games for search:', err);
@@ -327,13 +319,11 @@
       if (this.searchBoxContainer){
         this.popup = this.createPopup();
         this.searchBoxContainer.appendChild(this.popup);
-        console.debug('SearchPopup: Popup element created and appended');
       } else {
         console.error('SearchPopup: No search box container found');
       }
 
       this.setupEventListeners();
-      console.debug('SearchPopup: Event listeners set up');
     }
   }
 

@@ -113,7 +113,6 @@
 
   function initSearchPopup() {
     if (!searchInput) {
-      console.debug('Recently played: No search input found');
       return;
     }
 
@@ -123,8 +122,6 @@
     }
 
     try {
-      console.debug('Recently played: Initializing search popup');
-
       const popup = new global.SearchPopup({
         searchInput: searchInput,
         catalog: global.ArcadeCatalog,
@@ -136,9 +133,7 @@
         doc: document
       });
 
-      popup.init().then(() => {
-        console.debug('Recently played: Search popup initialized successfully');
-      }).catch(err => {
+      popup.init().catch(err => {
         console.error('Recently played: Search popup initialization failed:', err);
       });
     } catch (err) {

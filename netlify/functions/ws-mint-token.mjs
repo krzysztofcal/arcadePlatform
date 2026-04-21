@@ -230,7 +230,6 @@ export async function handler(event) {
     }
 
     const token = signWsToken({ sub, secret: mintSecret, ttlSec: expiresInSec });
-    klog("ws_mint_token_ok", { mode: "admin", userId: sub, expiresInSec });
     return {
       statusCode: 200,
       headers: optionsHeaders,
@@ -251,7 +250,6 @@ export async function handler(event) {
 
   const userId = auth.userId;
   const wsToken = signWsToken({ sub: userId, secret: mintSecret, ttlSec: expiresInSec });
-  klog("ws_mint_token_ok", { mode: "user", userId, expiresInSec });
   return {
     statusCode: 200,
     headers: originCors,
