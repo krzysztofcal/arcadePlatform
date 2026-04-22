@@ -4382,6 +4382,7 @@ export function createInactiveCleanupExecutor({ env }) {
       WS_AUTH_REQUIRED: "1",
       WS_AUTH_TEST_SECRET: secret,
       WS_PERSISTED_STATE_FILE: filePath,
+      WS_SEATED_RECONNECT_GRACE_MS: "0",
       WS_DISCONNECT_CLEANUP_SWEEP_MS: "25",
       WS_TIMEOUT_SWEEP_MS: "20",
       WS_INACTIVE_CLEANUP_ADAPTER_MODULE_PATH: `file://${cleanupModule.filePath}`

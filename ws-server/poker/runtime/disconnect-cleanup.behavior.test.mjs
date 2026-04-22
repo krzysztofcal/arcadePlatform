@@ -19,6 +19,122 @@ test('reconnect before sweep skips cleanup and removes candidate', async () => {
   assert.equal(runtime.size(), 0);
 });
 
+test('seated reconnect grace delays the first cleanup attempt until grace expires', async () => {
+  let currentNowMs = 1_000;
+  let cleanupCalls = 0;
+  const runtime = createDisconnectCleanupRuntime({
+    executeCleanup: async () => {
+      cleanupCalls += 1;
+      return { ok: true, changed: true, status: 'cleaned' };
+    },
+    listActiveSocketsForUser: () => [],
+    socketMatchesTable: () => false,
+    seatedReconnectGraceMs: 5_000,
+    nowMs: () => currentNowMs
+  });
+
+  runtime.enqueue({ tableId: 't_first_grace', userId: 'u_first_grace' });
+  await runtime.sweep();
+  assert.equal(cleanupCalls, 0);
+  assert.equal(runtime.size(), 1);
+
+  currentNowMs = 5_999;
+  await runtime.sweep();
+  assert.equal(cleanupCalls, 0);
+  assert.equal(runtime.size(), 1);
+
+  currentNowMs = 6_000;
+  await runtime.sweep();
+  assert.equal(cleanupCalls, 1);
+  assert.equal(runtime.size(), 0);
+});
+
+test('seated reconnect grace delays deferred cleanup retry until grace expires', async () => {
+  let currentNowMs = 1_000;
+  let cleanupCalls = 0;
+  const runtime = createDisconnectCleanupRuntime({
+    executeCleanup: async () => {
+      cleanupCalls += 1;
+      return cleanupCalls === 1
+        ? { ok: true, changed: false, deferred: true, status: 'cleaned_live_hand_preserved' }
+        : { ok: true, changed: true, status: 'cleaned' };
+    },
+    listActiveSocketsForUser: () => [],
+    socketMatchesTable: () => false,
+    seatedReconnectGraceMs: 5_000,
+    nowMs: () => currentNowMs
+  });
+
+  runtime.enqueue({ tableId: 't_grace', userId: 'u_grace' });
+  await runtime.sweep();
+  assert.equal(cleanupCalls, 0);
+  assert.equal(runtime.size(), 1);
+
+  currentNowMs = 5_999;
+  await runtime.sweep();
+  assert.equal(cleanupCalls, 0);
+  assert.equal(runtime.size(), 1);
+
+  currentNowMs = 6_000;
+  await runtime.sweep();
+  assert.equal(cleanupCalls, 1);
+  assert.equal(runtime.size(), 1);
+
+  currentNowMs = 10_999;
+  await runtime.sweep();
+  assert.equal(cleanupCalls, 1);
+  assert.equal(runtime.size(), 1);
+
+  currentNowMs = 11_000;
+  await runtime.sweep();
+  assert.equal(cleanupCalls, 2);
+  assert.equal(runtime.size(), 0);
+});
+
+test('protected or deferred results refresh reconnect grace on each retry', async () => {
+  let currentNowMs = 1_000;
+  let cleanupCalls = 0;
+  const runtime = createDisconnectCleanupRuntime({
+    executeCleanup: async () => {
+      cleanupCalls += 1;
+      if (cleanupCalls < 3) {
+        return { ok: true, changed: false, deferred: true, status: 'cleaned_live_hand_preserved' };
+      }
+      return { ok: true, changed: true, status: 'cleaned' };
+    },
+    listActiveSocketsForUser: () => [],
+    socketMatchesTable: () => false,
+    seatedReconnectGraceMs: 5_000,
+    nowMs: () => currentNowMs
+  });
+
+  runtime.enqueue({ tableId: 't_refresh_grace', userId: 'u_refresh_grace' });
+
+  await runtime.sweep();
+  assert.equal(cleanupCalls, 0);
+  assert.equal(runtime.size(), 1);
+
+  currentNowMs = 6_000;
+  await runtime.sweep();
+  assert.equal(cleanupCalls, 1);
+  assert.equal(runtime.size(), 1);
+
+  currentNowMs = 10_999;
+  await runtime.sweep();
+  assert.equal(cleanupCalls, 1);
+  assert.equal(runtime.size(), 1);
+
+  currentNowMs = 11_000;
+  await runtime.sweep();
+  assert.equal(cleanupCalls, 2);
+  assert.equal(runtime.size(), 1);
+
+  currentNowMs = 16_000;
+  await runtime.sweep();
+  assert.equal(cleanupCalls, 3);
+  assert.equal(runtime.size(), 0);
+});
+
 test('success cleanup triggers onChanged', async () => {
   const changed = [];
   const runtime = createDisconnectCleanupRuntime({

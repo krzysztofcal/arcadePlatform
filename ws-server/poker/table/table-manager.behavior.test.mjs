@@ -175,7 +175,7 @@ test("bootstrapHand excludes disconnected human ghost seats from the next hand",
   assert.equal(Object.prototype.hasOwnProperty.call(nextState.foldedByUserId, "ghost_human"), false);
 });
 
-test("rolloverSettledHand requires a connected human and excludes disconnected human ghosts", () => {
+test("rolloverSettledHand keeps reconnect-grace human with bots but still excludes disconnected human ghosts", () => {
   const tableManager = createTableManager({ maxSeats: 6, presenceTtlMs: 100 });
   const tableId = "table_rollover_connected_human_gate";
   const wsHuman = fakeWs("ws-rollover-human");
@@ -275,13 +275,112 @@ test("rolloverSettledHand requires a connected human and excludes disconnected h
 
   assert.equal(restored.ok, true);
 
-  rollover = tableManager.rolloverSettledHand({ tableId, nowMs: 6_500 });
+  rollover = tableManager.rolloverSettledHand({ tableId, nowMs: 6_050 });
+
+  assert.equal(rollover.ok, true);
+  assert.equal(rollover.changed, true);
+  nextState = tableManager.persistedPokerState(tableId);
+  assert.equal(nextState.phase, "PREFLOP");
+  assert.deepEqual(nextState.seats, [
+    { userId: "human_live", seatNo: 1 },
+    { userId: "bot_2", seatNo: 2 }
+  ]);
+  assert.equal(Object.prototype.hasOwnProperty.call(nextState.foldedByUserId, "ghost_human"), false);
+});
+
+test("rolloverSettledHand excludes runtime-disconnected humans from pure-human next hands", () => {
+  const tableManager = createTableManager({ maxSeats: 4, presenceTtlMs: 10_000 });
+  const tableId = "table_rollover_pure_human_disconnect_gate";
+  const wsA = fakeWs("ws-rollover-pure-human-a");
+  const wsB = fakeWs("ws-rollover-pure-human-b");
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "human_a", tableId, requestId: "join-pure-human-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "human_b", tableId, requestId: "join-pure-human-b", nowTs: 2 }).ok, true);
+
+  const restored = tableManager.restoreTableFromPersisted(tableId, {
+    coreState: {
+      version: 15,
+      roomId: tableId,
+      maxSeats: 4,
+      appliedRequestIds: [],
+      members: [
+        { userId: "human_a", seat: 1 },
+        { userId: "human_b", seat: 2 }
+      ],
+      seats: { human_a: 1, human_b: 2 },
+      publicStacks: { human_a: 118, human_b: 102 },
+      seatDetailsByUserId: {
+        human_a: { isBot: false, botProfile: null, leaveAfterHand: false },
+        human_b: { isBot: false, botProfile: null, leaveAfterHand: false }
+      },
+      pokerState: {
+        tableId,
+        handId: "hand_rollover_pure_human_gate",
+        phase: "SETTLED",
+        dealerSeatNo: 1,
+        seats: [
+          { userId: "human_a", seatNo: 1, status: "ACTIVE" },
+          { userId: "human_b", seatNo: 2, status: "ACTIVE" }
+        ],
+        stacks: { human_a: 118, human_b: 102 }
+      }
+    },
+    presenceByUserId: new Map([
+      ["human_a", { userId: "human_a", seat: 1 }],
+      ["human_b", { userId: "human_b", seat: 2 }]
+    ])
+  });
+
+  assert.equal(restored.ok, true);
+
+  tableManager.cleanupConnection({ ws: wsA, userId: "human_a", nowTs: 3_000, activeSockets: [] });
+  const rollover = tableManager.rolloverSettledHand({ tableId, nowMs: 3_050 });
 
   assert.equal(rollover.ok, true);
   assert.equal(rollover.changed, false);
   assert.equal(rollover.reason, "not_enough_players");
-  nextState = tableManager.persistedPokerState(tableId);
+  const nextState = tableManager.persistedPokerState(tableId);
   assert.equal(nextState.phase, "SETTLED");
+});
+
+test("bootstrapHand keeps cold-restored human placeholders eligible when expiresAt is null", () => {
+  const tableManager = createTableManager({ maxSeats: 4, presenceTtlMs: 10_000 });
+  const tableId = "table_bootstrap_cold_restore_placeholder";
+  const wsA = fakeWs("ws-bootstrap-cold-restore-a");
+
+  const restored = tableManager.restoreTableFromPersisted(tableId, {
+    coreState: {
+      version: 12,
+      roomId: tableId,
+      maxSeats: 4,
+      appliedRequestIds: [],
+      members: [
+        { userId: "human_a", seat: 1 },
+        { userId: "human_b", seat: 2 }
+      ],
+      seats: { human_a: 1, human_b: 2 },
+      publicStacks: { human_a: 100, human_b: 100 },
+      seatDetailsByUserId: {
+        human_a: { isBot: false, botProfile: null, leaveAfterHand: false },
+        human_b: { isBot: false, botProfile: null, leaveAfterHand: false }
+      },
+      pokerState: null
+    },
+    presenceByUserId: new Map([
+      ["human_a", { userId: "human_a", seat: 1, connected: false, lastSeenAt: null, expiresAt: null }],
+      ["human_b", { userId: "human_b", seat: 2, connected: false, lastSeenAt: null, expiresAt: null }]
+    ])
+  });
+
+  assert.equal(restored.ok, true);
+  assert.equal(tableManager.join({ ws: wsA, userId: "human_a", tableId, requestId: "join-cold-restore-a", nowTs: 100 }).ok, true);
+
+  const bootstrapped = tableManager.bootstrapHand(tableId, { nowMs: 150 });
+
+  assert.equal(bootstrapped.ok, true);
+  assert.equal(bootstrapped.changed, true);
+  assert.equal(tableManager.persistedPokerState(tableId).phase, "PREFLOP");
+  assert.deepEqual(memberPairs(tableManager.tableSnapshot(tableId, "human_a").members), [["human_a", 1], ["human_b", 2]]);
 });
 
 test("persistedPokerState keeps runtime private cards available for autoplay", () => {

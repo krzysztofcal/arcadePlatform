@@ -3,6 +3,12 @@
 
   var DEFAULT_MINT_URL = '/.netlify/functions/ws-mint-token';
   var COMMAND_TIMEOUT_MS = 12000;
+  var DEFAULT_HEARTBEAT_MS = 15000;
+  var MIN_HEARTBEAT_MS = 1000;
+  var MAX_HEARTBEAT_MS = 60000;
+  var DEFAULT_RECONNECT_BASE_MS = 500;
+  var DEFAULT_RECONNECT_MAX_MS = 5000;
+  var SESSION_REBOUND_CLOSE_CODE = 4001;
 
   function klog(kind, data){
     try {
@@ -42,6 +48,17 @@
     if (!text) return null;
     return text.length > 240 ? text.slice(0, 240) : text;
   }
+  function resolveBoundedHeartbeatMs(value, fallbackMs){
+    var fallback = Number.isFinite(Number(fallbackMs)) && Number(fallbackMs) > 0
+      ? Math.trunc(Number(fallbackMs))
+      : DEFAULT_HEARTBEAT_MS;
+    var parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    var normalized = Math.trunc(parsed);
+    if (normalized < MIN_HEARTBEAT_MS) return MIN_HEARTBEAT_MS;
+    if (normalized > MAX_HEARTBEAT_MS) return MAX_HEARTBEAT_MS;
+    return normalized;
+  }
   function safeReadyState(socket){
     return socket && typeof socket.readyState === 'number' ? socket.readyState : null;
   }
@@ -72,13 +89,26 @@
     var onProtocolError = typeof options.onProtocolError === 'function' ? options.onProtocolError : function(){};
     var log = typeof options.klog === 'function' ? options.klog : klog;
     var mintUrl = typeof options.mintUrl === 'string' && options.mintUrl ? options.mintUrl : DEFAULT_MINT_URL;
+    var heartbeatFallbackMs = resolveBoundedHeartbeatMs(options.heartbeatFallbackMs, DEFAULT_HEARTBEAT_MS);
+    var reconnectBaseMs = Number.isFinite(Number(options.reconnectBaseMs)) && Number(options.reconnectBaseMs) > 0
+      ? Math.trunc(Number(options.reconnectBaseMs))
+      : DEFAULT_RECONNECT_BASE_MS;
+    var reconnectMaxMs = Number.isFinite(Number(options.reconnectMaxMs)) && Number(options.reconnectMaxMs) >= reconnectBaseMs
+      ? Math.trunc(Number(options.reconnectMaxMs))
+      : DEFAULT_RECONNECT_MAX_MS;
+    var autoReconnect = options.autoReconnect !== false;
     var ws = null;
     var destroyed = false;
     var started = false;
+    var connecting = false;
     var authOk = false;
     var initialSnapshotDelivered = false;
     var initialLobbySnapshotDelivered = false;
     var pending = new Map();
+    var heartbeatMs = heartbeatFallbackMs;
+    var heartbeatTimer = null;
+    var reconnectTimer = null;
+    var reconnectAttempt = 0;
 
     function emitStatus(status, data){ try { onStatus(status, data || {}); } catch (_err){} }
     function emitProtocolError(code, detail){ try { onProtocolError({ code: code, detail: detail || null }); } catch (_err){} }
@@ -119,6 +149,52 @@
       var rid = send(type, payload, requestId || null);
       if (!rid) throw createError('ws_unavailable');
       return rid;
+    }
+
+    function clearHeartbeat(){
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+    }
+
+    function scheduleHeartbeat(nextHeartbeatMs){
+      heartbeatMs = resolveBoundedHeartbeatMs(nextHeartbeatMs, heartbeatFallbackMs);
+      clearHeartbeat();
+      if (!ws || ws.readyState !== 1) return;
+      heartbeatTimer = setInterval(function(){
+        if (!ws || ws.readyState !== 1) return;
+        send('ping', { clientTime: new Date().toISOString() });
+      }, heartbeatMs);
+      if (heartbeatTimer && typeof heartbeatTimer.unref === 'function') heartbeatTimer.unref();
+    }
+
+    function clearReconnect(){
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+    }
+
+    function shouldAutoReconnect(code){
+      if (!autoReconnect || destroyed) return false;
+      if (code === 1000 || code === SESSION_REBOUND_CLOSE_CODE) return false;
+      return true;
+    }
+
+    function scheduleReconnect(code){
+      if (!shouldAutoReconnect(code) || reconnectTimer) return;
+      var attempt = reconnectAttempt + 1;
+      var delayMs = Math.min(reconnectMaxMs, reconnectBaseMs * Math.pow(2, Math.max(0, reconnectAttempt)));
+      reconnectAttempt = attempt;
+      emitStatus('reconnecting', { code: code || null, attempt: attempt, delayMs: delayMs });
+      log('poker_ws_reconnect_scheduled', { tableId: tableId, code: code || null, attempt: attempt, delayMs: delayMs });
+      reconnectTimer = setTimeout(function(){
+        reconnectTimer = null;
+        if (destroyed) return;
+        openSocket();
+      }, delayMs);
+      if (reconnectTimer && typeof reconnectTimer.unref === 'function') reconnectTimer.unref();
     }
 
     function isSnapshotFrameType(type){
@@ -195,8 +271,13 @@
     function handleMessage(frame){
       if (!frame || typeof frame !== 'object' || !frame.type) return;
       log('poker_ws_recv', summarizeFrame(frame.type, frame.payload || null, frame.requestId || null, frame.roomId || null, tableId || null));
-      if (frame.type === 'helloAck') { emitStatus('hello_ack', {}); mintAndAuth().catch(function(err){ var code = safeErrorCode(err); log('poker_ws_auth_error', { tableId: tableId, code: code }); emitStatus('failed', { stage: 'auth', code: code }); emitProtocolError(code, 'auth_failed'); destroy(); }); return; }
-      if (frame.type === 'authOk') { authOk = true; emitStatus('auth_ok', { roomId: frame.payload && frame.payload.roomId ? frame.payload.roomId : null }); requestLiveState(); return; }
+      if (frame.type === 'helloAck') {
+        scheduleHeartbeat(frame.payload && frame.payload.heartbeatMs);
+        emitStatus('hello_ack', { heartbeatMs: heartbeatMs });
+        mintAndAuth().catch(function(err){ var code = safeErrorCode(err); log('poker_ws_auth_error', { tableId: tableId, code: code }); emitStatus('failed', { stage: 'auth', code: code }); emitProtocolError(code, 'auth_failed'); destroy(); });
+        return;
+      }
+      if (frame.type === 'authOk') { authOk = true; reconnectAttempt = 0; emitStatus('auth_ok', { roomId: frame.payload && frame.payload.roomId ? frame.payload.roomId : null }); requestLiveState(); return; }
       if (frame.type === 'lobby_snapshot') {
         var initialLobby = !initialLobbySnapshotDelivered;
         initialLobbySnapshotDelivered = true;
@@ -228,21 +309,24 @@
           var entry = pending.get(rid); pending.delete(rid); clearTimeout(entry.timer); entry.reject(createError(frame.payload && frame.payload.code ? frame.payload.code : 'ws_error'));
         }
         var code = frame.payload && frame.payload.code ? frame.payload.code : 'ws_error'; emitStatus('error', { code: code }); emitProtocolError(code, frame.payload && frame.payload.message ? frame.payload.message : null);
+        return;
       }
+      if (frame.type === 'pong') return;
     }
 
-    function start(){
-      if (destroyed || started) return;
-      if (mode !== 'lobby' && !tableId){ emitProtocolError('missing_table_id'); return; }
+    function openSocket(){
+      if (destroyed || connecting) return;
       if (typeof window.WebSocket !== 'function'){ emitProtocolError('ws_unavailable'); return; }
+      if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
       log('poker_ws_bootstrap_begin', { tableId: tableId });
       var wsUrl = resolveWsUrl();
       log('poker_ws_url_resolved', { tableId: tableId, url: wsUrl });
-      started = true;
       log('poker_ws_ctor', { tableId: tableId, url: wsUrl });
+      connecting = true;
       try {
         ws = new window.WebSocket(wsUrl);
       } catch (err) {
+        connecting = false;
         started = false;
         log('poker_ws_exception', {
           tableId: tableId,
@@ -252,13 +336,45 @@
         });
         throw err;
       }
-      ws.onopen = function(){ log('poker_ws_open', { tableId: tableId, readyState: safeReadyState(ws) }); send('hello', { supportedVersions: ['1.0'], client: { name: 'poker-ui', build: 'ws-authoritative' } }); };
+      ws.onopen = function(){ connecting = false; clearReconnect(); log('poker_ws_open', { tableId: tableId, readyState: safeReadyState(ws) }); send('hello', { supportedVersions: ['1.0'], client: { name: 'poker-ui', build: 'ws-authoritative' } }); };
       ws.onmessage = function(evt){ var frame = null; try { frame = JSON.parse(evt && evt.data ? evt.data : '{}'); } catch (_err){ emitProtocolError('invalid_json'); return; } handleMessage(frame); };
       ws.onerror = function(evt){ log('poker_ws_error', { tableId: tableId, readyState: safeReadyState(ws), message: sanitizeText(evt && evt.message) }); emitStatus('failed', { stage: 'socket', code: 'socket_error' }); };
-      ws.onclose = function(evt){ authOk = false; rejectAllPending('ws_closed'); log('poker_ws_close', { tableId: tableId, readyState: safeReadyState(ws), code: evt && typeof evt.code === 'number' ? evt.code : null, reason: sanitizeText(evt && evt.reason), wasClean: !!(evt && evt.wasClean) }); emitStatus('closed', { code: evt && evt.code ? evt.code : null }); };
+      ws.onclose = function(evt){
+        var code = evt && typeof evt.code === 'number' ? evt.code : null;
+        authOk = false;
+        connecting = false;
+        clearHeartbeat();
+        rejectAllPending('ws_closed');
+        log('poker_ws_close', { tableId: tableId, readyState: safeReadyState(ws), code: code, reason: sanitizeText(evt && evt.reason), wasClean: !!(evt && evt.wasClean) });
+        emitStatus('closed', { code: code });
+        ws = null;
+        if (shouldAutoReconnect(code)) {
+          scheduleReconnect(code);
+          return;
+        }
+        started = false;
+      };
     }
 
-    function destroy(){ log('poker_ws_destroy', { tableId: tableId, readyState: safeReadyState(ws) }); destroyed = true; started = false; authOk = false; rejectAllPending('ws_closed'); if (ws && ws.readyState <= 1){ try { ws.close(1000, 'client_shutdown'); } catch (_err){} } ws = null; }
+    function start(){
+      if (destroyed || started) return;
+      if (mode !== 'lobby' && !tableId){ emitProtocolError('missing_table_id'); return; }
+      started = true;
+      openSocket();
+    }
+
+    function destroy(){
+      log('poker_ws_destroy', { tableId: tableId, readyState: safeReadyState(ws) });
+      destroyed = true;
+      started = false;
+      connecting = false;
+      authOk = false;
+      clearHeartbeat();
+      clearReconnect();
+      rejectAllPending('ws_closed');
+      if (ws && ws.readyState <= 1){ try { ws.close(1000, 'client_shutdown'); } catch (_err){} }
+      ws = null;
+    }
 
     return {
       start: start,
