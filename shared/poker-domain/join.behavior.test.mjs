@@ -389,6 +389,70 @@ test("rejoin projects stale state-only seats out of the authoritative snapshot",
   assert.equal(Object.prototype.hasOwnProperty.call(result.snapshot.stacks, "ghost_human"), false);
 });
 
+test("rejoin does not zero stale active seat rows while projecting them out of the snapshot", async () => {
+  const store = {
+    table: { id: "t-poison-no-seat-row-mutation", status: "OPEN", max_players: 4, stakes: '{"sb":1,"bb":2}' },
+    seatRows: [
+      { user_id: "human_1", seat_no: 1, status: "ACTIVE", stack: 100, is_bot: false, bot_profile: null, leave_after_hand: false },
+      { user_id: "stale_human", seat_no: 99, status: "ACTIVE", stack: 250, is_bot: false, bot_profile: null, leave_after_hand: false }
+    ],
+    stateRow: {
+      version: 8,
+      state: {
+        tableId: "t-poison-no-seat-row-mutation",
+        seats: [{ userId: "human_1", seatNo: 1, status: "ACTIVE" }],
+        stacks: { human_1: 100 }
+      }
+    },
+    inactiveZeroUpdates: 0
+  };
+
+  const result = await executePokerJoinAuthoritative(withStorageValidator({
+    beginSql: async (fn) => fn({
+      unsafe: async (sql, params = []) => {
+        if (sql.includes("from public.poker_tables")) return [store.table];
+        if (sql.includes("from public.poker_seats") && sql.includes("seat_no, stack")) {
+          const row = store.seatRows.find((seat) => seat.user_id === params[1] && String(seat.status || "ACTIVE").toUpperCase() === "ACTIVE");
+          return row ? [{ seat_no: row.seat_no, stack: row.stack }] : [];
+        }
+        if (sql.includes("from public.poker_seats") && sql.includes("order by seat_no asc;")) {
+          return store.seatRows.map((seat) => ({ ...seat }));
+        }
+        if (sql.includes("select version, state from public.poker_state")) return [store.stateRow];
+        if (sql.includes("update public.poker_state set state")) {
+          store.stateRow.state = JSON.parse(params[1]);
+          store.stateRow.version += 1;
+          return [{ version: store.stateRow.version }];
+        }
+        if (sql.includes("update public.poker_seats set status = 'INACTIVE', stack = 0")) {
+          store.inactiveZeroUpdates += 1;
+          const row = store.seatRows.find((seat) => seat.user_id === params[1] && Number(seat.seat_no) === Number(params[2]));
+          if (row) {
+            row.status = "INACTIVE";
+            row.stack = 0;
+          }
+          return [];
+        }
+        if (sql.includes("update public.poker_seats set status = 'ACTIVE', last_seen_at = now()")) return [];
+        if (sql.includes("update public.poker_tables set last_activity_at")) return [];
+        return [];
+      }
+    }),
+    tableId: "t-poison-no-seat-row-mutation",
+    userId: "human_1",
+    requestId: "join-poison-no-seat-row-mutation",
+    buyIn: 100,
+    postTransactionFn: async () => ({ ok: true })
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.rejoin, true);
+  assert.equal(store.inactiveZeroUpdates, 0);
+  assert.equal(store.seatRows.find((seat) => seat.user_id === "stale_human").stack, 250);
+  assert.deepEqual(result.snapshot.seats.map((seat) => seat.userId), ["human_1"]);
+  assert.equal(Object.prototype.hasOwnProperty.call(result.snapshot.stacks, "stale_human"), false);
+});
+
 test("new join replaces stale state-only seat occupants that conflict with the inserted seat", async () => {
   const store = {
     table: { id: "t-poison-new-join", status: "OPEN", max_players: 4, stakes: '{"sb":1,"bb":2}' },

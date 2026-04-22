@@ -410,39 +410,6 @@ function buildProjectedSnapshot({ state, seatRows, maxPlayers, stateVersion }) {
   };
 }
 
-async function reconcilePoisonedSeatRows({ tx, tableId, stateRow, seatRows, maxPlayers }) {
-  const { runtimeSeats } = projectEffectiveRuntimeSeats({
-    state: stateRow.state,
-    seatRows,
-    maxPlayers
-  });
-  const runtimeSeatKeySet = new Set(runtimeSeats.map((seat) => `${seat.userId}:${seat.seat}`));
-  const staleActiveRows = activeSeatRows(seatRows).filter((row) => {
-    const userId = typeof row?.user_id === "string" ? row.user_id.trim() : "";
-    const seatNo = Number(row?.seat_no);
-    return userId && Number.isInteger(seatNo) && seatNo >= 1 && !runtimeSeatKeySet.has(`${userId}:${seatNo}`);
-  });
-  if (staleActiveRows.length === 0) {
-    return { stateRow, seatRows, changed: false };
-  }
-
-  for (const row of staleActiveRows) {
-    await tx.unsafe(
-      "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2 and seat_no = $3;",
-      [tableId, row.user_id, row.seat_no]
-    );
-  }
-
-  return {
-    changed: true,
-    stateRow,
-    seatRows: seatRows.map((row) => {
-      const stale = staleActiveRows.find((entry) => entry.user_id === row.user_id && Number(entry.seat_no) === Number(row.seat_no));
-      return stale ? { ...row, status: "INACTIVE", stack: 0 } : row;
-    })
-  };
-}
-
 function activeStackEntries(rows) {
   return activeSeatRows(rows)
     .map((row) => {
@@ -559,17 +526,8 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       const maxPlayers = Number(table.max_players);
       if (!Number.isInteger(maxPlayers) || maxPlayers < 1) throw makeError("table_not_open");
 
-      let stateRow = normalizeLockedStateResult(await loadStateForUpdate(tx, tableId));
-      let seatRows = await loadSeatRows(tx, tableId);
-      const reconciled = await reconcilePoisonedSeatRows({
-        tx,
-        tableId,
-        stateRow,
-        seatRows,
-        maxPlayers
-      });
-      stateRow = reconciled.stateRow;
-      seatRows = reconciled.seatRows;
+      const stateRow = normalizeLockedStateResult(await loadStateForUpdate(tx, tableId));
+      const seatRows = await loadSeatRows(tx, tableId);
 
       const existingSeatNo = Number(
         activeSeatRows(seatRows).find((row) => {
