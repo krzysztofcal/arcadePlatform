@@ -7,6 +7,7 @@ const DEFAULT_MAX_PLAYERS = 6;
 const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
 
 const DEFAULT_STAKES = { sb: 1, bb: 2 };
+const DEFAULT_HUMAN_SEAT_FRESH_MS = 120_000;
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -26,6 +27,12 @@ const parseMaxPlayers = (value) => {
   if (!Number.isFinite(num) || !Number.isInteger(num)) return null;
   if (num < 2 || num > 10) return null;
   return num;
+};
+
+const resolveHumanSeatFreshMs = (value) => {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 15_000) return DEFAULT_HUMAN_SEAT_FRESH_MS;
+  return Math.min(Math.trunc(num), 15 * 60_000);
 };
 
 const pickSeatNo = (rows, maxPlayers) => {
@@ -60,7 +67,7 @@ const triggerWsLobbyMaterialize = ({ tableId, maxPlayers, stakes, klog }) => {
   void notifyWsLobbyMaterialize({ tableId, maxPlayers, stakes, klog });
 };
 
-const selectCandidate = async (tx, { stakesJson, maxPlayers, requireHuman }) => {
+const selectCandidate = async (tx, { stakesJson, maxPlayers, requireHuman, humanSeatFreshCutoffIso }) => {
   return tx.unsafe(
     `
 select t.id, t.max_players
@@ -69,6 +76,14 @@ where t.status = 'OPEN'
   and t.max_players = $1
   and t.stakes = $2::jsonb
   and (select count(*)::int from public.poker_seats s where s.table_id = t.id and s.status = 'ACTIVE') < t.max_players
+  and not exists (
+    select 1
+    from public.poker_seats stale_hs
+    where stale_hs.table_id = t.id
+      and stale_hs.status = 'ACTIVE'
+      and coalesce(stale_hs.is_bot, false) = false
+      and coalesce(stale_hs.last_seen_at, to_timestamp(0)) < $4::timestamptz
+  )
   and (
     exists (
       select 1
@@ -76,6 +91,7 @@ where t.status = 'OPEN'
       where hs.table_id = t.id
         and hs.status = 'ACTIVE'
         and coalesce(hs.is_bot, false) = false
+        and coalesce(hs.last_seen_at, to_timestamp(0)) >= $4::timestamptz
     )
     or coalesce((
       select ps.state ->> 'phase'
@@ -90,11 +106,12 @@ where t.status = 'OPEN'
     where hs.table_id = t.id
       and hs.status = 'ACTIVE'
       and coalesce(hs.is_bot, false) = false
+      and coalesce(hs.last_seen_at, to_timestamp(0)) >= $4::timestamptz
   ))
 order by t.last_activity_at desc nulls last, t.created_at asc nulls last
 limit 1;
     `,
-    [maxPlayers, stakesJson, requireHuman]
+    [maxPlayers, stakesJson, requireHuman, humanSeatFreshCutoffIso]
   );
 };
 
@@ -170,11 +187,12 @@ export async function handler(event) {
     const result = await beginSql(async (tx) => {
       const createPayload = { userId: auth.userId, maxPlayers, stakesJson };
       const matchKey = `quickseat:${maxPlayers}:${stakesParsed.value.sb}:${stakesParsed.value.bb}`;
+      const humanSeatFreshCutoffIso = new Date(Date.now() - resolveHumanSeatFreshMs(process.env.POKER_ACTIVE_HUMAN_SEAT_FRESH_MS)).toISOString();
 
       klog("poker_quick_seat_lock", { matchKey, maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb, stakesJson });
       await tx.unsafe("select pg_advisory_xact_lock(hashtext($1));", [matchKey]);
 
-      const preferredRows = await selectCandidate(tx, { stakesJson, maxPlayers, requireHuman: true });
+      const preferredRows = await selectCandidate(tx, { stakesJson, maxPlayers, requireHuman: true, humanSeatFreshCutoffIso });
       if (preferredRows?.[0]?.id) {
         klog("poker_quick_seat_selected", { tableId: preferredRows[0].id, strategy: "prefer_humans", maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb });
         const recommendation = await recommendSeatAtTable(tx, {
@@ -187,7 +205,7 @@ export async function handler(event) {
         if (recommendation) return { ...recommendation, strategy: "prefer_humans" };
       }
 
-      const anyRows = await selectCandidate(tx, { stakesJson, maxPlayers, requireHuman: false });
+      const anyRows = await selectCandidate(tx, { stakesJson, maxPlayers, requireHuman: false, humanSeatFreshCutoffIso });
       if (anyRows?.[0]?.id) {
         klog("poker_quick_seat_selected", { tableId: anyRows[0].id, strategy: "any_open", maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb });
         const recommendation = await recommendSeatAtTable(tx, {

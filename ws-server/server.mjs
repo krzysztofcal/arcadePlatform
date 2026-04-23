@@ -7,7 +7,7 @@ import { handlePing } from "./poker/handlers/ping.mjs";
 import { handleAuth } from "./poker/handlers/auth.mjs";
 import { handleProtectedEcho } from "./poker/handlers/protected-echo.mjs";
 import { verifyToken } from "./poker/auth/verify-token.mjs";
-import { createConnState } from "./poker/runtime/conn-state.mjs";
+import { createConnState, HEARTBEAT_MS } from "./poker/runtime/conn-state.mjs";
 import { ackSessionSeq, touchSession } from "./poker/runtime/session.mjs";
 import { recordProtocolViolation, shouldClose } from "./poker/runtime/conn-guards.mjs";
 import { createTableManager } from "./poker/table/table-manager.mjs";
@@ -58,6 +58,7 @@ const SESSION_REBOUND_CLOSE_CODE = 4001;
 const LIVE_HAND_PHASES = new Set(["POSTING_BLINDS", "PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"]);
 const DEFAULT_EMPTY_JOINABLE_GRACE_MS = 60_000;
 const DEFAULT_SEATED_RECONNECT_GRACE_MS = 90_000;
+const DEFAULT_ACTIVE_SEAT_FRESH_MS = 120_000;
 
 function resolvePresenceTtlMs(rawValue) {
   const parsed = Number(rawValue);
@@ -73,6 +74,14 @@ function resolveSeatedReconnectGraceMs(rawValue) {
     return DEFAULT_SEATED_RECONNECT_GRACE_MS;
   }
   return Math.trunc(parsed);
+}
+
+function resolveActiveSeatFreshMs(rawValue) {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || parsed < HEARTBEAT_MS) {
+    return DEFAULT_ACTIVE_SEAT_FRESH_MS;
+  }
+  return Math.trunc(Math.min(parsed, 15 * 60_000));
 }
 
 function isLiveHandPhase(value) {
@@ -205,10 +214,17 @@ const tableCommandQueue = createTableCommandQueue({
 const sessionStore = createSessionStore({
   sessionTtlMs: resolveSessionTtlMs(process.env.WS_SESSION_TTL_MS)
 });
+const activeSeatFreshMs = resolveActiveSeatFreshMs(process.env.WS_ACTIVE_SEAT_FRESH_MS);
+const persistedSeatTouchThrottleMs = resolvePositiveInt(
+  process.env.WS_PERSISTED_SEAT_TOUCH_THROTTLE_MS,
+  Math.max(1_000, Math.trunc(HEARTBEAT_MS / 2)),
+  { min: 1_000, max: 60_000 }
+);
 const streamLog = createStreamLog({ cap: Number(process.env.WS_STREAM_REPLAY_CAP || 128) });
 const tableSnapshotLoader = createTableSnapshotLoader({ env: process.env });
 const persistedStateWriter = persistedStateWriteEnabled ? createPersistedStateWriter({ env: process.env, klog: klogSafe }) : null;
 const lastSnapshotBySessionAndTable = new Map();
+const persistedSeatTouchByTableUser = new Map();
 const lobbySubscribers = new Set();
 const activeLobbyTablesById = new Map();
 const lobbyEmptyJoinableGraceMs = resolveEmptyJoinableGraceMs(process.env.POKER_TABLE_CLOSE_GRACE_MS);
@@ -371,6 +387,55 @@ process.on("unhandledRejection", (reason) => {
 
 function nowTs() {
   return new Date().toISOString();
+}
+
+function staleSeatCandidateKey(tableId, userId) {
+  return `${tableId}:${userId}`;
+}
+
+function tableSocketMatches(socket, tableId) {
+  const conn = socket && socket.__connState;
+  const joined = conn?.joinedTableId || null;
+  const subscribed = conn?.subscribedTableId || null;
+  return joined === tableId || subscribed === tableId;
+}
+
+async function touchPersistedSeatLastSeen({ tableId, userId }) {
+  if (!persistedBootstrapEnabled) return false;
+  if (typeof tableId !== "string" || !tableId || typeof userId !== "string" || !userId) return false;
+  const key = staleSeatCandidateKey(tableId, userId);
+  const nowMs = Date.now();
+  const previousTouchMs = Number(persistedSeatTouchByTableUser.get(key));
+  if (Number.isFinite(previousTouchMs) && nowMs - previousTouchMs < persistedSeatTouchThrottleMs) {
+    return false;
+  }
+  persistedSeatTouchByTableUser.set(key, nowMs);
+  try {
+    const beginSqlWs = await loadBeginSqlWs();
+    await beginSqlWs(async (tx) => {
+      await tx.unsafe(
+        "update public.poker_seats set last_seen_at = now() where table_id = $1 and user_id = $2 and status = 'ACTIVE';",
+        [tableId, userId]
+      );
+      return true;
+    }, { env: process.env });
+    return true;
+  } catch (error) {
+    persistedSeatTouchByTableUser.delete(key);
+    klogSafe("ws_touch_persisted_seat_failed", {
+      tableId,
+      userId,
+      message: error?.message || "unknown"
+    });
+    return false;
+  }
+}
+
+function maybeTouchPersistedSeatLastSeen(connState) {
+  const tableId = connState?.joinedTableId || connState?.subscribedTableId || null;
+  const userId = connState?.session?.userId || null;
+  if (!tableId || !userId) return;
+  void touchPersistedSeatLastSeen({ tableId, userId });
 }
 
 function nextEventLoopTurn() {
@@ -1325,12 +1390,7 @@ const disconnectCleanupRuntime = createDisconnectCleanupRuntime({
     });
   },
   listActiveSocketsForUser: (userId) => sessionStore.connectionsForUser(userId),
-  socketMatchesTable: (socket, tableId) => {
-    const conn = socket && socket.__connState;
-    const joined = conn?.joinedTableId || null;
-    const subscribed = conn?.subscribedTableId || null;
-    return joined === tableId || subscribed === tableId;
-  },
+  socketMatchesTable: (socket, tableId) => tableSocketMatches(socket, tableId),
   seatedReconnectGraceMs: resolveSeatedReconnectGraceMs(process.env.WS_SEATED_RECONNECT_GRACE_MS),
   onChanged: async () => {},
   klog: klogSafe
@@ -1528,6 +1588,93 @@ async function recordTurnTimeoutOutcome({ tableId, result, nowMs }) {
 
 async function sweepDisconnectCleanupAndBroadcast() {
   await disconnectCleanupRuntime.sweep();
+}
+
+async function listStaleActiveHumanSeatCandidates({ limit = 25 } = {}) {
+  if (!persistedBootstrapEnabled) return [];
+  const boundedLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 25;
+  const cutoffIso = new Date(Date.now() - activeSeatFreshMs).toISOString();
+  try {
+    const beginSqlWs = await loadBeginSqlWs();
+    return beginSqlWs(async (tx) => {
+      const rows = await tx.unsafe(
+        `select s.table_id, s.user_id
+         from public.poker_seats s
+         join public.poker_tables t on t.id = s.table_id
+         where t.status = 'OPEN'
+           and s.status = 'ACTIVE'
+           and coalesce(s.is_bot, false) = false
+           and coalesce(s.last_seen_at, to_timestamp(0)) < $1::timestamptz
+         order by s.last_seen_at asc nulls first, t.updated_at asc
+         limit $2;`,
+        [cutoffIso, boundedLimit]
+      );
+      if (!Array.isArray(rows)) return [];
+      return rows
+        .map((row) => ({
+          tableId: typeof row?.table_id === "string" ? row.table_id : "",
+          userId: typeof row?.user_id === "string" ? row.user_id : ""
+        }))
+        .filter((row) => row.tableId && row.userId);
+    }, { env: process.env });
+  } catch (error) {
+    klogSafe("ws_stale_seat_cleanup_list_failed", { message: error?.message || "unknown" });
+    return [];
+  }
+}
+
+async function sweepStaleActiveHumanSeatsAndBroadcast() {
+  const staleSeatCandidates = await listStaleActiveHumanSeatCandidates({
+    limit: Number(process.env.WS_STALE_ACTIVE_SEAT_SWEEP_BATCH || 25)
+  });
+  if (!Array.isArray(staleSeatCandidates) || staleSeatCandidates.length === 0) return;
+  await Promise.allSettled(staleSeatCandidates.map(({ tableId, userId }) => enqueueTableCommand({
+    tableId,
+    commandName: "stale_active_seat_cleanup",
+    dedupeKey: `stale_active_seat_cleanup:${userId}`,
+    run: async () => {
+      const activeSockets = sessionStore.connectionsForUser(userId) || [];
+      if (activeSockets.some((socket) => tableSocketMatches(socket, tableId))) {
+        return { ok: true, changed: false, status: "socket_present" };
+      }
+      const executor = await loadInactiveCleanupExecutor();
+      const result = await executor({
+        tableId,
+        userId,
+        requestId: `ws-stale-active-seat-cleanup:${tableId}:${userId}`
+      });
+      if (result?.ok !== true) {
+        if (result?.retryable !== false) {
+          klogSafe("ws_stale_seat_cleanup_retry", { tableId, userId, code: result?.code || "unknown" });
+        }
+        return result;
+      }
+      if (result?.changed === true) {
+        await syncCleanupRuntimeState({
+          tableId,
+          result,
+          logPrefix: "ws_stale_seat_cleanup",
+          onRestore: async () => {
+            try {
+              scheduleBotStep({
+                tableId,
+                trigger: "stale_active_seat_cleanup",
+                requestId: null,
+                frameTs: null
+              });
+            } catch (error) {
+              klogSafe("ws_stale_seat_cleanup_schedule_bot_step_failed", {
+                tableId,
+                userId,
+                message: error?.message || "unknown"
+              });
+            }
+          }
+        });
+      }
+      return result;
+    }
+  })));
 }
 
 async function listZombieOpenTableIds({ limit = 25 } = {}) {
@@ -1852,6 +1999,7 @@ wss.on("connection", (ws) => {
       }
 
       sendFrame(ws, response.frame);
+      maybeTouchPersistedSeatLastSeen(connState);
       return;
     }
 
@@ -1964,6 +2112,7 @@ wss.on("connection", (ws) => {
           klog: klogSafe
         })
       });
+      maybeTouchPersistedSeatLastSeen(connState);
       return;
     }
 
@@ -2004,6 +2153,7 @@ wss.on("connection", (ws) => {
 
         const resyncedSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: resynced.tableState, tableSnapshot: resyncedSnapshot });
+        maybeTouchPersistedSeatLastSeen(connState);
         return;
       }
 
@@ -2177,6 +2327,7 @@ wss.on("connection", (ws) => {
 
         const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         sendStateSnapshot(ws, connState, { requestId: frame.requestId ?? null, tableSnapshot });
+        maybeTouchPersistedSeatLastSeen(connState);
         return;
       }
 
@@ -2203,6 +2354,7 @@ wss.on("connection", (ws) => {
 
       const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
       sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: subscribed.tableState, tableSnapshot });
+      maybeTouchPersistedSeatLastSeen(connState);
       return;
     }
 
@@ -2384,6 +2536,12 @@ const disconnectCleanupTimer = setInterval(() => {
   void sweepDisconnectCleanupAndBroadcast();
 }, Number.isFinite(disconnectCleanupSweepMs) && disconnectCleanupSweepMs > 0 ? disconnectCleanupSweepMs : 500);
 disconnectCleanupTimer.unref();
+
+const staleActiveSeatSweepMs = resolvePositiveInt(process.env.WS_STALE_ACTIVE_SEAT_SWEEP_MS, 5_000, { min: 500, max: 60_000 });
+const staleActiveSeatSweepTimer = setInterval(() => {
+  void sweepStaleActiveHumanSeatsAndBroadcast();
+}, staleActiveSeatSweepMs);
+staleActiveSeatSweepTimer.unref();
 
 const zombieTableSweepMs = Number(process.env.WS_ZOMBIE_TABLE_SWEEP_MS || 30_000);
 const zombieTableSweepTimer = setInterval(() => {

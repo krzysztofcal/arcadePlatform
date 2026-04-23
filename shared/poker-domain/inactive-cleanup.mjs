@@ -22,6 +22,7 @@ const DEFAULT_LIVE_HAND_STALE_MS = 15_000;
 const ACTION_HAND_PHASES = new Set(["PREFLOP", "FLOP", "TURN", "RIVER"]);
 const LIVE_HAND_PHASES = new Set([...ACTION_HAND_PHASES, "SHOWDOWN"]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const LEDGER_IDEMPOTENCY_CONSTRAINT = "chips_transactions_idempotency_key_unique";
 
 function normalizePositiveInt(n) {
   const value = Number(n);
@@ -88,7 +89,16 @@ function stateFirstStackAmount({ state, seat, userId }) {
   return { amount: 0, source: "none" };
 }
 
-function isTurnProtected({ state, userId, nowMs }) {
+function resolveSeatPresenceFreshness({ seat, nowMs, staleAfterMs }) {
+  const lastSeenAtMs = parseTimestampMs(seat?.last_seen_at);
+  if (!Number.isFinite(lastSeenAtMs) || !Number.isFinite(nowMs) || !Number.isFinite(staleAfterMs) || staleAfterMs <= 0) {
+    return null;
+  }
+  return nowMs - lastSeenAtMs < staleAfterMs;
+}
+
+function isTurnProtected({ state, userId, nowMs, seatPresenceFresh = null }) {
+  if (seatPresenceFresh === false) return false;
   const turnUserId = typeof state?.turnUserId === "string" ? state.turnUserId : null;
   if (!turnUserId || turnUserId !== userId) return false;
   const turnDeadlineAt = Number(state?.turnDeadlineAt);
@@ -148,24 +158,35 @@ function toClosedInertState({ state, stacks }) {
   };
 }
 
+function isLedgerIdempotencyDuplicate(error) {
+  if (String(error?.code || "") !== "23505") return false;
+  const constraint = String(error?.constraint || "");
+  const message = String(error?.message || "");
+  return constraint === LEDGER_IDEMPOTENCY_CONSTRAINT || message.includes(LEDGER_IDEMPOTENCY_CONSTRAINT);
+}
+
 async function postCashout({ postTransaction, tx, tableId, userId, amount, idempotencyKey, createdBy, reason }) {
   if (!postTransaction || typeof postTransaction !== "function") {
     throw new Error("post_transaction_missing");
   }
   if (amount <= 0) return false;
-  await postTransaction({
-    userId,
-    txType: "TABLE_CASH_OUT",
-    idempotencyKey,
-    reference: `table:${tableId}`,
-    metadata: { tableId, reason },
-    entries: [
-      { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -amount },
-      { accountType: "USER", amount }
-    ],
-    createdBy,
-    tx
-  });
+  try {
+    await postTransaction({
+      userId,
+      txType: "TABLE_CASH_OUT",
+      idempotencyKey,
+      reference: `table:${tableId}`,
+      metadata: { tableId, reason },
+      entries: [
+        { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -amount },
+        { accountType: "USER", amount }
+      ],
+      createdBy,
+      tx
+    });
+  } catch (error) {
+    if (!isLedgerIdempotencyDuplicate(error)) throw error;
+  }
   return true;
 }
 
@@ -191,7 +212,7 @@ export async function executeInactiveCleanup({
     let seat = null;
     if (normalizedUserId) {
       const seatRows = await tx.unsafe(
-        "select table_id, user_id, seat_no, status, is_bot, stack from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update;",
+        "select table_id, user_id, seat_no, status, is_bot, stack, last_seen_at from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update;",
         [tableId, normalizedUserId]
       );
       seat = seatRows?.[0] || null;
@@ -202,7 +223,11 @@ export async function executeInactiveCleanup({
     const stateRows = await tx.unsafe("select state from public.poker_state where table_id = $1 limit 1 for update;", [tableId]);
     const stateRow = stateRows?.[0] || null;
     const state = normalizeState(stateRow?.state);
-    if (normalizedUserId && isTurnProtected({ state, userId: normalizedUserId, nowMs: Date.now() })) {
+    const nowMs = Date.now();
+    const seatPresenceFresh = normalizedUserId
+      ? resolveSeatPresenceFreshness({ seat, nowMs, staleAfterMs: liveHandStaleMs })
+      : null;
+    if (normalizedUserId && isTurnProtected({ state, userId: normalizedUserId, nowMs, seatPresenceFresh })) {
       return { ok: true, changed: false, protected: true, status: "turn_protected", retryable: true };
     }
 
@@ -216,7 +241,6 @@ export async function executeInactiveCleanup({
       parseTimestampMs(tableRows?.[0]?.last_activity_at)
       ?? parseTimestampMs(tableRows?.[0]?.updated_at)
       ?? tableCreatedAtMs;
-    const nowMs = Date.now();
     const seatWasActive = seat?.status === "ACTIVE";
     if (hasLiveHandSignal(state)) {
       const logicalStaleReason =
@@ -224,6 +248,8 @@ export async function executeInactiveCleanup({
           ? resolveLiveHandLogicalStaleReason({ state, nowMs, staleAfterMs: liveHandStaleMs })
           : null;
       const liveHandIsFresh =
+        (normalizedUserId == null || seatPresenceFresh !== false)
+        &&
         !logicalStaleReason
         && (
           tableLastActivityAtMs == null
@@ -234,7 +260,8 @@ export async function executeInactiveCleanup({
           tableId,
           userId: normalizedUserId,
           phase: typeof state?.phase === "string" ? state.phase : null,
-          seatWasActive
+          seatWasActive,
+          seatPresenceFresh: normalizedUserId == null ? null : seatPresenceFresh
         });
         return {
           ok: true,
