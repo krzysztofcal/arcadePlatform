@@ -127,6 +127,130 @@ test('fresh live hand disconnect preserves active seat and state without cashout
   assert.equal(ctx.updates.length, 0);
 });
 
+test('fresh bots-only live hand with recent activity stays open for disconnected human when deadline is missing', async () => {
+  const ctx = makeTx({
+    seat: { table_id: 'table-fresh-bots-only', user_id: 'user-1', seat_no: 1, status: 'ACTIVE', is_bot: false, stack: 25 },
+    state: {
+      phase: 'PREFLOP',
+      handId: 'hand-fresh-bots-only',
+      turnUserId: 'bot-1',
+      turnDeadlineAt: null,
+      stacks: { 'user-1': 40, 'bot-1': 50 }
+    },
+    allSeats: [
+      { user_id: 'user-1', status: 'ACTIVE', is_bot: false, stack: 25 },
+      { user_id: 'bot-1', status: 'ACTIVE', is_bot: true, stack: 50 }
+    ],
+    lastActivityAt: new Date(Date.now()).toISOString()
+  });
+
+  const result = await executeInactiveCleanup({
+    tableId: 'table-fresh-bots-only',
+    userId: 'user-1',
+    requestId: 'req-fresh-bots-only',
+    env: {},
+    beginSql: async (fn) => fn(ctx.tx),
+    postTransaction: async (payload) => ctx.ledgerCalls.push(payload),
+    isHoleCardsTableMissing: () => false
+  });
+
+  assert.equal(result.status, 'cleaned_live_hand_preserved');
+  assert.equal(result.closed, false);
+  assert.equal(result.changed, false);
+  assert.equal(ctx.ledgerCalls.length, 0);
+  assert.equal(ctx.updates.length, 0);
+});
+
+test('stale live hand disconnect closes bots-only table after activity timeout even without a turn deadline', async () => {
+  const nowMs = Date.parse('2026-03-01T00:02:00.000Z');
+  const ctx = makeTx({
+    seat: { table_id: 'table-stale-live-preserve', user_id: 'user-1', seat_no: 1, status: 'ACTIVE', is_bot: false, stack: 25 },
+    state: {
+      phase: 'PREFLOP',
+      handId: 'hand-stale-live-preserve',
+      turnUserId: 'user-1',
+      turnDeadlineAt: null,
+      stacks: { 'user-1': 40, 'bot-1': 50 }
+    },
+    allSeats: [
+      { user_id: 'user-1', status: 'INACTIVE', is_bot: false, stack: 0 },
+      { user_id: 'bot-1', status: 'ACTIVE', is_bot: true, stack: 50 }
+    ],
+    createdAt: '2026-03-01T00:00:00.000Z',
+    lastActivityAt: '2026-03-01T00:00:10.000Z'
+  });
+  const originalDateNow = Date.now;
+  Date.now = () => nowMs;
+  try {
+    const result = await executeInactiveCleanup({
+      tableId: 'table-stale-live-preserve',
+      userId: 'user-1',
+      requestId: 'req-stale-live-preserve',
+      env: {},
+      beginSql: async (fn) => fn(ctx.tx),
+      postTransaction: async (payload) => ctx.ledgerCalls.push(payload),
+      isHoleCardsTableMissing: () => false
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.closed, true);
+    assert.equal(result.status, 'cleaned_closed');
+    const stateUpdate = ctx.updates.filter((u) => u.kind === 'state').at(-1)?.value;
+    assert.equal(stateUpdate.phase, 'HAND_DONE');
+    assert.equal(stateUpdate.turnUserId, null);
+    assert.deepEqual(stateUpdate.stacks, { 'bot-1': 50 });
+    const closedUpdate = ctx.updates.find((u) => String(u.query).includes("set status = 'CLOSED'"));
+    assert.ok(closedUpdate);
+  } finally {
+    Date.now = originalDateNow;
+  }
+});
+
+test('stale live hand disconnect does not close table when another active human remains', async () => {
+  const nowMs = Date.parse('2026-03-01T00:02:00.000Z');
+  const ctx = makeTx({
+    seat: { table_id: 'table-stale-other-human', user_id: 'user-1', seat_no: 1, status: 'ACTIVE', is_bot: false, stack: 25 },
+    state: {
+      phase: 'PREFLOP',
+      handId: 'hand-stale-other-human',
+      turnUserId: 'user-2',
+      turnDeadlineAt: null,
+      stacks: { 'user-1': 40, 'user-2': 90, 'bot-1': 50 }
+    },
+    allSeats: [
+      { user_id: 'user-1', status: 'INACTIVE', is_bot: false, stack: 0 },
+      { user_id: 'user-2', status: 'ACTIVE', is_bot: false, stack: 90 },
+      { user_id: 'bot-1', status: 'ACTIVE', is_bot: true, stack: 50 }
+    ],
+    createdAt: '2026-03-01T00:00:00.000Z',
+    lastActivityAt: '2026-03-01T00:00:10.000Z'
+  });
+  const originalDateNow = Date.now;
+  Date.now = () => nowMs;
+  try {
+    const result = await executeInactiveCleanup({
+      tableId: 'table-stale-other-human',
+      userId: 'user-1',
+      requestId: 'req-stale-other-human',
+      env: {},
+      beginSql: async (fn) => fn(ctx.tx),
+      postTransaction: async (payload) => ctx.ledgerCalls.push(payload),
+      isHoleCardsTableMissing: () => false
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.closed, false);
+    assert.equal(result.status, 'cleaned');
+    const stateUpdate = ctx.updates.filter((u) => u.kind === 'state').at(-1)?.value;
+    assert.equal(stateUpdate.turnUserId, 'user-2');
+    assert.deepEqual(stateUpdate.stacks, { 'user-2': 90, 'bot-1': 50 });
+    const closedUpdate = ctx.updates.find((u) => String(u.query).includes("set status = 'CLOSED'"));
+    assert.equal(closedUpdate, undefined);
+  } finally {
+    Date.now = originalDateNow;
+  }
+});
+
 test('singleton human disconnect closes table, ignores bots keep-alive, and close cashout uses state-first', async () => {
   const ctx = makeTx({
     seat: { table_id: 'table-3', user_id: 'user-3', seat_no: 3, status: 'ACTIVE', is_bot: false, stack: 5 },
