@@ -1,14 +1,25 @@
 :root {
   color-scheme: dark;
+  --page-bg: #101320;
   font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+
+html {
+  min-height: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--page-bg);
 }
 
 body {
   margin: 0;
+  min-height: 100%;
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
-  background: radial-gradient(circle at top, #1f253d, #101320 70%);
+  background-color: var(--page-bg);
+  background-image: radial-gradient(circle at top, #1f253d, var(--page-bg) 70%);
   color: #f6f7fb;
 }
 
@@ -102,4 +113,3 @@ button:active {
     font-size: 1.25rem;
   }
 }
-
