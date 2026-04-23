@@ -1,10 +1,10 @@
-:root{color-scheme:dark; background:#05070c;}
+:root{color-scheme:dark; --poker-page-bg:#05070c; background:var(--poker-page-bg);}
 
 *{box-sizing:border-box;}
 
-html{min-height:100%; min-height:100vh; min-height:100dvh; background:#05070c;}
+html{height:100%; min-height:100%; min-height:100vh; min-height:100dvh; background:var(--poker-page-bg);}
 
-body{margin:0; min-height:100vh; min-height:100dvh; font-family:Poppins, sans-serif; background:#06080f; color:#e7edf8;}
+body{margin:0; min-height:100%; min-height:100vh; min-height:100dvh; font-family:Poppins, sans-serif; background:var(--poker-page-bg); color:#e7edf8;}
 
 .poker-table-screen{position:relative; min-height:100vh; min-height:100dvh; padding:14px 12px calc(56px + env(safe-area-inset-bottom, 0px)); overflow:hidden; background:radial-gradient(circle at 50% -10%, rgba(235,176,91,0.24), rgba(8,9,14,0.92) 48%), radial-gradient(circle at 50% 120%, rgba(20,117,68,0.2), rgba(6,8,12,0.96) 46%), #05070c;}
 

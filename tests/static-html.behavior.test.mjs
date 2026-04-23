@@ -6,6 +6,43 @@ const root = process.cwd();
 const indexHtml = await readFile(path.join(root, 'poker', 'index.html'), 'utf8');
 const tableV2Html = await readFile(path.join(root, 'poker', 'table-v2.html'), 'utf8');
 const tableV2Css = await readFile(path.join(root, 'poker', 'poker-v2.css'), 'utf8');
+const portalCss = await readFile(path.join(root, 'css', 'portal.css'), 'utf8');
+const gameCss = await readFile(path.join(root, 'css', 'game.css'), 'utf8');
+const landingCss = await readFile(path.join(root, 'landing', 'css', 'landing.css'), 'utf8');
+const trexCss = await readFile(path.join(root, 'games', 't-rex', 'style.css'), 'utf8');
+
+const safeAreaViewportFiles = [
+  'index.html',
+  'play.html',
+  'about.en.html',
+  'about.pl.html',
+  'legal/privacy.en.html',
+  'legal/privacy.pl.html',
+  'legal/terms.en.html',
+  'legal/terms.pl.html',
+  'legal/cookies-notice.en.html',
+  'legal/cookies-notice.pl.html',
+  'landing/index.html',
+  'landing/about.html',
+  'landing/legal/privacy.en.html',
+  'landing/legal/privacy.pl.html',
+  'poker/table-v2.html',
+  'games/t-rex/index.html',
+];
+
+for (const file of safeAreaViewportFiles) {
+  const html = await readFile(path.join(root, file), 'utf8');
+  assert.match(
+    html,
+    /<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"\s*\/?>/,
+    `${file} should opt into viewport-fit=cover for mobile safe-area coverage`,
+  );
+}
+
+[portalCss, gameCss, landingCss, tableV2Css, trexCss].forEach((css) => {
+  assert.doesNotMatch(css, /background[^;]*fixed|background-attachment\s*:\s*fixed/, 'mobile shells should not rely on fixed backgrounds for root coverage');
+});
+
 assert.match(indexHtml, /src="\/js\/build-info\.js" defer/, 'poker index should include build-info bootstrap script');
 assert.equal(indexHtml.indexOf('/js/build-info.js') < indexHtml.indexOf('/poker/poker-ws-client.js'), true, 'poker index should load build-info before ws client');
 assert.doesNotMatch(indexHtml, /pokerClassicEntry/, 'poker lobby should no longer expose the classic table entry');
