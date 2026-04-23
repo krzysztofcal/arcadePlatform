@@ -5,7 +5,89 @@
   if (!sidebar || !btn) return;
 
   const model = window.SidebarModel;
-  const items = model && typeof model.getItems === 'function' ? model.getItems() : [];
+  const state = { isAdmin: false, authWired: false, adminRequestId: 0 };
+
+  function klog(kind, data){
+    try {
+      if (window && window.KLog && typeof window.KLog.log === 'function'){
+        window.KLog.log(kind, data || {});
+      }
+    } catch (_err){}
+  }
+
+  function getItems(){
+    return model && typeof model.getItems === 'function' ? model.getItems({ isAdmin: state.isAdmin }) : [];
+  }
+
+  function getAuthBridge(){
+    if (window.SupabaseAuthBridge && typeof window.SupabaseAuthBridge.getAccessToken === 'function'){
+      return window.SupabaseAuthBridge;
+    }
+    return null;
+  }
+
+  function getSupabaseClient(){
+    if (window.supabaseClient && window.supabaseClient.auth){
+      return window.supabaseClient;
+    }
+    return null;
+  }
+
+  async function getAccessToken(){
+    try {
+      const bridge = getAuthBridge();
+      if (bridge){
+        return await bridge.getAccessToken();
+      }
+      const client = getSupabaseClient();
+      if (client && client.auth && typeof client.auth.getSession === 'function'){
+        const res = await client.auth.getSession();
+        const session = res && res.data ? res.data.session : null;
+        return session && session.access_token ? session.access_token : null;
+      }
+    } catch (_err){}
+    return null;
+  }
+
+  async function refreshAdminVisibility(){
+    const requestId = ++state.adminRequestId;
+    const token = await getAccessToken();
+    if (requestId !== state.adminRequestId) return;
+    if (!token){
+      if (state.isAdmin){
+        state.isAdmin = false;
+        render();
+      }
+      return;
+    }
+    let nextIsAdmin = false;
+    try {
+      const res = await fetch('/.netlify/functions/admin-me', {
+        method: 'GET',
+        headers: { Authorization: 'Bearer ' + token },
+      });
+      nextIsAdmin = res.status === 200;
+    } catch (err){
+      klog('sidebar:admin_check_error', { message: err && err.message ? String(err.message) : 'error' });
+    }
+    if (requestId !== state.adminRequestId) return;
+    if (state.isAdmin !== nextIsAdmin){
+      state.isAdmin = nextIsAdmin;
+      render();
+    }
+  }
+
+  function wireAdminVisibility(){
+    if (state.authWired) return;
+    if (!window.SupabaseAuth || typeof window.SupabaseAuth.onAuthChange !== 'function'){
+      setTimeout(wireAdminVisibility, 200);
+      return;
+    }
+    state.authWired = true;
+    window.SupabaseAuth.onAuthChange(function(){
+      refreshAdminVisibility();
+    });
+  }
 
   function ensureList(){
     let nav = sidebar.querySelector('.sb-nav');
@@ -47,6 +129,7 @@
 
   function render(){
     const list = ensureList();
+    const items = getItems();
     list.innerHTML = '';
     items.forEach((item)=>{
       const li = doc.createElement('li');
@@ -122,4 +205,6 @@
   btn.addEventListener('click', toggle);
   window.addEventListener('resize', applyInitial);
   applyInitial();
+  wireAdminVisibility();
+  refreshAdminVisibility();
 })();

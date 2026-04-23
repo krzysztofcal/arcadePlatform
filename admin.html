@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1020">
+  <title>Admin • Arcade Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap">
+  <link rel="stylesheet" href="css/portal.css">
+  <link rel="stylesheet" href="/css/xp-overlay.css">
+  <style>
+    .admin-grid{ display:grid; gap:16px; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); }
+
+    .admin-status{ margin:0 0 16px; padding:12px 14px; border-radius:12px; background:rgba(255, 255, 255, 0.05); }
+
+    .admin-status[data-tone="error"]{ color:#fda4af; background:rgba(255, 77, 109, 0.12); }
+
+    .admin-status[data-tone="success"]{ color:#86efac; background:rgba(22, 163, 74, 0.12); }
+
+    .admin-status[data-tone="info"]{ color:#7dd3fc; background:rgba(14, 165, 233, 0.12); }
+
+    .admin-search__form{ display:grid; gap:12px; }
+
+    .admin-search__label{ display:block; font-weight:600; margin-bottom:6px; }
+
+    .admin-search__input{ width:100%; padding:10px 12px; border-radius:10px; border:1px solid rgba(255, 255, 255, 0.1); background:rgba(255, 255, 255, 0.04); color:#e2e8f0; }
+
+    .admin-adjust__input{ width:100%; padding:10px 12px; border-radius:10px; border:1px solid rgba(255, 255, 255, 0.1); background:rgba(255, 255, 255, 0.04); color:#e2e8f0; }
+
+    .admin-adjust__textarea{ width:100%; padding:10px 12px; border-radius:10px; border:1px solid rgba(255, 255, 255, 0.1); background:rgba(255, 255, 255, 0.04); color:#e2e8f0; }
+
+    .admin-search__input:focus{ outline:2px solid #6ee7e7; outline-offset:2px; }
+
+    .admin-adjust__input:focus{ outline:2px solid #6ee7e7; outline-offset:2px; }
+
+    .admin-adjust__textarea:focus{ outline:2px solid #6ee7e7; outline-offset:2px; }
+
+    .admin-search__actions{ display:flex; flex-wrap:wrap; gap:10px; }
+
+    .admin-adjust__actions{ display:flex; flex-wrap:wrap; gap:10px; }
+
+    .admin-user__actions{ display:flex; flex-wrap:wrap; gap:10px; }
+
+    .admin-quick{ display:flex; flex-wrap:wrap; gap:10px; }
+
+    .admin-btn{ padding:10px 14px; border:none; border-radius:12px; font-weight:700; cursor:pointer; }
+
+    .admin-btn--primary{ background:linear-gradient(90deg, #6ee7e7, #a78bfa); color:#0b1020; }
+
+    .admin-btn--ghost{ background:rgba(255, 255, 255, 0.08); color:#e2e8f0; }
+
+    .admin-results{ list-style:none; margin:16px 0 0; padding:0; display:grid; gap:10px; }
+
+    .admin-results__item{ margin:0; }
+
+    .admin-results__button{ width:100%; padding:12px; border-radius:12px; border:1px solid rgba(255, 255, 255, 0.08); background:rgba(255, 255, 255, 0.04); color:#e2e8f0; text-align:left; cursor:pointer; }
+
+    .admin-results__button.is-active{ border-color:#6ee7e7; background:rgba(110, 231, 231, 0.08); }
+
+    .admin-results__title{ display:block; font-weight:700; }
+
+    .admin-results__meta{ display:block; margin-top:4px; color:#94a3b8; font-size:13px; }
+
+    .admin-user__name{ margin:0 0 6px; font-size:20px; }
+
+    .admin-user__meta{ margin:0 0 8px; color:#a0aec0; word-break:break-word; }
+
+    .admin-balance{ display:flex; align-items:baseline; gap:8px; margin:14px 0 18px; }
+
+    .admin-balance__label{ color:#94a3b8; font-size:13px; text-transform:uppercase; letter-spacing:.08em; }
+
+    .admin-balance__value{ font-size:30px; font-weight:800; }
+
+    .admin-adjust{ display:grid; gap:12px; }
+
+    .admin-adjust__label{ display:block; font-weight:600; margin-bottom:6px; }
+
+    .admin-adjust__textarea{ min-height:110px; resize:vertical; }
+
+    .admin-empty{ color:#94a3b8; }
+
+    .admin-ledger{ width:100%; border-collapse:collapse; }
+
+    .admin-ledger th{ padding:10px 12px; border-bottom:1px solid rgba(255, 255, 255, 0.08); text-align:left; vertical-align:top; }
+
+    .admin-ledger td{ padding:10px 12px; border-bottom:1px solid rgba(255, 255, 255, 0.08); text-align:left; vertical-align:top; }
+
+    .admin-ledger td:last-child{ text-align:right; }
+
+    .admin-ledger th:last-child{ text-align:right; }
+
+    .admin-ledger__amount--positive{ color:#86efac; font-weight:700; }
+
+    .admin-ledger__amount--negative{ color:#fda4af; font-weight:700; }
+
+    .admin-ledger__meta{ display:block; margin-top:4px; color:#94a3b8; font-size:12px; }
+
+    .admin-ledger-wrap{ overflow:auto; }
+  </style>
+  <script id="Cookiebot"
+          src="https://consent.cookiebot.com/uc.js"
+          data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
+          data-blockingmode="auto"
+          type="text/javascript">
+  </script>
+  <script type="text/plain" data-cookieconsent="statistics"
+          src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
+  <script type="text/plain" data-cookieconsent="statistics">
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){ dataLayer.push(arguments); }
+    gtag('js', new Date());
+    gtag('config', 'G-JRP62LCXYK');
+  </script>
+  <script src="js/analytics.js" defer></script>
+  <script src="js/i18n.js" defer></script>
+  <script src="/js/auth/supabase-config.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
+  <script src="/js/auth/supabaseClient.js" defer></script>
+  <script src="js/chips/client.js" defer></script>
+  <script src="js/core/number-format.js" defer></script>
+  <script src="js/topbar.js" defer></script>
+  <script src="js/xpClient.js" defer></script>
+  <script src="/js/ui/xp-overlay.js" defer></script>
+  <script src="js/debug.js" defer></script>
+  <script src="js/xp/combo.js" defer></script>
+  <script src="js/xp/scoring.js" defer></script>
+  <script src="js/xp/core.js" defer></script>
+  <script src="js/xp.js" defer></script>
+  <script src="js/core/sidebar-model.js" defer></script>
+  <script src="js/sidebar.js" defer></script>
+  <script src="js/admin-page.js" defer></script>
+</head>
+<body class="page-admin">
+  <div class="topbar">
+    <div class="topbar-left">
+      <button class="hamburger" id="sbToggle" aria-label="Toggle navigation" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+      <a href="index.html" class="brand" aria-label="Arcade Hub home">
+        <div class="logo" aria-hidden="true"></div>
+        <h1>Arcade Hub</h1>
+      </a>
+      <div class="search search-box">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 21l-3.9-3.9M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z" stroke="#86e1e1" stroke-width="2" stroke-linecap="round"/></svg>
+        <input type="search" aria-label="Search games" placeholder="Search games (inactive in MVP)" />
+      </div>
+    </div>
+    <div class="topbar-right">
+      <a id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true" href="xp.html">
+        <span class="xp-badge__label">XP</span>
+      </a>
+      <div class="avatar-shell" id="avatarShell">
+        <button type="button" class="avatar-btn" id="avatarButton" aria-haspopup="true" aria-expanded="false">
+          <span class="avatar-circle" id="avatarInitials" aria-hidden="true">AH</span>
+          <span class="avatar-label" id="avatarLabel">Sign in</span>
+          <span class="avatar-caret" aria-hidden="true">▾</span>
+        </button>
+        <div class="avatar-menu" id="avatarMenu" hidden>
+          <div class="avatar-menu__user">
+            <div class="avatar-menu__initials" id="avatarMenuInitials" aria-hidden="true">AH</div>
+            <div class="avatar-menu__meta">
+              <div class="avatar-menu__name" id="avatarMenuName">Guest</div>
+              <div class="avatar-menu__email" id="avatarMenuEmail">Sign in to sync progress</div>
+            </div>
+          </div>
+          <button type="button" class="avatar-menu__action" id="avatarMenuAction">Sign in</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="shell">
+    <aside class="sidebar collapsed" id="sidebar" aria-label="Main navigation">
+      <nav class="sb-nav">
+        <ul class="sb-list">
+          <li class="sb-item">
+            <a href="index.html" class="sb-link sb-home" aria-label="Home" tabindex="0">
+              <span class="sb-ico" aria-hidden="true">
+                <svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z"/></svg>
+              </span>
+              <span class="sb-label">Home</span>
+            </a>
+          </li>
+          <li class="sb-item">
+            <a href="recently-played.html" class="sb-link" aria-label="Recently played" tabindex="0">
+              <span class="sb-ico" aria-hidden="true"></span>
+              <span class="sb-label" data-i18n="recentlyPlayed">Recently played</span>
+            </a>
+          </li>
+          <li class="sb-item">
+            <a href="favorites.html" class="sb-link" aria-label="Favorites" tabindex="0">
+              <span class="sb-ico" aria-hidden="true">
+                <svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+              </span>
+              <span class="sb-label" data-i18n="favorites">Favorites</span>
+            </a>
+          </li>
+          <li class="sb-item">
+            <a href="about.en.html" class="sb-link" tabindex="0" data-href-en="about.en.html" data-href-pl="about.pl.html">
+              <span class="sb-ico" aria-hidden="true"></span>
+              <span class="sb-label" data-i18n="about">About</span>
+            </a>
+          </li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main>
+      <article class="xp-page" aria-labelledby="adminTitle">
+        <header class="xp-header">
+          <h1 id="adminTitle" data-i18n="adminTitle">Admin panel</h1>
+          <p class="xp-subtitle" data-i18n="adminSubtitle">Search users and manage chip ledger adjustments.</p>
+        </header>
+
+        <div class="admin-status" id="adminStatus" aria-live="polite" hidden></div>
+
+        <section class="xp-card" id="adminUnauthorized" hidden aria-labelledby="adminUnauthorizedTitle">
+          <h2 class="xp-card__title" id="adminUnauthorizedTitle" data-i18n="adminUnauthorizedTitle">Admin access required</h2>
+          <p class="admin-empty" id="adminUnauthorizedText" data-i18n="adminUnauthorized">This page is available only for allowlisted admin accounts.</p>
+          <div class="admin-user__actions">
+            <a class="admin-btn admin-btn--primary" href="account.html">Account</a>
+          </div>
+        </section>
+
+        <section id="adminApp" hidden>
+          <div class="admin-grid">
+            <section class="xp-card" aria-labelledby="adminSearchTitle">
+              <h2 class="xp-card__title" id="adminSearchTitle" data-i18n="adminSearchLabel">Find user</h2>
+              <form class="admin-search__form" id="adminSearchForm">
+                <div>
+                  <label class="admin-search__label" for="adminSearchInput" data-i18n="adminSearchLabel">Find user</label>
+                  <input class="admin-search__input" id="adminSearchInput" type="search" data-i18n-placeholder="adminSearchPlaceholder" placeholder="Search by email or userId" required>
+                </div>
+                <div class="admin-search__actions">
+                  <button class="admin-btn admin-btn--primary" type="submit" id="adminSearchButton" data-i18n="adminSearchButton">Search</button>
+                </div>
+              </form>
+              <p class="admin-empty" id="adminSearchEmpty" hidden data-i18n="adminSearchEmpty">No users found.</p>
+              <ul class="admin-results" id="adminSearchResults"></ul>
+            </section>
+
+            <section class="xp-card" aria-labelledby="adminSelectedTitle">
+              <h2 class="xp-card__title" id="adminSelectedTitle" data-i18n="adminSelectedUser">Selected user</h2>
+              <div id="adminSelectedState">
+                <p class="admin-empty" id="adminSelectedEmpty" data-i18n="adminSelectedEmpty">Select a user to view balance, ledger, and adjustments.</p>
+                <div id="adminSelectedPanel" hidden>
+                  <h3 class="admin-user__name" id="adminUserName">—</h3>
+                  <p class="admin-user__meta" id="adminUserEmail">—</p>
+                  <p class="admin-user__meta" id="adminUserId">—</p>
+                  <div class="admin-user__actions">
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminCopyUserId" data-i18n="adminCopyUserId">Copy userId</button>
+                  </div>
+                  <div class="admin-balance">
+                    <span class="admin-balance__label" data-i18n="adminBalance">Balance</span>
+                    <span class="admin-balance__value" id="adminBalanceValue">—</span>
+                  </div>
+                  <form class="admin-adjust" id="adminAdjustForm">
+                    <h3 class="xp-card__title" data-i18n="adminAdjustTitle">Adjust chips</h3>
+                    <div class="admin-quick">
+                      <button class="admin-btn admin-btn--ghost" type="button" data-amount="100">+100</button>
+                      <button class="admin-btn admin-btn--ghost" type="button" data-amount="500">+500</button>
+                      <button class="admin-btn admin-btn--ghost" type="button" data-amount="1000">+1000</button>
+                      <button class="admin-btn admin-btn--ghost" type="button" data-amount="-100">-100</button>
+                      <button class="admin-btn admin-btn--ghost" type="button" data-amount="-500">-500</button>
+                    </div>
+                    <div>
+                      <label class="admin-adjust__label" for="adminAmountInput" data-i18n="adminAmountLabel">Amount</label>
+                      <input class="admin-adjust__input" id="adminAmountInput" name="amount" type="number" step="1" required>
+                    </div>
+                    <div>
+                      <label class="admin-adjust__label" for="adminReasonInput" data-i18n="adminReasonLabel">Reason</label>
+                      <textarea class="admin-adjust__textarea" id="adminReasonInput" name="reason" data-i18n-placeholder="adminReasonPlaceholder" placeholder="Required audit reason" required></textarea>
+                    </div>
+                    <div class="admin-adjust__actions">
+                      <button class="admin-btn admin-btn--primary" type="submit" id="adminAdjustSubmit" data-i18n="adminSubmit">Apply adjustment</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <section class="xp-card" aria-labelledby="adminLedgerTitle">
+            <h2 class="xp-card__title" id="adminLedgerTitle" data-i18n="adminLedgerTitle">Recent ledger entries</h2>
+            <p class="admin-empty" id="adminLedgerEmpty" data-i18n="adminNoLedger">No ledger activity yet.</p>
+            <div class="admin-ledger-wrap">
+              <table class="admin-ledger" id="adminLedgerTable" hidden>
+                <thead>
+                  <tr>
+                    <th scope="col" data-i18n="adminWhen">When</th>
+                    <th scope="col" data-i18n="adminAction">Action</th>
+                    <th scope="col" data-i18n="adminDetails">Details</th>
+                    <th scope="col" data-i18n="adminAmountLabel">Amount</th>
+                  </tr>
+                </thead>
+                <tbody id="adminLedgerBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+      </article>
+    </main>
+  </div>
+
+  <footer class="site-footer" role="contentinfo">
+    <nav class="footer-nav" aria-label="Footer">
+      <a class="ft-link" href="about.en.html">About</a>
+      <span class="sep">•</span>
+      <a class="ft-link" href="about/licenses.html">Licenses</a>
+      <span class="sep">•</span>
+      <a class="ft-link" href="legal/terms.en.html">Terms</a>
+      <span class="sep">•</span>
+      <a class="ft-link" href="legal/privacy.en.html">Privacy</a>
+      <span class="sep">•</span>
+      <a class="ft-link" href="mailto:contact@kcswh.pl">Contact</a>
+      <span class="sep">•</span>
+      <a class="ft-link manage-cookies" id="manageCookies" href="#" data-cookieconsent="ignore">Manage cookies</a>
+    </nav>
+    <div class="lang-switch" aria-label="Language">
+      <button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button>
+      <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
+    </div>
+  </footer>
+</body>
+</html>

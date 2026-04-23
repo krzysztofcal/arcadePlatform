@@ -80,6 +80,11 @@ run("node", ["ws-server/poker/persistence/inactive-cleanup-adapter.behavior.test
 run("node", ["ws-server/poker/runtime/disconnect-cleanup.behavior.test.mjs"], "ws-disconnect-cleanup-runtime-behavior");
 run("node", ["ws-server/poker/runtime/accepted-bot-autoplay-adapter.behavior.test.mjs"], "ws-accepted-bot-autoplay-adapter-behavior");
 run("node", ["ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs"], "ws-lobby-join-public-snapshot-behavior");
+run("node", ["tests/admin-auth.behavior.test.mjs"], "admin-auth-behavior");
+run("node", ["tests/admin-endpoints.behavior.test.mjs"], "admin-endpoints-behavior");
+run("node", ["tests/admin-ledger-adjust.behavior.test.mjs"], "admin-ledger-adjust-behavior");
+run("node", ["tests/admin-user-search.behavior.test.mjs"], "admin-user-search-behavior");
+run("node", ["tests/sidebar-admin-visibility.behavior.test.mjs"], "sidebar-admin-visibility-behavior");
 run("node", ["tests/i18n.behavior.test.mjs"], "i18n-behavior");
 run("node", ["tests/static-html.behavior.test.mjs"], "static-html-behavior");
 run("node", ["tests/test-all.runner-registration.guard.test.mjs"], "test-all-runner-registration-guard");

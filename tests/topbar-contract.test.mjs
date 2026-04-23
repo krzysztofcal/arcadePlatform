@@ -12,6 +12,7 @@ const topbarSource = await readFile(path.join(repoRoot, 'js', 'topbar.js'), 'utf
 const xpCoreSource = await readFile(path.join(repoRoot, 'js', 'xp', 'core.js'), 'utf8');
 const formatSource = await readFile(path.join(repoRoot, 'js', 'core', 'number-format.js'), 'utf8');
 const accountHtml = await readFile(path.join(repoRoot, 'account.html'), 'utf8');
+const adminHtml = await readFile(path.join(repoRoot, 'admin.html'), 'utf8');
 const favoritesHtml = await readFile(path.join(repoRoot, 'favorites.html'), 'utf8');
 const indexHtml = await readFile(path.join(repoRoot, 'index.html'), 'utf8');
 const recentlyPlayedHtml = await readFile(path.join(repoRoot, 'recently-played.html'), 'utf8');
@@ -38,6 +39,7 @@ const portalCss = await readFile(path.join(repoRoot, 'css', 'portal.css'), 'utf8
 const gameCss = await readFile(path.join(repoRoot, 'css', 'game.css'), 'utf8');
 const xpHtmlFiles = [
   accountHtml,
+  adminHtml,
   indexHtml,
   gameHtml,
   gameTrexHtml,
@@ -84,6 +86,7 @@ test('root pages use relative topbar and format scripts', () => {
   const absoluteChips = /src="\/js\/chips\/client\.js"/;
   const rootPages = [
     accountHtml,
+    adminHtml,
     indexHtml,
     gameHtml,
     gameCatsHtml,
@@ -121,6 +124,7 @@ test('topbar scripts load once per page', () => {
   ];
   const rootPages = [
     accountHtml,
+    adminHtml,
     indexHtml,
     gameHtml,
     gameCatsHtml,
@@ -191,6 +195,7 @@ test('nested legal pages use absolute chips/topbar dependencies', () => {
 
 test('chip badge is only provided by topbar', () => {
   assert.ok(!accountHtml.includes('id="chipBadge"'));
+  assert.ok(!adminHtml.includes('id="chipBadge"'));
 });
 
 test('chip badge styles only live in portal css', () => {
