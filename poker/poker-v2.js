@@ -1689,6 +1689,7 @@
 
   function positionHeroCards(){
     if (!els.heroCards) return;
+    if (els.heroCards.classList && typeof els.heroCards.classList.remove === 'function') els.heroCards.classList.remove('poker-hero-cards--docked');
     els.heroCards.style.removeProperty('left');
     els.heroCards.style.removeProperty('top');
     els.heroCards.style.removeProperty('bottom');
@@ -1708,7 +1709,7 @@
     var gapY = Math.max(6, Math.round(anchor.sceneHeight * 0.01)) / anchor.sceneHeight * 100;
     var left = clampNumber(anchor.x + anchor.radiusX + gapX, 1.5, 98.5 - cardsWidth);
     var centerY = clampNumber(anchor.y + (anchor.radiusY * 0.42) + gapY, cardsHalfHeight + 1.5, 98.5 - cardsHalfHeight);
-    els.heroCards.className += ' poker-hero-cards--docked';
+    if (els.heroCards.classList && typeof els.heroCards.classList.add === 'function') els.heroCards.classList.add('poker-hero-cards--docked');
     els.heroCards.style.left = formatScenePercent(left);
     els.heroCards.style.top = formatScenePercent(centerY);
     els.heroCards.style.bottom = 'auto';

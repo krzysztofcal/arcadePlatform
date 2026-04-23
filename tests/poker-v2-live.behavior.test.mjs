@@ -32,11 +32,6 @@ function makeElement(id){
     children: [],
     parentNode: null,
     attributes: {},
-    classList: {
-      add(){},
-      remove(){},
-      contains(){ return false; }
-    },
     _listeners: {},
     appendChild(child){ child.parentNode = this; this.children.push(child); return child; },
     removeChild(child){ this.children = this.children.filter((it) => it !== child); },
@@ -75,6 +70,22 @@ function makeElement(id){
         const changeHandlers = this._listeners.change || [];
         changeHandlers.forEach((fn) => fn({ preventDefault(){}, stopPropagation(){}, target: this }));
       }
+    }
+  };
+  element.classList = {
+    add(...classNames){
+      const current = String(element.className || '').split(/\s+/).filter(Boolean);
+      classNames.forEach((className) => {
+        if (className && !current.includes(className)) current.push(className);
+      });
+      element.className = current.join(' ');
+    },
+    remove(...classNames){
+      const removeSet = new Set(classNames.filter(Boolean));
+      element.className = String(element.className || '').split(/\s+/).filter((className) => className && !removeSet.has(className)).join(' ');
+    },
+    contains(className){
+      return String(element.className || '').split(/\s+/).includes(className);
     }
   };
   let innerHTML = '';
@@ -404,6 +415,79 @@ test('poker v2 shows compact call amount in the primary action label', async () 
 
   assert.equal(harness.elements.pokerV2PrimaryBtn.textContent, 'Call (1k)');
   assert.equal(harness.elements.pokerV2AmountValue.textContent, '2k');
+});
+
+test('poker v2 falls back to base hero card layout when the hero seat is temporarily unavailable', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-hero', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        board: ['As', 'Kd', '3h'],
+        pot: { total: 42, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CHECK', 'BET'] },
+        actionConstraints: { toCall: 0, maxBetAmount: 120 }
+      },
+      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  assert.match(harness.elements.pokerHeroCards.className, /poker-hero-cards--docked/, 'hero cards should dock when the hero seat is available');
+  assert.equal(harness.elements.pokerHeroCards.style.bottom, 'auto');
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 3,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        seats: [
+          { userId: 'villain-1', seatNo: 2, status: 'ACTIVE' }
+        ],
+        hand: { handId: 'hand-hero', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'villain-1', deadlineAt: Date.now() + 5000 },
+        board: ['As', 'Kd', '3h'],
+        pot: { total: 42, sidePots: [] },
+        legalActions: { seat: null, actions: [] },
+        actionConstraints: { toCall: null, maxBetAmount: null }
+      },
+      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
+      you: null
+    }
+  });
+  await harness.flush();
+
+  assert.doesNotMatch(harness.elements.pokerHeroCards.className, /poker-hero-cards--docked/, 'hero cards should drop the docked variant when the hero seat is unavailable');
+  assert.equal(harness.elements.pokerHeroCards.style.left, undefined, 'hero cards should clear docked left positioning on fallback');
+  assert.equal(harness.elements.pokerHeroCards.style.top, undefined, 'hero cards should clear docked top positioning on fallback');
+  assert.equal(harness.elements.pokerHeroCards.style.bottom, undefined, 'hero cards should return to base CSS bottom anchoring on fallback');
 });
 
 test('poker v2 renders chip atlas stack variants from pot amount breakdown', async () => {
