@@ -1604,9 +1604,8 @@ async function listStaleActiveHumanSeatCandidates({ limit = 25 } = {}) {
          where t.status = 'OPEN'
            and s.status = 'ACTIVE'
            and coalesce(s.is_bot, false) = false
-           and s.last_seen_at is not null
-           and s.last_seen_at < $1::timestamptz
-         order by s.last_seen_at asc, t.updated_at asc
+           and coalesce(s.last_seen_at, to_timestamp(0)) < $1::timestamptz
+         order by s.last_seen_at asc nulls first, t.updated_at asc
          limit $2;`,
         [cutoffIso, boundedLimit]
       );
