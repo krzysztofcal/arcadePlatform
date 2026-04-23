@@ -98,6 +98,10 @@ const run = async () => {
       queries.some((entry) => entry.query.toLowerCase().includes("coalesce(hs.is_bot, false) = false")),
       "quick seat should prefer tables with at least one human"
     );
+    assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("last_seen_at") && entry.query.toLowerCase().includes("$4::timestamptz")),
+      "quick seat should exclude tables with stale active human seats"
+    );
     assertCanonicalLockKey(queries, "quickseat:6:1:2");
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 order by seat_no asc")),
@@ -129,6 +133,10 @@ const run = async () => {
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("state ->> 'phase'")),
       "quick seat should exclude bots-only live-hand tables from generic open-table fallback"
+    );
+    assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("stale_hs.last_seen_at") || entry.query.toLowerCase().includes("coalesce(stale_hs.last_seen_at")),
+      "quick seat should filter out stale active humans before reusing a table"
     );
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("'settled'") && entry.query.toLowerCase().includes("'hand_done'")),

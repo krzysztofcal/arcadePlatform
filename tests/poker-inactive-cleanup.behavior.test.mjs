@@ -45,7 +45,7 @@ function makeTx({
 
 test('inactive cleanup protects live actor turn without mutation/cashout', async () => {
   const ctx = makeTx({
-    seat: { table_id: 'table-1', user_id: 'user-1', seat_no: 1, status: 'ACTIVE', is_bot: false, stack: 10 },
+    seat: { table_id: 'table-1', user_id: 'user-1', seat_no: 1, status: 'ACTIVE', is_bot: false, stack: 10, last_seen_at: new Date(Date.now()).toISOString() },
     state: { turnUserId: 'user-1', turnDeadlineAt: Date.now() + 60_000, stacks: { 'user-1': 40 } },
     allSeats: []
   });
@@ -94,7 +94,7 @@ test('off-turn cleanup cashes out state-first amount and clears stack entry', as
 
 test('fresh live hand disconnect preserves active seat and state without cashout', async () => {
   const ctx = makeTx({
-    seat: { table_id: 'table-live-preserve', user_id: 'user-1', seat_no: 1, status: 'ACTIVE', is_bot: false, stack: 25 },
+    seat: { table_id: 'table-live-preserve', user_id: 'user-1', seat_no: 1, status: 'ACTIVE', is_bot: false, stack: 25, last_seen_at: new Date(Date.now()).toISOString() },
     state: {
       phase: 'RIVER',
       handId: 'hand-live-preserve',
@@ -129,7 +129,7 @@ test('fresh live hand disconnect preserves active seat and state without cashout
 
 test('fresh bots-only live hand with recent activity stays open for disconnected human when deadline is missing', async () => {
   const ctx = makeTx({
-    seat: { table_id: 'table-fresh-bots-only', user_id: 'user-1', seat_no: 1, status: 'ACTIVE', is_bot: false, stack: 25 },
+    seat: { table_id: 'table-fresh-bots-only', user_id: 'user-1', seat_no: 1, status: 'ACTIVE', is_bot: false, stack: 25, last_seen_at: new Date(Date.now()).toISOString() },
     state: {
       phase: 'PREFLOP',
       handId: 'hand-fresh-bots-only',
@@ -164,7 +164,7 @@ test('fresh bots-only live hand with recent activity stays open for disconnected
 test('stale live hand disconnect closes bots-only table after activity timeout even without a turn deadline', async () => {
   const nowMs = Date.parse('2026-03-01T00:02:00.000Z');
   const ctx = makeTx({
-    seat: { table_id: 'table-stale-live-preserve', user_id: 'user-1', seat_no: 1, status: 'ACTIVE', is_bot: false, stack: 25 },
+    seat: { table_id: 'table-stale-live-preserve', user_id: 'user-1', seat_no: 1, status: 'ACTIVE', is_bot: false, stack: 25, last_seen_at: '2026-03-01T00:00:10.000Z' },
     state: {
       phase: 'PREFLOP',
       handId: 'hand-stale-live-preserve',
@@ -209,7 +209,7 @@ test('stale live hand disconnect closes bots-only table after activity timeout e
 test('stale live hand disconnect does not close table when another active human remains', async () => {
   const nowMs = Date.parse('2026-03-01T00:02:00.000Z');
   const ctx = makeTx({
-    seat: { table_id: 'table-stale-other-human', user_id: 'user-1', seat_no: 1, status: 'ACTIVE', is_bot: false, stack: 25 },
+    seat: { table_id: 'table-stale-other-human', user_id: 'user-1', seat_no: 1, status: 'ACTIVE', is_bot: false, stack: 25, last_seen_at: '2026-03-01T00:00:10.000Z' },
     state: {
       phase: 'PREFLOP',
       handId: 'hand-stale-other-human',
@@ -249,6 +249,39 @@ test('stale live hand disconnect does not close table when another active human 
   } finally {
     Date.now = originalDateNow;
   }
+});
+
+test('stale active seat is not preserved by a fresh live hand when presence is old', async () => {
+  const ctx = makeTx({
+    seat: { table_id: 'table-stale-seat-live', user_id: 'user-1', seat_no: 1, status: 'ACTIVE', is_bot: false, stack: 25, last_seen_at: '2026-03-01T00:00:00.000Z' },
+    state: {
+      phase: 'TURN',
+      handId: 'hand-stale-seat-live',
+      turnUserId: 'user-2',
+      turnDeadlineAt: Date.now() + 60_000,
+      stacks: { 'user-1': 40, 'user-2': 90, 'bot-1': 50 }
+    },
+    allSeats: [
+      { user_id: 'user-1', status: 'INACTIVE', is_bot: false, stack: 0 },
+      { user_id: 'user-2', status: 'ACTIVE', is_bot: false, stack: 90 },
+      { user_id: 'bot-1', status: 'ACTIVE', is_bot: true, stack: 50 }
+    ],
+    lastActivityAt: new Date(Date.now()).toISOString()
+  });
+
+  const result = await executeInactiveCleanup({
+    tableId: 'table-stale-seat-live',
+    userId: 'user-1',
+    requestId: 'req-stale-seat-live',
+    env: {},
+    beginSql: async (fn) => fn(ctx.tx),
+    postTransaction: async (payload) => ctx.ledgerCalls.push(payload),
+    isHoleCardsTableMissing: () => false
+  });
+
+  assert.equal(result.status, 'cleaned');
+  assert.equal(ctx.ledgerCalls.length, 1);
+  assert.ok(ctx.updates.find((entry) => String(entry.query).includes("update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2")));
 });
 
 test('singleton human disconnect closes table, ignores bots keep-alive, and close cashout uses state-first', async () => {
@@ -425,6 +458,35 @@ test('idempotent no-op when seat is already inactive', async () => {
 
   assert.equal(result.ok, true);
   assert.equal(ctx.ledgerCalls.length, 0);
+});
+
+test('duplicate cashout idempotency still completes inactive cleanup', async () => {
+  const ctx = makeTx({
+    seat: { table_id: 'table-dup-idem', user_id: 'user-dup', seat_no: 4, status: 'ACTIVE', is_bot: false, stack: 25, last_seen_at: '2026-03-01T00:00:00.000Z' },
+    state: { turnUserId: 'other-user', turnDeadlineAt: Date.now() - 1, stacks: { 'user-dup': 80, 'other-user': 20 } },
+    allSeats: [
+      { user_id: 'user-dup', status: 'INACTIVE', is_bot: false, stack: 0 },
+      { user_id: 'other-user', status: 'ACTIVE', is_bot: false, stack: 20 }
+    ]
+  });
+
+  const duplicate = new Error('duplicate key value violates unique constraint "chips_transactions_idempotency_key_unique"');
+  duplicate.code = '23505';
+  duplicate.constraint = 'chips_transactions_idempotency_key_unique';
+
+  const result = await executeInactiveCleanup({
+    tableId: 'table-dup-idem',
+    userId: 'user-dup',
+    requestId: 'req-dup-idem',
+    env: {},
+    beginSql: async (fn) => fn(ctx.tx),
+    postTransaction: async () => { throw duplicate; },
+    isHoleCardsTableMissing: () => false
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.status, 'cleaned');
+  assert.ok(ctx.updates.find((entry) => String(entry.query).includes("update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2")));
 });
 
 test('repeated cleanup against already closed inert table remains stable and no-op', async () => {
