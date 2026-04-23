@@ -6,6 +6,7 @@ const root = process.cwd();
 const indexHtml = await readFile(path.join(root, 'poker', 'index.html'), 'utf8');
 const tableV2Html = await readFile(path.join(root, 'poker', 'table-v2.html'), 'utf8');
 const tableV2Css = await readFile(path.join(root, 'poker', 'poker-v2.css'), 'utf8');
+const tableV2Js = await readFile(path.join(root, 'poker', 'poker-v2.js'), 'utf8');
 const portalCss = await readFile(path.join(root, 'css', 'portal.css'), 'utf8');
 const gameCss = await readFile(path.join(root, 'css', 'game.css'), 'utf8');
 const landingCss = await readFile(path.join(root, 'landing', 'css', 'landing.css'), 'utf8');
@@ -42,6 +43,9 @@ for (const file of safeAreaViewportFiles) {
 [portalCss, gameCss, landingCss, tableV2Css, trexCss].forEach((css) => {
   assert.doesNotMatch(css, /background[^;]*fixed|background-attachment\s*:\s*fixed/, 'mobile shells should not rely on fixed backgrounds for root coverage');
 });
+
+assert.doesNotMatch(indexHtml, /actions\/workflows\/tests\.yml\/badge\.svg\?branch=main/, 'home page should not inject the floating GitHub workflow badge overlay');
+assert.match(tableV2Js, /return '\/poker\/assets\/chips\/chip-'/, 'poker table v2 should use absolute chip asset paths');
 
 assert.match(indexHtml, /src="\/js\/build-info\.js" defer/, 'poker index should include build-info bootstrap script');
 assert.equal(indexHtml.indexOf('/js/build-info.js') < indexHtml.indexOf('/poker/poker-ws-client.js'), true, 'poker index should load build-info before ws client');

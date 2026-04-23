@@ -1218,7 +1218,7 @@
   function resolveChipStackAsset(color, chipCount){
     var safeColor = CHIP_ASSET_COLORS[color] ? color : 'white';
     var safeCount = Math.max(1, Math.min(CHIP_STACK_MAX_HEIGHT, Math.floor(Number(chipCount) || 1)));
-    return 'assets/chips/chip-' + safeColor + '-' + safeCount + '.png';
+    return '/poker/assets/chips/chip-' + safeColor + '-' + safeCount + '.png';
   }
 
   function createChipFlyAsset(color){

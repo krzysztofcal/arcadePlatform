@@ -433,7 +433,7 @@ test('poker v2 renders chip atlas stack variants from pot amount breakdown', asy
   assert.equal(visual.attributes['data-amount'], '1');
   assert.equal(visual.attributes['data-chip-count'], '1');
   assert.equal(visual.attributes['data-stack-count'], '1');
-  assert.equal(visual.children[0].src, 'assets/chips/chip-white-1.png');
+  assert.equal(visual.children[0].src, '/poker/assets/chips/chip-white-1.png');
 
   ws.onSnapshot(snapshot(124, 11));
   await harness.flush();
@@ -445,9 +445,9 @@ test('poker v2 renders chip atlas stack variants from pot amount breakdown', asy
   assert.deepEqual(
     visual.children.map((child) => child.src),
     [
-      'assets/chips/chip-white-4.png',
-      'assets/chips/chip-blue-2.png',
-      'assets/chips/chip-black-1.png'
+      '/poker/assets/chips/chip-white-4.png',
+      '/poker/assets/chips/chip-blue-2.png',
+      '/poker/assets/chips/chip-black-1.png'
     ]
   );
 });
@@ -484,8 +484,8 @@ test('poker v2 prefers committed chip maps for seat bet stacks', async () => {
   const stack = harness.elements.pokerSeatChipLayer.children[1];
   assert.equal(betStack.attributes['data-amount'], '9');
   assert.equal(betStack.attributes['data-chip-count'], '5');
-  assert.equal(betStack.children[0].src, 'assets/chips/chip-white-4.png');
-  assert.equal(betStack.children[1].src, 'assets/chips/chip-red-1.png');
+  assert.equal(betStack.children[0].src, '/poker/assets/chips/chip-white-4.png');
+  assert.equal(betStack.children[1].src, '/poker/assets/chips/chip-red-1.png');
   assert.equal(stack.attributes['data-amount'], '124');
 });
 
