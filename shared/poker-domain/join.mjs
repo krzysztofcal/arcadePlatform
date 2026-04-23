@@ -506,6 +506,47 @@ async function insertSeatRow({ tx, tableId, userId, seatNo }) {
   }
 }
 
+async function reclaimInactiveSeatConflicts({ tx, tableId, userId, seatNo }) {
+  let reclaimedUserConflict = false;
+  let reclaimedSeatConflict = false;
+
+  const staleUserRows = await tx.unsafe(
+    `
+delete from public.poker_seats
+where table_id = $1
+  and user_id = $2
+  and status <> 'ACTIVE'
+  and coalesce(stack, 0) = 0
+returning seat_no;
+    `,
+    [tableId, userId]
+  );
+  if (Array.isArray(staleUserRows) && staleUserRows.length > 0) {
+    reclaimedUserConflict = true;
+  }
+
+  const staleSeatRows = await tx.unsafe(
+    `
+delete from public.poker_seats
+where table_id = $1
+  and seat_no = $2
+  and status <> 'ACTIVE'
+  and coalesce(stack, 0) = 0
+returning user_id;
+    `,
+    [tableId, seatNo]
+  );
+  if (Array.isArray(staleSeatRows) && staleSeatRows.length > 0) {
+    reclaimedSeatConflict = true;
+  }
+
+  return {
+    reclaimed: reclaimedUserConflict || reclaimedSeatConflict,
+    reclaimedUserConflict,
+    reclaimedSeatConflict
+  };
+}
+
 export async function executePokerJoinAuthoritative({ beginSql, tableId, userId, requestId, seatNo = null, autoSeat = false, preferredSeatNo = null, buyIn = null, klog = () => {}, postTransactionFn = null, loadStateForUpdate, updateStateLocked, validateStateForStorage }) {
   if (typeof loadStateForUpdate !== "function" || typeof updateStateLocked !== "function" || typeof validateStateForStorage !== "function") {
     throw makeError("temporarily_unavailable");
@@ -602,60 +643,78 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       if (status && status !== "OPEN") throw makeError("table_not_open");
 
       const occupied = new Set(activeSeatRows(seatRows).map((row) => Number(row?.seat_no)).filter((n) => Number.isInteger(n) && n >= 1));
-    const requestedSeatNo = seatNo === null || seatNo === undefined ? null : (Number.isInteger(Number(seatNo)) ? Number(seatNo) : null);
-    const preferredSeatNoRequested = preferredSeatNo === null || preferredSeatNo === undefined ? null : (Number.isInteger(Number(preferredSeatNo)) ? Number(preferredSeatNo) : null);
+      const requestedSeatNo = seatNo === null || seatNo === undefined ? null : (Number.isInteger(Number(seatNo)) ? Number(seatNo) : null);
+      const preferredSeatNoRequested = preferredSeatNo === null || preferredSeatNo === undefined ? null : (Number.isInteger(Number(preferredSeatNo)) ? Number(preferredSeatNo) : null);
 
-    if (requestedSeatNo !== null && requestedSeatNo < 1) throw makeError("invalid_seat_no");
-    if (preferredSeatNoRequested !== null && preferredSeatNoRequested < 1) throw makeError("invalid_seat_no");
+      if (requestedSeatNo !== null && requestedSeatNo < 1) throw makeError("invalid_seat_no");
+      if (preferredSeatNoRequested !== null && preferredSeatNoRequested < 1) throw makeError("invalid_seat_no");
 
-    const startSeat = Number.isInteger(preferredSeatNoRequested) && preferredSeatNoRequested >= 1 && preferredSeatNoRequested <= maxPlayers ? preferredSeatNoRequested : 1;
-    const nextAutoSeatCandidate = () => {
-      for (let offset = 0; offset < maxPlayers; offset += 1) {
-        const candidate = ((startSeat - 1 + offset) % maxPlayers) + 1;
-        if (!occupied.has(candidate)) {
-          return candidate;
+      const startSeat = Number.isInteger(preferredSeatNoRequested) && preferredSeatNoRequested >= 1 && preferredSeatNoRequested <= maxPlayers ? preferredSeatNoRequested : 1;
+      const nextAutoSeatCandidate = () => {
+        for (let offset = 0; offset < maxPlayers; offset += 1) {
+          const candidate = ((startSeat - 1 + offset) % maxPlayers) + 1;
+          if (!occupied.has(candidate)) {
+            return candidate;
+          }
         }
+        return null;
+      };
+
+      let resolvedSeatNo = null;
+      if (requestedSeatNo !== null && !autoSeat) {
+        if (requestedSeatNo < 1 || requestedSeatNo > maxPlayers) throw makeError("invalid_seat_no");
+        if (occupied.has(requestedSeatNo)) throw makeError("seat_taken");
+        resolvedSeatNo = requestedSeatNo;
       }
-      return null;
-    };
 
-    let resolvedSeatNo = null;
-    if (requestedSeatNo !== null && !autoSeat) {
-      if (requestedSeatNo < 1 || requestedSeatNo > maxPlayers) throw makeError("invalid_seat_no");
-      if (occupied.has(requestedSeatNo)) throw makeError("seat_taken");
-      resolvedSeatNo = requestedSeatNo;
-    }
-
-    if (!Number.isInteger(resolvedSeatNo)) {
-      resolvedSeatNo = nextAutoSeatCandidate();
-    }
-
-    if (!Number.isInteger(resolvedSeatNo)) throw makeError("table_full");
-    klog("shared_join_seat_selected", { seatNo: resolvedSeatNo, occupiedCount: occupied.size });
-
-    while (true) {
-      const insertedRows = await insertSeatRow({
-        tx,
-        tableId,
-        userId,
-        seatNo: resolvedSeatNo
-      });
-      const insertedSeatNo = Number(insertedRows?.[0]?.seat_no);
-      if (Number.isInteger(insertedSeatNo) && insertedSeatNo >= 1) {
-        break;
+      if (!Number.isInteger(resolvedSeatNo)) {
+        resolvedSeatNo = nextAutoSeatCandidate();
       }
-      if (requestedSeatNo !== null && !autoSeat) throw makeError("seat_taken");
-      occupied.add(resolvedSeatNo);
-      const retrySeatNo = nextAutoSeatCandidate();
-      if (!Number.isInteger(retrySeatNo)) throw makeError("table_full");
-      resolvedSeatNo = retrySeatNo;
-      klog("shared_join_seat_retry", { seatNo: resolvedSeatNo, occupiedCount: occupied.size });
-    }
 
-    const escrowSystemKey = `POKER_TABLE:${tableId}`;
-    const idempotencyKey = requestId
-      ? `join-buyin:${tableId}:${userId}:${requestId}`
-      : `join-buyin:${tableId}:${userId}:${resolvedSeatNo}:${resolvedBuyIn}`;
+      if (!Number.isInteger(resolvedSeatNo)) throw makeError("table_full");
+      klog("shared_join_seat_selected", { seatNo: resolvedSeatNo, occupiedCount: occupied.size });
+
+      while (true) {
+        const insertedRows = await insertSeatRow({
+          tx,
+          tableId,
+          userId,
+          seatNo: resolvedSeatNo
+        });
+        const insertedSeatNo = Number(insertedRows?.[0]?.seat_no);
+        if (Number.isInteger(insertedSeatNo) && insertedSeatNo >= 1) {
+          break;
+        }
+
+        const reclaimedConflict = await reclaimInactiveSeatConflicts({
+          tx,
+          tableId,
+          userId,
+          seatNo: resolvedSeatNo
+        });
+        if (reclaimedConflict.reclaimed) {
+          klog("shared_join_reclaimed_inactive_seat_conflict", {
+            tableId,
+            userId,
+            seatNo: resolvedSeatNo,
+            reclaimedSeatConflict: reclaimedConflict.reclaimedSeatConflict,
+            reclaimedUserConflict: reclaimedConflict.reclaimedUserConflict
+          });
+          continue;
+        }
+
+        if (requestedSeatNo !== null && !autoSeat) throw makeError("seat_taken");
+        occupied.add(resolvedSeatNo);
+        const retrySeatNo = nextAutoSeatCandidate();
+        if (!Number.isInteger(retrySeatNo)) throw makeError("table_full");
+        resolvedSeatNo = retrySeatNo;
+        klog("shared_join_seat_retry", { seatNo: resolvedSeatNo, occupiedCount: occupied.size });
+      }
+
+      const escrowSystemKey = `POKER_TABLE:${tableId}`;
+      const idempotencyKey = requestId
+        ? `join-buyin:${tableId}:${userId}:${requestId}`
+        : `join-buyin:${tableId}:${userId}:${resolvedSeatNo}:${resolvedBuyIn}`;
 
       let buyInDuplicated = false;
       klog("shared_join_ledger_start", { buyIn: resolvedBuyIn });

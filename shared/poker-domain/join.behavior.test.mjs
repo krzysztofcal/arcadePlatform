@@ -760,6 +760,69 @@ test("authoritative auto-seat retries when insert is skipped by unique conflict 
   assert.deepEqual(selectedSeats, [1, 4]);
 }));
 
+test("authoritative auto-seat reclaims inactive seat blockers before reporting table_full", async () => withBotsDisabled(async () => {
+  const seatRows = [
+    { user_id: "u-seat-1", seat_no: 1, status: "ACTIVE", stack: 100, is_bot: false, bot_profile: null, leave_after_hand: false },
+    { user_id: "u-seat-2", seat_no: 2, status: "ACTIVE", stack: 100, is_bot: false, bot_profile: null, leave_after_hand: false },
+    { user_id: "u-seat-3", seat_no: 3, status: "ACTIVE", stack: 100, is_bot: false, bot_profile: null, leave_after_hand: false },
+    { user_id: "u-stale-4", seat_no: 4, status: "INACTIVE", stack: 0, is_bot: false, bot_profile: null, leave_after_hand: false },
+    { user_id: "u-stale-5", seat_no: 5, status: "INACTIVE", stack: 0, is_bot: false, bot_profile: null, leave_after_hand: false },
+    { user_id: "u-stale-6", seat_no: 6, status: "INACTIVE", stack: 0, is_bot: false, bot_profile: null, leave_after_hand: false }
+  ];
+  const selectedSeats = [];
+  const deletedSeats = [];
+
+  const result = await executePokerJoinAuthoritative(withLockedState({
+    beginSql: async (fn) => fn({
+      unsafe: async (sql, params) => {
+        if (sql.includes("from public.poker_tables")) return [{ id: "t1", status: "OPEN", max_players: 6 }];
+        if (sql.includes("from public.poker_seats") && sql.includes("order by seat_no asc;")) return seatRows.map((seat) => ({ ...seat }));
+        if (sql.includes("delete from public.poker_seats") && sql.includes("user_id = $2")) return [];
+        if (sql.includes("delete from public.poker_seats") && sql.includes("seat_no = $2")) {
+          const deleted = seatRows.filter((seat) => seat.seat_no === params[1] && String(seat.status || "ACTIVE").toUpperCase() !== "ACTIVE" && Number(seat.stack || 0) === 0);
+          if (deleted.length > 0) {
+            deletedSeats.push(...deleted.map((seat) => seat.seat_no));
+          }
+          for (let i = seatRows.length - 1; i >= 0; i -= 1) {
+            const seat = seatRows[i];
+            if (seat.seat_no === params[1] && String(seat.status || "ACTIVE").toUpperCase() !== "ACTIVE" && Number(seat.stack || 0) === 0) {
+              seatRows.splice(i, 1);
+            }
+          }
+          return deleted.map((seat) => ({ user_id: seat.user_id }));
+        }
+        if (sql.includes("insert into public.poker_seats")) {
+          selectedSeats.push(params[2]);
+          const conflict = seatRows.some((seat) => seat.seat_no === params[2] || seat.user_id === params[1]);
+          if (conflict) return [];
+          seatRows.push({ user_id: params[1], seat_no: params[2], status: "ACTIVE", stack: 0, is_bot: false, bot_profile: null, leave_after_hand: false });
+          return [{ seat_no: params[2] }];
+        }
+        if (sql.includes("update public.poker_seats set stack")) {
+          const row = seatRows.find((seat) => seat.user_id === params[1] && seat.seat_no === params[2]);
+          if (row) row.stack = params[3];
+          return [{ ok: true }];
+        }
+        if (sql.includes("select version, state from public.poker_state")) return [{ version: 1, state: { tableId: "t1", seats: [], stacks: {} } }];
+        if (sql.includes("update public.poker_state set state")) return [{ version: 2 }];
+        return [];
+      }
+    }),
+    tableId: "t1",
+    userId: "u-new",
+    requestId: "r-inactive-reclaim",
+    autoSeat: true,
+    preferredSeatNo: 4,
+    buyIn: 140,
+    postTransactionFn: async () => ({ ok: true })
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.seatNo, 4);
+  assert.deepEqual(selectedSeats, [4, 4]);
+  assert.deepEqual(deletedSeats, [4]);
+}));
+
 
 test("rejoin with invalid persisted stack fails closed and does not write state", async () => {
   const writes = { state: 0 };
