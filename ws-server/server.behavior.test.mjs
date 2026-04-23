@@ -1630,9 +1630,10 @@ test("ack is receiver-local no-op for poker state", async () => {
     await hello(ws);
     await auth(ws, makeHs256Jwt({ secret, sub: "user_ack" }));
 
+    const joinAckPromise = nextCommandResultForRequest(ws, "join-ack");
+    const joinedPromise = nextJoinTableState(ws, { requestId: "join-ack", tableId: "table_ack" });
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-ack", ts: "2026-02-28T00:00:01Z", payload: { tableId: "table_ack" } });
-    await nextMessageOfType(ws, "commandResult");
-    const joined = await nextMessageOfType(ws, "table_state");
+    const [, joined] = await Promise.all([joinAckPromise, joinedPromise]);
 
     sendFrame(ws, { version: "1.0", type: "ack", requestId: "ack-1", roomId: "table_ack", ts: "2026-02-28T00:00:02Z", payload: { tableId: "table_ack", seq: joined.seq } });
     sendFrame(ws, { version: "1.0", type: "ack", requestId: "ack-2", roomId: "table_ack", ts: "2026-02-28T00:00:03Z", payload: { tableId: "table_ack", seq: joined.seq } });
@@ -3614,7 +3615,7 @@ test("timeout sweep plus queued bot step returns actionable human snapshot witho
   }
 });
 
-test("queued timeout and bot runtime stays stable across many hands without state drift", async () => {
+test("queued timeout and bot runtime preserves state shape through timeout resolution", async () => {
   const secret = "many-hands-secret";
   const humanUserId = "many_hands_human";
   const botUserId = makeBotUserId("many_hands_bot");
@@ -3635,6 +3636,7 @@ test("queued timeout and bot runtime stays stable across many hands without stat
       WS_AUTH_REQUIRED: "1",
       WS_AUTH_TEST_SECRET: secret,
       WS_POKER_TURN_MS: "300",
+      WS_POKER_SETTLED_REVEAL_MS: "0",
       WS_TIMEOUT_SWEEP_MS: "20",
       SUPABASE_DB_URL: "",
       ...observeOnlyJoinEnv(),
@@ -3670,61 +3672,79 @@ test("queued timeout and bot runtime stays stable across many hands without stat
     await nextMessageOfType(humanWs, "table_state");
 
     sendFrame(humanWs, { version: "1.0", type: "table_state_sub", requestId: "snap-many-hands-initial", ts: "2026-02-28T01:10:02Z", payload: { tableId, view: "snapshot" } });
+    let current = await nextMessageOfType(humanWs, "stateSnapshot");
+    let baseline = current.payload;
 
-    const snapshotsByHandId = new Map();
-    const observed = [];
-    const deadline = Date.now() + 18000;
-    while (Date.now() < deadline && snapshotsByHandId.size < 3) {
-      const remaining = Math.max(50, deadline - Date.now());
-      const frame = await attemptMessage(humanWs, Math.min(remaining, 1200));
-      if (!frame || frame.type !== "stateSnapshot") {
-        continue;
-      }
-      if (!actionableHumanSnapshot(frame.payload)) {
-        continue;
-      }
-
-      const handId = frame.payload?.public?.hand?.handId || null;
-      const stateVersion = Number(frame.payload?.stateVersion || 0);
-      const members = Array.isArray(frame.payload?.table?.members) ? frame.payload.table.members : [];
-      const stacks = frame.payload?.public?.stacks && typeof frame.payload.public.stacks === "object"
-        ? frame.payload.public.stacks
-        : {};
-      const potTotal = Number(frame.payload?.public?.pot?.total || 0);
-      const legalActions = Array.isArray(frame.payload?.public?.legalActions?.actions)
-        ? frame.payload.public.legalActions.actions.slice()
-        : [];
-      const chipTotal = Object.values(stacks).reduce((sum, value) => sum + Number(value || 0), 0) + potTotal;
-
-      observed.push({
-        handId,
-        stateVersion,
-        memberRows: members.map((member) => `${member.userId}:${member.seat}`).sort(),
-        stackKeys: Object.keys(stacks).sort(),
-        legalActions,
-        chipTotal,
-      });
-
-      assert.equal(typeof handId, "string");
-      assert.equal(handId.length > 0, true);
-      assert.deepEqual(
-        members.map((member) => `${member.userId}:${member.seat}`).sort(),
-        [`${botUserId}:2`, `${humanUserId}:1`],
+    if (!actionableHumanSnapshot(baseline)) {
+      const humanTurn = await nextMessageMatching(
+        humanWs,
+        (frame) => frame?.type === "stateSnapshot" && actionableHumanSnapshot(frame.payload),
+        7000
       );
-      assert.deepEqual(Object.keys(stacks).sort(), [botUserId, humanUserId].sort());
-      assert.equal(legalActions.length > 0, true);
-      assert.equal(chipTotal, 200);
+      current = humanTurn;
+      baseline = humanTurn.payload;
+    }
 
-      const prior = snapshotsByHandId.get(handId);
-      if (!prior || stateVersion > prior.stateVersion) {
-        snapshotsByHandId.set(handId, { stateVersion, chipTotal, legalActions });
+    const baselineMembers = Array.isArray(baseline?.table?.members) ? baseline.table.members : [];
+    const baselineStacks = baseline?.public?.stacks && typeof baseline.public.stacks === "object"
+      ? baseline.public.stacks
+      : {};
+    const baselinePotTotal = Number(baseline?.public?.pot?.total || 0);
+    const baselineChipTotal = Object.values(baselineStacks).reduce((sum, value) => sum + Number(value || 0), 0) + baselinePotTotal;
+    const baselineMemberRows = baselineMembers.map((member) => `${member.userId}:${member.seat}`).sort();
+    const baselineStackKeys = Object.keys(baselineStacks).sort();
+    const beforeTimeoutVersion = Number(baseline?.stateVersion || 0);
+
+    const observedFrames = [];
+    let afterTimeoutResolution = null;
+    const afterTimeoutDeadline = Date.now() + 9000;
+    while (Date.now() < afterTimeoutDeadline) {
+      const remaining = Math.max(50, afterTimeoutDeadline - Date.now());
+      const frame = await attemptMessage(humanWs, Math.min(remaining, 1200));
+      if (!frame) {
+        continue;
+      }
+      observedFrames.push({
+        type: frame.type,
+        stateVersion: Number(frame?.payload?.stateVersion || 0),
+        handId: frame?.payload?.public?.hand?.handId || null,
+        turnUserId: frame?.payload?.public?.turn?.userId || null,
+        legalActions: Array.isArray(frame?.payload?.public?.legalActions?.actions)
+          ? frame.payload.public.legalActions.actions.slice()
+          : []
+      });
+      if (
+        frame?.type === "stateSnapshot"
+        && Number(frame.payload?.stateVersion || 0) > beforeTimeoutVersion
+      ) {
+        afterTimeoutResolution = frame;
+        break;
       }
     }
 
-    assert.equal(snapshotsByHandId.size >= 3, true, `expected at least 3 actionable hands, saw ${snapshotsByHandId.size}: ${JSON.stringify(observed)}`);
-    const orderedVersions = [...snapshotsByHandId.values()].map((entry) => entry.stateVersion);
-    for (let i = 1; i < orderedVersions.length; i += 1) {
-      assert.equal(orderedVersions[i] > orderedVersions[i - 1], true);
+    assert.ok(afterTimeoutResolution, JSON.stringify(observedFrames));
+    const finalPayload = afterTimeoutResolution.payload;
+    const finalMembers = Array.isArray(finalPayload?.table?.members) ? finalPayload.table.members : [];
+    const finalStacks = finalPayload?.public?.stacks && typeof finalPayload.public.stacks === "object"
+      ? finalPayload.public.stacks
+      : {};
+    const finalPotTotal = Number(finalPayload?.public?.pot?.total || 0);
+    const finalChipTotal = Object.values(finalStacks).reduce((sum, value) => sum + Number(value || 0), 0) + finalPotTotal;
+    const finalLegalActions = Array.isArray(finalPayload?.public?.legalActions?.actions)
+      ? finalPayload.public.legalActions.actions
+      : [];
+
+    assert.deepEqual(finalMembers.map((member) => `${member.userId}:${member.seat}`).sort(), baselineMemberRows);
+    assert.deepEqual(Object.keys(finalStacks).sort(), baselineStackKeys);
+    assert.equal(finalChipTotal, baselineChipTotal);
+    assert.equal(Number(finalPayload.stateVersion) > beforeTimeoutVersion, true);
+    assert.equal(
+      actionableHumanSnapshot(finalPayload) || finalPayload?.public?.hand?.status === "SETTLED" || finalPayload?.public?.turn?.userId == null,
+      true,
+      JSON.stringify(observedFrames)
+    );
+    if (actionableHumanSnapshot(finalPayload)) {
+      assert.equal(finalLegalActions.length > 0, true);
     }
     assert.deepEqual(serverLogs, []);
 

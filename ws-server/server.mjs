@@ -1604,8 +1604,9 @@ async function listStaleActiveHumanSeatCandidates({ limit = 25 } = {}) {
          where t.status = 'OPEN'
            and s.status = 'ACTIVE'
            and coalesce(s.is_bot, false) = false
-           and coalesce(s.last_seen_at, to_timestamp(0)) < $1::timestamptz
-         order by s.last_seen_at asc nulls first, t.updated_at asc
+           and s.last_seen_at is not null
+           and s.last_seen_at < $1::timestamptz
+         order by s.last_seen_at asc, t.updated_at asc
          limit $2;`,
         [cutoffIso, boundedLimit]
       );
@@ -2112,6 +2113,7 @@ wss.on("connection", (ws) => {
           klog: klogSafe
         })
       });
+      maybeTouchPersistedSeatLastSeen(connState);
       return;
     }
 
@@ -2152,6 +2154,7 @@ wss.on("connection", (ws) => {
 
         const resyncedSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: resynced.tableState, tableSnapshot: resyncedSnapshot });
+        maybeTouchPersistedSeatLastSeen(connState);
         return;
       }
 
@@ -2325,6 +2328,7 @@ wss.on("connection", (ws) => {
 
         const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         sendStateSnapshot(ws, connState, { requestId: frame.requestId ?? null, tableSnapshot });
+        maybeTouchPersistedSeatLastSeen(connState);
         return;
       }
 
@@ -2351,6 +2355,7 @@ wss.on("connection", (ws) => {
 
       const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
       sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: subscribed.tableState, tableSnapshot });
+      maybeTouchPersistedSeatLastSeen(connState);
       return;
     }
 

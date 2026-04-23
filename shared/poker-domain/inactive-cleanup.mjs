@@ -89,16 +89,16 @@ function stateFirstStackAmount({ state, seat, userId }) {
   return { amount: 0, source: "none" };
 }
 
-function isSeatPresenceFresh({ seat, nowMs, staleAfterMs }) {
+function resolveSeatPresenceFreshness({ seat, nowMs, staleAfterMs }) {
   const lastSeenAtMs = parseTimestampMs(seat?.last_seen_at);
   if (!Number.isFinite(lastSeenAtMs) || !Number.isFinite(nowMs) || !Number.isFinite(staleAfterMs) || staleAfterMs <= 0) {
-    return false;
+    return null;
   }
   return nowMs - lastSeenAtMs < staleAfterMs;
 }
 
-function isTurnProtected({ state, userId, nowMs, seatPresenceFresh = true }) {
-  if (seatPresenceFresh !== true) return false;
+function isTurnProtected({ state, userId, nowMs, seatPresenceFresh = null }) {
+  if (seatPresenceFresh === false) return false;
   const turnUserId = typeof state?.turnUserId === "string" ? state.turnUserId : null;
   if (!turnUserId || turnUserId !== userId) return false;
   const turnDeadlineAt = Number(state?.turnDeadlineAt);
@@ -225,8 +225,8 @@ export async function executeInactiveCleanup({
     const state = normalizeState(stateRow?.state);
     const nowMs = Date.now();
     const seatPresenceFresh = normalizedUserId
-      ? isSeatPresenceFresh({ seat, nowMs, staleAfterMs: liveHandStaleMs })
-      : false;
+      ? resolveSeatPresenceFreshness({ seat, nowMs, staleAfterMs: liveHandStaleMs })
+      : null;
     if (normalizedUserId && isTurnProtected({ state, userId: normalizedUserId, nowMs, seatPresenceFresh })) {
       return { ok: true, changed: false, protected: true, status: "turn_protected", retryable: true };
     }
@@ -248,7 +248,7 @@ export async function executeInactiveCleanup({
           ? resolveLiveHandLogicalStaleReason({ state, nowMs, staleAfterMs: liveHandStaleMs })
           : null;
       const liveHandIsFresh =
-        (normalizedUserId == null || seatPresenceFresh === true)
+        (normalizedUserId == null || seatPresenceFresh !== false)
         &&
         !logicalStaleReason
         && (
