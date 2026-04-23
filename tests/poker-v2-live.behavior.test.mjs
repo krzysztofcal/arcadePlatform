@@ -338,6 +338,7 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(harness.elements.pokerSeatLayer.children.length, 6, 'v2 should render all seats for the table');
   assert.equal(harness.elements.pokerCommunityCards.children.length, 4, 'v2 should render live board cards');
   assert.equal(harness.elements.pokerHeroCards.children.length, 2, 'v2 should render live hole cards');
+  assert.match(harness.elements.pokerHeroCards.className, /poker-hero-cards--docked/, 'v2 should dock hero hole cards to the hero avatar');
   assert.equal(harness.elements.pokerPotPill.textContent, 'Pot 42');
   assert.equal(harness.elements.pokerV2PrimaryBtn.hidden, false, 'v2 should surface the primary turn action');
   assert.equal(harness.elements.pokerV2PrimaryBtn.textContent, 'Check', 'v2 should keep check compact when there is nothing to call');
@@ -347,6 +348,9 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.ok(heroSeat, 'v2 should render a dedicated hero seat');
   assert.equal(heroSeat.style.left, '34%', 'hero seat should be shifted left to avoid the action rail');
   assert.equal(heroSeat.style.top, '91%', 'hero seat should stay near the bottom edge');
+  assert.equal(harness.elements.pokerHeroCards.style.left, '52.1%', 'hero hole cards should sit to the right of the hero avatar');
+  assert.ok(parseFloat(harness.elements.pokerHeroCards.style.top) > parseFloat(heroSeat.style.top), 'hero hole cards should stay docked below the hero avatar');
+  assert.equal(harness.elements.pokerHeroCards.style.bottom, 'auto', 'hero hole cards should not fall back to the global bottom anchor when the hero seat is present');
   const seatCards = heroSeat.children.find((node) => node.className === 'poker-seat-cards');
   assert.equal(seatCards, undefined, 'hero seat should not duplicate the bottom hole cards');
   const bestHand = heroSeat.children.find((node) => node.className === 'poker-seat-best-hand');

@@ -1279,6 +1279,10 @@
     return Math.max(min, Math.min(max, value));
   }
 
+  function formatScenePercent(value){
+    return (Math.round(value * 10) / 10) + '%';
+  }
+
   function getSeatAvatarAnchorFromRect(seatNo){
     if (!els.scene || !renderedSeatAvatars[seatNo]) return null;
     if (typeof els.scene.getBoundingClientRect !== 'function' || typeof renderedSeatAvatars[seatNo].getBoundingClientRect !== 'function') return null;
@@ -1683,6 +1687,33 @@
     });
   }
 
+  function positionHeroCards(){
+    if (!els.heroCards) return;
+    els.heroCards.style.removeProperty('left');
+    els.heroCards.style.removeProperty('top');
+    els.heroCards.style.removeProperty('bottom');
+    var heroSeat = deriveCurrentSeat();
+    if (!heroSeat || !Number.isInteger(heroSeat.seatNo)){
+      return;
+    }
+    var anchor = getSeatAvatarAnchorFromRect(heroSeat.seatNo);
+    if (!anchor || anchor.sceneWidth <= 0 || anchor.sceneHeight <= 0){
+      return;
+    }
+    var cardWidthPx = anchor.sceneWidth >= 470 ? 50 : 46;
+    var cardHeightPx = anchor.sceneWidth >= 470 ? 68 : 63;
+    var cardsWidth = ((cardWidthPx * 2) + 9) / anchor.sceneWidth * 100;
+    var cardsHalfHeight = (cardHeightPx / anchor.sceneHeight * 100) / 2;
+    var gapX = Math.max(10, Math.round(anchor.sceneWidth * 0.02)) / anchor.sceneWidth * 100;
+    var gapY = Math.max(6, Math.round(anchor.sceneHeight * 0.01)) / anchor.sceneHeight * 100;
+    var left = clampNumber(anchor.x + anchor.radiusX + gapX, 1.5, 98.5 - cardsWidth);
+    var centerY = clampNumber(anchor.y + (anchor.radiusY * 0.42) + gapY, cardsHalfHeight + 1.5, 98.5 - cardsHalfHeight);
+    els.heroCards.className += ' poker-hero-cards--docked';
+    els.heroCards.style.left = formatScenePercent(left);
+    els.heroCards.style.top = formatScenePercent(centerY);
+    els.heroCards.style.bottom = 'auto';
+  }
+
   function renderDealerChip(){
     if (!els.dealerChip) return;
     var targetSeatNo = Number.isInteger(state.dealerSeat) ? state.dealerSeat : null;
@@ -2072,8 +2103,9 @@
   function render(){
     if (els.potPill) els.potPill.textContent = 'Pot ' + formatNumber(state.potTotal || 0);
     renderCommunityCards();
-    renderHeroCards();
     renderSeats();
+    renderHeroCards();
+    positionHeroCards();
     renderSeatChips();
     renderPotChips();
     renderDealerChip();
