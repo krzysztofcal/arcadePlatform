@@ -127,6 +127,51 @@ test('fresh live hand disconnect preserves active seat and state without cashout
   assert.equal(ctx.updates.length, 0);
 });
 
+test('stale live hand disconnect closes bots-only table after activity timeout even without a turn deadline', async () => {
+  const nowMs = Date.parse('2026-03-01T00:02:00.000Z');
+  const ctx = makeTx({
+    seat: { table_id: 'table-stale-live-preserve', user_id: 'user-1', seat_no: 1, status: 'ACTIVE', is_bot: false, stack: 25 },
+    state: {
+      phase: 'PREFLOP',
+      handId: 'hand-stale-live-preserve',
+      turnUserId: 'user-1',
+      turnDeadlineAt: null,
+      stacks: { 'user-1': 40, 'bot-1': 50 }
+    },
+    allSeats: [
+      { user_id: 'user-1', status: 'INACTIVE', is_bot: false, stack: 0 },
+      { user_id: 'bot-1', status: 'ACTIVE', is_bot: true, stack: 50 }
+    ],
+    createdAt: '2026-03-01T00:00:00.000Z',
+    lastActivityAt: '2026-03-01T00:00:10.000Z'
+  });
+  const originalDateNow = Date.now;
+  Date.now = () => nowMs;
+  try {
+    const result = await executeInactiveCleanup({
+      tableId: 'table-stale-live-preserve',
+      userId: 'user-1',
+      requestId: 'req-stale-live-preserve',
+      env: {},
+      beginSql: async (fn) => fn(ctx.tx),
+      postTransaction: async (payload) => ctx.ledgerCalls.push(payload),
+      isHoleCardsTableMissing: () => false
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.closed, true);
+    assert.equal(result.status, 'cleaned_closed');
+    const stateUpdate = ctx.updates.filter((u) => u.kind === 'state').at(-1)?.value;
+    assert.equal(stateUpdate.phase, 'HAND_DONE');
+    assert.equal(stateUpdate.turnUserId, null);
+    assert.deepEqual(stateUpdate.stacks, { 'bot-1': 50 });
+    const closedUpdate = ctx.updates.find((u) => String(u.query).includes("set status = 'CLOSED'"));
+    assert.ok(closedUpdate);
+  } finally {
+    Date.now = originalDateNow;
+  }
+});
+
 test('singleton human disconnect closes table, ignores bots keep-alive, and close cashout uses state-first', async () => {
   const ctx = makeTx({
     seat: { table_id: 'table-3', user_id: 'user-3', seat_no: 3, status: 'ACTIVE', is_bot: false, stack: 5 },

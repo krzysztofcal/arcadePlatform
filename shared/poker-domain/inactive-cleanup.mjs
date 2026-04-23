@@ -226,8 +226,7 @@ export async function executeInactiveCleanup({
       const liveHandIsFresh =
         !logicalStaleReason
         && (
-          normalizedUserId !== null
-          || tableLastActivityAtMs == null
+          tableLastActivityAtMs == null
           || nowMs - tableLastActivityAtMs < liveHandStaleMs
         );
       if (liveHandIsFresh) {

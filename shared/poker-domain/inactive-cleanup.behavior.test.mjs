@@ -172,7 +172,8 @@ test("inactive cleanup preserves replacement bot turn holder when seat rows stil
         { userId: "bot_keep_3", seatNo: 3, status: "ACTIVE" }
       ],
       stacks: { human_1: 250, bot_auto_2_38: 100, bot_keep_3: 170 }
-    }
+    },
+    lastActivityAt: "2026-03-01T00:01:55.000Z"
   });
 
   const result = await harness.run();
@@ -223,6 +224,40 @@ test("inactive cleanup preserves fresh live hand without mutating disconnected a
   assert.equal(harness.seatState.find((row) => row.user_id === "human_1")?.status, "ACTIVE");
   assert.equal(harness.tableState.stateRow.state.turnUserId, "human_2");
   assert.deepEqual(harness.tableState.stateRow.state.stacks, { human_1: 250, human_2: 300, bot_1: 170 });
+});
+
+test("inactive cleanup closes stale live hand for disconnected human after activity timeout", async () => {
+  const harness = createCleanupHarness({
+    seatRows: [
+      { user_id: "human_1", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 250 },
+      { user_id: "bot_1", seat_no: 2, status: "ACTIVE", is_bot: true, stack: 170 }
+    ],
+    state: {
+      phase: "PREFLOP",
+      handId: "h-stale-disconnect",
+      turnUserId: "human_1",
+      turnDeadlineAt: null,
+      seats: [
+        { userId: "human_1", seatNo: 1, status: "ACTIVE" },
+        { userId: "bot_1", seatNo: 2, status: "ACTIVE" }
+      ],
+      stacks: { human_1: 250, bot_1: 170 }
+    },
+    createdAt: "2026-03-01T00:00:00.000Z",
+    lastActivityAt: "2026-03-01T00:00:10.000Z",
+    nowMs: Date.parse("2026-03-01T00:02:00.000Z")
+  });
+
+  const result = await harness.run();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.closed, true);
+  assert.equal(result.status, "cleaned_closed");
+  assert.equal(harness.tableState.tableStatus, "CLOSED");
+  assert.equal(harness.seatState.every((row) => row.status === "INACTIVE"), true);
+  assert.equal(harness.tableState.stateRow.state.phase, "HAND_DONE");
+  assert.equal(harness.tableState.stateRow.state.turnUserId, null);
+  assert.deepEqual(harness.tableState.stateRow.state.stacks, { bot_1: 170 });
 });
 
 test("inactive cleanup system sweep keeps bots-only live table open until hand completion", async () => {
