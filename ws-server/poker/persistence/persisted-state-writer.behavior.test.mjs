@@ -64,3 +64,44 @@ test("persisted state writer strips runtime private cards before file persistenc
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test("persisted state writer bumps table last_activity_at on successful db mutation", async () => {
+  const queries = [];
+  const writer = createPersistedStateWriter({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: async (fn) => fn({
+      unsafe: async (query, params = []) => {
+        queries.push({ query: String(query), params });
+        if (String(query).startsWith("update public.poker_state set version = version + 1")) {
+          return [{ version: 5 }];
+        }
+        return [];
+      }
+    }),
+    klog: () => {}
+  });
+
+  const result = await writer.writeMutation({
+    tableId: "t_db",
+    expectedVersion: 4,
+    nextState: {
+      tableId: "t_db",
+      handId: "hand_db",
+      handSeed: "seed_db",
+      phase: "TURN",
+      community: ["AS", "KS", "QS", "JD"],
+      communityDealt: 4,
+      seats: [{ userId: "u1", seatNo: 1, status: "ACTIVE" }],
+      stacks: { u1: 100 }
+    }
+  });
+
+  assert.deepEqual(result, { ok: true, newVersion: 5 });
+  assert.equal(
+    queries.some((entry) => (
+      entry.query === "update public.poker_tables set last_activity_at = now() where id = $1;"
+      && entry.params[0] === "t_db"
+    )),
+    true
+  );
+});

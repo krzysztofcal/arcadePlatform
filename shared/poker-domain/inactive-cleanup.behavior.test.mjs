@@ -226,6 +226,39 @@ test("inactive cleanup preserves fresh live hand without mutating disconnected a
   assert.deepEqual(harness.tableState.stateRow.state.stacks, { human_1: 250, human_2: 300, bot_1: 170 });
 });
 
+test("inactive cleanup preserves fresh bots-only live hand for disconnected human when activity is recent", async () => {
+  const harness = createCleanupHarness({
+    seatRows: [
+      { user_id: "human_1", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 250 },
+      { user_id: "bot_1", seat_no: 2, status: "ACTIVE", is_bot: true, stack: 170 }
+    ],
+    state: {
+      phase: "PREFLOP",
+      handId: "h-fresh-bots-only-disconnect",
+      turnUserId: "bot_1",
+      turnDeadlineAt: null,
+      seats: [
+        { userId: "human_1", seatNo: 1, status: "ACTIVE" },
+        { userId: "bot_1", seatNo: 2, status: "ACTIVE" }
+      ],
+      stacks: { human_1: 250, bot_1: 170 }
+    },
+    lastActivityAt: "2026-03-01T00:01:55.000Z"
+  });
+
+  const result = await harness.run();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, false);
+  assert.equal(result.closed, false);
+  assert.equal(result.deferred, true);
+  assert.equal(result.status, "cleaned_live_hand_preserved");
+  assert.equal(harness.cashouts.length, 0);
+  assert.equal(harness.seatState.find((row) => row.user_id === "human_1")?.status, "ACTIVE");
+  assert.equal(harness.tableState.tableStatus, "OPEN");
+  assert.equal(harness.tableState.stateRow.state.turnUserId, "bot_1");
+});
+
 test("inactive cleanup closes stale live hand for disconnected human after activity timeout", async () => {
   const harness = createCleanupHarness({
     seatRows: [
@@ -258,6 +291,43 @@ test("inactive cleanup closes stale live hand for disconnected human after activ
   assert.equal(harness.tableState.stateRow.state.phase, "HAND_DONE");
   assert.equal(harness.tableState.stateRow.state.turnUserId, null);
   assert.deepEqual(harness.tableState.stateRow.state.stacks, { bot_1: 170 });
+});
+
+test("inactive cleanup does not close stale live hand when another active human remains", async () => {
+  const harness = createCleanupHarness({
+    seatRows: [
+      { user_id: "human_1", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 250 },
+      { user_id: "human_2", seat_no: 2, status: "ACTIVE", is_bot: false, stack: 300 },
+      { user_id: "bot_1", seat_no: 3, status: "ACTIVE", is_bot: true, stack: 170 }
+    ],
+    state: {
+      phase: "PREFLOP",
+      handId: "h-stale-active-human-remains",
+      turnUserId: "human_2",
+      turnDeadlineAt: null,
+      seats: [
+        { userId: "human_1", seatNo: 1, status: "ACTIVE" },
+        { userId: "human_2", seatNo: 2, status: "ACTIVE" },
+        { userId: "bot_1", seatNo: 3, status: "ACTIVE" }
+      ],
+      stacks: { human_1: 250, human_2: 300, bot_1: 170 }
+    },
+    createdAt: "2026-03-01T00:00:00.000Z",
+    lastActivityAt: "2026-03-01T00:00:10.000Z",
+    nowMs: Date.parse("2026-03-01T00:02:00.000Z")
+  });
+
+  const result = await harness.run();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, true);
+  assert.equal(result.closed, false);
+  assert.equal(result.status, "cleaned");
+  assert.equal(harness.tableState.tableStatus, "OPEN");
+  assert.equal(harness.seatState.find((row) => row.user_id === "human_1")?.status, "INACTIVE");
+  assert.equal(harness.seatState.find((row) => row.user_id === "human_2")?.status, "ACTIVE");
+  assert.equal(harness.tableState.stateRow.state.turnUserId, "human_2");
+  assert.deepEqual(harness.tableState.stateRow.state.stacks, { human_2: 300, bot_1: 170 });
 });
 
 test("inactive cleanup system sweep keeps bots-only live table open until hand completion", async () => {
