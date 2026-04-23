@@ -1705,10 +1705,12 @@
     var cardHeightPx = anchor.sceneWidth >= 470 ? 68 : 63;
     var cardsWidth = ((cardWidthPx * 2) + 9) / anchor.sceneWidth * 100;
     var cardsHalfHeight = (cardHeightPx / anchor.sceneHeight * 100) / 2;
+    var cardHalfHeightOffsetX = (cardHeightPx / 2) / anchor.sceneWidth * 100;
+    var cardHalfHeightOffsetY = (cardHeightPx / 2) / anchor.sceneHeight * 100;
     var gapX = Math.max(10, Math.round(anchor.sceneWidth * 0.02)) / anchor.sceneWidth * 100;
     var gapY = Math.max(6, Math.round(anchor.sceneHeight * 0.01)) / anchor.sceneHeight * 100;
-    var left = clampNumber(anchor.x + anchor.radiusX + gapX, 1.5, 98.5 - cardsWidth);
-    var centerY = clampNumber(anchor.y + (anchor.radiusY * 0.42) + gapY, cardsHalfHeight + 1.5, 98.5 - cardsHalfHeight);
+    var left = clampNumber(anchor.x + anchor.radiusX + gapX - cardHalfHeightOffsetX, 1.5, 98.5 - cardsWidth);
+    var centerY = clampNumber(anchor.y + (anchor.radiusY * 0.42) + gapY + cardHalfHeightOffsetY, cardsHalfHeight + 1.5, 100);
     if (els.heroCards.classList && typeof els.heroCards.classList.add === 'function') els.heroCards.classList.add('poker-hero-cards--docked');
     els.heroCards.style.left = formatScenePercent(left);
     els.heroCards.style.top = formatScenePercent(centerY);

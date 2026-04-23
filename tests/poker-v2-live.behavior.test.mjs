@@ -359,8 +359,8 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.ok(heroSeat, 'v2 should render a dedicated hero seat');
   assert.equal(heroSeat.style.left, '34%', 'hero seat should be shifted left to avoid the action rail');
   assert.equal(heroSeat.style.top, '91%', 'hero seat should stay near the bottom edge');
-  assert.equal(harness.elements.pokerHeroCards.style.left, '52.1%', 'hero hole cards should sit to the right of the hero avatar');
-  assert.ok(parseFloat(harness.elements.pokerHeroCards.style.top) > parseFloat(heroSeat.style.top), 'hero hole cards should stay docked below the hero avatar');
+  assert.equal(harness.elements.pokerHeroCards.style.left, '42.3%', 'hero hole cards should shift left by half a card height toward the avatar');
+  assert.ok(parseFloat(harness.elements.pokerHeroCards.style.top) >= 100, 'hero hole cards should sit lower by roughly half a card height, even if they partially overlap the avatar or scene edge');
   assert.equal(harness.elements.pokerHeroCards.style.bottom, 'auto', 'hero hole cards should not fall back to the global bottom anchor when the hero seat is present');
   const seatCards = heroSeat.children.find((node) => node.className === 'poker-seat-cards');
   assert.equal(seatCards, undefined, 'hero seat should not duplicate the bottom hole cards');
