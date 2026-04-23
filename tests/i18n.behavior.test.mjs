@@ -44,6 +44,10 @@ const requiredKeys = [
   'pokerDumpLogsOk',
   'pokerDumpLogsFail',
   'pokerDumpLogsEmpty',
+  'admin',
+  'adminTitle',
+  'adminUnauthorized',
+  'adminSearchPlaceholder',
 ];
 for (const key of requiredKeys){
   const value = sandbox.window.I18N.t(key);

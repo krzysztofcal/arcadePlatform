@@ -9,7 +9,9 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.join(__dirname, '..');
 
 const sidebarModelSource = await readFile(path.join(repoRoot, 'js', 'core', 'sidebar-model.js'), 'utf8');
+const sidebarSource = await readFile(path.join(repoRoot, 'js', 'sidebar.js'), 'utf8');
 const accountHtml = await readFile(path.join(repoRoot, 'account.html'), 'utf8');
+const adminHtml = await readFile(path.join(repoRoot, 'admin.html'), 'utf8');
 const favoritesHtml = await readFile(path.join(repoRoot, 'favorites.html'), 'utf8');
 const indexHtml = await readFile(path.join(repoRoot, 'index.html'), 'utf8');
 const recentlyPlayedHtml = await readFile(path.join(repoRoot, 'recently-played.html'), 'utf8');
@@ -35,6 +37,7 @@ const pokerTableHtml = await readFile(path.join(repoRoot, 'poker', 'table-v2.htm
 
 const rootPages = [
   accountHtml,
+  adminHtml,
   indexHtml,
   gameHtml,
   gameCatsHtml,
@@ -64,6 +67,9 @@ test('sidebar model includes required entries', () => {
   assert.doesNotMatch(sidebarModelSource, /href:\s*['"]\/poker\/table-v2\.html['"]/);
   assert.match(sidebarModelSource, /id:\s*['"]favorites['"]/);
   assert.match(sidebarModelSource, /id:\s*['"]recentlyPlayed['"]/);
+  assert.match(sidebarModelSource, /id:\s*['"]admin['"]/);
+  assert.match(sidebarModelSource, /requiresAdmin:\s*true/);
+  assert.match(sidebarSource, /admin-me/);
 });
 
 test('sidebar scripts load once per root page', () => {
