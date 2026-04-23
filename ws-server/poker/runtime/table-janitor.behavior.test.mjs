@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evaluateTableHealth, runTableJanitor } from "./table-janitor.mjs";
+import { evaluateTableHealth, runTableJanitor, selectOpenTableJanitorBatch } from "./table-janitor.mjs";
 
 const NOW_MS = Date.parse("2026-04-23T13:12:00.000Z");
 
@@ -124,6 +124,89 @@ test("evaluateTableHealth classifies open inert tables", () => {
   assert.equal(result.classification, "open_inert_table");
   assert.equal(result.action, "zombie_cleanup");
   assert.equal(result.reasonCode, "open_table_without_active_humans");
+});
+
+test("evaluateTableHealth preserves fresh live hands during reconnect grace", () => {
+  const result = evaluateTableHealth({
+    tableId: "t_reconnect_grace",
+    nowMs: NOW_MS,
+    liveHandStaleMs: 15_000,
+    persistedTable: {
+      status: "OPEN",
+      created_at: iso(-600_000),
+      last_activity_at: iso(-5_000)
+    },
+    persistedSeats: [
+      { user_id: "u1", status: "ACTIVE", is_bot: false, last_seen_at: iso(-5_000) }
+    ],
+    persistedState: {
+      phase: "PREFLOP",
+      turnUserId: "u1",
+      turnDeadlineAt: NOW_MS + 10_000
+    },
+    runtime: {
+      loaded: false,
+      hasConnectedHumanPresence: false,
+      connectedUserIds: []
+    }
+  });
+
+  assert.equal(result.healthy, true);
+  assert.equal(result.action, "noop");
+  assert.equal(result.reasonCode, "healthy_live_hand_active");
+});
+
+test("selectOpenTableJanitorBatch rotates batches so older healthy tables do not starve newer unhealthy ones", () => {
+  const healthyOldOne = evaluateTableHealth({
+    tableId: "t_healthy_old_1",
+    nowMs: NOW_MS,
+    persistedTable: { status: "OPEN", created_at: iso(-600_000), last_activity_at: iso(-5_000) },
+    persistedSeats: [{ user_id: "u1", status: "ACTIVE", is_bot: false, last_seen_at: iso(-5_000) }],
+    persistedState: { phase: "HAND_DONE" },
+    runtime: { loaded: true, tableStatus: "OPEN", hasConnectedHumanPresence: true, connectedUserIds: ["u1"] }
+  });
+  const healthyOldTwo = evaluateTableHealth({
+    tableId: "t_healthy_old_2",
+    nowMs: NOW_MS,
+    persistedTable: { status: "OPEN", created_at: iso(-590_000), last_activity_at: iso(-5_000) },
+    persistedSeats: [{ user_id: "u2", status: "ACTIVE", is_bot: false, last_seen_at: iso(-5_000) }],
+    persistedState: { phase: "HAND_DONE" },
+    runtime: { loaded: true, tableStatus: "OPEN", hasConnectedHumanPresence: true, connectedUserIds: ["u2"] }
+  });
+  const newerInert = evaluateTableHealth({
+    tableId: "t_inert_newer",
+    nowMs: NOW_MS,
+    persistedTable: { status: "OPEN", created_at: iso(-300_000), last_activity_at: iso(-180_000) },
+    persistedSeats: [],
+    persistedState: { phase: "HAND_DONE" },
+    runtime: { loaded: true, tableStatus: "OPEN", hasConnectedHumanPresence: false, connectedUserIds: [] }
+  });
+
+  assert.equal(healthyOldOne.healthy, true);
+  assert.equal(healthyOldTwo.healthy, true);
+  assert.equal(newerInert.classification, "open_inert_table");
+
+  const orderedTables = [
+    { id: "t_healthy_old_1", updated_at: iso(-300_000) },
+    { id: "t_healthy_old_2", updated_at: iso(-200_000) },
+    { id: "t_inert_newer", updated_at: iso(-100_000) }
+  ];
+
+  const firstSweep = selectOpenTableJanitorBatch({
+    tables: orderedTables,
+    limit: 2
+  });
+  assert.deepEqual(firstSweep.tableIds, ["t_healthy_old_1", "t_healthy_old_2"]);
+
+  const secondSweep = selectOpenTableJanitorBatch({
+    tables: orderedTables,
+    limit: 2,
+    cursor: firstSweep.cursor
+  });
+  assert.equal(secondSweep.tableIds.includes("t_inert_newer"), true);
+
+  const covered = new Set([...firstSweep.tableIds, ...secondSweep.tableIds]);
+  assert.deepEqual([...covered].sort(), ["t_healthy_old_1", "t_healthy_old_2", "t_inert_newer"]);
 });
 
 test("runTableJanitor keeps runtime/db mismatch traceable while routing cleanup", async () => {

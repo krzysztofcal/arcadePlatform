@@ -14,7 +14,7 @@ import { createTableManager } from "./poker/table/table-manager.mjs";
 import { adaptPersistedBootstrap } from "./poker/bootstrap/persisted-bootstrap-adapter.mjs";
 import { createSessionStore } from "./poker/runtime/session-store.mjs";
 import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
-import { evaluateTableHealth, runTableJanitor } from "./poker/runtime/table-janitor.mjs";
+import { evaluateTableHealth, runTableJanitor, selectOpenTableJanitorBatch } from "./poker/runtime/table-janitor.mjs";
 import { buildStateSnapshotPayload } from "./poker/read-model/state-snapshot.mjs";
 import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
 import { createStreamLog } from "./poker/runtime/stream-log.mjs";
@@ -235,6 +235,7 @@ const lobbySubscribers = new Set();
 const activeLobbyTablesById = new Map();
 const lobbyEmptyJoinableGraceMs = resolveEmptyJoinableGraceMs(process.env.POKER_TABLE_CLOSE_GRACE_MS);
 const internalRuntimeToken = typeof process.env.POKER_WS_INTERNAL_TOKEN === "string" ? process.env.POKER_WS_INTERNAL_TOKEN.trim() : "";
+let openTableJanitorCursor = null;
 
 function snapshotCacheKey(sessionId, tableId) {
   return `${sessionId}:${tableId}`;
@@ -1890,17 +1891,25 @@ async function listOpenTableIdsForJanitor({ limit = 10 } = {}) {
     const beginSqlWs = await loadBeginSqlWs();
     return beginSqlWs(async (tx) => {
       const rows = await tx.unsafe(
-        `select t.id
+        `select t.id, t.updated_at
          from public.poker_tables t
          where t.status = 'OPEN'
-         order by t.updated_at asc
-         limit $1;`,
-        [boundedLimit]
+         order by t.updated_at asc, t.id asc;`
       );
-      if (!Array.isArray(rows)) return [];
-      return rows
-        .map((row) => (typeof row?.id === "string" ? row.id : ""))
-        .filter((id) => id);
+      const selected = selectOpenTableJanitorBatch({
+        tables: Array.isArray(rows) ? rows : [],
+        limit: boundedLimit,
+        cursor: openTableJanitorCursor
+      });
+      openTableJanitorCursor = selected.cursor;
+      klogSafe("ws_open_table_reconciler_batch_selected", {
+        limit: boundedLimit,
+        totalOpenTables: selected.total,
+        wrapped: selected.wrapped,
+        cursorTableId: selected.cursor?.tableId || null,
+        tableIds: selected.tableIds
+      });
+      return selected.tableIds;
     }, { env: process.env });
   } catch (error) {
     klogSafe("ws_open_table_reconciler_list_failed", { message: error?.message || "unknown" });

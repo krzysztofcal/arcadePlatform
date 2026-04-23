@@ -49,6 +49,47 @@ function parseTimestampMs(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeOpenTableJanitorCursor(cursor) {
+  const tableId = typeof cursor?.tableId === "string"
+    ? cursor.tableId.trim()
+    : typeof cursor?.id === "string"
+      ? cursor.id.trim()
+      : "";
+  const updatedAtMs = parseTimestampMs(cursor?.updatedAtMs ?? cursor?.updatedAt ?? cursor?.updated_at);
+  if (!tableId || updatedAtMs == null) {
+    return null;
+  }
+  return { tableId, updatedAtMs };
+}
+
+function normalizeOpenTableJanitorRow(row) {
+  const tableId = typeof row?.tableId === "string"
+    ? row.tableId.trim()
+    : typeof row?.id === "string"
+      ? row.id.trim()
+      : "";
+  if (!tableId) {
+    return null;
+  }
+  const updatedAtMs = parseTimestampMs(row?.updatedAtMs ?? row?.updatedAt ?? row?.updated_at) ?? 0;
+  return { tableId, updatedAtMs };
+}
+
+function compareOpenTableJanitorRows(left, right) {
+  if (left.updatedAtMs !== right.updatedAtMs) {
+    return left.updatedAtMs - right.updatedAtMs;
+  }
+  return left.tableId.localeCompare(right.tableId);
+}
+
+function isOpenTableRowAfterCursor(row, cursor) {
+  if (!cursor) {
+    return true;
+  }
+  const compared = compareOpenTableJanitorRows(row, cursor);
+  return compared > 0;
+}
+
 function hasLiveHandSignal(state) {
   const phase = typeof state?.phase === "string" ? state.phase.trim().toUpperCase() : "";
   return LIVE_HAND_PHASES.has(phase);
@@ -317,6 +358,58 @@ export function evaluateTableHealth({
       activeHumanCount: activeHumanSeats.length
     }
   });
+}
+
+export function selectOpenTableJanitorBatch({
+  tables = [],
+  limit = 10,
+  cursor = null
+} = {}) {
+  const boundedLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 10;
+  const orderedTables = (Array.isArray(tables) ? tables : [])
+    .map(normalizeOpenTableJanitorRow)
+    .filter(Boolean)
+    .sort(compareOpenTableJanitorRows);
+  const normalizedCursor = normalizeOpenTableJanitorCursor(cursor);
+  if (orderedTables.length === 0) {
+    return {
+      tableIds: [],
+      batch: [],
+      cursor: null,
+      wrapped: false,
+      total: 0
+    };
+  }
+
+  let startIndex = 0;
+  if (normalizedCursor) {
+    const nextIndex = orderedTables.findIndex((row) => isOpenTableRowAfterCursor(row, normalizedCursor));
+    startIndex = nextIndex >= 0 ? nextIndex : 0;
+  }
+
+  let wrapped = normalizedCursor ? startIndex === 0 : false;
+  let batch = orderedTables.slice(startIndex, startIndex + boundedLimit);
+  if (batch.length < boundedLimit && orderedTables.length > batch.length) {
+    const remaining = Math.min(boundedLimit - batch.length, startIndex);
+    if (remaining > 0) {
+      batch = batch.concat(orderedTables.slice(0, remaining));
+      wrapped = true;
+    }
+  }
+
+  const nextCursor = batch.length > 0
+    ? {
+        tableId: batch[batch.length - 1].tableId,
+        updatedAtMs: batch[batch.length - 1].updatedAtMs
+      }
+    : normalizedCursor;
+  return {
+    tableIds: batch.map((row) => row.tableId),
+    batch,
+    cursor: nextCursor,
+    wrapped,
+    total: orderedTables.length
+  };
 }
 
 export async function runTableJanitor({
