@@ -9,96 +9,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap">
   <link rel="stylesheet" href="css/portal.css">
+  <link rel="stylesheet" href="css/admin.css">
   <link rel="stylesheet" href="/css/xp-overlay.css">
-  <style>
-    .admin-grid{ display:grid; gap:16px; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); }
-
-    .admin-status{ margin:0 0 16px; padding:12px 14px; border-radius:12px; background:rgba(255, 255, 255, 0.05); }
-
-    .admin-status[data-tone="error"]{ color:#fda4af; background:rgba(255, 77, 109, 0.12); }
-
-    .admin-status[data-tone="success"]{ color:#86efac; background:rgba(22, 163, 74, 0.12); }
-
-    .admin-status[data-tone="info"]{ color:#7dd3fc; background:rgba(14, 165, 233, 0.12); }
-
-    .admin-search__form{ display:grid; gap:12px; }
-
-    .admin-search__label{ display:block; font-weight:600; margin-bottom:6px; }
-
-    .admin-search__input{ width:100%; padding:10px 12px; border-radius:10px; border:1px solid rgba(255, 255, 255, 0.1); background:rgba(255, 255, 255, 0.04); color:#e2e8f0; }
-
-    .admin-adjust__input{ width:100%; padding:10px 12px; border-radius:10px; border:1px solid rgba(255, 255, 255, 0.1); background:rgba(255, 255, 255, 0.04); color:#e2e8f0; }
-
-    .admin-adjust__textarea{ width:100%; padding:10px 12px; border-radius:10px; border:1px solid rgba(255, 255, 255, 0.1); background:rgba(255, 255, 255, 0.04); color:#e2e8f0; }
-
-    .admin-search__input:focus{ outline:2px solid #6ee7e7; outline-offset:2px; }
-
-    .admin-adjust__input:focus{ outline:2px solid #6ee7e7; outline-offset:2px; }
-
-    .admin-adjust__textarea:focus{ outline:2px solid #6ee7e7; outline-offset:2px; }
-
-    .admin-search__actions{ display:flex; flex-wrap:wrap; gap:10px; }
-
-    .admin-adjust__actions{ display:flex; flex-wrap:wrap; gap:10px; }
-
-    .admin-user__actions{ display:flex; flex-wrap:wrap; gap:10px; }
-
-    .admin-quick{ display:flex; flex-wrap:wrap; gap:10px; }
-
-    .admin-btn{ padding:10px 14px; border:none; border-radius:12px; font-weight:700; cursor:pointer; }
-
-    .admin-btn--primary{ background:linear-gradient(90deg, #6ee7e7, #a78bfa); color:#0b1020; }
-
-    .admin-btn--ghost{ background:rgba(255, 255, 255, 0.08); color:#e2e8f0; }
-
-    .admin-results{ list-style:none; margin:16px 0 0; padding:0; display:grid; gap:10px; }
-
-    .admin-results__item{ margin:0; }
-
-    .admin-results__button{ width:100%; padding:12px; border-radius:12px; border:1px solid rgba(255, 255, 255, 0.08); background:rgba(255, 255, 255, 0.04); color:#e2e8f0; text-align:left; cursor:pointer; }
-
-    .admin-results__button.is-active{ border-color:#6ee7e7; background:rgba(110, 231, 231, 0.08); }
-
-    .admin-results__title{ display:block; font-weight:700; }
-
-    .admin-results__meta{ display:block; margin-top:4px; color:#94a3b8; font-size:13px; }
-
-    .admin-user__name{ margin:0 0 6px; font-size:20px; }
-
-    .admin-user__meta{ margin:0 0 8px; color:#a0aec0; word-break:break-word; }
-
-    .admin-balance{ display:flex; align-items:baseline; gap:8px; margin:14px 0 18px; }
-
-    .admin-balance__label{ color:#94a3b8; font-size:13px; text-transform:uppercase; letter-spacing:.08em; }
-
-    .admin-balance__value{ font-size:30px; font-weight:800; }
-
-    .admin-adjust{ display:grid; gap:12px; }
-
-    .admin-adjust__label{ display:block; font-weight:600; margin-bottom:6px; }
-
-    .admin-adjust__textarea{ min-height:110px; resize:vertical; }
-
-    .admin-empty{ color:#94a3b8; }
-
-    .admin-ledger{ width:100%; border-collapse:collapse; }
-
-    .admin-ledger th{ padding:10px 12px; border-bottom:1px solid rgba(255, 255, 255, 0.08); text-align:left; vertical-align:top; }
-
-    .admin-ledger td{ padding:10px 12px; border-bottom:1px solid rgba(255, 255, 255, 0.08); text-align:left; vertical-align:top; }
-
-    .admin-ledger td:last-child{ text-align:right; }
-
-    .admin-ledger th:last-child{ text-align:right; }
-
-    .admin-ledger__amount--positive{ color:#86efac; font-weight:700; }
-
-    .admin-ledger__amount--negative{ color:#fda4af; font-weight:700; }
-
-    .admin-ledger__meta{ display:block; margin-top:4px; color:#94a3b8; font-size:12px; }
-
-    .admin-ledger-wrap{ overflow:auto; }
-  </style>
   <script id="Cookiebot"
           src="https://consent.cookiebot.com/uc.js"
           data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
@@ -225,78 +137,362 @@
         </section>
 
         <section id="adminApp" hidden>
-          <div class="admin-grid">
-            <section class="xp-card" aria-labelledby="adminSearchTitle">
-              <h2 class="xp-card__title" id="adminSearchTitle" data-i18n="adminSearchLabel">Find user</h2>
-              <form class="admin-search__form" id="adminSearchForm">
-                <div>
-                  <label class="admin-search__label" for="adminSearchInput" data-i18n="adminSearchLabel">Find user</label>
-                  <input class="admin-search__input" id="adminSearchInput" type="search" data-i18n-placeholder="adminSearchPlaceholder" placeholder="Search by email or userId" required>
-                </div>
-                <div class="admin-search__actions">
-                  <button class="admin-btn admin-btn--primary" type="submit" id="adminSearchButton" data-i18n="adminSearchButton">Search</button>
-                </div>
-              </form>
-              <p class="admin-empty" id="adminSearchEmpty" hidden data-i18n="adminSearchEmpty">No users found.</p>
-              <ul class="admin-results" id="adminSearchResults"></ul>
-            </section>
-
-            <section class="xp-card" aria-labelledby="adminSelectedTitle">
-              <h2 class="xp-card__title" id="adminSelectedTitle" data-i18n="adminSelectedUser">Selected user</h2>
-              <div id="adminSelectedState">
-                <p class="admin-empty" id="adminSelectedEmpty" data-i18n="adminSelectedEmpty">Select a user to view balance, ledger, and adjustments.</p>
-                <div id="adminSelectedPanel" hidden>
-                  <h3 class="admin-user__name" id="adminUserName">—</h3>
-                  <p class="admin-user__meta" id="adminUserEmail">—</p>
-                  <p class="admin-user__meta" id="adminUserId">—</p>
-                  <div class="admin-user__actions">
-                    <button class="admin-btn admin-btn--ghost" type="button" id="adminCopyUserId" data-i18n="adminCopyUserId">Copy userId</button>
-                  </div>
-                  <div class="admin-balance">
-                    <span class="admin-balance__label" data-i18n="adminBalance">Balance</span>
-                    <span class="admin-balance__value" id="adminBalanceValue">—</span>
-                  </div>
-                  <form class="admin-adjust" id="adminAdjustForm">
-                    <h3 class="xp-card__title" data-i18n="adminAdjustTitle">Adjust chips</h3>
-                    <div class="admin-quick">
-                      <button class="admin-btn admin-btn--ghost" type="button" data-amount="100">+100</button>
-                      <button class="admin-btn admin-btn--ghost" type="button" data-amount="500">+500</button>
-                      <button class="admin-btn admin-btn--ghost" type="button" data-amount="1000">+1000</button>
-                      <button class="admin-btn admin-btn--ghost" type="button" data-amount="-100">-100</button>
-                      <button class="admin-btn admin-btn--ghost" type="button" data-amount="-500">-500</button>
-                    </div>
-                    <div>
-                      <label class="admin-adjust__label" for="adminAmountInput" data-i18n="adminAmountLabel">Amount</label>
-                      <input class="admin-adjust__input" id="adminAmountInput" name="amount" type="number" step="1" required>
-                    </div>
-                    <div>
-                      <label class="admin-adjust__label" for="adminReasonInput" data-i18n="adminReasonLabel">Reason</label>
-                      <textarea class="admin-adjust__textarea" id="adminReasonInput" name="reason" data-i18n-placeholder="adminReasonPlaceholder" placeholder="Required audit reason" required></textarea>
-                    </div>
-                    <div class="admin-adjust__actions">
-                      <button class="admin-btn admin-btn--primary" type="submit" id="adminAdjustSubmit" data-i18n="adminSubmit">Apply adjustment</button>
-                    </div>
-                  </form>
-                </div>
-              </div>
-            </section>
+          <div class="admin-tabs" role="tablist" aria-label="Admin panel sections">
+            <button class="admin-tab is-active" type="button" role="tab" data-admin-tab="users" aria-selected="true">Users</button>
+            <button class="admin-tab" type="button" role="tab" data-admin-tab="tables" aria-selected="false">Tables</button>
+            <button class="admin-tab" type="button" role="tab" data-admin-tab="ledger" aria-selected="false">Ledger</button>
+            <button class="admin-tab" type="button" role="tab" data-admin-tab="ops" aria-selected="false">Ops</button>
           </div>
 
-          <section class="xp-card" aria-labelledby="adminLedgerTitle">
-            <h2 class="xp-card__title" id="adminLedgerTitle" data-i18n="adminLedgerTitle">Recent ledger entries</h2>
-            <p class="admin-empty" id="adminLedgerEmpty" data-i18n="adminNoLedger">No ledger activity yet.</p>
-            <div class="admin-ledger-wrap">
-              <table class="admin-ledger" id="adminLedgerTable" hidden>
-                <thead>
-                  <tr>
-                    <th scope="col" data-i18n="adminWhen">When</th>
-                    <th scope="col" data-i18n="adminAction">Action</th>
-                    <th scope="col" data-i18n="adminDetails">Details</th>
-                    <th scope="col" data-i18n="adminAmountLabel">Amount</th>
-                  </tr>
-                </thead>
-                <tbody id="adminLedgerBody"></tbody>
-              </table>
+          <section class="admin-tab-panel" id="adminTabUsers" data-admin-panel="users" role="tabpanel">
+            <div class="admin-workspace">
+              <section class="xp-card admin-card admin-card--main" aria-labelledby="adminUsersTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminUsersTitle">Users</h2>
+                    <p class="admin-card__subtitle">Search, filter, and operate on users without leaving the page.</p>
+                  </div>
+                  <div class="admin-card__actions">
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminUsersRefresh">Refresh</button>
+                  </div>
+                </div>
+                <form class="admin-filter-grid" id="adminUsersFilters">
+                  <label class="admin-field">
+                    <span class="admin-field__label">Email / text</span>
+                    <input class="admin-input" type="search" name="q" placeholder="email, display name, userId">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">userId</span>
+                    <input class="admin-input" type="search" name="userId" placeholder="Exact UUID">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Created from</span>
+                    <input class="admin-input" type="datetime-local" name="createdFrom">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Created to</span>
+                    <input class="admin-input" type="datetime-local" name="createdTo">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Last sign-in from</span>
+                    <input class="admin-input" type="datetime-local" name="lastSignInFrom">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Last sign-in to</span>
+                    <input class="admin-input" type="datetime-local" name="lastSignInTo">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Last activity from</span>
+                    <input class="admin-input" type="datetime-local" name="lastActivityFrom">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Last activity to</span>
+                    <input class="admin-input" type="datetime-local" name="lastActivityTo">
+                  </label>
+                  <label class="admin-field admin-field--toggle">
+                    <input type="checkbox" name="hasBalance" value="1">
+                    <span>Balance &gt; 0</span>
+                  </label>
+                  <label class="admin-field admin-field--toggle">
+                    <input type="checkbox" name="hasActiveSeat" value="1">
+                    <span>Has active seat</span>
+                  </label>
+                  <label class="admin-field admin-field--toggle">
+                    <input type="checkbox" name="hasActiveTable" value="1">
+                    <span>Has active table</span>
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Sort</span>
+                    <select class="admin-input" name="sort">
+                      <option value="last_activity_desc">Last activity desc</option>
+                      <option value="last_sign_in_desc">Last sign-in desc</option>
+                      <option value="created_at_desc">Created desc</option>
+                      <option value="balance_desc">Balance desc</option>
+                    </select>
+                  </label>
+                  <div class="admin-filter-actions">
+                    <button class="admin-btn admin-btn--primary" type="submit">Apply filters</button>
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminUsersReset">Reset</button>
+                  </div>
+                </form>
+                <div class="admin-table-wrap">
+                  <table class="admin-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Email</th>
+                        <th scope="col">userId</th>
+                        <th scope="col">Display</th>
+                        <th scope="col">Created</th>
+                        <th scope="col">Last sign-in</th>
+                        <th scope="col">Balance</th>
+                        <th scope="col">Seats</th>
+                        <th scope="col">Tables</th>
+                        <th scope="col">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="adminUsersBody"></tbody>
+                  </table>
+                </div>
+                <p class="admin-empty" id="adminUsersEmpty" hidden>No users matched the current filters.</p>
+                <div class="admin-pagination" id="adminUsersPagination"></div>
+              </section>
+
+              <aside class="xp-card admin-card admin-card--detail" aria-labelledby="adminUserDetailTitle">
+                <div class="admin-detail" id="adminUserDetail">
+                  <h2 class="xp-card__title" id="adminUserDetailTitle">User details</h2>
+                  <p class="admin-empty">Select a user to inspect balance, ledger, active poker state, and quick actions.</p>
+                </div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="admin-tab-panel" id="adminTabTables" data-admin-panel="tables" role="tabpanel" hidden>
+            <div class="admin-workspace">
+              <section class="xp-card admin-card admin-card--main" aria-labelledby="adminTablesTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminTablesTitle">Tables</h2>
+                    <p class="admin-card__subtitle">Inspect persisted state, janitor signals, and safe cleanup actions.</p>
+                  </div>
+                  <div class="admin-card__actions">
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminTablesRefresh">Refresh</button>
+                  </div>
+                </div>
+                <form class="admin-filter-grid" id="adminTablesFilters">
+                  <label class="admin-field">
+                    <span class="admin-field__label">tableId</span>
+                    <input class="admin-input" type="search" name="tableId" placeholder="UUID or partial match">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Status</span>
+                    <select class="admin-input" name="status">
+                      <option value="OPEN">Open</option>
+                      <option value="CLOSED">Closed</option>
+                      <option value="ALL">All</option>
+                    </select>
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Stakes</span>
+                    <input class="admin-input" type="search" name="stakes" placeholder="e.g. 10/20">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Phase</span>
+                    <select class="admin-input" name="phase">
+                      <option value="">Any phase</option>
+                      <option value="HAND_DONE">HAND_DONE</option>
+                      <option value="PREFLOP">PREFLOP</option>
+                      <option value="FLOP">FLOP</option>
+                      <option value="TURN">TURN</option>
+                      <option value="RIVER">RIVER</option>
+                      <option value="SHOWDOWN">SHOWDOWN</option>
+                    </select>
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Last activity older than (min)</span>
+                    <input class="admin-input" type="number" min="1" step="1" name="idleMinutes" placeholder="15">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Sort</span>
+                    <select class="admin-input" name="sort">
+                      <option value="last_activity_desc">Last activity desc</option>
+                      <option value="last_activity_asc">Last activity asc</option>
+                      <option value="created_at_desc">Created desc</option>
+                      <option value="created_at_asc">Created asc</option>
+                      <option value="player_count_desc">Player count desc</option>
+                    </select>
+                  </label>
+                  <label class="admin-field admin-field--toggle">
+                    <input type="checkbox" name="hasActiveHumans" value="1">
+                    <span>Has active humans</span>
+                  </label>
+                  <label class="admin-field admin-field--toggle">
+                    <input type="checkbox" name="hasBotsOnly" value="1">
+                    <span>Bots only</span>
+                  </label>
+                  <label class="admin-field admin-field--toggle">
+                    <input type="checkbox" name="hasStaleSeats" value="1">
+                    <span>Has stale seats</span>
+                  </label>
+                  <div class="admin-filter-actions">
+                    <button class="admin-btn admin-btn--primary" type="submit">Apply filters</button>
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminTablesReset">Reset</button>
+                  </div>
+                </form>
+                <div class="admin-table-wrap">
+                  <table class="admin-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">tableId</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Stakes</th>
+                        <th scope="col">Players</th>
+                        <th scope="col">Humans</th>
+                        <th scope="col">Bots</th>
+                        <th scope="col">Phase</th>
+                        <th scope="col">Last activity</th>
+                        <th scope="col">Janitor</th>
+                        <th scope="col">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="adminTablesBody"></tbody>
+                  </table>
+                </div>
+                <p class="admin-empty" id="adminTablesEmpty" hidden>No tables matched the current filters.</p>
+                <div class="admin-pagination" id="adminTablesPagination"></div>
+              </section>
+
+              <aside class="xp-card admin-card admin-card--detail" aria-labelledby="adminTableDetailTitle">
+                <div class="admin-detail" id="adminTableDetail">
+                  <h2 class="xp-card__title" id="adminTableDetailTitle">Table details</h2>
+                  <p class="admin-empty">Select a table to inspect seats, runtime hints, janitor evaluation, and cleanup history.</p>
+                </div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="admin-tab-panel" id="adminTabLedger" data-admin-panel="ledger" role="tabpanel" hidden>
+            <div class="admin-workspace">
+              <section class="xp-card admin-card admin-card--main" aria-labelledby="adminLedgerTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminLedgerTitle">Ledger</h2>
+                    <p class="admin-card__subtitle">Browse global ledger activity, audit admin changes, and pivot into a selected user.</p>
+                  </div>
+                  <div class="admin-card__actions admin-card__actions--wrap">
+                    <button class="admin-btn admin-btn--ghost" type="button" data-ledger-quick="ADMIN_ADJUST">ADMIN_ADJUST</button>
+                    <button class="admin-btn admin-btn--ghost" type="button" data-ledger-quick="TABLE_BUY_IN">TABLE_BUY_IN</button>
+                    <button class="admin-btn admin-btn--ghost" type="button" data-ledger-quick="TABLE_CASH_OUT">TABLE_CASH_OUT</button>
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminLedgerRecentAdmin">Recent admin actions</button>
+                  </div>
+                </div>
+                <form class="admin-filter-grid" id="adminLedgerFilters">
+                  <label class="admin-field">
+                    <span class="admin-field__label">tx type</span>
+                    <input class="admin-input" type="search" name="txType" placeholder="ADMIN_ADJUST">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">userId</span>
+                    <input class="admin-input" type="search" name="userId" placeholder="Exact UUID">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Email</span>
+                    <input class="admin-input" type="search" name="email" placeholder="player@example.com">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Source</span>
+                    <input class="admin-input" type="search" name="source" placeholder="admin_page">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">From</span>
+                    <input class="admin-input" type="datetime-local" name="from">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">To</span>
+                    <input class="admin-input" type="datetime-local" name="to">
+                  </label>
+                  <label class="admin-field admin-field--toggle">
+                    <input type="checkbox" name="positiveOnly" value="1">
+                    <span>Positive only</span>
+                  </label>
+                  <label class="admin-field admin-field--toggle">
+                    <input type="checkbox" name="negativeOnly" value="1">
+                    <span>Negative only</span>
+                  </label>
+                  <label class="admin-field admin-field--toggle">
+                    <input type="checkbox" name="adminOnly" value="1">
+                    <span>Admin adjustments only</span>
+                  </label>
+                  <div class="admin-filter-actions">
+                    <button class="admin-btn admin-btn--primary" type="submit">Apply filters</button>
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminLedgerReset">Reset</button>
+                  </div>
+                </form>
+                <div class="admin-table-wrap">
+                  <table class="admin-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">When</th>
+                        <th scope="col">Type</th>
+                        <th scope="col">Target user</th>
+                        <th scope="col">Details</th>
+                        <th scope="col">Idempotency / ref</th>
+                        <th scope="col">Source</th>
+                        <th scope="col">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody id="adminLedgerBody"></tbody>
+                  </table>
+                </div>
+                <p class="admin-empty" id="adminLedgerEmpty" hidden>No ledger entries matched the current filters.</p>
+                <div class="admin-pagination" id="adminLedgerPagination"></div>
+              </section>
+
+              <aside class="xp-card admin-card admin-card--detail" aria-labelledby="adminLedgerSideTitle">
+                <div class="admin-detail" id="adminLedgerDetail">
+                  <h2 class="xp-card__title" id="adminLedgerSideTitle">Ledger context</h2>
+                  <p class="admin-empty">Use quick filters, copy helpers, or jump from a user row to narrow this audit trail.</p>
+                </div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="admin-tab-panel" id="adminTabOps" data-admin-panel="ops" role="tabpanel" hidden>
+            <div class="admin-ops-grid">
+              <section class="xp-card admin-card" aria-labelledby="adminOpsSummaryTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminOpsSummaryTitle">Janitor / cleanup stats</h2>
+                    <p class="admin-card__subtitle">Read-only overview of the current persisted poker estate.</p>
+                  </div>
+                  <div class="admin-card__actions">
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminOpsRefresh">Refresh all stats</button>
+                  </div>
+                </div>
+                <div class="admin-stat-grid" id="adminOpsStats"></div>
+              </section>
+
+              <section class="xp-card admin-card" aria-labelledby="adminOpsRuntimeTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminOpsRuntimeTitle">Runtime / environment</h2>
+                    <p class="admin-card__subtitle">Health hints only. No secrets are exposed here.</p>
+                  </div>
+                </div>
+                <div id="adminOpsRuntime"></div>
+              </section>
+
+              <section class="xp-card admin-card" aria-labelledby="adminOpsActionsTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminOpsActionsTitle">Manual actions</h2>
+                    <p class="admin-card__subtitle">Safe batch triggers for operational cleanup workflows.</p>
+                  </div>
+                </div>
+                <div class="admin-action-stack">
+                  <button class="admin-btn admin-btn--primary" type="button" id="adminOpsRunReconciler">Run open-table reconciler now</button>
+                  <button class="admin-btn admin-btn--ghost" type="button" id="adminOpsRunStaleSweep">Run stale-seat sweep now</button>
+                </div>
+                <div id="adminOpsActionResult"></div>
+              </section>
+
+              <section class="xp-card admin-card admin-card--wide" aria-labelledby="adminOpsRecentTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminOpsRecentTitle">Recent janitor activity</h2>
+                    <p class="admin-card__subtitle">Recent admin table actions plus cleanup-related cash-out trails.</p>
+                  </div>
+                </div>
+                <div class="admin-two-column">
+                  <div>
+                    <h3 class="admin-section-title">Admin actions</h3>
+                    <div id="adminOpsRecentActions"></div>
+                  </div>
+                  <div>
+                    <h3 class="admin-section-title">Cleanup transactions</h3>
+                    <div id="adminOpsRecentCleanup"></div>
+                  </div>
+                </div>
+              </section>
             </div>
           </section>
         </section>

@@ -83,6 +83,12 @@ run("node", ["ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs"], "ws-lo
 run("node", ["tests/admin-auth.behavior.test.mjs"], "admin-auth-behavior");
 run("node", ["tests/admin-endpoints.behavior.test.mjs"], "admin-endpoints-behavior");
 run("node", ["tests/admin-ledger-adjust.behavior.test.mjs"], "admin-ledger-adjust-behavior");
+run("node", ["tests/admin-users-list.behavior.test.mjs"], "admin-users-list-behavior");
+run("node", ["tests/admin-tables-list.behavior.test.mjs"], "admin-tables-list-behavior");
+run("node", ["tests/admin-ledger-list.behavior.test.mjs"], "admin-ledger-list-behavior");
+run("node", ["tests/admin-table-actions.behavior.test.mjs"], "admin-table-actions-behavior");
+run("node", ["tests/admin-ops-summary.behavior.test.mjs"], "admin-ops-summary-behavior");
+run("node", ["tests/admin-page.contract.test.mjs"], "admin-page-contract");
 run("node", ["tests/admin-user-search.behavior.test.mjs"], "admin-user-search-behavior");
 run("node", ["tests/sidebar-admin-visibility.behavior.test.mjs"], "sidebar-admin-visibility-behavior");
 run("node", ["tests/i18n.behavior.test.mjs"], "i18n-behavior");
