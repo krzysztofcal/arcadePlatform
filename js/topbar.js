@@ -24,6 +24,26 @@
     return authState === AuthState.SIGNED_IN;
   }
 
+  function isTopbarEditableTarget(target){
+    if (!target || target === doc || target === win) return false;
+    const tag = target.tagName ? target.tagName.toLowerCase() : '';
+    const editable = target.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select';
+    if (!editable) return false;
+    try {
+      return !!(target.closest && target.closest('.topbar'));
+    } catch (_){
+      return false;
+    }
+  }
+
+  function protectTopbarInputKeys(event){
+    if (!event || event.key === 'Escape' || event.key === 'Tab') return;
+    if (!isTopbarEditableTarget(event.target)) return;
+    event.stopImmediatePropagation();
+  }
+
+  doc.addEventListener('keydown', protectTopbarInputKeys, true);
+
   function pickPreferredTopbar(list){
     if (!list || !list.length) return null;
     for (let i = 0; i < list.length; i++){
