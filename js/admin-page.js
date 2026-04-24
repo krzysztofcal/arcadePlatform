@@ -596,14 +596,55 @@
     }).join("") + "</div>";
   }
 
+  function closestEventTarget(target, selector){
+    var node = target;
+    if (!node) return null;
+    if (node.nodeType && node.nodeType !== 1){
+      node = node.parentElement || node.parentNode || null;
+    }
+    if (!node || typeof node.closest !== "function") return null;
+    return node.closest(selector);
+  }
+
+  function findTabButton(tab){
+    return (nodes.tabs || []).find(function(button){
+      return button.getAttribute("data-admin-tab") === tab;
+    }) || null;
+  }
+
+  function focusTab(tab){
+    var button = typeof tab === "string" ? findTabButton(tab) : tab;
+    if (button && typeof button.focus === "function"){
+      button.focus();
+    }
+  }
+
+  function moveTabFocus(currentTab, direction){
+    var tabs = nodes.tabs || [];
+    var currentIndex = tabs.findIndex(function(button){
+      return button.getAttribute("data-admin-tab") === currentTab;
+    });
+    if (currentIndex < 0 || !tabs.length) return;
+    var nextIndex = currentIndex + direction;
+    if (nextIndex < 0){
+      nextIndex = tabs.length - 1;
+    } else if (nextIndex >= tabs.length){
+      nextIndex = 0;
+    }
+    focusTab(tabs[nextIndex]);
+  }
+
   function renderTabs(){
     (nodes.tabs || []).forEach(function(button){
       var isActive = button.getAttribute("data-admin-tab") === state.activeTab;
       button.classList.toggle("is-active", isActive);
       button.setAttribute("aria-selected", isActive ? "true" : "false");
+      button.setAttribute("tabindex", isActive ? "0" : "-1");
     });
     (nodes.panels || []).forEach(function(panel){
-      setVisible(panel, panel.getAttribute("data-admin-panel") === state.activeTab);
+      var isActive = panel.getAttribute("data-admin-panel") === state.activeTab;
+      setVisible(panel, isActive);
+      panel.setAttribute("aria-hidden", isActive ? "false" : "true");
     });
   }
 
@@ -982,7 +1023,50 @@
     runTableAction(tableId, action);
   }
 
+  function handleTabClick(event){
+    if (event && typeof event.preventDefault === "function"){
+      event.preventDefault();
+    }
+    var tabButton = closestEventTarget(event && event.target ? event.target : event && event.currentTarget ? event.currentTarget : null, "[data-admin-tab]");
+    if (!tabButton) return;
+    setActiveTab(tabButton.getAttribute("data-admin-tab"));
+  }
+
+  function handleTabKeydown(event){
+    var tabButton = closestEventTarget(event && event.target ? event.target : null, "[data-admin-tab]");
+    if (!tabButton) return;
+    var tab = tabButton.getAttribute("data-admin-tab");
+    if (event.key === "ArrowRight" || event.key === "ArrowDown"){
+      event.preventDefault();
+      moveTabFocus(tab, 1);
+      return;
+    }
+    if (event.key === "ArrowLeft" || event.key === "ArrowUp"){
+      event.preventDefault();
+      moveTabFocus(tab, -1);
+      return;
+    }
+    if (event.key === "Home"){
+      event.preventDefault();
+      focusTab((nodes.tabs || [])[0]);
+      return;
+    }
+    if (event.key === "End"){
+      event.preventDefault();
+      focusTab((nodes.tabs || [])[Math.max(0, (nodes.tabs || []).length - 1)]);
+      return;
+    }
+    if (event.key === "Enter" || event.key === " "){
+      event.preventDefault();
+      setActiveTab(tab);
+    }
+  }
+
   function wireStaticEvents(){
+    (nodes.tabs || []).forEach(function(button){
+      button.addEventListener("click", handleTabClick);
+      button.addEventListener("keydown", handleTabKeydown);
+    });
     if (nodes.usersFilters) nodes.usersFilters.addEventListener("submit", handleUsersSubmit);
     if (nodes.tablesFilters) nodes.tablesFilters.addEventListener("submit", handleTablesSubmit);
     if (nodes.ledgerFilters) nodes.ledgerFilters.addEventListener("submit", handleLedgerSubmit);
@@ -1028,12 +1112,7 @@
     if (nodes.opsRunReconciler) nodes.opsRunReconciler.addEventListener("click", function(){ runOpsAction("open_table_reconciler"); });
     if (nodes.opsRunStaleSweep) nodes.opsRunStaleSweep.addEventListener("click", function(){ runOpsAction("stale_seat_sweep"); });
     doc.addEventListener("click", function(event){
-      var tabButton = event.target.closest("[data-admin-tab]");
-      if (tabButton){
-        setActiveTab(tabButton.getAttribute("data-admin-tab"));
-        return;
-      }
-      var pageButton = event.target.closest("[data-page-scope]");
+      var pageButton = closestEventTarget(event.target, "[data-page-scope]");
       if (pageButton){
         var scope = pageButton.getAttribute("data-page-scope");
         var page = Number(pageButton.getAttribute("data-page"));
@@ -1042,17 +1121,17 @@
         if (scope === "ledger") loadLedger(page);
         return;
       }
-      var userButton = event.target.closest("[data-user-action]");
+      var userButton = closestEventTarget(event.target, "[data-user-action]");
       if (userButton){
         handleUserAction(userButton.getAttribute("data-user-action"), userButton.getAttribute("data-user-id"));
         return;
       }
-      var tableButton = event.target.closest("[data-table-action]");
+      var tableButton = closestEventTarget(event.target, "[data-table-action]");
       if (tableButton){
         handleTableAction(tableButton.getAttribute("data-table-action"), tableButton.getAttribute("data-table-id"));
         return;
       }
-      var adjustButton = event.target.closest("[data-adjust-amount]");
+      var adjustButton = closestEventTarget(event.target, "[data-adjust-amount]");
       if (adjustButton){
         var input = doc.getElementById("adminAdjustAmount");
         if (input){
@@ -1061,7 +1140,7 @@
         }
         return;
       }
-      var copyButton = event.target.closest("[data-copy-text]");
+      var copyButton = closestEventTarget(event.target, "[data-copy-text]");
       if (copyButton){
         copyText(copyButton.getAttribute("data-copy-text"));
       }
