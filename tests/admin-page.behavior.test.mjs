@@ -56,6 +56,7 @@ function matchesSelector(node, selector) {
   if (selector[0] === "#") return node.id === selector.slice(1);
   const attrMatch = selector.match(/^\[([^=\]]+)(?:="([^"]*)")?\]$/);
   if (attrMatch) {
+    if (typeof node.getAttribute !== "function") return false;
     const name = attrMatch[1];
     const value = attrMatch[2];
     const actual = node.getAttribute(name);
@@ -172,6 +173,7 @@ function createDocument() {
   const document = {
     readyState: "complete",
     activeElement: null,
+    visibilityState: "visible",
     body: createElement("body", "body"),
     getElementById(id) {
       return nodes.get(id) || null;
@@ -195,6 +197,8 @@ function createDocument() {
     __queryMap: queryMap,
   };
   document.body.ownerDocument = document;
+  document.body.parentNode = document;
+  document.body.parentElement = null;
   return document;
 }
 
@@ -206,8 +210,15 @@ function registerNode(document, node) {
   return node;
 }
 
+function attachToBody(document, node) {
+  node.parentNode = document.body;
+  node.parentElement = document.body;
+  node.ownerDocument = document;
+  return node;
+}
+
 function createForm(document, id) {
-  const form = registerNode(document, createElement("form", id));
+  const form = attachToBody(document, registerNode(document, createElement("form", id)));
   form.elements = [];
   form.reset = function resetFormFields() {
     form.elements.forEach((field) => {
@@ -264,7 +275,7 @@ function createAdminDom() {
     "adminOpsRecentActions",
     "adminOpsRecentCleanup",
   ];
-  ids.forEach((id) => registerNode(document, createElement("div", id)));
+  ids.forEach((id) => attachToBody(document, registerNode(document, createElement("div", id))));
 
   const app = document.getElementById("adminApp");
   app.hidden = true;
@@ -285,8 +296,7 @@ function createAdminDom() {
     button.setAttribute("aria-controls", `adminTab${tab[0].toUpperCase()}${tab.slice(1)}`);
     button.setAttribute("tabindex", index === 0 ? "0" : "-1");
     if (index === 0) button.classList.add("is-active");
-    button.parentNode = document.body;
-    button.parentElement = document.body;
+    attachToBody(document, button);
     return button;
   });
 
@@ -295,8 +305,7 @@ function createAdminDom() {
     panel.setAttribute("data-admin-panel", tab);
     panel.setAttribute("role", "tabpanel");
     panel.hidden = index !== 0;
-    panel.parentNode = document.body;
-    panel.parentElement = document.body;
+    attachToBody(document, panel);
     return panel;
   });
 
@@ -304,12 +313,13 @@ function createAdminDom() {
   document.__queryMap.set("[data-admin-panel]", panels);
   document.__queryMap.set("[data-ledger-quick]", []);
 
-  return { document, tabs, panels };
+  return { document, tabs, panels, usersFilters };
 }
 
 function buildContext() {
-  const { document, tabs, panels } = createAdminDom();
+  const { document, tabs, panels, usersFilters } = createAdminDom();
   const fetchCalls = [];
+  const windowListeners = new Map();
   const fetch = async (url) => {
     fetchCalls.push(String(url || ""));
     const text = String(url || "");
@@ -333,6 +343,7 @@ function buildContext() {
   const windowObj = {
     document,
     fetch,
+    PointerEvent: function PointerEvent() {},
     KLog: { log() {} },
     I18N: { t() { return ""; } },
     SupabaseAuthBridge: { getAccessToken: async () => "token" },
@@ -340,18 +351,31 @@ function buildContext() {
     navigator: { clipboard: { writeText: async () => {} } },
     confirm() { return true; },
     prompt() { return "FORCE CLOSE"; },
+    addEventListener(type, handler) {
+      const list = windowListeners.get(type) || [];
+      list.push(handler);
+      windowListeners.set(type, list);
+    },
+    dispatchEvent(event) {
+      const nextEvent = event || {};
+      if (typeof nextEvent.preventDefault !== "function") nextEvent.preventDefault = function(){};
+      const list = windowListeners.get(nextEvent.type) || [];
+      list.forEach((handler) => handler(nextEvent));
+      return true;
+    },
   };
   const context = vm.createContext({
     window: windowObj,
     document,
     navigator: windowObj.navigator,
     fetch,
+    PointerEvent: windowObj.PointerEvent,
     setTimeout,
     clearTimeout,
     Math,
     Date,
   });
-  return { context, document, tabs, panels, fetchCalls };
+  return { context, document, tabs, panels, fetchCalls, usersFilters };
 }
 
 test("admin page tabs switch panels on click and keep ARIA state in sync", async () => {
@@ -386,4 +410,39 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.equal(tabs[3].getAttribute("aria-selected"), "true");
   assert.equal(panels[3].hidden, false);
   assert.equal(fetchCalls.includes("/.netlify/functions/admin-ops-summary"), true);
+});
+
+test("admin page mobile resume keeps custom actions working via touch activation", async () => {
+  const { context, document, tabs, fetchCalls, usersFilters } = buildContext();
+  vm.runInContext(source, context, { filename: "js/admin-page.js" });
+
+  await flush();
+  await flush();
+
+  usersFilters.elements[0].value = "created_at_desc";
+  document.dispatchEvent({ type: "xp:visible" });
+
+  document.getElementById("adminUsersReset").dispatchEvent({
+    type: "pointerup",
+    pointerType: "touch",
+    bubbles: true,
+    target: document.getElementById("adminUsersReset"),
+    preventDefault() {},
+  });
+  await flush();
+
+  assert.equal(usersFilters.elements[0].value, "last_activity_desc");
+  assert.equal(fetchCalls.filter((url) => url === "/.netlify/functions/admin-users-list?sort=last_activity_desc&page=1&limit=20").length >= 2, true);
+
+  tabs[1].dispatchEvent({
+    type: "pointerup",
+    pointerType: "touch",
+    bubbles: true,
+    target: tabs[1],
+    preventDefault() {},
+  });
+  await flush();
+
+  assert.equal(tabs[1].getAttribute("aria-selected"), "true");
+  assert.equal(fetchCalls.includes("/.netlify/functions/admin-tables-list?status=OPEN&sort=last_activity_desc&page=1&limit=20"), true);
 });

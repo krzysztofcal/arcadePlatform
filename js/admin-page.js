@@ -3,6 +3,7 @@
 
   var doc = document;
   var nodes = {};
+  var lifecycleWired = false;
   var state = {
     adminUserId: null,
     activeTab: "users",
@@ -37,6 +38,10 @@
       loaded: false,
     },
     draftIdempotencyKeys: {},
+    lastTouchActivation: {
+      control: null,
+      at: 0,
+    },
   };
 
   function klog(kind, data){
@@ -634,6 +639,184 @@
     focusTab(tabs[nextIndex]);
   }
 
+  function isTouchActivationEvent(event){
+    if (!event || !event.type) return false;
+    if (event.type === "touchend") return true;
+    return event.type === "pointerup" && event.pointerType !== "mouse";
+  }
+
+  function rememberTouchActivation(control){
+    state.lastTouchActivation.control = control || null;
+    state.lastTouchActivation.at = Date.now();
+  }
+
+  function shouldSkipSyntheticClick(control, event){
+    if (!control || !event || event.type !== "click") return false;
+    return state.lastTouchActivation.control === control && (Date.now() - state.lastTouchActivation.at) < 1200;
+  }
+
+  function resetUsersFilters(){
+    resetForm(nodes.usersFilters, { sort: "last_activity_desc" });
+    state.users.filters = { sort: "last_activity_desc" };
+    state.users.page = 1;
+    loadUsers();
+  }
+
+  function resetTablesFilters(){
+    resetForm(nodes.tablesFilters, { status: "OPEN", sort: "last_activity_desc" });
+    state.tables.filters = { status: "OPEN", sort: "last_activity_desc" };
+    state.tables.page = 1;
+    loadTables();
+  }
+
+  function resetLedgerFilters(){
+    resetForm(nodes.ledgerFilters, {});
+    state.ledger.filters = {};
+    state.ledger.page = 1;
+    state.ledger.contextLabel = "";
+    loadLedger();
+  }
+
+  function showRecentAdminLedger(){
+    state.ledger.filters = { adminOnly: "1" };
+    state.ledger.page = 1;
+    state.ledger.contextLabel = "Recent admin actions";
+    applyFiltersToForm(nodes.ledgerFilters, state.ledger.filters);
+    loadLedger();
+  }
+
+  function applyLedgerQuickFilter(button){
+    var txType = button && button.getAttribute ? (button.getAttribute("data-ledger-quick") || "") : "";
+    state.ledger.filters = { txType: txType };
+    state.ledger.page = 1;
+    state.ledger.contextLabel = "Quick filter: " + txType;
+    applyFiltersToForm(nodes.ledgerFilters, state.ledger.filters);
+    loadLedger();
+  }
+
+  function refreshAfterResume(){
+    selectNodes();
+    renderTabs();
+  }
+
+  function wireLifecycleEvents(){
+    if (lifecycleWired) return;
+    lifecycleWired = true;
+    doc.addEventListener("xp:visible", function(){
+      refreshAfterResume();
+    });
+  }
+
+  function findActivatableControl(target){
+    return closestEventTarget(target, "[data-admin-tab]")
+      || closestEventTarget(target, "#adminUsersRefresh")
+      || closestEventTarget(target, "#adminTablesRefresh")
+      || closestEventTarget(target, "#adminOpsRefresh")
+      || closestEventTarget(target, "#adminUsersReset")
+      || closestEventTarget(target, "#adminTablesReset")
+      || closestEventTarget(target, "#adminLedgerReset")
+      || closestEventTarget(target, "#adminLedgerRecentAdmin")
+      || closestEventTarget(target, "[data-ledger-quick]")
+      || closestEventTarget(target, "#adminOpsRunReconciler")
+      || closestEventTarget(target, "#adminOpsRunStaleSweep")
+      || closestEventTarget(target, "[data-page-scope]")
+      || closestEventTarget(target, "[data-user-action]")
+      || closestEventTarget(target, "[data-table-action]")
+      || closestEventTarget(target, "[data-adjust-amount]")
+      || closestEventTarget(target, "[data-copy-text]");
+  }
+
+  function activateControl(control){
+    if (!control) return false;
+    if (control.getAttribute("data-admin-tab")){
+      setActiveTab(control.getAttribute("data-admin-tab"));
+      return true;
+    }
+    if (control.id === "adminUsersRefresh"){
+      loadUsers();
+      return true;
+    }
+    if (control.id === "adminTablesRefresh"){
+      loadTables();
+      return true;
+    }
+    if (control.id === "adminOpsRefresh"){
+      loadOps();
+      return true;
+    }
+    if (control.id === "adminUsersReset"){
+      resetUsersFilters();
+      return true;
+    }
+    if (control.id === "adminTablesReset"){
+      resetTablesFilters();
+      return true;
+    }
+    if (control.id === "adminLedgerReset"){
+      resetLedgerFilters();
+      return true;
+    }
+    if (control.id === "adminLedgerRecentAdmin"){
+      showRecentAdminLedger();
+      return true;
+    }
+    if (control.getAttribute("data-ledger-quick") != null){
+      applyLedgerQuickFilter(control);
+      return true;
+    }
+    if (control.id === "adminOpsRunReconciler"){
+      runOpsAction("open_table_reconciler");
+      return true;
+    }
+    if (control.id === "adminOpsRunStaleSweep"){
+      runOpsAction("stale_seat_sweep");
+      return true;
+    }
+    if (control.getAttribute("data-page-scope")){
+      var scope = control.getAttribute("data-page-scope");
+      var page = Number(control.getAttribute("data-page"));
+      if (scope === "users") loadUsers(page);
+      if (scope === "tables") loadTables(page);
+      if (scope === "ledger") loadLedger(page);
+      return true;
+    }
+    if (control.getAttribute("data-user-action")){
+      handleUserAction(control.getAttribute("data-user-action"), control.getAttribute("data-user-id"));
+      return true;
+    }
+    if (control.getAttribute("data-table-action")){
+      handleTableAction(control.getAttribute("data-table-action"), control.getAttribute("data-table-id"));
+      return true;
+    }
+    if (control.getAttribute("data-adjust-amount")){
+      var input = doc.getElementById("adminAdjustAmount");
+      if (input){
+        input.value = control.getAttribute("data-adjust-amount") || "";
+        resetDraftIdempotencyKey("adjust-" + (state.users.detail && state.users.detail.user ? state.users.detail.user.userId : "current"));
+      }
+      return true;
+    }
+    if (control.getAttribute("data-copy-text")){
+      copyText(control.getAttribute("data-copy-text"));
+      return true;
+    }
+    return false;
+  }
+
+  function handleDocumentActivation(event){
+    var control = findActivatableControl(event && event.target ? event.target : event && event.currentTarget ? event.currentTarget : null);
+    if (!control) return;
+    if (isTouchActivationEvent(event)){
+      if (typeof event.preventDefault === "function"){
+        event.preventDefault();
+      }
+      rememberTouchActivation(control);
+    } else if (shouldSkipSyntheticClick(control, event)){
+      return;
+    }
+    activateControl(control);
+  }
+
   function renderTabs(){
     (nodes.tabs || []).forEach(function(button){
       var isActive = button.getAttribute("data-admin-tab") === state.activeTab;
@@ -1023,15 +1206,6 @@
     runTableAction(tableId, action);
   }
 
-  function handleTabClick(event){
-    if (event && typeof event.preventDefault === "function"){
-      event.preventDefault();
-    }
-    var tabButton = closestEventTarget(event && event.target ? event.target : event && event.currentTarget ? event.currentTarget : null, "[data-admin-tab]");
-    if (!tabButton) return;
-    setActiveTab(tabButton.getAttribute("data-admin-tab"));
-  }
-
   function handleTabKeydown(event){
     var tabButton = closestEventTarget(event && event.target ? event.target : null, "[data-admin-tab]");
     if (!tabButton) return;
@@ -1063,90 +1237,27 @@
   }
 
   function wireStaticEvents(){
-    (nodes.tabs || []).forEach(function(button){
-      button.addEventListener("click", handleTabClick);
-      button.addEventListener("keydown", handleTabKeydown);
-    });
-    if (nodes.usersFilters) nodes.usersFilters.addEventListener("submit", handleUsersSubmit);
-    if (nodes.tablesFilters) nodes.tablesFilters.addEventListener("submit", handleTablesSubmit);
-    if (nodes.ledgerFilters) nodes.ledgerFilters.addEventListener("submit", handleLedgerSubmit);
-    if (nodes.usersRefresh) nodes.usersRefresh.addEventListener("click", function(){ loadUsers(); });
-    if (nodes.tablesRefresh) nodes.tablesRefresh.addEventListener("click", function(){ loadTables(); });
-    if (nodes.opsRefresh) nodes.opsRefresh.addEventListener("click", function(){ loadOps(); });
-    if (nodes.usersReset) nodes.usersReset.addEventListener("click", function(){
-      resetForm(nodes.usersFilters, { sort: "last_activity_desc" });
-      state.users.filters = { sort: "last_activity_desc" };
-      state.users.page = 1;
-      loadUsers();
-    });
-    if (nodes.tablesReset) nodes.tablesReset.addEventListener("click", function(){
-      resetForm(nodes.tablesFilters, { status: "OPEN", sort: "last_activity_desc" });
-      state.tables.filters = { status: "OPEN", sort: "last_activity_desc" };
-      state.tables.page = 1;
-      loadTables();
-    });
-    if (nodes.ledgerReset) nodes.ledgerReset.addEventListener("click", function(){
-      resetForm(nodes.ledgerFilters, {});
-      state.ledger.filters = {};
-      state.ledger.page = 1;
-      state.ledger.contextLabel = "";
-      loadLedger();
-    });
-    if (nodes.ledgerRecentAdmin) nodes.ledgerRecentAdmin.addEventListener("click", function(){
-      state.ledger.filters = { adminOnly: "1" };
-      state.ledger.page = 1;
-      state.ledger.contextLabel = "Recent admin actions";
-      applyFiltersToForm(nodes.ledgerFilters, state.ledger.filters);
-      loadLedger();
-    });
-    (nodes.ledgerQuickButtons || []).forEach(function(button){
-      button.addEventListener("click", function(){
-        var txType = button.getAttribute("data-ledger-quick") || "";
-        state.ledger.filters = { txType: txType };
-        state.ledger.page = 1;
-        state.ledger.contextLabel = "Quick filter: " + txType;
-        applyFiltersToForm(nodes.ledgerFilters, state.ledger.filters);
-        loadLedger();
-      });
-    });
-    if (nodes.opsRunReconciler) nodes.opsRunReconciler.addEventListener("click", function(){ runOpsAction("open_table_reconciler"); });
-    if (nodes.opsRunStaleSweep) nodes.opsRunStaleSweep.addEventListener("click", function(){ runOpsAction("stale_seat_sweep"); });
-    doc.addEventListener("click", function(event){
-      var pageButton = closestEventTarget(event.target, "[data-page-scope]");
-      if (pageButton){
-        var scope = pageButton.getAttribute("data-page-scope");
-        var page = Number(pageButton.getAttribute("data-page"));
-        if (scope === "users") loadUsers(page);
-        if (scope === "tables") loadTables(page);
-        if (scope === "ledger") loadLedger(page);
-        return;
-      }
-      var userButton = closestEventTarget(event.target, "[data-user-action]");
-      if (userButton){
-        handleUserAction(userButton.getAttribute("data-user-action"), userButton.getAttribute("data-user-id"));
-        return;
-      }
-      var tableButton = closestEventTarget(event.target, "[data-table-action]");
-      if (tableButton){
-        handleTableAction(tableButton.getAttribute("data-table-action"), tableButton.getAttribute("data-table-id"));
-        return;
-      }
-      var adjustButton = closestEventTarget(event.target, "[data-adjust-amount]");
-      if (adjustButton){
-        var input = doc.getElementById("adminAdjustAmount");
-        if (input){
-          input.value = adjustButton.getAttribute("data-adjust-amount") || "";
-          resetDraftIdempotencyKey("adjust-" + (state.users.detail && state.users.detail.user ? state.users.detail.user.userId : "current"));
-        }
-        return;
-      }
-      var copyButton = closestEventTarget(event.target, "[data-copy-text]");
-      if (copyButton){
-        copyText(copyButton.getAttribute("data-copy-text"));
-      }
-    });
+    doc.addEventListener("keydown", handleTabKeydown);
+    doc.addEventListener("click", handleDocumentActivation);
+    if (window && typeof window.PointerEvent === "function"){
+      doc.addEventListener("pointerup", handleDocumentActivation);
+    } else {
+      doc.addEventListener("touchend", handleDocumentActivation);
+    }
     doc.addEventListener("submit", function(event){
       var form = event.target;
+      if (form && form.id === "adminUsersFilters"){
+        handleUsersSubmit(event);
+        return;
+      }
+      if (form && form.id === "adminTablesFilters"){
+        handleTablesSubmit(event);
+        return;
+      }
+      if (form && form.id === "adminLedgerFilters"){
+        handleLedgerSubmit(event);
+        return;
+      }
       if (form && form.id === "adminAdjustForm"){
         submitAdjustForm(event);
       }
@@ -1184,6 +1295,7 @@
     renderTabs();
     applyFiltersToForm(nodes.usersFilters, state.users.filters);
     applyFiltersToForm(nodes.tablesFilters, state.tables.filters);
+    wireLifecycleEvents();
     wireStaticEvents();
     wireAuthChanges();
     checkAccess();
