@@ -4526,6 +4526,113 @@ export function createInactiveCleanupExecutor({ env }) {
   }
 });
 
+test("disconnect cleanup already_closed evicts stale lobby table", async () => {
+  const secret = "disconnect-cleanup-already-closed";
+  const tableId = "table_disconnect_already_closed";
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "active" },
+        seatRows: [{ user_id: "seat_user_already_closed", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 400 }],
+        stateRow: {
+          version: 8,
+          state: {
+            handId: "h8",
+            phase: "TURN",
+            turnUserId: "seat_user_already_closed",
+            stacks: { seat_user_already_closed: 400 }
+          }
+        }
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const cleanupModule = await writeTestModule(`
+import fs from "node:fs/promises";
+export function createInactiveCleanupExecutor({ env }) {
+  return async ({ tableId, userId }) => {
+    const raw = await fs.readFile(env.WS_PERSISTED_STATE_FILE, "utf8");
+    const doc = JSON.parse(raw || "{}");
+    const table = doc?.tables?.[tableId];
+    if (!table) return { ok: true, changed: false, status: "already_closed", retryable: false };
+    table.tableRow = { ...(table.tableRow || {}), status: "CLOSED" };
+    table.seatRows = (Array.isArray(table.seatRows) ? table.seatRows : []).map((row) =>
+      row?.user_id === userId ? { ...row, status: "INACTIVE", stack: 0 } : row
+    );
+    const state = table?.stateRow?.state && typeof table.stateRow.state === "object" ? table.stateRow.state : {};
+    const nextStacks = { ...(state.stacks || {}) };
+    delete nextStacks[userId];
+    table.stateRow = {
+      ...(table.stateRow || { version: 0 }),
+      state: {
+        ...state,
+        phase: "HAND_DONE",
+        handId: "",
+        turnUserId: null,
+        turnStartedAt: null,
+        turnDeadlineAt: null,
+        stacks: nextStacks,
+        leftTableByUserId: {
+          ...(state.leftTableByUserId || {}),
+          [userId]: true
+        }
+      }
+    };
+    await fs.writeFile(env.WS_PERSISTED_STATE_FILE, JSON.stringify(doc) + "\\n", "utf8");
+    return { ok: true, changed: false, status: "already_closed", retryable: false };
+  };
+}
+`, "inactive-cleanup-test-adapter-already-closed.mjs");
+
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_SEATED_RECONNECT_GRACE_MS: "0",
+      WS_DISCONNECT_CLEANUP_SWEEP_MS: "25",
+      WS_TIMEOUT_SWEEP_MS: "20",
+      WS_INACTIVE_CLEANUP_ADAPTER_MODULE_PATH: `file://${cleanupModule.filePath}`
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const seated = await connectClient(port);
+    const lobby = await connectClient(port);
+    await hello(seated);
+    await hello(lobby);
+    await auth(seated, makeHs256Jwt({ secret, sub: "seat_user_already_closed" }), "auth-seat-already-closed");
+    await auth(lobby, makeHs256Jwt({ secret, sub: "lobby_user_already_closed" }), "auth-lobby-already-closed");
+
+    sendFrame(seated, { version: "1.0", type: "table_join", requestId: "join-already-closed-seat", ts: "2026-03-01T00:10:01Z", payload: { tableId } });
+    await nextMessageOfType(seated, "commandResult");
+    await nextMessageOfType(seated, "table_state");
+
+    sendFrame(lobby, { version: "1.0", type: "lobby_subscribe", requestId: "lobby-already-closed", ts: "2026-03-01T00:10:02Z", payload: {} });
+    const initialLobbySnapshot = await nextMessageOfType(lobby, "lobby_snapshot");
+    assert.equal(initialLobbySnapshot.payload.tables.some((table) => table?.tableId === tableId), true);
+
+    seated.close();
+    const removedSnapshot = await nextMessageMatching(
+      lobby,
+      (frame) => frame?.type === "lobby_snapshot"
+        && Array.isArray(frame?.payload?.tables)
+        && !frame.payload.tables.some((table) => table?.tableId === tableId),
+      5000
+    );
+    assert.equal(removedSnapshot.payload.tables.some((table) => table?.tableId === tableId), false);
+
+    const persisted = await readPersistedFile(filePath);
+    assert.equal(persisted.tables[tableId].tableRow.status, "CLOSED");
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(cleanupModule.dir, { recursive: true, force: true });
+  }
+});
+
 test("disconnect cleanup turn_protected path keeps semantics unchanged", async () => {
   const secret = "disconnect-cleanup-protected";
   const tableId = "table_disconnect_turn_protected";
