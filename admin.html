@@ -137,14 +137,17 @@
         </section>
 
         <section id="adminApp" hidden>
-          <div class="admin-tabs" role="tablist" aria-label="Admin panel sections">
-            <button class="admin-tab is-active" type="button" role="tab" data-admin-tab="users" aria-selected="true">Users</button>
-            <button class="admin-tab" type="button" role="tab" data-admin-tab="tables" aria-selected="false">Tables</button>
-            <button class="admin-tab" type="button" role="tab" data-admin-tab="ledger" aria-selected="false">Ledger</button>
-            <button class="admin-tab" type="button" role="tab" data-admin-tab="ops" aria-selected="false">Ops</button>
-          </div>
+          <section class="xp-card admin-tabbar" aria-labelledby="adminTabBarTitle">
+            <h2 class="visually-hidden" id="adminTabBarTitle">Admin sections</h2>
+            <div class="admin-tabs" role="tablist" aria-label="Admin panel sections">
+              <button class="admin-tab is-active" id="adminTabButtonUsers" type="button" role="tab" data-admin-tab="users" aria-selected="true" aria-controls="adminTabUsers" tabindex="0">Users</button>
+              <button class="admin-tab" id="adminTabButtonTables" type="button" role="tab" data-admin-tab="tables" aria-selected="false" aria-controls="adminTabTables" tabindex="-1">Tables</button>
+              <button class="admin-tab" id="adminTabButtonLedger" type="button" role="tab" data-admin-tab="ledger" aria-selected="false" aria-controls="adminTabLedger" tabindex="-1">Ledger</button>
+              <button class="admin-tab" id="adminTabButtonOps" type="button" role="tab" data-admin-tab="ops" aria-selected="false" aria-controls="adminTabOps" tabindex="-1">Ops</button>
+            </div>
+          </section>
 
-          <section class="admin-tab-panel" id="adminTabUsers" data-admin-panel="users" role="tabpanel">
+          <section class="admin-tab-panel" id="adminTabUsers" data-admin-panel="users" role="tabpanel" aria-labelledby="adminTabButtonUsers">
             <div class="admin-workspace">
               <section class="xp-card admin-card admin-card--main" aria-labelledby="adminUsersTitle">
                 <div class="admin-card__head">
@@ -246,7 +249,7 @@
             </div>
           </section>
 
-          <section class="admin-tab-panel" id="adminTabTables" data-admin-panel="tables" role="tabpanel" hidden>
+          <section class="admin-tab-panel" id="adminTabTables" data-admin-panel="tables" role="tabpanel" aria-labelledby="adminTabButtonTables" hidden>
             <div class="admin-workspace">
               <section class="xp-card admin-card admin-card--main" aria-labelledby="adminTablesTitle">
                 <div class="admin-card__head">
@@ -350,7 +353,7 @@
             </div>
           </section>
 
-          <section class="admin-tab-panel" id="adminTabLedger" data-admin-panel="ledger" role="tabpanel" hidden>
+          <section class="admin-tab-panel" id="adminTabLedger" data-admin-panel="ledger" role="tabpanel" aria-labelledby="adminTabButtonLedger" hidden>
             <div class="admin-workspace">
               <section class="xp-card admin-card admin-card--main" aria-labelledby="adminLedgerTitle">
                 <div class="admin-card__head">
@@ -436,7 +439,7 @@
             </div>
           </section>
 
-          <section class="admin-tab-panel" id="adminTabOps" data-admin-panel="ops" role="tabpanel" hidden>
+          <section class="admin-tab-panel" id="adminTabOps" data-admin-panel="ops" role="tabpanel" aria-labelledby="adminTabButtonOps" hidden>
             <div class="admin-ops-grid">
               <section class="xp-card admin-card" aria-labelledby="adminOpsSummaryTitle">
                 <div class="admin-card__head">
