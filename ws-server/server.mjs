@@ -1150,15 +1150,24 @@ function clearSnapshotCacheForTable(tableId) {
 }
 
 function shouldEvictClosedRuntimeTable(tableId, result) {
-  if (result?.changed !== true) {
-    return false;
-  }
   const status = typeof result?.status === "string" ? result.status : null;
   const isClosedResult = result?.closed === true || status === "cleaned_closed" || status === "already_closed";
   if (!isClosedResult) {
     return false;
   }
   return tableManager.hasConnectedHumanPresence(tableId) !== true;
+}
+
+function shouldSyncCleanupRuntimeState(tableId, result) {
+  if (result?.changed === true) {
+    return true;
+  }
+  const status = typeof result?.status === "string" ? result.status : null;
+  const isClosedResult = result?.closed === true || status === "cleaned_closed" || status === "already_closed";
+  if (!isClosedResult) {
+    return false;
+  }
+  return tableManager.isTableClosed(tableId) !== true || activeLobbyTablesById.has(tableId);
 }
 
 function evictClosedRuntimeTable({ tableId, logPrefix, status = null }) {
@@ -1181,7 +1190,7 @@ function evictClosedRuntimeTable({ tableId, logPrefix, status = null }) {
 }
 
 async function syncCleanupRuntimeState({ tableId, result, logPrefix, onRestore = null }) {
-  if (result?.changed !== true) {
+  if (!shouldSyncCleanupRuntimeState(tableId, result)) {
     return { ok: true, changed: false, evicted: false, restored: false };
   }
   if (shouldEvictClosedRuntimeTable(tableId, result)) {
@@ -1217,7 +1226,7 @@ async function applyInactiveCleanupAndBroadcast({ tableId, requestId, logPrefix 
     }
     return result;
   }
-  if (result?.changed === true) {
+  if (shouldSyncCleanupRuntimeState(tableId, result)) {
     await syncCleanupRuntimeState({ tableId, result, logPrefix });
   }
   return result;
@@ -1255,7 +1264,7 @@ async function executeUserInactiveCleanupPrimitive({
       if (result?.protected === true || result?.deferred === true) {
         return result;
       }
-      if (result?.changed === true) {
+      if (shouldSyncCleanupRuntimeState(tableId, result)) {
         await syncCleanupRuntimeState({
           tableId,
           result,
@@ -1637,7 +1646,7 @@ async function quarantineTurnTimeoutTable({ tableId, reason, nowMs }) {
       userId: null,
       requestId: `ws-timeout-quarantine:${tableId}:${nowMs}`
     });
-    if (cleanupResult?.ok === true && cleanupResult?.changed === true) {
+    if (cleanupResult?.ok === true && shouldSyncCleanupRuntimeState(tableId, cleanupResult)) {
       const synced = await syncCleanupRuntimeState({
         tableId,
         result: cleanupResult,
