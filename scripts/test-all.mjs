@@ -89,6 +89,7 @@ run("node", ["tests/admin-ledger-list.behavior.test.mjs"], "admin-ledger-list-be
 run("node", ["tests/admin-table-actions.behavior.test.mjs"], "admin-table-actions-behavior");
 run("node", ["tests/admin-ops-summary.behavior.test.mjs"], "admin-ops-summary-behavior");
 run("node", ["tests/admin-page.contract.test.mjs"], "admin-page-contract");
+run("node", ["tests/admin-page.behavior.test.mjs"], "admin-page-behavior");
 run("node", ["tests/admin-user-search.behavior.test.mjs"], "admin-user-search-behavior");
 run("node", ["tests/sidebar-admin-visibility.behavior.test.mjs"], "sidebar-admin-visibility-behavior");
 run("node", ["tests/i18n.behavior.test.mjs"], "i18n-behavior");
