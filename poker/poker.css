@@ -1,5 +1,16 @@
 .poker-page{max-width:900px; margin:0 auto; padding:20px;}
 
+.poker-ad-slot{
+  margin:0 0 16px;
+  padding:12px;
+  border:1px solid rgba(32,42,85,.9);
+  border-radius:14px;
+  background:rgba(10,15,30,.72);
+}
+
+.poker-ad-slot--secondary{
+  margin-top:20px;
+}
 .poker-header{display:flex; align-items:center; gap:16px; margin-bottom:20px;}
 
 .poker-header h2{margin:0; font:700 22px Poppins, sans-serif; color:#e8eeff;}
