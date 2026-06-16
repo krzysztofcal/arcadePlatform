@@ -14,6 +14,8 @@ const landingConsentManagerJs = await readFile(path.join(root, 'landing', 'js', 
 const landingConsentServicesJs = await readFile(path.join(root, 'landing', 'js', 'consent-services.js'), 'utf8');
 const landingKlaroConfigJs = await readFile(path.join(root, 'landing', 'js', 'klaro-config.js'), 'utf8');
 const landingAdsenseInitJs = await readFile(path.join(root, 'landing', 'js', 'adsense-init.js'), 'utf8');
+const landingIndexHtml = await readFile(path.join(root, 'landing', 'index.html'), 'utf8');
+const landingGameJs = await readFile(path.join(root, 'landing', 'js', 'landing-game.js'), 'utf8');
 const netlifyToml = await readFile(path.join(root, 'netlify.toml'), 'utf8');
 assert.match(indexHtml, /src="\/js\/build-info\.js" defer/, 'poker index should include build-info bootstrap script');
 assert.equal(indexHtml.indexOf('/js/build-info.js') < indexHtml.indexOf('/poker/poker-ws-client.js'), true, 'poker index should load build-info before ws client');
@@ -42,5 +44,8 @@ assert.equal(landingConsentManagerJs, consentManagerJs, 'landing deploy should p
 assert.equal(landingConsentServicesJs, consentServicesJs, 'landing deploy should publish the shared consent services helper at /js/consent-services.js');
 assert.equal(landingKlaroConfigJs, klaroConfigJs, 'landing deploy should publish the shared Klaro config at /js/klaro-config.js');
 assert.equal(landingAdsenseInitJs, adsenseInitJs, 'landing deploy should publish the AdSense init helper at /js/adsense-init.js');
+assert.match(landingIndexHtml, /data-landing-game/, 'landing page should render the mini game surface');
+assert.match(landingIndexHtml, /\.\/js\/landing-game\.js/, 'landing page should load the mini game controller');
+assert.match(landingGameJs, /landingPixelBest/, 'landing mini game should persist the best score locally');
 assert.ok(netlifyToml.includes('Content-Security-Policy = "'), 'Netlify deploys should emit a CSP header');
 assert.doesNotMatch(netlifyToml, /cookiebot/i, 'Netlify CSP should not require Cookiebot hosts after the Klaro migration');

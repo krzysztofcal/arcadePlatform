@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>KCSWH — Arcade Hub</title>
+  <title>KCSWH - Arcade Hub</title>
 
   <!-- AdSense account association tag for kcswh.pl -->
   <meta name="google-adsense-account" content="ca-pub-4054734235779751">
@@ -19,31 +19,49 @@
   <link rel="stylesheet" href="./css/landing.css">
   <link rel="stylesheet" href="../css/xp-badge.css">
 
-
-<script src="../js/adsense-init.js" defer></script>
+  <script src="../js/adsense-init.js" defer></script>
   <link rel="stylesheet" href="../js/vendor/klaro/klaro.css">
   <script src="../js/klaro-config.js" defer></script>
   <script src="../js/vendor/klaro/klaro.js" defer></script>
   <script src="../js/consent-services.js" defer></script>
 </head>
-<body>
+<body class="landing-home">
   <header class="header" role="banner">
-    <a href="../index.html" class="brand" aria-label="Arcade Hub home">
+    <a href="https://play.kcswh.pl/" class="brand" aria-label="Arcade Hub home">
       <span class="brand-badge" aria-hidden="true"></span>
       <span>Arcade Hub</span>
     </a>
-    <nav class="nav" aria-label="Primary">
-      <a href="./about.html">About</a>
-      <a class="manage-cookies" href="#manageCookies">Manage cookies</a>
-    </nav>
     <div class="header-actions">
       <a id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true" href="../xp.html">
-        <span class="xp-badge__label">Syncing XP…</span>
+        <span class="xp-badge__label">XP</span>
       </a>
     </div>
   </header>
 
-  <main class="main">
+  <main class="landing-main">
+    <section class="play-hero" aria-labelledby="landingGameTitle">
+      <div class="hero-copy">
+        <p class="eyebrow">One tap arcade warmup</p>
+        <h1 id="landingGameTitle">Catch the Pixel</h1>
+        <p class="hero-subtitle">A tiny browser game before the real arcade opens.</p>
+      </div>
+
+      <div class="mini-game" data-landing-game>
+        <div class="game-hud" aria-live="polite">
+          <span>Score <strong data-score>0</strong></span>
+          <span>Combo <strong data-streak>0</strong></span>
+          <span>Best <strong data-best>0</strong></span>
+        </div>
+        <button class="pixel-target" type="button" data-target aria-label="Catch the pixel"></button>
+        <div class="game-pulse" aria-hidden="true"></div>
+      </div>
+
+      <div class="hero-actions">
+        <a class="play-button" href="https://play.kcswh.pl/">Play more on Arcade Hub</a>
+        <p>Fast HTML5 games, XP sync, and poker with virtual chips.</p>
+      </div>
+    </section>
+
     <section class="ad-slot" aria-label="Advertisement">
       <ins class="adsbygoogle"
            style="display:block"
@@ -51,32 +69,6 @@
            data-ad-slot="6777117794"
            data-ad-format="auto"
            data-full-width-responsive="true"></ins>
-    </section>
-
-    <section class="tile about-card" aria-labelledby="landingIntroTitle">
-      <div class="eyebrow">Independent browser gaming project</div>
-      <h1 id="landingIntroTitle">Arcade Hub by KCSWH</h1>
-      <p>Arcade Hub is a web-based gaming project operated by KCSWH. The platform combines quick-play browser games, player profiles, cloud-synced XP, and experimental multiplayer features such as poker with virtual chips.</p>
-      <p>The goal of the site is to provide lightweight entertainment that works directly in the browser without installs. We maintain the platform, publish policy information, and handle user questions through the contact address listed below.</p>
-    </section>
-
-    <section class="grid" aria-label="Navigation">
-      <a class="tile" href="https://play.kcswh.pl/">
-        <div class="title">Play</div>
-        <div class="desc">Open the main Arcade Hub portal with browser games, accounts, XP, and poker.</div>
-      </a>
-      <a class="tile" href="./about.html">
-        <div class="title">About</div>
-        <div class="desc">Read who runs the project, what the platform offers, and how to get in touch.</div>
-      </a>
-      <a class="tile" href="mailto:contact@kcswh.pl">
-        <div class="title">Contact</div>
-        <div class="desc">Send questions, partnership ideas, support issues, or policy requests to KCSWH.</div>
-      </a>
-      <a class="tile" href="./legal/privacy.en.html">
-        <div class="title">Privacy</div>
-        <div class="desc">Review how cookies, analytics, account data, and gameplay-related information are handled.</div>
-      </a>
     </section>
   </main>
 
@@ -86,6 +78,7 @@
       <a class="manage-cookies" id="manageCookies" href="#">Manage cookies</a>
       <a href="./legal/privacy.en.html">Privacy</a>
       <a href="./about.html#terms">Arcade Terms</a>
+      <a href="mailto:contact@kcswh.pl">Contact</a>
     </div>
     <div>© <span id="year"></span> KCSWH</div>
   </footer>
@@ -93,6 +86,7 @@
   <script>
     document.getElementById('year').textContent = new Date().getFullYear();
   </script>
+  <script src="./js/landing-game.js" defer></script>
   <script src="../js/consent-manager.js" defer></script>
 </body>
 </html>
