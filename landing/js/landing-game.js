@@ -23,15 +23,22 @@
   resetPixel(pixel, true);
   requestAnimationFrame(tick);
 
-  target.addEventListener('click', function(event){
-    event.stopPropagation();
-    hitPixel(pixel);
-  });
-
   game.addEventListener('pointerdown', function(event){
-    if (event.target && event.target.classList && event.target.classList.contains('pixel-target')) return;
-    streak = 0;
-    streakEl.textContent = '0';
+    var point = getLocalPoint(event);
+    ripple(point.x, point.y);
+
+    var activePixel = findHitPixel(point.x, point.y);
+    if (activePixel) {
+      event.preventDefault();
+      hitPixel(activePixel);
+      if (!activePixel.primary) activePixel.expiresAt = 0;
+      return;
+    }
+
+    if (!isInteractiveChild(event.target)) {
+      streak = 0;
+      streakEl.textContent = '0';
+    }
   });
 
   window.addEventListener('resize', function(){
@@ -85,6 +92,22 @@
     redirectPixel(activePixel);
   }
 
+  function findHitPixel(x, y){
+    var candidates = [pixel].concat(clones);
+    for (var i = 0; i < candidates.length; i += 1) {
+      if (isInsidePixel(candidates[i], x, y)) return candidates[i];
+    }
+    return null;
+  }
+
+  function isInsidePixel(item, x, y){
+    var dx = x - item.x;
+    var dy = y - item.y;
+    var tolerance = Math.max(34, item.size * 0.8);
+    if (item.el.classList.contains('is-small')) tolerance = Math.max(28, tolerance * 0.72);
+    return Math.sqrt(dx * dx + dy * dy) <= tolerance;
+  }
+
   function runRandomEvent(now){
     if (Math.random() > 0.48) {
       shrinkPixel();
@@ -113,13 +136,6 @@
       var clone = createPixelState(cloneEl, false);
       clone.expiresAt = now + randomBetween(1800, 2600);
       resetPixel(clone, false);
-      cloneEl.addEventListener('click', function(event){
-        event.stopPropagation();
-        var activeClone = clones.find(function(item){ return item.el === event.currentTarget; });
-        if (!activeClone) return;
-        hitPixel(activeClone);
-        activeClone.expiresAt = 0;
-      });
       clones.push(clone);
     }
   }
@@ -207,6 +223,27 @@
     node.style.setProperty('--burst-top', y + 'px');
     game.appendChild(node);
     window.setTimeout(function(){ node.remove(); }, 560);
+  }
+
+  function ripple(x, y){
+    var node = document.createElement('span');
+    node.className = 'tap-ring';
+    node.style.setProperty('--tap-left', x + 'px');
+    node.style.setProperty('--tap-top', y + 'px');
+    game.appendChild(node);
+    window.setTimeout(function(){ node.remove(); }, 660);
+  }
+
+  function getLocalPoint(event){
+    var bounds = game.getBoundingClientRect();
+    return {
+      x: event.clientX - bounds.left,
+      y: event.clientY - bounds.top,
+    };
+  }
+
+  function isInteractiveChild(node){
+    return !!(node && node.closest && node.closest('a, button'));
   }
 
   function randomBetween(min, max){

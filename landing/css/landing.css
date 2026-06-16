@@ -300,6 +300,20 @@ h1 {
   animation: pixel-burst 520ms ease-out forwards;
 }
 
+.tap-ring {
+  position: absolute;
+  z-index: 1;
+  left: var(--tap-left, 50%);
+  top: var(--tap-top, 50%);
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(110, 231, 231, 0.74);
+  border-radius: 999px;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  animation: tap-ring 620ms ease-out forwards;
+}
+
 .play-button {
   display: inline-flex;
   align-items: center;
@@ -465,6 +479,17 @@ h1 {
   100% {
     opacity: 0;
     transform: translate(-50%, -50%) scale(1.9) rotate(28deg);
+  }
+}
+
+@keyframes tap-ring {
+  0% {
+    opacity: 0.9;
+    transform: translate(-50%, -50%) scale(0.55);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(4.4);
   }
 }
 
