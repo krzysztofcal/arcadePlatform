@@ -15,3 +15,10 @@
   # Feature policy / Permissions policy
   Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=()
 
+# Freedoom game - scoped CSP for Dwasm/Freedoom
+/games-open/freedoom/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.googletagmanager.com https://github.com https://cdn.jsdelivr.net https://pagead2.googlesyndication.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://github.com https://www.googletagmanager.com https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net; connect-src 'self' https://*.netlify.app https://www.google-analytics.com https://*.supabase.co https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net wss://*.supabase.co wss://ws.kcswh.pl wss://ws-preview.kcswh.pl; worker-src 'self' blob:; frame-src 'self' https://app.netlify.app https://app.netlify.com https://googleads.g.doubleclick.net https://tpc.googlesyndication.com https://pagead2.googlesyndication.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=()
