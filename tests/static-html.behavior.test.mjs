@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { statSync } from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
@@ -16,6 +17,9 @@ const landingKlaroConfigJs = await readFile(path.join(root, 'landing', 'js', 'kl
 const landingAdsenseInitJs = await readFile(path.join(root, 'landing', 'js', 'adsense-init.js'), 'utf8');
 const landingIndexHtml = await readFile(path.join(root, 'landing', 'index.html'), 'utf8');
 const landingGameJs = await readFile(path.join(root, 'landing', 'js', 'landing-game.js'), 'utf8');
+const freedoomHtml = await readFile(path.join(root, 'games-open', 'freedoom', 'index.html'), 'utf8');
+const freedoomJs = await readFile(path.join(root, 'games-open', 'freedoom', 'script.js'), 'utf8');
+const headersFile = await readFile(path.join(root, '_headers'), 'utf8');
 const netlifyToml = await readFile(path.join(root, 'netlify.toml'), 'utf8');
 assert.match(indexHtml, /src="\/js\/build-info\.js" defer/, 'poker index should include build-info bootstrap script');
 assert.equal(indexHtml.indexOf('/js/build-info.js') < indexHtml.indexOf('/poker/poker-ws-client.js'), true, 'poker index should load build-info before ws client');
@@ -47,5 +51,18 @@ assert.equal(landingAdsenseInitJs, adsenseInitJs, 'landing deploy should publish
 assert.match(landingIndexHtml, /data-landing-game/, 'landing page should render the mini game surface');
 assert.match(landingIndexHtml, /\.\/js\/landing-game\.js/, 'landing page should load the mini game controller');
 assert.match(landingGameJs, /landingPixelBest/, 'landing mini game should persist the best score locally');
+assert.match(freedoomHtml, /id="doomCanvas"/, 'Freedoom should render the Dwasm canvas target');
+assert.match(freedoomHtml, /js\/vendor\/klaro\/klaro\.js/, 'Freedoom should use the shared Klaro consent runtime');
+assert.doesNotMatch(freedoomHtml, /Cookiebot|cookiebot-manager|js-dos|v8\.js-dos\.com/, 'Freedoom should not depend on Cookiebot or js-dos assets');
+assert.match(freedoomJs, /freedoom2\.bin/, 'Freedoom should download the Freedoom Phase 2 archive');
+assert.match(freedoomJs, /assets\/freedoom2\.bin/, 'Freedoom should load the local Freedoom archive');
+assert.match(freedoomJs, /freedoom2\.wad/, 'Freedoom should boot the Freedoom WAD');
+assert.match(freedoomJs, /vendor\/dwasm\/index\.js/, 'Freedoom should use the vendored Dwasm runtime');
+assert.doesNotMatch(freedoomJs, /digger\.jsdos|v8\.js-dos\.com|cdn\.dos\.zone/, 'Freedoom should not boot the old Digger/js-dos placeholder');
+assert.ok(statSync(path.join(root, 'games-open', 'freedoom', 'assets', 'freedoom2.bin')).size > 7_000_000, 'Freedoom should publish the local Freedoom archive');
+assert.match(headersFile, /\/games-open\/freedoom\/\*/, 'Freedoom should have a scoped CSP in _headers');
+assert.doesNotMatch(headersFile, /dwasm\.m-h\.org\.uk/, 'Freedoom CSP should not rely on a remote WAD mirror');
+assert.match(netlifyToml, /for = "\/games-open\/freedoom\/\*"/, 'Netlify should emit a scoped Freedoom CSP');
+assert.doesNotMatch(netlifyToml, /dwasm\.m-h\.org\.uk/, 'Netlify Freedoom CSP should not rely on a remote WAD mirror');
 assert.ok(netlifyToml.includes('Content-Security-Policy = "'), 'Netlify deploys should emit a CSP header');
 assert.doesNotMatch(netlifyToml, /cookiebot/i, 'Netlify CSP should not require Cookiebot hosts after the Klaro migration');

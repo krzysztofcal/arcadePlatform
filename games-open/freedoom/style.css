@@ -2,14 +2,9 @@
 
 .freedoom-frame { position: relative; width: 100%; max-width: 800px; aspect-ratio: 4 / 3; margin: 0 auto; background: #000; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); }
 
-.dos-player { width: 100%; height: 100%; background: #000; }
+.doom-canvas { display: none; width: 100%; height: 100%; background: #000; border: 0; outline: none; object-fit: contain; image-rendering: pixelated; image-rendering: crisp-edges; }
 
-.dos-player canvas { width: 100% !important; height: 100% !important; object-fit: contain; image-rendering: pixelated; image-rendering: crisp-edges; }
-
-.jsdos-player-layers .jsdos-player-sidebar,
-.jsdos-player-layers .jsdos-player-panel,
-.jsdos-player-layers .jsdos-player-fullscreen-btn,
-.jsdos-player-layers .jsdos-player-footer { display: none !important; }
+.doom-output { position: absolute; inset: 0; width: 100%; height: 100%; padding: 14px; color: #cbd5e1; background: #020617; border: 0; resize: none; outline: none; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; opacity: 0; pointer-events: none; }
 
 .loading-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(11, 16, 32, 0.95); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; gap: 16px; }
 

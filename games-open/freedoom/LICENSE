@@ -35,10 +35,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ---
 
-js-dos License (GPL-2.0)
-========================
+Dwasm / PrBoomX License (GPL-2.0+)
+==================================
 
-This game uses js-dos for running DOS games in the browser.
+This game uses Dwasm, a WebAssembly port of the Doom engine based on
+PrBoom+ and PrBoomX, for running Freedoom in the browser.
 
 GNU GENERAL PUBLIC LICENSE
 Version 2, June 1991
@@ -68,5 +69,5 @@ MA 02110-1301, USA.
 
 Project Links:
 - Freedoom: https://freedoom.github.io
-- js-dos: https://js-dos.com
-- js-dos GitHub: https://github.com/caiiiycuk/js-dos
+- Dwasm: https://github.com/GMH-Code/Dwasm
+- PrBoomX: https://github.com/atsb/doom
