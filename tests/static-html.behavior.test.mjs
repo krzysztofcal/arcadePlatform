@@ -28,6 +28,6 @@ assert.match(tableV2Css, /\.poker-seat--hero\.poker-seat--active \.poker-seat-av
 assert.match(tableV2Html, /id="pokerBootSplash"/, 'poker table v2 should render a boot splash to avoid raw HTML flash');
 assert.match(tableV2Html, /id="pokerV2AmountValue"/, 'poker table v2 should render a compact amount value for the action slider');
 assert.match(cookiebotManagerJs, /#manageCookies, .manage-cookies/, 'cookie manager should delegate clicks from all manage cookies links');
-assert.equal(cookiebotManagerJs.indexOf('window.Cookiebot.renew()') < cookiebotManagerJs.indexOf('window.Cookiebot.show()'), true, 'manage cookies should reopen Cookiebot preferences before falling back to the initial banner');
+assert.match(cookiebotManagerJs, /window\.Cookiebot\.renew\(\);[\s\S]*setTimeout[\s\S]*showCookiebot\(\)/, 'manage cookies should reopen Cookiebot preferences before falling back to the initial banner');
 assert.equal(landingCookiebotManagerJs, cookiebotManagerJs, 'landing deploy should publish the shared Cookiebot manager at /js/cookiebot-manager.js');
 assert.equal(landingAdsenseInitJs, adsenseInitJs, 'landing deploy should publish the AdSense init helper at /js/adsense-init.js');
