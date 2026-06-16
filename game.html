@@ -23,21 +23,8 @@
   <link rel="stylesheet" href="css/game.css">
   <link rel="stylesheet" href="/css/xp-overlay.css">
   <link rel="stylesheet" href="/css/search-popup.css">
-  <script id="Cookiebot"
-          src="https://consent.cookiebot.com/uc.js"
-          data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
-          data-blockingmode="auto"
-          type="text/javascript">
-  </script>
-  <script type="text/plain" data-cookieconsent="statistics"
-          src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
-  <script type="text/plain" data-cookieconsent="statistics">
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){ dataLayer.push(arguments); }
-    gtag('js', new Date());
-    gtag('config', 'G-JRP62LCXYK');
-  </script>
-  <script src="js/analytics.js" defer></script>
+
+<script src="js/analytics.js" defer></script>
   <script src="js/i18n.js" defer></script>
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
@@ -45,6 +32,10 @@
   <script src="js/chips/client.js" defer></script>
   <script src="js/core/number-format.js" defer></script>
   <script src="js/topbar.js" defer></script>
+  <link rel="stylesheet" href="js/vendor/klaro/klaro.css">
+  <script src="js/klaro-config.js" defer></script>
+  <script src="js/vendor/klaro/klaro.js" defer></script>
+  <script src="js/consent-services.js" defer></script>
 </head>
 <body data-game-host>
   <div class="topbar">
@@ -213,8 +204,7 @@
   <script src="js/search-popup.js" defer></script>
   <script src="js/search-popup-bootstrap.js" defer></script>
   <script src="js/frame.js" defer></script>
-  <script src="js/cookiebot-manager.js" defer></script>
-  <script src="/js/debug.js" defer></script>
+<script src="/js/debug.js" defer></script>
   <script>window.__GAME_ID__ = 'game-shell';</script>
   <script src="/js/xp/combo.js" defer></script>
   <script src="/js/xp/scoring.js" defer></script>
@@ -243,5 +233,6 @@
       }
     }
   </script>
+  <script src="js/consent-manager.js" defer></script>
 </body>
 </html>

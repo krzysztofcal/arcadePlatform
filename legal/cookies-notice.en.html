@@ -10,22 +10,8 @@
   <link rel="stylesheet" href="../css/portal.css">
   <link rel="stylesheet" href="../css/xp-badge.css">
   <link rel="stylesheet" href="/css/xp-overlay.css">
-  <script id="Cookiebot"
-          src="https://consent.cookiebot.com/uc.js"
-          data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
-          data-blockingmode="auto"
-          type="text/javascript">
-  </script>
-  <!-- GA4 (blocked until Statistics consent) -->
-  <script type="text/plain" data-cookieconsent="statistics"
-          src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
-  <script type="text/plain" data-cookieconsent="statistics">
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){ dataLayer.push(arguments); }
-    gtag('js', new Date());
-    gtag('config', 'G-JRP62LCXYK');
-  </script>
-  <script src="../js/analytics.js" defer></script>
+
+<script src="../js/analytics.js" defer></script>
   <script src="../js/i18n.js" defer></script>
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
@@ -43,6 +29,10 @@
   <script src="../js/xp/scoring.js" defer></script>
   <script src="../js/xp/core.js" defer></script>
   <script src="../js/xp.js" defer></script>
+  <link rel="stylesheet" href="../js/vendor/klaro/klaro.css">
+  <script src="../js/klaro-config.js" defer></script>
+  <script src="../js/vendor/klaro/klaro.js" defer></script>
+  <script src="../js/consent-services.js" defer></script>
 </head>
 <body>
   <div class="topbar">
@@ -116,13 +106,13 @@
     <p>Last updated: 2025‑05‑06</p>
 
     <h2>How we use cookies</h2>
-    <p>Cookies and similar technologies help run the Arcade Hub portal, secure Supabase authentication, and measure usage when you consent. You can change your choices anytime via Cookiebot.</p>
+    <p>Cookies and similar technologies help run the Arcade Hub portal, secure Supabase authentication, and measure usage when you consent. You can change your choices anytime via the consent manager.</p>
 
     <h2>Cookie categories</h2>
     <ul>
       <li><strong>Strictly necessary:</strong> Supabase authentication cookies, session tokens, and basic preferences that keep you signed in and protect your account. Required for accounts and cannot be disabled without turning off sign-in.</li>
       <li><strong>Preferences:</strong> Stores your language and consent choices so the site remembers your settings.</li>
-      <li><strong>Statistics/Analytics:</strong> Google Analytics (GA4) loads only after you grant consent in Cookiebot.</li>
+      <li><strong>Statistics/Analytics:</strong> Google Analytics (GA4) loads only after you grant consent in the consent manager.</li>
     </ul>
 
     <h2>Supabase cookies</h2>
@@ -154,13 +144,13 @@
       <a class="ft-link" data-i18n="contact" href="mailto:contact@kcswh.pl">Contact</a>
       <span class="sep">•</span>
       <a class="ft-link manage-cookies" data-i18n="manageCookies"
-         id="manageCookies" href="#" data-cookieconsent="ignore">Manage cookies</a>
+         id="manageCookies" href="#">Manage cookies</a>
     </nav>
     <div class="lang-switch" aria-label="Language">
       <button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button>
       <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
     </div>
   </footer>
-  <script src="../js/cookiebot-manager.js" defer></script>
+  <script src="../js/consent-manager.js" defer></script>
 </body>
 </html>
