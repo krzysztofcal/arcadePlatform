@@ -9,6 +9,8 @@
   var WAD_FILENAME = 'freedoom2.wad';
   var RUNTIME_SCRIPT = 'vendor/dwasm/index.js';
   var ARCHIVE_SCRIPT = './vendor/dwasm/libarchive.js';
+  var RENDER_WIDTH = 1366;
+  var RENDER_HEIGHT = 768;
 
   var state = {
     booting: false,
@@ -20,7 +22,9 @@
     timeInterval: null,
     activityInterval: null,
     listenersAttached: false,
-    wadData: null
+    wadData: null,
+    renderCanvas: null,
+    presentationFrame: null
   };
 
   var elements = {
@@ -149,13 +153,34 @@
     elements.output.scrollTop = elements.output.scrollHeight;
   }
 
+  function ensureRenderCanvas() {
+    if (state.renderCanvas) return state.renderCanvas;
+    var canvas = document.createElement('canvas');
+    canvas.width = RENDER_WIDTH;
+    canvas.height = RENDER_HEIGHT;
+    canvas.tabIndex = -1;
+    canvas.setAttribute('aria-hidden', 'true');
+    canvas.className = 'doom-render-canvas';
+    canvas.style.position = 'fixed';
+    canvas.style.left = '-10000px';
+    canvas.style.top = '0';
+    canvas.style.width = RENDER_WIDTH + 'px';
+    canvas.style.height = RENDER_HEIGHT + 'px';
+    canvas.style.opacity = '0';
+    canvas.style.pointerEvents = 'none';
+    document.body.appendChild(canvas);
+    state.renderCanvas = canvas;
+    return canvas;
+  }
+
   function bootRuntime() {
     return new Promise(function(resolve, reject) {
       var script = document.createElement('script');
       var resolved = false;
+      var renderCanvas = ensureRenderCanvas();
 
       window.Module = {
-        canvas: elements.canvas,
+        canvas: renderCanvas,
         arguments: ['-iwad', WAD_FILENAME],
         print: function(text) { appendOutput('', text); },
         printErr: function(text) { appendOutput('(!)', text); },
@@ -202,10 +227,51 @@
     elements.canvas.style.setProperty('object-fit', 'contain', 'important');
   }
 
+  function paintPresentationCanvas() {
+    var source = state.renderCanvas;
+    var target = elements.canvas;
+    if (!source || !target) return;
+
+    var rect = target.getBoundingClientRect();
+    var cssWidth = Math.max(1, Math.round(rect.width));
+    var cssHeight = Math.max(1, Math.round(rect.height));
+    var ratio = Math.min(window.devicePixelRatio || 1, 2);
+    var targetWidth = Math.max(1, Math.round(cssWidth * ratio));
+    var targetHeight = Math.max(1, Math.round(cssHeight * ratio));
+    if (target.width !== targetWidth) target.width = targetWidth;
+    if (target.height !== targetHeight) target.height = targetHeight;
+
+    var ctx = target.getContext('2d');
+    if (!ctx) return;
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, targetWidth, targetHeight);
+
+    var sourceWidth = source.width || RENDER_WIDTH;
+    var sourceHeight = source.height || RENDER_HEIGHT;
+    var scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight);
+    var drawWidth = Math.max(1, Math.round(sourceWidth * scale));
+    var drawHeight = Math.max(1, Math.round(sourceHeight * scale));
+    var drawX = Math.floor((targetWidth - drawWidth) / 2);
+    var drawY = Math.floor((targetHeight - drawHeight) / 2);
+    ctx.drawImage(source, 0, 0, sourceWidth, sourceHeight, drawX, drawY, drawWidth, drawHeight);
+  }
+
+  function startPresentationLoop() {
+    if (state.presentationFrame) return;
+    function tick() {
+      fitCanvasToFrame();
+      paintPresentationCanvas();
+      state.presentationFrame = window.requestAnimationFrame(tick);
+    }
+    tick();
+  }
+
   function scheduleCanvasFit() {
     var ticks = 0;
     function tick() {
       fitCanvasToFrame();
+      paintPresentationCanvas();
       ticks += 1;
       if (ticks < 20) window.requestAnimationFrame(tick);
     }
@@ -222,6 +288,7 @@
     showLoading(false);
     if (elements.canvas) {
       scheduleCanvasFit();
+      startPresentationLoop();
       elements.canvas.focus();
     }
     if (elements.playBtn) elements.playBtn.style.display = 'none';
@@ -274,7 +341,7 @@
   }
 
   function sendKey(code, pressed) {
-    var target = elements.canvas || document.activeElement || document.body;
+    var target = state.renderCanvas || elements.canvas || document.activeElement || document.body;
     try {
       var keyCode = keyCodeFromString(code);
       var event = new KeyboardEvent(pressed ? 'keydown' : 'keyup', {

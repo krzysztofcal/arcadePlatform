@@ -67,7 +67,10 @@ assert.match(freedoomJs, /vendor\/dwasm\/index\.js/, 'Freedoom should use the ve
 assert.doesNotMatch(freedoomJs, /digger\.jsdos|v8\.js-dos\.com|cdn\.dos\.zone/, 'Freedoom should not boot the old Digger/js-dos placeholder');
 assert.match(freedoomJs, /setPointerCapture\(activePointerId\)/, 'Freedoom mobile joysticks should capture independent pointer IDs');
 assert.doesNotMatch(freedoomJs, /event\.touches\[0\]/, 'Freedoom mobile controls should not read the first global touch');
+assert.match(freedoomJs, /canvas:\s*renderCanvas/, 'Freedoom runtime should render to an internal canvas instead of the visible presentation canvas');
+assert.match(freedoomJs, /ctx\.drawImage\(source,\s*0,\s*0,\s*sourceWidth,\s*sourceHeight,\s*drawX,\s*drawY,\s*drawWidth,\s*drawHeight\)/, 'Freedoom presentation canvas should scale the full runtime frame');
 assert.match(freedoomCss, /\.doom-canvas\s*\{[^}]*width:\s*100% !important;[^}]*height:\s*100% !important;/, 'Freedoom canvas should be forced to fit inside the game frame');
+assert.match(freedoomCss, /\.freedoom-frame\s*\{[^}]*aspect-ratio:\s*16 \/ 9;/, 'Freedoom frame should match the Dwasm widescreen render aspect');
 assert.ok(statSync(path.join(root, 'games-open', 'freedoom', 'assets', 'freedoom2.bin')).size > 7_000_000, 'Freedoom should publish the local Freedoom archive');
 assert.match(headersFile, /\/games-open\/freedoom\/\*/, 'Freedoom should have a scoped CSP in _headers');
 assert.doesNotMatch(headersFile, /dwasm\.m-h\.org\.uk/, 'Freedoom CSP should not rely on a remote WAD mirror');

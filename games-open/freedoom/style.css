@@ -1,6 +1,6 @@
 /* Freedoom Game Styles - Arcade Hub */
 
-.freedoom-frame { position: relative; width: 100%; max-width: 800px; aspect-ratio: 4 / 3; margin: 0 auto; background: #000; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); contain: layout paint; }
+.freedoom-frame { position: relative; width: 100%; max-width: 900px; aspect-ratio: 16 / 9; margin: 0 auto; background: #000; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); contain: layout paint; }
 
 .doom-canvas { display: none; width: 100% !important; height: 100% !important; max-width: 100% !important; max-height: 100% !important; margin: 0 !important; background: #000; border: 0; outline: none; object-fit: contain; image-rendering: pixelated; image-rendering: crisp-edges; }
 
@@ -65,7 +65,7 @@
 .mobile-hint { display: none; color: var(--muted, #9fb0d0); font-size: 0.8rem; text-align: center; margin-top: 8px; }
 
 @media (max-width: 768px) {
-  .freedoom-frame { max-width: 100%; aspect-ratio: 16 / 10; border-radius: 8px; }
+  .freedoom-frame { max-width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; }
   .mobile-controls { display: flex; }
   .mobile-hint { display: block; }
   .notice { display: none; }
@@ -79,7 +79,7 @@
 }
 
 @media (max-width: 480px) {
-  .freedoom-frame { aspect-ratio: 4 / 3; }
+  .freedoom-frame { aspect-ratio: 16 / 9; }
   .joystick-base { width: 80px; height: 80px; }
   .joystick-stick { width: 34px; height: 34px; }
   .action-btn { width: 56px; height: 56px; font-size: 0.7rem; }
@@ -89,7 +89,7 @@
 }
 
 :fullscreen .freedoom-frame,
-:-webkit-full-screen .freedoom-frame { width: 100vw; height: 100vh; max-width: 100vw; max-height: 100vh; aspect-ratio: 4 / 3; border-radius: 0; }
+:-webkit-full-screen .freedoom-frame { width: 100vw; height: 100vh; max-width: 100vw; max-height: 100vh; aspect-ratio: 16 / 9; border-radius: 0; }
 
 :fullscreen .mobile-controls,
 :-webkit-full-screen .mobile-controls { position: fixed; bottom: 0; left: 0; right: 0; margin: 0; border-radius: 0; background: rgba(11, 16, 32, 0.85); backdrop-filter: blur(8px); z-index: 100; }
