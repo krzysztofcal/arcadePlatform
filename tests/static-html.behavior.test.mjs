@@ -90,3 +90,9 @@ assert.match(netlifyToml, /for = "\/games-open\/freedoom\/\*"/, 'Netlify should 
 assert.doesNotMatch(netlifyToml, /dwasm\.m-h\.org\.uk/, 'Netlify Freedoom CSP should not rely on a remote WAD mirror');
 assert.ok(netlifyToml.includes('Content-Security-Policy = "'), 'Netlify deploys should emit a CSP header');
 assert.doesNotMatch(netlifyToml, /cookiebot/i, 'Netlify CSP should not require Cookiebot hosts after the Klaro migration');
+assert.match(netlifyToml, /for = "\/css\/\*"[\s\S]*?Cache-Control = "public, max-age=0, must-revalidate"/, 'CSS files use stable names and should revalidate after deploys');
+assert.match(netlifyToml, /for = "\/js\/\*"[\s\S]*?Cache-Control = "public, max-age=0, must-revalidate"/, 'JS files use stable names and should revalidate after deploys');
+const cssHeaderBlock = netlifyToml.match(/\[\[headers\]\]\s+for = "\/css\/\*"[\s\S]*?(?=\n\[\[headers\]\]|$)/)?.[0] || '';
+const jsHeaderBlock = netlifyToml.match(/\[\[headers\]\]\s+for = "\/js\/\*"[\s\S]*?(?=\n\[\[headers\]\]|$)/)?.[0] || '';
+assert.doesNotMatch(cssHeaderBlock, /immutable/, 'Stable CSS paths must not be cached as immutable');
+assert.doesNotMatch(jsHeaderBlock, /immutable/, 'Stable JS paths must not be cached as immutable');
