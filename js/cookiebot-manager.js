@@ -25,12 +25,12 @@
     if (typeof window === 'undefined') return false;
     if (!window.Cookiebot) return false;
     try {
-      if (typeof window.Cookiebot.show === 'function') {
-        window.Cookiebot.show();
-        return true;
-      }
       if (typeof window.Cookiebot.renew === 'function') {
         window.Cookiebot.renew();
+        return true;
+      }
+      if (typeof window.Cookiebot.show === 'function') {
+        window.Cookiebot.show();
         return true;
       }
     } catch (err) {}

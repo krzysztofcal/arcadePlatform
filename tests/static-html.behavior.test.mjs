@@ -6,6 +6,7 @@ const root = process.cwd();
 const indexHtml = await readFile(path.join(root, 'poker', 'index.html'), 'utf8');
 const tableV2Html = await readFile(path.join(root, 'poker', 'table-v2.html'), 'utf8');
 const tableV2Css = await readFile(path.join(root, 'poker', 'poker-v2.css'), 'utf8');
+const cookiebotManagerJs = await readFile(path.join(root, 'js', 'cookiebot-manager.js'), 'utf8');
 assert.match(indexHtml, /src="\/js\/build-info\.js" defer/, 'poker index should include build-info bootstrap script');
 assert.equal(indexHtml.indexOf('/js/build-info.js') < indexHtml.indexOf('/poker/poker-ws-client.js'), true, 'poker index should load build-info before ws client');
 assert.doesNotMatch(indexHtml, /pokerClassicEntry/, 'poker lobby should no longer expose the classic table entry');
@@ -23,3 +24,5 @@ assert.doesNotMatch(tableV2Css, /\.poker-seat--hero \.poker-seat-avatar\{[^}]*bo
 assert.match(tableV2Css, /\.poker-seat--hero\.poker-seat--active \.poker-seat-avatar\{border-color:rgba\(84,245,152,0\.88\);/, 'hero avatar should turn green only on the active turn');
 assert.match(tableV2Html, /id="pokerBootSplash"/, 'poker table v2 should render a boot splash to avoid raw HTML flash');
 assert.match(tableV2Html, /id="pokerV2AmountValue"/, 'poker table v2 should render a compact amount value for the action slider');
+assert.match(cookiebotManagerJs, /#manageCookies, .manage-cookies/, 'cookie manager should delegate clicks from all manage cookies links');
+assert.equal(cookiebotManagerJs.indexOf('window.Cookiebot.renew()') < cookiebotManagerJs.indexOf('window.Cookiebot.show()'), true, 'manage cookies should reopen Cookiebot preferences before falling back to the initial banner');
