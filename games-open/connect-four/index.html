@@ -14,22 +14,8 @@
     <link rel="stylesheet" href="style.css" />
     <link rel="stylesheet" href="/css/xp-overlay.css" />
     <link rel="stylesheet" href="/css/search-popup.css" />
-    <script id="Cookiebot"
-            src="https://consent.cookiebot.com/uc.js"
-            data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
-            data-blockingmode="auto"
-            type="text/javascript">
-    </script>
-    <!-- GA4 (blocked until Statistics consent) -->
-    <script type="text/plain" data-cookieconsent="statistics"
-            src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
-    <script type="text/plain" data-cookieconsent="statistics">
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){ dataLayer.push(arguments); }
-      gtag('js', new Date());
-      gtag('config', 'G-JRP62LCXYK');
-    </script>
-    <script src="/js/i18n.js" defer></script>
+
+<script src="/js/i18n.js" defer></script>
     <script src="/js/auth/supabase-config.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
     <script src="/js/auth/supabaseClient.js" defer></script>
@@ -37,7 +23,11 @@
     <script src="/js/xpClient.js" defer></script>
     <script src="/js/ui/xp-overlay.js" defer></script>
     <script src="/js/ui/favorite-button.js" defer></script>
-  </head>
+  <link rel="stylesheet" href="../../js/vendor/klaro/klaro.css">
+  <script src="../../js/klaro-config.js" defer></script>
+  <script src="../../js/vendor/klaro/klaro.js" defer></script>
+  <script src="../../js/consent-services.js" defer></script>
+</head>
   <body data-game-host data-game-slug="connect-four" data-game-id="connect-four">
     <div class="topbar">
       <div class="topbar-left">
@@ -233,6 +223,6 @@
         }
       }
     </script>
-    <script src="/js/cookiebot-manager.js" defer></script>
+  <script src="../../js/consent-manager.js" defer></script>
 </body>
 </html>

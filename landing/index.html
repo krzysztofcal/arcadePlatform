@@ -18,27 +18,13 @@
 
   <link rel="stylesheet" href="./css/landing.css">
   <link rel="stylesheet" href="../css/xp-badge.css">
-  <script id="Cookiebot"
-          src="https://consent.cookiebot.com/uc.js"
-          data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
-          data-blockingmode="auto"
-          type="text/javascript">
-  </script>
-  <script type="text/plain"
-          data-cookieconsent="marketing"
-          async
-          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4054734235779751"
-          crossorigin="anonymous"></script>
-  <!-- GA4 (blocked until Statistics consent) -->
-  <script type="text/plain" data-cookieconsent="statistics"
-          src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
-  <script type="text/plain" data-cookieconsent="statistics">
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){ dataLayer.push(arguments); }
-    gtag('js', new Date());
-    gtag('config', 'G-JRP62LCXYK');
-  </script>
-  <script src="../js/adsense-init.js" defer></script>
+
+
+<script src="../js/adsense-init.js" defer></script>
+  <link rel="stylesheet" href="../js/vendor/klaro/klaro.css">
+  <script src="../js/klaro-config.js" defer></script>
+  <script src="../js/vendor/klaro/klaro.js" defer></script>
+  <script src="../js/consent-services.js" defer></script>
 </head>
 <body>
   <header class="header" role="banner">
@@ -48,7 +34,7 @@
     </a>
     <nav class="nav" aria-label="Primary">
       <a href="./about.html">About</a>
-      <a class="manage-cookies" href="#manageCookies" data-cookieconsent="ignore">Manage cookies</a>
+      <a class="manage-cookies" href="#manageCookies">Manage cookies</a>
     </nav>
     <div class="header-actions">
       <a id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true" href="../xp.html">
@@ -97,7 +83,7 @@
   <footer class="footer">
     <div class="links">
       <a href="./about.html">About</a>
-      <a class="manage-cookies" id="manageCookies" href="#" data-cookieconsent="ignore">Manage cookies</a>
+      <a class="manage-cookies" id="manageCookies" href="#">Manage cookies</a>
       <a href="./legal/privacy.en.html">Privacy</a>
       <a href="./about.html#terms">Arcade Terms</a>
     </div>
@@ -107,6 +93,6 @@
   <script>
     document.getElementById('year').textContent = new Date().getFullYear();
   </script>
-  <script src="../js/cookiebot-manager.js" defer></script>
+  <script src="../js/consent-manager.js" defer></script>
 </body>
 </html>

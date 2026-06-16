@@ -10,22 +10,8 @@
   <link rel="stylesheet" href="../css/portal.css">
   <link rel="stylesheet" href="../css/xp-badge.css">
   <link rel="stylesheet" href="/css/xp-overlay.css">
-  <script id="Cookiebot"
-          src="https://consent.cookiebot.com/uc.js"
-          data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
-          data-blockingmode="auto"
-          type="text/javascript">
-  </script>
-  <!-- GA4 (blocked until Statistics consent) -->
-  <script type="text/plain" data-cookieconsent="statistics"
-          src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
-  <script type="text/plain" data-cookieconsent="statistics">
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){ dataLayer.push(arguments); }
-    gtag('js', new Date());
-    gtag('config', 'G-JRP62LCXYK');
-  </script>
-  <script src="../js/analytics.js" defer></script>
+
+<script src="../js/analytics.js" defer></script>
   <script src="/js/i18n.js" defer></script>
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
@@ -45,6 +31,10 @@
   <script src="../js/xp/scoring.js" defer></script>
   <script src="../js/xp/core.js" defer></script>
   <script src="../js/xp.js" defer></script>
+  <link rel="stylesheet" href="../js/vendor/klaro/klaro.css">
+  <script src="../js/klaro-config.js" defer></script>
+  <script src="../js/vendor/klaro/klaro.js" defer></script>
+  <script src="../js/consent-services.js" defer></script>
 </head>
 <body>
   <div class="topbar">
@@ -107,7 +97,7 @@
       <li>Metadane konta, np. nazwa wyświetlana i inicjały awatara.</li>
       <li>XP oraz postępy w grach powiązane z Twoim identyfikatorem użytkownika na potrzeby synchronizacji w chmurze.</li>
       <li>Logi bezpieczeństwa i aktywności (np. zdarzenia logowania, diagnostyka błędów).</li>
-      <li>Dane o zgodach i analityce, jeśli wyrazisz zgodę przez Cookiebot.</li>
+      <li>Dane o zgodach i analityce, jeśli wyrazisz zgodę w menedżerze zgód.</li>
     </ul>
 
     <h2>Cele i podstawy prawne</h2>
@@ -116,7 +106,7 @@
       <li>Synchronizacja XP i zarządzanie kontem – art. 6 ust. 1 lit. b RODO.</li>
       <li>Bezpieczeństwo, zapobieganie nadużyciom i integralność usług – art. 6 ust. 1 lit. f RODO (prawnie uzasadniony interes).</li>
       <li>Wykonywanie obowiązków prawnych (np. logi bezpieczeństwa) – art. 6 ust. 1 lit. c RODO.</li>
-      <li>Analityka i pomiary opcjonalne – art. 6 ust. 1 lit. a RODO (zgoda przez Cookiebot).</li>
+      <li>Analityka i pomiary opcjonalne – art. 6 ust. 1 lit. a RODO (zgoda przez menedżera zgód).</li>
     </ul>
 
     <h2>Jak wykorzystujemy dane</h2>
@@ -137,8 +127,8 @@
     <h2>Cookies i podobne technologie</h2>
     <ul>
       <li>Cookies uwierzytelniające Supabase są niezbędne i ich wyłączenie uniemożliwi logowanie.</li>
-      <li>Cookies preferencji zapisują Twoje wybory w Cookiebot.</li>
-      <li>Cookies analityczne (np. Google Analytics) ładują się dopiero po udzieleniu zgody w Cookiebot.</li>
+      <li>Cookies preferencji zapisują Twoje wybory w menedżerze zgód.</li>
+      <li>Cookies analityczne (np. Google Analytics) ładują się dopiero po udzieleniu zgody w menedżerze zgód.</li>
       <li>W każdej chwili możesz zmienić wybory przez opcję <a class="ft-link manage-cookies" data-i18n="manageCookies" href="#">Zarządzaj cookies</a>.</li>
     </ul>
 
@@ -153,7 +143,7 @@
     <p>Supabase i inni dostawcy mogą przetwarzać dane poza Twoim krajem, w tym w USA. Przekazywanie opiera się na SCC i równoważnych zabezpieczeniach.</p>
 
     <h2>Twoje prawa</h2>
-    <p>Przysługują Ci prawa dostępu, sprostowania, usunięcia, ograniczenia, przenoszenia danych oraz sprzeciwu. Zgodę na analitykę możesz wycofać w dowolnym momencie przez Cookiebot. Aby skorzystać z praw, napisz na <a class="ft-link" href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Skargę możesz wnieść do Prezesa UODO.</p>
+    <p>Przysługują Ci prawa dostępu, sprostowania, usunięcia, ograniczenia, przenoszenia danych oraz sprzeciwu. Zgodę na analitykę możesz wycofać w dowolnym momencie przez menedżera zgód. Aby skorzystać z praw, napisz na <a class="ft-link" href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Skargę możesz wnieść do Prezesa UODO.</p>
 
     <h2>Usuwanie konta</h2>
     <p>Możesz zażądać usunięcia konta, wysyłając e-mail na <a class="ft-link" href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Automatyczne usuwanie w aplikacji jest planowane; do tego czasu realizujemy wnioski ręcznie i usuwamy powiązane rekordy XP, sesje i metadane w zakresie dozwolonym prawem.</p>
@@ -184,13 +174,13 @@
       <a class="ft-link" data-i18n="contact" href="mailto:contact@kcswh.pl">Contact</a>
       <span class="sep">•</span>
       <a class="ft-link manage-cookies" data-i18n="manageCookies"
-         id="manageCookies" href="#" data-cookieconsent="ignore">Manage cookies</a>
+         id="manageCookies" href="#">Manage cookies</a>
     </nav>
     <div class="lang-switch" aria-label="Language">
       <button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button>
       <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
     </div>
   </footer>
-  <script src="../js/cookiebot-manager.js" defer></script>
+  <script src="../js/consent-manager.js" defer></script>
 </body>
 </html>

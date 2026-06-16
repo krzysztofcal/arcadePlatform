@@ -24,6 +24,5 @@
   }
 
   document.addEventListener('DOMContentLoaded', scheduleInit, { once: true });
-  window.addEventListener('CookiebotOnConsentReady', scheduleInit);
-  window.addEventListener('CookiebotOnAccept', scheduleInit);
+  window.addEventListener('arcadeConsentChanged', scheduleInit);
 })();
