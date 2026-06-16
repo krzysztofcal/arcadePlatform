@@ -181,7 +181,7 @@
 
       window.Module = {
         canvas: renderCanvas,
-        arguments: ['-iwad', WAD_FILENAME, '-warp', '1', '-skill', '3'],
+        arguments: ['-iwad', WAD_FILENAME, '-config', '/arcade-prboomx.cfg', '-warp', '1', '-skill', '3'],
         print: function(text) { appendOutput('', text); },
         printErr: function(text) { appendOutput('(!)', text); },
         locateFile: function(path) { return 'vendor/dwasm/' + path; },
@@ -190,6 +190,7 @@
           if (left > 0) setStatus('Preparing engine dependencies... (' + left + ' left)');
         },
         onRuntimeInitialized: function() {
+          window.FS.writeFile('/arcade-prboomx.cfg', buildPrBoomConfig());
           var file = window.FS.open('/' + WAD_FILENAME, 'w');
           window.FS.write(file, state.wadData, 0, state.wadData.length, 0);
           window.FS.close(file);
@@ -214,6 +215,55 @@
       };
       document.body.appendChild(script);
     });
+  }
+
+  function buildPrBoomConfig() {
+    return [
+      '# Arcade Hub PrBoomX mobile config',
+      'videomode                         "32bit"',
+      'screen_resolution                 "1366x768"',
+      'usegamma                          1',
+      'filter_wall                       3',
+      'filter_floor                      3',
+      'filter_sprite                     3',
+      'filter_z                          2',
+      'gl_sprite_filter                  3',
+      'gl_texture_filter_anisotropic     1',
+      'gl_sprite_blend                   1',
+      'use_mouse                         1',
+      'use_joystick                      0',
+      'mouse_sensitivity_horiz           12',
+      'mouse_sensitivity_vert            8',
+      'mouse_sensitivity_mlook           18',
+      'movement_mouselook                1',
+      'movement_mousenovert              0',
+      'movement_maxviewpitch             90',
+      'movement_mouseinvert              0',
+      'key_up                            0x77',
+      'key_down                          0x73',
+      'key_strafeleft                    0x61',
+      'key_straferight                   0x64',
+      'key_left                          0xac',
+      'key_right                         0xae',
+      'key_fire                          0x9d',
+      'key_use                           0x20',
+      'key_mlook                         0x5c',
+      'hudadd_leveltime                  1',
+      'hudadd_demotime                   1',
+      'hudadd_secretarea                 1',
+      'hudadd_smarttotals                1',
+      'hudadd_crosshair                  1',
+      'hudadd_crosshair_health           1',
+      'hudadd_crosshair_target           1',
+      'hudadd_crosshair_lock_target      1',
+      'health_bar                        1',
+      'render_multisampling              2',
+      'gl_texture_hqresize               1',
+      'gl_texture_hqresize_sprites       1',
+      'gl_lightmode                      2',
+      'gl_blend_animations               1',
+      ''
+    ].join('\n');
   }
 
   function fitCanvasToFrame() {
@@ -364,6 +414,26 @@
     }
   }
 
+  function sendMouseMove(deltaX, deltaY) {
+    var source = state.renderCanvas || elements.canvas;
+    var targets = [source, document, window].filter(Boolean);
+    targets.forEach(function(target) {
+      var event = new MouseEvent('mousemove', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 400,
+        clientY: 240,
+        movementX: deltaX,
+        movementY: deltaY
+      });
+      try {
+        Object.defineProperty(event, 'movementX', { get: function() { return deltaX; } });
+        Object.defineProperty(event, 'movementY', { get: function() { return deltaY; } });
+      } catch (_error) {}
+      target.dispatchEvent(event);
+    });
+  }
+
   function codeToKey(code) {
     var map = {
       KeyW: 'w',
@@ -426,6 +496,8 @@
 
   var movementKeys = { up: false, down: false, left: false, right: false };
   var lookKeys = { left: false, right: false };
+  var lookVector = { x: 0, y: 0 };
+  var lookFrame = null;
 
   function setupJoystick(element, handler) {
     var stick = element.querySelector('.joystick-stick');
@@ -503,26 +575,40 @@
     var shouldMoveRight = x > threshold;
     if (shouldMoveUp !== movementKeys.up) {
       movementKeys.up = shouldMoveUp;
-      sendKey('ArrowUp', shouldMoveUp);
+      sendKey('KeyW', shouldMoveUp);
     }
     if (shouldMoveDown !== movementKeys.down) {
       movementKeys.down = shouldMoveDown;
-      sendKey('ArrowDown', shouldMoveDown);
+      sendKey('KeyS', shouldMoveDown);
     }
     if (shouldMoveLeft !== movementKeys.left) {
       movementKeys.left = shouldMoveLeft;
-      sendKey('Comma', shouldMoveLeft);
+      sendKey('KeyA', shouldMoveLeft);
     }
     if (shouldMoveRight !== movementKeys.right) {
       movementKeys.right = shouldMoveRight;
-      sendKey('Period', shouldMoveRight);
+      sendKey('KeyD', shouldMoveRight);
     }
   }
 
-  function handleLookJoystick(x) {
+  function startLookLoop() {
+    if (lookFrame) return;
+    function tick() {
+      if (Math.abs(lookVector.y) > 0.15) {
+        sendMouseMove(0, Math.round(lookVector.y * 18));
+      }
+      lookFrame = window.requestAnimationFrame(tick);
+    }
+    tick();
+  }
+
+  function handleLookJoystick(x, y) {
     var threshold = 0.3;
     var shouldTurnLeft = x < -threshold;
     var shouldTurnRight = x > threshold;
+    lookVector.x = x;
+    lookVector.y = y;
+    startLookLoop();
     if (shouldTurnLeft !== lookKeys.left) {
       lookKeys.left = shouldTurnLeft;
       sendKey('ArrowLeft', shouldTurnLeft);
