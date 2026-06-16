@@ -21,18 +21,35 @@
     return null;
   }
 
+  function hasCookiebotDialog(){
+    if (typeof document === 'undefined') return false;
+    return !!document.querySelector(
+      '#CybotCookiebotDialog, #CybotCookiebotDialogBody, #CybotCookiebotDialogBodyUnderlay, .CybotCookiebotDialogActive'
+    );
+  }
+
+  function showCookiebot(){
+    if (typeof window.Cookiebot.show !== 'function') return false;
+    window.Cookiebot.show();
+    return true;
+  }
+
   function reopenCookiebot(){
     if (typeof window === 'undefined') return false;
     if (!window.Cookiebot) return false;
     try {
       if (typeof window.Cookiebot.renew === 'function') {
         window.Cookiebot.renew();
+        if (typeof window.setTimeout === 'function' && typeof window.Cookiebot.show === 'function') {
+          window.setTimeout(function(){
+            if (!hasCookiebotDialog()) {
+              try { showCookiebot(); } catch (err) {}
+            }
+          }, 150);
+        }
         return true;
       }
-      if (typeof window.Cookiebot.show === 'function') {
-        window.Cookiebot.show();
-        return true;
-      }
+      if (showCookiebot()) return true;
     } catch (err) {}
     return false;
   }
