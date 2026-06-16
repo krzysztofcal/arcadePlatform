@@ -63,10 +63,15 @@ assert.doesNotMatch(freedoomHtml, /Cookiebot|cookiebot-manager|js-dos|v8\.js-dos
 assert.match(freedoomJs, /freedoom2\.bin/, 'Freedoom should download the Freedoom Phase 2 archive');
 assert.match(freedoomJs, /assets\/freedoom2\.bin/, 'Freedoom should load the local Freedoom archive');
 assert.match(freedoomJs, /freedoom2\.wad/, 'Freedoom should boot the Freedoom WAD');
+assert.match(freedoomJs, /'-warp',\s*'1'/, 'Freedoom should start in a playable map instead of the demo loop');
 assert.match(freedoomJs, /vendor\/dwasm\/index\.js/, 'Freedoom should use the vendored Dwasm runtime');
 assert.doesNotMatch(freedoomJs, /digger\.jsdos|v8\.js-dos\.com|cdn\.dos\.zone/, 'Freedoom should not boot the old Digger/js-dos placeholder');
 assert.match(freedoomJs, /setPointerCapture\(activePointerId\)/, 'Freedoom mobile joysticks should capture independent pointer IDs');
 assert.doesNotMatch(freedoomJs, /event\.touches\[0\]/, 'Freedoom mobile controls should not read the first global touch');
+assert.match(freedoomJs, /sendKey\('ArrowUp',\s*shouldMoveUp\)/, 'Freedoom mobile forward control should use Doom default arrow bindings');
+assert.match(freedoomJs, /sendKey\('Comma',\s*shouldMoveLeft\)/, 'Freedoom mobile strafe-left control should use Doom default strafe bindings');
+assert.match(freedoomJs, /sendKey\('Period',\s*shouldMoveRight\)/, 'Freedoom mobile strafe-right control should use Doom default strafe bindings');
+assert.match(freedoomJs, /document,\s*window/, 'Freedoom synthetic key events should reach the runtime keyboard listeners');
 assert.match(freedoomJs, /canvas:\s*renderCanvas/, 'Freedoom runtime should render to an internal canvas instead of the visible presentation canvas');
 assert.match(freedoomJs, /ctx\.drawImage\(source,\s*0,\s*0,\s*sourceWidth,\s*sourceHeight,\s*drawX,\s*drawY,\s*drawWidth,\s*drawHeight\)/, 'Freedoom presentation canvas should scale the full runtime frame');
 assert.match(freedoomCss, /\.doom-canvas\s*\{[^}]*width:\s*100% !important;[^}]*height:\s*100% !important;/, 'Freedoom canvas should be forced to fit inside the game frame');

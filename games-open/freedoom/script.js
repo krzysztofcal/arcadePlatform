@@ -181,7 +181,7 @@
 
       window.Module = {
         canvas: renderCanvas,
-        arguments: ['-iwad', WAD_FILENAME],
+        arguments: ['-iwad', WAD_FILENAME, '-warp', '1', '-skill', '3'],
         print: function(text) { appendOutput('', text); },
         printErr: function(text) { appendOutput('(!)', text); },
         locateFile: function(path) { return 'vendor/dwasm/' + path; },
@@ -341,18 +341,24 @@
   }
 
   function sendKey(code, pressed) {
-    var target = state.renderCanvas || elements.canvas || document.activeElement || document.body;
+    var targets = [state.renderCanvas, elements.canvas, document, window].filter(Boolean);
     try {
       var keyCode = keyCodeFromString(code);
-      var event = new KeyboardEvent(pressed ? 'keydown' : 'keyup', {
-        code: code,
-        key: codeToKey(code),
-        keyCode: keyCode,
-        which: keyCode,
-        bubbles: true,
-        cancelable: true
+      targets.forEach(function(target) {
+        var event = new KeyboardEvent(pressed ? 'keydown' : 'keyup', {
+          code: code,
+          key: codeToKey(code),
+          keyCode: keyCode,
+          which: keyCode,
+          bubbles: true,
+          cancelable: true
+        });
+        try {
+          Object.defineProperty(event, 'keyCode', { get: function() { return keyCode; } });
+          Object.defineProperty(event, 'which', { get: function() { return keyCode; } });
+        } catch (_error) {}
+        target.dispatchEvent(event);
       });
-      target.dispatchEvent(event);
     } catch (error) {
       klog('freedoom_key_error', { code: code, error: String(error) });
     }
@@ -375,6 +381,8 @@
       ArrowDown: 'ArrowDown',
       ArrowLeft: 'ArrowLeft',
       ArrowRight: 'ArrowRight',
+      Comma: ',',
+      Period: '.',
       Digit1: '1',
       Digit2: '2',
       Digit3: '3',
@@ -403,6 +411,8 @@
       ArrowDown: 40,
       ArrowLeft: 37,
       ArrowRight: 39,
+      Comma: 188,
+      Period: 190,
       Digit1: 49,
       Digit2: 50,
       Digit3: 51,
@@ -493,19 +503,19 @@
     var shouldMoveRight = x > threshold;
     if (shouldMoveUp !== movementKeys.up) {
       movementKeys.up = shouldMoveUp;
-      sendKey('KeyW', shouldMoveUp);
+      sendKey('ArrowUp', shouldMoveUp);
     }
     if (shouldMoveDown !== movementKeys.down) {
       movementKeys.down = shouldMoveDown;
-      sendKey('KeyS', shouldMoveDown);
+      sendKey('ArrowDown', shouldMoveDown);
     }
     if (shouldMoveLeft !== movementKeys.left) {
       movementKeys.left = shouldMoveLeft;
-      sendKey('KeyA', shouldMoveLeft);
+      sendKey('Comma', shouldMoveLeft);
     }
     if (shouldMoveRight !== movementKeys.right) {
       movementKeys.right = shouldMoveRight;
-      sendKey('KeyD', shouldMoveRight);
+      sendKey('Period', shouldMoveRight);
     }
   }
 
