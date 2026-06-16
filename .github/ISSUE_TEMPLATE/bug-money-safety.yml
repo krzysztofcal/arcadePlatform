@@ -1,0 +1,85 @@
+name: Bug (money/safety)
+description: Bug affecting correctness, chips/XP safety, security, or availability.
+title: "[BUG] "
+labels: ["type:bug"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - poker-backend
+        - poker-ui
+        - chips-ledger
+        - xp
+        - portal-ui
+        - infra
+        - security
+        - tests
+        - docs
+    validations:
+      required: true
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk
+      options:
+        - money
+        - security
+        - availability
+        - data-loss
+        - low
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context / Impact
+      description: What breaks? Any chips/XP loss risk? Security implications?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1) ...
+        2) ...
+        3) ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+      placeholder: |
+        Expected:
+        Actual:
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / IDs
+      description: klog lines, requestId/tableId/userId, timestamps.
+  - type: textarea
+    id: ac
+    attributes:
+      label: Acceptance criteria
+      description: Must include idempotency + safety constraints where relevant.
+      placeholder: |
+        - [ ] Idempotent on retry/replay (same requestId)
+        - [ ] No chip/XP loss or double-credit
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Tests to add/update
+      description: Name concrete files under tests/.
+      placeholder: |
+        - Update: tests/poker-*.behavior.test.mjs
+        - Add: tests/...
+    validations:
+      required: true

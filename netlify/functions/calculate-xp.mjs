@@ -17,6 +17,7 @@ import crypto from "node:crypto";
 import { store, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
 import { klog } from "./_shared/supabase-admin.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
+import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
 
 // ============================================================================
 // Configuration Constants
@@ -249,84 +250,9 @@ function generateFingerprint(headers) {
   return hash(`${ua}|${lang}|${enc}`).slice(0, 16);
 }
 
-const warsawDateFormatter = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "Europe/Warsaw",
-  hour12: false,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-});
+const getDailyKey = (ms = Date.now()) => warsawDayKey(ms);
 
-const warsawParts = (ms) => {
-  const parts = warsawDateFormatter.formatToParts(new Date(ms));
-  const result = {};
-  for (const part of parts) {
-    if (part.type === "year" || part.type === "month" || part.type === "day" || part.type === "hour") {
-      result[part.type] = Number(part.value);
-    }
-  }
-  return result;
-};
-
-const getDailyKey = (ms = Date.now()) => {
-  let effectiveMs = ms;
-  let { year, month, day, hour } = warsawParts(effectiveMs);
-  if (hour < 3) {
-    effectiveMs -= 3 * 60 * 60 * 1000;
-    ({ year, month, day } = warsawParts(effectiveMs));
-  }
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-};
-
-const warsawOffsetFormatter = new Intl.DateTimeFormat("en-US", {
-  timeZone: "Europe/Warsaw",
-  hour12: false,
-  timeZoneName: "longOffset",
-});
-
-const parseWarsawOffsetMinutes = (ms) => {
-  const parts = warsawOffsetFormatter.formatToParts(new Date(ms));
-  const offsetPart = parts.find((part) => part.type === "timeZoneName");
-  if (!offsetPart) return 0;
-  const match = /GMT([+-])(\d{2}):(\d{2})/.exec(offsetPart.value);
-  if (!match) return 0;
-  const sign = match[1] === "-" ? -1 : 1;
-  const hours = Number(match[2]);
-  const minutes = Number(match[3]);
-  return sign * (hours * 60 + minutes);
-};
-
-const toWarsawEpoch = (year, month, day, hour) => {
-  let guessUtc = Date.UTC(year, month - 1, day, hour, 0, 0, 0);
-  let offset = parseWarsawOffsetMinutes(guessUtc);
-  let adjusted = guessUtc - offset * 60_000;
-  const adjustedOffset = parseWarsawOffsetMinutes(adjusted);
-  if (adjustedOffset !== offset) {
-    offset = adjustedOffset;
-    adjusted = Date.UTC(year, month - 1, day, hour, 0, 0, 0) - offset * 60_000;
-  }
-  return adjusted;
-};
-
-const warsawNow = (ms = Date.now()) => ({
-  ...warsawParts(ms),
-  ms,
-});
-
-const getNextResetEpoch = (ms = Date.now()) => {
-  const current = warsawNow(ms);
-  let targetYear = current.year;
-  let targetMonth = current.month;
-  let targetDay = current.day;
-  if (current.hour >= 3) {
-    const tomorrow = warsawParts(ms + 24 * 60 * 60 * 1000);
-    targetYear = tomorrow.year;
-    targetMonth = tomorrow.month;
-    targetDay = tomorrow.day;
-  }
-  return toWarsawEpoch(targetYear, targetMonth, targetDay, 3);
-};
+const getNextResetEpoch = (ms = Date.now()) => nextWarsawResetMs(ms);
 
 // Redis Keys
 const keyDaily = (u, day = getDailyKey()) => `${KEY_NS}:daily:${u}:${day}`;
@@ -627,7 +553,7 @@ async function getSessionState(userId, sessionId) {
     };
   } catch (err) {
     if (DEBUG_ENABLED) {
-      klog("calc_session_state_get_failed", { userId, sessionId, error: err?.message });
+      klog("calc_session_state_get_failed", { error: err?.message });
     }
     return {
       combo: createComboState(),
@@ -647,7 +573,7 @@ async function saveSessionState(userId, sessionId, state) {
     return true;
   } catch (err) {
     if (DEBUG_ENABLED) {
-      klog("calc_session_state_save_failed", { userId, sessionId, error: err?.message });
+      klog("calc_session_state_save_failed", { error: err?.message });
     }
     return false;
   }
@@ -674,7 +600,7 @@ async function checkRateLimit({ userId, ip }) {
           exceeded: count > RATE_LIMIT_PER_USER_PER_MIN,
         }))
         .catch((err) => {
-          klog("xp_rate_limit_atomic_failed", { keyType: "user", userId, error: err?.message });
+          klog("xp_rate_limit_atomic_failed", { keyType: "user", error: err?.message });
           return { type: 'user', count: 0, limit: RATE_LIMIT_PER_USER_PER_MIN, exceeded: false };
         })
     );
@@ -801,11 +727,6 @@ export async function handler(event) {
     return json(405, { error: "method_not_allowed" }, origin);
   }
 
-  klog("calc_env_debug", {
-    XP_REQUIRE_ACTIVITY: process.env.XP_REQUIRE_ACTIVITY,
-    requireActivity: REQUIRE_ACTIVITY,
-  });
-
   // Parse body
   let body = {};
   try {
@@ -826,12 +747,6 @@ export async function handler(event) {
   const authContext = verifySupabaseJwt(jwtToken);
   const supabaseUserId = authContext.valid ? authContext.userId : null;
   const identityId = supabaseUserId || anonId || null;
-
-  klog("calc_identity_debug", {
-    anonId,
-    supabaseUserId,
-    identityId,
-  });
 
   if (!identityId || !sessionId) {
     return json(400, { error: "missing_fields", message: "identity and sessionId required" }, origin);
@@ -886,10 +801,8 @@ export async function handler(event) {
           sessionError = `session_${serverValidation.reason}`;
           if (serverValidation.suspicious) {
             klog("calc_session_validation_suspicious", {
-              userId,
-              fingerprint,
-              ip: clientIp,
               reason: serverValidation.reason,
+              identityType: supabaseUserId ? "authenticated" : "anonymous",
             });
           }
         } else {
@@ -919,10 +832,9 @@ export async function handler(event) {
       } else if (SERVER_SESSION_WARN_MODE) {
         // Warn mode: log but don't block
         klog("calc_session_validation_warn_mode_failed", {
-          userId,
           sessionError,
           hasToken: !!sessionToken,
-          ip: clientIp,
+          identityType: supabaseUserId ? "authenticated" : "anonymous",
         });
       }
     }
@@ -956,15 +868,6 @@ export async function handler(event) {
       }, origin);
     }
   }
-
-  klog("calc_award_attempt", {
-    identityId: userId,
-    supabaseUserId,
-    anonId,
-    gameId: body.gameId || null,
-    scoreDelta: body.scoreDelta ?? body.delta ?? null,
-    hasSessionToken: !!(body.sessionToken || event.headers?.["x-session-token"]),
-  });
 
   // Get or create session state
   const sessionState = await getSessionState(userId, sessionId);
@@ -1103,16 +1006,6 @@ export async function handler(event) {
 
   let res;
   try {
-    if (cappedDelta > 0) {
-      klog("calc_award_redis_eval_start", {
-        userId,
-        sessionId,
-        dayKeyNow,
-        keys: { todayKey, totalKeyK, sessionKeyK, sessionSyncKeyK },
-        cappedDelta,
-      });
-    }
-
     res = await store.eval(
       script,
       [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK],
@@ -1127,8 +1020,6 @@ export async function handler(event) {
     );
   } catch (err) {
     klog("calc_redis_eval_failed", {
-      userId,
-      sessionId,
       error: err?.message,
     });
     throw err;
@@ -1142,30 +1033,6 @@ export async function handler(event) {
   const status = Number(res?.[5]) || 0;
 
   const remaining = Math.max(0, DAILY_CAP - redisDailyTotal);
-
-  if (granted > 0) {
-    klog("calc_award_debug_totals", {
-      identityId: userId,
-      supabaseUserId,
-      anonId,
-      sessionId,
-      awarded: granted,
-      redisDailyTotal,
-      totalLifetime,
-      keys: { todayKey, totalKeyK, sessionKeyK, sessionSyncKeyK },
-    });
-
-    klog("calc_award_result", {
-      identityId: userId,
-      supabaseUserId,
-      anonId,
-      granted,
-      totalLifetime,
-      totalToday: redisDailyTotal,
-      status,
-      raw: res,
-    });
-  }
 
   // Update session state
   sessionState.combo = updatedCombo;

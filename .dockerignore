@@ -1,0 +1,4 @@
+**/node_modules
+ws-server/node_modules
+.git
+.artifacts

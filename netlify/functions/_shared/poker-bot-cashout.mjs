@@ -1,0 +1,163 @@
+import { postTransaction } from "./chips-ledger.mjs";
+import { isValidUuid } from "./poker-utils.mjs";
+import { klog } from "./supabase-admin.mjs";
+
+const normalizeStack = (value) => {
+  const num = Number(value);
+  if (!Number.isFinite(num) || !Number.isInteger(num)) return 0;
+  if (Math.abs(num) > Number.MAX_SAFE_INTEGER) return 0;
+  return num;
+};
+
+
+export async function ensureBotSeatInactiveForCashout(tx, { tableId, botUserId }) {
+  const lockedRows = await tx.unsafe(
+    "select user_id, seat_no, status, is_bot from public.poker_seats where table_id = $1 and user_id = $2 and is_bot = true limit 1 for update;",
+    [tableId, botUserId]
+  );
+  const seat = lockedRows?.[0] || null;
+  if (!seat) {
+    return { ok: false, skipped: true, reason: "seat_missing" };
+  }
+  if (seat.status !== "ACTIVE") {
+    return { ok: true, changed: false, seatNo: Number.isInteger(seat.seat_no) ? seat.seat_no : null };
+  }
+  await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2 and is_bot = true;", [tableId, botUserId]);
+  return { ok: true, changed: true, seatNo: Number.isInteger(seat.seat_no) ? seat.seat_no : null };
+}
+
+export async function cashoutBotSeatIfNeeded(
+  tx,
+  { tableId, botUserId, seatNo, reason, actorUserId, idempotencyKeySuffix, expectedAmount }
+) {
+  if (!isValidUuid(String(tableId || "").trim())) {
+    klog("poker_bot_cashout_failed", {
+      tableId: tableId ?? null,
+      botUserId,
+      seatNo: seatNo ?? null,
+      cause: reason,
+      code: "invalid_table_id",
+    });
+    const error = new Error("invalid_table_id");
+    error.code = "invalid_table_id";
+    throw error;
+  }
+
+  if (!isValidUuid(String(botUserId || "").trim())) {
+    klog("poker_bot_cashout_failed", {
+      tableId,
+      botUserId: botUserId ?? null,
+      seatNo: seatNo ?? null,
+      cause: reason,
+      code: "invalid_bot_user_id",
+    });
+    const error = new Error("invalid_bot_user_id");
+    error.code = "invalid_bot_user_id";
+    throw error;
+  }
+  const lockedRows = await tx.unsafe(
+    "select user_id, seat_no, status, is_bot, stack from public.poker_seats where table_id = $1 and user_id = $2 and is_bot = true limit 1 for update;",
+    [tableId, botUserId]
+  );
+  const seat = lockedRows?.[0] || null;
+  if (!seat) {
+    klog("poker_bot_cashout_skip", { tableId, botUserId, seatNo: seatNo ?? null, reason: "seat_missing", cause: reason });
+    return { ok: false, skipped: true, reason: "seat_missing" };
+  }
+
+  const effectiveSeatNo = Number.isInteger(seat.seat_no) ? seat.seat_no : seatNo;
+  if (!Number.isInteger(effectiveSeatNo)) {
+    const error = new Error("invalid_seat_no");
+    error.code = "invalid_seat_no";
+    throw error;
+  }
+  if (seat.status === "ACTIVE") {
+    klog("poker_bot_cashout_skip", {
+      tableId,
+      botUserId,
+      seatNo: effectiveSeatNo,
+      reason: "active_seat",
+      amount: 0,
+      cause: reason,
+    });
+    return { ok: true, skipped: true, reason: "active_seat", amount: 0, seatNo: effectiveSeatNo };
+  }
+
+  const providedExpectedAmount = normalizeStack(expectedAmount);
+  const amount = providedExpectedAmount > 0 ? providedExpectedAmount : normalizeStack(seat.stack);
+  if (amount <= 0) {
+    klog("poker_bot_cashout_skip", {
+      tableId,
+      botUserId,
+      seatNo: effectiveSeatNo,
+      reason: "non_positive_stack",
+      amount,
+      cause: reason,
+    });
+    return { ok: true, skipped: true, reason: "non_positive_stack", amount, seatNo: effectiveSeatNo };
+  }
+
+  const createdBy = String(actorUserId || "").trim();
+  if (!isValidUuid(createdBy)) {
+    klog("poker_bot_cashout_failed", {
+      tableId,
+      botUserId,
+      seatNo: effectiveSeatNo,
+      amount,
+      cause: reason,
+      code: "invalid_actor_user_id",
+    });
+    const error = new Error("invalid_actor_user_id");
+    error.code = "invalid_actor_user_id";
+    throw error;
+  }
+
+  const keySuffix = String(idempotencyKeySuffix || "").trim();
+  if (!keySuffix) {
+    klog("poker_bot_cashout_failed", {
+      tableId,
+      botUserId,
+      seatNo: effectiveSeatNo,
+      amount,
+      cause: reason,
+      code: "invalid_idempotency_suffix",
+    });
+    const error = new Error("invalid_idempotency_suffix");
+    error.code = "invalid_idempotency_suffix";
+    throw error;
+  }
+
+  const safeReason = String(reason || "UNKNOWN").toUpperCase();
+
+  await postTransaction({
+    userId: botUserId,
+    txType: "TABLE_CASH_OUT",
+    idempotencyKey: `bot-cashout:${tableId}:${botUserId}:${effectiveSeatNo}:${safeReason}:${keySuffix}`,
+    metadata: {
+      actor: "BOT",
+      reason: "BOT_CASH_OUT",
+      tableId,
+      seatNo: effectiveSeatNo,
+      botUserId,
+      cause: safeReason,
+    },
+    entries: [
+      { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -amount },
+      { accountType: "USER", amount },
+    ],
+    createdBy,
+    tx,
+  });
+
+  await tx.unsafe("update public.poker_seats set stack = 0 where table_id = $1 and user_id = $2;", [tableId, botUserId]);
+
+  klog("poker_bot_cashout_ok", {
+    tableId,
+    botUserId,
+    seatNo: effectiveSeatNo,
+    amount,
+    cause: safeReason,
+  });
+
+  return { ok: true, cashedOut: true, amount, seatNo: effectiveSeatNo };
+}

@@ -11,94 +11,44 @@
   <link rel="stylesheet" href="css/portal.css">
   <link rel="stylesheet" href="/css/xp-overlay.css">
   <style>
-    .account-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .account-grid{ display:grid; gap:16px; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); }
 
-    .account-note { color: #a0aec0; font-size: 14px; line-height: 1.5; }
+    .account-note{ color:#a0aec0; font-size:14px; line-height:1.5; }
 
-    .account-status { margin: 0 0 16px; padding: 12px 14px; border-radius: 12px; background: rgba(255, 255, 255, 0.05); }
+    .account-status{ margin:0 0 16px; padding:12px 14px; border-radius:12px; background:rgba(255, 255, 255, 0.05); }
 
-    .account-status[data-tone="error"] { color: #fda4af; background: rgba(255, 77, 109, 0.1); }
+    .account-status[data-tone="error"]{ color:#fda4af; background:rgba(255, 77, 109, 0.1); }
 
-    .account-status[data-tone="success"] { color: #86efac; background: rgba(22, 163, 74, 0.1); }
+    .account-status[data-tone="success"]{ color:#86efac; background:rgba(22, 163, 74, 0.1); }
 
-    .account-status[data-tone="info"] { color: #7dd3fc; background: rgba(14, 165, 233, 0.12); }
+    .account-status[data-tone="info"]{ color:#7dd3fc; background:rgba(14, 165, 233, 0.12); }
 
-    .account-form label { display: block; font-weight: 600; margin-bottom: 6px; }
+    .account-form label{ display:block; font-weight:600; margin-bottom:6px; }
 
-    .account-form input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.04); color: #e2e8f0; }
+    .account-form input{ width:100%; padding:10px 12px; border-radius:10px; border:1px solid rgba(255, 255, 255, 0.1); background:rgba(255, 255, 255, 0.04); color:#e2e8f0; }
 
-    .account-form input:focus { outline: 2px solid #6ee7e7; outline-offset: 2px; }
+    .account-form input:focus{ outline:2px solid #6ee7e7; outline-offset:2px; }
 
-    .account-form button { margin-top: 12px; width: 100%; padding: 12px; border: none; border-radius: 12px; background: linear-gradient(90deg, #6ee7e7, #a78bfa); color: #0b1020; font-weight: 700; cursor: pointer; }
+    .account-form button{ margin-top:12px; width:100%; padding:12px; border:none; border-radius:12px; background:linear-gradient(90deg, #6ee7e7, #a78bfa); color:#0b1020; font-weight:700; cursor:pointer; }
 
-    .account-form button:hover { opacity: 0.95; }
+    .account-form button:hover{ opacity:0.95; }
 
-    .account-panel__actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+    .account-panel__actions{ display:flex; flex-wrap:wrap; gap:12px; margin-top:12px; }
 
-    .account-panel__btn { padding: 10px 14px; border-radius: 12px; border: none; cursor: pointer; font-weight: 600; }
+    .account-panel__btn{ padding:10px 14px; border-radius:12px; border:none; cursor:pointer; font-weight:600; }
 
-    .account-panel__btn--primary { background: linear-gradient(90deg, #6ee7e7, #a78bfa); color: #0b1020; }
+    .account-panel__btn--primary{ background:linear-gradient(90deg, #6ee7e7, #a78bfa); color:#0b1020; }
 
-    .account-panel__btn--ghost { background: rgba(255, 255, 255, 0.08); color: #e2e8f0; }
-
-    .chip-pill { font: 600 13px/1 Poppins, sans-serif; color: #c7d2fe; background: rgba(99, 102, 241, 0.12); border: 1px solid rgba(129, 140, 248, 0.5); border-radius: 999px; padding: 8px 14px; display: inline-flex; align-items: center; gap: 6px; transition: transform 0.2s ease, background 0.2s ease; position: relative; overflow: visible; text-decoration: none; cursor: pointer; }
-
-    .chip-pill--loading { color: rgba(182, 200, 242, 0.96); background: rgba(148, 163, 184, 0.18); border-color: rgba(148, 163, 184, 0.35); }
-
-    .chip-pill--loading::after { content: ""; width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; margin-left: 4px; animation: xp-badge-spin 0.75s linear infinite; }
-
-    .chip-badge { color: #c7d2fe; }
-
-    .chip-badge__label { display: inline-flex; align-items: center; gap: 6px; }
-
-    .chip-panel { display: grid; gap: 12px; }
-
-    .chip-panel__header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-
-    .chip-balance { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-
-    .chip-balance__label { color: #94a3b8; font-size: 13px; text-transform: uppercase; letter-spacing: 0.4px; }
-
-    .chip-balance__value { font-weight: 800; color: #e2e8f0; font-size: 24px; }
-
-    .chip-ledger { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
-
-    .chip-ledger__item { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 10px 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.06); }
-
-    .chip-ledger__meta { display: flex; flex-direction: column; gap: 4px; }
-
-    .chip-ledger__type { font-weight: 700; color: #c7d2fe; }
-
-    .chip-ledger__desc { color: #cbd5e1; font-size: 14px; }
-
-    .chip-ledger__time { color: #94a3b8; font-size: 12px; }
-
-    .chip-ledger__amount { font-weight: 800; font-size: 18px; text-align: right; }
-
-    .chip-ledger__amount--positive { color: #86efac; }
-
-    .chip-ledger__amount--negative { color: #fca5a5; }
+    .account-panel__btn--ghost{ background:rgba(255, 255, 255, 0.08); color:#e2e8f0; }
   </style>
-  <script id="Cookiebot"
-          src="https://consent.cookiebot.com/uc.js"
-          data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
-          data-blockingmode="auto"
-          type="text/javascript">
-  </script>
-  <script type="text/plain" data-cookieconsent="statistics"
-          src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
-  <script type="text/plain" data-cookieconsent="statistics">
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){ dataLayer.push(arguments); }
-    gtag('js', new Date());
-    gtag('config', 'G-JRP62LCXYK');
-  </script>
-  <script src="js/analytics.js" defer></script>
+
+<script src="js/analytics.js" defer></script>
   <script src="js/i18n.js" defer></script>
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
   <script src="/js/auth/supabaseClient.js" defer></script>
   <script src="js/chips/client.js" defer></script>
+  <script src="js/core/number-format.js" defer></script>
   <script src="js/topbar.js" defer></script>
   <script src="js/xpClient.js" defer></script>
   <script src="/js/ui/xp-overlay.js" defer></script>
@@ -107,10 +57,15 @@
   <script src="js/xp/scoring.js" defer></script>
   <script src="js/xp/core.js" defer></script>
   <script src="js/xp.js" defer></script>
+  <script src="js/core/sidebar-model.js" defer></script>
   <script src="js/sidebar.js" defer></script>
   <script src="js/account-page.js" defer></script>
+  <link rel="stylesheet" href="js/vendor/klaro/klaro.css">
+  <script src="js/klaro-config.js" defer></script>
+  <script src="js/vendor/klaro/klaro.js" defer></script>
+  <script src="js/consent-services.js" defer></script>
 </head>
-<body>
+<body class="page-account">
   <div class="topbar">
     <div class="topbar-left">
       <button class="hamburger" id="sbToggle" aria-label="Toggle navigation" aria-expanded="false">
@@ -127,10 +82,7 @@
     </div>
     <div class="topbar-right">
       <a id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true" href="xp.html">
-        <span class="xp-badge__label">Syncing XP…</span>
-      </a>
-      <a id="chipBadge" class="chip-badge chip-pill chip-pill--loading" aria-live="polite" aria-busy="true" href="#chipPanel">
-        <span class="chip-badge__label"><span id="chipBadgeAmount">Syncing chips…</span></span>
+        <span class="xp-badge__label">XP</span>
       </a>
       <div class="avatar-shell" id="avatarShell">
         <button type="button" class="avatar-btn" id="avatarButton" aria-haspopup="true" aria-expanded="false">
@@ -242,7 +194,10 @@
             </div>
           </div>
           <p class="account-note" id="chipStatus" aria-live="polite"></p>
-          <ul class="chip-ledger" id="chipLedgerList"></ul>
+          <div class="chip-ledger__scroll" id="chipLedgerScroll">
+            <div class="chip-ledger__spacer" id="chipLedgerSpacer"></div>
+            <ul class="chip-ledger" id="chipLedgerList"></ul>
+          </div>
           <p class="account-note" id="chipLedgerEmpty" hidden>No chip activity yet.</p>
         </section>
       </article>
@@ -261,12 +216,13 @@
       <span class="sep">•</span>
       <a class="ft-link" href="mailto:contact@kcswh.pl">Contact</a>
       <span class="sep">•</span>
-      <a class="ft-link manage-cookies" id="manageCookies" href="#" data-cookieconsent="ignore">Manage cookies</a>
+      <a class="ft-link manage-cookies" id="manageCookies" href="#">Manage cookies</a>
     </nav>
     <div class="lang-switch" aria-label="Language">
       <button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button>
       <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
     </div>
   </footer>
+  <script src="js/consent-manager.js" defer></script>
 </body>
 </html>

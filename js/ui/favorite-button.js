@@ -3,10 +3,8 @@
  * Shows filled star when favorited, outline star when not
  * Only visible for authenticated users
  */
-console.log('[FavoriteButton] Script loading...');
 (function(global){
   'use strict';
-  console.log('[FavoriteButton] IIFE executing');
 
   const STAR_FILLED = '★';
   const STAR_OUTLINE = '☆';
@@ -88,10 +86,7 @@ console.log('[FavoriteButton] Script loading...');
       e.preventDefault();
       e.stopPropagation();
 
-      console.log('[FavoriteButton] CLICK - gameId:', gameId, 'hasService:', !!global.favoritesService, 'isLoading:', isLoading);
-
       if (!global.favoritesService || isLoading) {
-        console.log('[FavoriteButton] CLICK - early return (no service or loading)');
         return;
       }
 
@@ -99,13 +94,9 @@ console.log('[FavoriteButton] Script loading...');
       updateUI();
 
       try {
-        console.log('[FavoriteButton] CLICK - calling toggleFavorite...');
         const result = await global.favoritesService.toggleFavorite(gameId);
-        console.log('[FavoriteButton] CLICK - result:', result);
         if (result.success) {
           isFavorite = result.isFavorite;
-        } else {
-          console.warn('[FavoriteButton] CLICK - toggle failed, result:', result);
         }
       } catch (err) {
         console.error('[FavoriteButton] Failed to toggle favorite:', err);
@@ -119,19 +110,14 @@ console.log('[FavoriteButton] Script loading...');
      * Check authentication status and favorite state
      */
     async function checkStatus() {
-      console.debug('[FavoriteButton] checkStatus called, gameId=', gameId);
-
       if (!global.favoritesService) {
-        console.debug('[FavoriteButton] FavoritesService not available, retrying in 200ms');
         // Retry after a short delay - FavoritesService might not be loaded yet
         setTimeout(checkStatus, 200);
         return;
       }
 
       try {
-        console.debug('[FavoriteButton] Checking authentication...');
         isAuthenticated = await global.favoritesService.isAuthenticated();
-        console.debug('[FavoriteButton] isAuthenticated=', isAuthenticated);
 
         if (!button) return;
 
@@ -141,16 +127,13 @@ console.log('[FavoriteButton] Script loading...');
           // Check if game is favorite
           await global.favoritesService.init(false);
           isFavorite = global.favoritesService.isFavoriteSync(gameId);
-          console.debug('[FavoriteButton] isFavorite (cached)=', isFavorite);
           updateUI();
 
           // Fetch fresh data from API
           const freshFavorites = await global.favoritesService.getFavorites(true);
           isFavorite = freshFavorites.includes(gameId);
-          console.debug('[FavoriteButton] isFavorite (fresh)=', isFavorite);
           updateUI();
         } else {
-          console.debug('[FavoriteButton] Not authenticated, hiding button');
           button.style.display = 'none';
         }
       } catch (err) {
@@ -232,20 +215,17 @@ console.log('[FavoriteButton] Script loading...');
     const gameId = body.dataset.gameId || body.dataset.gameSlug;
 
     if (!gameId) {
-      console.debug('[FavoriteButton] No game ID found on body');
       return;
     }
 
     // Look for the actions container in titleBar
     const actionsContainer = document.querySelector('.titleBar .actions');
     if (!actionsContainer) {
-      console.debug('[FavoriteButton] No .titleBar .actions container found');
       return;
     }
 
     // Check if button already exists
     if (actionsContainer.querySelector('.btnFavorite')) {
-      console.debug('[FavoriteButton] Button already exists');
       return;
     }
 
@@ -258,8 +238,6 @@ console.log('[FavoriteButton] Script loading...');
       container: actionsContainer,
       insertPosition: 'afterbegin' // Insert at the beginning of actions
     });
-
-    console.debug('[FavoriteButton] Initialized for game:', gameId);
   }
 
   // Expose globally

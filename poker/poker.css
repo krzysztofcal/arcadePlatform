@@ -1,5 +1,16 @@
 .poker-page{max-width:900px; margin:0 auto; padding:20px;}
 
+.poker-ad-slot{
+  margin:0 0 16px;
+  padding:12px;
+  border:1px solid rgba(32,42,85,.9);
+  border-radius:14px;
+  background:rgba(10,15,30,.72);
+}
+
+.poker-ad-slot--secondary{
+  margin-top:20px;
+}
 .poker-header{display:flex; align-items:center; gap:16px; margin-bottom:20px;}
 
 .poker-header h2{margin:0; font:700 22px Poppins, sans-serif; color:#e8eeff;}
@@ -12,9 +23,206 @@
 
 .poker-btn--primary{background:rgba(110,231,231,.25); border-color:rgba(110,231,231,.5);}
 
+.poker-confirm-modal{
+  position:fixed;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:20px;
+  background:rgba(3, 7, 18, .72);
+  z-index:2400;
+}
+
+.poker-confirm-modal[hidden]{display:none;}
+
+.poker-confirm-dialog{
+  width:min(320px, 100%);
+  padding:20px;
+  border:1px solid rgba(110,231,231,.22);
+  border-radius:14px;
+  background:linear-gradient(180deg, rgba(17, 25, 40, .98), rgba(9, 14, 24, .98));
+  box-shadow:0 20px 48px rgba(0,0,0,.48);
+}
+
+.poker-confirm-title{
+  margin-bottom:14px;
+  color:#e8eeff;
+  font:700 16px Poppins, sans-serif;
+  text-align:center;
+}
+
+.poker-confirm-actions{
+  display:flex;
+  gap:12px;
+  justify-content:center;
+}
+
 .poker-panel{background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px; margin-bottom:16px;}
 
 .poker-panel h3{margin:0 0 12px; font:600 15px Poppins, sans-serif; color:#cdd6ff;}
+
+.poker-intro-panel h2{
+  margin:0 0 10px;
+  font:700 20px Poppins, sans-serif;
+  color:#e8eeff;
+}
+
+.poker-intro-panel p{
+  margin:0 0 10px;
+  font:500 14px/1.6 Poppins, sans-serif;
+  color:var(--muted);
+}
+
+.poker-intro-panel p:last-child{
+  margin-bottom:0;
+}
+
+.poker-showdown-panel{background:rgba(12,18,34,.55);}
+
+.poker-showdown-section{display:flex; flex-direction:column; gap:6px; margin-bottom:10px;}
+
+.poker-showdown-section:last-child{margin-bottom:0;}
+
+.poker-showdown-label{font:600 12px Poppins, sans-serif; color:var(--muted); text-transform:uppercase; letter-spacing:.04em;}
+
+.poker-showdown-body{font:600 13px Poppins, sans-serif; color:#e8eeff; word-break:break-word;}
+
+.poker-showdown-list{display:flex; flex-direction:column; gap:4px;}
+
+.poker-showdown-row{font:600 13px Poppins, sans-serif; color:#e8eeff;}
+
+.poker-showdown-meta{font:600 12px Poppins, sans-serif; color:var(--muted); display:flex; flex-direction:column; gap:4px;}
+
+.poker-showdown-flyout{
+  position:fixed;
+  right:16px;
+  bottom:16px;
+  width:min(220px, calc(100vw - 24px));
+  border:1px solid rgba(255,196,96,.42);
+  border-radius:12px;
+  background:
+    radial-gradient(120% 100% at 10% -20%, rgba(255,214,122,.2), transparent 52%),
+    radial-gradient(120% 100% at 100% 100%, rgba(57,227,201,.14), transparent 48%),
+    linear-gradient(155deg, rgba(9,14,24,.97), rgba(15,22,37,.97));
+  box-shadow:
+    0 18px 42px rgba(0,0,0,.55),
+    0 0 0 1px rgba(255,220,150,.08) inset;
+  padding:9px 10px;
+  color:#f4efe3;
+  opacity:0;
+  transform:translateX(0);
+  transition:opacity .2s ease, transform .2s ease;
+  backdrop-filter:blur(4px);
+  z-index:2200;
+  overflow:hidden;
+}
+
+.poker-showdown-flyout::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background:linear-gradient(90deg, transparent, rgba(255,233,170,.08), transparent);
+  transform:translateX(-120%);
+}
+
+.poker-showdown-flyout--visible::before{
+  animation:poker-showdown-shimmer 2.8s ease forwards;
+}
+
+.poker-showdown-flyout--visible{
+  opacity:1;
+  transform:translateX(0);
+  animation:poker-showdown-enter .28s cubic-bezier(.2,.85,.26,1);
+}
+
+.poker-showdown-flyout--exiting{
+  opacity:0;
+  transform:translateX(120%);
+  transition:opacity .24s ease, transform .24s ease;
+}
+
+.poker-showdown-flyout--won{
+  border-color:rgba(123,246,196,.55);
+  box-shadow:
+    0 18px 42px rgba(0,0,0,.55),
+    0 0 0 1px rgba(178,255,220,.14) inset,
+    0 0 26px rgba(80,241,183,.2);
+}
+
+.poker-showdown-flyout__title{
+  font:800 12px Poppins, sans-serif;
+  margin-bottom:6px;
+  letter-spacing:.03em;
+  text-transform:uppercase;
+  color:#ffd88a;
+  text-shadow:0 0 16px rgba(255,214,122,.28);
+}
+
+.poker-showdown-flyout--won .poker-showdown-flyout__title{
+  color:#9ff2cf;
+  text-shadow:0 0 18px rgba(95,244,191,.38);
+}
+
+.poker-showdown-flyout__label{
+  font:700 9px Poppins, sans-serif;
+  color:rgba(223,206,170,.88);
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  margin-bottom:3px;
+}
+
+.poker-showdown-flyout__value{
+  font:700 11px Poppins, sans-serif;
+  margin-bottom:6px;
+  color:#fff7df;
+  line-height:1.35;
+  word-break:break-word;
+}
+
+.poker-showdown-flyout__list{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  margin-bottom:6px;
+}
+
+.poker-showdown-flyout__row{
+  font:800 11px Poppins, sans-serif;
+  color:#ffe8b8;
+  border:1px solid rgba(255,198,97,.32);
+  border-radius:999px;
+  padding:3px 8px;
+  background:linear-gradient(180deg, rgba(48,36,19,.74), rgba(31,25,15,.58));
+  width:fit-content;
+  min-width:56px;
+  text-align:center;
+  box-shadow:0 5px 16px rgba(0,0,0,.32), 0 0 14px rgba(255,201,104,.12) inset;
+}
+
+.poker-showdown-flyout__cards{
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+}
+
+.poker-showdown-flyout .poker-card{
+  width:32px;
+  height:44px;
+  border-color:rgba(255,222,157,.62);
+  box-shadow:0 8px 18px rgba(0,0,0,.28);
+}
+
+@keyframes poker-showdown-enter{
+  from{opacity:0; transform:translateX(-36px);}
+  to{opacity:1; transform:translateX(0);}
+}
+
+@keyframes poker-showdown-shimmer{
+  0%{transform:translateX(-120%);}
+  100%{transform:translateX(140%);}
+}
 
 .poker-input{background:var(--card-2); border:1px solid var(--border); border-radius:8px; padding:8px 12px; color:#e8eeff; font:600 13px Poppins, sans-serif; width:80px; margin-right:8px;}
 
@@ -25,6 +233,20 @@
 .poker-form-row{display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;}
 
 .poker-form-row:last-child{margin-bottom:0;}
+
+.poker-actions-row{display:flex; align-items:center; flex-wrap:wrap; gap:6px;}
+
+.poker-actions-row .poker-btn{padding:6px 12px; font-size:12px;}
+
+.poker-action-amount{display:flex; align-items:center; gap:6px;}
+
+.poker-action-amount .poker-input{margin-right:0; width:90px;}
+
+.poker-inline-status{font:600 12px Poppins, sans-serif; color:var(--muted);}
+
+.poker-inline-status--error{color:#fca5a5;}
+
+.poker-inline-status--success{color:#a7f3d0;}
 
 .poker-table-list{display:flex; flex-direction:column; gap:8px;}
 
@@ -60,15 +282,27 @@
 
 .poker-info-item strong{color:#e8eeff;}
 
+.poker-turn-timer{font:600 12px Poppins, sans-serif; color:var(--muted); margin-bottom:10px;}
+
 .poker-seats-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); gap:10px; margin-bottom:16px;}
 
 .poker-seat{background:var(--card-2); border:1px solid var(--border); border-radius:10px; padding:12px; text-align:center;}
+
+.poker-seat--empty .poker-seat-user{color:var(--muted); font-style:italic;}
+
+.poker-seat--inactive{border-color:rgba(248,113,113,.5);}
 
 .poker-seat-no{font:700 11px Poppins, sans-serif; color:var(--muted); margin-bottom:4px;}
 
 .poker-seat-user{font:600 12px Poppins, sans-serif; color:#e8eeff; word-break:break-all;}
 
-.poker-seat--empty .poker-seat-user{color:var(--muted); font-style:italic;}
+.poker-seat-status{margin-top:6px; font:600 11px Poppins, sans-serif; color:var(--accent);}
+
+.poker-seat-status--active{color:var(--accent);}
+
+.poker-seat-status--inactive{color:#fca5a5;}
+
+.poker-seat-status--empty{color:var(--muted);}
 
 .poker-state-panel{background:var(--card-2); border:1px solid var(--border); border-radius:10px; padding:12px; margin-top:12px;}
 
@@ -85,3 +319,18 @@
 .poker-json-box[hidden]{display:none;}
 
 .poker-loading{color:var(--muted); font:600 13px Poppins, sans-serif; padding:20px; text-align:center;}
+
+.poker-card.poker-card--red{color:#ef4444;}
+
+.poker-card__rank{margin-right:2px;}
+
+.poker-card__suit{font-size:1.05em;}
+
+@media (max-width:700px){
+  .poker-showdown-flyout{
+    right:12px;
+    left:12px;
+    bottom:12px;
+    width:auto;
+  }
+}

@@ -38,6 +38,17 @@
     return false;
   }
 
+  function isDiagEnabled(win) {
+    if (!win) return false;
+    if (win.XP_DIAG) return true;
+    try {
+      if (win.location && typeof win.location.search === 'string') {
+        return /\bxpdiag=1\b/.test(win.location.search);
+      }
+    } catch (_) {}
+    return false;
+  }
+
   // State
   const state = {
     enabled: false,
@@ -109,7 +120,7 @@
       if (win) {
         win.XP_SERVER_CALC = enable;
       }
-      if (win && win.console && typeof win.console.debug === 'function') {
+      if (isDiagEnabled(win) && win && win.console && typeof win.console.debug === 'function') {
         win.console.debug('[xp] Server calc auto-config', {
           host: win && win.location && win.location.hostname,
           XP_SERVER_CALC: enable,
@@ -134,13 +145,15 @@
    */
   function init(options = {}) {
     if (state.initialized) {
-      console.warn('[XP-ServerCalc] Already initialized');
+      if (isDiagEnabled(window) && window.console && console.warn) {
+        console.warn('[XP-ServerCalc] Already initialized');
+      }
       return state;
     }
 
     state.enabled = isEnabled();
     if (!state.enabled) {
-      if (window.console && console.debug) {
+      if (isDiagEnabled(window) && window.console && console.debug) {
         console.debug('[XP-ServerCalc] Server-side calculation not enabled');
       }
       return state;
@@ -171,7 +184,7 @@
 
     state.initialized = true;
 
-    if (window.console && console.log) {
+    if (isDiagEnabled(window) && window.console && console.log) {
       console.log('[XP-ServerCalc] Initialized for game:', state.gameId);
     }
 
@@ -198,22 +211,22 @@
       visibilityStart = Date.now();
     }
 
-    document.addEventListener('visibilitychange', function () {
-      if (document.hidden) {
-        // Tab became hidden - record visible time
-        if (isVisible && visibilityStart > 0) {
-          const visibleMs = Date.now() - visibilityStart;
-          state.visibilitySeconds += visibleMs / 1000;
-        }
-        isVisible = false;
-      } else {
-        // Tab became visible
-        isVisible = true;
-        visibilityStart = Date.now();
+    document.addEventListener('xp:hidden', function () {
+      if (!isVisible) return;
+      if (visibilityStart > 0) {
+        const visibleMs = Date.now() - visibilityStart;
+        state.visibilitySeconds += visibleMs / 1000;
       }
-    });
+      isVisible = false;
+      visibilityStart = 0;
+    }, { passive: true });
 
-    // Note: beforeunload handling is done in core.js to comply with lifecycle guards
+    document.addEventListener('xp:visible', function () {
+      if (isVisible) return;
+      isVisible = true;
+      visibilityStart = Date.now();
+    }, { passive: true });
+      // Note: beforeunload handling is done in core.js to comply with lifecycle guards
   }
 
   /**

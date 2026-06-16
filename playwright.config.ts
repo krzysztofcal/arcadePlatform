@@ -8,17 +8,34 @@ const BASE_URL = `http://${HOST}:${PORT}`;
 const systemChromium = findSystemChromium();
 
 type UseConfig = NonNullable<ReturnType<typeof defineConfig>['use']>;
-const useConfig: UseConfig = {
+const baseUseConfig: UseConfig = {
   baseURL: BASE_URL,
 };
 
+const requestedBrowser = process.env.PLAYWRIGHT_BROWSER || '';
+const allowedBrowsers = new Set(['chromium', 'firefox', 'webkit']);
+if (requestedBrowser && !allowedBrowsers.has(requestedBrowser)) {
+  throw new Error(
+    `Invalid PLAYWRIGHT_BROWSER "${requestedBrowser}". Allowed values: chromium, firefox, webkit.`
+  );
+}
+const chromiumUse: UseConfig = { ...baseUseConfig, browserName: 'chromium' };
 if (process.env.PLAYWRIGHT_BROWSER_CHANNEL) {
-  useConfig.channel = process.env.PLAYWRIGHT_BROWSER_CHANNEL as UseConfig['channel'];
+  chromiumUse.channel = process.env.PLAYWRIGHT_BROWSER_CHANNEL as UseConfig['channel'];
 } else if (systemChromium) {
-  useConfig.browserName = 'chromium';
-  useConfig.launchOptions = {
+  chromiumUse.launchOptions = {
     executablePath: systemChromium,
   };
+}
+
+const resolvedBrowser = requestedBrowser || (systemChromium ? 'chromium' : '');
+let useConfig: UseConfig = baseUseConfig;
+if (resolvedBrowser) {
+  if (resolvedBrowser === 'chromium') {
+    useConfig = chromiumUse;
+  } else {
+    useConfig = { ...baseUseConfig, browserName: resolvedBrowser as UseConfig['browserName'] };
+  }
 }
 
 const testMatch =
@@ -45,7 +62,12 @@ export default defineConfig({
       XP_DAILY_SECRET: 'test-secret-for-sessions-32chars!',
       XP_DEBUG: '1',
       // Enable CORS whitelist for security testing
-      XP_CORS_ALLOW: 'http://localhost:8888,https://example.netlify.app',
+      XP_CORS_ALLOW: `http://localhost:${PORT},http://127.0.0.1:${PORT},https://example.netlify.app`,
+      XP_RATE_LIMIT_ENABLED: '0', // test harness only: avoid cross-suite 429 flake
+      XP_RATE_LIMIT_WINDOW_SEC: '5',
+      XP_RATE_LIMIT_USER_PER_MIN: '10',
+      XP_RATE_LIMIT_IP_PER_MIN: '40',
+      XP_SESSION_RATE_LIMIT_ENABLED: '0', // test harness only: avoid CI flake from session bootstrap churn
     },
   },
 });

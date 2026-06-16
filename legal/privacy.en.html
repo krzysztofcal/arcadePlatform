@@ -10,38 +10,31 @@
   <link rel="stylesheet" href="../css/portal.css">
   <link rel="stylesheet" href="../css/xp-badge.css">
   <link rel="stylesheet" href="/css/xp-overlay.css">
-  <script id="Cookiebot"
-          src="https://consent.cookiebot.com/uc.js"
-          data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
-          data-blockingmode="auto"
-          type="text/javascript">
-  </script>
-  <!-- GA4 (blocked until Statistics consent) -->
-  <script type="text/plain" data-cookieconsent="statistics"
-          src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
-  <script type="text/plain" data-cookieconsent="statistics">
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){ dataLayer.push(arguments); }
-    gtag('js', new Date());
-    gtag('config', 'G-JRP62LCXYK');
-  </script>
-  <script src="../js/analytics.js" defer></script>
-  <script src="../js/i18n.js" defer></script>
+
+<script src="../js/analytics.js" defer></script>
+  <script src="/js/i18n.js" defer></script>
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
   <script src="/js/auth/supabaseClient.js" defer></script>
-  <script src="../js/topbar.js" defer></script>
-  <script src="../js/xpClient.js" defer></script>
+  <script src="/js/chips/client.js" defer></script>
+  <script src="/js/core/number-format.js" defer></script>
+  <script src="/js/topbar.js" defer></script>
+  <script src="/js/xpClient.js" defer></script>
   <script src="/js/ui/xp-overlay.js" defer></script>
   <script src="../js/core/catalog.js" defer></script>
   <script src="../js/core/search-utils.js" defer></script>
   <script src="../js/search-popup.js" defer></script>
   <script src="../js/search-popup-bootstrap.js" defer></script>
-  <script src="../js/sidebar.js" defer></script>
+  <script src="/js/core/sidebar-model.js" defer></script>
+  <script src="/js/sidebar.js" defer></script>
   <script src="../js/xp/combo.js" defer></script>
   <script src="../js/xp/scoring.js" defer></script>
   <script src="../js/xp/core.js" defer></script>
   <script src="../js/xp.js" defer></script>
+  <link rel="stylesheet" href="../js/vendor/klaro/klaro.css">
+  <script src="../js/klaro-config.js" defer></script>
+  <script src="../js/vendor/klaro/klaro.js" defer></script>
+  <script src="../js/consent-services.js" defer></script>
 </head>
 <body>
   <div class="topbar">
@@ -85,28 +78,7 @@
   <div class="shell">
     <aside class="sidebar collapsed" id="sidebar" aria-label="Main navigation">
       <nav class="sb-nav">
-        <ul class="sb-list">
-          <li class="sb-item">
-            <a href="../index.html" class="sb-link sb-home" aria-label="Home" tabindex="0">
-              <span class="sb-ico" aria-hidden="true">
-                <svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z"/></svg>
-              </span>
-              <span class="sb-label">Home</span>
-            </a>
-          </li>
-          <li class="sb-item">
-            <a href="../recently-played.html" class="sb-link" aria-label="Recently played" tabindex="0">
-              <span class="sb-ico" aria-hidden="true"></span>
-              <span class="sb-label" data-i18n="recentlyPlayed">Recently played</span>
-            </a>
-          </li>
-          <li class="sb-item">
-            <a href="../about.en.html" class="sb-link" tabindex="0" data-href-en="../about.en.html" data-href-pl="../about.pl.html">
-              <span class="sb-ico" aria-hidden="true"></span>
-              <span class="sb-label" data-i18n="about">About</span>
-            </a>
-          </li>
-        </ul>
+        <ul class="sb-list"></ul>
       </nav>
     </aside>
 
@@ -125,7 +97,7 @@
       <li>Account metadata such as display name and avatar initials.</li>
       <li>XP and game progress tied to your user ID for cloud sync.</li>
       <li>Security and activity logs (e.g., sign-in events, error diagnostics).</li>
-      <li>Consent and analytics data when you opt in via Cookiebot.</li>
+      <li>Consent and analytics data when you opt in via the consent manager.</li>
     </ul>
 
     <h2>Purposes and legal bases</h2>
@@ -134,7 +106,7 @@
       <li>XP cloud sync and account management – Art. 6(1)(b) GDPR.</li>
       <li>Security, fraud prevention, service integrity – Art. 6(1)(f) GDPR (legitimate interest).</li>
       <li>Compliance with legal obligations (e.g., security logging) – Art. 6(1)(c) GDPR.</li>
-      <li>Analytics and optional measurements – Art. 6(1)(a) GDPR (consent via Cookiebot).</li>
+      <li>Analytics and optional measurements – Art. 6(1)(a) GDPR (consent via the consent manager).</li>
     </ul>
 
     <h2>How we use your data</h2>
@@ -155,8 +127,8 @@
     <h2>Cookies and similar technologies</h2>
     <ul>
       <li>Authentication cookies from Supabase are strictly necessary and cannot be turned off without disabling sign-in.</li>
-      <li>Preferences and consent cookies store your Cookiebot choices.</li>
-      <li>Analytics cookies (e.g., Google Analytics) load only after you provide consent through Cookiebot.</li>
+      <li>Preferences and consent cookies store your consent manager choices.</li>
+      <li>Analytics cookies (e.g., Google Analytics) load only after you provide consent through the consent manager.</li>
       <li>You can revisit choices anytime via the <a class="ft-link manage-cookies" data-i18n="manageCookies" href="#">Manage cookies</a> control.</li>
     </ul>
 
@@ -171,7 +143,7 @@
     <p>Supabase and other providers may process data outside your country, including in the USA. Transfers rely on SCCs and comparable safeguards.</p>
 
     <h2>Your rights</h2>
-    <p>You can request access, rectification, deletion, restriction, portability, or objection to processing. You may withdraw consent for analytics at any time via Cookiebot. To exercise rights, email <a class="ft-link" href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. You may lodge a complaint with the Polish Data Protection Authority (UODO).</p>
+    <p>You can request access, rectification, deletion, restriction, portability, or objection to processing. You may withdraw consent for analytics at any time via the consent manager. To exercise rights, email <a class="ft-link" href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. You may lodge a complaint with the Polish Data Protection Authority (UODO).</p>
 
     <h2>Account deletion</h2>
     <p>You can request deletion by emailing <a class="ft-link" href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Automated in-app deletion is planned; until then, we will process requests manually and remove associated XP records, sessions, and metadata where legally permissible.</p>
@@ -202,13 +174,13 @@
       <a class="ft-link" data-i18n="contact" href="mailto:contact@kcswh.pl">Contact</a>
       <span class="sep">•</span>
       <a class="ft-link manage-cookies" data-i18n="manageCookies"
-         id="manageCookies" href="#" data-cookieconsent="ignore">Manage cookies</a>
+         id="manageCookies" href="#">Manage cookies</a>
     </nav>
     <div class="lang-switch" aria-label="Language">
       <button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button>
       <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
     </div>
   </footer>
-  <script src="../js/cookiebot-manager.js" defer></script>
+  <script src="../js/consent-manager.js" defer></script>
 </body>
 </html>

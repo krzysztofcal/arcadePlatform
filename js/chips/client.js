@@ -26,6 +26,29 @@
     return num;
   }
 
+  function normalizeTimestampToIso(value){
+    if (!value) return null;
+    if (value instanceof Date){
+      if (Number.isNaN(value.getTime())) return null;
+      return value.toISOString();
+    }
+    if (typeof value !== 'string') return null;
+    var normalized = value.trim();
+    if (!normalized) return null;
+    var spaceIndex = normalized.indexOf(' ');
+    if (spaceIndex !== -1){
+      normalized = normalized.slice(0, spaceIndex) + 'T' + normalized.slice(spaceIndex + 1);
+    }
+    normalized = normalized.replace(/([+-]\d{2})(\d{2})$/, '$1:$2');
+    normalized = normalized.replace(/\+00$/, 'Z');
+    if (!/[Zz]|[+-]\d{2}:?\d{2}$/.test(normalized)){
+      normalized += 'Z';
+    }
+    var parsed = new Date(normalized);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toISOString();
+  }
+
   function klog(kind, data){
     try {
       if (window.KLog && typeof window.KLog.log === 'function'){
@@ -177,8 +200,8 @@
 
   async function fetchLedger(options){
     var params = [];
-    if (options && Number.isInteger(options.after)){
-      params.push('after=' + encodeURIComponent(options.after));
+    if (options && typeof options.cursor === 'string' && options.cursor){
+      params.push('cursor=' + encodeURIComponent(options.cursor));
     }
     if (options && Number.isInteger(options.limit)){
       params.push('limit=' + encodeURIComponent(options.limit));
@@ -186,48 +209,48 @@
     var url = params.length ? (LEDGER_URL + '?' + params.join('&')) : LEDGER_URL;
     try {
       var payload = await authedFetchWithRetry(url, { method: 'GET' });
-      if (payload && payload.data && payload.data.entries){
+      var items = payload && payload.data
+        ? (Array.isArray(payload.data.items)
+          ? payload.data.items
+          : (Array.isArray(payload.data.entries) ? payload.data.entries : null))
+        : null;
+      if (payload && payload.data && items){
         var loggedInvalidAmount = false;
         var loggedInvalidSeq = false;
-        for (var i = 0; i < payload.data.entries.length; i++){
-          var entry = payload.data.entries[i];
+        for (var i = 0; i < items.length; i++){
+          var entry = items[i];
           if (entry){
             var rawAmount = entry && Object.prototype.hasOwnProperty.call(entry, 'amount') ? entry.amount : null;
             var parsedAmount = parseLedgerAmount(rawAmount);
             entry.amount = parsedAmount;
-            if (
-              !loggedInvalidAmount &&
-              rawAmount != null &&
-              parsedAmount == null &&
-              window &&
-              window.XP_DIAG &&
-              console &&
-              typeof console.debug === 'function'
-            ){
+            if (!loggedInvalidAmount && rawAmount != null && parsedAmount == null){
               loggedInvalidAmount = true;
-              try {
-                console.debug('[chips] invalid ledger amount', {
-                  entry_seq: entry.entry_seq,
-                  raw_amount: entry && entry.raw_amount != null ? entry.raw_amount : rawAmount,
-                  tx_type: entry.tx_type,
-                });
-              } catch (_err){}
+              klog('chips:ledger_invalid_amount', {
+                entry_seq: entry.entry_seq,
+                raw_amount: entry && entry.raw_amount != null ? entry.raw_amount : rawAmount,
+                tx_type: entry.tx_type,
+              });
             }
             var hasValidSeq = Number.isInteger(entry.entry_seq) && entry.entry_seq > 0;
-            if (!loggedInvalidSeq && !hasValidSeq && window && window.XP_DIAG && console && typeof console.debug === 'function'){
+            if (!loggedInvalidSeq && !hasValidSeq){
               loggedInvalidSeq = true;
-              try {
-                console.debug('[chips] invalid ledger entry_seq', { raw_entry_seq: entry.entry_seq, tx_type: entry.tx_type });
-              } catch (_err2){}
+              klog('chips:ledger_invalid_entry_seq', { raw_entry_seq: entry.entry_seq, tx_type: entry.tx_type });
             }
+            entry.display_created_at = normalizeTimestampToIso(entry.display_created_at);
+            entry.created_at = normalizeTimestampToIso(entry.created_at);
+            entry.tx_created_at = normalizeTimestampToIso(entry.tx_created_at);
           }
         }
+      }
+      if (payload && payload.data && items){
+        payload.data.items = items;
+        payload.data.entries = items;
       }
       emit('chips:ledger', payload.data);
       return payload.data;
     } catch (err){
       if (err && err.status === 404){
-        var empty = { entries: [] };
+        var empty = { items: [], entries: [], nextCursor: null };
         emit('chips:ledger', empty);
         return empty;
       }

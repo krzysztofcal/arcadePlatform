@@ -1,0 +1,15 @@
+name: Poker Sweep
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sweep endpoint retired
+        run: |
+          echo "HTTP poker-sweep endpoint is retired (410); gameplay cleanup is WS-owned."

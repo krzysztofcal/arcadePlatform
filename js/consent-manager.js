@@ -5,35 +5,26 @@
     if (!node || !selector) return false;
     var fn = node.matches || node.msMatchesSelector || node.webkitMatchesSelector || node.mozMatchesSelector;
     if (!fn) return false;
-    try {
-      return fn.call(node, selector);
-    } catch (err) {
-      return false;
-    }
+    try { return fn.call(node, selector); } catch (_err) { return false; }
   }
 
   function findManageLink(start){
     var current = start;
     while (current && current !== document){
-      if (matchesSelector(current, '#manageCookies, .manage-cookies')) return current;
+      if (matchesSelector(current, '#manageCookies, .manage-cookies, [data-manage-cookies]')) return current;
       current = current.parentElement;
     }
     return null;
   }
 
-  function reopenCookiebot(){
-    if (typeof window === 'undefined') return false;
-    if (!window.Cookiebot) return false;
-    try {
-      if (typeof window.Cookiebot.show === 'function') {
-        window.Cookiebot.show();
-        return true;
-      }
-      if (typeof window.Cookiebot.renew === 'function') {
-        window.Cookiebot.renew();
-        return true;
-      }
-    } catch (err) {}
+  function showManager(){
+    if (window.ArcadeConsent && typeof window.ArcadeConsent.showManager === 'function') {
+      return window.ArcadeConsent.showManager();
+    }
+    if (window.klaro && typeof window.klaro.show === 'function') {
+      window.klaro.show(window.klaroConfig, true);
+      return true;
+    }
     return false;
   }
 
@@ -41,15 +32,13 @@
     if (typeof console !== 'undefined' && console && typeof console.warn === 'function') {
       console.warn('Consent manager not loaded yet.');
     }
-    try { alert('Consent manager not loaded yet.'); } catch (err) {}
+    try { alert('Consent manager not loaded yet.'); } catch (_err) {}
   }
 
   document.addEventListener('click', function(event){
     var link = findManageLink(event && event.target);
     if (!link) return;
     if (event && typeof event.preventDefault === 'function') event.preventDefault();
-    if (!reopenCookiebot()) {
-      notifyUnavailable();
-    }
+    if (!showManager()) notifyUnavailable();
   }, { passive: false });
 })();

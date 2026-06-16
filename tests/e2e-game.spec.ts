@@ -13,6 +13,37 @@ async function readTimeLeft(page: import('@playwright/test').Page) {
   return m ? parseFloat(m[1]) : NaN;
 }
 
+async function readStableTimeLeft(
+  page: import('@playwright/test').Page,
+  timeout = 1000
+) {
+  let previous: number | null = null;
+  let stableCount = 0;
+  let stableValue = NaN;
+  await expect
+    .poll(async () => {
+      const current = await readTimeLeft(page);
+      if (!Number.isFinite(current)) {
+        previous = null;
+        stableCount = 0;
+        return false;
+      }
+      if (previous !== null && Math.abs(current - previous) < 0.000001) {
+        stableCount += 1;
+      } else {
+        stableCount = 0;
+      }
+      previous = current;
+      stableValue = current;
+      return stableCount >= 2;
+    }, {
+      timeout,
+      intervals: [100, 150, 200],
+    })
+    .toBe(true);
+  return stableValue;
+}
+
 test('game starts, pauses, and resumes', async ({ page }) => {
   const gamePath = path.join(__dirname, '..', 'game_cats.html');
   expect(fs.existsSync(gamePath)).toBeTruthy();
@@ -50,15 +81,32 @@ test('game starts, pauses, and resumes', async ({ page }) => {
   await expect(page.locator('#status')).toHaveText(/Punkty: 0/);
 
   const timeAfterStart = await readTimeLeft(page);
-  await page.waitForTimeout(200);
-  const timeAfterWait = await readTimeLeft(page);
-  expect(timeAfterWait).toBeLessThan(timeAfterStart);
+  await expect
+    .poll(async () => readTimeLeft(page), {
+      timeout: 2500,
+      intervals: [100, 200, 300],
+    })
+    .toBeLessThan(timeAfterStart);
 
   await page.locator('#btnPause').click();
   await expect(page.locator('#btnPause')).toHaveAttribute('aria-pressed', 'true');
+  const pausedBaseline = await readStableTimeLeft(page);
+  expect(Number.isFinite(pausedBaseline)).toBe(true);
+  await expect
+    .poll(async () => readTimeLeft(page), {
+      timeout: 600,
+      intervals: [150, 150, 150],
+    })
+    .toBeGreaterThanOrEqual(pausedBaseline);
 
   await page.locator('#btnPause').click();
   await expect(page.locator('#btnPause')).toHaveAttribute('aria-pressed', 'false');
+  await expect
+    .poll(async () => readTimeLeft(page), {
+      timeout: 2500,
+      intervals: [100, 200, 300],
+    })
+    .toBeLessThan(pausedBaseline);
 });
 
 test('replay button restarts the round', async ({ page }) => {

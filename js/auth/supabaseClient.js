@@ -19,6 +19,13 @@
     }
   }
 
+  function getEmailDomain(email){
+    if (!email || typeof email !== 'string') return null;
+    var atIndex = email.lastIndexOf('@');
+    if (atIndex <= 0 || atIndex === email.length - 1) return null;
+    return email.slice(atIndex + 1).toLowerCase();
+  }
+
   function pickEnv(){
     var cfg = (window.SUPABASE_CONFIG || {});
     return {
@@ -60,7 +67,14 @@
     return client.auth.getSession().then(function(res){
       var session = res && res.data ? res.data.session : null;
       var user = session && session.user ? session.user : null;
-      logDiag('supabase:session_initial', { hasSession: !!user, hasEmail: !!(user && user.email) });
+      var emailDomain = getEmailDomain(user && user.email);
+      logDiag('supabase:session_initial', {
+        hasSession: !!user,
+        hasEmail: !!(user && user.email),
+        userId: user && user.id ? user.id : null,
+        emailDomain: emailDomain,
+        sessionExpiresAt: session && session.expires_at ? session.expires_at : null
+      });
       return user;
     }).catch(function(err){
       logDiag('supabase:session_error', { message: err && err.message ? String(err.message) : 'error' });
@@ -108,7 +122,15 @@
     }
     authSubscriptionAttached = true;
     var result = client.auth.onAuthStateChange(function(event, session){
-      logDiag('supabase:auth_change', { event: event, hasUser: !!(session && session.user) });
+      var user = session && session.user ? session.user : null;
+      var emailDomain = getEmailDomain(user && user.email);
+      logDiag('supabase:auth_change', {
+        event: event,
+        hasUser: !!user,
+        userId: user && user.id ? user.id : null,
+        emailDomain: emailDomain,
+        sessionExpiresAt: session && session.expires_at ? session.expires_at : null
+      });
       notifyAuthListeners(event, session || null);
     });
   }

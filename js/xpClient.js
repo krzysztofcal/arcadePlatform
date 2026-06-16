@@ -32,6 +32,17 @@
 
   let serverCalcInitRequested = false;
 
+  function isDiagEnabled() {
+    if (typeof window === "undefined" || !window) return false;
+    if (window.XP_DIAG) return true;
+    try {
+      if (typeof location !== "undefined" && location && typeof location.search === "string") {
+        return /\bxpdiag=1\b/.test(location.search);
+      }
+    } catch (_) {}
+    return false;
+  }
+
   function hostShouldUseServerCalc(win) {
     const host = win && win.location && win.location.hostname;
     if (!host) return false;
@@ -92,7 +103,7 @@
       }
     } catch (_) {}
     try {
-      if (typeof console !== "undefined" && console && typeof console.log === "function") {
+      if (isDiagEnabled() && typeof console !== "undefined" && console && typeof console.log === "function") {
         console.log(`[klog] ${kind}`, data || {});
       }
     } catch (_) {}
@@ -151,7 +162,7 @@
           : null;
         if (getter) {
           token = await getter();
-          if (window && window.console && typeof console.debug === "function") {
+          if (isDiagEnabled() && window && window.console && typeof console.debug === "function") {
             console.debug("[XPClient] auth_bridge_result", { hasToken: !!token });
           }
         }
@@ -163,7 +174,7 @@
             const session = res && res.data ? res.data.session : null;
             token = session && session.access_token ? session.access_token : null;
           }
-          if (window && window.console && typeof console.debug === "function") {
+          if (isDiagEnabled() && window && window.console && typeof console.debug === "function") {
             console.debug("[XPClient] auth_client_result", { hasToken: !!token });
           }
         }
@@ -172,7 +183,7 @@
         state.authCheckedAt = Date.now();
         return state.authToken;
       } catch (err) {
-        if (window && window.console && typeof console.warn === "function") {
+        if (isDiagEnabled() && window && window.console && typeof console.warn === "function") {
           try {
             const message = err && err.message ? String(err.message) : "error";
             console.warn("[XPClient] auth_token_fetch_error", { message });
@@ -373,8 +384,9 @@
         });
 
         if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          console.error("[XPClient] Failed to start session:", res.status, text);
+          if (isDiagEnabled() && window && window.console && typeof console.error === "function") {
+            console.error("[XPClient] Failed to start session", { status: res.status });
+          }
           throw new Error(`Session start failed (${res.status})`);
         }
 
@@ -727,7 +739,7 @@
     } catch (_) {}
 
     try {
-      if (window && window.console && typeof console.debug === "function") {
+      if (isDiagEnabled() && window && window.console && typeof console.debug === "function") {
         console.debug("[xpClient] Server calc decision", {
           XP_SERVER_CALC: window.XP_SERVER_CALC,
           serverCalcEnabled,
@@ -826,7 +838,7 @@
           responseBody._transport = "keepalive";
         }
 
-        if (window && window.console && typeof window.console.debug === "function" && responseBody) {
+        if (isDiagEnabled() && window && window.console && typeof window.console.debug === "function" && responseBody) {
           window.console.debug("[XP] server_calc_apply", {
             awarded: responseBody.awarded || 0,
             totalLifetime: responseBody.totalLifetime,

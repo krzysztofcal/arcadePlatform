@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { store } from "./_shared/store-upstash.mjs";
+import { buildCorsAllowlist, buildCorsHeaders } from "./_shared/xp-cors.mjs";
 
 // Configuration
 const SESSION_TTL_SEC = Math.max(0, Number(process.env.XP_SESSION_TTL_SEC) || 604800); // 7 days default
@@ -7,18 +8,7 @@ const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
 const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_JWT_SECRET_V2 || "";
 // Build CORS allowlist from env var + auto-include Netlify site URL
-const CORS_ALLOW = (() => {
-  const fromEnv = (process.env.XP_CORS_ALLOW ?? "")
-    .split(",")
-    .map(s => s.trim())
-    .filter(Boolean);
-  // Auto-include the Netlify site URL (handles custom domains)
-  const siteUrl = process.env.URL;
-  if (siteUrl && !fromEnv.includes(siteUrl)) {
-    fromEnv.push(siteUrl);
-  }
-  return fromEnv;
-})();
+const CORS_ALLOW = buildCorsAllowlist({ xpCorsAllow: process.env.XP_CORS_ALLOW, siteUrl: process.env.URL });
 
 // Rate limiting for session creation
 const SESSION_RATE_LIMIT_PER_IP_PER_MIN = Math.max(0, Number(process.env.XP_SESSION_RATE_LIMIT_IP) || 5);
@@ -105,27 +95,7 @@ const keySessionRateLimitIp = (ip) => `${KEY_NS}:session-ratelimit:ip:${hash(ip)
 
 // CORS headers
 function corsHeaders(origin) {
-  const headers = {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-  };
-
-  if (!origin) {
-    return headers;
-  }
-
-  const isNetlifyDomain = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin);
-
-  if (!isNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
-    return null;
-  }
-
-  headers["access-control-allow-origin"] = origin;
-  headers["access-control-allow-headers"] = "content-type,authorization,x-api-key";
-  headers["access-control-allow-methods"] = "POST,OPTIONS";
-  headers["Vary"] = "Origin";
-
-  return headers;
+  return buildCorsHeaders({ origin, allowlist: CORS_ALLOW, methods: "POST,OPTIONS", headers: "content-type,authorization,x-api-key" });
 }
 
 const json = (statusCode, obj, origin, extraHeaders) => {

@@ -44,8 +44,18 @@ if (!arcadeSlug || !puzzleSlug) {
 const puzzleCategory = Array.isArray(puzzleGame.category) && puzzleGame.category[0] ? puzzleGame.category[0] : 'Puzzle';
 const arcadeSlugParam = encodeURIComponent(arcadeSlug);
 const puzzleSlugParam = encodeURIComponent(puzzleSlug);
+const preseededConsent = encodeURIComponent(JSON.stringify({
+  googleAnalytics: true,
+  googleAds: true,
+}));
 
 test.describe('portal smoke tests', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript((value) => {
+      document.cookie = `arcade_consent=${value}; path=/; SameSite=Lax`;
+    }, preseededConsent);
+  });
+
   test('renders categories and game cards', async ({ page }) => {
     await page.goto('/');
     await page.waitForFunction(() => document.querySelectorAll('#gamesGrid .card').length > 1);

@@ -1055,7 +1055,7 @@ function bootXpCore(window, document) {
     state.snapshot = computeLevel(state.totalLifetime);
     const totalText = state.snapshot.totalXp.toLocaleString();
     state.labelEl.textContent = `Lvl ${state.snapshot.level}, ${totalText} XP`;
-    if (window.console && console.debug) {
+    if (isDiagEnabled() && window.console && console.debug) {
       console.debug("[XP] ui_display_total_xp", {
         authenticated,
         displayTotal: candidate,
@@ -1127,11 +1127,11 @@ function bootXpCore(window, document) {
         context.window = { ...state.pendingWindow };
       }
       logDebug("window_error", context);
-      if (window.console && console.debug) {
+      if (isDiagEnabled() && window.console && console.debug) {
         console.debug("[xp] window_error", context);
       }
     } catch (_) {}
-    if (window.console && console.debug) {
+    if (isDiagEnabled() && window.console && console.debug) {
       console.debug("XP window failed", err);
     }
     setBadgeLoading(false);
@@ -1228,7 +1228,7 @@ function bootXpCore(window, document) {
         : (previousTotal != null ? previousTotal : 0);
 
     if (authenticated && sanitizedTotal === 0 && localFloor > 0 && !isExplicitReset) {
-      if (window.console && console.warn) {
+      if (isDiagEnabled() && window.console && console.warn) {
         console.warn("[XP] Ignoring zero server total for authenticated user", {
           status: statusRaw,
           reason,
@@ -1244,7 +1244,7 @@ function bootXpCore(window, document) {
     }
 
     if (authenticated && sanitizedTotal < localFloor && !isExplicitReset) {
-      if (window.console && console.warn) {
+      if (isDiagEnabled() && window.console && console.warn) {
         console.warn("[XP] Ignoring regressive server total for authenticated user", {
           status: statusRaw,
           reason,
@@ -1294,7 +1294,7 @@ function bootXpCore(window, document) {
       ? Math.max(0, state.serverTotalXp || 0)
       : Math.max(Number(state.totalLifetime) || 0, state.serverTotalXp || 0);
     state.lastResultTs = Date.now();
-    if (window.console && console.debug) {
+    if (isDiagEnabled() && window.console && console.debug) {
       console.debug("[XP] server_totals_applied", {
         authenticated,
         sanitizedTotal,
@@ -1500,7 +1500,7 @@ function bootXpCore(window, document) {
             transport: (data && data._transport) || "fetch",
           };
           logDebug("window_result", snap);
-          if (window.console && console.debug) {
+          if (isDiagEnabled() && window.console && console.debug) {
             console.debug("[xp] window_result", snap);
           }
         } catch (_) {}
@@ -2663,7 +2663,7 @@ function bootXpCore(window, document) {
 
   try {
     const nodes = document.querySelectorAll('a.xp-badge#xpBadge');
-    if (nodes.length !== 1) {
+    if (isDiagEnabled() && nodes.length !== 1) {
       console.warn(`[xp] expected 1 xp-badge anchor with id="xpBadge", found ${nodes.length}`);
     }
   } catch (_) {}

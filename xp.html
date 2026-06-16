@@ -11,25 +11,14 @@
   <link rel="stylesheet" href="css/portal.css">
   <link rel="stylesheet" href="css/xp.css">
   <link rel="stylesheet" href="/css/xp-overlay.css">
-  <script id="Cookiebot"
-          src="https://consent.cookiebot.com/uc.js"
-          data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
-          data-blockingmode="auto"
-          type="text/javascript">
-  </script>
-  <script type="text/plain" data-cookieconsent="statistics"
-          src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
-  <script type="text/plain" data-cookieconsent="statistics">
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){ dataLayer.push(arguments); }
-    gtag('js', new Date());
-    gtag('config', 'G-JRP62LCXYK');
-  </script>
-  <script src="js/analytics.js" defer></script>
+
+<script src="js/analytics.js" defer></script>
   <script src="js/i18n.js" defer></script>
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
   <script src="/js/auth/supabaseClient.js" defer></script>
+  <script src="js/chips/client.js" defer></script>
+  <script src="js/core/number-format.js" defer></script>
   <script src="js/topbar.js" defer></script>
   <script src="js/xpClient.js" defer></script>
   <script src="/js/ui/xp-overlay.js" defer></script>
@@ -42,8 +31,13 @@
   <script src="js/core/search-utils.js" defer></script>
   <script src="js/search-popup.js" defer></script>
   <script src="js/search-popup-bootstrap.js" defer></script>
+  <script src="js/core/sidebar-model.js" defer></script>
   <script src="js/sidebar.js" defer></script>
   <script src="js/xp-page.js" defer></script>
+  <link rel="stylesheet" href="js/vendor/klaro/klaro.css">
+  <script src="js/klaro-config.js" defer></script>
+  <script src="js/vendor/klaro/klaro.js" defer></script>
+  <script src="js/consent-services.js" defer></script>
 </head>
 <body>
   <div class="topbar">
@@ -62,7 +56,7 @@
     </div>
     <div class="topbar-right">
       <a id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true" href="xp.html">
-        <span class="xp-badge__label">Syncing XP…</span>
+        <span class="xp-badge__label">XP</span>
       </a>
       <div class="avatar-shell" id="avatarShell">
         <button type="button" class="avatar-btn" id="avatarButton" aria-haspopup="true" aria-expanded="false">
@@ -175,12 +169,13 @@
       <a class="ft-link" data-i18n="contact" href="mailto:contact@kcswh.pl">Contact</a>
       <span class="sep">•</span>
       <a class="ft-link manage-cookies" data-i18n="manageCookies"
-         id="manageCookies" href="#" data-cookieconsent="ignore">Manage cookies</a>
+         id="manageCookies" href="#">Manage cookies</a>
     </nav>
     <div class="lang-switch" aria-label="Language">
       <button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button>
       <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
     </div>
   </footer>
+  <script src="js/consent-manager.js" defer></script>
 </body>
 </html>

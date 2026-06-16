@@ -33,7 +33,6 @@ export async function handler(event) {
 
   try {
     const balance = await getUserBalance(auth.userId);
-    klog("chips_balance_ok", { userId: auth.userId, balance: balance.balance });
     return {
       statusCode: 200,
       headers: cors,

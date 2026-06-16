@@ -3,9 +3,17 @@ test-results/
 playwright-report/
 .cache/
 
+# --- local / secrets ---
+.local/
+.env
+.env.*
+
 # Local Netlify folder
 .netlify
 
 # Generated build info (created during Netlify build)
 js/build-info.js
 landing/js/build-info.js
+
+.github/copilot-instructions.md
+.github/hooks/rtk-rewrite.json

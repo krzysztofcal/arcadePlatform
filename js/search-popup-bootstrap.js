@@ -8,7 +8,6 @@
     const searchInput = document.querySelector('.search-box input[type="search"]');
 
     if (!searchInput) {
-      console.debug('Search popup: No search input found');
       return;
     }
 
@@ -20,11 +19,8 @@
     // Only initialize on non-main pages (pages without gamesGrid)
     const gamesGrid = document.getElementById('gamesGrid');
     if (gamesGrid) {
-      console.debug('Search popup: Skipping initialization on main page');
       return; // Main page already has inline search
     }
-
-    console.debug('Search popup: Initializing on non-main page');
 
     try {
       const popup = new window.SearchPopup({
@@ -38,9 +34,7 @@
         doc: document
       });
 
-      popup.init().then(() => {
-        console.debug('Search popup: Initialization complete');
-      }).catch(err => {
+      popup.init().catch(err => {
         console.error('Search popup: Failed to initialize:', err);
       });
     } catch (err) {

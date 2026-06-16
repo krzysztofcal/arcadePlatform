@@ -1,0 +1,237 @@
+export const runAdvanceLoop = (stateToAdvance, eventsList, advanceEventsList, advanceIfNeeded, advanceLimit = 4) => {
+  if (typeof advanceIfNeeded !== "function") {
+    throw new Error("runAdvanceLoop requires advanceIfNeeded function");
+  }
+  let next = stateToAdvance;
+  let loopCount = 0;
+  while (loopCount < advanceLimit) {
+    if (next.phase === "HAND_DONE") break;
+    const prevPhase = next.phase;
+    const advanced = advanceIfNeeded(next);
+    next = advanced.state;
+
+    if (Array.isArray(advanced.events) && advanced.events.length > 0) {
+      if (Array.isArray(eventsList)) eventsList.push(...advanced.events);
+      if (Array.isArray(advanceEventsList)) advanceEventsList.push(...advanced.events);
+    }
+
+    if (!Array.isArray(advanced.events) || advanced.events.length === 0) break;
+    if (next.phase === prevPhase) break;
+    loopCount += 1;
+  }
+  return { nextState: next, loops: loopCount };
+};
+
+export const hasParticipatingHumanInHand = (state, seatBotMap) => {
+  const seats = Array.isArray(state?.seats) ? state.seats : [];
+  for (const seat of seats) {
+    const userId = typeof seat?.userId === "string" ? seat.userId : "";
+    if (!userId) continue;
+    if (state?.foldedByUserId?.[userId]) continue;
+    if (state?.leftTableByUserId?.[userId]) continue;
+    if (state?.sitOutByUserId?.[userId]) continue;
+    if (state?.pendingAutoSitOutByUserId?.[userId]) continue;
+    const isBot = seatBotMap instanceof Map ? seatBotMap.get(userId) === true : !!seatBotMap?.[userId];
+    if (!isBot) return true;
+  }
+  return false;
+};
+
+export const runBotAutoplayLoop = async ({
+  tableId,
+  requestId,
+  initialState,
+  initialPrivateState,
+  initialVersion,
+  seatBotMap,
+  seatUserIdsInOrder,
+  maxActions,
+  botsOnlyHandCompletionHardCap,
+  policyVersion,
+  klog,
+  isActionPhase,
+  advanceIfNeeded,
+  buildPersistedFromPrivateState,
+  materializeShowdownState,
+  persistStep,
+  computeLegalActions,
+  withoutPrivateState,
+  chooseBotActionTrivial,
+  isBotTurn,
+  applyAction,
+  beforeBotActionStep
+}) => {
+  let responseFinalState = initialState;
+  let loopPrivateState = initialPrivateState;
+  let loopVersion = initialVersion;
+  let loopSeatBotMap = seatBotMap;
+  let loopSeatUserIdsInOrder = Array.isArray(seatUserIdsInOrder) ? seatUserIdsInOrder.slice() : [];
+  let botActionCount = 0;
+  let botStopReason = "not_attempted";
+  let lastBotActionSummary = null;
+  let responseEvents = [];
+  const botsOnlyAtStart = !hasParticipatingHumanInHand(responseFinalState, loopSeatBotMap);
+  const effectiveMaxBotActions = botsOnlyAtStart
+    ? Math.max(maxActions, botsOnlyHandCompletionHardCap)
+    : maxActions;
+
+  const buildBotRequestId = (statePublic, botTurnUserId, stepIndex) => {
+    const handId = typeof statePublic?.handId === "string" && statePublic.handId.trim()
+      ? statePublic.handId.trim()
+      : "unknown_hand";
+    const phase = typeof statePublic?.phase === "string" && statePublic.phase.trim()
+      ? statePublic.phase.trim()
+      : "unknown_phase";
+    const actor = typeof botTurnUserId === "string" && botTurnUserId.trim()
+      ? botTurnUserId.trim()
+      : "unknown_actor";
+    return `bot:${requestId}:${handId}:${phase}:${actor}:${stepIndex}`;
+  };
+
+  while (botActionCount < effectiveMaxBotActions) {
+    if (!isActionPhase(responseFinalState.phase)) { botStopReason = "non_action_phase"; break; }
+    let botTurnUserId = responseFinalState.turnUserId;
+    if (!isBotTurn(botTurnUserId, loopSeatBotMap)) { botStopReason = "turn_not_bot"; break; }
+
+    if (typeof beforeBotActionStep === "function") {
+      const delayedStep = await beforeBotActionStep({
+        responseFinalState,
+        loopPrivateState,
+        loopVersion,
+        seatBotMap: loopSeatBotMap,
+        seatUserIdsInOrder: loopSeatUserIdsInOrder,
+        botActionCount,
+        effectiveMaxBotActions,
+        botTurnUserId
+      });
+      if (!delayedStep?.ok) {
+        botStopReason = delayedStep?.reason || "before_step_failed";
+        break;
+      }
+      if (delayedStep.responseFinalState && typeof delayedStep.responseFinalState === "object") {
+        responseFinalState = delayedStep.responseFinalState;
+      }
+      if (delayedStep.loopPrivateState && typeof delayedStep.loopPrivateState === "object") {
+        loopPrivateState = delayedStep.loopPrivateState;
+      }
+      if (Number.isFinite(Number(delayedStep.loopVersion))) {
+        loopVersion = Number(delayedStep.loopVersion);
+      }
+      if (delayedStep.seatBotMap instanceof Map || delayedStep.seatBotMap) {
+        loopSeatBotMap = delayedStep.seatBotMap;
+      }
+      if (Array.isArray(delayedStep.seatUserIdsInOrder)) {
+        loopSeatUserIdsInOrder = delayedStep.seatUserIdsInOrder.slice();
+      }
+      if (!isActionPhase(responseFinalState.phase)) {
+        botStopReason = "non_action_phase";
+        break;
+      }
+      if (!isBotTurn(responseFinalState.turnUserId, loopSeatBotMap)) {
+        botStopReason = delayedStep?.reason || "turn_not_bot";
+        break;
+      }
+      botTurnUserId = responseFinalState.turnUserId;
+    }
+
+    const botLegalInfo = computeLegalActions({ statePublic: withoutPrivateState(responseFinalState), userId: botTurnUserId });
+    const botChoice = chooseBotActionTrivial(botLegalInfo.actions);
+    if (!botChoice || !botChoice.type) { botStopReason = "no_legal_action"; break; }
+
+    const botRequestId = buildBotRequestId(responseFinalState, botTurnUserId, botActionCount + 1);
+    const botAction = { ...botChoice, userId: botTurnUserId, requestId: botRequestId };
+    let botApplied;
+    try {
+      botApplied = applyAction(loopPrivateState, botAction);
+    } catch (error) {
+      botStopReason = "apply_action_failed";
+      klog("poker_act_bot_autoplay_step_error", {
+        tableId,
+        handId: typeof responseFinalState?.handId === "string" && responseFinalState.handId.trim() ? responseFinalState.handId.trim() : null,
+        turnUserId: botTurnUserId || null,
+        policyVersion,
+        botActionCount,
+        reason: botStopReason,
+        actionType: botAction.type || null,
+        actionAmount: botAction.amount ?? null,
+        error: error?.message || "apply_action_failed"
+      });
+      break;
+    }
+
+    let botNextState = botApplied.state;
+    const botAdvanceEvents = [];
+    const botEvents = Array.isArray(botApplied.events) ? botApplied.events.slice() : [];
+    const botAdvanced = runAdvanceLoop(botNextState, botEvents, botAdvanceEvents, advanceIfNeeded);
+    botNextState = botAdvanced.nextState;
+
+    const botEligibleUserIds = loopSeatUserIdsInOrder.filter((userId) =>
+      typeof userId === "string"
+      && !botNextState.foldedByUserId?.[userId]
+      && !botNextState.leftTableByUserId?.[userId]
+      && !botNextState.sitOutByUserId?.[userId]
+    );
+    const botHandId = typeof botNextState.handId === "string" ? botNextState.handId.trim() : "";
+    const botShowdownHandId =
+      typeof botNextState.showdown?.handId === "string" && botNextState.showdown.handId.trim()
+        ? botNextState.showdown.handId.trim()
+        : "";
+    const botShowdownMaterialized = !!botHandId && !!botShowdownHandId && botShowdownHandId === botHandId;
+    const botNeedsSingleWinnerResolution = !botShowdownMaterialized && botEligibleUserIds.length <= 1;
+    const botNeedsFullShowdownResolution = !botShowdownMaterialized && botEligibleUserIds.length > 1 && botNextState.phase === "SHOWDOWN";
+    if ((botNeedsSingleWinnerResolution || botNeedsFullShowdownResolution) && typeof materializeShowdownState === "function") {
+      botNextState = materializeShowdownState(
+        botNextState,
+        loopSeatUserIdsInOrder,
+        loopPrivateState?.holeCardsByUserId,
+        { requiresShowdownComparison: botNeedsFullShowdownResolution }
+      );
+    }
+
+    const botPersistedState = buildPersistedFromPrivateState(botNextState, botTurnUserId, botRequestId);
+    const persistResult = await persistStep({
+      botTurnUserId,
+      botAction,
+      botRequestId,
+      fromState: responseFinalState,
+      persistedState: botPersistedState,
+      privateState: botNextState,
+      events: botEvents,
+      loopVersion
+    });
+
+    if (!persistResult?.ok) {
+      botStopReason = persistResult?.reason || "update_failed";
+      break;
+    }
+
+    loopVersion = persistResult.loopVersion;
+    responseFinalState = persistResult.responseFinalState;
+    responseEvents = responseEvents.concat(botEvents);
+    loopPrivateState = persistResult.loopPrivateState;
+    lastBotActionSummary = { type: botAction.type, amount: botAction.amount ?? null, userId: botTurnUserId };
+    botActionCount += 1;
+  }
+
+  if (botStopReason === "not_attempted") {
+    if (botActionCount >= effectiveMaxBotActions) {
+      botStopReason = botsOnlyAtStart ? "hard_cap_reached" : "action_cap_reached";
+    } else {
+      botStopReason = "completed";
+    }
+  } else if (botActionCount >= effectiveMaxBotActions) {
+    botStopReason = botsOnlyAtStart ? "hard_cap_reached" : "action_cap_reached";
+  }
+
+  return {
+    responseFinalState,
+    loopPrivateState,
+    loopVersion,
+    botActionCount,
+    botStopReason,
+    botsOnlyAtStart,
+    effectiveMaxBotActions,
+    lastBotActionSummary,
+    responseEvents
+  };
+};

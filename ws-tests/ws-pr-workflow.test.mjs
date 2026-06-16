@@ -1,0 +1,184 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+
+function workflowText() {
+  return fs.readFileSync(".github/workflows/ws-pr-checks.yml", "utf8");
+}
+
+function normalizeNewlines(text) {
+  return text.replace(/\r\n/g, "\n");
+}
+
+function leadingSpaces(line) {
+  const match = line.match(/^\s*/);
+  return match ? match[0].length : 0;
+}
+
+function stepsBlock(text) {
+  const normalized = normalizeNewlines(text);
+  const lines = normalized.split("\n");
+
+  const stepsLineIndex = lines.findIndex((line) => /^\s*steps:\s*(#.*)?$/.test(line));
+  assert.notEqual(stepsLineIndex, -1, "workflow must contain a steps: block");
+
+  const stepsIndent = leadingSpaces(lines[stepsLineIndex]);
+  const blockLines = [lines[stepsLineIndex]];
+
+  for (let i = stepsLineIndex + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+
+    if (!line.trim()) {
+      blockLines.push(line);
+      continue;
+    }
+
+    if (/^\s*#/.test(line)) {
+      blockLines.push(line);
+      continue;
+    }
+
+    const indent = leadingSpaces(line);
+    if (indent <= stepsIndent) {
+      break;
+    }
+
+    blockLines.push(line);
+  }
+
+  return blockLines.join("\n");
+}
+
+function assertRequiredOrder(text) {
+  const block = stepsBlock(text);
+
+  const install = block.indexOf("npm ci --prefix ws-server");
+  const rootInstall = block.indexOf("\n        run: npm ci\n");
+  const runtimeDepsGuard = block.indexOf("node --test ws-tests/ws-server-package-runtime-deps.guard.test.mjs");
+  const sharedJoinBehavior = block.indexOf("node --test shared/poker-domain/join.behavior.test.mjs");
+  const wsClientBehavior = block.indexOf("node --test tests/poker-ws-client.test.mjs");
+  const pokerV2Live = block.indexOf("node --test tests/poker-v2-live.behavior.test.mjs");
+  const joinRuntimeBehavior = block.indexOf("node --test ws-tests/ws-join-runtime.behavior.test.mjs");
+  const behavior = block.indexOf("node --test ws-server/server.behavior.test.mjs");
+  const infraVpcCaddyGuard = block.indexOf("node --test ws-tests/infra-vps-caddy.guard.test.mjs");
+  const imageCheck = block.indexOf("node --test ws-tests/ws-image-contains-protocol.behavior.test.mjs");
+  const containerCheck = block.indexOf("node --test ws-tests/ws-container-starts.behavior.test.mjs");
+
+  assert.match(block, /Run state-patch behavior test/);
+  assert.match(block, /node --test ws-server\/poker\/read-model\/state-patch\.behavior\.test\.mjs/);
+  assert.match(block, /Run stream-log behavior test/);
+  assert.match(block, /node --test ws-server\/poker\/runtime\/stream-log\.behavior\.test\.mjs/);
+  assert.match(block, /Run ws accepted bot autoplay adapter behavior test/);
+  assert.match(block, /node --test ws-server\/poker\/runtime\/accepted-bot-autoplay-adapter\.behavior\.test\.mjs/);
+
+  assert.match(block, /Run ws poker engine bootstrap behavior test/);
+  assert.match(block, /node --test ws-server\/poker\/engine\/engine-bootstrap\.behavior\.test\.mjs/);
+  assert.match(block, /Run ws poker engine act behavior test/);
+  assert.match(block, /node --test ws-server\/poker\/engine\/engine-act\.behavior\.test\.mjs/);
+  assert.match(block, /Run ws poker engine rollover behavior test/);
+  assert.match(block, /node --test ws-server\/poker\/engine\/engine-rollover\.behavior\.test\.mjs/);
+  assert.match(block, /Run ws poker engine timeout behavior test/);
+  assert.match(block, /node --test ws-server\/poker\/engine\/engine-timeout\.behavior\.test\.mjs/);
+
+  assert.equal(rootInstall, -1);
+  assert.notEqual(install, -1);
+  assert.notEqual(runtimeDepsGuard, -1);
+  assert.notEqual(sharedJoinBehavior, -1);
+  assert.notEqual(wsClientBehavior, -1);
+  assert.notEqual(pokerV2Live, -1);
+  assert.equal(block.indexOf("node --test tests/poker-ui-ws-act-smoke.behavior.test.mjs"), -1);
+  assert.equal(block.indexOf("node --test tests/poker-ui-ws-join-smoke.behavior.test.mjs"), -1);
+  assert.equal(block.indexOf("node --test tests/poker-ui-ws-write-path.guard.test.mjs"), -1);
+  assert.equal(block.indexOf("node --test tests/poker-ui-ws-leave-smoke.behavior.test.mjs"), -1);
+  assert.notEqual(joinRuntimeBehavior, -1);
+  assert.notEqual(behavior, -1);
+  assert.notEqual(infraVpcCaddyGuard, -1);
+  assert.notEqual(imageCheck, -1);
+  assert.notEqual(containerCheck, -1);
+  assert.equal(install < runtimeDepsGuard, true);
+  assert.equal(runtimeDepsGuard < sharedJoinBehavior, true);
+  assert.equal(sharedJoinBehavior < wsClientBehavior, true);
+  assert.equal(wsClientBehavior < pokerV2Live, true);
+  assert.equal(pokerV2Live < joinRuntimeBehavior, true);
+  assert.equal(joinRuntimeBehavior < behavior, true);
+  assert.equal(behavior < infraVpcCaddyGuard, true);
+  assert.equal(infraVpcCaddyGuard < imageCheck, true);
+  assert.equal(imageCheck < containerCheck, true);
+}
+
+test("ws pr workflow is pull_request-only with ws-related path filters", () => {
+  const text = workflowText();
+  assert.match(text, /on:\s*\n\s*pull_request:/);
+  assert.match(text, /paths:\s*\n\s*-\s*"ws-server\/\*\*"/);
+  assert.match(text, /"ws-tests\/\*\*"/);
+  assert.match(text, /"shared\/\*\*"/);
+  assert.match(text, /"infra\/vps\/\*\*"/);
+  assert.match(text, /"docs\/poker-deployment\.md"/);
+  assert.match(text, /"\.github\/workflows\/infra-vps\.yml"/);
+  assert.doesNotMatch(text, /push:/);
+});
+
+test("ws pr workflow runs required harness checks in expected order", () => {
+  assertRequiredOrder(workflowText());
+});
+
+test("ws pr workflow order check tolerates different indentation", () => {
+  const text = workflowText();
+  const textIndented = text.replace(/\n {4}/g, "\n  ");
+  assertRequiredOrder(textIndented);
+});
+
+test("ws pr workflow order check tolerates CRLF", () => {
+  const text = workflowText();
+  const textCrlf = text.replace(/\n/g, "\r\n");
+  assertRequiredOrder(textCrlf);
+});
+
+test("ws pr workflow order check is resilient to non-step occurrences", () => {
+  const text = workflowText();
+  const textWithNoise = `${text}\n# harmless note: node --test ws-tests/ws-container-starts.behavior.test.mjs`;
+  assertRequiredOrder(textWithNoise);
+});
+
+test("ws pr workflow does not deploy or use secrets", () => {
+  const text = workflowText();
+  assert.doesNotMatch(text, /appleboy\/ssh-action/);
+  assert.doesNotMatch(text, /docker\/login-action/);
+  assert.doesNotMatch(text, /docker\/build-push-action/);
+  assert.doesNotMatch(text, /docker compose/);
+  assert.doesNotMatch(text, /ghcr\.io/);
+  assert.doesNotMatch(text, /\$\{\{\s*secrets\./);
+});
+
+test("ws pr workflow uses read-only token permissions", () => {
+  const text = workflowText();
+  assert.match(text, /permissions:\s*\n\s*contents:\s*read/);
+});
+
+test("ws pr workflow wires poker v2-only browser coverage", () => {
+  const text = workflowText();
+  assert.match(text, /Run poker table v2 live behavior test/);
+  assert.match(text, /node --test tests\/poker-v2-live\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /Run poker UI ws act smoke test/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-act-smoke\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /Run poker UI ws join smoke test/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-join-smoke\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /Run poker UI ws write-path guard test/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-write-path\.guard\.test\.mjs/);
+  assert.doesNotMatch(text, /Run poker UI ws leave smoke test/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-leave-smoke\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-health-fallback\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-startup-order\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-snapshot-equal-version\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-auth-watch-order\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-visibility\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-join-authoritative\.behavior\.test\.mjs/);
+});
+
+test("ws pr workflow runs ws-server deploy harness tests", () => {
+  const text = workflowText();
+  assert.match(text, /Run ws join runtime behavior test/);
+  assert.match(text, /node --test ws-tests\/ws-join-runtime\.behavior\.test\.mjs/);
+  assert.match(text, /node --test ws-tests\/ws-server-deploy-artifact-path\.test\.mjs/);
+  assert.match(text, /node --test ws-tests\/ws-server-deploy-rollout\.test\.mjs/);
+});

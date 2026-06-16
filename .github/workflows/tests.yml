@@ -4,7 +4,6 @@ on:
   push:
     branches: [ main ]
   pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -26,7 +25,9 @@ jobs:
         run: npm run lint:games
 
       - name: Install Playwright Browsers
-        run: npx playwright install --with-deps
+        run: npx playwright install --with-deps chromium
 
       - name: Run Playwright tests
         run: PLAYWRIGHT=1 npm test
+        env:
+          PLAYWRIGHT_BROWSER: chromium

@@ -1,0 +1,93 @@
+function parseFixtureMap(rawValue) {
+  if (typeof rawValue !== "string" || rawValue.trim() === "") {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(rawValue);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function createPersistedBootstrapRepository({ env = process.env } = {}) {
+  let fileStoreLoaderPromise = null;
+  const fixtures = parseFixtureMap(env.WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON);
+  let beginSqlPromise = null;
+
+  async function loadBeginSql() {
+    if (!beginSqlPromise) {
+      beginSqlPromise = import("./persisted-bootstrap-db.mjs").then((module) => module.beginSqlWs);
+    }
+
+    return beginSqlPromise;
+  }
+
+  async function loadFromDb(tableId) {
+    const beginSql = await loadBeginSql();
+    return beginSql(async (tx) => {
+      const tableRows = await tx.unsafe(
+        "select id, status, max_players, stakes, created_at, updated_at, last_activity_at from public.poker_tables where id = $1 limit 1;",
+        [tableId]
+      );
+      const tableRow = tableRows?.[0] || null;
+      if (!tableRow) {
+        return { tableRow: null, seatRows: [], stateRow: null };
+      }
+
+      const seatRows = await tx.unsafe(
+        "select user_id, seat_no, status, is_bot, bot_profile, leave_after_hand, stack from public.poker_seats where table_id = $1 order by seat_no asc;",
+        [tableId]
+      );
+
+      const stateRows = await tx.unsafe(
+        "select version, state from public.poker_state where table_id = $1 limit 1;",
+        [tableId]
+      );
+
+      return {
+        tableRow,
+        seatRows: Array.isArray(seatRows) ? seatRows : [],
+        stateRow: stateRows?.[0] || null
+      };
+    }, { env });
+  }
+
+  async function loadFileStore() {
+    if (!fileStoreLoaderPromise) {
+      fileStoreLoaderPromise = import("../persistence/persisted-state-file-store.mjs").then((module) => module.loadPersistedTableFromFile);
+    }
+    return fileStoreLoaderPromise;
+  }
+
+  async function load(tableId) {
+    if (fixtures && Object.prototype.hasOwnProperty.call(fixtures, tableId)) {
+      const fixture = fixtures[tableId];
+      const fixtureDelayMs = Number(fixture?.delayMs);
+      if (Number.isFinite(fixtureDelayMs) && fixtureDelayMs > 0) {
+        await delay(fixtureDelayMs);
+      }
+      return {
+        tableRow: fixture?.tableRow ?? null,
+        seatRows: Array.isArray(fixture?.seatRows) ? fixture.seatRows : [],
+        stateRow: fixture?.stateRow ?? null
+      };
+    }
+
+    if (env.WS_PERSISTED_STATE_FILE) {
+      const loadFromFile = await loadFileStore();
+      return loadFromFile({ filePath: env.WS_PERSISTED_STATE_FILE, tableId });
+    }
+
+    if (!env.SUPABASE_DB_URL) {
+      return { tableRow: null, seatRows: [], stateRow: null };
+    }
+
+    return loadFromDb(tableId);
+  }
+  return { load };
+}

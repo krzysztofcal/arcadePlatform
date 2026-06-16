@@ -2,89 +2,14 @@ import crypto from "node:crypto";
 import { store, saveUserProfile, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
 import { klog } from "./_shared/supabase-admin.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
-
-const warsawDateFormatter = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "Europe/Warsaw",
-  hour12: false,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-});
-
-const warsawOffsetFormatter = new Intl.DateTimeFormat("en-US", {
-  timeZone: "Europe/Warsaw",
-  hour12: false,
-  timeZoneName: "longOffset",
-});
+import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
+import { buildCorsAllowlist, buildCorsHeaders } from "./_shared/xp-cors.mjs";
 
 const XP_DAY_COOKIE = "xp_day";
 
-const warsawParts = (ms) => {
-  const parts = warsawDateFormatter.formatToParts(new Date(ms));
-  const result = {};
-  for (const part of parts) {
-    if (part.type === "year" || part.type === "month" || part.type === "day" || part.type === "hour") {
-      result[part.type] = Number(part.value);
-    }
-  }
-  return result;
-};
+const getDailyKey = (ms = Date.now()) => warsawDayKey(ms);
 
-const parseWarsawOffsetMinutes = (ms) => {
-  const parts = warsawOffsetFormatter.formatToParts(new Date(ms));
-  const offsetPart = parts.find((part) => part.type === "timeZoneName");
-  if (!offsetPart) return 0;
-  const match = /GMT([+-])(\d{2}):(\d{2})/.exec(offsetPart.value);
-  if (!match) return 0;
-  const sign = match[1] === "-" ? -1 : 1;
-  const hours = Number(match[2]);
-  const minutes = Number(match[3]);
-  return sign * (hours * 60 + minutes);
-};
-
-const warsawNow = (ms = Date.now()) => ({
-  ...warsawParts(ms),
-  ms,
-});
-
-const toWarsawEpoch = (year, month, day, hour) => {
-  let guessUtc = Date.UTC(year, month - 1, day, hour, 0, 0, 0);
-  let offset = parseWarsawOffsetMinutes(guessUtc);
-  let adjusted = guessUtc - offset * 60_000;
-  const adjustedOffset = parseWarsawOffsetMinutes(adjusted);
-  if (adjustedOffset !== offset) {
-    offset = adjustedOffset;
-    adjusted = Date.UTC(year, month - 1, day, hour, 0, 0, 0) - offset * 60_000;
-  }
-  return adjusted;
-};
-
-// Warsaw reset occurs at 03:00 local time. Date math in this zone automatically
-// normalizes DST gaps/overlaps so the key always shifts after the local reset.
-const getDailyKey = (ms = Date.now()) => {
-  let effectiveMs = ms;
-  let { year, month, day, hour } = warsawParts(effectiveMs);
-  if (hour < 3) {
-    effectiveMs -= 3 * 60 * 60 * 1000;
-    ({ year, month, day } = warsawParts(effectiveMs));
-  }
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-};
-
-const getNextResetEpoch = (ms = Date.now()) => {
-  const current = warsawNow(ms);
-  let targetYear = current.year;
-  let targetMonth = current.month;
-  let targetDay = current.day;
-  if (current.hour >= 3) {
-    const tomorrow = warsawParts(ms + 24 * 60 * 60 * 1000);
-    targetYear = tomorrow.year;
-    targetMonth = tomorrow.month;
-    targetDay = tomorrow.day;
-  }
-  return toWarsawEpoch(targetYear, targetMonth, targetDay, 3);
-};
+const getNextResetEpoch = (ms = Date.now()) => nextWarsawResetMs(ms);
 
 const asNumber = (raw, fallback) => {
   if (raw == null) return fallback;
@@ -107,31 +32,22 @@ const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
 const LOCK_KEY_PREFIX = `${KEY_NS}:lock:`;
 const DRIFT_MS = Math.max(0, asNumber(process.env.XP_DRIFT_MS, 30_000));
 // Build CORS allowlist from env var + auto-include Netlify site URL
-const CORS_ALLOW = (() => {
-  const fromEnv = (process.env.XP_CORS_ALLOW ?? "")
-    .split(",")
-    .map(s => s.trim())
-    .filter(Boolean);
-  // Auto-include the Netlify site URL (handles custom domains)
-  const siteUrl = process.env.URL;
-  if (siteUrl && !fromEnv.includes(siteUrl)) {
-    fromEnv.push(siteUrl);
-  }
-  return fromEnv;
-})();
+const CORS_ALLOW = buildCorsAllowlist({ xpCorsAllow: process.env.XP_CORS_ALLOW, siteUrl: process.env.URL });
 
 const RAW_LOCK_TTL = Number(process.env.XP_LOCK_TTL_MS ?? 3_000);
 const LOCK_TTL_MS = Number.isFinite(RAW_LOCK_TTL) && RAW_LOCK_TTL >= 0 ? RAW_LOCK_TTL : 3_000;
-klog("xp_lock_config", {
-  lockTtlMs: LOCK_TTL_MS,
-  rawLockTtl: RAW_LOCK_TTL,
-  lockPrefix: LOCK_KEY_PREFIX,
-});
+if (DEBUG_ENABLED) {
+  klog("xp_lock_config", {
+    lockTtlMs: LOCK_TTL_MS,
+    rawLockTtl: RAW_LOCK_TTL,
+  });
+}
 
 // SECURITY: Rate limiting configuration
 const RATE_LIMIT_PER_USER_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_USER_PER_MIN, 30));
 const RATE_LIMIT_PER_IP_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_IP_PER_MIN, 60));
 const RATE_LIMIT_ENABLED = process.env.XP_RATE_LIMIT_ENABLED !== "0"; // Default enabled
+const RATE_LIMIT_WINDOW_SEC = Math.max(1, asNumber(process.env.XP_RATE_LIMIT_WINDOW_SEC, 60));
 
 // SECURITY: Server-side session token configuration
 // These are read at runtime to support dynamic configuration changes
@@ -215,7 +131,7 @@ async function persistUserProfile({ userId, totalXp, now }) {
   try {
     await saveUserProfile({ userId, totalXp, now });
   } catch (err) {
-    klog("xp_save_user_profile_failed", { userId, error: err?.message });
+    klog("xp_save_user_profile_failed", { error: err?.message });
   }
 }
 
@@ -299,36 +215,7 @@ const json = (statusCode, obj, origin, extraHeaders) => {
 };
 
 function corsHeaders(origin) {
-  // SECURITY: CORS validation for cross-origin requests
-  // Note: Origin header is only present for cross-origin requests
-  // Same-origin and local requests don't have Origin header - allow those
-
-  const headers = {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-  };
-
-  // If there's no Origin header, it's same-origin/local - allow it
-  if (!origin) {
-    return headers;
-  }
-
-  // Automatically allow Netlify deploy preview and production domains
-  // Pattern: https://*.netlify.app (including deploy-preview-*, branch-*, etc.)
-  const isNetlifyDomain = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin);
-
-  // If there IS an Origin header, enforce whitelist (unless it's a Netlify domain)
-  if (!isNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
-    return null; // Signal rejection for non-whitelisted origins
-  }
-
-  // Origin is whitelisted (or no whitelist configured) - add CORS headers
-  headers["access-control-allow-origin"] = origin;
-  headers["access-control-allow-headers"] = "content-type,authorization,x-api-key";
-  headers["access-control-allow-methods"] = "POST,OPTIONS";
-  headers["Vary"] = "Origin";
-
-  return headers;
+  return buildCorsHeaders({ origin, allowlist: CORS_ALLOW, methods: "POST,OPTIONS", headers: "content-type,authorization,x-api-key" });
 }
 
 const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
@@ -349,8 +236,8 @@ const keyTotal = (u) => `${KEY_NS}:total:${u}`;
 const keySession = (u, s) => `${KEY_NS}:session:${hash(`${u}|${s}`)}`;
 const keySessionSync = (u, s) => `${KEY_NS}:session:last:${hash(`${u}|${s}`)}`;
 const keyLock = (u, s) => `${LOCK_KEY_PREFIX}${hash(`${u}|${s}`)}`;
-const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}:${Math.floor(Date.now() / 60000)}`;
-const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / 60000)}`;
+const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}:${Math.floor(Date.now() / (RATE_LIMIT_WINDOW_SEC * 1000))}`;
+const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / (RATE_LIMIT_WINDOW_SEC * 1000))}`;
 const keySessionRegistry = (userId, sessionId) => `${KEY_NS}:registry:${hash(`${userId}|${sessionId}`)}`;
 const keyMigration = (anonId, userId) => `${KEY_NS}:migration:${hash(`${anonId}|${userId}`)}`;
 
@@ -364,7 +251,7 @@ async function registerSession({ userId, sessionId }) {
     await store.setex(key, ttlSeconds, Date.now().toString());
     return { registered: true };
   } catch (err) {
-    klog("xp_session_registration_failed", { userId, sessionId, error: err?.message });
+    klog("xp_session_registration_failed", { error: err?.message });
     return { registered: false };
   }
 }
@@ -391,7 +278,7 @@ async function checkRateLimit({ userId, ip }) {
   if (userId && RATE_LIMIT_PER_USER_PER_MIN > 0) {
     const userKey = keyRateLimitUser(userId);
     checks.push(
-      atomicRateLimitIncr(userKey, 60)
+      atomicRateLimitIncr(userKey, RATE_LIMIT_WINDOW_SEC)
         .then(({ count }) => ({
           type: 'user',
           count,
@@ -399,7 +286,7 @@ async function checkRateLimit({ userId, ip }) {
           exceeded: count > RATE_LIMIT_PER_USER_PER_MIN,
         }))
         .catch((err) => {
-          klog("xp_rate_limit_atomic_failed", { keyType: "user", userId, error: err?.message });
+          klog("xp_rate_limit_atomic_failed", { keyType: "user", error: err?.message });
           return { type: 'user', count: 0, limit: RATE_LIMIT_PER_USER_PER_MIN, exceeded: false };
         })
     );
@@ -409,7 +296,7 @@ async function checkRateLimit({ userId, ip }) {
   if (ip && RATE_LIMIT_PER_IP_PER_MIN > 0) {
     const ipKey = keyRateLimitIp(ip);
     checks.push(
-      atomicRateLimitIncr(ipKey, 60)
+      atomicRateLimitIncr(ipKey, RATE_LIMIT_WINDOW_SEC)
         .then(({ count }) => ({
           type: 'ip',
           count,
@@ -457,18 +344,7 @@ async function getTotals({ userId, sessionId, now = Date.now() }) {
     const lifetime = Number(values[1] ?? "0") || 0;
     const sessionTotal = sessionKeyK ? (Number(values[2] ?? "0") || 0) : 0;
     const lastSync = sessionSyncKeyK ? (Number(values[sessionKeyK ? 3 : 2] ?? "0") || 0) : 0;
-    const totals = { current, lifetime, sessionTotal, lastSync };
-    klog("award_getTotals_debug", {
-      xpIdentityUserId: userId,
-      sessionId,
-      now,
-      totals,
-      keys: {
-        todayKey,
-        totalKey: totalKeyK,
-      },
-    });
-    return totals;
+    return { current, lifetime, sessionTotal, lastSync };
   } catch {
     return { current: 0, lifetime: 0, sessionTotal: 0, lastSync: 0 };
   }
@@ -620,16 +496,6 @@ export async function handler(event) {
 
   xpIdentity = supabaseUserId || anonId || null;
 
-  klog("auth_debug", {
-    provided: authContext.provided,
-    valid: authContext.valid,
-    reason: authContext.reason,
-    identityId: xpIdentity,
-    xpIdentity: xpIdentity,
-    supabaseUserId,
-    anonId,
-  });
-
   // If we have a Supabase user and a prior anon id, migrate anon totals once into the
   // authenticated bucket so status reads and new awards share the same keys.
   if (supabaseUserId && anonId && anonId !== supabaseUserId) {
@@ -646,17 +512,12 @@ export async function handler(event) {
           pipe.del(anonTotalKey);
           pipe.set(markerKey, String(anonTotals.lifetime));
           await pipe.exec();
-          klog("xp_migrated_anon_to_account", {
-            from: anonId,
-            to: supabaseUserId,
-            amount: anonTotals.lifetime,
-          });
         } else {
           await store.set(markerKey, "0");
         }
       }
     } catch (err) {
-      klog("xp_migration_failed", { from: anonId, to: supabaseUserId, error: err?.message });
+      klog("xp_migration_failed", { error: err?.message });
     }
   }
 
@@ -671,7 +532,7 @@ export async function handler(event) {
   const isStatusOnly = body.statusOnly === true;
   const rateLimitResult = isStatusOnly ? { allowed: true } : await checkRateLimit({ userId: xpIdentity, ip: clientIp });
   if (!rateLimitResult.allowed) {
-    const retryAfter = rateLimitResult.retryAfter ?? 60;
+    const retryAfter = rateLimitResult.retryAfter ?? RATE_LIMIT_WINDOW_SEC;
     const payload = {
       error: "rate_limit_exceeded",
       message: `Too many requests from ${rateLimitResult.type}`,
@@ -724,10 +585,8 @@ export async function handler(event) {
             sessionError = `session_${serverValidation.reason}`;
             if (serverValidation.suspicious) {
               klog("xp_session_validation_suspicious", {
-                userId: xpIdentity,
-                fingerprint,
-                ip: clientIp,
                 reason: serverValidation.reason,
+                identityType: supabaseUserId ? "authenticated" : "anonymous",
               });
             }
           } else {
@@ -757,10 +616,9 @@ export async function handler(event) {
         } else if (serverSessionWarnMode) {
           // Warn mode: log but don't block
           klog("xp_session_validation_warn_mode_failed", {
-            userId: xpIdentity,
             sessionError,
             hasToken: !!sessionToken,
-            ip: clientIp,
+            identityType: supabaseUserId ? "authenticated" : "anonymous",
           });
         }
       }
@@ -826,13 +684,6 @@ export async function handler(event) {
     }
 
     const totals = await fetchTotals();
-    klog('xp_statusOnly_debug', {
-      xpIdentity,
-      userId: supabaseUserId,
-      anonId,
-      supabaseUserId,
-      totals,
-    });
     if (supabaseUserId) {
       await persistUserProfile({ userId: supabaseUserId, totalXp: totals.lifetime, now });
     }
@@ -883,9 +734,6 @@ export async function handler(event) {
       // Auto-register on first XP-bearing request for backward compatibility
       // In a future version, this could be enforced by rejecting unregistered sessions
       await registerSession({ userId: xpIdentity, sessionId });
-      if (DEBUG_ENABLED) {
-        klog("xp_auto_registered_session", { userId: xpIdentity, sessionId: sessionId.substring(0, 8) });
-      }
     }
   }
 
@@ -975,20 +823,6 @@ export async function handler(event) {
       });
     }
   }
-
-  klog("award_identity", {
-    anonymous: !supabaseUserId,
-    supabaseUserId,
-    xpIdentity,
-  });
-
-  klog('award_attempt', {
-    xpIdentity,
-    supabaseUserId,
-    anonId,
-    sessionId,
-    hasSessionToken: !!sessionToken,
-  });
 
   const script = `
     local sessionKey = KEYS[1]
@@ -1085,14 +919,6 @@ export async function handler(event) {
     : Math.min(normalizedDelta, cookieRemainingBefore);
   const cookieClamped = !supabaseUserId && effectiveDelta < normalizedDelta;
 
-  klog("award_cookie_delta_adjust", {
-    anonId,
-    supabaseUserId,
-    normalizedDelta,
-    cookieRemainingBefore,
-    effectiveDelta,
-  });
-
   const runAwardScript = () => store.eval(
     script,
     [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK, lockKeyK],
@@ -1123,15 +949,6 @@ export async function handler(event) {
   const lockedAt = Number(res?.[6]) || 0;
   const lockTtlRemainingRaw = Number(res?.[7]);
   const lockTtlRemainingMs = Number.isFinite(lockTtlRemainingRaw) ? lockTtlRemainingRaw : null;
-
-  klog('award_result', {
-    xpIdentity,
-    supabaseUserId,
-    anonId,
-    status,
-    granted,
-    totalLifetime,
-  });
 
   const totalTodayRedis = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(redisDailyTotalRaw)));
   const remaining = Math.max(0, DAILY_CAP - totalTodayRedis);
@@ -1244,7 +1061,6 @@ export async function handler(event) {
     debugExtra.lockTtlRemainingMs = lockTtlRemainingMs;
     if (DEBUG_ENABLED) {
       klog("xp_lock_contention", {
-        lockKey: lockKeyK,
         lockAgeMs,
         lockTtlMs: LOCK_TTL_MS,
         lockTtlRemainingMs,

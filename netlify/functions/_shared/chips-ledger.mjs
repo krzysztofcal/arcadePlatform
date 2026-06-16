@@ -6,6 +6,7 @@ const VALID_TX_TYPES = new Set([
   "BURN",
   "BUY_IN",
   "CASH_OUT",
+  "ADMIN_ADJUST",
   "TABLE_BUY_IN",
   "TABLE_CASH_OUT",
   "HAND_SETTLEMENT",
@@ -44,11 +45,52 @@ const parseWholeInt = (value) => {
   return parsed;
 };
 
+const parsePositiveIntString = (value) => {
+  if (value === null || value === undefined) return null;
+  const normalized = typeof value === "string" ? value.trim() : String(value);
+  if (!normalized || !/^\d+$/.test(normalized)) return null;
+  if (normalized === "0") return null;
+  return normalized;
+};
+
 const asIso = (value) => {
   if (!value) return null;
-  const dt = new Date(value);
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    return value.toISOString();
+  }
+  if (typeof value !== "string") return null;
+  let normalized = value.trim();
+  if (!normalized) return null;
+  const spaceIndex = normalized.indexOf(" ");
+  if (spaceIndex !== -1) {
+    normalized = normalized.slice(0, spaceIndex) + "T" + normalized.slice(spaceIndex + 1);
+  }
+  normalized = normalized.replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
+  normalized = normalized.replace(/\+00$/, "Z");
+  if (!/[Zz]|[+-]\d{2}:?\d{2}$/.test(normalized)) {
+    normalized += "Z";
+  }
+  const dt = new Date(normalized);
   if (Number.isNaN(dt.getTime())) return null;
   return dt.toISOString();
+};
+
+const resolveDisplayCreatedAt = (row, context) => {
+  const fromEntry = asIso(row?.created_at);
+  if (fromEntry) return fromEntry;
+  const fromTx = asIso(row?.tx_created_at);
+  if (fromTx) return fromTx;
+  klog("chips:ledger_missing_display_created_at", {
+    entry_seq: context?.entry_seq ?? null,
+    sort_id: context?.sort_id ?? null,
+    tx_type: context?.tx_type ?? null,
+    idempotency_key: context?.idempotency_key ?? null,
+    created_at: row?.created_at ?? null,
+    tx_created_at: row?.tx_created_at ?? null,
+    display_created_at: row?.display_created_at ?? null,
+  });
+  return null;
 };
 
 function badRequest(code, message) {
@@ -60,6 +102,10 @@ function badRequest(code, message) {
 
 const hashPayload = (input) =>
   crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex");
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isUuidLike = (value) => UUID_RE.test(String(value || "").trim());
 
 const isPlainObject = (value) =>
   value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype;
@@ -121,9 +167,102 @@ async function getUserBalance(userId) {
   };
 }
 
-async function listUserLedger(userId, { afterSeq = null, limit = 50 } = {}) {
+function decodeLedgerCursor(cursor) {
+  if (cursor === null || cursor === undefined) return null;
+  if (typeof cursor !== "string" || cursor.trim() === "") {
+    throw badRequest("invalid_cursor", "Invalid cursor");
+  }
+  let decoded = null;
+  try {
+    decoded = Buffer.from(cursor, "base64").toString("utf8");
+  } catch (_err) {
+    throw badRequest("invalid_cursor", "Invalid cursor");
+  }
+  let payload = null;
+  try {
+    payload = JSON.parse(decoded);
+  } catch (_err) {
+    throw badRequest("invalid_cursor", "Invalid cursor");
+  }
+  const hasSortKey = payload?.sortId != null || payload?.sort_id != null;
+  const hasSeqKey = payload?.entrySeq != null || payload?.entry_seq != null;
+  if (hasSortKey) {
+    const sortId = parsePositiveIntString(payload?.sortId ?? payload?.sort_id);
+    if (!sortId) {
+      throw badRequest("invalid_cursor", "Invalid cursor");
+    }
+    return { sortId, mode: "sort_id" };
+  }
+  if (hasSeqKey) {
+    const createdAt = payload?.displayCreatedAt || payload?.display_created_at || payload?.createdAt || payload?.created_at;
+    const createdIso = asIso(createdAt);
+    if (!createdIso) {
+      throw badRequest("invalid_cursor", "Invalid cursor");
+    }
+    const entrySeq = parsePositiveInt(payload?.entrySeq ?? payload?.entry_seq);
+    if (entrySeq === null) {
+      throw badRequest("invalid_cursor", "Invalid cursor");
+    }
+    return { createdAt: createdIso, entrySeq, mode: "entry_seq" };
+  }
+  const timestampOnly = payload?.displayCreatedAt || payload?.display_created_at || payload?.createdAt || payload?.created_at;
+  if (timestampOnly) {
+    klog("chips:ledger_timestamp_only_cursor", {
+      has_displayCreatedAt: payload?.displayCreatedAt != null,
+      has_display_created_at: payload?.display_created_at != null,
+      has_createdAt: payload?.createdAt != null,
+      has_created_at: payload?.created_at != null,
+    });
+  }
+  throw badRequest("invalid_cursor", "Invalid cursor");
+}
+
+function encodeLedgerCursor(cursor) {
+  if (!cursor || typeof cursor !== "object") return null;
+  const sortId = cursor.sortId;
+  const createdAt = cursor.createdAt;
+  const entrySeq = cursor.entrySeq;
+  if (sortId) {
+    if (typeof sortId !== "string" || !/^\d+$/.test(sortId) || sortId === "0") return null;
+    try {
+      const payload = JSON.stringify({ sortId });
+      return Buffer.from(payload, "utf8").toString("base64");
+    } catch (_err) {
+      return null;
+    }
+  }
+  if (createdAt && entrySeq != null) {
+    if (typeof createdAt !== "string" || !createdAt.trim()) return null;
+    if (!Number.isInteger(entrySeq) || entrySeq <= 0) return null;
+    try {
+      const payload = JSON.stringify({ createdAt, entrySeq });
+      return Buffer.from(payload, "utf8").toString("base64");
+    } catch (_err) {
+      return null;
+    }
+  }
+  return null;
+}
+
+function findLastCursorCandidate(entries) {
+  if (!Array.isArray(entries)) return null;
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const entry = entries[i];
+    const sortId = parsePositiveIntString(entry?.sort_id);
+    if (sortId !== null) {
+      return { sortId };
+    }
+    const createdAt = entry?.display_created_at || entry?.created_at || entry?.tx_created_at || null;
+    const parsedEntrySeq = parsePositiveInt(entry?.entry_seq);
+    if (createdAt && parsedEntrySeq !== null) {
+      return { createdAt, entrySeq: parsedEntrySeq };
+    }
+  }
+  return null;
+}
+
+async function listUserLedgerAfterSeq(userId, { afterSeq = null, limit = 50 } = {}) {
   const cappedLimit = Math.min(Math.max(1, Number.isInteger(limit) ? limit : 50), 200);
-  const account = await getOrCreateUserAccount(userId);
   const hasAfter = afterSeq !== null && afterSeq !== undefined && !(typeof afterSeq === "string" && afterSeq.trim() === "");
   const parsedAfterSeq = parsePositiveInt(afterSeq);
   if (hasAfter && parsedAfterSeq === null) {
@@ -133,6 +272,7 @@ async function listUserLedger(userId, { afterSeq = null, limit = 50 } = {}) {
 with entries as (
   select
     e.entry_seq,
+    e.id as sort_id,
     e.amount,
     e.metadata,
     e.created_at,
@@ -140,17 +280,21 @@ with entries as (
     t.reference,
     t.description,
     t.idempotency_key,
-    t.created_at as tx_created_at
+    t.created_at as tx_created_at,
+    coalesce(e.created_at, t.created_at) as display_created_at
   from public.chips_entries e
   join public.chips_transactions t on t.id = e.transaction_id
-  where e.account_id = $1
+  join public.chips_accounts a on a.id = e.account_id
+  where a.account_type = 'USER'
+    and a.user_id = $1
     and ($2::bigint is null or e.entry_seq > $2)
   order by e.entry_seq asc
   limit $3
 )
 select * from entries;
 `;
-  const rows = await executeSql(query, [account.id, parsedAfterSeq, cappedLimit]);
+  await getOrCreateUserAccount(userId);
+  const rows = await executeSql(query, [userId, parsedAfterSeq, cappedLimit]);
   const expectedStart = parsedAfterSeq ? parsedAfterSeq + 1 : 1;
   let sequenceOk = true;
   let cursor = expectedStart;
@@ -189,6 +333,13 @@ select * from entries;
     const parsedAmount = parseWholeInt(row?.amount);
     const createdAt = asIso(row?.created_at);
     const txCreatedAt = asIso(row?.tx_created_at);
+    const displayCreatedAt = asIso(row?.display_created_at) || resolveDisplayCreatedAt(row, {
+      entry_seq: entrySeq,
+      sort_id: row?.sort_id ?? null,
+      tx_type: row?.tx_type ?? null,
+      idempotency_key: row?.idempotency_key ?? null,
+    });
+    const sortId = parsePositiveIntString(row?.sort_id);
 
     if (parsedAmount === null && row?.amount != null) {
       klog("chips:ledger_invalid_amount", {
@@ -204,6 +355,8 @@ select * from entries;
       raw_amount: row?.amount == null ? null : String(row.amount),
       metadata: row?.metadata ?? null,
       created_at: createdAt,
+      display_created_at: displayCreatedAt,
+      sort_id: sortId,
       tx_type: row?.tx_type ?? null,
       reference: row?.reference ?? null,
       description: row?.description ?? null,
@@ -213,6 +366,134 @@ select * from entries;
   });
 
   return { entries: normalizedEntries, sequenceOk, nextExpectedSeq: cursor };
+}
+
+async function listUserLedger(userId, options = {}) {
+  const { cursor = null, limit = 50 } = options;
+  const cappedLimit = Math.min(Math.max(1, Number.isInteger(limit) ? limit : 50), 200);
+  await getOrCreateUserAccount(userId);
+  const parsedCursor = decodeLedgerCursor(cursor);
+  const cursorSortId = parsedCursor?.mode === "sort_id" ? parsedCursor.sortId : null;
+  const cursorEntrySeq = parsedCursor?.mode === "entry_seq" ? parsedCursor.entrySeq : null;
+  const sortQuery = `
+with entries as (
+  select
+    e.entry_seq,
+    e.id as sort_id,
+    e.amount,
+    e.metadata,
+    e.created_at,
+    t.tx_type,
+    t.reference,
+    t.description,
+    t.idempotency_key,
+    t.created_at as tx_created_at,
+    coalesce(e.created_at, t.created_at) as display_created_at
+  from public.chips_entries e
+  join public.chips_transactions t on t.id = e.transaction_id
+  join public.chips_accounts a on a.id = e.account_id
+  where a.account_type = 'USER'
+    and a.user_id = $1
+    and (
+      $2::bigint is null
+      or e.id < $2::bigint
+    )
+  order by e.id desc
+  limit $3
+)
+select * from entries;
+`;
+  const legacyQuery = `
+with entries as (
+  select
+    e.entry_seq,
+    e.id as sort_id,
+    e.amount,
+    e.metadata,
+    e.created_at,
+    t.tx_type,
+    t.reference,
+    t.description,
+    t.idempotency_key,
+    t.created_at as tx_created_at,
+    coalesce(e.created_at, t.created_at) as display_created_at
+  from public.chips_entries e
+  join public.chips_transactions t on t.id = e.transaction_id
+  join public.chips_accounts a on a.id = e.account_id
+  where a.account_type = 'USER'
+    and a.user_id = $1
+    and (
+      $2::timestamptz is null
+      or (coalesce(e.created_at, t.created_at), e.entry_seq) < ($2::timestamptz, $3::bigint)
+    )
+  order by coalesce(e.created_at, t.created_at) desc nulls last, e.entry_seq desc
+  limit $4
+)
+select * from entries;
+`;
+  const useLegacy = parsedCursor?.mode === "entry_seq";
+  const rows = await executeSql(
+    useLegacy ? legacyQuery : sortQuery,
+    useLegacy
+      ? [userId, parsedCursor?.createdAt || null, cursorEntrySeq, cappedLimit]
+      : [userId, cursorSortId, cappedLimit],
+  );
+  const rowList = Array.isArray(rows) ? rows : [];
+  const hasFullPage = rowList.length === cappedLimit;
+  const normalizedEntries = rowList.map(row => {
+    const parsedEntrySeq = parsePositiveInt(row?.entry_seq);
+    const entrySeq = parsedEntrySeq;
+    if (parsedEntrySeq === null) {
+      klog("chips:ledger_invalid_entry_seq", {
+        raw_entry_seq: row?.entry_seq,
+        tx_type: row?.tx_type,
+        idempotency_key: row?.idempotency_key,
+      });
+    }
+
+    const parsedAmount = parseWholeInt(row?.amount);
+    const createdAt = asIso(row?.created_at);
+    const txCreatedAt = asIso(row?.tx_created_at);
+    const displayCreatedAt = asIso(row?.display_created_at) || resolveDisplayCreatedAt(row, {
+      entry_seq: entrySeq,
+      sort_id: row?.sort_id ?? null,
+      tx_type: row?.tx_type ?? null,
+      idempotency_key: row?.idempotency_key ?? null,
+    });
+    const sortId = parsePositiveIntString(row?.sort_id);
+
+    if (parsedAmount === null && row?.amount != null) {
+      klog("chips:ledger_invalid_amount", {
+        entry_seq: entrySeq,
+        raw_amount: row?.amount == null ? null : String(row.amount),
+        tx_type: row?.tx_type,
+      });
+    }
+
+    return {
+      entry_seq: entrySeq,
+      amount: parsedAmount,
+      raw_amount: row?.amount == null ? null : String(row.amount),
+      metadata: row?.metadata ?? null,
+      created_at: createdAt,
+      display_created_at: displayCreatedAt,
+      sort_id: sortId,
+      tx_type: row?.tx_type ?? null,
+      reference: row?.reference ?? null,
+      description: row?.description ?? null,
+      idempotency_key: row?.idempotency_key ?? null,
+      tx_created_at: txCreatedAt,
+    };
+  });
+  const cursorCandidate = hasFullPage ? findLastCursorCandidate(normalizedEntries) : null;
+  if (!cursorCandidate && hasFullPage) {
+    klog("chips:ledger_cursor_missing", { count: normalizedEntries.length });
+  }
+  const nextCursor = cursorCandidate
+    ? encodeLedgerCursor(cursorCandidate)
+    : null;
+
+  return { entries: normalizedEntries, items: normalizedEntries, nextCursor };
 }
 
 async function findTransactionByKey(idempotencyKey, tx = null) {
@@ -255,27 +536,62 @@ select
   return rows?.[0] || null;
 }
 
-function validateEntries(entries) {
+function validateEntries(entries, payloadUserId, { txType = null, createdBy = null } = {}) {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw badRequest("missing_entries", "At least one entry is required");
   }
   const sanitized = [];
   let hasUserEntry = false;
+  let hasEscrowEntry = false;
+  let hasSystemEntry = false;
+  let escrowEntryCount = 0;
+  let systemEntryCount = 0;
+  let escrowAmount = 0;
+  let systemAmount = 0;
   for (const entry of entries) {
     const amount = Number(entry?.amount);
     const kind = entry?.accountType || entry?.kind;
     const systemKey = entry?.systemKey;
+    const rawEntryUserId = entry?.userId;
+    const hasEntryUserId = rawEntryUserId !== undefined && rawEntryUserId !== null;
+    const entryUserId = hasEntryUserId ? String(rawEntryUserId).trim() : "";
     if (!Number.isInteger(amount) || amount === 0) {
       throw badRequest("invalid_entry_amount", "Entry amount must be a non-zero integer");
     }
     if (kind !== "USER" && kind !== "SYSTEM" && kind !== "ESCROW") {
       throw badRequest("unsupported_account_type", "Unsupported accountType in entry");
     }
+    if (kind === "ESCROW") {
+      hasEscrowEntry = true;
+      escrowEntryCount += 1;
+      escrowAmount += amount;
+    }
+    if (kind === "SYSTEM") {
+      hasSystemEntry = true;
+      systemEntryCount += 1;
+      systemAmount += amount;
+    }
     if (kind !== "USER" && !systemKey) {
       throw badRequest("missing_system_key", "System entries must provide systemKey");
     }
+    let effectiveUserId = null;
     if (kind === "USER") {
       hasUserEntry = true;
+      if (hasEntryUserId) {
+        if (!entryUserId) {
+          throw badRequest("invalid_entry_user", "USER entry userId must be non-empty string");
+        }
+        effectiveUserId = entryUserId;
+      } else {
+        const fallbackUserId = String(payloadUserId == null ? "" : payloadUserId).trim();
+        if (!fallbackUserId) {
+          throw badRequest("invalid_entry_user", "USER entries require a user id");
+        }
+        effectiveUserId = fallbackUserId;
+      }
+      if (!isUuidLike(effectiveUserId)) {
+        throw badRequest("invalid_entry_user", "USER entry userId must be a UUID");
+      }
     }
     if (
       Object.prototype.hasOwnProperty.call(entry, "metadata") &&
@@ -285,9 +601,27 @@ function validateEntries(entries) {
       throw badRequest("invalid_entry_metadata", "Entry metadata must be a plain JSON object");
     }
     const metadata = entry?.metadata ?? {};
-    sanitized.push({ kind, systemKey, amount, metadata });
+    sanitized.push({ kind, systemKey, amount, metadata, ...(kind === "USER" ? { userId: effectiveUserId } : {}) });
   }
-  if (!hasUserEntry) {
+  const payloadUserIdNormalized = String(payloadUserId == null ? "" : payloadUserId).trim();
+  const createdByNormalized = String(createdBy == null ? "" : createdBy).trim();
+  const allowEscrowOnlyTableBuyIn =
+    !hasUserEntry &&
+    txType === "TABLE_BUY_IN" &&
+    payloadUserIdNormalized === "" &&
+    isUuidLike(createdByNormalized) &&
+    entries.length === 2 &&
+    hasEscrowEntry &&
+    hasSystemEntry &&
+    escrowEntryCount === 1 &&
+    systemEntryCount === 1 &&
+    systemAmount < 0 &&
+    escrowAmount > 0 &&
+    (systemAmount + escrowAmount) === 0;
+  if (!hasUserEntry && txType === "TABLE_BUY_IN" && !allowEscrowOnlyTableBuyIn) {
+    throw badRequest("invalid_escrow_only_entries", "Escrow-only TABLE_BUY_IN requires SYSTEM(-) and ESCROW(+) strict shape");
+  }
+  if (!hasUserEntry && txType !== "TABLE_BUY_IN") {
     throw badRequest("missing_user_entry", "Transactions must include the user account");
   }
   return sanitized;
@@ -311,7 +645,19 @@ async function postTransaction({
     throw badRequest("missing_idempotency_key", "Idempotency key is required");
   }
 
-  const normalizedEntries = validateEntries(entries);
+  const payloadUserIdRaw = String(userId == null ? "" : userId).trim();
+  const userEntryFallbackNeeded = Array.isArray(entries)
+    ? entries.some((entry) => {
+      const kind = entry?.accountType || entry?.kind;
+      return kind === "USER" && (entry?.userId === undefined || entry?.userId === null || String(entry.userId).trim() === "");
+    })
+    : false;
+  if (payloadUserIdRaw && !isUuidLike(payloadUserIdRaw) && userEntryFallbackNeeded) {
+    throw badRequest("invalid_user_id", "userId must be a UUID");
+  }
+  const payloadUserId = isUuidLike(payloadUserIdRaw) ? payloadUserIdRaw : "";
+
+  const normalizedEntries = validateEntries(entries, payloadUserId, { txType, createdBy });
   assertPlainObjectOrNull(metadata, "invalid_metadata");
   const safeMetadata = metadata ?? {};
   let safeMetadataJson = "{}";
@@ -342,6 +688,7 @@ async function postTransaction({
 
   const hashableEntries = normalizedEntries.map((entry) => ({
     kind: entry.kind,
+    userId: entry.kind === "USER" ? (entry.userId ?? null) : null,
     systemKey: entry.systemKey ?? null,
     amount: entry.amount,
     metadata: entry.metadata ?? {},
@@ -350,7 +697,7 @@ async function postTransaction({
   let payloadHash;
   try {
     payloadHash = hashPayload({
-      userId,
+      userId: payloadUserId || null,
       txType,
       idempotencyKey,
       reference,
@@ -366,12 +713,24 @@ async function postTransaction({
   let userAccount = null;
   const runInTx = async (sqlTx) => {
     // IMPORTANT: inside this block use ONLY `sqlTx` for all SQL to keep it atomic.
-    userAccount = await getOrCreateUserAccount(userId, sqlTx);
+    const userEntryIds = [...new Set(normalizedEntries.filter((entry) => entry.kind === "USER").map((entry) => entry.userId).filter(Boolean))];
+    const userAccountById = new Map();
+    for (const userEntryId of userEntryIds) {
+      userAccountById.set(userEntryId, await getOrCreateUserAccount(userEntryId, sqlTx));
+    }
+
+    userAccount = payloadUserId ? (userAccountById.get(payloadUserId) || null) : null;
+
+    for (const entry of normalizedEntries) {
+      if (entry.kind === "USER" && !userAccountById.has(entry.userId)) {
+        throw badRequest("invalid_entry_user", "USER entry userId must resolve to a user account");
+      }
+    }
 
     const entryRecords = normalizedEntries.map(entry => {
       if (entry.kind === "USER") {
         const safeEntryMetadata = entry?.metadata ?? {};
-        return { account_id: userAccount.id, amount: entry.amount, metadata: safeEntryMetadata };
+        return { account_id: userAccountById.get(entry.userId)?.id, amount: entry.amount, metadata: safeEntryMetadata };
       }
       const account = systemMap.get(entry.systemKey);
       const safeEntryMetadata = entry?.metadata ?? {};
@@ -393,7 +752,7 @@ async function postTransaction({
 
     const txRows = await sqlTx`
       insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, user_id, created_by)
-      values (${reference}, ${description}, ${safeMetadataJson}::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${userId}, ${createdBy})
+      values (${reference}, ${description}, ${safeMetadataJson}::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${payloadUserId || null}, ${createdBy})
       returning *;
     `;
 
@@ -513,12 +872,15 @@ from inserted i;
       throw mismatch;
     }
 
-    const accountRows = await sqlTx`
+    const shouldLoadUserAccountSnapshot = Boolean(payloadUserId && userAccount?.id);
+    const accountRows = shouldLoadUserAccountSnapshot
+      ? await sqlTx`
       select id, balance, next_entry_seq
       from public.chips_accounts
       where id = ${userAccount.id}
       limit 1;
-    `;
+    `
+      : [];
 
     return {
       transaction: transactionRow,
@@ -580,6 +942,7 @@ from inserted i;
 export {
   VALID_TX_TYPES,
   getUserBalance,
+  listUserLedgerAfterSeq,
   listUserLedger,
   postTransaction,
 };

@@ -1,0 +1,69 @@
+import fs from "node:fs/promises";
+import { writeJsonFileAtomic } from "./persisted-state-file-io.mjs";
+
+function emptyStore() {
+  return { tables: {} };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function readStore(filePath) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      const raw = await fs.readFile(filePath, "utf8");
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return emptyStore();
+      if (!parsed.tables || typeof parsed.tables !== "object" || Array.isArray(parsed.tables)) return emptyStore();
+      return parsed;
+    } catch {
+      if (attempt >= 4) {
+        return emptyStore();
+      }
+      await sleep(20);
+    }
+  }
+  return emptyStore();
+}
+
+async function writeStore(filePath, value) {
+  await writeJsonFileAtomic(filePath, value);
+}
+
+export async function loadPersistedTableFromFile({ filePath, tableId }) {
+  const store = await readStore(filePath);
+  const row = store.tables?.[tableId];
+  if (!row || typeof row !== "object") {
+    return { tableRow: null, seatRows: [], stateRow: null };
+  }
+  return {
+    tableRow: row.tableRow ?? null,
+    seatRows: Array.isArray(row.seatRows) ? row.seatRows : [],
+    stateRow: row.stateRow ?? null
+  };
+}
+
+export async function writePersistedTableToFile({ filePath, tableId, expectedVersion, nextState }) {
+  if (!filePath || !tableId || !Number.isInteger(expectedVersion) || expectedVersion < 0) {
+    return { ok: false, reason: "invalid" };
+  }
+  const store = await readStore(filePath);
+  const row = store.tables?.[tableId];
+  if (!row || typeof row !== "object") {
+    return { ok: false, reason: "not_found" };
+  }
+  const currentVersion = Number(row?.stateRow?.version);
+  if (!Number.isInteger(currentVersion) || currentVersion < 0) {
+    return { ok: false, reason: "invalid" };
+  }
+  if (currentVersion !== expectedVersion) {
+    return { ok: false, reason: "conflict", currentVersion };
+  }
+  const nextVersion = currentVersion + 1;
+  row.stateRow = { version: nextVersion, state: nextState };
+  row.lastActivityAt = new Date().toISOString();
+  store.tables[tableId] = row;
+  await writeStore(filePath, store);
+  return { ok: true, newVersion: nextVersion };
+}

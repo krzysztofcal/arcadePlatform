@@ -90,6 +90,7 @@ let fails = [];
 
 for (const rel of files) {
   const file = path.join(ROOT, rel);
+  if (!fs.existsSync(file)) continue;
   const src = fs.readFileSync(file, "utf8");
   if (rel.endsWith(".html")) {
     let match;

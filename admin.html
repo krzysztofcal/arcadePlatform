@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1020">
+  <title>Admin • Arcade Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap">
+  <link rel="stylesheet" href="css/portal.css">
+  <link rel="stylesheet" href="css/admin.css">
+  <link rel="stylesheet" href="/css/xp-overlay.css">
+
+<script src="js/analytics.js" defer></script>
+  <script src="js/i18n.js" defer></script>
+  <script src="/js/auth/supabase-config.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
+  <script src="/js/auth/supabaseClient.js" defer></script>
+  <script src="js/chips/client.js" defer></script>
+  <script src="js/core/number-format.js" defer></script>
+  <script src="js/topbar.js" defer></script>
+  <script src="js/xpClient.js" defer></script>
+  <script src="/js/ui/xp-overlay.js" defer></script>
+  <script src="js/debug.js" defer></script>
+  <script src="js/xp/combo.js" defer></script>
+  <script src="js/xp/scoring.js" defer></script>
+  <script src="js/xp/core.js" defer></script>
+  <script src="js/xp.js" defer></script>
+  <script src="js/core/sidebar-model.js" defer></script>
+  <script src="js/sidebar.js" defer></script>
+  <script src="js/admin-page.js" defer></script>
+  <link rel="stylesheet" href="js/vendor/klaro/klaro.css">
+  <script src="js/klaro-config.js" defer></script>
+  <script src="js/vendor/klaro/klaro.js" defer></script>
+  <script src="js/consent-services.js" defer></script>
+</head>
+<body class="page-admin">
+  <div class="topbar">
+    <div class="topbar-left">
+      <button class="hamburger" id="sbToggle" aria-label="Toggle navigation" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+      <a href="index.html" class="brand" aria-label="Arcade Hub home">
+        <div class="logo" aria-hidden="true"></div>
+        <h1>Arcade Hub</h1>
+      </a>
+      <div class="search search-box">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 21l-3.9-3.9M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z" stroke="#86e1e1" stroke-width="2" stroke-linecap="round"/></svg>
+        <input type="search" aria-label="Search games" placeholder="Search games (inactive in MVP)" />
+      </div>
+    </div>
+    <div class="topbar-right">
+      <a id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true" href="xp.html">
+        <span class="xp-badge__label">XP</span>
+      </a>
+      <div class="avatar-shell" id="avatarShell">
+        <button type="button" class="avatar-btn" id="avatarButton" aria-haspopup="true" aria-expanded="false">
+          <span class="avatar-circle" id="avatarInitials" aria-hidden="true">AH</span>
+          <span class="avatar-label" id="avatarLabel">Sign in</span>
+          <span class="avatar-caret" aria-hidden="true">▾</span>
+        </button>
+        <div class="avatar-menu" id="avatarMenu" hidden>
+          <div class="avatar-menu__user">
+            <div class="avatar-menu__initials" id="avatarMenuInitials" aria-hidden="true">AH</div>
+            <div class="avatar-menu__meta">
+              <div class="avatar-menu__name" id="avatarMenuName">Guest</div>
+              <div class="avatar-menu__email" id="avatarMenuEmail">Sign in to sync progress</div>
+            </div>
+          </div>
+          <button type="button" class="avatar-menu__action" id="avatarMenuAction">Sign in</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="shell">
+    <aside class="sidebar collapsed" id="sidebar" aria-label="Main navigation">
+      <nav class="sb-nav">
+        <ul class="sb-list">
+          <li class="sb-item">
+            <a href="index.html" class="sb-link sb-home" aria-label="Home" tabindex="0">
+              <span class="sb-ico" aria-hidden="true">
+                <svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z"/></svg>
+              </span>
+              <span class="sb-label">Home</span>
+            </a>
+          </li>
+          <li class="sb-item">
+            <a href="recently-played.html" class="sb-link" aria-label="Recently played" tabindex="0">
+              <span class="sb-ico" aria-hidden="true"></span>
+              <span class="sb-label" data-i18n="recentlyPlayed">Recently played</span>
+            </a>
+          </li>
+          <li class="sb-item">
+            <a href="favorites.html" class="sb-link" aria-label="Favorites" tabindex="0">
+              <span class="sb-ico" aria-hidden="true">
+                <svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+              </span>
+              <span class="sb-label" data-i18n="favorites">Favorites</span>
+            </a>
+          </li>
+          <li class="sb-item">
+            <a href="about.en.html" class="sb-link" tabindex="0" data-href-en="about.en.html" data-href-pl="about.pl.html">
+              <span class="sb-ico" aria-hidden="true"></span>
+              <span class="sb-label" data-i18n="about">About</span>
+            </a>
+          </li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main>
+      <article class="xp-page" aria-labelledby="adminTitle">
+        <header class="xp-header">
+          <h1 id="adminTitle" data-i18n="adminTitle">Admin panel</h1>
+          <p class="xp-subtitle" data-i18n="adminSubtitle">Search users and manage chip ledger adjustments.</p>
+        </header>
+
+        <div class="admin-status" id="adminStatus" aria-live="polite" hidden></div>
+
+        <section class="xp-card" id="adminUnauthorized" hidden aria-labelledby="adminUnauthorizedTitle">
+          <h2 class="xp-card__title" id="adminUnauthorizedTitle" data-i18n="adminUnauthorizedTitle">Admin access required</h2>
+          <p class="admin-empty" id="adminUnauthorizedText" data-i18n="adminUnauthorized">This page is available only for allowlisted admin accounts.</p>
+          <div class="admin-user__actions">
+            <a class="admin-btn admin-btn--primary" href="account.html">Account</a>
+          </div>
+        </section>
+
+        <section id="adminApp" hidden>
+          <section class="xp-card admin-tabbar" aria-labelledby="adminTabBarTitle">
+            <h2 class="visually-hidden" id="adminTabBarTitle">Admin sections</h2>
+            <div class="admin-tabs" role="tablist" aria-label="Admin panel sections">
+              <button class="admin-tab is-active" id="adminTabButtonUsers" type="button" role="tab" data-admin-tab="users" aria-selected="true" aria-controls="adminTabUsers" tabindex="0">Users</button>
+              <button class="admin-tab" id="adminTabButtonTables" type="button" role="tab" data-admin-tab="tables" aria-selected="false" aria-controls="adminTabTables" tabindex="-1">Tables</button>
+              <button class="admin-tab" id="adminTabButtonLedger" type="button" role="tab" data-admin-tab="ledger" aria-selected="false" aria-controls="adminTabLedger" tabindex="-1">Ledger</button>
+              <button class="admin-tab" id="adminTabButtonOps" type="button" role="tab" data-admin-tab="ops" aria-selected="false" aria-controls="adminTabOps" tabindex="-1">Ops</button>
+            </div>
+          </section>
+
+          <section class="admin-tab-panel" id="adminTabUsers" data-admin-panel="users" role="tabpanel" aria-labelledby="adminTabButtonUsers">
+            <div class="admin-workspace">
+              <section class="xp-card admin-card admin-card--main" aria-labelledby="adminUsersTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminUsersTitle">Users</h2>
+                    <p class="admin-card__subtitle">Search, filter, and operate on users without leaving the page.</p>
+                  </div>
+                  <div class="admin-card__actions">
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminUsersRefresh">Refresh</button>
+                  </div>
+                </div>
+                <form class="admin-filter-grid" id="adminUsersFilters">
+                  <label class="admin-field">
+                    <span class="admin-field__label">Email / text</span>
+                    <input class="admin-input" type="search" name="q" placeholder="email, display name, userId">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">userId</span>
+                    <input class="admin-input" type="search" name="userId" placeholder="Exact UUID">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Created from</span>
+                    <input class="admin-input" type="datetime-local" name="createdFrom">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Created to</span>
+                    <input class="admin-input" type="datetime-local" name="createdTo">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Last sign-in from</span>
+                    <input class="admin-input" type="datetime-local" name="lastSignInFrom">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Last sign-in to</span>
+                    <input class="admin-input" type="datetime-local" name="lastSignInTo">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Last activity from</span>
+                    <input class="admin-input" type="datetime-local" name="lastActivityFrom">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Last activity to</span>
+                    <input class="admin-input" type="datetime-local" name="lastActivityTo">
+                  </label>
+                  <label class="admin-field admin-field--toggle">
+                    <input type="checkbox" name="hasBalance" value="1">
+                    <span>Balance &gt; 0</span>
+                  </label>
+                  <label class="admin-field admin-field--toggle">
+                    <input type="checkbox" name="hasActiveSeat" value="1">
+                    <span>Has active seat</span>
+                  </label>
+                  <label class="admin-field admin-field--toggle">
+                    <input type="checkbox" name="hasActiveTable" value="1">
+                    <span>Has active table</span>
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Sort</span>
+                    <select class="admin-input" name="sort">
+                      <option value="last_activity_desc">Last activity desc</option>
+                      <option value="last_sign_in_desc">Last sign-in desc</option>
+                      <option value="created_at_desc">Created desc</option>
+                      <option value="balance_desc">Balance desc</option>
+                    </select>
+                  </label>
+                  <div class="admin-filter-actions">
+                    <button class="admin-btn admin-btn--primary" type="submit">Apply filters</button>
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminUsersReset">Reset</button>
+                  </div>
+                </form>
+                <div class="admin-table-wrap">
+                  <table class="admin-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Email</th>
+                        <th scope="col">userId</th>
+                        <th scope="col">Display</th>
+                        <th scope="col">Created</th>
+                        <th scope="col">Last sign-in</th>
+                        <th scope="col">Balance</th>
+                        <th scope="col">Seats</th>
+                        <th scope="col">Tables</th>
+                        <th scope="col">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="adminUsersBody"></tbody>
+                  </table>
+                </div>
+                <p class="admin-empty" id="adminUsersEmpty" hidden>No users matched the current filters.</p>
+                <div class="admin-pagination" id="adminUsersPagination"></div>
+              </section>
+
+              <aside class="xp-card admin-card admin-card--detail" aria-labelledby="adminUserDetailTitle">
+                <div class="admin-detail" id="adminUserDetail">
+                  <h2 class="xp-card__title" id="adminUserDetailTitle">User details</h2>
+                  <p class="admin-empty">Select a user to inspect balance, ledger, active poker state, and quick actions.</p>
+                </div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="admin-tab-panel" id="adminTabTables" data-admin-panel="tables" role="tabpanel" aria-labelledby="adminTabButtonTables" hidden>
+            <div class="admin-workspace">
+              <section class="xp-card admin-card admin-card--main" aria-labelledby="adminTablesTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminTablesTitle">Tables</h2>
+                    <p class="admin-card__subtitle">Inspect persisted state, janitor signals, and safe cleanup actions.</p>
+                  </div>
+                  <div class="admin-card__actions">
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminTablesRefresh">Refresh</button>
+                  </div>
+                </div>
+                <form class="admin-filter-grid" id="adminTablesFilters">
+                  <label class="admin-field">
+                    <span class="admin-field__label">tableId</span>
+                    <input class="admin-input" type="search" name="tableId" placeholder="UUID or partial match">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Status</span>
+                    <select class="admin-input" name="status">
+                      <option value="OPEN">Open</option>
+                      <option value="CLOSED">Closed</option>
+                      <option value="ALL">All</option>
+                    </select>
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Stakes</span>
+                    <input class="admin-input" type="search" name="stakes" placeholder="e.g. 10/20">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Phase</span>
+                    <select class="admin-input" name="phase">
+                      <option value="">Any phase</option>
+                      <option value="HAND_DONE">HAND_DONE</option>
+                      <option value="PREFLOP">PREFLOP</option>
+                      <option value="FLOP">FLOP</option>
+                      <option value="TURN">TURN</option>
+                      <option value="RIVER">RIVER</option>
+                      <option value="SHOWDOWN">SHOWDOWN</option>
+                    </select>
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Last activity older than (min)</span>
+                    <input class="admin-input" type="number" min="1" step="1" name="idleMinutes" placeholder="15">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Sort</span>
+                    <select class="admin-input" name="sort">
+                      <option value="last_activity_desc">Last activity desc</option>
+                      <option value="last_activity_asc">Last activity asc</option>
+                      <option value="created_at_desc">Created desc</option>
+                      <option value="created_at_asc">Created asc</option>
+                      <option value="player_count_desc">Player count desc</option>
+                    </select>
+                  </label>
+                  <label class="admin-field admin-field--toggle">
+                    <input type="checkbox" name="hasActiveHumans" value="1">
+                    <span>Has active humans</span>
+                  </label>
+                  <label class="admin-field admin-field--toggle">
+                    <input type="checkbox" name="hasBotsOnly" value="1">
+                    <span>Bots only</span>
+                  </label>
+                  <label class="admin-field admin-field--toggle">
+                    <input type="checkbox" name="hasStaleSeats" value="1">
+                    <span>Has stale seats</span>
+                  </label>
+                  <div class="admin-filter-actions">
+                    <button class="admin-btn admin-btn--primary" type="submit">Apply filters</button>
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminTablesReset">Reset</button>
+                  </div>
+                </form>
+                <div class="admin-table-wrap">
+                  <table class="admin-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">tableId</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Stakes</th>
+                        <th scope="col">Players</th>
+                        <th scope="col">Humans</th>
+                        <th scope="col">Bots</th>
+                        <th scope="col">Phase</th>
+                        <th scope="col">Last activity</th>
+                        <th scope="col">Janitor</th>
+                        <th scope="col">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="adminTablesBody"></tbody>
+                  </table>
+                </div>
+                <p class="admin-empty" id="adminTablesEmpty" hidden>No tables matched the current filters.</p>
+                <div class="admin-pagination" id="adminTablesPagination"></div>
+              </section>
+
+              <aside class="xp-card admin-card admin-card--detail" aria-labelledby="adminTableDetailTitle">
+                <div class="admin-detail" id="adminTableDetail">
+                  <h2 class="xp-card__title" id="adminTableDetailTitle">Table details</h2>
+                  <p class="admin-empty">Select a table to inspect seats, runtime hints, janitor evaluation, and cleanup history.</p>
+                </div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="admin-tab-panel" id="adminTabLedger" data-admin-panel="ledger" role="tabpanel" aria-labelledby="adminTabButtonLedger" hidden>
+            <div class="admin-workspace">
+              <section class="xp-card admin-card admin-card--main" aria-labelledby="adminLedgerTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminLedgerTitle">Ledger</h2>
+                    <p class="admin-card__subtitle">Browse global ledger activity, audit admin changes, and pivot into a selected user.</p>
+                  </div>
+                  <div class="admin-card__actions admin-card__actions--wrap">
+                    <button class="admin-btn admin-btn--ghost" type="button" data-ledger-quick="ADMIN_ADJUST">ADMIN_ADJUST</button>
+                    <button class="admin-btn admin-btn--ghost" type="button" data-ledger-quick="TABLE_BUY_IN">TABLE_BUY_IN</button>
+                    <button class="admin-btn admin-btn--ghost" type="button" data-ledger-quick="TABLE_CASH_OUT">TABLE_CASH_OUT</button>
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminLedgerRecentAdmin">Recent admin actions</button>
+                  </div>
+                </div>
+                <form class="admin-filter-grid" id="adminLedgerFilters">
+                  <label class="admin-field">
+                    <span class="admin-field__label">tx type</span>
+                    <input class="admin-input" type="search" name="txType" placeholder="ADMIN_ADJUST">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">userId</span>
+                    <input class="admin-input" type="search" name="userId" placeholder="Exact UUID">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Email</span>
+                    <input class="admin-input" type="search" name="email" placeholder="player@example.com">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Source</span>
+                    <input class="admin-input" type="search" name="source" placeholder="admin_page">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">From</span>
+                    <input class="admin-input" type="datetime-local" name="from">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">To</span>
+                    <input class="admin-input" type="datetime-local" name="to">
+                  </label>
+                  <label class="admin-field admin-field--toggle">
+                    <input type="checkbox" name="positiveOnly" value="1">
+                    <span>Positive only</span>
+                  </label>
+                  <label class="admin-field admin-field--toggle">
+                    <input type="checkbox" name="negativeOnly" value="1">
+                    <span>Negative only</span>
+                  </label>
+                  <label class="admin-field admin-field--toggle">
+                    <input type="checkbox" name="adminOnly" value="1">
+                    <span>Admin adjustments only</span>
+                  </label>
+                  <div class="admin-filter-actions">
+                    <button class="admin-btn admin-btn--primary" type="submit">Apply filters</button>
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminLedgerReset">Reset</button>
+                  </div>
+                </form>
+                <div class="admin-table-wrap">
+                  <table class="admin-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">When</th>
+                        <th scope="col">Type</th>
+                        <th scope="col">Target user</th>
+                        <th scope="col">Details</th>
+                        <th scope="col">Idempotency / ref</th>
+                        <th scope="col">Source</th>
+                        <th scope="col">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody id="adminLedgerBody"></tbody>
+                  </table>
+                </div>
+                <p class="admin-empty" id="adminLedgerEmpty" hidden>No ledger entries matched the current filters.</p>
+                <div class="admin-pagination" id="adminLedgerPagination"></div>
+              </section>
+
+              <aside class="xp-card admin-card admin-card--detail" aria-labelledby="adminLedgerSideTitle">
+                <div class="admin-detail" id="adminLedgerDetail">
+                  <h2 class="xp-card__title" id="adminLedgerSideTitle">Ledger context</h2>
+                  <p class="admin-empty">Use quick filters, copy helpers, or jump from a user row to narrow this audit trail.</p>
+                </div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="admin-tab-panel" id="adminTabOps" data-admin-panel="ops" role="tabpanel" aria-labelledby="adminTabButtonOps" hidden>
+            <div class="admin-ops-grid">
+              <section class="xp-card admin-card" aria-labelledby="adminOpsSummaryTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminOpsSummaryTitle">Janitor / cleanup stats</h2>
+                    <p class="admin-card__subtitle">Read-only overview of the current persisted poker estate.</p>
+                  </div>
+                  <div class="admin-card__actions">
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminOpsRefresh">Refresh all stats</button>
+                  </div>
+                </div>
+                <div class="admin-stat-grid" id="adminOpsStats"></div>
+              </section>
+
+              <section class="xp-card admin-card" aria-labelledby="adminOpsRuntimeTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminOpsRuntimeTitle">Runtime / environment</h2>
+                    <p class="admin-card__subtitle">Health hints only. No secrets are exposed here.</p>
+                  </div>
+                </div>
+                <div id="adminOpsRuntime"></div>
+              </section>
+
+              <section class="xp-card admin-card" aria-labelledby="adminOpsActionsTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminOpsActionsTitle">Manual actions</h2>
+                    <p class="admin-card__subtitle">Safe batch triggers for operational cleanup workflows.</p>
+                  </div>
+                </div>
+                <div class="admin-action-stack">
+                  <button class="admin-btn admin-btn--primary" type="button" id="adminOpsRunReconciler">Run open-table reconciler now</button>
+                  <button class="admin-btn admin-btn--ghost" type="button" id="adminOpsRunStaleSweep">Run stale-seat sweep now</button>
+                </div>
+                <div id="adminOpsActionResult"></div>
+              </section>
+
+              <section class="xp-card admin-card admin-card--wide" aria-labelledby="adminOpsRecentTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminOpsRecentTitle">Recent janitor activity</h2>
+                    <p class="admin-card__subtitle">Recent admin table actions plus cleanup-related cash-out trails.</p>
+                  </div>
+                </div>
+                <div class="admin-two-column">
+                  <div>
+                    <h3 class="admin-section-title">Admin actions</h3>
+                    <div id="adminOpsRecentActions"></div>
+                  </div>
+                  <div>
+                    <h3 class="admin-section-title">Cleanup transactions</h3>
+                    <div id="adminOpsRecentCleanup"></div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </section>
+        </section>
+      </article>
+    </main>
+  </div>
+
+  <footer class="site-footer" role="contentinfo">
+    <nav class="footer-nav" aria-label="Footer">
+      <a class="ft-link" href="about.en.html">About</a>
+      <span class="sep">•</span>
+      <a class="ft-link" href="about/licenses.html">Licenses</a>
+      <span class="sep">•</span>
+      <a class="ft-link" href="legal/terms.en.html">Terms</a>
+      <span class="sep">•</span>
+      <a class="ft-link" href="legal/privacy.en.html">Privacy</a>
+      <span class="sep">•</span>
+      <a class="ft-link" href="mailto:contact@kcswh.pl">Contact</a>
+      <span class="sep">•</span>
+      <a class="ft-link manage-cookies" id="manageCookies" href="#">Manage cookies</a>
+    </nav>
+    <div class="lang-switch" aria-label="Language">
+      <button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button>
+      <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
+    </div>
+  </footer>
+  <script src="js/consent-manager.js" defer></script>
+</body>
+</html>
