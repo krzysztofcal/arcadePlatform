@@ -16,6 +16,9 @@ const landingConsentServicesJs = await readFile(path.join(root, 'landing', 'js',
 const landingKlaroConfigJs = await readFile(path.join(root, 'landing', 'js', 'klaro-config.js'), 'utf8');
 const landingAdsenseInitJs = await readFile(path.join(root, 'landing', 'js', 'adsense-init.js'), 'utf8');
 const landingIndexHtml = await readFile(path.join(root, 'landing', 'index.html'), 'utf8');
+const landingAboutHtml = await readFile(path.join(root, 'landing', 'about.html'), 'utf8');
+const landingPrivacyEnHtml = await readFile(path.join(root, 'landing', 'legal', 'privacy.en.html'), 'utf8');
+const landingPrivacyPlHtml = await readFile(path.join(root, 'landing', 'legal', 'privacy.pl.html'), 'utf8');
 const landingGameJs = await readFile(path.join(root, 'landing', 'js', 'landing-game.js'), 'utf8');
 const freedoomHtml = await readFile(path.join(root, 'games-open', 'freedoom', 'index.html'), 'utf8');
 const freedoomJs = await readFile(path.join(root, 'games-open', 'freedoom', 'script.js'), 'utf8');
@@ -51,6 +54,8 @@ assert.equal(landingAdsenseInitJs, adsenseInitJs, 'landing deploy should publish
 assert.match(landingIndexHtml, /data-landing-game/, 'landing page should render the mini game surface');
 assert.match(landingIndexHtml, /\.\/js\/landing-game\.js/, 'landing page should load the mini game controller');
 assert.match(landingGameJs, /landingPixelBest/, 'landing mini game should persist the best score locally');
+assert.equal([landingIndexHtml, landingAboutHtml, landingPrivacyEnHtml, landingPrivacyPlHtml].every((html) => html.includes('href="https://play.kcswh.pl/xp.html"')), true, 'landing XP badges should link to the play subdomain XP panel');
+assert.equal([landingIndexHtml, landingAboutHtml, landingPrivacyEnHtml, landingPrivacyPlHtml].some((html) => /href="\.\.?\/.*xp\.html"|xp-badge--loading/.test(html)), false, 'landing XP badges should not point to missing local XP pages or show a permanent loading state');
 assert.match(freedoomHtml, /id="doomCanvas"/, 'Freedoom should render the Dwasm canvas target');
 assert.match(freedoomHtml, /js\/vendor\/klaro\/klaro\.js/, 'Freedoom should use the shared Klaro consent runtime');
 assert.doesNotMatch(freedoomHtml, /Cookiebot|cookiebot-manager|js-dos|v8\.js-dos\.com/, 'Freedoom should not depend on Cookiebot or js-dos assets');
