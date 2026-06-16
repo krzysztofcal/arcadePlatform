@@ -15,6 +15,9 @@ const landingConsentServicesJs = await readFile(path.join(root, 'landing', 'js',
 const landingKlaroConfigJs = await readFile(path.join(root, 'landing', 'js', 'klaro-config.js'), 'utf8');
 const landingAdsenseInitJs = await readFile(path.join(root, 'landing', 'js', 'adsense-init.js'), 'utf8');
 const landingIndexHtml = await readFile(path.join(root, 'landing', 'index.html'), 'utf8');
+const landingAboutHtml = await readFile(path.join(root, 'landing', 'about.html'), 'utf8');
+const landingPrivacyEnHtml = await readFile(path.join(root, 'landing', 'legal', 'privacy.en.html'), 'utf8');
+const landingPrivacyPlHtml = await readFile(path.join(root, 'landing', 'legal', 'privacy.pl.html'), 'utf8');
 const landingGameJs = await readFile(path.join(root, 'landing', 'js', 'landing-game.js'), 'utf8');
 const netlifyToml = await readFile(path.join(root, 'netlify.toml'), 'utf8');
 assert.match(indexHtml, /src="\/js\/build-info\.js" defer/, 'poker index should include build-info bootstrap script');
@@ -47,5 +50,7 @@ assert.equal(landingAdsenseInitJs, adsenseInitJs, 'landing deploy should publish
 assert.match(landingIndexHtml, /data-landing-game/, 'landing page should render the mini game surface');
 assert.match(landingIndexHtml, /\.\/js\/landing-game\.js/, 'landing page should load the mini game controller');
 assert.match(landingGameJs, /landingPixelBest/, 'landing mini game should persist the best score locally');
+assert.equal([landingIndexHtml, landingAboutHtml, landingPrivacyEnHtml, landingPrivacyPlHtml].every((html) => html.includes('href="https://play.kcswh.pl/xp.html"')), true, 'landing XP badges should link to the play subdomain XP panel');
+assert.equal([landingIndexHtml, landingAboutHtml, landingPrivacyEnHtml, landingPrivacyPlHtml].some((html) => /href="\.\.?\/.*xp\.html"|xp-badge--loading/.test(html)), false, 'landing XP badges should not point to missing local XP pages or show a permanent loading state');
 assert.ok(netlifyToml.includes('Content-Security-Policy = "'), 'Netlify deploys should emit a CSP header');
 assert.doesNotMatch(netlifyToml, /cookiebot/i, 'Netlify CSP should not require Cookiebot hosts after the Klaro migration');
