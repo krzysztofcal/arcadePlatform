@@ -7,6 +7,9 @@ const indexHtml = await readFile(path.join(root, 'poker', 'index.html'), 'utf8')
 const tableV2Html = await readFile(path.join(root, 'poker', 'table-v2.html'), 'utf8');
 const tableV2Css = await readFile(path.join(root, 'poker', 'poker-v2.css'), 'utf8');
 const cookiebotManagerJs = await readFile(path.join(root, 'js', 'cookiebot-manager.js'), 'utf8');
+const adsenseInitJs = await readFile(path.join(root, 'js', 'adsense-init.js'), 'utf8');
+const landingCookiebotManagerJs = await readFile(path.join(root, 'landing', 'js', 'cookiebot-manager.js'), 'utf8');
+const landingAdsenseInitJs = await readFile(path.join(root, 'landing', 'js', 'adsense-init.js'), 'utf8');
 assert.match(indexHtml, /src="\/js\/build-info\.js" defer/, 'poker index should include build-info bootstrap script');
 assert.equal(indexHtml.indexOf('/js/build-info.js') < indexHtml.indexOf('/poker/poker-ws-client.js'), true, 'poker index should load build-info before ws client');
 assert.doesNotMatch(indexHtml, /pokerClassicEntry/, 'poker lobby should no longer expose the classic table entry');
@@ -26,3 +29,5 @@ assert.match(tableV2Html, /id="pokerBootSplash"/, 'poker table v2 should render 
 assert.match(tableV2Html, /id="pokerV2AmountValue"/, 'poker table v2 should render a compact amount value for the action slider');
 assert.match(cookiebotManagerJs, /#manageCookies, .manage-cookies/, 'cookie manager should delegate clicks from all manage cookies links');
 assert.equal(cookiebotManagerJs.indexOf('window.Cookiebot.renew()') < cookiebotManagerJs.indexOf('window.Cookiebot.show()'), true, 'manage cookies should reopen Cookiebot preferences before falling back to the initial banner');
+assert.equal(landingCookiebotManagerJs, cookiebotManagerJs, 'landing deploy should publish the shared Cookiebot manager at /js/cookiebot-manager.js');
+assert.equal(landingAdsenseInitJs, adsenseInitJs, 'landing deploy should publish the AdSense init helper at /js/adsense-init.js');
