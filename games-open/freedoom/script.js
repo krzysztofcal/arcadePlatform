@@ -191,6 +191,29 @@
     });
   }
 
+  function fitCanvasToFrame() {
+    if (!elements.canvas) return;
+    elements.canvas.style.setProperty('display', 'block', 'important');
+    elements.canvas.style.setProperty('width', '100%', 'important');
+    elements.canvas.style.setProperty('height', '100%', 'important');
+    elements.canvas.style.setProperty('max-width', '100%', 'important');
+    elements.canvas.style.setProperty('max-height', '100%', 'important');
+    elements.canvas.style.setProperty('margin', '0', 'important');
+    elements.canvas.style.setProperty('object-fit', 'contain', 'important');
+  }
+
+  function scheduleCanvasFit() {
+    var ticks = 0;
+    function tick() {
+      fitCanvasToFrame();
+      ticks += 1;
+      if (ticks < 20) window.requestAnimationFrame(tick);
+    }
+    tick();
+    window.setTimeout(fitCanvasToFrame, 750);
+    window.setTimeout(fitCanvasToFrame, 1500);
+  }
+
   function onGameLoaded() {
     state.loaded = true;
     state.running = true;
@@ -198,7 +221,7 @@
     state.startTime = Date.now();
     showLoading(false);
     if (elements.canvas) {
-      elements.canvas.style.display = 'block';
+      scheduleCanvasFit();
       elements.canvas.focus();
     }
     if (elements.playBtn) elements.playBtn.style.display = 'none';
@@ -334,6 +357,7 @@
     var centerX = 0;
     var centerY = 0;
     var maxDistance = 40;
+    var activePointerId = null;
 
     function updateRect() {
       rect = base.getBoundingClientRect();
@@ -359,24 +383,39 @@
       handler(0, 0);
     }
 
-    element.addEventListener('touchstart', function(event) {
+    element.addEventListener('pointerdown', function(event) {
+      if (activePointerId !== null) return;
       event.preventDefault();
+      activePointerId = event.pointerId;
+      if (element.setPointerCapture) element.setPointerCapture(activePointerId);
       updateRect();
-      handleMove(event.touches[0].clientX, event.touches[0].clientY);
+      handleMove(event.clientX, event.clientY);
       notifyActivity();
     }, { passive: false });
-    element.addEventListener('touchmove', function(event) {
+    element.addEventListener('pointermove', function(event) {
+      if (event.pointerId !== activePointerId) return;
       event.preventDefault();
-      handleMove(event.touches[0].clientX, event.touches[0].clientY);
+      handleMove(event.clientX, event.clientY);
     }, { passive: false });
-    element.addEventListener('touchend', function(event) {
+
+    function finishPointer(event) {
+      if (event.pointerId !== activePointerId) return;
       event.preventDefault();
+      if (element.releasePointerCapture) {
+        try { element.releasePointerCapture(activePointerId); } catch (_error) {}
+      }
+      activePointerId = null;
       handleEnd();
-    }, { passive: false });
-    element.addEventListener('touchcancel', function(event) {
-      event.preventDefault();
-      handleEnd();
-    }, { passive: false });
+    }
+
+    element.addEventListener('pointerup', finishPointer, { passive: false });
+    element.addEventListener('pointercancel', finishPointer, { passive: false });
+    element.addEventListener('lostpointercapture', function(event) {
+      if (event.pointerId === activePointerId) {
+        activePointerId = null;
+        handleEnd();
+      }
+    });
   }
 
   function handleMoveJoystick(x, y) {
@@ -435,37 +474,52 @@
       setupJoystick(lookJoystick, handleLookJoystick);
     }
 
+    function bindKeyButton(button, keyCode) {
+      var activePointerId = null;
+
+      function release(event) {
+        if (event.pointerId !== activePointerId) return;
+        event.preventDefault();
+        if (button.releasePointerCapture) {
+          try { button.releasePointerCapture(activePointerId); } catch (_error) {}
+        }
+        activePointerId = null;
+        sendKey(keyCode, false);
+      }
+
+      button.addEventListener('pointerdown', function(event) {
+        if (activePointerId !== null) return;
+        event.preventDefault();
+        activePointerId = event.pointerId;
+        if (button.setPointerCapture) button.setPointerCapture(activePointerId);
+        sendKey(keyCode, true);
+        notifyActivity();
+      }, { passive: false });
+      button.addEventListener('pointerup', release, { passive: false });
+      button.addEventListener('pointercancel', release, { passive: false });
+      button.addEventListener('lostpointercapture', function(event) {
+        if (event.pointerId === activePointerId) {
+          activePointerId = null;
+          sendKey(keyCode, false);
+        }
+      });
+    }
+
     var fireBtn = document.getElementById('btnFire');
     var useBtn = document.getElementById('btnUse');
     if (fireBtn && !fireBtn.dataset.ready) {
       fireBtn.dataset.ready = '1';
-      fireBtn.addEventListener('touchstart', function(event) {
-        event.preventDefault();
-        sendKey('ControlLeft', true);
-        notifyActivity();
-      }, { passive: false });
-      fireBtn.addEventListener('touchend', function(event) {
-        event.preventDefault();
-        sendKey('ControlLeft', false);
-      }, { passive: false });
+      bindKeyButton(fireBtn, 'ControlLeft');
     }
     if (useBtn && !useBtn.dataset.ready) {
       useBtn.dataset.ready = '1';
-      useBtn.addEventListener('touchstart', function(event) {
-        event.preventDefault();
-        sendKey('Space', true);
-        notifyActivity();
-      }, { passive: false });
-      useBtn.addEventListener('touchend', function(event) {
-        event.preventDefault();
-        sendKey('Space', false);
-      }, { passive: false });
+      bindKeyButton(useBtn, 'Space');
     }
 
     document.querySelectorAll('.weapon-btn').forEach(function(btn) {
       if (btn.dataset.ready) return;
       btn.dataset.ready = '1';
-      btn.addEventListener('touchstart', function(event) {
+      btn.addEventListener('pointerdown', function(event) {
         event.preventDefault();
         var weapon = btn.getAttribute('data-weapon');
         if (!weapon) return;
@@ -511,7 +565,17 @@
     initElements();
     if (elements.playBtn) elements.playBtn.addEventListener('click', startGame);
     if (elements.restartBtn) elements.restartBtn.addEventListener('click', restartGame);
-    window.addEventListener('resize', function() { if (state.loaded) initMobileControls(); });
+    window.addEventListener('resize', function() {
+      if (state.loaded) {
+        initMobileControls();
+        scheduleCanvasFit();
+      }
+    });
+    window.addEventListener('orientationchange', function() {
+      window.setTimeout(function() {
+        if (state.loaded) scheduleCanvasFit();
+      }, 250);
+    });
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

@@ -22,6 +22,7 @@ const landingPrivacyPlHtml = await readFile(path.join(root, 'landing', 'legal', 
 const landingGameJs = await readFile(path.join(root, 'landing', 'js', 'landing-game.js'), 'utf8');
 const freedoomHtml = await readFile(path.join(root, 'games-open', 'freedoom', 'index.html'), 'utf8');
 const freedoomJs = await readFile(path.join(root, 'games-open', 'freedoom', 'script.js'), 'utf8');
+const freedoomCss = await readFile(path.join(root, 'games-open', 'freedoom', 'style.css'), 'utf8');
 const headersFile = await readFile(path.join(root, '_headers'), 'utf8');
 const netlifyToml = await readFile(path.join(root, 'netlify.toml'), 'utf8');
 assert.match(indexHtml, /src="\/js\/build-info\.js" defer/, 'poker index should include build-info bootstrap script');
@@ -64,6 +65,9 @@ assert.match(freedoomJs, /assets\/freedoom2\.bin/, 'Freedoom should load the loc
 assert.match(freedoomJs, /freedoom2\.wad/, 'Freedoom should boot the Freedoom WAD');
 assert.match(freedoomJs, /vendor\/dwasm\/index\.js/, 'Freedoom should use the vendored Dwasm runtime');
 assert.doesNotMatch(freedoomJs, /digger\.jsdos|v8\.js-dos\.com|cdn\.dos\.zone/, 'Freedoom should not boot the old Digger/js-dos placeholder');
+assert.match(freedoomJs, /setPointerCapture\(activePointerId\)/, 'Freedoom mobile joysticks should capture independent pointer IDs');
+assert.doesNotMatch(freedoomJs, /event\.touches\[0\]/, 'Freedoom mobile controls should not read the first global touch');
+assert.match(freedoomCss, /\.doom-canvas\s*\{[^}]*width:\s*100% !important;[^}]*height:\s*100% !important;/, 'Freedoom canvas should be forced to fit inside the game frame');
 assert.ok(statSync(path.join(root, 'games-open', 'freedoom', 'assets', 'freedoom2.bin')).size > 7_000_000, 'Freedoom should publish the local Freedoom archive');
 assert.match(headersFile, /\/games-open\/freedoom\/\*/, 'Freedoom should have a scoped CSP in _headers');
 assert.doesNotMatch(headersFile, /dwasm\.m-h\.org\.uk/, 'Freedoom CSP should not rely on a remote WAD mirror');
