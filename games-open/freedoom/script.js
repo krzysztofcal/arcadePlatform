@@ -24,7 +24,8 @@
     listenersAttached: false,
     wadData: null,
     renderCanvas: null,
-    presentationFrame: null
+    presentationFrame: null,
+    desktopMouseReady: false
   };
 
   var elements = {
@@ -344,6 +345,7 @@
     if (elements.playBtn) elements.playBtn.style.display = 'none';
     if (elements.restartBtn) elements.restartBtn.style.display = 'inline-flex';
     initMobileControls();
+    initDesktopMouseControls();
     if (state.timeInterval) clearInterval(state.timeInterval);
     state.timeInterval = setInterval(updateTime, 1000);
     setupGameEventListeners();
@@ -431,6 +433,47 @@
         Object.defineProperty(event, 'movementY', { get: function() { return deltaY; } });
       } catch (_error) {}
       target.dispatchEvent(event);
+    });
+  }
+
+  function initDesktopMouseControls() {
+    if (state.desktopMouseReady || !elements.canvas || isMobile()) return;
+    state.desktopMouseReady = true;
+
+    var activePointerId = null;
+
+    function releaseFire(event) {
+      if (event.pointerType && event.pointerType !== 'mouse') return;
+      if (activePointerId !== null && event.pointerId !== activePointerId) return;
+      if (event.cancelable) event.preventDefault();
+      if (elements.canvas.releasePointerCapture && activePointerId !== null) {
+        try { elements.canvas.releasePointerCapture(activePointerId); } catch (_error) {}
+      }
+      activePointerId = null;
+      sendKey('ControlLeft', false);
+    }
+
+    elements.canvas.addEventListener('pointerdown', function(event) {
+      if (event.pointerType !== 'mouse' || event.button !== 0) return;
+      if (event.cancelable) event.preventDefault();
+      activePointerId = event.pointerId;
+      if (elements.canvas.setPointerCapture) elements.canvas.setPointerCapture(activePointerId);
+      elements.canvas.focus();
+      sendKey('ControlLeft', true);
+      notifyActivity();
+    });
+
+    elements.canvas.addEventListener('pointerup', releaseFire);
+    elements.canvas.addEventListener('pointercancel', releaseFire);
+    elements.canvas.addEventListener('lostpointercapture', function(event) {
+      if (event.pointerId !== activePointerId) return;
+      activePointerId = null;
+      sendKey('ControlLeft', false);
+    });
+    window.addEventListener('blur', function() {
+      if (activePointerId === null) return;
+      activePointerId = null;
+      sendKey('ControlLeft', false);
     });
   }
 

@@ -76,6 +76,9 @@ assert.match(freedoomJs, /key_straferight\s+0x64/, 'Freedoom PrBoom config shoul
 assert.match(freedoomJs, /sendKey\('KeyW',\s*shouldMoveUp\)/, 'Freedoom mobile forward control should send the configured forward key');
 assert.match(freedoomJs, /sendKey\('KeyA',\s*shouldMoveLeft\)/, 'Freedoom mobile strafe-left control should send the configured strafe key');
 assert.match(freedoomJs, /sendKey\('KeyD',\s*shouldMoveRight\)/, 'Freedoom mobile strafe-right control should send the configured strafe key');
+assert.match(freedoomJs, /event\.pointerType !== 'mouse' \|\| event\.button !== 0/, 'Freedoom desktop firing should only bind the primary mouse button');
+assert.match(freedoomJs, /sendKey\('ControlLeft',\s*true\)/, 'Freedoom desktop firing should press the configured fire key on mouse down');
+assert.match(freedoomJs, /sendKey\('ControlLeft',\s*false\)/, 'Freedoom desktop firing should release the configured fire key on mouse up');
 assert.match(freedoomJs, /movement_mouselook\s+1/, 'Freedoom PrBoom config should enable mouselook for vertical look controls');
 assert.match(freedoomJs, /sendMouseMove\(0,\s*Math\.round\(lookVector\.y \* 18\)\)/, 'Freedoom mobile look joystick should drive vertical mouselook');
 assert.match(freedoomJs, /document,\s*window/, 'Freedoom synthetic key events should reach the runtime keyboard listeners');
