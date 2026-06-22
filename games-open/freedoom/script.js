@@ -433,7 +433,9 @@
       try {
         Object.defineProperty(event, 'movementX', { get: function() { return deltaX; } });
         Object.defineProperty(event, 'movementY', { get: function() { return deltaY; } });
+        Object.defineProperty(event, '__arcadeSynthetic', { value: true });
       } catch (_error) {}
+      event.__arcadeSynthetic = true;
       target.dispatchEvent(event);
     });
   }
@@ -455,6 +457,7 @@
 
     document.addEventListener('mousemove', function(event) {
       if (!hasDesktopPointerLock()) return;
+      if (event.__arcadeSynthetic) return;
       if (!event.movementX && !event.movementY) return;
       sendMouseMove(event.movementX || 0, event.movementY || 0);
       notifyActivity();

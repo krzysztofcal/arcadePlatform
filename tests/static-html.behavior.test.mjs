@@ -78,6 +78,8 @@ assert.match(freedoomJs, /sendKey\('KeyA',\s*shouldMoveLeft\)/, 'Freedoom mobile
 assert.match(freedoomJs, /sendKey\('KeyD',\s*shouldMoveRight\)/, 'Freedoom mobile strafe-right control should send the configured strafe key');
 assert.match(freedoomJs, /event\.pointerType !== 'mouse' \|\| event\.button !== 0/, 'Freedoom desktop firing should only bind the primary mouse button');
 assert.match(freedoomJs, /elements\.canvas\.requestPointerLock\(\)/, 'Freedoom desktop controls should request pointer lock on the visible canvas');
+assert.match(freedoomJs, /event\.__arcadeSynthetic\) return;/, 'Freedoom desktop pointer-lock listener should ignore synthetic mousemove events');
+assert.match(freedoomJs, /event\.__arcadeSynthetic = true;/, 'Freedoom synthetic mousemove events should be marked to avoid pointer-lock feedback loops');
 assert.match(freedoomJs, /document\.addEventListener\('mousemove', function\(event\) \{\s*if \(!hasDesktopPointerLock\(\)\) return;[\s\S]*sendMouseMove\(event\.movementX \|\| 0,\s*event\.movementY \|\| 0\);/, 'Freedoom desktop look should forward pointer-lock mouse movement to the runtime');
 assert.match(freedoomJs, /sendKey\('ControlLeft',\s*true\)/, 'Freedoom desktop firing should press the configured fire key on mouse down');
 assert.match(freedoomJs, /sendKey\('ControlLeft',\s*false\)/, 'Freedoom desktop firing should release the configured fire key on mouse up');
