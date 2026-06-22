@@ -20,14 +20,14 @@
       en: 'Below are details for included projects.',
       pl: 'Poniżej znajdziesz szczegóły wykorzystanych projektów.'
     },
-    licensesSupabaseTitle: { en: 'Supabase', pl: 'Supabase' },
+    licensesSupabaseTitle: { en: 'Supabase JavaScript client', pl: 'Klient JavaScript Supabase' },
     licensesSupabaseDesc: {
-      en: 'Authentication & database platform used for user accounts and XP sync.',
-      pl: 'Platforma uwierzytelniania i bazy danych używana dla kont użytkowników i synchronizacji XP.'
+      en: 'JavaScript client used for authentication and data access.',
+      pl: 'Klient JavaScript używany do uwierzytelniania i dostępu do danych.'
     },
     licensesSupabaseLicense: {
-      en: 'Licensed under the Apache License 2.0.',
-      pl: 'Licencjonowane na podstawie Apache License 2.0.'
+      en: 'Licensed under the MIT License.',
+      pl: 'Licencjonowane na podstawie licencji MIT.'
     },
     licensesSupabaseSource: { en: 'Source:', pl: 'Źródło:' },
     licensesOriginalBy: { en: 'Original project by', pl: 'Oryginalny projekt:' },
