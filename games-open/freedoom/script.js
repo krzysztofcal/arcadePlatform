@@ -250,7 +250,7 @@
       'key_left                          0xac',
       'key_right                         0xae',
       'key_fire                          0x9d',
-      'key_use                           0x20',
+      'key_use                           0x65',
       'key_mlook                         0x5c',
       'hudadd_leveltime                  1',
       'hudadd_demotime                   1',
@@ -759,7 +759,7 @@
     }
     if (useBtn && !useBtn.dataset.ready) {
       useBtn.dataset.ready = '1';
-      bindKeyButton(useBtn, 'Space');
+      bindKeyButton(useBtn, 'KeyE');
     }
 
     document.querySelectorAll('.weapon-btn').forEach(function(btn) {

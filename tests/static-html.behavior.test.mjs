@@ -73,9 +73,11 @@ assert.match(freedoomJs, /key_up\s+0x77/, 'Freedoom PrBoom config should bind fo
 assert.match(freedoomJs, /key_down\s+0x73/, 'Freedoom PrBoom config should bind backward to S');
 assert.match(freedoomJs, /key_strafeleft\s+0x61/, 'Freedoom PrBoom config should bind strafe-left to A');
 assert.match(freedoomJs, /key_straferight\s+0x64/, 'Freedoom PrBoom config should bind strafe-right to D');
+assert.match(freedoomJs, /key_use\s+0x65/, 'Freedoom PrBoom config should bind use to E');
 assert.match(freedoomJs, /sendKey\('KeyW',\s*shouldMoveUp\)/, 'Freedoom mobile forward control should send the configured forward key');
 assert.match(freedoomJs, /sendKey\('KeyA',\s*shouldMoveLeft\)/, 'Freedoom mobile strafe-left control should send the configured strafe key');
 assert.match(freedoomJs, /sendKey\('KeyD',\s*shouldMoveRight\)/, 'Freedoom mobile strafe-right control should send the configured strafe key');
+assert.match(freedoomJs, /bindKeyButton\(useBtn,\s*'KeyE'\)/, 'Freedoom mobile use button should send the configured use key');
 assert.match(freedoomJs, /document\.pointerLockElement === \(state\.renderCanvas \|\| elements\.canvas\)/, 'Freedoom desktop pointer lock should follow the runtime canvas');
 assert.match(freedoomJs, /target\.requestPointerLock\(\)/, 'Freedoom desktop controls should request pointer lock on the runtime canvas');
 assert.match(freedoomJs, /desktopTurnThreshold:\s*6/, 'Freedoom desktop look should ignore tiny pointer-lock jitter');
