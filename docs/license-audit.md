@@ -31,16 +31,18 @@ Licensing information is not complete in one place. `about/licenses.html` is the
 
 The locked npm set consists of Apache-2.0 (`@playwright/test`, `playwright`, `playwright-core`, `human-signals`), ISC (`isexe`, `signal-exit`, `which`, `yaml`), Unlicense (`postgres`), MIT (`ws` and the remaining named packages in `docs/third-party-notices.md`). `fsevents` and several root-lock entries omit a license field; upstream/installed package metadata must be used and kept under review.
 
+## First-party AI-assisted provenance follow-up
+
+The repository owner states that the twenty simple games attributed to Arcade Hub contributors were created iteratively by AI agents under owner direction rather than copied from external upstreams. The owner also states that ChatGPT image generation created the poker chip atlas at the owner’s request and Codex created and committed the derived chip PNGs from that atlas. Combined with local attribution and Git history, these components are treated as first-party repository work under the repository’s MIT terms and are no longer HIGH RISK merely because they lack an external upstream URL. This is a provenance classification based on the owner’s representation, not a legal certification or a guarantee of originality.
+
 ## HIGH RISK
 
 These components must not be changed merely by writing new license claims:
 
 - **Pacman** (`games-open/pacman`): local MIT claim conflicts with the cited upstream's WTFPL v2; imported revision unknown.
 - **T-Rex Runner** (`games/t-rex`): local MIT claim conflicts with the cited upstream's current BSD-3-Clause and Chromium extraction history; imported revision unknown.
-- **Twenty “Arcade Hub contributors” games**: Breakout, Flappy Bird, Minesweeper, Pong, Snake, Asteroids, Space Invaders, Frogger, Galaga, Missile Command, Simon, Connect Four, Whac-A-Mole, Memory Match, Sokoban, Brick Breaker, Tic-Tac-Toe, Hangman, Solitaire and Sudoku have no independent upstream/provenance proof. A self-issued MIT text does not prove ownership of externally copied code.
 - **Dwasm/PrBoomX binaries**: GPL text/authors exist, but exact source revision, build recipe and complete corresponding source for deployed WASM/JS are not recorded.
 - **Google libarchive/Comlink bundle in Dwasm**: embedded Apache-2.0 header exists, but exact source/version and complete applicable notice set are unproved.
-- **Poker chip atlas and 35 derivatives**: source, author and license are unknown.
 
 ## Evidence locations and recommendations
 
