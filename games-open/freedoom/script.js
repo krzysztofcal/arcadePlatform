@@ -26,7 +26,9 @@
     renderCanvas: null,
     presentationFrame: null,
     desktopMouseReady: false,
-    pointerLockReady: false
+    pointerLockReady: false,
+    desktopTurnKey: null,
+    desktopTurnReleaseTimer: null
   };
 
   var elements = {
@@ -440,28 +442,6 @@
     });
   }
 
-  function sendMouseButton(button, pressed) {
-    var source = state.renderCanvas || elements.canvas;
-    var targets = [source, document, window].filter(Boolean);
-    var eventType = pressed ? 'mousedown' : 'mouseup';
-    var buttons = pressed ? 1 : 0;
-    targets.forEach(function(target) {
-      var event = new MouseEvent(eventType, {
-        bubbles: true,
-        cancelable: true,
-        button: button,
-        buttons: buttons,
-        clientX: 400,
-        clientY: 240
-      });
-      try {
-        Object.defineProperty(event, '__arcadeSynthetic', { value: true });
-      } catch (_error) {}
-      event.__arcadeSynthetic = true;
-      target.dispatchEvent(event);
-    });
-  }
-
   function hasDesktopPointerLock() {
     return document.pointerLockElement === (state.renderCanvas || elements.canvas);
   }
@@ -477,6 +457,30 @@
   function initDesktopPointerLock() {
     if (state.pointerLockReady || !elements.canvas || isMobile()) return;
     state.pointerLockReady = true;
+
+    document.addEventListener('mousemove', function(event) {
+      if (!hasDesktopPointerLock() || event.__arcadeSynthetic) return;
+      var deltaX = event.movementX || 0;
+      if (Math.abs(deltaX) < 1) return;
+
+      var turnCode = deltaX < 0 ? 'ArrowLeft' : 'ArrowRight';
+      if (state.desktopTurnKey && state.desktopTurnKey !== turnCode) {
+        sendKey(state.desktopTurnKey, false);
+        state.desktopTurnKey = null;
+      }
+      if (state.desktopTurnKey !== turnCode) {
+        state.desktopTurnKey = turnCode;
+        sendKey(turnCode, true);
+      }
+      if (state.desktopTurnReleaseTimer) clearTimeout(state.desktopTurnReleaseTimer);
+      state.desktopTurnReleaseTimer = setTimeout(function() {
+        if (!state.desktopTurnKey) return;
+        sendKey(state.desktopTurnKey, false);
+        state.desktopTurnKey = null;
+        state.desktopTurnReleaseTimer = null;
+      }, 40);
+      notifyActivity();
+    }, { passive: true });
 
     elements.canvas.addEventListener('click', function() {
       requestDesktopPointerLock();
@@ -495,7 +499,7 @@
       if (event.cancelable) event.preventDefault();
       requestDesktopPointerLock();
       fireHeld = true;
-      sendMouseButton(0, true);
+      sendKey('ControlLeft', true);
       notifyActivity();
     });
 
@@ -503,13 +507,18 @@
       if (event.__arcadeSynthetic || event.button !== 0 || !fireHeld) return;
       if (event.cancelable) event.preventDefault();
       fireHeld = false;
-      sendMouseButton(0, false);
+      sendKey('ControlLeft', false);
     });
 
     window.addEventListener('blur', function() {
+      if (state.desktopTurnReleaseTimer) clearTimeout(state.desktopTurnReleaseTimer);
+      if (state.desktopTurnKey) {
+        sendKey(state.desktopTurnKey, false);
+        state.desktopTurnKey = null;
+      }
       if (!fireHeld) return;
       fireHeld = false;
-      sendMouseButton(0, false);
+      sendKey('ControlLeft', false);
     });
   }
 
