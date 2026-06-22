@@ -255,7 +255,7 @@
     createPlaceholderCard(item, lang){
       const el = this.document.createElement('article');
       el.className = 'card';
-      const ucText = lang === 'pl' ? 'W przygotowaniu' : 'Under construction';
+      const ucText = lang === 'pl' ? 'Więcej informacji wkrótce' : 'More details available soon';
 
       const thumb = this.document.createElement('div');
       thumb.className = 'thumb';

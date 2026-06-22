@@ -1,11 +1,9 @@
 (function (window, document) {
   const STORAGE_LOG_KEY = "kcswh:debug:log";
   const STORAGE_META_KEY = "kcswh:debug:meta";
-  const STORAGE_ADMIN_KEY = "kcswh:admin";
   const MAX_LINES = 1000;
   const MIRROR_THRESHOLD = 5; // persist more eagerly
   const ENTRY_MAX_CHARS = 2000;
-  const ADMIN_DURATION_MS = 24 * 60 * 60 * 1000;
 
   let buffer = [];
   let started = false;
@@ -14,7 +12,7 @@
   let totalLines = 0;
   let dirtySinceMirror = 0;
   let truncateLogged = false;
-  let adminActive = false;
+  let adminVerified = false;
 
   function getStorage() {
     try {
@@ -134,74 +132,25 @@
     } catch (_) {}
   }
 
-  function refreshAdmin() {
-    const record = readJson(STORAGE_ADMIN_KEY);
-    const now = Date.now();
-    let active = false;
-    if (record && record.v === true && typeof record.exp === "number") {
-      if (record.exp > now) {
-        active = true;
-      } else {
-        const store = getStorage();
-        if (store) {
-          try { store.removeItem(STORAGE_ADMIN_KEY); } catch (_) {}
-        }
-      }
-    }
-    adminActive = active;
-    return adminActive;
-  }
-
-  function hasAdminFlag() {
-    try {
-      const store = getStorage();
-      if (!store) return false;
-      return !!store.getItem(STORAGE_ADMIN_KEY);
-    } catch (_) {
-      return false;
-    }
-  }
-
   function notifyAdminChange() {
     try {
-      window.dispatchEvent(new CustomEvent("klog:admin", { detail: { active: adminActive } }));
+      window.dispatchEvent(new CustomEvent("klog:admin", { detail: { active: adminVerified } }));
     } catch (_) {}
   }
 
-  function enableAdmin(durationMs) {
-    const store = getStorage();
-    if (!store) return false;
-    const now = Date.now();
-    const exp = now + Math.max(Number(durationMs) || 0, ADMIN_DURATION_MS);
-    try {
-      store.setItem(STORAGE_ADMIN_KEY, JSON.stringify({ v: true, exp }));
-    } catch (_) {
-      return false;
-    }
-    refreshAdmin();
+  function syncAdminAccess(active) {
+    const next = !!active;
+    if (adminVerified === next) return adminVerified;
+    adminVerified = next;
     notifyAdminChange();
-    if (adminActive && !started) {
-      start(1);
+    if (!adminVerified) {
+      stop();
     }
-    return adminActive;
-  }
-
-  function maybeEnableFromUrl() {
-    try {
-      if (!window || !window.location || !window.location.search) return;
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("admin") === "1") {
-        enableAdmin(ADMIN_DURATION_MS);
-      }
-    } catch (_) {}
+    return adminVerified;
   }
 
   function isAdmin() {
-    if (!hasAdminFlag()) {
-      adminActive = false;
-      return false;
-    }
-    return refreshAdmin();
+    return adminVerified;
   }
 
   function recordDump(method, success, extra) {
@@ -260,6 +209,9 @@
   }
 
   async function dumpToClipboard() {
+    if (!isAdmin()) {
+      return false;
+    }
     flush(true);
     const text = getText();
     if (!window || typeof window.open !== "function") {
@@ -317,6 +269,9 @@
   }
 
   function downloadFile() {
+    if (!isAdmin()) {
+      return false;
+    }
     try {
       const text = getText();
       if (typeof Blob === "undefined" || typeof URL === "undefined") {
@@ -339,11 +294,15 @@
   }
 
   function getText() {
+    if (!isAdmin()) return "";
     if (!Array.isArray(buffer) || buffer.length === 0) return "";
     return buffer.join("\n");
   }
 
   function start(requestedLevel) {
+    if (!isAdmin()) {
+      return false;
+    }
     const nextLevel = Number(requestedLevel);
     level = Number.isFinite(nextLevel) && nextLevel > 0 ? nextLevel : 1;
     if (started) {
@@ -398,11 +357,6 @@
   }
 
   hydrateFromStorage();
-  refreshAdmin();
-  maybeEnableFromUrl();
-  if (isAdmin()) {
-    start(1);
-  }
 
   const api = {
     start,
@@ -412,28 +366,10 @@
     dumpToClipboard,
     downloadFile,
     status,
-    enableAdmin,
+    syncAdminAccess,
     isAdmin,
     flush,
   };
 
   window.KLog = Object.assign({}, window.KLog || {}, api);
-
-  if (typeof window !== "undefined") {
-    window.addEventListener("storage", (event) => {
-      try {
-        if (!event) return;
-        if (event.key === STORAGE_ADMIN_KEY) {
-          const before = adminActive;
-          refreshAdmin();
-          if (before !== adminActive) {
-            notifyAdminChange();
-            if (adminActive && !started) {
-              start(1);
-            }
-          }
-        }
-      } catch (_) {}
-    });
-  }
 })(typeof window !== "undefined" ? window : this, typeof document !== "undefined" ? document : undefined);
