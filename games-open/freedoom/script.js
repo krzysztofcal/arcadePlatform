@@ -25,7 +25,8 @@
     wadData: null,
     renderCanvas: null,
     presentationFrame: null,
-    desktopMouseReady: false
+    desktopMouseReady: false,
+    pointerLockReady: false
   };
 
   var elements = {
@@ -345,6 +346,7 @@
     if (elements.playBtn) elements.playBtn.style.display = 'none';
     if (elements.restartBtn) elements.restartBtn.style.display = 'inline-flex';
     initMobileControls();
+    initDesktopPointerLock();
     initDesktopMouseControls();
     if (state.timeInterval) clearInterval(state.timeInterval);
     state.timeInterval = setInterval(updateTime, 1000);
@@ -436,6 +438,33 @@
     });
   }
 
+  function hasDesktopPointerLock() {
+    return document.pointerLockElement === elements.canvas;
+  }
+
+  function requestDesktopPointerLock() {
+    if (!elements.canvas || isMobile() || hasDesktopPointerLock()) return;
+    if (typeof elements.canvas.requestPointerLock === 'function') {
+      try { elements.canvas.requestPointerLock(); } catch (_error) {}
+    }
+  }
+
+  function initDesktopPointerLock() {
+    if (state.pointerLockReady || !elements.canvas || isMobile()) return;
+    state.pointerLockReady = true;
+
+    document.addEventListener('mousemove', function(event) {
+      if (!hasDesktopPointerLock()) return;
+      if (!event.movementX && !event.movementY) return;
+      sendMouseMove(event.movementX || 0, event.movementY || 0);
+      notifyActivity();
+    }, { passive: true });
+
+    elements.canvas.addEventListener('click', function() {
+      requestDesktopPointerLock();
+    });
+  }
+
   function initDesktopMouseControls() {
     if (state.desktopMouseReady || !elements.canvas || isMobile()) return;
     state.desktopMouseReady = true;
@@ -459,6 +488,7 @@
       activePointerId = event.pointerId;
       if (elements.canvas.setPointerCapture) elements.canvas.setPointerCapture(activePointerId);
       elements.canvas.focus();
+      requestDesktopPointerLock();
       sendKey('ControlLeft', true);
       notifyActivity();
     });
@@ -782,6 +812,7 @@
         if (state.loaded) scheduleCanvasFit();
       }, 250);
     });
+    startGame();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
