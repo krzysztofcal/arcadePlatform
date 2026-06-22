@@ -578,7 +578,7 @@
     if (nodes.deleteBtn && nodes.deleteNote){
       nodes.deleteBtn.addEventListener('click', function(e){
         e.preventDefault();
-        setStatus('Account deletion is coming soon. Contact support to remove data.', 'info');
+        setStatus('Contact support to request account deletion for this profile.', 'info');
         nodes.deleteNote.focus();
       });
     }
