@@ -5,10 +5,8 @@
 (function() {
   'use strict';
 
-  var WAD_ARCHIVE_URL = 'assets/freedoom2.bin';
   var WAD_FILENAME = 'freedoom2.wad';
   var RUNTIME_SCRIPT = 'vendor/dwasm/index.js';
-  var ARCHIVE_SCRIPT = './vendor/dwasm/libarchive.js';
   var RENDER_WIDTH = 1366;
   var RENDER_HEIGHT = 768;
 
@@ -22,7 +20,6 @@
     timeInterval: null,
     activityInterval: null,
     listenersAttached: false,
-    wadData: null,
     renderCanvas: null,
     presentationFrame: null,
     desktopMouseReady: false,
@@ -101,50 +98,10 @@
     return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
   }
 
-  function fetchBlob(url, title) {
-    return new Promise(function(resolve, reject) {
-      var xhr = new XMLHttpRequest();
-      xhr.open('GET', url, true);
-      xhr.responseType = 'blob';
-      xhr.onprogress = function(event) {
-        var progress = event.lengthComputable ? (event.loaded / event.total) * 100 : null;
-        setStatus('Downloading ' + title + '...', progress);
-      };
-      xhr.onload = function() {
-        if (xhr.status === 200) {
-          resolve(new File([xhr.response], title, { type: xhr.getResponseHeader('Content-Type') || 'application/octet-stream' }));
-        } else {
-          reject(new Error('Download failed with HTTP ' + xhr.status));
-        }
-      };
-      xhr.onerror = function() {
-        reject(new Error('Download failed'));
-      };
-      xhr.send();
-    });
-  }
-
-  async function loadWad() {
-    if (state.wadData) return state.wadData;
-
-    setStatus('Preparing Freedoom runtime...');
-    var archiveModule = await import(ARCHIVE_SCRIPT);
-    var archiveBlob = await fetchBlob(WAD_ARCHIVE_URL, 'freedoom2.bin');
-
-    setStatus('Opening Freedoom archive...');
-    var archive = await archiveModule.Archive.open(archiveBlob);
-    try {
-      var files = await archive.getFilesObject();
-      if (!files[WAD_FILENAME] || typeof files[WAD_FILENAME].extract !== 'function') {
-        throw new Error(WAD_FILENAME + ' missing from archive');
-      }
-
-      setStatus('Extracting Freedoom WAD...');
-      var wadFile = await files[WAD_FILENAME].extract();
-      state.wadData = new Uint8Array(await wadFile.arrayBuffer());
-      return state.wadData;
-    } finally {
-      await archive.close();
+  function ensurePreloadedWad() {
+    var wadPath = '/' + WAD_FILENAME;
+    if (!window.FS || !window.FS.analyzePath || !window.FS.analyzePath(wadPath).exists) {
+      throw new Error(WAD_FILENAME + ' missing from preloaded Dwasm data');
     }
   }
 
@@ -194,14 +151,16 @@
           if (left > 0) setStatus('Preparing engine dependencies... (' + left + ' left)');
         },
         onRuntimeInitialized: function() {
-          window.FS.writeFile('/arcade-prboomx.cfg', buildPrBoomConfig());
-          var file = window.FS.open('/' + WAD_FILENAME, 'w');
-          window.FS.write(file, state.wadData, 0, state.wadData.length, 0);
-          window.FS.close(file);
-          onGameLoaded();
-          if (!resolved) {
-            resolved = true;
-            resolve();
+          try {
+            window.FS.writeFile('/arcade-prboomx.cfg', buildPrBoomConfig());
+            ensurePreloadedWad();
+            onGameLoaded();
+            if (!resolved) {
+              resolved = true;
+              resolve();
+            }
+          } catch (error) {
+            reject(error);
           }
         },
         onAbort: function(reason) {
@@ -371,7 +330,6 @@
     }
 
     try {
-      await loadWad();
       setStatus('Starting Freedoom engine...');
       await bootRuntime();
     } catch (error) {
