@@ -76,13 +76,11 @@ assert.match(freedoomJs, /key_straferight\s+0x64/, 'Freedoom PrBoom config shoul
 assert.match(freedoomJs, /sendKey\('KeyW',\s*shouldMoveUp\)/, 'Freedoom mobile forward control should send the configured forward key');
 assert.match(freedoomJs, /sendKey\('KeyA',\s*shouldMoveLeft\)/, 'Freedoom mobile strafe-left control should send the configured strafe key');
 assert.match(freedoomJs, /sendKey\('KeyD',\s*shouldMoveRight\)/, 'Freedoom mobile strafe-right control should send the configured strafe key');
-assert.match(freedoomJs, /event\.pointerType !== 'mouse' \|\| event\.button !== 0/, 'Freedoom desktop firing should only bind the primary mouse button');
-assert.match(freedoomJs, /elements\.canvas\.requestPointerLock\(\)/, 'Freedoom desktop controls should request pointer lock on the visible canvas');
-assert.match(freedoomJs, /event\.__arcadeSynthetic\) return;/, 'Freedoom desktop pointer-lock listener should ignore synthetic mousemove events');
-assert.match(freedoomJs, /event\.__arcadeSynthetic = true;/, 'Freedoom synthetic mousemove events should be marked to avoid pointer-lock feedback loops');
-assert.match(freedoomJs, /document\.addEventListener\('mousemove', function\(event\) \{\s*if \(!hasDesktopPointerLock\(\)\) return;[\s\S]*sendMouseMove\(event\.movementX \|\| 0,\s*event\.movementY \|\| 0\);/, 'Freedoom desktop look should forward pointer-lock mouse movement to the runtime');
-assert.match(freedoomJs, /sendKey\('ControlLeft',\s*true\)/, 'Freedoom desktop firing should press the configured fire key on mouse down');
-assert.match(freedoomJs, /sendKey\('ControlLeft',\s*false\)/, 'Freedoom desktop firing should release the configured fire key on mouse up');
+assert.match(freedoomJs, /document\.pointerLockElement === \(state\.renderCanvas \|\| elements\.canvas\)/, 'Freedoom desktop pointer lock should follow the runtime canvas');
+assert.match(freedoomJs, /target\.requestPointerLock\(\)/, 'Freedoom desktop controls should request pointer lock on the runtime canvas');
+assert.match(freedoomJs, /document\.addEventListener\('mousedown', function\(event\) \{\s*if \(event\.__arcadeSynthetic \|\| event\.button !== 0\) return;[\s\S]*sendMouseButton\(0,\s*true\);/, 'Freedoom desktop firing should press the primary mouse button through the runtime input path');
+assert.match(freedoomJs, /document\.addEventListener\('mouseup', function\(event\) \{\s*if \(event\.__arcadeSynthetic \|\| event\.button !== 0 \|\| !fireHeld\) return;[\s\S]*sendMouseButton\(0,\s*false\);/, 'Freedoom desktop firing should release the primary mouse button through the runtime input path');
+assert.match(freedoomJs, /event\.__arcadeSynthetic = true;/, 'Freedoom synthetic desktop mouse events should be marked to avoid feedback loops');
 assert.match(freedoomJs, /window\.addEventListener\('orientationchange'[\s\S]*startGame\(\);/, 'Freedoom should auto-start on page load instead of waiting for a manual Play click');
 assert.match(freedoomJs, /movement_mouselook\s+1/, 'Freedoom PrBoom config should enable mouselook for vertical look controls');
 assert.match(freedoomJs, /sendMouseMove\(0,\s*Math\.round\(lookVector\.y \* 18\)\)/, 'Freedoom mobile look joystick should drive vertical mouselook');

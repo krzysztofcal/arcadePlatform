@@ -440,28 +440,43 @@
     });
   }
 
+  function sendMouseButton(button, pressed) {
+    var source = state.renderCanvas || elements.canvas;
+    var targets = [source, document, window].filter(Boolean);
+    var eventType = pressed ? 'mousedown' : 'mouseup';
+    var buttons = pressed ? 1 : 0;
+    targets.forEach(function(target) {
+      var event = new MouseEvent(eventType, {
+        bubbles: true,
+        cancelable: true,
+        button: button,
+        buttons: buttons,
+        clientX: 400,
+        clientY: 240
+      });
+      try {
+        Object.defineProperty(event, '__arcadeSynthetic', { value: true });
+      } catch (_error) {}
+      event.__arcadeSynthetic = true;
+      target.dispatchEvent(event);
+    });
+  }
+
   function hasDesktopPointerLock() {
-    return document.pointerLockElement === elements.canvas;
+    return document.pointerLockElement === (state.renderCanvas || elements.canvas);
   }
 
   function requestDesktopPointerLock() {
-    if (!elements.canvas || isMobile() || hasDesktopPointerLock()) return;
-    if (typeof elements.canvas.requestPointerLock === 'function') {
-      try { elements.canvas.requestPointerLock(); } catch (_error) {}
+    var target = state.renderCanvas || elements.canvas;
+    if (!target || isMobile() || hasDesktopPointerLock()) return;
+    if (typeof target.requestPointerLock === 'function') {
+      try { target.requestPointerLock(); } catch (_error) {}
     }
   }
 
   function initDesktopPointerLock() {
     if (state.pointerLockReady || !elements.canvas || isMobile()) return;
     state.pointerLockReady = true;
-
-    document.addEventListener('mousemove', function(event) {
-      if (!hasDesktopPointerLock()) return;
-      if (event.__arcadeSynthetic) return;
-      if (!event.movementX && !event.movementY) return;
-      sendMouseMove(event.movementX || 0, event.movementY || 0);
-      notifyActivity();
-    }, { passive: true });
 
     elements.canvas.addEventListener('click', function() {
       requestDesktopPointerLock();
@@ -472,41 +487,29 @@
     if (state.desktopMouseReady || !elements.canvas || isMobile()) return;
     state.desktopMouseReady = true;
 
-    var activePointerId = null;
+    var fireHeld = false;
 
-    function releaseFire(event) {
-      if (event.pointerType && event.pointerType !== 'mouse') return;
-      if (activePointerId !== null && event.pointerId !== activePointerId) return;
+    document.addEventListener('mousedown', function(event) {
+      if (event.__arcadeSynthetic || event.button !== 0) return;
+      if (!hasDesktopPointerLock() && event.target !== elements.canvas) return;
       if (event.cancelable) event.preventDefault();
-      if (elements.canvas.releasePointerCapture && activePointerId !== null) {
-        try { elements.canvas.releasePointerCapture(activePointerId); } catch (_error) {}
-      }
-      activePointerId = null;
-      sendKey('ControlLeft', false);
-    }
-
-    elements.canvas.addEventListener('pointerdown', function(event) {
-      if (event.pointerType !== 'mouse' || event.button !== 0) return;
-      if (event.cancelable) event.preventDefault();
-      activePointerId = event.pointerId;
-      if (elements.canvas.setPointerCapture) elements.canvas.setPointerCapture(activePointerId);
-      elements.canvas.focus();
       requestDesktopPointerLock();
-      sendKey('ControlLeft', true);
+      fireHeld = true;
+      sendMouseButton(0, true);
       notifyActivity();
     });
 
-    elements.canvas.addEventListener('pointerup', releaseFire);
-    elements.canvas.addEventListener('pointercancel', releaseFire);
-    elements.canvas.addEventListener('lostpointercapture', function(event) {
-      if (event.pointerId !== activePointerId) return;
-      activePointerId = null;
-      sendKey('ControlLeft', false);
+    document.addEventListener('mouseup', function(event) {
+      if (event.__arcadeSynthetic || event.button !== 0 || !fireHeld) return;
+      if (event.cancelable) event.preventDefault();
+      fireHeld = false;
+      sendMouseButton(0, false);
     });
+
     window.addEventListener('blur', function() {
-      if (activePointerId === null) return;
-      activePointerId = null;
-      sendKey('ControlLeft', false);
+      if (!fireHeld) return;
+      fireHeld = false;
+      sendMouseButton(0, false);
     });
   }
 
