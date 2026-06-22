@@ -24,7 +24,11 @@
     listenersAttached: false,
     wadData: null,
     renderCanvas: null,
-    presentationFrame: null
+    presentationFrame: null,
+    desktopMouseReady: false,
+    pointerLockReady: false,
+    desktopTurnThreshold: 6,
+    desktopTurnReleaseTimer: null
   };
 
   var elements = {
@@ -246,7 +250,7 @@
       'key_left                          0xac',
       'key_right                         0xae',
       'key_fire                          0x9d',
-      'key_use                           0x20',
+      'key_use                           0x65',
       'key_mlook                         0x5c',
       'hudadd_leveltime                  1',
       'hudadd_demotime                   1',
@@ -344,6 +348,8 @@
     if (elements.playBtn) elements.playBtn.style.display = 'none';
     if (elements.restartBtn) elements.restartBtn.style.display = 'inline-flex';
     initMobileControls();
+    initDesktopPointerLock();
+    initDesktopMouseControls();
     if (state.timeInterval) clearInterval(state.timeInterval);
     state.timeInterval = setInterval(updateTime, 1000);
     setupGameEventListeners();
@@ -429,8 +435,85 @@
       try {
         Object.defineProperty(event, 'movementX', { get: function() { return deltaX; } });
         Object.defineProperty(event, 'movementY', { get: function() { return deltaY; } });
+        Object.defineProperty(event, '__arcadeSynthetic', { value: true });
       } catch (_error) {}
+      event.__arcadeSynthetic = true;
       target.dispatchEvent(event);
+    });
+  }
+
+  function hasDesktopPointerLock() {
+    return document.pointerLockElement === (state.renderCanvas || elements.canvas);
+  }
+
+  function requestDesktopPointerLock() {
+    var target = state.renderCanvas || elements.canvas;
+    if (!target || isMobile() || hasDesktopPointerLock()) return;
+    if (typeof target.requestPointerLock === 'function') {
+      try { target.requestPointerLock(); } catch (_error) {}
+    }
+  }
+
+  function pulseDesktopTurn(turnCode, durationMs) {
+    if (state.desktopTurnReleaseTimer) clearTimeout(state.desktopTurnReleaseTimer);
+    sendKey('ArrowLeft', false);
+    sendKey('ArrowRight', false);
+    sendKey(turnCode, true);
+    state.desktopTurnReleaseTimer = setTimeout(function() {
+      sendKey(turnCode, false);
+      state.desktopTurnReleaseTimer = null;
+    }, durationMs);
+  }
+
+  function initDesktopPointerLock() {
+    if (state.pointerLockReady || !elements.canvas || isMobile()) return;
+    state.pointerLockReady = true;
+
+    document.addEventListener('mousemove', function(event) {
+      if (!hasDesktopPointerLock() || event.__arcadeSynthetic) return;
+      var deltaX = event.movementX || 0;
+      if (Math.abs(deltaX) < state.desktopTurnThreshold) return;
+      var turnCode = deltaX < 0 ? 'ArrowLeft' : 'ArrowRight';
+      pulseDesktopTurn(turnCode, 18);
+      notifyActivity();
+    }, { passive: true });
+
+    elements.canvas.addEventListener('click', function() {
+      requestDesktopPointerLock();
+    });
+  }
+
+  function initDesktopMouseControls() {
+    if (state.desktopMouseReady || !elements.canvas || isMobile()) return;
+    state.desktopMouseReady = true;
+
+    var fireHeld = false;
+
+    document.addEventListener('mousedown', function(event) {
+      if (event.__arcadeSynthetic || event.button !== 0) return;
+      if (!hasDesktopPointerLock() && event.target !== elements.canvas) return;
+      if (event.cancelable) event.preventDefault();
+      requestDesktopPointerLock();
+      fireHeld = true;
+      sendKey('ControlLeft', true);
+      notifyActivity();
+    });
+
+    document.addEventListener('mouseup', function(event) {
+      if (event.__arcadeSynthetic || event.button !== 0 || !fireHeld) return;
+      if (event.cancelable) event.preventDefault();
+      fireHeld = false;
+      sendKey('ControlLeft', false);
+    });
+
+    window.addEventListener('blur', function() {
+      if (state.desktopTurnReleaseTimer) clearTimeout(state.desktopTurnReleaseTimer);
+      sendKey('ArrowLeft', false);
+      sendKey('ArrowRight', false);
+      state.desktopTurnReleaseTimer = null;
+      if (!fireHeld) return;
+      fireHeld = false;
+      sendKey('ControlLeft', false);
     });
   }
 
@@ -676,7 +759,7 @@
     }
     if (useBtn && !useBtn.dataset.ready) {
       useBtn.dataset.ready = '1';
-      bindKeyButton(useBtn, 'Space');
+      bindKeyButton(useBtn, 'KeyE');
     }
 
     document.querySelectorAll('.weapon-btn').forEach(function(btn) {
@@ -739,6 +822,7 @@
         if (state.loaded) scheduleCanvasFit();
       }, 250);
     });
+    startGame();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
