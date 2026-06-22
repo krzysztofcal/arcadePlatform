@@ -372,22 +372,4 @@
   };
 
   window.KLog = Object.assign({}, window.KLog || {}, api);
-
-  if (typeof window !== "undefined") {
-    window.addEventListener("storage", (event) => {
-      try {
-        if (!event) return;
-        if (event.key === STORAGE_ADMIN_KEY) {
-          const before = adminActive;
-          refreshAdmin();
-          if (before !== adminActive) {
-            notifyAdminChange();
-            if (adminActive && !started) {
-              start(1);
-            }
-          }
-        }
-      } catch (_) {}
-    });
-  }
 })(typeof window !== "undefined" ? window : this, typeof document !== "undefined" ? document : undefined);
