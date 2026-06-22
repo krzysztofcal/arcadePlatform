@@ -27,7 +27,7 @@
     presentationFrame: null,
     desktopMouseReady: false,
     pointerLockReady: false,
-    desktopTurnKey: null,
+    desktopTurnThreshold: 6,
     desktopTurnReleaseTimer: null
   };
 
@@ -454,6 +454,17 @@
     }
   }
 
+  function pulseDesktopTurn(turnCode, durationMs) {
+    if (state.desktopTurnReleaseTimer) clearTimeout(state.desktopTurnReleaseTimer);
+    sendKey('ArrowLeft', false);
+    sendKey('ArrowRight', false);
+    sendKey(turnCode, true);
+    state.desktopTurnReleaseTimer = setTimeout(function() {
+      sendKey(turnCode, false);
+      state.desktopTurnReleaseTimer = null;
+    }, durationMs);
+  }
+
   function initDesktopPointerLock() {
     if (state.pointerLockReady || !elements.canvas || isMobile()) return;
     state.pointerLockReady = true;
@@ -461,24 +472,9 @@
     document.addEventListener('mousemove', function(event) {
       if (!hasDesktopPointerLock() || event.__arcadeSynthetic) return;
       var deltaX = event.movementX || 0;
-      if (Math.abs(deltaX) < 1) return;
-
+      if (Math.abs(deltaX) < state.desktopTurnThreshold) return;
       var turnCode = deltaX < 0 ? 'ArrowLeft' : 'ArrowRight';
-      if (state.desktopTurnKey && state.desktopTurnKey !== turnCode) {
-        sendKey(state.desktopTurnKey, false);
-        state.desktopTurnKey = null;
-      }
-      if (state.desktopTurnKey !== turnCode) {
-        state.desktopTurnKey = turnCode;
-        sendKey(turnCode, true);
-      }
-      if (state.desktopTurnReleaseTimer) clearTimeout(state.desktopTurnReleaseTimer);
-      state.desktopTurnReleaseTimer = setTimeout(function() {
-        if (!state.desktopTurnKey) return;
-        sendKey(state.desktopTurnKey, false);
-        state.desktopTurnKey = null;
-        state.desktopTurnReleaseTimer = null;
-      }, 40);
+      pulseDesktopTurn(turnCode, 18);
       notifyActivity();
     }, { passive: true });
 
@@ -512,10 +508,9 @@
 
     window.addEventListener('blur', function() {
       if (state.desktopTurnReleaseTimer) clearTimeout(state.desktopTurnReleaseTimer);
-      if (state.desktopTurnKey) {
-        sendKey(state.desktopTurnKey, false);
-        state.desktopTurnKey = null;
-      }
+      sendKey('ArrowLeft', false);
+      sendKey('ArrowRight', false);
+      state.desktopTurnReleaseTimer = null;
       if (!fireHeld) return;
       fireHeld = false;
       sendKey('ControlLeft', false);

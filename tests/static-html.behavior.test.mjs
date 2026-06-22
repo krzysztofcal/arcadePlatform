@@ -78,8 +78,9 @@ assert.match(freedoomJs, /sendKey\('KeyA',\s*shouldMoveLeft\)/, 'Freedoom mobile
 assert.match(freedoomJs, /sendKey\('KeyD',\s*shouldMoveRight\)/, 'Freedoom mobile strafe-right control should send the configured strafe key');
 assert.match(freedoomJs, /document\.pointerLockElement === \(state\.renderCanvas \|\| elements\.canvas\)/, 'Freedoom desktop pointer lock should follow the runtime canvas');
 assert.match(freedoomJs, /target\.requestPointerLock\(\)/, 'Freedoom desktop controls should request pointer lock on the runtime canvas');
-assert.match(freedoomJs, /document\.addEventListener\('mousemove', function\(event\) \{\s*if \(!hasDesktopPointerLock\(\) \|\| event\.__arcadeSynthetic\) return;[\s\S]*var turnCode = deltaX < 0 \? 'ArrowLeft' : 'ArrowRight';/, 'Freedoom desktop look should translate pointer-lock mouse movement into turn keys');
-assert.match(freedoomJs, /setTimeout\(function\(\) \{\s*if \(!state\.desktopTurnKey\) return;[\s\S]*sendKey\(state\.desktopTurnKey,\s*false\);/, 'Freedoom desktop look should release turn keys after a short pulse');
+assert.match(freedoomJs, /desktopTurnThreshold:\s*6/, 'Freedoom desktop look should ignore tiny pointer-lock jitter');
+assert.match(freedoomJs, /if \(Math\.abs\(deltaX\) < state\.desktopTurnThreshold\) return;/, 'Freedoom desktop look should only turn after a minimum mouse delta');
+assert.match(freedoomJs, /pulseDesktopTurn\(turnCode,\s*18\);/, 'Freedoom desktop look should use a short turn pulse close to tapping the arrow keys');
 assert.match(freedoomJs, /document\.addEventListener\('mousedown', function\(event\) \{\s*if \(event\.__arcadeSynthetic \|\| event\.button !== 0\) return;[\s\S]*sendKey\('ControlLeft',\s*true\);/, 'Freedoom desktop firing should press the configured fire key from the left mouse button');
 assert.match(freedoomJs, /document\.addEventListener\('mouseup', function\(event\) \{\s*if \(event\.__arcadeSynthetic \|\| event\.button !== 0 \|\| !fireHeld\) return;[\s\S]*sendKey\('ControlLeft',\s*false\);/, 'Freedoom desktop firing should release the configured fire key on mouse up');
 assert.match(freedoomJs, /window\.addEventListener\('orientationchange'[\s\S]*startGame\(\);/, 'Freedoom should auto-start on page load instead of waiting for a manual Play click');
