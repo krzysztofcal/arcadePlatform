@@ -48,6 +48,10 @@
   <script src="js/search-popup-bootstrap.js" defer></script>
   <script src="js/core/sidebar-model.js" defer></script>
   <script src="js/sidebar.js" defer></script>
+  <link rel="stylesheet" href="js/vendor/klaro/klaro.css">
+  <script src="js/klaro-config.js" defer></script>
+  <script src="js/vendor/klaro/klaro.js" defer></script>
+  <script src="js/consent-services.js" defer></script>
 </head>
 <body data-game-host>
   <div class="topbar">
@@ -332,13 +336,13 @@
       <a class="ft-link" data-i18n="contact" href="mailto:contact@kcswh.pl">Contact</a>
       <span class="sep">•</span>
       <a class="ft-link manage-cookies" data-i18n="manageCookies"
-         id="manageCookies" href="#" data-cookieconsent="ignore">Manage cookies</a>
+         id="manageCookies" href="#">Manage cookies</a>
     </nav>
     <div class="lang-switch" aria-label="Language">
       <button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button>
       <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
     </div>
   </footer>
+  <script src="js/consent-manager.js" defer></script>
 </body>
 </html>
-

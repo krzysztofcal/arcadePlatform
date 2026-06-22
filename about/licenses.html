@@ -10,22 +10,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&amp;display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../css/portal.css">
   <link rel="stylesheet" href="/css/xp-overlay.css">
-  <script id="Cookiebot"
-          src="https://consent.cookiebot.com/uc.js"
-          data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
-          data-blockingmode="auto"
-          type="text/javascript">
-  </script>
-  <!-- GA4 (blocked until Statistics consent) -->
-  <script type="text/plain" data-cookieconsent="statistics"
-          src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
-  <script type="text/plain" data-cookieconsent="statistics">
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){ dataLayer.push(arguments); }
-    gtag('js', new Date());
-    gtag('config', 'G-JRP62LCXYK');
-  </script>
-  <script src="../js/analytics.js" defer></script>
+
+<script src="../js/analytics.js" defer></script>
   <script src="/js/i18n.js" defer></script>
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
@@ -58,6 +44,10 @@
       .page { padding-top: 16px; }
     }
   </style>
+  <link rel="stylesheet" href="../js/vendor/klaro/klaro.css">
+  <script src="../js/klaro-config.js" defer></script>
+  <script src="../js/vendor/klaro/klaro.js" defer></script>
+  <script src="../js/consent-services.js" defer></script>
 </head>
 <body>
   <div class="topbar">
@@ -891,6 +881,82 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.</pre>
         </section>
+
+        <section class="license-section">
+          <h2>Freedoom</h2>
+          <p>
+            <span data-i18n="licensesOriginalBy">Original project by</span>&nbsp;
+            <a href="https://freedoom.github.io" target="_blank" rel="noopener noreferrer">Freedoom contributors</a><br>
+            Licensed under the BSD 3-Clause License.<br>
+            <span data-i18n="licensesSource">Source:</span>&nbsp;
+            <a href="https://github.com/freedoom/freedoom" target="_blank" rel="noopener noreferrer">GitHub</a>
+          </p>
+          <pre class="license-text">BSD 3-Clause License
+
+Copyright (c) 2001-2024 Contributors to the Freedoom project. All rights
+reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+  * Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+
+  * Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+
+  * Neither the name of the Freedoom project nor the names of its
+    contributors may be used to endorse or promote products derived from
+    this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
+OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.</pre>
+        </section>
+
+        <section class="license-section">
+          <h2>Dwasm / PrBoomX</h2>
+          <p>
+            <span data-i18n="licensesOriginalBy">Original project by</span>&nbsp;
+            <a href="https://github.com/GMH-Code/Dwasm" target="_blank" rel="noopener noreferrer">Gregory Maynard-Hoare and contributors</a><br>
+            Licensed under the GNU General Public License v2.0 or later.<br>
+            <span data-i18n="licensesSource">Source:</span>&nbsp;
+            <a href="https://github.com/GMH-Code/Dwasm" target="_blank" rel="noopener noreferrer">GitHub</a>
+          </p>
+          <pre class="license-text">GNU GENERAL PUBLIC LICENSE
+Version 2, June 1991
+
+Copyright (C) 1989, 1991 Free Software Foundation, Inc.
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA
+
+Everyone is permitted to copy and distribute verbatim copies of this
+license document, but changing it is not allowed.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+MA 02110-1301, USA.</pre>
+        </section>
       </article>
     </main>
   </div>
@@ -933,6 +999,6 @@ SOFTWARE.</pre>
       }
     });
   </script>
-  <script src="../js/cookiebot-manager.js" defer></script>
+  <script src="../js/consent-manager.js" defer></script>
 </body>
 </html>

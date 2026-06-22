@@ -12,21 +12,10 @@
   </noscript>
   <link rel="stylesheet" href="../css/landing.css">
   <link rel="stylesheet" href="../../css/xp-badge.css">
-  <script id="Cookiebot"
-          src="https://consent.cookiebot.com/uc.js"
-          data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
-          data-blockingmode="auto"
-          type="text/javascript">
-  </script>
-  <!-- GA4 (blocked until Statistics consent) -->
-  <script type="text/plain" data-cookieconsent="statistics"
-          src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
-  <script type="text/plain" data-cookieconsent="statistics">
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){ dataLayer.push(arguments); }
-    gtag('js', new Date());
-    gtag('config', 'G-JRP62LCXYK');
-  </script>
+  <link rel="stylesheet" href="../../js/vendor/klaro/klaro.css">
+  <script src="../../js/klaro-config.js" defer></script>
+  <script src="../../js/vendor/klaro/klaro.js" defer></script>
+  <script src="../../js/consent-services.js" defer></script>
 </head>
 <body>
   <header class="header" role="banner">
@@ -39,8 +28,8 @@
       <a class="manage-cookies" href="#manageCookies">Zarządzaj cookies</a>
     </nav>
     <div class="header-actions">
-      <a id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true" href="../../xp.html">
-        <span class="xp-badge__label">Synchronizuję XP…</span>
+      <a id="xpBadge" class="xp-badge" aria-label="Otworz panel XP w Arcade Hub" href="https://play.kcswh.pl/xp.html">
+        <span class="xp-badge__label">XP</span>
       </a>
     </div>
   </header>
@@ -147,6 +136,6 @@
   <script>
     document.getElementById('year').textContent = new Date().getFullYear();
   </script>
-  <script src="../../js/cookiebot-manager.js" defer></script>
+  <script src="../../js/consent-manager.js" defer></script>
 </body>
 </html>
