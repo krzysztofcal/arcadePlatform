@@ -15,7 +15,8 @@ Licensing information is not complete in one place. `about/licenses.html` is the
 |---|---|---|---|---|---|
 | 2048 | `games-open/2048` | [gabrielecirulli/2048](https://github.com/gabrielecirulli/2048), Gabriele Cirulli | MIT | `public/games/2048/LICENSE`; central page | retain notice; redistribution permitted |
 | Canvas Tetris | `games-open/tetris` | [dionyziz/canvas-tetris](https://github.com/dionyziz/canvas-tetris), Dionysis Zindros | MIT | `public/games/tetris/LICENSE`; central page | retain notice; redistribution permitted |
-| Freedoom data | `games-open/freedoom/assets/freedoom2.bin` | [Freedoom contributors](https://github.com/freedoom/freedoom) | BSD-3-Clause | `games-open/freedoom/LICENSE`; central page | retain notice/conditions/disclaimer; redistribution permitted conditionally |
+| Freedoom data | `games-open/freedoom/assets/freedoom2.bin` (legacy archive) and the preload now baked into `games-open/freedoom/vendor/dwasm/index.data` | [Freedoom contributors](https://github.com/freedoom/freedoom) | BSD-3-Clause | `games-open/freedoom/LICENSE`; central page; `third_party/dwasm/SOURCE.md` records the Freedoom 0.13.0 source zip URL/checksum and the extracted `freedoom2.wad` checksum used for the current runtime | retain notice/conditions/disclaimer; redistribution permitted conditionally |
+| Dwasm / PrBoomX WebAssembly runtime | `games-open/freedoom/vendor/dwasm/index.js`, `index.data`, `index.wasm` | [GMH-Code/Dwasm](https://github.com/GMH-Code/Dwasm/tree/ddf0347a4fc115b11ffb1c5710768b7c47c46698), Gregory Maynard-Hoare and contributors | GPL-2.0-or-later | vendored `games-open/freedoom/vendor/dwasm/{README.md,COPYING,AUTHORS}` plus `third_party/dwasm/{ATTRIBUTION.md,LICENSE,SOURCE.md}` pin the exact upstream commit, build recipe and emitted artifact checksums | retain GPL notice and make complete corresponding source/build information available with redistributed binaries |
 | postgres | root and WS npm manifests | [porsager/postgres](https://github.com/porsager/postgres), Rasmus Porsager | Unlicense | lock/package metadata | redistribution permitted |
 | ws | WS npm manifest | [websockets/ws](https://github.com/websockets/ws), Einar Otto Stangvik and contributors | MIT | lock/package metadata | retain notice; redistribution permitted |
 
@@ -41,11 +42,11 @@ These components must not be changed merely by writing new license claims:
 
 - **Pacman** (`games-open/pacman`): local MIT claim conflicts with the cited upstream's WTFPL v2; imported revision unknown.
 - **T-Rex Runner** (`games/t-rex`): local MIT claim conflicts with the cited upstream's current BSD-3-Clause and Chromium extraction history; imported revision unknown.
-- **Dwasm/PrBoomX binaries**: GPL text/authors exist, but exact source revision, build recipe and complete corresponding source for deployed WASM/JS are not recorded.
-- **Google libarchive/Comlink bundle in Dwasm**: embedded Apache-2.0 header exists, but exact source/version and complete applicable notice set are unproved.
+
+The previous `games-open/freedoom/vendor/dwasm/libarchive.js`, `libarchive.wasm` and `worker-bundle.js` archive-extraction layer is no longer shipped by the current Freedoom runtime.
 
 ## Evidence locations and recommendations
 
-Existing license evidence: root `LICENSE`; `about/licenses.html`; `public/games/{2048,pacman,t-rex,tetris}/LICENSE`; `games-open/{breakout,flappy,minesweeper,pong,snake,freedoom}/LICENSE`; Dwasm `COPYING`, `AUTHORS` and `README.md`; both npm lockfiles.
+Existing license evidence: root `LICENSE`; `about/licenses.html`; `public/games/{2048,pacman,t-rex,tetris}/LICENSE`; `games-open/{breakout,flappy,minesweeper,pong,snake,freedoom}/LICENSE`; vendored Dwasm `COPYING`, `AUTHORS` and `README.md`; `third_party/dwasm/{ATTRIBUTION.md,LICENSE,SOURCE.md}`; both npm lockfiles.
 
 Maintain one `docs/third-party-notices.md` plus component license files, pin immutable upstream revisions/checksums, generate an SPDX/CycloneDX SBOM in CI, and reject new vendored files/assets without provenance. Do not rewrite upstream licenses or infer authorship from the committer.

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
@@ -60,12 +60,12 @@ assert.equal([landingIndexHtml, landingAboutHtml, landingPrivacyEnHtml, landingP
 assert.match(freedoomHtml, /id="doomCanvas"/, 'Freedoom should render the Dwasm canvas target');
 assert.match(freedoomHtml, /js\/vendor\/klaro\/klaro\.js/, 'Freedoom should use the shared Klaro consent runtime');
 assert.doesNotMatch(freedoomHtml, /Cookiebot|cookiebot-manager|js-dos|v8\.js-dos\.com/, 'Freedoom should not depend on Cookiebot or js-dos assets');
-assert.match(freedoomJs, /freedoom2\.bin/, 'Freedoom should download the Freedoom Phase 2 archive');
-assert.match(freedoomJs, /assets\/freedoom2\.bin/, 'Freedoom should load the local Freedoom archive');
+assert.doesNotMatch(freedoomJs, /freedoom2\.bin|libarchive|Archive\.open|fetchBlob/, 'Freedoom should boot the source-built Dwasm preload instead of extracting a local archive');
 assert.match(freedoomJs, /freedoom2\.wad/, 'Freedoom should boot the Freedoom WAD');
 assert.match(freedoomJs, /'-config',\s*'\/arcade-prboomx\.cfg'/, 'Freedoom should boot with the Arcade Hub PrBoom control config');
 assert.match(freedoomJs, /'-warp',\s*'1'/, 'Freedoom should start in a playable map instead of the demo loop');
 assert.match(freedoomJs, /vendor\/dwasm\/index\.js/, 'Freedoom should use the vendored Dwasm runtime');
+assert.match(freedoomJs, /window\.FS\.analyzePath\(wadPath\)\.exists/, 'Freedoom should verify that the IWAD is preloaded in the Dwasm data bundle');
 assert.doesNotMatch(freedoomJs, /digger\.jsdos|v8\.js-dos\.com|cdn\.dos\.zone/, 'Freedoom should not boot the old Digger/js-dos placeholder');
 assert.match(freedoomJs, /setPointerCapture\(activePointerId\)/, 'Freedoom mobile joysticks should capture independent pointer IDs');
 assert.doesNotMatch(freedoomJs, /event\.touches\[0\]/, 'Freedoom mobile controls should not read the first global touch');
@@ -93,7 +93,11 @@ assert.match(freedoomJs, /canvas:\s*renderCanvas/, 'Freedoom runtime should rend
 assert.match(freedoomJs, /ctx\.drawImage\(source,\s*0,\s*0,\s*sourceWidth,\s*sourceHeight,\s*drawX,\s*drawY,\s*drawWidth,\s*drawHeight\)/, 'Freedoom presentation canvas should scale the full runtime frame');
 assert.match(freedoomCss, /\.doom-canvas\s*\{[^}]*width:\s*100% !important;[^}]*height:\s*100% !important;/, 'Freedoom canvas should be forced to fit inside the game frame');
 assert.match(freedoomCss, /\.freedoom-frame\s*\{[^}]*aspect-ratio:\s*16 \/ 9;/, 'Freedoom frame should match the Dwasm widescreen render aspect');
-assert.ok(statSync(path.join(root, 'games-open', 'freedoom', 'assets', 'freedoom2.bin')).size > 7_000_000, 'Freedoom should publish the local Freedoom archive');
+assert.ok(statSync(path.join(root, 'games-open', 'freedoom', 'vendor', 'dwasm', 'index.data')).size > 20_000_000, 'Freedoom should ship the preloaded Dwasm data bundle');
+assert.ok(statSync(path.join(root, 'games-open', 'freedoom', 'vendor', 'dwasm', 'index.wasm')).size > 1_500_000, 'Freedoom should ship the prebuilt Dwasm WebAssembly module');
+assert.equal(existsSync(path.join(root, 'games-open', 'freedoom', 'vendor', 'dwasm', 'libarchive.js')), false, 'Freedoom should not keep the old libarchive loader in the runtime path');
+assert.equal(existsSync(path.join(root, 'games-open', 'freedoom', 'vendor', 'dwasm', 'libarchive.wasm')), false, 'Freedoom should not keep the old libarchive WASM in the runtime path');
+assert.equal(existsSync(path.join(root, 'games-open', 'freedoom', 'vendor', 'dwasm', 'worker-bundle.js')), false, 'Freedoom should not keep the old archive worker bundle in the runtime path');
 assert.match(headersFile, /\/games-open\/freedoom\/\*/, 'Freedoom should have a scoped CSP in _headers');
 assert.doesNotMatch(headersFile, /dwasm\.m-h\.org\.uk/, 'Freedoom CSP should not rely on a remote WAD mirror');
 assert.match(netlifyToml, /for = "\/games-open\/freedoom\/\*"/, 'Netlify should emit a scoped Freedoom CSP');

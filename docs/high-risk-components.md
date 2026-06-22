@@ -25,12 +25,16 @@ The owner’s provenance statement resolves components identified as first-party
 | Twenty AI-assisted Arcade Hub games: Breakout, Flappy Bird, Minesweeper, Pong, Snake, Asteroids, Space Invaders, Frogger, Galaga, Missile Command, Simon, Connect Four, Whac-A-Mole, Memory Match, Sokoban, Brick Breaker, Tic-Tac-Toe, Hangman, Solitaire and Sudoku | `games-open/` subdirectories named in `docs/provenance-audit.md` | Owner states these simple games were created iteratively by AI agents under owner direction rather than copied from external upstreams. Local Arcade Hub attribution and Git history support repository-first introduction; no external source claim was found. | First-party AI-assisted provenance, based on owner representation; no longer HIGH RISK solely for lacking an external upstream. | **KEEP** |
 | Poker chip atlas and 35 derived PNGs | `poker/assets/chips/chip-atlas.png` and `chip-{color}-{1..5}.png` | Owner states that ChatGPT image generation created the atlas at the owner’s request and Codex created and committed the derived PNGs from it. Git history records atlas addition and derived-asset commits. | First-party AI-generated asset path, based on owner representation; no external source URL or author is claimed. | **KEEP** |
 
-## Runtime and asset components
+## Runtime and asset components still requiring investigation
 
-| Component | Repository location | Why HIGH RISK | Missing evidence | Probable origin, if known | Recommended action |
-|---|---|---|---|---|---|
-| Dwasm / PrBoomX compiled runtime | `games-open/freedoom/vendor/dwasm/index.js`, `index.wasm`, `index.data`, and related vendor files | GPL text and author history are present, but the repository does not prove that users can obtain complete corresponding source for these exact binaries. | Exact upstream commits/tags; checksums; build configuration and scripts; local modification record; complete corresponding source or durable source offer for the distributed build. | Local files cite [GMH-Code/Dwasm](https://github.com/GMH-Code/Dwasm), which is based on PrBoom+ and PrBoomX. Exact revisions are unknown. | **INVESTIGATE** |
-| Google libarchive/Comlink bundle | `games-open/freedoom/vendor/dwasm/libarchive.js`, `libarchive.wasm`, `worker-bundle.js` | JavaScript headers identify Google LLC and Apache-2.0, but the exact source artifact/version and complete applicable license/NOTICE set are not established. | Exact upstream repository and revision; relationship between JS/WASM/bundle files; upstream LICENSE and NOTICE; checksums; build/modification record. | Google-authored libarchive.js/Comlink-related code is indicated by embedded headers. The exact upstream project is not proven. | **INVESTIGATE** |
+None currently. The current Freedoom browser runtime is now documented as a pinned source-built Dwasm replacement in `third_party/dwasm/`, and the prior libarchive extraction layer has been removed from `games-open/freedoom/vendor/dwasm/`.
+
+## Resolved runtime and asset components
+
+| Component | Repository location | Resolution evidence | Status | Recommended action |
+|---|---|---|---|---|
+| Dwasm / PrBoomX compiled runtime | `games-open/freedoom/vendor/dwasm/index.js`, `index.wasm`, `index.data` | `third_party/dwasm/ATTRIBUTION.md`, `third_party/dwasm/LICENSE`, `third_party/dwasm/SOURCE.md`, plus vendored `games-open/freedoom/vendor/dwasm/{AUTHORS,COPYING,README.md}` record the exact upstream repository, pinned commit `ddf0347a4fc115b11ffb1c5710768b7c47c46698`, build inputs, produced artifact checksums and GPL corresponding-source obligations for the shipped binaries. | Exact source-built replacement is retained with reproducible provenance. The current loader boots the preloaded IWAD from `index.data`; `games-open/freedoom/assets/freedoom2.bin` remains tracked only as a legacy archive and is no longer loaded by `script.js`. | **KEEP** |
+| Google libarchive/Comlink bundle | removed from `games-open/freedoom/vendor/dwasm/` | `games-open/freedoom/script.js` no longer imports `libarchive.js` or extracts `assets/freedoom2.bin`, and the old `libarchive.js`, `libarchive.wasm` and `worker-bundle.js` files are no longer shipped in the runtime path. | Historical runtime dependency removed from the distributed Freedoom build. | **REMOVE** |
 
 ## Decision rule after investigation
 
