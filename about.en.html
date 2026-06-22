@@ -134,9 +134,6 @@
   </div>
   <script>
     (function () {
-      const TAP_WINDOW_MS = 3000;
-      const TAP_COUNT = 5;
-
       function onReady() {
         try {
           const params = new URLSearchParams(window.location.search);
@@ -150,6 +147,7 @@
         const dumpButton = document.getElementById('debugDumpButton');
         const toast = document.getElementById('debugToast');
         let toastTimer = null;
+        let verifiedAdmin = false;
 
         function showToast(message) {
           if (!toast) return;
@@ -163,16 +161,56 @@
           }, 2400);
         }
 
-        function isAdmin() {
+        function applyAdminAccess(active) {
+          verifiedAdmin = !!active;
           try {
-            return !!(window.KLog && typeof window.KLog.isAdmin === 'function' && window.KLog.isAdmin());
+            if (window.KLog && typeof window.KLog.syncAdminAccess === 'function') {
+              window.KLog.syncAdminAccess(verifiedAdmin);
+            }
+          } catch (_) {}
+          updateVisibility();
+        }
+
+        async function getAccessToken() {
+          try {
+            if (window.SupabaseAuthBridge && typeof window.SupabaseAuthBridge.getAccessToken === 'function') {
+              return await window.SupabaseAuthBridge.getAccessToken();
+            }
+            if (window.supabaseClient && window.supabaseClient.auth && typeof window.supabaseClient.auth.getSession === 'function') {
+              const result = await window.supabaseClient.auth.getSession();
+              const session = result && result.data ? result.data.session : null;
+              return session && session.access_token ? session.access_token : null;
+            }
+          } catch (_) {}
+          return null;
+        }
+
+        async function refreshAdminStatus() {
+          const token = await getAccessToken();
+          if (!token) {
+            applyAdminAccess(false);
+            return false;
+          }
+          try {
+            const response = await fetch('/.netlify/functions/admin-me', {
+              headers: { Authorization: 'Bearer ' + token },
+            });
+            if (!response.ok) {
+              applyAdminAccess(false);
+              return false;
+            }
+            const payload = await response.json().catch(() => ({}));
+            const active = !!(payload && payload.isAdmin);
+            applyAdminAccess(active);
+            return active;
           } catch (_) {
+            applyAdminAccess(false);
             return false;
           }
         }
 
         function ensureRecorder() {
-          if (!isAdmin()) return;
+          if (!verifiedAdmin) return;
           try {
             if (!window.KLog || typeof window.KLog.start !== 'function') return;
             const status = typeof window.KLog.status === 'function' ? window.KLog.status() : null;
@@ -186,19 +224,19 @@
 
         function updateVisibility() {
           if (!dumpButton) return;
-          if (!window.KLog || typeof window.KLog.isAdmin !== 'function') {
-            dumpButton.hidden = true;
-            return;
-          }
-          const active = isAdmin();
-          dumpButton.hidden = !active;
-          if (active) {
+          dumpButton.hidden = !verifiedAdmin;
+          if (verifiedAdmin) {
             ensureRecorder();
           }
         }
 
         if (dumpButton) {
-          dumpButton.addEventListener('click', () => {
+          dumpButton.addEventListener('click', async () => {
+            const active = verifiedAdmin || await refreshAdminStatus();
+            if (!active) {
+              showToast('Admin access required');
+              return;
+            }
             if (!window.KLog) return;
             ensureRecorder();
             const attempt = window.KLog.dumpToClipboard ? window.KLog.dumpToClipboard() : false;
@@ -226,48 +264,17 @@
           });
         }
 
-        function unlockAdmin() {
-          if (!window.KLog || typeof window.KLog.enableAdmin !== 'function') return false;
-          const enabled = window.KLog.enableAdmin(24 * 60 * 60 * 1000);
-          if (enabled) {
-            showToast('Debug unlocked for 24h');
-            updateVisibility();
-            ensureRecorder();
-          }
-          return enabled;
-        }
-
-        const title = document.querySelector('main h1');
-        if (title) {
-          let taps = [];
-          function recordTap() {
-            const now = Date.now();
-            taps = taps.filter((ts) => (now - ts) <= TAP_WINDOW_MS);
-            taps.push(now);
-            if (taps.length >= TAP_COUNT) {
-              taps = [];
-              unlockAdmin();
-            }
-          }
-          title.addEventListener('pointerdown', recordTap, { passive: true });
-          if (!window.PointerEvent) {
-            title.addEventListener('click', recordTap);
-            title.addEventListener('touchstart', recordTap, { passive: true });
-          }
-          title.addEventListener('keydown', (event) => {
-            if (!event) return;
-            if (event.key === 'Enter' || event.key === ' ') {
-              recordTap();
-            }
-          });
-          if (!title.hasAttribute('tabindex')) {
-            title.setAttribute('tabindex', '0');
-          }
-        }
-
         window.addEventListener('klog:admin', updateVisibility);
-        updateVisibility();
-        window.setTimeout(updateVisibility, 250);
+        applyAdminAccess(false);
+        refreshAdminStatus();
+        window.setTimeout(refreshAdminStatus, 250);
+        if (window.SupabaseAuth && typeof window.SupabaseAuth.onAuthChange === 'function') {
+          try {
+            window.SupabaseAuth.onAuthChange(function () {
+              refreshAdminStatus();
+            });
+          } catch (_) {}
+        }
 
         // Initialize build info display
         initBuildInfo();
