@@ -24,7 +24,16 @@
         <span class="xp-badge__label">Syncing XP…</span>
       </a>
     </header>
-    <canvas id="game" data-game-surface width="600" height="200" role="img" aria-label="Side scrolling runner game"></canvas>
+    <div id="game" class="interstitial-wrapper" data-game-surface role="img" aria-label="Side scrolling runner game">
+      <div id="main-content">
+        <div class="icon icon-offline" aria-hidden="true"></div>
+      </div>
+      <button id="details-button" type="button" hidden></button>
+      <div id="offline-resources">
+        <img id="offline-resources-1x" alt="" src="vendor/wayou-t-rex-runner/assets/default_100_percent/100-offline-sprite.png">
+        <img id="offline-resources-2x" alt="" src="vendor/wayou-t-rex-runner/assets/default_200_percent/200-offline-sprite.png">
+      </div>
+    </div>
     <div class="controls">
       <p>Press <kbd>space</kbd>, <kbd>↑</kbd> or tap to jump.</p>
       <button id="restart" type="button">Restart</button>
@@ -33,6 +42,7 @@
   <footer class="footer">
     <a href="#" id="manageCookies">Manage cookies</a>
   </footer>
+<script src="vendor/wayou-t-rex-runner/index.js"></script>
 <script src="main.js"></script>
   <script src="/js/debug.js" defer></script>
   <script>window.__GAME_ID__ = 't-rex';</script>
@@ -66,4 +76,3 @@
   <script src="../../js/consent-manager.js" defer></script>
 </body>
 </html>
-

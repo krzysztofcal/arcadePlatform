@@ -8,6 +8,7 @@ Generated from repository evidence and upstream license files on 2026-06-22. Thi
 |---|---|---|---|---|
 | 2048 | `games-open/2048` | [Gabriele Cirulli](https://github.com/gabrielecirulli/2048) | MIT — `public/games/2048/LICENSE` | retain copyright and MIT text |
 | Canvas Tetris | `games-open/tetris` | [Dionysis Zindros](https://github.com/dionyziz/canvas-tetris) | MIT — `public/games/tetris/LICENSE` | retain copyright and MIT text |
+| T-Rex Runner | `games/t-rex/vendor/wayou-t-rex-runner/`, `games/t-rex/main.js`, `game_trex.html`, `games/t-rex/index.html`, `play.html` | [wayou/t-rex-runner](https://github.com/wayou/t-rex-runner/tree/5455bfa408ec6b707c7300ff194b7390733a766d), wayou / 牛さん; vendored runtime header also names The Chromium Authors | BSD-3-Clause — `third_party/t-rex/LICENSE` | [attribution](../third_party/t-rex/ATTRIBUTION.md), [source](../third_party/t-rex/SOURCE.md); retain copyright, conditions, disclaimer and no-endorsement condition |
 | Freedoom game data | `games-open/freedoom/assets/freedoom2.bin` | [Freedoom contributors](https://github.com/freedoom/freedoom) | BSD-3-Clause — `games-open/freedoom/LICENSE` | retain copyright, conditions and disclaimer; no endorsement |
 
 Components classified HIGH RISK in [license-audit.md](license-audit.md) are intentionally not normalized or relicensed here.

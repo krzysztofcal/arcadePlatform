@@ -48,13 +48,38 @@ body {
   text-transform: uppercase;
 }
 
-canvas {
+#game {
+  position: relative;
+  overflow: hidden;
   width: 100%;
   max-width: 600px;
-  height: auto;
-  background: linear-gradient(#1b2336, #0f111a 70%);
+  height: 150px;
+  background: #f7f7f7;
   border: 2px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
+}
+
+#game .runner-container {
+  height: 150px;
+  max-width: 600px;
+  overflow: hidden;
+  position: absolute;
+  top: 0;
+  width: 100%;
+}
+
+#game .runner-canvas {
+  height: 150px;
+  max-width: 600px;
+  overflow: hidden;
+  position: absolute;
+  top: 0;
+  z-index: 2;
+}
+
+#game .icon-offline,
+#game #offline-resources {
+  display: none;
 }
 
 .controls {
@@ -102,4 +127,3 @@ button:active {
     font-size: 1.25rem;
   }
 }
-

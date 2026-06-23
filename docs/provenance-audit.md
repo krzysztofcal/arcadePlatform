@@ -26,7 +26,7 @@ Confidence measures the strength of repository evidence, not legal certification
 | 2048 (`games-open/2048/`) | https://github.com/gabrielecirulli/2048 | MIT | Game page names Gabriele Cirulli, source and MIT; `about/licenses.html` repeats them; `public/games/2048/LICENSE` contains the Gabriele Cirulli MIT notice; imported in `6a5cb760`. Exact upstream revision is not recorded. | **HIGH** |
 | Canvas Tetris (`games-open/tetris/`) | https://github.com/dionyziz/canvas-tetris | MIT | Game page names Dionysis Zindros, source and MIT; `about/licenses.html` repeats them; `public/games/tetris/LICENSE` contains the Dionysis Zindros MIT notice; imported in `6a5cb760`. Exact upstream revision is not recorded. | **HIGH** |
 | Pacman (`games-open/pacman/`) | https://github.com/daleharvey/pacman | **UNKNOWN** for the imported revision | Game page and `about/licenses.html` name Dale Harvey and declare MIT; `public/games/pacman/LICENSE` contains that MIT claim; imported in `6a5cb760`. However, `docs/license-audit.md` records a conflict with the cited upstream's current WTFPL v2 and no imported commit/tag is known. | **MEDIUM** |
-| T-Rex Runner (`games/t-rex/`, `game_trex.html`) | https://github.com/wayou/t-rex-runner | **UNKNOWN** for the imported revision | `games/t-rex/README.txt`, the game page, `about/licenses.html` and `public/games/t-rex/LICENSE` declare wayou/Zhenlei Chen and MIT; introduced in `3d9b28a8`. `docs/license-audit.md` records that the cited upstream currently uses BSD-3-Clause and describes a Chromium extraction; no exact wayou/Chromium revision is retained. | **MEDIUM** |
+| T-Rex Runner (`games/t-rex/`, `game_trex.html`) | https://github.com/wayou/t-rex-runner/tree/5455bfa408ec6b707c7300ff194b7390733a766d | BSD-3-Clause | Replaced unresolved local implementation with vendored upstream `index.js` and local sprite PNGs from exact commit `5455bfa408ec6b707c7300ff194b7390733a766d`. `third_party/t-rex/{ATTRIBUTION.md,LICENSE,SOURCE.md}`, `public/games/t-rex/LICENSE`, `about/licenses.html`, and `games/t-rex/README.txt` record source, author/copyright, license, runtime file paths, checksums and local integration changes. Active adapter `games/t-rex/main.js` only wires controls/fullscreen/XP around the vendored runner. Status: **KEEP**. | **HIGH** |
 | Breakout (`games-open/breakout/`) | Internal / AI-assisted first-party Arcade Hub work | MIT (repository declaration) | Owner states that the simple Arcade Hub games were created iteratively by AI agents under owner direction, not copied from external upstreams. Local page or central attribution identifies Arcade Hub contributors, Git history records repository-first introduction, and no external upstream claim was found. | **HIGH** |
 | Flappy Bird (`games-open/flappy/`) | Internal / AI-assisted first-party Arcade Hub work | MIT (repository declaration) | Owner states that the simple Arcade Hub games were created iteratively by AI agents under owner direction, not copied from external upstreams. Local page or central attribution identifies Arcade Hub contributors, Git history records repository-first introduction, and no external upstream claim was found. | **HIGH** |
 | Minesweeper (`games-open/minesweeper/`) | Internal / AI-assisted first-party Arcade Hub work | MIT (repository declaration) | Owner states that the simple Arcade Hub games were created iteratively by AI agents under owner direction, not copied from external upstreams. Local page or central attribution identifies Arcade Hub contributors, Git history records repository-first introduction, and no external upstream claim was found. | **HIGH** |
@@ -73,13 +73,14 @@ Confidence measures the strength of repository evidence, not legal certification
 - Poker code and first-party ChatGPT-generated chip atlas/derived PNGs
 - Catch the Cats
 - 2048 and Canvas Tetris
+- T-Rex Runner, resolved by replacing the active runtime with a pinned BSD-3-Clause upstream import documented in `third_party/t-rex/`
 - Breakout, Flappy Bird, Minesweeper, Pong, Snake, Asteroids, Space Invaders, Frogger, Galaga, Missile Command, Simon, Connect Four, Whac-A-Mole, Memory Match, Sokoban, Brick Breaker, Tic-Tac-Toe, Hangman, Solitaire and Sudoku as AI-assisted first-party implementations based on the owner’s representation, local attribution and Git history
 - Poppins remote font dependency
 - Postgres.js and ws
 
 ### MEDIUM confidence components
 
-- Pacman and T-Rex Runner: named external upstreams and local license claims exist, but the applicable license for the unknown imported revision is unresolved.
+- Pacman: named external upstream and local license claim exist, but the applicable license for the unknown imported revision is unresolved.
 - Historical `games-open/freedoom/assets/freedoom2.bin` archive: the current loader no longer uses it, but the exact provenance of the legacy `.bin` packaging itself is still not recorded.
 - Synthesized Web Audio effects, Klaro, Supabase JavaScript client and the remaining locked npm set.
 
@@ -91,7 +92,7 @@ Confidence measures the strength of repository evidence, not legal certification
 
 Provenance confidence and licensing risk are separate. First-party AI-assisted work can have **HIGH** provenance confidence based on the owner’s representation without being legally certified. The remaining high-risk entries involve external imports or compiled third-party artifacts, not merely a missing upstream URL.
 
-- Pacman and T-Rex Runner remain **INVESTIGATE** because the named upstream is known but the license for the exact imported revision is unresolved.
+- Pacman remains **INVESTIGATE** because the named upstream is known but the license for the exact imported revision is unresolved. T-Rex Runner is now **KEEP** after replacement with a pinned BSD-3-Clause upstream import.
 
 ## Coverage notes
 
