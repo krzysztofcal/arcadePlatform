@@ -53,8 +53,8 @@
     {
       "id": "open-pacman",
       "slug": "pacman",
-      "title": { "en": "Pacman", "pl": "Pacman" },
-      "description": { "en": "Eat dots, avoid ghosts, clear the maze.", "pl": "Zjadaj kropki, unikaj duchów, wyczyść labirynt." },
+      "title": { "en": "Maze Muncher", "pl": "Maze Muncher" },
+      "description": { "en": "Clear dots, dodge chasers, and solve a connected maze.", "pl": "Zbieraj kropki, unikaj pościgu i czyść połączony labirynt." },
       "category": ["Arcade"],
       "thumbnail": "img/games/pacman-maze.svg",
       "tags": ["arcade", "retro", "classic"],

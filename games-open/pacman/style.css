@@ -8,13 +8,19 @@ canvas {
   width: min(94vw, 448px);
   height: calc(min(94vw, 448px) * 0.928);
   background: #000;
-  border-radius: 18px;
+  border-radius: 8px;
   border: 1px solid rgba(110, 231, 231, 0.18);
   touch-action: none;
 }
 
 #gameOverlay[hidden] {
   display: none;
+}
+
+.overlay-subtitle {
+  color: rgba(203, 213, 255, 0.72);
+  font-size: 1rem;
+  margin-top: 0.5rem;
 }
 
 .notice {

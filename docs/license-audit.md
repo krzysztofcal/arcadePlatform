@@ -15,6 +15,7 @@ Licensing information is not complete in one place. `about/licenses.html` is the
 |---|---|---|---|---|---|
 | 2048 | `games-open/2048` | [gabrielecirulli/2048](https://github.com/gabrielecirulli/2048), Gabriele Cirulli | MIT | `public/games/2048/LICENSE`; central page | retain notice; redistribution permitted |
 | Canvas Tetris | `games-open/tetris` | [dionyziz/canvas-tetris](https://github.com/dionyziz/canvas-tetris), Dionysis Zindros | MIT | `public/games/tetris/LICENSE`; central page | retain notice; redistribution permitted |
+| Maze Muncher | `games-open/pacman` | Internal / AI-assisted first-party Arcade Hub work | MIT (root repository license) | `games-open/pacman/`; `public/games/pacman/LICENSE`; central page; `docs/provenance-audit.md` | KEEP; first-party code and original canvas shapes; no external maze-chase clone/assets remain active |
 | T-Rex Runner | `games/t-rex` | [wayou/t-rex-runner](https://github.com/wayou/t-rex-runner/tree/5455bfa408ec6b707c7300ff194b7390733a766d), wayou / 牛さん; vendored `index.js` also carries Chromium Authors notice | BSD-3-Clause | `third_party/t-rex/{ATTRIBUTION.md,LICENSE,SOURCE.md}`; `public/games/t-rex/LICENSE`; central page | KEEP; retain BSD-3-Clause notice/conditions/disclaimer and no-endorsement condition |
 | Freedoom data | `games-open/freedoom/assets/freedoom2.bin` (legacy archive) and the preload now baked into `games-open/freedoom/vendor/dwasm/index.data` | [Freedoom contributors](https://github.com/freedoom/freedoom) | BSD-3-Clause | `games-open/freedoom/LICENSE`; central page; `third_party/dwasm/SOURCE.md` records the Freedoom 0.13.0 source zip URL/checksum and the extracted `freedoom2.wad` checksum used for the current runtime | retain notice/conditions/disclaimer; redistribution permitted conditionally |
 | Dwasm / PrBoomX WebAssembly runtime | `games-open/freedoom/vendor/dwasm/index.js`, `index.data`, `index.wasm` | [GMH-Code/Dwasm](https://github.com/GMH-Code/Dwasm/tree/ddf0347a4fc115b11ffb1c5710768b7c47c46698), Gregory Maynard-Hoare and contributors | GPL-2.0-or-later | vendored `games-open/freedoom/vendor/dwasm/{README.md,COPYING,AUTHORS}` plus `third_party/dwasm/{ATTRIBUTION.md,LICENSE,SOURCE.md}` pin the exact upstream commit, build recipe and emitted artifact checksums | retain GPL notice and make complete corresponding source/build information available with redistributed binaries |
@@ -41,7 +42,7 @@ The repository owner states that the twenty simple games attributed to Arcade Hu
 
 These components must not be changed merely by writing new license claims:
 
-- **Pacman** (`games-open/pacman`): local MIT claim conflicts with the cited upstream's WTFPL v2; imported revision unknown.
+No game component is currently classified HIGH RISK due to the former unresolved implementation. The active `games-open/pacman` route now serves first-party Maze Muncher code and is classified KEEP.
 
 The previous `games-open/freedoom/vendor/dwasm/libarchive.js`, `libarchive.wasm` and `worker-bundle.js` archive-extraction layer is no longer shipped by the current Freedoom runtime.
 
