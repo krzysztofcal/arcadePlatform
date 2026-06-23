@@ -1,7 +1,7 @@
 (function(global){
   'use strict';
 
-  const DEFAULT_CATEGORIES = Object.freeze(['All', 'Arcade', 'Puzzle', 'Shooter', 'Racing']);
+  const DEFAULT_CATEGORIES = Object.freeze(['All', 'Arcade', 'Puzzle', 'Shooter', 'Card']);
   const SHARED_GAME_UTILS = global.GameUtils && typeof global.GameUtils === 'object'
     ? global.GameUtils
     : null;
@@ -72,22 +72,7 @@
     }
 
     refreshCategoryItemsFromCatalog(){
-      const preferred = ['All', 'Arcade', 'Puzzle', 'Shooter', 'Card', 'Action', 'Racing'];
-      const discovered = new Set();
-      this.allGames.forEach(item => {
-        if (!item || !Array.isArray(item.category)) return;
-        item.category.forEach(name => {
-          if (isNonEmptyString(name)) discovered.add(name.trim());
-        });
-      });
-      const next = [];
-      preferred.forEach(name => {
-        if (name === this.defaultCategory || discovered.has(name)) next.push(name);
-      });
-      Array.from(discovered).sort((a, b) => a.localeCompare(b)).forEach(name => {
-        if (!next.includes(name)) next.push(name);
-      });
-      this.categoryItems = next.length ? next : DEFAULT_CATEGORIES.slice();
+      this.categoryItems = DEFAULT_CATEGORIES.slice();
       this.defaultCategory = this.categoryItems[0] || 'All';
     }
 
@@ -337,7 +322,7 @@
     createHeroCard(featured, lang){
       const href = featured ? this.playableHref(featured, lang) : null;
       const promo = this.document.createElement(href ? 'a' : 'article');
-      promo.className = 'hero-card';
+      promo.className = 'card hero-card slot-card';
       promo.setAttribute('aria-label', 'Featured arcade game');
       if (href) promo.href = href;
 

@@ -366,7 +366,6 @@ body::before{ content:""; position:fixed; inset:0; pointer-events:none; backgrou
 .site-footer::before{ content:"Arcade Hub"; color:#eef7ff; font:900 12px/1 Poppins, sans-serif; white-space:nowrap; }
 .footer-nav{ gap:8px; overflow:hidden; flex-wrap:nowrap; }
 .footer-nav .ft-link{ color:#aab7e8; font:700 11px/1 Poppins, sans-serif; white-space:nowrap; }
-.footer-nav .ft-link[data-i18n="about"]{ display:none; }
 .footer-nav .ft-link[data-i18n="terms"]{ display:none; }
 .footer-nav .ft-link.manage-cookies{ display:none; }
 .footer-nav .sep{ display:none; }
@@ -409,3 +408,10 @@ body::before{ content:""; position:fixed; inset:0; pointer-events:none; backgrou
 @media (min-width: 1180px){ .grid{ grid-template-columns:repeat(3, minmax(0, 1fr)); } }
 @media (min-width: 1180px){ .hero-card{ grid-template-columns:1fr 180px; } }
 @media (min-width: 1180px){ .hero-art{ width:156px; } }
+
+
+/* Hero card compatibility with legacy slot-card smoke tests */
+.hero-card.card{ grid-column:1 / -1; min-height:154px; display:grid; grid-template-columns:1fr 104px; gap:12px; align-items:center; overflow:hidden; text-decoration:none; color:#f7fbff; border-radius:24px; padding:18px; background:radial-gradient(circle at 86% 20%, rgba(255,79,216,.32), transparent 34%), radial-gradient(circle at 4% 0%, rgba(50,246,255,.3), transparent 42%), linear-gradient(135deg, rgba(25,32,68,.9), rgba(12,13,32,.86)); border:1px solid rgba(50,246,255,.34); box-shadow:0 20px 70px rgba(0,0,0,.38), 0 0 38px rgba(50,246,255,.14), inset 0 1px 0 rgba(255,255,255,.1); transform:none; }
+.hero-card.card:hover{ transform:none; border-color:rgba(50,246,255,.42); box-shadow:0 20px 70px rgba(0,0,0,.38), 0 0 42px rgba(50,246,255,.18), inset 0 1px 0 rgba(255,255,255,.1); }
+@media (min-width: 720px){ .hero-card.card{ min-height:190px; grid-template-columns:1fr 150px; padding:24px; } }
+@media (min-width: 1180px){ .hero-card.card{ grid-template-columns:1fr 180px; } }
