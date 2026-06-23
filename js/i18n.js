@@ -7,6 +7,12 @@
     privacy: { en: 'Privacy', pl: 'Prywatność' },
     contact: { en: 'Contact', pl: 'Kontakt' },
     manageCookies: { en: 'Manage cookies', pl: 'Zarządzaj cookies' },
+    home: { en: 'Home', pl: 'Start' },
+    leaderboard: { en: 'Leaderboard', pl: 'Ranking' },
+    profile: { en: 'Profile', pl: 'Profil' },
+    settings: { en: 'Settings', pl: 'Ustawienia' },
+    playRandomGame: { en: 'Play Random Game', pl: 'Losowa gra' },
+    search: { en: 'Search', pl: 'Szukaj' },
     licensesTitle: { en: 'Game Licenses & Credits', pl: 'Licencje i podziękowania' },
     licensesIntro1: {
       en: 'Some games on this website are open-source and used under their respective licenses.',

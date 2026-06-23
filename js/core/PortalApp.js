@@ -1,4 +1,4 @@
-﻿(function(global){
+(function(global){
   'use strict';
 
   const DEFAULT_CATEGORIES = Object.freeze(['All', 'Arcade', 'Puzzle', 'Shooter', 'Racing']);
@@ -28,6 +28,14 @@
       return out;
     }
     return { en: '', pl: '' };
+  }
+
+  function klog(kind, data){
+    try {
+      if (global && global.KLog && typeof global.KLog.log === 'function'){
+        global.KLog.log(kind, data || {});
+      }
+    } catch (_err){}
   }
 
   class PortalApp {
@@ -61,6 +69,26 @@
       this.gameUtils = SHARED_GAME_UTILS;
       this.searchUtils = SEARCH_UTILS;
       this.onLangChange = () => this.renderCurrentList('langchange');
+    }
+
+    refreshCategoryItemsFromCatalog(){
+      const preferred = ['All', 'Arcade', 'Puzzle', 'Shooter', 'Card', 'Action', 'Racing'];
+      const discovered = new Set();
+      this.allGames.forEach(item => {
+        if (!item || !Array.isArray(item.category)) return;
+        item.category.forEach(name => {
+          if (isNonEmptyString(name)) discovered.add(name.trim());
+        });
+      });
+      const next = [];
+      preferred.forEach(name => {
+        if (name === this.defaultCategory || discovered.has(name)) next.push(name);
+      });
+      Array.from(discovered).sort((a, b) => a.localeCompare(b)).forEach(name => {
+        if (!next.includes(name)) next.push(name);
+      });
+      this.categoryItems = next.length ? next : DEFAULT_CATEGORIES.slice();
+      this.defaultCategory = this.categoryItems[0] || 'All';
     }
 
     showLoadingSkeleton(count = 6){
@@ -234,20 +262,33 @@
       this.applyThumbnail(thumb, item);
       link.appendChild(thumb);
 
-      const label = this.document.createElement('span');
-      label.className = 'label';
-      label.textContent = this.t('playChip');
-      link.appendChild(label);
+      const body = this.document.createElement('div');
+      body.className = 'card-body';
 
       const title = this.document.createElement('div');
       title.className = 'title';
       title.textContent = this.resolveTitle(item, lang);
-      link.appendChild(title);
+      body.appendChild(title);
 
       const subtitle = this.document.createElement('div');
       subtitle.className = 'subtitle';
       subtitle.textContent = this.resolveDescription(item, lang);
-      link.appendChild(subtitle);
+      body.appendChild(subtitle);
+
+      const meta = this.document.createElement('div');
+      meta.className = 'card-meta';
+      const category = this.document.createElement('span');
+      category.className = 'label';
+      category.textContent = item && Array.isArray(item.category) && item.category[0] ? item.category[0] : this.t('playChip');
+      meta.appendChild(category);
+      body.appendChild(meta);
+
+      const action = this.document.createElement('span');
+      action.className = 'play-button';
+      action.textContent = this.t('playChip') || 'PLAY';
+
+      link.appendChild(body);
+      link.appendChild(action);
 
       return link;
     }
@@ -262,15 +303,28 @@
       this.applyThumbnail(thumb, item);
       el.appendChild(thumb);
 
+      const body = this.document.createElement('div');
+      body.className = 'card-body';
+
       const title = this.document.createElement('div');
       title.className = 'title';
       title.textContent = this.resolveTitle(item, lang);
-      el.appendChild(title);
+      body.appendChild(title);
 
       const subtitle = this.document.createElement('div');
       subtitle.className = 'subtitle';
       subtitle.textContent = this.resolveDescription(item, lang) || ucText;
-      el.appendChild(subtitle);
+      body.appendChild(subtitle);
+
+      const meta = this.document.createElement('div');
+      meta.className = 'card-meta';
+      const category = this.document.createElement('span');
+      category.className = 'label';
+      category.textContent = item && Array.isArray(item.category) && item.category[0] ? item.category[0] : 'Soon';
+      meta.appendChild(category);
+      body.appendChild(meta);
+
+      el.appendChild(body);
 
       const uc = this.document.createElement('div');
       uc.className = 'uc';
@@ -280,11 +334,41 @@
       return el;
     }
 
-    createPromoCard(){
-      const promo = this.document.createElement('article');
-      promo.className = 'card slot-card';
-      promo.setAttribute('aria-label', 'Promotional');
-      promo.innerHTML = '<span class="slot-badge">Promo</span><div class="slot-box">Reserved slot</div>';
+    createHeroCard(featured, lang){
+      const href = featured ? this.playableHref(featured, lang) : null;
+      const promo = this.document.createElement(href ? 'a' : 'article');
+      promo.className = 'hero-card';
+      promo.setAttribute('aria-label', 'Featured arcade game');
+      if (href) promo.href = href;
+
+      const copy = this.document.createElement('div');
+      copy.className = 'hero-copy';
+
+      const kicker = this.document.createElement('span');
+      kicker.className = 'hero-kicker';
+      kicker.textContent = lang === 'pl' ? 'Dzienny bonus' : 'Daily Bonus';
+      copy.appendChild(kicker);
+
+      const title = this.document.createElement('h2');
+      title.textContent = featured ? this.resolveTitle(featured, lang) : 'Arcade Hub';
+      copy.appendChild(title);
+
+      const text = this.document.createElement('p');
+      text.textContent = featured ? this.resolveDescription(featured, lang) : (lang === 'pl' ? 'Wybierz grę i wskocz do akcji.' : 'Pick a game and jump into the action.');
+      copy.appendChild(text);
+
+      const action = this.document.createElement('span');
+      action.className = 'hero-action';
+      action.textContent = this.t('playChip') || 'PLAY';
+      copy.appendChild(action);
+
+      promo.appendChild(copy);
+
+      const art = this.document.createElement('div');
+      art.className = 'hero-art';
+      if (featured) this.applyThumbnail(art, featured);
+      promo.appendChild(art);
+
       return promo;
     }
 
@@ -303,7 +387,7 @@
       const lang = this.getLang();
       const sortedList = this.sortGames(list);
       const fragment = this.document.createDocumentFragment();
-      fragment.appendChild(this.createPromoCard());
+      fragment.appendChild(this.createHeroCard(sortedList[0] || null, lang));
       for (const item of sortedList){
         const href = this.playableHref(item, lang);
         fragment.appendChild(href ? this.createPlayableCard(item, lang, href) : this.createPlaceholderCard(item, lang));
@@ -377,9 +461,7 @@
           this.window.history.replaceState(null, '', newUrl);
         }
       } catch (err) {
-        if (global.console && typeof global.console.debug === 'function'){
-          global.console.debug('Failed to update URL', err);
-        }
+        klog('portal:url_update_error', { message: err && err.message ? String(err.message) : 'error' });
       }
     }
 
@@ -490,11 +572,12 @@ renderForCategory(category, reason){
         this.allGames = await this.loadGames(); // { cache: 'no-cache' } inside
       } catch (err) {
         catalogError = true;
-        console.error(err);
+        klog('portal:catalog_load_error', { message: err && err.message ? String(err.message) : 'error' });
         this.allGames = [];
       }
 
       // Build the category bar even if the catalog failed (keeps UI usable)
+      if (!catalogError) this.refreshCategoryItemsFromCatalog();
       this.buildCategoryBar();
       if (catalogError){
         this.clearLoadingSkeleton();
