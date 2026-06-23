@@ -14,6 +14,11 @@ process.env.XP_REQUIRE_ACTIVITY = "0"; // Disable by default for most tests
 // Mock store before importing handler
 vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => {
   const mockData = new Map();
+  const atomicRateLimitIncr = vi.fn((key) => {
+    const current = Number(mockData.get(key) || 0) + 1;
+    mockData.set(key, String(current));
+    return Promise.resolve({ count: current });
+  });
 
   return {
     store: {
@@ -40,6 +45,7 @@ vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => {
       _mockData: mockData,
       _reset: () => mockData.clear(),
     },
+    atomicRateLimitIncr,
   };
 });
 
@@ -48,7 +54,19 @@ async function loadHandlerWithEnv(requireActivityValue) {
   process.env.XP_REQUIRE_ACTIVITY = requireActivityValue;
   vi.resetModules();
   const module = await import("../netlify/functions/calculate-xp.mjs");
-  const { store: freshStore } = await import("../netlify/functions/_shared/store-upstash.mjs");
+  const { store: freshStore, atomicRateLimitIncr: freshAtomicRateLimitIncr } = await import("../netlify/functions/_shared/store-upstash.mjs");
+  freshStore._reset?.();
+  freshStore.eval.mockClear();
+  freshStore.get.mockClear();
+  freshStore.set.mockClear();
+  freshStore.setex.mockClear();
+  freshStore.incrBy.mockClear();
+  freshAtomicRateLimitIncr.mockClear();
+  freshAtomicRateLimitIncr.mockImplementation((key) => {
+    const current = Number(freshStore._mockData.get(key) || 0) + 1;
+    freshStore._mockData.set(key, String(current));
+    return Promise.resolve({ count: current });
+  });
   return {
     handler: module.handler,
     GAME_XP_RULES: module.GAME_XP_RULES,
@@ -65,7 +83,7 @@ const module = await import("../netlify/functions/calculate-xp.mjs");
 const { handler, GAME_XP_RULES } = module;
 
 // Get reference to mocked store
-const { store } = await import("../netlify/functions/_shared/store-upstash.mjs");
+const { store, atomicRateLimitIncr } = await import("../netlify/functions/_shared/store-upstash.mjs");
 
 describe("calculate-xp endpoint", () => {
   beforeEach(() => {
@@ -74,6 +92,11 @@ describe("calculate-xp endpoint", () => {
     // Reset eval mock for each test
     store.eval.mockResolvedValue([10, 10, 10, 10, Date.now(), 0]);
     store.incrBy.mockResolvedValue(1);
+    atomicRateLimitIncr.mockImplementation((key) => {
+      const current = Number(store._mockData.get(key) || 0) + 1;
+      store._mockData.set(key, String(current));
+      return Promise.resolve({ count: current });
+    });
   });
 
   afterEach(() => {
@@ -184,7 +207,7 @@ describe("calculate-xp endpoint", () => {
         body: JSON.stringify({
           userId: "user-123",
           sessionId: "sess-123",
-          gameId: "tetris",
+          gameId: "block-stacker",
           windowStart: Date.now() - 10000,
           windowEnd: Date.now(),
           inputEvents: 20, // Active player
@@ -211,7 +234,7 @@ describe("calculate-xp endpoint", () => {
         body: JSON.stringify({
           userId: "user-123",
           sessionId: "sess-123",
-          gameId: "tetris",
+          gameId: "block-stacker",
           windowStart: Date.now() - 10000,
           windowEnd: Date.now(),
           inputEvents: 0, // No activity
@@ -240,7 +263,7 @@ describe("calculate-xp endpoint", () => {
         body: JSON.stringify({
           userId: "user-123",
           sessionId: "sess-123",
-          gameId: "tetris",
+          gameId: "block-stacker",
           windowStart: Date.now() - 10000,
           windowEnd: Date.now(),
           inputEvents: 0,
@@ -271,7 +294,7 @@ describe("calculate-xp endpoint", () => {
         body: JSON.stringify({
           userId: "user-123",
           sessionId: "sess-123",
-          gameId: "tetris",
+          gameId: "block-stacker",
           windowStart: Date.now() - 10000,
           windowEnd: Date.now(),
           inputEvents: 100,
@@ -295,14 +318,14 @@ describe("calculate-xp endpoint", () => {
         body: JSON.stringify({
           userId: "user-123",
           sessionId: "sess-123",
-          gameId: "tetris",
+          gameId: "block-stacker",
           windowStart: Date.now() - 10000,
           windowEnd: Date.now(),
           inputEvents: 20,
           visibilitySeconds: 10,
           scoreDelta: 500,
           gameEvents: [
-            { type: "line_clear", value: 4 }, // Tetris!
+            { type: "four_line_clear", value: 4 },
             { type: "level_up", value: 2 },
           ],
         }),
@@ -426,7 +449,7 @@ describe("calculate-xp endpoint", () => {
   describe("rate limiting", () => {
     it("should rate limit excessive requests", async () => {
       // Simulate rate limit exceeded
-      store.incrBy.mockResolvedValue(35); // Over the 30 req/min limit
+      atomicRateLimitIncr.mockResolvedValue({ count: 35 }); // Over the 30 req/min limit
 
       const event = {
         httpMethod: "POST",
@@ -454,16 +477,26 @@ describe("calculate-xp endpoint", () => {
 });
 
 describe("GAME_XP_RULES", () => {
+  beforeEach(() => {
+    store._reset?.();
+    atomicRateLimitIncr.mockImplementation((key) => {
+      const current = Number(store._mockData.get(key) || 0) + 1;
+      store._mockData.set(key, String(current));
+      return Promise.resolve({ count: current });
+    });
+  });
+
   it("should have default rules", () => {
     expect(GAME_XP_RULES.default).toBeDefined();
     expect(GAME_XP_RULES.default.baseXpPerSecond).toBe(10);
   });
 
-  it("should have tetris-specific rules", () => {
+  it("should expose Block Stacker rules under both ids", () => {
     expect(GAME_XP_RULES.tetris).toBeDefined();
+    expect(GAME_XP_RULES["block-stacker"]).toBeDefined();
     expect(GAME_XP_RULES.tetris.events).toBeDefined();
     expect(GAME_XP_RULES.tetris.events.line_clear).toBeDefined();
-    expect(GAME_XP_RULES.tetris.events.tetris).toBeDefined();
+    expect(GAME_XP_RULES.tetris.events.four_line_clear).toBeDefined();
   });
 
   it("should have 2048-specific rules", () => {
@@ -478,12 +511,38 @@ describe("GAME_XP_RULES", () => {
     expect(GAME_XP_RULES.pacman.events.ghost_eaten).toBeDefined();
   });
 
-  it("should calculate correct XP for tetris events", () => {
+  it("should calculate correct XP for Block Stacker events", () => {
     const rules = GAME_XP_RULES.tetris;
     expect(rules.events.line_clear(1)).toBe(5); // 1 line = 5 XP
     expect(rules.events.line_clear(4)).toBe(20); // 4 lines = 20 XP
-    expect(rules.events.tetris()).toBe(40); // Tetris = 40 XP
+    expect(rules.events.four_line_clear()).toBe(40); // Four-line clear = 40 XP
     expect(rules.events.level_up(5)).toBe(50); // Level 5 = 50 XP
+  });
+
+  it("should accept legacy Block Stacker aliases", async () => {
+    const event = {
+      httpMethod: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        userId: "user-123",
+        sessionId: "sess-123",
+        gameId: "tetris",
+        windowStart: Date.now() - 10000,
+        windowEnd: Date.now(),
+        inputEvents: 20,
+        visibilitySeconds: 10,
+        scoreDelta: 500,
+        gameEvents: [
+          { type: "tetris", value: 4 },
+        ],
+      }),
+    };
+
+    const response = await handler(event);
+    const body = JSON.parse(response.body);
+    expect(response.statusCode).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.calculated).toBeGreaterThan(0);
   });
 
   it("should calculate correct XP for 2048 events", () => {

@@ -33,7 +33,7 @@ Generated SHA-256 hashes for all inline scripts to allow them under strict CSP:
 | Game ID: play-shell | play.html:207 | `sha256-hj8NYUFe4nbn60KAXU7N2GrsNT/k8E1xkdlLIoRL9XM=` |
 | Game ID: 2048 | games-open/2048/index.html:185 | `sha256-0Wb+NgnHAGHhGh/6nFbkTiktnYSpz6EVA5IxiiUU8DQ=` |
 | Game ID: pacman | games-open/pacman/index.html:190 | `sha256-nLjGeBvK8BQE0UTh0+74CPwdrKgQDVRFFVyOcYuMf7g=` |
-| Game ID: tetris | games-open/tetris/index.html:197 | `sha256-Rnt3+nPKWPiw/qrDaU3o++VVHxBSkZ+c3jPI2wHLOOk=` |
+| Game ID: tetris (Block Stacker compatibility alias) | games-open/tetris/index.html:197 | `sha256-Rnt3+nPKWPiw/qrDaU3o++VVHxBSkZ+c3jPI2wHLOOk=` |
 | XP autoboot | play.html, games-open/*/index.html | `sha256-SWcqpLVOMnXcdN/VcUKPlxZykeV9QrkVNrvQUD6SZJk=` |
 | GA4 analytics | index.html (GA4) | `sha256-AO9B7DMlmWxTtLbca1rsS5u3qc7ZYy2nDO8OZbmZIU0=` |
 | Game loader | play.html:48-186 | `sha256-BXGXBorW8mlhTPKDCok0aiBZOGWyKJ9NLbeCp3LDYBU=` |

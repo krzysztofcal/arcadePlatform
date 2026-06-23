@@ -29,6 +29,11 @@ const pipelineFactory = () => {
 };
 
 const saveUserProfileMock = vi.fn(async () => {});
+const atomicRateLimitIncrMock = vi.fn((key) => {
+  const current = Number(mockData.get(key) || 0) + 1;
+  mockData.set(key, String(current));
+  return Promise.resolve({ count: current });
+});
 
 const store = {
   get: vi.fn((key) => Promise.resolve(mockData.get(key) ?? null)),
@@ -67,6 +72,12 @@ const store = {
     store.incrBy.mockClear();
     store.pipeline.mockClear();
     saveUserProfileMock.mockClear();
+    atomicRateLimitIncrMock.mockReset();
+    atomicRateLimitIncrMock.mockImplementation((key) => {
+      const current = Number(mockData.get(key) || 0) + 1;
+      mockData.set(key, String(current));
+      return Promise.resolve({ count: current });
+    });
     store._lastPipeline = null;
   },
 };
@@ -74,6 +85,7 @@ const store = {
 vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => ({
   store,
   saveUserProfile: saveUserProfileMock,
+  atomicRateLimitIncr: atomicRateLimitIncrMock,
 }));
 
 async function loadAwardXp() {
