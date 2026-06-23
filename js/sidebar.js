@@ -188,6 +188,7 @@
   }
 
   function renderBottomNav(items){
+    if (!doc.body || typeof doc.body.appendChild !== 'function') return;
     let nav = doc.getElementById('mobileBottomNav');
     if (!nav){
       nav = doc.createElement('nav');
