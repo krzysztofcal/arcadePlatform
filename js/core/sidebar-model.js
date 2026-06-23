@@ -7,10 +7,6 @@
     leaderboard: '<svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 11h4v10H5V11Zm5-8h4v18h-4V3Zm5 5h4v13h-4V8ZM4 21h16v1H4v-1Z"/></svg>',
     profile: '<svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5Z"/></svg>',
     about: '<svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 10h2v8h-2v-8Zm0-4h2v2h-2V6Zm1-4a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z"/></svg>',
-    licenses: '<svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l3 3v15H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm8 1.8V7h2.2L14 4.8ZM7 10h8v2H7v-2Zm0 4h10v2H7v-2Z"/></svg>',
-    terms: '<svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10a2 2 0 0 1 2 2v16l-3-1.5-3 1.5-3-1.5L7 21V5a2 2 0 0 1 2-2Zm2 5h6V6H9v2Zm0 4h6v-2H9v2Zm0 4h4v-2H9v2Z"/></svg>',
-    privacy: '<svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5.4V11c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5.4L12 2Zm0 4.2 5 2.1V11c0 3.6-2.1 6.9-5 8.3-2.9-1.4-5-4.7-5-8.3V8.3l5-2.1Z"/></svg>',
-    contact: '<svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm0 3.2 8 5 8-5V7l-8 5-8-5v1.2Z"/></svg>',
     settings: '<svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="m19.4 13.5.1-1.5-.1-1.5 2-1.5-2-3.5-2.4 1a7.8 7.8 0 0 0-2.6-1.5L14 2h-4l-.4 2.5A7.8 7.8 0 0 0 7 6L4.6 5 2.6 8.5l2 1.5-.1 1.5.1 1.5-2 1.5 2 3.5 2.4-1a7.8 7.8 0 0 0 2.6 1.5L10 22h4l.4-2.5A7.8 7.8 0 0 0 17 18l2.4 1 2-3.5-2-1.5ZM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"/></svg>',
     random: '<svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3h5v5h-2V6.4l-4.6 4.6-1.4-1.4L18.6 5H17V3ZM4 7h3.2c1.7 0 3.2.9 4 2.3l.5.8-1.4 1.4-.8-1.2A2.8 2.8 0 0 0 7.2 9H4V7Zm10 7.4 1.4-1.4 4.6 4.6V16h2v5h-5v-2h1.6L14 14.4ZM4 15h3.2c1 0 1.8-.5 2.3-1.3l4.6-7A4.8 4.8 0 0 1 18.2 4H20v2h-1.8c-1 0-1.8.5-2.3 1.3l-4.6 7A4.8 4.8 0 0 1 7.2 17H4v-2Z"/></svg>'
   };
@@ -22,11 +18,7 @@
     { id: 'leaderboard', labelKey: 'leaderboard', fallbackLabel: 'Leaderboard', href: '/xp.html', iconSvg: icons.leaderboard },
     { id: 'profile', labelKey: 'profile', fallbackLabel: 'Profile', href: '/account.html', iconSvg: icons.profile },
     { id: 'random', labelKey: 'playRandomGame', fallbackLabel: 'Play Random Game', href: '/index.html', className: 'sb-random', iconSvg: icons.random },
-    { id: 'about', labelKey: 'about', fallbackLabel: 'About', href: '/about.en.html', hrefEn: '/about.en.html', hrefPl: '/about.pl.html', section: 'info', iconSvg: icons.about },
-    { id: 'licenses', labelKey: 'licenses', fallbackLabel: 'Licenses', href: '/about/licenses.html', section: 'info', iconSvg: icons.licenses },
-    { id: 'terms', labelKey: 'terms', fallbackLabel: 'Terms', href: '/legal/terms.en.html', hrefEn: '/legal/terms.en.html', hrefPl: '/legal/terms.pl.html', section: 'info', iconSvg: icons.terms },
-    { id: 'privacy', labelKey: 'privacy', fallbackLabel: 'Privacy', href: '/legal/privacy.en.html', hrefEn: '/legal/privacy.en.html', hrefPl: '/legal/privacy.pl.html', section: 'info', iconSvg: icons.privacy },
-    { id: 'contact', labelKey: 'contact', fallbackLabel: 'Contact', href: 'mailto:contact@kcswh.pl', section: 'info', iconSvg: icons.contact },
+    { id: 'about', labelKey: 'about', fallbackLabel: 'About', href: '/about.en.html', hrefEn: '/about.en.html', hrefPl: '/about.pl.html', section: 'about', iconSvg: icons.about },
     { id: 'admin', labelKey: 'admin', fallbackLabel: 'Admin', href: '/admin.html', requiresAdmin: true, iconSvg: icons.settings }
   ];
 

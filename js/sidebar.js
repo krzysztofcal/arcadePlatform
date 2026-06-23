@@ -148,19 +148,21 @@
     const items = getItems();
     const groups = [
       { id: 'arcadeHub', labelKey: 'menuArcadeHub', fallbackLabel: 'Arcade Hub', items: items.filter(function(item){ return !item.section && !item.requiresAdmin; }) },
-      { id: 'info', labelKey: 'menuInfo', fallbackLabel: 'Info', items: items.filter(function(item){ return item.section === 'info'; }) },
+      { id: 'about', items: items.filter(function(item){ return item.section === 'about'; }), heading: false },
       { id: 'language', labelKey: 'menuLanguage', fallbackLabel: 'Language', language: true },
       { id: 'admin', labelKey: 'admin', fallbackLabel: 'Admin', items: items.filter(function(item){ return item.requiresAdmin; }) }
     ];
     list.innerHTML = '';
     groups.forEach(function(group){
       if (!group.language && (!group.items || !group.items.length)) return;
-      const header = doc.createElement('li');
-      header.className = 'sb-section';
-      header.setAttribute('data-section-id', group.id);
-      if (group.labelKey) header.setAttribute('data-i18n', group.labelKey);
-      header.textContent = resolveText(group.labelKey, group.fallbackLabel);
-      list.appendChild(header);
+      if (group.heading !== false){
+        const header = doc.createElement('li');
+        header.className = 'sb-section';
+        header.setAttribute('data-section-id', group.id);
+        if (group.labelKey) header.setAttribute('data-i18n', group.labelKey);
+        header.textContent = resolveText(group.labelKey, group.fallbackLabel);
+        list.appendChild(header);
+      }
       if (group.language){
         list.appendChild(createLanguageItem());
         return;

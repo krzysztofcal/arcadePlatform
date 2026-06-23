@@ -8,7 +8,6 @@
     contact: { en: 'Contact', pl: 'Kontakt' },
     manageCookies: { en: 'Manage cookies', pl: 'Zarządzaj cookies' },
     menuArcadeHub: { en: 'Arcade Hub', pl: 'Arcade Hub' },
-    menuInfo: { en: 'Info', pl: 'Info' },
     menuLanguage: { en: 'Language', pl: 'Język' },
     home: { en: 'Home', pl: 'Start' },
     leaderboard: { en: 'Leaderboard', pl: 'Ranking' },
