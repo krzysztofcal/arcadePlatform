@@ -437,10 +437,10 @@ if (window.GameShell && typeof window.GameShell.registerControls === 'function')
       }
     },
     onMute: function() {
-      // Tetris has no audio yet
+      // Block Stacker has no audio yet
     },
     onUnmute: function() {
-      // Tetris has no audio yet
+      // Block Stacker has no audio yet
     }
   });
 }

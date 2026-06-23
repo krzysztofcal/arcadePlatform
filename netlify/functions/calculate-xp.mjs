@@ -82,6 +82,27 @@ const CORS_ALLOW = (() => {
   return fromEnv;
 })();
 
+const BLOCK_STACKER_EVENT_ALIASES = Object.freeze({
+  tetris: "four_line_clear",
+  quad_clear: "four_line_clear",
+});
+
+const normalizeGameEventType = (type) => {
+  const normalized = typeof type === "string" ? type.trim().toLowerCase() : "";
+  return BLOCK_STACKER_EVENT_ALIASES[normalized] || normalized;
+};
+
+const BLOCK_STACKER_XP_RULES = {
+  baseXpPerSecond: BASELINE_XP_PER_SECOND,
+  scoreToXpRatio: 0.005, // 200 score = 1 XP (Block Stacker scores are high)
+  maxScoreXpPerWindow: 100,
+  events: {
+    line_clear: (lines) => lines * 5,           // 5 XP per cleared line
+    four_line_clear: () => 40,                  // 40 XP for clearing 4 lines at once
+    level_up: (level) => level * 10,            // 10 XP per level
+  }
+};
+
 // Game-specific XP rules
 const GAME_XP_RULES = {
   // Default rules for unknown games
@@ -90,17 +111,9 @@ const GAME_XP_RULES = {
     scoreToXpRatio: 0.01,  // 100 score = 1 XP
     maxScoreXpPerWindow: 50,
   },
-  // Tetris: line clears are valuable
-  tetris: {
-    baseXpPerSecond: BASELINE_XP_PER_SECOND,
-    scoreToXpRatio: 0.005, // 200 score = 1 XP (tetris scores are high)
-    maxScoreXpPerWindow: 100,
-    events: {
-      line_clear: (lines) => lines * 5,      // 5 XP per line
-      tetris: () => 40,                       // 40 XP for tetris (4 lines)
-      level_up: (level) => level * 10,        // 10 XP per level
-    }
-  },
+  // Block Stacker keeps the legacy tetris gameId for compatibility.
+  tetris: BLOCK_STACKER_XP_RULES,
+  "block-stacker": BLOCK_STACKER_XP_RULES,
   // 2048: tile merges
   "2048": {
     baseXpPerSecond: BASELINE_XP_PER_SECOND,
@@ -485,7 +498,7 @@ function calculateXP({
   let eventXp = 0;
   if (rules.events && gameEvents.length > 0) {
     for (const event of gameEvents) {
-      const eventHandler = rules.events[event.type];
+      const eventHandler = rules.events[normalizeGameEventType(event.type)];
       if (eventHandler && typeof eventHandler === 'function') {
         try {
           eventXp += Math.max(0, eventHandler(event.value) || 0);

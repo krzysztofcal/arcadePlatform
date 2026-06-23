@@ -215,7 +215,7 @@ All games in `games-open/` now support control messages:
 |------|--------------|-------|
 | Flappy Bird | ✅ | Stops game loop |
 | Pong | ✅ | Stops game loop |
-| Tetris | ✅ | Shows "Paused" overlay |
+| Block Stacker | ✅ | Shows "Paused" overlay |
 | Snake | ✅ | Shows "Paused" message |
 | Breakout | ✅ | Stops game loop |
 | Maze Muncher | ✅ | Shows "Paused" overlay |
