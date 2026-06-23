@@ -19,6 +19,10 @@
     return model && typeof model.getItems === 'function' ? model.getItems({ isAdmin: state.isAdmin }) : [];
   }
 
+  function getBottomItems(){
+    return model && typeof model.getBottomNavItems === 'function' ? model.getBottomNavItems() : [];
+  }
+
   function getAuthBridge(){
     if (window.SupabaseAuthBridge && typeof window.SupabaseAuthBridge.getAccessToken === 'function'){
       return window.SupabaseAuthBridge;
@@ -118,6 +122,18 @@
     return item.fallbackLabel || '';
   }
 
+  function resolveText(key, fallback){
+    if (key && window.ArcadeI18n && typeof window.ArcadeI18n.t === 'function'){
+      const translated = window.ArcadeI18n.t(key);
+      if (translated) return translated;
+    }
+    if (key && window.I18N && typeof window.I18N.t === 'function'){
+      const translated = window.I18N.t(key);
+      if (translated) return translated;
+    }
+    return fallback || '';
+  }
+
   function isActive(href){
     if (!href || !window.location || typeof window.location.pathname !== 'string') return false;
     const path = window.location.pathname;
@@ -130,8 +146,26 @@
   function render(){
     const list = ensureList();
     const items = getItems();
+    const groups = [
+      { id: 'arcadeHub', labelKey: 'menuArcadeHub', fallbackLabel: 'Arcade Hub', items: items.filter(function(item){ return !item.section && !item.requiresAdmin; }) },
+      { id: 'info', labelKey: 'menuInfo', fallbackLabel: 'Info', items: items.filter(function(item){ return item.section === 'info'; }) },
+      { id: 'language', labelKey: 'menuLanguage', fallbackLabel: 'Language', language: true },
+      { id: 'admin', labelKey: 'admin', fallbackLabel: 'Admin', items: items.filter(function(item){ return item.requiresAdmin; }) }
+    ];
     list.innerHTML = '';
-    items.forEach((item)=>{
+    groups.forEach(function(group){
+      if (!group.language && (!group.items || !group.items.length)) return;
+      const header = doc.createElement('li');
+      header.className = 'sb-section';
+      header.setAttribute('data-section-id', group.id);
+      if (group.labelKey) header.setAttribute('data-i18n', group.labelKey);
+      header.textContent = resolveText(group.labelKey, group.fallbackLabel);
+      list.appendChild(header);
+      if (group.language){
+        list.appendChild(createLanguageItem());
+        return;
+      }
+      group.items.forEach(function(item){
       const li = doc.createElement('li');
       li.className = 'sb-item';
 
@@ -162,14 +196,37 @@
       link.appendChild(label);
       li.appendChild(link);
       list.appendChild(li);
+      });
     });
 
-    renderBottomNav(items);
+    renderBottomNav(getBottomItems());
 
     if (window.I18N && typeof window.I18N.apply === 'function'){
       const lang = typeof window.I18N.getLang === 'function' ? window.I18N.getLang() : 'en';
       window.I18N.apply(lang, 'api');
     }
+  }
+
+  function createLanguageItem(){
+    const li = doc.createElement('li');
+    li.className = 'sb-item sb-lang-item';
+    const switcher = doc.createElement('div');
+    switcher.className = 'sb-lang-switch';
+    switcher.setAttribute('aria-label', resolveText('menuLanguage', 'Language'));
+    ['pl', 'en'].forEach(function(lang){
+      const langBtn = doc.createElement('button');
+      langBtn.type = 'button';
+      langBtn.className = 'lang-btn';
+      langBtn.setAttribute('data-lang', lang);
+      langBtn.setAttribute('aria-pressed', window.I18N && typeof window.I18N.getLang === 'function' && window.I18N.getLang() === lang ? 'true' : 'false');
+      langBtn.textContent = lang.toUpperCase();
+      langBtn.addEventListener('click', function(){
+        if (window.I18N && typeof window.I18N.setLang === 'function') window.I18N.setLang(lang);
+      });
+      switcher.appendChild(langBtn);
+    });
+    li.appendChild(switcher);
+    return li;
   }
 
 
