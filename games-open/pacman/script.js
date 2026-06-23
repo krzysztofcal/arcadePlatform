@@ -314,24 +314,26 @@
 
   function movePlayer(delta) {
     if (player.progress === 0) {
-      if (canMove(player.tileX, player.tileY, player.nextDir)) {
-        player.dir = { x: player.nextDir.x, y: player.nextDir.y };
-      }
-      if (!canMove(player.tileX, player.tileY, player.dir)) {
-        player.dir = { x: 0, y: 0 };
-      }
+      applyQueuedDirection();
     }
     if (player.dir.x === 0 && player.dir.y === 0) return;
+
     player.progress += player.speed * delta;
-    while (player.progress >= 1) {
-      player.tileX += player.dir.x;
-      player.tileY += player.dir.y;
-      player.progress -= 1;
-      eatPellet(player.tileX, player.tileY);
-      if (!canMove(player.tileX, player.tileY, player.dir)) {
-        player.progress = 0;
-        break;
-      }
+    if (player.progress < 1) return;
+
+    player.tileX += player.dir.x;
+    player.tileY += player.dir.y;
+    player.progress = 0;
+    eatPellet(player.tileX, player.tileY);
+    applyQueuedDirection();
+  }
+
+  function applyQueuedDirection() {
+    if (canMove(player.tileX, player.tileY, player.nextDir)) {
+      player.dir = { x: player.nextDir.x, y: player.nextDir.y };
+    }
+    if (!canMove(player.tileX, player.tileY, player.dir)) {
+      player.dir = { x: 0, y: 0 };
     }
   }
 
@@ -340,16 +342,18 @@
       enemy.dir = chooseEnemyDirection(enemy);
     }
     if (enemy.dir.x === 0 && enemy.dir.y === 0) return;
+
     enemy.progress += (enemy.vulnerable > 0 ? enemy.speed * 0.62 : enemy.speed) * delta;
-    while (enemy.progress >= 1) {
-      enemy.tileX += enemy.dir.x;
-      enemy.tileY += enemy.dir.y;
-      enemy.progress -= 1;
-      if (!canMove(enemy.tileX, enemy.tileY, enemy.dir)) {
-        enemy.progress = 0;
-        break;
+    if (enemy.progress < 1) {
+      if (enemy.vulnerable > 0) {
+        enemy.vulnerable = Math.max(0, enemy.vulnerable - delta);
       }
+      return;
     }
+
+    enemy.tileX += enemy.dir.x;
+    enemy.tileY += enemy.dir.y;
+    enemy.progress = 0;
     if (enemy.vulnerable > 0) {
       enemy.vulnerable = Math.max(0, enemy.vulnerable - delta);
     }
