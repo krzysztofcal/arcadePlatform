@@ -218,7 +218,7 @@ All games in `games-open/` now support control messages:
 | Tetris | ✅ | Shows "Paused" overlay |
 | Snake | ✅ | Shows "Paused" message |
 | Breakout | ✅ | Stops game loop |
-| Pacman | ✅ | Shows "Paused" overlay |
+| Maze Muncher | ✅ | Shows "Paused" overlay |
 | 2048 | N/A | Turn-based, no continuous loop |
 | Minesweeper | N/A | Turn-based, no continuous loop |
 

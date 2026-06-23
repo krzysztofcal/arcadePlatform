@@ -85,7 +85,7 @@ Used for any game without specific rules.
 
 ---
 
-### Pacman
+### Maze Muncher
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
@@ -97,7 +97,7 @@ Used for any game without specific rules.
 
 | Event | XP | Description |
 |-------|-----|-------------|
-| `ghost_eaten` | 10 | Eating a ghost |
+| `chaser_eaten` | 10 | Eating a vulnerable chaser |
 | `power_pellet` | 5 | Eating a power pellet |
 | `level_complete` | 15 × level | Level completion bonus |
 
