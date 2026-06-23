@@ -5,7 +5,7 @@
   if (!sidebar || !btn) return;
 
   const model = window.SidebarModel;
-  const state = { isAdmin: false, authWired: false, adminRequestId: 0 };
+  const state = { isAdmin: false, authWired: false, adminRequestId: 0, bottomNavReady: false, randomInFlight: false };
 
   function klog(kind, data){
     try {
@@ -17,6 +17,10 @@
 
   function getItems(){
     return model && typeof model.getItems === 'function' ? model.getItems({ isAdmin: state.isAdmin }) : [];
+  }
+
+  function getBottomItems(){
+    return model && typeof model.getBottomNavItems === 'function' ? model.getBottomNavItems() : [];
   }
 
   function getAuthBridge(){
@@ -118,6 +122,18 @@
     return item.fallbackLabel || '';
   }
 
+  function resolveText(key, fallback){
+    if (key && window.ArcadeI18n && typeof window.ArcadeI18n.t === 'function'){
+      const translated = window.ArcadeI18n.t(key);
+      if (translated) return translated;
+    }
+    if (key && window.I18N && typeof window.I18N.t === 'function'){
+      const translated = window.I18N.t(key);
+      if (translated) return translated;
+    }
+    return fallback || '';
+  }
+
   function isActive(href){
     if (!href || !window.location || typeof window.location.pathname !== 'string') return false;
     const path = window.location.pathname;
@@ -130,8 +146,28 @@
   function render(){
     const list = ensureList();
     const items = getItems();
+    const groups = [
+      { id: 'arcadeHub', labelKey: 'menuArcadeHub', fallbackLabel: 'Arcade Hub', items: items.filter(function(item){ return !item.section && !item.requiresAdmin; }) },
+      { id: 'about', items: items.filter(function(item){ return item.section === 'about'; }), heading: false },
+      { id: 'language', labelKey: 'menuLanguage', fallbackLabel: 'Language', language: true },
+      { id: 'admin', labelKey: 'admin', fallbackLabel: 'Admin', items: items.filter(function(item){ return item.requiresAdmin; }) }
+    ];
     list.innerHTML = '';
-    items.forEach((item)=>{
+    groups.forEach(function(group){
+      if (!group.language && (!group.items || !group.items.length)) return;
+      if (group.heading !== false){
+        const header = doc.createElement('li');
+        header.className = 'sb-section';
+        header.setAttribute('data-section-id', group.id);
+        if (group.labelKey) header.setAttribute('data-i18n', group.labelKey);
+        header.textContent = resolveText(group.labelKey, group.fallbackLabel);
+        list.appendChild(header);
+      }
+      if (group.language){
+        list.appendChild(createLanguageItem());
+        return;
+      }
+      group.items.forEach(function(item){
       const li = doc.createElement('li');
       li.className = 'sb-item';
 
@@ -142,7 +178,11 @@
       link.setAttribute('tabindex', '0');
       if (item.hrefEn) link.setAttribute('data-href-en', item.hrefEn);
       if (item.hrefPl) link.setAttribute('data-href-pl', item.hrefPl);
+      if (item.id) link.setAttribute('data-nav-id', item.id);
       if (isActive(item.href)) link.classList.add('is-active');
+      if (item.id === 'random'){
+        link.addEventListener('click', handleRandomGameClick);
+      }
 
       const icon = doc.createElement('span');
       icon.className = 'sb-ico';
@@ -158,11 +198,151 @@
       link.appendChild(label);
       li.appendChild(link);
       list.appendChild(li);
+      });
     });
+
+    renderBottomNav(getBottomItems());
 
     if (window.I18N && typeof window.I18N.apply === 'function'){
       const lang = typeof window.I18N.getLang === 'function' ? window.I18N.getLang() : 'en';
       window.I18N.apply(lang, 'api');
+    }
+  }
+
+  function createLanguageItem(){
+    const li = doc.createElement('li');
+    li.className = 'sb-item sb-lang-item';
+    const switcher = doc.createElement('div');
+    switcher.className = 'sb-lang-switch';
+    switcher.setAttribute('aria-label', resolveText('menuLanguage', 'Language'));
+    ['pl', 'en'].forEach(function(lang){
+      const langBtn = doc.createElement('button');
+      langBtn.type = 'button';
+      langBtn.className = 'lang-btn';
+      langBtn.setAttribute('data-lang', lang);
+      langBtn.setAttribute('aria-pressed', window.I18N && typeof window.I18N.getLang === 'function' && window.I18N.getLang() === lang ? 'true' : 'false');
+      langBtn.textContent = lang.toUpperCase();
+      langBtn.addEventListener('click', function(){
+        if (window.I18N && typeof window.I18N.setLang === 'function') window.I18N.setLang(lang);
+      });
+      switcher.appendChild(langBtn);
+    });
+    li.appendChild(switcher);
+    return li;
+  }
+
+
+  function bottomNavItems(items){
+    const wanted = ['home', 'search', 'favorites', 'poker', 'profile'];
+    const byId = {};
+    items.forEach(function(item){ byId[item.id] = item; });
+    byId.search = {
+      id: 'search',
+      labelKey: 'search',
+      fallbackLabel: 'Search',
+      href: '#search',
+      iconSvg: '<svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="m20.7 19.3-4.1-4.1a7.5 7.5 0 1 0-1.4 1.4l4.1 4.1 1.4-1.4ZM5 10.5a5.5 5.5 0 1 1 11 0 5.5 5.5 0 0 1-11 0Z"/></svg>'
+    };
+    return wanted.map(function(id){ return byId[id]; }).filter(Boolean);
+  }
+
+  function renderBottomNav(items){
+    if (!doc.body || typeof doc.body.appendChild !== 'function') return;
+    if (!doc.querySelector('.shell')) return;
+    let nav = doc.getElementById('mobileBottomNav');
+    if (!nav){
+      nav = doc.createElement('nav');
+      nav.id = 'mobileBottomNav';
+      nav.className = 'mobile-bottom-nav';
+      nav.setAttribute('aria-label', 'Mobile navigation');
+      doc.body.appendChild(nav);
+    }
+    nav.innerHTML = '';
+    bottomNavItems(items).forEach(function(item){
+      const link = doc.createElement('a');
+      link.className = 'mobile-bottom-nav__item';
+      link.href = item.href || '#';
+      link.setAttribute('data-nav-id', item.id);
+      if (item.id !== 'search' && isActive(item.href)) link.classList.add('is-active');
+      if (item.id === 'search'){
+        link.addEventListener('click', handleBottomSearchClick);
+      }
+
+      const icon = doc.createElement('span');
+      icon.className = 'mobile-bottom-nav__icon';
+      icon.setAttribute('aria-hidden', 'true');
+      if (item.iconSvg) icon.innerHTML = item.iconSvg;
+
+      const label = doc.createElement('span');
+      label.className = 'mobile-bottom-nav__label';
+      if (item.labelKey) label.setAttribute('data-i18n', item.labelKey);
+      label.textContent = resolveLabel(item);
+
+      link.appendChild(icon);
+      link.appendChild(label);
+      nav.appendChild(link);
+    });
+  }
+
+  function handleBottomSearchClick(event){
+    event.preventDefault();
+    const search = doc.getElementById('searchInput');
+    if (!search) return;
+    const box = search.closest ? search.closest('.search-box') : null;
+    if (box) box.classList.add('is-expanded');
+    search.focus();
+  }
+
+  function safeSelfPage(page){
+    if (!page || typeof page !== 'string') return null;
+    try {
+      const url = new URL(page, window.location.href);
+      if (url.origin !== window.location.origin) return null;
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+      return url;
+    } catch (_err){ return null; }
+  }
+
+  function playableHref(item){
+    if (!item || !item.source) return null;
+    const slug = item.slug || item.id || '';
+    if (item.source.page){
+      const url = safeSelfPage(item.source.page);
+      if (!url) return null;
+      const lang = window.I18N && typeof window.I18N.getLang === 'function' ? window.I18N.getLang() : 'en';
+      url.searchParams.set('lang', lang);
+      if (slug) url.searchParams.set('slug', slug);
+      return url.toString();
+    }
+    if (item.source.type === 'distributor'){
+      const url = new URL('/game.html', window.location.href);
+      if (slug) url.searchParams.set('slug', slug);
+      const lang = window.I18N && typeof window.I18N.getLang === 'function' ? window.I18N.getLang() : 'en';
+      url.searchParams.set('lang', lang);
+      return url.toString();
+    }
+    return null;
+  }
+
+  async function handleRandomGameClick(event){
+    event.preventDefault();
+    if (state.randomInFlight) return;
+    state.randomInFlight = true;
+    try {
+      const res = await fetch('/js/games.json', { cache: 'no-cache' });
+      const data = res && typeof res.json === 'function' ? await res.json() : null;
+      let games = data && Array.isArray(data.games) ? data.games : (Array.isArray(data) ? data : []);
+      if (window.ArcadeCatalog && typeof window.ArcadeCatalog.normalizeGameList === 'function'){
+        games = window.ArcadeCatalog.normalizeGameList(games);
+      }
+      const playable = games.map(playableHref).filter(Boolean);
+      if (playable.length){
+        window.location.href = playable[Math.floor(Math.random() * playable.length)];
+      }
+    } catch (err){
+      klog('sidebar:random_game_error', { message: err && err.message ? String(err.message) : 'error' });
+    } finally {
+      state.randomInFlight = false;
     }
   }
 

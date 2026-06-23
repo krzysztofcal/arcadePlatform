@@ -17,9 +17,11 @@
 
   function start(){
     app.init().catch(err => {
-      if (window.console && typeof window.console.error === 'function'){
-        window.console.error(err);
-      }
+      try {
+        if (window.KLog && typeof window.KLog.log === 'function'){
+          window.KLog.log('portal:init_error', { message: err && err.message ? String(err.message) : 'error' });
+        }
+      } catch (_err){}
     });
   }
 

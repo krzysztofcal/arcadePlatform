@@ -105,7 +105,7 @@
       </nav>
     </aside>
 
-    <main style="padding:16px; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#e8eeff; background:#0b1020;">
+    <main class="about-page">
     <button id="debugDumpButton" class="debug-dump-button" type="button" hidden>Dump diagnostics</button>
     <div id="debugToast" class="debug-toast" role="status" aria-live="polite"></div>
     <h1>About</h1>
@@ -114,6 +114,16 @@
     <p>Contact: <a href="mailto:contact@kcswh.pl" class="ft-link">contact@kcswh.pl</a></p>
     <p><a href="#" class="ft-link manage-cookies" data-i18n="manageCookies">Manage cookies</a></p>
     <p><a id="backLink" href="index.html?lang=en" class="ft-link">Back to portal</a></p>
+
+    <section class="documents-panel" aria-labelledby="documentsTitle">
+      <h2 id="documentsTitle">Documents</h2>
+      <nav class="documents-links" aria-label="Documents">
+        <a class="documents-link" href="about/licenses.html">Licenses</a>
+        <a class="documents-link" href="legal/terms.en.html">Terms</a>
+        <a class="documents-link" href="legal/privacy.en.html">Privacy</a>
+        <a class="documents-link" href="mailto:contact@kcswh.pl">Contact</a>
+      </nav>
+    </section>
 
     <section id="buildInfoSection" class="build-info" hidden>
       <h2>Build Information</h2>
@@ -372,4 +382,3 @@
   <script src="js/consent-manager.js" defer></script>
 </body>
 </html>
-
