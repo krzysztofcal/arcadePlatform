@@ -138,3 +138,13 @@ button:focus-visible, a:focus-visible{ outline:2px solid var(--accent); outline-
 .slot-fixed{ height:100px; border:1px dashed var(--border); border-radius:12px; display:flex; align-items:center; justify-content:center; color:#9fb0d0; background:rgba(11,16,32,.35); margin-bottom:10px; position:relative; }
 @media (min-width: 700px){ .slot-fixed{ height:250px; } }
 .slot-fixed .slot-badge{ position:absolute; top:8px; right:12px; font:700 10px/1 Poppins, sans-serif; color:#9fb0d0; background:rgba(15,20,48,.7); border:1px solid var(--border); padding:4px 6px; border-radius:999px; }
+
+
+/* Keep game host sidebar compact when portal CSS is also loaded. */
+.layout .sidebar.collapsed{ width:64px; transform:none; }
+.layout .sidebar.collapsed .sb-label{ max-width:0; opacity:0; }
+.layout .sidebar.collapsed:hover .sb-label{ max-width:0; opacity:0; }
+@media (min-width: 1180px){ .layout{ grid-template-columns:72px 1fr 280px; } }
+@media (min-width: 1180px){ .layout .sidebar{ width:64px; } }
+@media (min-width: 1180px){ .layout .sidebar.collapsed{ width:64px; } }
+@media (min-width: 1180px){ .layout .sidebar.expanded{ width:220px; } }
