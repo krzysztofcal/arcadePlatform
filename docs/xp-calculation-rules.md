@@ -50,7 +50,7 @@ Used for any game without specific rules.
 
 ---
 
-### Tetris
+### Block Stacker
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
@@ -63,8 +63,10 @@ Used for any game without specific rules.
 | Event | XP | Description |
 |-------|-----|-------------|
 | `line_clear` | 5 × lines | 5 XP per line cleared |
-| `tetris` | 40 | Bonus for clearing 4 lines at once |
+| `four_line_clear` | 40 | Bonus for clearing 4 lines at once |
 | `level_up` | 10 × level | 10 XP per level achieved |
+
+Legacy clients may still send the technical `tetris` or `quad_clear` event name; both are normalized to `four_line_clear`.
 
 ---
 
@@ -213,14 +215,14 @@ const GAME_XP_RULES = {
 {
   "userId": "user-123",
   "sessionId": "sess-456",
-  "gameId": "tetris",
+  "gameId": "block-stacker",
   "windowStart": 1700000000000,
   "windowEnd": 1700000010000,
   "inputEvents": 20,
   "visibilitySeconds": 10,
   "scoreDelta": 1000,
   "gameEvents": [
-    { "type": "line_clear", "value": 4 },
+    { "type": "four_line_clear", "value": 4 },
     { "type": "level_up", "value": 2 }
   ],
   "boostMultiplier": 1.5
