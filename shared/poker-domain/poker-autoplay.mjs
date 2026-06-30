@@ -59,7 +59,8 @@ export const runBotAutoplayLoop = async ({
   chooseBotActionTrivial,
   isBotTurn,
   applyAction,
-  beforeBotActionStep
+  beforeBotActionStep,
+  botActionRandom = Math.random
 }) => {
   let responseFinalState = initialState;
   let loopPrivateState = initialPrivateState;
@@ -135,7 +136,12 @@ export const runBotAutoplayLoop = async ({
     }
 
     const botLegalInfo = computeLegalActions({ statePublic: withoutPrivateState(responseFinalState), userId: botTurnUserId });
-    const botChoice = chooseBotActionTrivial(botLegalInfo.actions);
+    const botChoice = chooseBotActionTrivial(botLegalInfo.actions, {
+      state: responseFinalState,
+      privateState: loopPrivateState,
+      userId: botTurnUserId,
+      random: botActionRandom
+    });
     if (!botChoice || !botChoice.type) { botStopReason = "no_legal_action"; break; }
 
     const botRequestId = buildBotRequestId(responseFinalState, botTurnUserId, botActionCount + 1);

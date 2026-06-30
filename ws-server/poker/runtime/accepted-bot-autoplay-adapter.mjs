@@ -1,4 +1,5 @@
 import { recoverFromPersistConflict } from "./persist-conflict-recovery.mjs";
+import { chooseBotActionProfiled as chooseSharedBotActionProfiled } from "../../shared/poker-domain/bots.mjs";
 
 import { TURN_MS } from "../shared/poker-turn-timeout.mjs";
 import { applyAction as applySharedAction } from "../shared/poker-action-reducer.mjs";
@@ -103,16 +104,8 @@ function isBotTurnAuthoritatively(tableManager, tableId, turnUserId, seatBotMap)
   return isBotTurn(turnUserId, seatBotMap);
 }
 
-function chooseBotActionTrivial(legalActions) {
-  const actions = Array.isArray(legalActions) ? legalActions : [];
-  if (actions.includes("CHECK")) return { type: "CHECK" };
-  if (actions.includes("CALL")) return { type: "CALL" };
-  if (actions.includes("FOLD")) return { type: "FOLD" };
-  const bet = actions.find((entry) => entry && typeof entry === "object" && entry.type === "BET");
-  if (bet) return { type: "BET", amount: Number.isFinite(Number(bet.min)) ? Number(bet.min) : 0 };
-  const raise = actions.find((entry) => entry && typeof entry === "object" && entry.type === "RAISE");
-  if (raise) return { type: "RAISE", amount: Number.isFinite(Number(raise.min)) ? Number(raise.min) : 0 };
-  return null;
+function chooseBotActionTrivial(legalActions, context = {}) {
+  return chooseSharedBotActionProfiled(legalActions, context);
 }
 
 function buildSeatBotMap(seats) {
@@ -635,6 +628,7 @@ export function createAcceptedBotStepExecutor({
         maxActions: 1,
         botsOnlyHandCompletionHardCap: cfg.botsOnlyHandCompletionHardCap,
         policyVersion: cfg.policyVersion,
+        botActionRandom: () => 0.5,
         klog,
         isActionPhase,
         advanceIfNeeded,
@@ -741,8 +735,11 @@ export function createAcceptedBotStepExecutor({
           };
         },
         withoutPrivateState,
-        chooseBotActionTrivial: (legalActions) => {
-          const action = chooseBotActionTrivial(legalActions);
+        chooseBotActionTrivial: (legalActions, context = {}) => {
+          const action = chooseBotActionTrivial(legalActions, {
+            ...context,
+            profile: tableManager.tableSnapshot?.(tableId, context?.userId || lastKnown?.state?.turnUserId || "")?.seats?.find((seat) => seat?.userId === (context?.userId || lastKnown?.state?.turnUserId))?.botProfile
+          });
           lastKnown = { ...lastKnown, stage: "action_chosen", actionType: action?.type || null, actionAmount: action?.amount ?? null };
           logVerbose("ws_bot_autoplay_action_chosen", {
             ...baseLog,
