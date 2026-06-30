@@ -5613,7 +5613,7 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
       POKER_BOTS_ENABLED: "1",
       POKER_BOTS_MAX_PER_TABLE: "2",
       POKER_BOT_BUYIN_BB: "100",
-      POKER_BOT_PROFILE_DEFAULT: "TRIVIAL"
+      POKER_BOT_PROFILE_DEFAULT: "NORMAL"
     }
   });
 
@@ -5651,8 +5651,8 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
     assert.equal(firstState.payload.members.some((entry) => entry.userId === botSeat2), false);
     assert.deepEqual(firstState.payload.seats, [
       { userId: "bot_seed_human", seatNo: 1, status: "ACTIVE" },
-      { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" },
-      { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" }
+      { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "NORMAL" },
+      { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "NORMAL" }
     ]);
     assert.equal(typeof firstState.payload.stacks.bot_seed_human, "number");
     assert.equal(typeof firstState.payload.stacks[botSeat2], "number");
