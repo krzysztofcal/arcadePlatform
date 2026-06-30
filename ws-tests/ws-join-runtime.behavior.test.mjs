@@ -196,8 +196,8 @@ function isStableReplayJoinState(frame, { tableId, userId, botSeat2, botSeat3 })
   ];
   const expectedSeats = [
     { userId, seatNo: 1, status: "ACTIVE" },
-    { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" },
-    { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" }
+    { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "NORMAL" },
+    { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "NORMAL" }
   ];
   try {
     assert.deepEqual(members, expectedMembers);
@@ -331,7 +331,7 @@ function runtimeJoinEnv({ secret, filePath }) {
     POKER_BOTS_ENABLED: "1",
     POKER_BOTS_MAX_PER_TABLE: "2",
     POKER_BOT_BUYIN_BB: "100",
-    POKER_BOT_PROFILE_DEFAULT: "TRIVIAL",
+    POKER_BOT_PROFILE_DEFAULT: "NORMAL",
     WS_BOT_REACTION_MIN_MS: "0",
     WS_BOT_REACTION_MAX_MS: "0",
     WS_POKER_TURN_MS: "250",
@@ -395,8 +395,8 @@ test("authoritative WS table_join returns a fully seated stacked snapshot and ke
     assert.equal(typeof joinedState.payload.hand.handId, "string");
     assert.deepEqual(joinedState.payload.seats, [
       { userId: "runtime_human", seatNo: 1, status: "ACTIVE" },
-      { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" },
-      { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" }
+      { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "NORMAL" },
+      { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "NORMAL" }
     ]);
     assert.equal(joinedState.payload.seats.filter((seat) => seat?.status === "ACTIVE").length >= 3, true);
     assert.equal(typeof joinedState.payload.stacks.runtime_human, "number");
