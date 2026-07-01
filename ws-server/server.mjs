@@ -1948,9 +1948,25 @@ async function sweepTurnTimeoutsAndBroadcast() {
   });
   await Promise.allSettled(timeoutUpdates.map((update) => enqueueTableCommand({
     tableId: update.tableId,
-    commandName: "turn_timeout",
-    dedupeKey: "turn_timeout",
+    commandName: update.isBotTurn === true ? "bot_timeout_safety" : "turn_timeout",
+    dedupeKey: update.isBotTurn === true ? null : "turn_timeout",
     run: async () => {
+      if (update.isBotTurn === true) {
+        klogSafe("ws_bot_timeout_safety_autoplay", {
+          tableId: update.tableId,
+          turnUserId: update.turnUserId || null,
+          stateVersion: Number.isFinite(Number(update.stateVersion)) ? Number(update.stateVersion) : null
+        });
+        return handleBotStepCommand({
+          tableId: update.tableId,
+          trigger: "bot_timeout_safety",
+          requestId: `bot-timeout-safety:${update.tableId}:${nowMs}`,
+          frameTs: null,
+          runBotStep,
+          broadcastStateSnapshots,
+          klog: klogSafe
+        });
+      }
       const result = await handleTurnTimeoutCommand({
         tableId: update.tableId,
         nowMs,
@@ -2315,6 +2331,7 @@ wss.on("connection", (ws) => {
           observeOnlyJoinEnabled,
           persistedBootstrapEnabled,
           loadAuthoritativeJoinExecutor,
+          scheduleBotStep,
           klog: klogSafe
         })
       });

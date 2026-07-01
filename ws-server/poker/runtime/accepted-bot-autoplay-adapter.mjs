@@ -230,6 +230,10 @@ function chooseBotActionTrivial(legalActions, context = {}) {
   return chooseBotActionProfiled(legalActions, context);
 }
 
+function chooseBotActionFallback(legalActions) {
+  return pickLegalAction(legalActions, ["CHECK", "CALL", "FOLD"]);
+}
+
 function buildSeatBotMap(seats) {
   const rows = Array.isArray(seats) ? seats : [];
   const map = new Map();
@@ -858,10 +862,19 @@ export function createAcceptedBotStepExecutor({
         },
         withoutPrivateState,
         chooseBotActionTrivial: (legalActions, context = {}) => {
-          const action = chooseBotActionTrivial(legalActions, {
+          let action = chooseBotActionTrivial(legalActions, {
             ...context,
             profile: tableManager.tableSnapshot?.(tableId, context?.userId || lastKnown?.state?.turnUserId || "")?.seats?.find((seat) => seat?.userId === (context?.userId || lastKnown?.state?.turnUserId))?.botProfile
           });
+          if ((!action || !action.type) && Array.isArray(legalActions) && legalActions.length > 0) {
+            action = chooseBotActionFallback(legalActions);
+            klog(action?.type ? "ws_bot_autoplay_fallback_action" : "ws_bot_autoplay_no_fallback_action", {
+              ...baseLog,
+              botTurnUserId: context?.userId || (typeof lastKnown?.state?.turnUserId === "string" ? lastKnown.state.turnUserId : null),
+              legalActionSummary: summarizeLegalActions(legalActions),
+              actionType: action?.type || null
+            });
+          }
           lastKnown = { ...lastKnown, stage: "action_chosen", actionType: action?.type || null, actionAmount: action?.amount ?? null };
           logVerbose("ws_bot_autoplay_action_chosen", {
             ...baseLog,

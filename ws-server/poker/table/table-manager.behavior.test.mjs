@@ -1922,6 +1922,72 @@ test("maybeApplyTurnTimeout applies deterministic action once for expired turn",
   assert.equal(afterReplay.stateVersion, after.stateVersion);
 });
 
+test("listDueTurnTimeouts marks expired bot turns for autoplay safety", () => {
+  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
+  const tableId = "table_due_bot_timeout";
+  const nowMs = 10_000;
+  const restored = tableManager.restoreTableFromPersisted(tableId, {
+    coreState: {
+      version: 4,
+      roomId: tableId,
+      maxSeats: 4,
+      members: [
+        { userId: "human_a", seat: 1 },
+        { userId: "bot_b", seat: 2 }
+      ],
+      seats: { human_a: 1, bot_b: 2 },
+      publicStacks: { human_a: 99, bot_b: 99 },
+      seatDetailsByUserId: {
+        human_a: { isBot: false, botProfile: null, leaveAfterHand: false },
+        bot_b: { isBot: true, botProfile: "NORMAL", leaveAfterHand: false }
+      },
+      pokerState: {
+        roomId: tableId,
+        handId: "hand_due_bot_timeout",
+        phase: "FLOP",
+        dealerSeatNo: 1,
+        turnUserId: "bot_b",
+        turnStartedAt: 1,
+        turnDeadlineAt: 2,
+        seats: [
+          { userId: "human_a", seatNo: 1, status: "ACTIVE", isBot: false },
+          { userId: "bot_b", seatNo: 2, status: "ACTIVE", isBot: true }
+        ],
+        handSeats: [
+          { userId: "human_a", seatNo: 1, status: "ACTIVE", isBot: false },
+          { userId: "bot_b", seatNo: 2, status: "ACTIVE", isBot: true }
+        ],
+        stacks: { human_a: 99, bot_b: 99 },
+        committedByUserId: { human_a: 0, bot_b: 0 },
+        contributionsByUserId: { human_a: 1, bot_b: 1 },
+        foldedByUserId: {},
+        leftTableByUserId: {},
+        sitOutByUserId: {},
+        pendingAutoSitOutByUserId: {},
+        community: ["2S", "7D", "9C"],
+        deck: ["AS", "KD"],
+        holeCardsByUserId: { human_a: ["AH", "AD"], bot_b: ["3C", "4C"] },
+        pot: 2,
+        potTotal: 2,
+        currentBet: 0,
+        minRaise: 2
+      }
+    },
+    presenceByUserId: new Map([
+      ["human_a", { userId: "human_a", seat: 1, connected: true, lastSeenAt: 1, expiresAt: null }],
+      ["bot_b", { userId: "bot_b", seat: 2, connected: false, lastSeenAt: 1, expiresAt: null }]
+    ])
+  });
+
+  assert.equal(restored.ok, true);
+  const due = tableManager.listDueTurnTimeouts({ nowMs });
+
+  assert.equal(due.length, 1);
+  assert.equal(due[0].tableId, tableId);
+  assert.equal(due[0].turnUserId, "bot_b");
+  assert.equal(due[0].isBotTurn, true);
+});
+
 test("maybeApplyTurnTimeout does nothing when deadline is unexpired", () => {
   const tableManager = createTableManager({ maxSeats: 4 });
   const wsA = fakeWs("timeout-noop-a");
