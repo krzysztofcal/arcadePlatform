@@ -12,6 +12,7 @@ import { makeBotUserId } from "../shared/poker-domain/bots.mjs";
 import { dealHoleCards, deriveDeck, toCardCodes } from "./poker/shared/poker-primitives.mjs";
 import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
 import { buildBootstrappedPokerState } from "./poker/engine/poker-engine.mjs";
+import { createTableManager } from "./poker/table/table-manager.mjs";
 
 const FIXED_RANDOM_BOT_AUTOPLAY_ADAPTER_URL = new URL(
   "./poker/runtime/accepted-bot-autoplay-adapter.fixed-random.fixture.mjs",
@@ -793,6 +794,262 @@ export function createInactiveCleanupExecutor({ env }) {
   }
 });
 
+test("accepted action that settles a hand schedules delayed rollover", async () => {
+  const secret = "act-settled-rollover-secret";
+  const tableId = "table_act_settled_rollover";
+  const actorUserId = "act_settled_actor";
+  const otherUserId = "act_settled_other";
+  const fixtureManager = createTableManager({ maxSeats: 6 });
+  const wsActor = new EventEmitter();
+  const wsOther = new EventEmitter();
+  wsActor.close = () => {};
+  wsOther.close = () => {};
+  assert.equal(fixtureManager.join({ ws: wsActor, userId: actorUserId, tableId, requestId: "join-actor", nowTs: 1 }).ok, true);
+  assert.equal(fixtureManager.join({ ws: wsOther, userId: otherUserId, tableId, requestId: "join-other", nowTs: 2 }).ok, true);
+  assert.equal(fixtureManager.bootstrapHand(tableId).ok, true);
+
+  let snapshot = fixtureManager.tableSnapshot(tableId, actorUserId);
+  assert.equal(fixtureManager.applyAction({ tableId, handId: snapshot.hand.handId, userId: actorUserId, requestId: "fixture-pre-call", action: "CALL", amount: 0 }).accepted, true);
+  snapshot = fixtureManager.tableSnapshot(tableId, otherUserId);
+  assert.equal(fixtureManager.applyAction({ tableId, handId: snapshot.hand.handId, userId: otherUserId, requestId: "fixture-flop-check-1", action: "CHECK", amount: 0 }).accepted, true);
+  assert.equal(fixtureManager.applyAction({ tableId, handId: snapshot.hand.handId, userId: actorUserId, requestId: "fixture-flop-check-2", action: "CHECK", amount: 0 }).accepted, true);
+  snapshot = fixtureManager.tableSnapshot(tableId, otherUserId);
+  assert.equal(fixtureManager.applyAction({ tableId, handId: snapshot.hand.handId, userId: otherUserId, requestId: "fixture-turn-check-1", action: "CHECK", amount: 0 }).accepted, true);
+  assert.equal(fixtureManager.applyAction({ tableId, handId: snapshot.hand.handId, userId: actorUserId, requestId: "fixture-turn-check-2", action: "CHECK", amount: 0 }).accepted, true);
+  snapshot = fixtureManager.tableSnapshot(tableId, otherUserId);
+  assert.equal(snapshot.hand.status, "RIVER");
+  assert.equal(fixtureManager.applyAction({ tableId, handId: snapshot.hand.handId, userId: otherUserId, requestId: "fixture-river-check-1", action: "CHECK", amount: 0 }).accepted, true);
+  const riverState = fixtureManager.persistedPokerState(tableId);
+  const riverVersion = fixtureManager.persistedStateVersion(tableId);
+  assert.equal(riverState.phase, "RIVER");
+  assert.equal(riverState.turnUserId, actorUserId);
+
+  const { dir, filePath } = await writePersistedFile({
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+        seatRows: [
+          { user_id: actorUserId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: Number(riverState.stacks?.[actorUserId] ?? 0) },
+          { user_id: otherUserId, seat_no: 2, status: "ACTIVE", is_bot: false, stack: Number(riverState.stacks?.[otherUserId] ?? 0) }
+        ],
+        stateRow: { version: riverVersion, state: riverState }
+      }
+    }
+  });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_POKER_SETTLED_REVEAL_MS: "500",
+      WS_TIMEOUT_SWEEP_MS: "60000",
+      WS_ZOMBIE_TABLE_SWEEP_MS: "60000",
+      WS_OPEN_TABLE_JANITOR_SWEEP_MS: "60000"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const serverLogs = [];
+    child.stdout.on("data", (buf) => {
+      const text = String(buf || "");
+      if (text.includes("ws_settled_rollover") || text.includes("ws_state_persist") || text.includes("ws_bot_autoplay")) {
+        serverLogs.push(text.trim());
+      }
+    });
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: actorUserId }), "auth-act-settled-rollover");
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "sub-act-settled-rollover",
+      ts: "2026-04-14T10:00:00Z",
+      payload: { tableId }
+    });
+    await nextMessageOfType(ws, "table_state");
+    sendFrame(ws, {
+      version: "1.0",
+      type: "act",
+      requestId: "act-settle-rollover",
+      ts: new Date().toISOString(),
+      payload: { tableId, handId: riverState.handId, action: "check" }
+    });
+    const actAck = await nextCommandResultForRequest(ws, "act-settle-rollover");
+    assert.equal(actAck.payload.status, "accepted");
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    const settled = await readPersistedFile(filePath);
+    assert.equal(settled.tables[tableId].stateRow.state.phase, "SETTLED", JSON.stringify(settled.tables[tableId].stateRow.state.handSettlement));
+
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    const rolled = await readPersistedFile(filePath);
+    assert.equal(rolled.tables[tableId].stateRow.state.phase, "PREFLOP", `${JSON.stringify(settled.tables[tableId].stateRow.state.handSettlement)}\n${serverLogs.join("\n")}`);
+    assert.equal(rolled.tables[tableId].stateRow.version > settled.tables[tableId].stateRow.version, true);
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("disconnect cleanup defers fresh settled reveal and can close after reveal grace", async () => {
+  const secret = "disconnect-settled-reveal-secret";
+  const tableId = "table_disconnect_settled_reveal";
+  const humanUserId = "disconnect_settled_human";
+  const botUserId = makeBotUserId(tableId, 2);
+  const settledAtIso = new Date(Date.now() + 2_000).toISOString();
+  const settledRevealState = {
+    tableId,
+    roomId: tableId,
+    handId: "hand_disconnect_settled_reveal",
+    phase: "SETTLED",
+    dealerSeatNo: 1,
+    seats: [
+      { userId: humanUserId, seatNo: 1, status: "ACTIVE" },
+      { userId: botUserId, seatNo: 2, status: "ACTIVE", isBot: true }
+    ],
+    stacks: { [humanUserId]: 112, [botUserId]: 88 },
+    showdown: {
+      handId: "hand_disconnect_settled_reveal",
+      winners: [humanUserId],
+      reason: "computed"
+    },
+    handSettlement: {
+      handId: "hand_disconnect_settled_reveal",
+      settledAt: settledAtIso,
+      payouts: { [humanUserId]: 12 }
+    },
+    turnUserId: null,
+    turnStartedAt: null,
+    turnDeadlineAt: null
+  };
+  const { dir, filePath } = await writePersistedFile({
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+        seatRows: [
+          { user_id: humanUserId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 },
+          { user_id: botUserId, seat_no: 2, status: "ACTIVE", is_bot: true, stack: 100, bot_profile: "NORMAL" }
+        ],
+        stateRow: {
+          version: 19,
+          state: settledRevealState
+        }
+      }
+    }
+  });
+  const cleanupModule = await writeTestModule(`
+import fs from "node:fs/promises";
+export function createInactiveCleanupExecutor({ env }) {
+  return async ({ tableId }) => {
+    const raw = await fs.readFile(env.WS_PERSISTED_STATE_FILE, "utf8");
+    const doc = JSON.parse(raw || "{}");
+    const table = doc?.tables?.[tableId];
+    if (!table) return { ok: true, changed: false, status: "seat_missing", retryable: false };
+    table.tableRow = { ...(table.tableRow || {}), status: "CLOSED" };
+    table.seatRows = (Array.isArray(table.seatRows) ? table.seatRows : []).map((row) => ({ ...row, status: "INACTIVE", stack: 0 }));
+    table.stateRow = {
+      ...(table.stateRow || { version: 0 }),
+      version: Number(table?.stateRow?.version || 0) + 1,
+      state: {
+        ...(table?.stateRow?.state || {}),
+        phase: "HAND_DONE",
+        handId: "",
+        handSeed: "",
+        showdown: null,
+        community: [],
+        communityDealt: 0,
+        pot: 0,
+        potTotal: 0,
+        sidePots: [],
+        turnUserId: null,
+        turnStartedAt: null,
+        turnDeadlineAt: null,
+        currentBet: 0,
+        toCallByUserId: {},
+        betThisRoundByUserId: {},
+        actedThisRoundByUserId: {},
+        stacks: {}
+      }
+    };
+    await fs.writeFile(env.WS_PERSISTED_STATE_FILE, JSON.stringify(doc) + "\\n", "utf8");
+    return { ok: true, changed: true, status: "cleaned_closed", closed: true, retryable: false };
+  };
+}
+`, "inactive-cleanup-disconnect-settled-reveal.mjs");
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_INACTIVE_CLEANUP_ADAPTER_MODULE_PATH: cleanupModule.filePath,
+      WS_POKER_SETTLED_REVEAL_MS: "400",
+      WS_SEATED_RECONNECT_GRACE_MS: "0",
+      WS_DISCONNECT_CLEANUP_SWEEP_MS: "20",
+      WS_TIMEOUT_SWEEP_MS: "60000",
+      WS_ZOMBIE_TABLE_SWEEP_MS: "60000",
+      WS_OPEN_TABLE_JANITOR_SWEEP_MS: "60000"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const logs = [];
+    child.stdout.on("data", (buf) => {
+      const text = String(buf || "");
+      if (
+        text.includes("ws_disconnect_cleanup")
+        || text.includes("ws_table_janitor")
+        || text.includes("ws_settled_rollover")
+        || text.includes("ws_settled_reveal_pending_check")
+      ) {
+        logs.push(text.trim());
+      }
+    });
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: humanUserId }), "auth-disconnect-settled-reveal");
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "join-disconnect-settled-reveal",
+      ts: "2026-04-14T10:05:00Z",
+      payload: { tableId }
+    });
+    const initial = await nextCommandResultForRequest(ws, "join-disconnect-settled-reveal");
+    assert.equal(initial.payload.status, "accepted");
+    await nextMessageOfType(ws, "table_state");
+    const resetToSettled = await readPersistedFile(filePath);
+    resetToSettled.tables[tableId].tableRow.status = "OPEN";
+    resetToSettled.tables[tableId].stateRow = {
+      version: Number(resetToSettled.tables[tableId].stateRow.version || 0) + 1,
+      state: settledRevealState
+    };
+    await fs.writeFile(filePath, `${JSON.stringify(resetToSettled)}\n`, "utf8");
+    const closed = new Promise((resolve) => ws.once("close", resolve));
+    ws.close();
+    await closed;
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const duringReveal = await readPersistedFile(filePath);
+    assert.equal(duringReveal.tables[tableId].tableRow.status, "OPEN", logs.join("\n"));
+    assert.equal(duringReveal.tables[tableId].stateRow.state.phase, "SETTLED");
+    assert.equal(logs.some((line) => line.includes("ws_disconnect_cleanup_settled_reveal_deferred")), true);
+
+    await new Promise((resolve) => setTimeout(resolve, 2600));
+    const afterReveal = await readPersistedFile(filePath);
+    assert.equal(afterReveal.tables[tableId].tableRow.status, "CLOSED");
+    assert.equal(afterReveal.tables[tableId].stateRow.state.phase, "HAND_DONE");
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(cleanupModule.dir, { recursive: true, force: true });
+  }
+});
+
 test("server supports healthz and hello/helloAck smoke flow", async () => {
   const { port, child } = await createServer();
 
@@ -1218,11 +1475,11 @@ test("table_leave rejects when authoritative success state still contains actor 
     await auth(other, keepToken, "auth-leave-still-present-keep");
 
     sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-still-present-actor", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
-    await nextMessageOfType(actor, "commandResult");
-    await nextMessageOfType(actor, "table_state");
+    await nextCommandResultForRequest(actor, "join-leave-still-present-actor");
+    await nextJoinTableState(actor, { requestId: "join-leave-still-present-actor", tableId });
     sendFrame(other, { version: "1.0", type: "table_join", requestId: "join-leave-still-present-keep", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
-    const otherJoinAck = await nextMessageOfType(other, "commandResult");
-    await nextMessageOfType(other, "table_state");
+    const otherJoinAck = await nextCommandResultForRequest(other, "join-leave-still-present-keep");
+    await nextJoinTableState(other, { requestId: "join-leave-still-present-keep", tableId });
     assert.equal(otherJoinAck.payload.status, "accepted");
 
     sendFrame(actor, { version: "1.0", type: "table_leave", requestId: "leave-still-present", ts: "2026-02-28T00:00:03Z", payload: { tableId } });
@@ -1666,14 +1923,15 @@ test("resume outside replay window triggers deterministic resync plus fresh snap
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-r1", ts: "2026-02-28T00:00:01Z", payload: { tableId: "table_resume" } });
     const first = await nextMessageOfType(ws, "table_state");
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-r1", ts: "2026-02-28T00:00:02Z", payload: { tableId: "table_resume", view: "snapshot" } });
-    await nextMessageOfType(ws, "stateSnapshot");
+    await nextMessageForRequest(ws, { type: "stateSnapshot", requestId: "snap-r1" });
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-r2", ts: "2026-02-28T00:00:03Z", payload: { tableId: "table_resume", view: "snapshot" } });
-    await nextMessageOfType(ws, "stateSnapshot");
+    await nextMessageForRequest(ws, { type: "stateSnapshot", requestId: "snap-r2" });
     ws.close();
 
     const ws2 = await connectClient(port);
     await hello(ws2);
     await auth(ws2, makeHs256Jwt({ secret, sub: "user_resume" }), "auth-r2");
+    const resumeMessages = nextNMessages(ws2, 2, 10000);
     sendFrame(ws2, {
       version: "1.0",
       type: "resume",
@@ -1683,8 +1941,7 @@ test("resume outside replay window triggers deterministic resync plus fresh snap
       payload: { tableId: "table_resume", sessionId: helloAck.payload.sessionId, lastSeq: 0 }
     });
 
-    const resync = await nextMessageOfType(ws2, "resync");
-    const snapshot = await nextMessageOfType(ws2, "stateSnapshot");
+    const [resync, snapshot] = await resumeMessages;
     assert.equal(resync.payload.mode, "required");
     assert.equal(snapshot.type, "stateSnapshot");
     ws2.close();
@@ -4510,23 +4767,26 @@ test("WS act persists state to file-backed optimistic store", async () => {
     await auth(ws, makeHs256Jwt({ secret, sub: "seat_actor" }), "auth-persist");
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-persist", ts: "2026-02-28T02:00:00Z", payload: { tableId } });
-    const joinAck_join_persist = await nextMessageOfType(ws, "commandResult");
-    await nextMessageOfType(ws, "table_state");
+    const joinAck_join_persist = await nextCommandResultForRequest(ws, "join-persist");
+    await nextJoinTableState(ws, { requestId: "join-persist", tableId });
     assert.equal(joinAck_join_persist.payload.requestId, "join-persist");
     assert.equal(joinAck_join_persist.payload.status, "accepted");
 
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-persist", ts: "2026-02-28T02:00:01Z", payload: { tableId, view: "snapshot" } });
-    const baseline = await nextMessageOfType(ws, "stateSnapshot");
+    const baseline = await nextMessageForRequest(ws, { type: "stateSnapshot", requestId: "snap-persist" });
     const handId = baseline.payload.public.hand.handId;
 
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-persist", ts: "2026-02-28T02:00:02Z", payload: { tableId, handId, action: "fold" } });
-    const result = await nextMessageOfType(ws, "commandResult");
+    const result = await nextCommandResultForRequest(ws, "act-persist");
     assert.equal(result.payload.status, "accepted");
-    const post = await nextStateUpdate(ws, { baseline: baseline.payload, timeoutMs: 4000 });
-    assert.equal(post.payload.stateVersion > baseline.payload.stateVersion, true);
+    await nextStateUpdate(ws, { baseline: baseline.payload, timeoutMs: 4000 });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-persist-after", ts: "2026-02-28T02:00:03Z", payload: { tableId, view: "snapshot" } });
+    const afterPersist = await nextMessageForRequest(ws, { type: "stateSnapshot", requestId: "snap-persist-after" });
+    assert.equal(afterPersist.payload.stateVersion > baseline.payload.stateVersion, true);
 
     const persisted = await readPersistedFile(filePath);
-    assert.equal(persisted.tables[tableId].stateRow.version, post.payload.stateVersion);
+    assert.equal(persisted.tables[tableId].stateRow.version, afterPersist.payload.stateVersion);
     assert.equal(typeof persisted.tables[tableId].lastActivityAt, "string");
 
     ws.close();
@@ -4612,6 +4872,7 @@ export function createInactiveCleanupExecutor({ env }) {
       WS_SEATED_RECONNECT_GRACE_MS: "0",
       WS_DISCONNECT_CLEANUP_SWEEP_MS: "25",
       WS_TIMEOUT_SWEEP_MS: "20",
+      WS_POKER_SETTLED_REVEAL_MS: "0",
       WS_INACTIVE_CLEANUP_ADAPTER_MODULE_PATH: `file://${cleanupModule.filePath}`
     }
   });
@@ -5020,7 +5281,7 @@ test("WS act optimistic conflict returns deterministic rejection and restored sn
     assert.equal(joinAck_join_conflict.payload.requestId, "join-conflict");
     assert.equal(joinAck_join_conflict.payload.status, "accepted");
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-conflict", ts: "2026-02-28T02:10:01Z", payload: { tableId, view: "snapshot" } });
-    const baseline = await nextMessageOfType(ws, "stateSnapshot");
+    const baseline = await nextMessageForRequest(ws, { type: "stateSnapshot", requestId: "snap-conflict" });
     const handId = baseline.payload.public.hand.handId;
 
     const forced = await readPersistedFile(filePath);
@@ -5028,26 +5289,20 @@ test("WS act optimistic conflict returns deterministic rejection and restored sn
     await fs.writeFile(filePath, `${JSON.stringify(forced)}
 `, "utf8");
 
+    const conflictMessages = nextNMessages(ws, 2, 10000);
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-conflict", ts: "2026-02-28T02:10:02Z", payload: { tableId, handId, action: "fold" } });
-    let rejected = null;
-    let restored = null;
-    let highestSnapshotVersion = 0;
-    const conflictDeadline = Date.now() + 10000;
-    while ((!rejected || !restored) && Date.now() < conflictDeadline) {
-      const remaining = Math.max(50, conflictDeadline - Date.now());
-      const frame = await nextMessage(ws, remaining);
-      if (!rejected && frame?.type === "commandResult") {
-        rejected = frame;
-        continue;
-      }
-      if (frame?.type === "stateSnapshot") {
-        const version = Number(frame?.payload?.stateVersion || 0);
-        if (version > highestSnapshotVersion) highestSnapshotVersion = version;
-        if (!restored && version === forced.tables[tableId].stateRow.version) {
-          restored = frame;
-        }
-      }
-    }
+    const frames = await conflictMessages;
+    const rejected = frames.find((frame) => frame?.type === "commandResult") ?? null;
+    const restored = frames.find((frame) => (
+      frame?.type === "stateSnapshot"
+      && Number(frame?.payload?.stateVersion || 0) === forced.tables[tableId].stateRow.version
+    )) ?? null;
+    const highestSnapshotVersion = Math.max(
+      0,
+      ...frames
+        .filter((frame) => frame?.type === "stateSnapshot")
+        .map((frame) => Number(frame?.payload?.stateVersion || 0))
+    );
     assert.ok(rejected, "expected commandResult after optimistic conflict");
     assert.ok(restored, `expected restored stateSnapshot after optimistic conflict (max_seen=${highestSnapshotVersion})`);
     assert.equal(rejected.payload.status, "rejected");
@@ -5056,7 +5311,7 @@ test("WS act optimistic conflict returns deterministic rejection and restored sn
     assert.equal(restored.payload.stateVersion, forced.tables[tableId].stateRow.version);
 
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-conflict-after", ts: "2026-02-28T02:10:03Z", payload: { tableId, view: "snapshot" } });
-    const afterConflict = await nextMessageOfType(ws, "stateSnapshot");
+    const afterConflict = await nextMessageForRequest(ws, { type: "stateSnapshot", requestId: "snap-conflict-after" });
     assert.equal(afterConflict.payload.stateVersion, forced.tables[tableId].stateRow.version);
 
     ws.close();
