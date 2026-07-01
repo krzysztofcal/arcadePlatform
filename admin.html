@@ -134,6 +134,7 @@
               <button class="admin-tab is-active" id="adminTabButtonUsers" type="button" role="tab" data-admin-tab="users" aria-selected="true" aria-controls="adminTabUsers" tabindex="0">Users</button>
               <button class="admin-tab" id="adminTabButtonTables" type="button" role="tab" data-admin-tab="tables" aria-selected="false" aria-controls="adminTabTables" tabindex="-1">Tables</button>
               <button class="admin-tab" id="adminTabButtonLedger" type="button" role="tab" data-admin-tab="ledger" aria-selected="false" aria-controls="adminTabLedger" tabindex="-1">Ledger</button>
+              <button class="admin-tab" id="adminTabButtonPokerAudit" type="button" role="tab" data-admin-tab="pokerAudit" aria-selected="false" aria-controls="adminTabPokerAudit" tabindex="-1">Poker Audit</button>
               <button class="admin-tab" id="adminTabButtonOps" type="button" role="tab" data-admin-tab="ops" aria-selected="false" aria-controls="adminTabOps" tabindex="-1">Ops</button>
             </div>
           </section>
@@ -425,6 +426,69 @@
                 <div class="admin-detail" id="adminLedgerDetail">
                   <h2 class="xp-card__title" id="adminLedgerSideTitle">Ledger context</h2>
                   <p class="admin-empty">Use quick filters, copy helpers, or jump from a user row to narrow this audit trail.</p>
+                </div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="admin-tab-panel" id="adminTabPokerAudit" data-admin-panel="pokerAudit" role="tabpanel" aria-labelledby="adminTabButtonPokerAudit" hidden>
+            <div class="admin-workspace">
+              <section class="xp-card admin-card admin-card--main" aria-labelledby="adminPokerAuditTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminPokerAuditTitle">Poker Audit</h2>
+                    <p class="admin-card__subtitle">Read-only hand audit from persisted poker_actions rows.</p>
+                  </div>
+                  <div class="admin-card__actions">
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminPokerAuditRefresh">Search again</button>
+                  </div>
+                </div>
+                <form class="admin-filter-grid" id="adminPokerAuditFilters">
+                  <label class="admin-field">
+                    <span class="admin-field__label">Table ID</span>
+                    <input class="admin-input" type="search" name="tableId" placeholder="Full or partial tableId">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Hand ID</span>
+                    <input class="admin-input" type="search" name="handId" placeholder="Exact handId">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Limit</span>
+                    <select class="admin-input" name="limit">
+                      <option value="20">20</option>
+                      <option value="50">50</option>
+                      <option value="100">100</option>
+                    </select>
+                  </label>
+                  <div class="admin-filter-actions">
+                    <button class="admin-btn admin-btn--primary" type="submit">Search</button>
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminPokerAuditReset">Reset</button>
+                  </div>
+                </form>
+                <div class="admin-table-wrap">
+                  <table class="admin-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Time</th>
+                        <th scope="col">Table</th>
+                        <th scope="col">Hand</th>
+                        <th scope="col">Actions</th>
+                        <th scope="col">Winner(s)</th>
+                        <th scope="col">Pot</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Details</th>
+                      </tr>
+                    </thead>
+                    <tbody id="adminPokerAuditBody"></tbody>
+                  </table>
+                </div>
+                <p class="admin-empty" id="adminPokerAuditEmpty">Enter a tableId or handId to search poker audit rows.</p>
+              </section>
+
+              <aside class="xp-card admin-card admin-card--detail" aria-labelledby="adminPokerAuditDetailTitle">
+                <div class="admin-detail" id="adminPokerAuditDetail">
+                  <h2 class="xp-card__title" id="adminPokerAuditDetailTitle">Hand audit</h2>
+                  <p class="admin-empty">Select a hand to inspect actions, board, payouts, pots, and evaluated hands.</p>
                 </div>
               </aside>
             </div>

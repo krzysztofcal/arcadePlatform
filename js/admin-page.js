@@ -36,6 +36,12 @@
       summary: null,
       loaded: false,
     },
+    pokerAudit: {
+      filters: { limit: "20" },
+      items: [],
+      selectedHand: null,
+      loaded: false,
+    },
     draftIdempotencyKeys: {},
   };
 
@@ -86,6 +92,12 @@
     nodes.ledgerReset = doc.getElementById("adminLedgerReset");
     nodes.ledgerRecentAdmin = doc.getElementById("adminLedgerRecentAdmin");
     nodes.ledgerQuickButtons = Array.prototype.slice.call(doc.querySelectorAll("[data-ledger-quick]"));
+    nodes.pokerAuditFilters = doc.getElementById("adminPokerAuditFilters");
+    nodes.pokerAuditBody = doc.getElementById("adminPokerAuditBody");
+    nodes.pokerAuditEmpty = doc.getElementById("adminPokerAuditEmpty");
+    nodes.pokerAuditDetail = doc.getElementById("adminPokerAuditDetail");
+    nodes.pokerAuditRefresh = doc.getElementById("adminPokerAuditRefresh");
+    nodes.pokerAuditReset = doc.getElementById("adminPokerAuditReset");
     nodes.opsStats = doc.getElementById("adminOpsStats");
     nodes.opsRuntime = doc.getElementById("adminOpsRuntime");
     nodes.opsRefresh = doc.getElementById("adminOpsRefresh");
@@ -526,6 +538,112 @@
     nodes.ledgerDetail.innerHTML = html.join("");
   }
 
+  function joinList(values){
+    if (!Array.isArray(values) || !values.length) return "—";
+    return values.map(function(value){ return String(value == null ? "" : value); }).filter(Boolean).join(", ") || "—";
+  }
+
+  function renderCardCodes(cards){
+    if (!Array.isArray(cards) || !cards.length) return '<p class="admin-empty">No board recorded.</p>';
+    return '<div class="admin-inline-actions">' + cards.map(function(card){
+      return '<span class="admin-pill admin-mono">' + escapeHtml(card) + "</span>";
+    }).join("") + "</div>";
+  }
+
+  function renderPokerAudit(){
+    var items = state.pokerAudit.items || [];
+    if (nodes.pokerAuditBody){
+      nodes.pokerAuditBody.innerHTML = items.map(function(item){
+        return [
+          "<tr>",
+          "<td>" + escapeHtml(formatTimestamp(item.settledAt || item.startedAt)) + "</td>",
+          '<td class="admin-mono">' + escapeHtml(item.tableId || "—") + "</td>",
+          '<td class="admin-mono">' + escapeHtml(item.handId || "—") + "</td>",
+          "<td>" + escapeHtml(formatAmount(item.actionCount)) + "</td>",
+          "<td>" + escapeHtml(joinList(item.winnerUserIds || [])) + "</td>",
+          "<td>" + escapeHtml(formatAmount(item.potTotal)) + "</td>",
+          "<td>" + (item.hasSettlement ? pill("Settled", "success") : pill("Settlement missing", "danger")) + "</td>",
+          '<td><button class="admin-btn admin-btn--ghost" type="button" data-audit-action="details" data-audit-table-id="' + escapeHtml(item.tableId || "") + '" data-audit-hand-id="' + escapeHtml(item.handId || "") + '">Details</button></td>',
+          "</tr>"
+        ].join("");
+      }).join("");
+    }
+    if (nodes.pokerAuditEmpty){
+      nodes.pokerAuditEmpty.textContent = state.pokerAudit.loaded ? "No poker audit hands matched the current filters." : "Enter a tableId or handId to search poker audit rows.";
+    }
+    setVisible(nodes.pokerAuditEmpty, items.length === 0);
+    renderPokerAuditDetail();
+  }
+
+  function renderPokerAuditDetail(){
+    if (!nodes.pokerAuditDetail) return;
+    var hand = state.pokerAudit.selectedHand;
+    if (!hand){
+      nodes.pokerAuditDetail.innerHTML = '<h2 class="xp-card__title">Hand audit</h2><p class="admin-empty">Select a hand to inspect actions, board, payouts, pots, and evaluated hands.</p>';
+      return;
+    }
+    var settlement = hand.settlement || null;
+    var payouts = settlement && settlement.payoutByUserId ? settlement.payoutByUserId : {};
+    var payoutRows = Object.keys(payouts).sort().map(function(userId){
+      return { title: escapeHtml(userId), meta: escapeHtml("payout " + formatAmount(payouts[userId])) };
+    });
+    var potRows = settlement && Array.isArray(settlement.potsAwarded) ? settlement.potsAwarded.map(function(pot){
+      return {
+        title: escapeHtml("pot " + formatAmount(pot && pot.amount)),
+        meta: escapeHtml("eligible " + joinList(pot && pot.eligibleUserIds || []) + " · winners " + joinList(pot && pot.winners || [])),
+      };
+    }) : [];
+    var evaluatedRows = settlement && Array.isArray(settlement.evaluatedHands) ? settlement.evaluatedHands.map(function(item){
+      var label = item && (item.name || item.category != null) ? ((item.name || "category") + (item.category != null ? " · " + item.category : "")) : "evaluated";
+      return {
+        title: escapeHtml((item && item.userId || "user") + " · " + label),
+        meta: escapeHtml("ranks " + joinList(item && item.ranks || []) + " · best " + joinList(item && item.bestFiveCards || [])),
+      };
+    }) : [];
+    var actionRows = Array.isArray(hand.actions) ? hand.actions : [];
+    var html = [];
+    html.push('<h2 class="xp-card__title">Hand audit</h2>');
+    html.push('<div class="admin-surface">');
+    html.push('<div class="admin-list__title"><span class="admin-mono">' + escapeHtml(hand.handId || "—") + "</span>" + (hand.hasSettlement ? pill("Settled", "success") : pill("Settlement missing", "danger")) + "</div>");
+    html.push('<div class="admin-list__meta admin-mono">' + escapeHtml(hand.tableId || "—") + "</div>");
+    html.push("</div>");
+    html.push('<div class="admin-kv">');
+    html.push(renderKvRow("tableId", hand.tableId || "—"));
+    html.push(renderKvRow("handId", hand.handId || "—"));
+    html.push(renderKvRow("Started", formatTimestamp(hand.startedAt)));
+    html.push(renderKvRow("Settled", settlement ? formatTimestamp(settlement.settledAt || hand.settledAt) : "Settlement missing"));
+    html.push(renderKvRow("Reason", settlement && settlement.reason ? settlement.reason : "—"));
+    html.push(renderKvRow("Total payout", settlement ? formatAmount(settlement.payoutTotal) : "—"));
+    html.push("</div>");
+    html.push('<div><h3 class="admin-section-title">Board</h3>' + renderCardCodes(settlement && settlement.communityCards || []) + "</div>");
+    html.push('<div><h3 class="admin-section-title">Winners / payouts</h3>' + renderMiniList(payoutRows) + "</div>");
+    html.push('<div><h3 class="admin-section-title">Pots</h3>' + renderMiniList(potRows) + "</div>");
+    html.push('<div><h3 class="admin-section-title">Evaluated hands</h3>' + renderMiniList(evaluatedRows) + "</div>");
+    html.push('<div><h3 class="admin-section-title">Action timeline</h3>');
+    if (!actionRows.length){
+      html.push('<p class="admin-empty">No actions found.</p>');
+    } else {
+      html.push('<div class="admin-table-wrap"><table class="admin-table"><thead><tr><th scope="col">Version</th><th scope="col">Phase</th><th scope="col">Source</th><th scope="col">User</th><th scope="col">Action</th><th scope="col">Amount</th><th scope="col">Pot</th><th scope="col">Stack</th></tr></thead><tbody>');
+      html.push(actionRows.map(function(action){
+        return [
+          "<tr>",
+          "<td>" + escapeHtml(action.version == null ? "—" : action.version) + "</td>",
+          "<td>" + escapeHtml((action.phaseFrom || "—") + " → " + (action.phaseTo || "—")) + "</td>",
+          "<td>" + escapeHtml(action.source || "—") + "</td>",
+          '<td class="admin-mono">' + escapeHtml(action.userId || "—") + "</td>",
+          "<td>" + escapeHtml(action.actionType || "—") + "</td>",
+          "<td>" + escapeHtml(formatAmount(action.amount)) + "</td>",
+          "<td>" + escapeHtml(formatAmount(action.potTotalBefore) + " → " + formatAmount(action.potTotalAfter)) + "</td>",
+          "<td>" + escapeHtml(formatAmount(action.actorStackBefore) + " → " + formatAmount(action.actorStackAfter)) + "</td>",
+          "</tr>"
+        ].join("");
+      }).join(""));
+      html.push("</tbody></table></div>");
+    }
+    html.push("</div>");
+    nodes.pokerAuditDetail.innerHTML = html.join("");
+  }
+
   function renderOps(){
     var summary = state.ops.summary;
     if (!summary){
@@ -658,6 +776,7 @@
     if (tab === "users" && !state.users.loaded) loadUsers();
     if (tab === "tables" && !state.tables.loaded) loadTables();
     if (tab === "ledger" && !state.ledger.loaded) loadLedger();
+    if (tab === "pokerAudit") renderPokerAudit();
     if (tab === "ops") loadOps();
   }
 
@@ -839,6 +958,43 @@
     }
   }
 
+  async function loadPokerAudit(options){
+    var opts = options || {};
+    if (opts.filters){
+      state.pokerAudit.filters = opts.filters;
+    }
+    var filters = state.pokerAudit.filters || {};
+    if (!filters.tableId && !filters.handId){
+      state.pokerAudit.items = [];
+      state.pokerAudit.selectedHand = null;
+      state.pokerAudit.loaded = false;
+      renderPokerAudit();
+      setStatus("Enter a tableId or handId.", "error");
+      return;
+    }
+    setStatus(t("loading", "Loading..."), "info");
+    try {
+      var payload = await apiFetch("/.netlify/functions/admin-poker-audit" + buildQuery(filters), { method: "GET" });
+      state.pokerAudit.items = payload.hands || [];
+      state.pokerAudit.selectedHand = payload.selectedHand || opts.selectedHand || null;
+      state.pokerAudit.loaded = true;
+      renderPokerAudit();
+      setStatus("", "");
+    } catch (err){
+      handleApiError(err, "Could not load poker audit.");
+    }
+  }
+
+  async function loadPokerAuditHand(tableId, handId){
+    if (!handId) return;
+    var filters = {
+      tableId: tableId || "",
+      handId: handId,
+      limit: state.pokerAudit.filters && state.pokerAudit.filters.limit ? state.pokerAudit.filters.limit : "20"
+    };
+    await loadPokerAudit({ filters: filters });
+  }
+
   async function submitAdjustForm(event){
     event.preventDefault();
     if (!state.users.detail || !state.users.detail.user){
@@ -954,6 +1110,13 @@
     loadLedger();
   }
 
+  function handlePokerAuditSubmit(event){
+    event.preventDefault();
+    state.pokerAudit.filters = formToObject(nodes.pokerAuditFilters);
+    if (!state.pokerAudit.filters.limit) state.pokerAudit.filters.limit = "20";
+    loadPokerAudit();
+  }
+
   function resetForm(form, defaults){
     if (!form) return;
     form.reset();
@@ -1023,6 +1186,13 @@
     runTableAction(tableId, action);
   }
 
+  function handleAuditAction(action, tableId, handId){
+    if (action === "details"){
+      setActiveTab("pokerAudit");
+      loadPokerAuditHand(tableId, handId);
+    }
+  }
+
   function handleTabClick(event){
     if (event && typeof event.preventDefault === "function"){
       event.preventDefault();
@@ -1070,8 +1240,10 @@
     if (nodes.usersFilters) nodes.usersFilters.addEventListener("submit", handleUsersSubmit);
     if (nodes.tablesFilters) nodes.tablesFilters.addEventListener("submit", handleTablesSubmit);
     if (nodes.ledgerFilters) nodes.ledgerFilters.addEventListener("submit", handleLedgerSubmit);
+    if (nodes.pokerAuditFilters) nodes.pokerAuditFilters.addEventListener("submit", handlePokerAuditSubmit);
     if (nodes.usersRefresh) nodes.usersRefresh.addEventListener("click", function(){ loadUsers(); });
     if (nodes.tablesRefresh) nodes.tablesRefresh.addEventListener("click", function(){ loadTables(); });
+    if (nodes.pokerAuditRefresh) nodes.pokerAuditRefresh.addEventListener("click", function(){ loadPokerAudit(); });
     if (nodes.opsRefresh) nodes.opsRefresh.addEventListener("click", function(){ loadOps(); });
     if (nodes.usersReset) nodes.usersReset.addEventListener("click", function(){
       resetForm(nodes.usersFilters, { sort: "last_activity_desc" });
@@ -1091,6 +1263,15 @@
       state.ledger.page = 1;
       state.ledger.contextLabel = "";
       loadLedger();
+    });
+    if (nodes.pokerAuditReset) nodes.pokerAuditReset.addEventListener("click", function(){
+      resetForm(nodes.pokerAuditFilters, { limit: "20" });
+      state.pokerAudit.filters = { limit: "20" };
+      state.pokerAudit.items = [];
+      state.pokerAudit.selectedHand = null;
+      state.pokerAudit.loaded = false;
+      renderPokerAudit();
+      setStatus("", "");
     });
     if (nodes.ledgerRecentAdmin) nodes.ledgerRecentAdmin.addEventListener("click", function(){
       state.ledger.filters = { adminOnly: "1" };
@@ -1129,6 +1310,11 @@
       var tableButton = closestEventTarget(event.target, "[data-table-action]");
       if (tableButton){
         handleTableAction(tableButton.getAttribute("data-table-action"), tableButton.getAttribute("data-table-id"));
+        return;
+      }
+      var auditButton = closestEventTarget(event.target, "[data-audit-action]");
+      if (auditButton){
+        handleAuditAction(auditButton.getAttribute("data-audit-action"), auditButton.getAttribute("data-audit-table-id"), auditButton.getAttribute("data-audit-hand-id"));
         return;
       }
       var adjustButton = closestEventTarget(event.target, "[data-adjust-amount]");
@@ -1175,6 +1361,7 @@
       state.users.detail = null;
       state.tables.detail = null;
       state.ledger.contextLabel = "";
+      state.pokerAudit.selectedHand = null;
       checkAccess();
     });
   }
@@ -1184,6 +1371,7 @@
     renderTabs();
     applyFiltersToForm(nodes.usersFilters, state.users.filters);
     applyFiltersToForm(nodes.tablesFilters, state.tables.filters);
+    applyFiltersToForm(nodes.pokerAuditFilters, state.pokerAudit.filters);
     wireStaticEvents();
     wireAuthChanges();
     checkAccess();
