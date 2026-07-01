@@ -271,6 +271,20 @@ async function nextAdvancedStateUpdate(ws, { baseline, timeoutMs = 10000 } = {})
   }
 }
 
+async function nextStateSnapshotAtLeast(ws, { stateVersion, timeoutMs = 10000 } = {}) {
+  const started = Date.now();
+  while (true) {
+    const remainingMs = timeoutMs - (Date.now() - started);
+    if (remainingMs <= 0) {
+      throw new Error(`Timed out waiting for stateSnapshot at version ${stateVersion}`);
+    }
+    const frame = await nextMessage(ws, remainingMs);
+    if (frame?.type === "stateSnapshot" && Number(frame?.payload?.stateVersion) >= Number(stateVersion)) {
+      return frame;
+    }
+  }
+}
+
 async function waitForHumanTurn(ws, { userId, baseline, timeoutMs = 5000 }) {
   let current = baseline;
   if (current?.public?.turn?.userId === userId) {
@@ -553,7 +567,10 @@ test("authoritative WS table_join can progress through human act and bot timeout
       ts: "2026-02-28T06:20:03Z",
       payload: { tableId, view: "snapshot" }
     });
-    const postAutoplaySnapshot = await nextMessageOfType(ws, "stateSnapshot");
+    const postAutoplaySnapshot = await nextStateSnapshotAtLeast(ws, {
+      stateVersion: afterBotAutoplay.payload.stateVersion,
+      timeoutMs: 5000
+    });
     assert.equal(postAutoplaySnapshot.payload.stateVersion >= afterBotAutoplay.payload.stateVersion, true);
     assert.equal(typeof postAutoplaySnapshot.payload.public.hand.handId, "string");
     const postAutoplayHumanTurn = await waitForHumanTurn(ws, {
