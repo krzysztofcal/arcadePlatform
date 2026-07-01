@@ -18,7 +18,7 @@ function createAcceptedBotAutoplayExecutor(options = {}) {
   };
   return createAcceptedBotAutoplayExecutorBase({
     sleep: async () => {},
-    random: () => 0,
+    random: () => 0.5,
     ...options,
     env: mergedEnv
   });

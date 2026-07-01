@@ -750,7 +750,7 @@ export function createAcceptedBotStepExecutor({
         maxActions: 1,
         botsOnlyHandCompletionHardCap: cfg.botsOnlyHandCompletionHardCap,
         policyVersion: cfg.policyVersion,
-        botActionRandom: () => 0.5,
+        botActionRandom: random,
         klog,
         isActionPhase,
         advanceIfNeeded,
