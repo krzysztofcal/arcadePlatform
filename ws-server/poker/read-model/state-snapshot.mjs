@@ -162,6 +162,10 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId }) {
     memberCount
   };
 
+  if (typeof tableSnapshot?.status === "string" && tableSnapshot.status) {
+    table.status = tableSnapshot.status;
+  }
+
   if (maxSeats !== null) {
     table.maxSeats = maxSeats;
   }

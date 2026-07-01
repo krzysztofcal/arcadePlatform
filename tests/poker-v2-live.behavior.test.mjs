@@ -470,6 +470,36 @@ test('poker v2 clears the closed-table redirect when live mode is torn down', as
   assert.equal(harness.windowLocation.href, '');
 });
 
+test('poker v2 keeps closed-table redirect active across ambiguous HAND_DONE snapshots without status', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onProtocolError({ code: 'table_closed' });
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2ClosedTableModal.hidden, false);
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 5,
+      table: { tableId: 'table-1', maxSeats: 6, members: [] },
+      public: {
+        hand: { handId: 'hand-closed', status: 'HAND_DONE' },
+        pot: { total: 0 },
+        seats: []
+      },
+      you: { seat: null }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2ClosedTableModal.hidden, false);
+  assert.equal(harness.elements.pokerV2ClosedTableCountdown.textContent, 'Returning to lobby in 5 seconds…');
+});
+
 test('poker v2 shows compact call amount in the primary action label', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();

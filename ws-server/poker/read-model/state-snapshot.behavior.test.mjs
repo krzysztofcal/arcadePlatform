@@ -24,6 +24,7 @@ test("buildStateSnapshotPayload returns canonical room-core payload for seated a
     { userId: "user_b", seat: 1 },
     { userId: "user_a", seat: 2 }
   ]);
+  assert.equal(payload.table.status, "OPEN");
   assert.equal(payload.you.userId, "user_a");
   assert.equal(payload.you.seat, 2);
   assert.deepEqual(payload.private, { userId: "user_a", seat: 2, holeCards: [] });
@@ -70,6 +71,28 @@ test("buildStateSnapshotPayload missing table snapshot returns canonical empty r
   assert.deepEqual(payload.public.pot, { total: 0, sidePots: [] });
   assert.deepEqual(payload.public.legalActions, { seat: null, actions: [] });
   assert.equal("private" in payload, false);
+});
+
+test("buildStateSnapshotPayload keeps closed table status for automatic redirect consumers", () => {
+  const payload = buildStateSnapshotPayload({
+    userId: "user_a",
+    tableSnapshot: {
+      tableId: "table_closed_status",
+      roomId: "table_closed_status",
+      status: "CLOSED",
+      stateVersion: 44,
+      members: [],
+      memberCount: 0,
+      hand: { handId: "h_closed", status: "HAND_DONE", round: null, dealerSeatNo: null },
+      board: { cards: [] },
+      pot: { total: 0, sidePots: [] },
+      turn: { userId: null, seat: null, startedAt: null, deadlineAt: null },
+      legalActions: { seat: null, actions: [] }
+    }
+  });
+
+  assert.equal(payload.table.status, "CLOSED");
+  assert.equal(payload.public.hand.status, "HAND_DONE");
 });
 
 test("buildStateSnapshotPayload keeps authoritative seated members after disconnect cleanup", () => {

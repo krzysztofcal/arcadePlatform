@@ -435,6 +435,7 @@ export function createTableManager({
     const roomId = table?.coreState?.roomId || tableId;
     const youSeatValue = table?.coreState?.seats?.[userId];
     const youSeat = Number.isInteger(youSeatValue) ? youSeatValue : null;
+    const tableStatus = table ? normalizeTableStatus(table.tableStatus) : null;
     const roomCore = projectRoomCoreSnapshot({
       tableId,
       roomId,
@@ -461,6 +462,7 @@ export function createTableManager({
       tableId,
       roomId,
       stateVersion: table.coreState.version,
+      status: tableStatus,
       members,
       memberCount: members.length,
       maxSeats: table.coreState.maxSeats,

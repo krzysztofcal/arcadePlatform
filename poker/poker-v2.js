@@ -220,7 +220,24 @@
       startClosedTableRedirect('table_closed');
       return;
     }
-    cancelClosedTableRedirect();
+    var publicObj = isObject(payload.public) ? payload.public : {};
+    var handObj = isObject(publicObj.hand) ? publicObj.hand : (isObject(payload.hand) ? payload.hand : {});
+    var handStatus = typeof handObj.status === 'string' ? handObj.status.trim().toUpperCase() : '';
+    var hasMembers = Array.isArray(tableObj.members) && tableObj.members.some(function(member){
+      return member && typeof member.userId === 'string' && member.userId;
+    });
+    var hasSeats = Array.isArray(publicObj.seats) && publicObj.seats.some(function(seat){
+      return seat && typeof seat.userId === 'string' && seat.userId;
+    });
+    var hasUsableState = handStatus === 'LOBBY'
+      || handStatus === 'PREFLOP'
+      || handStatus === 'FLOP'
+      || handStatus === 'TURN'
+      || handStatus === 'RIVER'
+      || handStatus === 'SETTLED'
+      || hasMembers
+      || hasSeats;
+    if (hasUsableState) cancelClosedTableRedirect();
   }
 
   function syncClosedTableRedirectFromSignal(reason){
