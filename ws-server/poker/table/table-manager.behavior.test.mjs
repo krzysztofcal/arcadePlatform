@@ -56,6 +56,83 @@ test("resolveNextDealerSeatNo skips ineligible seats based on settled continuati
   assert.equal(nextDealer, 3);
 });
 
+test("applyAction returns accepted action audit context without private cards", () => {
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const tableId = "table_action_audit_context";
+  const restored = tableManager.restoreTableFromPersisted(tableId, {
+    coreState: {
+      version: 7,
+      roomId: tableId,
+      maxSeats: 4,
+      members: [
+        { userId: "user_a", seat: 1 },
+        { userId: "user_b", seat: 2 }
+      ],
+      seats: { user_a: 1, user_b: 2 },
+      publicStacks: { user_a: 99, user_b: 98 },
+      seatDetailsByUserId: {
+        user_a: { isBot: false, botProfile: null, leaveAfterHand: false },
+        user_b: { isBot: false, botProfile: null, leaveAfterHand: false }
+      },
+      pokerState: {
+        roomId: tableId,
+        handId: "hand_action_audit_context",
+        phase: "PREFLOP",
+        turnUserId: "user_a",
+        dealerSeatNo: 1,
+        seats: [
+          { userId: "user_a", seatNo: 1, status: "ACTIVE" },
+          { userId: "user_b", seatNo: 2, status: "ACTIVE" }
+        ],
+        handSeats: [
+          { userId: "user_a", seatNo: 1, status: "ACTIVE" },
+          { userId: "user_b", seatNo: 2, status: "ACTIVE" }
+        ],
+        stacks: { user_a: 99, user_b: 98 },
+        currentBet: 2,
+        lastRaiseSize: 1,
+        potTotal: 3,
+        toCallByUserId: { user_a: 1, user_b: 0 },
+        betThisRoundByUserId: { user_a: 1, user_b: 2 },
+        actedThisRoundByUserId: { user_a: false, user_b: false },
+        lastBettingRoundActionByUserId: { user_a: null, user_b: null },
+        foldedByUserId: { user_a: false, user_b: false },
+        contributionsByUserId: { user_a: 1, user_b: 2 },
+        community: [],
+        deck: ["AS", "KS", "QS", "JS", "TS"],
+        holeCardsByUserId: { user_a: ["AH", "AD"], user_b: ["2C", "2D"] }
+      }
+    }
+  });
+  assert.equal(restored.ok, true);
+
+  const applied = tableManager.applyAction({
+    tableId,
+    handId: "hand_action_audit_context",
+    userId: "user_a",
+    requestId: "req-call-audit",
+    action: "CALL",
+    nowIso: "2026-07-01T00:00:00.000Z",
+    nowMs: 1000
+  });
+
+  assert.equal(applied.accepted, true);
+  assert.equal(applied.acceptedActionAudit.action, "CALL");
+  assert.equal(applied.acceptedActionAudit.handId, "hand_action_audit_context");
+  assert.equal(applied.acceptedActionAudit.actorUserId, "user_a");
+  assert.equal(applied.acceptedActionAudit.requestId, "req-call-audit");
+  assert.equal(applied.acceptedActionAudit.stateVersionBefore, 7);
+  assert.equal(applied.acceptedActionAudit.stateVersionAfter, 8);
+  assert.equal(applied.acceptedActionAudit.potTotalBefore, 3);
+  assert.equal(applied.acceptedActionAudit.potTotalAfter, 4);
+  assert.equal(applied.acceptedActionAudit.toCall, 1);
+  assert.equal(applied.acceptedActionAudit.actorStackBefore, 99);
+  assert.equal(applied.acceptedActionAudit.actorStackAfter, 98);
+  const serialized = JSON.stringify(applied.acceptedActionAudit);
+  assert.equal(serialized.includes("AH"), false);
+  assert.equal(serialized.includes("AD"), false);
+});
+
 test("rolloverSettledHand delays next-hand bootstrap until explicitly invoked", () => {
   const tableManager = createTableManager({ maxSeats: 6 });
   const tableId = "table_settled_rollover";

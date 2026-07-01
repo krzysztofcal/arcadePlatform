@@ -1068,7 +1068,10 @@ export function createAcceptedBotStepExecutor({
           const persisted = await persistMutatedState({
             tableId,
             expectedVersion: Number(applied.stateVersion) - 1,
-            mutationKind: "act"
+            mutationKind: "act",
+            acceptedActionAudit: applied.acceptedActionAudit
+              ? { ...applied.acceptedActionAudit, source: "bot_autoplay" }
+              : null
           });
 
           if (!persisted?.ok) {

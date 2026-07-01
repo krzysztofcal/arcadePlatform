@@ -3,6 +3,8 @@ import { writePersistedTableToFile } from "./persisted-state-file-store.mjs";
 
 const HAND_SETTLED_ACTION_TYPE = "HAND_SETTLED";
 const SETTLEMENT_AUDIT_VERSION = 1;
+const ACCEPTED_ACTION_AUDIT_VERSION = 1;
+const ACCEPTED_ACTION_TYPES = new Set(["FOLD", "CHECK", "CALL", "BET", "RAISE", "ALL_IN"]);
 
 function normalizeJsonState(value) {
   if (!value) return {};
@@ -81,6 +83,92 @@ function normalizePayoutMap(value) {
       .filter(([userId, amount]) => typeof userId === "string" && userId.trim() && Number.isFinite(Number(amount)))
       .map(([userId, amount]) => [userId.trim(), Number(amount)])
   );
+}
+
+function normalizeAuditActionType(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const normalized = value.trim().toUpperCase();
+  return ACCEPTED_ACTION_TYPES.has(normalized) ? normalized : "";
+}
+
+function normalizeAuditString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function normalizeAuditNumber(value) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function readActorStack(state, actorUserId) {
+  if (!state || typeof state !== "object" || Array.isArray(state) || !actorUserId) {
+    return null;
+  }
+  return normalizeAuditNumber(state?.stacks?.[actorUserId]);
+}
+
+function buildAcceptedActionAuditMeta({ tableId, stateVersionAfter, auditAction, nextState }) {
+  if (!auditAction || typeof auditAction !== "object" || Array.isArray(auditAction)) {
+    return null;
+  }
+  const actionType = normalizeAuditActionType(auditAction.action ?? auditAction.actionType);
+  const handId = normalizeAuditString(auditAction.handId) || normalizeAuditString(nextState?.handId);
+  const actorUserId = normalizeAuditString(auditAction.actorUserId ?? auditAction.userId);
+  if (!tableId || !handId || !actorUserId || !actionType || !Number.isInteger(stateVersionAfter)) {
+    return null;
+  }
+
+  const phaseFrom = normalizeAuditString(auditAction.phaseFrom);
+  const phaseTo = normalizeAuditString(auditAction.phaseTo) || normalizeAuditString(nextState?.phase);
+  const amount = normalizeAuditNumber(auditAction.amount);
+  const potTotalAfter = normalizeAuditNumber(auditAction.potTotalAfter ?? nextState?.potTotal ?? nextState?.pot);
+  const currentBetAfter = normalizeAuditNumber(auditAction.currentBetAfter ?? nextState?.currentBet);
+  const actorStackAfter = normalizeAuditNumber(auditAction.actorStackAfter ?? readActorStack(nextState, actorUserId));
+  const requestId = normalizeAuditString(auditAction.requestId)
+    || `audit:action:${tableId}:${handId}:${stateVersionAfter}:${actorUserId}:${actionType}`;
+
+  const meta = {
+    auditVersion: ACCEPTED_ACTION_AUDIT_VERSION,
+    tableId,
+    handId,
+    actorUserId,
+    action: actionType,
+    phaseFrom: phaseFrom || null,
+    phaseTo: phaseTo || null,
+    stateVersionAfter
+  };
+
+  if (amount !== null) meta.amount = amount;
+  if (typeof auditAction.isBot === "boolean") meta.isBot = auditAction.isBot;
+  if (normalizeAuditString(auditAction.source ?? auditAction.trigger)) meta.source = normalizeAuditString(auditAction.source ?? auditAction.trigger);
+  const stateVersionBefore = normalizeAuditNumber(auditAction.stateVersionBefore);
+  if (stateVersionBefore !== null) meta.stateVersionBefore = stateVersionBefore;
+  const potTotalBefore = normalizeAuditNumber(auditAction.potTotalBefore);
+  if (potTotalBefore !== null) meta.potTotalBefore = potTotalBefore;
+  if (potTotalAfter !== null) meta.potTotalAfter = potTotalAfter;
+  const currentBetBefore = normalizeAuditNumber(auditAction.currentBetBefore);
+  if (currentBetBefore !== null) meta.currentBetBefore = currentBetBefore;
+  if (currentBetAfter !== null) meta.currentBetAfter = currentBetAfter;
+  const toCall = normalizeAuditNumber(auditAction.toCall);
+  if (toCall !== null) meta.toCall = toCall;
+  const actorStackBefore = normalizeAuditNumber(auditAction.actorStackBefore);
+  if (actorStackBefore !== null) meta.actorStackBefore = actorStackBefore;
+  if (actorStackAfter !== null) meta.actorStackAfter = actorStackAfter;
+
+  return {
+    tableId,
+    version: stateVersionAfter,
+    userId: actorUserId,
+    actionType,
+    amount,
+    handId,
+    requestId,
+    phaseFrom: phaseFrom || null,
+    phaseTo: phaseTo || null,
+    meta
+  };
 }
 
 function normalizePotsAwarded(potsAwarded) {
@@ -173,8 +261,47 @@ async function maybeWriteSettlementAudit({ tx, tableId, stateVersion, state, klo
   return { ok: true };
 }
 
+async function maybeWriteAcceptedActionAudit({ tx, tableId, stateVersion, state, auditAction, klog = () => {} }) {
+  const audit = buildAcceptedActionAuditMeta({ tableId, stateVersionAfter: stateVersion, auditAction, nextState: state });
+  if (!audit) {
+    return { ok: true, skipped: true };
+  }
+
+  const existingRows = await tx.unsafe(
+    "select id from public.poker_actions where table_id = $1 and request_id = $2 limit 1;",
+    [tableId, audit.requestId]
+  );
+  if (existingRows?.[0]?.id) {
+    return { ok: true, skipped: true, alreadyApplied: true };
+  }
+
+  await tx.unsafe(
+    "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
+    [
+      audit.tableId,
+      audit.version,
+      audit.userId,
+      audit.actionType,
+      audit.amount,
+      audit.handId,
+      audit.requestId,
+      audit.phaseFrom,
+      audit.phaseTo,
+      JSON.stringify(audit.meta)
+    ]
+  );
+  klog("ws_accepted_action_audit_written", {
+    tableId,
+    handId: audit.handId,
+    requestId: audit.requestId,
+    actionType: audit.actionType,
+    stateVersion
+  });
+  return { ok: true };
+}
+
 export function createPersistedStateWriter({ env = process.env, beginSql = beginSqlWs, klog = () => {} } = {}) {
-  async function writeViaDb({ tableId, expectedVersion, nextState }) {
+  async function writeViaDb({ tableId, expectedVersion, nextState, acceptedActionAudit = null }) {
     return beginSql(async (tx) => {
       const persistedState = sanitizePersistedState(nextState);
       const payload = JSON.stringify(persistedState);
@@ -185,6 +312,17 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       const newVersion = Number(rows?.[0]?.version);
       if (Number.isInteger(newVersion) && newVersion >= 0) {
         await tx.unsafe("update public.poker_tables set last_activity_at = now() where id = $1;", [tableId]);
+        try {
+          await maybeWriteAcceptedActionAudit({ tx, tableId, stateVersion: newVersion, state: persistedState, auditAction: acceptedActionAudit, klog });
+        } catch (error) {
+          klog("ws_accepted_action_audit_failed", {
+            tableId,
+            handId: acceptedActionAudit?.handId ?? persistedState?.handId ?? null,
+            requestId: acceptedActionAudit?.requestId ?? null,
+            actionType: acceptedActionAudit?.action ?? acceptedActionAudit?.actionType ?? null,
+            reason: error?.message || "unknown"
+          });
+        }
         try {
           await maybeWriteSettlementAudit({ tx, tableId, stateVersion: newVersion, state: persistedState, klog });
         } catch (error) {
@@ -206,6 +344,17 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       const equalState = stableStringify(currentState) === stableStringify(sanitizePersistedState(nextState));
       if (equalState) {
         try {
+          await maybeWriteAcceptedActionAudit({ tx, tableId, stateVersion: Number.isInteger(currentVersion) ? currentVersion : expectedVersion, state: currentState, auditAction: acceptedActionAudit, klog });
+        } catch (error) {
+          klog("ws_accepted_action_audit_failed", {
+            tableId,
+            handId: acceptedActionAudit?.handId ?? currentState?.handId ?? null,
+            requestId: acceptedActionAudit?.requestId ?? null,
+            actionType: acceptedActionAudit?.action ?? acceptedActionAudit?.actionType ?? null,
+            reason: error?.message || "unknown"
+          });
+        }
+        try {
           await maybeWriteSettlementAudit({ tx, tableId, stateVersion: Number.isInteger(currentVersion) ? currentVersion : expectedVersion, state: currentState, klog });
         } catch (error) {
           klog("ws_hand_settlement_audit_failed", {
@@ -221,7 +370,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     }, { env });
   }
 
-  async function writeMutation({ tableId, expectedVersion, nextState, supabaseUrl, supabaseServiceRoleKey, meta = null }) {
+  async function writeMutation({ tableId, expectedVersion, nextState, supabaseUrl, supabaseServiceRoleKey, meta = null, acceptedActionAudit = null }) {
     if (!tableId || !Number.isInteger(expectedVersion) || expectedVersion < 0) {
       return { ok: false, reason: "invalid" };
     }
@@ -251,7 +400,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       if (!env.SUPABASE_DB_URL && !supabaseUrl && !supabaseServiceRoleKey) {
         return { ok: false, reason: "config_missing" };
       }
-      return await writeViaDb({ tableId, expectedVersion, nextState: persistedState });
+      return await writeViaDb({ tableId, expectedVersion, nextState: persistedState, acceptedActionAudit });
     } catch (error) {
       klog("ws_persisted_state_write_error", {
         tableId,

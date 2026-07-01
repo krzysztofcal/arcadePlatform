@@ -43,7 +43,10 @@ export async function handleTurnTimeoutCommand({
   const persisted = await persistMutatedState({
     tableId,
     expectedVersion: Number(result.stateVersion) - 1,
-    mutationKind: "timeout"
+    mutationKind: "timeout",
+    acceptedActionAudit: result.acceptedActionAudit
+      ? { ...result.acceptedActionAudit, source: "timeout" }
+      : null
   });
   if (!persisted?.ok) {
     await recoverFromPersistConflict({

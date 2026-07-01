@@ -22,16 +22,26 @@ test('handleActCommand maps rejection reasons', async () => {
 
 
 test('handleActCommand persists and triggers autoplay only for accepted fresh action', async () => {
-  const calls = { persisted: 0, snaps: 0, autoplay: 0 };
+  const calls = { persisted: 0, snaps: 0, autoplay: 0, persistArgs: null };
   await handleActCommand({
     frame: { __resolvedTableId: 't1', requestId: 'r2', ts: new Date().toISOString(), payload: { handId: 'h1', action: 'CHECK' } },
     ws: {},
     connState: { session: { userId: 'u1' } },
-    tableManager: { ensureTableLoaded: async () => ({ ok: true }), applyAction: () => ({ accepted: true, replayed: false, changed: true, stateVersion: 2, reason: null }) },
+    tableManager: {
+      ensureTableLoaded: async () => ({ ok: true }),
+      applyAction: () => ({
+        accepted: true,
+        replayed: false,
+        changed: true,
+        stateVersion: 2,
+        reason: null,
+        acceptedActionAudit: { handId: 'h1', actorUserId: 'u1', action: 'CHECK' }
+      })
+    },
     ensureTableLoadedErrorMapper: (x) => x,
     sendError: () => assert.fail('unexpected sendError'),
     sendCommandResult: () => {},
-    persistMutatedState: async () => { calls.persisted += 1; return { ok: true }; },
+    persistMutatedState: async (args) => { calls.persisted += 1; calls.persistArgs = args; return { ok: true }; },
     restoreTableFromPersisted: async () => ({ ok: true }),
     broadcastResyncRequired: () => {},
     broadcastStateSnapshots: () => { calls.snaps += 1; },
@@ -40,6 +50,8 @@ test('handleActCommand persists and triggers autoplay only for accepted fresh ac
   assert.equal(calls.persisted, 1);
   assert.equal(calls.snaps, 1);
   assert.equal(calls.autoplay, 1);
+  assert.equal(calls.persistArgs.acceptedActionAudit.source, 'human');
+  assert.equal(calls.persistArgs.acceptedActionAudit.action, 'CHECK');
 });
 
 test('handleActCommand does not autoplay for replayed, rejected, or conflicted actions', async () => {
