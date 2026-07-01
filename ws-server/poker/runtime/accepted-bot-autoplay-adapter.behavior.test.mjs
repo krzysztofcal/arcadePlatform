@@ -18,7 +18,7 @@ function createAcceptedBotAutoplayExecutor(options = {}) {
   };
   return createAcceptedBotAutoplayExecutorBase({
     sleep: async () => {},
-    random: () => 0,
+    random: () => 0.5,
     ...options,
     env: mergedEnv
   });
@@ -65,6 +65,135 @@ test("accepted bot autoplay executes and persists when bot is on turn", async ()
   const result = await run({ tableId: "t1", trigger: "act", requestId: "r1" });
   assert.equal(result.ok, true);
   assert.equal(calls.persist > 0, true);
+});
+
+test("accepted bot autoplay enriches legal bet with a positive amount", async () => {
+  const observed = { action: null };
+  const state = {
+    version: 2,
+    tableId: "t-zero-bet",
+    handId: "h-zero-bet",
+    phase: "PREFLOP",
+    turnUserId: "bot_2",
+    seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }],
+    stacks: { human_1: 100, bot_2: 100 },
+    holeCardsByUserId: { bot_2: ["AS", "AD"] },
+    toCallByUserId: { bot_2: 0 }
+  };
+  const tableManager = {
+    persistedPokerState: () => ({ ...state }),
+    persistedStateVersion: () => 2,
+    tableSnapshot: () => ({ seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true, botProfile: "NORMAL" }] }),
+    applyAction: ({ action, amount }) => {
+      observed.action = { action, amount };
+      assert.notDeepEqual({ action, amount }, { action: "BET", amount: 0 });
+      assert.notDeepEqual({ action, amount }, { action: "RAISE", amount: 0 });
+      return { accepted: true, changed: true, replayed: false, stateVersion: 3 };
+    }
+  };
+
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    random: () => 0,
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    klog: () => {}
+  });
+
+  const result = await run({ tableId: "t-zero-bet", trigger: "act", requestId: "r-zero-bet" });
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, true);
+  assert.equal(observed.action?.action, "BET");
+  assert.equal(Number.isInteger(observed.action?.amount), true);
+  assert.equal(observed.action.amount > 0, true);
+});
+
+test("accepted bot autoplay enriches legal raise with a positive amount", async () => {
+  const observed = { action: null };
+  const state = {
+    version: 2,
+    tableId: "t-raise-amount",
+    handId: "h-raise-amount",
+    phase: "PREFLOP",
+    turnUserId: "bot_2",
+    seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }],
+    stacks: { human_1: 100, bot_2: 100 },
+    holeCardsByUserId: { bot_2: ["AS", "AD"] },
+    currentBet: 2,
+    lastRaiseSize: 2,
+    betThisRoundByUserId: { human_1: 2, bot_2: 0 },
+    toCallByUserId: { bot_2: 2 }
+  };
+  const tableManager = {
+    persistedPokerState: () => ({ ...state }),
+    persistedStateVersion: () => 2,
+    tableSnapshot: () => ({ seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true, botProfile: "LOOSE" }] }),
+    applyAction: ({ action, amount }) => {
+      observed.action = { action, amount };
+      assert.notDeepEqual({ action, amount }, { action: "RAISE", amount: 0 });
+      return { accepted: true, changed: true, replayed: false, stateVersion: 3 };
+    }
+  };
+
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    random: () => 0,
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    klog: () => {}
+  });
+
+  const result = await run({ tableId: "t-raise-amount", trigger: "act", requestId: "r-raise-amount" });
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, true);
+  assert.equal(observed.action?.action, "RAISE");
+  assert.equal(observed.action?.amount, 4);
+});
+
+test("accepted bot autoplay does not repeatedly min-reraise after the bot already raised this round", async () => {
+  const observed = { action: null };
+  const state = {
+    version: 2,
+    tableId: "t-no-reraise-loop",
+    handId: "h-no-reraise-loop",
+    phase: "TURN",
+    turnUserId: "bot_2",
+    seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }],
+    stacks: { human_1: 100, bot_2: 100 },
+    community: ["AS", "AD", "AC", "2H"],
+    holeCardsByUserId: { bot_2: ["AH", "KD"] },
+    currentBet: 4,
+    lastRaiseSize: 2,
+    betThisRoundByUserId: { human_1: 4, bot_2: 2 },
+    toCallByUserId: { bot_2: 2 },
+    lastBettingRoundActionByUserId: { bot_2: "RAISE" }
+  };
+  const tableManager = {
+    persistedPokerState: () => ({ ...state }),
+    persistedStateVersion: () => 2,
+    tableSnapshot: () => ({ seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true, botProfile: "LOOSE" }] }),
+    applyAction: ({ action, amount }) => {
+      observed.action = { action, amount };
+      return { accepted: true, changed: true, replayed: false, stateVersion: 3 };
+    }
+  };
+
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    random: () => 0,
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    klog: () => {}
+  });
+
+  const result = await run({ tableId: "t-no-reraise-loop", trigger: "act", requestId: "r-no-reraise-loop" });
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, true);
+  assert.equal(observed.action?.action, "CALL");
+  assert.equal(observed.action?.amount, undefined);
 });
 
 test("accepted bot autoplay waits a human-like reaction delay before acting", async () => {

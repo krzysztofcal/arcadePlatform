@@ -733,7 +733,15 @@ export function createTableManager({
       }
       const timeoutDecision = decideCoreStateTurnTimeout({ coreState: table?.coreState, nowMs });
       if (timeoutDecision?.due === true) {
-        due.push({ tableId, stateVersion: timeoutDecision.stateVersion });
+        const turnUserId = typeof timeoutDecision?.decision?.actorUserId === "string"
+          ? timeoutDecision.decision.actorUserId
+          : (typeof timeoutDecision?.liveState?.turnUserId === "string" ? timeoutDecision.liveState.turnUserId : null);
+        due.push({
+          tableId,
+          stateVersion: timeoutDecision.stateVersion,
+          turnUserId,
+          isBotTurn: isCoreStateBotUser(table?.coreState, turnUserId)
+        });
       }
     }
     return due;

@@ -17,7 +17,7 @@ function withBotEnv(fn) {
   process.env.POKER_BOTS_ENABLED = "1";
   process.env.POKER_BOTS_MAX_PER_TABLE = "2";
   process.env.POKER_BOT_BUYIN_BB = "100";
-  process.env.POKER_BOT_PROFILE_DEFAULT = "TRIVIAL";
+  process.env.POKER_BOT_PROFILE_DEFAULT = "NORMAL";
   return Promise.resolve()
     .then(fn)
     .finally(() => {
@@ -994,8 +994,8 @@ test("first human authoritative join seeds exactly two bots and persists bot sea
   assert.equal(result.snapshot.seats.length, 3);
   assert.deepEqual(result.snapshot.seats.map((seat) => seat.seatNo), [1, 2, 3]);
   assert.deepEqual(result.snapshot.seats.filter((seat) => seat.isBot).map((seat) => ({ seatNo: seat.seatNo, botProfile: seat.botProfile, leaveAfterHand: seat.leaveAfterHand === true })), [
-    { seatNo: 2, botProfile: "TRIVIAL", leaveAfterHand: false },
-    { seatNo: 3, botProfile: "TRIVIAL", leaveAfterHand: false }
+    { seatNo: 2, botProfile: "NORMAL", leaveAfterHand: false },
+    { seatNo: 3, botProfile: "NORMAL", leaveAfterHand: false }
   ]);
   assert.equal(result.snapshot.stacks.human_1, 150);
   assert.equal(Object.values(result.snapshot.stacks).filter((stack) => stack === 200).length, 2);

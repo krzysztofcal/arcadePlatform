@@ -69,6 +69,39 @@ test("evaluateTableHealth classifies stale human seats from last_seen_at", () =>
   assert.equal(result.reasonCode, "stale_human_last_seen_expired");
 });
 
+test("evaluateTableHealth does not stale-clean a connected human with an old persisted heartbeat", () => {
+  const result = evaluateTableHealth({
+    tableId: "t_connected_old_seen",
+    nowMs: NOW_MS,
+    activeSeatFreshMs: 120_000,
+    seatedReconnectGraceMs: 90_000,
+    persistedTable: {
+      status: "OPEN",
+      created_at: iso(-600_000),
+      last_activity_at: iso(-240_000)
+    },
+    persistedSeats: [
+      { user_id: "u1", status: "ACTIVE", is_bot: false, last_seen_at: iso(-240_000) }
+    ],
+    persistedState: {
+      phase: "PREFLOP",
+      turnUserId: "bot_1",
+      turnDeadlineAt: NOW_MS + 30_000
+    },
+    runtime: {
+      loaded: true,
+      tableStatus: "OPEN",
+      hasConnectedHumanPresence: true,
+      connectedUserIds: ["u1"]
+    }
+  });
+
+  assert.equal(result.healthy, true);
+  assert.equal(result.classification, "healthy");
+  assert.equal(result.action, "noop");
+  assert.equal(result.reasonCode, "healthy_live_hand_active");
+});
+
 test("evaluateTableHealth classifies abandoned live hands", () => {
   const result = evaluateTableHealth({
     tableId: "t_abandoned_live_hand",

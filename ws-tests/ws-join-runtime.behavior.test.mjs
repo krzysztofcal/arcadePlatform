@@ -196,8 +196,8 @@ function isStableReplayJoinState(frame, { tableId, userId, botSeat2, botSeat3 })
   ];
   const expectedSeats = [
     { userId, seatNo: 1, status: "ACTIVE" },
-    { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" },
-    { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" }
+    { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "NORMAL" },
+    { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "NORMAL" }
   ];
   try {
     assert.deepEqual(members, expectedMembers);
@@ -251,6 +251,36 @@ async function nextStateUpdate(ws, { baseline = null, timeoutMs = 10000 } = {}) 
     if (frame?.type === "statePatch") {
       const merged = baseline ? { ...baseline, ...frame.payload } : { ...frame.payload };
       return { frame, payload: merged, baseline: merged };
+    }
+  }
+}
+
+async function nextAdvancedStateUpdate(ws, { baseline, timeoutMs = 10000 } = {}) {
+  const started = Date.now();
+  let current = baseline;
+  while (true) {
+    const remainingMs = timeoutMs - (Date.now() - started);
+    if (remainingMs <= 0) {
+      throw new Error("Timed out waiting for advanced state update frame");
+    }
+    const next = await nextStateUpdate(ws, { baseline: current, timeoutMs: remainingMs });
+    current = next.payload;
+    if (Number(current?.stateVersion) > Number(baseline?.stateVersion ?? -1)) {
+      return next;
+    }
+  }
+}
+
+async function nextStateSnapshotAtLeast(ws, { stateVersion, timeoutMs = 10000 } = {}) {
+  const started = Date.now();
+  while (true) {
+    const remainingMs = timeoutMs - (Date.now() - started);
+    if (remainingMs <= 0) {
+      throw new Error(`Timed out waiting for stateSnapshot at version ${stateVersion}`);
+    }
+    const frame = await nextMessage(ws, remainingMs);
+    if (frame?.type === "stateSnapshot" && Number(frame?.payload?.stateVersion) >= Number(stateVersion)) {
+      return frame;
     }
   }
 }
@@ -331,7 +361,7 @@ function runtimeJoinEnv({ secret, filePath }) {
     POKER_BOTS_ENABLED: "1",
     POKER_BOTS_MAX_PER_TABLE: "2",
     POKER_BOT_BUYIN_BB: "100",
-    POKER_BOT_PROFILE_DEFAULT: "TRIVIAL",
+    POKER_BOT_PROFILE_DEFAULT: "NORMAL",
     WS_BOT_REACTION_MIN_MS: "0",
     WS_BOT_REACTION_MAX_MS: "0",
     WS_POKER_TURN_MS: "250",
@@ -395,8 +425,8 @@ test("authoritative WS table_join returns a fully seated stacked snapshot and ke
     assert.equal(typeof joinedState.payload.hand.handId, "string");
     assert.deepEqual(joinedState.payload.seats, [
       { userId: "runtime_human", seatNo: 1, status: "ACTIVE" },
-      { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" },
-      { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" }
+      { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "NORMAL" },
+      { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "NORMAL" }
     ]);
     assert.equal(joinedState.payload.seats.filter((seat) => seat?.status === "ACTIVE").length >= 3, true);
     assert.equal(typeof joinedState.payload.stacks.runtime_human, "number");
@@ -518,14 +548,14 @@ test("authoritative WS table_join can progress through human act and bot timeout
     const actAck = await nextCommandResultForRequest(ws, "act-runtime-human");
     assert.equal(actAck.payload.status, "accepted");
 
-    const afterHumanAction = await nextStateUpdate(ws, {
+    const afterHumanAction = await nextAdvancedStateUpdate(ws, {
       baseline: humanTurnSnapshot,
       timeoutMs: 4000
     });
     assert.equal(afterHumanAction.payload.stateVersion > humanTurnSnapshot.stateVersion, true);
     assert.equal(afterHumanAction.payload.public.hand.handId, humanTurnSnapshot.public.hand.handId);
 
-    const afterBotAutoplay = await nextStateUpdate(ws, {
+    const afterBotAutoplay = await nextAdvancedStateUpdate(ws, {
       baseline: afterHumanAction.payload,
       timeoutMs: 5000
     });
@@ -537,7 +567,10 @@ test("authoritative WS table_join can progress through human act and bot timeout
       ts: "2026-02-28T06:20:03Z",
       payload: { tableId, view: "snapshot" }
     });
-    const postAutoplaySnapshot = await nextMessageOfType(ws, "stateSnapshot");
+    const postAutoplaySnapshot = await nextStateSnapshotAtLeast(ws, {
+      stateVersion: afterBotAutoplay.payload.stateVersion,
+      timeoutMs: 5000
+    });
     assert.equal(postAutoplaySnapshot.payload.stateVersion >= afterBotAutoplay.payload.stateVersion, true);
     assert.equal(typeof postAutoplaySnapshot.payload.public.hand.handId, "string");
     const postAutoplayHumanTurn = await waitForHumanTurn(ws, {

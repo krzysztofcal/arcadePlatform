@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { handleJoinCommand } from './join.mjs';
 
 function baseCtx(payload = {}){
-  const calls = { command: [], table: 0, snapshots: 0, joinArgs: null, authoritativeArgs: null, sendError: 0, sentErrors: [], actorTableState: 0, resync: 0, logs: [] };
+  const calls = { command: [], table: 0, snapshots: 0, joinArgs: null, authoritativeArgs: null, sendError: 0, sentErrors: [], actorTableState: 0, resync: 0, autoplay: [], logs: [] };
   const tableManager = {
     ensureTableLoaded: async () => ({ ok: true }),
     join: (args) => { calls.joinArgs = args; return { ok: true, changed: true, tableState: { tableId: 't1', members: [] } }; },
@@ -47,6 +47,7 @@ function baseCtx(payload = {}){
       observeOnlyJoinEnabled: false,
       persistedBootstrapEnabled: false,
       loadAuthoritativeJoinExecutor: async () => async (args) => { calls.authoritativeArgs = args; return { ok: true, seatNo: 2, stack: 100 }; },
+      scheduleBotStep: (payload) => { calls.autoplay.push(payload); },
       klog: (event, payload) => { calls.logs.push({ event, payload }); }
     }
   };
@@ -69,6 +70,24 @@ test('handleJoinCommand forwards autoSeat + preferredSeatNo intent', async () =>
   assert.equal(calls.joinArgs.autoSeat, true);
   assert.equal(calls.joinArgs.preferredSeatNo, 2);
   assert.equal(calls.joinArgs.buyIn, 150);
+});
+
+test('handleJoinCommand schedules bot autoplay after join bootstraps first hand', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 100 });
+  ctx.frame.ts = '2026-02-28T00:00:01Z';
+  ctx.tableManager.bootstrapHand = () => ({ ok: true, changed: true, bootstrap: 'started' });
+
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.command[0].status, 'accepted');
+  assert.equal(calls.snapshots, 1);
+  assert.equal(calls.autoplay.length, 1);
+  assert.deepEqual(calls.autoplay[0], {
+    tableId: 't1',
+    trigger: 'join_bootstrap',
+    requestId: 'r1',
+    frameTs: '2026-02-28T00:00:01Z'
+  });
 });
 
 test('handleJoinCommand forwards join intent to authoritative executor when enabled', async () => {

@@ -71,7 +71,7 @@ function restoredAuthoritativeStateLooksComplete({ restoredTable, userId, seatNo
 
 import { recoverFromPersistConflict } from "../runtime/persist-conflict-recovery.mjs";
 
-export async function handleJoinCommand({ frame, ws, connState, sessionStore, tableManager, ensureTableLoadedErrorMapper, restoreTableFromPersisted, persistMutatedState, broadcastResyncRequired, broadcastStateSnapshots, broadcastTableState, sendError, sendCommandResult, sendTableState, authoritativeJoinEnabled, observeOnlyJoinEnabled, persistedBootstrapEnabled, loadAuthoritativeJoinExecutor, klog = () => {} }) {
+export async function handleJoinCommand({ frame, ws, connState, sessionStore, tableManager, ensureTableLoadedErrorMapper, restoreTableFromPersisted, persistMutatedState, broadcastResyncRequired, broadcastStateSnapshots, broadcastTableState, sendError, sendCommandResult, sendTableState, authoritativeJoinEnabled, observeOnlyJoinEnabled, persistedBootstrapEnabled, loadAuthoritativeJoinExecutor, scheduleBotStep = () => {}, klog = () => {} }) {
   const tableId = frame.__resolvedTableId;
   const authoritativeJoinRequired = authoritativeJoinEnabled && !observeOnlyJoinEnabled;
   const parsedJoinIntent = parseJoinIntent(frame.payload);
@@ -294,5 +294,19 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
   }
   if (bootstrapped?.changed) {
     broadcastStateSnapshots(tableId);
+    try {
+      scheduleBotStep({
+        tableId,
+        trigger: "join_bootstrap",
+        requestId: frame.requestId ?? null,
+        frameTs: frame.ts
+      });
+    } catch (error) {
+      klog("ws_join_bootstrap_bot_autoplay_failed", {
+        tableId,
+        requestId: frame.requestId ?? null,
+        message: error?.message || "unknown"
+      });
+    }
   }
 }

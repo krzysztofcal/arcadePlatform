@@ -459,6 +459,18 @@ function buildAutoplayStartSnapshot(tableId) {
   };
 }
 
+function buildBotTurnScheduleKey(tableId) {
+  const state = tableManager.persistedPokerState(tableId);
+  if (!state || typeof state !== "object") return null;
+  if (!isLiveHandPhase(state.phase) || state.phase === "SHOWDOWN") return null;
+  const turnUserId = typeof state.turnUserId === "string" ? state.turnUserId.trim() : "";
+  if (!turnUserId || tableManager.isBotUser(tableId, turnUserId) !== true) return null;
+  const stateVersion = Number(tableManager.persistedStateVersion(tableId) || state.version || 0);
+  const handId = typeof state.handId === "string" && state.handId.trim() ? state.handId.trim() : "unknown_hand";
+  const phase = typeof state.phase === "string" && state.phase.trim() ? state.phase.trim() : "unknown_phase";
+  return `${tableId}:${stateVersion}:${handId}:${phase}:${turnUserId}`;
+}
+
 async function runBotStep({ tableId, trigger, requestId, frameTs }) {
   const acceptedBotAutoplayExecutor = await loadAcceptedBotAutoplayExecutor();
   const startSnapshot = buildAutoplayStartSnapshot(tableId);
@@ -473,11 +485,12 @@ async function runBotStep({ tableId, trigger, requestId, frameTs }) {
   return acceptedBotAutoplayExecutor({ tableId, trigger, requestId, frameTs });
 }
 
+const scheduledObservedBotTurnKeys = new Map();
+
 function scheduleBotStep({ tableId, trigger, requestId, frameTs }) {
   const enqueueStep = () => enqueueTableCommand({
     tableId,
     commandName: "bot_step",
-    dedupeKey: "bot_step",
     run: async () => handleBotStepCommand({
       tableId,
       trigger,
@@ -503,6 +516,34 @@ function scheduleBotStep({ tableId, trigger, requestId, frameTs }) {
     return queued;
   };
   return runCascade();
+}
+
+function scheduleObservedBotTurn({ tableId, trigger, requestId = null, frameTs = null }) {
+  const scheduleKey = buildBotTurnScheduleKey(tableId);
+  if (!scheduleKey) {
+    scheduledObservedBotTurnKeys.delete(tableId);
+    return false;
+  }
+  if (scheduledObservedBotTurnKeys.get(tableId) === scheduleKey) return false;
+  scheduledObservedBotTurnKeys.set(tableId, scheduleKey);
+  try {
+    scheduleBotStep({ tableId, trigger, requestId, frameTs });
+    klogSafe("ws_observed_bot_turn_autoplay_scheduled", {
+      tableId,
+      trigger: trigger || null,
+      scheduleKey
+    });
+    return true;
+  } catch (error) {
+    scheduledObservedBotTurnKeys.delete(tableId);
+    klogSafe("ws_observed_bot_turn_autoplay_failed", {
+      tableId,
+      trigger: trigger || null,
+      scheduleKey,
+      message: error?.message || "unknown"
+    });
+    return false;
+  }
 }
 
 function enqueueTableCommand({ tableId, commandName, dedupeKey = null, run }) {
@@ -1787,21 +1828,34 @@ async function loadPersistedTableHealthSnapshot(tableId) {
 
 function buildTableJanitorRuntimeContext(tableId, persistedSeats = []) {
   const loaded = tableManager.listTableIds().includes(tableId);
-  const connectedUserIds = [];
+  const connectedUserIds = new Set();
+  if (loaded && typeof tableManager.orderedConnectionsForTable === "function") {
+    const sockets = tableManager.orderedConnectionsForTable(tableId, (socket) => {
+      const userId = socket?.__connState?.session?.userId;
+      return typeof userId === "string" ? userId : "";
+    });
+    for (const socket of sockets) {
+      if (socket?.__connState?.sessionInvalidated === true) continue;
+      const userId = socket?.__connState?.session?.userId;
+      if (typeof userId === "string" && userId.trim()) {
+        connectedUserIds.add(userId.trim());
+      }
+    }
+  }
   for (const seat of persistedSeats || []) {
     if (seat?.is_bot === true) continue;
     const userId = typeof seat?.user_id === "string" ? seat.user_id.trim() : "";
     if (!userId) continue;
     const activeSockets = sessionStore.connectionsForUser(userId) || [];
     if (activeSockets.some((socket) => tableSocketMatches(socket, tableId))) {
-      connectedUserIds.push(userId);
+      connectedUserIds.add(userId);
     }
   }
   return {
     loaded,
     tableStatus: loaded ? (tableManager.isTableClosed(tableId) ? "CLOSED" : "OPEN") : null,
     hasConnectedHumanPresence: tableManager.hasConnectedHumanPresence(tableId),
-    connectedUserIds
+    connectedUserIds: [...connectedUserIds]
   };
 }
 
@@ -1949,9 +2003,25 @@ async function sweepTurnTimeoutsAndBroadcast() {
   });
   await Promise.allSettled(timeoutUpdates.map((update) => enqueueTableCommand({
     tableId: update.tableId,
-    commandName: "turn_timeout",
-    dedupeKey: "turn_timeout",
+    commandName: update.isBotTurn === true ? "bot_timeout_safety" : "turn_timeout",
+    dedupeKey: update.isBotTurn === true ? null : "turn_timeout",
     run: async () => {
+      if (update.isBotTurn === true) {
+        klogSafe("ws_bot_timeout_safety_autoplay", {
+          tableId: update.tableId,
+          turnUserId: update.turnUserId || null,
+          stateVersion: Number.isFinite(Number(update.stateVersion)) ? Number(update.stateVersion) : null
+        });
+        return handleBotStepCommand({
+          tableId: update.tableId,
+          trigger: "bot_timeout_safety",
+          requestId: `bot-timeout-safety:${update.tableId}:${nowMs}`,
+          frameTs: null,
+          runBotStep,
+          broadcastStateSnapshots,
+          klog: klogSafe
+        });
+      }
       const result = await handleTurnTimeoutCommand({
         tableId: update.tableId,
         nowMs,
@@ -2316,6 +2386,7 @@ wss.on("connection", (ws) => {
           observeOnlyJoinEnabled,
           persistedBootstrapEnabled,
           loadAuthoritativeJoinExecutor,
+          scheduleBotStep,
           klog: klogSafe
         })
       });
@@ -2361,6 +2432,12 @@ wss.on("connection", (ws) => {
         const resyncedSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: resynced.tableState, tableSnapshot: resyncedSnapshot });
         maybeTouchPersistedSeatLastSeen(connState);
+        scheduleObservedBotTurn({
+          tableId,
+          trigger: "resync",
+          requestId: frame.requestId ?? null,
+          frameTs: frame.ts
+        });
         return;
       }
 
@@ -2450,11 +2527,23 @@ wss.on("connection", (ws) => {
         const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         await nextEventLoopTurn();
         sendStateSnapshot(ws, connState, { tableSnapshot, reason: replay.reason });
+        scheduleObservedBotTurn({
+          tableId,
+          trigger: "resume_resync",
+          requestId: frame.requestId ?? null,
+          frameTs: frame.ts
+        });
         return;
       }
 
       if (replay.frames.length === 0) {
         sendResumeAck(ws, connState, { requestId: frame.requestId ?? null, tableId });
+        scheduleObservedBotTurn({
+          tableId,
+          trigger: "resume_ack",
+          requestId: frame.requestId ?? null,
+          frameTs: frame.ts
+        });
         return;
       }
 
@@ -2462,6 +2551,12 @@ wss.on("connection", (ws) => {
         connState.session.latestDeliveredSeqByTableId.set(tableId, replayFrame.seq);
         sendFrame(ws, replayFrame);
       }
+      scheduleObservedBotTurn({
+        tableId,
+        trigger: "resume_replay",
+        requestId: frame.requestId ?? null,
+        frameTs: frame.ts
+      });
       return;
     }
 
@@ -2562,6 +2657,12 @@ wss.on("connection", (ws) => {
       const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
       sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: subscribed.tableState, tableSnapshot });
       maybeTouchPersistedSeatLastSeen(connState);
+      scheduleObservedBotTurn({
+        tableId,
+        trigger: "table_state_sub",
+        requestId: frame.requestId ?? null,
+        frameTs: frame.ts
+      });
       return;
     }
 
@@ -2587,6 +2688,7 @@ wss.on("connection", (ws) => {
         return;
       }
       sendGameplaySnapshot(ws, connState, { requestId: frame.requestId ?? null, tableId, snapshot: loaded.snapshot });
+      maybeTouchPersistedSeatLastSeen(connState);
       return;
     }
 
@@ -2620,6 +2722,7 @@ wss.on("connection", (ws) => {
           klog: klogSafe
         })
       });
+      maybeTouchPersistedSeatLastSeen(connState);
       return;
     }
 

@@ -23,7 +23,9 @@ function parseIntClamped(value, fallback, min, max) {
   return parsed;
 }
 
-function parseProfile(value, fallback = "TRIVIAL") {
+const BOT_PROFILES = ["TIGHT", "NORMAL", "LOOSE"];
+
+function parseProfile(value, fallback = "RANDOM") {
   const normalized = normalizeString(value).toUpperCase();
   return normalized || fallback;
 }
@@ -82,8 +84,9 @@ function parseStakes(raw) {
 function getBotConfig(env = process.env) {
   return {
     enabled: parseBool(env?.POKER_BOTS_ENABLED, false),
-    maxPerTable: parseIntClamped(env?.POKER_BOTS_MAX_PER_TABLE, 2, 0, 9),
-    defaultProfile: parseProfile(env?.POKER_BOT_PROFILE_DEFAULT, "TRIVIAL"),
+    minPerTable: parseIntClamped(env?.POKER_BOTS_MIN_PER_TABLE, 2, 0, 9),
+    maxPerTable: parseIntClamped(env?.POKER_BOTS_MAX_PER_TABLE, 5, 0, 9),
+    defaultProfile: parseProfile(env?.POKER_BOT_PROFILE_DEFAULT, "RANDOM"),
     buyInBB: parseIntClamped(env?.POKER_BOT_BUYIN_BB, 100, 1, 1000),
     bankrollSystemKey: normalizeString(env?.POKER_BOT_BANKROLL_SYSTEM_KEY) || "TREASURY"
   };
@@ -97,12 +100,37 @@ function makeBotSystemKey(tableId, seatNo) {
   return `POKER_BOT:${tableId}:${seatNo}`;
 }
 
-export function computeTargetBotCount({ maxPlayers, humanCount, maxBots } = {}) {
+function clampRandom(random = Math.random) {
+  const sampled = typeof random === "function" ? Number(random()) : Number(random);
+  if (!Number.isFinite(sampled)) return 0;
+  return Math.max(0, Math.min(0.999999, sampled));
+}
+
+function randomIntInclusive(min, max, random = Math.random) {
+  const low = Math.ceil(Number(min));
+  const high = Math.floor(Number(max));
+  if (!Number.isInteger(low) || !Number.isInteger(high) || high < low) return low;
+  return low + Math.floor((high - low + 1) * clampRandom(random));
+}
+
+function normalizeBotProfile(value, random = Math.random) {
+  const normalized = normalizeString(value).toUpperCase();
+  if (BOT_PROFILES.includes(normalized)) return normalized;
+  if (normalized === "TRIVIAL" || normalized === "DEFAULT") return "NORMAL";
+  const index = randomIntInclusive(0, BOT_PROFILES.length - 1, random);
+  return BOT_PROFILES[index] || "NORMAL";
+}
+
+export function computeTargetBotCount({ maxPlayers, humanCount, maxBots, minBots = 2, random = Math.random } = {}) {
   const totalSeats = Number.isFinite(Number(maxPlayers)) ? Math.trunc(Number(maxPlayers)) : 0;
   const humans = Number.isFinite(Number(humanCount)) ? Math.trunc(Number(humanCount)) : 0;
   const limit = Number.isFinite(Number(maxBots)) ? Math.trunc(Number(maxBots)) : 0;
+  const minimum = Number.isFinite(Number(minBots)) ? Math.trunc(Number(minBots)) : 0;
   if (humans <= 0 || humans >= totalSeats) return 0;
-  return Math.max(0, Math.min(Math.max(0, limit), Math.max(0, (totalSeats - humans) - 1)));
+  const upper = Math.max(0, Math.min(Math.max(0, limit), Math.max(0, totalSeats - humans)));
+  if (upper <= 0) return 0;
+  const lower = Math.min(upper, Math.max(1, Math.max(0, minimum)));
+  return randomIntInclusive(lower, upper, random);
 }
 
 export function shouldSeedBotsOnJoin({ humanCount } = {}) {
@@ -177,7 +205,7 @@ async function loadSeatRows(tx, tableId) {
   return Array.isArray(rows) ? rows : [];
 }
 
-async function seedBotsForJoin({ tx, tableId, maxPlayers, tableStakes, cfg, humanUserId, postTransaction, klog = () => {} }) {
+async function seedBotsForJoin({ tx, tableId, maxPlayers, tableStakes, cfg, humanUserId, postTransaction, klog = () => {}, random = Math.random }) {
   if (!cfg?.enabled || typeof postTransaction !== "function") return [];
   const stakesParsed = parseStakes(tableStakes);
   if (!stakesParsed.ok) {
@@ -190,7 +218,7 @@ async function seedBotsForJoin({ tx, tableId, maxPlayers, tableStakes, cfg, huma
   const humanCount = activeSeats.filter((row) => !row?.is_bot).length;
   if (!shouldSeedBotsOnJoin({ humanCount })) return [];
 
-  const targetBots = computeTargetBotCount({ maxPlayers, humanCount, maxBots: cfg.maxPerTable });
+  const targetBots = computeTargetBotCount({ maxPlayers, humanCount, minBots: cfg.minPerTable, maxBots: cfg.maxPerTable, random });
   if (!Number.isInteger(targetBots) || targetBots <= 0) return [];
 
   const existingBotCount = activeSeats.filter((row) => row?.is_bot).length;
@@ -206,6 +234,7 @@ async function seedBotsForJoin({ tx, tableId, maxPlayers, tableStakes, cfg, huma
     if (occupied.has(seatNo)) continue;
     const botUserId = makeBotUserId(tableId, seatNo);
     const botSystemKey = makeBotSystemKey(tableId, seatNo);
+    const botProfile = normalizeBotProfile(cfg.defaultProfile, random);
     const insertRows = await tx.unsafe(
       `
 insert into public.poker_seats (table_id, user_id, seat_no, status, is_bot, bot_profile, leave_after_hand, stack, last_seen_at, joined_at)
@@ -213,7 +242,7 @@ values ($1, $2, $3, 'ACTIVE', true, $4, false, $5, now(), now())
 on conflict do nothing
 returning seat_no;
       `,
-      [tableId, botUserId, seatNo, cfg.defaultProfile, buyInChips]
+      [tableId, botUserId, seatNo, botProfile, buyInChips]
     );
     if (!insertRows?.length) continue;
 
@@ -228,7 +257,7 @@ returning seat_no;
           botSystemKey,
           tableId,
           seatNo,
-          botProfile: cfg.defaultProfile,
+          botProfile: botProfile,
           reason: "BOT_SEED_BUY_IN"
         },
         entries: [
@@ -243,7 +272,7 @@ returning seat_no;
         seatNo,
         status: "ACTIVE",
         isBot: true,
-        botProfile: cfg.defaultProfile,
+        botProfile: botProfile,
         leaveAfterHand: false,
         stack: buyInChips
       });
@@ -260,8 +289,133 @@ returning seat_no;
   return seededBots;
 }
 
+function readAmount(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  for (const key of ["min", "minimum", "minAmount", "amountMin", "amount"]) {
+    const value = Number(entry[key]);
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
+function findAction(legalActions, actionType) {
+  const target = normalizeString(actionType).toUpperCase();
+  for (const entry of Array.isArray(legalActions) ? legalActions : []) {
+    if (typeof entry === "string" && entry.toUpperCase() === target) return { type: target };
+    const entryType = normalizeString(entry?.type || entry?.action).toUpperCase();
+    if (entryType === target) return entry;
+  }
+  return null;
+}
+
+function cardRank(card) {
+  const raw = typeof card === "string" ? card.trim().slice(0, -1).toUpperCase() : card?.r;
+  if (typeof raw === "number" && Number.isInteger(raw)) return raw;
+  if (raw === "A") return 14;
+  if (raw === "K") return 13;
+  if (raw === "Q") return 12;
+  if (raw === "J") return 11;
+  if (raw === "T" || raw === "10") return 10;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 2 && parsed <= 14 ? parsed : 0;
+}
+
+function cardSuit(card) {
+  return typeof card === "string" ? card.trim().slice(-1).toUpperCase() : normalizeString(card?.s).toUpperCase();
+}
+
+function botCardsFromContext(context = {}) {
+  const userId = typeof context?.userId === "string" ? context.userId : "";
+  const privateCards = context?.privateState?.holeCardsByUserId?.[userId];
+  const publicCards = context?.state?.holeCardsByUserId?.[userId];
+  return Array.isArray(privateCards) ? privateCards : Array.isArray(publicCards) ? publicCards : [];
+}
+
+function scorePreflop(cards) {
+  if (!Array.isArray(cards) || cards.length < 2) return 0.45;
+  const ranks = cards.map(cardRank).sort((a, b) => b - a);
+  const suited = cardSuit(cards[0]) && cardSuit(cards[0]) === cardSuit(cards[1]);
+  const pair = ranks[0] === ranks[1];
+  const high = ranks[0] || 0;
+  const low = ranks[1] || 0;
+  if (pair) return high >= 11 ? 0.95 : high >= 8 ? 0.78 : 0.62;
+  let score = (high + low) / 28;
+  if (suited) score += 0.1;
+  if (high >= 14 && low >= 10) score += 0.2;
+  else if (high >= 13 && low >= 10) score += 0.12;
+  if (Math.abs(high - low) <= 2) score += 0.05;
+  return Math.max(0.05, Math.min(0.98, score));
+}
+
+function scorePostflop(cards, community) {
+  const allCards = [...(Array.isArray(cards) ? cards : []), ...(Array.isArray(community) ? community : [])];
+  if (allCards.length < 3) return scorePreflop(cards);
+  const rankCounts = new Map();
+  const suitCounts = new Map();
+  for (const card of allCards) {
+    const rank = cardRank(card);
+    const suit = cardSuit(card);
+    if (rank) rankCounts.set(rank, (rankCounts.get(rank) || 0) + 1);
+    if (suit) suitCounts.set(suit, (suitCounts.get(suit) || 0) + 1);
+  }
+  const counts = [...rankCounts.values()].sort((a, b) => b - a);
+  const maxSuit = Math.max(0, ...suitCounts.values());
+  if (counts[0] >= 4) return 0.98;
+  if (counts[0] >= 3 && counts[1] >= 2) return 0.94;
+  if (maxSuit >= 5) return 0.9;
+  if (counts[0] >= 3) return 0.82;
+  if (counts[0] >= 2 && counts[1] >= 2) return 0.72;
+  if (counts[0] >= 2) return 0.58;
+  return Math.max(0.1, Math.min(0.55, scorePreflop(cards) - 0.12 + (maxSuit === 4 ? 0.12 : 0)));
+}
+
+function strengthThresholds(profile) {
+  if (profile === "TIGHT") return { bet: 0.78, call: 0.55, bluff: 0.06, aggression: 0.28 };
+  if (profile === "LOOSE") return { bet: 0.62, call: 0.32, bluff: 0.18, aggression: 0.55 };
+  return { bet: 0.7, call: 0.43, bluff: 0.11, aggression: 0.38 };
+}
+
+function pickLegalAction(legalActions, preferredTypes) {
+  for (const type of preferredTypes) {
+    const action = findAction(legalActions, type);
+    if (!action) continue;
+    const amount = readAmount(action);
+    if (type === "BET" || type === "RAISE") {
+      if (amount == null) continue;
+      const normalizedAmount = Math.trunc(amount);
+      if (normalizedAmount <= 0) continue;
+      return { type, amount: normalizedAmount };
+    }
+    return { type };
+  }
+  return null;
+}
+
+function hasAggressedThisRound(context = {}) {
+  const userId = typeof context?.userId === "string" ? context.userId : "";
+  const lastAction = normalizeString(context?.state?.lastBettingRoundActionByUserId?.[userId]).toUpperCase();
+  return lastAction === "BET" || lastAction === "RAISE";
+}
+
+function chooseBotActionProfiled(legalActions, context = {}) {
+  const seatProfile = Array.isArray(context?.state?.seats) ? context.state.seats.find((seat) => seat?.userId === context?.userId)?.botProfile : null;
+  const profile = normalizeBotProfile(context?.profile ?? context?.botProfile ?? seatProfile, context?.random);
+  const cards = botCardsFromContext(context);
+  const phase = normalizeString(context?.state?.phase).toUpperCase();
+  const strength = phase === "PREFLOP" ? scorePreflop(cards) : scorePostflop(cards, context?.state?.community);
+  const thresholds = strengthThresholds(profile);
+  const roll = clampRandom(context?.random);
+  const toCall = Number(context?.state?.toCallByUserId?.[context?.userId] ?? 0);
+  const aggressiveTypes = hasAggressedThisRound(context) ? ["BET", "CALL", "CHECK", "FOLD"] : ["BET", "RAISE", "CALL", "CHECK", "FOLD"];
+  if ((strength >= thresholds.bet && roll < thresholds.aggression) || roll < thresholds.bluff) return pickLegalAction(legalActions, aggressiveTypes);
+  if (toCall <= 0 && strength >= thresholds.call - 0.15) return pickLegalAction(legalActions, ["CHECK", "BET", "CALL", "FOLD"]);
+  if (strength >= thresholds.call || roll < thresholds.call * 0.35) return pickLegalAction(legalActions, ["CALL", "CHECK", "FOLD"]);
+  return pickLegalAction(legalActions, ["CHECK", "FOLD", "CALL"]);
+}
+
 export {
   applySeatsAndStacksToState,
+  chooseBotActionProfiled,
   asSeatSnapshot,
   getBotConfig,
   loadSeatRows,
