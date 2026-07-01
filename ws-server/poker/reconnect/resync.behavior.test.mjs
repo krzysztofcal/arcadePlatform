@@ -1301,13 +1301,8 @@ test("restart and resync hydrate latest persisted WS mutation", async () => {
     const handId = baseline.payload.public.hand.handId;
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-restart-1", ts: "2026-02-28T02:20:02Z", payload: { tableId, handId, action: "fold" } });
     await nextMessageOfType(ws, "commandResult", { skipTypes: ["stateSnapshot", "statePatch"] });
-    let advanced = null;
-    while (!advanced) {
-      const candidate = await nextMessageOfType(ws, "stateSnapshot", { skipTypes: ["statePatch"] });
-      if (Number(candidate?.payload?.stateVersion) > Number(baseline?.payload?.stateVersion)) {
-        advanced = candidate;
-      }
-    }
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-restart-1-after-act", ts: "2026-02-28T02:20:02.500Z", payload: { tableId, view: "snapshot" } });
+    const advanced = await nextMessageForRequest(ws, "stateSnapshot", "snap-restart-1-after-act", { skipTypes: ["commandResult", "statePatch"] });
     assert.equal(advanced.payload.stateVersion > baseline.payload.stateVersion, true);
     ws.close();
   } finally {
@@ -1367,7 +1362,7 @@ test("recoverable persistence conflict does not force resync and explicit resync
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-conflict-resync", ts: "2026-02-28T03:00:00Z", payload: { tableId } });
     await nextMessageOfType(ws, "table_state", { skipTypes: ["commandResult"] });
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-conflict-resync", ts: "2026-02-28T03:00:01Z", payload: { tableId, view: "snapshot" } });
-    const baseline = await nextMessageOfType(ws, "stateSnapshot", { skipTypes: ["commandResult"] });
+    const baseline = await nextMessageForRequest(ws, "stateSnapshot", "snap-conflict-resync", { skipTypes: ["commandResult", "statePatch"] });
     const handId = baseline.payload.public.hand.handId;
 
     const forcedRaw = JSON.parse(await fs.readFile(filePath, "utf8"));
@@ -1375,7 +1370,7 @@ test("recoverable persistence conflict does not force resync and explicit resync
     await fs.writeFile(filePath, `${JSON.stringify(forcedRaw)}\n`, "utf8");
 
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-conflict-resync", ts: "2026-02-28T03:00:02Z", payload: { tableId, handId, action: "fold" } });
-    const rejected = await nextMessageOfType(ws, "commandResult", { skipTypes: ["stateSnapshot", "statePatch"] });
+    const rejected = await nextMessageForRequest(ws, "commandResult", "act-conflict-resync", { skipTypes: ["stateSnapshot", "statePatch"] });
     assert.equal(rejected.payload.status, "rejected");
     const maybeImmediateRecovery = await attemptMessage(ws, 400);
     assert.notEqual(maybeImmediateRecovery?.type, "resync");
@@ -1383,7 +1378,7 @@ test("recoverable persistence conflict does not force resync and explicit resync
     sendFrame(ws, { version: "1.0", type: "resync", requestId: "resync-after-conflict", ts: "2026-02-28T03:00:03Z", payload: { tableId } });
     await nextMessageOfType(ws, "table_state", { skipTypes: ["commandResult"] });
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-after-conflict", ts: "2026-02-28T03:00:04Z", payload: { tableId, view: "snapshot" } });
-    const hydrated = await nextMessageOfType(ws, "stateSnapshot", { skipTypes: ["commandResult"] });
+    const hydrated = await nextMessageForRequest(ws, "stateSnapshot", "snap-after-conflict", { skipTypes: ["commandResult", "statePatch"] });
     assert.equal(hydrated.payload.stateVersion, forcedRaw.tables[tableId].stateRow.version);
     ws.close();
   } finally {
