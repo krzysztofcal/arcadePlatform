@@ -477,7 +477,6 @@ function scheduleBotStep({ tableId, trigger, requestId, frameTs }) {
   const enqueueStep = () => enqueueTableCommand({
     tableId,
     commandName: "bot_step",
-    dedupeKey: "bot_step",
     run: async () => handleBotStepCommand({
       tableId,
       trigger,

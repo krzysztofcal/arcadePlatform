@@ -101,3 +101,46 @@ test("table command queue coalesces deduped commands while one is queued or runn
   await first;
   assert.equal(runCount, 1);
 });
+
+test("table command queue runs non-deduped bot-step cascade commands even while a prior step is active", async () => {
+  const queue = createTableCommandQueue();
+  const order = [];
+  let releaseFirst = null;
+  const waitForRelease = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+
+  const first = queue.enqueue({
+    tableId: "bot-cascade-table",
+    run: async () => {
+      order.push("bot_step:first:start");
+      await waitForRelease;
+      order.push("bot_step:first:end");
+      return { ok: true, shouldContinue: true };
+    }
+  });
+
+  const second = queue.enqueue({
+    tableId: "bot-cascade-table",
+    run: async () => {
+      order.push("bot_step:second:start");
+      order.push("bot_step:second:end");
+      return { ok: true, shouldContinue: false };
+    }
+  });
+
+  await Promise.resolve();
+  assert.deepEqual(order, ["bot_step:first:start"]);
+  releaseFirst();
+
+  assert.deepEqual(await Promise.all([first, second]), [
+    { ok: true, shouldContinue: true },
+    { ok: true, shouldContinue: false }
+  ]);
+  assert.deepEqual(order, [
+    "bot_step:first:start",
+    "bot_step:first:end",
+    "bot_step:second:start",
+    "bot_step:second:end"
+  ]);
+});
