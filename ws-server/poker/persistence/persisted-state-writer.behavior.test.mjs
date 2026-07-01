@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createPersistedStateWriter } from "./persisted-state-writer.mjs";
+import { createTableManager } from "../table/table-manager.mjs";
 
 test("persisted state writer strips runtime private cards before file persistence", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "persisted-state-writer-"));
@@ -213,6 +214,119 @@ test("persisted state writer hole card persistence is idempotent on replayed sta
   const holeCardInserts = queries.filter((entry) => entry.query.startsWith("insert into public.poker_hole_cards"));
   assert.equal(holeCardInserts.length, 2);
   assert.equal(holeCardInserts.every((entry) => entry.query.includes("on conflict (table_id, hand_id, user_id) do update")), true);
+});
+
+test("persisted state writer persists hole cards from real WS bootstrap private audit state when public state is sanitized", async () => {
+  const tableId = "00000000-0000-4000-8000-000000000010";
+  const userA = "00000000-0000-4000-8000-0000000000a1";
+  const userB = "00000000-0000-4000-8000-0000000000b2";
+  const tableManager = createTableManager({ maxSeats: 4 });
+  assert.equal(tableManager.join({ ws: { id: "ws-a" }, userId: userA, tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: { id: "ws-b" }, userId: userB, tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  const bootstrapped = tableManager.bootstrapHand(tableId, { nowMs: 1_000 });
+  assert.equal(bootstrapped.changed, true);
+
+  const privateStateForHoleCards = tableManager.privatePokerStateForAudit(tableId);
+  const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...nextState } = tableManager.persistedPokerState(tableId);
+  assert.equal(Object.prototype.hasOwnProperty.call(nextState, "holeCardsByUserId"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(nextState, "deck"), false);
+  assert.equal(Object.keys(privateStateForHoleCards?.holeCardsByUserId || {}).length, 2);
+
+  const queries = [];
+  const writer = createPersistedStateWriter({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: async (fn) => fn({
+      unsafe: async (query, params = []) => {
+        const text = String(query);
+        queries.push({ query: text, params });
+        if (text.startsWith("update public.poker_state set version = version + 1")) return [{ version: bootstrapped.stateVersion }];
+        return [];
+      }
+    }),
+    klog: () => {}
+  });
+
+  const result = await writer.writeMutation({
+    tableId,
+    expectedVersion: bootstrapped.stateVersion - 1,
+    nextState,
+    privateStateForHoleCards
+  });
+
+  assert.deepEqual(result, { ok: true, newVersion: bootstrapped.stateVersion });
+  const holeCardInsert = queries.find((entry) => entry.query.startsWith("insert into public.poker_hole_cards"));
+  assert.ok(holeCardInsert);
+  assert.equal(holeCardInsert.params[0], tableId);
+  assert.equal(holeCardInsert.params[1], privateStateForHoleCards.handId);
+  assert.equal(holeCardInsert.params[2], userA);
+  assert.equal(holeCardInsert.params[4], tableId);
+  assert.equal(holeCardInsert.params[5], privateStateForHoleCards.handId);
+  assert.equal(holeCardInsert.params[6], userB);
+  assert.equal(JSON.parse(holeCardInsert.params[3]).length, 2);
+  assert.equal(JSON.parse(holeCardInsert.params[7]).length, 2);
+});
+
+test("persisted state writer persists hole cards from real WS rollover private audit state when public state is sanitized", async () => {
+  const tableId = "00000000-0000-4000-8000-000000000011";
+  const userA = "00000000-0000-4000-8000-0000000000a1";
+  const userB = "00000000-0000-4000-8000-0000000000b2";
+  const tableManager = createTableManager({ maxSeats: 4 });
+  assert.equal(tableManager.join({ ws: { id: "ws-roll-a" }, userId: userA, tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: { id: "ws-roll-b" }, userId: userB, tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  const bootstrapped = tableManager.bootstrapHand(tableId, { nowMs: 1_000 });
+  assert.equal(bootstrapped.changed, true);
+  const firstState = tableManager.persistedPokerState(tableId);
+  const folded = tableManager.applyAction({
+    tableId,
+    handId: firstState.handId,
+    userId: firstState.turnUserId,
+    requestId: "fold-to-settle",
+    action: "FOLD",
+    amount: null,
+    nowMs: 1_100
+  });
+  assert.equal(folded.accepted, true);
+  assert.equal(tableManager.persistedPokerState(tableId).phase, "SETTLED");
+
+  const rollover = tableManager.rolloverSettledHand({ tableId, nowMs: 5_000 });
+  assert.equal(rollover.changed, true);
+  const privateStateForHoleCards = tableManager.privatePokerStateForAudit(tableId);
+  const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...nextState } = tableManager.persistedPokerState(tableId);
+  assert.equal(nextState.phase, "PREFLOP");
+  assert.equal(Object.keys(privateStateForHoleCards?.holeCardsByUserId || {}).length, 2);
+
+  const queries = [];
+  const writer = createPersistedStateWriter({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: async (fn) => fn({
+      unsafe: async (query, params = []) => {
+        const text = String(query);
+        queries.push({ query: text, params });
+        if (text.startsWith("update public.poker_state set version = version + 1")) return [{ version: rollover.stateVersion }];
+        return [];
+      }
+    }),
+    klog: () => {}
+  });
+
+  const result = await writer.writeMutation({
+    tableId,
+    expectedVersion: rollover.stateVersion - 1,
+    nextState,
+    privateStateForHoleCards
+  });
+
+  assert.deepEqual(result, { ok: true, newVersion: rollover.stateVersion });
+  const holeCardInsert = queries.find((entry) => entry.query.startsWith("insert into public.poker_hole_cards"));
+  assert.ok(holeCardInsert);
+  const persistedUsers = new Set();
+  for (let index = 0; index < holeCardInsert.params.length; index += 4) {
+    assert.equal(holeCardInsert.params[index], tableId);
+    assert.equal(holeCardInsert.params[index + 1], privateStateForHoleCards.handId);
+    persistedUsers.add(holeCardInsert.params[index + 2]);
+    assert.equal(JSON.parse(holeCardInsert.params[index + 3]).length, 2);
+  }
+  assert.deepEqual(persistedUsers, new Set([userA, userB]));
 });
 
 test("persisted state writer logs hole card persistence failures without failing gameplay or leaking cards", async () => {

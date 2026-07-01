@@ -1536,6 +1536,42 @@ test("bootstrapHand uses seed-derived shuffled deck and can vary by effective se
   assert.notDeepEqual(snapA.private.holeCards, snapB.private.holeCards);
 });
 
+test("privatePokerStateForAudit derives hole cards from public-only WS hand state", () => {
+  const tableId = "table_private_audit_public_only";
+  const userA = "user_a";
+  const userB = "user_b";
+  const source = createTableManager({ maxSeats: 4 });
+  assert.equal(source.join({ ws: fakeWs("audit-a"), userId: userA, tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(source.join({ ws: fakeWs("audit-b"), userId: userB, tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  assert.equal(source.bootstrapHand(tableId, { nowMs: 1_000 }).changed, true);
+
+  const fullState = source.persistedPokerState(tableId);
+  const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...publicOnlyState } = fullState;
+  const restored = createTableManager({ maxSeats: 4 });
+  assert.equal(restored.restoreTableFromPersisted(tableId, {
+    coreState: {
+      version: 1,
+      roomId: tableId,
+      maxSeats: 4,
+      appliedRequestIds: [],
+      members: [{ userId: userA, seat: 1 }, { userId: userB, seat: 2 }],
+      seats: { [userA]: 1, [userB]: 2 },
+      publicStacks: { [userA]: 100, [userB]: 100 },
+      seatDetailsByUserId: {
+        [userA]: { isBot: false, botProfile: null, leaveAfterHand: false },
+        [userB]: { isBot: false, botProfile: null, leaveAfterHand: false }
+      },
+      pokerState: publicOnlyState
+    }
+  }).ok, true);
+
+  const privateState = restored.privatePokerStateForAudit(tableId);
+  assert.equal(privateState.handId, fullState.handId);
+  assert.equal(privateState.deck.length > 0, true);
+  assert.equal(privateState.holeCardsByUserId[userA].length, 2);
+  assert.equal(privateState.holeCardsByUserId[userB].length, 2);
+});
+
 test("applyAction accepts legal turn CALL and increments state version once", () => {
   const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
   const wsA = fakeWs("apply-a");

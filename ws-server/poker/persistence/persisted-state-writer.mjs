@@ -325,9 +325,19 @@ async function maybeWriteAcceptedActionAudit({ tx, tableId, stateVersion, state,
   return { ok: true };
 }
 
-async function maybeWriteHoleCards({ tx, tableId, state }) {
+async function maybeWriteHoleCards({ tx, tableId, state, klog = () => {} }) {
   const { handId, rows } = buildHoleCardRows(state);
   if (!tableId || !handId || rows.length === 0) {
+    if (tableId || handId) {
+      const holeCardsByUserId = state?.holeCardsByUserId;
+      klog("ws_hole_cards_persist_skipped", {
+        tableId,
+        handId: handId || null,
+        hasHandId: Boolean(handId),
+        hasHoleCardsByUserId: Boolean(holeCardsByUserId && typeof holeCardsByUserId === "object" && !Array.isArray(holeCardsByUserId)),
+        playerCount: rows.length
+      });
+    }
     return { ok: true, skipped: true };
   }
   const placeholders = rows.map((_, index) => `($${index * 4 + 1}, $${index * 4 + 2}, $${index * 4 + 3}, $${index * 4 + 4}::jsonb)`).join(", ");
@@ -353,7 +363,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       if (Number.isInteger(newVersion) && newVersion >= 0) {
         await tx.unsafe("update public.poker_tables set last_activity_at = now() where id = $1;", [tableId]);
         try {
-          await maybeWriteHoleCards({ tx, tableId, state: holeCardState });
+          await maybeWriteHoleCards({ tx, tableId, state: holeCardState, klog });
         } catch (error) {
           const { handId, rows } = buildHoleCardRows(holeCardState);
           klog("ws_hole_cards_persist_failed", {
@@ -395,7 +405,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       const equalState = stableStringify(currentState) === stableStringify(sanitizePersistedState(nextState));
       if (equalState) {
         try {
-          await maybeWriteHoleCards({ tx, tableId, state: holeCardState });
+          await maybeWriteHoleCards({ tx, tableId, state: holeCardState, klog });
         } catch (error) {
           const { handId, rows } = buildHoleCardRows(holeCardState);
           klog("ws_hole_cards_persist_failed", {
@@ -432,7 +442,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     }, { env });
   }
 
-  async function writeMutation({ tableId, expectedVersion, nextState, supabaseUrl, supabaseServiceRoleKey, meta = null, acceptedActionAudit = null }) {
+  async function writeMutation({ tableId, expectedVersion, nextState, privateStateForHoleCards = null, supabaseUrl, supabaseServiceRoleKey, meta = null, acceptedActionAudit = null }) {
     if (!tableId || !Number.isInteger(expectedVersion) || expectedVersion < 0) {
       return { ok: false, reason: "invalid" };
     }
@@ -440,7 +450,9 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       return { ok: false, reason: "invalid" };
     }
     const persistedState = sanitizePersistedState(nextState);
-    const privateStateForHoleCards = normalizeJsonState(nextState);
+    const holeCardPrivateState = privateStateForHoleCards
+      ? normalizeJsonState(privateStateForHoleCards)
+      : normalizeJsonState(nextState);
     try {
       JSON.stringify(persistedState);
     } catch {
@@ -463,7 +475,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       if (!env.SUPABASE_DB_URL && !supabaseUrl && !supabaseServiceRoleKey) {
         return { ok: false, reason: "config_missing" };
       }
-      return await writeViaDb({ tableId, expectedVersion, nextState: persistedState, privateStateForHoleCards, acceptedActionAudit });
+      return await writeViaDb({ tableId, expectedVersion, nextState: persistedState, privateStateForHoleCards: holeCardPrivateState, acceptedActionAudit });
     } catch (error) {
       klog("ws_persisted_state_write_error", {
         tableId,

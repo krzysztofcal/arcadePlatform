@@ -1482,6 +1482,20 @@ export function createTableManager({
     return { ...pokerState };
   }
 
+  function privatePokerStateForAudit(tableId) {
+    const state = persistedPokerState(tableId);
+    if (!state) {
+      return null;
+    }
+    if (state.holeCardsByUserId && typeof state.holeCardsByUserId === "object" && !Array.isArray(state.holeCardsByUserId)) {
+      return state;
+    }
+    const derivedRuntimeHandState = deriveDeterministicRuntimeHandState(state);
+    return derivedRuntimeHandState
+      ? { ...state, ...derivedRuntimeHandState }
+      : state;
+  }
+
   function setPersistedStateVersion(tableId, stateVersion) {
     const table = tables.get(tableId);
     if (!table || !Number.isInteger(stateVersion) || stateVersion < 0) {
@@ -1680,6 +1694,7 @@ export function createTableManager({
     resolveImplicitLeaveTableId,
     sweepExpiredPresence,
     persistedPokerState,
+    privatePokerStateForAudit,
     persistedStateVersion,
     setPersistedStateVersion,
     restoreTableFromPersisted,
