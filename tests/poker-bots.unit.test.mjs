@@ -66,6 +66,18 @@ import {
     chooseBotActionTrivial([{ type: "BET", min: 15 }, "CHECK", "FOLD"], strongPreflop),
     { type: "BET", amount: 15 }
   );
+  assert.deepEqual(
+    chooseBotActionTrivial(["BET", "CHECK", "FOLD"], strongPreflop),
+    { type: "CHECK" }
+  );
+  assert.deepEqual(
+    chooseBotActionTrivial([{ type: "BET", amount: 0 }, "CHECK", "FOLD"], strongPreflop),
+    { type: "CHECK" }
+  );
+  assert.deepEqual(
+    chooseBotActionTrivial(["RAISE", "CALL", "FOLD"], { ...strongPreflop, state: { phase: "PREFLOP", toCallByUserId: { bot_1: 2 } } }),
+    { type: "CALL" }
+  );
 
   const weakTightFacingCall = {
     userId: "bot_2",

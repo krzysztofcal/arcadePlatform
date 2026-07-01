@@ -380,7 +380,12 @@ function pickLegalAction(legalActions, preferredTypes) {
     const action = findAction(legalActions, type);
     if (!action) continue;
     const amount = readAmount(action);
-    if (type === "BET" || type === "RAISE") return { type, amount: amount == null ? 0 : Math.max(0, Math.trunc(amount)) };
+    if (type === "BET" || type === "RAISE") {
+      if (amount == null) continue;
+      const normalizedAmount = Math.trunc(amount);
+      if (normalizedAmount <= 0) continue;
+      return { type, amount: normalizedAmount };
+    }
     return { type };
   }
   return null;
