@@ -12,6 +12,11 @@ import { makeBotUserId } from "../shared/poker-domain/bots.mjs";
 import { dealHoleCards, deriveDeck, toCardCodes } from "./poker/shared/poker-primitives.mjs";
 import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
 
+const FIXED_RANDOM_BOT_AUTOPLAY_ADAPTER_URL = new URL(
+  "./poker/runtime/accepted-bot-autoplay-adapter.fixed-random.fixture.mjs",
+  import.meta.url
+).href;
+
 function getFreePort() {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
@@ -94,6 +99,7 @@ function createServer({ env = {} } = {}) {
         PORT: String(port),
         WS_BOT_REACTION_MIN_MS: "0",
         WS_BOT_REACTION_MAX_MS: "0",
+        WS_ACCEPTED_BOT_AUTOPLAY_ADAPTER_MODULE_PATH: FIXED_RANDOM_BOT_AUTOPLAY_ADAPTER_URL,
         ...env
       },
       stdio: ["ignore", "pipe", "pipe"]
