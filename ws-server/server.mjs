@@ -2419,6 +2419,12 @@ wss.on("connection", (ws) => {
         const resyncedSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: resynced.tableState, tableSnapshot: resyncedSnapshot });
         maybeTouchPersistedSeatLastSeen(connState);
+        scheduleObservedBotTurn({
+          tableId,
+          trigger: "resync",
+          requestId: frame.requestId ?? null,
+          frameTs: frame.ts
+        });
         return;
       }
 
@@ -2508,11 +2514,23 @@ wss.on("connection", (ws) => {
         const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         await nextEventLoopTurn();
         sendStateSnapshot(ws, connState, { tableSnapshot, reason: replay.reason });
+        scheduleObservedBotTurn({
+          tableId,
+          trigger: "resume_resync",
+          requestId: frame.requestId ?? null,
+          frameTs: frame.ts
+        });
         return;
       }
 
       if (replay.frames.length === 0) {
         sendResumeAck(ws, connState, { requestId: frame.requestId ?? null, tableId });
+        scheduleObservedBotTurn({
+          tableId,
+          trigger: "resume_ack",
+          requestId: frame.requestId ?? null,
+          frameTs: frame.ts
+        });
         return;
       }
 
@@ -2520,6 +2538,12 @@ wss.on("connection", (ws) => {
         connState.session.latestDeliveredSeqByTableId.set(tableId, replayFrame.seq);
         sendFrame(ws, replayFrame);
       }
+      scheduleObservedBotTurn({
+        tableId,
+        trigger: "resume_replay",
+        requestId: frame.requestId ?? null,
+        frameTs: frame.ts
+      });
       return;
     }
 
