@@ -88,7 +88,7 @@ test("admin-poker-audit rejects unauthorized callers", async () => {
     },
     loadPokerAudit: async () => ({ ok: true, hands: [] }),
   });
-  const response = await handler(createEvent({ handId: "hand-audit-1" }));
+  const response = await handler(createEvent({ handId: "hand-audit-1", revealPrivateCards: "1" }));
   assert.equal(response.statusCode, 403);
 });
 
@@ -122,6 +122,9 @@ test("search by handId returns selected hand and parses action plus settlement m
 
   assert.equal(payload.selectedHand.handId, "hand-audit-1");
   assert.equal(payload.selectedHand.actions.length, 1);
+  assert.equal(payload.selectedHand.timeline.length, 2);
+  assert.equal(payload.selectedHand.timeline[1].actionType, "HAND_SETTLED");
+  assert.equal(payload.selectedHand.timeline[1].source, "system");
   assert.equal(payload.selectedHand.actions[0].actionType, "CALL");
   assert.equal(payload.selectedHand.actions[0].source, "human");
   assert.equal(payload.selectedHand.actions[0].potTotalBefore, 8);
@@ -129,6 +132,48 @@ test("search by handId returns selected hand and parses action plus settlement m
   assert.deepEqual(payload.selectedHand.settlement.communityCards, ["6C", "4S", "4C", "9D", "TD"]);
   assert.equal(payload.selectedHand.settlement.payoutByUserId["00000000-0000-4000-8000-0000000000a1"], 44);
   assert.equal(payload.selectedHand.settlement.evaluatedHands[0].name, "Pair");
+  assert.equal(Object.prototype.hasOwnProperty.call(payload.selectedHand, "privateCardsByUserId"), false);
+});
+
+test("revealPrivateCards includes selected hand private cards only when requested", async () => {
+  let calls = 0;
+  const payload = await loadPokerAudit({
+    handId: "hand-audit-1",
+    revealPrivateCards: true,
+    executeSqlFn: async (query) => {
+      calls += 1;
+      if (String(query).includes("public.poker_hole_cards")) {
+        return [
+          { user_id: "00000000-0000-4000-8000-0000000000a1", cards: JSON.stringify(["AS", "KD"]) },
+          { user_id: "unrelated-user", cards: JSON.stringify(["2C", "3D"]) }
+        ];
+      }
+      return rows.filter((row) => row.hand_id === "hand-audit-1");
+    }
+  });
+
+  assert.equal(calls, 2);
+  assert.deepEqual(payload.selectedHand.privateCardsByUserId, {
+    "00000000-0000-4000-8000-0000000000a1": ["AS", "KD"]
+  });
+  assert.equal(payload.selectedHand.privateCardsAvailable, true);
+  const serialized = JSON.stringify(payload);
+  assert.equal(serialized.includes("2C"), false);
+  assert.equal(serialized.includes('"deck"'), false);
+});
+
+test("older hands without stored private cards reveal empty mapping gracefully", async () => {
+  const payload = await loadPokerAudit({
+    handId: "hand-audit-1",
+    revealPrivateCards: true,
+    executeSqlFn: async (query) => {
+      if (String(query).includes("public.poker_hole_cards")) return [];
+      return rows.filter((row) => row.hand_id === "hand-audit-1");
+    }
+  });
+
+  assert.deepEqual(payload.selectedHand.privateCardsByUserId, {});
+  assert.equal(payload.selectedHand.privateCardsAvailable, false);
 });
 
 test("response does not expose raw hole cards or deck keys", async () => {

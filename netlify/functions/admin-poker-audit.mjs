@@ -60,6 +60,40 @@ function normalizeStringList(values) {
   return values.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim());
 }
 
+function normalizeCardCode(value) {
+  if (typeof value === "string") {
+    const code = value.trim().toUpperCase();
+    return /^(10|[2-9TJQKA])[CDHS]$/.test(code) ? code.replace(/^10/, "T") : null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const suit = typeof value.s === "string" ? value.s.trim().toUpperCase() : "";
+  const rankValue = value.r;
+  const rank = typeof rankValue === "number"
+    ? (rankValue === 14 ? "A" : rankValue === 13 ? "K" : rankValue === 12 ? "Q" : rankValue === 11 ? "J" : rankValue === 10 ? "T" : String(rankValue))
+    : typeof rankValue === "string"
+      ? rankValue.trim().toUpperCase().replace(/^10$/, "T")
+      : "";
+  return /^[CDHS]$/.test(suit) && /^(?:[2-9TJQKA])$/.test(rank) ? `${rank}${suit}` : null;
+}
+
+function normalizeCardList(cards) {
+  if (!Array.isArray(cards)) return [];
+  return cards.map(normalizeCardCode).filter(Boolean);
+}
+
+function parseCardsValue(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 function normalizePayoutMap(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return Object.fromEntries(
@@ -111,6 +145,29 @@ function normalizeAction(row) {
   };
 }
 
+function normalizeSettlementTimelineRow(row) {
+  if (!row) return null;
+  const settlement = normalizeSettlement(row);
+  return {
+    createdAt: row?.created_at || null,
+    version: Number.isInteger(Number(row?.version)) ? Number(row.version) : null,
+    actionType: "HAND_SETTLED",
+    userId: null,
+    requestId: row?.request_id || null,
+    source: "system",
+    phaseFrom: row?.phase_from || null,
+    phaseTo: row?.phase_to || "SETTLED",
+    amount: settlement?.payoutTotal ?? null,
+    winnerUserIds: settlement?.winners || [],
+    reason: settlement?.reason || null,
+    payoutTotal: settlement?.payoutTotal ?? null,
+    potTotalBefore: null,
+    potTotalAfter: settlement?.payoutTotal ?? null,
+    actorStackBefore: null,
+    actorStackAfter: null
+  };
+}
+
 function handSummaryFromRows(rows) {
   const sorted = (Array.isArray(rows) ? rows : []).slice().sort((left, right) => {
     const leftTime = Date.parse(left?.created_at || "") || 0;
@@ -138,6 +195,7 @@ function selectedHandFromRows(rows) {
   if (sourceRows.length === 0) return null;
   const settlementRow = sourceRows.find((row) => row?.action_type === "HAND_SETTLED") || null;
   const actions = sourceRows.filter((row) => row?.action_type !== "HAND_SETTLED").map(normalizeAction);
+  const settlementTimelineRow = normalizeSettlementTimelineRow(settlementRow);
   const summary = handSummaryFromRows(sourceRows);
   return {
     tableId: summary.tableId,
@@ -147,6 +205,7 @@ function selectedHandFromRows(rows) {
     actionCount: summary.actionCount,
     hasSettlement: summary.hasSettlement,
     actions,
+    timeline: settlementTimelineRow ? actions.concat(settlementTimelineRow) : actions,
     settlement: normalizeSettlement(settlementRow)
   };
 }
@@ -178,7 +237,40 @@ function buildWhere({ tableId, handId }) {
   return { whereSql: clauses.join(" and "), params };
 }
 
-async function loadPokerAudit({ tableId = "", handId = "", limit = DEFAULT_LIMIT, executeSqlFn = executeSql } = {}) {
+async function loadPrivateCardsForSelectedHand({ selectedHand, executeSqlFn }) {
+  if (!selectedHand?.tableId || !selectedHand?.handId) {
+    return { privateCardsByUserId: {}, privateCardsAvailable: false };
+  }
+  try {
+    const rows = await executeSqlFn(
+      "select user_id::text as user_id, cards from public.poker_hole_cards where table_id = $1::uuid and hand_id = $2;",
+      [selectedHand.tableId, selectedHand.handId]
+    );
+    const relevantUserIds = new Set();
+    for (const action of selectedHand.actions || []) {
+      if (typeof action?.userId === "string" && action.userId.trim()) relevantUserIds.add(action.userId.trim());
+    }
+    const settlement = selectedHand.settlement || {};
+    normalizeStringList(settlement.winners).forEach((userId) => relevantUserIds.add(userId));
+    Object.keys(settlement.payoutByUserId || {}).forEach((userId) => relevantUserIds.add(userId));
+    (Array.isArray(settlement.evaluatedHands) ? settlement.evaluatedHands : []).forEach((hand) => {
+      if (typeof hand?.userId === "string" && hand.userId.trim()) relevantUserIds.add(hand.userId.trim());
+    });
+
+    const privateCardsByUserId = {};
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const userId = typeof row?.user_id === "string" ? row.user_id.trim() : "";
+      if (!userId || (relevantUserIds.size > 0 && !relevantUserIds.has(userId))) continue;
+      const cards = normalizeCardList(parseCardsValue(row.cards));
+      if (cards.length === 2) privateCardsByUserId[userId] = cards;
+    }
+    return { privateCardsByUserId, privateCardsAvailable: Object.keys(privateCardsByUserId).length > 0 };
+  } catch (error) {
+    return { privateCardsByUserId: {}, privateCardsAvailable: false };
+  }
+}
+
+async function loadPokerAudit({ tableId = "", handId = "", limit = DEFAULT_LIMIT, revealPrivateCards = false, executeSqlFn = executeSql } = {}) {
   const normalizedTableId = normalizeText(tableId);
   const normalizedHandId = normalizeText(handId);
   const boundedLimit = parseLimit(limit);
@@ -213,6 +305,10 @@ order by mh.last_action_at desc, pa.table_id::text asc, pa.hand_id asc, pa.versi
   if (normalizedHandId && groups.length > 0) {
     const exactGroup = groups.find((group) => group.some((row) => row?.hand_id === normalizedHandId && (!normalizedTableId || String(row?.table_id || "").includes(normalizedTableId)))) || groups[0];
     selectedHand = selectedHandFromRows(exactGroup);
+    if (revealPrivateCards === true || revealPrivateCards === "1") {
+      const privateCards = await loadPrivateCardsForSelectedHand({ selectedHand, executeSqlFn });
+      selectedHand = { ...selectedHand, ...privateCards };
+    }
   }
   return { ok: true, hands, selectedHand };
 }
@@ -237,12 +333,18 @@ function createAdminPokerAuditHandler(deps = {}) {
       return { statusCode: 405, headers: cors, body: JSON.stringify({ error: "method_not_allowed" }) };
     }
     try {
-      await requireAdmin(event, env);
+      const admin = await requireAdmin(event, env);
       const qs = event.queryStringParameters || {};
+      const revealPrivateCards = qs.revealPrivateCards === "1";
+      // Sensitive reveal is already gated by admin auth and explicit query flag.
+      // TODO: If a durable admin action audit stream is introduced, log metadata only:
+      // admin.userId, tableId, handId, revealPrivateCards, timestamp.
+      void admin;
       const payload = await loadAudit({
         tableId: qs.tableId,
         handId: qs.handId,
-        limit: qs.limit
+        limit: qs.limit,
+        revealPrivateCards
       });
       return { statusCode: 200, headers: cors, body: JSON.stringify(payload) };
     } catch (error) {

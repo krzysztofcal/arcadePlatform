@@ -543,11 +543,40 @@
     return values.map(function(value){ return String(value == null ? "" : value); }).filter(Boolean).join(", ") || "—";
   }
 
+  function joinCards(values){
+    if (!Array.isArray(values) || !values.length) return "—";
+    return values.map(function(value){ return String(value == null ? "" : value); }).filter(Boolean).join(" ") || "—";
+  }
+
   function renderCardCodes(cards){
     if (!Array.isArray(cards) || !cards.length) return '<p class="admin-empty">No board recorded.</p>';
     return '<div class="admin-inline-actions">' + cards.map(function(card){
       return '<span class="admin-pill admin-mono">' + escapeHtml(card) + "</span>";
     }).join("") + "</div>";
+  }
+
+  function renderSourcePill(source){
+    var normalized = String(source || "").toLowerCase();
+    if (normalized === "bot") normalized = "bot_autoplay";
+    if (normalized === "audit") normalized = "system";
+    var label = normalized || "—";
+    var tone = normalized === "human" ? "info" : normalized === "bot_autoplay" ? "success" : normalized === "timeout" ? "danger" : "";
+    return pill(label, tone);
+  }
+
+  function formatEvaluatedHandLabel(item){
+    if (!item) return "evaluated";
+    var name = item.name || "category";
+    if (item.category != null) return name + " (category " + item.category + ")";
+    return name;
+  }
+
+  function formatAuditRange(before, after){
+    return formatAmount(before) + " → " + formatAmount(after);
+  }
+
+  function isSettlementLinkedAction(action){
+    return action && action.actionType !== "HAND_SETTLED" && action.phaseTo === "SETTLED";
   }
 
   function renderPokerAudit(){
@@ -563,7 +592,7 @@
           "<td>" + escapeHtml(joinList(item.winnerUserIds || [])) + "</td>",
           "<td>" + escapeHtml(formatAmount(item.potTotal)) + "</td>",
           "<td>" + (item.hasSettlement ? pill("Settled", "success") : pill("Settlement missing", "danger")) + "</td>",
-          '<td><button class="admin-btn admin-btn--ghost" type="button" data-audit-action="details" data-audit-table-id="' + escapeHtml(item.tableId || "") + '" data-audit-hand-id="' + escapeHtml(item.handId || "") + '">Details</button></td>',
+          '<td><button class="admin-btn admin-btn--primary" type="button" aria-label="View poker audit details for hand ' + escapeHtml(item.handId || "") + '" data-audit-action="details" data-audit-table-id="' + escapeHtml(item.tableId || "") + '" data-audit-hand-id="' + escapeHtml(item.handId || "") + '">View details</button></td>',
           "</tr>"
         ].join("");
       }).join("");
@@ -594,13 +623,16 @@
       };
     }) : [];
     var evaluatedRows = settlement && Array.isArray(settlement.evaluatedHands) ? settlement.evaluatedHands.map(function(item){
-      var label = item && (item.name || item.category != null) ? ((item.name || "category") + (item.category != null ? " · " + item.category : "")) : "evaluated";
       return {
-        title: escapeHtml((item && item.userId || "user") + " · " + label),
+        title: escapeHtml((item && item.userId || "user") + " · " + formatEvaluatedHandLabel(item)),
         meta: escapeHtml("ranks " + joinList(item && item.ranks || []) + " · best " + joinList(item && item.bestFiveCards || [])),
       };
     }) : [];
-    var actionRows = Array.isArray(hand.actions) ? hand.actions : [];
+    var timelineRows = Array.isArray(hand.timeline) ? hand.timeline : (Array.isArray(hand.actions) ? hand.actions : []);
+    var privateCards = hand.privateCardsByUserId && typeof hand.privateCardsByUserId === "object" ? hand.privateCardsByUserId : null;
+    var privateCardRows = privateCards ? Object.keys(privateCards).sort().map(function(userId){
+      return { title: escapeHtml(userId), meta: escapeHtml(joinCards(privateCards[userId])) };
+    }) : [];
     var html = [];
     html.push('<h2 class="xp-card__title">Hand audit</h2>');
     html.push('<div class="admin-surface">');
@@ -619,22 +651,46 @@
     html.push('<div><h3 class="admin-section-title">Winners / payouts</h3>' + renderMiniList(payoutRows) + "</div>");
     html.push('<div><h3 class="admin-section-title">Pots</h3>' + renderMiniList(potRows) + "</div>");
     html.push('<div><h3 class="admin-section-title">Evaluated hands</h3>' + renderMiniList(evaluatedRows) + "</div>");
+    html.push('<div><h3 class="admin-section-title">Private cards</h3>');
+    html.push('<p class="admin-note admin-note--danger">Private cards are sensitive. Reveal only for audit/debugging.</p>');
+    if (privateCards){
+      html.push(renderMiniList(privateCardRows.length ? privateCardRows : [{ title: escapeHtml("Private cards unavailable"), meta: escapeHtml("No stored cards were found for this hand.") }]));
+    } else {
+      html.push('<p class="admin-empty">Hidden by default.</p>');
+      html.push('<div class="admin-inline-actions"><button class="admin-btn admin-btn--danger" type="button" data-audit-action="reveal-private" data-audit-table-id="' + escapeHtml(hand.tableId || "") + '" data-audit-hand-id="' + escapeHtml(hand.handId || "") + '">Reveal private cards</button></div>');
+    }
+    html.push("</div>");
     html.push('<div><h3 class="admin-section-title">Action timeline</h3>');
-    if (!actionRows.length){
+    if (!timelineRows.length){
       html.push('<p class="admin-empty">No actions found.</p>');
     } else {
-      html.push('<div class="admin-table-wrap"><table class="admin-table"><thead><tr><th scope="col">Version</th><th scope="col">Phase</th><th scope="col">Source</th><th scope="col">User</th><th scope="col">Action</th><th scope="col">Amount</th><th scope="col">Pot</th><th scope="col">Stack</th></tr></thead><tbody>');
-      html.push(actionRows.map(function(action){
+      if (Array.isArray(hand.actions) && hand.actions.length === 0){
+        html.push('<p class="admin-empty">No accepted action rows found.</p>');
+      }
+      html.push('<div class="admin-table-wrap"><table class="admin-table"><thead><tr><th scope="col">Version</th><th scope="col">Phase</th><th scope="col">Source</th><th scope="col">User</th><th scope="col">Action</th><th scope="col">Amount</th><th scope="col">Pot / payout</th><th scope="col">Stack / winners</th></tr></thead><tbody>');
+      html.push(timelineRows.map(function(action){
+        var settlementRow = action.actionType === "HAND_SETTLED";
+        var linkedSettlement = isSettlementLinkedAction(action);
+        var potText = settlementRow
+          ? ("payout " + formatAmount(action.payoutTotal))
+          : linkedSettlement
+            ? "see HAND_SETTLED"
+            : formatAuditRange(action.potTotalBefore, action.potTotalAfter);
+        var stackText = settlementRow
+          ? ("winners " + joinList(action.winnerUserIds || []))
+          : linkedSettlement
+            ? "settled separately"
+            : formatAuditRange(action.actorStackBefore, action.actorStackAfter);
         return [
           "<tr>",
           "<td>" + escapeHtml(action.version == null ? "—" : action.version) + "</td>",
           "<td>" + escapeHtml((action.phaseFrom || "—") + " → " + (action.phaseTo || "—")) + "</td>",
-          "<td>" + escapeHtml(action.source || "—") + "</td>",
+          "<td>" + renderSourcePill(action.source || (settlementRow ? "system" : "")) + "</td>",
           '<td class="admin-mono">' + escapeHtml(action.userId || "—") + "</td>",
-          "<td>" + escapeHtml(action.actionType || "—") + "</td>",
+          "<td>" + escapeHtml(action.actionType || "—") + (settlementRow && action.reason ? '<div class="admin-note">' + escapeHtml(action.reason) + "</div>" : "") + "</td>",
           "<td>" + escapeHtml(formatAmount(action.amount)) + "</td>",
-          "<td>" + escapeHtml(formatAmount(action.potTotalBefore) + " → " + formatAmount(action.potTotalAfter)) + "</td>",
-          "<td>" + escapeHtml(formatAmount(action.actorStackBefore) + " → " + formatAmount(action.actorStackAfter)) + "</td>",
+          "<td>" + escapeHtml(potText) + "</td>",
+          "<td>" + escapeHtml(stackText) + "</td>",
           "</tr>"
         ].join("");
       }).join(""));
@@ -974,7 +1030,9 @@
     }
     setStatus(t("loading", "Loading..."), "info");
     try {
-      var payload = await apiFetch("/.netlify/functions/admin-poker-audit" + buildQuery(filters), { method: "GET" });
+      var query = Object.assign({}, filters);
+      if (opts.revealPrivateCards) query.revealPrivateCards = "1";
+      var payload = await apiFetch("/.netlify/functions/admin-poker-audit" + buildQuery(query), { method: "GET" });
       state.pokerAudit.items = payload.hands || [];
       state.pokerAudit.selectedHand = payload.selectedHand || opts.selectedHand || null;
       state.pokerAudit.loaded = true;
@@ -985,14 +1043,22 @@
     }
   }
 
-  async function loadPokerAuditHand(tableId, handId){
+  async function loadPokerAuditHand(tableId, handId, revealPrivateCards){
     if (!handId) return;
     var filters = {
       tableId: tableId || "",
       handId: handId,
       limit: state.pokerAudit.filters && state.pokerAudit.filters.limit ? state.pokerAudit.filters.limit : "20"
     };
-    await loadPokerAudit({ filters: filters });
+    await loadPokerAudit({ filters: filters, revealPrivateCards: revealPrivateCards === true });
+  }
+
+  async function revealPokerAuditPrivateCards(tableId, handId){
+    if (!handId) return;
+    if (window.confirm && !window.confirm("Reveal private cards for this hand?\n\nPrivate cards are sensitive. Reveal only for audit/debugging.")){
+      return;
+    }
+    await loadPokerAuditHand(tableId, handId, true);
   }
 
   async function submitAdjustForm(event){
@@ -1190,6 +1256,11 @@
     if (action === "details"){
       setActiveTab("pokerAudit");
       loadPokerAuditHand(tableId, handId);
+      return;
+    }
+    if (action === "reveal-private"){
+      setActiveTab("pokerAudit");
+      revealPokerAuditPrivateCards(tableId, handId);
     }
   }
 

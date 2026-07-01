@@ -340,6 +340,7 @@ function buildContext() {
       return { ok: true, json: async () => ({ summary: {}, janitor: {}, runtime: {}, recentActions: [], recentCleanup: [] }) };
     }
     if (text.includes("/.netlify/functions/admin-poker-audit")) {
+      const reveal = text.includes("revealPrivateCards=1");
       return { ok: true, json: async () => ({
         ok: true,
         hands: [{
@@ -347,7 +348,7 @@ function buildContext() {
           handId: "hand-audit",
           startedAt: "2026-07-01T10:00:00.000Z",
           settledAt: "2026-07-01T10:02:00.000Z",
-          actionCount: 1,
+          actionCount: 3,
           winnerUserIds: ["user-a"],
           potTotal: 44,
           hasSettlement: true
@@ -357,10 +358,21 @@ function buildContext() {
           handId: "hand-audit",
           startedAt: "2026-07-01T10:00:00.000Z",
           settledAt: "2026-07-01T10:02:00.000Z",
-          actionCount: 1,
+          actionCount: 3,
           hasSettlement: true,
-          actions: [{ version: 8, phaseFrom: "FLOP", phaseTo: "FLOP", source: "human", userId: "user-a", actionType: "BET", amount: 20, potTotalBefore: 6, potTotalAfter: 26, actorStackBefore: 95, actorStackAfter: 75 }],
-          settlement: { reason: "computed", settledAt: "2026-07-01T10:02:00.000Z", communityCards: ["6C", "4S", "4C", "9D", "TD"], winners: ["user-a"], payoutByUserId: { "user-a": 44 }, payoutTotal: 44, potsAwarded: [{ amount: 44, eligibleUserIds: ["user-a"], winners: ["user-a"] }], evaluatedHands: [{ userId: "user-a", name: "Pair", category: 1, ranks: [10], bestFiveCards: ["TD", "TC", "9D", "6C", "4S"] }] }
+          actions: [
+            { version: 6, phaseFrom: "TURN", phaseTo: "TURN", source: "bot_autoplay", userId: "user-b", actionType: "CHECK", amount: null, potTotalBefore: 120, potTotalAfter: 120, actorStackBefore: 80, actorStackAfter: 80 },
+            { version: 7, phaseFrom: "RIVER", phaseTo: "RIVER", source: "timeout", userId: "user-c", actionType: "FOLD", amount: null, potTotalBefore: 136, potTotalAfter: 136, actorStackBefore: 41, actorStackAfter: 41 },
+            { version: 8, phaseFrom: "RIVER", phaseTo: "SETTLED", source: "human", userId: "user-a", actionType: "CALL", amount: 0, potTotalBefore: 136, potTotalAfter: 0, actorStackBefore: 41, actorStackAfter: 176 }
+          ],
+          timeline: [
+            { version: 6, phaseFrom: "TURN", phaseTo: "TURN", source: "bot_autoplay", userId: "user-b", actionType: "CHECK", amount: null, potTotalBefore: 120, potTotalAfter: 120, actorStackBefore: 80, actorStackAfter: 80 },
+            { version: 7, phaseFrom: "RIVER", phaseTo: "RIVER", source: "timeout", userId: "user-c", actionType: "FOLD", amount: null, potTotalBefore: 136, potTotalAfter: 136, actorStackBefore: 41, actorStackAfter: 41 },
+            { version: 8, phaseFrom: "RIVER", phaseTo: "SETTLED", source: "human", userId: "user-a", actionType: "CALL", amount: 0, potTotalBefore: 136, potTotalAfter: 0, actorStackBefore: 41, actorStackAfter: 176 },
+            { version: 9, phaseFrom: null, phaseTo: "SETTLED", source: "system", userId: null, actionType: "HAND_SETTLED", amount: 152, payoutTotal: 152, winnerUserIds: ["user-a"], reason: "computed" }
+          ],
+          settlement: { reason: "computed", settledAt: "2026-07-01T10:02:00.000Z", communityCards: ["AD", "JD", "3C", "KD", "6S"], winners: ["user-a"], payoutByUserId: { "user-a": 152 }, payoutTotal: 152, potsAwarded: [{ amount: 152, eligibleUserIds: ["user-a"], winners: ["user-a"] }], evaluatedHands: [{ userId: "user-a", name: "TWO_PAIR", category: 3, ranks: [10], bestFiveCards: ["AD", "JD", "3C", "KD", "6S"] }] },
+          ...(reveal ? { privateCardsByUserId: { "user-a": ["AS", "KD"] }, privateCardsAvailable: true } : {})
         }
       }) };
     }
@@ -442,8 +454,32 @@ test("admin page poker audit search renders hand timeline and settlement summary
 
   assert.equal(fetchCalls.includes("/.netlify/functions/admin-poker-audit?handId=hand-audit&limit=20"), true);
   assert.match(document.getElementById("adminPokerAuditBody").innerHTML, /hand-audit/);
+  assert.match(document.getElementById("adminPokerAuditBody").innerHTML, /View details/);
   assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /Action timeline/);
-  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /BET/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /CALL/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /HAND_SETTLED/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /see HAND_SETTLED/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /settled separately/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /human/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /bot_autoplay/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /timeout/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /system/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /AD<\/span><span class="admin-pill admin-mono">JD/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /TWO_PAIR \(category 3\)/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /Hidden by default/);
   assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /computed/);
   assert.doesNotMatch(document.getElementById("adminPokerAuditDetail").innerHTML, /holeCardsByUserId|deck/);
+
+  const revealButton = createElement("button");
+  revealButton.setAttribute("data-audit-action", "reveal-private");
+  revealButton.setAttribute("data-audit-table-id", "table-audit");
+  revealButton.setAttribute("data-audit-hand-id", "hand-audit");
+  revealButton.parentNode = document.body;
+  revealButton.parentElement = document.body;
+  document.dispatchEvent({ type: "click", bubbles: true, target: revealButton, preventDefault() {} });
+  await flush();
+  await flush();
+
+  assert.equal(fetchCalls.includes("/.netlify/functions/admin-poker-audit?tableId=table-audit&handId=hand-audit&limit=20&revealPrivateCards=1"), true);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /AS KD/);
 });
