@@ -459,6 +459,18 @@ function buildAutoplayStartSnapshot(tableId) {
   };
 }
 
+function buildBotTurnScheduleKey(tableId) {
+  const state = tableManager.persistedPokerState(tableId);
+  if (!state || typeof state !== "object") return null;
+  if (!isLiveHandPhase(state.phase) || state.phase === "SHOWDOWN") return null;
+  const turnUserId = typeof state.turnUserId === "string" ? state.turnUserId.trim() : "";
+  if (!turnUserId || tableManager.isBotUser(tableId, turnUserId) !== true) return null;
+  const stateVersion = Number(tableManager.persistedStateVersion(tableId) || state.version || 0);
+  const handId = typeof state.handId === "string" && state.handId.trim() ? state.handId.trim() : "unknown_hand";
+  const phase = typeof state.phase === "string" && state.phase.trim() ? state.phase.trim() : "unknown_phase";
+  return `${tableId}:${stateVersion}:${handId}:${phase}:${turnUserId}`;
+}
+
 async function runBotStep({ tableId, trigger, requestId, frameTs }) {
   const acceptedBotAutoplayExecutor = await loadAcceptedBotAutoplayExecutor();
   const startSnapshot = buildAutoplayStartSnapshot(tableId);
@@ -472,6 +484,8 @@ async function runBotStep({ tableId, trigger, requestId, frameTs }) {
   });
   return acceptedBotAutoplayExecutor({ tableId, trigger, requestId, frameTs });
 }
+
+const scheduledObservedBotTurnKeys = new Map();
 
 function scheduleBotStep({ tableId, trigger, requestId, frameTs }) {
   const enqueueStep = () => enqueueTableCommand({
@@ -502,6 +516,34 @@ function scheduleBotStep({ tableId, trigger, requestId, frameTs }) {
     return queued;
   };
   return runCascade();
+}
+
+function scheduleObservedBotTurn({ tableId, trigger, requestId = null, frameTs = null }) {
+  const scheduleKey = buildBotTurnScheduleKey(tableId);
+  if (!scheduleKey) {
+    scheduledObservedBotTurnKeys.delete(tableId);
+    return false;
+  }
+  if (scheduledObservedBotTurnKeys.get(tableId) === scheduleKey) return false;
+  scheduledObservedBotTurnKeys.set(tableId, scheduleKey);
+  try {
+    scheduleBotStep({ tableId, trigger, requestId, frameTs });
+    klogSafe("ws_observed_bot_turn_autoplay_scheduled", {
+      tableId,
+      trigger: trigger || null,
+      scheduleKey
+    });
+    return true;
+  } catch (error) {
+    scheduledObservedBotTurnKeys.delete(tableId);
+    klogSafe("ws_observed_bot_turn_autoplay_failed", {
+      tableId,
+      trigger: trigger || null,
+      scheduleKey,
+      message: error?.message || "unknown"
+    });
+    return false;
+  }
 }
 
 function enqueueTableCommand({ tableId, commandName, dedupeKey = null, run }) {
@@ -2578,6 +2620,12 @@ wss.on("connection", (ws) => {
       const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
       sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: subscribed.tableState, tableSnapshot });
       maybeTouchPersistedSeatLastSeen(connState);
+      scheduleObservedBotTurn({
+        tableId,
+        trigger: "table_state_sub",
+        requestId: frame.requestId ?? null,
+        frameTs: frame.ts
+      });
       return;
     }
 

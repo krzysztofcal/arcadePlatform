@@ -11,6 +11,7 @@ import WebSocket from "ws";
 import { makeBotUserId } from "../shared/poker-domain/bots.mjs";
 import { dealHoleCards, deriveDeck, toCardCodes } from "./poker/shared/poker-primitives.mjs";
 import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
+import { buildBootstrappedPokerState } from "./poker/engine/poker-engine.mjs";
 
 const FIXED_RANDOM_BOT_AUTOPLAY_ADAPTER_URL = new URL(
   "./poker/runtime/accepted-bot-autoplay-adapter.fixed-random.fixture.mjs",
@@ -4138,6 +4139,106 @@ test("human act against queued bots returns next actionable human snapshot", asy
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
+  }
+});
+
+test("table_state_sub schedules autoplay for restored live bot turn before timeout sweep", async () => {
+  const secret = "restored-bot-turn-sub-secret";
+  const tableId = "table_restored_bot_turn_sub_autoplay";
+  const humanUserId = "restored_sub_human";
+  const botSeat2 = makeBotUserId(tableId, 2);
+  const botSeat3 = makeBotUserId(tableId, 3);
+  const baseCoreState = {
+    roomId: tableId,
+    version: 8,
+    maxSeats: 6,
+    members: [
+      { userId: humanUserId, seat: 1 },
+      { userId: botSeat2, seat: 2 },
+      { userId: botSeat3, seat: 3 }
+    ],
+    seats: [
+      { userId: humanUserId, seatNo: 1, status: "ACTIVE" },
+      { userId: botSeat2, seatNo: 2, status: "ACTIVE" },
+      { userId: botSeat3, seatNo: 3, status: "ACTIVE" }
+    ],
+    seatDetailsByUserId: {
+      [humanUserId]: { isBot: false, stack: 100 },
+      [botSeat2]: { isBot: true, botProfile: "NORMAL", stack: 100 },
+      [botSeat3]: { isBot: true, botProfile: "NORMAL", stack: 100 }
+    },
+    publicStacks: {
+      [humanUserId]: 100,
+      [botSeat2]: 100,
+      [botSeat3]: 100
+    }
+  };
+  const liveState = {
+    ...buildBootstrappedPokerState({
+      tableId,
+      coreState: baseCoreState,
+      dealerSeatNo: 2,
+      startingStacks: baseCoreState.publicStacks,
+      handVersion: baseCoreState.version
+    }),
+    turnStartedAt: Date.now(),
+    turnDeadlineAt: Date.now() + 60_000
+  };
+  assert.equal(liveState.turnUserId, botSeat2);
+
+  const { dir, filePath } = await writePersistedFile({
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+        seatRows: [
+          { user_id: humanUserId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 },
+          { user_id: botSeat2, seat_no: 2, status: "ACTIVE", is_bot: true, stack: 100, bot_profile: "NORMAL" },
+          { user_id: botSeat3, seat_no: 3, status: "ACTIVE", is_bot: true, stack: 100, bot_profile: "NORMAL" }
+        ],
+        stateRow: { version: baseCoreState.version, state: liveState }
+      }
+    }
+  });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_TIMEOUT_SWEEP_MS: "60000",
+      WS_ZOMBIE_TABLE_SWEEP_MS: "60000"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: humanUserId }), "auth-restored-bot-turn-sub");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "sub-restored-bot-turn",
+      ts: "2026-02-28T01:45:01Z",
+      payload: { tableId }
+    });
+    const initial = await nextMessageOfType(ws, "table_state");
+    assert.equal(initial.payload.tableId, tableId);
+
+    const autoplayUpdate = await nextMessageMatching(
+      ws,
+      (frame) => frame?.type === "stateSnapshot" && Number(frame?.payload?.stateVersion || 0) > baseCoreState.version,
+      5000
+    );
+    assert.notEqual(autoplayUpdate.payload.public.turn.userId, botSeat2);
+
+    const persisted = await readPersistedFile(filePath);
+    assert.equal(persisted.tables[tableId].stateRow.version > baseCoreState.version, true);
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
   }
 });
 
