@@ -49,6 +49,15 @@ function stepsBlock(text) {
   return blockLines.join("\n");
 }
 
+function requiredStep(text, stepName) {
+  const marker = `- name: ${stepName}`;
+  const start = text.indexOf(marker);
+  assert.notEqual(start, -1, `Missing required workflow step: ${stepName}`);
+  const remainder = text.slice(start);
+  const next = remainder.indexOf("\n      - name:", marker.length);
+  return next === -1 ? remainder : remainder.slice(0, next);
+}
+
 function assertRequiredOrder(text) {
   const block = stepsBlock(text);
 
@@ -59,6 +68,7 @@ function assertRequiredOrder(text) {
   const wsClientBehavior = block.indexOf("node --test tests/poker-ws-client.test.mjs");
   const pokerV2Live = block.indexOf("node --test tests/poker-v2-live.behavior.test.mjs");
   const joinRuntimeBehavior = block.indexOf("node --test ws-tests/ws-join-runtime.behavior.test.mjs");
+  const dockerBuildContract = block.indexOf("docker build -t arcadeplatform-ws-contract:${{ github.sha }} -f \"$WS_DOCKERFILE_PATH\" \"$WS_DOCKER_BUILD_CONTEXT\"");
   const behavior = block.indexOf("node --test ws-server/server.behavior.test.mjs");
   const infraVpcCaddyGuard = block.indexOf("node --test ws-tests/infra-vps-caddy.guard.test.mjs");
   const imageCheck = block.indexOf("node --test ws-tests/ws-image-contains-protocol.behavior.test.mjs");
@@ -91,6 +101,7 @@ function assertRequiredOrder(text) {
   assert.equal(block.indexOf("node --test tests/poker-ui-ws-write-path.guard.test.mjs"), -1);
   assert.equal(block.indexOf("node --test tests/poker-ui-ws-leave-smoke.behavior.test.mjs"), -1);
   assert.notEqual(joinRuntimeBehavior, -1);
+  assert.notEqual(dockerBuildContract, -1);
   assert.notEqual(behavior, -1);
   assert.notEqual(infraVpcCaddyGuard, -1);
   assert.notEqual(imageCheck, -1);
@@ -100,7 +111,8 @@ function assertRequiredOrder(text) {
   assert.equal(sharedJoinBehavior < wsClientBehavior, true);
   assert.equal(wsClientBehavior < pokerV2Live, true);
   assert.equal(pokerV2Live < joinRuntimeBehavior, true);
-  assert.equal(joinRuntimeBehavior < behavior, true);
+  assert.equal(joinRuntimeBehavior < dockerBuildContract, true);
+  assert.equal(dockerBuildContract < behavior, true);
   assert.equal(behavior < infraVpcCaddyGuard, true);
   assert.equal(infraVpcCaddyGuard < imageCheck, true);
   assert.equal(imageCheck < containerCheck, true);
@@ -155,6 +167,15 @@ test("ws pr workflow uses read-only token permissions", () => {
   assert.match(text, /permissions:\s*\n\s*contents:\s*read/);
 });
 
+test("ws pr workflow matches main ws deploy docker build contract", () => {
+  const text = workflowText();
+  assert.match(text, /WS_DOCKER_BUILD_CONTEXT: "\."/);
+  assert.match(text, /WS_DOCKERFILE_PATH: "ws-server\/Dockerfile"/);
+  const stepText = requiredStep(text, "Validate shared WS Docker build contract (repo-root context)");
+  assert.match(stepText, /docker build[^\n]*arcadeplatform-ws-contract:\$\{\{ github\.sha \}\}[^\n]*-f "\$WS_DOCKERFILE_PATH" "\$WS_DOCKER_BUILD_CONTEXT"/);
+  assert.doesNotMatch(stepText, /docker build[^\n]*-f ws-server\/Dockerfile \.\/ws-server/);
+});
+
 test("ws pr workflow wires poker v2-only browser coverage", () => {
   const text = workflowText();
   assert.match(text, /Run poker table v2 live behavior test/);
@@ -179,6 +200,8 @@ test("ws pr workflow runs ws-server deploy harness tests", () => {
   const text = workflowText();
   assert.match(text, /Run ws join runtime behavior test/);
   assert.match(text, /node --test ws-tests\/ws-join-runtime\.behavior\.test\.mjs/);
+  assert.match(text, /WS reconnect\/resync regression tests/);
+  assert.match(text, /node --test ws-server\/poker\/reconnect\/resync\.behavior\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-server-deploy-artifact-path\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-server-deploy-rollout\.test\.mjs/);
 });

@@ -134,7 +134,7 @@ jobs:
       - name: Run poker action reducer behavior test
         run: node --test ws-server/poker/shared/poker-action-reducer.behavior.test.mjs
 
-      - name: Run ws resync behavior test
+      - name: WS reconnect/resync regression tests
         run: node --test ws-server/poker/reconnect/resync.behavior.test.mjs
 
       - name: Run ws join handler behavior test
