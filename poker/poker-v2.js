@@ -21,6 +21,7 @@
     disconnected: 'Live connection closed',
     error: 'Live table unavailable'
   };
+  var CLOSED_TABLE_REDIRECT_SECONDS = 5;
   var WINNER_REVEAL_MS = 4_000;
   var CHIP_FLY_MS = 420;
   var CHIP_DENOMINATIONS = [
@@ -105,6 +106,9 @@
   var authWatchTimer = null;
   var turnClockTimer = null;
   var revealDismissTimer = null;
+  var closedTableRedirectTimer = null;
+  var closedTableRedirectRemaining = 0;
+  var closedTableRedirectReason = null;
   var authUnsubscribe = null;
   var pendingLeaveRetryAfterReconnect = false;
   var pendingLeaveNavigation = false;
@@ -133,6 +137,96 @@
 
   function cloneState(source){
     return JSON.parse(JSON.stringify(source));
+  }
+
+  function normalizeSignalCode(value){
+    if (typeof value !== 'string') return '';
+    return value.trim().toLowerCase();
+  }
+
+  function isClosedTableStatus(value){
+    return typeof value === 'string' && value.trim().toUpperCase() === 'CLOSED';
+  }
+
+  function isClosedTableSignal(value){
+    var normalized = normalizeSignalCode(value);
+    if (!normalized) return false;
+    return normalized === 'table_closed'
+      || normalized === 'table_not_open'
+      || normalized === 'table_not_found'
+      || normalized === 'temporarily_unavailable';
+  }
+
+  function clearClosedTableRedirectTimer(){
+    if (!closedTableRedirectTimer) return;
+    window.clearTimeout(closedTableRedirectTimer);
+    closedTableRedirectTimer = null;
+  }
+
+  function renderClosedTableNotice(){
+    if (!els.closedTableModal || !els.closedTableCountdown || !els.closedTableTitle) return;
+    var active = closedTableRedirectRemaining > 0;
+    els.closedTableModal.hidden = !active;
+    if (!active) return;
+    els.closedTableTitle.textContent = 'This table has ended. Returning to lobby in 5 seconds…';
+    els.closedTableCountdown.textContent = closedTableRedirectRemaining === CLOSED_TABLE_REDIRECT_SECONDS
+      ? 'Returning to lobby in 5 seconds…'
+      : ('Returning to lobby in ' + closedTableRedirectRemaining + '…');
+  }
+
+  function cancelClosedTableRedirect(){
+    clearClosedTableRedirectTimer();
+    closedTableRedirectRemaining = 0;
+    closedTableRedirectReason = null;
+    renderClosedTableNotice();
+  }
+
+  function tickClosedTableRedirect(){
+    clearClosedTableRedirectTimer();
+    if (closedTableRedirectRemaining <= 1) {
+      closedTableRedirectRemaining = 0;
+      renderClosedTableNotice();
+      navigateToLobby();
+      return;
+    }
+    closedTableRedirectRemaining -= 1;
+    renderClosedTableNotice();
+    closedTableRedirectTimer = window.setTimeout(tickClosedTableRedirect, 1000);
+  }
+
+  function startClosedTableRedirect(reason){
+    if (closedTableRedirectRemaining === CLOSED_TABLE_REDIRECT_SECONDS && closedTableRedirectReason === reason && closedTableRedirectTimer) {
+      renderClosedTableNotice();
+      return;
+    }
+    closedTableRedirectReason = reason || null;
+    closedTableRedirectRemaining = CLOSED_TABLE_REDIRECT_SECONDS;
+    clearClosedTableRedirectTimer();
+    renderClosedTableNotice();
+    klog('poker_closed_table_redirect_started', {
+      tableId: state.tableId || null,
+      reason: closedTableRedirectReason
+    });
+    closedTableRedirectTimer = window.setTimeout(tickClosedTableRedirect, 1000);
+  }
+
+  function syncClosedTableRedirectFromSnapshot(payload){
+    if (!isObject(payload)) return;
+    var tableObj = isObject(payload.table) ? payload.table : {};
+    var nextStatus = null;
+    if (typeof payload.status === 'string' && payload.status) nextStatus = payload.status;
+    else if (typeof tableObj.status === 'string' && tableObj.status) nextStatus = tableObj.status;
+    if (isClosedTableStatus(nextStatus)) {
+      startClosedTableRedirect('table_closed');
+      return;
+    }
+    cancelClosedTableRedirect();
+  }
+
+  function syncClosedTableRedirectFromSignal(reason){
+    if (!isClosedTableSignal(reason)) return false;
+    startClosedTableRedirect(normalizeSignalCode(reason));
+    return true;
   }
 
   function createEmptyLiveState(nextTableId, nextUserId){
@@ -747,6 +841,7 @@
 
     if (typeof tableObj.status === 'string' && tableObj.status) state.tableStatus = tableObj.status.toUpperCase();
     if (typeof payload.status === 'string' && payload.status) state.tableStatus = payload.status.toUpperCase();
+    syncClosedTableRedirectFromSnapshot(payload);
 
     var resolvedMaxSeats = null;
     if (Number.isInteger(tableObj.maxSeats) && tableObj.maxSeats > 1) resolvedMaxSeats = tableObj.maxSeats;
@@ -2114,6 +2209,7 @@
     renderDealerChip();
     renderInfoPanel();
     renderControls();
+    renderClosedTableNotice();
   }
 
   function setError(message){
@@ -2247,6 +2343,7 @@
   }
 
   function navigateToLobby(){
+    cancelClosedTableRedirect();
     if (!window || !window.location) return;
     window.location.href = '/poker/';
   }
@@ -2428,6 +2525,9 @@
     els.leaveConfirmModal = document.getElementById('pokerV2LeaveConfirmModal');
     els.leaveConfirmYes = document.getElementById('pokerV2LeaveConfirmYes');
     els.leaveConfirmCancel = document.getElementById('pokerV2LeaveConfirmCancel');
+    els.closedTableModal = document.getElementById('pokerV2ClosedTableModal');
+    els.closedTableTitle = document.getElementById('pokerV2ClosedTableTitle');
+    els.closedTableCountdown = document.getElementById('pokerV2ClosedTableCountdown');
     els.startBtn = document.getElementById('pokerV2StartBtn');
     els.foldBtn = document.getElementById('pokerV2FoldBtn');
     els.foldPreactionWrap = document.getElementById('pokerV2FoldPreactionWrap');
@@ -2462,6 +2562,7 @@
   function stopLiveMode(){
     stopTurnClock();
     clearWinnerRevealTimer();
+    cancelClosedTableRedirect();
     pendingPostRevealSnapshot = null;
     state.wsReady = false;
     if (wsClient && typeof wsClient.destroy === 'function'){
@@ -2516,6 +2617,8 @@
             return;
           }
           autoJoinSeat();
+        } else if (status === 'command_result') {
+          syncClosedTableRedirectFromSignal(info && info.reason ? info.reason : null);
         } else if (status === 'failed'){
           state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.error;
@@ -2523,6 +2626,7 @@
         } else if (status === 'error'){
           state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.error;
+          syncClosedTableRedirectFromSignal(info && info.code ? info.code : null);
           setError(info && info.code ? info.code : 'Live table unavailable');
         } else if (status === 'closed'){
           state.wsReady = false;
@@ -2557,6 +2661,7 @@
           restartLiveMode(currentAccessToken);
           return;
         }
+        syncClosedTableRedirectFromSignal(info && info.code ? info.code : null);
         setError(info && info.code ? info.code : 'Protocol error');
       }
     });

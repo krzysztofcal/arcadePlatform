@@ -207,6 +207,11 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
   flex-wrap:wrap;
 }
 
+.poker-closed-table-modal{z-index:65;}
+.poker-closed-table-dialog{text-align:center;}
+.poker-closed-table-title{margin-bottom:8px;}
+.poker-closed-table-body{color:#dce7fb;font-size:0.92rem;font-weight:600;line-height:1.4;}
+
 .poker-action-bar{position:fixed; right:max(10px, env(safe-area-inset-right)); bottom:max(10px, env(safe-area-inset-bottom)); width:min(33vw, 196px); display:grid; grid-template-columns:40px minmax(0, 1fr); align-items:end; gap:8px; padding:8px; border-radius:20px; border:1px solid rgba(255,223,180,0.24); background:linear-gradient(180deg, rgba(9,12,20,0.94), rgba(2,4,8,0.98)); box-shadow:0 12px 22px rgba(0,0,0,0.56), inset 0 1px 1px rgba(255,255,255,0.12); z-index:25;}
 
 .poker-action-buttons{display:flex; flex-direction:column; justify-content:flex-end; gap:8px; min-height:182px;}
