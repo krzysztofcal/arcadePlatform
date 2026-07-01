@@ -106,6 +106,169 @@ test("persisted state writer bumps table last_activity_at on successful db mutat
   );
 });
 
+test("persisted state writer persists WS hand hole cards after successful db mutation", async () => {
+  const queries = [];
+  const writer = createPersistedStateWriter({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: async (fn) => fn({
+      unsafe: async (query, params = []) => {
+        const text = String(query);
+        queries.push({ query: text, params });
+        if (text.startsWith("update public.poker_state set version = version + 1")) {
+          return [{ version: 5 }];
+        }
+        return [];
+      }
+    }),
+    klog: () => {}
+  });
+
+  const result = await writer.writeMutation({
+    tableId: "00000000-0000-4000-8000-000000000001",
+    expectedVersion: 4,
+    nextState: {
+      tableId: "00000000-0000-4000-8000-000000000001",
+      handId: "hand_ws_1",
+      handSeed: "seed_ws_1",
+      phase: "PREFLOP",
+      seats: [
+        { userId: "00000000-0000-4000-8000-0000000000a1", seatNo: 1, status: "ACTIVE" },
+        { userId: "00000000-0000-4000-8000-0000000000b2", seatNo: 2, status: "ACTIVE" }
+      ],
+      stacks: {
+        "00000000-0000-4000-8000-0000000000a1": 98,
+        "00000000-0000-4000-8000-0000000000b2": 96
+      },
+      holeCardsByUserId: {
+        "00000000-0000-4000-8000-0000000000a1": ["AS", "KD"],
+        "00000000-0000-4000-8000-0000000000b2": ["2C", "2D"]
+      },
+      deck: ["3H"]
+    }
+  });
+
+  assert.deepEqual(result, { ok: true, newVersion: 5 });
+  const stateUpdate = queries.find((entry) => entry.query.startsWith("update public.poker_state set version = version + 1"));
+  assert.ok(stateUpdate);
+  const storedState = JSON.parse(stateUpdate.params[2]);
+  assert.equal(Object.prototype.hasOwnProperty.call(storedState, "holeCardsByUserId"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(storedState, "deck"), false);
+  const holeCardInsert = queries.find((entry) => entry.query.startsWith("insert into public.poker_hole_cards"));
+  assert.ok(holeCardInsert);
+  assert.match(holeCardInsert.query, /on conflict \(table_id, hand_id, user_id\) do update set cards = excluded\.cards/);
+  assert.deepEqual(holeCardInsert.params, [
+    "00000000-0000-4000-8000-000000000001",
+    "hand_ws_1",
+    "00000000-0000-4000-8000-0000000000a1",
+    "[\"AS\",\"KD\"]",
+    "00000000-0000-4000-8000-000000000001",
+    "hand_ws_1",
+    "00000000-0000-4000-8000-0000000000b2",
+    "[\"2C\",\"2D\"]"
+  ]);
+});
+
+test("persisted state writer hole card persistence is idempotent on replayed state write", async () => {
+  let stateVersion = 4;
+  let currentState = null;
+  const queries = [];
+  const writer = createPersistedStateWriter({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: async (fn) => fn({
+      unsafe: async (query, params = []) => {
+        const text = String(query);
+        queries.push({ query: text, params });
+        if (text.startsWith("update public.poker_state set version = version + 1")) {
+          if (stateVersion === 4) {
+            stateVersion = 5;
+            currentState = JSON.parse(params[2]);
+            return [{ version: stateVersion }];
+          }
+          return [];
+        }
+        if (text.startsWith("select version, state from public.poker_state where table_id = $1 limit 1;")) {
+          return [{ version: stateVersion, state: currentState }];
+        }
+        return [];
+      }
+    }),
+    klog: () => {}
+  });
+
+  const nextState = {
+    tableId: "00000000-0000-4000-8000-000000000002",
+    handId: "hand_ws_replay",
+    phase: "PREFLOP",
+    holeCardsByUserId: {
+      "00000000-0000-4000-8000-0000000000a1": ["AS", "KD"],
+      "00000000-0000-4000-8000-0000000000b2": ["2C", "2D"]
+    }
+  };
+
+  const first = await writer.writeMutation({ tableId: "00000000-0000-4000-8000-000000000002", expectedVersion: 4, nextState });
+  const second = await writer.writeMutation({ tableId: "00000000-0000-4000-8000-000000000002", expectedVersion: 4, nextState });
+
+  assert.deepEqual(first, { ok: true, newVersion: 5 });
+  assert.deepEqual(second, { ok: true, newVersion: 5, alreadyApplied: true });
+  const holeCardInserts = queries.filter((entry) => entry.query.startsWith("insert into public.poker_hole_cards"));
+  assert.equal(holeCardInserts.length, 2);
+  assert.equal(holeCardInserts.every((entry) => entry.query.includes("on conflict (table_id, hand_id, user_id) do update")), true);
+});
+
+test("persisted state writer logs hole card persistence failures without failing gameplay or leaking cards", async () => {
+  const logs = [];
+  const writer = createPersistedStateWriter({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: async (fn) => fn({
+      unsafe: async (query) => {
+        const text = String(query);
+        if (text.startsWith("update public.poker_state set version = version + 1")) {
+          return [{ version: 5 }];
+        }
+        if (text.startsWith("insert into public.poker_hole_cards")) {
+          const error = new Error("driver leaked AS KD");
+          error.code = "23505";
+          throw error;
+        }
+        return [];
+      }
+    }),
+    klog: (kind, payload) => logs.push({ kind, payload })
+  });
+
+  const result = await writer.writeMutation({
+    tableId: "00000000-0000-4000-8000-000000000003",
+    expectedVersion: 4,
+    nextState: {
+      tableId: "00000000-0000-4000-8000-000000000003",
+      handId: "hand_ws_failure",
+      phase: "PREFLOP",
+      holeCardsByUserId: {
+        "00000000-0000-4000-8000-0000000000a1": ["AS", "KD"],
+        "00000000-0000-4000-8000-0000000000b2": ["2C", "2D"]
+      },
+      deck: ["3H"]
+    }
+  });
+
+  assert.deepEqual(result, { ok: true, newVersion: 5 });
+  assert.deepEqual(logs, [{
+    kind: "ws_hole_cards_persist_failed",
+    payload: {
+      tableId: "00000000-0000-4000-8000-000000000003",
+      handId: "hand_ws_failure",
+      playerCount: 2,
+      reason: "23505"
+    }
+  }]);
+  const serializedLogs = JSON.stringify(logs);
+  assert.equal(serializedLogs.includes("AS"), false);
+  assert.equal(serializedLogs.includes("KD"), false);
+  assert.equal(serializedLogs.includes("2C"), false);
+  assert.equal(serializedLogs.includes("2D"), false);
+  assert.equal(serializedLogs.includes("3H"), false);
+});
+
 test("persisted state writer appends accepted human action audit row", async () => {
   const queries = [];
   const writer = createPersistedStateWriter({

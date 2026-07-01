@@ -67,6 +67,31 @@ function normalizeCardList(cards) {
   return cards.map(normalizeCardCode).filter(Boolean);
 }
 
+function buildHoleCardRows(state) {
+  const handId = normalizeAuditString(state?.handId);
+  const holeCardsByUserId = state?.holeCardsByUserId;
+  if (!handId || !holeCardsByUserId || typeof holeCardsByUserId !== "object" || Array.isArray(holeCardsByUserId)) {
+    return { handId, rows: [] };
+  }
+  const rows = Object.entries(holeCardsByUserId)
+    .map(([userId, cards]) => ({
+      userId: normalizeAuditString(userId),
+      cards: normalizeCardList(cards)
+    }))
+    .filter((entry) => entry.userId && entry.cards.length === 2);
+  return { handId, rows };
+}
+
+function safeHoleCardPersistReason(error) {
+  if (typeof error?.code === "string" && error.code.trim()) {
+    return error.code.trim();
+  }
+  if (typeof error?.name === "string" && error.name.trim() && error.name !== "Error") {
+    return error.name.trim();
+  }
+  return "unknown";
+}
+
 function normalizeStringList(values) {
   if (!Array.isArray(values)) {
     return [];
@@ -300,10 +325,25 @@ async function maybeWriteAcceptedActionAudit({ tx, tableId, stateVersion, state,
   return { ok: true };
 }
 
+async function maybeWriteHoleCards({ tx, tableId, state }) {
+  const { handId, rows } = buildHoleCardRows(state);
+  if (!tableId || !handId || rows.length === 0) {
+    return { ok: true, skipped: true };
+  }
+  const placeholders = rows.map((_, index) => `($${index * 4 + 1}, $${index * 4 + 2}, $${index * 4 + 3}, $${index * 4 + 4}::jsonb)`).join(", ");
+  const params = rows.flatMap((entry) => [tableId, handId, entry.userId, JSON.stringify(entry.cards)]);
+  await tx.unsafe(
+    `insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ${placeholders} on conflict (table_id, hand_id, user_id) do update set cards = excluded.cards;`,
+    params
+  );
+  return { ok: true, playerCount: rows.length };
+}
+
 export function createPersistedStateWriter({ env = process.env, beginSql = beginSqlWs, klog = () => {} } = {}) {
-  async function writeViaDb({ tableId, expectedVersion, nextState, acceptedActionAudit = null }) {
+  async function writeViaDb({ tableId, expectedVersion, nextState, privateStateForHoleCards = null, acceptedActionAudit = null }) {
     return beginSql(async (tx) => {
       const persistedState = sanitizePersistedState(nextState);
+      const holeCardState = normalizeJsonState(privateStateForHoleCards) || {};
       const payload = JSON.stringify(persistedState);
       const rows = await tx.unsafe(
         "update public.poker_state set version = version + 1, state = $3::jsonb, updated_at = now() where table_id = $1 and version = $2 returning version;",
@@ -312,6 +352,17 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       const newVersion = Number(rows?.[0]?.version);
       if (Number.isInteger(newVersion) && newVersion >= 0) {
         await tx.unsafe("update public.poker_tables set last_activity_at = now() where id = $1;", [tableId]);
+        try {
+          await maybeWriteHoleCards({ tx, tableId, state: holeCardState });
+        } catch (error) {
+          const { handId, rows } = buildHoleCardRows(holeCardState);
+          klog("ws_hole_cards_persist_failed", {
+            tableId,
+            handId: handId || persistedState?.handId || null,
+            playerCount: rows.length,
+            reason: safeHoleCardPersistReason(error)
+          });
+        }
         try {
           await maybeWriteAcceptedActionAudit({ tx, tableId, stateVersion: newVersion, state: persistedState, auditAction: acceptedActionAudit, klog });
         } catch (error) {
@@ -343,6 +394,17 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       const currentState = sanitizePersistedState(currentRow?.state);
       const equalState = stableStringify(currentState) === stableStringify(sanitizePersistedState(nextState));
       if (equalState) {
+        try {
+          await maybeWriteHoleCards({ tx, tableId, state: holeCardState });
+        } catch (error) {
+          const { handId, rows } = buildHoleCardRows(holeCardState);
+          klog("ws_hole_cards_persist_failed", {
+            tableId,
+            handId: handId || currentState?.handId || null,
+            playerCount: rows.length,
+            reason: safeHoleCardPersistReason(error)
+          });
+        }
         try {
           await maybeWriteAcceptedActionAudit({ tx, tableId, stateVersion: Number.isInteger(currentVersion) ? currentVersion : expectedVersion, state: currentState, auditAction: acceptedActionAudit, klog });
         } catch (error) {
@@ -378,6 +440,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       return { ok: false, reason: "invalid" };
     }
     const persistedState = sanitizePersistedState(nextState);
+    const privateStateForHoleCards = normalizeJsonState(nextState);
     try {
       JSON.stringify(persistedState);
     } catch {
@@ -400,7 +463,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       if (!env.SUPABASE_DB_URL && !supabaseUrl && !supabaseServiceRoleKey) {
         return { ok: false, reason: "config_missing" };
       }
-      return await writeViaDb({ tableId, expectedVersion, nextState: persistedState, acceptedActionAudit });
+      return await writeViaDb({ tableId, expectedVersion, nextState: persistedState, privateStateForHoleCards, acceptedActionAudit });
     } catch (error) {
       klog("ws_persisted_state_write_error", {
         tableId,
