@@ -1923,14 +1923,15 @@ test("resume outside replay window triggers deterministic resync plus fresh snap
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-r1", ts: "2026-02-28T00:00:01Z", payload: { tableId: "table_resume" } });
     const first = await nextMessageOfType(ws, "table_state");
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-r1", ts: "2026-02-28T00:00:02Z", payload: { tableId: "table_resume", view: "snapshot" } });
-    await nextMessageOfType(ws, "stateSnapshot");
+    await nextMessageForRequest(ws, { type: "stateSnapshot", requestId: "snap-r1" });
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-r2", ts: "2026-02-28T00:00:03Z", payload: { tableId: "table_resume", view: "snapshot" } });
-    await nextMessageOfType(ws, "stateSnapshot");
+    await nextMessageForRequest(ws, { type: "stateSnapshot", requestId: "snap-r2" });
     ws.close();
 
     const ws2 = await connectClient(port);
     await hello(ws2);
     await auth(ws2, makeHs256Jwt({ secret, sub: "user_resume" }), "auth-r2");
+    const resumeMessages = nextNMessages(ws2, 2, 10000);
     sendFrame(ws2, {
       version: "1.0",
       type: "resume",
@@ -1940,8 +1941,7 @@ test("resume outside replay window triggers deterministic resync plus fresh snap
       payload: { tableId: "table_resume", sessionId: helloAck.payload.sessionId, lastSeq: 0 }
     });
 
-    const resync = await nextMessageOfType(ws2, "resync");
-    const snapshot = await nextMessageOfType(ws2, "stateSnapshot");
+    const [resync, snapshot] = await resumeMessages;
     assert.equal(resync.payload.mode, "required");
     assert.equal(snapshot.type, "stateSnapshot");
     ws2.close();
@@ -5278,7 +5278,7 @@ test("WS act optimistic conflict returns deterministic rejection and restored sn
     assert.equal(joinAck_join_conflict.payload.requestId, "join-conflict");
     assert.equal(joinAck_join_conflict.payload.status, "accepted");
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-conflict", ts: "2026-02-28T02:10:01Z", payload: { tableId, view: "snapshot" } });
-    const baseline = await nextMessageOfType(ws, "stateSnapshot");
+    const baseline = await nextMessageForRequest(ws, { type: "stateSnapshot", requestId: "snap-conflict" });
     const handId = baseline.payload.public.hand.handId;
 
     const forced = await readPersistedFile(filePath);
@@ -5286,26 +5286,20 @@ test("WS act optimistic conflict returns deterministic rejection and restored sn
     await fs.writeFile(filePath, `${JSON.stringify(forced)}
 `, "utf8");
 
+    const conflictMessages = nextNMessages(ws, 2, 10000);
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-conflict", ts: "2026-02-28T02:10:02Z", payload: { tableId, handId, action: "fold" } });
-    let rejected = null;
-    let restored = null;
-    let highestSnapshotVersion = 0;
-    const conflictDeadline = Date.now() + 10000;
-    while ((!rejected || !restored) && Date.now() < conflictDeadline) {
-      const remaining = Math.max(50, conflictDeadline - Date.now());
-      const frame = await nextMessage(ws, remaining);
-      if (!rejected && frame?.type === "commandResult") {
-        rejected = frame;
-        continue;
-      }
-      if (frame?.type === "stateSnapshot") {
-        const version = Number(frame?.payload?.stateVersion || 0);
-        if (version > highestSnapshotVersion) highestSnapshotVersion = version;
-        if (!restored && version === forced.tables[tableId].stateRow.version) {
-          restored = frame;
-        }
-      }
-    }
+    const frames = await conflictMessages;
+    const rejected = frames.find((frame) => frame?.type === "commandResult") ?? null;
+    const restored = frames.find((frame) => (
+      frame?.type === "stateSnapshot"
+      && Number(frame?.payload?.stateVersion || 0) === forced.tables[tableId].stateRow.version
+    )) ?? null;
+    const highestSnapshotVersion = Math.max(
+      0,
+      ...frames
+        .filter((frame) => frame?.type === "stateSnapshot")
+        .map((frame) => Number(frame?.payload?.stateVersion || 0))
+    );
     assert.ok(rejected, "expected commandResult after optimistic conflict");
     assert.ok(restored, `expected restored stateSnapshot after optimistic conflict (max_seen=${highestSnapshotVersion})`);
     assert.equal(rejected.payload.status, "rejected");
@@ -5314,7 +5308,7 @@ test("WS act optimistic conflict returns deterministic rejection and restored sn
     assert.equal(restored.payload.stateVersion, forced.tables[tableId].stateRow.version);
 
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-conflict-after", ts: "2026-02-28T02:10:03Z", payload: { tableId, view: "snapshot" } });
-    const afterConflict = await nextMessageOfType(ws, "stateSnapshot");
+    const afterConflict = await nextMessageForRequest(ws, { type: "stateSnapshot", requestId: "snap-conflict-after" });
     assert.equal(afterConflict.payload.stateVersion, forced.tables[tableId].stateRow.version);
 
     ws.close();
