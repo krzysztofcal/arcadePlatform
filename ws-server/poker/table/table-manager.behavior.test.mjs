@@ -1266,6 +1266,7 @@ test("tableSnapshot is read-only and deterministic", () => {
 
   assert.deepEqual(snapshot1, snapshot2);
   assert.deepEqual(before, after);
+  assert.equal(snapshot1.status, "OPEN");
   assert.deepEqual(snapshot1.hand, { handId: null, status: "LOBBY", round: null, dealerSeatNo: null });
   assert.deepEqual(snapshot1.board, { cards: [] });
   assert.deepEqual(snapshot1.turn, { userId: "user_a", seat: 1, startedAt: null, deadlineAt: null });
@@ -1315,6 +1316,36 @@ test("tableSnapshot memberCount matches authoritative members after disconnect c
   ]);
   assert.equal(snapshot.memberCount, snapshot.members.length);
   assert.deepEqual(after, before);
+});
+
+test("tableSnapshot exposes closed runtime status for closed-table consumers", () => {
+  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
+  const tableId = "table_closed_runtime_status";
+
+  const restored = tableManager.restoreTableFromPersisted(tableId, {
+    coreState: {
+      version: 12,
+      roomId: tableId,
+      maxSeats: 4,
+      members: [],
+      seats: {},
+      seatDetailsByUserId: {},
+      publicStacks: {},
+      pokerState: {
+        handId: "h_closed",
+        phase: "HAND_DONE",
+        dealerSeatNo: null,
+        community: [],
+        communityDealt: 0,
+        turnUserId: null
+      }
+    },
+    tableStatus: "CLOSED"
+  });
+
+  assert.equal(restored.ok, true);
+  assert.equal(tableManager.isTableClosed(tableId), true);
+  assert.equal(tableManager.tableSnapshot(tableId, "observer").status, "CLOSED");
 });
 
 test("subscribe keeps tableState.members presence-based while tableSnapshot.members remains authoritative", async () => {

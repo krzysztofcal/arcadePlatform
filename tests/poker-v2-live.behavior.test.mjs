@@ -108,6 +108,7 @@ function createHarness(options = {}){
     'pokerHeroCards', 'pokerV2LiveStatus', 'pokerV2TableMeta', 'pokerV2TurnText',
     'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2SignInBtn', 'pokerV2SeatNo',
     'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
+    'pokerV2ClosedTableModal', 'pokerV2ClosedTableTitle', 'pokerV2ClosedTableCountdown',
     'pokerV2DemoPill', 'pokerV2FoldBtn', 'pokerV2PrimaryBtn', 'pokerV2AmountBtn',
     'pokerV2AllInBtn', 'pokerV2FoldPreactionWrap', 'pokerV2FoldPreaction', 'pokerV2FoldPreactionText',
     'pokerV2PrimaryPreactionWrap', 'pokerV2PrimaryPreaction', 'pokerV2PrimaryPreactionText',
@@ -127,6 +128,7 @@ function createHarness(options = {}){
   elements.pokerV2AmountPreaction.type = 'checkbox';
   elements.pokerV2AllInPreaction.type = 'checkbox';
   elements.pokerV2LeaveConfirmModal.hidden = true;
+  elements.pokerV2ClosedTableModal.hidden = true;
   elements.pokerMenuPanel.setAttribute('hidden', 'hidden');
 
   const documentEvents = {};
@@ -386,6 +388,116 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(harness.leavePayloads.length, 1);
   assert.equal(JSON.stringify(harness.leavePayloads[0]), JSON.stringify({ tableId: 'table-1' }));
   assert.equal(harness.windowLocation.href, '/poker/');
+});
+
+test('poker v2 shows a closed-table countdown, cancels on recovery, and redirects after five seconds', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: { hand: { handId: 'hand-1', status: 'TURN' }, pot: { total: 10 } },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 3,
+      table: { tableId: 'table-1', status: 'CLOSED', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: { hand: { handId: 'hand-1', status: 'SETTLED' }, pot: { total: 10 } },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2ClosedTableModal.hidden, false);
+  assert.equal(harness.elements.pokerV2ClosedTableTitle.textContent, 'This table has ended. Returning to lobby in 5 seconds…');
+  assert.equal(harness.elements.pokerV2ClosedTableCountdown.textContent, 'Returning to lobby in 5 seconds…');
+
+  harness.advanceTime(1000);
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2ClosedTableCountdown.textContent, 'Returning to lobby in 4…');
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 4,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: { hand: { handId: 'hand-2', status: 'PREFLOP' }, pot: { total: 0 } },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2ClosedTableModal.hidden, true, 'valid live state should cancel the redirect');
+
+  ws.onProtocolError({ code: 'TABLE_NOT_FOUND' });
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2ClosedTableModal.hidden, false, 'explicit closed/unavailable protocol errors should start the redirect');
+  for (let i = 0; i < 5; i += 1){
+    harness.advanceTime(1000);
+    await harness.flush();
+  }
+  assert.equal(harness.windowLocation.href, '/poker/');
+});
+
+test('poker v2 clears the closed-table redirect when live mode is torn down', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onProtocolError({ code: 'table_closed' });
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2ClosedTableModal.hidden, false);
+
+  ws.onProtocolError({ code: 'missing_access_token' });
+  await harness.flush();
+  harness.advanceTime(5000);
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2ClosedTableModal.hidden, true);
+  assert.equal(harness.windowLocation.href, '');
+});
+
+test('poker v2 keeps closed-table redirect active across ambiguous HAND_DONE snapshots without status', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onProtocolError({ code: 'table_closed' });
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2ClosedTableModal.hidden, false);
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 5,
+      table: { tableId: 'table-1', maxSeats: 6, members: [] },
+      public: {
+        hand: { handId: 'hand-closed', status: 'HAND_DONE' },
+        pot: { total: 0 },
+        seats: []
+      },
+      you: { seat: null }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2ClosedTableModal.hidden, false);
+  assert.equal(harness.elements.pokerV2ClosedTableCountdown.textContent, 'Returning to lobby in 5 seconds…');
 });
 
 test('poker v2 shows compact call amount in the primary action label', async () => {

@@ -909,6 +909,7 @@ function buildTableStatePayload({ tableState, tableSnapshot }) {
   }
 
   if (typeof tableSnapshot.roomId === "string" && tableSnapshot.roomId) payload.roomId = tableSnapshot.roomId;
+  if (typeof tableSnapshot.status === "string" && tableSnapshot.status) payload.status = tableSnapshot.status;
   if (Number.isInteger(tableSnapshot.stateVersion)) payload.stateVersion = tableSnapshot.stateVersion;
   if (Number.isInteger(tableSnapshot.memberCount)) payload.memberCount = tableSnapshot.memberCount;
   if (Number.isInteger(tableSnapshot.maxSeats)) payload.maxSeats = tableSnapshot.maxSeats;
