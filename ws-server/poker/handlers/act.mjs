@@ -7,7 +7,7 @@ function mapActReason(reason) {
   return reason;
 }
 
-export async function handleActCommand({ frame, ws, connState, tableManager, ensureTableLoadedErrorMapper, sendError, sendCommandResult, persistMutatedState, restoreTableFromPersisted, broadcastResyncRequired, broadcastStateSnapshots, scheduleBotStep = () => {}, klog = () => {} }) {
+export async function handleActCommand({ frame, ws, connState, tableManager, ensureTableLoadedErrorMapper, sendError, sendCommandResult, persistMutatedState, restoreTableFromPersisted, broadcastResyncRequired, broadcastStateSnapshots, scheduleSettledRollover = () => {}, scheduleBotStep = () => {}, klog = () => {} }) {
   const tableId = frame.__resolvedTableId;
   const handId = typeof frame.payload?.handId === "string" ? frame.payload.handId.trim() : "";
   const action = typeof frame.payload?.action === "string" ? frame.payload.action.trim().toUpperCase() : "";
@@ -94,6 +94,7 @@ export async function handleActCommand({ frame, ws, connState, tableManager, ens
 
   if (result.accepted && !result.replayed && result.changed) {
     broadcastStateSnapshots(tableId);
+    scheduleSettledRollover(tableId);
     try {
       scheduleBotStep({
         tableId,

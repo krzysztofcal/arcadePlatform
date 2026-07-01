@@ -482,7 +482,9 @@ async function runBotStep({ tableId, trigger, requestId, frameTs }) {
     turnUserId_before_autoplay: startSnapshot.turnUserIdBeforeAutoplay,
     phase_before_autoplay: startSnapshot.phaseBeforeAutoplay
   });
-  return acceptedBotAutoplayExecutor({ tableId, trigger, requestId, frameTs });
+  const result = await acceptedBotAutoplayExecutor({ tableId, trigger, requestId, frameTs });
+  maybeScheduleSettledRollover(tableId);
+  return result;
 }
 
 const scheduledObservedBotTurnKeys = new Map();
@@ -1294,6 +1296,22 @@ async function executeUserInactiveCleanupPrimitive({
           return { ok: true, changed: false, status: "socket_present" };
         }
       }
+      if (await isSettledRevealPending(tableId)) {
+        maybeScheduleSettledRollover(tableId);
+        klogSafe(`${logPrefix}_settled_reveal_deferred`, {
+          tableId,
+          userId,
+          revealMs: settledRevealMs
+        });
+        return {
+          ok: true,
+          changed: false,
+          deferred: true,
+          status: "settled_reveal_pending",
+          closed: false,
+          retryable: true
+        };
+      }
       const executor = await loadInactiveCleanupExecutor();
       const result = await executor({ tableId, userId, requestId });
       if (result?.ok !== true) {
@@ -1438,6 +1456,12 @@ function maybeScheduleSettledRollover(tableId) {
 
   clearSettledRolloverTimer(tableId);
   const delayMs = Math.max(0, dueAt - nowMs);
+  klogSafe("ws_settled_rollover_scheduled", {
+    tableId,
+    dueAt,
+    delayMs,
+    settledAt: pokerState?.handSettlement?.settledAt || null
+  });
   const timer = setTimeout(() => {
     settledRolloverTimerByTableId.delete(tableId);
     void enqueueTableCommand({
@@ -1445,6 +1469,7 @@ function maybeScheduleSettledRollover(tableId) {
       commandName: "settled_rollover",
       dedupeKey: "settled_rollover",
       run: async () => {
+        klogSafe("ws_settled_rollover_start", { tableId });
         if (!tableManager.hasActiveHumanMember(tableId)) {
           if (tableManager.hasConnectedHumanPresence(tableId)) {
             klogSafe("ws_settled_rollover_close_skipped_human_presence", {
@@ -1466,9 +1491,17 @@ function maybeScheduleSettledRollover(tableId) {
         }
         const rollover = tableManager.rolloverSettledHand({ tableId, nowMs: Date.now() });
         if (!rollover?.ok) {
+          klogSafe("ws_settled_rollover_failed", {
+            tableId,
+            reason: rollover?.reason || rollover?.code || "unknown"
+          });
           return rollover;
         }
         if (!rollover.changed) {
+          klogSafe("ws_settled_rollover_noop", {
+            tableId,
+            reason: rollover?.reason || rollover?.code || "unchanged"
+          });
           return rollover;
         }
 
@@ -1514,6 +1547,57 @@ function maybeScheduleSettledRollover(tableId) {
     timer.unref();
   }
   settledRolloverTimerByTableId.set(tableId, { timer, dueAt });
+}
+
+function isSettledRevealPendingForState(pokerState, nowMs = Date.now()) {
+  if (settledRevealMs <= 0) {
+    return false;
+  }
+  if (!pokerState || pokerState.phase !== "SETTLED") {
+    return false;
+  }
+  const settledAt = pokerState?.handSettlement?.settledAt;
+  if (typeof settledAt !== "string" || !settledAt.trim()) {
+    return false;
+  }
+  const dueAt = resolveSettledRevealDueAt({
+    settledAt,
+    nowMs,
+    revealMs: settledRevealMs
+  });
+  return dueAt > nowMs;
+}
+
+async function isSettledRevealPending(tableId, nowMs = Date.now()) {
+  const runtimeState = tableManager.persistedPokerState(tableId);
+  if (isSettledRevealPendingForState(runtimeState, nowMs)) {
+    return true;
+  }
+  if (typeof loadPersistedTableBootstrap !== "function") {
+    return false;
+  }
+  try {
+    const loaded = await loadPersistedTableBootstrap({ tableId });
+    const persistedState = loaded?.table?.coreState?.pokerState;
+    const pending = isSettledRevealPendingForState(persistedState, nowMs);
+    if (runtimeState?.phase === "SETTLED" || persistedState?.phase === "SETTLED") {
+      klogSafe("ws_settled_reveal_pending_check", {
+        tableId,
+        loadedOk: loaded?.ok === true,
+        runtimePhase: runtimeState?.phase || null,
+        persistedPhase: persistedState?.phase || null,
+        persistedSettledAt: persistedState?.handSettlement?.settledAt || null,
+        pending
+      });
+    }
+    return pending;
+  } catch (error) {
+    klogSafe("ws_settled_reveal_pending_check_failed", {
+      tableId,
+      message: error?.message || "unknown"
+    });
+    return false;
+  }
 }
 
 function broadcastStateSnapshots(tableId) {
@@ -2431,6 +2515,7 @@ wss.on("connection", (ws) => {
 
         const resyncedSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: resynced.tableState, tableSnapshot: resyncedSnapshot });
+        maybeScheduleSettledRollover(tableId);
         maybeTouchPersistedSeatLastSeen(connState);
         scheduleObservedBotTurn({
           tableId,
@@ -2527,6 +2612,7 @@ wss.on("connection", (ws) => {
         const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         await nextEventLoopTurn();
         sendStateSnapshot(ws, connState, { tableSnapshot, reason: replay.reason });
+        maybeScheduleSettledRollover(tableId);
         scheduleObservedBotTurn({
           tableId,
           trigger: "resume_resync",
@@ -2551,6 +2637,7 @@ wss.on("connection", (ws) => {
         connState.session.latestDeliveredSeqByTableId.set(tableId, replayFrame.seq);
         sendFrame(ws, replayFrame);
       }
+      maybeScheduleSettledRollover(tableId);
       scheduleObservedBotTurn({
         tableId,
         trigger: "resume_replay",
@@ -2629,6 +2716,7 @@ wss.on("connection", (ws) => {
 
         const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         sendStateSnapshot(ws, connState, { requestId: frame.requestId ?? null, tableSnapshot });
+        maybeScheduleSettledRollover(tableId);
         maybeTouchPersistedSeatLastSeen(connState);
         return;
       }
@@ -2656,6 +2744,7 @@ wss.on("connection", (ws) => {
 
       const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
       sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: subscribed.tableState, tableSnapshot });
+      maybeScheduleSettledRollover(tableId);
       maybeTouchPersistedSeatLastSeen(connState);
       scheduleObservedBotTurn({
         tableId,
@@ -2718,6 +2807,7 @@ wss.on("connection", (ws) => {
           restoreTableFromPersisted,
           broadcastResyncRequired,
           broadcastStateSnapshots,
+          scheduleSettledRollover: maybeScheduleSettledRollover,
           scheduleBotStep,
           klog: klogSafe
         })
