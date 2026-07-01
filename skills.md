@@ -166,9 +166,15 @@ Agents MUST use this to locate logic quickly.
 
 ### Logs
 - `journalctl`
+- Production WS logs:
+  - `journalctl -u ws-server.service`
+- Preview WS logs:
+  - `journalctl -u ws-server-preview.service`
+- For live debugging, add `-f`; for recent bounded output, add `--no-pager -n 200`.
 
 ### Rule
 - No Docker assumptions unless explicitly present
+- When investigating WS preview or production behavior, check the relevant journald service before inferring from code alone.
 
 ---
 
