@@ -200,6 +200,23 @@ async function nextMessageOfType(ws, type, { timeoutMs = 5000, skipTypes = [] } 
   }
 }
 
+async function nextMessageForRequest(ws, type, requestId, { timeoutMs = 5000, skipTypes = [] } = {}) {
+  const started = Date.now();
+  while (true) {
+    const remaining = timeoutMs - (Date.now() - started);
+    if (remaining <= 0) {
+      throw new Error(`Timed out waiting for ${type} requestId=${requestId}`);
+    }
+    const frame = await nextMessage(ws, remaining, `nextMessageForRequest(${type}, ${requestId})`);
+    if (frame?.type === type && frame?.requestId === requestId) {
+      return frame;
+    }
+    if (skipTypes.includes(frame?.type)) {
+      continue;
+    }
+  }
+}
+
 
 function persistedBootstrapFixturesEnv(fixtures) {
   return {
@@ -1280,11 +1297,17 @@ test("restart and resync hydrate latest persisted WS mutation", async () => {
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-restart-1", ts: "2026-02-28T02:20:00Z", payload: { tableId } });
     await nextMessageOfType(ws, "table_state", { skipTypes: ["commandResult"] });
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-restart-1", ts: "2026-02-28T02:20:01Z", payload: { tableId, view: "snapshot" } });
-    const baseline = await nextMessageOfType(ws, "stateSnapshot", { skipTypes: ["commandResult"] });
+    const baseline = await nextMessageForRequest(ws, "stateSnapshot", "snap-restart-1", { skipTypes: ["commandResult", "statePatch"] });
     const handId = baseline.payload.public.hand.handId;
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-restart-1", ts: "2026-02-28T02:20:02Z", payload: { tableId, handId, action: "fold" } });
     await nextMessageOfType(ws, "commandResult", { skipTypes: ["stateSnapshot", "statePatch"] });
-    const advanced = await nextMessageOfType(ws, "stateSnapshot", { skipTypes: ["statePatch"] });
+    let advanced = null;
+    while (!advanced) {
+      const candidate = await nextMessageOfType(ws, "stateSnapshot", { skipTypes: ["statePatch"] });
+      if (Number(candidate?.payload?.stateVersion) > Number(baseline?.payload?.stateVersion)) {
+        advanced = candidate;
+      }
+    }
     assert.equal(advanced.payload.stateVersion > baseline.payload.stateVersion, true);
     ws.close();
   } finally {
@@ -1301,7 +1324,7 @@ test("restart and resync hydrate latest persisted WS mutation", async () => {
     sendFrame(ws2, { version: "1.0", type: "resync", requestId: "resync-restart-2", ts: "2026-02-28T02:20:03Z", payload: { tableId } });
     await nextMessageOfType(ws2, "table_state", { skipTypes: ["commandResult"] });
     sendFrame(ws2, { version: "1.0", type: "table_state_sub", requestId: "snap-restart-2", ts: "2026-02-28T02:20:04Z", payload: { tableId, view: "snapshot" } });
-    const rehydrated = await nextMessageOfType(ws2, "stateSnapshot", { skipTypes: ["commandResult"] });
+    const rehydrated = await nextMessageForRequest(ws2, "stateSnapshot", "snap-restart-2", { skipTypes: ["commandResult", "statePatch"] });
     assert.equal(rehydrated.payload.stateVersion > 0, true);
     ws2.close();
   } finally {
