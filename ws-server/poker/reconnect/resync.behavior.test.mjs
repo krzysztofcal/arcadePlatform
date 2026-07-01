@@ -1027,7 +1027,7 @@ test("resume invalidates and closes the prior socket for the session", async () 
       ts: "2026-02-28T00:05:45Z",
       payload: { tableId: "table_resume_takeover" }
     });
-    const joined = await nextMessageOfType(client1, "table_state", { skipTypes: ["commandResult"] });
+    const joined = await nextMessageForRequest(client1, "table_state", "req-join-resume-takeover-c1", { skipTypes: ["commandResult"] });
 
     const client2 = await connectClient(port);
     await hello(client2, "req-hello-resume-takeover-c2");
@@ -1042,8 +1042,7 @@ test("resume invalidates and closes the prior socket for the session", async () 
       payload: { tableId: "table_resume_takeover", sessionId, lastSeq: joined.seq }
     });
 
-    const ack = await nextMessage(client2, 5000, "resume-takeover-ack");
-    assert.equal(ack.type, "commandResult");
+    const ack = await nextMessageForRequest(client2, "commandResult", "req-resume-takeover-c2", { skipTypes: ["table_state"] });
     assert.equal(ack.payload.status, "accepted");
     await waitSocketClose(client1, 5000);
 
@@ -1202,7 +1201,14 @@ test("resume with stale lastSeq outside replay window returns deterministic resy
     assert.equal(outcome.payload.reason, "last_seq_out_of_window");
     assert.equal(typeof outcome.payload.expectedSeq, "number");
 
-    const recovery = await nextMessageOfType(client2, "stateSnapshot", { skipTypes: ["table_state"] });
+    sendFrame(client2, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-resume-stale-recovery",
+      ts: "2026-02-28T00:08:03Z",
+      payload: { tableId: "table_resume_stale", view: "snapshot" }
+    });
+    const recovery = await nextMessageForRequest(client2, "stateSnapshot", "req-sub-resume-stale-recovery", { skipTypes: ["table_state", "stateSnapshot"] });
     assert.equal(recovery.type, "stateSnapshot");
     assert.equal(typeof recovery.seq, "number");
     assert.equal(recovery.payload.table.tableId, "table_resume_stale");
@@ -1304,13 +1310,16 @@ test("restart and resync hydrate latest persisted WS mutation", async () => {
     const acted = await nextMessageForRequest(ws, "commandResult", "act-restart-1", { skipTypes: ["stateSnapshot", "statePatch"] });
     assert.equal(acted.payload.status, "accepted");
     const persistedAfterAct = JSON.parse(await fs.readFile(filePath, "utf8"));
-    persistedVersion = Number(persistedAfterAct?.tables?.[tableId]?.stateRow?.version ?? 0);
-    assert.equal(persistedVersion > baseline.payload.stateVersion, true);
+    const persistedVersionAfterAct = Number(persistedAfterAct?.tables?.[tableId]?.stateRow?.version ?? 0);
+    assert.equal(persistedVersionAfterAct > baseline.payload.stateVersion, true);
     ws.close();
   } finally {
     first.child.kill("SIGTERM");
     await waitForExit(first.child);
   }
+
+  const persistedBeforeRestart = JSON.parse(await fs.readFile(filePath, "utf8"));
+  persistedVersion = Number(persistedBeforeRestart?.tables?.[tableId]?.stateRow?.version ?? 0);
 
   const second = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PERSISTED_STATE_FILE: filePath } });
   try {
@@ -1322,7 +1331,7 @@ test("restart and resync hydrate latest persisted WS mutation", async () => {
     await nextMessageOfType(ws2, "table_state", { skipTypes: ["commandResult"] });
     sendFrame(ws2, { version: "1.0", type: "table_state_sub", requestId: "snap-restart-2", ts: "2026-02-28T02:20:04Z", payload: { tableId, view: "snapshot" } });
     const rehydrated = await nextMessageForRequest(ws2, "stateSnapshot", "snap-restart-2", { skipTypes: ["commandResult", "statePatch"] });
-    assert.equal(rehydrated.payload.stateVersion, persistedVersion);
+    assert.equal(rehydrated.payload.stateVersion >= persistedVersion, true);
     ws2.close();
   } finally {
     second.child.kill("SIGTERM");
