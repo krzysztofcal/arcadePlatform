@@ -119,6 +119,49 @@ function strengthThresholds(profile) {
   return { bet: 0.7, call: 0.43, bluff: 0.11, aggression: 0.38 };
 }
 
+function bucketStrength(strength) {
+  if (strength >= 0.8) return "very_strong";
+  if (strength >= 0.65) return "strong";
+  if (strength >= 0.45) return "medium";
+  if (strength >= 0.25) return "weak";
+  return "very_weak";
+}
+
+function bucketRoll(roll) {
+  if (roll < 0.2) return "low";
+  if (roll < 0.5) return "medium";
+  if (roll < 0.8) return "high";
+  return "very_high";
+}
+
+function describeAggressiveActionSkip(legalActions, actionType) {
+  const action = findAction(legalActions, actionType);
+  if (!action) return null;
+  const amount = readAmount(action);
+  if (amount == null) return "missing_amount";
+  if (Math.trunc(amount) <= 0) return "invalid_amount";
+  return null;
+}
+
+function buildBotDecisionDiagnostics({ legalActions, context, profile, roll, action }) {
+  const cards = botCardsFromContext(context);
+  const phase = normalizeString(context?.state?.phase).toUpperCase();
+  const strength = phase === "PREFLOP" ? scorePreflop(cards) : scorePostflop(cards, context?.state?.community);
+  return {
+    botUserId: typeof context?.userId === "string" ? context.userId : null,
+    botProfile: profile,
+    phase: phase || null,
+    handStrengthBucket: bucketStrength(strength),
+    randomRollBucket: bucketRoll(roll),
+    selectedAction: action?.type || null,
+    selectedAmount: action?.amount ?? null,
+    aggressiveActionSkips: {
+      bet: describeAggressiveActionSkip(legalActions, "BET"),
+      raise: describeAggressiveActionSkip(legalActions, "RAISE")
+    }
+  };
+}
+
 function pickLegalAction(legalActions, preferredTypes) {
   for (const type of preferredTypes) {
     const action = findAction(legalActions, type);
@@ -867,19 +910,36 @@ export function createAcceptedBotStepExecutor({
         },
         withoutPrivateState,
         chooseBotActionTrivial: (legalActions, context = {}) => {
-          let action = chooseBotActionTrivial(legalActions, {
+          const botUserId = context?.userId || lastKnown?.state?.turnUserId || "";
+          const botSeat = tableManager.tableSnapshot?.(tableId, botUserId)?.seats?.find((seat) => seat?.userId === botUserId);
+          const botProfile = normalizeString(context?.profile ?? context?.botProfile ?? botSeat?.botProfile).toUpperCase() || "NORMAL";
+          const decisionRoll = clampRandom(context?.random);
+          const decisionContext = {
             ...context,
-            profile: tableManager.tableSnapshot?.(tableId, context?.userId || lastKnown?.state?.turnUserId || "")?.seats?.find((seat) => seat?.userId === (context?.userId || lastKnown?.state?.turnUserId))?.botProfile
-          });
+            profile: botProfile,
+            random: () => decisionRoll
+          };
+          let action = chooseBotActionTrivial(legalActions, decisionContext);
           if ((!action || !action.type) && Array.isArray(legalActions) && legalActions.length > 0) {
             action = chooseBotActionFallback(legalActions);
             klog(action?.type ? "ws_bot_autoplay_fallback_action" : "ws_bot_autoplay_no_fallback_action", {
               ...baseLog,
-              botTurnUserId: context?.userId || (typeof lastKnown?.state?.turnUserId === "string" ? lastKnown.state.turnUserId : null),
+              botTurnUserId: botUserId || null,
               legalActionSummary: summarizeLegalActions(legalActions),
               actionType: action?.type || null
             });
           }
+          klog("ws_bot_autoplay_decision", {
+            ...baseLog,
+            ...buildBotDecisionDiagnostics({
+              legalActions,
+              context: decisionContext,
+              profile: botProfile,
+              roll: decisionRoll,
+              action
+            }),
+            legalActionSummary: summarizeLegalActions(legalActions)
+          });
           lastKnown = { ...lastKnown, stage: "action_chosen", actionType: action?.type || null, actionAmount: action?.amount ?? null };
           logVerbose("ws_bot_autoplay_action_chosen", {
             ...baseLog,
