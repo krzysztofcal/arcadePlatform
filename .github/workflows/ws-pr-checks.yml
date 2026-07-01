@@ -19,6 +19,10 @@ on:
       - ".github/workflows/ws-preview-deploy.yml"
       - ".github/workflows/infra-vps.yml"
 
+env:
+  WS_DOCKER_BUILD_CONTEXT: "."
+  WS_DOCKERFILE_PATH: "ws-server/Dockerfile"
+
 jobs:
   ws-harness:
     runs-on: ubuntu-latest
@@ -54,6 +58,13 @@ jobs:
 
       - name: Run ws join runtime behavior test
         run: node --test ws-tests/ws-join-runtime.behavior.test.mjs
+
+      - name: Validate shared WS Docker build contract (repo-root context)
+        run: |
+          set -euo pipefail
+          # Must stay aligned with ws-tests/ws-docker-build-contract.mjs and main WS Deploy harness.
+          docker build -t arcadeplatform-ws-contract:${{ github.sha }} -f "$WS_DOCKERFILE_PATH" "$WS_DOCKER_BUILD_CONTEXT"
+          docker image rm -f arcadeplatform-ws-contract:${{ github.sha }}
 
       - name: Run WS behavior test
         run: node --test ws-server/server.behavior.test.mjs
@@ -125,7 +136,7 @@ jobs:
       - name: Run poker action reducer behavior test
         run: node --test ws-server/poker/shared/poker-action-reducer.behavior.test.mjs
 
-      - name: Run ws resync behavior test
+      - name: WS reconnect/resync regression tests
         run: node --test ws-server/poker/reconnect/resync.behavior.test.mjs
 
       - name: Run ws join handler behavior test
