@@ -1300,7 +1300,8 @@ test("restart and resync hydrate latest persisted WS mutation", async () => {
     const baseline = await nextMessageForRequest(ws, "stateSnapshot", "snap-restart-1", { skipTypes: ["commandResult", "statePatch"] });
     const handId = baseline.payload.public.hand.handId;
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-restart-1", ts: "2026-02-28T02:20:02Z", payload: { tableId, handId, action: "fold" } });
-    await nextMessageOfType(ws, "commandResult", { skipTypes: ["stateSnapshot", "statePatch"] });
+    const acted = await nextMessageForRequest(ws, "commandResult", "act-restart-1", { skipTypes: ["stateSnapshot", "statePatch"] });
+    assert.equal(acted.payload.status, "accepted");
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-restart-1-after-act", ts: "2026-02-28T02:20:02.500Z", payload: { tableId, view: "snapshot" } });
     const advanced = await nextMessageForRequest(ws, "stateSnapshot", "snap-restart-1-after-act", { skipTypes: ["commandResult", "statePatch"] });
     assert.equal(advanced.payload.stateVersion > baseline.payload.stateVersion, true);
