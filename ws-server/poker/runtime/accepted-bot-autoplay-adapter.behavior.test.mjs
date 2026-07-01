@@ -152,6 +152,50 @@ test("accepted bot autoplay enriches legal raise with a positive amount", async 
   assert.equal(observed.action?.amount, 4);
 });
 
+test("accepted bot autoplay does not repeatedly min-reraise after the bot already raised this round", async () => {
+  const observed = { action: null };
+  const state = {
+    version: 2,
+    tableId: "t-no-reraise-loop",
+    handId: "h-no-reraise-loop",
+    phase: "TURN",
+    turnUserId: "bot_2",
+    seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }],
+    stacks: { human_1: 100, bot_2: 100 },
+    community: ["AS", "AD", "AC", "2H"],
+    holeCardsByUserId: { bot_2: ["AH", "KD"] },
+    currentBet: 4,
+    lastRaiseSize: 2,
+    betThisRoundByUserId: { human_1: 4, bot_2: 2 },
+    toCallByUserId: { bot_2: 2 },
+    lastBettingRoundActionByUserId: { bot_2: "RAISE" }
+  };
+  const tableManager = {
+    persistedPokerState: () => ({ ...state }),
+    persistedStateVersion: () => 2,
+    tableSnapshot: () => ({ seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true, botProfile: "LOOSE" }] }),
+    applyAction: ({ action, amount }) => {
+      observed.action = { action, amount };
+      return { accepted: true, changed: true, replayed: false, stateVersion: 3 };
+    }
+  };
+
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    random: () => 0,
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    klog: () => {}
+  });
+
+  const result = await run({ tableId: "t-no-reraise-loop", trigger: "act", requestId: "r-no-reraise-loop" });
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, true);
+  assert.equal(observed.action?.action, "CALL");
+  assert.equal(observed.action?.amount, undefined);
+});
+
 test("accepted bot autoplay waits a human-like reaction delay before acting", async () => {
   const observed = { sleepMs: [], persist: 0 };
   const nowMs = Date.now();

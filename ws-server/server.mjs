@@ -1828,21 +1828,34 @@ async function loadPersistedTableHealthSnapshot(tableId) {
 
 function buildTableJanitorRuntimeContext(tableId, persistedSeats = []) {
   const loaded = tableManager.listTableIds().includes(tableId);
-  const connectedUserIds = [];
+  const connectedUserIds = new Set();
+  if (loaded && typeof tableManager.orderedConnectionsForTable === "function") {
+    const sockets = tableManager.orderedConnectionsForTable(tableId, (socket) => {
+      const userId = socket?.__connState?.session?.userId;
+      return typeof userId === "string" ? userId : "";
+    });
+    for (const socket of sockets) {
+      if (socket?.__connState?.sessionInvalidated === true) continue;
+      const userId = socket?.__connState?.session?.userId;
+      if (typeof userId === "string" && userId.trim()) {
+        connectedUserIds.add(userId.trim());
+      }
+    }
+  }
   for (const seat of persistedSeats || []) {
     if (seat?.is_bot === true) continue;
     const userId = typeof seat?.user_id === "string" ? seat.user_id.trim() : "";
     if (!userId) continue;
     const activeSockets = sessionStore.connectionsForUser(userId) || [];
     if (activeSockets.some((socket) => tableSocketMatches(socket, tableId))) {
-      connectedUserIds.push(userId);
+      connectedUserIds.add(userId);
     }
   }
   return {
     loaded,
     tableStatus: loaded ? (tableManager.isTableClosed(tableId) ? "CLOSED" : "OPEN") : null,
     hasConnectedHumanPresence: tableManager.hasConnectedHumanPresence(tableId),
-    connectedUserIds
+    connectedUserIds: [...connectedUserIds]
   };
 }
 
@@ -2675,6 +2688,7 @@ wss.on("connection", (ws) => {
         return;
       }
       sendGameplaySnapshot(ws, connState, { requestId: frame.requestId ?? null, tableId, snapshot: loaded.snapshot });
+      maybeTouchPersistedSeatLastSeen(connState);
       return;
     }
 
@@ -2708,6 +2722,7 @@ wss.on("connection", (ws) => {
           klog: klogSafe
         })
       });
+      maybeTouchPersistedSeatLastSeen(connState);
       return;
     }
 

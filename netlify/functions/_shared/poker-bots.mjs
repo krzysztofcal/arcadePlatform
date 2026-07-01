@@ -206,6 +206,12 @@ function pickLegalAction(legalActions, preferredTypes) {
   return null;
 }
 
+function hasAggressedThisRound(context = {}) {
+  const userId = typeof context?.userId === "string" ? context.userId : "";
+  const lastAction = normalizeString(context?.state?.lastBettingRoundActionByUserId?.[userId]).toUpperCase();
+  return lastAction === "BET" || lastAction === "RAISE";
+}
+
 function chooseBotActionProfiled(legalActions, context = {}) {
   const seatProfile = Array.isArray(context?.state?.seats)
     ? context.state.seats.find((seat) => seat?.userId === context?.userId)?.botProfile
@@ -217,9 +223,10 @@ function chooseBotActionProfiled(legalActions, context = {}) {
   const thresholds = strengthThresholds(profile);
   const roll = clampRandom(context?.random);
   const toCall = Number(context?.state?.toCallByUserId?.[context?.userId] ?? 0);
+  const aggressiveTypes = hasAggressedThisRound(context) ? ["BET", "CALL", "CHECK", "FOLD"] : ["BET", "RAISE", "CALL", "CHECK", "FOLD"];
 
   if ((strength >= thresholds.bet && roll < thresholds.aggression) || roll < thresholds.bluff) {
-    return pickLegalAction(legalActions, ["BET", "RAISE", "CALL", "CHECK", "FOLD"]);
+    return pickLegalAction(legalActions, aggressiveTypes);
   }
   if (toCall <= 0 && strength >= thresholds.call - 0.15) {
     return pickLegalAction(legalActions, ["CHECK", "BET", "CALL", "FOLD"]);
