@@ -78,6 +78,10 @@ import {
     chooseBotActionTrivial(["RAISE", "CALL", "FOLD"], { ...strongPreflop, state: { phase: "PREFLOP", toCallByUserId: { bot_1: 2 } } }),
     { type: "CALL" }
   );
+  assert.deepEqual(
+    chooseBotActionTrivial([{ type: "RAISE", min: 20 }, "CALL", "FOLD"], { ...strongPreflop, state: { phase: "PREFLOP", toCallByUserId: { bot_1: 2 } } }),
+    { type: "RAISE", amount: 20 }
+  );
 
   const weakTightFacingCall = {
     userId: "bot_2",

@@ -143,6 +143,42 @@ function describeAggressiveActionSkip(legalActions, actionType) {
   return null;
 }
 
+function enrichBotLegalActions(legalInfo = {}) {
+  const actions = Array.isArray(legalInfo?.actions) ? legalInfo.actions : [];
+  const minRaiseTo = Number(legalInfo?.minRaiseTo);
+  const maxRaiseTo = Number(legalInfo?.maxRaiseTo);
+  const maxBetAmount = Number(legalInfo?.maxBetAmount);
+  const normalizedMinRaiseTo = Number.isFinite(minRaiseTo) ? Math.trunc(minRaiseTo) : null;
+  const normalizedMaxRaiseTo = Number.isFinite(maxRaiseTo) ? Math.trunc(maxRaiseTo) : null;
+  const normalizedMaxBetAmount = Number.isFinite(maxBetAmount) ? Math.trunc(maxBetAmount) : null;
+  return actions.map((action) => {
+    const type = typeof action === "string"
+      ? action.toUpperCase()
+      : normalizeString(action?.type || action?.action).toUpperCase();
+    if (type === "BET" && normalizedMaxBetAmount > 0) {
+      return {
+        type: "BET",
+        min: 1,
+        minAmount: 1,
+        amount: 1,
+        max: normalizedMaxBetAmount,
+        maxAmount: normalizedMaxBetAmount
+      };
+    }
+    if (type === "RAISE" && normalizedMinRaiseTo > 0) {
+      return {
+        type: "RAISE",
+        min: normalizedMinRaiseTo,
+        minAmount: normalizedMinRaiseTo,
+        amount: normalizedMinRaiseTo,
+        max: normalizedMaxRaiseTo,
+        maxAmount: normalizedMaxRaiseTo
+      };
+    }
+    return action;
+  });
+}
+
 function buildBotDecisionDiagnostics({ legalActions, context, profile, roll, action }) {
   const cards = botCardsFromContext(context);
   const phase = normalizeString(context?.state?.phase).toUpperCase();
@@ -686,16 +722,26 @@ function buildDiagnosticSnapshot(state) {
 function summarizeLegalActions(legalActions) {
   const actions = Array.isArray(legalActions) ? legalActions : [];
   const types = [];
+  const aggressiveAmounts = {};
   for (const item of actions) {
     if (typeof item === "string") {
       types.push(item);
     } else if (item && typeof item === "object" && typeof item.type === "string") {
       types.push(item.type);
+      const type = item.type.toUpperCase();
+      if (type === "BET" || type === "RAISE") {
+        aggressiveAmounts[type.toLowerCase()] = {
+          amount: Number.isFinite(Number(item.amount)) ? Number(item.amount) : null,
+          min: Number.isFinite(Number(item.min ?? item.minAmount)) ? Number(item.min ?? item.minAmount) : null,
+          max: Number.isFinite(Number(item.max ?? item.maxAmount)) ? Number(item.max ?? item.maxAmount) : null
+        };
+      }
     }
   }
   return {
     count: actions.length,
-    types: [...new Set(types)].slice(0, 8)
+    types: [...new Set(types)].slice(0, 8),
+    aggressiveAmounts
   };
 }
 
@@ -842,7 +888,11 @@ export function createAcceptedBotStepExecutor({
         },
         computeLegalActions: ({ statePublic, userId }) => {
           const legal = computeLegalActions({ statePublic, userId });
-          const legalSummary = summarizeLegalActions(legal?.actions);
+          const botLegal = {
+            ...legal,
+            actions: enrichBotLegalActions(legal)
+          };
+          const legalSummary = summarizeLegalActions(botLegal?.actions);
           lastKnown = { ...lastKnown, stage: "turn_snapshot", state: statePublic, legalActionSummary: legalSummary };
           logVerbose("ws_bot_autoplay_turn_snapshot", {
             ...baseLog,
@@ -851,7 +901,7 @@ export function createAcceptedBotStepExecutor({
             ...buildDiagnosticSnapshot(statePublic),
             stateVersion: Number(tableManager.persistedStateVersion(tableId) || 0)
           });
-          return legal;
+          return botLegal;
         },
         beforeBotActionStep: async ({
           responseFinalState,
