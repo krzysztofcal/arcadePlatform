@@ -66,7 +66,10 @@ export async function handleActCommand({ frame, ws, connState, tableManager, ens
     const persisted = await persistMutatedState({
       tableId,
       expectedVersion: Number(result.stateVersion) - 1,
-      mutationKind: "act"
+      mutationKind: "act",
+      acceptedActionAudit: result.acceptedActionAudit
+        ? { ...result.acceptedActionAudit, source: "human" }
+        : null
     });
     if (!persisted?.ok) {
       await recoverFromPersistConflict({

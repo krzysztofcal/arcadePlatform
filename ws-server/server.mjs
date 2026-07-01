@@ -1111,7 +1111,7 @@ function broadcastTableState(tableId, { excludeWs = null } = {}) {
 
 
 
-async function persistMutatedState({ tableId, expectedVersion, mutationKind }) {
+async function persistMutatedState({ tableId, expectedVersion, mutationKind, acceptedActionAudit = null }) {
   if (!persistedStateWriter) {
     return { ok: true, skipped: true };
   }
@@ -1126,7 +1126,8 @@ async function persistMutatedState({ tableId, expectedVersion, mutationKind }) {
     nextState,
     supabaseUrl: process.env.SUPABASE_URL,
     supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-    meta: { mutationKind }
+    meta: { mutationKind },
+    acceptedActionAudit
   });
   if (!persisted?.ok) {
     klogSafe("ws_state_persist_failed", { tableId, expectedVersion, mutationKind, reason: persisted?.reason || "unknown" });

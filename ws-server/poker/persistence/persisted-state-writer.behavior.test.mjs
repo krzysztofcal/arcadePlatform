@@ -106,6 +106,216 @@ test("persisted state writer bumps table last_activity_at on successful db mutat
   );
 });
 
+test("persisted state writer appends accepted human action audit row", async () => {
+  const queries = [];
+  const writer = createPersistedStateWriter({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: async (fn) => fn({
+      unsafe: async (query, params = []) => {
+        const text = String(query);
+        queries.push({ query: text, params });
+        if (text.startsWith("update public.poker_state set version = version + 1")) {
+          return [{ version: 8 }];
+        }
+        if (text === "update public.poker_tables set last_activity_at = now() where id = $1;") {
+          return [];
+        }
+        if (text.startsWith("select id from public.poker_actions where table_id = $1 and request_id = $2")) {
+          return [];
+        }
+        if (text.startsWith("insert into public.poker_actions")) {
+          return [{ id: 100 }];
+        }
+        return [];
+      }
+    }),
+    klog: () => {}
+  });
+
+  const result = await writer.writeMutation({
+    tableId: "t_action",
+    expectedVersion: 7,
+    nextState: {
+      tableId: "t_action",
+      handId: "hand_action",
+      phase: "FLOP",
+      potTotal: 12,
+      currentBet: 0,
+      stacks: { u1: 94, u2: 94 },
+      seats: [{ userId: "u1", seatNo: 1, status: "ACTIVE" }, { userId: "u2", seatNo: 2, status: "ACTIVE" }],
+      holeCardsByUserId: { u1: ["AH", "AD"] }
+    },
+    acceptedActionAudit: {
+      tableId: "t_action",
+      handId: "hand_action",
+      actorUserId: "u2",
+      isBot: false,
+      source: "human",
+      action: "CALL",
+      amount: 4,
+      requestId: "req-call",
+      phaseFrom: "PREFLOP",
+      phaseTo: "FLOP",
+      stateVersionBefore: 7,
+      stateVersionAfter: 8,
+      potTotalBefore: 8,
+      potTotalAfter: 12,
+      currentBetBefore: 6,
+      currentBetAfter: 0,
+      toCall: 4,
+      actorStackBefore: 98,
+      actorStackAfter: 94
+    }
+  });
+
+  assert.deepEqual(result, { ok: true, newVersion: 8 });
+  const actionInsert = queries.find((entry) => entry.query.startsWith("insert into public.poker_actions"));
+  assert.ok(actionInsert);
+  assert.equal(actionInsert.params[0], "t_action");
+  assert.equal(actionInsert.params[1], 8);
+  assert.equal(actionInsert.params[2], "u2");
+  assert.equal(actionInsert.params[3], "CALL");
+  assert.equal(actionInsert.params[4], 4);
+  assert.equal(actionInsert.params[5], "hand_action");
+  assert.equal(actionInsert.params[6], "req-call");
+  assert.equal(actionInsert.params[7], "PREFLOP");
+  assert.equal(actionInsert.params[8], "FLOP");
+  const meta = JSON.parse(actionInsert.params[9]);
+  assert.deepEqual(meta, {
+    auditVersion: 1,
+    tableId: "t_action",
+    handId: "hand_action",
+    actorUserId: "u2",
+    action: "CALL",
+    phaseFrom: "PREFLOP",
+    phaseTo: "FLOP",
+    stateVersionAfter: 8,
+    amount: 4,
+    isBot: false,
+    source: "human",
+    stateVersionBefore: 7,
+    potTotalBefore: 8,
+    potTotalAfter: 12,
+    currentBetBefore: 6,
+    currentBetAfter: 0,
+    toCall: 4,
+    actorStackBefore: 98,
+    actorStackAfter: 94
+  });
+  assert.equal(JSON.stringify(meta).includes("AH"), false);
+  assert.equal(JSON.stringify(meta).includes("AD"), false);
+});
+
+test("persisted state writer dedupes replayed accepted action audit by request_id", async () => {
+  let stateVersion = 7;
+  let currentState = null;
+  let actionExists = false;
+  const queries = [];
+  const writer = createPersistedStateWriter({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: async (fn) => fn({
+      unsafe: async (query, params = []) => {
+        const text = String(query);
+        queries.push({ query: text, params });
+        if (text.startsWith("update public.poker_state set version = version + 1")) {
+          if (stateVersion === 7) {
+            stateVersion = 8;
+            currentState = JSON.parse(params[2]);
+            return [{ version: stateVersion }];
+          }
+          return [];
+        }
+        if (text === "update public.poker_tables set last_activity_at = now() where id = $1;") {
+          return [];
+        }
+        if (text.startsWith("select version, state from public.poker_state where table_id = $1 limit 1;")) {
+          return [{ version: stateVersion, state: currentState }];
+        }
+        if (text.startsWith("select id from public.poker_actions where table_id = $1 and request_id = $2")) {
+          return actionExists ? [{ id: 1 }] : [];
+        }
+        if (text.startsWith("insert into public.poker_actions")) {
+          actionExists = true;
+          return [{ id: 1 }];
+        }
+        return [];
+      }
+    }),
+    klog: () => {}
+  });
+
+  const nextState = { tableId: "t_action", handId: "hand_action", phase: "FLOP", potTotal: 12, stacks: { u2: 94 } };
+  const acceptedActionAudit = {
+    handId: "hand_action",
+    actorUserId: "u2",
+    action: "CALL",
+    amount: 4,
+    requestId: "req-call",
+    phaseFrom: "PREFLOP",
+    phaseTo: "FLOP"
+  };
+
+  const first = await writer.writeMutation({ tableId: "t_action", expectedVersion: 7, nextState, acceptedActionAudit });
+  const second = await writer.writeMutation({ tableId: "t_action", expectedVersion: 7, nextState, acceptedActionAudit });
+
+  assert.deepEqual(first, { ok: true, newVersion: 8 });
+  assert.deepEqual(second, { ok: true, newVersion: 8, alreadyApplied: true });
+  assert.equal(queries.filter((entry) => entry.query.startsWith("insert into public.poker_actions")).length, 1);
+});
+
+test("persisted state writer logs accepted action audit failures without private hole cards", async () => {
+  const logs = [];
+  const writer = createPersistedStateWriter({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: async (fn) => fn({
+      unsafe: async (query) => {
+        const text = String(query);
+        if (text.startsWith("update public.poker_state set version = version + 1")) {
+          return [{ version: 8 }];
+        }
+        if (text === "update public.poker_tables set last_activity_at = now() where id = $1;") {
+          return [];
+        }
+        if (text.startsWith("select id from public.poker_actions where table_id = $1 and request_id = $2")) {
+          return [];
+        }
+        if (text.startsWith("insert into public.poker_actions")) {
+          throw new Error("accepted_audit_insert_failed");
+        }
+        return [];
+      }
+    }),
+    klog: (kind, payload) => logs.push({ kind, payload })
+  });
+
+  const result = await writer.writeMutation({
+    tableId: "t_action",
+    expectedVersion: 7,
+    nextState: {
+      tableId: "t_action",
+      handId: "hand_action",
+      phase: "TURN",
+      holeCardsByUserId: { u2: ["AS", "KS"] },
+      deck: ["QD"]
+    },
+    acceptedActionAudit: {
+      handId: "hand_action",
+      actorUserId: "u2",
+      action: "CHECK",
+      requestId: "req-check",
+      phaseFrom: "FLOP",
+      phaseTo: "TURN"
+    }
+  });
+
+  assert.deepEqual(result, { ok: true, newVersion: 8 });
+  assert.equal(logs.some((entry) => entry.kind === "ws_accepted_action_audit_failed"), true);
+  const serializedLogs = JSON.stringify(logs);
+  assert.equal(serializedLogs.includes("AS"), false);
+  assert.equal(serializedLogs.includes("KS"), false);
+  assert.equal(serializedLogs.includes("QD"), false);
+});
+
 test("persisted state writer appends exactly one HAND_SETTLED audit event with settlement summary", async () => {
   let stateVersion = 4;
   let currentState = null;

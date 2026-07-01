@@ -34,7 +34,7 @@ test("autoplay adapter resolves shared autoplay from neutral shared module path"
 });
 
 test("accepted bot autoplay executes and persists when bot is on turn", async () => {
-  const calls = { persist: 0 };
+  const calls = { persist: 0, persistArgs: null };
   const state = {
     version: 2,
     tableId: "t1",
@@ -48,13 +48,20 @@ test("accepted bot autoplay executes and persists when bot is on turn", async ()
     persistedPokerState: () => ({ ...state }),
     persistedStateVersion: () => 2,
     tableSnapshot: () => ({ seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }] }),
-    applyAction: () => ({ accepted: true, changed: true, replayed: false, stateVersion: 3 })
+    applyAction: () => ({
+      accepted: true,
+      changed: true,
+      replayed: false,
+      stateVersion: 3,
+      acceptedActionAudit: { handId: "h1", actorUserId: "bot_2", action: "CHECK", isBot: true }
+    })
   };
 
   const run = createAcceptedBotAutoplayExecutor({
     tableManager,
-    persistMutatedState: async () => {
+    persistMutatedState: async (args) => {
       calls.persist += 1;
+      calls.persistArgs = args;
       return { ok: true };
     },
     restoreTableFromPersisted: async () => ({ ok: true }),
@@ -65,6 +72,8 @@ test("accepted bot autoplay executes and persists when bot is on turn", async ()
   const result = await run({ tableId: "t1", trigger: "act", requestId: "r1" });
   assert.equal(result.ok, true);
   assert.equal(calls.persist > 0, true);
+  assert.equal(calls.persistArgs.acceptedActionAudit.source, "bot_autoplay");
+  assert.equal(calls.persistArgs.acceptedActionAudit.actorUserId, "bot_2");
 });
 
 test("accepted bot autoplay enriches legal bet with a positive amount", async () => {

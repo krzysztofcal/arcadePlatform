@@ -3,15 +3,24 @@ import assert from "node:assert/strict";
 import { handleTurnTimeoutCommand } from "./turn-timeout.mjs";
 
 test("handleTurnTimeoutCommand persists, autoplays, and broadcasts on changed timeout", async () => {
-  const calls = { persist: 0, autoplay: 0, snapshots: 0 };
+  const calls = { persist: 0, autoplay: 0, snapshots: 0, persistArgs: null };
   const result = await handleTurnTimeoutCommand({
     tableId: "t1",
     nowMs: 123,
     tableManager: {
-      maybeApplyTurnTimeout: ({ tableId, nowMs }) => ({ ok: true, changed: true, tableId, nowMs, stateVersion: 4, requestId: "timeout:t1" })
+      maybeApplyTurnTimeout: ({ tableId, nowMs }) => ({
+        ok: true,
+        changed: true,
+        tableId,
+        nowMs,
+        stateVersion: 4,
+        requestId: "timeout:t1",
+        acceptedActionAudit: { handId: "h1", actorUserId: "u1", action: "FOLD" }
+      })
     },
-    persistMutatedState: async () => {
+    persistMutatedState: async (args) => {
       calls.persist += 1;
+      calls.persistArgs = args;
       return { ok: true };
     },
     restoreTableFromPersisted: async () => ({ ok: true }),
@@ -28,6 +37,8 @@ test("handleTurnTimeoutCommand persists, autoplays, and broadcasts on changed ti
   assert.equal(calls.persist, 1);
   assert.equal(calls.autoplay, 1);
   assert.equal(calls.snapshots, 1);
+  assert.equal(calls.persistArgs.acceptedActionAudit.source, "timeout");
+  assert.equal(calls.persistArgs.acceptedActionAudit.action, "FOLD");
 });
 
 test("handleTurnTimeoutCommand no-ops cleanly when timeout is not due", async () => {

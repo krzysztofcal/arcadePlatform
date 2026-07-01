@@ -208,6 +208,63 @@ function buildEmptyLobbyPokerState(tableId) {
   };
 }
 
+function normalizeNumberOrNull(value) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function readPotTotal(state) {
+  return normalizeNumberOrNull(state?.potTotal ?? state?.pot);
+}
+
+function readActorStack(state, userId) {
+  if (!state || typeof state !== "object" || Array.isArray(state) || !userId) {
+    return null;
+  }
+  return normalizeNumberOrNull(state?.stacks?.[userId]);
+}
+
+function buildAcceptedActionAudit({ tableId, coreStateBefore, coreStateAfter, userId, requestId, action, amount, isBot }) {
+  const before = coreStateBefore?.pokerState;
+  const after = coreStateAfter?.pokerState;
+  const handId = typeof before?.handId === "string" && before.handId.trim()
+    ? before.handId.trim()
+    : (typeof after?.handId === "string" ? after.handId.trim() : "");
+  const actionType = typeof action === "string" ? action.trim().toUpperCase() : "";
+  const actorUserId = typeof userId === "string" ? userId.trim() : "";
+  if (!tableId || !handId || !actorUserId || !actionType) {
+    return null;
+  }
+  const stackBefore = readActorStack(before, actorUserId);
+  const stackAfter = readActorStack(after, actorUserId);
+  const stackContribution = stackBefore !== null && stackAfter !== null && stackBefore >= stackAfter
+    ? stackBefore - stackAfter
+    : null;
+  const actionAmount = normalizeNumberOrNull(amount);
+  const toCall = normalizeNumberOrNull(before?.toCallByUserId?.[actorUserId]);
+
+  return {
+    tableId,
+    handId,
+    actorUserId,
+    isBot: isBot === true,
+    action: actionType,
+    amount: actionAmount !== null ? actionAmount : stackContribution,
+    requestId: typeof requestId === "string" && requestId.trim() ? requestId.trim() : null,
+    phaseFrom: typeof before?.phase === "string" ? before.phase : null,
+    phaseTo: typeof after?.phase === "string" ? after.phase : null,
+    stateVersionBefore: Number.isInteger(coreStateBefore?.version) ? coreStateBefore.version : null,
+    stateVersionAfter: Number.isInteger(coreStateAfter?.version) ? coreStateAfter.version : null,
+    potTotalBefore: readPotTotal(before),
+    potTotalAfter: readPotTotal(after),
+    currentBetBefore: normalizeNumberOrNull(before?.currentBet),
+    currentBetAfter: normalizeNumberOrNull(after?.currentBet),
+    toCall,
+    actorStackBefore: stackBefore,
+    actorStackAfter: stackAfter
+  };
+}
+
 function needsPersistedBootstrap(table) {
   return table?.pendingPersistedBootstrap === true;
 }
@@ -524,9 +581,10 @@ export function createTableManager({
     }
 
     const resolvedNowMs = resolveNowMs({ nowMs });
+    const coreStateBefore = table.coreState;
     const applied = applyCoreStateAction({
       tableId,
-      coreState: table.coreState,
+      coreState: coreStateBefore,
       handId,
       userId,
       action,
@@ -552,7 +610,17 @@ export function createTableManager({
       reason: null,
       action: applied.action,
       stateVersion: applied.stateVersion,
-      handId: applied.handId
+      handId: applied.handId,
+      acceptedActionAudit: buildAcceptedActionAudit({
+        tableId,
+        coreStateBefore,
+        coreStateAfter: applied.coreState,
+        userId,
+        requestId,
+        action: applied.action,
+        amount,
+        isBot: isCoreStateBotUser(applied.coreState, userId)
+      })
     };
 
     rememberActionResult(table, requestId, { ...accepted, userId });
@@ -596,9 +664,10 @@ export function createTableManager({
       };
     }
 
+    const coreStateBefore = table.coreState;
     let timeoutApplied;
     try {
-      timeoutApplied = applyCoreStateTurnTimeout({ tableId, coreState: table.coreState, nowMs });
+      timeoutApplied = applyCoreStateTurnTimeout({ tableId, coreState: coreStateBefore, nowMs });
     } catch (error) {
       return {
         ok: false,
@@ -649,7 +718,17 @@ export function createTableManager({
       requestId,
       action: timeoutApplied.action,
       actorUserId: timeoutApplied.actorUserId,
-      stateVersion: timeoutApplied.stateVersion
+      stateVersion: timeoutApplied.stateVersion,
+      acceptedActionAudit: buildAcceptedActionAudit({
+        tableId,
+        coreStateBefore,
+        coreStateAfter: timeoutApplied.coreState,
+        userId: timeoutApplied.actorUserId,
+        requestId,
+        action: timeoutApplied.action,
+        amount: null,
+        isBot: isCoreStateBotUser(timeoutApplied.coreState, timeoutApplied.actorUserId)
+      })
     };
   }
 
