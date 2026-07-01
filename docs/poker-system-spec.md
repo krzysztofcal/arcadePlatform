@@ -42,6 +42,7 @@ Related documents:
 - `poker_seats`: per-table seats; includes seat status, occupant identity, and persisted snapshot `stack`.
 - `poker_state`: current hand/table JSON state, including authoritative active gameplay stacks.
 - `poker_actions`: append-only action/event trail for gameplay and diagnostics.
+- `poker_actions` should include terminal `HAND_SETTLED` audit rows with board, winners, payouts, and per-pot settlement summaries.
 - `poker_hole_cards`: private per-user hand cards for active hands.
 
 Authoritative vs derived/cache:

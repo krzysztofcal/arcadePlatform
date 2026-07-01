@@ -81,6 +81,7 @@ const awardPotsAtShowdown = ({ state, seatUserIdsInOrder, computeShowdown, nowIs
 
   const nextStacks = { ...state.stacks };
   const potsAwarded = [];
+  const handsByUserId = {};
   const winnersUnion = new Set();
   let potAwardedTotal = 0;
 
@@ -93,6 +94,18 @@ const awardPotsAtShowdown = ({ state, seatUserIdsInOrder, computeShowdown, nowIs
     const players = eligible.map((userId) => ({ userId, holeCards: ensureHoleCardsPresent({ holeCardsByUserId, userId }) }));
     const result = computeShowdown({ community, players });
     const winners = Array.isArray(result?.winners) ? result.winners : [];
+    if (result?.handsByUserId && typeof result.handsByUserId === "object" && !Array.isArray(result.handsByUserId)) {
+      for (const [userId, hand] of Object.entries(result.handsByUserId)) {
+        if (typeof userId !== "string" || !userId) continue;
+        if (!hand || typeof hand !== "object" || Array.isArray(hand)) continue;
+        handsByUserId[userId] = {
+          category: hand.category ?? null,
+          name: hand.name ?? null,
+          ranks: Array.isArray(hand.ranks) ? hand.ranks.slice() : [],
+          best5: Array.isArray(hand.best5) ? hand.best5.slice() : []
+        };
+      }
+    }
     if (winners.length === 0) {
       throw new Error("showdown_no_winners");
     }
@@ -132,6 +145,9 @@ const awardPotsAtShowdown = ({ state, seatUserIdsInOrder, computeShowdown, nowIs
     reason: "computed",
     awardedAt,
   };
+  if (Object.keys(handsByUserId).length > 0) {
+    showdown.handsByUserId = handsByUserId;
+  }
 
   return {
     nextState: {

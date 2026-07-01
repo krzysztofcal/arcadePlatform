@@ -201,6 +201,14 @@ test("applyAction RIVER-closing action settles hand with showdown metadata", () 
   assert.equal(closed.state.community.length, 5);
   assert.equal(closed.state.potTotal, 0);
   assert.deepEqual(closed.state.showdown.winners, ["u1", "u2"]);
+  assert.equal(closed.state.showdown.handsByUserId.u1.category, 9);
+  assert.equal(closed.state.showdown.handsByUserId.u1.name, "STRAIGHT_FLUSH");
+  assert.deepEqual(closed.state.showdown.handsByUserId.u1.ranks, [7]);
+  assert.equal(closed.state.showdown.handsByUserId.u1.best5.length, 5);
+  assert.equal(closed.state.showdown.handsByUserId.u2.category, 9);
+  assert.equal(closed.state.showdown.handsByUserId.u2.name, "STRAIGHT_FLUSH");
+  assert.deepEqual(closed.state.showdown.handsByUserId.u2.ranks, [7]);
+  assert.equal(closed.state.showdown.handsByUserId.u2.best5.length, 5);
   assert.equal(closed.state.handSettlement.handId, riverPending.handId);
 
   const replay = applyAction({ pokerState: riverPending, userId: "u2", action: "CHECK", amount: 0 });
