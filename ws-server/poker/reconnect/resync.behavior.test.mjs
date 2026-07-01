@@ -1287,6 +1287,7 @@ test("restart and resync hydrate latest persisted WS mutation", async () => {
   };
   const { dir, filePath } = await writePersistedFile(persisted);
   const token = makeHs256Jwt({ secret, sub: "seat_actor" });
+  let persistedVersion = 0;
 
   const first = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PERSISTED_STATE_FILE: filePath } });
   try {
@@ -1302,9 +1303,9 @@ test("restart and resync hydrate latest persisted WS mutation", async () => {
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-restart-1", ts: "2026-02-28T02:20:02Z", payload: { tableId, handId, action: "fold" } });
     const acted = await nextMessageForRequest(ws, "commandResult", "act-restart-1", { skipTypes: ["stateSnapshot", "statePatch"] });
     assert.equal(acted.payload.status, "accepted");
-    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-restart-1-after-act", ts: "2026-02-28T02:20:02.500Z", payload: { tableId, view: "snapshot" } });
-    const advanced = await nextMessageForRequest(ws, "stateSnapshot", "snap-restart-1-after-act", { skipTypes: ["commandResult", "statePatch"] });
-    assert.equal(advanced.payload.stateVersion > baseline.payload.stateVersion, true);
+    const persistedAfterAct = JSON.parse(await fs.readFile(filePath, "utf8"));
+    persistedVersion = Number(persistedAfterAct?.tables?.[tableId]?.stateRow?.version ?? 0);
+    assert.equal(persistedVersion > baseline.payload.stateVersion, true);
     ws.close();
   } finally {
     first.child.kill("SIGTERM");
@@ -1321,7 +1322,7 @@ test("restart and resync hydrate latest persisted WS mutation", async () => {
     await nextMessageOfType(ws2, "table_state", { skipTypes: ["commandResult"] });
     sendFrame(ws2, { version: "1.0", type: "table_state_sub", requestId: "snap-restart-2", ts: "2026-02-28T02:20:04Z", payload: { tableId, view: "snapshot" } });
     const rehydrated = await nextMessageForRequest(ws2, "stateSnapshot", "snap-restart-2", { skipTypes: ["commandResult", "statePatch"] });
-    assert.equal(rehydrated.payload.stateVersion > 0, true);
+    assert.equal(rehydrated.payload.stateVersion, persistedVersion);
     ws2.close();
   } finally {
     second.child.kill("SIGTERM");
