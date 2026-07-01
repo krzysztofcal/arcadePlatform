@@ -255,6 +255,22 @@ async function nextStateUpdate(ws, { baseline = null, timeoutMs = 10000 } = {}) 
   }
 }
 
+async function nextAdvancedStateUpdate(ws, { baseline, timeoutMs = 10000 } = {}) {
+  const started = Date.now();
+  let current = baseline;
+  while (true) {
+    const remainingMs = timeoutMs - (Date.now() - started);
+    if (remainingMs <= 0) {
+      throw new Error("Timed out waiting for advanced state update frame");
+    }
+    const next = await nextStateUpdate(ws, { baseline: current, timeoutMs: remainingMs });
+    current = next.payload;
+    if (Number(current?.stateVersion) > Number(baseline?.stateVersion ?? -1)) {
+      return next;
+    }
+  }
+}
+
 async function waitForHumanTurn(ws, { userId, baseline, timeoutMs = 5000 }) {
   let current = baseline;
   if (current?.public?.turn?.userId === userId) {
@@ -518,14 +534,14 @@ test("authoritative WS table_join can progress through human act and bot timeout
     const actAck = await nextCommandResultForRequest(ws, "act-runtime-human");
     assert.equal(actAck.payload.status, "accepted");
 
-    const afterHumanAction = await nextStateUpdate(ws, {
+    const afterHumanAction = await nextAdvancedStateUpdate(ws, {
       baseline: humanTurnSnapshot,
       timeoutMs: 4000
     });
     assert.equal(afterHumanAction.payload.stateVersion > humanTurnSnapshot.stateVersion, true);
     assert.equal(afterHumanAction.payload.public.hand.handId, humanTurnSnapshot.public.hand.handId);
 
-    const afterBotAutoplay = await nextStateUpdate(ws, {
+    const afterBotAutoplay = await nextAdvancedStateUpdate(ws, {
       baseline: afterHumanAction.payload,
       timeoutMs: 5000
     });
