@@ -1475,11 +1475,11 @@ test("table_leave rejects when authoritative success state still contains actor 
     await auth(other, keepToken, "auth-leave-still-present-keep");
 
     sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-still-present-actor", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
-    await nextMessageOfType(actor, "commandResult");
-    await nextMessageOfType(actor, "table_state");
+    await nextCommandResultForRequest(actor, "join-leave-still-present-actor");
+    await nextJoinTableState(actor, { requestId: "join-leave-still-present-actor", tableId });
     sendFrame(other, { version: "1.0", type: "table_join", requestId: "join-leave-still-present-keep", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
-    const otherJoinAck = await nextMessageOfType(other, "commandResult");
-    await nextMessageOfType(other, "table_state");
+    const otherJoinAck = await nextCommandResultForRequest(other, "join-leave-still-present-keep");
+    await nextJoinTableState(other, { requestId: "join-leave-still-present-keep", tableId });
     assert.equal(otherJoinAck.payload.status, "accepted");
 
     sendFrame(actor, { version: "1.0", type: "table_leave", requestId: "leave-still-present", ts: "2026-02-28T00:00:03Z", payload: { tableId } });
@@ -4767,23 +4767,26 @@ test("WS act persists state to file-backed optimistic store", async () => {
     await auth(ws, makeHs256Jwt({ secret, sub: "seat_actor" }), "auth-persist");
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-persist", ts: "2026-02-28T02:00:00Z", payload: { tableId } });
-    const joinAck_join_persist = await nextMessageOfType(ws, "commandResult");
-    await nextMessageOfType(ws, "table_state");
+    const joinAck_join_persist = await nextCommandResultForRequest(ws, "join-persist");
+    await nextJoinTableState(ws, { requestId: "join-persist", tableId });
     assert.equal(joinAck_join_persist.payload.requestId, "join-persist");
     assert.equal(joinAck_join_persist.payload.status, "accepted");
 
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-persist", ts: "2026-02-28T02:00:01Z", payload: { tableId, view: "snapshot" } });
-    const baseline = await nextMessageOfType(ws, "stateSnapshot");
+    const baseline = await nextMessageForRequest(ws, { type: "stateSnapshot", requestId: "snap-persist" });
     const handId = baseline.payload.public.hand.handId;
 
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-persist", ts: "2026-02-28T02:00:02Z", payload: { tableId, handId, action: "fold" } });
-    const result = await nextMessageOfType(ws, "commandResult");
+    const result = await nextCommandResultForRequest(ws, "act-persist");
     assert.equal(result.payload.status, "accepted");
-    const post = await nextStateUpdate(ws, { baseline: baseline.payload, timeoutMs: 4000 });
-    assert.equal(post.payload.stateVersion > baseline.payload.stateVersion, true);
+    await nextStateUpdate(ws, { baseline: baseline.payload, timeoutMs: 4000 });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-persist-after", ts: "2026-02-28T02:00:03Z", payload: { tableId, view: "snapshot" } });
+    const afterPersist = await nextMessageForRequest(ws, { type: "stateSnapshot", requestId: "snap-persist-after" });
+    assert.equal(afterPersist.payload.stateVersion > baseline.payload.stateVersion, true);
 
     const persisted = await readPersistedFile(filePath);
-    assert.equal(persisted.tables[tableId].stateRow.version, post.payload.stateVersion);
+    assert.equal(persisted.tables[tableId].stateRow.version, afterPersist.payload.stateVersion);
     assert.equal(typeof persisted.tables[tableId].lastActivityAt, "string");
 
     ws.close();
