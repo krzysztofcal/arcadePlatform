@@ -464,7 +464,9 @@ test("admin page poker audit search renders hand timeline and settlement summary
   assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /bot_autoplay/);
   assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /timeout/);
   assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /system/);
-  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /AD<\/span><span class="admin-pill admin-mono">JD/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /A♦/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /J♦/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /6♠/);
   assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /TWO_PAIR \(category 3\)/);
   assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /Hidden by default/);
   assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /computed/);
@@ -481,5 +483,7 @@ test("admin page poker audit search renders hand timeline and settlement summary
   await flush();
 
   assert.equal(fetchCalls.includes("/.netlify/functions/admin-poker-audit?tableId=table-audit&handId=hand-audit&limit=20&revealPrivateCards=1"), true);
-  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /AS KD/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /A♠/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /K♦/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /admin-card-symbol--red/);
 });

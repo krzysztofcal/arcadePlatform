@@ -543,16 +543,30 @@
     return values.map(function(value){ return String(value == null ? "" : value); }).filter(Boolean).join(", ") || "—";
   }
 
-  function joinCards(values){
-    if (!Array.isArray(values) || !values.length) return "—";
-    return values.map(function(value){ return String(value == null ? "" : value); }).filter(Boolean).join(" ") || "—";
+  function normalizeCardCode(value){
+    return String(value == null ? "" : value).trim().toUpperCase();
+  }
+
+  function cardSymbolParts(value){
+    var code = normalizeCardCode(value);
+    if (!code) return null;
+    var suit = code.slice(-1);
+    var rank = code.slice(0, -1);
+    var suits = { S: "♠", H: "♥", D: "♦", C: "♣" };
+    if (!suits[suit] || !rank) return { label: code, red: false };
+    return { label: rank + suits[suit], red: suit === "H" || suit === "D" };
+  }
+
+  function renderCardPill(card){
+    var parts = cardSymbolParts(card);
+    var label = parts ? parts.label : normalizeCardCode(card);
+    var className = "admin-pill admin-mono admin-card-symbol" + (parts && parts.red ? " admin-card-symbol--red" : "");
+    return '<span class="' + className + '" title="' + escapeHtml(normalizeCardCode(card)) + '">' + escapeHtml(label) + "</span>";
   }
 
   function renderCardCodes(cards){
     if (!Array.isArray(cards) || !cards.length) return '<p class="admin-empty">No board recorded.</p>';
-    return '<div class="admin-inline-actions">' + cards.map(function(card){
-      return '<span class="admin-pill admin-mono">' + escapeHtml(card) + "</span>";
-    }).join("") + "</div>";
+    return '<div class="admin-inline-actions">' + cards.map(renderCardPill).join("") + "</div>";
   }
 
   function renderSourcePill(source){
@@ -631,7 +645,7 @@
     var timelineRows = Array.isArray(hand.timeline) ? hand.timeline : (Array.isArray(hand.actions) ? hand.actions : []);
     var privateCards = hand.privateCardsByUserId && typeof hand.privateCardsByUserId === "object" ? hand.privateCardsByUserId : null;
     var privateCardRows = privateCards ? Object.keys(privateCards).sort().map(function(userId){
-      return { title: escapeHtml(userId), meta: escapeHtml(joinCards(privateCards[userId])) };
+      return { title: escapeHtml(userId), meta: renderCardCodes(privateCards[userId]) };
     }) : [];
     var html = [];
     html.push('<h2 class="xp-card__title">Hand audit</h2>');
