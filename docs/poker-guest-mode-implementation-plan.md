@@ -1,6 +1,6 @@
 # Poker Guest Mode - implementation plan
 
-Status: analysis only, verified against `origin/main` at `dee7f2563c8e0a1161edd4797df0e039865f3c79`.
+Status: analysis only. Initial code verification was done against `origin/main` at `dee7f2563c8e0a1161edd4797df0e039865f3c79`; the PR branch was later rebased onto `origin/main` at `448d662168f6c66cc8319c8e9ff659577f62ff12`.
 
 ## Feasibility
 
@@ -23,6 +23,16 @@ Conclusion: PR1 is not just a UI toggle. A guest cannot reach real poker today b
 Guest tables should be in-memory WS tables with IDs prefixed by `guest_`. They must not be inserted into `public.poker_tables`, must not create `poker_seats`, and must not post chip ledger entries. This keeps the Arcade economy isolated and avoids treating the database as source of truth for guest poker.
 
 Registration upgrade must not convert guest chips into persisted currency. If a guest creates an account mid-hand, the current guest table can keep running and the seat can be relabeled/rebound to the real account, but the table remains economy-isolated until it ends. Future tables use the normal authenticated profile and ledger.
+
+To make the conversion feel fair without weakening economy isolation, the Guest -> Account flow should include a one-time welcome bonus for newly registered accounts, for example `500 CH`. The bonus is independent of guest chip winnings: guest chips still expire with the guest session, while the new account starts normal play with a real CH wallet, XP, rankings, achievements, game history, and daily rewards.
+
+Welcome bonus rules:
+
+- Award the bonus only once per newly created account.
+- Do not base the bonus on the number of guest chips won or lost.
+- Never transfer guest chips into the real account.
+- Grant the bonus through the normal CH ledger as a dedicated welcome-bonus transaction type or an equivalent idempotent ledger entry.
+- Make the bonus idempotent with a stable key such as `welcome-bonus:<userId>`.
 
 ## PR1 - Guest Mode foundation
 
@@ -122,6 +132,9 @@ UI tasks:
 - Reuse `/account.html` and existing `SupabaseAuth.onAuthChange`.
 - After `SIGNED_IN`, call `upgrade_guest` instead of reloading the table.
 - Update current user ID locally after upgrade so action buttons still work.
+- Award a one-time welcome bonus after successful account creation, for example `500 CH`, through the existing CH ledger.
+- Ensure the welcome bonus is idempotent and account-scoped; it must not depend on the guest session stack or guest hand outcomes.
+- Show clear copy before registration, for example: `Create a free account and get 500 CH to start. Guest chips are temporary and disappear after the session. An account gives you a persistent CH wallet, XP, rankings, game history, achievements, and daily rewards.`
 
 Risk:
 
@@ -146,6 +159,7 @@ Tasks:
   - attempting multiplayer/opening normal lobby action
 - The multiplayer trigger should reuse the same banner rather than opening a modal.
 - Keep copy short and registration-oriented.
+- Include the welcome-bonus value in conversion copy, for example: `Create a free account and get 500 CH to start.`
 
 ## PR5 - Dedicated Guest landing experience
 
@@ -158,6 +172,7 @@ Tasks:
 - Add a comparison section in the signed-out lobby:
   - Guest: poker vs bots only
   - Account: multiplayer, saved chips, XP, achievements, rankings
+- Add the welcome-bonus message to the account side of the comparison, making clear that guest chips are temporary and the account bonus is a separate one-time grant.
 - Update `poker/poker.css` only with one selector per line and single-line declarations, following the project CSS constraint.
 - Avoid inline scripts. If an inline script is unavoidable, update CSP hashes per `docs/csp-implementation.md`.
 
