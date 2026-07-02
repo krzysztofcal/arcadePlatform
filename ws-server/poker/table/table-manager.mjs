@@ -397,6 +397,61 @@ export function createTableManager({
     return { ok: true, existed, table };
   }
 
+
+  function materializeGuestTable({ tableId, guestUserId, nickname = null, maxPlayers = 6, botCount = 3, stack = 100, nowMs = Date.now() } = {}) {
+    const normalizedTableId = typeof tableId === "string" ? tableId.trim() : "";
+    const normalizedGuestUserId = typeof guestUserId === "string" ? guestUserId.trim() : "";
+    if (!normalizedTableId || !normalizedGuestUserId) {
+      return { ok: false, code: "invalid_guest_table" };
+    }
+    const resolvedMaxPlayers = Number.isInteger(maxPlayers) && maxPlayers >= 2 && maxPlayers <= maxSeats ? maxPlayers : Math.min(6, maxSeats);
+    const resolvedBotCount = Math.max(1, Math.min(resolvedMaxPlayers - 1, Number.isInteger(botCount) ? botCount : 3));
+    const resolvedStack = Number.isFinite(Number(stack)) && Number(stack) > 0 ? Math.trunc(Number(stack)) : 100;
+    const existed = tables.has(normalizedTableId);
+    const table = ensureTable(normalizedTableId);
+    if (existed && Array.isArray(table.coreState?.members) && table.coreState.members.some((member) => member?.userId === normalizedGuestUserId)) {
+      touchTableActivity(table, nowMs);
+      return { ok: true, existed: true, table };
+    }
+    const members = [{ userId: normalizedGuestUserId, seat: 1 }];
+    const seats = { [normalizedGuestUserId]: 1 };
+    const seatDetailsByUserId = {
+      [normalizedGuestUserId]: { isBot: false, botProfile: null, leaveAfterHand: false, nickname }
+    };
+    const publicStacks = { [normalizedGuestUserId]: resolvedStack };
+    for (let idx = 0; idx < resolvedBotCount; idx += 1) {
+      const seatNo = idx + 2;
+      const botUserId = `bot_guest_${seatNo}_${normalizedTableId}`.slice(0, 120);
+      members.push({ userId: botUserId, seat: seatNo });
+      seats[botUserId] = seatNo;
+      seatDetailsByUserId[botUserId] = {
+        isBot: true,
+        botProfile: idx % 3 === 0 ? "NORMAL" : idx % 3 === 1 ? "TIGHT" : "LOOSE",
+        leaveAfterHand: false
+      };
+      publicStacks[botUserId] = resolvedStack;
+    }
+    table.tableStatus = "OPEN";
+    table.tableMeta = normalizeTableMeta({ maxPlayers: resolvedMaxPlayers, stakes: { sb: 1, bb: 2 }, createdAtMs: nowMs, lastActivityAtMs: nowMs }, resolvedMaxPlayers, {
+      defaultCreatedAtMs: nowMs,
+      defaultLastActivityAtMs: nowMs
+    });
+    table.coreState = {
+      ...table.coreState,
+      roomId: normalizedTableId,
+      maxSeats: resolvedMaxPlayers,
+      version: existed ? Number(table.coreState.version || 0) : 0,
+      members,
+      seats,
+      seatDetailsByUserId,
+      publicStacks,
+      pokerState: buildEmptyLobbyPokerState(normalizedTableId)
+    };
+    table.pendingPersistedBootstrap = false;
+    touchTableActivity(table, nowMs);
+    return { ok: true, existed, table };
+  }
+
   async function ensureTableLoaded(tableId, { allowCreate = false } = {}) {
     const existingTable = tables.get(tableId);
     if (existingTable && !needsPersistedBootstrap(existingTable)) {
@@ -1691,6 +1746,7 @@ export function createTableManager({
     listTableIds,
     tableMeta,
     materializeLobbyTable,
+    materializeGuestTable,
     resolveImplicitLeaveTableId,
     sweepExpiredPresence,
     persistedPokerState,

@@ -3,6 +3,7 @@
 
   var CREATE_URL = '/.netlify/functions/poker-create-table';
   var QUICK_SEAT_URL = '/.netlify/functions/poker-quick-seat';
+  var GUEST_SESSION_URL = '/.netlify/functions/poker-guest-session';
   var WS_JOIN_ENDPOINT = 'ws:join';
   var WS_LEAVE_ENDPOINT = 'ws:leave';
   var WS_START_HAND_ENDPOINT = 'ws:start_hand';
@@ -629,6 +630,9 @@
     }
     if (opts.autoStart === true){
       query.push('autoStart=1');
+    }
+    if (opts.guest === true){
+      query.push('guest=1');
     }
     return path + (query.length ? ('?' + query.join('&')) : '');
   }
@@ -1474,6 +1478,7 @@
     var bbInput = document.getElementById('pokerBb');
     var maxPlayersInput = document.getElementById('pokerMaxPlayers');
     var signInBtn = document.getElementById('pokerSignIn');
+    var guestPlayBtn = document.getElementById('pokerGuestPlay');
 
     var LOBBY_RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000];
     var authTimer = null;
@@ -1746,6 +1751,43 @@
     }
 
 
+
+    function storeGuestSession(data){
+      if (!data || !data.token || !data.tableId) return false;
+      try {
+        window.sessionStorage.setItem("poker:guestSession", JSON.stringify({
+          token: data.token,
+          tableId: data.tableId,
+          guestId: data.guestId || data.userId || null,
+          nickname: data.nickname || null,
+          expiresAt: Date.now() + Math.max(1, Number(data.expiresInSec || 1800)) * 1000
+        }));
+        return true;
+      } catch (_err){
+        return false;
+      }
+    }
+
+    async function playAsGuest(){
+      setError(errorEl, null);
+      if (guestPlayBtn) setLoading(guestPlayBtn, true);
+      try {
+        var res = await fetch(GUEST_SESSION_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        var data = {};
+        try { data = await res.json(); } catch (_err){}
+        if (!res.ok || !data || data.ok !== true || !data.token || !data.tableId){
+          throw new Error(data && data.error ? data.error : "guest_session_failed");
+        }
+        storeGuestSession(data);
+        navigateToPokerTable(data.tableId, { autoJoin: true, guest: true });
+      } catch (err){
+        klog("poker_guest_session_error", { error: err && (err.message || err.code) ? (err.message || err.code) : "unknown" });
+        setError(errorEl, "Guest mode is temporarily unavailable");
+      } finally {
+        if (guestPlayBtn) setLoading(guestPlayBtn, false);
+      }
+    }
+
     async function quickSeat(){
       setError(errorEl, null);
       var sb = parseInt(sbInput ? sbInput.value : 1, 10);
@@ -1831,6 +1873,9 @@
       refreshBtn.addEventListener('click', function(){
         refreshLobby('manual_refresh');
       });
+    }
+    if (guestPlayBtn){
+      guestPlayBtn.addEventListener('click', playAsGuest);
     }
     if (quickSeatBtn){
       quickSeatBtn.addEventListener('click', quickSeat);

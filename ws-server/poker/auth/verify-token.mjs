@@ -10,6 +10,10 @@ function base64UrlDecode(input) {
   return base64UrlToBuffer(input).toString("utf8");
 }
 
+function normalizeIdentityMode(value) {
+  return value === "guest" ? "guest" : "user";
+}
+
 function verifyHs256({ token, secret }) {
   const parts = token.split(".");
   if (parts.length !== 3) {
@@ -44,7 +48,18 @@ function verifyHs256({ token, secret }) {
     return { ok: false, code: "auth_invalid", message: "Token subject is required" };
   }
 
-  return { ok: true, userId: payload.sub };
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (payload.exp != null && Number.isFinite(Number(payload.exp)) && Number(payload.exp) <= nowSec) {
+    return { ok: false, code: "auth_expired", message: "Token is expired" };
+  }
+
+  return {
+    ok: true,
+    userId: payload.sub.trim(),
+    identityMode: normalizeIdentityMode(payload.mode),
+    nickname: typeof payload.nickname === "string" && payload.nickname.trim() ? payload.nickname.trim().slice(0, 40) : null,
+    tableId: typeof payload.tableId === "string" && payload.tableId.trim() ? payload.tableId.trim() : null
+  };
 }
 
 export function verifyToken({ token, env = process.env }) {

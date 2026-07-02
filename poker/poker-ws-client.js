@@ -83,6 +83,7 @@
     var mode = options.mode === 'lobby' ? 'lobby' : 'table';
     var tableId = typeof options.tableId === 'string' ? options.tableId.trim() : '';
     var getAccessToken = typeof options.getAccessToken === 'function' ? options.getAccessToken : null;
+    var guestToken = typeof options.guestToken === 'string' && options.guestToken ? options.guestToken : null;
     var onStatus = typeof options.onStatus === 'function' ? options.onStatus : function(){};
     var onSnapshot = typeof options.onSnapshot === 'function' ? options.onSnapshot : function(){};
     var onLobbySnapshot = typeof options.onLobbySnapshot === 'function' ? options.onLobbySnapshot : function(){};
@@ -208,6 +209,11 @@
     }
 
     async function mintAndAuth(){
+      if (guestToken){
+        emitStatus('authenticating', { mode: 'guest' });
+        send('auth', { token: guestToken });
+        return;
+      }
       if (!getAccessToken) throw new Error('missing_access_token_provider');
       var accessToken = await getAccessToken();
       if (!accessToken) throw new Error('missing_access_token');

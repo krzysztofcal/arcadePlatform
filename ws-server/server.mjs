@@ -408,6 +408,7 @@ function tableSocketMatches(socket, tableId) {
 }
 
 async function touchPersistedSeatLastSeen({ tableId, userId }) {
+  if (isGuestTableId(tableId)) return false;
   if (!persistedBootstrapEnabled) return false;
   if (typeof tableId !== "string" || !tableId || typeof userId !== "string" || !userId) return false;
   const key = staleSeatCandidateKey(tableId, userId);
@@ -692,6 +693,14 @@ function normalizeTableId(value) {
   return tableId;
 }
 
+function isGuestTableId(tableId) {
+  return typeof tableId === "string" && tableId.startsWith("guest_table_");
+}
+
+function isGuestSession(connState) {
+  return connState?.session?.identityMode === "guest" || connState?.identityMode === "guest";
+}
+
 function resolveRoomId(frame, { allowMissing = false } = {}) {
   const envelopeRoomIdProvided = frame.roomId !== undefined;
   const payloadTableIdProvided = frame.payload.tableId !== undefined;
@@ -795,6 +804,7 @@ function isLobbyTableJoinable({ seats, maxPlayers, lastActivityAtMs }) {
 }
 
 function buildLobbyTableEntry(tableId) {
+  if (isGuestTableId(tableId)) return null;
   if (tableManager.isTableClosed(tableId) === true) {
     return null;
   }
@@ -1112,6 +1122,9 @@ function broadcastTableState(tableId, { excludeWs = null } = {}) {
 
 
 async function persistMutatedState({ tableId, expectedVersion, mutationKind, acceptedActionAudit = null }) {
+  if (isGuestTableId(tableId)) {
+    return { ok: true, skipped: true, guest: true };
+  }
   if (!persistedStateWriter) {
     return { ok: true, skipped: true };
   }
@@ -2454,6 +2467,83 @@ wss.on("connection", (ws) => {
         return;
       }
       frame.__resolvedTableId = resolvedRoomId.roomId;
+
+      if (isGuestSession(connState)) {
+        if (!isGuestTableId(frame.__resolvedTableId) || (connState.guestTableId && connState.guestTableId !== frame.__resolvedTableId)) {
+          sendCommandResult(ws, connState, {
+            requestId: frame.requestId ?? null,
+            tableId: frame.__resolvedTableId,
+            status: "rejected",
+            reason: "guest_multiplayer_requires_account"
+          });
+          return;
+        }
+        const materializedGuest = tableManager.materializeGuestTable({
+          tableId: frame.__resolvedTableId,
+          guestUserId: connState.session.userId,
+          nickname: connState.session.nickname || connState.nickname || null,
+          nowMs: Date.now()
+        });
+        if (!materializedGuest?.ok) {
+          sendCommandResult(ws, connState, {
+            requestId: frame.requestId ?? null,
+            tableId: frame.__resolvedTableId,
+            status: "rejected",
+            reason: materializedGuest?.code || "guest_table_failed"
+          });
+          return;
+        }
+        sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
+        const joined = tableManager.join({
+          ws,
+          userId: connState.session.userId,
+          tableId: frame.__resolvedTableId,
+          requestId: frame.requestId,
+          nowTs: Date.now(),
+          authoritativeSeatNo: 1,
+          buyIn: 100
+        });
+        if (!joined.ok) {
+          sendCommandResult(ws, connState, {
+            requestId: frame.requestId ?? null,
+            tableId: frame.__resolvedTableId,
+            status: "rejected",
+            reason: joined.code || "join_failed"
+          });
+          return;
+        }
+        const bootstrapped = tableManager.bootstrapHand(frame.__resolvedTableId, { nowMs: Date.now() });
+        sendCommandResult(ws, connState, {
+          requestId: frame.requestId ?? null,
+          tableId: frame.__resolvedTableId,
+          status: "accepted",
+          reason: joined.changed ? null : "already_joined"
+        });
+        const tableSnapshot = tableManager.tableSnapshot(frame.__resolvedTableId, connState.session.userId);
+        sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: joined.tableState, tableSnapshot });
+        if (joined.changed || bootstrapped?.changed) {
+          broadcastStateSnapshots(frame.__resolvedTableId);
+          broadcastTableState(frame.__resolvedTableId, { excludeWs: ws });
+          scheduleBotStep({
+            tableId: frame.__resolvedTableId,
+            trigger: "guest_join_bootstrap",
+            requestId: frame.requestId ?? null,
+            frameTs: frame.ts
+          });
+        }
+        return;
+      }
+
+      if (isGuestTableId(frame.__resolvedTableId)) {
+        sendCommandResult(ws, connState, {
+          requestId: frame.requestId ?? null,
+          tableId: frame.__resolvedTableId,
+          status: "rejected",
+          reason: "guest_table_requires_guest_session"
+        });
+        return;
+      }
+
       await enqueueTableCommand({
         tableId: frame.__resolvedTableId,
         commandName: "join",
@@ -2706,6 +2796,23 @@ wss.on("connection", (ws) => {
         return;
       }
       const tableId = resolvedRoomId.roomId;
+
+      if (isGuestSession(connState)) {
+        if (!isGuestTableId(tableId) || (connState.guestTableId && connState.guestTableId !== tableId)) {
+          sendError(ws, connState, {
+            code: "INVALID_COMMAND",
+            message: "guest_multiplayer_requires_account",
+            requestId: frame.requestId ?? null
+          });
+          return;
+        }
+        tableManager.materializeGuestTable({
+          tableId,
+          guestUserId: connState.session.userId,
+          nickname: connState.session.nickname || connState.nickname || null,
+          nowMs: Date.now()
+        });
+      }
 
       const wantsSnapshot = frame.payload?.view === "snapshot" || frame.payload?.mode === "snapshot";
       if (wantsSnapshot) {
