@@ -93,7 +93,7 @@ test("repeated POST does not grant a second welcome bonus", async () => {
   assert.equal(deps.posts[0].idempotencyKey, `welcome-bonus:${AFTER_USER}`);
 });
 
-test("welcome bonus uses treasury ledger offset and never transfers guest chips", async () => {
+test("welcome bonus uses genesis ledger offset and never transfers guest chips", async () => {
   const deps = createDeps();
   const result = await claimWelcomeBonus(AFTER_USER, deps);
   const payload = deps.posts[0];
@@ -104,7 +104,7 @@ test("welcome bonus uses treasury ledger offset and never transfers guest chips"
     payload.entries.map(entry => ({ accountType: entry.accountType, userId: entry.userId || null, systemKey: entry.systemKey || null, amount: entry.amount })),
     [
       { accountType: "USER", userId: AFTER_USER, systemKey: null, amount: 500 },
-      { accountType: "SYSTEM", userId: null, systemKey: "TREASURY", amount: -500 },
+      { accountType: "SYSTEM", userId: null, systemKey: "GENESIS", amount: -500 },
     ],
   );
   assert.equal(JSON.stringify(payload).includes("guestChips"), false);

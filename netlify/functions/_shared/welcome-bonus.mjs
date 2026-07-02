@@ -2,7 +2,7 @@ import { executeSql, klog } from "./supabase-admin.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 
 const DEFAULT_BONUS_AMOUNT = 500;
-const TREASURY_SYSTEM_KEY = "TREASURY";
+const GENESIS_SYSTEM_KEY = "GENESIS";
 
 function parsePositiveInt(value, fallback) {
   const raw = value == null || value === "" ? fallback : value;
@@ -137,9 +137,9 @@ function buildWelcomeBonusEntries(userId, amount) {
     },
     {
       accountType: "SYSTEM",
-      systemKey: TREASURY_SYSTEM_KEY,
+      systemKey: GENESIS_SYSTEM_KEY,
       amount: -amount,
-      metadata: { source: "welcome_bonus", entry_role: "treasury_offset" },
+      metadata: { source: "welcome_bonus", entry_role: "genesis_offset" },
     },
   ];
 }
@@ -206,7 +206,7 @@ async function claimWelcomeBonus(userId, deps = {}) {
 
 export {
   DEFAULT_BONUS_AMOUNT,
-  TREASURY_SYSTEM_KEY,
+  GENESIS_SYSTEM_KEY,
   buildIdempotencyKey,
   claimWelcomeBonus,
   getConfig,

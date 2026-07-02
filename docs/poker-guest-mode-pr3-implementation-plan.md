@@ -51,14 +51,14 @@ Ledger transaction shape:
 - `reference`: `guest_registration_incentive`
 - `description`: `Welcome bonus`
 - user entry: `+500`
-- system offset entry: `-500`, using the existing ledger/system account convention from the current chip ledger implementation
+- system offset entry: `-500`, using `SYSTEM/GENESIS`
 - metadata:
   - `source: "guest_registration_incentive"`
   - `bonus_chips: 500`
 
 Use the existing `postTransaction()` path rather than creating a separate ledger write mechanism.
 
-Before coding, identify the existing system account convention used by chip ledger helpers and document the chosen system account/reference in the implementation PR. If the repository does not expose a clear explicit system account for this source, resolve that first instead of inventing a new ledger source for the bonus.
+Chosen ledger source: `SYSTEM/GENESIS`. The current ledger guard allows negative balance only for `SYSTEM/GENESIS`, so it is the correct existing convention for mint-like incentives. Do not use `SYSTEM/TREASURY` for this bonus unless a future migration explicitly funds it for welcome bonuses; `TREASURY` can fail with `insufficient_funds` when its balance is too low.
 
 ### 2. Add Welcome Bonus Shared Helper
 
