@@ -2,6 +2,8 @@
 
 Status: analysis only. Initial code verification was done against `origin/main` at `dee7f2563c8e0a1161edd4797df0e039865f3c79`; the PR branch was later rebased onto `origin/main` at `448d662168f6c66cc8319c8e9ff659577f62ff12`.
 
+Roadmap note: after seeing a working Guest flow, the priority moved away from in-place upgrade as the next blocker. PR1 and PR2 stay as-is; the follow-up order below front-loads conversion incentives, non-modal prompts, landing polish, and analytics. The old in-place upgrade flow is now a later nice-to-have.
+
 ## Feasibility
 
 Guest Mode is implementable in the current architecture, but it should be implemented as an isolated poker runtime path, not as a fake Supabase user and not through the normal chip ledger flow.
@@ -101,44 +103,97 @@ Integration checks:
 - `js/topbar.js` already hides chip badge when `html[data-auth="out"]`; keep guest mode aligned with signed-out auth state.
 - XP is awarded through `js/xpClient.js`, `js/xp-game-hook.js`, and `netlify/functions/award-xp.mjs`; guest poker must not call those paths.
 
-## PR3 - Registration upgrade flow
+## PR3 - Registration Incentives
 
-Goal: guest can register without leaving the current table or interrupting the hand.
-
-Important constraint:
-
-- Do not convert guest chips into real chips. The current guest table remains economy-isolated after registration. The account is used for identity from that point forward, and future games use the normal account profile.
+Goal: increase Guest -> Account conversion.
 
 Backend tasks:
 
-- Add a WS command such as `upgrade_guest`.
-- Client sends the real Supabase access token after registration.
-- Server verifies it using the same Supabase JWT verification logic used by `netlify/functions/ws-mint-token.mjs`, or calls a small shared verifier module.
-- Add a controlled session upgrade path in `ws-server/poker/runtime/session.mjs`; current `bindSessionUser()` rejects changing `session.userId`, so do not reuse it blindly.
-- Add `tableManager.upgradeGuestIdentity({ tableId, guestUserId, realUserId, nickname })`.
-- The table manager must replace the user ID in:
-  - `coreState.members`
-  - `coreState.seats`
-  - `coreState.publicStacks`
-  - `coreState.pokerState.seats`
-  - `coreState.pokerState.stacks`
-  - action maps such as `foldedByUserId`, `contributionsByUserId`, `lastBettingRoundActionByUserId`, `holeCardsByUserId`, and related per-user maps
-  - presence maps and connection/session tracking
-- Broadcast a normal state snapshot after upgrade.
+- Add a ledger transaction type such as `WELCOME_BONUS`.
+- Grant a one-time welcome bonus, for example `500 CH`, to a newly created account.
+- Make the bonus idempotent so it can only be claimed once per account.
+- Expose API data such as `eligible` and `alreadyClaimed`.
+
+Frontend tasks:
+
+- Anywhere a CTA says `Create account`, surface the bonus in the copy.
+- Show guest panel copy such as:
+  - `Guest account`
+  - `Practice poker`
+  - `Unlimited bot games`
+  - `Create account to unlock:`
+  - `+500 CH welcome bonus`
+  - `Multiplayer`
+  - `XP progression`
+  - `Persistent chips`
+- After first login, show a confirmation message such as:
+  - `Welcome! 500 CH have been added to your account.`
+
+## PR4 - Smart Conversion Prompts
+
+Goal: encourage registration without spam.
+
+Rules:
+
+- Show prompts only when they make sense.
+- Trigger after the first win.
+- Trigger after 10 hands.
+- Trigger when the player tries to enter multiplayer.
+- Trigger when the player tries to leave the table.
+- Never use a modal.
+- Use only a banner.
+
+## PR5 - Guest Landing Polish
+
+Goal: tidy the lobby and make the value split obvious.
+
+Lobby copy:
+
+- `Play as Guest`
+- `Perfect for trying poker.`
+- `no registration`
+- `instant play`
+- `bots only`
+
+Account copy:
+
+- `Create Account`
+- `+500 CH`
+- `multiplayer`
+- `XP`
+- `persistent chips`
+
+## PR6 - Analytics
+
+Goal: measure whether Guest actually improves conversion.
+
+Metrics:
+
+- `guest_started`
+- `guest_hands_played`
+- `guest_registered`
+- `guest_registered_after_10_hands`
+- `guest_clicked_multiplayer`
+- `guest_conversion_rate`
+
+## PR7 - Guest -> Account Upgrade In Place
+
+Goal: keep the current table running while the guest becomes a registered account.
+
+This is now a nice-to-have, not the next blocker. It is technically harder than the earlier PRs and does not buy as much conversion as the incentive and prompt work above.
+
+Backend tasks:
+
+- Add the in-place upgrade command and session rewrite path.
+- Replace the guest user ID across live table state maps.
+- Keep the current hand and seat intact.
+- Broadcast a normal snapshot after upgrade.
 
 UI tasks:
 
-- Add `Create account` action to guest table panel.
-- Reuse `/account.html` and existing `SupabaseAuth.onAuthChange`.
-- After `SIGNED_IN`, call `upgrade_guest` instead of reloading the table.
-- Update current user ID locally after upgrade so action buttons still work.
-- Award a one-time welcome bonus after successful account creation, for example `500 CH`, through the existing CH ledger.
-- Ensure the welcome bonus is idempotent and account-scoped; it must not depend on the guest session stack or guest hand outcomes.
-- Show clear copy before registration, for example: `Create a free account and get 500 CH to start. Guest chips are temporary and disappear after the session. An account gives you a persistent CH wallet, XP, rankings, game history, achievements, and daily rewards.`
-
-Risk:
-
-- This is the highest-risk PR because user ID is a primary key throughout the live poker state. It needs careful state-map replacement. It is feasible, but should not be mixed with PR1/PR2.
+- Add a `Create account` action to the guest panel.
+- Reuse the existing auth flow.
+- Keep the current table view stable during registration.
 
 ## PR4 - Smart conversion prompts
 
@@ -196,10 +251,11 @@ Tasks:
 
 1. PR1: guest token/session, guest-only WS table path, signed-out one-click entry.
 2. PR2: economy isolation guards and guest limitations UI.
-3. PR3: guest-to-account upgrade in-place.
+3. PR3: registration incentives and welcome bonus.
 4. PR4: non-modal conversion prompts.
 5. PR5: polished guest landing/comparison.
 6. PR6: optional analytics.
+7. PR7: guest-to-account upgrade in place.
 
 Each PR should start from latest `main` and should not depend on unmerged work outside the earlier guest-mode PRs.
 
