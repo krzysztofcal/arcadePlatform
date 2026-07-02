@@ -103,6 +103,8 @@
   var tableId = readTableId();
   var wsClient = null;
   var currentAccessToken = null;
+  var currentGuestSession = null;
+  var isGuestMode = false;
   var authWatchTimer = null;
   var turnClockTimer = null;
   var revealDismissTimer = null;
@@ -283,6 +285,30 @@
       return searchParams.get('tableId');
     } catch (_err){
       searchParams = null;
+      return null;
+    }
+  }
+
+
+  function readGuestMode(){
+    try {
+      if (!searchParams) searchParams = new URLSearchParams(window.location.search || "");
+      return searchParams.get("guest") === "1";
+    } catch (_err){
+      return false;
+    }
+  }
+
+  function readGuestSession(){
+    try {
+      var raw = window.sessionStorage ? window.sessionStorage.getItem("poker:guestSession") : null;
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || !parsed.token || !parsed.tableId) return null;
+      if (tableId && parsed.tableId !== tableId) return null;
+      if (Number(parsed.expiresAt) && Number(parsed.expiresAt) <= Date.now()) return null;
+      return parsed;
+    } catch (_err){
       return null;
     }
   }
@@ -2116,6 +2142,7 @@
     }
 
     if (els.signInBtn) els.signInBtn.hidden = signedIn;
+    if (els.guestBadge) els.guestBadge.hidden = !isGuestMode;
     if (els.joinBtn) els.joinBtn.hidden = false;
     if (els.joinBtn) els.joinBtn.disabled = joinDisabled;
     if (els.joinBtn) {
@@ -2535,6 +2562,7 @@
     els.stackText = document.getElementById('pokerV2StackText');
     els.errorText = document.getElementById('pokerV2ErrorText');
     els.signInBtn = document.getElementById('pokerV2SignInBtn');
+    els.guestBadge = document.getElementById('pokerV2GuestBadge');
     els.joinBtn = document.getElementById('pokerV2JoinBtn');
     els.joinSeat = document.getElementById('pokerV2SeatNo');
     els.joinBuyIn = document.getElementById('pokerV2BuyIn');
@@ -2616,6 +2644,7 @@
     markBootReady();
     wsClient = window.PokerWsClient.create({
       tableId: tableId,
+      guestToken: isGuestMode && currentGuestSession ? currentGuestSession.token : null,
       getAccessToken: function(){ return Promise.resolve(currentAccessToken); },
       klog: klog,
       onStatus: function(status, info){
@@ -2742,11 +2771,23 @@
     shouldAutoJoin = readAutoJoinParam();
     bindMenu();
     bindControls();
-    bindAuthLifecycle();
+    isGuestMode = readGuestMode();
+    currentGuestSession = isGuestMode ? readGuestSession() : null;
     if (!tableId){
       startDemoMode();
       return;
     }
+    if (isGuestMode){
+      if (!currentGuestSession || !currentGuestSession.token){
+        applySignedOutState();
+        setError('Guest session expired. Start again from the lobby.');
+        return;
+      }
+      currentAccessToken = null;
+      startLiveMode(currentGuestSession.token);
+      return;
+    }
+    bindAuthLifecycle();
     getAccessToken().then(function(token){
       currentAccessToken = token;
       if (!token){
