@@ -25,9 +25,9 @@ Backend:
 
 Frontend:
 
-- Replace plain `Create account` guest CTAs with `Create account +500 CH Welcome Bonus`.
+- Replace plain `Create account` guest CTAs with `Create account and get 500 CH Welcome Bonus`.
 - Update the Guest poker panel to show the account unlock value.
-- After first login from Guest conversion, show: `Welcome! 500 CH have been added to your account.`
+- Show `Welcome! 500 CH have been added to your account.` only after a real successful bonus claim.
 
 Out of scope:
 
@@ -51,12 +51,14 @@ Ledger transaction shape:
 - `reference`: `guest_registration_incentive`
 - `description`: `Welcome bonus`
 - user entry: `+500`
-- treasury/system entry: `-500`
+- system offset entry: `-500`, using the existing ledger/system account convention from the current chip ledger implementation
 - metadata:
   - `source: "guest_registration_incentive"`
   - `bonus_chips: 500`
 
 Use the existing `postTransaction()` path rather than creating a separate ledger write mechanism.
+
+Before coding, identify the existing system account convention used by chip ledger helpers and document the chosen system account/reference in the implementation PR. If the repository does not expose a clear explicit system account for this source, resolve that first instead of inventing a new ledger source for the bonus.
 
 ### 2. Add Welcome Bonus Shared Helper
 
@@ -92,20 +94,15 @@ Implementation details:
 
 - Bonus amount should come from env with a sane default:
   - `WELCOME_BONUS_CHIPS=500`
-- Eligibility should be gated by a rollout timestamp:
+- Eligibility must be gated by a required rollout timestamp:
   - `WELCOME_BONUS_START_AT`
 - New-account detection should query `auth.users.created_at` through `SUPABASE_DB_URL`.
 - A user is eligible when:
   - the account exists,
   - `auth.users.created_at >= WELCOME_BONUS_START_AT`,
   - no transaction exists for `welcome-bonus:<userId>`.
-
-Important product decision:
-
-- If the business wants to grant the bonus to every existing account that has never claimed it, skip the `created_at` gate.
-- If the bonus must apply only to new registrations after PR3, keep the `created_at` gate.
-
-The safer default for PR3 is to keep the `created_at` gate.
+- Accounts created before `WELCOME_BONUS_START_AT` are never eligible, even if they have never claimed a welcome bonus.
+- The endpoint should fail closed when `WELCOME_BONUS_START_AT` is missing or invalid.
 
 ### 3. Add API Endpoint
 
@@ -124,6 +121,22 @@ API behavior:
 - Already claimed user returns `200` with `alreadyClaimed: true`.
 - First successful claim returns `200` with transaction/account details.
 - Repeated claim must not create a second ledger transaction.
+- Safe klog diagnostics are required:
+  - `welcome_bonus_claimed`
+  - `welcome_bonus_skipped`
+  - `welcome_bonus_failed`
+
+Logging rules:
+
+- Use `klog`; do not use `console.log`.
+- Logs must not contain secrets, JWTs, emails, or access tokens.
+- Allowed metadata:
+  - `userId`
+  - `eligible`
+  - `alreadyClaimed`
+  - `amount`
+  - `reason`
+  - `transactionId` when available
 
 Implementation patterns to reuse:
 
@@ -182,7 +195,7 @@ Update Guest panel copy to:
 Add CTA text:
 
 ```text
-Create account +500 CH Welcome Bonus
+Create account and get 500 CH Welcome Bonus
 ```
 
 CTA behavior:
@@ -206,10 +219,12 @@ Files:
 Change signed-out account CTA copy from plain sign-in/account text to:
 
 ```text
-Create account +500 CH Welcome Bonus
+Create account and get 500 CH Welcome Bonus
 ```
 
 Keep PR3 limited to copy and bonus wiring. The larger lobby split remains PR5.
+
+Do not use `Sign in and get 500 CH` copy. Existing users may sign in, but they must not see misleading bonus claim or success copy.
 
 ### 4. Claim After First Login
 
@@ -226,7 +241,7 @@ Flow:
 4. Account page detects authenticated user and the conversion marker.
 5. Account page calls `GET /.netlify/functions/welcome-bonus`.
 6. If `eligible`, account page calls `POST /.netlify/functions/welcome-bonus`.
-7. Account page shows:
+7. Account page shows the success message only after the `POST` returns a real successful claim:
 
 ```text
 Welcome! 500 CH have been added to your account.
@@ -235,7 +250,7 @@ Welcome! 500 CH have been added to your account.
 8. Account page clears the session marker.
 9. Chip balance refreshes via `chips:tx-complete`.
 
-If the user is not eligible or already claimed, clear the marker without showing a misleading success message.
+If the user is not eligible or already claimed, clear the marker without showing a success message. Existing signed-in users who are not eligible may continue normally, but the UI must not imply they received the bonus.
 
 ## Tests and Validation
 
@@ -247,15 +262,17 @@ Backend tests:
 - `POST welcome-bonus` creates one `WELCOME_BONUS` transaction.
 - Repeated `POST welcome-bonus` does not create a second transaction.
 - Already claimed status returns `alreadyClaimed: true`.
-- Account before `WELCOME_BONUS_START_AT` is not eligible when the cutover gate is enabled.
+- Account created before `WELCOME_BONUS_START_AT` is not eligible.
+- Account created at or after `WELCOME_BONUS_START_AT` is eligible when it has not claimed the bonus.
 - Missing auth returns `401`.
 - `CHIPS_ENABLED !== "1"` returns `404`.
 
 Frontend/static tests:
 
 - Guest panel contains `+500 CH welcome bonus`.
-- Guest account CTA contains `Create account +500 CH Welcome Bonus`.
+- Guest account CTA contains `Create account and get 500 CH Welcome Bonus`.
 - Account page claim flow dispatches chip refresh after success.
+- Ineligible or already-claimed account flow does not show the success message.
 
 Suggested commands:
 
@@ -265,10 +282,16 @@ node --test tests/welcome-bonus.behavior.test.mjs tests/poker-v2-live.behavior.t
 
 ## Acceptance Criteria
 
-- Guest users see the `+500 CH` account incentive.
+- Guest users see the `Create account and get 500 CH Welcome Bonus` account incentive.
 - A newly eligible account receives exactly one `WELCOME_BONUS` transaction.
+- Account created before `WELCOME_BONUS_START_AT` is not eligible.
+- Account created at or after `WELCOME_BONUS_START_AT` is eligible if it has not claimed the bonus.
 - Reloading or retrying does not grant another bonus.
+- Repeated `POST` does not grant a second bonus.
+- Ineligible or already-claimed users do not see `Welcome! 500 CH have been added to your account.`
+- Existing signed-in users do not see misleading `get 500 CH` claim-result copy.
 - Guest chips remain temporary and are not transferred.
+- Guest chips are never transferred into the registered account.
 - Topbar/account chip balance refreshes after bonus claim.
 - Existing authenticated poker flow is unchanged.
 - Existing ledger integrity and idempotency behavior are preserved.
@@ -276,10 +299,20 @@ node --test tests/welcome-bonus.behavior.test.mjs tests/poker-v2-live.behavior.t
 ## Risks
 
 - The phrase "new account" must be implemented explicitly. Do not infer it from a JWT alone.
-- Without `WELCOME_BONUS_START_AT`, existing users may become eligible if they have not claimed a bonus before.
+- `WELCOME_BONUS_START_AT` is required. Missing or invalid configuration must not make existing accounts eligible.
 - Do not expose arbitrary ledger entries through a user-facing endpoint.
 - Do not add the bonus to guest table state or guest stacks.
 - Keep the idempotency key account-scoped and stable.
+- Future implementation must reuse existing ledger/auth/chips concepts from the repository and avoid duplicate abstractions.
+
+## Documentation-Only Update Notes
+
+- Do not implement runtime code in this PR.
+- Do not change backend or frontend files in this PR.
+- Do not add JavaScript.
+- Do not add CSS.
+- Do not write tests for this documentation-only update.
+- Any future runtime logging for this feature must use `klog`.
 
 ## PR Summary Template
 
