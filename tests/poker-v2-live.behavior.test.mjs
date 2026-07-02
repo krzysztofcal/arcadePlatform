@@ -103,10 +103,11 @@ function createHarness(options = {}){
   const source = fs.readFileSync(path.join(process.cwd(), 'poker', 'poker-v2.js'), 'utf8');
   const elements = {};
   [
+    'xpBadge',
     'pokerMenuToggle', 'pokerMenuPanel', 'pokerLobbyLink',
     'pokerSeatLayer', 'pokerSeatChipLayer', 'pokerChipFxLayer', 'pokerPotPill', 'pokerPotChipStack', 'pokerCommunityCards', 'pokerDealerChip',
     'pokerHeroCards', 'pokerV2LiveStatus', 'pokerV2TableMeta', 'pokerV2TurnText',
-    'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2SignInBtn', 'pokerV2SeatNo',
+    'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2GuestPanel', 'pokerV2GuestBadge', 'pokerV2SignInBtn', 'pokerV2SeatNo',
     'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
     'pokerV2ClosedTableModal', 'pokerV2ClosedTableTitle', 'pokerV2ClosedTableCountdown',
     'pokerV2DemoPill', 'pokerV2FoldBtn', 'pokerV2PrimaryBtn', 'pokerV2AmountBtn',
@@ -120,6 +121,7 @@ function createHarness(options = {}){
     elements[id] = makeElement(id);
   });
   elements.pokerLobbyLink.href = '/poker/';
+  elements.xpBadge.href = '/xp.html';
   elements.pokerV2SeatNo.value = '1';
   elements.pokerV2BuyIn.value = '100';
   elements.pokerV2AmountInput.value = '20';
@@ -175,6 +177,7 @@ function createHarness(options = {}){
 
   const intervalTimers = [];
   const timeoutTimers = [];
+  const sessionStorageEntries = new Map();
   let nextTimeoutId = 1;
   let nowMs = Number.isFinite(options.nowMs) ? options.nowMs : 1_700_000_000_000;
   const FakeDate = class extends Date {
@@ -217,6 +220,12 @@ function createHarness(options = {}){
         return timer.id;
       }
     },
+    sessionStorage: {
+      getItem(key){ return sessionStorageEntries.has(String(key)) ? sessionStorageEntries.get(String(key)) : null; },
+      setItem(key, value){ sessionStorageEntries.set(String(key), String(value)); },
+      removeItem(key){ sessionStorageEntries.delete(String(key)); },
+      clear(){ sessionStorageEntries.clear(); }
+    },
     document: {
       readyState: 'loading',
       addEventListener(type, fn){ documentEvents[type] = documentEvents[type] || []; documentEvents[type].push(fn); },
@@ -231,6 +240,11 @@ function createHarness(options = {}){
     console
   };
   sandbox.window.document = sandbox.document;
+  sandbox.window.sessionStorage = sandbox.sessionStorage;
+
+  if (options.guestSession) {
+    sandbox.sessionStorage.setItem('poker:guestSession', JSON.stringify(options.guestSession));
+  }
 
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox, { filename: 'poker/poker-v2.js' });
@@ -388,6 +402,33 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(harness.leavePayloads.length, 1);
   assert.equal(JSON.stringify(harness.leavePayloads[0]), JSON.stringify({ tableId: 'table-1' }));
   assert.equal(harness.windowLocation.href, '/poker/');
+});
+
+test('poker v2 guest mode shows restrictions panel, hides XP badge, and still auto-joins', async () => {
+  const guestPayload = Buffer.from(JSON.stringify({ sub: 'guest_user_1' })).toString('base64url');
+  const guestToken = `aaa.${guestPayload}.zzz`;
+  const harness = createHarness({
+    search: '?tableId=guest_table_1&guest=1&autoJoin=1',
+    guestSession: {
+      token: guestToken,
+      tableId: 'guest_table_1',
+      guestId: 'guest_user_1',
+      nickname: 'Guest1234',
+      expiresAt: Date.now() + 3_600_000
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  assert.ok(ws, 'guest mode should still bootstrap a WS client');
+  assert.equal(ws.guestToken, guestToken);
+  assert.equal(harness.elements.xpBadge.hidden, true, 'guest mode should hide the XP badge');
+  assert.equal(harness.elements.pokerV2GuestBadge.hidden, false, 'guest mode should show the guest badge');
+  assert.equal(harness.elements.pokerV2GuestPanel.hidden, false, 'guest mode should show the restrictions panel');
+
+  await waitFor(() => harness.joinPayloads.length === 1);
+  assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({ tableId: 'guest_table_1', buyIn: 100, autoSeat: true, preferredSeatNo: 1 }));
 });
 
 test('poker v2 shows a closed-table countdown, cancels on recovery, and redirects after five seconds', async () => {

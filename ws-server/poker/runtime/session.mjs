@@ -11,11 +11,17 @@ function ensureTableReplay(session, tableId) {
   return session.replayByTableId.get(tableId);
 }
 
+function normalizeIdentityMode(value) {
+  return value === "guest" ? "guest" : "user";
+}
+
 export function createSession({ sessionId, nowTs, replayWindowSize = DEFAULT_REPLAY_WINDOW_SIZE }) {
   const ts = nowIso(nowTs);
   return {
     sessionId,
     userId: null,
+    identityMode: null,
+    nickname: null,
     authedAt: null,
     lastSeenAt: ts,
     latestDeliveredSeq: 0,
@@ -31,17 +37,21 @@ export function touchSession(session, nowTs) {
   return session;
 }
 
-export function bindSessionUser({ session, userId, nowTs }) {
+export function bindSessionUser({ session, userId, identityMode = "user", nickname = null, nowTs }) {
   const ts = nowIso(nowTs);
+  const nextIdentityMode = normalizeIdentityMode(identityMode);
+  const nextNickname = typeof nickname === "string" && nickname.trim() ? nickname.trim().slice(0, 40) : null;
 
   if (session.userId === null) {
     session.userId = userId;
+    session.identityMode = nextIdentityMode;
+    session.nickname = nextNickname;
     session.authedAt = ts;
     session.lastSeenAt = ts;
     return { ok: true, changed: true };
   }
 
-  if (session.userId !== userId) {
+  if (session.userId !== userId || normalizeIdentityMode(session.identityMode) !== nextIdentityMode) {
     return {
       ok: false,
       code: "auth_session_locked",
@@ -49,6 +59,7 @@ export function bindSessionUser({ session, userId, nowTs }) {
     };
   }
 
+  session.nickname = nextNickname || session.nickname || null;
   session.lastSeenAt = ts;
   return { ok: true, changed: false };
 }
@@ -97,7 +108,6 @@ export function resolveReplay({ session, tableId, lastSeq }) {
     frames
   };
 }
-
 
 export function ackSessionSeq({ session, tableId, seq }) {
   const latestDelivered = session.latestDeliveredSeqByTableId.get(tableId) ?? 0;

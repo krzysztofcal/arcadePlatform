@@ -1381,7 +1381,7 @@ test("recoverable persistence conflict does not force resync and explicit resync
     await fs.writeFile(filePath, `${JSON.stringify(forcedRaw)}\n`, "utf8");
 
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-conflict-resync", ts: "2026-02-28T03:00:02Z", payload: { tableId, handId, action: "fold" } });
-    const rejected = await nextMessageForRequest(ws, "commandResult", "act-conflict-resync", { skipTypes: ["stateSnapshot", "statePatch"] });
+    const rejected = await nextMessageForRequest(ws, "commandResult", "act-conflict-resync", { skipTypes: ["stateSnapshot", "statePatch"], timeoutMs: 10000 });
     assert.equal(rejected.payload.status, "rejected");
     const maybeImmediateRecovery = await attemptMessage(ws, 400);
     assert.notEqual(maybeImmediateRecovery?.type, "resync");

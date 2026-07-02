@@ -16,6 +16,8 @@ export function handleAuth({ frame, connState, nowTs, verifyToken }) {
   const bound = bindSessionUser({
     session: connState.session,
     userId: verification.userId,
+    identityMode: verification.identityMode || "user",
+    nickname: verification.nickname || null,
     nowTs
   });
 
@@ -24,6 +26,9 @@ export function handleAuth({ frame, connState, nowTs, verifyToken }) {
   }
 
   connState.userId = connState.session.userId;
+  connState.identityMode = connState.session.identityMode || "user";
+  connState.nickname = connState.session.nickname || null;
+  connState.guestTableId = verification.tableId || null;
 
   const response = {
     version: PROTOCOL_VERSION,
@@ -32,7 +37,9 @@ export function handleAuth({ frame, connState, nowTs, verifyToken }) {
     sessionId: connState.sessionId,
     payload: {
       sessionId: connState.sessionId,
-      userId: connState.session.userId
+      userId: connState.session.userId,
+      mode: connState.identityMode,
+      nickname: connState.nickname
     }
   };
 
