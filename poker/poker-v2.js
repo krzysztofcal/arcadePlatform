@@ -1954,6 +1954,8 @@
         els.turnText.textContent = 'Waiting for action';
       }
     }
+    if (els.xpBadge) els.xpBadge.hidden = !!isGuestMode;
+    if (els.guestPanel) els.guestPanel.hidden = !isGuestMode;
   }
 
   function resolvePrimaryAction(allowed){
@@ -2544,6 +2546,7 @@
     els.screen = document.getElementById('pokerTableScreen');
     if (typeof document.querySelector === 'function') els.scene = document.querySelector('.poker-scene');
     if (!els.scene) els.scene = els.screen;
+    els.xpBadge = document.getElementById('xpBadge');
     els.bootSplash = document.getElementById('pokerBootSplash');
     els.menuToggle = document.getElementById('pokerMenuToggle');
     els.menuPanel = document.getElementById('pokerMenuPanel');
@@ -2561,6 +2564,7 @@
     els.turnText = document.getElementById('pokerV2TurnText');
     els.stackText = document.getElementById('pokerV2StackText');
     els.errorText = document.getElementById('pokerV2ErrorText');
+    els.guestPanel = document.getElementById('pokerV2GuestPanel');
     els.signInBtn = document.getElementById('pokerV2SignInBtn');
     els.guestBadge = document.getElementById('pokerV2GuestBadge');
     els.joinBtn = document.getElementById('pokerV2JoinBtn');

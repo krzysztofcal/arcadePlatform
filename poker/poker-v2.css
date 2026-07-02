@@ -164,6 +164,22 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 
 .poker-live-btn--accent{background:linear-gradient(180deg, #2f79df, #1c4497);}
 
+.poker-guest-panel{margin-top:12px; padding:14px 14px 12px; border-radius:18px; border:1px solid rgba(255,223,180,0.2); background:rgba(8,13,22,0.72);}
+
+.poker-guest-panel[hidden]{display:none;}
+
+.poker-guest-panel__title{font-size:0.9rem; font-weight:700; letter-spacing:0.01em; color:#f8efd6;}
+
+.poker-guest-panel__list{margin:10px 0 0; padding:0; list-style:none; display:grid; gap:6px;}
+
+.poker-guest-panel__item{display:flex; gap:8px; align-items:flex-start; font-size:0.86rem; line-height:1.35; color:#d6e1f5;}
+
+.poker-guest-panel__item::before{flex:0 0 auto; font-weight:800;}
+
+.poker-guest-panel__item--allowed::before{content:"✓"; color:#8df8bf;}
+
+.poker-guest-panel__item--blocked::before{content:"✕"; color:#ffb5b5;}
+
 .poker-live-input{display:flex; flex-direction:column; gap:5px; font-size:0.72rem; font-weight:600; letter-spacing:0.03em; text-transform:uppercase; color:#b9c6dc;}
 
 .poker-live-input input{width:102px; min-height:42px; padding:0 12px; border-radius:14px; border:1px solid rgba(255,223,180,0.22); background:rgba(6,10,18,0.88); color:#f7f9fe; font-size:0.98rem; font-weight:700;}
