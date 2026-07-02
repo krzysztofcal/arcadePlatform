@@ -957,12 +957,6 @@ export async function executePokerLeave({
               "update public.poker_tables set status = 'CLOSED', updated_at = now(), last_activity_at = now() where id = $1;",
               [tableId]
             );
-            try {
-              await tx.unsafe("delete from public.poker_hole_cards where table_id = $1;", [tableId]);
-            } catch (error) {
-              if (!isHoleCardsTableMissing(error)) throw error;
-              klog("poker_hole_cards_missing", { tableId, error: error?.message || "unknown_error" });
-            }
           }
           klog("poker_leave_table_closed_terminal_bots_only", {
             tableId,

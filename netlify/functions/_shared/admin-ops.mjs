@@ -2,7 +2,6 @@ import { parseAdminUserIds } from "./admin-auth.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./poker-idempotency.mjs";
 import { cashoutBotSeatIfNeeded, ensureBotSeatInactiveForCashout } from "./poker-bot-cashout.mjs";
-import { isHoleCardsTableMissing } from "./poker-hole-cards-store.mjs";
 import { parseStakes } from "./poker-stakes.mjs";
 import { beginSql, executeSql, klog } from "./supabase-admin.mjs";
 import { executeInactiveCleanup } from "../../../shared/poker-domain/inactive-cleanup.mjs";
@@ -443,7 +442,6 @@ async function runCleanupActionInTx(tx, {
     env,
     klog,
     postTransaction: async (payload) => postTransaction({ ...payload, tx }),
-    isHoleCardsTableMissing,
     hasConnectedHumanPresence: () => false,
   });
   await insertTableAdminAction(tx, {
@@ -543,12 +541,6 @@ async function forceCloseTableInTx(tx, {
     "update public.poker_tables set status = 'CLOSED', updated_at = now(), last_activity_at = now() where id = $1;",
     [tableId],
   );
-  try {
-    await tx.unsafe("delete from public.poker_hole_cards where table_id = $1;", [tableId]);
-  } catch (error) {
-    if (!isHoleCardsTableMissing(error)) throw error;
-    klog("admin_force_close_hole_cards_missing", { tableId, message: error?.message || "unknown" });
-  }
   const result = {
     ok: true,
     changed: true,

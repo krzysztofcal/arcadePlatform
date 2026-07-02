@@ -1119,11 +1119,15 @@ async function persistMutatedState({ tableId, expectedVersion, mutationKind, acc
   if (!nextState) {
     return { ok: false, reason: "invalid_state" };
   }
+  const privateStateForHoleCards = typeof tableManager.privatePokerStateForAudit === "function"
+    ? tableManager.privatePokerStateForAudit(tableId)
+    : nextState;
   klogSafe("ws_state_persist_start", { tableId, expectedVersion, mutationKind });
   const persisted = await persistedStateWriter.writeMutation({
     tableId,
     expectedVersion,
     nextState,
+    privateStateForHoleCards,
     supabaseUrl: process.env.SUPABASE_URL,
     supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
     meta: { mutationKind },

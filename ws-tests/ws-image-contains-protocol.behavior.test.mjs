@@ -8,6 +8,33 @@ function run(cmd, args, options = {}) {
   return spawnSync(cmd, args, { encoding: "utf8", ...options });
 }
 
+function isTransientDockerBuildFailure(result) {
+  const output = String(result?.stderr || "") + "\n" + String(result?.stdout || "");
+  const normalizedOutput = output.toLowerCase();
+  return [
+    "502 bad gateway",
+    "503 service unavailable",
+    "504 gateway timeout",
+    "toomanyrequests",
+    "connection reset by peer",
+    "client.timeout",
+    "i/o timeout",
+    "tls handshake timeout",
+    "failed to resolve source metadata",
+    "failed to fetch oauth token"
+  ].some((needle) => normalizedOutput.includes(needle));
+}
+
+function dockerBuildWithRetry(imageTag, { attempts = 3 } = {}) {
+  let last = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    last = run("docker", wsDockerBuildArgs(imageTag));
+    if (last.status === 0) return last;
+    if (!isTransientDockerBuildFailure(last) || attempt === attempts) return last;
+  }
+  return last;
+}
+
 test("ws image contains required poker protocol/runtime modules", { timeout: 180000 }, (t) => {
   const dockerCheck = run("docker", ["version"]);
   if (dockerCheck.status !== 0) {
@@ -20,7 +47,7 @@ test("ws image contains required poker protocol/runtime modules", { timeout: 180
   fs.mkdirSync("ws-server/node_modules", { recursive: true });
   fs.writeFileSync(sentinelPath, "host-sentinel", "utf8");
   try {
-    const build = run("docker", wsDockerBuildArgs(imageTag));
+    const build = dockerBuildWithRetry(imageTag);
     assert.equal(build.status, 0, `docker build failed:\n${build.stderr || build.stdout}`);
 
     const check = run("docker", [
@@ -60,7 +87,7 @@ test("docker runtime resolves authoritative join adapter dependency chain", { ti
 
   const imageTag = `arcadeplatform-ws-test:${Date.now()}-join-loader`;
   try {
-    const build = run("docker", wsDockerBuildArgs(imageTag));
+    const build = dockerBuildWithRetry(imageTag);
     assert.equal(build.status, 0, `docker build failed:
 ${build.stderr || build.stdout}`);
 

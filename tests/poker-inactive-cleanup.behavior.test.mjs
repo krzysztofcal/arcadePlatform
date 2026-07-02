@@ -314,7 +314,7 @@ test('singleton human disconnect closes table, ignores bots keep-alive, and clos
   assert.equal(closeUser4.entries[1].amount, 70, 'close cashout should be state-first, not seat fallback');
   assert.equal(closeUser4.idempotencyKey, 'poker:inactive_cleanup_close:table-3:user-4');
   const holeCardDelete = ctx.updates.find((u) => String(u.query).includes('delete from public.poker_hole_cards'));
-  assert.ok(holeCardDelete, 'close path should clear hole cards');
+  assert.equal(holeCardDelete, undefined, 'close path should preserve audit hole cards');
   const closedState = ctx.updates.filter((u) => u.kind === 'state').at(-1)?.value;
   assert.ok(closedState, 'close path should persist closed inert state');
   assert.equal(closedState.phase, 'HAND_DONE');

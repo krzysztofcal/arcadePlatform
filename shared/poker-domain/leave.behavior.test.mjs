@@ -16,7 +16,7 @@ const tableId = "77777777-7777-4777-8777-777777777777";
 const userId = "99999999-9999-4999-8999-999999999999";
 
 const makeMocks = () => {
-  const calls = { cashouts: 0, actions: 0, deleteSeat: 0, storeResult: 0, updates: 0, closeTable: 0 };
+  const calls = { cashouts: 0, actions: 0, deleteSeat: 0, storeResult: 0, updates: 0, closeTable: 0, holeCardDelete: 0 };
   const state = { version: 2, value: { tableId, phase: "INIT", seats: [{ userId, seatNo: 1 }], stacks: { [userId]: 50 }, leftTableByUserId: {} } };
   let tableStatus = "OPEN";
   const requests = new Map();
@@ -67,7 +67,7 @@ const makeMocks = () => {
       calls.closeTable += 1;
       return [];
     }
-    if (text.includes("delete from public.poker_hole_cards where table_id = $1")) return [];
+    if (text.includes("delete from public.poker_hole_cards")) { calls.holeCardDelete += 1; return []; }
     if (text.includes("update public.poker_tables set last_activity_at")) return [];
     return [];
   } };
@@ -246,6 +246,7 @@ for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
   const result = await executePokerLeave({ beginSql: ctx.beginSql, tableId, userId, requestId: "r6", includeState: true, klog: () => {} });
   assert.equal(result.ok, true);
   assert.equal(ctx.calls.closeTable, 1, "table should be closed when no active humans remain");
+  assert.equal(ctx.calls.holeCardDelete, 0, "close path should preserve audit hole cards");
   assert.equal(result.state.state.phase, "HAND_DONE");
   assert.deepEqual(result.state.state.stacks, {});
 }
@@ -548,6 +549,7 @@ for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
   assert.equal(ctx.calls.cashouts, 1);
   assert.equal(ctx.calls.deleteSeat, 1);
   assert.equal(ctx.calls.closeTable, 1);
+  assert.equal(ctx.calls.holeCardDelete, 0, "close path should preserve audit hole cards");
   assert.equal(ctx.calls.storeResult, 1);
   assert.equal(logNames.includes("poker_leave_bot_autoplay_start"), true);
   assert.equal(logNames.includes("poker_leave_bot_autoplay_finish"), true);

@@ -68,6 +68,7 @@ function matchesSelector(node, selector) {
 function createElement(tagName, id = null) {
   const attributes = new Map();
   const listeners = new Map();
+  let html = "";
   const node = {
     tagName: String(tagName || "").toUpperCase(),
     id,
@@ -151,9 +152,10 @@ function createElement(tagName, id = null) {
   node.classList = createClassList(node);
   Object.defineProperty(node, "innerHTML", {
     get() {
-      return "";
+      return html;
     },
     set(value) {
+      html = String(value == null ? "" : value);
       if (value === "") {
         node.children.length = 0;
       }
@@ -255,6 +257,11 @@ function createAdminDom() {
     "adminLedgerDetail",
     "adminLedgerReset",
     "adminLedgerRecentAdmin",
+    "adminPokerAuditBody",
+    "adminPokerAuditEmpty",
+    "adminPokerAuditDetail",
+    "adminPokerAuditRefresh",
+    "adminPokerAuditReset",
     "adminOpsStats",
     "adminOpsRuntime",
     "adminOpsRefresh",
@@ -276,8 +283,12 @@ function createAdminDom() {
   addField(tablesFilters, { name: "sort", value: "last_activity_desc" });
   const ledgerFilters = createForm(document, "adminLedgerFilters");
   addField(ledgerFilters, { name: "txType", value: "" });
+  const pokerAuditFilters = createForm(document, "adminPokerAuditFilters");
+  addField(pokerAuditFilters, { name: "tableId", value: "" });
+  addField(pokerAuditFilters, { name: "handId", value: "" });
+  addField(pokerAuditFilters, { name: "limit", value: "20" });
 
-  const tabs = ["users", "tables", "ledger", "ops"].map((tab, index) => {
+  const tabs = ["users", "tables", "ledger", "pokerAudit", "ops"].map((tab, index) => {
     const button = registerNode(document, createElement("button", `adminTabButton${tab[0].toUpperCase()}${tab.slice(1)}`));
     button.setAttribute("data-admin-tab", tab);
     button.setAttribute("role", "tab");
@@ -290,7 +301,7 @@ function createAdminDom() {
     return button;
   });
 
-  const panels = ["users", "tables", "ledger", "ops"].map((tab, index) => {
+  const panels = ["users", "tables", "ledger", "pokerAudit", "ops"].map((tab, index) => {
     const panel = registerNode(document, createElement("section", `adminTab${tab[0].toUpperCase()}${tab.slice(1)}`));
     panel.setAttribute("data-admin-panel", tab);
     panel.setAttribute("role", "tabpanel");
@@ -327,6 +338,43 @@ function buildContext() {
     }
     if (text.includes("/.netlify/functions/admin-ops-summary")) {
       return { ok: true, json: async () => ({ summary: {}, janitor: {}, runtime: {}, recentActions: [], recentCleanup: [] }) };
+    }
+    if (text.includes("/.netlify/functions/admin-poker-audit")) {
+      const reveal = text.includes("revealPrivateCards=1");
+      return { ok: true, json: async () => ({
+        ok: true,
+        hands: [{
+          tableId: "table-audit",
+          handId: "hand-audit",
+          startedAt: "2026-07-01T10:00:00.000Z",
+          settledAt: "2026-07-01T10:02:00.000Z",
+          actionCount: 3,
+          winnerUserIds: ["user-a"],
+          potTotal: 44,
+          hasSettlement: true
+        }],
+        selectedHand: {
+          tableId: "table-audit",
+          handId: "hand-audit",
+          startedAt: "2026-07-01T10:00:00.000Z",
+          settledAt: "2026-07-01T10:02:00.000Z",
+          actionCount: 3,
+          hasSettlement: true,
+          actions: [
+            { version: 6, phaseFrom: "TURN", phaseTo: "TURN", source: "bot_autoplay", userId: "user-b", actionType: "CHECK", amount: null, potTotalBefore: 120, potTotalAfter: 120, actorStackBefore: 80, actorStackAfter: 80 },
+            { version: 7, phaseFrom: "RIVER", phaseTo: "RIVER", source: "timeout", userId: "user-c", actionType: "FOLD", amount: null, potTotalBefore: 136, potTotalAfter: 136, actorStackBefore: 41, actorStackAfter: 41 },
+            { version: 8, phaseFrom: "RIVER", phaseTo: "SETTLED", source: "human", userId: "user-a", actionType: "CALL", amount: 0, potTotalBefore: 136, potTotalAfter: 0, actorStackBefore: 41, actorStackAfter: 176 }
+          ],
+          timeline: [
+            { version: 6, phaseFrom: "TURN", phaseTo: "TURN", source: "bot_autoplay", userId: "user-b", actionType: "CHECK", amount: null, potTotalBefore: 120, potTotalAfter: 120, actorStackBefore: 80, actorStackAfter: 80 },
+            { version: 7, phaseFrom: "RIVER", phaseTo: "RIVER", source: "timeout", userId: "user-c", actionType: "FOLD", amount: null, potTotalBefore: 136, potTotalAfter: 136, actorStackBefore: 41, actorStackAfter: 41 },
+            { version: 8, phaseFrom: "RIVER", phaseTo: "SETTLED", source: "human", userId: "user-a", actionType: "CALL", amount: 0, potTotalBefore: 136, potTotalAfter: 0, actorStackBefore: 41, actorStackAfter: 176 },
+            { version: 9, phaseFrom: null, phaseTo: "SETTLED", source: "system", userId: null, actionType: "HAND_SETTLED", amount: 152, payoutTotal: 152, winnerUserIds: ["user-a"], reason: "computed" }
+          ],
+          settlement: { reason: "computed", settledAt: "2026-07-01T10:02:00.000Z", communityCards: ["AD", "JD", "3C", "KD", "6S"], winners: ["user-a"], payoutByUserId: { "user-a": 152 }, payoutTotal: 152, potsAwarded: [{ amount: 152, eligibleUserIds: ["user-a"], winners: ["user-a"] }], evaluatedHands: [{ userId: "user-a", name: "TWO_PAIR", category: 3, ranks: [10], bestFiveCards: ["AD", "JD", "3C", "KD", "6S"] }] },
+          ...(reveal ? { privateCardsByUserId: { "user-a": ["AS", "KD"] }, privateCardsAvailable: true } : {})
+        }
+      }) };
     }
     return { ok: true, json: async () => ({}) };
   };
@@ -380,10 +428,62 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.equal(panels[1].getAttribute("aria-hidden"), "false");
   assert.equal(fetchCalls.includes("/.netlify/functions/admin-tables-list?status=OPEN&sort=last_activity_desc&page=1&limit=20"), true);
 
+  tabs[4].dispatchEvent({ type: "click", bubbles: true, target: tabs[4], preventDefault() {} });
+  await flush();
+
+  assert.equal(tabs[4].getAttribute("aria-selected"), "true");
+  assert.equal(panels[4].hidden, false);
+  assert.equal(fetchCalls.includes("/.netlify/functions/admin-ops-summary"), true);
+});
+
+test("admin page poker audit search renders hand timeline and settlement summary", async () => {
+  const { context, document, tabs, fetchCalls } = buildContext();
+  vm.runInContext(source, context, { filename: "js/admin-page.js" });
+
+  await flush();
+  await flush();
+
   tabs[3].dispatchEvent({ type: "click", bubbles: true, target: tabs[3], preventDefault() {} });
   await flush();
 
-  assert.equal(tabs[3].getAttribute("aria-selected"), "true");
-  assert.equal(panels[3].hidden, false);
-  assert.equal(fetchCalls.includes("/.netlify/functions/admin-ops-summary"), true);
+  const filters = document.getElementById("adminPokerAuditFilters");
+  filters.elements.find((field) => field.name === "handId").value = "hand-audit";
+  filters.dispatchEvent({ type: "submit", bubbles: true, target: filters, preventDefault() {} });
+  await flush();
+  await flush();
+
+  assert.equal(fetchCalls.includes("/.netlify/functions/admin-poker-audit?handId=hand-audit&limit=20"), true);
+  assert.match(document.getElementById("adminPokerAuditBody").innerHTML, /hand-audit/);
+  assert.match(document.getElementById("adminPokerAuditBody").innerHTML, /View details/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /Action timeline/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /CALL/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /HAND_SETTLED/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /see HAND_SETTLED/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /settled separately/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /human/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /bot_autoplay/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /timeout/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /system/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /A♦/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /J♦/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /6♠/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /TWO_PAIR \(category 3\)/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /Hidden by default/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /computed/);
+  assert.doesNotMatch(document.getElementById("adminPokerAuditDetail").innerHTML, /holeCardsByUserId|deck/);
+
+  const revealButton = createElement("button");
+  revealButton.setAttribute("data-audit-action", "reveal-private");
+  revealButton.setAttribute("data-audit-table-id", "table-audit");
+  revealButton.setAttribute("data-audit-hand-id", "hand-audit");
+  revealButton.parentNode = document.body;
+  revealButton.parentElement = document.body;
+  document.dispatchEvent({ type: "click", bubbles: true, target: revealButton, preventDefault() {} });
+  await flush();
+  await flush();
+
+  assert.equal(fetchCalls.includes("/.netlify/functions/admin-poker-audit?tableId=table-audit&handId=hand-audit&limit=20&revealPrivateCards=1"), true);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /A♠/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /K♦/);
+  assert.match(document.getElementById("adminPokerAuditDetail").innerHTML, /admin-card-symbol--red/);
 });

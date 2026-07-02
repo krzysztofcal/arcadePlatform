@@ -198,7 +198,6 @@ export async function executeInactiveCleanup({
   env = process.env,
   klog = () => {},
   postTransaction,
-  isHoleCardsTableMissing = () => false,
   hasConnectedHumanPresence = () => false
 }) {
   const normalizedUserId = typeof userId === "string" && userId.trim() ? userId.trim() : null;
@@ -379,12 +378,6 @@ export async function executeInactiveCleanup({
     let closed = false;
     if (tableStatus !== "CLOSED") {
       await tx.unsafe("update public.poker_tables set status = 'CLOSED', updated_at = now() where id = $1;", [tableId]);
-      try {
-        await tx.unsafe("delete from public.poker_hole_cards where table_id = $1;", [tableId]);
-      } catch (error) {
-        if (!isHoleCardsTableMissing(error)) throw error;
-        klog("poker_hole_cards_missing", { tableId, error: error?.message || "unknown_error" });
-      }
       closed = true;
     }
 

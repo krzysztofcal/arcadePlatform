@@ -120,6 +120,10 @@
 
 .admin-pill--info { background:rgba(14, 165, 233, 0.16); color:#bae6fd; }
 
+.admin-card-symbol { min-width:28px; justify-content:center; letter-spacing:0; }
+
+.admin-card-symbol--red { color:#fecaca; background:rgba(244, 63, 94, 0.16); }
+
 .admin-amount--positive { color:#86efac; font-weight:700; }
 
 .admin-amount--negative { color:#fda4af; font-weight:700; }
