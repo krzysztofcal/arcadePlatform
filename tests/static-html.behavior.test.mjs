@@ -33,6 +33,8 @@ assert.match(tableV2Html, /id="pokerLobbyLink"/, 'poker table v2 should include 
 assert.match(tableV2Html, /id="pokerV2ClosedTableModal"/, 'poker table v2 should render the closed-table redirect notice');
 assert.match(tableV2Html, /id="pokerV2GuestPanel"/, 'poker table v2 should render the guest restrictions panel');
 assert.match(indexHtml, /Create account and get 500 CH Welcome Bonus/, 'poker lobby guest CTA should advertise the welcome bonus');
+assert.match(indexHtml, /id="pokerWelcomeBonusBanner"/, 'poker lobby should render an eligible-user welcome bonus banner');
+assert.match(indexHtml, /Claim bonus/, 'poker lobby welcome bonus banner should include a claim CTA');
 assert.match(tableV2Html, /Create account and get 500 CH Welcome Bonus/, 'poker table guest CTA should advertise the welcome bonus');
 assert.match(tableV2Html, /\+500 CH welcome bonus/, 'guest panel should list the welcome bonus as an account unlock');
 assert.doesNotMatch(indexHtml + tableV2Html, /Sign in and get 500 CH/i, 'guest bonus copy should not promise a sign-in reward');

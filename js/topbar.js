@@ -4,9 +4,11 @@
   const win = window;
   if (win.__topbarBooted) return;
   win.__topbarBooted = true;
-  const chipNodes = { badge: null, amount: null, ready: false };
+  const chipNodes = { badge: null, amount: null, bonus: null, ready: false };
   let chipInFlight = null;
+  let welcomeBonusInFlight = null;
   let chipsClientWaitTries = 0;
+  let welcomeBonusClientWaitTries = 0;
   const AuthState = { UNKNOWN: 0, SIGNED_OUT: 1, SIGNED_IN: 2 };
   let authState = AuthState.SIGNED_OUT;
   let authWired = false;
@@ -134,6 +136,12 @@
       amount.id = 'chipBadgeAmount';
       amount.textContent = '';
       label.appendChild(amount);
+      const bonus = doc.createElement('span');
+      bonus.id = 'welcomeBonusTopbarBadge';
+      bonus.className = 'welcome-bonus-badge';
+      bonus.textContent = '+500';
+      bonus.hidden = true;
+      label.appendChild(bonus);
       badge.appendChild(label);
     } else if (badge.getAttribute('href') !== CHIP_BADGE_HREF){
       badge.setAttribute('href', CHIP_BADGE_HREF);
@@ -156,6 +164,20 @@
         wrap.appendChild(amount);
         badge.textContent = '';
         badge.appendChild(wrap);
+      }
+    }
+    let bonus = doc.getElementById('welcomeBonusTopbarBadge');
+    if (!bonus){
+      const label = badge.querySelector('.chip-badge__label');
+      bonus = doc.createElement('span');
+      bonus.id = 'welcomeBonusTopbarBadge';
+      bonus.className = 'welcome-bonus-badge';
+      bonus.textContent = '+500';
+      bonus.hidden = true;
+      if (label){
+        label.appendChild(bonus);
+      } else {
+        badge.appendChild(bonus);
       }
     }
     if (topbarRight && badge.parentNode !== topbarRight){
@@ -186,9 +208,10 @@
   }
 
   function ensureChipNodes(){
-    if (chipNodes.ready) return;
+    if (chipNodes.ready && chipNodes.badge && chipNodes.amount && chipNodes.bonus) return;
     chipNodes.badge = doc.getElementById('chipBadge');
     chipNodes.amount = doc.getElementById('chipBadgeAmount');
+    chipNodes.bonus = doc.getElementById('welcomeBonusTopbarBadge');
     chipNodes.ready = true;
   }
 
@@ -219,6 +242,24 @@
     if (chipNodes.amount){ chipNodes.amount.textContent = ''; }
   }
 
+  function hideWelcomeBonusBadge(){
+    ensureChipNodes();
+    if (chipNodes.bonus){ chipNodes.bonus.hidden = true; }
+  }
+
+  function setWelcomeBonusBadgeVisible(isVisible, amount){
+    ensureChipNodes();
+    if (!chipNodes.bonus) return;
+    if (!isAuthed() || !isVisible){
+      chipNodes.bonus.hidden = true;
+      return;
+    }
+    const raw = amount == null ? 500 : Number(amount);
+    const value = Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : 500;
+    chipNodes.bonus.textContent = '+' + value;
+    chipNodes.bonus.hidden = false;
+  }
+
   function renderChipBadgeBalance(amount){
     const formatKey = 'format' + 'CompactNumber';
     const formatter = window && window.ArcadeFormat && typeof window.ArcadeFormat[formatKey] === 'function'
@@ -242,11 +283,13 @@
     if (amount){ amount.textContent = ''; }
     if (!isAuthed()){
       hideChipBadge();
+      hideWelcomeBonusBadge();
       return;
     }
     if (badge){ badge.hidden = false; }
     setChipBadge('', { loading: true });
     refreshChipBadge();
+    refreshWelcomeBonusBadge();
   }
 
   function resolveInitialAuth(){
@@ -259,10 +302,49 @@
       }
       refreshXpBadge();
       refreshChipBadge();
+      refreshWelcomeBonusBadge();
     }).catch(function(){
       setAuthState(AuthState.SIGNED_OUT);
       hideChipBadge();
+      hideWelcomeBonusBadge();
     });
+  }
+
+  async function refreshWelcomeBonusBadge(){
+    normalizeTopbarBadges();
+    ensureChipNodes();
+    if (!isAuthed()){
+      hideWelcomeBonusBadge();
+      return;
+    }
+    if (!window || !window.ChipsClient || typeof window.ChipsClient.fetchWelcomeBonusStatus !== 'function'){
+      if (welcomeBonusClientWaitTries < 6){
+        welcomeBonusClientWaitTries += 1;
+        setTimeout(refreshWelcomeBonusBadge, 150);
+        return;
+      }
+      welcomeBonusClientWaitTries = 0;
+      hideWelcomeBonusBadge();
+      return;
+    }
+    welcomeBonusClientWaitTries = 0;
+    if (welcomeBonusInFlight){ return welcomeBonusInFlight; }
+    welcomeBonusInFlight = (async function(){
+      try {
+        const status = await window.ChipsClient.fetchWelcomeBonusStatus();
+        const canClaim = !!(status && status.eligible && !status.alreadyClaimed);
+        setWelcomeBonusBadgeVisible(canClaim, status && status.amount);
+      } catch (err){
+        if (err && err.code === 'not_authenticated'){
+          setAuthState(AuthState.SIGNED_OUT);
+        }
+        hideWelcomeBonusBadge();
+      } finally {
+        welcomeBonusInFlight = null;
+      }
+    })();
+
+    return welcomeBonusInFlight;
   }
 
   async function refreshChipBadge(){
@@ -331,16 +413,19 @@
     if (event === 'SIGNED_OUT'){
       setAuthState(AuthState.SIGNED_OUT);
       hideChipBadge();
+      hideWelcomeBonusBadge();
       return;
     }
     if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION'){
       setAuthState(hasUser ? AuthState.SIGNED_IN : AuthState.SIGNED_OUT);
       if (!isAuthed()){
         hideChipBadge();
+        hideWelcomeBonusBadge();
         return;
       }
       refreshXpBadge();
       refreshChipBadge();
+      refreshWelcomeBonusBadge();
       return;
     }
   }
@@ -355,7 +440,10 @@
 
   function wireChipEvents(){
     if (!doc || typeof doc.addEventListener !== 'function') return;
-    doc.addEventListener('chips:tx-complete', refreshChipBadge);
+    doc.addEventListener('chips:tx-complete', function(){
+      refreshChipBadge();
+      refreshWelcomeBonusBadge();
+    });
   }
 
   function tryWireAuthBridge(){
