@@ -6,6 +6,10 @@
   var nodes = {};
   var currentUser = null;
   var chipsInFlight = null;
+  var welcomeBonusInFlight = null;
+  var welcomeBonusProcessedFor = {};
+  var GUEST_CONVERSION_KEY = 'poker:guestConversionIntent';
+  var WELCOME_BONUS_SUCCESS = 'Welcome! 500 CH have been added to your account.';
   var ledgerState = {
     entries: [],
     nextCursor: null,
@@ -62,6 +66,26 @@
         window.KLog.log(kind, data || {});
       }
     } catch (_err){}
+  }
+
+  function getGuestConversionIntent(){
+    try {
+      if (!window.sessionStorage) return '';
+      return window.sessionStorage.getItem(GUEST_CONVERSION_KEY) || '';
+    } catch (_err){
+      return '';
+    }
+  }
+
+  function clearGuestConversionIntent(){
+    try {
+      if (window.sessionStorage) window.sessionStorage.removeItem(GUEST_CONVERSION_KEY);
+    } catch (_err){}
+  }
+
+  function getUserKey(user){
+    if (!user) return '';
+    return String(user.id || user.user_id || user.sub || 'current');
   }
 
   function parseSortId(value){
@@ -496,6 +520,47 @@
     return chipsInFlight;
   }
 
+  async function processWelcomeBonus(user){
+    var userKey = getUserKey(user);
+    if (!userKey || getGuestConversionIntent() !== 'welcome_bonus') return null;
+    if (
+      !window ||
+      !window.ChipsClient ||
+      typeof window.ChipsClient.fetchWelcomeBonusStatus !== 'function' ||
+      typeof window.ChipsClient.claimWelcomeBonus !== 'function'
+    ) return null;
+    if (welcomeBonusProcessedFor[userKey]) return welcomeBonusProcessedFor[userKey];
+    if (welcomeBonusInFlight) return welcomeBonusInFlight;
+
+    welcomeBonusInFlight = (async function(){
+      try {
+        var status = await window.ChipsClient.fetchWelcomeBonusStatus();
+        if (!status || !status.eligible || status.alreadyClaimed){
+          clearGuestConversionIntent();
+          return status || null;
+        }
+
+        var result = await window.ChipsClient.claimWelcomeBonus();
+        if (result && result.claimed){
+          clearGuestConversionIntent();
+          setStatus(WELCOME_BONUS_SUCCESS, 'success');
+          loadChips();
+          return result;
+        }
+
+        clearGuestConversionIntent();
+        return result || null;
+      } catch (err){
+        return null;
+      } finally {
+        welcomeBonusInFlight = null;
+      }
+    })();
+
+    welcomeBonusProcessedFor[userKey] = welcomeBonusInFlight;
+    return welcomeBonusInFlight;
+  }
+
   function handleSignIn(e){
     e.preventDefault();
     var email = nodes.signInEmail && nodes.signInEmail.value ? nodes.signInEmail.value.trim() : '';
@@ -517,6 +582,7 @@
         setStatus('Signed in successfully.', 'success');
         renderUser(user);
         loadChips();
+        processWelcomeBonus(user);
       } else {
         setStatus('Signed in. Redirecting…', 'success');
       }
@@ -548,7 +614,10 @@
       } else {
         setStatus('Account created. You are signed in.', 'success');
       }
+      var user = res && res.data && res.data.user ? res.data.user : null;
+      if (user){ renderUser(user); }
       loadChips();
+      processWelcomeBonus(user || currentUser);
     }).catch(function(err){
       var msg = err && err.message ? String(err.message) : 'Could not sign up. Please try again.';
       setStatus(msg, 'error');
@@ -607,6 +676,7 @@
       setStatus(user ? 'Signed in.' : '', user ? 'success' : '');
       if (user){
         loadChips();
+        processWelcomeBonus(user);
       } else {
         clearChips();
         setBlockVisibility(nodes.chipPanel, false);
@@ -622,6 +692,7 @@
         if (user){
           setStatus('Signed in.', 'success');
           loadChips();
+          processWelcomeBonus(user);
         } else {
           setStatus('You have been signed out.', 'info');
           clearChips();

@@ -154,6 +154,7 @@
   }
 
   function openSignIn(){
+    storeGuestConversionIntent();
     var bridge = getSignInBridge();
     if (bridge){
       var methods = ['signIn', 'openSignIn', 'showAuth', 'startLogin'];
@@ -170,6 +171,12 @@
       }
     }
     window.location.href = '/account.html';
+  }
+
+  function storeGuestConversionIntent(){
+    try {
+      if (window.sessionStorage) window.sessionStorage.setItem('poker:guestConversionIntent', 'welcome_bonus');
+    } catch (_err){}
   }
 
   async function authedFetch(url, options){

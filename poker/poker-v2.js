@@ -361,6 +361,7 @@
   }
 
   function openSignIn(){
+    storeGuestConversionIntent();
     var bridge = window.SupabaseAuthBridge;
     var methods = ['signIn', 'openSignIn', 'showAuth', 'startLogin'];
     if (bridge){
@@ -374,6 +375,13 @@
       }
     }
     window.location.href = '/account.html';
+  }
+
+  function storeGuestConversionIntent(){
+    if (!isGuestMode) return;
+    try {
+      if (window.sessionStorage) window.sessionStorage.setItem('poker:guestConversionIntent', 'welcome_bonus');
+    } catch (_err){}
   }
 
   function isObject(value){
@@ -2143,7 +2151,10 @@
       });
     }
 
-    if (els.signInBtn) els.signInBtn.hidden = signedIn;
+    if (els.signInBtn) {
+      els.signInBtn.hidden = signedIn && !isGuestMode;
+      els.signInBtn.textContent = isGuestMode ? 'Create account and get 500 CH Welcome Bonus' : 'Sign in';
+    }
     if (els.guestBadge) els.guestBadge.hidden = !isGuestMode;
     if (els.joinBtn) els.joinBtn.hidden = false;
     if (els.joinBtn) els.joinBtn.disabled = joinDisabled;

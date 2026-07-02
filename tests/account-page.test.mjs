@@ -111,10 +111,11 @@ function seedNodes(document) {
   });
 }
 
-function buildContext(chipsClient) {
+function buildContext(chipsClient, options = {}) {
   const document = createDocument();
   seedNodes(document);
   const logs = [];
+  const sessionValues = new Map(Object.entries(options.sessionStorage || {}));
   const windowObj = {
     document,
     addEventListener() {},
@@ -128,13 +129,24 @@ function buildContext(chipsClient) {
     },
     SupabaseAuth: {
       getCurrentUser() {
-        return Promise.resolve({ user_metadata: { name: "Tester" }, email: "tester@example.com" });
+        return Promise.resolve({ id: "00000000-0000-4000-8000-000000000111", user_metadata: { name: "Tester" }, email: "tester@example.com" });
       },
       onAuthChange() {},
     },
     ChipsClient: chipsClient,
+    sessionStorage: {
+      getItem(key) {
+        return sessionValues.has(key) ? sessionValues.get(key) : null;
+      },
+      setItem(key, value) {
+        sessionValues.set(key, String(value));
+      },
+      removeItem(key) {
+        sessionValues.delete(key);
+      },
+    },
   };
-  return { windowObj, document, logs };
+  return { windowObj, document, logs, sessionValues };
 }
 
 function findByClass(node, className) {
@@ -826,4 +838,117 @@ test("chip-panel min-height is scoped to page-account", () => {
     assert.ok(!/min-height/.test(globalChipPanel[0]), "chip-panel min-height should not be global");
   }
   assert.ok(/\.page-account\s+\.chip-panel\{[^}]*min-height\s*:\s*0/.test(normalized), "chip-panel min-height must be scoped");
+});
+
+test("claims welcome bonus from guest conversion marker and shows success after POST", async () => {
+  const calls = [];
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1700 });
+    },
+    fetchLedger() {
+      return Promise.resolve({ items: [], nextCursor: null });
+    },
+    fetchWelcomeBonusStatus() {
+      calls.push("status");
+      return Promise.resolve({ eligible: true, alreadyClaimed: false, amount: 500 });
+    },
+    claimWelcomeBonus() {
+      calls.push("claim");
+      return Promise.resolve({ claimed: true, amount: 500, transactionId: "tx-1" });
+    },
+  };
+  const { windowObj, document, sessionValues } = buildContext(chipsClient, {
+    sessionStorage: { "poker:guestConversionIntent": "welcome_bonus" },
+  });
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+  await flush();
+
+  assert.deepEqual(calls, ["status", "claim"]);
+  assert.equal(document.getElementById("accountStatus").textContent, "Welcome! 500 CH have been added to your account.");
+  assert.equal(sessionValues.has("poker:guestConversionIntent"), false);
+});
+
+test("clears welcome marker without success for already claimed account", async () => {
+  const calls = [];
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1200 });
+    },
+    fetchLedger() {
+      return Promise.resolve({ items: [], nextCursor: null });
+    },
+    fetchWelcomeBonusStatus() {
+      calls.push("status");
+      return Promise.resolve({ eligible: false, alreadyClaimed: true, amount: 500 });
+    },
+    claimWelcomeBonus() {
+      calls.push("claim");
+      return Promise.resolve({ claimed: true });
+    },
+  };
+  const { windowObj, document, sessionValues } = buildContext(chipsClient, {
+    sessionStorage: { "poker:guestConversionIntent": "welcome_bonus" },
+  });
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+  await flush();
+
+  assert.deepEqual(calls, ["status"]);
+  assert.notEqual(document.getElementById("accountStatus").textContent, "Welcome! 500 CH have been added to your account.");
+  assert.equal(sessionValues.has("poker:guestConversionIntent"), false);
+});
+
+test("does not fetch welcome bonus status without guest conversion marker", async () => {
+  const calls = [];
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1200 });
+    },
+    fetchLedger() {
+      return Promise.resolve({ items: [], nextCursor: null });
+    },
+    fetchWelcomeBonusStatus() {
+      calls.push("status");
+      return Promise.resolve({ eligible: true, alreadyClaimed: false, amount: 500 });
+    },
+    claimWelcomeBonus() {
+      calls.push("claim");
+      return Promise.resolve({ claimed: true });
+    },
+  };
+  const { windowObj, document } = buildContext(chipsClient);
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+
+  assert.deepEqual(calls, []);
+  assert.notEqual(document.getElementById("accountStatus").textContent, "Welcome! 500 CH have been added to your account.");
 });

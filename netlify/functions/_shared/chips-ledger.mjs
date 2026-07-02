@@ -12,6 +12,7 @@ const VALID_TX_TYPES = new Set([
   "HAND_SETTLEMENT",
   "RAKE_FEE",
   "PRIZE_PAYOUT",
+  "WELCOME_BONUS",
 ]);
 
 // Loose integer parsing for non-sequence fields only (balances, etc.).
