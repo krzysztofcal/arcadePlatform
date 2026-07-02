@@ -7,7 +7,7 @@ PR3 adds a one-time registration incentive for Guest -> Account conversion.
 The intended user outcome is:
 
 - Guest players see a clear account-upgrade value proposition.
-- A newly eligible account receives exactly one `500 CH` welcome bonus.
+- An eligible account receives exactly one `500 CH` welcome bonus.
 - Guest chips are never transferred into the real account.
 - The existing authenticated poker and chip ledger flows remain unchanged.
 
@@ -96,12 +96,15 @@ Implementation details:
   - `WELCOME_BONUS_CHIPS=500`
 - Eligibility must be gated by a required rollout timestamp:
   - `WELCOME_BONUS_START_AT`
+- For the initial rollout, set:
+  - `WELCOME_BONUS_START_AT=2025-06-01T00:00:00Z`
 - New-account detection should query `auth.users.created_at` through `SUPABASE_DB_URL`.
 - A user is eligible when:
   - the account exists,
   - `auth.users.created_at >= WELCOME_BONUS_START_AT`,
   - no transaction exists for `welcome-bonus:<userId>`.
-- Accounts created before `WELCOME_BONUS_START_AT` are never eligible, even if they have never claimed a welcome bonus.
+- Existing Arcade accounts created at or after `WELCOME_BONUS_START_AT` are eligible for the initial rollout if they have not already claimed the bonus.
+- Accounts created before `WELCOME_BONUS_START_AT` are outside the rollout window.
 - The endpoint should fail closed when `WELCOME_BONUS_START_AT` is missing or invalid.
 
 ### 3. Add API Endpoint
@@ -258,11 +261,11 @@ Although the roadmap originally said not to write tests unless explicitly reques
 
 Backend tests:
 
-- `GET welcome-bonus` returns `eligible: true` for a new account without prior bonus.
+- `GET welcome-bonus` returns `eligible: true` for an account created at or after `WELCOME_BONUS_START_AT` without prior bonus.
 - `POST welcome-bonus` creates one `WELCOME_BONUS` transaction.
 - Repeated `POST welcome-bonus` does not create a second transaction.
 - Already claimed status returns `alreadyClaimed: true`.
-- Account created before `WELCOME_BONUS_START_AT` is not eligible.
+- Account created before `WELCOME_BONUS_START_AT` is outside the rollout window and is not eligible.
 - Account created at or after `WELCOME_BONUS_START_AT` is eligible when it has not claimed the bonus.
 - Missing auth returns `401`.
 - `CHIPS_ENABLED !== "1"` returns `404`.
@@ -283,8 +286,10 @@ node --test tests/welcome-bonus.behavior.test.mjs tests/poker-v2-live.behavior.t
 ## Acceptance Criteria
 
 - Guest users see the `Create account and get 500 CH Welcome Bonus` account incentive.
-- A newly eligible account receives exactly one `WELCOME_BONUS` transaction.
-- Account created before `WELCOME_BONUS_START_AT` is not eligible.
+- An eligible account receives exactly one `WELCOME_BONUS` transaction.
+- For the initial rollout, `WELCOME_BONUS_START_AT` is `2025-06-01T00:00:00Z`.
+- Existing Arcade accounts created at or after `WELCOME_BONUS_START_AT` can claim the bonus once.
+- Account created before `WELCOME_BONUS_START_AT` is outside the rollout window and is not eligible.
 - Account created at or after `WELCOME_BONUS_START_AT` is eligible if it has not claimed the bonus.
 - Reloading or retrying does not grant another bonus.
 - Repeated `POST` does not grant a second bonus.
@@ -298,8 +303,8 @@ node --test tests/welcome-bonus.behavior.test.mjs tests/poker-v2-live.behavior.t
 
 ## Risks
 
-- The phrase "new account" must be implemented explicitly. Do not infer it from a JWT alone.
-- `WELCOME_BONUS_START_AT` is required. Missing or invalid configuration must not make existing accounts eligible.
+- Eligibility must be implemented from `auth.users.created_at`; do not infer it from a JWT alone.
+- `WELCOME_BONUS_START_AT` is required. Missing or invalid configuration must fail closed.
 - Do not expose arbitrary ledger entries through a user-facing endpoint.
 - Do not add the bonus to guest table state or guest stacks.
 - Keep the idempotency key account-scoped and stable.
