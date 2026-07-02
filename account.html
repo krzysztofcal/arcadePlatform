@@ -40,6 +40,14 @@
     .account-panel__btn--primary{ background:linear-gradient(90deg, #6ee7e7, #a78bfa); color:#0b1020; }
 
     .account-panel__btn--ghost{ background:rgba(255, 255, 255, 0.08); color:#e2e8f0; }
+
+    .account-bonus{ display:grid; gap:10px; margin-top:16px; padding:14px; border-radius:14px; border:1px solid rgba(110, 231, 231, 0.18); background:rgba(255, 255, 255, 0.03); }
+
+    .account-bonus__title{ font-size:15px; font-weight:700; color:#f8fafc; }
+
+    .account-bonus__btn{ justify-self:start; padding:10px 14px; border:none; border-radius:12px; background:linear-gradient(90deg, #f7c948, #6ee7e7); color:#0b1020; font-weight:700; cursor:pointer; }
+
+    .account-bonus__btn[hidden]{ display:none; }
   </style>
 
 <script src="js/analytics.js" defer></script>
@@ -181,6 +189,11 @@
           <div class="account-panel__actions">
             <button type="button" class="account-panel__btn account-panel__btn--primary" id="signOutButton">Sign out</button>
             <button type="button" class="account-panel__btn account-panel__btn--ghost" id="deleteAccountButton">Delete account</button>
+          </div>
+          <div class="account-bonus" id="welcomeBonusPanel" hidden>
+            <div class="account-bonus__title" id="welcomeBonusTitle">Claim your 500 CH welcome bonus</div>
+            <button type="button" class="account-bonus__btn" id="welcomeBonusClaimButton">Claim your 500 CH welcome bonus</button>
+            <p class="account-note" id="welcomeBonusStatus" aria-live="polite"></p>
           </div>
           <p class="account-note" id="deleteAccountNote" tabindex="-1">To request account deletion, contact support and include the email address linked to your Arcade Hub profile.</p>
         </section>

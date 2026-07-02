@@ -160,16 +160,12 @@ The existing chips ledger already has unique idempotency constraints. A duplicat
 
 ### 1. Add Welcome Bonus Client
 
-Proposed file: `js/welcome-bonus-client.js`
+Reuse the existing `js/chips/client.js` browser API and auth lookup pattern.
 
-Expose a small browser API:
+Expose:
 
-- `window.WelcomeBonusClient.fetchStatus()`
-- `window.WelcomeBonusClient.claim()`
-
-Auth:
-
-- Reuse `SupabaseAuthBridge.getAccessToken()` or the same auth lookup pattern used by `js/chips/client.js`.
+- `window.ChipsClient.fetchWelcomeBonusStatus()`
+- `window.ChipsClient.claimWelcomeBonus()`
 
 Events:
 
@@ -204,13 +200,8 @@ Create account and get 500 CH Welcome Bonus
 CTA behavior:
 
 - Navigate to `/account.html`.
-- Store a session marker before navigation:
-
-```text
-poker:guestConversionIntent=welcome_bonus
-```
-
-This marker lets account page auto-claim the bonus after login.
+- Do not store a guest conversion marker for welcome bonus eligibility.
+- Backend status decides whether the signed-in account can claim the bonus.
 
 ### 3. Update Poker Lobby CTA
 
@@ -229,7 +220,7 @@ Keep PR3 limited to copy and bonus wiring. The larger lobby split remains PR5.
 
 Do not use `Sign in and get 500 CH` copy. Existing users may sign in, but they must not see misleading bonus claim or success copy.
 
-### 4. Claim After First Login
+### 4. Claim From Backend Eligibility
 
 Files:
 
@@ -238,22 +229,25 @@ Files:
 
 Flow:
 
-1. Guest clicks bonus CTA.
-2. UI stores `poker:guestConversionIntent=welcome_bonus`.
-3. User reaches account page and signs in or creates an account.
-4. Account page detects authenticated user and the conversion marker.
-5. Account page calls `GET /.netlify/functions/welcome-bonus`.
-6. If `eligible`, account page calls `POST /.netlify/functions/welcome-bonus`.
-7. Account page shows the success message only after the `POST` returns a real successful claim:
+1. User reaches the account page and signs in or creates an account.
+2. Account page detects an authenticated user.
+3. Account page calls `GET /.netlify/functions/welcome-bonus`.
+4. If `eligible` and not `alreadyClaimed`, account page shows a manual CTA:
+
+```text
+Claim your 500 CH welcome bonus
+```
+
+5. Account page calls `POST /.netlify/functions/welcome-bonus` only after the user clicks the claim CTA.
+6. Account page shows the success message only after the `POST` returns a real successful claim:
 
 ```text
 Welcome! 500 CH have been added to your account.
 ```
 
-8. Account page clears the session marker.
-9. Chip balance refreshes via `chips:tx-complete`.
+7. Chip balance refreshes via `chips:tx-complete`.
 
-If the user is not eligible or already claimed, clear the marker without showing a success message. Existing signed-in users who are not eligible may continue normally, but the UI must not imply they received the bonus.
+If the user is not eligible or already claimed, hide the claim CTA without showing a success message. This works for accounts created through any route, not only through Guest Poker.
 
 ## Tests and Validation
 
@@ -326,7 +320,7 @@ node --test tests/welcome-bonus.behavior.test.mjs tests/poker-v2-live.behavior.t
 - Added `WELCOME_BONUS` ledger support.
 - Added welcome bonus status/claim endpoint.
 - Added Guest -> Account bonus CTA copy.
-- Added account-page claim flow after Guest conversion login.
+- Added backend-driven account-page claim CTA for eligible signed-in accounts.
 
 ## Validation
 - `node --test ...`

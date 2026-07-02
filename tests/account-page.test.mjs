@@ -105,6 +105,10 @@ function seedNodes(document) {
     "chipLedgerSpacer",
     "chipLedgerList",
     "chipLedgerEmpty",
+    "welcomeBonusPanel",
+    "welcomeBonusTitle",
+    "welcomeBonusClaimButton",
+    "welcomeBonusStatus",
   ];
   ids.forEach(id => {
     document.__nodes.set(id, createElement("div", id));
@@ -840,7 +844,7 @@ test("chip-panel min-height is scoped to page-account", () => {
   assert.ok(/\.page-account\s+\.chip-panel\{[^}]*min-height\s*:\s*0/.test(normalized), "chip-panel min-height must be scoped");
 });
 
-test("claims welcome bonus from guest conversion marker and shows success after POST", async () => {
+test("shows welcome bonus claim from backend eligibility and claims on click", async () => {
   const calls = [];
   const chipsClient = {
     fetchBalance() {
@@ -858,9 +862,7 @@ test("claims welcome bonus from guest conversion marker and shows success after 
       return Promise.resolve({ claimed: true, amount: 500, transactionId: "tx-1" });
     },
   };
-  const { windowObj, document, sessionValues } = buildContext(chipsClient, {
-    sessionStorage: { "poker:guestConversionIntent": "welcome_bonus" },
-  });
+  const { windowObj, document } = buildContext(chipsClient);
   const context = vm.createContext({
     window: windowObj,
     document,
@@ -874,12 +876,20 @@ test("claims welcome bonus from guest conversion marker and shows success after 
   await flush();
   await flush();
 
-  assert.deepEqual(calls, ["status", "claim"]);
+  assert.deepEqual(calls, ["status"]);
+  assert.equal(document.getElementById("welcomeBonusPanel").hidden, false);
+  assert.equal(document.getElementById("welcomeBonusClaimButton").textContent, "Claim your 500 CH welcome bonus");
+
+  document.getElementById("welcomeBonusClaimButton").dispatchEvent({ type: "click", preventDefault() {} });
+  await flush();
+  await flush();
+  await flush();
+
+  assert.deepEqual(calls, ["status", "claim", "status"]);
   assert.equal(document.getElementById("accountStatus").textContent, "Welcome! 500 CH have been added to your account.");
-  assert.equal(sessionValues.has("poker:guestConversionIntent"), false);
 });
 
-test("clears welcome marker without success for already claimed account", async () => {
+test("hides welcome bonus panel without success for already claimed account", async () => {
   const calls = [];
   const chipsClient = {
     fetchBalance() {
@@ -897,9 +907,7 @@ test("clears welcome marker without success for already claimed account", async 
       return Promise.resolve({ claimed: true });
     },
   };
-  const { windowObj, document, sessionValues } = buildContext(chipsClient, {
-    sessionStorage: { "poker:guestConversionIntent": "welcome_bonus" },
-  });
+  const { windowObj, document } = buildContext(chipsClient);
   const context = vm.createContext({
     window: windowObj,
     document,
@@ -914,11 +922,11 @@ test("clears welcome marker without success for already claimed account", async 
   await flush();
 
   assert.deepEqual(calls, ["status"]);
+  assert.equal(document.getElementById("welcomeBonusPanel").hidden, true);
   assert.notEqual(document.getElementById("accountStatus").textContent, "Welcome! 500 CH have been added to your account.");
-  assert.equal(sessionValues.has("poker:guestConversionIntent"), false);
 });
 
-test("does not fetch welcome bonus status without guest conversion marker", async () => {
+test("does not auto-claim welcome bonus after eligible status", async () => {
   const calls = [];
   const chipsClient = {
     fetchBalance() {
@@ -949,6 +957,7 @@ test("does not fetch welcome bonus status without guest conversion marker", asyn
   await flush();
   await flush();
 
-  assert.deepEqual(calls, []);
+  assert.deepEqual(calls, ["status"]);
+  assert.equal(document.getElementById("welcomeBonusPanel").hidden, false);
   assert.notEqual(document.getElementById("accountStatus").textContent, "Welcome! 500 CH have been added to your account.");
 });
