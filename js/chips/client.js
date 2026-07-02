@@ -4,6 +4,7 @@
   var BALANCE_URL = '/.netlify/functions/chips-balance';
   var LEDGER_URL = '/.netlify/functions/chips-ledger';
   var TX_URL = '/.netlify/functions/chips-tx';
+  var WELCOME_BONUS_URL = '/.netlify/functions/welcome-bonus';
   var AUTH_CACHE_MS = 60000;
 
   var state = { token: null, checkedAt: 0, tokenPromise: null };
@@ -264,6 +265,19 @@
     return payload.data;
   }
 
+  async function fetchWelcomeBonusStatus(){
+    var payload = await authedFetchWithRetry(WELCOME_BONUS_URL, { method: 'GET' });
+    return payload.data;
+  }
+
+  async function claimWelcomeBonus(){
+    var payload = await authedFetchWithRetry(WELCOME_BONUS_URL, { method: 'POST', body: JSON.stringify({}) });
+    if (payload && payload.data && payload.data.claimed){
+      emit('chips:tx-complete', payload.data);
+    }
+    return payload.data;
+  }
+
   async function fetchState(options){
     var limit = options && Number.isInteger(options.limit) ? options.limit : 10;
     var balance = await fetchBalance();
@@ -277,6 +291,8 @@
     fetchBalance: fetchBalance,
     fetchLedger: fetchLedger,
     postTransaction: postTransaction,
+    fetchWelcomeBonusStatus: fetchWelcomeBonusStatus,
+    claimWelcomeBonus: claimWelcomeBonus,
     fetchState: fetchState,
     refreshAuth: function(){ return fetchAuthToken(true); }
   };

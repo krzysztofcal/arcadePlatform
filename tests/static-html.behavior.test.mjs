@@ -32,6 +32,12 @@ assert.match(tableV2Html, /id="pokerV2JoinBtn"/, 'poker table v2 should include 
 assert.match(tableV2Html, /id="pokerLobbyLink"/, 'poker table v2 should include a back-to-lobby link in the hamburger menu');
 assert.match(tableV2Html, /id="pokerV2ClosedTableModal"/, 'poker table v2 should render the closed-table redirect notice');
 assert.match(tableV2Html, /id="pokerV2GuestPanel"/, 'poker table v2 should render the guest restrictions panel');
+assert.match(indexHtml, /Create account and get 500 CH Welcome Bonus/, 'poker lobby guest CTA should advertise the welcome bonus');
+assert.match(indexHtml, /id="pokerWelcomeBonusBanner"/, 'poker lobby should render an eligible-user welcome bonus banner');
+assert.match(indexHtml, /Claim bonus/, 'poker lobby welcome bonus banner should include a claim CTA');
+assert.match(tableV2Html, /Create account and get 500 CH Welcome Bonus/, 'poker table guest CTA should advertise the welcome bonus');
+assert.match(tableV2Html, /\+500 CH welcome bonus/, 'guest panel should list the welcome bonus as an account unlock');
+assert.doesNotMatch(indexHtml + tableV2Html, /Sign in and get 500 CH/i, 'guest bonus copy should not promise a sign-in reward');
 assert.doesNotMatch(tableV2Html, /pokerClassicLink/, 'poker table v2 should not expose the classic table link');
 assert.doesNotMatch(tableV2Html, /pokerV2Link/, 'poker table v2 should not expose a self-link in the hamburger menu');
 assert.doesNotMatch(tableV2Html, /pokerV2DemoPill/, 'poker table v2 should not render the legacy demo pill');
@@ -109,6 +115,8 @@ assert.match(netlifyToml, /for = "\/games-open\/freedoom\/\*"/, 'Netlify should 
 assert.doesNotMatch(netlifyToml, /dwasm\.m-h\.org\.uk/, 'Netlify Freedoom CSP should not rely on a remote WAD mirror');
 assert.ok(netlifyToml.includes('Content-Security-Policy = "'), 'Netlify deploys should emit a CSP header');
 assert.doesNotMatch(netlifyToml, /cookiebot/i, 'Netlify CSP should not require Cookiebot hosts after the Klaro migration');
+assert.match(netlifyToml, /WELCOME_BONUS_START_AT = "2025-06-01T00:00:00Z"/, 'Netlify config should set the welcome bonus rollout date');
+assert.match(netlifyToml, /WELCOME_BONUS_CHIPS = "500"/, 'Netlify config should set the welcome bonus amount');
 assert.match(netlifyToml, /for = "\/css\/\*"[\s\S]*?Cache-Control = "public, max-age=0, must-revalidate"/, 'CSS files use stable names and should revalidate after deploys');
 assert.match(netlifyToml, /for = "\/js\/\*"[\s\S]*?Cache-Control = "public, max-age=0, must-revalidate"/, 'JS files use stable names and should revalidate after deploys');
 const cssHeaderBlock = netlifyToml.match(/\[\[headers\]\]\s+for = "\/css\/\*"[\s\S]*?(?=\n\[\[headers\]\]|$)/)?.[0] || '';

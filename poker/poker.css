@@ -234,6 +234,16 @@
 
 .poker-form-row:last-child{margin-bottom:0;}
 
+.poker-bonus-banner{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; padding:14px 16px; border:1px solid rgba(247,201,72,.34); border-radius:14px; background:linear-gradient(135deg, rgba(247,201,72,.14), rgba(110,231,231,.08)); box-shadow:0 12px 32px rgba(0,0,0,.18);}
+
+.poker-bonus-banner[hidden]{display:none;}
+
+.poker-bonus-banner__copy{display:flex; flex-direction:column; gap:4px; min-width:0;}
+
+.poker-bonus-banner__copy strong{font:800 14px Poppins, sans-serif; color:#fff4c2;}
+
+.poker-bonus-banner__copy span{font:600 12px/1.45 Poppins, sans-serif; color:#cdd6ff;}
+
 .poker-actions-row{display:flex; align-items:center; flex-wrap:wrap; gap:6px;}
 
 .poker-actions-row .poker-btn{padding:6px 12px; font-size:12px;}
@@ -327,6 +337,10 @@
 .poker-card__suit{font-size:1.05em;}
 
 @media (max-width:700px){
+  .poker-bonus-banner{align-items:stretch; flex-direction:column;}
+
+  .poker-bonus-banner .poker-btn{width:100%;}
+
   .poker-showdown-flyout{
     right:12px;
     left:12px;

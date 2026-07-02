@@ -1479,9 +1479,12 @@
     var maxPlayersInput = document.getElementById('pokerMaxPlayers');
     var signInBtn = document.getElementById('pokerSignIn');
     var guestPlayBtn = document.getElementById('pokerGuestPlay');
+    var welcomeBonusBanner = document.getElementById('pokerWelcomeBonusBanner');
+    var welcomeBonusClaimBtn = document.getElementById('pokerWelcomeBonusClaim');
 
     var LOBBY_RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000];
     var authTimer = null;
+    var welcomeBonusInFlight = null;
     var lobbyWsClient = null;
     var lobbyReconnectTimer = null;
     var lobbyReconnectAttempt = 0;
@@ -1597,6 +1600,34 @@
       }, 3000);
     }
 
+    function setWelcomeBonusBannerVisible(isVisible){
+      if (!welcomeBonusBanner) return;
+      welcomeBonusBanner.hidden = !isVisible;
+    }
+
+    async function refreshWelcomeBonusBanner(){
+      if (!welcomeBonusBanner) return null;
+      if (!window || !window.ChipsClient || typeof window.ChipsClient.fetchWelcomeBonusStatus !== 'function'){
+        setWelcomeBonusBannerVisible(false);
+        return null;
+      }
+      if (welcomeBonusInFlight) return welcomeBonusInFlight;
+      welcomeBonusInFlight = (async function(){
+        try {
+          var status = await window.ChipsClient.fetchWelcomeBonusStatus();
+          var canClaim = !!(status && status.eligible && !status.alreadyClaimed);
+          setWelcomeBonusBannerVisible(canClaim);
+          return status || null;
+        } catch (_err){
+          setWelcomeBonusBannerVisible(false);
+          return null;
+        } finally {
+          welcomeBonusInFlight = null;
+        }
+      })();
+      return welcomeBonusInFlight;
+    }
+
     function isLobbyAuthProtocolError(code){
       var normalized = typeof code === 'string' ? code.trim().toLowerCase() : '';
       return normalized === 'missing_access_token'
@@ -1614,6 +1645,7 @@
       var token = await getAccessToken();
       if (!token){
         stopLobbyWs();
+        setWelcomeBonusBannerVisible(false);
         if (authMsg) authMsg.hidden = false;
         if (lobbyContent) lobbyContent.hidden = true;
         if (tableList) tableList.innerHTML = '';
@@ -1623,6 +1655,7 @@
       if (authMsg) authMsg.hidden = true;
       if (lobbyContent) lobbyContent.hidden = false;
       stopAuthWatch();
+      refreshWelcomeBonusBanner();
       return true;
     }
 
@@ -1889,10 +1922,16 @@
     if (signInBtn){
       signInBtn.addEventListener('click', openSignIn);
     }
+    if (welcomeBonusClaimBtn){
+      welcomeBonusClaimBtn.addEventListener('click', function(){
+        window.location.href = '/account.html';
+      });
+    }
 
     window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-lobby(2026-01-01)
     window.addEventListener('beforeunload', stopLobbyWs); // xp-lifecycle-allow:poker-lobby-ws(2026-01-01)
     document.addEventListener('visibilitychange', handleLobbyVisibilityChange); // xp-lifecycle-allow:poker-lobby-visibility(2027-01-01)
+    document.addEventListener('chips:tx-complete', refreshWelcomeBonusBanner);
 
     checkAuth().then(function(authed){
       if (authed) requestLiveLobbySnapshot('initial');
