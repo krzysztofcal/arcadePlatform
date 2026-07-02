@@ -346,6 +346,11 @@ async function maybeWriteHoleCards({ tx, tableId, state, klog = () => {} }) {
     `insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ${placeholders} on conflict (table_id, hand_id, user_id) do update set cards = excluded.cards;`,
     params
   );
+  klog("ws_hole_cards_persist_written", {
+    tableId,
+    handId,
+    playerCount: rows.length
+  });
   return { ok: true, playerCount: rows.length };
 }
 
