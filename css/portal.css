@@ -60,6 +60,10 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #0a0d1a 100%); col
 
 .chip-badge__label{ display:inline-flex; align-items:center; gap:6px; }
 
+.welcome-bonus-badge{ display:inline-flex; align-items:center; min-height:18px; padding:2px 6px; border-radius:999px; background:linear-gradient(90deg, #f7c948, #6ee7e7); color:#0b1020; font:800 10px/1 Poppins, sans-serif; }
+
+.welcome-bonus-badge[hidden]{ display:none; }
+
 #chipBadge{ display:none; }
 
 html[data-auth="in"] #chipBadge{ display:inline-flex; }
@@ -315,6 +319,7 @@ body::before{ content:""; position:fixed; inset:0; pointer-events:none; backgrou
 .search-popup{ min-width:min(520px, calc(100vw - 24px)); max-width:calc(100vw - 24px); left:0; background:rgba(9,12,28,.96); border-color:rgba(50,246,255,.28); box-shadow:0 24px 70px rgba(0,0,0,.58), 0 0 32px rgba(182,92,255,.16); backdrop-filter:blur(18px); }
 .xp-badge{ min-height:32px; padding:8px 10px; border-color:rgba(50,246,255,.42); color:#ddfdff; background:linear-gradient(135deg, rgba(50,246,255,.16), rgba(182,92,255,.12)); box-shadow:0 0 18px rgba(50,246,255,.13); font-size:11px; }
 .chip-pill{ min-height:32px; padding:8px 10px; border-color:rgba(182,92,255,.42); color:#efe7ff; background:rgba(182,92,255,.12); font-size:11px; }
+.welcome-bonus-badge{ min-height:16px; padding:2px 5px; font-size:9px; }
 .avatar-circle{ width:34px; height:34px; border-color:rgba(255,255,255,.22); background:linear-gradient(145deg, rgba(50,246,255,.24), rgba(255,79,216,.18)); color:#fff; box-shadow:0 0 18px rgba(182,92,255,.16); }
 .avatar-menu{ background:rgba(9,12,28,.96); border-color:rgba(50,246,255,.28); box-shadow:0 24px 70px rgba(0,0,0,.58); backdrop-filter:blur(18px); }
 .sidebar{ position:fixed; left:12px; top:calc(var(--topbar-offset) + 10px); bottom:calc(var(--bottom-nav-h) + 14px + env(safe-area-inset-bottom, 0px)); width:min(286px, calc(100vw - 24px)); max-height:none; padding:12px; border-radius:24px; background:linear-gradient(180deg, rgba(18,23,50,.9), rgba(10,12,28,.82)); border:1px solid rgba(50,246,255,.28); box-shadow:0 24px 80px rgba(0,0,0,.5), 0 0 40px rgba(50,246,255,.12), inset 0 1px 0 rgba(255,255,255,.08); backdrop-filter:blur(20px); transform:translateX(calc(-100% - 18px)); transition:transform .26s ease, width .22s ease, box-shadow .22s ease; z-index:80; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }

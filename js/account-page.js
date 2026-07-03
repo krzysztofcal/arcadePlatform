@@ -6,6 +6,8 @@
   var nodes = {};
   var currentUser = null;
   var chipsInFlight = null;
+  var welcomeBonusInFlight = null;
+  var WELCOME_BONUS_SUCCESS = 'Welcome! 500 CH have been added to your account.';
   var ledgerState = {
     entries: [],
     nextCursor: null,
@@ -41,6 +43,10 @@
     nodes.chipLedgerSpacer = doc.getElementById('chipLedgerSpacer');
     nodes.chipLedgerList = doc.getElementById('chipLedgerList');
     nodes.chipLedgerEmpty = doc.getElementById('chipLedgerEmpty');
+    nodes.welcomeBonusPanel = doc.getElementById('welcomeBonusPanel');
+    nodes.welcomeBonusTitle = doc.getElementById('welcomeBonusTitle');
+    nodes.welcomeBonusClaimButton = doc.getElementById('welcomeBonusClaimButton');
+    nodes.welcomeBonusStatus = doc.getElementById('welcomeBonusStatus');
   }
 
   function setBlockVisibility(node, isVisible){
@@ -62,6 +68,11 @@
         window.KLog.log(kind, data || {});
       }
     } catch (_err){}
+  }
+
+  function getUserKey(user){
+    if (!user) return '';
+    return String(user.id || user.user_id || user.sub || 'current');
   }
 
   function parseSortId(value){
@@ -115,6 +126,7 @@
 
     if (!hasUser){
       clearChips();
+      setWelcomeBonusVisibility(false);
       return;
     }
 
@@ -139,6 +151,24 @@
     nodes.chipStatus.textContent = message || '';
     nodes.chipStatus.dataset.tone = tone || '';
     nodes.chipStatus.hidden = !message;
+  }
+
+  function setWelcomeBonusStatus(message, tone){
+    if (!nodes.welcomeBonusStatus) return;
+    nodes.welcomeBonusStatus.textContent = message || '';
+    nodes.welcomeBonusStatus.dataset.tone = tone || '';
+    nodes.welcomeBonusStatus.hidden = !message;
+  }
+
+  function setWelcomeBonusVisibility(isVisible){
+    setBlockVisibility(nodes.welcomeBonusPanel, isVisible);
+    if (nodes.welcomeBonusTitle){ nodes.welcomeBonusTitle.textContent = 'Claim your 500 CH welcome bonus'; }
+    if (nodes.welcomeBonusClaimButton){
+      nodes.welcomeBonusClaimButton.hidden = !isVisible;
+      nodes.welcomeBonusClaimButton.disabled = false;
+      nodes.welcomeBonusClaimButton.textContent = 'Claim your 500 CH welcome bonus';
+    }
+    if (!isVisible) setWelcomeBonusStatus('', '');
   }
 
   function renderChipBalance(balance){
@@ -496,6 +526,63 @@
     return chipsInFlight;
   }
 
+  async function refreshWelcomeBonus(user){
+    var userKey = getUserKey(user);
+    if (!userKey){
+      setWelcomeBonusVisibility(false);
+      return null;
+    }
+    if (
+      !window ||
+      !window.ChipsClient ||
+      typeof window.ChipsClient.fetchWelcomeBonusStatus !== 'function'
+    ){
+      setWelcomeBonusVisibility(false);
+      return null;
+    }
+    if (welcomeBonusInFlight) return welcomeBonusInFlight;
+
+    welcomeBonusInFlight = (async function(){
+      try {
+        var status = await window.ChipsClient.fetchWelcomeBonusStatus();
+        var canClaim = !!(status && status.eligible && !status.alreadyClaimed);
+        setWelcomeBonusVisibility(canClaim);
+        if (canClaim) setWelcomeBonusStatus('', '');
+        return status || null;
+      } catch (_err){
+        setWelcomeBonusVisibility(false);
+        return null;
+      } finally {
+        welcomeBonusInFlight = null;
+      }
+    })();
+
+    return welcomeBonusInFlight;
+  }
+
+  async function handleWelcomeBonusClaim(e){
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    if (!currentUser || !window || !window.ChipsClient || typeof window.ChipsClient.claimWelcomeBonus !== 'function') return;
+    if (nodes.welcomeBonusClaimButton) nodes.welcomeBonusClaimButton.disabled = true;
+    setWelcomeBonusStatus('Claiming your 500 CH welcome bonus...', 'info');
+    try {
+      var result = await window.ChipsClient.claimWelcomeBonus();
+      if (result && result.claimed){
+        setStatus(WELCOME_BONUS_SUCCESS, 'success');
+        setWelcomeBonusStatus('Welcome bonus added to your account.', 'success');
+        loadChips();
+        await refreshWelcomeBonus(currentUser);
+        return result;
+      }
+      setWelcomeBonusVisibility(false);
+      return result || null;
+    } catch (_err){
+      setWelcomeBonusStatus('Could not claim your welcome bonus right now.', 'error');
+      if (nodes.welcomeBonusClaimButton) nodes.welcomeBonusClaimButton.disabled = false;
+      return null;
+    }
+  }
+
   function handleSignIn(e){
     e.preventDefault();
     var email = nodes.signInEmail && nodes.signInEmail.value ? nodes.signInEmail.value.trim() : '';
@@ -517,6 +604,7 @@
         setStatus('Signed in successfully.', 'success');
         renderUser(user);
         loadChips();
+        refreshWelcomeBonus(user);
       } else {
         setStatus('Signed in. Redirecting…', 'success');
       }
@@ -548,7 +636,10 @@
       } else {
         setStatus('Account created. You are signed in.', 'success');
       }
+      var user = res && res.data && res.data.user ? res.data.user : null;
+      if (user){ renderUser(user); }
       loadChips();
+      refreshWelcomeBonus(user || currentUser);
     }).catch(function(err){
       var msg = err && err.message ? String(err.message) : 'Could not sign up. Please try again.';
       setStatus(msg, 'error');
@@ -575,6 +666,7 @@
     if (nodes.signInForm){ nodes.signInForm.addEventListener('submit', handleSignIn); }
     if (nodes.signUpForm){ nodes.signUpForm.addEventListener('submit', handleSignUp); }
     if (nodes.signOut){ nodes.signOut.addEventListener('click', handleSignOut); }
+    if (nodes.welcomeBonusClaimButton){ nodes.welcomeBonusClaimButton.addEventListener('click', handleWelcomeBonusClaim); }
     if (nodes.deleteBtn && nodes.deleteNote){
       nodes.deleteBtn.addEventListener('click', function(e){
         e.preventDefault();
@@ -607,8 +699,10 @@
       setStatus(user ? 'Signed in.' : '', user ? 'success' : '');
       if (user){
         loadChips();
+        refreshWelcomeBonus(user);
       } else {
         clearChips();
+        setWelcomeBonusVisibility(false);
         setBlockVisibility(nodes.chipPanel, false);
       }
     }).catch(function(err){
@@ -622,9 +716,11 @@
         if (user){
           setStatus('Signed in.', 'success');
           loadChips();
+          refreshWelcomeBonus(user);
         } else {
           setStatus('You have been signed out.', 'info');
           clearChips();
+          setWelcomeBonusVisibility(false);
           setBlockVisibility(nodes.chipPanel, false);
         }
       });

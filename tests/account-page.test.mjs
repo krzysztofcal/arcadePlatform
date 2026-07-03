@@ -105,16 +105,21 @@ function seedNodes(document) {
     "chipLedgerSpacer",
     "chipLedgerList",
     "chipLedgerEmpty",
+    "welcomeBonusPanel",
+    "welcomeBonusTitle",
+    "welcomeBonusClaimButton",
+    "welcomeBonusStatus",
   ];
   ids.forEach(id => {
     document.__nodes.set(id, createElement("div", id));
   });
 }
 
-function buildContext(chipsClient) {
+function buildContext(chipsClient, options = {}) {
   const document = createDocument();
   seedNodes(document);
   const logs = [];
+  const sessionValues = new Map(Object.entries(options.sessionStorage || {}));
   const windowObj = {
     document,
     addEventListener() {},
@@ -128,13 +133,24 @@ function buildContext(chipsClient) {
     },
     SupabaseAuth: {
       getCurrentUser() {
-        return Promise.resolve({ user_metadata: { name: "Tester" }, email: "tester@example.com" });
+        return Promise.resolve({ id: "00000000-0000-4000-8000-000000000111", user_metadata: { name: "Tester" }, email: "tester@example.com" });
       },
       onAuthChange() {},
     },
     ChipsClient: chipsClient,
+    sessionStorage: {
+      getItem(key) {
+        return sessionValues.has(key) ? sessionValues.get(key) : null;
+      },
+      setItem(key, value) {
+        sessionValues.set(key, String(value));
+      },
+      removeItem(key) {
+        sessionValues.delete(key);
+      },
+    },
   };
-  return { windowObj, document, logs };
+  return { windowObj, document, logs, sessionValues };
 }
 
 function findByClass(node, className) {
@@ -826,4 +842,122 @@ test("chip-panel min-height is scoped to page-account", () => {
     assert.ok(!/min-height/.test(globalChipPanel[0]), "chip-panel min-height should not be global");
   }
   assert.ok(/\.page-account\s+\.chip-panel\{[^}]*min-height\s*:\s*0/.test(normalized), "chip-panel min-height must be scoped");
+});
+
+test("shows welcome bonus claim from backend eligibility and claims on click", async () => {
+  const calls = [];
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1700 });
+    },
+    fetchLedger() {
+      return Promise.resolve({ items: [], nextCursor: null });
+    },
+    fetchWelcomeBonusStatus() {
+      calls.push("status");
+      return Promise.resolve({ eligible: true, alreadyClaimed: false, amount: 500 });
+    },
+    claimWelcomeBonus() {
+      calls.push("claim");
+      return Promise.resolve({ claimed: true, amount: 500, transactionId: "tx-1" });
+    },
+  };
+  const { windowObj, document } = buildContext(chipsClient);
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+  await flush();
+
+  assert.deepEqual(calls, ["status"]);
+  assert.equal(document.getElementById("welcomeBonusPanel").hidden, false);
+  assert.equal(document.getElementById("welcomeBonusClaimButton").textContent, "Claim your 500 CH welcome bonus");
+
+  document.getElementById("welcomeBonusClaimButton").dispatchEvent({ type: "click", preventDefault() {} });
+  await flush();
+  await flush();
+  await flush();
+
+  assert.deepEqual(calls, ["status", "claim", "status"]);
+  assert.equal(document.getElementById("accountStatus").textContent, "Welcome! 500 CH have been added to your account.");
+});
+
+test("hides welcome bonus panel without success for already claimed account", async () => {
+  const calls = [];
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1200 });
+    },
+    fetchLedger() {
+      return Promise.resolve({ items: [], nextCursor: null });
+    },
+    fetchWelcomeBonusStatus() {
+      calls.push("status");
+      return Promise.resolve({ eligible: false, alreadyClaimed: true, amount: 500 });
+    },
+    claimWelcomeBonus() {
+      calls.push("claim");
+      return Promise.resolve({ claimed: true });
+    },
+  };
+  const { windowObj, document } = buildContext(chipsClient);
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+  await flush();
+
+  assert.deepEqual(calls, ["status"]);
+  assert.equal(document.getElementById("welcomeBonusPanel").hidden, true);
+  assert.notEqual(document.getElementById("accountStatus").textContent, "Welcome! 500 CH have been added to your account.");
+});
+
+test("does not auto-claim welcome bonus after eligible status", async () => {
+  const calls = [];
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1200 });
+    },
+    fetchLedger() {
+      return Promise.resolve({ items: [], nextCursor: null });
+    },
+    fetchWelcomeBonusStatus() {
+      calls.push("status");
+      return Promise.resolve({ eligible: true, alreadyClaimed: false, amount: 500 });
+    },
+    claimWelcomeBonus() {
+      calls.push("claim");
+      return Promise.resolve({ claimed: true });
+    },
+  };
+  const { windowObj, document } = buildContext(chipsClient);
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+
+  assert.deepEqual(calls, ["status"]);
+  assert.equal(document.getElementById("welcomeBonusPanel").hidden, false);
+  assert.notEqual(document.getElementById("accountStatus").textContent, "Welcome! 500 CH have been added to your account.");
 });

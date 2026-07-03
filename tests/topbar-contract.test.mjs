@@ -54,6 +54,9 @@ test('topbar ensures chip badge creation when missing', () => {
   assert.match(topbarSource, /ensureChipBadge/);
   assert.match(topbarSource, /badge\.id\s*=\s*['"]chipBadge['"]/);
   assert.match(topbarSource, /amount\.id\s*=\s*['"]chipBadgeAmount['"]/);
+  assert.match(topbarSource, /bonus\.id\s*=\s*['"]welcomeBonusTopbarBadge['"]/);
+  assert.match(topbarSource, /fetchWelcomeBonusStatus/);
+  assert.match(topbarSource, /refreshWelcomeBonusBadge/);
   assert.match(topbarSource, /badge\.hidden\s*=\s*true/);
   assert.match(topbarSource, /if\s*\(!isAuthed\(\)\)/);
   assert.match(topbarSource, /CH:\s/);
@@ -200,6 +203,7 @@ test('chip badge is only provided by topbar', () => {
 
 test('chip badge styles only live in portal css', () => {
   assert.match(portalCss, /\.chip-pill/);
+  assert.match(portalCss, /\.welcome-bonus-badge/);
   assert.match(portalCss, /--topbar-offset/);
   assert.match(portalCss, /safe-area-inset-top/);
   assert.match(portalCss, /html\[data-auth="in"\]\s*#chipBadge/);
