@@ -68,6 +68,8 @@
   WELCOME_BONUS_CHIPS = "500"
 
 # Deploy preview context - relaxed for testing
+# Supabase deploy-preview credentials must be configured in Netlify UI with stage DB values.
+# Set SUPABASE_STAGE_PROJECT_REF in Netlify UI to the non-secret stage project ref.
 [context.deploy-preview.environment]
   XP_DEBUG = "1"
   XP_RATE_LIMIT_ENABLED = "1"

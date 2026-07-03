@@ -51,6 +51,7 @@ assert.doesNotMatch(source, /tests\/poker-lifecycle\.invariants\.sweep-idle-cuto
 assert.doesNotMatch(source, /tests\/poker-realtime-fallback\.behavior\.test\.mjs/, "runner should not include legacy HTTP table reload fallback behavior test");
 assert.doesNotMatch(source, /tests\/poker-showdown-eligibility-sitout\.test\.mjs/, "runner should not include retired HTTP poker-act source contract test");
 assert.match(source, /run\("node", \["ws-tests\/ws-lobby-join-public-snapshot\.behavior\.test\.mjs"\],/, "runner should include ws lobby join public snapshot test");
+assert.match(source, /run\("node", \["tests\/admin-stage-identity\.behavior\.test\.mjs"\],/, "runner should include admin stage identity behavior test");
 assert.match(source, /run\("node", \["tests\/i18n\.behavior\.test\.mjs"\],/, "runner should include i18n.behavior test");
 assert.match(source, /run\("node", \["tests\/static-html\.behavior\.test\.mjs"\],/, "runner should include static-html.behavior test");
 

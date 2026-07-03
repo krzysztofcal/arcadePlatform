@@ -263,6 +263,7 @@ function createAdminDom() {
     "adminPokerAuditRefresh",
     "adminPokerAuditReset",
     "adminOpsStats",
+    "adminOpsIdentity",
     "adminOpsRuntime",
     "adminOpsRefresh",
     "adminOpsRunReconciler",
@@ -338,6 +339,23 @@ function buildContext() {
     }
     if (text.includes("/.netlify/functions/admin-ops-summary")) {
       return { ok: true, json: async () => ({ summary: {}, janitor: {}, runtime: {}, recentActions: [], recentCleanup: [] }) };
+    }
+    if (text.includes("/.netlify/functions/admin-stage-identity")) {
+      return { ok: true, json: async () => ({
+        environmentContext: "deploy-preview",
+        supabaseProjectRef: "stageabc",
+        expectedStageProjectRef: "stageabc",
+        databaseTarget: "stage",
+        chipsEnabled: true,
+        stageProjectRefConfigured: true,
+        stageProjectRefMatches: true,
+        config: {
+          hasSupabaseUrl: true,
+          hasSupabaseDbUrl: true,
+          hasSupabaseJwtSecret: true,
+          hasSupabaseAnonKey: true
+        }
+      }) };
     }
     if (text.includes("/.netlify/functions/admin-poker-audit")) {
       const reveal = text.includes("revealPrivateCards=1");
@@ -433,7 +451,11 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
 
   assert.equal(tabs[4].getAttribute("aria-selected"), "true");
   assert.equal(panels[4].hidden, false);
+  assert.equal(fetchCalls.includes("/.netlify/functions/admin-stage-identity"), true);
   assert.equal(fetchCalls.includes("/.netlify/functions/admin-ops-summary"), true);
+  assert.match(document.getElementById("adminOpsIdentity").innerHTML, /Database target/);
+  assert.match(document.getElementById("adminOpsIdentity").innerHTML, /stageabc/);
+  assert.match(document.getElementById("adminOpsIdentity").innerHTML, /stage/);
 });
 
 test("admin page poker audit search renders hand timeline and settlement summary", async () => {
