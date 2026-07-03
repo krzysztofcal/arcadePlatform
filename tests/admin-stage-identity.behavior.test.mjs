@@ -36,7 +36,8 @@ test("admin-stage-identity derives stage target without exposing secrets", async
   assert.equal(identity.config.hasSupabaseDbUrl, true);
   assert.equal(JSON.stringify(identity).includes("secret"), false);
   assert.equal(JSON.stringify(identity).includes("anon-key-value"), false);
-  assert.equal(JSON.stringify(identity).includes("pooler.supabase.com"), false);
+  assert.equal(JSON.stringify(identity).includes("postgresql://"), false);
+  assert.equal(JSON.stringify(identity).includes("aws-0-eu"), false);
 });
 
 test("admin-stage-identity marks production context as production when stage ref does not match", () => {
