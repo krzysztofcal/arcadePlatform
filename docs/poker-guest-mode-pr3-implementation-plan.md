@@ -210,11 +210,13 @@ Files:
 - `poker/index.html`
 - `poker/poker.js`
 
-Change signed-out account CTA copy from plain sign-in/account text to:
+Keep signed-out lobby auth CTA neutral because the button can open either account creation or normal sign-in, and existing users may be ineligible:
 
 ```text
-Create account and get 500 CH Welcome Bonus
+Create account or sign in
 ```
+
+Show the bonus in the lobby only after backend eligibility is known through the signed-in welcome bonus banner.
 
 Keep PR3 limited to copy and bonus wiring. The larger lobby split remains PR5.
 
@@ -268,6 +270,7 @@ Frontend/static tests:
 
 - Guest panel contains `+500 CH welcome bonus`.
 - Guest account CTA contains `Create account and get 500 CH Welcome Bonus`.
+- Signed-out poker lobby CTA contains `Create account or sign in`.
 - Account page claim flow dispatches chip refresh after success.
 - Ineligible or already-claimed account flow does not show the success message.
 
@@ -279,7 +282,8 @@ node --test tests/welcome-bonus.behavior.test.mjs tests/poker-v2-live.behavior.t
 
 ## Acceptance Criteria
 
-- Guest users see the `Create account and get 500 CH Welcome Bonus` account incentive.
+- Guest users see the `Create account and get 500 CH Welcome Bonus` account incentive in the Guest table experience.
+- Signed-out poker lobby users see a neutral `Create account or sign in` CTA until backend eligibility is known.
 - An eligible account receives exactly one `WELCOME_BONUS` transaction.
 - For the initial rollout, `WELCOME_BONUS_START_AT` is `2025-06-01T00:00:00Z`.
 - Existing Arcade accounts created at or after `WELCOME_BONUS_START_AT` can claim the bonus once.
