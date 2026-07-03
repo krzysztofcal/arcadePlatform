@@ -73,9 +73,9 @@ Useful sources:
 
 ## Recommended Architecture
 
-Use a two-step approach.
+Use a staged approach, but start with automatic shared stage validation.
 
-### Phase 1: Persistent Stage DB + Manual Self-Service Workflow
+### Phase 1: Persistent Stage DB + Automatic PR Migration Apply
 
 This is the practical first implementation for the current repo.
 
@@ -91,27 +91,53 @@ Developer flow:
 
 1. Open PR.
 2. Netlify creates deploy preview URL as today.
-3. If the PR includes DB migrations, run one command:
-
-```bash
-gh workflow run db-stage-deploy.yml --ref main -f ref=<feature-branch>
-```
-
-4. The workflow applies migrations from `<feature-branch>` to the stage DB.
-5. Test the public Netlify preview URL against stage DB.
+3. GitHub detects whether `supabase/migrations/**` changed relative to `main`.
+4. If migrations changed, GitHub automatically applies the PR migrations to shared stage DB.
+5. GitHub runs smoke checks and reports a green/red PR check.
+6. Test the public Netlify preview URL against stage DB after the stage check is green.
 
 Why this first:
 
-- Matches the existing `ws-preview-deploy.yml` self-service pattern.
+- Gives clear PR feedback when migrations fail.
+- Removes the normal manual step for the common linear workflow.
 - Does not require solving dynamic per-PR Netlify env injection.
 - Gives immediate safety improvement for DB-heavy work.
-- Easy for an AI agent to operate after the owner configures secrets.
+- Still keeps production DB untouched.
 
 Tradeoff:
 
 - One shared stage DB means only one DB-heavy PR should be tested at a time.
 - Stage can drift if abandoned PR migrations are applied and later changed.
-- For conflicting DB PRs, reset/recreate stage before the next test.
+- For conflicting DB PRs, use the manual prepare-stage workflow or recreate stage before the next test.
+
+This tradeoff is acceptable for the current owner workflow because feature work is usually linear.
+
+### Phase 1b: Manual Prepare Stage For Branch
+
+Add a manual tool for switching stage DB between feature branches:
+
+```bash
+gh workflow run db-stage-prepare.yml --ref main -f ref=<feature-branch>
+```
+
+Plain explanation:
+
+- The automatic PR check is enough when working on one DB PR at a time.
+- If work switches from PR A to PR B, shared stage may still contain migrations from PR A.
+- `db-stage-prepare.yml` is the explicit "make stage ready for this branch" command.
+- It should make stage represent `main schema + selected feature branch migrations + safe seed`.
+
+Initial implementation:
+
+- Do not do a destructive remote reset.
+- Inspect stage migration state.
+- If stage is compatible with `main` plus the selected branch, apply pending migrations and smoke-check.
+- If stage contains unrelated migrations from another PR, fail with a clear message that stage must be recreated or reset before testing this branch.
+
+Later implementation:
+
+- Add a safe reset/recreate path after the stage setup is proven.
+- Prefer Supabase Branching or stage project recreation over hand-written destructive SQL.
 
 ### Phase 2: Supabase Branching / Ephemeral Preview DB
 
@@ -134,7 +160,7 @@ Challenge:
 
 Recommendation:
 
-- Do Phase 1 now.
+- Do Phase 1 and Phase 1b now.
 - Revisit Phase 2 after stage DB is stable and large DB changes become frequent.
 
 ## Why Not Copy Production Data
@@ -272,26 +298,29 @@ Notes:
 Potential blocker:
 
 - GitHub runner must support Docker for Supabase local stack.
-- If local Supabase is too slow/flaky, keep this as syntax/order guard initially and rely on manual stage workflow for full validation.
+- If local Supabase is too slow/flaky, keep this as syntax/order guard initially and rely on the automatic stage apply workflow for full validation.
 
-### Workflow 2: `db-stage-deploy.yml`
+### Workflow 2: `db-stage-apply-pr.yml`
 
 Purpose:
 
-- Manual self-service stage DB deployment for one feature branch.
+- Automatic shared stage DB migration apply for PRs that change migrations.
 
-Command:
+Trigger:
 
-```bash
-gh workflow run db-stage-deploy.yml --ref main -f ref=<feature-branch>
+```yaml
+pull_request:
+  paths:
+    - "supabase/migrations/**"
+    - ".github/workflows/db-stage-apply-pr.yml"
 ```
 
-Inputs:
+Guards:
 
 ```text
-ref: required Git ref to apply to stage
-mode: validate|apply, default apply
-seed: none|safe, default safe
+only PRs from this repository
+never forks
+never production DB
 ```
 
 Concurrency:
@@ -306,7 +335,7 @@ Steps:
 
 1. Checkout workflow ref.
 2. Validate required secrets.
-3. Checkout target `ref`.
+3. Checkout PR head SHA.
 4. Show selected SHA.
 5. Detect whether `supabase/migrations` changed relative to `origin/main`.
 6. If no migrations changed:
@@ -331,13 +360,60 @@ Use `--db-url "$SUPABASE_STAGE_DB_URL"` where possible instead of relying on loc
 Expected workflow outcome:
 
 - The stage DB schema now matches the feature branch migrations.
-- The existing Netlify PR deploy preview can be tested against stage if Netlify deploy-preview env points to stage.
+- The PR shows a green/red stage DB check.
+- The existing Netlify PR deploy preview can be tested against stage after this check is green.
 
-### Workflow 3: `db-stage-reset.yml`
+### Workflow 3: `db-stage-prepare.yml`
 
 Purpose:
 
-- Restore stage DB to `main` baseline when a feature PR polluted stage.
+- Manually prepare shared stage DB for a selected branch when switching between DB-heavy PRs.
+
+Command:
+
+```bash
+gh workflow run db-stage-prepare.yml --ref main -f ref=<feature-branch>
+```
+
+This is not needed for the normal linear flow. Use it when:
+
+- stage was previously used for another PR,
+- a feature branch was rebased or its migrations were rewritten,
+- the automatic PR apply fails because stage contains unrelated migrations,
+- manual testing should start from a known branch target.
+
+Plain behavior:
+
+```text
+make shared stage ready for this branch
+= main schema + selected branch migrations + safe seed
+```
+
+Initial safe implementation:
+
+1. Checkout `main` and selected `ref`.
+2. Compare migration files between `main`, selected `ref`, and remote stage history.
+3. If stage is compatible:
+   - apply pending selected-branch migrations,
+   - run smoke checks,
+   - print the Netlify preview testing target.
+4. If stage contains unrelated migrations:
+   - fail clearly,
+   - tell the owner to recreate stage or run the future reset workflow.
+
+Do not attempt to reverse already-applied migrations.
+
+Reason:
+
+- Supabase/Postgres migrations are usually forward-only.
+- A feature migration may have changed data or enum values.
+- Reverting remote migration history without reverting real schema/data can corrupt the migration state.
+
+### Workflow 4: `db-stage-reset.yml`
+
+Purpose:
+
+- Restore stage DB to `main` baseline when a feature PR polluted stage and `db-stage-prepare.yml` cannot proceed.
 
 This is the hard part.
 
@@ -359,36 +435,39 @@ Initial policy:
 
 - Stage is disposable.
 - If stage gets bad, recreate the Supabase stage project or preview branch.
+- Do not block Phase 1 on reset automation.
 
 ## Automatic vs Manual Stage DB
 
 ### Fully automatic on PR migration changes
 
-Possible, but not recommended as first step.
+Chosen for Phase 1, with strict guardrails.
 
-Why:
+Why this is acceptable:
 
-- A shared persistent stage DB can be mutated by every PR automatically.
-- Two concurrent PRs can conflict.
-- Failed/abandoned migrations can leave stage dirty.
-- Netlify deploy preview may build before DB stage is ready.
+- The owner workflow is usually linear.
+- The PR gets a clear green/red status when migrations fail.
+- Concurrency prevents two stage mutations from racing.
+- Netlify deploy-preview already points to stage DB, so manual testing remains simple.
 
-Safer automatic behavior:
+Known risks:
 
-- Automatic local migration check only.
-- Manual cloud stage apply.
+- A shared persistent stage DB can still be polluted by an abandoned PR.
+- Two DB-heavy PRs should not be tested on shared stage at the same time.
+- If a PR rewrites already-applied migrations, stage may need to be recreated or reset.
+- Netlify deploy preview may build before DB stage is ready; wait for the stage DB check before testing DB-dependent behavior.
 
-### Manual one-command stage apply
+### Manual one-command stage prepare
 
-Recommended first step.
+Keep this as the branch-switching tool, not the normal happy path.
 
 Command:
 
 ```bash
-gh workflow run db-stage-deploy.yml --ref main -f ref=<branch>
+gh workflow run db-stage-prepare.yml --ref main -f ref=<branch>
 ```
 
-This matches the existing poker WS preview mental model and avoids accidental stage drift.
+Use it when moving shared stage from one feature branch to another.
 
 ## Netlify Preview Integration
 
@@ -404,8 +483,9 @@ Result:
 
 Important:
 
-- If stage DB has not had a PR migration applied yet, a preview with new code may fail when it expects new tables.
-- The developer should run `db-stage-deploy.yml` before manual testing of DB-dependent PR preview.
+- If the automatic stage DB check is still running, a preview with new code may fail when it expects new tables.
+- Wait for the automatic `db-stage-apply-pr.yml` check to be green before manual DB-dependent testing.
+- If switching from another DB-heavy PR, run `db-stage-prepare.yml` first or recreate stage if the workflow reports unrelated migrations.
 
 ### Optional Rebuild Hook
 
@@ -502,7 +582,7 @@ One-time setup:
 Operational use:
 
 ```bash
-gh workflow run db-stage-deploy.yml --ref main -f ref=<feature-branch>
+gh workflow run db-stage-prepare.yml --ref main -f ref=<feature-branch>
 ```
 
 ## What The AI Agent Can Do
@@ -511,12 +591,13 @@ The agent can implement:
 
 1. `docs/stage-db-implementation-plan.md`.
 2. `.github/workflows/db-migration-check.yml`.
-3. `.github/workflows/db-stage-deploy.yml`.
-4. Guard tests for these workflows, similar to `ws-tests/ws-preview-deploy.workflow.guard.test.mjs`.
-5. Stage smoke SQL scripts.
-6. `supabase/seed.sql` with safe sample data if desired.
-7. Documentation updates in `docs/operations.md` and `docs/chips-ledger.md`.
-8. Optional scripts for:
+3. `.github/workflows/db-stage-apply-pr.yml`.
+4. `.github/workflows/db-stage-prepare.yml`.
+5. Guard tests for these workflows, similar to `ws-tests/ws-preview-deploy.workflow.guard.test.mjs`.
+6. Stage smoke SQL scripts.
+7. `supabase/seed.sql` with safe sample data if desired.
+8. Documentation updates in `docs/operations.md` and `docs/chips-ledger.md`.
+9. Optional scripts for:
    - migration diff detection,
    - stage smoke checks,
    - printing manual test instructions.
@@ -562,31 +643,52 @@ Acceptance:
 - PRs touching `supabase/**` run migration validation.
 - No production or stage DB is touched.
 
-### PR3: Manual Stage DB Deploy Workflow
+### PR3: Automatic Shared Stage DB PR Apply
 
 Goal:
 
-- One-command stage DB migration apply.
+- Automatically apply PR migrations to shared stage DB and report a green/red PR check.
 
 Changes:
 
-- Add `.github/workflows/db-stage-deploy.yml`.
+- Add `.github/workflows/db-stage-apply-pr.yml`.
 - Add stage smoke check script.
 - Add workflow guard tests.
-- Document command:
-
-```bash
-gh workflow run db-stage-deploy.yml --ref main -f ref=<branch>
-```
 
 Acceptance:
 
 - Workflow fails fast if required secrets are missing.
-- Workflow applies pending migrations from selected ref to stage.
+- Workflow runs only for PRs from this repository, not forks.
+- Workflow runs only when `supabase/migrations/**` changes.
+- Workflow applies pending migrations from PR head to shared stage.
 - Workflow runs smoke checks after applying.
 - Workflow uses concurrency to prevent simultaneous stage mutation.
+- PR clearly shows success/failure for stage DB migration validation.
 
-### PR4: Netlify Preview Stage Configuration Docs
+### PR4: Manual Prepare Stage Workflow
+
+Goal:
+
+- Let the owner manually prepare shared stage DB for a selected branch when switching between DB-heavy PRs.
+
+Changes:
+
+- Add `.github/workflows/db-stage-prepare.yml`.
+- Add migration-state comparison and clear failure messaging.
+- Add command docs:
+
+```bash
+gh workflow run db-stage-prepare.yml --ref main -f ref=<branch>
+```
+
+Acceptance:
+
+- Workflow applies pending migrations if shared stage is compatible with `main + selected branch`.
+- Workflow fails clearly if stage contains unrelated migrations from another PR.
+- Workflow does not attempt unsafe migration rollback.
+- Workflow explains whether stage must be recreated/reset.
+
+### PR5: Netlify Preview Stage Configuration Docs
 
 Goal:
 
@@ -602,7 +704,7 @@ Acceptance:
 - Owner can confirm deploy-preview context points at stage DB.
 - Manual preview testing does not touch production DB.
 
-### PR5: Optional Supabase Branching Investigation
+### PR6: Optional Supabase Branching Investigation
 
 Goal:
 
@@ -626,7 +728,7 @@ These need owner confirmation before implementing workflows:
 2. Should `branch-deploy` also use stage DB, or stay production-like?
 3. Is Supabase Branching available on the current Supabase plan?
 4. Are we comfortable with one shared persistent stage DB initially?
-5. Should the first workflow be manual-only, with automatic PR checks limited to local validation?
+5. Should PR migration changes automatically apply to shared stage DB?
 6. Should stage DB be data-less plus seed, or should we invest in sanitized prod-like fixtures?
 
 Recommended answers:
@@ -634,8 +736,8 @@ Recommended answers:
 1. Yes, deploy-preview should always use stage DB.
 2. Keep branch-deploy production-like unless there is a known branch deploy workflow.
 3. Check plan; if available, use it later for ephemeral PR DBs.
-4. Yes, acceptable initially with concurrency and manual trigger.
-5. Yes, manual cloud mutation first.
+4. Yes, acceptable initially with concurrency and a manual prepare-stage fallback.
+5. Yes, for PRs from this repository that change `supabase/migrations/**`.
 6. Data-less plus seed first.
 
 ## Recommended Immediate Next Step
@@ -646,15 +748,15 @@ Implement in order:
 
 1. Owner creates stage Supabase project and Netlify/GitHub secrets.
 2. Add `db-migration-check.yml`.
-3. Add `db-stage-deploy.yml`.
-4. Run:
+3. Add `db-stage-apply-pr.yml`.
+4. Add `db-stage-prepare.yml`.
+5. Run:
 
 ```bash
-gh workflow run db-stage-deploy.yml --ref main -f ref=main
+gh workflow run db-stage-prepare.yml --ref main -f ref=main
 ```
 
-5. Confirm stage DB can run current `main` migrations.
-6. Point Netlify deploy-preview at stage.
-7. Test an existing PR preview against stage.
-8. Proceed with `bonus_campaigns`.
-
+6. Confirm stage DB can run current `main` migrations.
+7. Point Netlify deploy-preview at stage.
+8. Open a test PR with a harmless migration and confirm automatic stage check is green.
+9. Proceed with `bonus_campaigns`.
