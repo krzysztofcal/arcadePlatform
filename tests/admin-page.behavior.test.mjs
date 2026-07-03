@@ -319,7 +319,8 @@ function createAdminDom() {
   return { document, tabs, panels };
 }
 
-function buildContext() {
+function buildContext(options = {}) {
+  const opts = options || {};
   const { document, tabs, panels } = createAdminDom();
   const fetchCalls = [];
   const fetch = async (url) => {
@@ -338,9 +339,17 @@ function buildContext() {
       return { ok: true, json: async () => ({ items: [], pagination: null }) };
     }
     if (text.includes("/.netlify/functions/admin-ops-summary")) {
-      return { ok: true, json: async () => ({ summary: {}, janitor: {}, runtime: {}, recentActions: [], recentCleanup: [] }) };
+      return { ok: true, json: async () => ({
+        summary: {},
+        janitor: { openTableCount: 0, staleHumanSeatCount: 0, staleOpenTableCount: 0, flaggedTableCount: 0 },
+        runtime: { buildId: "test-build", chipsEnabled: true, adminUserIdsConfigured: true, janitorConfig: {}, healthy: true },
+        recentJanitorActivity: { adminActions: [], cleanupTransactions: [] },
+      }) };
     }
     if (text.includes("/.netlify/functions/admin-stage-identity")) {
+      if (opts.identityFails){
+        return { ok: false, status: 500, json: async () => ({ error: "server_error" }) };
+      }
       return { ok: true, json: async () => ({
         environmentContext: "deploy-preview",
         supabaseProjectRef: "stageabc",
@@ -456,6 +465,24 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /Database target/);
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /stageabc/);
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /stage/);
+});
+
+test("admin page still renders ops summary when stage identity request fails", async () => {
+  const { context, document, tabs, fetchCalls } = buildContext({ identityFails: true });
+  vm.runInContext(source, context, { filename: "js/admin-page.js" });
+
+  await flush();
+  await flush();
+
+  tabs[4].dispatchEvent({ type: "click", bubbles: true, target: tabs[4], preventDefault() {} });
+  await flush();
+  await flush();
+
+  assert.equal(fetchCalls.includes("/.netlify/functions/admin-stage-identity"), true);
+  assert.equal(fetchCalls.includes("/.netlify/functions/admin-ops-summary"), true);
+  assert.match(document.getElementById("adminOpsIdentity").innerHTML, /Stage identity unavailable/);
+  assert.match(document.getElementById("adminOpsStats").innerHTML, /OPEN tables/);
+  assert.match(document.getElementById("adminOpsRuntime").innerHTML, /Runtime health/);
 });
 
 test("admin page poker audit search renders hand timeline and settlement summary", async () => {

@@ -57,6 +57,11 @@ test("admin-stage-identity parses project refs from supported Supabase URLs", ()
   assert.equal(parseProjectRefFromDbUrl("postgresql://postgres:pw@db.stageabc.supabase.co:5432/postgres"), "stageabc");
 });
 
+test("admin-stage-identity rejects postgres project-ref usernames on non-Supabase hosts", () => {
+  assert.equal(parseProjectRefFromDbUrl("postgresql://postgres.stageabc:pw@evil.example.com:6543/postgres"), null);
+  assert.equal(parseProjectRefFromDbUrl("postgresql://postgres.stageabc:pw@pooler.supabase.example.com:6543/postgres"), null);
+});
+
 test("admin-stage-identity endpoint requires admin and returns sanitized payload", async () => {
   const handler = createAdminStageIdentityHandler({
     env: {

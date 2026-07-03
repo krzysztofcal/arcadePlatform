@@ -24,11 +24,13 @@ function parseProjectRefFromDbUrl(value) {
   try {
     const url = new URL(raw);
     const username = decodeURIComponent(url.username || "");
-    const userMatch = /^postgres\.([a-z0-9-]+)$/i.exec(username);
-    if (userMatch) return userMatch[1];
     const host = url.hostname || "";
     const hostMatch = /^db\.([a-z0-9-]+)\.supabase\.co$/i.exec(host);
-    return hostMatch ? hostMatch[1] : null;
+    if (hostMatch) return hostMatch[1];
+    const isSupabasePooler = /^[a-z0-9-]+\.pooler\.supabase\.com$/i.test(host);
+    const userMatch = /^postgres\.([a-z0-9-]+)$/i.exec(username);
+    if (isSupabasePooler && userMatch) return userMatch[1];
+    return null;
   } catch (_error) {
     return null;
   }

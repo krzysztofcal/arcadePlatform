@@ -35,6 +35,7 @@
     ops: {
       summary: null,
       identity: null,
+      identityError: null,
       loaded: false,
     },
     pokerAudit: {
@@ -729,7 +730,8 @@
     }
     if (nodes.opsIdentity){
       if (!identity){
-        nodes.opsIdentity.innerHTML = '<p class="admin-empty">Stage identity not loaded.</p>';
+        var message = state.ops.identityError ? "Stage identity unavailable: " + state.ops.identityError : "Stage identity not loaded.";
+        nodes.opsIdentity.innerHTML = '<p class="admin-empty">' + escapeHtml(message) + "</p>";
       } else {
         var target = identity.databaseTarget || "unknown";
         var targetTone = target === "stage" ? "success" : target === "production" ? "danger" : "info";
@@ -1157,9 +1159,22 @@
   async function loadOps(){
     setStatus(t("loading", "Loading..."), "info");
     try {
-      var identity = await apiFetch("/.netlify/functions/admin-stage-identity", { method: "GET" });
-      var payload = await apiFetch("/.netlify/functions/admin-ops-summary", { method: "GET" });
-      state.ops.identity = identity || null;
+      var results = await Promise.allSettled([
+        apiFetch("/.netlify/functions/admin-stage-identity", { method: "GET" }),
+        apiFetch("/.netlify/functions/admin-ops-summary", { method: "GET" })
+      ]);
+      if (results[0].status === "fulfilled"){
+        state.ops.identity = results[0].value || null;
+        state.ops.identityError = null;
+      } else {
+        state.ops.identity = null;
+        state.ops.identityError = results[0].reason && results[0].reason.code ? results[0].reason.code : "request_failed";
+        klog("admin_stage_identity_load_failed", { code: state.ops.identityError });
+      }
+      if (results[1].status !== "fulfilled"){
+        throw results[1].reason || new Error("request_failed");
+      }
+      var payload = results[1].value || {};
       state.ops.summary = payload;
       state.ops.loaded = true;
       renderOps();
