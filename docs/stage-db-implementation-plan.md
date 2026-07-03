@@ -471,7 +471,7 @@ Use it when moving shared stage from one feature branch to another.
 
 ## Netlify Preview Integration
 
-### Recommended Phase 1
+### Required Before Automatic Stage Apply
 
 Set Netlify `deploy-preview` environment variables to the persistent stage Supabase project.
 
@@ -480,6 +480,45 @@ Result:
 - Any PR preview uses stage DB.
 - Production deploys use production DB.
 - Branch deploys can be decided separately.
+
+This must happen before enabling automatic `db-stage-apply-pr.yml`.
+
+Reason:
+
+- A public PR preview must never accidentally test DB-dependent code against production.
+- Automatic stage migrations are only useful if the matching Netlify preview also points at stage.
+- This is the boundary that makes preview testing safe.
+
+### Required Stage Identity Check
+
+Add a simple required diagnostic before automatic stage apply is treated as complete.
+
+Purpose:
+
+- Make it obvious whether the current preview/function is connected to stage or production.
+- Prevent accidental manual testing against production.
+
+Acceptable implementations:
+
+- Admin-only diagnostic endpoint showing sanitized environment identity.
+- Admin-only UI display in an existing admin/status page.
+- Smoke SQL plus workflow output that prints the expected stage project ref.
+
+Required output:
+
+```text
+environmentContext: deploy-preview|production|development
+supabaseProjectRef: <sanitized project ref>
+databaseTarget: stage|production|unknown
+chipsEnabled: true|false
+```
+
+Rules:
+
+- Do not expose secrets, JWTs, DB URLs, emails, or access tokens.
+- Production may show `databaseTarget=production`, but must not expose credentials.
+- Deploy previews should clearly show `databaseTarget=stage`.
+- The automatic stage workflow should fail if the configured target does not match the expected stage project ref.
 
 Important:
 
@@ -590,14 +629,16 @@ gh workflow run db-stage-prepare.yml --ref main -f ref=<feature-branch>
 The agent can implement:
 
 1. `docs/stage-db-implementation-plan.md`.
-2. `.github/workflows/db-migration-check.yml`.
-3. `.github/workflows/db-stage-apply-pr.yml`.
-4. `.github/workflows/db-stage-prepare.yml`.
-5. Guard tests for these workflows, similar to `ws-tests/ws-preview-deploy.workflow.guard.test.mjs`.
-6. Stage smoke SQL scripts.
-7. `supabase/seed.sql` with safe sample data if desired.
-8. Documentation updates in `docs/operations.md` and `docs/chips-ledger.md`.
-9. Optional scripts for:
+2. Netlify preview stage configuration docs.
+3. A safe stage identity diagnostic endpoint/admin display.
+4. `.github/workflows/db-migration-check.yml`.
+5. `.github/workflows/db-stage-apply-pr.yml`.
+6. `.github/workflows/db-stage-prepare.yml`.
+7. Guard tests for these workflows, similar to `ws-tests/ws-preview-deploy.workflow.guard.test.mjs`.
+8. Stage smoke SQL scripts.
+9. `supabase/seed.sql` with safe sample data if desired.
+10. Documentation updates in `docs/operations.md` and `docs/chips-ledger.md`.
+11. Optional scripts for:
    - migration diff detection,
    - stage smoke checks,
    - printing manual test instructions.
@@ -626,7 +667,29 @@ Acceptance:
 
 - Owner can review and decide the setup path.
 
-### PR2: Local Migration Check Workflow
+### PR2: Netlify Preview Stage Configuration + Identity Check
+
+Goal:
+
+- Ensure Netlify deploy previews use stage DB before any automatic stage migration workflow exists.
+
+Changes:
+
+- Configure/document exact Netlify deploy-preview env setup.
+- Add a safe stage identity check:
+  - admin-only endpoint, or
+  - admin-only status display, or
+  - equivalent workflow-visible diagnostic.
+- Add guard/smoke checks that prove deploy-preview targets stage, not production.
+
+Acceptance:
+
+- Owner can confirm deploy-preview context points at stage DB.
+- Deploy-preview reports `databaseTarget=stage`.
+- Production reports `databaseTarget=production` without exposing secrets.
+- Manual preview testing does not touch production DB.
+
+### PR3: Local Migration Check Workflow
 
 Goal:
 
@@ -643,7 +706,7 @@ Acceptance:
 - PRs touching `supabase/**` run migration validation.
 - No production or stage DB is touched.
 
-### PR3: Automatic Shared Stage DB PR Apply
+### PR4: Automatic Shared Stage DB PR Apply
 
 Goal:
 
@@ -660,12 +723,13 @@ Acceptance:
 - Workflow fails fast if required secrets are missing.
 - Workflow runs only for PRs from this repository, not forks.
 - Workflow runs only when `supabase/migrations/**` changes.
+- Workflow verifies the configured target is the expected stage DB before applying migrations.
 - Workflow applies pending migrations from PR head to shared stage.
 - Workflow runs smoke checks after applying.
 - Workflow uses concurrency to prevent simultaneous stage mutation.
 - PR clearly shows success/failure for stage DB migration validation.
 
-### PR4: Manual Prepare Stage Workflow
+### PR5: Manual Prepare Stage Workflow
 
 Goal:
 
@@ -687,22 +751,6 @@ Acceptance:
 - Workflow fails clearly if stage contains unrelated migrations from another PR.
 - Workflow does not attempt unsafe migration rollback.
 - Workflow explains whether stage must be recreated/reset.
-
-### PR5: Netlify Preview Stage Configuration Docs
-
-Goal:
-
-- Ensure Netlify preview deploys use stage DB.
-
-Changes:
-
-- Update docs with exact Netlify env setup.
-- Optionally add a runtime diagnostic endpoint or admin display showing current DB target is stage.
-
-Acceptance:
-
-- Owner can confirm deploy-preview context points at stage DB.
-- Manual preview testing does not touch production DB.
 
 ### PR6: Optional Supabase Branching Investigation
 
@@ -747,16 +795,17 @@ Do not start `bonus_campaigns` until stage DB exists.
 Implement in order:
 
 1. Owner creates stage Supabase project and Netlify/GitHub secrets.
-2. Add `db-migration-check.yml`.
-3. Add `db-stage-apply-pr.yml`.
-4. Add `db-stage-prepare.yml`.
-5. Run:
+2. Point Netlify deploy-preview at stage.
+3. Add the required stage identity check and verify deploy-preview reports `databaseTarget=stage`.
+4. Add `db-migration-check.yml`.
+5. Add `db-stage-apply-pr.yml`.
+6. Add `db-stage-prepare.yml`.
+7. Run:
 
 ```bash
 gh workflow run db-stage-prepare.yml --ref main -f ref=main
 ```
 
-6. Confirm stage DB can run current `main` migrations.
-7. Point Netlify deploy-preview at stage.
-8. Open a test PR with a harmless migration and confirm automatic stage check is green.
-9. Proceed with `bonus_campaigns`.
+8. Confirm stage DB can run current `main` migrations.
+9. Open a test PR with a harmless migration and confirm automatic stage check is green.
+10. Proceed with `bonus_campaigns`.
