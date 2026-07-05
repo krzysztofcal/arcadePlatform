@@ -14,7 +14,7 @@
  */
 
 import crypto from "node:crypto";
-import { store, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
+import { store, saveUserProfile, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
 import { klog } from "./_shared/supabase-admin.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
@@ -65,6 +65,15 @@ const SERVER_SESSION_WARN_MODE = process.env.XP_SERVER_SESSION_WARN_MODE === "1"
 const RATE_LIMIT_PER_USER_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_USER_PER_MIN, 30));
 const RATE_LIMIT_PER_IP_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_IP_PER_MIN, 60));
 const RATE_LIMIT_ENABLED = process.env.XP_RATE_LIMIT_ENABLED !== "0";
+
+async function persistUserProfile({ userId, totalXp, now }) {
+  if (!userId) return;
+  try {
+    await saveUserProfile({ userId, totalXp, now });
+  } catch (err) {
+    klog("calc_save_user_profile_failed", { error: err?.message });
+  }
+}
 
 // Supabase JWT verification
 const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_JWT_SECRET_V2 || "";
@@ -862,7 +871,7 @@ export async function handler(event) {
   const visibilitySeconds = Math.max(0, Number(body.visibilitySeconds) || 0);
   const scoreDelta = Math.max(0, Math.floor(Number(body.scoreDelta) || 0));
   const gameEvents = Array.isArray(body.gameEvents) ? body.gameEvents.slice(0, 50) : []; // Limit events
-  const clientBoost = Math.max(1, Math.min(5, Number(body.boostMultiplier) || 1)); // Client-reported boost
+  const clientBoost = Math.max(1, Math.min(5, Number(body.boostMultiplier) || 1)); // Diagnostic only; not trusted for awards
 
   // Timestamp validation
   if (windowEnd > now + DRIFT_MS) {
@@ -920,9 +929,7 @@ export async function handler(event) {
     ? sessionState.boostMultiplier
     : 1;
 
-  // Use the higher of server-tracked boost or client-reported boost
-  // (client might have received a boost we haven't tracked yet)
-  const effectiveBoost = Math.max(activeBoost, clientBoost);
+  const effectiveBoost = activeBoost;
 
   // Calculate XP server-side
   const calculation = calculateXP({
@@ -1047,6 +1054,10 @@ export async function handler(event) {
 
   const remaining = Math.max(0, DAILY_CAP - redisDailyTotal);
 
+  if (supabaseUserId) {
+    await persistUserProfile({ userId: supabaseUserId, totalXp: totalLifetime, now });
+  }
+
   // Update session state
   sessionState.combo = updatedCombo;
   sessionState.lastWindowEnd = windowEnd;
@@ -1099,6 +1110,7 @@ export async function handler(event) {
       scoreDelta,
       gameEventsCount: gameEvents.length,
       effectiveBoost,
+      clientBoost,
       status,
     };
   }

@@ -19,6 +19,11 @@ vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => {
     mockData.set(key, String(current));
     return Promise.resolve({ count: current });
   });
+  const saveUserProfile = vi.fn(async ({ userId, totalXp, now = Date.now() }) => {
+    const profile = { userId, totalXp, updatedAt: new Date(now).toISOString() };
+    mockData.set(`kcswh:xp:user:${userId}`, JSON.stringify(profile));
+    return profile;
+  });
 
   return {
     store: {
@@ -45,6 +50,7 @@ vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => {
       _mockData: mockData,
       _reset: () => mockData.clear(),
     },
+    saveUserProfile,
     atomicRateLimitIncr,
   };
 });
@@ -337,6 +343,43 @@ describe("calculate-xp endpoint", () => {
       const body = JSON.parse(response.body);
       expect(body.ok).toBe(true);
       expect(body.calculated).toBeGreaterThan(0);
+    });
+
+    it("should ignore client-reported boost multiplier without server boost state", async () => {
+      const windowEnd = Date.now();
+      const basePayload = {
+        gameId: "block-stacker",
+        windowStart: windowEnd - 10000,
+        windowEnd,
+        inputEvents: 20,
+        visibilitySeconds: 10,
+        scoreDelta: 500,
+      };
+
+      const normal = await handler({
+        httpMethod: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...basePayload,
+          userId: "user-normal",
+          sessionId: "sess-normal",
+        }),
+      });
+
+      const boosted = await handler({
+        httpMethod: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...basePayload,
+          userId: "user-boosted",
+          sessionId: "sess-boosted",
+          boostMultiplier: 5,
+        }),
+      });
+
+      expect(normal.statusCode).toBe(200);
+      expect(boosted.statusCode).toBe(200);
+      expect(JSON.parse(boosted.body).calculated).toBe(JSON.parse(normal.body).calculated);
     });
 
     it("should track combo state in response", async () => {

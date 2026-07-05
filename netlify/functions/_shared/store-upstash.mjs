@@ -98,19 +98,20 @@ function createMemoryStore() {
       return memory.delete(key) ? 1 : 0;
     },
     async eval(_script, keys = [], argv = []) {
-      // Memory impl supports only v2 delta script signature [sessionKey, sessionSyncKey, dailyKey, totalKey, lockKey] x [now, delta, dailyCap, sessionCap, ts, lockTtl, sessionTtl].
-      if (keys.length === 5 && argv.length === 7) {
-        const [sessionKey, sessionSyncKey, dailyKey, totalKey, lockKey] = keys;
+      // Memory impl supports the XP award signatures used by award-xp and calculate-xp.
+      if ((keys.length === 5 && argv.length === 7) || (keys.length === 4 && argv.length === 6)) {
+        const [sessionKey, sessionSyncKey, dailyKey, totalKey, maybeLockKey] = keys;
+        const lockKey = keys.length === 5 ? maybeLockKey : null;
         const now = Number(argv[0]);
         const delta = Number(argv[1]);
         const dailyCap = Number(argv[2]);
         const sessionCap = Number(argv[3]);
         const ts = Number(argv[4]);
-        const lockTtl = Number(argv[5]);
-        const sessionTtlMs = Number(argv[6]);
+        const lockTtl = keys.length === 5 ? Number(argv[5]) : 0;
+        const sessionTtlMs = keys.length === 5 ? Number(argv[6]) : Number(argv[5]);
 
-        const lockEntry = sweep(lockKey);
-        if (lockEntry) {
+        const lockEntry = lockKey ? sweep(lockKey) : null;
+        if (lockKey && lockEntry) {
           const currentDaily = Number(getValue(dailyKey) ?? "0");
           const sessionTotalLocked = Number(getValue(sessionKey) ?? "0");
           const lifetimeLocked = Number(getValue(totalKey) ?? "0");
@@ -118,9 +119,9 @@ function createMemoryStore() {
           return [0, currentDaily, sessionTotalLocked, lifetimeLocked, lastSyncLocked, 6];
         }
 
-        setValue(lockKey, now, lockTtl);
+        if (lockKey) setValue(lockKey, now, lockTtl);
 
-        const release = () => { memory.delete(lockKey); };
+        const release = () => { if (lockKey) memory.delete(lockKey); };
 
         // Wrap all operations after lock acquisition in try block to ensure cleanup
         try {
@@ -176,6 +177,31 @@ function createMemoryStore() {
         } finally {
           release();
         }
+      }
+
+      if (keys.length === 4 && argv.length === 1) {
+        const [anonTotalKey, userTotalKey, markerKey, userMarkerKey] = keys;
+        const conversionCap = Math.max(0, Math.floor(Number(argv[0]) || 0));
+        const existingUserMarker = getValue(userMarkerKey);
+        const currentUserTotal = Number(getValue(userTotalKey) ?? "0") || 0;
+        if (existingUserMarker !== null) {
+          return [0, currentUserTotal, Number(existingUserMarker) || 0, 1];
+        }
+        const existingMarker = getValue(markerKey);
+        if (existingMarker !== null) {
+          return [0, currentUserTotal, Number(existingMarker) || 0, 1];
+        }
+        const anonTotal = Math.max(0, Math.floor(Number(getValue(anonTotalKey) ?? "0") || 0));
+        const converted = Math.min(anonTotal, conversionCap);
+        let userTotal = currentUserTotal;
+        if (converted > 0) {
+          userTotal += converted;
+          setValue(userTotalKey, userTotal, null);
+          memory.delete(anonTotalKey);
+        }
+        setValue(markerKey, converted, null);
+        setValue(userMarkerKey, converted, null);
+        return [converted, userTotal, anonTotal, 0];
       }
 
       throw new Error("Unsupported eval signature in memory store");
