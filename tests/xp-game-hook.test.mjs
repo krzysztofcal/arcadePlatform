@@ -182,6 +182,27 @@ import { createEnvironment } from './helpers/xp-env.mjs';
   assert.equal(Bridge.getHighScore('record-game'), 12, 'new record should persist the high score');
 }
 
+// report_score_fallback_marks_score_pulse
+{
+  const env = createEnvironment({ bodyGameId: 'brick-breaker' });
+  const { Bridge, drainTimers, installXp } = env;
+
+  const { getState } = installXp();
+  drainTimers();
+
+  assert.equal(
+    typeof env.context.window.reportScoreToPortal,
+    'function',
+    'XP core should provide reportScoreToPortal when game HTML does not define it',
+  );
+
+  env.context.window.reportScoreToPortal('brick-breaker', 20);
+  drainTimers();
+
+  assert.equal(getState().lastScorePulseTs > 0, true, 'fallback score reports should satisfy the XP score pulse gate');
+  assert.equal(Bridge.getHighScore('brick-breaker'), 20, 'fallback score reports should use normal high-score handling');
+}
+
 // no_double_start_in_same_run
 {
   const env = createEnvironment();

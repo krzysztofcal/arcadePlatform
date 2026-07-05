@@ -724,6 +724,39 @@ function bootXpCore(window, document) {
     dispatchNewRecordBoost(resolvedGameId);
   }
 
+  function receiveScorePulse(rawGameId, rawScore) {
+    if (!isGameHost()) return;
+    try {
+      const XP = window && window.XP;
+      const running = XP && typeof XP.isRunning === "function" ? !!XP.isRunning() : false;
+      if (!running) {
+        const gid = resolveScorePulseGameId(rawGameId);
+        if (gid && XP && typeof XP.startSession === "function") {
+          try { window.__GAME_ID__ = gid; } catch (_) {}
+          XP.startSession(gid, { resume: true });
+          if (isDiagEnabled()) {
+            logDebug("auto_start_from_score_pulse", { gameId: gid });
+          }
+        }
+      }
+    } catch (_) {}
+    state.lastScorePulseTs = Date.now();
+    logDebug("score_pulse", {
+      gameId: rawGameId || state.gameId || "",
+      score: typeof rawScore === "number" ? rawScore : undefined,
+    });
+    handleScorePulse(rawGameId, rawScore);
+  }
+
+  function installScoreReporterFallback() {
+    try {
+      if (!window || typeof window.reportScoreToPortal === "function") return;
+      window.reportScoreToPortal = function(gameId, score) {
+        receiveScorePulse(gameId, score);
+      };
+    } catch (_) {}
+  }
+
   function accumulateLocalXp(xpDelta) {
     const numeric = Number(xpDelta) || 0;
     if (!Number.isFinite(numeric) || numeric <= 0) return 0;
@@ -2189,6 +2222,7 @@ function bootXpCore(window, document) {
 
     if (typeof window !== "undefined") {
       ensureTimer();
+      installScoreReporterFallback();
 
       window.addEventListener("pageshow", () => {
         try {
@@ -2223,27 +2257,7 @@ function bootXpCore(window, document) {
           if (!event || !event.data || typeof event.data !== "object") return;
           if (event.origin && typeof location !== "undefined" && event.origin !== location.origin) return;
           if (event.data.type !== "game-score") return;
-          if (!isGameHost()) return;
-          state.lastScorePulseTs = Date.now();
-          logDebug("score_pulse", {
-            gameId: event.data.gameId || state.gameId || "",
-            score: typeof event.data.score === "number" ? event.data.score : undefined,
-          });
-          handleScorePulse(event.data.gameId, event.data.score);
-          try {
-            const XP = window && window.XP;
-            const running = XP && typeof XP.isRunning === "function" ? !!XP.isRunning() : false;
-            if (!running) {
-              const gid = resolveScorePulseGameId(event.data.gameId);
-              if (gid && XP && typeof XP.startSession === "function") {
-                try { window.__GAME_ID__ = gid; } catch (_) {}
-                XP.startSession(gid, { resume: true });
-                if (isDiagEnabled()) {
-                  logDebug("auto_start_from_score_pulse", { gameId: gid });
-                }
-              }
-            }
-          } catch (_) {}
+          receiveScorePulse(event.data.gameId, event.data.score);
         } catch (_) {}
       }, { passive: true });
 
