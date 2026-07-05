@@ -3,6 +3,12 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { parseJsonBody } from "./helpers/xp-test-helpers.mjs";
 
 const mockData = new Map();
+const saveUserProfileMock = vi.fn(async () => {});
+const atomicRateLimitIncrMock = vi.fn((key) => {
+  const current = Number(mockData.get(key) || 0) + 1;
+  mockData.set(key, String(current));
+  return Promise.resolve({ count: current });
+});
 
 const pipelineFactory = () => {
   const operations = [];
@@ -58,11 +64,22 @@ const store = {
     store.setex.mockClear();
     store.del.mockClear();
     store.pipeline.mockClear();
+    saveUserProfileMock.mockClear();
+    atomicRateLimitIncrMock.mockReset();
+    atomicRateLimitIncrMock.mockImplementation((key) => {
+      const current = Number(mockData.get(key) || 0) + 1;
+      mockData.set(key, String(current));
+      return Promise.resolve({ count: current });
+    });
     store._lastPipeline = null;
   },
 };
 
-vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => ({ store }));
+vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => ({
+  store,
+  saveUserProfile: saveUserProfileMock,
+  atomicRateLimitIncr: atomicRateLimitIncrMock,
+}));
 
 const buildSessionToken = ({ sessionId, userId, fingerprint, secret, createdAt = Date.now() }) => {
   const payload = JSON.stringify({ sid: sessionId, uid: userId, ts: createdAt, fp: fingerprint });
@@ -94,7 +111,7 @@ describe("session token plumbing", () => {
     store._reset();
     process.env.XP_KEY_NS = "test:xp:v2";
     process.env.XP_DEBUG = "1";
-    process.env.XP_DAILY_SECRET = "test-secret-for-sessions-32chars!";
+    process.env.XP_DAILY_SECRET = "test-secret-for-sessions-32chars-long";
     process.env.SUPABASE_JWT_SECRET = "test_supabase_jwt_secret_12345678901234567890";
   });
 
@@ -141,7 +158,7 @@ describe("session token plumbing", () => {
     expect(missingBody.error).toBe("invalid_session");
     expect(missingBody.requiresNewSession).toBe(true);
 
-    const fingerprint = hash("Vitest/UA").substring(0, 16);
+    const fingerprint = hash("Vitest/UA||").substring(0, 16);
     const sessionToken = buildSessionToken({
       sessionId: "sess-valid",
       userId: "user-1",
@@ -197,7 +214,7 @@ describe("session token plumbing", () => {
     const secret = process.env.XP_DAILY_SECRET;
     const { handler } = await loadCalculateXp();
 
-    const fingerprint = hash("CalcUA").substring(0, 16);
+    const fingerprint = hash("CalcUA||").substring(0, 16);
     const token = buildSessionToken({ sessionId: "sess-999", userId: "user-999", fingerprint, secret });
     store.setex(`${process.env.XP_KEY_NS}:server-session:sess-999`, 600, JSON.stringify({
       userId: "user-999",
