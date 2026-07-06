@@ -1482,14 +1482,16 @@ test("table_leave rejects when authoritative success state still contains actor 
     await nextJoinTableState(other, { requestId: "join-leave-still-present-keep", tableId });
     assert.equal(otherJoinAck.payload.status, "accepted");
 
+    const leaveResult = nextCommandResultForRequest(actor, "leave-still-present");
     sendFrame(actor, { version: "1.0", type: "table_leave", requestId: "leave-still-present", ts: "2026-02-28T00:00:03Z", payload: { tableId } });
-    const result = await nextMessageOfType(actor, "commandResult");
+    const result = await leaveResult;
     assert.equal(result.payload.status, "rejected");
     assert.equal(result.payload.reason, "authoritative_state_invalid");
     assert.equal(await attemptMessage(other, 300), null);
 
+    const observerStateAfterSub = nextJoinTableState(other, { requestId: "sub-after-still-present", tableId });
     sendFrame(other, { version: "1.0", type: "table_state_sub", requestId: "sub-after-still-present", ts: "2026-02-28T00:00:04Z", payload: { tableId } });
-    const observerState = await nextMessageOfType(other, "table_state");
+    const observerState = await observerStateAfterSub;
     assert.deepEqual(observerState.payload.members, [
       { userId: "leave_still_present_actor", seat: 1 },
       { userId: "leave_still_present_keep", seat: 2 }
