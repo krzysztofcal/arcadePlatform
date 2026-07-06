@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
+import vm from 'node:vm';
 
 const root = process.cwd();
 const indexHtml = await readFile(path.join(root, 'poker', 'index.html'), 'utf8');
@@ -130,6 +131,37 @@ assert.doesNotMatch(jsHeaderBlock, /immutable/, 'Stable JS paths must not be cac
 
 const supabaseConfigSource = await readFile(path.join(root, "js", "auth", "supabase-config.js"), "utf8");
 assert.doesNotMatch(supabaseConfigSource, /otbqfijerkieoxwpxjnm\.supabase\.co/, "checked-in Supabase browser config should not hardcode the production project");
+
+const supabaseClientSource = await readFile(path.join(root, "js", "auth", "supabaseClient.js"), "utf8");
+{
+  let bridgeCalls = 0;
+  const context = {
+    window: {
+      SUPABASE_CONFIG: { SUPABASE_URL: "", SUPABASE_ANON_KEY: "" },
+      SupabaseAuthBridge: {
+        getAccessToken(){
+          bridgeCalls += 1;
+          return Promise.resolve("fallback-token");
+        },
+      },
+      KLog: { log(){} },
+    },
+    document: {
+      readyState: "loading",
+      addEventListener(){},
+      getElementById(){ return null; },
+      querySelector(){ return null; },
+    },
+    Promise,
+    console,
+  };
+  context.window.window = context.window;
+  vm.createContext(context);
+  vm.runInContext(supabaseClientSource, context, { filename: "js/auth/supabaseClient.js" });
+  const token = await context.window.SupabaseAuthBridge.getAccessToken();
+  assert.equal(token, "fallback-token", "SupabaseAuthBridge should preserve an existing token provider when browser config is empty");
+  assert.equal(bridgeCalls, 1, "preserved SupabaseAuthBridge provider should be called exactly once");
+}
 
 const buildTmpDir = await mkdtemp(path.join(os.tmpdir(), "arcade-build-config-"));
 try {

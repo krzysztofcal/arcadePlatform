@@ -100,8 +100,19 @@
 
   if (typeof window !== 'undefined'){
     if (!window.SupabaseAuthBridge) window.SupabaseAuthBridge = {};
-    window.SupabaseAuthBridge.getAccessToken = getAccessToken;
-    logDiag('supabase:token_bridge_init', { attached: true });
+    var existingBridgeGetAccessToken = typeof window.SupabaseAuthBridge.getAccessToken === 'function'
+      ? window.SupabaseAuthBridge.getAccessToken
+      : null;
+    window.SupabaseAuthBridge.getAccessToken = function(){
+      var client = getClient();
+      if (client && client.auth && typeof client.auth.getSession === 'function'){
+        return getAccessToken();
+      }
+      return existingBridgeGetAccessToken
+        ? Promise.resolve().then(function(){ return existingBridgeGetAccessToken(); })
+        : Promise.resolve(null);
+    };
+    logDiag('supabase:token_bridge_init', { attached: true, preservedExisting: !!existingBridgeGetAccessToken });
   }
 
   function notifyAuthListeners(event, session){
