@@ -20,6 +20,47 @@ This document preserves the operational and rollout details that were previously
 - Once unlocked, the recorder auto-starts (`window.KLog.start(1)`) and the About page surfaces a **Dump diagnostics** button. Clicking it opens a new tab populated with the recent buffer (up to 1000 lines) and falls back to downloading `kcswh-diagnostic-<timestamp>.txt` when the popup is blocked.
 - The buffer captures the XP lifecycle breadcrumbs (`xp_init`, `xp_start`, `xp_stop`, `block_no_host`, `block_hard_idle`, `award`) so you can confirm that accrual only happens on game hosts and is suppressed on idle or non-host pages. Check `window.KLog.status()` for the active level and line count.
 
+## Stage DB identity check
+- Netlify deploy previews must point at the stage Supabase project before DB migration automation is enabled.
+- Configure these variables in Netlify for the `deploy-preview` context with stage values:
+  - `SUPABASE_URL`
+  - `SUPABASE_ANON_KEY` or `SUPABASE_ANON_KEY_V2`
+  - `SUPABASE_JWT_SECRET` or `SUPABASE_JWT_SECRET_V2`
+  - `SUPABASE_SERVICE_ROLE_KEY`
+  - `SUPABASE_DB_URL`
+  - `SUPABASE_STAGE_PROJECT_REF`
+  - `CHIPS_ENABLED=1`
+- `SUPABASE_STAGE_PROJECT_REF` is not a secret. It is the Supabase project ref used as the expected stage identity.
+- Production keeps production Supabase values. Do not set production `SUPABASE_URL` or `SUPABASE_DB_URL` to stage.
+- The admin-only endpoint `/.netlify/functions/admin-stage-identity` returns sanitized environment identity:
+  - `environmentContext`
+  - `supabaseProjectRef`
+  - `expectedStageProjectRef`
+  - `databaseTarget`
+  - `chipsEnabled`
+  - safe boolean config flags
+- The endpoint never returns DB URLs, JWT secrets, anon keys, emails, or access tokens.
+- Admin UI → Ops → Runtime / environment shows the same identity block.
+- Manual preview verification:
+
+```
+curl -H "Authorization: Bearer <admin access token>" \
+  https://<deploy-preview>.netlify.app/.netlify/functions/admin-stage-identity
+```
+
+Expected deploy-preview result:
+
+```
+"databaseTarget":"stage"
+"stageProjectRefMatches":true
+```
+
+Expected production result:
+
+```
+"databaseTarget":"production"
+```
+
 ## P1.1 rollout & rollback
 Operators rolling out the P1.1 XP bridge should stage the following environment toggles alongside their Netlify/Functions deployment:
 

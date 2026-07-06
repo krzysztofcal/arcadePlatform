@@ -34,6 +34,8 @@
     },
     ops: {
       summary: null,
+      identity: null,
+      identityError: null,
       loaded: false,
     },
     pokerAudit: {
@@ -99,6 +101,7 @@
     nodes.pokerAuditRefresh = doc.getElementById("adminPokerAuditRefresh");
     nodes.pokerAuditReset = doc.getElementById("adminPokerAuditReset");
     nodes.opsStats = doc.getElementById("adminOpsStats");
+    nodes.opsIdentity = doc.getElementById("adminOpsIdentity");
     nodes.opsRuntime = doc.getElementById("adminOpsRuntime");
     nodes.opsRefresh = doc.getElementById("adminOpsRefresh");
     nodes.opsRunReconciler = doc.getElementById("adminOpsRunReconciler");
@@ -716,22 +719,54 @@
 
   function renderOps(){
     var summary = state.ops.summary;
-    if (!summary){
+    var identity = state.ops.identity;
+    if (!summary && !identity){
       if (nodes.opsStats) nodes.opsStats.innerHTML = "";
+      if (nodes.opsIdentity) nodes.opsIdentity.innerHTML = "";
       if (nodes.opsRuntime) nodes.opsRuntime.innerHTML = "";
       if (nodes.opsRecentActions) nodes.opsRecentActions.innerHTML = "";
       if (nodes.opsRecentCleanup) nodes.opsRecentCleanup.innerHTML = "";
       return;
     }
+    if (nodes.opsIdentity){
+      if (!identity){
+        var message = state.ops.identityError ? "Stage identity unavailable: " + state.ops.identityError : "Stage identity not loaded.";
+        nodes.opsIdentity.innerHTML = '<p class="admin-empty">' + escapeHtml(message) + "</p>";
+      } else {
+        var target = identity.databaseTarget || "unknown";
+        var targetTone = target === "stage" ? "success" : target === "production" ? "danger" : "info";
+        nodes.opsIdentity.innerHTML = [
+          '<div class="admin-surface">',
+          '<div class="admin-list__title"><span>Database target</span>' + pill(target, targetTone) + "</div>",
+          '<div class="admin-kv">',
+          renderKvRow("Environment context", identity.environmentContext || "unknown"),
+          renderKvRow("Supabase project ref", identity.supabaseProjectRef || "unknown"),
+          renderKvRow("Expected stage ref", identity.expectedStageProjectRef || "not configured"),
+          renderKvRow("Stage ref match", identity.stageProjectRefMatches ? "yes" : "no"),
+          renderKvRow("Service role project ref", identity.serviceRoleProjectRef || "unknown"),
+          renderKvRow("Service role stage match", identity.serviceRoleStageProjectRefMatches ? "yes" : "no"),
+          renderKvRow("CHIPS_ENABLED", identity.chipsEnabled ? "on" : "off"),
+          "</div>",
+          "</div>"
+        ].join("");
+      }
+    }
     if (nodes.opsStats){
+      if (!summary){
+        nodes.opsStats.innerHTML = "";
+      } else {
       nodes.opsStats.innerHTML = [
         renderStat("OPEN tables", summary.janitor && summary.janitor.openTableCount),
         renderStat("Stale human seats", summary.janitor && summary.janitor.staleHumanSeatCount),
         renderStat("Idle OPEN tables", summary.janitor && summary.janitor.staleOpenTableCount),
         renderStat("Flagged tables", summary.janitor && summary.janitor.flaggedTableCount)
       ].join("");
+      }
     }
     if (nodes.opsRuntime){
+      if (!summary){
+        nodes.opsRuntime.innerHTML = "";
+      } else {
       var runtime = summary.runtime || {};
       nodes.opsRuntime.innerHTML = [
         '<div class="admin-kv">',
@@ -746,24 +781,25 @@
         renderKvRow("Live-hand stale", runtime.janitorConfig ? String(runtime.janitorConfig.liveHandStaleMs) + "ms" : "—"),
         "</div>"
       ].join("");
+      }
     }
     if (nodes.opsRecentActions){
-      nodes.opsRecentActions.innerHTML = renderMiniList((summary.recentJanitorActivity && summary.recentJanitorActivity.adminActions || []).map(function(item){
+      nodes.opsRecentActions.innerHTML = summary ? renderMiniList((summary.recentJanitorActivity && summary.recentJanitorActivity.adminActions || []).map(function(item){
         var result = item.meta && item.meta.result ? item.meta.result.status : "—";
         return {
           title: escapeHtml((item.actionType || "ACTION") + " · " + formatTimestamp(item.createdAt)),
           meta: escapeHtml((item.tableId || "—") + " · " + result),
         };
-      }));
+      })) : "";
     }
     if (nodes.opsRecentCleanup){
-      nodes.opsRecentCleanup.innerHTML = renderMiniList((summary.recentJanitorActivity && summary.recentJanitorActivity.cleanupTransactions || []).map(function(item){
+      nodes.opsRecentCleanup.innerHTML = summary ? renderMiniList((summary.recentJanitorActivity && summary.recentJanitorActivity.cleanupTransactions || []).map(function(item){
         var reason = item.metadata && item.metadata.reason ? item.metadata.reason : item.description || "TABLE_CASH_OUT";
         return {
           title: escapeHtml((item.txType || "TABLE_CASH_OUT") + " · " + formatTimestamp(item.createdAt)),
           meta: escapeHtml((item.userId || "—") + " · " + reason),
         };
-      }));
+      })) : "";
     }
   }
 
@@ -1125,7 +1161,22 @@
   async function loadOps(){
     setStatus(t("loading", "Loading..."), "info");
     try {
-      var payload = await apiFetch("/.netlify/functions/admin-ops-summary", { method: "GET" });
+      var results = await Promise.allSettled([
+        apiFetch("/.netlify/functions/admin-stage-identity", { method: "GET" }),
+        apiFetch("/.netlify/functions/admin-ops-summary", { method: "GET" })
+      ]);
+      if (results[0].status === "fulfilled"){
+        state.ops.identity = results[0].value || null;
+        state.ops.identityError = null;
+      } else {
+        state.ops.identity = null;
+        state.ops.identityError = results[0].reason && results[0].reason.code ? results[0].reason.code : "request_failed";
+        klog("admin_stage_identity_load_failed", { code: state.ops.identityError });
+      }
+      if (results[1].status !== "fulfilled"){
+        throw results[1].reason || new Error("request_failed");
+      }
+      var payload = results[1].value || {};
       state.ops.summary = payload;
       state.ops.loaded = true;
       renderOps();

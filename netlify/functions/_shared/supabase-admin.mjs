@@ -68,6 +68,8 @@ function normalizeRow(row) {
 
 const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_JWT_SECRET_V2 || "";
 const SUPABASE_DB_URL = process.env.SUPABASE_DB_URL || "";
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.SUPABASE_URL_V2 || "";
+const SUPABASE_AUTH_API_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY_V2 || "";
 
 if (!SUPABASE_DB_URL) {
   klog("chips_db_url_missing", { hasDbUrl: false });
@@ -176,29 +178,87 @@ const buildJwtAuthResult = ({ provided, valid, userId, reason, payload }) => {
     user,
   };
 };
+function hasRemoteJwtVerifier() {
+  return !!(normalizeSupabaseUrl(SUPABASE_URL) && SUPABASE_AUTH_API_KEY);
+}
+
+function normalizeSupabaseUrl(raw) {
+  const text = typeof raw === "string" ? raw.trim() : "";
+  if (!text) return null;
+  try {
+    const url = new URL(text);
+    if (url.protocol !== "https:") return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+async function verifySupabaseJwtRemote(token) {
+  const baseUrl = normalizeSupabaseUrl(SUPABASE_URL);
+  if (!baseUrl || !SUPABASE_AUTH_API_KEY) {
+    return buildJwtAuthResult({ provided: true, valid: false, reason: "remote_verify_unconfigured" });
+  }
+  let response;
+  try {
+    response = await fetch(baseUrl + "/auth/v1/user", {
+      method: "GET",
+      headers: {
+        apikey: SUPABASE_AUTH_API_KEY,
+        authorization: "Bearer " + token,
+      },
+    });
+  } catch {
+    return buildJwtAuthResult({ provided: true, valid: false, reason: "remote_verify_failed" });
+  }
+  if (!response || !response.ok) {
+    return buildJwtAuthResult({ provided: true, valid: false, reason: "remote_verify_rejected" });
+  }
+  let user;
+  try {
+    user = await response.json();
+  } catch {
+    return buildJwtAuthResult({ provided: true, valid: false, reason: "remote_verify_invalid_response" });
+  }
+  const userId = typeof user?.id === "string" ? user.id.trim() : "";
+  if (!userId) {
+    return buildJwtAuthResult({ provided: true, valid: false, reason: "missing_sub" });
+  }
+  return {
+    provided: true,
+    valid: true,
+    userId,
+    reason: "ok",
+    user: { id: userId, sub: userId, email: typeof user.email === "string" ? user.email : undefined, claims: user },
+  };
+}
+
 const AUTH_VERIFY_SLOW_MS = 25;
 let authVerifyModeLogged = false;
-const logAuthTiming = (start) => {
+const logAuthTiming = (start, mode = "local") => {
   const ms = Date.now() - start;
   if (!authVerifyModeLogged) {
-    klog("auth_verify_mode", { mode: "local" });
+    klog("auth_verify_mode", { mode });
     authVerifyModeLogged = true;
   }
   if (ms >= AUTH_VERIFY_SLOW_MS) {
-    klog("auth_verify_local_ms", { ms, thresholdMs: AUTH_VERIFY_SLOW_MS });
+    klog("auth_verify_ms", { mode, ms, thresholdMs: AUTH_VERIFY_SLOW_MS });
   }
 };
 const verifySupabaseJwt = async (token) => {
   const start = Date.now();
-  const finish = (result) => {
-    logAuthTiming(start);
+  const finish = (result, mode = "local") => {
+    logAuthTiming(start, mode);
     return result;
   };
+  const finishRemote = async () => finish(await verifySupabaseJwtRemote(token), "remote");
   if (!token) {
     return finish(buildJwtAuthResult({ provided: false, valid: false, reason: "missing_token" }));
   }
   if (!SUPABASE_JWT_SECRET) {
-    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "missing_jwt_secret" }));
+    return hasRemoteJwtVerifier()
+      ? finishRemote()
+      : finish(buildJwtAuthResult({ provided: true, valid: false, reason: "missing_jwt_secret" }));
   }
 
   const [headerSegment, payloadSegment, signatureSegment] = token.split(".");
@@ -214,7 +274,9 @@ const verifySupabaseJwt = async (token) => {
 
   const alg = header.alg;
   if (alg !== "HS256" && alg !== "HS512") {
-    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "unsupported_alg" }));
+    return hasRemoteJwtVerifier()
+      ? finishRemote()
+      : finish(buildJwtAuthResult({ provided: true, valid: false, reason: "unsupported_alg" }));
   }
   const hmacAlg = alg === "HS512" ? "sha512" : "sha256";
   const expectedSig = crypto.createHmac(hmacAlg, SUPABASE_JWT_SECRET)

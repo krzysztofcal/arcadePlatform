@@ -100,8 +100,19 @@
 
   if (typeof window !== 'undefined'){
     if (!window.SupabaseAuthBridge) window.SupabaseAuthBridge = {};
-    window.SupabaseAuthBridge.getAccessToken = getAccessToken;
-    logDiag('supabase:token_bridge_init', { attached: true });
+    var existingBridgeGetAccessToken = typeof window.SupabaseAuthBridge.getAccessToken === 'function'
+      ? window.SupabaseAuthBridge.getAccessToken
+      : null;
+    window.SupabaseAuthBridge.getAccessToken = function(){
+      var client = getClient();
+      if (client && client.auth && typeof client.auth.getSession === 'function'){
+        return getAccessToken();
+      }
+      return existingBridgeGetAccessToken
+        ? Promise.resolve().then(function(){ return existingBridgeGetAccessToken(); })
+        : Promise.resolve(null);
+    };
+    logDiag('supabase:token_bridge_init', { attached: true, preservedExisting: !!existingBridgeGetAccessToken });
   }
 
   function notifyAuthListeners(event, session){
@@ -157,12 +168,26 @@
     return client.auth.signInWithPassword({ email: email, password: password });
   }
 
+  function getAuthRedirectTo(){
+    try {
+      if (!window || !window.location || !window.location.origin) return null;
+      var protocol = window.location.protocol || '';
+      if (protocol !== 'http:' && protocol !== 'https:') return null;
+      return window.location.origin + '/account.html';
+    } catch (_err){
+      return null;
+    }
+  }
+
   function signUp(email, password){
     var client = getClient();
     if (!client || !client.auth || typeof client.auth.signUp !== 'function'){
       return Promise.reject(new Error('Authentication client not ready'));
     }
-    return client.auth.signUp({ email: email, password: password });
+    var payload = { email: email, password: password };
+    var emailRedirectTo = getAuthRedirectTo();
+    if (emailRedirectTo) payload.options = { emailRedirectTo: emailRedirectTo };
+    return client.auth.signUp(payload);
   }
 
   function signOut(){
