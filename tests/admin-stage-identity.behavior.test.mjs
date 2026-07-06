@@ -6,7 +6,14 @@ const {
   createAdminStageIdentityHandler,
   parseProjectRefFromDbUrl,
   parseProjectRefFromSupabaseUrl,
+  parseProjectRefFromSupabaseJwt,
 } = await import("../netlify/functions/admin-stage-identity.mjs");
+
+function makeUnsignedSupabaseJwt(projectRef) {
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ iss: projectRef, ref: projectRef, role: "service_role" })).toString("base64url");
+  return header + "." + payload + ".signature";
+}
 
 function createEvent() {
   return {
@@ -25,6 +32,7 @@ test("admin-stage-identity derives stage target without exposing secrets", async
     SUPABASE_JWT_SECRET: "jwt-secret-value",
     SUPABASE_ANON_KEY: "anon-key-value",
     SUPABASE_STAGE_PROJECT_REF: "stageabc",
+    SUPABASE_SERVICE_ROLE_KEY: makeUnsignedSupabaseJwt("stageabc"),
   };
   const identity = buildStageIdentity(env);
 
@@ -33,6 +41,8 @@ test("admin-stage-identity derives stage target without exposing secrets", async
   assert.equal(identity.expectedStageProjectRef, "stageabc");
   assert.equal(identity.databaseTarget, "stage");
   assert.equal(identity.stageProjectRefMatches, true);
+  assert.equal(identity.serviceRoleProjectRef, "stageabc");
+  assert.equal(identity.serviceRoleStageProjectRefMatches, true);
   assert.equal(identity.config.hasSupabaseDbUrl, true);
   assert.equal(JSON.stringify(identity).includes("secret"), false);
   assert.equal(JSON.stringify(identity).includes("anon-key-value"), false);
@@ -56,6 +66,21 @@ test("admin-stage-identity parses project refs from supported Supabase URLs", ()
   assert.equal(parseProjectRefFromSupabaseUrl("https://stageabc.supabase.co"), "stageabc");
   assert.equal(parseProjectRefFromDbUrl("postgresql://postgres.stageabc:pw@aws-0-us.pooler.supabase.com:6543/postgres"), "stageabc");
   assert.equal(parseProjectRefFromDbUrl("postgresql://postgres:pw@db.stageabc.supabase.co:5432/postgres"), "stageabc");
+});
+
+test("admin-stage-identity detects service role project mismatch", () => {
+  const identity = buildStageIdentity({
+    CONTEXT: "deploy-preview",
+    SUPABASE_URL: "https://stageabc.supabase.co",
+    SUPABASE_STAGE_PROJECT_REF: "stageabc",
+    SUPABASE_SERVICE_ROLE_KEY: makeUnsignedSupabaseJwt("prodabc"),
+  });
+
+  assert.equal(parseProjectRefFromSupabaseJwt(makeUnsignedSupabaseJwt("prodabc")), "prodabc");
+  assert.equal(identity.databaseTarget, "stage");
+  assert.equal(identity.stageProjectRefMatches, true);
+  assert.equal(identity.serviceRoleProjectRef, "prodabc");
+  assert.equal(identity.serviceRoleStageProjectRefMatches, false);
 });
 
 test("admin-stage-identity rejects postgres project-ref usernames on non-Supabase hosts", () => {

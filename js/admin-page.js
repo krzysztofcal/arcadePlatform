@@ -743,6 +743,8 @@
           renderKvRow("Supabase project ref", identity.supabaseProjectRef || "unknown"),
           renderKvRow("Expected stage ref", identity.expectedStageProjectRef || "not configured"),
           renderKvRow("Stage ref match", identity.stageProjectRefMatches ? "yes" : "no"),
+          renderKvRow("Service role project ref", identity.serviceRoleProjectRef || "unknown"),
+          renderKvRow("Service role stage match", identity.serviceRoleStageProjectRefMatches ? "yes" : "no"),
           renderKvRow("CHIPS_ENABLED", identity.chipsEnabled ? "on" : "off"),
           "</div>",
           "</div>"

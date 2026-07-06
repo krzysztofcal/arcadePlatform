@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import os from 'node:os';
 import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 
@@ -124,3 +126,27 @@ const cssHeaderBlock = netlifyToml.match(/\[\[headers\]\]\s+for = "\/css\/\*"[\s
 const jsHeaderBlock = netlifyToml.match(/\[\[headers\]\]\s+for = "\/js\/\*"[\s\S]*?(?=\n\[\[headers\]\]|$)/)?.[0] || '';
 assert.doesNotMatch(cssHeaderBlock, /immutable/, 'Stable CSS paths must not be cached as immutable');
 assert.doesNotMatch(jsHeaderBlock, /immutable/, 'Stable JS paths must not be cached as immutable');
+
+
+const supabaseConfigSource = await readFile(path.join(root, "js", "auth", "supabase-config.js"), "utf8");
+assert.doesNotMatch(supabaseConfigSource, /otbqfijerkieoxwpxjnm\.supabase\.co/, "checked-in Supabase browser config should not hardcode the production project");
+
+const buildTmpDir = await mkdtemp(path.join(os.tmpdir(), "arcade-build-config-"));
+try {
+  execFileSync(process.execPath, [path.join(root, "scripts", "generate-build-info.js")], {
+    cwd: buildTmpDir,
+    env: {
+      ...process.env,
+      CONTEXT: "deploy-preview",
+      SUPABASE_URL: "https://stageabc.supabase.co",
+      SUPABASE_ANON_KEY: "stage-anon-key",
+    },
+    stdio: "pipe",
+  });
+  const generatedSupabaseConfig = await readFile(path.join(buildTmpDir, "js", "auth", "supabase-config.js"), "utf8");
+  assert.match(generatedSupabaseConfig, /https:\/\/stageabc\.supabase\.co/, "build should publish the deploy context Supabase URL to the browser config");
+  assert.match(generatedSupabaseConfig, /stage-anon-key/, "build should publish the deploy context Supabase anon key to the browser config");
+  assert.doesNotMatch(generatedSupabaseConfig, /otbqfijerkieoxwpxjnm/, "deploy-preview browser config should not retain the production project ref");
+} finally {
+  await rm(buildTmpDir, { recursive: true, force: true });
+}

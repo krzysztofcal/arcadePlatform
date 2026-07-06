@@ -26,6 +26,7 @@ This document preserves the operational and rollout details that were previously
   - `SUPABASE_URL`
   - `SUPABASE_ANON_KEY` or `SUPABASE_ANON_KEY_V2`
   - `SUPABASE_JWT_SECRET` or `SUPABASE_JWT_SECRET_V2`
+  - `SUPABASE_SERVICE_ROLE_KEY`
   - `SUPABASE_DB_URL`
   - `SUPABASE_STAGE_PROJECT_REF`
   - `CHIPS_ENABLED=1`
