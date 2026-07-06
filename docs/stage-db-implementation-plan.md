@@ -790,22 +790,29 @@ Recommended answers:
 
 ## Recommended Immediate Next Step
 
-Do not start `bonus_campaigns` until stage DB exists.
+Do not start `bonus_campaigns` until stage DB exists and deploy-preview points at it.
+
+Implementation status:
+
+- Deploy-preview stage identity checks exist.
+- WS preview deploy refuses non-stage Supabase preview env.
+- `db-migration-check.yml` validates migration files without mutating a cloud DB.
+- `db-stage-apply-pr.yml` applies PR migrations to shared stage for same-repo PRs.
+- `db-stage-prepare.yml` manually prepares shared stage for a selected ref.
+- Destructive stage reset is intentionally not implemented.
 
 Implement in order:
 
 1. Owner creates stage Supabase project and Netlify/GitHub secrets.
 2. Point Netlify deploy-preview at stage.
-3. Add the required stage identity check and verify deploy-preview reports `databaseTarget=stage`.
-4. Add `db-migration-check.yml`.
-5. Add `db-stage-apply-pr.yml`.
-6. Add `db-stage-prepare.yml`.
-7. Run:
+3. Verify deploy-preview reports `databaseTarget=stage`.
+4. Verify GitHub secrets exist for `SUPABASE_STAGE_DB_URL` and `SUPABASE_STAGE_PROJECT_REF`.
+5. Run:
 
 ```bash
 gh workflow run db-stage-prepare.yml --ref main -f ref=main
 ```
 
-8. Confirm stage DB can run current `main` migrations.
-9. Open a test PR with a harmless migration and confirm automatic stage check is green.
-10. Proceed with `bonus_campaigns`.
+6. Confirm stage DB can run current `main` migrations.
+7. Open a test PR with a harmless migration and confirm automatic stage check is green.
+8. Proceed with `bonus_campaigns`.

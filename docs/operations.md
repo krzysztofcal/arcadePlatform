@@ -61,6 +61,80 @@ Expected production result:
 "databaseTarget":"production"
 ```
 
+## Stage DB migrations
+
+Use the stage DB migration workflows before merging DB-heavy changes such as bonus campaigns.
+
+Required GitHub repository secrets:
+
+- `SUPABASE_STAGE_DB_URL` - stage Postgres connection string.
+- `SUPABASE_STAGE_PROJECT_REF` - expected stage Supabase project ref.
+
+The workflows refuse to run if the DB URL does not contain the expected stage project ref. They do not reset, drop, or roll back schemas.
+
+### Automatic PR stage apply
+
+PRs that change `supabase/migrations/**` run:
+
+```text
+DB Migration Check
+DB Stage Apply PR
+```
+
+Expected sequence:
+
+1. `DB Migration Check` validates migration filenames/order.
+2. `DB Stage Apply PR` applies pending migration files to the shared stage DB.
+3. The workflow fails if stage contains migration versions that are not present in the PR checkout.
+4. After the check is green, test the matching Netlify deploy preview against stage.
+
+### Manual prepare stage
+
+Use this when switching between DB-heavy branches or when a PR was rebased:
+
+```bash
+gh workflow run db-stage-prepare.yml --ref main -f ref=<branch-or-sha>
+```
+
+This applies pending migrations from the selected ref to shared stage and runs smoke checks. It fails safely if stage contains unrelated migrations from another branch.
+
+### Promote tested migrations to production
+
+After stage testing passes and the PR is merged:
+
+1. Confirm the merged `main` contains the same migration files tested on stage.
+2. Apply production migrations with the production DB connection method used by the owner. Prefer Supabase migration tooling so `supabase_migrations.schema_migrations` is recorded with the schema change, for example:
+
+```bash
+supabase db push --db-url "$SUPABASE_PROD_DB_URL"
+```
+
+Raw `psql -f supabase/migrations/<migration-file>.sql` is only acceptable if the same operation also records the migration version in `supabase_migrations.schema_migrations`; otherwise future automation can treat an already-applied production migration as pending.
+
+3. Verify production smoke checks manually:
+
+```sql
+select version from supabase_migrations.schema_migrations order by version desc limit 10;
+select to_regclass('public.chips_accounts');
+select to_regclass('public.chips_transactions');
+select to_regclass('public.chips_entries');
+```
+
+For generic bonus work, additionally verify:
+
+```sql
+select to_regclass('public.bonus_campaigns');
+select to_regclass('public.bonus_claims');
+select to_regclass('public.bonus_campaign_eligible_users');
+select enumlabel
+from pg_type t
+join pg_enum e on e.enumtypid = t.oid
+where t.typname = 'chips_tx_type'
+  and enumlabel = 'PROMO_BONUS';
+```
+
+Do not apply production migrations until the stage deploy preview and stage DB checks are green.
+
 ## P1.1 rollout & rollback
 Operators rolling out the P1.1 XP bridge should stage the following environment toggles alongside their Netlify/Functions deployment:
 
