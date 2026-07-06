@@ -163,6 +163,41 @@ const supabaseClientSource = await readFile(path.join(root, "js", "auth", "supab
   assert.equal(bridgeCalls, 1, "preserved SupabaseAuthBridge provider should be called exactly once");
 }
 
+{
+  let signUpPayload = null;
+  const context = {
+    window: {
+      location: { origin: "https://deploy-preview-656--playkcswh.netlify.app", protocol: "https:" },
+      SUPABASE_CONFIG: { SUPABASE_URL: "https://stageabc.supabase.co", SUPABASE_ANON_KEY: "anon" },
+      supabase: {
+        createClient(){
+          return {
+            auth: {
+              getSession(){ return Promise.resolve({ data: { session: null } }); },
+              onAuthStateChange(){ return { data: { subscription: { unsubscribe(){} } } }; },
+              signUp(payload){ signUpPayload = payload; return Promise.resolve({ data: {} }); },
+            },
+          };
+        },
+      },
+      KLog: { log(){} },
+    },
+    document: {
+      readyState: "loading",
+      addEventListener(){},
+      getElementById(){ return null; },
+      querySelector(){ return null; },
+    },
+    Promise,
+    console,
+  };
+  context.window.window = context.window;
+  vm.createContext(context);
+  vm.runInContext(supabaseClientSource, context, { filename: "js/auth/supabaseClient.js" });
+  await context.window.SupabaseAuth.signUp("new.test", "password");
+  assert.equal(signUpPayload.options.emailRedirectTo, "https://deploy-preview-656--playkcswh.netlify.app/account.html", "signup confirmation should redirect back to the current deploy origin");
+}
+
 const buildTmpDir = await mkdtemp(path.join(os.tmpdir(), "arcade-build-config-"));
 try {
   execFileSync(process.execPath, [path.join(root, "scripts", "generate-build-info.js")], {
