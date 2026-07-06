@@ -168,12 +168,26 @@
     return client.auth.signInWithPassword({ email: email, password: password });
   }
 
+  function getAuthRedirectTo(){
+    try {
+      if (!window || !window.location || !window.location.origin) return null;
+      var protocol = window.location.protocol || '';
+      if (protocol !== 'http:' && protocol !== 'https:') return null;
+      return window.location.origin + '/account.html';
+    } catch (_err){
+      return null;
+    }
+  }
+
   function signUp(email, password){
     var client = getClient();
     if (!client || !client.auth || typeof client.auth.signUp !== 'function'){
       return Promise.reject(new Error('Authentication client not ready'));
     }
-    return client.auth.signUp({ email: email, password: password });
+    var payload = { email: email, password: password };
+    var emailRedirectTo = getAuthRedirectTo();
+    if (emailRedirectTo) payload.options = { emailRedirectTo: emailRedirectTo };
+    return client.auth.signUp(payload);
   }
 
   function signOut(){
