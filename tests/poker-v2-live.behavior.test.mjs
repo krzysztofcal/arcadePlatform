@@ -409,6 +409,7 @@ test('poker v2 guest mode shows restrictions panel, hides XP badge, and still au
   const guestToken = `aaa.${guestPayload}.zzz`;
   const harness = createHarness({
     search: '?tableId=guest_table_1&guest=1&autoJoin=1',
+    token: null,
     guestSession: {
       token: guestToken,
       tableId: 'guest_table_1',
@@ -429,6 +430,69 @@ test('poker v2 guest mode shows restrictions panel, hides XP badge, and still au
 
   await waitFor(() => harness.joinPayloads.length === 1);
   assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({ tableId: 'guest_table_1', buyIn: 100, autoSeat: true, preferredSeatNo: 1 }));
+});
+
+test('poker v2 authenticated user takes precedence over a matching guest session', async () => {
+  const guestPayload = Buffer.from(JSON.stringify({ sub: 'guest_user_1' })).toString('base64url');
+  const guestToken = `aaa.${guestPayload}.zzz`;
+  const harness = createHarness({
+    search: '?tableId=guest_table_1&guest=1&autoJoin=1',
+    guestSession: {
+      token: guestToken,
+      tableId: 'guest_table_1',
+      guestId: 'guest_user_1',
+      nickname: 'Guest1234',
+      expiresAt: Date.now() + 3_600_000
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  assert.ok(ws, 'authenticated user flow should bootstrap a WS client');
+  assert.equal(ws.guestToken, null);
+  assert.equal(harness.elements.xpBadge.hidden, false, 'authenticated user mode should keep the XP badge visible');
+  assert.equal(harness.elements.pokerV2GuestBadge.hidden, true, 'authenticated user mode should not show the guest badge');
+  assert.equal(harness.elements.pokerV2GuestPanel.hidden, true, 'authenticated user mode should not show the restrictions panel');
+});
+
+test('poker v2 ignores stale guest query when there is no matching guest session', async () => {
+  const harness = createHarness({
+    search: '?tableId=table-1&guest=1&autoJoin=1'
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  assert.ok(ws, 'registered user flow should still bootstrap a WS client');
+  assert.equal(ws.guestToken, null);
+  assert.equal(harness.elements.xpBadge.hidden, false, 'registered user mode should keep the XP badge visible');
+  assert.equal(harness.elements.pokerV2GuestBadge.hidden, true, 'registered user mode should not show the guest badge');
+  assert.equal(harness.elements.pokerV2GuestPanel.hidden, true, 'registered user mode should not show the restrictions panel');
+});
+
+test('poker v2 ignores a guest session for a different table', async () => {
+  const guestPayload = Buffer.from(JSON.stringify({ sub: 'guest_user_old' })).toString('base64url');
+  const guestToken = `aaa.${guestPayload}.zzz`;
+  const harness = createHarness({
+    search: '?tableId=table-1&guest=1&autoJoin=1',
+    guestSession: {
+      token: guestToken,
+      tableId: 'guest_table_old',
+      guestId: 'guest_user_old',
+      nickname: 'GuestOld',
+      expiresAt: Date.now() + 3_600_000
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  assert.ok(ws, 'registered user flow should still bootstrap when stale guest storage exists');
+  assert.equal(ws.guestToken, null);
+  assert.equal(harness.elements.xpBadge.hidden, false);
+  assert.equal(harness.elements.pokerV2GuestBadge.hidden, true);
+  assert.equal(harness.elements.pokerV2GuestPanel.hidden, true);
 });
 
 test('poker v2 shows a closed-table countdown, cancels on recovery, and redirects after five seconds', async () => {

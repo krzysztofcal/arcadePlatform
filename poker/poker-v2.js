@@ -299,16 +299,32 @@
     }
   }
 
+  function clearGuestSession(){
+    try {
+      if (window.sessionStorage) window.sessionStorage.removeItem("poker:guestSession");
+    } catch (_err){}
+  }
+
   function readGuestSession(){
     try {
       var raw = window.sessionStorage ? window.sessionStorage.getItem("poker:guestSession") : null;
       if (!raw) return null;
       var parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object" || !parsed.token || !parsed.tableId) return null;
-      if (tableId && parsed.tableId !== tableId) return null;
-      if (Number(parsed.expiresAt) && Number(parsed.expiresAt) <= Date.now()) return null;
+      if (!parsed || typeof parsed !== "object" || !parsed.token || !parsed.tableId){
+        clearGuestSession();
+        return null;
+      }
+      if (tableId && parsed.tableId !== tableId){
+        clearGuestSession();
+        return null;
+      }
+      if (Number(parsed.expiresAt) && Number(parsed.expiresAt) <= Date.now()){
+        clearGuestSession();
+        return null;
+      }
       return parsed;
     } catch (_err){
+      clearGuestSession();
       return null;
     }
   }
@@ -2637,6 +2653,14 @@
     startLiveMode(token);
   }
 
+  function restartAuthenticatedLiveMode(token){
+    if (!tableId || !token) return;
+    isGuestMode = false;
+    currentGuestSession = null;
+    clearGuestSession();
+    restartLiveMode(token);
+  }
+
   function startLiveMode(token){
     if (!window.PokerWsClient || typeof window.PokerWsClient.create !== 'function'){
       state.statusText = LIVE_STATUS_COPY.error;
@@ -2726,7 +2750,7 @@
     authWatchTimer = window.setInterval(function(){
       getAccessToken().then(function(token){
         if (!token || token === currentAccessToken) return;
-        restartLiveMode(token);
+        restartAuthenticatedLiveMode(token);
       }).catch(function(){});
     }, 3000);
   }
@@ -2763,7 +2787,7 @@
           return;
         }
         stopAuthWatch();
-        if (token !== currentAccessToken || !isWsReady()) restartLiveMode(token);
+        if (isGuestMode || token !== currentAccessToken || !isWsReady()) restartAuthenticatedLiveMode(token);
       }).catch(function(){
         currentAccessToken = null;
         applySignedOutState();
@@ -2778,32 +2802,33 @@
     shouldAutoJoin = readAutoJoinParam();
     bindMenu();
     bindControls();
-    isGuestMode = readGuestMode();
-    currentGuestSession = isGuestMode ? readGuestSession() : null;
+    var guestSessionCandidate = readGuestMode() ? readGuestSession() : null;
     if (!tableId){
       startDemoMode();
       return;
     }
-    if (isGuestMode){
-      if (!currentGuestSession || !currentGuestSession.token){
+    bindAuthLifecycle();
+    getAccessToken().then(function(token){
+      if (token){
+        stopAuthWatch();
+        restartAuthenticatedLiveMode(token);
+        return;
+      }
+      currentGuestSession = guestSessionCandidate;
+      isGuestMode = !!(currentGuestSession && currentGuestSession.token);
+      if (isGuestMode){
+        currentAccessToken = null;
+        startLiveMode(currentGuestSession.token);
+        return;
+      }
+      if (readGuestMode()){
         applySignedOutState();
         setError('Guest session expired. Start again from the lobby.');
         return;
       }
       currentAccessToken = null;
-      startLiveMode(currentGuestSession.token);
-      return;
-    }
-    bindAuthLifecycle();
-    getAccessToken().then(function(token){
-      currentAccessToken = token;
-      if (!token){
-        applySignedOutState();
-        startAuthWatch();
-        return;
-      }
-      stopAuthWatch();
-      startLiveMode(token);
+      applySignedOutState();
+      startAuthWatch();
     }).catch(function(){
       applySignedOutState();
       startAuthWatch();
