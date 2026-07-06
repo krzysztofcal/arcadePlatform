@@ -37,6 +37,28 @@ const run = async () => {
     assert.equal(result.reason, "unsupported_alg");
   });
 
+  await withEnv({ SUPABASE_JWT_SECRET: secret, SUPABASE_URL: "https://stageabc.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "service-role" }, async () => {
+    const previousFetch = globalThis.fetch;
+    let receivedAuthorization = null;
+    globalThis.fetch = async (url, options) => {
+      assert.equal(url, "https://stageabc.supabase.co/auth/v1/user");
+      assert.equal(options.headers.apikey, "service-role");
+      receivedAuthorization = options.headers.authorization;
+      return { ok: true, json: async () => ({ id: "remote-user-1", email: "remote.test" }) };
+    };
+    try {
+      const verifySupabaseJwt = await loadVerify();
+      const token = createSupabaseJwt({ sub: "ignored-local-sub", secret, alg: "ES256" });
+      const result = await verifySupabaseJwt(token);
+      assert.equal(result.valid, true);
+      assert.equal(result.userId, "remote-user-1");
+      assert.equal(result.user?.email, "remote.test");
+      assert.equal(receivedAuthorization, "Bearer " + token);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
   await withEnv({ SUPABASE_JWT_SECRET: secret }, async () => {
     const verifySupabaseJwt = await loadVerify();
     const token = createSupabaseJwt({ sub: "user-abc", secret });
