@@ -75,13 +75,74 @@ function safeCompareBase64Url(a, b) {
   return timingSafeEqual(left, right);
 }
 
+function normalizeSupabaseUrl(raw) {
+  const text = typeof raw === "string" ? raw.trim() : "";
+  if (!text) return null;
+  try {
+    const url = new URL(text);
+    if (url.protocol !== "https:") return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+function resolveSupabaseAuthApiKey(env) {
+  return env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_ANON_KEY || env.SUPABASE_ANON_KEY_V2 || "";
+}
+
+function hasRemoteJwtVerifier(env) {
+  return !!(normalizeSupabaseUrl(env.SUPABASE_URL || env.SUPABASE_URL_V2 || "") && resolveSupabaseAuthApiKey(env));
+}
+
+async function verifySupabaseJwtRemote(token, env) {
+  const baseUrl = normalizeSupabaseUrl(env.SUPABASE_URL || env.SUPABASE_URL_V2 || "");
+  const apiKey = resolveSupabaseAuthApiKey(env);
+  if (!baseUrl || !apiKey) {
+    return { valid: false, userId: null, reason: "remote_verify_unconfigured" };
+  }
+
+  let response;
+  try {
+    response = await fetch(baseUrl + "/auth/v1/user", {
+      method: "GET",
+      headers: {
+        apikey: apiKey,
+        authorization: "Bearer " + token,
+      },
+    });
+  } catch {
+    return { valid: false, userId: null, reason: "remote_verify_failed" };
+  }
+
+  if (!response || !response.ok) {
+    return { valid: false, userId: null, reason: "remote_verify_rejected" };
+  }
+
+  let user;
+  try {
+    user = await response.json();
+  } catch {
+    return { valid: false, userId: null, reason: "remote_verify_invalid_response" };
+  }
+
+  const userId = typeof user?.id === "string" ? user.id.trim() : "";
+  if (!userId) {
+    return { valid: false, userId: null, reason: "missing_sub" };
+  }
+
+  return { valid: true, userId, reason: "ok" };
+}
+
 async function verifySupabaseJwt(token, env = process.env) {
   if (!token) {
     return { valid: false, userId: null, reason: "missing_token" };
   }
   const secret = env.SUPABASE_JWT_SECRET || env.SUPABASE_JWT_SECRET_V2 || "";
   if (!secret) {
-    return { valid: false, userId: null, reason: "missing_jwt_secret" };
+    return hasRemoteJwtVerifier(env)
+      ? verifySupabaseJwtRemote(token, env)
+      : { valid: false, userId: null, reason: "missing_jwt_secret" };
   }
 
   const [headerSegment, payloadSegment, signatureSegment] = token.split(".");
@@ -96,7 +157,9 @@ async function verifySupabaseJwt(token, env = process.env) {
   }
 
   if (header.alg !== "HS256") {
-    return { valid: false, userId: null, reason: "unsupported_alg" };
+    return hasRemoteJwtVerifier(env)
+      ? verifySupabaseJwtRemote(token, env)
+      : { valid: false, userId: null, reason: "unsupported_alg" };
   }
 
   const expectedSig = createHmac("sha256", secret)
