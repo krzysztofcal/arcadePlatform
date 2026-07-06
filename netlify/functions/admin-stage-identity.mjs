@@ -36,6 +36,20 @@ function parseProjectRefFromDbUrl(value) {
   }
 }
 
+function parseProjectRefFromSupabaseJwt(value) {
+  const raw = normalizeString(value);
+  if (raw === "") return null;
+  const parts = raw.split(".");
+  if (parts.length < 2) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    const ref = normalizeString((payload && (payload.ref || payload.iss)) || "");
+    return new RegExp("^[a-z0-9-]+" + String.fromCharCode(36), "i").test(ref) ? ref : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
 function resolveEnvironmentContext(env = process.env) {
   return normalizeString(env.CONTEXT || env.NETLIFY_CONTEXT || env.NODE_ENV) || "unknown";
 }
@@ -64,6 +78,7 @@ function buildStageIdentity(env = process.env) {
   const environmentContext = resolveEnvironmentContext(env);
   const supabaseProjectRef = resolveConfiguredProjectRef(env);
   const expectedStageProjectRef = resolveExpectedStageProjectRef(env);
+  const serviceRoleProjectRef = parseProjectRefFromSupabaseJwt(env.SUPABASE_SERVICE_ROLE_KEY);
   const stageProjectRefMatches = !!expectedStageProjectRef && !!supabaseProjectRef && expectedStageProjectRef === supabaseProjectRef;
   const databaseTarget = resolveDatabaseTarget({
     environmentContext,
@@ -79,11 +94,14 @@ function buildStageIdentity(env = process.env) {
     chipsEnabled: env.CHIPS_ENABLED === "1",
     stageProjectRefConfigured: !!expectedStageProjectRef,
     stageProjectRefMatches,
+    serviceRoleProjectRef: serviceRoleProjectRef || null,
+    serviceRoleStageProjectRefMatches: !!expectedStageProjectRef && !!serviceRoleProjectRef && expectedStageProjectRef === serviceRoleProjectRef,
     config: {
       hasSupabaseUrl: !!normalizeString(env.SUPABASE_URL || env.SUPABASE_URL_V2),
       hasSupabaseDbUrl: !!normalizeString(env.SUPABASE_DB_URL),
       hasSupabaseJwtSecret: !!normalizeString(env.SUPABASE_JWT_SECRET || env.SUPABASE_JWT_SECRET_V2),
       hasSupabaseAnonKey: !!normalizeString(env.SUPABASE_ANON_KEY || env.SUPABASE_ANON_KEY_V2),
+      hasSupabaseServiceRoleKey: !!normalizeString(env.SUPABASE_SERVICE_ROLE_KEY),
     },
   };
 }
@@ -134,5 +152,6 @@ export {
   handler,
   parseProjectRefFromDbUrl,
   parseProjectRefFromSupabaseUrl,
+  parseProjectRefFromSupabaseJwt,
   resolveDatabaseTarget,
 };

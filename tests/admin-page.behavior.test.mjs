@@ -358,6 +358,8 @@ function buildContext(options = {}) {
         chipsEnabled: true,
         stageProjectRefConfigured: true,
         stageProjectRefMatches: true,
+        serviceRoleProjectRef: "stageabc",
+        serviceRoleStageProjectRefMatches: true,
         config: {
           hasSupabaseUrl: true,
           hasSupabaseDbUrl: true,
@@ -464,6 +466,7 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.equal(fetchCalls.includes("/.netlify/functions/admin-ops-summary"), true);
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /Database target/);
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /stageabc/);
+  assert.match(document.getElementById("adminOpsIdentity").innerHTML, /Service role stage match/);
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /stage/);
 });
 

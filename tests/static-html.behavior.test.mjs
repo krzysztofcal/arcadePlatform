@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import os from 'node:os';
 import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
+import vm from 'node:vm';
 
 const root = process.cwd();
 const indexHtml = await readFile(path.join(root, 'poker', 'index.html'), 'utf8');
@@ -124,3 +127,58 @@ const cssHeaderBlock = netlifyToml.match(/\[\[headers\]\]\s+for = "\/css\/\*"[\s
 const jsHeaderBlock = netlifyToml.match(/\[\[headers\]\]\s+for = "\/js\/\*"[\s\S]*?(?=\n\[\[headers\]\]|$)/)?.[0] || '';
 assert.doesNotMatch(cssHeaderBlock, /immutable/, 'Stable CSS paths must not be cached as immutable');
 assert.doesNotMatch(jsHeaderBlock, /immutable/, 'Stable JS paths must not be cached as immutable');
+
+
+const supabaseConfigSource = await readFile(path.join(root, "js", "auth", "supabase-config.js"), "utf8");
+assert.doesNotMatch(supabaseConfigSource, /otbqfijerkieoxwpxjnm\.supabase\.co/, "checked-in Supabase browser config should not hardcode the production project");
+
+const supabaseClientSource = await readFile(path.join(root, "js", "auth", "supabaseClient.js"), "utf8");
+{
+  let bridgeCalls = 0;
+  const context = {
+    window: {
+      SUPABASE_CONFIG: { SUPABASE_URL: "", SUPABASE_ANON_KEY: "" },
+      SupabaseAuthBridge: {
+        getAccessToken(){
+          bridgeCalls += 1;
+          return Promise.resolve("fallback-token");
+        },
+      },
+      KLog: { log(){} },
+    },
+    document: {
+      readyState: "loading",
+      addEventListener(){},
+      getElementById(){ return null; },
+      querySelector(){ return null; },
+    },
+    Promise,
+    console,
+  };
+  context.window.window = context.window;
+  vm.createContext(context);
+  vm.runInContext(supabaseClientSource, context, { filename: "js/auth/supabaseClient.js" });
+  const token = await context.window.SupabaseAuthBridge.getAccessToken();
+  assert.equal(token, "fallback-token", "SupabaseAuthBridge should preserve an existing token provider when browser config is empty");
+  assert.equal(bridgeCalls, 1, "preserved SupabaseAuthBridge provider should be called exactly once");
+}
+
+const buildTmpDir = await mkdtemp(path.join(os.tmpdir(), "arcade-build-config-"));
+try {
+  execFileSync(process.execPath, [path.join(root, "scripts", "generate-build-info.js")], {
+    cwd: buildTmpDir,
+    env: {
+      ...process.env,
+      CONTEXT: "deploy-preview",
+      SUPABASE_URL: "https://stageabc.supabase.co",
+      SUPABASE_ANON_KEY: "stage-anon-key",
+    },
+    stdio: "pipe",
+  });
+  const generatedSupabaseConfig = await readFile(path.join(buildTmpDir, "js", "auth", "supabase-config.js"), "utf8");
+  assert.match(generatedSupabaseConfig, /https:\/\/stageabc\.supabase\.co/, "build should publish the deploy context Supabase URL to the browser config");
+  assert.match(generatedSupabaseConfig, /stage-anon-key/, "build should publish the deploy context Supabase anon key to the browser config");
+  assert.doesNotMatch(generatedSupabaseConfig, /otbqfijerkieoxwpxjnm/, "deploy-preview browser config should not retain the production project ref");
+} finally {
+  await rm(buildTmpDir, { recursive: true, force: true });
+}
