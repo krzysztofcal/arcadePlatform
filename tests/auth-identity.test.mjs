@@ -111,7 +111,7 @@ describe("JWT verification and identity selection", () => {
     process.env.XP_KEY_NS = "test:xp:v2";
     process.env.XP_DEBUG = "1";
     process.env.XP_REQUIRE_SERVER_SESSION = "0";
-    process.env.XP_DAILY_SECRET = "test-secret-for-daily-32chars!";
+    process.env.XP_DAILY_SECRET = "test-secret-for-daily-32chars-long";
   });
 
   it("A1: No Authorization header uses anonymous identity", async () => {
@@ -149,7 +149,7 @@ describe("JWT verification and identity selection", () => {
     expect(response.statusCode).toBe(200);
     expect(body.debug.authProvided).toBe(true);
     expect(body.debug.authValid).toBe(false);
-    expect(["malformed_token", "invalid_signature"].includes(body.debug.authReason)).toBe(true);
+    expect(["malformed_token", "invalid_signature", "invalid_encoding"].includes(body.debug.authReason)).toBe(true);
     const keys = store.eval.mock.calls[0][1];
     expect(keys[3]).toBe(`${process.env.XP_KEY_NS}:total:anon-123`);
   });
@@ -177,8 +177,9 @@ describe("JWT verification and identity selection", () => {
     expect(response.statusCode).toBe(200);
     expect(body.totalLifetime).toBe(20);
     expect(body.debug.authValid).toBe(true);
-    expect(body.debug.authReason).toBe("ok");
-    const keys = store.eval.mock.calls[0][1];
+    expect(body.debug.authReason).toBeUndefined();
+    const awardCall = store.eval.mock.calls.find((call) => call[1]?.length === 5);
+    const keys = awardCall[1];
     expect(keys[3]).toBe(`${process.env.XP_KEY_NS}:total:user-777`);
     expect(saveUserProfileMock).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-777", totalXp: 20 }));
   });

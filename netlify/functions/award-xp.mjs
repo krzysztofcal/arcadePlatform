@@ -23,6 +23,7 @@ const SESSION_CAP = asNumber(process.env.XP_SESSION_CAP, 300);
 const DELTA_CAP = asNumber(process.env.XP_DELTA_CAP, 300);
 const SESSION_TTL_SEC = Math.max(0, asNumber(process.env.XP_SESSION_TTL_SEC, 604800));
 const SESSION_TTL_MS = SESSION_TTL_SEC > 0 ? SESSION_TTL_SEC * 1000 : 0;
+const MAX_ANON_CONVERSION_XP = Math.max(0, asNumber(process.env.XP_ANON_CONVERSION_MAX_XP, 100_000));
 const REQUIRE_ACTIVITY = process.env.XP_REQUIRE_ACTIVITY === "1";
 const MIN_ACTIVITY_EVENTS = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_EVENTS, 4));
 const MIN_ACTIVITY_VIS_S = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_VIS_S, 8));
@@ -240,6 +241,61 @@ const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}:${Math.
 const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / (RATE_LIMIT_WINDOW_SEC * 1000))}`;
 const keySessionRegistry = (userId, sessionId) => `${KEY_NS}:registry:${hash(`${userId}|${sessionId}`)}`;
 const keyMigration = (anonId, userId) => `${KEY_NS}:migration:${hash(`${anonId}|${userId}`)}`;
+const keyUserMigration = (userId) => `${KEY_NS}:migration:user:${hash(userId)}`;
+
+const ANON_MIGRATION_SCRIPT = `
+  local anonTotalKey = KEYS[1]
+  local userTotalKey = KEYS[2]
+  local markerKey = KEYS[3]
+  local userMarkerKey = KEYS[4]
+  local conversionCap = tonumber(ARGV[1]) or 0
+
+  local existingUserMarker = redis.call('GET', userMarkerKey)
+  local currentUserTotal = tonumber(redis.call('GET', userTotalKey) or '0')
+  if existingUserMarker then
+    return {0, currentUserTotal, tonumber(existingUserMarker) or 0, 1}
+  end
+
+  local existingMarker = redis.call('GET', markerKey)
+  if existingMarker then
+    return {0, currentUserTotal, tonumber(existingMarker) or 0, 1}
+  end
+
+  local anonTotal = tonumber(redis.call('GET', anonTotalKey) or '0')
+  if anonTotal < 0 then anonTotal = 0 end
+
+  local converted = anonTotal
+  if converted > conversionCap then
+    converted = conversionCap
+  end
+  if converted < 0 then converted = 0 end
+
+  if converted > 0 then
+    currentUserTotal = tonumber(redis.call('INCRBY', userTotalKey, converted))
+    redis.call('DEL', anonTotalKey)
+  end
+
+  redis.call('SET', markerKey, tostring(converted))
+  redis.call('SET', userMarkerKey, tostring(converted))
+  return {converted, currentUserTotal, anonTotal, 0}
+`;
+
+async function migrateAnonXpToUser({ anonId, userId }) {
+  if (!anonId || !userId || anonId === userId) {
+    return { converted: 0, userTotal: null, anonTotal: 0, alreadyConverted: false };
+  }
+  const result = await store.eval(
+    ANON_MIGRATION_SCRIPT,
+    [keyTotal(anonId), keyTotal(userId), keyMigration(anonId, userId), keyUserMigration(userId)],
+    [String(MAX_ANON_CONVERSION_XP)]
+  );
+  return {
+    converted: Math.max(0, Math.floor(Number(result?.[0]) || 0)),
+    userTotal: Math.max(0, Math.floor(Number(result?.[1]) || 0)),
+    anonTotal: Math.max(0, Math.floor(Number(result?.[2]) || 0)),
+    alreadyConverted: Number(result?.[3]) === 1,
+  };
+}
 
 // SECURITY: Session registration
 async function registerSession({ userId, sessionId }) {
@@ -416,6 +472,7 @@ export async function handler(event) {
   const authContext = verifySupabaseJwt(jwtToken);
   const supabaseUserId = authContext.valid ? authContext.userId : null;
   let xpIdentity = supabaseUserId || anonId || null;
+  let migrationResult = null;
 
   const applyDiagnostics = (payload, extra = {}) => {
     if (!DEBUG_ENABLED) return;
@@ -433,6 +490,14 @@ export async function handler(event) {
     debug.authProvided = authContext.provided;
     debug.authValid = authContext.valid;
     debug.authReason = authContext.reason;
+    if (migrationResult) {
+      debug.anonMigration = {
+        converted: migrationResult.converted,
+        anonTotal: migrationResult.anonTotal,
+        alreadyConverted: migrationResult.alreadyConverted,
+        cap: MAX_ANON_CONVERSION_XP,
+      };
+    }
     // NOTE: Do not include raw anonId/xpIdentity in debug to avoid reflecting user input in responses (XSS safety).
     Object.assign(debug, extra);
     payload.debug = debug;
@@ -496,25 +561,13 @@ export async function handler(event) {
 
   xpIdentity = supabaseUserId || anonId || null;
 
-  // If we have a Supabase user and a prior anon id, migrate anon totals once into the
-  // authenticated bucket so status reads and new awards share the same keys.
+  // If we have a Supabase user and a prior anon id, migrate a capped anon total once
+  // into the authenticated bucket so status reads and new awards share the same keys.
   if (supabaseUserId && anonId && anonId !== supabaseUserId) {
-    const markerKey = keyMigration(anonId, supabaseUserId);
     try {
-      const already = await store.get(markerKey);
-      if (!already) {
-        const anonTotals = await getTotals({ userId: anonId, sessionId: querySessionId, now });
-        if (anonTotals && anonTotals.lifetime > 0) {
-          const anonTotalKey = keyTotal(anonId);
-          const userTotalKey = keyTotal(supabaseUserId);
-          const pipe = store.pipeline();
-          pipe.incrby(userTotalKey, anonTotals.lifetime);
-          pipe.del(anonTotalKey);
-          pipe.set(markerKey, String(anonTotals.lifetime));
-          await pipe.exec();
-        } else {
-          await store.set(markerKey, "0");
-        }
+      migrationResult = await migrateAnonXpToUser({ anonId, userId: supabaseUserId });
+      if (migrationResult.converted > 0) {
+        await persistUserProfile({ userId: supabaseUserId, totalXp: migrationResult.userTotal, now });
       }
     } catch (err) {
       klog("xp_migration_failed", { error: err?.message });

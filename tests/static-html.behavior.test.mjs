@@ -69,6 +69,7 @@ assert.match(landingGameJs, /landingPixelBest/, 'landing mini game should persis
 assert.equal([landingIndexHtml, landingAboutHtml, landingPrivacyEnHtml, landingPrivacyPlHtml].every((html) => html.includes('href="https://play.kcswh.pl/xp.html"')), true, 'landing XP badges should link to the play subdomain XP panel');
 assert.equal([landingIndexHtml, landingAboutHtml, landingPrivacyEnHtml, landingPrivacyPlHtml].some((html) => /href="\.\.?\/.*xp\.html"|xp-badge--loading/.test(html)), false, 'landing XP badges should not point to missing local XP pages or show a permanent loading state');
 assert.match(freedoomHtml, /id="doomCanvas"/, 'Freedoom should render the Dwasm canvas target');
+assert.match(freedoomHtml, /window\.XP_REQUIRE_SCORE\s*=\s*0;[\s\S]*src="\/js\/xp\/core\.js" defer/, 'Freedoom should allow activity-based XP because the Dwasm runtime does not emit score pulses');
 assert.match(freedoomHtml, /js\/vendor\/klaro\/klaro\.js/, 'Freedoom should use the shared Klaro consent runtime');
 assert.doesNotMatch(freedoomHtml, /Cookiebot|cookiebot-manager|js-dos|v8\.js-dos\.com/, 'Freedoom should not depend on Cookiebot or js-dos assets');
 assert.doesNotMatch(freedoomJs, /freedoom2\.bin|libarchive|Archive\.open|fetchBlob/, 'Freedoom should boot the source-built Dwasm preload instead of extracting a local archive');
