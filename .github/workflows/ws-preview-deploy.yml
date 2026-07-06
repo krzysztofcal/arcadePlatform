@@ -195,6 +195,29 @@ jobs:
             sudo -n grep -Eq '^PORT=3001$' "$PREVIEW_ENV_FILE" || { echo "preview env file must define PORT=3001"; exit 1; }
             sudo -n grep -Eq '^WS_AUTHORITATIVE_JOIN_ENABLED=1$' "$PREVIEW_ENV_FILE" || { echo "preview env file must define WS_AUTHORITATIVE_JOIN_ENABLED=1"; exit 1; }
             sudo -n grep -Eq '^SUPABASE_DB_URL=.+$' "$PREVIEW_ENV_FILE" || { echo "preview env file must define SUPABASE_DB_URL"; exit 1; }
+            sudo -n grep -Eq '^SUPABASE_STAGE_PROJECT_REF=.+$' "$PREVIEW_ENV_FILE" || { echo "preview env file must define SUPABASE_STAGE_PROJECT_REF"; exit 1; }
+            sudo -n bash -c '
+              set -Eeuo pipefail
+              env_file="$1"
+              set -a
+              . "$env_file"
+              set +a
+              stage_ref="${SUPABASE_STAGE_PROJECT_REF:-}"
+              supabase_url="${SUPABASE_URL:-${SUPABASE_URL_V2:-}}"
+              db_url="${SUPABASE_DB_URL:-}"
+              if [ -z "$stage_ref" ] || [ -z "$supabase_url" ] || [ -z "$db_url" ]; then
+                echo "preview env file must define stage Supabase URL and DB URL"
+                exit 1
+              fi
+              case "$supabase_url" in
+                *"://$stage_ref.supabase.co"*) ;;
+                *) echo "preview env SUPABASE_URL must target SUPABASE_STAGE_PROJECT_REF"; exit 1 ;;
+              esac
+              case "$db_url" in
+                *"postgres.$stage_ref"*|*"//$stage_ref."*|*".$stage_ref."*) ;;
+                *) echo "preview env SUPABASE_DB_URL must target SUPABASE_STAGE_PROJECT_REF"; exit 1 ;;
+              esac
+            ' bash "$PREVIEW_ENV_FILE"
 
             test -f "$TMP_ARCHIVE"
 

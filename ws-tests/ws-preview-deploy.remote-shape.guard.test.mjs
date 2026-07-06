@@ -40,3 +40,16 @@ test("ws preview deploy remote script matches fixed preview app-dir contract", (
   assert.doesNotMatch(text, /readlink -f/);
   assert.doesNotMatch(text, /\/current/);
 });
+
+test("ws preview deploy remote script rejects non-stage Supabase env", () => {
+  const text = workflowText();
+
+  assert.match(text, /preview env file must define SUPABASE_STAGE_PROJECT_REF/);
+  assert.match(text, /stage_ref="\$\{SUPABASE_STAGE_PROJECT_REF:-\}"/);
+  assert.match(text, /supabase_url="\$\{SUPABASE_URL:-\$\{SUPABASE_URL_V2:-\}\}"/);
+  assert.match(text, /db_url="\$\{SUPABASE_DB_URL:-\}"/);
+  assert.match(text, /\*":\/\/\$stage_ref\.supabase\.co"\*/);
+  assert.match(text, /preview env SUPABASE_URL must target SUPABASE_STAGE_PROJECT_REF/);
+  assert.match(text, /\*"postgres\.\$stage_ref"\*\|\*"\/\/\$stage_ref\."\*\|\*"\.\$stage_ref\."\*/);
+  assert.match(text, /preview env SUPABASE_DB_URL must target SUPABASE_STAGE_PROJECT_REF/);
+});

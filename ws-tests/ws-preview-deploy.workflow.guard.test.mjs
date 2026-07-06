@@ -81,6 +81,9 @@ test("ws preview deploy workflow keeps preview runtime contract and does not man
   assert.match(text, /http:\/\/127\.0\.0\.1:3001\/healthz/);
   assert.match(text, /preview env file must define WS_AUTHORITATIVE_JOIN_ENABLED=1/);
   assert.match(text, /preview env file must define SUPABASE_DB_URL/);
+  assert.match(text, /preview env file must define SUPABASE_STAGE_PROJECT_REF/);
+  assert.match(text, /preview env SUPABASE_URL must target SUPABASE_STAGE_PROJECT_REF/);
+  assert.match(text, /preview env SUPABASE_DB_URL must target SUPABASE_STAGE_PROJECT_REF/);
   assert.doesNotMatch(text, /\/etc\/caddy\/Caddyfile/);
   assert.doesNotMatch(text, /infra\/vps\/Caddyfile/);
   assert.doesNotMatch(text, /Caddyfile\.preview\.example/);
@@ -121,5 +124,6 @@ test("poker deployment doc states the unified preview Caddy ownership model", ()
   assert.match(text, /http:\/\/127\.0\.0\.1:3001\/healthz/);
   assert.match(text, /WS_AUTHORITATIVE_JOIN_ENABLED=1/);
   assert.match(text, /SUPABASE_DB_URL/);
+  assert.match(text, /SUPABASE_STAGE_PROJECT_REF/);
   assert.doesNotMatch(text, /Caddyfile\.preview\.example/);
 });
