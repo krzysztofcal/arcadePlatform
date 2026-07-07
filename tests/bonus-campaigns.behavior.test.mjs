@@ -13,6 +13,7 @@ const START_AT = "2025-06-01T00:00:00.000Z";
 const BEFORE_USER = "00000000-0000-4000-8000-000000000001";
 const AFTER_USER = "00000000-0000-4000-8000-000000000003";
 const ALLOWLIST_USER = "00000000-0000-4000-8000-000000000004";
+const LIMITED_USER = "00000000-0000-4000-8000-000000000005";
 
 function createDeps() {
   const welcomeCampaign = {
@@ -60,11 +61,27 @@ function createDeps() {
     claim_policy: "daily",
     max_total_claims: null,
   };
-  const campaigns = [welcomeCampaign, allowlistCampaign, dailyCampaign];
+  const limitedCampaign = {
+    id: "10000000-0000-4000-8000-000000000004",
+    code: "limited-2026",
+    title: "Limited Bonus",
+    description: "Only one total claim.",
+    campaign_type: "limited",
+    amount: 75,
+    status: "active",
+    starts_at: START_AT,
+    ends_at: null,
+    eligibility_type: "all_accounts",
+    eligibility_config: {},
+    claim_policy: "once",
+    max_total_claims: 1,
+  };
+  const campaigns = [welcomeCampaign, allowlistCampaign, dailyCampaign, limitedCampaign];
   const users = new Map([
     [BEFORE_USER, "2025-05-31T23:59:59.000Z"],
     [AFTER_USER, "2025-06-02T12:00:00.000Z"],
     [ALLOWLIST_USER, "2025-01-02T12:00:00.000Z"],
+    [LIMITED_USER, "2025-06-02T12:00:00.000Z"],
   ]);
   const allowlist = new Set([`${allowlistCampaign.id}:${ALLOWLIST_USER}`]);
   const txByKey = new Map();
@@ -74,6 +91,9 @@ function createDeps() {
     async executeSql(query, params = []) {
       const text = String(query).toLowerCase().replace(/\s+/g, " ");
       if (text.includes("from public.bonus_campaigns")) {
+        if (text.includes("for update")) {
+          return campaigns.filter((campaign) => campaign.id === params[0]);
+        }
         const code = params[0] || null;
         return code ? campaigns.filter((campaign) => campaign.code === code) : campaigns;
       }
@@ -82,6 +102,14 @@ function createDeps() {
         return createdAt ? [{ created_at: createdAt }] : [];
       }
       if (text.includes("from public.bonus_claims")) {
+        if (text.includes("count(*)")) {
+          const campaignId = params[0];
+          return [{
+            claim_count: [...claimsByCampaignUser.values()]
+              .filter((claim) => claim.campaign_id === campaignId)
+              .length,
+          }];
+        }
         const key = `${params[0]}:${params[1]}:${params[2]}`;
         const row = claimsByCampaignUser.get(key);
         return row ? [row] : [];
@@ -122,6 +150,11 @@ function createDeps() {
       };
       txByKey.set(payload.idempotencyKey, transaction);
       return { transaction, entries: payload.entries, account: { balance: payload.metadata.amount } };
+    },
+    async beginSql(fn) {
+      return await fn({
+        unsafe: (query, params = []) => deps.executeSql(query, params),
+      });
     },
     posts,
     claimsByCampaignUser,
@@ -219,11 +252,34 @@ test("daily claim policy grants once per UTC day", async () => {
   assert.equal(deps.claimsByCampaignUser.size, 2);
 });
 
+test("max_total_claims makes exhausted campaigns ineligible", async () => {
+  const deps = createDeps();
+  await claimBonusCampaign(AFTER_USER, "limited-2026", deps);
+
+  const status = await getBonusCampaignStatus(LIMITED_USER, "limited-2026", deps);
+
+  assert.equal(status.eligible, false);
+  assert.equal(status.alreadyClaimed, false);
+  assert.equal(status.reason, "max_total_claims_reached");
+});
+
+test("claim path does not post ledger transaction after max_total_claims is reached", async () => {
+  const deps = createDeps();
+  const first = await claimBonusCampaign(AFTER_USER, "limited-2026", deps);
+  const second = await claimBonusCampaign(LIMITED_USER, "limited-2026", deps);
+
+  assert.equal(first.claimed, true);
+  assert.equal(second.claimed, false);
+  assert.equal(second.reason, "max_total_claims_reached");
+  assert.equal(deps.posts.length, 1);
+  assert.equal(deps.claimsByCampaignUser.size, 1);
+});
+
 test("list helper returns public campaign status summaries", async () => {
   const deps = createDeps();
   const list = await listBonusCampaignStatuses(ALLOWLIST_USER, deps);
 
-  assert.equal(list.items.length, 3);
+  assert.equal(list.items.length, 4);
   assert.deepEqual(
     list.items.map((item) => ({
       code: item.code,
@@ -235,6 +291,7 @@ test("list helper returns public campaign status summaries", async () => {
       { code: "welcome-2026", claimPolicy: "once", eligible: false, amount: 500 },
       { code: "vip-2026", claimPolicy: "once", eligible: true, amount: 250 },
       { code: "daily-login", claimPolicy: "daily", eligible: true, amount: 25 },
+      { code: "limited-2026", claimPolicy: "once", eligible: true, amount: 75 },
     ],
   );
 });
