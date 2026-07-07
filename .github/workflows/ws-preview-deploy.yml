@@ -188,6 +188,7 @@ jobs:
             command -v tar >/dev/null 2>&1 || { echo "preview VPS missing tar"; exit 1; }
             command -v rsync >/dev/null 2>&1 || { echo "preview VPS missing rsync"; exit 1; }
 
+            sudo -n bash -c 'true' >/dev/null 2>&1 || { echo "preview deploy user must be allowed to run sudo -n bash for ws-preview deploy"; exit 1; }
             sudo -n systemctl cat "$PREVIEW_SERVICE_NAME" >/dev/null 2>&1 || { echo "missing preview systemd unit: $PREVIEW_SERVICE_NAME"; exit 1; }
             sudo -n test -d "$PREVIEW_BASE_DIR" || { echo "missing preview base dir: $PREVIEW_BASE_DIR"; exit 1; }
             sudo -n test -d "$PREVIEW_APP_DIR" || { echo "missing preview app dir: $PREVIEW_APP_DIR"; exit 1; }

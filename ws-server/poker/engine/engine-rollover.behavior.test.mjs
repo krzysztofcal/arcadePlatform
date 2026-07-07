@@ -9,6 +9,8 @@ import {
 } from "./poker-engine.mjs";
 import { dealHoleCards, deriveDeck, toCardCodes } from "../shared/poker-primitives.mjs";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 function initialCore() {
   return {
     roomId: "table_engine_roll",
@@ -167,6 +169,7 @@ test("replaceBrokeBotsForNextHand swaps too-short bot only after settlement", ()
   const replacementBot = recycled.coreState.members.find((member) => member.seat === 2);
   assert.ok(replacementBot);
   assert.notEqual(replacementBot.userId, "bot_old");
+  assert.match(replacementBot.userId, UUID_RE);
   assert.equal(recycled.coreState.seatDetailsByUserId[replacementBot.userId].isBot, true);
   assert.equal(recycled.settledState.stacks[replacementBot.userId], 100);
   assert.equal("bot_old" in recycled.settledState.stacks, false);

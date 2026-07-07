@@ -50,6 +50,14 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
   - reconnect
 - DB is NOT source of truth
 
+### WS Runtime Logs
+- For preview incidents, agents may inspect:
+  - `sudo journalctl -u ws-server-preview -f`
+  - `journalctl -u ws-server-preview.service`
+- For production WS incidents, agents may inspect:
+  - `journalctl -u ws-server.service`
+- When debugging a specific poker table, filter by `tableId` and correlate `ws_state_persist_*`, `ws_settled_rollover_*`, `ws_bot_autoplay_*`, `ws_table_janitor_*`, and cleanup logs with `poker_state`, `poker_actions`, `poker_seats`, and `poker_tables`.
+
 ---
 
 ## 🧩 Agent Roles

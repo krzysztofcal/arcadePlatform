@@ -65,8 +65,10 @@ test("stage migration helper refuses non-stage targets and unrelated remote migr
   assert.match(text, /SUPABASE_STAGE_PROJECT_REF is required/);
   assert.match(text, /does not contain SUPABASE_STAGE_PROJECT_REF/);
   assert.match(text, /Stage DB contains migration versions that are not present in this checkout/);
-  assert.match(text, /Stage already has this migration version; bump timestamp or reset\/recreate stage/);
+  assert.match(text, /Stage already has this migration version but no recorded contents hash; bump timestamp or reset\/recreate stage/);
+  assert.match(text, /Stage already has this migration version with different contents; bump timestamp or reset\/recreate stage/);
   assert.match(text, /--changed-from/);
+  assert.match(text, /schema_migration_files/);
   assert.match(text, /Refusing to continue/);
   assert.doesNotMatch(text, /drop schema|drop database|truncate/i);
 });

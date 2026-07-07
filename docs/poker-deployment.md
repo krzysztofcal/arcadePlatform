@@ -146,8 +146,24 @@ The preview VPS contract is:
 - Optional close grace: `POKER_TABLE_CLOSE_GRACE_MS=60000` keeps newly created empty tables open for 60s before cleanup may close them
 
 Preview deploys unpack into a temporary directory under `/tmp/arcadeplatform-ws-preview` and then sync the extracted files into `/opt/arcade-ws-preview/ws-server`.
-The workflow fails fast before mutating preview app contents when the preview base root, app dir, env file, service, Node.js, `tar`, `rsync`, `curl`, required `PORT=3001`, `WS_AUTHORITATIVE_JOIN_ENABLED=1`, non-empty `SUPABASE_DB_URL`, or stage Supabase project-ref match is missing.
+The `WS_PREVIEW_USER` SSH account must have passwordless sudo available to non-interactive GitHub Actions sessions. The workflow checks this with `sudo -n bash -c 'true'` before touching preview app contents because it needs elevated access to validate the systemd unit, read the preview env file, sync files into `/opt/arcade-ws-preview`, and restart `ws-server-preview.service`. Do not use `sudo -n -v` as the local smoke check here: it can still require a password when the same user has both normal passworded sudo rules and command-specific `NOPASSWD` rules.
+The workflow fails fast before mutating preview app contents when passwordless sudo, the preview base root, app dir, env file, service, Node.js, `tar`, `rsync`, `curl`, required `PORT=3001`, `WS_AUTHORITATIVE_JOIN_ENABLED=1`, non-empty `SUPABASE_DB_URL`, or stage Supabase project-ref match is missing.
 Preview routing stays in `infra/vps/Caddyfile`, which must continue to define both the `ws.kcswh.pl -> 127.0.0.1:3000` and `ws-preview.kcswh.pl -> 127.0.0.1:3001` site blocks.
+
+Minimal preview sudoers coverage for `WS_PREVIEW_USER` must include the concrete programs used by the workflow: `systemctl`, `test`, `grep`, `bash`, `rm`, `mkdir`, `tar`, and `rsync`. On Ubuntu, verify the actual binary paths with `command -v systemctl test grep bash rm mkdir tar rsync`, then keep `/etc/sudoers.d/ws-preview-deploy` mode `0440`.
+
+Quick VPS check for the current `copilot` deploy user:
+
+```sh
+sudo -u copilot sudo -n systemctl cat ws-server-preview.service >/dev/null && echo systemctl-ok
+sudo -u copilot sudo -n test -d /opt/arcade-ws-preview && echo test-ok
+sudo -u copilot sudo -n grep -Eq '^PORT=3001$' /opt/arcade-ws-preview/.env.preview && echo grep-ok
+sudo -u copilot sudo -n bash -c 'test -f "$1"' bash /opt/arcade-ws-preview/.env.preview && echo bash-ok
+sudo -u copilot sudo -n mkdir -p /tmp/arcadeplatform-ws-preview/sudo-check && echo mkdir-ok
+sudo -u copilot sudo -n rm -rf /tmp/arcadeplatform-ws-preview/sudo-check && echo rm-ok
+sudo -u copilot sudo -n rsync --version >/dev/null && echo rsync-ok
+sudo -u copilot sudo -n tar --version >/dev/null && echo tar-ok
+```
 
 ### Preview secrets
 

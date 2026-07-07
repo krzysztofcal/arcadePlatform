@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   dealHoleCards,
   deriveDeck,
@@ -12,6 +13,17 @@ const MIN_PLAYERS_TO_BOOTSTRAP = 2;
 const ENGINE_ACTIONS = new Set(["FOLD", "CHECK", "CALL", "BET", "RAISE"]);
 const MIN_STACK_TO_JOIN_HAND = 2;
 const BOT_REPLACEMENT_STACK = 100;
+
+function toHex(bytes) {
+  return Buffer.from(bytes).toString("hex");
+}
+
+function toUuidLike(input) {
+  const bytes = Buffer.from(createHash("sha256").update(input).digest().subarray(0, 16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  return `${toHex(bytes.subarray(0, 4))}-${toHex(bytes.subarray(4, 6))}-${toHex(bytes.subarray(6, 8))}-${toHex(bytes.subarray(8, 10))}-${toHex(bytes.subarray(10, 16))}`;
+}
 
 function toInt(value) {
   if (!Number.isFinite(value)) {
@@ -184,12 +196,13 @@ export function buildNextHandStateFromSettled({ tableId, coreState, settledState
   });
 }
 
-function nextBotReplacementUserId({ seatNo, version, existingUserIds }) {
-  const base = `bot_auto_${Number(seatNo)}_${Number(version)}`;
+function nextBotReplacementUserId({ tableId, seatNo, version, existingUserIds }) {
+  const baseInput = `bot_replacement:${tableId ?? ""}:${Number(seatNo)}:${Number(version)}`;
+  const base = toUuidLike(baseInput);
   let candidate = base;
   let suffix = 1;
   while (existingUserIds.has(candidate)) {
-    candidate = `${base}_${suffix}`;
+    candidate = toUuidLike(`${baseInput}:${suffix}`);
     suffix += 1;
   }
   existingUserIds.add(candidate);
@@ -229,6 +242,7 @@ export function replaceBrokeBotsForNextHand({ coreState, settledState, nextVersi
     if (!Number.isFinite(stack) || stack >= MIN_STACK_TO_JOIN_HAND) continue;
 
     const replacementUserId = nextBotReplacementUserId({
+      tableId: coreState.roomId,
       seatNo: member.seat,
       version: nextVersion,
       existingUserIds
