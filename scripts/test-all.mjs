@@ -48,6 +48,7 @@ run("node", ["tests/poker-bot-cashout.not-bot.unit.test.mjs"], "poker-bot-cashou
 run("node", ["tests/chips-ledger.escrow-only.null-user.unit.test.mjs"], "chips-ledger-escrow-only-null-user");
 run("node", ["tests/chips-ledger.human.buyin.unit.test.mjs"], "chips-ledger-human-buyin");
 run("node", ["tests/welcome-bonus.behavior.test.mjs"], "welcome-bonus-behavior");
+run("node", ["tests/bonus-campaigns-endpoint.behavior.test.mjs"], "bonus-campaigns-endpoint-behavior");
 run("node", ["tests/poker-stakes-ui.test.mjs"], "poker-stakes-ui");
 run("node", ["tests/poker-ws-client.test.mjs"], "poker-ws-client");
 run("node", ["tests/poker-csp-ws-allowlist.test.mjs"], "poker-csp-ws-allowlist");

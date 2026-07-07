@@ -5,6 +5,7 @@
   var LEDGER_URL = '/.netlify/functions/chips-ledger';
   var TX_URL = '/.netlify/functions/chips-tx';
   var WELCOME_BONUS_URL = '/.netlify/functions/welcome-bonus';
+  var BONUS_CAMPAIGNS_URL = '/.netlify/functions/bonus-campaigns';
   var AUTH_CACHE_MS = 60000;
 
   var state = { token: null, checkedAt: 0, tokenPromise: null };
@@ -278,6 +279,22 @@
     return payload.data;
   }
 
+  async function fetchBonusCampaigns(){
+    var payload = await authedFetchWithRetry(BONUS_CAMPAIGNS_URL, { method: 'GET' });
+    return payload.data;
+  }
+
+  async function claimBonusCampaign(code){
+    var payload = await authedFetchWithRetry(BONUS_CAMPAIGNS_URL, {
+      method: 'POST',
+      body: JSON.stringify({ code: code }),
+    });
+    if (payload && payload.data && payload.data.claimed){
+      emit('chips:tx-complete', payload.data);
+    }
+    return payload.data;
+  }
+
   async function fetchState(options){
     var limit = options && Number.isInteger(options.limit) ? options.limit : 10;
     var balance = await fetchBalance();
@@ -293,6 +310,8 @@
     postTransaction: postTransaction,
     fetchWelcomeBonusStatus: fetchWelcomeBonusStatus,
     claimWelcomeBonus: claimWelcomeBonus,
+    fetchBonusCampaigns: fetchBonusCampaigns,
+    claimBonusCampaign: claimBonusCampaign,
     fetchState: fetchState,
     refreshAuth: function(){ return fetchAuthToken(true); }
   };
