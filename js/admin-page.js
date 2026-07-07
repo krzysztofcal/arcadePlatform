@@ -325,10 +325,18 @@
     return "";
   }
 
+  function canEditSafeCampaignFields(item){
+    if (!item) return false;
+    return (item.status === "scheduled" || item.status === "paused") && Number(item.claimCount || 0) === 0;
+  }
+
   function campaignStatusActions(item){
     var status = item && item.status;
     var actions = [];
-    actions.push('<button class="admin-btn admin-btn--ghost" type="button" data-campaign-action="edit" data-campaign-id="' + escapeHtml(item.id) + '">Edit draft</button>');
+    var canEditSafeFields = canEditSafeCampaignFields(item);
+    var loadAction = status === "draft" || canEditSafeFields ? "edit" : "view";
+    var loadLabel = status === "draft" ? "Edit draft" : (canEditSafeFields ? "Edit safe fields" : "View");
+    actions.push('<button class="admin-btn admin-btn--ghost" type="button" data-campaign-action="' + loadAction + '" data-campaign-id="' + escapeHtml(item.id) + '">' + loadLabel + "</button>");
     if (status === "draft" || status === "scheduled" || status === "paused"){
       actions.push('<button class="admin-btn admin-btn--primary" type="button" data-campaign-action="set_status" data-campaign-status="active" data-campaign-id="' + escapeHtml(item.id) + '">Activate</button>');
     }
@@ -373,6 +381,10 @@
     var form = nodes.bonusCampaignForm;
     if (!form) return;
     var campaign = item || {};
+    var isExistingCampaign = !!campaign.id;
+    var canEditSafeFields = canEditSafeCampaignFields(campaign);
+    var isReadOnlyCampaign = isExistingCampaign && campaign.status !== "draft" && !canEditSafeFields;
+    var safeFieldNames = new Set(["title", "description", "startsAt", "endsAt", "maxTotalClaims"]);
     Array.prototype.forEach.call(form.elements || [], function(field){
       if (!field || !field.name) return;
       if (field.name === "campaignId") field.value = campaign.id || "";
@@ -396,9 +408,15 @@
           field.value = "{}";
         }
       }
-      if (campaign.id && campaign.status !== "draft" && field.name !== "campaignId"){
+      if (field.name === "campaignId"){
+        field.disabled = false;
+      } else if (field.name === "code"){
+        field.disabled = isExistingCampaign;
+      } else if (canEditSafeFields){
+        field.disabled = !safeFieldNames.has(field.name);
+      } else if (isReadOnlyCampaign){
         field.disabled = true;
-      } else if (field.name !== "code" || !campaign.id) {
+      } else {
         field.disabled = false;
       }
     });
@@ -407,6 +425,21 @@
 
   function readBonusCampaignForm(){
     var raw = formToObject(nodes.bonusCampaignForm);
+    var selectedCampaign = raw.campaignId ? findBonusCampaign(raw.campaignId) : null;
+    if (selectedCampaign){
+      raw.title = raw.title != null ? raw.title : selectedCampaign.title;
+      raw.description = raw.description != null ? raw.description : selectedCampaign.description;
+      raw.campaignType = raw.campaignType != null ? raw.campaignType : selectedCampaign.campaignType;
+      raw.amount = raw.amount != null ? raw.amount : selectedCampaign.amount;
+      raw.startsAt = raw.startsAt != null ? raw.startsAt : formatDateTimeLocalValue(selectedCampaign.startsAt);
+      raw.endsAt = raw.endsAt != null ? raw.endsAt : formatDateTimeLocalValue(selectedCampaign.endsAt);
+      raw.eligibilityType = raw.eligibilityType != null ? raw.eligibilityType : selectedCampaign.eligibilityType;
+      raw.eligibilityConfig = raw.eligibilityConfig != null
+        ? raw.eligibilityConfig
+        : JSON.stringify(selectedCampaign.eligibilityConfig || {}, null, 2);
+      raw.claimPolicy = raw.claimPolicy != null ? raw.claimPolicy : selectedCampaign.claimPolicy;
+      raw.maxTotalClaims = raw.maxTotalClaims != null ? raw.maxTotalClaims : selectedCampaign.maxTotalClaims;
+    }
     var config = {};
     try {
       config = raw.eligibilityConfig ? JSON.parse(raw.eligibilityConfig) : {};
@@ -1098,7 +1131,7 @@
           campaign: campaign,
         }),
       });
-      setStatus(isUpdate ? "Bonus campaign draft updated." : "Bonus campaign draft created.", "success");
+      setStatus(isUpdate ? "Bonus campaign updated." : "Bonus campaign draft created.", "success");
       fillBonusCampaignForm(null);
       state.bonusCampaigns.page = 1;
       await loadBonusCampaigns(1);
@@ -1583,11 +1616,15 @@
   }
 
   function handleCampaignAction(action, campaignId, status){
-    if (action === "edit"){
+    if (action === "edit" || action === "view"){
       var campaign = findBonusCampaign(campaignId);
       fillBonusCampaignForm(campaign);
-      if (campaign && campaign.status !== "draft"){
-        setStatus("Only draft campaigns can be edited. Use status controls for active campaigns.", "info");
+      if (campaign && campaign.status === "draft"){
+        setStatus("Draft campaign loaded for editing.", "info");
+      } else if (campaign && canEditSafeCampaignFields(campaign)){
+        setStatus("Campaign has no claims yet. Safe fields are loaded for editing.", "info");
+      } else if (campaign){
+        setStatus("Campaign is not draft; fields are read-only. Use status controls for active campaigns.", "info");
       }
       return;
     }

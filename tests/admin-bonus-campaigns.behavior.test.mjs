@@ -8,6 +8,8 @@ const {
 const ADMIN_USER_ID = "00000000-0000-4000-8000-000000000010";
 const DRAFT_ID = "10000000-0000-4000-8000-000000000001";
 const ACTIVE_ID = "10000000-0000-4000-8000-000000000002";
+const PAUSED_EMPTY_ID = "10000000-0000-4000-8000-000000000003";
+const PAUSED_CLAIMED_ID = "10000000-0000-4000-8000-000000000004";
 
 function campaignRow(overrides = {}) {
   return {
@@ -49,6 +51,18 @@ function createHandler(options = {}) {
       code: "active-test",
       status: "active",
       claim_count: 2,
+    })],
+    [PAUSED_EMPTY_ID, campaignRow({
+      id: PAUSED_EMPTY_ID,
+      code: "paused-empty-test",
+      status: "paused",
+      claim_count: 0,
+    })],
+    [PAUSED_CLAIMED_ID, campaignRow({
+      id: PAUSED_CLAIMED_ID,
+      code: "paused-claimed-test",
+      status: "paused",
+      claim_count: 1,
     })],
   ]);
   const calls = [];
@@ -121,7 +135,7 @@ test("admin-bonus-campaigns lists campaigns with claim counts", async () => {
   const body = JSON.parse(response.body);
 
   assert.equal(response.statusCode, 200);
-  assert.equal(body.items.length, 2);
+  assert.equal(body.items.length, 4);
   assert.equal(body.items[0].claimPolicy, "daily");
   assert.equal(body.items[1].claimCount, 2);
 });
@@ -165,6 +179,75 @@ test("admin-bonus-campaigns rejects edits outside draft status", async () => {
       eligibilityType: "all_accounts",
       eligibilityConfig: {},
       claimPolicy: "once",
+    },
+  }));
+
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(JSON.parse(response.body), { error: "campaign_not_draft" });
+});
+
+test("admin-bonus-campaigns allows safe date edits for paused campaigns without claims", async () => {
+  const { handler } = createHandler();
+  const response = await handler(createEvent("POST", {
+    action: "update",
+    campaignId: PAUSED_EMPTY_ID,
+    campaign: {
+      title: "Paused Retimed",
+      description: "Retimed paused campaign",
+      campaignType: "daily",
+      amount: 50,
+      startsAt: "2026-07-15T00:00:00.000Z",
+      endsAt: "2026-07-22T00:00:00.000Z",
+      eligibilityType: "all_accounts",
+      eligibilityConfig: {},
+      claimPolicy: "daily",
+      maxTotalClaims: 200,
+    },
+  }));
+  const body = JSON.parse(response.body);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.campaign.status, "paused");
+  assert.equal(body.campaign.claimCount, 0);
+  assert.equal(body.campaign.title, "Paused Retimed");
+  assert.equal(body.campaign.startsAt, "2026-07-15T00:00:00.000Z");
+  assert.equal(body.campaign.endsAt, "2026-07-22T00:00:00.000Z");
+  assert.equal(body.campaign.maxTotalClaims, 200);
+});
+
+test("admin-bonus-campaigns keeps immutable fields locked after publication", async () => {
+  const { handler } = createHandler();
+  const response = await handler(createEvent("POST", {
+    action: "update",
+    campaignId: PAUSED_EMPTY_ID,
+    campaign: {
+      title: "Paused Retimed",
+      campaignType: "daily",
+      amount: 999,
+      startsAt: "2026-07-15T00:00:00.000Z",
+      eligibilityType: "all_accounts",
+      eligibilityConfig: {},
+      claimPolicy: "daily",
+    },
+  }));
+
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(JSON.parse(response.body), { error: "campaign_immutable_fields_locked" });
+});
+
+test("admin-bonus-campaigns rejects paused campaign edits after claims exist", async () => {
+  const { handler } = createHandler();
+  const response = await handler(createEvent("POST", {
+    action: "update",
+    campaignId: PAUSED_CLAIMED_ID,
+    campaign: {
+      title: "Paused Retimed",
+      campaignType: "daily",
+      amount: 50,
+      startsAt: "2026-07-15T00:00:00.000Z",
+      eligibilityType: "all_accounts",
+      eligibilityConfig: {},
+      claimPolicy: "daily",
     },
   }));
 

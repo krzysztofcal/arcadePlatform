@@ -23,6 +23,7 @@ const STATUS_TRANSITIONS = {
   paused: new Set(["active", "ended"]),
   ended: new Set([]),
 };
+const SAFE_UPDATE_STATUSES = new Set(["scheduled", "paused"]);
 
 function normalizeCampaignRow(row) {
   if (!row) return null;
@@ -127,6 +128,44 @@ function parseCampaignInput(payload = {}, { requireCode = true } = {}) {
     claimPolicy: parseEnum(payload.claimPolicy ?? payload.claim_policy ?? "once", CLAIM_POLICIES, "invalid_claim_policy"),
     maxTotalClaims: parseOptionalPositiveInt(payload.maxTotalClaims ?? payload.max_total_claims, "invalid_max_total_claims"),
   };
+}
+
+function normalizeStable(value) {
+  if (!value || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(normalizeStable);
+  const sorted = {};
+  Object.keys(value).sort().forEach((key) => {
+    sorted[key] = normalizeStable(value[key]);
+  });
+  return sorted;
+}
+
+function stableJson(value) {
+  return JSON.stringify(normalizeStable(value));
+}
+
+function timestampsEqual(left, right) {
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  return Date.parse(left) === Date.parse(right);
+}
+
+function assertSafePublishedUpdate(current, input) {
+  if (!SAFE_UPDATE_STATUSES.has(current.status) || current.claimCount !== 0) {
+    throw conflict("campaign_not_draft", "campaign_not_draft");
+  }
+  if (
+    input.campaignType !== current.campaignType ||
+    input.amount !== current.amount ||
+    input.eligibilityType !== current.eligibilityType ||
+    input.claimPolicy !== current.claimPolicy ||
+    stableJson(input.eligibilityConfig) !== stableJson(current.eligibilityConfig || {})
+  ) {
+    throw conflict("campaign_immutable_fields_locked", "campaign_immutable_fields_locked");
+  }
+  if (!timestampsEqual(input.startsAt, current.startsAt) && current.status !== "scheduled" && current.status !== "paused") {
+    throw conflict("campaign_immutable_fields_locked", "campaign_immutable_fields_locked");
+  }
 }
 
 async function listBonusCampaigns(filters = {}, runSql = executeSql) {
@@ -269,7 +308,7 @@ async function updateBonusCampaign(id, payload = {}, runSql = executeSql) {
   const current = await fetchCampaignById(id, runSql);
   if (!current) throw notFound("campaign_not_found", "campaign_not_found");
   if (current.status !== "draft") {
-    throw conflict("campaign_not_draft", "campaign_not_draft");
+    assertSafePublishedUpdate(current, input);
   }
   const rows = await runSql(
     `
@@ -285,7 +324,7 @@ set title = $2,
     claim_policy = $10,
     max_total_claims = $11
 where id = $1
-returning *, 0::bigint as claim_count;
+returning *, $12::bigint as claim_count;
 `,
     [
       id,
@@ -299,6 +338,7 @@ returning *, 0::bigint as claim_count;
       JSON.stringify(input.eligibilityConfig),
       input.claimPolicy,
       input.maxTotalClaims,
+      current.claimCount,
     ],
   );
   return normalizeCampaignRow(rows?.[0] || null);

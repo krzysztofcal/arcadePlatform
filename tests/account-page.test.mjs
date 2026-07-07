@@ -108,6 +108,7 @@ function seedNodes(document) {
     "chipLedgerEmpty",
     "welcomeBonusPanel",
     "welcomeBonusTitle",
+    "bonusCampaignList",
     "welcomeBonusClaimButton",
     "welcomeBonusStatus",
   ];
@@ -860,7 +861,7 @@ test("welcome bonus panel is hidden before backend eligibility resolves", async 
     fetchLedger() {
       return Promise.resolve({ items: [], nextCursor: null });
     },
-    fetchWelcomeBonusStatus() {
+    fetchBonusCampaigns() {
       return new Promise(resolve => {
         resolveStatus = resolve;
       });
@@ -884,7 +885,7 @@ test("welcome bonus panel is hidden before backend eligibility resolves", async 
   assert.equal(panel.hidden, true);
   assert.equal(panel.style.display, "none");
 
-  resolveStatus({ eligible: false, alreadyClaimed: true, amount: 500 });
+  resolveStatus({ items: [] });
   await flush();
   await flush();
 
@@ -892,7 +893,7 @@ test("welcome bonus panel is hidden before backend eligibility resolves", async 
   assert.equal(panel.style.display, "none");
 });
 
-test("shows welcome bonus claim from backend eligibility and claims on click", async () => {
+test("shows generic bonus campaigns from backend eligibility and claims by code", async () => {
   const calls = [];
   const chipsClient = {
     fetchBalance() {
@@ -901,13 +902,23 @@ test("shows welcome bonus claim from backend eligibility and claims on click", a
     fetchLedger() {
       return Promise.resolve({ items: [], nextCursor: null });
     },
-    fetchWelcomeBonusStatus() {
+    fetchBonusCampaigns() {
       calls.push("status");
-      return Promise.resolve({ eligible: true, alreadyClaimed: false, amount: 500 });
+      return Promise.resolve({
+        items: [{
+          code: "daily-active-2026",
+          title: "Daily bonus",
+          description: "Daily active player bonus.",
+          eligible: true,
+          alreadyClaimed: false,
+          amount: 20,
+          claimPolicy: "daily",
+        }],
+      });
     },
-    claimWelcomeBonus() {
-      calls.push("claim");
-      return Promise.resolve({ claimed: true, amount: 500, transactionId: "tx-1" });
+    claimBonusCampaign(code) {
+      calls.push(`claim:${code}`);
+      return Promise.resolve({ claimed: true, code, amount: 20, transactionId: "tx-1" });
     },
   };
   const { windowObj, document } = buildContext(chipsClient);
@@ -926,18 +937,21 @@ test("shows welcome bonus claim from backend eligibility and claims on click", a
 
   assert.deepEqual(calls, ["status"]);
   assert.equal(document.getElementById("welcomeBonusPanel").hidden, false);
-  assert.equal(document.getElementById("welcomeBonusClaimButton").textContent, "Claim your 500 CH welcome bonus");
+  const bonusButton = findByClassToken(document.getElementById("bonusCampaignList"), "account-bonus__btn");
+  assert.ok(bonusButton);
+  assert.equal(bonusButton.textContent, "Claim +20 CH");
+  assert.equal(bonusButton.dataset.bonusCode, "daily-active-2026");
 
-  document.getElementById("welcomeBonusClaimButton").dispatchEvent({ type: "click", preventDefault() {} });
+  document.getElementById("bonusCampaignList").dispatchEvent({ type: "click", target: bonusButton, preventDefault() {} });
   await flush();
   await flush();
   await flush();
 
-  assert.deepEqual(calls, ["status", "claim", "status"]);
-  assert.equal(document.getElementById("accountStatus").textContent, "Welcome! 500 CH have been added to your account.");
+  assert.deepEqual(calls, ["status", "claim:daily-active-2026", "status"]);
+  assert.equal(document.getElementById("accountStatus").textContent, "Bonus added to your account.");
 });
 
-test("hides welcome bonus panel without success for already claimed account", async () => {
+test("hides generic bonus panel without success for already claimed account", async () => {
   const calls = [];
   const chipsClient = {
     fetchBalance() {
@@ -946,11 +960,18 @@ test("hides welcome bonus panel without success for already claimed account", as
     fetchLedger() {
       return Promise.resolve({ items: [], nextCursor: null });
     },
-    fetchWelcomeBonusStatus() {
+    fetchBonusCampaigns() {
       calls.push("status");
-      return Promise.resolve({ eligible: false, alreadyClaimed: true, amount: 500 });
+      return Promise.resolve({
+        items: [{
+          code: "daily-active-2026",
+          eligible: false,
+          alreadyClaimed: true,
+          amount: 20,
+        }],
+      });
     },
-    claimWelcomeBonus() {
+    claimBonusCampaign() {
       calls.push("claim");
       return Promise.resolve({ claimed: true });
     },
@@ -974,7 +995,7 @@ test("hides welcome bonus panel without success for already claimed account", as
   assert.notEqual(document.getElementById("accountStatus").textContent, "Welcome! 500 CH have been added to your account.");
 });
 
-test("does not auto-claim welcome bonus after eligible status", async () => {
+test("does not auto-claim generic bonus after eligible status", async () => {
   const calls = [];
   const chipsClient = {
     fetchBalance() {
@@ -983,11 +1004,19 @@ test("does not auto-claim welcome bonus after eligible status", async () => {
     fetchLedger() {
       return Promise.resolve({ items: [], nextCursor: null });
     },
-    fetchWelcomeBonusStatus() {
+    fetchBonusCampaigns() {
       calls.push("status");
-      return Promise.resolve({ eligible: true, alreadyClaimed: false, amount: 500 });
+      return Promise.resolve({
+        items: [{
+          code: "daily-active-2026",
+          title: "Daily bonus",
+          eligible: true,
+          alreadyClaimed: false,
+          amount: 20,
+        }],
+      });
     },
-    claimWelcomeBonus() {
+    claimBonusCampaign() {
       calls.push("claim");
       return Promise.resolve({ claimed: true });
     },

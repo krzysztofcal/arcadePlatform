@@ -29,3 +29,10 @@ test("admin page exposes required admin tabs", () => {
   assert.match(adminHtml, /data-admin-panel="pokerAudit"/);
   assert.match(adminHtml, /data-admin-panel="ops"/);
 });
+
+test("admin bonus campaign form exposes campaign type suggestions", () => {
+  assert.match(adminHtml, /name="campaignType"[^>]+list="adminBonusCampaignTypeOptions"/);
+  assert.match(adminHtml, /<datalist id="adminBonusCampaignTypeOptions">/);
+  assert.match(adminHtml, /<option value="daily"><\/option>/);
+  assert.match(adminHtml, /<option value="anniversary"><\/option>/);
+});

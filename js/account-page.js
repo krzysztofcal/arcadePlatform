@@ -7,7 +7,7 @@
   var currentUser = null;
   var chipsInFlight = null;
   var welcomeBonusInFlight = null;
-  var WELCOME_BONUS_SUCCESS = 'Welcome! 500 CH have been added to your account.';
+  var WELCOME_BONUS_SUCCESS = 'Bonus added to your account.';
   var ledgerState = {
     entries: [],
     nextCursor: null,
@@ -45,6 +45,7 @@
     nodes.chipLedgerEmpty = doc.getElementById('chipLedgerEmpty');
     nodes.welcomeBonusPanel = doc.getElementById('welcomeBonusPanel');
     nodes.welcomeBonusTitle = doc.getElementById('welcomeBonusTitle');
+    nodes.bonusCampaignList = doc.getElementById('bonusCampaignList');
     nodes.welcomeBonusClaimButton = doc.getElementById('welcomeBonusClaimButton');
     nodes.welcomeBonusStatus = doc.getElementById('welcomeBonusStatus');
   }
@@ -162,13 +163,52 @@
 
   function setWelcomeBonusVisibility(isVisible){
     setBlockVisibility(nodes.welcomeBonusPanel, isVisible);
-    if (nodes.welcomeBonusTitle){ nodes.welcomeBonusTitle.textContent = 'Claim your 500 CH welcome bonus'; }
+    if (nodes.welcomeBonusTitle){ nodes.welcomeBonusTitle.textContent = 'Available chip bonuses'; }
     if (nodes.welcomeBonusClaimButton){
-      nodes.welcomeBonusClaimButton.hidden = !isVisible;
+      nodes.welcomeBonusClaimButton.hidden = true;
       nodes.welcomeBonusClaimButton.disabled = false;
-      nodes.welcomeBonusClaimButton.textContent = 'Claim your 500 CH welcome bonus';
+      nodes.welcomeBonusClaimButton.textContent = 'Claim bonus';
     }
+    if (!isVisible && nodes.bonusCampaignList){ nodes.bonusCampaignList.innerHTML = ''; }
     if (!isVisible) setWelcomeBonusStatus('', '');
+  }
+
+  function formatBonusAmount(value){
+    var amount = Number(value);
+    return Number.isFinite(amount) && amount > 0 ? Math.trunc(amount).toLocaleString() : '0';
+  }
+
+  function renderBonusCampaigns(items){
+    var campaigns = Array.isArray(items) ? items.filter(function(item){
+      return item && item.eligible && !item.alreadyClaimed && item.code;
+    }) : [];
+    setWelcomeBonusVisibility(campaigns.length > 0);
+    if (!nodes.bonusCampaignList) return;
+    nodes.bonusCampaignList.innerHTML = '';
+    campaigns.forEach(function(item){
+      var title = item.title || 'Chip bonus';
+      var description = item.description || '';
+      var amount = formatBonusAmount(item.amount);
+      var wrapper = doc.createElement('div');
+      wrapper.className = 'account-bonus__item';
+      var heading = doc.createElement('div');
+      heading.className = 'account-bonus__title';
+      heading.textContent = title + ' · +' + amount + ' CH';
+      wrapper.appendChild(heading);
+      if (description){
+        var desc = doc.createElement('p');
+        desc.className = 'account-note';
+        desc.textContent = description;
+        wrapper.appendChild(desc);
+      }
+      var button = doc.createElement('button');
+      button.type = 'button';
+      button.className = 'account-bonus__btn';
+      button.dataset.bonusCode = item.code;
+      button.textContent = 'Claim +' + amount + ' CH';
+      wrapper.appendChild(button);
+      nodes.bonusCampaignList.appendChild(wrapper);
+    });
   }
 
   function renderChipBalance(balance){
@@ -535,7 +575,7 @@
     if (
       !window ||
       !window.ChipsClient ||
-      typeof window.ChipsClient.fetchWelcomeBonusStatus !== 'function'
+      typeof window.ChipsClient.fetchBonusCampaigns !== 'function'
     ){
       setWelcomeBonusVisibility(false);
       return null;
@@ -544,11 +584,11 @@
 
     welcomeBonusInFlight = (async function(){
       try {
-        var status = await window.ChipsClient.fetchWelcomeBonusStatus();
-        var canClaim = !!(status && status.eligible && !status.alreadyClaimed);
-        setWelcomeBonusVisibility(canClaim);
-        if (canClaim) setWelcomeBonusStatus('', '');
-        return status || null;
+        var payload = await window.ChipsClient.fetchBonusCampaigns();
+        var items = payload && Array.isArray(payload.items) ? payload.items : [];
+        renderBonusCampaigns(items);
+        if (items.length > 0) setWelcomeBonusStatus('', '');
+        return payload || null;
       } catch (_err){
         setWelcomeBonusVisibility(false);
         return null;
@@ -562,14 +602,20 @@
 
   async function handleWelcomeBonusClaim(e){
     if (e && typeof e.preventDefault === 'function') e.preventDefault();
-    if (!currentUser || !window || !window.ChipsClient || typeof window.ChipsClient.claimWelcomeBonus !== 'function') return;
-    if (nodes.welcomeBonusClaimButton) nodes.welcomeBonusClaimButton.disabled = true;
-    setWelcomeBonusStatus('Claiming your 500 CH welcome bonus...', 'info');
+    var target = e && e.target && typeof e.target.closest === 'function'
+      ? e.target.closest('[data-bonus-code]')
+      : e && e.target && e.target.dataset && e.target.dataset.bonusCode ? e.target : null;
+    var code = target && target.dataset && target.dataset.bonusCode
+      ? target.dataset.bonusCode
+      : target && typeof target.getAttribute === 'function' ? target.getAttribute('data-bonus-code') : '';
+    if (!currentUser || !code || !window || !window.ChipsClient || typeof window.ChipsClient.claimBonusCampaign !== 'function') return;
+    if (target) target.disabled = true;
+    setWelcomeBonusStatus('Claiming bonus...', 'info');
     try {
-      var result = await window.ChipsClient.claimWelcomeBonus();
+      var result = await window.ChipsClient.claimBonusCampaign(code);
       if (result && result.claimed){
         setStatus(WELCOME_BONUS_SUCCESS, 'success');
-        setWelcomeBonusStatus('Welcome bonus added to your account.', 'success');
+        setWelcomeBonusStatus('Bonus added to your account.', 'success');
         loadChips();
         await refreshWelcomeBonus(currentUser);
         return result;
@@ -577,8 +623,8 @@
       setWelcomeBonusVisibility(false);
       return result || null;
     } catch (_err){
-      setWelcomeBonusStatus('Could not claim your welcome bonus right now.', 'error');
-      if (nodes.welcomeBonusClaimButton) nodes.welcomeBonusClaimButton.disabled = false;
+      setWelcomeBonusStatus('Could not claim your bonus right now.', 'error');
+      if (target) target.disabled = false;
       return null;
     }
   }
@@ -666,6 +712,7 @@
     if (nodes.signInForm){ nodes.signInForm.addEventListener('submit', handleSignIn); }
     if (nodes.signUpForm){ nodes.signUpForm.addEventListener('submit', handleSignUp); }
     if (nodes.signOut){ nodes.signOut.addEventListener('click', handleSignOut); }
+    if (nodes.bonusCampaignList){ nodes.bonusCampaignList.addEventListener('click', handleWelcomeBonusClaim); }
     if (nodes.welcomeBonusClaimButton){ nodes.welcomeBonusClaimButton.addEventListener('click', handleWelcomeBonusClaim); }
     if (nodes.deleteBtn && nodes.deleteNote){
       nodes.deleteBtn.addEventListener('click', function(e){
