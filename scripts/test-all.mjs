@@ -85,6 +85,7 @@ run("node", ["tests/admin-auth.behavior.test.mjs"], "admin-auth-behavior");
 run("node", ["tests/admin-endpoints.behavior.test.mjs"], "admin-endpoints-behavior");
 run("node", ["tests/admin-ledger-adjust.behavior.test.mjs"], "admin-ledger-adjust-behavior");
 run("node", ["tests/admin-users-list.behavior.test.mjs"], "admin-users-list-behavior");
+run("node", ["tests/admin-bonus-campaigns.behavior.test.mjs"], "admin-bonus-campaigns-behavior");
 run("node", ["tests/admin-tables-list.behavior.test.mjs"], "admin-tables-list-behavior");
 run("node", ["tests/admin-ledger-list.behavior.test.mjs"], "admin-ledger-list-behavior");
 run("node", ["tests/admin-table-actions.behavior.test.mjs"], "admin-table-actions-behavior");

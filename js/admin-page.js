@@ -32,6 +32,14 @@
       contextLabel: "",
       loaded: false,
     },
+    bonusCampaigns: {
+      page: 1,
+      filters: {},
+      items: [],
+      pagination: null,
+      selectedCampaignId: null,
+      loaded: false,
+    },
     ops: {
       summary: null,
       identity: null,
@@ -94,6 +102,14 @@
     nodes.ledgerReset = doc.getElementById("adminLedgerReset");
     nodes.ledgerRecentAdmin = doc.getElementById("adminLedgerRecentAdmin");
     nodes.ledgerQuickButtons = Array.prototype.slice.call(doc.querySelectorAll("[data-ledger-quick]"));
+    nodes.bonusCampaignsFilters = doc.getElementById("adminBonusCampaignsFilters");
+    nodes.bonusCampaignsBody = doc.getElementById("adminBonusCampaignsBody");
+    nodes.bonusCampaignsEmpty = doc.getElementById("adminBonusCampaignsEmpty");
+    nodes.bonusCampaignsPagination = doc.getElementById("adminBonusCampaignsPagination");
+    nodes.bonusCampaignsRefresh = doc.getElementById("adminBonusCampaignsRefresh");
+    nodes.bonusCampaignsReset = doc.getElementById("adminBonusCampaignsReset");
+    nodes.bonusCampaignForm = doc.getElementById("adminBonusCampaignForm");
+    nodes.bonusCampaignClear = doc.getElementById("adminBonusCampaignClear");
     nodes.pokerAuditFilters = doc.getElementById("adminPokerAuditFilters");
     nodes.pokerAuditBody = doc.getElementById("adminPokerAuditBody");
     nodes.pokerAuditEmpty = doc.getElementById("adminPokerAuditEmpty");
@@ -300,6 +316,119 @@
     parts.push('<button class="admin-btn admin-btn--ghost" type="button" data-page-scope="' + escapeHtml(scope) + '" data-page="' + escapeHtml(Math.max(1, pagination.page - 1)) + '"' + (pagination.hasPrevPage ? "" : " disabled") + ">Prev</button>");
     parts.push('<button class="admin-btn admin-btn--ghost" type="button" data-page-scope="' + escapeHtml(scope) + '" data-page="' + escapeHtml(pagination.page + 1) + '"' + (pagination.hasNextPage ? "" : " disabled") + ">Next</button>");
     container.innerHTML = parts.join("");
+  }
+
+  function campaignStatusTone(status){
+    if (status === "active") return "success";
+    if (status === "paused" || status === "scheduled") return "info";
+    if (status === "ended") return "danger";
+    return "";
+  }
+
+  function campaignStatusActions(item){
+    var status = item && item.status;
+    var actions = [];
+    actions.push('<button class="admin-btn admin-btn--ghost" type="button" data-campaign-action="edit" data-campaign-id="' + escapeHtml(item.id) + '">Edit draft</button>');
+    if (status === "draft" || status === "scheduled" || status === "paused"){
+      actions.push('<button class="admin-btn admin-btn--primary" type="button" data-campaign-action="set_status" data-campaign-status="active" data-campaign-id="' + escapeHtml(item.id) + '">Activate</button>');
+    }
+    if (status === "active"){
+      actions.push('<button class="admin-btn admin-btn--ghost" type="button" data-campaign-action="set_status" data-campaign-status="paused" data-campaign-id="' + escapeHtml(item.id) + '">Pause</button>');
+    }
+    if (status !== "ended"){
+      actions.push('<button class="admin-btn admin-btn--ghost" type="button" data-campaign-action="set_status" data-campaign-status="ended" data-campaign-id="' + escapeHtml(item.id) + '">End</button>');
+    }
+    return actions.join("");
+  }
+
+  function renderBonusCampaigns(){
+    var items = state.bonusCampaigns.items || [];
+    if (nodes.bonusCampaignsBody){
+      nodes.bonusCampaignsBody.innerHTML = items.map(function(item){
+        var max = item.maxTotalClaims == null ? "∞" : String(item.maxTotalClaims);
+        var windowText = formatTimestamp(item.startsAt) + " → " + (item.endsAt ? formatTimestamp(item.endsAt) : "open");
+        return [
+          "<tr>",
+          '<td><div class="admin-list__title"><span>' + escapeHtml(item.code || "—") + '</span></div><div class="admin-list__meta">' + escapeHtml(item.title || "—") + "</div></td>",
+          "<td>" + pill(item.status || "—", campaignStatusTone(item.status)) + "</td>",
+          "<td>" + escapeHtml(formatAmount(item.amount)) + "</td>",
+          "<td>" + escapeHtml(item.claimPolicy || "once") + "</td>",
+          "<td>" + escapeHtml(item.eligibilityType || "—") + "</td>",
+          "<td>" + escapeHtml(windowText) + "</td>",
+          "<td>" + escapeHtml(String(item.claimCount || 0)) + " / " + escapeHtml(max) + "</td>",
+          '<td><div class="admin-table__actions">' + campaignStatusActions(item) + "</div></td>",
+          "</tr>"
+        ].join("");
+      }).join("");
+    }
+    setVisible(nodes.bonusCampaignsEmpty, items.length === 0);
+    renderPagination(nodes.bonusCampaignsPagination, "bonusCampaigns", state.bonusCampaigns.pagination);
+  }
+
+  function findBonusCampaign(campaignId){
+    return (state.bonusCampaigns.items || []).find(function(item){ return item.id === campaignId; }) || null;
+  }
+
+  function fillBonusCampaignForm(item){
+    var form = nodes.bonusCampaignForm;
+    if (!form) return;
+    var campaign = item || {};
+    Array.prototype.forEach.call(form.elements || [], function(field){
+      if (!field || !field.name) return;
+      if (field.name === "campaignId") field.value = campaign.id || "";
+      if (field.name === "code") {
+        field.value = campaign.code || "";
+        field.disabled = !!campaign.id;
+      }
+      if (field.name === "title") field.value = campaign.title || "";
+      if (field.name === "description") field.value = campaign.description || "";
+      if (field.name === "campaignType") field.value = campaign.campaignType || "";
+      if (field.name === "amount") field.value = campaign.amount == null ? "" : String(campaign.amount);
+      if (field.name === "startsAt") field.value = formatDateTimeLocalValue(campaign.startsAt);
+      if (field.name === "endsAt") field.value = formatDateTimeLocalValue(campaign.endsAt);
+      if (field.name === "eligibilityType") field.value = campaign.eligibilityType || "all_accounts";
+      if (field.name === "claimPolicy") field.value = campaign.claimPolicy || "once";
+      if (field.name === "maxTotalClaims") field.value = campaign.maxTotalClaims == null ? "" : String(campaign.maxTotalClaims);
+      if (field.name === "eligibilityConfig") {
+        try {
+          field.value = JSON.stringify(campaign.eligibilityConfig || {}, null, 2);
+        } catch (_err){
+          field.value = "{}";
+        }
+      }
+      if (campaign.id && campaign.status !== "draft" && field.name !== "campaignId"){
+        field.disabled = true;
+      } else if (field.name !== "code" || !campaign.id) {
+        field.disabled = false;
+      }
+    });
+    state.bonusCampaigns.selectedCampaignId = campaign.id || null;
+  }
+
+  function readBonusCampaignForm(){
+    var raw = formToObject(nodes.bonusCampaignForm);
+    var config = {};
+    try {
+      config = raw.eligibilityConfig ? JSON.parse(raw.eligibilityConfig) : {};
+    } catch (_err){
+      var error = new Error("invalid_eligibility_config");
+      error.code = "invalid_eligibility_config";
+      throw error;
+    }
+    return {
+      campaignId: raw.campaignId || "",
+      code: raw.code || "",
+      title: raw.title || "",
+      description: raw.description || "",
+      campaignType: raw.campaignType || "",
+      amount: raw.amount ? Number(raw.amount) : null,
+      startsAt: raw.startsAt || "",
+      endsAt: raw.endsAt || "",
+      eligibilityType: raw.eligibilityType || "all_accounts",
+      eligibilityConfig: config,
+      claimPolicy: raw.claimPolicy || "once",
+      maxTotalClaims: raw.maxTotalClaims ? Number(raw.maxTotalClaims) : null,
+    };
   }
 
   function renderUsers(){
@@ -882,6 +1011,7 @@
     if (tab === "users" && !state.users.loaded) loadUsers();
     if (tab === "tables" && !state.tables.loaded) loadTables();
     if (tab === "ledger" && !state.ledger.loaded) loadLedger();
+    if (tab === "bonusCampaigns" && !state.bonusCampaigns.loaded) loadBonusCampaigns();
     if (tab === "pokerAudit") renderPokerAudit();
     if (tab === "ops") loadOps();
   }
@@ -920,6 +1050,83 @@
       }
     } catch (err){
       handleApiError(err, "Could not load users.");
+    }
+  }
+
+  async function loadBonusCampaigns(page){
+    if (page) state.bonusCampaigns.page = page;
+    setStatus(t("loading", "Loading..."), "info");
+    try {
+      var params = Object.assign({}, state.bonusCampaigns.filters, {
+        page: state.bonusCampaigns.page,
+        limit: 25,
+      });
+      var payload = await apiFetch("/.netlify/functions/admin-bonus-campaigns" + buildQuery(params), { method: "GET" });
+      state.bonusCampaigns.items = payload.items || [];
+      state.bonusCampaigns.pagination = payload.pagination || null;
+      state.bonusCampaigns.loaded = true;
+      renderBonusCampaigns();
+      setStatus("", "");
+    } catch (err){
+      handleApiError(err, "Could not load bonus campaigns.");
+    }
+  }
+
+  async function saveBonusCampaignDraft(event){
+    if (event && typeof event.preventDefault === "function") event.preventDefault();
+    try {
+      var data = readBonusCampaignForm();
+      var isUpdate = !!data.campaignId;
+      var campaign = {
+        title: data.title,
+        description: data.description,
+        campaignType: data.campaignType,
+        amount: data.amount,
+        startsAt: data.startsAt,
+        endsAt: data.endsAt,
+        eligibilityType: data.eligibilityType,
+        eligibilityConfig: data.eligibilityConfig,
+        claimPolicy: data.claimPolicy,
+        maxTotalClaims: data.maxTotalClaims,
+      };
+      if (!isUpdate) campaign.code = data.code;
+      await apiFetch("/.netlify/functions/admin-bonus-campaigns", {
+        method: "POST",
+        body: JSON.stringify({
+          action: isUpdate ? "update" : "create",
+          campaignId: data.campaignId || undefined,
+          campaign: campaign,
+        }),
+      });
+      setStatus(isUpdate ? "Bonus campaign draft updated." : "Bonus campaign draft created.", "success");
+      fillBonusCampaignForm(null);
+      state.bonusCampaigns.page = 1;
+      await loadBonusCampaigns(1);
+    } catch (err){
+      handleApiError(err, err && err.code === "invalid_eligibility_config" ? "Eligibility config must be valid JSON object." : "Could not save bonus campaign.");
+    }
+  }
+
+  async function setBonusCampaignStatus(campaignId, status){
+    var campaign = findBonusCampaign(campaignId);
+    var label = campaign ? (campaign.code || campaign.title || campaignId) : campaignId;
+    if (typeof window.confirm === "function" && !window.confirm("Set bonus campaign " + label + " to " + status + "?")){
+      return;
+    }
+    setStatus("Updating bonus campaign...", "info");
+    try {
+      await apiFetch("/.netlify/functions/admin-bonus-campaigns", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "set_status",
+          campaignId: campaignId,
+          status: status,
+        }),
+      });
+      setStatus("Bonus campaign status updated.", "success");
+      await loadBonusCampaigns();
+    } catch (err){
+      handleApiError(err, "Could not update bonus campaign status.");
     }
   }
 
@@ -1368,6 +1575,27 @@
     }
   }
 
+  function handleBonusCampaignsSubmit(event){
+    if (event && typeof event.preventDefault === "function") event.preventDefault();
+    state.bonusCampaigns.filters = formToObject(nodes.bonusCampaignsFilters);
+    state.bonusCampaigns.page = 1;
+    loadBonusCampaigns();
+  }
+
+  function handleCampaignAction(action, campaignId, status){
+    if (action === "edit"){
+      var campaign = findBonusCampaign(campaignId);
+      fillBonusCampaignForm(campaign);
+      if (campaign && campaign.status !== "draft"){
+        setStatus("Only draft campaigns can be edited. Use status controls for active campaigns.", "info");
+      }
+      return;
+    }
+    if (action === "set_status"){
+      setBonusCampaignStatus(campaignId, status);
+    }
+  }
+
   function wireStaticEvents(){
     (nodes.tabs || []).forEach(function(button){
       button.addEventListener("click", handleTabClick);
@@ -1376,9 +1604,12 @@
     if (nodes.usersFilters) nodes.usersFilters.addEventListener("submit", handleUsersSubmit);
     if (nodes.tablesFilters) nodes.tablesFilters.addEventListener("submit", handleTablesSubmit);
     if (nodes.ledgerFilters) nodes.ledgerFilters.addEventListener("submit", handleLedgerSubmit);
+    if (nodes.bonusCampaignsFilters) nodes.bonusCampaignsFilters.addEventListener("submit", handleBonusCampaignsSubmit);
+    if (nodes.bonusCampaignForm) nodes.bonusCampaignForm.addEventListener("submit", saveBonusCampaignDraft);
     if (nodes.pokerAuditFilters) nodes.pokerAuditFilters.addEventListener("submit", handlePokerAuditSubmit);
     if (nodes.usersRefresh) nodes.usersRefresh.addEventListener("click", function(){ loadUsers(); });
     if (nodes.tablesRefresh) nodes.tablesRefresh.addEventListener("click", function(){ loadTables(); });
+    if (nodes.bonusCampaignsRefresh) nodes.bonusCampaignsRefresh.addEventListener("click", function(){ loadBonusCampaigns(); });
     if (nodes.pokerAuditRefresh) nodes.pokerAuditRefresh.addEventListener("click", function(){ loadPokerAudit(); });
     if (nodes.opsRefresh) nodes.opsRefresh.addEventListener("click", function(){ loadOps(); });
     if (nodes.usersReset) nodes.usersReset.addEventListener("click", function(){
@@ -1399,6 +1630,16 @@
       state.ledger.page = 1;
       state.ledger.contextLabel = "";
       loadLedger();
+    });
+    if (nodes.bonusCampaignsReset) nodes.bonusCampaignsReset.addEventListener("click", function(){
+      resetForm(nodes.bonusCampaignsFilters, {});
+      state.bonusCampaigns.filters = {};
+      state.bonusCampaigns.page = 1;
+      loadBonusCampaigns();
+    });
+    if (nodes.bonusCampaignClear) nodes.bonusCampaignClear.addEventListener("click", function(){
+      fillBonusCampaignForm(null);
+      setStatus("", "");
     });
     if (nodes.pokerAuditReset) nodes.pokerAuditReset.addEventListener("click", function(){
       resetForm(nodes.pokerAuditFilters, { limit: "20" });
@@ -1436,6 +1677,7 @@
         if (scope === "users") loadUsers(page);
         if (scope === "tables") loadTables(page);
         if (scope === "ledger") loadLedger(page);
+        if (scope === "bonusCampaigns") loadBonusCampaigns(page);
         return;
       }
       var userButton = closestEventTarget(event.target, "[data-user-action]");
@@ -1451,6 +1693,15 @@
       var auditButton = closestEventTarget(event.target, "[data-audit-action]");
       if (auditButton){
         handleAuditAction(auditButton.getAttribute("data-audit-action"), auditButton.getAttribute("data-audit-table-id"), auditButton.getAttribute("data-audit-hand-id"));
+        return;
+      }
+      var campaignButton = closestEventTarget(event.target, "[data-campaign-action]");
+      if (campaignButton){
+        handleCampaignAction(
+          campaignButton.getAttribute("data-campaign-action"),
+          campaignButton.getAttribute("data-campaign-id"),
+          campaignButton.getAttribute("data-campaign-status")
+        );
         return;
       }
       var adjustButton = closestEventTarget(event.target, "[data-adjust-amount]");
