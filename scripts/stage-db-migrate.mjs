@@ -129,7 +129,7 @@ function runSmokeChecks(dbUrl) {
     "  if to_regclass('public.chips_transactions') is null then raise exception 'missing public.chips_transactions'; end if;",
     "  if to_regclass('public.chips_entries') is null then raise exception 'missing public.chips_entries'; end if;",
     "  if not exists (select 1 from pg_type where typname = 'chips_tx_type') then raise exception 'missing public.chips_tx_type'; end if;",
-    "  if not exists (select 1 from public.chips_accounts where user_id = 'SYSTEM/GENESIS') then raise exception 'missing SYSTEM/GENESIS account'; end if;",
+    "  if not exists (select 1 from public.chips_accounts where account_type = 'SYSTEM' and system_key = 'GENESIS') then raise exception 'missing SYSTEM/GENESIS account'; end if;",
     "end",
     "$$;"
   ].join("\n");
