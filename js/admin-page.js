@@ -328,7 +328,9 @@
   function campaignStatusActions(item){
     var status = item && item.status;
     var actions = [];
-    actions.push('<button class="admin-btn admin-btn--ghost" type="button" data-campaign-action="edit" data-campaign-id="' + escapeHtml(item.id) + '">Edit draft</button>');
+    var loadAction = status === "draft" ? "edit" : "view";
+    var loadLabel = status === "draft" ? "Edit draft" : "View";
+    actions.push('<button class="admin-btn admin-btn--ghost" type="button" data-campaign-action="' + loadAction + '" data-campaign-id="' + escapeHtml(item.id) + '">' + loadLabel + "</button>");
     if (status === "draft" || status === "scheduled" || status === "paused"){
       actions.push('<button class="admin-btn admin-btn--primary" type="button" data-campaign-action="set_status" data-campaign-status="active" data-campaign-id="' + escapeHtml(item.id) + '">Activate</button>');
     }
@@ -373,6 +375,8 @@
     var form = nodes.bonusCampaignForm;
     if (!form) return;
     var campaign = item || {};
+    var isExistingCampaign = !!campaign.id;
+    var isReadOnlyCampaign = isExistingCampaign && campaign.status !== "draft";
     Array.prototype.forEach.call(form.elements || [], function(field){
       if (!field || !field.name) return;
       if (field.name === "campaignId") field.value = campaign.id || "";
@@ -396,9 +400,13 @@
           field.value = "{}";
         }
       }
-      if (campaign.id && campaign.status !== "draft" && field.name !== "campaignId"){
+      if (field.name === "campaignId"){
+        field.disabled = false;
+      } else if (field.name === "code"){
+        field.disabled = isExistingCampaign;
+      } else if (isReadOnlyCampaign){
         field.disabled = true;
-      } else if (field.name !== "code" || !campaign.id) {
+      } else {
         field.disabled = false;
       }
     });
@@ -1583,11 +1591,13 @@
   }
 
   function handleCampaignAction(action, campaignId, status){
-    if (action === "edit"){
+    if (action === "edit" || action === "view"){
       var campaign = findBonusCampaign(campaignId);
       fillBonusCampaignForm(campaign);
-      if (campaign && campaign.status !== "draft"){
-        setStatus("Only draft campaigns can be edited. Use status controls for active campaigns.", "info");
+      if (campaign && campaign.status === "draft"){
+        setStatus("Draft campaign loaded for editing.", "info");
+      } else if (campaign){
+        setStatus("Campaign is not draft; fields are read-only. Use status controls for active campaigns.", "info");
       }
       return;
     }

@@ -506,7 +506,15 @@
                     </label>
                     <label class="admin-field">
                       <span class="admin-field__label">Campaign type</span>
-                      <input class="admin-input" type="text" name="campaignType" placeholder="daily" required>
+                      <input class="admin-input" type="text" name="campaignType" list="adminBonusCampaignTypeOptions" placeholder="daily" required>
+                      <datalist id="adminBonusCampaignTypeOptions">
+                        <option value="welcome"></option>
+                        <option value="daily"></option>
+                        <option value="anniversary"></option>
+                        <option value="seasonal"></option>
+                        <option value="vip"></option>
+                        <option value="limited"></option>
+                      </datalist>
                     </label>
                     <label class="admin-field">
                       <span class="admin-field__label">Amount</span>

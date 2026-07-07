@@ -232,6 +232,10 @@ function addField(form, { name, type = "text", value = "" } = {}) {
   return field;
 }
 
+function formField(form, name) {
+  return (form.elements || []).find((field) => field.name === name);
+}
+
 function createAdminDom() {
   const document = createDocument();
   const ids = [
@@ -361,20 +365,36 @@ function buildContext(options = {}) {
     }
     if (text.includes("/.netlify/functions/admin-bonus-campaigns")) {
       return { ok: true, json: async () => ({
-        items: [{
-          id: "campaign-1",
-          code: "daily-test",
-          title: "Daily Test",
-          amount: 50,
-          status: "draft",
-          startsAt: "2026-07-07T00:00:00.000Z",
-          endsAt: null,
-          eligibilityType: "all_accounts",
-          eligibilityConfig: {},
-          claimPolicy: "daily",
-          maxTotalClaims: 100,
-          claimCount: 0,
-        }],
+        items: [
+          {
+            id: "campaign-1",
+            code: "daily-test",
+            title: "Daily Test",
+            amount: 50,
+            status: "draft",
+            startsAt: "2026-07-07T00:00:00.000Z",
+            endsAt: null,
+            eligibilityType: "all_accounts",
+            eligibilityConfig: {},
+            claimPolicy: "daily",
+            maxTotalClaims: 100,
+            claimCount: 0,
+          },
+          {
+            id: "campaign-2",
+            code: "active-test",
+            title: "Active Test",
+            amount: 20,
+            status: "active",
+            startsAt: "2026-07-08T00:00:00.000Z",
+            endsAt: null,
+            eligibilityType: "all_accounts",
+            eligibilityConfig: {},
+            claimPolicy: "once",
+            maxTotalClaims: null,
+            claimCount: 3,
+          },
+        ],
         pagination: null,
       }) };
     }
@@ -505,6 +525,33 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.equal(fetchCalls.includes("/.netlify/functions/admin-bonus-campaigns?page=1&limit=25"), true);
   assert.match(document.getElementById("adminBonusCampaignsBody").innerHTML, /daily-test/);
   assert.match(document.getElementById("adminBonusCampaignsBody").innerHTML, /Daily Test/);
+  assert.match(document.getElementById("adminBonusCampaignsBody").innerHTML, /Edit draft/);
+  assert.match(document.getElementById("adminBonusCampaignsBody").innerHTML, /View/);
+
+  const draftEditButton = createElement("button");
+  draftEditButton.setAttribute("data-campaign-action", "edit");
+  draftEditButton.setAttribute("data-campaign-id", "campaign-1");
+  document.dispatchEvent({ type: "click", target: draftEditButton, preventDefault() {} });
+
+  const bonusCampaignForm = document.getElementById("adminBonusCampaignForm");
+  assert.equal(formField(bonusCampaignForm, "title").value, "Daily Test");
+  assert.equal(formField(bonusCampaignForm, "amount").value, "50");
+  assert.equal(formField(bonusCampaignForm, "code").disabled, true);
+  assert.equal(formField(bonusCampaignForm, "title").disabled, false);
+  assert.equal(formField(bonusCampaignForm, "amount").disabled, false);
+  assert.match(document.getElementById("adminStatus").textContent, /loaded for editing/);
+
+  const activeViewButton = createElement("button");
+  activeViewButton.setAttribute("data-campaign-action", "view");
+  activeViewButton.setAttribute("data-campaign-id", "campaign-2");
+  document.dispatchEvent({ type: "click", target: activeViewButton, preventDefault() {} });
+
+  assert.equal(formField(bonusCampaignForm, "title").value, "Active Test");
+  assert.equal(formField(bonusCampaignForm, "amount").value, "20");
+  assert.equal(formField(bonusCampaignForm, "code").disabled, true);
+  assert.equal(formField(bonusCampaignForm, "title").disabled, true);
+  assert.equal(formField(bonusCampaignForm, "amount").disabled, true);
+  assert.match(document.getElementById("adminStatus").textContent, /read-only/);
 
   tabs[5].dispatchEvent({ type: "click", bubbles: true, target: tabs[5], preventDefault() {} });
   await flush();
