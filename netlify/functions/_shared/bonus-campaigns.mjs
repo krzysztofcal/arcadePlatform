@@ -1,4 +1,4 @@
-import { executeSql, klog } from "./supabase-admin.mjs";
+import { beginSql, executeSql, klog } from "./supabase-admin.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 
 const GENESIS_SYSTEM_KEY = "GENESIS";
@@ -134,6 +134,31 @@ limit 1;
   return rows?.[0] || null;
 }
 
+async function fetchCampaignClaimCount(campaignId, runSql = executeSql) {
+  const rows = await runSql(
+    `
+select count(*)::bigint as claim_count
+from public.bonus_claims
+where campaign_id = $1;
+`,
+    [campaignId],
+  );
+  return Number(rows?.[0]?.claim_count || 0);
+}
+
+async function lockCampaign(campaignId, runSql = executeSql) {
+  const rows = await runSql(
+    `
+select id, max_total_claims
+from public.bonus_campaigns
+where id = $1
+for update;
+`,
+    [campaignId],
+  );
+  return rows?.[0] || null;
+}
+
 async function isAllowlisted(campaignId, userId, runSql = executeSql) {
   const rows = await runSql(
     `
@@ -228,10 +253,40 @@ async function getBonusCampaignStatus(userId, campaignCode, deps = {}) {
   }
 
   const eligibility = await evaluateEligibility(campaign, userId, userCreatedAt, runSql);
+  if (!eligibility.eligible) {
+    return {
+      eligible: false,
+      alreadyClaimed: false,
+      reason: eligibility.reason,
+      campaign,
+      claimPeriodKey,
+      idempotencyKey,
+      createdAt: userCreatedAt,
+      transactionId: null,
+    };
+  }
+
+  const maxTotalClaims = campaign.maxTotalClaims;
+  if (Number.isInteger(maxTotalClaims) && maxTotalClaims > 0) {
+    const claimCount = await fetchCampaignClaimCount(campaign.id, runSql);
+    if (claimCount >= maxTotalClaims) {
+      return {
+        eligible: false,
+        alreadyClaimed: false,
+        reason: "max_total_claims_reached",
+        campaign,
+        claimPeriodKey,
+        idempotencyKey,
+        createdAt: userCreatedAt,
+        transactionId: null,
+      };
+    }
+  }
+
   return {
-    eligible: eligibility.eligible,
+    eligible: true,
     alreadyClaimed: false,
-    reason: eligibility.reason,
+    reason: "eligible",
     campaign,
     claimPeriodKey,
     idempotencyKey,
@@ -302,6 +357,7 @@ returning id, campaign_id, user_id, transaction_id, idempotency_key, claim_perio
 async function claimBonusCampaign(userId, campaignCode, deps = {}) {
   const runSql = deps.executeSql || executeSql;
   const writeTransaction = deps.postTransaction || postTransaction;
+  const begin = deps.beginSql || beginSql;
   const status = await getBonusCampaignStatus(userId, campaignCode, deps);
   const campaign = status.campaign;
   const baseLog = {
@@ -333,26 +389,124 @@ async function claimBonusCampaign(userId, campaignCode, deps = {}) {
       claim_period_key: status.claimPeriodKey,
       amount: campaign.amount,
     };
-    const result = await writeTransaction({
-      userId,
-      txType: PROMO_BONUS_TX_TYPE,
-      idempotencyKey: status.idempotencyKey,
-      reference: status.idempotencyKey,
-      description: campaign.title,
-      metadata,
-      entries: buildBonusCampaignEntries(userId, campaign, status.claimPeriodKey),
-      createdBy: userId,
+    const transactionResult = await begin(async (sqlTx) => {
+      const txSql = (query, params = []) => sqlTx.unsafe(query, params);
+      const lockedCampaign = await lockCampaign(campaign.id, txSql);
+      if (!lockedCampaign) {
+        return {
+          missingCampaign: true,
+          result: null,
+          claim: null,
+        };
+      }
+
+      const existingClaim = await fetchClaim(campaign.id, userId, status.claimPeriodKey, txSql);
+      const existingTransaction = existingClaim
+        ? null
+        : await fetchPromoTransaction(userId, status.idempotencyKey, txSql);
+      if (existingClaim || existingTransaction) {
+        return {
+          alreadyClaimed: true,
+          transactionId: existingClaim?.transaction_id || existingTransaction?.id || null,
+          result: existingTransaction ? { transaction: existingTransaction, entries: [], account: null } : null,
+          claim: existingClaim || null,
+        };
+      }
+
+      const maxTotalClaims = lockedCampaign.max_total_claims == null ? null : Number(lockedCampaign.max_total_claims);
+      if (Number.isInteger(maxTotalClaims) && maxTotalClaims > 0) {
+        const claimCount = await fetchCampaignClaimCount(campaign.id, txSql);
+        if (claimCount >= maxTotalClaims) {
+          return {
+            limitReached: true,
+            result: null,
+            claim: null,
+          };
+        }
+      }
+
+      const result = await writeTransaction({
+        userId,
+        txType: PROMO_BONUS_TX_TYPE,
+        idempotencyKey: status.idempotencyKey,
+        reference: status.idempotencyKey,
+        description: campaign.title,
+        metadata,
+        entries: buildBonusCampaignEntries(userId, campaign, status.claimPeriodKey),
+        createdBy: userId,
+        tx: sqlTx,
+      });
+      const transactionId = result?.transaction?.id || null;
+      const claim = transactionId
+        ? await insertBonusClaim({
+            campaign,
+            userId,
+            transactionId,
+            idempotencyKey: status.idempotencyKey,
+            claimPeriodKey: status.claimPeriodKey,
+          }, txSql)
+        : null;
+      return {
+        result,
+        transactionId,
+        claim,
+      };
     });
-    const transactionId = result?.transaction?.id || null;
-    const claim = transactionId
-      ? await insertBonusClaim({
-          campaign,
-          userId,
-          transactionId,
-          idempotencyKey: status.idempotencyKey,
-          claimPeriodKey: status.claimPeriodKey,
-        }, runSql)
-      : null;
+
+    if (transactionResult?.limitReached) {
+      klog("bonus_campaign_skipped", {
+        ...baseLog,
+        reason: "max_total_claims_reached",
+        transactionId: null,
+      });
+      return {
+        ...status,
+        eligible: false,
+        alreadyClaimed: false,
+        claimed: false,
+        reason: "max_total_claims_reached",
+        transaction: null,
+        entries: [],
+        account: null,
+      };
+    }
+
+    if (transactionResult?.missingCampaign) {
+      klog("bonus_campaign_skipped", {
+        ...baseLog,
+        reason: "campaign_not_found",
+        transactionId: null,
+      });
+      return {
+        ...status,
+        eligible: false,
+        alreadyClaimed: false,
+        claimed: false,
+        reason: "campaign_not_found",
+        transaction: null,
+        entries: [],
+        account: null,
+      };
+    }
+
+    if (transactionResult?.alreadyClaimed) {
+      return {
+        ...status,
+        eligible: false,
+        alreadyClaimed: true,
+        claimed: false,
+        reason: "already_claimed",
+        transactionId: transactionResult.transactionId || null,
+        claim: transactionResult.claim || null,
+        transaction: transactionResult.result?.transaction || null,
+        entries: transactionResult.result?.entries || [],
+        account: transactionResult.result?.account || null,
+      };
+    }
+
+    const result = transactionResult?.result || null;
+    const transactionId = transactionResult?.transactionId || null;
+    const claim = transactionResult?.claim || null;
     klog("bonus_campaign_claimed", {
       ...baseLog,
       transactionId,

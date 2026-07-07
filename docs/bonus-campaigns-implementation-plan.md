@@ -212,6 +212,8 @@ unique (campaign_id, user_id, claim_period_key)
 unique (idempotency_key)
 ```
 
+`max_total_claims` is a campaign-wide cap across all claim periods. The claim path must enforce it while holding a row lock on `bonus_campaigns` before posting the `PROMO_BONUS` ledger transaction, so concurrent claims cannot exceed the cap.
+
 #### `public.bonus_campaign_eligible_users`
 
 Purpose:
