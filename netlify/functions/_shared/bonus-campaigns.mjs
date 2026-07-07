@@ -3,6 +3,7 @@ import { postTransaction } from "./chips-ledger.mjs";
 
 const GENESIS_SYSTEM_KEY = "GENESIS";
 const PROMO_BONUS_TX_TYPE = "PROMO_BONUS";
+const CLAIM_POLICIES = new Set(["once", "daily", "weekly", "monthly"]);
 
 function toIso(value) {
   if (!value) return null;
@@ -27,6 +28,7 @@ function parseJsonObject(value) {
 
 function normalizeCampaign(row) {
   if (!row) return null;
+  const claimPolicy = CLAIM_POLICIES.has(row.claim_policy) ? row.claim_policy : "once";
   return {
     id: row.id,
     code: row.code,
@@ -39,12 +41,38 @@ function normalizeCampaign(row) {
     endsAt: toIso(row.ends_at),
     eligibilityType: row.eligibility_type,
     eligibilityConfig: parseJsonObject(row.eligibility_config),
+    claimPolicy,
     maxTotalClaims: row.max_total_claims == null ? null : Number(row.max_total_claims),
   };
 }
 
-function buildCampaignIdempotencyKey(campaignCode, userId) {
-  return `bonus:${campaignCode}:${userId}`;
+function buildClaimPeriodKey(claimPolicy = "once", now = new Date()) {
+  if (claimPolicy === "once") return "once";
+  const date = now instanceof Date ? now : new Date(now);
+  if (Number.isNaN(date.getTime())) return "once";
+
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+
+  if (claimPolicy === "daily") return `${year}-${month}-${day}`;
+  if (claimPolicy === "monthly") return `${year}-${month}`;
+  if (claimPolicy === "weekly") {
+    const weekDate = new Date(Date.UTC(year, date.getUTCMonth(), date.getUTCDate()));
+    const dayOfWeek = weekDate.getUTCDay() || 7;
+    weekDate.setUTCDate(weekDate.getUTCDate() + 4 - dayOfWeek);
+    const weekYear = weekDate.getUTCFullYear();
+    const yearStart = new Date(Date.UTC(weekYear, 0, 1));
+    const week = Math.ceil(((weekDate - yearStart) / 86400000 + 1) / 7);
+    return `${weekYear}-W${String(week).padStart(2, "0")}`;
+  }
+
+  return "once";
+}
+
+function buildCampaignIdempotencyKey(campaignCode, userId, claimPeriodKey = "once") {
+  const base = `bonus:${campaignCode}:${userId}`;
+  return claimPeriodKey && claimPeriodKey !== "once" ? `${base}:${claimPeriodKey}` : base;
 }
 
 async function fetchUserCreatedAt(userId, runSql = executeSql) {
@@ -64,7 +92,7 @@ async function fetchActiveCampaignRows(runSql = executeSql, code = null) {
   return await runSql(
     `
 select id, code, title, description, campaign_type, amount, status, starts_at, ends_at,
-       eligibility_type, eligibility_config, max_total_claims
+       eligibility_type, eligibility_config, claim_policy, max_total_claims
 from public.bonus_campaigns
 where status = 'active'
   and starts_at <= timezone('utc', now())
@@ -76,16 +104,17 @@ order by starts_at asc, code asc;
   );
 }
 
-async function fetchClaim(campaignId, userId, runSql = executeSql) {
+async function fetchClaim(campaignId, userId, claimPeriodKey, runSql = executeSql) {
   const rows = await runSql(
     `
-select id, campaign_id, user_id, transaction_id, idempotency_key, claimed_at
+select id, campaign_id, user_id, transaction_id, idempotency_key, claim_period_key, claimed_at
 from public.bonus_claims
 where campaign_id = $1
   and user_id = $2
+  and claim_period_key = $3
 limit 1;
 `,
-    [campaignId, userId],
+    [campaignId, userId, claimPeriodKey],
   );
   return rows?.[0] || null;
 }
@@ -155,6 +184,7 @@ function publicStatus(status) {
     title: status.campaign.title,
     description: status.campaign.description,
     campaignType: status.campaign.campaignType,
+    claimPolicy: status.campaign.claimPolicy,
     amount: status.campaign.amount,
     eligible: status.eligible,
     alreadyClaimed: status.alreadyClaimed,
@@ -165,6 +195,7 @@ function publicStatus(status) {
 
 async function getBonusCampaignStatus(userId, campaignCode, deps = {}) {
   const runSql = deps.executeSql || executeSql;
+  const now = deps.now ? new Date(deps.now) : new Date();
   const rows = await fetchActiveCampaignRows(runSql, campaignCode);
   const campaign = normalizeCampaign(rows?.[0]);
   if (!campaign) {
@@ -177,9 +208,10 @@ async function getBonusCampaignStatus(userId, campaignCode, deps = {}) {
     };
   }
 
-  const idempotencyKey = buildCampaignIdempotencyKey(campaign.code, userId);
+  const claimPeriodKey = buildClaimPeriodKey(campaign.claimPolicy, now);
+  const idempotencyKey = buildCampaignIdempotencyKey(campaign.code, userId, claimPeriodKey);
   const userCreatedAt = await fetchUserCreatedAt(userId, runSql);
-  const claim = await fetchClaim(campaign.id, userId, runSql);
+  const claim = await fetchClaim(campaign.id, userId, claimPeriodKey, runSql);
   const transaction = claim ? null : await fetchPromoTransaction(userId, idempotencyKey, runSql);
 
   if (claim || transaction) {
@@ -188,6 +220,7 @@ async function getBonusCampaignStatus(userId, campaignCode, deps = {}) {
       alreadyClaimed: true,
       reason: "already_claimed",
       campaign,
+      claimPeriodKey,
       idempotencyKey,
       createdAt: userCreatedAt,
       transactionId: claim?.transaction_id || transaction?.id || null,
@@ -200,6 +233,7 @@ async function getBonusCampaignStatus(userId, campaignCode, deps = {}) {
     alreadyClaimed: false,
     reason: eligibility.reason,
     campaign,
+    claimPeriodKey,
     idempotencyKey,
     createdAt: userCreatedAt,
     transactionId: null,
@@ -217,12 +251,14 @@ async function listBonusCampaignStatuses(userId, deps = {}) {
   return { items };
 }
 
-function buildBonusCampaignEntries(userId, campaign) {
+function buildBonusCampaignEntries(userId, campaign, claimPeriodKey = "once") {
   const shared = {
     source: "bonus_campaign",
     campaign_id: campaign.id,
     campaign_code: campaign.code,
     campaign_type: campaign.campaignType,
+    claim_policy: campaign.claimPolicy,
+    claim_period_key: claimPeriodKey,
   };
   return [
     {
@@ -240,23 +276,25 @@ function buildBonusCampaignEntries(userId, campaign) {
   ];
 }
 
-async function insertBonusClaim({ campaign, userId, transactionId, idempotencyKey }, runSql = executeSql) {
+async function insertBonusClaim({ campaign, userId, transactionId, idempotencyKey, claimPeriodKey }, runSql = executeSql) {
   const metadata = {
     source: "bonus_campaign",
     campaign_id: campaign.id,
     campaign_code: campaign.code,
     campaign_type: campaign.campaignType,
+    claim_policy: campaign.claimPolicy,
+    claim_period_key: claimPeriodKey,
     amount: campaign.amount,
   };
   const rows = await runSql(
     `
-insert into public.bonus_claims (campaign_id, user_id, transaction_id, idempotency_key, metadata)
-values ($1, $2, $3, $4, $5::jsonb)
-on conflict (campaign_id, user_id) do update
+insert into public.bonus_claims (campaign_id, user_id, transaction_id, idempotency_key, claim_period_key, metadata)
+values ($1, $2, $3, $4, $5, $6::jsonb)
+on conflict (campaign_id, user_id, claim_period_key) do update
 set metadata = public.bonus_claims.metadata
-returning id, campaign_id, user_id, transaction_id, idempotency_key, claimed_at;
+returning id, campaign_id, user_id, transaction_id, idempotency_key, claim_period_key, claimed_at;
 `,
-    [campaign.id, userId, transactionId, idempotencyKey, JSON.stringify(metadata)],
+    [campaign.id, userId, transactionId, idempotencyKey, claimPeriodKey, JSON.stringify(metadata)],
   );
   return rows?.[0] || null;
 }
@@ -291,6 +329,8 @@ async function claimBonusCampaign(userId, campaignCode, deps = {}) {
       campaign_id: campaign.id,
       campaign_code: campaign.code,
       campaign_type: campaign.campaignType,
+      claim_policy: campaign.claimPolicy,
+      claim_period_key: status.claimPeriodKey,
       amount: campaign.amount,
     };
     const result = await writeTransaction({
@@ -300,12 +340,18 @@ async function claimBonusCampaign(userId, campaignCode, deps = {}) {
       reference: status.idempotencyKey,
       description: campaign.title,
       metadata,
-      entries: buildBonusCampaignEntries(userId, campaign),
+      entries: buildBonusCampaignEntries(userId, campaign, status.claimPeriodKey),
       createdBy: userId,
     });
     const transactionId = result?.transaction?.id || null;
     const claim = transactionId
-      ? await insertBonusClaim({ campaign, userId, transactionId, idempotencyKey: status.idempotencyKey }, runSql)
+      ? await insertBonusClaim({
+          campaign,
+          userId,
+          transactionId,
+          idempotencyKey: status.idempotencyKey,
+          claimPeriodKey: status.claimPeriodKey,
+        }, runSql)
       : null;
     klog("bonus_campaign_claimed", {
       ...baseLog,
@@ -337,6 +383,7 @@ export {
   PROMO_BONUS_TX_TYPE,
   buildBonusCampaignEntries,
   buildCampaignIdempotencyKey,
+  buildClaimPeriodKey,
   claimBonusCampaign,
   getBonusCampaignStatus,
   listBonusCampaignStatuses,

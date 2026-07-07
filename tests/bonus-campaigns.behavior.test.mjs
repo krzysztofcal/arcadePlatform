@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildCampaignIdempotencyKey,
+  buildClaimPeriodKey,
   claimBonusCampaign,
   getBonusCampaignStatus,
   listBonusCampaignStatuses,
@@ -26,6 +27,7 @@ function createDeps() {
     ends_at: null,
     eligibility_type: "created_after",
     eligibility_config: { created_at_gte: START_AT },
+    claim_policy: "once",
     max_total_claims: null,
   };
   const allowlistCampaign = {
@@ -40,9 +42,25 @@ function createDeps() {
     ends_at: null,
     eligibility_type: "allowlist",
     eligibility_config: {},
+    claim_policy: "once",
     max_total_claims: null,
   };
-  const campaigns = [welcomeCampaign, allowlistCampaign];
+  const dailyCampaign = {
+    id: "10000000-0000-4000-8000-000000000003",
+    code: "daily-login",
+    title: "Daily Login Bonus",
+    description: "Claim once per UTC day.",
+    campaign_type: "daily",
+    amount: 25,
+    status: "active",
+    starts_at: START_AT,
+    ends_at: null,
+    eligibility_type: "all_accounts",
+    eligibility_config: {},
+    claim_policy: "daily",
+    max_total_claims: null,
+  };
+  const campaigns = [welcomeCampaign, allowlistCampaign, dailyCampaign];
   const users = new Map([
     [BEFORE_USER, "2025-05-31T23:59:59.000Z"],
     [AFTER_USER, "2025-06-02T12:00:00.000Z"],
@@ -64,7 +82,7 @@ function createDeps() {
         return createdAt ? [{ created_at: createdAt }] : [];
       }
       if (text.includes("from public.bonus_claims")) {
-        const key = `${params[0]}:${params[1]}`;
+        const key = `${params[0]}:${params[1]}:${params[2]}`;
         const row = claimsByCampaignUser.get(key);
         return row ? [row] : [];
       }
@@ -82,9 +100,10 @@ function createDeps() {
           user_id: params[1],
           transaction_id: params[2],
           idempotency_key: params[3],
+          claim_period_key: params[4],
           claimed_at: "2026-07-07T00:00:00.000Z",
         };
-        claimsByCampaignUser.set(`${params[0]}:${params[1]}`, row);
+        claimsByCampaignUser.set(`${params[0]}:${params[1]}:${params[4]}`, row);
         return [row];
       }
       throw new Error(`unexpected query: ${text}`);
@@ -122,6 +141,7 @@ test("created-after welcome campaign preserves current eligibility boundary", as
   assert.equal(after.reason, "eligible");
   assert.equal(after.campaign.amount, 500);
   assert.equal(after.idempotencyKey, buildCampaignIdempotencyKey("welcome-2026", AFTER_USER));
+  assert.equal(after.claimPeriodKey, "once");
 });
 
 test("allowlist campaign only allows selected users", async () => {
@@ -146,6 +166,8 @@ test("claim writes PROMO_BONUS ledger transaction and bonus claim row", async ()
   assert.equal(payload.reference, payload.idempotencyKey);
   assert.equal(payload.metadata.source, "bonus_campaign");
   assert.equal(payload.metadata.campaign_code, "welcome-2026");
+  assert.equal(payload.metadata.claim_policy, "once");
+  assert.equal(payload.metadata.claim_period_key, "once");
   assert.deepEqual(
     payload.entries.map((entry) => ({
       accountType: entry.accountType,
@@ -174,16 +196,45 @@ test("repeated claim does not grant a second bonus", async () => {
   assert.equal(deps.claimsByCampaignUser.size, 1);
 });
 
+test("daily claim policy grants once per UTC day", async () => {
+  const deps = createDeps();
+  const todayDeps = { ...deps, now: "2026-07-07T12:00:00.000Z" };
+  const tomorrowDeps = { ...deps, now: "2026-07-08T00:00:01.000Z" };
+
+  const first = await claimBonusCampaign(AFTER_USER, "daily-login", todayDeps);
+  const second = await claimBonusCampaign(AFTER_USER, "daily-login", todayDeps);
+  const third = await claimBonusCampaign(AFTER_USER, "daily-login", tomorrowDeps);
+
+  assert.equal(buildClaimPeriodKey("daily", new Date("2026-07-07T12:00:00.000Z")), "2026-07-07");
+  assert.equal(first.claimed, true);
+  assert.equal(first.claimPeriodKey, "2026-07-07");
+  assert.equal(second.claimed, false);
+  assert.equal(second.reason, "already_claimed");
+  assert.equal(third.claimed, true);
+  assert.equal(third.claimPeriodKey, "2026-07-08");
+  assert.deepEqual(
+    deps.posts.map((post) => post.idempotencyKey),
+    [`bonus:daily-login:${AFTER_USER}:2026-07-07`, `bonus:daily-login:${AFTER_USER}:2026-07-08`],
+  );
+  assert.equal(deps.claimsByCampaignUser.size, 2);
+});
+
 test("list helper returns public campaign status summaries", async () => {
   const deps = createDeps();
   const list = await listBonusCampaignStatuses(ALLOWLIST_USER, deps);
 
-  assert.equal(list.items.length, 2);
+  assert.equal(list.items.length, 3);
   assert.deepEqual(
-    list.items.map((item) => ({ code: item.code, eligible: item.eligible, amount: item.amount })),
+    list.items.map((item) => ({
+      code: item.code,
+      claimPolicy: item.claimPolicy,
+      eligible: item.eligible,
+      amount: item.amount,
+    })),
     [
-      { code: "welcome-2026", eligible: false, amount: 500 },
-      { code: "vip-2026", eligible: true, amount: 250 },
+      { code: "welcome-2026", claimPolicy: "once", eligible: false, amount: 500 },
+      { code: "vip-2026", claimPolicy: "once", eligible: true, amount: 250 },
+      { code: "daily-login", claimPolicy: "daily", eligible: true, amount: 25 },
     ],
   );
 });
