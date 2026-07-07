@@ -69,7 +69,7 @@ jobs:
 
       - name: Apply PR migrations to shared stage DB
         if: ${{ steps.changed.outputs.count != '0' }}
-        run: node scripts/stage-db-migrate.mjs --apply
+        run: node scripts/stage-db-migrate.mjs --apply --changed-from "origin/${{ github.base_ref }}"
 
       - name: No migration changes
         if: ${{ steps.changed.outputs.count == '0' }}

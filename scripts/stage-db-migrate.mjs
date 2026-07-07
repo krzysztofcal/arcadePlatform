@@ -32,6 +32,19 @@ function runPsql(dbUrl, args, options = {}) {
   return result.stdout || "";
 }
 
+function runGit(args) {
+  const result = spawnSync("git", args, {
+    encoding: "utf8",
+    stdio: "pipe"
+  });
+  if (result.status !== 0) {
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    fail("git failed with exit " + result.status);
+  }
+  return result.stdout || "";
+}
+
 function sqlLiteral(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
@@ -86,6 +99,28 @@ function readRemoteVersions(dbUrl) {
   return output.split("\n").map((line) => line.trim()).filter(Boolean);
 }
 
+function readChangedMigrationVersions(diffBase) {
+  if (!diffBase) return [];
+
+  const output = runGit([
+    "diff",
+    "--name-only",
+    diffBase + "...HEAD",
+    "--",
+    "supabase/migrations"
+  ]);
+
+  return output.split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.endsWith(".sql"))
+    .map((line) => path.basename(line))
+    .map((file) => {
+      const match = file.match(MIGRATION_RE);
+      if (!match) fail("Invalid migration filename in PR diff: " + file);
+      return { file, version: match[1] };
+    });
+}
+
 function runSmokeChecks(dbUrl) {
   const smokeSql = [
     "do $$",
@@ -102,6 +137,7 @@ function runSmokeChecks(dbUrl) {
 }
 
 const apply = hasArg("--apply");
+const changedFrom = argValue("--changed-from");
 const dbUrl = argValue("--db-url") || process.env.SUPABASE_STAGE_DB_URL || "";
 const stageRef = argValue("--stage-ref") || process.env.SUPABASE_STAGE_PROJECT_REF || "";
 
@@ -122,6 +158,15 @@ if (unknownRemote.length) {
 }
 
 const remoteSet = new Set(remoteVersions);
+const changedAlreadyApplied = readChangedMigrationVersions(changedFrom)
+  .filter((migration) => remoteSet.has(migration.version));
+if (changedAlreadyApplied.length) {
+  fail([
+    "Stage already has this migration version; bump timestamp or reset/recreate stage.",
+    ...changedAlreadyApplied.map((migration) => "- " + migration.file + " (" + migration.version + ")")
+  ].join("\n"));
+}
+
 const pending = localMigrations.filter((migration) => !remoteSet.has(migration.version));
 
 console.log(`Stage migration status: ${remoteVersions.length} applied, ${pending.length} pending.`);

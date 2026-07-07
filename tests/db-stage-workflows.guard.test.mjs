@@ -35,7 +35,7 @@ test("db stage apply PR is guarded to repo PRs and shared stage only", () => {
   assert.match(text, /SUPABASE_STAGE_DB_URL must target SUPABASE_STAGE_PROJECT_REF/);
   assert.match(text, /git diff --name-only "origin\/\$\{\{ github\.base_ref \}\}"\.\.\.HEAD -- supabase\/migrations/);
   assert.match(text, /node scripts\/check-db-migrations\.mjs/);
-  assert.match(text, /node scripts\/stage-db-migrate\.mjs --apply/);
+  assert.match(text, /node scripts\/stage-db-migrate\.mjs --apply --changed-from "origin\/\$\{\{ github\.base_ref \}\}"/);
   assert.doesNotMatch(text, /SUPABASE_DB_URL: \$\{\{ secrets\.SUPABASE_DB_URL \}\}/);
   assert.doesNotMatch(text, /db reset|drop schema|drop database|supabase db reset/i);
 });
@@ -65,6 +65,8 @@ test("stage migration helper refuses non-stage targets and unrelated remote migr
   assert.match(text, /SUPABASE_STAGE_PROJECT_REF is required/);
   assert.match(text, /does not contain SUPABASE_STAGE_PROJECT_REF/);
   assert.match(text, /Stage DB contains migration versions that are not present in this checkout/);
+  assert.match(text, /Stage already has this migration version; bump timestamp or reset\/recreate stage/);
+  assert.match(text, /--changed-from/);
   assert.match(text, /Refusing to continue/);
   assert.doesNotMatch(text, /drop schema|drop database|truncate/i);
 });

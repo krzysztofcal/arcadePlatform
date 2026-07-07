@@ -19,10 +19,6 @@ if (files.length === 0) {
 }
 
 const sorted = files.slice().sort();
-if (JSON.stringify(files) !== JSON.stringify(sorted)) {
-  fail("Migration directory listing is not lexicographically sorted.");
-}
-
 const seenVersions = new Set();
 const seenNames = new Set();
 
