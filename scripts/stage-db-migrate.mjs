@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 
 const MIGRATIONS_DIR = path.join(process.cwd(), "supabase", "migrations");
@@ -49,6 +50,10 @@ function sqlLiteral(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
+function sha256(value) {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
 function loadLocalMigrations() {
   if (!fs.existsSync(MIGRATIONS_DIR)) fail(`Missing migrations directory: ${MIGRATIONS_DIR}`);
   return fs.readdirSync(MIGRATIONS_DIR)
@@ -57,11 +62,14 @@ function loadLocalMigrations() {
     .map((file) => {
       const match = file.match(MIGRATION_RE);
       if (!match) fail(`Invalid migration filename: ${file}`);
+      const fullPath = path.join(MIGRATIONS_DIR, file);
+      const sql = fs.readFileSync(fullPath, "utf8");
       return {
         file,
         version: match[1],
         name: match[2],
-        path: path.join(MIGRATIONS_DIR, file)
+        path: fullPath,
+        sha256: sha256(sql)
       };
     });
 }
@@ -84,6 +92,13 @@ function ensureMigrationTable(dbUrl) {
       "  version text primary key,",
       "  statements text[],",
       "  name text",
+      ");",
+      "create table if not exists supabase_migrations.schema_migration_files (",
+      "  version text primary key,",
+      "  name text,",
+      "  file text,",
+      "  sha256 text not null,",
+      "  recorded_at timestamptz not null default timezone('utc', now())",
       ");"
     ].join("\n")
   ]);
@@ -97,6 +112,45 @@ function readRemoteVersions(dbUrl) {
     "select version from supabase_migrations.schema_migrations order by version;"
   ]);
   return output.split("\n").map((line) => line.trim()).filter(Boolean);
+}
+
+function readRemoteMigrationHashes(dbUrl) {
+  const output = runPsql(dbUrl, [
+    "-v", "ON_ERROR_STOP=1",
+    "-At",
+    "-F", "\t",
+    "-c",
+    "select version, sha256 from supabase_migrations.schema_migration_files order by version;"
+  ]);
+  const hashes = new Map();
+  for (const line of output.split("\n").map((entry) => entry.trim()).filter(Boolean)) {
+    const [version, hash] = line.split("\t");
+    if (version && hash) hashes.set(version, hash);
+  }
+  return hashes;
+}
+
+function recordMigrationHashes(dbUrl, migrations, { updateExisting = false } = {}) {
+  for (const migration of migrations) {
+    const conflictSql = updateExisting
+      ? [
+          "on conflict (version) do update set",
+          "  name = excluded.name,",
+          "  file = excluded.file,",
+          "  sha256 = excluded.sha256,",
+          "  recorded_at = timezone('utc', now());"
+        ].join("\n")
+      : "on conflict (version) do nothing;";
+    runPsql(dbUrl, [
+      "-v", "ON_ERROR_STOP=1",
+      "-c",
+      [
+        "insert into supabase_migrations.schema_migration_files(version, name, file, sha256)",
+        `values (${sqlLiteral(migration.version)}, ${sqlLiteral(migration.name)}, ${sqlLiteral(migration.file)}, ${sqlLiteral(migration.sha256)})`,
+        conflictSql
+      ].join("\n")
+    ]);
+  }
 }
 
 function readChangedMigrationVersions(diffBase) {
@@ -158,12 +212,24 @@ if (unknownRemote.length) {
 }
 
 const remoteSet = new Set(remoteVersions);
-const changedAlreadyApplied = readChangedMigrationVersions(changedFrom)
-  .filter((migration) => remoteSet.has(migration.version));
-if (changedAlreadyApplied.length) {
+let remoteHashes = readRemoteMigrationHashes(dbUrl);
+const missingHashMigrations = remoteVersions
+  .filter((version) => localByVersion.has(version) && !remoteHashes.has(version))
+  .map((version) => localByVersion.get(version));
+if (missingHashMigrations.length) {
+  console.log(`Recording hashes for ${missingHashMigrations.length} already-applied migration(s).`);
+  recordMigrationHashes(dbUrl, missingHashMigrations);
+  remoteHashes = readRemoteMigrationHashes(dbUrl);
+}
+
+const changedAppliedMismatches = readChangedMigrationVersions(changedFrom)
+  .filter((migration) => remoteSet.has(migration.version))
+  .map((migration) => localByVersion.get(migration.version) || migration)
+  .filter((migration) => remoteHashes.has(migration.version) && remoteHashes.get(migration.version) !== migration.sha256);
+if (changedAppliedMismatches.length) {
   fail([
-    "Stage already has this migration version; bump timestamp or reset/recreate stage.",
-    ...changedAlreadyApplied.map((migration) => "- " + migration.file + " (" + migration.version + ")")
+    "Stage already has this migration version with different contents; bump timestamp or reset/recreate stage.",
+    ...changedAppliedMismatches.map((migration) => "- " + migration.file + " (" + migration.version + ")")
   ].join("\n"));
 }
 
@@ -191,6 +257,7 @@ for (const migration of pending) {
       "on conflict (version) do nothing;"
     ].join("\n")
   ]);
+  recordMigrationHashes(dbUrl, [migration], { updateExisting: true });
 }
 
 runSmokeChecks(dbUrl);
