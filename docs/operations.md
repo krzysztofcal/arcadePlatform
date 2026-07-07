@@ -209,6 +209,18 @@ where t.typname = 'chips_tx_type'
 
 Do not apply production migrations until the stage deploy preview and stage DB checks are green.
 
+## Bonus campaign scheduler
+
+`netlify/functions/bonus-campaigns-scheduled.mjs` runs every 5 minutes when `CHIPS_ENABLED=1`.
+
+It updates only campaign status fields:
+
+- `scheduled -> active` when `starts_at <= now()` and the campaign has not ended.
+- `active -> ended` when `ends_at <= now()`.
+- stale `scheduled -> ended` when a scheduled campaign's `ends_at` has already passed before activation.
+
+The scheduler does not create claims, write ledger entries, or mutate campaign rules.
+
 ## P1.1 rollout & rollback
 Operators rolling out the P1.1 XP bridge should stage the following environment toggles alongside their Netlify/Functions deployment:
 
