@@ -123,10 +123,10 @@
     setBlockVisibility(nodes.forms, !hasUser);
     setBlockVisibility(nodes.account, hasUser);
     setBlockVisibility(nodes.chipPanel, hasUser);
+    setWelcomeBonusVisibility(false);
 
     if (!hasUser){
       clearChips();
-      setWelcomeBonusVisibility(false);
       return;
     }
 
@@ -730,6 +730,7 @@
   function init(){
     auth = (typeof window !== 'undefined' && window.SupabaseAuth) ? window.SupabaseAuth : null;
     selectNodes();
+    setWelcomeBonusVisibility(false);
     wireEvents();
     hydrateUser();
 
