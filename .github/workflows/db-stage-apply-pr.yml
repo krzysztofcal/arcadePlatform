@@ -1,0 +1,76 @@
+name: DB Stage Apply PR
+
+on:
+  pull_request:
+    paths:
+      - "supabase/migrations/**"
+      - "scripts/check-db-migrations.mjs"
+      - "scripts/stage-db-migrate.mjs"
+      - ".github/workflows/db-stage-apply-pr.yml"
+
+concurrency:
+  group: db-stage
+  cancel-in-progress: false
+
+jobs:
+  apply-stage:
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      SUPABASE_STAGE_DB_URL: ${{ secrets.SUPABASE_STAGE_DB_URL }}
+      SUPABASE_STAGE_PROJECT_REF: ${{ secrets.SUPABASE_STAGE_PROJECT_REF }}
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Detect migration changes
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          count="$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD -- supabase/migrations | wc -l | tr -d ' ')"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "migration files changed: $count"
+
+      - name: Validate stage migration secrets
+        if: ${{ steps.changed.outputs.count != '0' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_STAGE_DB_URL"
+          test -n "$SUPABASE_STAGE_PROJECT_REF"
+          case "$SUPABASE_STAGE_DB_URL" in
+            *"$SUPABASE_STAGE_PROJECT_REF"*) ;;
+            *) echo "SUPABASE_STAGE_DB_URL must target SUPABASE_STAGE_PROJECT_REF"; exit 1 ;;
+          esac
+
+      - name: Install PostgreSQL client
+        if: ${{ steps.changed.outputs.count != '0' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Validate migration files
+        if: ${{ steps.changed.outputs.count != '0' }}
+        run: node scripts/check-db-migrations.mjs
+
+      - name: Apply PR migrations to shared stage DB
+        if: ${{ steps.changed.outputs.count != '0' }}
+        run: node scripts/stage-db-migrate.mjs --apply --changed-from "origin/${{ github.base_ref }}"
+
+      - name: No migration changes
+        if: ${{ steps.changed.outputs.count == '0' }}
+        run: echo "No supabase/migrations changes detected; stage DB apply skipped."

@@ -371,6 +371,7 @@ async function collectMatchingFrames(ws, { expectations, timeoutMs = 10000, labe
 
 async function nextStateUpdate(ws, { baseline = null, timeoutMs = 10000 } = {}) {
   const started = Date.now();
+  const baselineVersion = Number(baseline?.stateVersion ?? baseline?.version ?? 0);
   while (true) {
     const remainingMs = timeoutMs - (Date.now() - started);
     if (remainingMs <= 0) {
@@ -378,10 +379,18 @@ async function nextStateUpdate(ws, { baseline = null, timeoutMs = 10000 } = {}) 
     }
     const frame = await nextMessage(ws, remainingMs);
     if (frame?.type === "stateSnapshot") {
+      const frameVersion = Number(frame.payload?.stateVersion ?? frame.payload?.version ?? 0);
+      if (baselineVersion > 0 && frameVersion <= baselineVersion) {
+        continue;
+      }
       return { frame, payload: frame.payload, baseline: frame.payload };
     }
     if (frame?.type === "statePatch") {
       const merged = baseline ? { ...baseline, ...frame.payload } : { ...frame.payload };
+      const mergedVersion = Number(merged?.stateVersion ?? merged?.version ?? 0);
+      if (baselineVersion > 0 && mergedVersion <= baselineVersion) {
+        continue;
+      }
       return { frame, payload: merged, baseline: merged };
     }
   }

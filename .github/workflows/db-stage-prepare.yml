@@ -1,0 +1,66 @@
+name: DB Stage Prepare
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to apply to shared stage DB
+        required: true
+        type: string
+
+concurrency:
+  group: db-stage
+  cancel-in-progress: false
+
+jobs:
+  prepare-stage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      SUPABASE_STAGE_DB_URL: ${{ secrets.SUPABASE_STAGE_DB_URL }}
+      SUPABASE_STAGE_PROJECT_REF: ${{ secrets.SUPABASE_STAGE_PROJECT_REF }}
+    steps:
+      - name: Checkout selected ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Resolve selected ref SHA
+        id: selected_ref
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate stage migration secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_STAGE_DB_URL"
+          test -n "$SUPABASE_STAGE_PROJECT_REF"
+          case "$SUPABASE_STAGE_DB_URL" in
+            *"$SUPABASE_STAGE_PROJECT_REF"*) ;;
+            *) echo "SUPABASE_STAGE_DB_URL must target SUPABASE_STAGE_PROJECT_REF"; exit 1 ;;
+          esac
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Validate migration files
+        run: node scripts/check-db-migrations.mjs
+
+      - name: Prepare shared stage DB for selected ref
+        run: node scripts/stage-db-migrate.mjs --apply
+
+      - name: Print stage target
+        run: |
+          echo "Prepared shared stage DB for ${{ inputs.ref }}"
+          echo "Selected SHA: ${{ steps.selected_ref.outputs.sha }}"

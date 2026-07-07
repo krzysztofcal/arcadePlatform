@@ -1,0 +1,25 @@
+name: DB Migration Check
+
+on:
+  pull_request:
+    paths:
+      - "supabase/**"
+      - "scripts/check-db-migrations.mjs"
+      - ".github/workflows/db-migration-check.yml"
+
+jobs:
+  migration-guard:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate migration files
+        run: node scripts/check-db-migrations.mjs
