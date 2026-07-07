@@ -213,6 +213,18 @@ if (unknownRemote.length) {
 
 const remoteSet = new Set(remoteVersions);
 let remoteHashes = readRemoteMigrationHashes(dbUrl);
+const changedAppliedMigrations = readChangedMigrationVersions(changedFrom)
+  .filter((migration) => remoteSet.has(migration.version))
+  .map((migration) => localByVersion.get(migration.version) || migration);
+const changedAppliedMissingHashes = changedAppliedMigrations
+  .filter((migration) => !remoteHashes.has(migration.version));
+if (changedAppliedMissingHashes.length) {
+  fail([
+    "Stage already has this migration version but no recorded contents hash; bump timestamp or reset/recreate stage.",
+    ...changedAppliedMissingHashes.map((migration) => "- " + migration.file + " (" + migration.version + ")")
+  ].join("\n"));
+}
+
 const missingHashMigrations = remoteVersions
   .filter((version) => localByVersion.has(version) && !remoteHashes.has(version))
   .map((version) => localByVersion.get(version));
@@ -222,9 +234,7 @@ if (missingHashMigrations.length) {
   remoteHashes = readRemoteMigrationHashes(dbUrl);
 }
 
-const changedAppliedMismatches = readChangedMigrationVersions(changedFrom)
-  .filter((migration) => remoteSet.has(migration.version))
-  .map((migration) => localByVersion.get(migration.version) || migration)
+const changedAppliedMismatches = changedAppliedMigrations
   .filter((migration) => remoteHashes.has(migration.version) && remoteHashes.get(migration.version) !== migration.sha256);
 if (changedAppliedMismatches.length) {
   fail([
