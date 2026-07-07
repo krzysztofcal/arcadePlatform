@@ -377,6 +377,112 @@
     return (state.bonusCampaigns.items || []).find(function(item){ return item.id === campaignId; }) || null;
   }
 
+  function getBonusCampaignField(name){
+    var form = nodes.bonusCampaignForm;
+    if (!form) return null;
+    return Array.prototype.find.call(form.elements || [], function(field){
+      return field && field.name === name;
+    }) || null;
+  }
+
+  function getBonusCampaignFormValue(name){
+    var field = getBonusCampaignField(name);
+    return field ? field.value : "";
+  }
+
+  function setBonusCampaignFormValue(name, value){
+    var field = getBonusCampaignField(name);
+    if (!field || field.disabled) return;
+    field.value = value == null ? "" : String(value);
+  }
+
+  function isBlankEligibilityConfig(value){
+    var text = String(value == null ? "" : value).trim();
+    return !text || text === "{}";
+  }
+
+  function buildEligibilityConfigForType(eligibilityType, startsAt){
+    if (eligibilityType === "created_after"){
+      return { created_at_gte: startsAt || new Date().toISOString().slice(0, 16) };
+    }
+    if (eligibilityType === "created_before"){
+      return { created_at_lte: startsAt || new Date().toISOString().slice(0, 16) };
+    }
+    return {};
+  }
+
+  function syncEligibilityConfigFromPreset(force){
+    var eligibilityType = getBonusCampaignFormValue("eligibilityType") || "all_accounts";
+    var configField = getBonusCampaignField("eligibilityConfig");
+    if (!configField || configField.disabled) return;
+    if (!force && !isBlankEligibilityConfig(configField.value)) return;
+    configField.value = JSON.stringify(
+      buildEligibilityConfigForType(eligibilityType, getBonusCampaignFormValue("startsAt")),
+      null,
+      2,
+    );
+  }
+
+  function canApplyBonusCampaignTemplate(){
+    var campaignId = getBonusCampaignFormValue("campaignId");
+    if (!campaignId) return true;
+    var campaign = findBonusCampaign(campaignId);
+    return !!campaign && campaign.status === "draft";
+  }
+
+  function applyBonusCampaignTemplate(templateKey){
+    if (!nodes.bonusCampaignForm) return;
+    if (!canApplyBonusCampaignTemplate()){
+      setStatus("Templates are available only for new campaigns or draft edits.", "info");
+      return;
+    }
+    var templates = {
+      welcome: {
+        title: "500 CH Welcome Bonus",
+        description: "Create an account and claim your starter chips.",
+        campaignType: "welcome",
+        amount: 500,
+        eligibilityType: "created_after",
+        claimPolicy: "once",
+        maxTotalClaims: "",
+      },
+      daily: {
+        title: "Daily Login Bonus",
+        description: "Claim once per UTC day.",
+        campaignType: "daily",
+        amount: 20,
+        eligibilityType: "all_accounts",
+        claimPolicy: "daily",
+        maxTotalClaims: "",
+      },
+      anniversary: {
+        title: "Anniversary Bonus",
+        description: "Limited-time anniversary chips.",
+        campaignType: "anniversary",
+        amount: 250,
+        eligibilityType: "all_accounts",
+        claimPolicy: "once",
+        maxTotalClaims: "",
+      },
+      compensation: {
+        title: "Compensation Bonus",
+        description: "Manual compensation campaign for selected users.",
+        campaignType: "compensation",
+        amount: 100,
+        eligibilityType: "allowlist",
+        claimPolicy: "once",
+        maxTotalClaims: "",
+      },
+    };
+    var template = templates[templateKey];
+    if (!template) return;
+    Object.keys(template).forEach(function(fieldName){
+      setBonusCampaignFormValue(fieldName, template[fieldName]);
+    });
+    syncEligibilityConfigFromPreset(true);
+    setStatus("Bonus campaign template applied. Review code, dates, amount, and eligibility before saving.", "info");
+  }
+
   function fillBonusCampaignForm(item){
     var form = nodes.bonusCampaignForm;
     if (!form) return;
@@ -1615,6 +1721,14 @@
     loadBonusCampaigns();
   }
 
+  function handleBonusCampaignFormChange(event){
+    var target = event && event.target;
+    if (!target || !target.name) return;
+    if (target.name === "eligibilityType" || target.name === "startsAt"){
+      syncEligibilityConfigFromPreset(false);
+    }
+  }
+
   function handleCampaignAction(action, campaignId, status){
     if (action === "edit" || action === "view"){
       var campaign = findBonusCampaign(campaignId);
@@ -1643,6 +1757,7 @@
     if (nodes.ledgerFilters) nodes.ledgerFilters.addEventListener("submit", handleLedgerSubmit);
     if (nodes.bonusCampaignsFilters) nodes.bonusCampaignsFilters.addEventListener("submit", handleBonusCampaignsSubmit);
     if (nodes.bonusCampaignForm) nodes.bonusCampaignForm.addEventListener("submit", saveBonusCampaignDraft);
+    if (nodes.bonusCampaignForm) nodes.bonusCampaignForm.addEventListener("change", handleBonusCampaignFormChange);
     if (nodes.pokerAuditFilters) nodes.pokerAuditFilters.addEventListener("submit", handlePokerAuditSubmit);
     if (nodes.usersRefresh) nodes.usersRefresh.addEventListener("click", function(){ loadUsers(); });
     if (nodes.tablesRefresh) nodes.tablesRefresh.addEventListener("click", function(){ loadTables(); });
@@ -1739,6 +1854,11 @@
           campaignButton.getAttribute("data-campaign-id"),
           campaignButton.getAttribute("data-campaign-status")
         );
+        return;
+      }
+      var bonusTemplateButton = closestEventTarget(event.target, "[data-bonus-template]");
+      if (bonusTemplateButton){
+        applyBonusCampaignTemplate(bonusTemplateButton.getAttribute("data-bonus-template"));
         return;
       }
       var adjustButton = closestEventTarget(event.target, "[data-adjust-amount]");

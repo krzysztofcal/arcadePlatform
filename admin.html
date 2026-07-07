@@ -492,6 +492,12 @@
                   <p class="admin-empty">Create campaigns as draft first. Edit is allowed only while the campaign is still draft.</p>
                   <form class="admin-adjust" id="adminBonusCampaignForm">
                     <input type="hidden" name="campaignId">
+                    <div class="admin-filter-actions" aria-label="Bonus campaign templates">
+                      <button class="admin-btn admin-btn--ghost" type="button" data-bonus-template="welcome">Welcome once</button>
+                      <button class="admin-btn admin-btn--ghost" type="button" data-bonus-template="daily">Daily login</button>
+                      <button class="admin-btn admin-btn--ghost" type="button" data-bonus-template="anniversary">Anniversary</button>
+                      <button class="admin-btn admin-btn--ghost" type="button" data-bonus-template="compensation">Compensation</button>
+                    </div>
                     <label class="admin-field">
                       <span class="admin-field__label">Code</span>
                       <input class="admin-input" type="text" name="code" placeholder="daily-active-2026" required>
@@ -513,6 +519,9 @@
                         <option value="anniversary"></option>
                         <option value="seasonal"></option>
                         <option value="vip"></option>
+                        <option value="retention"></option>
+                        <option value="compensation"></option>
+                        <option value="event"></option>
                         <option value="limited"></option>
                       </datalist>
                     </label>
@@ -545,6 +554,7 @@
                         <option value="weekly">weekly</option>
                         <option value="monthly">monthly</option>
                       </select>
+                      <span class="admin-field__hint">Repeat policies use UTC periods. Daily means once per UTC day.</span>
                     </label>
                     <label class="admin-field">
                       <span class="admin-field__label">Max total claims</span>

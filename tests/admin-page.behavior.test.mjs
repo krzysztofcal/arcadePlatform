@@ -543,12 +543,36 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.match(document.getElementById("adminBonusCampaignsBody").innerHTML, /Edit safe fields/);
   assert.match(document.getElementById("adminBonusCampaignsBody").innerHTML, /View/);
 
+  const dailyTemplateButton = createElement("button");
+  dailyTemplateButton.setAttribute("data-bonus-template", "daily");
+  document.dispatchEvent({ type: "click", target: dailyTemplateButton, preventDefault() {} });
+
+  const bonusCampaignForm = document.getElementById("adminBonusCampaignForm");
+  assert.equal(formField(bonusCampaignForm, "title").value, "Daily Login Bonus");
+  assert.equal(formField(bonusCampaignForm, "campaignType").value, "daily");
+  assert.equal(formField(bonusCampaignForm, "amount").value, "20");
+  assert.equal(formField(bonusCampaignForm, "claimPolicy").value, "daily");
+  assert.equal(formField(bonusCampaignForm, "eligibilityType").value, "all_accounts");
+  assert.deepEqual(JSON.parse(formField(bonusCampaignForm, "eligibilityConfig").value), {});
+  assert.match(document.getElementById("adminStatus").textContent, /template applied/);
+
+  formField(bonusCampaignForm, "startsAt").value = "2026-07-10T12:30";
+  formField(bonusCampaignForm, "eligibilityType").value = "created_after";
+  formField(bonusCampaignForm, "eligibilityConfig").value = "{}";
+  bonusCampaignForm.dispatchEvent({
+    type: "change",
+    target: formField(bonusCampaignForm, "eligibilityType"),
+    preventDefault() {},
+  });
+  assert.deepEqual(JSON.parse(formField(bonusCampaignForm, "eligibilityConfig").value), {
+    created_at_gte: "2026-07-10T12:30",
+  });
+
   const draftEditButton = createElement("button");
   draftEditButton.setAttribute("data-campaign-action", "edit");
   draftEditButton.setAttribute("data-campaign-id", "campaign-1");
   document.dispatchEvent({ type: "click", target: draftEditButton, preventDefault() {} });
 
-  const bonusCampaignForm = document.getElementById("adminBonusCampaignForm");
   assert.equal(formField(bonusCampaignForm, "title").value, "Daily Test");
   assert.equal(formField(bonusCampaignForm, "amount").value, "50");
   assert.equal(formField(bonusCampaignForm, "code").disabled, true);
@@ -584,6 +608,11 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.equal(formField(bonusCampaignForm, "claimPolicy").disabled, true);
   assert.equal(formField(bonusCampaignForm, "eligibilityType").disabled, true);
   assert.match(document.getElementById("adminStatus").textContent, /Safe fields/);
+
+  document.dispatchEvent({ type: "click", target: dailyTemplateButton, preventDefault() {} });
+  assert.equal(formField(bonusCampaignForm, "title").value, "Paused Empty Test");
+  assert.equal(formField(bonusCampaignForm, "amount").value, "20");
+  assert.match(document.getElementById("adminStatus").textContent, /Templates are available only/);
 
   tabs[5].dispatchEvent({ type: "click", bubbles: true, target: tabs[5], preventDefault() {} });
   await flush();

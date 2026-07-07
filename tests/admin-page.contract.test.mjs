@@ -35,4 +35,15 @@ test("admin bonus campaign form exposes campaign type suggestions", () => {
   assert.match(adminHtml, /<datalist id="adminBonusCampaignTypeOptions">/);
   assert.match(adminHtml, /<option value="daily"><\/option>/);
   assert.match(adminHtml, /<option value="anniversary"><\/option>/);
+  assert.match(adminHtml, /<option value="retention"><\/option>/);
+  assert.match(adminHtml, /<option value="compensation"><\/option>/);
+  assert.match(adminHtml, /<option value="event"><\/option>/);
+});
+
+test("admin bonus campaign form exposes draft templates and policy hint", () => {
+  assert.match(adminHtml, /data-bonus-template="welcome"/);
+  assert.match(adminHtml, /data-bonus-template="daily"/);
+  assert.match(adminHtml, /data-bonus-template="anniversary"/);
+  assert.match(adminHtml, /data-bonus-template="compensation"/);
+  assert.match(adminHtml, /Daily means once per UTC day/);
 });
