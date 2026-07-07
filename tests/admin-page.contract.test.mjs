@@ -19,11 +19,13 @@ test("admin page exposes required admin tabs", () => {
   assert.match(adminHtml, /data-admin-tab="users"/);
   assert.match(adminHtml, /data-admin-tab="tables"/);
   assert.match(adminHtml, /data-admin-tab="ledger"/);
+  assert.match(adminHtml, /data-admin-tab="bonusCampaigns"/);
   assert.match(adminHtml, /data-admin-tab="pokerAudit"/);
   assert.match(adminHtml, /data-admin-tab="ops"/);
   assert.match(adminHtml, /data-admin-panel="users"/);
   assert.match(adminHtml, /data-admin-panel="tables"/);
   assert.match(adminHtml, /data-admin-panel="ledger"/);
+  assert.match(adminHtml, /data-admin-panel="bonusCampaigns"/);
   assert.match(adminHtml, /data-admin-panel="pokerAudit"/);
   assert.match(adminHtml, /data-admin-panel="ops"/);
 });

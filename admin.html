@@ -134,6 +134,7 @@
               <button class="admin-tab is-active" id="adminTabButtonUsers" type="button" role="tab" data-admin-tab="users" aria-selected="true" aria-controls="adminTabUsers" tabindex="0">Users</button>
               <button class="admin-tab" id="adminTabButtonTables" type="button" role="tab" data-admin-tab="tables" aria-selected="false" aria-controls="adminTabTables" tabindex="-1">Tables</button>
               <button class="admin-tab" id="adminTabButtonLedger" type="button" role="tab" data-admin-tab="ledger" aria-selected="false" aria-controls="adminTabLedger" tabindex="-1">Ledger</button>
+              <button class="admin-tab" id="adminTabButtonBonusCampaigns" type="button" role="tab" data-admin-tab="bonusCampaigns" aria-selected="false" aria-controls="adminTabBonusCampaigns" tabindex="-1">Bonus Campaigns</button>
               <button class="admin-tab" id="adminTabButtonPokerAudit" type="button" role="tab" data-admin-tab="pokerAudit" aria-selected="false" aria-controls="adminTabPokerAudit" tabindex="-1">Poker Audit</button>
               <button class="admin-tab" id="adminTabButtonOps" type="button" role="tab" data-admin-tab="ops" aria-selected="false" aria-controls="adminTabOps" tabindex="-1">Ops</button>
             </div>
@@ -426,6 +427,130 @@
                 <div class="admin-detail" id="adminLedgerDetail">
                   <h2 class="xp-card__title" id="adminLedgerSideTitle">Ledger context</h2>
                   <p class="admin-empty">Use quick filters, copy helpers, or jump from a user row to narrow this audit trail.</p>
+                </div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="admin-tab-panel" id="adminTabBonusCampaigns" data-admin-panel="bonusCampaigns" role="tabpanel" aria-labelledby="adminTabButtonBonusCampaigns" hidden>
+            <div class="admin-workspace">
+              <section class="xp-card admin-card admin-card--main" aria-labelledby="adminBonusCampaignsTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminBonusCampaignsTitle">Bonus Campaigns</h2>
+                    <p class="admin-card__subtitle">Create draft campaigns, review claim counts, and control campaign status.</p>
+                  </div>
+                  <div class="admin-card__actions">
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminBonusCampaignsRefresh">Refresh</button>
+                  </div>
+                </div>
+                <form class="admin-filter-grid" id="adminBonusCampaignsFilters">
+                  <label class="admin-field">
+                    <span class="admin-field__label">Code / title</span>
+                    <input class="admin-input" type="search" name="q" placeholder="welcome-2026">
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Status</span>
+                    <select class="admin-input" name="status">
+                      <option value="">Any</option>
+                      <option value="draft">draft</option>
+                      <option value="scheduled">scheduled</option>
+                      <option value="active">active</option>
+                      <option value="paused">paused</option>
+                      <option value="ended">ended</option>
+                    </select>
+                  </label>
+                  <div class="admin-filter-actions">
+                    <button class="admin-btn admin-btn--primary" type="submit">Apply filters</button>
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminBonusCampaignsReset">Reset</button>
+                  </div>
+                </form>
+                <div class="admin-table-wrap">
+                  <table class="admin-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Code</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Amount</th>
+                        <th scope="col">Policy</th>
+                        <th scope="col">Eligibility</th>
+                        <th scope="col">Window</th>
+                        <th scope="col">Claims</th>
+                        <th scope="col">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="adminBonusCampaignsBody"></tbody>
+                  </table>
+                </div>
+                <p class="admin-empty" id="adminBonusCampaignsEmpty" hidden>No bonus campaigns matched the current filters.</p>
+                <div class="admin-pagination" id="adminBonusCampaignsPagination"></div>
+              </section>
+
+              <aside class="xp-card admin-card admin-card--detail" aria-labelledby="adminBonusCampaignFormTitle">
+                <div class="admin-detail">
+                  <h2 class="xp-card__title" id="adminBonusCampaignFormTitle">Campaign draft</h2>
+                  <p class="admin-empty">Create campaigns as draft first. Edit is allowed only while the campaign is still draft.</p>
+                  <form class="admin-adjust" id="adminBonusCampaignForm">
+                    <input type="hidden" name="campaignId">
+                    <label class="admin-field">
+                      <span class="admin-field__label">Code</span>
+                      <input class="admin-input" type="text" name="code" placeholder="daily-active-2026" required>
+                    </label>
+                    <label class="admin-field">
+                      <span class="admin-field__label">Title</span>
+                      <input class="admin-input" type="text" name="title" placeholder="Daily Active Bonus" required>
+                    </label>
+                    <label class="admin-field">
+                      <span class="admin-field__label">Description</span>
+                      <textarea class="admin-input" name="description" rows="2" placeholder="Short public description"></textarea>
+                    </label>
+                    <label class="admin-field">
+                      <span class="admin-field__label">Campaign type</span>
+                      <input class="admin-input" type="text" name="campaignType" placeholder="daily" required>
+                    </label>
+                    <label class="admin-field">
+                      <span class="admin-field__label">Amount</span>
+                      <input class="admin-input" type="number" name="amount" min="1" step="1" required>
+                    </label>
+                    <label class="admin-field">
+                      <span class="admin-field__label">Starts at</span>
+                      <input class="admin-input" type="datetime-local" name="startsAt" required>
+                    </label>
+                    <label class="admin-field">
+                      <span class="admin-field__label">Ends at</span>
+                      <input class="admin-input" type="datetime-local" name="endsAt">
+                    </label>
+                    <label class="admin-field">
+                      <span class="admin-field__label">Eligibility</span>
+                      <select class="admin-input" name="eligibilityType">
+                        <option value="all_accounts">all_accounts</option>
+                        <option value="created_after">created_after</option>
+                        <option value="created_before">created_before</option>
+                        <option value="allowlist">allowlist</option>
+                      </select>
+                    </label>
+                    <label class="admin-field">
+                      <span class="admin-field__label">Claim policy</span>
+                      <select class="admin-input" name="claimPolicy">
+                        <option value="once">once</option>
+                        <option value="daily">daily</option>
+                        <option value="weekly">weekly</option>
+                        <option value="monthly">monthly</option>
+                      </select>
+                    </label>
+                    <label class="admin-field">
+                      <span class="admin-field__label">Max total claims</span>
+                      <input class="admin-input" type="number" name="maxTotalClaims" min="1" step="1" placeholder="optional">
+                    </label>
+                    <label class="admin-field">
+                      <span class="admin-field__label">Eligibility config JSON</span>
+                      <textarea class="admin-input admin-mono" name="eligibilityConfig" rows="5">{}</textarea>
+                    </label>
+                    <div class="admin-filter-actions">
+                      <button class="admin-btn admin-btn--primary" type="submit">Save draft</button>
+                      <button class="admin-btn admin-btn--ghost" type="button" id="adminBonusCampaignClear">New draft</button>
+                    </div>
+                  </form>
                 </div>
               </aside>
             </div>

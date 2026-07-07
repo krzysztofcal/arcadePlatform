@@ -257,6 +257,12 @@ function createAdminDom() {
     "adminLedgerDetail",
     "adminLedgerReset",
     "adminLedgerRecentAdmin",
+    "adminBonusCampaignsBody",
+    "adminBonusCampaignsEmpty",
+    "adminBonusCampaignsPagination",
+    "adminBonusCampaignsRefresh",
+    "adminBonusCampaignsReset",
+    "adminBonusCampaignClear",
     "adminPokerAuditBody",
     "adminPokerAuditEmpty",
     "adminPokerAuditDetail",
@@ -284,12 +290,27 @@ function createAdminDom() {
   addField(tablesFilters, { name: "sort", value: "last_activity_desc" });
   const ledgerFilters = createForm(document, "adminLedgerFilters");
   addField(ledgerFilters, { name: "txType", value: "" });
+  const bonusCampaignsFilters = createForm(document, "adminBonusCampaignsFilters");
+  addField(bonusCampaignsFilters, { name: "status", value: "" });
+  const bonusCampaignForm = createForm(document, "adminBonusCampaignForm");
+  addField(bonusCampaignForm, { name: "campaignId", value: "" });
+  addField(bonusCampaignForm, { name: "code", value: "" });
+  addField(bonusCampaignForm, { name: "title", value: "" });
+  addField(bonusCampaignForm, { name: "description", value: "" });
+  addField(bonusCampaignForm, { name: "campaignType", value: "" });
+  addField(bonusCampaignForm, { name: "amount", value: "" });
+  addField(bonusCampaignForm, { name: "startsAt", value: "" });
+  addField(bonusCampaignForm, { name: "endsAt", value: "" });
+  addField(bonusCampaignForm, { name: "eligibilityType", value: "all_accounts" });
+  addField(bonusCampaignForm, { name: "claimPolicy", value: "once" });
+  addField(bonusCampaignForm, { name: "maxTotalClaims", value: "" });
+  addField(bonusCampaignForm, { name: "eligibilityConfig", value: "{}" });
   const pokerAuditFilters = createForm(document, "adminPokerAuditFilters");
   addField(pokerAuditFilters, { name: "tableId", value: "" });
   addField(pokerAuditFilters, { name: "handId", value: "" });
   addField(pokerAuditFilters, { name: "limit", value: "20" });
 
-  const tabs = ["users", "tables", "ledger", "pokerAudit", "ops"].map((tab, index) => {
+  const tabs = ["users", "tables", "ledger", "bonusCampaigns", "pokerAudit", "ops"].map((tab, index) => {
     const button = registerNode(document, createElement("button", `adminTabButton${tab[0].toUpperCase()}${tab.slice(1)}`));
     button.setAttribute("data-admin-tab", tab);
     button.setAttribute("role", "tab");
@@ -302,7 +323,7 @@ function createAdminDom() {
     return button;
   });
 
-  const panels = ["users", "tables", "ledger", "pokerAudit", "ops"].map((tab, index) => {
+  const panels = ["users", "tables", "ledger", "bonusCampaigns", "pokerAudit", "ops"].map((tab, index) => {
     const panel = registerNode(document, createElement("section", `adminTab${tab[0].toUpperCase()}${tab.slice(1)}`));
     panel.setAttribute("data-admin-panel", tab);
     panel.setAttribute("role", "tabpanel");
@@ -337,6 +358,25 @@ function buildContext(options = {}) {
     }
     if (text.includes("/.netlify/functions/admin-ledger-list")) {
       return { ok: true, json: async () => ({ items: [], pagination: null }) };
+    }
+    if (text.includes("/.netlify/functions/admin-bonus-campaigns")) {
+      return { ok: true, json: async () => ({
+        items: [{
+          id: "campaign-1",
+          code: "daily-test",
+          title: "Daily Test",
+          amount: 50,
+          status: "draft",
+          startsAt: "2026-07-07T00:00:00.000Z",
+          endsAt: null,
+          eligibilityType: "all_accounts",
+          eligibilityConfig: {},
+          claimPolicy: "daily",
+          maxTotalClaims: 100,
+          claimCount: 0,
+        }],
+        pagination: null,
+      }) };
     }
     if (text.includes("/.netlify/functions/admin-ops-summary")) {
       return { ok: true, json: async () => ({
@@ -457,11 +497,20 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.equal(panels[1].getAttribute("aria-hidden"), "false");
   assert.equal(fetchCalls.includes("/.netlify/functions/admin-tables-list?status=OPEN&sort=last_activity_desc&page=1&limit=20"), true);
 
-  tabs[4].dispatchEvent({ type: "click", bubbles: true, target: tabs[4], preventDefault() {} });
+  tabs[3].dispatchEvent({ type: "click", bubbles: true, target: tabs[3], preventDefault() {} });
   await flush();
 
-  assert.equal(tabs[4].getAttribute("aria-selected"), "true");
-  assert.equal(panels[4].hidden, false);
+  assert.equal(tabs[3].getAttribute("aria-selected"), "true");
+  assert.equal(panels[3].hidden, false);
+  assert.equal(fetchCalls.includes("/.netlify/functions/admin-bonus-campaigns?page=1&limit=25"), true);
+  assert.match(document.getElementById("adminBonusCampaignsBody").innerHTML, /daily-test/);
+  assert.match(document.getElementById("adminBonusCampaignsBody").innerHTML, /Daily Test/);
+
+  tabs[5].dispatchEvent({ type: "click", bubbles: true, target: tabs[5], preventDefault() {} });
+  await flush();
+
+  assert.equal(tabs[5].getAttribute("aria-selected"), "true");
+  assert.equal(panels[5].hidden, false);
   assert.equal(fetchCalls.includes("/.netlify/functions/admin-stage-identity"), true);
   assert.equal(fetchCalls.includes("/.netlify/functions/admin-ops-summary"), true);
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /Database target/);
@@ -477,7 +526,7 @@ test("admin page still renders ops summary when stage identity request fails", a
   await flush();
   await flush();
 
-  tabs[4].dispatchEvent({ type: "click", bubbles: true, target: tabs[4], preventDefault() {} });
+  tabs[5].dispatchEvent({ type: "click", bubbles: true, target: tabs[5], preventDefault() {} });
   await flush();
   await flush();
 
@@ -495,7 +544,7 @@ test("admin page poker audit search renders hand timeline and settlement summary
   await flush();
   await flush();
 
-  tabs[3].dispatchEvent({ type: "click", bubbles: true, target: tabs[3], preventDefault() {} });
+  tabs[4].dispatchEvent({ type: "click", bubbles: true, target: tabs[4], preventDefault() {} });
   await flush();
 
   const filters = document.getElementById("adminPokerAuditFilters");
