@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.join(__dirname, "..");
 const source = await readFile(path.join(repoRoot, "js", "account-page.js"), "utf8");
 const portalCss = await readFile(path.join(repoRoot, "css", "portal.css"), "utf8");
+const accountHtml = await readFile(path.join(repoRoot, "account.html"), "utf8");
 
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
@@ -842,6 +843,53 @@ test("chip-panel min-height is scoped to page-account", () => {
     assert.ok(!/min-height/.test(globalChipPanel[0]), "chip-panel min-height should not be global");
   }
   assert.ok(/\.page-account\s+\.chip-panel\{[^}]*min-height\s*:\s*0/.test(normalized), "chip-panel min-height must be scoped");
+});
+
+test("welcome bonus panel hidden attribute is not overridden by account page CSS", () => {
+  const normalized = accountHtml.replace(/\s+/g, " ");
+  assert.ok(/id="welcomeBonusPanel"\s+hidden/.test(normalized), "welcome bonus panel should be hidden in static HTML");
+  assert.ok(/\.account-bonus\[hidden\]\{[^}]*display\s*:\s*none\s*!important/.test(normalized), "account bonus hidden state must override display:grid");
+});
+
+test("welcome bonus panel is hidden before backend eligibility resolves", async () => {
+  let resolveStatus;
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1200 });
+    },
+    fetchLedger() {
+      return Promise.resolve({ items: [], nextCursor: null });
+    },
+    fetchWelcomeBonusStatus() {
+      return new Promise(resolve => {
+        resolveStatus = resolve;
+      });
+    },
+  };
+  const { windowObj, document } = buildContext(chipsClient);
+  const panel = document.getElementById("welcomeBonusPanel");
+  panel.hidden = false;
+  panel.style.display = "";
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+
+  assert.equal(panel.hidden, true);
+  assert.equal(panel.style.display, "none");
+
+  resolveStatus({ eligible: false, alreadyClaimed: true, amount: 500 });
+  await flush();
+  await flush();
+
+  assert.equal(panel.hidden, true);
+  assert.equal(panel.style.display, "none");
 });
 
 test("shows welcome bonus claim from backend eligibility and claims on click", async () => {
