@@ -143,6 +143,7 @@ starts_at timestamptz not null
 ends_at timestamptz
 eligibility_type text not null
 eligibility_config jsonb not null default '{}'
+claim_policy text not null default 'once'
 max_total_claims bigint
 created_by uuid
 created_at timestamptz not null default now()
@@ -168,6 +169,15 @@ created_before
 allowlist
 ```
 
+Supported claim policies:
+
+```text
+once
+daily
+weekly
+monthly
+```
+
 Future eligibility types:
 
 ```text
@@ -180,7 +190,7 @@ no_bonus_claimed_since
 
 Purpose:
 
-- Records one claim per user per campaign.
+- Records one claim per user per campaign period.
 
 Suggested columns:
 
@@ -190,6 +200,7 @@ campaign_id uuid not null references public.bonus_campaigns(id)
 user_id uuid not null references auth.users(id)
 transaction_id uuid not null references public.chips_transactions(id)
 idempotency_key text not null
+claim_period_key text not null default 'once'
 claimed_at timestamptz not null default now()
 metadata jsonb not null default '{}'
 ```
@@ -197,7 +208,7 @@ metadata jsonb not null default '{}'
 Constraints:
 
 ```text
-unique (campaign_id, user_id)
+unique (campaign_id, user_id, claim_period_key)
 unique (idempotency_key)
 ```
 
@@ -220,10 +231,16 @@ primary key (campaign_id, user_id)
 
 ### Idempotency
 
-Use stable campaign-scoped keys:
+Use stable campaign-scoped keys. `once` campaigns keep the original key shape:
 
 ```text
 bonus:<campaignCode>:<userId>
+```
+
+Repeating campaigns include the UTC claim period:
+
+```text
+bonus:<campaignCode>:<userId>:<claimPeriodKey>
 ```
 
 Examples:
@@ -231,6 +248,7 @@ Examples:
 ```text
 bonus:welcome-2026:00000000-0000-4000-8000-000000000003
 bonus:anniversary-2026:00000000-0000-4000-8000-000000000003
+bonus:daily-login:00000000-0000-4000-8000-000000000003:2026-07-07
 ```
 
 ### Ledger Entries
@@ -246,8 +264,8 @@ Transaction fields:
 
 ```text
 tx_type = PROMO_BONUS
-idempotency_key = bonus:<campaignCode>:<userId>
-reference = bonus:<campaignCode>:<userId>
+idempotency_key = bonus:<campaignCode>:<userId>[:<claimPeriodKey>]
+reference = bonus:<campaignCode>:<userId>[:<claimPeriodKey>]
 description = campaign title
 created_by = userId
 ```
@@ -260,6 +278,8 @@ Metadata:
   "campaign_id": "...",
   "campaign_code": "welcome-2026",
   "campaign_type": "welcome",
+  "claim_policy": "once",
+  "claim_period_key": "once",
   "amount": 500
 }
 ```
@@ -794,4 +814,3 @@ Recommended answers:
 4. Return claimable plus already-claimed visible campaign summaries only when useful; hide ineligible campaigns from normal users.
 5. Show one compact topbar indicator using highest priority or soonest-expiring campaign.
 6. Yes, admin mutations should be follow-up PRs.
-
