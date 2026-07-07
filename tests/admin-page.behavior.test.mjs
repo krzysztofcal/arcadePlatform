@@ -394,6 +394,20 @@ function buildContext(options = {}) {
             maxTotalClaims: null,
             claimCount: 3,
           },
+          {
+            id: "campaign-3",
+            code: "paused-empty-test",
+            title: "Paused Empty Test",
+            amount: 20,
+            status: "paused",
+            startsAt: "2026-07-09T00:00:00.000Z",
+            endsAt: null,
+            eligibilityType: "all_accounts",
+            eligibilityConfig: {},
+            claimPolicy: "once",
+            maxTotalClaims: null,
+            claimCount: 0,
+          },
         ],
         pagination: null,
       }) };
@@ -526,6 +540,7 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.match(document.getElementById("adminBonusCampaignsBody").innerHTML, /daily-test/);
   assert.match(document.getElementById("adminBonusCampaignsBody").innerHTML, /Daily Test/);
   assert.match(document.getElementById("adminBonusCampaignsBody").innerHTML, /Edit draft/);
+  assert.match(document.getElementById("adminBonusCampaignsBody").innerHTML, /Edit safe fields/);
   assert.match(document.getElementById("adminBonusCampaignsBody").innerHTML, /View/);
 
   const draftEditButton = createElement("button");
@@ -552,6 +567,23 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.equal(formField(bonusCampaignForm, "title").disabled, true);
   assert.equal(formField(bonusCampaignForm, "amount").disabled, true);
   assert.match(document.getElementById("adminStatus").textContent, /read-only/);
+
+  const safeEditButton = createElement("button");
+  safeEditButton.setAttribute("data-campaign-action", "edit");
+  safeEditButton.setAttribute("data-campaign-id", "campaign-3");
+  document.dispatchEvent({ type: "click", target: safeEditButton, preventDefault() {} });
+
+  assert.equal(formField(bonusCampaignForm, "title").value, "Paused Empty Test");
+  assert.equal(formField(bonusCampaignForm, "code").disabled, true);
+  assert.equal(formField(bonusCampaignForm, "title").disabled, false);
+  assert.equal(formField(bonusCampaignForm, "description").disabled, false);
+  assert.equal(formField(bonusCampaignForm, "startsAt").disabled, false);
+  assert.equal(formField(bonusCampaignForm, "endsAt").disabled, false);
+  assert.equal(formField(bonusCampaignForm, "maxTotalClaims").disabled, false);
+  assert.equal(formField(bonusCampaignForm, "amount").disabled, true);
+  assert.equal(formField(bonusCampaignForm, "claimPolicy").disabled, true);
+  assert.equal(formField(bonusCampaignForm, "eligibilityType").disabled, true);
+  assert.match(document.getElementById("adminStatus").textContent, /Safe fields/);
 
   tabs[5].dispatchEvent({ type: "click", bubbles: true, target: tabs[5], preventDefault() {} });
   await flush();
