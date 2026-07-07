@@ -903,6 +903,93 @@ test("accepted action that settles a hand schedules delayed rollover", async () 
   }
 });
 
+test("zero settled reveal delay schedules immediate rollover instead of leaving table settled", async () => {
+  const secret = "zero-settled-rollover-secret";
+  const tableId = "table_zero_settled_rollover";
+  const settledAt = new Date(Date.now() - 1_000).toISOString();
+  const { dir, filePath } = await writePersistedFile({
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+        seatRows: [
+          { user_id: "user_zero_a", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 104 },
+          { user_id: "user_zero_b", seat_no: 2, status: "ACTIVE", is_bot: false, stack: 96 }
+        ],
+        stateRow: {
+          version: 11,
+          state: {
+            tableId,
+            roomId: tableId,
+            handId: "hand_zero_settled_rollover",
+            phase: "SETTLED",
+            dealerSeatNo: 1,
+            seats: [
+              { userId: "user_zero_a", seatNo: 1, status: "ACTIVE" },
+              { userId: "user_zero_b", seatNo: 2, status: "ACTIVE" }
+            ],
+            stacks: { user_zero_a: 104, user_zero_b: 96 },
+            community: ["AS", "KD", "QC", "JH", "TS"],
+            communityDealt: 5,
+            pot: 0,
+            showdown: {
+              handId: "hand_zero_settled_rollover",
+              winners: ["user_zero_a"],
+              potsAwarded: [{ amount: 8, winners: ["user_zero_a"], eligibleUserIds: ["user_zero_a", "user_zero_b"] }],
+              potAwardedTotal: 8,
+              reason: "computed"
+            },
+            handSettlement: {
+              handId: "hand_zero_settled_rollover",
+              settledAt,
+              payouts: { user_zero_a: 8 }
+            },
+            turnUserId: null,
+            turnStartedAt: null,
+            turnDeadlineAt: null
+          }
+        }
+      }
+    }
+  });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_POKER_SETTLED_REVEAL_MS: "0",
+      WS_TIMEOUT_SWEEP_MS: "60000",
+      WS_ZOMBIE_TABLE_SWEEP_MS: "60000",
+      WS_OPEN_TABLE_JANITOR_SWEEP_MS: "60000"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "user_zero_a" }), "auth-zero-settled-rollover");
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "sub-zero-settled-rollover",
+      ts: new Date().toISOString(),
+      payload: { tableId, view: "snapshot" }
+    });
+    const snapshot = await nextMessageOfType(ws, "stateSnapshot");
+    assert.equal(snapshot.payload.public.hand.status, "SETTLED");
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    const rolled = await readPersistedFile(filePath);
+    assert.equal(rolled.tables[tableId].stateRow.state.phase, "PREFLOP");
+    assert.equal(rolled.tables[tableId].stateRow.version > 11, true);
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("disconnect cleanup defers fresh settled reveal and can close after reveal grace", async () => {
   const secret = "disconnect-settled-reveal-secret";
   const tableId = "table_disconnect_settled_reveal";

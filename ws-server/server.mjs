@@ -1451,11 +1451,6 @@ const tableJanitorPrimitives = {
 };
 
 function maybeScheduleSettledRollover(tableId) {
-  if (settledRevealMs <= 0) {
-    clearSettledRolloverTimer(tableId);
-    return;
-  }
-
   const pokerState = tableManager.persistedPokerState(tableId);
   if (!pokerState || pokerState.phase !== "SETTLED") {
     clearSettledRolloverTimer(tableId);
