@@ -76,11 +76,13 @@ test.describe('XP idle behaviour', () => {
       }
     }
 
-    await page.waitForTimeout(2_000); // brief buffer to allow sendWindow
-
-    const postCount = await page.evaluate(() =>
-      (window.__xpCalls || []).filter(c => c.method === 'postWindow').length
-    );
-    expect(postCount).toBeGreaterThan(0);
+    await expect.poll(async () => (
+      await page.evaluate(() =>
+        (window.__xpCalls || []).filter(c => c.method === 'postWindow').length
+      )
+    ), {
+      message: 'XPClient.postWindow should be called after sustained activity',
+      timeout: 8_000,
+    }).toBeGreaterThan(0);
   });
 });
