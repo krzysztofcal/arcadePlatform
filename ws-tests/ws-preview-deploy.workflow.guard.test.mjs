@@ -84,8 +84,8 @@ test("ws preview deploy workflow keeps preview runtime contract and does not man
   assert.match(text, /preview env file must define SUPABASE_STAGE_PROJECT_REF/);
   assert.match(text, /preview env SUPABASE_URL must target SUPABASE_STAGE_PROJECT_REF/);
   assert.match(text, /preview env SUPABASE_DB_URL must target SUPABASE_STAGE_PROJECT_REF/);
-  assert.match(text, /sudo -n -v/);
-  assert.match(text, /preview deploy user must have passwordless sudo for ws-preview deploy/);
+  assert.match(text, /sudo -n bash -c 'true'/);
+  assert.match(text, /preview deploy user must be allowed to run sudo -n bash for ws-preview deploy/);
   assert.doesNotMatch(text, /\/etc\/caddy\/Caddyfile/);
   assert.doesNotMatch(text, /infra\/vps\/Caddyfile/);
   assert.doesNotMatch(text, /Caddyfile\.preview\.example/);
