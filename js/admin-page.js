@@ -401,6 +401,18 @@
     return !text || text === "{}";
   }
 
+  function isAutoEligibilityConfig(value){
+    if (isBlankEligibilityConfig(value)) return true;
+    try {
+      var parsed = JSON.parse(String(value || "{}"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+      var keys = Object.keys(parsed);
+      return keys.length === 1 && (keys[0] === "created_at_gte" || keys[0] === "created_at_lte");
+    } catch (_err){
+      return false;
+    }
+  }
+
   function buildEligibilityConfigForType(eligibilityType, startsAt){
     if (eligibilityType === "created_after"){
       return { created_at_gte: startsAt || new Date().toISOString().slice(0, 16) };
@@ -415,7 +427,7 @@
     var eligibilityType = getBonusCampaignFormValue("eligibilityType") || "all_accounts";
     var configField = getBonusCampaignField("eligibilityConfig");
     if (!configField || configField.disabled) return;
-    if (!force && !isBlankEligibilityConfig(configField.value)) return;
+    if (!force && !isAutoEligibilityConfig(configField.value)) return;
     configField.value = JSON.stringify(
       buildEligibilityConfigForType(eligibilityType, getBonusCampaignFormValue("startsAt")),
       null,

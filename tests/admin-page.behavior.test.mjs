@@ -567,6 +567,30 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.deepEqual(JSON.parse(formField(bonusCampaignForm, "eligibilityConfig").value), {
     created_at_gte: "2026-07-10T12:30",
   });
+  formField(bonusCampaignForm, "eligibilityType").value = "created_before";
+  bonusCampaignForm.dispatchEvent({
+    type: "change",
+    target: formField(bonusCampaignForm, "eligibilityType"),
+    preventDefault() {},
+  });
+  assert.deepEqual(JSON.parse(formField(bonusCampaignForm, "eligibilityConfig").value), {
+    created_at_lte: "2026-07-10T12:30",
+  });
+  formField(bonusCampaignForm, "eligibilityType").value = "all_accounts";
+  bonusCampaignForm.dispatchEvent({
+    type: "change",
+    target: formField(bonusCampaignForm, "eligibilityType"),
+    preventDefault() {},
+  });
+  assert.deepEqual(JSON.parse(formField(bonusCampaignForm, "eligibilityConfig").value), {});
+  formField(bonusCampaignForm, "eligibilityConfig").value = JSON.stringify({ manual: true });
+  formField(bonusCampaignForm, "eligibilityType").value = "created_after";
+  bonusCampaignForm.dispatchEvent({
+    type: "change",
+    target: formField(bonusCampaignForm, "eligibilityType"),
+    preventDefault() {},
+  });
+  assert.deepEqual(JSON.parse(formField(bonusCampaignForm, "eligibilityConfig").value), { manual: true });
 
   const draftEditButton = createElement("button");
   draftEditButton.setAttribute("data-campaign-action", "edit");
