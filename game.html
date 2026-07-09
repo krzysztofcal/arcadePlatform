@@ -113,10 +113,10 @@
     </aside>
 
     <section class="center">
-      <a class="back" href="index.html">← Back to games</a>
+      <a class="back" href="index.html"><span aria-hidden="true">← </span><span data-i18n="backToGames">Back to games</span></a>
       <div class="slot-fixed" id="slotGameTop" aria-label="Promotional"><span class="slot-badge">Promo</span>Reserved slot</div>
       <div class="titleBar">
-        <h1 id="gameTitle">Loading…</h1>
+        <h1 id="gameTitle" data-i18n="gameLoading">Loading...</h1>
         <div class="actions">
           <button type="button" class="btnIcon" id="btnMute" title="Mute" aria-label="Mute">🔇</button>
           <button type="button" class="btnIcon" id="btnPause" title="Pause/Resume" aria-label="Pause/Resume">⏸</button>
@@ -134,7 +134,7 @@
           <img id="gameCover" alt="" loading="lazy" decoding="async" />
         </div>
         <div class="heroMeta">
-          <p id="gameDescription" class="heroDescription">Loading game details…</p>
+          <p id="gameDescription" class="heroDescription" data-i18n="gameDetailsLoading">Loading game details...</p>
           <div class="pillRow" id="gameCategories" aria-label="Categories"></div>
           <div class="pillRow" id="gameTags" aria-label="Tags"></div>
         </div>
@@ -143,13 +143,13 @@
       <div class="gameWrap" id="frameWrap">
         <div class="centerOverlay" id="consentOverlay">
           <div>
-            <div style="color:#9fb0d0; margin-bottom:8px; text-align:center;">Waiting for consent…</div>
+            <div style="color:#9fb0d0; margin-bottom:8px; text-align:center;" data-i18n="waitingForConsent">Waiting for consent...</div>
           </div>
         </div>
 
         <div class="centerOverlay hidden" id="rotateOverlay">
           <div>
-            <div style="color:#9fb0d0; margin-bottom:8px; text-align:center;">Please rotate your device</div>
+            <div style="color:#9fb0d0; margin-bottom:8px; text-align:center;" data-i18n="rotateDevice">Please rotate your device</div>
           </div>
         </div>
 
@@ -160,9 +160,9 @@
 
       <div class="meta" id="gameMeta"></div>
 
-      <section class="similarSection" id="similarSection" aria-label="Similar games" hidden>
+      <section class="similarSection" id="similarSection" aria-label="Similar games" data-i18n-aria="similarGames" hidden>
         <div class="similarHeader">
-          <h2>Similar games</h2>
+          <h2 data-i18n="similarGames">Similar games</h2>
         </div>
         <div class="similarList" id="similarList"></div>
       </section>

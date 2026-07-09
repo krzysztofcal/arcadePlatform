@@ -152,59 +152,59 @@
     <main>
       <article class="xp-page" aria-labelledby="accountTitle">
         <header class="xp-header">
-          <h1 id="accountTitle">Your account</h1>
-          <p class="xp-subtitle">Sign in to sync XP and manage your Arcade Hub profile.</p>
+          <h1 id="accountTitle" data-i18n="accountTitle">Your account</h1>
+          <p class="xp-subtitle" data-i18n="accountSubtitle">Sign in to sync XP and manage your Arcade Hub profile.</p>
         </header>
 
         <div class="account-status" id="accountStatus" aria-live="polite" hidden></div>
 
-        <section class="account-grid" id="authForms" aria-label="Authentication">
+        <section class="account-grid" id="authForms" data-i18n-aria="authentication" aria-label="Authentication">
           <div class="xp-card">
-            <h2 class="xp-card__title">Sign in</h2>
+            <h2 class="xp-card__title" data-i18n="signIn">Sign in</h2>
             <form class="account-form" id="signinForm">
-              <label for="signinEmail">Email</label>
+              <label for="signinEmail" data-i18n="email">Email</label>
               <input id="signinEmail" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
-              <label for="signinPassword">Password</label>
+              <label for="signinPassword" data-i18n="password">Password</label>
               <input id="signinPassword" name="password" type="password" autocomplete="current-password" required placeholder="••••••••">
-              <button type="submit">Sign in</button>
+              <button type="submit" data-i18n="signIn">Sign in</button>
             </form>
           </div>
 
           <div class="xp-card">
-            <h2 class="xp-card__title">Create account</h2>
+            <h2 class="xp-card__title" data-i18n="createAccount">Create account</h2>
             <form class="account-form" id="signupForm">
-              <label for="signupEmail">Email</label>
+              <label for="signupEmail" data-i18n="email">Email</label>
               <input id="signupEmail" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
-              <label for="signupPassword">Password</label>
-              <input id="signupPassword" name="password" type="password" autocomplete="new-password" required placeholder="Choose a password">
-              <button type="submit">Sign up</button>
+              <label for="signupPassword" data-i18n="password">Password</label>
+              <input id="signupPassword" name="password" type="password" autocomplete="new-password" data-i18n-placeholder="choosePassword" required placeholder="Choose a password">
+              <button type="submit" data-i18n="signUp">Sign up</button>
             </form>
-            <p class="account-note">We may ask you to verify your email before unlocking cloud sync.</p>
+            <p class="account-note" data-i18n="accountVerification">We may ask you to verify your email before unlocking cloud sync.</p>
           </div>
         </section>
 
-        <section class="xp-card" id="accountPanel" hidden aria-label="Account details">
-          <h2 class="xp-card__title">Account</h2>
-          <p class="xp-details__text">Signed in as <strong id="accountName">Player</strong>.</p>
-          <p class="xp-details__text">Email: <strong id="accountEmail">you@example.com</strong></p>
+        <section class="xp-card" id="accountPanel" hidden data-i18n-aria="account" aria-label="Account details">
+          <h2 class="xp-card__title" data-i18n="account">Account</h2>
+          <p class="xp-details__text"><span data-i18n="signedInAs">Signed in as</span> <strong id="accountName">Player</strong>.</p>
+          <p class="xp-details__text"><span data-i18n="email">Email</span>: <strong id="accountEmail">you@example.com</strong></p>
           <div class="account-panel__actions">
-            <button type="button" class="account-panel__btn account-panel__btn--primary" id="signOutButton">Sign out</button>
-            <button type="button" class="account-panel__btn account-panel__btn--ghost" id="deleteAccountButton">Delete account</button>
+            <button type="button" class="account-panel__btn account-panel__btn--primary" id="signOutButton" data-i18n="signOut">Sign out</button>
+            <button type="button" class="account-panel__btn account-panel__btn--ghost" id="deleteAccountButton" data-i18n="deleteAccount">Delete account</button>
           </div>
           <div class="account-bonus" id="welcomeBonusPanel" hidden>
             <div class="account-bonus__title" id="welcomeBonusTitle">Available chip bonuses</div>
             <div id="bonusCampaignList"></div>
-            <button type="button" class="account-bonus__btn" id="welcomeBonusClaimButton" hidden>Claim bonus</button>
+            <button type="button" class="account-bonus__btn" id="welcomeBonusClaimButton" data-i18n="claimBonus" hidden>Claim bonus</button>
             <p class="account-note" id="welcomeBonusStatus" aria-live="polite"></p>
           </div>
-          <p class="account-note" id="deleteAccountNote" tabindex="-1">To request account deletion, contact support and include the email address linked to your Arcade Hub profile.</p>
+          <p class="account-note" id="deleteAccountNote" data-i18n="deleteAccountNote" tabindex="-1">To request account deletion, contact support and include the email address linked to your Arcade Hub profile.</p>
         </section>
 
-        <section class="xp-card chip-panel" id="chipPanel" hidden aria-label="Arcade chips">
+        <section class="xp-card chip-panel" id="chipPanel" hidden data-i18n-aria="arcadeChips" aria-label="Arcade chips">
           <div class="chip-panel__header">
-            <h2 class="xp-card__title">Arcade chips</h2>
+            <h2 class="xp-card__title" data-i18n="arcadeChips">Arcade chips</h2>
             <div class="chip-balance">
-              <span class="chip-balance__label">Balance</span>
+              <span class="chip-balance__label" data-i18n="balance">Balance</span>
               <span class="chip-balance__value" id="chipBalanceValue">—</span>
             </div>
           </div>
@@ -213,7 +213,7 @@
             <div class="chip-ledger__spacer" id="chipLedgerSpacer"></div>
             <ul class="chip-ledger" id="chipLedgerList"></ul>
           </div>
-          <p class="account-note" id="chipLedgerEmpty" hidden>No chip activity yet.</p>
+          <p class="account-note" id="chipLedgerEmpty" data-i18n="noChipActivity" hidden>No chip activity yet.</p>
         </section>
       </article>
     </main>
@@ -221,17 +221,17 @@
 
   <footer class="site-footer" role="contentinfo">
     <nav class="footer-nav" aria-label="Footer">
-      <a class="ft-link" href="about.en.html">About</a>
+      <a class="ft-link" data-i18n="about" data-href-en="about.en.html" data-href-pl="about.pl.html" href="about.en.html">About</a>
       <span class="sep">•</span>
-      <a class="ft-link" href="about/licenses.html">Licenses</a>
+      <a class="ft-link" data-i18n="licenses" href="about/licenses.html">Licenses</a>
       <span class="sep">•</span>
-      <a class="ft-link" href="legal/terms.en.html">Terms</a>
+      <a class="ft-link" data-i18n="terms" data-href-en="legal/terms.en.html" data-href-pl="legal/terms.pl.html" href="legal/terms.en.html">Terms</a>
       <span class="sep">•</span>
-      <a class="ft-link" href="legal/privacy.en.html">Privacy</a>
+      <a class="ft-link" data-i18n="privacy" data-href-en="legal/privacy.en.html" data-href-pl="legal/privacy.pl.html" href="legal/privacy.en.html">Privacy</a>
       <span class="sep">•</span>
-      <a class="ft-link" href="mailto:contact@kcswh.pl">Contact</a>
+      <a class="ft-link" data-i18n="contact" href="mailto:contact@kcswh.pl">Contact</a>
       <span class="sep">•</span>
-      <a class="ft-link manage-cookies" id="manageCookies" href="#">Manage cookies</a>
+      <a class="ft-link manage-cookies" id="manageCookies" data-i18n="manageCookies" href="#">Manage cookies</a>
     </nav>
     <div class="lang-switch" aria-label="Language">
       <button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button>

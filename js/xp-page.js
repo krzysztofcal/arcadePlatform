@@ -10,7 +10,23 @@
 
   function formatNumber(value){
     const num = Number(value) || 0;
-    return num.toLocaleString();
+    const lang = window.I18N && typeof window.I18N.getLang === "function" ? window.I18N.getLang() : "en";
+    return num.toLocaleString(lang === "pl" ? "pl-PL" : "en-US");
+  }
+
+  function t(key, fallback){
+    return window.I18N && typeof window.I18N.t === "function"
+      ? (window.I18N.t(key) || fallback)
+      : fallback;
+  }
+
+  function tf(key, values, fallback){
+    if (window.I18N && typeof window.I18N.format === "function"){
+      return window.I18N.format(key, values);
+    }
+    return fallback.replace(/\{([a-zA-Z0-9_]+)\}/g, function(match, name){
+      return values[name] == null ? match : String(values[name]);
+    });
   }
 
   function applySnapshot(){
@@ -32,9 +48,12 @@
     }
     if (progressDetails) {
       if (snapshot.xpForNextLevel > 0) {
-        progressDetails.textContent = `${formatNumber(snapshot.xpIntoLevel)} / ${formatNumber(snapshot.xpForNextLevel)} XP to next level`;
+        progressDetails.textContent = tf("xpProgressDetails", {
+          current: formatNumber(snapshot.xpIntoLevel),
+          total: formatNumber(snapshot.xpForNextLevel),
+        }, "{current} / {total} XP to next level");
       } else {
-        progressDetails.textContent = "Maximum level achieved";
+        progressDetails.textContent = t("xpMaximumLevel", "Maximum level achieved");
       }
     }
   }
@@ -58,4 +77,6 @@
     applySnapshot();
     refresh();
   }
+
+  document.addEventListener("langchange", applySnapshot);
 })();

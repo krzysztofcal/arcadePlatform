@@ -50,6 +50,26 @@
     nodes.welcomeBonusStatus = doc.getElementById('welcomeBonusStatus');
   }
 
+  function t(key, fallback){
+    try {
+      if (window.I18N && typeof window.I18N.t === 'function'){
+        return window.I18N.t(key) || fallback || key;
+      }
+    } catch (_err){}
+    return fallback || key;
+  }
+
+  function tf(key, values, fallback){
+    try {
+      if (window.I18N && typeof window.I18N.format === 'function'){
+        return window.I18N.format(key, values);
+      }
+    } catch (_err){}
+    return (fallback || key).replace(/\{([a-zA-Z0-9_]+)\}/g, function(match, name){
+      return values && values[name] != null ? String(values[name]) : match;
+    });
+  }
+
   function setBlockVisibility(node, isVisible){
     if (!node) return;
     node.hidden = !isVisible;
@@ -163,11 +183,11 @@
 
   function setWelcomeBonusVisibility(isVisible){
     setBlockVisibility(nodes.welcomeBonusPanel, isVisible);
-    if (nodes.welcomeBonusTitle){ nodes.welcomeBonusTitle.textContent = 'Available chip bonuses'; }
+    if (nodes.welcomeBonusTitle){ nodes.welcomeBonusTitle.textContent = t('availableChipBonuses', 'Available chip bonuses'); }
     if (nodes.welcomeBonusClaimButton){
       nodes.welcomeBonusClaimButton.hidden = true;
       nodes.welcomeBonusClaimButton.disabled = false;
-      nodes.welcomeBonusClaimButton.textContent = 'Claim bonus';
+      nodes.welcomeBonusClaimButton.textContent = t('claimBonus', 'Claim bonus');
     }
     if (!isVisible && nodes.bonusCampaignList){ nodes.bonusCampaignList.innerHTML = ''; }
     if (!isVisible) setWelcomeBonusStatus('', '');
@@ -186,7 +206,7 @@
     if (!nodes.bonusCampaignList) return;
     nodes.bonusCampaignList.innerHTML = '';
     campaigns.forEach(function(item){
-      var title = item.title || 'Chip bonus';
+      var title = item.title || t('chipBonus', 'Chip bonus');
       var description = item.description || '';
       var amount = formatBonusAmount(item.amount);
       var wrapper = doc.createElement('div');
@@ -205,7 +225,7 @@
       button.type = 'button';
       button.className = 'account-bonus__btn';
       button.dataset.bonusCode = item.code;
-      button.textContent = 'Claim +' + amount + ' CH';
+      button.textContent = tf('claimBonusAmount', { amount: amount }, 'Claim +{amount} CH');
       wrapper.appendChild(button);
       nodes.bonusCampaignList.appendChild(wrapper);
     });
@@ -378,14 +398,14 @@
       if (i < entries.length){
         row = buildLedgerRow(entries[i]);
       } else if (tailState === 'loading'){
-        row = buildLedgerStatusRow('Loading more activity…');
+        row = buildLedgerStatusRow(t('loadingMoreActivity', 'Loading more activity...'));
       } else if (tailState === 'error'){
-        row = buildLedgerStatusRow('Could not load more activity. Scroll to retry.');
+        row = buildLedgerStatusRow(t('chipHistoryLoadMoreError', 'Could not load more activity. Scroll to retry.'));
         row.addEventListener('click', function(){
           loadLedgerPage(true);
         });
       } else if (tailState === 'end'){
-        row = buildLedgerStatusRow('End of history');
+        row = buildLedgerStatusRow(t('chipHistoryEnd', 'End of history'));
       }
       if (row){
         row.style.top = (i * ledgerState.rowHeight) + 'px';
@@ -501,7 +521,7 @@
       appendLedgerItems(items, payload ? payload.nextCursor : null);
       setChipStatus('', '');
     } catch (err){
-      setChipStatus('Could not load chip history right now.', 'error');
+      setChipStatus(t('chipHistoryLoadError', 'Could not load chip history right now.'), 'error');
       ledgerState.error = 'load_failed';
     } finally {
       ledgerState.loading = false;
@@ -532,7 +552,7 @@
     if (chipsInFlight){ return chipsInFlight; }
 
     setBlockVisibility(nodes.chipPanel, true);
-    setChipStatus('Syncing chips…', 'info');
+    setChipStatus(t('syncingChips', 'Syncing chips...'), 'info');
     if (nodes.chipBalanceValue){ nodes.chipBalanceValue.textContent = '—'; }
     if (nodes.chipLedgerList){ nodes.chipLedgerList.innerHTML = ''; }
     if (nodes.chipLedgerSpacer){ nodes.chipLedgerSpacer.style.height = '0px'; }
@@ -548,7 +568,7 @@
       } catch (err){
         if (err && (err.status === 404 || err.code === 'not_found')){
           clearChips();
-          setChipStatus('Chips are not available right now.', 'info');
+          setChipStatus(t('chipsUnavailable', 'Chips are not available right now.'), 'info');
           setBlockVisibility(nodes.chipPanel, false);
           return;
         }
@@ -557,7 +577,7 @@
           setBlockVisibility(nodes.chipPanel, false);
           return;
         }
-        setChipStatus('Could not load chips right now.', 'error');
+        setChipStatus(t('chipsLoadError', 'Could not load chips right now.'), 'error');
       } finally {
         chipsInFlight = null;
       }
@@ -610,12 +630,12 @@
       : target && typeof target.getAttribute === 'function' ? target.getAttribute('data-bonus-code') : '';
     if (!currentUser || !code || !window || !window.ChipsClient || typeof window.ChipsClient.claimBonusCampaign !== 'function') return;
     if (target) target.disabled = true;
-    setWelcomeBonusStatus('Claiming bonus...', 'info');
+    setWelcomeBonusStatus(t('claimingBonus', 'Claiming bonus...'), 'info');
     try {
       var result = await window.ChipsClient.claimBonusCampaign(code);
       if (result && result.claimed){
-        setStatus(WELCOME_BONUS_SUCCESS, 'success');
-        setWelcomeBonusStatus('Bonus added to your account.', 'success');
+        setStatus(t('bonusAdded', WELCOME_BONUS_SUCCESS), 'success');
+        setWelcomeBonusStatus(t('bonusAdded', WELCOME_BONUS_SUCCESS), 'success');
         loadChips();
         await refreshWelcomeBonus(currentUser);
         return result;
@@ -623,7 +643,7 @@
       setWelcomeBonusVisibility(false);
       return result || null;
     } catch (_err){
-      setWelcomeBonusStatus('Could not claim your bonus right now.', 'error');
+      setWelcomeBonusStatus(t('bonusClaimError', 'Could not claim your bonus right now.'), 'error');
       if (target) target.disabled = false;
       return null;
     }
@@ -634,28 +654,28 @@
     var email = nodes.signInEmail && nodes.signInEmail.value ? nodes.signInEmail.value.trim() : '';
     var password = nodes.signInPass && nodes.signInPass.value ? nodes.signInPass.value : '';
     if (!email || !password){
-      setStatus('Enter both email and password to sign in.', 'error');
+      setStatus(t('authFieldsRequired', 'Enter both email and password to sign in.'), 'error');
       return;
     }
 
     if (!auth || !auth.signIn){
-      setStatus('Authentication is not ready. Refresh and try again.', 'error');
+      setStatus(t('authenticationNotReady', 'Authentication is not ready. Refresh and try again.'), 'error');
       return;
     }
 
-    setStatus('Signing in…', 'info');
+    setStatus(t('signingIn', 'Signing in...'), 'info');
     auth.signIn(email, password).then(function(res){
       var user = res && res.data && res.data.user ? res.data.user : null;
       if (user){
-        setStatus('Signed in successfully.', 'success');
+        setStatus(t('signedInSuccessfully', 'Signed in successfully.'), 'success');
         renderUser(user);
         loadChips();
         refreshWelcomeBonus(user);
       } else {
-        setStatus('Signed in. Redirecting…', 'success');
+        setStatus(t('signedInRedirecting', 'Signed in. Redirecting...'), 'success');
       }
     }).catch(function(err){
-      var msg = err && err.message ? String(err.message) : 'Could not sign in. Please try again.';
+      var msg = err && err.message ? String(err.message) : t('signInError', 'Could not sign in. Please try again.');
       setStatus(msg, 'error');
     });
   }
@@ -665,45 +685,45 @@
     var email = nodes.signUpEmail && nodes.signUpEmail.value ? nodes.signUpEmail.value.trim() : '';
     var password = nodes.signUpPass && nodes.signUpPass.value ? nodes.signUpPass.value : '';
     if (!email || !password){
-      setStatus('Enter both email and password to sign up.', 'error');
+      setStatus(t('signUpFieldsRequired', 'Enter both email and password to sign up.'), 'error');
       return;
     }
 
     if (!auth || !auth.signUp){
-      setStatus('Authentication is not ready. Refresh and try again.', 'error');
+      setStatus(t('authenticationNotReady', 'Authentication is not ready. Refresh and try again.'), 'error');
       return;
     }
 
-    setStatus('Creating your account…', 'info');
+    setStatus(t('creatingAccount', 'Creating your account...'), 'info');
     auth.signUp(email, password).then(function(res){
       var needsVerify = res && res.data && res.data.user && res.data.user.confirmation_sent_at;
       if (needsVerify){
-        setStatus('Check your inbox to confirm your email.', 'success');
+        setStatus(t('verifyEmail', 'Check your inbox to confirm your email.'), 'success');
       } else {
-        setStatus('Account created. You are signed in.', 'success');
+        setStatus(t('accountCreated', 'Account created. You are signed in.'), 'success');
       }
       var user = res && res.data && res.data.user ? res.data.user : null;
       if (user){ renderUser(user); }
       loadChips();
       refreshWelcomeBonus(user || currentUser);
     }).catch(function(err){
-      var msg = err && err.message ? String(err.message) : 'Could not sign up. Please try again.';
+      var msg = err && err.message ? String(err.message) : t('signUpError', 'Could not sign up. Please try again.');
       setStatus(msg, 'error');
     });
   }
 
   function handleSignOut(){
-    setStatus('Signing out…', 'info');
+    setStatus(t('signingOut', 'Signing out...'), 'info');
     if (!auth || !auth.signOut){
-      setStatus('Authentication is not ready. Refresh and try again.', 'error');
+      setStatus(t('authenticationNotReady', 'Authentication is not ready. Refresh and try again.'), 'error');
       return;
     }
 
     auth.signOut().then(function(){
-      setStatus('Signed out.', 'success');
+      setStatus(t('signedOut', 'Signed out.'), 'success');
       renderUser(null);
     }).catch(function(err){
-      var msg = err && err.message ? String(err.message) : 'Could not sign out right now.';
+      var msg = err && err.message ? String(err.message) : t('signOutError', 'Could not sign out right now.');
       setStatus(msg, 'error');
     });
   }
@@ -717,7 +737,7 @@
     if (nodes.deleteBtn && nodes.deleteNote){
       nodes.deleteBtn.addEventListener('click', function(e){
         e.preventDefault();
-        setStatus('Contact support to request account deletion for this profile.', 'info');
+        setStatus(t('deleteAccountSupport', 'Contact support to request account deletion for this profile.'), 'info');
         nodes.deleteNote.focus();
       });
     }
@@ -736,14 +756,14 @@
 
   function hydrateUser(){
     if (!auth || !auth.getCurrentUser){
-      setStatus('Authentication is not configured yet.', 'error');
+      setStatus(t('authNotConfigured', 'Authentication is not configured yet.'), 'error');
       return;
     }
 
-    setStatus('Checking session…', 'info');
+    setStatus(t('checkingSession', 'Checking session...'), 'info');
     auth.getCurrentUser().then(function(user){
       renderUser(user);
-      setStatus(user ? 'Signed in.' : '', user ? 'success' : '');
+      setStatus(user ? t('signedIn', 'Signed in.') : '', user ? 'success' : '');
       if (user){
         loadChips();
         refreshWelcomeBonus(user);
@@ -753,7 +773,7 @@
         setBlockVisibility(nodes.chipPanel, false);
       }
     }).catch(function(err){
-      var msg = err && err.message ? String(err.message) : 'Could not load your session. Please try again.';
+      var msg = err && err.message ? String(err.message) : t('signInError', 'Could not load your session. Please try again.');
       setStatus(msg, 'error');
     });
 
@@ -761,11 +781,11 @@
       auth.onAuthChange(function(_event, user){
         renderUser(user);
         if (user){
-          setStatus('Signed in.', 'success');
+          setStatus(t('signedIn', 'Signed in.'), 'success');
           loadChips();
           refreshWelcomeBonus(user);
         } else {
-          setStatus('You have been signed out.', 'info');
+          setStatus(t('signedOutNotice', 'You have been signed out.'), 'info');
           clearChips();
           setWelcomeBonusVisibility(false);
           setBlockVisibility(nodes.chipPanel, false);
@@ -782,6 +802,11 @@
     hydrateUser();
 
     doc.addEventListener('chips:tx-complete', loadChips);
+    doc.addEventListener('langchange', function(){
+      setWelcomeBonusVisibility(nodes.welcomeBonusPanel && !nodes.welcomeBonusPanel.hidden);
+      if (currentUser){ refreshWelcomeBonus(currentUser); }
+      queueLedgerRender();
+    });
   }
 
   if (doc.readyState === 'loading'){
