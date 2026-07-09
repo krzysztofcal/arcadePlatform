@@ -219,30 +219,39 @@
     nodes.menuUser = doc.querySelector('.avatar-menu__user');
   }
 
+  function t(key, fallback){
+    try {
+      if (window.I18N && typeof window.I18N.t === 'function'){
+        return window.I18N.t(key) || fallback || key;
+      }
+    } catch (_err){}
+    return fallback || key;
+  }
+
   function renderUser(user){
     state.user = user || null;
-    var name = 'Guest';
-    var email = 'Sign in to sync progress';
+    var name = t('guest', 'Guest');
+    var email = t('signInToSyncProgress', 'Sign in to sync progress');
 
     if (user){
       var meta = user.user_metadata || {};
-      name = meta.full_name || meta.name || user.email || 'Player';
+      name = meta.full_name || meta.name || user.email || t('player', 'Player');
       email = user.email || email;
     }
 
     var initials = computeInitials(name);
 
     if (nodes.initials){ nodes.initials.textContent = initials; }
-    if (nodes.label){ nodes.label.textContent = user ? name : 'Sign in'; }
+    if (nodes.label){ nodes.label.textContent = user ? name : t('signIn', 'Sign in'); }
     if (nodes.menuInitials){ nodes.menuInitials.textContent = initials; }
     if (nodes.menuName){ nodes.menuName.textContent = name; }
     if (nodes.menuEmail){ nodes.menuEmail.textContent = email; }
     if (nodes.menuAction){
-      nodes.menuAction.textContent = user ? 'Sign out' : 'Sign in';
+      nodes.menuAction.textContent = user ? t('signOut', 'Sign out') : t('signIn', 'Sign in');
       nodes.menuAction.dataset.intent = user ? 'signout' : 'signin';
     }
     if (nodes.button){
-      nodes.button.setAttribute('aria-label', user ? 'Account menu' : 'Sign in');
+      nodes.button.setAttribute('aria-label', user ? t('accountMenu', 'Account menu') : t('signIn', 'Sign in'));
     }
   }
 
@@ -347,6 +356,7 @@
     doc.addEventListener('keydown', handleEscape);
     if (nodes.menuAction){ nodes.menuAction.addEventListener('click', handleAction); }
     if (nodes.menuUser){ nodes.menuUser.addEventListener('click', handleMenuUserClick); }
+    doc.addEventListener('langchange', function(){ renderUser(state.user); });
 
     renderUser(state.user);
   }

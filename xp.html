@@ -117,27 +117,27 @@
     <main>
       <article class="xp-page" aria-labelledby="xpTitle">
         <header class="xp-header">
-          <h1 id="xpTitle">XP Progress</h1>
-          <p class="xp-subtitle">Track your overall XP, daily gains, and level progress.</p>
+          <h1 id="xpTitle" data-i18n="xpProgressTitle">XP Progress</h1>
+          <p class="xp-subtitle" data-i18n="xpProgressSubtitle">Track your overall XP, daily gains, and level progress.</p>
         </header>
 
         <section class="xp-card xp-summary" aria-label="XP summary">
           <div class="xp-summary__metric">
-            <span class="xp-summary__label">Level</span>
+            <span class="xp-summary__label" data-i18n="level">Level</span>
             <span class="xp-summary__value" id="xpLevel">1</span>
           </div>
           <div class="xp-summary__metric">
-            <span class="xp-summary__label">Total XP</span>
+            <span class="xp-summary__label" data-i18n="totalXp">Total XP</span>
             <span class="xp-summary__value" id="xpTotal">0</span>
           </div>
           <div class="xp-summary__metric">
-            <span class="xp-summary__label">Daily limit</span>
+            <span class="xp-summary__label" data-i18n="dailyLimit">Daily limit</span>
             <span class="xp-summary__value" id="xpDailyCap">0 XP</span>
           </div>
         </section>
 
         <section class="xp-card" aria-labelledby="xpProgressTitle">
-          <h2 id="xpProgressTitle" class="xp-card__title">Progress to next level</h2>
+          <h2 id="xpProgressTitle" class="xp-card__title" data-i18n="progressToNextLevel">Progress to next level</h2>
           <div class="xp-progress">
             <div class="xp-progress__bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
               <div class="xp-progress__fill" id="xpProgressFill"></div>
@@ -147,10 +147,10 @@
         </section>
 
         <section class="xp-card xp-details" aria-labelledby="xpDailyTitle">
-          <h2 id="xpDailyTitle" class="xp-card__title">Daily progress</h2>
-          <p class="xp-details__text">You have earned <span id="xpToday">0</span> XP today.</p>
-          <p class="xp-details__text">The daily XP cap is <span id="xpTodayCap">0 XP</span>.</p>
-          <p class="xp-details__hint">Each new level requires 10% more XP than the previous one. Play a little every day to keep leveling up!</p>
+          <h2 id="xpDailyTitle" class="xp-card__title" data-i18n="dailyProgress">Daily progress</h2>
+          <p class="xp-details__text"><span data-i18n="xpToday">You have earned</span> <span id="xpToday">0</span> <span data-i18n="xpTodaySuffix">XP today.</span></p>
+          <p class="xp-details__text"><span data-i18n="xpCapPrefix">The daily XP cap is</span> <span id="xpTodayCap">0 XP</span>.</p>
+          <p class="xp-details__hint" data-i18n="xpLevelHint">Each new level requires 10% more XP than the previous one. Play a little every day to keep leveling up!</p>
         </section>
       </article>
     </main>
