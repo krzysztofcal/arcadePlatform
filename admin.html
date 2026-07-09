@@ -500,7 +500,7 @@
                     </div>
                     <label class="admin-field">
                       <span class="admin-field__label">Code</span>
-                      <input class="admin-input" type="text" name="code" placeholder="daily-active-2026" required>
+                      <input class="admin-input" type="text" name="code" placeholder="daily-active-2026" pattern="[a-z0-9][a-z0-9_-]*" autocomplete="off" autocapitalize="none" spellcheck="false" title="Lowercase letters, digits, hyphens, and underscores only." required>
                     </label>
                     <label class="admin-field">
                       <span class="admin-field__label">Title</span>
@@ -564,7 +564,7 @@
                       <span class="admin-field__label">Eligibility config JSON</span>
                       <textarea class="admin-input admin-mono" name="eligibilityConfig" rows="5">{}</textarea>
                     </label>
-                    <div class="admin-filter-actions">
+                    <div class="admin-filter-actions admin-form-actions">
                       <button class="admin-btn admin-btn--primary" type="submit">Save draft</button>
                       <button class="admin-btn admin-btn--ghost" type="button" id="adminBonusCampaignClear">New draft</button>
                     </div>

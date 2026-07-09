@@ -451,6 +451,7 @@
     }
     var templates = {
       welcome: {
+        code: "welcome-bonus-2026",
         title: "500 CH Welcome Bonus",
         description: "Create an account and claim your starter chips.",
         campaignType: "welcome",
@@ -458,8 +459,10 @@
         eligibilityType: "created_after",
         claimPolicy: "once",
         maxTotalClaims: "",
+        endsAt: "",
       },
       daily: {
+        code: "daily-login-2026",
         title: "Daily Login Bonus",
         description: "Claim once per UTC day.",
         campaignType: "daily",
@@ -467,8 +470,10 @@
         eligibilityType: "all_accounts",
         claimPolicy: "daily",
         maxTotalClaims: "",
+        endsAt: "",
       },
       anniversary: {
+        code: "anniversary-2026",
         title: "Anniversary Bonus",
         description: "Limited-time anniversary chips.",
         campaignType: "anniversary",
@@ -476,8 +481,10 @@
         eligibilityType: "all_accounts",
         claimPolicy: "once",
         maxTotalClaims: "",
+        endsAt: "",
       },
       compensation: {
+        code: "compensation-2026",
         title: "Compensation Bonus",
         description: "Manual compensation campaign for selected users.",
         campaignType: "compensation",
@@ -485,13 +492,24 @@
         eligibilityType: "allowlist",
         claimPolicy: "once",
         maxTotalClaims: "",
+        endsAt: "",
       },
     };
     var template = templates[templateKey];
     if (!template) return;
     Object.keys(template).forEach(function(fieldName){
+      if (fieldName === "code"){
+        var existingCode = String(getBonusCampaignFormValue("code") || "").trim();
+        if (!BONUS_CAMPAIGN_CODE_RE.test(existingCode)){
+          setBonusCampaignFormValue("code", template.code);
+        }
+        return;
+      }
       setBonusCampaignFormValue(fieldName, template[fieldName]);
     });
+    if (!getBonusCampaignFormValue("startsAt")){
+      setBonusCampaignFormValue("startsAt", formatDateTimeLocalValue(new Date().toISOString()));
+    }
     syncEligibilityConfigFromPreset(true);
     setStatus("Bonus campaign template applied. Review code, dates, amount, and eligibility before saving.", "info");
   }
@@ -579,7 +597,7 @@
       eligibilityType: raw.eligibilityType || "all_accounts",
       eligibilityConfig: config,
       claimPolicy: raw.claimPolicy || "once",
-      maxTotalClaims: raw.maxTotalClaims ? Number(raw.maxTotalClaims) : null,
+      maxTotalClaims: raw.maxTotalClaims !== "" && raw.maxTotalClaims != null ? Number(raw.maxTotalClaims) : null,
     };
   }
 
@@ -615,6 +633,20 @@
       if (!code) return "missing_code";
       if (code.length > 80) return "missing_code_too_long";
       if (!BONUS_CAMPAIGN_CODE_RE.test(code)) return "invalid_code";
+    }
+    var title = String(data.title || "").trim();
+    if (!title) return "missing_title";
+    if (title.length > 160) return "missing_title_too_long";
+    var campaignType = String(data.campaignType || "").trim();
+    if (!campaignType) return "missing_campaign_type";
+    if (campaignType.length > 80) return "missing_campaign_type_too_long";
+    if (!Number.isInteger(data.amount) || data.amount <= 0) return "invalid_amount";
+    if (!data.startsAt) return "missing_starts_at";
+    if (!Number.isFinite(Date.parse(data.startsAt))) return "invalid_starts_at";
+    if (data.endsAt && !Number.isFinite(Date.parse(data.endsAt))) return "invalid_ends_at";
+    if (data.endsAt && Date.parse(data.endsAt) <= Date.parse(data.startsAt)) return "invalid_time_window";
+    if (data.maxTotalClaims != null && (!Number.isInteger(data.maxTotalClaims) || data.maxTotalClaims <= 0)){
+      return "invalid_max_total_claims";
     }
     return "";
   }

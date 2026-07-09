@@ -9,6 +9,7 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.join(__dirname, "..");
 
 const adminHtml = await readFile(path.join(repoRoot, "admin.html"), "utf8");
+const adminCss = await readFile(path.join(repoRoot, "css", "admin.css"), "utf8");
 
 test("admin page includes admin CSS and JS once", () => {
   assert.equal((adminHtml.match(/href="css\/admin\.css"/g) || []).length, 1);
@@ -46,4 +47,13 @@ test("admin bonus campaign form exposes draft templates and policy hint", () => 
   assert.match(adminHtml, /data-bonus-template="anniversary"/);
   assert.match(adminHtml, /data-bonus-template="compensation"/);
   assert.match(adminHtml, /Daily means once per UTC day/);
+});
+
+test("admin bonus campaign form constrains code input and keeps save actions reachable", () => {
+  assert.match(adminHtml, /name="code"[^>]+pattern="\[a-z0-9\]\[a-z0-9_-\]\*"/);
+  assert.match(adminHtml, /name="code"[^>]+autocomplete="off"/);
+  assert.match(adminHtml, /admin-form-actions/);
+  assert.match(adminCss, /\.admin-card--detail[^}]*max-height:calc\(100dvh/);
+  assert.match(adminCss, /\.admin-card--detail[^}]*overflow-y:auto/);
+  assert.match(adminCss, /\.admin-form-actions[^}]*position:sticky/);
 });

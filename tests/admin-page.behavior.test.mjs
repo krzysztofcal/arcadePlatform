@@ -553,8 +553,22 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.equal(formField(bonusCampaignForm, "amount").value, "20");
   assert.equal(formField(bonusCampaignForm, "claimPolicy").value, "daily");
   assert.equal(formField(bonusCampaignForm, "eligibilityType").value, "all_accounts");
+  assert.equal(formField(bonusCampaignForm, "code").value, "daily-login-2026");
+  assert.match(formField(bonusCampaignForm, "startsAt").value, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
   assert.deepEqual(JSON.parse(formField(bonusCampaignForm, "eligibilityConfig").value), {});
   assert.match(document.getElementById("adminStatus").textContent, /template applied/);
+
+  formField(bonusCampaignForm, "code").value = "Arcade-Hub-anniversary";
+  formField(bonusCampaignForm, "endsAt").value = "2020-01-01T00:00";
+  const anniversaryTemplateButton = createElement("button");
+  anniversaryTemplateButton.setAttribute("data-bonus-template", "anniversary");
+  document.dispatchEvent({ type: "click", target: anniversaryTemplateButton, preventDefault() {} });
+  assert.equal(formField(bonusCampaignForm, "code").value, "anniversary-2026");
+  assert.equal(formField(bonusCampaignForm, "endsAt").value, "");
+
+  formField(bonusCampaignForm, "code").value = "custom-campaign_2026";
+  document.dispatchEvent({ type: "click", target: dailyTemplateButton, preventDefault() {} });
+  assert.equal(formField(bonusCampaignForm, "code").value, "custom-campaign_2026");
 
   formField(bonusCampaignForm, "startsAt").value = "2026-07-10T12:30";
   formField(bonusCampaignForm, "eligibilityType").value = "created_after";
