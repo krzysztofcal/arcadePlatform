@@ -3,6 +3,7 @@
 
   var doc = document;
   var nodes = {};
+  var BONUS_CAMPAIGN_CODE_RE = /^[a-z0-9][a-z0-9_-]*$/;
   var state = {
     adminUserId: null,
     activeTab: "users",
@@ -377,6 +378,142 @@
     return (state.bonusCampaigns.items || []).find(function(item){ return item.id === campaignId; }) || null;
   }
 
+  function getBonusCampaignField(name){
+    var form = nodes.bonusCampaignForm;
+    if (!form) return null;
+    return Array.prototype.find.call(form.elements || [], function(field){
+      return field && field.name === name;
+    }) || null;
+  }
+
+  function getBonusCampaignFormValue(name){
+    var field = getBonusCampaignField(name);
+    return field ? field.value : "";
+  }
+
+  function setBonusCampaignFormValue(name, value){
+    var field = getBonusCampaignField(name);
+    if (!field || field.disabled) return;
+    field.value = value == null ? "" : String(value);
+  }
+
+  function isBlankEligibilityConfig(value){
+    var text = String(value == null ? "" : value).trim();
+    return !text || text === "{}";
+  }
+
+  function isAutoEligibilityConfig(value){
+    if (isBlankEligibilityConfig(value)) return true;
+    try {
+      var parsed = JSON.parse(String(value || "{}"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+      var keys = Object.keys(parsed);
+      return keys.length === 1 && (keys[0] === "created_at_gte" || keys[0] === "created_at_lte");
+    } catch (_err){
+      return false;
+    }
+  }
+
+  function buildEligibilityConfigForType(eligibilityType, startsAt){
+    if (eligibilityType === "created_after"){
+      return { created_at_gte: startsAt || new Date().toISOString().slice(0, 16) };
+    }
+    if (eligibilityType === "created_before"){
+      return { created_at_lte: startsAt || new Date().toISOString().slice(0, 16) };
+    }
+    return {};
+  }
+
+  function syncEligibilityConfigFromPreset(force){
+    var eligibilityType = getBonusCampaignFormValue("eligibilityType") || "all_accounts";
+    var configField = getBonusCampaignField("eligibilityConfig");
+    if (!configField || configField.disabled) return;
+    if (!force && !isAutoEligibilityConfig(configField.value)) return;
+    configField.value = JSON.stringify(
+      buildEligibilityConfigForType(eligibilityType, getBonusCampaignFormValue("startsAt")),
+      null,
+      2,
+    );
+  }
+
+  function canApplyBonusCampaignTemplate(){
+    var campaignId = getBonusCampaignFormValue("campaignId");
+    if (!campaignId) return true;
+    var campaign = findBonusCampaign(campaignId);
+    return !!campaign && campaign.status === "draft";
+  }
+
+  function applyBonusCampaignTemplate(templateKey){
+    if (!nodes.bonusCampaignForm) return;
+    if (!canApplyBonusCampaignTemplate()){
+      setStatus("Templates are available only for new campaigns or draft edits.", "info");
+      return;
+    }
+    var templates = {
+      welcome: {
+        code: "welcome-bonus-2026",
+        title: "500 CH Welcome Bonus",
+        description: "Create an account and claim your starter chips.",
+        campaignType: "welcome",
+        amount: 500,
+        eligibilityType: "created_after",
+        claimPolicy: "once",
+        maxTotalClaims: "",
+        endsAt: "",
+      },
+      daily: {
+        code: "daily-login-2026",
+        title: "Daily Login Bonus",
+        description: "Claim once per UTC day.",
+        campaignType: "daily",
+        amount: 20,
+        eligibilityType: "all_accounts",
+        claimPolicy: "daily",
+        maxTotalClaims: "",
+        endsAt: "",
+      },
+      anniversary: {
+        code: "anniversary-2026",
+        title: "Anniversary Bonus",
+        description: "Limited-time anniversary chips.",
+        campaignType: "anniversary",
+        amount: 250,
+        eligibilityType: "all_accounts",
+        claimPolicy: "once",
+        maxTotalClaims: "",
+        endsAt: "",
+      },
+      compensation: {
+        code: "compensation-2026",
+        title: "Compensation Bonus",
+        description: "Manual compensation campaign for selected users.",
+        campaignType: "compensation",
+        amount: 100,
+        eligibilityType: "allowlist",
+        claimPolicy: "once",
+        maxTotalClaims: "",
+        endsAt: "",
+      },
+    };
+    var template = templates[templateKey];
+    if (!template) return;
+    Object.keys(template).forEach(function(fieldName){
+      if (fieldName === "code"){
+        var existingCode = String(getBonusCampaignFormValue("code") || "").trim();
+        if (!BONUS_CAMPAIGN_CODE_RE.test(existingCode)){
+          setBonusCampaignFormValue("code", template.code);
+        }
+        return;
+      }
+      setBonusCampaignFormValue(fieldName, template[fieldName]);
+    });
+    if (!getBonusCampaignFormValue("startsAt")){
+      setBonusCampaignFormValue("startsAt", formatDateTimeLocalValue(new Date().toISOString()));
+    }
+    syncEligibilityConfigFromPreset(true);
+    setStatus("Bonus campaign template applied. Review code, dates, amount, and eligibility before saving.", "info");
+  }
+
   function fillBonusCampaignForm(item){
     var form = nodes.bonusCampaignForm;
     if (!form) return;
@@ -460,8 +597,58 @@
       eligibilityType: raw.eligibilityType || "all_accounts",
       eligibilityConfig: config,
       claimPolicy: raw.claimPolicy || "once",
-      maxTotalClaims: raw.maxTotalClaims ? Number(raw.maxTotalClaims) : null,
+      maxTotalClaims: raw.maxTotalClaims !== "" && raw.maxTotalClaims != null ? Number(raw.maxTotalClaims) : null,
     };
+  }
+
+  function bonusCampaignValidationMessage(code){
+    var messages = {
+      missing_code: "Campaign code is required.",
+      missing_code_too_long: "Campaign code must be at most 80 characters.",
+      invalid_code: "Campaign code must start with a lowercase letter or digit and use only lowercase letters, digits, hyphens (-), or underscores (_). Example: daily-active-2026.",
+      missing_title: "Title is required.",
+      missing_title_too_long: "Title must be at most 160 characters.",
+      description_too_long: "Description must be at most 500 characters.",
+      missing_campaign_type: "Campaign type is required.",
+      missing_campaign_type_too_long: "Campaign type must be at most 80 characters.",
+      invalid_amount: "Amount must be a positive whole number.",
+      missing_starts_at: "Starts at is required.",
+      invalid_starts_at: "Starts at must be a valid date and time.",
+      invalid_ends_at: "Ends at must be a valid date and time.",
+      invalid_time_window: "Ends at must be later than Starts at.",
+      invalid_eligibility_type: "Choose a supported eligibility type.",
+      invalid_eligibility_config: "Eligibility config must be a valid JSON object.",
+      invalid_claim_policy: "Choose a supported claim policy.",
+      invalid_max_total_claims: "Max total claims must be a positive whole number or empty.",
+      campaign_code_exists: "This campaign code already exists. Choose a unique code.",
+      campaign_immutable_fields_locked: "This campaign has published fields that cannot be changed.",
+      campaign_not_draft: "This campaign can no longer be edited in its current state.",
+    };
+    return messages[code] || "Could not save bonus campaign.";
+  }
+
+  function validateBonusCampaignForm(data){
+    if (!data.campaignId){
+      var code = String(data.code || "").trim();
+      if (!code) return "missing_code";
+      if (code.length > 80) return "missing_code_too_long";
+      if (!BONUS_CAMPAIGN_CODE_RE.test(code)) return "invalid_code";
+    }
+    var title = String(data.title || "").trim();
+    if (!title) return "missing_title";
+    if (title.length > 160) return "missing_title_too_long";
+    var campaignType = String(data.campaignType || "").trim();
+    if (!campaignType) return "missing_campaign_type";
+    if (campaignType.length > 80) return "missing_campaign_type_too_long";
+    if (!Number.isInteger(data.amount) || data.amount <= 0) return "invalid_amount";
+    if (!data.startsAt) return "missing_starts_at";
+    if (!Number.isFinite(Date.parse(data.startsAt))) return "invalid_starts_at";
+    if (data.endsAt && !Number.isFinite(Date.parse(data.endsAt))) return "invalid_ends_at";
+    if (data.endsAt && Date.parse(data.endsAt) <= Date.parse(data.startsAt)) return "invalid_time_window";
+    if (data.maxTotalClaims != null && (!Number.isInteger(data.maxTotalClaims) || data.maxTotalClaims <= 0)){
+      return "invalid_max_total_claims";
+    }
+    return "";
   }
 
   function renderUsers(){
@@ -1109,6 +1296,12 @@
     if (event && typeof event.preventDefault === "function") event.preventDefault();
     try {
       var data = readBonusCampaignForm();
+      var validationCode = validateBonusCampaignForm(data);
+      if (validationCode){
+        var validationError = new Error(validationCode);
+        validationError.code = validationCode;
+        throw validationError;
+      }
       var isUpdate = !!data.campaignId;
       var campaign = {
         title: data.title,
@@ -1136,7 +1329,7 @@
       state.bonusCampaigns.page = 1;
       await loadBonusCampaigns(1);
     } catch (err){
-      handleApiError(err, err && err.code === "invalid_eligibility_config" ? "Eligibility config must be valid JSON object." : "Could not save bonus campaign.");
+      handleApiError(err, bonusCampaignValidationMessage(err && err.code));
     }
   }
 
@@ -1615,6 +1808,14 @@
     loadBonusCampaigns();
   }
 
+  function handleBonusCampaignFormChange(event){
+    var target = event && event.target;
+    if (!target || !target.name) return;
+    if (target.name === "eligibilityType" || target.name === "startsAt"){
+      syncEligibilityConfigFromPreset(false);
+    }
+  }
+
   function handleCampaignAction(action, campaignId, status){
     if (action === "edit" || action === "view"){
       var campaign = findBonusCampaign(campaignId);
@@ -1643,6 +1844,7 @@
     if (nodes.ledgerFilters) nodes.ledgerFilters.addEventListener("submit", handleLedgerSubmit);
     if (nodes.bonusCampaignsFilters) nodes.bonusCampaignsFilters.addEventListener("submit", handleBonusCampaignsSubmit);
     if (nodes.bonusCampaignForm) nodes.bonusCampaignForm.addEventListener("submit", saveBonusCampaignDraft);
+    if (nodes.bonusCampaignForm) nodes.bonusCampaignForm.addEventListener("change", handleBonusCampaignFormChange);
     if (nodes.pokerAuditFilters) nodes.pokerAuditFilters.addEventListener("submit", handlePokerAuditSubmit);
     if (nodes.usersRefresh) nodes.usersRefresh.addEventListener("click", function(){ loadUsers(); });
     if (nodes.tablesRefresh) nodes.tablesRefresh.addEventListener("click", function(){ loadTables(); });
@@ -1739,6 +1941,11 @@
           campaignButton.getAttribute("data-campaign-id"),
           campaignButton.getAttribute("data-campaign-status")
         );
+        return;
+      }
+      var bonusTemplateButton = closestEventTarget(event.target, "[data-bonus-template]");
+      if (bonusTemplateButton){
+        applyBonusCampaignTemplate(bonusTemplateButton.getAttribute("data-bonus-template"));
         return;
       }
       var adjustButton = closestEventTarget(event.target, "[data-adjust-amount]");

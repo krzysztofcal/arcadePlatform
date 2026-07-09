@@ -28,7 +28,7 @@
 
 .admin-card--main { min-width:0; }
 
-.admin-card--detail { min-width:0; position:sticky; top:88px; align-self:start; }
+.admin-card--detail { min-width:0; position:sticky; top:calc(var(--topbar-offset) + 12px); align-self:start; max-height:calc(100dvh - var(--topbar-offset) - 24px); overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
 
 .admin-card--wide { grid-column:1 / -1; }
 
@@ -53,6 +53,8 @@
 .admin-input:focus { outline:2px solid #6ee7e7; outline-offset:2px; }
 
 .admin-filter-actions { display:flex; flex-wrap:wrap; gap:10px; align-items:end; }
+
+.admin-form-actions { position:sticky; bottom:0; z-index:1; padding:12px 0 2px; background:linear-gradient(to bottom, rgba(11, 16, 32, 0), rgba(11, 16, 32, 0.96) 28%); }
 
 .admin-table-wrap { overflow:auto; }
 
@@ -161,7 +163,9 @@
 @media (max-width: 980px) {
   .admin-workspace { grid-template-columns:1fr; }
 
-  .admin-card--detail { position:static; }
+  .admin-card--detail { position:static; max-height:none; overflow:visible; }
+
+  .admin-form-actions { position:static; padding:0; background:none; }
 
   .admin-ops-grid { grid-template-columns:1fr; }
 

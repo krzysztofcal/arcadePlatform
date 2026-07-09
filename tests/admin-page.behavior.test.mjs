@@ -543,12 +543,74 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.match(document.getElementById("adminBonusCampaignsBody").innerHTML, /Edit safe fields/);
   assert.match(document.getElementById("adminBonusCampaignsBody").innerHTML, /View/);
 
+  const dailyTemplateButton = createElement("button");
+  dailyTemplateButton.setAttribute("data-bonus-template", "daily");
+  document.dispatchEvent({ type: "click", target: dailyTemplateButton, preventDefault() {} });
+
+  const bonusCampaignForm = document.getElementById("adminBonusCampaignForm");
+  assert.equal(formField(bonusCampaignForm, "title").value, "Daily Login Bonus");
+  assert.equal(formField(bonusCampaignForm, "campaignType").value, "daily");
+  assert.equal(formField(bonusCampaignForm, "amount").value, "20");
+  assert.equal(formField(bonusCampaignForm, "claimPolicy").value, "daily");
+  assert.equal(formField(bonusCampaignForm, "eligibilityType").value, "all_accounts");
+  assert.equal(formField(bonusCampaignForm, "code").value, "daily-login-2026");
+  assert.match(formField(bonusCampaignForm, "startsAt").value, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+  assert.deepEqual(JSON.parse(formField(bonusCampaignForm, "eligibilityConfig").value), {});
+  assert.match(document.getElementById("adminStatus").textContent, /template applied/);
+
+  formField(bonusCampaignForm, "code").value = "Arcade-Hub-anniversary";
+  formField(bonusCampaignForm, "endsAt").value = "2020-01-01T00:00";
+  const anniversaryTemplateButton = createElement("button");
+  anniversaryTemplateButton.setAttribute("data-bonus-template", "anniversary");
+  document.dispatchEvent({ type: "click", target: anniversaryTemplateButton, preventDefault() {} });
+  assert.equal(formField(bonusCampaignForm, "code").value, "anniversary-2026");
+  assert.equal(formField(bonusCampaignForm, "endsAt").value, "");
+
+  formField(bonusCampaignForm, "code").value = "custom-campaign_2026";
+  document.dispatchEvent({ type: "click", target: dailyTemplateButton, preventDefault() {} });
+  assert.equal(formField(bonusCampaignForm, "code").value, "custom-campaign_2026");
+
+  formField(bonusCampaignForm, "startsAt").value = "2026-07-10T12:30";
+  formField(bonusCampaignForm, "eligibilityType").value = "created_after";
+  formField(bonusCampaignForm, "eligibilityConfig").value = "{}";
+  bonusCampaignForm.dispatchEvent({
+    type: "change",
+    target: formField(bonusCampaignForm, "eligibilityType"),
+    preventDefault() {},
+  });
+  assert.deepEqual(JSON.parse(formField(bonusCampaignForm, "eligibilityConfig").value), {
+    created_at_gte: "2026-07-10T12:30",
+  });
+  formField(bonusCampaignForm, "eligibilityType").value = "created_before";
+  bonusCampaignForm.dispatchEvent({
+    type: "change",
+    target: formField(bonusCampaignForm, "eligibilityType"),
+    preventDefault() {},
+  });
+  assert.deepEqual(JSON.parse(formField(bonusCampaignForm, "eligibilityConfig").value), {
+    created_at_lte: "2026-07-10T12:30",
+  });
+  formField(bonusCampaignForm, "eligibilityType").value = "all_accounts";
+  bonusCampaignForm.dispatchEvent({
+    type: "change",
+    target: formField(bonusCampaignForm, "eligibilityType"),
+    preventDefault() {},
+  });
+  assert.deepEqual(JSON.parse(formField(bonusCampaignForm, "eligibilityConfig").value), {});
+  formField(bonusCampaignForm, "eligibilityConfig").value = JSON.stringify({ manual: true });
+  formField(bonusCampaignForm, "eligibilityType").value = "created_after";
+  bonusCampaignForm.dispatchEvent({
+    type: "change",
+    target: formField(bonusCampaignForm, "eligibilityType"),
+    preventDefault() {},
+  });
+  assert.deepEqual(JSON.parse(formField(bonusCampaignForm, "eligibilityConfig").value), { manual: true });
+
   const draftEditButton = createElement("button");
   draftEditButton.setAttribute("data-campaign-action", "edit");
   draftEditButton.setAttribute("data-campaign-id", "campaign-1");
   document.dispatchEvent({ type: "click", target: draftEditButton, preventDefault() {} });
 
-  const bonusCampaignForm = document.getElementById("adminBonusCampaignForm");
   assert.equal(formField(bonusCampaignForm, "title").value, "Daily Test");
   assert.equal(formField(bonusCampaignForm, "amount").value, "50");
   assert.equal(formField(bonusCampaignForm, "code").disabled, true);
@@ -585,6 +647,11 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.equal(formField(bonusCampaignForm, "eligibilityType").disabled, true);
   assert.match(document.getElementById("adminStatus").textContent, /Safe fields/);
 
+  document.dispatchEvent({ type: "click", target: dailyTemplateButton, preventDefault() {} });
+  assert.equal(formField(bonusCampaignForm, "title").value, "Paused Empty Test");
+  assert.equal(formField(bonusCampaignForm, "amount").value, "20");
+  assert.match(document.getElementById("adminStatus").textContent, /Templates are available only/);
+
   tabs[5].dispatchEvent({ type: "click", bubbles: true, target: tabs[5], preventDefault() {} });
   await flush();
 
@@ -614,6 +681,29 @@ test("admin page still renders ops summary when stage identity request fails", a
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /Stage identity unavailable/);
   assert.match(document.getElementById("adminOpsStats").innerHTML, /OPEN tables/);
   assert.match(document.getElementById("adminOpsRuntime").innerHTML, /Runtime health/);
+});
+
+test("admin bonus campaign form explains invalid campaign codes before sending a request", async () => {
+  const { context, document, fetchCalls } = buildContext();
+  vm.runInContext(source, context, { filename: "js/admin-page.js" });
+
+  await flush();
+  await flush();
+
+  const form = document.getElementById("adminBonusCampaignForm");
+  formField(form, "code").value = "Daily Bonus!";
+  formField(form, "title").value = "Daily Bonus";
+  formField(form, "campaignType").value = "daily";
+  formField(form, "amount").value = "20";
+  formField(form, "startsAt").value = "2026-07-10T12:00";
+  form.dispatchEvent({ type: "submit", target: form, preventDefault() {} });
+
+  await flush();
+
+  assert.match(document.getElementById("adminStatus").textContent, /invalid_code/);
+  assert.match(document.getElementById("adminStatus").textContent, /lowercase letter or digit/);
+  assert.match(document.getElementById("adminStatus").textContent, /daily-active-2026/);
+  assert.equal(fetchCalls.some((url) => url.includes("/.netlify/functions/admin-bonus-campaigns")), false);
 });
 
 test("admin page poker audit search renders hand timeline and settlement summary", async () => {
