@@ -5,6 +5,11 @@ const SETTLE_DELAY_MS = 1_000;
 const IDLE_OBSERVE_MS = 12_000;
 const GESTURE_SPACING_MS = 800; // keep "active" continuous (each gesture extends ~2s)
 
+// The sustained-input case deliberately spends more than 20 seconds sending
+// user gestures. Leave startup and CI scheduling headroom beyond Playwright's
+// default 30 second test timeout.
+test.setTimeout(45_000);
+
 function initXpClientStub() {
   return `(() => {
     const calls = [];
