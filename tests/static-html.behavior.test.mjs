@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
@@ -27,6 +28,7 @@ const freedoomHtml = await readFile(path.join(root, 'games-open', 'freedoom', 'i
 const freedoomJs = await readFile(path.join(root, 'games-open', 'freedoom', 'script.js'), 'utf8');
 const freedoomCss = await readFile(path.join(root, 'games-open', 'freedoom', 'style.css'), 'utf8');
 const headersFile = await readFile(path.join(root, '_headers'), 'utf8');
+const playHtml = await readFile(path.join(root, 'play.html'), 'utf8');
 const netlifyToml = await readFile(path.join(root, 'netlify.toml'), 'utf8');
 assert.match(indexHtml, /src="\/js\/build-info\.js" defer/, 'poker index should include build-info bootstrap script');
 assert.equal(indexHtml.indexOf('/js/build-info.js') < indexHtml.indexOf('/poker/poker-ws-client.js'), true, 'poker index should load build-info before ws client');
@@ -119,6 +121,11 @@ assert.match(netlifyToml, /for = "\/games-open\/freedoom\/\*"/, 'Netlify should 
 assert.doesNotMatch(netlifyToml, /dwasm\.m-h\.org\.uk/, 'Netlify Freedoom CSP should not rely on a remote WAD mirror');
 assert.ok(netlifyToml.includes('Content-Security-Policy = "'), 'Netlify deploys should emit a CSP header');
 assert.doesNotMatch(netlifyToml, /cookiebot/i, 'Netlify CSP should not require Cookiebot hosts after the Klaro migration');
+const playInlineScriptHashes = [...playHtml.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)]
+  .map((match) => createHash('sha256').update(match[1]).digest('base64'));
+playInlineScriptHashes.forEach((hash) => {
+  assert.ok(headersFile.includes(`'sha256-${hash}'`), `play.html inline script hash ${hash} must be allowlisted by CSP`);
+});
 assert.match(netlifyToml, /WELCOME_BONUS_START_AT = "2025-06-01T00:00:00Z"/, 'Netlify config should set the welcome bonus rollout date');
 assert.match(netlifyToml, /WELCOME_BONUS_CHIPS = "500"/, 'Netlify config should set the welcome bonus amount');
 assert.match(netlifyToml, /for = "\/css\/\*"[\s\S]*?Cache-Control = "public, max-age=0, must-revalidate"/, 'CSS files use stable names and should revalidate after deploys');

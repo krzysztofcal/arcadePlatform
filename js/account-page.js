@@ -62,7 +62,8 @@
   function tf(key, values, fallback){
     try {
       if (window.I18N && typeof window.I18N.format === 'function'){
-        return window.I18N.format(key, values);
+        var formatted = window.I18N.format(key, values);
+        if (formatted) return formatted;
       }
     } catch (_err){}
     return (fallback || key).replace(/\{([a-zA-Z0-9_]+)\}/g, function(match, name){
