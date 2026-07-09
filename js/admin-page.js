@@ -3,6 +3,7 @@
 
   var doc = document;
   var nodes = {};
+  var BONUS_CAMPAIGN_CODE_RE = /^[a-z0-9][a-z0-9_-]*$/;
   var state = {
     adminUserId: null,
     activeTab: "users",
@@ -580,6 +581,42 @@
       claimPolicy: raw.claimPolicy || "once",
       maxTotalClaims: raw.maxTotalClaims ? Number(raw.maxTotalClaims) : null,
     };
+  }
+
+  function bonusCampaignValidationMessage(code){
+    var messages = {
+      missing_code: "Campaign code is required.",
+      missing_code_too_long: "Campaign code must be at most 80 characters.",
+      invalid_code: "Campaign code must start with a lowercase letter or digit and use only lowercase letters, digits, hyphens (-), or underscores (_). Example: daily-active-2026.",
+      missing_title: "Title is required.",
+      missing_title_too_long: "Title must be at most 160 characters.",
+      description_too_long: "Description must be at most 500 characters.",
+      missing_campaign_type: "Campaign type is required.",
+      missing_campaign_type_too_long: "Campaign type must be at most 80 characters.",
+      invalid_amount: "Amount must be a positive whole number.",
+      missing_starts_at: "Starts at is required.",
+      invalid_starts_at: "Starts at must be a valid date and time.",
+      invalid_ends_at: "Ends at must be a valid date and time.",
+      invalid_time_window: "Ends at must be later than Starts at.",
+      invalid_eligibility_type: "Choose a supported eligibility type.",
+      invalid_eligibility_config: "Eligibility config must be a valid JSON object.",
+      invalid_claim_policy: "Choose a supported claim policy.",
+      invalid_max_total_claims: "Max total claims must be a positive whole number or empty.",
+      campaign_code_exists: "This campaign code already exists. Choose a unique code.",
+      campaign_immutable_fields_locked: "This campaign has published fields that cannot be changed.",
+      campaign_not_draft: "This campaign can no longer be edited in its current state.",
+    };
+    return messages[code] || "Could not save bonus campaign.";
+  }
+
+  function validateBonusCampaignForm(data){
+    if (!data.campaignId){
+      var code = String(data.code || "").trim();
+      if (!code) return "missing_code";
+      if (code.length > 80) return "missing_code_too_long";
+      if (!BONUS_CAMPAIGN_CODE_RE.test(code)) return "invalid_code";
+    }
+    return "";
   }
 
   function renderUsers(){
@@ -1227,6 +1264,12 @@
     if (event && typeof event.preventDefault === "function") event.preventDefault();
     try {
       var data = readBonusCampaignForm();
+      var validationCode = validateBonusCampaignForm(data);
+      if (validationCode){
+        var validationError = new Error(validationCode);
+        validationError.code = validationCode;
+        throw validationError;
+      }
       var isUpdate = !!data.campaignId;
       var campaign = {
         title: data.title,
@@ -1254,7 +1297,7 @@
       state.bonusCampaigns.page = 1;
       await loadBonusCampaigns(1);
     } catch (err){
-      handleApiError(err, err && err.code === "invalid_eligibility_config" ? "Eligibility config must be valid JSON object." : "Could not save bonus campaign.");
+      handleApiError(err, bonusCampaignValidationMessage(err && err.code));
     }
   }
 

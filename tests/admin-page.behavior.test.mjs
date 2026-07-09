@@ -669,6 +669,29 @@ test("admin page still renders ops summary when stage identity request fails", a
   assert.match(document.getElementById("adminOpsRuntime").innerHTML, /Runtime health/);
 });
 
+test("admin bonus campaign form explains invalid campaign codes before sending a request", async () => {
+  const { context, document, fetchCalls } = buildContext();
+  vm.runInContext(source, context, { filename: "js/admin-page.js" });
+
+  await flush();
+  await flush();
+
+  const form = document.getElementById("adminBonusCampaignForm");
+  formField(form, "code").value = "Daily Bonus!";
+  formField(form, "title").value = "Daily Bonus";
+  formField(form, "campaignType").value = "daily";
+  formField(form, "amount").value = "20";
+  formField(form, "startsAt").value = "2026-07-10T12:00";
+  form.dispatchEvent({ type: "submit", target: form, preventDefault() {} });
+
+  await flush();
+
+  assert.match(document.getElementById("adminStatus").textContent, /invalid_code/);
+  assert.match(document.getElementById("adminStatus").textContent, /lowercase letter or digit/);
+  assert.match(document.getElementById("adminStatus").textContent, /daily-active-2026/);
+  assert.equal(fetchCalls.some((url) => url.includes("/.netlify/functions/admin-bonus-campaigns")), false);
+});
+
 test("admin page poker audit search renders hand timeline and settlement summary", async () => {
   const { context, document, tabs, fetchCalls } = buildContext();
   vm.runInContext(source, context, { filename: "js/admin-page.js" });
