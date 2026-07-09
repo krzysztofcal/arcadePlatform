@@ -381,8 +381,27 @@
     }
   }
 
+  function close(){
+    if (!sidebar.classList.contains('expanded')) return;
+    sidebar.classList.remove('expanded');
+    if (!isMobile()) sidebar.classList.add('collapsed');
+    btn.setAttribute('aria-expanded', 'false');
+  }
+
+  function handleDocumentClick(event){
+    const target = event && event.target;
+    if (!target || sidebar.contains(target) || btn.contains(target)) return;
+    close();
+  }
+
+  function handleKeydown(event){
+    if (event && event.key === 'Escape') close();
+  }
+
   render();
   btn.addEventListener('click', toggle);
+  doc.addEventListener('click', handleDocumentClick);
+  doc.addEventListener('keydown', handleKeydown);
   window.addEventListener('resize', applyInitial);
   applyInitial();
   wireAdminVisibility();

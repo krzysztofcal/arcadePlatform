@@ -72,6 +72,10 @@ function createElement(tagName, id = null) {
       node.children.push(child);
       return child;
     },
+    contains(target) {
+      if (target === node) return true;
+      return node.children.some((child) => child.contains && child.contains(target));
+    },
     querySelector(selector) {
       if (selector.startsWith(".")) {
         return findByClass(node, selector.slice(1));
@@ -111,6 +115,7 @@ function createElement(tagName, id = null) {
 
 function createDocument() {
   const nodes = new Map();
+  const listeners = new Map();
   const document = {
     readyState: "complete",
     getElementById(id) {
@@ -119,7 +124,14 @@ function createDocument() {
     createElement(tagName) {
       return createElement(tagName);
     },
-    addEventListener() {},
+    addEventListener(type, handler) {
+      const list = listeners.get(type) || [];
+      list.push(handler);
+      listeners.set(type, list);
+    },
+    fireEvent(type, event) {
+      (listeners.get(type) || []).forEach((handler) => handler(event));
+    },
   };
   document.__nodes = nodes;
   return document;
@@ -181,7 +193,7 @@ async function renderSidebarAs(statusCode) {
   await flush();
   await flush();
 
-  return { authListeners, fetchCalls, hrefs: collectHrefs(sidebar) };
+  return { authListeners, fetchCalls, hrefs: collectHrefs(sidebar), document, sidebar, toggle };
 }
 
 test("sidebar shows Admin entry for verified admins", async () => {
@@ -199,4 +211,20 @@ test("sidebar hides Admin entry for non-admins", async () => {
 
   assert.equal(result.fetchCalls.length >= 1, true);
   assert.equal(result.hrefs.includes("/admin.html"), false);
+});
+
+test("sidebar closes when clicking outside the expanded panel", async () => {
+  const result = await renderSidebarAs(403);
+  result.toggle.dispatchEvent({ type: "click", target: result.toggle });
+  assert.equal(result.sidebar.classList.contains("expanded"), true);
+
+  const inside = createElement("span");
+  result.sidebar.appendChild(inside);
+  result.document.fireEvent("click", { target: inside });
+  assert.equal(result.sidebar.classList.contains("expanded"), true, "clicks inside the sidebar should keep it open");
+
+  result.document.fireEvent("click", { target: createElement("main") });
+  assert.equal(result.sidebar.classList.contains("expanded"), false);
+  assert.equal(result.sidebar.classList.contains("collapsed"), true);
+  assert.equal(result.toggle.getAttribute("aria-expanded"), "false");
 });
