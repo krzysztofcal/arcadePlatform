@@ -90,6 +90,8 @@ Add `netlify/functions/_shared/user-profile.mjs` in PR 1. It should be small and
 
 The generator must retry a finite number of handle collisions and return a controlled server error if exhausted. Do not use hashes of user IDs, external nickname services, or client-generated identity values.
 
+Profile creation must be atomic. `ensureUserProfile(authenticatedUserId)` uses `insert ... on conflict` or an equivalent single-statement database operation so concurrent topbar and account-page requests cannot create two different profiles for one `user_id`. After a `user_id` conflict, it reads and returns the existing row. After a handle uniqueness conflict, it generates a fresh handle and retries within the bounded attempt limit.
+
 ## API Contracts
 
 Use separate Netlify functions and current CORS/auth/JSON conventions.
@@ -108,6 +110,8 @@ No authentication required. Normalize and validate the handle, return `404` for 
 ```
 
 For a processed uploaded avatar, `avatar` becomes `{ "type": "uploaded", "url": "<stable-public-webp-url>", "variant": "fox-blue" }`. Do not return `user_id`, timestamps, auth metadata, email, chips, ledger, poker, XP, or internal storage paths.
+
+The endpoint must reuse the existing rate-limit helper where its current contract supports this public route. Cache successful public responses briefly with a public cache policy suitable for profile edits. Return the same generic `404` response for every absent or invalidly resolvable handle. This MVP has no profile search, directory, pagination, or endpoint that lists profiles, so public handles cannot be enumerated through an application API.
 
 ### `GET /.netlify/functions/profile-me`
 
@@ -142,16 +146,19 @@ Default avatar variants must not encode a UUID, email, or other personal identif
 Use a two-stage pipeline.
 
 1. Create private `profile-avatar-uploads` Storage bucket for temporary originals.
-2. `profile-avatar-upload-url` requires a valid JWT, ensures the profile exists, validates declared MIME and size, and issues a short-lived user-scoped signed upload URL.
+2. `profile-avatar-upload-url` requires a valid JWT, ensures the profile exists, validates declared MIME and size, and issues a short-lived signed upload URL for a backend-generated temporary object key.
    - Allow only JPEG, PNG, and WebP.
    - Reject SVG, GIF, unknown MIME, and files over 1 MB.
    - The browser never receives service-role credentials.
+   - The client cannot select an arbitrary Storage path.
 3. `profile-avatar-finalize` requires the same JWT and only operates on that user's pending object.
    - Inspect actual file type instead of trusting the upload header.
    - Enforce dimensions up to 1024x1024.
    - Strip metadata, normalize to a 256x256 WebP, and write a processed result.
    - Use an opaque random processed key, never a raw user UUID.
    - Update `user_profiles.avatar_key`, safely remove/replace the preceding processed avatar, and delete the temporary source.
+   - Accept only a fresh, unconsumed temporary upload recorded for the authenticated user; reject another user's or expired upload.
+   - Run bounded cleanup for expired or failed temporary uploads so unsuccessful finalization cannot leave private objects indefinitely.
 4. Create public read-only `profile-avatars` bucket for normalized processed WebP only. Its stable public URL is safe to cache and suitable for leaderboard lists.
 
 The public bucket is safe because it contains only server-normalized WebP, no SVG, no EXIF, no originals, and no internal identifier in its path. Clients cannot overwrite processed objects.
