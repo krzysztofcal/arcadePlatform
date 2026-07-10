@@ -405,6 +405,7 @@
   function scheduleInitialStatusRefresh() {
     if (typeof document === "undefined" || !document || typeof document.getElementById !== "function") return;
     if (!document.getElementById("xpBadge")) return;
+    if (window.XP_IS_GAME_HOST === true || (document.body && document.body.hasAttribute("data-game-host"))) return;
     schedule(() => refreshInitialStatus(), 0);
   }
 
