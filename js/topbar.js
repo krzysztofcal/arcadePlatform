@@ -203,7 +203,7 @@
   function refreshXpBadge(){
     if (!window || !window.XPClient || typeof window.XPClient.refreshBadgeFromServer !== 'function') return;
     try {
-      window.XPClient.refreshBadgeFromServer({ bumpBadge: true });
+      window.XPClient.refreshBadgeFromServer();
     } catch (_err){}
   }
 

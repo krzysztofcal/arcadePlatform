@@ -10,6 +10,7 @@ This document preserves the XP-related technical details that previously lived i
 ## Authoritative award path and identity
 
 - Gameplay XP is awarded through `/.netlify/functions/calculate-xp`. `award-xp` remains the status/legacy compatibility endpoint and must not be used by new playable integrations.
+- The XP badge and `+N XP` overlay animate only after `calculate-xp` returns a positive authoritative `awarded` value. Status reads, auth refreshes, focus changes, cache hydration, zero awards, and rejected windows update state without award animation.
 - Both endpoints share XP policy values (`XP_DAILY_CAP`, `XP_SESSION_CAP`, `XP_DELTA_CAP`, `XP_SESSION_TTL_SEC`) and identity resolution: a valid Supabase JWT subject wins over the browser anon id.
 - On an authenticated request carrying the browser anon id, both endpoints run the same atomic one-time conversion before reading or awarding totals. The Redis migration marker is the idempotent receipt; zero anon XP does not consume conversion eligibility.
 - Canonical server game IDs include `tetris`, `2048`, `pacman`, `t-rex`, and `cats`. Existing aliases such as `open-tetris`, `block-stacker`, `trex`, `open-pacman`, `catch-cats`, and `game_cats` remain supported.
