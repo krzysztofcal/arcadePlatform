@@ -96,6 +96,7 @@ run("node", ["tests/admin-stage-identity.behavior.test.mjs"], "admin-stage-ident
 run("node", ["tests/admin-page.contract.test.mjs"], "admin-page-contract");
 run("node", ["tests/admin-page.behavior.test.mjs"], "admin-page-behavior");
 run("node", ["tests/admin-user-search.behavior.test.mjs"], "admin-user-search-behavior");
+run("node", ["tests/public-profiles.behavior.test.mjs"], "public-profiles-behavior");
 run("node", ["tests/sidebar-admin-visibility.behavior.test.mjs"], "sidebar-admin-visibility-behavior");
 run("node", ["tests/i18n.behavior.test.mjs"], "i18n-behavior");
 run("node", ["tests/static-html.behavior.test.mjs"], "static-html-behavior");

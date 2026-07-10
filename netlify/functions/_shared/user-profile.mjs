@@ -188,6 +188,7 @@ async function updateUserProfile(userId, payload = {}, deps = {}) {
 }
 
 export {
+  createGeneratedIdentity,
   ensureUserProfile,
   findPublicProfile,
   normalizeBio,

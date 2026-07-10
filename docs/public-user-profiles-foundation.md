@@ -6,7 +6,7 @@ This plan creates a safe public gaming identity for every authenticated Arcade H
 
 Every authenticated account receives a public profile automatically. A profile has a generated gaming name, a permanent public handle, a default avatar identity, and an empty bio. It must never expose email, Supabase user UUID, chip balances, ledger entries, poker data, session data, IP address, or copied auth metadata.
 
-**Privacy decision required before public activation:** every authenticated profile will be public and reachable at `/u/<handle>`. This must be explicitly approved as product policy and checked against Terms and Privacy wording before PR 2 adds the public route. The current legal documents do not disclose that a nickname, avatar, and bio become public, so the proposed legal copy remains a release draft until public profiles are accessible in the UI.
+**Privacy decision required before public activation:** every authenticated profile will be public and reachable at `/u/<handle>`. This must be explicitly approved as product policy and checked against Terms and Privacy wording before PR 2 adds the public route. The current legal documents do not disclose that a nickname, avatar, and bio become public, so the proposed legal copy remains a release draft until public profiles are accessible in the UI. `PUBLIC_PROFILES_ENABLED` remains `0` by default; `profile-public` returns the same generic `404` while disabled and can be enabled only after the legal release gate.
 
 ## Current Repository Fit
 
@@ -31,8 +31,8 @@ The implementation should extend existing patterns rather than create parallel c
 2. There is no private-profile mode and no profile-setup gate in this MVP.
 3. Missing profiles are created lazily during `GET profile-me` and at the existing safe authenticated topbar/profile refresh path.
 4. Initial values are generated server-side from curated local words and secure randomness:
-   - `display_name`: adjective + noun + short number, such as `BlueFox27`.
-   - `handle`: lowercase normalized equivalent, such as `bluefox27`.
+   - `display_name`: adjective + noun + six-digit number, such as `Blue Fox 482731`.
+   - `handle`: lowercase normalized equivalent, such as `blue-fox-482731`.
    - `avatar_variant`: a curated built-in default such as `fox-blue`.
    - `bio`: empty string.
 5. No generated or displayed value may derive from email, email prefix, Supabase UUID, IP address, or real name in auth metadata.
@@ -98,7 +98,7 @@ Use separate Netlify functions and current CORS/auth/JSON conventions.
 
 ### `GET /.netlify/functions/profile-public?handle=<handle>`
 
-No authentication required. Normalize and validate the handle, return `404` for an unknown profile, and return only:
+No authentication required once `PUBLIC_PROFILES_ENABLED=1`. Normalize and validate the handle, return `404` for an unknown profile, and return only:
 
 ```json
 {
@@ -256,7 +256,7 @@ Out of scope. Begin only after public profiles and avatars are stable in product
 
 ## Verification and Rollout
 
-Do not add automated tests during this planning-only change. Each implementation PR must include deterministic manual verification plus existing checks:
+The original planning-only update added no tests. Each implementation PR must add focused automated coverage for deterministic validation, response projection, error mapping, and concurrency-sensitive contracts where practical, plus deterministic manual verification and existing checks:
 
 1. Run `npm test` and `npm run check:all`.
 2. Use the syntax check recorded in `skills.md`/the repository test runner.
@@ -292,6 +292,7 @@ Manual smoke checklist:
 10. Existing account, XP, chips, and poker paths remain unaffected.
 11. In PR 3, reject oversized/unsupported avatar files; verify processed output is stable public WebP and the original is not public.
 12. Verify the approved PL/EN legal wording is published before public profiles are enabled in production.
+13. Verify `profile-public` remains a generic `404` until `PUBLIC_PROFILES_ENABLED=1`, then repeat the public-profile smoke checks.
 
 Rollback: disable the new route/rewrite only if necessary, leave existing account auth flows intact, and do not delete `user_profiles` data merely to roll back UI. Avatar rollback must revoke/remove public processed objects only after confirming the account editor no longer references them.
 

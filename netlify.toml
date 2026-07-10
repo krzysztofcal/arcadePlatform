@@ -76,6 +76,7 @@
   XP_SESSION_RATE_LIMIT_ENABLED = "1"
   XP_SERVER_SESSION_WARN_MODE = "1"
   XP_REQUIRE_SERVER_SESSION = "0"
+  PUBLIC_PROFILES_ENABLED = "0"
   WELCOME_BONUS_START_AT = "2025-06-01T00:00:00Z"
   WELCOME_BONUS_CHIPS = "500"
 
@@ -93,6 +94,7 @@
   # Step 2: After verification, enable enforcement (set in Netlify UI)
   # XP_REQUIRE_SERVER_SESSION = "1"
   XP_REQUIRE_SERVER_SESSION = "0"
+  PUBLIC_PROFILES_ENABLED = "0"
 
 # =============================================================================
 # All Environment Variables Reference
@@ -111,6 +113,9 @@
 #   XP_DAILY_CAP     - Max XP per day (default: 3000)
 #   XP_SESSION_CAP   - Max XP per session (default: 300)
 #   XP_DELTA_CAP     - Max XP per request (default: 300)
+#
+# Public profiles:
+#   PUBLIC_PROFILES_ENABLED - Set to 1 only after approved Terms/Privacy copy is published with the public profile route.
 #
 # Rate Limiting:
 #   XP_RATE_LIMIT_USER_PER_MIN - Requests per user per minute (default: 10)

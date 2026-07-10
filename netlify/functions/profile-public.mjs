@@ -32,6 +32,7 @@ async function allowPublicRead(event) {
 }
 
 function createProfilePublicHandler(deps = {}) {
+  const env = deps.env || process.env;
   const findProfile = deps.findPublicProfile || findPublicProfile;
   const allowRead = deps.allowPublicRead || allowPublicRead;
   return async function handler(event) {
@@ -40,6 +41,7 @@ function createProfilePublicHandler(deps = {}) {
     if (!cors) return json(403, baseHeaders(), { error: "forbidden_origin" });
     if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: cors, body: "" };
     if (event.httpMethod !== "GET") return json(405, cors, { error: "method_not_allowed" });
+    if (env.PUBLIC_PROFILES_ENABLED !== "1") return json(404, cors, { error: "not_found" });
     if (!await allowRead(event)) return json(429, cors, { error: "rate_limit_exceeded" });
 
     try {
