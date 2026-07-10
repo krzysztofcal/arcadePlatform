@@ -1374,6 +1374,9 @@ function bootXpCore(window, document) {
       if (isExplicitReset) {
         state.serverTotalXp = sanitizedTotal;
         state.sessionXp = 0;
+        state.badgeShownXp = sanitizedTotal;
+        state.badgeBaselineXp = sanitizedTotal;
+        state.totalLifetime = sanitizedTotal;
       } else if (sanitizedTotal >= previousServer) {
         acked = sanitizedTotal - previousServer;
         state.serverTotalXp = sanitizedTotal;
