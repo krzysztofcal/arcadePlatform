@@ -820,6 +820,7 @@
       inputEvents: Math.max(0, Math.floor(Number(source.inputEvents) || 0)),
       visibilitySeconds: Math.max(0, Number(source.visibilitySeconds) || 0),
       scoreDelta: Math.max(0, Math.floor(Number(source.scoreDelta) || 0)),
+      gameplayActions: Math.max(0, Math.floor(Number(source.gameplayActions) || 0)),
     };
 
     // Add game events if present

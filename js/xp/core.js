@@ -166,6 +166,8 @@ function bootXpCore(window, document) {
       lastUnfreezeLog: 0,
     },
     lastScorePulseTs: 0,
+    lastReportedScoreByGameId: {},
+    gameplayActionsInWindow: 0,
     phase: "idle",
     lastInputAt: 0,
     eventsSinceLastAward: 0,
@@ -724,28 +726,47 @@ function bootXpCore(window, document) {
     dispatchNewRecordBoost(resolvedGameId);
   }
 
+  function reportGameAction(rawGameId, detail) {
+    if (!isGameHost() || !state.running) return false;
+    const gameId = resolveScorePulseGameId(rawGameId);
+    if (!gameId || gameId !== state.gameId) return false;
+    state.gameplayActionsInWindow += 1;
+    state.lastScorePulseTs = Date.now();
+    logDebug("gameplay_action", { gameId, kind: detail?.kind || "game" });
+    return true;
+  }
+
   function receiveScorePulse(rawGameId, rawScore) {
     if (!isGameHost()) return;
+    const gameId = resolveScorePulseGameId(rawGameId);
+    const score = Number(rawScore);
+    if (!gameId || !Number.isFinite(score)) return;
+    const previous = state.lastReportedScoreByGameId[gameId];
+    state.lastReportedScoreByGameId[gameId] = score;
+    if (!Number.isFinite(previous)) {
+      handleScorePulse(gameId, score);
+      if (score <= 0) return;
+    }
+    if (Number.isFinite(previous) && score <= previous) return;
     try {
       const XP = window && window.XP;
       const running = XP && typeof XP.isRunning === "function" ? !!XP.isRunning() : false;
       if (!running) {
-        const gid = resolveScorePulseGameId(rawGameId);
-        if (gid && XP && typeof XP.startSession === "function") {
-          try { window.__GAME_ID__ = gid; } catch (_) {}
-          XP.startSession(gid, { resume: true });
+        if (XP && typeof XP.startSession === "function") {
+          try { window.__GAME_ID__ = gameId; } catch (_) {}
+          XP.startSession(gameId, { resume: true });
           if (isDiagEnabled()) {
-            logDebug("auto_start_from_score_pulse", { gameId: gid });
+            logDebug("auto_start_from_score_pulse", { gameId });
           }
         }
       }
     } catch (_) {}
-    state.lastScorePulseTs = Date.now();
+    reportGameAction(gameId, { kind: "score" });
     logDebug("score_pulse", {
-      gameId: rawGameId || state.gameId || "",
-      score: typeof rawScore === "number" ? rawScore : undefined,
+      gameId,
+      score,
     });
-    handleScorePulse(rawGameId, rawScore);
+    handleScorePulse(gameId, score);
   }
 
   function installScoreReporterFallback() {
@@ -1411,12 +1432,24 @@ function bootXpCore(window, document) {
       return;
     }
 
+    const gameplayActions = state.gameplayActionsInWindow;
+    state.gameplayActionsInWindow = 0;
+    if (gameplayActions <= 0) {
+      state.windowStart = now;
+      state.activeMs = 0;
+      state.visibilitySeconds = 0;
+      state.inputEvents = 0;
+      logDebug("award_skip", { reason: "no_gameplay_action", gameId: activeGameId });
+      return;
+    }
+
     const payload = {
       gameId: activeGameId,
       windowStart: state.windowStart,
       windowEnd: now,
       visibilitySeconds: visibility,
       inputEvents: inputs,
+      gameplayActions,
       chunkMs: CHUNK_MS,
       pointsPerPeriod: 10
     };
@@ -1767,6 +1800,8 @@ function bootXpCore(window, document) {
     state.scoreDelta = 0;
     state.scoreDeltaRemainder = 0;
     state.lastScorePulseTs = 0;
+    state.lastReportedScoreByGameId = {};
+    state.gameplayActionsInWindow = 0;
     state.lastInputAt = 0;
     state.lastTrustedInputTs = 0;
     state.eventsSinceLastAward = 0;
@@ -1842,6 +1877,8 @@ function bootXpCore(window, document) {
     state.activityWindowFrozen = false;
     state.isActive = false;
     state.lastScorePulseTs = 0;
+    state.lastReportedScoreByGameId = {};
+    state.gameplayActionsInWindow = 0;
     state.pendingWindow = null;
     state.earlyWindowSent = false;
     state.lastSuccessfulWindowEnd = null;
@@ -1877,7 +1914,9 @@ function bootXpCore(window, document) {
   }
 
   function addScore(delta) {
-    Scoring.addScore(state, delta, Date.now(), MAX_SCORE_DELTA);
+    const added = Scoring.addScore(state, delta, Date.now(), MAX_SCORE_DELTA);
+    if (added > 0) reportGameAction(state.gameId, { kind: "score_delta" });
+    return added;
   }
 
   function pulseBadge() {
@@ -2398,6 +2437,7 @@ function bootXpCore(window, document) {
     refreshFromServerStatus,
     resetIdentityCache,
     addScore,
+    reportGameAction,
     awardLocalXp,
     flushXp,
     // Public API: dispatch an event so host integrations remain decoupled.
