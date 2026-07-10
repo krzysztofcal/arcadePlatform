@@ -750,14 +750,11 @@
   }
 
   async function refreshBadgeFromServer(options) {
-    const opts = options || {};
     try {
       const payload = await fetchStatus();
       if (typeof window !== "undefined" && window.XP && typeof window.XP.refreshFromServerStatus === "function") {
         try {
-          window.XP.refreshFromServerStatus(payload, {
-            bump: opts.bumpBadge === true,
-          });
+          window.XP.refreshFromServerStatus(payload, { source: "status" });
         } catch (_) {}
       }
       return payload;

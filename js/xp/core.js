@@ -182,6 +182,7 @@ function bootXpCore(window, document) {
     pendingWindow: null,
     earlyWindowSent: false,
     lastSuccessfulWindowEnd: null,
+    lastConfirmedAwardKey: null,
     badgeTimerId: null,
     runBoostTriggered: false,
     boostStartSeen: false,
@@ -1138,9 +1139,52 @@ function bootXpCore(window, document) {
 
   function bumpBadge() {
     if (!state.badge) return;
+    try {
+      if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    } catch (_) {}
     state.badge.classList.remove("xp-badge--bump");
     void state.badge.offsetWidth; // force reflow
     state.badge.classList.add("xp-badge--bump");
+  }
+
+  function isServerCalculatedAwardPath() {
+    try {
+      return !!(window.XPClient
+        && typeof window.XPClient.isServerCalcEnabled === "function"
+        && window.XPClient.isServerCalcEnabled());
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function emitConfirmedAward(data, meta) {
+    if (!meta || meta.authoritative !== true || !data || typeof data !== "object") return false;
+    const awarded = Math.max(0, Math.floor(Number(data.awarded) || 0));
+    if (awarded <= 0) return false;
+    const gameId = normalizeGameId(meta.gameId || state.gameId) || "unknown";
+    const windowEnd = Math.max(0, Math.floor(Number(meta.windowEnd) || 0));
+    const totalLifetime = Math.max(0, Math.floor(Number(data.totalLifetime) || 0));
+    const key = [gameId, windowEnd, totalLifetime, awarded].join(":");
+    if (state.lastConfirmedAwardKey === key) return false;
+    state.lastConfirmedAwardKey = key;
+
+    const detail = { awarded, gameId, windowEnd, totalLifetime, source: "calculate-xp" };
+    bumpBadge();
+    const overlay = (window && window.XpOverlay) || (window && window.XPOverlay);
+    if (overlay && typeof overlay.showBurst === "function") {
+      try {
+        const combo = snapshotCombo();
+        overlay.showBurst({
+          xp: awarded,
+          combo: Number(combo.multiplier) || 1,
+          boost: getBoostMultiplierValue(),
+        });
+      } catch (_) {}
+    }
+    try {
+      window.dispatchEvent(new CustomEvent("xp:award-confirmed", { detail }));
+    } catch (_) {}
+    return true;
   }
 
   function attachBadge() {
@@ -1171,10 +1215,8 @@ function bootXpCore(window, document) {
 
   function handleResponse(data, meta) {
     const mergedMeta = Object.assign({}, meta);
-    if (data && typeof data.awarded === "number" && data.awarded > 0) {
-      mergedMeta.bump = true;
-    }
     applyServerDelta(data, mergedMeta);
+    emitConfirmedAward(data, mergedMeta);
     setBadgeLoading(false);
     return data;
   }
@@ -1365,20 +1407,13 @@ function bootXpCore(window, document) {
         badgeBaselineXp: state.badgeBaselineXp,
       });
     }
-    if (meta && meta.bump === true) {
-      bumpBadge();
-    }
     saveCache();
     updateBadge();
   }
 
   function refreshFromServerStatus(payload, meta) {
     if (!payload || typeof payload !== "object") return null;
-    var mergedMeta = Object.assign({}, meta || {});
-    if (mergedMeta.bumpBadge === true && mergedMeta.bump !== true) {
-      mergedMeta.bump = true;
-    }
-    applyServerDelta(payload, mergedMeta);
+    applyServerDelta(payload, Object.assign({}, meta || {}));
     return payload;
   }
 
@@ -1389,6 +1424,7 @@ function bootXpCore(window, document) {
     state.badgeBaselineXp = 0;
     state.badgeShownXp = 0;
     state.sessionXp = 0;
+    state.lastConfirmedAwardKey = null;
     state.cap = null;
     state.dailyRemaining = Infinity;
     state.dayKey = null;
@@ -1572,14 +1608,17 @@ function bootXpCore(window, document) {
         state.pendingWindow = null;
         return Promise.resolve(null);
       }
-      // Use server-side calculation when enabled, otherwise legacy endpoint
-      const postFn = window.XPClient.isServerCalcEnabled && window.XPClient.isServerCalcEnabled()
-        ? window.XPClient.postWindowServerCalc
-        : window.XPClient.postWindow;
+      // The calculate-xp response is the only authoritative award signal.
+      const authoritative = isServerCalculatedAwardPath();
+      const postFn = authoritative ? window.XPClient.postWindowServerCalc : window.XPClient.postWindow;
       const transportOptions = force ? { keepalive: true, allowBeacon: true } : {};
-      return postFn(payload, transportOptions);
+      return postFn(payload, transportOptions).then((data) => ({ data, authoritative }));
     })
-      .then((data) => {
+      .then((result) => {
+        const hasWrappedData = result && typeof result === "object"
+          && Object.prototype.hasOwnProperty.call(result, "data");
+        const data = hasWrappedData ? result.data : result;
+        const authoritative = !!(result && result.authoritative);
         try {
           const snap = {
             status: data && data.status,
@@ -1599,7 +1638,12 @@ function bootXpCore(window, document) {
         }
         state.lastSuccessfulWindowEnd = payload.windowEnd;
         state.pendingWindow = null;
-        return handleResponse(data, { source: "window" });
+        return handleResponse(data, {
+          source: "window",
+          authoritative,
+          gameId: payload.gameId,
+          windowEnd: payload.windowEnd,
+        });
       })
       .catch((err) => {
         state.pendingWindow = null;
@@ -1716,7 +1760,8 @@ function bootXpCore(window, document) {
       state.debug.hardIdleActive = false;
     }
 
-    const awarded = awardLocalXp(activityRatio);
+    const authoritative = isServerCalculatedAwardPath();
+    const awarded = authoritative ? 0 : awardLocalXp(activityRatio);
     zeroTickCounters();
     flushXp(false).catch(() => {});
     emitTick(awarded, activityRatio, true);
@@ -1827,6 +1872,7 @@ function bootXpCore(window, document) {
     state.pendingWindow = null;
     state.earlyWindowSent = false;
     state.lastSuccessfulWindowEnd = null;
+    state.lastConfirmedAwardKey = null;
     if (!state.flush.lastSync) state.flush.lastSync = Date.now();
     state.debug.hardIdleActive = false;
     state.debug.lastNoHostLog = 0;
@@ -1888,6 +1934,7 @@ function bootXpCore(window, document) {
     state.pendingWindow = null;
     state.earlyWindowSent = false;
     state.lastSuccessfulWindowEnd = null;
+    state.lastConfirmedAwardKey = null;
     state.badgeBaselineXp = Math.max(resolveBadgeBaseline(), Number(state.badgeShownXp) || 0);
     state.sessionXp = 0;
     state.debug.hardIdleActive = false;

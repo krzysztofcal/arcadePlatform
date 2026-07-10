@@ -296,7 +296,10 @@
   function safeSelfPage(page){
     if (!page || typeof page !== 'string') return null;
     try {
-      const url = new URL(page, window.location.href);
+      const value = page.trim();
+      const url = /^[a-z][a-z0-9+.-]*:/i.test(value) || value.startsWith('/')
+        ? new URL(value, window.location.origin)
+        : new URL('/' + value.replace(/^\/+/, ''), window.location.origin);
       if (url.origin !== window.location.origin) return null;
       if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
       return url;

@@ -81,7 +81,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     );
   }
 
-  // refreshBadgeFromServer applies status payload and bump meta
+  // refreshBadgeFromServer applies status payload without award animation meta
   {
     let applied = null;
     const calls = [];
@@ -101,7 +101,8 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     assert.equal(calls.length, 1);
     assert.equal(calls[0].statusOnly, true);
     assert.equal(applied.payload.totalLifetime, 777);
-    assert.equal(applied.meta.bump, true);
+    assert.equal(applied.meta.source, 'status');
+    assert.equal(applied.meta.bump, undefined);
   }
 
   console.log('xp-client contract tests passed');
