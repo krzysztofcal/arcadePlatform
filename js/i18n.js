@@ -44,10 +44,89 @@
     playChip: { en: 'PLAY', pl: 'GRAJ' },
     searchPlaceholder: { en: 'Search games', pl: 'Szukaj gier' },
     searchAria: { en: 'Search games', pl: 'Szukaj gier' },
+    backToGames: { en: 'Back to games', pl: 'Wróć do gier' },
+    gameLoading: { en: 'Loading...', pl: 'Ładowanie...' },
+    gameDetailsLoading: { en: 'Loading game details...', pl: 'Wczytywanie szczegółów gry...' },
+    waitingForConsent: { en: 'Waiting for consent...', pl: 'Oczekiwanie na zgodę...' },
+    rotateDevice: { en: 'Please rotate your device', pl: 'Obróć urządzenie' },
+    similarGames: { en: 'Similar games', pl: 'Podobne gry' },
+    gameNotFound: { en: 'Game not found.', pl: 'Nie znaleziono gry.' },
+    playableUrlMissing: { en: 'Playable URL missing.', pl: 'Brak adresu uruchamianej gry.' },
     catsFullscreenHint: {
       en: 'Make the game feel bigger — use the top bar icon or the yellow corner button to go full screen, and press Esc to return.',
       pl: 'Zanurz się w grze w trybie pełnoekranowym — użyj ikony w pasku u góry lub żółtego przycisku w rogu. Naciśnij Esc, aby wrócić.'
     },
+    trexFullscreenHint: {
+      en: 'Make the game feel bigger - use the top bar icon or the yellow corner button to go full screen, and press Esc to return.',
+      pl: 'Powiększ grę - użyj ikony w pasku u góry lub żółtego przycisku w rogu, aby przejść na pełny ekran. Naciśnij Esc, aby wrócić.'
+    },
+    accountTitle: { en: 'Your account', pl: 'Twoje konto' },
+    accountSubtitle: { en: 'Sign in to sync XP and manage your Arcade Hub profile.', pl: 'Zaloguj się, aby synchronizować XP i zarządzać profilem Arcade Hub.' },
+    authentication: { en: 'Authentication', pl: 'Uwierzytelnianie' },
+    email: { en: 'Email', pl: 'E-mail' },
+    password: { en: 'Password', pl: 'Hasło' },
+    createAccount: { en: 'Create account', pl: 'Załóż konto' },
+    signUp: { en: 'Sign up', pl: 'Zarejestruj się' },
+    choosePassword: { en: 'Choose a password', pl: 'Wybierz hasło' },
+    accountVerification: { en: 'We may ask you to verify your email before unlocking cloud sync.', pl: 'Możemy poprosić o potwierdzenie adresu e-mail przed odblokowaniem synchronizacji w chmurze.' },
+    account: { en: 'Account', pl: 'Konto' },
+    signedInAs: { en: 'Signed in as', pl: 'Zalogowano jako' },
+    signOut: { en: 'Sign out', pl: 'Wyloguj się' },
+    deleteAccount: { en: 'Delete account', pl: 'Usuń konto' },
+    deleteAccountNote: { en: 'To request account deletion, contact support and include the email address linked to your Arcade Hub profile.', pl: 'Aby poprosić o usunięcie konta, skontaktuj się z pomocą i podaj adres e-mail powiązany z profilem Arcade Hub.' },
+    availableChipBonuses: { en: 'Available chip bonuses', pl: 'Dostępne bonusy żetonów' },
+    claimBonus: { en: 'Claim bonus', pl: 'Odbierz bonus' },
+    claimBonusAmount: { en: 'Claim +{amount} CH', pl: 'Odbierz +{amount} CH' },
+    chipBonus: { en: 'Chip bonus', pl: 'Bonus żetonów' },
+    arcadeChips: { en: 'Arcade chips', pl: 'Żetony Arcade' },
+    balance: { en: 'Balance', pl: 'Saldo' },
+    noChipActivity: { en: 'No chip activity yet.', pl: 'Brak aktywności żetonów.' },
+    syncingChips: { en: 'Syncing chips...', pl: 'Synchronizowanie żetonów...' },
+    chipHistoryLoadError: { en: 'Could not load chip history right now.', pl: 'Nie udało się teraz wczytać historii żetonów.' },
+    chipsLoadError: { en: 'Could not load chips right now.', pl: 'Nie udało się teraz wczytać żetonów.' },
+    chipsUnavailable: { en: 'Chips are not available right now.', pl: 'Żetony są obecnie niedostępne.' },
+    loadingMoreActivity: { en: 'Loading more activity...', pl: 'Wczytywanie dalszej aktywności...' },
+    chipHistoryLoadMoreError: { en: 'Could not load more activity. Scroll to retry.', pl: 'Nie udało się wczytać dalszej aktywności. Przewiń, aby spróbować ponownie.' },
+    chipHistoryEnd: { en: 'End of history', pl: 'Koniec historii' },
+    claimingBonus: { en: 'Claiming bonus...', pl: 'Odbieranie bonusu...' },
+    bonusAdded: { en: 'Bonus added to your account.', pl: 'Bonus został dodany do Twojego konta.' },
+    bonusClaimError: { en: 'Could not claim your bonus right now.', pl: 'Nie udało się teraz odebrać bonusu.' },
+    authFieldsRequired: { en: 'Enter both email and password to sign in.', pl: 'Podaj e-mail i hasło, aby się zalogować.' },
+    signUpFieldsRequired: { en: 'Enter both email and password to sign up.', pl: 'Podaj e-mail i hasło, aby się zarejestrować.' },
+    authenticationNotReady: { en: 'Authentication is not ready. Refresh and try again.', pl: 'Uwierzytelnianie nie jest jeszcze gotowe. Odśwież stronę i spróbuj ponownie.' },
+    signingIn: { en: 'Signing in...', pl: 'Logowanie...' },
+    signedInSuccessfully: { en: 'Signed in successfully.', pl: 'Zalogowano pomyślnie.' },
+    signedInRedirecting: { en: 'Signed in. Redirecting...', pl: 'Zalogowano. Przekierowywanie...' },
+    signInError: { en: 'Could not sign in. Please try again.', pl: 'Nie udało się zalogować. Spróbuj ponownie.' },
+    creatingAccount: { en: 'Creating your account...', pl: 'Tworzenie konta...' },
+    verifyEmail: { en: 'Check your inbox to confirm your email.', pl: 'Sprawdź skrzynkę, aby potwierdzić e-mail.' },
+    accountCreated: { en: 'Account created. You are signed in.', pl: 'Konto zostało utworzone. Jesteś zalogowany.' },
+    signUpError: { en: 'Could not sign up. Please try again.', pl: 'Nie udało się zarejestrować. Spróbuj ponownie.' },
+    signingOut: { en: 'Signing out...', pl: 'Wylogowywanie...' },
+    signedOut: { en: 'Signed out.', pl: 'Wylogowano.' },
+    signOutError: { en: 'Could not sign out right now.', pl: 'Nie udało się teraz wylogować.' },
+    deleteAccountSupport: { en: 'Contact support to request account deletion for this profile.', pl: 'Skontaktuj się z pomocą, aby poprosić o usunięcie tego konta.' },
+    authNotConfigured: { en: 'Authentication is not configured yet.', pl: 'Uwierzytelnianie nie jest jeszcze skonfigurowane.' },
+    checkingSession: { en: 'Checking session...', pl: 'Sprawdzanie sesji...' },
+    signedIn: { en: 'Signed in.', pl: 'Zalogowano.' },
+    signedOutNotice: { en: 'You have been signed out.', pl: 'Zostałeś wylogowany.' },
+    guest: { en: 'Guest', pl: 'Gość' },
+    signInToSyncProgress: { en: 'Sign in to sync progress', pl: 'Zaloguj się, aby synchronizować postęp' },
+    player: { en: 'Player', pl: 'Gracz' },
+    accountMenu: { en: 'Account menu', pl: 'Menu konta' },
+    xpProgressTitle: { en: 'XP Progress', pl: 'Postęp XP' },
+    xpProgressSubtitle: { en: 'Track your overall XP, daily gains, and level progress.', pl: 'Śledź łączne XP, dzienne zdobycie i postęp poziomu.' },
+    level: { en: 'Level', pl: 'Poziom' },
+    totalXp: { en: 'Total XP', pl: 'Łączne XP' },
+    dailyLimit: { en: 'Daily limit', pl: 'Dzienny limit' },
+    progressToNextLevel: { en: 'Progress to next level', pl: 'Postęp do następnego poziomu' },
+    dailyProgress: { en: 'Daily progress', pl: 'Dzienny postęp' },
+    xpToday: { en: 'You have earned', pl: 'Dzisiaj zdobyto' },
+    xpTodaySuffix: { en: 'XP today.', pl: 'XP.' },
+    xpCapPrefix: { en: 'The daily XP cap is', pl: 'Dzienny limit XP wynosi' },
+    xpLevelHint: { en: 'Each new level requires 10% more XP than the previous one. Play a little every day to keep leveling up!', pl: 'Każdy kolejny poziom wymaga o 10% więcej XP niż poprzedni. Graj każdego dnia, aby dalej zdobywać poziomy!' },
+    xpProgressDetails: { en: '{current} / {total} XP to next level', pl: '{current} / {total} XP do następnego poziomu' },
+    xpMaximumLevel: { en: 'Maximum level achieved', pl: 'Osiągnięto maksymalny poziom' },
     recentlyPlayed: { en: 'Recently played', pl: 'Ostatnio grane' },
     recentlyPlayedTitle: { en: 'Recently Played', pl: 'Ostatnio grane' },
     recentlyPlayedDesc: { en: 'Pick up where you left off', pl: 'Kontynuuj tam, gdzie skończyłeś' },
@@ -176,6 +255,8 @@
   const analytics = window.Analytics;
 
   function detectLang(){
+    const pageLocale = /\.(en|pl)\.html$/i.exec(location.pathname || '');
+    if (pageLocale) return pageLocale[1].toLowerCase();
     const params = new URLSearchParams(location.search);
     const p = params.get('lang');
     if (p === 'pl' || p === 'en') return p;
@@ -194,8 +275,9 @@
   }
   function applyLang(lang, source){
     currentLang = lang;
-    const elements = document.querySelectorAll('[data-i18n], [data-href-en], [data-href-pl], [data-i18n-placeholder], [data-i18n-aria], .lang-btn');
     const update = ()=>{
+      const elements = document.querySelectorAll('[data-i18n], [data-href-en], [data-href-pl], [data-i18n-placeholder], [data-i18n-aria], .lang-btn');
+      if (document.documentElement) document.documentElement.lang = lang;
       elements.forEach(el=>{
         const data = el.dataset || {};
         const key = data.i18n;
@@ -236,8 +318,27 @@
     document.querySelectorAll('.lang-btn').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         const l = btn.getAttribute('data-lang');
-        persistLang(l); applyLang(l, 'button');
+        setLang(l, 'button');
       });
+    });
+  }
+
+  function setLang(lang, source){
+    if (lang !== 'pl' && lang !== 'en') return;
+    persistLang(lang);
+    const localizedPath = location.pathname && location.pathname.replace(/\.(en|pl)\.html$/i, '.' + lang + '.html');
+    if (localizedPath && localizedPath !== location.pathname){
+      location.assign(localizedPath + location.search + location.hash);
+      return;
+    }
+    applyLang(lang, source || 'api');
+  }
+
+  function format(key, values){
+    const replacements = values || {};
+    const value = (dict[key] && dict[key][currentLang]) || '';
+    return value.replace(/\{([a-zA-Z0-9_]+)\}/g, function(match, name){
+      return Object.prototype.hasOwnProperty.call(replacements, name) ? String(replacements[name]) : match;
     });
   }
 
@@ -245,8 +346,9 @@
 
   window.I18N = {
     t: (key)=> (dict[key] && dict[key][currentLang]) || '',
+    format: format,
     getLang: ()=> currentLang,
-    setLang: (l)=>{ persistLang(l); applyLang(l, 'api'); },
+    setLang: (l)=>{ setLang(l, 'api'); },
     apply: applyLang
   };
 })();

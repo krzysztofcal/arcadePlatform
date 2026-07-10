@@ -145,14 +145,26 @@
       const payload = await res.json();
       const list = Array.isArray(payload) ? payload : (Array.isArray(payload.games) ? payload.games : []);
       const game = list.find(g => g.id === id || g.slug === id) || null;
-      if (!game) { document.body.innerHTML = 'Game not found.'; return; }
+      const t = (key, fallback) => (window.I18N && typeof window.I18N.t === 'function' && window.I18N.t(key)) || fallback;
+      if (!game) { document.body.textContent = t('gameNotFound', 'Game not found.'); return; }
 
-      const title = typeof game.title === 'object' ? (game.title.en || game.title.pl || game.title) : game.title;
-      const description = typeof game.description === 'object' ? (game.description.en || game.description.pl || '') : (game.description || '');
-
-      document.title = title || 'Play';
-      document.getElementById('title').textContent = title || '';
-      document.getElementById('desc').textContent = description;
+      const localizedValue = (value, lang) => {
+        if (!value || typeof value !== 'object') return value || '';
+        return value[lang] || value.en || value.pl || '';
+      };
+      const renderGameText = (lang) => {
+        const title = localizedValue(game.title, lang);
+        const description = localizedValue(game.description, lang);
+        document.title = title || 'Play';
+        document.getElementById('title').textContent = title || '';
+        document.getElementById('desc').textContent = description;
+      };
+      const currentLang = (window.I18N && typeof window.I18N.getLang === 'function') ? window.I18N.getLang() : 'en';
+      renderGameText(currentLang);
+      document.addEventListener('langchange', (ev) => {
+        const lang = (ev && ev.detail && ev.detail.lang) || (window.I18N && window.I18N.getLang && window.I18N.getLang()) || 'en';
+        renderGameText(lang);
+      });
 
       const xpId = game.id || game.slug || id;
       if (window.GameXpBridge && typeof window.GameXpBridge.stop === 'function') {
@@ -269,7 +281,7 @@
         iframe.addEventListener('pointerdown', sendNudge, { passive: true });
         iframe.src = target;
       } else {
-        document.body.innerHTML = 'Playable URL missing.';
+        document.body.textContent = t('playableUrlMissing', 'Playable URL missing.');
         return;
       }
 

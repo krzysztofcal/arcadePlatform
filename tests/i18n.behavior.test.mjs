@@ -15,7 +15,13 @@ const sandbox = {
     dispatchEvent: () => {},
   },
   navigator: { language: 'en-US' },
-  location: { search: '', href: 'https://example.com/poker/table-v2.html?lang=en' },
+  location: {
+    search: '',
+    hash: '',
+    href: 'https://example.com/poker/table-v2.html',
+    pathname: '/poker/table-v2.html',
+    assign: (url) => { sandbox.assignedUrl = url; },
+  },
   history: { replaceState: () => {} },
   localStorage: { getItem: () => null, setItem: () => {} },
   URL,
@@ -54,3 +60,35 @@ for (const key of requiredKeys){
   assert.ok(value && value.length > 0, `translation for ${key} should exist`);
   assert.notEqual(value, key, `translation for ${key} should not fallback to raw key`);
 }
+
+sandbox.window.I18N.setLang('pl');
+assert.equal(sandbox.window.I18N.t('accountTitle'), 'Twoje konto', 'setLang should update the active language on regular pages');
+assert.equal(sandbox.assignedUrl, undefined, 'setLang should not navigate on regular pages');
+
+const localizedSandbox = {
+  ...sandbox,
+  window: {},
+  location: {
+    search: '?source=test',
+    hash: '#details',
+    href: 'https://example.com/legal/terms.en.html?source=test',
+    pathname: '/legal/terms.en.html',
+    assign: (url) => { localizedSandbox.assignedUrl = url; },
+  },
+  localStorage: { getItem: () => 'pl', setItem: () => {} },
+};
+localizedSandbox.window.document = localizedSandbox.document;
+localizedSandbox.window.navigator = localizedSandbox.navigator;
+localizedSandbox.window.location = localizedSandbox.location;
+localizedSandbox.window.history = localizedSandbox.history;
+localizedSandbox.window.localStorage = localizedSandbox.localStorage;
+localizedSandbox.window.URL = URL;
+localizedSandbox.window.URLSearchParams = URLSearchParams;
+localizedSandbox.window.CustomEvent = localizedSandbox.CustomEvent;
+localizedSandbox.window.requestAnimationFrame = localizedSandbox.requestAnimationFrame;
+vm.createContext(localizedSandbox);
+vm.runInContext(source, localizedSandbox, { filename: 'js/i18n.js' });
+
+assert.equal(localizedSandbox.window.I18N.getLang(), 'en', 'a localized document path should take precedence over stored language');
+localizedSandbox.window.I18N.setLang('pl');
+assert.equal(localizedSandbox.assignedUrl, '/legal/terms.pl.html?source=test#details', 'switching localized documents should navigate to the matching language file');
