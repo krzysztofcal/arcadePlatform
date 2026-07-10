@@ -128,6 +128,7 @@
     if (row === -1) return; // Column is full
 
     board[row][col] = currentPlayer;
+    if (window.GameShell && window.GameShell.reportGameplayAction) window.GameShell.reportGameplayAction('disc_drop');
     playSound(currentPlayer === 'red' ? 440 : 520, 100);
     klog('disc_drop', { player: currentPlayer, row: row, col: col });
 

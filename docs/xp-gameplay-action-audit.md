@@ -12,7 +12,7 @@ Before this change, a visible game page could submit a server-calculated XP wind
 
 The core accepts gameplay actions from:
 
-- a strictly increasing score reported through `game-score` or `reportScoreToPortal`;
+- a changed score reported through `game-score` or `reportScoreToPortal`; a score decrease resets the run baseline so restarts without a zero pulse continue to qualify;
 - a positive internal `XP.addScore(delta)` call;
 - a future explicit `XP.reportGameAction(gameId, { kind })` call.
 
@@ -24,16 +24,16 @@ The catalog uses three integration patterns:
 
 1. **Score-relay shells:** `2048`, `asteroids`, `breakout`, `flappy`, `frogger`, `galaga`, `minesweeper`, `missile-command`, `pacman`, `pong`, `snake`, `space-invaders`, and `tetris` relay increasing score changes to the portal. They are covered by the immediate gate.
 2. **Direct score hooks:** first-party games and several open games call `XP.addScore` or bridge score APIs. Positive deltas qualify their window.
-3. **State/action-only games:** `connect-four`, `hangman`, `memory-match`, `simon`, `sokoban`, `solitaire`, `sudoku`, `tic-tac-toe`, and parts of `freedoom` and `whac-a-mole` have meaningful moves that may not change score promptly. They are protected from farming, but must emit `XP.reportGameAction()` from a successful move, card flip, valid placement, accepted answer, or running simulation tick before they can reliably earn XP.
+3. **State/action-only games:** `connect-four`, `hangman`, `memory-match`, `simon`, `sokoban`, `solitaire`, `sudoku`, `tic-tac-toe`, `whac-a-mole`, and `freedoom` report a gameplay action only after their local state accepts a move. Examples include a placed disc, accepted guess, valid card flip or move, Sudoku value change, hit mole, and a control forwarded to the running Freedoom engine.
 
 ## Required follow-up for complete semantic coverage
 
-Each state/action-only game needs a small local integration at the point where its own reducer accepts a move. Call `XP.reportGameAction(gameId, { kind: "move" })` only after the game confirms that the action changed state. Do not call it from raw DOM listeners, pause controls, start controls, rejected moves, or animation loops with no game-state change.
+Future state/action-only games need a small local integration at the point where their reducer accepts a move. Use `GameShell.reportGameplayAction(kind)` only after the game confirms that the action changed state. Do not call it from raw DOM listeners, pause controls, start controls, rejected moves, or animation loops with no game-state change.
 
-For continuous games, emit the action after a successful movement/update tick caused by a user-controlled action. For turn-based games, emit it after a valid turn is committed. This instrumentation is intentionally per game: a shared DOM-level listener cannot distinguish a game move from random clicking without reintroducing the exploit.
+For continuous games, emit the action after a successful user-controlled movement/update tick. For turn-based games, emit it after a valid turn is committed. This instrumentation remains intentionally per game: a shared DOM-level listener cannot distinguish a game move from random clicking without reintroducing the exploit.
 
 ## Breaking impact
 
-- Games without score progression or an explicit action hook will no longer award XP until instrumented.
+- Future games without score progression or an explicit action hook will not award XP until instrumented.
 - XP starts only after the first qualifying action, not when a playable page loads.
 - The server still treats client reports as untrusted telemetry; this change closes passive/random-click farming but is not full anti-cheat attestation.

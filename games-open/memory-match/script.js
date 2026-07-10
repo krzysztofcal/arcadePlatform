@@ -153,6 +153,7 @@
 
     card.isFlipped = true;
     flippedCards.push(card);
+    if (window.GameShell && window.GameShell.reportGameplayAction) window.GameShell.reportGameplayAction('card_flip');
     playSound(440, 50);
     renderCards();
 

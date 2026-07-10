@@ -742,12 +742,18 @@ function bootXpCore(window, document) {
     const score = Number(rawScore);
     if (!gameId || !Number.isFinite(score)) return;
     const previous = state.lastReportedScoreByGameId[gameId];
-    state.lastReportedScoreByGameId[gameId] = score;
     if (!Number.isFinite(previous)) {
-      handleScorePulse(gameId, score);
+      state.lastReportedScoreByGameId[gameId] = score;
       if (score <= 0) return;
+    } else if (score === previous) {
+      return;
+    } else if (score < previous) {
+      // A lower score starts a new in-session run for games without a zero reset pulse.
+      state.lastReportedScoreByGameId[gameId] = score;
+      logDebug("score_pulse_reset", { gameId, previous, score });
+    } else {
+      state.lastReportedScoreByGameId[gameId] = score;
     }
-    if (Number.isFinite(previous) && score <= previous) return;
     try {
       const XP = window && window.XP;
       const running = XP && typeof XP.isRunning === "function" ? !!XP.isRunning() : false;

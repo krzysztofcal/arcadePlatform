@@ -246,6 +246,7 @@
   }
 
   function handleStockClick() {
+    if (stock.length === 0 && waste.length === 0) return;
     saveState();
     if (stock.length > 0) {
       var card = stock.pop();
@@ -261,6 +262,7 @@
       playSound(300, 100, 'sine');
     }
     moves++;
+    if (window.GameShell && window.GameShell.reportGameplayAction) window.GameShell.reportGameplayAction('stock_draw');
     render();
     klog('stock_click', { stockSize: stock.length, wasteSize: waste.length });
   }
@@ -341,6 +343,7 @@
         saveState();
         targetPile.push(waste.pop());
         moves++;
+        if (window.GameShell && window.GameShell.reportGameplayAction) window.GameShell.reportGameplayAction('card_move');
         score += 5;
         playSound(600, 50, 'sine');
         klog('move_waste_to_tableau', { target: targetIndex });
@@ -350,6 +353,7 @@
         saveState();
         targetPile.push(foundations[selectedPile.index].pop());
         moves++;
+        if (window.GameShell && window.GameShell.reportGameplayAction) window.GameShell.reportGameplayAction('card_move');
         score = Math.max(0, score - 15);
         playSound(600, 50, 'sine');
         klog('move_foundation_to_tableau', { source: selectedPile.index, target: targetIndex });
@@ -373,6 +377,7 @@
           }
         }
         moves++;
+        if (window.GameShell && window.GameShell.reportGameplayAction) window.GameShell.reportGameplayAction('card_move');
         playSound(600, 50, 'sine');
         klog('move_tableau_to_tableau', { source: selectedPile.index, target: targetIndex, count: cardsToMove.length });
       }
@@ -388,6 +393,7 @@
         saveState();
         foundations[foundationIndex].push(waste.pop());
         moves++;
+        if (window.GameShell && window.GameShell.reportGameplayAction) window.GameShell.reportGameplayAction('card_move');
         score += 10;
         playSound(700, 50, 'sine');
         klog('move_waste_to_foundation', { foundation: foundationIndex });
@@ -407,6 +413,7 @@
           }
         }
         moves++;
+        if (window.GameShell && window.GameShell.reportGameplayAction) window.GameShell.reportGameplayAction('card_move');
         score += 10;
         playSound(700, 50, 'sine');
         klog('move_tableau_to_foundation', { source: selectedPile.index, foundation: foundationIndex });
@@ -562,6 +569,7 @@
         }
         moves++;
         score += 10;
+        if (window.GameShell && window.GameShell.reportGameplayAction) window.GameShell.reportGameplayAction('auto_foundation_move');
         playSound(700, 50, 'sine');
         clearSelection();
         checkWin();

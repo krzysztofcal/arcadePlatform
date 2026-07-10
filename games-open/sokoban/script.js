@@ -277,6 +277,7 @@
     playerPos.x = newX;
     playerPos.y = newY;
     moves++;
+    if (window.GameShell && window.GameShell.reportGameplayAction) window.GameShell.reportGameplayAction(pushed ? 'box_push' : 'move');
 
     playSound(pushed ? 300 : 440, 50);
     updateStats();
