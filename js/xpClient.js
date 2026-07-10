@@ -548,17 +548,22 @@
     schedule(() => refreshInitialStatus(), 0);
   }
 
-  async function refreshInitialStatus(legacyOverride) {
+  async function refreshInitialStatus(legacyOverride, attempt) {
     const legacy = legacyOverride && typeof legacyOverride === "object"
       ? legacyOverride
       : readLegacyXp();
+    const retryAttempt = Number.isFinite(attempt) ? attempt : 0;
     let authToken = null;
     try { authToken = await ensureAuthTokenWithRetry(); } catch (_) {}
-    let loggedIn = !!authToken;
-    if (!loggedIn) {
+    if (!authToken) {
+      let loggedIn = false;
       try { loggedIn = await isUserLoggedIn(); } catch (_) {}
-    }
-    if (!loggedIn) {
+      if (loggedIn) {
+        if (retryAttempt < 4) {
+          schedule(() => refreshInitialStatus(legacy, retryAttempt + 1), 500);
+        }
+        return;
+      }
       await refreshBadgeFromServer();
       return;
     }
