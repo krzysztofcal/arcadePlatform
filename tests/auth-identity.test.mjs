@@ -208,8 +208,10 @@ describe("JWT verification and identity selection", () => {
     const body = parseJsonBody(response);
     expect(response.statusCode).toBe(200);
     expect(body.ok).toBe(true);
-    const keys = store.eval.mock.calls[0][1];
-    expect(keys[3]).toBe(`${process.env.XP_KEY_NS}:total:user-abc`);
+    const migrationCall = store.eval.mock.calls.find((call) => call[2]?.length === 1);
+    const awardCall = store.eval.mock.calls.find((call) => call[2]?.length === 6);
+    expect(migrationCall[1][1]).toBe(`${process.env.XP_KEY_NS}:total:user-abc`);
+    expect(awardCall[1][3]).toBe(`${process.env.XP_KEY_NS}:total:user-abc`);
   });
 
   it("A5: calculate-xp falls back to anon when JWT invalid", async () => {

@@ -369,6 +369,13 @@
     } catch (_) {}
   }
 
+  function schedule(callback, delay) {
+    const timer = typeof window.setTimeout === "function"
+      ? window.setTimeout.bind(window)
+      : (typeof setTimeout === "function" ? setTimeout : null);
+    if (timer) timer(callback, delay);
+  }
+
   function handleAuthChange(event) {
     state.authToken = null;
     state.authCheckedAt = 0;
@@ -378,7 +385,7 @@
     clearServerSession();
     clearIdentityBoundXpCache();
     klog("xp_auth_changed", { event: typeof event === "string" ? event : "unknown" });
-    window.setTimeout(() => refreshBadgeFromServer(), 0);
+    schedule(() => refreshBadgeFromServer(), 0);
   }
 
   function bindAuthChanges(attempt) {
@@ -391,7 +398,7 @@
       }
     } catch (_) {}
     if ((attempt || 0) < 10) {
-      window.setTimeout(() => bindAuthChanges((attempt || 0) + 1), 50);
+      schedule(() => bindAuthChanges((attempt || 0) + 1), 50);
     }
   }
 
