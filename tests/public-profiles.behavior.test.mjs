@@ -174,7 +174,10 @@ test("profile-public returns current XP and level without internal fields", asyn
   const handler = createProfilePublicHandler({
     env: { PUBLIC_PROFILES_ENABLED: "1" },
     findPublicProfile: async () => profile(),
-    getUserProfile: async () => ({ userId: USER_ID, totalXp: 235, updatedAt: Date.now() }),
+    getUserXpTotal: async (userId) => {
+      assert.equal(userId, USER_ID);
+      return 235;
+    },
     allowPublicRead: async () => true,
   });
   const response = await handler(event("GET", null, { handle: "blue-fox-482731" }));
@@ -198,7 +201,7 @@ test("profile-public fails closed when the XP store read fails", async () => {
   const handler = createProfilePublicHandler({
     env: { PUBLIC_PROFILES_ENABLED: "1" },
     findPublicProfile: async () => profile(),
-    getUserProfile: async () => { throw new Error("upstash_unavailable"); },
+    getUserXpTotal: async () => { throw new Error("upstash_unavailable"); },
     allowPublicRead: async () => true,
   });
   const response = await handler(event("GET", null, { handle: "blue-fox-482731" }));

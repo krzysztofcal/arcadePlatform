@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { atomicRateLimitIncr, getUserProfileStrict } from "./_shared/store-upstash.mjs";
+import { atomicRateLimitIncr, getUserXpTotalStrict } from "./_shared/store-upstash.mjs";
 import { baseHeaders, corsHeaders, klog } from "./_shared/supabase-admin.mjs";
 import { findPublicProfile, publicProfile } from "./_shared/user-profile.mjs";
 import { computeXpLevel } from "./_shared/xp-level.mjs";
@@ -45,7 +45,7 @@ function createProfilePublicHandler(deps = {}) {
   const env = deps.env || process.env;
   const findProfile = deps.findPublicProfile || findPublicProfile;
   const allowRead = deps.allowPublicRead || allowPublicRead;
-  const getPublicXp = deps.getUserProfile || getUserProfileStrict;
+  const getPublicXp = deps.getUserXpTotal || getUserXpTotalStrict;
   return async function handler(event) {
     const origin = event.headers?.origin || event.headers?.Origin;
     const cors = profileCors(origin);
@@ -58,8 +58,9 @@ function createProfilePublicHandler(deps = {}) {
     try {
       const profile = await findProfile(event.queryStringParameters?.handle);
       if (!profile) return json(404, cors, { error: "not_found" });
-      const xpProfile = await getPublicXp(profile.userId);
-      const xp = Math.max(0, Math.floor(Number(xpProfile?.totalXp) || 0));
+      const xpResult = await getPublicXp(profile.userId);
+      const xpValue = typeof xpResult === "object" ? xpResult?.totalXp : xpResult;
+      const xp = Math.max(0, Math.floor(Number(xpValue) || 0));
       return json(200, { ...cors, "cache-control": "public, max-age=30", Vary: "Origin" }, publicProfile(profile, {
         xp,
         level: computeXpLevel(xp),

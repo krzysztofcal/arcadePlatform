@@ -37,7 +37,7 @@ The implementation should extend existing patterns rather than create parallel c
    - `bio`: empty string.
 5. No generated or displayed value may derive from email, email prefix, Supabase UUID, IP address, or real name in auth metadata.
 6. Profiles are public to anyone knowing the handle at `/u/<handle>`.
-7. The public profile may include current total `xp` and computed `level`, read server-side from the authoritative XP snapshot. It does not include XP event history, daily/weekly gains, caps, or ledger details.
+7. The public profile may include current total `xp` and computed `level`, read server-side from the canonical XP lifetime total. It does not include XP event history, daily/weekly gains, caps, or ledger details.
 
 ### Stable handles
 
@@ -114,7 +114,7 @@ No authentication required once `PUBLIC_PROFILES_ENABLED=1`. Normalize and valid
 
 For a processed uploaded avatar, `avatar` becomes `{ "type": "uploaded", "url": "<stable-public-webp-url>", "variant": "fox-blue" }`. Do not return `user_id`, timestamps, auth metadata, email, chips, ledger, poker data, XP event history, daily/weekly gains, or internal storage paths. `xp` and `level` are the only public XP summary fields.
 
-If the user has no XP snapshot yet, the endpoint returns `xp: 0` and `level: 1`. If the XP store is unavailable or its data cannot be parsed, the endpoint returns `500 server_error` with `Cache-Control: no-store`; it must never present an infrastructure failure as zero XP.
+If the user has no canonical XP lifetime total yet, the endpoint returns `xp: 0` and `level: 1`. If the XP store is unavailable or its data cannot be parsed, the endpoint returns `500 server_error` with `Cache-Control: no-store`; it must never present an infrastructure failure as zero XP.
 
 The endpoint must reuse the existing rate-limit helper where its current contract supports this public route. Cache successful public responses briefly with a public cache policy suitable for profile edits. Return the same generic `404` response for every absent or invalidly resolvable handle. This MVP has no profile search, directory, pagination, or endpoint that lists profiles, so public handles cannot be enumerated through an application API.
 
@@ -252,7 +252,7 @@ Terms must also cover user responsibility for public profile text and uploaded a
 
 ### PR 3: Public XP and level profile stats
 
-- Read the authoritative current XP snapshot server-side; never expose Redis or internal XP keys to the browser.
+- Read the authoritative current XP lifetime total server-side; never expose Redis or internal XP keys to the browser.
 - Use the same fixed level progression contract as the XP badge so public level matches the client.
 - Use the fixed public level contract of `100 XP` for the first level and a `1.35` requirement multiplier. `window.XP_LEVEL_BASE_XP` and `window.XP_LEVEL_MULTIPLIER` are not supported runtime overrides.
 - Add `xp` and `level` to the explicit public response allowlist and render them on `/u/<handle>`.
@@ -260,7 +260,7 @@ Terms must also cover user responsibility for public profile text and uploaded a
 - Use the existing short public cache; document that profile XP can be stale for up to the cache lifetime.
 - No leaderboard ranking, daily/weekly aggregates, XP history, or database migration is included.
 
-**Implementation status (2026-07-10):** this PR adds public current XP and computed level from the server-side XP profile snapshot. The public response remains allowlisted and does not expose `userId`, email, `avatarKey`, Redis keys, XP history, daily/weekly gains, or rank. The public cache remains `max-age=30`, so the displayed total can lag a recent award briefly. Production remains disabled until the existing public-profile rollout gate is complete.
+**Implementation status (2026-07-10):** this PR adds public current XP and computed level from the same canonical lifetime total used by authenticated XP status reads. The public response remains allowlisted and does not expose `userId`, email, `avatarKey`, Redis keys, XP history, daily/weekly gains, or rank. The public cache remains `max-age=30`, so the displayed total can lag a recent award briefly. Production remains disabled until the existing public-profile rollout gate is complete.
 
 ### PR 4: Avatar upload pipeline
 

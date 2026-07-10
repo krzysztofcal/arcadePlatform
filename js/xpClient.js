@@ -410,8 +410,12 @@
   }
 
   async function refreshInitialStatus() {
-    let loggedIn = false;
-    try { loggedIn = await isUserLoggedIn(); } catch (_) {}
+    let authToken = null;
+    try { authToken = await ensureAuthTokenWithRetry(); } catch (_) {}
+    let loggedIn = !!authToken;
+    if (!loggedIn) {
+      try { loggedIn = await isUserLoggedIn(); } catch (_) {}
+    }
     if (loggedIn) clearIdentityBoundXpCache();
     await refreshBadgeFromServer();
   }

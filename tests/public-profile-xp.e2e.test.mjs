@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import test from "node:test";
 
+process.env.XP_TEST_MODE = "1";
+process.env.XP_KEY_NS = "kcswh:xp:v2";
+
 const { createProfilePublicHandler } = await import("../netlify/functions/profile-public.mjs");
 const { computeXpLevel } = await import("../netlify/functions/_shared/xp-level.mjs");
+const { store } = await import("../netlify/functions/_shared/store-upstash.mjs");
 
 const USER_ID = "7339c05e-5068-4ad1-a449-5f7b3bb8f2e0";
 const ANON_ID = "anon-public-profile-e2e";
@@ -30,14 +34,11 @@ function response(body) {
   };
 }
 
-test("authenticated badge and public profile use the same XP snapshot", async () => {
+test("authenticated badge and public profile use the same canonical XP total", async () => {
+  await store.set(`kcswh:xp:v2:total:${USER_ID}`, String(SNAPSHOT.totalXp));
   const publicHandler = createProfilePublicHandler({
     env: { PUBLIC_PROFILES_ENABLED: "1" },
     findPublicProfile: async () => profile(),
-    getUserProfile: async (userId) => {
-      assert.equal(userId, USER_ID);
-      return SNAPSHOT;
-    },
     allowPublicRead: async () => true,
   });
   const publicResponse = await publicHandler({
