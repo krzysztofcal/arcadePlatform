@@ -94,7 +94,7 @@
   # Step 2: After verification, enable enforcement (set in Netlify UI)
   # XP_REQUIRE_SERVER_SESSION = "1"
   XP_REQUIRE_SERVER_SESSION = "0"
-  PUBLIC_PROFILES_ENABLED = "1"
+  PUBLIC_PROFILES_ENABLED = "0"
 
 # =============================================================================
 # All Environment Variables Reference

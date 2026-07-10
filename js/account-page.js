@@ -9,6 +9,7 @@
   var welcomeBonusInFlight = null;
   var publicProfileInFlight = null;
   var publicProfile = null;
+  var publicProfileGeneration = 0;
   var WELCOME_BONUS_SUCCESS = 'Bonus added to your account.';
   var ledgerState = {
     entries: [],
@@ -153,7 +154,14 @@
 
   function renderUser(user){
     var hasUser = !!user;
+    var previousUserKey = getUserKey(currentUser);
+    var nextUserKey = getUserKey(user);
     currentUser = user || null;
+    if (previousUserKey !== nextUserKey){
+      publicProfileGeneration += 1;
+      publicProfileInFlight = null;
+      if (window.ProfileClient && typeof window.ProfileClient.clear === 'function') window.ProfileClient.clear();
+    }
 
     // Toggle panels
     setBlockVisibility(nodes.forms, !hasUser);
@@ -210,12 +218,22 @@
   function loadPublicProfile(force){
     if (!currentUser || !window.ProfileClient || typeof window.ProfileClient.getMe !== 'function') return Promise.resolve(null);
     if (publicProfileInFlight) return publicProfileInFlight;
-    publicProfileInFlight = window.ProfileClient.getMe(!!force).then(function(profile){ renderPublicProfile(profile); return profile; }).catch(function(error){
+    var requestedUserKey = getUserKey(currentUser);
+    var requestedGeneration = publicProfileGeneration;
+    var request = window.ProfileClient.getMe(!!force).then(function(profile){
+      if (requestedUserKey !== getUserKey(currentUser) || requestedGeneration !== publicProfileGeneration) return null;
+      renderPublicProfile(profile);
+      return profile;
+    }).catch(function(error){
       klog('profile:account_load_failed', { code: error && error.code ? error.code : 'request_failed' });
-      setBlockVisibility(nodes.publicProfileEditor, false);
+      if (requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration){
+        setBlockVisibility(nodes.publicProfileEditor, false);
+        setStatus(t('publicProfileLoadError', 'Could not load your public profile. Please refresh and try again.'), 'error');
+      }
       return null;
-    }).finally(function(){ publicProfileInFlight = null; });
-    return publicProfileInFlight;
+    }).finally(function(){ if (publicProfileInFlight === request) publicProfileInFlight = null; });
+    publicProfileInFlight = request;
+    return request;
   }
 
   function handlePublicProfileSave(event){

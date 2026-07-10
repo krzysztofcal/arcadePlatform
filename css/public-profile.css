@@ -9,8 +9,9 @@
 .public-profile__status[data-tone="error"]{ color:#fda4af; }
 .profile-avatar--fox-blue,[data-avatar-variant="fox-blue"]{ background:linear-gradient(145deg,#2357a6,#59b6ec); }
 .profile-avatar--panda-pink,[data-avatar-variant="panda-pink"]{ background:linear-gradient(145deg,#8c3d75,#ef87bb); }
-.profile-avatar--tiger-gold,[data-avatar-variant="tiger-gold"]{ background:linear-gradient(145deg,#9b5a17,#f7c948); }
-.profile-avatar--koala-mint,[data-avatar-variant="koala-mint"]{ background:linear-gradient(145deg,#1f786b,#79e6cf); }
-.profile-avatar--rocket-violet,[data-avatar-variant="rocket-violet"]{ background:linear-gradient(145deg,#553298,#b18cff); }
+.profile-avatar--comet-blue,[data-avatar-variant="comet-blue"]{ background:linear-gradient(145deg,#2357a6,#59b6ec); }
+.profile-avatar--falcon-orange,[data-avatar-variant="falcon-orange"]{ background:linear-gradient(145deg,#a9541b,#f79a48); }
+.profile-avatar--nova-purple,[data-avatar-variant="nova-purple"]{ background:linear-gradient(145deg,#553298,#b18cff); }
+.profile-avatar--orbit-green,[data-avatar-variant="orbit-green"]{ background:linear-gradient(145deg,#19755d,#74d9a0); }
 .profile-avatar--default,[data-avatar-variant="default"]{ background:linear-gradient(145deg,#355070,#6ee7e7); }
 @media (max-width:600px){ .public-profile{ padding:16px 12px 40px; } .public-profile__card{ padding:18px; } }

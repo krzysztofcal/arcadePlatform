@@ -30,6 +30,19 @@
     return bridge.getAccessToken();
   }
 
+  async function currentUserId(){
+    var auth = window.SupabaseAuth;
+    if (!auth || typeof auth.getCurrentUser !== 'function') return null;
+    var user = await auth.getCurrentUser();
+    return user && user.id ? String(user.id) : null;
+  }
+
+  function staleIdentityError(){
+    var error = new Error('stale_identity');
+    error.code = 'stale_identity';
+    return error;
+  }
+
   async function parse(response){
     var body = {};
     try { body = await response.json(); } catch (_err){}
@@ -58,19 +71,27 @@
   }
 
   async function getMe(force){
-    if (!force && cache) return cache;
-    if (!force && inFlight) return inFlight;
-    inFlight = authedFetch(ME_URL, { method: 'GET' }).then(parse).then(function(profile){
-      cache = profile;
+    var userId = await currentUserId();
+    if (!userId) throw staleIdentityError();
+    if (!force && cache && cache.userId === userId) return cache.profile;
+    if (!force && inFlight && inFlight.userId === userId) return inFlight.promise;
+    var request = authedFetch(ME_URL, { method: 'GET' }).then(parse).then(async function(profile){
+      if (await currentUserId() !== userId) throw staleIdentityError();
+      cache = { userId: userId, profile: profile };
       return profile;
-    }).finally(function(){ inFlight = null; });
-    return inFlight;
+    });
+    inFlight = { userId: userId, promise: request };
+    request.finally(function(){ if (inFlight && inFlight.promise === request) inFlight = null; }).catch(function(){});
+    return request;
   }
 
   async function updateMe(payload){
+    var userId = await currentUserId();
+    if (!userId) throw staleIdentityError();
     var response = await authedFetch(ME_URL, { method: 'PATCH', body: JSON.stringify(payload || {}) });
     var profile = await parse(response);
-    cache = profile;
+    if (await currentUserId() !== userId) throw staleIdentityError();
+    cache = { userId: userId, profile: profile };
     notify(profile);
     return profile;
   }
