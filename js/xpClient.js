@@ -10,6 +10,10 @@
   const MAX_TS = Number.MAX_SAFE_INTEGER;
   const DEFAULT_DELTA_CAP = 300;
   const AUTH_CACHE_MS = 60000;
+  const LEGACY_XP_CACHE_KEY = "kcswh:xp:last";
+  const LEGACY_XP_RUNTIME_KEY = "kcswh:xp:regen";
+  const XP_MIGRATION_NOTICE_PREFIX = "kcswh:xp:server-migration-notice:v1:";
+  const XP_MIGRATION_NOTICE_ID = "xpServerMigrationNotice";
 
   // Session states: "none" | "pending" | "ready"
   const SESSION_NONE = "none";
@@ -29,6 +33,10 @@
     authCheckedAt: 0,
     authPromise: null,
     authChangeBound: false,
+    migrationNotice: null,
+    migrationNoticeText: null,
+    migrationNoticeClose: null,
+    migrationNoticeLangBound: false,
   };
 
   let serverCalcInitRequested = false;
@@ -356,17 +364,137 @@
     state.sessionStatus = SESSION_NONE;
   }
 
-  function clearIdentityBoundXpCache() {
+  function clearIdentityBoundStorage() {
     try {
       const ls = window.localStorage;
-      ls.removeItem("kcswh:xp:last");
-      ls.removeItem("kcswh:xp:regen");
+      ls.removeItem(LEGACY_XP_CACHE_KEY);
+      ls.removeItem(LEGACY_XP_RUNTIME_KEY);
     } catch (_) {}
+  }
+
+  function clearIdentityBoundXpCache(options) {
+    if (!options || options.preserveLegacy !== true) {
+      clearIdentityBoundStorage();
+    }
     try {
       if (window.XP && typeof window.XP.resetIdentityCache === "function") {
-        window.XP.resetIdentityCache();
+        window.XP.resetIdentityCache({ preserveBadge: options?.preserveBadge === true });
       }
     } catch (_) {}
+  }
+
+  function readLegacyXp() {
+    let raw = null;
+    try {
+      raw = window.localStorage.getItem(LEGACY_XP_CACHE_KEY);
+      if (!raw) return { total: 0, raw: null };
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { total: 0, raw };
+      const values = [parsed.totalLifetime, parsed.serverTotalXp, parsed.badgeShownXp]
+        .filter((value) => Number.isSafeInteger(value) && value >= 0);
+      return { total: values.length ? Math.max(...values) : 0, raw };
+    } catch (_) {
+      return { total: 0, raw };
+    }
+  }
+
+  function getLocalizedText(key, fallback) {
+    try {
+      if (window.I18N && typeof window.I18N.format === "function") {
+        const value = window.I18N.format(key);
+        if (value) return value;
+      }
+      if (window.I18N && typeof window.I18N.t === "function") {
+        const value = window.I18N.t(key);
+        if (value) return value;
+      }
+    } catch (_) {}
+    return fallback;
+  }
+
+  function updateMigrationNoticeText() {
+    if (!state.migrationNoticeText) return;
+    state.migrationNoticeText.textContent = getLocalizedText(
+      "xpServerMigrationNotice",
+      "Your account XP is now synchronized with the server. Some XP previously shown only on this device was not saved to your account and could not be transferred.",
+    );
+    if (state.migrationNoticeClose) {
+      state.migrationNoticeClose.setAttribute("aria-label", getLocalizedText(
+        "xpServerMigrationDismiss",
+        "Dismiss XP synchronization notice",
+      ));
+    }
+  }
+
+  function ensureMigrationNotice() {
+    if (typeof document === "undefined" || !document || !document.body) return null;
+    if (state.migrationNotice && document.body.contains(state.migrationNotice)) return state.migrationNotice;
+
+    const notice = document.createElement("div");
+    notice.id = XP_MIGRATION_NOTICE_ID;
+    notice.className = "xp-server-migration-notice";
+    notice.setAttribute("role", "status");
+    notice.setAttribute("aria-live", "polite");
+
+    const text = document.createElement("p");
+    text.className = "xp-server-migration-notice__text";
+    notice.appendChild(text);
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "xp-server-migration-notice__close";
+    close.textContent = "×";
+    close.addEventListener("click", () => {
+      notice.hidden = true;
+      notice.remove();
+      state.migrationNotice = null;
+      state.migrationNoticeText = null;
+      state.migrationNoticeClose = null;
+    });
+    notice.appendChild(close);
+    document.body.appendChild(notice);
+
+    state.migrationNotice = notice;
+    state.migrationNoticeText = text;
+    state.migrationNoticeClose = close;
+    updateMigrationNoticeText();
+    if (!state.migrationNoticeLangBound) {
+      document.addEventListener("langchange", updateMigrationNoticeText);
+      state.migrationNoticeLangBound = true;
+    }
+    return notice;
+  }
+
+  async function getAuthenticatedUserId() {
+    try {
+      const bridge = getAuthBridge();
+      if (bridge && typeof bridge.getCurrentUserId === "function") {
+        const userId = await bridge.getCurrentUserId();
+        if (typeof userId === "string" && userId.trim()) return userId.trim();
+      }
+    } catch (_) {}
+    try {
+      if (window.SupabaseAuth && typeof window.SupabaseAuth.getCurrentUser === "function") {
+        const user = await window.SupabaseAuth.getCurrentUser();
+        if (user && typeof user.id === "string" && user.id.trim()) return user.id.trim();
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function migrationMarkerKey(identity) {
+    return `${XP_MIGRATION_NOTICE_PREFIX}${identity}`;
+  }
+
+  function showMigrationNoticeIfNeeded(legacyLocalXp, serverTotalXp, identity) {
+    if (!identity || legacyLocalXp <= serverTotalXp) return;
+    let shown = false;
+    try { shown = window.localStorage.getItem(migrationMarkerKey(identity)) === "1"; } catch (_) {}
+    if (shown) return;
+    const notice = ensureMigrationNotice();
+    if (!notice) return;
+    notice.hidden = false;
+    try { window.localStorage.setItem(migrationMarkerKey(identity), "1"); } catch (_) {}
   }
 
   function schedule(callback, delay) {
@@ -377,15 +505,26 @@
   }
 
   function handleAuthChange(event) {
+    const eventName = typeof event === "string" ? event : "unknown";
+    const isGameHost = window.XP_IS_GAME_HOST === true
+      || (typeof document !== "undefined" && !!(document && document.body && document.body.hasAttribute("data-game-host")));
+    const migrationLegacy = !isGameHost && (eventName === "SIGNED_IN" || eventName === "INITIAL_SESSION")
+      ? readLegacyXp()
+      : null;
     state.authToken = null;
     state.authCheckedAt = 0;
     state.authPromise = null;
     state.statusBootstrapped = false;
     state.statusPromise = null;
     clearServerSession();
-    clearIdentityBoundXpCache();
-    klog("xp_auth_changed", { event: typeof event === "string" ? event : "unknown" });
-    schedule(() => refreshBadgeFromServer(), 0);
+    clearIdentityBoundXpCache({
+      preserveLegacy: !!migrationLegacy,
+      preserveBadge: !!migrationLegacy,
+    });
+    klog("xp_auth_changed", { event: eventName });
+    schedule(() => migrationLegacy
+      ? refreshInitialStatus(migrationLegacy)
+      : refreshBadgeFromServer(), 0);
   }
 
   function bindAuthChanges(attempt) {
@@ -409,15 +548,28 @@
     schedule(() => refreshInitialStatus(), 0);
   }
 
-  async function refreshInitialStatus() {
+  async function refreshInitialStatus(legacyOverride) {
+    const legacy = legacyOverride && typeof legacyOverride === "object"
+      ? legacyOverride
+      : readLegacyXp();
     let authToken = null;
     try { authToken = await ensureAuthTokenWithRetry(); } catch (_) {}
     let loggedIn = !!authToken;
     if (!loggedIn) {
       try { loggedIn = await isUserLoggedIn(); } catch (_) {}
     }
-    if (loggedIn) clearIdentityBoundXpCache();
-    await refreshBadgeFromServer();
+    if (!loggedIn) {
+      await refreshBadgeFromServer();
+      return;
+    }
+
+    const identity = (await getAuthenticatedUserId()) || ensureIds().sessionId;
+    const payload = await refreshBadgeFromServer({ allowServerRegression: true });
+    const serverTotal = Number(payload?.totalLifetime);
+    if (payload?.ok !== true || payload?.status !== "statusOnly"
+      || !Number.isSafeInteger(serverTotal) || serverTotal < 0) return;
+    clearIdentityBoundStorage();
+    showMigrationNoticeIfNeeded(legacy.total, serverTotal, identity);
   }
 
   async function startServerSession(force = false) {
@@ -775,7 +927,10 @@
       const payload = await fetchStatus();
       if (typeof window !== "undefined" && window.XP && typeof window.XP.refreshFromServerStatus === "function") {
         try {
-          window.XP.refreshFromServerStatus(payload, { source: "status" });
+          window.XP.refreshFromServerStatus(payload, {
+            source: "status",
+            allowServerRegression: options?.allowServerRegression === true,
+          });
         } catch (_) {}
       }
       return payload;

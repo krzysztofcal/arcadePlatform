@@ -114,6 +114,8 @@
     signInToSyncProgress: { en: 'Sign in to sync progress', pl: 'Zaloguj się, aby synchronizować postęp' },
     player: { en: 'Player', pl: 'Gracz' },
     profileAccountSynced: { en: 'Account synced', pl: 'Konto zsynchronizowane' },
+    xpServerMigrationNotice: { en: 'Your account XP is now synchronized with the server. Some XP previously shown only on this device was not saved to your account and could not be transferred.', pl: 'XP konta jest teraz synchronizowane z serwerem. Część punktów wcześniej widocznych tylko na tym urządzeniu nie była zapisana na koncie i nie mogła zostać przeniesiona.' },
+    xpServerMigrationDismiss: { en: 'Dismiss XP synchronization notice', pl: 'Zamknij komunikat synchronizacji XP' },
     accountMenu: { en: 'Account menu', pl: 'Menu konta' },
     publicProfileTitle: { en: 'Public profile', pl: 'Profil publiczny' },
     publicDisplayName: { en: 'Display name', pl: 'Nazwa wyświetlana' },

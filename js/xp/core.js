@@ -1283,7 +1283,8 @@ function bootXpCore(window, document) {
       reason === "reset"
       || reason === "daily_reset"
       || reason === "day_reset"
-      || reason === "hard_reset";
+      || reason === "hard_reset"
+      || meta?.allowServerRegression === true;
 
     const skipTotals =
       (!authenticated && statusRaw === "statusonly")
@@ -1418,7 +1419,7 @@ function bootXpCore(window, document) {
     return payload;
   }
 
-  function resetIdentityCache() {
+  function resetIdentityCache(options) {
     state.totalToday = null;
     state.totalLifetime = null;
     state.serverTotalXp = null;
@@ -1434,7 +1435,7 @@ function bootXpCore(window, document) {
       window.localStorage.removeItem(CACHE_KEY);
       window.localStorage.removeItem(RUNTIME_CACHE_KEY);
     } catch (_) {}
-    updateBadge();
+    if (!options || options.preserveBadge !== true) updateBadge();
   }
 
   async function sendWindow(force) {
