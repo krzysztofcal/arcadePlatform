@@ -10,6 +10,11 @@ create table if not exists public.user_profiles (
   updated_at timestamptz not null default timezone('utc', now()),
   constraint user_profiles_handle_normalized check (handle = lower(handle)),
   constraint user_profiles_handle_format check (handle ~ '^[a-z0-9][a-z0-9_-]{2,23}$'),
+  constraint user_profiles_handle_not_reserved check (handle not in (
+    'admin', 'admin-api', 'about', 'account', 'api', 'assets', 'auth', 'contact', 'game', 'games',
+    'help', 'leaderboard', 'legal', 'login', 'logout', 'me', 'poker', 'privacy', 'profile', 'register',
+    'settings', 'signup', 'static', 'support', 'terms', 'user', 'users', 'xp'
+  )),
   constraint user_profiles_display_name_length check (char_length(btrim(display_name)) between 2 and 40),
   constraint user_profiles_bio_length check (char_length(bio) <= 160)
 );

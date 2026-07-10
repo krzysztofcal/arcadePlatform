@@ -24,6 +24,18 @@ function parseBody(raw) {
   }
 }
 
+function validatePatch(payload) {
+  const allowed = new Set(["displayName", "bio", "handle"]);
+  const keys = Object.keys(payload);
+  if (keys.length === 0 || keys.some((key) => !allowed.has(key))) {
+    const error = new Error("invalid_request");
+    error.code = "invalid_request";
+    error.status = 400;
+    throw error;
+  }
+  return payload;
+}
+
 function createProfileMeHandler(deps = {}) {
   const verifyJwt = deps.verifySupabaseJwt || verifySupabaseJwt;
   const ensureProfile = deps.ensureUserProfile || ensureUserProfile;
@@ -41,11 +53,11 @@ function createProfileMeHandler(deps = {}) {
     try {
       const profile = event.httpMethod === "GET"
         ? await ensureProfile(auth.userId)
-        : await updateProfile(auth.userId, parseBody(event.body));
+        : await updateProfile(auth.userId, validatePatch(parseBody(event.body)));
       return json(200, cors, ownerProfile(profile));
     } catch (error) {
       const status = Number(error?.status) || 500;
-      const publicCodes = new Set(["invalid_json", "invalid_handle", "handle_taken", "reserved_handle", "handle_locked", "invalid_display_name", "bio_too_long"]);
+      const publicCodes = new Set(["invalid_json", "invalid_request", "invalid_handle", "handle_taken", "reserved_handle", "handle_locked", "invalid_display_name", "bio_too_long"]);
       const code = publicCodes.has(error?.code) ? error.code : "server_error";
       klog("profile_me_failed", { userId: auth.userId, code, status });
       return json(status, cors, { error: code });

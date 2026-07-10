@@ -45,7 +45,7 @@ function createProfilePublicHandler(deps = {}) {
     try {
       const profile = await findProfile(event.queryStringParameters?.handle);
       if (!profile) return json(404, cors, { error: "not_found" });
-      return json(200, { ...cors, "cache-control": "public, max-age=60, stale-while-revalidate=300", Vary: "Origin" }, publicProfile(profile));
+      return json(200, { ...cors, "cache-control": "public, max-age=30", Vary: "Origin" }, publicProfile(profile));
     } catch (error) {
       klog("profile_public_failed", { message: error?.message || "error" });
       return json(500, cors, { error: "server_error" });

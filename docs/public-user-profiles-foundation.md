@@ -6,7 +6,7 @@ This plan creates a safe public gaming identity for every authenticated Arcade H
 
 Every authenticated account receives a public profile automatically. A profile has a generated gaming name, a permanent public handle, a default avatar identity, and an empty bio. It must never expose email, Supabase user UUID, chip balances, ledger entries, poker data, session data, IP address, or copied auth metadata.
 
-**Privacy decision required before implementation:** every authenticated profile will be public and reachable at `/u/<handle>`. This must be explicitly approved as product policy and checked against Terms and Privacy wording before PR 1 is merged. The current `legal/privacy.en.html`, `legal/privacy.pl.html`, `legal/terms.en.html`, and `legal/terms.pl.html` describe account metadata but do not disclose that a nickname, avatar, and bio become public. They are not sufficient for this feature as written.
+**Privacy decision required before public activation:** every authenticated profile will be public and reachable at `/u/<handle>`. This must be explicitly approved as product policy and checked against Terms and Privacy wording before PR 2 adds the public route. The current legal documents do not disclose that a nickname, avatar, and bio become public, so the proposed legal copy remains a release draft until public profiles are accessible in the UI.
 
 ## Current Repository Fit
 
@@ -212,7 +212,7 @@ The leaderboard backend will aggregate XP server-side and join identities to `us
 
 ## Legal and Privacy Release Gate
 
-Before enabling public profiles in production, update both Privacy Policy variants and both Terms variants, then update their revision dates. The legal copy must state in plain language that:
+Before enabling the public route in production, update both Privacy Policy variants and both Terms variants, then update their revision dates. The legal copy must state in plain language that:
 
 - every authenticated account receives a public gaming profile;
 - its generated or customized handle, display name, optional bio, and avatar are visible to anyone who knows the profile URL;
@@ -230,7 +230,7 @@ Terms must also cover user responsibility for public profile text and uploaded a
 - Shared profile helper and generated identity.
 - `profile-public` and `profile-me` endpoints.
 - Documentation of public/private data and leaderboard contract.
-- Updated PL/EN Terms and Privacy Policy approved as the public-profile release gate.
+- Draft PL/EN Terms and Privacy Policy wording and an explicit public-profile release gate.
 - Stage migration plus API smoke verification.
 
 ### PR 2: Profile UI and public route
@@ -239,6 +239,7 @@ Terms must also cover user responsibility for public profile text and uploaded a
 - Default avatar rendering.
 - `/u/<handle>` rewrite, `profile.html`, and public page controller.
 - Topbar integration and PL/EN localization.
+- Publish approved PL/EN Terms and Privacy Policy updates before enabling the route.
 - No uploaded-avatar support yet.
 
 ### PR 3: Avatar upload pipeline

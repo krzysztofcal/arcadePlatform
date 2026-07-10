@@ -1,12 +1,12 @@
 import crypto from "node:crypto";
 import { beginSql, executeSql } from "./supabase-admin.mjs";
 
-const ADJECTIVES = Object.freeze(["Blue", "Bright", "Cosmic", "Echo", "Neon", "Pixel", "Rocket", "Solar", "Swift", "Turbo"]);
-const NOUNS = Object.freeze(["Comet", "Falcon", "Fox", "Nova", "Orbit", "Panda", "Raven", "Tiger", "Wave", "Wizard"]);
+const ADJECTIVES = Object.freeze(["Apex", "Blue", "Bold", "Bright", "Cosmic", "Echo", "Ember", "Neon", "Nova", "Pixel", "Rapid", "Rocket", "Solar", "Swift", "Turbo", "Ultra", "Vivid", "Zen"]);
+const NOUNS = Object.freeze(["Ace", "Bolt", "Comet", "Falcon", "Fox", "Nova", "Orbit", "Panda", "Raven", "Tiger", "Wave", "Wizard"]);
 const AVATAR_VARIANTS = Object.freeze(["comet-blue", "falcon-orange", "fox-blue", "nova-purple", "orbit-green", "panda-pink"]);
-const RESERVED_HANDLES = new Set(["admin", "api", "account", "profile", "poker", "xp", "login", "logout", "settings", "support", "about", "leaderboard"]);
+const RESERVED_HANDLES = new Set(["admin", "admin-api", "about", "account", "api", "assets", "auth", "contact", "game", "games", "help", "leaderboard", "legal", "login", "logout", "me", "poker", "privacy", "profile", "register", "settings", "signup", "static", "support", "terms", "user", "users", "xp"]);
 const HANDLE_RE = /^[a-z0-9][a-z0-9_-]{2,23}$/;
-const MAX_IDENTITY_ATTEMPTS = 12;
+const MAX_IDENTITY_ATTEMPTS = 16;
 
 function profileError(code, status = 400) {
   const error = new Error(code);
@@ -47,10 +47,13 @@ function randomItem(items) {
 }
 
 function createGeneratedIdentity() {
-  const displayName = `${randomItem(ADJECTIVES)}${randomItem(NOUNS)}${crypto.randomInt(10, 100)}`;
+  const adjective = randomItem(ADJECTIVES);
+  const noun = randomItem(NOUNS);
+  const suffix = crypto.randomInt(100000, 1000000);
+  const displayName = `${adjective} ${noun} ${suffix}`;
   return {
     displayName,
-    handle: displayName.toLowerCase(),
+    handle: `${adjective}-${noun}-${suffix}`.toLowerCase(),
     avatarVariant: randomItem(AVATAR_VARIANTS),
   };
 }
@@ -147,7 +150,7 @@ async function updateUserProfile(userId, payload = {}, deps = {}) {
   const profile = await ensureUserProfile(userId, deps);
   const hasDisplayName = Object.prototype.hasOwnProperty.call(payload, "displayName");
   const hasBio = Object.prototype.hasOwnProperty.call(payload, "bio");
-  const hasHandle = Object.prototype.hasOwnProperty.call(payload, "handle") && payload.handle != null;
+  const hasHandle = Object.prototype.hasOwnProperty.call(payload, "handle");
   const displayName = hasDisplayName ? normalizeDisplayName(payload.displayName) : profile.displayName;
   const bio = hasBio ? normalizeBio(payload.bio) : profile.bio;
   const requestedHandle = hasHandle ? normalizeHandle(payload.handle) : profile.handle;
