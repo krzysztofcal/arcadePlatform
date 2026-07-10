@@ -1355,6 +1355,24 @@ function bootXpCore(window, document) {
     return payload;
   }
 
+  function resetIdentityCache() {
+    state.totalToday = null;
+    state.totalLifetime = null;
+    state.serverTotalXp = null;
+    state.badgeBaselineXp = 0;
+    state.badgeShownXp = 0;
+    state.sessionXp = 0;
+    state.cap = null;
+    state.dailyRemaining = Infinity;
+    state.dayKey = null;
+    state.nextResetEpoch = 0;
+    try {
+      window.localStorage.removeItem(CACHE_KEY);
+      window.localStorage.removeItem(RUNTIME_CACHE_KEY);
+    } catch (_) {}
+    updateBadge();
+  }
+
   async function sendWindow(force) {
     if (!state.running || !window.XPClient || typeof window.XPClient.postWindow !== "function") return;
     if (state.pending) return;
@@ -2378,6 +2396,7 @@ function bootXpCore(window, document) {
     getSnapshot,
     refreshStatus,
     refreshFromServerStatus,
+    resetIdentityCache,
     addScore,
     awardLocalXp,
     flushXp,

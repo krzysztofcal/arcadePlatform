@@ -1,6 +1,21 @@
 
-XP Anonymous → Account Auto-Conversion Specification (v1)
-Arcade Hub – Functional & Security Requirements
+# XP Anonymous to Account Conversion
+
+## Implemented behavior
+
+The authoritative gameplay endpoint is `calculate-xp`. Both it and the `award-xp` status endpoint run the same conversion helper before reading or awarding authenticated totals.
+
+- A valid Supabase JWT subject is the destination account; the browser anon id is the source.
+- Conversion atomically transfers `min(anon lifetime XP, XP_ANON_CONVERSION_MAX_XP)`.
+- A positive conversion deletes the anon lifetime counter and records account and pair markers. Those markers are the idempotent receipt and prevent another conversion for that account.
+- A zero anon balance creates no marker and does not consume future eligibility.
+- Both endpoints return `conversion: { converted }` only when they moved XP. UI messaging is intentionally outside the award path.
+
+The remainder of this file is historical v1 product design, not the current implementation contract.
+
+---
+
+## Historical v1 design
 1. Purpose
 Arcade Hub supports gameplay for both anonymous users and logged-in users. Anonymous players earn XP normally, but their XP is stored in a temporary, browser-bound anonymous profile.
 This document defines the official mechanism for automatically converting anonymous XP to a permanent account, once per user, after they create and verify an account.

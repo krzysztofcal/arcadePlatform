@@ -1,31 +1,26 @@
-# Server-verified XP via Netlify Functions
+# XP service
 
-This PR introduces a minimal server endpoint to award XP only after a **verified** 30 seconds of active play per user and game.
+## Authoritative gameplay endpoint
 
-## What this adds
-- `netlify/functions/_shared/store-upstash.mjs` (helper for Upstash Redis REST)
-- `netlify/functions/award-xp.mjs` (POST endpoint)
-- `docs/xp-service.md` (how to configure & call)
+Playable pages use `js/xpClient.js` and `js/xp/core.js`; they must not call XP functions directly. The authoritative gameplay endpoint is:
 
-## Configure on Netlify
-1. Add env vars: `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `XP_SERVICE_API_KEY`, optional `XP_STEP`.
-2. Deploy. Endpoint becomes `/.netlify/functions/award-xp`.
-
-## Client usage (example)
-Call from UI **only when 30s of active play elapsed**:
-
-```js
-await fetch('/.netlify/functions/award-xp', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'x-api-key': '<set-in-env>' },
-  body: JSON.stringify({ userId, gameId, claimedAt: Date.now() })
-});
+```
+POST /.netlify/functions/calculate-xp
 ```
 
-Responses:
-- 200: `{ ok: true, added, total }`
-- 409: `Too soon`
-- 422: timestamp window invalid
-- 401: missing/invalid API key
+It receives a bounded activity window and calculates the grant on the server. The browser sends its anon id, session id, optional signed server-session token, and Supabase bearer token when authenticated. The JWT subject is the authoritative account identity.
 
-Idempotency & spam: a short lock prevents rapid duplicates; per-game 30s spacing enforced server-side.
+`/.netlify/functions/award-xp` is retained for status reads and legacy compatibility. It shares XP policy, identity resolution, and one-time anonymous conversion with `calculate-xp`; new gameplay code must not use it for awards.
+
+## Required configuration
+
+- `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
+- `SUPABASE_JWT_SECRET` or `SUPABASE_JWT_SECRET_V2`
+- `XP_DAILY_SECRET` / `XP_SESSION_SECRET` with a strong value
+- `XP_CORS_ALLOW` and `URL`
+
+Recommended production enforcement: `XP_REQUIRE_SERVER_SESSION=1` and `XP_REQUIRE_ACTIVITY=1`. Roll out signed-session enforcement through warn mode only while observing `klog` events.
+
+## Anonymous conversion
+
+On an authenticated request carrying the browser anon id, the server atomically transfers a positive anon lifetime total up to `XP_ANON_CONVERSION_MAX_XP`. It records a Redis marker as the receipt and will not convert again for that account. A zero balance creates no marker, so later guest XP remains eligible.
