@@ -8,7 +8,7 @@ const {
   updateUserProfile,
 } = await import("../netlify/functions/_shared/user-profile.mjs");
 const { createProfileMeHandler } = await import("../netlify/functions/profile-me.mjs");
-const { createProfilePublicHandler } = await import("../netlify/functions/profile-public.mjs");
+const { createProfilePublicHandler, publicProfilesEnabled } = await import("../netlify/functions/profile-public.mjs");
 
 const USER_ID = "00000000-0000-4000-8000-000000000003";
 
@@ -151,4 +151,10 @@ test("profile-public is disabled by default and uses generic not found responses
   const invalid = await enabled(event("GET", null, { handle: "not valid" }));
   assert.equal(unknown.statusCode, 404);
   assert.deepEqual(JSON.parse(unknown.body), JSON.parse(invalid.body));
+});
+
+test("profile-public enables deploy previews when the function scope lacks the flag", () => {
+  assert.equal(publicProfilesEnabled({ CONTEXT: "deploy-preview" }), true);
+  assert.equal(publicProfilesEnabled({ CONTEXT: "deploy-preview", PUBLIC_PROFILES_ENABLED: "0" }), false);
+  assert.equal(publicProfilesEnabled({ CONTEXT: "production" }), false);
 });

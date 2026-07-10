@@ -14,6 +14,13 @@ function profileCors(origin) {
   return headers ? { ...headers, "access-control-allow-methods": "GET, OPTIONS" } : null;
 }
 
+function publicProfilesEnabled(env) {
+  if (Object.prototype.hasOwnProperty.call(env, "PUBLIC_PROFILES_ENABLED")) {
+    return env.PUBLIC_PROFILES_ENABLED === "1";
+  }
+  return env.CONTEXT === "deploy-preview";
+}
+
 function clientIp(event) {
   return event.headers?.["x-forwarded-for"]?.split(",")[0]?.trim() || event.headers?.["x-real-ip"] || "unknown";
 }
@@ -41,7 +48,7 @@ function createProfilePublicHandler(deps = {}) {
     if (!cors) return json(403, baseHeaders(), { error: "forbidden_origin" });
     if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: cors, body: "" };
     if (event.httpMethod !== "GET") return json(405, cors, { error: "method_not_allowed" });
-    if (env.PUBLIC_PROFILES_ENABLED !== "1") return json(404, cors, { error: "not_found" });
+    if (!publicProfilesEnabled(env)) return json(404, cors, { error: "not_found" });
     if (!await allowRead(event)) return json(429, cors, { error: "rate_limit_exceeded" });
 
     try {
@@ -57,4 +64,4 @@ function createProfilePublicHandler(deps = {}) {
 
 const handler = createProfilePublicHandler();
 
-export { createProfilePublicHandler, handler };
+export { createProfilePublicHandler, handler, publicProfilesEnabled };
