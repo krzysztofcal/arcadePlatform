@@ -123,6 +123,8 @@
     publicHandleHint: { en: 'You can change your generated handle once. It then becomes permanent.', pl: 'Możesz raz zmienić wygenerowany identyfikator. Potem stanie się stały.' },
     publicHandleLockedHint: { en: 'This handle is permanent.', pl: 'Ten identyfikator jest stały.' },
     savePublicProfile: { en: 'Save public profile', pl: 'Zapisz profil publiczny' },
+    savingPublicProfile: { en: 'Saving...', pl: 'Zapisywanie...' },
+    publicProfileSavedShort: { en: 'Saved', pl: 'Zapisano' },
     publicProfileInvalidHandle: { en: 'Use 3-24 lowercase letters, digits, hyphens, or underscores.', pl: 'Użyj 3-24 małych liter, cyfr, myślników lub podkreśleń.' },
     publicProfileHandleTaken: { en: 'This handle is already taken.', pl: 'Ten identyfikator jest już zajęty.' },
     publicProfileReservedHandle: { en: 'This handle is reserved.', pl: 'Ten identyfikator jest zarezerwowany.' },

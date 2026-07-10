@@ -139,7 +139,7 @@ html[data-auth="out"] #chipBadge{ display:none !important; }
 
 .avatar-menu[hidden]{ display:none; }
 
-.avatar-menu__user{ display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+.avatar-menu__user{ display:flex; align-items:center; gap:10px; margin-bottom:10px; width:100%; border:0; padding:0; background:transparent; color:inherit; text-align:left; }
 
 .avatar-menu__initials{ width:34px; height:34px; border-radius:50%; border:1px solid var(--border); display:grid; place-items:center; background:rgba(110,231,231,.1); color:var(--accent); font:700 13px/1 Poppins, sans-serif; }
 

@@ -56,6 +56,14 @@
     .public-profile-editor__url{ color:#a5f3fc; overflow-wrap:anywhere; }
     .public-profile-editor__field-error{ min-height:18px; margin:4px 0 0; color:#fda4af; font-size:13px; }
     .public-profile-editor textarea{ width:100%; min-height:92px; padding:10px 12px; resize:vertical; border:1px solid rgba(255,255,255,.1); border-radius:10px; background:rgba(255,255,255,.04); color:#e2e8f0; font:inherit; }
+    .public-profile-save{ display:inline-flex !important; align-items:center; justify-content:center; gap:8px; min-height:42px; transition:background .18s ease, color .18s ease, transform .18s ease; }
+    .public-profile-save[data-state="saving"]{ cursor:wait; opacity:.82; }
+    .public-profile-save[data-state="saved"]{ background:#86efac !important; color:#0b1020 !important; animation:public-profile-save-pop .28s ease-out; }
+    .public-profile-save__spinner{ display:none; width:14px; height:14px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; }
+    .public-profile-save[data-state="saving"] .public-profile-save__spinner{ display:inline-block; animation:public-profile-save-spin .7s linear infinite; }
+    .public-profile-save__status{ min-height:18px; color:#86efac; font-size:13px; }
+    @keyframes public-profile-save-spin{ to{ transform:rotate(360deg); } }
+    @keyframes public-profile-save-pop{ 0%{ transform:scale(.98); } 60%{ transform:scale(1.02); } 100%{ transform:scale(1); } }
   </style>
 
 <script src="js/analytics.js" defer></script>
@@ -215,7 +223,8 @@
               <label for="publicBio" data-i18n="publicBio">Bio</label>
               <textarea id="publicBio" name="bio" maxlength="160"></textarea>
               <p class="public-profile-editor__field-error" id="publicBioError" aria-live="polite"></p>
-              <button type="submit" id="publicProfileSave" data-i18n="savePublicProfile">Save public profile</button>
+              <button type="submit" class="public-profile-save" id="publicProfileSave" data-state="idle" aria-busy="false"><span class="public-profile-save__spinner" aria-hidden="true"></span><span id="publicProfileSaveLabel" data-i18n="savePublicProfile">Save public profile</span></button>
+              <span class="public-profile-save__status" id="publicProfileSaveStatus" aria-live="polite"></span>
             </form>
           </section>
           <div class="account-panel__actions">

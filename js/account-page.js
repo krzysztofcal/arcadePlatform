@@ -10,6 +10,7 @@
   var publicProfileInFlight = null;
   var publicProfile = null;
   var publicProfileGeneration = 0;
+  var publicProfileSaveResetTimer = null;
   var WELCOME_BONUS_SUCCESS = 'Bonus added to your account.';
   var ledgerState = {
     entries: [],
@@ -60,6 +61,8 @@
     nodes.publicBio = doc.getElementById('publicBio');
     nodes.publicHandleHint = doc.getElementById('publicHandleHint');
     nodes.publicProfileSave = doc.getElementById('publicProfileSave');
+    nodes.publicProfileSaveLabel = doc.getElementById('publicProfileSaveLabel');
+    nodes.publicProfileSaveStatus = doc.getElementById('publicProfileSaveStatus');
     nodes.publicDisplayNameError = doc.getElementById('publicDisplayNameError');
     nodes.publicHandleError = doc.getElementById('publicHandleError');
     nodes.publicBioError = doc.getElementById('publicBioError');
@@ -202,6 +205,24 @@
     return { code: code, message: messages[code] || t('publicProfileSaveError', 'Could not save your public profile.') };
   }
 
+  function setPublicProfileSaveState(state, message){
+    if (publicProfileSaveResetTimer){ clearTimeout(publicProfileSaveResetTimer); publicProfileSaveResetTimer = null; }
+    if (nodes.publicProfileSave){
+      nodes.publicProfileSave.dataset.state = state;
+      nodes.publicProfileSave.disabled = state === 'saving';
+      nodes.publicProfileSave.setAttribute('aria-busy', state === 'saving' ? 'true' : 'false');
+    }
+    if (nodes.publicProfileSaveLabel){
+      nodes.publicProfileSaveLabel.textContent = state === 'saving'
+        ? t('savingPublicProfile', 'Saving...')
+        : state === 'saved' ? t('publicProfileSavedShort', 'Saved') : t('savePublicProfile', 'Save public profile');
+    }
+    if (nodes.publicProfileSaveStatus) nodes.publicProfileSaveStatus.textContent = message || '';
+    if (state === 'saved'){
+      publicProfileSaveResetTimer = setTimeout(function(){ setPublicProfileSaveState('idle', ''); }, 1800);
+    }
+  }
+
   function renderPublicProfile(profile){
     publicProfile = profile || null;
     setBlockVisibility(nodes.publicProfileEditor, !!profile);
@@ -251,9 +272,12 @@
       payload.handle = handle;
     }
     if (!Object.keys(payload).length){ setStatus(t('publicProfileNoChanges', 'No profile changes to save.'), 'info'); return; }
-    if (nodes.publicProfileSave) nodes.publicProfileSave.disabled = true;
+    setPublicProfileSaveState('saving', t('savingPublicProfile', 'Saving...'));
+    var saveSucceeded = false;
     window.ProfileClient.updateMe(payload).then(function(profile){
       renderPublicProfile(profile);
+      saveSucceeded = true;
+      setPublicProfileSaveState('saved', t('publicProfileSaved', 'Public profile saved.'));
       setStatus(t('publicProfileSaved', 'Public profile saved.'), 'success');
     }).catch(function(error){
       var result = publicProfileError(error);
@@ -262,8 +286,9 @@
       else if (result.code === 'bio_too_long') errors.bio = result.message;
       else if (result.code === 'invalid_display_name') errors.displayName = result.message;
       setPublicProfileErrors(errors);
+      setPublicProfileSaveState('idle', result.message);
       setStatus(result.message, 'error');
-    }).finally(function(){ if (nodes.publicProfileSave) nodes.publicProfileSave.disabled = false; });
+    }).finally(function(){ if (!saveSucceeded) setPublicProfileSaveState('idle', nodes.publicProfileSaveStatus ? nodes.publicProfileSaveStatus.textContent : ''); });
   }
 
   function clearChips(){

@@ -6,11 +6,16 @@ import vm from "node:vm";
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("public profile route, editor, and legal release gate are present", async () => {
-  const [account, page, config, privacyEn, privacyPl, termsEn, termsPl] = await Promise.all([
-    read("account.html"), read("profile.html"), read("netlify.toml"), read("legal/privacy.en.html"), read("legal/privacy.pl.html"), read("legal/terms.en.html"), read("legal/terms.pl.html")
+  const [account, page, config, privacyEn, privacyPl, termsEn, termsPl, portalCss, accountJs] = await Promise.all([
+    read("account.html"), read("profile.html"), read("netlify.toml"), read("legal/privacy.en.html"), read("legal/privacy.pl.html"), read("legal/terms.en.html"), read("legal/terms.pl.html"), read("css/portal.css"), read("js/account-page.js")
   ]);
   assert.match(account, /id="publicProfileEditor"/);
   assert.match(account, /id="publicProfileForm"/);
+  assert.match(account, /id="publicProfileSave"[^>]*data-state="idle"/);
+  assert.match(account, /public-profile-save__spinner/);
+  assert.match(accountJs, /setPublicProfileSaveState\('saving'/);
+  assert.match(accountJs, /setPublicProfileSaveState\('saved'/);
+  assert.match(portalCss, /\.avatar-menu__user\{[^}]*background:transparent/);
   assert.match(page, /id="publicProfileCard"/);
   assert.match(page, /src="\/js\/public-profile-page\.js"/);
   assert.equal((page.match(/(?:href|src)="(?:css|js)\//g) || []).length, 0, "profile page assets must be root-absolute under /u/:handle");
