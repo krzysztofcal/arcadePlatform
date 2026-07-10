@@ -13,6 +13,7 @@ test("public profile route, editor, and legal release gate are present", async (
   assert.match(account, /id="publicProfileForm"/);
   assert.match(page, /id="publicProfileCard"/);
   assert.match(page, /src="\/js\/public-profile-page\.js"/);
+  assert.equal((page.match(/(?:href|src)="(?:css|js)\//g) || []).length, 0, "profile page assets must be root-absolute under /u/:handle");
   assert.match(config, /from = "\/u\/:handle"\s+to = "\/profile\.html"/);
   assert.match(config, /\[context\.deploy-preview\.environment\][\s\S]*?PUBLIC_PROFILES_ENABLED = "1"/);
   assert.match(config, /\[context\.production\.environment\][\s\S]*?PUBLIC_PROFILES_ENABLED = "0"/);
