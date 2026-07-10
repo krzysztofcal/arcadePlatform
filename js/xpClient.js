@@ -33,6 +33,7 @@
     authCheckedAt: 0,
     authPromise: null,
     authChangeBound: false,
+    initialStatusPending: false,
     migrationNotice: null,
     migrationNoticeText: null,
     migrationNoticeClose: null,
@@ -549,6 +550,7 @@
   }
 
   async function refreshInitialStatus(legacyOverride, attempt) {
+    state.initialStatusPending = true;
     const legacy = legacyOverride && typeof legacyOverride === "object"
       ? legacyOverride
       : readLegacyXp();
@@ -561,9 +563,12 @@
       if (loggedIn) {
         if (retryAttempt < 4) {
           schedule(() => refreshInitialStatus(legacy, retryAttempt + 1), 500);
+        } else {
+          state.initialStatusPending = false;
         }
         return;
       }
+      state.initialStatusPending = false;
       await refreshBadgeFromServer();
       return;
     }
@@ -572,9 +577,21 @@
     const payload = await refreshBadgeFromServer({ allowServerRegression: true });
     const serverTotal = Number(payload?.totalLifetime);
     if (payload?.ok !== true || payload?.status !== "statusOnly"
-      || !Number.isSafeInteger(serverTotal) || serverTotal < 0) return;
+      || !Number.isSafeInteger(serverTotal) || serverTotal < 0) {
+      state.initialStatusPending = false;
+      return;
+    }
+    if (!window.XP || typeof window.XP.refreshFromServerStatus !== "function") {
+      if (retryAttempt < 4) {
+        schedule(() => refreshInitialStatus(legacy, retryAttempt + 1), 250);
+      } else {
+        state.initialStatusPending = false;
+      }
+      return;
+    }
     clearIdentityBoundStorage();
     showMigrationNoticeIfNeeded(legacy.total, serverTotal, identity);
+    state.initialStatusPending = false;
   }
 
   async function startServerSession(force = false) {
@@ -682,6 +699,10 @@
     }
     const token = loadServerSession();
     return { status: state.sessionStatus, token };
+  }
+
+  function isInitialStatusPending() {
+    return state.initialStatusPending === true;
   }
 
   function currentClientCap() {
@@ -930,11 +951,13 @@
   async function refreshBadgeFromServer(options) {
     try {
       const payload = await fetchStatus();
+      const allowServerRegression = options?.allowServerRegression === true
+        || state.initialStatusPending === true;
       if (typeof window !== "undefined" && window.XP && typeof window.XP.refreshFromServerStatus === "function") {
         try {
           window.XP.refreshFromServerStatus(payload, {
             source: "status",
-            allowServerRegression: options?.allowServerRegression === true,
+            allowServerRegression,
           });
         } catch (_) {}
       }
@@ -1130,6 +1153,7 @@
     clearServerSession,
     ensureServerSession,
     getSessionStatus,
+    isInitialStatusPending,
     isAuthenticated,
   };
 

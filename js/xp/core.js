@@ -2274,7 +2274,12 @@ function bootXpCore(window, document) {
     if (!window.XPClient || typeof window.XPClient.fetchStatus !== "function") return Promise.resolve(null);
     setBadgeLoading(true);
     return window.XPClient.fetchStatus()
-      .then((data) => { handleResponse(data); return data; })
+      .then((data) => {
+        const migrationPending = typeof window.XPClient.isInitialStatusPending === "function"
+          && window.XPClient.isInitialStatusPending();
+        handleResponse(data, { source: "status", allowServerRegression: migrationPending });
+        return data;
+      })
       .catch((err) => { handleError(err); throw err; });
   }
 
