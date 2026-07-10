@@ -76,7 +76,7 @@
   XP_SESSION_RATE_LIMIT_ENABLED = "1"
   XP_SERVER_SESSION_WARN_MODE = "1"
   XP_REQUIRE_SERVER_SESSION = "0"
-  PUBLIC_PROFILES_ENABLED = "0"
+  PUBLIC_PROFILES_ENABLED = "1"
   WELCOME_BONUS_START_AT = "2025-06-01T00:00:00Z"
   WELCOME_BONUS_CHIPS = "500"
 
@@ -94,7 +94,7 @@
   # Step 2: After verification, enable enforcement (set in Netlify UI)
   # XP_REQUIRE_SERVER_SESSION = "1"
   XP_REQUIRE_SERVER_SESSION = "0"
-  PUBLIC_PROFILES_ENABLED = "0"
+  PUBLIC_PROFILES_ENABLED = "1"
 
 # =============================================================================
 # All Environment Variables Reference
@@ -210,4 +210,9 @@
 [[redirects]]
   from = "/api/favorites"
   to = "/.netlify/functions/favorites"
+  status = 200
+
+[[redirects]]
+  from = "/u/:handle"
+  to = "/profile.html"
   status = 200

@@ -7,6 +7,8 @@
   var currentUser = null;
   var chipsInFlight = null;
   var welcomeBonusInFlight = null;
+  var publicProfileInFlight = null;
+  var publicProfile = null;
   var WELCOME_BONUS_SUCCESS = 'Bonus added to your account.';
   var ledgerState = {
     entries: [],
@@ -48,6 +50,18 @@
     nodes.bonusCampaignList = doc.getElementById('bonusCampaignList');
     nodes.welcomeBonusClaimButton = doc.getElementById('welcomeBonusClaimButton');
     nodes.welcomeBonusStatus = doc.getElementById('welcomeBonusStatus');
+    nodes.publicProfileEditor = doc.getElementById('publicProfileEditor');
+    nodes.publicProfileForm = doc.getElementById('publicProfileForm');
+    nodes.publicProfileAvatar = doc.getElementById('publicProfileAvatar');
+    nodes.publicProfileUrl = doc.getElementById('publicProfileUrl');
+    nodes.publicDisplayName = doc.getElementById('publicDisplayName');
+    nodes.publicHandle = doc.getElementById('publicHandle');
+    nodes.publicBio = doc.getElementById('publicBio');
+    nodes.publicHandleHint = doc.getElementById('publicHandleHint');
+    nodes.publicProfileSave = doc.getElementById('publicProfileSave');
+    nodes.publicDisplayNameError = doc.getElementById('publicDisplayNameError');
+    nodes.publicHandleError = doc.getElementById('publicHandleError');
+    nodes.publicBioError = doc.getElementById('publicBioError');
   }
 
   function t(key, fallback){
@@ -148,6 +162,8 @@
     setWelcomeBonusVisibility(false);
 
     if (!hasUser){
+      publicProfile = null;
+      setBlockVisibility(nodes.publicProfileEditor, false);
       clearChips();
       return;
     }
@@ -156,6 +172,80 @@
     var displayName = meta.full_name || meta.name || user.email || 'Player';
     if (nodes.userEmail){ nodes.userEmail.textContent = user.email || 'Unknown email'; }
     if (nodes.userName){ nodes.userName.textContent = displayName; }
+    loadPublicProfile();
+  }
+
+  function setPublicProfileErrors(errors){
+    if (nodes.publicDisplayNameError) nodes.publicDisplayNameError.textContent = errors && errors.displayName ? errors.displayName : '';
+    if (nodes.publicHandleError) nodes.publicHandleError.textContent = errors && errors.handle ? errors.handle : '';
+    if (nodes.publicBioError) nodes.publicBioError.textContent = errors && errors.bio ? errors.bio : '';
+  }
+
+  function publicProfileError(error){
+    var code = error && error.code ? error.code : 'request_failed';
+    var messages = {
+      invalid_handle: t('publicProfileInvalidHandle', 'Use 3-24 lowercase letters, digits, hyphens, or underscores.'),
+      handle_taken: t('publicProfileHandleTaken', 'This handle is already taken.'),
+      reserved_handle: t('publicProfileReservedHandle', 'This handle is reserved.'),
+      handle_locked: t('publicProfileHandleLocked', 'Your handle is permanent and cannot be changed again.'),
+      invalid_display_name: t('publicProfileInvalidDisplayName', 'Use 2-40 characters for your display name.'),
+      bio_too_long: t('publicProfileBioTooLong', 'Your bio can contain up to 160 characters.')
+    };
+    return { code: code, message: messages[code] || t('publicProfileSaveError', 'Could not save your public profile.') };
+  }
+
+  function renderPublicProfile(profile){
+    publicProfile = profile || null;
+    setBlockVisibility(nodes.publicProfileEditor, !!profile);
+    if (!profile) return;
+    if (window.ProfileClient && window.ProfileClient.applyAvatar) window.ProfileClient.applyAvatar(nodes.publicProfileAvatar, profile);
+    if (nodes.publicDisplayName) nodes.publicDisplayName.value = profile.displayName || '';
+    if (nodes.publicHandle){ nodes.publicHandle.value = profile.handle || ''; nodes.publicHandle.disabled = !profile.handleCanBeCustomized; }
+    if (nodes.publicBio) nodes.publicBio.value = profile.bio || '';
+    if (nodes.publicHandleHint) nodes.publicHandleHint.textContent = profile.handleCanBeCustomized ? t('publicHandleHint', 'You can change your generated handle once. It then becomes permanent.') : t('publicHandleLockedHint', 'This handle is permanent.');
+    if (nodes.publicProfileUrl){ nodes.publicProfileUrl.href = '/u/' + encodeURIComponent(profile.handle || ''); nodes.publicProfileUrl.textContent = '/u/' + (profile.handle || ''); }
+    setPublicProfileErrors(null);
+  }
+
+  function loadPublicProfile(force){
+    if (!currentUser || !window.ProfileClient || typeof window.ProfileClient.getMe !== 'function') return Promise.resolve(null);
+    if (publicProfileInFlight) return publicProfileInFlight;
+    publicProfileInFlight = window.ProfileClient.getMe(!!force).then(function(profile){ renderPublicProfile(profile); return profile; }).catch(function(error){
+      klog('profile:account_load_failed', { code: error && error.code ? error.code : 'request_failed' });
+      setBlockVisibility(nodes.publicProfileEditor, false);
+      return null;
+    }).finally(function(){ publicProfileInFlight = null; });
+    return publicProfileInFlight;
+  }
+
+  function handlePublicProfileSave(event){
+    event.preventDefault();
+    if (!publicProfile || !window.ProfileClient || typeof window.ProfileClient.updateMe !== 'function') return;
+    setPublicProfileErrors(null);
+    var payload = {};
+    var displayName = nodes.publicDisplayName ? nodes.publicDisplayName.value.trim() : '';
+    var bio = nodes.publicBio ? nodes.publicBio.value.trim() : '';
+    var handle = nodes.publicHandle ? nodes.publicHandle.value.trim().toLowerCase() : '';
+    if (displayName !== publicProfile.displayName) payload.displayName = displayName;
+    if (bio !== publicProfile.bio) payload.bio = bio;
+    if (publicProfile.handleCanBeCustomized && handle && handle !== publicProfile.handle){
+      if (!window.confirm(t('publicHandleConfirm', 'Changing your handle is permanent. Continue?'))) return;
+      payload.handle = handle;
+    }
+    if (!Object.keys(payload).length){ setStatus(t('publicProfileNoChanges', 'No profile changes to save.'), 'info'); return; }
+    if (nodes.publicProfileSave) nodes.publicProfileSave.disabled = true;
+    window.ProfileClient.updateMe(payload).then(function(profile){
+      renderPublicProfile(profile);
+      setStatus(t('publicProfileSaved', 'Public profile saved.'), 'success');
+    }).catch(function(error){
+      var result = publicProfileError(error);
+      var errors = {};
+      if (result.code.indexOf('handle') !== -1 || result.code === 'reserved_handle') errors.handle = result.message;
+      else if (result.code === 'bio_too_long') errors.bio = result.message;
+      else if (result.code === 'invalid_display_name') errors.displayName = result.message;
+      setPublicProfileErrors(errors);
+      setStatus(result.message, 'error');
+    }).finally(function(){ if (nodes.publicProfileSave) nodes.publicProfileSave.disabled = false; });
   }
 
   function clearChips(){
@@ -735,6 +825,7 @@
     if (nodes.signOut){ nodes.signOut.addEventListener('click', handleSignOut); }
     if (nodes.bonusCampaignList){ nodes.bonusCampaignList.addEventListener('click', handleWelcomeBonusClaim); }
     if (nodes.welcomeBonusClaimButton){ nodes.welcomeBonusClaimButton.addEventListener('click', handleWelcomeBonusClaim); }
+    if (nodes.publicProfileForm){ nodes.publicProfileForm.addEventListener('submit', handlePublicProfileSave); }
     if (nodes.deleteBtn && nodes.deleteNote){
       nodes.deleteBtn.addEventListener('click', function(e){
         e.preventDefault();
@@ -803,6 +894,7 @@
     hydrateUser();
 
     doc.addEventListener('chips:tx-complete', loadChips);
+    doc.addEventListener('profile:updated', function(event){ renderPublicProfile(event && event.detail ? event.detail : null); });
     doc.addEventListener('langchange', function(){
       setWelcomeBonusVisibility(nodes.welcomeBonusPanel && !nodes.welcomeBonusPanel.hidden);
       if (currentUser){ refreshWelcomeBonus(currentUser); }

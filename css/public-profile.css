@@ -1,0 +1,16 @@
+.public-profile{ max-width:640px; margin:0 auto; padding:24px 16px 48px; }
+.public-profile__card{ display:grid; gap:20px; padding:24px; border:1px solid var(--border); border-radius:12px; background:var(--card-2); }
+.public-profile__identity{ display:flex; align-items:center; gap:16px; }
+.public-profile__avatar{ width:80px; height:80px; flex:0 0 80px; border-radius:50%; display:grid; place-items:center; border:1px solid var(--border); color:#fff; font:800 26px/1 Poppins, sans-serif; }
+.public-profile__name{ margin:0; font:800 26px/1.15 Poppins, sans-serif; color:#fff; }
+.public-profile__handle{ margin:6px 0 0; color:#9fb0d0; }
+.public-profile__bio{ margin:0; white-space:pre-wrap; line-height:1.55; color:#dbe7ff; }
+.public-profile__status{ margin:0; color:#9fb0d0; }
+.public-profile__status[data-tone="error"]{ color:#fda4af; }
+.profile-avatar--fox-blue,[data-avatar-variant="fox-blue"]{ background:linear-gradient(145deg,#2357a6,#59b6ec); }
+.profile-avatar--panda-pink,[data-avatar-variant="panda-pink"]{ background:linear-gradient(145deg,#8c3d75,#ef87bb); }
+.profile-avatar--tiger-gold,[data-avatar-variant="tiger-gold"]{ background:linear-gradient(145deg,#9b5a17,#f7c948); }
+.profile-avatar--koala-mint,[data-avatar-variant="koala-mint"]{ background:linear-gradient(145deg,#1f786b,#79e6cf); }
+.profile-avatar--rocket-violet,[data-avatar-variant="rocket-violet"]{ background:linear-gradient(145deg,#553298,#b18cff); }
+.profile-avatar--default,[data-avatar-variant="default"]{ background:linear-gradient(145deg,#355070,#6ee7e7); }
+@media (max-width:600px){ .public-profile{ padding:16px 12px 40px; } .public-profile__card{ padding:18px; } }

@@ -242,6 +242,8 @@ Terms must also cover user responsibility for public profile text and uploaded a
 - Publish approved PL/EN Terms and Privacy Policy updates before enabling the route.
 - No uploaded-avatar support yet.
 
+**Implementation status (2026-07-10):** delivered by the profile UI PR. It adds the account editor, CSS-rendered default avatars, the `/u/<handle>` rewrite and public page, topbar profile refresh, PL/EN strings, and the approved Terms/Privacy disclosure. `PUBLIC_PROFILES_ENABLED=1` is enabled in deploy-preview and production configuration together with this route. This PR has no database migration; the already-applied Profile Foundation migrations remain required.
+
 ### PR 3: Avatar upload pipeline
 
 - Private temporary bucket and signed-upload endpoint.

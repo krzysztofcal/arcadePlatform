@@ -49,6 +49,13 @@
     .account-bonus__btn{ justify-self:start; padding:10px 14px; border:none; border-radius:12px; background:linear-gradient(90deg, #f7c948, #6ee7e7); color:#0b1020; font-weight:700; cursor:pointer; }
 
     .account-bonus__btn[hidden]{ display:none; }
+
+    .public-profile-editor{ display:grid; gap:14px; margin-top:18px; padding-top:18px; border-top:1px solid rgba(255,255,255,.1); }
+    .public-profile-editor__identity{ display:flex; align-items:center; gap:12px; }
+    .public-profile-editor__avatar{ width:48px; height:48px; border-radius:50%; display:grid; place-items:center; color:#fff; font:700 16px/1 Poppins, sans-serif; }
+    .public-profile-editor__url{ color:#a5f3fc; overflow-wrap:anywhere; }
+    .public-profile-editor__field-error{ min-height:18px; margin:4px 0 0; color:#fda4af; font-size:13px; }
+    .public-profile-editor textarea{ width:100%; min-height:92px; padding:10px 12px; resize:vertical; border:1px solid rgba(255,255,255,.1); border-radius:10px; background:rgba(255,255,255,.04); color:#e2e8f0; font:inherit; }
   </style>
 
 <script src="js/analytics.js" defer></script>
@@ -56,6 +63,7 @@
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
   <script src="/js/auth/supabaseClient.js" defer></script>
+  <script src="/js/profile-client.js" defer></script>
   <script src="js/chips/client.js" defer></script>
   <script src="js/core/number-format.js" defer></script>
   <script src="js/topbar.js" defer></script>
@@ -187,6 +195,29 @@
           <h2 class="xp-card__title" data-i18n="account">Account</h2>
           <p class="xp-details__text"><span data-i18n="signedInAs">Signed in as</span> <strong id="accountName">Player</strong>.</p>
           <p class="xp-details__text"><span data-i18n="email">Email</span>: <strong id="accountEmail">you@example.com</strong></p>
+          <section class="public-profile-editor" id="publicProfileEditor" aria-labelledby="publicProfileTitle" hidden>
+            <div class="public-profile-editor__identity">
+              <div class="public-profile-editor__avatar" id="publicProfileAvatar" aria-hidden="true">AH</div>
+              <div>
+                <h3 class="xp-card__title" id="publicProfileTitle" data-i18n="publicProfileTitle">Public profile</h3>
+                <a class="public-profile-editor__url" id="publicProfileUrl" href="#">/u/handle</a>
+              </div>
+            </div>
+            <p class="account-note" data-i18n="publicProfileNotice">Your handle, display name, bio, and avatar are public. Email and account details are never shown.</p>
+            <form class="account-form" id="publicProfileForm">
+              <label for="publicDisplayName" data-i18n="publicDisplayName">Display name</label>
+              <input id="publicDisplayName" name="displayName" type="text" minlength="2" maxlength="40" required>
+              <p class="public-profile-editor__field-error" id="publicDisplayNameError" aria-live="polite"></p>
+              <label for="publicHandle" data-i18n="publicHandle">Handle</label>
+              <input id="publicHandle" name="handle" type="text" minlength="3" maxlength="24" pattern="[a-z0-9_-]+" autocomplete="off">
+              <p class="account-note" id="publicHandleHint" data-i18n="publicHandleHint">You can change your generated handle once. It then becomes permanent.</p>
+              <p class="public-profile-editor__field-error" id="publicHandleError" aria-live="polite"></p>
+              <label for="publicBio" data-i18n="publicBio">Bio</label>
+              <textarea id="publicBio" name="bio" maxlength="160"></textarea>
+              <p class="public-profile-editor__field-error" id="publicBioError" aria-live="polite"></p>
+              <button type="submit" id="publicProfileSave" data-i18n="savePublicProfile">Save public profile</button>
+            </form>
+          </section>
           <div class="account-panel__actions">
             <button type="button" class="account-panel__btn account-panel__btn--primary" id="signOutButton" data-i18n="signOut">Sign out</button>
             <button type="button" class="account-panel__btn account-panel__btn--ghost" id="deleteAccountButton" data-i18n="deleteAccount">Delete account</button>
