@@ -3,7 +3,7 @@
 
   var doc = document;
   var nodes = {};
-  var state = { user: null, open: false, client: null };
+  var state = { user: null, profile: null, open: false, client: null };
   var authListeners = [];
   var authSubscriptionAttached = false;
 
@@ -206,6 +206,16 @@
     return str.slice(0, 2).toUpperCase();
   }
 
+  function applyProfileAvatar(node, profile, name){
+    if (!node) return;
+    if (window.ProfileClient && typeof window.ProfileClient.applyAvatar === 'function'){
+      window.ProfileClient.applyAvatar(node, profile || { displayName: name, avatar: { variant: 'default' } });
+      return;
+    }
+    node.textContent = computeInitials(name);
+    node.dataset.avatarVariant = profile && profile.avatar && profile.avatar.variant ? profile.avatar.variant : 'default';
+  }
+
   function selectNodes(){
     nodes.shell = doc.getElementById('avatarShell');
     nodes.button = doc.getElementById('avatarButton');
@@ -228,22 +238,22 @@
     return fallback || key;
   }
 
-  function renderUser(user){
+  function renderUser(user, profile){
     state.user = user || null;
+    state.profile = profile || null;
     var name = t('guest', 'Guest');
     var email = t('signInToSyncProgress', 'Sign in to sync progress');
 
     if (user){
-      var meta = user.user_metadata || {};
-      name = meta.full_name || meta.name || user.email || t('player', 'Player');
-      email = user.email || email;
+      name = profile && profile.displayName ? profile.displayName : t('player', 'Player');
+      email = t('profileAccountSynced', 'Account synced');
     }
 
     var initials = computeInitials(name);
 
-    if (nodes.initials){ nodes.initials.textContent = initials; }
+    applyProfileAvatar(nodes.initials, profile, name);
+    applyProfileAvatar(nodes.menuInitials, profile, name);
     if (nodes.label){ nodes.label.textContent = user ? name : t('signIn', 'Sign in'); }
-    if (nodes.menuInitials){ nodes.menuInitials.textContent = initials; }
     if (nodes.menuName){ nodes.menuName.textContent = name; }
     if (nodes.menuEmail){ nodes.menuEmail.textContent = email; }
     if (nodes.menuAction){
@@ -253,6 +263,24 @@
     if (nodes.button){
       nodes.button.setAttribute('aria-label', user ? t('accountMenu', 'Account menu') : t('signIn', 'Sign in'));
     }
+  }
+
+  function refreshProfile(user){
+    if (!user) return;
+    var load = window.ProfileClient && typeof window.ProfileClient.getMe === 'function'
+      ? window.ProfileClient.getMe()
+      : getAccessToken().then(function(accessToken){
+        if (!accessToken) throw new Error('not_authenticated');
+        return fetch('/.netlify/functions/profile-me', { headers: { Authorization: 'Bearer ' + accessToken } }).then(function(response){
+          if (!response.ok) throw new Error('profile_request_failed');
+          return response.json();
+        });
+      });
+    load.then(function(profile){
+      if (state.user && state.user.id === user.id) renderUser(user, profile);
+    }).catch(function(error){
+      logDiag('profile:topbar_load_failed', { code: error && error.code ? error.code : 'request_failed' });
+    });
   }
 
   function toggleMenu(force){
@@ -356,20 +384,24 @@
     doc.addEventListener('keydown', handleEscape);
     if (nodes.menuAction){ nodes.menuAction.addEventListener('click', handleAction); }
     if (nodes.menuUser){ nodes.menuUser.addEventListener('click', handleMenuUserClick); }
-    doc.addEventListener('langchange', function(){ renderUser(state.user); });
+    doc.addEventListener('langchange', function(){ renderUser(state.user, state.profile); });
+    doc.addEventListener('profile:updated', function(event){ if (state.user) renderUser(state.user, event && event.detail ? event.detail : state.profile); });
 
     renderUser(state.user);
   }
 
   function hydrateSession(){
-    renderUser(null);
+    renderUser(null, null);
 
     getCurrentUser().then(function(user){
-      renderUser(user);
+      renderUser(user, null);
+      refreshProfile(user);
     });
 
     onAuthChange(function(_event, user){
-      renderUser(user);
+      if (window.ProfileClient && typeof window.ProfileClient.clear === 'function') window.ProfileClient.clear();
+      renderUser(user, null);
+      refreshProfile(user);
     });
   }
 
