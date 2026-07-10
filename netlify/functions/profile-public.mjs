@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { atomicRateLimitIncr, getUserProfile } from "./_shared/store-upstash.mjs";
+import { atomicRateLimitIncr, getUserProfileStrict } from "./_shared/store-upstash.mjs";
 import { baseHeaders, corsHeaders, klog } from "./_shared/supabase-admin.mjs";
 import { findPublicProfile, publicProfile } from "./_shared/user-profile.mjs";
 import { computeXpLevel } from "./_shared/xp-level.mjs";
@@ -45,7 +45,7 @@ function createProfilePublicHandler(deps = {}) {
   const env = deps.env || process.env;
   const findProfile = deps.findPublicProfile || findPublicProfile;
   const allowRead = deps.allowPublicRead || allowPublicRead;
-  const getPublicXp = deps.getUserProfile || getUserProfile;
+  const getPublicXp = deps.getUserProfile || getUserProfileStrict;
   return async function handler(event) {
     const origin = event.headers?.origin || event.headers?.Origin;
     const cors = profileCors(origin);
@@ -66,7 +66,7 @@ function createProfilePublicHandler(deps = {}) {
       }));
     } catch (error) {
       klog("profile_public_failed", { message: error?.message || "error" });
-      return json(500, cors, { error: "server_error" });
+      return json(500, { ...cors, "cache-control": "no-store" }, { error: "server_error" });
     }
   };
 }

@@ -194,6 +194,20 @@ test("profile-public returns current XP and level without internal fields", asyn
   assert.equal("totalXp" in body, false);
 });
 
+test("profile-public fails closed when the XP store read fails", async () => {
+  const handler = createProfilePublicHandler({
+    env: { PUBLIC_PROFILES_ENABLED: "1" },
+    findPublicProfile: async () => profile(),
+    getUserProfile: async () => { throw new Error("upstash_unavailable"); },
+    allowPublicRead: async () => true,
+  });
+  const response = await handler(event("GET", null, { handle: "blue-fox-482731" }));
+  assert.equal(response.statusCode, 500);
+  assert.deepEqual(JSON.parse(response.body), { error: "server_error" });
+  assert.equal(response.headers["cache-control"], "no-store");
+  assert.equal(response.body.includes('"xp"'), false);
+});
+
 test("profile-public enables deploy previews when the function scope lacks the flag", () => {
   assert.equal(publicProfilesEnabled({ CONTEXT: "deploy-preview" }), true);
   assert.equal(publicProfilesEnabled({ CONTEXT: "deploy-preview", PUBLIC_PROFILES_ENABLED: "0" }), false);

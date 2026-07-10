@@ -322,19 +322,32 @@ const clampTotalXp = (value) => {
 
 const profileKey = (userId) => `${USER_PROFILE_PREFIX}${userId}`;
 
+function normalizeUserProfile(raw, userId) {
+  if (!raw) return null;
+  const parsed = JSON.parse(raw);
+  const totalXp = clampTotalXp(parsed.totalXp ?? parsed.total ?? 0);
+  const createdAt = typeof parsed.createdAt === "string" ? parsed.createdAt : null;
+  const updatedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : createdAt;
+  return { userId, totalXp, createdAt, updatedAt };
+}
+
 export async function getUserProfile(userId) {
   if (!userId) return null;
   try {
-    const raw = await store.get(profileKey(userId));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    const totalXp = clampTotalXp(parsed.totalXp ?? parsed.total ?? 0);
-    const createdAt = typeof parsed.createdAt === "string" ? parsed.createdAt : null;
-    const updatedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : createdAt;
-    return { userId, totalXp, createdAt, updatedAt };
+    return normalizeUserProfile(await store.get(profileKey(userId)), userId);
   } catch {
     return null;
   }
+}
+
+export async function getUserProfileStrict(userId) {
+  if (!userId) return null;
+  if (isMemoryStore && !FORCE_MEMORY_STORE) {
+    const error = new Error("xp_store_unavailable");
+    error.code = "xp_store_unavailable";
+    throw error;
+  }
+  return normalizeUserProfile(await store.get(profileKey(userId)), userId);
 }
 
 export async function saveUserProfile({ userId, totalXp, now = Date.now() }) {

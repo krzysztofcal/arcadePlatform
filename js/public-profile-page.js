@@ -8,6 +8,7 @@
   var xp = document.getElementById('publicProfileXp');
   var level = document.getElementById('publicProfileLevel');
   var bio = document.getElementById('publicProfileBio');
+  var currentProfile = null;
 
   function t(key, fallback){
     try { return window.I18N && window.I18N.t ? (window.I18N.t(key) || fallback) : fallback; } catch (_err){ return fallback; }
@@ -25,12 +26,18 @@
     status.hidden = !message;
   }
 
+  function formatXp(value){
+    var locale = window.I18N && window.I18N.getLang && window.I18N.getLang() === 'pl' ? 'pl-PL' : 'en-US';
+    return Number(value || 0).toLocaleString(locale);
+  }
+
   function render(profile){
+    currentProfile = profile;
     if (window.ProfileClient && window.ProfileClient.applyAvatar) window.ProfileClient.applyAvatar(avatar, profile);
     name.textContent = profile.displayName || '';
     avatar.setAttribute('aria-label', t('publicProfileAvatar', 'Avatar') + ': ' + (profile.displayName || ''));
     handle.textContent = '@' + (profile.handle || '');
-    if (xp) xp.textContent = Number(profile.xp || 0).toLocaleString(window.I18N && window.I18N.getLang && window.I18N.getLang() === 'pl' ? 'pl-PL' : 'en-US');
+    if (xp) xp.textContent = formatXp(profile.xp);
     if (level) level.textContent = String(Math.max(1, Number(profile.level) || 1));
     bio.textContent = profile.bio || '';
     bio.hidden = !profile.bio;
@@ -49,6 +56,11 @@
     });
   }
 
-  document.addEventListener('langchange', function(){ if (!card.hidden) document.title = t('publicProfilePageTitle', 'Public profile') + ' • Arcade Hub'; });
+  document.addEventListener('langchange', function(){
+    if (!card.hidden && currentProfile) {
+      if (xp) xp.textContent = formatXp(currentProfile.xp);
+      document.title = t('publicProfilePageTitle', 'Public profile') + ' • Arcade Hub';
+    }
+  });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', load, { once: true }); else load();
 })();

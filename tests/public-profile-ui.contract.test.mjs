@@ -4,6 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+const { DEFAULT_BASE_XP, DEFAULT_MULTIPLIER } = await import("../netlify/functions/_shared/xp-level.mjs");
 
 test("public profile route, editor, and legal release gate are present", async () => {
   const [account, page, config, privacyEn, privacyPl, termsEn, termsPl, portalCss, accountJs] = await Promise.all([
@@ -33,6 +34,14 @@ test("public profile page renders the server-provided XP and level", async () =>
   assert.match(source, /profile\.level/);
   assert.match(source, /publicProfileXp/);
   assert.match(source, /publicProfileLevel/);
+});
+
+test("public XP level contract is fixed consistently across server and client", async () => {
+  const core = await read("js/xp/core.js");
+  assert.ok(core.includes(`const LEVEL_BASE_XP = ${DEFAULT_BASE_XP};`));
+  assert.ok(core.includes(`const LEVEL_MULTIPLIER = ${DEFAULT_MULTIPLIER};`));
+  assert.equal(core.includes("window.XP_LEVEL_BASE_XP"), false);
+  assert.equal(core.includes("window.XP_LEVEL_MULTIPLIER"), false);
 });
 
 test("every backend avatar variant has frontend styles", async () => {
