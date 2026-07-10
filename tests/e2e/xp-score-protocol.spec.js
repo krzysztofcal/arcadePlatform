@@ -41,7 +41,7 @@ async function ensureXpReady(page) {
   });
 }
 
-async function runWindow(page, scoreDelta) {
+async function runWindow(page, scoreDelta, gameplayAction = true) {
   await page.evaluate(() => {
     const xp = window.XP;
     if (!xp || typeof xp.startSession !== 'function') return;
@@ -65,6 +65,14 @@ async function runWindow(page, scoreDelta) {
       if (!xp || typeof xp.addScore !== 'function') return;
       xp.addScore(delta);
     }, scoreDelta);
+  }
+
+  if (gameplayAction && typeof scoreDelta !== 'number') {
+    await page.evaluate(() => {
+      const xp = window.XP;
+      if (!xp || typeof xp.reportGameAction !== 'function') return;
+      xp.reportGameAction('xp-score-e2e', { kind: 'accepted_move' });
+    });
   }
 
   await page.evaluate(() => {
