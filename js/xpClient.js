@@ -402,6 +402,19 @@
     }
   }
 
+  function scheduleInitialStatusRefresh() {
+    if (typeof document === "undefined" || !document || typeof document.getElementById !== "function") return;
+    if (!document.getElementById("xpBadge")) return;
+    schedule(() => refreshInitialStatus(), 0);
+  }
+
+  async function refreshInitialStatus() {
+    let loggedIn = false;
+    try { loggedIn = await isUserLoggedIn(); } catch (_) {}
+    if (loggedIn) clearIdentityBoundXpCache();
+    await refreshBadgeFromServer();
+  }
+
   async function startServerSession(force = false) {
     // Check if we already have a valid session
     if (!force) {
@@ -731,7 +744,10 @@
   async function fetchStatus() {
     const { userId, sessionId } = ensureIds();
     const body = { userId, sessionId, gameId: "status", statusOnly: true };
-    await ensureAuthTokenWithRetry();
+    const authToken = await ensureAuthTokenWithRetry();
+    if (!authToken && await isUserLoggedIn()) {
+      throw new Error("XP status requires an authenticated token");
+    }
     const headers = await buildAuthHeaders({ "content-type": "application/json" });
     const res = await fetch(FN_URL, {
       method: "POST",
@@ -953,4 +969,5 @@
   };
 
   bindAuthChanges();
+  scheduleInitialStatusRefresh();
 })();

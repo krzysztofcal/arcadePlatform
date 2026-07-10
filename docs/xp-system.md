@@ -15,6 +15,7 @@ This document preserves the XP-related technical details that previously lived i
 - On an authenticated request carrying the browser anon id, both endpoints run the same atomic one-time conversion before reading or awarding totals. The Redis migration marker is the idempotent receipt; zero anon XP does not consume conversion eligibility.
 - Canonical server game IDs include `tetris`, `2048`, `pacman`, `t-rex`, and `cats`. Existing aliases such as `open-tetris`, `block-stacker`, `trex`, `open-pacman`, `catch-cats`, and `game_cats` remain supported.
 - `XPClient` clears its cached JWT, signed server session, and identity-bound XP cache on `SupabaseAuth.onAuthChange`, then refreshes status for the new identity.
+- Every page that renders `#xpBadge` also performs an initial authenticated status read. When a session is already present, identity-bound local XP cache is cleared before the read so a stale anonymous or optimistic value cannot be shown as the account total.
 
 ## GameXpBridge API
 `js/xp-game-hook.js` exposes a `window.GameXpBridge` helper so every game page can wire into the XP service without duplicating lifecycle code.
