@@ -1371,7 +1371,10 @@ function bootXpCore(window, document) {
     }
     let acked = 0;
     if (previousServer != null) {
-      if (sanitizedTotal >= previousServer) {
+      if (isExplicitReset) {
+        state.serverTotalXp = sanitizedTotal;
+        state.sessionXp = 0;
+      } else if (sanitizedTotal >= previousServer) {
         acked = sanitizedTotal - previousServer;
         state.serverTotalXp = sanitizedTotal;
       } else {
