@@ -157,4 +157,6 @@ test("profile-public enables deploy previews when the function scope lacks the f
   assert.equal(publicProfilesEnabled({ CONTEXT: "deploy-preview" }), true);
   assert.equal(publicProfilesEnabled({ CONTEXT: "deploy-preview", PUBLIC_PROFILES_ENABLED: "0" }), false);
   assert.equal(publicProfilesEnabled({ CONTEXT: "production" }), false);
+  assert.equal(publicProfilesEnabled({}, { headers: { host: "deploy-preview-677--playkcswh.netlify.app" } }), true);
+  assert.equal(publicProfilesEnabled({}, { headers: { host: "play.kcswh.pl" } }), false);
 });

@@ -14,11 +14,13 @@ function profileCors(origin) {
   return headers ? { ...headers, "access-control-allow-methods": "GET, OPTIONS" } : null;
 }
 
-function publicProfilesEnabled(env) {
+function publicProfilesEnabled(env, event = {}) {
   if (Object.prototype.hasOwnProperty.call(env, "PUBLIC_PROFILES_ENABLED")) {
     return env.PUBLIC_PROFILES_ENABLED === "1";
   }
-  return env.CONTEXT === "deploy-preview";
+  if (env.CONTEXT === "deploy-preview" || env.NETLIFY_CONTEXT === "deploy-preview") return true;
+  const host = event.headers?.host || event.headers?.Host || "";
+  return /^deploy-preview-[a-z0-9-]+\.netlify\.app$/i.test(String(host).split(":")[0]);
 }
 
 function clientIp(event) {
@@ -48,7 +50,7 @@ function createProfilePublicHandler(deps = {}) {
     if (!cors) return json(403, baseHeaders(), { error: "forbidden_origin" });
     if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: cors, body: "" };
     if (event.httpMethod !== "GET") return json(405, cors, { error: "method_not_allowed" });
-    if (!publicProfilesEnabled(env)) return json(404, cors, { error: "not_found" });
+    if (!publicProfilesEnabled(env, event)) return json(404, cors, { error: "not_found" });
     if (!await allowRead(event)) return json(429, cors, { error: "rate_limit_exceeded" });
 
     try {
