@@ -137,6 +137,8 @@
     publicProfileSaved: { en: 'Public profile saved.', pl: 'Profil publiczny zapisany.' },
     publicProfilePageTitle: { en: 'Public profile', pl: 'Profil publiczny' },
     publicProfileAvatar: { en: 'Avatar', pl: 'Awatar' },
+    publicProfileXpLabel: { en: 'XP', pl: 'XP' },
+    publicProfileLevelLabel: { en: 'Level', pl: 'Poziom' },
     publicProfileLoading: { en: 'Loading profile...', pl: 'Wczytywanie profilu...' },
     publicProfileNotFound: { en: 'This profile is not available.', pl: 'Ten profil nie jest dostępny.' },
     publicProfileLoadError: { en: 'Could not load this profile. Please try again.', pl: 'Nie udało się wczytać tego profilu. Spróbuj ponownie.' },

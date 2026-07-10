@@ -75,13 +75,18 @@ function profileAvatar(profile) {
   return { type: "default", variant: profile.avatarVariant };
 }
 
-function publicProfile(profile) {
-  return {
+function publicProfile(profile, stats = null) {
+  const result = {
     handle: profile.handle,
     displayName: profile.displayName,
     bio: profile.bio,
     avatar: profileAvatar(profile),
   };
+  if (stats) {
+    result.xp = Math.max(0, Math.floor(Number(stats.xp) || 0));
+    result.level = Math.max(1, Math.floor(Number(stats.level) || 1));
+  }
+  return result;
 }
 
 function ownerProfile(profile) {

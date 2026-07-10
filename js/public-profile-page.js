@@ -5,6 +5,8 @@
   var avatar = document.getElementById('publicProfileAvatar');
   var name = document.getElementById('publicProfileName');
   var handle = document.getElementById('publicProfileHandle');
+  var xp = document.getElementById('publicProfileXp');
+  var level = document.getElementById('publicProfileLevel');
   var bio = document.getElementById('publicProfileBio');
 
   function t(key, fallback){
@@ -28,6 +30,8 @@
     name.textContent = profile.displayName || '';
     avatar.setAttribute('aria-label', t('publicProfileAvatar', 'Avatar') + ': ' + (profile.displayName || ''));
     handle.textContent = '@' + (profile.handle || '');
+    if (xp) xp.textContent = Number(profile.xp || 0).toLocaleString(window.I18N && window.I18N.getLang && window.I18N.getLang() === 'pl' ? 'pl-PL' : 'en-US');
+    if (level) level.textContent = String(Math.max(1, Number(profile.level) || 1));
     bio.textContent = profile.bio || '';
     bio.hidden = !profile.bio;
     card.hidden = false;

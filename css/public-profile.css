@@ -4,6 +4,9 @@
 .public-profile__avatar{ width:80px; height:80px; flex:0 0 80px; border-radius:50%; display:grid; place-items:center; border:1px solid var(--border); color:#fff; font:800 26px/1 Poppins, sans-serif; }
 .public-profile__name{ margin:0; font:800 26px/1.15 Poppins, sans-serif; color:#fff; }
 .public-profile__handle{ margin:6px 0 0; color:#9fb0d0; }
+.public-profile__stats{ display:flex; flex-wrap:wrap; gap:10px; }
+.public-profile__stats div{ min-width:100px; padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:rgba(255,255,255,.04); color:#9fb0d0; }
+.public-profile__stats strong{ display:block; color:#fff; font:800 20px/1.1 Poppins, sans-serif; }
 .public-profile__bio{ margin:0; white-space:pre-wrap; line-height:1.55; color:#dbe7ff; }
 .public-profile__status{ margin:0; color:#9fb0d0; }
 .public-profile__status[data-tone="error"]{ color:#fda4af; }
