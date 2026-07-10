@@ -129,6 +129,7 @@
 
     mole.classList.add('whacked');
     score++;
+    if (window.GameShell && window.GameShell.reportGameplayAction) window.GameShell.reportGameplayAction('mole_whacked');
     scoreEl.textContent = score;
     playSound(600, 80, 'square');
     klog('mole_whacked', { score: score });

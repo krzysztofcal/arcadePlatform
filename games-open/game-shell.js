@@ -46,6 +46,12 @@
     }
   }
 
+  function reportGameplayAction(kind) {
+    var xp = window.XP;
+    if (!xp || gameState.paused || !gameState.slug || typeof xp.reportGameAction !== "function") return false;
+    try { return xp.reportGameAction(gameState.slug, { kind: kind || "move" }); } catch (_) { return false; }
+  }
+
   function start(slug) {
     if (!window.XP) return;
     try { window.XP.stopSession({ flush: true }); } catch (_) { /* noop */ }
@@ -174,7 +180,8 @@
     getState: getState,
     isPaused: isPaused,
     isMuted: isMuted,
-    nudge: nudge
+    nudge: nudge,
+    reportGameplayAction: reportGameplayAction
   };
 
   if (document.readyState === "loading") {

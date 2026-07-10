@@ -342,6 +342,11 @@
     if (window.GameXpBridge && typeof window.GameXpBridge.nudge === 'function') window.GameXpBridge.nudge();
   }
 
+  function reportGameplayAction(kind) {
+    if (!state.running || state.paused || !window.XP || typeof window.XP.reportGameAction !== 'function') return;
+    try { window.XP.reportGameAction('freedoom', { kind: kind || 'control' }); } catch (_) {}
+  }
+
   function setupGameEventListeners() {
     if (state.listenersAttached) return;
     state.listenersAttached = true;
@@ -355,6 +360,7 @@
   }
 
   function sendKey(code, pressed) {
+    if (pressed && code !== 'Escape') reportGameplayAction('control');
     var targets = [state.renderCanvas, elements.canvas, document, window].filter(Boolean);
     try {
       var keyCode = keyCodeFromString(code);
@@ -379,6 +385,7 @@
   }
 
   function sendMouseMove(deltaX, deltaY) {
+    if (deltaX || deltaY) reportGameplayAction('look');
     var source = state.renderCanvas || elements.canvas;
     var targets = [source, document, window].filter(Boolean);
     targets.forEach(function(target) {

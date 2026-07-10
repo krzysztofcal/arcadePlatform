@@ -7,6 +7,14 @@ This document preserves the XP-related technical details that previously lived i
 - Use `npm run check:xpbadge -- --fix` for auto-remediation when there’s exactly one badge anchor.
 - See [docs/guards.md](guards.md) for details on the badge and lifecycle checks plus the XP hook validator.
 
+## Authoritative award path and identity
+
+- Gameplay XP is awarded through `/.netlify/functions/calculate-xp`. `award-xp` remains the status/legacy compatibility endpoint and must not be used by new playable integrations.
+- Both endpoints share XP policy values (`XP_DAILY_CAP`, `XP_SESSION_CAP`, `XP_DELTA_CAP`, `XP_SESSION_TTL_SEC`) and identity resolution: a valid Supabase JWT subject wins over the browser anon id.
+- On an authenticated request carrying the browser anon id, both endpoints run the same atomic one-time conversion before reading or awarding totals. The Redis migration marker is the idempotent receipt; zero anon XP does not consume conversion eligibility.
+- Canonical server game IDs include `tetris`, `2048`, `pacman`, `t-rex`, and `cats`. Existing aliases such as `open-tetris`, `block-stacker`, `trex`, `open-pacman`, `catch-cats`, and `game_cats` remain supported.
+- `XPClient` clears its cached JWT, signed server session, and identity-bound XP cache on `SupabaseAuth.onAuthChange`, then refreshes status for the new identity.
+
 ## GameXpBridge API
 `js/xp-game-hook.js` exposes a `window.GameXpBridge` helper so every game page can wire into the XP service without duplicating lifecycle code.
 
@@ -44,7 +52,8 @@ The helper survives soft navigations—if you’re swapping views inside an SPA,
 - `window.XP.getRemainingDaily()` and `window.XP.getNextResetEpoch()` expose the live allowance for UI surfaces, while the runtime automatically resets the cached totals once the stored `nextReset` elapses.
 - `XP.addScore()` and the `GameXpBridge` flush path pre-clamp outgoing deltas based on the server-advertised `remaining` value and emit `award_preclamp` / `award_skip { reason: 'daily_cap' }` diagnostics so operators can confirm when the cap halts awards.
 
-## Message contract: `postWindow`
+## Legacy compatibility contract: `postWindow`
+`postWindow` targets `award-xp` and is retained for status/legacy callers. New gameplay windows use `postWindowServerCalc` and `calculate-xp` instead.
 Client → server payload (minimal set, extras allowed):
 - `userId` (string)
 - `sessionId` (string)

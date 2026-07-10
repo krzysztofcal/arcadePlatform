@@ -242,6 +242,7 @@
     if (!gameActive || guessedLetters.indexOf(letter) !== -1) return;
 
     guessedLetters.push(letter);
+    if (window.GameShell && window.GameShell.reportGameplayAction) window.GameShell.reportGameplayAction('guess');
     var keyBtn = keyboardEl.querySelector('[data-letter="' + letter + '"]');
 
     if (currentWord.indexOf(letter) !== -1) {

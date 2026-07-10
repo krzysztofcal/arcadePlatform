@@ -18,6 +18,7 @@ import { store, saveUserProfile, atomicRateLimitIncr } from "./_shared/store-ups
 import { klog } from "./_shared/supabase-admin.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
+import { canonicalizeXpGameId, getXpPolicy, migrateAnonXpToUser, resolveXpIdentity } from "./_shared/xp-identity.mjs";
 
 // ============================================================================
 // Configuration Constants
@@ -42,9 +43,10 @@ const COMBO_SUSTAIN_MS = 5000;
 const COMBO_COOLDOWN_MS = 3000;
 
 // Caps
-const DAILY_CAP = Math.max(0, asNumber(process.env.XP_DAILY_CAP, 3000));
-const SESSION_CAP = asNumber(process.env.XP_SESSION_CAP, 300);
-const DELTA_CAP = asNumber(process.env.XP_DELTA_CAP, 300);
+const XP_POLICY = getXpPolicy();
+const DAILY_CAP = XP_POLICY.dailyCap;
+const SESSION_CAP = XP_POLICY.sessionCap;
+const DELTA_CAP = XP_POLICY.deltaCap;
 
 // Activity Requirements
 const MIN_ACTIVITY_EVENTS = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_EVENTS, 4));
@@ -52,8 +54,8 @@ const MIN_ACTIVITY_VIS_S = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_VIS_
 const REQUIRE_ACTIVITY = process.env.XP_REQUIRE_ACTIVITY === "1"; // Require activity only when explicitly enabled
 
 // Session & Security
-const SESSION_TTL_SEC = Math.max(0, asNumber(process.env.XP_SESSION_TTL_SEC, 604800));
-const SESSION_TTL_MS = SESSION_TTL_SEC > 0 ? SESSION_TTL_SEC * 1000 : 0;
+const SESSION_TTL_SEC = XP_POLICY.sessionTtlSec;
+const SESSION_TTL_MS = XP_POLICY.sessionTtlMs;
 const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
 const DRIFT_MS = Math.max(0, asNumber(process.env.XP_DRIFT_MS, 30_000));
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
@@ -767,14 +769,31 @@ export async function handler(event) {
 
   const jwtToken = extractBearerToken(event.headers);
   const authContext = verifySupabaseJwt(jwtToken);
-  const supabaseUserId = authContext.valid ? authContext.userId : null;
-  const identityId = supabaseUserId || anonId || null;
+  const { supabaseUserId, identityId, anonId: resolvedAnonId } = resolveXpIdentity({ anonId, authContext });
 
   if (!identityId || !sessionId) {
     return json(400, { error: "missing_fields", message: "identity and sessionId required" }, origin);
   }
 
   const userId = identityId;
+
+  let conversion = null;
+  if (supabaseUserId && resolvedAnonId) {
+    try {
+      conversion = await migrateAnonXpToUser({
+        store,
+        namespace: KEY_NS,
+        anonId: resolvedAnonId,
+        userId: supabaseUserId,
+        conversionCap: XP_POLICY.anonConversionCap,
+      });
+      if (conversion.converted > 0) {
+        await persistUserProfile({ userId: supabaseUserId, totalXp: conversion.userTotal, now });
+      }
+    } catch (err) {
+      klog("calc_anon_migration_failed", { error: err?.message });
+    }
+  }
 
   // Rate limiting
   const clientIp = event.headers?.["x-forwarded-for"]?.split(",")[0]?.trim()
@@ -863,7 +882,7 @@ export async function handler(event) {
   }
 
   // Extract game event data
-  const gameId = typeof body.gameId === "string" ? body.gameId.trim() : "default";
+  const gameId = canonicalizeXpGameId(body.gameId);
   const windowStart = Number(body.windowStart) || 0;
   const windowEnd = Number(body.windowEnd) || now;
   const windowMs = Math.max(0, Math.min(30000, windowEnd - windowStart)); // Cap at 30s
@@ -1077,6 +1096,7 @@ export async function handler(event) {
     remaining,
     dayKey: dayKeyNow,
     nextReset,
+    conversion: conversion?.converted > 0 ? { converted: conversion.converted } : undefined,
     combo: {
       multiplier: updatedCombo.multiplier,
       mode: updatedCombo.mode,

@@ -192,6 +192,7 @@
     if (!gameActive || gameBoard[index] !== '' || currentPlayer !== PLAYER) return;
 
     gameBoard[index] = PLAYER;
+    if (window.GameShell && window.GameShell.reportGameplayAction) window.GameShell.reportGameplayAction('player_move');
     updateDisplay();
     playSound(440, 100, 'sine');
     klog('player_move', { index: index });

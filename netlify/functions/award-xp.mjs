@@ -4,6 +4,7 @@ import { klog } from "./_shared/supabase-admin.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
 import { buildCorsAllowlist, buildCorsHeaders } from "./_shared/xp-cors.mjs";
+import { getXpPolicy, migrateAnonXpToUser, resolveXpIdentity } from "./_shared/xp-identity.mjs";
 
 const XP_DAY_COOKIE = "xp_day";
 
@@ -18,12 +19,13 @@ const asNumber = (raw, fallback) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const DAILY_CAP = Math.max(0, asNumber(process.env.XP_DAILY_CAP, 3000));
-const SESSION_CAP = asNumber(process.env.XP_SESSION_CAP, 300);
-const DELTA_CAP = asNumber(process.env.XP_DELTA_CAP, 300);
-const SESSION_TTL_SEC = Math.max(0, asNumber(process.env.XP_SESSION_TTL_SEC, 604800));
-const SESSION_TTL_MS = SESSION_TTL_SEC > 0 ? SESSION_TTL_SEC * 1000 : 0;
-const MAX_ANON_CONVERSION_XP = Math.max(0, asNumber(process.env.XP_ANON_CONVERSION_MAX_XP, 100_000));
+const XP_POLICY = getXpPolicy();
+const DAILY_CAP = XP_POLICY.dailyCap;
+const SESSION_CAP = XP_POLICY.sessionCap;
+const DELTA_CAP = XP_POLICY.deltaCap;
+const SESSION_TTL_SEC = XP_POLICY.sessionTtlSec;
+const SESSION_TTL_MS = XP_POLICY.sessionTtlMs;
+const MAX_ANON_CONVERSION_XP = XP_POLICY.anonConversionCap;
 const REQUIRE_ACTIVITY = process.env.XP_REQUIRE_ACTIVITY === "1";
 const MIN_ACTIVITY_EVENTS = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_EVENTS, 4));
 const MIN_ACTIVITY_VIS_S = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_VIS_S, 8));
@@ -240,63 +242,6 @@ const keyLock = (u, s) => `${LOCK_KEY_PREFIX}${hash(`${u}|${s}`)}`;
 const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}:${Math.floor(Date.now() / (RATE_LIMIT_WINDOW_SEC * 1000))}`;
 const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / (RATE_LIMIT_WINDOW_SEC * 1000))}`;
 const keySessionRegistry = (userId, sessionId) => `${KEY_NS}:registry:${hash(`${userId}|${sessionId}`)}`;
-const keyMigration = (anonId, userId) => `${KEY_NS}:migration:${hash(`${anonId}|${userId}`)}`;
-const keyUserMigration = (userId) => `${KEY_NS}:migration:user:${hash(userId)}`;
-
-const ANON_MIGRATION_SCRIPT = `
-  local anonTotalKey = KEYS[1]
-  local userTotalKey = KEYS[2]
-  local markerKey = KEYS[3]
-  local userMarkerKey = KEYS[4]
-  local conversionCap = tonumber(ARGV[1]) or 0
-
-  local existingUserMarker = redis.call('GET', userMarkerKey)
-  local currentUserTotal = tonumber(redis.call('GET', userTotalKey) or '0')
-  if existingUserMarker then
-    return {0, currentUserTotal, tonumber(existingUserMarker) or 0, 1}
-  end
-
-  local existingMarker = redis.call('GET', markerKey)
-  if existingMarker then
-    return {0, currentUserTotal, tonumber(existingMarker) or 0, 1}
-  end
-
-  local anonTotal = tonumber(redis.call('GET', anonTotalKey) or '0')
-  if anonTotal < 0 then anonTotal = 0 end
-
-  local converted = anonTotal
-  if converted > conversionCap then
-    converted = conversionCap
-  end
-  if converted < 0 then converted = 0 end
-
-  if converted > 0 then
-    currentUserTotal = tonumber(redis.call('INCRBY', userTotalKey, converted))
-    redis.call('DEL', anonTotalKey)
-  end
-
-  redis.call('SET', markerKey, tostring(converted))
-  redis.call('SET', userMarkerKey, tostring(converted))
-  return {converted, currentUserTotal, anonTotal, 0}
-`;
-
-async function migrateAnonXpToUser({ anonId, userId }) {
-  if (!anonId || !userId || anonId === userId) {
-    return { converted: 0, userTotal: null, anonTotal: 0, alreadyConverted: false };
-  }
-  const result = await store.eval(
-    ANON_MIGRATION_SCRIPT,
-    [keyTotal(anonId), keyTotal(userId), keyMigration(anonId, userId), keyUserMigration(userId)],
-    [String(MAX_ANON_CONVERSION_XP)]
-  );
-  return {
-    converted: Math.max(0, Math.floor(Number(result?.[0]) || 0)),
-    userTotal: Math.max(0, Math.floor(Number(result?.[1]) || 0)),
-    anonTotal: Math.max(0, Math.floor(Number(result?.[2]) || 0)),
-    alreadyConverted: Number(result?.[3]) === 1,
-  };
-}
-
 // SECURITY: Session registration
 async function registerSession({ userId, sessionId }) {
   if (!userId || !sessionId) return { registered: false };
@@ -470,8 +415,9 @@ export async function handler(event) {
 
   const jwtToken = extractBearerToken(event.headers);
   const authContext = verifySupabaseJwt(jwtToken);
-  const supabaseUserId = authContext.valid ? authContext.userId : null;
-  let xpIdentity = supabaseUserId || anonId || null;
+  const initialIdentity = resolveXpIdentity({ anonId, authContext });
+  const supabaseUserId = initialIdentity.supabaseUserId;
+  let xpIdentity = initialIdentity.identityId;
   let migrationResult = null;
 
   const applyDiagnostics = (payload, extra = {}) => {
@@ -511,6 +457,9 @@ export async function handler(event) {
     payload.remaining = remaining;
     payload.dayKey ??= dayKeyNow;
     payload.nextReset ??= nextReset;
+    if (migrationResult?.converted > 0) {
+      payload.conversion = { converted: migrationResult.converted };
+    }
     applyDiagnostics(payload, { redisDailyTotalRaw: totalTodaySource, redisDailyTotal: safeTotal, ...debugExtra });
     const headers = skipCookie
       ? undefined
@@ -559,13 +508,21 @@ export async function handler(event) {
     anonId = typeof anonIdRaw === "string" ? anonIdRaw.trim() : null;
   }
 
-  xpIdentity = supabaseUserId || anonId || null;
+  const resolvedIdentity = resolveXpIdentity({ anonId, authContext });
+  anonId = resolvedIdentity.anonId;
+  xpIdentity = resolvedIdentity.identityId;
 
   // If we have a Supabase user and a prior anon id, migrate a capped anon total once
   // into the authenticated bucket so status reads and new awards share the same keys.
   if (supabaseUserId && anonId && anonId !== supabaseUserId) {
     try {
-      migrationResult = await migrateAnonXpToUser({ anonId, userId: supabaseUserId });
+      migrationResult = await migrateAnonXpToUser({
+        store,
+        namespace: KEY_NS,
+        anonId,
+        userId: supabaseUserId,
+        conversionCap: MAX_ANON_CONVERSION_XP,
+      });
       if (migrationResult.converted > 0) {
         await persistUserProfile({ userId: supabaseUserId, totalXp: migrationResult.userTotal, now });
       }

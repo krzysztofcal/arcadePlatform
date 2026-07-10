@@ -194,11 +194,10 @@ function createMemoryStore() {
         const anonTotal = Math.max(0, Math.floor(Number(getValue(anonTotalKey) ?? "0") || 0));
         const converted = Math.min(anonTotal, conversionCap);
         let userTotal = currentUserTotal;
-        if (converted > 0) {
-          userTotal += converted;
-          setValue(userTotalKey, userTotal, null);
-          memory.delete(anonTotalKey);
-        }
+        if (converted <= 0) return [0, userTotal, anonTotal, 0];
+        userTotal += converted;
+        setValue(userTotalKey, userTotal, null);
+        memory.delete(anonTotalKey);
         setValue(markerKey, converted, null);
         setValue(userMarkerKey, converted, null);
         return [converted, userTotal, anonTotal, 0];

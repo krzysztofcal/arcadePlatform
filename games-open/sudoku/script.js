@@ -268,8 +268,10 @@
 
     // Can't edit given cells
     if (initialGrid[row][col] !== 0) return;
+    if (grid[row][col] === num) return;
 
     grid[row][col] = num;
+    if (window.GameShell && window.GameShell.reportGameplayAction) window.GameShell.reportGameplayAction('number_entry');
 
     selectedCell.element.textContent = num === 0 ? '' : num;
     selectedCell.element.classList.remove('error', 'correct');

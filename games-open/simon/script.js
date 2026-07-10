@@ -128,6 +128,7 @@
     if (!running || !acceptingInput) return;
 
     lightUp(color, 200);
+    if (window.GameShell && window.GameShell.reportGameplayAction) window.GameShell.reportGameplayAction('sequence_input');
 
     if (color === sequence[playerIndex]) {
       playerIndex++;

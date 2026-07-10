@@ -28,6 +28,7 @@
     authToken: null,
     authCheckedAt: 0,
     authPromise: null,
+    authChangeBound: false,
   };
 
   let serverCalcInitRequested = false;
@@ -353,6 +354,52 @@
     state.serverSessionToken = null;
     state.serverSessionPromise = null;
     state.sessionStatus = SESSION_NONE;
+  }
+
+  function clearIdentityBoundXpCache() {
+    try {
+      const ls = window.localStorage;
+      ls.removeItem("kcswh:xp:last");
+      ls.removeItem("kcswh:xp:regen");
+    } catch (_) {}
+    try {
+      if (window.XP && typeof window.XP.resetIdentityCache === "function") {
+        window.XP.resetIdentityCache();
+      }
+    } catch (_) {}
+  }
+
+  function schedule(callback, delay) {
+    const timer = typeof window.setTimeout === "function"
+      ? window.setTimeout.bind(window)
+      : (typeof setTimeout === "function" ? setTimeout : null);
+    if (timer) timer(callback, delay);
+  }
+
+  function handleAuthChange(event) {
+    state.authToken = null;
+    state.authCheckedAt = 0;
+    state.authPromise = null;
+    state.statusBootstrapped = false;
+    state.statusPromise = null;
+    clearServerSession();
+    clearIdentityBoundXpCache();
+    klog("xp_auth_changed", { event: typeof event === "string" ? event : "unknown" });
+    schedule(() => refreshBadgeFromServer(), 0);
+  }
+
+  function bindAuthChanges(attempt) {
+    if (state.authChangeBound) return;
+    try {
+      if (window.SupabaseAuth && typeof window.SupabaseAuth.onAuthChange === "function") {
+        window.SupabaseAuth.onAuthChange(handleAuthChange);
+        state.authChangeBound = true;
+        return;
+      }
+    } catch (_) {}
+    if ((attempt || 0) < 10) {
+      schedule(() => bindAuthChanges((attempt || 0) + 1), 50);
+    }
   }
 
   async function startServerSession(force = false) {
@@ -773,6 +820,7 @@
       inputEvents: Math.max(0, Math.floor(Number(source.inputEvents) || 0)),
       visibilitySeconds: Math.max(0, Number(source.visibilitySeconds) || 0),
       scoreDelta: Math.max(0, Math.floor(Number(source.scoreDelta) || 0)),
+      gameplayActions: Math.max(0, Math.floor(Number(source.gameplayActions) || 0)),
     };
 
     // Add game events if present
@@ -906,4 +954,6 @@
     getSessionStatus,
     isAuthenticated,
   };
+
+  bindAuthChanges();
 })();

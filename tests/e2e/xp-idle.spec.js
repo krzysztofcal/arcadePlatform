@@ -57,7 +57,7 @@ test.describe('XP idle behaviour', () => {
     expect(postCount).toBe(0);
   });
 
-  test('reports activity after sustained user input', async ({ page }) => {
+  test('reports activity after sustained input and gameplay actions', async ({ page }) => {
     await page.goto(GAME_PAGE, { waitUntil: 'domcontentloaded' });
 
     await page.waitForTimeout(SETTLE_DELAY_MS);
@@ -71,6 +71,11 @@ test.describe('XP idle behaviour', () => {
       await page.mouse.up();
       await page.waitForTimeout(50);
       await page.keyboard.press('Space');
+      await page.evaluate(() => {
+        const xp = window.XP;
+        if (!xp || typeof xp.reportGameAction !== 'function') return;
+        xp.reportGameAction('cats', { kind: 'accepted_move' });
+      });
     };
 
     // ~14 gestures * 0.8s spacing ≈ 11–12s of continuous "active" time
@@ -86,7 +91,7 @@ test.describe('XP idle behaviour', () => {
         (window.__xpCalls || []).filter(c => c.method === 'postWindow').length
       )
     ), {
-      message: 'XPClient.postWindow should be called after sustained activity',
+      message: 'XPClient.postWindow should be called after sustained gameplay',
       timeout: 8_000,
     }).toBeGreaterThan(0);
   });
