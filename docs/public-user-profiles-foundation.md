@@ -6,7 +6,7 @@ This plan creates a safe public gaming identity for every authenticated Arcade H
 
 Every authenticated account receives a public profile automatically. A profile has a generated gaming name, a permanent public handle, a default avatar identity, and an empty bio. It must never expose email, Supabase user UUID, chip balances, ledger entries, poker data, session data, IP address, or copied auth metadata.
 
-**Privacy decision required before implementation:** every authenticated profile will be public and reachable at `/u/<handle>`. This must be explicitly approved as product policy and checked against Terms and Privacy wording before PR 1 is merged.
+**Privacy decision required before implementation:** every authenticated profile will be public and reachable at `/u/<handle>`. This must be explicitly approved as product policy and checked against Terms and Privacy wording before PR 1 is merged. The current `legal/privacy.en.html`, `legal/privacy.pl.html`, `legal/terms.en.html`, and `legal/terms.pl.html` describe account metadata but do not disclose that a nickname, avatar, and bio become public. They are not sufficient for this feature as written.
 
 ## Current Repository Fit
 
@@ -210,6 +210,18 @@ optional level
 
 The leaderboard backend will aggregate XP server-side and join identities to `user_profiles` server-side. It must never expose email or Supabase UUID, never require browser access to Redis or `auth.users`, and link each row to `/u/<handle>`.
 
+## Legal and Privacy Release Gate
+
+Before enabling public profiles in production, update both Privacy Policy variants and both Terms variants, then update their revision dates. The legal copy must state in plain language that:
+
+- every authenticated account receives a public gaming profile;
+- its generated or customized handle, display name, optional bio, and avatar are visible to anyone who knows the profile URL;
+- email address, Supabase UUID, chips, ledger, poker data, session data, and private account metadata are not displayed on that profile;
+- uploaded avatars are processed and published as public profile images, while original uploads are private and temporary;
+- profile data and processed avatar are removed as part of account-deletion handling, subject to applicable retention duties.
+
+Terms must also cover user responsibility for public profile text and uploaded avatar content, including prohibited unlawful, infringing, impersonating, or abusive material. Confirm the appropriate GDPR legal basis and any notification requirement with the product owner or legal adviser; this plan does not make that legal determination.
+
 ## Delivery Plan
 
 ### PR 1: Profile data and API foundation
@@ -218,6 +230,7 @@ The leaderboard backend will aggregate XP server-side and join identities to `us
 - Shared profile helper and generated identity.
 - `profile-public` and `profile-me` endpoints.
 - Documentation of public/private data and leaderboard contract.
+- Updated PL/EN Terms and Privacy Policy approved as the public-profile release gate.
 - Stage migration plus API smoke verification.
 
 ### PR 2: Profile UI and public route
@@ -234,6 +247,7 @@ The leaderboard backend will aggregate XP server-side and join identities to `us
 - Finalization endpoint, type/dimension validation, metadata stripping, and WebP normalization.
 - Public processed-avatar bucket and safe replacement/removal.
 - Upload/remove account UI.
+- Storage bucket and policy migration plus stage upload smoke verification.
 
 ### PR 4: XP leaderboard
 
@@ -248,6 +262,21 @@ Do not add automated tests during this planning-only change. Each implementation
 3. For a migration, run `node scripts/check-db-migrations.mjs`, wait for `DB Migration Check` and `DB Stage Apply PR`, then use the matching Netlify Deploy Preview against stage.
 4. Complete stage smoke verification before applying production migration according to `docs/operations.md`.
 
+### Storage readiness for PR 3
+
+The existing stage workflow can apply bucket and Storage policy SQL because it executes timestamped migrations through the stage Postgres connection. There are currently no repository migrations for Storage buckets, and `scripts/stage-db-migrate.mjs` smoke check only verifies chips objects; it does not prove that either avatar bucket exists or that an upload works. Live stage bucket state cannot be inferred from this repository and must be verified after the PR 3 migration applies.
+
+PR 3 must add an idempotent migration that creates/configures `profile-avatar-uploads` and `profile-avatars` plus their policies. The preview environment must retain its existing stage Supabase configuration, especially the stage service-role key used only by trusted functions; browsers use only signed temporary upload URLs.
+
+After `DB Stage Apply PR` is green, run this stage smoke sequence against the matching Netlify Deploy Preview with a dedicated stage test account:
+
+1. Confirm both bucket rows and expected public/private settings in stage Storage.
+2. Request an upload URL and verify the server-generated pending key cannot be substituted by the client.
+3. Upload a valid small source, finalize it, and confirm the resulting profile exposes a stable public WebP URL.
+4. Confirm the temporary original is not publicly readable and is removed after finalization.
+5. Verify an unsupported file, oversized declared upload, expired pending upload, and another account's pending key are rejected.
+6. Confirm stale temporary uploads are removed by the configured bounded cleanup path.
+
 Manual smoke checklist:
 
 1. An existing authenticated account without a row receives a generated identity.
@@ -261,6 +290,7 @@ Manual smoke checklist:
 9. PL and EN render correctly.
 10. Existing account, XP, chips, and poker paths remain unaffected.
 11. In PR 3, reject oversized/unsupported avatar files; verify processed output is stable public WebP and the original is not public.
+12. Verify the approved PL/EN legal wording is published before public profiles are enabled in production.
 
 Rollback: disable the new route/rewrite only if necessary, leave existing account auth flows intact, and do not delete `user_profiles` data merely to roll back UI. Avatar rollback must revoke/remove public processed objects only after confirming the account editor no longer references them.
 
