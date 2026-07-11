@@ -27,7 +27,8 @@ function storageConfig(env = process.env) {
 }
 
 function storagePath(bucket, path, mode = "authenticated") {
-  return `/storage/v1/object/${mode}/${encodeURIComponent(bucket)}/${path.split("/").map(encodeURIComponent).join("/")}`;
+  const accessSegment = mode ? `/${mode}` : "";
+  return `/storage/v1/object${accessSegment}/${encodeURIComponent(bucket)}/${path.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 async function storageRequest(path, options = {}, deps = {}) {
@@ -154,7 +155,7 @@ async function finalizeAvatar(userId, uploadId, deps = {}) {
     }
     const processed = await image.rotate().resize(256, 256, { fit: "cover", position: "centre" }).webp({ quality: 82 }).toBuffer();
     newAvatarKey = `${crypto.randomUUID()}.webp`;
-    await storageRequest(storagePath(PUBLIC_BUCKET, newAvatarKey), {
+    await storageRequest(storagePath(PUBLIC_BUCKET, newAvatarKey, null), {
       method: "POST",
       headers: { "content-type": "image/webp", "cache-control": "31536000", "x-upsert": "false" },
       body: processed,

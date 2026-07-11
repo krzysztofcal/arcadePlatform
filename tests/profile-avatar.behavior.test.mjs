@@ -94,7 +94,8 @@ test("finalization publishes only normalized 256px WebP and removes the original
     if (options.method === "GET") return { ok: true, arrayBuffer: async () => source, text: async () => "" };
     if (options.method === "POST") {
       publicBody = Buffer.from(options.body);
-      assert.match(url, /profile-avatars\/[0-9a-f-]{36}\.webp$/);
+      assert.match(url, /\/storage\/v1\/object\/profile-avatars\/[0-9a-f-]{36}\.webp$/);
+      assert.doesNotMatch(url, /\/object\/authenticated\/profile-avatars\//);
       assert.equal(options.headers["content-type"], "image/webp");
       return { ok: true, text: async () => "" };
     }
