@@ -157,6 +157,7 @@ html[data-auth="out"] #chipBadge{ display:none !important; }
 .avatar-circle[data-avatar-variant="nova-purple"],.avatar-menu__initials[data-avatar-variant="nova-purple"]{ background:linear-gradient(145deg,#553298,#b18cff); }
 .avatar-circle[data-avatar-variant="orbit-green"],.avatar-menu__initials[data-avatar-variant="orbit-green"]{ background:linear-gradient(145deg,#19755d,#74d9a0); }
 .avatar-circle[data-avatar-variant="default"],.avatar-menu__initials[data-avatar-variant="default"]{ background:linear-gradient(145deg,#355070,#6ee7e7); }
+.avatar-circle.profile-avatar--uploaded,.avatar-menu__initials.profile-avatar--uploaded{ background-position:center; background-size:cover; }
 .category-bar{display:flex; flex-wrap:wrap; gap:10px; margin:0 0 16px; padding:4px 0;}
 .category-bar .category-button{appearance:none; -webkit-appearance:none; border:1px solid var(--border); background:var(--card-2); color:#cdd6ff; font:600 13px Poppins, sans-serif; padding:8px 14px; border-radius:999px; cursor:pointer; transition:background .18s ease, border-color .18s ease, color .18s ease;}
 .category-bar .category-button:hover{background:rgba(110,231,231,.08); border-color:rgba(110,231,231,.35);}

@@ -270,6 +270,8 @@ Terms must also cover user responsibility for public profile text and uploaded a
 - Upload/remove account UI.
 - Storage bucket and policy migration plus stage upload smoke verification.
 
+**Implementation status (2026-07-11):** implemented on the avatar pipeline PR. The browser requests a backend-generated, short-lived signed upload target for JPEG/PNG/WebP sources up to 1 MB. Finalization atomically consumes a user-bound pending receipt, verifies the decoded source and dimensions, strips metadata, publishes a 256x256 WebP under an opaque key, updates the profile, and removes the private original. Restoring the default avatar clears the profile key and removes the prior processed object. The migration and real stage upload smoke must pass before production rollout.
+
 ### PR 5: XP leaderboard
 
 Out of scope. Begin only after public profiles and avatars are stable in production.

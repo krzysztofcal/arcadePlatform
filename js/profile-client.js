@@ -3,6 +3,11 @@
 
   var ME_URL = '/.netlify/functions/profile-me';
   var PUBLIC_URL = '/.netlify/functions/profile-public?handle=';
+  var AVATAR_UPLOAD_URL = '/.netlify/functions/profile-avatar-upload-url';
+  var AVATAR_FINALIZE_URL = '/.netlify/functions/profile-avatar-finalize';
+  var AVATAR_REMOVE_URL = '/.netlify/functions/profile-avatar-remove';
+  var AVATAR_MAX_BYTES = 1024 * 1024;
+  var AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
   var cache = null;
   var inFlight = null;
 
@@ -19,9 +24,11 @@
   function applyAvatar(node, profile){
     if (!node) return;
     var avatar = profile && profile.avatar ? profile.avatar : {};
-    node.textContent = initials(profile && profile.displayName);
+    var uploaded = avatar.type === 'uploaded' && typeof avatar.url === 'string' && avatar.url;
+    node.textContent = uploaded ? '' : initials(profile && profile.displayName);
     node.dataset.avatarVariant = avatar.variant || 'default';
-    node.classList.toggle('profile-avatar--uploaded', avatar.type === 'uploaded');
+    node.classList.toggle('profile-avatar--uploaded', !!uploaded);
+    node.style.backgroundImage = uploaded ? 'url("' + avatar.url.replace(/["\\]/g, '') + '")' : '';
   }
 
   async function token(){
@@ -96,6 +103,52 @@
     return profile;
   }
 
+  async function uploadAvatar(file){
+    if (!file || AVATAR_TYPES.indexOf(file.type) === -1){
+      var typeError = new Error('unsupported_avatar_type');
+      typeError.code = 'unsupported_avatar_type';
+      throw typeError;
+    }
+    if (!Number.isFinite(file.size) || file.size < 1 || file.size > AVATAR_MAX_BYTES){
+      var sizeError = new Error('avatar_too_large');
+      sizeError.code = 'avatar_too_large';
+      throw sizeError;
+    }
+    var signed = await parse(await authedFetch(AVATAR_UPLOAD_URL, {
+      method: 'POST',
+      body: JSON.stringify({ mimeType: file.type, size: file.size })
+    }));
+    var uploadUrl = String(signed.uploadUrl || '');
+    if (signed.token && uploadUrl.indexOf('token=') === -1){
+      uploadUrl += (uploadUrl.indexOf('?') === -1 ? '?' : '&') + 'token=' + encodeURIComponent(signed.token);
+    }
+    var uploadResponse = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+    if (!uploadResponse.ok){
+      var uploadError = new Error('avatar_upload_failed');
+      uploadError.code = 'avatar_upload_failed';
+      uploadError.status = uploadResponse.status;
+      throw uploadError;
+    }
+    var profile = await parse(await authedFetch(AVATAR_FINALIZE_URL, {
+      method: 'POST',
+      body: JSON.stringify({ uploadId: signed.uploadId })
+    }));
+    var userId = await currentUserId();
+    if (!userId) throw staleIdentityError();
+    cache = { userId: userId, profile: profile };
+    notify(profile);
+    return profile;
+  }
+
+  async function removeAvatar(){
+    var profile = await parse(await authedFetch(AVATAR_REMOVE_URL, { method: 'DELETE' }));
+    var userId = await currentUserId();
+    if (!userId) throw staleIdentityError();
+    cache = { userId: userId, profile: profile };
+    notify(profile);
+    return profile;
+  }
+
   async function getPublic(handle){
     var response = await fetch(PUBLIC_URL + encodeURIComponent(String(handle || '')), { headers: { Accept: 'application/json' } });
     return parse(response);
@@ -103,6 +156,6 @@
 
   function clear(){ cache = null; inFlight = null; }
 
-  window.ProfileClient = { getMe: getMe, updateMe: updateMe, getPublic: getPublic, clear: clear, applyAvatar: applyAvatar, initials: initials };
+  window.ProfileClient = { getMe: getMe, updateMe: updateMe, uploadAvatar: uploadAvatar, removeAvatar: removeAvatar, getPublic: getPublic, clear: clear, applyAvatar: applyAvatar, initials: initials };
   klog('profile:client_ready', {});
 })();

@@ -2,6 +2,7 @@
 .public-profile__card{ display:grid; gap:20px; padding:24px; border:1px solid var(--border); border-radius:12px; background:var(--card-2); }
 .public-profile__identity{ display:flex; align-items:center; gap:16px; }
 .public-profile__avatar{ width:80px; height:80px; flex:0 0 80px; border-radius:50%; display:grid; place-items:center; border:1px solid var(--border); color:#fff; font:800 26px/1 Poppins, sans-serif; }
+.public-profile__avatar.profile-avatar--uploaded{ background-position:center; background-size:cover; }
 .public-profile__name{ margin:0; font:800 26px/1.15 Poppins, sans-serif; color:#fff; }
 .public-profile__handle{ margin:6px 0 0; color:#9fb0d0; }
 .public-profile__stats{ display:flex; flex-wrap:wrap; gap:10px; }

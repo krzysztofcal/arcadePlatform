@@ -72,6 +72,12 @@ function normalizeProfileRow(row) {
 }
 
 function profileAvatar(profile) {
+  if (profile.avatarKey) {
+    const baseUrl = String(process.env.SUPABASE_URL || process.env.SUPABASE_URL_V2 || "").replace(/\/$/, "");
+    if (/^https:\/\/[^/]+\.supabase\.co$/i.test(baseUrl) && /^[0-9a-f-]{36}\.webp$/i.test(profile.avatarKey)) {
+      return { type: "uploaded", url: `${baseUrl}/storage/v1/object/public/profile-avatars/${encodeURIComponent(profile.avatarKey)}` };
+    }
+  }
   return { type: "default", variant: profile.avatarVariant };
 }
 
@@ -192,6 +198,27 @@ async function updateUserProfile(userId, payload = {}, deps = {}) {
   }
 }
 
+async function updateUserAvatarKey(userId, avatarKey, deps = {}) {
+  await ensureUserProfile(userId, deps);
+  if (avatarKey !== null && !/^[0-9a-f-]{36}\.webp$/i.test(String(avatarKey || ""))) throw profileError("invalid_avatar_key");
+  const runTransaction = deps.beginSql || beginSql;
+  return runTransaction(async (tx) => {
+    const currentRows = await tx.unsafe(
+      `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at
+       from public.user_profiles where user_id = $1 for update;`,
+      [userId],
+    );
+    const current = normalizeProfileRow(currentRows?.[0]);
+    if (!current) throw profileError("profile_not_found", 404);
+    const updatedRows = await tx.unsafe(
+      `update public.user_profiles set avatar_key = $1 where user_id = $2
+       returning user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at;`,
+      [avatarKey, userId],
+    );
+    return { profile: normalizeProfileRow(updatedRows?.[0]), previousAvatarKey: current.avatarKey };
+  });
+}
+
 export {
   createGeneratedIdentity,
   ensureUserProfile,
@@ -202,5 +229,6 @@ export {
   ownerProfile,
   profileError,
   publicProfile,
+  updateUserAvatarKey,
   updateUserProfile,
 };

@@ -13,9 +13,14 @@ test("public profile route, editor, and legal release gate are present", async (
   assert.match(account, /id="publicProfileEditor"/);
   assert.match(account, /id="publicProfileForm"/);
   assert.match(account, /id="publicProfileSave"[^>]*data-state="idle"/);
+  assert.match(account, /id="publicAvatarInput"[^>]*accept="image\/jpeg,image\/png,image\/webp"/);
+  assert.match(account, /id="publicAvatarChoose"/);
+  assert.match(account, /id="publicAvatarRemove"/);
   assert.match(account, /public-profile-save__spinner/);
   assert.match(accountJs, /setPublicProfileSaveState\('saving'/);
   assert.match(accountJs, /setPublicProfileSaveState\('saved'/);
+  assert.match(accountJs, /ProfileClient\.uploadAvatar/);
+  assert.match(accountJs, /ProfileClient\.removeAvatar/);
   assert.match(portalCss, /\.avatar-menu__user\{[^}]*background:transparent/);
   assert.match(page, /id="publicProfileCard"/);
   assert.match(page, /id="publicProfileXp"/);

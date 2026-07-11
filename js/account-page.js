@@ -63,6 +63,10 @@
     nodes.publicProfileSave = doc.getElementById('publicProfileSave');
     nodes.publicProfileSaveLabel = doc.getElementById('publicProfileSaveLabel');
     nodes.publicProfileSaveStatus = doc.getElementById('publicProfileSaveStatus');
+    nodes.publicAvatarInput = doc.getElementById('publicAvatarInput');
+    nodes.publicAvatarChoose = doc.getElementById('publicAvatarChoose');
+    nodes.publicAvatarRemove = doc.getElementById('publicAvatarRemove');
+    nodes.publicAvatarStatus = doc.getElementById('publicAvatarStatus');
     nodes.publicDisplayNameError = doc.getElementById('publicDisplayNameError');
     nodes.publicHandleError = doc.getElementById('publicHandleError');
     nodes.publicBioError = doc.getElementById('publicBioError');
@@ -228,12 +232,53 @@
     setBlockVisibility(nodes.publicProfileEditor, !!profile);
     if (!profile) return;
     if (window.ProfileClient && window.ProfileClient.applyAvatar) window.ProfileClient.applyAvatar(nodes.publicProfileAvatar, profile);
+    if (nodes.publicAvatarRemove) nodes.publicAvatarRemove.hidden = !(profile.avatar && profile.avatar.type === 'uploaded');
     if (nodes.publicDisplayName) nodes.publicDisplayName.value = profile.displayName || '';
     if (nodes.publicHandle){ nodes.publicHandle.value = profile.handle || ''; nodes.publicHandle.disabled = !profile.handleCanBeCustomized; }
     if (nodes.publicBio) nodes.publicBio.value = profile.bio || '';
     if (nodes.publicHandleHint) nodes.publicHandleHint.textContent = profile.handleCanBeCustomized ? t('publicHandleHint', 'You can change your generated handle once. It then becomes permanent.') : t('publicHandleLockedHint', 'This handle is permanent.');
     if (nodes.publicProfileUrl){ nodes.publicProfileUrl.href = '/u/' + encodeURIComponent(profile.handle || ''); nodes.publicProfileUrl.textContent = '/u/' + (profile.handle || ''); }
     setPublicProfileErrors(null);
+  }
+
+  function setAvatarState(busy, message, tone){
+    if (nodes.publicAvatarChoose) nodes.publicAvatarChoose.disabled = !!busy;
+    if (nodes.publicAvatarRemove) nodes.publicAvatarRemove.disabled = !!busy;
+    if (nodes.publicAvatarInput) nodes.publicAvatarInput.disabled = !!busy;
+    if (nodes.publicAvatarStatus){
+      nodes.publicAvatarStatus.textContent = message || t('publicAvatarRequirements', 'JPEG, PNG or WebP, up to 1 MB.');
+      nodes.publicAvatarStatus.dataset.tone = tone || '';
+    }
+  }
+
+  function avatarErrorMessage(error){
+    var code = error && error.code ? error.code : 'avatar_upload_failed';
+    if (code === 'unsupported_avatar_type' || code === 'invalid_avatar_file') return t('publicAvatarInvalidType', 'Choose a valid JPEG, PNG or WebP image.');
+    if (code === 'avatar_too_large' || code === 'avatar_dimensions_too_large') return t('publicAvatarTooLarge', 'Use an image up to 1 MB and 1024 x 1024 pixels.');
+    return t('publicAvatarUploadError', 'Could not update your avatar. Please try again.');
+  }
+
+  function handleAvatarChoose(){ if (nodes.publicAvatarInput && !nodes.publicAvatarInput.disabled) nodes.publicAvatarInput.click(); }
+
+  function handleAvatarSelected(){
+    var file = nodes.publicAvatarInput && nodes.publicAvatarInput.files ? nodes.publicAvatarInput.files[0] : null;
+    if (!file || !window.ProfileClient || typeof window.ProfileClient.uploadAvatar !== 'function') return;
+    setAvatarState(true, t('publicAvatarUploading', 'Uploading and processing avatar...'), 'info');
+    window.ProfileClient.uploadAvatar(file).then(function(profile){
+      renderPublicProfile(profile);
+      setAvatarState(false, t('publicAvatarUpdated', 'Avatar updated.'), 'success');
+    }).catch(function(error){
+      setAvatarState(false, avatarErrorMessage(error), 'error');
+    }).finally(function(){ if (nodes.publicAvatarInput) nodes.publicAvatarInput.value = ''; });
+  }
+
+  function handleAvatarRemove(){
+    if (!window.ProfileClient || typeof window.ProfileClient.removeAvatar !== 'function') return;
+    setAvatarState(true, t('publicAvatarRemoving', 'Restoring default avatar...'), 'info');
+    window.ProfileClient.removeAvatar().then(function(profile){
+      renderPublicProfile(profile);
+      setAvatarState(false, t('publicAvatarRemoved', 'Default avatar restored.'), 'success');
+    }).catch(function(error){ setAvatarState(false, avatarErrorMessage(error), 'error'); });
   }
 
   function loadPublicProfile(force){
@@ -869,6 +914,9 @@
     if (nodes.bonusCampaignList){ nodes.bonusCampaignList.addEventListener('click', handleWelcomeBonusClaim); }
     if (nodes.welcomeBonusClaimButton){ nodes.welcomeBonusClaimButton.addEventListener('click', handleWelcomeBonusClaim); }
     if (nodes.publicProfileForm){ nodes.publicProfileForm.addEventListener('submit', handlePublicProfileSave); }
+    if (nodes.publicAvatarChoose){ nodes.publicAvatarChoose.addEventListener('click', handleAvatarChoose); }
+    if (nodes.publicAvatarInput){ nodes.publicAvatarInput.addEventListener('change', handleAvatarSelected); }
+    if (nodes.publicAvatarRemove){ nodes.publicAvatarRemove.addEventListener('click', handleAvatarRemove); }
     if (nodes.deleteBtn && nodes.deleteNote){
       nodes.deleteBtn.addEventListener('click', function(e){
         e.preventDefault();
