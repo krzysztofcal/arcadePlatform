@@ -37,6 +37,7 @@ test("public profile route, editor, and legal release gate are present", async (
   assert.match(config, /from = "\/u\/:handle"\s+to = "\/profile\.html"/);
   assert.match(config, /\[context\.deploy-preview\.environment\][\s\S]*?PUBLIC_PROFILES_ENABLED = "1"/);
   assert.match(config, /\[context\.production\.environment\][\s\S]*?PUBLIC_PROFILES_ENABLED = "0"/);
+  assert.match(config, /img-src[^;]*https:\/\/\*\.supabase\.co/, "public avatar Storage URLs must be allowed by CSP");
   for (const document of [privacyEn, privacyPl, termsEn, termsPl]) assert.match(document, /profil|profile/i);
 });
 
