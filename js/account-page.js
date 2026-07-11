@@ -11,6 +11,7 @@
   var publicProfile = null;
   var publicProfileGeneration = 0;
   var publicProfileSaveResetTimer = null;
+  var passwordRecoveryActive = false;
   var WELCOME_BONUS_SUCCESS = 'Bonus added to your account.';
   var ledgerState = {
     entries: [],
@@ -23,6 +24,8 @@
     lastLoadAttemptAtMs: 0,
     lastScrollTop: 0,
     renderQueued: false,
+    pageIndex: 0,
+    pageCursors: [null],
   };
 
   function selectNodes(){
@@ -40,6 +43,14 @@
     nodes.signInPass = doc.getElementById('signinPassword');
     nodes.signUpEmail = doc.getElementById('signupEmail');
     nodes.signUpPass = doc.getElementById('signupPassword');
+    nodes.signUpPassConfirm = doc.getElementById('signupPasswordConfirm');
+    nodes.forgotPasswordButton = doc.getElementById('forgotPasswordButton');
+    nodes.passwordResetForm = doc.getElementById('passwordResetForm');
+    nodes.passwordResetEmail = doc.getElementById('passwordResetEmail');
+    nodes.passwordResetBack = doc.getElementById('passwordResetBack');
+    nodes.passwordRecoveryForm = doc.getElementById('passwordRecoveryForm');
+    nodes.recoveryPassword = doc.getElementById('recoveryPassword');
+    nodes.recoveryPasswordConfirm = doc.getElementById('recoveryPasswordConfirm');
     nodes.chipPanel = doc.getElementById('chipPanel');
     nodes.chipStatus = doc.getElementById('chipStatus');
     nodes.chipBalanceValue = doc.getElementById('chipBalanceValue');
@@ -47,6 +58,10 @@
     nodes.chipLedgerSpacer = doc.getElementById('chipLedgerSpacer');
     nodes.chipLedgerList = doc.getElementById('chipLedgerList');
     nodes.chipLedgerEmpty = doc.getElementById('chipLedgerEmpty');
+    nodes.chipLedgerPagination = doc.getElementById('chipLedgerPagination');
+    nodes.chipLedgerPrev = doc.getElementById('chipLedgerPrev');
+    nodes.chipLedgerNext = doc.getElementById('chipLedgerNext');
+    nodes.chipLedgerPage = doc.getElementById('chipLedgerPage');
     nodes.welcomeBonusPanel = doc.getElementById('welcomeBonusPanel');
     nodes.welcomeBonusTitle = doc.getElementById('welcomeBonusTitle');
     nodes.bonusCampaignList = doc.getElementById('bonusCampaignList');
@@ -91,6 +106,17 @@
     return (fallback || key).replace(/\{([a-zA-Z0-9_]+)\}/g, function(match, name){
       return values && values[name] != null ? String(values[name]) : match;
     });
+  }
+
+  function validEmail(value){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim()); }
+
+  function openAccountPanel(user){
+    if (!user) return;
+    renderUser(user);
+    loadChips();
+    refreshWelcomeBonus(user);
+    if (window.location) window.location.hash = 'accountPanel';
+    if (nodes.account && typeof nodes.account.scrollIntoView === 'function') nodes.account.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   function setBlockVisibility(node, isVisible){
@@ -625,7 +651,17 @@
     ledgerState.lastLoadAttemptAtMs = 0;
     ledgerState.lastScrollTop = 0;
     ledgerState.renderQueued = false;
+    ledgerState.pageIndex = 0;
+    ledgerState.pageCursors = [null];
     if (nodes.chipLedgerScroll){ nodes.chipLedgerScroll.scrollTop = 0; }
+  }
+
+  function renderLedgerPagination(){
+    if (!nodes.chipLedgerPagination) return;
+    nodes.chipLedgerPagination.hidden = ledgerState.entries.length === 0 && !ledgerState.loading;
+    if (nodes.chipLedgerPrev) nodes.chipLedgerPrev.disabled = ledgerState.loading || ledgerState.pageIndex === 0;
+    if (nodes.chipLedgerNext) nodes.chipLedgerNext.disabled = ledgerState.loading || !ledgerState.nextCursor;
+    if (nodes.chipLedgerPage) nodes.chipLedgerPage.textContent = tf('chipHistoryPage', { page: ledgerState.pageIndex + 1 }, 'Page {page}');
   }
 
   function appendLedgerItems(items, nextCursor){
@@ -704,21 +740,30 @@
     return nodes.chipLedgerScroll.scrollTop + nodes.chipLedgerScroll.clientHeight >= totalHeight - (ledgerState.rowHeight * 3);
   }
 
-  async function loadLedgerPage(force){
+  async function loadLedgerPage(targetIndex){
     if (!window || !window.ChipsClient || typeof window.ChipsClient.fetchLedger !== 'function') return;
-    if (!ledgerState.hasMore || ledgerState.loading) return;
+    var paginated = !!nodes.chipLedgerPagination;
+    var requestedIndex = Number.isInteger(targetIndex) ? targetIndex : ledgerState.pageIndex;
+    if ((paginated && (requestedIndex < 0 || requestedIndex >= ledgerState.pageCursors.length)) || (!paginated && !ledgerState.hasMore) || ledgerState.loading) return;
     ledgerState.loading = true;
     ledgerState.error = null;
     ledgerState.lastLoadAttemptAtMs = Date.now();
     ledgerState.lastScrollTop = nodes.chipLedgerScroll ? nodes.chipLedgerScroll.scrollTop : 0;
     queueLedgerRender();
+    renderLedgerPagination();
     try {
       var payload = await window.ChipsClient.fetchLedger({
-        limit: 50,
-        cursor: ledgerState.nextCursor,
+        limit: paginated ? 10 : 50,
+        cursor: paginated ? ledgerState.pageCursors[requestedIndex] : ledgerState.nextCursor,
       });
       var items = payload && Array.isArray(payload.items) ? payload.items : (payload && Array.isArray(payload.entries) ? payload.entries : []);
+      if (paginated){ ledgerState.entries = []; ledgerState.pageIndex = requestedIndex; }
       appendLedgerItems(items, payload ? payload.nextCursor : null);
+      if (paginated){
+        if (ledgerState.nextCursor) ledgerState.pageCursors[requestedIndex + 1] = ledgerState.nextCursor;
+        ledgerState.pageCursors.length = ledgerState.nextCursor ? requestedIndex + 2 : requestedIndex + 1;
+        if (nodes.chipLedgerScroll) nodes.chipLedgerScroll.scrollTop = 0;
+      }
       setChipStatus('', '');
     } catch (err){
       setChipStatus(t('chipHistoryLoadError', 'Could not load chip history right now.'), 'error');
@@ -726,14 +771,13 @@
     } finally {
       ledgerState.loading = false;
       queueLedgerRender();
+      renderLedgerPagination();
     }
   }
 
   function handleLedgerScroll(){
     queueLedgerRender();
-    if (shouldLoadMore()){
-      loadLedgerPage(false);
-    }
+    if (!nodes.chipLedgerPagination && shouldLoadMore()) loadLedgerPage();
   }
 
   async function loadChips(){
@@ -853,7 +897,12 @@
     e.preventDefault();
     var email = nodes.signInEmail && nodes.signInEmail.value ? nodes.signInEmail.value.trim() : '';
     var password = nodes.signInPass && nodes.signInPass.value ? nodes.signInPass.value : '';
-    if (!email || !password){
+    if (!validEmail(email)){
+      setStatus(t('invalidEmail', 'Enter a valid email address.'), 'error');
+      nodes.signInEmail.focus();
+      return;
+    }
+    if (!password){
       setStatus(t('authFieldsRequired', 'Enter both email and password to sign in.'), 'error');
       return;
     }
@@ -868,9 +917,7 @@
       var user = res && res.data && res.data.user ? res.data.user : null;
       if (user){
         setStatus(t('signedInSuccessfully', 'Signed in successfully.'), 'success');
-        renderUser(user);
-        loadChips();
-        refreshWelcomeBonus(user);
+        openAccountPanel(user);
       } else {
         setStatus(t('signedInRedirecting', 'Signed in. Redirecting...'), 'success');
       }
@@ -884,6 +931,22 @@
     e.preventDefault();
     var email = nodes.signUpEmail && nodes.signUpEmail.value ? nodes.signUpEmail.value.trim() : '';
     var password = nodes.signUpPass && nodes.signUpPass.value ? nodes.signUpPass.value : '';
+    var passwordConfirm = nodes.signUpPassConfirm && nodes.signUpPassConfirm.value ? nodes.signUpPassConfirm.value : '';
+    if (!validEmail(email)){
+      setStatus(t('invalidEmail', 'Enter a valid email address.'), 'error');
+      nodes.signUpEmail.focus();
+      return;
+    }
+    if (password.length < 8){
+      setStatus(t('passwordTooShort', 'Password must contain at least 8 characters.'), 'error');
+      nodes.signUpPass.focus();
+      return;
+    }
+    if (password !== passwordConfirm){
+      setStatus(t('passwordsDoNotMatch', 'Passwords do not match.'), 'error');
+      nodes.signUpPassConfirm.focus();
+      return;
+    }
     if (!email || !password){
       setStatus(t('signUpFieldsRequired', 'Enter both email and password to sign up.'), 'error');
       return;
@@ -912,6 +975,50 @@
     });
   }
 
+  function showPasswordReset(show){
+    if (nodes.signInForm) nodes.signInForm.hidden = !!show;
+    if (nodes.passwordResetForm) nodes.passwordResetForm.hidden = !show;
+    if (show && nodes.passwordResetEmail){ nodes.passwordResetEmail.value = nodes.signInEmail ? nodes.signInEmail.value : ''; nodes.passwordResetEmail.focus(); }
+  }
+
+  function handlePasswordReset(e){
+    e.preventDefault();
+    var email = nodes.passwordResetEmail && nodes.passwordResetEmail.value ? nodes.passwordResetEmail.value.trim() : '';
+    if (!validEmail(email)){ setStatus(t('invalidEmail', 'Enter a valid email address.'), 'error'); return; }
+    if (!auth || typeof auth.requestPasswordReset !== 'function'){ setStatus(t('authenticationNotReady', 'Authentication is not ready. Refresh and try again.'), 'error'); return; }
+    setStatus(t('sendResetLink', 'Send reset link') + '...', 'info');
+    auth.requestPasswordReset(email).then(function(){ setStatus(t('resetLinkSent', 'Check your inbox for the password reset link.'), 'success'); }).catch(function(err){ setStatus(err && err.message ? String(err.message) : t('signInError', 'Could not sign in. Please try again.'), 'error'); });
+  }
+
+  function handlePasswordRecovery(e){
+    e.preventDefault();
+    var password = nodes.recoveryPassword ? nodes.recoveryPassword.value : '';
+    var confirmation = nodes.recoveryPasswordConfirm ? nodes.recoveryPasswordConfirm.value : '';
+    if (password.length < 8){ setStatus(t('passwordTooShort', 'Password must contain at least 8 characters.'), 'error'); return; }
+    if (password !== confirmation){ setStatus(t('passwordsDoNotMatch', 'Passwords do not match.'), 'error'); return; }
+    auth.updatePassword(password).then(function(){
+      return auth.getCurrentUser();
+    }).then(function(user){
+      if (!user) throw new Error('not_authenticated');
+      if (nodes.recoveryPassword) nodes.recoveryPassword.value = '';
+      if (nodes.recoveryPasswordConfirm) nodes.recoveryPasswordConfirm.value = '';
+      if (nodes.passwordRecoveryForm) nodes.passwordRecoveryForm.hidden = true;
+      passwordRecoveryActive = false;
+      openAccountPanel(user);
+      setStatus(t('passwordUpdated', 'Password updated. You can continue to your profile.'), 'success');
+    }).catch(function(err){ setStatus(err && err.message ? String(err.message) : t('signInError', 'Could not sign in. Please try again.'), 'error'); });
+  }
+
+  function showPasswordRecovery(){
+    passwordRecoveryActive = true;
+    setBlockVisibility(nodes.forms, true);
+    setBlockVisibility(nodes.account, false);
+    if (nodes.signInForm) nodes.signInForm.hidden = true;
+    if (nodes.passwordResetForm) nodes.passwordResetForm.hidden = true;
+    if (nodes.passwordRecoveryForm) nodes.passwordRecoveryForm.hidden = false;
+    if (nodes.recoveryPassword) nodes.recoveryPassword.focus();
+  }
+
   function handleSignOut(){
     setStatus(t('signingOut', 'Signing out...'), 'info');
     if (!auth || !auth.signOut){
@@ -931,6 +1038,10 @@
   function wireEvents(){
     if (nodes.signInForm){ nodes.signInForm.addEventListener('submit', handleSignIn); }
     if (nodes.signUpForm){ nodes.signUpForm.addEventListener('submit', handleSignUp); }
+    if (nodes.forgotPasswordButton) nodes.forgotPasswordButton.addEventListener('click', function(){ showPasswordReset(true); });
+    if (nodes.passwordResetBack) nodes.passwordResetBack.addEventListener('click', function(){ showPasswordReset(false); });
+    if (nodes.passwordResetForm) nodes.passwordResetForm.addEventListener('submit', handlePasswordReset);
+    if (nodes.passwordRecoveryForm) nodes.passwordRecoveryForm.addEventListener('submit', handlePasswordRecovery);
     if (nodes.signOut){ nodes.signOut.addEventListener('click', handleSignOut); }
     if (nodes.bonusCampaignList){ nodes.bonusCampaignList.addEventListener('click', handleWelcomeBonusClaim); }
     if (nodes.welcomeBonusClaimButton){ nodes.welcomeBonusClaimButton.addEventListener('click', handleWelcomeBonusClaim); }
@@ -952,9 +1063,9 @@
       if (nodes.signInEmail){ nodes.signInEmail.focus(); }
     });
 
-    if (nodes.chipLedgerScroll){
-      nodes.chipLedgerScroll.addEventListener('scroll', handleLedgerScroll);
-    }
+    if (nodes.chipLedgerScroll) nodes.chipLedgerScroll.addEventListener('scroll', handleLedgerScroll);
+    if (nodes.chipLedgerPrev) nodes.chipLedgerPrev.addEventListener('click', function(){ loadLedgerPage(ledgerState.pageIndex - 1); });
+    if (nodes.chipLedgerNext) nodes.chipLedgerNext.addEventListener('click', function(){ if (ledgerState.nextCursor) loadLedgerPage(ledgerState.pageIndex + 1); });
     window.addEventListener('resize', queueLedgerRender);
   }
 
@@ -964,8 +1075,10 @@
       return;
     }
 
-    setStatus(t('checkingSession', 'Checking session...'), 'info');
+    if (typeof auth.isPasswordRecoveryPending === 'function' && auth.isPasswordRecoveryPending()) showPasswordRecovery();
+    setStatus(passwordRecoveryActive ? '' : t('checkingSession', 'Checking session...'), passwordRecoveryActive ? '' : 'info');
     auth.getCurrentUser().then(function(user){
+      if (passwordRecoveryActive) return;
       renderUser(user);
       setStatus(user ? t('signedIn', 'Signed in.') : '', user ? 'success' : '');
       if (user){
@@ -982,7 +1095,11 @@
     });
 
     if (auth.onAuthChange){
-      auth.onAuthChange(function(_event, user){
+      auth.onAuthChange(function(event, user){
+        if (event === 'PASSWORD_RECOVERY'){
+          showPasswordRecovery();
+          return;
+        }
         renderUser(user);
         if (user){
           setStatus(t('signedIn', 'Signed in.'), 'success');

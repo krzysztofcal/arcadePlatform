@@ -34,6 +34,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
   <script src="/js/auth/supabaseClient.js" defer></script>
   <script src="js/chips/client.js" defer></script>
+  <script src="js/home-bonuses.js" defer></script>
   <script src="js/core/number-format.js" defer></script>
   <script src="js/topbar.js" defer></script>
   <link rel="stylesheet" href="js/vendor/klaro/klaro.css">
@@ -124,6 +125,14 @@
       </nav>
     </aside>
     <main>
+      <section class="home-bonuses" id="homeBonuses" aria-labelledby="homeBonusesTitle" hidden>
+        <div class="home-bonuses__mark" aria-hidden="true">CH</div>
+        <div class="home-bonuses__content">
+          <h2 id="homeBonusesTitle" data-i18n="homeBonusesTitle">Bonuses ready to claim</h2>
+          <div class="home-bonuses__list" id="homeBonusesList"></div>
+          <p class="home-bonuses__status" id="homeBonusesStatus" aria-live="polite"></p>
+        </div>
+      </section>
       <nav class="category-bar" id="categoryBar" aria-label="Game categories"></nav>
       <section class="grid" id="gamesGrid"></section>
       <section class="ad-slot" aria-label="Advertisement">
@@ -218,7 +227,6 @@
 <script src="js/consent-manager.js" defer></script>
 </body>
 </html>
-
 
 
 

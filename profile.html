@@ -47,14 +47,14 @@
   </header>
   <main class="public-profile" aria-labelledby="publicProfileName">
     <p class="public-profile__status" id="publicProfileStatus" aria-live="polite" data-i18n="publicProfileLoading">Loading profile...</p>
-    <article class="public-profile__card" id="publicProfileCard" hidden>
-      <div class="public-profile__identity">
+    <article class="public-profile__card" id="publicProfileCard" aria-busy="true">
+      <div class="public-profile__identity" id="publicProfileIdentity" hidden>
         <div class="public-profile__avatar" id="publicProfileAvatar" role="img">AH</div>
         <div><h1 class="public-profile__name" id="publicProfileName"></h1><p class="public-profile__handle" id="publicProfileHandle"></p></div>
       </div>
       <div class="public-profile__stats" aria-label="Public profile stats">
-        <div><strong id="publicProfileXp">0</strong> <span data-i18n="publicProfileXpLabel">XP</span></div>
-        <div><strong id="publicProfileLevel">1</strong> <span data-i18n="publicProfileLevelLabel">Level</span></div>
+        <div><strong class="public-profile__stat-loading" id="publicProfileXp" aria-label="Loading"></strong> <span data-i18n="publicProfileXpLabel">XP</span></div>
+        <div><strong class="public-profile__stat-loading" id="publicProfileLevel" aria-label="Loading"></strong> <span data-i18n="publicProfileLevelLabel">Level</span></div>
       </div>
       <p class="public-profile__bio" id="publicProfileBio" hidden></p>
     </article>

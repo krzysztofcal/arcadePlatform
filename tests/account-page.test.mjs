@@ -99,6 +99,14 @@ function seedNodes(document) {
     "signinPassword",
     "signupEmail",
     "signupPassword",
+    "signupPasswordConfirm",
+    "forgotPasswordButton",
+    "passwordResetForm",
+    "passwordResetEmail",
+    "passwordResetBack",
+    "passwordRecoveryForm",
+    "recoveryPassword",
+    "recoveryPasswordConfirm",
     "chipPanel",
     "chipStatus",
     "chipBalanceValue",
@@ -133,12 +141,13 @@ function buildContext(chipsClient, options = {}) {
         logs.push({ kind, data });
       },
     },
-    SupabaseAuth: {
+    SupabaseAuth: options.auth || {
       getCurrentUser() {
         return Promise.resolve({ id: "00000000-0000-4000-8000-000000000111", user_metadata: { name: "Tester" }, email: "tester@example.com" });
       },
       onAuthChange() {},
     },
+    location: { hash: "" },
     ChipsClient: chipsClient,
     sessionStorage: {
       getItem(key) {
@@ -993,6 +1002,42 @@ test("hides generic bonus panel without success for already claimed account", as
   assert.deepEqual(calls, ["status"]);
   assert.equal(document.getElementById("welcomeBonusPanel").hidden, true);
   assert.notEqual(document.getElementById("accountStatus").textContent, "Welcome! 500 CH have been added to your account.");
+});
+
+test("successful password recovery opens the authenticated account panel", async () => {
+  const user = { id: "00000000-0000-4000-8000-000000000222", user_metadata: { name: "Recovered" }, email: "recovered@example.com" };
+  let authListener = null;
+  let updatedPassword = null;
+  const auth = {
+    getCurrentUser: () => Promise.resolve(user),
+    onAuthChange(callback) { authListener = callback; },
+    updatePassword(password) { updatedPassword = password; return Promise.resolve({ data: { user } }); },
+  };
+  const chipsClient = {
+    fetchBalance: () => Promise.resolve({ balance: 10 }),
+    fetchLedger: () => Promise.resolve({ items: [], nextCursor: null }),
+    fetchBonusCampaigns: () => Promise.resolve({ items: [] }),
+  };
+  const { windowObj, document } = buildContext(chipsClient, { auth });
+  const context = vm.createContext({ window: windowObj, document, requestAnimationFrame: windowObj.requestAnimationFrame, CustomEvent: function() {} });
+  vm.runInContext(source, context);
+  await flush();
+
+  authListener("PASSWORD_RECOVERY", user);
+  const recoveryForm = document.getElementById("passwordRecoveryForm");
+  document.getElementById("recoveryPassword").value = "new-password-123";
+  document.getElementById("recoveryPasswordConfirm").value = "new-password-123";
+  recoveryForm.dispatchEvent({ type: "submit", preventDefault() {} });
+  await flush();
+  await flush();
+
+  assert.equal(updatedPassword, "new-password-123");
+  assert.equal(recoveryForm.hidden, true);
+  assert.equal(document.getElementById("authForms").hidden, true);
+  assert.equal(document.getElementById("accountPanel").hidden, false);
+  assert.equal(windowObj.location.hash, "accountPanel");
+  assert.equal(document.getElementById("recoveryPassword").value, "");
+  assert.equal(document.getElementById("recoveryPasswordConfirm").value, "");
 });
 
 test("does not auto-claim generic bonus after eligible status", async () => {

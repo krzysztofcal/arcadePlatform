@@ -2307,16 +2307,19 @@ function bootXpCore(window, document) {
       state.debug.adminInitLogged = admin && logged;
     }
 
-    try {
-      refreshBadgeFromStorage();
-    } catch (_) {}
-
     if (!isGameHost()) {
       if (state.running === true) {
         try { stopSession({ flush: true }); } catch (_) {}
       }
+      attachBadge();
+      setBadgeLoading(true);
+      refreshStatus().catch(() => { setBadgeLoading(true); });
       return;
     }
+
+    try {
+      refreshBadgeFromStorage();
+    } catch (_) {}
 
     if (typeof document !== "undefined") {
       const handleDomReady = () => {

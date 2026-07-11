@@ -196,6 +196,21 @@
               <label for="signinPassword" data-i18n="password">Password</label>
               <input id="signinPassword" name="password" type="password" autocomplete="current-password" required placeholder="••••••••">
               <button type="submit" data-i18n="signIn">Sign in</button>
+              <button type="button" class="account-form__link" id="forgotPasswordButton" data-i18n="forgotPassword">Forgot password?</button>
+            </form>
+            <form class="account-form" id="passwordResetForm" hidden>
+              <label for="passwordResetEmail" data-i18n="email">Email</label>
+              <input id="passwordResetEmail" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
+              <button type="submit" data-i18n="sendResetLink">Send reset link</button>
+              <button type="button" class="account-form__link" id="passwordResetBack" data-i18n="backToSignIn">Back to sign in</button>
+            </form>
+            <form class="account-form" id="passwordRecoveryForm" hidden>
+              <label for="recoveryPassword" data-i18n="newPassword">New password</label>
+              <input id="recoveryPassword" type="password" autocomplete="new-password" minlength="8" required>
+              <label for="recoveryPasswordConfirm" data-i18n="confirmPassword">Confirm password</label>
+              <input id="recoveryPasswordConfirm" type="password" autocomplete="new-password" minlength="8" required>
+              <p class="account-note" data-i18n="passwordRequirements">Use at least 8 characters.</p>
+              <button type="submit" data-i18n="saveNewPassword">Save new password</button>
             </form>
           </div>
 
@@ -205,7 +220,10 @@
               <label for="signupEmail" data-i18n="email">Email</label>
               <input id="signupEmail" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
               <label for="signupPassword" data-i18n="password">Password</label>
-              <input id="signupPassword" name="password" type="password" autocomplete="new-password" data-i18n-placeholder="choosePassword" required placeholder="Choose a password">
+              <input id="signupPassword" name="password" type="password" autocomplete="new-password" minlength="8" data-i18n-placeholder="choosePassword" required placeholder="Choose a password">
+              <label for="signupPasswordConfirm" data-i18n="confirmPassword">Confirm password</label>
+              <input id="signupPasswordConfirm" name="passwordConfirm" type="password" autocomplete="new-password" minlength="8" required placeholder="••••••••">
+              <p class="account-note" data-i18n="passwordRequirements">Use at least 8 characters.</p>
               <button type="submit" data-i18n="signUp">Sign up</button>
             </form>
             <p class="account-note" data-i18n="accountVerification">We may ask you to verify your email before unlocking cloud sync.</p>
@@ -273,6 +291,11 @@
             <ul class="chip-ledger" id="chipLedgerList"></ul>
           </div>
           <p class="account-note" id="chipLedgerEmpty" data-i18n="noChipActivity" hidden>No chip activity yet.</p>
+          <nav class="chip-ledger__pagination" id="chipLedgerPagination" aria-label="Chip history pages">
+            <button type="button" id="chipLedgerPrev" data-i18n="previousPage">Previous</button>
+            <span id="chipLedgerPage" aria-live="polite">1</span>
+            <button type="button" id="chipLedgerNext" data-i18n="nextPage">Next</button>
+          </nav>
         </section>
       </article>
     </main>
