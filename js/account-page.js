@@ -241,13 +241,18 @@
     setPublicProfileErrors(null);
   }
 
-  function setAvatarState(busy, message, tone){
+  function setAvatarState(state, message, tone){
+    var busy = state === 'validating' || state === 'uploading' || state === 'processing' || state === 'removing';
     if (nodes.publicAvatarChoose) nodes.publicAvatarChoose.disabled = !!busy;
     if (nodes.publicAvatarRemove) nodes.publicAvatarRemove.disabled = !!busy;
     if (nodes.publicAvatarInput) nodes.publicAvatarInput.disabled = !!busy;
     if (nodes.publicAvatarStatus){
       nodes.publicAvatarStatus.textContent = message || t('publicAvatarRequirements', 'JPEG, PNG or WebP, up to 1 MB.');
       nodes.publicAvatarStatus.dataset.tone = tone || '';
+    }
+    if (nodes.publicProfileAvatar){
+      nodes.publicProfileAvatar.dataset.uploadState = state || 'idle';
+      nodes.publicProfileAvatar.setAttribute('aria-busy', busy ? 'true' : 'false');
     }
   }
 
@@ -263,22 +268,35 @@
   function handleAvatarSelected(){
     var file = nodes.publicAvatarInput && nodes.publicAvatarInput.files ? nodes.publicAvatarInput.files[0] : null;
     if (!file || !window.ProfileClient || typeof window.ProfileClient.uploadAvatar !== 'function') return;
-    setAvatarState(true, t('publicAvatarUploading', 'Uploading and processing avatar...'), 'info');
-    window.ProfileClient.uploadAvatar(file).then(function(profile){
+    var previewUrl = window.URL && window.URL.createObjectURL ? window.URL.createObjectURL(file) : '';
+    if (previewUrl && nodes.publicProfileAvatar){
+      nodes.publicProfileAvatar.textContent = '';
+      nodes.publicProfileAvatar.classList.add('profile-avatar--uploaded');
+      nodes.publicProfileAvatar.style.backgroundImage = 'url("' + previewUrl.replace(/["\\]/g, '') + '")';
+    }
+    setAvatarState('validating', t('publicAvatarValidating', 'Checking image...'), 'info');
+    window.ProfileClient.uploadAvatar(file, function(stage){
+      if (stage === 'uploading') setAvatarState('uploading', t('publicAvatarUploading', 'Uploading avatar...'), 'info');
+      if (stage === 'processing') setAvatarState('processing', t('publicAvatarProcessing', 'Processing avatar...'), 'info');
+    }).then(function(profile){
       renderPublicProfile(profile);
-      setAvatarState(false, t('publicAvatarUpdated', 'Avatar updated.'), 'success');
+      setAvatarState('success', t('publicAvatarUpdated', 'Avatar updated and visible on your profile.'), 'success');
     }).catch(function(error){
-      setAvatarState(false, avatarErrorMessage(error), 'error');
-    }).finally(function(){ if (nodes.publicAvatarInput) nodes.publicAvatarInput.value = ''; });
+      renderPublicProfile(publicProfile);
+      setAvatarState('error', avatarErrorMessage(error), 'error');
+    }).finally(function(){
+      if (previewUrl && window.URL && window.URL.revokeObjectURL) window.URL.revokeObjectURL(previewUrl);
+      if (nodes.publicAvatarInput) nodes.publicAvatarInput.value = '';
+    });
   }
 
   function handleAvatarRemove(){
     if (!window.ProfileClient || typeof window.ProfileClient.removeAvatar !== 'function') return;
-    setAvatarState(true, t('publicAvatarRemoving', 'Restoring default avatar...'), 'info');
+    setAvatarState('removing', t('publicAvatarRemoving', 'Restoring default avatar...'), 'info');
     window.ProfileClient.removeAvatar().then(function(profile){
       renderPublicProfile(profile);
-      setAvatarState(false, t('publicAvatarRemoved', 'Default avatar restored.'), 'success');
-    }).catch(function(error){ setAvatarState(false, avatarErrorMessage(error), 'error'); });
+      setAvatarState('success', t('publicAvatarRemoved', 'Default avatar restored.'), 'success');
+    }).catch(function(error){ setAvatarState('error', avatarErrorMessage(error), 'error'); });
   }
 
   function loadPublicProfile(force){

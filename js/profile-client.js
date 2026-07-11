@@ -7,6 +7,7 @@
   var AVATAR_FINALIZE_URL = '/.netlify/functions/profile-avatar-finalize';
   var AVATAR_REMOVE_URL = '/.netlify/functions/profile-avatar-remove';
   var AVATAR_MAX_BYTES = 1024 * 1024;
+  var AVATAR_MAX_DIMENSION = 1024;
   var AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
   var cache = null;
   var inFlight = null;
@@ -114,6 +115,9 @@
       sizeError.code = 'avatar_too_large';
       throw sizeError;
     }
+    await validateAvatarDimensions(file);
+    var onProgress = arguments.length > 1 && typeof arguments[1] === 'function' ? arguments[1] : function(){};
+    onProgress('uploading');
     var signed = await parse(await authedFetch(AVATAR_UPLOAD_URL, {
       method: 'POST',
       body: JSON.stringify({ mimeType: file.type, size: file.size })
@@ -129,6 +133,7 @@
       uploadError.status = uploadResponse.status;
       throw uploadError;
     }
+    onProgress('processing');
     var profile = await parse(await authedFetch(AVATAR_FINALIZE_URL, {
       method: 'POST',
       body: JSON.stringify({ uploadId: signed.uploadId })
@@ -137,7 +142,31 @@
     if (!userId) throw staleIdentityError();
     cache = { userId: userId, profile: profile };
     notify(profile);
+    onProgress('done');
     return profile;
+  }
+
+  function validateAvatarDimensions(file){
+    return new Promise(function(resolve, reject){
+      if (!window.URL || typeof window.URL.createObjectURL !== 'function') return resolve();
+      var url = window.URL.createObjectURL(file);
+      var image = new Image();
+      function finish(error){
+        window.URL.revokeObjectURL(url);
+        if (error) reject(error); else resolve();
+      }
+      image.onload = function(){
+        if (!image.naturalWidth || !image.naturalHeight){
+          var invalid = new Error('invalid_avatar_file'); invalid.code = 'invalid_avatar_file'; finish(invalid); return;
+        }
+        if (image.naturalWidth > AVATAR_MAX_DIMENSION || image.naturalHeight > AVATAR_MAX_DIMENSION){
+          var dimensions = new Error('avatar_dimensions_too_large'); dimensions.code = 'avatar_dimensions_too_large'; finish(dimensions); return;
+        }
+        finish();
+      };
+      image.onerror = function(){ var error = new Error('invalid_avatar_file'); error.code = 'invalid_avatar_file'; finish(error); };
+      image.src = url;
+    });
   }
 
   async function removeAvatar(){
