@@ -285,13 +285,11 @@ The original planning-only update added no tests. Each implementation PR must ad
 3. For a migration, run `node scripts/check-db-migrations.mjs`, wait for `DB Migration Check` and `DB Stage Apply PR`, then use the matching Netlify Deploy Preview against stage.
 4. Complete stage smoke verification before applying production migration according to `docs/operations.md`.
 
-### Storage readiness for PR 3
+### Avatar Storage rollout status
 
-The existing stage workflow can apply bucket and Storage policy SQL because it executes timestamped migrations through the stage Postgres connection. There are currently no repository migrations for Storage buckets, and `scripts/stage-db-migrate.mjs` smoke check only verifies chips objects; it does not prove that either avatar bucket exists or that an upload works. Live stage bucket state cannot be inferred from this repository and must be verified after the PR 3 migration applies.
+Migration `20260711103000_profile_avatar_storage.sql` creates the private `profile-avatar-uploads` bucket, public processed `profile-avatars` bucket, pending-upload receipts, and restrictive access policies. It has passed the stage migration workflow, real browser upload/finalization smoke, and production migration plus smoke verification. The production Functions scope uses the production Supabase URL and service-role key; browsers receive only short-lived, path-scoped upload URLs and never receive service-role credentials.
 
-PR 3 must add an idempotent migration that creates/configures `profile-avatar-uploads` and `profile-avatars` plus their policies. The preview environment must retain its existing stage Supabase configuration, especially the stage service-role key used only by trusted functions; browsers use only signed temporary upload URLs.
-
-After `DB Stage Apply PR` is green, run this stage smoke sequence against the matching Netlify Deploy Preview with a dedicated stage test account:
+For future avatar pipeline changes, repeat this smoke sequence against the matching Netlify Deploy Preview with a dedicated stage test account:
 
 1. Confirm both bucket rows and expected public/private settings in stage Storage.
 2. Request an upload URL and verify the server-generated pending key cannot be substituted by the client.

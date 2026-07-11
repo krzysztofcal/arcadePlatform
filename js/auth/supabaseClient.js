@@ -6,6 +6,8 @@
   var state = { user: null, profile: null, open: false, client: null };
   var authListeners = [];
   var authSubscriptionAttached = false;
+  var recoverySession = null;
+  var recoveryPending = false;
 
   function logDiag(label, payload){
     var logger = window && window.KLog;
@@ -142,6 +144,10 @@
         emailDomain: emailDomain,
         sessionExpiresAt: session && session.expires_at ? session.expires_at : null
       });
+      if (event === 'PASSWORD_RECOVERY'){
+        recoveryPending = true;
+        recoverySession = session || null;
+      }
       notifyAuthListeners(event, session || null);
     });
   }
@@ -154,6 +160,13 @@
       authListeners.push(callback);
     }
     attachAuthSubscription();
+    if (recoveryPending && typeof callback === 'function'){
+      Promise.resolve().then(function(){
+        if (authListeners.indexOf(callback) === -1 || !recoveryPending) return;
+        var user = recoverySession && recoverySession.user ? recoverySession.user : null;
+        try { callback('PASSWORD_RECOVERY', user, recoverySession); } catch (_err){}
+      });
+    }
     return function(){
       if (!callback) return;
       authListeners = authListeners.filter(function(fn){ return fn !== callback; });
@@ -190,11 +203,34 @@
     return client.auth.signUp(payload);
   }
 
+  function requestPasswordReset(email){
+    var client = getClient();
+    if (!client || !client.auth || typeof client.auth.resetPasswordForEmail !== 'function') return Promise.reject(new Error('Authentication client not ready'));
+    var options = {};
+    var redirectTo = getAuthRedirectTo();
+    if (redirectTo) options.redirectTo = redirectTo;
+    return client.auth.resetPasswordForEmail(email, options);
+  }
+
+  function updatePassword(password){
+    var client = getClient();
+    if (!client || !client.auth || typeof client.auth.updateUser !== 'function') return Promise.reject(new Error('Authentication client not ready'));
+    return client.auth.updateUser({ password: password }).then(function(result){
+      recoveryPending = false;
+      recoverySession = null;
+      return result;
+    });
+  }
+
+  function isPasswordRecoveryPending(){ return recoveryPending; }
+
   function signOut(){
     var client = getClient();
     if (!client || !client.auth || typeof client.auth.signOut !== 'function'){
       return Promise.reject(new Error('Authentication client not ready'));
     }
+    recoveryPending = false;
+    recoverySession = null;
     return client.auth.signOut();
   }
 
@@ -418,6 +454,9 @@
     onAuthChange: onAuthChange,
     signIn: signIn,
     signUp: signUp,
+    requestPasswordReset: requestPasswordReset,
+    updatePassword: updatePassword,
+    isPasswordRecoveryPending: isPasswordRecoveryPending,
     signOut: signOut
   };
 

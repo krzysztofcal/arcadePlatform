@@ -59,6 +59,21 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #0a0d1a 100%); col
 .chip-badge{ color:#c7d2fe; }
 
 .chip-badge__label{ display:inline-flex; align-items:center; gap:6px; }
+.home-bonuses{ display:grid; grid-template-columns:auto 1fr; gap:16px; align-items:center; margin:0 0 18px; padding:18px; border:1px solid rgba(247,201,72,.48); border-radius:8px; background:linear-gradient(135deg,rgba(247,201,72,.14),rgba(110,231,231,.08)); box-shadow:0 10px 28px rgba(0,0,0,.2); }
+.home-bonuses[hidden]{ display:none; }
+.home-bonuses__mark{ width:54px; height:54px; display:grid; place-items:center; border:2px solid #f7c948; border-radius:8px; background:#111735; color:#f7c948; font:800 16px/1 Poppins,sans-serif; box-shadow:inset 0 0 0 4px rgba(247,201,72,.1); }
+.home-bonuses__content{ min-width:0; }
+.home-bonuses__content h2{ margin:0 0 10px; color:#fff; font:800 18px/1.2 Poppins,sans-serif; }
+.home-bonuses__list{ display:grid; gap:10px; }
+.home-bonuses__item{ display:flex; align-items:center; justify-content:space-between; gap:14px; }
+.home-bonuses__copy{ min-width:0; }
+.home-bonuses__name{ color:#f8fafc; font-weight:700; }
+.home-bonuses__description{ margin:3px 0 0; color:#b8c5e1; font-size:13px; }
+.home-bonuses__claim{ flex:0 0 auto; padding:10px 14px; border:0; border-radius:8px; background:#f7c948; color:#0b1020; font:800 13px/1 Poppins,sans-serif; cursor:pointer; }
+.home-bonuses__claim:disabled{ cursor:wait; opacity:.65; }
+.home-bonuses__status{ min-height:18px; margin:8px 0 0; color:#a5f3fc; font-size:13px; }
+.home-bonuses__status[data-tone="error"]{ color:#fda4af; }
+@media (max-width:600px){ .home-bonuses{ grid-template-columns:1fr; } .home-bonuses__mark{ width:44px; height:44px; } .home-bonuses__item{ align-items:flex-start; flex-direction:column; } .home-bonuses__claim{ width:100%; } }
 
 .welcome-bonus-badge{ display:inline-flex; align-items:center; min-height:18px; padding:2px 6px; border-radius:999px; background:linear-gradient(90deg, #f7c948, #6ee7e7); color:#0b1020; font:800 10px/1 Poppins, sans-serif; }
 
@@ -89,6 +104,11 @@ html[data-auth="out"] #chipBadge{ display:none !important; }
 .chip-ledger__item{ position:absolute; left:0; right:0; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; border-bottom:1px solid rgba(32,42,85,.6); height:80px; overflow:hidden; }
 
 .chip-ledger__item--status{ justify-content:center; align-items:center; color:var(--muted); font:600 12px/1.2 Poppins, sans-serif; }
+.chip-ledger__pagination{ display:flex; align-items:center; justify-content:center; gap:12px; margin-top:12px; }
+.chip-ledger__pagination button{ min-width:92px; padding:8px 12px; border:1px solid var(--border); border-radius:8px; background:rgba(255,255,255,.06); color:#e8eeff; font:600 13px/1 Poppins,sans-serif; cursor:pointer; }
+.chip-ledger__pagination button:disabled{ cursor:not-allowed; opacity:.45; }
+.chip-ledger__pagination span{ min-width:32px; text-align:center; color:#a5f3fc; font-weight:700; }
+.account-form__link{ padding:4px 0 !important; border:0 !important; background:transparent !important; color:#a5f3fc !important; text-align:left; font-weight:600; cursor:pointer; }
 
 .chip-ledger__meta{ display:flex; flex-direction:column; gap:4px; min-width:0; }
 

@@ -33,6 +33,9 @@ test("public profile route, editor, and legal release gate are present", async (
   assert.match(page, /id="publicProfileCard"/);
   assert.match(page, /id="publicProfileXp"/);
   assert.match(page, /id="publicProfileLevel"/);
+  assert.doesNotMatch(page, /id="publicProfileXp">0</);
+  assert.doesNotMatch(page, /id="publicProfileLevel">1</);
+  assert.match(page, /public-profile__stat-loading/);
   assert.match(page, /src="\/js\/public-profile-page\.js"/);
   assert.match(page, /src="\/js\/chips\/client\.js"/);
   assert.match(page, /src="\/js\/core\/number-format\.js"/);

@@ -1,5 +1,6 @@
 .public-profile{ max-width:640px; margin:0 auto; padding:24px 16px 48px; }
 .public-profile__card{ display:grid; gap:20px; padding:24px; border:1px solid var(--border); border-radius:12px; background:var(--card-2); }
+.public-profile__card[hidden],.public-profile__identity[hidden]{ display:none; }
 .public-profile__identity{ display:flex; align-items:center; gap:16px; }
 .public-profile__avatar{ width:80px; height:80px; flex:0 0 80px; border-radius:50%; display:grid; place-items:center; border:1px solid var(--border); color:#fff; font:800 26px/1 Poppins, sans-serif; }
 .public-profile__avatar.profile-avatar--uploaded{ background-position:center; background-size:cover; }
@@ -8,6 +9,7 @@
 .public-profile__stats{ display:flex; flex-wrap:wrap; gap:10px; }
 .public-profile__stats div{ min-width:100px; padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:rgba(255,255,255,.04); color:#9fb0d0; }
 .public-profile__stats strong{ display:block; color:#fff; font:800 20px/1.1 Poppins, sans-serif; }
+.public-profile__stat-loading{ width:18px; height:18px; border:2px solid rgba(159,176,208,.42); border-top-color:#6ee7e7; border-radius:50%; animation:public-profile-stat-spin .75s linear infinite; }
 .public-profile__bio{ margin:0; white-space:pre-wrap; line-height:1.55; color:#dbe7ff; }
 .public-profile__status{ margin:0; color:#9fb0d0; }
 .public-profile__status[data-tone="error"]{ color:#fda4af; }
@@ -18,4 +20,5 @@
 .profile-avatar--nova-purple,[data-avatar-variant="nova-purple"]{ background:linear-gradient(145deg,#553298,#b18cff); }
 .profile-avatar--orbit-green,[data-avatar-variant="orbit-green"]{ background:linear-gradient(145deg,#19755d,#74d9a0); }
 .profile-avatar--default,[data-avatar-variant="default"]{ background:linear-gradient(145deg,#355070,#6ee7e7); }
+@keyframes public-profile-stat-spin{ to{ transform:rotate(360deg); } }
 @media (max-width:600px){ .public-profile{ padding:16px 12px 40px; } .public-profile__card{ padding:18px; } }

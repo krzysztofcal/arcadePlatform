@@ -3,6 +3,7 @@
   var status = document.getElementById('publicProfileStatus');
   var card = document.getElementById('publicProfileCard');
   var avatar = document.getElementById('publicProfileAvatar');
+  var identity = document.getElementById('publicProfileIdentity');
   var name = document.getElementById('publicProfileName');
   var handle = document.getElementById('publicProfileHandle');
   var xp = document.getElementById('publicProfileXp');
@@ -39,9 +40,13 @@
     handle.textContent = '@' + (profile.handle || '');
     if (xp) xp.textContent = formatXp(profile.xp);
     if (level) level.textContent = String(Math.max(1, Number(profile.level) || 1));
+    if (xp) { xp.classList.remove('public-profile__stat-loading'); xp.removeAttribute('aria-label'); }
+    if (level) { level.classList.remove('public-profile__stat-loading'); level.removeAttribute('aria-label'); }
     bio.textContent = profile.bio || '';
     bio.hidden = !profile.bio;
+    if (identity) identity.hidden = false;
     card.hidden = false;
+    card.setAttribute('aria-busy', 'false');
     setStatus('', '');
   }
 
@@ -52,6 +57,7 @@
       return;
     }
     window.ProfileClient.getPublic(value).then(render).catch(function(error){
+      card.hidden = true;
       setStatus(error && error.status === 404 ? t('publicProfileNotFound', 'This profile is not available.') : t('publicProfileLoadError', 'Could not load this profile. Please try again.'), 'error');
     });
   }
