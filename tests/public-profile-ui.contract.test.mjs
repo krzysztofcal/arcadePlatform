@@ -22,6 +22,7 @@ test("public profile route, editor, and legal release gate are present", async (
   assert.match(accountJs, /ProfileClient\.uploadAvatar/);
   assert.match(accountJs, /publicAvatarValidating/);
   assert.match(accountJs, /publicAvatarProcessing/);
+  assert.match(accountJs, /confirm\(t\('publicAvatarRemoveConfirm'/);
   assert.match(account, /data-upload-state="idle"/);
   assert.match(account, /@keyframes public-avatar-spin/);
   assert.match(accountJs, /readAsDataURL\(file\)/);
@@ -33,6 +34,9 @@ test("public profile route, editor, and legal release gate are present", async (
   assert.match(page, /id="publicProfileXp"/);
   assert.match(page, /id="publicProfileLevel"/);
   assert.match(page, /src="\/js\/public-profile-page\.js"/);
+  assert.match(page, /src="\/js\/chips\/client\.js"/);
+  assert.match(page, /src="\/js\/core\/number-format\.js"/);
+  assert.ok(page.indexOf('/js/chips/client.js') < page.indexOf('/js/topbar.js'), 'chips client must load before topbar');
   assert.equal((page.match(/(?:href|src)="(?:css|js)\//g) || []).length, 0, "profile page assets must be root-absolute under /u/:handle");
   assert.match(config, /from = "\/u\/:handle"\s+to = "\/profile\.html"/);
   assert.match(config, /\[context\.deploy-preview\.environment\][\s\S]*?PUBLIC_PROFILES_ENABLED = "1"/);

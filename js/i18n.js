@@ -151,6 +151,7 @@
     publicAvatarUploading: { en: 'Uploading avatar...', pl: 'Przesyłanie awatara...' },
     publicAvatarProcessing: { en: 'Processing avatar...', pl: 'Przetwarzanie awatara...' },
     publicAvatarRemoving: { en: 'Restoring default avatar...', pl: 'Przywracanie domyślnego awatara...' },
+    publicAvatarRemoveConfirm: { en: 'Remove your uploaded avatar and restore the default avatar?', pl: 'Usunąć wgrany awatar i przywrócić awatar domyślny?' },
     publicAvatarUpdated: { en: 'Avatar updated and visible on your profile.', pl: 'Awatar został zaktualizowany i jest widoczny na profilu.' },
     publicAvatarRemoved: { en: 'Default avatar restored.', pl: 'Przywrócono domyślny awatar.' },
     publicAvatarInvalidType: { en: 'Choose a valid JPEG, PNG or WebP image.', pl: 'Wybierz prawidłowy obraz JPEG, PNG lub WebP.' },

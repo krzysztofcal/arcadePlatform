@@ -294,6 +294,7 @@
 
   function handleAvatarRemove(){
     if (!window.ProfileClient || typeof window.ProfileClient.removeAvatar !== 'function') return;
+    if (!window.confirm(t('publicAvatarRemoveConfirm', 'Remove your uploaded avatar and restore the default avatar?'))) return;
     setAvatarState('removing', t('publicAvatarRemoving', 'Restoring default avatar...'), 'info');
     window.ProfileClient.removeAvatar().then(function(profile){
       renderPublicProfile(profile);
