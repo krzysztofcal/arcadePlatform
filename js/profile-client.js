@@ -150,13 +150,10 @@
 
   function validateAvatarDimensions(file){
     return new Promise(function(resolve, reject){
-      if (!window.URL || typeof window.URL.createObjectURL !== 'function') return resolve();
-      var url = window.URL.createObjectURL(file);
-      var image = new Image();
-      function finish(error){
-        window.URL.revokeObjectURL(url);
-        if (error) reject(error); else resolve();
-      }
+      if (typeof window.FileReader !== 'function' || typeof window.Image !== 'function') return resolve();
+      var reader = new window.FileReader();
+      var image = new window.Image();
+      function finish(error){ if (error) reject(error); else resolve(); }
       image.onload = function(){
         if (!image.naturalWidth || !image.naturalHeight){
           var invalid = new Error('invalid_avatar_file'); invalid.code = 'invalid_avatar_file'; finish(invalid); return;
@@ -167,7 +164,9 @@
         finish();
       };
       image.onerror = function(){ var error = new Error('invalid_avatar_file'); error.code = 'invalid_avatar_file'; finish(error); };
-      image.src = url;
+      reader.onload = function(){ image.src = String(reader.result || ''); };
+      reader.onerror = function(){ var error = new Error('invalid_avatar_file'); error.code = 'invalid_avatar_file'; finish(error); };
+      reader.readAsDataURL(file);
     });
   }
 

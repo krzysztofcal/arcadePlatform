@@ -268,11 +268,14 @@
   function handleAvatarSelected(){
     var file = nodes.publicAvatarInput && nodes.publicAvatarInput.files ? nodes.publicAvatarInput.files[0] : null;
     if (!file || !window.ProfileClient || typeof window.ProfileClient.uploadAvatar !== 'function') return;
-    var previewUrl = window.URL && window.URL.createObjectURL ? window.URL.createObjectURL(file) : '';
-    if (previewUrl && nodes.publicProfileAvatar){
-      nodes.publicProfileAvatar.textContent = '';
-      nodes.publicProfileAvatar.classList.add('profile-avatar--uploaded');
-      nodes.publicProfileAvatar.style.backgroundImage = 'url("' + previewUrl.replace(/["\\]/g, '') + '")';
+    if (typeof window.FileReader === 'function' && nodes.publicProfileAvatar){
+      var previewReader = new window.FileReader();
+      previewReader.onload = function(){
+        nodes.publicProfileAvatar.textContent = '';
+        nodes.publicProfileAvatar.classList.add('profile-avatar--uploaded');
+        nodes.publicProfileAvatar.style.backgroundImage = 'url("' + String(previewReader.result || '').replace(/["\\]/g, '') + '")';
+      };
+      previewReader.readAsDataURL(file);
     }
     setAvatarState('validating', t('publicAvatarValidating', 'Checking image...'), 'info');
     window.ProfileClient.uploadAvatar(file, function(stage){
@@ -285,7 +288,6 @@
       renderPublicProfile(publicProfile);
       setAvatarState('error', avatarErrorMessage(error), 'error');
     }).finally(function(){
-      if (previewUrl && window.URL && window.URL.revokeObjectURL) window.URL.revokeObjectURL(previewUrl);
       if (nodes.publicAvatarInput) nodes.publicAvatarInput.value = '';
     });
   }

@@ -7,8 +7,8 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 const { DEFAULT_BASE_XP, DEFAULT_MULTIPLIER } = await import("../netlify/functions/_shared/xp-level.mjs");
 
 test("public profile route, editor, and legal release gate are present", async () => {
-  const [account, page, config, privacyEn, privacyPl, termsEn, termsPl, portalCss, accountJs] = await Promise.all([
-    read("account.html"), read("profile.html"), read("netlify.toml"), read("legal/privacy.en.html"), read("legal/privacy.pl.html"), read("legal/terms.en.html"), read("legal/terms.pl.html"), read("css/portal.css"), read("js/account-page.js")
+  const [account, page, config, privacyEn, privacyPl, termsEn, termsPl, portalCss, accountJs, profileClient] = await Promise.all([
+    read("account.html"), read("profile.html"), read("netlify.toml"), read("legal/privacy.en.html"), read("legal/privacy.pl.html"), read("legal/terms.en.html"), read("legal/terms.pl.html"), read("css/portal.css"), read("js/account-page.js"), read("js/profile-client.js")
   ]);
   assert.match(account, /id="publicProfileEditor"/);
   assert.match(account, /id="publicProfileForm"/);
@@ -24,6 +24,9 @@ test("public profile route, editor, and legal release gate are present", async (
   assert.match(accountJs, /publicAvatarProcessing/);
   assert.match(account, /data-upload-state="idle"/);
   assert.match(account, /@keyframes public-avatar-spin/);
+  assert.match(accountJs, /readAsDataURL\(file\)/);
+  assert.match(profileClient, /readAsDataURL\(file\)/);
+  assert.doesNotMatch(accountJs + profileClient, /createObjectURL\(file\)/, "avatar validation and preview must not depend on CSP-blocked blob URLs");
   assert.match(accountJs, /ProfileClient\.removeAvatar/);
   assert.match(portalCss, /\.avatar-menu__user\{[^}]*background:transparent/);
   assert.match(page, /id="publicProfileCard"/);
