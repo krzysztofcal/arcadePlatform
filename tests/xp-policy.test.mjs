@@ -10,6 +10,9 @@ assert.equal(configuredDaily.dailyCap, 4500);
 assert.equal(configuredDaily.sessionCap, 4500);
 
 const explicitSession = getXpPolicy({ XP_DAILY_CAP: "3000", XP_SESSION_CAP: "500" });
-assert.equal(explicitSession.sessionCap, 500);
+assert.equal(explicitSession.sessionCap, 3000);
+
+const higherSession = getXpPolicy({ XP_DAILY_CAP: "3000", XP_SESSION_CAP: "5000" });
+assert.equal(higherSession.sessionCap, 5000);
 
 console.log("xp policy tests passed");

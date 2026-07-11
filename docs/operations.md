@@ -251,7 +251,7 @@ Document every toggle change in your incident timeline—the bridge guard expect
 | --- | --- | --- |
 | `XP_DEBUG` | `0` | Include the `debug` object in responses for easier staging diagnostics. |
 | `XP_DAILY_CAP` | `3000` | Maximum XP a user can gain per Warsaw local day (03:00–03:00 CET/CEST). |
-| `XP_SESSION_CAP` | value of `XP_DAILY_CAP` (default `3000`) | Maximum XP a single page/game session can accumulate. Set it explicitly only when a lower per-session ceiling is intentional. |
+| `XP_SESSION_CAP` | value of `XP_DAILY_CAP` (default `3000`) | Legacy session ceiling. Values below `XP_DAILY_CAP` are raised to the daily cap so they cannot stop account progression early. |
 | `XP_DELTA_CAP` | `300` | Largest delta accepted from the client in a single request. |
 | `XP_LOCK_TTL_MS` | `3000` | Duration of the per-session Redis lock that guards concurrent writes. |
 | `XP_SESSION_TTL_SEC` | `604800` | TTL (seconds) for session counters; refreshed on each award/heartbeat to curb key bloat. |
