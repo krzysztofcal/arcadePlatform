@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createSupabaseJwt, mockStoreEvalReturn, parseJsonBody } from "./helpers/xp-test-helpers.mjs";
 
 const mockData = new Map();
@@ -108,10 +108,16 @@ describe("JWT verification and identity selection", () => {
     vi.resetModules();
     store._reset();
     process.env.SUPABASE_JWT_SECRET = "test_supabase_jwt_secret_12345678901234567890";
+    process.env.SUPABASE_URL = "https://stage-test.supabase.co";
+    process.env.SUPABASE_ANON_KEY = "test-anon-key";
     process.env.XP_KEY_NS = "test:xp:v2";
     process.env.XP_DEBUG = "1";
     process.env.XP_REQUIRE_SERVER_SESSION = "0";
     process.env.XP_DAILY_SECRET = "test-secret-for-daily-32chars-long";
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("A1: No Authorization header uses anonymous identity", async () => {
@@ -133,7 +139,7 @@ describe("JWT verification and identity selection", () => {
     expect(keys[3]).toBe(`${process.env.XP_KEY_NS}:total:anon-123`);
   });
 
-  it("A2: Invalid JWT falls back to anonymous identity", async () => {
+  it("A2: Invalid JWT is rejected instead of falling back to anonymous identity", async () => {
     const { handler } = await loadAwardXp();
     await mockStoreEvalReturn([5, 5, 5, 5, Date.now(), 0]);
 
@@ -146,12 +152,9 @@ describe("JWT verification and identity selection", () => {
     });
 
     const body = parseJsonBody(response);
-    expect(response.statusCode).toBe(200);
-    expect(body.debug.authProvided).toBe(true);
-    expect(body.debug.authValid).toBe(false);
-    expect(["malformed_token", "invalid_signature", "invalid_encoding"].includes(body.debug.authReason)).toBe(true);
-    const keys = store.eval.mock.calls[0][1];
-    expect(keys[3]).toBe(`${process.env.XP_KEY_NS}:total:anon-123`);
+    expect(response.statusCode).toBe(401);
+    expect(body.error).toBe("unauthorized");
+    expect(store.eval).not.toHaveBeenCalled();
   });
 
   it("A3: Valid JWT overrides client-provided identities", async () => {
@@ -177,7 +180,7 @@ describe("JWT verification and identity selection", () => {
     expect(response.statusCode).toBe(200);
     expect(body.totalLifetime).toBe(20);
     expect(body.debug.authValid).toBe(true);
-    expect(body.debug.authReason).toBeUndefined();
+    expect(body.debug.authReason).toBe("ok");
     const awardCall = store.eval.mock.calls.find((call) => call[1]?.length === 5);
     const keys = awardCall[1];
     expect(keys[3]).toBe(`${process.env.XP_KEY_NS}:total:user-777`);
@@ -214,7 +217,40 @@ describe("JWT verification and identity selection", () => {
     expect(awardCall[1][3]).toBe(`${process.env.XP_KEY_NS}:total:user-abc`);
   });
 
-  it("A5: calculate-xp falls back to anon when JWT invalid", async () => {
+  it("A4b: calculate-xp resolves Supabase ES256 tokens through shared remote auth", async () => {
+    const userId = "user-es256";
+    const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+    const token = `${encode({ alg: "ES256", typ: "JWT" })}.${encode({ sub: userId, exp: Math.floor(Date.now() / 1000) + 3600 })}.signature`;
+    vi.stubGlobal("fetch", vi.fn(async (url) => {
+      expect(url).toBe("https://stage-test.supabase.co/auth/v1/user");
+      return { ok: true, json: async () => ({ id: userId }) };
+    }));
+    const { handler } = await loadCalculateXp();
+    await mockStoreEvalReturn([12, 12, 12, 12, Date.now(), 0]);
+    const now = Date.now();
+
+    const response = await handler({
+      httpMethod: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        userId: "anon-es256",
+        sessionId: "sess-es256",
+        gameId: "tetris",
+        windowStart: now - 10000,
+        windowEnd: now,
+        inputEvents: 10,
+        visibilitySeconds: 10,
+        scoreDelta: 100,
+      }),
+    });
+
+    expect(response.statusCode).toBe(200);
+    const awardCall = store.eval.mock.calls.find((call) => call[2]?.length === 6);
+    expect(awardCall[1][3]).toBe(`${process.env.XP_KEY_NS}:total:${userId}`);
+    expect(saveUserProfileMock).toHaveBeenCalledWith(expect.objectContaining({ userId, totalXp: 12 }));
+  });
+
+  it("A5: calculate-xp rejects an invalid JWT instead of awarding anon XP", async () => {
     const { handler } = await loadCalculateXp();
     await mockStoreEvalReturn([8, 8, 8, 8, Date.now(), 0]);
     const now = Date.now();
@@ -235,10 +271,9 @@ describe("JWT verification and identity selection", () => {
     });
 
     const body = parseJsonBody(response);
-    expect(response.statusCode).toBe(200);
-    expect(body.ok).toBe(true);
-    const keys = store.eval.mock.calls[0][1];
-    expect(keys[3]).toBe(`${process.env.XP_KEY_NS}:total:anon-xyz`);
+    expect(response.statusCode).toBe(401);
+    expect(body.error).toBe("unauthorized");
+    expect(store.eval).not.toHaveBeenCalled();
   });
 
   it("A6: start-session prefers JWT identity and rejects missing identity", async () => {

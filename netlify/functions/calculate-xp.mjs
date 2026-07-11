@@ -15,7 +15,7 @@
 
 import crypto from "node:crypto";
 import { store, saveUserProfile, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
-import { klog } from "./_shared/supabase-admin.mjs";
+import { extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
 import { canonicalizeXpGameId, getXpPolicy, migrateAnonXpToUser, resolveXpIdentity } from "./_shared/xp-identity.mjs";
@@ -76,9 +76,6 @@ async function persistUserProfile({ userId, totalXp, now }) {
     klog("calc_save_user_profile_failed", { error: err?.message });
   }
 }
-
-// Supabase JWT verification
-const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_JWT_SECRET_V2 || "";
 
 // CORS
 const CORS_ALLOW = (() => {
@@ -192,74 +189,6 @@ const GAME_XP_RULES = {
 // ============================================================================
 // Utility Functions
 // ============================================================================
-
-const safeEquals = (a, b) => {
-  if (!a || !b || a.length !== b.length) return false;
-  const left = Buffer.from(a, "utf8");
-  const right = Buffer.from(b, "utf8");
-  if (left.length !== right.length) return false;
-  return crypto.timingSafeEqual(left, right);
-};
-
-const decodeBase64UrlJson = (segment) => {
-  if (!segment) return null;
-  try {
-    const decoded = Buffer.from(segment, "base64url").toString("utf8");
-    return JSON.parse(decoded);
-  } catch {
-    return null;
-  }
-};
-
-const extractBearerToken = (headers) => {
-  const headerValue = headers?.authorization || headers?.Authorization || headers?.AUTHORIZATION;
-  if (!headerValue || typeof headerValue !== "string") return null;
-  const match = /^Bearer\s+(.+)$/.exec(headerValue.trim());
-  return match ? match[1].trim() : null;
-};
-
-const verifySupabaseJwt = (token) => {
-  if (!token) {
-    return { provided: false, valid: false, userId: null, reason: "missing_token" };
-  }
-  if (!SUPABASE_JWT_SECRET || SUPABASE_JWT_SECRET.length < 32) {
-    return { provided: false, valid: false, userId: null, reason: "disabled_or_missing_secret" };
-  }
-
-  const [headerSegment, payloadSegment, signatureSegment] = token.split(".");
-  if (!headerSegment || !payloadSegment || !signatureSegment) {
-    return { provided: true, valid: false, userId: null, reason: "malformed_token" };
-  }
-
-  const header = decodeBase64UrlJson(headerSegment);
-  const payload = decodeBase64UrlJson(payloadSegment);
-  if (!header || !payload) {
-    return { provided: true, valid: false, userId: null, reason: "invalid_encoding" };
-  }
-
-  const alg = header.alg || "HS256";
-  const hmacAlg = alg === "HS512" ? "sha512" : "sha256";
-  const expectedSig = crypto
-    .createHmac(hmacAlg, SUPABASE_JWT_SECRET)
-    .update(`${headerSegment}.${payloadSegment}`)
-    .digest("base64url");
-
-  if (!safeEquals(signatureSegment, expectedSig)) {
-    return { provided: true, valid: false, userId: null, reason: "invalid_signature" };
-  }
-
-  const nowSec = Math.floor(Date.now() / 1000);
-  if (payload.exp && Number(payload.exp) <= nowSec) {
-    return { provided: true, valid: false, userId: null, reason: "expired" };
-  }
-
-  const userId = typeof payload.sub === "string" ? payload.sub : null;
-  if (!userId) {
-    return { provided: true, valid: false, userId: null, reason: "no_sub" };
-  }
-
-  return { provided: true, valid: true, userId, reason: "ok", payload };
-};
 
 const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
 
@@ -768,7 +697,10 @@ export async function handler(event) {
   const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : null;
 
   const jwtToken = extractBearerToken(event.headers);
-  const authContext = verifySupabaseJwt(jwtToken);
+  const authContext = await verifySupabaseJwt(jwtToken);
+  if (jwtToken && !authContext.valid) {
+    return json(401, { error: "unauthorized", message: authContext.reason || "invalid_token" }, origin);
+  }
   const { supabaseUserId, identityId, anonId: resolvedAnonId } = resolveXpIdentity({ anonId, authContext });
 
   if (!identityId || !sessionId) {
