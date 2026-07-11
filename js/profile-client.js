@@ -9,6 +9,7 @@
   var AVATAR_MAX_BYTES = 1024 * 1024;
   var AVATAR_MAX_DIMENSION = 1024;
   var AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+  var AVATAR_TYPE_ALIASES = { 'image/jpg': 'image/jpeg', 'image/pjpeg': 'image/jpeg', 'image/x-png': 'image/png' };
   var cache = null;
   var inFlight = null;
 
@@ -105,7 +106,8 @@
   }
 
   async function uploadAvatar(file){
-    if (!file || AVATAR_TYPES.indexOf(file.type) === -1){
+    var mimeType = file ? (AVATAR_TYPE_ALIASES[String(file.type || '').toLowerCase()] || String(file.type || '').toLowerCase()) : '';
+    if (!file || AVATAR_TYPES.indexOf(mimeType) === -1){
       var typeError = new Error('unsupported_avatar_type');
       typeError.code = 'unsupported_avatar_type';
       throw typeError;
@@ -120,13 +122,13 @@
     onProgress('uploading');
     var signed = await parse(await authedFetch(AVATAR_UPLOAD_URL, {
       method: 'POST',
-      body: JSON.stringify({ mimeType: file.type, size: file.size })
+      body: JSON.stringify({ mimeType: mimeType, size: file.size })
     }));
     var uploadUrl = String(signed.uploadUrl || '');
     if (signed.token && uploadUrl.indexOf('token=') === -1){
       uploadUrl += (uploadUrl.indexOf('?') === -1 ? '?' : '&') + 'token=' + encodeURIComponent(signed.token);
     }
-    var uploadResponse = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+    var uploadResponse = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': mimeType }, body: file });
     if (!uploadResponse.ok){
       var uploadError = new Error('avatar_upload_failed');
       uploadError.code = 'avatar_upload_failed';

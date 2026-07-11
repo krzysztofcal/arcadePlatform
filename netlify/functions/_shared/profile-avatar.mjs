@@ -10,6 +10,7 @@ const MAX_DIMENSION = 1024;
 const PENDING_TTL_MS = 5 * 60 * 1000;
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
 const FORMAT_MIME = Object.freeze({ jpeg: "image/jpeg", png: "image/png", webp: "image/webp" });
+const MIME_ALIASES = Object.freeze({ "image/jpg": "image/jpeg", "image/pjpeg": "image/jpeg", "image/x-png": "image/png" });
 
 function avatarError(code, status = 400) {
   const error = new Error(code);
@@ -44,7 +45,8 @@ async function storageRequest(path, options = {}, deps = {}) {
 }
 
 function validateUploadRequest(payload) {
-  const mimeType = typeof payload?.mimeType === "string" ? payload.mimeType.trim().toLowerCase() : "";
+  const suppliedMime = typeof payload?.mimeType === "string" ? payload.mimeType.trim().toLowerCase() : "";
+  const mimeType = MIME_ALIASES[suppliedMime] || suppliedMime;
   const size = Number(payload?.size);
   if (!ALLOWED_MIME.has(mimeType)) throw avatarError("unsupported_avatar_type");
   if (!Number.isInteger(size) || size < 1 || size > MAX_SOURCE_BYTES) throw avatarError("avatar_too_large");
@@ -146,7 +148,7 @@ async function finalizeAvatar(userId, uploadId, deps = {}) {
     const image = (deps.sharp || sharp)(source, { failOn: "error", limitInputPixels: MAX_DIMENSION * MAX_DIMENSION });
     const metadata = await image.metadata();
     const actualMime = FORMAT_MIME[metadata.format];
-    if (!actualMime || actualMime !== pending.declared_mime_type) throw avatarError("invalid_avatar_file");
+    if (!actualMime || !ALLOWED_MIME.has(actualMime)) throw avatarError("invalid_avatar_file");
     if (!metadata.width || !metadata.height || metadata.width > MAX_DIMENSION || metadata.height > MAX_DIMENSION) {
       throw avatarError("avatar_dimensions_too_large");
     }

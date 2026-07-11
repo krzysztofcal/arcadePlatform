@@ -8,8 +8,31 @@ const USER_ID = "00000000-0000-4000-8000-000000000003";
 
 test("avatar upload request accepts only bounded raster formats", () => {
   assert.deepEqual(validateUploadRequest({ mimeType: "image/png", size: 1024 }), { mimeType: "image/png", size: 1024 });
+  assert.deepEqual(validateUploadRequest({ mimeType: "image/x-png", size: 1024 }), { mimeType: "image/png", size: 1024 });
   assert.throws(() => validateUploadRequest({ mimeType: "image/svg+xml", size: 1024 }), { code: "unsupported_avatar_type" });
   assert.throws(() => validateUploadRequest({ mimeType: "image/png", size: 1048577 }), { code: "avatar_too_large" });
+});
+
+test("finalization trusts detected safe image content over browser-declared raster MIME", async () => {
+  const source = await sharp({ create: { width: 612, height: 778, channels: 3, background: "#336699" } }).png().toBuffer();
+  const uploadId = "10000000-0000-4000-8000-000000000005";
+  let published = false;
+  const profile = { userId: USER_ID, handle: "png-avatar", displayName: "PNG Avatar", bio: "", avatarKey: null, avatarVariant: "fox-blue", handleCustomizedAt: null };
+  const result = await finalizeAvatar(USER_ID, uploadId, {
+    executeSql: async (query) => query.includes("update public.profile_avatar_uploads")
+      ? [{ id: uploadId, source_path: `pending/${uploadId}`, declared_mime_type: "image/jpeg", declared_size: source.length }]
+      : [],
+    storageConfig: { baseUrl: "https://stage.supabase.co", serviceKey: "service-role" },
+    fetch: async (_url, options = {}) => {
+      if (options.method === "GET") return { ok: true, arrayBuffer: async () => source, text: async () => "" };
+      if (options.method === "POST") { published = true; return { ok: true, text: async () => "" }; }
+      if (options.method === "DELETE") return { ok: true, text: async () => "" };
+      throw new Error(`unexpected request ${options.method}`);
+    },
+    updateUserAvatarKey: async (_userId, avatarKey) => ({ profile: { ...profile, avatarKey }, previousAvatarKey: null }),
+  });
+  assert.equal(published, true);
+  assert.match(result.avatarKey, /^[0-9a-f-]{36}\.webp$/);
 });
 
 test("upload-url endpoint requires auth and returns only backend-generated upload data", async () => {
