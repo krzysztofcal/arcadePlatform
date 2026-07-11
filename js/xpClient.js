@@ -38,6 +38,7 @@
     migrationNoticeText: null,
     migrationNoticeClose: null,
     migrationNoticeLangBound: false,
+    awardSessionId: null,
   };
 
   let serverCalcInitRequested = false;
@@ -219,6 +220,10 @@
   async function isUserLoggedIn() {
     try {
       const bridge = getAuthBridge();
+      if (bridge && typeof bridge.getCurrentUserId === "function") {
+        const userId = await bridge.getCurrentUserId();
+        if (typeof userId === "string" && userId.trim()) return true;
+      }
       if (bridge && typeof bridge.getAccessToken === "function") {
         const token = await bridge.getAccessToken();
         if (token) return true;
@@ -285,16 +290,12 @@
     try {
       const ls = window.localStorage;
       let userId = ls.getItem(USER_KEY);
-      let sessionId = ls.getItem(SESSION_KEY);
       if (!userId) {
         userId = randomId();
         ls.setItem(USER_KEY, userId);
       }
-      if (!sessionId) {
-        sessionId = randomId();
-        ls.setItem(SESSION_KEY, sessionId);
-      }
-      return { userId, sessionId };
+      if (!state.awardSessionId) state.awardSessionId = randomId();
+      return { userId, sessionId: state.awardSessionId };
     } catch (_) {
       if (!state.fallbackIds) {
         state.fallbackIds = {
@@ -517,6 +518,7 @@
     state.authPromise = null;
     state.statusBootstrapped = false;
     state.statusPromise = null;
+    state.awardSessionId = randomId();
     clearServerSession();
     clearIdentityBoundXpCache({
       preserveLegacy: !!migrationLegacy,
@@ -785,7 +787,10 @@
     const keepalive = opts.keepalive === true;
     const allowBeacon = opts.allowBeacon === true;
     const payload = JSON.stringify(body);
-    await ensureAuthTokenWithRetry();
+    const authToken = await ensureAuthTokenWithRetry();
+    if (!authToken && await isUserLoggedIn()) {
+      throw new Error("Authenticated XP award requires an access token");
+    }
     const headers = await buildAuthHeaders({ "content-type": "application/json" });
     const requestInit = {
       method: "POST",
@@ -1043,7 +1048,10 @@
     let attempt = 0;
     const payloadJson = JSON.stringify(body);
     const allowBeacon = opts.allowBeacon === true;
-    await ensureAuthTokenWithRetry();
+    const authToken = await ensureAuthTokenWithRetry();
+    if (!authToken && await isUserLoggedIn()) {
+      throw new Error("Authenticated XP award requires an access token");
+    }
     const headers = await buildAuthHeaders({ "content-type": "application/json" });
     while (attempt < 3) {
       let networkError = false;

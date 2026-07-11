@@ -69,7 +69,7 @@ Client → server payload (minimal set, extras allowed):
 
 Server behavior:
 - Requests with `delta` outside `0…XP_DELTA_CAP` (default 300) are rejected. Legacy clients can continue sending `scoreDelta` / `pointsPerPeriod` and the server will coerce them once per request.
-- XP is granted directly from `delta` while enforcing per-session (`XP_SESSION_CAP`, default 300) and per-day (`XP_DAILY_CAP`, default 3000) ceilings. The daily cap resets at 03:00 Europe/Warsaw (handles CET/CEST) and partial grants surface `reason: 'daily_cap_partial' | 'session_cap_partial'`.
+- XP is granted directly from `delta` while enforcing per-session (`XP_SESSION_CAP`, defaults to the daily cap) and per-day (`XP_DAILY_CAP`, default 3000) ceilings. The browser creates a fresh in-memory award session on each page load instead of persisting it indefinitely. The daily cap resets at 03:00 Europe/Warsaw (handles CET/CEST) and partial grants surface `reason: 'daily_cap_partial' | 'session_cap_partial'`.
 - Responses remain backwards compatible: `{ ok, awarded, granted, totalToday, remaining, dayKey, nextReset, cap, totalLifetime }` plus `sessionTotal`, `lastSync`, and `capDelta` so clients can rehydrate badge state, countdown to the next reset, and mirror the server cap.
 - When `XP_DEBUG=1`, the payload includes `debug` with the requested delta, caps, `lastSync`, and status code.
 

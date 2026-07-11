@@ -10,9 +10,10 @@ const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 
 export function getXpPolicy(env = process.env) {
   const sessionTtlSec = Math.max(0, asNumber(env.XP_SESSION_TTL_SEC, 604800));
+  const dailyCap = Math.max(0, asNumber(env.XP_DAILY_CAP, 3000));
   return {
-    dailyCap: Math.max(0, asNumber(env.XP_DAILY_CAP, 3000)),
-    sessionCap: Math.max(0, asNumber(env.XP_SESSION_CAP, 300)),
+    dailyCap,
+    sessionCap: Math.max(0, asNumber(env.XP_SESSION_CAP, dailyCap)),
     deltaCap: Math.max(0, asNumber(env.XP_DELTA_CAP, 300)),
     sessionTtlSec,
     sessionTtlMs: sessionTtlSec * 1000,

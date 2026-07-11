@@ -1,0 +1,15 @@
+import assert from "node:assert/strict";
+import { getXpPolicy } from "../netlify/functions/_shared/xp-identity.mjs";
+
+const defaults = getXpPolicy({});
+assert.equal(defaults.dailyCap, 3000);
+assert.equal(defaults.sessionCap, 3000);
+
+const configuredDaily = getXpPolicy({ XP_DAILY_CAP: "4500" });
+assert.equal(configuredDaily.dailyCap, 4500);
+assert.equal(configuredDaily.sessionCap, 4500);
+
+const explicitSession = getXpPolicy({ XP_DAILY_CAP: "3000", XP_SESSION_CAP: "500" });
+assert.equal(explicitSession.sessionCap, 500);
+
+console.log("xp policy tests passed");

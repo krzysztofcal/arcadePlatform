@@ -18,6 +18,7 @@ run("node", ["scripts/syntax-check.mjs"], "syntax");
 
 run("node", ["tests/xp-client.test.mjs"], "xp-client");
 run("node", ["tests/xp-client-contract.test.mjs"], "xp-client-contract");
+run("node", ["tests/xp-policy.test.mjs"], "xp-policy");
 run("node", ["tests/xp-server-migration-notice.test.mjs"], "xp-server-migration-notice");
 run("node", ["tests/xp-core-authoritative-reset.test.mjs"], "xp-core-authoritative-reset");
 run("node", ["tests/xp-game-hook.test.mjs"], "xp-game-hook");
