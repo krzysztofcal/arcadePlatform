@@ -4,6 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+const { DEFAULT_BASE_XP, DEFAULT_MULTIPLIER } = await import("../netlify/functions/_shared/xp-level.mjs");
 
 test("public profile route, editor, and legal release gate are present", async () => {
   const [account, page, config, privacyEn, privacyPl, termsEn, termsPl, portalCss, accountJs] = await Promise.all([
@@ -17,12 +18,30 @@ test("public profile route, editor, and legal release gate are present", async (
   assert.match(accountJs, /setPublicProfileSaveState\('saved'/);
   assert.match(portalCss, /\.avatar-menu__user\{[^}]*background:transparent/);
   assert.match(page, /id="publicProfileCard"/);
+  assert.match(page, /id="publicProfileXp"/);
+  assert.match(page, /id="publicProfileLevel"/);
   assert.match(page, /src="\/js\/public-profile-page\.js"/);
   assert.equal((page.match(/(?:href|src)="(?:css|js)\//g) || []).length, 0, "profile page assets must be root-absolute under /u/:handle");
   assert.match(config, /from = "\/u\/:handle"\s+to = "\/profile\.html"/);
   assert.match(config, /\[context\.deploy-preview\.environment\][\s\S]*?PUBLIC_PROFILES_ENABLED = "1"/);
   assert.match(config, /\[context\.production\.environment\][\s\S]*?PUBLIC_PROFILES_ENABLED = "0"/);
   for (const document of [privacyEn, privacyPl, termsEn, termsPl]) assert.match(document, /profil|profile/i);
+});
+
+test("public profile page renders the server-provided XP and level", async () => {
+  const source = await read("js/public-profile-page.js");
+  assert.match(source, /profile\.xp/);
+  assert.match(source, /profile\.level/);
+  assert.match(source, /publicProfileXp/);
+  assert.match(source, /publicProfileLevel/);
+});
+
+test("public XP level contract is fixed consistently across server and client", async () => {
+  const core = await read("js/xp/core.js");
+  assert.ok(core.includes(`const LEVEL_BASE_XP = ${DEFAULT_BASE_XP};`));
+  assert.ok(core.includes(`const LEVEL_MULTIPLIER = ${DEFAULT_MULTIPLIER};`));
+  assert.equal(core.includes("window.XP_LEVEL_BASE_XP"), false);
+  assert.equal(core.includes("window.XP_LEVEL_MULTIPLIER"), false);
 });
 
 test("every backend avatar variant has frontend styles", async () => {

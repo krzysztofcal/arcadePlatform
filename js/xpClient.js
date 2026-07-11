@@ -10,6 +10,10 @@
   const MAX_TS = Number.MAX_SAFE_INTEGER;
   const DEFAULT_DELTA_CAP = 300;
   const AUTH_CACHE_MS = 60000;
+  const LEGACY_XP_CACHE_KEY = "kcswh:xp:last";
+  const LEGACY_XP_RUNTIME_KEY = "kcswh:xp:regen";
+  const XP_MIGRATION_NOTICE_PREFIX = "kcswh:xp:server-migration-notice:v1:";
+  const XP_MIGRATION_NOTICE_ID = "xpServerMigrationNotice";
 
   // Session states: "none" | "pending" | "ready"
   const SESSION_NONE = "none";
@@ -29,6 +33,12 @@
     authCheckedAt: 0,
     authPromise: null,
     authChangeBound: false,
+    initialStatusPending: false,
+    migrationNotice: null,
+    migrationNoticeText: null,
+    migrationNoticeClose: null,
+    migrationNoticeLangBound: false,
+    awardSessionId: null,
   };
 
   let serverCalcInitRequested = false;
@@ -210,6 +220,10 @@
   async function isUserLoggedIn() {
     try {
       const bridge = getAuthBridge();
+      if (bridge && typeof bridge.getCurrentUserId === "function") {
+        const userId = await bridge.getCurrentUserId();
+        if (typeof userId === "string" && userId.trim()) return true;
+      }
       if (bridge && typeof bridge.getAccessToken === "function") {
         const token = await bridge.getAccessToken();
         if (token) return true;
@@ -276,16 +290,12 @@
     try {
       const ls = window.localStorage;
       let userId = ls.getItem(USER_KEY);
-      let sessionId = ls.getItem(SESSION_KEY);
       if (!userId) {
         userId = randomId();
         ls.setItem(USER_KEY, userId);
       }
-      if (!sessionId) {
-        sessionId = randomId();
-        ls.setItem(SESSION_KEY, sessionId);
-      }
-      return { userId, sessionId };
+      if (!state.awardSessionId) state.awardSessionId = randomId();
+      return { userId, sessionId: state.awardSessionId };
     } catch (_) {
       if (!state.fallbackIds) {
         state.fallbackIds = {
@@ -295,6 +305,11 @@
       }
       return state.fallbackIds;
     }
+  }
+
+  function rotateAwardSession() {
+    state.awardSessionId = randomId();
+    state.lastTs = 0;
   }
 
   // Server-side session management
@@ -356,17 +371,137 @@
     state.sessionStatus = SESSION_NONE;
   }
 
-  function clearIdentityBoundXpCache() {
+  function clearIdentityBoundStorage() {
     try {
       const ls = window.localStorage;
-      ls.removeItem("kcswh:xp:last");
-      ls.removeItem("kcswh:xp:regen");
+      ls.removeItem(LEGACY_XP_CACHE_KEY);
+      ls.removeItem(LEGACY_XP_RUNTIME_KEY);
     } catch (_) {}
+  }
+
+  function clearIdentityBoundXpCache(options) {
+    if (!options || options.preserveLegacy !== true) {
+      clearIdentityBoundStorage();
+    }
     try {
       if (window.XP && typeof window.XP.resetIdentityCache === "function") {
-        window.XP.resetIdentityCache();
+        window.XP.resetIdentityCache({ preserveBadge: options?.preserveBadge === true });
       }
     } catch (_) {}
+  }
+
+  function readLegacyXp() {
+    let raw = null;
+    try {
+      raw = window.localStorage.getItem(LEGACY_XP_CACHE_KEY);
+      if (!raw) return { total: 0, raw: null };
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { total: 0, raw };
+      const values = [parsed.totalLifetime, parsed.serverTotalXp, parsed.badgeShownXp]
+        .filter((value) => Number.isSafeInteger(value) && value >= 0);
+      return { total: values.length ? Math.max(...values) : 0, raw };
+    } catch (_) {
+      return { total: 0, raw };
+    }
+  }
+
+  function getLocalizedText(key, fallback) {
+    try {
+      if (window.I18N && typeof window.I18N.format === "function") {
+        const value = window.I18N.format(key);
+        if (value) return value;
+      }
+      if (window.I18N && typeof window.I18N.t === "function") {
+        const value = window.I18N.t(key);
+        if (value) return value;
+      }
+    } catch (_) {}
+    return fallback;
+  }
+
+  function updateMigrationNoticeText() {
+    if (!state.migrationNoticeText) return;
+    state.migrationNoticeText.textContent = getLocalizedText(
+      "xpServerMigrationNotice",
+      "Your account XP is now synchronized with the server. Some XP previously shown only on this device was not saved to your account and could not be transferred.",
+    );
+    if (state.migrationNoticeClose) {
+      state.migrationNoticeClose.setAttribute("aria-label", getLocalizedText(
+        "xpServerMigrationDismiss",
+        "Dismiss XP synchronization notice",
+      ));
+    }
+  }
+
+  function ensureMigrationNotice() {
+    if (typeof document === "undefined" || !document || !document.body) return null;
+    if (state.migrationNotice && document.body.contains(state.migrationNotice)) return state.migrationNotice;
+
+    const notice = document.createElement("div");
+    notice.id = XP_MIGRATION_NOTICE_ID;
+    notice.className = "xp-server-migration-notice";
+    notice.setAttribute("role", "status");
+    notice.setAttribute("aria-live", "polite");
+
+    const text = document.createElement("p");
+    text.className = "xp-server-migration-notice__text";
+    notice.appendChild(text);
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "xp-server-migration-notice__close";
+    close.textContent = "×";
+    close.addEventListener("click", () => {
+      notice.hidden = true;
+      notice.remove();
+      state.migrationNotice = null;
+      state.migrationNoticeText = null;
+      state.migrationNoticeClose = null;
+    });
+    notice.appendChild(close);
+    document.body.appendChild(notice);
+
+    state.migrationNotice = notice;
+    state.migrationNoticeText = text;
+    state.migrationNoticeClose = close;
+    updateMigrationNoticeText();
+    if (!state.migrationNoticeLangBound) {
+      document.addEventListener("langchange", updateMigrationNoticeText);
+      state.migrationNoticeLangBound = true;
+    }
+    return notice;
+  }
+
+  async function getAuthenticatedUserId() {
+    try {
+      const bridge = getAuthBridge();
+      if (bridge && typeof bridge.getCurrentUserId === "function") {
+        const userId = await bridge.getCurrentUserId();
+        if (typeof userId === "string" && userId.trim()) return userId.trim();
+      }
+    } catch (_) {}
+    try {
+      if (window.SupabaseAuth && typeof window.SupabaseAuth.getCurrentUser === "function") {
+        const user = await window.SupabaseAuth.getCurrentUser();
+        if (user && typeof user.id === "string" && user.id.trim()) return user.id.trim();
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function migrationMarkerKey(identity) {
+    return `${XP_MIGRATION_NOTICE_PREFIX}${identity}`;
+  }
+
+  function showMigrationNoticeIfNeeded(legacyLocalXp, serverTotalXp, identity) {
+    if (!identity || legacyLocalXp <= serverTotalXp) return;
+    let shown = false;
+    try { shown = window.localStorage.getItem(migrationMarkerKey(identity)) === "1"; } catch (_) {}
+    if (shown) return;
+    const notice = ensureMigrationNotice();
+    if (!notice) return;
+    notice.hidden = false;
+    try { window.localStorage.setItem(migrationMarkerKey(identity), "1"); } catch (_) {}
   }
 
   function schedule(callback, delay) {
@@ -377,15 +512,27 @@
   }
 
   function handleAuthChange(event) {
+    const eventName = typeof event === "string" ? event : "unknown";
+    const isGameHost = window.XP_IS_GAME_HOST === true
+      || (typeof document !== "undefined" && !!(document && document.body && document.body.hasAttribute("data-game-host")));
+    const migrationLegacy = !isGameHost && (eventName === "SIGNED_IN" || eventName === "INITIAL_SESSION")
+      ? readLegacyXp()
+      : null;
     state.authToken = null;
     state.authCheckedAt = 0;
     state.authPromise = null;
     state.statusBootstrapped = false;
     state.statusPromise = null;
+    state.awardSessionId = randomId();
     clearServerSession();
-    clearIdentityBoundXpCache();
-    klog("xp_auth_changed", { event: typeof event === "string" ? event : "unknown" });
-    schedule(() => refreshBadgeFromServer(), 0);
+    clearIdentityBoundXpCache({
+      preserveLegacy: !!migrationLegacy,
+      preserveBadge: !!migrationLegacy,
+    });
+    klog("xp_auth_changed", { event: eventName });
+    schedule(() => migrationLegacy
+      ? refreshInitialStatus(migrationLegacy)
+      : refreshBadgeFromServer(), 0);
   }
 
   function bindAuthChanges(attempt) {
@@ -400,6 +547,58 @@
     if ((attempt || 0) < 10) {
       schedule(() => bindAuthChanges((attempt || 0) + 1), 50);
     }
+  }
+
+  function scheduleInitialStatusRefresh() {
+    if (typeof document === "undefined" || !document || typeof document.getElementById !== "function") return;
+    if (!document.getElementById("xpBadge")) return;
+    if (window.XP_IS_GAME_HOST === true || (document.body && document.body.hasAttribute("data-game-host"))) return;
+    schedule(() => refreshInitialStatus(), 0);
+  }
+
+  async function refreshInitialStatus(legacyOverride, attempt) {
+    state.initialStatusPending = true;
+    const legacy = legacyOverride && typeof legacyOverride === "object"
+      ? legacyOverride
+      : readLegacyXp();
+    const retryAttempt = Number.isFinite(attempt) ? attempt : 0;
+    let authToken = null;
+    try { authToken = await ensureAuthTokenWithRetry(); } catch (_) {}
+    if (!authToken) {
+      let loggedIn = false;
+      try { loggedIn = await isUserLoggedIn(); } catch (_) {}
+      if (loggedIn) {
+        if (retryAttempt < 4) {
+          schedule(() => refreshInitialStatus(legacy, retryAttempt + 1), 500);
+        } else {
+          state.initialStatusPending = false;
+        }
+        return;
+      }
+      state.initialStatusPending = false;
+      await refreshBadgeFromServer();
+      return;
+    }
+
+    const identity = (await getAuthenticatedUserId()) || ensureIds().sessionId;
+    const payload = await refreshBadgeFromServer({ allowServerRegression: true });
+    const serverTotal = Number(payload?.totalLifetime);
+    if (payload?.ok !== true || payload?.status !== "statusOnly"
+      || !Number.isSafeInteger(serverTotal) || serverTotal < 0) {
+      state.initialStatusPending = false;
+      return;
+    }
+    if (!window.XP || typeof window.XP.refreshFromServerStatus !== "function") {
+      if (retryAttempt < 4) {
+        schedule(() => refreshInitialStatus(legacy, retryAttempt + 1), 250);
+      } else {
+        state.initialStatusPending = false;
+      }
+      return;
+    }
+    clearIdentityBoundStorage();
+    showMigrationNoticeIfNeeded(legacy.total, serverTotal, identity);
+    state.initialStatusPending = false;
   }
 
   async function startServerSession(force = false) {
@@ -509,6 +708,10 @@
     return { status: state.sessionStatus, token };
   }
 
+  function isInitialStatusPending() {
+    return state.initialStatusPending === true;
+  }
+
   function currentClientCap() {
     const globalCap = Number(window.XP_DELTA_CAP_CLIENT);
     if (Number.isFinite(globalCap) && globalCap >= 0) return globalCap;
@@ -589,7 +792,10 @@
     const keepalive = opts.keepalive === true;
     const allowBeacon = opts.allowBeacon === true;
     const payload = JSON.stringify(body);
-    await ensureAuthTokenWithRetry();
+    const authToken = await ensureAuthTokenWithRetry();
+    if (!authToken && await isUserLoggedIn()) {
+      throw new Error("Authenticated XP award requires an access token");
+    }
     const headers = await buildAuthHeaders({ "content-type": "application/json" });
     const requestInit = {
       method: "POST",
@@ -717,6 +923,7 @@
         responseBody._transport = result.transport;
       }
       updateCapFromPayload(responseBody);
+      if (responseBody.sessionCapped === true) rotateAwardSession();
       if (responseBody && responseBody.locked && attempt === 0) {
         await new Promise(resolve => setTimeout(resolve, 100 + Math.floor(Math.random() * 200)));
         body.ts = sanitizeTs({ ts: Math.max(Date.now(), body.ts + 1) });
@@ -731,7 +938,10 @@
   async function fetchStatus() {
     const { userId, sessionId } = ensureIds();
     const body = { userId, sessionId, gameId: "status", statusOnly: true };
-    await ensureAuthTokenWithRetry();
+    const authToken = await ensureAuthTokenWithRetry();
+    if (!authToken && await isUserLoggedIn()) {
+      throw new Error("XP status requires an authenticated token");
+    }
     const headers = await buildAuthHeaders({ "content-type": "application/json" });
     const res = await fetch(FN_URL, {
       method: "POST",
@@ -752,9 +962,14 @@
   async function refreshBadgeFromServer(options) {
     try {
       const payload = await fetchStatus();
+      const allowServerRegression = options?.allowServerRegression === true
+        || state.initialStatusPending === true;
       if (typeof window !== "undefined" && window.XP && typeof window.XP.refreshFromServerStatus === "function") {
         try {
-          window.XP.refreshFromServerStatus(payload, { source: "status" });
+          window.XP.refreshFromServerStatus(payload, {
+            source: "status",
+            allowServerRegression,
+          });
         } catch (_) {}
       }
       return payload;
@@ -839,7 +1054,10 @@
     let attempt = 0;
     const payloadJson = JSON.stringify(body);
     const allowBeacon = opts.allowBeacon === true;
-    await ensureAuthTokenWithRetry();
+    const authToken = await ensureAuthTokenWithRetry();
+    if (!authToken && await isUserLoggedIn()) {
+      throw new Error("Authenticated XP award requires an access token");
+    }
     const headers = await buildAuthHeaders({ "content-type": "application/json" });
     while (attempt < 3) {
       let networkError = false;
@@ -894,6 +1112,7 @@
         // Update client cap from server response
         if (responseBody && typeof responseBody === "object") {
           if (Number.isFinite(responseBody.capDelta)) setClientCap(Number(responseBody.capDelta));
+          if (responseBody.sessionCapped === true) rotateAwardSession();
         }
 
         // Dispatch event for listeners
@@ -949,8 +1168,10 @@
     clearServerSession,
     ensureServerSession,
     getSessionStatus,
+    isInitialStatusPending,
     isAuthenticated,
   };
 
   bindAuthChanges();
+  scheduleInitialStatusRefresh();
 })();

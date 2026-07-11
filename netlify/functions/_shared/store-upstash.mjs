@@ -3,6 +3,7 @@ import { klog } from "./supabase-admin.mjs";
 
 const BASE = process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+const XP_NAMESPACE = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
 const USER_PROFILE_PREFIX = "kcswh:xp:user:";
 const FORCE_MEMORY_STORE = process.env.XP_TEST_MODE === "1";
 
@@ -321,20 +322,48 @@ const clampTotalXp = (value) => {
 };
 
 const profileKey = (userId) => `${USER_PROFILE_PREFIX}${userId}`;
+const xpTotalKey = (userId) => `${XP_NAMESPACE}:total:${userId}`;
+
+function normalizeUserProfile(raw, userId) {
+  if (!raw) return null;
+  const parsed = JSON.parse(raw);
+  const totalXp = clampTotalXp(parsed.totalXp ?? parsed.total ?? 0);
+  const createdAt = typeof parsed.createdAt === "string" ? parsed.createdAt : null;
+  const updatedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : createdAt;
+  return { userId, totalXp, createdAt, updatedAt };
+}
 
 export async function getUserProfile(userId) {
   if (!userId) return null;
   try {
-    const raw = await store.get(profileKey(userId));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    const totalXp = clampTotalXp(parsed.totalXp ?? parsed.total ?? 0);
-    const createdAt = typeof parsed.createdAt === "string" ? parsed.createdAt : null;
-    const updatedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : createdAt;
-    return { userId, totalXp, createdAt, updatedAt };
+    return normalizeUserProfile(await store.get(profileKey(userId)), userId);
   } catch {
     return null;
   }
+}
+
+export async function getUserProfileStrict(userId) {
+  if (!userId) return null;
+  if (isMemoryStore && !FORCE_MEMORY_STORE) {
+    const error = new Error("xp_store_unavailable");
+    error.code = "xp_store_unavailable";
+    throw error;
+  }
+  return normalizeUserProfile(await store.get(profileKey(userId)), userId);
+}
+
+export async function getUserXpTotalStrict(userId) {
+  if (!userId) return 0;
+  if (isMemoryStore && !FORCE_MEMORY_STORE) {
+    const error = new Error("xp_store_unavailable");
+    error.code = "xp_store_unavailable";
+    throw error;
+  }
+  const raw = await store.get(xpTotalKey(userId));
+  if (raw == null) return 0;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) throw new Error("invalid_xp_total");
+  return clampTotalXp(parsed);
 }
 
 export async function saveUserProfile({ userId, totalXp, now = Date.now() }) {

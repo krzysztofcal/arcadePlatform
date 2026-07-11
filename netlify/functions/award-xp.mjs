@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { store, saveUserProfile, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
-import { klog } from "./_shared/supabase-admin.mjs";
+import { extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
 import { buildCorsAllowlist, buildCorsHeaders } from "./_shared/xp-cors.mjs";
@@ -72,61 +72,6 @@ const safeEquals = (a, b) => {
   const right = Buffer.from(b, "utf8");
   if (left.length !== right.length) return false;
   return crypto.timingSafeEqual(left, right);
-};
-
-const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_JWT_SECRET_V2;
-if (!SUPABASE_JWT_SECRET) {
-  klog("xp_auth_jwt_secret_missing", {});
-}
-
-const decodeBase64UrlJson = (segment) => {
-  if (!segment) return null;
-  try {
-    const decoded = Buffer.from(segment, "base64url").toString("utf8");
-    return JSON.parse(decoded);
-  } catch {
-    return null;
-  }
-};
-
-const extractBearerToken = (headers) => {
-  const headerValue = headers?.authorization || headers?.Authorization || headers?.AUTHORIZATION;
-  if (!headerValue || typeof headerValue !== "string") return null;
-  const match = /^Bearer\s+(.+)$/i.exec(headerValue.trim());
-  return match ? match[1].trim() : null;
-};
-
-const verifySupabaseJwt = (token) => {
-  if (!token) return { provided: false, valid: false, reason: "missing_token" };
-  if (!SUPABASE_JWT_SECRET) {
-    return { provided: false, valid: false, reason: "auth_disabled" };
-  }
-  const [headerSegment, payloadSegment, signatureSegment] = token.split(".");
-  if (!headerSegment || !payloadSegment || !signatureSegment) {
-    return { provided: true, valid: false, reason: "malformed_token" };
-  }
-  const header = decodeBase64UrlJson(headerSegment);
-  const payload = decodeBase64UrlJson(payloadSegment);
-  if (!header || !payload) {
-    return { provided: true, valid: false, reason: "invalid_encoding" };
-  }
-  const alg = header.alg || "HS256";
-  const hmacAlg = alg === "HS512" ? "sha512" : "sha256";
-  const expectedSig = crypto.createHmac(hmacAlg, SUPABASE_JWT_SECRET)
-    .update(`${headerSegment}.${payloadSegment}`)
-    .digest("base64url");
-  if (!safeEquals(signatureSegment, expectedSig)) {
-    return { provided: true, valid: false, reason: "invalid_signature" };
-  }
-  const nowSec = Math.floor(Date.now() / 1000);
-  if (payload.exp && Number(payload.exp) <= nowSec) {
-    return { provided: true, valid: false, reason: "expired" };
-  }
-  const userId = typeof payload.sub === "string" ? payload.sub : null;
-  if (!userId) {
-    return { provided: true, valid: false, reason: "missing_sub" };
-  }
-  return { provided: true, valid: true, userId, payload };
 };
 
 async function persistUserProfile({ userId, totalXp, now }) {
@@ -414,7 +359,10 @@ export async function handler(event) {
   let anonId = typeof anonIdRaw === "string" ? anonIdRaw.trim() : null;
 
   const jwtToken = extractBearerToken(event.headers);
-  const authContext = verifySupabaseJwt(jwtToken);
+  const authContext = await verifySupabaseJwt(jwtToken);
+  if (jwtToken && !authContext.valid) {
+    return json(401, { error: "unauthorized", message: authContext.reason || "invalid_token" }, origin);
+  }
   const initialIdentity = resolveXpIdentity({ anonId, authContext });
   const supabaseUserId = initialIdentity.supabaseUserId;
   let xpIdentity = initialIdentity.identityId;

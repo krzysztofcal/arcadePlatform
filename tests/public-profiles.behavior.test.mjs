@@ -7,6 +7,7 @@ const {
   publicProfile,
   updateUserProfile,
 } = await import("../netlify/functions/_shared/user-profile.mjs");
+const { computeXpLevel } = await import("../netlify/functions/_shared/xp-level.mjs");
 const { createProfileMeHandler } = await import("../netlify/functions/profile-me.mjs");
 const { createProfilePublicHandler, publicProfilesEnabled } = await import("../netlify/functions/profile-public.mjs");
 
@@ -82,6 +83,22 @@ test("public projection never returns internal identity or avatar storage key", 
   assert.equal(JSON.stringify(projected).includes("internal/private-key.webp"), false);
 });
 
+test("public projection exposes only current XP and computed level", () => {
+  const projected = publicProfile(profile(), { xp: 235, level: computeXpLevel(235) });
+  assert.equal(projected.xp, 235);
+  assert.equal(projected.level, 3);
+  assert.equal("userId" in projected, false);
+  assert.equal("avatarKey" in projected, false);
+});
+
+test("server XP level boundaries match the client progression", () => {
+  assert.equal(computeXpLevel(0), 1);
+  assert.equal(computeXpLevel(99), 1);
+  assert.equal(computeXpLevel(100), 2);
+  assert.equal(computeXpLevel(234), 2);
+  assert.equal(computeXpLevel(235), 3);
+});
+
 test("profile-me rejects empty and unknown PATCH fields", async () => {
   const handler = createProfileMeHandler({
     verifySupabaseJwt: async () => ({ valid: true, userId: USER_ID }),
@@ -151,6 +168,47 @@ test("profile-public is disabled by default and uses generic not found responses
   const invalid = await enabled(event("GET", null, { handle: "not valid" }));
   assert.equal(unknown.statusCode, 404);
   assert.deepEqual(JSON.parse(unknown.body), JSON.parse(invalid.body));
+});
+
+test("profile-public returns current XP and level without internal fields", async () => {
+  const handler = createProfilePublicHandler({
+    env: { PUBLIC_PROFILES_ENABLED: "1" },
+    findPublicProfile: async () => profile(),
+    getUserXpTotal: async (userId) => {
+      assert.equal(userId, USER_ID);
+      return 235;
+    },
+    allowPublicRead: async () => true,
+  });
+  const response = await handler(event("GET", null, { handle: "blue-fox-482731" }));
+  const body = JSON.parse(response.body);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(body, {
+    handle: "blue-fox-482731",
+    displayName: "Blue Fox 482731",
+    bio: "",
+    avatar: { type: "default", variant: "fox-blue" },
+    xp: 235,
+    level: 3,
+  });
+  assert.equal("userId" in body, false);
+  assert.equal("email" in body, false);
+  assert.equal("avatarKey" in body, false);
+  assert.equal("totalXp" in body, false);
+});
+
+test("profile-public fails closed when the XP store read fails", async () => {
+  const handler = createProfilePublicHandler({
+    env: { PUBLIC_PROFILES_ENABLED: "1" },
+    findPublicProfile: async () => profile(),
+    getUserXpTotal: async () => { throw new Error("upstash_unavailable"); },
+    allowPublicRead: async () => true,
+  });
+  const response = await handler(event("GET", null, { handle: "blue-fox-482731" }));
+  assert.equal(response.statusCode, 500);
+  assert.deepEqual(JSON.parse(response.body), { error: "server_error" });
+  assert.equal(response.headers["cache-control"], "no-store");
+  assert.equal(response.body.includes('"xp"'), false);
 });
 
 test("profile-public enables deploy previews when the function scope lacks the flag", () => {

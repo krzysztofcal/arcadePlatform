@@ -25,8 +25,9 @@ function bootXpCore(window, document) {
   const ACTIVE_WINDOW_MS = parseNumber(window && window.XP_ACTIVE_WINDOW_MS, DEFAULT_ACTIVE_WINDOW_MS);
   const CACHE_KEY = "kcswh:xp:last";
 
-  const LEVEL_BASE_XP = parseNumber(window && window.XP_LEVEL_BASE_XP, 100);
-  const LEVEL_MULTIPLIER = parseNumber(window && window.XP_LEVEL_MULTIPLIER, 1.35);
+  // Fixed public XP/level contract. Change server and client together.
+  const LEVEL_BASE_XP = 100;
+  const LEVEL_MULTIPLIER = 1.35;
 
   const DEFAULT_BOOST_SEC = 15;
   const DIAG_QUERY = /\bxpdiag=1\b/;
@@ -1282,10 +1283,11 @@ function bootXpCore(window, document) {
       reason === "reset"
       || reason === "daily_reset"
       || reason === "day_reset"
-      || reason === "hard_reset";
+      || reason === "hard_reset"
+      || meta?.allowServerRegression === true;
 
     const skipTotals =
-      (!authenticated && statusRaw === "statusonly")
+      (!authenticated && statusRaw === "statusonly" && !isExplicitReset)
       || reason === "too_soon"
       || reason === "insufficient-activity";
     const FORCE_IGNORE_SERVER_TOTALS = false;
@@ -1369,7 +1371,13 @@ function bootXpCore(window, document) {
     }
     let acked = 0;
     if (previousServer != null) {
-      if (sanitizedTotal >= previousServer) {
+      if (isExplicitReset) {
+        state.serverTotalXp = sanitizedTotal;
+        state.sessionXp = 0;
+        state.badgeShownXp = sanitizedTotal;
+        state.badgeBaselineXp = sanitizedTotal;
+        state.totalLifetime = sanitizedTotal;
+      } else if (sanitizedTotal >= previousServer) {
         acked = sanitizedTotal - previousServer;
         state.serverTotalXp = sanitizedTotal;
       } else {
@@ -1417,7 +1425,7 @@ function bootXpCore(window, document) {
     return payload;
   }
 
-  function resetIdentityCache() {
+  function resetIdentityCache(options) {
     state.totalToday = null;
     state.totalLifetime = null;
     state.serverTotalXp = null;
@@ -1433,7 +1441,7 @@ function bootXpCore(window, document) {
       window.localStorage.removeItem(CACHE_KEY);
       window.localStorage.removeItem(RUNTIME_CACHE_KEY);
     } catch (_) {}
-    updateBadge();
+    if (!options || options.preserveBadge !== true) updateBadge();
   }
 
   async function sendWindow(force) {
@@ -2272,7 +2280,12 @@ function bootXpCore(window, document) {
     if (!window.XPClient || typeof window.XPClient.fetchStatus !== "function") return Promise.resolve(null);
     setBadgeLoading(true);
     return window.XPClient.fetchStatus()
-      .then((data) => { handleResponse(data); return data; })
+      .then((data) => {
+        const migrationPending = typeof window.XPClient.isInitialStatusPending === "function"
+          && window.XPClient.isInitialStatusPending();
+        handleResponse(data, { source: "status", allowServerRegression: migrationPending });
+        return data;
+      })
       .catch((err) => { handleError(err); throw err; });
   }
 

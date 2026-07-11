@@ -3,6 +3,7 @@
 This document preserves the operational and rollout details that were previously embedded in `README.md`.
 
 ## Server gates & debug
+- XP auth uses the shared Supabase verifier, including remote verification for ES256 tokens. Keep `SUPABASE_URL`/`SUPABASE_URL_V2` and a server-side Supabase API key configured together; invalid supplied bearer tokens return `401` instead of mutating an anonymous XP identity.
 - `award-xp.mjs` validates the JSON body, tolerates legacy `scoreDelta` / `pointsPerPeriod` fields, and enforces `XP_DELTA_CAP` plus the per-session (`XP_SESSION_CAP`) ceiling and the Warsaw-local daily (`XP_DAILY_CAP`, default 3000) window that runs from 03:00 to 03:00 (CET/CEST aware).
   - Every response surfaces Redis-sourced `totalToday`, `remaining`, `dayKey`, and `nextReset` (epoch ms of the next Warsaw reset). The signed `xp_day` cookie is rewritten on each call so stale or missing cookies self-heal automatically.
   - The cookie pre-clamps each award before Redis executes, so once the server reports `remaining: 0` the next calls immediately short-circuit until the advertised `nextReset`. Redis still tracks session/lifetime totals for analytics, and any session caps stack on top of the daily allowance.
@@ -251,7 +252,7 @@ Document every toggle change in your incident timeline—the bridge guard expect
 | --- | --- | --- |
 | `XP_DEBUG` | `0` | Include the `debug` object in responses for easier staging diagnostics. |
 | `XP_DAILY_CAP` | `3000` | Maximum XP a user can gain per Warsaw local day (03:00–03:00 CET/CEST). |
-| `XP_SESSION_CAP` | `300` | Maximum XP a single session can accumulate before further deltas are rejected. |
+| `XP_SESSION_CAP` | `300` | Maximum XP per award session. The browser rotates to a fresh award session after reaching this ceiling, while the daily cap remains authoritative. |
 | `XP_DELTA_CAP` | `300` | Largest delta accepted from the client in a single request. |
 | `XP_LOCK_TTL_MS` | `3000` | Duration of the per-session Redis lock that guards concurrent writes. |
 | `XP_SESSION_TTL_SEC` | `604800` | TTL (seconds) for session counters; refreshed on each award/heartbeat to curb key bloat. |

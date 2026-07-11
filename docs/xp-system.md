@@ -11,10 +11,16 @@ This document preserves the XP-related technical details that previously lived i
 
 - Gameplay XP is awarded through `/.netlify/functions/calculate-xp`. `award-xp` remains the status/legacy compatibility endpoint and must not be used by new playable integrations.
 - The XP badge and `+N XP` overlay animate only after `calculate-xp` returns a positive authoritative `awarded` value. Status reads, auth refreshes, focus changes, cache hydration, zero awards, and rejected windows update state without award animation.
-- Both endpoints share XP policy values (`XP_DAILY_CAP`, `XP_SESSION_CAP`, `XP_DELTA_CAP`, `XP_SESSION_TTL_SEC`) and identity resolution: a valid Supabase JWT subject wins over the browser anon id.
+- `calculate-xp`, `award-xp`, and `start-session` must use the shared Supabase auth verifier from `_shared/supabase-admin.mjs`. This keeps HS256/HS512 and Supabase ES256 remote verification aligned with profile, chips, and poker APIs. A request without Authorization may use the browser anon id; a request that supplies an invalid Bearer token fails with `401` and must never fall back to anonymous XP.
+- Both award endpoints share XP policy values (`XP_DAILY_CAP`, `XP_SESSION_CAP`, `XP_DELTA_CAP`, `XP_SESSION_TTL_SEC`) and identity resolution: a valid Supabase JWT subject wins over the browser anon id.
 - On an authenticated request carrying the browser anon id, both endpoints run the same atomic one-time conversion before reading or awarding totals. The Redis migration marker is the idempotent receipt; zero anon XP does not consume conversion eligibility.
 - Canonical server game IDs include `tetris`, `2048`, `pacman`, `t-rex`, and `cats`. Existing aliases such as `open-tetris`, `block-stacker`, `trex`, `open-pacman`, `catch-cats`, and `game_cats` remain supported.
 - `XPClient` clears its cached JWT, signed server session, and identity-bound XP cache on `SupabaseAuth.onAuthChange`, then refreshes status for the new identity.
+- Non-game pages that render `#xpBadge` perform an initial authenticated status read. The server response is the only value rendered for an authenticated badge. Before that read, the client defensively inspects the legacy `kcswh:xp:last` value; if it is higher than the server total, it shows a one-time, per-user synchronization notice and never uploads the local value. Legacy cache keys are removed only after a successful authenticated response, while a failed response leaves the cache and marker untouched. Game hosts keep their existing `GameXpBridge`/core lifecycle and do not run this migration UX.
+
+## Legacy local XP synchronization
+
+The old `kcswh:xp:last` and `kcswh:xp:regen` entries are not an account ledger. They can contain an optimistic or anonymous value from one browser and are never accepted as authenticated XP. On a non-game page with an authenticated session, `XPClient` sends a `statusOnly` request with the Supabase bearer token, applies the canonical server `totalLifetime`, and then removes those legacy entries. If the defensively parsed legacy value is greater than the server total, the user sees a localized non-blocking notice once per Supabase user and browser under `kcswh:xp:server-migration-notice:v1:<userId>`. A status/network failure does not force `0 XP`, delete the legacy entries, or set the notice marker. The public profile uses the same canonical server total and does not read browser storage.
 
 ## GameXpBridge API
 `js/xp-game-hook.js` exposes a `window.GameXpBridge` helper so every game page can wire into the XP service without duplicating lifecycle code.
@@ -64,7 +70,7 @@ Client → server payload (minimal set, extras allowed):
 
 Server behavior:
 - Requests with `delta` outside `0…XP_DELTA_CAP` (default 300) are rejected. Legacy clients can continue sending `scoreDelta` / `pointsPerPeriod` and the server will coerce them once per request.
-- XP is granted directly from `delta` while enforcing per-session (`XP_SESSION_CAP`, default 300) and per-day (`XP_DAILY_CAP`, default 3000) ceilings. The daily cap resets at 03:00 Europe/Warsaw (handles CET/CEST) and partial grants surface `reason: 'daily_cap_partial' | 'session_cap_partial'`.
+- XP is granted directly from `delta` while enforcing per-session (`XP_SESSION_CAP`, default 300) and per-day (`XP_DAILY_CAP`, default 3000) ceilings. The browser uses an in-memory award session and rotates it automatically when the server reports that the session cap was reached, so play can continue up to the daily limit. The daily cap resets at 03:00 Europe/Warsaw (handles CET/CEST) and partial grants surface `reason: 'daily_cap_partial' | 'session_cap_partial'`.
 - Responses remain backwards compatible: `{ ok, awarded, granted, totalToday, remaining, dayKey, nextReset, cap, totalLifetime }` plus `sessionTotal`, `lastSync`, and `capDelta` so clients can rehydrate badge state, countdown to the next reset, and mirror the server cap.
 - When `XP_DEBUG=1`, the payload includes `debug` with the requested delta, caps, `lastSync`, and status code.
 

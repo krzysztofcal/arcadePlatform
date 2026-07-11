@@ -2,11 +2,11 @@
 
 ## Executive Summary
 
-This plan creates a safe public gaming identity for every authenticated Arcade Hub user and prepares the contract used by a future XP leaderboard. It does not implement leaderboard ranking, XP aggregation, or public XP values.
+This plan creates a safe public gaming identity for every authenticated Arcade Hub user and prepares the contract used by a future XP leaderboard. It does not implement leaderboard ranking or XP gain aggregation. The public profile may expose the user's current total XP and computed level; daily/weekly XP history and ranking remain out of scope.
 
 Every authenticated account receives a public profile automatically. A profile has a generated gaming name, a permanent public handle, a default avatar identity, and an empty bio. It must never expose email, Supabase user UUID, chip balances, ledger entries, poker data, session data, IP address, or copied auth metadata.
 
-**Privacy decision required before public activation:** every authenticated profile will be public and reachable at `/u/<handle>`. This must be explicitly approved as product policy and checked against Terms and Privacy wording before PR 2 adds the public route. The current legal documents do not disclose that a nickname, avatar, and bio become public, so the proposed legal copy remains a release draft until public profiles are accessible in the UI. `PUBLIC_PROFILES_ENABLED` remains `0` by default; `profile-public` returns the same generic `404` while disabled and can be enabled only after the legal release gate.
+**Privacy and rollout gate:** every authenticated profile is public and reachable at `/u/<handle>`. The public-profile policy and UI disclosure were delivered with PR 2; this PR extends the disclosure to current total XP and level. `PUBLIC_PROFILES_ENABLED` remains `0` in production until the approved legal wording, production migration, and production smoke verification are complete. The endpoint returns the same generic `404` while disabled.
 
 ## Current Repository Fit
 
@@ -37,6 +37,7 @@ The implementation should extend existing patterns rather than create parallel c
    - `bio`: empty string.
 5. No generated or displayed value may derive from email, email prefix, Supabase UUID, IP address, or real name in auth metadata.
 6. Profiles are public to anyone knowing the handle at `/u/<handle>`.
+7. The public profile may include current total `xp` and computed `level`, read server-side from the canonical XP lifetime total. It does not include XP event history, daily/weekly gains, caps, or ledger details.
 
 ### Stable handles
 
@@ -72,7 +73,7 @@ Required constraints and indexes:
 - Bio: maximum 160 characters.
 - A trigger or server-owned update statement maintains `updated_at`.
 
-Do not add email, XP, chips, ledger, poker statistics, visibility, `is_public`, or copies of auth metadata.
+Do not add email, an XP column, chips, ledger, poker statistics, visibility, `is_public`, or copies of auth metadata. The public XP summary remains sourced from the authoritative XP store.
 
 Enable RLS and deny direct `anon` and `authenticated` table access. Netlify functions are the only public/owner view boundary and use the existing trusted server-side Supabase/Postgres path. The migration must follow the repository's established auth-user deletion convention.
 
@@ -102,14 +103,18 @@ No authentication required once `PUBLIC_PROFILES_ENABLED=1`. Normalize and valid
 
 ```json
 {
-  "handle": "bluefox27",
-  "displayName": "BlueFox27",
+  "handle": "blue-fox-482731",
+  "displayName": "Blue Fox 482731",
   "bio": "",
-  "avatar": { "type": "default", "variant": "fox-blue" }
+  "avatar": { "type": "default", "variant": "fox-blue" },
+  "xp": 235,
+  "level": 3
 }
 ```
 
-For a processed uploaded avatar, `avatar` becomes `{ "type": "uploaded", "url": "<stable-public-webp-url>", "variant": "fox-blue" }`. Do not return `user_id`, timestamps, auth metadata, email, chips, ledger, poker, XP, or internal storage paths.
+For a processed uploaded avatar, `avatar` becomes `{ "type": "uploaded", "url": "<stable-public-webp-url>", "variant": "fox-blue" }`. Do not return `user_id`, timestamps, auth metadata, email, chips, ledger, poker data, XP event history, daily/weekly gains, or internal storage paths. `xp` and `level` are the only public XP summary fields.
+
+If the user has no canonical XP lifetime total yet, the endpoint returns `xp: 0` and `level: 1`. If the XP store is unavailable or its data cannot be parsed, the endpoint returns `500 server_error` with `Cache-Control: no-store`; it must never present an infrastructure failure as zero XP.
 
 The endpoint must reuse the existing rate-limit helper where its current contract supports this public route. Cache successful public responses briefly with a public cache policy suitable for profile edits. Return the same generic `404` response for every absent or invalidly resolvable handle. This MVP has no profile search, directory, pagination, or endpoint that lists profiles, so public handles cannot be enumerated through an application API.
 
@@ -187,7 +192,7 @@ Do not make setup mandatory. Use DOM APIs and `textContent` for user data, retai
 
 Add `profile.html`, an external profile-page controller, and narrowly scoped CSS only where `portal.css` is insufficient. Add a `netlify.toml` rewrite from `/u/:handle` to `/profile.html`, then resolve route state using the existing routing conventions.
 
-The view displays avatar, display name, `@handle`, and optional bio only. It has generic loading, not-found, and network-error states. It does not display XP, rank, chips, poker data, account metadata, or timestamps.
+The view displays avatar, display name, `@handle`, optional bio, current XP, and current level. It has generic loading, not-found, and network-error states. It does not display XP history, rank, chips, poker data, account metadata, or timestamps.
 
 Use semantic heading structure, meaningful avatar alternative text, keyboard-safe controls, `aria-live` status messaging, and no color-only state. Add all PL/EN keys through the current i18n mechanism.
 
@@ -212,10 +217,11 @@ The leaderboard backend will aggregate XP server-side and join identities to `us
 
 ## Legal and Privacy Release Gate
 
-Before enabling the public route in production, update both Privacy Policy variants and both Terms variants, then update their revision dates. The legal copy must state in plain language that:
+Before enabling the public route in production, both Privacy Policy variants and both Terms variants must state in plain language that:
 
 - every authenticated account receives a public gaming profile;
 - its generated or customized handle, display name, optional bio, and avatar are visible to anyone who knows the profile URL;
+- current total XP and level may be displayed, but detailed XP events and daily/weekly gains are not;
 - email address, Supabase UUID, chips, ledger, poker data, session data, and private account metadata are not displayed on that profile;
 - uploaded avatars are processed and published as public profile images, while original uploads are private and temporary;
 - profile data and processed avatar are removed as part of account-deletion handling, subject to applicable retention duties.
@@ -244,7 +250,19 @@ Terms must also cover user responsibility for public profile text and uploaded a
 
 **Implementation status (2026-07-10):** delivered by the profile UI PR. It adds the account editor, CSS-rendered default avatars, the `/u/<handle>` rewrite and public page, topbar profile refresh, PL/EN strings, and the approved Terms/Privacy disclosure. `PUBLIC_PROFILES_ENABLED=1` is enabled for deploy previews; any Netlify UI override must include the **Functions** scope. If the flag is absent from the function runtime, the handler enables only `CONTEXT=deploy-preview` or the `deploy-preview-*.netlify.app` host; an explicit `PUBLIC_PROFILES_ENABLED=0` still disables it. Production remains `0` until the production migration and an authenticated production smoke test are confirmed, then it must be enabled through the Netlify environment configuration. This PR has no database migration; the already-applied Profile Foundation migrations remain required.
 
-### PR 3: Avatar upload pipeline
+### PR 3: Public XP and level profile stats
+
+- Read the authoritative current XP lifetime total server-side; never expose Redis or internal XP keys to the browser.
+- Use the same fixed level progression contract as the XP badge so public level matches the client.
+- Use the fixed public level contract of `100 XP` for the first level and a `1.35` requirement multiplier. `window.XP_LEVEL_BASE_XP` and `window.XP_LEVEL_MULTIPLIER` are not supported runtime overrides.
+- Add `xp` and `level` to the explicit public response allowlist and render them on `/u/<handle>`.
+- Update PL/EN legal wording, documentation, and API/UI contract checks.
+- Use the existing short public cache; document that profile XP can be stale for up to the cache lifetime.
+- No leaderboard ranking, daily/weekly aggregates, XP history, or database migration is included.
+
+**Implementation status (2026-07-10):** this PR adds public current XP and computed level from the same canonical lifetime total used by authenticated XP status reads. The public response remains allowlisted and does not expose `userId`, email, `avatarKey`, Redis keys, XP history, daily/weekly gains, or rank. The public cache remains `max-age=30`, so the displayed total can lag a recent award briefly. Production remains disabled until the existing public-profile rollout gate is complete.
+
+### PR 4: Avatar upload pipeline
 
 - Private temporary bucket and signed-upload endpoint.
 - Finalization endpoint, type/dimension validation, metadata stripping, and WebP normalization.
@@ -252,7 +270,7 @@ Terms must also cover user responsibility for public profile text and uploaded a
 - Upload/remove account UI.
 - Storage bucket and policy migration plus stage upload smoke verification.
 
-### PR 4: XP leaderboard
+### PR 5: XP leaderboard
 
 Out of scope. Begin only after public profiles and avatars are stable in production.
 
@@ -289,12 +307,13 @@ Manual smoke checklist:
 5. Display name and bio update correctly.
 6. The first handle customization succeeds only after confirmation; a second returns `handle_locked`.
 7. A default avatar always renders with no uploaded file.
-8. Topbar refreshes after profile update and after auth transition.
-9. PL and EN render correctly.
-10. Existing account, XP, chips, and poker paths remain unaffected.
-11. In PR 3, reject oversized/unsupported avatar files; verify processed output is stable public WebP and the original is not public.
-12. Verify the approved PL/EN legal wording is published before public profiles are enabled in production.
-13. Verify `profile-public` remains a generic `404` until `PUBLIC_PROFILES_ENABLED=1`, then repeat the public-profile smoke checks.
+8. A public profile shows current total XP and level, and does not show rank or XP history.
+9. Topbar refreshes after profile update and after auth transition.
+10. PL and EN render correctly.
+11. Existing account, XP, chips, and poker paths remain unaffected.
+12. In PR 4, reject oversized/unsupported avatar files; verify processed output is stable public WebP and the original is not public.
+13. Verify the approved PL/EN legal wording is published before public profiles are enabled in production.
+14. Verify `profile-public` remains a generic `404` until `PUBLIC_PROFILES_ENABLED=1`, then repeat the public-profile smoke checks.
 
 Rollback: disable the new route/rewrite only if necessary, leave existing account auth flows intact, and do not delete `user_profiles` data merely to roll back UI. Avatar rollback must revoke/remove public processed objects only after confirming the account editor no longer references them.
 

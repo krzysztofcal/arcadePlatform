@@ -18,6 +18,9 @@ run("node", ["scripts/syntax-check.mjs"], "syntax");
 
 run("node", ["tests/xp-client.test.mjs"], "xp-client");
 run("node", ["tests/xp-client-contract.test.mjs"], "xp-client-contract");
+run("node", ["tests/xp-policy.test.mjs"], "xp-policy");
+run("node", ["tests/xp-server-migration-notice.test.mjs"], "xp-server-migration-notice");
+run("node", ["tests/xp-core-authoritative-reset.test.mjs"], "xp-core-authoritative-reset");
 run("node", ["tests/xp-game-hook.test.mjs"], "xp-game-hook");
 run("node", ["tests/xp-badge.test.mjs"], "xp-badge");
 run("node", ["tests/xp-multigame.test.mjs"], "xp-multigame");
@@ -97,6 +100,7 @@ run("node", ["tests/admin-page.contract.test.mjs"], "admin-page-contract");
 run("node", ["tests/admin-page.behavior.test.mjs"], "admin-page-behavior");
 run("node", ["tests/admin-user-search.behavior.test.mjs"], "admin-user-search-behavior");
 run("node", ["tests/public-profiles.behavior.test.mjs"], "public-profiles-behavior");
+run("node", ["tests/public-profile-xp.e2e.test.mjs"], "public-profile-xp-e2e");
 run("node", ["tests/public-profile-ui.contract.test.mjs"], "public-profile-ui-contract");
 run("node", ["tests/sidebar-admin-visibility.behavior.test.mjs"], "sidebar-admin-visibility-behavior");
 run("node", ["tests/i18n.behavior.test.mjs"], "i18n-behavior");
