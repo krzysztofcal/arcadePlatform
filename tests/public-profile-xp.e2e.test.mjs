@@ -89,12 +89,12 @@ test("authenticated badge and public profile use the same canonical XP total", a
   assert.equal(publicResponse.statusCode, 200);
   assert.equal(publicBody.xp, SNAPSHOT.totalXp);
   assert.equal(publicBody.level, computeXpLevel(SNAPSHOT.totalXp));
-  assert.deepEqual(statusRequest.body, {
-    userId: ANON_ID,
-    sessionId: "session-public-profile-e2e",
-    gameId: "status",
-    statusOnly: true,
-  });
+  assert.equal(statusRequest.body.userId, ANON_ID);
+  assert.equal(statusRequest.body.gameId, "status");
+  assert.equal(statusRequest.body.statusOnly, true);
+  assert.equal(typeof statusRequest.body.sessionId, "string");
+  assert.ok(statusRequest.body.sessionId.length > 0);
+  assert.notEqual(statusRequest.body.sessionId, "session-public-profile-e2e");
   assert.equal(statusRequest.hasAuthorization, true);
   assert.equal(badge.textContent, `Lvl ${publicBody.level}, ${publicBody.xp.toLocaleString()} XP`);
 });
