@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import sharp from "sharp";
-import { createPendingUpload, finalizeAvatar, validateUploadRequest } from "../netlify/functions/_shared/profile-avatar.mjs";
+import { cleanupExpiredUploads, createPendingUpload, finalizeAvatar, validateUploadRequest } from "../netlify/functions/_shared/profile-avatar.mjs";
 import { createAvatarUploadUrlHandler } from "../netlify/functions/profile-avatar-upload-url.mjs";
 
 const USER_ID = "00000000-0000-4000-8000-000000000003";
@@ -101,4 +101,44 @@ test("finalization publishes only normalized 256px WebP and removes the original
   assert.equal(metadata.width, 256);
   assert.equal(metadata.height, 256);
   assert.ok(calls.some((query) => query.includes("delete from public.profile_avatar_uploads")));
+});
+
+test("expired upload receipt remains retryable when private Storage cleanup fails", async () => {
+  const queries = [];
+  await cleanupExpiredUploads({
+    executeSql: async (query) => {
+      queries.push(query);
+      if (query.includes("select id::text")) return [{ id: "10000000-0000-4000-8000-000000000003", user_id: USER_ID, source_path: "pending/expired" }];
+      return [];
+    },
+    storageConfig: { baseUrl: "https://stage.supabase.co", serviceKey: "service-role" },
+    fetch: async () => ({ ok: false, status: 503, text: async () => "temporary failure" }),
+  });
+  assert.equal(queries.filter((query) => query.includes("delete from public.profile_avatar_uploads")).length, 0);
+});
+
+test("finalization removes a newly published avatar when profile update fails", async () => {
+  const source = await sharp({
+    create: { width: 64, height: 64, channels: 3, background: { r: 20, g: 40, b: 60 } },
+  }).png().toBuffer();
+  const uploadId = "10000000-0000-4000-8000-000000000004";
+  const deleted = [];
+  await assert.rejects(() => finalizeAvatar(USER_ID, uploadId, {
+    executeSql: async (query) => query.includes("update public.profile_avatar_uploads")
+      ? [{ id: uploadId, source_path: `pending/${uploadId}`, declared_mime_type: "image/png", declared_size: source.length }]
+      : [],
+    storageConfig: { baseUrl: "https://stage.supabase.co", serviceKey: "service-role" },
+    fetch: async (url, options = {}) => {
+      if (options.method === "GET") return { ok: true, arrayBuffer: async () => source, text: async () => "" };
+      if (options.method === "POST") return { ok: true, text: async () => "" };
+      if (options.method === "DELETE") {
+        deleted.push(JSON.parse(options.body).prefixes[0]);
+        return { ok: true, text: async () => "" };
+      }
+      throw new Error(`unexpected request ${options.method} ${url}`);
+    },
+    updateUserAvatarKey: async () => { throw new Error("database unavailable"); },
+  }), /database unavailable/);
+  assert.ok(deleted.some((path) => /^[0-9a-f-]{36}\.webp$/.test(path)));
+  assert.ok(deleted.includes(`pending/${uploadId}`));
 });

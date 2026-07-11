@@ -54,14 +54,18 @@ function validateUploadRequest(payload) {
 async function cleanupExpiredUploads(deps = {}) {
   const runSql = deps.executeSql || executeSql;
   const rows = await runSql(
-    `delete from public.profile_avatar_uploads
-     where id in (
-       select id from public.profile_avatar_uploads
-       where expires_at <= timezone('utc', now()) and consumed_at is null
-       order by expires_at asc limit 10
-     ) returning source_path;`,
+    `select id::text, user_id::text, source_path
+     from public.profile_avatar_uploads
+     where expires_at <= timezone('utc', now())
+     order by expires_at asc limit 10;`,
   );
-  await Promise.allSettled((rows || []).map((row) => deleteStorageObject(UPLOAD_BUCKET, row.source_path, deps)));
+  await Promise.allSettled((rows || []).map(async (row) => {
+    await deleteStorageObject(UPLOAD_BUCKET, row.source_path, deps);
+    await runSql(
+      `delete from public.profile_avatar_uploads where id = $1 and user_id = $2 and source_path = $3;`,
+      [row.id, row.user_id, row.source_path],
+    );
+  }));
 }
 
 async function createPendingUpload(userId, payload, deps = {}) {
@@ -131,6 +135,8 @@ async function deleteStorageObject(bucket, path, deps = {}) {
 async function finalizeAvatar(userId, uploadId, deps = {}) {
   const pending = await consumePendingUpload(userId, uploadId, deps);
   const runSql = deps.executeSql || executeSql;
+  let newAvatarKey = null;
+  let profileUpdated = false;
   try {
     const { response } = await storageRequest(storagePath(UPLOAD_BUCKET, pending.source_path), { method: "GET" }, deps);
     const source = Buffer.from(await response.arrayBuffer());
@@ -145,18 +151,24 @@ async function finalizeAvatar(userId, uploadId, deps = {}) {
       throw avatarError("avatar_dimensions_too_large");
     }
     const processed = await image.rotate().resize(256, 256, { fit: "cover", position: "centre" }).webp({ quality: 82 }).toBuffer();
-    const avatarKey = `${crypto.randomUUID()}.webp`;
-    await storageRequest(storagePath(PUBLIC_BUCKET, avatarKey), {
+    newAvatarKey = `${crypto.randomUUID()}.webp`;
+    await storageRequest(storagePath(PUBLIC_BUCKET, newAvatarKey), {
       method: "POST",
       headers: { "content-type": "image/webp", "cache-control": "31536000", "x-upsert": "false" },
       body: processed,
     }, deps);
-    const { profile, previousAvatarKey } = await (deps.updateUserAvatarKey || updateUserAvatarKey)(userId, avatarKey);
+    const { profile, previousAvatarKey } = await (deps.updateUserAvatarKey || updateUserAvatarKey)(userId, newAvatarKey);
+    profileUpdated = true;
     if (previousAvatarKey) await deleteStorageObject(PUBLIC_BUCKET, previousAvatarKey, deps).catch(() => {});
     return profile;
+  } catch (error) {
+    if (newAvatarKey && !profileUpdated) await deleteStorageObject(PUBLIC_BUCKET, newAvatarKey, deps).catch(() => {});
+    throw error;
   } finally {
-    await deleteStorageObject(UPLOAD_BUCKET, pending.source_path, deps).catch(() => {});
-    await runSql(`delete from public.profile_avatar_uploads where id = $1 and user_id = $2;`, [uploadId, userId]).catch(() => {});
+    try {
+      await deleteStorageObject(UPLOAD_BUCKET, pending.source_path, deps);
+      await runSql(`delete from public.profile_avatar_uploads where id = $1 and user_id = $2;`, [uploadId, userId]);
+    } catch {}
   }
 }
 
