@@ -210,6 +210,20 @@ where t.typname = 'chips_tx_type'
 
 Do not apply production migrations until the stage deploy preview and stage DB checks are green.
 
+### Public profile avatar rollout
+
+Avatar uploads require migration `20260711103000_profile_avatar_storage.sql`, `SUPABASE_URL` (or `SUPABASE_URL_V2`), `SUPABASE_SERVICE_ROLE_KEY`, and the normal authenticated profile configuration in the Netlify Functions scope. The service-role key is never returned to the browser; only a short-lived, path-scoped Storage upload URL is returned.
+
+After the stage migration workflow succeeds, verify on the matching Deploy Preview:
+
+1. Upload a JPEG, PNG, and WebP below 1 MB and 1024x1024; each public result must be a 256x256 WebP.
+2. Confirm `/u/<handle>`, account UI, and topbar render the same stable public avatar URL.
+3. Confirm the private original returns no public access and is deleted after finalization.
+4. Reject SVG/GIF, files over 1 MB, dimensions over 1024x1024, expired upload IDs, and an upload ID owned by another user.
+5. Restore the default avatar and confirm the processed object is removed and all profile surfaces return to `avatar_variant`.
+
+Apply the same migration to production only after this stage smoke passes. A rollback may disable the avatar controls/functions, but should not drop `user_profiles.avatar_key`; existing public WebP objects remain harmless while the feature is disabled.
+
 ## Bonus campaign scheduler
 
 `netlify/functions/bonus-campaigns-scheduled.mjs` runs every 5 minutes when `CHIPS_ENABLED=1`.

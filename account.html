@@ -52,7 +52,18 @@
 
     .public-profile-editor{ display:grid; gap:14px; margin-top:18px; padding-top:18px; border-top:1px solid rgba(255,255,255,.1); }
     .public-profile-editor__identity{ display:flex; align-items:center; gap:12px; }
-    .public-profile-editor__avatar{ width:48px; height:48px; border-radius:50%; display:grid; place-items:center; color:#fff; font:700 16px/1 Poppins, sans-serif; }
+    .public-profile-editor__avatar{ position:relative; width:48px; height:48px; border-radius:50%; display:grid; place-items:center; color:#fff; font:700 16px/1 Poppins, sans-serif; transition:transform .2s ease, box-shadow .2s ease; }
+    .public-profile-editor__avatar.profile-avatar--uploaded{ background-position:center; background-size:cover; }
+    .public-profile-editor__avatar-actions{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+    .public-profile-editor__avatar-input{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+    .public-profile-editor__avatar-btn{ padding:8px 11px; border:1px solid rgba(255,255,255,.14); border-radius:9px; background:rgba(255,255,255,.07); color:#e2e8f0; font:600 13px/1.2 Poppins,sans-serif; cursor:pointer; }
+    .public-profile-editor__avatar-btn:disabled{ cursor:wait; opacity:.58; }
+    .public-profile-editor__avatar-status{ min-height:18px; margin:0; color:#a5f3fc; font-size:13px; }
+    .public-profile-editor__avatar-status[data-tone="success"]{ color:#86efac; }
+    .public-profile-editor__avatar-status[data-tone="error"]{ color:#fda4af; }
+    .public-profile-editor__avatar[data-upload-state="validating"],.public-profile-editor__avatar[data-upload-state="uploading"],.public-profile-editor__avatar[data-upload-state="processing"],.public-profile-editor__avatar[data-upload-state="removing"]{ box-shadow:0 0 0 3px rgba(50,246,255,.22); }
+    .public-profile-editor__avatar[data-upload-state="validating"]::after,.public-profile-editor__avatar[data-upload-state="uploading"]::after,.public-profile-editor__avatar[data-upload-state="processing"]::after,.public-profile-editor__avatar[data-upload-state="removing"]::after{ content:""; position:absolute; inset:-5px; border:2px solid rgba(255,255,255,.22); border-top-color:#32f6ff; border-radius:50%; animation:public-avatar-spin .75s linear infinite; }
+    .public-profile-editor__avatar[data-upload-state="success"]{ animation:public-avatar-success .42s ease-out; box-shadow:0 0 0 3px rgba(134,239,172,.28); }
     .public-profile-editor__url{ color:#a5f3fc; overflow-wrap:anywhere; }
     .public-profile-editor__field-error{ min-height:18px; margin:4px 0 0; color:#fda4af; font-size:13px; }
     .public-profile-editor textarea{ width:100%; min-height:92px; padding:10px 12px; resize:vertical; border:1px solid rgba(255,255,255,.1); border-radius:10px; background:rgba(255,255,255,.04); color:#e2e8f0; font:inherit; }
@@ -64,6 +75,8 @@
     .public-profile-save__status{ min-height:18px; color:#86efac; font-size:13px; }
     @keyframes public-profile-save-spin{ to{ transform:rotate(360deg); } }
     @keyframes public-profile-save-pop{ 0%{ transform:scale(.98); } 60%{ transform:scale(1.02); } 100%{ transform:scale(1); } }
+    @keyframes public-avatar-spin{ to{ transform:rotate(360deg); } }
+    @keyframes public-avatar-success{ 0%{ transform:scale(.9); } 65%{ transform:scale(1.08); } 100%{ transform:scale(1); } }
   </style>
 
 <script src="js/analytics.js" defer></script>
@@ -205,13 +218,19 @@
           <p class="xp-details__text"><span data-i18n="email">Email</span>: <strong id="accountEmail">you@example.com</strong></p>
           <section class="public-profile-editor" id="publicProfileEditor" aria-labelledby="publicProfileTitle" hidden>
             <div class="public-profile-editor__identity">
-              <div class="public-profile-editor__avatar" id="publicProfileAvatar" aria-hidden="true">AH</div>
+              <div class="public-profile-editor__avatar" id="publicProfileAvatar" aria-hidden="true" aria-busy="false" data-upload-state="idle">AH</div>
               <div>
                 <h3 class="xp-card__title" id="publicProfileTitle" data-i18n="publicProfileTitle">Public profile</h3>
                 <a class="public-profile-editor__url" id="publicProfileUrl" href="#">/u/handle</a>
               </div>
             </div>
             <p class="account-note" data-i18n="publicProfileNotice">Your handle, display name, bio, and avatar are public. Email and account details are never shown.</p>
+            <div class="public-profile-editor__avatar-actions">
+              <input class="public-profile-editor__avatar-input" id="publicAvatarInput" type="file" accept="image/jpeg,image/png,image/webp">
+              <button class="public-profile-editor__avatar-btn" id="publicAvatarChoose" type="button" data-i18n="choosePublicAvatar">Choose avatar</button>
+              <button class="public-profile-editor__avatar-btn" id="publicAvatarRemove" type="button" data-i18n="removePublicAvatar" hidden>Restore default</button>
+            </div>
+            <p class="public-profile-editor__avatar-status" id="publicAvatarStatus" aria-live="polite" data-i18n="publicAvatarRequirements">JPEG, PNG or WebP, up to 1 MB.</p>
             <form class="account-form" id="publicProfileForm">
               <label for="publicDisplayName" data-i18n="publicDisplayName">Display name</label>
               <input id="publicDisplayName" name="displayName" type="text" minlength="2" maxlength="40" required>

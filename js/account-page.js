@@ -63,6 +63,10 @@
     nodes.publicProfileSave = doc.getElementById('publicProfileSave');
     nodes.publicProfileSaveLabel = doc.getElementById('publicProfileSaveLabel');
     nodes.publicProfileSaveStatus = doc.getElementById('publicProfileSaveStatus');
+    nodes.publicAvatarInput = doc.getElementById('publicAvatarInput');
+    nodes.publicAvatarChoose = doc.getElementById('publicAvatarChoose');
+    nodes.publicAvatarRemove = doc.getElementById('publicAvatarRemove');
+    nodes.publicAvatarStatus = doc.getElementById('publicAvatarStatus');
     nodes.publicDisplayNameError = doc.getElementById('publicDisplayNameError');
     nodes.publicHandleError = doc.getElementById('publicHandleError');
     nodes.publicBioError = doc.getElementById('publicBioError');
@@ -228,12 +232,74 @@
     setBlockVisibility(nodes.publicProfileEditor, !!profile);
     if (!profile) return;
     if (window.ProfileClient && window.ProfileClient.applyAvatar) window.ProfileClient.applyAvatar(nodes.publicProfileAvatar, profile);
+    if (nodes.publicAvatarRemove) nodes.publicAvatarRemove.hidden = !(profile.avatar && profile.avatar.type === 'uploaded');
     if (nodes.publicDisplayName) nodes.publicDisplayName.value = profile.displayName || '';
     if (nodes.publicHandle){ nodes.publicHandle.value = profile.handle || ''; nodes.publicHandle.disabled = !profile.handleCanBeCustomized; }
     if (nodes.publicBio) nodes.publicBio.value = profile.bio || '';
     if (nodes.publicHandleHint) nodes.publicHandleHint.textContent = profile.handleCanBeCustomized ? t('publicHandleHint', 'You can change your generated handle once. It then becomes permanent.') : t('publicHandleLockedHint', 'This handle is permanent.');
     if (nodes.publicProfileUrl){ nodes.publicProfileUrl.href = '/u/' + encodeURIComponent(profile.handle || ''); nodes.publicProfileUrl.textContent = '/u/' + (profile.handle || ''); }
     setPublicProfileErrors(null);
+  }
+
+  function setAvatarState(state, message, tone){
+    var busy = state === 'validating' || state === 'uploading' || state === 'processing' || state === 'removing';
+    if (nodes.publicAvatarChoose) nodes.publicAvatarChoose.disabled = !!busy;
+    if (nodes.publicAvatarRemove) nodes.publicAvatarRemove.disabled = !!busy;
+    if (nodes.publicAvatarInput) nodes.publicAvatarInput.disabled = !!busy;
+    if (nodes.publicAvatarStatus){
+      nodes.publicAvatarStatus.textContent = message || t('publicAvatarRequirements', 'JPEG, PNG or WebP, up to 1 MB.');
+      nodes.publicAvatarStatus.dataset.tone = tone || '';
+    }
+    if (nodes.publicProfileAvatar){
+      nodes.publicProfileAvatar.dataset.uploadState = state || 'idle';
+      nodes.publicProfileAvatar.setAttribute('aria-busy', busy ? 'true' : 'false');
+    }
+  }
+
+  function avatarErrorMessage(error){
+    var code = error && error.code ? error.code : 'avatar_upload_failed';
+    if (code === 'unsupported_avatar_type' || code === 'invalid_avatar_file') return t('publicAvatarInvalidType', 'Choose a valid JPEG, PNG or WebP image.');
+    if (code === 'avatar_too_large' || code === 'avatar_dimensions_too_large') return t('publicAvatarTooLarge', 'Use an image up to 1 MB and 1024 x 1024 pixels.');
+    return t('publicAvatarUploadError', 'Could not update your avatar. Please try again.');
+  }
+
+  function handleAvatarChoose(){ if (nodes.publicAvatarInput && !nodes.publicAvatarInput.disabled) nodes.publicAvatarInput.click(); }
+
+  function handleAvatarSelected(){
+    var file = nodes.publicAvatarInput && nodes.publicAvatarInput.files ? nodes.publicAvatarInput.files[0] : null;
+    if (!file || !window.ProfileClient || typeof window.ProfileClient.uploadAvatar !== 'function') return;
+    if (typeof window.FileReader === 'function' && nodes.publicProfileAvatar){
+      var previewReader = new window.FileReader();
+      previewReader.onload = function(){
+        nodes.publicProfileAvatar.textContent = '';
+        nodes.publicProfileAvatar.classList.add('profile-avatar--uploaded');
+        nodes.publicProfileAvatar.style.backgroundImage = 'url("' + String(previewReader.result || '').replace(/["\\]/g, '') + '")';
+      };
+      previewReader.readAsDataURL(file);
+    }
+    setAvatarState('validating', t('publicAvatarValidating', 'Checking image...'), 'info');
+    window.ProfileClient.uploadAvatar(file, function(stage){
+      if (stage === 'uploading') setAvatarState('uploading', t('publicAvatarUploading', 'Uploading avatar...'), 'info');
+      if (stage === 'processing') setAvatarState('processing', t('publicAvatarProcessing', 'Processing avatar...'), 'info');
+    }).then(function(profile){
+      renderPublicProfile(profile);
+      setAvatarState('success', t('publicAvatarUpdated', 'Avatar updated and visible on your profile.'), 'success');
+    }).catch(function(error){
+      renderPublicProfile(publicProfile);
+      setAvatarState('error', avatarErrorMessage(error), 'error');
+    }).finally(function(){
+      if (nodes.publicAvatarInput) nodes.publicAvatarInput.value = '';
+    });
+  }
+
+  function handleAvatarRemove(){
+    if (!window.ProfileClient || typeof window.ProfileClient.removeAvatar !== 'function') return;
+    if (!window.confirm(t('publicAvatarRemoveConfirm', 'Remove your uploaded avatar and restore the default avatar?'))) return;
+    setAvatarState('removing', t('publicAvatarRemoving', 'Restoring default avatar...'), 'info');
+    window.ProfileClient.removeAvatar().then(function(profile){
+      renderPublicProfile(profile);
+      setAvatarState('success', t('publicAvatarRemoved', 'Default avatar restored.'), 'success');
+    }).catch(function(error){ setAvatarState('error', avatarErrorMessage(error), 'error'); });
   }
 
   function loadPublicProfile(force){
@@ -869,6 +935,9 @@
     if (nodes.bonusCampaignList){ nodes.bonusCampaignList.addEventListener('click', handleWelcomeBonusClaim); }
     if (nodes.welcomeBonusClaimButton){ nodes.welcomeBonusClaimButton.addEventListener('click', handleWelcomeBonusClaim); }
     if (nodes.publicProfileForm){ nodes.publicProfileForm.addEventListener('submit', handlePublicProfileSave); }
+    if (nodes.publicAvatarChoose){ nodes.publicAvatarChoose.addEventListener('click', handleAvatarChoose); }
+    if (nodes.publicAvatarInput){ nodes.publicAvatarInput.addEventListener('change', handleAvatarSelected); }
+    if (nodes.publicAvatarRemove){ nodes.publicAvatarRemove.addEventListener('click', handleAvatarRemove); }
     if (nodes.deleteBtn && nodes.deleteNote){
       nodes.deleteBtn.addEventListener('click', function(e){
         e.preventDefault();

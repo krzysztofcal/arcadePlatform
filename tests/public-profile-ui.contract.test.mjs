@@ -7,24 +7,41 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 const { DEFAULT_BASE_XP, DEFAULT_MULTIPLIER } = await import("../netlify/functions/_shared/xp-level.mjs");
 
 test("public profile route, editor, and legal release gate are present", async () => {
-  const [account, page, config, privacyEn, privacyPl, termsEn, termsPl, portalCss, accountJs] = await Promise.all([
-    read("account.html"), read("profile.html"), read("netlify.toml"), read("legal/privacy.en.html"), read("legal/privacy.pl.html"), read("legal/terms.en.html"), read("legal/terms.pl.html"), read("css/portal.css"), read("js/account-page.js")
+  const [account, page, config, privacyEn, privacyPl, termsEn, termsPl, portalCss, accountJs, profileClient] = await Promise.all([
+    read("account.html"), read("profile.html"), read("netlify.toml"), read("legal/privacy.en.html"), read("legal/privacy.pl.html"), read("legal/terms.en.html"), read("legal/terms.pl.html"), read("css/portal.css"), read("js/account-page.js"), read("js/profile-client.js")
   ]);
   assert.match(account, /id="publicProfileEditor"/);
   assert.match(account, /id="publicProfileForm"/);
   assert.match(account, /id="publicProfileSave"[^>]*data-state="idle"/);
+  assert.match(account, /id="publicAvatarInput"[^>]*accept="image\/jpeg,image\/png,image\/webp"/);
+  assert.match(account, /id="publicAvatarChoose"/);
+  assert.match(account, /id="publicAvatarRemove"/);
   assert.match(account, /public-profile-save__spinner/);
   assert.match(accountJs, /setPublicProfileSaveState\('saving'/);
   assert.match(accountJs, /setPublicProfileSaveState\('saved'/);
+  assert.match(accountJs, /ProfileClient\.uploadAvatar/);
+  assert.match(accountJs, /publicAvatarValidating/);
+  assert.match(accountJs, /publicAvatarProcessing/);
+  assert.match(accountJs, /confirm\(t\('publicAvatarRemoveConfirm'/);
+  assert.match(account, /data-upload-state="idle"/);
+  assert.match(account, /@keyframes public-avatar-spin/);
+  assert.match(accountJs, /readAsDataURL\(file\)/);
+  assert.match(profileClient, /readAsDataURL\(file\)/);
+  assert.doesNotMatch(accountJs + profileClient, /createObjectURL\(file\)/, "avatar validation and preview must not depend on CSP-blocked blob URLs");
+  assert.match(accountJs, /ProfileClient\.removeAvatar/);
   assert.match(portalCss, /\.avatar-menu__user\{[^}]*background:transparent/);
   assert.match(page, /id="publicProfileCard"/);
   assert.match(page, /id="publicProfileXp"/);
   assert.match(page, /id="publicProfileLevel"/);
   assert.match(page, /src="\/js\/public-profile-page\.js"/);
+  assert.match(page, /src="\/js\/chips\/client\.js"/);
+  assert.match(page, /src="\/js\/core\/number-format\.js"/);
+  assert.ok(page.indexOf('/js/chips/client.js') < page.indexOf('/js/topbar.js'), 'chips client must load before topbar');
   assert.equal((page.match(/(?:href|src)="(?:css|js)\//g) || []).length, 0, "profile page assets must be root-absolute under /u/:handle");
   assert.match(config, /from = "\/u\/:handle"\s+to = "\/profile\.html"/);
   assert.match(config, /\[context\.deploy-preview\.environment\][\s\S]*?PUBLIC_PROFILES_ENABLED = "1"/);
   assert.match(config, /\[context\.production\.environment\][\s\S]*?PUBLIC_PROFILES_ENABLED = "0"/);
+  assert.match(config, /img-src[^;]*https:\/\/\*\.supabase\.co/, "public avatar Storage URLs must be allowed by CSP");
   for (const document of [privacyEn, privacyPl, termsEn, termsPl]) assert.match(document, /profil|profile/i);
 });
 

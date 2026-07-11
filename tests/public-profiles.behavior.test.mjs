@@ -83,6 +83,23 @@ test("public projection never returns internal identity or avatar storage key", 
   assert.equal(JSON.stringify(projected).includes("internal/private-key.webp"), false);
 });
 
+test("uploaded avatar projection exposes only an opaque stable public URL", () => {
+  const previous = process.env.SUPABASE_URL;
+  process.env.SUPABASE_URL = "https://stageabc.supabase.co";
+  try {
+    const key = "10000000-0000-4000-8000-000000000001.webp";
+    const projected = publicProfile(profile({ avatarKey: key }));
+    assert.deepEqual(projected.avatar, {
+      type: "uploaded",
+      url: `https://stageabc.supabase.co/storage/v1/object/public/profile-avatars/${key}`,
+    });
+    assert.equal("avatarKey" in projected, false);
+  } finally {
+    if (previous === undefined) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = previous;
+  }
+});
+
 test("public projection exposes only current XP and computed level", () => {
   const projected = publicProfile(profile(), { xp: 235, level: computeXpLevel(235) });
   assert.equal(projected.xp, 235);
