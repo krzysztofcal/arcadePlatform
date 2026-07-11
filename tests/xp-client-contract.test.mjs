@@ -19,6 +19,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
   const src = await fs.readFile(path.join(__dirname, '..', 'js', 'xpClient.js'), 'utf8');
 
   const store = new Map();
+  let randomId = 0;
   const baseWindow = { localStorage: {
     getItem: k => store.get(k) ?? null,
     setItem: (k, v) => store.set(k, String(v)),
@@ -27,7 +28,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
   const ctx = {
     window: Object.assign(baseWindow, options.window || {}),
     fetch: fetchImpl,
-    crypto: { randomUUID: () => 'uuid-test' },
+    crypto: { randomUUID: () => `uuid-test-${++randomId}` },
     Date, setTimeout, clearTimeout, console,
   };
   ctx.window.fetch = fetchImpl;
@@ -103,6 +104,34 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     assert.equal(applied.payload.totalLifetime, 777);
     assert.equal(applied.meta.source, 'status');
     assert.equal(applied.meta.bump, undefined);
+  }
+
+  // Reaching the server-side session cap rotates the next award session.
+  {
+    const awardCalls = [];
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.statusOnly) return response(200, { ok: true, status: 'statusOnly' });
+      if (url === '/.netlify/functions/calculate-xp') {
+        awardCalls.push(body);
+        return response(200, {
+          ok: true,
+          awarded: 10,
+          totalToday: awardCalls.length * 10,
+          totalLifetime: awardCalls.length * 10,
+          sessionTotal: awardCalls.length === 1 ? 300 : 10,
+          sessionCapped: awardCalls.length === 1,
+          cap: 3000,
+          capDelta: 300,
+        });
+      }
+      return response(200, { ok: true });
+    });
+
+    await XPClient.postWindowServerCalc({ gameId: 'pacman', scoreDelta: 10 });
+    await XPClient.postWindowServerCalc({ gameId: 'pacman', scoreDelta: 10 });
+    assert.equal(awardCalls.length, 2);
+    assert.notEqual(awardCalls[0].sessionId, awardCalls[1].sessionId);
   }
 
   console.log('xp-client contract tests passed');

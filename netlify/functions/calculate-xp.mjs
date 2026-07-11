@@ -1093,6 +1093,7 @@ export async function handler(event) {
     totalToday: Math.min(DAILY_CAP, redisDailyTotal),
     totalLifetime,
     sessionTotal,
+    sessionCapped: SESSION_CAP > 0 && sessionTotal >= SESSION_CAP,
     remaining,
     dayKey: dayKeyNow,
     nextReset,

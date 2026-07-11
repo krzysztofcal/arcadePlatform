@@ -307,6 +307,11 @@
     }
   }
 
+  function rotateAwardSession() {
+    state.awardSessionId = randomId();
+    state.lastTs = 0;
+  }
+
   // Server-side session management
   function isSessionExpired() {
     try {
@@ -918,6 +923,7 @@
         responseBody._transport = result.transport;
       }
       updateCapFromPayload(responseBody);
+      if (responseBody.sessionCapped === true) rotateAwardSession();
       if (responseBody && responseBody.locked && attempt === 0) {
         await new Promise(resolve => setTimeout(resolve, 100 + Math.floor(Math.random() * 200)));
         body.ts = sanitizeTs({ ts: Math.max(Date.now(), body.ts + 1) });
@@ -1106,6 +1112,7 @@
         // Update client cap from server response
         if (responseBody && typeof responseBody === "object") {
           if (Number.isFinite(responseBody.capDelta)) setClientCap(Number(responseBody.capDelta));
+          if (responseBody.sessionCapped === true) rotateAwardSession();
         }
 
         // Dispatch event for listeners
