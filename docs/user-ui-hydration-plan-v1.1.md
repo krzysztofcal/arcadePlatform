@@ -118,6 +118,31 @@ These limits are UX controls, not correctness guarantees. Revalidation runs rega
 
 Non-game pages must not start an XP award session. Game pages preserve their current gameplay lifecycle and use hydration only for initial presentation.
 
+## Pre-hydration DOM and first-paint contract
+
+Stale-while-revalidate alone does not prevent a flash if identity-bound HTML is visible before JavaScript resolves the local session. The initial document must therefore enforce this contract before the first observable paint:
+
+- Every topbar starts with `data-user-ui-state="pending"` in its HTML markup. JavaScript must not add the pending state after load.
+- While `pending`, avatar initials, display name, XP numbers, and chips numbers are not visible. Neutral skeletons reserve the final avatar and badge dimensions to prevent layout shift.
+- The pending UI contains no cached or hardcoded account values, including provisional `0 XP`, `CH: 0`, or user initials.
+- Shared `portal.css` selectors own the pending presentation across all pages. Individual pages must not define competing identity-loading behavior.
+- Initials may be rendered only after identity is known and the matching profile is confirmed to have no uploaded or cached uploaded avatar.
+
+After local session resolution, the state machine is:
+
+```text
+pending -> hydrated    matching valid cache was applied
+pending -> loading     authenticated user has no valid cache; neutral placeholders remain
+pending -> anonymous   no authenticated session; render established guest state
+hydrated/loading -> ready   authoritative requests completed successfully
+hydrated/loading -> stale   refresh failed; keep only matching cached values, otherwise error/loading UI
+any authenticated state -> pending/anonymous   logout or account switch clears rendered identity first
+```
+
+The state attribute may live on the topbar or document root, but there must be one canonical owner and one shared selector contract. Hydration may occur only after Supabase returns the current `userId`; synchronous access to cache after that point should be applied in the same task before scheduling network revalidation.
+
+This design does not promise cached account data before identity resolution. It promises that from first paint until resolution the user sees a neutral, dimensionally stable placeholder, never incorrect initials or numeric account values.
+
 ## Avatar strategy
 
 - Before identity is known, show a neutral avatar skeleton rather than initials tied to unknown state.
@@ -197,7 +222,8 @@ Cross-device convergence remains request-based; this plan adds no realtime backe
 
 ### Browser coverage
 
-- Uploaded avatar remains visible across full-page navigation without an initials flash after identity resolution.
+- From the first observable paint through hydration, topbar state is either neutral or the matching cached state; provisional initials and zero account values are never visible.
+- Uploaded avatar remains visible across full-page navigation without an initials flash.
 - Default avatar remains correct and removal clears the uploaded image.
 - XP and chips render cached confirmed values, then reconcile to changed server values.
 - Failed requests retain cached values and do not force zero.
@@ -210,7 +236,7 @@ Cross-device convergence remains request-based; this plan adds no realtime backe
 
 1. Sign in with an uploaded avatar and known XP/chips.
 2. Navigate repeatedly between root, a game, poker, account, and legal pages.
-3. Confirm no initials or zero-value flash after the session resolves locally.
+3. Observe from first paint and confirm only neutral placeholders or matching cached values appear; no initials or zero-value account flash is allowed.
 4. Change avatar and perform XP/chips-producing actions; confirm another tab updates.
 5. Sign out and sign in as a second account; confirm no first-account data appears.
 6. Simulate offline/network failure after one successful load; confirm cached display remains visibly stale rather than resetting.
@@ -220,9 +246,10 @@ Cross-device convergence remains request-based; this plan adds no realtime backe
 ### PR 1: Infrastructure and avatar
 
 - Add `user-ui-state.js`, cache schema, auth generation, and cross-tab transport.
+- Add the initial `data-user-ui-state="pending"` markup contract and shared `portal.css` placeholder styles while reserving final topbar dimensions.
 - Integrate profile publication and topbar avatar hydration.
-- Add the shared script to every topbar page using existing page-validation tooling.
-- Verify uploaded/default avatar, navigation, logout, account switch, and stale requests.
+- Add the shared script to every topbar page and extend the inventory guard to require the pending state, shared styles, and script order.
+- Verify uploaded/default avatar, navigation, logout, account switch, stale requests, and the absence of identity-bound content from first paint.
 
 ### PR 2: XP hydration
 
@@ -250,6 +277,7 @@ Each PR must be independently deployable and pass existing lifecycle, XP, chips,
 | Hydration triggers XP animation | Separate hydration/status application from confirmed positive award effects. |
 | Chips display implies transactional authority | Cache display balance only; all mutations remain server-confirmed. |
 | Added script ordering differs between pages | Extend static page inventory guard and representative nested-page browser tests. |
+| Initial HTML paints identity values before hydration | Put `pending` in source markup, hide identity-bound content in shared CSS, and test from first observable paint. |
 
 ## Breaking impact
 
@@ -260,7 +288,8 @@ The main compatibility risk is script ordering across many static pages. Impleme
 ## Exit criteria
 
 - No authenticated identity slice is rendered before Supabase user resolution.
-- Full-page navigation hydrates valid cached avatar, XP, and chips without provisional initials or zeroes.
+- From first observable paint until hydration completes, the topbar shows either a neutral placeholder or matching cached state, never provisional initials or zero account values.
+- Full-page navigation hydrates valid cached avatar, XP, and chips without layout shift.
 - Profile, XP, and chips revalidate in parallel and remain server-authoritative.
 - Logout, account switch, stale requests, multi-tab updates, and BFCache are deterministic.
 - No cached field can authorize or mutate account state.
