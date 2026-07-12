@@ -45,7 +45,7 @@ The target is a small shared `user-ui-state` module that hydrates the last serve
 
 ## Architecture
 
-Add one plain-script module, for example `js/user-ui-state.js`, loaded after the auth bridge and before topbar consumers. It owns only:
+Add one plain-script module, for example `js/user-ui-state.js`, loaded before the auth bridge and topbar consumers. The module has no Supabase dependency and must exist before the auth bridge can resolve a locally cached session during deferred-script execution. It owns only:
 
 - versioned, user-scoped cache reads and writes;
 - defensive schema validation;
