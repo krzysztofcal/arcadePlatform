@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createXpLedgerKeys, executeAtomicXpAward, readXpTotals } from "../netlify/functions/_shared/xp-ledger.mjs";
-import { buildXpStatusSnapshot, persistXpProfileSnapshot } from "../netlify/functions/_shared/xp-status.mjs";
+import { buildXpStatusSnapshot, persistXpProfileSnapshot, readCanonicalXpStatus } from "../netlify/functions/_shared/xp-status.mjs";
 
 const keys = createXpLedgerKeys({ namespace: "test:xp", lockPrefix: "test:lock:" });
 
@@ -44,14 +44,35 @@ test("totals error policy is explicit for authoritative and legacy adapters", as
 
 test("canonical status snapshot is allowlisted and preserves a supplied compatibility session id", () => {
   assert.deepEqual(buildXpStatusSnapshot({
-    totals: { lifetime: 320, sessionTotal: 18, lastSync: 123, internalKey: "secret" },
+    totals: { current: 25, lifetime: 320, sessionTotal: 18, lastSync: 123, internalKey: "secret" },
     dailyCap: 3000,
     deltaCap: 300,
     sessionId: "legacy-session",
+    dayKey: "2026-07-12",
+    nextReset: 1783900800000,
   }), {
     ok: true, awarded: 0, granted: 0, cap: 3000, capDelta: 300,
     totalLifetime: 320, sessionTotal: 18, lastSync: 123, status: "statusOnly", sessionId: "legacy-session",
+    totalToday: 25, remaining: 2975, dayKey: "2026-07-12", nextReset: 1783900800000,
   });
+});
+
+test("canonical status read projects totals and persists only the derived authenticated snapshot", async () => {
+  let persisted = null;
+  const result = await readCanonicalXpStatus({
+    readTotals: async () => ({ current: 40, lifetime: 500, sessionTotal: 0, lastSync: 0 }),
+    dailyCap: 3000,
+    deltaCap: 300,
+    dayKey: "2026-07-12",
+    nextReset: 1783900800000,
+    supabaseUserId: "user-1",
+    persistProfile: async (value) => { persisted = value; },
+  });
+  assert.equal(result.payload.totalLifetime, 500);
+  assert.equal(result.payload.totalToday, 40);
+  assert.equal(result.payload.remaining, 2960);
+  assert.equal(Object.hasOwn(result.payload, "userId"), false);
+  assert.deepEqual(persisted, { userId: "user-1", totalXp: 500 });
 });
 
 test("derived profile persistence normalizes totals and fails without changing canonical status", async () => {

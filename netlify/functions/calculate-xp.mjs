@@ -20,7 +20,7 @@ import { verifySessionToken, validateServerSession, touchSession } from "./start
 import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
 import { canonicalizeXpGameId, getXpPolicy, migrateAnonXpToUser, resolveXpIdentity } from "./_shared/xp-identity.mjs";
 import { createXpLedgerKeys, executeAtomicXpAward, readXpTotals } from "./_shared/xp-ledger.mjs";
-import { persistXpProfileSnapshot } from "./_shared/xp-status.mjs";
+import { persistXpProfileSnapshot, readCanonicalXpStatus } from "./_shared/xp-status.mjs";
 
 // ============================================================================
 // Configuration Constants
@@ -671,6 +671,10 @@ export async function handler(event) {
     : (typeof body.userId === "string" ? body.userId : null);
   const anonId = bodyAnonIdRaw ? bodyAnonIdRaw.trim() : null;
   const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : null;
+  const operation = body.operation === "status" || body.statusOnly === true ? "status" : (body.operation || "award");
+  if (operation !== "award" && operation !== "status") {
+    return json(400, { error: "invalid_operation" }, origin);
+  }
 
   const jwtToken = extractBearerToken(event.headers);
   const authContext = await verifySupabaseJwt(jwtToken);
@@ -679,8 +683,8 @@ export async function handler(event) {
   }
   const { supabaseUserId, identityId, anonId: resolvedAnonId } = resolveXpIdentity({ anonId, authContext });
 
-  if (!identityId || !sessionId) {
-    return json(400, { error: "missing_fields", message: "identity and sessionId required" }, origin);
+  if (!identityId) {
+    return json(400, { error: "missing_fields", message: "identity required" }, origin);
   }
 
   const userId = identityId;
@@ -701,6 +705,31 @@ export async function handler(event) {
     } catch (err) {
       klog("calc_anon_migration_failed", { error: err?.message });
     }
+  }
+
+  if (operation === "status") {
+    const dayKey = getDailyKey(now);
+    try {
+      const result = await readCanonicalXpStatus({
+        readTotals: () => getTotals({ userId, sessionId, now }),
+        dailyCap: DAILY_CAP,
+        deltaCap: DELTA_CAP,
+        sessionId,
+        dayKey,
+        nextReset: getNextResetEpoch(now),
+        supabaseUserId,
+        persistProfile: ({ userId: profileUserId, totalXp }) => persistUserProfile({ userId: profileUserId, totalXp, now }),
+      });
+      if (conversion?.converted > 0) result.payload.conversion = { converted: conversion.converted };
+      return json(200, result.payload, origin);
+    } catch (err) {
+      klog("calc_status_read_failed", { error: err?.message });
+      return json(500, { error: "server_error" }, origin);
+    }
+  }
+
+  if (!sessionId) {
+    return json(400, { error: "missing_fields", message: "sessionId required" }, origin);
   }
 
   // Rate limiting

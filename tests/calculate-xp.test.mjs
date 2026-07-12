@@ -163,6 +163,40 @@ describe("calculate-xp endpoint", () => {
     });
   });
 
+  describe("authoritative status operation", () => {
+    it("reads status without creating, touching, or requiring a gameplay session", async () => {
+      store._mockData.set("kcswh:xp:v2:total:status-user", "345");
+
+      const response = await handler({
+        httpMethod: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ anonId: "status-user", operation: "status" }),
+      });
+      const payload = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(200);
+      expect(payload.status).toBe("statusOnly");
+      expect(payload.totalLifetime).toBe(345);
+      expect(payload).not.toHaveProperty("sessionId");
+      expect(store.eval).not.toHaveBeenCalled();
+      expect(store.set).not.toHaveBeenCalled();
+      expect(store.setex).not.toHaveBeenCalled();
+      expect(atomicRateLimitIncr).not.toHaveBeenCalled();
+    });
+
+    it("temporarily accepts statusOnly as an alias without generating a session id", async () => {
+      const response = await handler({
+        httpMethod: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId: "status-alias", statusOnly: true }),
+      });
+      const payload = JSON.parse(response.body);
+      expect(response.statusCode).toBe(200);
+      expect(payload.status).toBe("statusOnly");
+      expect(payload).not.toHaveProperty("sessionId");
+    });
+  });
+
   describe("CORS validation", () => {
     it("should allow same-origin requests (no origin header)", async () => {
       const event = {

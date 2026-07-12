@@ -1,6 +1,6 @@
 # XP service
 
-## Authoritative gameplay endpoint
+## Authoritative XP endpoint
 
 Playable pages use `js/xpClient.js` and `js/xp/core.js`; they must not call XP functions directly. The authoritative gameplay endpoint is:
 
@@ -8,9 +8,9 @@ Playable pages use `js/xpClient.js` and `js/xp/core.js`; they must not call XP f
 POST /.netlify/functions/calculate-xp
 ```
 
-It receives a bounded activity window and calculates the grant on the server. The browser sends its anon id, session id, optional signed server-session token, and Supabase bearer token when authenticated. The JWT subject is the authoritative account identity.
+For gameplay, it receives `operation: "award"` (or the default operation), validates a bounded activity window, and calculates the grant on the server. For reads, `operation: "status"` returns the canonical totals without creating, registering, or touching an award session. The browser sends its anon id and Supabase bearer token when authenticated; award requests additionally send session data. The JWT subject is the authoritative account identity.
 
-`/.netlify/functions/award-xp` is retained for status reads and legacy compatibility. It shares XP policy, identity resolution, and one-time anonymous conversion with `calculate-xp`; new gameplay code must not use it for awards.
+`/.netlify/functions/award-xp` is retained only for legacy compatibility. Its `statusOnly` adapter temporarily preserves generated/registered session IDs for cached clients, but delegates canonical status projection to the shared status service. Supported clients read status from `calculate-xp`; new code must not use `award-xp`.
 
 ## Required configuration
 

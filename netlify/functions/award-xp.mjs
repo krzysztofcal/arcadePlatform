@@ -6,7 +6,7 @@ import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
 import { buildCorsAllowlist, buildCorsHeaders } from "./_shared/xp-cors.mjs";
 import { getXpPolicy, migrateAnonXpToUser, resolveXpIdentity } from "./_shared/xp-identity.mjs";
 import { createXpLedgerKeys, executeAtomicXpAward, readXpTotals } from "./_shared/xp-ledger.mjs";
-import { buildXpStatusSnapshot, persistXpProfileSnapshot } from "./_shared/xp-status.mjs";
+import { persistXpProfileSnapshot, readCanonicalXpStatus } from "./_shared/xp-status.mjs";
 
 const XP_DAY_COOKIE = "xp_day";
 
@@ -622,12 +622,17 @@ export async function handler(event) {
       touchSession(parsedSessionToken.sessionId).catch(() => {});
     }
 
-    const totals = await fetchTotals();
-    if (supabaseUserId) {
-      await persistUserProfile({ userId: supabaseUserId, totalXp: totals.lifetime, now });
-    }
-    const payload = buildXpStatusSnapshot({ totals, dailyCap: DAILY_CAP, deltaCap: DELTA_CAP, sessionId: sessId });
-    return respond(200, payload, { totals, debugExtra: { mode: "statusOnly" } });
+    const result = await readCanonicalXpStatus({
+      readTotals: fetchTotals,
+      dailyCap: DAILY_CAP,
+      deltaCap: DELTA_CAP,
+      sessionId: sessId,
+      dayKey: dayKeyNow,
+      nextReset,
+      supabaseUserId,
+      persistProfile: ({ userId, totalXp }) => persistUserProfile({ userId, totalXp, now }),
+    });
+    return respond(200, result.payload, { totals: result.totals, debugExtra: { mode: "statusOnly" } });
   }
 
   let deltaRaw = Number(body.delta);
