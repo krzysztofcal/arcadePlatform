@@ -36,6 +36,7 @@
     migrationNoticeClose: null,
     migrationNoticeLangBound: false,
     awardSessionId: null,
+    xpCacheHydrated: false,
   };
 
   function isDiagEnabled() {
@@ -459,23 +460,31 @@
     return Number.isSafeInteger(total) && total >= 0 ? total : null;
   }
 
-  function applyHydratedXp(value, attempt) {
+  function applyHydratedXp(value, attempt, userId, appliedState) {
     const total = Number(value && value.totalLifetime);
     const level = Number(value && value.level);
     if (!Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(level) || level < 1) return false;
     if (!window.XP || typeof window.XP.refreshFromServerStatus !== "function") {
-      if ((attempt || 0) < 10) schedule(() => applyHydratedXp(value, (attempt || 0) + 1), 50);
+      if ((attempt || 0) < 10) schedule(() => applyHydratedXp(value, (attempt || 0) + 1, userId, appliedState), 50);
       return false;
     }
     try {
       const snapshot = typeof window.XP.getSnapshot === "function" ? window.XP.getSnapshot() : null;
-      if (snapshot && snapshot.totalXp === total && snapshot.level === level) return true;
+      if (snapshot && snapshot.totalXp === total && snapshot.level === level) {
+        const ui = getUserUiState();
+        if (ui && userId && typeof ui.markSliceApplied === "function") ui.markSliceApplied(userId, "xp", appliedState || "hydrated");
+        state.xpCacheHydrated = true;
+        return true;
+      }
       window.XP.refreshFromServerStatus({ ok: true, status: "statusOnly", totalLifetime: total }, {
         source: "user-ui-cache",
         allowServerRegression: true,
         authenticated: true,
         hydration: true,
       });
+      const ui = getUserUiState();
+      if (ui && userId && typeof ui.markSliceApplied === "function") ui.markSliceApplied(userId, "xp", appliedState || "hydrated");
+      state.xpCacheHydrated = true;
       return true;
     } catch (_) {
       return false;
@@ -489,7 +498,7 @@
     if (!userId) return null;
     const hydrated = ui.hydrate(userId);
     if (!hydrated || !hydrated.xp) return null;
-    applyHydratedXp(hydrated.xp, 0);
+    applyHydratedXp(hydrated.xp, 0, userId, "hydrated");
     return hydrated.xp;
   }
 
@@ -501,14 +510,16 @@
     if (!snapshot || snapshot.totalXp !== total || !Number.isSafeInteger(snapshot.level) || snapshot.level < 1) return null;
     const userId = await getAuthenticatedUserId();
     if (!userId) return null;
-    return ui.publish(userId, "xp", { totalLifetime: total, level: snapshot.level }, Date.now());
+    const published = ui.publish(userId, "xp", { totalLifetime: total, level: snapshot.level }, Date.now());
+    if (published) state.xpCacheHydrated = true;
+    return published;
   }
 
   function bindUserUiXp() {
     const ui = getUserUiState();
     if (!ui || typeof ui.onChange !== "function") return;
     ui.onChange((detail) => {
-      if (detail && detail.slice === "xp") applyHydratedXp(detail.value, 0);
+      if (detail && detail.slice === "xp") applyHydratedXp(detail.value, 0, detail.userId, "ready");
     });
   }
 
@@ -532,6 +543,7 @@
     state.statusBootstrapped = false;
     state.statusPromise = null;
     state.awardSessionId = randomId();
+    state.xpCacheHydrated = false;
     clearServerSession();
     clearIdentityBoundXpCache({
       preserveLegacy: !!migrationLegacy,
@@ -801,6 +813,10 @@
       await publishConfirmedXp(payload);
       return payload;
     } catch (err) {
+      getAuthenticatedUserId().then((userId) => {
+        const ui = getUserUiState();
+        if (userId && ui && typeof ui.markSliceApplied === "function") ui.markSliceApplied(userId, "xp", state.xpCacheHydrated ? "stale" : "loading");
+      }).catch(() => {});
       klog("xp_refresh_error", { message: err && err.message ? String(err.message) : "error" });
       return null;
     }

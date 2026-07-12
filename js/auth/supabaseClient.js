@@ -355,6 +355,7 @@
     var hydrated = ui ? ui.hydrate(userId) : { generation: 0, profile: null };
     if (!ui) setUserUiState('loading');
     renderUser(user, hydrated.profile || null);
+    if (ui && hydrated.profile) ui.markSliceApplied(userId, 'profile', 'hydrated');
     refreshProfile(user, hydrated.generation, !!hydrated.profile);
   }
 

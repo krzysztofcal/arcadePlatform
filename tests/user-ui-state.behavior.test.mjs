@@ -6,7 +6,7 @@ const source = await readFile(new URL('../js/user-ui-state.js', import.meta.url)
 
 function createContext(initial = {}, options = {}){
   const values = options.values || new Map(Object.entries(initial));
-  const topbar = { state: 'pending', setAttribute(name, value){ if (name === 'data-user-ui-state') this.state = value; } };
+  const topbar = { state: 'pending', attributes: {}, setAttribute(name, value){ this.attributes[name] = value; if (name === 'data-user-ui-state') this.state = value; } };
   const listeners = {};
   const window = {
     localStorage: {
@@ -53,7 +53,11 @@ const profileRecord = (userId, displayName, confirmedAt = Date.now()) => JSON.st
   const repeated = state.api.hydrate('user-a');
   assert.equal(hydrated.profile.displayName, 'User A');
   assert.equal(repeated.generation, hydrated.generation);
+  assert.equal(state.topbar.state, 'loading');
+  assert.equal(state.topbar.attributes['data-user-ui-xp-state'], 'loading');
+  state.api.markSliceApplied('user-a', 'profile', 'hydrated');
   assert.equal(state.topbar.state, 'hydrated');
+  assert.equal(state.topbar.attributes['data-user-ui-xp-state'], 'loading');
   assert.equal(state.api.isCurrent('user-a', hydrated.generation), true);
   assert.equal(state.api.publish('user-b', 'profile', { displayName: 'Wrong', avatar: {} }), null);
 }
