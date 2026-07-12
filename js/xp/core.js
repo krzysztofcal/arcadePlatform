@@ -1281,8 +1281,7 @@ function bootXpCore(window, document) {
       || meta?.allowServerRegression === true;
 
     const skipTotals =
-      (!authenticated && statusRaw === "statusonly" && !isExplicitReset)
-      || reason === "too_soon"
+      reason === "too_soon"
       || reason === "insufficient-activity";
     const FORCE_IGNORE_SERVER_TOTALS = false;
 

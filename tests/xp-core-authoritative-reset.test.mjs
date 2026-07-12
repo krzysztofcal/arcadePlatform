@@ -99,4 +99,15 @@ assert.equal(cache.totalLifetime, 0);
 assert.equal(cache.serverTotalXp, 0);
 assert.equal(cache.badgeShownXp, 0);
 
+window.XPClient.isAuthenticated = () => false;
+window.XP.refreshFromServerStatus(
+  { ok: true, status: "statusOnly", totalLifetime: 120, totalToday: 120, cap: 3000 },
+  { source: "status" },
+);
+const guestCache = JSON.parse(storage.get("kcswh:xp:last"));
+assert.equal(label.textContent, "Lvl 2, 120 XP");
+assert.equal(window.XP.getSnapshot().totalXp, 120);
+assert.equal(guestCache.totalLifetime, 120);
+assert.equal(guestCache.serverTotalXp, 120);
+
 console.log("xp core authoritative reset tests passed");
