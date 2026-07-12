@@ -186,6 +186,8 @@ Exit criteria:
 
 Objective: remove the second executable award algorithm without waiting for production telemetry.
 
+Implementation status: supported client methods and XP core now always call `postWindowServerCalc()`. `award-xp` contains no ledger mutation or session registration logic; it returns `410 legacy_award_retired` for award attempts and keeps only a read-only `statusOnly` adapter for one compatibility cycle. `check-xp-authoritative-transport.mjs` prevents reconnecting playable code to the retired transport.
+
 Work:
 
 - Use `rg`, the XP hook guard, catalog validation, and playable-page inspection to prove every supported game uses semantic activity and server calculation.

@@ -22,8 +22,8 @@ function initXpClientStub() {
       get() { return calls; },
     });
     const stub = {
-      postWindow: (...args) => {
-        record('postWindow', args);
+      postWindowServerCalc: (...args) => {
+        record('postWindowServerCalc', args);
         return Promise.resolve({ ok: true, stub: true });
       },
       fetchStatus: (...args) => {
@@ -52,7 +52,7 @@ test.describe('XP idle behaviour', () => {
     await page.waitForTimeout(IDLE_OBSERVE_MS);
 
     const postCount = await page.evaluate(() =>
-      (window.__xpCalls || []).filter(c => c.method === 'postWindow').length
+      (window.__xpCalls || []).filter(c => c.method === 'postWindowServerCalc').length
     );
     expect(postCount).toBe(0);
   });
@@ -88,10 +88,10 @@ test.describe('XP idle behaviour', () => {
 
     await expect.poll(async () => (
       await page.evaluate(() =>
-        (window.__xpCalls || []).filter(c => c.method === 'postWindow').length
+        (window.__xpCalls || []).filter(c => c.method === 'postWindowServerCalc').length
       )
     ), {
-      message: 'XPClient.postWindow should be called after sustained gameplay',
+      message: 'XPClient.postWindowServerCalc should be called after sustained gameplay',
       timeout: 8_000,
     }).toBeGreaterThan(0);
   });

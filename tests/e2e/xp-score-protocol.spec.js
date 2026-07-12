@@ -17,8 +17,8 @@ function initXpClientRecorder() {
       get() { return calls; },
     });
     const stub = {
-      postWindow: (...args) => {
-        record('postWindow', args);
+      postWindowServerCalc: (...args) => {
+        record('postWindowServerCalc', args);
         return Promise.resolve({ ok: true, stub: true });
       },
       fetchStatus: (...args) => {
@@ -85,7 +85,7 @@ async function runWindow(page, scoreDelta, gameplayAction = true) {
 function getPostWindowPayloads(page) {
   return page.evaluate(() => {
     return (window.__xpCalls || [])
-      .filter((entry) => entry.method === 'postWindow')
+      .filter((entry) => entry.method === 'postWindowServerCalc')
       .map((entry) => entry.args[0]);
   });
 }
@@ -106,7 +106,7 @@ test.describe('XP score protocol', () => {
 
     await runWindow(page, 321);
     await page.waitForFunction(() => {
-      const calls = (window.__xpCalls || []).filter((entry) => entry.method === 'postWindow');
+      const calls = (window.__xpCalls || []).filter((entry) => entry.method === 'postWindowServerCalc');
       return calls.length >= 1;
     });
 
@@ -117,7 +117,7 @@ test.describe('XP score protocol', () => {
 
     await runWindow(page, undefined);
     await page.waitForFunction(() => {
-      const calls = (window.__xpCalls || []).filter((entry) => entry.method === 'postWindow');
+      const calls = (window.__xpCalls || []).filter((entry) => entry.method === 'postWindowServerCalc');
       return calls.length >= 2;
     });
 

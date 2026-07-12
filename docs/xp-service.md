@@ -10,7 +10,7 @@ POST /.netlify/functions/calculate-xp
 
 For gameplay, it receives `operation: "award"` (or the default operation), validates a bounded activity window, and calculates the grant on the server. For reads, `operation: "status"` returns the canonical totals without creating, registering, or touching an award session. The browser sends its anon id and Supabase bearer token when authenticated; award requests additionally send session data. The JWT subject is the authoritative account identity.
 
-`/.netlify/functions/award-xp` is retained only for legacy compatibility. Its `statusOnly` adapter temporarily preserves generated/registered session IDs for cached clients, but delegates canonical status projection to the shared status service. Supported clients read status from `calculate-xp`; new code must not use `award-xp`.
+`/.netlify/functions/award-xp` is retained for one compatibility cycle as a read-only `statusOnly` adapter. It no longer registers or touches sessions and never grants client-provided XP; direct award attempts return `410 legacy_award_retired`. Supported clients use only `calculate-xp`.
 
 ## Required configuration
 
