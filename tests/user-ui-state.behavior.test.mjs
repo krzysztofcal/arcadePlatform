@@ -59,6 +59,7 @@ const profileRecord = (userId, displayName, confirmedAt = Date.now()) => JSON.st
   assert.equal(state.topbar.state, 'hydrated');
   assert.equal(state.topbar.attributes['data-user-ui-xp-state'], 'loading');
   assert.equal(state.api.isCurrent('user-a', hydrated.generation), true);
+  assert.equal(JSON.stringify(state.api.getActiveContext()), JSON.stringify({ userId: 'user-a', generation: hydrated.generation }));
   assert.equal(state.api.publish('user-b', 'profile', { displayName: 'Wrong', avatar: {} }), null);
 }
 

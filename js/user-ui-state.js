@@ -129,6 +129,10 @@
     return activeUserId === userId && generation === expectedGeneration;
   }
 
+  function getActiveContext(){
+    return activeUserId ? { userId: activeUserId, generation: generation } : null;
+  }
+
   function writeRecord(record){
     var store = storage();
     if (!store) return false;
@@ -149,6 +153,12 @@
     emit(record);
     if (channel){ try { channel.postMessage(record); } catch (_err){} }
     return normalized;
+  }
+
+  function readActiveSlice(slice){
+    if (!activeUserId || !Object.prototype.hasOwnProperty.call(MAX_AGE, slice)) return null;
+    var record = read(slice, activeUserId);
+    return record ? record.value : null;
   }
 
   function clearUser(userId){
@@ -214,6 +224,6 @@
     if (parsed && parsed.userId === userId) acceptExternal(parsed);
   });
 
-  window.UserUiState = { hydrate: hydrate, publish: publish, clearUser: clearUser, setAnonymous: setAnonymous, isCurrent: isCurrent, markSliceApplied: markSliceApplied, markActiveSliceApplied: markActiveSliceApplied, markRefreshFailed: markRefreshFailed, onChange: onChange };
+  window.UserUiState = { hydrate: hydrate, publish: publish, readActiveSlice: readActiveSlice, getActiveContext: getActiveContext, clearUser: clearUser, setAnonymous: setAnonymous, isCurrent: isCurrent, markSliceApplied: markSliceApplied, markActiveSliceApplied: markActiveSliceApplied, markRefreshFailed: markRefreshFailed, onChange: onChange };
   klog('user_ui_state_ready', { version: VERSION });
 })();

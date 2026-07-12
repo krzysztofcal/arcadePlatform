@@ -6,6 +6,9 @@
   win.__topbarBooted = true;
   const chipNodes = { badge: null, amount: null, bonus: null, ready: false };
   let chipInFlight = null;
+  let chipHasHydratedValue = false;
+  let chipRequestGeneration = 0;
+  let chipIdentityUserId = null;
   let welcomeBonusInFlight = null;
   let chipsClientWaitTries = 0;
   let welcomeBonusClientWaitTries = 0;
@@ -260,16 +263,51 @@
     chipNodes.bonus.hidden = false;
   }
 
-  function renderChipBadgeBalance(amount){
+  function renderChipBadgeBalance(amount, uiState){
     const formatKey = 'format' + 'CompactNumber';
     const formatter = window && window.ArcadeFormat && typeof window.ArcadeFormat[formatKey] === 'function'
       ? window.ArcadeFormat[formatKey]
       : null;
     const text = amount == null ? '—' : formatter ? formatter(amount) : String(Math.round(amount));
     setChipBadge(text, { loading: false });
+    chipHasHydratedValue = amount != null;
     if (window.UserUiState && typeof window.UserUiState.markActiveSliceApplied === 'function'){
-      window.UserUiState.markActiveSliceApplied('chips', 'ready');
+      window.UserUiState.markActiveSliceApplied('chips', uiState || 'ready');
     }
+  }
+
+  function hydrateChipBadge(){
+    const ui = window.UserUiState;
+    if (!ui || typeof ui.readActiveSlice !== 'function') return false;
+    const cached = ui.readActiveSlice('chips');
+    const balance = cached && Number.isSafeInteger(cached.balance) && cached.balance >= 0 ? cached.balance : null;
+    if (balance == null) return false;
+    renderChipBadgeBalance(balance, 'hydrated');
+    return true;
+  }
+
+  function retainCachedChipBadge(){
+    if (!chipHasHydratedValue) return false;
+    if (window.UserUiState && typeof window.UserUiState.markActiveSliceApplied === 'function'){
+      window.UserUiState.markActiveSliceApplied('chips', 'stale');
+    }
+    return true;
+  }
+
+  function prepareChipIdentity(expectedUserId){
+    const ui = window.UserUiState;
+    const context = ui && typeof ui.getActiveContext === 'function' ? ui.getActiveContext() : null;
+    const userId = expectedUserId || (context && context.userId ? context.userId : null);
+    if (userId && userId === chipIdentityUserId){
+      if (!chipHasHydratedValue) hydrateChipBadge();
+      return;
+    }
+    chipRequestGeneration += 1;
+    chipInFlight = null;
+    chipHasHydratedValue = false;
+    chipIdentityUserId = userId;
+    const contextMatches = !expectedUserId || (context && context.userId === expectedUserId);
+    if (!contextMatches || !hydrateChipBadge()) setChipBadge('', { loading: true });
   }
 
   function setAuthState(next){
@@ -285,12 +323,16 @@
     }
     if (amount){ amount.textContent = ''; }
     if (!isAuthed()){
+      chipRequestGeneration += 1;
+      chipInFlight = null;
+      chipIdentityUserId = null;
+      chipHasHydratedValue = false;
       hideChipBadge();
       hideWelcomeBonusBadge();
       return;
     }
     if (badge){ badge.hidden = false; }
-    setChipBadge('', { loading: true });
+    prepareChipIdentity();
     refreshChipBadge();
     refreshWelcomeBonusBadge();
   }
@@ -303,6 +345,7 @@
         hideChipBadge();
         return;
       }
+      prepareChipIdentity(user && user.id ? String(user.id) : null);
       refreshXpBadge();
       refreshChipBadge();
       refreshWelcomeBonusBadge();
@@ -371,7 +414,10 @@
     }
     chipsClientWaitTries = 0;
     if (chipInFlight){ return chipInFlight; }
-    setChipBadge('', { loading: true });
+    if (!chipHasHydratedValue) setChipBadge('', { loading: true });
+    const requestGeneration = chipRequestGeneration;
+    const ui = window.UserUiState;
+    const uiContext = ui && typeof ui.getActiveContext === 'function' ? ui.getActiveContext() : null;
     chipInFlight = (async function(){
       let timeoutId = null;
       try {
@@ -384,12 +430,14 @@
           }, timeoutMs);
         });
         const balance = await Promise.race([window.ChipsClient.fetchBalance(), timeoutPromise]);
+        if (requestGeneration !== chipRequestGeneration) return;
+        if (uiContext && ui && typeof ui.isCurrent === 'function' && !ui.isCurrent(uiContext.userId, uiContext.generation)) return;
         const raw = balance && balance.balance != null ? Number(balance.balance) : null;
         const value = Number.isFinite(raw) ? raw : null;
         renderChipBadgeBalance(value);
       } catch (err){
         if (err && err.code === 'timeout'){
-          hideChipBadge();
+          if (!retainCachedChipBadge()) hideChipBadge();
           return;
         }
         if (err && (err.status === 404 || err.code === 'not_found')){
@@ -401,10 +449,10 @@
           hideChipBadge();
           return;
         }
-        hideChipBadge();
+        if (!retainCachedChipBadge()) hideChipBadge();
       } finally {
         if (timeoutId){ clearTimeout(timeoutId); }
-        chipInFlight = null;
+        if (requestGeneration === chipRequestGeneration) chipInFlight = null;
       }
     })();
 
@@ -413,19 +461,21 @@
 
   function handleAuthChange(event, user, session){
     const hasUser = !!(user || (session && session.user));
+    if (window.ChipsClient && typeof window.ChipsClient.clearAuthCache === 'function') window.ChipsClient.clearAuthCache();
     if (event === 'SIGNED_OUT'){
       setAuthState(AuthState.SIGNED_OUT);
       hideChipBadge();
       hideWelcomeBonusBadge();
       return;
     }
-    if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION'){
+    if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION' || event === 'USER_UPDATED'){
       setAuthState(hasUser ? AuthState.SIGNED_IN : AuthState.SIGNED_OUT);
       if (!isAuthed()){
         hideChipBadge();
         hideWelcomeBonusBadge();
         return;
       }
+      prepareChipIdentity(user && user.id ? String(user.id) : (session && session.user && session.user.id ? String(session.user.id) : null));
       refreshXpBadge();
       refreshChipBadge();
       refreshWelcomeBonusBadge();
@@ -447,6 +497,11 @@
       refreshChipBadge();
       refreshWelcomeBonusBadge();
     });
+    if (window.UserUiState && typeof window.UserUiState.onChange === 'function'){
+      window.UserUiState.onChange(function(detail){
+        if (detail && detail.slice === 'chips' && detail.value) renderChipBadgeBalance(detail.value.balance, 'ready');
+      });
+    }
   }
 
   function tryWireAuthBridge(){
