@@ -9,11 +9,11 @@ This document preserves the XP-related technical details that previously lived i
 
 ## Authoritative award path and identity
 
-- Gameplay XP is awarded and canonical XP status is read through `/.netlify/functions/calculate-xp`. `operation: "status"` is read-only with respect to daily, session, and lifetime counters and does not register, touch, or generate an award session. The legacy `award-xp` function cannot grant XP and returns `410 legacy_award_retired` for client delta requests.
+- Gameplay XP is awarded and canonical XP status is read through `/.netlify/functions/calculate-xp`. `operation: "status"` is read-only with respect to daily, session, and lifetime counters and does not register, touch, or generate an award session. The legacy `award-xp` function and redirects have been removed.
 - The XP badge and `+N XP` overlay animate only after `calculate-xp` returns a positive authoritative `awarded` value. Status reads, auth refreshes, focus changes, cache hydration, zero awards, and rejected windows update state without award animation.
-- `calculate-xp`, `award-xp`, and `start-session` must use the shared Supabase auth verifier from `_shared/supabase-admin.mjs`. This keeps HS256/HS512 and Supabase ES256 remote verification aligned with profile, chips, and poker APIs. A request without Authorization may use the browser anon id; a request that supplies an invalid Bearer token fails with `401` and must never fall back to anonymous XP.
-- Both award endpoints share XP policy values (`XP_DAILY_CAP`, `XP_SESSION_CAP`, `XP_DELTA_CAP`, `XP_SESSION_TTL_SEC`) and identity resolution: a valid Supabase JWT subject wins over the browser anon id.
-- On an authenticated request carrying the browser anon id, both endpoints run the same atomic one-time conversion before reading or awarding totals. The Redis migration marker is the idempotent receipt; zero anon XP does not consume conversion eligibility.
+- `calculate-xp` and `start-session` must use the shared Supabase auth verifier from `_shared/supabase-admin.mjs`. This keeps HS256/HS512 and Supabase ES256 remote verification aligned with profile, chips, and poker APIs. A request without Authorization may use the browser anon id; a request that supplies an invalid Bearer token fails with `401` and must never fall back to anonymous XP.
+- The authoritative endpoint uses shared XP policy values (`XP_DAILY_CAP`, `XP_SESSION_CAP`, `XP_DELTA_CAP`, `XP_SESSION_TTL_SEC`) and identity resolution: a valid Supabase JWT subject wins over the browser anon id.
+- On an authenticated request carrying the browser anon id, `calculate-xp` runs the atomic one-time conversion before reading or awarding totals. The Redis migration marker is the idempotent receipt; zero anon XP does not consume conversion eligibility.
 - Canonical server game IDs include `tetris`, `2048`, `pacman`, `t-rex`, and `cats`. Existing aliases such as `open-tetris`, `block-stacker`, `trex`, `open-pacman`, `catch-cats`, and `game_cats` remain supported.
 - `XPClient` clears its cached JWT, signed server session, and identity-bound XP cache on `SupabaseAuth.onAuthChange`, then refreshes status for the new identity.
 - Non-game pages that render `#xpBadge` perform an initial authenticated status read. The server response is the only value rendered for an authenticated badge. Before that read, the client defensively inspects the legacy `kcswh:xp:last` value; if it is higher than the server total, it shows a one-time, per-user synchronization notice and never uploads the local value. Legacy cache keys are removed only after a successful authenticated response, while a failed response leaves the cache and marker untouched. Game hosts keep their existing `GameXpBridge`/core lifecycle and do not run this migration UX.
@@ -59,6 +59,6 @@ The helper survives soft navigations—if you’re swapping views inside an SPA,
 - `window.XP.getRemainingDaily()` and `window.XP.getNextResetEpoch()` expose the live allowance for UI surfaces, while the runtime automatically resets the cached totals once the stored `nextReset` elapses.
 - `XP.addScore()` and the `GameXpBridge` flush path pre-clamp outgoing deltas based on the server-advertised `remaining` value and emit `award_preclamp` / `award_skip { reason: 'daily_cap' }` diagnostics so operators can confirm when the cap halts awards.
 
-## Retired compatibility contract
+## Removed compatibility contract
 
-The former `XPClient.postWindow()`, `postWindowAuto()`, server-calculation feature flags, and duplicate `XpServerCalc` module have been removed. No browser code sends a client-authoritative XP delta. `award-xp statusOnly` remains read-only for one compatibility cycle; any other request receives `410 legacy_award_retired` and cannot mutate XP.
+The former `XPClient.postWindow()`, `postWindowAuto()`, server-calculation feature flags, duplicate `XpServerCalc` module, and `award-xp` function have been removed. No browser code sends a client-authoritative XP delta.

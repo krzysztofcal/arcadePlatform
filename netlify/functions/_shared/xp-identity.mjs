@@ -32,6 +32,10 @@ export function resolveXpIdentity({ anonId, authContext }) {
   };
 }
 
+export function isValidXpAnonId(value) {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/.test(value);
+}
+
 const GAME_ID_ALIASES = Object.freeze({
   "open-2048": "2048",
   "block-stacker": "tetris",

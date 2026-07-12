@@ -3,13 +3,13 @@
 
 ## Implemented behavior
 
-The authoritative XP endpoint is `calculate-xp`. Its `operation: "status"` and award path run the same conversion helper before reading or awarding authenticated totals. The temporary `award-xp statusOnly` compatibility adapter uses the same helper and status projection until that adapter is retired.
+The authoritative XP endpoint is `calculate-xp`. Its `operation: "status"` and award path run the same conversion helper before reading or awarding authenticated totals. The former `award-xp` compatibility adapter has been removed.
 
 - A valid Supabase JWT subject is the destination account; the browser anon id is the source.
 - Conversion atomically transfers `min(anon lifetime XP, XP_ANON_CONVERSION_MAX_XP)`.
 - A positive conversion deletes the anon lifetime counter and records account and pair markers. Those markers are the idempotent receipt and prevent another conversion for that account.
 - A zero anon balance creates no marker and does not consume future eligibility.
-- Both endpoints return `conversion: { converted }` only when they moved XP. UI messaging is intentionally outside the award path.
+- The endpoint returns `conversion: { converted }` only when it moved XP. UI messaging is intentionally outside the award path.
 
 The remainder of this file is historical v1 product design, not the current implementation contract.
 

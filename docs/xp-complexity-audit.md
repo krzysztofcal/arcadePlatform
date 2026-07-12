@@ -1,13 +1,13 @@
 # XP mechanism complexity audit
 
-> Status update (2026-07-12): `docs/xp-unification-plan.md` supersedes the historical inventory below. Status and gameplay writes now use `calculate-xp`; `award-xp` cannot grant XP and remains only as a temporary read-only compatibility adapter. The duplicate browser transport and `server-calc.js` module have also been removed.
+> Status update (2026-07-12): `docs/xp-unification-plan.md` supersedes the historical inventory below. Status and gameplay writes now use only `calculate-xp`; `award-xp`, its redirects, the duplicate browser transport, and `server-calc.js` have been removed.
 
 ## Executive summary
 
 The XP system is more complex than the product behavior requires. It does not have three functions that calculate XP:
 
 - `calculate-xp.mjs` is the authoritative gameplay calculator and award path.
-- `award-xp.mjs` is the older client-delta award path and the current status-read endpoint.
+- `award-xp.mjs` was the older client-delta award and status-read endpoint; it has been removed.
 - `start-session.mjs` creates and validates signed anti-abuse sessions; it does not calculate or award XP.
 
 Keeping a separate session endpoint is reasonable. Keeping two independently implemented award paths is the main source of unnecessary complexity. The recent ES256 incident demonstrated the risk: three copied JWT verifiers drifted from the shared Supabase verifier, causing authenticated awards to be stored under browser-anonymous identities.
@@ -26,7 +26,7 @@ The primary implementation surface is approximately 5,200 lines after the first 
 | Component | Approximate size | Current responsibility |
 | --- | ---: | --- |
 | `netlify/functions/calculate-xp.mjs` | 1,013 lines | Validate activity windows, calculate XP, apply caps, update Redis totals and serve status reads |
-| `netlify/functions/award-xp.mjs` | 96 lines | Temporary read-only status adapter; reject legacy award requests |
+| `netlify/functions/award-xp.mjs` | removed | Compatibility cycle completed; guarded against reintroduction |
 | `netlify/functions/start-session.mjs` | 374 lines | Create, sign, store, validate and refresh server sessions |
 | `js/xpClient.js` | 893 lines | Auth, status, signed-session acquisition, one award transport, retries and cache synchronization |
 | `js/xp/core.js` | 2,828 lines | Gameplay lifecycle, scoring windows, badge state, buffering and server reconciliation |

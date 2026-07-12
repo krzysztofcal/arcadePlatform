@@ -226,7 +226,7 @@ function createTestContext() {
         text: async () => JSON.stringify({ ok: true }),
       };
     }
-    // award-xp endpoint
+    // calculate-xp endpoint
     return {
       ok: true,
       status: 200,

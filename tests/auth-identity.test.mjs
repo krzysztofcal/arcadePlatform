@@ -88,11 +88,6 @@ vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => ({
   atomicRateLimitIncr: atomicRateLimitIncrMock,
 }));
 
-async function loadAwardXp() {
-  const mod = await import("../netlify/functions/award-xp.mjs");
-  return { handler: mod.handler };
-}
-
 async function loadCalculateXp() {
   const mod = await import("../netlify/functions/calculate-xp.mjs");
   return { handler: mod.handler };
@@ -118,73 +113,6 @@ describe("JWT verification and identity selection", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
-  });
-
-  it("A1: No Authorization header uses anonymous identity", async () => {
-    const { handler } = await loadAwardXp();
-    await mockStoreEvalReturn([10, 10, 10, 10, Date.now(), 0]);
-
-    const response = await handler({
-      httpMethod: "POST",
-      headers: {},
-      body: JSON.stringify({ anonId: "anon-123", sessionId: "sess-1", delta: 10 }),
-    });
-
-    const body = parseJsonBody(response);
-    expect(response.statusCode).toBe(200);
-    expect(body.debug.authProvided).toBe(false);
-    expect(body.debug.authValid).toBe(false);
-    expect(body.debug.authReason).toBe("missing_token");
-    const keys = store.eval.mock.calls[0][1];
-    expect(keys[3]).toBe(`${process.env.XP_KEY_NS}:total:anon-123`);
-  });
-
-  it("A2: Invalid JWT is rejected instead of falling back to anonymous identity", async () => {
-    const { handler } = await loadAwardXp();
-    await mockStoreEvalReturn([5, 5, 5, 5, Date.now(), 0]);
-
-    const response = await handler({
-      httpMethod: "POST",
-      headers: {
-        Authorization: "Bearer invalid.token.string",
-      },
-      body: JSON.stringify({ anonId: "anon-123", sessionId: "sess-1", delta: 10 }),
-    });
-
-    const body = parseJsonBody(response);
-    expect(response.statusCode).toBe(401);
-    expect(body.error).toBe("unauthorized");
-    expect(store.eval).not.toHaveBeenCalled();
-  });
-
-  it("A3: Valid JWT overrides client-provided identities", async () => {
-    const { handler } = await loadAwardXp();
-    await mockStoreEvalReturn([20, 20, 20, 20, Date.now(), 0]);
-    const token = createSupabaseJwt({
-      sub: "user-777",
-      secret: process.env.SUPABASE_JWT_SECRET,
-    });
-
-    const response = await handler({
-      httpMethod: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        anonId: "anon-123",
-        userId: "evil-client-user",
-        sessionId: "sess-1",
-        delta: 20,
-      }),
-    });
-
-    const body = parseJsonBody(response);
-    expect(response.statusCode).toBe(200);
-    expect(body.totalLifetime).toBe(20);
-    expect(body.debug.authValid).toBe(true);
-    expect(body.debug.authReason).toBe("ok");
-    const awardCall = store.eval.mock.calls.find((call) => call[1]?.length === 5);
-    const keys = awardCall[1];
-    expect(keys[3]).toBe(`${process.env.XP_KEY_NS}:total:user-777`);
-    expect(saveUserProfileMock).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-777", totalXp: 20 }));
   });
 
   it("A4: calculate-xp uses JWT sub for identity", async () => {

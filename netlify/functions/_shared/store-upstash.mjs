@@ -99,7 +99,7 @@ function createMemoryStore() {
       return memory.delete(key) ? 1 : 0;
     },
     async eval(_script, keys = [], argv = []) {
-      // Memory impl supports the XP award signatures used by award-xp and calculate-xp.
+      // Memory impl supports the XP award signatures used by calculate-xp.
       if ((keys.length === 5 && argv.length === 7) || (keys.length === 4 && argv.length === 6)) {
         const [sessionKey, sessionSyncKey, dailyKey, totalKey, maybeLockKey] = keys;
         const lockKey = keys.length === 5 ? maybeLockKey : null;

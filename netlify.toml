@@ -182,11 +182,6 @@
 
 # Redirects for Netlify Functions
 [[redirects]]
-  from = "/api/award-xp"
-  to = "/.netlify/functions/award-xp"
-  status = 200
-
-[[redirects]]
   from = "/api/start-session"
   to = "/.netlify/functions/start-session"
   status = 200
@@ -195,11 +190,6 @@
 [[redirects]]
   from = "/api/xp/start-session"
   to = "/.netlify/functions/start-session"
-  status = 200
-
-[[redirects]]
-  from = "/api/xp/award"
-  to = "/.netlify/functions/award-xp"
   status = 200
 
 [[redirects]]

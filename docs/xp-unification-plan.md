@@ -2,7 +2,9 @@
 
 ## Executive summary
 
-Arcade Hub should consolidate XP before implementing the leaderboard. The current product has one authoritative gameplay award route (`calculate-xp`), one legacy award/status route (`award-xp`), and one justified signed-session route (`start-session`). The target is one authoritative XP award/status service plus the separate session service.
+Arcade Hub consolidated XP before implementing the leaderboard. The current product has one authoritative award/status route (`calculate-xp`) and one justified signed-session route (`start-session`). The legacy `award-xp` route has been removed.
+
+Implementation status (2026-07-12): PRs 1-4 and the final compatibility cleanup are complete. Repository callers, redirects, local tooling, and tests use `calculate-xp`; `award-xp.mjs` no longer exists. The plan remains as the implementation record and invariant checklist.
 
 This plan intentionally skips the observation/telemetry phase from `docs/xp-complexity-audit.md`. Arcade Hub is still early, has one active operator/user, and does not need a production usage window before removing internal legacy paths. Replacement confidence will come from repository-wide caller inspection, existing guards, deterministic behavior tests, Deploy Preview smoke tests, and a controlled compatibility adapter.
 
@@ -35,7 +37,7 @@ This is a consolidation, not a ground-up rewrite. Existing Redis keys, caps, con
 - `start-session` remains separate because session issuance has distinct security and rate-limit behavior.
 - Status reads use the same identity and conversion service as awards but never consume gameplay windows or grant XP.
 - A missing Authorization header may use anonymous identity; a supplied invalid token always returns `401` and never falls back to anonymous identity.
-- `award-xp` may temporarily delegate, but it must not retain independent identity, policy, cap, conversion, or Redis orchestration.
+- The removed `award-xp` endpoint must not be reintroduced; a static guard enforces its absence.
 - Removal decisions use static caller verification and real smoke tests instead of a Phase 0 usage-observation period.
 
 ## Required invariants
@@ -72,14 +74,9 @@ During migration, existing award payloads without `operation` normalize to `awar
 
 Retain the current responsibility: issue and validate signed anti-abuse sessions. It may call shared identity/session helpers but does not read or award XP totals unless required to construct its existing response contract.
 
-#### `POST /.netlify/functions/award-xp`
+#### Removed endpoint: `POST /.netlify/functions/award-xp`
 
-Temporary compatibility behavior:
-
-- status requests delegate to the same authoritative status service used by `calculate-xp`;
-- legacy delta awards remain isolated only until every repository caller is migrated;
-- after caller verification, legacy delta requests return a controlled `legacy_award_retired` response;
-- the endpoint can be removed later, but only after static checks prove no supported page calls it.
+Static caller inspection and Deploy Preview smoke tests proved that supported pages use `calculate-xp`. The compatibility endpoint and its redirects are removed; requests to the old route now receive the platform's normal missing-function response.
 
 ### Status/session compatibility decision
 
@@ -186,7 +183,7 @@ Exit criteria:
 
 Objective: remove the second executable award algorithm without waiting for production telemetry.
 
-Implementation status: supported client methods and XP core now always call `postWindowServerCalc()`. `award-xp` contains no ledger mutation or session registration logic; it returns `410 legacy_award_retired` for award attempts and keeps only a read-only `statusOnly` adapter for one compatibility cycle. `check-xp-authoritative-transport.mjs` prevents reconnecting playable code to the retired transport.
+Implementation status: supported client methods and XP core always call `postWindowServerCalc()`. After the compatibility cycle and successful smoke tests, `award-xp`, its redirects, local server wiring, and adapter-only tests were removed. `check-xp-authoritative-transport.mjs` prevents restoring the function or reconnecting playable code to the retired transport.
 
 Work:
 
@@ -302,7 +299,7 @@ XP unification is complete when:
 
 - `calculate-xp` owns award and status operations;
 - `start-session` remains the only separate session responsibility;
-- `award-xp` is removed or is a non-mutating compatibility adapter with no independent XP logic;
+- `award-xp` is removed and guarded against reintroduction;
 - all playable pages use semantic server-calculated awards;
 - badge, public profile, and status always agree for authenticated users;
 - authenticated XP survives browser-data deletion and device changes;

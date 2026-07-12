@@ -25,7 +25,6 @@ run("node", ["tests/xp-game-hook.test.mjs"], "xp-game-hook");
 run("node", ["tests/xp-badge.test.mjs"], "xp-badge");
 run("node", ["tests/xp-multigame.test.mjs"], "xp-multigame");
 run("node", ["tests/store-upstash.force-memory-test-mode.behavior.test.mjs"], "store-upstash-force-memory-test-mode");
-run("node", ["tests/xp-award-retired.behavior.test.mjs"], "xp-award-retired");
 run("node", ["scripts/check-xp-authoritative-transport.mjs"], "xp-authoritative-transport");
 run("node", ["tests/xp-caps.nextReset.test.mjs"], "xp-caps-nextReset");
 run("node", ["tests/xp-client-bfcache.test.mjs"], "xp-client-bfcache");

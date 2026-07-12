@@ -95,11 +95,6 @@ async function loadStartSession() {
   return { handler: mod.handler };
 }
 
-async function loadAwardXp() {
-  const mod = await import("../netlify/functions/award-xp.mjs");
-  return { handler: mod.handler };
-}
-
 async function loadCalculateXp() {
   const mod = await import("../netlify/functions/calculate-xp.mjs");
   return { handler: mod.handler };
@@ -139,74 +134,6 @@ describe("session token plumbing", () => {
     const parsed = JSON.parse(stored);
     expect(parsed.userId).toBe("anon-555");
     expect(parsed.fingerprint).toBeTruthy();
-  });
-
-  it("S2: award-xp enforces valid server session when required", async () => {
-    process.env.XP_REQUIRE_SERVER_SESSION = "1";
-    process.env.XP_SERVER_SESSION_WARN_MODE = "0";
-    const secret = process.env.XP_DAILY_SECRET;
-    const { handler } = await loadAwardXp();
-
-    const missing = await handler({
-      httpMethod: "POST",
-      headers: {},
-      body: JSON.stringify({ userId: "user-1", sessionId: "sess-1", delta: 10 }),
-    });
-
-    const missingBody = parseJsonBody(missing);
-    expect(missing.statusCode).toBe(401);
-    expect(missingBody.error).toBe("invalid_session");
-    expect(missingBody.requiresNewSession).toBe(true);
-
-    const fingerprint = hash("Vitest/UA||").substring(0, 16);
-    const sessionToken = buildSessionToken({
-      sessionId: "sess-valid",
-      userId: "user-1",
-      fingerprint,
-      secret,
-    });
-    store.setex(`${process.env.XP_KEY_NS}:server-session:sess-valid`, 600, JSON.stringify({
-      userId: "user-1",
-      createdAt: Date.now(),
-      fingerprint,
-      ipHash: hash("127.0.0.1").substring(0, 16),
-      lastActivity: Date.now(),
-    }));
-
-    store.eval.mockResolvedValue([10, 10, 10, 10, Date.now(), 0]);
-    const valid = await handler({
-      httpMethod: "POST",
-      headers: { "user-agent": "Vitest/UA" },
-      body: JSON.stringify({
-        userId: "user-1",
-        sessionId: "sess-valid",
-        sessionToken,
-        delta: 10,
-        ts: Date.now(),
-      }),
-    });
-
-    const validBody = parseJsonBody(valid);
-    expect(valid.statusCode).toBe(200);
-    expect(validBody.ok).toBe(true);
-    expect(validBody.error).toBeUndefined();
-  });
-
-  it("S3: warn mode allows invalid session tokens", async () => {
-    process.env.XP_REQUIRE_SERVER_SESSION = "0";
-    process.env.XP_SERVER_SESSION_WARN_MODE = "1";
-    const { handler } = await loadAwardXp();
-
-    const response = await handler({
-      httpMethod: "POST",
-      headers: {},
-      body: JSON.stringify({ userId: "user-warn", sessionId: "sess-warn", delta: 5, sessionToken: "broken" }),
-    });
-
-    const body = parseJsonBody(response);
-    expect(response.statusCode).toBe(200);
-    expect(body.ok).toBe(true);
-    expect(store.eval).toHaveBeenCalled();
   });
 
   it("S4: calculate-xp validates session token coherence", async () => {

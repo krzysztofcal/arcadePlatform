@@ -18,7 +18,7 @@ import { store, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
 import { extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
-import { canonicalizeXpGameId, getXpPolicy, migrateAnonXpToUser, resolveXpIdentity } from "./_shared/xp-identity.mjs";
+import { canonicalizeXpGameId, getXpPolicy, isValidXpAnonId, migrateAnonXpToUser, resolveXpIdentity } from "./_shared/xp-identity.mjs";
 import { createXpLedgerKeys, executeAtomicXpAward, readXpTotals } from "./_shared/xp-ledger.mjs";
 import { persistXpProfileSnapshot, readCanonicalXpStatus } from "./_shared/xp-status.mjs";
 
@@ -674,6 +674,9 @@ export async function handler(event) {
   const operation = body.operation === "status" || body.statusOnly === true ? "status" : (body.operation || "award");
   if (operation !== "award" && operation !== "status") {
     return json(400, { error: "invalid_operation" }, origin);
+  }
+  if (anonId && !isValidXpAnonId(anonId)) {
+    return json(400, { error: "invalid_identity" }, origin);
   }
 
   const jwtToken = extractBearerToken(event.headers);
