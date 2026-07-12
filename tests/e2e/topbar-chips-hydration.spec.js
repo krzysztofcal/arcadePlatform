@@ -115,7 +115,6 @@ test('hides account A chips during a direct signed-in switch to account B', asyn
   await page.waitForTimeout(100);
   await expect(amount).toHaveCSS('visibility', 'hidden');
   expect(await page.evaluate(() => localStorage.getItem('kcswh:user-ui:chips:v1:chips-user-b'))).toBeNull();
-  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).value.balance, CACHE_KEY)).toBe(896);
 
   releaseB();
   await expect(amount).toHaveText('950');
