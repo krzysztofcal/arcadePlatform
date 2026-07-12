@@ -210,8 +210,13 @@
       var parsed = toNumber(payload.data.balance);
       if (parsed != null){ payload.data.balance = parsed; }
     }
+    var contextIsCurrent = !uiContext
+      || !ui
+      || typeof ui.isCurrent !== 'function'
+      || ui.isCurrent(uiContext.userId, uiContext.generation);
+    if (!contextIsCurrent) return null;
     if (payload && payload.data && Number.isSafeInteger(payload.data.balance) && payload.data.balance >= 0){
-      if (uiContext && ui && typeof ui.isCurrent === 'function' && ui.isCurrent(uiContext.userId, uiContext.generation)){
+      if (uiContext && ui && typeof ui.publish === 'function'){
         ui.publish(uiContext.userId, 'chips', { balance: payload.data.balance }, Date.now());
       }
     }

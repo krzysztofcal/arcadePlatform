@@ -10,6 +10,7 @@ function response(balance){
 
 function createClient(fetchImpl){
   const published = [];
+  const events = [];
   let context = { userId: 'chips-user', generation: 1 };
   let token = 'token-a';
   const window = {
@@ -22,8 +23,11 @@ function createClient(fetchImpl){
     KLog: { log(){} },
   };
   window.window = window;
-  vm.runInNewContext(source, { window, document: { dispatchEvent(){} }, CustomEvent: class {}, fetch: fetchImpl, Date, JSON, Number });
-  return { client: window.ChipsClient, published, setContext(value){ context = value; }, setToken(value){ token = value; } };
+  class CustomEvent {
+    constructor(type, options){ this.type = type; this.detail = options && options.detail; }
+  }
+  vm.runInNewContext(source, { window, document: { dispatchEvent(event){ events.push(event); } }, CustomEvent, fetch: fetchImpl, Date, JSON, Number });
+  return { client: window.ChipsClient, events, published, setContext(value){ context = value; }, setToken(value){ token = value; } };
 }
 
 {
@@ -55,8 +59,10 @@ function createClient(fetchImpl){
   await Promise.resolve();
   state.setContext({ userId: 'other-user', generation: 2 });
   release();
-  await pending;
+  const result = await pending;
+  assert.equal(result, null);
   assert.equal(state.published.length, 0);
+  assert.equal(state.events.filter((event) => event.type === 'chips:balance').length, 0);
 }
 
 console.log('chips client cache behavior tests passed');

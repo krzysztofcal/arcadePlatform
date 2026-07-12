@@ -106,6 +106,10 @@ test('hides account A chips during a direct signed-in switch to account B', asyn
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   const amount = page.locator('#chipBadgeAmount');
   await expect(amount).toHaveText('896');
+  await page.evaluate(() => {
+    window.__chipBalanceEvents = [];
+    document.addEventListener('chips:balance', (event) => window.__chipBalanceEvents.push(event.detail && event.detail.balance));
+  });
   await page.evaluate(() => document.dispatchEvent(new CustomEvent('chips:tx-complete', { detail: { ok: true } })));
   await expect.poll(() => requests).toBe(2);
 
@@ -120,9 +124,11 @@ test('hides account A chips during a direct signed-in switch to account B', asyn
   await page.waitForTimeout(100);
   await expect(amount).toHaveCSS('visibility', 'hidden');
   expect(await page.evaluate(() => localStorage.getItem('kcswh:user-ui:chips:v1:chips-user-b'))).toBeNull();
+  expect(await page.evaluate(() => window.__chipBalanceEvents.includes(777))).toBe(false);
 
   releaseB();
   await expect(amount).toHaveText('950');
+  await expect.poll(() => page.evaluate(() => window.__chipBalanceEvents.includes(950))).toBe(true);
   await expect(page.locator('.topbar')).toHaveAttribute('data-user-ui-chips-state', 'ready');
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('kcswh:user-ui:chips:v1:chips-user-b')).value.balance)).toBe(950);
 });
