@@ -14,11 +14,13 @@
  */
 
 import crypto from "node:crypto";
-import { store, saveUserProfile, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
+import { store, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
 import { extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
 import { canonicalizeXpGameId, getXpPolicy, migrateAnonXpToUser, resolveXpIdentity } from "./_shared/xp-identity.mjs";
+import { createXpLedgerKeys, executeAtomicXpAward, readXpTotals } from "./_shared/xp-ledger.mjs";
+import { persistXpProfileSnapshot } from "./_shared/xp-status.mjs";
 
 // ============================================================================
 // Configuration Constants
@@ -69,12 +71,7 @@ const RATE_LIMIT_PER_IP_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT
 const RATE_LIMIT_ENABLED = process.env.XP_RATE_LIMIT_ENABLED !== "0";
 
 async function persistUserProfile({ userId, totalXp, now }) {
-  if (!userId) return;
-  try {
-    await saveUserProfile({ userId, totalXp, now });
-  } catch (err) {
-    klog("calc_save_user_profile_failed", { error: err?.message });
-  }
+  return persistXpProfileSnapshot({ userId, totalXp, now, logKind: "calc_save_user_profile_failed" });
 }
 
 // CORS
@@ -208,38 +205,17 @@ const getDailyKey = (ms = Date.now()) => warsawDayKey(ms);
 const getNextResetEpoch = (ms = Date.now()) => nextWarsawResetMs(ms);
 
 // Redis Keys
-const keyDaily = (u, day = getDailyKey()) => `${KEY_NS}:daily:${u}:${day}`;
-const keyTotal = (u) => `${KEY_NS}:total:${u}`;
-const keySession = (u, s) => `${KEY_NS}:session:${hash(`${u}|${s}`)}`;
-const keySessionSync = (u, s) => `${KEY_NS}:session:last:${hash(`${u}|${s}`)}`;
-const keySessionState = (u, s) => `${KEY_NS}:session:state:${hash(`${u}|${s}`)}`;
+const XP_LEDGER_KEYS = createXpLedgerKeys({ namespace: KEY_NS });
+const keyDaily = (u, day = getDailyKey()) => XP_LEDGER_KEYS.daily(u, day);
+const keyTotal = XP_LEDGER_KEYS.total;
+const keySession = XP_LEDGER_KEYS.session;
+const keySessionSync = XP_LEDGER_KEYS.sessionSync;
+const keySessionState = XP_LEDGER_KEYS.sessionState;
 const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}:${Math.floor(Date.now() / 60000)}`;
 const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / 60000)}`;
 
 async function getTotals({ userId, sessionId, now }) {
-  if (!userId) {
-    return { current: 0, lifetime: 0, sessionTotal: 0, lastSync: 0 };
-  }
-
-  const dayKeyNow = getDailyKey(now || Date.now());
-  const todayKey = keyDaily(userId, dayKeyNow);
-  const totalKeyK = keyTotal(userId);
-  const sessionKeyK = keySession(userId, sessionId || "");
-  const sessionSyncKeyK = keySessionSync(userId, sessionId || "");
-
-  const [dailyRaw, totalRaw, sessionRaw, syncRaw] = await Promise.all([
-    store.get(todayKey),
-    store.get(totalKeyK),
-    store.get(sessionKeyK),
-    store.get(sessionSyncKeyK),
-  ]);
-
-  const current = Math.max(0, Math.floor(Number(dailyRaw) || 0));
-  const lifetime = Math.max(0, Math.floor(Number(totalRaw) || 0));
-  const sessionTotal = Math.max(0, Math.floor(Number(sessionRaw) || 0));
-  const lastSync = Math.max(0, Math.floor(Number(syncRaw) || 0));
-
-  return { current, lifetime, sessionTotal, lastSync };
+  return readXpTotals({ store, keys: XP_LEDGER_KEYS, userId, sessionId, dayKey: getDailyKey(now || Date.now()) });
 }
 
 // ============================================================================
@@ -906,102 +882,21 @@ export async function handler(event) {
   const totalKeyK = keyTotal(userId);
   const sessionKeyK = keySession(userId, sessionId);
   const sessionSyncKeyK = keySessionSync(userId, sessionId);
+  const lockKeyK = XP_LEDGER_KEYS.lock(userId, sessionId);
 
   // Award XP atomically with caps
-  const script = `
-    local sessionKey = KEYS[1]
-    local sessionSyncKey = KEYS[2]
-    local dailyKey = KEYS[3]
-    local totalKey = KEYS[4]
-    local now = tonumber(ARGV[1])
-    local delta = tonumber(ARGV[2])
-    local dailyCap = tonumber(ARGV[3])
-    local sessionCap = tonumber(ARGV[4])
-    local ts = tonumber(ARGV[5])
-    local sessionTtl = tonumber(ARGV[6])
-
-    local function refreshSessionTtl()
-      if sessionTtl and sessionTtl > 0 then
-        redis.call('PEXPIRE', sessionKey, sessionTtl)
-        redis.call('PEXPIRE', sessionSyncKey, sessionTtl)
-      end
-    end
-
-    local sessionTotal = tonumber(redis.call('GET', sessionKey) or '0')
-    local lastSync = tonumber(redis.call('GET', sessionSyncKey) or '0')
-    local dailyTotal = tonumber(redis.call('GET', dailyKey) or '0')
-    local lifetime = tonumber(redis.call('GET', totalKey) or '0')
-
-    if lastSync > 0 and ts <= lastSync then
-      return {0, dailyTotal, sessionTotal, lifetime, lastSync, 2}
-    end
-
-    local remainingDaily = dailyCap - dailyTotal
-    if remainingDaily <= 0 then
-      return {0, dailyTotal, sessionTotal, lifetime, lastSync, 3}
-    end
-
-    local remainingSession = sessionCap - sessionTotal
-    if remainingSession <= 0 then
-      return {0, dailyTotal, sessionTotal, lifetime, lastSync, 5}
-    end
-
-    local grant = delta
-    local status = 0
-    if grant > remainingDaily then
-      grant = remainingDaily
-      status = 1
-    end
-    if grant > remainingSession then
-      grant = remainingSession
-      status = 4
-    end
-
-    if grant <= 0 then
-      if ts > lastSync then
-        lastSync = ts
-        redis.call('SET', sessionSyncKey, tostring(lastSync))
-        refreshSessionTtl()
-      end
-      return {0, dailyTotal, sessionTotal, lifetime, lastSync, status}
-    end
-
-    dailyTotal = tonumber(redis.call('INCRBY', dailyKey, grant))
-    sessionTotal = tonumber(redis.call('INCRBY', sessionKey, grant))
-    lifetime = tonumber(redis.call('INCRBY', totalKey, grant))
-    lastSync = ts
-    redis.call('SET', sessionSyncKey, tostring(lastSync))
-    refreshSessionTtl()
-    return {grant, dailyTotal, sessionTotal, lifetime, lastSync, status}
-  `;
-
-  let res;
-  try {
-    res = await store.eval(
-      script,
-      [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK],
-      [
-        String(now),
-        String(cappedDelta),
-        String(DAILY_CAP),
-        String(Math.max(0, SESSION_CAP)),
-        String(windowEnd),
-        String(SESSION_TTL_MS),
-      ]
-    );
-  } catch (err) {
-    klog("calc_redis_eval_failed", {
-      error: err?.message,
-    });
-    throw err;
-  }
-
-  const granted = Math.max(0, Math.floor(Number(res?.[0]) || 0));
-  const redisDailyTotal = Number(res?.[1]) || 0;
-  const sessionTotal = Number(res?.[2]) || 0;
-  const totalLifetime = Number(res?.[3]) || 0;
-  const lastSync = Number(res?.[4]) || 0;
-  const status = Number(res?.[5]) || 0;
+  const awardResult = await executeAtomicXpAward({
+    store,
+    keys: [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK, lockKeyK],
+    args: [now, cappedDelta, DAILY_CAP, Math.max(0, SESSION_CAP), windowEnd, 0, SESSION_TTL_MS],
+    onEvalError: (err) => klog("calc_redis_eval_failed", { error: err?.message }),
+  });
+  const granted = awardResult.granted;
+  const redisDailyTotal = awardResult.dailyTotal;
+  const sessionTotal = awardResult.sessionTotal;
+  const totalLifetime = awardResult.lifetime;
+  const lastSync = awardResult.lastSync;
+  const status = awardResult.status;
 
   const remaining = Math.max(0, DAILY_CAP - redisDailyTotal);
 

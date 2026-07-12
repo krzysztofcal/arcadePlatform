@@ -105,6 +105,7 @@ run("node", ["tests/public-profile-xp.e2e.test.mjs"], "public-profile-xp-e2e");
 run("node", ["tests/public-profile-ui.contract.test.mjs"], "public-profile-ui-contract");
 run("node", ["tests/home-bonuses.contract.test.mjs"], "home-bonuses-contract");
 run("node", ["tests/account-auth.contract.test.mjs"], "account-auth-contract");
+run("node", ["tests/xp-ledger.behavior.test.mjs"], "xp-ledger-behavior");
 run("node", ["tests/sidebar-admin-visibility.behavior.test.mjs"], "sidebar-admin-visibility-behavior");
 run("node", ["tests/i18n.behavior.test.mjs"], "i18n-behavior");
 run("node", ["tests/static-html.behavior.test.mjs"], "static-html-behavior");
