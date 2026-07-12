@@ -178,9 +178,10 @@ html[data-auth="out"] #chipBadge{ display:none !important; }
 .avatar-circle[data-avatar-variant="orbit-green"],.avatar-menu__initials[data-avatar-variant="orbit-green"]{ background:linear-gradient(145deg,#19755d,#74d9a0); }
 .avatar-circle[data-avatar-variant="default"],.avatar-menu__initials[data-avatar-variant="default"]{ background:linear-gradient(145deg,#355070,#6ee7e7); }
 .avatar-circle.profile-avatar--uploaded,.avatar-menu__initials.profile-avatar--uploaded{ background-position:center; background-size:cover; }
-.topbar[data-user-ui-state="pending"] .avatar-circle,.topbar[data-user-ui-state="loading"] .avatar-circle{ color:transparent; background-image:linear-gradient(110deg,rgba(110,231,231,.12) 25%,rgba(167,139,250,.28) 45%,rgba(110,231,231,.12) 65%); background-size:220% 100%; animation:user-ui-placeholder 1.2s linear infinite; }
-.topbar[data-user-ui-state="pending"] .avatar-label,.topbar[data-user-ui-state="loading"] .avatar-label{ visibility:hidden; }
-.topbar[data-user-ui-state="pending"] #xpBadge .xp-badge__label,.topbar[data-user-ui-state="loading"] #xpBadge .xp-badge__label,.topbar[data-user-ui-state="pending"] #chipBadgeAmount,.topbar[data-user-ui-state="loading"] #chipBadgeAmount{ visibility:hidden; }
+.topbar[data-user-ui-profile-state="pending"] .avatar-circle,.topbar[data-user-ui-profile-state="loading"] .avatar-circle{ color:transparent; background-image:linear-gradient(110deg,rgba(110,231,231,.12) 25%,rgba(167,139,250,.28) 45%,rgba(110,231,231,.12) 65%); background-size:220% 100%; animation:user-ui-placeholder 1.2s linear infinite; }
+.topbar[data-user-ui-profile-state="pending"] .avatar-label,.topbar[data-user-ui-profile-state="loading"] .avatar-label{ visibility:hidden; }
+.topbar[data-user-ui-xp-state="pending"] #xpBadge .xp-badge__label,.topbar[data-user-ui-xp-state="loading"] #xpBadge .xp-badge__label{ visibility:hidden; }
+.topbar[data-user-ui-chips-state="pending"] #chipBadgeAmount,.topbar[data-user-ui-chips-state="loading"] #chipBadgeAmount{ visibility:hidden; }
 @keyframes user-ui-placeholder{ 0%{background-position:100% 0;} 100%{background-position:-100% 0;} }
 .category-bar{display:flex; flex-wrap:wrap; gap:10px; margin:0 0 16px; padding:4px 0;}
 .category-bar .category-button{appearance:none; -webkit-appearance:none; border:1px solid var(--border); background:var(--card-2); color:#cdd6ff; font:600 13px Poppins, sans-serif; padding:8px 14px; border-radius:999px; cursor:pointer; transition:background .18s ease, border-color .18s ease, color .18s ease;}

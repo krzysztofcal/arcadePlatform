@@ -122,13 +122,13 @@ Non-game pages must not start an XP award session. Game pages preserve their cur
 
 Stale-while-revalidate alone does not prevent a flash if identity-bound HTML is visible before JavaScript resolves the local session. The initial document must therefore enforce this contract before the first observable paint:
 
-- Every topbar starts with `data-user-ui-state="pending"` in its HTML markup. JavaScript must not add the pending state after load.
+- Every topbar starts with `data-user-ui-profile-state="pending"`, `data-user-ui-xp-state="pending"`, and `data-user-ui-chips-state="pending"` in its HTML markup. JavaScript must not add the pending states after load. The legacy summary `data-user-ui-state` may remain for compatibility, but it must not control another slice's visibility.
 - While `pending`, avatar initials, display name, XP numbers, and chips numbers are not visible. Neutral skeletons reserve the final avatar and badge dimensions to prevent layout shift.
 - The pending UI contains no cached or hardcoded account values, including provisional `0 XP`, `CH: 0`, or user initials.
 - Shared `portal.css` selectors own the pending presentation across all pages. Individual pages must not define competing identity-loading behavior.
 - Initials may be rendered only after identity is known and the matching profile is confirmed to have no uploaded or cached uploaded avatar.
 
-After local session resolution, the state machine is:
+After local session resolution, each slice advances independently through the state machine:
 
 ```text
 pending -> hydrated    matching valid cache was applied
@@ -139,7 +139,7 @@ hydrated/loading -> stale   refresh failed; keep only matching cached values, ot
 any authenticated state -> pending/anonymous   logout or account switch clears rendered identity first
 ```
 
-The state attribute may live on the topbar or document root, but there must be one canonical owner and one shared selector contract. Hydration may occur only after Supabase returns the current `userId`; synchronous access to cache after that point should be applied in the same task before scheduling network revalidation.
+The slice state attributes may live on the topbar or document root, but there must be one canonical owner and one shared selector contract. Profile completion must not reveal XP or chips, and XP completion must not reveal profile or chips. Hydration may occur only after Supabase returns the current `userId`; a cached slice becomes `hydrated` only after its consumer applies the value to the DOM, not merely when storage is read.
 
 This design does not promise cached account data before identity resolution. It promises that from first paint until resolution the user sees a neutral, dimensionally stable placeholder, never incorrect initials or numeric account values.
 

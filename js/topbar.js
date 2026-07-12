@@ -146,7 +146,7 @@
     } else if (badge.getAttribute('href') !== CHIP_BADGE_HREF){
       badge.setAttribute('href', CHIP_BADGE_HREF);
     }
-    let amount = doc.getElementById('chipBadgeAmount');
+    let amount = badge.querySelector('#chipBadgeAmount') || doc.getElementById('chipBadgeAmount');
     if (!amount){
       const label = badge.querySelector('.chip-badge__label');
       amount = doc.createElement('span');
@@ -166,7 +166,7 @@
         badge.appendChild(wrap);
       }
     }
-    let bonus = doc.getElementById('welcomeBonusTopbarBadge');
+    let bonus = badge.querySelector('#welcomeBonusTopbarBadge') || doc.getElementById('welcomeBonusTopbarBadge');
     if (!bonus){
       const label = badge.querySelector('.chip-badge__label');
       bonus = doc.createElement('span');
@@ -267,6 +267,9 @@
       : null;
     const text = amount == null ? '—' : formatter ? formatter(amount) : String(Math.round(amount));
     setChipBadge(text, { loading: false });
+    if (window.UserUiState && typeof window.UserUiState.markActiveSliceApplied === 'function'){
+      window.UserUiState.markActiveSliceApplied('chips', 'ready');
+    }
   }
 
   function setAuthState(next){

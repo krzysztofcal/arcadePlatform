@@ -10,6 +10,7 @@
   var generation = 0;
   var channel = null;
   var appliedAt = { profile: 0, xp: 0, chips: 0 };
+  var sliceStates = { profile: 'pending', xp: 'pending', chips: 'pending' };
 
   function klog(kind, data){
     try { if (window.KLog && typeof window.KLog.log === 'function') window.KLog.log(kind, data || {}); } catch (_err){}
@@ -83,6 +84,21 @@
     } catch (_err){}
   }
 
+  function setSliceState(slice, value){
+    if (!Object.prototype.hasOwnProperty.call(MAX_AGE, slice)) return false;
+    sliceStates[slice] = value;
+    try {
+      var bars = document.querySelectorAll('.topbar');
+      for (var i = 0; i < bars.length; i++) bars[i].setAttribute('data-user-ui-' + slice + '-state', value);
+    } catch (_err){}
+    if (slice === 'profile') setTopbarState(value);
+    return true;
+  }
+
+  function setAllSliceStates(value){
+    ['profile', 'xp', 'chips'].forEach(function(slice){ setSliceState(slice, value); });
+  }
+
   function emit(detail){
     for (var i = 0; i < listeners.length; i++){
       try { listeners[i](detail); } catch (_err){}
@@ -95,6 +111,7 @@
     if (activeUserId !== userId){
       generation += 1;
       appliedAt = { profile: 0, xp: 0, chips: 0 };
+      setAllSliceStates('loading');
     }
     activeUserId = userId;
     var result = { generation: generation, profile: null, xp: null, chips: null };
@@ -105,7 +122,6 @@
         appliedAt[slice] = record.confirmedAt;
       }
     });
-    setTopbarState(result.profile || result.xp || result.chips ? 'hydrated' : 'loading');
     return result;
   }
 
@@ -129,7 +145,7 @@
     var record = { version: VERSION, userId: userId, slice: slice, confirmedAt: timestamp, value: normalized };
     writeRecord(record);
     appliedAt[slice] = timestamp;
-    setTopbarState('ready');
+    setSliceState(slice, 'ready');
     emit(record);
     if (channel){ try { channel.postMessage(record); } catch (_err){} }
     return normalized;
@@ -141,14 +157,24 @@
     if (store){
       ['profile', 'xp', 'chips'].forEach(function(slice){ try { store.removeItem(key(slice, userId)); } catch (_err){} });
     }
-    if (activeUserId === userId){ activeUserId = null; appliedAt = { profile: 0, xp: 0, chips: 0 }; generation += 1; }
+    if (activeUserId === userId){ activeUserId = null; appliedAt = { profile: 0, xp: 0, chips: 0 }; generation += 1; setAllSliceStates('pending'); }
   }
 
-  function setAnonymous(){ activeUserId = null; appliedAt = { profile: 0, xp: 0, chips: 0 }; generation += 1; setTopbarState('anonymous'); }
+  function setAnonymous(){ activeUserId = null; appliedAt = { profile: 0, xp: 0, chips: 0 }; generation += 1; setAllSliceStates('anonymous'); }
+
+  function markSliceApplied(userId, slice, value){
+    if (activeUserId !== userId) return false;
+    return setSliceState(slice, value);
+  }
+
+  function markActiveSliceApplied(slice, value){
+    if (!activeUserId) return false;
+    return setSliceState(slice, value);
+  }
 
   function markRefreshFailed(userId, expectedGeneration, hasCachedValue){
     if (!isCurrent(userId, expectedGeneration)) return;
-    setTopbarState(hasCachedValue ? 'stale' : 'loading');
+    setSliceState('profile', hasCachedValue ? 'stale' : 'loading');
   }
 
   function onChange(listener){
@@ -166,7 +192,7 @@
     var accepted = { version: VERSION, userId: activeUserId, slice: record.slice, confirmedAt: confirmedAt, value: normalized };
     writeRecord(accepted);
     appliedAt[record.slice] = confirmedAt;
-    setTopbarState('ready');
+    setSliceState(record.slice, 'ready');
     emit(accepted);
   }
 
@@ -188,6 +214,6 @@
     if (parsed && parsed.userId === userId) acceptExternal(parsed);
   });
 
-  window.UserUiState = { hydrate: hydrate, publish: publish, clearUser: clearUser, setAnonymous: setAnonymous, isCurrent: isCurrent, markRefreshFailed: markRefreshFailed, onChange: onChange };
+  window.UserUiState = { hydrate: hydrate, publish: publish, clearUser: clearUser, setAnonymous: setAnonymous, isCurrent: isCurrent, markSliceApplied: markSliceApplied, markActiveSliceApplied: markActiveSliceApplied, markRefreshFailed: markRefreshFailed, onChange: onChange };
   klog('user_ui_state_ready', { version: VERSION });
 })();

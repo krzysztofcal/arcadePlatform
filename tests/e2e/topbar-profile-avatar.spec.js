@@ -19,6 +19,11 @@ async function mockAuthenticatedSession(page) {
       } }; } };
     `,
   }));
+  await page.route('**/.netlify/functions/chips-balance', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ balance: 896 }),
+  }));
 }
 
 const profile = () => ({
@@ -52,15 +57,19 @@ test.describe('authenticated topbar profile avatar', () => {
       await expect(avatar).toHaveText('');
       await expect(menuAvatar).toHaveClass(/profile-avatar--uploaded/);
       await expect(menuAvatar).toHaveCSS('background-image', `url("${AVATAR_URL}")`);
+      await expect(page.locator('.topbar')).toHaveAttribute('data-user-ui-chips-state', 'ready');
+      await expect(page.locator('#chipBadgeAmount')).toHaveText('896');
     });
   }
 
   test('hydrates the cached avatar before delayed revalidation without a visible initials frame', async ({ page }) => {
     await mockAuthenticatedSession(page);
     let requests = 0;
+    let releaseProfile;
+    const profileGate = new Promise((resolve) => { releaseProfile = resolve; });
     await page.route('**/.netlify/functions/profile-me', async (route) => {
       requests += 1;
-      if (requests > 1) await new Promise((resolve) => setTimeout(resolve, 1200));
+      if (requests > 1) await profileGate;
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(profile()) });
     });
     await page.addInitScript(() => {
@@ -85,10 +94,15 @@ test.describe('authenticated topbar profile avatar', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#avatarInitials')).toHaveClass(/profile-avatar--uploaded/);
     await page.goto('/games-open/2048/', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('.topbar')).toHaveAttribute('data-user-ui-state', 'hydrated');
+    await expect.poll(() => requests).toBe(2);
+    await expect(page.locator('.topbar')).toHaveAttribute('data-user-ui-profile-state', 'hydrated');
     await expect(page.locator('#avatarInitials')).toHaveClass(/profile-avatar--uploaded/);
+    await expect(page.locator('#avatarInitials')).toHaveCSS('background-image', `url("${AVATAR_URL}")`);
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     const frames = await page.evaluate(() => window.__avatarFrames);
     assertNoVisibleInitials(frames);
+    releaseProfile();
+    await expect(page.locator('.topbar')).toHaveAttribute('data-user-ui-profile-state', 'ready');
   });
 });
 
