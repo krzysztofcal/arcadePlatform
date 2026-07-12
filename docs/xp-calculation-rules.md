@@ -1,21 +1,6 @@
 # Server-Side XP Calculation Rules
 
-This document describes how XP is calculated for each game when server-side calculation is enabled.
-
-## Enabling Server-Side Calculation
-
-Server-side XP calculation can be enabled via:
-
-```javascript
-// Option 1: Global flag
-window.XP_SERVER_CALC = true;
-
-// Option 2: URL parameter
-https://example.com/game?xpserver=1
-
-// Option 3: localStorage
-localStorage.setItem('xp:serverCalc', '1');
-```
+This document describes how XP is calculated for each game. Server-side calculation through `calculate-xp` is mandatory; there is no client-side transport selector or fallback award path.
 
 ## How XP is Calculated
 

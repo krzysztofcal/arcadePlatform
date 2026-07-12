@@ -271,9 +271,9 @@ function createTestContext() {
     new vm.Script(entry.code, { filename: entry.name }).runInContext(context);
   }
 
-  // Wrap postWindow to track calls
-  const originalPostWindow = context.window.XPClient.postWindow;
-  context.window.XPClient.postWindow = async function(payload) {
+  // Wrap the authoritative transport to track calls.
+  const originalPostWindow = context.window.XPClient.postWindowServerCalc;
+  context.window.XPClient.postWindowServerCalc = async function(payload) {
     postWindowCalls.push({ ...payload });
     return originalPostWindow.call(this, payload);
   };
@@ -309,6 +309,7 @@ async function test_enforce_mode_blocks_without_token() {
     state.lastInputAt = DateMock.now();
     state.lastTrustedInputTs = DateMock.now();
     state.eventsSinceLastAward = 5;
+    state.gameplayActionsInWindow = 1;
     state.activeUntil = DateMock.now() + 2000;
     state.visibilitySeconds = 10;
     state.inputEvents = 10;
@@ -352,6 +353,7 @@ async function test_with_token_attaches_and_sends() {
     state.lastInputAt = DateMock.now();
     state.lastTrustedInputTs = DateMock.now();
     state.eventsSinceLastAward = 5;
+    state.gameplayActionsInWindow = 1;
     state.activeUntil = DateMock.now() + 2000;
     state.visibilitySeconds = 10;
     state.inputEvents = 10;
@@ -394,6 +396,7 @@ async function test_warn_mode_sends_without_token() {
     state.lastInputAt = DateMock.now();
     state.lastTrustedInputTs = DateMock.now();
     state.eventsSinceLastAward = 5;
+    state.gameplayActionsInWindow = 1;
     state.activeUntil = DateMock.now() + 2000;
     state.visibilitySeconds = 10;
     state.inputEvents = 10;

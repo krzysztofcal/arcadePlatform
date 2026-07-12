@@ -101,7 +101,6 @@ async function loadClient({ legacy, serverStatus, userId = "user-a", error = fal
   const window = {
     localStorage,
     document: documentStub,
-    XpServerCalc: { initServerCalc() {} },
     SupabaseAuthBridge: {
       async getAccessToken() { return "stage-jwt"; },
       async getCurrentUserId() { return userId; },

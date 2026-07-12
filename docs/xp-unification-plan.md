@@ -192,7 +192,7 @@ Work:
 
 - Use `rg`, the XP hook guard, catalog validation, and playable-page inspection to prove every supported game uses semantic activity and server calculation.
 - Verify no production page calls `XPClient.postWindow()` or sends client-authoritative deltas to `award-xp`.
-- Simplify `postWindowAuto` to the server-calculated route.
+- Remove the obsolete `postWindowAuto` alias after all supported callers use `postWindowServerCalc` directly.
 - Keep a controlled compatibility response for direct legacy attempts during one deploy cycle, without mutating XP.
 - Remove legacy delta policy, cap, conversion, and Lua orchestration from `award-xp`.
 - Remove adapter-only `statusOnly` calls to `registerSession()`/`touchSession()`, stop generating status `sessionId`, and update compatibility responses after proving no supported client consumes that field.
@@ -217,6 +217,8 @@ Exit criteria:
 ### PR 4: Reduce XP client state
 
 Objective: simplify browser code after server ownership is unambiguous.
+
+Implementation status: the client now has one gameplay award method, `postWindowServerCalc()`, and one status method, `fetchStatus()`, both targeting `calculate-xp`. The legacy aliases, runtime feature flags, dynamic module loader, duplicate retry implementation, and `js/xp/server-calc.js` have been removed. A static guard prevents these paths from being reintroduced.
 
 Work:
 

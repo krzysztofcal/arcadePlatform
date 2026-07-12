@@ -1,6 +1,6 @@
 # XP mechanism complexity audit
 
-> Status update (2026-07-12): `docs/xp-unification-plan.md` supersedes the current-state inventory below. Status and gameplay writes now use `calculate-xp`; `award-xp` cannot grant XP and remains only as a temporary read-only compatibility adapter.
+> Status update (2026-07-12): `docs/xp-unification-plan.md` supersedes the historical inventory below. Status and gameplay writes now use `calculate-xp`; `award-xp` cannot grant XP and remains only as a temporary read-only compatibility adapter. The duplicate browser transport and `server-calc.js` module have also been removed.
 
 ## Executive summary
 
@@ -21,16 +21,15 @@ The recommended target is two public responsibilities:
 
 ## Current architecture
 
-The primary implementation surface is approximately 7,000 lines:
+The primary implementation surface is approximately 5,200 lines after the first four stabilization PRs:
 
 | Component | Approximate size | Current responsibility |
 | --- | ---: | --- |
-| `netlify/functions/calculate-xp.mjs` | 1,089 lines | Validate activity windows, calculate XP, apply caps, update Redis totals and session state |
-| `netlify/functions/award-xp.mjs` | 1,035 lines | Accept legacy client deltas, apply caps, expose status reads, maintain compatibility cookies |
+| `netlify/functions/calculate-xp.mjs` | 1,013 lines | Validate activity windows, calculate XP, apply caps, update Redis totals and serve status reads |
+| `netlify/functions/award-xp.mjs` | 96 lines | Temporary read-only status adapter; reject legacy award requests |
 | `netlify/functions/start-session.mjs` | 374 lines | Create, sign, store, validate and refresh server sessions |
-| `js/xpClient.js` | 1,177 lines | Auth, status, session acquisition, two transport paths, retries and cache synchronization |
-| `js/xp/core.js` | 2,832 lines | Gameplay lifecycle, scoring windows, badge state, buffering and server reconciliation |
-| `js/xp/server-calc.js` | 529 lines | Server-calculation client integration and activity collection |
+| `js/xpClient.js` | 893 lines | Auth, status, signed-session acquisition, one award transport, retries and cache synchronization |
+| `js/xp/core.js` | 2,828 lines | Gameplay lifecycle, scoring windows, badge state, buffering and server reconciliation |
 
 Related shared modules already provide useful foundations:
 
@@ -110,9 +109,9 @@ The old local JWT implementations treated an unrecognized ES256 token as invalid
 
 This must remain a system invariant and use only `_shared/supabase-admin.mjs`.
 
-### Medium: client exposes two transports
+### Resolved: client exposed two transports
 
-`XPClient` contains `postWindow`, `postWindowServerCalc` and `postWindowAuto`. Production selects server calculation, but the legacy path remains executable and increases branching in retries, session handling and response reconciliation.
+`XPClient` now exposes only `postWindowServerCalc` for gameplay awards. The legacy aliases, feature-flag selection, dynamic loader, and duplicate `server-calc.js` implementation have been removed.
 
 ### Medium: session concepts are overloaded
 
@@ -210,7 +209,7 @@ The simplification is acceptable only if all of these remain true:
 ### Phase 3: retire client-delta awards
 
 - Confirm all playable integrations use semantic activity and server calculation.
-- Remove production selection of `postWindow` and simplify `postWindowAuto` to one path.
+- Remove production selection of `postWindow` and make `postWindowServerCalc` the only award transport. Completed in PR 4.
 - Make legacy award attempts observable before rejecting them.
 - Remove legacy delta calculation only after the observation window is clean.
 

@@ -38,6 +38,11 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
 }
 
 (async () => {
+  const semanticWindow = (scoreDelta) => ({
+    gameId: 'pacman', windowStart: Date.now() - 1000, windowEnd: Date.now(),
+    inputEvents: 3, visibilitySeconds: 1, gameplayActions: 1, scoreDelta,
+  });
+
   // Success path
   {
     const XPClient = await loadClientWithFetch(async (_url, opts) => {
@@ -45,7 +50,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
       if (body.operation === 'status') return response(200, { ok: true, status: 'statusOnly' });
       return response(200, { ok: true, awarded: 10, totalToday: 10, sessionTotal: 10, lastSync: body.ts, cap: 400, capDelta: 240 });
     });
-    const res = await XPClient.postWindow({ delta: 10, ts: 111 });
+    const res = await XPClient.postWindowServerCalc(semanticWindow(10));
     assert.equal(res.awarded, 10);
   }
 
@@ -55,7 +60,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
       response(422, { error: 'delta_out_of_range', capDelta: 123 })
     );
     await assert.rejects(
-      () => XPClient.postWindow({ delta: 9999, ts: 222 }),
+      () => XPClient.postWindowServerCalc(semanticWindow(9999)),
       /delta_out_of_range/i
     );
   }
@@ -66,7 +71,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
       response(500, { error: 'server_error' })
     );
     await assert.rejects(
-      () => XPClient.postWindow({ delta: 1, ts: 333 }),
+      () => XPClient.postWindowServerCalc(semanticWindow(1)),
       /server_error|status 500/i
     );
   }
@@ -77,7 +82,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
       throw new Error('fetch failed');
     });
     await assert.rejects(
-      () => XPClient.postWindow({ delta: 1, ts: 444 }),
+      () => XPClient.postWindowServerCalc(semanticWindow(1)),
       /fetch failed|XP request failed/i
     );
   }
