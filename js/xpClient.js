@@ -447,6 +447,71 @@
     try { window.localStorage.setItem(migrationMarkerKey(identity), "1"); } catch (_) {}
   }
 
+  function getUserUiState() {
+    return window.UserUiState && typeof window.UserUiState.hydrate === "function"
+      ? window.UserUiState
+      : null;
+  }
+
+  function validConfirmedTotal(payload) {
+    if (!payload || typeof payload !== "object" || payload.ok !== true) return null;
+    const total = Number(payload.totalLifetime);
+    return Number.isSafeInteger(total) && total >= 0 ? total : null;
+  }
+
+  function applyHydratedXp(value, attempt) {
+    const total = Number(value && value.totalLifetime);
+    const level = Number(value && value.level);
+    if (!Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(level) || level < 1) return false;
+    if (!window.XP || typeof window.XP.refreshFromServerStatus !== "function") {
+      if ((attempt || 0) < 10) schedule(() => applyHydratedXp(value, (attempt || 0) + 1), 50);
+      return false;
+    }
+    try {
+      const snapshot = typeof window.XP.getSnapshot === "function" ? window.XP.getSnapshot() : null;
+      if (snapshot && snapshot.totalXp === total && snapshot.level === level) return true;
+      window.XP.refreshFromServerStatus({ ok: true, status: "statusOnly", totalLifetime: total }, {
+        source: "user-ui-cache",
+        allowServerRegression: true,
+        authenticated: true,
+        hydration: true,
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function hydrateCachedXp() {
+    const ui = getUserUiState();
+    if (!ui) return null;
+    const userId = await getAuthenticatedUserId();
+    if (!userId) return null;
+    const hydrated = ui.hydrate(userId);
+    if (!hydrated || !hydrated.xp) return null;
+    applyHydratedXp(hydrated.xp, 0);
+    return hydrated.xp;
+  }
+
+  async function publishConfirmedXp(payload) {
+    const total = validConfirmedTotal(payload);
+    const ui = getUserUiState();
+    if (total == null || !ui || !window.XP || typeof window.XP.getSnapshot !== "function") return null;
+    const snapshot = window.XP.getSnapshot();
+    if (!snapshot || snapshot.totalXp !== total || !Number.isSafeInteger(snapshot.level) || snapshot.level < 1) return null;
+    const userId = await getAuthenticatedUserId();
+    if (!userId) return null;
+    return ui.publish(userId, "xp", { totalLifetime: total, level: snapshot.level }, Date.now());
+  }
+
+  function bindUserUiXp() {
+    const ui = getUserUiState();
+    if (!ui || typeof ui.onChange !== "function") return;
+    ui.onChange((detail) => {
+      if (detail && detail.slice === "xp") applyHydratedXp(detail.value, 0);
+    });
+  }
+
   function schedule(callback, delay) {
     const timer = typeof window.setTimeout === "function"
       ? window.setTimeout.bind(window)
@@ -473,9 +538,10 @@
       preserveBadge: !!migrationLegacy,
     });
     klog("xp_auth_changed", { event: eventName });
-    schedule(() => migrationLegacy
-      ? refreshInitialStatus(migrationLegacy)
-      : refreshBadgeFromServer(), 0);
+    schedule(() => {
+      hydrateCachedXp().catch(() => {});
+      return migrationLegacy ? refreshInitialStatus(migrationLegacy) : refreshBadgeFromServer();
+    }, 0);
   }
 
   function bindAuthChanges(attempt) {
@@ -732,6 +798,7 @@
           });
         } catch (_) {}
       }
+      await publishConfirmedXp(payload);
       return payload;
     } catch (err) {
       klog("xp_refresh_error", { message: err && err.message ? String(err.message) : "error" });
@@ -886,8 +953,12 @@
     getSessionStatus,
     isInitialStatusPending,
     isAuthenticated,
+    hydrateCachedXp,
+    publishConfirmedXp,
   };
 
+  bindUserUiXp();
   bindAuthChanges();
+  schedule(() => hydrateCachedXp().catch(() => {}), 0);
   scheduleInitialStatusRefresh();
 })();

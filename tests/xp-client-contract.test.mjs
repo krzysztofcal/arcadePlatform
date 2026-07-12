@@ -113,6 +113,45 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     assert.equal(applied.meta.bump, undefined);
   }
 
+  // Authenticated XP cache hydrates without award animation and publishes only confirmed snapshots.
+  {
+    let applied = null;
+    let userUiListener = null;
+    const published = [];
+    const cached = { totalLifetime: 300, level: 3 };
+    const XPClient = await loadClientWithFetch(async () => response(200, { ok: true, status: 'statusOnly', totalLifetime: 300 }), {
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => 'token',
+          getCurrentUserId: async () => 'xp-user',
+        },
+        UserUiState: {
+          hydrate(userId){ assert.equal(userId, 'xp-user'); return { xp: cached }; },
+          publish(userId, slice, value){ published.push({ userId, slice, value }); return value; },
+          onChange(listener){ userUiListener = listener; },
+        },
+        XP: {
+          refreshFromServerStatus(payload, meta){ applied = { payload, meta }; },
+          getSnapshot(){ return { totalXp: applied ? applied.payload.totalLifetime : 0, level: applied && applied.payload.totalLifetime === 450 ? 4 : (applied ? 3 : 1) }; },
+        },
+      },
+    });
+    const hydrated = await XPClient.hydrateCachedXp();
+    assert.deepEqual(hydrated, cached);
+    assert.equal(applied.payload.totalLifetime, 300);
+    assert.equal(applied.meta.source, 'user-ui-cache');
+    assert.equal(applied.meta.authenticated, true);
+    assert.equal(applied.meta.hydration, true);
+    assert.equal(applied.meta.bump, undefined);
+    await XPClient.publishConfirmedXp({ ok: true, totalLifetime: 300 });
+    assert.equal(JSON.stringify(published), JSON.stringify([{ userId: 'xp-user', slice: 'xp', value: cached }]));
+    await XPClient.publishConfirmedXp({ ok: false, totalLifetime: 900 });
+    assert.equal(published.length, 1);
+    userUiListener({ slice: 'xp', value: { totalLifetime: 450, level: 4 } });
+    assert.equal(applied.payload.totalLifetime, 450);
+    assert.equal(applied.meta.hydration, true);
+  }
+
   // Reaching the server-side session cap rotates the next award session.
   {
     const awardCalls = [];

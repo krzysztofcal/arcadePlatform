@@ -1182,6 +1182,14 @@ function bootXpCore(window, document) {
     return true;
   }
 
+  function publishConfirmedXp(data) {
+    try {
+      if (window.XPClient && typeof window.XPClient.publishConfirmedXp === "function") {
+        window.XPClient.publishConfirmedXp(data).catch(() => {});
+      }
+    } catch (_) {}
+  }
+
   function attachBadge() {
     if (state.badge) return;
     if (document && typeof document.querySelector === "function") {
@@ -1211,6 +1219,7 @@ function bootXpCore(window, document) {
   function handleResponse(data, meta) {
     const mergedMeta = Object.assign({}, meta);
     applyServerDelta(data, mergedMeta);
+    publishConfirmedXp(data);
     emitConfirmedAward(data, mergedMeta);
     setBadgeLoading(false);
     return data;
@@ -1272,7 +1281,7 @@ function bootXpCore(window, document) {
     const clientThinksAuthenticated = isAuthenticatedUser && typeof isAuthenticatedUser === "function"
       ? isAuthenticatedUser()
       : false;
-    const authenticated = serverThinksAuthenticated || clientThinksAuthenticated;
+    const authenticated = meta?.authenticated === true || serverThinksAuthenticated || clientThinksAuthenticated;
     const isExplicitReset =
       reason === "reset"
       || reason === "daily_reset"
@@ -2251,6 +2260,7 @@ function bootXpCore(window, document) {
     return window.XPClient.fetchStatus()
       .then((data) => {
         applyServerDelta(data, { source: "reconcile" });
+        publishConfirmedXp(data);
         try {
           logDebug("badge_reconcile", {
             badgeShownXp: Number(state.badgeShownXp) || 0,
