@@ -115,6 +115,8 @@ Do not create a framework or class hierarchy. Handlers should parse HTTP, call o
 
 Objective: remove duplicated server orchestration while preserving every current route and client contract.
 
+Implementation status in PR #681: the canonical Redis key factory, totals reader, atomic Lua award operation, normalized result mapping, status projection, and derived profile persistence now live under `netlify/functions/_shared/`. Both current handlers use those shared owners. The legacy `award-xp` adapter still owns its request compatibility, session registration/touch, lock retry, and response mapping; `calculate-xp` still owns gameplay scoring. Moving status traffic and removing the adapter are intentionally left to PR 2 and PR 3 below.
+
 Work:
 
 - Inventory duplicated logic in `calculate-xp.mjs` and `award-xp.mjs` before moving it.
