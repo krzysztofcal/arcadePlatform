@@ -63,9 +63,9 @@ The API response includes the normalized period key and `nextResetAt` for period
 - Only authenticated Supabase accounts are ranked.
 - Guests and anonymous IDs are never written to public leaderboard indexes.
 - A visible row requires a matching `public.user_profiles` record.
-- Every indexed production account must have a profile before public rollout. A bounded pre-rollout reconciliation creates missing profiles through the existing trusted profile helper; public leaderboard reads must never create profiles.
+- Every indexed production account must have a profile before public rollout. A separate, bounded profile-coverage preflight pages through accounts with the trusted Supabase Admin API and creates missing profiles through the existing trusted profile helper. It runs only as a guarded operation before rollout; public leaderboard reads must never create profiles.
 - New users continue receiving profiles through the existing authenticated entry flow. The leaderboard writer must not add a database query to every XP award.
-- If an exceptional indexed account has no profile, the API omits it, records a `klog` diagnostic without public identifiers, and over-fetches within a strict bound to fill the page. Reconciliation repairs the missing profile/index state outside the public request.
+- If an exceptional indexed account has no profile, the API omits it, returns a shorter page, and records a `klog` diagnostic without public identifiers. It must not pull candidates from the next raw Redis page to fill the gap. Reconciliation removes or repairs the invalid member outside the public request.
 
 There is no leaderboard opt-out in this MVP because every authenticated profile is currently public. This privacy decision must be reconfirmed before implementation. If product policy changes, eligibility must be designed before leaderboard indexes are enabled rather than filtering only in the browser.
 
@@ -166,6 +166,7 @@ Extend the existing Upstash adapter rather than adding another Redis client. Req
 
 - `ZADD`;
 - `ZINCRBY` where used by reconciliation;
+- `ZREM` for reconciliation of ineligible or missing-profile members;
 - `ZREVRANGE ... WITHSCORES`;
 - `ZREVRANK` and `ZSCORE`;
 - `ZCOUNT` for competition-rank calculation;
@@ -192,7 +193,7 @@ GET /.netlify/functions/xp-leaderboard?period=today|week|all_time&page=1&limit=2
 - A valid token enables the `me` projection but does not change public rows.
 - Apply the existing CORS conventions and a reusable public-IP rate limit.
 
-Offset/rank pagination matches Redis sorted-set access and is sufficient for the current product scale. Rankings can move between requests as XP is awarded; the API documents this eventual movement rather than pretending to provide a stable snapshot cursor.
+Offset/rank pagination matches Redis sorted-set access and is sufficient for the current product scale. The raw Redis range is always `offset = (page - 1) * limit` through `offset + limit - 1`. Public projection may omit an exceptional member without a profile, but it must not over-fetch into the next page. Rankings can move between requests as XP is awarded; the API documents this eventual movement rather than pretending to provide a stable snapshot cursor.
 
 ### Response contract
 
@@ -249,9 +250,12 @@ Never return email, Supabase UUID, auth metadata, IP, chips, ledger data, poker 
 2. Batch-query `user_profiles` with the existing trusted SQL helper.
 3. Preserve Redis ordering while projecting profiles through shared avatar/public-profile helpers.
 4. Batch-read lifetime totals when period scores do not represent lifetime XP.
-5. Over-fetch missing profiles only up to a documented maximum, then return the available rows and emit a diagnostic.
+5. If a candidate has no profile, omit it from that response, return a shorter page, and emit an aggregate diagnostic. Do not read beyond the page's raw Redis range.
+6. Derive `hasMore` from the raw sorted-set cardinality and raw page boundary, not from the number of projected rows.
 
 Do not serialize raw Redis members or database rows.
+
+This preserves deterministic page boundaries: a missing profile at raw position 10 cannot pull a position from page 2 into page 1. Until reconciliation removes the invalid member, public rank numbers may contain a gap, which is preferable to duplicate or skipped users across pages.
 
 ### Cache policy
 
@@ -266,6 +270,17 @@ The implementation PR must choose either a fully public cacheable endpoint plus 
 ## Backfill and reconciliation
 
 Add an idempotent, manually invoked server-side tool. It must be guarded to the intended environment and must not accept arbitrary client-provided Redis namespaces.
+
+### Profile coverage preflight
+
+Profile coverage and XP-index backfill have different discovery sources and must remain explicit:
+
+1. Use trusted, paginated Supabase Admin user listing to discover authenticated accounts; do not attempt to discover them with a Redis `KEYS` or unbounded `SCAN`.
+2. Create a missing profile through `ensureUserProfile()` under the existing every-account-is-public policy.
+3. Record aggregate processed/created/failed counts without logging email addresses or UUIDs.
+4. Complete this preflight before ranking backfill and public activation.
+
+If product policy no longer permits automatic public profiles for every account, stop the rollout and redesign eligibility rather than silently creating profiles. The ranking backfill itself starts from `user_profiles`; it does not discover or create auth accounts.
 
 ### Initial backfill
 
@@ -325,7 +340,7 @@ Do not load gameplay XP scoring modules merely to render rankings. Reuse only th
 - Clients cannot submit XP, rank, member IDs, or profile fields to the leaderboard.
 - Invalid Bearer tokens always return `401` on authenticated ranking requests.
 - Use explicit response projection and generic errors.
-- Apply bounded page/limit values, rate limiting, request timeouts, and maximum profile over-fetch.
+- Apply bounded page/limit values, rate limiting, request timeouts, and fixed raw Redis page ranges.
 - Do not provide handle prefix search, full export, arbitrary historical period keys, or unbounded page traversal.
 - Only current periods and `all_time` are public in MVP; callers cannot select an old Redis key.
 - Use `klog` for diagnostics and never log JWTs, emails, raw UUIDs, or full response rows.
@@ -359,7 +374,8 @@ Do not create high-cardinality labels containing user IDs or handles.
 ### PR 2: Backfill and reconciliation
 
 - Add the guarded idempotent backfill/reconciliation tool.
-- Verify profile coverage and retained daily keys on stage.
+- Add and run the separate trusted profile-coverage preflight; verify retained daily keys on stage.
+- Remove exceptional missing-profile members from projections rather than changing public page boundaries.
 - Populate stage `all_time`, current day, and current week.
 - Document exact stage/prod invocation, dry-run output, rerun behavior, and rollback.
 - Do not expose leaderboard publicly yet.
@@ -414,6 +430,8 @@ No database migration is expected for the Redis-first MVP unless profile eligibi
 - Day/week TTLs are bounded from period end.
 - Equal scores produce competition ranks and deterministic ordering.
 - Pagination handles ties across boundaries.
+- A missing profile at a raw position produces a shorter page without borrowing from the next page; the following page starts at its documented raw offset and contains no duplicate.
+- `hasMore` follows raw index cardinality/page boundaries even when public projection omits an invalid member.
 - Public projection contains no UUID, email, Redis key, chips, or metadata.
 - Invalid auth does not become a guest request.
 - Missing profiles are bounded and never trigger profile creation from a public read.
@@ -464,7 +482,7 @@ No database migration is expected for the Redis-first MVP unless profile eligibi
 | Week score duplicates | Same Lua as award, duplicate-window guard before `ZINCRBY`, reconciliation from daily keys. |
 | Guest identity becomes public | Write projections only for verified authenticated identity. |
 | UUID leaks through API or logs | Explicit projection, server-side profile join, response contract tests, aggregate logs. |
-| Missing lazy-created profile creates rank gaps | Pre-rollout profile reconciliation, bounded omission, non-public repair. |
+| Missing lazy-created profile creates rank gaps | Trusted Auth profile-coverage preflight, shorter deterministic page, non-public reconciliation/removal. |
 | CDN leaks signed-in `me` | Separate public and authenticated endpoints preferred; no shared caching of private response. |
 | Period keys use wrong timezone | One tested Warsaw/ISO period helper shared by writer, reader, and backfill. |
 | Backfill overwrites canonical data | Sorted sets are projection targets only; canonical counters are read-only to backfill. |
