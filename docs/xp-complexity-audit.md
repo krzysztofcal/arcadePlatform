@@ -1,5 +1,7 @@
 # XP mechanism complexity audit
 
+> Status update (2026-07-12): `docs/xp-unification-plan.md` supersedes the current-state inventory below. Status and gameplay writes now use `calculate-xp`; `award-xp` cannot grant XP and remains only as a temporary read-only compatibility adapter.
+
 ## Executive summary
 
 The XP system is more complex than the product behavior requires. It does not have three functions that calculate XP:

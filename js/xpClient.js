@@ -1,5 +1,4 @@
 (function () {
-  const FN_URL = "/.netlify/functions/award-xp";
   const CALC_URL = "/.netlify/functions/calculate-xp";
   const START_SESSION_URL = "/.netlify/functions/start-session";
   const USER_KEY = "kcswh:userId";
@@ -7,7 +6,6 @@
   const SERVER_SESSION_KEY = "kcswh:serverSessionId";
   const SERVER_SESSION_TOKEN_KEY = "kcswh:serverSessionToken";
   const SERVER_SESSION_EXPIRES_KEY = "kcswh:serverSessionExpires";
-  const MAX_TS = Number.MAX_SAFE_INTEGER;
   const DEFAULT_DELTA_CAP = 300;
   const AUTH_CACHE_MS = 60000;
   const LEGACY_XP_CACHE_KEY = "kcswh:xp:last";
@@ -25,7 +23,6 @@
     statusBootstrapped: false,
     statusPromise: null,
     backoffUntil: 0,
-    lastTs: 0,
     serverSessionPromise: null,
     serverSessionToken: null,
     sessionStatus: SESSION_NONE,
@@ -309,7 +306,6 @@
 
   function rotateAwardSession() {
     state.awardSessionId = randomId();
-    state.lastTs = 0;
   }
 
   // Server-side session management
@@ -723,47 +719,6 @@
     window.XP_DELTA_CAP_CLIENT = value;
   }
 
-  function sanitizeDelta(source) {
-    let delta = 0;
-    if (typeof source.delta === "number") delta = source.delta;
-    else if (typeof source.scoreDelta === "number") delta = source.scoreDelta;
-    else if (typeof source.pointsPerPeriod === "number") delta = source.pointsPerPeriod;
-
-    if (!Number.isFinite(delta)) delta = 0;
-    delta = Math.max(0, delta);
-    const cap = currentClientCap();
-    if (delta > cap) delta = cap;
-    return Math.floor(delta);
-  }
-
-  function sanitizeTs(source) {
-    let raw = source.ts;
-    if (raw == null) raw = source.windowEnd;
-    let ts = Number(raw);
-    if (!Number.isFinite(ts)) ts = Date.now();
-    ts = Math.floor(ts);
-    if (ts < 0) ts = 0;
-    if (ts > MAX_TS) ts = MAX_TS;
-    if (ts <= state.lastTs) {
-      const candidate = Math.max(Date.now(), state.lastTs + 1);
-      ts = candidate <= MAX_TS ? candidate : MAX_TS;
-    }
-    state.lastTs = ts;
-    return ts;
-  }
-
-  function buildMetadata(source) {
-    if (!source || typeof source !== "object") return null;
-    const metadata = {};
-    for (const key in source) {
-      if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
-      if (key === "userId" || key === "sessionId" || key === "delta" || key === "ts" || key === "windowEnd") continue;
-      if (key === "scoreDelta" || key === "pointsPerPeriod") continue;
-      metadata[key] = source[key];
-    }
-    return Object.keys(metadata).length ? metadata : null;
-  }
-
   function ensureStatusBootstrap(force) {
     if (!force && state.statusBootstrapped) return;
     if (force) state.statusPromise = null;
@@ -787,152 +742,14 @@
     }
   }
 
-  async function sendRequest(body, options) {
-    const opts = options || {};
-    const keepalive = opts.keepalive === true;
-    const allowBeacon = opts.allowBeacon === true;
-    const payload = JSON.stringify(body);
-    const authToken = await ensureAuthTokenWithRetry();
-    if (!authToken && await isUserLoggedIn()) {
-      throw new Error("Authenticated XP award requires an access token");
-    }
-    const headers = await buildAuthHeaders({ "content-type": "application/json" });
-    const requestInit = {
-      method: "POST",
-      headers,
-      body: payload,
-      cache: "no-store",
-      credentials: "omit",
-    };
-    if (keepalive) requestInit.keepalive = true;
-    let transport = keepalive ? "keepalive" : "fetch";
-    try {
-      const res = await fetch(FN_URL, requestInit);
-      const status = res.status;
-      if (!res.ok) {
-        let parsed = null;
-        try {
-          const text = await res.text();
-          parsed = text ? JSON.parse(text) : null;
-        } catch (_) {
-          return { ok: false, network: true, status };
-        }
-        const result = { ok: false, network: true, status, body: parsed, transport };
-        if (status === 422 && parsed && parsed.error === "delta_out_of_range") {
-          result.network = false;
-        }
-        return result;
-      }
-      try {
-        const json = await res.json();
-        return { ok: true, body: json, transport };
-      } catch (_) {
-        return { ok: false, network: true, status: res.status, transport };
-      }
-    } catch (err) {
-      if (allowBeacon && typeof navigator !== "undefined" && navigator && typeof navigator.sendBeacon === "function") {
-        try {
-          const beaconPayload = new Blob([payload], { type: "application/json" });
-          const beaconOk = navigator.sendBeacon(FN_URL, beaconPayload);
-          if (beaconOk) {
-            return { ok: true, body: null, transport: "beacon", status: 0 };
-          }
-        } catch (_) {}
-      }
-      return { ok: false, network: true, status: 0, error: err, transport };
-    }
-  }
-
   function updateCapFromPayload(payload) {
     if (!payload || typeof payload !== "object") return;
     if (Number.isFinite(payload.capDelta)) setClientCap(Number(payload.capDelta));
     else if (Number.isFinite(payload.cap)) setClientCap(Number(payload.cap));
   }
 
-  function clampAfterServerCap(body, response) {
-    const cap = Number(response?.cap ?? response?.capDelta);
-    if (Number.isFinite(cap) && cap > 0) {
-      setClientCap(cap);
-      state.backoffUntil = Date.now() + (2000 + Math.floor(Math.random() * 3000));
-      const safeCap = Math.max(0, cap - 1);
-      setClientCap(safeCap > 0 ? safeCap : cap);
-    } else {
-      state.backoffUntil = Date.now() + (2000 + Math.floor(Math.random() * 3000));
-    }
-    ensureStatusBootstrap(true);
-  }
-
   async function postWindow(payload, options) {
-    const opts = options || {};
-    const source = (payload && typeof payload === "object") ? payload : {};
-    ensureStatusBootstrap(false);
-    await maybeBackoff();
-
-    const { userId, sessionId } = ensureIds();
-    let delta = sanitizeDelta(source);
-    let ts = sanitizeTs(source);
-    const metadata = buildMetadata(source);
-
-    // Session token should be provided by caller (via ensureServerSession gate)
-    // or loaded from storage. No lazy acquisition here - caller is responsible.
-    let sessionToken = source.sessionToken || loadServerSession();
-
-    const body = { userId, sessionId, delta, ts };
-    if (sessionToken) body.sessionToken = sessionToken;
-    if (metadata) body.metadata = metadata;
-
-    let attempt = 0;
-    let sessionRefreshed = false;
-    while (attempt < 3) {
-      const result = await sendRequest(body, {
-        keepalive: opts.keepalive === true,
-        allowBeacon: opts.allowBeacon === true,
-      });
-      if (!result.ok) {
-        // Handle invalid session - refresh and retry once
-        if (result.status === 401 && result.body?.error === "invalid_session" && !sessionRefreshed) {
-          clearServerSession();
-          try {
-            const newToken = await startServerSession(true);
-            body.sessionToken = newToken;
-            sessionRefreshed = true;
-            attempt += 1;
-            continue;
-          } catch (_) {
-            // If we can't get a new session, try without (server may allow it)
-            delete body.sessionToken;
-            attempt += 1;
-            continue;
-          }
-        }
-
-        if (result.status === 422 && result.body && result.body.error === "delta_out_of_range") {
-          clampAfterServerCap(body, result.body);
-          const capMsg = Number.isFinite(result.body.capDelta || result.body.cap)
-            ? ` (cap=${result.body.capDelta ?? result.body.cap})`
-            : "";
-          throw new Error(`XP request failed: delta_out_of_range${capMsg}`);
-        }
-        const serverMsg = result.body?.error || result.error?.message || "unknown_error";
-        const code = result.status ?? 0;
-        throw new Error(`XP request failed: ${serverMsg} (status ${code})`);
-      }
-
-      const responseBody = result.body || {};
-      if (result.transport) {
-        responseBody._transport = result.transport;
-      }
-      updateCapFromPayload(responseBody);
-      if (responseBody.sessionCapped === true) rotateAwardSession();
-      if (responseBody && responseBody.locked && attempt === 0) {
-        await new Promise(resolve => setTimeout(resolve, 100 + Math.floor(Math.random() * 200)));
-        body.ts = sanitizeTs({ ts: Math.max(Date.now(), body.ts + 1) });
-        attempt += 1;
-        continue;
-      }
-      return responseBody;
-    }
-    throw new Error("XP request failed: exhausted retries");
+    return postWindowServerCalc(payload, options);
   }
 
   async function fetchStatus() {
@@ -983,30 +800,7 @@
    * Check if server-side XP calculation is enabled
    */
   function isServerCalcEnabled() {
-    ensureServerCalcInit();
-
-    let serverCalcEnabled = window.XP_SERVER_CALC === true;
-    try {
-      if (!serverCalcEnabled && typeof location !== "undefined" && location && typeof location.search === "string") {
-        if (/\bxpserver=1\b/.test(location.search)) serverCalcEnabled = true;
-      }
-    } catch (_) {}
-    try {
-      if (!serverCalcEnabled && typeof localStorage !== "undefined" && localStorage) {
-        if (localStorage.getItem("xp:serverCalc") === "1") serverCalcEnabled = true;
-      }
-    } catch (_) {}
-
-    try {
-      if (isDiagEnabled() && window && window.console && typeof console.debug === "function") {
-        console.debug("[xpClient] Server calc decision", {
-          XP_SERVER_CALC: window.XP_SERVER_CALC,
-          serverCalcEnabled,
-        });
-      }
-    } catch (_) {}
-
-    return serverCalcEnabled;
+    return true;
   }
 
   /**
@@ -1151,10 +945,7 @@
    * based on configuration
    */
   async function postWindowAuto(payload, options) {
-    if (isServerCalcEnabled()) {
-      return postWindowServerCalc(payload, options);
-    }
-    return postWindow(payload, options);
+    return postWindowServerCalc(payload, options);
   }
 
   window.XPClient = {

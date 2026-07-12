@@ -1149,13 +1149,7 @@ function bootXpCore(window, document) {
   }
 
   function isServerCalculatedAwardPath() {
-    try {
-      return !!(window.XPClient
-        && typeof window.XPClient.isServerCalcEnabled === "function"
-        && window.XPClient.isServerCalcEnabled());
-    } catch (_) {
-      return false;
-    }
+    return true;
   }
 
   function emitConfirmedAward(data, meta) {
@@ -1445,7 +1439,7 @@ function bootXpCore(window, document) {
   }
 
   async function sendWindow(force) {
-    if (!state.running || !window.XPClient || typeof window.XPClient.postWindow !== "function") return;
+    if (!state.running || !window.XPClient || typeof window.XPClient.postWindowServerCalc !== "function") return;
     if (state.pending) return;
     const now = Date.now();
     const elapsed = now - state.windowStart;
@@ -1617,8 +1611,8 @@ function bootXpCore(window, document) {
         return Promise.resolve(null);
       }
       // The calculate-xp response is the only authoritative award signal.
-      const authoritative = isServerCalculatedAwardPath();
-      const postFn = authoritative ? window.XPClient.postWindowServerCalc : window.XPClient.postWindow;
+      const authoritative = true;
+      const postFn = window.XPClient.postWindowServerCalc;
       const transportOptions = force ? { keepalive: true, allowBeacon: true } : {};
       return postFn(payload, transportOptions).then((data) => ({ data, authoritative }));
     })

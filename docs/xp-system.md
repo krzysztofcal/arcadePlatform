@@ -9,7 +9,7 @@ This document preserves the XP-related technical details that previously lived i
 
 ## Authoritative award path and identity
 
-- Gameplay XP is awarded and canonical XP status is read through `/.netlify/functions/calculate-xp`. `operation: "status"` is read-only with respect to daily, session, and lifetime counters and does not register, touch, or generate an award session. `award-xp` remains only as a legacy compatibility adapter and must not be used by supported clients.
+- Gameplay XP is awarded and canonical XP status is read through `/.netlify/functions/calculate-xp`. `operation: "status"` is read-only with respect to daily, session, and lifetime counters and does not register, touch, or generate an award session. The legacy `award-xp` function cannot grant XP and returns `410 legacy_award_retired` for client delta requests.
 - The XP badge and `+N XP` overlay animate only after `calculate-xp` returns a positive authoritative `awarded` value. Status reads, auth refreshes, focus changes, cache hydration, zero awards, and rejected windows update state without award animation.
 - `calculate-xp`, `award-xp`, and `start-session` must use the shared Supabase auth verifier from `_shared/supabase-admin.mjs`. This keeps HS256/HS512 and Supabase ES256 remote verification aligned with profile, chips, and poker APIs. A request without Authorization may use the browser anon id; a request that supplies an invalid Bearer token fails with `401` and must never fall back to anonymous XP.
 - Both award endpoints share XP policy values (`XP_DAILY_CAP`, `XP_SESSION_CAP`, `XP_DELTA_CAP`, `XP_SESSION_TTL_SEC`) and identity resolution: a valid Supabase JWT subject wins over the browser anon id.
@@ -59,26 +59,6 @@ The helper survives soft navigations—if you’re swapping views inside an SPA,
 - `window.XP.getRemainingDaily()` and `window.XP.getNextResetEpoch()` expose the live allowance for UI surfaces, while the runtime automatically resets the cached totals once the stored `nextReset` elapses.
 - `XP.addScore()` and the `GameXpBridge` flush path pre-clamp outgoing deltas based on the server-advertised `remaining` value and emit `award_preclamp` / `award_skip { reason: 'daily_cap' }` diagnostics so operators can confirm when the cap halts awards.
 
-## Legacy compatibility contract: `postWindow`
-`postWindow` targets `award-xp` and is retained only for legacy delta callers. Status reads and new gameplay windows use `calculate-xp`.
-Client → server payload (minimal set, extras allowed):
-- `userId` (string)
-- `sessionId` (string)
-- `delta` (integer ≥ 0) — requested XP increment for the active session
-- `ts` (ms since epoch) — last activity timestamp used for ordering and `lastSync` persistence
-- `metadata` (object, optional) — any additional context (`gameId`, instrumentation, etc.)
+## Retired compatibility contract
 
-Server behavior:
-- Requests with `delta` outside `0…XP_DELTA_CAP` (default 300) are rejected. Legacy clients can continue sending `scoreDelta` / `pointsPerPeriod` and the server will coerce them once per request.
-- XP is granted directly from `delta` while enforcing per-session (`XP_SESSION_CAP`, default 300) and per-day (`XP_DAILY_CAP`, default 3000) ceilings. The browser uses an in-memory award session and rotates it automatically when the server reports that the session cap was reached, so play can continue up to the daily limit. The daily cap resets at 03:00 Europe/Warsaw (handles CET/CEST) and partial grants surface `reason: 'daily_cap_partial' | 'session_cap_partial'`.
-- Responses remain backwards compatible: `{ ok, awarded, granted, totalToday, remaining, dayKey, nextReset, cap, totalLifetime }` plus `sessionTotal`, `lastSync`, and `capDelta` so clients can rehydrate badge state, countdown to the next reset, and mirror the server cap.
-- When `XP_DEBUG=1`, the payload includes `debug` with the requested delta, caps, `lastSync`, and status code.
-
-Response status values:
-- `ok` — full grant
-- `partial` — partial grant (daily or session)
-- `daily_cap`, `daily_cap_partial`, `session_cap`, `session_cap_partial`, `stale`, `locked`, `inactive`
-- `statusOnly` — status probes without awarding XP
-
-Client hooks:
-- `window.XP.addScore(delta)` queues XP locally; the bridge forwards consolidated deltas via the simplified payload above and lets the server enforce rate limits.
+`XPClient.postWindow()` and `postWindowAuto()` now delegate to `postWindowServerCalc()`. No browser code sends a client-authoritative XP delta. `award-xp statusOnly` remains read-only for one compatibility cycle; any other request receives `410 legacy_award_retired` and cannot mutate XP.
