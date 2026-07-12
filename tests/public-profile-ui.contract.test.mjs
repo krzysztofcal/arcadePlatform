@@ -1,10 +1,25 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 const { DEFAULT_BASE_XP, DEFAULT_MULTIPLIER } = await import("../netlify/functions/_shared/xp-level.mjs");
+
+async function listHtmlFiles(directory = new URL("../", import.meta.url), prefix = ""){
+  const ignored = new Set([".git", ".copilot-worktrees", "node_modules"]);
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries){
+    if (entry.isDirectory()){
+      if (ignored.has(entry.name)) continue;
+      files.push(...await listHtmlFiles(new URL(`${entry.name}/`, directory), `${prefix}${entry.name}/`));
+    } else if (entry.isFile() && entry.name.endsWith(".html")){
+      files.push(`${prefix}${entry.name}`);
+    }
+  }
+  return files;
+}
 
 test("public profile route, editor, and legal release gate are present", async () => {
   const [account, page, config, privacyEn, privacyPl, termsEn, termsPl, portalCss, accountJs, profileClient] = await Promise.all([
@@ -116,6 +131,23 @@ test("topbar derives its visible signed-in identity from the public profile", as
   assert.match(source, /name = profile && profile\.displayName \? profile\.displayName : t\('player'/);
   assert.match(source, /email = t\('profileAccountSynced'/);
   assert.match(source, /refreshProfile\(user\)/);
+  assert.match(source, /avatar\.type === 'uploaded'/);
+  assert.match(source, /classList\.toggle\('profile-avatar--uploaded', !!uploaded\)/);
+  assert.match(source, /style\.backgroundImage = uploaded/);
   assert.match(accountSource, /publicProfileGeneration \+= 1/);
   assert.match(accountSource, /requestedUserKey !== getUserKey\(currentUser\)/);
+});
+
+test("every HTML page with a topbar loads the shared auth avatar bridge first", async () => {
+  const htmlFiles = await listHtmlFiles();
+  const sources = await Promise.all(htmlFiles.map(async (file) => ({ file, source: await read(file) })));
+  const files = sources.filter(({ source }) => /(?:\/|\b)js\/topbar\.js/.test(source));
+  assert.ok(files.length > 30, "expected the full topbar page inventory");
+  for (const { file, source } of files){
+    const authIndex = source.indexOf("/js/auth/supabaseClient.js");
+    const topbarIndex = Math.max(source.indexOf("/js/topbar.js"), source.indexOf('src="js/topbar.js"'));
+    assert.match(source, /(?:\/|\b)css\/portal\.css/, `${file} must load uploaded-avatar styles`);
+    assert.ok(authIndex >= 0, `${file} must load the shared auth avatar bridge`);
+    assert.ok(topbarIndex > authIndex, `${file} must load auth before topbar`);
+  }
 });

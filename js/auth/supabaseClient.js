@@ -248,8 +248,12 @@
       window.ProfileClient.applyAvatar(node, profile || { displayName: name, avatar: { variant: 'default' } });
       return;
     }
-    node.textContent = computeInitials(name);
-    node.dataset.avatarVariant = profile && profile.avatar && profile.avatar.variant ? profile.avatar.variant : 'default';
+    var avatar = profile && profile.avatar ? profile.avatar : {};
+    var uploaded = avatar.type === 'uploaded' && typeof avatar.url === 'string' && avatar.url;
+    node.textContent = uploaded ? '' : computeInitials(name);
+    node.dataset.avatarVariant = avatar.variant || 'default';
+    node.classList.toggle('profile-avatar--uploaded', !!uploaded);
+    node.style.backgroundImage = uploaded ? 'url("' + avatar.url.replace(/["\\]/g, '') + '")' : '';
   }
 
   function selectNodes(){
