@@ -10,13 +10,15 @@ async function mockAuthenticatedSession(page) {
     body: `
       window.SUPABASE_CONFIG = { SUPABASE_URL: 'https://stage-test.supabase.co', SUPABASE_ANON_KEY: 'test-key' };
       var currentAuthUser = { id: '${USER_ID}', email: 'private@example.test' };
+      var currentAccessToken = 'token-a';
       var authStateCallback = null;
       window.__switchAuthUser = function(userId){
         currentAuthUser = { id: userId, email: 'private@example.test' };
-        if (authStateCallback) authStateCallback('SIGNED_IN', { access_token: 'test-token', user: currentAuthUser });
+        currentAccessToken = 'token-b';
+        if (authStateCallback) authStateCallback('SIGNED_IN', { access_token: currentAccessToken, user: currentAuthUser });
       };
       window.supabase = { createClient: function(){ return { auth: {
-        getSession: function(){ return Promise.resolve({ data: { session: { access_token: 'test-token', user: currentAuthUser } } }); },
+        getSession: function(){ return Promise.resolve({ data: { session: { access_token: currentAccessToken, user: currentAuthUser } } }); },
         onAuthStateChange: function(callback){ authStateCallback = callback; return { data: { subscription: { unsubscribe: function(){} } } }; },
         signOut: function(){ return Promise.resolve(); }
       } }; } };
@@ -91,8 +93,10 @@ test('hides account A chips during a direct signed-in switch to account B', asyn
   const lateAGate = new Promise((resolve) => { releaseLateA = resolve; });
   const bGate = new Promise((resolve) => { releaseB = resolve; });
   let requests = 0;
+  const authorization = [];
   await page.route('**/.netlify/functions/chips-balance', async (route) => {
     const requestNo = ++requests;
+    authorization.push(route.request().headers().authorization);
     if (requestNo === 2) await lateAGate;
     if (requestNo === 3) await bGate;
     const balance = requestNo === 1 ? 896 : (requestNo === 2 ? 777 : 950);
@@ -107,6 +111,7 @@ test('hides account A chips during a direct signed-in switch to account B', asyn
 
   await page.evaluate(() => window.__switchAuthUser('chips-user-b'));
   await expect.poll(() => requests).toBe(3);
+  expect(authorization[2]).toBe('Bearer token-b');
   await expect(page.locator('.topbar')).toHaveAttribute('data-user-ui-chips-state', 'loading');
   await expect(amount).toHaveCSS('visibility', 'hidden');
   await expect(amount).not.toHaveText('896');

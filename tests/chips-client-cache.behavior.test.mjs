@@ -11,8 +11,9 @@ function response(balance){
 function createClient(fetchImpl){
   const published = [];
   let context = { userId: 'chips-user', generation: 1 };
+  let token = 'token-a';
   const window = {
-    SupabaseAuthBridge: { getAccessToken: async () => 'token' },
+    SupabaseAuthBridge: { getAccessToken: async () => token },
     UserUiState: {
       getActiveContext(){ return context; },
       isCurrent(userId, generation){ return context.userId === userId && context.generation === generation; },
@@ -22,7 +23,21 @@ function createClient(fetchImpl){
   };
   window.window = window;
   vm.runInNewContext(source, { window, document: { dispatchEvent(){} }, CustomEvent: class {}, fetch: fetchImpl, Date, JSON, Number });
-  return { client: window.ChipsClient, published, setContext(value){ context = value; } };
+  return { client: window.ChipsClient, published, setContext(value){ context = value; }, setToken(value){ token = value; } };
+}
+
+{
+  const authorization = [];
+  const state = createClient(async (_url, options) => {
+    authorization.push(options.headers.Authorization);
+    return response(authorization.length === 1 ? 896 : 950);
+  });
+  await state.client.fetchBalance();
+  state.setToken('token-b');
+  state.setContext({ userId: 'chips-user-b', generation: 2 });
+  state.client.clearAuthCache();
+  await state.client.fetchBalance();
+  assert.deepEqual(authorization, ['Bearer token-a', 'Bearer token-b']);
 }
 
 {

@@ -461,6 +461,7 @@
 
   function handleAuthChange(event, user, session){
     const hasUser = !!(user || (session && session.user));
+    if (window.ChipsClient && typeof window.ChipsClient.clearAuthCache === 'function') window.ChipsClient.clearAuthCache();
     if (event === 'SIGNED_OUT'){
       setAuthState(AuthState.SIGNED_OUT);
       hideChipBadge();

@@ -8,7 +8,14 @@
   var BONUS_CAMPAIGNS_URL = '/.netlify/functions/bonus-campaigns';
   var AUTH_CACHE_MS = 60000;
 
-  var state = { token: null, checkedAt: 0, tokenPromise: null };
+  var state = { token: null, checkedAt: 0, tokenPromise: null, authGeneration: 0 };
+
+  function clearAuthCache(){
+    state.authGeneration += 1;
+    state.token = null;
+    state.checkedAt = 0;
+    state.tokenPromise = null;
+  }
 
   function toNumber(value){
     var num = Number(value);
@@ -107,7 +114,8 @@
       return state.tokenPromise;
     }
 
-    state.tokenPromise = (async function(){
+    var authGeneration = state.authGeneration;
+    var tokenPromise = (async function(){
       try {
         var token = null;
         var bridge = getAuthBridge();
@@ -127,17 +135,21 @@
           }
         }
 
+        if (authGeneration !== state.authGeneration) return null;
         state.token = token || null;
         state.checkedAt = Date.now();
         return state.token;
       } catch (_err){
+        if (authGeneration !== state.authGeneration) return null;
         state.token = null;
         state.checkedAt = Date.now();
         return null;
-      } finally {
-        state.tokenPromise = null;
       }
     })();
+    state.tokenPromise = tokenPromise;
+    tokenPromise.then(function(){
+      if (authGeneration === state.authGeneration && state.tokenPromise === tokenPromise) state.tokenPromise = null;
+    });
 
     return state.tokenPromise;
   }
@@ -320,6 +332,7 @@
     fetchBonusCampaigns: fetchBonusCampaigns,
     claimBonusCampaign: claimBonusCampaign,
     fetchState: fetchState,
+    clearAuthCache: clearAuthCache,
     refreshAuth: function(){ return fetchAuthToken(true); }
   };
 })();
