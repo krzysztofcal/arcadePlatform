@@ -101,7 +101,7 @@ Frontend tasks:
 Integration checks:
 
 - `js/topbar.js` already hides chip badge when `html[data-auth="out"]`; keep guest mode aligned with signed-out auth state.
-- XP is awarded through `js/xpClient.js`, `js/xp-game-hook.js`, and `netlify/functions/award-xp.mjs`; guest poker must not call those paths.
+- XP is awarded through `js/xpClient.js`, `js/xp-game-hook.js`, and `netlify/functions/calculate-xp.mjs`; guest poker must not call those paths.
 
 ## PR3 - Registration Incentives
 

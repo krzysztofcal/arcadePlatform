@@ -14,12 +14,12 @@ export function getXPEndpoint(): string {
 
   // If the base URL includes netlify, use the same base
   if (baseURL.includes('netlify')) {
-    return `${baseURL}/.netlify/functions/award-xp`;
+    return `${baseURL}/.netlify/functions/calculate-xp`;
   }
 
   // For local testing, check if there's a dedicated function server
   const functionPort = process.env.XP_FUNCTION_PORT || '8888';
-  return `http://127.0.0.1:${functionPort}/.netlify/functions/award-xp`;
+  return `http://127.0.0.1:${functionPort}/.netlify/functions/calculate-xp`;
 }
 
 /**
@@ -41,10 +41,9 @@ export function generateSessionId(): string {
  */
 export function createXPRequest(overrides: any = {}) {
   return {
-    userId: generateUserId(),
+    anonId: generateUserId(),
     sessionId: generateSessionId(),
-    delta: 10,
-    ts: Date.now(),
+    operation: 'status',
     ...overrides
   };
 }
@@ -87,12 +86,12 @@ export function getXPClientStub() {
       get() { return calls; },
     });
     const stub = {
-      postWindow: (...args) => {
-        record('postWindow', args);
+      postWindowServerCalc: (...args) => {
+        record('postWindowServerCalc', args);
         return Promise.resolve({
           ok: true,
           status: 'ok',
-          granted: args[0]?.delta || 0,
+          granted: 0,
           totalToday: 0,
           remaining: 3000,
           nextReset: Date.now() + 86400000,

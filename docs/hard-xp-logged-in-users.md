@@ -81,7 +81,7 @@ Behavior:
 totalXp must never become negative.
 Data model must allow adding hasConvertedAnonXp later without migrations.
 5.2 Backend – Identity verification
-Backend logic (Netlify award-xp function):
+Backend logic (Netlify `calculate-xp` function):
 Extract Supabase access token from request headers, for example from an Authorization header with a bearer token.
 Verify the JWT using Supabase configuration (project URL and anon key or JWT secret).
 Derive at least:
@@ -179,7 +179,7 @@ Add getUserProfile(userId) and saveUserProfile(profile) helpers.
 Store UserProfile in Upstash next to existing anon profiles.
 Add basic unit tests for these helpers.
 Phase H2 — JWT Verification in XP Backend
-In award-xp Netlify function:
+In the `calculate-xp` Netlify function:
 Read Supabase access token from headers.
 Verify token and extract userId and emailVerified.
 Add diagnostic logs that do not expose secrets.

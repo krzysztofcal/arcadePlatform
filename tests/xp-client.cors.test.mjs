@@ -6,7 +6,7 @@ async function createHandler(ns = 'test:cors') {
   process.env.XP_DEBUG = '0';
   process.env.XP_KEY_NS = ns;
   process.env.XP_CORS_ALLOW = 'https://allowed.test';
-  const { handler } = await import('../netlify/functions/award-xp.mjs?cors=' + ns);
+  const { handler } = await import('../netlify/functions/calculate-xp.mjs?cors=' + ns);
   return handler;
 }
 
@@ -22,7 +22,7 @@ async function createHandler(ns = 'test:cors') {
   const blocked = await handler({
     httpMethod: 'POST',
     headers: { origin: 'https://blocked.test' },
-    body: JSON.stringify({ userId: 'cors-user', sessionId: 'cors-session', statusOnly: true }),
+    body: JSON.stringify({ anonId: 'cors-user', operation: 'status' }),
   });
   assert.equal(blocked.statusCode, 403);
   const blockedPayload = JSON.parse(blocked.body);
@@ -33,7 +33,7 @@ async function createHandler(ns = 'test:cors') {
   const allowed = await handler({
     httpMethod: 'POST',
     headers: { origin: 'https://allowed.test' },
-    body: JSON.stringify({ userId: 'cors-user', sessionId: 'cors-session', statusOnly: true }),
+    body: JSON.stringify({ anonId: 'cors-user', operation: 'status' }),
   });
   assert.equal(allowed.statusCode, 200);
   const allowedPayload = JSON.parse(allowed.body);
@@ -44,7 +44,7 @@ async function createHandler(ns = 'test:cors') {
   const noOrigin = await handler({
     httpMethod: 'POST',
     headers: {},
-    body: JSON.stringify({ userId: 'cors-user2', sessionId: 'cors-session2', statusOnly: true }),
+    body: JSON.stringify({ anonId: 'cors-user2', operation: 'status' }),
   });
   assert.equal(noOrigin.statusCode, 200);
   const noOriginPayload = JSON.parse(noOrigin.body);

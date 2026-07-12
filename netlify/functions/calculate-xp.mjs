@@ -18,7 +18,7 @@ import { store, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
 import { extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
-import { canonicalizeXpGameId, getXpPolicy, migrateAnonXpToUser, resolveXpIdentity } from "./_shared/xp-identity.mjs";
+import { canonicalizeXpGameId, getXpPolicy, isValidXpAnonId, migrateAnonXpToUser, resolveXpIdentity } from "./_shared/xp-identity.mjs";
 import { createXpLedgerKeys, executeAtomicXpAward, readXpTotals } from "./_shared/xp-ledger.mjs";
 import { persistXpProfileSnapshot, readCanonicalXpStatus } from "./_shared/xp-status.mjs";
 
@@ -675,11 +675,13 @@ export async function handler(event) {
   if (operation !== "award" && operation !== "status") {
     return json(400, { error: "invalid_operation" }, origin);
   }
-
   const jwtToken = extractBearerToken(event.headers);
   const authContext = await verifySupabaseJwt(jwtToken);
   if (jwtToken && !authContext.valid) {
     return json(401, { error: "unauthorized", message: authContext.reason || "invalid_token" }, origin);
+  }
+  if (anonId && !isValidXpAnonId(anonId)) {
+    return json(400, { error: "invalid_identity" }, origin);
   }
   const { supabaseUserId, identityId, anonId: resolvedAnonId } = resolveXpIdentity({ anonId, authContext });
 

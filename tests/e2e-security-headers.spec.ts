@@ -199,12 +199,10 @@ test.describe('Security Headers Tests', () => {
     });
 
     test('should maintain security headers on API endpoints', async ({ request }) => {
-      const response = await request.post('/.netlify/functions/award-xp', {
+      const response = await request.post('/.netlify/functions/calculate-xp', {
         data: {
-          userId: 'test-user',
-          sessionId: 'test-session',
-          delta: 10,
-          ts: Date.now()
+          anonId: 'test-user',
+          operation: 'status'
         },
         headers: {
           'Origin': 'http://localhost:8888'
@@ -229,12 +227,10 @@ test.describe('Security Headers Tests', () => {
     test('should sanitize user input in XP metadata', async ({ request }) => {
       const xssPayload = "<script>alert('xss')</script>";
 
-      const response = await request.post('/.netlify/functions/award-xp', {
+      const response = await request.post('/.netlify/functions/calculate-xp', {
         data: {
-          userId: xssPayload,
-          sessionId: 'test-session',
-          delta: 10,
-          ts: Date.now(),
+          anonId: xssPayload,
+          operation: 'status',
           metadata: {
             name: xssPayload,
             description: xssPayload
@@ -242,21 +238,19 @@ test.describe('Security Headers Tests', () => {
         }
       });
 
-      expect(response.status()).toBe(410);
+      expect(response.status()).toBe(400);
       expect(await response.text()).not.toContain('<script>');
     });
 
     test('should reject script tags in userId', async ({ request }) => {
-      const response = await request.post('/.netlify/functions/award-xp', {
+      const response = await request.post('/.netlify/functions/calculate-xp', {
         data: {
-          userId: '<script>alert(1)</script>',
-          sessionId: 'test-session',
-          delta: 10,
-          ts: Date.now()
+          anonId: '<script>alert(1)</script>',
+          operation: 'status'
         }
       });
 
-      expect(response.status()).toBe(410);
+      expect(response.status()).toBe(400);
     });
   });
 });

@@ -121,7 +121,6 @@ function send(res, status, body, headers = {}) {
 
 // Import and handle Netlify functions (ESM)
 const functionHandlers = {
-  'award-xp': null,
   'start-session': null,
   'calculate-xp': null,
 };
@@ -200,14 +199,11 @@ const server = http.createServer(async (req, res) => {
 
     // Handle Netlify function endpoints + API redirects used in Netlify
     const functionRouteMap = {
-      '/.netlify/functions/award-xp': 'award-xp',
       '/.netlify/functions/start-session': 'start-session',
       '/.netlify/functions/calculate-xp': 'calculate-xp',
-      '/api/xp/award': 'award-xp',
       '/api/xp/start-session': 'start-session',
       '/api/xp/calculate': 'calculate-xp',
       '/api/start-session': 'start-session',
-      '/api/award-xp': 'award-xp',
     };
     const fnName = functionRouteMap[pathname];
     if (fnName) {

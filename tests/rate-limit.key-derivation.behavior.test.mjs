@@ -9,17 +9,31 @@ process.env.XP_RATE_LIMIT_WINDOW_SEC = '2';
 process.env.XP_KEY_NS = `test:rate-key:${Date.now()}`;
 process.env.XP_CORS_ALLOW = 'http://127.0.0.1:4173';
 
-const { handler } = await import('../netlify/functions/award-xp.mjs');
+const { handler } = await import('../netlify/functions/calculate-xp.mjs');
 
-const post = (ip, userId = `user-${Date.now()}`) =>
-  handler({
+let windowOffset = 0;
+const post = (ip, userId = `user-${Date.now()}`) => {
+  const now = Date.now() + windowOffset++;
+  return handler({
     httpMethod: 'POST',
     headers: {
       origin: 'http://127.0.0.1:4173',
       'x-forwarded-for': ip,
     },
-    body: JSON.stringify({ userId, sessionId: `sess-${Date.now()}`, delta: 10, ts: Date.now() }),
+    body: JSON.stringify({
+      anonId: userId,
+      operation: 'award',
+      sessionId: `sess-${now}`,
+      gameId: '2048',
+      windowStart: now - 1_000,
+      windowEnd: now,
+      inputEvents: 2,
+      visibilitySeconds: 1,
+      gameplayActions: 1,
+      scoreDelta: 2,
+    }),
   });
+};
 
 const ipA = '203.0.113.50';
 const ipB = '203.0.113.51';

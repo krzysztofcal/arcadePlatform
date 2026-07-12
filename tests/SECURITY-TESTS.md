@@ -66,7 +66,7 @@ npm run test:e2e -- tests/e2e-security-isolation.spec.ts
 
 The tests use an **integrated test server** (`scripts/test-server.js`) that combines:
 - Static file serving (HTML, CSS, JS)
-- Netlify function handling (`/.netlify/functions/award-xp`)
+- Netlify function handling (`/.netlify/functions/calculate-xp`)
 - Security headers (loaded from `_headers` file)
 
 This server is automatically started by Playwright's `webServer` config.
@@ -165,11 +165,11 @@ When adding new security tests:
 - `/SECURITY-ISSUES.md` - Known security issues and risk assessment
 - `/SECURITY-PATCHES.md` - Applied security fixes and patches
 - `/_headers` - Netlify security header configuration
-- `/netlify/functions/award-xp.mjs` - XP award endpoint implementation
+- `/netlify/functions/calculate-xp.mjs` - XP award and status endpoint implementation
 
 ## Questions?
 
 For questions about security tests, see:
 - Security issue tracker: `/SECURITY-ISSUES.md`
-- XP system documentation: Check inline comments in `award-xp.mjs`
+- XP system documentation: Check inline comments in `calculate-xp.mjs`
 - Test patterns: Refer to existing E2E tests in `/tests/e2e/`
