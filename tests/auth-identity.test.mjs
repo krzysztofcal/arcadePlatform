@@ -139,10 +139,13 @@ describe("JWT verification and identity selection", () => {
     const body = parseJsonBody(response);
     expect(response.statusCode).toBe(200);
     expect(body.ok).toBe(true);
-    const migrationCall = store.eval.mock.calls.find((call) => call[2]?.length === 1);
-    const awardCall = store.eval.mock.calls.find((call) => call[2]?.length === 6);
+    const migrationCall = store.eval.mock.calls.find((call) => call[2]?.length === 2);
+    const awardCall = store.eval.mock.calls.find((call) => call[2]?.length === 10);
     expect(migrationCall[1][1]).toBe(`${process.env.XP_KEY_NS}:total:user-abc`);
+    expect(migrationCall[1][4]).toBe(`${process.env.XP_KEY_NS}:leaderboard:v1:all_time`);
     expect(awardCall[1][3]).toBe(`${process.env.XP_KEY_NS}:total:user-abc`);
+    expect(awardCall[1][5]).toBe(`${process.env.XP_KEY_NS}:leaderboard:v1:all_time`);
+    expect(awardCall[2][7]).toBe("user-abc");
   });
 
   it("A4b: calculate-xp resolves Supabase ES256 tokens through shared remote auth", async () => {
@@ -173,8 +176,9 @@ describe("JWT verification and identity selection", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    const awardCall = store.eval.mock.calls.find((call) => call[2]?.length === 6);
+    const awardCall = store.eval.mock.calls.find((call) => call[2]?.length === 10);
     expect(awardCall[1][3]).toBe(`${process.env.XP_KEY_NS}:total:${userId}`);
+    expect(awardCall[2][7]).toBe(userId);
     expect(saveUserProfileMock).toHaveBeenCalledWith(expect.objectContaining({ userId, totalXp: 12 }));
   });
 

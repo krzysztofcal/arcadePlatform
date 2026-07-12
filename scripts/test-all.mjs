@@ -105,6 +105,7 @@ run("node", ["tests/chips-client-cache.behavior.test.mjs"], "chips-client-cache-
 run("node", ["tests/home-bonuses.contract.test.mjs"], "home-bonuses-contract");
 run("node", ["tests/account-auth.contract.test.mjs"], "account-auth-contract");
 run("node", ["tests/xp-ledger.behavior.test.mjs"], "xp-ledger-behavior");
+run("node", ["tests/xp-leaderboard-foundation.behavior.test.mjs"], "xp-leaderboard-foundation-behavior");
 run("node", ["tests/sidebar-admin-visibility.behavior.test.mjs"], "sidebar-admin-visibility-behavior");
 run("node", ["tests/i18n.behavior.test.mjs"], "i18n-behavior");
 run("node", ["tests/static-html.behavior.test.mjs"], "static-html-behavior");

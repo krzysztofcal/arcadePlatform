@@ -50,7 +50,34 @@ function createMemoryStore() {
     if (!ttlMs || ttlMs <= 0) return;
     const entry = sweep(key);
     if (!entry) return;
-    setValue(key, entry.value, ttlMs);
+    memory.set(key, { ...entry, expiry: Date.now() + ttlMs });
+  }
+
+  function getSortedSet(key, create = false) {
+    const entry = sweep(key);
+    if (entry?.kind === "zset") return entry.value;
+    if (!create) return null;
+    const value = new Map();
+    memory.set(key, { kind: "zset", value, expiry: null });
+    return value;
+  }
+
+  function sortedEntries(key, reverse = false) {
+    const set = getSortedSet(key);
+    if (!set) return [];
+    return [...set.entries()].sort((left, right) => {
+      const scoreOrder = left[1] - right[1];
+      if (scoreOrder !== 0) return reverse ? -scoreOrder : scoreOrder;
+      const memberOrder = left[0] < right[0] ? -1 : (left[0] > right[0] ? 1 : 0);
+      return reverse ? -memberOrder : memberOrder;
+    });
+  }
+
+  function zaddValue(key, score, member) {
+    const set = getSortedSet(key, true);
+    const exists = set.has(String(member));
+    set.set(String(member), Number(score));
+    return exists ? 0 : 1;
   }
 
   function remainingTtlMs(entry) {
@@ -98,18 +125,52 @@ function createMemoryStore() {
     async del(key) {
       return memory.delete(key) ? 1 : 0;
     },
+    async zadd(key, score, member) { return zaddValue(key, score, member); },
+    async zincrBy(key, delta, member) {
+      const set = getSortedSet(key, true);
+      const next = Number(set.get(String(member)) ?? 0) + Number(delta);
+      set.set(String(member), next);
+      return next;
+    },
+    async zrem(key, member) {
+      const set = getSortedSet(key);
+      return set?.delete(String(member)) ? 1 : 0;
+    },
+    async zrevrangeWithScores(key, start, stop) {
+      const entries = sortedEntries(key, true);
+      const normalizedStop = Number(stop) < 0 ? entries.length + Number(stop) : Number(stop);
+      return entries.slice(Number(start), normalizedStop + 1).map(([member, score]) => ({ member, score }));
+    },
+    async zrevrank(key, member) {
+      const index = sortedEntries(key, true).findIndex(([candidate]) => candidate === String(member));
+      return index < 0 ? null : index;
+    },
+    async zscore(key, member) {
+      const score = getSortedSet(key)?.get(String(member));
+      return score == null ? null : score;
+    },
+    async zcount(key, min, max) {
+      const lower = min === "-inf" ? -Infinity : Number(min);
+      const upper = max === "+inf" ? Infinity : Number(max);
+      return sortedEntries(key).filter(([, score]) => score >= lower && score <= upper).length;
+    },
+    async zcard(key) { return getSortedSet(key)?.size ?? 0; },
     async eval(_script, keys = [], argv = []) {
       // Memory impl supports the XP award signatures used by calculate-xp.
-      if ((keys.length === 5 && argv.length === 7) || (keys.length === 4 && argv.length === 6)) {
+      if ((keys.length === 8 && argv.length === 10) || (keys.length === 5 && argv.length === 7) || (keys.length === 4 && argv.length === 6)) {
         const [sessionKey, sessionSyncKey, dailyKey, totalKey, maybeLockKey] = keys;
-        const lockKey = keys.length === 5 ? maybeLockKey : null;
+        const hasLock = keys.length !== 4;
+        const lockKey = hasLock ? maybeLockKey : null;
         const now = Number(argv[0]);
         const delta = Number(argv[1]);
         const dailyCap = Number(argv[2]);
         const sessionCap = Number(argv[3]);
         const ts = Number(argv[4]);
-        const lockTtl = keys.length === 5 ? Number(argv[5]) : 0;
-        const sessionTtlMs = keys.length === 5 ? Number(argv[6]) : Number(argv[5]);
+        const lockTtl = hasLock ? Number(argv[5]) : 0;
+        const sessionTtlMs = hasLock ? Number(argv[6]) : Number(argv[5]);
+        const leaderboardMember = keys.length === 8 ? String(argv[7] || "") : "";
+        const dayExpiresAtSec = keys.length === 8 ? Number(argv[8]) : 0;
+        const weekExpiresAtSec = keys.length === 8 ? Number(argv[9]) : 0;
 
         const lockEntry = lockKey ? sweep(lockKey) : null;
         if (lockKey && lockEntry) {
@@ -174,13 +235,22 @@ function createMemoryStore() {
           setValue(totalKey, lifetime, null);
           setValue(sessionSyncKey, lastSync, sessionTtlMs > 0 ? sessionTtlMs : null);
 
+          if (leaderboardMember) {
+            zaddValue(keys[5], lifetime, leaderboardMember);
+            zaddValue(keys[6], dailyTotal, leaderboardMember);
+            const weekly = getSortedSet(keys[7], true);
+            weekly.set(leaderboardMember, Number(weekly.get(leaderboardMember) ?? 0) + grant);
+            setExpiryMs(keys[6], Math.max(0, dayExpiresAtSec * 1000 - Date.now()));
+            setExpiryMs(keys[7], Math.max(0, weekExpiresAtSec * 1000 - Date.now()));
+          }
+
           return [grant, dailyTotal, sessionTotal, lifetime, lastSync, status];
         } finally {
           release();
         }
       }
 
-      if (keys.length === 4 && argv.length === 1) {
+      if ((keys.length === 5 && argv.length === 2) || (keys.length === 4 && argv.length === 1)) {
         const [anonTotalKey, userTotalKey, markerKey, userMarkerKey] = keys;
         const conversionCap = Math.max(0, Math.floor(Number(argv[0]) || 0));
         const existingUserMarker = getValue(userMarkerKey);
@@ -201,6 +271,7 @@ function createMemoryStore() {
         memory.delete(anonTotalKey);
         setValue(markerKey, converted, null);
         setValue(userMarkerKey, converted, null);
+        if (keys.length === 5 && argv[1]) zaddValue(keys[4], userTotal, argv[1]);
         return [converted, userTotal, anonTotal, 0];
       }
 
@@ -237,6 +308,30 @@ const remoteStore = {
   async expire(key, seconds) { return call("EXPIRE", key, String(seconds)); },
   async ttl(key) { return call("TTL", key); },
   async del(key) { return call("DEL", key); },
+  async zadd(key, score, member) { return call("ZADD", key, String(score), String(member)); },
+  async zincrBy(key, delta, member) { return call("ZINCRBY", key, String(delta), String(member)); },
+  async zrem(key, member) { return call("ZREM", key, String(member)); },
+  async zrevrangeWithScores(key, start, stop) {
+    const result = await call("ZREVRANGE", key, String(start), String(stop), "WITHSCORES");
+    if (Array.isArray(result?.[0])) {
+      return result.map(([member, score]) => ({ member: String(member), score: Number(score) || 0 }));
+    }
+    const rows = [];
+    for (let index = 0; index < (result?.length ?? 0); index += 2) {
+      rows.push({ member: String(result[index]), score: Number(result[index + 1]) || 0 });
+    }
+    return rows;
+  },
+  async zrevrank(key, member) {
+    const result = await call("ZREVRANK", key, String(member));
+    return result == null ? null : Number(result);
+  },
+  async zscore(key, member) {
+    const result = await call("ZSCORE", key, String(member));
+    return result == null ? null : Number(result);
+  },
+  async zcount(key, min, max) { return Number(await call("ZCOUNT", key, String(min), String(max))) || 0; },
+  async zcard(key) { return Number(await call("ZCARD", key)) || 0; },
   async eval(script, keys = [], argv = []) {
     // Upstash REST API expects array format: ["eval", script, numkeys, key1, key2, ..., arg1, arg2, ...]
     // The command name must be included as the first element when POSTing to the root endpoint
@@ -277,6 +372,7 @@ const remoteStore = {
 
 export const store = isMemoryStore ? createMemoryStore() : remoteStore;
 export const __remoteStoreForTests = remoteStore;
+export const __createMemoryStoreForTests = createMemoryStore;
 export const __setNxExScriptForTests = SET_NX_EX_SCRIPT;
 
 /**

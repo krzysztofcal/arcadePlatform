@@ -38,7 +38,7 @@ function parseWarsawOffsetMinutes(ms) {
   return sign * (hours * 60 + minutes);
 }
 
-function toWarsawEpoch(year, month, day, hour) {
+export function warsawLocalEpochMs(year, month, day, hour = 0) {
   const baseUtc = Date.UTC(year, month - 1, day, hour, 0, 0, 0);
   let offset = parseWarsawOffsetMinutes(baseUtc);
   let adjusted = baseUtc - offset * 60_000;
@@ -52,12 +52,12 @@ function toWarsawEpoch(year, month, day, hour) {
 
 function nextCandidateReset(nowMs) {
   const now = warsawParts(nowMs);
-  const todayReset = toWarsawEpoch(now.year, now.month, now.day, 3);
+  const todayReset = warsawLocalEpochMs(now.year, now.month, now.day, 3);
   if (nowMs < todayReset) {
     return todayReset;
   }
   const tomorrowParts = warsawParts(nowMs + DAY_MS);
-  return toWarsawEpoch(tomorrowParts.year, tomorrowParts.month, tomorrowParts.day, 3);
+  return warsawLocalEpochMs(tomorrowParts.year, tomorrowParts.month, tomorrowParts.day, 3);
 }
 
 export function warsawDayKey(nowMs = Date.now()) {

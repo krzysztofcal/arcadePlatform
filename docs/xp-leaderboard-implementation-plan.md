@@ -6,7 +6,7 @@ Arcade Hub is ready to add a public XP leaderboard after stabilizing the authori
 
 The current XP store has per-user lifetime and daily counters but no efficient cross-user index. Reading or scanning individual XP keys at request time is not acceptable. The implementation will add Redis sorted-set projections for `today`, `week`, and `all_time`, update them atomically with every confirmed authenticated XP grant, and resolve public profile fields in a server-only API.
 
-This document is a plan only. It does not implement runtime code, migrations, tests, or UI.
+This document tracks the staged implementation. PR #690 implements the dark-write projection foundation and its tests; backfill, public APIs, and UI remain later phases.
 
 ## Current foundation
 
@@ -52,8 +52,8 @@ Existing documents provide a future row contract and readiness gate, but not a c
 
 The MVP exposes:
 
-- `today`: XP granted during the current `Europe/Warsaw` calendar day;
-- `week`: XP granted during the current ISO week based on `Europe/Warsaw` local time, Monday 00:00 through Sunday 23:59:59.999;
+- `today`: XP granted during the current canonical XP day, from 03:00 `Europe/Warsaw` until the next 03:00 reset;
+- `week`: XP granted during the current ISO week of canonical XP days, Monday 03:00 through the next Monday 02:59:59.999 in `Europe/Warsaw`;
 - `all_time`: canonical lifetime account XP.
 
 The API response includes the normalized period key and `nextResetAt` for period rankings. `all_time` has no reset.
@@ -119,7 +119,7 @@ Each member is the internal Supabase user ID and each score is a non-negative in
 - TTL is refreshed to a fixed period-end-plus-retention timestamp, not extended indefinitely from every award.
 - Current canonical per-user key retention is unchanged by this feature.
 
-The period helper owns Warsaw day keys, ISO week keys, reset timestamps, and retention TTL calculations. Do not duplicate date logic in handlers or the browser.
+The 03:00 boundary is required because the existing canonical daily counters cannot safely project a midnight-based ranking. The period helper owns Warsaw XP-day keys, ISO week keys, reset timestamps, and retention TTL calculations. Do not duplicate date logic in handlers or the browser.
 
 ## Authoritative write path
 
@@ -364,6 +364,8 @@ Do not create high-cardinality labels containing user IDs or handles.
 
 ### PR 1: Period and projection foundation
 
+Implementation status: complete in PR #690. The shared 03:00 Warsaw/ISO period helper, sorted-set store parity, atomic authenticated award projections, and all-time conversion synchronization are included; public reads and UI remain disabled.
+
 - Add shared Warsaw day/week period helpers.
 - Extend store adapters with sorted-set behavior.
 - Extend the atomic award script for authenticated leaderboard projections.
@@ -426,7 +428,7 @@ No database migration is expected for the Redis-first MVP unless profile eligibi
 - One confirmed authenticated grant updates canonical totals and all relevant indexes once.
 - Duplicate, zero, capped, guest, invalid-token, and failed grants do not alter rankings.
 - Anon conversion updates all-time only and remains exactly once.
-- Warsaw midnight and ISO-week/year boundaries choose correct keys and reset times.
+- Warsaw 03:00 XP-day and ISO-week/year boundaries choose correct keys and reset times.
 - Day/week TTLs are bounded from period end.
 - Equal scores produce competition ranks and deterministic ordering.
 - Pagination handles ties across boundaries.
@@ -499,15 +501,13 @@ No database migration is expected for the Redis-first MVP unless profile eligibi
 - Current-period rankings may begin with a controlled warm-up if retained daily data is incomplete.
 - Ranking order can move between paginated requests as users earn XP.
 
-## Open decisions before implementation
+## Remaining decisions before public rollout
 
 1. Reconfirm that all authenticated public profiles participate without opt-out.
-2. Approve `Europe/Warsaw` and ISO Monday as the public weekly contract.
-3. Approve competition ranking for ties.
-4. Confirm whether the public API and authenticated `me` read will be separate endpoints; this plan recommends separation.
-5. Verify retained production daily keys before promising current-week backfill.
-6. Confirm 14-day daily and 8-week weekly index retention.
-7. Review Terms/Privacy wording for increased discoverability through rankings.
+2. Approve competition ranking for ties.
+3. Confirm whether the public API and authenticated `me` read will be separate endpoints; this plan recommends separation.
+4. Verify retained production daily keys before promising current-week backfill.
+5. Review Terms/Privacy wording for increased discoverability through rankings.
 
 ## Definition of done
 
