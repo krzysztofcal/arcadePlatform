@@ -242,14 +242,8 @@ test.describe('Security Headers Tests', () => {
         }
       });
 
-      // Accept success, validation errors, or rate limits
-      expect([200, 400, 422, 429]).toContain(response.status());
-
-      // If accepted, response should not contain unescaped script tags
-      if (response.status() === 200) {
-        const text = await response.text();
-        expect(text).not.toContain('<script>');
-      }
+      expect(response.status()).toBe(410);
+      expect(await response.text()).not.toContain('<script>');
     });
 
     test('should reject script tags in userId', async ({ request }) => {
@@ -262,8 +256,7 @@ test.describe('Security Headers Tests', () => {
         }
       });
 
-      // Server should handle safely (accept with sanitization or reject)
-      expect([200, 400, 422, 429]).toContain(response.status());
+      expect(response.status()).toBe(410);
     });
   });
 });

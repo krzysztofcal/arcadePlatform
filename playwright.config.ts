@@ -50,6 +50,7 @@ if (process.env.CI_NO_E2E === '1') {
 export default defineConfig({
   // Only run Playwright specs; ignore browser-only *.test.js files
   testMatch,
+  testIgnore: ['.copilot-worktrees/**'],
   use: useConfig,
   webServer: {
     // Integrated test server serves static assets, security headers, and Netlify functions
