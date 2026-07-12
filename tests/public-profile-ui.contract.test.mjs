@@ -116,6 +116,25 @@ test("topbar derives its visible signed-in identity from the public profile", as
   assert.match(source, /name = profile && profile\.displayName \? profile\.displayName : t\('player'/);
   assert.match(source, /email = t\('profileAccountSynced'/);
   assert.match(source, /refreshProfile\(user\)/);
+  assert.match(source, /avatar\.type === 'uploaded'/);
+  assert.match(source, /classList\.toggle\('profile-avatar--uploaded', !!uploaded\)/);
+  assert.match(source, /style\.backgroundImage = uploaded/);
   assert.match(accountSource, /publicProfileGeneration \+= 1/);
   assert.match(accountSource, /requestedUserKey !== getUserKey\(currentUser\)/);
+});
+
+test("every HTML page with a topbar loads the shared auth avatar bridge first", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const files = execFileSync("rg", ["-l", "(?:/|\\b)js/topbar\\.js", "--glob", "*.html", "."], {
+    cwd: new URL("..", import.meta.url), encoding: "utf8"
+  }).trim().split("\n").filter(Boolean);
+  assert.ok(files.length > 30, "expected the full topbar page inventory");
+  for (const file of files){
+    const source = await read(file.replace(/^\.\//, ""));
+    const authIndex = source.indexOf("/js/auth/supabaseClient.js");
+    const topbarIndex = Math.max(source.indexOf("/js/topbar.js"), source.indexOf('src="js/topbar.js"'));
+    assert.match(source, /(?:\/|\b)css\/portal\.css/, `${file} must load uploaded-avatar styles`);
+    assert.ok(authIndex >= 0, `${file} must load the shared auth avatar bridge`);
+    assert.ok(topbarIndex > authIndex, `${file} must load auth before topbar`);
+  }
 });
