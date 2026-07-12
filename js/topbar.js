@@ -294,10 +294,10 @@
     return true;
   }
 
-  function prepareChipIdentity(){
+  function prepareChipIdentity(expectedUserId){
     const ui = window.UserUiState;
     const context = ui && typeof ui.getActiveContext === 'function' ? ui.getActiveContext() : null;
-    const userId = context && context.userId ? context.userId : null;
+    const userId = expectedUserId || (context && context.userId ? context.userId : null);
     if (userId && userId === chipIdentityUserId){
       if (!chipHasHydratedValue) hydrateChipBadge();
       return;
@@ -306,7 +306,8 @@
     chipInFlight = null;
     chipHasHydratedValue = false;
     chipIdentityUserId = userId;
-    if (!hydrateChipBadge()) setChipBadge('', { loading: true });
+    const contextMatches = !expectedUserId || (context && context.userId === expectedUserId);
+    if (!contextMatches || !hydrateChipBadge()) setChipBadge('', { loading: true });
   }
 
   function setAuthState(next){
@@ -344,7 +345,7 @@
         hideChipBadge();
         return;
       }
-      prepareChipIdentity();
+      prepareChipIdentity(user && user.id ? String(user.id) : null);
       refreshXpBadge();
       refreshChipBadge();
       refreshWelcomeBonusBadge();
@@ -466,13 +467,14 @@
       hideWelcomeBonusBadge();
       return;
     }
-    if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION'){
+    if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION' || event === 'USER_UPDATED'){
       setAuthState(hasUser ? AuthState.SIGNED_IN : AuthState.SIGNED_OUT);
       if (!isAuthed()){
         hideChipBadge();
         hideWelcomeBonusBadge();
         return;
       }
+      prepareChipIdentity(user && user.id ? String(user.id) : (session && session.user && session.user.id ? String(session.user.id) : null));
       refreshXpBadge();
       refreshChipBadge();
       refreshWelcomeBonusBadge();
