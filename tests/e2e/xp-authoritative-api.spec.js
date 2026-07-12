@@ -19,6 +19,23 @@ test.describe('authoritative XP API security contract', () => {
     expect((await response.json()).error).toBe('unauthorized');
   });
 
+  test('invalid bearer takes precedence over malformed anonymous identity', async ({ request }) => {
+    const response = await request.post(ENDPOINT, {
+      headers: { Authorization: 'Bearer invalid-token' },
+      data: { anonId: '<script>invalid</script>', operation: 'status' },
+    });
+    expect(response.status()).toBe(401);
+    expect((await response.json()).error).toBe('unauthorized');
+  });
+
+  test('malformed anonymous identity without bearer is rejected', async ({ request }) => {
+    const response = await request.post(ENDPOINT, {
+      data: { anonId: '<script>invalid</script>', operation: 'status' },
+    });
+    expect(response.status()).toBe(400);
+    expect((await response.json()).error).toBe('invalid_identity');
+  });
+
   test('status is read-only and does not generate a session', async ({ request }) => {
     const response = await request.post(ENDPOINT, {
       data: { anonId: `status-${Date.now()}`, operation: 'status' },

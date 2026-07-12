@@ -675,14 +675,13 @@ export async function handler(event) {
   if (operation !== "award" && operation !== "status") {
     return json(400, { error: "invalid_operation" }, origin);
   }
-  if (anonId && !isValidXpAnonId(anonId)) {
-    return json(400, { error: "invalid_identity" }, origin);
-  }
-
   const jwtToken = extractBearerToken(event.headers);
   const authContext = await verifySupabaseJwt(jwtToken);
   if (jwtToken && !authContext.valid) {
     return json(401, { error: "unauthorized", message: authContext.reason || "invalid_token" }, origin);
+  }
+  if (anonId && !isValidXpAnonId(anonId)) {
+    return json(400, { error: "invalid_identity" }, origin);
   }
   const { supabaseUserId, identityId, anonId: resolvedAnonId } = resolveXpIdentity({ anonId, authContext });
 
