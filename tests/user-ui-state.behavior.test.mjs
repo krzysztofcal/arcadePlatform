@@ -4,8 +4,8 @@ import vm from 'node:vm';
 
 const source = await readFile(new URL('../js/user-ui-state.js', import.meta.url), 'utf8');
 
-function createContext(initial = {}){
-  const values = new Map(Object.entries(initial));
+function createContext(initial = {}, options = {}){
+  const values = options.values || new Map(Object.entries(initial));
   const topbar = { state: 'pending', setAttribute(name, value){ if (name === 'data-user-ui-state') this.state = value; } };
   const listeners = {};
   const window = {
@@ -17,10 +17,24 @@ function createContext(initial = {}){
     addEventListener(type, listener){ listeners[type] = listener; },
     KLog: { log(){} },
   };
+  if (options.BroadcastChannel) window.BroadcastChannel = options.BroadcastChannel;
   const document = { querySelectorAll(){ return [topbar]; }, dispatchEvent(){} };
   window.window = window;
   vm.runInNewContext(source, { window, document, CustomEvent: class {}, Date, JSON });
   return { api: window.UserUiState, values, topbar, listeners };
+}
+
+function createChannelHub(){
+  const channels = [];
+  class BroadcastChannel {
+    constructor(){ this.listener = null; channels.push(this); }
+    addEventListener(type, listener){ if (type === 'message') this.listener = listener; }
+    postMessage(data){ channels.forEach((channel) => { if (channel !== this && channel.listener) channel.listener({ data }); }); }
+  }
+  return {
+    BroadcastChannel,
+    deliver(index, data){ if (channels[index] && channels[index].listener) channels[index].listener({ data }); },
+  };
 }
 
 const profileRecord = (userId, displayName, confirmedAt = Date.now()) => JSON.stringify({
@@ -42,6 +56,24 @@ const profileRecord = (userId, displayName, confirmedAt = Date.now()) => JSON.st
   assert.equal(state.topbar.state, 'hydrated');
   assert.equal(state.api.isCurrent('user-a', hydrated.generation), true);
   assert.equal(state.api.publish('user-b', 'profile', { displayName: 'Wrong', avatar: {} }), null);
+}
+
+{
+  const values = new Map();
+  const hub = createChannelHub();
+  const first = createContext({}, { values, BroadcastChannel: hub.BroadcastChannel });
+  const second = createContext({}, { values, BroadcastChannel: hub.BroadcastChannel });
+  const received = [];
+  first.api.hydrate('shared-user');
+  second.api.hydrate('shared-user');
+  second.api.onChange((event) => received.push(event));
+  const confirmedAt = Date.now();
+  first.api.publish('shared-user', 'profile', { displayName: 'Shared Avatar', avatar: { type: 'uploaded', variant: 'fox-blue', url: 'https://stage-test.supabase.co/new-avatar.webp' } }, confirmedAt);
+  assert.equal(received.length, 1);
+  assert.equal(received[0].value.avatar.url, 'https://stage-test.supabase.co/new-avatar.webp');
+  assert.equal(second.topbar.state, 'ready');
+  hub.deliver(1, received[0]);
+  assert.equal(received.length, 1);
 }
 
 {

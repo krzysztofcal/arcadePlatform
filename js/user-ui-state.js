@@ -9,6 +9,7 @@
   var activeUserId = null;
   var generation = 0;
   var channel = null;
+  var appliedAt = { profile: 0, xp: 0, chips: 0 };
 
   function klog(kind, data){
     try { if (window.KLog && typeof window.KLog.log === 'function') window.KLog.log(kind, data || {}); } catch (_err){}
@@ -91,12 +92,18 @@
 
   function hydrate(userId){
     if (!validUserId(userId)) return { generation: generation, profile: null, xp: null, chips: null };
-    if (activeUserId !== userId) generation += 1;
+    if (activeUserId !== userId){
+      generation += 1;
+      appliedAt = { profile: 0, xp: 0, chips: 0 };
+    }
     activeUserId = userId;
     var result = { generation: generation, profile: null, xp: null, chips: null };
     ['profile', 'xp', 'chips'].forEach(function(slice){
       var record = read(slice, userId);
-      if (record) result[slice] = record.value;
+      if (record){
+        result[slice] = record.value;
+        appliedAt[slice] = record.confirmedAt;
+      }
     });
     setTopbarState(result.profile || result.xp || result.chips ? 'hydrated' : 'loading');
     return result;
@@ -121,6 +128,7 @@
     if (!Number.isSafeInteger(timestamp) || timestamp < 1) timestamp = Date.now();
     var record = { version: VERSION, userId: userId, slice: slice, confirmedAt: timestamp, value: normalized };
     writeRecord(record);
+    appliedAt[slice] = timestamp;
     setTopbarState('ready');
     emit(record);
     if (channel){ try { channel.postMessage(record); } catch (_err){} }
@@ -133,10 +141,10 @@
     if (store){
       ['profile', 'xp', 'chips'].forEach(function(slice){ try { store.removeItem(key(slice, userId)); } catch (_err){} });
     }
-    if (activeUserId === userId){ activeUserId = null; generation += 1; }
+    if (activeUserId === userId){ activeUserId = null; appliedAt = { profile: 0, xp: 0, chips: 0 }; generation += 1; }
   }
 
-  function setAnonymous(){ activeUserId = null; generation += 1; setTopbarState('anonymous'); }
+  function setAnonymous(){ activeUserId = null; appliedAt = { profile: 0, xp: 0, chips: 0 }; generation += 1; setTopbarState('anonymous'); }
 
   function markRefreshFailed(userId, expectedGeneration, hasCachedValue){
     if (!isCurrent(userId, expectedGeneration)) return;
@@ -154,10 +162,11 @@
     var normalized = normalize(record.slice, record.value);
     var confirmedAt = Number(record.confirmedAt);
     if (!normalized || !Number.isSafeInteger(confirmedAt) || confirmedAt < 1) return;
-    var current = read(record.slice, activeUserId);
-    if (current && current.confirmedAt >= confirmedAt) return;
+    if (appliedAt[record.slice] >= confirmedAt) return;
     var accepted = { version: VERSION, userId: activeUserId, slice: record.slice, confirmedAt: confirmedAt, value: normalized };
     writeRecord(accepted);
+    appliedAt[record.slice] = confirmedAt;
+    setTopbarState('ready');
     emit(accepted);
   }
 
