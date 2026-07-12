@@ -940,10 +940,7 @@
     throw new Error("Server calc failed: exhausted retries");
   }
 
-  /**
-   * Unified postWindow that routes to server calc or legacy endpoint
-   * based on configuration
-   */
+  // Compatibility alias; all supported windows use server calculation.
   async function postWindowAuto(payload, options) {
     return postWindowServerCalc(payload, options);
   }

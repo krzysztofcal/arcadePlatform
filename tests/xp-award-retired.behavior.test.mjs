@@ -4,8 +4,8 @@ import test from "node:test";
 process.env.XP_TEST_MODE = "1";
 const { handler } = await import("../netlify/functions/award-xp.mjs");
 
-const invoke = async (body) => {
-  const response = await handler({ httpMethod: "POST", headers: {}, body: JSON.stringify(body) });
+const invoke = async (body, headers = {}) => {
+  const response = await handler({ httpMethod: "POST", headers, body: JSON.stringify(body) });
   return { response, payload: JSON.parse(response.body) };
 };
 
@@ -14,6 +14,17 @@ test("legacy client-provided awards are retired without mutating XP", async () =
   assert.equal(response.statusCode, 410);
   assert.equal(payload.error, "legacy_award_retired");
   assert.equal(payload.endpoint, "/.netlify/functions/calculate-xp");
+  assert.equal(Object.hasOwn(payload, "awarded"), false);
+});
+
+test("legacy award with an invalid bearer token returns unauthorized before retirement status", async () => {
+  const { response, payload } = await invoke(
+    { userId: "legacy-user", sessionId: "legacy-session", delta: 300, ts: Date.now() },
+    { authorization: "Bearer invalid-token" },
+  );
+  assert.equal(response.statusCode, 401);
+  assert.equal(payload.error, "unauthorized");
+  assert.equal(Object.hasOwn(payload, "endpoint"), false);
   assert.equal(Object.hasOwn(payload, "awarded"), false);
 });
 

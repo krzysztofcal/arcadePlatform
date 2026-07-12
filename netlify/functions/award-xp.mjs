@@ -40,18 +40,18 @@ export async function handler(event) {
   try { body = event.body ? JSON.parse(event.body) : {}; }
   catch { return response(400, { error: "bad_json" }, origin); }
 
+  const token = extractBearerToken(event.headers);
+  const authContext = await verifySupabaseJwt(token);
+  if (token && !authContext.valid) {
+    return response(401, { error: "unauthorized", message: authContext.reason || "invalid_token" }, origin);
+  }
+
   if (body.statusOnly !== true) {
     return response(410, {
       error: "legacy_award_retired",
       message: "Client-provided XP awards are no longer supported.",
       endpoint: "/.netlify/functions/calculate-xp",
     }, origin);
-  }
-
-  const token = extractBearerToken(event.headers);
-  const authContext = await verifySupabaseJwt(token);
-  if (token && !authContext.valid) {
-    return response(401, { error: "unauthorized", message: authContext.reason || "invalid_token" }, origin);
   }
 
   const rawAnonId = typeof body.anonId === "string" ? body.anonId : body.userId;
