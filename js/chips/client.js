@@ -191,10 +191,17 @@
   }
 
   async function fetchBalance(){
+    var ui = window.UserUiState;
+    var uiContext = ui && typeof ui.getActiveContext === 'function' ? ui.getActiveContext() : null;
     var payload = await authedFetchWithRetry(BALANCE_URL, { method: 'GET' });
     if (payload && payload.data){
       var parsed = toNumber(payload.data.balance);
       if (parsed != null){ payload.data.balance = parsed; }
+    }
+    if (payload && payload.data && Number.isSafeInteger(payload.data.balance) && payload.data.balance >= 0){
+      if (uiContext && ui && typeof ui.isCurrent === 'function' && ui.isCurrent(uiContext.userId, uiContext.generation)){
+        ui.publish(uiContext.userId, 'chips', { balance: payload.data.balance }, Date.now());
+      }
     }
     emit('chips:balance', payload.data);
     return payload.data;
