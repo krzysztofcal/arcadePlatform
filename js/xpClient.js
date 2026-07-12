@@ -38,8 +38,6 @@
     awardSessionId: null,
   };
 
-  let serverCalcInitRequested = false;
-
   function isDiagEnabled() {
     if (typeof window === "undefined" || !window) return false;
     if (window.XP_DIAG) return true;
@@ -50,57 +48,6 @@
     } catch (_) {}
     return false;
   }
-
-  function hostShouldUseServerCalc(win) {
-    const host = win && win.location && win.location.hostname;
-    if (!host) return false;
-    if (host === "localhost" || host === "127.0.0.1") return true;
-    if (host === "play.kcswh.pl" || host === "landing.kcswh.pl") return true;
-    if (typeof host === "string" && host.endsWith(".netlify.app")) return true;
-    return false;
-  }
-
-  function ensureServerCalcInit() {
-    if (typeof window === "undefined") return;
-
-    if (!serverCalcInitRequested && typeof window.XP_SERVER_CALC === "undefined") {
-      window.XP_SERVER_CALC = hostShouldUseServerCalc(window);
-    }
-
-    if (window.XpServerCalc && typeof window.XpServerCalc.initServerCalc === "function") {
-      try {
-        window.XpServerCalc.initServerCalc(window, typeof document !== "undefined" ? document : undefined, {});
-      } catch (_) {}
-      return;
-    }
-
-    if (serverCalcInitRequested) return;
-    serverCalcInitRequested = true;
-
-    if (typeof document === "undefined" || !document || typeof document.createElement !== "function") {
-      serverCalcInitRequested = false;
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = "/js/xp/server-calc.js";
-    script.async = true;
-    script.onload = function () {
-      serverCalcInitRequested = false;
-      if (window.XpServerCalc && typeof window.XpServerCalc.initServerCalc === "function") {
-        try {
-          window.XpServerCalc.initServerCalc(window, document, {});
-        } catch (_) {}
-      }
-    };
-    script.onerror = function () {
-      serverCalcInitRequested = false;
-    };
-
-    (document.head || document.body || document.documentElement).appendChild(script);
-  }
-
-  ensureServerCalcInit();
 
   function klog(kind, data) {
     if (typeof window === "undefined") return;
@@ -748,10 +695,6 @@
     else if (Number.isFinite(payload.cap)) setClientCap(Number(payload.cap));
   }
 
-  async function postWindow(payload, options) {
-    return postWindowServerCalc(payload, options);
-  }
-
   async function fetchStatus() {
     const { userId, sessionId } = ensureIds();
     const body = { anonId: userId, sessionId, operation: "status" };
@@ -794,13 +737,6 @@
       klog("xp_refresh_error", { message: err && err.message ? String(err.message) : "error" });
       return null;
     }
-  }
-
-  /**
-   * Check if server-side XP calculation is enabled
-   */
-  function isServerCalcEnabled() {
-    return true;
   }
 
   /**
@@ -940,16 +876,8 @@
     throw new Error("Server calc failed: exhausted retries");
   }
 
-  // Compatibility alias; all supported windows use server calculation.
-  async function postWindowAuto(payload, options) {
-    return postWindowServerCalc(payload, options);
-  }
-
   window.XPClient = {
-    postWindow,
     postWindowServerCalc,
-    postWindowAuto,
-    isServerCalcEnabled,
     fetchStatus,
     refreshBadgeFromServer,
     startServerSession,

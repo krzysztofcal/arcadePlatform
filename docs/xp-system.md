@@ -49,16 +49,16 @@ The helper survives soft navigations—if you’re swapping views inside an SPA,
 - Metadata excludes core identifiers (`userId`, `sessionId`, `delta`, `ts`) automatically and still flows when `localStorage` or `crypto.randomUUID` are blocked (private browsing fallbacks).
 
 ## XPClient contract
-- `XPClient.postWindow(payload)` returns the parsed success payload on `2xx` responses.
+- `XPClient.postWindowServerCalc(payload)` is the only gameplay award transport and returns the parsed success payload on `2xx` responses.
 - The helper throws an `Error` on non-`2xx` HTTP responses (for example `422 delta_out_of_range`, `500`) and on transport failures. The error message includes the server-provided `error` field when available.
 - Callers must wrap invocations in `try/catch` if they need to handle failures gracefully.
 
 ## Daily XP Cap (03:00 Europe/Warsaw)
 - Users can earn up to **3000 XP** between consecutive 03:00 Europe/Warsaw instants (handles CET/CEST automatically). Responses include `nextReset` (epoch ms) so clients can render countdowns or pause scheduling until the boundary passes.
-- The `xp_day` cookie stores `{ k: <dayKey>, t: <awardedToday> }`, is signed with `XP_DAILY_SECRET`, and expires exactly at the next reset. Deleting the cookie simply causes the server to reissue the authoritative totals on the next award.
+- Daily and lifetime totals are enforced atomically in Redis. Clearing browser cookies or local storage does not reset authenticated account XP.
 - `window.XP.getRemainingDaily()` and `window.XP.getNextResetEpoch()` expose the live allowance for UI surfaces, while the runtime automatically resets the cached totals once the stored `nextReset` elapses.
 - `XP.addScore()` and the `GameXpBridge` flush path pre-clamp outgoing deltas based on the server-advertised `remaining` value and emit `award_preclamp` / `award_skip { reason: 'daily_cap' }` diagnostics so operators can confirm when the cap halts awards.
 
 ## Retired compatibility contract
 
-`XPClient.postWindow()` and `postWindowAuto()` now delegate to `postWindowServerCalc()`. No browser code sends a client-authoritative XP delta. `award-xp statusOnly` remains read-only for one compatibility cycle; any other request receives `410 legacy_award_retired` and cannot mutate XP.
+The former `XPClient.postWindow()`, `postWindowAuto()`, server-calculation feature flags, and duplicate `XpServerCalc` module have been removed. No browser code sends a client-authoritative XP delta. `award-xp statusOnly` remains read-only for one compatibility cycle; any other request receives `410 legacy_award_retired` and cannot mutate XP.
