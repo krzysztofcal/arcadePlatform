@@ -256,6 +256,17 @@
     node.style.backgroundImage = uploaded ? 'url("' + avatar.url.replace(/["\\]/g, '') + '")' : '';
   }
 
+  function setUserUiState(value){
+    try {
+      var bars = doc.querySelectorAll('.topbar');
+      for (var i = 0; i < bars.length; i++) bars[i].setAttribute('data-user-ui-state', value);
+    } catch (_err){}
+  }
+
+  function userUiState(){
+    return window.UserUiState && typeof window.UserUiState.hydrate === 'function' ? window.UserUiState : null;
+  }
+
   function selectNodes(){
     nodes.shell = doc.getElementById('avatarShell');
     nodes.button = doc.getElementById('avatarButton');
@@ -305,7 +316,7 @@
     }
   }
 
-  function refreshProfile(user){
+  function refreshProfile(user, uiGeneration, hadCachedProfile){
     if (!user) return;
     var load = window.ProfileClient && typeof window.ProfileClient.getMe === 'function'
       ? window.ProfileClient.getMe()
@@ -317,10 +328,34 @@
         });
       });
     load.then(function(profile){
-      if (state.user && state.user.id === user.id) renderUser(user, profile);
+      var ui = userUiState();
+      if (!state.user || state.user.id !== user.id || (ui && !ui.isCurrent(user.id, uiGeneration))) return;
+      if (ui) ui.publish(user.id, 'profile', profile, Date.now());
+      else setUserUiState('ready');
+      renderUser(user, profile);
     }).catch(function(error){
+      var ui = userUiState();
+      if (ui) ui.markRefreshFailed(user.id, uiGeneration, !!hadCachedProfile);
+      else setUserUiState(hadCachedProfile ? 'stale' : 'loading');
       logDiag('profile:topbar_load_failed', { code: error && error.code ? error.code : 'request_failed' });
     });
+  }
+
+  function applyResolvedUser(user){
+    var previousUserId = state.user && state.user.id ? String(state.user.id) : null;
+    var ui = userUiState();
+    if (!user || !user.id){
+      if (ui && previousUserId) ui.clearUser(previousUserId);
+      if (ui) ui.setAnonymous(); else setUserUiState('anonymous');
+      renderUser(null, null);
+      return;
+    }
+    var userId = String(user.id);
+    if (ui && previousUserId && previousUserId !== userId) ui.clearUser(previousUserId);
+    var hydrated = ui ? ui.hydrate(userId) : { generation: 0, profile: null };
+    if (!ui) setUserUiState('loading');
+    renderUser(user, hydrated.profile || null);
+    refreshProfile(user, hydrated.generation, !!hydrated.profile);
   }
 
   function toggleMenu(force){
@@ -425,7 +460,19 @@
     if (nodes.menuAction){ nodes.menuAction.addEventListener('click', handleAction); }
     if (nodes.menuUser){ nodes.menuUser.addEventListener('click', handleMenuUserClick); }
     doc.addEventListener('langchange', function(){ renderUser(state.user, state.profile); });
-    doc.addEventListener('profile:updated', function(event){ if (state.user) renderUser(state.user, event && event.detail ? event.detail : state.profile); });
+    doc.addEventListener('profile:updated', function(event){
+      if (!state.user) return;
+      var profile = event && event.detail ? event.detail : state.profile;
+      var ui = userUiState();
+      if (ui && profile) ui.publish(String(state.user.id), 'profile', profile, Date.now());
+      renderUser(state.user, profile);
+    });
+    var ui = userUiState();
+    if (ui && typeof ui.onChange === 'function'){
+      ui.onChange(function(detail){
+        if (state.user && detail && detail.slice === 'profile' && detail.userId === String(state.user.id)) renderUser(state.user, detail.value);
+      });
+    }
 
     renderUser(state.user);
   }
@@ -434,14 +481,12 @@
     renderUser(null, null);
 
     getCurrentUser().then(function(user){
-      renderUser(user, null);
-      refreshProfile(user);
+      applyResolvedUser(user);
     });
 
     onAuthChange(function(_event, user){
       if (window.ProfileClient && typeof window.ProfileClient.clear === 'function') window.ProfileClient.clear();
-      renderUser(user, null);
-      refreshProfile(user);
+      applyResolvedUser(user);
     });
   }
 

@@ -130,7 +130,7 @@ test("topbar derives its visible signed-in identity from the public profile", as
   const [source, accountSource] = await Promise.all([read("js/auth/supabaseClient.js"), read("js/account-page.js")]);
   assert.match(source, /name = profile && profile\.displayName \? profile\.displayName : t\('player'/);
   assert.match(source, /email = t\('profileAccountSynced'/);
-  assert.match(source, /refreshProfile\(user\)/);
+  assert.match(source, /refreshProfile\(user, hydrated\.generation/);
   assert.match(source, /avatar\.type === 'uploaded'/);
   assert.match(source, /classList\.toggle\('profile-avatar--uploaded', !!uploaded\)/);
   assert.match(source, /style\.backgroundImage = uploaded/);
@@ -145,9 +145,12 @@ test("every HTML page with a topbar loads the shared auth avatar bridge first", 
   assert.ok(files.length > 30, "expected the full topbar page inventory");
   for (const { file, source } of files){
     const authIndex = source.indexOf("/js/auth/supabaseClient.js");
+    const userUiIndex = source.indexOf("/js/user-ui-state.js");
     const topbarIndex = Math.max(source.indexOf("/js/topbar.js"), source.indexOf('src="js/topbar.js"'));
     assert.match(source, /(?:\/|\b)css\/portal\.css/, `${file} must load uploaded-avatar styles`);
-    assert.ok(authIndex >= 0, `${file} must load the shared auth avatar bridge`);
+    assert.match(source, /class="topbar"[^>]*data-user-ui-state="pending"/, `${file} must start pending before first paint`);
+    assert.ok(userUiIndex >= 0, `${file} must load user UI state`);
+    assert.ok(authIndex > userUiIndex, `${file} must load user UI state before auth`);
     assert.ok(topbarIndex > authIndex, `${file} must load auth before topbar`);
   }
 });
