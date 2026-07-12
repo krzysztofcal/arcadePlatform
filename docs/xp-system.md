@@ -9,7 +9,7 @@ This document preserves the XP-related technical details that previously lived i
 
 ## Authoritative award path and identity
 
-- Gameplay XP is awarded through `/.netlify/functions/calculate-xp`. `award-xp` remains the status/legacy compatibility endpoint and must not be used by new playable integrations.
+- Gameplay XP is awarded and canonical XP status is read through `/.netlify/functions/calculate-xp`. `operation: "status"` is read-only with respect to daily, session, and lifetime counters and does not register, touch, or generate an award session. `award-xp` remains only as a legacy compatibility adapter and must not be used by supported clients.
 - The XP badge and `+N XP` overlay animate only after `calculate-xp` returns a positive authoritative `awarded` value. Status reads, auth refreshes, focus changes, cache hydration, zero awards, and rejected windows update state without award animation.
 - `calculate-xp`, `award-xp`, and `start-session` must use the shared Supabase auth verifier from `_shared/supabase-admin.mjs`. This keeps HS256/HS512 and Supabase ES256 remote verification aligned with profile, chips, and poker APIs. A request without Authorization may use the browser anon id; a request that supplies an invalid Bearer token fails with `401` and must never fall back to anonymous XP.
 - Both award endpoints share XP policy values (`XP_DAILY_CAP`, `XP_SESSION_CAP`, `XP_DELTA_CAP`, `XP_SESSION_TTL_SEC`) and identity resolution: a valid Supabase JWT subject wins over the browser anon id.
@@ -20,7 +20,7 @@ This document preserves the XP-related technical details that previously lived i
 
 ## Legacy local XP synchronization
 
-The old `kcswh:xp:last` and `kcswh:xp:regen` entries are not an account ledger. They can contain an optimistic or anonymous value from one browser and are never accepted as authenticated XP. On a non-game page with an authenticated session, `XPClient` sends a `statusOnly` request with the Supabase bearer token, applies the canonical server `totalLifetime`, and then removes those legacy entries. If the defensively parsed legacy value is greater than the server total, the user sees a localized non-blocking notice once per Supabase user and browser under `kcswh:xp:server-migration-notice:v1:<userId>`. A status/network failure does not force `0 XP`, delete the legacy entries, or set the notice marker. The public profile uses the same canonical server total and does not read browser storage.
+The old `kcswh:xp:last` and `kcswh:xp:regen` entries are not an account ledger. They can contain an optimistic or anonymous value from one browser and are never accepted as authenticated XP. On a non-game page with an authenticated session, `XPClient` sends `operation: "status"` to `calculate-xp` with the Supabase bearer token, applies the canonical server `totalLifetime`, and then removes those legacy entries. If the defensively parsed legacy value is greater than the server total, the user sees a localized non-blocking notice once per Supabase user and browser under `kcswh:xp:server-migration-notice:v1:<userId>`. A status/network failure does not force `0 XP`, delete the legacy entries, or set the notice marker. The public profile uses the same canonical server total and does not read browser storage.
 
 ## GameXpBridge API
 `js/xp-game-hook.js` exposes a `window.GameXpBridge` helper so every game page can wire into the XP service without duplicating lifecycle code.
@@ -60,7 +60,7 @@ The helper survives soft navigations—if you’re swapping views inside an SPA,
 - `XP.addScore()` and the `GameXpBridge` flush path pre-clamp outgoing deltas based on the server-advertised `remaining` value and emit `award_preclamp` / `award_skip { reason: 'daily_cap' }` diagnostics so operators can confirm when the cap halts awards.
 
 ## Legacy compatibility contract: `postWindow`
-`postWindow` targets `award-xp` and is retained for status/legacy callers. New gameplay windows use `postWindowServerCalc` and `calculate-xp` instead.
+`postWindow` targets `award-xp` and is retained only for legacy delta callers. Status reads and new gameplay windows use `calculate-xp`.
 Client → server payload (minimal set, extras allowed):
 - `userId` (string)
 - `sessionId` (string)

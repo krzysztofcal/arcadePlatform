@@ -149,6 +149,8 @@ Exit criteria:
 
 Objective: make reads and writes enter through the same authoritative endpoint.
 
+Implementation status: `XPClient.fetchStatus()` now sends `operation: "status"` to `calculate-xp`. The authoritative status branch runs after identity resolution and optional idempotent anonymous conversion, but before award rate limiting, signed-session validation/touch, gameplay validation, or scoring. `award-xp statusOnly` remains the temporary mutating compatibility adapter described below.
+
 Work:
 
 - Add explicit `operation: "status"` handling to `calculate-xp`.

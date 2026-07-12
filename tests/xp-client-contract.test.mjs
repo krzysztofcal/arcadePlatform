@@ -42,7 +42,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
   {
     const XPClient = await loadClientWithFetch(async (_url, opts) => {
       const body = opts?.body ? JSON.parse(opts.body) : {};
-      if (body.statusOnly) return response(200, { ok: true, status: 'statusOnly' });
+      if (body.operation === 'status') return response(200, { ok: true, status: 'statusOnly' });
       return response(200, { ok: true, awarded: 10, totalToday: 10, sessionTotal: 10, lastSync: body.ts, cap: 400, capDelta: 240 });
     });
     const res = await XPClient.postWindow({ delta: 10, ts: 111 });
@@ -86,8 +86,8 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
   {
     let applied = null;
     const calls = [];
-    const XPClient = await loadClientWithFetch(async (_url, opts) => {
-      calls.push(JSON.parse(opts?.body || '{}'));
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      calls.push({ url, body: JSON.parse(opts?.body || '{}') });
       return response(200, { ok: true, status: 'statusOnly', totalLifetime: 777, cap: 10 });
     }, {
       window: {
@@ -100,7 +100,9 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     });
     await XPClient.refreshBadgeFromServer({ bumpBadge: true });
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].statusOnly, true);
+    assert.equal(calls[0].url, '/.netlify/functions/calculate-xp');
+    assert.equal(calls[0].body.operation, 'status');
+    assert.equal(calls[0].body.statusOnly, undefined);
     assert.equal(applied.payload.totalLifetime, 777);
     assert.equal(applied.meta.source, 'status');
     assert.equal(applied.meta.bump, undefined);
@@ -111,7 +113,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     const awardCalls = [];
     const XPClient = await loadClientWithFetch(async (url, opts) => {
       const body = JSON.parse(opts?.body || '{}');
-      if (body.statusOnly) return response(200, { ok: true, status: 'statusOnly' });
+      if (body.operation === 'status') return response(200, { ok: true, status: 'statusOnly' });
       if (url === '/.netlify/functions/calculate-xp') {
         awardCalls.push(body);
         return response(200, {

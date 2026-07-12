@@ -50,7 +50,7 @@ async function fetchStub(url, options = {}) {
   }
 
   const body = options.body ? JSON.parse(options.body) : {};
-  if (body.statusOnly) {
+  if (body.operation === "status") {
     statusBootstraps += 1;
     return response(200, { ok: true, status: 'statusOnly', totalToday: 0, totalLifetime: 0, sessionTotal: 0, lastSync: 0, cap: 400, capDelta: 240 });
   }

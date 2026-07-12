@@ -176,7 +176,8 @@ function status(totalLifetime) {
   assert.equal(result.storage.get(noticeKey("user-a")), "1");
   assert.equal(result.requests[0].options.headers.Authorization, "Bearer stage-jwt");
   const requestBody = JSON.parse(result.requests[0].options.body);
-  assert.equal(requestBody.statusOnly, true);
+  assert.equal(requestBody.operation, "status");
+  assert.equal(Object.hasOwn(requestBody, "statusOnly"), false);
   assert.equal(Object.hasOwn(requestBody, "totalLifetime"), false);
   assert.equal(Object.hasOwn(requestBody, "serverTotalXp"), false);
   assert.equal(result.applied[0].meta.allowServerRegression, true);

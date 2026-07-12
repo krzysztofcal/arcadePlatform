@@ -3,7 +3,7 @@
 
 ## Implemented behavior
 
-The authoritative gameplay endpoint is `calculate-xp`. Both it and the `award-xp` status endpoint run the same conversion helper before reading or awarding authenticated totals.
+The authoritative XP endpoint is `calculate-xp`. Its `operation: "status"` and award path run the same conversion helper before reading or awarding authenticated totals. The temporary `award-xp statusOnly` compatibility adapter uses the same helper and status projection until that adapter is retired.
 
 - A valid Supabase JWT subject is the destination account; the browser anon id is the source.
 - Conversion atomically transfers `min(anon lifetime XP, XP_ANON_CONVERSION_MAX_XP)`.

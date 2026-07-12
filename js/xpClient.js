@@ -937,13 +937,13 @@
 
   async function fetchStatus() {
     const { userId, sessionId } = ensureIds();
-    const body = { userId, sessionId, gameId: "status", statusOnly: true };
+    const body = { anonId: userId, sessionId, operation: "status" };
     const authToken = await ensureAuthTokenWithRetry();
     if (!authToken && await isUserLoggedIn()) {
       throw new Error("XP status requires an authenticated token");
     }
     const headers = await buildAuthHeaders({ "content-type": "application/json" });
-    const res = await fetch(FN_URL, {
+    const res = await fetch(CALC_URL, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
