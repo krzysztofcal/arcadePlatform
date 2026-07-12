@@ -19,6 +19,11 @@ async function mockAuthenticatedSession(page) {
       } }; } };
     `,
   }));
+  await page.route('**/.netlify/functions/chips-balance', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ balance: 896 }),
+  }));
 }
 
 const profile = () => ({
@@ -52,6 +57,8 @@ test.describe('authenticated topbar profile avatar', () => {
       await expect(avatar).toHaveText('');
       await expect(menuAvatar).toHaveClass(/profile-avatar--uploaded/);
       await expect(menuAvatar).toHaveCSS('background-image', `url("${AVATAR_URL}")`);
+      await expect(page.locator('.topbar')).toHaveAttribute('data-user-ui-chips-state', 'ready');
+      await expect(page.locator('#chipBadgeAmount')).toHaveText('896');
     });
   }
 

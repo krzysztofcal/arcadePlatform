@@ -96,6 +96,8 @@ const profileRecord = (userId, displayName, confirmedAt = Date.now()) => JSON.st
   assert.equal(value.displayName, 'Confirmed User');
   assert.equal(state.topbar.state, 'ready');
   assert.equal(state.values.has('kcswh:user-ui:profile:v1:user-a'), true);
+  assert.equal(state.api.markActiveSliceApplied('chips', 'ready'), true);
+  assert.equal(state.topbar.attributes['data-user-ui-chips-state'], 'ready');
   state.api.clearUser('user-a');
   assert.equal(state.values.has('kcswh:user-ui:profile:v1:user-a'), false);
   assert.equal(state.api.isCurrent('user-a', hydrated.generation), false);

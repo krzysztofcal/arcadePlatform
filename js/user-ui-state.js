@@ -167,6 +167,11 @@
     return setSliceState(slice, value);
   }
 
+  function markActiveSliceApplied(slice, value){
+    if (!activeUserId) return false;
+    return setSliceState(slice, value);
+  }
+
   function markRefreshFailed(userId, expectedGeneration, hasCachedValue){
     if (!isCurrent(userId, expectedGeneration)) return;
     setSliceState('profile', hasCachedValue ? 'stale' : 'loading');
@@ -209,6 +214,6 @@
     if (parsed && parsed.userId === userId) acceptExternal(parsed);
   });
 
-  window.UserUiState = { hydrate: hydrate, publish: publish, clearUser: clearUser, setAnonymous: setAnonymous, isCurrent: isCurrent, markSliceApplied: markSliceApplied, markRefreshFailed: markRefreshFailed, onChange: onChange };
+  window.UserUiState = { hydrate: hydrate, publish: publish, clearUser: clearUser, setAnonymous: setAnonymous, isCurrent: isCurrent, markSliceApplied: markSliceApplied, markActiveSliceApplied: markActiveSliceApplied, markRefreshFailed: markRefreshFailed, onChange: onChange };
   klog('user_ui_state_ready', { version: VERSION });
 })();

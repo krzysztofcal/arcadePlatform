@@ -146,12 +146,14 @@ test("every HTML page with a topbar loads the shared auth avatar bridge first", 
   for (const { file, source } of files){
     const authIndex = source.indexOf("/js/auth/supabaseClient.js");
     const userUiIndex = source.indexOf("/js/user-ui-state.js");
+    const chipsIndex = Math.max(source.indexOf("/js/chips/client.js"), source.indexOf('src="js/chips/client.js"'));
     const topbarIndex = Math.max(source.indexOf("/js/topbar.js"), source.indexOf('src="js/topbar.js"'));
     assert.match(source, /(?:\/|\b)css\/portal\.css/, `${file} must load uploaded-avatar styles`);
     assert.match(source, /class="topbar"[^>]*data-user-ui-state="pending"/, `${file} must start pending before first paint`);
     assert.match(source, /class="topbar"[^>]*data-user-ui-profile-state="pending"[^>]*data-user-ui-xp-state="pending"[^>]*data-user-ui-chips-state="pending"/, `${file} must start every user UI slice pending`);
     assert.ok(userUiIndex >= 0, `${file} must load user UI state`);
     assert.ok(authIndex > userUiIndex, `${file} must load user UI state before auth`);
-    assert.ok(topbarIndex > authIndex, `${file} must load auth before topbar`);
+    assert.ok(chipsIndex > authIndex, `${file} must load the chips client after auth`);
+    assert.ok(topbarIndex > chipsIndex, `${file} must load the chips client before topbar`);
   }
 });
