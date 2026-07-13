@@ -134,6 +134,45 @@ test("missing or corrupt lifetime XP fails instead of fabricating level one", as
   }), { code: "leaderboard_projection_inconsistent", status: 503 });
 });
 
+test("Redis range, lifetime MGET, and profile SQL failures stay non-cacheable 503", async () => {
+  const periods = getXpLeaderboardPeriods(NOW);
+  const keys = createXpLeaderboardKeys({ namespace: NAMESPACE });
+  const scenarios = [];
+
+  const rangeStore = await seededStore();
+  rangeStore.zrevrangeWithScores = async () => { throw new Error("redis range unavailable"); };
+  scenarios.push({ store: rangeStore, period: "all_time", readProfiles });
+
+  const lifetimeStore = await seededStore();
+  await lifetimeStore.zadd(keys.day(periods.dayKey), 10, USER_A);
+  lifetimeStore.mget = async () => { throw new Error("redis mget unavailable"); };
+  scenarios.push({ store: lifetimeStore, period: "today", readProfiles });
+
+  const profileStore = await seededStore();
+  scenarios.push({
+    store: profileStore,
+    period: "all_time",
+    readProfiles: async () => { throw new Error("profile sql unavailable"); },
+  });
+
+  for (const scenario of scenarios) {
+    const handler = createXpLeaderboardHandler({
+      leaderboardEnabled: () => true,
+      allowLeaderboardRead: async () => true,
+      readLeaderboardPage: (options) => readLeaderboardPage(options, {
+        store: scenario.store,
+        namespace: NAMESPACE,
+        nowMs: NOW,
+        readProfiles: scenario.readProfiles,
+      }),
+    });
+    const response = await handler(event({ period: scenario.period }));
+    assert.equal(response.statusCode, 503);
+    assert.equal(response.headers["cache-control"], "no-store");
+    assert.deepEqual(body(response), { error: "leaderboard_unavailable" });
+  }
+});
+
 test("authenticated me uses the same public projection and competition rank", async () => {
   const store = await seededStore();
   const result = await readLeaderboardMe({ period: "all_time" }, USER_B, {
