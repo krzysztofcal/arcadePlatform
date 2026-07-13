@@ -2847,6 +2847,7 @@
     if (isGuestMode){
       currentAccessToken = null;
       startLiveMode(currentGuestSession.token);
+      startAuthWatch();
       return;
     }
     if (readGuestMode()){

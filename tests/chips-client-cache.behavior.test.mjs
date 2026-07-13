@@ -8,6 +8,10 @@ function response(balance){
   return { status: 200, ok: true, async json(){ return { balance }; } };
 }
 
+function jsonResponse(body){
+  return { status: 200, ok: true, async json(){ return body; } };
+}
+
 function createClient(fetchImpl){
   const published = [];
   const events = [];
@@ -63,6 +67,37 @@ function createClient(fetchImpl){
   assert.equal(result, null);
   assert.equal(state.published.length, 0);
   assert.equal(state.events.filter((event) => event.type === 'chips:balance').length, 0);
+}
+
+{
+  const requests = [];
+  let claimed = false;
+  const state = createClient(async (url, options) => {
+    requests.push({ url, method: options.method });
+    assert.equal(url, '/.netlify/functions/bonus-campaigns');
+    if (options.method === 'POST'){
+      claimed = true;
+      assert.equal(JSON.parse(options.body).code, 'welcome-2026');
+      return jsonResponse({ claimed: true, code: 'welcome-2026', amount: 500 });
+    }
+    return jsonResponse({
+      items: claimed ? [] : [
+        { code: 'daily-2026', campaignType: 'daily', amount: 20, eligible: true, alreadyClaimed: false },
+        { code: 'welcome-2026', campaignType: 'welcome', amount: 500, eligible: true, alreadyClaimed: false },
+      ],
+    });
+  });
+
+  const before = await state.client.fetchWelcomeBonusStatus();
+  assert.equal(before.code, 'welcome-2026');
+  assert.equal(before.amount, 500);
+  const result = await state.client.claimWelcomeBonus();
+  assert.equal(result.claimed, true);
+  const after = await state.client.fetchWelcomeBonusStatus();
+  assert.equal(after.eligible, false);
+  assert.equal(after.code, null);
+  assert.ok(requests.every((request) => request.url !== '/.netlify/functions/welcome-bonus'));
+  assert.equal(state.events.filter((event) => event.type === 'chips:tx-complete').length, 1);
 }
 
 console.log('chips client cache behavior tests passed');

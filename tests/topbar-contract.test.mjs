@@ -70,7 +70,13 @@ test('topbar ensures chip badge creation when missing', () => {
   assert.match(topbarSource, /welcomeBonusRequestGeneration/);
   assert.match(topbarSource, /invalidateWelcomeBonusBadge/);
   assert.match(topbarSource, /pageTransition/);
+  assert.match(topbarSource, /event\.preventDefault\(\)/);
+  assert.match(topbarSource, /requestAnimationFrame/);
+  assert.match(topbarSource, /location\.assign\(href\)/);
   assert.match(portalCss, /\.page-transition/);
+  assert.match(accountHtml, /id="pageBoot"/);
+  assert.match(accountHtml, /\.page-boot__shell/);
+  assert.match(topbarSource, /pageBoot\.hidden\s*=\s*true/);
 });
 
 test('topbar pages load topbar script', () => {

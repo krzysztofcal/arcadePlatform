@@ -46,7 +46,11 @@
       const remaining = Math.max(0, 180 - (Date.now() - shownAt));
       setTimeout(function(){
         overlay.classList.remove('is-visible');
-        setTimeout(function(){ overlay.hidden = true; }, 220);
+        setTimeout(function(){
+          overlay.hidden = true;
+          const pageBoot = doc.getElementById('pageBoot');
+          if (pageBoot) pageBoot.hidden = true;
+        }, 220);
       }, remaining);
     }
     function isPageNavigation(event, link){
@@ -66,7 +70,18 @@
     doc.addEventListener('click', function(event){
       const target = event.target;
       const link = target && target.closest ? target.closest('a[href]') : null;
-      if (isPageNavigation(event, link)) show();
+      if (!isPageNavigation(event, link)) return;
+      const href = link.href;
+      event.preventDefault();
+      show();
+      const navigate = function(){
+        setTimeout(function(){ win.location.assign(href); }, 90);
+      };
+      if (typeof win.requestAnimationFrame === 'function'){
+        win.requestAnimationFrame(function(){ win.requestAnimationFrame(navigate); });
+      } else {
+        setTimeout(navigate, 32);
+      }
     }, true);
     show();
     if (doc.readyState === 'complete') hide();

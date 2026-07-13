@@ -4,6 +4,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 
+const pokerV2Css = fs.readFileSync(path.join(process.cwd(), 'poker', 'poker-v2.css'), 'utf8');
+
+test('poker v2 CSS respects the hidden state of the guest account badge', () => {
+  assert.match(pokerV2Css, /\.poker-live-pill\[hidden\]\s*\{\s*display\s*:\s*none\s*;?\s*\}/);
+});
+
 function makeElement(id){
   const sceneRect = { left: 0, top: 0, width: 320, height: 640, right: 320, bottom: 640 };
   const style = {
