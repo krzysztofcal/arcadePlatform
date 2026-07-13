@@ -226,6 +226,9 @@
 
   async function fetchLedger(options){
     var params = [];
+    if (options && Number.isInteger(options.page) && options.page > 0){
+      params.push('page=' + encodeURIComponent(options.page));
+    }
     if (options && typeof options.cursor === 'string' && options.cursor){
       params.push('cursor=' + encodeURIComponent(options.cursor));
     }

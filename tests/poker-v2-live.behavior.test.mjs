@@ -241,6 +241,12 @@ function createHarness(options = {}){
   };
   sandbox.window.document = sandbox.document;
   sandbox.window.sessionStorage = sandbox.sessionStorage;
+  if (Object.prototype.hasOwnProperty.call(options, 'authUser')) {
+    sandbox.window.SupabaseAuth = {
+      getCurrentUser: async () => options.authUser,
+      onAuthChange(){ return function(){}; }
+    };
+  }
 
   if (options.guestSession) {
     sandbox.sessionStorage.setItem('poker:guestSession', JSON.stringify(options.guestSession));
@@ -454,6 +460,31 @@ test('poker v2 authenticated user takes precedence over a matching guest session
   assert.equal(harness.elements.xpBadge.hidden, false, 'authenticated user mode should keep the XP badge visible');
   assert.equal(harness.elements.pokerV2GuestBadge.hidden, true, 'authenticated user mode should not show the guest badge');
   assert.equal(harness.elements.pokerV2GuestPanel.hidden, true, 'authenticated user mode should not show the restrictions panel');
+});
+
+test('poker v2 never labels a resolved authenticated user as a guest while its token is pending', async () => {
+  const guestPayload = Buffer.from(JSON.stringify({ sub: 'guest_user_1' })).toString('base64url');
+  const guestToken = `aaa.${guestPayload}.zzz`;
+  const harness = createHarness({
+    search: '?tableId=guest_table_1&guest=1&autoJoin=1',
+    token: null,
+    authUser: { id: 'registered-user-1', email: 'player@example.com' },
+    guestSession: {
+      token: guestToken,
+      tableId: 'guest_table_1',
+      guestId: 'guest_user_1',
+      nickname: 'Guest1234',
+      expiresAt: Date.now() + 3_600_000
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2GuestBadge.hidden, true);
+  assert.equal(harness.elements.pokerV2GuestPanel.hidden, true);
+  assert.equal(harness.elements.xpBadge.hidden, false);
+  assert.equal(harness.getCreateOptions(), null, 'room should wait for the authenticated token instead of opening a guest socket');
 });
 
 test('poker v2 ignores stale guest query when there is no matching guest session', async () => {

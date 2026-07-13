@@ -85,6 +85,32 @@ test('retains cached chips when balance revalidation fails', async ({ page }) =>
   await expect(page.locator('#chipBadgeAmount')).toHaveCSS('visibility', 'visible');
 });
 
+test('does not restore a stale +500 badge after the welcome bonus is claimed', async ({ page }) => {
+  await mockAuthenticatedSession(page);
+  await page.unroute('**/.netlify/functions/welcome-bonus');
+  await page.route('**/.netlify/functions/chips-balance', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ balance: 500 }) }));
+  let releaseStaleStatus;
+  const staleGate = new Promise((resolve) => { releaseStaleStatus = resolve; });
+  let statusRequests = 0;
+  await page.route('**/.netlify/functions/welcome-bonus', async (route) => {
+    statusRequests += 1;
+    if (statusRequests === 1) {
+      await staleGate;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ eligible: true, alreadyClaimed: false, amount: 500 }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ eligible: false, alreadyClaimed: true, amount: 500 }) });
+  });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await expect.poll(() => statusRequests).toBe(1);
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('chips:tx-complete', { detail: { claimed: true, amount: 500 } })));
+  releaseStaleStatus();
+
+  await expect.poll(() => statusRequests).toBe(2);
+  await expect(page.locator('#welcomeBonusTopbarBadge')).toBeHidden();
+});
+
 test('hides account A chips during a direct signed-in switch to account B', async ({ page }) => {
   await mockAuthenticatedSession(page);
   await seedCachedBalance(page, 896);

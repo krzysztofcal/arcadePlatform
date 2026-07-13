@@ -12,6 +12,7 @@
   var publicProfileGeneration = 0;
   var publicProfileSaveResetTimer = null;
   var passwordRecoveryActive = false;
+  var signupConfirmationPending = false;
   var WELCOME_BONUS_SUCCESS = 'Bonus added to your account.';
   var ledgerState = {
     entries: [],
@@ -25,7 +26,9 @@
     lastScrollTop: 0,
     renderQueued: false,
     pageIndex: 0,
-    pageCursors: [null],
+    pageSize: 10,
+    totalRecords: 0,
+    totalPages: 0,
   };
 
   function selectNodes(){
@@ -44,6 +47,9 @@
     nodes.signUpEmail = doc.getElementById('signupEmail');
     nodes.signUpPass = doc.getElementById('signupPassword');
     nodes.signUpPassConfirm = doc.getElementById('signupPasswordConfirm');
+    nodes.signupConfirmation = doc.getElementById('signupConfirmation');
+    nodes.signupConfirmationMessage = doc.getElementById('signupConfirmationMessage');
+    nodes.signupConfirmationBack = doc.getElementById('signupConfirmationBack');
     nodes.forgotPasswordButton = doc.getElementById('forgotPasswordButton');
     nodes.passwordResetForm = doc.getElementById('passwordResetForm');
     nodes.passwordResetEmail = doc.getElementById('passwordResetEmail');
@@ -59,9 +65,13 @@
     nodes.chipLedgerList = doc.getElementById('chipLedgerList');
     nodes.chipLedgerEmpty = doc.getElementById('chipLedgerEmpty');
     nodes.chipLedgerPagination = doc.getElementById('chipLedgerPagination');
+    nodes.chipLedgerFirst = doc.getElementById('chipLedgerFirst');
     nodes.chipLedgerPrev = doc.getElementById('chipLedgerPrev');
     nodes.chipLedgerNext = doc.getElementById('chipLedgerNext');
+    nodes.chipLedgerLast = doc.getElementById('chipLedgerLast');
+    nodes.chipLedgerPages = doc.getElementById('chipLedgerPages');
     nodes.chipLedgerPage = doc.getElementById('chipLedgerPage');
+    nodes.chipLedgerPageSize = doc.getElementById('chipLedgerPageSize');
     nodes.welcomeBonusPanel = doc.getElementById('welcomeBonusPanel');
     nodes.welcomeBonusTitle = doc.getElementById('welcomeBonusTitle');
     nodes.bonusCampaignList = doc.getElementById('bonusCampaignList');
@@ -133,6 +143,28 @@
     nodes.status.hidden = !message;
   }
 
+  function showSignupConfirmation(email){
+    signupConfirmationPending = true;
+    setBlockVisibility(nodes.forms, false);
+    setBlockVisibility(nodes.account, false);
+    setBlockVisibility(nodes.chipPanel, false);
+    setBlockVisibility(nodes.signupConfirmation, true);
+    if (nodes.signupConfirmationMessage){
+      nodes.signupConfirmationMessage.textContent = tf('confirmationEmailSent', { email: email }, 'We sent a confirmation link to {email}.');
+    }
+    if (nodes.signUpPass) nodes.signUpPass.value = '';
+    if (nodes.signUpPassConfirm) nodes.signUpPassConfirm.value = '';
+    setStatus(t('verifyEmail', 'Check your inbox to confirm your email.'), 'success');
+  }
+
+  function closeSignupConfirmation(){
+    signupConfirmationPending = false;
+    setBlockVisibility(nodes.signupConfirmation, false);
+    setBlockVisibility(nodes.forms, true);
+    setStatus('', '');
+    if (nodes.signInEmail) nodes.signInEmail.focus();
+  }
+
   function klog(kind, data){
     try {
       if (window && window.KLog && typeof window.KLog.log === 'function'){
@@ -191,6 +223,10 @@
     var previousUserKey = getUserKey(currentUser);
     var nextUserKey = getUserKey(user);
     currentUser = user || null;
+    if (user){
+      signupConfirmationPending = false;
+      setBlockVisibility(nodes.signupConfirmation, false);
+    }
     if (previousUserKey !== nextUserKey){
       publicProfileGeneration += 1;
       publicProfileInFlight = null;
@@ -198,9 +234,10 @@
     }
 
     // Toggle panels
-    setBlockVisibility(nodes.forms, !hasUser);
+    setBlockVisibility(nodes.forms, !hasUser && !signupConfirmationPending);
     setBlockVisibility(nodes.account, hasUser);
     setBlockVisibility(nodes.chipPanel, hasUser);
+    if (!hasUser && signupConfirmationPending) setBlockVisibility(nodes.signupConfirmation, true);
     setWelcomeBonusVisibility(false);
 
     if (!hasUser){
@@ -602,6 +639,7 @@
   function getLedgerTailState(){
     if (ledgerState.loading){ return 'loading'; }
     if (ledgerState.error){ return 'error'; }
+    if (nodes.chipLedgerPagination) return null;
     if (!ledgerState.hasMore && ledgerState.entries.length){ return 'end'; }
     return null;
   }
@@ -657,16 +695,56 @@
     ledgerState.lastScrollTop = 0;
     ledgerState.renderQueued = false;
     ledgerState.pageIndex = 0;
-    ledgerState.pageCursors = [null];
+    ledgerState.totalRecords = 0;
+    ledgerState.totalPages = 0;
     if (nodes.chipLedgerScroll){ nodes.chipLedgerScroll.scrollTop = 0; }
+  }
+
+  function ledgerPageNumbers(){
+    var total = ledgerState.totalPages;
+    var current = ledgerState.pageIndex + 1;
+    var selected = {};
+    [1, total, current - 2, current - 1, current, current + 1, current + 2].forEach(function(page){
+      if (page >= 1 && page <= total) selected[page] = true;
+    });
+    return Object.keys(selected).map(Number).sort(function(a, b){ return a - b; });
+  }
+
+  function renderLedgerPageLinks(){
+    if (!nodes.chipLedgerPages) return;
+    nodes.chipLedgerPages.innerHTML = '';
+    var pages = ledgerPageNumbers();
+    var previous = 0;
+    pages.forEach(function(page){
+      if (previous && page - previous > 1){
+        var gap = doc.createElement('span');
+        gap.textContent = '…';
+        gap.setAttribute('aria-hidden', 'true');
+        nodes.chipLedgerPages.appendChild(gap);
+      }
+      var button = doc.createElement('button');
+      button.type = 'button';
+      button.textContent = String(page);
+      button.dataset.page = String(page);
+      button.setAttribute('aria-label', tf('chipHistoryPage', { page: page, totalPages: ledgerState.totalPages }, 'Page {page} of {totalPages}'));
+      if (page === ledgerState.pageIndex + 1) button.setAttribute('aria-current', 'page');
+      button.disabled = ledgerState.loading || page === ledgerState.pageIndex + 1;
+      button.addEventListener('click', function(){ loadLedgerPage(page - 1); });
+      nodes.chipLedgerPages.appendChild(button);
+      previous = page;
+    });
   }
 
   function renderLedgerPagination(){
     if (!nodes.chipLedgerPagination) return;
-    nodes.chipLedgerPagination.hidden = ledgerState.entries.length === 0 && !ledgerState.loading;
+    nodes.chipLedgerPagination.hidden = ledgerState.totalRecords === 0 && !ledgerState.loading;
+    if (nodes.chipLedgerFirst) nodes.chipLedgerFirst.disabled = ledgerState.loading || ledgerState.pageIndex === 0;
     if (nodes.chipLedgerPrev) nodes.chipLedgerPrev.disabled = ledgerState.loading || ledgerState.pageIndex === 0;
-    if (nodes.chipLedgerNext) nodes.chipLedgerNext.disabled = ledgerState.loading || !ledgerState.nextCursor;
-    if (nodes.chipLedgerPage) nodes.chipLedgerPage.textContent = tf('chipHistoryPage', { page: ledgerState.pageIndex + 1 }, 'Page {page}');
+    if (nodes.chipLedgerNext) nodes.chipLedgerNext.disabled = ledgerState.loading || ledgerState.totalPages === 0 || ledgerState.pageIndex >= ledgerState.totalPages - 1;
+    if (nodes.chipLedgerLast) nodes.chipLedgerLast.disabled = ledgerState.loading || ledgerState.totalPages === 0 || ledgerState.pageIndex >= ledgerState.totalPages - 1;
+    if (nodes.chipLedgerPage) nodes.chipLedgerPage.textContent = tf('chipHistoryPage', { page: ledgerState.pageIndex + 1, totalPages: Math.max(ledgerState.totalPages, 1) }, 'Page {page} of {totalPages}');
+    if (nodes.chipLedgerPageSize) nodes.chipLedgerPageSize.value = String(ledgerState.pageSize);
+    renderLedgerPageLinks();
   }
 
   function appendLedgerItems(items, nextCursor){
@@ -749,7 +827,7 @@
     if (!window || !window.ChipsClient || typeof window.ChipsClient.fetchLedger !== 'function') return;
     var paginated = !!nodes.chipLedgerPagination;
     var requestedIndex = Number.isInteger(targetIndex) ? targetIndex : ledgerState.pageIndex;
-    if ((paginated && (requestedIndex < 0 || requestedIndex >= ledgerState.pageCursors.length)) || (!paginated && !ledgerState.hasMore) || ledgerState.loading) return;
+    if ((paginated && (requestedIndex < 0 || (ledgerState.totalPages > 0 && requestedIndex >= ledgerState.totalPages))) || (!paginated && !ledgerState.hasMore) || ledgerState.loading) return;
     ledgerState.loading = true;
     ledgerState.error = null;
     ledgerState.lastLoadAttemptAtMs = Date.now();
@@ -758,15 +836,21 @@
     renderLedgerPagination();
     try {
       var payload = await window.ChipsClient.fetchLedger({
-        limit: paginated ? 10 : 50,
-        cursor: paginated ? ledgerState.pageCursors[requestedIndex] : ledgerState.nextCursor,
+        limit: paginated ? ledgerState.pageSize : 50,
+        page: paginated ? requestedIndex + 1 : undefined,
+        cursor: paginated ? null : ledgerState.nextCursor,
       });
       var items = payload && Array.isArray(payload.items) ? payload.items : (payload && Array.isArray(payload.entries) ? payload.entries : []);
-      if (paginated){ ledgerState.entries = []; ledgerState.pageIndex = requestedIndex; }
+      if (paginated){
+        var pagination = payload && payload.pagination ? payload.pagination : {};
+        ledgerState.entries = [];
+        ledgerState.pageIndex = Math.max(0, (Number(pagination.page) || requestedIndex + 1) - 1);
+        ledgerState.pageSize = Number(pagination.limit) || ledgerState.pageSize;
+        ledgerState.totalRecords = Math.max(0, Number(pagination.total) || 0);
+        ledgerState.totalPages = Math.max(0, Number(pagination.totalPages) || 0);
+      }
       appendLedgerItems(items, payload ? payload.nextCursor : null);
       if (paginated){
-        if (ledgerState.nextCursor) ledgerState.pageCursors[requestedIndex + 1] = ledgerState.nextCursor;
-        ledgerState.pageCursors.length = ledgerState.nextCursor ? requestedIndex + 2 : requestedIndex + 1;
         if (nodes.chipLedgerScroll) nodes.chipLedgerScroll.scrollTop = 0;
       }
       setChipStatus('', '');
@@ -964,13 +1048,14 @@
 
     setStatus(t('creatingAccount', 'Creating your account...'), 'info');
     auth.signUp(email, password).then(function(res){
-      var needsVerify = res && res.data && res.data.user && res.data.user.confirmation_sent_at;
-      if (needsVerify){
-        setStatus(t('verifyEmail', 'Check your inbox to confirm your email.'), 'success');
-      } else {
-        setStatus(t('accountCreated', 'Account created. You are signed in.'), 'success');
-      }
       var user = res && res.data && res.data.user ? res.data.user : null;
+      var session = res && res.data && res.data.session ? res.data.session : null;
+      var needsVerify = !!(user && !session);
+      if (needsVerify){
+        showSignupConfirmation(email);
+        return;
+      }
+      setStatus(t('accountCreated', 'Account created. You are signed in.'), 'success');
       if (user){ renderUser(user); }
       loadChips();
       refreshWelcomeBonus(user || currentUser);
@@ -1043,6 +1128,7 @@
   function wireEvents(){
     if (nodes.signInForm){ nodes.signInForm.addEventListener('submit', handleSignIn); }
     if (nodes.signUpForm){ nodes.signUpForm.addEventListener('submit', handleSignUp); }
+    if (nodes.signupConfirmationBack){ nodes.signupConfirmationBack.addEventListener('click', closeSignupConfirmation); }
     if (nodes.forgotPasswordButton) nodes.forgotPasswordButton.addEventListener('click', function(){ showPasswordReset(true); });
     if (nodes.passwordResetBack) nodes.passwordResetBack.addEventListener('click', function(){ showPasswordReset(false); });
     if (nodes.passwordResetForm) nodes.passwordResetForm.addEventListener('submit', handlePasswordReset);
@@ -1069,8 +1155,16 @@
     });
 
     if (nodes.chipLedgerScroll) nodes.chipLedgerScroll.addEventListener('scroll', handleLedgerScroll);
+    if (nodes.chipLedgerFirst) nodes.chipLedgerFirst.addEventListener('click', function(){ loadLedgerPage(0); });
     if (nodes.chipLedgerPrev) nodes.chipLedgerPrev.addEventListener('click', function(){ loadLedgerPage(ledgerState.pageIndex - 1); });
-    if (nodes.chipLedgerNext) nodes.chipLedgerNext.addEventListener('click', function(){ if (ledgerState.nextCursor) loadLedgerPage(ledgerState.pageIndex + 1); });
+    if (nodes.chipLedgerNext) nodes.chipLedgerNext.addEventListener('click', function(){ loadLedgerPage(ledgerState.pageIndex + 1); });
+    if (nodes.chipLedgerLast) nodes.chipLedgerLast.addEventListener('click', function(){ if (ledgerState.totalPages) loadLedgerPage(ledgerState.totalPages - 1); });
+    if (nodes.chipLedgerPageSize) nodes.chipLedgerPageSize.addEventListener('change', function(){
+      var nextSize = Number(nodes.chipLedgerPageSize.value);
+      ledgerState.pageSize = [10, 25, 50].indexOf(nextSize) !== -1 ? nextSize : 10;
+      ledgerState.totalPages = 0;
+      loadLedgerPage(0);
+    });
     window.addEventListener('resize', queueLedgerRender);
   }
 
@@ -1111,7 +1205,7 @@
           loadChips();
           refreshWelcomeBonus(user);
         } else {
-          setStatus(t('signedOutNotice', 'You have been signed out.'), 'info');
+          if (!signupConfirmationPending) setStatus(t('signedOutNotice', 'You have been signed out.'), 'info');
           clearChips();
           setWelcomeBonusVisibility(false);
           setBlockVisibility(nodes.chipPanel, false);

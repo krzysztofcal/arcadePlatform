@@ -103,8 +103,39 @@ function handleLedgerQuery(query, params = []) {
     return existing ? [existing] : [];
   }
 
+  if (text.includes("select count(*) as total") && text.includes("from public.chips_entries")) {
+    const [userId] = params;
+    const account = ensureUserAccount(userId);
+    const total = mockDb.entries.filter(entry => entry.account_id === account.id).length;
+    return [{ total: String(total) }];
+  }
+
   if (text.includes("from public.chips_entries") && text.includes("join public.chips_transactions")) {
     if (text.includes("order by e.id desc")) {
+      if (text.includes("offset $2")) {
+        const [userId, offset, limit] = params;
+        const account = ensureUserAccount(userId);
+        return mockDb.entries
+          .filter(entry => entry.account_id === account.id)
+          .sort((a, b) => BigInt(String(b.id)) > BigInt(String(a.id)) ? 1 : -1)
+          .slice(offset, offset + limit)
+          .map(entry => {
+            const tx = mockDb.transactions.get(entry.transaction_id);
+            return {
+              entry_seq: entry.entry_seq,
+              sort_id: String(entry.id),
+              amount: entry.amount,
+              metadata: entry.metadata,
+              created_at: entry.created_at,
+              tx_type: tx?.tx_type ?? null,
+              reference: tx?.reference ?? null,
+              description: tx?.description ?? null,
+              idempotency_key: tx?.idempotency_key ?? null,
+              tx_created_at: tx?.created_at ?? null,
+              display_created_at: entry.created_at ?? tx?.created_at ?? null,
+            };
+          });
+      }
       const [userId, cursorSortId, limit] = params;
       const cursorSortIdBig = cursorSortId != null ? BigInt(String(cursorSortId)) : null;
       const account = ensureUserAccount(userId);
@@ -946,6 +977,30 @@ describe("chips ledger paging", () => {
     expect(BigInt(items[0].sort_id) >= BigInt(items[1].sort_id)).toBe(true);
     expectDisplayCreatedAtValidForAll(items);
     expectSortIdForAll(items);
+  });
+
+  it("returns numbered page metadata for direct first, selected, and last-page navigation", async () => {
+    const userId = "00000000-0000-4000-8000-000000000099";
+    const { postTransaction, listUserLedgerPage } = await loadLedger();
+    for (let index = 0; index < 6; index += 1) {
+      await postTransaction({
+        userId,
+        txType: index === 0 ? "MINT" : "BUY_IN",
+        idempotencyKey: `numbered-page-${index}`,
+        entries: index === 0
+          ? [{ accountType: "SYSTEM", systemKey: "TREASURY", amount: -30 }, { accountType: "USER", amount: 30 }]
+          : [{ accountType: "USER", amount: -1 }, { accountType: "SYSTEM", systemKey: "TREASURY", amount: 1 }],
+      });
+    }
+
+    const first = await listUserLedgerPage(userId, { page: 1, limit: 2 });
+    const last = await listUserLedgerPage(userId, { page: 3, limit: 2 });
+
+    expect(first.items).toHaveLength(2);
+    expect(first.pagination).toEqual({ page: 1, limit: 2, total: 6, totalPages: 3, hasPreviousPage: false, hasNextPage: true });
+    expect(last.items).toHaveLength(2);
+    expect(last.pagination).toEqual({ page: 3, limit: 2, total: 6, totalPages: 3, hasPreviousPage: true, hasNextPage: false });
+    expect(BigInt(first.items[0].sort_id) > BigInt(last.items[0].sort_id)).toBe(true);
   });
 
   it("orders by sort_id when timestamps match", async () => {

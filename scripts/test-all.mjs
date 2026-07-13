@@ -47,6 +47,7 @@ run("node", ["tests/poker-bot-cashout.seat-missing.unit.test.mjs"], "poker-bot-c
 run("node", ["tests/poker-bot-cashout.not-bot.unit.test.mjs"], "poker-bot-cashout-not-bot-unit");
 run("node", ["tests/chips-ledger.escrow-only.null-user.unit.test.mjs"], "chips-ledger-escrow-only-null-user");
 run("node", ["tests/chips-ledger.human.buyin.unit.test.mjs"], "chips-ledger-human-buyin");
+run("node", ["tests/chips-ledger-pagination.behavior.test.mjs"], "chips-ledger-pagination-behavior");
 run("node", ["tests/welcome-bonus.behavior.test.mjs"], "welcome-bonus-behavior");
 run("node", ["tests/bonus-campaigns-endpoint.behavior.test.mjs"], "bonus-campaigns-endpoint-behavior");
 run("node", ["tests/bonus-campaigns-scheduler.behavior.test.mjs"], "bonus-campaigns-scheduler-behavior");

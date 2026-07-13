@@ -358,6 +358,23 @@
     return null;
   }
 
+  function getCurrentUser(){
+    var authApi = getAuthApi();
+    if (!authApi || typeof authApi.getCurrentUser !== 'function') return Promise.resolve(null);
+    return Promise.resolve().then(function(){ return authApi.getCurrentUser(); }).catch(function(){ return null; });
+  }
+
+  function resolveInitialIdentity(attempt){
+    var retry = Number.isInteger(attempt) ? attempt : 0;
+    return Promise.all([getAccessToken(), getCurrentUser()]).then(function(values){
+      var identity = { token: values[0] || null, user: values[1] || null };
+      if (identity.token || identity.user || !getAuthApi() || retry >= 4) return identity;
+      return new Promise(function(resolve){
+        window.setTimeout(function(){ resolve(resolveInitialIdentity(retry + 1)); }, 150);
+      });
+    });
+  }
+
   function decodeBase64Url(str){
     var base64 = String(str || '').replace(/-/g, '+').replace(/_/g, '/');
     while (base64.length % 4) base64 += '=';
@@ -2647,6 +2664,17 @@
     render();
   }
 
+  function applyAuthenticatedPendingState(user){
+    stopLiveMode();
+    resetQueuedPreactionState();
+    isGuestMode = false;
+    currentGuestSession = null;
+    state = createEmptyLiveState(tableId, user && user.id ? String(user.id) : null);
+    state.statusText = LIVE_STATUS_COPY.connecting;
+    render();
+    markBootReady();
+  }
+
   function restartLiveMode(token){
     if (!tableId || !token) return;
     currentAccessToken = token;
@@ -2780,6 +2808,12 @@
     if (!authApi || typeof authApi.onAuthChange !== 'function') return;
     authUnsubscribe = authApi.onAuthChange(function(_event, user){
       getAccessToken().then(function(token){
+        if (user && !token){
+          currentAccessToken = null;
+          applyAuthenticatedPendingState(user);
+          startAuthWatch();
+          return;
+        }
         if (!user || !token){
           currentAccessToken = null;
           applySignedOutState();
@@ -2796,6 +2830,35 @@
     });
   }
 
+  function applyInitialIdentity(identity, guestSessionCandidate){
+    if (identity.token){
+      stopAuthWatch();
+      restartAuthenticatedLiveMode(identity.token);
+      return;
+    }
+    if (identity.user){
+      currentAccessToken = null;
+      applyAuthenticatedPendingState(identity.user);
+      startAuthWatch();
+      return;
+    }
+    currentGuestSession = guestSessionCandidate;
+    isGuestMode = !!(currentGuestSession && currentGuestSession.token);
+    if (isGuestMode){
+      currentAccessToken = null;
+      startLiveMode(currentGuestSession.token);
+      return;
+    }
+    if (readGuestMode()){
+      applySignedOutState();
+      setError('Guest session expired. Start again from the lobby.');
+      return;
+    }
+    currentAccessToken = null;
+    applySignedOutState();
+    startAuthWatch();
+  }
+
   function init(){
     selectElements();
     suggestedSeatNoParam = readSeatParam();
@@ -2808,27 +2871,9 @@
       return;
     }
     bindAuthLifecycle();
-    getAccessToken().then(function(token){
-      if (token){
-        stopAuthWatch();
-        restartAuthenticatedLiveMode(token);
-        return;
-      }
-      currentGuestSession = guestSessionCandidate;
-      isGuestMode = !!(currentGuestSession && currentGuestSession.token);
-      if (isGuestMode){
-        currentAccessToken = null;
-        startLiveMode(currentGuestSession.token);
-        return;
-      }
-      if (readGuestMode()){
-        applySignedOutState();
-        setError('Guest session expired. Start again from the lobby.');
-        return;
-      }
-      currentAccessToken = null;
-      applySignedOutState();
-      startAuthWatch();
+    var identityPromise = getAuthApi() ? resolveInitialIdentity() : getAccessToken();
+    identityPromise.then(function(identity){
+      applyInitialIdentity(getAuthApi() ? identity : { token: identity || null, user: null }, guestSessionCandidate);
     }).catch(function(){
       applySignedOutState();
       startAuthWatch();

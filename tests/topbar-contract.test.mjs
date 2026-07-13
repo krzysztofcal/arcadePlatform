@@ -67,6 +67,10 @@ test('topbar ensures chip badge creation when missing', () => {
   assert.match(topbarSource, /setAuthDataset\(['"]out['"]\)/);
   assert.match(topbarSource, /badge\.hidden\s*=\s*!isAuthed\(\)/);
   assert.match(topbarSource, /__topbarBooted/);
+  assert.match(topbarSource, /welcomeBonusRequestGeneration/);
+  assert.match(topbarSource, /invalidateWelcomeBonusBadge/);
+  assert.match(topbarSource, /pageTransition/);
+  assert.match(portalCss, /\.page-transition/);
 });
 
 test('topbar pages load topbar script', () => {
@@ -237,4 +241,11 @@ test('poker pages place xp badge inside topbar', () => {
   assert.match(pokerIndex, /topbar-right[\s\S]*id="xpBadge"/);
   assert.doesNotMatch(pokerTable, /topbar-right[\s\S]*id="xpBadge"/);
   assert.match(pokerTable, /id="xpBadge"/);
+});
+
+test('poker pages boot the XP renderer after loading the XP core', () => {
+  for (const content of [pokerIndex, pokerTable]) {
+    assert.match(content, /src="\/js\/xp\.js"/);
+    assert.ok(content.indexOf('/js/xp/core.js') < content.indexOf('/js/xp.js'));
+  }
 });

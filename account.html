@@ -231,6 +231,16 @@
           </div>
         </section>
 
+        <section class="xp-card account-confirmation" id="signupConfirmation" role="status" aria-live="polite" hidden>
+          <div class="account-confirmation__icon" aria-hidden="true">✦</div>
+          <div>
+            <h2 class="xp-card__title" data-i18n="confirmationEmailSentTitle">Confirmation email sent</h2>
+            <p class="xp-details__text" id="signupConfirmationMessage"></p>
+            <p class="account-note" data-i18n="confirmationEmailHint">Open the link within 24 hours. You can sign in after your email is confirmed.</p>
+            <button type="button" class="account-form__link" id="signupConfirmationBack" data-i18n="backToSignIn">Back to sign in</button>
+          </div>
+        </section>
+
         <section class="xp-card" id="accountPanel" hidden data-i18n-aria="account" aria-label="Account details">
           <h2 class="xp-card__title" data-i18n="account">Account</h2>
           <p class="xp-details__text"><span data-i18n="signedInAs">Signed in as</span> <strong id="accountName">Player</strong>.</p>
@@ -298,9 +308,15 @@
           </div>
           <p class="account-note" id="chipLedgerEmpty" data-i18n="noChipActivity" hidden>No chip activity yet.</p>
           <nav class="chip-ledger__pagination" id="chipLedgerPagination" aria-label="Chip history pages">
+            <button type="button" id="chipLedgerFirst" data-i18n="firstPage">First</button>
             <button type="button" id="chipLedgerPrev" data-i18n="previousPage">Previous</button>
-            <span id="chipLedgerPage" aria-live="polite">1</span>
+            <div class="chip-ledger__pages" id="chipLedgerPages" aria-label="Available pages"></div>
+            <span class="chip-ledger__page-status" id="chipLedgerPage" aria-live="polite">Page 1 of 1</span>
             <button type="button" id="chipLedgerNext" data-i18n="nextPage">Next</button>
+            <button type="button" id="chipLedgerLast" data-i18n="lastPage">Last</button>
+            <label class="chip-ledger__page-size" for="chipLedgerPageSize"><span data-i18n="recordsPerPage">Records per page</span>
+              <select id="chipLedgerPageSize"><option value="10">10</option><option value="25">25</option><option value="50">50</option></select>
+            </label>
           </nav>
         </section>
       </article>
