@@ -218,9 +218,11 @@ try {
     stdio: "pipe",
   });
   const generatedSupabaseConfig = await readFile(path.join(buildTmpDir, "js", "auth", "supabase-config.js"), "utf8");
+  const generatedDeployContext = await readFile(path.join(buildTmpDir, "netlify", "functions", "_generated", "deploy-context.mjs"), "utf8");
   assert.match(generatedSupabaseConfig, /https:\/\/stageabc\.supabase\.co/, "build should publish the deploy context Supabase URL to the browser config");
   assert.match(generatedSupabaseConfig, /stage-anon-key/, "build should publish the deploy context Supabase anon key to the browser config");
   assert.doesNotMatch(generatedSupabaseConfig, /otbqfijerkieoxwpxjnm/, "deploy-preview browser config should not retain the production project ref");
+  assert.match(generatedDeployContext, /BUILD_DEPLOY_CONTEXT = "deploy-preview"/, "build should embed the Netlify context for server functions");
 } finally {
   await rm(buildTmpDir, { recursive: true, force: true });
 }

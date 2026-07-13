@@ -83,7 +83,6 @@
 # Production context - secure defaults
 # NOTE: These are baseline values. Override in Netlify UI for sensitive settings.
 [context.production.environment]
-  ARCADE_DEPLOY_TARGET = "production"
   XP_DEBUG = "0"
   XP_RATE_LIMIT_ENABLED = "1"
   XP_SESSION_RATE_LIMIT_ENABLED = "1"

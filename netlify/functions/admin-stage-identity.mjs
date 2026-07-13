@@ -1,5 +1,6 @@
 import { adminAuthErrorResponse, requireAdminUser } from "./_shared/admin-auth.mjs";
 import { baseHeaders, corsHeaders, klog } from "./_shared/supabase-admin.mjs";
+import { BUILD_DEPLOY_CONTEXT } from "./_generated/deploy-context.mjs";
 
 function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -50,12 +51,12 @@ function parseProjectRefFromSupabaseJwt(value) {
   }
 }
 
-function resolveEnvironmentContext(env = process.env) {
+function resolveEnvironmentContext(env = process.env, buildDeployContext = BUILD_DEPLOY_CONTEXT) {
   const configuredTarget = normalizeString(env.ARCADE_DEPLOY_TARGET);
   if (["production", "deploy-preview", "branch-deploy", "development"].includes(configuredTarget)) {
     return configuredTarget;
   }
-  return normalizeString(env.CONTEXT || env.NETLIFY_CONTEXT || env.NODE_ENV) || "unknown";
+  return normalizeString(env.CONTEXT || env.NETLIFY_CONTEXT || env.NODE_ENV || buildDeployContext) || "unknown";
 }
 
 function resolveConfiguredProjectRef(env = process.env) {
@@ -78,8 +79,8 @@ function resolveDatabaseTarget({ environmentContext, projectRef, expectedStagePr
   return "unknown";
 }
 
-function buildStageIdentity(env = process.env) {
-  const environmentContext = resolveEnvironmentContext(env);
+function buildStageIdentity(env = process.env, options = {}) {
+  const environmentContext = resolveEnvironmentContext(env, options.buildDeployContext);
   const supabaseUrlProjectRef = parseProjectRefFromSupabaseUrl(env.SUPABASE_URL || env.SUPABASE_URL_V2);
   const databaseProjectRef = parseProjectRefFromDbUrl(env.SUPABASE_DB_URL);
   const supabaseProjectRef = supabaseUrlProjectRef || databaseProjectRef || resolveConfiguredProjectRef(env);
