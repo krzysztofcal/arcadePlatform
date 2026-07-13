@@ -74,6 +74,7 @@
     nodes.publicDisplayName = doc.getElementById('publicDisplayName');
     nodes.publicHandle = doc.getElementById('publicHandle');
     nodes.publicBio = doc.getElementById('publicBio');
+    nodes.hideFromLeaderboard = doc.getElementById('hideFromLeaderboard');
     nodes.publicHandleHint = doc.getElementById('publicHandleHint');
     nodes.publicProfileSave = doc.getElementById('publicProfileSave');
     nodes.publicProfileSaveLabel = doc.getElementById('publicProfileSaveLabel');
@@ -230,7 +231,8 @@
       reserved_handle: t('publicProfileReservedHandle', 'This handle is reserved.'),
       handle_locked: t('publicProfileHandleLocked', 'Your handle is permanent and cannot be changed again.'),
       invalid_display_name: t('publicProfileInvalidDisplayName', 'Use 2-40 characters for your display name.'),
-      bio_too_long: t('publicProfileBioTooLong', 'Your bio can contain up to 160 characters.')
+      bio_too_long: t('publicProfileBioTooLong', 'Your bio can contain up to 160 characters.'),
+      invalid_leaderboard_visibility: t('leaderboardVisibilityInvalid', 'Choose a valid leaderboard visibility setting.')
     };
     return { code: code, message: messages[code] || t('publicProfileSaveError', 'Could not save your public profile.') };
   }
@@ -262,6 +264,7 @@
     if (nodes.publicDisplayName) nodes.publicDisplayName.value = profile.displayName || '';
     if (nodes.publicHandle){ nodes.publicHandle.value = profile.handle || ''; nodes.publicHandle.disabled = !profile.handleCanBeCustomized; }
     if (nodes.publicBio) nodes.publicBio.value = profile.bio || '';
+    if (nodes.hideFromLeaderboard) nodes.hideFromLeaderboard.checked = profile.leaderboardVisible === false;
     if (nodes.publicHandleHint) nodes.publicHandleHint.textContent = profile.handleCanBeCustomized ? t('publicHandleHint', 'You can change your generated handle once. It then becomes permanent.') : t('publicHandleLockedHint', 'This handle is permanent.');
     if (nodes.publicProfileUrl){ nodes.publicProfileUrl.href = '/u/' + encodeURIComponent(profile.handle || ''); nodes.publicProfileUrl.textContent = '/u/' + (profile.handle || ''); }
     setPublicProfileErrors(null);
@@ -357,12 +360,14 @@
     var displayName = nodes.publicDisplayName ? nodes.publicDisplayName.value.trim() : '';
     var bio = nodes.publicBio ? nodes.publicBio.value.trim() : '';
     var handle = nodes.publicHandle ? nodes.publicHandle.value.trim().toLowerCase() : '';
+    var leaderboardVisible = nodes.hideFromLeaderboard ? !nodes.hideFromLeaderboard.checked : publicProfile.leaderboardVisible !== false;
     if (displayName !== publicProfile.displayName) payload.displayName = displayName;
     if (bio !== publicProfile.bio) payload.bio = bio;
     if (publicProfile.handleCanBeCustomized && handle && handle !== publicProfile.handle){
       if (!window.confirm(t('publicHandleConfirm', 'Changing your handle is permanent. Continue?'))) return;
       payload.handle = handle;
     }
+    if (leaderboardVisible !== (publicProfile.leaderboardVisible !== false)) payload.leaderboardVisible = leaderboardVisible;
     if (!Object.keys(payload).length){ setStatus(t('publicProfileNoChanges', 'No profile changes to save.'), 'info'); return; }
     setPublicProfileSaveState('saving', t('savingPublicProfile', 'Saving...'));
     var saveSucceeded = false;

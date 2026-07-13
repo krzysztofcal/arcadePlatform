@@ -67,6 +67,7 @@ const ANON_CONVERSION_SCRIPT = `
   local markerKey = KEYS[3]
   local userMarkerKey = KEYS[4]
   local leaderboardAllTimeKey = KEYS[5]
+  local leaderboardHiddenKey = KEYS[6]
   local conversionCap = tonumber(ARGV[1]) or 0
   local leaderboardMember = ARGV[2]
 
@@ -85,13 +86,14 @@ const ANON_CONVERSION_SCRIPT = `
   redis.call('DEL', anonTotalKey)
   redis.call('SET', markerKey, tostring(converted))
   redis.call('SET', userMarkerKey, tostring(converted))
-  if leaderboardAllTimeKey and leaderboardMember and leaderboardMember ~= '' then
+  local leaderboardVisible = not leaderboardHiddenKey or leaderboardHiddenKey == '' or redis.call('EXISTS', leaderboardHiddenKey) == 0
+  if leaderboardAllTimeKey and leaderboardMember and leaderboardMember ~= '' and leaderboardVisible then
     redis.call('ZADD', leaderboardAllTimeKey, currentUserTotal, leaderboardMember)
   end
   return {converted, currentUserTotal, anonTotal, 0}
 `;
 
-export async function migrateAnonXpToUser({ store, namespace, anonId, userId, conversionCap, leaderboardAllTimeKey = null }) {
+export async function migrateAnonXpToUser({ store, namespace, anonId, userId, conversionCap, leaderboardAllTimeKey = null, leaderboardHiddenKey = null }) {
   if (!anonId || !userId || anonId === userId) {
     return { converted: 0, userTotal: null, anonTotal: 0, alreadyConverted: false };
   }
@@ -103,6 +105,7 @@ export async function migrateAnonXpToUser({ store, namespace, anonId, userId, co
       keyMigration(namespace, anonId, userId),
       keyUserMigration(namespace, userId),
       ...(leaderboardAllTimeKey ? [leaderboardAllTimeKey] : []),
+      ...(leaderboardAllTimeKey && leaderboardHiddenKey ? [leaderboardHiddenKey] : []),
     ],
     [String(Math.max(0, Number(conversionCap) || 0)), ...(leaderboardAllTimeKey ? [userId] : [])],
   );

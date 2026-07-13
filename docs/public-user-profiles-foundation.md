@@ -73,7 +73,7 @@ Required constraints and indexes:
 - Bio: maximum 160 characters.
 - A trigger or server-owned update statement maintains `updated_at`.
 
-Do not add email, an XP column, chips, ledger, poker statistics, visibility, `is_public`, or copies of auth metadata. The public XP summary remains sourced from the authoritative XP store.
+Do not add email, an XP column, chips, ledger, poker statistics, profile visibility, `is_public`, or copies of auth metadata. `leaderboard_visible` is an owner-controlled ranking preference only; it does not make `/u/<handle>` private. The public XP summary remains sourced from the authoritative XP store.
 
 Enable RLS and deny direct `anon` and `authenticated` table access. Netlify functions are the only public/owner view boundary and use the existing trusted server-side Supabase/Postgres path. The migration must follow the repository's established auth-user deletion convention.
 
@@ -81,13 +81,13 @@ Enable RLS and deny direct `anon` and `authenticated` table access. Netlify func
 
 Add `netlify/functions/_shared/user-profile.mjs` in PR 1. It should be small and own:
 
-- curated adjective, noun, and default-avatar-variant lists;
+- calls to the database-owned profile constructor and normalization of its result;
 - secure random selection using the Netlify Node runtime primitive;
 - handle normalization and all validation errors;
 - reserved-handle lookup;
 - public-row projection;
 - generated identity creation with bounded uniqueness retries;
-- lazy `ensureUserProfile(authenticatedUserId)` creation.
+- idempotent `ensureUserProfile(authenticatedUserId)` repair for exceptional missing rows.
 
 The generator must retry a finite number of handle collisions and return a controlled server error if exhausted. Do not use hashes of user IDs, external nickname services, or client-generated identity values.
 
@@ -120,7 +120,7 @@ The endpoint must reuse the existing rate-limit helper where its current contrac
 
 ### `GET /.netlify/functions/profile-me`
 
-Require a valid Supabase JWT via the existing server helper. Lazily create a missing profile and return the editable owner contract, including `handleCanBeCustomized` and the safe avatar model. It must not return raw auth data.
+Require a valid Supabase JWT via the existing server helper. Read the profile created by the signup trigger, repair an exceptional missing row through the same database constructor, and return the editable owner contract, including `handleCanBeCustomized`, `leaderboardVisible`, and the safe avatar model. It must not return raw auth data.
 
 ### `PATCH /.netlify/functions/profile-me`
 
@@ -198,7 +198,7 @@ Use semantic heading structure, meaningful avatar alternative text, keyboard-saf
 
 ### Topbar integration (PR 2)
 
-Replace email-derived labels for authenticated users with loaded public-profile display name and avatar. A missing profile triggers the safe authenticated `profile-me` read/create path. Reuse the centralized auth-change listener in `js/auth/supabaseClient.js`; do not add independent listeners. Profile saves invalidate the profile cache and refresh topbar rendering. Guests keep the current generic Arcade Hub state.
+Replace email-derived labels for authenticated users with loaded public-profile display name and avatar. A missing profile triggers the safe authenticated `profile-me` repair path. Reuse the centralized auth-change listener in `js/auth/supabaseClient.js`; do not add independent listeners. Profile saves invalidate the profile cache and refresh topbar rendering. Guests keep the current generic Arcade Hub state.
 
 ## Future Leaderboard Contract
 
@@ -323,6 +323,6 @@ Rollback: disable the new route/rewrite only if necessary, leave existing accoun
 - Every authenticated account becomes publicly discoverable by its handle; this requires explicit privacy-policy approval and potentially Terms/Privacy updates before launch.
 - Handles become externally persistent URLs and can only be customized once.
 - The `/u/:handle` rewrite can conflict with future routes; reserved handles and deployment smoke checks are mandatory.
-- Profile creation adds a write to the first authenticated profile/topbar access.
+- Profile creation adds a write to the Supabase account-creation transaction; authenticated profile reads retain an idempotent repair path.
 - Avatar processing introduces Storage configuration and potentially a runtime image-processing dependency.
-- A future leaderboard will include every authenticated profile unless a later product rule introduces an opt-out.
+- Leaderboards include profiles by default, while owners can opt out without making their `/u/<handle>` profile private.

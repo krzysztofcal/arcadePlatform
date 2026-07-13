@@ -4,6 +4,7 @@ import { __createMemoryStoreForTests, __remoteStoreForTests } from "../netlify/f
 import { migrateAnonXpToUser } from "../netlify/functions/_shared/xp-identity.mjs";
 import { XP_ATOMIC_AWARD_SCRIPT, createXpLedgerKeys, executeAtomicXpAward } from "../netlify/functions/_shared/xp-ledger.mjs";
 import { createXpLeaderboardKeys, getXpLeaderboardPeriods } from "../netlify/functions/_shared/xp-leaderboard.mjs";
+import { syncUserLeaderboardVisibility } from "../netlify/functions/_shared/xp-leaderboard-visibility.mjs";
 
 const namespace = "test:xp:leaderboard";
 const ledgerKeys = createXpLedgerKeys({ namespace });
@@ -22,6 +23,7 @@ function awardInput({ userId, sessionId, now, delta, member = userId }) {
       leaderboardKeys.allTime(),
       leaderboardKeys.day(periods.dayKey),
       leaderboardKeys.week(periods.weekKey),
+      leaderboardKeys.hidden(userId),
     ],
     args: [now, delta, 3000, 300, now, 0, 60_000, member || "", periods.dayExpiresAtSec, periods.weekExpiresAtSec],
   };
@@ -119,6 +121,19 @@ test("zero grants and guest awards do not create leaderboard members", async () 
   assert.equal(await store.zcard(leaderboardKeys.week(zero.periods.weekKey)), 0);
 });
 
+test("hidden authenticated users keep canonical XP without leaderboard membership", async () => {
+  const store = __createMemoryStoreForTests();
+  const now = Date.parse("2026-07-13T12:00:00Z");
+  await store.set(leaderboardKeys.hidden("user-hidden"), "1");
+  const input = awardInput({ userId: "user-hidden", sessionId: "session-hidden", now, delta: 40 });
+  const result = await executeAtomicXpAward({ store, script: XP_ATOMIC_AWARD_SCRIPT, keys: input.keys, args: input.args });
+  assert.equal(result.granted, 40);
+  assert.equal(result.lifetime, 40);
+  assert.equal(await store.zscore(leaderboardKeys.allTime(), "user-hidden"), null);
+  assert.equal(await store.zscore(leaderboardKeys.day(input.periods.dayKey), "user-hidden"), null);
+  assert.equal(await store.zscore(leaderboardKeys.week(input.periods.weekKey), "user-hidden"), null);
+});
+
 test("anonymous conversion synchronizes all-time only and remains idempotent", async () => {
   const store = __createMemoryStoreForTests();
   await store.set(ledgerKeys.total("anon-1"), "75");
@@ -143,4 +158,47 @@ test("anonymous conversion synchronizes all-time only and remains idempotent", a
   assert.equal(second.alreadyConverted, true);
   assert.equal(await store.zscore(leaderboardKeys.allTime(), "user-1"), 75);
   assert.equal(await store.zcard(leaderboardKeys.day("2026-07-12")), 0);
+});
+
+test("anonymous conversion respects a hidden leaderboard marker", async () => {
+  const store = __createMemoryStoreForTests();
+  await store.set(ledgerKeys.total("anon-hidden"), "75");
+  await store.set(leaderboardKeys.hidden("user-hidden"), "1");
+  const result = await migrateAnonXpToUser({
+    store,
+    namespace,
+    anonId: "anon-hidden",
+    userId: "user-hidden",
+    conversionCap: 1000,
+    leaderboardAllTimeKey: leaderboardKeys.allTime(),
+    leaderboardHiddenKey: leaderboardKeys.hidden("user-hidden"),
+  });
+  assert.equal(result.converted, 75);
+  assert.equal(result.userTotal, 75);
+  assert.equal(await store.zscore(leaderboardKeys.allTime(), "user-hidden"), null);
+});
+
+test("visibility synchronization removes and restores canonical leaderboard projections", async () => {
+  const store = __createMemoryStoreForTests();
+  const now = Date.parse("2026-07-13T12:00:00Z");
+  const periods = getXpLeaderboardPeriods(now);
+  const userId = "user-toggle";
+  await store.set(ledgerKeys.total(userId), "320");
+  await store.set(ledgerKeys.daily(userId, periods.dayKey), "25");
+  await store.zadd(leaderboardKeys.allTime(), 320, userId);
+  await store.zadd(leaderboardKeys.day(periods.dayKey), 25, userId);
+  await store.zadd(leaderboardKeys.week(periods.weekKey), 25, userId);
+
+  await syncUserLeaderboardVisibility(userId, false, { store, namespace, now });
+  assert.equal(await store.get(leaderboardKeys.hidden(userId)), "1");
+  assert.equal(await store.zscore(leaderboardKeys.allTime(), userId), null);
+  assert.equal(await store.zscore(leaderboardKeys.day(periods.dayKey), userId), null);
+  assert.equal(await store.zscore(leaderboardKeys.week(periods.weekKey), userId), null);
+
+  const restored = await syncUserLeaderboardVisibility(userId, true, { store, namespace, now });
+  assert.deepEqual(restored, { visible: true, allTime: 320, today: 25, week: 25 });
+  assert.equal(await store.get(leaderboardKeys.hidden(userId)), null);
+  assert.equal(await store.zscore(leaderboardKeys.allTime(), userId), 320);
+  assert.equal(await store.zscore(leaderboardKeys.day(periods.dayKey), userId), 25);
+  assert.equal(await store.zscore(leaderboardKeys.week(periods.weekKey), userId), 25);
 });

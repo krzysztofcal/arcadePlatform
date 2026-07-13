@@ -67,5 +67,6 @@ export function createXpLeaderboardKeys({ namespace = "kcswh:xp:v2" } = {}) {
     allTime: () => `${prefix}:all_time`,
     day: (dayKey) => `${prefix}:day:${dayKey}`,
     week: (weekKey) => `${prefix}:week:${weekKey}`,
+    hidden: (userId) => `${prefix}:hidden:${userId}`,
   });
 }

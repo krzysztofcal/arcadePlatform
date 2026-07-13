@@ -63,11 +63,11 @@ The API response includes the normalized period key and `nextResetAt` for period
 - Only authenticated Supabase accounts are ranked.
 - Guests and anonymous IDs are never written to public leaderboard indexes.
 - A visible row requires a matching `public.user_profiles` record.
-- Every indexed production account must have a profile before public rollout. A separate, bounded profile-coverage preflight pages through accounts with the trusted Supabase Admin API and creates missing profiles through the existing trusted profile helper. It runs only as a guarded operation before rollout; public leaderboard reads must never create profiles.
-- New users continue receiving profiles through the existing authenticated entry flow. The leaderboard writer must not add a database query to every XP award.
+- Every successfully created Supabase account receives a profile from the `auth.users` provisioning trigger. The bounded profile-coverage operation remains repair tooling; public leaderboard reads never create profiles.
+- The leaderboard writer uses the Redis hidden marker and does not add a database query to every XP award.
 - If an exceptional indexed account has no profile, the API omits it, returns a shorter page, and records a `klog` diagnostic without public identifiers. It must not pull candidates from the next raw Redis page to fill the gap. Reconciliation removes or repairs the invalid member outside the public request.
 
-There is no leaderboard opt-out in this MVP because every authenticated profile is currently public. This privacy decision must be reconfirmed before implementation. If product policy changes, eligibility must be designed before leaderboard indexes are enabled rather than filtering only in the browser.
+Owners may opt out through `user_profiles.leaderboard_visible`. SQL reads fail closed by filtering hidden profiles, while Redis projection synchronization removes hidden members and prevents award or conversion writers from re-adding them. The public profile remains available by handle.
 
 ### Anonymous conversion
 
@@ -287,14 +287,14 @@ Add an idempotent, manually invoked server-side tool. It must be guarded to the 
 
 ### Profile coverage preflight
 
-Profile coverage and XP-index backfill have different discovery sources and must remain explicit:
+Profile coverage and XP-index backfill have different discovery sources and remain explicit repair operations:
 
 1. Use trusted, paginated Supabase Admin user listing to discover authenticated accounts; do not attempt to discover them with a Redis `KEYS` or unbounded `SCAN`.
-2. Create a missing profile through `ensureUserProfile()` under the existing every-account-is-public policy.
+2. Create an exceptional missing profile through the database-backed `ensureUserProfile()` helper.
 3. Record aggregate processed/created/failed counts without logging email addresses or UUIDs.
-4. Complete this preflight before ranking backfill and public activation.
+4. Normal signup does not require this operation because the database trigger owns provisioning.
 
-If product policy no longer permits automatic public profiles for every account, stop the rollout and redesign eligibility rather than silently creating profiles. The ranking backfill itself starts from `user_profiles`; it does not discover or create auth accounts.
+The ranking backfill starts from visible `user_profiles`; hidden profiles are excluded and prune removes any stale hidden members.
 
 ### Initial backfill
 
@@ -392,7 +392,7 @@ Implementation status: complete in PR #690. The shared 03:00 Warsaw/ISO period h
 Implementation status: complete in PR #691. The admin-only bounded maintenance endpoint, signed dry-run/apply tokens, stage profile coverage, backfill, prune, and idempotence verification are complete; it does not expose leaderboard data publicly.
 
 - Add the guarded idempotent backfill/reconciliation tool.
-- Add and run the separate trusted profile-coverage preflight; verify retained daily keys on stage.
+- Verify the auth provisioning trigger and run profile coverage only as a repair audit; verify retained daily keys on stage.
 - Remove exceptional missing-profile members from projections rather than changing public page boundaries.
 - Populate stage `all_time`, current day, and current week.
 - Document exact stage/prod invocation, dry-run output, rerun behavior, and rollback.
@@ -504,7 +504,7 @@ No database migration is expected for the Redis-first MVP unless profile eligibi
 | Week score duplicates | Same Lua as award, duplicate-window guard before `ZINCRBY`, reconciliation from daily keys. |
 | Guest identity becomes public | Write projections only for verified authenticated identity. |
 | UUID leaks through API or logs | Explicit projection, server-side profile join, response contract tests, aggregate logs. |
-| Missing lazy-created profile creates rank gaps | Trusted Auth profile-coverage preflight, shorter deterministic page, non-public reconciliation/removal. |
+| Exceptional missing profile creates rank gaps | Auth trigger invariant, repair-only profile coverage, shorter deterministic page, non-public reconciliation/removal. |
 | CDN leaks signed-in `me` | Separate public and authenticated endpoints preferred; no shared caching of private response. |
 | Period keys use wrong timezone | One tested Warsaw/ISO period helper shared by writer, reader, and backfill. |
 | Backfill overwrites canonical data | Sorted sets are projection targets only; canonical counters are read-only to backfill. |
@@ -516,14 +516,14 @@ No database migration is expected for the Redis-first MVP unless profile eligibi
 - The existing sidebar `Leaderboard` destination will change from `xp.html` to the new page only in the UI PR.
 - Authenticated XP awards will execute additional Redis sorted-set operations in the existing atomic Lua script, increasing script key count and cost.
 - Production rollout creates new Redis keys and retention behavior but does not migrate Supabase schema or alter canonical XP totals.
-- Every authenticated public profile is eligible for public ranking under the current no-opt-out policy.
+- Every authenticated public profile is eligible for public ranking by default; owners may opt out without making the public profile private.
 - Handles, display names, avatars, XP gain, lifetime XP, level, and rank become more discoverable than a profile URL known in isolation; Terms/Privacy wording must be reviewed for leaderboard visibility before launch.
 - Current-period rankings may begin with a controlled warm-up if retained daily data is incomplete.
 - Ranking order can move between paginated requests as users earn XP.
 
 ## Remaining decisions before public rollout
 
-1. Reconfirm that all authenticated public profiles participate without opt-out.
+1. Reconfirm that authenticated public profiles participate by default and that the owner opt-out remains available in Settings.
 2. Approve competition ranking for ties.
 3. The public API and authenticated `me` read use separate endpoints; keep this cache boundary during UI implementation.
 4. Verify retained production daily keys before promising current-week backfill.

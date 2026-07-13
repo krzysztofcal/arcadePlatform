@@ -24,7 +24,7 @@ This document preserves the operational and rollout details that were previously
 
 ## XP leaderboard maintenance
 
-`/.netlify/functions/admin-xp-leaderboard-maintenance` is an admin-only, bounded maintenance endpoint. It does not expose rankings publicly. Requests default to dry-run, accept at most 50 accounts, use the configured `XP_KEY_NS`, and refuse unknown Supabase targets. A successful dry-run returns a signed `applyToken` valid for five minutes. The token is bound to the admin, Netlify deploy, target project, operation, page, offset, limit, and period; it cannot authorize a different request.
+`/.netlify/functions/admin-xp-leaderboard-maintenance` is an admin-only, bounded repair endpoint. New accounts receive profiles from the database trigger and do not require routine profile-coverage runs. Requests default to dry-run, accept at most 50 accounts, use the configured `XP_KEY_NS`, and refuse unknown Supabase targets. A successful dry-run returns a signed `applyToken` valid for five minutes. The token is bound to the admin, Netlify deploy, target project, operation, page, offset, limit, and period; it cannot authorize a different request.
 
 Prerequisites are existing runtime configuration only: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL`, Upstash REST credentials, `XP_KEY_NS`, and `SUPABASE_STAGE_PROJECT_REF` on deploy previews. No database migration or new persistent environment variable is required.
 
@@ -52,7 +52,7 @@ For each page, inspect the dry-run response and stop if `failed` is non-zero. Ap
 
 Expired tokens, changed parameters, another admin, and another stage/production target return `409` before maintenance runs. After profile coverage completes, run `backfill` with the same dry-run-first and paged apply sequence. It reads canonical lifetime/current-day/current-week counters, sets non-zero sorted-set scores, removes stale zero scores, and refreshes bounded day/week TTLs. Re-running every page must converge to `updated: 0`, `removed: 0`, and only `unchanged` results.
 
-Finally run `prune` separately for `all_time`, `today`, and `week`. It removes index members without a public profile. Prune uses `offset`, not `page`; when an apply removes rows it returns the same `nextOffset` so shifted members are not skipped:
+Finally run `prune` separately for `all_time`, `today`, and `week`. It removes index members without an eligible visible public profile. Prune uses `offset`, not `page`; when an apply removes rows it returns the same `nextOffset` so shifted members are not skipped:
 
 ```json
 {

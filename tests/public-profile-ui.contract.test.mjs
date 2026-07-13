@@ -80,10 +80,10 @@ test("public XP level contract is fixed consistently across server and client", 
 });
 
 test("every backend avatar variant has frontend styles", async () => {
-  const [backend, portalCss, profileCss] = await Promise.all([
-    read("netlify/functions/_shared/user-profile.mjs"), read("css/portal.css"), read("css/public-profile.css")
+  const [migration, portalCss, profileCss] = await Promise.all([
+    read("supabase/migrations/20260713090000_user_profile_provisioning_visibility.sql"), read("css/portal.css"), read("css/public-profile.css")
   ]);
-  const variants = Array.from(backend.match(/AVATAR_VARIANTS = Object\.freeze\(\[([^\]]+)\]\)/)[1].matchAll(/"([^"]+)"/g), (match) => match[1]);
+  const variants = Array.from(migration.match(/avatar_variants constant text\[\] := array\[([^\]]+)\]/i)[1].matchAll(/'([^']+)'/g), (match) => match[1]);
   assert.deepEqual(variants, ["comet-blue", "falcon-orange", "fox-blue", "nova-purple", "orbit-green", "panda-pink"]);
   for (const variant of variants){
     assert.match(portalCss, new RegExp(`data-avatar-variant="${variant}"`));
