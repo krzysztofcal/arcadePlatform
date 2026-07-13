@@ -1,6 +1,6 @@
 # Poker bot avatars
 
-Status: implemented in PR #703. The owner supplied 9 male and 9 female source assets. The implementation converts them to versioned 256 × 256 WebP files, adds atomic name/gender/avatar catalog entries, and removes the temporary PNG sources before merge.
+Status: implemented in PR #703. The owner supplied 9 male and 9 female source assets. The implementation converts them to versioned 256 × 256 WebP files, adds atomic name/gender/avatar catalog entries, assigns distinct entries to concurrently occupied bot seats, and removes the temporary PNG sources before merge.
 
 ## Objective
 
@@ -14,7 +14,7 @@ In scope:
 
 - owner-provided male and female avatar images for live poker bot seats;
 - an explicit owner-approved male or female display name paired with every avatar;
-- deterministic assignment so the same bot `userId` has the same name/avatar pair across snapshots, reconnect, and resync for a fixed presentation catalog;
+- deterministic, collision-free assignment so occupied bot seats at one table have distinct name/avatar pairs across snapshots, reconnect, late observation, and resync for a fixed presentation catalog;
 - reuse of the existing poker seat `<img>` loading and initials fallback behavior;
 - same-origin static asset loading;
 - desktop and mobile table presentation.
@@ -35,7 +35,7 @@ Out of scope:
 ### Poker bot identity
 
 - `shared/poker-domain/bots.mjs` creates bot UUIDs and persists bot seats with `is_bot` and `bot_profile`.
-- Initial bot IDs are deterministically derived from table ID and seat number. Broke-bot replacement in `ws-server/poker/engine/poker-engine.mjs` deliberately creates a new UUID, which is an appropriate identity boundary for a potentially different name/avatar pair.
+- Initial bot IDs are deterministically derived from table ID and seat number. Broke-bot replacement in `ws-server/poker/engine/poker-engine.mjs` deliberately creates a new UUID, but presentation remains a property of the occupied table seat rather than of that transient runtime ID.
 - `bot_profile` represents play style (`TIGHT`, `NORMAL`, or `LOOSE`, with legacy values normalized by the bot policy). It is behavior configuration, not presentation identity, gender, or display name.
 - Bot metadata is restored by `ws-server/poker/bootstrap/persisted-bootstrap-adapter.mjs` into `seatDetailsByUserId`.
 
@@ -43,7 +43,7 @@ Out of scope:
 
 - `ws-server/poker/read-model/room-core-snapshot.mjs` and `ws-server/poker/read-model/state-snapshot.mjs` already expose `userId`, `seatNo`, `status`, optional `isBot`, and optional `botProfile` for bot seats.
 - Human seats may additionally carry the optional minimal `profile` projection. Both snapshot projectors intentionally refuse to attach a human public profile to a bot.
-- The existing `userId` plus `isBot` fields are sufficient for local deterministic presentation selection. Adding an avatar URL, avatar key, display name, or gender to the WS contract would duplicate derivable presentation state.
+- The existing `tableId`, `seatNo`, `userId`, and `isBot` fields are sufficient for local deterministic presentation selection. `userId` is used only to require a real occupied bot seat; `tableId` and `seatNo` select its presentation. Adding an avatar URL, avatar key, display name, or gender to the WS contract would duplicate derivable presentation state.
 
 ### Browser normalization and rendering
 
@@ -64,7 +64,9 @@ Out of scope:
 
 Add a fixed, ordered allowlist of bot presentation entries to `poker/poker-v2.js`. Each entry binds exactly one owner-approved display name, one explicit presentation gender (`male` or `female`), and one owner-provided avatar filename of the same gender. The implementation must never infer gender from spelling, filename, image pixels, locale, or `botProfile`.
 
-For a seat that is positively identified as a bot, a small deterministic string hash of its existing `userId` selects one complete entry from that catalog. The same selected entry supplies both the visible name and the absolute same-origin image path below `/poker/assets/avatars/bots/`. Names and avatars are therefore impossible to select independently.
+For seats positively identified as bots, a deterministic hash of `tableId` rotates the catalog and stable `seatNo` ordering selects distinct entries from that rotation. Linear probing is a defensive fallback if input ever violates the supported seat range. The same selected entry supplies both the visible name and the absolute same-origin image path below `/poker/assets/avatars/bots/`. Names and avatars are therefore impossible to select independently.
+
+The assignment is intentionally stateless. Deriving it from table identity and seat number means a late observer, an existing client, reconnect, and authoritative restore all converge without persisting presentation in WS state. Removing another bot cannot rename an unchanged occupied seat. A replacement bot at the same seat retains that seat's presentation persona.
 
 `renderSeatAvatar()` then uses its existing safe image lifecycle:
 
@@ -150,8 +152,9 @@ Replacing artwork should use a new filename version and a corresponding catalog 
   - add one ordered bot-presentation allowlist near the existing avatar and asset constants;
   - keep each internal key, display name, `male`/`female` marker, and filename in the same immutable entry;
   - add a small closed validator for catalog entries and reject duplicate keys, duplicate first-release names, unsupported gender values, or filenames whose gender marker disagrees with the entry;
-  - add a deterministic, side-effect-free hash helper for arbitrary non-empty bot IDs, including UUID and legacy fixture formats;
-  - add `resolveBotPresentation(userId)` that selects and returns one complete validated catalog entry;
+  - reuse a deterministic, side-effect-free string hash helper to rotate the catalog from the snapshot table ID;
+  - add `resolveBotPresentation(tableId, seatNo, usedKeys)` that selects and returns one complete validated, currently unused catalog entry;
+  - add `assignBotPresentations(seats, tableId)` that orders bot seats by `seatNo`, allocates entries, and records used catalog keys;
   - extend `normalizeSeatRows()` to compute `isBot` once, resolve the bot presentation, and use its display name instead of the generic `Bot` label;
   - retain a derived browser-only presentation reference on the normalized seat so name and image rendering consume the same selected entry;
   - keep `getDisplayName()` compatible with existing human/guest handling and use generic `Bot` only when bot presentation resolution fails.
@@ -159,8 +162,9 @@ Replacing artwork should use a new filename version and a corresponding catalog 
 ### Invariants
 
 - selection has no randomness, time, storage, request, table action, or connection dependency;
-- the same `userId` and catalog always select the same complete name/gender/avatar entry in every browser;
-- a replacement bot with a new `userId` is allowed to select a different complete presentation;
+- the same table ID, seat number, and catalog always select the same complete name/gender/avatar entry in every browser;
+- simultaneously occupied bot seats cannot share a presentation while their count does not exceed the catalog size;
+- a replacement bot at the same seat retains the seat's presentation persona;
 - name and avatar are never hashed or selected separately;
 - unknown, missing, guest, human, and empty-seat identities return no bot presentation;
 - `botProfile` does not choose or modify the name, gender, or image;

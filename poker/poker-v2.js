@@ -765,14 +765,33 @@
     });
   }
 
-  function resolveBotPresentation(userId){
-    var normalizedUserId = typeof userId === 'string' ? userId.trim() : '';
-    if (!normalizedUserId || !BOT_PRESENTATIONS.length) return null;
-    var index = hashBotPresentationKey(normalizedUserId) % BOT_PRESENTATIONS.length;
-    return BOT_PRESENTATIONS[index] || null;
+  function resolveBotPresentation(tableId, seatNo, usedKeys){
+    if (!BOT_PRESENTATIONS.length || !Number.isInteger(seatNo) || seatNo < 0) return null;
+    var normalizedTableId = typeof tableId === 'string' && tableId.trim() ? tableId.trim() : 'poker-table';
+    var baseIndex = (hashBotPresentationKey(normalizedTableId) + seatNo) % BOT_PRESENTATIONS.length;
+    for (var offset = 0; offset < BOT_PRESENTATIONS.length; offset++){
+      var entry = BOT_PRESENTATIONS[(baseIndex + offset) % BOT_PRESENTATIONS.length];
+      if (entry && (!usedKeys || usedKeys[entry.key] !== true)) return entry;
+    }
+    return null;
   }
 
-  function normalizeSeatRows(payload, previousSeats){
+  function assignBotPresentations(seats, tableId){
+    var usedKeys = {};
+    (Array.isArray(seats) ? seats : []).filter(function(seat){
+      return seat && seat.isBot === true && typeof seat.userId === 'string' && seat.userId;
+    }).sort(function(left, right){
+      return left.seatNo - right.seatNo || left.userId.localeCompare(right.userId);
+    }).forEach(function(seat){
+      var presentation = resolveBotPresentation(tableId, seat.seatNo, usedKeys);
+      seat.botPresentation = presentation;
+      seat.displayName = presentation ? presentation.displayName : 'Bot';
+      if (presentation) usedKeys[presentation.key] = true;
+    });
+    return seats;
+  }
+
+  function normalizeSeatRows(payload, previousSeats, currentTableId){
     var seatMap = {};
     var previousMap = {};
     var sourceSeats = [];
@@ -785,6 +804,15 @@
 
     var tableObj = isObject(payload.table) ? payload.table : {};
     var publicObj = isObject(payload.public) ? payload.public : {};
+    var snapshotTableId = typeof payload.tableId === 'string' && payload.tableId
+      ? payload.tableId
+      : (typeof payload.roomId === 'string' && payload.roomId
+        ? payload.roomId
+        : (typeof tableObj.tableId === 'string' && tableObj.tableId
+          ? tableObj.tableId
+          : (typeof publicObj.roomId === 'string' && publicObj.roomId
+            ? publicObj.roomId
+            : (typeof currentTableId === 'string' ? currentTableId : ''))));
     if (Array.isArray(tableObj.members)) sourceSeats = sourceSeats.concat(tableObj.members);
     if (Array.isArray(payload.authoritativeMembers)) sourceSeats = sourceSeats.concat(payload.authoritativeMembers);
     if (Array.isArray(payload.seats)) sourceSeats = sourceSeats.concat(payload.seats);
@@ -800,10 +828,9 @@
       var userId = typeof rawSeat.userId === 'string' && rawSeat.userId ? rawSeat.userId : (typeof previous.userId === 'string' ? previous.userId : null);
       var samePreviousUser = !!(userId && previous.userId === userId);
       var isBot = rawSeat.isBot === true || (samePreviousUser && previous.isBot === true) || /^bot[-_:]/i.test(userId || '');
-      var botPresentation = isBot ? resolveBotPresentation(userId) : null;
       var profile = isBot ? null : (normalizePokerProfile(rawSeat.profile) || (samePreviousUser ? normalizePokerProfile(previous.profile) : null));
       var displayName = isBot
-        ? (botPresentation ? botPresentation.displayName : 'Bot')
+        ? 'Bot'
         : ((profile && profile.displayName) || rawSeat.displayName || rawSeat.name || rawSeat.username || rawSeat.userName || rawSeat.handle || (samePreviousUser ? previous.displayName : null) || null);
       var status = typeof rawSeat.status === 'string' && rawSeat.status ? rawSeat.status.toUpperCase() : (previous.status || 'ACTIVE');
       seatMap[seatNo] = {
@@ -813,13 +840,14 @@
         status: status,
         isBot: isBot,
         profile: profile,
-        botPresentation: botPresentation
+        botPresentation: null
       };
     });
 
-    return Object.keys(seatMap)
+    var normalizedSeats = Object.keys(seatMap)
       .map(function(key){ return seatMap[key]; })
       .sort(function(left, right){ return left.seatNo - right.seatNo; });
+    return assignBotPresentations(normalizedSeats, snapshotTableId);
   }
 
   function normalizeStacks(payload){
@@ -1053,7 +1081,7 @@
     else if (Number.isInteger(payload.maxSeats) && payload.maxSeats > 1) resolvedMaxSeats = payload.maxSeats;
     if (resolvedMaxSeats) state.maxSeats = resolvedMaxSeats;
 
-    var nextSeats = normalizeSeatRows(payload, state.seats);
+    var nextSeats = normalizeSeatRows(payload, state.seats, state.tableId);
     if (nextSeats.length || Array.isArray(payload.seats) || Array.isArray(tableObj.members) || Array.isArray(payload.authoritativeMembers) || Array.isArray(publicObj.seats)) {
       state.seats = nextSeats;
     }
