@@ -45,7 +45,7 @@ function createXpLeaderboardHandler(deps = {}) {
       });
       return json(200, {
         ...cors,
-        "cache-control": "public, max-age=15, stale-while-revalidate=30",
+        "cache-control": "no-store",
       }, result.response);
     } catch (error) {
       const response = errorResponse(error, cors);

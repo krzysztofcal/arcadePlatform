@@ -274,12 +274,12 @@ This preserves deterministic page boundaries: a missing profile at raw position 
 
 ### Cache policy
 
-- Public pages: `Cache-Control: public, max-age=15, stale-while-revalidate=30`.
+- Public pages: `Cache-Control: no-store`. Immediate owner visibility changes must not diverge from the authenticated `me` result. Public caching may return only with an explicit projection version or invalidation mechanism.
 - Authenticated `me`: `Cache-Control: private, no-store`.
 - Include `Vary: Origin`; the public response never varies by Authorization.
 - Never cache `401`, `429`, or `5xx` as a valid empty leaderboard.
 
-The selected implementation is two endpoints. This keeps the main ranking CDN-cacheable and prevents accidental cross-user `me` leakage.
+The selected implementation is two endpoints. This keeps public ranking data separate from authenticated `me` data and prevents accidental cross-user leakage. Successful responses are currently non-cacheable so opt-out and opt-in transitions are immediately consistent.
 
 ## Backfill and reconciliation
 
@@ -400,9 +400,9 @@ Implementation status: complete in PR #691. The admin-only bounded maintenance e
 
 ### PR 3: Public leaderboard API
 
-Implementation status: implemented in PR #692. The selected design uses a cacheable unauthenticated ranking endpoint and a separate authenticated, non-cacheable `me` endpoint. Deploy Preview smoke passed for all three periods, including public/`me` equality and response privacy checks. Production remains disabled until explicitly enabled after rollout checks.
+Implementation status: implemented in PR #692. The selected design uses an unauthenticated ranking endpoint and a separate authenticated `me` endpoint. Both now return fresh, non-cacheable results so leaderboard privacy changes cannot leave the public page behind the owner result. Deploy Preview smoke passed for all three periods, including public/`me` equality and response privacy checks. Production remains disabled until explicitly enabled after rollout checks.
 
-- Add public cacheable ranking endpoint.
+- Add public ranking endpoint with an explicit freshness contract.
 - Add separate authenticated `me` endpoint if selected during implementation review.
 - Add batch public-profile projection and lifetime-level reads.
 - Add rate limiting, CORS, pagination, tie handling, response allowlist, and error policy.
@@ -410,7 +410,7 @@ Implementation status: implemented in PR #692. The selected design uses a cachea
 
 ### PR 4: Leaderboard UI
 
-Implementation status: implemented in PR #693. The page uses the public cacheable endpoint and separate authenticated `me` endpoint, includes complete PL/EN responsive states, and uses a lightweight status-only XP badge adapter instead of loading gameplay scoring modules.
+Implementation status: implemented in PR #693. The page uses the public fresh endpoint and separate authenticated `me` endpoint, includes complete PL/EN responsive states, and uses a lightweight status-only XP badge adapter instead of loading gameplay scoring modules.
 
 - Add `leaderboard.html`, external controller, scoped CSS, PL/EN strings, and sidebar route.
 - Reuse topbar hydration and shared avatar/profile URL rendering.

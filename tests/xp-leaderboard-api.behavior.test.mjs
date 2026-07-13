@@ -200,7 +200,7 @@ test("authenticated me uses the same public projection and competition rank", as
   })).response.me, null);
 });
 
-test("public handler is cacheable, gated, rate-limited, and returns controlled failures", async () => {
+test("public handler stays fresh across visibility changes, is gated, rate-limited, and returns controlled failures", async () => {
   const publicPayload = { period: "all_time", rows: [] };
   const handler = createXpLeaderboardHandler({
     leaderboardEnabled: () => true,
@@ -209,7 +209,7 @@ test("public handler is cacheable, gated, rate-limited, and returns controlled f
   });
   const success = await handler(event());
   assert.equal(success.statusCode, 200);
-  assert.equal(success.headers["cache-control"], "public, max-age=15, stale-while-revalidate=30");
+  assert.equal(success.headers["cache-control"], "no-store");
   assert.deepEqual(body(success), publicPayload);
 
   const disabled = await createXpLeaderboardHandler({ leaderboardEnabled: () => false })(event());

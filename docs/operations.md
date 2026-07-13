@@ -76,7 +76,7 @@ GET /.netlify/functions/xp-leaderboard?period=today|week|all_time&page=1&limit=2
 GET /.netlify/functions/xp-leaderboard-me?period=today|week|all_time
 ```
 
-The first endpoint is public, returns only allowlisted profile identity, rank, period XP, lifetime-derived level, and profile URL, and uses `public, max-age=15, stale-while-revalidate=30`. It never includes `me` and never returns UUIDs, emails, bio, chips, ledger/session data, Redis keys, or avatar storage keys. Missing profiles produce a shorter deterministic raw page; the endpoint does not borrow members from the next page. `page` is capped at 20 and `limit` at 50.
+The first endpoint is public, returns only allowlisted profile identity, rank, period XP, lifetime-derived level, and profile URL, and uses `no-store`. Fresh reads prevent a recently re-enabled owner from appearing in authenticated `me` while an older public page still omits them. It never includes `me` and never returns UUIDs, emails, bio, chips, ledger/session data, Redis keys, or avatar storage keys. Missing profiles produce a shorter deterministic raw page; the endpoint does not borrow members from the next page. `page` is capped at 20 and `limit` at 50.
 
 The second endpoint requires `Authorization: Bearer <Supabase access token>`, returns only the matching public-safe row or `me: null`, and always uses `private, no-store`. Public and private results must not be merged into one cacheable response.
 
@@ -92,7 +92,7 @@ curl -i \
   'https://<deploy-preview>/.netlify/functions/xp-leaderboard-me?period=all_time'
 ```
 
-Repeat both requests for `today` and `week`. Confirm public responses are cacheable, `me` is `no-store`, ties use competition ranks, period levels use lifetime XP, and no private identifiers occur anywhere in response bodies. A Redis, canonical-lifetime, or profile read failure must return non-cacheable `503 leaderboard_unavailable`, never a successful empty ranking or fabricated level 1.
+Repeat both requests for `today` and `week`. Confirm both public and `me` responses are `no-store`, ties use competition ranks, period levels use lifetime XP, and no private identifiers occur anywhere in response bodies. A Redis, canonical-lifetime, or profile read failure must return non-cacheable `503 leaderboard_unavailable`, never a successful empty ranking or fabricated level 1.
 
 ## Stage DB identity check
 - Netlify deploy previews must point at the stage Supabase project before DB migration automation is enabled.
