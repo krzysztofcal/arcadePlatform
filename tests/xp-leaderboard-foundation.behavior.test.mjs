@@ -50,6 +50,8 @@ test("memory sorted sets preserve Redis reverse score and member ordering", asyn
   assert.equal(await store.zrevrank("ranking", "bravo"), 1);
   assert.equal(await store.zscore("ranking", "alpha"), 10);
   assert.equal(await store.zcount("ranking", 20, 20), 2);
+  assert.equal(await store.zcount("ranking", "(10", "+inf"), 2);
+  assert.deepEqual(await store.mget(["missing-1", "missing-2"]), [null, null]);
   assert.equal(await store.zcard("ranking"), 3);
   assert.equal(await store.zrem("ranking", "alpha"), 1);
 });
@@ -58,12 +60,12 @@ test("remote sorted-set adapter emits bounded Redis commands and normalizes scor
   const originalFetch = globalThis.fetch;
   const commands = [];
   globalThis.fetch = async (url) => {
-    const command = ["ZADD", "ZINCRBY", "ZREVRANGE", "ZREVRANK", "ZSCORE", "ZCOUNT", "ZCARD", "ZREM"]
+    const command = ["ZADD", "ZINCRBY", "ZREVRANGE", "ZREVRANK", "ZSCORE", "ZCOUNT", "ZCARD", "ZREM", "MGET"]
       .find((candidate) => String(url).includes(`/${candidate}/`));
     commands.push(command);
     return {
       ok: true,
-      json: async () => ({ result: command === "ZREVRANGE" ? ["user-2", "20", "user-1", "10"] : 1 }),
+      json: async () => ({ result: command === "ZREVRANGE" ? ["user-2", "20", "user-1", "10"] : (command === "MGET" ? ["1", null] : 1) }),
     };
   };
   try {
@@ -78,7 +80,8 @@ test("remote sorted-set adapter emits bounded Redis commands and normalizes scor
     await __remoteStoreForTests.zcount("ranking", 1, "+inf");
     await __remoteStoreForTests.zcard("ranking");
     await __remoteStoreForTests.zrem("ranking", "user-1");
-    assert.deepEqual(commands, ["ZADD", "ZINCRBY", "ZREVRANGE", "ZREVRANK", "ZSCORE", "ZCOUNT", "ZCARD", "ZREM"]);
+    assert.deepEqual(await __remoteStoreForTests.mget(["xp-1", "xp-2"]), ["1", null]);
+    assert.deepEqual(commands, ["ZADD", "ZINCRBY", "ZREVRANGE", "ZREVRANK", "ZSCORE", "ZCOUNT", "ZCARD", "ZREM", "MGET"]);
   } finally {
     globalThis.fetch = originalFetch;
   }

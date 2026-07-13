@@ -87,6 +87,7 @@ function createMemoryStore() {
 
   return {
     async get(key) { return getValue(key); },
+    async mget(keys) { return keys.map((key) => getValue(key)); },
     async set(key, value) { setValue(key, value, null); return "OK"; },
     async setex(key, seconds, value) { setValue(key, value, seconds * 1000); return "OK"; },
     async setNxEx(key, seconds, value) {
@@ -150,9 +151,17 @@ function createMemoryStore() {
       return score == null ? null : score;
     },
     async zcount(key, min, max) {
-      const lower = min === "-inf" ? -Infinity : Number(min);
-      const upper = max === "+inf" ? Infinity : Number(max);
-      return sortedEntries(key).filter(([, score]) => score >= lower && score <= upper).length;
+      const parseBound = (raw, infinity) => {
+        if (raw === infinity) return { value: infinity === "-inf" ? -Infinity : Infinity, exclusive: false };
+        const text = String(raw);
+        return { value: Number(text.startsWith("(") ? text.slice(1) : text), exclusive: text.startsWith("(") };
+      };
+      const lower = parseBound(min, "-inf");
+      const upper = parseBound(max, "+inf");
+      return sortedEntries(key).filter(([, score]) => (
+        (lower.exclusive ? score > lower.value : score >= lower.value)
+        && (upper.exclusive ? score < upper.value : score <= upper.value)
+      )).length;
     },
     async zcard(key) { return getSortedSet(key)?.size ?? 0; },
     async eval(_script, keys = [], argv = []) {
@@ -300,6 +309,7 @@ return redis.call('SET', key, value, 'EX', ttlSec, 'NX')
 
 const remoteStore = {
   async get(key) { return call("GET", key); },
+  async mget(keys) { return keys.length ? call("MGET", ...keys) : []; },
   async set(key, value) { return call("SET", key, String(value)); },
   async setex(key, seconds, value) { return call("SETEX", key, String(seconds), String(value)); },
   async setNxEx(key, seconds, value) { return remoteStore.eval(SET_NX_EX_SCRIPT, [key], [String(value), String(seconds)]); },
