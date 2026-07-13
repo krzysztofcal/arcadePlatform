@@ -5,7 +5,7 @@ This document preserves the operational and rollout details that were previously
 ## Server gates & debug
 - XP auth uses the shared Supabase verifier, including remote verification for ES256 tokens. Keep `SUPABASE_URL`/`SUPABASE_URL_V2` and a server-side Supabase API key configured together; invalid supplied bearer tokens return `401` instead of mutating an anonymous XP identity.
 - `calculate-xp.mjs` is the only XP award and status endpoint. It calculates grants from bounded semantic activity windows while enforcing session and Warsaw-local daily caps. The retired `award-xp` endpoint and its redirects have been removed.
-  - Authenticated positive grants atomically maintain dark leaderboard projections under `<XP_KEY_NS>:leaderboard:v1:*`. Day and ISO-week projections follow the canonical 03:00 Warsaw XP reset, expire after their bounded retention windows, and are not yet publicly exposed. Guest awards do not write leaderboard members; conversion synchronizes all-time only.
+  - Authenticated positive grants atomically maintain public leaderboard projections under `<XP_KEY_NS>:leaderboard:v1:*`. Day and ISO-week projections follow the canonical 03:00 Warsaw XP reset and expire after their bounded retention windows. Guest awards do not write leaderboard members; conversion synchronizes all-time only.
   - Every response surfaces Redis-sourced `totalToday`, `remaining`, `dayKey`, and `nextReset` (epoch ms of the next Warsaw reset). The signed `xp_day` cookie is rewritten on each call so stale or missing cookies self-heal automatically.
   - The cookie pre-clamps each award before Redis executes, so once the server reports `remaining: 0` the next calls immediately short-circuit until the advertised `nextReset`. Redis still tracks session/lifetime totals for analytics, and any session caps stack on top of the daily allowance.
   - The cookie is HttpOnly + SameSite=Lax, signed with `XP_DAILY_SECRET`, and its payload mirrors the response totals (`granted` equals the legacy `awarded` field but should be preferred going forward and `awarded` will be phased out in a future update). When `XP_COOKIE_SECURE=1`, the cookie is also marked Secure for HTTPS deployments.
@@ -82,7 +82,9 @@ The first endpoint is public, returns only allowlisted profile identity, rank, p
 
 The second endpoint requires `Authorization: Bearer <Supabase access token>`, returns only the matching public-safe row or `me: null`, and always uses `private, no-store`. Public and private results must not be merged into one cacheable response.
 
-Deploy Previews enable these reads automatically unless `XP_LEADERBOARD_ENABLED=0` is explicitly set. Production stays unavailable by default; set `XP_LEADERBOARD_ENABLED=1` only after production profile coverage/backfill/prune and API smoke pass. Optional per-instance limits are `XP_LEADERBOARD_RATE_LIMIT_IP_PER_MIN` and `XP_LEADERBOARD_ME_RATE_LIMIT_IP_PER_MIN`, both defaulting to 60. No database migration is required.
+Deploy Previews enable these reads automatically unless `XP_LEADERBOARD_ENABLED=0` is explicitly set. Production uses `XP_LEADERBOARD_ENABLED=1`; disable it only as an explicit leaderboard rollback. Optional per-instance limits are `XP_LEADERBOARD_RATE_LIMIT_IP_PER_MIN` and `XP_LEADERBOARD_ME_RATE_LIMIT_IP_PER_MIN`, both defaulting to 60. No database migration is required.
+
+Production rollout completed on 2026-07-13. The target identity matched the production Supabase URL, database, and service-role project references. Profile coverage, backfill, and all three prune periods converged with no failures; sampled canonical lifetime XP matched the public and authenticated leaderboard rows. Production day/week behavior also passed smoke verification. Future repairs must retain the same dry-run, signed apply-token, convergence, and no-private-identifiers procedure.
 
 Preview smoke requests:
 
