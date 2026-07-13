@@ -106,10 +106,21 @@ async function readLifetimeXp(store, namespace, candidates, period) {
   });
 }
 
-async function competitionRanks(store, key, scores) {
-  const distinct = [...new Set(scores)];
-  const entries = await Promise.all(distinct.map(async (score) => [score, 1 + await store.zcount(key, `(${score}`, "+inf")]));
-  return new Map(entries);
+function visibleCompetitionRanks(candidates, profiles) {
+  const ranks = new Map();
+  let visibleCount = 0;
+  let currentScore = null;
+  let currentRank = 0;
+  for (const candidate of candidates) {
+    if (!profiles.has(candidate.member)) continue;
+    if (currentScore === null || candidate.score !== currentScore) {
+      currentScore = candidate.score;
+      currentRank = visibleCount + 1;
+    }
+    ranks.set(candidate.member, currentRank);
+    visibleCount += 1;
+  }
+  return ranks;
 }
 
 async function readLeaderboardPage(options, deps = {}) {
@@ -121,24 +132,29 @@ async function readLeaderboardPage(options, deps = {}) {
   const periodState = resolveLeaderboardPeriod({ period, namespace, nowMs });
   const offset = (page - 1) * limit;
   const redisStartedAt = Date.now();
-  const [rawRows, total] = await Promise.all([
-    store.zrevrangeWithScores(periodState.key, offset, offset + limit - 1),
+  const [rawPrefix, total] = await Promise.all([
+    store.zrevrangeWithScores(periodState.key, 0, offset + limit - 1),
     store.zcard(periodState.key),
   ]);
-  const candidates = rawRows.map((row) => ({ member: String(row.member), score: normalizeScore(row.score) }));
+  const prefixCandidates = rawPrefix.map((row) => ({ member: String(row.member), score: normalizeScore(row.score) }));
+  const candidates = prefixCandidates.slice(offset, offset + limit);
+  const validPrefix = prefixCandidates.filter((candidate) => UUID_RE.test(candidate.member) && candidate.score > 0);
   const validCandidates = candidates.filter((candidate) => UUID_RE.test(candidate.member) && candidate.score > 0);
-  const ranks = await competitionRanks(store, periodState.key, candidates.map((row) => row.score));
-  const lifetimeValues = await readLifetimeXp(store, namespace, validCandidates, period);
-  const redisMs = Date.now() - redisStartedAt;
+  let redisMs = Date.now() - redisStartedAt;
   const profilesStartedAt = Date.now();
-  const profiles = await readProfiles(validCandidates.map((row) => row.member), deps.executeSql);
+  const profiles = await readProfiles(validPrefix.map((row) => row.member), deps.executeSql);
+  const profileMs = Date.now() - profilesStartedAt;
+  const ranks = visibleCompetitionRanks(validPrefix, profiles);
+  const visibleCandidates = validCandidates.filter((candidate) => profiles.has(candidate.member));
+  const lifetimeStartedAt = Date.now();
+  const lifetimeValues = await readLifetimeXp(store, namespace, visibleCandidates, period);
+  redisMs += Date.now() - lifetimeStartedAt;
   const rows = [];
-  for (let index = 0; index < validCandidates.length; index += 1) {
-    const candidate = validCandidates[index];
+  for (let index = 0; index < visibleCandidates.length; index += 1) {
+    const candidate = visibleCandidates[index];
     const profile = profiles.get(candidate.member);
-    if (!profile) continue;
     rows.push(projectLeaderboardProfile(profile, {
-      rank: ranks.get(candidate.score),
+      rank: ranks.get(candidate.member),
       xp: candidate.score,
       lifetimeXp: lifetimeValues[index],
     }));
@@ -160,7 +176,7 @@ async function readLeaderboardPage(options, deps = {}) {
       missingProfiles: validCandidates.length - rows.length,
       invalidMembers: candidates.length - validCandidates.length,
       redisMs,
-      profileMs: Date.now() - profilesStartedAt,
+      profileMs,
     },
   };
 }
@@ -176,14 +192,23 @@ async function readLeaderboardMe(options, userId, deps = {}) {
   let me = null;
   let missingProfiles = 0;
   if (score > 0) {
-    const [profiles, greaterCount, lifetimeXp] = await Promise.all([
-      readProfiles([userId], deps.executeSql),
-      store.zcount(periodState.key, `(${score}`, "+inf"),
-      readLifetimeXp(store, namespace, [{ member: userId, score }], options.period).then((values) => values[0]),
-    ]);
+    const greaterCount = await store.zcount(periodState.key, `(${score}`, "+inf");
+    const rawGreater = greaterCount > 0
+      ? await store.zrevrangeWithScores(periodState.key, 0, greaterCount - 1)
+      : [];
+    const greaterCandidates = rawGreater
+      .map((row) => ({ member: String(row.member), score: normalizeScore(row.score) }))
+      .filter((candidate) => UUID_RE.test(candidate.member) && candidate.score > score);
+    const profiles = await readProfiles([...greaterCandidates.map((candidate) => candidate.member), userId], deps.executeSql);
     const profile = profiles.get(userId);
-    if (profile) me = projectLeaderboardProfile(profile, { rank: greaterCount + 1, xp: score, lifetimeXp });
-    else missingProfiles = 1;
+    missingProfiles = greaterCandidates.filter((candidate) => !profiles.has(candidate.member)).length;
+    if (profile) {
+      const lifetimeXp = await readLifetimeXp(store, namespace, [{ member: userId, score }], options.period).then((values) => values[0]);
+      const visibleGreaterCount = greaterCandidates.filter((candidate) => profiles.has(candidate.member)).length;
+      me = projectLeaderboardProfile(profile, { rank: visibleGreaterCount + 1, xp: score, lifetimeXp });
+    } else {
+      missingProfiles += 1;
+    }
   }
   return {
     response: {

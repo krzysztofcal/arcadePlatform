@@ -78,7 +78,7 @@ GET /.netlify/functions/xp-leaderboard?period=today|week|all_time&page=1&limit=2
 GET /.netlify/functions/xp-leaderboard-me?period=today|week|all_time
 ```
 
-The first endpoint is public, returns only allowlisted profile identity, rank, period XP, lifetime-derived level, and profile URL, and uses `no-store`. Fresh reads prevent a recently re-enabled owner from appearing in authenticated `me` while an older public page still omits them. It never includes `me` and never returns UUIDs, emails, bio, chips, ledger/session data, Redis keys, or avatar storage keys. Missing profiles produce a shorter deterministic raw page; the endpoint does not borrow members from the next page. `page` is capped at 20 and `limit` at 50.
+The first endpoint is public, returns only allowlisted profile identity, rank, period XP, lifetime-derived level, and profile URL, and uses `no-store`. Fresh reads prevent a recently re-enabled owner from appearing in authenticated `me` while an older public page still omits them. It never includes `me` and never returns UUIDs, emails, bio, chips, ledger/session data, Redis keys, or avatar storage keys. Missing profiles produce a shorter deterministic raw page; the endpoint does not borrow members from the next page and does not count omitted members in visible competition ranks. `page` is capped at 20 and `limit` at 50, bounding the rank prefix to 1000 candidates.
 
 The second endpoint requires `Authorization: Bearer <Supabase access token>`, returns only the matching public-safe row or `me: null`, and always uses `private, no-store`. Public and private results must not be merged into one cacheable response.
 

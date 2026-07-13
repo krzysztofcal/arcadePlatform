@@ -65,7 +65,7 @@ The API response includes the normalized period key and `nextResetAt` for period
 - A visible row requires a matching `public.user_profiles` record.
 - Every successfully created Supabase account receives a profile from the `auth.users` provisioning trigger. The bounded profile-coverage operation remains repair tooling; public leaderboard reads never create profiles.
 - The leaderboard writer uses the Redis hidden marker and does not add a database query to every XP award.
-- If an exceptional indexed account has no profile, the API omits it, returns a shorter page, and records a `klog` diagnostic without public identifiers. It must not pull candidates from the next raw Redis page to fill the gap. Reconciliation removes or repairs the invalid member outside the public request.
+- If an exceptional indexed account has no profile, the API omits it, returns a shorter page, and records a `klog` diagnostic without public identifiers. It must not pull candidates from the next raw Redis page to fill the gap. Public ranks exclude the omitted account; reconciliation removes or repairs the invalid member outside the public request.
 
 Owners may opt out through `user_profiles.leaderboard_visible`. SQL reads fail closed by filtering hidden profiles, while Redis projection synchronization removes hidden members and prevents award or conversion writers from re-adding them. The public profile remains available by handle.
 
@@ -194,7 +194,7 @@ GET /.netlify/functions/xp-leaderboard-me?period=today|week|all_time
 - The `me` endpoint accepts only `period`; it does not accept public page or limit parameters.
 - Apply the existing CORS conventions and a reusable public-IP rate limit.
 
-Offset/rank pagination matches Redis sorted-set access and is sufficient for the current product scale. The raw Redis range is always `offset = (page - 1) * limit` through `offset + limit - 1`. Public projection may omit an exceptional member without a profile, but it must not over-fetch into the next page. Rankings can move between requests as XP is awarded; the API documents this eventual movement rather than pretending to provide a stable snapshot cursor.
+Offset/rank pagination matches Redis sorted-set access and is sufficient for the current product scale. The requested raw page remains `offset = (page - 1) * limit` through `offset + limit - 1`. To calculate ranks among eligible profiles across pages, the API reads the bounded raw prefix from zero through that page boundary; the existing page and limit caps bound this to 1000 candidates. Public projection may omit an exceptional member without a profile, but it must not pull a member from the next raw page. Rankings can move between requests as XP is awarded; the API documents this eventual movement rather than pretending to provide a stable snapshot cursor.
 
 ### Response contract
 
@@ -261,8 +261,8 @@ Never return email, Supabase UUID, auth metadata, IP, chips, ledger data, poker 
 
 ### Profile join
 
-1. Read a bounded candidate range and scores from Redis.
-2. Batch-query `user_profiles` with the existing trusted SQL helper.
+1. Read the bounded candidate prefix through the requested raw page and its scores from Redis.
+2. Batch-query `user_profiles` for that prefix with the existing trusted SQL helper.
 3. Preserve Redis ordering while projecting profiles through shared avatar/public-profile helpers.
 4. Batch-read lifetime totals when period scores do not represent lifetime XP.
 5. If a candidate has no profile, omit it from that response, return a shorter page, and emit an aggregate diagnostic. Do not read beyond the page's raw Redis range.
@@ -270,7 +270,7 @@ Never return email, Supabase UUID, auth metadata, IP, chips, ledger data, poker 
 
 Do not serialize raw Redis members or database rows.
 
-This preserves deterministic page boundaries: a missing profile at raw position 10 cannot pull a position from page 2 into page 1. Until reconciliation removes the invalid member, public rank numbers may contain a gap, which is preferable to duplicate or skipped users across pages.
+This preserves deterministic page boundaries: a missing profile at raw position 10 cannot pull a position from page 2 into page 1. The rank calculation filters the same bounded prefix through the public profile allowlist, so omitted or hidden members do not consume visible positions and competition ranks remain consistent across pages.
 
 ### Cache policy
 
@@ -354,7 +354,7 @@ Do not load gameplay XP scoring modules merely to render rankings. Reuse only th
 - Clients cannot submit XP, rank, member IDs, or profile fields to the leaderboard.
 - Invalid Bearer tokens always return `401` on authenticated ranking requests.
 - Use explicit response projection and generic errors.
-- Apply bounded page/limit values, rate limiting, request timeouts, and fixed raw Redis page ranges.
+- Apply bounded page/limit values, rate limiting, request timeouts, and bounded raw Redis prefixes.
 - Do not provide handle prefix search, full export, arbitrary historical period keys, or unbounded page traversal.
 - Only current periods and `all_time` are public in MVP; callers cannot select an old Redis key.
 - Use `klog` for diagnostics and never log JWTs, emails, raw UUIDs, or full response rows.

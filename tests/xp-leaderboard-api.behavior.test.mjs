@@ -103,6 +103,51 @@ test("public pages use competition ranks and never over-fetch a missing profile"
   }
 });
 
+test("public and authenticated ranks ignore stale members without an eligible profile", async () => {
+  const store = await seededStore();
+  const keys = createXpLeaderboardKeys({ namespace: NAMESPACE });
+  for (const [userId, score] of [[USER_D, 4000], [USER_A, 3699], [USER_B, 500], [USER_C, 96]]) {
+    await store.zadd(keys.allTime(), score, userId);
+    await store.set(`${NAMESPACE}:total:${userId}`, score);
+  }
+  const readOnlyVisibleProfiles = (userIds) => Promise.resolve(new Map(
+    userIds
+      .filter((userId) => userId === USER_A || userId === USER_C)
+      .map((userId) => [userId, PROFILE_MAP.get(userId)]),
+  ));
+
+  const complete = await readLeaderboardPage({ period: "all_time", page: 1, limit: 25 }, {
+    store, namespace: NAMESPACE, nowMs: NOW, readProfiles: readOnlyVisibleProfiles,
+  });
+  const first = await readLeaderboardPage({ period: "all_time", page: 1, limit: 2 }, {
+    store, namespace: NAMESPACE, nowMs: NOW, readProfiles: readOnlyVisibleProfiles,
+  });
+  const second = await readLeaderboardPage({ period: "all_time", page: 2, limit: 2 }, {
+    store, namespace: NAMESPACE, nowMs: NOW, readProfiles: readOnlyVisibleProfiles,
+  });
+  const own = await readLeaderboardMe({ period: "all_time" }, USER_A, {
+    store, namespace: NAMESPACE, nowMs: NOW, readProfiles: readOnlyVisibleProfiles,
+  });
+
+  assert.deepEqual(complete.response.rows.map(({ rank, handle }) => ({ rank, handle })), [
+    { rank: 1, handle: "alpha-ace-123456" },
+    { rank: 2, handle: "cosmic-comet-123456" },
+  ]);
+  assert.equal(complete.diagnostics.missingProfiles, 2);
+  assert.deepEqual(first.response.rows.map(({ rank, handle }) => ({ rank, handle })), [
+    { rank: 1, handle: "alpha-ace-123456" },
+  ]);
+  assert.deepEqual(second.response.rows.map(({ rank, handle }) => ({ rank, handle })), [
+    { rank: 2, handle: "cosmic-comet-123456" },
+  ]);
+  assert.equal(first.response.hasMore, true);
+  assert.equal(second.response.hasMore, false);
+  assert.equal(first.diagnostics.missingProfiles, 1);
+  assert.equal(second.diagnostics.missingProfiles, 1);
+  assert.equal(own.response.me.rank, 1);
+  assert.equal(own.diagnostics.missingProfiles, 1);
+});
+
 test("period XP uses the period index while level uses batched canonical lifetime XP", async () => {
   const store = await seededStore();
   const periods = getXpLeaderboardPeriods(NOW);
