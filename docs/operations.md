@@ -67,6 +67,33 @@ Finally run `prune` separately for `all_time`, `today`, and `week`. It removes i
 
 Stop on any non-zero `failed` count. The endpoint logs aggregate counts only and never logs user IDs or emails. Do not run production apply until the public API PR is deployed dark and stage backfill has been rerun successfully. Rollback consists of removing the derived `<XP_KEY_NS>:leaderboard:v1:*` sorted sets; never modify canonical `total` or `daily` XP keys.
 
+## XP leaderboard reads
+
+The leaderboard read layer has two endpoints with separate cache and authentication contracts:
+
+```text
+GET /.netlify/functions/xp-leaderboard?period=today|week|all_time&page=1&limit=25
+GET /.netlify/functions/xp-leaderboard-me?period=today|week|all_time
+```
+
+The first endpoint is public, returns only allowlisted profile identity, rank, period XP, lifetime-derived level, and profile URL, and uses `public, max-age=15, stale-while-revalidate=30`. It never includes `me` and never returns UUIDs, emails, bio, chips, ledger/session data, Redis keys, or avatar storage keys. Missing profiles produce a shorter deterministic raw page; the endpoint does not borrow members from the next page. `page` is capped at 20 and `limit` at 50.
+
+The second endpoint requires `Authorization: Bearer <Supabase access token>`, returns only the matching public-safe row or `me: null`, and always uses `private, no-store`. Public and private results must not be merged into one cacheable response.
+
+Deploy Previews enable these reads automatically unless `XP_LEADERBOARD_ENABLED=0` is explicitly set. Production stays unavailable by default; set `XP_LEADERBOARD_ENABLED=1` only after production profile coverage/backfill/prune and API smoke pass. Optional per-instance limits are `XP_LEADERBOARD_RATE_LIMIT_IP_PER_MIN` and `XP_LEADERBOARD_ME_RATE_LIMIT_IP_PER_MIN`, both defaulting to 60. No database migration is required.
+
+Preview smoke requests:
+
+```bash
+curl -i 'https://<deploy-preview>/.netlify/functions/xp-leaderboard?period=all_time&page=1&limit=25'
+
+curl -i \
+  -H 'Authorization: Bearer <stage user access token>' \
+  'https://<deploy-preview>/.netlify/functions/xp-leaderboard-me?period=all_time'
+```
+
+Repeat both requests for `today` and `week`. Confirm public responses are cacheable, `me` is `no-store`, ties use competition ranks, period levels use lifetime XP, and no private identifiers occur anywhere in response bodies. A Redis, canonical-lifetime, or profile read failure must return non-cacheable `503 leaderboard_unavailable`, never a successful empty ranking or fabricated level 1.
+
 ## Stage DB identity check
 - Netlify deploy previews must point at the stage Supabase project before DB migration automation is enabled.
 - Configure these variables in Netlify for the `deploy-preview` context with stage values:

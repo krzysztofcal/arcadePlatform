@@ -177,10 +177,11 @@ The in-memory adapter must implement the same ordering, tie, rank, and TTL behav
 
 ## Public API
 
-Add one endpoint:
+Use two endpoints so the public ranking never varies by authentication state:
 
 ```text
 GET /.netlify/functions/xp-leaderboard?period=today|week|all_time&page=1&limit=25
+GET /.netlify/functions/xp-leaderboard-me?period=today|week|all_time
 ```
 
 ### Request contract
@@ -188,9 +189,9 @@ GET /.netlify/functions/xp-leaderboard?period=today|week|all_time&page=1&limit=2
 - `period` defaults to `all_time`.
 - `page` is a positive integer, initially capped at 20.
 - `limit` defaults to 25 and is capped at 50.
-- Authentication is optional.
-- A supplied invalid Bearer token returns `401`; it never falls back to anonymous behavior.
-- A valid token enables the `me` projection but does not change public rows.
+- The ranking endpoint is deliberately unauthenticated and ignores identity; callers must not send account state to it.
+- The `me` endpoint requires a valid Supabase Bearer token. Missing or invalid credentials return `401` and never fall back to an anonymous identity.
+- The `me` endpoint accepts only `period`; it does not accept public page or limit parameters.
 - Apply the existing CORS conventions and a reusable public-IP rate limit.
 
 Offset/rank pagination matches Redis sorted-set access and is sufficient for the current product scale. The raw Redis range is always `offset = (page - 1) * limit` through `offset + limit - 1`. Public projection may omit an exceptional member without a profile, but it must not over-fetch into the next page. Rankings can move between requests as XP is awarded; the API documents this eventual movement rather than pretending to provide a stable snapshot cursor.
@@ -216,17 +217,31 @@ Offset/rank pagination matches Redis sorted-set access and is sufficient for the
       "level": 3,
       "profileUrl": "/u/blue-fox-123456"
     }
-  ],
+  ]
+}
+```
+
+The private endpoint returns the same period metadata and one public-safe row:
+
+```json
+{
+  "period": "today",
+  "periodKey": "2026-07-12",
+  "nextResetAt": 0,
+  "generatedAt": 0,
   "me": {
     "rank": 42,
     "xp": 120,
     "handle": "pixel-panda-654321",
+    "displayName": "Pixel Panda 654321",
+    "avatar": { "type": "default", "variant": "panda-pink" },
+    "level": 2,
     "profileUrl": "/u/pixel-panda-654321"
   }
 }
 ```
 
-`me` is `null` for guests, zero-XP accounts, or accounts not currently eligible. It uses the same public projection and must not contain a UUID.
+`me` is `null` for zero-XP accounts or accounts not currently eligible. It uses the same public projection and must not contain a UUID.
 
 ### Public allowlist
 
@@ -260,12 +275,11 @@ This preserves deterministic page boundaries: a missing profile at raw position 
 ### Cache policy
 
 - Public pages: `Cache-Control: public, max-age=15, stale-while-revalidate=30`.
-- Authenticated responses containing `me`: `Cache-Control: private, no-store` unless `me` is fetched through a separate authenticated endpoint.
-- Prefer splitting `me` into a second request if CDN behavior makes mixed public/private caching error-prone.
-- Include `Vary: Origin` and, for mixed auth responses, `Vary: Authorization`.
+- Authenticated `me`: `Cache-Control: private, no-store`.
+- Include `Vary: Origin`; the public response never varies by Authorization.
 - Never cache `401`, `429`, or `5xx` as a valid empty leaderboard.
 
-The implementation PR must choose either a fully public cacheable endpoint plus a separate `xp-leaderboard-me` endpoint, or one private response whenever Authorization is present. The preferred design is two endpoints because it keeps the main ranking CDN-cacheable and avoids accidental cross-user `me` leakage.
+The selected implementation is two endpoints. This keeps the main ranking CDN-cacheable and prevents accidental cross-user `me` leakage.
 
 ## Backfill and reconciliation
 
@@ -375,7 +389,7 @@ Implementation status: complete in PR #690. The shared 03:00 Warsaw/ISO period h
 
 ### PR 2: Backfill and reconciliation
 
-Implementation status: implemented on branch `feat/xp-leaderboard-backfill`; stage dry-run/apply verification remains required before merge. The maintenance endpoint is admin-only, bounded, dry-run by default, and does not expose leaderboard data publicly.
+Implementation status: complete in PR #691. The admin-only bounded maintenance endpoint, signed dry-run/apply tokens, stage profile coverage, backfill, prune, and idempotence verification are complete; it does not expose leaderboard data publicly.
 
 - Add the guarded idempotent backfill/reconciliation tool.
 - Add and run the separate trusted profile-coverage preflight; verify retained daily keys on stage.
@@ -385,6 +399,8 @@ Implementation status: implemented on branch `feat/xp-leaderboard-backfill`; sta
 - Do not expose leaderboard publicly yet.
 
 ### PR 3: Public leaderboard API
+
+Implementation status: implemented in PR #692. The selected design uses a cacheable unauthenticated ranking endpoint and a separate authenticated, non-cacheable `me` endpoint. Deploy Preview smoke passed for all three periods, including public/`me` equality and response privacy checks. Production remains disabled until explicitly enabled after rollout checks.
 
 - Add public cacheable ranking endpoint.
 - Add separate authenticated `me` endpoint if selected during implementation review.
@@ -507,7 +523,7 @@ No database migration is expected for the Redis-first MVP unless profile eligibi
 
 1. Reconfirm that all authenticated public profiles participate without opt-out.
 2. Approve competition ranking for ties.
-3. Confirm whether the public API and authenticated `me` read will be separate endpoints; this plan recommends separation.
+3. The public API and authenticated `me` read use separate endpoints; keep this cache boundary during UI implementation.
 4. Verify retained production daily keys before promising current-week backfill.
 5. Review Terms/Privacy wording for increased discoverability through rankings.
 
