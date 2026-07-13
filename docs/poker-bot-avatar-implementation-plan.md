@@ -48,9 +48,9 @@ Out of scope:
 ### Browser normalization and rendering
 
 - `poker/poker-v2.js::normalizeSeatRows()` preserves `userId`, computes the displayed seat name, and recognizes bots from authoritative `isBot` metadata, with its existing legacy ID-pattern fallback.
-- `poker/poker-v2.js::renderSeatAvatar()` first renders initials, then handles human generated variants or an uploaded image. Initials remain visible until an image loads; an image error removes the failed image and restores initials.
+- `poker/poker-v2.js::renderSeatAvatar()` first renders initials, then handles human generated variants or an uploaded image. Initials remain visible until the first successful image load; later renders of that loaded URL keep them hidden immediately. An image error removes the failed image, clears the loaded marker, and restores initials.
 - `getDisplayName()` currently labels every bot as `Bot`, so all bot fallbacks are `BO`. The implementation must replace that generic label with the display name from the selected bot presentation entry; image failure must show initials derived from the same name.
-- `renderSeats()` creates a new avatar element for each seat render, so no previous occupant's image or data attribute is reused.
+- `renderSeats()` creates a new avatar element for each state render, so no previous occupant's image or data attribute is reused. The 200 ms turn-clock tick updates only the existing clock overlay and must not rebuild seats or images.
 - `.poker-seat-avatar__image` in `poker/poker-v2.css` already provides circular clipping through the parent and uses `object-fit: cover`. The turn clock, active, winner, folded, and hero layers are separate and can remain unchanged.
 
 ### Asset loading and CSP
@@ -73,15 +73,15 @@ The assignment is intentionally stateless. Deriving it from table identity and s
 1. resolve the bot presentation only when `seat.isBot === true` and `seat.userId` is non-empty;
 2. render the selected display name beside the seat and its initials inside the avatar immediately;
 3. create the paired local image with DOM APIs, an empty decorative `alt`, and asynchronous decoding;
-4. hide initials only after `load`;
-5. remove the image and keep the selected name's initials after `error`.
+4. record a successful URL and hide initials after its first `load`, then keep initials hidden immediately when that same URL is rendered again;
+5. remove the loaded marker and image, then restore the selected name's initials after `error`.
 
 Human seats continue through the existing `seat.profile.avatar` branch. Guest and empty seats never enter bot resolution.
 
 ### Why this is the preferred design
 
 - It reuses the existing renderer, display-name path, and initials helper instead of introducing a second avatar system.
-- It adds no database lookup, profile hydration, runtime cache, network API, or backend failure mode.
+- It adds no database lookup, profile hydration, network API, or backend failure mode. The browser keeps only a page-lifetime set of successfully loaded avatar URLs to prevent fallback flashes on later state renders.
 - Every viewer derives the same result from the same snapshot and static catalog.
 - The WS server remains authoritative only for whether a seat is a bot; presentation stays in the browser.
 - Names, gender metadata, and asset paths cannot be injected by snapshot data because only complete entries compiled into the local allowlist are usable.
@@ -253,7 +253,7 @@ No new automated tests are part of this Speckit. Validate the implementation on 
 | Poker engine and bot policy | None. `botProfile`, decisions, autoplay, replacement, and funds flows are untouched. |
 | Database and persistence | None. No migration, new column, profile row, or persisted avatar key. |
 | ENV and secrets | None. The paired presentation catalog is release-owned source code, not runtime configuration. |
-| Network and runtime | One same-origin static image request per distinct selected asset in view, then normal browser/CDN caching; no API request or runtime cache. |
+| Network and runtime | One same-origin static image request per distinct selected asset in view, then normal browser/CDN caching; no API request. A page-lifetime loaded-URL set prevents initials from reappearing during later state renders. |
 | CSP | None. Existing `img-src 'self'` covers the assets, and the implementation remains in external `poker-v2.js`. |
 | Deployment | Netlify preview/production only; no WS Preview Deploy. |
 | Accessibility | Decorative images use empty alt text; the selected visible bot name and matching initials fallback identify the seat. |
