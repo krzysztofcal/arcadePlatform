@@ -13,6 +13,15 @@
     QUADS: 8,
     STRAIGHT_FLUSH: 9
   };
+  var POKER_AVATAR_VARIANTS = {
+    'default': true,
+    'comet-blue': true,
+    'falcon-orange': true,
+    'fox-blue': true,
+    'nova-purple': true,
+    'orbit-green': true,
+    'panda-pink': true
+  };
   var LIVE_STATUS_COPY = {
     demo: 'Demo mode',
     connecting: 'Connecting…',
@@ -652,6 +661,34 @@
     return seatNo;
   }
 
+  function normalizePokerAvatar(rawAvatar){
+    if (!isObject(rawAvatar)) return null;
+    if (rawAvatar.type === 'default' && POKER_AVATAR_VARIANTS[rawAvatar.variant] === true){
+      return { type: 'default', variant: rawAvatar.variant };
+    }
+    if (rawAvatar.type !== 'uploaded' || typeof rawAvatar.url !== 'string') return null;
+    try {
+      var parsed = new URL(rawAvatar.url);
+      if (parsed.protocol !== 'https:' || !/^[a-z0-9-]+\.supabase\.co$/i.test(parsed.hostname)) return null;
+      if (!/^\/storage\/v1\/object\/public\/profile-avatars\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.webp$/i.test(parsed.pathname)) return null;
+      if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.port) return null;
+      return { type: 'uploaded', url: parsed.href };
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function normalizePokerProfile(rawProfile){
+    if (!isObject(rawProfile)) return null;
+    var handle = typeof rawProfile.handle === 'string' ? rawProfile.handle.trim().toLowerCase() : '';
+    var displayName = typeof rawProfile.displayName === 'string' ? rawProfile.displayName.trim().replace(/\s+/g, ' ') : '';
+    var avatar = normalizePokerAvatar(rawProfile.avatar);
+    if (!/^[a-z0-9][a-z0-9_-]{2,23}$/.test(handle)) return null;
+    if (displayName.length < 2 || displayName.length > 40 || /[\u0000-\u001f\u007f]/.test(displayName)) return null;
+    if (!avatar) return null;
+    return { handle: handle, displayName: displayName, avatar: avatar };
+  }
+
   function normalizeSeatRows(payload, previousSeats){
     var seatMap = {};
     var previousMap = {};
@@ -678,14 +715,17 @@
       if (seatNo == null) return;
       var previous = previousMap[seatNo] || {};
       var userId = typeof rawSeat.userId === 'string' && rawSeat.userId ? rawSeat.userId : (typeof previous.userId === 'string' ? previous.userId : null);
-      var displayName = rawSeat.displayName || rawSeat.name || rawSeat.username || rawSeat.userName || rawSeat.handle || previous.displayName || null;
+      var samePreviousUser = !!(userId && previous.userId === userId);
+      var profile = normalizePokerProfile(rawSeat.profile) || (samePreviousUser ? normalizePokerProfile(previous.profile) : null);
+      var displayName = (profile && profile.displayName) || rawSeat.displayName || rawSeat.name || rawSeat.username || rawSeat.userName || rawSeat.handle || (samePreviousUser ? previous.displayName : null) || null;
       var status = typeof rawSeat.status === 'string' && rawSeat.status ? rawSeat.status.toUpperCase() : (previous.status || 'ACTIVE');
       seatMap[seatNo] = {
         seatNo: seatNo,
         userId: userId,
         displayName: displayName,
         status: status,
-        isBot: rawSeat.isBot === true || /^bot[-_:]/i.test(userId || '')
+        isBot: rawSeat.isBot === true || /^bot[-_:]/i.test(userId || ''),
+        profile: profile
       };
     });
 
@@ -1197,6 +1237,43 @@
     if (!seat) return 'Open seat';
     if (isCurrentUserSeat(seat)) return 'You';
     return seat.displayName || (seat.isBot ? 'Bot' : shortId(seat.userId)) || 'Player';
+  }
+
+  function renderSeatAvatar(avatar, seat){
+    avatar.textContent = '';
+    if (!seat){
+      avatar.textContent = '+';
+      return;
+    }
+
+    var fallback = document.createElement('span');
+    fallback.className = 'poker-seat-avatar__initials';
+    fallback.textContent = initials(getDisplayName(seat));
+    avatar.appendChild(fallback);
+
+    var profileAvatar = seat.profile && seat.profile.avatar;
+    if (!profileAvatar) return;
+    if (profileAvatar.type === 'default'){
+      avatar.dataset.avatarVariant = profileAvatar.variant;
+      return;
+    }
+    if (profileAvatar.type !== 'uploaded') return;
+
+    var image = document.createElement('img');
+    image.className = 'poker-seat-avatar__image';
+    image.alt = '';
+    image.decoding = 'async';
+    image.addEventListener('load', function(){
+      fallback.hidden = true;
+      avatar.classList.add('poker-seat-avatar--image');
+    }, { once: true });
+    image.addEventListener('error', function(){
+      if (image.parentNode === avatar) avatar.removeChild(image);
+      fallback.hidden = false;
+      avatar.classList.remove('poker-seat-avatar--image');
+    }, { once: true });
+    image.src = profileAvatar.url;
+    avatar.appendChild(image);
   }
 
   function getSeatLastBettingRoundAction(seat){
@@ -1735,7 +1812,7 @@
 
       var avatar = document.createElement('div');
       avatar.className = 'poker-seat-avatar';
-      avatar.textContent = seat ? initials(getDisplayName(seat)) : '+';
+      renderSeatAvatar(avatar, seat);
       if (seat && Number.isInteger(seat.seatNo)) renderedSeatAvatars[seat.seatNo] = avatar;
       if (active){
         var turnClock = getTurnClockState();

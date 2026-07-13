@@ -254,6 +254,10 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
     return;
   }
 
+  if (typeof tableManager.refreshPublicProfiles === "function") {
+    await tableManager.refreshPublicProfiles(tableId, { force: true });
+  }
+
   const bootstrapExpectedVersion = tableManager.persistedStateVersion(tableId);
   const bootstrapped = tableManager.bootstrapHand(tableId, { nowMs: Date.now() });
   if (bootstrapped?.changed) {

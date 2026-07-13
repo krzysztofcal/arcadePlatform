@@ -2686,3 +2686,198 @@ test("observeOnlyJoin seated member reconnect remains non-mutating and connected
   assert.equal(secondJoin.changed, false);
   assert.deepEqual(memberPairs(secondJoin.tableState.members), [["seat_user", 2]]);
 });
+
+test("public profile hydration queries only current UUID human seats and reuses fresh cache", async () => {
+  const humanId = "00000000-0000-4000-8000-000000000101";
+  const botId = "00000000-0000-4000-8000-000000000102";
+  const tableId = "table_public_profiles";
+  const calls = [];
+  const tableManager = createTableManager({
+    maxSeats: 4,
+    publicProfileFreshMs: 60_000,
+    publicProfileLoader: async (userIds) => {
+      calls.push(userIds);
+      return {
+        [humanId]: {
+          handle: "cosmic-panda-101",
+          displayName: "Cosmic Panda 101",
+          avatar: { type: "default", variant: "panda-pink" },
+          bio: "must not survive"
+        },
+        [botId]: {
+          handle: "bot-profile-102",
+          displayName: "Bot Profile 102",
+          avatar: { type: "default", variant: "fox-blue" }
+        }
+      };
+    }
+  });
+  tableManager.restoreTableFromPersisted(tableId, {
+    tableMeta: { maxPlayers: 3 },
+    coreState: {
+      version: 1,
+      roomId: tableId,
+      maxSeats: 3,
+      members: [
+        { userId: humanId, seat: 1 },
+        { userId: botId, seat: 2 },
+        { userId: "guest_user_3", seat: 3 }
+      ],
+      seats: { [humanId]: 1, [botId]: 2, guest_user_3: 3 },
+      seatDetailsByUserId: {
+        [humanId]: { isBot: false },
+        [botId]: { isBot: true },
+        guest_user_3: { isBot: false }
+      },
+      publicStacks: {},
+      pokerState: null
+    }
+  });
+
+  const first = await tableManager.refreshPublicProfiles(tableId, { force: true, nowMs: 1_000 });
+  const cached = await tableManager.refreshPublicProfiles(tableId, { nowMs: 1_001 });
+  const snapshot = tableManager.tableSnapshot(tableId, humanId);
+
+  assert.equal(first.ok, true);
+  assert.equal(cached.cached, true);
+  assert.deepEqual(calls, [[humanId]]);
+  assert.deepEqual(snapshot.seats.find((seat) => seat.userId === humanId)?.profile, {
+    handle: "cosmic-panda-101",
+    displayName: "Cosmic Panda 101",
+    avatar: { type: "default", variant: "panda-pink" }
+  });
+  assert.equal("profile" in snapshot.seats.find((seat) => seat.userId === botId), false);
+  assert.equal("profile" in snapshot.seats.find((seat) => seat.userId === "guest_user_3"), false);
+});
+
+test("public profile hydration deduplicates refreshes and ignores results for an old seat fingerprint", async () => {
+  const firstUserId = "00000000-0000-4000-8000-000000000201";
+  const secondUserId = "00000000-0000-4000-8000-000000000202";
+  const tableId = "table_public_profile_generation";
+  const pending = [];
+  const calls = [];
+  const tableManager = createTableManager({
+    maxSeats: 2,
+    publicProfileTimeoutMs: 5_000,
+    publicProfileLoader: (userIds) => {
+      calls.push(userIds);
+      return new Promise((resolve) => pending.push({ userIds, resolve }));
+    }
+  });
+  const restoreUser = (userId) => tableManager.restoreTableFromPersisted(tableId, {
+    coreState: {
+      version: 1,
+      roomId: tableId,
+      maxSeats: 2,
+      members: [{ userId, seat: 1 }],
+      seats: { [userId]: 1 },
+      seatDetailsByUserId: { [userId]: { isBot: false } },
+      publicStacks: {},
+      pokerState: null
+    }
+  });
+
+  restoreUser(firstUserId);
+  const firstRefresh = tableManager.refreshPublicProfiles(tableId, { force: true });
+  const deduplicatedRefresh = tableManager.refreshPublicProfiles(tableId, { force: true });
+  assert.equal(calls.length, 1);
+
+  restoreUser(secondUserId);
+  pending[0].resolve({
+    [firstUserId]: {
+      handle: "first-user-201",
+      displayName: "First User 201",
+      avatar: { type: "default", variant: "fox-blue" }
+    }
+  });
+  await Promise.all([firstRefresh, deduplicatedRefresh]);
+  assert.equal("profile" in tableManager.tableSnapshot(tableId, secondUserId).seats[0], false);
+
+  const secondRefresh = tableManager.refreshPublicProfiles(tableId, { force: true });
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1], [secondUserId]);
+  pending[1].resolve({
+    [secondUserId]: {
+      handle: "second-user-202",
+      displayName: "Second User 202",
+      avatar: { type: "default", variant: "orbit-green" }
+    }
+  });
+  await secondRefresh;
+  assert.equal(tableManager.tableSnapshot(tableId, secondUserId).seats[0].profile.handle, "second-user-202");
+});
+
+test("a stale profile failure cannot clear a newer seat fingerprint result", async () => {
+  const firstUserId = "00000000-0000-4000-8000-000000000211";
+  const secondUserId = "00000000-0000-4000-8000-000000000212";
+  const tableId = "table_public_profile_stale_failure";
+  const pending = [];
+  const tableManager = createTableManager({
+    maxSeats: 2,
+    publicProfileTimeoutMs: 5_000,
+    publicProfileLoader: (userIds) => new Promise((resolve, reject) => pending.push({ userIds, resolve, reject }))
+  });
+  const restoreUser = (userId) => tableManager.restoreTableFromPersisted(tableId, {
+    coreState: {
+      version: 1,
+      roomId: tableId,
+      maxSeats: 2,
+      members: [{ userId, seat: 1 }],
+      seats: { [userId]: 1 },
+      seatDetailsByUserId: { [userId]: { isBot: false } },
+      publicStacks: {},
+      pokerState: null
+    }
+  });
+
+  restoreUser(firstUserId);
+  const staleRefresh = tableManager.refreshPublicProfiles(tableId, { force: true });
+  restoreUser(secondUserId);
+  const currentRefresh = tableManager.refreshPublicProfiles(tableId, { force: true });
+
+  assert.deepEqual(pending.map(({ userIds }) => userIds), [[firstUserId], [secondUserId]]);
+  pending[1].resolve({
+    [secondUserId]: {
+      handle: "second-user-212",
+      displayName: "Second User 212",
+      avatar: { type: "default", variant: "orbit-green" }
+    }
+  });
+  await currentRefresh;
+  pending[0].reject(new Error("stale_profile_read_failed"));
+  await staleRefresh;
+
+  const snapshot = tableManager.tableSnapshot(tableId, secondUserId);
+  assert.equal(snapshot.seats[0].profile.handle, "second-user-212");
+});
+
+test("public profile failure and timeout return initials fallback without rejecting table state", async () => {
+  const userId = "00000000-0000-4000-8000-000000000301";
+  const tableId = "table_public_profile_failure";
+  const tableManager = createTableManager({
+    maxSeats: 2,
+    publicProfileTimeoutMs: 5,
+    publicProfileLoader: async () => new Promise(() => {})
+  });
+  tableManager.restoreTableFromPersisted(tableId, {
+    coreState: {
+      version: 1,
+      roomId: tableId,
+      maxSeats: 2,
+      members: [{ userId, seat: 1 }],
+      seats: { [userId]: 1 },
+      seatDetailsByUserId: { [userId]: { isBot: false } },
+      publicStacks: {},
+      pokerState: null
+    }
+  });
+
+  const result = await tableManager.refreshPublicProfiles(tableId, { force: true });
+  const snapshot = tableManager.tableSnapshot(tableId, userId);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.fallback, true);
+  assert.equal(result.reason, "public_profile_timeout");
+  assert.equal("profile" in snapshot.seats[0], false);
+  assert.equal(snapshot.members.length, 1);
+});

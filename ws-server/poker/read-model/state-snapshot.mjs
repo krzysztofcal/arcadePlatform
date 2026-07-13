@@ -1,3 +1,5 @@
+import { normalizePublicPokerIdentity } from "./public-poker-identity.mjs";
+
 function normalizeSeat(value) {
   return Number.isInteger(value) ? value : null;
 }
@@ -55,6 +57,10 @@ function normalizeSeatRows(seats) {
       if (seat.isBot === true) normalized.isBot = true;
       if (typeof seat.botProfile === "string" && seat.botProfile) normalized.botProfile = seat.botProfile;
       if (seat.leaveAfterHand === true) normalized.leaveAfterHand = true;
+      if (seat.isBot !== true) {
+        const profile = normalizePublicPokerIdentity(seat.profile);
+        if (profile) normalized.profile = profile;
+      }
       return normalized;
     });
 }

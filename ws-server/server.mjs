@@ -194,13 +194,31 @@ function createPersistedBootstrapLoader({ env = process.env } = {}) {
   };
 }
 
+function createPublicProfileLoader({ env = process.env } = {}) {
+  let repositoryPromise = null;
+  async function loadRepository() {
+    if (!repositoryPromise) {
+      repositoryPromise = import("./poker/profile/public-profile-repository.mjs")
+        .then((module) => module.createPublicProfileRepository({ env }));
+    }
+    return repositoryPromise;
+  }
+  return async function loadPublicProfiles(userIds) {
+    const repository = await loadRepository();
+    return repository.loadPublicProfiles(userIds);
+  };
+}
+
 const loadPersistedTableBootstrap = persistedBootstrapEnabled ? createPersistedBootstrapLoader() : null;
+const loadPublicProfiles = hasSupabaseDbUrl ? createPublicProfileLoader() : null;
 
 const tableManager = createTableManager({
   presenceTtlMs: resolvePresenceTtlMs(process.env.WS_PRESENCE_TTL_MS),
   maxSeats: resolveMaxSeats(process.env.WS_MAX_SEATS),
   actionResultCacheMax: resolveActionResultCacheMax(process.env.WS_ACTION_RESULT_CACHE_MAX),
   tableBootstrapLoader: loadPersistedTableBootstrap,
+  publicProfileLoader: loadPublicProfiles,
+  publicProfileLog: klogSafe,
   observeOnlyJoin: observeOnlyJoinEnabled
 });
 const tableCommandQueue = createTableCommandQueue({
@@ -2604,6 +2622,7 @@ wss.on("connection", (ws) => {
           return;
         }
 
+        await tableManager.refreshPublicProfiles(tableId);
         const resyncedSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: resynced.tableState, tableSnapshot: resyncedSnapshot });
         maybeScheduleSettledRollover(tableId);
@@ -2700,6 +2719,7 @@ wss.on("connection", (ws) => {
           reason: replay.reason,
           expectedSeq: replay.latestSeq ?? 0
         });
+        await tableManager.refreshPublicProfiles(tableId);
         const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         await nextEventLoopTurn();
         sendStateSnapshot(ws, connState, { tableSnapshot, reason: replay.reason });
@@ -2822,6 +2842,7 @@ wss.on("connection", (ws) => {
           return;
         }
 
+        await tableManager.refreshPublicProfiles(tableId);
         const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         sendStateSnapshot(ws, connState, { requestId: frame.requestId ?? null, tableSnapshot });
         maybeScheduleSettledRollover(tableId);
@@ -2850,6 +2871,7 @@ wss.on("connection", (ws) => {
         return;
       }
 
+      await tableManager.refreshPublicProfiles(tableId);
       const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
       sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: subscribed.tableState, tableSnapshot });
       maybeScheduleSettledRollover(tableId);

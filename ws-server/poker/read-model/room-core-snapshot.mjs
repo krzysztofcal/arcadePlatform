@@ -1,4 +1,5 @@
 import { computeSharedLegalActions } from "../shared/poker-primitives.mjs";
+import { normalizePublicPokerIdentity } from "./public-poker-identity.mjs";
 
 function asObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -96,7 +97,7 @@ function normalizeMemberSeatRows(value) {
     .map((member) => ({ userId: member.userId, seatNo: member.seat, status: "ACTIVE" }));
 }
 
-function resolvePublicSeats({ statePublic, members, coreState }) {
+function resolvePublicSeats({ statePublic, members, coreState, publicProfilesByUserId }) {
   const stateSeats = normalizeSeatRows(statePublic?.seats);
   const seatDetailsByUserId = normalizeSeatDetails(coreState?.seatDetailsByUserId);
   const foldedByUserId = asObject(statePublic?.foldedByUserId) || {};
@@ -108,10 +109,13 @@ function resolvePublicSeats({ statePublic, members, coreState }) {
     if (foldedByUserId[seat.userId] === true) {
       merged.status = "FOLDED";
     }
-    if (!details) return merged;
-    if (details.isBot) merged.isBot = true;
-    if (details.botProfile) merged.botProfile = details.botProfile;
-    if (details.leaveAfterHand) merged.leaveAfterHand = true;
+    if (details?.isBot) merged.isBot = true;
+    if (details?.botProfile) merged.botProfile = details.botProfile;
+    if (details?.leaveAfterHand) merged.leaveAfterHand = true;
+    if (!merged.isBot) {
+      const profile = normalizePublicPokerIdentity(publicProfilesByUserId?.[seat.userId]);
+      if (profile) merged.profile = profile;
+    }
     return merged;
   });
 }
@@ -280,10 +284,10 @@ function resolveRevealedShowdownParticipants({ statePublic, state }) {
     .filter((entry) => entry.holeCards.length === 2);
 }
 
-export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, userId, youSeat }) {
+export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, userId, youSeat, publicProfilesByUserId = {} }) {
   const state = asObject(coreState?.pokerState) || asObject(coreState?.state);
   const statePublic = state ? withoutPrivateState(state) : null;
-  const publicSeats = resolvePublicSeats({ statePublic, members, coreState });
+  const publicSeats = resolvePublicSeats({ statePublic, members, coreState, publicProfilesByUserId });
   const publicStacks = resolvePublicStacks({ statePublic, coreState, seats: publicSeats });
   const effectiveYouSeat = hasLeftTable(statePublic, userId) ? null : youSeat;
 

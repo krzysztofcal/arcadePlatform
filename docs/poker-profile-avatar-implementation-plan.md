@@ -1,6 +1,6 @@
 # Poker profile avatars
 
-Status: implementation plan only. This document does not change the poker protocol, database, Auth providers, runtime, CSP, or UI.
+Status: implementation completed in PR #700. The owner approved combining the three reviewed delivery phases in the same PR. The change adds an optional poker profile projection and UI rendering, without a database migration, new Auth provider, new environment variable, or CSP expansion.
 
 ## Objective
 
@@ -102,7 +102,7 @@ The browser derives a profile link only when needed:
 /u/${encodeURIComponent(handle)}
 ```
 
-## PR 1 — minimal avatar and poker identity projections
+## Phase 1 — minimal avatar and poker identity projections
 
 ### Files and methods
 
@@ -130,7 +130,7 @@ The browser derives a profile link only when needed:
 - Extend `tests/public-profiles.behavior.test.mjs` and `tests/profile-avatar.behavior.test.mjs` for projection parity and private-field rejection.
 - Do not add UI, CSS, JSP, DOM, or Playwright tests.
 
-## PR 2 — isolated WS profile hydration
+## Phase 2 — isolated WS profile hydration
 
 ### Repository boundary
 
@@ -233,7 +233,7 @@ Extend existing tests rather than introducing a new framework:
 
 These are required WS/reconnect/backend tests under the project policy. Do not add UI-rendering or Playwright tests.
 
-## PR 3 — poker table renderer
+## Phase 3 — poker table renderer
 
 ### Files and methods
 
@@ -303,7 +303,7 @@ Provider images must not be hotlinked. A copied provider image becomes an ordina
 | WS seat contract | Additive optional `profile`; old clients remain compatible. |
 | Table-manager API | `tableSnapshot()` and `resync()` stay synchronous; new `refreshPublicProfiles()` is explicitly awaited only from existing async call sites. |
 | Poker engine/persistence | No changes to reducers, core state, `poker_state`, replay, or ledger. |
-| Database | PR 1–3 require no migration. Profile hydration reads existing `public.user_profiles`. |
+| Database | Phases 1–3 require no migration. Profile hydration reads existing `public.user_profiles`. |
 | ENV/secrets | No new ENV or secret. Existing trusted Supabase configuration supplies DB and Storage origins. |
 | CSP | No new image domain and no inline script in the intended implementation. |
 | Runtime failure | Profile read or image failure degrades to initials without changing gameplay. |

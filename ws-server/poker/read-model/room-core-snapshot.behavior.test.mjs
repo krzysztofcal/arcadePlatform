@@ -531,3 +531,46 @@ test("projectRoomCoreSnapshot clears turn timer metadata for settled hands even 
   assert.equal(snapshot.turn.deadlineAt, null);
   assert.deepEqual(snapshot.private, { userId: "seated_user", seat: 1, holeCards: ["AH", "AD"] });
 });
+
+test("projectRoomCoreSnapshot adds only minimal profiles to current non-bot seats", () => {
+  const humanId = "00000000-0000-4000-8000-000000000401";
+  const botId = "00000000-0000-4000-8000-000000000402";
+  const snapshot = projectRoomCoreSnapshot({
+    tableId: "table_profiles",
+    roomId: "table_profiles",
+    coreState: {
+      seats: { [humanId]: 1, [botId]: 2 },
+      seatDetailsByUserId: {
+        [humanId]: { isBot: false },
+        [botId]: { isBot: true, botProfile: "NORMAL" }
+      },
+      pokerState: null
+    },
+    members: [{ userId: humanId, seat: 1 }, { userId: botId, seat: 2 }],
+    userId: humanId,
+    youSeat: 1,
+    publicProfilesByUserId: {
+      [humanId]: {
+        handle: "human-player-401",
+        displayName: "Human Player 401",
+        avatar: { type: "default", variant: "comet-blue" },
+        bio: "must not leak",
+        xp: 500
+      },
+      [botId]: {
+        handle: "bot-player-402",
+        displayName: "Bot Player 402",
+        avatar: { type: "default", variant: "fox-blue" }
+      }
+    }
+  });
+
+  assert.deepEqual(snapshot.seats[0].profile, {
+    handle: "human-player-401",
+    displayName: "Human Player 401",
+    avatar: { type: "default", variant: "comet-blue" }
+  });
+  assert.equal("bio" in snapshot.seats[0].profile, false);
+  assert.equal("xp" in snapshot.seats[0].profile, false);
+  assert.equal("profile" in snapshot.seats[1], false);
+});
