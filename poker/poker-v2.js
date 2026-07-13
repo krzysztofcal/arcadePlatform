@@ -151,6 +151,7 @@
   var renderedSeatAvatars = {};
   var renderedSeatBetAnchors = {};
   var renderedSeatStackAnchors = {};
+  var loadedSeatAvatarUrls = Object.create(null);
   var seatCommittedByUserId = {};
   var suggestedSeatNoParam = null;
   var shouldAutoJoin = false;
@@ -1377,21 +1378,69 @@
     if (!imageUrl && profileAvatar.type === 'uploaded') imageUrl = profileAvatar.url;
     if (!imageUrl) return;
 
+    if (loadedSeatAvatarUrls[imageUrl] === true){
+      fallback.hidden = true;
+      avatar.classList.add('poker-seat-avatar--image');
+    }
+
     var image = document.createElement('img');
     image.className = 'poker-seat-avatar__image';
     image.alt = '';
     image.decoding = 'async';
     image.addEventListener('load', function(){
+      loadedSeatAvatarUrls[imageUrl] = true;
       fallback.hidden = true;
       avatar.classList.add('poker-seat-avatar--image');
     }, { once: true });
     image.addEventListener('error', function(){
+      delete loadedSeatAvatarUrls[imageUrl];
       if (image.parentNode === avatar) avatar.removeChild(image);
       fallback.hidden = false;
       avatar.classList.remove('poker-seat-avatar--image');
     }, { once: true });
     image.src = imageUrl;
     avatar.appendChild(image);
+  }
+
+  function findSeatTurnClock(avatar){
+    if (!avatar || !avatar.children) return null;
+    for (var i = 0; i < avatar.children.length; i++){
+      var child = avatar.children[i];
+      if (child && child.classList && child.classList.contains('poker-seat-turn-clock')) return child;
+    }
+    return null;
+  }
+
+  function updateSeatTurnClock(avatar, turnClock){
+    if (!avatar) return;
+    var clock = findSeatTurnClock(avatar);
+    if (!turnClock){
+      if (clock && clock.parentNode === avatar) avatar.removeChild(clock);
+      return;
+    }
+    if (!clock){
+      clock = document.createElement('div');
+      clock.setAttribute('aria-hidden', 'true');
+      avatar.appendChild(clock);
+    }
+    clock.className = 'poker-seat-turn-clock' + (turnClock.remainingSeconds <= 5 ? ' poker-seat-turn-clock--warning' : '');
+    clock.style.setProperty('--turn-progress', String(turnClock.ratio));
+    clock.style.setProperty('--turn-hue', String(Math.max(0, Math.min(120, Math.round(turnClock.ratio * 120)))));
+  }
+
+  function refreshSeatTurnClock(){
+    var activeSeatNo = null;
+    for (var i = 0; i < state.seats.length; i++){
+      var seat = state.seats[i];
+      if (seat && seat.userId && seat.userId === state.turnUserId){
+        activeSeatNo = seat.seatNo;
+        break;
+      }
+    }
+    var turnClock = activeSeatNo == null ? null : getTurnClockState();
+    Object.keys(renderedSeatAvatars).forEach(function(seatNo){
+      updateSeatTurnClock(renderedSeatAvatars[seatNo], Number(seatNo) === activeSeatNo ? turnClock : null);
+    });
   }
 
   function getSeatLastBettingRoundAction(seat){
@@ -1932,17 +1981,7 @@
       avatar.className = 'poker-seat-avatar';
       renderSeatAvatar(avatar, seat);
       if (seat && Number.isInteger(seat.seatNo)) renderedSeatAvatars[seat.seatNo] = avatar;
-      if (active){
-        var turnClock = getTurnClockState();
-        if (turnClock){
-          var clock = document.createElement('div');
-          clock.className = 'poker-seat-turn-clock' + (turnClock.remainingSeconds <= 5 ? ' poker-seat-turn-clock--warning' : '');
-          clock.style.setProperty('--turn-progress', String(turnClock.ratio));
-          clock.style.setProperty('--turn-hue', String(Math.max(0, Math.min(120, Math.round(turnClock.ratio * 120)))));
-          clock.setAttribute('aria-hidden', 'true');
-          avatar.appendChild(clock);
-        }
-      }
+      if (active) updateSeatTurnClock(avatar, getTurnClockState());
 
       var cards = document.createElement('div');
       cards.className = 'poker-seat-cards';
@@ -2988,7 +3027,7 @@
     if (turnClockTimer) return;
     turnClockTimer = window.setInterval(function(){
       if (!state.turnUserId || !state.turnDeadlineAt) return;
-      renderSeats();
+      refreshSeatTurnClock();
     }, 200);
   }
 
