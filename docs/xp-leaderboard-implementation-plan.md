@@ -400,7 +400,7 @@ Implementation status: complete in PR #691. The admin-only bounded maintenance e
 
 ### PR 3: Public leaderboard API
 
-Implementation status: in progress on branch `feat/xp-leaderboard-api`. The selected design uses a cacheable unauthenticated ranking endpoint and a separate authenticated, non-cacheable `me` endpoint. Production remains disabled until explicitly enabled after rollout checks.
+Implementation status: implemented in PR #692. The selected design uses a cacheable unauthenticated ranking endpoint and a separate authenticated, non-cacheable `me` endpoint. Deploy Preview smoke passed for all three periods, including public/`me` equality and response privacy checks. Production remains disabled until explicitly enabled after rollout checks.
 
 - Add public cacheable ranking endpoint.
 - Add separate authenticated `me` endpoint if selected during implementation review.
