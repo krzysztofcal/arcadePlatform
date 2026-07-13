@@ -137,7 +137,9 @@ async function updateUserProfile(userId, payload = {}, deps = {}) {
   if (!hasDisplayName && !hasBio && !changesHandle && !hasLeaderboardVisible) return profile;
 
   const runTransaction = deps.beginSql || beginSql;
+  const syncVisibility = deps.syncLeaderboardVisibility || syncUserLeaderboardVisibility;
   try {
+    if (hasLeaderboardVisible && !leaderboardVisible) await syncVisibility(userId, false, deps);
     const updatedProfile = await runTransaction(async (tx) => {
       const rows = await tx.unsafe(
         `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at, leaderboard_visible
@@ -162,10 +164,7 @@ async function updateUserProfile(userId, payload = {}, deps = {}) {
       );
       return normalizeProfileRow(updated?.[0]);
     });
-    if (hasLeaderboardVisible) {
-      const syncVisibility = deps.syncLeaderboardVisibility || syncUserLeaderboardVisibility;
-      await syncVisibility(userId, updatedProfile.leaderboardVisible, deps);
-    }
+    if (hasLeaderboardVisible && updatedProfile.leaderboardVisible) await syncVisibility(userId, true, deps);
     return updatedProfile;
   } catch (error) {
     if (isHandleConflict(error)) throw profileError("handle_taken", 409);

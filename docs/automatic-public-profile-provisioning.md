@@ -33,7 +33,10 @@ Leaderboard privacy is enforced in two layers:
 1. SQL profile joins and maintenance queries include only `leaderboard_visible = true`, so a hidden account is never projected in a public row even if Redis is temporarily stale.
 2. A Redis hidden marker prevents gameplay awards and anonymous-XP conversion from re-adding the member. The profile update path atomically synchronizes that marker with all-time, current-day, and current-week projections. Re-enabling visibility rebuilds those projections from canonical XP counters rather than from client data.
 
-The database update occurs before Redis synchronization. Therefore hiding fails closed for public reads: if Redis is temporarily unavailable, SQL filtering still withholds the profile and the API returns an error so the owner can retry projection synchronization. Repeating the same visibility PATCH is supported and repairs the Redis projection idempotently.
+Synchronization order depends on the direction of the privacy change:
+
+- Opt-out writes the Redis hidden marker and removes all projections before setting `leaderboard_visible = false`. If Redis is unavailable, the database remains visible and the PATCH fails without leaving a hidden database row that can still influence raw ranks. If the later database write fails, the account is temporarily omitted from the leaderboard, which is the privacy-safe partial state; retrying the same PATCH converges both stores.
+- Opt-in sets `leaderboard_visible = true` before removing the marker and rebuilding projections. If Redis is unavailable, the account remains omitted until the owner retries. Repeating the same visibility PATCH is supported, so either partial state can be repaired idempotently.
 
 ## API and UI contract
 

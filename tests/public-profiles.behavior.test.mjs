@@ -204,16 +204,46 @@ test("one-time handle lock and unique conflicts are enforced by profile updates"
   );
 });
 
-test("leaderboard visibility updates the owner row and synchronizes Redis even on an idempotent retry", async () => {
+test("leaderboard opt-out synchronizes Redis before the database write", async () => {
   const updatedRow = dbProfile({ leaderboardVisible: false });
-  const syncs = [];
+  const effects = [];
   const result = await updateUserProfile(USER_ID, { leaderboardVisible: false }, {
-    executeSql: async () => [dbProfile({ leaderboardVisible: false })],
-    beginSql: transactionForProfile(updatedRow),
-    syncLeaderboardVisibility: async (userId, visible) => { syncs.push({ userId, visible }); },
+    executeSql: async () => [dbProfile()],
+    beginSql: async (callback) => { effects.push("db"); return transactionForProfile(updatedRow)(callback); },
+    syncLeaderboardVisibility: async (userId, visible) => { effects.push("redis"); assert.deepEqual({ userId, visible }, { userId: USER_ID, visible: false }); },
   });
   assert.equal(result.leaderboardVisible, false);
-  assert.deepEqual(syncs, [{ userId: USER_ID, visible: false }]);
+  assert.deepEqual(effects, ["redis", "db"]);
+});
+
+test("leaderboard opt-out leaves the database visible when Redis synchronization fails", async () => {
+  let databaseWrites = 0;
+  await assert.rejects(
+    () => updateUserProfile(USER_ID, { leaderboardVisible: false }, {
+      executeSql: async () => [dbProfile()],
+      beginSql: async () => { databaseWrites += 1; },
+      syncLeaderboardVisibility: async () => { throw new Error("redis_unavailable"); },
+    }),
+    /redis_unavailable/,
+  );
+  assert.equal(databaseWrites, 0);
+});
+
+test("leaderboard opt-in commits the database before Redis and an identical retry repairs projections", async () => {
+  const effects = [];
+  const deps = {
+    executeSql: async () => [dbProfile({ leaderboardVisible: true })],
+    beginSql: async (callback) => { effects.push("db"); return transactionForProfile(dbProfile({ leaderboardVisible: true }))(callback); },
+    syncLeaderboardVisibility: async () => { effects.push("redis"); throw new Error("redis_unavailable"); },
+  };
+  await assert.rejects(() => updateUserProfile(USER_ID, { leaderboardVisible: true }, deps), /redis_unavailable/);
+  assert.deepEqual(effects, ["db", "redis"]);
+
+  effects.length = 0;
+  deps.syncLeaderboardVisibility = async (userId, visible) => { effects.push("redis"); assert.deepEqual({ userId, visible }, { userId: USER_ID, visible: true }); };
+  const repaired = await updateUserProfile(USER_ID, { leaderboardVisible: true }, deps);
+  assert.equal(repaired.leaderboardVisible, true);
+  assert.deepEqual(effects, ["db", "redis"]);
 });
 
 test("profile-public is disabled by default and uses generic not found responses", async () => {
