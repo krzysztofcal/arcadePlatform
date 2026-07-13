@@ -15,7 +15,7 @@
     { id: 'home', labelKey: 'home', fallbackLabel: 'Home', href: '/index.html', className: 'sb-home', iconSvg: icons.home },
     { id: 'recentlyPlayed', labelKey: 'recentlyPlayed', fallbackLabel: 'Recently Played', href: '/recently-played.html', iconSvg: icons.recent },
     { id: 'favorites', labelKey: 'favorites', fallbackLabel: 'Favorites', href: '/favorites.html', iconSvg: icons.favorites },
-    { id: 'leaderboard', labelKey: 'leaderboard', fallbackLabel: 'Leaderboard', href: '/xp.html', iconSvg: icons.leaderboard },
+    { id: 'leaderboard', labelKey: 'leaderboard', fallbackLabel: 'Leaderboard', href: '/leaderboard.html', iconSvg: icons.leaderboard },
     { id: 'profile', labelKey: 'profile', fallbackLabel: 'Profile', href: '/account.html', iconSvg: icons.profile },
     { id: 'random', labelKey: 'playRandomGame', fallbackLabel: 'Play Random Game', href: '/index.html', className: 'sb-random', iconSvg: icons.random },
     { id: 'about', labelKey: 'about', fallbackLabel: 'About', href: '/about.en.html', hrefEn: '/about.en.html', hrefPl: '/about.pl.html', section: 'about', iconSvg: icons.about },
