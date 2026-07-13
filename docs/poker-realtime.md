@@ -17,6 +17,7 @@ This document gives a concise map of the poker realtime pieces in Arcade Portal 
 - Poker deployment notes: [docs/poker-deployment.md](poker-deployment.md)
 - Poker bots: [docs/poker-bots.md](poker-bots.md)
 - Hole-card normalization: [docs/poker-hole-cards-normalization.md](poker-hole-cards-normalization.md)
+- Poker profile avatars and future social-avatar support: [docs/poker-profile-avatar-implementation-plan.md](poker-profile-avatar-implementation-plan.md)
 
 ## Runtime components
 - `poker/` renders the lobby and table_v2 experience in the browser.
