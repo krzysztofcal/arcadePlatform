@@ -111,7 +111,7 @@ test('does not restore a stale +500 badge after the welcome bonus is claimed', a
   await expect(page.locator('#welcomeBonusTopbarBadge')).toBeHidden();
 });
 
-test('paints the transition skeleton before navigating from the chips badge', async ({ page }) => {
+test('uses native chips-badge navigation to the account page with a boot skeleton', async ({ page }) => {
   await mockAuthenticatedSession(page);
   await page.route('**/.netlify/functions/chips-balance', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ balance: 500 }) }));
   let releaseAccount;
@@ -125,12 +125,40 @@ test('paints the transition skeleton before navigating from the chips badge', as
 
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await expect(page.locator('#chipBadge')).toBeVisible();
-  await page.locator('#chipBadge').click();
-  await expect(page.locator('#pageTransition')).toHaveClass(/is-visible/);
-  await expect(page.locator('#pageTransition')).toBeVisible();
+  await page.locator('#chipBadge').click({ noWaitAfter: true });
   await expect.poll(() => accountRequested).toBe(true);
   releaseAccount();
   await page.waitForURL(/account\.html#chipPanel$/);
+  await expect(page.locator('#pageBoot')).toBeAttached();
+});
+
+test('respects a later bubble handler that cancels an internal link', async ({ page }) => {
+  await mockAuthenticatedSession(page);
+  await page.route('**/.netlify/functions/chips-balance', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ balance: 500 }) }));
+  let accountRequests = 0;
+  await page.route('**/account.html?cancelled=1', (route) => {
+    accountRequests += 1;
+    return route.abort();
+  });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.evaluate(() => {
+    const link = document.createElement('a');
+    link.id = 'cancelledInternalLink';
+    link.href = '/account.html?cancelled=1';
+    link.textContent = 'Open controlled panel';
+    document.body.appendChild(link);
+    document.addEventListener('click', (event) => {
+      if (event.target && event.target.closest && event.target.closest('#cancelledInternalLink')) event.preventDefault();
+    });
+  });
+
+  const initialUrl = page.url();
+  await page.locator('#cancelledInternalLink').click();
+  await page.waitForTimeout(100);
+  expect(page.url()).toBe(initialUrl);
+  expect(accountRequests).toBe(0);
+  await expect(page.locator('#pageTransition')).toBeHidden();
 });
 
 test('hides account A chips during a direct signed-in switch to account B', async ({ page }) => {

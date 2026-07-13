@@ -71,18 +71,10 @@
       const target = event.target;
       const link = target && target.closest ? target.closest('a[href]') : null;
       if (!isPageNavigation(event, link)) return;
-      const href = link.href;
-      event.preventDefault();
-      show();
-      const navigate = function(){
-        setTimeout(function(){ win.location.assign(href); }, 90);
-      };
-      if (typeof win.requestAnimationFrame === 'function'){
-        win.requestAnimationFrame(function(){ win.requestAnimationFrame(navigate); });
-      } else {
-        setTimeout(navigate, 32);
-      }
-    }, true);
+      setTimeout(function(){
+        if (!event.defaultPrevented) show();
+      }, 0);
+    });
     show();
     if (doc.readyState === 'complete') hide();
     else win.addEventListener('load', hide, { once: true, passive: true });

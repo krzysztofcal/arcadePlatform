@@ -70,9 +70,10 @@ test('topbar ensures chip badge creation when missing', () => {
   assert.match(topbarSource, /welcomeBonusRequestGeneration/);
   assert.match(topbarSource, /invalidateWelcomeBonusBadge/);
   assert.match(topbarSource, /pageTransition/);
-  assert.match(topbarSource, /event\.preventDefault\(\)/);
-  assert.match(topbarSource, /requestAnimationFrame/);
-  assert.match(topbarSource, /location\.assign\(href\)/);
+  assert.match(topbarSource, /if\s*\(!event\.defaultPrevented\)\s*show\(\)/);
+  assert.doesNotMatch(topbarSource, /event\.preventDefault\(\)/);
+  assert.doesNotMatch(topbarSource, /location\.assign\(/);
+  assert.doesNotMatch(topbarSource, /addEventListener\(['"]click['"][\s\S]{0,500},\s*true\s*\)/);
   assert.match(portalCss, /\.page-transition/);
   assert.match(accountHtml, /id="pageBoot"/);
   assert.match(accountHtml, /\.page-boot__shell/);
