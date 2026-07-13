@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { handleJoinCommand } from './join.mjs';
 
 function baseCtx(payload = {}){
-  const calls = { command: [], table: 0, snapshots: 0, joinArgs: null, authoritativeArgs: null, sendError: 0, sentErrors: [], actorTableState: 0, resync: 0, autoplay: [], logs: [] };
+  const calls = { command: [], table: 0, snapshots: 0, joinArgs: null, authoritativeArgs: null, refreshProfileArgs: [], sendError: 0, sentErrors: [], actorTableState: 0, resync: 0, autoplay: [], logs: [] };
   const tableManager = {
     ensureTableLoaded: async () => ({ ok: true }),
     join: (args) => { calls.joinArgs = args; return { ok: true, changed: true, tableState: { tableId: 't1', members: [] } }; },
+    refreshPublicProfiles: async (...args) => { calls.refreshProfileArgs.push(args); return { ok: true }; },
     persistedStateVersion: () => 1,
     bootstrapHand: () => ({ ok: true, changed: false }),
     tableSnapshot: () => ({
@@ -70,6 +71,19 @@ test('handleJoinCommand forwards autoSeat + preferredSeatNo intent', async () =>
   assert.equal(calls.joinArgs.autoSeat, true);
   assert.equal(calls.joinArgs.preferredSeatNo, 2);
   assert.equal(calls.joinArgs.buyIn, 150);
+});
+
+test('handleJoinCommand respects the fresh profile cache on an unchanged rejoin', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 2, buyIn: 100 });
+  ctx.tableManager.join = (args) => {
+    calls.joinArgs = args;
+    return { ok: true, changed: false, tableState: { tableId: 't1', members: [{ userId: 'u1', seat: 2 }] } };
+  };
+
+  await handleJoinCommand(ctx);
+
+  assert.deepEqual(calls.refreshProfileArgs, [['t1']]);
+  assert.equal(calls.command[0].status, 'accepted');
 });
 
 test('handleJoinCommand schedules bot autoplay after join bootstraps first hand', async () => {

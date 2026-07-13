@@ -12,7 +12,7 @@ const { computeXpLevel } = await import("../netlify/functions/_shared/xp-level.m
 const { createProfileMeHandler } = await import("../netlify/functions/profile-me.mjs");
 const { createProfilePublicHandler, publicProfilesEnabled } = await import("../netlify/functions/profile-public.mjs");
 const { projectPublicAvatar } = await import("../shared/profile-avatar-projection.mjs");
-const { projectPublicPokerIdentity } = await import("../ws-server/poker/read-model/public-poker-identity.mjs");
+const { normalizePublicPokerIdentity, projectPublicPokerIdentity } = await import("../ws-server/poker/read-model/public-poker-identity.mjs");
 
 const USER_ID = "00000000-0000-4000-8000-000000000003";
 
@@ -149,6 +149,25 @@ test("poker identity shares avatar rules without inheriting full public profile 
   assert.equal("bio" in projected, false);
   assert.equal("xp" in projected, false);
   assert.equal("avatarKey" in projected, false);
+});
+
+test("poker identity accepts uploaded avatars only from the configured Arcade Hub Storage origin", () => {
+  const identity = {
+    handle: "blue-fox-482731",
+    displayName: "Blue Fox 482731",
+    avatar: {
+      type: "uploaded",
+      url: "https://arcadehub.supabase.co/storage/v1/object/public/profile-avatars/10000000-0000-4000-8000-000000000001.webp"
+    }
+  };
+
+  assert.deepEqual(normalizePublicPokerIdentity(identity, {
+    storageBaseUrl: "https://arcadehub.supabase.co"
+  }), identity);
+  assert.equal(normalizePublicPokerIdentity(identity, {
+    storageBaseUrl: "https://foreign-project.supabase.co"
+  }), null);
+  assert.equal(normalizePublicPokerIdentity(identity), null);
 });
 
 test("shared avatar projection falls back for unknown variants and untrusted storage origins", () => {

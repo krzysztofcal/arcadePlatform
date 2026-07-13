@@ -661,6 +661,19 @@
     return seatNo;
   }
 
+  function getTrustedAvatarOrigin(){
+    var config = isObject(window.SUPABASE_CONFIG) ? window.SUPABASE_CONFIG : {};
+    var rawUrl = config.SUPABASE_URL || config.supabaseUrl || config.url || '';
+    try {
+      var parsed = new URL(rawUrl);
+      if (parsed.protocol !== 'https:' || !/^[a-z0-9-]+\.supabase\.co$/i.test(parsed.hostname)) return '';
+      if (parsed.href !== parsed.origin + '/') return '';
+      return parsed.origin;
+    } catch (_error) {
+      return '';
+    }
+  }
+
   function normalizePokerAvatar(rawAvatar){
     if (!isObject(rawAvatar)) return null;
     if (rawAvatar.type === 'default' && POKER_AVATAR_VARIANTS[rawAvatar.variant] === true){
@@ -669,7 +682,8 @@
     if (rawAvatar.type !== 'uploaded' || typeof rawAvatar.url !== 'string') return null;
     try {
       var parsed = new URL(rawAvatar.url);
-      if (parsed.protocol !== 'https:' || !/^[a-z0-9-]+\.supabase\.co$/i.test(parsed.hostname)) return null;
+      var trustedOrigin = getTrustedAvatarOrigin();
+      if (!trustedOrigin || parsed.origin !== trustedOrigin) return null;
       if (!/^\/storage\/v1\/object\/public\/profile-avatars\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.webp$/i.test(parsed.pathname)) return null;
       if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.port) return null;
       return { type: 'uploaded', url: parsed.href };

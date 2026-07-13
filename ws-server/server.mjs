@@ -163,6 +163,7 @@ function resolveAuthoritativeJoinEnabled(rawValue, { hasSupabaseDbUrl = false, o
 }
 
 const hasSupabaseDbUrl = Boolean(process.env.SUPABASE_DB_URL);
+const publicProfileStorageBaseUrl = process.env.SUPABASE_URL || process.env.SUPABASE_URL_V2 || "";
 const persistedBootstrapEnabled = Boolean(hasSupabaseDbUrl || process.env.WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON || process.env.WS_PERSISTED_STATE_FILE);
 const persistedStateWriteEnabled = Boolean(process.env.SUPABASE_DB_URL || process.env.WS_PERSISTED_STATE_FILE);
 const observeOnlyJoinEnabled = resolveObserveOnlyJoin(process.env.WS_OBSERVE_ONLY_JOIN);
@@ -218,6 +219,7 @@ const tableManager = createTableManager({
   actionResultCacheMax: resolveActionResultCacheMax(process.env.WS_ACTION_RESULT_CACHE_MAX),
   tableBootstrapLoader: loadPersistedTableBootstrap,
   publicProfileLoader: loadPublicProfiles,
+  publicProfileStorageBaseUrl,
   publicProfileLog: klogSafe,
   observeOnlyJoin: observeOnlyJoinEnabled
 });
@@ -984,7 +986,8 @@ function sendStateSnapshot(ws, connState, { requestId = null, tableSnapshot, rea
   maybeScheduleSettledRollover(tableSnapshot.tableId);
   const payload = buildStateSnapshotPayload({
     tableSnapshot,
-    userId: connState.session.userId
+    userId: connState.session.userId,
+    publicProfileStorageBaseUrl
   });
 
   const frame = {
@@ -1011,7 +1014,8 @@ function sendStateSnapshot(ws, connState, { requestId = null, tableSnapshot, rea
 function sendStateDelta(ws, connState, { tableSnapshot }) {
   const payload = buildStateSnapshotPayload({
     tableSnapshot,
-    userId: connState.session.userId
+    userId: connState.session.userId,
+    publicProfileStorageBaseUrl
   });
   const cacheKey = snapshotCacheKey(connState.sessionId, tableSnapshot.tableId);
   const previousPayload = lastSnapshotBySessionAndTable.get(cacheKey) ?? null;

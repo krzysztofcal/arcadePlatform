@@ -97,7 +97,7 @@ function normalizeMemberSeatRows(value) {
     .map((member) => ({ userId: member.userId, seatNo: member.seat, status: "ACTIVE" }));
 }
 
-function resolvePublicSeats({ statePublic, members, coreState, publicProfilesByUserId }) {
+function resolvePublicSeats({ statePublic, members, coreState, publicProfilesByUserId, publicProfileStorageBaseUrl }) {
   const stateSeats = normalizeSeatRows(statePublic?.seats);
   const seatDetailsByUserId = normalizeSeatDetails(coreState?.seatDetailsByUserId);
   const foldedByUserId = asObject(statePublic?.foldedByUserId) || {};
@@ -113,7 +113,7 @@ function resolvePublicSeats({ statePublic, members, coreState, publicProfilesByU
     if (details?.botProfile) merged.botProfile = details.botProfile;
     if (details?.leaveAfterHand) merged.leaveAfterHand = true;
     if (!merged.isBot) {
-      const profile = normalizePublicPokerIdentity(publicProfilesByUserId?.[seat.userId]);
+      const profile = normalizePublicPokerIdentity(publicProfilesByUserId?.[seat.userId], { storageBaseUrl: publicProfileStorageBaseUrl });
       if (profile) merged.profile = profile;
     }
     return merged;
@@ -284,10 +284,10 @@ function resolveRevealedShowdownParticipants({ statePublic, state }) {
     .filter((entry) => entry.holeCards.length === 2);
 }
 
-export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, userId, youSeat, publicProfilesByUserId = {} }) {
+export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, userId, youSeat, publicProfilesByUserId = {}, publicProfileStorageBaseUrl = "" }) {
   const state = asObject(coreState?.pokerState) || asObject(coreState?.state);
   const statePublic = state ? withoutPrivateState(state) : null;
-  const publicSeats = resolvePublicSeats({ statePublic, members, coreState, publicProfilesByUserId });
+  const publicSeats = resolvePublicSeats({ statePublic, members, coreState, publicProfilesByUserId, publicProfileStorageBaseUrl });
   const publicStacks = resolvePublicStacks({ statePublic, coreState, seats: publicSeats });
   const effectiveYouSeat = hasLeftTable(statePublic, userId) ? null : youSeat;
 

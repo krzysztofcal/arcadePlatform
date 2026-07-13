@@ -193,7 +193,8 @@ Cache invariants:
   - then call and await the bounded `refreshPublicProfiles()` before returning the cold-load result;
   - profile failure returns the successful table result with initials.
 - `ws-server/poker/handlers/join.mjs` in `handleJoinCommand()`:
-  - after successful authoritative `restoreTableFromPersisted()` and before the first `tableSnapshot()`, await `refreshPublicProfiles(tableId, { force: true })`;
+  - after successful authoritative `restoreTableFromPersisted()` and before the first `tableSnapshot()`, await `refreshPublicProfiles(tableId)`;
+  - a changed human-seat fingerprint already invalidates freshness, while an unchanged rejoin/reconnect reuses the 60-second cache;
   - the refresh timeout/failure does not reject the accepted join.
 - `ws-server/server.mjs` resync/resume paths:
   - after `ensureTableLoaded()` and before the synchronous `tableSnapshot()`, await `refreshPublicProfiles()` only when stale;
@@ -313,7 +314,7 @@ Making existing synchronous table-manager paths asynchronous is explicitly out o
 ## Rollout and rollback
 
 - Deploy the optional WS field before enabling browser rendering.
-- Monitor aggregate profile-refresh count, cache hit/miss, timeout/error count, latency, missing-profile count, and snapshot size without logging handles or user IDs.
+- Monitor aggregate profile-refresh count, cache hit/miss, timeout/error count, latency, missing-profile count, and snapshot size without logging table IDs, handles, or user IDs.
 - Roll back WS enrichment by disabling the profile loader; clients continue with initials.
 - Roll back image rendering while retaining names and initials.
 - Never delete canonical profiles, user uploads, poker seats, poker state, or ledger data during rollback.

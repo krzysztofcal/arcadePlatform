@@ -279,6 +279,7 @@ export function createTableManager({
   actionResultCacheMax = DEFAULT_ACTION_RESULT_CACHE_MAX,
   tableBootstrapLoader = null,
   publicProfileLoader = null,
+  publicProfileStorageBaseUrl = "",
   publicProfileFreshMs = DEFAULT_PUBLIC_PROFILE_FRESH_MS,
   publicProfileTimeoutMs = DEFAULT_PUBLIC_PROFILE_TIMEOUT_MS,
   publicProfileLog = null,
@@ -351,7 +352,7 @@ export function createTableManager({
     const allowed = new Set(candidates.userIds);
     return Object.fromEntries(Object.entries(table?.publicProfilesByUserId || {})
       .filter(([userId]) => allowed.has(userId))
-      .map(([userId, profile]) => [userId, normalizePublicPokerIdentity(profile)])
+      .map(([userId, profile]) => [userId, normalizePublicPokerIdentity(profile, { storageBaseUrl: publicProfileStorageBaseUrl })])
       .filter(([, profile]) => profile));
   }
 
@@ -413,12 +414,11 @@ export function createTableManager({
         const allowedIds = new Set(candidates.userIds);
         const profiles = Object.fromEntries(Object.entries(loaded && typeof loaded === "object" && !Array.isArray(loaded) ? loaded : {})
           .filter(([userId]) => allowedIds.has(userId))
-          .map(([userId, profile]) => [userId, normalizePublicPokerIdentity(profile)])
+          .map(([userId, profile]) => [userId, normalizePublicPokerIdentity(profile, { storageBaseUrl: publicProfileStorageBaseUrl })])
           .filter(([, profile]) => profile));
         currentTable.publicProfilesByUserId = profiles;
         currentTable.publicProfilesLoadedAtMs = nowMs;
         emitPublicProfileLog({
-          tableId,
           status: "ok",
           candidates: candidates.userIds.length,
           profiles: Object.keys(profiles).length,
@@ -434,7 +434,6 @@ export function createTableManager({
           }
         }
         emitPublicProfileLog({
-          tableId,
           status: error?.message === "public_profile_timeout" ? "timeout" : "error",
           candidates: candidates.userIds.length,
           latencyMs: Date.now() - startedAt
@@ -732,7 +731,8 @@ export function createTableManager({
       members,
       userId,
       youSeat,
-      publicProfilesByUserId: table ? publicProfilesForSnapshot(table) : {}
+      publicProfilesByUserId: table ? publicProfilesForSnapshot(table) : {},
+      publicProfileStorageBaseUrl
     });
 
     if (!table) {
