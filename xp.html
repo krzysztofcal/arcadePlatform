@@ -6,12 +6,12 @@
   <meta name="theme-color" content="#0b1020">
   <title>XP Progress • Arcade Hub</title>
   <style>
-    .page-boot{position:fixed;inset:0;z-index:2147483000;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 16% 8%,rgba(50,246,255,.25),transparent 34%),radial-gradient(circle at 88% 14%,rgba(255,79,216,.22),transparent 30%),#070814;color:#eefcff;font-family:system-ui,sans-serif}
+    .page-boot{position:fixed;inset:0;z-index:2147483000;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 16% 8%,rgba(50,246,255,.25),transparent 34%),radial-gradient(circle at 88% 14%,rgba(255,79,216,.22),transparent 30%),#070814;color:#eefcff;font-family:system-ui,sans-serif;animation:page-boot-failsafe .2s ease 3s forwards}
     .page-boot[hidden]{display:none}.page-boot__shell{width:min(720px,88vw);display:grid;gap:16px;padding:20px;border:1px solid rgba(50,246,255,.3);border-radius:28px;background:rgba(12,16,36,.9);box-shadow:0 30px 100px rgba(0,0,0,.55)}
     .page-boot__logo{width:64px;height:64px;margin:-52px auto 4px;border-radius:22px;background:linear-gradient(135deg,#32f6ff,#7c4dff 52%,#ff4fd8);box-shadow:0 0 60px rgba(50,246,255,.42);animation:page-boot-float 1s ease-in-out infinite alternate}
     .page-boot__line,.page-boot__hero,.page-boot__cards i{display:block;border-radius:15px;background:linear-gradient(100deg,rgba(50,246,255,.08) 20%,rgba(182,92,255,.3) 42%,rgba(50,246,255,.08) 64%);background-size:240% 100%;animation:page-boot-shimmer 1s linear infinite}
     .page-boot__line{width:54%;height:18px}.page-boot__hero{height:116px}.page-boot__cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.page-boot__cards i{height:76px}
-    @keyframes page-boot-shimmer{to{background-position:-240% 0}}@keyframes page-boot-float{from{transform:translateY(-7px) rotate(-4deg)}to{transform:translateY(7px) rotate(4deg)}}
+    @keyframes page-boot-shimmer{to{background-position:-240% 0}}@keyframes page-boot-float{from{transform:translateY(-7px) rotate(-4deg)}to{transform:translateY(7px) rotate(4deg)}}@keyframes page-boot-failsafe{to{opacity:0;visibility:hidden;pointer-events:none}}
     @media(max-width:560px){.page-boot__cards{grid-template-columns:1fr}.page-boot__cards i:nth-child(n+2){display:none}}@media(prefers-reduced-motion:reduce){.page-boot__logo,.page-boot__line,.page-boot__hero,.page-boot__cards i{animation:none}}
   </style>
   <link rel="preconnect" href="https://fonts.googleapis.com">

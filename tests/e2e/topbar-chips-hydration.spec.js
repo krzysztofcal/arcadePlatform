@@ -72,6 +72,26 @@ async function seedCachedBalance(page, balance) {
   });
 });
 
+[
+  { path: '/account.html', name: 'account' },
+  { path: '/favorites.html', name: 'favorites' },
+  { path: '/recently-played.html', name: 'recently played' },
+  { path: '/xp.html', name: 'XP progress' },
+].forEach(({ path, name }) => {
+  test(`${name} fails open when topbar.js cannot load`, async ({ page }) => {
+    await mockAuthenticatedSession(page);
+    await page.route('**/js/topbar.js', (route) => route.abort('failed'));
+
+    await page.goto(path, { waitUntil: 'domcontentloaded' });
+    const boot = page.locator('#pageBoot');
+    await expect(boot).toBeVisible();
+    await boot.evaluate((element) => { element.style.animationDelay = '0s'; });
+    await expect(boot).toBeHidden();
+    await expect(page.locator('main')).toBeVisible();
+    await expect(boot).toHaveCSS('pointer-events', 'none');
+  });
+});
+
 test('hydrates chips before revalidation and refreshes after a transaction event', async ({ page }) => {
   await mockAuthenticatedSession(page);
   await seedCachedBalance(page, 896);

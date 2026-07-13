@@ -78,6 +78,8 @@ test('topbar ensures chip badge creation when missing', () => {
   [accountHtml, favoritesHtml, recentlyPlayedHtml, xpHtml].forEach((content) => {
     assert.match(content, /id="pageBoot"/);
     assert.match(content, /\.page-boot__shell/);
+    assert.match(content, /animation:page-boot-failsafe \.2s ease 3s forwards/);
+    assert.match(content, /@keyframes page-boot-failsafe\{to\{opacity:0;visibility:hidden;pointer-events:none\}\}/);
     assert.ok(content.indexOf('.page-boot{') < content.indexOf('css/portal.css'));
     assert.ok(content.indexOf('id="pageBoot"') < content.indexOf('class="topbar"'));
   });
