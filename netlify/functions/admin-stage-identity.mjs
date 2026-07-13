@@ -76,7 +76,9 @@ function resolveDatabaseTarget({ environmentContext, projectRef, expectedStagePr
 
 function buildStageIdentity(env = process.env) {
   const environmentContext = resolveEnvironmentContext(env);
-  const supabaseProjectRef = resolveConfiguredProjectRef(env);
+  const supabaseUrlProjectRef = parseProjectRefFromSupabaseUrl(env.SUPABASE_URL || env.SUPABASE_URL_V2);
+  const databaseProjectRef = parseProjectRefFromDbUrl(env.SUPABASE_DB_URL);
+  const supabaseProjectRef = supabaseUrlProjectRef || databaseProjectRef || resolveConfiguredProjectRef(env);
   const expectedStageProjectRef = resolveExpectedStageProjectRef(env);
   const serviceRoleProjectRef = parseProjectRefFromSupabaseJwt(env.SUPABASE_SERVICE_ROLE_KEY);
   const stageProjectRefMatches = !!expectedStageProjectRef && !!supabaseProjectRef && expectedStageProjectRef === supabaseProjectRef;
@@ -89,6 +91,9 @@ function buildStageIdentity(env = process.env) {
   return {
     environmentContext,
     supabaseProjectRef: supabaseProjectRef || null,
+    supabaseUrlProjectRef: supabaseUrlProjectRef || null,
+    databaseProjectRef: databaseProjectRef || null,
+    databaseMatchesSupabaseProjectRef: !!supabaseUrlProjectRef && !!databaseProjectRef && supabaseUrlProjectRef === databaseProjectRef,
     expectedStageProjectRef,
     databaseTarget,
     chipsEnabled: env.CHIPS_ENABLED === "1",

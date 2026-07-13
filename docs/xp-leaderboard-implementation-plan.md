@@ -375,6 +375,8 @@ Implementation status: complete in PR #690. The shared 03:00 Warsaw/ISO period h
 
 ### PR 2: Backfill and reconciliation
 
+Implementation status: implemented on branch `feat/xp-leaderboard-backfill`; stage dry-run/apply verification remains required before merge. The maintenance endpoint is admin-only, bounded, dry-run by default, and does not expose leaderboard data publicly.
+
 - Add the guarded idempotent backfill/reconciliation tool.
 - Add and run the separate trusted profile-coverage preflight; verify retained daily keys on stage.
 - Remove exceptional missing-profile members from projections rather than changing public page boundaries.

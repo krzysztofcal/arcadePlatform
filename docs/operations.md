@@ -22,6 +22,51 @@ This document preserves the operational and rollout details that were previously
 - Once unlocked, the recorder auto-starts (`window.KLog.start(1)`) and the About page surfaces a **Dump diagnostics** button. Clicking it opens a new tab populated with the recent buffer (up to 1000 lines) and falls back to downloading `kcswh-diagnostic-<timestamp>.txt` when the popup is blocked.
 - The buffer captures the XP lifecycle breadcrumbs (`xp_init`, `xp_start`, `xp_stop`, `block_no_host`, `block_hard_idle`, `award`) so you can confirm that accrual only happens on game hosts and is suppressed on idle or non-host pages. Check `window.KLog.status()` for the active level and line count.
 
+## XP leaderboard maintenance
+
+`/.netlify/functions/admin-xp-leaderboard-maintenance` is an admin-only, bounded maintenance endpoint. It does not expose rankings publicly. Requests default to dry-run, accept at most 50 accounts, use the configured `XP_KEY_NS`, and refuse unknown Supabase targets. Apply requests require the exact confirmation returned by the detected target: `apply:<stage|production>:<project-ref>`.
+
+Prerequisites are existing runtime configuration only: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL`, Upstash REST credentials, `XP_KEY_NS`, and `SUPABASE_STAGE_PROJECT_REF` on deploy previews. No database migration or new persistent environment variable is required.
+
+Use an admin Supabase access token and the matching deploy URL. Start every operation without `apply`:
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer <admin access token>" \
+  -H "Content-Type: application/json" \
+  https://<deploy>/.netlify/functions/admin-xp-leaderboard-maintenance \
+  -d '{"operation":"profile_coverage","page":1,"limit":25}'
+```
+
+Run pages until `hasMore` is false. Then repeat each page with `"apply":true` and the exact target confirmation, for example on stage:
+
+```json
+{
+  "operation": "profile_coverage",
+  "page": 1,
+  "limit": 25,
+  "apply": true,
+  "confirmation": "apply:stage:<stage-project-ref>"
+}
+```
+
+After profile coverage completes, run `backfill` with the same dry-run-first and paged apply sequence. It reads canonical lifetime/current-day/current-week counters, sets non-zero sorted-set scores, removes stale zero scores, and refreshes bounded day/week TTLs. Re-running every page must converge to `updated: 0`, `removed: 0`, and only `unchanged` results.
+
+Finally run `prune` separately for `all_time`, `today`, and `week`. It removes index members without a public profile. Prune uses `offset`, not `page`; when an apply removes rows it returns the same `nextOffset` so shifted members are not skipped:
+
+```json
+{
+  "operation": "prune",
+  "period": "all_time",
+  "offset": 0,
+  "limit": 25,
+  "apply": true,
+  "confirmation": "apply:stage:<stage-project-ref>"
+}
+```
+
+Stop on any non-zero `failed` count. The endpoint logs aggregate counts only and never logs user IDs or emails. Do not run production apply until the public API PR is deployed dark and stage backfill has been rerun successfully. Rollback consists of removing the derived `<XP_KEY_NS>:leaderboard:v1:*` sorted sets; never modify canonical `total` or `daily` XP keys.
+
 ## Stage DB identity check
 - Netlify deploy previews must point at the stage Supabase project before DB migration automation is enabled.
 - Configure these variables in Netlify for the `deploy-preview` context with stage values:
@@ -37,6 +82,8 @@ This document preserves the operational and rollout details that were previously
 - The admin-only endpoint `/.netlify/functions/admin-stage-identity` returns sanitized environment identity:
   - `environmentContext`
   - `supabaseProjectRef`
+  - separate `supabaseUrlProjectRef` and `databaseProjectRef`
+  - `databaseMatchesSupabaseProjectRef`
   - `expectedStageProjectRef`
   - `databaseTarget`
   - `chipsEnabled`
