@@ -166,7 +166,7 @@ function createMemoryStore() {
     async zcard(key) { return getSortedSet(key)?.size ?? 0; },
     async eval(_script, keys = [], argv = []) {
       // Memory impl supports the XP award signatures used by calculate-xp.
-      if ((keys.length === 8 && argv.length === 10) || (keys.length === 5 && argv.length === 7) || (keys.length === 4 && argv.length === 6)) {
+      if (((keys.length === 8 || keys.length === 9) && argv.length === 10) || (keys.length === 5 && argv.length === 7) || (keys.length === 4 && argv.length === 6)) {
         const [sessionKey, sessionSyncKey, dailyKey, totalKey, maybeLockKey] = keys;
         const hasLock = keys.length !== 4;
         const lockKey = hasLock ? maybeLockKey : null;
@@ -177,9 +177,9 @@ function createMemoryStore() {
         const ts = Number(argv[4]);
         const lockTtl = hasLock ? Number(argv[5]) : 0;
         const sessionTtlMs = hasLock ? Number(argv[6]) : Number(argv[5]);
-        const leaderboardMember = keys.length === 8 ? String(argv[7] || "") : "";
-        const dayExpiresAtSec = keys.length === 8 ? Number(argv[8]) : 0;
-        const weekExpiresAtSec = keys.length === 8 ? Number(argv[9]) : 0;
+        const leaderboardMember = keys.length >= 8 ? String(argv[7] || "") : "";
+        const dayExpiresAtSec = keys.length >= 8 ? Number(argv[8]) : 0;
+        const weekExpiresAtSec = keys.length >= 8 ? Number(argv[9]) : 0;
 
         const lockEntry = lockKey ? sweep(lockKey) : null;
         if (lockKey && lockEntry) {
@@ -244,7 +244,8 @@ function createMemoryStore() {
           setValue(totalKey, lifetime, null);
           setValue(sessionSyncKey, lastSync, sessionTtlMs > 0 ? sessionTtlMs : null);
 
-          if (leaderboardMember) {
+          const leaderboardVisible = keys.length < 9 || getValue(keys[8]) === null;
+          if (leaderboardMember && leaderboardVisible) {
             zaddValue(keys[5], lifetime, leaderboardMember);
             zaddValue(keys[6], dailyTotal, leaderboardMember);
             const weekly = getSortedSet(keys[7], true);
@@ -259,7 +260,7 @@ function createMemoryStore() {
         }
       }
 
-      if ((keys.length === 5 && argv.length === 2) || (keys.length === 4 && argv.length === 1)) {
+      if ((keys.length === 5 && argv.length === 2) || (keys.length === 6 && argv.length === 2) || (keys.length === 4 && argv.length === 1)) {
         const [anonTotalKey, userTotalKey, markerKey, userMarkerKey] = keys;
         const conversionCap = Math.max(0, Math.floor(Number(argv[0]) || 0));
         const existingUserMarker = getValue(userMarkerKey);
@@ -280,8 +281,36 @@ function createMemoryStore() {
         memory.delete(anonTotalKey);
         setValue(markerKey, converted, null);
         setValue(userMarkerKey, converted, null);
-        if (keys.length === 5 && argv[1]) zaddValue(keys[4], userTotal, argv[1]);
+        const leaderboardVisible = keys.length < 6 || getValue(keys[5]) === null;
+        if (keys.length >= 5 && argv[1] && leaderboardVisible) zaddValue(keys[4], userTotal, argv[1]);
         return [converted, userTotal, anonTotal, 0];
+      }
+
+      if (keys.length >= 7 && argv.length === 4) {
+        const [hiddenKey, allTimeKey, dayKey, weekKey, totalKey, todayTotalKey] = keys;
+        const visible = String(argv[0]) === "1";
+        const member = String(argv[1] || "");
+        if (!visible) {
+          setValue(hiddenKey, "1", null);
+          getSortedSet(allTimeKey)?.delete(member);
+          getSortedSet(dayKey)?.delete(member);
+          getSortedSet(weekKey)?.delete(member);
+          return [0, 0, 0];
+        }
+        memory.delete(hiddenKey);
+        const lifetime = Math.max(0, Math.floor(Number(getValue(totalKey)) || 0));
+        const today = Math.max(0, Math.floor(Number(getValue(todayTotalKey)) || 0));
+        const week = keys.slice(6).reduce((sum, key) => sum + Math.max(0, Math.floor(Number(getValue(key)) || 0)), 0);
+        const setScore = (key, score) => {
+          if (score > 0) zaddValue(key, score, member);
+          else getSortedSet(key)?.delete(member);
+        };
+        setScore(allTimeKey, lifetime);
+        setScore(dayKey, today);
+        setScore(weekKey, week);
+        if (today > 0) setExpiryMs(dayKey, Math.max(0, Number(argv[2]) * 1000 - Date.now()));
+        if (week > 0) setExpiryMs(weekKey, Math.max(0, Number(argv[3]) * 1000 - Date.now()));
+        return [lifetime, today, week];
       }
 
       throw new Error("Unsupported eval signature in memory store");

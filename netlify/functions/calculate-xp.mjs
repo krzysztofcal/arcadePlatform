@@ -703,6 +703,7 @@ export async function handler(event) {
         userId: supabaseUserId,
         conversionCap: XP_POLICY.anonConversionCap,
         leaderboardAllTimeKey: XP_LEADERBOARD_KEYS.allTime(),
+        leaderboardHiddenKey: XP_LEADERBOARD_KEYS.hidden(supabaseUserId),
       });
       if (conversion.converted > 0) {
         await persistUserProfile({ userId: supabaseUserId, totalXp: conversion.userTotal, now });
@@ -934,6 +935,7 @@ export async function handler(event) {
       leaderboardAllTimeKey,
       leaderboardDayKey,
       leaderboardWeekKey,
+      XP_LEADERBOARD_KEYS.hidden(supabaseUserId || userId),
     ],
     args: [
       now,

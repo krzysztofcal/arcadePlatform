@@ -261,6 +261,11 @@
               <label for="publicBio" data-i18n="publicBio">Bio</label>
               <textarea id="publicBio" name="bio" maxlength="160"></textarea>
               <p class="public-profile-editor__field-error" id="publicBioError" aria-live="polite"></p>
+              <fieldset class="leaderboard-privacy-setting">
+                <legend data-i18n="leaderboardSettingsTitle">Leaderboard settings</legend>
+                <label for="hideFromLeaderboard"><input id="hideFromLeaderboard" name="hideFromLeaderboard" type="checkbox"><span data-i18n="hideFromLeaderboard">Hide my profile from the leaderboard</span></label>
+                <p class="account-note" data-i18n="hideFromLeaderboardHint">Your public profile remains available by handle. This setting removes you from XP rankings.</p>
+              </fieldset>
               <button type="submit" class="public-profile-save" id="publicProfileSave" data-state="idle" aria-busy="false"><span class="public-profile-save__spinner" aria-hidden="true"></span><span id="publicProfileSaveLabel" data-i18n="savePublicProfile">Save public profile</span></button>
               <span class="public-profile-save__status" id="publicProfileSaveStatus" aria-live="polite"></span>
             </form>

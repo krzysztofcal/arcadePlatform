@@ -5,7 +5,9 @@ import { createAdminXpLeaderboardMaintenanceHandler } from "../netlify/functions
 import {
   issueMaintenanceApplyToken,
   listAuthUsersPage,
+  listProfilesPage,
   parseMaintenanceRequest,
+  readEligibleProfileIds,
   runBackfill,
   runProfileCoverage,
   runPrune,
@@ -135,6 +137,14 @@ test("profile coverage discovery uses bounded Supabase Admin pagination and keep
   assert.equal(request.url, "https://stage-ref.supabase.co/auth/v1/admin/users?page=2&per_page=25");
   assert.equal(request.options.headers.apikey, "service-secret");
   assert.equal(JSON.stringify(ids).includes("private@example.com"), false);
+});
+
+test("backfill and prune select only leaderboard-visible profiles", async () => {
+  const queries = [];
+  const runSql = async (query) => { queries.push(query); return []; };
+  assert.deepEqual(await listProfilesPage({ page: 1, limit: 25, runSql }), []);
+  assert.deepEqual(await readEligibleProfileIds([USER_1], runSql), new Set());
+  assert.equal(queries.every((query) => /leaderboard_visible\s*=\s*true/i.test(query)), true);
 });
 
 test("profile coverage is read-only in dry-run and creates only missing profiles on apply", async () => {

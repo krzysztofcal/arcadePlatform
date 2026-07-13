@@ -9,6 +9,7 @@ import {
   parseLeaderboardQuery,
   readLeaderboardMe,
   readLeaderboardPage,
+  readLeaderboardProfiles,
 } from "../netlify/functions/_shared/xp-leaderboard-read.mjs";
 import { configuredRateLimit, leaderboardEnabled } from "../netlify/functions/_shared/xp-leaderboard-http.mjs";
 
@@ -68,6 +69,13 @@ test("leaderboard query validation is bounded and endpoint-specific", () => {
   assert.throws(() => parseLeaderboardQuery({ limit: "51" }), { code: "invalid_limit" });
   assert.throws(() => parseLeaderboardQuery({ member: USER_A }), { code: "invalid_request" });
   assert.throws(() => parseLeaderboardQuery({ page: "1" }, { me: true }), { code: "invalid_request" });
+});
+
+test("leaderboard profile reads fail closed for owner opt-outs", async () => {
+  let sql = "";
+  const result = await readLeaderboardProfiles([USER_A], async (query) => { sql = query; return []; });
+  assert.match(sql, /leaderboard_visible\s*=\s*true/i);
+  assert.equal(result.size, 0);
 });
 
 test("public pages use competition ranks and never over-fetch a missing profile", async () => {
@@ -192,7 +200,7 @@ test("authenticated me uses the same public projection and competition rank", as
   })).response.me, null);
 });
 
-test("public handler is cacheable, gated, rate-limited, and returns controlled failures", async () => {
+test("public handler stays fresh across visibility changes, is gated, rate-limited, and returns controlled failures", async () => {
   const publicPayload = { period: "all_time", rows: [] };
   const handler = createXpLeaderboardHandler({
     leaderboardEnabled: () => true,
@@ -201,7 +209,7 @@ test("public handler is cacheable, gated, rate-limited, and returns controlled f
   });
   const success = await handler(event());
   assert.equal(success.statusCode, 200);
-  assert.equal(success.headers["cache-control"], "public, max-age=15, stale-while-revalidate=30");
+  assert.equal(success.headers["cache-control"], "no-store");
   assert.deepEqual(body(success), publicPayload);
 
   const disabled = await createXpLeaderboardHandler({ leaderboardEnabled: () => false })(event());

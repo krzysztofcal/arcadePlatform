@@ -109,6 +109,11 @@ html[data-auth="out"] #chipBadge{ display:none !important; }
 .chip-ledger__pagination button:disabled{ cursor:not-allowed; opacity:.45; }
 .chip-ledger__pagination span{ min-width:32px; text-align:center; color:#a5f3fc; font-weight:700; }
 .account-form__link{ padding:4px 0 !important; border:0 !important; background:transparent !important; color:#a5f3fc !important; text-align:left; font-weight:600; cursor:pointer; }
+.leaderboard-privacy-setting{margin:6px 0 0;padding:14px;border:1px solid rgba(110,231,231,.2);border-radius:10px;background:rgba(110,231,231,.04);}
+.leaderboard-privacy-setting legend{padding:0 5px;color:#f8fafc;font-weight:700;}
+.account-form .leaderboard-privacy-setting label{display:flex;align-items:flex-start;gap:10px;margin:0;cursor:pointer;}
+.leaderboard-privacy-setting input[type="checkbox"]{width:18px;height:18px;flex:0 0 18px;margin:2px 0 0;accent-color:#6ee7e7;}
+.leaderboard-privacy-setting .account-note{margin:8px 0 0 28px;}
 
 .chip-ledger__meta{ display:flex; flex-direction:column; gap:4px; min-width:0; }
 

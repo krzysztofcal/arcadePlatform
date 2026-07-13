@@ -1,12 +1,8 @@
-import crypto from "node:crypto";
 import { beginSql, executeSql } from "./supabase-admin.mjs";
+import { syncUserLeaderboardVisibility } from "./xp-leaderboard-visibility.mjs";
 
-const ADJECTIVES = Object.freeze(["Apex", "Blue", "Bold", "Bright", "Cosmic", "Echo", "Ember", "Neon", "Nova", "Pixel", "Rapid", "Rocket", "Solar", "Swift", "Turbo", "Ultra", "Vivid", "Zen"]);
-const NOUNS = Object.freeze(["Ace", "Bolt", "Comet", "Falcon", "Fox", "Nova", "Orbit", "Panda", "Raven", "Tiger", "Wave", "Wizard"]);
-const AVATAR_VARIANTS = Object.freeze(["comet-blue", "falcon-orange", "fox-blue", "nova-purple", "orbit-green", "panda-pink"]);
 const RESERVED_HANDLES = new Set(["admin", "admin-api", "about", "account", "api", "assets", "auth", "contact", "game", "games", "help", "leaderboard", "legal", "login", "logout", "me", "poker", "privacy", "profile", "register", "settings", "signup", "static", "support", "terms", "user", "users", "xp"]);
 const HANDLE_RE = /^[a-z0-9][a-z0-9_-]{2,23}$/;
-const MAX_IDENTITY_ATTEMPTS = 16;
 
 function profileError(code, status = 400) {
   const error = new Error(code);
@@ -42,22 +38,6 @@ function normalizeBio(value) {
   return bio;
 }
 
-function randomItem(items) {
-  return items[crypto.randomInt(0, items.length)];
-}
-
-function createGeneratedIdentity() {
-  const adjective = randomItem(ADJECTIVES);
-  const noun = randomItem(NOUNS);
-  const suffix = crypto.randomInt(100000, 1000000);
-  const displayName = `${adjective} ${noun} ${suffix}`;
-  return {
-    displayName,
-    handle: `${adjective}-${noun}-${suffix}`.toLowerCase(),
-    avatarVariant: randomItem(AVATAR_VARIANTS),
-  };
-}
-
 function normalizeProfileRow(row) {
   if (!row) return null;
   return {
@@ -68,6 +48,7 @@ function normalizeProfileRow(row) {
     avatarKey: row.avatar_key || null,
     avatarVariant: row.avatar_variant,
     handleCustomizedAt: row.handle_customized_at || null,
+    leaderboardVisible: row.leaderboard_visible !== false,
   };
 }
 
@@ -99,6 +80,7 @@ function ownerProfile(profile) {
   return {
     ...publicProfile(profile),
     handleCanBeCustomized: !profile.handleCustomizedAt,
+    leaderboardVisible: profile.leaderboardVisible !== false,
   };
 }
 
@@ -108,7 +90,7 @@ function isHandleConflict(error) {
 
 async function readProfile(userId, runSql = executeSql) {
   const rows = await runSql(
-    `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at
+    `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at, leaderboard_visible
      from public.user_profiles where user_id = $1 limit 1;`,
     [userId],
   );
@@ -117,40 +99,23 @@ async function readProfile(userId, runSql = executeSql) {
 
 async function ensureUserProfile(userId, deps = {}) {
   if (typeof userId !== "string" || !userId.trim()) throw profileError("unauthorized", 401);
-  const runTransaction = deps.beginSql || beginSql;
-  for (let attempt = 0; attempt < MAX_IDENTITY_ATTEMPTS; attempt += 1) {
-    const identity = createGeneratedIdentity();
-    try {
-      const profile = await runTransaction(async (tx) => {
-        const inserted = await tx.unsafe(
-          `insert into public.user_profiles (user_id, handle, display_name, avatar_variant)
-           values ($1, $2, $3, $4)
-           on conflict (user_id) do nothing
-           returning user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at;`,
-          [userId, identity.handle, identity.displayName, identity.avatarVariant],
-        );
-        if (inserted?.[0]) return normalizeProfileRow(inserted[0]);
-        const existing = await tx.unsafe(
-          `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at
-           from public.user_profiles where user_id = $1 limit 1;`,
-          [userId],
-        );
-        return normalizeProfileRow(existing?.[0]);
-      });
-      if (profile) return profile;
-    } catch (error) {
-      if (isHandleConflict(error)) continue;
-      throw error;
-    }
-  }
-  throw profileError("profile_generation_exhausted", 503);
+  const runSql = deps.executeSql || executeSql;
+  const rows = await runSql(
+    `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant,
+            handle_customized_at, leaderboard_visible
+     from public.ensure_user_profile($1::uuid);`,
+    [userId],
+  );
+  const profile = normalizeProfileRow(rows?.[0]);
+  if (!profile) throw profileError("profile_generation_exhausted", 503);
+  return profile;
 }
 
 async function findPublicProfile(handle, runSql = executeSql) {
   const normalized = typeof handle === "string" ? handle.trim().toLowerCase() : "";
   if (!HANDLE_RE.test(normalized) || RESERVED_HANDLES.has(normalized)) return null;
   const rows = await runSql(
-    `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at
+    `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at, leaderboard_visible
      from public.user_profiles where lower(handle) = $1 limit 1;`,
     [normalized],
   );
@@ -162,17 +127,22 @@ async function updateUserProfile(userId, payload = {}, deps = {}) {
   const hasDisplayName = Object.prototype.hasOwnProperty.call(payload, "displayName");
   const hasBio = Object.prototype.hasOwnProperty.call(payload, "bio");
   const hasHandle = Object.prototype.hasOwnProperty.call(payload, "handle");
+  const hasLeaderboardVisible = Object.prototype.hasOwnProperty.call(payload, "leaderboardVisible");
+  if (hasLeaderboardVisible && typeof payload.leaderboardVisible !== "boolean") throw profileError("invalid_leaderboard_visibility");
   const displayName = hasDisplayName ? normalizeDisplayName(payload.displayName) : profile.displayName;
   const bio = hasBio ? normalizeBio(payload.bio) : profile.bio;
   const requestedHandle = hasHandle ? normalizeHandle(payload.handle) : profile.handle;
+  const leaderboardVisible = hasLeaderboardVisible ? payload.leaderboardVisible : profile.leaderboardVisible;
   const changesHandle = requestedHandle !== profile.handle;
-  if (!hasDisplayName && !hasBio && !changesHandle) return profile;
+  if (!hasDisplayName && !hasBio && !changesHandle && !hasLeaderboardVisible) return profile;
 
   const runTransaction = deps.beginSql || beginSql;
+  const syncVisibility = deps.syncLeaderboardVisibility || syncUserLeaderboardVisibility;
   try {
-    return await runTransaction(async (tx) => {
+    if (hasLeaderboardVisible && !leaderboardVisible) await syncVisibility(userId, false, deps);
+    const updatedProfile = await runTransaction(async (tx) => {
       const rows = await tx.unsafe(
-        `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at
+        `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at, leaderboard_visible
          from public.user_profiles where user_id = $1 for update;`,
         [userId],
       );
@@ -180,18 +150,22 @@ async function updateUserProfile(userId, payload = {}, deps = {}) {
       if (!current) throw profileError("profile_not_found", 404);
       const finalDisplayName = hasDisplayName ? displayName : current.displayName;
       const finalBio = hasBio ? bio : current.bio;
+      const finalLeaderboardVisible = hasLeaderboardVisible ? leaderboardVisible : current.leaderboardVisible;
       if (changesHandle && current.handleCustomizedAt) throw profileError("handle_locked");
       const finalHandle = changesHandle ? requestedHandle : current.handle;
       const updated = await tx.unsafe(
         `update public.user_profiles
          set handle = $1, display_name = $2, bio = $3,
-             handle_customized_at = case when $4 then timezone('utc', now()) else handle_customized_at end
-         where user_id = $5
-         returning user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at;`,
-        [finalHandle, finalDisplayName, finalBio, changesHandle, userId],
+             handle_customized_at = case when $4 then timezone('utc', now()) else handle_customized_at end,
+             leaderboard_visible = $5
+         where user_id = $6
+         returning user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at, leaderboard_visible;`,
+        [finalHandle, finalDisplayName, finalBio, changesHandle, finalLeaderboardVisible, userId],
       );
       return normalizeProfileRow(updated?.[0]);
     });
+    if (hasLeaderboardVisible && updatedProfile.leaderboardVisible) await syncVisibility(userId, true, deps);
+    return updatedProfile;
   } catch (error) {
     if (isHandleConflict(error)) throw profileError("handle_taken", 409);
     throw error;
@@ -204,7 +178,7 @@ async function updateUserAvatarKey(userId, avatarKey, deps = {}) {
   const runTransaction = deps.beginSql || beginSql;
   return runTransaction(async (tx) => {
     const currentRows = await tx.unsafe(
-      `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at
+      `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at, leaderboard_visible
        from public.user_profiles where user_id = $1 for update;`,
       [userId],
     );
@@ -212,7 +186,7 @@ async function updateUserAvatarKey(userId, avatarKey, deps = {}) {
     if (!current) throw profileError("profile_not_found", 404);
     const updatedRows = await tx.unsafe(
       `update public.user_profiles set avatar_key = $1 where user_id = $2
-       returning user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at;`,
+       returning user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at, leaderboard_visible;`,
       [avatarKey, userId],
     );
     return { profile: normalizeProfileRow(updatedRows?.[0]), previousAvatarKey: current.avatarKey };
@@ -220,7 +194,6 @@ async function updateUserAvatarKey(userId, avatarKey, deps = {}) {
 }
 
 export {
-  createGeneratedIdentity,
   ensureUserProfile,
   findPublicProfile,
   normalizeBio,

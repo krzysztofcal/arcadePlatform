@@ -163,6 +163,17 @@ async function readExistingProfileIds(userIds, runSql = executeSql) {
   return new Set((rows || []).map((row) => row.user_id));
 }
 
+async function readEligibleProfileIds(userIds, runSql = executeSql) {
+  const validIds = userIds.filter((userId) => UUID_RE.test(userId));
+  if (!validIds.length) return new Set();
+  const rows = await runSql(
+    `select user_id::text from public.user_profiles
+     where user_id = any($1::uuid[]) and leaderboard_visible = true;`,
+    [validIds],
+  );
+  return new Set((rows || []).map((row) => row.user_id));
+}
+
 async function runProfileCoverage(request, deps = {}) {
   const listUsers = deps.listAuthUsersPage || listAuthUsersPage;
   const readExisting = deps.readExistingProfileIds || readExistingProfileIds;
@@ -201,6 +212,7 @@ async function listProfilesPage({ page, limit, runSql = executeSql }) {
   const rows = await runSql(
     `select user_id::text
      from public.user_profiles
+     where leaderboard_visible = true
      order by user_id
      offset $1 limit $2;`,
     [(page - 1) * limit, limit],
@@ -285,7 +297,7 @@ async function runPrune(request, deps = {}) {
   const now = Number.isFinite(deps.now) ? deps.now : Date.now();
   const key = selectLeaderboardKey({ period: request.period, namespace, now });
   const candidates = await store.zrevrangeWithScores(key, request.offset, request.offset + request.limit - 1);
-  const readExisting = deps.readExistingProfileIds || readExistingProfileIds;
+  const readExisting = deps.readEligibleProfileIds || deps.readExistingProfileIds || readEligibleProfileIds;
   const existing = await readExisting(candidates.map((row) => row.member), deps.executeSql);
   const missing = candidates.filter((row) => !existing.has(row.member));
   if (!request.dryRun) {
@@ -335,6 +347,7 @@ export {
   maintenanceError,
   parseMaintenanceRequest,
   readCanonicalProjection,
+  readEligibleProfileIds,
   readExistingProfileIds,
   runBackfill,
   runLeaderboardMaintenance,

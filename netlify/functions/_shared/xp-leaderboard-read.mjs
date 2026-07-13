@@ -72,7 +72,8 @@ async function readLeaderboardProfiles(userIds, runSql = executeSql) {
   if (!validIds.length) return new Map();
   const rows = await runSql(
     `select user_id::text, handle, display_name, avatar_key, avatar_variant
-     from public.user_profiles where user_id = any($1::uuid[]);`,
+     from public.user_profiles
+     where user_id = any($1::uuid[]) and leaderboard_visible = true;`,
     [validIds],
   );
   return new Map((rows || []).map((row) => {

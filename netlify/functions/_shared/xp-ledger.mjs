@@ -12,6 +12,7 @@ const XP_ATOMIC_AWARD_SCRIPT = `
   local leaderboardAllTimeKey = KEYS[6]
   local leaderboardDayKey = KEYS[7]
   local leaderboardWeekKey = KEYS[8]
+  local leaderboardHiddenKey = KEYS[9]
   local now = tonumber(ARGV[1])
   local delta = tonumber(ARGV[2])
   local dailyCap = tonumber(ARGV[3])
@@ -79,7 +80,8 @@ const XP_ATOMIC_AWARD_SCRIPT = `
   lastSync = ts
   redis.call('SET', sessionSyncKey, tostring(lastSync))
   refreshSessionTtl()
-  if leaderboardMember and leaderboardMember ~= '' then
+  local leaderboardVisible = not leaderboardHiddenKey or leaderboardHiddenKey == '' or redis.call('EXISTS', leaderboardHiddenKey) == 0
+  if leaderboardMember and leaderboardMember ~= '' and leaderboardVisible then
     redis.call('ZADD', leaderboardAllTimeKey, lifetime, leaderboardMember)
     redis.call('ZADD', leaderboardDayKey, dailyTotal, leaderboardMember)
     redis.call('ZINCRBY', leaderboardWeekKey, grant, leaderboardMember)

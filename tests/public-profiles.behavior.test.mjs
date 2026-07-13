@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 const {
-  createGeneratedIdentity,
+  ensureUserProfile,
   normalizeHandle,
+  ownerProfile,
   publicProfile,
   updateUserProfile,
 } = await import("../netlify/functions/_shared/user-profile.mjs");
@@ -31,6 +32,7 @@ function profile(overrides = {}) {
     avatarKey: "internal/private-key.webp",
     avatarVariant: "fox-blue",
     handleCustomizedAt: null,
+    leaderboardVisible: true,
     ...overrides,
   };
 }
@@ -45,6 +47,7 @@ function dbProfile(overrides = {}) {
     avatar_key: value.avatarKey,
     avatar_variant: value.avatarVariant,
     handle_customized_at: value.handleCustomizedAt,
+    leaderboard_visible: value.leaderboardVisible,
   };
 }
 
@@ -62,13 +65,19 @@ function transactionForProfile(row, updateError = null) {
   });
 }
 
-test("generated identities are public-safe and handles reject reserved values", () => {
-  const identity = createGeneratedIdentity();
-  assert.match(identity.handle, /^[a-z0-9][a-z0-9_-]{2,23}$/);
-  assert.equal(identity.displayName.includes(USER_ID), false);
-  assert.equal(identity.displayName.includes("@"), false);
+test("profile handles reject reserved and invalid values", () => {
   assert.throws(() => normalizeHandle("admin"), { code: "reserved_handle" });
   assert.throws(() => normalizeHandle("not valid"), { code: "invalid_handle" });
+});
+
+test("profile helper delegates idempotent creation to the database function", async () => {
+  let called = null;
+  const result = await ensureUserProfile(USER_ID, {
+    executeSql: async (query, params) => { called = { query, params }; return [dbProfile()]; },
+  });
+  assert.match(called.query, /from public\.ensure_user_profile\(\$1::uuid\)/);
+  assert.deepEqual(called.params, [USER_ID]);
+  assert.equal(result.leaderboardVisible, true);
 });
 
 test("public projection never returns internal identity or avatar storage key", () => {
@@ -81,6 +90,13 @@ test("public projection never returns internal identity or avatar storage key", 
   });
   assert.equal("userId" in projected, false);
   assert.equal(JSON.stringify(projected).includes("internal/private-key.webp"), false);
+  assert.equal("leaderboardVisible" in projected, false);
+});
+
+test("owner projection exposes leaderboard visibility without leaking it publicly", () => {
+  const owner = ownerProfile(profile({ leaderboardVisible: false }));
+  assert.equal(owner.leaderboardVisible, false);
+  assert.equal("leaderboardVisible" in publicProfile(profile({ leaderboardVisible: false })), false);
 });
 
 test("uploaded avatar projection exposes only an opaque stable public URL", () => {
@@ -128,6 +144,28 @@ test("profile-me rejects empty and unknown PATCH fields", async () => {
   }
 });
 
+test("profile-me rejects non-boolean leaderboard visibility", async () => {
+  const handler = createProfileMeHandler({
+    verifySupabaseJwt: async () => ({ valid: true, userId: USER_ID }),
+    updateUserProfile: async () => { const error = new Error("invalid_leaderboard_visibility"); error.code = "invalid_leaderboard_visibility"; error.status = 400; throw error; },
+  });
+  const response = await handler(event("PATCH", { leaderboardVisible: "false" }));
+  assert.equal(response.statusCode, 400);
+  assert.deepEqual(JSON.parse(response.body), { error: "invalid_leaderboard_visibility" });
+});
+
+test("profile helper rejects non-boolean leaderboard visibility before a database write", async () => {
+  let writes = 0;
+  await assert.rejects(
+    () => updateUserProfile(USER_ID, { leaderboardVisible: "false" }, {
+      executeSql: async () => [dbProfile()],
+      beginSql: async () => { writes += 1; },
+    }),
+    { code: "invalid_leaderboard_visibility", status: 400 },
+  );
+  assert.equal(writes, 0);
+});
+
 test("profile-me maps locked and taken handle errors", async () => {
   for (const [code, status] of [["handle_locked", 400], ["handle_taken", 409]]) {
     const handler = createProfileMeHandler({
@@ -149,6 +187,7 @@ test("one-time handle lock and unique conflicts are enforced by profile updates"
   await assert.rejects(
     () => updateUserProfile(USER_ID, { handle: "second-handle" }, {
       beginSql: transactionForProfile(dbProfile({ handleCustomizedAt: "2026-07-10T00:00:00.000Z" })),
+      executeSql: async () => [dbProfile({ handleCustomizedAt: "2026-07-10T00:00:00.000Z" })],
     }),
     { code: "handle_locked" },
   );
@@ -159,9 +198,52 @@ test("one-time handle lock and unique conflicts are enforced by profile updates"
   await assert.rejects(
     () => updateUserProfile(USER_ID, { handle: "taken-handle" }, {
       beginSql: transactionForProfile(dbProfile(), conflict),
+      executeSql: async () => [dbProfile()],
     }),
     { code: "handle_taken", status: 409 },
   );
+});
+
+test("leaderboard opt-out synchronizes Redis before the database write", async () => {
+  const updatedRow = dbProfile({ leaderboardVisible: false });
+  const effects = [];
+  const result = await updateUserProfile(USER_ID, { leaderboardVisible: false }, {
+    executeSql: async () => [dbProfile()],
+    beginSql: async (callback) => { effects.push("db"); return transactionForProfile(updatedRow)(callback); },
+    syncLeaderboardVisibility: async (userId, visible) => { effects.push("redis"); assert.deepEqual({ userId, visible }, { userId: USER_ID, visible: false }); },
+  });
+  assert.equal(result.leaderboardVisible, false);
+  assert.deepEqual(effects, ["redis", "db"]);
+});
+
+test("leaderboard opt-out leaves the database visible when Redis synchronization fails", async () => {
+  let databaseWrites = 0;
+  await assert.rejects(
+    () => updateUserProfile(USER_ID, { leaderboardVisible: false }, {
+      executeSql: async () => [dbProfile()],
+      beginSql: async () => { databaseWrites += 1; },
+      syncLeaderboardVisibility: async () => { throw new Error("redis_unavailable"); },
+    }),
+    /redis_unavailable/,
+  );
+  assert.equal(databaseWrites, 0);
+});
+
+test("leaderboard opt-in commits the database before Redis and an identical retry repairs projections", async () => {
+  const effects = [];
+  const deps = {
+    executeSql: async () => [dbProfile({ leaderboardVisible: true })],
+    beginSql: async (callback) => { effects.push("db"); return transactionForProfile(dbProfile({ leaderboardVisible: true }))(callback); },
+    syncLeaderboardVisibility: async () => { effects.push("redis"); throw new Error("redis_unavailable"); },
+  };
+  await assert.rejects(() => updateUserProfile(USER_ID, { leaderboardVisible: true }, deps), /redis_unavailable/);
+  assert.deepEqual(effects, ["db", "redis"]);
+
+  effects.length = 0;
+  deps.syncLeaderboardVisibility = async (userId, visible) => { effects.push("redis"); assert.deepEqual({ userId, visible }, { userId: USER_ID, visible: true }); };
+  const repaired = await updateUserProfile(USER_ID, { leaderboardVisible: true }, deps);
+  assert.equal(repaired.leaderboardVisible, true);
+  assert.deepEqual(effects, ["db", "redis"]);
 });
 
 test("profile-public is disabled by default and uses generic not found responses", async () => {
