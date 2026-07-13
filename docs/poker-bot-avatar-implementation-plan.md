@@ -1,6 +1,6 @@
 # Poker bot avatars
 
-Status: planning only. Avatar assets are owner-provided and are not part of this documentation PR. Do not begin implementation until the asset handoff in Phase 0 is complete.
+Status: implemented in PR #703. The owner supplied 9 male and 9 female source assets. The implementation converts them to versioned 256 × 256 WebP files, adds atomic name/gender/avatar catalog entries, and removes the temporary PNG sources before merge.
 
 ## Objective
 
