@@ -29,6 +29,16 @@ Poker bots are implemented in the current runtime.
   - Sweep/timeout and close flows may force bot seat inactive and cash out via bot cash-out helper logic.
 - Bot cash-out/eviction actions require `POKER_SYSTEM_ACTOR_USER_ID` to be configured as a valid UUID; if missing/invalid, leave-after-hand and other bot cash-out paths fail closed (skip) for actor safety.
 
+## Browser presentation identity
+
+- `poker/poker-v2.js` deterministically maps each occupied bot seat to one local presentation catalog entry. A table-ID hash rotates the catalog and unique `seatNo` values select distinct entries within that rotation.
+- Each entry atomically pairs an owner-approved display name, explicit `male` or `female` presentation metadata, and the matching same-gender WebP asset.
+- Presentation gender is local validation metadata only. It is not displayed, logged, persisted, or added to the WS contract.
+- Bot names and avatars are not derived from `bot_profile`; betting policy and presentation identity remain independent.
+- The assignment is stateless and collision-free within the supported table capacity: reconnects, late observers, and authoritative restores derive the same result, while removing another bot does not rename remaining seats.
+- Images load from `/poker/assets/avatars/bots/` under the existing same-origin CSP policy. A failed image keeps the selected bot name and falls back to initials derived from that name.
+- Human public-profile avatars, guests, snapshots, poker persistence, and server runtime remain unchanged.
+
 ## Persisted seat fields used by bot flows
 
 Seat snapshots include bot-specific fields that are persisted and returned by table APIs:
