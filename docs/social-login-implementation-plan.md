@@ -20,6 +20,7 @@ The first release is authentication only. It does not import provider avatars, c
 - The current browser client uses Supabase's client-only URL session handling. Moving every auth path to PKCE would also change email confirmation and password-recovery semantics, so that migration is not bundled into the first social-login release.
 - `js/auth/supabaseClient.js::getCurrentUser()` and `attachAuthSubscription()` currently emit `userId`, `emailDomain`, and `sessionExpiresAt`. That high-cardinality telemetry conflicts with the privacy contract for this rollout and must be removed before OAuth is enabled.
 - The browser client currently uses Supabase's default persisted-session storage. Supabase may include `provider_token` or `provider_refresh_token` inside its internally managed serialized session after OAuth even when Arcade Hub never reads those fields.
+- `legal/privacy.pl.html`, `legal/privacy.en.html`, `legal/terms.pl.html`, and `legal/terms.en.html` already direct account-deletion requests to `contact@kcswh.pl`, and the account page exposes the same manual-support path. They do not yet disclose Google/Meta/GitHub social-login processing or provide a dedicated stable Meta deletion-instructions URL.
 - The effective CSP already allows connections to the configured Supabase host. Full-page OAuth redirects do not require Google, Facebook, or GitHub in `connect-src`, `frame-src`, or `img-src`.
 
 No `arcadePlatform-repomix*.txt` snapshot exists in the current checkout, so this plan was prepared from the tracked source files above.
@@ -158,6 +159,52 @@ Rules:
 - disabling the provider in Supabase is the authoritative emergency stop;
 - client IDs and client secrets are never emitted by the build script.
 
+## Legal & Compliance Prerequisites
+
+These are owner/legal production-readiness gates, not OAuth runtime tasks. Stage engineering may proceed with approved test accounts, but no provider button may be enabled in production until every applicable item is complete and publicly verifiable.
+
+### Public legal documents
+
+The owner must approve, publish, and date both language versions before production activation:
+
+- `legal/privacy.pl.html` and `legal/privacy.en.html` must identify Google, Meta/Facebook, GitHub, and Supabase as applicable authentication participants/processors; describe the categories and purpose of social-login data, account/profile creation, identity linking, retention, international transfers, and deletion-request route;
+- `legal/terms.pl.html` and `legal/terms.en.html` must be reviewed and updated wherever their current account/login wording would inaccurately imply email/password is the only login method;
+- the homepage, Privacy Policy, Terms, contact details, and deletion instructions must be reachable over HTTPS without login, provider authentication, cookies consent, or application-only navigation state;
+- links must be stable, production URLs on a verified owner-controlled domain and must return successful public responses before they are entered into provider dashboards;
+- final legal basis, processor/controller characterization, retention exceptions, response commitments, and wording remain owner/legal decisions; Codex must not invent or approve them.
+
+### Manual account and data deletion procedure
+
+The first OAuth release requires a working deletion procedure, not an in-app self-service deletion feature.
+
+- Publish a stable public page such as `https://play.kcswh.pl/account-deletion.html`, with PL/EN instructions for starting an Arcade Hub account/data deletion request through `contact@kcswh.pl` or another owner-approved privacy address.
+- The public instructions may ask for the account email and public profile handle/identifier to locate the account, but must state that support will verify account ownership before deletion. Possession of an email address or public identifier alone is not sufficient authorization.
+- Document an owner-controlled internal support runbook covering request intake, identity verification, acknowledgement, applicable response target, deletion or legally required retention across Supabase Auth identities/session data, `user_profiles`, XP, chips/ledger, favorites, poker/account data, logs, and backups, plus completion/refusal communication.
+- Confirm that the manual procedure can actually be executed with current administrative access before production rollout; a published mailbox without an actionable runbook is not sufficient.
+- Keep the current account-page support route aligned with the published instructions. Do not add a working `Delete account` button or imply immediate automated deletion in this release.
+
+The later self-service deletion feature is a separate plan. It must cover recent reauthentication, explicit confirmation, all linked identities/login-method safety, transactional deletion versus anonymization, public profile and leaderboard effects, XP/chips/ledger and poker retention rules, auditability, retries/partial failure, backups, and provider-specific deletion obligations. None of that runtime implementation is part of this OAuth plan.
+
+### Provider dashboard readiness
+
+Before production activation, the owner must confirm:
+
+- Google OAuth consent/branding configuration contains the public production homepage, Privacy Policy, optional Terms used by Arcade Hub, verified authorized domain, current support contact, and only the approved minimal scopes;
+- Meta/Facebook App Dashboard contains the public Privacy Policy and a valid data-deletion configuration. Use the public Data Deletion Instructions URL when that option is accepted for the app; if the dashboard/review requires a Data Deletion Request callback, Facebook remains disabled until a compliant HTTPS callback and human-readable status flow are separately implemented and verified;
+- GitHub production OAuth App contains the matching public homepage and owner-approved support/legal links exposed by Arcade Hub, even where GitHub does not provide equivalent dedicated dashboard fields;
+- screenshots or an owner-maintained release record capture the configured public URLs, provider app environment, review/live status, and verification date without recording provider secrets.
+
+Production go-live checklist:
+
+- [ ] Privacy Policy updated and published in Polish and English.
+- [ ] Terms reviewed and updated in Polish and English where necessary.
+- [ ] Public homepage, Privacy, Terms, contact, and deletion instructions verified without authentication.
+- [ ] Public account/data deletion instructions URL published.
+- [ ] Manual support deletion procedure documented and execution-tested by the owner.
+- [ ] Google OAuth consent/branding links and support contact configured.
+- [ ] Meta Privacy Policy and Data Deletion Instructions URL or required callback configured and verified.
+- [ ] No in-app automated account-deletion UI is included or promised by this release.
+
 ## Delivery plan
 
 ### Phase 1 — shared OAuth client contract
@@ -258,12 +305,14 @@ Run the full stage matrix for each provider:
 
 ### Phase 4 — production release
 
+- Treat every item in `Legal & Compliance Prerequisites` as a hard go-live gate. Do not enable a production provider merely because its technical OAuth callback succeeds.
 - Create/use production provider applications and configure the production Supabase project with its own credentials.
 - Set production Supabase `SITE_URL` to `https://play.kcswh.pl` and add the exact `https://play.kcswh.pl/account.html` redirect URL. Do not use a broad production wildcard.
 - Complete Google publishing/verification requirements and branding review.
 - Complete Facebook required app details, email/public-profile permission setup, Live mode/review as applicable, privacy policy, Terms, and user-data-deletion instructions/callback.
 - Configure a production GitHub OAuth App with the production Supabase callback and keep Device Flow disabled.
 - Publish approved PL/EN Terms and Privacy changes before enabling buttons.
+- Publish and execution-test the manual account/data deletion instructions and support runbook before enabling buttons.
 - Enable one provider at a time in Supabase, then in production `AUTH_OAUTH_PROVIDERS`; smoke test and monitor before enabling the next.
 - Keep the production provider list scoped only to Netlify `production`; compare the generated production and deploy-preview configs before activation.
 - Roll back a provider by removing it from the public list and disabling it in the target Supabase project. Do not delete users, identities, public profiles, XP, chips, or poker data during rollback.
@@ -278,12 +327,14 @@ Run the full stage matrix for each provider:
 - Store Client ID and Client Secret only in the matching Supabase project.
 - Use only the basic authentication identity scopes supplied by Supabase. Do not request Drive, YouTube, contacts, offline access, or forced consent.
 - Approve the final Google button against current branding requirements.
+- Verify the public production homepage, Privacy Policy, optional Terms URL used by Arcade Hub, verified domain, and support contact in the OAuth consent/branding configuration.
 
 ### Facebook
 
 - Create a stage/test Meta app and a separate production app or approved production test-app arrangement.
 - Add Facebook Login, configure the exact target Supabase callback under Valid OAuth Redirect URIs, and enable only `public_profile` plus `email` required by Supabase.
 - Complete app icon, domain, contact, Privacy Policy, Terms if applicable, and data-deletion URL/instructions.
+- Configure the public Data Deletion Instructions URL when accepted by the current dashboard; if Meta requires a Data Deletion Request callback for this app, keep Facebook disabled until that separately scoped callback/status flow is implemented.
 - Keep stage in Development mode with explicit testers; move production to Live only after required review/readiness is complete.
 - Store App ID and App Secret only in the matching Supabase project.
 
@@ -339,7 +390,8 @@ A later avatar-import feature may copy a provider image only after explicit prod
 | Facebook | Integrate configured provider and verify callback behavior | Own Meta app/testers, permissions, app review/Live mode, credentials, privacy/data deletion setup |
 | GitHub | Integrate configured provider and verify callback behavior | Own stage/prod OAuth Apps, credentials, homepage/callback configuration |
 | Supabase | Verify generated profile and existing JWT consumers, document exact settings | Enable providers, enter secrets, set Site URL and redirect allowlists in stage/prod dashboards |
-| Legal/privacy | Wire approved links and copy into UI | Approve/publish PL/EN Terms, Privacy, deletion process, and provider disclosures |
+| Legal/privacy | Only wire owner-approved final URLs/copy when separately requested; do not make legal determinations | Own legal review; approve, publish, and date PL/EN Terms/Privacy and public deletion instructions; configure provider-dashboard links |
+| Account deletion operations | No self-service deletion implementation in this plan | Own the support mailbox, identity-verification policy, executable manual deletion runbook, retention decisions, request handling, and completion records |
 | Testing | Run repository checks and guide/inspect deploy-preview smoke results | Use real provider accounts, approve external consent screens, execute final production smoke |
 | Rollout | Prepare flags, diagnostics, and rollback instructions | Decide provider order, enable production, monitor support/security impact |
 
@@ -354,7 +406,7 @@ Automated work follows the project policy:
 - do not introduce a new UI test framework or tests for CSS/layout/simple DOM glue;
 - run the existing syntax and repository test commands before merge.
 
-Manual stage verification is mandatory because provider dashboards, real consent screens, redirects, account-linking outcomes, and the Supabase SDK's actual browser-storage shape cannot be proven by repository tests. Record for each provider: target Supabase project ref, provider app environment, preview URL, resulting Supabase user UUID comparison (same/different only, not the UUID value in logs), profile creation result, SDK storage audit result, pending-state cleanup result, generated provider list/order, and pass/fail timestamp.
+Manual stage verification is mandatory because provider dashboards, real consent screens, redirects, account-linking outcomes, and the Supabase SDK's actual browser-storage shape cannot be proven by repository tests. Record for each provider: target Supabase project ref, provider app environment, preview URL, resulting Supabase user UUID comparison (same/different only, not the UUID value in logs), profile creation result, SDK storage audit result, pending-state cleanup result, generated provider list/order, and pass/fail timestamp. Before production, the owner must also record successful unauthenticated access to the published legal/deletion URLs and a dry run of the manual support deletion procedure without deleting a real user unintentionally.
 
 This change does not touch `ws-server/**`, `shared/**` WS runtime dependencies, or the browser/WS protocol. `WS Preview Deploy` is therefore not required for this social-login implementation unless the eventual code scope expands into one of those areas.
 
@@ -374,7 +426,7 @@ This change does not touch `ws-server/**`, `shared/**` WS runtime dependencies, 
 | Diagnostics | Breaking operational change: remove `userId`, `emailDomain`, and `sessionExpiresAt` from existing auth telemetry. Troubleshooting loses per-user/domain correlation and must use aggregate event/status plus request-side diagnostics that do not identify a user. Dashboards or alerts depending on removed fields must be updated before rollout. |
 | CSP | No change planned. Full-page navigation and existing Supabase connection policy are sufficient. |
 | WS | No change and no WS preview deployment. |
-| Legal/support | Terms, Privacy, deletion, duplicate-account, and lost-provider procedures require owner approval before production. |
+| Legal/support | Hard production gate: owner-approved public PL/EN legal documents, stable deletion instructions URL, provider-dashboard links, and an executable manual deletion runbook. No self-service account deletion is added. |
 
 The browser API additions are non-breaking, but the telemetry schema change is intentionally breaking for operations. The material product risk is identity linking/account duplication and provider-token persistence policy, not only code compatibility. Do not make existing synchronous account UI methods asynchronous beyond the already promise-based submit handlers without updating every caller.
 
@@ -392,6 +444,8 @@ The browser API additions are non-breaking, but the telemetry schema change is i
 - Auth telemetry contains no user ID, email/domain, session expiry, provider subject, or raw callback/error data, and the operational loss of per-user correlation is accepted.
 - Generated provider lists are independently scoped for deploy preview and production and render in fixed Google, Facebook, GitHub order.
 - Google/Meta/GitHub branding, app configuration, legal disclosures, and data-deletion requirements are owner-approved before production.
+- Public PL/EN Privacy/Terms, homepage, contact, and account/data deletion instructions are available without authentication; Google and Meta dashboard links resolve to the approved production pages.
+- The owner has execution-tested and documented the manual deletion procedure; the OAuth release contains no automated in-app account-deletion feature.
 - Rollout can be stopped per provider using the public UI list plus the authoritative Supabase provider switch.
 - No database migration, WS protocol change, WS deploy, new provider CSP domain, or provider secret in repository/Netlify is introduced.
 
@@ -409,7 +463,8 @@ Owner decisions:
 6. Approve the client-only Supabase flow for the first release and treat any PKCE migration as a separate cross-flow change covering email confirmation and password recovery.
 7. Create/configure separate stage and production provider applications, credentials, Supabase provider settings, Site URLs, and redirect allowlists.
 8. Approve provider branding, PL/EN legal copy, privacy/data-deletion disclosures, automatic-linking behavior, duplicate-account support, and lost-provider recovery policy.
-9. Perform real-provider stage and production smoke tests, including browser-storage inspection, pending-state lifecycle, generated environment config, and same/different UUID outcomes without logging UUID values.
+9. Publish the stable public account/data deletion instructions URL, configure the applicable Meta deletion field, and approve an executable manual support runbook with ownership verification and retention rules.
+10. Perform real-provider stage and production smoke tests, including browser-storage inspection, pending-state lifecycle, generated environment config, public legal/deletion URL checks, and same/different UUID outcomes without logging UUID values.
 
 ## Official references
 
@@ -422,6 +477,8 @@ Owner decisions:
 - [Supabase GitHub login](https://supabase.com/docs/guides/auth/social-login/auth-github)
 - [Supabase PKCE flow](https://supabase.com/docs/guides/auth/sessions/pkce-flow)
 - [Supabase implicit flow](https://supabase.com/docs/guides/auth/sessions/implicit-flow)
+- [Meta data deletion request callback and privacy-policy requirement](https://developers.facebook.com/docs/development/create-an-app/app-dashboard/data-deletion-callback/)
+- [Google OAuth production readiness and policy compliance](https://developers.google.com/identity/protocols/oauth2/production-readiness/policy-compliance)
 - [Google OAuth policies](https://developers.google.com/identity/protocols/oauth2/policies)
 - [Google OAuth best practices](https://developers.google.com/identity/protocols/oauth2/resources/best-practices)
 - [Google sign-in branding](https://developers.google.com/identity/branding-guidelines)
