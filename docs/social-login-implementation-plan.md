@@ -6,7 +6,7 @@ Status: implementation plan. This document does not enable an OAuth provider, ad
 
 Add "Continue with Google", "Continue with Facebook", and "Continue with GitHub" to the existing Arcade Hub account experience through Supabase Auth. A first successful provider login creates the same Arcade Hub account, public profile, XP/chips identity, and poker identity as email/password signup. Returning users receive the same Supabase session contract regardless of how they authenticate.
 
-The first release adds social authentication and a safe self-service Arcade Hub account-deletion workflow. It does not import provider avatars, call provider APIs after login, read or persist provider access tokens in Arcade Hub-owned state, or add manual identity-linking controls. Supabase SDK-managed session persistence is treated separately in the provider-token contract below. No production OAuth provider may be enabled until account deletion and the public/support fallback are operational.
+The first release is authentication only. It does not import provider avatars, call provider APIs after login, read or persist provider access tokens in Arcade Hub-owned state, add manual identity-linking controls, or implement self-service account deletion. Supabase SDK-managed session persistence is treated separately in the provider-token contract below. Production OAuth is not blocked by the future self-service deletion feature once the public legal documents and executable manual deletion procedure below are ready.
 
 ## Confirmed current state
 
@@ -41,8 +41,7 @@ No `arcadePlatform-repomix*.txt` snapshot exists in the current checkout, so thi
 12. Provider activation has two gates: the provider must be enabled in the target Supabase project, and the browser button must be included in a build-time public allowlist. Neither gate is a substitute for the other.
 13. Provider order is fixed as Google, Facebook, GitHub. `AUTH_OAUTH_PROVIDERS` selects a subset but cannot reorder the UI.
 14. The first release does not show "Signed in with Google/Facebook/GitHub". `user.identities` describes linked identities and `app_metadata.provider` may describe account creation/default metadata; neither reliably proves the provider used for the current session.
-15. Self-service account deletion is part of the delivery plan and is a production OAuth prerequisite. It is not implemented by calling `auth.admin.deleteUser()` directly: Arcade Hub must first settle or block active poker/chips state, delete or anonymize application data according to the approved retention policy, remove Storage and XP data, and delete the Supabase Auth user and all linked identities last.
-16. The public deletion-instructions page and verified support procedure remain available as a fallback for users who cannot sign in or complete self-service deletion. They do not replace the in-app workflow.
+15. Automated self-service account deletion is valuable future work, but it is not a universal Google requirement or a blocker for the first OAuth release. Its data, ledger, poker, orchestration, migration, WS, and danger-zone UI design belongs only to the separate account-deletion plan.
 
 ## User flow
 
@@ -175,26 +174,26 @@ The owner must approve, publish, and date both language versions before producti
 - links must be stable, production URLs on a verified owner-controlled domain and must return successful public responses before they are entered into provider dashboards;
 - final legal basis, processor/controller characterization, retention exceptions, response commitments, and wording remain owner/legal decisions; Codex must not invent or approve them.
 
-### Account and data deletion readiness
+### Manual account and data deletion procedure
 
-The first production OAuth release requires both a working self-service deletion flow and a manual support fallback.
+The first OAuth release requires a working deletion procedure, not an in-app self-service deletion feature.
 
-This is an Arcade Hub production-readiness decision that is stricter than the providers' common minimum. Meta requires an effective way for users to request deletion and documented instructions or the applicable callback; Google's published OAuth readiness checklist requires public privacy/contact information but does not itself mandate an in-app delete button. The implementation below is included because the owner wants a complete first-party deletion experience, not because the UI control alone is a universal Google/Meta protocol requirement.
-
-- Publish a stable public page such as `https://play.kcswh.pl/account-deletion.html`, with PL/EN instructions for starting an Arcade Hub account/data deletion request through `contact@kcswh.pl` or another owner-approved privacy address.
+- Publish the stable public `https://play.kcswh.pl/account-deletion.html` page, with PL/EN instructions for starting an Arcade Hub account/data deletion request through `contact@kcswh.pl` or another owner-approved privacy address.
 - The public instructions may ask for the account email and public profile handle/identifier to locate the account, but must state that support will verify account ownership before deletion. Possession of an email address or public identifier alone is not sufficient authorization.
 - Document an owner-controlled internal support runbook covering request intake, identity verification, acknowledgement, applicable response target, deletion or legally required retention across Supabase Auth identities/session data, `user_profiles`, XP, chips/ledger, favorites, poker/account data, logs, and backups, plus completion/refusal communication.
 - Confirm that the manual procedure can actually be executed with current administrative access before production rollout; a published mailbox without an actionable runbook is not sufficient.
-- Keep the account-page support route aligned with the published instructions for users who have lost access to every login method.
-- Implement the authenticated self-service workflow in Phase 3. The UI must accurately describe asynchronous/pending states and must never promise immediate deletion when poker settlement or a retry is still outstanding.
-- Treat immutable accounting records, security logs, abuse records, and backups according to the owner-approved retention policy: anonymize or retain only what is legally/operationally required, disclose the exception, prevent normal product use of retained data, and expire it on the documented schedule. Do not promise physical removal from every backup immediately unless operations can guarantee it.
+- Keep the current account-page support route aligned with the published instructions. Do not add a working `Delete account` button or imply immediate automated deletion in this release.
+
+### Future self-service deletion
+
+See the separate [Arcade Hub account deletion plan](./account-deletion-implementation-plan.md). It begins with a full data inventory and owner-approved delete/anonymize/retain decisions before any state machine, migration, WS contract, or UI work. None of its chips-ledger changes, account-wide freeze, poker settlement API, scheduled orchestrator, migrations, WS changes, or danger-zone UI is part of this social-login implementation or a production blocker for the first OAuth release.
 
 ### Provider dashboard readiness
 
 Before production activation, the owner must confirm:
 
 - Google OAuth consent/branding configuration contains the public production homepage, Privacy Policy, optional Terms used by Arcade Hub, verified authorized domain, current support contact, and only the approved minimal scopes;
-- Meta/Facebook App Dashboard contains the public Privacy Policy and a valid data-deletion configuration. Use the public Data Deletion Instructions URL when that option is accepted for the app; if the dashboard/review requires a Data Deletion Request callback, Facebook remains disabled until a compliant HTTPS callback and human-readable status flow are separately implemented and verified;
+- Meta/Facebook App Dashboard contains the public Privacy Policy. Configure the stable public Data Deletion Instructions URL or a Data Deletion Request callback only when the current dashboard/review for this app actually requires it; if it specifically requires a callback that is not implemented, Facebook alone remains disabled while Google and GitHub may proceed independently;
 - GitHub production OAuth App contains the matching public homepage and owner-approved support/legal links exposed by Arcade Hub, even where GitHub does not provide equivalent dedicated dashboard fields;
 - screenshots or an owner-maintained release record capture the configured public URLs, provider app environment, review/live status, and verification date without recording provider secrets.
 
@@ -205,10 +204,9 @@ Production go-live checklist:
 - [ ] Public homepage, Privacy, Terms, contact, and deletion instructions verified without authentication.
 - [ ] Public account/data deletion instructions URL published.
 - [ ] Manual support deletion procedure documented and execution-tested by the owner.
-- [ ] Self-service account deletion implemented, stage-tested across password and enabled OAuth accounts, and enabled in production.
-- [ ] Chips, poker, XP, Storage, logs, and backup deletion/anonymization rules approved and reflected in PL/EN disclosures.
 - [ ] Google OAuth consent/branding links and support contact configured.
-- [ ] Meta Privacy Policy and Data Deletion Instructions URL or required callback configured and verified.
+- [ ] Meta Privacy Policy configured; Data Deletion Instructions URL or callback configured and verified only if the current dashboard/review requires it.
+- [ ] No in-app automated account-deletion UI is included or promised by this release.
 
 ## Delivery plan
 
@@ -279,90 +277,7 @@ Acceptance and manual UI validation:
 
 Per the project testing policy, do not add CSS, DOM-rendering, or Playwright tests solely for this UI. Update existing static contract expectations only when necessary; validate visual and provider behavior manually on the deploy preview.
 
-### Phase 3 — self-service Arcade Hub account deletion
-
-This phase is mandatory before production OAuth activation. It is a cross-store, destructive workflow and must be delivered independently from the OAuth button/callback change so it can be reviewed, migrated, deployed, and rolled back safely.
-
-#### Server contract and persistence
-
-Files, functions, and properties:
-
-- Add a migration such as `supabase/migrations/<timestamp>_account_deletion_workflow.sql`:
-  - create a private `public.account_deletion_requests` table with an opaque request ID, nullable `user_id` not protected by an `auth.users` cascade, status, step markers, attempt count, timestamps, bounded internal error code, and a hash of a high-entropy status confirmation token; clear `user_id` after Auth deletion and do not store email, provider token, provider subject, raw error, or plaintext confirmation token;
-  - allow at most one non-terminal request per user and deny direct browser reads/writes with RLS;
-  - add the minimum account freeze/deletion marker needed for every mutating HTTP/WS path to reject new XP, chip, profile, favorite, bonus, and poker changes once deletion processing starts;
-  - replace the current `chips_accounts.user_id -> auth.users.id` blocking relationship with an approved ledger-safe contract. A deleted user's settled `USER` account may be closed and detached/anonymized, but `chips_entries` and balanced transactions must not be blindly cascaded or rewritten in a way that breaks ledger invariants;
-  - add only the indexes and bounded cleanup metadata required by the orchestrator; do not expose deletion requests through public APIs.
-- Add `netlify/functions/account-delete-challenge.mjs` as authenticated `POST` only. It creates a short-lived, one-use server record bound to the current verified Auth UUID and requested deletion action. A refreshed JWT `iat` alone is not proof of recent authentication.
-- Add `netlify/functions/account-delete-start.mjs` as authenticated `POST` only:
-  - derive the target user solely from a verified Supabase JWT; never accept a target `userId` or email from the browser;
-  - require a recent reauthentication proof, strict allowed Origin/CORS, an exact typed confirmation, rate limiting, and a one-time/idempotency key;
-  - create or return the caller's active deletion request and its controlled status token; never perform an unbounded multi-store deletion inside the initial request;
-  - return closed status/error codes such as `reauth_required`, `poker_active`, `deletion_pending`, and `deletion_unavailable`, without raw backend details.
-- Add `netlify/functions/account-delete-status.mjs` for a high-entropy, single-request status capability. It returns only a controlled status and timestamps required by the UI; it never exposes user ID, email, provider identity, storage path, ledger metadata, or internal error details. Rate-limit it and make terminal status records expire under the approved retention policy.
-- Add `netlify/functions/_shared/account-deletion.mjs` with an idempotent `processAccountDeletion(requestId, deps)` state machine. Persist step completion before advancing, tolerate a retry after any external timeout, and never roll a completed destructive step backward.
-- Add `netlify/functions/account-deletion-scheduled.mjs` using the repository's existing scheduled-function pattern. It atomically leases a bounded batch of due requests, calls `processAccountDeletion()`, and releases or reschedules each lease. The browser request must not depend on post-response work continuing in an ordinary Netlify Function.
-- Reuse `verifySupabaseJwt()`, `baseHeaders()`, `corsHeaders()`, `klog()`, the existing SQL helpers, and the Storage request patterns in `netlify/functions/_shared/profile-avatar.mjs`. Add a service-role Auth Admin helper only inside server code; the service-role key must never reach browser config or logs.
-
-Required state contract:
-
-```text
-QUEUED -> BLOCKED_POKER | PROCESSING -> RETRYABLE_ERROR | MANUAL_REVIEW | COMPLETED
-```
-
-- `BLOCKED_POKER` is resumable after the authoritative table has safely completed leave/cash-out; it is not a terminal deletion failure.
-- `RETRYABLE_ERROR` records only a closed step/error code and retry schedule. Repeated non-recoverable failures become `MANUAL_REVIEW` and enter the owner support runbook.
-- `COMPLETED` is written only when required stores have been deleted/anonymized and the Auth user is gone. Status lookup remains possible through the hashed capability, not through the deleted session.
-
-#### Deletion order and data contracts
-
-`processAccountDeletion()` must use this order and these invariants:
-
-1. Verify the request and freeze new account mutations. Concurrent start calls return the same active request.
-2. Query the authoritative poker service for every active human seat. Use the existing WS leave/cash-out domain path at a safe hand boundary; do not delete seat rows directly while a live room still owns the state. If funds or a hand cannot be settled, move to `BLOCKED_POKER` and retry instead of deleting the account.
-3. Close and settle the chips account under a single SQL ledger transaction. The owner must first choose the approved disposition of remaining virtual chips. Preserve balanced `chips_entries`; detach/anonymize retained accounting records and scrub user UUIDs from free-form transaction/reference/metadata fields where the schema permits.
-4. Remove the user's XP totals, profile snapshot, rate/migration keys, and membership in all-time/day/week/hidden leaderboard sets through a bounded `deleteUserXpData(userId)` helper built on `netlify/functions/_shared/store-upstash.mjs`. Do not use an unbounded Redis `SCAN` in a request; add a per-user registry/index or a bounded retention-window strategy for every dynamic key family.
-5. Delete pending avatar uploads and the processed public avatar object through the existing Supabase Storage service-role path before the cascading profile rows disappear. A missing object is idempotent success; an unavailable Storage service is retryable rather than silently ignored.
-6. Delete or anonymize Postgres product data according to the approved table-level matrix: cascade `favorites`, `user_profiles`, avatar receipts, bonus claims, and other account-owned rows where deletion is safe; remove active poker request/seat/hole-card state only after authoritative settlement; anonymize retained poker actions/history and chips ledger rows rather than leaving a usable Supabase UUID.
-7. Delete the Supabase Auth user with the server-side Admin API last. This removes password credentials, sessions, and every linked Google/Facebook/GitHub identity together. Never delete or unlink only the identity used for the current session.
-8. Mark the opaque request `COMPLETED`, revoke/clear the browser session and Arcade Hub identity-bound caches, and make all former public-profile URLs and leaderboard entries return the normal not-found/absent state.
-
-The implementation must publish a table-by-table deletion matrix in the same delivery PR, covering `auth.users`/identities/sessions, `user_profiles`, avatar objects and upload receipts, favorites, bonus claims, XP and leaderboard keys, chips accounts/transactions/entries, poker seats/requests/hole cards/actions/state JSON, application logs, and backups. Each row must name `delete`, `anonymize`, `retain until`, the responsible step, and the retry behavior. This matrix requires owner/legal approval before the migration reaches production.
-
-#### Reauthentication and account UI
-
-Files and methods:
-
-- Update `js/auth/supabaseClient.js` with a narrow `reauthenticateForAccountDeletion()` contract that obtains the server challenge and completes an explicit fresh Supabase authentication without exposing provider tokens. A normal old session or automatic token refresh is insufficient.
-- Password users re-enter their password through Supabase; OAuth users complete a fresh top-level OAuth authentication with one of their enabled linked identities. The callback presents the fresh JWT plus the opaque challenge to the server, which must compare its verified `sub` with the UUID bound to the challenge before marking reauthentication complete. A callback that signs into a different account invalidates the challenge and can never delete either account.
-- The browser does not infer the provider used for the current session. It may use `identities` only to build an allowlisted choice of login methods available for this explicit reauthentication flow; if that field is unavailable or ambiguous, show the configured providers plus password where applicable and rely on the server's same-`sub` check. Cancellation clears only deletion reauth state and never starts deletion.
-- Update `account.html` to turn the existing delete-account support control into a localized danger-zone flow: consequences summary, public support fallback, typed irreversible confirmation, reauthentication, pending/progress state, and final confirmation. Do not combine deletion confirmation with an OAuth login button click.
-- Update `js/account-page.js` with `startAccountDeletion()`, `pollAccountDeletionStatus()`, and `clearDeletedAccountState()`. After terminal success, sign out locally even if remote sign-out reports the already-deleted user, clear Supabase session storage through the SDK, clear the pending OAuth record, favorites/XP/profile/chips identity caches, and render the anonymous account state.
-- Update `js/i18n.js`, `legal/privacy.pl.html`, `legal/privacy.en.html`, `legal/terms.pl.html`, and `legal/terms.en.html` with owner-approved PL/EN copy. Publish `account-deletion.html` as a stable unauthenticated PL/EN entry point for support instructions and deletion-status guidance.
-- Keep the manual support path visible for lost-login, blocked, and `MANUAL_REVIEW` cases. It must not require the user to disclose a password, OAuth token, or provider subject.
-
-#### Provider callbacks and Meta
-
-The stable public instructions URL is the default Meta configuration because the self-service flow is initiated inside Arcade Hub. If the current Meta dashboard/review also requires a Data Deletion Request callback, add it as a separately reviewed adapter that verifies Meta's signed request using a server-only app secret, maps the provider identity to the Supabase user, starts the same deletion orchestrator, and returns the required confirmation code/status URL. In that case the Meta App Secret becomes an explicitly scoped server secret as well as a Supabase provider credential; Facebook stays disabled until rotation, signature validation, replay protection, and status behavior are verified. Google and GitHub do not get provider-specific deletion endpoints unless their current documented configuration requires one.
-
-Acceptance:
-
-- a caller cannot delete another account by changing body/query fields, and an old session without successful recent reauthentication cannot start deletion;
-- repeated start calls and worker retries do not double-burn chips, duplicate cash-out, corrupt ledger entry sequences, or fail because an earlier step already removed data;
-- an active hand/seat blocks deletion until authoritative leave/cash-out completes; no stack is lost and no ghost seat remains;
-- the public avatar object, pending uploads, profile, favorites, bonus eligibility/claims where deletable, XP keys, and all leaderboard memberships are absent after completion;
-- retained chips/poker/accounting records contain no directly usable Auth UUID except where owner/legal explicitly approved time-bounded retention, and ledger totals remain balanced;
-- Supabase Auth deletion is the final destructive dependency step and removes all linked identities; failed earlier steps leave the Auth account frozen but recoverable by retry/support;
-- partial failures in SQL, Upstash, Storage, WS, or Auth Admin produce a bounded retry/manual-review state, never false `COMPLETED`;
-- the browser clears identity-bound local data and returns to the anonymous UI after completion; a stale tab cannot resume authenticated mutations;
-- the public deletion page and support route work without authentication; the full flow works for password-only, Google, Facebook, GitHub, and automatically linked multi-identity accounts;
-- no raw user ID, email, provider subject, storage path, token, or deletion confirmation capability is written to KLog.
-
-Critical automated coverage may extend existing auth, chips, poker, and store tests for authorization/recent-auth enforcement, idempotent retry, ledger balance, active-poker blocking, bounded Upstash cleanup, Storage cleanup, Auth-deletion-last ordering, and controlled status output. Do not add tests for CSS or simple DOM glue. Manual stage verification must use disposable accounts and confirm the resulting rows/objects/keys without copying personal data into CI artifacts.
-
-This phase is expected to touch authoritative poker leave/cash-out behavior in `ws-server/**` or its shared runtime. Its implementation therefore requires `WS Preview Deploy` and a real stage poker deletion exercise before merge. If the final implementation proves it can use the existing deployed authoritative contract without any WS/shared/protocol change, document that evidence and the normal WS-preview exemption in the implementation PR.
-
-### Phase 4 — stage provider setup and end-to-end verification
+### Phase 3 — stage provider setup and end-to-end verification
 
 This phase is primarily owner-controlled configuration; Codex can verify public results but cannot create or approve external provider applications without the owner's accounts and authority.
 
@@ -391,16 +306,16 @@ Run the full stage matrix for each provider:
 12. verify pending OAuth state cleanup for success, denial/cancel callback, callback error, redirect-start failure, and TTL expiry; verify password login and old-session restoration do not consume it.
 13. inspect the generated preview config and confirm provider order is Google, Facebook, GitHub filtered to the deploy-preview subset, with no production-only provider inherited.
 
-### Phase 5 — production release
+### Phase 4 — production release
 
 - Treat every item in `Legal & Compliance Prerequisites` as a hard go-live gate. Do not enable a production provider merely because its technical OAuth callback succeeds.
 - Create/use production provider applications and configure the production Supabase project with its own credentials.
 - Set production Supabase `SITE_URL` to `https://play.kcswh.pl` and add the exact `https://play.kcswh.pl/account.html` redirect URL. Do not use a broad production wildcard.
 - Complete Google publishing/verification requirements and branding review.
-- Complete Facebook required app details, email/public-profile permission setup, Live mode/review as applicable, privacy policy, Terms, and user-data-deletion instructions/callback.
+- Complete Facebook required app details, email/public-profile permission setup, Live mode/review as applicable, Privacy Policy, Terms, and—only where the current dashboard/review requires it—the Data Deletion Instructions URL or callback. A missing required callback blocks Facebook only.
 - Configure a production GitHub OAuth App with the production Supabase callback and keep Device Flow disabled.
 - Publish approved PL/EN Terms and Privacy changes before enabling buttons.
-- Publish and execution-test the self-service deletion workflow, public instructions, and manual support runbook before enabling buttons. Complete at least one disposable-account deletion per enabled login method on stage and verify the table-by-table deletion matrix.
+- Publish and execution-test the manual account/data deletion instructions and support runbook before enabling buttons.
 - Enable one provider at a time in Supabase, then in production `AUTH_OAUTH_PROVIDERS`; smoke test and monitor before enabling the next.
 - Keep the production provider list scoped only to Netlify `production`; compare the generated production and deploy-preview configs before activation.
 - Roll back a provider by removing it from the public list and disabling it in the target Supabase project. Do not delete users, identities, public profiles, XP, chips, or poker data during rollback.
@@ -421,8 +336,8 @@ Run the full stage matrix for each provider:
 
 - Create a stage/test Meta app and a separate production app or approved production test-app arrangement.
 - Add Facebook Login, configure the exact target Supabase callback under Valid OAuth Redirect URIs, and enable only `public_profile` plus `email` required by Supabase.
-- Complete app icon, domain, contact, Privacy Policy, Terms if applicable, and data-deletion URL/instructions.
-- Configure the public Data Deletion Instructions URL when accepted by the current dashboard; if Meta requires a Data Deletion Request callback for this app, keep Facebook disabled until that separately scoped callback/status flow is implemented.
+- Complete app icon, domain, contact, Privacy Policy, and Terms if applicable.
+- Inspect the current Meta dashboard/review for this app. Configure the stable public Data Deletion Instructions URL or a Data Deletion Request callback only when it is actually required; if a callback is mandatory and unavailable, keep Facebook disabled until that separately scoped flow is implemented, without blocking Google or GitHub.
 - Keep stage in Development mode with explicit testers; move production to Live only after required review/readiness is complete.
 - Store App ID and App Secret only in the matching Supabase project.
 
@@ -456,7 +371,7 @@ A later avatar-import feature may copy a provider image only after explicit prod
 
 ## Security, privacy, and observability
 
-- Keep provider secrets exclusively in Supabase provider configuration for the OAuth frontend flow. They are not browser config, source files, build logs, or GitHub secrets. The only conditional exception is a separately scoped server-side Meta App Secret if Meta requires the signed Data Deletion Request callback described in Phase 3; never reuse or expose it client-side.
+- Keep provider secrets exclusively in Supabase provider configuration. They are not Netlify variables, browser config, source files, build logs, or GitHub secrets for this frontend flow.
 - Treat `SUPABASE_ANON_KEY` as the existing public client credential; do not confuse it with provider secrets.
 - Let Supabase generate and validate the OAuth protocol `state`. The Arcade Hub pending record is short-lived UI/navigation correlation only: never pass it as the OAuth `state` parameter and never treat it as CSRF protection or proof of identity.
 - Use exact production redirects and a site-scoped Netlify glob only on the stage project.
@@ -479,8 +394,7 @@ A later avatar-import feature may copy a provider image only after explicit prod
 | GitHub | Integrate configured provider and verify callback behavior | Own stage/prod OAuth Apps, credentials, homepage/callback configuration |
 | Supabase | Verify generated profile and existing JWT consumers, document exact settings | Enable providers, enter secrets, set Site URL and redirect allowlists in stage/prod dashboards |
 | Legal/privacy | Only wire owner-approved final URLs/copy when separately requested; do not make legal determinations | Own legal review; approve, publish, and date PL/EN Terms/Privacy and public deletion instructions; configure provider-dashboard links |
-| Account deletion runtime | Implement the authenticated start/status endpoints, idempotent orchestrator, migrations, Storage/XP cleanup, ledger-safe anonymization, poker coordination, session cleanup, danger-zone UI, and controlled diagnostics | Approve remaining-chip disposition, poker/ledger/log/backup retention, recent-reauth window, deletion SLA, and production feature enablement |
-| Account deletion support | Publish the repository-owned public instructions page and wire the fallback path after owner supplies approved text | Own the mailbox, ownership-verification policy, executable manual runbook, exceptional request handling, and completion/refusal records |
+| Account deletion operations | No self-service deletion implementation in this plan; maintain only the future-work reference | Own the support mailbox, identity-verification policy, executable manual deletion runbook, retention decisions, request handling, and completion records |
 | Testing | Run repository checks and guide/inspect deploy-preview smoke results | Use real provider accounts, approve external consent screens, execute final production smoke |
 | Rollout | Prepare flags, diagnostics, and rollback instructions | Decide provider order, enable production, monitor support/security impact |
 
@@ -491,14 +405,13 @@ Codex must stop and ask for owner action when external credentials, domain/app v
 Automated work follows the project policy:
 
 - extend `tests/account-auth.contract.test.mjs` only for critical provider allowlisting, redirect/open-redirect examples, pending-state TTL and lifecycle, callback sanitization, password/old-session non-consumption, and removal of high-cardinality auth telemetry;
-- extend the closest existing auth/chips/poker/Upstash/Storage tests only for Phase 3's destructive security and accounting invariants: caller identity, recent reauthentication, idempotent retry, active-seat settlement, balanced ledger, bounded key cleanup, Auth-deletion-last ordering, and controlled status output;
 - update existing static/build-config expectations for the new public provider array;
 - do not introduce a new UI test framework or tests for CSS/layout/simple DOM glue;
 - run the existing syntax and repository test commands before merge.
 
-Manual stage verification is mandatory because provider dashboards, real consent screens, redirects, account-linking outcomes, destructive multi-store cleanup, and the Supabase SDK's actual browser-storage shape cannot be proven by repository tests. Record for each provider: target Supabase project ref, provider app environment, preview URL, resulting Supabase user UUID comparison (same/different only, not the UUID value in logs), profile creation result, SDK storage audit result, pending-state cleanup result, generated provider list/order, disposable-account deletion result, and pass/fail timestamp. Before production, the owner must also record successful unauthenticated access to the published legal/deletion URLs, one successful self-service deletion per enabled login method, and a dry run of the manual support fallback.
+Manual stage verification is mandatory because provider dashboards, real consent screens, redirects, account-linking outcomes, and the Supabase SDK's actual browser-storage shape cannot be proven by repository tests. Record for each provider: target Supabase project ref, provider app environment, preview URL, resulting Supabase user UUID comparison (same/different only, not the UUID value in logs), profile creation result, SDK storage audit result, pending-state cleanup result, generated provider list/order, and pass/fail timestamp. Before production, the owner must also record successful unauthenticated access to the published legal/deletion URLs and a dry run of the manual support deletion procedure without deleting a real user unintentionally.
 
-This documentation-only PR does not require `WS Preview Deploy`. Phase 3 implementation is presumed to affect authoritative poker settlement and therefore requires `WS Preview Deploy` unless its implementation PR proves and documents that no `ws-server/**`, shared WS runtime dependency, or browser/WS protocol changed.
+This change does not touch `ws-server/**`, `shared/**` WS runtime dependencies, or the browser/WS protocol. `WS Preview Deploy` is therefore not required for this social-login implementation unless the eventual code scope expands into one of those areas.
 
 ## Breaking and operational impact
 
@@ -509,15 +422,14 @@ This documentation-only PR does not require `WS Preview Deploy`. Phase 3 impleme
 | Callback contract | Additive controlled `readOAuthCallbackResult()` output. `account-page.js` no longer interprets raw callback parameters. |
 | Auth accounts | First provider login may insert `auth.users`; same verified email may be automatically linked by Supabase. |
 | Public profiles | Existing trigger creates one generated profile for a newly inserted Auth user. No provider metadata is published. |
-| XP/chips/favorites/poker | OAuth keeps the UUID/JWT `sub` contract. Account deletion adds a freeze and destructive cleanup/anonymization path; chips and poker require settlement before identity removal. |
-| Database | Phase 3 requires a migration for deletion workflow state and a ledger-safe closed/anonymized user-account contract. Stage must also contain the automatic profile-provisioning migration. |
-| Secrets | Three provider credential pairs per environment are owner-managed in Supabase. A server-side Meta App Secret is added only if the optional signed deletion callback is required and approved. |
+| XP/chips/favorites/poker | No contract change; all continue to use the Supabase UUID/JWT `sub`. |
+| Database | No migration planned. Stage must already contain the automatic profile-provisioning migration. |
+| Secrets | Three provider credential pairs per environment are owner-managed in Supabase, not the repository or Netlify. |
 | Public ENV | Add non-secret `AUTH_OAUTH_PROVIDERS` separately per Netlify context. |
 | Diagnostics | Breaking operational change: remove `userId`, `emailDomain`, and `sessionExpiresAt` from existing auth telemetry. Troubleshooting loses per-user/domain correlation and must use aggregate event/status plus request-side diagnostics that do not identify a user. Dashboards or alerts depending on removed fields must be updated before rollout. |
 | CSP | No change planned. Full-page navigation and existing Supabase connection policy are sufficient. |
-| Account deletion API | New authenticated destructive start operation and capability-based status lookup. It is additive to ordinary account APIs but irreversible after processing begins. |
-| WS | OAuth itself does not change WS. Phase 3 may coordinate authoritative leave/cash-out and is WS-preview gated as described above. |
-| Legal/support | Hard production gate: owner-approved public PL/EN legal documents, stable deletion instructions URL, operational self-service deletion, provider-dashboard links, and an executable manual fallback runbook. |
+| WS | No change and no WS preview deployment. |
+| Legal/support | Hard production gate: owner-approved public PL/EN legal documents, stable `account-deletion.html`, verified ownership checks, and an executable manual deletion runbook. Self-service deletion is explicitly not a gate. |
 
 The browser API additions are non-breaking, but the telemetry schema change is intentionally breaking for operations. The material product risk is identity linking/account duplication and provider-token persistence policy, not only code compatibility. Do not make existing synchronous account UI methods asynchronous beyond the already promise-based submit handlers without updating every caller.
 
@@ -534,17 +446,15 @@ The browser API additions are non-breaking, but the telemetry schema change is i
 - Provider scopes are minimal; provider tokens are never handled or stored separately by Arcade Hub, the approved Supabase SDK-storage policy is verified manually, and no provider avatar is hotlinked or published.
 - Auth telemetry contains no user ID, email/domain, session expiry, provider subject, or raw callback/error data, and the operational loss of per-user correlation is accepted.
 - Generated provider lists are independently scoped for deploy preview and production and render in fixed Google, Facebook, GitHub order.
-- Google/Meta/GitHub branding, app configuration, legal disclosures, and data-deletion requirements are owner-approved before production.
+- Google/Meta/GitHub branding, app configuration, and legal disclosures are owner-approved before production; any Meta deletion URL/callback requirement is based on the current dashboard/review rather than assumed globally.
 - Public PL/EN Privacy/Terms, homepage, contact, and account/data deletion instructions are available without authentication; Google and Meta dashboard links resolve to the approved production pages.
-- A recently reauthenticated user can permanently delete a password, single-provider, or linked multi-identity Arcade Hub account through the danger-zone UI, with accurate pending/manual-review states and no cross-account deletion path.
-- Deletion safely settles poker/chips, preserves ledger invariants, removes or approved-anonymizes Postgres data, Storage avatars, XP/leaderboard data, and linked Supabase identities, and remains retryable after a partial external failure.
-- The owner has execution-tested and documented both self-service deletion and the manual fallback procedure using disposable stage accounts.
+- The owner has execution-tested and documented the manual deletion procedure with account-ownership verification; the OAuth release is complete without an automated in-app account-deletion feature.
 - Rollout can be stopped per provider using the public UI list plus the authoritative Supabase provider switch.
-- No new provider CSP domain or provider secret in browser/repository output is introduced. Required account-deletion migrations and any WS-preview deployment are completed before production OAuth activation.
+- No database migration, WS protocol change, WS deploy, new provider CSP domain, or provider secret in repository/Netlify is introduced.
 
 ## Plan verdict and owner decisions before implementation
 
-Verdict: ready for implementation only after the decisions below are recorded. The architecture remains valid—Supabase is the sole OAuth broker and existing UUID/JWT consumers remain unchanged—but OAuth must not be implemented from the earlier, ambiguous return-path, telemetry, or token-storage contract.
+Verdict: ready for implementation only after the decisions below are recorded. The architecture remains valid—Supabase is the sole OAuth broker and existing UUID/JWT consumers remain unchanged—and production readiness depends on the public legal/manual-deletion gates, not on the separate self-service deletion plan.
 
 Owner decisions:
 
@@ -556,11 +466,8 @@ Owner decisions:
 6. Approve the client-only Supabase flow for the first release and treat any PKCE migration as a separate cross-flow change covering email confirmation and password recovery.
 7. Create/configure separate stage and production provider applications, credentials, Supabase provider settings, Site URLs, and redirect allowlists.
 8. Approve provider branding, PL/EN legal copy, privacy/data-deletion disclosures, automatic-linking behavior, duplicate-account support, and lost-provider recovery policy.
-9. Approve the destructive-data matrix: remaining-chip disposition; ledger and poker-history anonymization; treatment and retention duration for security/abuse logs and backups; and the deletion completion/SLA wording.
-10. Approve the recent-reauthentication maximum age and UI for password, OAuth, and linked multi-identity accounts. Decide whether deletion blocks until a safe poker boundary or forces an immediate fold under existing rules; it must never lose an unsettled stack.
-11. Publish the stable public account/data deletion instructions URL, configure the applicable Meta deletion field, and approve an executable manual support runbook with ownership verification and retention rules.
-12. Decide whether Meta accepts the public instructions URL or requires the signed Data Deletion Request callback. If the callback is required, approve the additional server-secret ownership, rotation, replay protection, and status-retention contract before Facebook activation.
-13. Perform real-provider stage and production smoke tests, including browser-storage inspection, pending-state lifecycle, generated environment config, public legal/deletion URL checks, self-service deletion of disposable accounts, and same/different UUID outcomes without logging UUID values.
+9. Publish `account-deletion.html`, approve an executable manual support runbook with ownership verification and retention rules, and configure a Meta deletion field/callback only if the current dashboard/review actually requires it. If an unimplemented callback is mandatory, keep Facebook disabled without blocking Google or GitHub.
+10. Perform real-provider stage and production smoke tests, including browser-storage inspection, pending-state lifecycle, generated environment config, public legal/deletion URL checks, and same/different UUID outcomes without logging UUID values.
 
 ## Official references
 
