@@ -200,9 +200,9 @@ Use semantic heading structure, meaningful avatar alternative text, keyboard-saf
 
 Replace email-derived labels for authenticated users with loaded public-profile display name and avatar. A missing profile triggers the safe authenticated `profile-me` repair path. Reuse the centralized auth-change listener in `js/auth/supabaseClient.js`; do not add independent listeners. Profile saves invalidate the profile cache and refresh topbar rendering. Guests keep the current generic Arcade Hub state.
 
-## Future Leaderboard Contract
+## Leaderboard Contract
 
-This task does not implement a leaderboard. Document this contract in the profile documentation and use it later:
+The production leaderboard implements this public profile contract:
 
 ```text
 rank
@@ -213,7 +213,7 @@ xp
 optional level
 ```
 
-The leaderboard backend will aggregate XP server-side and join identities to `user_profiles` server-side. It must never expose email or Supabase UUID, never require browser access to Redis or `auth.users`, and link each row to `/u/<handle>`.
+The leaderboard backend aggregates XP server-side and joins identities to `user_profiles` server-side. It never exposes email or Supabase UUID, never requires browser access to Redis or `auth.users`, and links each row to `/u/<handle>`. Owners are included by default and can opt out in Settings without hiding the public profile itself.
 
 ## Legal and Privacy Release Gate
 
@@ -260,7 +260,7 @@ Terms must also cover user responsibility for public profile text and uploaded a
 - Use the existing short public cache; document that profile XP can be stale for up to the cache lifetime.
 - No leaderboard ranking, daily/weekly aggregates, XP history, or database migration is included.
 
-**Implementation status (2026-07-10):** this PR adds public current XP and computed level from the same canonical lifetime total used by authenticated XP status reads. The public response remains allowlisted and does not expose `userId`, email, `avatarKey`, Redis keys, XP history, daily/weekly gains, or rank. The public cache remains `max-age=30`, so the displayed total can lag a recent award briefly. Production remains disabled until the existing public-profile rollout gate is complete.
+**Implementation status (2026-07-10):** this PR adds public current XP and computed level from the same canonical lifetime total used by authenticated XP status reads. The public response remains allowlisted and does not expose `userId`, email, `avatarKey`, Redis keys, XP history, daily/weekly gains, or rank. The public cache remains `max-age=30`, so the displayed total can lag a recent award briefly. The public-profile rollout is enabled in production and has passed production smoke verification.
 
 ### PR 4: Avatar upload pipeline
 
@@ -274,7 +274,7 @@ Terms must also cover user responsibility for public profile text and uploaded a
 
 ### PR 5: XP leaderboard
 
-Out of scope. Begin only after public profiles and avatars are stable in production.
+**Implementation status (2026-07-13):** complete and enabled in production. The leaderboard provides `today`, `week`, and `all_time` rankings, owner opt-out, public-profile links, and a separate authenticated `me` result. Production profile coverage, backfill, prune, canonical-XP equality, and period smoke checks passed.
 
 ## Verification and Rollout
 

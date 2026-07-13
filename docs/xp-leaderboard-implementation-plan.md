@@ -2,11 +2,11 @@
 
 ## Executive summary
 
-Arcade Hub is ready to add a public XP leaderboard after stabilizing the authoritative XP path, public profiles, avatars, and topbar hydration. The leaderboard must rank only authenticated accounts, use server-confirmed XP, and expose only public profile identity. Guests remain outside public rankings.
+Arcade Hub has deployed the public XP leaderboard after stabilizing the authoritative XP path, public profiles, avatars, and topbar hydration. The leaderboard ranks only authenticated accounts, uses server-confirmed XP, and exposes only public profile identity. Guests remain outside public rankings.
 
-The current XP store has per-user lifetime and daily counters but no efficient cross-user index. Reading or scanning individual XP keys at request time is not acceptable. The implementation will add Redis sorted-set projections for `today`, `week`, and `all_time`, update them atomically with every confirmed authenticated XP grant, and resolve public profile fields in a server-only API.
+The XP store keeps per-user lifetime and daily counters as canonical values and uses Redis sorted-set projections as the bounded cross-user index. The implementation maintains `today`, `week`, and `all_time` atomically with every confirmed authenticated XP grant and resolves public profile fields in a server-only API.
 
-This document tracks the staged implementation. PR #690 implements the dark-write projection foundation and its tests; backfill, public APIs, and UI remain later phases.
+This document records the completed staged implementation. PRs #690-#694 delivered projections, maintenance, public APIs, UI, automatic profile provisioning, and owner opt-out. PRs #695-#696 made production maintenance target detection fail closed and reliable in Netlify Functions. Production backfill and period smoke verification completed on 2026-07-13.
 
 ## Current foundation
 
@@ -22,7 +22,7 @@ The following prerequisites are complete:
 - Public profiles provide stable handles, display names, default/uploaded avatars, current XP, and level.
 - Topbar profile, XP, and chips hydration is presentation-only and does not change XP authority.
 
-Existing documents provide a future row contract and readiness gate, but not a complete leaderboard storage, API, backfill, or rollout design.
+The sections below are the deployed storage, API, backfill, UI, privacy, and rollback contract.
 
 ## Goals
 
@@ -400,7 +400,7 @@ Implementation status: complete in PR #691. The admin-only bounded maintenance e
 
 ### PR 3: Public leaderboard API
 
-Implementation status: implemented in PR #692. The selected design uses an unauthenticated ranking endpoint and a separate authenticated `me` endpoint. Both now return fresh, non-cacheable results so leaderboard privacy changes cannot leave the public page behind the owner result. Deploy Preview smoke passed for all three periods, including public/`me` equality and response privacy checks. Production remains disabled until explicitly enabled after rollout checks.
+Implementation status: complete in PR #692 and enabled in production after the 2026-07-13 rollout. The selected design uses an unauthenticated ranking endpoint and a separate authenticated `me` endpoint. Both return fresh, non-cacheable results so leaderboard privacy changes cannot leave the public page behind the owner result. Deploy Preview and production smoke passed for all three periods, including public/`me` equality and response privacy checks.
 
 - Add public ranking endpoint with an explicit freshness contract.
 - Add separate authenticated `me` endpoint if selected during implementation review.
@@ -419,6 +419,8 @@ Implementation status: implemented in PR #693. The page uses the public fresh en
 - No inline scripts; if any existing inline script changes, update the CSP hash allowlist.
 
 ### PR 5: Production rollout and cleanup
+
+Implementation status: complete on 2026-07-13. Production target identity was verified against matching Supabase URL, database, and service-role project references. Profile coverage found all 10 accounts provisioned. The idempotent backfill converged with `updated: 0`, `removed: 0`, and `failed: 0` on verification; prune removed stale ineligible projections and converged with no remaining missing members. Public `all_time`, `today`, `week`, authenticated `me`, canonical XP equality, and day/week period behavior were verified on production. The UI route and navigation are enabled.
 
 - Run production dry-run and idempotent backfill after PRs 1-3 are deployed but before public navigation is enabled.
 - Verify counts and sampled canonical totals without exposing identities in logs.
@@ -521,15 +523,17 @@ No database migration is expected for the Redis-first MVP unless profile eligibi
 - Current-period rankings may begin with a controlled warm-up if retained daily data is incomplete.
 - Ranking order can move between paginated requests as users earn XP.
 
-## Remaining decisions before public rollout
+## Resolved rollout decisions
 
-1. Reconfirm that authenticated public profiles participate by default and that the owner opt-out remains available in Settings.
-2. Approve competition ranking for ties.
-3. The public API and authenticated `me` read use separate endpoints; keep this cache boundary during UI implementation.
-4. Verify retained production daily keys before promising current-week backfill.
-5. Review Terms/Privacy wording for increased discoverability through rankings.
+1. Authenticated public profiles participate by default; owners can opt out in Settings without hiding `/u/<handle>`.
+2. Ties use competition ranking.
+3. Public ranking and authenticated `me` remain separate endpoints with separate cache boundaries.
+4. Production period keys and day/week behavior passed smoke verification.
+5. Terms and Privacy explicitly describe leaderboard discoverability, period XP, default inclusion, and owner opt-out.
 
 ## Definition of done
+
+Status: complete as of 2026-07-13, including production backfill and period smoke verification.
 
 Leaderboard MVP is complete when:
 
