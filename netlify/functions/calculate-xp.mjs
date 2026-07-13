@@ -20,6 +20,7 @@ import { verifySessionToken, validateServerSession, touchSession } from "./start
 import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
 import { canonicalizeXpGameId, getXpPolicy, isValidXpAnonId, migrateAnonXpToUser, resolveXpIdentity } from "./_shared/xp-identity.mjs";
 import { createXpLedgerKeys, executeAtomicXpAward, readXpTotals } from "./_shared/xp-ledger.mjs";
+import { createXpLeaderboardKeys, getXpLeaderboardPeriods } from "./_shared/xp-leaderboard.mjs";
 import { persistXpProfileSnapshot, readCanonicalXpStatus } from "./_shared/xp-status.mjs";
 
 // ============================================================================
@@ -206,6 +207,7 @@ const getNextResetEpoch = (ms = Date.now()) => nextWarsawResetMs(ms);
 
 // Redis Keys
 const XP_LEDGER_KEYS = createXpLedgerKeys({ namespace: KEY_NS });
+const XP_LEADERBOARD_KEYS = createXpLeaderboardKeys({ namespace: KEY_NS });
 const keyDaily = (u, day = getDailyKey()) => XP_LEDGER_KEYS.daily(u, day);
 const keyTotal = XP_LEDGER_KEYS.total;
 const keySession = XP_LEDGER_KEYS.session;
@@ -700,6 +702,7 @@ export async function handler(event) {
         anonId: resolvedAnonId,
         userId: supabaseUserId,
         conversionCap: XP_POLICY.anonConversionCap,
+        leaderboardAllTimeKey: XP_LEADERBOARD_KEYS.allTime(),
       });
       if (conversion.converted > 0) {
         await persistUserProfile({ userId: supabaseUserId, totalXp: conversion.userTotal, now });
@@ -907,6 +910,7 @@ export async function handler(event) {
   // Get daily key and next reset
   const dayKeyNow = getDailyKey(now);
   const nextReset = getNextResetEpoch(now);
+  const leaderboardPeriods = getXpLeaderboardPeriods(now);
 
   // Redis keys
   const todayKey = keyDaily(userId, dayKeyNow);
@@ -914,12 +918,35 @@ export async function handler(event) {
   const sessionKeyK = keySession(userId, sessionId);
   const sessionSyncKeyK = keySessionSync(userId, sessionId);
   const lockKeyK = XP_LEDGER_KEYS.lock(userId, sessionId);
+  const leaderboardAllTimeKey = XP_LEADERBOARD_KEYS.allTime();
+  const leaderboardDayKey = XP_LEADERBOARD_KEYS.day(leaderboardPeriods.dayKey);
+  const leaderboardWeekKey = XP_LEADERBOARD_KEYS.week(leaderboardPeriods.weekKey);
 
   // Award XP atomically with caps
   const awardResult = await executeAtomicXpAward({
     store,
-    keys: [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK, lockKeyK],
-    args: [now, cappedDelta, DAILY_CAP, Math.max(0, SESSION_CAP), windowEnd, 0, SESSION_TTL_MS],
+    keys: [
+      sessionKeyK,
+      sessionSyncKeyK,
+      todayKey,
+      totalKeyK,
+      lockKeyK,
+      leaderboardAllTimeKey,
+      leaderboardDayKey,
+      leaderboardWeekKey,
+    ],
+    args: [
+      now,
+      cappedDelta,
+      DAILY_CAP,
+      Math.max(0, SESSION_CAP),
+      windowEnd,
+      0,
+      SESSION_TTL_MS,
+      supabaseUserId || "",
+      leaderboardPeriods.dayExpiresAtSec,
+      leaderboardPeriods.weekExpiresAtSec,
+    ],
     onEvalError: (err) => klog("calc_redis_eval_failed", { error: err?.message }),
   });
   const granted = awardResult.granted;

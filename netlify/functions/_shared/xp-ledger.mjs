@@ -9,6 +9,9 @@ const XP_ATOMIC_AWARD_SCRIPT = `
   local dailyKey = KEYS[3]
   local totalKey = KEYS[4]
   local lockKey = KEYS[5]
+  local leaderboardAllTimeKey = KEYS[6]
+  local leaderboardDayKey = KEYS[7]
+  local leaderboardWeekKey = KEYS[8]
   local now = tonumber(ARGV[1])
   local delta = tonumber(ARGV[2])
   local dailyCap = tonumber(ARGV[3])
@@ -16,6 +19,9 @@ const XP_ATOMIC_AWARD_SCRIPT = `
   local ts = tonumber(ARGV[5])
   local lockTtl = tonumber(ARGV[6])
   local sessionTtl = tonumber(ARGV[7])
+  local leaderboardMember = ARGV[8]
+  local dayExpiresAt = tonumber(ARGV[9])
+  local weekExpiresAt = tonumber(ARGV[10])
 
   local shouldLock = lockTtl and lockTtl > 0
   if shouldLock then
@@ -73,6 +79,13 @@ const XP_ATOMIC_AWARD_SCRIPT = `
   lastSync = ts
   redis.call('SET', sessionSyncKey, tostring(lastSync))
   refreshSessionTtl()
+  if leaderboardMember and leaderboardMember ~= '' then
+    redis.call('ZADD', leaderboardAllTimeKey, lifetime, leaderboardMember)
+    redis.call('ZADD', leaderboardDayKey, dailyTotal, leaderboardMember)
+    redis.call('ZINCRBY', leaderboardWeekKey, grant, leaderboardMember)
+    if dayExpiresAt and dayExpiresAt > 0 then redis.call('EXPIREAT', leaderboardDayKey, dayExpiresAt) end
+    if weekExpiresAt and weekExpiresAt > 0 then redis.call('EXPIREAT', leaderboardWeekKey, weekExpiresAt) end
+  end
   return finish(grant, dailyTotal, sessionTotal, lifetime, lastSync, status)
 `;
 
