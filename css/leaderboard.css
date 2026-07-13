@@ -23,6 +23,10 @@
 .leaderboard-state p{max-width:580px;margin:10px auto 0;color:#aab8d6;line-height:1.55;}
 .leaderboard-retry{margin-top:20px;border:1px solid #6ee7e7;border-radius:6px;padding:10px 18px;background:#6ee7e7;color:#07131d;font:800 13px/1 Poppins,sans-serif;cursor:pointer;}
 .leaderboard-results[hidden]{display:none;}
+.leaderboard-page-empty{padding:30px 20px;border:1px solid rgba(132,155,198,.25);border-radius:8px;background:#111a2d;text-align:center;}
+.leaderboard-page-empty[hidden]{display:none;}
+.leaderboard-page-empty h2{margin:0;color:#fff;font:800 20px/1.25 Poppins,sans-serif;}
+.leaderboard-page-empty p{max-width:580px;margin:9px auto 0;color:#aab8d6;line-height:1.55;}
 .leaderboard-podium{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-areas:"second first third";align-items:end;gap:14px;margin:0 0 24px;padding:0;list-style:none;}
 .leaderboard-podium .leaderboard-entry:nth-child(1){grid-area:first;min-height:216px;border-color:rgba(248,214,91,.65);}
 .leaderboard-podium .leaderboard-entry:nth-child(2){grid-area:second;min-height:190px;}

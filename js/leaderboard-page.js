@@ -205,13 +205,39 @@
     nodes.live.textContent = nodes.stateTitle.textContent + '. ' + nodes.stateText.textContent;
   }
 
-  function renderResults(data, me){
-    var rows = Array.isArray(data && data.rows) ? data.rows.map(normalizeRow).filter(Boolean) : [];
-    if (!rows.length){ showState('empty'); return; }
-    state.hasMore = data.hasMore === true;
+  function renderEmptyPage(data, me){
     clear(nodes.podium);
     clear(nodes.list);
     clear(nodes.meRow);
+    nodes.podium.hidden = true;
+    nodes.tableHead.hidden = true;
+    nodes.pageEmpty.hidden = false;
+    nodes.pageEmptyTitle.textContent = t('leaderboardPageEmptyTitle', 'No results on this page');
+    nodes.pageEmptyText.textContent = t('leaderboardPageEmptyText', 'No public profiles are available in this part of the ranking. Use the page controls to continue.');
+    nodes.me.hidden = !me;
+    if (me) nodes.meRow.appendChild(entryNode(me, { isMe: true }));
+    nodes.previous.disabled = state.page <= 1;
+    nodes.next.disabled = !state.hasMore;
+    nodes.pageNumber.textContent = t('leaderboardPageStatus', 'Page ' + state.page, { page: state.page });
+    nodes.loading.hidden = true;
+    nodes.state.hidden = true;
+    nodes.results.hidden = false;
+    resetText(data);
+    nodes.live.textContent = nodes.pageEmptyTitle.textContent + '. ' + nodes.pageNumber.textContent + '.';
+  }
+
+  function renderResults(data, me){
+    var rows = Array.isArray(data && data.rows) ? data.rows.map(normalizeRow).filter(Boolean) : [];
+    state.hasMore = data.hasMore === true;
+    if (!rows.length){
+      if (state.page === 1 && !state.hasMore) showState('empty');
+      else renderEmptyPage(data, me);
+      return;
+    }
+    clear(nodes.podium);
+    clear(nodes.list);
+    clear(nodes.meRow);
+    nodes.pageEmpty.hidden = true;
     var loadedHandles = new Set(rows.map(function(row){ return row.handle; }));
     var podiumRows = state.page === 1 ? rows.slice(0, 3) : [];
     var listRows = state.page === 1 ? rows.slice(3) : rows;
@@ -318,6 +344,9 @@
       stateText: document.getElementById('leaderboardStateText'),
       retry: document.getElementById('leaderboardRetry'),
       results: document.getElementById('leaderboardResults'),
+      pageEmpty: document.getElementById('leaderboardPageEmpty'),
+      pageEmptyTitle: document.getElementById('leaderboardPageEmptyTitle'),
+      pageEmptyText: document.getElementById('leaderboardPageEmptyText'),
       podium: document.getElementById('leaderboardPodium'),
       tableHead: document.getElementById('leaderboardTableHead'),
       list: document.getElementById('leaderboardList'),

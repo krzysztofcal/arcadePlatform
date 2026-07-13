@@ -21,6 +21,8 @@
     leaderboardLoaded: { en: 'Leaderboard loaded.', pl: 'Ranking został wczytany.' },
     leaderboardWarmupTitle: { en: 'The ranking is warming up', pl: 'Ranking dopiero się rozkręca' },
     leaderboardWarmupText: { en: 'No confirmed XP has been recorded for this period yet. Play a game and check back soon.', pl: 'W tym okresie nie zapisano jeszcze potwierdzonego XP. Zagraj i wróć za chwilę.' },
+    leaderboardPageEmptyTitle: { en: 'No results on this page', pl: 'Brak wyników na tej stronie' },
+    leaderboardPageEmptyText: { en: 'No public profiles are available in this part of the ranking. Use the page controls to continue.', pl: 'W tej części rankingu nie ma dostępnych profili publicznych. Użyj przycisków stron, aby przejść dalej.' },
     leaderboardUnavailableTitle: { en: 'Leaderboard unavailable', pl: 'Ranking jest niedostępny' },
     leaderboardUnavailableText: { en: 'We could not load the ranking right now. Please try again.', pl: 'Nie udało się teraz wczytać rankingu. Spróbuj ponownie.' },
     leaderboardRateLimitTitle: { en: 'Please wait a moment', pl: 'Poczekaj chwilę' },

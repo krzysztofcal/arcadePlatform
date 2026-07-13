@@ -18,6 +18,7 @@ test('leaderboard page uses the shared shell without gameplay XP modules', () =>
   assert.match(html, /id="leaderboardPodium"/);
   assert.match(html, /id="leaderboardList"/);
   assert.match(html, /id="leaderboardMe"/);
+  assert.match(html, /id="leaderboardPageEmpty"/);
   assert.match(html, /data-period="today"/);
   assert.match(html, /data-period="week"/);
   assert.match(html, /data-period="all_time"/);
@@ -38,6 +39,8 @@ test('leaderboard UI keeps a public/auth cache boundary and safe DOM projection'
   assert.match(controller, /error\.status\s*===\s*429/);
   assert.match(controller, /error\.status\s*===\s*404/);
   assert.match(controller, /showState\('empty'\)/);
+  assert.match(controller, /state\.page\s*===\s*1\s*&&\s*!state\.hasMore/);
+  assert.match(controller, /renderEmptyPage\(data, me\)/);
   assert.match(controller, /document\.createElement/);
   assert.doesNotMatch(controller, /innerHTML/);
   assert.match(controller, /new Set\(rows\.map/);
@@ -68,7 +71,7 @@ test('light XP badge adapter supports status hydration without gameplay lifecycl
 
 test('sidebar, localization and responsive styles expose the complete leaderboard surface', () => {
   assert.match(sidebar, /id:\s*'leaderboard'[\s\S]*href:\s*'\/leaderboard\.html'/);
-  for (const key of ['leaderboardPageTitle', 'leaderboardToday', 'leaderboardWeek', 'leaderboardAllTime', 'leaderboardWarmupTitle', 'leaderboardRateLimitTitle', 'leaderboardYourPosition']) {
+  for (const key of ['leaderboardPageTitle', 'leaderboardToday', 'leaderboardWeek', 'leaderboardAllTime', 'leaderboardWarmupTitle', 'leaderboardPageEmptyTitle', 'leaderboardPageEmptyText', 'leaderboardRateLimitTitle', 'leaderboardYourPosition']) {
     assert.match(i18n, new RegExp(`${key}:\\s*\\{\\s*en:[\\s\\S]*?pl:`));
   }
   assert.match(css, /\.leaderboard-podium/);

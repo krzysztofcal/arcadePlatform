@@ -77,3 +77,40 @@ test('shows a retryable rate-limit state without provisional score rows', async 
   await expect(page.locator('#leaderboardPodium > li')).toHaveCount(0);
   await expect(page.locator('#leaderboardRetry')).toBeVisible();
 });
+
+test('keeps previous-page navigation on an empty later page', async ({ page }) => {
+  await mockShell(page);
+  await page.route('**/.netlify/functions/xp-leaderboard?**', (route) => {
+    const url = new URL(route.request().url());
+    const pageNumber = Number(url.searchParams.get('page'));
+    const rows = pageNumber === 1 ? [row(1, 'first-player', 'First Player', 300, 3)] : [];
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ period: 'all_time', periodKey: 'all_time', nextResetAt: null, page: pageNumber, limit: 25, hasMore: false, rows }) });
+  });
+  await page.route('**/.netlify/functions/xp-leaderboard-me?**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ me: null }) }));
+
+  await page.goto('/leaderboard.html?period=all_time&page=2', { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('#leaderboardResults')).toBeVisible();
+  await expect(page.locator('#leaderboardPageEmpty')).toBeVisible();
+  await expect(page.locator('#leaderboardPageEmptyTitle')).toHaveText('No results on this page');
+  await expect(page.locator('#leaderboardState')).toBeHidden();
+  await expect(page.locator('#leaderboardPrevious')).toBeEnabled();
+  await expect(page.locator('#leaderboardNext')).toBeDisabled();
+
+  await page.locator('#leaderboardPrevious').click();
+  await expect(page).toHaveURL(/period=all_time(?!.*page=)/);
+  await expect(page.locator('#leaderboardPodium')).toContainText('First Player');
+});
+
+test('keeps next-page navigation when the first raw page has no public rows', async ({ page }) => {
+  await mockShell(page);
+  await page.route('**/.netlify/functions/xp-leaderboard?**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ period: 'all_time', periodKey: 'all_time', nextResetAt: null, page: 1, limit: 25, hasMore: true, rows: [] }) }));
+  await page.route('**/.netlify/functions/xp-leaderboard-me?**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ me: null }) }));
+
+  await page.goto('/leaderboard.html?period=all_time', { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('#leaderboardResults')).toBeVisible();
+  await expect(page.locator('#leaderboardPageEmpty')).toBeVisible();
+  await expect(page.locator('#leaderboardState')).toBeHidden();
+  await expect(page.locator('#leaderboardPrevious')).toBeDisabled();
+  await expect(page.locator('#leaderboardNext')).toBeEnabled();
+  await expect(page.locator('#leaderboardPageEmptyText')).not.toContainText('No confirmed XP');
+});
