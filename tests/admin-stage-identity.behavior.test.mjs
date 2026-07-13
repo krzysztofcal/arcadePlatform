@@ -67,6 +67,7 @@ test("admin-stage-identity marks production context as production when stage ref
 
 test("admin-stage-identity uses the build-generated production target when Netlify omits runtime context", () => {
   const identity = buildStageIdentity({
+    NODE_ENV: "production",
     SUPABASE_URL: "https://prodabc.supabase.co",
     SUPABASE_DB_URL: "postgresql://postgres.prodabc:secret@aws-0-eu.pooler.supabase.com:6543/postgres",
     SUPABASE_SERVICE_ROLE_KEY: makeUnsignedSupabaseJwt("prodabc"),
@@ -76,6 +77,27 @@ test("admin-stage-identity uses the build-generated production target when Netli
   assert.equal(identity.databaseTarget, "production");
   assert.equal(identity.databaseMatchesSupabaseProjectRef, true);
   assert.equal(identity.serviceRoleProjectRef, "prodabc");
+});
+
+test("admin-stage-identity prefers build-generated deploy-preview over NODE_ENV production", () => {
+  const identity = buildStageIdentity({
+    NODE_ENV: "production",
+    SUPABASE_URL: "https://stageabc.supabase.co",
+    SUPABASE_STAGE_PROJECT_REF: "stageabc",
+  }, { buildDeployContext: "deploy-preview" });
+
+  assert.equal(identity.environmentContext, "deploy-preview");
+  assert.equal(identity.databaseTarget, "stage");
+});
+
+test("admin-stage-identity does not infer production target from NODE_ENV alone", () => {
+  const identity = buildStageIdentity({
+    NODE_ENV: "production",
+    SUPABASE_URL: "https://prodabc.supabase.co",
+  }, { buildDeployContext: "unknown" });
+
+  assert.equal(identity.environmentContext, "unknown");
+  assert.equal(identity.databaseTarget, "unknown");
 });
 
 test("admin-stage-identity parses project refs from supported Supabase URLs", () => {

@@ -52,11 +52,16 @@ function parseProjectRefFromSupabaseJwt(value) {
 }
 
 function resolveEnvironmentContext(env = process.env, buildDeployContext = BUILD_DEPLOY_CONTEXT) {
+  const supportedContexts = ["production", "deploy-preview", "branch-deploy", "development"];
   const configuredTarget = normalizeString(env.ARCADE_DEPLOY_TARGET);
-  if (["production", "deploy-preview", "branch-deploy", "development"].includes(configuredTarget)) {
+  if (supportedContexts.includes(configuredTarget)) {
     return configuredTarget;
   }
-  return normalizeString(env.CONTEXT || env.NETLIFY_CONTEXT || env.NODE_ENV || buildDeployContext) || "unknown";
+  const runtimeContext = normalizeString(env.CONTEXT || env.NETLIFY_CONTEXT);
+  if (supportedContexts.includes(runtimeContext)) return runtimeContext;
+  const embeddedContext = normalizeString(buildDeployContext);
+  if (supportedContexts.includes(embeddedContext)) return embeddedContext;
+  return env.NODE_ENV === "development" ? "development" : "unknown";
 }
 
 function resolveConfiguredProjectRef(env = process.env) {
