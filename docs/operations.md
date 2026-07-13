@@ -24,7 +24,7 @@ This document preserves the operational and rollout details that were previously
 
 ## XP leaderboard maintenance
 
-`/.netlify/functions/admin-xp-leaderboard-maintenance` is an admin-only, bounded maintenance endpoint. It does not expose rankings publicly. Requests default to dry-run, accept at most 50 accounts, use the configured `XP_KEY_NS`, and refuse unknown Supabase targets. A successful dry-run returns a signed `applyToken` valid for five minutes. The token is bound to the admin, target project, operation, page, offset, limit, and period; it cannot authorize a different request.
+`/.netlify/functions/admin-xp-leaderboard-maintenance` is an admin-only, bounded maintenance endpoint. It does not expose rankings publicly. Requests default to dry-run, accept at most 50 accounts, use the configured `XP_KEY_NS`, and refuse unknown Supabase targets. A successful dry-run returns a signed `applyToken` valid for five minutes. The token is bound to the admin, Netlify deploy, target project, operation, page, offset, limit, and period; it cannot authorize a different request.
 
 Prerequisites are existing runtime configuration only: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL`, Upstash REST credentials, `XP_KEY_NS`, and `SUPABASE_STAGE_PROJECT_REF` on deploy previews. No database migration or new persistent environment variable is required.
 

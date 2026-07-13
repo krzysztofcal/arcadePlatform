@@ -80,6 +80,11 @@ function actorFingerprint(userId, secret) {
   return createHmac("sha256", secret).update(`actor:${String(userId || "")}`).digest("base64url").slice(0, 22);
 }
 
+function deploymentFingerprint(env, secret) {
+  const deployment = env.DEPLOY_ID || env.COMMIT_REF || env.DEPLOY_PRIME_URL || env.URL || env.CONTEXT || "local";
+  return createHmac("sha256", secret).update(`deploy:${deployment}`).digest("base64url").slice(0, 22);
+}
+
 function issueMaintenanceApplyToken({ request, target, adminUserId, env = process.env, nowMs = Date.now() }) {
   if (!request?.dryRun) throw maintenanceError("apply_token_requires_dry_run", 409);
   const secret = resolveApplyTokenSecret(env);
@@ -90,6 +95,7 @@ function issueMaintenanceApplyToken({ request, target, adminUserId, env = proces
     projectRef: target.projectRef,
     scope: maintenanceRequestScope(request),
     actor: actorFingerprint(adminUserId, secret),
+    deployment: deploymentFingerprint(env, secret),
     iat: issuedAt,
     exp: issuedAt + APPLY_TOKEN_TTL_SEC,
   };
@@ -125,6 +131,7 @@ function verifyMaintenanceApplyToken({ token, request, target, adminUserId, env 
     throw maintenanceError("apply_token_target_mismatch", 409);
   }
   if (payload.actor !== actorFingerprint(adminUserId, secret)) throw maintenanceError("apply_token_actor_mismatch", 409);
+  if (payload.deployment !== deploymentFingerprint(env, secret)) throw maintenanceError("apply_token_deploy_mismatch", 409);
   if (JSON.stringify(payload.scope) !== JSON.stringify(maintenanceRequestScope(request))) {
     throw maintenanceError("apply_token_scope_mismatch", 409);
   }

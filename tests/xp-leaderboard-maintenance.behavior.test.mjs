@@ -18,7 +18,7 @@ const USER_1 = "00000000-0000-4000-8000-000000000001";
 const USER_2 = "00000000-0000-4000-8000-000000000002";
 const NAMESPACE = "test:xp:maintenance";
 const NOW = Date.UTC(2026, 6, 13, 5, 0, 0);
-const TOKEN_ENV = { SUPABASE_SERVICE_ROLE_KEY: "test-service-role-secret-at-least-32-chars" };
+const TOKEN_ENV = { SUPABASE_SERVICE_ROLE_KEY: "test-service-role-secret-at-least-32-chars", DEPLOY_ID: "deploy-stage-a" };
 const STAGE_TARGET = { databaseTarget: "stage", projectRef: "stage-ref", environmentContext: "deploy-preview" };
 const STAGE_IDENTITY = {
   databaseTarget: "stage",
@@ -84,6 +84,14 @@ test("signed apply token is bound to operation, page, target, actor, and expiry"
   assert.throws(() => verifyMaintenanceApplyToken({
     token: issued.token, request: matchingApply, target: STAGE_TARGET, adminUserId: USER_2, env: TOKEN_ENV, nowMs: NOW,
   }), /apply_token_actor_mismatch/);
+  assert.throws(() => verifyMaintenanceApplyToken({
+    token: issued.token,
+    request: matchingApply,
+    target: STAGE_TARGET,
+    adminUserId: USER_1,
+    env: { ...TOKEN_ENV, DEPLOY_ID: "deploy-stage-b" },
+    nowMs: NOW,
+  }), /apply_token_deploy_mismatch/);
   assert.throws(() => verifyMaintenanceApplyToken({
     token: issued.token, request: matchingApply, target: STAGE_TARGET, adminUserId: USER_1, env: TOKEN_ENV, nowMs: NOW + (5 * 60 * 1000),
   }), /apply_token_expired/);
