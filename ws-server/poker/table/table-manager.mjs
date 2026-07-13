@@ -1,5 +1,6 @@
 import { applyCoreEvent, CORE_EVENT_TYPES, createInitialCoreState } from "../core/index.mjs";
 import { projectRoomCoreSnapshot } from "../read-model/room-core-snapshot.mjs";
+import { normalizePublicPokerIdentity } from "../read-model/public-poker-identity.mjs";
 import {
   applyCoreStateAction,
   applyCoreStateTurnTimeout,
@@ -19,6 +20,9 @@ import { stampTurnDeadline } from "../shared/poker-turn-timeout.mjs";
 const DEFAULT_PRESENCE_TTL_MS = 10_000;
 const DEFAULT_MAX_SEATS = 10;
 const DEFAULT_ACTION_RESULT_CACHE_MAX = 256;
+const DEFAULT_PUBLIC_PROFILE_FRESH_MS = 60_000;
+const DEFAULT_PUBLIC_PROFILE_TIMEOUT_MS = 750;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const __testOnly = {
   isContinuationEligibleByStack,
   orderedEligibleSeatMembers,
@@ -274,6 +278,11 @@ export function createTableManager({
   maxSeats = DEFAULT_MAX_SEATS,
   actionResultCacheMax = DEFAULT_ACTION_RESULT_CACHE_MAX,
   tableBootstrapLoader = null,
+  publicProfileLoader = null,
+  publicProfileStorageBaseUrl = "",
+  publicProfileFreshMs = DEFAULT_PUBLIC_PROFILE_FRESH_MS,
+  publicProfileTimeoutMs = DEFAULT_PUBLIC_PROFILE_TIMEOUT_MS,
+  publicProfileLog = null,
   observeOnlyJoin = false,
   enableDebugCore = false,
   nodeEnv = process.env.NODE_ENV
@@ -281,9 +290,165 @@ export function createTableManager({
   const normalizedActionResultCacheMax = Number.isInteger(actionResultCacheMax) && actionResultCacheMax > 0
     ? actionResultCacheMax
     : DEFAULT_ACTION_RESULT_CACHE_MAX;
+  const normalizedPublicProfileFreshMs = Number.isFinite(Number(publicProfileFreshMs)) && Number(publicProfileFreshMs) >= 0
+    ? Math.trunc(Number(publicProfileFreshMs))
+    : DEFAULT_PUBLIC_PROFILE_FRESH_MS;
+  const normalizedPublicProfileTimeoutMs = Number.isFinite(Number(publicProfileTimeoutMs)) && Number(publicProfileTimeoutMs) > 0
+    ? Math.trunc(Number(publicProfileTimeoutMs))
+    : DEFAULT_PUBLIC_PROFILE_TIMEOUT_MS;
   const tables = new Map();
   const pendingBootstrapByTableId = new Map();
   const connStateBySocket = new Map();
+
+  function ensurePublicProfileState(table) {
+    if (!table) return;
+    if (!table.publicProfilesByUserId || typeof table.publicProfilesByUserId !== "object" || Array.isArray(table.publicProfilesByUserId)) {
+      table.publicProfilesByUserId = {};
+    }
+    if (!Number.isFinite(table.publicProfilesLoadedAtMs)) table.publicProfilesLoadedAtMs = null;
+    if (typeof table.publicProfilesSeatFingerprint !== "string") table.publicProfilesSeatFingerprint = "";
+    if (!Number.isInteger(table.publicProfilesRefreshGeneration) || table.publicProfilesRefreshGeneration < 0) {
+      table.publicProfilesRefreshGeneration = 0;
+    }
+    if (!table.publicProfilesRefreshPromise || typeof table.publicProfilesRefreshPromise !== "object") {
+      table.publicProfilesRefreshPromise = null;
+    }
+  }
+
+  function buildPublicProfileCandidates(table) {
+    const members = Array.isArray(table?.coreState?.members) ? table.coreState.members : [];
+    const seatDetails = table?.coreState?.seatDetailsByUserId;
+    const configuredMax = Number(table?.tableMeta?.maxPlayers);
+    const coreMax = Number(table?.coreState?.maxSeats);
+    const capacity = Math.min(
+      DEFAULT_MAX_SEATS,
+      Number.isInteger(configuredMax) && configuredMax > 0 ? configuredMax : DEFAULT_MAX_SEATS,
+      Number.isInteger(coreMax) && coreMax > 0 ? coreMax : DEFAULT_MAX_SEATS
+    );
+    const userIds = [...new Set(members
+      .filter((member) => seatDetails?.[member?.userId]?.isBot !== true)
+      .map((member) => typeof member?.userId === "string" ? member.userId.trim() : "")
+      .filter((userId) => UUID_RE.test(userId)))]
+      .sort((left, right) => left.localeCompare(right))
+      .slice(0, capacity);
+    return { userIds, fingerprint: userIds.join("|") };
+  }
+
+  function invalidatePublicProfilesForSeatChange(table) {
+    if (!table) return { userIds: [], fingerprint: "" };
+    ensurePublicProfileState(table);
+    const candidates = buildPublicProfileCandidates(table);
+    if (table.publicProfilesSeatFingerprint !== candidates.fingerprint) {
+      table.publicProfilesByUserId = {};
+      table.publicProfilesLoadedAtMs = null;
+      table.publicProfilesSeatFingerprint = candidates.fingerprint;
+      table.publicProfilesRefreshGeneration += 1;
+    }
+    return candidates;
+  }
+
+  function publicProfilesForSnapshot(table) {
+    const candidates = invalidatePublicProfilesForSeatChange(table);
+    const allowed = new Set(candidates.userIds);
+    return Object.fromEntries(Object.entries(table?.publicProfilesByUserId || {})
+      .filter(([userId]) => allowed.has(userId))
+      .map(([userId, profile]) => [userId, normalizePublicPokerIdentity(profile, { storageBaseUrl: publicProfileStorageBaseUrl })])
+      .filter(([, profile]) => profile));
+  }
+
+  function withProfileTimeout(promise) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("public_profile_timeout")), normalizedPublicProfileTimeoutMs);
+      Promise.resolve(promise).then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error) => {
+          clearTimeout(timer);
+          reject(error);
+        }
+      );
+    });
+  }
+
+  function emitPublicProfileLog(data) {
+    if (typeof publicProfileLog !== "function") return;
+    try {
+      publicProfileLog("ws_public_profiles_refresh", data);
+    } catch {
+      // Profile telemetry must never affect table behavior.
+    }
+  }
+
+  async function refreshPublicProfiles(tableId, { force = false, nowMs = Date.now() } = {}) {
+    const table = tables.get(tableId);
+    if (!table) return { ok: true, skipped: true, reason: "table_missing" };
+    const candidates = invalidatePublicProfilesForSeatChange(table);
+    if (candidates.userIds.length === 0 || typeof publicProfileLoader !== "function") {
+      table.publicProfilesByUserId = {};
+      table.publicProfilesLoadedAtMs = nowMs;
+      return { ok: true, skipped: true, count: 0 };
+    }
+    const ageMs = Number.isFinite(table.publicProfilesLoadedAtMs) ? nowMs - table.publicProfilesLoadedAtMs : Number.POSITIVE_INFINITY;
+    if (!force && ageMs >= 0 && ageMs < normalizedPublicProfileFreshMs) {
+      return { ok: true, cached: true, count: Object.keys(table.publicProfilesByUserId).length };
+    }
+    const inFlight = table.publicProfilesRefreshPromise;
+    if (inFlight?.fingerprint === candidates.fingerprint && inFlight?.promise) {
+      return inFlight.promise;
+    }
+
+    const generation = table.publicProfilesRefreshGeneration;
+    const startedAt = Date.now();
+    let refreshPromise;
+    refreshPromise = (async () => {
+      try {
+        const loaded = await withProfileTimeout(publicProfileLoader(candidates.userIds));
+        const currentTable = tables.get(tableId);
+        if (!currentTable) return { ok: true, stale: true, reason: "table_missing" };
+        const currentCandidates = invalidatePublicProfilesForSeatChange(currentTable);
+        if (currentCandidates.fingerprint !== candidates.fingerprint || currentTable.publicProfilesRefreshGeneration !== generation) {
+          return { ok: true, stale: true, reason: "seat_set_changed" };
+        }
+        const allowedIds = new Set(candidates.userIds);
+        const profiles = Object.fromEntries(Object.entries(loaded && typeof loaded === "object" && !Array.isArray(loaded) ? loaded : {})
+          .filter(([userId]) => allowedIds.has(userId))
+          .map(([userId, profile]) => [userId, normalizePublicPokerIdentity(profile, { storageBaseUrl: publicProfileStorageBaseUrl })])
+          .filter(([, profile]) => profile));
+        currentTable.publicProfilesByUserId = profiles;
+        currentTable.publicProfilesLoadedAtMs = nowMs;
+        emitPublicProfileLog({
+          status: "ok",
+          candidates: candidates.userIds.length,
+          profiles: Object.keys(profiles).length,
+          latencyMs: Date.now() - startedAt
+        });
+        return { ok: true, count: Object.keys(profiles).length };
+      } catch (error) {
+        const currentTable = tables.get(tableId);
+        if (currentTable) {
+          const currentCandidates = invalidatePublicProfilesForSeatChange(currentTable);
+          if (currentCandidates.fingerprint === candidates.fingerprint && currentTable.publicProfilesRefreshGeneration === generation) {
+            currentTable.publicProfilesLoadedAtMs = null;
+          }
+        }
+        emitPublicProfileLog({
+          status: error?.message === "public_profile_timeout" ? "timeout" : "error",
+          candidates: candidates.userIds.length,
+          latencyMs: Date.now() - startedAt
+        });
+        return { ok: false, fallback: true, reason: error?.message || "public_profile_load_failed" };
+      } finally {
+        const currentTable = tables.get(tableId);
+        if (currentTable?.publicProfilesRefreshPromise?.promise === refreshPromise) {
+          currentTable.publicProfilesRefreshPromise = null;
+        }
+      }
+    })();
+    table.publicProfilesRefreshPromise = { fingerprint: candidates.fingerprint, promise: refreshPromise };
+    return refreshPromise;
+  }
   function nextSyntheticRequestId(kind, tableId, userId, nowTs, discriminator) {
     return `${kind}:${tableId}:${userId}:${nowTs}:${discriminator}`;
   }
@@ -357,10 +522,17 @@ export function createTableManager({
         pendingPersistedBootstrap: false,
         presenceByUserId: new Map(),
         subscribers: new Set(),
-        actionResultsByRequestId: new Map()
+        actionResultsByRequestId: new Map(),
+        publicProfilesByUserId: {},
+        publicProfilesLoadedAtMs: null,
+        publicProfilesSeatFingerprint: "",
+        publicProfilesRefreshPromise: null,
+        publicProfilesRefreshGeneration: 0
       });
     }
-    return tables.get(tableId);
+    const table = tables.get(tableId);
+    ensurePublicProfileState(table);
+    return table;
   }
 
   function touchTableActivity(table, nowMs = Date.now()) {
@@ -447,6 +619,7 @@ export function createTableManager({
       publicStacks,
       pokerState: buildEmptyLobbyPokerState(normalizedTableId)
     };
+    invalidatePublicProfilesForSeatChange(table);
     table.pendingPersistedBootstrap = false;
     touchTableActivity(table, nowMs);
     return { ok: true, existed, table };
@@ -488,6 +661,7 @@ export function createTableManager({
       }
 
       const loadedTable = loaded.table;
+      ensurePublicProfileState(loadedTable);
       loadedTable.tableStatus = normalizeTableStatus(loadedTable.tableStatus);
       loadedTable.tableMeta = normalizeTableMeta(loadedTable.tableMeta, loadedTable?.coreState?.maxSeats || maxSeats);
       const loadedVersion = Number(loadedTable?.coreState?.version);
@@ -502,10 +676,12 @@ export function createTableManager({
             message: restored?.reason || "invalid_restored_table"
           };
         }
+        await refreshPublicProfiles(tableId, { force: true });
         return { ok: true, table: tables.get(tableId), cached: false };
       }
       loadedTable.pendingPersistedBootstrap = false;
       tables.set(tableId, loadedTable);
+      await refreshPublicProfiles(tableId, { force: true });
       return { ok: true, table: loadedTable, cached: false };
     })();
 
@@ -554,7 +730,9 @@ export function createTableManager({
       coreState: table?.coreState ?? null,
       members,
       userId,
-      youSeat
+      youSeat,
+      publicProfilesByUserId: table ? publicProfilesForSnapshot(table) : {},
+      publicProfileStorageBaseUrl
     });
 
     if (!table) {
@@ -947,6 +1125,7 @@ export function createTableManager({
           seatDetailsByUserId: nextSeatDetails,
           publicStacks: nextPublicStacks
         };
+        invalidatePublicProfilesForSeatChange(table);
 
         const seat = authoritativeSeat;
         if (!table.presenceByUserId.has(userId)) {
@@ -989,6 +1168,7 @@ export function createTableManager({
         }
 
         table.coreState = joinResult.state;
+        invalidatePublicProfilesForSeatChange(table);
       }
 
       const seat = table.coreState.seats[userId];
@@ -1093,6 +1273,7 @@ export function createTableManager({
       }
 
       table.coreState = leaveResult.state;
+      invalidatePublicProfilesForSeatChange(table);
       effects = leaveResult.effects;
       changed = leaveResult.effects.some((effect) => effect.type === "member_left");
       if (changed) {
@@ -1381,6 +1562,7 @@ export function createTableManager({
     table.coreState = restored.restoredTable.coreState;
     table.tableStatus = restored.restoredTable.tableStatus;
     table.presenceByUserId = restored.restoredTable.presenceByUserId;
+    invalidatePublicProfilesForSeatChange(table);
     touchTableActivity(table);
 
     table.subscribers.delete(ws);
@@ -1457,6 +1639,7 @@ export function createTableManager({
             });
             if (leaveResult.ok) {
               table.coreState = leaveResult.state;
+              invalidatePublicProfilesForSeatChange(table);
               table.presenceByUserId.delete(userId);
               membershipChanged = leaveResult.effects.some((effect) => effect.type === "member_left");
               if (membershipChanged) {
@@ -1604,6 +1787,7 @@ export function createTableManager({
     table.pendingPersistedBootstrap = false;
     table.presenceByUserId = nextPresenceByUserId;
     table.actionResultsByRequestId.clear();
+    invalidatePublicProfilesForSeatChange(table);
     return { ok: true };
   }
 
@@ -1726,6 +1910,7 @@ export function createTableManager({
 
   const manager = {
     ensureTableLoaded,
+    refreshPublicProfiles,
     join,
     leave,
     syncAuthoritativeLeave,

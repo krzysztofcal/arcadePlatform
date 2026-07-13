@@ -192,6 +192,7 @@ Canonical room-core fields in `payload.public`:
 - `payload.public.pot: { total: number, sidePots: any[] }`
 - `payload.public.turn: { userId: string|null, seat: number|null, startedAt: number|null, deadlineAt: number|null }`
 - `payload.public.legalActions: { seat: number|null, actions: string[] }`
+- `payload.public.seats: Array<{ userId: string, seatNo: number, status: string, profile?: object }>`
 - `payload.public.showdown?: { winners: string[], potsAwarded: any[], potAwardedTotal: number, reason: string|null, handId: string|null }`
 - `payload.public.handSettlement?: { handId: string|null, settledAt: string|null, payouts: Record<string, number> }`
 
@@ -205,6 +206,18 @@ Canonical compatibility fields:
 - `payload.you.seat: number | null` (null for authenticated non-seated observer)
 
 Missing room-core data MUST fail safe to canonical defaults and never expose foreign private state: `public.hand.status` resolves to `"LOBBY"` (members present) or `"EMPTY"` (no members), `public.pot.total` resolves to `0`, list fields resolve to `[]`, and optional scalars remain `null` when unavailable.
+
+Poker profile avatar contract delta: authenticated non-bot seats may include an additive `profile` object in `table_state.payload.seats` and `stateSnapshot.payload.public.seats`:
+
+```json
+{
+  "handle": "cosmic-panda-951265",
+  "displayName": "Cosmic Panda 951265",
+  "avatar": { "type": "default", "variant": "panda-pink" }
+}
+```
+
+Uploaded avatars use `{ "type": "uploaded", "url": "https://<arcade-project>.supabase.co/storage/v1/object/public/profile-avatars/<uuid>.webp" }`. Both WS and browser validation require that URL origin to equal the currently configured Arcade Hub `SUPABASE_URL`; another Supabase project is rejected. The allowlist is exactly `handle`, `displayName`, and `avatar`; it excludes `profileUrl`, bio, XP, level, email, provider metadata, provider URLs, and `avatar_key`. The field is optional and fail-open: bots, guests, invalid IDs, missing profiles, profile-query failures, and old servers/clients continue with initials. Profile hydration is derived presentation state and cannot affect join, reconnect, action, leave, settlement, or cash-out.
 
 PR8 contract delta: when WS room-core has bootstrapped a live initial hand, `stateSnapshot` may return `public.hand.status = "PREFLOP"` with live `public.turn`, `public.pot`, and per-user `public.legalActions`, while `payload.private.holeCards` is still emitted only for the authenticated seated user. This delta is limited to initial hand bootstrap/read-model projection and does **not** promise full WS `act` mutation support yet.
 

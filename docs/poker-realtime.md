@@ -10,6 +10,8 @@ This document gives a concise map of the poker realtime pieces in Arcade Portal 
 - Netlify HTTP gameplay endpoints are retired (`410`) and non-authoritative for runtime gameplay (including `poker-get-table`).
 - The realtime transport lives in `ws-server/`, which provides the WebSocket server used by poker clients.
 - Bot support is part of the poker flow and is covered by the poker tests and supporting docs already in `docs/`.
+- Authenticated human seats may carry the additive public identity projection `profile: { handle, displayName, avatar }`. The WS runtime hydrates it independently from required table state, keeps it outside poker engine/persistence data, and fails open to initials for missing, invalid, or unavailable profiles.
+- Poker renders only platform-owned generated avatars or copied Supabase Storage avatars. It never hotlinks Google/Facebook images or exposes provider metadata; future social-photo import remains a separate ingestion feature.
 
 ## Related docs
 - Poker system specification: [docs/poker-system-spec.md](poker-system-spec.md)
@@ -17,6 +19,7 @@ This document gives a concise map of the poker realtime pieces in Arcade Portal 
 - Poker deployment notes: [docs/poker-deployment.md](poker-deployment.md)
 - Poker bots: [docs/poker-bots.md](poker-bots.md)
 - Hole-card normalization: [docs/poker-hole-cards-normalization.md](poker-hole-cards-normalization.md)
+- Poker profile avatar implementation plan: [docs/poker-profile-avatar-implementation-plan.md](poker-profile-avatar-implementation-plan.md)
 
 ## Runtime components
 - `poker/` renders the lobby and table_v2 experience in the browser.

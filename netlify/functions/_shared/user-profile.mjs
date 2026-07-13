@@ -1,5 +1,6 @@
 import { beginSql, executeSql } from "./supabase-admin.mjs";
 import { syncUserLeaderboardVisibility } from "./xp-leaderboard-visibility.mjs";
+import { projectPublicAvatar } from "../../../shared/profile-avatar-projection.mjs";
 
 const RESERVED_HANDLES = new Set(["admin", "admin-api", "about", "account", "api", "assets", "auth", "contact", "game", "games", "help", "leaderboard", "legal", "login", "logout", "me", "poker", "privacy", "profile", "register", "settings", "signup", "static", "support", "terms", "user", "users", "xp"]);
 const HANDLE_RE = /^[a-z0-9][a-z0-9_-]{2,23}$/;
@@ -53,13 +54,11 @@ function normalizeProfileRow(row) {
 }
 
 function profileAvatar(profile) {
-  if (profile.avatarKey) {
-    const baseUrl = String(process.env.SUPABASE_URL || process.env.SUPABASE_URL_V2 || "").replace(/\/$/, "");
-    if (/^https:\/\/[^/]+\.supabase\.co$/i.test(baseUrl) && /^[0-9a-f-]{36}\.webp$/i.test(profile.avatarKey)) {
-      return { type: "uploaded", url: `${baseUrl}/storage/v1/object/public/profile-avatars/${encodeURIComponent(profile.avatarKey)}` };
-    }
-  }
-  return { type: "default", variant: profile.avatarVariant };
+  return projectPublicAvatar({
+    avatarKey: profile.avatarKey,
+    avatarVariant: profile.avatarVariant,
+    storageBaseUrl: process.env.SUPABASE_URL || process.env.SUPABASE_URL_V2 || ""
+  });
 }
 
 function publicProfile(profile, stats = null) {

@@ -11,6 +11,8 @@ const {
 const { computeXpLevel } = await import("../netlify/functions/_shared/xp-level.mjs");
 const { createProfileMeHandler } = await import("../netlify/functions/profile-me.mjs");
 const { createProfilePublicHandler, publicProfilesEnabled } = await import("../netlify/functions/profile-public.mjs");
+const { projectPublicAvatar } = await import("../shared/profile-avatar-projection.mjs");
+const { normalizePublicPokerIdentity, projectPublicPokerIdentity } = await import("../ws-server/poker/read-model/public-poker-identity.mjs");
 
 const USER_ID = "00000000-0000-4000-8000-000000000003";
 
@@ -122,6 +124,68 @@ test("public projection exposes only current XP and computed level", () => {
   assert.equal(projected.level, 3);
   assert.equal("userId" in projected, false);
   assert.equal("avatarKey" in projected, false);
+});
+
+test("poker identity shares avatar rules without inheriting full public profile fields", () => {
+  const avatar = projectPublicAvatar({
+    avatarKey: "10000000-0000-4000-8000-000000000001.webp",
+    avatarVariant: "fox-blue",
+    storageBaseUrl: "https://stageabc.supabase.co"
+  });
+  const projected = projectPublicPokerIdentity({
+    handle: "blue-fox-482731",
+    display_name: "Blue Fox 482731",
+    bio: "public but not a poker field",
+    xp: 900,
+    avatar_key: "10000000-0000-4000-8000-000000000001.webp",
+    avatar_variant: "fox-blue"
+  }, { storageBaseUrl: "https://stageabc.supabase.co" });
+
+  assert.deepEqual(projected, {
+    handle: "blue-fox-482731",
+    displayName: "Blue Fox 482731",
+    avatar
+  });
+  assert.equal("bio" in projected, false);
+  assert.equal("xp" in projected, false);
+  assert.equal("avatarKey" in projected, false);
+});
+
+test("poker identity accepts uploaded avatars only from the configured Arcade Hub Storage origin", () => {
+  const identity = {
+    handle: "blue-fox-482731",
+    displayName: "Blue Fox 482731",
+    avatar: {
+      type: "uploaded",
+      url: "https://arcadehub.supabase.co/storage/v1/object/public/profile-avatars/10000000-0000-4000-8000-000000000001.webp"
+    }
+  };
+
+  assert.deepEqual(normalizePublicPokerIdentity(identity, {
+    storageBaseUrl: "https://arcadehub.supabase.co"
+  }), identity);
+  assert.equal(normalizePublicPokerIdentity(identity, {
+    storageBaseUrl: "https://foreign-project.supabase.co"
+  }), null);
+  assert.equal(normalizePublicPokerIdentity(identity), null);
+});
+
+test("shared avatar projection falls back for unknown variants and untrusted storage origins", () => {
+  assert.deepEqual(projectPublicAvatar({ avatarVariant: "unknown" }), { type: "default", variant: "default" });
+  assert.deepEqual(projectPublicPokerIdentity({
+    handle: "default-avatar-101",
+    display_name: "Default Avatar 101",
+    avatar_variant: "unknown"
+  }), {
+    handle: "default-avatar-101",
+    displayName: "Default Avatar 101",
+    avatar: { type: "default", variant: "default" }
+  });
+  assert.deepEqual(projectPublicAvatar({
+    avatarKey: "10000000-0000-4000-8000-000000000001.webp",
+    avatarVariant: "orbit-green",
+    storageBaseUrl: "https://images.example.com"
+  }), { type: "default", variant: "orbit-green" });
 });
 
 test("server XP level boundaries match the client progression", () => {

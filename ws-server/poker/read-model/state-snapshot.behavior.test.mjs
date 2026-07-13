@@ -38,6 +38,49 @@ test("buildStateSnapshotPayload returns canonical room-core payload for seated a
   assert.deepEqual(payload.public.committedByUserId, {});
 });
 
+test("buildStateSnapshotPayload preserves only the optional poker profile allowlist", () => {
+  const userId = "00000000-0000-4000-8000-000000000501";
+  const payload = buildStateSnapshotPayload({
+    userId,
+    tableSnapshot: {
+      tableId: "table_profile_payload",
+      roomId: "table_profile_payload",
+      stateVersion: 1,
+      members: [{ userId, seat: 1 }],
+      memberCount: 1,
+      maxSeats: 2,
+      youSeat: 1,
+      seats: [{
+        userId,
+        seatNo: 1,
+        status: "ACTIVE",
+        profile: {
+          handle: "payload-user-501",
+          displayName: "Payload User 501",
+          avatar: { type: "default", variant: "nova-purple" },
+          bio: "must not leak",
+          level: 9
+        }
+      }],
+      stacks: {},
+      hand: { handId: null, status: "LOBBY", round: null, dealerSeatNo: null },
+      board: { cards: [] },
+      pot: { total: 0, sidePots: [] },
+      turn: { userId, seat: 1, startedAt: null, deadlineAt: null },
+      legalActions: { seat: null, actions: [] },
+      private: { userId, seat: 1, holeCards: [] }
+    }
+  });
+
+  assert.deepEqual(payload.public.seats[0].profile, {
+    handle: "payload-user-501",
+    displayName: "Payload User 501",
+    avatar: { type: "default", variant: "nova-purple" }
+  });
+  assert.equal("bio" in payload.public.seats[0].profile, false);
+  assert.equal("level" in payload.public.seats[0].profile, false);
+});
+
 test("buildStateSnapshotPayload for observer never exposes private branch", () => {
   const tableManager = createTableManager({ maxSeats: 6 });
   const wsA = {};

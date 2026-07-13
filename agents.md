@@ -50,6 +50,13 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
   - reconnect
 - DB is NOT source of truth
 
+### WS Preview Deploy Gate (CRITICAL)
+- Netlify deploy previews update the browser app only. The `WS Server Deploy` pull-request check validates the WS package but does **not** deploy it; its deploy job is intentionally skipped on PR events.
+- If a PR changes `ws-server/**`, WS runtime dependencies under `shared/**`, or browser/WS protocol behavior, the agent MUST remind the user that `WS Preview Deploy` is required before end-to-end preview verification.
+- The agent must never describe the PR preview as fully deployed merely because Netlify, `WS PR Checks`, or `WS Server Deploy` validation is green.
+- Use the manual `WS Preview Deploy` workflow with `--ref main` for the workflow definition and `-f ref=<pr-branch-or-sha>` for the application revision. After dispatch, verify that the workflow succeeded for the intended ref before asking the user to retest.
+- The preview WS host is shared. Do not make every PR auto-deploy to `ws-preview.kcswh.pl`; concurrent PRs would overwrite each other's runtime. Keep deployment explicit unless preview infrastructure becomes isolated per PR.
+
 ### WS Runtime Logs
 - For preview incidents, agents may inspect:
   - `sudo journalctl -u ws-server-preview -f`
@@ -154,3 +161,4 @@ Task is complete when:
 - WS state and UI are consistent
 - Critical paths are covered with tests
 - Code is simple and readable
+- For WS-affecting PR preview work, the selected PR ref has been manually deployed with `WS Preview Deploy`, or the agent has explicitly reported that this external deploy is still required.

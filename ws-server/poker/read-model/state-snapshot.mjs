@@ -1,3 +1,5 @@
+import { normalizePublicPokerIdentity } from "./public-poker-identity.mjs";
+
 function normalizeSeat(value) {
   return Number.isInteger(value) ? value : null;
 }
@@ -40,7 +42,7 @@ function normalizeActionList(actions) {
   return actions.filter((action) => typeof action === "string");
 }
 
-function normalizeSeatRows(seats) {
+function normalizeSeatRows(seats, { publicProfileStorageBaseUrl = "" } = {}) {
   if (!Array.isArray(seats)) {
     return [];
   }
@@ -55,6 +57,10 @@ function normalizeSeatRows(seats) {
       if (seat.isBot === true) normalized.isBot = true;
       if (typeof seat.botProfile === "string" && seat.botProfile) normalized.botProfile = seat.botProfile;
       if (seat.leaveAfterHand === true) normalized.leaveAfterHand = true;
+      if (seat.isBot !== true) {
+        const profile = normalizePublicPokerIdentity(seat.profile, { storageBaseUrl: publicProfileStorageBaseUrl });
+        if (profile) normalized.profile = profile;
+      }
       return normalized;
     });
 }
@@ -148,7 +154,7 @@ function normalizePrivateBranch(privateBranch, { userId, youSeat }) {
   };
 }
 
-export function buildStateSnapshotPayload({ tableSnapshot, userId }) {
+export function buildStateSnapshotPayload({ tableSnapshot, userId, publicProfileStorageBaseUrl = "" }) {
   const tableId = normalizeString(tableSnapshot?.tableId);
   const stateVersion = Number.isInteger(tableSnapshot?.stateVersion) ? tableSnapshot.stateVersion : 0;
   const maxSeats = Number.isInteger(tableSnapshot?.maxSeats) ? tableSnapshot.maxSeats : null;
@@ -190,7 +196,7 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId }) {
       board: {
         cards: normalizeCards(tableSnapshot?.board?.cards)
       },
-      seats: normalizeSeatRows(tableSnapshot?.seats),
+      seats: normalizeSeatRows(tableSnapshot?.seats, { publicProfileStorageBaseUrl }),
       stacks: normalizeStacks(tableSnapshot?.stacks),
       betThisRoundByUserId: normalizeNumericUserMap(tableSnapshot?.betThisRoundByUserId),
       committedByUserId: normalizeNumericUserMap(tableSnapshot?.committedByUserId),

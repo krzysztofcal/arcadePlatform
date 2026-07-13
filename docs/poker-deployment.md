@@ -107,6 +107,7 @@ What you’re looking for:
 The preview WS deploy is manual-only and isolated from the production WS workflows.
 It targets only the preview host, preview filesystem root, preview service, preview env file, and preview health checks.
 It does not manage Caddy.
+The host is a single shared preview runtime, so automatic deployment from every PR is intentionally disabled: concurrent PRs would overwrite each other and a Netlify preview could silently use another branch's backend.
 Repo-side Caddy ownership is unified: `infra/vps/Caddyfile` is the single source of truth for both production and preview WS routing, so any Caddy change for either host must be made in that file.
 
 ### Dispatch a preview deploy for a selected ref
@@ -115,6 +116,18 @@ Run the workflow from GitHub CLI and pass the target ref explicitly:
 
 ```sh
 gh workflow run ws-preview-deploy.yml --ref main -f ref=<branch-or-sha>
+```
+
+From Termux, trigger the current poker-avatar PR and wait for its result with this complete command (requires an authenticated GitHub CLI with Actions write permission):
+
+```sh
+REPO=krzysztofcal/arcadePlatform; DEPLOY_REF=agent/plan-poker-profile-avatars; gh workflow run ws-preview-deploy.yml --repo "$REPO" --ref main -f ref="$DEPLOY_REF" && sleep 3 && RUN_ID="$(gh run list --repo "$REPO" --workflow 'WS Preview Deploy' --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId')" && gh run watch --repo "$REPO" "$RUN_ID" --exit-status
+```
+
+If `gh` returns `403 Resource not accessible by personal access token`, re-authenticate in Termux with an account/token allowed to run Actions:
+
+```sh
+gh auth login --hostname github.com --git-protocol https --web
 ```
 
 Examples:
