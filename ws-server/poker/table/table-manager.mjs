@@ -1595,7 +1595,7 @@ export function createTableManager({
     };
   }
 
-  function subscribe({ ws, tableId }) {
+  function subscribe({ ws, tableId, userId = null, nowTs = Date.now() }) {
     const conn = ensureConn(ws);
     if (conn.subscribedTableId && conn.subscribedTableId !== tableId) {
       return { ok: false, code: "one_table_per_connection", message: "Connection is already subscribed to a different table" };
@@ -1604,9 +1604,32 @@ export function createTableManager({
     const table = ensureTable(tableId);
     table.subscribers.add(ws);
     conn.subscribedTableId = tableId;
+    const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+    const member = normalizedUserId
+      ? table.coreState.members.find((entry) => entry?.userId === normalizedUserId) ?? null
+      : null;
+    if (member) {
+      const seat = Number.isInteger(member.seat) ? member.seat : table.coreState.seats?.[normalizedUserId];
+      const existingPresence = table.presenceByUserId.get(normalizedUserId);
+      if (existingPresence) {
+        existingPresence.seat = seat;
+        markConnected(existingPresence, nowTs);
+      } else {
+        table.presenceByUserId.set(normalizedUserId, {
+          userId: normalizedUserId,
+          seat,
+          connected: true,
+          lastSeenAt: nowTs,
+          expiresAt: null
+        });
+      }
+      conn.joinedTableId = tableId;
+      touchTableActivity(table, nowTs);
+    }
 
     return {
       ok: true,
+      reattached: Boolean(member),
       tableState: tableState(tableId)
     };
   }
