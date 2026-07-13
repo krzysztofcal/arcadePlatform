@@ -10,6 +10,10 @@ test("ws-server deploy workflow has guarded triggers, secrets and concurrency", 
   const text = workflowText();
 
   assert.match(text, /"ws-server\/\*\*"/);
+  assert.match(text, /"shared\/\*\*"/);
+  assert.match(text, /"netlify\/functions\/_shared\/chips-ledger\.mjs"/);
+  assert.match(text, /"netlify\/functions\/_shared\/poker-\*\.mjs"/);
+  assert.match(text, /"netlify\/functions\/_shared\/supabase-admin\.mjs"/);
   assert.match(text, /concurrency:\n\s+group: ws-server-\$\{\{ github\.ref \}\}/);
   assert.match(text, /permissions:\n\s+contents: read/);
 
@@ -33,6 +37,7 @@ test("workflow includes rollback discipline and atomic current switch markers", 
 
   assert.match(text, /trap 'on_error' ERR/);
   assert.match(text, /rollback\(\)/);
-  assert.match(text, /ln -sfn "\$NEW_RELEASE_DIR" "\$CURRENT_LINK\.tmp"/);
+  assert.match(text, /NEW_RELEASE_APP_DIR="\$NEW_RELEASE_DIR\/ws-server"/);
+  assert.match(text, /ln -sfn "\$NEW_RELEASE_APP_DIR" "\$CURRENT_LINK\.tmp"/);
   assert.match(text, /mv -Tf "\$CURRENT_LINK\.tmp" "\$CURRENT_LINK"/);
 });
