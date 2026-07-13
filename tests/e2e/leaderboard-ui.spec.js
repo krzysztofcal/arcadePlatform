@@ -34,7 +34,7 @@ test('renders podium, dense rows, outside-page position and period navigation', 
     if (period === 'today') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ period, periodKey: '2026-07-13', nextResetAt: Date.parse('2026-07-14T01:00:00Z'), page: 1, limit: 25, hasMore: false, rows: [] }) });
     const rows = pageNumber === 2
       ? [row(26, 'page-two-player', 'Page Two Player', 40, 2, 'orbit-green')]
-      : [row(1, 'alpha-ace', 'Alpha Ace', 900, 6, 'comet-blue'), row(2, 'beta-bolt', 'Beta Bolt', 700, 5, 'falcon-orange'), row(2, 'cosmic-comet', 'Cosmic Comet', 700, 5, 'nova-purple'), row(4, 'delta-dash', 'Delta Dash', 500, 4, 'panda-pink')];
+      : [row(1, 'smoke-profile-676', 'Smoke Profile 676yyehehd', 900, 6, 'comet-blue'), row(2, 'beta-bolt', 'Beta Bolt', 700, 5, 'falcon-orange'), row(2, 'cosmic-comet', 'Cosmic Comet', 700, 5, 'nova-purple'), row(4, 'delta-dash', 'Delta Dash', 500, 4, 'panda-pink')];
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ period, periodKey: 'all_time', nextResetAt: null, page: pageNumber, limit: 25, hasMore: pageNumber === 1, rows }) });
   });
   await page.route('**/.netlify/functions/xp-leaderboard-me?**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ period: 'all_time', periodKey: 'all_time', nextResetAt: null, me: row(42, 'ranked-player', 'Ranked Player', 450, 4, 'fox-blue') }) }));
@@ -53,6 +53,8 @@ test('renders podium, dense rows, outside-page position and period navigation', 
   await expect(page.locator('#leaderboardPageNumber')).toHaveText('Strona 1');
   await page.locator('.site-footer [data-lang="en"]').click();
   await expect(page.locator('#leaderboardTitle')).toHaveText('XP Leaderboard');
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 
   await page.locator('#leaderboardNext').click();
   await expect(page.locator('#leaderboardList')).toContainText('Page Two Player');
