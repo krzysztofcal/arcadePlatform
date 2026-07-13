@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1020">
+  <title>XP Leaderboard - Arcade Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&amp;display=swap">
+  <link rel="stylesheet" href="/css/portal.css">
+  <link rel="stylesheet" href="/css/public-profile.css">
+  <link rel="stylesheet" href="/css/leaderboard.css">
+  <script src="/js/i18n.js" defer></script>
+  <script src="/js/auth/supabase-config.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
+  <script src="/js/user-ui-state.js" defer></script>
+  <script src="/js/auth/supabaseClient.js" defer></script>
+  <script src="/js/profile-client.js" defer></script>
+  <script src="/js/chips/client.js" defer></script>
+  <script src="/js/core/number-format.js" defer></script>
+  <script src="/js/xp/badge-display.js" defer></script>
+  <script src="/js/xpClient.js" defer></script>
+  <script src="/js/topbar.js" defer></script>
+  <script src="/js/core/sidebar-model.js" defer></script>
+  <script src="/js/sidebar.js" defer></script>
+  <script src="/js/leaderboard-page.js" defer></script>
+  <link rel="stylesheet" href="/js/vendor/klaro/klaro.css">
+  <script src="/js/klaro-config.js" defer></script>
+  <script src="/js/vendor/klaro/klaro.js" defer></script>
+  <script src="/js/consent-services.js" defer></script>
+</head>
+<body>
+  <header class="topbar" data-user-ui-state="pending" data-user-ui-profile-state="pending" data-user-ui-xp-state="pending" data-user-ui-chips-state="pending">
+    <div class="topbar-left">
+      <button class="hamburger" id="sbToggle" type="button" aria-label="Toggle navigation" aria-expanded="false"><span></span><span></span><span></span></button>
+      <a href="/index.html" class="brand" aria-label="Arcade Hub home"><div class="logo" aria-hidden="true"></div><h1>Arcade Hub</h1></a>
+    </div>
+    <div class="topbar-right">
+      <a id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true" href="/xp.html"><span class="xp-badge__label">XP</span></a>
+      <div class="avatar-shell" id="avatarShell">
+        <button type="button" class="avatar-btn" id="avatarButton" aria-haspopup="true" aria-expanded="false"><span class="avatar-circle" id="avatarInitials" aria-hidden="true">AH</span><span class="avatar-label" id="avatarLabel">Sign in</span><span class="avatar-caret" aria-hidden="true">v</span></button>
+        <div class="avatar-menu" id="avatarMenu" hidden>
+          <div class="avatar-menu__user" id="avatarMenuUser"><span class="avatar-menu__initials" id="avatarMenuInitials" aria-hidden="true">AH</span><span class="avatar-menu__meta"><span class="avatar-menu__name" id="avatarMenuName">Guest</span><span class="avatar-menu__email" id="avatarMenuEmail">Sign in to sync progress</span></span></div>
+          <button type="button" class="avatar-menu__action" id="avatarMenuAction">Sign in</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="shell leaderboard-shell">
+    <aside class="sidebar collapsed" id="sidebar" aria-label="Main navigation"><nav class="sb-nav"><ul class="sb-list"></ul></nav></aside>
+    <main class="leaderboard-main">
+      <section class="leaderboard-page" aria-labelledby="leaderboardTitle">
+        <header class="leaderboard-header">
+          <div><p class="leaderboard-kicker">Arcade Hub</p><h1 id="leaderboardTitle" data-i18n="leaderboardPageTitle">XP Leaderboard</h1><p class="leaderboard-subtitle" data-i18n="leaderboardPageSubtitle">See who is earning the most XP across Arcade Hub.</p></div>
+          <div class="leaderboard-periods" role="group" data-i18n-aria="leaderboardPeriodsAria" aria-label="Leaderboard period">
+            <button type="button" class="leaderboard-period" data-period="today" data-i18n="leaderboardToday">Today</button>
+            <button type="button" class="leaderboard-period" data-period="week" data-i18n="leaderboardWeek">This week</button>
+            <button type="button" class="leaderboard-period" data-period="all_time" data-i18n="leaderboardAllTime">All time</button>
+          </div>
+        </header>
+
+        <p class="leaderboard-reset" id="leaderboardReset"></p>
+        <p class="leaderboard-live sr-only" id="leaderboardLive" role="status" aria-live="polite" data-i18n="leaderboardLoading">Loading leaderboard...</p>
+
+        <div class="leaderboard-loading" id="leaderboardLoading" aria-hidden="true">
+          <div class="leaderboard-skeleton leaderboard-skeleton--podium"></div><div class="leaderboard-skeleton leaderboard-skeleton--podium"></div><div class="leaderboard-skeleton leaderboard-skeleton--podium"></div>
+          <div class="leaderboard-skeleton leaderboard-skeleton--row"></div><div class="leaderboard-skeleton leaderboard-skeleton--row"></div><div class="leaderboard-skeleton leaderboard-skeleton--row"></div>
+        </div>
+
+        <section class="leaderboard-state" id="leaderboardState" hidden>
+          <h2 id="leaderboardStateTitle"></h2><p id="leaderboardStateText"></p><button type="button" class="leaderboard-retry" id="leaderboardRetry" data-i18n="leaderboardRetry">Try again</button>
+        </section>
+
+        <div class="leaderboard-results" id="leaderboardResults" hidden>
+          <section class="leaderboard-page-empty" id="leaderboardPageEmpty" hidden>
+            <h2 id="leaderboardPageEmptyTitle" data-i18n="leaderboardPageEmptyTitle">No results on this page</h2>
+            <p id="leaderboardPageEmptyText" data-i18n="leaderboardPageEmptyText">No public profiles are available in this part of the ranking. Use the page controls to continue.</p>
+          </section>
+          <ol class="leaderboard-podium" id="leaderboardPodium" aria-label="Top players"></ol>
+          <div class="leaderboard-table-head" id="leaderboardTableHead" aria-hidden="true"><span data-i18n="leaderboardRank">Rank</span><span data-i18n="leaderboardPlayer">Player</span><span data-i18n="leaderboardPeriodXp">Period XP</span><span data-i18n="leaderboardLevel">Level</span></div>
+          <ol class="leaderboard-list" id="leaderboardList"></ol>
+          <section class="leaderboard-me" id="leaderboardMe" aria-labelledby="leaderboardMeTitle" hidden><h2 id="leaderboardMeTitle" data-i18n="leaderboardYourPosition">Your position</h2><div id="leaderboardMeRow"></div></section>
+          <nav class="leaderboard-pagination" aria-label="Leaderboard pages"><button type="button" id="leaderboardPrevious" data-i18n="leaderboardPrevious">Previous page</button><span id="leaderboardPageNumber"></span><button type="button" id="leaderboardNext" data-i18n="leaderboardNext">Next page</button></nav>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="site-footer" role="contentinfo"><nav class="footer-nav" aria-label="Footer"><a class="ft-link" data-i18n="about" data-href-en="/about.en.html" data-href-pl="/about.pl.html" href="/about.en.html">About</a><span class="sep">|</span><a class="ft-link" data-i18n="terms" data-href-en="/legal/terms.en.html" data-href-pl="/legal/terms.pl.html" href="/legal/terms.en.html">Terms</a><span class="sep">|</span><a class="ft-link" data-i18n="privacy" data-href-en="/legal/privacy.en.html" data-href-pl="/legal/privacy.pl.html" href="/legal/privacy.en.html">Privacy</a><span class="sep">|</span><a class="ft-link manage-cookies" data-i18n="manageCookies" id="manageCookies" href="#">Manage cookies</a></nav><div class="lang-switch" aria-label="Language"><button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button><button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button></div></footer>
+  <script src="/js/consent-manager.js" defer></script>
+</body>
+</html>

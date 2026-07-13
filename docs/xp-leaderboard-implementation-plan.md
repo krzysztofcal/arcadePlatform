@@ -410,6 +410,8 @@ Implementation status: implemented in PR #692. The selected design uses a cachea
 
 ### PR 4: Leaderboard UI
 
+Implementation status: implemented in PR #693. The page uses the public cacheable endpoint and separate authenticated `me` endpoint, includes complete PL/EN responsive states, and uses a lightweight status-only XP badge adapter instead of loading gameplay scoring modules.
+
 - Add `leaderboard.html`, external controller, scoped CSS, PL/EN strings, and sidebar route.
 - Reuse topbar hydration and shared avatar/profile URL rendering.
 - Add Today / This week / All time, podium, rows, `me`, pagination, and states.
