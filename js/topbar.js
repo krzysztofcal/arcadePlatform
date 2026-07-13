@@ -10,6 +10,8 @@
   let chipRequestGeneration = 0;
   let chipIdentityUserId = null;
   let welcomeBonusInFlight = null;
+  let welcomeBonusRequestGeneration = 0;
+  let welcomeBonusRefreshQueued = false;
   let chipsClientWaitTries = 0;
   let welcomeBonusClientWaitTries = 0;
   const AuthState = { UNKNOWN: 0, SIGNED_OUT: 1, SIGNED_IN: 2 };
@@ -17,6 +19,68 @@
   let authWired = false;
   let authWireAttempts = 0;
   const CHIP_BADGE_HREF = '/account.html#chipPanel';
+
+  function installPageTransition(){
+    if (!doc.body || doc.getElementById('pageTransition')) return;
+    const overlay = doc.createElement('div');
+    overlay.id = 'pageTransition';
+    overlay.className = 'page-transition';
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.innerHTML = '<div class="page-transition__orb"></div><div class="page-transition__shell"><div class="page-transition__bar"></div><div class="page-transition__hero"></div><div class="page-transition__cards"><i></i><i></i><i></i></div></div>';
+    doc.body.appendChild(overlay);
+
+    let shownAt = Date.now();
+    let fallbackHideTimer = null;
+    function show(){
+      shownAt = Date.now();
+      overlay.hidden = false;
+      overlay.classList.add('is-visible');
+      if (fallbackHideTimer) clearTimeout(fallbackHideTimer);
+      fallbackHideTimer = setTimeout(hide, 1600);
+    }
+    function hide(){
+      if (fallbackHideTimer){
+        clearTimeout(fallbackHideTimer);
+        fallbackHideTimer = null;
+      }
+      const remaining = Math.max(0, 180 - (Date.now() - shownAt));
+      setTimeout(function(){
+        overlay.classList.remove('is-visible');
+        setTimeout(function(){
+          overlay.hidden = true;
+          const pageBoot = doc.getElementById('pageBoot');
+          if (pageBoot) pageBoot.hidden = true;
+        }, 220);
+      }, remaining);
+    }
+    function isPageNavigation(event, link){
+      if (!link || event.defaultPrevented || event.button > 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return false;
+      if (link.hasAttribute('download') || (link.target && link.target !== '_self')) return false;
+      const href = link.getAttribute('href');
+      if (!href || href.charAt(0) === '#' || /^(mailto:|tel:|javascript:)/i.test(href)) return false;
+      try {
+        const next = new URL(link.href, win.location.href);
+        const current = new URL(win.location.href);
+        if (next.origin !== current.origin) return false;
+        return next.pathname !== current.pathname || next.search !== current.search;
+      } catch (_err){
+        return false;
+      }
+    }
+    doc.addEventListener('click', function(event){
+      const target = event.target;
+      const link = target && target.closest ? target.closest('a[href]') : null;
+      if (!isPageNavigation(event, link)) return;
+      setTimeout(function(){
+        if (!event.defaultPrevented) show();
+      }, 0);
+    });
+    show();
+    if (doc.readyState === 'complete') hide();
+    else win.addEventListener('load', hide, { once: true, passive: true });
+  }
+
+  installPageTransition();
 
   function setAuthDataset(state){
     if (!doc || !doc.documentElement) return;
@@ -250,6 +314,11 @@
     if (chipNodes.bonus){ chipNodes.bonus.hidden = true; }
   }
 
+  function invalidateWelcomeBonusBadge(){
+    welcomeBonusRequestGeneration += 1;
+    hideWelcomeBonusBadge();
+  }
+
   function setWelcomeBonusBadgeVisible(isVisible, amount){
     ensureChipNodes();
     if (!chipNodes.bonus) return;
@@ -305,6 +374,7 @@
     chipRequestGeneration += 1;
     chipInFlight = null;
     chipHasHydratedValue = false;
+    invalidateWelcomeBonusBadge();
     chipIdentityUserId = userId;
     const contextMatches = !expectedUserId || (context && context.userId === expectedUserId);
     if (!contextMatches || !hydrateChipBadge()) setChipBadge('', { loading: true });
@@ -328,7 +398,7 @@
       chipIdentityUserId = null;
       chipHasHydratedValue = false;
       hideChipBadge();
-      hideWelcomeBonusBadge();
+      invalidateWelcomeBonusBadge();
       return;
     }
     if (badge){ badge.hidden = false; }
@@ -356,7 +426,7 @@
     });
   }
 
-  async function refreshWelcomeBonusBadge(){
+  async function refreshWelcomeBonusBadge(options){
     normalizeTopbarBadges();
     ensureChipNodes();
     if (!isAuthed()){
@@ -374,10 +444,15 @@
       return;
     }
     welcomeBonusClientWaitTries = 0;
-    if (welcomeBonusInFlight){ return welcomeBonusInFlight; }
+    if (welcomeBonusInFlight){
+      if (options && options.force) welcomeBonusRefreshQueued = true;
+      return welcomeBonusInFlight;
+    }
+    const requestGeneration = welcomeBonusRequestGeneration;
     welcomeBonusInFlight = (async function(){
       try {
         const status = await window.ChipsClient.fetchWelcomeBonusStatus();
+        if (requestGeneration !== welcomeBonusRequestGeneration) return;
         const canClaim = !!(status && status.eligible && !status.alreadyClaimed);
         setWelcomeBonusBadgeVisible(canClaim, status && status.amount);
       } catch (err){
@@ -387,6 +462,10 @@
         hideWelcomeBonusBadge();
       } finally {
         welcomeBonusInFlight = null;
+        if (welcomeBonusRefreshQueued){
+          welcomeBonusRefreshQueued = false;
+          refreshWelcomeBonusBadge();
+        }
       }
     })();
 
@@ -495,7 +574,8 @@
     if (!doc || typeof doc.addEventListener !== 'function') return;
     doc.addEventListener('chips:tx-complete', function(){
       refreshChipBadge();
-      refreshWelcomeBonusBadge();
+      invalidateWelcomeBonusBadge();
+      refreshWelcomeBonusBadge({ force: true });
     });
     if (window.UserUiState && typeof window.UserUiState.onChange === 'function'){
       window.UserUiState.onChange(function(detail){

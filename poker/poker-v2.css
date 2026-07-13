@@ -160,6 +160,8 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 
 .poker-live-pill{display:inline-flex; align-items:center; gap:6px; min-height:42px; padding:0 14px; border-radius:14px; border:1px solid rgba(255,223,180,0.22); background:rgba(19,28,44,0.54); font-size:0.9rem; color:#ebf2ff;}
 
+.poker-live-pill[hidden]{display:none;}
+
 .poker-live-btn{min-height:42px; padding:0 16px; border-radius:14px; border:1px solid rgba(255,223,180,0.22); background:linear-gradient(180deg, rgba(29,41,64,0.96), rgba(12,18,31,0.98)); color:#f7f9fe; font-size:0.96rem; font-weight:700; box-shadow:0 9px 16px rgba(0,0,0,0.34);}
 
 .poker-live-btn--accent{background:linear-gradient(180deg, #2f79df, #1c4497);}

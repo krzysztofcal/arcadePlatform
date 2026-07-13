@@ -4,7 +4,6 @@
   var BALANCE_URL = '/.netlify/functions/chips-balance';
   var LEDGER_URL = '/.netlify/functions/chips-ledger';
   var TX_URL = '/.netlify/functions/chips-tx';
-  var WELCOME_BONUS_URL = '/.netlify/functions/welcome-bonus';
   var BONUS_CAMPAIGNS_URL = '/.netlify/functions/bonus-campaigns';
   var AUTH_CACHE_MS = 60000;
 
@@ -226,6 +225,9 @@
 
   async function fetchLedger(options){
     var params = [];
+    if (options && Number.isInteger(options.page) && options.page > 0){
+      params.push('page=' + encodeURIComponent(options.page));
+    }
     if (options && typeof options.cursor === 'string' && options.cursor){
       params.push('cursor=' + encodeURIComponent(options.cursor));
     }
@@ -290,17 +292,29 @@
     return payload.data;
   }
 
+  function findWelcomeCampaign(payload){
+    var items = payload && Array.isArray(payload.items) ? payload.items : [];
+    for (var i = 0; i < items.length; i += 1){
+      var item = items[i];
+      if (!item || !item.eligible || item.alreadyClaimed) continue;
+      if (item.campaignType === 'welcome' || /^welcome(?:-|_|$)/i.test(item.code || '')) return item;
+    }
+    return null;
+  }
+
   async function fetchWelcomeBonusStatus(){
-    var payload = await authedFetchWithRetry(WELCOME_BONUS_URL, { method: 'GET' });
-    return payload.data;
+    var campaigns = await fetchBonusCampaigns();
+    var welcome = findWelcomeCampaign(campaigns);
+    if (!welcome){
+      return { eligible: false, alreadyClaimed: false, amount: null, reason: 'not_available', code: null };
+    }
+    return welcome;
   }
 
   async function claimWelcomeBonus(){
-    var payload = await authedFetchWithRetry(WELCOME_BONUS_URL, { method: 'POST', body: JSON.stringify({}) });
-    if (payload && payload.data && payload.data.claimed){
-      emit('chips:tx-complete', payload.data);
-    }
-    return payload.data;
+    var status = await fetchWelcomeBonusStatus();
+    if (!status || !status.code) return status;
+    return claimBonusCampaign(status.code);
   }
 
   async function fetchBonusCampaigns(){

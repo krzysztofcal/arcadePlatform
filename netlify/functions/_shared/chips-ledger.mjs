@@ -370,6 +370,54 @@ select * from entries;
   return { entries: normalizedEntries, sequenceOk, nextExpectedSeq: cursor };
 }
 
+function normalizeLedgerRows(rows) {
+  return (Array.isArray(rows) ? rows : []).map(row => {
+    const parsedEntrySeq = parsePositiveInt(row?.entry_seq);
+    const entrySeq = parsedEntrySeq;
+    if (parsedEntrySeq === null) {
+      klog("chips:ledger_invalid_entry_seq", {
+        raw_entry_seq: row?.entry_seq,
+        tx_type: row?.tx_type,
+        idempotency_key: row?.idempotency_key,
+      });
+    }
+
+    const parsedAmount = parseWholeInt(row?.amount);
+    const createdAt = asIso(row?.created_at);
+    const txCreatedAt = asIso(row?.tx_created_at);
+    const displayCreatedAt = asIso(row?.display_created_at) || resolveDisplayCreatedAt(row, {
+      entry_seq: entrySeq,
+      sort_id: row?.sort_id ?? null,
+      tx_type: row?.tx_type ?? null,
+      idempotency_key: row?.idempotency_key ?? null,
+    });
+    const sortId = parsePositiveIntString(row?.sort_id);
+
+    if (parsedAmount === null && row?.amount != null) {
+      klog("chips:ledger_invalid_amount", {
+        entry_seq: entrySeq,
+        raw_amount: row?.amount == null ? null : String(row.amount),
+        tx_type: row?.tx_type,
+      });
+    }
+
+    return {
+      entry_seq: entrySeq,
+      amount: parsedAmount,
+      raw_amount: row?.amount == null ? null : String(row.amount),
+      metadata: row?.metadata ?? null,
+      created_at: createdAt,
+      display_created_at: displayCreatedAt,
+      sort_id: sortId,
+      tx_type: row?.tx_type ?? null,
+      reference: row?.reference ?? null,
+      description: row?.description ?? null,
+      idempotency_key: row?.idempotency_key ?? null,
+      tx_created_at: txCreatedAt,
+    };
+  });
+}
+
 async function listUserLedger(userId, options = {}) {
   const { cursor = null, limit = 50 } = options;
   const cappedLimit = Math.min(Math.max(1, Number.isInteger(limit) ? limit : 50), 200);
@@ -442,51 +490,7 @@ select * from entries;
   );
   const rowList = Array.isArray(rows) ? rows : [];
   const hasFullPage = rowList.length === cappedLimit;
-  const normalizedEntries = rowList.map(row => {
-    const parsedEntrySeq = parsePositiveInt(row?.entry_seq);
-    const entrySeq = parsedEntrySeq;
-    if (parsedEntrySeq === null) {
-      klog("chips:ledger_invalid_entry_seq", {
-        raw_entry_seq: row?.entry_seq,
-        tx_type: row?.tx_type,
-        idempotency_key: row?.idempotency_key,
-      });
-    }
-
-    const parsedAmount = parseWholeInt(row?.amount);
-    const createdAt = asIso(row?.created_at);
-    const txCreatedAt = asIso(row?.tx_created_at);
-    const displayCreatedAt = asIso(row?.display_created_at) || resolveDisplayCreatedAt(row, {
-      entry_seq: entrySeq,
-      sort_id: row?.sort_id ?? null,
-      tx_type: row?.tx_type ?? null,
-      idempotency_key: row?.idempotency_key ?? null,
-    });
-    const sortId = parsePositiveIntString(row?.sort_id);
-
-    if (parsedAmount === null && row?.amount != null) {
-      klog("chips:ledger_invalid_amount", {
-        entry_seq: entrySeq,
-        raw_amount: row?.amount == null ? null : String(row.amount),
-        tx_type: row?.tx_type,
-      });
-    }
-
-    return {
-      entry_seq: entrySeq,
-      amount: parsedAmount,
-      raw_amount: row?.amount == null ? null : String(row.amount),
-      metadata: row?.metadata ?? null,
-      created_at: createdAt,
-      display_created_at: displayCreatedAt,
-      sort_id: sortId,
-      tx_type: row?.tx_type ?? null,
-      reference: row?.reference ?? null,
-      description: row?.description ?? null,
-      idempotency_key: row?.idempotency_key ?? null,
-      tx_created_at: txCreatedAt,
-    };
-  });
+  const normalizedEntries = normalizeLedgerRows(rowList);
   const cursorCandidate = hasFullPage ? findLastCursorCandidate(normalizedEntries) : null;
   if (!cursorCandidate && hasFullPage) {
     klog("chips:ledger_cursor_missing", { count: normalizedEntries.length });
@@ -496,6 +500,64 @@ select * from entries;
     : null;
 
   return { entries: normalizedEntries, items: normalizedEntries, nextCursor };
+}
+
+async function listUserLedgerPage(userId, options = {}) {
+  const requestedPage = Number(options.page);
+  const page = Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  const requestedLimit = Number(options.limit);
+  const limit = Math.min(Math.max(1, Number.isInteger(requestedLimit) ? requestedLimit : 10), 50);
+  await getOrCreateUserAccount(userId);
+  const countQuery = `
+select count(*) as total
+from public.chips_entries e
+join public.chips_accounts a on a.id = e.account_id
+where a.account_type = 'USER'
+  and a.user_id = $1;
+`;
+  const pageQuery = `
+select
+  e.entry_seq,
+  e.id as sort_id,
+  e.amount,
+  e.metadata,
+  e.created_at,
+  t.tx_type,
+  t.reference,
+  t.description,
+  t.idempotency_key,
+  t.created_at as tx_created_at,
+  coalesce(e.created_at, t.created_at) as display_created_at
+from public.chips_entries e
+join public.chips_transactions t on t.id = e.transaction_id
+join public.chips_accounts a on a.id = e.account_id
+where a.account_type = 'USER'
+  and a.user_id = $1
+order by e.id desc
+offset $2
+limit $3;
+`;
+  const countRows = await executeSql(countQuery, [userId]);
+  const parsedTotal = Number(countRows?.[0]?.total);
+  const total = Number.isSafeInteger(parsedTotal) && parsedTotal >= 0 ? parsedTotal : 0;
+  const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
+  const resolvedPage = totalPages > 0 ? Math.min(page, totalPages) : 1;
+  const offset = (resolvedPage - 1) * limit;
+  const rows = await executeSql(pageQuery, [userId, offset, limit]);
+  const rowList = Array.isArray(rows) ? rows : [];
+  const items = normalizeLedgerRows(rowList);
+  return {
+    entries: items,
+    items,
+    pagination: {
+      page: resolvedPage,
+      limit,
+      total,
+      totalPages,
+      hasPreviousPage: resolvedPage > 1,
+      hasNextPage: resolvedPage < totalPages,
+    },
+  };
 }
 
 async function findTransactionByKey(idempotencyKey, tx = null) {
@@ -946,5 +1008,6 @@ export {
   getUserBalance,
   listUserLedgerAfterSeq,
   listUserLedger,
+  listUserLedgerPage,
   postTransaction,
 };

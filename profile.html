@@ -19,6 +19,8 @@
   <script src="/js/chips/client.js" defer></script>
   <script src="/js/core/number-format.js" defer></script>
   <script src="/js/topbar.js" defer></script>
+  <script src="/js/core/sidebar-model.js" defer></script>
+  <script src="/js/sidebar.js" defer></script>
   <script src="/js/xpClient.js" defer></script>
   <script src="/js/ui/xp-overlay.js" defer></script>
   <script src="/js/xp/combo.js" defer></script>
@@ -30,6 +32,7 @@
 <body>
   <header class="topbar" data-user-ui-state="pending" data-user-ui-profile-state="pending" data-user-ui-xp-state="pending" data-user-ui-chips-state="pending">
     <div class="topbar-left">
+      <button class="hamburger" id="sbToggle" type="button" aria-label="Toggle navigation" aria-expanded="false"><span></span><span></span><span></span></button>
       <a href="/index.html" class="brand" aria-label="Arcade Hub home"><div class="logo" aria-hidden="true"></div><h1>Arcade Hub</h1></a>
     </div>
     <div class="topbar-right">
@@ -46,19 +49,22 @@
       </div>
     </div>
   </header>
-  <main class="public-profile" aria-labelledby="publicProfileName">
-    <p class="public-profile__status" id="publicProfileStatus" aria-live="polite" data-i18n="publicProfileLoading">Loading profile...</p>
-    <article class="public-profile__card" id="publicProfileCard" aria-busy="true">
-      <div class="public-profile__identity" id="publicProfileIdentity" hidden>
-        <div class="public-profile__avatar" id="publicProfileAvatar" role="img">AH</div>
-        <div><h1 class="public-profile__name" id="publicProfileName"></h1><p class="public-profile__handle" id="publicProfileHandle"></p></div>
-      </div>
-      <div class="public-profile__stats" aria-label="Public profile stats">
-        <div><strong class="public-profile__stat-loading" id="publicProfileXp" aria-label="Loading"></strong> <span data-i18n="publicProfileXpLabel">XP</span></div>
-        <div><strong class="public-profile__stat-loading" id="publicProfileLevel" aria-label="Loading"></strong> <span data-i18n="publicProfileLevelLabel">Level</span></div>
-      </div>
-      <p class="public-profile__bio" id="publicProfileBio" hidden></p>
-    </article>
-  </main>
+  <div class="shell public-profile-shell">
+    <aside class="sidebar collapsed" id="sidebar" aria-label="Main navigation"><nav class="sb-nav"><ul class="sb-list"></ul></nav></aside>
+    <main class="public-profile" aria-labelledby="publicProfileName">
+      <p class="public-profile__status" id="publicProfileStatus" aria-live="polite" data-i18n="publicProfileLoading">Loading profile...</p>
+      <article class="public-profile__card" id="publicProfileCard" aria-busy="true">
+        <div class="public-profile__identity" id="publicProfileIdentity" hidden>
+          <div class="public-profile__avatar" id="publicProfileAvatar" role="img">AH</div>
+          <div><h1 class="public-profile__name" id="publicProfileName"></h1><p class="public-profile__handle" id="publicProfileHandle"></p></div>
+        </div>
+        <div class="public-profile__stats" aria-label="Public profile stats">
+          <div><strong class="public-profile__stat-loading" id="publicProfileXp" aria-label="Loading"></strong> <span data-i18n="publicProfileXpLabel">XP</span></div>
+          <div><strong class="public-profile__stat-loading" id="publicProfileLevel" aria-label="Loading"></strong> <span data-i18n="publicProfileLevelLabel">Level</span></div>
+        </div>
+        <p class="public-profile__bio" id="publicProfileBio" hidden></p>
+      </article>
+    </main>
+  </div>
 </body>
 </html>

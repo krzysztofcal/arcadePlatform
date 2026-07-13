@@ -1,15 +1,21 @@
 import { baseHeaders, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { listUserLedger, listUserLedgerAfterSeq } from "./_shared/chips-ledger.mjs";
+import { listUserLedger, listUserLedgerAfterSeq, listUserLedgerPage } from "./_shared/chips-ledger.mjs";
 
-const CHIPS_ENABLED = process.env.CHIPS_ENABLED === "1";
 const LEDGER_VERSION = process.env.COMMIT_REF || process.env.BUILD_ID || process.env.DEPLOY_ID || new Date().toISOString();
 
 function withLedgerVersion(headers) {
   return { ...headers, "x-chips-ledger-version": LEDGER_VERSION };
 }
 
-export async function handler(event) {
-  if (!CHIPS_ENABLED) {
+export function createChipsLedgerHandler(deps = {}) {
+  const env = deps.env || process.env;
+  const verifyJwt = deps.verifySupabaseJwt || verifySupabaseJwt;
+  const listCursorPage = deps.listUserLedger || listUserLedger;
+  const listLegacyPage = deps.listUserLedgerAfterSeq || listUserLedgerAfterSeq;
+  const listNumberedPage = deps.listUserLedgerPage || listUserLedgerPage;
+
+  return async function chipsLedgerHandler(event) {
+  if (env.CHIPS_ENABLED !== "1") {
     return {
       statusCode: 404,
       headers: withLedgerVersion(baseHeaders()),
@@ -34,7 +40,7 @@ export async function handler(event) {
   }
 
   const token = extractBearerToken(event.headers);
-  const auth = await verifySupabaseJwt(token);
+  const auth = await verifyJwt(token);
   if (!auth.valid || !auth.userId) {
     klog("chips_ledger_auth_failed", { reason: auth.reason });
     return {
@@ -56,10 +62,31 @@ export async function handler(event) {
   const limitRaw = qs.limit;
   const parsedLimit = Number(limitRaw);
   const limit = Number.isInteger(parsedLimit) ? parsedLimit : 50;
+  const hasPage = Object.prototype.hasOwnProperty.call(qs, "page");
+  const parsedPage = Number(qs.page);
+
+  if (hasPage && (!Number.isInteger(parsedPage) || parsedPage < 1)) {
+    return { statusCode: 400, headers: withLedgerVersion(cors), body: JSON.stringify({ error: "invalid_page" }) };
+  }
 
   try {
+    if (hasPage) {
+      const ledger = await listNumberedPage(auth.userId, { page: parsedPage, limit });
+      klog("chips_ledger_page_ok", { userId: auth.userId, page: parsedPage, count: ledger.items.length });
+      return {
+        statusCode: 200,
+        headers: withLedgerVersion(cors),
+        body: JSON.stringify({
+          userId: auth.userId,
+          items: ledger.items,
+          entries: ledger.items,
+          pagination: ledger.pagination,
+          nextCursor: null,
+        }),
+      };
+    }
     if (hasCursorValue || !hasAfterValue) {
-      const ledger = await listUserLedger(auth.userId, { cursor: hasCursorValue ? trimmedCursor : null, limit });
+      const ledger = await listCursorPage(auth.userId, { cursor: hasCursorValue ? trimmedCursor : null, limit });
       const items = Array.isArray(ledger.items) ? ledger.items : ledger.entries || [];
       klog("chips_ledger_ok", { userId: auth.userId, count: items.length });
       return {
@@ -74,7 +101,7 @@ export async function handler(event) {
       };
     }
 
-    const legacy = await listUserLedgerAfterSeq(auth.userId, { afterSeq: after, limit });
+    const legacy = await listLegacyPage(auth.userId, { afterSeq: after, limit });
     klog("chips_ledger_ok", { userId: auth.userId, count: legacy.entries.length });
     return {
       statusCode: 200,
@@ -92,4 +119,7 @@ export async function handler(event) {
     klog("chips_ledger_error", { error: error.message, code });
     return { statusCode: status, headers: withLedgerVersion(cors), body: JSON.stringify({ error: code }) };
   }
+  };
 }
+
+export const handler = createChipsLedgerHandler();

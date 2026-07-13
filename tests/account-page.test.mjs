@@ -46,6 +46,10 @@ function createElement(tagName, id, isFragment = false) {
       list.push(handler);
       listeners.set(type, list);
     },
+    setAttribute(name, value) {
+      this.attributes = this.attributes || {};
+      this.attributes[name] = String(value);
+    },
     dispatchEvent(event) {
       const list = listeners.get(event?.type) || [];
       list.forEach(handler => handler(event));
@@ -83,7 +87,7 @@ function createDocument() {
   return document;
 }
 
-function seedNodes(document) {
+function seedNodes(document, includePagination = false) {
   const ids = [
     "accountStatus",
     "authForms",
@@ -100,6 +104,9 @@ function seedNodes(document) {
     "signupEmail",
     "signupPassword",
     "signupPasswordConfirm",
+    "signupConfirmation",
+    "signupConfirmationMessage",
+    "signupConfirmationBack",
     "forgotPasswordButton",
     "passwordResetForm",
     "passwordResetEmail",
@@ -123,11 +130,17 @@ function seedNodes(document) {
   ids.forEach(id => {
     document.__nodes.set(id, createElement("div", id));
   });
+  if (includePagination) {
+    ["chipLedgerPagination", "chipLedgerFirst", "chipLedgerPrev", "chipLedgerNext", "chipLedgerLast", "chipLedgerPages", "chipLedgerPage", "chipLedgerPageSize"].forEach(id => {
+      document.__nodes.set(id, createElement(id === "chipLedgerPageSize" ? "select" : "div", id));
+    });
+    document.getElementById("chipLedgerPageSize").value = "10";
+  }
 }
 
 function buildContext(chipsClient, options = {}) {
   const document = createDocument();
-  seedNodes(document);
+  seedNodes(document, options.pagination === true);
   const logs = [];
   const sessionValues = new Map(Object.entries(options.sessionStorage || {}));
   const windowObj = {
@@ -1082,4 +1095,63 @@ test("does not auto-claim generic bonus after eligible status", async () => {
   assert.deepEqual(calls, ["status"]);
   assert.equal(document.getElementById("welcomeBonusPanel").hidden, false);
   assert.notEqual(document.getElementById("accountStatus").textContent, "Welcome! 500 CH have been added to your account.");
+});
+
+test("shows an email confirmation state when signup creates a user without a session", async () => {
+  const auth = {
+    getCurrentUser: () => Promise.resolve(null),
+    onAuthChange() {},
+    signUp: () => Promise.resolve({ data: { user: { id: "pending-user" }, session: null } }),
+  };
+  const chipsClient = {
+    fetchBalance: () => Promise.resolve({ balance: 0 }),
+    fetchLedger: () => Promise.resolve({ items: [], nextCursor: null }),
+    fetchBonusCampaigns: () => Promise.resolve({ items: [] }),
+  };
+  const { windowObj, document } = buildContext(chipsClient, { auth });
+  vm.runInContext(source, vm.createContext({ window: windowObj, document, requestAnimationFrame: windowObj.requestAnimationFrame, CustomEvent: function() {} }));
+  await flush();
+
+  document.getElementById("signupEmail").value = "new@example.com";
+  document.getElementById("signupPassword").value = "password-123";
+  document.getElementById("signupPasswordConfirm").value = "password-123";
+  document.getElementById("signupForm").dispatchEvent({ type: "submit", preventDefault() {} });
+  await flush();
+
+  assert.equal(document.getElementById("signupConfirmation").hidden, false);
+  assert.equal(document.getElementById("authForms").hidden, true);
+  assert.match(document.getElementById("signupConfirmationMessage").textContent, /new@example\.com/);
+  assert.equal(document.getElementById("accountPanel").hidden, true);
+  assert.equal(document.getElementById("accountStatus").dataset.tone, "success");
+});
+
+test("chip history pagination shows total pages and jumps to the last page", async () => {
+  const calls = [];
+  const chipsClient = {
+    fetchBalance: () => Promise.resolve({ balance: 100 }),
+    fetchLedger(options) {
+      calls.push(options);
+      const page = options.page || 1;
+      return Promise.resolve({
+        items: [{ entry_seq: page, sort_id: String(100 - page), amount: 1, tx_type: "MINT", display_created_at: "2026-07-13T10:00:00Z" }],
+        pagination: { page, limit: options.limit, total: 96, totalPages: 10 },
+        nextCursor: null,
+      });
+    },
+    fetchBonusCampaigns: () => Promise.resolve({ items: [] }),
+  };
+  const { windowObj, document } = buildContext(chipsClient, { pagination: true });
+  vm.runInContext(source, vm.createContext({ window: windowObj, document, requestAnimationFrame: windowObj.requestAnimationFrame, CustomEvent: function() {} }));
+  await flush();
+  await flush();
+
+  assert.equal(document.getElementById("chipLedgerPage").textContent, "Page 1 of 10");
+  assert.ok(document.getElementById("chipLedgerPages").children.some(node => node.textContent === "10"));
+  document.getElementById("chipLedgerLast").dispatchEvent({ type: "click" });
+  await flush();
+  await flush();
+
+  assert.equal(calls.at(-1).page, 10);
+  assert.equal(calls.at(-1).limit, 10);
+  assert.equal(document.getElementById("chipLedgerPage").textContent, "Page 10 of 10");
 });

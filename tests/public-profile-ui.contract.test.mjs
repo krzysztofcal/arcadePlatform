@@ -46,6 +46,10 @@ test("public profile route, editor, and legal release gate are present", async (
   assert.match(accountJs, /ProfileClient\.removeAvatar/);
   assert.match(portalCss, /\.avatar-menu__user\{[^}]*background:transparent/);
   assert.match(page, /id="publicProfileCard"/);
+  assert.match(page, /id="sbToggle"/);
+  assert.match(page, /id="sidebar"/);
+  assert.match(page, /src="\/js\/core\/sidebar-model\.js"/);
+  assert.match(page, /src="\/js\/sidebar\.js"/);
   assert.match(page, /id="publicProfileXp"/);
   assert.match(page, /id="publicProfileLevel"/);
   assert.doesNotMatch(page, /id="publicProfileXp">0</);

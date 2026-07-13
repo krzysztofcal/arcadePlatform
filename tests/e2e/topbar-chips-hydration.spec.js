@@ -25,7 +25,7 @@ async function mockAuthenticatedSession(page) {
     `,
   }));
   await page.route('**/.netlify/functions/profile-me', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ displayName: 'Chips Player', avatar: { type: 'default', variant: 'orbit-green' } }) }));
-  await page.route('**/.netlify/functions/welcome-bonus', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ eligible: false, alreadyClaimed: true }) }));
+  await page.route('**/.netlify/functions/bonus-campaigns', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [] }) }));
 }
 
 async function seedCachedBalance(page, balance) {
@@ -40,6 +40,57 @@ async function seedCachedBalance(page, balance) {
     requestAnimationFrame(sample);
   }, { key: CACHE_KEY, userId: USER_ID, value: balance });
 }
+
+[
+  { path: '/favorites.html', name: 'favorites' },
+  { path: '/recently-played.html', name: 'recently played' },
+  { path: '/xp.html', name: 'XP progress' },
+].forEach(({ path, name }) => {
+  test(`${name} keeps its critical boot skeleton visible until deferred scripts are ready`, async ({ page }) => {
+    await mockAuthenticatedSession(page);
+    let releaseTopbar;
+    let topbarRequested = false;
+    const topbarGate = new Promise((resolve) => { releaseTopbar = resolve; });
+    await page.route('**/js/topbar.js', async (route) => {
+      topbarRequested = true;
+      await topbarGate;
+      await route.continue();
+    });
+
+    const navigation = page.goto(path, { waitUntil: 'domcontentloaded' });
+    await expect.poll(() => topbarRequested).toBe(true);
+    const boot = page.locator('#pageBoot');
+    await expect(boot).toBeVisible();
+    await expect(boot).toHaveCSS('position', 'fixed');
+    const box = await boot.boundingBox();
+    const viewport = page.viewportSize();
+    expect(box && viewport && box.width >= viewport.width && box.height >= viewport.height).toBe(true);
+
+    releaseTopbar();
+    await navigation;
+    await expect(boot).toBeHidden();
+  });
+});
+
+[
+  { path: '/account.html', name: 'account' },
+  { path: '/favorites.html', name: 'favorites' },
+  { path: '/recently-played.html', name: 'recently played' },
+  { path: '/xp.html', name: 'XP progress' },
+].forEach(({ path, name }) => {
+  test(`${name} fails open when topbar.js cannot load`, async ({ page }) => {
+    await mockAuthenticatedSession(page);
+    await page.route('**/js/topbar.js', (route) => route.abort('failed'));
+
+    await page.goto(path, { waitUntil: 'domcontentloaded' });
+    const boot = page.locator('#pageBoot');
+    await expect(boot).toBeVisible();
+    await boot.evaluate((element) => { element.style.animationDelay = '0s'; });
+    await expect(boot).toBeHidden();
+    await expect(page.locator('main')).toBeVisible();
+    await expect(boot).toHaveCSS('pointer-events', 'none');
+  });
+});
 
 test('hydrates chips before revalidation and refreshes after a transaction event', async ({ page }) => {
   await mockAuthenticatedSession(page);
@@ -83,6 +134,82 @@ test('retains cached chips when balance revalidation fails', async ({ page }) =>
   await expect(page.locator('#chipBadgeAmount')).toHaveText('896');
   await expect(page.locator('.topbar')).toHaveAttribute('data-user-ui-chips-state', 'stale');
   await expect(page.locator('#chipBadgeAmount')).toHaveCSS('visibility', 'visible');
+});
+
+test('does not restore a stale +500 badge after the welcome bonus is claimed', async ({ page }) => {
+  await mockAuthenticatedSession(page);
+  await page.unroute('**/.netlify/functions/bonus-campaigns');
+  await page.route('**/.netlify/functions/chips-balance', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ balance: 500 }) }));
+  let releaseStaleStatus;
+  const staleGate = new Promise((resolve) => { releaseStaleStatus = resolve; });
+  let statusRequests = 0;
+  await page.route('**/.netlify/functions/bonus-campaigns', async (route) => {
+    statusRequests += 1;
+    if (statusRequests <= 2) {
+      await staleGate;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [{ code: 'welcome-2026', campaignType: 'welcome', eligible: true, alreadyClaimed: false, amount: 500 }] }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [] }) });
+  });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await expect.poll(() => statusRequests).toBe(2);
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('chips:tx-complete', { detail: { claimed: true, amount: 500 } })));
+  releaseStaleStatus();
+
+  await expect.poll(() => statusRequests).toBeGreaterThanOrEqual(3);
+  await expect(page.locator('#welcomeBonusTopbarBadge')).toBeHidden();
+});
+
+test('uses native chips-badge navigation to the account page with a boot skeleton', async ({ page }) => {
+  await mockAuthenticatedSession(page);
+  await page.route('**/.netlify/functions/chips-balance', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ balance: 500 }) }));
+  let releaseAccount;
+  const accountGate = new Promise((resolve) => { releaseAccount = resolve; });
+  let accountRequested = false;
+  await page.route('**/account.html', async (route) => {
+    accountRequested = true;
+    await accountGate;
+    await route.continue();
+  });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('#chipBadge')).toBeVisible();
+  await page.locator('#chipBadge').click({ noWaitAfter: true });
+  await expect.poll(() => accountRequested).toBe(true);
+  releaseAccount();
+  await page.waitForURL(/account\.html#chipPanel$/);
+  await expect(page.locator('#pageBoot')).toBeAttached();
+});
+
+test('respects a later bubble handler that cancels an internal link', async ({ page }) => {
+  await mockAuthenticatedSession(page);
+  await page.route('**/.netlify/functions/chips-balance', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ balance: 500 }) }));
+  let accountRequests = 0;
+  await page.route('**/account.html?cancelled=1', (route) => {
+    accountRequests += 1;
+    return route.abort();
+  });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.evaluate(() => {
+    const link = document.createElement('a');
+    link.id = 'cancelledInternalLink';
+    link.href = '/account.html?cancelled=1';
+    link.textContent = 'Open controlled panel';
+    document.body.appendChild(link);
+    document.addEventListener('click', (event) => {
+      if (event.target && event.target.closest && event.target.closest('#cancelledInternalLink')) event.preventDefault();
+    });
+  });
+
+  const initialUrl = page.url();
+  await page.locator('#cancelledInternalLink').click();
+  await page.waitForTimeout(100);
+  expect(page.url()).toBe(initialUrl);
+  expect(accountRequests).toBe(0);
+  await expect(page.locator('#pageTransition')).toBeHidden();
 });
 
 test('hides account A chips during a direct signed-in switch to account B', async ({ page }) => {
