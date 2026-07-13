@@ -75,8 +75,12 @@ test('topbar ensures chip badge creation when missing', () => {
   assert.doesNotMatch(topbarSource, /location\.assign\(/);
   assert.doesNotMatch(topbarSource, /addEventListener\(['"]click['"][\s\S]{0,500},\s*true\s*\)/);
   assert.match(portalCss, /\.page-transition/);
-  assert.match(accountHtml, /id="pageBoot"/);
-  assert.match(accountHtml, /\.page-boot__shell/);
+  [accountHtml, favoritesHtml, recentlyPlayedHtml, xpHtml].forEach((content) => {
+    assert.match(content, /id="pageBoot"/);
+    assert.match(content, /\.page-boot__shell/);
+    assert.ok(content.indexOf('.page-boot{') < content.indexOf('css/portal.css'));
+    assert.ok(content.indexOf('id="pageBoot"') < content.indexOf('class="topbar"'));
+  });
   assert.match(topbarSource, /pageBoot\.hidden\s*=\s*true/);
 });
 

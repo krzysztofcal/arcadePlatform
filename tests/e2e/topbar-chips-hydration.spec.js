@@ -41,6 +41,37 @@ async function seedCachedBalance(page, balance) {
   }, { key: CACHE_KEY, userId: USER_ID, value: balance });
 }
 
+[
+  { path: '/favorites.html', name: 'favorites' },
+  { path: '/recently-played.html', name: 'recently played' },
+  { path: '/xp.html', name: 'XP progress' },
+].forEach(({ path, name }) => {
+  test(`${name} keeps its critical boot skeleton visible until deferred scripts are ready`, async ({ page }) => {
+    await mockAuthenticatedSession(page);
+    let releaseTopbar;
+    let topbarRequested = false;
+    const topbarGate = new Promise((resolve) => { releaseTopbar = resolve; });
+    await page.route('**/js/topbar.js', async (route) => {
+      topbarRequested = true;
+      await topbarGate;
+      await route.continue();
+    });
+
+    const navigation = page.goto(path, { waitUntil: 'domcontentloaded' });
+    await expect.poll(() => topbarRequested).toBe(true);
+    const boot = page.locator('#pageBoot');
+    await expect(boot).toBeVisible();
+    await expect(boot).toHaveCSS('position', 'fixed');
+    const box = await boot.boundingBox();
+    const viewport = page.viewportSize();
+    expect(box && viewport && box.width >= viewport.width && box.height >= viewport.height).toBe(true);
+
+    releaseTopbar();
+    await navigation;
+    await expect(boot).toBeHidden();
+  });
+});
+
 test('hydrates chips before revalidation and refreshes after a transaction event', async ({ page }) => {
   await mockAuthenticatedSession(page);
   await seedCachedBalance(page, 896);
