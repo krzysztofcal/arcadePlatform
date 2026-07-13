@@ -1,74 +1,70 @@
-# Poker profile avatars and future social-avatar support
+# Poker profile avatars
 
 Status: implementation plan only. This document does not change the poker protocol, database, Auth providers, runtime, CSP, or UI.
 
 ## Objective
 
-Show each authenticated human player's Arcade Hub public-profile avatar and display name at the poker table. Preserve safe fallbacks for guests, bots, missing profiles, and failed images. Keep the design ready for a future owner-controlled import of Google or Facebook profile photos without making poker depend directly on either provider.
+Show each authenticated human player's Arcade Hub public-profile avatar and display name at `poker/table-v2.html`. Preserve initials for guests, bots, missing profiles, invalid payloads, profile-read failures, and image-load failures.
 
-The intended ownership chain is:
-
-```text
-Google/Facebook identity (optional future input)
-  -> validated server-side import
-  -> Arcade Hub user_profiles + profile-avatars Storage
-  -> bounded WS public-profile projection
-  -> poker seat snapshot
-  -> poker table renderer
-```
-
-Poker consumes only the Arcade Hub public-profile projection. It never consumes Auth metadata, provider tokens, provider image URLs, email addresses, or database avatar keys directly.
+Poker consumes only the Arcade Hub public identity projection. It never consumes Auth metadata, provider tokens, provider image URLs, email addresses, bio, XP, leaderboard fields, or database avatar keys.
 
 ## Scope
 
-This plan covers occupied seats in `poker/table-v2.html`, their WS read model, and the shared profile pipeline required to support them. Adding avatars to lobby table lists, chat, tournament views, bot customization, or enabling social-login buttons is out of scope until the table implementation and provider-import foundation are verified independently.
+In scope:
+
+- optional public identity data on occupied human seats in poker WS snapshots;
+- independently hydrated, fail-open profile data in the WS runtime;
+- avatar rendering in the existing poker table UI;
+- verification that the contract can accept a future Google/Facebook-derived Arcade Hub avatar.
+
+Out of scope:
+
+- lobby, chat, tournament, or bot avatars;
+- Google/Facebook login buttons;
+- remote provider-image ingestion, consent, unlink/delete policy, or provider configuration;
+- changes to poker engine state, persisted poker JSON, chips, settlement, or authorization.
+
+Social-avatar import is a separate future feature and requires its own plan. It is not part of the poker-avatar definition of done.
 
 ## Confirmed current state
 
-### Profile avatar source
+- `public.user_profiles` stores `display_name`, `handle`, `avatar_key`, and `avatar_variant`.
+- `netlify/functions/_shared/user-profile.mjs` exposes uploaded avatars as immutable Supabase Storage URLs and generated avatars as allowlisted variants.
+- `netlify/functions/_shared/profile-avatar.mjs` already validates and converts uploads to 256 by 256 WebP.
+- `poker/poker-v2.js` renders initials inside `.poker-seat-avatar` and has no image path.
+- `ws-server/poker/bootstrap/persisted-bootstrap-repository.mjs` loads the table, seats, and poker state in one required transaction.
+- `ws-server/poker/read-model/room-core-snapshot.mjs` projects seats synchronously and has no profile data.
+- `ws-server/poker/table/table-manager.mjs` has asynchronous `ensureTableLoaded()` but synchronous `tableSnapshot()` and `resync()` methods.
+- Persisted `poker_seats.user_id` values are UUIDs. Guest tables and local fixtures may use non-UUID identifiers and must never reach the profile query.
+- The effective poker image policy already permits the project's `https://*.supabase.co` Storage origin.
 
-- `public.user_profiles` is the platform-owned profile source. It stores `display_name`, `handle`, `avatar_key`, and `avatar_variant`.
-- `netlify/functions/_shared/user-profile.mjs` converts those internal fields into the public allowlist:
-  - `{ type: "uploaded", url }` for an immutable processed image in the public `profile-avatars` bucket;
-  - `{ type: "default", variant }` otherwise.
-- The upload path in `netlify/functions/_shared/profile-avatar.mjs` accepts JPEG, PNG, or WebP up to 1 MB and 1024 by 1024 source pixels, validates the decoded image with Sharp, crops it to 256 by 256, converts it to WebP, and writes a UUID-named immutable object.
-- `js/profile-client.js` already renders this public avatar contract in portal UI. Poker should reuse its semantics, not invent a second avatar model.
+The missing avatar is a public read-model enrichment gap, not an upload or engine-state problem.
 
-### Poker table gap
+## Product and architecture decisions
 
-- `poker/poker-v2.js` currently creates `.poker-seat-avatar` and inserts initials from `displayName`; it has no image path.
-- The browser already accepts optional seat naming fields, but the authoritative WS snapshots normally contain only seat identity and game metadata.
-- `ws-server/poker/read-model/room-core-snapshot.mjs` projects `userId`, `seatNo`, `status`, and bot metadata. It does not join or project `user_profiles`.
-- `ws-server/poker/bootstrap/persisted-bootstrap-repository.mjs` reads `poker_seats` without a profile join. The adapter and table manager therefore have no safe profile data to place in a snapshot.
-- Snapshot projection is synchronous. A database read must not be added inside `projectRoomCoreSnapshot()` or repeated for every action broadcast.
-- The deployed poker CSP permits images from the project's `*.supabase.co` Storage origin. It does not permit arbitrary Google or Facebook image hosts.
+1. `public.user_profiles` remains the source of presentation identity.
+2. A poker seat receives only `handle`, `displayName`, and `avatar`.
+3. The profile URL is derived from `handle`; it is not an independent WS field.
+4. The full `publicProfile()` object is not reused by poker because it also contains `bio` and may contain XP and level.
+5. Only avatar normalization is shared. Poker owns a separate closed identity allowlist.
+6. Profile hydration runs after the required table bootstrap in an independent database operation. It is never joined to the required `poker_seats` query.
+7. Profile availability never determines whether join, reconnect, action, leave, settlement, or cash-out succeeds.
+8. The cache is derived runtime presentation state. It is not written to `coreState`, `poker_state`, replay data, or the ledger.
+9. `tableSnapshot()` and `resync()` remain synchronous. Existing callers do not receive a changed return type.
+10. Ordinary actions and broadcasts never trigger a profile query.
 
-The missing poker avatar is therefore a read-model problem, not an image-upload problem.
+## Additive WS contract
 
-## Product decisions
-
-1. The Arcade Hub public profile is the single source of truth for a human poker identity.
-2. Poker shows the current public `displayName`, `handle`, and avatar. Leaderboard visibility does not hide an avatar at a poker table because the public profile itself remains public.
-3. A user-uploaded Arcade Hub avatar has precedence over any social-provider suggestion.
-4. Google or Facebook photos are optional profile sources controlled by the owner. Linking or signing in with a provider must not silently replace a later user upload.
-5. Provider images are copied into Arcade Hub Storage after validation. They are never hotlinked in profile or poker UI.
-6. Guests and accounts missing a valid profile use initials plus the existing neutral poker-seat treatment. Bots keep an explicit bot treatment and never cause a `user_profiles` lookup requirement.
-7. A broken image must fall back locally without moving the seat, hiding the player name, or affecting gameplay.
-8. Profile enrichment is derived presentation data. It must not be written into `poker_state`, used by the engine, included in idempotency decisions, or affect funds and seat authority.
-
-## Public poker seat contract
-
-Add one nested, additive field to human seat rows:
+Add an optional `profile` property to non-bot public seat rows:
 
 ```json
 {
-  "userId": "internal-existing-seat-id",
+  "userId": "71ae168f-6ec8-4b0e-8a38-ae11b40414cc",
   "seatNo": 3,
   "status": "ACTIVE",
   "profile": {
     "handle": "cosmic-panda-951265",
     "displayName": "Cosmic Panda 951265",
-    "profileUrl": "/u/cosmic-panda-951265",
     "avatar": {
       "type": "uploaded",
       "url": "https://<project-ref>.supabase.co/storage/v1/object/public/profile-avatars/<opaque>.webp"
@@ -77,258 +73,258 @@ Add one nested, additive field to human seat rows:
 }
 ```
 
-Default-avatar example:
+Generated-avatar example:
 
 ```json
 {
   "profile": {
     "handle": "pixel-fox-123456",
     "displayName": "Pixel Fox 123456",
-    "profileUrl": "/u/pixel-fox-123456",
     "avatar": { "type": "default", "variant": "fox-blue" }
   }
 }
 ```
 
-Rules:
+Contract rules:
 
-- Treat `profile` as optional for backward compatibility and fail-open rendering.
-- Reuse the same strict public allowlist as profile and leaderboard APIs.
-- Do not serialize `avatar_key`, Supabase UUID fields beyond the already-existing poker `userId`, email, auth metadata, provider name, provider subject, provider URL, bio, or leaderboard preference.
-- Reject unknown avatar types and variants while normalizing a snapshot. Use initials on rejection.
-- Keep bot presentation separate from this contract. A bot may later receive an allowlisted local bot-avatar variant, but it must not masquerade as a public user profile.
-- The field is public to all table viewers; it must be identical for every recipient. Only existing hole-card and legal-action fields remain recipient-specific.
+- `profile` is optional and additive; old clients ignore it and new clients fall back when absent.
+- The poker allowlist contains exactly `handle`, `displayName`, and `avatar`.
+- `profileUrl`, `bio`, XP, level, leaderboard preference, email, provider metadata, provider URL, and `avatar_key` are forbidden.
+- Uploaded avatars use only the trusted Arcade Hub Storage origin and the existing immutable WebP key shape.
+- Default variants use the same allowlist as the profile UI.
+- Bots never receive `profile`.
+- Guests and invalid non-UUID human identifiers are skipped by profile hydration and use initials.
+- The public profile projection is identical for every table viewer; existing recipient-specific cards and legal actions stay unchanged.
 
-## Server design
+The browser derives a profile link only when needed:
 
-### 1. Extract a pure shared public-profile projector
+```text
+/u/${encodeURIComponent(handle)}
+```
 
-Move the non-I/O normalization and avatar projection into a small shared module usable by Netlify functions and the WS service. It should accept normalized profile fields plus an explicitly supplied trusted Storage base URL and return only the public contract.
+## PR 1 — minimal avatar and poker identity projections
 
-Do not make the WS server import the current full `user-profile.mjs`, because that module also owns database writes and leaderboard-visibility behavior. The shared projector must have no database client, environment reads, or mutation side effects.
+### Files and methods
 
-Contract tests must prove that the profile endpoint, leaderboard, and poker use the same avatar-type and variant rules.
+- Add `shared/profile-avatar-projection.mjs`:
+  - `projectPublicAvatar({ avatarKey, avatarVariant, storageBaseUrl })` performs pure uploaded/default avatar projection;
+  - the function has no environment reads, database access, or mutations.
+- Update `netlify/functions/_shared/user-profile.mjs`:
+  - keep `publicProfile()` and `ownerProfile()` contracts unchanged;
+  - replace only the private `profileAvatar()` implementation with `projectPublicAvatar()`.
+- Add `ws-server/poker/read-model/public-poker-identity.mjs`:
+  - `projectPublicPokerIdentity(row, { storageBaseUrl })` returns exactly `handle`, `displayName`, and `avatar`;
+  - it must not call or spread `publicProfile()`.
+- Update `ws-server/Dockerfile` to copy `shared/profile-avatar-projection.mjs` into the release image.
+- Document the optional `seat.profile` contract in `docs/poker-realtime.md`.
 
-### 2. Batch-load profiles with seats
+### Acceptance
 
-Extend the persisted bootstrap repository with a bounded join from active human `poker_seats` to `public.user_profiles`, or perform one separate `WHERE user_id = ANY($1::uuid[])` query after loading seats.
+- Profile APIs keep their existing public shape, including bio where already documented.
+- Poker identity projection cannot serialize bio, XP, level, provider data, or storage keys.
+- Uploaded/default avatar rules are identical in profile and poker projections.
+- No poker browser or WS payload changes are enabled in this PR.
 
-Requirements:
+### Critical tests
 
-- one bounded profile read per table refresh, never one query per seat;
-- no more profile candidates than the table's maximum of ten seats;
-- no Auth-schema or browser-side profile read;
-- missing rows are allowed and reported only as aggregate diagnostics;
-- bot IDs are excluded before the UUID/profile query;
-- SQL failures fail open to initials unless the table bootstrap itself requires the same database connection and has already failed.
+- Extend `tests/public-profiles.behavior.test.mjs` and `tests/profile-avatar.behavior.test.mjs` for projection parity and private-field rejection.
+- Do not add UI, CSS, JSP, DOM, or Playwright tests.
 
-Store the result as derived table-level `publicProfilesByUserId`, outside `coreState` and outside persisted poker JSON. The persisted bootstrap adapter should normalize it, while gameplay reducers should remain unaware of it.
+## PR 2 — isolated WS profile hydration
 
-### 3. Define freshness without querying on every action
+### Repository boundary
 
-Add an async table-manager profile refresh operation and keep snapshot projection synchronous:
+- Add `ws-server/poker/profile/public-profile-repository.mjs` with:
+  - `createPublicProfileRepository({ env })`;
+  - `loadPublicProfiles(userIds)`.
+- `loadPublicProfiles()` performs one bounded `public.user_profiles` query in its own `beginSqlWs()` call after the required bootstrap transaction has completed.
+- Do not JOIN `user_profiles` into the table or seat bootstrap query.
+- Do not execute the optional query inside the callback used by `persisted-bootstrap-repository.loadFromDb()`.
+- A profile-query error or timeout is caught by the profile refresh method and produces an initials fallback. It cannot change a successful required-bootstrap result into a failure.
 
-- force refresh after authoritative join rehydration, because the seat set changed;
-- refresh before the first snapshot on a cold table load;
-- refresh on reconnect/resync when the cache is stale;
-- reuse the cache for ordinary action/state broadcasts;
-- use a short bounded freshness window, initially 60 seconds;
-- deduplicate concurrent refreshes per table;
-- on refresh failure, retain the last safe projection and log only aggregate counts/latency.
+### Candidate filtering
 
-The initial implementation does not need instant cross-tab propagation. Acceptance is that a changed profile appears after rejoin/resync or the next stale-cache refresh without restarting a hand. A later authenticated `refresh_profile` WS command is permissible only if the server ignores client profile fields, reloads the caller by the JWT-bound user ID, rate-limits the command, and broadcasts the server projection.
+Add a local UUID validator and build candidates from the current authoritative members:
 
-### 4. Enrich only the public read model
+1. exclude entries whose `seatDetailsByUserId[userId].isBot` is true;
+2. trim the identifier and require a valid UUID;
+3. remove duplicates and sort for a deterministic fingerprint;
+4. cap candidates at the current normalized `table.coreState.maxSeats`/`table.tableMeta.maxPlayers`;
+5. retain the existing domain hard cap of ten as a final guard;
+6. skip invalid IDs, bot-only tables, and guest tables without running SQL.
 
-Pass `publicProfilesByUserId` explicitly into `projectRoomCoreSnapshot()`. Merge an optional `profile` into each non-bot public seat after left-player filtering. Keep the authoritative `members`, engine seats, stacks, action state, persistence, and replay formats unchanged.
+The query uses `WHERE user_id = ANY($1::uuid[])`. An empty candidate set returns `{}` without opening a transaction.
 
-Update both `stateSnapshot` and `table_state` payload builders, plus state-patch tests, so the additive field survives join, action broadcasts, reconnect, and resync.
+### Table-manager cache
 
-## Browser design
+Update `ws-server/poker/table/table-manager.mjs` with derived fields on each table:
 
-Update `normalizeSeatRows()` in `poker/poker-v2.js` to accept only the documented nested profile shape. Do not copy arbitrary snapshot properties into DOM state.
+```text
+table.publicProfilesByUserId
+table.publicProfilesLoadedAtMs
+table.publicProfilesSeatFingerprint
+table.publicProfilesRefreshPromise
+table.publicProfilesRefreshGeneration
+```
 
-For each occupied human seat:
+Add methods/helpers:
 
-- always render a stable avatar container and player name;
-- for `uploaded`, insert an `<img>` with an empty `alt` because the adjacent visible name identifies the player;
-- set `decoding="async"`; eager loading is acceptable because there are at most ten visible seats;
-- for `default`, set an allowlisted `data-avatar-variant` and render initials;
-- on `error`, remove the failed image and restore initials without re-rendering the whole table;
-- preserve the active-turn clock, winner treatment, folded opacity, cards, and chip animation layers above or around the image;
-- avoid assigning untrusted URLs through HTML strings; use DOM properties after strict URL validation;
-- make the profile name/avatar link to the allowlisted relative `/u/<handle>` only if the link does not interfere with poker controls and focus order.
+- `buildPublicProfileCandidates(table)` returns the validated sorted IDs and fingerprint;
+- `invalidatePublicProfilesForSeatChange(table)` clears the projection, timestamp, and advances the generation when the authoritative human-ID fingerprint changes;
+- `refreshPublicProfiles(tableId, { force, nowMs })` owns the optional read, timeout, deduplication, stale-result protection, and fallback;
+- `publicProfilesForSnapshot(table)` returns only entries matching the current candidate IDs.
 
-CSS should use `object-fit: cover`, preserve the existing circular crop, and include high-contrast focus styling if a profile link is introduced. Test narrow mobile layouts and six-seat layouts so the 76 px avatar does not overlap cards or action badges.
+Cache invariants:
 
-## Google and Facebook compatibility assessment
+1. A snapshot attaches a profile only by exact equality with the current `seat.userId`.
+2. A changed human-ID fingerprint invalidates freshness immediately.
+3. Each refresh captures its candidate IDs, fingerprint, and generation before querying.
+4. Concurrent refreshes for the same fingerprint reuse `publicProfilesRefreshPromise`.
+5. A result is applied only if the table still exists and its fingerprint and generation still match.
+6. Applied results are filtered again to the captured candidate set.
+7. Authoritative rehydration removes profiles for users no longer seated.
+8. Failure or timeout never rejects the caller. A changed seat set falls back to `{}`; a stale refresh for an unchanged set may retain the last safe projection.
+9. Freshness is initially 60 seconds. This is presentation freshness, not game authority.
 
-### Feasibility
+### Exact refresh call sites
 
-This architecture is compatible with both providers.
+- `createTableManager().ensureTableLoaded()`:
+  - first await the required `tableBootstrapLoader` and install/restore the table;
+  - then call and await the bounded `refreshPublicProfiles()` before returning the cold-load result;
+  - profile failure returns the successful table result with initials.
+- `ws-server/poker/handlers/join.mjs` in `handleJoinCommand()`:
+  - after successful authoritative `restoreTableFromPersisted()` and before the first `tableSnapshot()`, await `refreshPublicProfiles(tableId, { force: true })`;
+  - the refresh timeout/failure does not reject the accepted join.
+- `ws-server/server.mjs` resync/resume paths:
+  - after `ensureTableLoaded()` and before the synchronous `tableSnapshot()`, await `refreshPublicProfiles()` only when stale;
+  - replay-only resume that sends no snapshot does not require a refresh.
+- `restoreTableFromPersisted()`, authoritative leave restore, join, and leave membership mutations call `invalidatePublicProfilesForSeatChange()` synchronously.
+- `applyAction()`, turn timeout, bot autoplay, persistence, settlement, cash-out, and ordinary snapshot broadcasts do not call the loader.
 
-- Supabase supports Google and Facebook social login through `signInWithOAuth()`.
-- OAuth identities expose provider metadata through `identity_data`.
-- A Supabase user can have multiple linked identities; automatic and optional manual linking are supported.
-- Supabase documents that `user_metadata` defaults from the first provider's identity data, but its order is not a stable selection mechanism and the field is user-editable. It must not become the poker or profile authority.
+The optional refresh gets a short bounded timeout configured as a local constant in the new profile module. It introduces no ENV requirement. Timing is verified on stage before adjustment.
+
+### Snapshot projection
+
+- Update `ws-server/poker/read-model/room-core-snapshot.mjs` so `projectRoomCoreSnapshot()` accepts an explicit `publicProfilesByUserId` argument.
+- Attach `profile` only after current-seat and left-player filtering and only for non-bot seats.
+- Update `ws-server/poker/table/table-manager.mjs::tableSnapshot()` to pass the filtered map.
+- Keep `tableSnapshot()` synchronous.
+- Preserve the additive field through `stateSnapshot`, `table_state`, and `statePatch` payloads without changing engine or persistence formats.
+
+### Acceptance
+
+- A profile-table outage or timeout cannot reject table load, join, action, reconnect, leave, settlement, or cash-out.
+- A profile query never runs inside the required bootstrap transaction.
+- One refresh performs at most one bounded profile query and no per-seat query.
+- Ordinary poker actions perform zero profile queries.
+- A late result for an old seat fingerprint is ignored.
+- Removed users do not remain in the active snapshot cache.
+- `tableSnapshot()` and `resync()` remain synchronous and all existing callers retain their contracts.
+
+### Critical tests
+
+Extend existing tests rather than introducing a new framework:
+
+- `ws-server/poker/bootstrap/persisted-bootstrap-repository.behavior.test.mjs`: required bootstrap succeeds independently of profile loading.
+- `ws-server/poker/table/table-manager.behavior.test.mjs`: candidate filtering, deduplication, max-player bound, freshness, concurrent refresh deduplication, invalidation, timeout, and stale-result rejection.
+- `ws-server/poker/read-model/room-core-snapshot.behavior.test.mjs`: minimal allowlist, bot/guest omission, and exact current-user mapping.
+- `ws-server/poker/read-model/state-snapshot.behavior.test.mjs` and `state-patch.behavior.test.mjs`: additive profile survives full snapshots and compatible patches.
+- `ws-server/poker/reconnect/resync.behavior.test.mjs`: cold load, authoritative join rehydration, stale resync, profile failure, and no gameplay rejection.
+
+These are required WS/reconnect/backend tests under the project policy. Do not add UI-rendering or Playwright tests.
+
+## PR 3 — poker table renderer
+
+### Files and methods
+
+- Update the existing external `poker/poker-v2.js`:
+  - add `normalizePokerAvatar()` and `normalizePokerProfile()`;
+  - extend `normalizeSeatRows()` with the closed optional profile shape;
+  - add `renderSeatAvatar()` for uploaded images, generated variants, and initials fallback;
+  - derive `/u/<encoded handle>` locally only if the link does not interfere with controls or focus order.
+- Update `poker/poker-v2.css` using the existing selector formatting and seat layers.
+- Do not add an inline script or a second poker renderer.
+
+Renderer rules:
+
+- create `<img>` with DOM APIs, never profile-derived HTML strings;
+- accept only HTTPS URLs on the configured Supabase Storage host and expected public bucket path;
+- use `alt=""`, `decoding="async"`, and `object-fit: cover` because the adjacent visible name identifies the player;
+- on `error`, remove the image and restore initials without rebuilding the whole table;
+- keep default variants allowlisted and render initials inside the existing circle;
+- preserve turn clock, winner/folded states, cards, chip animations, mobile geometry, and current-user treatment.
+
+### CSP impact
+
+- Continue loading code from the existing external `poker/poker-v2.js`; no script CSP hash is needed.
+- Do not add Google/Facebook image domains. Images come only from existing Arcade Hub/Supabase Storage.
+- If implementation unexpectedly introduces an inline script, update the effective CSP SHA allowlist in the same PR; the preferred implementation has no inline script.
+
+### Acceptance and manual validation
+
+The project policy excludes new tests for UI rendering and CSS. Validate manually on the deploy preview:
+
+1. Two browsers see the same uploaded avatar, generated variant, and display name.
+2. A failed image request returns to initials while the name and controls stay usable.
+3. Human, bot, guest, and empty seats retain intentional presentation.
+4. Turn ring, winner/folded states, cards, and chip animations remain correctly layered.
+5. Six-seat desktop and narrow mobile layouts have no avatar overlap.
+6. Reconnect/resync updates the avatar without restarting the hand.
+7. Browser network and CSP reports show no provider-domain image requests or new inline-script violations.
+
+Run the existing syntax and full test commands; update existing UI expectations only if the additive data changes a current assertion.
+
+## Future Google/Facebook compatibility
+
+The poker contract is compatible with future Google/Facebook avatars because poker reads only the platform-owned Arcade Hub avatar projection. Supabase supports both providers and exposes provider identity metadata, but that metadata must never become the poker contract.
 
 Official references:
 
 - [Supabase Google login](https://supabase.com/docs/guides/auth/social-login/auth-google)
 - [Supabase Facebook login](https://supabase.com/docs/guides/auth/social-login/auth-facebook)
-- [Supabase identities and `identity_data`](https://supabase.com/docs/guides/auth/identities)
-- [Supabase users and metadata caveats](https://supabase.com/docs/guides/auth/users)
+- [Supabase identities](https://supabase.com/docs/guides/auth/identities)
 - [Supabase identity linking](https://supabase.com/docs/guides/auth/auth-identity-linking)
-- [Supabase social-login provider-token lifecycle](https://supabase.com/docs/guides/auth/social-login)
 
-Provider metadata keys are not the Arcade Hub contract. Stage fixtures must capture the actual Google and Facebook `identity_data` shapes produced by the configured Supabase project, with tokens, emails, provider subjects, and real URLs redacted. The importer may support explicitly tested candidates such as `picture` or `avatar_url`, but unknown shapes must result in “no provider avatar”, not a guessed URL.
+A separate social-avatar import plan must decide and specify:
 
-### Safe provider-avatar import
+- trusted access to `auth.identities` and provider-specific metadata adapters;
+- explicit owner selection and precedence over/under user uploads;
+- server-side download, redirect/DNS/private-address SSRF protection, byte and image limits;
+- conversion through the existing WebP pipeline and copying to `profile-avatars` Storage;
+- private provenance schema, unlink/delete retention, consent, feature flag, and rollout;
+- provider host allowlists and stage fixtures.
 
-Add a server-only profile operation, conceptually `POST profile-avatar-import-provider`, that accepts only a supported provider selector such as `google` or `facebook`. It must derive the user from a verified Supabase JWT and then:
+Provider images must not be hotlinked. A copied provider image becomes an ordinary Arcade Hub `avatar_key`, so the poker implementation requires no provider logic, provider URL, new CSP image domain, or protocol change.
 
-1. Read that user's matching `auth.identities` row through trusted server/database access.
-2. Select the image candidate from an explicitly versioned provider adapter.
-3. Require HTTPS and validate the initial host against a provider-specific allowlist.
-4. Fetch with a short timeout, a small redirect limit, DNS/private-address protections, and revalidation after every redirect to prevent SSRF.
-5. Stream with a strict byte ceiling; do not trust `Content-Length` or `Content-Type` alone.
-6. Decode and validate with the existing Sharp limits.
-7. Resize to 256 by 256 WebP and store in the existing `profile-avatars` bucket under a new UUID key.
-8. Atomically update the profile avatar selection, then best-effort delete the replaced owned object.
-9. Return the standard owner-profile projection and emit the existing `profile:updated` lifecycle event in the browser.
+## Breaking and operational impact
 
-Do not store Google/Facebook provider tokens. Supabase does not refresh provider tokens for the application, and the avatar import does not require ongoing provider API access. Do not expose the provider URL to browsers or persist it as the rendered avatar URL.
+| Area | Impact |
+| --- | --- |
+| WS seat contract | Additive optional `profile`; old clients remain compatible. |
+| Table-manager API | `tableSnapshot()` and `resync()` stay synchronous; new `refreshPublicProfiles()` is explicitly awaited only from existing async call sites. |
+| Poker engine/persistence | No changes to reducers, core state, `poker_state`, replay, or ledger. |
+| Database | PR 1–3 require no migration. Profile hydration reads existing `public.user_profiles`. |
+| ENV/secrets | No new ENV or secret. Existing trusted Supabase configuration supplies DB and Storage origins. |
+| CSP | No new image domain and no inline script in the intended implementation. |
+| Runtime failure | Profile read or image failure degrades to initials without changing gameplay. |
 
-### Source precedence and schema
-
-The existing `avatar_key` can hold every processed image regardless of origin. Add minimal private provenance so automatic or explicit imports cannot overwrite an owner's choice:
-
-```text
-avatar_source: default | user_upload | google | facebook
-avatar_source_identity_id: nullable private identity reference/fingerprint
-avatar_source_updated_at: timestamp
-```
-
-Exact naming should be finalized with the migration. None of these fields is public.
-
-Precedence:
-
-1. `user_upload` remains selected until the owner explicitly chooses another source or removes it.
-2. Selecting Google/Facebook imports a snapshot into Arcade Hub Storage and records that source.
-3. A later OAuth login does not overwrite the stored image.
-4. “Refresh provider photo” is an explicit owner action using the same secured import endpoint.
-5. Removing an avatar returns to the generated default unless the owner explicitly selects a linked provider again.
-6. Unlinking an identity must prevent future refresh. Product/legal review should decide whether an already imported copy is retained as an owner-selected profile asset or deleted immediately; implementation must encode and test one policy before rollout.
-
-For a brand-new OAuth signup, the safest initial release keeps the generated Arcade Hub avatar and offers “Use Google/Facebook photo” after the first confirmed session. Automatic first-sign-in import can be evaluated later only with clear consent copy and the same validation pipeline.
-
-## Security, privacy, and reliability requirements
-
-- Never trust a client-supplied profile, avatar URL, provider, user ID, or Storage key.
-- Never read OAuth metadata from the poker browser or include it in WS frames.
-- Never hotlink provider photos. This avoids provider tracking, URL expiry, referrer leakage, CSP expansion, inconsistent caching, and table layout changes from arbitrary images.
-- Keep `img-src` limited to the existing Arcade Hub/Supabase Storage origin. Add a contract test for the effective `/poker/*` CSP rather than adding Google/Facebook CDN wildcards.
-- Use immutable UUID object names and existing long-lived cache headers; an avatar update gets a new URL and naturally invalidates clients.
-- Do not make profile availability a gameplay, reconnect, or cash-out dependency. Initials are always a valid fail-open state.
-- Do not log handles, provider URLs, identity data, emails, raw image contents, or high-cardinality user IDs. Log table-level counts, source type, status code, bytes rejected, and latency only where needed.
-- Preserve the existing profile upload limits and decompression-bomb protection for provider imports.
-- Apply rate limits and idempotency to provider import/refresh requests.
-- Review Google/Facebook platform terms, consent copy, privacy policy, and deletion behavior before enabling either provider in production.
-
-## Delivery sequence
-
-### PR 1: Shared projection and protocol contract
-
-- extract the pure public-avatar/profile projector;
-- define and document the optional poker seat `profile` field;
-- add allowlist, privacy, and compatibility tests;
-- no browser behavior change yet.
-
-### PR 2: WS profile hydration
-
-- add the bounded seat/profile batch read;
-- add derived table-level profile cache and refresh lifecycle;
-- enrich public snapshots and patches;
-- cover cold load, join, reconnect, resync, missing profile, bot, and database-failure fallbacks.
-
-### PR 3: Poker table rendering
-
-- normalize the additive profile field;
-- render uploaded and default avatars with resilient fallback;
-- add CSS and accessibility behavior;
-- add DOM/Playwright coverage for multiple players, image failure, turn clock, mobile layout, reconnect, and avatar update after refresh.
-
-### PR 4: Optional social-avatar import foundation
-
-- add private avatar-source provenance migration;
-- implement provider adapters and the secured remote-image ingestion path;
-- add account UI source selection and explicit refresh;
-- do not enable Google/Facebook buttons until provider configuration, redirect allowlists, consent, deletion policy, and stage verification are complete.
-
-Google and Facebook may be separate rollout PRs after the shared import foundation because their metadata shapes, host allowlists, console setup, and platform review requirements differ.
-
-## Test matrix
-
-### Unit and contract tests
-
-- uploaded/default public avatar projection parity across profile API, leaderboard, and poker;
-- strict rejection of unknown avatar types, variants, schemes, hosts, and malformed profile URLs;
-- no private profile/auth fields in serialized poker seats;
-- one profile batch for up to ten human seats and zero lookups for bot-only tables;
-- deterministic missing-profile and SQL-failure fallback;
-- unchanged gameplay core state and persisted poker JSON;
-- uploaded image error restores initials while preserving the turn clock;
-- ties between `table_state`, full `stateSnapshot`, and `statePatch` profile data.
-
-### WS integration tests
-
-- existing seated players receive profiles on cold bootstrap;
-- a newly joined player appears with a profile after authoritative rehydration;
-- every observer receives the same public profile projection;
-- reconnect/resync refreshes stale profile data;
-- normal actions do not cause profile queries;
-- profile lookup failure does not reject join, act, leave, reconnect, or cash-out;
-- bot and guest seats never expose another user's cached profile.
-
-### Provider import tests
-
-- Google and Facebook stage fixtures map only allowlisted fields;
-- unsupported/missing identity returns a controlled error;
-- JWT user cannot select another user's identity;
-- user upload precedence is preserved;
-- HTTPS, DNS, redirect, timeout, byte, MIME, decoded-format, dimension, and pixel limits are enforced;
-- SVG, HTML, polyglot, oversized, redirect-to-private-network, and decompression-bomb inputs are rejected;
-- imported object is WebP in Arcade Hub Storage and provider URL is absent from public payloads;
-- retries do not leak orphaned objects and replacement cleanup is safe;
-- linked-identity removal follows the chosen retention policy.
-
-### Stage acceptance
-
-1. Set a generated avatar and join a table from two browsers; both see the same default variant and display name.
-2. Upload a custom avatar, resync/rejoin, and verify all table viewers receive the new immutable URL.
-3. Force the image request to fail and verify initials, name, controls, turn ring, and gameplay remain usable.
-4. Exercise six seats with humans and bots on desktop and mobile.
-5. Verify snapshots contain no email, bio, Auth metadata, provider URL, Storage key, or provider token.
-6. Confirm ordinary action traffic does not increase profile SQL reads.
-7. When social import is implemented, repeat with one Google and one Facebook test identity, linked and unlinked identity flows, user-upload precedence, and provider-photo refresh.
-8. Verify the deployed `/poker/*` CSP loads only the copied Supabase Storage image and requires no Google/Facebook image-domain additions.
+Making existing synchronous table-manager paths asynchronous is explicitly out of scope. If implementation cannot preserve those signatures, stop and revise this plan and all callers before coding.
 
 ## Rollout and rollback
 
-- Roll out the optional WS field before enabling the browser renderer; old clients ignore it.
-- Monitor aggregate profile-cache hit/miss, load latency, missing-profile counts, image failures, and snapshot size.
-- Set a snapshot-size budget before implementation; ten small profile projections should remain well below protocol limits.
-- If WS enrichment causes problems, disable profile hydration and continue sending seats without `profile`; clients fall back to initials and gameplay remains unchanged.
-- If the renderer causes problems, disable image rendering while retaining names and initials.
-- Social-avatar import must have its own feature flag. Disabling it stops new imports without breaking already stored Arcade Hub avatars.
-- Rollback must never delete canonical profiles, user uploads, poker seats, poker state, or ledger data.
+- Deploy the optional WS field before enabling browser rendering.
+- Monitor aggregate profile-refresh count, cache hit/miss, timeout/error count, latency, missing-profile count, and snapshot size without logging handles or user IDs.
+- Roll back WS enrichment by disabling the profile loader; clients continue with initials.
+- Roll back image rendering while retaining names and initials.
+- Never delete canonical profiles, user uploads, poker seats, poker state, or ledger data during rollback.
 
 ## Definition of done
 
-- Every authenticated human with a valid Arcade Hub profile is shown at the poker table using the same display name and avatar seen on `/u/<handle>`.
-- Guests, bots, missing profiles, invalid payloads, and failed image requests have intentional non-blocking fallbacks.
-- Join, actions, reconnect, resync, leave, settlement, and cash-out remain independent of profile availability.
-- Snapshot and DOM tests prove that no private identity fields are added.
-- Profile queries are bounded and absent from ordinary per-action broadcasts.
-- The design can import Google/Facebook photos into the same platform-owned avatar pipeline without hotlinking or poker-specific provider logic.
-- No provider is enabled until stage fixtures, consent, CSP, redirect, deletion, and platform-policy checks pass.
+- Authenticated human seats use the same display name and avatar semantics as their Arcade Hub public profile.
+- The poker WS allowlist contains only `handle`, `displayName`, and `avatar`.
+- Guests, bots, missing profiles, invalid IDs, failed SQL, timeouts, invalid payloads, and failed images have non-blocking fallbacks.
+- Required bootstrap and gameplay remain independent of profile availability.
+- Cache fingerprint and generation guards prevent stale seat-set results from being applied.
+- Profile queries are bounded by the actual table capacity and absent from ordinary action broadcasts.
+- Critical WS/backend behavior is covered by existing-suite tests; UI/CSS behavior is manually validated.
+- Google/Facebook photos can later enter through the platform-owned avatar pipeline without poker-specific provider logic or hotlinking.
