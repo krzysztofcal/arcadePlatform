@@ -9,6 +9,7 @@ function rollout({ baseDir, releaseSha, archivePath }) {
   const releasesDir = path.join(baseDir, "releases");
   const currentLink = path.join(baseDir, "current");
   const newReleaseDir = path.join(releasesDir, releaseSha);
+  const newReleaseAppDir = path.join(newReleaseDir, "ws-server");
 
   fs.rmSync(newReleaseDir, { recursive: true, force: true });
   fs.mkdirSync(newReleaseDir, { recursive: true });
@@ -17,14 +18,8 @@ function rollout({ baseDir, releaseSha, archivePath }) {
 
   const tmpLink = `${currentLink}.tmp`;
   fs.rmSync(tmpLink, { force: true });
-  fs.symlinkSync(newReleaseDir, tmpLink);
+  fs.symlinkSync(newReleaseAppDir, tmpLink);
   fs.renameSync(tmpLink, currentLink);
-}
-
-function createArchive({ archivePath, fileName, fileContent }) {
-  const staging = fs.mkdtempSync(path.join(os.tmpdir(), "ws-rollout-stage-"));
-  fs.writeFileSync(path.join(staging, fileName), fileContent);
-  execFileSync("tar", ["-czf", archivePath, "-C", staging, "."]);
 }
 
 test("rollout script is atomic: current symlink switches only after extract success", async () => {
@@ -44,9 +39,12 @@ test("rollout script is atomic: current symlink switches only after extract succ
   assert.equal(afterFail, oldRelease);
 
   const goodArchive = path.join(baseDir, "good.tgz");
-  createArchive({ archivePath: goodArchive, fileName: "server.mjs", fileContent: "export {}\n" });
+  const staging = fs.mkdtempSync(path.join(os.tmpdir(), "ws-rollout-layout-"));
+  fs.mkdirSync(path.join(staging, "ws-server"), { recursive: true });
+  fs.writeFileSync(path.join(staging, "ws-server", "server.mjs"), "export {}\n");
+  execFileSync("tar", ["-czf", goodArchive, "-C", staging, "."]);
 
   rollout({ baseDir, releaseSha: "new-success", archivePath: goodArchive });
   const afterSuccess = await fs.promises.realpath(currentLink);
-  assert.equal(afterSuccess, path.join(releasesDir, "new-success"));
+  assert.equal(afterSuccess, path.join(releasesDir, "new-success", "ws-server"));
 });
