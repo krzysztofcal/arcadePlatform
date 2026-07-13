@@ -3,48 +3,113 @@ import test from "node:test";
 import { __createMemoryStoreForTests } from "../netlify/functions/_shared/store-upstash.mjs";
 import { createAdminXpLeaderboardMaintenanceHandler } from "../netlify/functions/admin-xp-leaderboard-maintenance.mjs";
 import {
+  issueMaintenanceApplyToken,
   listAuthUsersPage,
   parseMaintenanceRequest,
   runBackfill,
   runProfileCoverage,
   runPrune,
   validateMaintenanceTarget,
+  verifyMaintenanceApplyToken,
 } from "../netlify/functions/_shared/xp-leaderboard-maintenance.mjs";
 import { createXpLeaderboardKeys, getXpLeaderboardPeriods, getXpLeaderboardWeekDayKeys } from "../netlify/functions/_shared/xp-leaderboard.mjs";
 
 const USER_1 = "00000000-0000-4000-8000-000000000001";
 const USER_2 = "00000000-0000-4000-8000-000000000002";
 const NAMESPACE = "test:xp:maintenance";
+const NOW = Date.UTC(2026, 6, 13, 5, 0, 0);
+const TOKEN_ENV = { SUPABASE_SERVICE_ROLE_KEY: "test-service-role-secret-at-least-32-chars" };
+const STAGE_TARGET = { databaseTarget: "stage", projectRef: "stage-ref", environmentContext: "deploy-preview" };
+const STAGE_IDENTITY = {
+  databaseTarget: "stage",
+  supabaseProjectRef: "stage-ref",
+  supabaseUrlProjectRef: "stage-ref",
+  databaseProjectRef: "stage-ref",
+  databaseMatchesSupabaseProjectRef: true,
+  stageProjectRefMatches: true,
+  serviceRoleProjectRef: "stage-ref",
+  environmentContext: "deploy-preview",
+};
 
 test("maintenance requests default to bounded dry-run and reject unsafe operations", () => {
   assert.deepEqual(parseMaintenanceRequest({ operation: "backfill", limit: 500 }), {
-    operation: "backfill", period: "all_time", page: 1, offset: 0, limit: 50, dryRun: true, confirmation: "",
+    operation: "backfill", period: "all_time", page: 1, offset: 0, limit: 50, dryRun: true, applyToken: "",
   });
   assert.throws(() => parseMaintenanceRequest({ operation: "unknown" }), /invalid_operation/);
   assert.throws(() => parseMaintenanceRequest({ operation: "prune", period: "old-week" }), /invalid_period/);
 });
 
-test("apply requires an exact detected target confirmation", () => {
-  const identity = {
-    databaseTarget: "stage",
-    supabaseProjectRef: "stage-ref",
-    supabaseUrlProjectRef: "stage-ref",
-    databaseProjectRef: "stage-ref",
-    databaseMatchesSupabaseProjectRef: true,
-    stageProjectRefMatches: true,
-    serviceRoleProjectRef: "stage-ref",
-    environmentContext: "deploy-preview",
-  };
-  assert.equal(validateMaintenanceTarget({ identity, request: { dryRun: true } }).databaseTarget, "stage");
-  assert.throws(() => validateMaintenanceTarget({ identity, request: { dryRun: false, confirmation: "" } }), /confirmation_required/);
-  assert.equal(validateMaintenanceTarget({
-    identity,
-    request: { dryRun: false, confirmation: "apply:stage:stage-ref" },
-  }).projectRef, "stage-ref");
+test("maintenance target validation rejects inconsistent server resources", () => {
+  assert.equal(validateMaintenanceTarget({ identity: STAGE_IDENTITY }).databaseTarget, "stage");
   assert.throws(() => validateMaintenanceTarget({
-    identity: { ...identity, serviceRoleProjectRef: "other-ref" },
-    request: { dryRun: true },
+    identity: { ...STAGE_IDENTITY, serviceRoleProjectRef: "other-ref" },
   }), /service_role_project_mismatch/);
+});
+
+test("signed apply token is bound to operation, page, target, actor, and expiry", () => {
+  const dryRun = parseMaintenanceRequest({ operation: "profile_coverage", page: 1, limit: 25 });
+  const issued = issueMaintenanceApplyToken({
+    request: dryRun, target: STAGE_TARGET, adminUserId: USER_1, env: TOKEN_ENV, nowMs: NOW,
+  });
+  const matchingApply = parseMaintenanceRequest({
+    operation: "profile_coverage", page: 1, limit: 25, apply: true, applyToken: issued.token,
+  });
+  assert.equal(verifyMaintenanceApplyToken({
+    token: issued.token, request: matchingApply, target: STAGE_TARGET, adminUserId: USER_1, env: TOKEN_ENV, nowMs: NOW,
+  }).scope.page, 1);
+  assert.throws(() => verifyMaintenanceApplyToken({
+    token: issued.token,
+    request: parseMaintenanceRequest({ operation: "backfill", page: 1, limit: 25, apply: true }),
+    target: STAGE_TARGET,
+    adminUserId: USER_1,
+    env: TOKEN_ENV,
+    nowMs: NOW,
+  }), /apply_token_scope_mismatch/);
+  assert.throws(() => verifyMaintenanceApplyToken({
+    token: issued.token,
+    request: parseMaintenanceRequest({ operation: "profile_coverage", page: 2, limit: 25, apply: true }),
+    target: STAGE_TARGET,
+    adminUserId: USER_1,
+    env: TOKEN_ENV,
+    nowMs: NOW,
+  }), /apply_token_scope_mismatch/);
+  assert.throws(() => verifyMaintenanceApplyToken({
+    token: issued.token,
+    request: matchingApply,
+    target: { databaseTarget: "production", projectRef: "prod-ref" },
+    adminUserId: USER_1,
+    env: TOKEN_ENV,
+    nowMs: NOW,
+  }), /apply_token_target_mismatch/);
+  assert.throws(() => verifyMaintenanceApplyToken({
+    token: issued.token, request: matchingApply, target: STAGE_TARGET, adminUserId: USER_2, env: TOKEN_ENV, nowMs: NOW,
+  }), /apply_token_actor_mismatch/);
+  assert.throws(() => verifyMaintenanceApplyToken({
+    token: issued.token, request: matchingApply, target: STAGE_TARGET, adminUserId: USER_1, env: TOKEN_ENV, nowMs: NOW + (5 * 60 * 1000),
+  }), /apply_token_expired/);
+  assert.throws(() => verifyMaintenanceApplyToken({
+    token: `${issued.token.slice(0, -1)}x`, request: matchingApply, target: STAGE_TARGET, adminUserId: USER_1, env: TOKEN_ENV, nowMs: NOW,
+  }), /invalid_apply_token/);
+});
+
+test("prune apply token is bound to period and raw offset", () => {
+  const dryRun = parseMaintenanceRequest({ operation: "prune", period: "all_time", offset: 0, limit: 25 });
+  const issued = issueMaintenanceApplyToken({
+    request: dryRun, target: STAGE_TARGET, adminUserId: USER_1, env: TOKEN_ENV, nowMs: NOW,
+  });
+  for (const mismatch of [
+    { operation: "prune", period: "week", offset: 0, limit: 25, apply: true },
+    { operation: "prune", period: "all_time", offset: 25, limit: 25, apply: true },
+  ]) {
+    assert.throws(() => verifyMaintenanceApplyToken({
+      token: issued.token,
+      request: parseMaintenanceRequest(mismatch),
+      target: STAGE_TARGET,
+      adminUserId: USER_1,
+      env: TOKEN_ENV,
+      nowMs: NOW,
+    }), /apply_token_scope_mismatch/);
+  }
 });
 
 test("profile coverage discovery uses bounded Supabase Admin pagination and keeps only IDs", async () => {
@@ -76,7 +141,7 @@ test("profile coverage is read-only in dry-run and creates only missing profiles
     { processed: 2, existing: 1, missing: 1, created: 0 });
   assert.deepEqual(created, []);
   const apply = await runProfileCoverage(parseMaintenanceRequest({
-    operation: "profile_coverage", apply: true, confirmation: "unused-by-service",
+    operation: "profile_coverage", apply: true,
   }), deps);
   assert.equal(apply.created, 1);
   assert.deepEqual(created, [USER_2]);
@@ -141,33 +206,32 @@ test("prune removes missing profiles without skipping the shifted raw offset", a
 
 test("admin endpoint is authenticated and keeps target validation ahead of maintenance", async () => {
   let maintenanceCalls = 0;
-  const identity = {
-    databaseTarget: "stage",
-    supabaseProjectRef: "stage-ref",
-    supabaseUrlProjectRef: "stage-ref",
-    databaseProjectRef: "stage-ref",
-    databaseMatchesSupabaseProjectRef: true,
-    stageProjectRefMatches: true,
-    serviceRoleProjectRef: "stage-ref",
-    environmentContext: "deploy-preview",
-  };
   const handler = createAdminXpLeaderboardMaintenanceHandler({
-    env: {},
+    env: TOKEN_ENV,
     requireAdminUser: async () => ({ userId: USER_1 }),
-    buildStageIdentity: () => identity,
+    buildStageIdentity: () => STAGE_IDENTITY,
     runLeaderboardMaintenance: async (request) => { maintenanceCalls += 1; return { operation: request.operation, dryRun: request.dryRun }; },
+    now: () => NOW,
   });
   const rejected = await handler({
     httpMethod: "POST", headers: {}, body: JSON.stringify({ operation: "backfill", apply: true }),
   });
   assert.equal(rejected.statusCode, 409);
-  assert.equal(JSON.parse(rejected.body).error, "confirmation_required");
+  assert.equal(JSON.parse(rejected.body).error, "apply_token_required");
   assert.equal(maintenanceCalls, 0);
+  const dryRun = await handler({
+    httpMethod: "POST", headers: {}, body: JSON.stringify({ operation: "backfill", page: 2, limit: 25 }),
+  });
+  assert.equal(dryRun.statusCode, 200);
+  const dryRunPayload = JSON.parse(dryRun.body);
+  assert.equal(typeof dryRunPayload.applyToken, "string");
+  assert.equal(dryRunPayload.applyTokenExpiresAt, NOW + (5 * 60 * 1000));
+  assert.equal(maintenanceCalls, 1);
   const accepted = await handler({
     httpMethod: "POST",
     headers: {},
-    body: JSON.stringify({ operation: "backfill", apply: true, confirmation: "apply:stage:stage-ref" }),
+    body: JSON.stringify({ operation: "backfill", page: 2, limit: 25, apply: true, applyToken: dryRunPayload.applyToken }),
   });
   assert.equal(accepted.statusCode, 200);
-  assert.equal(maintenanceCalls, 1);
+  assert.equal(maintenanceCalls, 2);
 });

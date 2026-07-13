@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { executeSql, klog } from "./supabase-admin.mjs";
 import { store as defaultStore } from "./store-upstash.mjs";
 import { ensureUserProfile } from "./user-profile.mjs";
@@ -5,6 +6,8 @@ import { createXpLeaderboardKeys, getXpLeaderboardPeriods, getXpLeaderboardWeekD
 
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 50;
+const APPLY_TOKEN_TTL_SEC = 5 * 60;
+const APPLY_TOKEN_VERSION = 1;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function maintenanceError(code, status = 400) {
@@ -37,11 +40,11 @@ function parseMaintenanceRequest(payload = {}) {
     offset: Math.max(0, Math.floor(Number(payload.offset) || 0)),
     limit: normalizePositiveInt(payload.limit, DEFAULT_LIMIT, MAX_LIMIT),
     dryRun: payload.apply !== true,
-    confirmation: typeof payload.confirmation === "string" ? payload.confirmation.trim() : "",
+    applyToken: typeof payload.applyToken === "string" ? payload.applyToken.trim() : "",
   };
 }
 
-function validateMaintenanceTarget({ identity, request }) {
+function validateMaintenanceTarget({ identity }) {
   const target = identity?.databaseTarget;
   const projectRef = identity?.supabaseProjectRef;
   if (!projectRef || (target !== "stage" && target !== "production")) throw maintenanceError("unsafe_target", 409);
@@ -50,11 +53,82 @@ function validateMaintenanceTarget({ identity, request }) {
     throw maintenanceError("supabase_resource_mismatch", 409);
   }
   if (identity.serviceRoleProjectRef && identity.serviceRoleProjectRef !== projectRef) throw maintenanceError("service_role_project_mismatch", 409);
-  if (!request.dryRun) {
-    const expected = `apply:${target}:${projectRef}`;
-    if (request.confirmation !== expected) throw maintenanceError("confirmation_required", 409);
-  }
   return { databaseTarget: target, projectRef, environmentContext: identity.environmentContext || "unknown" };
+}
+
+function maintenanceRequestScope(request) {
+  return {
+    operation: request.operation,
+    page: request.page,
+    offset: request.offset,
+    limit: request.limit,
+    period: request.period,
+  };
+}
+
+function resolveApplyTokenSecret(env = process.env) {
+  const secret = String(env.SUPABASE_SERVICE_ROLE_KEY || "");
+  if (!secret) throw maintenanceError("apply_token_unavailable", 503);
+  return createHmac("sha256", secret).update("xp-leaderboard-maintenance:v1").digest();
+}
+
+function signApplyTokenPayload(encodedPayload, secret) {
+  return createHmac("sha256", secret).update(encodedPayload).digest("base64url");
+}
+
+function actorFingerprint(userId, secret) {
+  return createHmac("sha256", secret).update(`actor:${String(userId || "")}`).digest("base64url").slice(0, 22);
+}
+
+function issueMaintenanceApplyToken({ request, target, adminUserId, env = process.env, nowMs = Date.now() }) {
+  if (!request?.dryRun) throw maintenanceError("apply_token_requires_dry_run", 409);
+  const secret = resolveApplyTokenSecret(env);
+  const issuedAt = Math.floor(nowMs / 1000);
+  const payload = {
+    v: APPLY_TOKEN_VERSION,
+    target: target.databaseTarget,
+    projectRef: target.projectRef,
+    scope: maintenanceRequestScope(request),
+    actor: actorFingerprint(adminUserId, secret),
+    iat: issuedAt,
+    exp: issuedAt + APPLY_TOKEN_TTL_SEC,
+  };
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return {
+    token: `${encodedPayload}.${signApplyTokenPayload(encodedPayload, secret)}`,
+    expiresAt: payload.exp * 1000,
+  };
+}
+
+function verifyMaintenanceApplyToken({ token, request, target, adminUserId, env = process.env, nowMs = Date.now() }) {
+  if (!token) throw maintenanceError("apply_token_required", 409);
+  const secret = resolveApplyTokenSecret(env);
+  const parts = token.split(".");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) throw maintenanceError("invalid_apply_token", 409);
+  const expectedSignature = Buffer.from(signApplyTokenPayload(parts[0], secret));
+  const suppliedSignature = Buffer.from(parts[1]);
+  if (expectedSignature.length !== suppliedSignature.length || !timingSafeEqual(expectedSignature, suppliedSignature)) {
+    throw maintenanceError("invalid_apply_token", 409);
+  }
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
+  } catch {
+    throw maintenanceError("invalid_apply_token", 409);
+  }
+  const nowSec = Math.floor(nowMs / 1000);
+  if (payload?.v !== APPLY_TOKEN_VERSION || !Number.isInteger(payload.exp) || !Number.isInteger(payload.iat)) {
+    throw maintenanceError("invalid_apply_token", 409);
+  }
+  if (payload.exp <= nowSec || payload.iat > nowSec + 30) throw maintenanceError("apply_token_expired", 409);
+  if (payload.target !== target.databaseTarget || payload.projectRef !== target.projectRef) {
+    throw maintenanceError("apply_token_target_mismatch", 409);
+  }
+  if (payload.actor !== actorFingerprint(adminUserId, secret)) throw maintenanceError("apply_token_actor_mismatch", 409);
+  if (JSON.stringify(payload.scope) !== JSON.stringify(maintenanceRequestScope(request))) {
+    throw maintenanceError("apply_token_scope_mismatch", 409);
+  }
+  return payload;
 }
 
 async function listAuthUsersPage({ page, limit, env = process.env, fetchFn = fetch }) {
@@ -247,8 +321,10 @@ async function runLeaderboardMaintenance(request, deps = {}) {
 }
 
 export {
+  issueMaintenanceApplyToken,
   listAuthUsersPage,
   listProfilesPage,
+  maintenanceRequestScope,
   maintenanceError,
   parseMaintenanceRequest,
   readCanonicalProjection,
@@ -258,4 +334,5 @@ export {
   runProfileCoverage,
   runPrune,
   validateMaintenanceTarget,
+  verifyMaintenanceApplyToken,
 };

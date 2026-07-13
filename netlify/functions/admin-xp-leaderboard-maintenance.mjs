@@ -2,9 +2,11 @@ import { adminAuthErrorResponse, requireAdminUser } from "./_shared/admin-auth.m
 import { baseHeaders, corsHeaders, klog } from "./_shared/supabase-admin.mjs";
 import { buildStageIdentity } from "./admin-stage-identity.mjs";
 import {
+  issueMaintenanceApplyToken,
   parseMaintenanceRequest,
   runLeaderboardMaintenance,
   validateMaintenanceTarget,
+  verifyMaintenanceApplyToken,
 } from "./_shared/xp-leaderboard-maintenance.mjs";
 
 function createAdminXpLeaderboardMaintenanceHandler(deps = {}) {
@@ -12,6 +14,7 @@ function createAdminXpLeaderboardMaintenanceHandler(deps = {}) {
   const requireAdmin = deps.requireAdminUser || requireAdminUser;
   const buildIdentity = deps.buildStageIdentity || (() => buildStageIdentity(env));
   const runMaintenance = deps.runLeaderboardMaintenance || runLeaderboardMaintenance;
+  const now = deps.now || (() => Date.now());
 
   return async function handler(event) {
     const origin = event.headers?.origin || event.headers?.Origin;
@@ -21,7 +24,7 @@ function createAdminXpLeaderboardMaintenanceHandler(deps = {}) {
     if (event.httpMethod !== "POST") return { statusCode: 405, headers: cors, body: JSON.stringify({ error: "method_not_allowed" }) };
 
     try {
-      await requireAdmin(event, env);
+      const admin = await requireAdmin(event, env);
       let payload;
       try {
         payload = event.body ? JSON.parse(event.body) : {};
@@ -29,8 +32,22 @@ function createAdminXpLeaderboardMaintenanceHandler(deps = {}) {
         return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "bad_json" }) };
       }
       const request = parseMaintenanceRequest(payload);
-      const target = validateMaintenanceTarget({ identity: buildIdentity(), request });
+      const target = validateMaintenanceTarget({ identity: buildIdentity() });
+      const nowMs = now();
+      if (!request.dryRun) {
+        verifyMaintenanceApplyToken({
+          token: request.applyToken,
+          request,
+          target,
+          adminUserId: admin.userId,
+          env,
+          nowMs,
+        });
+      }
       const result = await runMaintenance(request, { env });
+      const apply = request.dryRun && Number(result.failed || 0) === 0
+        ? issueMaintenanceApplyToken({ request, target, adminUserId: admin.userId, env, nowMs })
+        : null;
       return {
         statusCode: 200,
         headers: cors,
@@ -39,9 +56,9 @@ function createAdminXpLeaderboardMaintenanceHandler(deps = {}) {
             databaseTarget: target.databaseTarget,
             environmentContext: target.environmentContext,
             projectRef: target.projectRef,
-            applyConfirmation: `apply:${target.databaseTarget}:${target.projectRef}`,
           },
           result,
+          ...(apply ? { applyToken: apply.token, applyTokenExpiresAt: apply.expiresAt } : {}),
         }),
       };
     } catch (error) {

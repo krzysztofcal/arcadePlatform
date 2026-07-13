@@ -24,7 +24,7 @@ This document preserves the operational and rollout details that were previously
 
 ## XP leaderboard maintenance
 
-`/.netlify/functions/admin-xp-leaderboard-maintenance` is an admin-only, bounded maintenance endpoint. It does not expose rankings publicly. Requests default to dry-run, accept at most 50 accounts, use the configured `XP_KEY_NS`, and refuse unknown Supabase targets. Apply requests require the exact confirmation returned by the detected target: `apply:<stage|production>:<project-ref>`.
+`/.netlify/functions/admin-xp-leaderboard-maintenance` is an admin-only, bounded maintenance endpoint. It does not expose rankings publicly. Requests default to dry-run, accept at most 50 accounts, use the configured `XP_KEY_NS`, and refuse unknown Supabase targets. A successful dry-run returns a signed `applyToken` valid for five minutes. The token is bound to the admin, target project, operation, page, offset, limit, and period; it cannot authorize a different request.
 
 Prerequisites are existing runtime configuration only: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL`, Upstash REST credentials, `XP_KEY_NS`, and `SUPABASE_STAGE_PROJECT_REF` on deploy previews. No database migration or new persistent environment variable is required.
 
@@ -38,7 +38,7 @@ curl -sS -X POST \
   -d '{"operation":"profile_coverage","page":1,"limit":25}'
 ```
 
-Run pages until `hasMore` is false. Then repeat each page with `"apply":true` and the exact target confirmation, for example on stage:
+For each page, inspect the dry-run response and stop if `failed` is non-zero. Apply that exact page immediately with the returned token:
 
 ```json
 {
@@ -46,11 +46,11 @@ Run pages until `hasMore` is false. Then repeat each page with `"apply":true` an
   "page": 1,
   "limit": 25,
   "apply": true,
-  "confirmation": "apply:stage:<stage-project-ref>"
+  "applyToken": "<token returned by this exact dry-run>"
 }
 ```
 
-After profile coverage completes, run `backfill` with the same dry-run-first and paged apply sequence. It reads canonical lifetime/current-day/current-week counters, sets non-zero sorted-set scores, removes stale zero scores, and refreshes bounded day/week TTLs. Re-running every page must converge to `updated: 0`, `removed: 0`, and only `unchanged` results.
+Expired tokens, changed parameters, another admin, and another stage/production target return `409` before maintenance runs. After profile coverage completes, run `backfill` with the same dry-run-first and paged apply sequence. It reads canonical lifetime/current-day/current-week counters, sets non-zero sorted-set scores, removes stale zero scores, and refreshes bounded day/week TTLs. Re-running every page must converge to `updated: 0`, `removed: 0`, and only `unchanged` results.
 
 Finally run `prune` separately for `all_time`, `today`, and `week`. It removes index members without a public profile. Prune uses `offset`, not `page`; when an apply removes rows it returns the same `nextOffset` so shifted members are not skipped:
 
@@ -61,7 +61,7 @@ Finally run `prune` separately for `all_time`, `today`, and `week`. It removes i
   "offset": 0,
   "limit": 25,
   "apply": true,
-  "confirmation": "apply:stage:<stage-project-ref>"
+  "applyToken": "<token returned by this exact prune dry-run>"
 }
 ```
 
