@@ -38,6 +38,9 @@ test("admin-stage-identity derives stage target without exposing secrets", async
 
   assert.equal(identity.environmentContext, "deploy-preview");
   assert.equal(identity.supabaseProjectRef, "stageabc");
+  assert.equal(identity.supabaseUrlProjectRef, "stageabc");
+  assert.equal(identity.databaseProjectRef, "stageabc");
+  assert.equal(identity.databaseMatchesSupabaseProjectRef, true);
   assert.equal(identity.expectedStageProjectRef, "stageabc");
   assert.equal(identity.databaseTarget, "stage");
   assert.equal(identity.stageProjectRefMatches, true);
@@ -81,6 +84,19 @@ test("admin-stage-identity detects service role project mismatch", () => {
   assert.equal(identity.stageProjectRefMatches, true);
   assert.equal(identity.serviceRoleProjectRef, "prodabc");
   assert.equal(identity.serviceRoleStageProjectRefMatches, false);
+});
+
+test("admin-stage-identity exposes a sanitized URL and DB project mismatch", () => {
+  const identity = buildStageIdentity({
+    CONTEXT: "deploy-preview",
+    SUPABASE_URL: "https://stageabc.supabase.co",
+    SUPABASE_DB_URL: "postgresql://postgres.prodabc:pw@aws-0-us.pooler.supabase.com:6543/postgres",
+    SUPABASE_STAGE_PROJECT_REF: "stageabc",
+  });
+  assert.equal(identity.supabaseUrlProjectRef, "stageabc");
+  assert.equal(identity.databaseProjectRef, "prodabc");
+  assert.equal(identity.databaseMatchesSupabaseProjectRef, false);
+  assert.equal(JSON.stringify(identity).includes("postgresql://"), false);
 });
 
 test("admin-stage-identity rejects postgres project-ref usernames on non-Supabase hosts", () => {

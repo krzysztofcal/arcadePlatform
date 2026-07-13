@@ -31,6 +31,10 @@ function addUtcDays(dayKey, days) {
   };
 }
 
+function formatUtcDay({ year, month, day }) {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
 export function getXpLeaderboardPeriods(nowMs = Date.now()) {
   const dayKey = warsawDayKey(nowMs);
   const { isoYear, week, isoDay } = isoWeekForDay(dayKey);
@@ -45,6 +49,16 @@ export function getXpLeaderboardPeriods(nowMs = Date.now()) {
     dayExpiresAtSec: Math.floor((nextDayResetAt + DAY_RETENTION_MS) / 1000),
     weekExpiresAtSec: Math.floor((nextWeekResetAt + WEEK_RETENTION_MS) / 1000),
   });
+}
+
+export function getXpLeaderboardWeekDayKeys(nowMs = Date.now()) {
+  const currentDayKey = warsawDayKey(nowMs);
+  const { isoDay } = isoWeekForDay(currentDayKey);
+  const keys = [];
+  for (let offset = isoDay - 1; offset >= 0; offset -= 1) {
+    keys.push(formatUtcDay(addUtcDays(currentDayKey, -offset)));
+  }
+  return Object.freeze(keys);
 }
 
 export function createXpLeaderboardKeys({ namespace = "kcswh:xp:v2" } = {}) {

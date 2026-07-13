@@ -112,7 +112,7 @@ function createMemoryStore() {
     async expire(key, seconds) {
       const entry = sweep(key);
       if (!entry) return 0;
-      setValue(key, entry.value, seconds * 1000);
+      memory.set(key, { ...entry, expiry: Date.now() + seconds * 1000 });
       return 1;
     },
     async ttl(key) {
