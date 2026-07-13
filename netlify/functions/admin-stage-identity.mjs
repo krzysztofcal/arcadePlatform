@@ -51,6 +51,10 @@ function parseProjectRefFromSupabaseJwt(value) {
 }
 
 function resolveEnvironmentContext(env = process.env) {
+  const configuredTarget = normalizeString(env.ARCADE_DEPLOY_TARGET);
+  if (["production", "deploy-preview", "branch-deploy", "development"].includes(configuredTarget)) {
+    return configuredTarget;
+  }
   return normalizeString(env.CONTEXT || env.NETLIFY_CONTEXT || env.NODE_ENV) || "unknown";
 }
 

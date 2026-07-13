@@ -65,6 +65,20 @@ test("admin-stage-identity marks production context as production when stage ref
   assert.equal(identity.stageProjectRefMatches, false);
 });
 
+test("admin-stage-identity uses the source-controlled production target when Netlify omits runtime context", () => {
+  const identity = buildStageIdentity({
+    ARCADE_DEPLOY_TARGET: "production",
+    SUPABASE_URL: "https://prodabc.supabase.co",
+    SUPABASE_DB_URL: "postgresql://postgres.prodabc:secret@aws-0-eu.pooler.supabase.com:6543/postgres",
+    SUPABASE_SERVICE_ROLE_KEY: makeUnsignedSupabaseJwt("prodabc"),
+  });
+
+  assert.equal(identity.environmentContext, "production");
+  assert.equal(identity.databaseTarget, "production");
+  assert.equal(identity.databaseMatchesSupabaseProjectRef, true);
+  assert.equal(identity.serviceRoleProjectRef, "prodabc");
+});
+
 test("admin-stage-identity parses project refs from supported Supabase URLs", () => {
   assert.equal(parseProjectRefFromSupabaseUrl("https://stageabc.supabase.co"), "stageabc");
   assert.equal(parseProjectRefFromDbUrl("postgresql://postgres.stageabc:pw@aws-0-us.pooler.supabase.com:6543/postgres"), "stageabc");
