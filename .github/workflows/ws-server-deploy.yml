@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - "ws-server/**"
+      - "shared/**"
+      - "netlify/functions/_shared/chips-ledger.mjs"
+      - "netlify/functions/_shared/poker-*.mjs"
+      - "netlify/functions/_shared/supabase-admin.mjs"
       - "ws-tests/**"
       - ".github/workflows/ws-server-deploy.yml"
   push:
@@ -11,6 +15,10 @@ on:
       - "main"
     paths:
       - "ws-server/**"
+      - "shared/**"
+      - "netlify/functions/_shared/chips-ledger.mjs"
+      - "netlify/functions/_shared/poker-*.mjs"
+      - "netlify/functions/_shared/supabase-admin.mjs"
       - ".github/workflows/ws-server-deploy.yml"
   workflow_dispatch:
 
@@ -69,11 +77,12 @@ jobs:
         run: |
           set -euo pipefail
           ARTIFACT_DIR="$GITHUB_WORKSPACE/.artifacts/ws-server"
-          STAGE_DIR="$ARTIFACT_DIR/stage"
+          STAGE_ROOT="$ARTIFACT_DIR/stage"
+          STAGE_WS_DIR="$STAGE_ROOT/ws-server"
           ARTIFACT_FILE="$ARTIFACT_DIR/ws-server-dist.tgz"
 
           rm -rf "$ARTIFACT_DIR"
-          mkdir -p "$STAGE_DIR"
+          mkdir -p "$STAGE_WS_DIR"
 
           npm ci --prefix ws-server
           npm run --prefix ws-server build --if-present
@@ -81,33 +90,47 @@ jobs:
           rm -rf ws-server/node_modules
           npm ci --prefix ws-server --omit=dev
 
-          cp ws-server/package.json "$STAGE_DIR"/
-          cp ws-server/package-lock.json "$STAGE_DIR"/
-          cp -R ws-server/node_modules "$STAGE_DIR"/node_modules
+          cp ws-server/package.json "$STAGE_WS_DIR"/
+          cp ws-server/package-lock.json "$STAGE_WS_DIR"/
+          cp -R ws-server/node_modules "$STAGE_WS_DIR"/node_modules
+          ln -s ws-server/node_modules "$STAGE_ROOT/node_modules"
 
           if [ -d ws-server/dist ]; then
-            cp -R ws-server/dist "$STAGE_DIR"/dist
+            cp -R ws-server/dist "$STAGE_WS_DIR"/dist
           fi
 
           if [ -f ws-server/server.mjs ]; then
-            cp ws-server/server.mjs "$STAGE_DIR"/
+            cp ws-server/server.mjs "$STAGE_WS_DIR"/
           fi
 
           if [ -d ws-server/poker ]; then
-            cp -R ws-server/poker "$STAGE_DIR"/poker
+            cp -R ws-server/poker "$STAGE_WS_DIR"/poker
           fi
 
-          if [ -d shared/poker-domain ]; then
-            mkdir -p "$STAGE_DIR"/shared
-            cp -R shared/poker-domain "$STAGE_DIR"/shared/poker-domain
+          if [ -d ws-server/shared ]; then
+            cp -R ws-server/shared "$STAGE_WS_DIR"/shared
+          fi
+
+          if [ -d shared ]; then
+            cp -R shared "$STAGE_ROOT"/shared
           fi
 
           if [ -d netlify/functions/_shared ]; then
-            mkdir -p "$STAGE_DIR"/netlify/functions/_shared
-            cp netlify/functions/_shared/chips-ledger.mjs "$STAGE_DIR"/netlify/functions/_shared/
-            cp netlify/functions/_shared/poker-*.mjs "$STAGE_DIR"/netlify/functions/_shared/
-            cp netlify/functions/_shared/supabase-admin.mjs "$STAGE_DIR"/netlify/functions/_shared/
+            mkdir -p "$STAGE_ROOT"/netlify/functions/_shared
+            cp netlify/functions/_shared/chips-ledger.mjs "$STAGE_ROOT"/netlify/functions/_shared/
+            cp netlify/functions/_shared/poker-*.mjs "$STAGE_ROOT"/netlify/functions/_shared/
+            cp netlify/functions/_shared/supabase-admin.mjs "$STAGE_ROOT"/netlify/functions/_shared/
           fi
+
+          test -f "$STAGE_WS_DIR/server.mjs"
+          test -f "$STAGE_ROOT/shared/profile-avatar-projection.mjs"
+          test -f "$STAGE_ROOT/netlify/functions/_shared/chips-ledger.mjs"
+          test -d "$STAGE_ROOT/node_modules/postgres"
+          (
+            cd "$STAGE_ROOT"
+            node --input-type=module -e "await import('./ws-server/poker/read-model/public-poker-identity.mjs')"
+            node --input-type=module -e "await import('./ws-server/shared/poker-domain/inactive-cleanup-deps.mjs')"
+          )
 
           tar \
             --sort=name \
@@ -116,7 +139,7 @@ jobs:
             --group=0 \
             --numeric-owner \
             -czf "$ARTIFACT_FILE" \
-            -C "$STAGE_DIR" \
+            -C "$STAGE_ROOT" \
             .
 
       - name: Upload ws-server artifact to VPS
@@ -155,6 +178,7 @@ jobs:
             TMP_ARCHIVE="/tmp/arcadeplatform-ws/.artifacts/ws-server/ws-server-dist.tgz"
             RELEASE_ID="$RELEASE_SHA"
             NEW_RELEASE_DIR="$RELEASES_DIR/$RELEASE_ID"
+            NEW_RELEASE_APP_DIR="$NEW_RELEASE_DIR/ws-server"
             PREVIOUS_TARGET=""
             HAVE_SWITCHED=0
             HEALTH_RETRIES=30
@@ -206,8 +230,12 @@ jobs:
             sudo -n rm -rf "$NEW_RELEASE_DIR"
             sudo -n mkdir -p "$NEW_RELEASE_DIR"
             sudo -n tar -xzf "$TMP_ARCHIVE" -C "$NEW_RELEASE_DIR"
+            sudo -n test -f "$NEW_RELEASE_APP_DIR/server.mjs"
+            sudo -n test -f "$NEW_RELEASE_DIR/shared/profile-avatar-projection.mjs"
+            sudo -n test -f "$NEW_RELEASE_DIR/netlify/functions/_shared/chips-ledger.mjs"
+            sudo -n test -d "$NEW_RELEASE_DIR/node_modules/postgres"
 
-            sudo -n ln -sfn "$NEW_RELEASE_DIR" "$CURRENT_LINK.tmp"
+            sudo -n ln -sfn "$NEW_RELEASE_APP_DIR" "$CURRENT_LINK.tmp"
             sudo -n mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
             HAVE_SWITCHED=1
 
