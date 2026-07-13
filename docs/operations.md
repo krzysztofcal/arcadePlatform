@@ -28,7 +28,7 @@ This document preserves the operational and rollout details that were previously
 
 Prerequisites are existing runtime configuration only: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL`, Upstash REST credentials, `XP_KEY_NS`, and `SUPABASE_STAGE_PROJECT_REF` on deploy previews. No database migration or new persistent environment variable is required.
 
-Production deploys receive `ARCADE_DEPLOY_TARGET=production` from `netlify.toml`. This source-controlled, non-secret marker is required because Netlify does not guarantee that its build-only `CONTEXT` value is present in the Functions runtime. The maintenance target still requires matching Supabase URL, database, and service-role project references; the marker alone cannot authorize a mismatched target.
+The Netlify build writes its build-only `CONTEXT` into `netlify/functions/_generated/deploy-context.mjs` before Functions are bundled. This is required because Netlify does not guarantee that `CONTEXT` remains available in the Functions runtime. The maintenance target still requires matching Supabase URL, database, and service-role project references; the generated context alone cannot authorize a mismatched target.
 
 Use an admin Supabase access token and the matching deploy URL. Start every operation without `apply`:
 
