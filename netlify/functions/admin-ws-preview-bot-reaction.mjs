@@ -71,6 +71,14 @@ function resolveTimeoutMs(env) {
   return Math.trunc(parsed);
 }
 
+function isValidBotReactionSnapshot(value) {
+  if (!value || typeof value !== "object" || value.ok !== true || value.environment !== "ws-preview") return false;
+  if (value.mode !== "default" && value.mode !== "override") return false;
+  const minMs = Number(value.active?.minMs);
+  const maxMs = Number(value.active?.maxMs);
+  return Number.isInteger(minMs) && Number.isInteger(maxMs) && minMs >= 100 && maxMs <= 10_000 && minMs <= maxMs;
+}
+
 async function proxyBotReaction({ method, payload, adminUserId, env, fetchImpl }) {
   const baseUrl = resolvePreviewBaseUrl(env);
   const token = typeof env?.POKER_WS_INTERNAL_TOKEN === "string" ? env.POKER_WS_INTERNAL_TOKEN.trim() : "";
@@ -107,6 +115,12 @@ async function proxyBotReaction({ method, payload, adminUserId, env, fetchImpl }
       const error = new Error(exposedCodes.has(upstreamCode) ? upstreamCode : "ws_preview_unavailable");
       error.code = exposedCodes.has(upstreamCode) ? upstreamCode : "ws_preview_unavailable";
       error.status = upstreamCode === "preview_only" ? 403 : response.status === 400 ? 400 : 502;
+      throw error;
+    }
+    if (!isValidBotReactionSnapshot(responseBody)) {
+      const error = new Error("ws_preview_unavailable");
+      error.code = "ws_preview_unavailable";
+      error.status = 502;
       throw error;
     }
     return responseBody;
@@ -181,6 +195,7 @@ const handler = createAdminWsPreviewBotReactionHandler();
 export {
   createAdminWsPreviewBotReactionHandler,
   handler,
+  isValidBotReactionSnapshot,
   parseBody,
   proxyBotReaction,
   resolvePreviewBaseUrl

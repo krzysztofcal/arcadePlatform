@@ -137,6 +137,28 @@ test("admin WS Preview bot reaction body allowlist rejects unexpected fields", (
   assert.throws(() => parseBotReactionBody(JSON.stringify({ mode: "override", minMs: 500, maxMs: 500, updatedBy: "spoofed" })), { code: "invalid_request" });
 });
 
+test("admin WS Preview bot reaction proxy rejects a non-JSON Caddy fallback response", async () => {
+  const handler = createAdminWsPreviewBotReactionHandler({
+    env: {
+      POKER_WS_INTERNAL_BASE_URL: "https://ws-preview.kcswh.pl",
+      POKER_WS_INTERNAL_TOKEN: "preview-internal-token",
+    },
+    requireAdminUser: async () => ({ userId: "admin-1" }),
+    buildStageIdentity: previewStageIdentity,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new SyntaxError("not_json");
+      },
+    }),
+  });
+  const response = await handler(event("GET"));
+
+  assert.equal(response.statusCode, 502);
+  assert.deepEqual(JSON.parse(response.body), { error: "ws_preview_unavailable" });
+});
+
 test("admin-user-balance returns target user balance", async () => {
   let seenUserId = null;
   const handler = createAdminUserBalanceHandler({
