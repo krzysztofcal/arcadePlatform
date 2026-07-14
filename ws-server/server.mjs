@@ -29,7 +29,7 @@ import { handleLeaveCommand } from "./poker/handlers/leave.mjs";
 import { createTableCommandQueue } from "./poker/runtime/table-command-queue.mjs";
 import { recoverFromPersistConflict } from "./poker/runtime/persist-conflict-recovery.mjs";
 import { resolveSettledRevealDueAt } from "./poker/runtime/settled-reveal-timing.mjs";
-import { parseStakes } from "./shared/poker-domain/bots.mjs";
+import { getBotConfig, parseStakes } from "./shared/poker-domain/bots.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const PROTECTED_MESSAGE_TYPES = new Set([
@@ -60,6 +60,8 @@ const LIVE_HAND_PHASES = new Set(["POSTING_BLINDS", "PREFLOP", "FLOP", "TURN", "
 const DEFAULT_EMPTY_JOINABLE_GRACE_MS = 60_000;
 const DEFAULT_SEATED_RECONNECT_GRACE_MS = 90_000;
 const DEFAULT_ACTIVE_SEAT_FRESH_MS = 120_000;
+const FAST_SETTLED_ROLLOVER_RETRY_DELAYS_MS = [1_000, 5_000, 15_000, 30_000];
+const SLOW_SETTLED_ROLLOVER_RETRY_MS = 60_000;
 
 function resolvePresenceTtlMs(rawValue) {
   const parsed = Number(rawValue);
@@ -249,6 +251,10 @@ const persistedSeatTouchThrottleMs = resolvePositiveInt(
 const streamLog = createStreamLog({ cap: Number(process.env.WS_STREAM_REPLAY_CAP || 128) });
 const tableSnapshotLoader = createTableSnapshotLoader({ env: process.env });
 const persistedStateWriter = persistedStateWriteEnabled ? createPersistedStateWriter({ env: process.env, klog: klogSafe }) : null;
+const botFundingSystemKey = getBotConfig(process.env).bankrollSystemKey;
+const pokerSystemActorUserId = typeof process.env.POKER_SYSTEM_ACTOR_USER_ID === "string"
+  ? process.env.POKER_SYSTEM_ACTOR_USER_ID.trim()
+  : "";
 const lastSnapshotBySessionAndTable = new Map();
 const persistedSeatTouchByTableUser = new Map();
 const lobbySubscribers = new Set();
@@ -1143,20 +1149,34 @@ function broadcastTableState(tableId, { excludeWs = null } = {}) {
 
 
 
-async function persistMutatedState({ tableId, expectedVersion, mutationKind, acceptedActionAudit = null }) {
+async function persistMutatedState({
+  tableId,
+  expectedVersion,
+  mutationKind,
+  acceptedActionAudit = null,
+  nextStateOverride = null,
+  privateStateForHoleCardsOverride = null,
+  replacementFundings = undefined,
+  replacementFundingSystemKey = null,
+  replacementFundingActorUserId = null,
+  deferRuntimeVersionUpdate = false
+}) {
   if (isGuestTableId(tableId)) {
     return { ok: true, skipped: true, guest: true };
   }
   if (!persistedStateWriter) {
+    if (Array.isArray(replacementFundings) && replacementFundings.length > 0) {
+      return { ok: false, reason: "persistence_required" };
+    }
     return { ok: true, skipped: true };
   }
-  const nextState = tableManager.persistedPokerState(tableId);
+  const nextState = nextStateOverride || tableManager.persistedPokerState(tableId);
   if (!nextState) {
     return { ok: false, reason: "invalid_state" };
   }
-  const privateStateForHoleCards = typeof tableManager.privatePokerStateForAudit === "function"
+  const privateStateForHoleCards = privateStateForHoleCardsOverride || (typeof tableManager.privatePokerStateForAudit === "function"
     ? tableManager.privatePokerStateForAudit(tableId)
-    : nextState;
+    : nextState);
   klogSafe("ws_state_persist_start", { tableId, expectedVersion, mutationKind });
   const persisted = await persistedStateWriter.writeMutation({
     tableId,
@@ -1166,14 +1186,19 @@ async function persistMutatedState({ tableId, expectedVersion, mutationKind, acc
     supabaseUrl: process.env.SUPABASE_URL,
     supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
     meta: { mutationKind },
-    acceptedActionAudit
+    acceptedActionAudit,
+    replacementFundings,
+    botFundingSystemKey: replacementFundingSystemKey,
+    systemActorUserId: replacementFundingActorUserId
   });
   if (!persisted?.ok) {
     klogSafe("ws_state_persist_failed", { tableId, expectedVersion, mutationKind, reason: persisted?.reason || "unknown" });
     return persisted;
   }
   klogSafe("ws_state_persist_result", { ok: true, newVersion: persisted.newVersion ?? null });
-  tableManager.setPersistedStateVersion(tableId, persisted.newVersion);
+  if (!deferRuntimeVersionUpdate) {
+    tableManager.setPersistedStateVersion(tableId, persisted.newVersion);
+  }
   return persisted;
 }
 
@@ -1197,6 +1222,7 @@ async function restoreTableFromPersisted(tableId) {
     if (!applied?.ok) {
       return applied;
     }
+    maybeScheduleSettledRollover(tableId);
     return {
       ...applied,
       restoredTable: restored.table
@@ -1472,6 +1498,166 @@ const tableJanitorPrimitives = {
   inactive_cleanup: executeInactiveCleanupPrimitive
 };
 
+function settledRolloverGenerationKey(tableId, pokerState = tableManager.persistedPokerState(tableId)) {
+  if (!pokerState || pokerState.phase !== "SETTLED") {
+    return null;
+  }
+  const version = tableManager.persistedStateVersion(tableId);
+  const handId = typeof pokerState.handId === "string" && pokerState.handId.trim()
+    ? pokerState.handId.trim()
+    : "unknown";
+  return `${tableId}:${Number.isInteger(version) ? version : "unknown"}:${handId}`;
+}
+
+function scheduleSettledRolloverTimer({ tableId, generationKey, dueAt, attempt = 0, mode = "reveal" }) {
+  clearSettledRolloverTimer(tableId);
+  const nowMs = Date.now();
+  const delayMs = Math.max(0, dueAt - nowMs);
+  klogSafe("ws_settled_rollover_scheduled", { tableId, dueAt, delayMs, attempt, mode });
+  const timer = setTimeout(() => {
+    settledRolloverTimerByTableId.delete(tableId);
+    void enqueueTableCommand({
+      tableId,
+      commandName: "settled_rollover",
+      dedupeKey: "settled_rollover",
+      run: () => runSettledRolloverCommand({ tableId, generationKey, attempt })
+    });
+  }, delayMs);
+  if (typeof timer?.unref === "function") {
+    timer.unref();
+  }
+  settledRolloverTimerByTableId.set(tableId, { timer, dueAt, generationKey, attempt, mode });
+}
+
+function scheduleSettledRolloverRetry({ tableId, generationKey, attempt }) {
+  const pokerState = tableManager.persistedPokerState(tableId);
+  if (settledRolloverGenerationKey(tableId, pokerState) !== generationKey) {
+    return;
+  }
+  const fastDelay = FAST_SETTLED_ROLLOVER_RETRY_DELAYS_MS[attempt - 1];
+  const delayMs = Number.isFinite(fastDelay) ? fastDelay : SLOW_SETTLED_ROLLOVER_RETRY_MS;
+  scheduleSettledRolloverTimer({
+    tableId,
+    generationKey,
+    dueAt: Date.now() + delayMs,
+    attempt,
+    mode: Number.isFinite(fastDelay) ? "fast_retry" : "slow_retry"
+  });
+}
+
+async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }) {
+  const pokerState = tableManager.persistedPokerState(tableId);
+  if (settledRolloverGenerationKey(tableId, pokerState) !== generationKey) {
+    return { ok: true, changed: false, reason: "settled_generation_changed" };
+  }
+  klogSafe("ws_settled_rollover_start", { tableId, attempt });
+  if (!tableManager.hasActiveHumanMember(tableId)) {
+    if (tableManager.hasConnectedHumanPresence(tableId)) {
+      klogSafe("ws_settled_rollover_close_skipped_human_presence", { tableId, phase: pokerState?.phase || null });
+      return { ok: true, changed: false, deferred: true, reason: "human_presence_present" };
+    }
+    return applyInactiveCleanupAndBroadcast({
+      tableId,
+      requestId: `ws-settled-rollover-close:${tableId}`,
+      logPrefix: "ws_settled_rollover_close"
+    });
+  }
+
+  if (isGuestTableId(tableId)) {
+    const guestRollover = tableManager.rolloverSettledHand({ tableId, nowMs: Date.now(), economyMode: "none" });
+    if (!guestRollover?.ok || !guestRollover.changed) {
+      return guestRollover;
+    }
+    broadcastStateSnapshots(tableId);
+    try {
+      scheduleBotStep({ tableId, trigger: "settled_rollover", requestId: null, frameTs: null });
+    } catch (error) {
+      klogSafe("ws_settled_rollover_bot_autoplay_failed", { tableId, message: error?.message || "unknown" });
+    }
+    return guestRollover;
+  }
+
+  const prepared = tableManager.prepareSettledHandRollover({ tableId, nowMs: Date.now() });
+  if (!prepared?.ok || !prepared.changed) {
+    klogSafe("ws_settled_rollover_noop", { tableId, reason: prepared?.reason || "unchanged" });
+    return prepared;
+  }
+
+  const candidatePokerState = prepared.nextCoreState?.pokerState;
+  const persisted = await persistMutatedState({
+    tableId,
+    expectedVersion: prepared.expectedVersion,
+    mutationKind: "settled_rollover",
+    nextStateOverride: candidatePokerState,
+    privateStateForHoleCardsOverride: candidatePokerState,
+    replacementFundings: prepared.replacementFundings,
+    replacementFundingSystemKey: botFundingSystemKey,
+    replacementFundingActorUserId: pokerSystemActorUserId,
+    deferRuntimeVersionUpdate: true
+  });
+  if (!persisted?.ok || persisted.alreadyApplied) {
+    if (!persisted?.alreadyApplied) {
+      klogSafe("ws_settled_rollover_persist_failed", {
+        tableId,
+        reason: persisted?.reason || "persist_failed",
+        stateVersion: prepared.stateVersion,
+        replacementCount: prepared.replacementFundings.length,
+        totalFundingDelta: prepared.replacementFundings.reduce((sum, entry) => sum + entry.fundingDelta, 0)
+      });
+    }
+    await recoverFromPersistConflict({
+      tableId,
+      restoreTableFromPersisted,
+      broadcastStateSnapshots,
+      broadcastResyncRequired
+    });
+    if (persisted?.alreadyApplied) {
+      try {
+        scheduleBotStep({ tableId, trigger: "settled_rollover_restore", requestId: null, frameTs: null });
+      } catch (error) {
+        klogSafe("ws_settled_rollover_bot_autoplay_failed", { tableId, message: error?.message || "unknown" });
+      }
+    }
+    if (!persisted?.alreadyApplied) {
+      scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
+    }
+    return {
+      ok: Boolean(persisted?.alreadyApplied),
+      changed: false,
+      reason: persisted?.alreadyApplied ? "already_applied_restored" : (persisted?.reason || "persist_failed"),
+      stateVersion: prepared.stateVersion
+    };
+  }
+
+  const rollover = tableManager.commitSettledHandRollover({
+    tableId,
+    expectedVersion: prepared.expectedVersion,
+    nextCoreState: prepared.nextCoreState,
+    replacementFundings: prepared.replacementFundings,
+    persistenceReceipt: persisted,
+    nowMs: Date.now()
+  });
+  if (!rollover?.ok) {
+    await restoreTableFromPersisted(tableId);
+    broadcastStateSnapshots(tableId);
+    try {
+      scheduleBotStep({ tableId, trigger: "settled_rollover_commit_restore", requestId: null, frameTs: null });
+    } catch (error) {
+      klogSafe("ws_settled_rollover_bot_autoplay_failed", { tableId, message: error?.message || "unknown" });
+    }
+    return rollover;
+  }
+
+  tableManager.setPersistedStateVersion(tableId, persisted.newVersion);
+  broadcastStateSnapshots(tableId);
+  try {
+    scheduleBotStep({ tableId, trigger: "settled_rollover", requestId: null, frameTs: null });
+  } catch (error) {
+    klogSafe("ws_settled_rollover_bot_autoplay_failed", { tableId, message: error?.message || "unknown" });
+  }
+  return rollover;
+}
+
 function maybeScheduleSettledRollover(tableId) {
   const pokerState = tableManager.persistedPokerState(tableId);
   if (!pokerState || pokerState.phase !== "SETTLED") {
@@ -1485,104 +1671,12 @@ function maybeScheduleSettledRollover(tableId) {
     nowMs,
     revealMs: settledRevealMs
   });
+  const generationKey = settledRolloverGenerationKey(tableId, pokerState);
   const existing = settledRolloverTimerByTableId.get(tableId);
-  if (existing && existing.dueAt === dueAt) {
+  if (existing && existing.generationKey === generationKey) {
     return;
   }
-
-  clearSettledRolloverTimer(tableId);
-  const delayMs = Math.max(0, dueAt - nowMs);
-  klogSafe("ws_settled_rollover_scheduled", {
-    tableId,
-    dueAt,
-    delayMs,
-    settledAt: pokerState?.handSettlement?.settledAt || null
-  });
-  const timer = setTimeout(() => {
-    settledRolloverTimerByTableId.delete(tableId);
-    void enqueueTableCommand({
-      tableId,
-      commandName: "settled_rollover",
-      dedupeKey: "settled_rollover",
-      run: async () => {
-        klogSafe("ws_settled_rollover_start", { tableId });
-        if (!tableManager.hasActiveHumanMember(tableId)) {
-          if (tableManager.hasConnectedHumanPresence(tableId)) {
-            klogSafe("ws_settled_rollover_close_skipped_human_presence", {
-              tableId,
-              phase: pokerState?.phase || null
-            });
-            return {
-              ok: true,
-              changed: false,
-              deferred: true,
-              reason: "human_presence_present"
-            };
-          }
-          return applyInactiveCleanupAndBroadcast({
-            tableId,
-            requestId: `ws-settled-rollover-close:${tableId}`,
-            logPrefix: "ws_settled_rollover_close"
-          });
-        }
-        const rollover = tableManager.rolloverSettledHand({ tableId, nowMs: Date.now() });
-        if (!rollover?.ok) {
-          klogSafe("ws_settled_rollover_failed", {
-            tableId,
-            reason: rollover?.reason || rollover?.code || "unknown"
-          });
-          return rollover;
-        }
-        if (!rollover.changed) {
-          klogSafe("ws_settled_rollover_noop", {
-            tableId,
-            reason: rollover?.reason || rollover?.code || "unchanged"
-          });
-          return rollover;
-        }
-
-        const persisted = await persistMutatedState({
-          tableId,
-          expectedVersion: Number(rollover.stateVersion) - 1,
-          mutationKind: "settled_rollover"
-        });
-        if (!persisted?.ok) {
-          await recoverFromPersistConflict({
-            tableId,
-            restoreTableFromPersisted,
-            broadcastStateSnapshots,
-            broadcastResyncRequired
-          });
-          return {
-            ok: false,
-            changed: false,
-            reason: persisted?.reason || "persist_failed",
-            stateVersion: rollover.stateVersion
-          };
-        }
-
-        broadcastStateSnapshots(tableId);
-        try {
-          scheduleBotStep({
-            tableId,
-            trigger: "settled_rollover",
-            requestId: null,
-            frameTs: null
-          });
-        } catch (error) {
-          klogSafe("ws_settled_rollover_bot_autoplay_failed", {
-            tableId,
-            message: error?.message || "unknown"
-          });
-        }
-        return rollover;
-      }
-    });
-  }, delayMs);
-  if (typeof timer?.unref === "function") {
-    timer.unref();
-  }
-  settledRolloverTimerByTableId.set(tableId, { timer, dueAt });
+  scheduleSettledRolloverTimer({ tableId, generationKey, dueAt });
 }
 
 function isSettledRevealPendingForState(pokerState, nowMs = Date.now()) {

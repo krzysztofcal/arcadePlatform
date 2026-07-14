@@ -778,3 +778,191 @@ test("persisted state writer logs settlement audit failures without private hole
   assert.equal(serializedLogs.includes("AH"), false);
   assert.equal(serializedLogs.includes("AD"), false);
 });
+
+function createReplacementFundingDbHarness({ tableId, version = 7, state, treasuryBalance = 1_000, escrowBalance = 50 } = {}) {
+  const sourceAccount = { id: "10000000-0000-4000-8000-000000000001", system_key: "TREASURY", account_type: "SYSTEM", status: "active", balance: treasuryBalance };
+  const escrowAccount = { id: "10000000-0000-4000-8000-000000000002", system_key: `POKER_TABLE:${tableId}`, account_type: "ESCROW", status: "active", balance: escrowBalance };
+  const durable = {
+    version,
+    state: structuredClone(state),
+    accounts: new Map([[sourceAccount.system_key, sourceAccount], [escrowAccount.system_key, escrowAccount]]),
+    transactions: new Map(),
+    ledgerInsertCount: 0,
+    failFunding: false
+  };
+
+  const beginSql = async (fn) => {
+    const working = {
+      version: durable.version,
+      state: structuredClone(durable.state),
+      accounts: new Map([...durable.accounts].map(([key, account]) => [key, { ...account }])),
+      transactions: new Map([...durable.transactions].map(([key, transaction]) => [key, { ...transaction }])),
+      ledgerInsertCount: durable.ledgerInsertCount
+    };
+    const tx = {
+      unsafe: async (query, params = []) => {
+        const text = String(query);
+        if (text.startsWith("update public.poker_state set version = version + 1")) {
+          if (working.version !== params[1]) return [];
+          working.version += 1;
+          working.state = JSON.parse(params[2]);
+          return [{ version: working.version }];
+        }
+        if (text.startsWith("select version, state from public.poker_state")) {
+          return [{ version: working.version, state: structuredClone(working.state) }];
+        }
+        if (text.includes("from public.chips_accounts") && text.includes("system_key = any")) {
+          return params[0].map((key) => working.accounts.get(key)).filter(Boolean).map((account) => ({ ...account }));
+        }
+        if (text.includes("insert into public.chips_transactions")) {
+          if (durable.failFunding) throw new Error("simulated_funding_failure");
+          const idempotencyKey = params[3];
+          if (working.transactions.has(idempotencyKey)) throw new Error("duplicate_idempotency_key");
+          const transaction = { id: `tx-${working.transactions.size + 1}`, idempotency_key: idempotencyKey, payload_hash: params[4] };
+          working.transactions.set(idempotencyKey, transaction);
+          working.ledgerInsertCount += 1;
+          return [{ ...transaction }];
+        }
+        if (text.includes("select count(*) from apply_balance")) {
+          const entries = JSON.parse(params[0]);
+          for (const entry of entries) {
+            const account = [...working.accounts.values()].find((candidate) => candidate.id === entry.account_id);
+            if (!account || account.balance + entry.amount < 0) throw new Error("insufficient_funds");
+            account.balance += entry.amount;
+          }
+          return [{ updated_accounts: entries.length, expected_accounts: entries.length, guard_ok: true }];
+        }
+        if (text.includes("insert into public.chips_entries")) {
+          const entries = JSON.parse(params[1]);
+          return [{ entries: entries.map((entry, index) => ({ ...entry, entry_seq: index + 1 })) }];
+        }
+        return [];
+      }
+    };
+    const result = await fn(tx);
+    durable.version = working.version;
+    durable.state = working.state;
+    durable.accounts = working.accounts;
+    durable.transactions = working.transactions;
+    durable.ledgerInsertCount = working.ledgerInsertCount;
+    return result;
+  };
+
+  return {
+    beginSql,
+    durable,
+    balance(systemKey) {
+      return durable.accounts.get(systemKey)?.balance;
+    }
+  };
+}
+
+function replacementFundingFixture({ tableId, expectedVersion = 7, oldStack = 1 } = {}) {
+  return [{
+    seatNo: 2,
+    oldBotUserId: "00000000-0000-4000-8000-0000000000b2",
+    replacementBotUserId: "00000000-0000-4000-8000-0000000000c3",
+    oldStack,
+    targetStack: 100,
+    fundingDelta: 100 - oldStack,
+    settledHandId: "hand_replacement_funding",
+    fromStateVersion: expectedVersion,
+    toStateVersion: expectedVersion + 1
+  }];
+}
+
+test("replacement funding atomically increases escrow once and survives writer restart", async () => {
+  const tableId = "00000000-0000-4000-8000-000000000705";
+  const previousState = { tableId, handId: "hand_replacement_funding", phase: "SETTLED", stacks: {} };
+  const nextState = { tableId, handId: "hand_after_replacement", phase: "PREFLOP", stacks: {} };
+  const harness = createReplacementFundingDbHarness({ tableId, state: previousState });
+  const funding = replacementFundingFixture({ tableId });
+  const writerOptions = { env: { SUPABASE_DB_URL: "postgres://example.invalid/db" }, beginSql: harness.beginSql, klog: () => {} };
+  const escrowBefore = harness.balance(`POKER_TABLE:${tableId}`);
+  const firstWriter = createPersistedStateWriter(writerOptions);
+  const first = await firstWriter.writeMutation({
+    tableId,
+    expectedVersion: 7,
+    nextState,
+    replacementFundings: funding,
+    botFundingSystemKey: "TREASURY",
+    systemActorUserId: "00000000-0000-4000-8000-0000000000a1"
+  });
+
+  assert.equal(first.ok, true);
+  assert.equal(first.replacementFundingCommitted, true);
+  assert.equal(harness.balance(`POKER_TABLE:${tableId}`), escrowBefore + funding[0].fundingDelta);
+  assert.equal(harness.durable.ledgerInsertCount, 1);
+
+  const restartedManager = createTableManager({ maxSeats: 6, tableBootstrapLoader: async () => ({ ok: false }) });
+  assert.equal(restartedManager.restoreTableFromPersisted(tableId, {
+    coreState: {
+      version: harness.durable.version,
+      roomId: tableId,
+      maxSeats: 6,
+      members: [],
+      seats: {},
+      publicStacks: {},
+      seatDetailsByUserId: {},
+      pokerState: harness.durable.state
+    },
+    presenceByUserId: new Map()
+  }).ok, true);
+  const restartPlan = restartedManager.prepareSettledHandRollover({ tableId });
+  assert.equal(restartPlan.changed, false);
+  assert.equal(restartPlan.reason, "hand_not_settled");
+
+  const restartedWriter = createPersistedStateWriter(writerOptions);
+  const replay = await restartedWriter.writeMutation({
+    tableId,
+    expectedVersion: 7,
+    nextState,
+    replacementFundings: funding,
+    botFundingSystemKey: "TREASURY",
+    systemActorUserId: "00000000-0000-4000-8000-0000000000a1"
+  });
+  assert.equal(replay.alreadyApplied, true);
+  assert.equal(harness.durable.ledgerInsertCount, 1);
+  assert.equal(harness.balance(`POKER_TABLE:${tableId}`), escrowBefore + funding[0].fundingDelta);
+
+  const conflict = await restartedWriter.writeMutation({
+    tableId,
+    expectedVersion: 7,
+    nextState: { ...nextState, handId: "different_candidate" },
+    replacementFundings: funding,
+    botFundingSystemKey: "TREASURY",
+    systemActorUserId: "00000000-0000-4000-8000-0000000000a1"
+  });
+  assert.equal(conflict.ok, false);
+  assert.equal(conflict.reason, "conflict");
+  assert.equal(harness.durable.ledgerInsertCount, 1);
+});
+
+test("replacement funding failure rolls back persisted state and escrow", async () => {
+  const tableId = "00000000-0000-4000-8000-000000000706";
+  const previousState = { tableId, handId: "hand_replacement_funding", phase: "SETTLED", stacks: {} };
+  const nextState = { tableId, handId: "hand_after_replacement", phase: "PREFLOP", stacks: {} };
+  const harness = createReplacementFundingDbHarness({ tableId, state: previousState });
+  harness.durable.failFunding = true;
+  const escrowBefore = harness.balance(`POKER_TABLE:${tableId}`);
+  const writer = createPersistedStateWriter({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: harness.beginSql,
+    klog: () => {}
+  });
+  const result = await writer.writeMutation({
+    tableId,
+    expectedVersion: 7,
+    nextState,
+    replacementFundings: replacementFundingFixture({ tableId }),
+    botFundingSystemKey: "TREASURY",
+    systemActorUserId: "00000000-0000-4000-8000-0000000000a1"
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "db_error");
+  assert.equal(harness.durable.version, 7);
+  assert.deepEqual(harness.durable.state, previousState);
+  assert.equal(harness.balance(`POKER_TABLE:${tableId}`), escrowBefore);
+  assert.equal(harness.durable.ledgerInsertCount, 0);
+});

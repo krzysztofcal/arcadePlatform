@@ -202,6 +202,83 @@ test("rolloverSettledHand delays next-hand bootstrap until explicitly invoked", 
   assert.equal(nextState.turnDeadlineAt > nextState.turnStartedAt, true);
 });
 
+test("persistent bot replacement commits runtime only with matching funding receipt", () => {
+  const tableManager = createTableManager({ maxSeats: 6, tableBootstrapLoader: async () => ({ ok: false }) });
+  const tableId = "00000000-0000-4000-8000-000000000705";
+  const humanUserId = "00000000-0000-4000-8000-0000000000a1";
+  const oldBotUserId = "00000000-0000-4000-8000-0000000000b2";
+  const restored = tableManager.restoreTableFromPersisted(tableId, {
+    coreState: {
+      version: 7,
+      roomId: tableId,
+      maxSeats: 6,
+      members: [{ userId: humanUserId, seat: 1 }, { userId: oldBotUserId, seat: 2 }],
+      seats: { [humanUserId]: 1, [oldBotUserId]: 2 },
+      publicStacks: { [humanUserId]: 199, [oldBotUserId]: 1 },
+      seatDetailsByUserId: {
+        [humanUserId]: { isBot: false, botProfile: null, leaveAfterHand: false },
+        [oldBotUserId]: { isBot: true, botProfile: "NORMAL", leaveAfterHand: false }
+      },
+      pokerState: {
+        roomId: tableId,
+        handId: "hand_replacement_receipt",
+        phase: "SETTLED",
+        dealerSeatNo: 1,
+        seats: [{ userId: humanUserId, seatNo: 1, status: "ACTIVE" }, { userId: oldBotUserId, seatNo: 2, status: "ACTIVE" }],
+        stacks: { [humanUserId]: 199, [oldBotUserId]: 1 },
+        handSettlement: { handId: "hand_replacement_receipt", settledAt: "2026-07-14T00:00:00.000Z", payouts: {} }
+      }
+    },
+    presenceByUserId: new Map([
+      [humanUserId, { userId: humanUserId, seat: 1, connected: true, lastSeenAt: 1, expiresAt: null }],
+      [oldBotUserId, { userId: oldBotUserId, seat: 2, connected: false, lastSeenAt: 1, expiresAt: null }]
+    ])
+  });
+  assert.equal(restored.ok, true);
+  assert.equal(tableManager.join({
+    ws: fakeWs("ws-replacement-receipt"),
+    userId: humanUserId,
+    tableId,
+    requestId: "join-replacement-receipt",
+    nowTs: 1
+  }).ok, true);
+
+  const prepared = tableManager.prepareSettledHandRollover({ tableId, nowMs: 5_000 });
+  assert.equal(prepared.ok, true);
+  assert.equal(prepared.changed, true);
+  assert.equal(prepared.replacementFundings[0].fundingDelta, 99);
+  assert.equal(tableManager.persistedPokerState(tableId).phase, "SETTLED");
+
+  const unconfirmed = tableManager.commitSettledHandRollover({ ...prepared, tableId, nowMs: 5_000 });
+  assert.equal(unconfirmed.ok, false);
+  assert.equal(unconfirmed.reason, "replacement_funding_unconfirmed");
+  assert.equal(tableManager.persistedPokerState(tableId).phase, "SETTLED");
+
+  const funding = prepared.replacementFundings[0];
+  const committed = tableManager.commitSettledHandRollover({
+    ...prepared,
+    tableId,
+    persistenceReceipt: {
+      ok: true,
+      tableId,
+      expectedVersion: prepared.expectedVersion,
+      newVersion: prepared.stateVersion,
+      replacementFundingCommitted: true,
+      fundedReplacements: [{
+        seatNo: funding.seatNo,
+        fundingDelta: funding.fundingDelta,
+        idempotencyKey: `poker:bot-replacement-buyin:v1:${tableId}:${prepared.stateVersion}:${funding.seatNo}`,
+        transactionId: "tx-replacement-1",
+        payloadHash: "hash-replacement-1"
+      }]
+    },
+    nowMs: 5_000
+  });
+  assert.equal(committed.ok, true);
+  assert.equal(tableManager.persistedPokerState(tableId).phase, "PREFLOP");
+  assert.equal(tableManager.commitSettledHandRollover({ ...prepared, tableId }).reason, "runtime_version_conflict");
+});
+
 test("authenticated resubscribe restores seated human presence so a fold settlement rolls into the next hand", () => {
   const tableManager = createTableManager({ maxSeats: 6 });
   const tableId = "table_resubscribe_after_fold";

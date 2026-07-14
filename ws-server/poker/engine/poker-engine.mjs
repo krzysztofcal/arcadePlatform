@@ -14,6 +14,21 @@ const ENGINE_ACTIONS = new Set(["FOLD", "CHECK", "CALL", "BET", "RAISE"]);
 const MIN_STACK_TO_JOIN_HAND = 2;
 const BOT_REPLACEMENT_STACK = 100;
 
+export function calculateReplacementFundingDelta({ oldStack, targetStack = BOT_REPLACEMENT_STACK } = {}) {
+  if (!Number.isInteger(targetStack) || targetStack <= 0) {
+    return { ok: false, reason: "invalid_target_stack" };
+  }
+  if (!Number.isInteger(oldStack) || oldStack < 0 || oldStack >= targetStack) {
+    return { ok: false, reason: "invalid_old_stack" };
+  }
+  return {
+    ok: true,
+    oldStack,
+    targetStack,
+    fundingDelta: targetStack - oldStack
+  };
+}
+
 function toHex(bytes) {
   return Buffer.from(bytes).toString("hex");
 }
@@ -211,10 +226,15 @@ function nextBotReplacementUserId({ tableId, seatNo, version, existingUserIds })
 
 export function replaceBrokeBotsForNextHand({ coreState, settledState, nextVersion }) {
   if (!coreState || typeof coreState !== "object" || Array.isArray(coreState)) {
-    return { coreState, settledState };
+    return { ok: false, reason: "invalid_core_state", coreState, settledState, replacementFundings: [] };
   }
   if (!settledState || typeof settledState !== "object" || Array.isArray(settledState)) {
-    return { coreState, settledState };
+    return { ok: false, reason: "invalid_settled_state", coreState, settledState, replacementFundings: [] };
+  }
+
+  const fromStateVersion = Number(coreState.version);
+  if (!Number.isInteger(fromStateVersion) || !Number.isInteger(nextVersion) || nextVersion !== fromStateVersion + 1) {
+    return { ok: false, reason: "invalid_replacement_version", coreState, settledState, replacementFundings: [] };
   }
 
   const currentMembers = orderedSeatMembers(coreState);
@@ -234,12 +254,36 @@ export function replaceBrokeBotsForNextHand({ coreState, settledState, nextVersi
     ? { ...coreState.publicStacks }
     : null;
   const existingUserIds = new Set(nextMembers.map((member) => member.userId));
+  const replacementFundings = [];
 
   for (const member of currentMembers) {
     const userId = member.userId;
     if (nextSeatDetails?.[userId]?.isBot !== true) continue;
     const stack = Number(nextStacks[userId] ?? 0);
-    if (!Number.isFinite(stack) || stack >= MIN_STACK_TO_JOIN_HAND) continue;
+    if (!Number.isFinite(stack)) {
+      return {
+        ok: false,
+        reason: "invalid_old_stack",
+        coreState,
+        settledState,
+        replacementFundings: []
+      };
+    }
+    if (stack >= MIN_STACK_TO_JOIN_HAND) continue;
+
+    const funding = calculateReplacementFundingDelta({
+      oldStack: stack,
+      targetStack: BOT_REPLACEMENT_STACK
+    });
+    if (!funding.ok) {
+      return {
+        ok: false,
+        reason: funding.reason,
+        coreState,
+        settledState,
+        replacementFundings: []
+      };
+    }
 
     const replacementUserId = nextBotReplacementUserId({
       tableId: coreState.roomId,
@@ -270,14 +314,27 @@ export function replaceBrokeBotsForNextHand({ coreState, settledState, nextVersi
       delete nextPublicStacks[userId];
       nextPublicStacks[replacementUserId] = BOT_REPLACEMENT_STACK;
     }
+
+    replacementFundings.push({
+      seatNo: member.seat,
+      oldBotUserId: userId,
+      replacementBotUserId: replacementUserId,
+      oldStack: funding.oldStack,
+      targetStack: funding.targetStack,
+      fundingDelta: funding.fundingDelta,
+      settledHandId: typeof settledState.handId === "string" ? settledState.handId : null,
+      fromStateVersion,
+      toStateVersion: nextVersion
+    });
   }
 
   if (!changed) {
-    return { coreState, settledState };
+    return { ok: true, coreState, settledState, replacementFundings: [] };
   }
 
   nextMembers.sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
   return {
+    ok: true,
     coreState: {
       ...coreState,
       members: nextMembers,
@@ -288,7 +345,8 @@ export function replaceBrokeBotsForNextHand({ coreState, settledState, nextVersi
     settledState: {
       ...settledState,
       stacks: nextStacks
-    }
+    },
+    replacementFundings
   };
 }
 

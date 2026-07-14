@@ -5,11 +5,26 @@ import {
   bootstrapCoreStateHand,
   buildBootstrappedPokerState,
   buildNextHandStateFromSettled,
+  calculateReplacementFundingDelta,
   replaceBrokeBotsForNextHand
 } from "./poker-engine.mjs";
 import { dealHoleCards, deriveDeck, toCardCodes } from "../shared/poker-primitives.mjs";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+test("replacement funding delta preserves residual bot stack", () => {
+  assert.deepEqual(calculateReplacementFundingDelta({ oldStack: 0 }), { ok: true, oldStack: 0, targetStack: 100, fundingDelta: 100 });
+  assert.deepEqual(calculateReplacementFundingDelta({ oldStack: 1 }), { ok: true, oldStack: 1, targetStack: 100, fundingDelta: 99 });
+  assert.deepEqual(calculateReplacementFundingDelta({ oldStack: 99 }), { ok: true, oldStack: 99, targetStack: 100, fundingDelta: 1 });
+});
+
+test("replacement funding delta rejects invalid accounting inputs", () => {
+  for (const oldStack of [-1, Number.NaN, Number.POSITIVE_INFINITY, 100, 101, 1.5]) {
+    assert.equal(calculateReplacementFundingDelta({ oldStack }).ok, false);
+  }
+  assert.equal(calculateReplacementFundingDelta({ oldStack: 1, targetStack: 0 }).ok, false);
+  assert.equal(calculateReplacementFundingDelta({ oldStack: 1, targetStack: Number.NaN }).ok, false);
+});
 
 function initialCore() {
   return {
@@ -173,4 +188,15 @@ test("replaceBrokeBotsForNextHand swaps too-short bot only after settlement", ()
   assert.equal(recycled.coreState.seatDetailsByUserId[replacementBot.userId].isBot, true);
   assert.equal(recycled.settledState.stacks[replacementBot.userId], 100);
   assert.equal("bot_old" in recycled.settledState.stacks, false);
+  assert.deepEqual(recycled.replacementFundings, [{
+    seatNo: 2,
+    oldBotUserId: "bot_old",
+    replacementBotUserId: replacementBot.userId,
+    oldStack: 1,
+    targetStack: 100,
+    fundingDelta: 99,
+    settledHandId: "settled_bot_replace",
+    fromStateVersion: 30,
+    toStateVersion: 31
+  }]);
 });
