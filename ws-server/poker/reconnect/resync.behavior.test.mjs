@@ -182,39 +182,73 @@ async function writePersistedFile(fixture) {
   return { dir, filePath };
 }
 
-async function nextMessageOfType(ws, type, { timeoutMs = 5000, skipTypes = [] } = {}) {
-  const started = Date.now();
-  while (true) {
-    const remaining = timeoutMs - (Date.now() - started);
-    if (remaining <= 0) {
-      throw new Error(`Timed out waiting for message type: ${type}`);
-    }
-    const frame = await nextMessage(ws, remaining, `nextMessageOfType(${type})`);
-    if (frame?.type === type) {
-      return frame;
-    }
-    if (skipTypes.includes(frame?.type)) {
-      continue;
-    }
-    throw new Error(`Unexpected frame while waiting for ${type}: ${frame?.type || "unknown"}`);
-  }
+function nextMessageOfType(ws, type, { timeoutMs = 5000, skipTypes = [] } = {}) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      ws.off("error", onError);
+      ws.off("close", onClose);
+    };
+    const onMessage = (data) => {
+      const frame = JSON.parse(String(data));
+      if (frame?.type === type) {
+        cleanup();
+        resolve(frame);
+        return;
+      }
+      if (skipTypes.includes(frame?.type)) return;
+      cleanup();
+      reject(new Error(`Unexpected frame while waiting for ${type}: ${frame?.type || "unknown"}`));
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    const onClose = (code) => {
+      cleanup();
+      reject(new Error(`Socket closed before message type ${type}: ${code}`));
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for message type: ${type}`));
+    }, timeoutMs);
+    ws.on("message", onMessage);
+    ws.on("error", onError);
+    ws.on("close", onClose);
+  });
 }
 
-async function nextMessageForRequest(ws, type, requestId, { timeoutMs = 5000, skipTypes = [] } = {}) {
-  const started = Date.now();
-  while (true) {
-    const remaining = timeoutMs - (Date.now() - started);
-    if (remaining <= 0) {
-      throw new Error(`Timed out waiting for ${type} requestId=${requestId}`);
-    }
-    const frame = await nextMessage(ws, remaining, `nextMessageForRequest(${type}, ${requestId})`);
-    if (frame?.type === type && frame?.requestId === requestId) {
-      return frame;
-    }
-    if (skipTypes.includes(frame?.type)) {
-      continue;
-    }
-  }
+function nextMessageForRequest(ws, type, requestId, { timeoutMs = 5000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      ws.off("error", onError);
+      ws.off("close", onClose);
+    };
+    const onMessage = (data) => {
+      const frame = JSON.parse(String(data));
+      if (frame?.type !== type || frame?.requestId !== requestId) return;
+      cleanup();
+      resolve(frame);
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    const onClose = (code) => {
+      cleanup();
+      reject(new Error(`Socket closed before ${type} requestId=${requestId}: ${code}`));
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for ${type} requestId=${requestId}`));
+    }, timeoutMs);
+    ws.on("message", onMessage);
+    ws.on("error", onError);
+    ws.on("close", onClose);
+  });
 }
 
 
@@ -480,6 +514,7 @@ test("resync accepts roomId without payload.tableId", async () => {
     const auth2 = await auth(client2, token, "req-auth-roomid-c2");
     assert.equal(auth2.type, "authOk");
 
+    const resyncedPromise = nextMessage(client2, 5000, "resync-roomid-c2");
     sendFrame(client2, {
       version: "1.0",
       type: "resync",
@@ -488,7 +523,7 @@ test("resync accepts roomId without payload.tableId", async () => {
       ts: "2026-02-28T00:00:21Z",
       payload: {}
     });
-    const resynced = await nextMessage(client2, 5000, "resync-roomid-c2");
+    const resynced = await resyncedPromise;
     assert.equal(resynced.type, "table_state");
     assert.equal(resynced.payload.tableId, "table_roomid_resync");
     assert.equal(resynced.payload.members.length, 1);
@@ -1426,26 +1461,31 @@ test("recoverable persistence conflict does not force resync and explicit resync
     const ws = await connectClient(port);
     await hello(ws, "hello-conflict-resync");
     await auth(ws, token, "auth-conflict-resync");
+    const joinedPromise = nextMessageOfType(ws, "table_state", { skipTypes: ["commandResult"] });
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-conflict-resync", ts: "2026-02-28T03:00:00Z", payload: { tableId } });
-    await nextMessageOfType(ws, "table_state", { skipTypes: ["commandResult"] });
+    await joinedPromise;
+    const baselinePromise = nextMessageForRequest(ws, "stateSnapshot", "snap-conflict-resync", { skipTypes: ["commandResult", "statePatch"] });
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-conflict-resync", ts: "2026-02-28T03:00:01Z", payload: { tableId, view: "snapshot" } });
-    const baseline = await nextMessageForRequest(ws, "stateSnapshot", "snap-conflict-resync", { skipTypes: ["commandResult", "statePatch"] });
+    const baseline = await baselinePromise;
     const handId = baseline.payload.public.hand.handId;
 
     const forcedRaw = JSON.parse(await fs.readFile(filePath, "utf8"));
     forcedRaw.tables[tableId].stateRow.version = baseline.payload.stateVersion + 3;
     await fs.writeFile(filePath, `${JSON.stringify(forcedRaw)}\n`, "utf8");
 
+    const rejectedPromise = nextMessageForRequest(ws, "commandResult", "act-conflict-resync", { skipTypes: ["stateSnapshot", "statePatch"], timeoutMs: 10000 });
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-conflict-resync", ts: "2026-02-28T03:00:02Z", payload: { tableId, handId, action: "fold" } });
-    const rejected = await nextMessageForRequest(ws, "commandResult", "act-conflict-resync", { skipTypes: ["stateSnapshot", "statePatch"], timeoutMs: 10000 });
+    const rejected = await rejectedPromise;
     assert.equal(rejected.payload.status, "rejected");
     const maybeImmediateRecovery = await attemptMessage(ws, 400);
     assert.notEqual(maybeImmediateRecovery?.type, "resync");
 
+    const resyncedPromise = nextMessageOfType(ws, "table_state", { skipTypes: ["commandResult"] });
     sendFrame(ws, { version: "1.0", type: "resync", requestId: "resync-after-conflict", ts: "2026-02-28T03:00:03Z", payload: { tableId } });
-    await nextMessageOfType(ws, "table_state", { skipTypes: ["commandResult"] });
+    await resyncedPromise;
+    const hydratedPromise = nextMessageForRequest(ws, "stateSnapshot", "snap-after-conflict", { skipTypes: ["commandResult", "statePatch"] });
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-after-conflict", ts: "2026-02-28T03:00:04Z", payload: { tableId, view: "snapshot" } });
-    const hydrated = await nextMessageForRequest(ws, "stateSnapshot", "snap-after-conflict", { skipTypes: ["commandResult", "statePatch"] });
+    const hydrated = await hydratedPromise;
     assert.equal(hydrated.payload.stateVersion, forcedRaw.tables[tableId].stateRow.version);
     ws.close();
   } finally {
