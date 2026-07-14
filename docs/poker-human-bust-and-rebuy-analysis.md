@@ -91,7 +91,7 @@ This violates the intended accounting invariant:
 ### Required accounting contract before rebuy work
 
 - Declare one authoritative stack for every active human table lifecycle, including `0` after a bust.
-- Keep any `poker_seats.stack` projection transactionally synchronized with authoritative gameplay state, or stop using it as a cash-out fallback.
+- Keep `poker_seats.stack` transactionally synchronized as an operational projection, but never use it as a cash-out fallback for an active table lifecycle.
 - Rollover must not erase the only durable proof that a busted player's balance is `0`.
 - Cleanup must fail closed and flag manual review when the cash-out amount cannot be proven. It must not refund a stale positive seat value.
 - Process restart/restore, ordinary leave, disconnect cleanup, table close, and rebuy must use the same source-of-truth rule.
@@ -195,22 +195,23 @@ Use these additive properties:
 - `pokerState.waitingForNextHandByUserId[userId] = true`: an already funded human who must wait for the next deal;
 - snapshot `private.playerState.status`: `ACTIVE`, `WAITING_NEXT_HAND`, or `OUT_OF_CHIPS`;
 - snapshot `private.playerState.stack`: authoritative non-negative table stack;
-- snapshot `private.playerState.canRebuy`: true only for an authenticated human with status `OUT_OF_CHIPS` at an open table.
+- snapshot `private.playerState.canRebuy`: true only for an authenticated human with status `OUT_OF_CHIPS` at an open table, after authoritative rollover has removed that user from `handSeats`.
 
 The client must treat `private.playerState` as optional for backward compatibility and derive the old behavior when it is absent.
 
-No database migration is required. `poker_seats.stack` remains the lifecycle projection, but it must be updated transactionally from the authoritative state before it can be used by leave or cleanup.
+No database migration is required. `poker_seats.stack` remains a transactionally synchronized operational projection for inventory and diagnostics. It is not authoritative cash-out evidence and must never be used by leave or cleanup to replace a missing active-lifecycle stack.
 
 ### Delivery strategy
 
-Implement this as two ordered runtime PRs after this documentation PR:
+Implement this as three strictly ordered runtime PRs after this documentation PR:
 
-1. **Accounting and lifecycle safety:** preserve zero stacks, synchronize the human seat-stack projection, fail closed on ambiguous cash-out, expose `OUT_OF_CHIPS`, and fix the 1 CH human edge case.
-2. **Explicit rebuy and UI:** add the authoritative rebuy command, USER-to-ESCROW transaction, waiting-for-next-hand transition, and table prompt.
+1. **PR 1 — accounting P0 only:** preserve the authoritative human stack, including `0`; synchronize the seat projection; make cleanup and leave fail closed when the authoritative stack is absent; verify restart/restore; and add the read-only discrepancy inventory. Do not add `OUT_OF_CHIPS`, change the 1 CH rule, or change browser UI in this PR.
+2. **PR 2 — lifecycle and UI:** expose `OUT_OF_CHIPS / SITTING_OUT`, distinguish table seats from current-hand participants, allow a human with 1 CH to play, and keep disabled actions plus the explanatory message stable. Do not add ledger funding or a rebuy command in this PR.
+3. **PR 3 — explicit manual rebuy:** add the authoritative command, USER-to-ESCROW transaction, waiting-for-next-hand transition, and rebuy prompt.
 
-The second PR must not deploy before the first PR has passed stage reconciliation and a bust-cleanup smoke test.
+Each PR is independently deployable and reviewable. PR 2 must not deploy before PR 1 passes production-shaped stage inventory and bust-cleanup smoke tests. PR 3 must not deploy before PR 2 proves the out-of-chips lifecycle across rollover and reconnect.
 
-### Phase 0 — read-only impact inventory
+### Phase 0 / runtime PR 1 — read-only impact inventory
 
 Files and operational surfaces:
 
@@ -237,24 +238,21 @@ Acceptance:
 - no production balance is changed;
 - remediation remains a separate owner-approved operation.
 
-### Phase 1 — authoritative human stack through rollover and cash-out
+### Phase 1 / runtime PR 1 — accounting P0 only
 
 #### `ws-server/poker/engine/poker-engine.mjs`
 
 Change:
 
-- split the current `MIN_STACK_TO_JOIN_HAND` policy into human and bot rules;
-- update `isContinuationEligibleByStack()`, `orderedEligibleSeatMembers()`, and `buildNextHandStateFromSettled()` so a human with stack `> 0` is eligible, while bot replacement may retain its existing `< 2` policy;
-- preserve every active table member in table-level `seats` and `stacks`, including a busted human with `0`;
-- keep only eligible funded players in `handSeats`;
+- update `buildNextHandStateFromSettled()` so settled rollover carries the proven stack for every active non-bot table member into durable `pokerState.stacks`, including `0`, independently of the next hand's participant arrays;
+- preserve the current `MIN_STACK_TO_JOIN_HAND`, `isContinuationEligibleByStack()`, `orderedEligibleSeatMembers()`, `seats`, and `handSeats` behavior in this accounting PR;
 - keep `replaceBrokeBotsForNextHand()` bot-only and do not fund humans from SYSTEM accounts;
-- clear `waitingForNextHandByUserId[userId]` when that funded human is admitted to the next hand.
+- do not add presentation status, waiting-for-next-hand behavior, or the 1 CH rule change in this PR.
 
 Invariants:
 
 - a human stack `0` survives rollover as durable evidence;
-- a human stack `1` can post a partial blind and be all-in;
-- a busted human never appears in `handSeats`;
+- hand eligibility and player-visible behavior are unchanged by the P0 accounting fix;
 - bot replacement funding behavior remains unchanged.
 
 #### `ws-server/poker/table/table-manager.mjs`
@@ -264,7 +262,7 @@ Change:
 - extend `prepareSettledHandRollover()` to return a normalized `humanStackUpdates` intent for active non-bot members, including zero;
 - project settled human stacks into `nextCoreState.publicStacks` before building the next hand;
 - extend `commitSettledHandRollover()` receipt validation so runtime state cannot commit unless the persistence receipt confirms the human stack projection and any bot replacement funding;
-- make `hasActiveHumanMember()` explicitly distinguish table presence from hand eligibility. A connected out-of-chips human still keeps the table experience alive, but is not an action participant.
+- leave `hasActiveHumanMember()` and other lifecycle/presentation behavior unchanged until runtime PR 2.
 
 Properties:
 
@@ -314,27 +312,46 @@ Add a focused `shared/poker-domain/human-stack-accounting.mjs` helper and use it
 
 Contract:
 
-- explicit state stack, including `0`, wins;
-- a synchronized seat projection can be used when state intentionally omits the user only if its lifecycle evidence is unambiguous;
-- state-missing plus positive legacy seat stack is `stack_ambiguous`, not an automatic refund;
+- the active lifecycle cash-out amount comes exclusively from the authoritative numeric stack in `poker_state.state.stacks`, including `0`;
+- an absent, invalid, or out-of-range authoritative stack is always `stack_ambiguous`, regardless of the value or timestamp in `poker_seats.stack`;
+- `poker_seats.stack`, `updated_at`, recent action rows, and the original buy-in are never sufficient fallback evidence for an online cash-out;
 - ambiguous cleanup/leave fails closed, logs with `klog`, and requires restore or manual review;
 - amount `0` completes lifecycle cleanup without creating a ledger transaction;
 - ordinary leave and disconnect cleanup use the same resolver.
 
-Do not use `console.log`. Logs must contain table ID, reason code, source (`state`, `seat_projection`, or `ambiguous`), and aggregate amount, without email or profile data.
+Do not use `console.log`. Logs must contain table ID, reason code, source (`authoritative_state` or `ambiguous`), and aggregate amount when proven, without email or profile data.
 
 #### `ws-server/poker/bootstrap/persisted-bootstrap-adapter.mjs`
 
-Change `normalizePublicStacks()` so a valid persisted gameplay stack takes precedence over a seat projection for the same user. The seat projection remains a fallback for table members not present in the current hand state.
+Change `normalizePublicStacks()` so active human lifecycle restoration requires a valid persisted gameplay stack for every active human seat. A missing human stack is an explicit restore-integrity error and must remain fail-closed; it must not be reconstructed from `poker_seats.stack`. Preserve the existing bot-specific restore rules separately.
 
 Restore acceptance:
 
 - an out-of-chips active human restores with stack `0` and remains seated but not dealt in;
-- a human with stack `1` restores as hand-eligible;
+- a human with stack `1` restores without changing the existing PR 1 eligibility policy;
 - a stale positive seat row cannot override state stack `0`;
+- a missing human state stack cannot be replaced by any seat-row value;
 - replacement bot restore behavior stays intact.
 
-### Phase 2 — public and private `OUT_OF_CHIPS` presentation contract
+### Phase 2 / runtime PR 2 — `OUT_OF_CHIPS` lifecycle and UI
+
+#### `ws-server/poker/engine/poker-engine.mjs` and `ws-server/poker/table/table-manager.mjs`
+
+Change:
+
+- split the current `MIN_STACK_TO_JOIN_HAND` policy into human and bot rules;
+- update `isContinuationEligibleByStack()`, `orderedEligibleSeatMembers()`, and `buildNextHandStateFromSettled()` so a human with stack `> 0` is eligible, while bot replacement may retain its existing `< 2` policy;
+- formalize table-level seats/stacks as all active table members and `handSeats` as only players dealt into the current hand;
+- keep a busted human at table stack `0` but outside `handSeats`;
+- make `hasActiveHumanMember()` distinguish table presence from hand eligibility, so a connected out-of-chips human keeps the table experience alive without becoming an action participant;
+- do not add rebuy funding, a rebuy command, or `WAITING_NEXT_HAND` in this PR.
+
+Acceptance:
+
+- a human stack `1` can post a partial blind and be all-in;
+- a human stack `0` remains table-seated but is never dealt in;
+- bot autoplay continues while the human is sitting out;
+- the accounting source-of-truth rules from runtime PR 1 remain unchanged.
 
 #### `ws-server/poker/read-model/room-core-snapshot.mjs`
 
@@ -343,8 +360,8 @@ Change:
 - merge table members with current hand seats instead of dropping members not present in `handSeats`;
 - merge `coreState.publicStacks` with live hand stacks per user instead of choosing one entire map;
 - mark a non-bot table seat with authoritative stack `0` as `OUT_OF_CHIPS`;
-- add optional `private.playerState` for the authenticated viewer;
-- preserve `legalActions.actions = []` for `OUT_OF_CHIPS` and `WAITING_NEXT_HAND`.
+- add optional `private.playerState` with `status` and `stack` for the authenticated viewer;
+- preserve `legalActions.actions = []` for `OUT_OF_CHIPS`.
 
 Snapshot example:
 
@@ -356,8 +373,7 @@ Snapshot example:
     "holeCards": [],
     "playerState": {
       "status": "OUT_OF_CHIPS",
-      "stack": 0,
-      "canRebuy": true
+      "stack": 0
     }
   }
 }
@@ -378,7 +394,25 @@ Change snapshot normalization and rendering to:
 
 The seat can remain reserved while the authenticated WS presence is healthy. Existing disconnect/presence cleanup releases it after disconnect. A forced timeout for a connected watcher is not required in the first release and can be considered separately if seat hoarding becomes a product issue.
 
-### Phase 3 — explicit manual rebuy
+### Phase 3 / runtime PR 3 — explicit manual rebuy
+
+#### Rebuy availability contract
+
+Extend `private.playerState` with `canRebuy` only in this PR. It is true only when all of these are true in the same authoritative snapshot:
+
+- the viewer is the authenticated non-bot seat owner;
+- table status is `OPEN`;
+- authoritative table stack is exactly `0`;
+- the user is absent from current `handSeats` after settled rollover;
+- the user does not already have a committed `WAITING_NEXT_HAND` rebuy.
+
+During `SETTLED`, the busted user can still be present in the completed hand's `handSeats`; `canRebuy` must remain false in that snapshot. The rollover snapshot that excludes the user from the new hand is the first snapshot allowed to expose `canRebuy: true`. The client must render the rebuy CTA only from explicit `canRebuy === true`, never from stack `0` or empty legal actions alone.
+
+Touchpoints:
+
+- `ws-server/poker/read-model/room-core-snapshot.mjs` derives `canRebuy` from the complete condition above and adds `WAITING_NEXT_HAND` only after a committed rebuy;
+- `ws-server/poker/engine/poker-engine.mjs` clears `waitingForNextHandByUserId[userId]` only when rollover actually admits the funded human to a new `handSeats` set;
+- `poker/poker-v2.js` shows the rebuy CTA only for explicit `canRebuy === true` and shows `Funded · Joining next hand` for `WAITING_NEXT_HAND`.
 
 #### Shared authoritative domain
 
@@ -395,7 +429,7 @@ Add `executePokerRebuyAuthoritative()` with these preconditions:
 - table status `OPEN`;
 - user owns an `ACTIVE` seat at that table;
 - authoritative table stack is exactly `0`;
-- user is absent from current `handSeats`;
+- user is absent from current `handSeats` after authoritative rollover;
 - requested amount is exactly 100 CH for the first release;
 - request ID is present.
 
@@ -477,12 +511,15 @@ Files:
 
 Cases:
 
-- human `0` remains table-seated, is excluded from `handSeats`, and remains stack `0`;
-- human `1` enters the next hand and posts a partial blind;
-- broke bot replacement behavior is unchanged;
-- `OUT_OF_CHIPS`, `WAITING_NEXT_HAND`, and `ACTIVE` are derived deterministically;
-- state stack `0` cannot be overridden by seat stack `100`;
-- missing state plus stale positive seat projection returns `stack_ambiguous`.
+- runtime PR 1: settled human stack `0` remains in the authoritative stack map even when that user is absent from next-hand participant arrays;
+- runtime PR 1: state stack `0` cannot be overridden by seat stack `100`;
+- runtime PR 1: missing state plus any seat projection returns `stack_ambiguous`;
+- runtime PR 1: broke bot replacement behavior is unchanged;
+- runtime PR 2: human `0` remains table-seated, is excluded from `handSeats`, and derives `OUT_OF_CHIPS`;
+- runtime PR 2: human `1` enters the next hand and posts a partial blind;
+- runtime PR 3: `WAITING_NEXT_HAND` and rebuy availability are derived deterministically.
+
+The accounting PR must not be expanded merely to share one combined test file.
 
 #### Transaction and integration tests
 
@@ -503,7 +540,7 @@ Cases:
 1. bust `100 → 0`, rollover, disconnect cleanup: cash-out is `0`, not `100`;
 2. bust, rollover, explicit leave: cash-out is `0`;
 3. state CAS failure: seat projection and runtime do not commit;
-4. restart after bust: stack remains `0` and player remains `OUT_OF_CHIPS`;
+4. runtime PR 1 restart after bust: authoritative stack remains `0`, cleanup remains safe, and no stale refund occurs;
 5. successful rebuy: `USER -100`, `ESCROW +100`, seat/state stack `100` exactly once;
 6. same rebuy request twice: one ledger transaction;
 7. failed ledger funding: no persisted or runtime stack change;
@@ -512,6 +549,9 @@ Cases:
 10. leave after funded rebuy but before the next hand: exactly 100 CH is returned;
 11. reconnect/resync at stack `0`: static out-of-chips UI, no actions;
 12. action buttons remain stable and disabled while the rebuy prompt is visible.
+13. completed-hand `SETTLED` snapshot with the busted user still in `handSeats`: `canRebuy` is false and no rebuy CTA is rendered;
+14. first authoritative post-rollover snapshot without that user in `handSeats`: `canRebuy` is true and the rebuy CTA is rendered.
+15. runtime PR 2 restart/reconnect after bust: the player renders as `OUT_OF_CHIPS` without rebuy behavior being present yet.
 
 Ledger invariants:
 
@@ -524,7 +564,11 @@ cash-out after audited bust == 0
 
 ### Manual verification
 
-Requires both Netlify Deploy Preview and WS Preview Deploy because the plan changes the browser and WS server.
+Preview requirements follow the three-PR boundary:
+
+- runtime PR 1 requires WS Preview Deploy plus stage DB/ledger inspection; it has no browser change and does not require Netlify Preview for accounting acceptance;
+- runtime PR 2 requires both WS Preview Deploy and Netlify Deploy Preview;
+- runtime PR 3 requires both WS Preview Deploy and Netlify Deploy Preview.
 
 On stage:
 
@@ -546,13 +590,15 @@ On stage:
 Rollout order:
 
 1. run the read-only discrepancy inventory on stage and production;
-2. deploy accounting/lifecycle safety to WS Preview;
+2. deploy runtime PR 1 accounting P0 to WS Preview;
 3. verify bust → rollover → disconnect/leave produces zero cash-out;
-4. deploy accounting/lifecycle safety to production and observe before enabling rebuy UI;
-5. deploy rebuy WS command to preview, then the Netlify UI;
-6. smoke-test the complete flow;
-7. deploy WS production before the UI that sends `table_rebuy`;
-8. monitor ambiguous cash-out, rebuy failure, duplicate, and restore logs.
+4. deploy accounting P0 to production and observe `stack_ambiguous` plus restore behavior before any lifecycle release;
+5. deploy runtime PR 2 lifecycle changes to WS Preview and Netlify Preview, then verify 1 CH, `OUT_OF_CHIPS`, stable actions, reconnect, and continued bot play;
+6. deploy and observe runtime PR 2 in production before enabling rebuy;
+7. deploy runtime PR 3 rebuy WS command to preview, then the Netlify UI;
+8. smoke-test the complete explicit rebuy flow, including the post-rollover `canRebuy` boundary;
+9. deploy rebuy WS production before the UI that sends `table_rebuy`;
+10. monitor ambiguous cash-out, rebuy failure, duplicate, and restore logs.
 
 Rollback:
 
@@ -578,6 +624,7 @@ Potentially breaking internal semantics:
 - `pokerState.seats` becomes the table-seat set while `handSeats` is the dealt-player set; every engine/reducer caller that falls back from `handSeats` to `seats` must be audited;
 - human stack `1` becomes eligible instead of silently excluded;
 - cleanup and leave will fail closed for ambiguous legacy positive seat projections instead of paying them automatically;
+- `poker_seats.stack` is no longer accepted as cash-out evidence when the active lifecycle stack is missing, even when its timestamp is recent;
 - runtime rollover commit receipts gain mandatory human projection evidence;
 - deployment order matters because old WS code does not understand committed waiting-for-next-hand rebuys.
 
