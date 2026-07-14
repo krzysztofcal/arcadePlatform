@@ -178,6 +178,33 @@ test('poker ws client sendJoin/sendLeave/sendStartHand/sendAct resolve and rejec
   await assert.rejects(actPromise, (err) => err && err.code === 'hand_not_live');
 });
 
+test('poker ws client keeps the socket ready after a command-scoped error frame', async () => {
+  const h = loadClientHarness();
+  h.client.start();
+  const ws = h.FakeWebSocket.instances[0];
+  ws.open();
+  ws.message({ type: 'helloAck', payload: { version: '1.0' } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  ws.message({ type: 'authOk', payload: { roomId: 'table_test_1' } });
+
+  const joinPromise = h.client.sendJoin({ tableId: 'table_test_1' }, 'join_bootstrap_retry');
+  ws.message({
+    type: 'error',
+    requestId: 'join_bootstrap_retry',
+    payload: {
+      requestId: 'join_bootstrap_retry',
+      code: 'TABLE_BOOTSTRAP_FAILED',
+      message: 'authoritative_join_rehydrate_failed'
+    }
+  });
+
+  await assert.rejects(joinPromise, (err) => err && err.code === 'TABLE_BOOTSTRAP_FAILED');
+  assert.equal(h.client.isReady(), true);
+  assert.equal(h.statuses.some((entry) => entry.status === 'command_error' && entry.data.code === 'TABLE_BOOTSTRAP_FAILED'), true);
+  assert.equal(h.statuses.some((entry) => entry.status === 'error'), false);
+  assert.equal(h.protocolErrors.length, 0);
+});
+
 test('poker ws client can queue leave without waiting for commandResult', async () => {
   const h = loadClientHarness();
   h.client.start();

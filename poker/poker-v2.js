@@ -55,6 +55,7 @@
   var CLOSED_TABLE_REDIRECT_SECONDS = 5;
   var WINNER_REVEAL_MS = 4_000;
   var CHIP_FLY_MS = 420;
+  var AUTO_JOIN_RETRY_DELAYS_MS = [250, 750, 1500, 3000];
   var CHIP_DENOMINATIONS = [
     { value: 1000, color: 'yellow' },
     { value: 500, color: 'purple' },
@@ -156,6 +157,9 @@
   var suggestedSeatNoParam = null;
   var shouldAutoJoin = false;
   var autoJoinAttempted = false;
+  var autoJoinRetryTimer = null;
+  var autoJoinRetryCount = 0;
+  var autoJoinErrorActive = false;
   var reconnectSeatNo = null;
   var lastKnownCurrentSeatNo = null;
   var bootReady = false;
@@ -1147,7 +1151,7 @@
     syncStickyWinnerReveal();
     state.actionConstraints = normalizeConstraints(constraintsPrimary, legalSource && legalSource.actionConstraints);
     state.statusText = LIVE_STATUS_COPY.live;
-    state.errorText = '';
+    if (!autoJoinErrorActive) state.errorText = '';
     if (pendingLeaveNavigation && !hasRenderableCurrentSeat()){
       pendingLeaveRetryAfterReconnect = false;
       pendingLeaveNavigation = false;
@@ -2619,22 +2623,73 @@
     });
   }
 
-  function isSeatTakenError(error){
-    var message = error && error.message ? String(error.message) : '';
-    return /seat_taken/i.test(message);
+  function autoJoinErrorCode(error){
+    var value = error && (error.code || error.message) ? String(error.code || error.message) : '';
+    return value.trim().toLowerCase();
+  }
+
+  function isRetryableAutoJoinError(error){
+    var code = autoJoinErrorCode(error);
+    if (!code) return false;
+    return /^(timeout|ws_unavailable|temporarily_unavailable|authoritative_join_failed|authoritative_state_invalid|state_missing|poker_state_missing|state_conflict|conflict|persist_failed|seat_taken|table_load_failed|table_bootstrap_failed)$/.test(code);
+  }
+
+  function clearAutoJoinRetry(){
+    if (autoJoinRetryTimer){
+      window.clearTimeout(autoJoinRetryTimer);
+      autoJoinRetryTimer = null;
+    }
+  }
+
+  function resetAutoJoinRetryState(){
+    clearAutoJoinRetry();
+    autoJoinRetryCount = 0;
+    autoJoinErrorActive = false;
+  }
+
+  function scheduleAutoJoinRetry(error){
+    if (!shouldAutoJoin || !isRetryableAutoJoinError(error) || autoJoinRetryTimer) return false;
+    if (autoJoinRetryCount >= AUTO_JOIN_RETRY_DELAYS_MS.length) return false;
+    var delayMs = AUTO_JOIN_RETRY_DELAYS_MS[autoJoinRetryCount];
+    autoJoinRetryCount += 1;
+    autoJoinRetryTimer = window.setTimeout(function(){
+      autoJoinRetryTimer = null;
+      autoJoinAttempted = false;
+      if (deriveCurrentSeat()){
+        resetAutoJoinRetryState();
+        return;
+      }
+      autoJoinSeat();
+    }, delayMs);
+    return true;
   }
 
   function autoJoinSeat(){
-    if (!shouldAutoJoin || autoJoinAttempted) return;
-    if (!isSignedIn() || !isWsReady() || deriveCurrentSeat()) return;
+    if (!shouldAutoJoin) return;
+    if (deriveCurrentSeat()){
+      autoJoinAttempted = false;
+      resetAutoJoinRetryState();
+      return;
+    }
+    if (autoJoinAttempted || autoJoinRetryTimer) return;
+    if (!isSignedIn() || !isWsReady()) return;
     autoJoinAttempted = true;
     if (suggestedSeatNoParam && els.joinSeat) els.joinSeat.value = String(suggestedSeatNoParam);
+    autoJoinErrorActive = false;
     setError('');
     sendCommand('sendJoin', buildJoinPayloadWithOptions({ autoSeat: true })).then(function(result){
+      resetAutoJoinRetryState();
       state.statusText = result && result.seatNo != null ? ('Joined seat ' + result.seatNo) : 'Join accepted';
       renderInfoPanel();
     }).catch(function(err){
-      if (isSeatTakenError(err)) autoJoinAttempted = false;
+      autoJoinAttempted = false;
+      autoJoinErrorActive = true;
+      var retryScheduled = scheduleAutoJoinRetry(err);
+      klog('poker_auto_join_failed', {
+        reason: autoJoinErrorCode(err) || 'unknown',
+        retryScheduled: retryScheduled,
+        retryCount: autoJoinRetryCount
+      });
       setError(err && err.message ? err.message : 'Failed to auto-join');
     });
   }
@@ -2904,6 +2959,8 @@
     stopTurnClock();
     clearWinnerRevealTimer();
     cancelClosedTableRedirect();
+    resetAutoJoinRetryState();
+    autoJoinAttempted = false;
     pendingPostRevealSnapshot = null;
     state.wsReady = false;
     if (wsClient && typeof wsClient.destroy === 'function'){

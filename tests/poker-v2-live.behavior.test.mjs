@@ -1362,6 +1362,54 @@ test('poker v2 auto-joins from query params after live auth', async () => {
   assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({ tableId: 'table-1', buyIn: 100, autoSeat: true, preferredSeatNo: 4 }));
 });
 
+test('poker v2 retries Play now auto-join after a transient authoritative join failure', async () => {
+  const harness = createHarness({
+    search: '?tableId=table-1&seatNo=4&autoJoin=1',
+    sendJoin(payload, context){
+      if (context.attempt === 1) {
+        const error = new Error('authoritative_join_rehydrate_failed');
+        error.code = 'TABLE_BOOTSTRAP_FAILED';
+        return Promise.reject(error);
+      }
+      return Promise.resolve({ ok: true, seatNo: payload.preferredSeatNo });
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  await waitFor(() => harness.joinPayloads.length === 1);
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 0,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [] },
+      public: {
+        hand: { handId: null, status: 'INIT', dealerSeatNo: null },
+        turn: { userId: null, deadlineAt: null },
+        pot: { total: 0, sidePots: [] },
+        legalActions: { seat: null, actions: [] },
+        actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+        stacks: {}
+      },
+      you: { seat: null }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.joinPayloads.length, 1);
+  assert.equal(harness.elements.pokerV2ErrorText.textContent, 'authoritative_join_rehydrate_failed');
+  assert.equal(harness.elements.pokerV2ErrorText.hidden, false);
+
+  harness.advanceTime(250);
+  await harness.flush();
+
+  assert.equal(harness.joinPayloads.length, 2);
+  assert.equal(JSON.stringify(harness.joinPayloads[1]), JSON.stringify({ tableId: 'table-1', buyIn: 100, autoSeat: true, preferredSeatNo: 4 }));
+  assert.equal(harness.logs.some((entry) => entry.kind === 'poker_auto_join_failed' && entry.data.retryScheduled === true), true);
+});
+
 test('poker v2 safely rejoins the same authoritative seat after a socket reconnect', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
