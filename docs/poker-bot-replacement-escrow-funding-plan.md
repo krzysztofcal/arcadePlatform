@@ -1,6 +1,6 @@
 # Poker bot replacement escrow funding
 
-Status: planning only for GitHub issue #705. No implementation, production data change, automatic reconciliation, terminal bot cash-out, or new test is part of this plan.
+Status: planning only for GitHub issue #705. No implementation, production data change, automatic reconciliation, or terminal bot cash-out is part of this plan. The implementation must add only the small automated accounting test set defined below.
 
 ## Goal
 
@@ -62,7 +62,7 @@ This is limited to replacement funding. Issue #706 owns terminal bot cash-out an
 For each replacement:
 
 ```text
-oldStack       = integer current settled stack, allowed range 0..1
+oldStack       = integer current settled stack, valid funding range 0..99
 targetStack    = BOT_REPLACEMENT_STACK, currently 100
 fundingDelta   = targetStack - oldStack
 ledger entries = SYSTEM(TREASURY, -fundingDelta)
@@ -71,7 +71,9 @@ ledger entries = SYSTEM(TREASURY, -fundingDelta)
 
 The old residual remains backed by the escrow already present. The new ledger transfer backs exactly the additional claim. After the next hand posts blinds, the same value is represented by replacement stack plus pot; no further ledger transaction is needed.
 
-Invalid, fractional, negative, non-finite, or unexpectedly large old stacks fail closed. The engine must not replace such a bot or calculate a guessed delta.
+Add a pure synchronous `calculateReplacementFundingDelta({ oldStack, targetStack })` helper in `poker-engine.mjs`. It accepts integer values satisfying `targetStack > 0` and `0 <= oldStack < targetStack`, and returns the exact positive integer delta. Negative, fractional, non-finite, `NaN`, `oldStack >= targetStack`, or invalid target values fail closed with a controlled result; the engine must not calculate a guessed delta.
+
+The current replacement eligibility rule remains unchanged: `replaceBrokeBotsForNextHand()` only invokes funding for bots below `MIN_STACK_TO_JOIN_HAND`, so normal production descriptors currently contain old stacks 0 or 1. The pure helper deliberately supports the full range below the target, including `oldStack=99 -> 1`, so the accounting invariant remains correct if the replacement threshold changes in a future refactor.
 
 ## Prepared rollover contract
 
@@ -228,6 +230,7 @@ On WS process bootstrap or authoritative table restore, an active table restored
 
 - `ws-server/poker/engine/poker-engine.mjs`
   - keep `BOT_REPLACEMENT_STACK` at 100;
+  - add pure `calculateReplacementFundingDelta({ oldStack, targetStack })` validation and calculation;
   - extend `replaceBrokeBotsForNextHand()` with validated delta calculation and `replacementFundings` evidence;
   - preserve deterministic replacement identity and seat ordering.
 - `ws-server/poker/table/table-manager.mjs`
@@ -260,6 +263,27 @@ On WS process bootstrap or authoritative table restore, an active table restored
 - `docs/poker-bots.md`
   - document the replacement delta invariant, continued use of the current `TREASURY` source, and that terminal return remains owned by #706.
 
+### Focused automated tests
+
+- `ws-server/poker/engine/engine-rollover.behavior.test.mjs`
+  - add table-driven unit cases for exact deltas `0 -> 100`, `1 -> 99`, and `99 -> 1` with target 100;
+  - add fail-closed cases for `-1`, `NaN`, `Infinity`, fractional values, `oldStack === targetStack`, `oldStack > targetStack`, and invalid targets;
+  - keep these tests pure: no SQL, timers, sockets, or environment.
+- `ws-server/poker/table/table-manager.behavior.test.mjs`
+  - verify a prepared replacement does not mutate runtime;
+  - verify commit without a matching successful persistence/funding receipt is rejected and leaves the settled runtime unchanged;
+  - verify the same candidate commits only after a matching receipt and cannot be committed twice.
+- `ws-server/poker/persistence/persisted-state-writer.behavior.test.mjs`
+  - add a small transaction-aware harness through the existing `beginSql` injection and exercise the real writer/ledger call boundary;
+  - verify successful CAS plus funding commits state and exactly one balanced ledger transaction;
+  - verify a funding exception rolls back both pending state and ledger effects;
+  - verify a CAS/version conflict makes zero ledger calls;
+  - verify replay of the same table/version/seat is already applied or rejected without a second funding transaction;
+  - recreate writer/manager instances over the same committed harness state to simulate process restart, then verify restored advanced state prevents replacement retry from funding again.
+- `scripts/test-all.mjs`, `.github/workflows/ws-pr-checks.yml`, and `.github/workflows/ws-deploy.yml`
+  - register the existing persisted-state-writer suite alongside the already registered rollover and table-manager suites so these invariants run locally, on PRs, and before WS deployment;
+  - do not add a database service, Playwright scenario, broad poker suite, or new test framework.
+
 ### Explicitly unchanged
 
 - `shared/poker-domain/inactive-cleanup.mjs` and `netlify/functions/_shared/poker-bot-cashout.mjs`: #706 scope; terminal behavior is not changed here.
@@ -286,9 +310,11 @@ GitHub issue #710 owns the optional future evaluation of a dedicated poker bot b
 
 ### Phase 2 — pure replacement funding evidence
 
+- add the pure delta helper and its table-driven unit tests;
 - extend the engine result with validated per-seat delta descriptors;
 - split table-manager rollover into prepare and receipt-guarded commit;
 - restrict the compatibility wrapper to existing in-memory mode, explicitly confirmed guest mode, or candidates without funding intents;
+- add the focused table-manager unit tests for preparation and receipt-gated runtime commit;
 - keep all calculations synchronous and side-effect-free until commit.
 
 ### Phase 3 — atomic ledger plus persistence
@@ -297,17 +323,43 @@ GitHub issue #710 owns the optional future evaluation of a dedicated poker bot b
 - execute state CAS and all `TABLE_BUY_IN` posts in the same `beginSqlWs()` transaction;
 - update `server.mjs` to commit runtime state only after database success;
 - add fast restore/backoff followed by persistent slow recovery and existing-style `klog` events;
-- ensure bootstrap and authoritative restore reschedule an active settled generation.
+- ensure bootstrap and authoritative restore reschedule an active settled generation;
+- add the focused persisted-state/ledger integration cases for commit, rollback, CAS conflict, replay idempotency, and restart retry.
 
 ### Phase 4 — staged verification and rollout
 
-- run the existing repository checks unchanged; do not add or modify tests;
+- register and run the three focused automated suites in local, WS PR, and WS deployment checks;
 - manually verify the cases below against WS preview and the stage ledger;
 - deploy production only after the stage invariant and retry behavior are confirmed.
 
+## Automated test contract
+
+### Deterministic unit tests
+
+Unit tests cover only pure or in-memory business contracts:
+
+1. `calculateReplacementFundingDelta()` returns 100 for old stack 0, 99 for old stack 1, and 1 for old stack 99 when target is 100.
+2. Invalid numeric inputs fail closed and never produce a funding descriptor.
+3. Prepare leaves `table.coreState` unchanged.
+4. Runtime commit requires a matching successful persistence/funding receipt and remains idempotent after the first commit.
+
+These cases use `node:test` and the existing engine/table-manager suites. They must not use a database, network, timers, or broad gameplay scenarios.
+
+### Transactional integration tests
+
+Integration tests cover the smallest writer-ledger-state boundary using the existing injectable `beginSql` contract and a transaction-aware deterministic harness:
+
+1. successful state CAS and one replacement funding commit together;
+2. ledger failure rolls back both state and ledger effects and produces no receipt usable by runtime commit;
+3. failed CAS performs no ledger funding;
+4. replay of the deterministic idempotency key cannot fund twice;
+5. a fresh writer/manager instance restoring the committed state does not fund the same replacement generation again.
+
+The harness must stage state and ledger changes and publish them only when the `beginSql` callback resolves, so the rollback assertion tests transaction behavior rather than only call order. Use the real replacement payload shape and existing `TABLE_BUY_IN` contract. Do not add an external database service, production/stage writes, WebSocket end-to-end scenario, Playwright coverage, or generalized transaction-testing framework.
+
 ## Manual verification
 
-No new automated test or test framework is planned.
+Manual verification complements the required automated invariants; it does not replace them.
 
 1. Confirm an initial bot seed continues to debit the existing `TREASURY` account and credit table escrow; #705 must not change that transaction.
 2. Settle a hand with one bot at stack 1. Confirm one replacement `TABLE_BUY_IN` for 99 and a target replacement claim of 100 before blind posting.
@@ -355,13 +407,13 @@ No new automated test or test framework is planned.
 | Database | No migration, new account, schema change, or production-data mutation. |
 | ENV/secrets | No new or changed value. The implementation consumes the current bot funding parser and existing system actor configuration. |
 | WS/browser contract | None. No snapshot field, message type, JSP, JavaScript browser compatibility, HTML, CSS, or CSP change. |
-| Tests | No new or modified tests. Existing checks are run unchanged, followed by the manual stage verification above. |
+| Tests | Adds only focused `node:test` cases in three existing suites and registers the persisted-state-writer suite in local/WS CI. No browser, broad gameplay, or external-DB test expansion. |
 
 The most important breaking risk is the intentional fail-closed gameplay behavior: if the existing `TREASURY` ledger transfer is unavailable, replacement rollover remains in `SETTLED` and retries instead of inventing chips. There is no new account-provisioning, funding, or ENV release gate.
 
 ## Acceptance criteria
 
-- Every replacement descriptor uses an integer old stack of 0 or 1, target 100, and exact positive delta `target - old`.
+- The pure delta helper accepts integer `0 <= oldStack < targetStack`, returns exact `target - old`, and fails closed for invalid values; current replacement eligibility still normally emits descriptors only for old stacks 0 or 1.
 - The existing `TREASURY` source is debited by exactly the sum of replacement deltas and table escrow is credited by the same amount.
 - State CAS and all replacement ledger posts commit or roll back together.
 - The live runtime, snapshots, and bot autoplay do not observe the replacement state before database success.
@@ -374,7 +426,7 @@ The most important breaking risk is the intentional fail-closed gameplay behavio
 - Initial bot funding remains unchanged and continues to use the current `TREASURY` source.
 - Guest tables remain outside the chips economy.
 - Inactive cleanup, terminal cash-out, and reconciliation remain unchanged and explicitly deferred to #706/#707.
-- Existing checks pass without adding or changing tests.
+- The focused unit and transactional integration tests pass in local, WS PR, and WS deployment checks.
 - WS preview manual verification passes before production rollout.
 
 ## Definition of Done
@@ -384,6 +436,7 @@ The most important breaking risk is the intentional fail-closed gameplay behavio
 - Persistent rollover follows prepare → atomic persist/fund → runtime commit.
 - Existing `TABLE_BUY_IN` validation and transaction helpers are reused; no new framework or generic ledger abstraction is introduced.
 - Failure is fail-closed, logged with `klog`, restored, retried quickly with bounded backoff, then retried at a bounded slow frequency until a terminal lifecycle condition.
+- The automated suite proves exact delta boundaries, invalid-input rejection, idempotency, transaction rollback, CAS-before-ledger ordering, receipt-gated runtime commit, and restart retry without duplicate funding.
 - The implementation contains no #706 cash-out behavior, #707 inventory, automatic remediation, frontend, CSS, JSP, or CSP work.
 
 ## Plan verdict
