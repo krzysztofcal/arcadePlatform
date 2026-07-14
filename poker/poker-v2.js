@@ -166,6 +166,9 @@
   var bootReady = false;
   var queuedPreaction = null;
   var queuedPreactionInFlight = false;
+  var rebuyInFlight = false;
+  var rebuyPanelDismissed = false;
+  var rebuyBalanceLoading = false;
   var stickyWinnerReveal = {
     handId: null,
     visibleUntilMs: 0,
@@ -323,7 +326,8 @@
       showdown: null,
       handSettlement: null,
       settlementPresentation: null,
-      revealedShowdownCardsByUserId: {}
+      revealedShowdownCardsByUserId: {},
+      playerState: null
     };
   }
 
@@ -1270,6 +1274,15 @@
     return { present: false, value: undefined };
   }
 
+  function normalizePlayerState(value){
+    if (!isObject(value)) return null;
+    var status = typeof value.status === 'string' ? value.status.trim().toUpperCase() : '';
+    if (status !== 'ACTIVE' && status !== 'OUT_OF_CHIPS' && status !== 'WAITING_NEXT_HAND') return null;
+    var stack = Number(value.stack);
+    if (!Number.isInteger(stack) || stack < 0) return null;
+    return { status: status, stack: stack, canRebuy: value.canRebuy === true };
+  }
+
   function mergeSnapshot(payload, frame){
     if (!isObject(payload)) return;
     var frameKind = frame && typeof frame.kind === 'string' ? frame.kind : 'stateSnapshot';
@@ -1285,6 +1298,9 @@
     var potObj = isObject(payload.pot) ? payload.pot : isObject(publicObj.pot) ? publicObj.pot : {};
     var showdownField = readSnapshotField(payload, publicObj, 'showdown');
     var handSettlementField = readSnapshotField(payload, publicObj, 'handSettlement');
+    var playerStateField = hasOwn(payload, 'private') && isObject(payload.private) && hasOwn(payload.private, 'playerState')
+      ? { present: true, value: payload.private.playerState }
+      : { present: false, value: undefined };
     var legalSource = payload.legalActions != null ? payload.legalActions : publicObj.legalActions;
     var constraintsPrimary = payload.actionConstraints != null ? payload.actionConstraints : publicObj.actionConstraints;
     var lastActionMapSource = payload.lastBettingRoundActionByUserId != null ? payload.lastBettingRoundActionByUserId : publicObj.lastBettingRoundActionByUserId;
@@ -1350,6 +1366,13 @@
     if (Number.isInteger(payload.youSeat)) state.youSeat = payload.youSeat;
     else if (Number.isInteger(youObj.seat)) state.youSeat = youObj.seat;
     else if (payload.youSeat == null && youObj.seat == null) state.youSeat = null;
+
+    if (playerStateField.present) state.playerState = normalizePlayerState(playerStateField.value);
+    else if (authoritativeFull) state.playerState = null;
+    if (!state.playerState || (state.playerState.status !== 'OUT_OF_CHIPS' && state.playerState.status !== 'WAITING_NEXT_HAND')) {
+      rebuyPanelDismissed = false;
+    }
+    if (state.playerState && (state.playerState.status === 'OUT_OF_CHIPS' || state.playerState.status === 'WAITING_NEXT_HAND')) clearQueuedPreaction();
 
     var legalActions = normalizeLegalActions(legalSource);
     if (legalActions.length || Array.isArray(legalSource) || (isObject(legalSource) && Array.isArray(legalSource.actions))){
@@ -2506,6 +2529,47 @@
     return !!(state.wsReady && wsClient && typeof wsClient.isReady === 'function' && wsClient.isReady());
   }
 
+  function currentPlayerStatus(){
+    return state.playerState && typeof state.playerState.status === 'string' ? state.playerState.status : 'ACTIVE';
+  }
+
+  function isPlayerSittingOut(){
+    var status = currentPlayerStatus();
+    return status === 'OUT_OF_CHIPS' || status === 'WAITING_NEXT_HAND';
+  }
+
+  function refreshRebuyBalance(){
+    if (rebuyBalanceLoading || !els.rebuyBalance || !window.ChipsClient || typeof window.ChipsClient.fetchBalance !== 'function') return;
+    rebuyBalanceLoading = true;
+    Promise.resolve(window.ChipsClient.fetchBalance()).then(function(balance){
+      var amount = balance && Number.isFinite(Number(balance.balance)) ? Number(balance.balance) : Number(balance);
+      if (Number.isFinite(amount)) els.rebuyBalance.textContent = 'Balance: ' + formatNumber(amount) + ' CH · Buy-in: 100 CH';
+    }).catch(function(){
+      els.rebuyBalance.textContent = 'Buy-in: 100 CH';
+    }).then(function(){
+      rebuyBalanceLoading = false;
+    });
+  }
+
+  function renderRebuyPanel(){
+    if (!els.rebuyPanel) return;
+    var playerState = state.playerState || null;
+    var outOfChips = !!playerState && playerState.status === 'OUT_OF_CHIPS';
+    var waiting = !!playerState && playerState.status === 'WAITING_NEXT_HAND';
+    var show = (outOfChips || waiting) && !rebuyPanelDismissed;
+    els.rebuyPanel.hidden = !show;
+    if (!show) return;
+    if (els.rebuyTitle) els.rebuyTitle.textContent = waiting ? 'Buy-in confirmed' : 'Out of chips';
+    if (els.rebuyCopy) els.rebuyCopy.textContent = waiting ? 'Funded · Joining next hand' : 'The table will keep playing. Buy in to join the next hand.';
+    if (els.rebuyBtn) {
+      els.rebuyBtn.hidden = waiting;
+      els.rebuyBtn.disabled = rebuyInFlight || !isWsReady() || playerState.canRebuy !== true;
+      els.rebuyBtn.textContent = rebuyInFlight ? 'Buying in…' : 'Buy in 100 CH';
+    }
+    if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.disabled = rebuyInFlight || !isWsReady();
+    if (outOfChips) refreshRebuyBalance();
+  }
+
   function renderInfoPanel(){
     if (els.liveStatus) els.liveStatus.textContent = state.statusText || '';
     if (els.tableMeta) {
@@ -2520,7 +2584,11 @@
       els.errorText.hidden = !state.errorText;
     }
     if (els.turnText){
-      if (isUsersTurn()){
+      if (currentPlayerStatus() === 'OUT_OF_CHIPS'){
+        els.turnText.textContent = 'Out of chips · Sitting out';
+      } else if (currentPlayerStatus() === 'WAITING_NEXT_HAND'){
+        els.turnText.textContent = 'Funded · Joining next hand';
+      } else if (isUsersTurn()){
         els.turnText.textContent = 'Your turn.';
       } else if (state.turnUserId){
         els.turnText.textContent = 'Acting: ' + shortId(state.turnUserId);
@@ -2530,6 +2598,7 @@
     }
     if (els.xpBadge) els.xpBadge.hidden = !!isGuestMode;
     if (els.guestPanel) els.guestPanel.hidden = !isGuestMode;
+    renderRebuyPanel();
   }
 
   function resolvePrimaryAction(allowed){
@@ -2694,7 +2763,8 @@
     var allInPlan = resolveAllInPlan(allowed);
     var stackAmount = resolveStack(state.currentUserId);
     var amountBounds = resolveAmountBounds(amountAction, stackAmount);
-    var preactionMode = !!(signedIn && seated && liveReady && activeHand && !usersTurn && !isCurrentUserFolded());
+    var playerSittingOut = isPlayerSittingOut();
+    var preactionMode = !!(signedIn && seated && liveReady && activeHand && !usersTurn && !isCurrentUserFolded() && !playerSittingOut);
     var projectedAllowed = preactionMode ? resolveProjectedAllowedActions() : [];
     var preactionPrimary = resolvePrimaryAction(projectedAllowed);
     var preactionAmountAction = resolveAmountAction(projectedAllowed);
@@ -2704,9 +2774,9 @@
     var displayAmountAction = amountAction || preactionAmountAction || 'BET';
     var showActionButtons = signedIn && seated;
     var showLiveActionButtons = showActionButtons && !preactionMode;
-    var actionControlsLocked = !liveReady || !usersTurn || controlsLocked;
+    var actionControlsLocked = !liveReady || !usersTurn || controlsLocked || playerSittingOut;
     var joinDisabled = !signedIn || seated || !state.tableId || !liveReady;
-    if (!seated || !activeHand || isCurrentUserFolded()) clearQueuedPreaction();
+    if (!seated || !activeHand || isCurrentUserFolded() || playerSittingOut) clearQueuedPreaction();
     if (preactionMode) {
       syncQueuedPreactionWithPreactionState({
         foldVisible: isFoldAvailable(),
@@ -3145,6 +3215,23 @@
     });
   }
 
+  function requestManualRebuy(){
+    if (rebuyInFlight || !state.playerState || state.playerState.canRebuy !== true) return Promise.resolve();
+    rebuyInFlight = true;
+    setError('');
+    renderRebuyPanel();
+    return sendCommand('sendRebuy', { tableId: state.tableId, amount: 100 }).then(function(){
+      state.statusText = 'Buy-in accepted';
+    }).catch(function(error){
+      var reason = error && (error.code || error.message) ? String(error.code || error.message) : 'rebuy_failed';
+      if (els.rebuyAccountLink) els.rebuyAccountLink.hidden = reason !== 'insufficient_chips';
+      setError(reason === 'insufficient_chips' ? 'Not enough CH for a 100 CH buy-in' : reason);
+    }).then(function(){
+      rebuyInFlight = false;
+      render();
+    });
+  }
+
   function bindMenu(){
     if (!els.menuToggle || !els.menuPanel) return;
     els.menuToggle.addEventListener('click', function(){
@@ -3221,6 +3308,12 @@
     if (els.leaveConfirmCancel) els.leaveConfirmCancel.addEventListener('click', function(){
       closeLeaveConfirm();
     });
+    if (els.rebuyBtn) els.rebuyBtn.addEventListener('click', requestManualRebuy);
+    if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.addEventListener('click', leaveAndReturnToLobby);
+    if (els.rebuyWatchBtn) els.rebuyWatchBtn.addEventListener('click', function(){
+      rebuyPanelDismissed = true;
+      renderRebuyPanel();
+    });
     if (els.startBtn) els.startBtn.addEventListener('click', function(){
       setError('');
       sendCommand('sendStartHand', { tableId: state.tableId }).then(function(){
@@ -3291,6 +3384,14 @@
     els.leaveConfirmModal = document.getElementById('pokerV2LeaveConfirmModal');
     els.leaveConfirmYes = document.getElementById('pokerV2LeaveConfirmYes');
     els.leaveConfirmCancel = document.getElementById('pokerV2LeaveConfirmCancel');
+    els.rebuyPanel = document.getElementById('pokerV2RebuyPanel');
+    els.rebuyTitle = document.getElementById('pokerV2RebuyTitle');
+    els.rebuyCopy = document.getElementById('pokerV2RebuyCopy');
+    els.rebuyBalance = document.getElementById('pokerV2RebuyBalance');
+    els.rebuyBtn = document.getElementById('pokerV2RebuyBtn');
+    els.rebuyLobbyBtn = document.getElementById('pokerV2RebuyLobbyBtn');
+    els.rebuyWatchBtn = document.getElementById('pokerV2RebuyWatchBtn');
+    els.rebuyAccountLink = document.getElementById('pokerV2RebuyAccountLink');
     els.closedTableModal = document.getElementById('pokerV2ClosedTableModal');
     els.closedTableTitle = document.getElementById('pokerV2ClosedTableTitle');
     els.closedTableCountdown = document.getElementById('pokerV2ClosedTableCountdown');

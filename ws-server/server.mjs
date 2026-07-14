@@ -27,6 +27,7 @@ import { handleStartHandCommand } from "./poker/handlers/start-hand.mjs";
 import { handleTurnTimeoutCommand } from "./poker/handlers/turn-timeout.mjs";
 import { handleBotStepCommand } from "./poker/handlers/bot-autoplay.mjs";
 import { handleLeaveCommand } from "./poker/handlers/leave.mjs";
+import { handleRebuyCommand } from "./poker/handlers/rebuy.mjs";
 import { createTableCommandQueue } from "./poker/runtime/table-command-queue.mjs";
 import { recoverFromPersistConflict } from "./poker/runtime/persist-conflict-recovery.mjs";
 import { resolveSettledRevealDueAt } from "./poker/runtime/settled-reveal-timing.mjs";
@@ -39,6 +40,8 @@ const PROTECTED_MESSAGE_TYPES = new Set([
   "leave",
   "table_join",
   "table_leave",
+  "rebuy",
+  "table_rebuy",
   "lobby_subscribe",
   "table_state_sub",
   "table_snapshot",
@@ -48,7 +51,7 @@ const PROTECTED_MESSAGE_TYPES = new Set([
   "resume",
   "ack"
 ]);
-const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "lobby_subscribe", "table_state_sub", "table_snapshot", "act", "start_hand", "resync", "resume"]);
+const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "rebuy", "table_rebuy", "lobby_subscribe", "table_state_sub", "table_snapshot", "act", "start_hand", "resync", "resume"]);
 const TABLE_SNAPSHOT_KNOWN_FAILURE_CODES = new Set([
   "invalid_table_id",
   "table_not_found",
@@ -269,6 +272,7 @@ function snapshotCacheKey(sessionId, tableId) {
 
 let authoritativeLeaveExecutorPromise = null;
 let authoritativeJoinExecutorPromise = null;
+let authoritativeRebuyExecutorPromise = null;
 let inactiveCleanupExecutorPromise = null;
 let acceptedBotAutoplayExecutorPromise = null;
 let beginSqlWsLoaderPromise = null;
@@ -298,6 +302,14 @@ async function loadAuthoritativeJoinExecutor() {
       .then((module) => module.createAuthoritativeJoinExecutor({ env: process.env, klog: klogSafe }));
   }
   return authoritativeJoinExecutorPromise;
+}
+
+async function loadAuthoritativeRebuyExecutor() {
+  if (!authoritativeRebuyExecutorPromise) {
+    authoritativeRebuyExecutorPromise = import("./poker/persistence/authoritative-rebuy-adapter.mjs")
+      .then((module) => module.createAuthoritativeRebuyExecutor({ env: process.env, klog: klogSafe }));
+  }
+  return authoritativeRebuyExecutorPromise;
 }
 
 async function loadInactiveCleanupExecutor() {
@@ -1157,6 +1169,7 @@ async function persistMutatedState({
   nextStateOverride = null,
   privateStateForHoleCardsOverride = null,
   replacementFundings = undefined,
+  humanStackUpdates = undefined,
   replacementFundingSystemKey = null,
   deferRuntimeVersionUpdate = false
 }) {
@@ -1187,6 +1200,7 @@ async function persistMutatedState({
     meta: { mutationKind },
     acceptedActionAudit,
     replacementFundings,
+    humanStackUpdates,
     botFundingSystemKey: replacementFundingSystemKey
   });
   if (!persisted?.ok) {
@@ -1589,6 +1603,7 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     nextStateOverride: candidatePokerState,
     privateStateForHoleCardsOverride: candidatePokerState,
     replacementFundings: prepared.replacementFundings,
+    humanStackUpdates: prepared.humanStackUpdates,
     replacementFundingSystemKey: botFundingSystemKey,
     deferRuntimeVersionUpdate: true
   });
@@ -1631,6 +1646,7 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     expectedVersion: prepared.expectedVersion,
     nextCoreState: prepared.nextCoreState,
     replacementFundings: prepared.replacementFundings,
+    humanStackUpdates: prepared.humanStackUpdates,
     persistenceReceipt: persisted,
     nowMs: Date.now()
   });
@@ -2936,6 +2952,47 @@ wss.on("connection", (ws) => {
         trigger: "resume_replay",
         requestId: frame.requestId ?? null,
         frameTs: frame.ts
+      });
+      return;
+    }
+
+    if (frame.type === "table_rebuy" || frame.type === "rebuy") {
+      const resolvedRoomId = resolveRoomId(frame);
+      if (!resolvedRoomId.ok) {
+        sendError(ws, connState, {
+          code: resolvedRoomId.code,
+          message: resolvedRoomId.message,
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+      const tableId = resolvedRoomId.roomId;
+      if (isGuestSession(connState) || isGuestTableId(tableId)) {
+        sendCommandResult(ws, connState, {
+          requestId: frame.requestId ?? null,
+          tableId,
+          status: "rejected",
+          reason: "rebuy_not_allowed"
+        });
+        return;
+      }
+      await enqueueTableCommand({
+        tableId,
+        commandName: "rebuy",
+        run: async () => handleRebuyCommand({
+          frame,
+          ws,
+          connState,
+          tableId,
+          loadAuthoritativeRebuyExecutor,
+          restoreTableFromPersisted,
+          broadcastStateSnapshots,
+          broadcastTableState,
+          broadcastResyncRequired,
+          sendCommandResult,
+          scheduleBotStep,
+          klog: klogSafe
+        })
       });
       return;
     }

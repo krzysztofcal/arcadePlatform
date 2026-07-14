@@ -34,6 +34,10 @@ assert.match(source, /run\("node", \["ws-server\/poker\/persistence\/inactive-cl
 assert.match(source, /run\("node", \["ws-server\/poker\/runtime\/disconnect-cleanup\.behavior\.test\.mjs"\],/, "runner should include ws disconnect cleanup runtime behavior test");
 assert.match(source, /run\("node", \["ws-server\/poker\/runtime\/accepted-bot-autoplay-adapter\.behavior\.test\.mjs"\],/, "runner should include ws accepted bot autoplay adapter behavior test");
 assert.match(source, /run\("node", \["shared\/poker-domain\/inactive-cleanup\.behavior\.test\.mjs"\],/, "runner should include shared poker-domain inactive cleanup behavior test");
+assert.match(source, /run\("node", \["shared\/poker-domain\/human-stack-accounting\.behavior\.test\.mjs"\],/, "runner should include human stack accounting behavior test");
+assert.match(source, /run\("node", \["shared\/poker-domain\/rebuy\.behavior\.test\.mjs"\],/, "runner should include manual rebuy accounting behavior test");
+assert.match(source, /run\("node", \["ws-server\/poker\/persistence\/authoritative-rebuy-adapter\.behavior\.test\.mjs"\],/, "runner should include authoritative rebuy adapter behavior test");
+assert.match(source, /run\("node", \["ws-server\/poker\/handlers\/rebuy\.behavior\.test\.mjs"\],/, "runner should include rebuy handler behavior test");
 assert.doesNotMatch(source, /poker-heartbeat\.behavior\.test\.mjs/, "runner should not include removed heartbeat behavior tests");
 assert.doesNotMatch(source, /tests\/poker-sweep\.behavior\.test\.mjs/, "runner should not include removed legacy sweep behavior test");
 assert.doesNotMatch(source, /tests\/poker-sweep\..*\.behavior\.test\.mjs/, "runner should not include removed sweep behavior tests");

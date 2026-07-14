@@ -7,6 +7,7 @@ const SETTLEMENT_AUDIT_VERSION = 1;
 const ACCEPTED_ACTION_AUDIT_VERSION = 1;
 const ACCEPTED_ACTION_TYPES = new Set(["FOLD", "CHECK", "CALL", "BET", "RAISE", "ALL_IN"]);
 const MAX_REPLACEMENT_FUNDINGS = 10;
+const MAX_HUMAN_STACK_UPDATES = 10;
 
 function normalizeJsonState(value) {
   if (!value) return {};
@@ -401,6 +402,50 @@ function normalizeReplacementFundings({ replacementFundings, tableId, expectedVe
   return { ok: true, supplied: true, fundings };
 }
 
+function normalizeHumanStackUpdates({ humanStackUpdates, expectedVersion }) {
+  if (humanStackUpdates === undefined) return { ok: true, supplied: false, updates: [] };
+  if (!Array.isArray(humanStackUpdates) || humanStackUpdates.length > MAX_HUMAN_STACK_UPDATES) {
+    return { ok: false, reason: "invalid_human_stack_updates" };
+  }
+  const seenUsers = new Set();
+  const seenSeats = new Set();
+  const updates = [];
+  for (const value of humanStackUpdates) {
+    const userId = typeof value?.userId === "string" ? value.userId.trim() : "";
+    const seatNo = Number(value?.seatNo);
+    const stack = Number(value?.stack);
+    const fromStateVersion = Number(value?.fromStateVersion);
+    const toStateVersion = Number(value?.toStateVersion);
+    const settledHandId = typeof value?.settledHandId === "string" ? value.settledHandId.trim() : "";
+    if (!userId || seenUsers.has(userId) || !Number.isInteger(seatNo) || seatNo < 1 || seatNo > MAX_HUMAN_STACK_UPDATES || seenSeats.has(seatNo)
+      || !Number.isInteger(stack) || stack < 0 || fromStateVersion !== expectedVersion || toStateVersion !== expectedVersion + 1 || !settledHandId) {
+      return { ok: false, reason: "invalid_human_stack_updates" };
+    }
+    seenUsers.add(userId);
+    seenSeats.add(seatNo);
+    updates.push({ userId, seatNo, stack, settledHandId, fromStateVersion, toStateVersion });
+  }
+  updates.sort((left, right) => left.seatNo - right.seatNo || left.userId.localeCompare(right.userId));
+  return { ok: true, supplied: true, updates };
+}
+
+async function writeHumanStackUpdates({ tx, tableId, updates }) {
+  const projectedHumanStacks = [];
+  for (const update of updates) {
+    const rows = await tx.unsafe(
+      "update public.poker_seats set stack = $4 where table_id = $1 and user_id = $2 and seat_no = $3 and status = 'ACTIVE' and is_bot = false returning user_id, seat_no, stack;",
+      [tableId, update.userId, update.seatNo, update.stack]
+    );
+    if (!Array.isArray(rows) || rows.length !== 1 || Number(rows[0]?.stack) !== update.stack) {
+      const error = new Error("human_stack_projection_conflict");
+      error.code = "human_stack_projection_conflict";
+      throw error;
+    }
+    projectedHumanStacks.push({ userId: update.userId, seatNo: update.seatNo, stack: update.stack });
+  }
+  return projectedHumanStacks;
+}
+
 async function writeReplacementFundings({ tx, tableId, fundings, botFundingSystemKey }) {
   if (fundings.length === 0) {
     return [];
@@ -478,6 +523,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     privateStateForHoleCards = null,
     acceptedActionAudit = null,
     replacementFundingPlan,
+    humanStackUpdatePlan,
     botFundingSystemKey = null
   }) {
     return beginSql(async (tx) => {
@@ -490,6 +536,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       );
       const newVersion = Number(rows?.[0]?.version);
       if (Number.isInteger(newVersion) && newVersion >= 0) {
+        const projectedHumanStacks = await writeHumanStackUpdates({ tx, tableId, updates: humanStackUpdatePlan.updates });
         const fundedReplacements = await writeReplacementFundings({
           tx,
           tableId,
@@ -537,6 +584,12 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
             expectedVersion,
             replacementFundingCommitted: true,
             fundedReplacements
+          } : {}),
+          ...(humanStackUpdatePlan.supplied ? {
+            tableId,
+            expectedVersion,
+            humanStackProjectionCommitted: true,
+            projectedHumanStacks
           } : {})
         };
       }
@@ -596,6 +649,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     meta = null,
     acceptedActionAudit = null,
     replacementFundings = undefined,
+    humanStackUpdates = undefined,
     botFundingSystemKey = null
   }) {
     if (!tableId || !Number.isInteger(expectedVersion) || expectedVersion < 0) {
@@ -617,6 +671,8 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     if (!replacementFundingPlan.ok) {
       return { ok: false, reason: replacementFundingPlan.reason };
     }
+    const humanStackUpdatePlan = normalizeHumanStackUpdates({ humanStackUpdates, expectedVersion });
+    if (!humanStackUpdatePlan.ok) return { ok: false, reason: humanStackUpdatePlan.reason };
     if (replacementFundingPlan.fundings.length > 0) {
       const sourceSystemKey = typeof botFundingSystemKey === "string" ? botFundingSystemKey.trim() : "";
       if (!sourceSystemKey) {
@@ -637,7 +693,8 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
           filePath: env.WS_PERSISTED_STATE_FILE,
           tableId,
           expectedVersion,
-          nextState: persistedState
+          nextState: persistedState,
+          humanStackUpdates: humanStackUpdatePlan.updates
         });
       }
       if (!env.SUPABASE_DB_URL && !supabaseUrl && !supabaseServiceRoleKey) {
@@ -650,6 +707,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
         privateStateForHoleCards: holeCardPrivateState,
         acceptedActionAudit,
         replacementFundingPlan,
+        humanStackUpdatePlan,
         botFundingSystemKey
       });
     } catch (error) {

@@ -1,3 +1,5 @@
+import { requireAuthoritativeHumanStack } from "./human-stack-accounting.mjs";
+
 const normalizeState = (value) => {
   if (!value) return {};
   if (typeof value === "string") {
@@ -79,14 +81,6 @@ function resolveStateStacks(state) {
   if (!state || typeof state !== "object" || Array.isArray(state)) return {};
   if (!state.stacks || typeof state.stacks !== "object" || Array.isArray(state.stacks)) return {};
   return state.stacks;
-}
-
-function stateFirstStackAmount({ state, seat, userId }) {
-  const stateStack = normalizeNonNegativeInt(resolveStateStacks(state)?.[userId]);
-  if (stateStack != null) return { amount: stateStack, source: "state" };
-  const seatStack = normalizeNonNegativeInt(seat?.stack);
-  if (seatStack != null) return { amount: seatStack, source: "seat" };
-  return { amount: 0, source: "none" };
 }
 
 function resolveSeatPresenceFreshness({ seat, nowMs, staleAfterMs }) {
@@ -285,7 +279,13 @@ export async function executeInactiveCleanup({
 
     const stacks = { ...resolveStateStacks(state) };
     if (seatWasActive) {
-      const targetCashout = stateFirstStackAmount({ state, seat, userId: normalizedUserId });
+      let targetCashout;
+      try {
+        targetCashout = requireAuthoritativeHumanStack({ state, userId: normalizedUserId });
+      } catch (error) {
+        klog("poker_inactive_cleanup_stack_ambiguous", { tableId, reason: error?.code || "stack_ambiguous", source: "ambiguous" });
+        throw error;
+      }
       await postCashout({
         postTransaction,
         tx,
@@ -348,7 +348,10 @@ export async function executeInactiveCleanup({
 
     for (const row of allSeatRows || []) {
       if (row?.is_bot === true) continue;
-      const closeCashout = stateFirstStackAmount({ state: { stacks }, seat: row, userId: row.user_id });
+      const hasPendingAuthoritativeStack = Object.prototype.hasOwnProperty.call(stacks, row?.user_id);
+      if (String(row?.status || "").toUpperCase() !== "ACTIVE" && !hasPendingAuthoritativeStack) continue;
+      if (seatWasActive && row?.user_id === normalizedUserId) continue;
+      const closeCashout = requireAuthoritativeHumanStack({ state: { stacks }, userId: row.user_id });
       klog("poker_inactive_cleanup_post_hand_cashout", {
         tableId,
         userId: row?.user_id ?? null,

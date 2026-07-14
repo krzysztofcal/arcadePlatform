@@ -216,6 +216,16 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 }
 
 .poker-confirm-modal[hidden]{display:none;}
+.poker-rebuy-panel{position:fixed;left:50%;bottom:max(18px, env(safe-area-inset-bottom));z-index:64;width:min(92vw, 420px);transform:translateX(-50%);}
+.poker-rebuy-panel[hidden]{display:none;}
+.poker-rebuy-panel__card{padding:20px;border:1px solid rgba(255,219,154,.3);border-radius:22px;background:linear-gradient(180deg,rgba(20,25,37,.98),rgba(7,10,17,.98));box-shadow:0 18px 50px rgba(0,0,0,.58);text-align:center;}
+.poker-rebuy-panel__eyebrow{color:#efc36f;font-size:.75rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;}
+.poker-rebuy-panel__title{margin-top:4px;color:#fff4dc;font-size:1.5rem;font-weight:800;}
+.poker-rebuy-panel__copy{margin:8px 0;color:#c7d0df;font-size:.92rem;line-height:1.45;}
+.poker-rebuy-panel__balance{margin:12px 0;color:#fff;font-weight:700;}
+.poker-rebuy-panel__actions{display:grid;grid-template-columns:1fr 1fr;gap:9px;}
+.poker-rebuy-panel__watch{grid-column:1/-1;}
+.poker-rebuy-panel__account{display:inline-block;margin-top:12px;color:#8fc4ff;font-weight:700;}
 
 .poker-confirm-dialog{
   width:min(320px, 100%);

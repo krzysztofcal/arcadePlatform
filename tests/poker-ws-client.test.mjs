@@ -148,7 +148,7 @@ test('poker ws client bootstraps hello -> auth -> snapshot once', async () => {
 });
 
 
-test('poker ws client sendJoin/sendLeave/sendStartHand/sendAct resolve and reject by commandResult', async () => {
+test('poker ws client gameplay commands including rebuy resolve and reject by commandResult', async () => {
   const h = loadClientHarness();
   h.client.start();
   const ws = h.FakeWebSocket.instances[0];
@@ -168,6 +168,12 @@ test('poker ws client sendJoin/sendLeave/sendStartHand/sendAct resolve and rejec
   ws.message({ type: 'commandResult', requestId: 'leave_req_1', payload: { requestId: 'leave_req_1', status: 'accepted', reason: null } });
   const leaveResult = await leavePromise;
   assert.equal(leaveResult.ok, true);
+
+  const rebuyPromise = h.client.sendRebuy({ tableId: 'table_test_1', amount: 100 }, 'rebuy_req_1');
+  assert.equal(h.sentFrames.at(-1).type, 'rebuy');
+  assert.equal(h.sentFrames.at(-1).payload.amount, 100);
+  ws.message({ type: 'commandResult', requestId: 'rebuy_req_1', payload: { requestId: 'rebuy_req_1', status: 'accepted', reason: null } });
+  assert.equal((await rebuyPromise).ok, true);
 
   const startPromise = h.client.sendStartHand({ tableId: 'table_test_1' }, 'start_req_1');
   ws.message({ type: 'commandResult', requestId: 'start_req_1', payload: { requestId: 'start_req_1', status: 'rejected', reason: 'not_enough_players' } });

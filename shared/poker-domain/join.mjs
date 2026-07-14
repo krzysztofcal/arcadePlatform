@@ -1,4 +1,5 @@
 import { asSeatSnapshot, computeTargetBotCount, getBotConfig, loadSeatRows, seedBotsForJoin, shouldSeedBotsOnJoin } from "./bots.mjs";
+import { postUserTableBuyIn } from "./table-buy-in.mjs";
 
 const BUY_IN_IDEMPOTENCY_CONSTRAINT = "chips_transactions_idempotency_key_unique";
 
@@ -711,7 +712,6 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         klog("shared_join_seat_retry", { seatNo: resolvedSeatNo, occupiedCount: occupied.size });
       }
 
-      const escrowSystemKey = `POKER_TABLE:${tableId}`;
       const idempotencyKey = requestId
         ? `join-buyin:${tableId}:${userId}:${requestId}`
         : `join-buyin:${tableId}:${userId}:${resolvedSeatNo}:${resolvedBuyIn}`;
@@ -719,16 +719,13 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       let buyInDuplicated = false;
       klog("shared_join_ledger_start", { buyIn: resolvedBuyIn });
       try {
-        await runPostTransaction({
-        userId,
-        txType: "TABLE_BUY_IN",
-        idempotencyKey,
-        entries: [
-          { accountType: "USER", amount: -resolvedBuyIn },
-          { accountType: "ESCROW", systemKey: escrowSystemKey, amount: resolvedBuyIn }
-        ],
-        createdBy: userId,
-        tx
+        await postUserTableBuyIn({
+          postTransaction: runPostTransaction,
+          tx,
+          tableId,
+          userId,
+          amount: resolvedBuyIn,
+          idempotencyKey
         });
       } catch (error) {
         if (!isBuyInIdempotencyDuplicate(error)) throw error;

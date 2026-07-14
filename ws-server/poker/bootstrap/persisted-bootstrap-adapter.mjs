@@ -109,7 +109,7 @@ function normalizeTableMeta(tableRow, maxSeats) {
 
 function normalizePublicStacks(runtimeSeats, pokerState) {
   if (!Array.isArray(runtimeSeats)) {
-    return {};
+    return { ok: false, stacks: {} };
   }
   const stateStacks = asPlainObject(pokerState?.stacks) || {};
   const entries = [];
@@ -117,15 +117,20 @@ function normalizePublicStacks(runtimeSeats, pokerState) {
     const userId = typeof seat?.userId === "string" ? seat.userId.trim() : "";
     const stateStack = Number(stateStacks[userId]);
     const seatStack = Number(seat?.stack);
-    const stack = seat?.preferStatePublicStack === true && Number.isFinite(stateStack) && stateStack >= 0
+    const hasAuthoritativeStateStack = Object.prototype.hasOwnProperty.call(stateStacks, userId)
+      && Number.isSafeInteger(stateStack)
+      && stateStack >= 0;
+    if (!userId) continue;
+    if (seat?.isBot !== true && !hasAuthoritativeStateStack) {
+      return { ok: false, stacks: {} };
+    }
+    const stack = seat?.isBot !== true || seat?.preferStatePublicStack === true || !Number.isFinite(seatStack)
       ? stateStack
       : seatStack;
-    if (!userId || !Number.isFinite(stack)) {
-      continue;
-    }
+    if (!Number.isFinite(stack) || stack < 0) continue;
     entries.push([userId, stack]);
   }
-  return Object.fromEntries(entries);
+  return { ok: true, stacks: Object.fromEntries(entries) };
 }
 
 function normalizeSeatRows(seatRows, maxSeats) {
@@ -300,7 +305,11 @@ export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow 
   const { stateSeats, replacementSeatNos, leftTableByUserId } = mergeStateSeatsWithSeatRows(pokerState, seats);
   const runtimeSeats = buildRuntimeSeats({ seatRows: seats, stateSeats, replacementSeatNos, leftTableByUserId });
   const members = runtimeSeats.map((seat) => ({ userId: seat.userId, seat: seat.seat }));
-  const publicStacks = normalizePublicStacks(runtimeSeats, pokerState);
+  const publicStackResult = normalizePublicStacks(runtimeSeats, pokerState);
+  if (!publicStackResult.ok) {
+    return { ok: false, code: "invalid_persisted_state", message: "human_stack_ambiguous" };
+  }
+  const publicStacks = publicStackResult.stacks;
   const normalizedPokerState = { ...pokerState, seats: stateSeats };
   const derivedRuntimeHandState = deriveDeterministicRuntimeHandState(normalizedPokerState);
   const seatDetailsByUserId = {};

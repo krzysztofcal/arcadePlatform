@@ -99,10 +99,13 @@ function normalizeMemberSeatRows(value) {
 
 function resolvePublicSeats({ statePublic, members, coreState, publicProfilesByUserId, publicProfileStorageBaseUrl }) {
   const stateSeats = normalizeSeatRows(statePublic?.seats);
+  const memberSeats = normalizeMemberSeatRows(members);
   const seatDetailsByUserId = normalizeSeatDetails(coreState?.seatDetailsByUserId);
   const foldedByUserId = asObject(statePublic?.foldedByUserId) || {};
   const leftTableByUserId = asObject(statePublic?.leftTableByUserId) || {};
-  const baseSeats = stateSeats.length > 0 ? stateSeats : normalizeMemberSeatRows(members);
+  const byUserId = new Map(memberSeats.map((seat) => [seat.userId, seat]));
+  for (const seat of stateSeats) byUserId.set(seat.userId, { ...(byUserId.get(seat.userId) || {}), ...seat });
+  const baseSeats = [...byUserId.values()].sort((left, right) => left.seatNo - right.seatNo || left.userId.localeCompare(right.userId));
   return baseSeats.filter((seat) => leftTableByUserId[seat.userId] !== true).map((seat) => {
     const details = seatDetailsByUserId[seat.userId] || null;
     const merged = { ...seat };
@@ -122,7 +125,7 @@ function resolvePublicSeats({ statePublic, members, coreState, publicProfilesByU
 
 function resolvePublicStacks({ statePublic, coreState, seats }) {
   const stateStacks = normalizeStacks(statePublic?.stacks);
-  const fallbackStacks = Object.keys(stateStacks).length > 0 ? stateStacks : normalizeStacks(coreState?.publicStacks);
+  const fallbackStacks = { ...normalizeStacks(coreState?.publicStacks), ...stateStacks };
   if (Object.keys(fallbackStacks).length <= 0) {
     return {};
   }
@@ -223,17 +226,29 @@ function normalizeHandSettlement(handSettlement) {
   };
 }
 
-function resolvePrivateBranch({ state, userId, youSeat }) {
+function resolvePrivateBranch({ state, statePublic, userId, youSeat, stack, isBot, tableStatus }) {
   if (!Number.isInteger(youSeat)) {
     return null;
   }
 
   const holeCards = normalizeCards(state?.holeCardsByUserId?.[userId]);
-  return {
+  const handSeats = Array.isArray(statePublic?.handSeats) ? statePublic.handSeats : Array.isArray(statePublic?.seats) ? statePublic.seats : [];
+  const inCurrentHand = handSeats.some((seat) => seat?.userId === userId);
+  const waiting = statePublic?.waitingForNextHandByUserId?.[userId] === true;
+  const status = waiting ? "WAITING_NEXT_HAND" : stack === 0 ? "OUT_OF_CHIPS" : "ACTIVE";
+  const branch = {
     userId,
     seat: youSeat,
     holeCards
   };
+  if (Number.isInteger(stack) && stack >= 0) {
+    branch.playerState = {
+      status,
+      stack,
+      canRebuy: isBot !== true && tableStatus === "OPEN" && stack === 0 && !inCurrentHand && !waiting
+    };
+  }
+  return branch;
 }
 
 function hasLeftTable(statePublic, userId) {
@@ -284,11 +299,18 @@ function resolveRevealedShowdownParticipants({ statePublic, state }) {
     .filter((entry) => entry.holeCards.length === 2);
 }
 
-export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, userId, youSeat, publicProfilesByUserId = {}, publicProfileStorageBaseUrl = "" }) {
+export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, userId, youSeat, tableStatus = "OPEN", publicProfilesByUserId = {}, publicProfileStorageBaseUrl = "" }) {
   const state = asObject(coreState?.pokerState) || asObject(coreState?.state);
   const statePublic = state ? withoutPrivateState(state) : null;
-  const publicSeats = resolvePublicSeats({ statePublic, members, coreState, publicProfilesByUserId, publicProfileStorageBaseUrl });
+  let publicSeats = resolvePublicSeats({ statePublic, members, coreState, publicProfilesByUserId, publicProfileStorageBaseUrl });
   const publicStacks = resolvePublicStacks({ statePublic, coreState, seats: publicSeats });
+  publicSeats = publicSeats.map((seat) => {
+    if (seat.isBot === true) return seat;
+    const stack = Number(publicStacks[seat.userId]);
+    if (statePublic?.waitingForNextHandByUserId?.[seat.userId] === true) return { ...seat, status: "WAITING_NEXT_HAND" };
+    if (Number.isInteger(stack) && stack === 0) return { ...seat, status: "OUT_OF_CHIPS" };
+    return seat;
+  });
   const effectiveYouSeat = hasLeftTable(statePublic, userId) ? null : youSeat;
 
   if (!statePublic) {
@@ -376,7 +398,15 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
     betThisRoundByUserId: normalizeNumericUserMap(statePublic.betThisRoundByUserId),
     committedByUserId: normalizeNumericUserMap(statePublic.committedByUserId),
     lastBettingRoundActionByUserId: normalizeLastBettingRoundActionByUserId(statePublic.lastBettingRoundActionByUserId),
-    private: resolvePrivateBranch({ state, userId, youSeat: effectiveYouSeat })
+    private: resolvePrivateBranch({
+      state,
+      statePublic,
+      userId,
+      youSeat: effectiveYouSeat,
+      stack: Number.isInteger(Number(publicStacks[userId])) ? Number(publicStacks[userId]) : null,
+      isBot: coreState?.seatDetailsByUserId?.[userId]?.isBot === true,
+      tableStatus
+    })
   };
 
   const showdown = normalizeShowdown(statePublic.showdown);

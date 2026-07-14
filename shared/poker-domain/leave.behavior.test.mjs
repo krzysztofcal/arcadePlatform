@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { isStateStorageValid as realIsStateStorageValid } from "../../netlify/functions/_shared/poker-state-utils.mjs";
+import { requireAuthoritativeHumanStack as realRequireAuthoritativeHumanStack } from "./human-stack-accounting.mjs";
 
 const root = process.cwd();
 const loadExecutePokerLeave = (mocks) => {
   const source = fs.readFileSync(path.join(root, "shared/poker-domain/leave.mjs"), "utf8");
   const withoutImports = source.replace(/^\s*import[\s\S]*?;\s*$/gm, "");
   const rewritten = withoutImports.replace(/export\s+async\s+function\s+executePokerLeave\s*\(/, "async function executePokerLeave(");
-  const factory = new Function("mocks", `"use strict"; const { postTransaction, deletePokerRequest, ensurePokerRequest, storePokerRequestResult, updatePokerStateOptimistic, advanceIfNeeded, applyLeaveTable, isStateStorageValid, withoutPrivateState, buildSeatBotMap, isBotTurn, deriveCommunityCards, deriveRemainingDeck, isHoleCardsTableMissing, loadHoleCardsByUserId, hasParticipatingHumanInHand, runAdvanceLoop, runBotAutoplayLoop } = mocks; ${rewritten}; return executePokerLeave;`);
+  const factory = new Function("mocks", `"use strict"; const { postTransaction, deletePokerRequest, ensurePokerRequest, storePokerRequestResult, updatePokerStateOptimistic, advanceIfNeeded, applyLeaveTable, isStateStorageValid, withoutPrivateState, buildSeatBotMap, isBotTurn, deriveCommunityCards, deriveRemainingDeck, isHoleCardsTableMissing, loadHoleCardsByUserId, hasParticipatingHumanInHand, runAdvanceLoop, runBotAutoplayLoop, requireAuthoritativeHumanStack } = mocks; ${rewritten}; return executePokerLeave;`);
   return factory(mocks);
 };
 
@@ -94,6 +95,7 @@ const makeMocks = () => {
       hasParticipatingHumanInHand: () => true,
       runAdvanceLoop: (s) => ({ nextState: s }),
       runBotAutoplayLoop: async () => ({ responseFinalState: state.value, loopVersion: state.version, botActionCount: 0, botStopReason: "not_applicable" }),
+      requireAuthoritativeHumanStack: realRequireAuthoritativeHumanStack,
     },
     beginSql: async (fn) => fn(tx),
   };

@@ -203,13 +203,13 @@ No database migration is required. `poker_seats.stack` remains a transactionally
 
 ### Delivery strategy
 
-Implement this as three strictly ordered runtime PRs after this documentation PR:
+The owner approved implementation of the three strictly ordered phases in PR #713:
 
-1. **PR 1 — accounting P0 only:** preserve the authoritative human stack, including `0`; synchronize the seat projection; make cleanup and leave fail closed when the authoritative stack is absent; verify restart/restore; and add the read-only discrepancy inventory. Do not add `OUT_OF_CHIPS`, change the 1 CH rule, or change browser UI in this PR.
-2. **PR 2 — lifecycle and UI:** expose `OUT_OF_CHIPS / SITTING_OUT`, distinguish table seats from current-hand participants, allow a human with 1 CH to play, and keep disabled actions plus the explanatory message stable. Do not add ledger funding or a rebuy command in this PR.
-3. **PR 3 — explicit manual rebuy:** add the authoritative command, USER-to-ESCROW transaction, waiting-for-next-hand transition, and rebuy prompt.
+1. **Phase 1 — accounting P0:** preserve the authoritative human stack, including `0`; synchronize the seat projection; make cleanup and leave fail closed when the authoritative stack is absent; verify restart/restore; and add the read-only discrepancy inventory.
+2. **Phase 2 — lifecycle and UI:** expose `OUT_OF_CHIPS / SITTING_OUT`, distinguish table seats from current-hand participants, allow a human with 1 CH to play, and keep disabled actions plus the explanatory message stable.
+3. **Phase 3 — explicit manual rebuy:** add the authoritative command, USER-to-ESCROW transaction, waiting-for-next-hand transition, and rebuy prompt.
 
-Each PR is independently deployable and reviewable. PR 2 must not deploy before PR 1 passes production-shaped stage inventory and bust-cleanup smoke tests. PR 3 must not deploy before PR 2 proves the out-of-chips lifecycle across rollover and reconnect.
+The phases remain independently reviewable and must be verified in that order within the same preview deployment. Accounting acceptance is a prerequisite for accepting lifecycle behavior, and lifecycle acceptance is a prerequisite for accepting manual rebuy. Auto-rebuy remains a separate future issue.
 
 ### Phase 0 / runtime PR 1 — read-only impact inventory
 
@@ -564,11 +564,7 @@ cash-out after audited bust == 0
 
 ### Manual verification
 
-Preview requirements follow the three-PR boundary:
-
-- runtime PR 1 requires WS Preview Deploy plus stage DB/ledger inspection; it has no browser change and does not require Netlify Preview for accounting acceptance;
-- runtime PR 2 requires both WS Preview Deploy and Netlify Deploy Preview;
-- runtime PR 3 requires both WS Preview Deploy and Netlify Deploy Preview.
+PR #713 requires both WS Preview Deploy and Netlify Deploy Preview. Verify the three phases in order on that shared preview: accounting and ledger evidence first, then out-of-chips lifecycle/UI, then explicit rebuy.
 
 On stage:
 
@@ -590,15 +586,12 @@ On stage:
 Rollout order:
 
 1. run the read-only discrepancy inventory on stage and production;
-2. deploy runtime PR 1 accounting P0 to WS Preview;
-3. verify bust → rollover → disconnect/leave produces zero cash-out;
-4. deploy accounting P0 to production and observe `stack_ambiguous` plus restore behavior before any lifecycle release;
-5. deploy runtime PR 2 lifecycle changes to WS Preview and Netlify Preview, then verify 1 CH, `OUT_OF_CHIPS`, stable actions, reconnect, and continued bot play;
-6. deploy and observe runtime PR 2 in production before enabling rebuy;
-7. deploy runtime PR 3 rebuy WS command to preview, then the Netlify UI;
-8. smoke-test the complete explicit rebuy flow, including the post-rollover `canRebuy` boundary;
-9. deploy rebuy WS production before the UI that sends `table_rebuy`;
-10. monitor ambiguous cash-out, rebuy failure, duplicate, and restore logs.
+2. deploy PR #713 to WS Preview and Netlify Preview;
+3. verify bust → rollover → disconnect/leave produces zero cash-out before testing rebuy;
+4. verify 1 CH, `OUT_OF_CHIPS`, stable actions, reconnect, and continued bot play;
+5. smoke-test the complete explicit rebuy flow, including the post-rollover `canRebuy` boundary, duplicate request, insufficient balance, and leave-before-next-hand behavior;
+6. deploy the merged WS server to production before the web release can send `table_rebuy`;
+7. verify one production bust/rebuy lifecycle and monitor ambiguous cash-out, rebuy failure, duplicate, and restore logs.
 
 Rollback:
 

@@ -248,7 +248,7 @@ test("projectRoomCoreSnapshot reuses poker legal-actions/public stripping semant
   assert.deepEqual(seated.committedByUserId, { seated_user: 40, other_user: 35 });
   assert.deepEqual(seated.legalActions.actions, ["FOLD", "CHECK", "BET"]);
   assert.deepEqual(seated.lastBettingRoundActionByUserId, {});
-  assert.deepEqual(seated.private, { userId: "seated_user", seat: 2, holeCards: ["AH", "AD"] });
+  assert.deepEqual(seated.private, { userId: "seated_user", seat: 2, holeCards: ["AH", "AD"], playerState: { status: "ACTIVE", stack: 150, canRebuy: false } });
   assert.deepEqual(observer.hand, seated.hand);
   assert.deepEqual(observer.board, seated.board);
   assert.deepEqual(observer.turn, seated.turn);
@@ -438,7 +438,7 @@ test("projectRoomCoreSnapshot omits terminal fields for fresh next-hand PREFLOP 
   assert.deepEqual(snapshot.board.cards, []);
   assert.equal("showdown" in snapshot, false);
   assert.equal("handSettlement" in snapshot, false);
-  assert.deepEqual(snapshot.private, { userId: "seated_user", seat: 1, holeCards: ["AS", "KD"] });
+  assert.deepEqual(snapshot.private, { userId: "seated_user", seat: 1, holeCards: ["AS", "KD"], playerState: { status: "ACTIVE", stack: 99, canRebuy: false } });
 });
 
 
@@ -573,4 +573,49 @@ test("projectRoomCoreSnapshot adds only minimal profiles to current non-bot seat
   assert.equal("bio" in snapshot.seats[0].profile, false);
   assert.equal("xp" in snapshot.seats[0].profile, false);
   assert.equal("profile" in snapshot.seats[1], false);
+});
+
+test("projectRoomCoreSnapshot derives OUT_OF_CHIPS, canRebuy, and WAITING_NEXT_HAND from authoritative state", () => {
+  const coreState = {
+    seats: { human: 1, bot: 2 },
+    members: [{ userId: "human", seat: 1 }, { userId: "bot", seat: 2 }],
+    publicStacks: { human: 0, bot: 98 },
+    seatDetailsByUserId: { human: { isBot: false }, bot: { isBot: true } },
+    pokerState: {
+      roomId: "table_busted",
+      handId: "bot_hand",
+      phase: "PREFLOP",
+      seats: [{ userId: "bot", seatNo: 2, isBot: true }],
+      handSeats: [{ userId: "bot", seatNo: 2, isBot: true }],
+      stacks: { human: 0, bot: 98 }
+    }
+  };
+  const busted = projectRoomCoreSnapshot({ tableId: "table_busted", roomId: "table_busted", coreState, members: coreState.members, userId: "human", youSeat: 1, tableStatus: "OPEN" });
+  assert.equal(busted.seats.find((seat) => seat.userId === "human")?.status, "OUT_OF_CHIPS");
+  assert.deepEqual(busted.private.playerState, { status: "OUT_OF_CHIPS", stack: 0, canRebuy: true });
+  assert.deepEqual(busted.legalActions.actions, []);
+
+  const settledCore = {
+    ...coreState,
+    pokerState: {
+      ...coreState.pokerState,
+      phase: "SETTLED",
+      handSeats: [{ userId: "human", seatNo: 1 }, { userId: "bot", seatNo: 2, isBot: true }]
+    }
+  };
+  const settled = projectRoomCoreSnapshot({ tableId: "table_busted", roomId: "table_busted", coreState: settledCore, members: settledCore.members, userId: "human", youSeat: 1, tableStatus: "OPEN" });
+  assert.equal(settled.private.playerState.canRebuy, false);
+
+  const waitingCore = {
+    ...coreState,
+    publicStacks: { human: 100, bot: 98 },
+    pokerState: {
+      ...coreState.pokerState,
+      stacks: { human: 100, bot: 98 },
+      waitingForNextHandByUserId: { human: true }
+    }
+  };
+  const waiting = projectRoomCoreSnapshot({ tableId: "table_busted", roomId: "table_busted", coreState: waitingCore, members: waitingCore.members, userId: "human", youSeat: 1, tableStatus: "OPEN" });
+  assert.equal(waiting.seats.find((seat) => seat.userId === "human")?.status, "WAITING_NEXT_HAND");
+  assert.deepEqual(waiting.private.playerState, { status: "WAITING_NEXT_HAND", stack: 100, canRebuy: false });
 });

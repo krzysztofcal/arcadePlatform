@@ -779,6 +779,57 @@ test("persisted state writer logs settlement audit failures without private hole
   assert.equal(serializedLogs.includes("AD"), false);
 });
 
+test("persisted state writer atomically projects authoritative human stack after successful state CAS", async () => {
+  const tableId = "00000000-0000-4000-8000-0000000007a1";
+  const userId = "00000000-0000-4000-8000-0000000007b1";
+  const queries = [];
+  const writer = createPersistedStateWriter({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: async (fn) => fn({ unsafe: async (query) => {
+      const text = String(query);
+      queries.push(text);
+      if (text.startsWith("update public.poker_state set version = version + 1")) return [{ version: 9 }];
+      if (text.includes("update public.poker_seats") && text.includes("returning user_id")) return [{ user_id: userId, seat_no: 1, stack: 0 }];
+      return [];
+    } }),
+    klog: () => {}
+  });
+  const result = await writer.writeMutation({
+    tableId,
+    expectedVersion: 8,
+    nextState: { tableId, handId: "next", phase: "PREFLOP", seats: [], stacks: { [userId]: 0 } },
+    humanStackUpdates: [{ userId, seatNo: 1, stack: 0, settledHandId: "settled", fromStateVersion: 8, toStateVersion: 9 }]
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.humanStackProjectionCommitted, true);
+  assert.deepEqual(result.projectedHumanStacks, [{ userId, seatNo: 1, stack: 0 }]);
+  assert.equal(queries.findIndex((query) => query.includes("update public.poker_seats")) > queries.findIndex((query) => query.startsWith("update public.poker_state")), true);
+});
+
+test("persisted state writer never projects human stack when state CAS conflicts", async () => {
+  const queries = [];
+  const writer = createPersistedStateWriter({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: async (fn) => fn({ unsafe: async (query) => {
+      const text = String(query);
+      queries.push(text);
+      if (text.startsWith("update public.poker_state set version = version + 1")) return [];
+      if (text.startsWith("select version, state from public.poker_state")) return [{ version: 8, state: { handId: "different" } }];
+      return [];
+    } }),
+    klog: () => {}
+  });
+  const result = await writer.writeMutation({
+    tableId: "00000000-0000-4000-8000-0000000007a2",
+    expectedVersion: 8,
+    nextState: { handId: "next", phase: "PREFLOP", stacks: { human: 0 } },
+    humanStackUpdates: [{ userId: "human", seatNo: 1, stack: 0, settledHandId: "settled", fromStateVersion: 8, toStateVersion: 9 }]
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "conflict");
+  assert.equal(queries.some((query) => query.includes("update public.poker_seats")), false);
+});
+
 function createReplacementFundingDbHarness({ tableId, version = 7, state, treasuryBalance = 1_000, escrowBalance = 50 } = {}) {
   const sourceAccount = { id: "10000000-0000-4000-8000-000000000001", system_key: "TREASURY", account_type: "SYSTEM", status: "active", balance: treasuryBalance };
   const escrowAccount = { id: "10000000-0000-4000-8000-000000000002", system_key: `POKER_TABLE:${tableId}`, account_type: "ESCROW", status: "active", balance: escrowBalance };
