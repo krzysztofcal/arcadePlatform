@@ -179,6 +179,7 @@
   var lastSettlementFailureKey = null;
   var settlementAnimationGeneration = 0;
   var settlementAnimationTimers = [];
+  var settlementAnimationNodes = [];
   var els = {};
 
   function cloneState(source){
@@ -2098,7 +2099,7 @@
   }
 
   function spawnChipFly(fromPoint, toPoint, color, delayMs){
-    if (!els.chipFxLayer || !fromPoint || !toPoint) return;
+    if (!els.chipFxLayer || !fromPoint || !toPoint) return null;
     var tone = color || 'white';
     var fly = createChipFlyAsset(tone);
     fly.style.left = Math.round(fromPoint.x) + 'px';
@@ -2109,6 +2110,7 @@
     fly.style.setProperty('--chip-dy', Math.round(toPoint.y - fromPoint.y) + 'px');
     els.chipFxLayer.appendChild(fly);
     window.setTimeout(function(){ if (fly && fly.parentNode) fly.parentNode.removeChild(fly); }, CHIP_FLY_MS + Math.max(0, delayMs || 0) + 40);
+    return fly;
   }
 
   function resolveBetAnimationUserIds(previousVisual, nextVisual){
@@ -2147,6 +2149,10 @@
       try { window.clearTimeout(timerId); } catch (_err){}
     });
     settlementAnimationTimers = [];
+    settlementAnimationNodes.forEach(function(node){
+      if (node && node.parentNode) node.parentNode.removeChild(node);
+    });
+    settlementAnimationNodes = [];
   }
 
   function animateSettlementAwards(previousVisual, nextVisual, sceneRect, potFrom, frame){
@@ -2172,7 +2178,13 @@
           var target = resolvePointFromPercent(renderedSeatStackAnchors[seat.seatNo] || renderedSeatBetAnchors[seat.seatNo], sceneRect);
           if (!target) return;
           var color = resolveFlyChipColorFromAmount(recipient.amount);
-          for (var chipIndex = 0; chipIndex < 3; chipIndex++) spawnChipFly(potFrom, target, color, recipientIndex * 34 + chipIndex * 42);
+          for (var chipIndex = 0; chipIndex < 3; chipIndex++){
+            var fly = spawnChipFly(potFrom, target, color, recipientIndex * 34 + chipIndex * 42);
+            if (!fly) continue;
+            fly.classList.add('poker-chip-fly--settlement');
+            fly.dataset.settlementAnimation = presentation.handId;
+            settlementAnimationNodes.push(fly);
+          }
         });
       }, potIndex * stepGapMs);
       settlementAnimationTimers.push(timerId);
@@ -3384,6 +3396,7 @@
           }
           if (!rejoinSeatAfterReconnect()) autoJoinSeat();
         } else if (status === 'reconnecting'){
+          cancelSettlementAnimations();
           rememberSeatForReconnect();
           state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.connecting;
@@ -3392,15 +3405,18 @@
         } else if (status === 'command_result') {
           syncClosedTableRedirectFromSignal(info && info.reason ? info.reason : null);
         } else if (status === 'failed'){
+          cancelSettlementAnimations();
           state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.error;
           setError(info && info.code ? info.code : 'Live connection failed');
         } else if (status === 'error'){
+          cancelSettlementAnimations();
           state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.error;
           syncClosedTableRedirectFromSignal(info && info.code ? info.code : null);
           setError(info && info.code ? info.code : 'Live table unavailable');
         } else if (status === 'closed'){
+          cancelSettlementAnimations();
           state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.disconnected;
           renderInfoPanel();

@@ -2377,8 +2377,8 @@ test('poker v2 animates a live per-pot settlement once and skips it for reduced 
       public: {
         hand: { handId: 'hand-animation', status: 'SETTLED' },
         pot: { total: 0 },
-        showdown: { handId: 'hand-animation', reason: 'computed', winners: ['user-1'], potAwardedTotal: 20, potsAwarded: [{ amount: 20, winners: ['user-1'], eligibleUserIds: ['user-1', 'player-b'] }] },
-        handSettlement: { handId: 'hand-animation', settledAt: new Date(Date.now()).toISOString(), payouts: { 'user-1': 20 } }
+        showdown: { handId: 'hand-animation', reason: 'computed', winners: ['user-1', 'player-b'], potAwardedTotal: 20, potsAwarded: [{ amount: 18, winners: ['user-1'], eligibleUserIds: ['user-1', 'player-b'] }, { amount: 2, winners: ['player-b'], eligibleUserIds: ['player-b'] }] },
+        handSettlement: { handId: 'hand-animation', settledAt: new Date(Date.now()).toISOString(), payouts: { 'user-1': 18, 'player-b': 2 } }
       }
     };
     ws.onSnapshot({
@@ -2394,12 +2394,26 @@ test('poker v2 animates a live per-pot settlement once and skips it for reduced 
   const animatedResult = await settle(false);
   const animated = animatedResult.harness;
   assert.equal(animated.elements.pokerChipFxLayer.children.length > 0, true);
+  assert.equal(animated.elements.pokerChipFxLayer.children.every((node) => node.classList.contains('poker-chip-fly--settlement')), true);
   const flyCount = animated.elements.pokerChipFxLayer.children.length;
   animated.getCreateOptions().onSnapshot({ kind: 'statePatch', payload: animatedResult.settlementPayload });
   await animated.flush();
   animated.advanceTime(0);
   await animated.flush();
   assert.equal(animated.elements.pokerChipFxLayer.children.length, flyCount, 'duplicate settlement patches must not replay chip flows');
+  animated.getCreateOptions().onSnapshot({ kind: 'statePatch', payload: { tableId: 'table-1', public: { showdown: null } } });
+  await animated.flush();
+  assert.equal(animated.elements.pokerChipFxLayer.children.length, 0, 'explicit clear must remove already-running settlement chips');
+  animated.advanceTime(1000);
+  await animated.flush();
+  assert.equal(animated.elements.pokerChipFxLayer.children.length, 0, 'cancelled later pots must not create new settlement chips');
+  const disconnectResult = await settle(false);
+  disconnectResult.harness.getCreateOptions().onStatus('reconnecting', {});
+  await disconnectResult.harness.flush();
+  assert.equal(disconnectResult.harness.elements.pokerChipFxLayer.children.length, 0, 'disconnect must remove already-running settlement chips');
+  disconnectResult.harness.advanceTime(1000);
+  await disconnectResult.harness.flush();
+  assert.equal(disconnectResult.harness.elements.pokerChipFxLayer.children.length, 0, 'disconnect must keep later settlement pots cancelled');
   const staticOnly = (await settle(true)).harness;
   assert.equal(staticOnly.elements.pokerChipFxLayer.children.length, 0);
 });
