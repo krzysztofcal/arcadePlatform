@@ -202,6 +202,83 @@ test("rolloverSettledHand delays next-hand bootstrap until explicitly invoked", 
   assert.equal(nextState.turnDeadlineAt > nextState.turnStartedAt, true);
 });
 
+test("authenticated resubscribe restores seated human presence so a fold settlement rolls into the next hand", () => {
+  const tableManager = createTableManager({ maxSeats: 6 });
+  const tableId = "table_resubscribe_after_fold";
+  const humanUserId = "human_folded";
+  const botUserId = "bot_after_fold";
+  const restored = tableManager.restoreTableFromPersisted(tableId, {
+    coreState: {
+      version: 12,
+      roomId: tableId,
+      maxSeats: 6,
+      appliedRequestIds: [],
+      members: [
+        { userId: humanUserId, seat: 1 },
+        { userId: botUserId, seat: 2 }
+      ],
+      seats: { [humanUserId]: 1, [botUserId]: 2 },
+      publicStacks: { [humanUserId]: 99, [botUserId]: 101 },
+      seatDetailsByUserId: {
+        [humanUserId]: { isBot: false, botProfile: null, leaveAfterHand: false },
+        [botUserId]: { isBot: true, botProfile: "NORMAL", leaveAfterHand: false }
+      },
+      pokerState: {
+        tableId,
+        handId: "hand_folded_before_background_reconnect",
+        phase: "SETTLED",
+        dealerSeatNo: 1,
+        seats: [
+          { userId: humanUserId, seatNo: 1, status: "FOLDED" },
+          { userId: botUserId, seatNo: 2, status: "ACTIVE", isBot: true }
+        ],
+        stacks: { [humanUserId]: 99, [botUserId]: 101 },
+        foldedByUserId: { [humanUserId]: true, [botUserId]: false },
+        showdown: {
+          handId: "hand_folded_before_background_reconnect",
+          winners: [botUserId],
+          potsAwarded: [{ amount: 3, winners: [botUserId] }],
+          potAwardedTotal: 3,
+          reason: "all_folded"
+        },
+        handSettlement: {
+          handId: "hand_folded_before_background_reconnect",
+          settledAt: "2026-07-13T12:00:00.000Z",
+          payouts: { [botUserId]: 3 }
+        },
+        holeCardsByUserId: { [humanUserId]: ["AS", "KD"], [botUserId]: ["2C", "2D"] }
+      }
+    },
+    presenceByUserId: new Map([
+      [humanUserId, { userId: humanUserId, seat: 1, connected: false, lastSeenAt: 1, expiresAt: 2 }]
+    ])
+  });
+  assert.equal(restored.ok, true);
+
+  const reconnectedWs = fakeWs("ws-resubscribe-after-fold");
+  const subscribed = tableManager.subscribe({
+    ws: reconnectedWs,
+    tableId,
+    userId: humanUserId,
+    nowTs: 10_000
+  });
+
+  assert.equal(subscribed.ok, true);
+  assert.equal(subscribed.reattached, true);
+  assert.equal(tableManager.hasConnectedHumanPresence(tableId), true);
+  assert.deepEqual(memberPairs(tableManager.tableState(tableId).members), [[humanUserId, 1]]);
+
+  const rollover = tableManager.rolloverSettledHand({ tableId, nowMs: 10_001 });
+  assert.equal(rollover.ok, true);
+  assert.equal(rollover.changed, true);
+
+  const nextState = tableManager.persistedPokerState(tableId);
+  assert.equal(nextState.phase, "PREFLOP");
+  assert.deepEqual(nextState.seats.map((seat) => seat.userId), [humanUserId, botUserId]);
+  assert.equal(nextState.foldedByUserId[humanUserId], false);
+  assert.equal(nextState.holeCardsByUserId[humanUserId].length, 2);
+});
+
 test("bootstrapHand excludes disconnected human ghost seats from the next hand", () => {
   const tableManager = createTableManager({ maxSeats: 6 });
   const tableId = "table_bootstrap_connected_human_only";

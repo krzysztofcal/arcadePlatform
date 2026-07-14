@@ -55,6 +55,7 @@
   var CLOSED_TABLE_REDIRECT_SECONDS = 5;
   var WINNER_REVEAL_MS = 4_000;
   var CHIP_FLY_MS = 420;
+  var AUTO_JOIN_RETRY_DELAYS_MS = [250, 750, 1500, 3000];
   var CHIP_DENOMINATIONS = [
     { value: 1000, color: 'yellow' },
     { value: 500, color: 'purple' },
@@ -156,6 +157,11 @@
   var suggestedSeatNoParam = null;
   var shouldAutoJoin = false;
   var autoJoinAttempted = false;
+  var autoJoinRetryTimer = null;
+  var autoJoinRetryCount = 0;
+  var autoJoinErrorActive = false;
+  var reconnectSeatNo = null;
+  var lastKnownCurrentSeatNo = null;
   var bootReady = false;
   var queuedPreaction = null;
   var queuedPreactionInFlight = false;
@@ -1085,6 +1091,10 @@
     var nextSeats = normalizeSeatRows(payload, state.seats, state.tableId);
     if (nextSeats.length || Array.isArray(payload.seats) || Array.isArray(tableObj.members) || Array.isArray(payload.authoritativeMembers) || Array.isArray(publicObj.seats)) {
       state.seats = nextSeats;
+      var currentSeatAfterMerge = deriveCurrentSeat();
+      if (currentSeatAfterMerge && Number.isInteger(currentSeatAfterMerge.seatNo)) {
+        lastKnownCurrentSeatNo = currentSeatAfterMerge.seatNo;
+      }
     }
     seatCommittedByUserId = extractSeatCommittedByUserId(payload);
 
@@ -1141,7 +1151,7 @@
     syncStickyWinnerReveal();
     state.actionConstraints = normalizeConstraints(constraintsPrimary, legalSource && legalSource.actionConstraints);
     state.statusText = LIVE_STATUS_COPY.live;
-    state.errorText = '';
+    if (!autoJoinErrorActive) state.errorText = '';
     if (pendingLeaveNavigation && !hasRenderableCurrentSeat()){
       pendingLeaveRetryAfterReconnect = false;
       pendingLeaveNavigation = false;
@@ -1223,25 +1233,6 @@
     var value = state.stacks[userId];
     if (!Number.isFinite(Number(value))) return null;
     return Math.max(0, Math.trunc(Number(value)));
-  }
-
-  function isContestableOpponentSeat(seat, currentUserId){
-    if (!seat || typeof seat.userId !== 'string' || !seat.userId) return false;
-    if (seat.userId === currentUserId) return false;
-    if (/FOLD/i.test(seat.status || '')) return false;
-    return true;
-  }
-
-  function resolveMaxContestableOpponentBehindAmount(currentUserId){
-    if (!currentUserId || !Array.isArray(state.seats)) return null;
-    var max = null;
-    state.seats.forEach(function(seat){
-      if (!isContestableOpponentSeat(seat, currentUserId)) return;
-      var amount = resolveStack(seat.userId);
-      if (!Number.isFinite(amount) || amount <= 0) return;
-      max = max == null ? amount : Math.max(max, amount);
-    });
-    return max;
   }
 
   function getAllowedActions(){
@@ -2242,28 +2233,23 @@
     if (!stackAmount || stackAmount < 1) return null;
     var constraints = state.actionConstraints || {};
     var toCall = Number.isFinite(constraints.toCall) ? Math.max(0, Math.trunc(constraints.toCall)) : null;
-    var contestableOpponentBehind = resolveMaxContestableOpponentBehindAmount(state.currentUserId);
-    var cappedTotalContribution = contestableOpponentBehind == null
-      ? stackAmount
-      : Math.max(0, Math.min(stackAmount, (toCall || 0) + Math.trunc(contestableOpponentBehind)));
     if (allowed.indexOf('CALL') !== -1 && toCall != null && toCall > 0 && stackAmount <= toCall){
       return { type: 'CALL', amount: null };
     }
     if (allowed.indexOf('RAISE') !== -1 && Number.isFinite(constraints.maxRaiseTo)){
       var maxRaiseTo = Math.max(1, Math.trunc(constraints.maxRaiseTo));
-      var minRaiseTo = Number.isFinite(constraints.minRaiseTo) ? Math.max(1, Math.trunc(constraints.minRaiseTo)) : 1;
-      var currentUserBet = Math.max(0, maxRaiseTo - stackAmount);
-      var cappedRaiseTo = Math.min(maxRaiseTo, Math.max(currentUserBet + cappedTotalContribution, minRaiseTo));
-      if (toCall != null && toCall > 0 && cappedRaiseTo <= currentUserBet + toCall){
-        return { type: 'CALL', amount: null };
-      }
-      return { type: 'RAISE', amount: cappedRaiseTo };
+      return { type: 'RAISE', amount: maxRaiseTo };
     }
     if (allowed.indexOf('BET') !== -1){
       var maxBet = Number.isFinite(constraints.maxBetAmount) ? Math.max(1, Math.trunc(constraints.maxBetAmount)) : stackAmount;
-      return { type: 'BET', amount: Math.max(1, Math.min(maxBet, cappedTotalContribution || maxBet)) };
+      return { type: 'BET', amount: maxBet };
     }
     return null;
+  }
+
+  function canQueueAllInPreaction(){
+    var stackAmount = resolveStack(state.currentUserId);
+    return stackAmount == null || stackAmount > 0;
   }
 
   function resolveAmountBounds(amountAction, stackAmount){
@@ -2355,7 +2341,7 @@
       queuedPreaction.amount = queuedAmount;
       return;
     }
-    if (queuedPreaction.slot === 'allIn' && !preactionState.allInPlan) clearQueuedPreaction();
+    if (queuedPreaction.slot === 'allIn' && !preactionState.allInAvailable) clearQueuedPreaction();
   }
 
   function resolveQueuedPreactionExecution(liveState){
@@ -2396,8 +2382,13 @@
     var projectedAllowed = preactionMode ? resolveProjectedAllowedActions() : [];
     var preactionPrimary = resolvePrimaryAction(projectedAllowed);
     var preactionAmountAction = resolveAmountAction(projectedAllowed);
-    var preactionAllInPlan = resolveAllInPlan(projectedAllowed);
+    var preactionAllInAvailable = preactionMode && canQueueAllInPreaction();
     var preactionAmountBounds = resolveAmountBounds(preactionAmountAction, stackAmount);
+    var displayPrimary = primary || preactionPrimary || 'CHECK';
+    var displayAmountAction = amountAction || preactionAmountAction || 'BET';
+    var showActionButtons = signedIn && seated;
+    var showLiveActionButtons = showActionButtons && !preactionMode;
+    var actionControlsLocked = !liveReady || !usersTurn || controlsLocked;
     var joinDisabled = !signedIn || seated || !state.tableId || !liveReady;
     if (!seated || !activeHand || isCurrentUserFolded()) clearQueuedPreaction();
     if (preactionMode) {
@@ -2405,7 +2396,7 @@
         foldVisible: isFoldAvailable(),
         primaryAction: preactionPrimary,
         amountAction: preactionAmountAction,
-        allInPlan: preactionAllInPlan,
+        allInAvailable: preactionAllInAvailable,
         amountBounds: preactionAmountBounds
       });
     }
@@ -2436,42 +2427,42 @@
     if (els.stackText) els.stackText.textContent = stackAmount == null ? '—' : formatNumber(stackAmount);
 
     if (els.foldBtn){
-      els.foldBtn.hidden = !usersTurn || !isFoldAvailable();
+      els.foldBtn.hidden = !showLiveActionButtons;
       els.foldBtn.dataset.action = 'FOLD';
-      els.foldBtn.disabled = !liveReady || controlsLocked;
+      els.foldBtn.disabled = actionControlsLocked || !isFoldAvailable();
     }
     if (els.primaryBtn){
-      els.primaryBtn.hidden = !usersTurn || !primary;
+      els.primaryBtn.hidden = !showLiveActionButtons;
       var toCall = Number.isFinite(state.actionConstraints && state.actionConstraints.toCall)
         ? Math.max(0, Math.trunc(state.actionConstraints.toCall))
         : null;
-      els.primaryBtn.textContent = primary === 'CHECK'
+      els.primaryBtn.textContent = displayPrimary === 'CHECK'
         ? 'Check'
         : ('Call (' + formatCompactAmount(toCall) + ')');
       els.primaryBtn.dataset.action = primary || '';
-      els.primaryBtn.disabled = !liveReady || controlsLocked;
+      els.primaryBtn.disabled = actionControlsLocked || !primary;
     }
     if (els.amountBtn){
-      els.amountBtn.hidden = !usersTurn || !amountAction;
-      els.amountBtn.textContent = amountAction === 'RAISE' ? 'Raise' : 'Bet';
+      els.amountBtn.hidden = !showLiveActionButtons;
+      els.amountBtn.textContent = displayAmountAction === 'RAISE' ? 'Raise' : 'Bet';
       els.amountBtn.dataset.action = amountAction || '';
-      els.amountBtn.disabled = !liveReady || controlsLocked;
+      els.amountBtn.disabled = actionControlsLocked || !amountAction;
     }
     if (els.allInBtn){
-      els.allInBtn.hidden = !usersTurn || !allInPlan;
+      els.allInBtn.hidden = !showLiveActionButtons;
       els.allInBtn.dataset.action = allInPlan ? allInPlan.type : '';
-      els.allInBtn.disabled = !liveReady || controlsLocked;
+      els.allInBtn.disabled = actionControlsLocked || !allInPlan;
     }
-    if (els.foldPreactionWrap) els.foldPreactionWrap.hidden = !preactionMode || !isFoldAvailable();
+    if (els.foldPreactionWrap) els.foldPreactionWrap.hidden = !preactionMode;
     if (els.foldPreaction) {
       els.foldPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'fold');
-      els.foldPreaction.disabled = !liveReady;
+      els.foldPreaction.disabled = !liveReady || controlsLocked || !isFoldAvailable();
       els.foldPreaction.dataset.slot = 'fold';
     }
-    if (els.primaryPreactionWrap) els.primaryPreactionWrap.hidden = !preactionMode || !preactionPrimary;
+    if (els.primaryPreactionWrap) els.primaryPreactionWrap.hidden = !preactionMode;
     if (els.primaryPreaction) {
       els.primaryPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'primary');
-      els.primaryPreaction.disabled = !liveReady || !preactionPrimary;
+      els.primaryPreaction.disabled = !liveReady || controlsLocked || !preactionPrimary;
       els.primaryPreaction.dataset.slot = 'primary';
       els.primaryPreaction.dataset.action = preactionPrimary || '';
     }
@@ -2483,18 +2474,18 @@
         ? ('Call (' + formatCompactAmount(projectedToCall) + ')')
         : 'Check';
     }
-    if (els.amountPreactionWrap) els.amountPreactionWrap.hidden = !preactionMode || !preactionAmountAction;
+    if (els.amountPreactionWrap) els.amountPreactionWrap.hidden = !preactionMode;
     if (els.amountPreaction) {
       els.amountPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'amount');
-      els.amountPreaction.disabled = !liveReady || !preactionAmountAction;
+      els.amountPreaction.disabled = !liveReady || controlsLocked || !preactionAmountAction;
       els.amountPreaction.dataset.slot = 'amount';
       els.amountPreaction.dataset.action = preactionAmountAction || '';
     }
     if (els.amountPreactionText) els.amountPreactionText.textContent = preactionAmountAction === 'RAISE' ? 'Raise' : 'Bet';
-    if (els.allInPreactionWrap) els.allInPreactionWrap.hidden = !preactionMode || !preactionAllInPlan;
+    if (els.allInPreactionWrap) els.allInPreactionWrap.hidden = !preactionMode;
     if (els.allInPreaction) {
       els.allInPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'allIn');
-      els.allInPreaction.disabled = !liveReady || !preactionAllInPlan;
+      els.allInPreaction.disabled = !liveReady || controlsLocked || !preactionAllInAvailable;
       els.allInPreaction.dataset.slot = 'allIn';
     }
     if (els.amountInputWrap){
@@ -2632,24 +2623,110 @@
     });
   }
 
-  function isSeatTakenError(error){
-    var message = error && error.message ? String(error.message) : '';
-    return /seat_taken/i.test(message);
+  function autoJoinErrorCode(error){
+    var value = error && (error.code || error.message) ? String(error.code || error.message) : '';
+    return value.trim().toLowerCase();
+  }
+
+  function isRetryableAutoJoinError(error){
+    var code = autoJoinErrorCode(error);
+    if (!code) return false;
+    return /^(timeout|ws_unavailable|temporarily_unavailable|authoritative_join_failed|authoritative_state_invalid|state_missing|poker_state_missing|state_conflict|conflict|persist_failed|seat_taken|table_load_failed|table_bootstrap_failed)$/.test(code);
+  }
+
+  function clearAutoJoinRetry(){
+    if (autoJoinRetryTimer){
+      window.clearTimeout(autoJoinRetryTimer);
+      autoJoinRetryTimer = null;
+    }
+  }
+
+  function resetAutoJoinRetryState(){
+    clearAutoJoinRetry();
+    autoJoinRetryCount = 0;
+    autoJoinErrorActive = false;
+  }
+
+  function scheduleAutoJoinRetry(error){
+    if (!shouldAutoJoin || !isRetryableAutoJoinError(error) || autoJoinRetryTimer) return false;
+    if (autoJoinRetryCount >= AUTO_JOIN_RETRY_DELAYS_MS.length) return false;
+    var delayMs = AUTO_JOIN_RETRY_DELAYS_MS[autoJoinRetryCount];
+    autoJoinRetryCount += 1;
+    autoJoinRetryTimer = window.setTimeout(function(){
+      autoJoinRetryTimer = null;
+      autoJoinAttempted = false;
+      if (deriveCurrentSeat()){
+        resetAutoJoinRetryState();
+        return;
+      }
+      autoJoinSeat();
+    }, delayMs);
+    return true;
   }
 
   function autoJoinSeat(){
-    if (!shouldAutoJoin || autoJoinAttempted) return;
-    if (!isSignedIn() || !isWsReady() || deriveCurrentSeat()) return;
+    if (!shouldAutoJoin) return;
+    if (deriveCurrentSeat()){
+      autoJoinAttempted = false;
+      resetAutoJoinRetryState();
+      return;
+    }
+    if (autoJoinAttempted || autoJoinRetryTimer) return;
+    if (!isSignedIn() || !isWsReady()) return;
     autoJoinAttempted = true;
     if (suggestedSeatNoParam && els.joinSeat) els.joinSeat.value = String(suggestedSeatNoParam);
+    autoJoinErrorActive = false;
     setError('');
     sendCommand('sendJoin', buildJoinPayloadWithOptions({ autoSeat: true })).then(function(result){
+      resetAutoJoinRetryState();
       state.statusText = result && result.seatNo != null ? ('Joined seat ' + result.seatNo) : 'Join accepted';
       renderInfoPanel();
     }).catch(function(err){
-      if (isSeatTakenError(err)) autoJoinAttempted = false;
+      autoJoinAttempted = false;
+      autoJoinErrorActive = true;
+      var retryScheduled = scheduleAutoJoinRetry(err);
+      klog('poker_auto_join_failed', {
+        reason: autoJoinErrorCode(err) || 'unknown',
+        retryScheduled: retryScheduled,
+        retryCount: autoJoinRetryCount
+      });
       setError(err && err.message ? err.message : 'Failed to auto-join');
     });
+  }
+
+  function rememberSeatForReconnect(){
+    var currentSeat = deriveCurrentSeat();
+    var seatNo = currentSeat && Number.isInteger(currentSeat.seatNo)
+      ? currentSeat.seatNo
+      : lastKnownCurrentSeatNo;
+    reconnectSeatNo = Number.isInteger(seatNo) && seatNo > 0 ? seatNo : null;
+    autoJoinAttempted = false;
+  }
+
+  function rejoinSeatAfterReconnect(){
+    if (!Number.isInteger(reconnectSeatNo) || reconnectSeatNo < 1) return false;
+    if (autoJoinAttempted) return true;
+    var preferredSeatNo = reconnectSeatNo;
+    autoJoinAttempted = true;
+    setError('');
+    sendCommand('sendJoin', {
+      tableId: state.tableId,
+      autoSeat: true,
+      preferredSeatNo: preferredSeatNo
+    }).then(function(result){
+      var resolvedSeatNo = result && Number.isInteger(Number(result.seatNo))
+        ? Number(result.seatNo)
+        : preferredSeatNo;
+      reconnectSeatNo = null;
+      lastKnownCurrentSeatNo = resolvedSeatNo;
+      state.statusText = 'Reconnected to seat ' + resolvedSeatNo;
+      renderInfoPanel();
+    }).catch(function(err){
+      autoJoinAttempted = false;
+      reconnectSeatNo = preferredSeatNo;
+      setError(err && err.message ? err.message : 'Failed to reconnect seat');
+    });
+    return true;
   }
 
   function closeMenu(){
@@ -2882,6 +2959,8 @@
     stopTurnClock();
     clearWinnerRevealTimer();
     cancelClosedTableRedirect();
+    resetAutoJoinRetryState();
+    autoJoinAttempted = false;
     pendingPostRevealSnapshot = null;
     state.wsReady = false;
     if (wsClient && typeof wsClient.destroy === 'function'){
@@ -2955,7 +3034,13 @@
             leaveAndReturnToLobby();
             return;
           }
-          autoJoinSeat();
+          if (!rejoinSeatAfterReconnect()) autoJoinSeat();
+        } else if (status === 'reconnecting'){
+          rememberSeatForReconnect();
+          state.wsReady = false;
+          state.statusText = LIVE_STATUS_COPY.connecting;
+          renderInfoPanel();
+          renderControls();
         } else if (status === 'command_result') {
           syncClosedTableRedirectFromSignal(info && info.reason ? info.reason : null);
         } else if (status === 'failed'){

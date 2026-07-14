@@ -2865,7 +2865,12 @@ wss.on("connection", (ws) => {
         return;
       }
 
-      const subscribed = tableManager.subscribe({ ws, tableId });
+      const subscribed = tableManager.subscribe({
+        ws,
+        tableId,
+        userId: connState.session.userId,
+        nowTs: Date.now()
+      });
       if (!subscribed.ok) {
         sendError(ws, connState, {
           code: "INVALID_COMMAND",

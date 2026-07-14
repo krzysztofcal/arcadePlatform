@@ -341,6 +341,62 @@ test("resync restores presence and seat without duplicates", async () => {
   }
 });
 
+test("authenticated table subscription reattaches an existing seat after socket reconnect", async () => {
+  const secret = "table-subscription-reattach-secret";
+  const token = makeHs256Jwt({ secret, sub: "reattach_user" });
+  const tableId = "table_subscription_reattach";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "10000"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const firstSocket = await connectClient(port);
+    await hello(firstSocket, "hello-subscription-reattach-1");
+    await auth(firstSocket, token, "auth-subscription-reattach-1");
+    sendFrame(firstSocket, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "join-subscription-reattach-1",
+      ts: "2026-07-13T12:00:00Z",
+      payload: { tableId }
+    });
+    await nextMessageOfType(firstSocket, "commandResult", { skipTypes: ["stateSnapshot", "statePatch"] });
+    const joined = await nextMessageOfType(firstSocket, "table_state", { skipTypes: ["stateSnapshot", "statePatch"] });
+    const seat = joined.payload.members[0].seat;
+
+    const firstSocketClosed = waitSocketClose(firstSocket);
+    firstSocket.close();
+    await firstSocketClosed;
+
+    const reconnectedSocket = await connectClient(port);
+    await hello(reconnectedSocket, "hello-subscription-reattach-2");
+    await auth(reconnectedSocket, token, "auth-subscription-reattach-2");
+    const reattached = await subscribeTableState(
+      reconnectedSocket,
+      tableId,
+      "subscription-reattach-2",
+      "2026-07-13T12:00:01Z",
+      "subscription reattach"
+    );
+
+    assert.equal(reattached.type, "table_state");
+    assert.deepEqual(reattached.payload.members, [{ userId: "reattach_user", seat }]);
+
+    const noDuplicateFrames = await attemptMessage(reconnectedSocket);
+    assert.equal(noDuplicateFrames, null);
+    reconnectedSocket.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 
 
 test("resync join flow is command-first for actor-visible frames", async () => {

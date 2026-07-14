@@ -311,10 +311,17 @@
       }
       if (frame.type === 'error') {
         var rid = frame.requestId || (frame.payload && frame.payload.requestId) || null;
+        var commandErrorHandled = false;
         if (rid && pending.has(rid)) {
           var entry = pending.get(rid); pending.delete(rid); clearTimeout(entry.timer); entry.reject(createError(frame.payload && frame.payload.code ? frame.payload.code : 'ws_error'));
+          commandErrorHandled = true;
         }
-        var code = frame.payload && frame.payload.code ? frame.payload.code : 'ws_error'; emitStatus('error', { code: code }); emitProtocolError(code, frame.payload && frame.payload.message ? frame.payload.message : null);
+        var code = frame.payload && frame.payload.code ? frame.payload.code : 'ws_error';
+        if (commandErrorHandled) {
+          emitStatus('command_error', { code: code, requestId: rid });
+          return;
+        }
+        emitStatus('error', { code: code }); emitProtocolError(code, frame.payload && frame.payload.message ? frame.payload.message : null);
         return;
       }
       if (frame.type === 'pong') return;

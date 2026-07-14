@@ -4874,10 +4874,11 @@ test("WS act persists state to file-backed optimistic store", async () => {
     const baseline = await nextMessageForRequest(ws, { type: "stateSnapshot", requestId: "snap-persist" });
     const handId = baseline.payload.public.hand.handId;
 
+    const resultPromise = nextCommandResultForRequest(ws, "act-persist");
+    const stateUpdatePromise = nextStateUpdate(ws, { baseline: baseline.payload, timeoutMs: 4000 });
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-persist", ts: "2026-02-28T02:00:02Z", payload: { tableId, handId, action: "fold" } });
-    const result = await nextCommandResultForRequest(ws, "act-persist");
+    const [result] = await Promise.all([resultPromise, stateUpdatePromise]);
     assert.equal(result.payload.status, "accepted");
-    await nextStateUpdate(ws, { baseline: baseline.payload, timeoutMs: 4000 });
     await new Promise((resolve) => setTimeout(resolve, 150));
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-persist-after", ts: "2026-02-28T02:00:03Z", payload: { tableId, view: "snapshot" } });
     const afterPersist = await nextMessageForRequest(ws, { type: "stateSnapshot", requestId: "snap-persist-after" });

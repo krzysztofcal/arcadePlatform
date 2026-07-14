@@ -162,7 +162,11 @@ function createHarness(options = {}){
     },
     destroy(){ this._ready = false; },
     isReady(){ return this._ready; },
-    sendJoin(payload){ joinPayloads.push(payload); return Promise.resolve({ ok: true, seatNo: payload.seatNo || payload.preferredSeatNo || 1 }); },
+    sendJoin(payload){
+      joinPayloads.push(payload);
+      if (typeof options.sendJoin === 'function') return options.sendJoin(payload, { attempt: joinPayloads.length });
+      return Promise.resolve({ ok: true, seatNo: payload.seatNo || payload.preferredSeatNo || 1 });
+    },
     sendAct(payload){ actPayloads.push(payload); return Promise.resolve({ ok: true }); },
     sendStartHand(payload){ startPayloads.push(payload); return Promise.resolve({ ok: true }); },
     sendLeave(payload){
@@ -931,7 +935,7 @@ test('poker v2 keeps fold available even when live legalActions omit fold', asyn
   assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-fold-always', action: 'FOLD' }));
 });
 
-test('poker v2 swaps action buttons for single-select preaction checkboxes during other players turns', async () => {
+test('poker v2 keeps action buttons stable while exposing single-select preactions off-turn', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -952,7 +956,7 @@ test('poker v2 swaps action buttons for single-select preaction checkboxes durin
         ]
       },
       public: {
-        hand: { handId: 'hand-preaction-checkbox', status: 'TURN', dealerSeatNo: 2 },
+        hand: { handId: 'hand-stable-controls-off-turn', status: 'TURN', dealerSeatNo: 2 },
         turn: { userId: 'villain-1', deadlineAt: Date.now() + 5000 },
         pot: { total: 18, sidePots: [] },
         legalActions: { seat: 1, actions: [] },
@@ -964,14 +968,25 @@ test('poker v2 swaps action buttons for single-select preaction checkboxes durin
   });
   await harness.flush();
 
-  assert.equal(harness.elements.pokerV2FoldBtn.hidden, true);
-  assert.equal(harness.elements.pokerV2PrimaryBtn.hidden, true);
-  assert.equal(harness.elements.pokerV2AmountBtn.hidden, true);
+  const buttons = [
+    harness.elements.pokerV2FoldBtn,
+    harness.elements.pokerV2PrimaryBtn,
+    harness.elements.pokerV2AmountBtn,
+    harness.elements.pokerV2AllInBtn
+  ];
+  buttons.forEach((button) => {
+    assert.equal(button.hidden, true);
+    assert.equal(button.disabled, true);
+  });
+  assert.equal(harness.elements.pokerV2PrimaryBtn.textContent, 'Call (6)');
+  assert.equal(harness.elements.pokerV2AmountBtn.textContent, 'Raise');
   assert.equal(harness.elements.pokerV2FoldPreactionWrap.hidden, false);
   assert.equal(harness.elements.pokerV2PrimaryPreactionWrap.hidden, false);
   assert.equal(harness.elements.pokerV2AmountPreactionWrap.hidden, false);
+  assert.equal(harness.elements.pokerV2AllInPreactionWrap.hidden, false);
   assert.equal(harness.elements.pokerV2PrimaryPreactionText.textContent, 'Call (6)');
   assert.equal(harness.elements.pokerV2AmountPreactionText.textContent, 'Raise');
+  assert.equal(harness.elements.pokerV2AllInPreaction.disabled, false);
 
   harness.elements.pokerV2PrimaryPreaction.click();
   await harness.flush();
@@ -982,9 +997,10 @@ test('poker v2 swaps action buttons for single-select preaction checkboxes durin
   await harness.flush();
   assert.equal(harness.elements.pokerV2PrimaryPreaction.checked, false);
   assert.equal(harness.elements.pokerV2AmountPreaction.checked, true);
+  assert.equal(harness.actPayloads.length, 0);
 });
 
-test('poker v2 auto-executes a queued primary preaction when the player turn starts', async () => {
+test('poker v2 auto-executes a queued preaction without moving the live action buttons', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -1048,10 +1064,17 @@ test('poker v2 auto-executes a queued primary preaction when the player turn sta
   await harness.flush();
 
   assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-preaction-call', action: 'CALL' }));
-  assert.equal(harness.elements.pokerV2PrimaryPreaction.checked, false);
+  assert.equal(harness.elements.pokerV2FoldPreactionWrap.hidden, true);
+  assert.equal(harness.elements.pokerV2PrimaryPreactionWrap.hidden, true);
+  assert.equal(harness.elements.pokerV2AmountPreactionWrap.hidden, true);
+  assert.equal(harness.elements.pokerV2AllInPreactionWrap.hidden, true);
+  assert.equal(harness.elements.pokerV2FoldBtn.hidden, false);
+  assert.equal(harness.elements.pokerV2PrimaryBtn.hidden, false);
+  assert.equal(harness.elements.pokerV2AmountBtn.hidden, false);
+  assert.equal(harness.elements.pokerV2AllInBtn.hidden, false);
 });
 
-test('poker v2 clears an invalid queued preaction and falls back to live buttons on turn start', async () => {
+test('poker v2 queues all-in intent without pre-turn raise limits and resolves it from live turn constraints', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -1072,11 +1095,12 @@ test('poker v2 clears an invalid queued preaction and falls back to live buttons
         ]
       },
       public: {
-        hand: { handId: 'hand-preaction-invalid', status: 'TURN', dealerSeatNo: 2 },
+        hand: { handId: 'hand-preaction-all-in', status: 'TURN', dealerSeatNo: 2 },
         turn: { userId: 'villain-1', deadlineAt: Date.now() + 5000 },
         pot: { total: 18, sidePots: [] },
-        legalActions: { seat: 1, actions: [] },
-        actionConstraints: { toCall: 0, maxBetAmount: 120 }
+        legalActions: { seat: 1, actions: ['FOLD'] },
+        actionConstraints: { toCall: 6, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+        stacks: { 'user-1': 100, 'villain-1': 80 }
       },
       private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
       you: { seat: 1 }
@@ -1084,9 +1108,10 @@ test('poker v2 clears an invalid queued preaction and falls back to live buttons
   });
   await harness.flush();
 
-  harness.elements.pokerV2PrimaryPreaction.click();
+  assert.equal(harness.elements.pokerV2AllInPreaction.disabled, false);
+  harness.elements.pokerV2AllInPreaction.click();
   await harness.flush();
-  assert.equal(harness.elements.pokerV2PrimaryPreaction.checked, true);
+  assert.equal(harness.elements.pokerV2AllInPreaction.checked, true);
 
   ws.onSnapshot({
     kind: 'stateSnapshot',
@@ -1103,11 +1128,12 @@ test('poker v2 clears an invalid queued preaction and falls back to live buttons
         ]
       },
       public: {
-        hand: { handId: 'hand-preaction-invalid', status: 'TURN', dealerSeatNo: 2 },
+        hand: { handId: 'hand-preaction-all-in', status: 'TURN', dealerSeatNo: 2 },
         turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
         pot: { total: 24, sidePots: [] },
         legalActions: { seat: 1, actions: ['FOLD', 'CALL', 'RAISE'] },
-        actionConstraints: { toCall: 8, minRaiseTo: 24, maxRaiseTo: 120 }
+        actionConstraints: { toCall: 6, minRaiseTo: 18, maxRaiseTo: 100, maxBetAmount: null },
+        stacks: { 'user-1': 100, 'villain-1': 80 }
       },
       private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
       you: { seat: 1 }
@@ -1115,13 +1141,10 @@ test('poker v2 clears an invalid queued preaction and falls back to live buttons
   });
   await harness.flush();
 
-  assert.equal(harness.actPayloads.length, 0);
-  assert.equal(harness.elements.pokerV2PrimaryPreaction.checked, false);
-  assert.equal(harness.elements.pokerV2PrimaryBtn.hidden, false);
-  assert.equal(harness.elements.pokerV2PrimaryBtn.textContent, 'Call (8)');
+  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-preaction-all-in', action: 'RAISE', amount: 100 }));
 });
 
-test('poker v2 uses the current amount slider value for queued amount preactions', async () => {
+test('poker v2 clears queued all-in intent when the live turn has no legal all-in realization', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -1142,11 +1165,12 @@ test('poker v2 uses the current amount slider value for queued amount preactions
         ]
       },
       public: {
-        hand: { handId: 'hand-preaction-bet', status: 'TURN', dealerSeatNo: 2 },
+        hand: { handId: 'hand-preaction-all-in-invalid', status: 'TURN', dealerSeatNo: 2 },
         turn: { userId: 'villain-1', deadlineAt: Date.now() + 5000 },
         pot: { total: 18, sidePots: [] },
-        legalActions: { seat: 1, actions: [] },
-        actionConstraints: { toCall: 0, maxBetAmount: 120 }
+        legalActions: { seat: 1, actions: ['FOLD'] },
+        actionConstraints: { toCall: 6, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+        stacks: { 'user-1': 100, 'villain-1': 80 }
       },
       private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
       you: { seat: 1 }
@@ -1154,16 +1178,9 @@ test('poker v2 uses the current amount slider value for queued amount preactions
   });
   await harness.flush();
 
-  harness.elements.pokerV2AmountInput.value = '77';
-  harness.elements.pokerV2AmountInput.click();
-  harness.elements.pokerV2AmountInput.click();
-  harness.elements.pokerV2AmountInput._listeners.input.forEach((fn) => fn({ target: harness.elements.pokerV2AmountInput }));
-  harness.elements.pokerV2AmountPreaction.click();
+  harness.elements.pokerV2AllInPreaction.click();
   await harness.flush();
-
-  harness.elements.pokerV2AmountInput.value = '99';
-  harness.elements.pokerV2AmountInput._listeners.input.forEach((fn) => fn({ target: harness.elements.pokerV2AmountInput }));
-  await harness.flush();
+  assert.equal(harness.elements.pokerV2AllInPreaction.checked, true);
 
   ws.onSnapshot({
     kind: 'stateSnapshot',
@@ -1180,10 +1197,50 @@ test('poker v2 uses the current amount slider value for queued amount preactions
         ]
       },
       public: {
-        hand: { handId: 'hand-preaction-bet', status: 'TURN', dealerSeatNo: 2 },
+        hand: { handId: 'hand-preaction-all-in-invalid', status: 'TURN', dealerSeatNo: 2 },
         turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
-        pot: { total: 24, sidePots: [] },
-        legalActions: { seat: 1, actions: ['FOLD', 'CHECK', 'BET'] },
+        pot: { total: 18, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CHECK'] },
+        actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+        stacks: { 'user-1': 100, 'villain-1': 80 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.actPayloads.length, 0);
+  assert.equal(harness.elements.pokerV2AllInPreaction.checked, false);
+  assert.equal(harness.elements.pokerV2AllInBtn.hidden, false);
+  assert.equal(harness.elements.pokerV2AllInBtn.disabled, true);
+});
+
+test('poker v2 enables only legal actions without removing or moving the other buttons', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 32,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-stable-controls-transition', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'villain-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 18, sidePots: [] },
+        legalActions: { seat: 1, actions: [] },
         actionConstraints: { toCall: 0, maxBetAmount: 120 }
       },
       private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
@@ -1192,10 +1249,65 @@ test('poker v2 uses the current amount slider value for queued amount preactions
   });
   await harness.flush();
 
-  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-preaction-bet', action: 'BET', amount: 99 }));
+  const buttonsBeforeTurn = [
+    harness.elements.pokerV2FoldBtn,
+    harness.elements.pokerV2PrimaryBtn,
+    harness.elements.pokerV2AmountBtn,
+    harness.elements.pokerV2AllInBtn
+  ];
+  buttonsBeforeTurn.forEach((button) => {
+    assert.equal(button.hidden, true);
+    assert.equal(button.disabled, true);
+  });
+  [
+    harness.elements.pokerV2FoldPreactionWrap,
+    harness.elements.pokerV2PrimaryPreactionWrap,
+    harness.elements.pokerV2AmountPreactionWrap,
+    harness.elements.pokerV2AllInPreactionWrap
+  ].forEach((preaction) => {
+    assert.equal(preaction.hidden, false);
+  });
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 33,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-stable-controls-transition', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 24, sidePots: [] },
+        legalActions: { seat: 1, actions: ['CHECK'] },
+        actionConstraints: { toCall: 0 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2FoldBtn.hidden, false);
+  assert.equal(harness.elements.pokerV2FoldBtn.disabled, false);
+  assert.equal(harness.elements.pokerV2PrimaryBtn.hidden, false);
+  assert.equal(harness.elements.pokerV2PrimaryBtn.disabled, false);
+  assert.equal(harness.elements.pokerV2PrimaryBtn.textContent, 'Check');
+  assert.equal(harness.elements.pokerV2AmountBtn.hidden, false);
+  assert.equal(harness.elements.pokerV2AmountBtn.disabled, true);
+  assert.equal(harness.elements.pokerV2AllInBtn.hidden, false);
+  assert.equal(harness.elements.pokerV2AllInBtn.disabled, true);
+  assert.equal(harness.actPayloads.length, 0);
 });
 
-test('poker v2 caps raise all-in to call plus the biggest active opponent stack behind', async () => {
+test('poker v2 sends authoritative maxRaiseTo for all-in even when the active opponent stack is smaller', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -1238,7 +1350,7 @@ test('poker v2 caps raise all-in to call plus the biggest active opponent stack 
   harness.elements.pokerV2AllInBtn.click();
   await harness.flush();
 
-  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-all-in', action: 'RAISE', amount: 45 }));
+  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-all-in', action: 'RAISE', amount: 100 }));
 });
 
 test('poker v2 auto-joins from query params after live auth', async () => {
@@ -1248,6 +1360,156 @@ test('poker v2 auto-joins from query params after live auth', async () => {
   await waitFor(() => harness.joinPayloads.length === 1);
 
   assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({ tableId: 'table-1', buyIn: 100, autoSeat: true, preferredSeatNo: 4 }));
+});
+
+test('poker v2 retries Play now auto-join after a transient authoritative join failure', async () => {
+  const harness = createHarness({
+    search: '?tableId=table-1&seatNo=4&autoJoin=1',
+    sendJoin(payload, context){
+      if (context.attempt === 1) {
+        const error = new Error('authoritative_join_rehydrate_failed');
+        error.code = 'TABLE_BOOTSTRAP_FAILED';
+        return Promise.reject(error);
+      }
+      return Promise.resolve({ ok: true, seatNo: payload.preferredSeatNo });
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  await waitFor(() => harness.joinPayloads.length === 1);
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 0,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [] },
+      public: {
+        hand: { handId: null, status: 'INIT', dealerSeatNo: null },
+        turn: { userId: null, deadlineAt: null },
+        pot: { total: 0, sidePots: [] },
+        legalActions: { seat: null, actions: [] },
+        actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+        stacks: {}
+      },
+      you: { seat: null }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.joinPayloads.length, 1);
+  assert.equal(harness.elements.pokerV2ErrorText.textContent, 'authoritative_join_rehydrate_failed');
+  assert.equal(harness.elements.pokerV2ErrorText.hidden, false);
+
+  harness.advanceTime(250);
+  await harness.flush();
+
+  assert.equal(harness.joinPayloads.length, 2);
+  assert.equal(JSON.stringify(harness.joinPayloads[1]), JSON.stringify({ tableId: 'table-1', buyIn: 100, autoSeat: true, preferredSeatNo: 4 }));
+  assert.equal(harness.logs.some((entry) => entry.kind === 'poker_auto_join_failed' && entry.data.retryScheduled === true), true);
+});
+
+test('poker v2 safely rejoins the same authoritative seat after a socket reconnect', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 40,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'bot-1', seat: 1, displayName: 'Bot 1', isBot: true },
+          { userId: 'user-1', seat: 4, displayName: 'Hero' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-before-reconnect', status: 'TURN', dealerSeatNo: 1 },
+        turn: { userId: 'bot-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 12, sidePots: [] },
+        legalActions: { seat: 4, actions: [] },
+        stacks: { 'bot-1': 100, 'user-1': 100 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 4 }
+    }
+  });
+  await harness.flush();
+
+  ws.onStatus('reconnecting', { attempt: 1 });
+  ws.onStatus('auth_ok', { roomId: 'table-1' });
+  await harness.flush();
+
+  assert.equal(harness.joinPayloads.length, 1);
+  assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({
+    tableId: 'table-1',
+    autoSeat: true,
+    preferredSeatNo: 4
+  }));
+  assert.equal(Object.prototype.hasOwnProperty.call(harness.joinPayloads[0], 'buyIn'), false);
+});
+
+test('poker v2 retries the same reconnect seat after a transient join failure', async () => {
+  const harness = createHarness({
+    sendJoin(payload, context){
+      if (context.attempt === 1) return Promise.reject(new Error('timeout'));
+      return Promise.resolve({ ok: true, seatNo: payload.preferredSeatNo });
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 40,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'bot-1', seat: 1, displayName: 'Bot 1', isBot: true },
+          { userId: 'user-1', seat: 4, displayName: 'Hero' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-reconnect-retry', status: 'TURN', dealerSeatNo: 1 },
+        turn: { userId: 'bot-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 12, sidePots: [] },
+        legalActions: { seat: 4, actions: [] },
+        stacks: { 'bot-1': 100, 'user-1': 100 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 4 }
+    }
+  });
+  await harness.flush();
+
+  ws.onStatus('reconnecting', { attempt: 1 });
+  ws.onStatus('auth_ok', { roomId: 'table-1' });
+  await harness.flush();
+  assert.equal(harness.joinPayloads.length, 1);
+
+  ws.onStatus('auth_ok', { roomId: 'table-1' });
+  await harness.flush();
+
+  assert.equal(harness.joinPayloads.length, 2);
+  harness.joinPayloads.forEach((payload) => {
+    assert.equal(JSON.stringify(payload), JSON.stringify({
+      tableId: 'table-1',
+      autoSeat: true,
+      preferredSeatNo: 4
+    }));
+  });
 });
 
 test('poker v2 aligns the right rail seats and keeps the chip on the dealer seat', async () => {
