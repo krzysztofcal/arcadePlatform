@@ -246,35 +246,23 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 
 .poker-action-btn[hidden]{display:none;}
 
-.poker-preaction-panel{position:absolute; right:0; bottom:calc(100% + 8px); width:min(70vw, 240px); display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); grid-template-rows:repeat(2, minmax(38px, auto)); gap:7px; padding:8px; border-radius:16px; border:1px solid rgba(255,223,180,0.24); background:linear-gradient(180deg, rgba(9,12,20,0.96), rgba(2,4,8,0.98)); box-shadow:0 12px 22px rgba(0,0,0,0.48);}
-
-.poker-preaction-panel[hidden]{display:none;}
-
-.poker-action-toggle{display:block; min-width:0; cursor:pointer;}
+.poker-action-toggle{display:block; cursor:pointer;}
 
 .poker-action-toggle[hidden]{display:none;}
 
-.poker-action-toggle--slot-fold{grid-area:1 / 1;}
-
-.poker-action-toggle--slot-primary{grid-area:1 / 2;}
-
-.poker-action-toggle--slot-amount{grid-area:2 / 1;}
-
-.poker-action-toggle--slot-all-in{grid-area:2 / 2;}
-
 .poker-action-toggle input{position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;}
 
-.poker-action-toggle span{position:relative; display:flex; align-items:center; min-height:38px; padding:0 8px 0 32px; border-radius:12px; color:#f7f8fd; font-size:0.76rem; font-weight:700; line-height:1.15; letter-spacing:0.01em; box-shadow:inset 0 1px 1px rgba(255,255,255,0.22), 0 6px 10px rgba(0,0,0,0.36);}
+.poker-action-toggle span{position:relative; display:flex; align-items:center; min-height:50px; padding:0 16px 0 50px; border-radius:17px; color:#f7f8fd; font-size:0.98rem; font-weight:700; letter-spacing:0.01em; box-shadow:inset 0 1px 1px rgba(255,255,255,0.22), 0 8px 14px rgba(0,0,0,0.42);}
 
-.poker-action-toggle span::before{content:""; position:absolute; left:9px; top:50%; width:15px; height:15px; border-radius:5px; border:2px solid rgba(255,255,255,0.82); background:rgba(4,8,14,0.2); transform:translateY(-50%); box-shadow:inset 0 1px 1px rgba(255,255,255,0.12);}
+.poker-action-toggle span::before{content:""; position:absolute; left:16px; top:50%; width:21px; height:21px; border-radius:7px; border:2px solid rgba(255,255,255,0.82); background:rgba(4,8,14,0.2); transform:translateY(-50%); box-shadow:inset 0 1px 1px rgba(255,255,255,0.12);}
 
 .poker-action-toggle input:focus-visible + span{outline:2px solid #fff; outline-offset:2px;}
 
-.poker-action-toggle input:checked + span{box-shadow:0 0 0 2px rgba(255,255,255,0.66), inset 0 1px 1px rgba(255,255,255,0.26), 0 8px 13px rgba(0,0,0,0.42);}
+.poker-action-toggle input:checked + span{box-shadow:0 0 0 2px rgba(255,255,255,0.66), inset 0 1px 1px rgba(255,255,255,0.26), 0 10px 16px rgba(0,0,0,0.42);}
 
 .poker-action-toggle input:checked + span::before{background:rgba(255,255,255,0.94); border-color:rgba(255,255,255,0.98);}
 
-.poker-action-toggle input:checked + span::after{content:""; position:absolute; left:14px; top:50%; width:5px; height:9px; border-right:2px solid #0b1320; border-bottom:2px solid #0b1320; transform:translateY(-58%) rotate(42deg);}
+.poker-action-toggle input:checked + span::after{content:""; position:absolute; left:23px; top:50%; width:6px; height:11px; border-right:3px solid #0b1320; border-bottom:3px solid #0b1320; transform:translateY(-58%) rotate(42deg);}
 
 .poker-action-toggle input:disabled + span{cursor:not-allowed; opacity:0.5;}
 

@@ -2407,6 +2407,7 @@
     var displayPrimary = primary || preactionPrimary || 'CHECK';
     var displayAmountAction = amountAction || preactionAmountAction || 'BET';
     var showActionButtons = signedIn && seated;
+    var showLiveActionButtons = showActionButtons && !preactionMode;
     var actionControlsLocked = !liveReady || !usersTurn || controlsLocked;
     var joinDisabled = !signedIn || seated || !state.tableId || !liveReady;
     if (!seated || !activeHand || isCurrentUserFolded()) clearQueuedPreaction();
@@ -2446,12 +2447,12 @@
     if (els.stackText) els.stackText.textContent = stackAmount == null ? '—' : formatNumber(stackAmount);
 
     if (els.foldBtn){
-      els.foldBtn.hidden = !showActionButtons;
+      els.foldBtn.hidden = !showLiveActionButtons;
       els.foldBtn.dataset.action = 'FOLD';
       els.foldBtn.disabled = actionControlsLocked || !isFoldAvailable();
     }
     if (els.primaryBtn){
-      els.primaryBtn.hidden = !showActionButtons;
+      els.primaryBtn.hidden = !showLiveActionButtons;
       var toCall = Number.isFinite(state.actionConstraints && state.actionConstraints.toCall)
         ? Math.max(0, Math.trunc(state.actionConstraints.toCall))
         : null;
@@ -2462,24 +2463,23 @@
       els.primaryBtn.disabled = actionControlsLocked || !primary;
     }
     if (els.amountBtn){
-      els.amountBtn.hidden = !showActionButtons;
+      els.amountBtn.hidden = !showLiveActionButtons;
       els.amountBtn.textContent = displayAmountAction === 'RAISE' ? 'Raise' : 'Bet';
       els.amountBtn.dataset.action = amountAction || '';
       els.amountBtn.disabled = actionControlsLocked || !amountAction;
     }
     if (els.allInBtn){
-      els.allInBtn.hidden = !showActionButtons;
+      els.allInBtn.hidden = !showLiveActionButtons;
       els.allInBtn.dataset.action = allInPlan ? allInPlan.type : '';
       els.allInBtn.disabled = actionControlsLocked || !allInPlan;
     }
-    if (els.preactionPanel) els.preactionPanel.hidden = !preactionMode;
-    if (els.foldPreactionWrap) els.foldPreactionWrap.hidden = !preactionMode || !isFoldAvailable();
+    if (els.foldPreactionWrap) els.foldPreactionWrap.hidden = !preactionMode;
     if (els.foldPreaction) {
       els.foldPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'fold');
-      els.foldPreaction.disabled = !liveReady || controlsLocked;
+      els.foldPreaction.disabled = !liveReady || controlsLocked || !isFoldAvailable();
       els.foldPreaction.dataset.slot = 'fold';
     }
-    if (els.primaryPreactionWrap) els.primaryPreactionWrap.hidden = !preactionMode || !preactionPrimary;
+    if (els.primaryPreactionWrap) els.primaryPreactionWrap.hidden = !preactionMode;
     if (els.primaryPreaction) {
       els.primaryPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'primary');
       els.primaryPreaction.disabled = !liveReady || controlsLocked || !preactionPrimary;
@@ -2494,7 +2494,7 @@
         ? ('Call (' + formatCompactAmount(projectedToCall) + ')')
         : 'Check';
     }
-    if (els.amountPreactionWrap) els.amountPreactionWrap.hidden = !preactionMode || !preactionAmountAction;
+    if (els.amountPreactionWrap) els.amountPreactionWrap.hidden = !preactionMode;
     if (els.amountPreaction) {
       els.amountPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'amount');
       els.amountPreaction.disabled = !liveReady || controlsLocked || !preactionAmountAction;
@@ -2502,7 +2502,7 @@
       els.amountPreaction.dataset.action = preactionAmountAction || '';
     }
     if (els.amountPreactionText) els.amountPreactionText.textContent = preactionAmountAction === 'RAISE' ? 'Raise' : 'Bet';
-    if (els.allInPreactionWrap) els.allInPreactionWrap.hidden = !preactionMode || !preactionAllInPlan;
+    if (els.allInPreactionWrap) els.allInPreactionWrap.hidden = !preactionMode;
     if (els.allInPreaction) {
       els.allInPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'allIn');
       els.allInPreaction.disabled = !liveReady || controlsLocked || !preactionAllInPlan;
@@ -2895,7 +2895,6 @@
     els.closedTableCountdown = document.getElementById('pokerV2ClosedTableCountdown');
     els.startBtn = document.getElementById('pokerV2StartBtn');
     els.foldBtn = document.getElementById('pokerV2FoldBtn');
-    els.preactionPanel = document.getElementById('pokerV2PreactionPanel');
     els.foldPreactionWrap = document.getElementById('pokerV2FoldPreactionWrap');
     els.foldPreaction = document.getElementById('pokerV2FoldPreaction');
     els.foldPreactionText = document.getElementById('pokerV2FoldPreactionText');

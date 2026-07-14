@@ -117,7 +117,7 @@ function createHarness(options = {}){
     'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
     'pokerV2ClosedTableModal', 'pokerV2ClosedTableTitle', 'pokerV2ClosedTableCountdown',
     'pokerV2DemoPill', 'pokerV2FoldBtn', 'pokerV2PrimaryBtn', 'pokerV2AmountBtn',
-    'pokerV2AllInBtn', 'pokerV2PreactionPanel', 'pokerV2FoldPreactionWrap', 'pokerV2FoldPreaction', 'pokerV2FoldPreactionText',
+    'pokerV2AllInBtn', 'pokerV2FoldPreactionWrap', 'pokerV2FoldPreaction', 'pokerV2FoldPreactionText',
     'pokerV2PrimaryPreactionWrap', 'pokerV2PrimaryPreaction', 'pokerV2PrimaryPreactionText',
     'pokerV2AmountPreactionWrap', 'pokerV2AmountPreaction', 'pokerV2AmountPreactionText',
     'pokerV2AllInPreactionWrap', 'pokerV2AllInPreaction', 'pokerV2AllInPreactionText',
@@ -975,17 +975,18 @@ test('poker v2 keeps action buttons stable while exposing single-select preactio
     harness.elements.pokerV2AllInBtn
   ];
   buttons.forEach((button) => {
-    assert.equal(button.hidden, false);
+    assert.equal(button.hidden, true);
     assert.equal(button.disabled, true);
   });
   assert.equal(harness.elements.pokerV2PrimaryBtn.textContent, 'Call (6)');
   assert.equal(harness.elements.pokerV2AmountBtn.textContent, 'Raise');
-  assert.equal(harness.elements.pokerV2PreactionPanel.hidden, false);
   assert.equal(harness.elements.pokerV2FoldPreactionWrap.hidden, false);
   assert.equal(harness.elements.pokerV2PrimaryPreactionWrap.hidden, false);
   assert.equal(harness.elements.pokerV2AmountPreactionWrap.hidden, false);
+  assert.equal(harness.elements.pokerV2AllInPreactionWrap.hidden, false);
   assert.equal(harness.elements.pokerV2PrimaryPreactionText.textContent, 'Call (6)');
   assert.equal(harness.elements.pokerV2AmountPreactionText.textContent, 'Raise');
+  assert.equal(harness.elements.pokerV2AllInPreaction.disabled, true);
 
   harness.elements.pokerV2PrimaryPreaction.click();
   await harness.flush();
@@ -1063,7 +1064,10 @@ test('poker v2 auto-executes a queued preaction without moving the live action b
   await harness.flush();
 
   assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-preaction-call', action: 'CALL' }));
-  assert.equal(harness.elements.pokerV2PreactionPanel.hidden, true);
+  assert.equal(harness.elements.pokerV2FoldPreactionWrap.hidden, true);
+  assert.equal(harness.elements.pokerV2PrimaryPreactionWrap.hidden, true);
+  assert.equal(harness.elements.pokerV2AmountPreactionWrap.hidden, true);
+  assert.equal(harness.elements.pokerV2AllInPreactionWrap.hidden, true);
   assert.equal(harness.elements.pokerV2FoldBtn.hidden, false);
   assert.equal(harness.elements.pokerV2PrimaryBtn.hidden, false);
   assert.equal(harness.elements.pokerV2AmountBtn.hidden, false);
@@ -1110,8 +1114,16 @@ test('poker v2 enables only legal actions without removing or moving the other b
     harness.elements.pokerV2AllInBtn
   ];
   buttonsBeforeTurn.forEach((button) => {
-    assert.equal(button.hidden, false);
+    assert.equal(button.hidden, true);
     assert.equal(button.disabled, true);
+  });
+  [
+    harness.elements.pokerV2FoldPreactionWrap,
+    harness.elements.pokerV2PrimaryPreactionWrap,
+    harness.elements.pokerV2AmountPreactionWrap,
+    harness.elements.pokerV2AllInPreactionWrap
+  ].forEach((preaction) => {
+    assert.equal(preaction.hidden, false);
   });
 
   ws.onSnapshot({

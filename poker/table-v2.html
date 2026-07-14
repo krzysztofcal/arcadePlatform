@@ -105,24 +105,22 @@
       </div>
       <div class="poker-action-buttons">
         <button type="button" class="poker-action-btn poker-action-btn--fold" id="pokerV2FoldBtn" hidden>Fold</button>
-        <button type="button" class="poker-action-btn poker-action-btn--fold" id="pokerV2PrimaryBtn" hidden>Check</button>
-        <button type="button" class="poker-action-btn poker-action-btn--call" id="pokerV2AmountBtn" hidden>Bet</button>
-        <button type="button" class="poker-action-btn poker-action-btn--raise" id="pokerV2AllInBtn" hidden>All in</button>
-      </div>
-      <div class="poker-preaction-panel" id="pokerV2PreactionPanel" aria-label="Pre-actions" hidden>
-        <label class="poker-action-toggle poker-action-toggle--fold poker-action-toggle--slot-fold" id="pokerV2FoldPreactionWrap" hidden>
+        <label class="poker-action-toggle poker-action-toggle--fold" id="pokerV2FoldPreactionWrap" hidden>
           <input type="checkbox" id="pokerV2FoldPreaction" aria-label="Queue fold">
           <span id="pokerV2FoldPreactionText">Fold</span>
         </label>
-        <label class="poker-action-toggle poker-action-toggle--fold poker-action-toggle--slot-primary" id="pokerV2PrimaryPreactionWrap" hidden>
+        <button type="button" class="poker-action-btn poker-action-btn--fold" id="pokerV2PrimaryBtn" hidden>Check</button>
+        <label class="poker-action-toggle poker-action-toggle--fold" id="pokerV2PrimaryPreactionWrap" hidden>
           <input type="checkbox" id="pokerV2PrimaryPreaction" aria-label="Queue primary action">
           <span id="pokerV2PrimaryPreactionText">Check</span>
         </label>
-        <label class="poker-action-toggle poker-action-toggle--call poker-action-toggle--slot-amount" id="pokerV2AmountPreactionWrap" hidden>
+        <button type="button" class="poker-action-btn poker-action-btn--call" id="pokerV2AmountBtn" hidden>Bet</button>
+        <label class="poker-action-toggle poker-action-toggle--call" id="pokerV2AmountPreactionWrap" hidden>
           <input type="checkbox" id="pokerV2AmountPreaction" aria-label="Queue amount action">
           <span id="pokerV2AmountPreactionText">Bet</span>
         </label>
-        <label class="poker-action-toggle poker-action-toggle--raise poker-action-toggle--slot-all-in" id="pokerV2AllInPreactionWrap" hidden>
+        <button type="button" class="poker-action-btn poker-action-btn--raise" id="pokerV2AllInBtn" hidden>All in</button>
+        <label class="poker-action-toggle poker-action-toggle--raise" id="pokerV2AllInPreactionWrap" hidden>
           <input type="checkbox" id="pokerV2AllInPreaction" aria-label="Queue all in">
           <span id="pokerV2AllInPreactionText">All in</span>
         </label>
