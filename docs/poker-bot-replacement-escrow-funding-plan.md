@@ -276,6 +276,7 @@ On WS process bootstrap or authoritative table restore, an active table restored
 - `ws-server/poker/persistence/persisted-state-writer.behavior.test.mjs`
   - add a small transaction-aware harness through the existing `beginSql` injection and exercise the real writer/ledger call boundary;
   - verify successful CAS plus funding commits state and exactly one balanced ledger transaction;
+  - capture the table escrow balance before and after success and assert `escrowAfter === escrowBefore + fundingDelta`; for several replacements in one rollover, use the sum of their deltas;
   - verify a funding exception rolls back both pending state and ledger effects;
   - verify a CAS/version conflict makes zero ledger calls;
   - verify replay of the same table/version/seat is already applied or rejected without a second funding transaction;
@@ -349,7 +350,7 @@ These cases use `node:test` and the existing engine/table-manager suites. They m
 
 Integration tests cover the smallest writer-ledger-state boundary using the existing injectable `beginSql` contract and a transaction-aware deterministic harness:
 
-1. successful state CAS and one replacement funding commit together;
+1. successful state CAS and one replacement funding commit together, with `escrowAfter === escrowBefore + fundingDelta` (or `+ sum(fundingDelta)` for an atomic multi-replacement rollover);
 2. ledger failure rolls back both state and ledger effects and produces no receipt usable by runtime commit;
 3. failed CAS performs no ledger funding;
 4. replay of the deterministic idempotency key cannot fund twice;
@@ -414,7 +415,7 @@ The most important breaking risk is the intentional fail-closed gameplay behavio
 ## Acceptance criteria
 
 - The pure delta helper accepts integer `0 <= oldStack < targetStack`, returns exact `target - old`, and fails closed for invalid values; current replacement eligibility still normally emits descriptors only for old stacks 0 or 1.
-- The existing `TREASURY` source is debited by exactly the sum of replacement deltas and table escrow is credited by the same amount.
+- The existing `TREASURY` source is debited by exactly the sum of replacement deltas, and the integration test proves `escrowAfter === escrowBefore + sum(fundingDelta)` for the committed rollover.
 - State CAS and all replacement ledger posts commit or roll back together.
 - The live runtime, snapshots, and bot autoplay do not observe the replacement state before database success.
 - Multiple replacements in one rollover are atomic and independently auditable by deterministic per-seat keys.
@@ -436,7 +437,7 @@ The most important breaking risk is the intentional fail-closed gameplay behavio
 - Persistent rollover follows prepare → atomic persist/fund → runtime commit.
 - Existing `TABLE_BUY_IN` validation and transaction helpers are reused; no new framework or generic ledger abstraction is introduced.
 - Failure is fail-closed, logged with `klog`, restored, retried quickly with bounded backoff, then retried at a bounded slow frequency until a terminal lifecycle condition.
-- The automated suite proves exact delta boundaries, invalid-input rejection, idempotency, transaction rollback, CAS-before-ledger ordering, receipt-gated runtime commit, and restart retry without duplicate funding.
+- The automated suite proves exact delta boundaries, the escrow balance-delta invariant, invalid-input rejection, idempotency, transaction rollback, CAS-before-ledger ordering, receipt-gated runtime commit, and restart retry without duplicate funding.
 - The implementation contains no #706 cash-out behavior, #707 inventory, automatic remediation, frontend, CSS, JSP, or CSP work.
 
 ## Plan verdict
