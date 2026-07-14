@@ -57,10 +57,62 @@ function observeOnlyJoinEnv() {
   return { WS_OBSERVE_ONLY_JOIN: "1" };
 }
 
+function coherentPersistedBootstrapFixtures(fixtures) {
+  return Object.fromEntries(Object.entries(fixtures || {}).map(([tableId, fixture]) => {
+    const stateValue = fixture?.stateRow?.state;
+    let state = null;
+    let stringified = false;
+    if (stateValue && typeof stateValue === "object" && !Array.isArray(stateValue)) {
+      state = { ...stateValue };
+    } else if (typeof stateValue === "string") {
+      try {
+        const parsed = JSON.parse(stateValue);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          state = { ...parsed };
+          stringified = true;
+        }
+      } catch {
+        return [tableId, fixture];
+      }
+    }
+    if (!state) return [tableId, fixture];
+
+    const stacks = state.stacks && typeof state.stacks === "object" && !Array.isArray(state.stacks)
+      ? { ...state.stacks }
+      : {};
+    const fixtureSeatRows = Array.isArray(fixture?.seatRows) ? fixture.seatRows : [];
+    for (const seat of fixtureSeatRows) {
+      if (seat?.is_bot === true || String(seat?.status || "").toUpperCase() !== "ACTIVE") continue;
+      const userId = typeof seat?.user_id === "string" ? seat.user_id.trim() : "";
+      if (!userId || Object.prototype.hasOwnProperty.call(stacks, userId)) continue;
+      const seatStack = Number(seat?.stack);
+      const hasSeatStack = seat?.stack !== null && seat?.stack !== undefined && Number.isSafeInteger(seatStack) && seatStack >= 0;
+      stacks[userId] = hasSeatStack ? seatStack : 100;
+    }
+    const coherentSeatRows = fixtureSeatRows.map((seat) => {
+      if (seat?.is_bot === true || String(seat?.status || "").toUpperCase() !== "ACTIVE") return seat;
+      const userId = typeof seat?.user_id === "string" ? seat.user_id.trim() : "";
+      const seatStack = Number(seat?.stack);
+      const stateStack = Number(stacks[userId]);
+      const hasSeatStack = seat?.stack !== null && seat?.stack !== undefined && Number.isSafeInteger(seatStack) && seatStack >= 0;
+      return !hasSeatStack && userId && Number.isSafeInteger(stateStack) && stateStack >= 0 ? { ...seat, stack: stateStack } : seat;
+    });
+    const coherentState = { ...state, stacks };
+    return [tableId, {
+      ...fixture,
+      seatRows: coherentSeatRows,
+      stateRow: fixture?.stateRow
+        ? { ...fixture.stateRow, state: stringified ? JSON.stringify(coherentState) : coherentState }
+        : fixture?.stateRow
+    }];
+  }));
+}
+
 function persistedBootstrapFixturesEnv(fixtures) {
+  const coherentFixtures = coherentPersistedBootstrapFixtures(fixtures);
   return {
     SUPABASE_DB_URL: "",
-    WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(fixtures)
+    WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(coherentFixtures)
   };
 }
 
@@ -69,7 +121,7 @@ async function writePersistedStateFile(fixtures) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ws-protocol-persist-"));
   const filePath = path.join(dir, "persisted-state.json");
   const tables = {};
-  for (const [tableId, fixture] of Object.entries(fixtures || {})) {
+  for (const [tableId, fixture] of Object.entries(coherentPersistedBootstrapFixtures(fixtures))) {
     tables[tableId] = {
       tableRow: fixture.tableRow,
       seatRows: fixture.seatRows || [],
@@ -766,8 +818,7 @@ test("observe-only mode keeps seated persisted user table_leave authoritative", 
       WS_AUTH_REQUIRED: "1",
       WS_AUTH_TEST_SECRET: secret,
       ...observeOnlyJoinEnv(),
-      SUPABASE_DB_URL: "",
-      WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(fixtures)
+      ...persistedBootstrapFixturesEnv(fixtures)
     }
   });
 
@@ -879,8 +930,7 @@ test("observe-only runtime keeps seated act accepted and observer act rejected",
       WS_AUTH_REQUIRED: "1",
       WS_AUTH_TEST_SECRET: secret,
       ...observeOnlyJoinEnv(),
-      SUPABASE_DB_URL: "",
-      WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(fixtures)
+      ...persistedBootstrapFixturesEnv(fixtures)
     }
   });
 
@@ -952,8 +1002,7 @@ test("duplicate act requestId does not emit additional advancing state frame", a
       WS_AUTH_TEST_SECRET: secret,
       WS_POKER_SETTLED_REVEAL_MS: "60000",
       ...observeOnlyJoinEnv(),
-      SUPABASE_DB_URL: "",
-      WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(fixtures)
+      ...persistedBootstrapFixturesEnv(fixtures)
     }
   });
 
@@ -1033,8 +1082,7 @@ test("timeout sweep emits at most one immediate transition for a single due turn
       WS_AUTH_TEST_SECRET: secret,
       WS_POKER_TURN_MS: "600",
       WS_TIMEOUT_SWEEP_MS: "20",
-      SUPABASE_DB_URL: "",
-      WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(fixtures)
+      ...persistedBootstrapFixturesEnv(fixtures)
     }
   });
 

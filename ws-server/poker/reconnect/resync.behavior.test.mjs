@@ -278,16 +278,27 @@ function coherentPersistedBootstrapFixtures(fixtures) {
     const stacks = state.stacks && typeof state.stacks === "object" && !Array.isArray(state.stacks)
       ? { ...state.stacks }
       : {};
-    for (const seat of Array.isArray(fixture?.seatRows) ? fixture.seatRows : []) {
+    const fixtureSeatRows = Array.isArray(fixture?.seatRows) ? fixture.seatRows : [];
+    for (const seat of fixtureSeatRows) {
       if (seat?.is_bot === true || String(seat?.status || "").toUpperCase() !== "ACTIVE") continue;
       const userId = typeof seat?.user_id === "string" ? seat.user_id.trim() : "";
       if (!userId || Object.prototype.hasOwnProperty.call(stacks, userId)) continue;
       const seatStack = Number(seat?.stack);
-      stacks[userId] = Number.isSafeInteger(seatStack) && seatStack >= 0 ? seatStack : 100;
+      const hasSeatStack = seat?.stack !== null && seat?.stack !== undefined && Number.isSafeInteger(seatStack) && seatStack >= 0;
+      stacks[userId] = hasSeatStack ? seatStack : 100;
     }
+    const coherentSeatRows = fixtureSeatRows.map((seat) => {
+      if (seat?.is_bot === true || String(seat?.status || "").toUpperCase() !== "ACTIVE") return seat;
+      const userId = typeof seat?.user_id === "string" ? seat.user_id.trim() : "";
+      const seatStack = Number(seat?.stack);
+      const stateStack = Number(stacks[userId]);
+      const hasSeatStack = seat?.stack !== null && seat?.stack !== undefined && Number.isSafeInteger(seatStack) && seatStack >= 0;
+      return !hasSeatStack && userId && Number.isSafeInteger(stateStack) && stateStack >= 0 ? { ...seat, stack: stateStack } : seat;
+    });
     const coherentState = { ...state, stacks };
     return [tableId, {
       ...fixture,
+      seatRows: coherentSeatRows,
       stateRow: fixture?.stateRow
         ? { ...fixture.stateRow, state: stringified ? JSON.stringify(coherentState) : coherentState }
         : fixture?.stateRow
