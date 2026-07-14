@@ -117,7 +117,10 @@ function createHarness(options = {}){
     'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
     'pokerV2ClosedTableModal', 'pokerV2ClosedTableTitle', 'pokerV2ClosedTableCountdown',
     'pokerV2DemoPill', 'pokerV2FoldBtn', 'pokerV2PrimaryBtn', 'pokerV2AmountBtn',
-    'pokerV2AllInBtn',
+    'pokerV2AllInBtn', 'pokerV2PreactionPanel', 'pokerV2FoldPreactionWrap', 'pokerV2FoldPreaction', 'pokerV2FoldPreactionText',
+    'pokerV2PrimaryPreactionWrap', 'pokerV2PrimaryPreaction', 'pokerV2PrimaryPreactionText',
+    'pokerV2AmountPreactionWrap', 'pokerV2AmountPreaction', 'pokerV2AmountPreactionText',
+    'pokerV2AllInPreactionWrap', 'pokerV2AllInPreaction', 'pokerV2AllInPreactionText',
     'pokerV2AmountInput', 'pokerV2AmountInputWrap', 'pokerV2AmountValue',
     'pokerTableScreen', 'pokerBootSplash'
   ].forEach((id) => {
@@ -128,6 +131,10 @@ function createHarness(options = {}){
   elements.pokerV2SeatNo.value = '1';
   elements.pokerV2BuyIn.value = '100';
   elements.pokerV2AmountInput.value = '20';
+  elements.pokerV2FoldPreaction.type = 'checkbox';
+  elements.pokerV2PrimaryPreaction.type = 'checkbox';
+  elements.pokerV2AmountPreaction.type = 'checkbox';
+  elements.pokerV2AllInPreaction.type = 'checkbox';
   elements.pokerV2LeaveConfirmModal.hidden = true;
   elements.pokerV2ClosedTableModal.hidden = true;
   elements.pokerMenuPanel.setAttribute('hidden', 'hidden');
@@ -155,7 +162,11 @@ function createHarness(options = {}){
     },
     destroy(){ this._ready = false; },
     isReady(){ return this._ready; },
-    sendJoin(payload){ joinPayloads.push(payload); return Promise.resolve({ ok: true, seatNo: payload.seatNo || payload.preferredSeatNo || 1 }); },
+    sendJoin(payload){
+      joinPayloads.push(payload);
+      if (typeof options.sendJoin === 'function') return options.sendJoin(payload, { attempt: joinPayloads.length });
+      return Promise.resolve({ ok: true, seatNo: payload.seatNo || payload.preferredSeatNo || 1 });
+    },
     sendAct(payload){ actPayloads.push(payload); return Promise.resolve({ ok: true }); },
     sendStartHand(payload){ startPayloads.push(payload); return Promise.resolve({ ok: true }); },
     sendLeave(payload){
@@ -924,7 +935,7 @@ test('poker v2 keeps fold available even when live legalActions omit fold', asyn
   assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-fold-always', action: 'FOLD' }));
 });
 
-test('poker v2 keeps every action button visible and disabled during another player turn', async () => {
+test('poker v2 keeps action buttons stable while exposing single-select preactions off-turn', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -969,7 +980,94 @@ test('poker v2 keeps every action button visible and disabled during another pla
   });
   assert.equal(harness.elements.pokerV2PrimaryBtn.textContent, 'Call (6)');
   assert.equal(harness.elements.pokerV2AmountBtn.textContent, 'Raise');
+  assert.equal(harness.elements.pokerV2PreactionPanel.hidden, false);
+  assert.equal(harness.elements.pokerV2FoldPreactionWrap.hidden, false);
+  assert.equal(harness.elements.pokerV2PrimaryPreactionWrap.hidden, false);
+  assert.equal(harness.elements.pokerV2AmountPreactionWrap.hidden, false);
+  assert.equal(harness.elements.pokerV2PrimaryPreactionText.textContent, 'Call (6)');
+  assert.equal(harness.elements.pokerV2AmountPreactionText.textContent, 'Raise');
+
+  harness.elements.pokerV2PrimaryPreaction.click();
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2PrimaryPreaction.checked, true);
+  assert.equal(harness.elements.pokerV2AmountPreaction.checked, false);
+
+  harness.elements.pokerV2AmountPreaction.click();
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2PrimaryPreaction.checked, false);
+  assert.equal(harness.elements.pokerV2AmountPreaction.checked, true);
   assert.equal(harness.actPayloads.length, 0);
+});
+
+test('poker v2 auto-executes a queued preaction without moving the live action buttons', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 32,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-preaction-call', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'villain-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 18, sidePots: [] },
+        legalActions: { seat: 1, actions: [] },
+        actionConstraints: { toCall: 6, minRaiseTo: 18, maxRaiseTo: 120 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  harness.elements.pokerV2PrimaryPreaction.click();
+  await harness.flush();
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 33,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-preaction-call', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 24, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CALL', 'RAISE'] },
+        actionConstraints: { toCall: 6, minRaiseTo: 18, maxRaiseTo: 120 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-preaction-call', action: 'CALL' }));
+  assert.equal(harness.elements.pokerV2PreactionPanel.hidden, true);
+  assert.equal(harness.elements.pokerV2FoldBtn.hidden, false);
+  assert.equal(harness.elements.pokerV2PrimaryBtn.hidden, false);
+  assert.equal(harness.elements.pokerV2AmountBtn.hidden, false);
+  assert.equal(harness.elements.pokerV2AllInBtn.hidden, false);
 });
 
 test('poker v2 enables only legal actions without removing or moving the other buttons', async () => {
@@ -1154,6 +1252,62 @@ test('poker v2 safely rejoins the same authoritative seat after a socket reconne
     preferredSeatNo: 4
   }));
   assert.equal(Object.prototype.hasOwnProperty.call(harness.joinPayloads[0], 'buyIn'), false);
+});
+
+test('poker v2 retries the same reconnect seat after a transient join failure', async () => {
+  const harness = createHarness({
+    sendJoin(payload, context){
+      if (context.attempt === 1) return Promise.reject(new Error('timeout'));
+      return Promise.resolve({ ok: true, seatNo: payload.preferredSeatNo });
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 40,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'bot-1', seat: 1, displayName: 'Bot 1', isBot: true },
+          { userId: 'user-1', seat: 4, displayName: 'Hero' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-reconnect-retry', status: 'TURN', dealerSeatNo: 1 },
+        turn: { userId: 'bot-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 12, sidePots: [] },
+        legalActions: { seat: 4, actions: [] },
+        stacks: { 'bot-1': 100, 'user-1': 100 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 4 }
+    }
+  });
+  await harness.flush();
+
+  ws.onStatus('reconnecting', { attempt: 1 });
+  ws.onStatus('auth_ok', { roomId: 'table-1' });
+  await harness.flush();
+  assert.equal(harness.joinPayloads.length, 1);
+
+  ws.onStatus('auth_ok', { roomId: 'table-1' });
+  await harness.flush();
+
+  assert.equal(harness.joinPayloads.length, 2);
+  harness.joinPayloads.forEach((payload) => {
+    assert.equal(JSON.stringify(payload), JSON.stringify({
+      tableId: 'table-1',
+      autoSeat: true,
+      preferredSeatNo: 4
+    }));
+  });
 });
 
 test('poker v2 aligns the right rail seats and keeps the chip on the dealer seat', async () => {
