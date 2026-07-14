@@ -66,6 +66,15 @@ This is the root cause of the misleading production result. The authoritative st
 
 `poker/poker.js` contains older `buildShowdownWinnerPayoutMap()` and `renderShowdownPanel()` helpers, but they are not a correct reusable settlement model: they aggregate payouts by the same winner union and label entries only as `Pot #N`. That file powers the lobby page rather than `table-v2.html`. Do not copy its lossy classification into v2 or expand this fix into dead/legacy table UI. The new pure projector may replace that older logic in separate cleanup only if the lobby later presents live settlements again.
 
+### Partial patch transport is not materialized
+
+- `poker/poker-ws-client.js::normalizeSnapshot()` passes `table_state`, `stateSnapshot`, and `statePatch` payloads to `poker-v2.js` without merging them into a client-side full snapshot.
+- `ws-server/server.mjs::sendStateDelta()` builds a real partial `statePatch`; an unrelated clock, presence, action, or legal-action patch may omit `showdown` and `handSettlement` entirely.
+- The current `poker-v2.js::mergeSnapshot()` conditionally merges most hand fields but unconditionally assigns normalized showdown and settlement values. An omitted settlement field therefore currently looks the same as an explicit clear and can erase a visible reveal.
+- `onSnapshot()` currently passes only `snapshot.payload` into `mergeSnapshot()`, so the merge layer also loses whether the payload was a full `stateSnapshot`, partial `statePatch`, or initial `table_state`.
+
+PR 1 must correct this merge contract as part of the settlement fix. Otherwise correct award rows could disappear or flicker after an ordinary partial patch.
+
 ## Architecture decision
 
 Implement correctness and animation in two PRs.
@@ -86,7 +95,9 @@ Separating the PRs prevents animation sequencing, timing, and motion preferences
 
 ### Small pure projection helper
 
-Add `poker/poker-settlement-presentation.js` as a JSP-compatible, dependency-free external script loaded before `poker-v2.js`. It exposes one narrow browser namespace, `window.ArcadePokerSettlement`, containing deterministic normalization/projection functions. This keeps accounting-display logic testable without a DOM and avoids a framework or build step.
+Keep the deterministic settlement normalizers and projector inside the existing `poker/poker-v2.js` IIFE. Do not add a second runtime script, browser-global production namespace, HTML dependency, or loading-order/cache boundary.
+
+For focused unit tests, follow the existing guarded poker test-hook pattern from `poker/poker.js`: expose only the pure functions through `window.__POKER_V2_TEST_HOOKS__` when `window.__RUNNING_POKER_UI_TESTS__ === true`. The guard is false in production, so the test surface is unavailable during normal gameplay.
 
 The primary function is `buildSettlementPresentation({ showdown, handSettlement })`. Its closed result is:
 
@@ -128,6 +139,8 @@ For a split pot, reuse the existing server rule exactly: integer floor share, th
 
 If validation fails, stacks remain authoritative and gameplay remains usable. The UI shows a neutral localized `Settlement complete` state without guessed amounts, generic multi-user `Winner` badges, or payout animation. Existing safe client logging may emit one aggregated `klog` event with only the controlled failure reason; never use `console.log` or include cards, email, token, raw payload, or user IDs.
 
+The failure is scoped only to award presentation. Invalid, incomplete, or legacy award data must not clear `revealedShowdownParticipants`, community cards, the viewer's hole cards, or the independently calculated best-hand name/cards. A legacy snapshot with one `showdown.winners` entry but no complete `potsAwarded` may still show the revealed cards and hand summary; it must not invent a pot label, amount, return, or payout animation.
+
 ### Main pot, side pot, and return classification
 
 Use the server order; do not sort pots in the browser.
@@ -151,21 +164,6 @@ This classification distinguishes a real uncontested main-pot win after folds fr
 
 ## PR 1 — exact files and changes
 
-### `poker/poker-settlement-presentation.js` — new pure helper
-
-- add closed normalizers for IDs, chip amounts, per-pot entries, and `handSettlement.payouts`;
-- add `allocatePotRecipients(amount, orderedWinnerIds)` using the existing server split/remainder rule;
-- add `classifyPot({ reason, potIndex, eligibleUserIds, winners, sidePotNumber })` with the main/side/return rules above;
-- add `buildSettlementPresentation({ showdown, handSettlement })` and construct `pots` plus `byUserId` in server order;
-- expose only the functions required by `poker-v2.js` and focused unit tests through `window.ArcadePokerSettlement`;
-- use function/`var` syntax compatible with the current non-module poker page and JSP delivery; do not rely on bundlers or Node-only APIs.
-
-### `poker/table-v2.html`
-
-- load `/poker/poker-settlement-presentation.js` with `defer` immediately before `/poker/poker-v2.js`, preserving deterministic deferred-script order;
-- add one hidden settlement summary inside `.poker-center-layer`, with `role="status"`, `aria-live="polite"`, and `aria-atomic="true"`;
-- keep all behavior in external scripts; add no inline JavaScript.
-
 ### `js/i18n.js`
 
 - add PL/EN keys for `Main pot`, `Side pot {number}`, `Returned`, `Settlement complete`, and the settlement summary accessible label;
@@ -175,21 +173,40 @@ This classification distinguishes a real uncontested main-pot win after folds fr
 
 ### `poker/poker-v2.js`
 
+- add closed pure normalizers for IDs, chip amounts, per-pot entries, and `handSettlement.payouts` inside the existing IIFE;
+- add pure `allocatePotRecipients(amount, orderedWinnerIds)` using the existing server split/remainder rule;
+- add pure `classifyPot({ reason, potIndex, eligibleUserIds, winners, sidePotNumber })` with the main/side/return rules above;
+- add pure `buildSettlementPresentation({ showdown, handSettlement })` and construct `pots` plus `byUserId` in server order;
+- expose those pure functions only under the existing explicit test flag through `window.__POKER_V2_TEST_HOOKS__`; add no production global API;
 - extend `normalizeShowdown()` to preserve normalized `potsAwarded` and `potAwardedTotal` instead of dropping them;
 - extend `normalizeHandSettlement()` to preserve normalized `payouts`;
-- add `state.settlementPresentation` or derive it once in `mergeSnapshot()` through `ArcadePokerSettlement.buildSettlementPresentation()` when phase is `SETTLED`;
-- detect a missing/invalid `window.ArcadePokerSettlement` helper and fall back to the neutral state instead of throwing during snapshot handling;
+- add `state.settlementPresentation` and derive it through the local `buildSettlementPresentation()` only when a complete authoritative settlement is available;
 - replace `stickyWinnerReveal.winners` with a cloned immutable `settlementPresentation`; retain revealed cards and community cards;
 - add `lastPresentedSettlementHandId` so duplicate/replayed snapshots for the same hand cannot restart or extend an expired reveal window;
 - calculate the local reveal deadline from `handSettlement.settledAt + WINNER_REVEAL_MS`, falling back to receipt time only when the server timestamp is absent; never reset the deadline for the same hand;
 - replace `getDisplayWinnerUserIds()`/`isWinnerSeat()` with `getDisplaySettlementPresentation()` and `getSeatSettlementAwards(userId)` for labels and amounts;
 - retain a separate helper for which compared hands/cards are revealed; award recipients and revealed showdown participants are different concepts;
 - add `renderSettlementSummary()` and call it from `render()`;
+- let `renderSettlementSummary()` create and reuse one semantic DOM container inside the existing `.poker-center-layer`, with `role="status"`, `aria-live="polite"`, and `aria-atomic="true"`; do not change `table-v2.html`;
 - change `renderSeats()` to append ordered award rows at each recipient seat and remove the generic `Winner` title from per-pot settlements;
 - keep the evaluated hand name/cards as secondary showdown detail, not as proof that the seat won every pot;
 - extend `captureVisualSnapshot()` with the closed presentation/award IDs rather than the winner union;
 - in PR 1, remove only the `payoutLike` aggregate branch from `animateChipDiff()`; keep the existing contribution-to-pot animation;
 - keep `shouldDeferSnapshotUntilRevealEnds()` and `scheduleRevealDismiss()`, but key their state by the settlement hand ID so a queued next-hand snapshot is applied exactly once.
+
+### Explicit snapshot/patch merge contract
+
+Change `onSnapshot()` to pass `{ kind, initial, payload }` metadata into `mergeSnapshot()` and retain the same metadata with `pendingPostRevealSnapshot`. Add a small own-property helper so omission can be distinguished from explicit `null` in both root and `public` branches.
+
+- Full `stateSnapshot`: treat settlement fields as authoritative. In `SETTLED`, rebuild from the complete `showdown` plus `handSettlement`; if that pair is incomplete or invalid, clear only the award presentation to its neutral fallback while preserving independent reveal data. Explicit `null` or absence outside `SETTLED` clears the non-sticky current settlement.
+- Initial `table_state`: treat the settlement fields present in the initial authoritative view as the baseline. Later `table_state` messages are merge-like because the protocol/client tests allow partial table state.
+- `statePatch` with neither `showdown` nor `handSettlement`: preserve normalized settlement data, `state.settlementPresentation`, sticky award rows, revealed cards, and the original reveal deadline.
+- `statePatch` with explicit `showdown: null` or `handSettlement: null`: clear the corresponding current-hand data, current presentation, and same-hand sticky reveal. A next-hand payload is deferred before merge, so its clear cannot erase the still-readable previous reveal prematurely.
+- `statePatch` for the same hand containing both complete settlement fields: validate and replace the current presentation without restarting its deadline. A patch containing only one updated settlement half must not combine it speculatively with stale data to invent a new presentation; retain the last valid presentation until a complete pair or an authoritative clear arrives.
+- Payload with a different hand ID or a non-`SETTLED` next-hand phase: clear current settlement only after the existing reveal deferral releases it. If reveal is active, queue the whole `{ kind, initial, payload }` frame rather than only its payload.
+- Full `stateSnapshot` received during reconnect/resync in `SETTLED`: rebuild the static model from that snapshot and use the remaining `settledAt` deadline; do not classify it as a live animation transition.
+
+The merge rules apply independently from showdown-card privacy. An omitted award field cannot clear revealed-card state, and an invalid award projection cannot suppress otherwise valid revealed participants.
 
 ### `poker/poker-v2.css`
 
@@ -201,7 +218,7 @@ This classification distinguishes a real uncontested main-pot win after folds fr
 
 ### Focused tests
 
-- `tests/poker-settlement-presentation.unit.test.mjs` — load only the pure browser helper in the existing VM style and test deterministic model output.
+- `tests/poker-settlement-presentation.unit.test.mjs` — load `poker-v2.js` in the existing VM style with `window.__RUNNING_POKER_UI_TESTS__ = true` and test only the guarded pure projection hooks.
 - `tests/poker-v2-live.behavior.test.mjs` — extend the existing poker DOM/WS harness for labels, seat rows, sticky settlement, next-hand transition, and safe fallback.
 - `ws-server/poker/read-model/room-core-snapshot.behavior.test.mjs` and `ws-server/poker/read-model/state-snapshot.behavior.test.mjs` — strengthen existing settled-snapshot assertions to prove ordered `potsAwarded`, `eligibleUserIds`, `winners`, total, and aggregate payouts survive transport. No read-model source change is expected.
 
@@ -215,9 +232,12 @@ This classification distinguishes a real uncontested main-pot win after folds fr
 - multiple recipients are never collectively labeled as winners of the whole hand;
 - no pot-to-seat animation runs from the aggregate winner union;
 - duplicate snapshots do not extend the reveal or render rows twice;
+- a partial same-hand `statePatch` that omits `showdown` and `handSettlement` preserves award rows, revealed cards, and the original reveal deadline;
+- an explicit clear or released next-hand transition removes the previous settlement at the defined boundary;
 - a full initial/reconnect `SETTLED` snapshot renders a static summary immediately without fabricating a live transition;
 - the next hand remains deferred only for the remaining reveal deadline and is then applied once;
 - malformed or legacy settlement data cannot produce guessed labels/amounts or block gameplay.
+- malformed or legacy award data does not remove valid revealed cards or best-hand details;
 - PL/EN language changes update settlement labels without changing amounts or classification.
 
 ## PR 2 — sequential award animation
@@ -273,6 +293,9 @@ The existing behavior harness must cover:
 - compared losing players retaining revealed cards without award badges;
 - full `SETTLED` snapshot on first load/reconnect rendering static content;
 - duplicate resync for the same hand not duplicating awards or extending the timer;
+- partial same-hand `statePatch` without `showdown` and `handSettlement` preserving award rows, revealed cards, and the original deadline;
+- explicit settlement `null` clearing current award presentation, while a deferred next-hand patch waits for the reveal boundary;
+- malformed/legacy awards falling back neutrally without removing revealed cards or the best-hand summary;
 - next-hand snapshot deferred until the remaining reveal deadline, then applied once;
 - narrow/mobile DOM remaining usable with multiple rows;
 - reduced motion retaining all information;
@@ -293,18 +316,19 @@ Use a controlled table or fixture that produces known contributions and compare 
 7. Different players winning different pots: verify no seat is presented as winner of another pot.
 8. Fold-ended hand: verify the sole recipient is the main-pot winner, not a return.
 9. During `SETTLED`, disconnect/reconnect and request full resync; verify static information remains exact and does not replay or duplicate.
-10. Receive the next hand while reveal is active; verify the settlement remains readable and the queued snapshot applies once afterward.
-11. Test desktop and narrow mobile widths with the maximum realistic number of award rows and action controls visible.
-12. Enable reduced motion and verify complete static labels with no chip-flight nodes.
-13. Switch between Polish and English and verify only labels change; classification and chip amounts remain identical.
-14. Block or delay the new helper script during failure testing; the poker page must fail safe without invented winner labels and must not expose raw HTML or block unrelated controls.
-15. For PR 2, compare animation order/destinations with the already visible static rows; the static result must remain correct if animation is interrupted.
+10. While the reveal is visible, apply a same-hand partial patch containing only turn/presence data; verify award rows, revealed cards, and deadline do not change.
+11. Apply an explicit settlement clear and a next-hand patch separately; verify the explicit same-hand clear is honored, while the next-hand payload waits for the reveal boundary and then applies once.
+12. Feed a legacy/malformed award shape with valid revealed participants; verify neutral award copy while cards and the best-hand summary remain visible.
+13. Test desktop and narrow mobile widths with the maximum realistic number of award rows and action controls visible.
+14. Enable reduced motion and verify complete static labels with no chip-flight nodes.
+15. Switch between Polish and English and verify only labels change; classification and chip amounts remain identical.
+16. For PR 2, compare animation order/destinations with the already visible static rows; the static result must remain correct if animation is interrupted.
 
 ## Preview, rollout, and rollback
 
 ### Preview requirements
 
-- Both implementation PRs require a Netlify Deploy Preview because they change browser JavaScript, HTML, CSS, and visual behavior.
+- Both implementation PRs require a Netlify Deploy Preview because they change browser JavaScript, CSS, localization, and visual behavior.
 - A WS Preview Deploy is not required for the planned implementation because no WS server source, protocol, persistence, settlement, or timing changes are needed.
 - The browser preview must still connect to a compatible preview WS and inspect a real `SETTLED` payload to confirm `potsAwarded` and `handSettlement.payouts` are present.
 - If implementation analysis unexpectedly requires any change under `ws-server/`, stop and update this plan; that revised PR must run a WS Preview Deploy before merge.
@@ -320,7 +344,7 @@ Use a controlled table or fixture that produces known contributions and compare 
 
 - PR 1 can roll back to the prior renderer without changing authoritative server state, balances, or stored hands.
 - PR 2 can independently remove only the settlement animation and retain PR 1's correct static summary.
-- Mixed cached versions are safe because the WS fields are additive/existing and old clients continue their previous presentation until refreshed.
+- The implementation stays in the existing `poker-v2.js`, so rollback has no cross-file runtime helper version to coordinate. Old cached JavaScript continues its previous presentation until normal revalidation.
 
 ## Breaking and operational impact
 
@@ -330,15 +354,15 @@ Use a controlled table or fixture that produces known contributions and compare 
 | WS contract | No schema/version change. Existing `potsAwarded`, totals, payouts, and compatibility `winners` are consumed more fully. |
 | Browser behavior | Intentional visible change: generic `Winner` badges and aggregate payout animation are replaced by localized exact per-pot labels and amounts. |
 | Reveal timing | No server change. Client reveal becomes keyed to the original `settledAt`/hand ID and cannot be restarted by duplicate snapshots. |
-| Reconnect/resync | Initial settled state is static; duplicate state does not replay awards. This is an intentional idempotency improvement. |
-| HTML/JSP | One external deferred helper and one semantic container. The helper uses browser-compatible non-module JavaScript and requires no build transform. |
+| Patch/reconnect/resync | Omitted patch fields preserve settlement; explicit clears and new-hand transitions clear it at defined boundaries. Initial settled state is static and duplicate state does not replay awards. |
+| HTML/JSP | No markup or script-tag change. The existing non-module `poker-v2.js` creates the semantic container with DOM APIs and remains JSP-compatible. |
 | Localization | Additive PL/EN settlement keys in the existing dictionary; no new i18n system. |
 | CSS | Additive responsive selectors only, with one line per selector. Reduced motion becomes explicitly supported. |
-| CSP | No inline script or external origin. Existing same-origin `script-src` covers the new file, so no SHA or provider-domain change is required. |
+| CSP | No script is added and no inline code changes, so no CSP SHA or provider-domain change is required. |
 | Database/ENV/secrets | None. No migration, configuration, or secret. |
 | Deployment | Netlify preview/production only under the planned scope; no WS Preview Deploy. |
 
-The browser-global `window.ArcadePokerSettlement` is an additive page-local interface. The main compatibility risk is old cached `poker-v2.js` loading with new HTML or the reverse; both scripts must fail closed when the helper is absent, and versioned deploy cache invalidation must be verified on preview.
+The guarded `window.__POKER_V2_TEST_HOOKS__` exists only when the explicit test flag is true and is not a production API. Text and class changes can break screenshot expectations or UI tests/selectors that assert the literal `Winner` label or `.poker-seat-winner-*`; update those consumers in the implementation PR. This does not affect poker actions, settlement, or economy.
 
 ## Definition of Done
 
@@ -346,11 +370,13 @@ The browser-global `window.ArcadePokerSettlement` is an additive page-local inte
 - Main pots, numbered side pots, returns, split shares, and multi-pot recipients are labeled and summed exactly.
 - A return is never rendered or animated as `Winner`.
 - Static settlement remains correct without animation, on mobile, with reduced motion, and after reconnect/resync.
+- Partial patches preserve omitted settlement fields; explicit clears and new-hand transitions clear them only at the documented boundary.
+- Invalid or legacy award data disables only award labels/amounts/animation and retains valid revealed cards and best-hand details.
 - Duplicate snapshots cannot duplicate awards, replay animation, or extend the same hand's reveal deadline.
 - The next hand is applied once after the readable remaining reveal window.
 - Focused pure unit and browser behavior cases pass together with existing repository checks.
 - PR 1 is verified before PR 2 starts.
-- No poker rule, ledger, DB, ENV, WS contract, CSP origin, or server timing change is introduced.
+- No new runtime script, HTML change, CSP SHA, poker rule, ledger, DB, ENV, WS contract, CSP origin, or server timing change is introduced.
 
 ## Plan verdict
 
