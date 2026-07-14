@@ -275,6 +275,11 @@ function createAdminDom() {
     "adminOpsStats",
     "adminOpsIdentity",
     "adminOpsRuntime",
+    "adminOpsBotReactionSummary",
+    "adminOpsBotReactionDelay",
+    "adminOpsBotReactionApply",
+    "adminOpsBotReactionDefault",
+    "adminOpsBotReactionStatus",
     "adminOpsRefresh",
     "adminOpsRunReconciler",
     "adminOpsRunStaleSweep",
@@ -313,6 +318,7 @@ function createAdminDom() {
   addField(pokerAuditFilters, { name: "tableId", value: "" });
   addField(pokerAuditFilters, { name: "handId", value: "" });
   addField(pokerAuditFilters, { name: "limit", value: "20" });
+  createForm(document, "adminOpsBotReactionForm");
 
   const tabs = ["users", "tables", "ledger", "bonusCampaigns", "pokerAudit", "ops"].map((tab, index) => {
     const button = registerNode(document, createElement("button", `adminTabButton${tab[0].toUpperCase()}${tab.slice(1)}`));
@@ -418,6 +424,16 @@ function buildContext(options = {}) {
         janitor: { openTableCount: 0, staleHumanSeatCount: 0, staleOpenTableCount: 0, flaggedTableCount: 0 },
         runtime: { buildId: "test-build", chipsEnabled: true, adminUserIdsConfigured: true, janitorConfig: {}, healthy: true },
         recentJanitorActivity: { adminActions: [], cleanupTransactions: [] },
+      }) };
+    }
+    if (text.includes("/.netlify/functions/admin-ws-preview-bot-reaction")) {
+      return { ok: true, json: async () => ({
+        ok: true,
+        environment: "ws-preview",
+        mode: "default",
+        defaults: { minMs: 2000, maxMs: 4000 },
+        active: { minMs: 2000, maxMs: 4000 },
+        override: null,
       }) };
     }
     if (text.includes("/.netlify/functions/admin-stage-identity")) {
@@ -659,10 +675,14 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.equal(panels[5].hidden, false);
   assert.equal(fetchCalls.includes("/.netlify/functions/admin-stage-identity"), true);
   assert.equal(fetchCalls.includes("/.netlify/functions/admin-ops-summary"), true);
+  assert.equal(fetchCalls.includes("/.netlify/functions/admin-ws-preview-bot-reaction"), true);
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /Database target/);
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /stageabc/);
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /Service role stage match/);
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /stage/);
+  assert.match(document.getElementById("adminOpsBotReactionSummary").innerHTML, /Default/);
+  assert.match(document.getElementById("adminOpsBotReactionSummary").innerHTML, /2000–4000 ms/);
+  assert.equal(document.getElementById("adminOpsBotReactionDelay").value, "2000");
 });
 
 test("admin page still renders ops summary when stage identity request fails", async () => {

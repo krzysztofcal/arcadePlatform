@@ -14,6 +14,7 @@ import { createTableManager } from "./poker/table/table-manager.mjs";
 import { adaptPersistedBootstrap } from "./poker/bootstrap/persisted-bootstrap-adapter.mjs";
 import { createSessionStore } from "./poker/runtime/session-store.mjs";
 import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
+import { createBotReactionOverrideStore } from "./poker/runtime/bot-reaction-override.mjs";
 import { evaluateTableHealth, runTableJanitor, selectOpenTableJanitorBatch } from "./poker/runtime/table-janitor.mjs";
 import { buildStateSnapshotPayload } from "./poker/read-model/state-snapshot.mjs";
 import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
@@ -258,6 +259,7 @@ const lobbySubscribers = new Set();
 const activeLobbyTablesById = new Map();
 const lobbyEmptyJoinableGraceMs = resolveEmptyJoinableGraceMs(process.env.POKER_TABLE_CLOSE_GRACE_MS);
 const internalRuntimeToken = typeof process.env.POKER_WS_INTERNAL_TOKEN === "string" ? process.env.POKER_WS_INTERNAL_TOKEN.trim() : "";
+const botReactionOverrideStore = createBotReactionOverrideStore({ env: process.env });
 let openTableJanitorCursor = null;
 
 function snapshotCacheKey(sessionId, tableId) {
@@ -340,6 +342,7 @@ async function loadAcceptedBotAutoplayExecutor() {
           onBotStepPersisted: ({ tableId }) => {
             broadcastStateSnapshots(tableId);
           },
+          getBotReactionOverride: () => botReactionOverrideStore.getOverrideRange(),
           env: process.env,
           klog: klogSafe
         });
@@ -2251,11 +2254,28 @@ async function sweepTurnTimeoutsAndBroadcast() {
   })));
 }
 
-function readJsonBody(req) {
+function readJsonBody(req, { maxBytes = 64 * 1024 } = {}) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
+    let totalBytes = 0;
+    let tooLarge = false;
+    req.on("data", (chunk) => {
+      if (tooLarge) return;
+      totalBytes += chunk.length;
+      if (totalBytes > maxBytes) {
+        tooLarge = true;
+        chunks.length = 0;
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => {
+      if (tooLarge) {
+        const error = new Error("body_too_large");
+        error.code = "body_too_large";
+        reject(error);
+        return;
+      }
       const raw = Buffer.concat(chunks).toString("utf8");
       if (!raw.trim()) {
         resolve({});
@@ -2269,6 +2289,71 @@ function readJsonBody(req) {
     });
     req.on("error", reject);
   });
+}
+
+function sendInternalJson(res, statusCode, body) {
+  res.writeHead(statusCode, {
+    "content-type": "application/json",
+    "cache-control": "no-store"
+  });
+  res.end(JSON.stringify(body));
+}
+
+function hasExactKeys(payload, allowedKeys) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+  const allowed = new Set(allowedKeys);
+  return Object.keys(payload).every((key) => allowed.has(key));
+}
+
+async function handleInternalBotReactionConfig(req, res) {
+  if (req.method !== "GET" && req.method !== "POST") {
+    sendInternalJson(res, 405, { error: "method_not_allowed" });
+    return;
+  }
+  if (!internalRuntimeToken) {
+    sendInternalJson(res, 503, { error: "internal_runtime_token_missing" });
+    return;
+  }
+  const authHeader = typeof req.headers?.authorization === "string" ? req.headers.authorization.trim() : "";
+  if (authHeader !== `Bearer ${internalRuntimeToken}`) {
+    sendInternalJson(res, 401, { error: "unauthorized" });
+    return;
+  }
+  try {
+    if (req.method === "GET") {
+      sendInternalJson(res, 200, botReactionOverrideStore.read());
+      return;
+    }
+    const payload = await readJsonBody(req, { maxBytes: 1_024 });
+    const mode = typeof payload?.mode === "string" ? payload.mode.trim() : "";
+    let result;
+    if (mode === "override" && hasExactKeys(payload, ["mode", "minMs", "maxMs", "updatedBy"])) {
+      result = botReactionOverrideStore.setOverride({
+        minMs: payload.minMs,
+        maxMs: payload.maxMs,
+        updatedBy: payload.updatedBy
+      });
+    } else if (mode === "default" && hasExactKeys(payload, ["mode", "updatedBy"])) {
+      result = botReactionOverrideStore.clearOverride({ updatedBy: payload.updatedBy });
+    } else {
+      sendInternalJson(res, 400, { error: "invalid_request" });
+      return;
+    }
+    klogSafe("ws_preview_bot_reaction_updated", {
+      mode: result.mode,
+      minMs: result.active.minMs,
+      maxMs: result.active.maxMs,
+      updatedBy: typeof payload.updatedBy === "string" ? payload.updatedBy : null
+    });
+    sendInternalJson(res, 200, result);
+  } catch (error) {
+    const code = error?.code || (error instanceof SyntaxError ? "invalid_json" : "internal_server_error");
+    const statusCode = Number(error?.status) || (code === "body_too_large" || code === "invalid_json" ? 400 : 500);
+    if (statusCode >= 500) {
+      klogSafe("ws_preview_bot_reaction_failed", { code });
+    }
+    sendInternalJson(res, statusCode, { error: code });
+  }
 }
 
 async function handleInternalLobbyMaterialize(req, res) {
@@ -2342,6 +2427,11 @@ async function handleHttpRequest(req, res) {
 
   if (req.url === "/internal/lobby/materialize-table") {
     await handleInternalLobbyMaterialize(req, res);
+    return;
+  }
+
+  if (req.url === "/internal/admin/bot-reaction") {
+    await handleInternalBotReactionConfig(req, res);
     return;
   }
 

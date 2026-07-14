@@ -664,6 +664,29 @@
                 <div id="adminOpsRuntime"></div>
               </section>
 
+              <section class="xp-card admin-card" aria-labelledby="adminOpsBotReactionTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminOpsBotReactionTitle">Poker bot reaction</h2>
+                    <p class="admin-card__subtitle">Process-local timing control for manual poker tests.</p>
+                  </div>
+                  <span class="admin-pill admin-pill--info">WS Preview</span>
+                </div>
+                <div id="adminOpsBotReactionSummary"></div>
+                <form class="admin-adjust" id="adminOpsBotReactionForm">
+                  <label class="admin-field">
+                    <span class="admin-field__label">Reaction delay (ms)</span>
+                    <input class="admin-input" id="adminOpsBotReactionDelay" type="number" name="delayMs" min="100" max="10000" step="100" inputmode="numeric" required>
+                    <span class="admin-field__hint">A fixed value applies to the next bot delay calculation.</span>
+                  </label>
+                  <div class="admin-filter-actions">
+                    <button class="admin-btn admin-btn--primary" id="adminOpsBotReactionApply" type="submit">Apply delay</button>
+                    <button class="admin-btn admin-btn--ghost" id="adminOpsBotReactionDefault" type="button">Set default</button>
+                  </div>
+                </form>
+                <div class="admin-note" id="adminOpsBotReactionStatus" aria-live="polite"></div>
+              </section>
+
               <section class="xp-card admin-card" aria-labelledby="adminOpsActionsTitle">
                 <div class="admin-card__head">
                   <div>

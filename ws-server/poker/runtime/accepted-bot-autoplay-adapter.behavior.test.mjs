@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createAcceptedBotAutoplayExecutor as createAcceptedBotAutoplayExecutorBase } from "./accepted-bot-autoplay-adapter.mjs";
+import { createBotReactionOverrideStore } from "./bot-reaction-override.mjs";
 import { initHandState, applyAction as applyRuntimeAction, advanceIfNeeded } from "../snapshot-runtime/poker-reducer.mjs";
 import { buildBootstrappedPokerState, applyCoreStateAction } from "../engine/poker-engine.mjs";
 import { computeSharedLegalActions } from "../shared/poker-primitives.mjs";
@@ -23,6 +24,44 @@ function createAcceptedBotAutoplayExecutor(options = {}) {
     env: mergedEnv
   });
 }
+
+function previewRuntimeEnv() {
+  return {
+    PORT: "3001",
+    WS_AUTHORITATIVE_JOIN_ENABLED: "1",
+    SUPABASE_STAGE_PROJECT_REF: "stage-project-ref",
+    SUPABASE_URL: "https://stage-project-ref.supabase.co",
+    SUPABASE_DB_URL: "postgresql://postgres.stage-project-ref:password@aws-0-eu-central-1.pooler.supabase.com:6543/postgres"
+  };
+}
+
+test("bot reaction override store defaults, validates, clears, and resets with a new process instance", () => {
+  const env = previewRuntimeEnv();
+  const store = createBotReactionOverrideStore({ env, now: () => Date.parse("2026-07-14T12:00:00.000Z") });
+
+  assert.deepEqual(store.read().active, { minMs: 2000, maxMs: 4000 });
+  assert.equal(store.read().mode, "default");
+  assert.deepEqual(store.setOverride({ minMs: 500, maxMs: 500, updatedBy: "admin-1" }).active, { minMs: 500, maxMs: 500 });
+  assert.throws(() => store.setOverride({ minMs: 99, maxMs: 500, updatedBy: "admin-1" }), { code: "invalid_range" });
+  assert.throws(() => store.setOverride({ minMs: 600, maxMs: 500, updatedBy: "admin-1" }), { code: "invalid_range" });
+  assert.deepEqual(store.getOverrideRange(), { minMs: 500, maxMs: 500 });
+  assert.equal(store.clearOverride({ updatedBy: "admin-1" }).mode, "default");
+  assert.equal(store.getOverrideRange(), null);
+  assert.equal(createBotReactionOverrideStore({ env }).read().mode, "default");
+});
+
+test("bot reaction override admin operations fail closed outside the exact WS Preview runtime", () => {
+  const productionStore = createBotReactionOverrideStore({
+    env: { ...previewRuntimeEnv(), PORT: "3000" }
+  });
+  assert.throws(() => productionStore.read(), { code: "preview_only" });
+  assert.throws(() => productionStore.setOverride({ minMs: 500, maxMs: 500, updatedBy: "admin-1" }), { code: "preview_only" });
+
+  const legacyConfiguredStore = createBotReactionOverrideStore({
+    env: { ...previewRuntimeEnv(), WS_BOT_REACTION_MIN_MS: "500" }
+  });
+  assert.throws(() => legacyConfiguredStore.read(), { code: "preview_only" });
+});
 
 test("autoplay adapter resolves shared autoplay from neutral shared module path", () => {
   const source = fs.readFileSync(new URL("./accepted-bot-autoplay-adapter.mjs", import.meta.url), "utf8");
@@ -287,6 +326,53 @@ test("accepted bot autoplay waits a human-like reaction delay before acting", as
   assert.equal(observed.persist, 1);
 });
 
+test("accepted bot autoplay reads the in-memory override for each next action without interrupting an active sleep", async () => {
+  const store = createBotReactionOverrideStore({ env: previewRuntimeEnv() });
+  store.setOverride({ minMs: 2000, maxMs: 2000, updatedBy: "admin-1" });
+  const observedSleepMs = [];
+  const nowMs = Date.now();
+  let version = 2;
+  const state = {
+    version,
+    tableId: "t-live-override",
+    handId: "h-live-override",
+    phase: "PREFLOP",
+    turnUserId: "bot_2",
+    turnDeadlineAt: nowMs + 20_000,
+    seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }],
+    stacks: { human_1: 100, bot_2: 100 }
+  };
+  const tableManager = {
+    persistedPokerState: () => ({ ...state, version }),
+    persistedStateVersion: () => version,
+    tableSnapshot: () => ({ seats: state.seats }),
+    applyAction: () => {
+      version += 1;
+      return { accepted: true, changed: true, replayed: false, stateVersion: version };
+    }
+  };
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    getBotReactionOverride: () => store.getOverrideRange(),
+    now: () => nowMs,
+    sleep: async (ms) => {
+      observedSleepMs.push(ms);
+      if (observedSleepMs.length === 1) {
+        store.setOverride({ minMs: 500, maxMs: 500, updatedBy: "admin-1" });
+      }
+    },
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    klog: () => {}
+  });
+
+  await run({ tableId: state.tableId, trigger: "act", requestId: "first-action" });
+  await run({ tableId: state.tableId, trigger: "act", requestId: "second-action" });
+
+  assert.deepEqual(observedSleepMs, [2000, 500]);
+});
+
 test("accepted bot autoplay clamps reaction delay to the remaining turn window", async () => {
   const observed = [];
   const nowMs = Date.now();
@@ -545,6 +631,7 @@ test("accepted bot autoplay exposes final state version when a later step broadc
 });
 
 test("accepted bot autoplay no-ops when next turn is not a bot", async () => {
+  let overrideReads = 0;
   const tableManager = {
     persistedPokerState: () => ({
       version: 2,
@@ -564,6 +651,10 @@ test("accepted bot autoplay no-ops when next turn is not a bot", async () => {
 
   const run = createAcceptedBotAutoplayExecutor({
     tableManager,
+    getBotReactionOverride: () => {
+      overrideReads += 1;
+      return { minMs: 500, maxMs: 500 };
+    },
     persistMutatedState: async () => ({ ok: true }),
     restoreTableFromPersisted: async () => ({ ok: true }),
     broadcastResyncRequired: () => {},
@@ -574,6 +665,7 @@ test("accepted bot autoplay no-ops when next turn is not a bot", async () => {
   assert.equal(result.ok, true);
   assert.equal(result.changed, false);
   assert.equal(result.reason, "turn_not_bot");
+  assert.equal(overrideReads, 0);
 });
 
 test("accepted bot autoplay no-ops on non-action phase boundary", async () => {
