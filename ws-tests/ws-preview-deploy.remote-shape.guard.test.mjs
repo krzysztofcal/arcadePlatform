@@ -54,4 +54,6 @@ test("ws preview deploy remote script rejects non-stage Supabase env", () => {
   assert.match(text, /preview env SUPABASE_URL must target SUPABASE_STAGE_PROJECT_REF/);
   assert.match(text, /\*"postgres\.\$stage_ref"\*\|\*"\/\/\$stage_ref\."\*\|\*"\.\$stage_ref\."\*/);
   assert.match(text, /preview env SUPABASE_DB_URL must target SUPABASE_STAGE_PROJECT_REF/);
+  assert.match(text, /preview env file must define POKER_WS_INTERNAL_TOKEN/);
+  assert.match(text, /WS_BOT_REACTION_\(MIN\|MAX\)_MS/);
 });

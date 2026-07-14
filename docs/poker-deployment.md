@@ -161,12 +161,26 @@ The preview VPS contract is:
 - Preview port: `3001`
 - Remote upload staging directory: `/tmp/arcadeplatform-ws-preview`
 - Supabase target: `SUPABASE_STAGE_PROJECT_REF` must be set, and `SUPABASE_URL` plus `SUPABASE_DB_URL` must target that same stage project ref
+- Internal admin token: `POKER_WS_INTERNAL_TOKEN` must be a long preview-only secret shared only with the deploy-preview-scoped Netlify Function configuration
 - Optional close grace: `POKER_TABLE_CLOSE_GRACE_MS=60000` keeps newly created empty tables open for 60s before cleanup may close them
 
 Preview deploys unpack into a temporary directory under `/tmp/arcadeplatform-ws-preview` and then sync the extracted files into `/opt/arcade-ws-preview/ws-server`.
 The `WS_PREVIEW_USER` SSH account must have passwordless sudo available to non-interactive GitHub Actions sessions. The workflow checks this with `sudo -n bash -c 'true'` before touching preview app contents because it needs elevated access to validate the systemd unit, read the preview env file, sync files into `/opt/arcade-ws-preview`, and restart `ws-server-preview.service`. Do not use `sudo -n -v` as the local smoke check here: it can still require a password when the same user has both normal passworded sudo rules and command-specific `NOPASSWD` rules.
-The workflow fails fast before mutating preview app contents when passwordless sudo, the preview base root, app dir, env file, service, Node.js, `tar`, `rsync`, `curl`, required `PORT=3001`, `WS_AUTHORITATIVE_JOIN_ENABLED=1`, non-empty `SUPABASE_DB_URL`, or stage Supabase project-ref match is missing.
-Preview routing stays in `infra/vps/Caddyfile`, which must continue to define both the `ws.kcswh.pl -> 127.0.0.1:3000` and `ws-preview.kcswh.pl -> 127.0.0.1:3001` site blocks.
+The workflow fails fast before mutating preview app contents when passwordless sudo, the preview base root, app dir, env file, service, Node.js, `tar`, `rsync`, `curl`, required `PORT=3001`, `WS_AUTHORITATIVE_JOIN_ENABLED=1`, non-empty `SUPABASE_DB_URL`, preview-only `POKER_WS_INTERNAL_TOKEN`, or stage Supabase project-ref match is missing. It also rejects retired `WS_BOT_REACTION_MIN_MS` and `WS_BOT_REACTION_MAX_MS` values so runtime changes have one source of truth.
+Preview routing stays in `infra/vps/Caddyfile`, which must continue to define both the `ws.kcswh.pl -> 127.0.0.1:3000` and `ws-preview.kcswh.pl -> 127.0.0.1:3001` site blocks. Only the preview host exposes the exact `/internal/admin/bot-reaction` reverse-proxy route; the production host must not expose it.
+
+### WS Preview bot reaction control
+
+The Admin Ops card can set a single fixed bot reaction delay for manual poker testing. A value such as `500 ms` creates the in-memory range `500–500 ms`; **Set default** removes the override and restores random `2000–4000 ms` delays. The next bot action reads the current range, while an action already sleeping keeps its original delay.
+
+The control is intentionally process-local and preview-only: it does not use a table, migration, feature-flag service, or timing ENV. A WS Preview restart or deployment restores the default automatically. The deploy-preview Netlify context must define `POKER_WS_INTERNAL_BASE_URL=https://ws-preview.kcswh.pl` and the same preview-only `POKER_WS_INTERNAL_TOKEN` as `/opt/arcade-ws-preview/.env.preview`. Do not copy either setting into production context.
+
+Manual verification after both Netlify Deploy Preview and an explicit WS Preview Deploy:
+
+1. Open Admin → Ops and confirm the card says `WS Preview`, `Default`, and `2000–4000 ms`.
+2. Set `500 ms`, start a poker hand, and confirm subsequent bot decisions occur after about half a second.
+3. Click **Set default**, continue playing, and confirm subsequent bot decisions again vary within approximately `2000–4000 ms`.
+4. Restart or redeploy the preview WS and confirm the card returns to `Default` without database cleanup.
 
 Minimal preview sudoers coverage for `WS_PREVIEW_USER` must include the concrete programs used by the workflow: `systemctl`, `test`, `grep`, `bash`, `rm`, `mkdir`, `tar`, and `rsync`. On Ubuntu, verify the actual binary paths with `command -v systemctl test grep bash rm mkdir tar rsync`, then keep `/etc/sudoers.d/ws-preview-deploy` mode `0440`.
 

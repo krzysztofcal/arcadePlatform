@@ -1,4 +1,5 @@
 import { recoverFromPersistConflict } from "./persist-conflict-recovery.mjs";
+import { DEFAULT_BOT_REACTION_MAX_MS, DEFAULT_BOT_REACTION_MIN_MS } from "./bot-reaction-override.mjs";
 
 import { TURN_MS } from "../shared/poker-turn-timeout.mjs";
 import { applyAction as applySharedAction } from "../shared/poker-action-reducer.mjs";
@@ -16,8 +17,6 @@ import { computeLegalActions as computeLegacyLegalActions } from "../snapshot-ru
 
 const DEFAULT_SHARED_AUTOPLAY_MODULE_URL = new URL("../../shared/poker-domain/poker-autoplay.mjs", import.meta.url).href;
 const sharedAutoplayModulePromiseByUrl = new Map();
-const DEFAULT_BOT_REACTION_MIN_MS = 2_000;
-const DEFAULT_BOT_REACTION_MAX_MS = 4_000;
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 const isCurrentHandPhase = (phase) => isActionPhase(phase) || phase === "SHOWDOWN" || phase === "HAND_DONE";
@@ -346,17 +345,27 @@ function buildSeatUserIdsInOrder(state) {
     .map((seat) => seat.userId.trim());
 }
 
-function getBotAutoplayConfig(env = process.env) {
+function getBotAutoplayConfig(env = process.env, runtimeOverride = null) {
   const hardCapRaw = Number(env?.POKER_BOTS_BOTS_ONLY_HAND_HARD_CAP);
   const botsOnlyHandCompletionHardCap = Number.isInteger(hardCapRaw) && hardCapRaw > 0 ? hardCapRaw : 80;
   const configuredMinRaw = Number(env?.WS_BOT_REACTION_MIN_MS);
   const configuredMaxRaw = Number(env?.WS_BOT_REACTION_MAX_MS);
-  const minReactionMs = Number.isFinite(configuredMinRaw) && configuredMinRaw >= 0
-    ? Math.trunc(configuredMinRaw)
-    : DEFAULT_BOT_REACTION_MIN_MS;
-  const maxReactionMs = Number.isFinite(configuredMaxRaw) && configuredMaxRaw >= 0
-    ? Math.trunc(configuredMaxRaw)
-    : DEFAULT_BOT_REACTION_MAX_MS;
+  const overrideMinRaw = Number(runtimeOverride?.minMs);
+  const overrideMaxRaw = Number(runtimeOverride?.maxMs);
+  const hasValidRuntimeOverride = Number.isInteger(overrideMinRaw)
+    && Number.isInteger(overrideMaxRaw)
+    && overrideMinRaw >= 0
+    && overrideMaxRaw >= overrideMinRaw;
+  const minReactionMs = hasValidRuntimeOverride
+    ? overrideMinRaw
+    : Number.isFinite(configuredMinRaw) && configuredMinRaw >= 0
+      ? Math.trunc(configuredMinRaw)
+      : DEFAULT_BOT_REACTION_MIN_MS;
+  const maxReactionMs = hasValidRuntimeOverride
+    ? overrideMaxRaw
+    : Number.isFinite(configuredMaxRaw) && configuredMaxRaw >= 0
+      ? Math.trunc(configuredMaxRaw)
+      : DEFAULT_BOT_REACTION_MAX_MS;
   return {
     botsOnlyHandCompletionHardCap,
     minReactionMs,
@@ -759,6 +768,7 @@ export function createAcceptedBotStepExecutor({
   broadcastResyncRequired,
   onBotStepPersisted = () => {},
   env = process.env,
+  getBotReactionOverride = () => null,
   random = Math.random,
   now = Date.now,
   sleep = sleepMs,
@@ -922,10 +932,11 @@ export function createAcceptedBotStepExecutor({
           if (!isBotTurnAuthoritatively(tableManager, tableId, botTurnUserId, loopSeatBotMap)) {
             return { ok: false, reason: "turn_not_bot" };
           }
+          const reactionConfig = getBotAutoplayConfig(env, getBotReactionOverride());
           const reactionDelayMs = resolveBotReactionDelayMs({
             state: responseFinalState,
-            minReactionMs: cfg.minReactionMs,
-            maxReactionMs: cfg.maxReactionMs,
+            minReactionMs: reactionConfig.minReactionMs,
+            maxReactionMs: reactionConfig.maxReactionMs,
             random,
             now
           });

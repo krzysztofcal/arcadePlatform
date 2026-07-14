@@ -32,9 +32,11 @@ test("infra/vps/Caddyfile is the unified prod+preview WS source of truth", () =>
   assert.match(prod, /respond "OK" 200/);
 
   assert.match(preview, /@healthz path \/healthz/);
+  assert.match(preview, /@botReactionAdmin path \/internal\/admin\/bot-reaction/);
   assert.match(preview, /@ws path \/ws\*/);
   assert.match(preview, /reverse_proxy 127\.0\.0\.1:3001/);
   assert.match(preview, /respond "OK" 200/);
+  assert.doesNotMatch(prod, /internal\/admin\/bot-reaction/);
 });
 
 test("WS PR harness runs the unified infra VPS Caddy guard", () => {

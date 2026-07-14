@@ -20,6 +20,11 @@ ws-preview.kcswh.pl {
     reverse_proxy 127.0.0.1:3001
   }
 
+  @botReactionAdmin path /internal/admin/bot-reaction
+  handle @botReactionAdmin {
+    reverse_proxy 127.0.0.1:3001
+  }
+
   @ws path /ws*
   handle @ws {
     reverse_proxy 127.0.0.1:3001
