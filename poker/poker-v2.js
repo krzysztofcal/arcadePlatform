@@ -168,11 +168,17 @@
   var stickyWinnerReveal = {
     handId: null,
     visibleUntilMs: 0,
-    winners: [],
+    settlementPresentation: null,
+    showdownWinnerUserIds: [],
     revealedShowdownCardsByUserId: {},
     communityCards: []
   };
   var pendingPostRevealSnapshot = null;
+  var lastPresentedSettlementHandId = null;
+  var lastAnimatedSettlementHandId = null;
+  var lastSettlementFailureKey = null;
+  var settlementAnimationGeneration = 0;
+  var settlementAnimationTimers = [];
   var els = {};
 
   function cloneState(source){
@@ -313,6 +319,7 @@
       wsReady: false,
       showdown: null,
       handSettlement: null,
+      settlementPresentation: null,
       revealedShowdownCardsByUserId: {}
     };
   }
@@ -381,6 +388,20 @@
       }
     } catch (_err){}
     return fallback || key;
+  }
+
+  function tf(key, values, fallback){
+    try {
+      if (window.I18N && typeof window.I18N.format === 'function'){
+        var translated = window.I18N.format(key, values || {});
+        if (translated) return translated;
+      }
+    } catch (_err){}
+    var output = t(key, fallback || key);
+    Object.keys(values || {}).forEach(function(name){
+      output = output.replace(new RegExp('\\{' + name + '\\}', 'g'), String(values[name]));
+    });
+    return output;
   }
 
   function getAccessToken(){
@@ -893,7 +914,7 @@
       handId: state.handId || null,
       committedByUserId: Object.assign({}, seatCommittedByUserId),
       lastActionByUserId: Object.assign({}, state.lastBettingRoundActionByUserId || {}),
-      winners: getDisplayWinnerUserIds()
+      settlementPresentation: cloneSettlementPresentation(getDisplaySettlementPresentation())
     };
   }
 
@@ -935,11 +956,17 @@
   function normalizeShowdown(source){
     if (!isObject(source)) return null;
     var showdown = {
-      winners: Array.isArray(source.winners) ? source.winners.filter(function(userId){
-        return typeof userId === 'string' && !!userId;
-      }) : [],
+      winners: Array.isArray(source.winners) ? source.winners.slice() : [],
       reason: typeof source.reason === 'string' ? source.reason : null,
-      handId: typeof source.handId === 'string' ? source.handId : null
+      handId: typeof source.handId === 'string' ? source.handId : null,
+      potAwardedTotal: source.potAwardedTotal,
+      potsAwarded: Array.isArray(source.potsAwarded) ? source.potsAwarded.map(function(pot){
+        return isObject(pot) ? {
+          amount: pot.amount,
+          winners: Array.isArray(pot.winners) ? pot.winners.slice() : pot.winners,
+          eligibleUserIds: Array.isArray(pot.eligibleUserIds) ? pot.eligibleUserIds.slice() : pot.eligibleUserIds
+        } : pot;
+      }) : source.potsAwarded
     };
     if (Array.isArray(source.revealedShowdownParticipants)){
       showdown.revealedShowdownParticipants = source.revealedShowdownParticipants
@@ -963,7 +990,160 @@
     if (!isObject(source)) return null;
     return {
       handId: typeof source.handId === 'string' ? source.handId : null,
-      settledAt: typeof source.settledAt === 'string' ? source.settledAt : null
+      settledAt: typeof source.settledAt === 'string' ? source.settledAt : null,
+      payouts: isObject(source.payouts) ? Object.assign({}, source.payouts) : source.payouts
+    };
+  }
+
+  function invalidSettlementPresentation(reason, handId, settledAt){
+    return {
+      valid: false,
+      failureReason: reason || 'invalid_settlement',
+      handId: handId || null,
+      settledAt: settledAt || null,
+      totalAmount: 0,
+      pots: [],
+      byUserId: {}
+    };
+  }
+
+  function normalizeSettlementUserId(value){
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+  }
+
+  function normalizeSettlementChipAmount(value){
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+  }
+
+  function normalizeSettlementUserIds(source){
+    if (!Array.isArray(source) || !source.length) return null;
+    var result = [];
+    var seen = Object.create(null);
+    for (var i = 0; i < source.length; i++){
+      var userId = normalizeSettlementUserId(source[i]);
+      if (!userId || seen[userId]) return null;
+      seen[userId] = true;
+      result.push(userId);
+    }
+    return result;
+  }
+
+  function normalizeSettlementPayouts(source){
+    if (!isObject(source)) return null;
+    var result = Object.create(null);
+    var keys = Object.keys(source);
+    for (var i = 0; i < keys.length; i++){
+      var userId = normalizeSettlementUserId(keys[i]);
+      var amount = normalizeSettlementChipAmount(source[keys[i]]);
+      if (!userId || amount == null || hasOwn(result, userId)) return null;
+      if (amount > 0) result[userId] = amount;
+    }
+    return result;
+  }
+
+  function allocatePotRecipients(amount, orderedWinnerIds){
+    var safeAmount = normalizeSettlementChipAmount(amount);
+    var winners = normalizeSettlementUserIds(orderedWinnerIds);
+    if (safeAmount == null || !winners || (safeAmount > 0 && !winners.length)) return null;
+    var baseShare = Math.floor(safeAmount / winners.length);
+    var remainder = safeAmount - (baseShare * winners.length);
+    return winners.map(function(userId, index){
+      return { userId: userId, amount: baseShare + (index < remainder ? 1 : 0) };
+    });
+  }
+
+  function classifySettlementPot(reason, potIndex, eligibleUserIds, winners, sidePotNumber){
+    if (reason === 'all_folded'){
+      if (potIndex !== 0 || eligibleUserIds.length !== 1 || winners.length !== 1 || eligibleUserIds[0] !== winners[0]) return null;
+      return { kind: 'main', sidePotNumber: null };
+    }
+    if (reason !== 'computed') return null;
+    if (potIndex === 0){
+      if (eligibleUserIds.length < 2) return null;
+      return { kind: 'main', sidePotNumber: null };
+    }
+    if (eligibleUserIds.length >= 2) return { kind: 'side', sidePotNumber: sidePotNumber };
+    if (eligibleUserIds.length === 1 && winners.length === 1 && eligibleUserIds[0] === winners[0]) return { kind: 'return', sidePotNumber: null };
+    return null;
+  }
+
+  function buildSettlementPresentation(input){
+    var showdown = input && input.showdown;
+    var settlement = input && input.handSettlement;
+    var handId = showdown && normalizeSettlementUserId(showdown.handId);
+    var settlementHandId = settlement && normalizeSettlementUserId(settlement.handId);
+    var settledAt = settlement && typeof settlement.settledAt === 'string' ? settlement.settledAt : null;
+    if (!isObject(showdown) || !isObject(settlement)) return invalidSettlementPresentation('missing_settlement_pair', handId || settlementHandId, settledAt);
+    if (!handId || !settlementHandId || handId !== settlementHandId) return invalidSettlementPresentation('hand_id_mismatch', handId || settlementHandId, settledAt);
+    var reason = typeof showdown.reason === 'string' ? showdown.reason.trim().toLowerCase() : '';
+    var totalAmount = normalizeSettlementChipAmount(showdown.potAwardedTotal);
+    var payouts = normalizeSettlementPayouts(settlement.payouts);
+    var sourcePots = showdown.potsAwarded;
+    if (totalAmount == null || !payouts || !Array.isArray(sourcePots) || !sourcePots.length) return invalidSettlementPresentation('malformed_totals', handId, settledAt);
+    if (reason === 'all_folded' && sourcePots.length !== 1) return invalidSettlementPresentation('malformed_all_folded', handId, settledAt);
+
+    var pots = [];
+    var byUserId = Object.create(null);
+    var calculatedPayouts = Object.create(null);
+    var calculatedTotal = 0;
+    var sidePotNumber = 0;
+    for (var potIndex = 0; potIndex < sourcePots.length; potIndex++){
+      var sourcePot = sourcePots[potIndex];
+      if (!isObject(sourcePot)) return invalidSettlementPresentation('malformed_pot', handId, settledAt);
+      var amount = normalizeSettlementChipAmount(sourcePot.amount);
+      var winners = normalizeSettlementUserIds(sourcePot.winners);
+      var eligibleUserIds = normalizeSettlementUserIds(sourcePot.eligibleUserIds);
+      if (amount == null || !winners || !eligibleUserIds) return invalidSettlementPresentation('malformed_pot', handId, settledAt);
+      for (var winnerIndex = 0; winnerIndex < winners.length; winnerIndex++){
+        if (eligibleUserIds.indexOf(winners[winnerIndex]) === -1) return invalidSettlementPresentation('ineligible_winner', handId, settledAt);
+      }
+      var nextSidePotNumber = sidePotNumber + 1;
+      var classification = classifySettlementPot(reason, potIndex, eligibleUserIds, winners, nextSidePotNumber);
+      if (!classification) return invalidSettlementPresentation('invalid_pot_classification', handId, settledAt);
+      if (classification.kind === 'side') sidePotNumber = nextSidePotNumber;
+      var recipients = allocatePotRecipients(amount, winners);
+      if (!recipients) return invalidSettlementPresentation('invalid_split', handId, settledAt);
+      var recipientTotal = 0;
+      var awardId = handId + ':pot:' + potIndex;
+      recipients.forEach(function(recipient){
+        recipientTotal += recipient.amount;
+        calculatedPayouts[recipient.userId] = (calculatedPayouts[recipient.userId] || 0) + recipient.amount;
+        if (!byUserId[recipient.userId]) byUserId[recipient.userId] = [];
+        byUserId[recipient.userId].push({
+          awardId: awardId,
+          potIndex: potIndex,
+          kind: classification.kind,
+          sidePotNumber: classification.sidePotNumber,
+          amount: recipient.amount
+        });
+      });
+      if (recipientTotal !== amount) return invalidSettlementPresentation('split_total_mismatch', handId, settledAt);
+      pots.push({
+        awardId: awardId,
+        potIndex: potIndex,
+        kind: classification.kind,
+        sidePotNumber: classification.sidePotNumber,
+        amount: amount,
+        recipients: recipients,
+        eligibleUserIds: eligibleUserIds
+      });
+      calculatedTotal += amount;
+    }
+    if (calculatedTotal !== totalAmount) return invalidSettlementPresentation('pot_total_mismatch', handId, settledAt);
+    var payoutKeys = Object.keys(payouts).sort();
+    var calculatedKeys = Object.keys(calculatedPayouts).filter(function(userId){ return calculatedPayouts[userId] > 0; }).sort();
+    if (payoutKeys.join('|') !== calculatedKeys.join('|')) return invalidSettlementPresentation('payout_users_mismatch', handId, settledAt);
+    for (var payoutIndex = 0; payoutIndex < payoutKeys.length; payoutIndex++){
+      if (payouts[payoutKeys[payoutIndex]] !== calculatedPayouts[payoutKeys[payoutIndex]]) return invalidSettlementPresentation('payout_amount_mismatch', handId, settledAt);
+    }
+    return {
+      valid: true,
+      failureReason: null,
+      handId: handId,
+      settledAt: settledAt,
+      totalAmount: totalAmount,
+      pots: pots,
+      byUserId: byUserId
     };
   }
 
@@ -988,20 +1168,34 @@
     return next;
   }
 
+  function cloneSettlementPresentation(source){
+    return source ? cloneState(source) : null;
+  }
+
+  function resolveSettlementRevealDueAt(presentation){
+    var settledAtMs = presentation && presentation.settledAt ? Date.parse(presentation.settledAt) : NaN;
+    return Number.isFinite(settledAtMs) && settledAtMs <= Date.now() + 1000 ? settledAtMs + WINNER_REVEAL_MS : Date.now() + WINNER_REVEAL_MS;
+  }
+
   function syncStickyWinnerReveal(){
     var handId = state.handId || (state.handSettlement && state.handSettlement.handId) || (state.showdown && state.showdown.handId) || null;
-    var winners = state.showdown && Array.isArray(state.showdown.winners) ? state.showdown.winners.filter(Boolean) : [];
-    if (!handId || !winners.length || state.phase !== 'SETTLED'){
-      return;
-    }
-    if (stickyWinnerReveal.handId !== handId || stickyWinnerReveal.visibleUntilMs <= Date.now()){
+    if (!handId || state.phase !== 'SETTLED' || (!state.showdown && !state.settlementPresentation)) return;
+    if (stickyWinnerReveal.handId !== handId && lastPresentedSettlementHandId !== handId){
+      var visibleUntilMs = resolveSettlementRevealDueAt(state.settlementPresentation || state.handSettlement);
       stickyWinnerReveal = {
         handId: handId,
-        visibleUntilMs: Date.now() + WINNER_REVEAL_MS,
-        winners: winners.slice(),
+        visibleUntilMs: visibleUntilMs,
+        settlementPresentation: cloneSettlementPresentation(state.settlementPresentation),
+        showdownWinnerUserIds: state.showdown && Array.isArray(state.showdown.winners) ? state.showdown.winners.filter(function(userId){ return typeof userId === 'string' && !!userId; }) : [],
         revealedShowdownCardsByUserId: cloneRevealedShowdownCards(state.revealedShowdownCardsByUserId),
         communityCards: Array.isArray(state.communityCards) ? state.communityCards.slice(0, 5) : []
       };
+      lastPresentedSettlementHandId = handId;
+    } else if (stickyWinnerReveal.handId === handId){
+      stickyWinnerReveal.settlementPresentation = cloneSettlementPresentation(state.settlementPresentation);
+      stickyWinnerReveal.showdownWinnerUserIds = state.showdown && Array.isArray(state.showdown.winners) ? state.showdown.winners.filter(function(userId){ return typeof userId === 'string' && !!userId; }) : [];
+      stickyWinnerReveal.revealedShowdownCardsByUserId = cloneRevealedShowdownCards(state.revealedShowdownCardsByUserId);
+      stickyWinnerReveal.communityCards = Array.isArray(state.communityCards) ? state.communityCards.slice(0, 5) : [];
     }
   }
 
@@ -1034,9 +1228,9 @@
       revealDismissTimer = null;
       stickyWinnerReveal.visibleUntilMs = 0;
       if (pendingPostRevealSnapshot){
-        var nextPayload = pendingPostRevealSnapshot;
+        var nextFrame = pendingPostRevealSnapshot;
         pendingPostRevealSnapshot = null;
-        mergeSnapshot(nextPayload);
+        mergeSnapshot(nextFrame.payload, nextFrame);
       }
       render();
       autoJoinSeat();
@@ -1050,16 +1244,33 @@
     return !!(nextHandId && sticky.handId && nextHandId !== sticky.handId);
   }
 
-  function getDisplayWinnerUserIds(){
-    if (state.showdown && Array.isArray(state.showdown.winners) && state.showdown.winners.length){
-      return state.showdown.winners;
-    }
+  function getDisplaySettlementPresentation(){
+    if (state.phase === 'SETTLED' && state.settlementPresentation) return state.settlementPresentation;
     var sticky = getActiveWinnerReveal();
-    return sticky ? sticky.winners.slice() : [];
+    return sticky ? sticky.settlementPresentation : null;
   }
 
-  function mergeSnapshot(payload){
+  function getSeatSettlementAwards(userId){
+    var presentation = getDisplaySettlementPresentation();
+    if (!presentation || !presentation.valid || !presentation.byUserId || !Array.isArray(presentation.byUserId[userId])) return [];
+    return presentation.byUserId[userId].slice();
+  }
+
+  function hasOwn(source, key){
+    return !!source && Object.prototype.hasOwnProperty.call(source, key);
+  }
+
+  function readSnapshotField(payload, publicObj, key){
+    if (hasOwn(payload, key)) return { present: true, value: payload[key] };
+    if (hasOwn(publicObj, key)) return { present: true, value: publicObj[key] };
+    return { present: false, value: undefined };
+  }
+
+  function mergeSnapshot(payload, frame){
     if (!isObject(payload)) return;
+    var frameKind = frame && typeof frame.kind === 'string' ? frame.kind : 'stateSnapshot';
+    var frameInitial = !!(frame && frame.initial);
+    var authoritativeFull = frameKind === 'stateSnapshot' || (frameKind === 'table_state' && frameInitial);
     var snapshotTableId = typeof payload.tableId === 'string' && payload.tableId ? payload.tableId : null;
     var publicObj = isObject(payload.public) ? payload.public : {};
     var privateObj = isObject(payload.private) ? payload.private : {};
@@ -1068,8 +1279,8 @@
     var handObj = isObject(payload.hand) ? payload.hand : isObject(publicObj.hand) ? publicObj.hand : {};
     var turnObj = isObject(payload.turn) ? payload.turn : isObject(publicObj.turn) ? publicObj.turn : {};
     var potObj = isObject(payload.pot) ? payload.pot : isObject(publicObj.pot) ? publicObj.pot : {};
-    var showdownObj = isObject(payload.showdown) ? payload.showdown : isObject(publicObj.showdown) ? publicObj.showdown : null;
-    var handSettlementObj = isObject(payload.handSettlement) ? payload.handSettlement : isObject(publicObj.handSettlement) ? publicObj.handSettlement : null;
+    var showdownField = readSnapshotField(payload, publicObj, 'showdown');
+    var handSettlementField = readSnapshotField(payload, publicObj, 'handSettlement');
     var legalSource = payload.legalActions != null ? payload.legalActions : publicObj.legalActions;
     var constraintsPrimary = payload.actionConstraints != null ? payload.actionConstraints : publicObj.actionConstraints;
     var lastActionMapSource = payload.lastBettingRoundActionByUserId != null ? payload.lastBettingRoundActionByUserId : publicObj.lastBettingRoundActionByUserId;
@@ -1140,11 +1351,37 @@
     if (legalActions.length || Array.isArray(legalSource) || (isObject(legalSource) && Array.isArray(legalSource.actions))){
       state.legalActions = legalActions;
     }
-    state.showdown = normalizeShowdown(showdownObj);
-    state.handSettlement = normalizeHandSettlement(handSettlementObj);
-    state.revealedShowdownCardsByUserId = mapRevealedShowdownCards(state.showdown);
+    if (authoritativeFull || showdownField.present){
+      state.showdown = normalizeShowdown(showdownField.value);
+      state.revealedShowdownCardsByUserId = mapRevealedShowdownCards(state.showdown);
+    }
+    if (authoritativeFull || handSettlementField.present) state.handSettlement = normalizeHandSettlement(handSettlementField.value);
+    var handChanged = !!(state.handId && previousHandId && state.handId !== previousHandId);
+    var explicitSettlementClear = (showdownField.present && showdownField.value == null) || (handSettlementField.present && handSettlementField.value == null);
+    var completeSettlementPair = showdownField.present && handSettlementField.present && state.showdown && state.handSettlement;
+    if (state.phase !== 'SETTLED' || handChanged || explicitSettlementClear){
+      state.settlementPresentation = null;
+      if (explicitSettlementClear && stickyWinnerReveal.handId === (state.handId || previousHandId)){
+        clearWinnerRevealTimer();
+        stickyWinnerReveal.visibleUntilMs = 0;
+      }
+      cancelSettlementAnimations();
+    } else if ((authoritativeFull && state.showdown && state.handSettlement) || completeSettlementPair){
+      state.settlementPresentation = buildSettlementPresentation({ showdown: state.showdown, handSettlement: state.handSettlement });
+      if (!state.settlementPresentation.valid){
+        var failureKey = String(state.settlementPresentation.handId || state.handId || 'unknown') + ':' + state.settlementPresentation.failureReason;
+        if (failureKey !== lastSettlementFailureKey){
+          lastSettlementFailureKey = failureKey;
+          klog('poker_settlement_presentation_invalid', { reason: state.settlementPresentation.failureReason });
+        }
+      }
+    } else if (authoritativeFull && (showdownField.present || handSettlementField.present)){
+      state.settlementPresentation = invalidSettlementPresentation('missing_settlement_pair', state.handId, state.handSettlement && state.handSettlement.settledAt);
+    } else if (authoritativeFull){
+      state.settlementPresentation = null;
+    }
     state.lastBettingRoundActionByUserId = normalizeLastBettingRoundActionByUserId(lastActionMapSource);
-    if (state.handId && previousHandId && state.handId !== previousHandId && (previousPhase === 'SETTLED' || stickyWinnerReveal.handId === previousHandId)){
+    if (handChanged && (previousPhase === 'SETTLED' || stickyWinnerReveal.handId === previousHandId)){
       clearWinnerRevealTimer();
       stickyWinnerReveal.visibleUntilMs = 0;
     }
@@ -1494,9 +1731,30 @@
     };
   }
 
-  function isWinnerSeat(seat){
+  function getSettlementAwardLabel(award){
+    if (!award) return '';
+    if (award.kind === 'main') return t('pokerSettlementMainPot', 'Main pot');
+    if (award.kind === 'side') return tf('pokerSettlementSidePot', { number: award.sidePotNumber }, 'Side pot {number}');
+    if (award.kind === 'return') return t('pokerSettlementReturned', 'Returned');
+    return '';
+  }
+
+  function hasWonContestedPot(seat){
     if (!seat || typeof seat.userId !== 'string') return false;
-    return getDisplayWinnerUserIds().indexOf(seat.userId) !== -1;
+    return getSeatSettlementAwards(seat.userId).some(function(award){ return award.kind === 'main' || award.kind === 'side'; });
+  }
+
+  function hasReturnedChips(seat){
+    if (!seat || typeof seat.userId !== 'string') return false;
+    return getSeatSettlementAwards(seat.userId).some(function(award){ return award.kind === 'return'; });
+  }
+
+  function shouldShowShowdownHandSummary(seat){
+    if (!seat || typeof seat.userId !== 'string') return false;
+    if (getSeatSettlementAwards(seat.userId).length) return true;
+    if (state.showdown && Array.isArray(state.showdown.winners) && state.showdown.winners.indexOf(seat.userId) !== -1) return true;
+    var sticky = getActiveWinnerReveal();
+    return !!(sticky && Array.isArray(sticky.showdownWinnerUserIds) && sticky.showdownWinnerUserIds.indexOf(seat.userId) !== -1);
   }
 
   function getSeatRevealCards(seat){
@@ -1879,8 +2137,51 @@
     return ids;
   }
 
-  function animateChipDiff(previousVisual, nextVisual){
+  function prefersReducedMotion(){
+    try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (_err){ return false; }
+  }
+
+  function cancelSettlementAnimations(){
+    settlementAnimationGeneration += 1;
+    settlementAnimationTimers.forEach(function(timerId){
+      try { window.clearTimeout(timerId); } catch (_err){}
+    });
+    settlementAnimationTimers = [];
+  }
+
+  function animateSettlementAwards(previousVisual, nextVisual, sceneRect, potFrom, frame){
+    var presentation = nextVisual && nextVisual.settlementPresentation;
+    if (!presentation || !presentation.valid || !Array.isArray(presentation.pots) || !presentation.pots.length) return;
+    if (!frame || frame.kind !== 'statePatch' || frame.initial) return;
+    if (!previousVisual || previousVisual.phase === 'SETTLED' || nextVisual.phase !== 'SETTLED') return;
+    if (!nextVisual.handId || previousVisual.handId !== nextVisual.handId || presentation.handId !== nextVisual.handId) return;
+    if (lastAnimatedSettlementHandId === presentation.handId || prefersReducedMotion()) return;
+    lastAnimatedSettlementHandId = presentation.handId;
+    cancelSettlementAnimations();
+    var generation = settlementAnimationGeneration;
+    var seatByUserId = {};
+    state.seats.forEach(function(seat){ if (seat && seat.userId) seatByUserId[seat.userId] = seat; });
+    var availableMs = Math.max(200, WINNER_REVEAL_MS - CHIP_FLY_MS - 240);
+    var stepGapMs = Math.min(480, Math.max(150, Math.floor(availableMs / Math.max(1, presentation.pots.length))));
+    presentation.pots.forEach(function(pot, potIndex){
+      var timerId = window.setTimeout(function(){
+        if (generation !== settlementAnimationGeneration || state.handId !== presentation.handId) return;
+        pot.recipients.forEach(function(recipient, recipientIndex){
+          var seat = seatByUserId[recipient.userId];
+          if (!seat || !Number.isInteger(seat.seatNo)) return;
+          var target = resolvePointFromPercent(renderedSeatStackAnchors[seat.seatNo] || renderedSeatBetAnchors[seat.seatNo], sceneRect);
+          if (!target) return;
+          var color = resolveFlyChipColorFromAmount(recipient.amount);
+          for (var chipIndex = 0; chipIndex < 3; chipIndex++) spawnChipFly(potFrom, target, color, recipientIndex * 34 + chipIndex * 42);
+        });
+      }, potIndex * stepGapMs);
+      settlementAnimationTimers.push(timerId);
+    });
+  }
+
+  function animateChipDiff(previousVisual, nextVisual, frame){
     if (!previousVisual || !nextVisual || !els.scene || !els.chipFxLayer) return;
+    if (prefersReducedMotion()) return;
     if (typeof els.scene.getBoundingClientRect !== 'function') return;
     var sceneRect = els.scene.getBoundingClientRect();
     if (sceneRect.width <= 0 || sceneRect.height <= 0) return;
@@ -1905,25 +2206,27 @@
         sent += chips;
       });
     }
-    var previousPot = Math.max(0, Number(previousVisual.potTotal) || 0);
-    var nextPot = Math.max(0, Number(nextVisual.potTotal) || 0);
-    var winners = Array.isArray(nextVisual.winners) ? nextVisual.winners : [];
-    var payoutLike = previousPot > 0 && nextPot < previousPot && winners.length > 0 && nextVisual.phase === 'SETTLED';
-    if (payoutLike){
-      var seatByUser = {};
-      state.seats.forEach(function(seat){ if (seat && seat.userId) seatByUser[seat.userId] = seat; });
-      winners.forEach(function(userId, index){
-        var winnerSeat = seatByUser[userId];
-        if (!winnerSeat || !Number.isInteger(winnerSeat.seatNo)) return;
-        var target = resolvePointFromPercent(renderedSeatStackAnchors[winnerSeat.seatNo] || renderedSeatBetAnchors[winnerSeat.seatNo], sceneRect);
-        if (!target) return;
-        var payoutAmount = Math.max(1, Math.round((previousPot - nextPot) / Math.max(1, winners.length)));
-        var payoutColor = resolveFlyChipColorFromAmount(payoutAmount);
-        for (var i = 0; i < 4; i++){
-          spawnChipFly(potFrom, target, payoutColor, (index * 50) + (i * 36));
-        }
-      });
-    }
+    animateSettlementAwards(previousVisual, nextVisual, sceneRect, potFrom, frame);
+  }
+
+  function appendShowdownHandSummary(container, seat){
+    if (!container || !shouldShowShowdownHandSummary(seat)) return;
+    var summary = getWinnerHandSummary(seat);
+    if (!summary) return;
+    var label = document.createElement('div');
+    label.className = 'poker-seat-settlement-hand-label';
+    label.textContent = summary.label;
+    container.appendChild(label);
+    var cards = document.createElement('div');
+    cards.className = 'poker-seat-settlement-hand-cards';
+    summary.cards.forEach(function(card){
+      var normalizedCard = normalizeCard(card);
+      var chip = document.createElement('span');
+      chip.className = 'poker-seat-settlement-hand-card' + (normalizedCard && (normalizedCard.s === 'H' || normalizedCard.s === 'D') ? ' poker-seat-settlement-hand-card--red' : '');
+      chip.textContent = normalizedCard ? (normalizedCard.r + SUIT_SYMBOLS[normalizedCard.s]) : '?';
+      cards.appendChild(chip);
+    });
+    container.appendChild(cards);
   }
 
   function renderSeats(){
@@ -1958,7 +2261,8 @@
       article.className = 'poker-seat'
         + (active ? ' poker-seat--active' : '')
         + (folded ? ' poker-seat--folded' : '')
-        + (seat && isWinnerSeat(seat) ? ' poker-seat--winner' : '')
+        + (seat && hasWonContestedPot(seat) ? ' poker-seat--pot-winner' : '')
+        + (seat && hasReturnedChips(seat) ? ' poker-seat--returned' : '')
         + (hero ? ' poker-seat--hero' : '')
         + (!seat ? ' poker-seat--empty' : '');
       article.style.left = anchor.x + '%';
@@ -2009,31 +2313,20 @@
         actionBadge.style.top = badgePosition.top;
         article.appendChild(actionBadge);
       }
-      if (seat && isWinnerSeat(seat)){
-        var winnerBadge = document.createElement('div');
-        winnerBadge.className = 'poker-seat-winner-badge';
-        var winnerTitle = document.createElement('div');
-        winnerTitle.className = 'poker-seat-winner-title';
-        winnerTitle.textContent = 'Winner';
-        winnerBadge.appendChild(winnerTitle);
-        var winnerSummary = getWinnerHandSummary(seat);
-        if (winnerSummary){
-          var winnerLabel = document.createElement('div');
-          winnerLabel.className = 'poker-seat-winner-label';
-          winnerLabel.textContent = winnerSummary.label;
-          winnerBadge.appendChild(winnerLabel);
-          var winnerCards = document.createElement('div');
-          winnerCards.className = 'poker-seat-winner-cards';
-          winnerSummary.cards.forEach(function(card){
-            var normalizedWinnerCard = normalizeCard(card);
-            var chip = document.createElement('span');
-            chip.className = 'poker-seat-winner-card' + (normalizedWinnerCard && (normalizedWinnerCard.s === 'H' || normalizedWinnerCard.s === 'D') ? ' poker-seat-winner-card--red' : '');
-            chip.textContent = normalizedWinnerCard ? (normalizedWinnerCard.r + SUIT_SYMBOLS[normalizedWinnerCard.s]) : '?';
-            winnerCards.appendChild(chip);
-          });
-          winnerBadge.appendChild(winnerCards);
-        }
-        article.appendChild(winnerBadge);
+      var seatSettlementAwards = seat ? getSeatSettlementAwards(seat.userId) : [];
+      var seatHasShowdownSummary = !!(seat && shouldShowShowdownHandSummary(seat) && getWinnerHandSummary(seat));
+      if (seat && (seatSettlementAwards.length || seatHasShowdownSummary)){
+        var settlementBadge = document.createElement('div');
+        settlementBadge.className = 'poker-seat-settlement-badge';
+        seatSettlementAwards.forEach(function(award){
+          var awardRow = document.createElement('div');
+          awardRow.className = 'poker-seat-settlement-award poker-seat-settlement-award--' + award.kind;
+          awardRow.dataset.awardId = award.awardId;
+          awardRow.textContent = '+' + formatNumber(award.amount) + ' ' + getSettlementAwardLabel(award);
+          settlementBadge.appendChild(awardRow);
+        });
+        appendShowdownHandSummary(settlementBadge, seat);
+        article.appendChild(settlementBadge);
       }
       if (cards.children.length) article.appendChild(cards);
       article.appendChild(name);
@@ -2505,6 +2798,58 @@
     }
   }
 
+  function resolveSettlementRecipientName(userId){
+    for (var i = 0; i < state.seats.length; i++){
+      if (state.seats[i] && state.seats[i].userId === userId) return getDisplayName(state.seats[i]);
+    }
+    return shortId(userId) || t('pokerSettlementPlayer', 'Player');
+  }
+
+  function renderSettlementSummary(){
+    if (!els.centerLayer) return;
+    if (!els.settlementSummary){
+      els.settlementSummary = document.createElement('div');
+      els.settlementSummary.className = 'poker-settlement-summary';
+      els.settlementSummary.setAttribute('role', 'status');
+      els.settlementSummary.setAttribute('aria-live', 'polite');
+      els.settlementSummary.setAttribute('aria-atomic', 'true');
+      els.settlementSummary.setAttribute('aria-label', t('pokerSettlementSummaryAria', 'Hand settlement'));
+      els.centerLayer.appendChild(els.settlementSummary);
+    }
+    els.settlementSummary.setAttribute('aria-label', t('pokerSettlementSummaryAria', 'Hand settlement'));
+    els.settlementSummary.innerHTML = '';
+    var presentation = getDisplaySettlementPresentation();
+    if (!presentation){
+      els.settlementSummary.hidden = true;
+      return;
+    }
+    els.settlementSummary.hidden = false;
+    if (!presentation.valid){
+      var fallback = document.createElement('div');
+      fallback.className = 'poker-settlement-summary__fallback';
+      fallback.textContent = t('pokerSettlementComplete', 'Settlement complete');
+      els.settlementSummary.appendChild(fallback);
+      return;
+    }
+    presentation.pots.forEach(function(pot){
+      var row = document.createElement('div');
+      row.className = 'poker-settlement-summary__row poker-settlement-summary__row--' + pot.kind;
+      row.dataset.awardId = pot.awardId;
+      var label = document.createElement('span');
+      label.className = 'poker-settlement-summary__label';
+      label.textContent = getSettlementAwardLabel(pot) + ' ' + formatNumber(pot.amount);
+      var recipients = document.createElement('span');
+      recipients.className = 'poker-settlement-summary__recipients';
+      recipients.textContent = pot.recipients.map(function(recipient){
+        var name = resolveSettlementRecipientName(recipient.userId);
+        return pot.recipients.length > 1 ? name + ' +' + formatNumber(recipient.amount) : name;
+      }).join(', ');
+      row.appendChild(label);
+      row.appendChild(recipients);
+      els.settlementSummary.appendChild(row);
+    });
+  }
+
   function render(){
     if (els.potPill) els.potPill.textContent = 'Pot ' + formatNumber(state.potTotal || 0);
     renderCommunityCards();
@@ -2513,6 +2858,7 @@
     positionHeroCards();
     renderSeatChips();
     renderPotChips();
+    renderSettlementSummary();
     renderDealerChip();
     renderInfoPanel();
     renderControls();
@@ -2892,6 +3238,7 @@
   function selectElements(){
     els.screen = document.getElementById('pokerTableScreen');
     if (typeof document.querySelector === 'function') els.scene = document.querySelector('.poker-scene');
+    if (typeof document.querySelector === 'function') els.centerLayer = document.querySelector('.poker-center-layer');
     if (!els.scene) els.scene = els.screen;
     els.xpBadge = document.getElementById('xpBadge');
     els.bootSplash = document.getElementById('pokerBootSplash');
@@ -2958,6 +3305,7 @@
   function stopLiveMode(){
     stopTurnClock();
     clearWinnerRevealTimer();
+    cancelSettlementAnimations();
     cancelClosedTableRedirect();
     resetAutoJoinRetryState();
     autoJoinAttempted = false;
@@ -3061,17 +3409,22 @@
       },
       onSnapshot: function(snapshot){
         var payload = snapshot && snapshot.payload ? snapshot.payload : null;
+        var frame = {
+          kind: snapshot && typeof snapshot.kind === 'string' ? snapshot.kind : 'stateSnapshot',
+          initial: !!(snapshot && snapshot.initial),
+          payload: payload
+        };
         if (shouldDeferSnapshotUntilRevealEnds(payload)){
-          pendingPostRevealSnapshot = payload;
+          pendingPostRevealSnapshot = frame;
           scheduleRevealDismiss();
           return;
         }
         var previousVisual = captureVisualSnapshot();
-        mergeSnapshot(payload);
+        mergeSnapshot(payload, frame);
         maybeExecuteQueuedPreaction();
         render();
         var nextVisual = captureVisualSnapshot();
-        animateChipDiff(previousVisual, nextVisual);
+        animateChipDiff(previousVisual, nextVisual, frame);
         autoJoinSeat();
       },
       onProtocolError: function(info){
@@ -3185,6 +3538,7 @@
     shouldAutoJoin = readAutoJoinParam();
     bindMenu();
     bindControls();
+    document.addEventListener('langchange', function(){ render(); });
     var guestSessionCandidate = readGuestMode() ? readGuestSession() : null;
     if (!tableId){
       startDemoMode();
@@ -3204,6 +3558,14 @@
     _mergeSnapshot: mergeSnapshot,
     _resolveAllInPlan: resolveAllInPlan
   };
+
+  if (window.__RUNNING_POKER_UI_TESTS__ === true){
+    window.__POKER_V2_TEST_HOOKS__ = {
+      allocatePotRecipients: allocatePotRecipients,
+      classifySettlementPot: classifySettlementPot,
+      buildSettlementPresentation: buildSettlementPresentation
+    };
+  }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
   else init();

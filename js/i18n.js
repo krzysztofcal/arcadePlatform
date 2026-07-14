@@ -351,7 +351,13 @@ homeBonusLoadError: { en: 'Could not load available bonuses.', pl: 'Nie udało s
     pokerShowdownWinnerSingleSuffix: { en: 'won', pl: 'wygrał' },
     pokerShowdownWinnerMultiPrefix: { en: 'Winners', pl: 'Wygrali' },
     pokerShowdownFlyoutPayouts: { en: 'Payouts', pl: 'Wygrane' },
-    pokerShowdownFlyoutCards: { en: 'Winner cards', pl: 'Karty zwycięzcy' }
+    pokerShowdownFlyoutCards: { en: 'Winner cards', pl: 'Karty zwycięzcy' },
+    pokerSettlementMainPot: { en: 'Main pot', pl: 'Pula główna' },
+    pokerSettlementSidePot: { en: 'Side pot {number}', pl: 'Pula boczna {number}' },
+    pokerSettlementReturned: { en: 'Returned', pl: 'Zwrot' },
+    pokerSettlementComplete: { en: 'Settlement complete', pl: 'Rozliczenie zakończone' },
+    pokerSettlementSummaryAria: { en: 'Hand settlement', pl: 'Rozliczenie rozdania' },
+    pokerSettlementPlayer: { en: 'Player', pl: 'Gracz' }
   };
 
   let currentLang = 'en';

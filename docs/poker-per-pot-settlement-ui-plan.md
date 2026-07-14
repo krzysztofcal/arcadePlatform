@@ -1,6 +1,6 @@
 # Poker per-pot settlement presentation
 
-Status: proposed implementation plan. This document is planning-only and does not change poker runtime behavior.
+Status: accepted and implemented on PR #711. The owner approved delivering both phases in one PR.
 
 ## Goal
 
@@ -18,7 +18,7 @@ In scope:
 - retain the existing showdown-card reveal and best-hand information without using the generic `Winner` badge as the settlement model;
 - make settlement display stable across the `SETTLED` reveal window, next-hand deferral, reconnect, and duplicate snapshots;
 - add focused unit and browser behavior coverage for settlement presentation;
-- add sequential chip-flow animation only in a follow-up PR after the information model is correct.
+- add sequential chip-flow animation in the same PR, implemented only after and on top of the validated static information model.
 
 Out of scope:
 
@@ -73,23 +73,23 @@ This is the root cause of the misleading production result. The authoritative st
 - The current `poker-v2.js::mergeSnapshot()` conditionally merges most hand fields but unconditionally assigns normalized showdown and settlement values. An omitted settlement field therefore currently looks the same as an explicit clear and can erase a visible reveal.
 - `onSnapshot()` currently passes only `snapshot.payload` into `mergeSnapshot()`, so the merge layer also loses whether the payload was a full `stateSnapshot`, partial `statePatch`, or initial `table_state`.
 
-PR 1 must correct this merge contract as part of the settlement fix. Otherwise correct award rows could disappear or flicker after an ordinary partial patch.
+Phase 1 must correct this merge contract as part of the settlement fix. Otherwise correct award rows could disappear or flicker after an ordinary partial patch.
 
 ## Architecture decision
 
-Implement correctness and animation in two PRs.
+Implement correctness and animation as two ordered phases in one PR.
 
-### PR 1 — authoritative static per-pot presentation
+### Phase 1 — authoritative static per-pot presentation
 
 Preserve existing settlement fields, project them through one small pure browser helper, render ordered per-pot information, and remove the incorrect aggregate payout animation. Keep the existing bet-to-pot animation unchanged.
 
 This PR fixes the user-visible meaning without changing settlement timing, server state, or WS payloads. It is independently releasable and is the blocker for correctness.
 
-### PR 2 — sequential per-pot animation
+### Phase 2 — sequential per-pot animation
 
-After PR 1 is verified, reuse the same presentation model and existing chip-flight primitives to animate each ordered award. Animation remains decorative: the complete static summary and per-seat amounts render immediately and remain the source of truth.
+After Phase 1 is covered by focused tests, reuse the same presentation model and existing chip-flight primitives to animate each ordered award. Animation remains decorative: the complete static summary and per-seat amounts render immediately and remain the source of truth.
 
-Separating the PRs prevents animation sequencing, timing, and motion preferences from delaying or obscuring the accounting fix. PR 2 must not modify how pots are calculated or introduce another settlement model.
+Keeping the phases ordered prevents animation sequencing, timing, and motion preferences from obscuring the accounting fix. Phase 2 must not modify how pots are calculated or introduce another settlement model; both phases are reviewed and rolled back together in PR #711.
 
 ## Client settlement model
 
@@ -162,7 +162,7 @@ This classification distinguishes a real uncontested main-pot win after folds fr
 - A return row uses `Returned` and never `Winner`, `Main pot`, or `Side pot` styling/copy.
 - `showdown.winners` may be retained for revealed-hand compatibility but cannot determine award labels, amounts, or chip destinations.
 
-## PR 1 — exact files and changes
+## Phase 1 — exact files and changes
 
 ### `js/i18n.js`
 
@@ -191,7 +191,7 @@ This classification distinguishes a real uncontested main-pot win after folds fr
 - change `renderSeats()` to append ordered award rows at each recipient seat and remove the generic `Winner` title from per-pot settlements;
 - keep the evaluated hand name/cards as secondary showdown detail, not as proof that the seat won every pot;
 - extend `captureVisualSnapshot()` with the closed presentation/award IDs rather than the winner union;
-- in PR 1, remove only the `payoutLike` aggregate branch from `animateChipDiff()`; keep the existing contribution-to-pot animation;
+- remove only the `payoutLike` aggregate branch from `animateChipDiff()`; keep the existing contribution-to-pot animation until Phase 2 delegates settlement flow to exact awards;
 - keep `shouldDeferSnapshotUntilRevealEnds()` and `scheduleRevealDismiss()`, but key their state by the settlement hand ID so a queued next-hand snapshot is applied exactly once.
 
 ### Explicit snapshot/patch merge contract
@@ -222,7 +222,7 @@ The merge rules apply independently from showdown-card privacy. An omitted award
 - `tests/poker-v2-live.behavior.test.mjs` — extend the existing poker DOM/WS harness for labels, seat rows, sticky settlement, next-hand transition, and safe fallback.
 - `ws-server/poker/read-model/room-core-snapshot.behavior.test.mjs` and `ws-server/poker/read-model/state-snapshot.behavior.test.mjs` — strengthen existing settled-snapshot assertions to prove ordered `potsAwarded`, `eligibleUserIds`, `winners`, total, and aggregate payouts survive transport. No read-model source change is expected.
 
-### PR 1 acceptance
+### Phase 1 acceptance
 
 - a single contested pot renders as `Main pot` with its exact recipient amount;
 - main plus one or several side pots render in server order with stable numbering;
@@ -240,9 +240,9 @@ The merge rules apply independently from showdown-card privacy. An omitted award
 - malformed or legacy award data does not remove valid revealed cards or best-hand details;
 - PL/EN language changes update settlement labels without changing amounts or classification.
 
-## PR 2 — sequential award animation
+## Phase 2 — sequential award animation
 
-PR 2 may start only after PR 1 is deployed and its static presentation is verified.
+Phase 2 starts only after the Phase 1 model and static behavior pass their focused tests. Owner approval explicitly allows both phases to ship in this PR.
 
 ### Exact files and functions
 
@@ -271,7 +271,7 @@ No change to `ws-server/server.mjs::maybeScheduleSettledRollover()`, `resolveSet
 
 ### Pure unit cases
 
-The PR 1 unit suite must cover:
+The Phase 1 unit suite must cover:
 
 - one main pot;
 - main pot plus one side pot;
@@ -299,7 +299,7 @@ The existing behavior harness must cover:
 - next-hand snapshot deferred until the remaining reveal deadline, then applied once;
 - narrow/mobile DOM remaining usable with multiple rows;
 - reduced motion retaining all information;
-- PR 2 only: no replay after resync, ordered animations, split destinations, return destination, and cancellation on hand change.
+- animation phase: no replay after resync, ordered animations, split destinations, return destination, and cancellation on hand change.
 
 Run the existing repository checks in addition to the focused tests. Do not broaden engine/ledger test scope because their rules are unchanged.
 
@@ -322,28 +322,28 @@ Use a controlled table or fixture that produces known contributions and compare 
 13. Test desktop and narrow mobile widths with the maximum realistic number of award rows and action controls visible.
 14. Enable reduced motion and verify complete static labels with no chip-flight nodes.
 15. Switch between Polish and English and verify only labels change; classification and chip amounts remain identical.
-16. For PR 2, compare animation order/destinations with the already visible static rows; the static result must remain correct if animation is interrupted.
+16. Compare animation order/destinations with the already visible static rows; the static result must remain correct if animation is interrupted.
 
 ## Preview, rollout, and rollback
 
 ### Preview requirements
 
-- Both implementation PRs require a Netlify Deploy Preview because they change browser JavaScript, CSS, localization, and visual behavior.
+- PR #711 requires a Netlify Deploy Preview because it changes browser JavaScript, CSS, localization, and visual behavior.
 - A WS Preview Deploy is not required for the planned implementation because no WS server source, protocol, persistence, settlement, or timing changes are needed.
 - The browser preview must still connect to a compatible preview WS and inspect a real `SETTLED` payload to confirm `potsAwarded` and `handSettlement.payouts` are present.
 - If implementation analysis unexpectedly requires any change under `ws-server/`, stop and update this plan; that revised PR must run a WS Preview Deploy before merge.
 
 ### Rollout
 
-1. Merge and deploy PR 1 first.
-2. Verify exact labels/amounts in production-like play before enabling any new settlement animation.
-3. Monitor only existing safe client telemetry for controlled invalid-presentation reasons; no new user/table/card identifiers.
-4. Implement and deploy PR 2 separately after the static behavior is accepted.
+1. Verify Phase 1 exact labels/amounts and Phase 2 destinations together on the Netlify Deploy Preview.
+2. Confirm reduced-motion and reconnect/resync behavior before merge.
+3. Merge and deploy PR #711 as one browser release.
+4. Monitor only existing safe client telemetry for controlled invalid-presentation reasons; no new user/table/card identifiers.
 
 ### Rollback
 
-- PR 1 can roll back to the prior renderer without changing authoritative server state, balances, or stored hands.
-- PR 2 can independently remove only the settlement animation and retain PR 1's correct static summary.
+- The PR can roll back to the prior renderer without changing authoritative server state, balances, or stored hands.
+- If only animation proves problematic, a follow-up can remove `animateSettlementAwards()` while retaining the exact static summary and projector.
 - The implementation stays in the existing `poker-v2.js`, so rollback has no cross-file runtime helper version to coordinate. Old cached JavaScript continues its previous presentation until normal revalidation.
 
 ## Breaking and operational impact
@@ -375,11 +375,11 @@ The guarded `window.__POKER_V2_TEST_HOOKS__` exists only when the explicit test 
 - Duplicate snapshots cannot duplicate awards, replay animation, or extend the same hand's reveal deadline.
 - The next hand is applied once after the readable remaining reveal window.
 - Focused pure unit and browser behavior cases pass together with existing repository checks.
-- PR 1 is verified before PR 2 starts.
+- The pure/static phase is verified before the animation phase within the same PR.
 - No new runtime script, HTML change, CSP SHA, poker rule, ledger, DB, ENV, WS contract, CSP origin, or server timing change is introduced.
 
 ## Plan verdict
 
 The backend already holds and publishes the information required for correct UX. The defect is a browser projection bug: `normalizeShowdown()` and `normalizeHandSettlement()` discard the detailed award model, after which badges and animation use the lossy union `showdown.winners`.
 
-The smallest safe fix is a static, validated per-pot presentation in PR 1 and a separate decorative animation PR 2. This restores accounting meaning immediately, keeps the server and ledger untouched, and gives animation one reusable authoritative client model instead of duplicating or guessing settlement logic.
+The smallest safe fix is a static, validated per-pot presentation followed by decorative animation in the same accepted PR. This restores accounting meaning, keeps the server and ledger untouched, and gives animation one reusable authoritative client model instead of duplicating or guessing settlement logic.
