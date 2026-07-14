@@ -2381,7 +2381,11 @@ test('poker v2 animates a live per-pot settlement once and skips it for resync o
         handSettlement: { handId: 'hand-animation', settledAt: new Date(Date.now()).toISOString(), payouts: { 'user-1': 18, 'player-b': 2 } }
       }
     };
-    if (statusBeforeSettlement) ws.onStatus(statusBeforeSettlement, {});
+    if (statusBeforeSettlement){
+      ws.onStatus(statusBeforeSettlement, {});
+      ws.onSnapshot({ kind: 'statePatch', payload: { tableId: 'table-1', public: { pot: { total: 20 } } } });
+      await harness.flush();
+    }
     ws.onSnapshot({
       kind: 'stateSnapshot',
       payload: settlementPayload
@@ -2417,6 +2421,8 @@ test('poker v2 animates a live per-pot settlement once and skips it for resync o
   await disconnectResult.harness.flush();
   assert.equal(disconnectResult.harness.elements.pokerChipFxLayer.children.length, 0, 'disconnect must keep later settlement pots cancelled');
   const resynced = (await settle(false, 'resync')).harness;
+  const resyncedSummary = findChildByClass(resynced.elements.pokerCenterLayer, 'poker-settlement-summary');
+  assert.equal(resyncedSummary.hidden, false, 'the authoritative settlement after a resync remains visible statically');
   assert.equal(resynced.elements.pokerChipFxLayer.children.length, 0, 'a resync snapshot must not replay settlement chips');
   const staticOnly = (await settle(true)).harness;
   assert.equal(staticOnly.elements.pokerChipFxLayer.children.length, 0);

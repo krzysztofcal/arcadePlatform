@@ -181,7 +181,7 @@
   var settlementAnimationGeneration = 0;
   var settlementAnimationTimers = [];
   var settlementAnimationNodes = [];
-  var suppressNextSettlementAnimation = false;
+  var suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
   var els = {};
 
   function cloneState(source){
@@ -3408,7 +3408,7 @@
           if (!rejoinSeatAfterReconnect()) autoJoinSeat();
         } else if (status === 'reconnecting'){
           cancelSettlementAnimations();
-          suppressNextSettlementAnimation = true;
+          suppressSettlementAnimationUntilAuthoritativeSnapshot = true;
           rememberSeatForReconnect();
           state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.connecting;
@@ -3418,7 +3418,7 @@
           syncClosedTableRedirectFromSignal(info && info.reason ? info.reason : null);
         } else if (status === 'resync'){
           cancelSettlementAnimations();
-          suppressNextSettlementAnimation = true;
+          suppressSettlementAnimationUntilAuthoritativeSnapshot = true;
         } else if (status === 'failed'){
           cancelSettlementAnimations();
           state.wsReady = false;
@@ -3443,10 +3443,11 @@
         var frame = {
           kind: snapshot && typeof snapshot.kind === 'string' ? snapshot.kind : 'stateSnapshot',
           initial: !!(snapshot && snapshot.initial),
-          suppressSettlementAnimation: suppressNextSettlementAnimation,
+          suppressSettlementAnimation: suppressSettlementAnimationUntilAuthoritativeSnapshot,
           payload: payload
         };
-        suppressNextSettlementAnimation = false;
+        var authoritativeSnapshot = frame.kind === 'stateSnapshot' || (frame.kind === 'table_state' && frame.initial);
+        if (authoritativeSnapshot) suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
         if (shouldDeferSnapshotUntilRevealEnds(payload)){
           pendingPostRevealSnapshot = frame;
           scheduleRevealDismiss();

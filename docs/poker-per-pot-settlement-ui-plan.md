@@ -262,6 +262,7 @@ Phase 2 starts only after the Phase 1 model and static behavior pass their focus
 - animate a return as `Returned`, never as a winner flow;
 - keep the total sequence within the existing reveal window by using a bounded stagger; if there are too many recipients, shorten decorative spacing rather than delay server rollover;
 - do not replay animation for the same `handId` after duplicate snapshots, resync, reconnect, or an initial/recovery full snapshot; a non-initial full snapshot that is the page's first observed same-hand transition into `SETTLED` remains eligible;
+- after reconnect/resync, keep animation suppression active across partial `statePatch` frames and release it only after the next authoritative full `stateSnapshot` (or an explicitly initial full `table_state`); the authoritative frame that releases suppression is itself rendered statically;
 - animate only when the current page observed a live transition for that same hand into `SETTLED`; an initial/reconnect snapshot already in `SETTLED` is static;
 - cancel pending callbacks when the hand changes or the client disconnects;
 - remove already-running settlement fly nodes when cancellation occurs, while leaving unrelated bet-to-pot fly nodes untouched;
