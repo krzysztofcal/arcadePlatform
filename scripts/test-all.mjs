@@ -79,6 +79,7 @@ run("node", ["tests/poker-inactive-cleanup.behavior.test.mjs"], "poker-inactive-
 run("node", ["tests/poker-materialize-settlement.payouts.test.mjs"], "poker-materialize-settlement-payouts");
 
 run("node", ["tests/poker-ui.behavior.test.mjs"], "poker-ui-behavior");
+run("node", ["tests/poker-settlement-presentation.unit.test.mjs"], "poker-settlement-presentation-unit");
 run("node", ["tests/poker-v2-live.behavior.test.mjs"], "poker-v2-live-behavior");
 run("node", ["ws-server/poker/persistence/inactive-cleanup-adapter.behavior.test.mjs"], "ws-inactive-cleanup-adapter-behavior");
 run("node", ["ws-server/poker/persistence/persisted-state-writer.behavior.test.mjs"], "ws-persisted-state-writer-behavior");

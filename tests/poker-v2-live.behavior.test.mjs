@@ -122,7 +122,7 @@ function createHarness(options = {}){
     'pokerV2AmountPreactionWrap', 'pokerV2AmountPreaction', 'pokerV2AmountPreactionText',
     'pokerV2AllInPreactionWrap', 'pokerV2AllInPreaction', 'pokerV2AllInPreactionText',
     'pokerV2AmountInput', 'pokerV2AmountInputWrap', 'pokerV2AmountValue',
-    'pokerTableScreen', 'pokerBootSplash'
+    'pokerTableScreen', 'pokerCenterLayer', 'pokerBootSplash'
   ].forEach((id) => {
     elements[id] = makeElement(id);
   });
@@ -215,6 +215,7 @@ function createHarness(options = {}){
           return wsClient;
         }
       },
+      matchMedia(){ return { matches: options.reducedMotion === true }; },
       setInterval(fn){
         intervalTimers.push(fn);
         return intervalTimers.length;
@@ -240,7 +241,11 @@ function createHarness(options = {}){
       readyState: 'loading',
       addEventListener(type, fn){ documentEvents[type] = documentEvents[type] || []; documentEvents[type].push(fn); },
       getElementById(id){ return elements[id] || null; },
-      querySelector(selector){ if (selector === '.poker-scene') return elements.pokerTableScreen || null; return null; },
+      querySelector(selector){
+        if (selector === '.poker-scene') return elements.pokerTableScreen || null;
+        if (selector === '.poker-center-layer') return elements.pokerCenterLayer || null;
+        return null;
+      },
       createElement(tag){ return makeElement(tag); }
     },
     URLSearchParams,
@@ -331,6 +336,10 @@ function findSeatByLabel(harness, label){
 
 function findSeatChild(seatNode, className){
   return (seatNode.children || []).find((child) => child.className === className);
+}
+
+function findChildByClass(node, className){
+  return (node.children || []).find((child) => String(child.className || '').split(/\s+/).includes(className));
 }
 
 test('poker v2 boots live mode, preserves table links, and sends WS commands', async () => {
@@ -1932,7 +1941,7 @@ test('poker v2 keeps the dealer chip fixed while action moves between players', 
   assert.equal(harness.elements.pokerDealerChip.style.top, initialTop);
 });
 
-test('poker v2 shows winner badges and reveals showdown participant cards during settled state', async () => {
+test('poker v2 preserves showdown hand summaries and revealed cards for legacy settled state', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -1980,16 +1989,12 @@ test('poker v2 shows winner badges and reveals showdown participant cards during
   await harness.flush();
 
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
-  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  const villainBadge = findSeatChild(villainSeat, 'poker-seat-winner-badge');
-  const heroBadge = findSeatChild(heroSeat, 'poker-seat-winner-badge');
+  const villainBadge = findSeatChild(villainSeat, 'poker-seat-settlement-badge');
   const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
-  const villainBadgeLabel = findSeatChild(villainBadge, 'poker-seat-winner-label');
-  const villainBadgeCards = findSeatChild(villainBadge, 'poker-seat-winner-cards');
+  const villainBadgeLabel = findSeatChild(villainBadge, 'poker-seat-settlement-hand-label');
+  const villainBadgeCards = findSeatChild(villainBadge, 'poker-seat-settlement-hand-cards');
 
   assert.ok(villainBadge);
-  assert.equal(findSeatChild(villainBadge, 'poker-seat-winner-title').textContent, 'Winner');
-  assert.ok(heroBadge);
   assert.ok(villainBadgeLabel);
   assert.equal(villainBadgeLabel.textContent.length > 0, true);
   assert.equal(villainBadgeCards.children.length, 5);
@@ -2057,7 +2062,7 @@ test('poker v2 reveals showdown cards for compared losing players without winner
   assert.equal(losingCards.children.length, 2);
   assert.equal(losingCards.children[0].className.includes('poker-card--back'), false);
   assert.equal(losingCards.children[1].className.includes('poker-card--back'), false);
-  assert.equal(findSeatChild(losingSeat, 'poker-seat-winner-badge'), undefined);
+  assert.equal(findSeatChild(losingSeat, 'poker-seat-settlement-badge'), undefined);
 });
 
 test('poker v2 keeps the previous reveal visible for the full local window before switching to the next hand', async () => {
@@ -2133,7 +2138,7 @@ test('poker v2 keeps the previous reveal visible for the full local window befor
   await harness.flush();
 
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
-  assert.ok(findSeatChild(villainSeat, 'poker-seat-winner-badge'));
+  assert.ok(findSeatChild(villainSeat, 'poker-seat-settlement-badge'));
   const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
   assert.ok(villainCards);
   assert.equal(villainCards.children.length, 2);
@@ -2146,7 +2151,7 @@ test('poker v2 keeps the previous reveal visible for the full local window befor
   await harness.flush();
 
   const switchedVillainSeat = findSeatByLabel(harness, 'Villain 1');
-  assert.equal(findSeatChild(switchedVillainSeat, 'poker-seat-winner-badge'), undefined);
+  assert.equal(findSeatChild(switchedVillainSeat, 'poker-seat-settlement-badge'), undefined);
   const switchedVillainCards = findSeatChild(switchedVillainSeat, 'poker-seat-cards');
   assert.ok(switchedVillainCards);
   assert.equal(switchedVillainCards.children.length, 2);
@@ -2230,7 +2235,7 @@ test('poker v2 does not switch away from the settled reveal scene before the loc
 
   assert.equal(harness.elements.pokerCommunityCards.children.length, 5, 'reveal board should stay visible until the local reveal window ends');
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
-  assert.ok(findSeatChild(villainSeat, 'poker-seat-winner-badge'));
+  assert.ok(findSeatChild(villainSeat, 'poker-seat-settlement-badge'));
   const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
   assert.ok(villainCards);
   assert.equal(villainCards.children[0].className.includes('poker-card--back'), false);
@@ -2279,15 +2284,204 @@ test('poker v2 keeps showdown participant cards hidden when the hand ends withou
   await harness.flush();
 
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
-  const villainBadge = findSeatChild(villainSeat, 'poker-seat-winner-badge');
+  const villainBadge = findSeatChild(villainSeat, 'poker-seat-settlement-badge');
   const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
 
-  assert.ok(villainBadge);
-  assert.equal(findSeatChild(villainBadge, 'poker-seat-winner-title').textContent, 'Winner');
-  assert.equal(findSeatChild(villainBadge, 'poker-seat-winner-label'), undefined);
-  assert.equal(findSeatChild(villainBadge, 'poker-seat-winner-cards'), undefined);
+  assert.equal(villainBadge, undefined, 'an all-folded legacy settlement must not invent an award badge');
   assert.equal(villainCards.children[0].className, 'poker-card poker-card--back');
   assert.equal(villainCards.children[1].className, 'poker-card poker-card--back');
+});
+
+test('poker v2 renders exact main, side, and returned awards and preserves them across omitted patch fields', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    initial: true,
+    payload: {
+      tableId: 'table-1',
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [
+        { userId: 'user-1', seat: 1, displayName: 'Player A' },
+        { userId: 'player-b', seat: 2, displayName: 'Player B' },
+        { userId: 'player-c', seat: 3, displayName: 'Player C' }
+      ] },
+      public: {
+        hand: { handId: 'hand-awards', status: 'SETTLED', dealerSeatNo: 1 },
+        board: { cards: ['2H', '3H', '4H', '9C', 'KD'] },
+        pot: { total: 0 },
+        showdown: {
+          handId: 'hand-awards',
+          reason: 'computed',
+          winners: ['user-1', 'player-b', 'player-c'],
+          potAwardedTotal: 295,
+          potsAwarded: [
+            { amount: 288, winners: ['user-1'], eligibleUserIds: ['user-1', 'player-b', 'player-c'] },
+            { amount: 6, winners: ['player-b'], eligibleUserIds: ['player-b', 'player-c'] },
+            { amount: 1, winners: ['player-c'], eligibleUserIds: ['player-c'] }
+          ]
+        },
+        handSettlement: { handId: 'hand-awards', settledAt: new Date(Date.now()).toISOString(), payouts: { 'user-1': 288, 'player-b': 6, 'player-c': 1 } }
+      },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const summary = findChildByClass(harness.elements.pokerCenterLayer, 'poker-settlement-summary');
+  assert.ok(summary);
+  assert.equal(summary.hidden, false);
+  assert.deepEqual(summary.children.map((row) => row.children[0].textContent), ['Main pot 288', 'Side pot 1 6', 'Returned 1']);
+  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  const playerBSeat = findSeatByLabel(harness, 'Player B');
+  const playerCSeat = findSeatByLabel(harness, 'Player C');
+  assert.equal(findChildByClass(findSeatChild(heroSeat, 'poker-seat-settlement-badge'), 'poker-seat-settlement-award').textContent, '+288 Main pot');
+  assert.equal(findChildByClass(findSeatChild(playerBSeat, 'poker-seat-settlement-badge'), 'poker-seat-settlement-award').textContent, '+6 Side pot 1');
+  assert.equal(findChildByClass(findSeatChild(playerCSeat, 'poker-seat-settlement-badge'), 'poker-seat-settlement-award--return').textContent, '+1 Returned');
+  assert.equal(/poker-seat--pot-winner/.test(playerCSeat.className), false, 'a return must not style the seat as a pot winner');
+  assert.equal(harness.elements.pokerChipFxLayer.children.length, 0, 'initial settled snapshots stay static');
+
+  ws.onSnapshot({ kind: 'statePatch', payload: { tableId: 'table-1', public: { pot: { total: 0 } } } });
+  await harness.flush();
+  assert.equal(summary.hidden, false);
+  assert.equal(summary.children.length, 3, 'omitted settlement fields must preserve the presentation');
+
+  ws.onSnapshot({ kind: 'statePatch', payload: { tableId: 'table-1', public: { showdown: null } } });
+  await harness.flush();
+  assert.equal(summary.hidden, true, 'an explicit clear must remove the presentation');
+});
+
+test('poker v2 animates a live per-pot settlement once and skips it for resync or reduced motion', async () => {
+  async function settle(reducedMotion, statusBeforeSettlement){
+    const harness = createHarness({ reducedMotion });
+    harness.fireDomContentLoaded();
+    await harness.flush();
+    const ws = harness.getCreateOptions();
+    ws.onSnapshot({
+      kind: 'stateSnapshot',
+      initial: true,
+      payload: {
+        tableId: 'table-1',
+        table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [
+          { userId: 'user-1', seat: 1, displayName: 'Player A' },
+          { userId: 'player-b', seat: 2, displayName: 'Player B' }
+        ] },
+        public: { hand: { handId: 'hand-animation', status: 'RIVER' }, pot: { total: 20 }, stacks: { 'user-1': 90, 'player-b': 90 } },
+        you: { seat: 1 }
+      }
+    });
+    await harness.flush();
+    const settlementPayload = {
+      tableId: 'table-1',
+      public: {
+        hand: { handId: 'hand-animation', status: 'SETTLED' },
+        pot: { total: 0 },
+        showdown: { handId: 'hand-animation', reason: 'computed', winners: ['user-1', 'player-b'], potAwardedTotal: 20, potsAwarded: [{ amount: 18, winners: ['user-1'], eligibleUserIds: ['user-1', 'player-b'] }, { amount: 2, winners: ['player-b'], eligibleUserIds: ['player-b'] }] },
+        handSettlement: { handId: 'hand-animation', settledAt: new Date(Date.now()).toISOString(), payouts: { 'user-1': 18, 'player-b': 2 } }
+      }
+    };
+    if (statusBeforeSettlement){
+      ws.onStatus(statusBeforeSettlement, {});
+      ws.onSnapshot({ kind: 'statePatch', payload: { tableId: 'table-1', public: { pot: { total: 20 } } } });
+      await harness.flush();
+    }
+    ws.onSnapshot({
+      kind: 'stateSnapshot',
+      payload: settlementPayload
+    });
+    await harness.flush();
+    harness.advanceTime(0);
+    await harness.flush();
+    return { harness, settlementPayload };
+  }
+
+  const animatedResult = await settle(false);
+  const animated = animatedResult.harness;
+  assert.equal(animated.elements.pokerChipFxLayer.children.length > 0, true);
+  assert.equal(animated.elements.pokerChipFxLayer.children.every((node) => node.classList.contains('poker-chip-fly--settlement')), true);
+  assert.equal(animated.elements.pokerChipFxLayer.children.every((node) => node.style.animationDuration === '780ms'), true);
+  const flyCount = animated.elements.pokerChipFxLayer.children.length;
+  animated.getCreateOptions().onSnapshot({ kind: 'statePatch', payload: animatedResult.settlementPayload });
+  await animated.flush();
+  animated.advanceTime(0);
+  await animated.flush();
+  assert.equal(animated.elements.pokerChipFxLayer.children.length, flyCount, 'duplicate settlement patches must not replay chip flows');
+  animated.getCreateOptions().onSnapshot({ kind: 'statePatch', payload: { tableId: 'table-1', public: { showdown: null } } });
+  await animated.flush();
+  assert.equal(animated.elements.pokerChipFxLayer.children.length, 0, 'explicit clear must remove already-running settlement chips');
+  animated.advanceTime(1000);
+  await animated.flush();
+  assert.equal(animated.elements.pokerChipFxLayer.children.length, 0, 'cancelled later pots must not create new settlement chips');
+  const disconnectResult = await settle(false);
+  disconnectResult.harness.getCreateOptions().onStatus('reconnecting', {});
+  await disconnectResult.harness.flush();
+  assert.equal(disconnectResult.harness.elements.pokerChipFxLayer.children.length, 0, 'disconnect must remove already-running settlement chips');
+  disconnectResult.harness.advanceTime(1000);
+  await disconnectResult.harness.flush();
+  assert.equal(disconnectResult.harness.elements.pokerChipFxLayer.children.length, 0, 'disconnect must keep later settlement pots cancelled');
+  const resynced = (await settle(false, 'resync')).harness;
+  const resyncedSummary = findChildByClass(resynced.elements.pokerCenterLayer, 'poker-settlement-summary');
+  assert.equal(resyncedSummary.hidden, false, 'the authoritative settlement after a resync remains visible statically');
+  assert.equal(resynced.elements.pokerChipFxLayer.children.length, 0, 'a resync snapshot must not replay settlement chips');
+  const staticOnly = (await settle(true)).harness;
+  assert.equal(staticOnly.elements.pokerChipFxLayer.children.length, 0);
+});
+
+test('poker v2 preserves a live settlement reveal received after the server timestamp window elapsed', async () => {
+  const nowMs = 1_700_000_300_000;
+  const harness = createHarness({ nowMs });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    initial: true,
+    payload: {
+      tableId: 'table-1',
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [
+        { userId: 'user-1', seat: 1, displayName: 'Player A' },
+        { userId: 'player-b', seat: 2, displayName: 'Player B' }
+      ] },
+      public: { hand: { handId: 'hand-delayed-settlement', status: 'RIVER' }, pot: { total: 20 }, stacks: { 'user-1': 90, 'player-b': 90 } },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      public: {
+        hand: { handId: 'hand-delayed-settlement', status: 'SETTLED' },
+        pot: { total: 0 },
+        showdown: { handId: 'hand-delayed-settlement', reason: 'computed', winners: ['user-1'], potAwardedTotal: 20, potsAwarded: [{ amount: 20, winners: ['user-1'], eligibleUserIds: ['user-1', 'player-b'] }] },
+        handSettlement: { handId: 'hand-delayed-settlement', settledAt: new Date(nowMs - 10_000).toISOString(), payouts: { 'user-1': 20 } }
+      }
+    }
+  });
+  await harness.flush();
+  harness.advanceTime(0);
+  await harness.flush();
+  assert.equal(harness.elements.pokerChipFxLayer.children.length > 0, true, 'a delayed live stateSnapshot must still animate');
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      public: { hand: { handId: 'hand-after-delayed-settlement', status: 'PREFLOP' }, pot: { total: 3 } }
+    }
+  });
+  await harness.flush();
+  const summary = findChildByClass(harness.elements.pokerCenterLayer, 'poker-settlement-summary');
+  assert.equal(summary.hidden, false, 'the next hand must wait for the local reveal window');
+
+  harness.advanceTime(3999);
+  await harness.flush();
+  assert.equal(summary.hidden, false);
+  harness.advanceTime(1);
+  await harness.flush();
+  assert.equal(summary.hidden, true, 'the queued next hand appears after the full local reveal window');
 });
 
 test('poker v2 falls back to demo mode when tableId is missing', async () => {
