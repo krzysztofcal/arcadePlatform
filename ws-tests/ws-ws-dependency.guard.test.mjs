@@ -312,7 +312,7 @@ test("ws-local poker autoplay wrapper is the only allowed bridge to repo-root sh
 test("ws-local bots wrapper is the only allowed bridge to repo-root shared bots module", () => {
   const wrapperFile = "ws-server/shared/poker-domain/bots.mjs";
   const wrapperText = fs.readFileSync(wrapperFile, "utf8");
-  assert.match(wrapperText, /export\s*\{\s*makeBotUserId,\s*parseStakes\s*\}\s*from\s*["']\.\.\/\.\.\/\.\.\/shared\/poker-domain\/bots\.mjs["']/);
+  assert.match(wrapperText, /export\s*\{\s*getBotConfig,\s*makeBotUserId,\s*parseStakes\s*\}\s*from\s*["']\.\.\/\.\.\/\.\.\/shared\/poker-domain\/bots\.mjs["']/);
 
   const wsFiles = fs.readdirSync("ws-server", { recursive: true })
     .filter((entry) => typeof entry === "string" && entry.endsWith(".mjs"))
