@@ -45,6 +45,10 @@
       summary: null,
       identity: null,
       identityError: null,
+      botReaction: null,
+      botReactionError: null,
+      botReactionMessage: "",
+      botReactionPending: false,
       loaded: false,
     },
     pokerAudit: {
@@ -120,6 +124,12 @@
     nodes.opsStats = doc.getElementById("adminOpsStats");
     nodes.opsIdentity = doc.getElementById("adminOpsIdentity");
     nodes.opsRuntime = doc.getElementById("adminOpsRuntime");
+    nodes.opsBotReactionSummary = doc.getElementById("adminOpsBotReactionSummary");
+    nodes.opsBotReactionForm = doc.getElementById("adminOpsBotReactionForm");
+    nodes.opsBotReactionDelay = doc.getElementById("adminOpsBotReactionDelay");
+    nodes.opsBotReactionApply = doc.getElementById("adminOpsBotReactionApply");
+    nodes.opsBotReactionDefault = doc.getElementById("adminOpsBotReactionDefault");
+    nodes.opsBotReactionStatus = doc.getElementById("adminOpsBotReactionStatus");
     nodes.opsRefresh = doc.getElementById("adminOpsRefresh");
     nodes.opsRunReconciler = doc.getElementById("adminOpsRunReconciler");
     nodes.opsRunStaleSweep = doc.getElementById("adminOpsRunStaleSweep");
@@ -1069,6 +1079,7 @@
   function renderOps(){
     var summary = state.ops.summary;
     var identity = state.ops.identity;
+    renderBotReactionControl();
     if (!summary && !identity){
       if (nodes.opsStats) nodes.opsStats.innerHTML = "";
       if (nodes.opsIdentity) nodes.opsIdentity.innerHTML = "";
@@ -1149,6 +1160,56 @@
           meta: escapeHtml((item.userId || "—") + " · " + reason),
         };
       })) : "";
+    }
+  }
+
+  function formatReactionRange(range){
+    if (!range) return "—";
+    var minMs = Number(range.minMs);
+    var maxMs = Number(range.maxMs);
+    if (!Number.isInteger(minMs) || !Number.isInteger(maxMs)) return "—";
+    return minMs === maxMs ? String(minMs) + " ms" : String(minMs) + "–" + String(maxMs) + " ms";
+  }
+
+  function renderBotReactionControl(){
+    var value = state.ops.botReaction;
+    var errorCode = state.ops.botReactionError;
+    var pending = state.ops.botReactionPending === true;
+    var unavailable = errorCode === "preview_only" || errorCode === "ws_preview_unavailable" || errorCode === "ws_preview_timeout";
+    if (nodes.opsBotReactionSummary){
+      if (value){
+        var mode = value.mode === "override" ? "Override" : "Default";
+        nodes.opsBotReactionSummary.innerHTML = [
+          '<div class="admin-surface">',
+          '<div class="admin-list__title"><span>Active range</span>' + pill(mode, value.mode === "override" ? "success" : "info") + "</div>",
+          '<div class="admin-kv">',
+          renderKvRow("Environment", "WS Preview"),
+          renderKvRow("Range", formatReactionRange(value.active)),
+          "</div>",
+          "</div>"
+        ].join("");
+      } else if (errorCode){
+        var errorText = errorCode === "preview_only"
+          ? "Available only on WS Preview."
+          : errorCode === "ws_preview_timeout"
+            ? "WS Preview did not respond in time."
+            : errorCode === "ws_preview_unavailable"
+              ? "WS Preview control is unavailable."
+              : "Could not load bot reaction timing.";
+        nodes.opsBotReactionSummary.innerHTML = '<p class="admin-empty">' + escapeHtml(errorText) + "</p>";
+      } else {
+        nodes.opsBotReactionSummary.innerHTML = '<p class="admin-empty">Loading WS Preview timing…</p>';
+      }
+    }
+    if (nodes.opsBotReactionDelay && value && !pending){
+      nodes.opsBotReactionDelay.value = String(value.active && value.active.minMs != null ? value.active.minMs : 500);
+    }
+    if (nodes.opsBotReactionDelay) nodes.opsBotReactionDelay.disabled = pending || unavailable;
+    if (nodes.opsBotReactionApply) nodes.opsBotReactionApply.disabled = pending || unavailable;
+    if (nodes.opsBotReactionDefault) nodes.opsBotReactionDefault.disabled = pending || unavailable || !value || value.mode !== "override";
+    if (nodes.opsBotReactionStatus){
+      var localError = errorCode && !unavailable ? errorCode : "";
+      nodes.opsBotReactionStatus.textContent = pending ? "Updating WS Preview…" : state.ops.botReactionMessage || localError;
     }
   }
 
@@ -1596,7 +1657,8 @@
     try {
       var results = await Promise.allSettled([
         apiFetch("/.netlify/functions/admin-stage-identity", { method: "GET" }),
-        apiFetch("/.netlify/functions/admin-ops-summary", { method: "GET" })
+        apiFetch("/.netlify/functions/admin-ops-summary", { method: "GET" }),
+        apiFetch("/.netlify/functions/admin-ws-preview-bot-reaction", { method: "GET", cache: "no-store" })
       ]);
       if (results[0].status === "fulfilled"){
         state.ops.identity = results[0].value || null;
@@ -1611,11 +1673,81 @@
       }
       var payload = results[1].value || {};
       state.ops.summary = payload;
+      if (results[2].status === "fulfilled"){
+        state.ops.botReaction = results[2].value || null;
+        state.ops.botReactionError = null;
+        state.ops.botReactionMessage = "";
+      } else {
+        state.ops.botReaction = null;
+        state.ops.botReactionError = results[2].reason && results[2].reason.code ? results[2].reason.code : "request_failed";
+        state.ops.botReactionMessage = "";
+        klog("admin_ws_preview_bot_reaction_load_failed", { code: state.ops.botReactionError });
+      }
       state.ops.loaded = true;
       renderOps();
       setStatus("", "");
     } catch (err){
       handleApiError(err, "Could not load ops summary.");
+    }
+  }
+
+  function handleBotReactionError(err, fallback){
+    if (err && (err.status === 401 || (err.status === 403 && err.code === "admin_required"))){
+      showUnauthorized(getUnauthorizedMessage(err));
+      setStatus("", "");
+      return;
+    }
+    state.ops.botReactionError = err && err.code ? err.code : "request_failed";
+    state.ops.botReactionMessage = fallback || "Could not update WS Preview timing.";
+    klog("admin_ws_preview_bot_reaction_update_failed", { code: state.ops.botReactionError });
+    renderBotReactionControl();
+  }
+
+  async function submitBotReactionOverride(event){
+    event.preventDefault();
+    var delayMs = Number(nodes.opsBotReactionDelay && nodes.opsBotReactionDelay.value);
+    if (!Number.isInteger(delayMs) || delayMs < 100 || delayMs > 10000){
+      state.ops.botReactionError = "invalid_range";
+      state.ops.botReactionMessage = "Enter a whole value from 100 to 10000 ms.";
+      renderBotReactionControl();
+      return;
+    }
+    state.ops.botReactionPending = true;
+    state.ops.botReactionError = null;
+    state.ops.botReactionMessage = "";
+    renderBotReactionControl();
+    try {
+      state.ops.botReaction = await apiFetch("/.netlify/functions/admin-ws-preview-bot-reaction", {
+        method: "POST",
+        body: JSON.stringify({ mode: "override", minMs: delayMs, maxMs: delayMs })
+      });
+      state.ops.botReactionError = null;
+      state.ops.botReactionMessage = "Override applied to the next bot action.";
+    } catch (err){
+      handleBotReactionError(err, "Could not apply the override.");
+    } finally {
+      state.ops.botReactionPending = false;
+      renderBotReactionControl();
+    }
+  }
+
+  async function clearBotReactionOverride(){
+    state.ops.botReactionPending = true;
+    state.ops.botReactionError = null;
+    state.ops.botReactionMessage = "";
+    renderBotReactionControl();
+    try {
+      state.ops.botReaction = await apiFetch("/.netlify/functions/admin-ws-preview-bot-reaction", {
+        method: "POST",
+        body: JSON.stringify({ mode: "default" })
+      });
+      state.ops.botReactionError = null;
+      state.ops.botReactionMessage = "Default 2000–4000 ms range restored.";
+    } catch (err){
+      handleBotReactionError(err, "Could not restore the default range.");
+    } finally {
+      state.ops.botReactionPending = false;
+      renderBotReactionControl();
     }
   }
 
@@ -1846,6 +1978,8 @@
     if (nodes.bonusCampaignForm) nodes.bonusCampaignForm.addEventListener("submit", saveBonusCampaignDraft);
     if (nodes.bonusCampaignForm) nodes.bonusCampaignForm.addEventListener("change", handleBonusCampaignFormChange);
     if (nodes.pokerAuditFilters) nodes.pokerAuditFilters.addEventListener("submit", handlePokerAuditSubmit);
+    if (nodes.opsBotReactionForm) nodes.opsBotReactionForm.addEventListener("submit", submitBotReactionOverride);
+    if (nodes.opsBotReactionDefault) nodes.opsBotReactionDefault.addEventListener("click", clearBotReactionOverride);
     if (nodes.usersRefresh) nodes.usersRefresh.addEventListener("click", function(){ loadUsers(); });
     if (nodes.tablesRefresh) nodes.tablesRefresh.addEventListener("click", function(){ loadTables(); });
     if (nodes.bonusCampaignsRefresh) nodes.bonusCampaignsRefresh.addEventListener("click", function(){ loadBonusCampaigns(); });

@@ -31,6 +31,15 @@ test("admin page exposes required admin tabs", () => {
   assert.match(adminHtml, /data-admin-panel="ops"/);
 });
 
+test("admin ops exposes the WS Preview bot reaction control", () => {
+  assert.match(adminHtml, /id="adminOpsBotReactionSummary"/);
+  assert.match(adminHtml, /id="adminOpsBotReactionForm"/);
+  assert.match(adminHtml, /id="adminOpsBotReactionDelay"[^>]+min="100"[^>]+max="10000"/);
+  assert.match(adminHtml, /id="adminOpsBotReactionApply"/);
+  assert.match(adminHtml, /id="adminOpsBotReactionDefault"/);
+  assert.match(adminHtml, />WS Preview</);
+});
+
 test("admin bonus campaign form exposes campaign type suggestions", () => {
   assert.match(adminHtml, /name="campaignType"[^>]+list="adminBonusCampaignTypeOptions"/);
   assert.match(adminHtml, /<datalist id="adminBonusCampaignTypeOptions">/);

@@ -19,6 +19,34 @@ const FIXED_RANDOM_BOT_AUTOPLAY_ADAPTER_URL = new URL(
   import.meta.url
 ).href;
 
+test("internal bot reaction admin endpoint requires its token and fails closed outside WS Preview", async () => {
+  const { port, child } = await createServer({
+    env: {
+      POKER_WS_INTERNAL_TOKEN: "internal-preview-token",
+      WS_BOT_REACTION_MIN_MS: "",
+      WS_BOT_REACTION_MAX_MS: "",
+      WS_AUTHORITATIVE_JOIN_ENABLED: "1",
+      SUPABASE_STAGE_PROJECT_REF: "stage-project-ref",
+      SUPABASE_URL: "https://stage-project-ref.supabase.co",
+      SUPABASE_DB_URL: "postgresql://postgres.stage-project-ref:password@aws-0-eu-central-1.pooler.supabase.com:6543/postgres"
+    }
+  });
+  try {
+    await waitForListening(child, 5000);
+    const unauthorized = await fetch(`http://127.0.0.1:${port}/internal/admin/bot-reaction`);
+    assert.equal(unauthorized.status, 401);
+
+    const blocked = await fetch(`http://127.0.0.1:${port}/internal/admin/bot-reaction`, {
+      headers: { authorization: "Bearer internal-preview-token" }
+    });
+    assert.equal(blocked.status, 403);
+    assert.deepEqual(await blocked.json(), { error: "preview_only" });
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 function getFreePort() {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();

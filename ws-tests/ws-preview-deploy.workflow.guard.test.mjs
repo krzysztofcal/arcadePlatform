@@ -41,6 +41,7 @@ test("ws preview deploy workflow keeps the preview-only manual contract", () => 
   assert.match(text, /https:\/\/ws-preview\.kcswh\.pl\/healthz/);
   assert.match(text, /WS_AUTHORITATIVE_JOIN_ENABLED=1/);
   assert.match(text, /SUPABASE_DB_URL/);
+  assert.match(text, /POKER_WS_INTERNAL_TOKEN/);
   assert.match(text, /node --test ws-tests\/ws-preview-deploy\.workflow\.guard\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-preview-deploy\.remote-shape\.guard\.test\.mjs/);
 
@@ -82,6 +83,8 @@ test("ws preview deploy workflow keeps preview runtime contract and does not man
   assert.match(text, /preview env file must define WS_AUTHORITATIVE_JOIN_ENABLED=1/);
   assert.match(text, /preview env file must define SUPABASE_DB_URL/);
   assert.match(text, /preview env file must define SUPABASE_STAGE_PROJECT_REF/);
+  assert.match(text, /preview env file must define POKER_WS_INTERNAL_TOKEN/);
+  assert.match(text, /must not define legacy WS_BOT_REACTION_MIN_MS or WS_BOT_REACTION_MAX_MS/);
   assert.match(text, /preview env SUPABASE_URL must target SUPABASE_STAGE_PROJECT_REF/);
   assert.match(text, /preview env SUPABASE_DB_URL must target SUPABASE_STAGE_PROJECT_REF/);
   assert.match(text, /sudo -n bash -c 'true'/);
@@ -128,5 +131,7 @@ test("poker deployment doc states the unified preview Caddy ownership model", ()
   assert.match(text, /WS_AUTHORITATIVE_JOIN_ENABLED=1/);
   assert.match(text, /SUPABASE_DB_URL/);
   assert.match(text, /SUPABASE_STAGE_PROJECT_REF/);
+  assert.match(text, /POKER_WS_INTERNAL_TOKEN/);
+  assert.match(text, /internal\/admin\/bot-reaction/);
   assert.doesNotMatch(text, /Caddyfile\.preview\.example/);
 });
