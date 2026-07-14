@@ -52,8 +52,13 @@ Seat snapshots include bot-specific fields that are persisted and returned by ta
 Bots follow the same funds safety model as human seats:
 
 - buy-in uses `TABLE_BUY_IN` into table escrow,
+- a broke bot replacement preserves the old residual stack and funds only `100 - oldStack` from the currently configured bot `SYSTEM` source (default `TREASURY`) into the table `ESCROW`,
+- replacement funding and the poker-state CAS commit in one database transaction before the replacement becomes visible in WS runtime,
+- replacement retries reuse a deterministic table/version/seat idempotency key and cannot create a second ledger credit after restore,
 - cash-out uses `TABLE_CASH_OUT` out of escrow,
 - timeout/cleanup paths are responsible for returning chips from escrow and avoiding stranded balances.
+
+Terminal bot cash-out and historical escrow reconciliation remain separate lifecycle work; replacement funding does not change those policies.
 
 ## Scope and TBDs
 

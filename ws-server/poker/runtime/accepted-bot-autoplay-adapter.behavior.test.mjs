@@ -76,6 +76,45 @@ test("accepted bot autoplay executes and persists when bot is on turn", async ()
   assert.equal(calls.persistArgs.acceptedActionAudit.actorUserId, "bot_2");
 });
 
+test("accepted bot autoplay gives repeated same-street turns distinct version-scoped request ids", async () => {
+  const requestIds = [];
+  let persistedVersion = 117;
+  const state = {
+    version: 117,
+    tableId: "t-repeat-turn",
+    handId: "h-repeat-turn",
+    phase: "TURN",
+    turnUserId: "bot_2",
+    seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }],
+    stacks: { human_1: 100, bot_2: 100 }
+  };
+  const tableManager = {
+    persistedPokerState: () => ({ ...state }),
+    persistedStateVersion: () => persistedVersion,
+    tableSnapshot: () => ({ seats: state.seats }),
+    applyAction: ({ requestId }) => {
+      requestIds.push(requestId);
+      persistedVersion += 1;
+      return { accepted: true, changed: true, replayed: false, stateVersion: persistedVersion };
+    }
+  };
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    klog: () => {}
+  });
+
+  await run({ tableId: state.tableId, trigger: "act", requestId: "same-parent-request" });
+  await run({ tableId: state.tableId, trigger: "act", requestId: "same-parent-request" });
+
+  assert.equal(requestIds.length, 2);
+  assert.notEqual(requestIds[0], requestIds[1]);
+  assert.match(requestIds[0], /:v117:1$/);
+  assert.match(requestIds[1], /:v118:1$/);
+});
+
 test("accepted bot autoplay enriches legal bet with a positive amount", async () => {
   const observed = { action: null };
   const state = {

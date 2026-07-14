@@ -1,1 +1,1 @@
-export { makeBotUserId, parseStakes } from "../../../shared/poker-domain/bots.mjs";
+export { getBotConfig, makeBotUserId, parseStakes } from "../../../shared/poker-domain/bots.mjs";

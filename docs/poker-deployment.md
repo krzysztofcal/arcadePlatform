@@ -53,6 +53,9 @@ Operational notes:
 - Bot runtime is guarded by `POKER_BOTS_ENABLED`.
 - Values above are Netlify runtime config env vars (not secrets unless explicitly sensitive).
 - Bot/gameplay orchestration runs server-side in WS runtime (no client-side bot scripts).
+- Bot replacement funding continues to use the existing configured source (default `TREASURY`); it adds no account, migration, environment variable, balance move, or manual replenishment step.
+- Replacement funding is an internal `SYSTEM -> ESCROW` transaction with `created_by = NULL` and closed bot/replacement metadata. It does not depend on `POKER_SYSTEM_ACTOR_USER_ID`; that existing setting still applies to separate legacy bot cash-out paths.
+- A replacement funding failure leaves the table in `SETTLED`, retries with bounded fast backoff, then retries at most once per minute until the same generation succeeds or changes. Monitor `ws_settled_rollover_persist_failed` for the controlled reason, requested replacement count, and total delta.
 
 ### Local development
 
@@ -108,6 +111,8 @@ The preview WS deploy is manual-only and isolated from the production WS workflo
 It targets only the preview host, preview filesystem root, preview service, preview env file, and preview health checks.
 It does not manage Caddy.
 The host is a single shared preview runtime, so automatic deployment from every PR is intentionally disabled: concurrent PRs would overwrite each other and a Netlify preview could silently use another branch's backend.
+
+Changes to bot replacement funding touch the authoritative WS runtime and therefore require a manual WS preview deploy before stage acceptance. Verify a replacement with old stack `0` or `1`, then confirm the next hand starts and the table escrow increased by exactly the funded delta. A Netlify deploy preview alone is not sufficient for this server-side path.
 Repo-side Caddy ownership is unified: `infra/vps/Caddyfile` is the single source of truth for both production and preview WS routing, so any Caddy change for either host must be made in that file.
 
 ### Dispatch a preview deploy for a selected ref

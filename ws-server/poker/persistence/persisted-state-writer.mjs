@@ -1,10 +1,12 @@
 import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
+import { postTransaction } from "./chips-ledger.mjs";
 import { writePersistedTableToFile } from "./persisted-state-file-store.mjs";
 
 const HAND_SETTLED_ACTION_TYPE = "HAND_SETTLED";
 const SETTLEMENT_AUDIT_VERSION = 1;
 const ACCEPTED_ACTION_AUDIT_VERSION = 1;
 const ACCEPTED_ACTION_TYPES = new Set(["FOLD", "CHECK", "CALL", "BET", "RAISE", "ALL_IN"]);
+const MAX_REPLACEMENT_FUNDINGS = 10;
 
 function normalizeJsonState(value) {
   if (!value) return {};
@@ -354,8 +356,130 @@ async function maybeWriteHoleCards({ tx, tableId, state, klog = () => {} }) {
   return { ok: true, playerCount: rows.length };
 }
 
+function normalizeReplacementFundings({ replacementFundings, tableId, expectedVersion }) {
+  if (replacementFundings === undefined) {
+    return { ok: true, supplied: false, fundings: [] };
+  }
+  if (!Array.isArray(replacementFundings) || replacementFundings.length > MAX_REPLACEMENT_FUNDINGS) {
+    return { ok: false, reason: "invalid_replacement_fundings" };
+  }
+  const seenSeats = new Set();
+  const fundings = [];
+  for (const value of replacementFundings) {
+    const seatNo = Number(value?.seatNo);
+    const oldStack = Number(value?.oldStack);
+    const targetStack = Number(value?.targetStack);
+    const fundingDelta = Number(value?.fundingDelta);
+    const fromStateVersion = Number(value?.fromStateVersion);
+    const toStateVersion = Number(value?.toStateVersion);
+    const oldBotUserId = typeof value?.oldBotUserId === "string" ? value.oldBotUserId.trim() : "";
+    const replacementBotUserId = typeof value?.replacementBotUserId === "string" ? value.replacementBotUserId.trim() : "";
+    const settledHandId = typeof value?.settledHandId === "string" ? value.settledHandId.trim() : "";
+    if (!Number.isInteger(seatNo) || seatNo < 1 || seatNo > MAX_REPLACEMENT_FUNDINGS || seenSeats.has(seatNo)
+      || !Number.isInteger(oldStack) || oldStack < 0
+      || !Number.isInteger(targetStack) || targetStack <= oldStack
+      || !Number.isInteger(fundingDelta) || fundingDelta !== targetStack - oldStack
+      || fromStateVersion !== expectedVersion || toStateVersion !== expectedVersion + 1
+      || !oldBotUserId || !replacementBotUserId || !settledHandId) {
+      return { ok: false, reason: "invalid_replacement_fundings" };
+    }
+    seenSeats.add(seatNo);
+    fundings.push({
+      seatNo,
+      oldBotUserId,
+      replacementBotUserId,
+      oldStack,
+      targetStack,
+      fundingDelta,
+      settledHandId,
+      fromStateVersion,
+      toStateVersion,
+      idempotencyKey: `poker:bot-replacement-buyin:v1:${tableId}:${toStateVersion}:${seatNo}`
+    });
+  }
+  fundings.sort((left, right) => left.seatNo - right.seatNo);
+  return { ok: true, supplied: true, fundings };
+}
+
+async function writeReplacementFundings({ tx, tableId, fundings, botFundingSystemKey }) {
+  if (fundings.length === 0) {
+    return [];
+  }
+  const sourceSystemKey = typeof botFundingSystemKey === "string" ? botFundingSystemKey.trim() : "";
+  if (!sourceSystemKey) {
+    const error = new Error("replacement_funding_config_invalid");
+    error.code = "replacement_funding_config_invalid";
+    throw error;
+  }
+  const escrowSystemKey = `POKER_TABLE:${tableId}`;
+  const fundedReplacements = [];
+  for (const funding of fundings) {
+    const result = await postTransaction({
+      userId: null,
+      txType: "TABLE_BUY_IN",
+      idempotencyKey: funding.idempotencyKey,
+      reference: `BOT_REPLACEMENT_BUY_IN:${tableId}:${funding.toStateVersion}:${funding.seatNo}`,
+      description: "Poker bot replacement funding",
+      metadata: {
+        actor: "BOT",
+        reason: "BOT_REPLACEMENT_BUY_IN",
+        tableId,
+        seatNo: funding.seatNo,
+        oldBotUserId: funding.oldBotUserId,
+        replacementBotUserId: funding.replacementBotUserId,
+        settledHandId: funding.settledHandId,
+        fromStateVersion: funding.fromStateVersion,
+        toStateVersion: funding.toStateVersion,
+        oldStack: funding.oldStack,
+        targetStack: funding.targetStack,
+        fundingDelta: funding.fundingDelta,
+        sourceSystemKey
+      },
+      entries: [
+        {
+          accountType: "SYSTEM",
+          systemKey: sourceSystemKey,
+          amount: -funding.fundingDelta,
+          metadata: { reason: "BOT_REPLACEMENT_BUY_IN", tableId, seatNo: funding.seatNo }
+        },
+        {
+          accountType: "ESCROW",
+          systemKey: escrowSystemKey,
+          amount: funding.fundingDelta,
+          metadata: { reason: "BOT_REPLACEMENT_BUY_IN", tableId, seatNo: funding.seatNo }
+        }
+      ],
+      createdBy: null,
+      tx
+    });
+    const transactionId = typeof result?.transaction?.id === "string" ? result.transaction.id : "";
+    const payloadHash = typeof result?.transaction?.payload_hash === "string" ? result.transaction.payload_hash : "";
+    if (!transactionId || !payloadHash) {
+      const error = new Error("replacement_funding_receipt_invalid");
+      error.code = "replacement_funding_receipt_invalid";
+      throw error;
+    }
+    fundedReplacements.push({
+      seatNo: funding.seatNo,
+      idempotencyKey: funding.idempotencyKey,
+      fundingDelta: funding.fundingDelta,
+      transactionId,
+      payloadHash
+    });
+  }
+  return fundedReplacements;
+}
+
 export function createPersistedStateWriter({ env = process.env, beginSql = beginSqlWs, klog = () => {} } = {}) {
-  async function writeViaDb({ tableId, expectedVersion, nextState, privateStateForHoleCards = null, acceptedActionAudit = null }) {
+  async function writeViaDb({
+    tableId,
+    expectedVersion,
+    nextState,
+    privateStateForHoleCards = null,
+    acceptedActionAudit = null,
+    replacementFundingPlan,
+    botFundingSystemKey = null
+  }) {
     return beginSql(async (tx) => {
       const persistedState = sanitizePersistedState(nextState);
       const holeCardState = normalizeJsonState(privateStateForHoleCards) || {};
@@ -366,6 +490,12 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       );
       const newVersion = Number(rows?.[0]?.version);
       if (Number.isInteger(newVersion) && newVersion >= 0) {
+        const fundedReplacements = await writeReplacementFundings({
+          tx,
+          tableId,
+          fundings: replacementFundingPlan.fundings,
+          botFundingSystemKey
+        });
         await tx.unsafe("update public.poker_tables set last_activity_at = now() where id = $1;", [tableId]);
         try {
           await maybeWriteHoleCards({ tx, tableId, state: holeCardState, klog });
@@ -399,7 +529,16 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
             reason: error?.message || "unknown"
           });
         }
-        return { ok: true, newVersion };
+        return {
+          ok: true,
+          newVersion,
+          ...(replacementFundingPlan.supplied ? {
+            tableId,
+            expectedVersion,
+            replacementFundingCommitted: true,
+            fundedReplacements
+          } : {})
+        };
       }
 
       const stateRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 limit 1;", [tableId]);
@@ -447,7 +586,18 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     }, { env });
   }
 
-  async function writeMutation({ tableId, expectedVersion, nextState, privateStateForHoleCards = null, supabaseUrl, supabaseServiceRoleKey, meta = null, acceptedActionAudit = null }) {
+  async function writeMutation({
+    tableId,
+    expectedVersion,
+    nextState,
+    privateStateForHoleCards = null,
+    supabaseUrl,
+    supabaseServiceRoleKey,
+    meta = null,
+    acceptedActionAudit = null,
+    replacementFundings = undefined,
+    botFundingSystemKey = null
+  }) {
     if (!tableId || !Number.isInteger(expectedVersion) || expectedVersion < 0) {
       return { ok: false, reason: "invalid" };
     }
@@ -463,6 +613,16 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     } catch {
       return { ok: false, reason: "invalid" };
     }
+    const replacementFundingPlan = normalizeReplacementFundings({ replacementFundings, tableId, expectedVersion });
+    if (!replacementFundingPlan.ok) {
+      return { ok: false, reason: replacementFundingPlan.reason };
+    }
+    if (replacementFundingPlan.fundings.length > 0) {
+      const sourceSystemKey = typeof botFundingSystemKey === "string" ? botFundingSystemKey.trim() : "";
+      if (!sourceSystemKey) {
+        return { ok: false, reason: "replacement_funding_config_invalid" };
+      }
+    }
 
     try {
       const forcedFailureKind = typeof env.WS_TEST_PERSIST_FAIL_KIND === "string" ? env.WS_TEST_PERSIST_FAIL_KIND.trim() : "";
@@ -470,6 +630,9 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
         return { ok: false, reason: "conflict" };
       }
       if (env.WS_PERSISTED_STATE_FILE) {
+        if (replacementFundingPlan.fundings.length > 0) {
+          return { ok: false, reason: "ledger_unavailable" };
+        }
         return writePersistedTableToFile({
           filePath: env.WS_PERSISTED_STATE_FILE,
           tableId,
@@ -480,7 +643,15 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       if (!env.SUPABASE_DB_URL && !supabaseUrl && !supabaseServiceRoleKey) {
         return { ok: false, reason: "config_missing" };
       }
-      return await writeViaDb({ tableId, expectedVersion, nextState: persistedState, privateStateForHoleCards: holeCardPrivateState, acceptedActionAudit });
+      return await writeViaDb({
+        tableId,
+        expectedVersion,
+        nextState: persistedState,
+        privateStateForHoleCards: holeCardPrivateState,
+        acceptedActionAudit,
+        replacementFundingPlan,
+        botFundingSystemKey
+      });
     } catch (error) {
       klog("ws_persisted_state_write_error", {
         tableId,

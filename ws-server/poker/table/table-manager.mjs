@@ -965,7 +965,62 @@ export function createTableManager({
     };
   }
 
-  function rolloverSettledHand({ tableId, nowMs = Date.now() } = {}) {
+  function normalizedReplacementFundingShape(value) {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.map((entry) => ({
+      seatNo: entry?.seatNo,
+      oldBotUserId: entry?.oldBotUserId,
+      replacementBotUserId: entry?.replacementBotUserId,
+      oldStack: entry?.oldStack,
+      targetStack: entry?.targetStack,
+      fundingDelta: entry?.fundingDelta,
+      settledHandId: entry?.settledHandId,
+      fromStateVersion: entry?.fromStateVersion,
+      toStateVersion: entry?.toStateVersion
+    }));
+  }
+
+  function replacementFundingPlansEqual(left, right) {
+    return JSON.stringify(normalizedReplacementFundingShape(left)) === JSON.stringify(normalizedReplacementFundingShape(right));
+  }
+
+  function replacementFundingReceiptMatches({ tableId, expectedVersion, stateVersion, replacementFundings, persistenceReceipt }) {
+    if (!persistenceReceipt || persistenceReceipt.ok !== true) {
+      return false;
+    }
+    if (persistenceReceipt.tableId !== tableId
+      || persistenceReceipt.expectedVersion !== expectedVersion
+      || persistenceReceipt.newVersion !== stateVersion
+      || persistenceReceipt.replacementFundingCommitted !== true) {
+      return false;
+    }
+    const funded = Array.isArray(persistenceReceipt.fundedReplacements)
+      ? persistenceReceipt.fundedReplacements
+      : [];
+    if (funded.length !== replacementFundings.length) {
+      return false;
+    }
+    return replacementFundings.every((entry, index) => {
+      const receiptEntry = funded[index];
+      const expectedKey = `poker:bot-replacement-buyin:v1:${tableId}:${stateVersion}:${entry.seatNo}`;
+      return receiptEntry?.seatNo === entry.seatNo
+        && receiptEntry?.idempotencyKey === expectedKey
+        && receiptEntry?.fundingDelta === entry.fundingDelta
+        && typeof receiptEntry?.transactionId === "string"
+        && receiptEntry.transactionId.length > 0
+        && typeof receiptEntry?.payloadHash === "string"
+        && receiptEntry.payloadHash.length > 0;
+    });
+  }
+
+  function isEconomyFreeRollover({ tableId, economyMode }) {
+    return typeof tableBootstrapLoader !== "function"
+      || (economyMode === "none" && typeof tableId === "string" && tableId.startsWith("guest_table_"));
+  }
+
+  function prepareSettledHandRollover({ tableId, nowMs = Date.now() } = {}) {
     const table = tables.get(tableId);
     if (!table) {
       return { ok: false, changed: false, reason: "table_not_found", stateVersion: 0 };
@@ -985,6 +1040,14 @@ export function createTableManager({
       settledState,
       nextVersion
     });
+    if (!recycled?.ok) {
+      return {
+        ok: false,
+        changed: false,
+        reason: recycled?.reason || "bot_replacement_invalid",
+        stateVersion: table.coreState.version
+      };
+    }
     if (!hasHandEligibleHumanMember({ table, coreState: recycled.coreState, nowMs })) {
       return {
         ok: true,
@@ -1009,20 +1072,100 @@ export function createTableManager({
       };
     }
 
-    table.coreState = {
+    const nextCoreState = {
       ...recycled.coreState,
       version: nextVersion,
       pokerState: stampTurnDeadline(nextHandState, resolveNowMs({ nowMs }))
     };
-    touchTableActivity(table, nowMs);
 
     return {
       ok: true,
       changed: true,
       reason: null,
-      stateVersion: table.coreState.version,
-      handId: table.coreState?.pokerState?.handId ?? null
+      expectedVersion: Number(table.coreState.version),
+      stateVersion: nextVersion,
+      nextCoreState,
+      handId: nextCoreState?.pokerState?.handId ?? null,
+      replacementFundings: normalizedReplacementFundingShape(recycled.replacementFundings)
     };
+  }
+
+  function commitSettledHandRollover({
+    tableId,
+    expectedVersion,
+    nextCoreState,
+    replacementFundings = [],
+    persistenceReceipt = null,
+    economyMode = null,
+    nowMs = Date.now()
+  } = {}) {
+    const table = tables.get(tableId);
+    if (!table) {
+      return { ok: false, changed: false, reason: "table_not_found", stateVersion: 0 };
+    }
+    const currentVersion = Number(table.coreState?.version);
+    const nextVersion = Number(nextCoreState?.version);
+    if (!Number.isInteger(expectedVersion)
+      || currentVersion !== expectedVersion
+      || nextVersion !== expectedVersion + 1
+      || table.coreState?.pokerState?.phase !== "SETTLED") {
+      return { ok: false, changed: false, reason: "runtime_version_conflict", stateVersion: currentVersion };
+    }
+
+    const recalculated = replaceBrokeBotsForNextHand({
+      coreState: table.coreState,
+      settledState: table.coreState.pokerState,
+      nextVersion
+    });
+    if (!recalculated?.ok || !replacementFundingPlansEqual(recalculated.replacementFundings, replacementFundings)) {
+      return { ok: false, changed: false, reason: "replacement_funding_mismatch", stateVersion: currentVersion };
+    }
+
+    const normalizedFundings = normalizedReplacementFundingShape(replacementFundings);
+    const economyFree = isEconomyFreeRollover({ tableId, economyMode });
+    if (normalizedFundings.length > 0 && !economyFree && !replacementFundingReceiptMatches({
+      tableId,
+      expectedVersion,
+      stateVersion: nextVersion,
+      replacementFundings: normalizedFundings,
+      persistenceReceipt
+    })) {
+      return { ok: false, changed: false, reason: "replacement_funding_unconfirmed", stateVersion: currentVersion };
+    }
+
+    table.coreState = nextCoreState;
+    touchTableActivity(table, nowMs);
+    return {
+      ok: true,
+      changed: true,
+      reason: null,
+      stateVersion: nextVersion,
+      handId: nextCoreState?.pokerState?.handId ?? null,
+      replacementFundings: normalizedFundings
+    };
+  }
+
+  function rolloverSettledHand({ tableId, nowMs = Date.now(), economyMode = null } = {}) {
+    const prepared = prepareSettledHandRollover({ tableId, nowMs });
+    if (!prepared?.ok || !prepared.changed) {
+      return prepared;
+    }
+    const hasFunding = prepared.replacementFundings.length > 0;
+    const economyFree = isEconomyFreeRollover({ tableId, economyMode });
+    if (hasFunding && !economyFree) {
+      return {
+        ok: false,
+        changed: false,
+        reason: "replacement_funding_required",
+        stateVersion: prepared.expectedVersion
+      };
+    }
+    return commitSettledHandRollover({
+      ...prepared,
+      tableId,
+      economyMode,
+      nowMs
+    });
   }
 
   function sweepTurnTimeouts({ nowMs = Date.now(), shouldProcessTable = null } = {}) {
@@ -1944,6 +2087,8 @@ export function createTableManager({
     tableSnapshot,
     bootstrapHand,
     applyAction,
+    prepareSettledHandRollover,
+    commitSettledHandRollover,
     rolloverSettledHand,
     maybeApplyTurnTimeout,
     sweepTurnTimeouts,

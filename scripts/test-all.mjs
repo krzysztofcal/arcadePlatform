@@ -81,6 +81,7 @@ run("node", ["tests/poker-materialize-settlement.payouts.test.mjs"], "poker-mate
 run("node", ["tests/poker-ui.behavior.test.mjs"], "poker-ui-behavior");
 run("node", ["tests/poker-v2-live.behavior.test.mjs"], "poker-v2-live-behavior");
 run("node", ["ws-server/poker/persistence/inactive-cleanup-adapter.behavior.test.mjs"], "ws-inactive-cleanup-adapter-behavior");
+run("node", ["ws-server/poker/persistence/persisted-state-writer.behavior.test.mjs"], "ws-persisted-state-writer-behavior");
 run("node", ["ws-server/poker/runtime/disconnect-cleanup.behavior.test.mjs"], "ws-disconnect-cleanup-runtime-behavior");
 run("node", ["ws-server/poker/runtime/accepted-bot-autoplay-adapter.behavior.test.mjs"], "ws-accepted-bot-autoplay-adapter-behavior");
 run("node", ["ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs"], "ws-lobby-join-public-snapshot-behavior");
