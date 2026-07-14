@@ -11,7 +11,8 @@ The smallest safe implementation is:
 1. prepare the next-hand state without mutating the live table;
 2. use the existing persisted-state database transaction to CAS the poker state and post every required replacement `TABLE_BUY_IN`;
 3. allow that transaction to commit only when both state persistence and ledger funding succeed;
-4. install and broadcast the prepared runtime state only after the database transaction commits.
+4. install and broadcast the prepared runtime state only after the database transaction commits;
+5. keep retrying a recoverable settled rollover at a low bounded frequency until it succeeds, the authoritative state changes, or the table is evicted.
 
 This is limited to replacement funding. Issue #706 owns terminal bot cash-out and issue #707 owns reconciliation inventory.
 
@@ -104,12 +105,16 @@ Add two focused methods to `createTableManager()`:
   - performs the current eligibility, replacement, next-dealer, next-hand, hole-card, blind, and deadline calculations;
   - returns `expectedVersion`, `stateVersion`, `nextCoreState`, `handId`, and `replacementFundings`;
   - does not assign `table.coreState`, touch activity, broadcast, or schedule autoplay.
-- `commitSettledHandRollover({ tableId, expectedVersion, nextCoreState, persistedVersion, nowMs })`
+- `commitSettledHandRollover({ tableId, expectedVersion, nextCoreState, replacementFundings, persistenceReceipt, nowMs })`
   - rechecks that the current runtime table is still on the expected settled version;
-  - requires `nextCoreState.version === expectedVersion + 1` and `persistedVersion` to match;
-  - installs the prepared state and touches activity only after the database result is successful.
+  - requires `nextCoreState.version === expectedVersion + 1` and `persistenceReceipt.newVersion` to match;
+  - accepts the closed `replacementFundings` array returned by prepare plus a persistence receipt returned by the writer;
+  - refuses any candidate with non-empty `replacementFundings` unless the receipt confirms the same table ID, expected version, committed version, and successful atomic funding transaction;
+  - installs the prepared state and touches activity only after that validation succeeds.
 
-Retain `rolloverSettledHand()` as a compatibility wrapper around prepare plus commit for existing in-memory/guest behavior and current callers outside the persistent production path. `server.mjs` must use the explicit prepare/persist/commit path for non-guest tables so production funding cannot be bypassed.
+Retain `rolloverSettledHand()` only as an economy-free compatibility wrapper. A table manager constructed without a persistence bootstrap loader may use it for existing in-memory behavior. In the production manager it may commit directly when `replacementFundings.length === 0`; when replacements require funding, the caller must pass `economyMode: "none"`, and omission or any other value returns `replacement_funding_required` without mutating runtime. `server.mjs` may pass that opt-out only after its existing `isGuestTableId(tableId)` check. Persistent tables always use the explicit prepare/persist/commit path.
+
+The wrapper must never manufacture a successful persistence receipt. The normal `commitSettledHandRollover()` path rejects a funding intent without the real writer result, so a future or overlooked caller cannot accidentally create a funded-looking replacement by invoking prepare plus commit locally. This guard is part of the table-manager contract, not only a convention in `server.mjs`.
 
 Do not store a pending plan on the table object. The prepared object remains local to the already serialized table command.
 
@@ -131,6 +136,8 @@ deferRuntimeVersionUpdate
 Ordinary action, timeout, join, and start-hand callers omit these properties and keep their current behavior. Settled rollover passes the prepared poker state and private hole-card state because the live table has not yet been mutated.
 
 For this prepared path, `deferRuntimeVersionUpdate` prevents `persistMutatedState()` from changing `table.persistedStateVersion` before the prepared `coreState` is installed. After `commitSettledHandRollover()` succeeds, `server.mjs` applies the returned persisted version. If the runtime commit validation unexpectedly fails after the database commit, the server immediately restores the now-funded, now-advanced state from persistence instead of retrying the old rollover.
+
+The successful writer result used as the commit receipt includes the table ID, expected version, new version, `replacementFundingCommitted: true`, and one closed `fundedReplacements` entry per prepared descriptor: `seatNo`, `idempotencyKey`, `fundingDelta`, returned transaction ID, and returned ledger `payload_hash`. The manager compares seat, key, and delta with the prepared input; a plain numeric `persistedVersion` is insufficient for a candidate containing funding intents. Reuse the transaction row already returned by `postTransaction()` rather than introducing another proof store or query.
 
 For a guest table, retain the current economy-free in-memory rollover and do not create a funding intent. For a non-guest table, non-empty replacement funding is mandatory before commit.
 
@@ -171,6 +178,8 @@ Required key components:
 
 Do not include the funding amount in the key. The existing payload hash must reject reuse of the same logical key with a different amount or account.
 
+This deliberately satisfies the issue requirement that the amount be bound to idempotency without putting the amount in the key itself. The key names one logical table/version/seat replacement; `fundingDelta` is mandatory payload and is covered by the ledger payload hash. Recomputing a different amount for the same logical replacement therefore produces an idempotency mismatch instead of a second valid transaction. Literal inclusion of the amount in the key would weaken this protection by allowing two differently calculated deltas for the same generation to appear as separate operations.
+
 The replacement UUID is deterministically derived from table, seat, and version, so it is redundant in the key. The old bot UUID and settled hand ID are useful audit evidence but are not required for uniqueness. Include both identities, `settledHandId`, from/to versions, old/target stack, delta, source `SYSTEM` key, and reason `BOT_REPLACEMENT_BUY_IN` in transaction metadata and reference.
 
 Use the existing `POKER_SYSTEM_ACTOR_USER_ID` as `createdBy`. Missing or invalid system actor configuration fails closed before the state CAS. Do not choose a connected human as the accounting actor.
@@ -189,9 +198,20 @@ For missing/inactive bankroll, insufficient bankroll balance, invalid delta, inv
 
 ### Retry
 
-Add a small settled-rollover retry counter beside the existing rollover timer map in `server.mjs`. Reuse the existing timer and table command queue with a bounded exponential delay. Clear the counter on successful commit, table eviction, or a restored state that is no longer `SETTLED`.
+Add settled-rollover retry metadata beside the existing rollover timer map in `server.mjs`. Reuse one timer and the existing table command queue per table:
 
-The retry recomputes the plan from the restored state. The same table, version, and seat produce the same replacement identity and idempotency key.
+- define fixed module constants `FAST_SETTLED_ROLLOVER_RETRY_DELAYS_MS = [1_000, 5_000, 15_000, 30_000]` and `SLOW_SETTLED_ROLLOVER_RETRY_MS = 60_000`; do not add another ENV;
+- use the fast schedule once for the initial failures;
+- after the fast retry budget is exhausted, switch to one slow retry every 60 seconds;
+- continue the slow retry without a total-attempt limit until the rollover succeeds, authoritative state is no longer the same `SETTLED` generation, or the table is evicted/closed;
+- clear the attempt count and slow-recovery mode on success, state change, eviction, and shutdown;
+- never allow both the reveal timer and recovery timer to exist for the same table.
+
+The slow retry interval is a frequency cap, not a terminal retry limit. It prevents a hot loop while guaranteeing that a temporary bankroll, database, or configuration outage cannot strand an otherwise active table forever.
+
+Identify the retry generation as `<tableId>:<stateVersion>:<handId>`. Store that key with `mode`, `attempt`, `dueAt`, and `timer` in `settledRolloverTimerByTableId`. A changed generation replaces and resets the schedule; a matching generation deduplicates it.
+
+Before every retry after a persistence/funding failure, restore or confirm the authoritative persisted state and recompute the plan from that state. The same table, version, and seat produce the same replacement identity and idempotency key. A restored table already past that generation cancels the retry rather than replaying it.
 
 - If the previous transaction rolled back, no ledger key exists and the retry may post normally.
 - If PostgreSQL committed but the WS process stopped before runtime commit, restart/restore loads the already-advanced poker state, so the old rollover is not planned again.
@@ -200,7 +220,7 @@ The retry recomputes the plan from the restored state. The same table, version, 
 
 Do not catch a PostgreSQL idempotency violation inside the same aborted transaction and then attempt to continue that transaction. Let the writer return failure, restore authoritative state outside the transaction, and rely on the atomic state-plus-ledger commit to distinguish an already-committed rollover from a rolled-back attempt.
 
-Cap retry frequency to avoid a hot loop when the bankroll is empty or misconfigured. Persistent failures remain visible through `klog` and leave the hand safely settled instead of inventing chips.
+On WS process bootstrap or authoritative table restore, an active table restored in `SETTLED` must call `maybeScheduleSettledRollover(tableId)`. This recreates recovery after process restart even though in-memory timer metadata was lost. Persistent failures remain visible through rate-limited `klog` and leave the hand safely settled instead of inventing chips, but they do not permanently disable future recovery attempts.
 
 ## Exact affected files
 
@@ -212,19 +232,23 @@ Cap retry frequency to avoid a hot loop when the bankroll is empty or misconfigu
   - preserve deterministic replacement identity and seat ordering.
 - `ws-server/poker/table/table-manager.mjs`
   - add `prepareSettledHandRollover()` and `commitSettledHandRollover()`;
-  - retain `rolloverSettledHand()` as the compatibility wrapper;
+  - retain `rolloverSettledHand()` only as the guarded economy-free compatibility wrapper;
+  - reject direct commit of non-empty replacement funding without a matching successful persistence receipt;
   - expose the two new methods from the manager object;
   - do not add persisted or table-level pending-funding properties.
 - `ws-server/server.mjs`
   - resolve the configured bankroll and existing system actor once at startup;
   - change `maybeScheduleSettledRollover()` to prepare, atomically persist/fund, commit runtime, then broadcast/autoplay;
   - extend `persistMutatedState()` only with optional prepared-state/funding inputs;
-  - add bounded retry state using the existing settled-rollover timer lifecycle;
-  - clear retries on success and eviction.
+  - add the fixed fast/slow delay constants and extend each `settledRolloverTimerByTableId` record with `mode`, `attempt`, `generationKey`, `dueAt`, and `timer` rather than adding a parallel scheduler;
+  - add `scheduleSettledRolloverRetry()` for fast backoff followed by one 60-second recovery timer per table;
+  - reschedule restored active `SETTLED` tables during bootstrap/restore;
+  - clear retries on success, authoritative state change, shutdown, and eviction.
 - `ws-server/poker/persistence/persisted-state-writer.mjs`
   - accept and validate optional replacement funding descriptors;
   - call the existing WS ledger helper inside the current DB transaction after a successful state CAS;
   - make funding failure transaction-fatal;
+  - return the closed persistence/funding receipt consumed by the table-manager commit guard;
   - reject replacement funding on the file-store path.
 - `ws-server/poker/persistence/chips-ledger.mjs`
   - reuse unchanged if repository verification during implementation confirms its `tx` path and strict `TABLE_BUY_IN` contract remain as analyzed;
@@ -278,7 +302,8 @@ Exit criteria: the migration amount is approved, environment scopes are known, a
 ### Phase 2 — pure replacement funding evidence
 
 - extend the engine result with validated per-seat delta descriptors;
-- split table-manager rollover into prepare and commit while preserving the compatibility wrapper;
+- split table-manager rollover into prepare and receipt-guarded commit;
+- restrict the compatibility wrapper to existing in-memory mode, explicitly confirmed guest mode, or candidates without funding intents;
 - keep all calculations synchronous and side-effect-free until commit.
 
 ### Phase 3 — atomic ledger plus persistence
@@ -286,7 +311,8 @@ Exit criteria: the migration amount is approved, environment scopes are known, a
 - extend the existing writer input with the prepared state and funding descriptors;
 - execute state CAS and all `TABLE_BUY_IN` posts in the same `beginSqlWs()` transaction;
 - update `server.mjs` to commit runtime state only after database success;
-- add controlled restore/backoff behavior and existing-style `klog` events.
+- add fast restore/backoff followed by persistent slow recovery and existing-style `klog` events;
+- ensure bootstrap and authoritative restore reschedule an active settled generation.
 
 ### Phase 4 — staged verification and rollout
 
@@ -303,13 +329,14 @@ No new automated test or test framework is planned.
 3. Repeat with stack 0 and confirm a delta of 100.
 4. Settle a hand with two broke bots and confirm two per-seat transactions plus one state transition commit atomically.
 5. Verify the idempotency keys use the same table/version/seat on retry and no duplicate ledger entry appears.
-6. Temporarily make the stage bankroll insufficient or inactive. Confirm the state remains `SETTLED`, escrow is unchanged, no candidate snapshot/autoplay is emitted, a bounded retry occurs, and recovery succeeds after the account is restored.
+6. Temporarily make the stage bankroll insufficient or inactive long enough to exhaust fast retries. Confirm the state remains `SETTLED`, escrow is unchanged, no candidate snapshot/autoplay is emitted, retry switches to one 60-second timer, and recovery succeeds after the account is restored without any user action.
 7. Force a state-version conflict. Confirm the CAS fails before ledger posting and the persisted state is restored.
-8. Restart the WS service immediately after a successful replacement commit. Confirm bootstrap restores the new hand and does not fund the replacement again.
+8. Restart the WS service while a table is waiting in slow recovery. Confirm bootstrap restores the settled table, recreates the retry, and advances after the dependency recovers. Then restart immediately after a successful replacement commit and confirm the new hand is restored without duplicate funding.
 9. Verify a table with no broke bot performs no ledger operation and follows the current rollover behavior.
-10. Verify a guest table remains economy-free and continues in memory.
-11. Verify inactive cleanup behavior is unchanged and any terminal bot residual remains for #706 rather than being moved by this implementation.
-12. Inspect `klog` output for controlled status/reason/count/delta fields and absence of cards, auth data, and raw sensitive errors.
+10. In the production-configured manager, attempt direct wrapper/commit use for a persistent replacement candidate without a funding receipt. Confirm it returns `replacement_funding_required` or `replacement_funding_unconfirmed` and leaves runtime unchanged.
+11. Verify a guest table explicitly selected by `isGuestTableId()` remains economy-free and continues in memory.
+12. Verify inactive cleanup behavior is unchanged and any terminal bot residual remains for #706 rather than being moved by this implementation.
+13. Inspect `klog` output for controlled status/reason/count/delta/retry-mode fields and absence of cards, auth data, and raw sensitive errors.
 
 ## Deployment and rollback
 
@@ -337,10 +364,10 @@ No new automated test or test framework is planned.
 | Poker gameplay | Intentional fail-closed change: a next hand with a replacement bot no longer starts when funding is unavailable. The table stays settled and retries instead of inventing chips. |
 | Bot replacement | Replacement identity, seat, target stack, dealer progression, cards, and autoplay policy remain the same after a successful commit. |
 | Initial bot funding | Operationally breaking default changes from `TREASURY` to `POKER_BOT_BANKROLL`; the account, allocation, and scoped environment value must exist before rollout. |
-| Runtime API | New prepare/commit methods are additive. The existing `rolloverSettledHand()` wrapper remains for compatibility, while the persistent production caller switches to the safe path. |
+| Runtime API | Conditionally breaking: new prepare/commit methods are additive, but a production persistence-backed caller can no longer use `rolloverSettledHand()` to commit a funded replacement. Guest/in-memory callers remain supported through the guarded economy-free path; every persistent caller must migrate to writer receipt plus commit. |
 | Persistence | `writeMutation()` receives optional additive inputs. Normal action/start/timeout callers remain unchanged. Mandatory replacement funding now participates in the state transaction. |
 | Ledger | Adds one `TABLE_BUY_IN` transaction per replacement seat. No transaction enum, balance semantics, or cash-out behavior changes. |
-| Restore/retry | A failed replacement may keep a table in `SETTLED` longer. Bounded retries and operational monitoring are required. |
+| Restore/retry | A failed replacement may keep a table in `SETTLED` longer. Fast retries transition to a 60-second recovery cadence and survive process restart through restored-state scheduling; operational monitoring is required. |
 | Inactive cleanup | No code change. More correctly backed bot value may remain in escrow until #706 implements terminal return. |
 | Reconciliation | No implementation. Replacement ledger metadata creates cleaner future evidence for #707. |
 | Database | Additive data migration creates and funds one `SYSTEM` account; no table/column/schema contract changes. |
@@ -359,6 +386,9 @@ The most important breaking risk is operational: deploying the code before provi
 - Multiple replacements in one rollover are atomic and independently auditable by deterministic per-seat keys.
 - State conflicts create no ledger entry; ledger failures create no state transition.
 - Retry and restart cannot fund the same table/version/seat twice.
+- Exhausting fast retries cannot permanently strand an active settled table; slow recovery continues until success, state change, or eviction.
+- A persistence-backed replacement candidate with a funding intent cannot be committed through the compatibility wrapper or without a matching writer receipt.
+- `fundingDelta` is bound to the idempotency operation by the existing payload hash; a changed amount for the same table/version/seat is rejected rather than assigned a second key.
 - Initial bot funding after rollout also uses `POKER_BOT_BANKROLL`.
 - Guest tables remain outside the chips economy.
 - Inactive cleanup, terminal cash-out, and reconciliation remain unchanged and explicitly deferred to #706/#707.
@@ -371,7 +401,7 @@ The most important breaking risk is operational: deploying the code before provi
 - Engine replacement returns closed, validated funding evidence without performing I/O.
 - Persistent rollover follows prepare → atomic persist/fund → runtime commit.
 - Existing `TABLE_BUY_IN` validation and transaction helpers are reused; no new framework or generic ledger abstraction is introduced.
-- Failure is fail-closed, logged with `klog`, restored, and retried with bounded delay.
+- Failure is fail-closed, logged with `klog`, restored, retried quickly with bounded backoff, then retried at a bounded slow frequency until a terminal lifecycle condition.
 - The implementation contains no #706 cash-out behavior, #707 inventory, automatic remediation, frontend, CSS, JSP, or CSP work.
 
 ## Plan verdict
