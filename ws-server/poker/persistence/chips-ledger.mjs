@@ -199,7 +199,7 @@ async function runTableBuyIn(sqlTx, {
   const txRows = await sqlTx.unsafe(
     `
 insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, user_id, created_by)
-values ($1, $2, $3::jsonb, $4, $5, $6, $7, $8)
+values ($1, $2, ($3::text)::jsonb, $4, $5, $6, $7, $8)
 returning *;
     `,
     [reference, description, safeMetadataJson, idempotencyKey, payloadHash, txType, payloadUserId, createdBy]

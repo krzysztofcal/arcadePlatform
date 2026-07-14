@@ -788,6 +788,7 @@ function createReplacementFundingDbHarness({ tableId, version = 7, state, treasu
     accounts: new Map([[sourceAccount.system_key, sourceAccount], [escrowAccount.system_key, escrowAccount]]),
     transactions: new Map(),
     ledgerInsertCount: 0,
+    transactionInsertSql: null,
     failFunding: false
   };
 
@@ -815,6 +816,7 @@ function createReplacementFundingDbHarness({ tableId, version = 7, state, treasu
           return params[0].map((key) => working.accounts.get(key)).filter(Boolean).map((account) => ({ ...account }));
         }
         if (text.includes("insert into public.chips_transactions")) {
+          durable.transactionInsertSql = text;
           if (durable.failFunding) throw new Error("simulated_funding_failure");
           const idempotencyKey = params[3];
           if (working.transactions.has(idempotencyKey)) throw new Error("duplicate_idempotency_key");
@@ -893,6 +895,7 @@ test("replacement funding without a configured human actor atomically increases 
   assert.equal(harness.balance(`POKER_TABLE:${tableId}`), escrowBefore + funding[0].fundingDelta);
   assert.equal(harness.durable.ledgerInsertCount, 1);
   assert.equal([...harness.durable.transactions.values()][0]?.created_by, null);
+  assert.match(harness.durable.transactionInsertSql, /values\s*\(\$1, \$2, \(\$3::text\)::jsonb,/);
 
   const restartedManager = createTableManager({ maxSeats: 6, tableBootstrapLoader: async () => ({ ok: false }) });
   assert.equal(restartedManager.restoreTableFromPersisted(tableId, {
