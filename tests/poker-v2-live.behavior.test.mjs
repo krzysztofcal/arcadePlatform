@@ -2352,8 +2352,8 @@ test('poker v2 renders exact main, side, and returned awards and preserves them 
   assert.equal(summary.hidden, true, 'an explicit clear must remove the presentation');
 });
 
-test('poker v2 animates a live per-pot settlement once and skips it for reduced motion', async () => {
-  async function settle(reducedMotion){
+test('poker v2 animates a live per-pot settlement once and skips it for resync or reduced motion', async () => {
+  async function settle(reducedMotion, statusBeforeSettlement){
     const harness = createHarness({ reducedMotion });
     harness.fireDomContentLoaded();
     await harness.flush();
@@ -2381,8 +2381,9 @@ test('poker v2 animates a live per-pot settlement once and skips it for reduced 
         handSettlement: { handId: 'hand-animation', settledAt: new Date(Date.now()).toISOString(), payouts: { 'user-1': 18, 'player-b': 2 } }
       }
     };
+    if (statusBeforeSettlement) ws.onStatus(statusBeforeSettlement, {});
     ws.onSnapshot({
-      kind: 'statePatch',
+      kind: 'stateSnapshot',
       payload: settlementPayload
     });
     await harness.flush();
@@ -2395,6 +2396,7 @@ test('poker v2 animates a live per-pot settlement once and skips it for reduced 
   const animated = animatedResult.harness;
   assert.equal(animated.elements.pokerChipFxLayer.children.length > 0, true);
   assert.equal(animated.elements.pokerChipFxLayer.children.every((node) => node.classList.contains('poker-chip-fly--settlement')), true);
+  assert.equal(animated.elements.pokerChipFxLayer.children.every((node) => node.style.animationDuration === '780ms'), true);
   const flyCount = animated.elements.pokerChipFxLayer.children.length;
   animated.getCreateOptions().onSnapshot({ kind: 'statePatch', payload: animatedResult.settlementPayload });
   await animated.flush();
@@ -2414,8 +2416,66 @@ test('poker v2 animates a live per-pot settlement once and skips it for reduced 
   disconnectResult.harness.advanceTime(1000);
   await disconnectResult.harness.flush();
   assert.equal(disconnectResult.harness.elements.pokerChipFxLayer.children.length, 0, 'disconnect must keep later settlement pots cancelled');
+  const resynced = (await settle(false, 'resync')).harness;
+  assert.equal(resynced.elements.pokerChipFxLayer.children.length, 0, 'a resync snapshot must not replay settlement chips');
   const staticOnly = (await settle(true)).harness;
   assert.equal(staticOnly.elements.pokerChipFxLayer.children.length, 0);
+});
+
+test('poker v2 preserves a live settlement reveal received after the server timestamp window elapsed', async () => {
+  const nowMs = 1_700_000_300_000;
+  const harness = createHarness({ nowMs });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    initial: true,
+    payload: {
+      tableId: 'table-1',
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [
+        { userId: 'user-1', seat: 1, displayName: 'Player A' },
+        { userId: 'player-b', seat: 2, displayName: 'Player B' }
+      ] },
+      public: { hand: { handId: 'hand-delayed-settlement', status: 'RIVER' }, pot: { total: 20 }, stacks: { 'user-1': 90, 'player-b': 90 } },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      public: {
+        hand: { handId: 'hand-delayed-settlement', status: 'SETTLED' },
+        pot: { total: 0 },
+        showdown: { handId: 'hand-delayed-settlement', reason: 'computed', winners: ['user-1'], potAwardedTotal: 20, potsAwarded: [{ amount: 20, winners: ['user-1'], eligibleUserIds: ['user-1', 'player-b'] }] },
+        handSettlement: { handId: 'hand-delayed-settlement', settledAt: new Date(nowMs - 10_000).toISOString(), payouts: { 'user-1': 20 } }
+      }
+    }
+  });
+  await harness.flush();
+  harness.advanceTime(0);
+  await harness.flush();
+  assert.equal(harness.elements.pokerChipFxLayer.children.length > 0, true, 'a delayed live stateSnapshot must still animate');
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      public: { hand: { handId: 'hand-after-delayed-settlement', status: 'PREFLOP' }, pot: { total: 3 } }
+    }
+  });
+  await harness.flush();
+  const summary = findChildByClass(harness.elements.pokerCenterLayer, 'poker-settlement-summary');
+  assert.equal(summary.hidden, false, 'the next hand must wait for the local reveal window');
+
+  harness.advanceTime(3999);
+  await harness.flush();
+  assert.equal(summary.hidden, false);
+  harness.advanceTime(1);
+  await harness.flush();
+  assert.equal(summary.hidden, true, 'the queued next hand appears after the full local reveal window');
 });
 
 test('poker v2 falls back to demo mode when tableId is missing', async () => {

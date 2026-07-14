@@ -55,6 +55,7 @@
   var CLOSED_TABLE_REDIRECT_SECONDS = 5;
   var WINNER_REVEAL_MS = 4_000;
   var CHIP_FLY_MS = 420;
+  var SETTLEMENT_CHIP_FLY_MS = 780;
   var AUTO_JOIN_RETRY_DELAYS_MS = [250, 750, 1500, 3000];
   var CHIP_DENOMINATIONS = [
     { value: 1000, color: 'yellow' },
@@ -180,6 +181,7 @@
   var settlementAnimationGeneration = 0;
   var settlementAnimationTimers = [];
   var settlementAnimationNodes = [];
+  var suppressNextSettlementAnimation = false;
   var els = {};
 
   function cloneState(source){
@@ -1178,11 +1180,12 @@
     return Number.isFinite(settledAtMs) && settledAtMs <= Date.now() + 1000 ? settledAtMs + WINNER_REVEAL_MS : Date.now() + WINNER_REVEAL_MS;
   }
 
-  function syncStickyWinnerReveal(){
+  function syncStickyWinnerReveal(minimumVisibleUntilMs){
     var handId = state.handId || (state.handSettlement && state.handSettlement.handId) || (state.showdown && state.showdown.handId) || null;
     if (!handId || state.phase !== 'SETTLED' || (!state.showdown && !state.settlementPresentation)) return;
     if (stickyWinnerReveal.handId !== handId && lastPresentedSettlementHandId !== handId){
       var visibleUntilMs = resolveSettlementRevealDueAt(state.settlementPresentation || state.handSettlement);
+      if (Number.isFinite(minimumVisibleUntilMs)) visibleUntilMs = Math.max(visibleUntilMs, minimumVisibleUntilMs);
       stickyWinnerReveal = {
         handId: handId,
         visibleUntilMs: visibleUntilMs,
@@ -1386,7 +1389,13 @@
       clearWinnerRevealTimer();
       stickyWinnerReveal.visibleUntilMs = 0;
     }
-    syncStickyWinnerReveal();
+    var liveSettlementTransition = !frameInitial
+      && !(frame && frame.suppressSettlementAnimation)
+      && !!previousHandId
+      && previousHandId === state.handId
+      && previousPhase !== 'SETTLED'
+      && state.phase === 'SETTLED';
+    syncStickyWinnerReveal(liveSettlementTransition ? Date.now() + WINNER_REVEAL_MS : null);
     state.actionConstraints = normalizeConstraints(constraintsPrimary, legalSource && legalSource.actionConstraints);
     state.statusText = LIVE_STATUS_COPY.live;
     if (!autoJoinErrorActive) state.errorText = '';
@@ -2098,18 +2107,19 @@
     };
   }
 
-  function spawnChipFly(fromPoint, toPoint, color, delayMs){
+  function spawnChipFly(fromPoint, toPoint, color, delayMs, durationMs){
     if (!els.chipFxLayer || !fromPoint || !toPoint) return null;
     var tone = color || 'white';
     var fly = createChipFlyAsset(tone);
     fly.style.left = Math.round(fromPoint.x) + 'px';
     fly.style.top = Math.round(fromPoint.y) + 'px';
-    fly.style.animationDuration = CHIP_FLY_MS + 'ms';
+    var resolvedDurationMs = Number.isFinite(durationMs) && durationMs > 0 ? durationMs : CHIP_FLY_MS;
+    fly.style.animationDuration = resolvedDurationMs + 'ms';
     fly.style.animationDelay = Math.max(0, delayMs || 0) + 'ms';
     fly.style.setProperty('--chip-dx', Math.round(toPoint.x - fromPoint.x) + 'px');
     fly.style.setProperty('--chip-dy', Math.round(toPoint.y - fromPoint.y) + 'px');
     els.chipFxLayer.appendChild(fly);
-    window.setTimeout(function(){ if (fly && fly.parentNode) fly.parentNode.removeChild(fly); }, CHIP_FLY_MS + Math.max(0, delayMs || 0) + 40);
+    window.setTimeout(function(){ if (fly && fly.parentNode) fly.parentNode.removeChild(fly); }, resolvedDurationMs + Math.max(0, delayMs || 0) + 40);
     return fly;
   }
 
@@ -2158,7 +2168,8 @@
   function animateSettlementAwards(previousVisual, nextVisual, sceneRect, potFrom, frame){
     var presentation = nextVisual && nextVisual.settlementPresentation;
     if (!presentation || !presentation.valid || !Array.isArray(presentation.pots) || !presentation.pots.length) return;
-    if (!frame || frame.kind !== 'statePatch' || frame.initial) return;
+    if (!frame || frame.initial || frame.suppressSettlementAnimation) return;
+    if (frame.kind !== 'statePatch' && frame.kind !== 'stateSnapshot') return;
     if (!previousVisual || previousVisual.phase === 'SETTLED' || nextVisual.phase !== 'SETTLED') return;
     if (!nextVisual.handId || previousVisual.handId !== nextVisual.handId || presentation.handId !== nextVisual.handId) return;
     if (lastAnimatedSettlementHandId === presentation.handId || prefersReducedMotion()) return;
@@ -2167,7 +2178,7 @@
     var generation = settlementAnimationGeneration;
     var seatByUserId = {};
     state.seats.forEach(function(seat){ if (seat && seat.userId) seatByUserId[seat.userId] = seat; });
-    var availableMs = Math.max(200, WINNER_REVEAL_MS - CHIP_FLY_MS - 240);
+    var availableMs = Math.max(200, WINNER_REVEAL_MS - SETTLEMENT_CHIP_FLY_MS - 240);
     var stepGapMs = Math.min(480, Math.max(150, Math.floor(availableMs / Math.max(1, presentation.pots.length))));
     presentation.pots.forEach(function(pot, potIndex){
       var timerId = window.setTimeout(function(){
@@ -2179,7 +2190,7 @@
           if (!target) return;
           var color = resolveFlyChipColorFromAmount(recipient.amount);
           for (var chipIndex = 0; chipIndex < 3; chipIndex++){
-            var fly = spawnChipFly(potFrom, target, color, recipientIndex * 34 + chipIndex * 42);
+            var fly = spawnChipFly(potFrom, target, color, recipientIndex * 34 + chipIndex * 42, SETTLEMENT_CHIP_FLY_MS);
             if (!fly) continue;
             fly.classList.add('poker-chip-fly--settlement');
             fly.dataset.settlementAnimation = presentation.handId;
@@ -3397,6 +3408,7 @@
           if (!rejoinSeatAfterReconnect()) autoJoinSeat();
         } else if (status === 'reconnecting'){
           cancelSettlementAnimations();
+          suppressNextSettlementAnimation = true;
           rememberSeatForReconnect();
           state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.connecting;
@@ -3404,6 +3416,9 @@
           renderControls();
         } else if (status === 'command_result') {
           syncClosedTableRedirectFromSignal(info && info.reason ? info.reason : null);
+        } else if (status === 'resync'){
+          cancelSettlementAnimations();
+          suppressNextSettlementAnimation = true;
         } else if (status === 'failed'){
           cancelSettlementAnimations();
           state.wsReady = false;
@@ -3428,8 +3443,10 @@
         var frame = {
           kind: snapshot && typeof snapshot.kind === 'string' ? snapshot.kind : 'stateSnapshot',
           initial: !!(snapshot && snapshot.initial),
+          suppressSettlementAnimation: suppressNextSettlementAnimation,
           payload: payload
         };
+        suppressNextSettlementAnimation = false;
         if (shouldDeferSnapshotUntilRevealEnds(payload)){
           pendingPostRevealSnapshot = frame;
           scheduleRevealDismiss();

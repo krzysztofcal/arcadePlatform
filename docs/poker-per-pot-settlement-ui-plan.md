@@ -183,7 +183,7 @@ This classification distinguishes a real uncontested main-pot win after folds fr
 - add `state.settlementPresentation` and derive it through the local `buildSettlementPresentation()` only when a complete authoritative settlement is available;
 - replace `stickyWinnerReveal.winners` with a cloned immutable `settlementPresentation`; retain revealed cards and community cards;
 - add `lastPresentedSettlementHandId` so duplicate/replayed snapshots for the same hand cannot restart or extend an expired reveal window;
-- calculate the local reveal deadline from `handSettlement.settledAt + WINNER_REVEAL_MS`, falling back to receipt time only when the server timestamp is absent; never reset the deadline for the same hand;
+- calculate the local reveal deadline from `handSettlement.settledAt + WINNER_REVEAL_MS`; for a same-hand live transition observed by the page, guarantee one `WINNER_REVEAL_MS` window from receipt because persistence/broadcast latency can consume the server-side interval, while initial/reconnect/resync snapshots use only the remaining authoritative deadline; never reset the deadline for the same hand;
 - replace `getDisplayWinnerUserIds()`/`isWinnerSeat()` with `getDisplaySettlementPresentation()` and `getSeatSettlementAwards(userId)` for labels and amounts;
 - retain a separate helper for which compared hands/cards are revealed; award recipients and revealed showdown participants are different concepts;
 - add `renderSettlementSummary()` and call it from `render()`;
@@ -199,6 +199,7 @@ This classification distinguishes a real uncontested main-pot win after folds fr
 Change `onSnapshot()` to pass `{ kind, initial, payload }` metadata into `mergeSnapshot()` and retain the same metadata with `pendingPostRevealSnapshot`. Add a small own-property helper so omission can be distinguished from explicit `null` in both root and `public` branches.
 
 - Full `stateSnapshot`: treat settlement fields as authoritative. In `SETTLED`, rebuild from the complete `showdown` plus `handSettlement`; if that pair is incomplete or invalid, clear only the award presentation to its neutral fallback while preserving independent reveal data. Explicit `null` or absence outside `SETTLED` clears the non-sticky current settlement.
+- A non-initial full `stateSnapshot` is also the normal live broadcast shape in the current server. A same-hand transition from an active phase into `SETTLED` is eligible for the local reveal window and animation exactly like `statePatch`; frame kind alone must not suppress it.
 - Initial `table_state`: treat the settlement fields present in the initial authoritative view as the baseline. Later `table_state` messages are merge-like because the protocol/client tests allow partial table state.
 - `statePatch` with neither `showdown` nor `handSettlement`: preserve normalized settlement data, `state.settlementPresentation`, sticky award rows, revealed cards, and the original reveal deadline.
 - `statePatch` with explicit `showdown: null` or `handSettlement: null`: clear the corresponding current-hand data, current presentation, and same-hand sticky reveal. A next-hand payload is deferred before merge, so its clear cannot erase the still-readable previous reveal prematurely.
@@ -248,8 +249,8 @@ Phase 2 starts only after the Phase 1 model and static behavior pass their focus
 
 - `poker/poker-v2.js::captureVisualSnapshot()` — retain the settlement hand ID and immutable ordered awards needed to identify a new live settlement.
 - `poker/poker-v2.js::animateChipDiff()` — delegate the settlement branch to a new `animateSettlementAwards(previousVisual, nextVisual)` while leaving bet-to-pot behavior unchanged.
-- `poker/poker-v2.js::spawnChipFly()` — reuse unchanged for each recipient trajectory; do not create another animation engine.
-- add page-lifetime `lastAnimatedSettlementHandId`, `settlementAnimationGeneration`, and a bounded list of animation timers so stale callbacks can be cancelled on hand change, disconnect, or teardown.
+- `poker/poker-v2.js::spawnChipFly()` — reuse it for each recipient trajectory with an optional duration parameter so settlement flow can remain readable without slowing the existing bet-to-pot effect; do not create another animation engine.
+- add page-lifetime `lastAnimatedSettlementHandId`, `settlementAnimationGeneration`, and bounded lists of animation timers and active settlement nodes so stale callbacks and already-running settlement chips can be cancelled on hand change, disconnect, resync, or teardown without removing independent bet-to-pot nodes.
 - `poker/poker-v2.css` — add only small award-active/returned visual states and reduced-motion overrides, one line per selector.
 - `tests/poker-v2-live.behavior.test.mjs` — add live transition, split, return, duplicate resync, reconnect, cancellation, and reduced-motion cases.
 
@@ -260,9 +261,10 @@ Phase 2 starts only after the Phase 1 model and static behavior pass their focus
 - for a split pot, animate the same pot step toward every recipient using that recipient's exact share for color/quantity selection;
 - animate a return as `Returned`, never as a winner flow;
 - keep the total sequence within the existing reveal window by using a bounded stagger; if there are too many recipients, shorten decorative spacing rather than delay server rollover;
-- do not replay animation for the same `handId` after duplicate snapshots, patch resync, reconnect, or full snapshot;
+- do not replay animation for the same `handId` after duplicate snapshots, resync, reconnect, or an initial/recovery full snapshot; a non-initial full snapshot that is the page's first observed same-hand transition into `SETTLED` remains eligible;
 - animate only when the current page observed a live transition for that same hand into `SETTLED`; an initial/reconnect snapshot already in `SETTLED` is static;
 - cancel pending callbacks when the hand changes or the client disconnects;
+- remove already-running settlement fly nodes when cancellation occurs, while leaving unrelated bet-to-pot fly nodes untouched;
 - when `matchMedia('(prefers-reduced-motion: reduce)')` matches, create no flying-chip DOM nodes or timers. Static information remains complete and immediate.
 
 No change to `ws-server/server.mjs::maybeScheduleSettledRollover()`, `resolveSettledRevealDueAt()`, or `WS_POKER_SETTLED_REVEAL_MS` is planned. Animation is subordinate to the authoritative reveal/rollover lifecycle.
@@ -297,6 +299,7 @@ The existing behavior harness must cover:
 - explicit settlement `null` clearing current award presentation, while a deferred next-hand patch waits for the reveal boundary;
 - malformed/legacy awards falling back neutrally without removing revealed cards or the best-hand summary;
 - next-hand snapshot deferred until the remaining reveal deadline, then applied once;
+- delayed live settlement delivered after its server timestamp window has elapsed still receives a complete local reveal window, while the queued next-hand snapshot is applied once afterward;
 - narrow/mobile DOM remaining usable with multiple rows;
 - reduced motion retaining all information;
 - animation phase: no replay after resync, ordered animations, split destinations, return destination, and cancellation on hand change.
