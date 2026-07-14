@@ -116,6 +116,22 @@ test('handleJoinCommand forwards join intent to authoritative executor when enab
   assert.equal(calls.joinArgs.authoritativeSeatNo, 2);
 });
 
+test('handleJoinCommand does not reapply the original buy-in during authoritative rejoin attach', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 2, buyIn: 100 });
+  ctx.authoritativeJoinEnabled = true;
+  ctx.persistedBootstrapEnabled = true;
+  ctx.loadAuthoritativeJoinExecutor = async () => async (args) => {
+    calls.authoritativeArgs = args;
+    return { ok: true, seatNo: 2, stack: 99, rejoin: true };
+  };
+
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.authoritativeArgs.buyIn, 100);
+  assert.equal(calls.joinArgs.authoritativeSeatNo, 2);
+  assert.equal(calls.joinArgs.buyIn, null);
+});
+
 test('handleJoinCommand rejects instead of degrading when authoritative join is required but unavailable', async () => {
   const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 100 });
   ctx.authoritativeJoinEnabled = true;
