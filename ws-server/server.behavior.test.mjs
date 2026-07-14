@@ -264,7 +264,10 @@ function sendFrame(ws, frame) {
 async function writePersistedFile(fixture) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ws-persist-"));
   const filePath = path.join(dir, "persisted-state.json");
-  await fs.writeFile(filePath, `${JSON.stringify(fixture)}
+  const coherentFixture = fixture?.tables && typeof fixture.tables === "object" && !Array.isArray(fixture.tables)
+    ? { ...fixture, tables: coherentPersistedBootstrapFixtures(fixture.tables) }
+    : fixture;
+  await fs.writeFile(filePath, `${JSON.stringify(coherentFixture)}
 `, "utf8");
   return { dir, filePath };
 }
@@ -2291,9 +2294,50 @@ test("resume continuity for session A is not invalidated by high-traffic session
   }
 });
 
+function coherentPersistedBootstrapFixtures(fixtures) {
+  return Object.fromEntries(Object.entries(fixtures || {}).map(([tableId, fixture]) => {
+    const stateValue = fixture?.stateRow?.state;
+    let state = null;
+    let stringified = false;
+    if (stateValue && typeof stateValue === "object" && !Array.isArray(stateValue)) {
+      state = { ...stateValue };
+    } else if (typeof stateValue === "string") {
+      try {
+        const parsed = JSON.parse(stateValue);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          state = { ...parsed };
+          stringified = true;
+        }
+      } catch {
+        return [tableId, fixture];
+      }
+    }
+    if (!state) return [tableId, fixture];
+
+    const stacks = state.stacks && typeof state.stacks === "object" && !Array.isArray(state.stacks)
+      ? { ...state.stacks }
+      : {};
+    for (const seat of Array.isArray(fixture?.seatRows) ? fixture.seatRows : []) {
+      if (seat?.is_bot === true || String(seat?.status || "").toUpperCase() !== "ACTIVE") continue;
+      const userId = typeof seat?.user_id === "string" ? seat.user_id.trim() : "";
+      if (!userId || Object.prototype.hasOwnProperty.call(stacks, userId)) continue;
+      const seatStack = Number(seat?.stack);
+      stacks[userId] = Number.isSafeInteger(seatStack) && seatStack >= 0 ? seatStack : 100;
+    }
+    const coherentState = { ...state, stacks };
+    return [tableId, {
+      ...fixture,
+      stateRow: fixture?.stateRow
+        ? { ...fixture.stateRow, state: stringified ? JSON.stringify(coherentState) : coherentState }
+        : fixture?.stateRow
+    }];
+  }));
+}
+
 function persistedBootstrapFixturesEnv(fixtures) {
+  const coherentFixtures = coherentPersistedBootstrapFixtures(fixtures);
   return {
-    WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(fixtures)
+    WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(coherentFixtures)
   };
 }
 

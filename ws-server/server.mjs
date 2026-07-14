@@ -1180,6 +1180,18 @@ async function persistMutatedState({
     if (Array.isArray(replacementFundings) && replacementFundings.length > 0) {
       return { ok: false, reason: "persistence_required" };
     }
+    if (process.env.WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON && Array.isArray(humanStackUpdates)) {
+      return {
+        ok: true,
+        skipped: true,
+        fixture: true,
+        tableId,
+        expectedVersion,
+        newVersion: expectedVersion + 1,
+        humanStackProjectionCommitted: true,
+        projectedHumanStacks: humanStackUpdates.map(({ userId, seatNo, stack }) => ({ userId, seatNo, stack }))
+      };
+    }
     return { ok: true, skipped: true };
   }
   const nextState = nextStateOverride || tableManager.persistedPokerState(tableId);
