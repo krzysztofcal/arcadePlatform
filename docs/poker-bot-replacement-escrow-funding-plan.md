@@ -53,8 +53,8 @@ This is limited to replacement funding. Issue #706 owns terminal bot cash-out an
 
 ## Accounting decision and invariant
 
-- All bot funding created after rollout uses the configured dedicated `POKER_BOT_BANKROLL` `SYSTEM` account.
-- `POKER_BOT_BANKROLL_SYSTEM_KEY` remains the existing configuration property, but its default and deployed value become `POKER_BOT_BANKROLL`.
+- Replacement funding reuses the same existing `SYSTEM` source as current bot seeding. `shared/poker-domain/bots.mjs::getBotConfig()` already resolves `bankrollSystemKey` with the deployed fallback `TREASURY`; #705 leaves that parser, fallback, account, and environment configuration unchanged.
+- The expected source for #705 is therefore the existing `TREASURY` account. No dedicated account, initial allocation, balance migration, new replenishment procedure, or environment change is part of this fix.
 - A replacement transfers the old bot's remaining claim to the deterministic new bot identity and funds only the increase to the existing target of 100.
 - No replacement cash-out is performed in this issue.
 - No direct `chips_accounts.balance` patch is permitted.
@@ -65,7 +65,7 @@ For each replacement:
 oldStack       = integer current settled stack, allowed range 0..1
 targetStack    = BOT_REPLACEMENT_STACK, currently 100
 fundingDelta   = targetStack - oldStack
-ledger entries = SYSTEM(POKER_BOT_BANKROLL, -fundingDelta)
+ledger entries = SYSTEM(TREASURY, -fundingDelta)
                  ESCROW(POKER_TABLE:<tableId>, +fundingDelta)
 ```
 
@@ -128,12 +128,12 @@ Extend the existing optional argument contract with:
 nextStateOverride
 privateStateForHoleCardsOverride
 replacementFundings
-botBankrollSystemKey
+botFundingSystemKey
 systemActorUserId
 deferRuntimeVersionUpdate
 ```
 
-Ordinary action, timeout, join, and start-hand callers omit these properties and keep their current behavior. Settled rollover passes the prepared poker state and private hole-card state because the live table has not yet been mutated.
+Ordinary action, timeout, join, and start-hand callers omit these properties and keep their current behavior. Settled rollover passes the prepared poker state, private hole-card state, and `botFundingSystemKey` resolved from the unchanged shared `bankrollSystemKey` configuration because the live table has not yet been mutated.
 
 For this prepared path, `deferRuntimeVersionUpdate` prevents `persistMutatedState()` from changing `table.persistedStateVersion` before the prepared `coreState` is installed. After `commitSettledHandRollover()` succeeds, `server.mjs` applies the returned persisted version. If the runtime commit validation unexpectedly fails after the database commit, the server immediately restores the now-funded, now-advanced state from persistence instead of retrying the old rollover.
 
@@ -237,7 +237,7 @@ On WS process bootstrap or authoritative table restore, an active table restored
   - expose the two new methods from the manager object;
   - do not add persisted or table-level pending-funding properties.
 - `ws-server/server.mjs`
-  - resolve the configured bankroll and existing system actor once at startup;
+  - resolve the existing bot funding source through the unchanged shared `getBotConfig(process.env)` parser and resolve the existing system actor once at startup;
   - change `maybeScheduleSettledRollover()` to prepare, atomically persist/fund, commit runtime, then broadcast/autoplay;
   - extend `persistMutatedState()` only with optional prepared-state/funding inputs;
   - add the fixed fast/slow delay constants and extend each `settledRolloverTimerByTableId` record with `mode`, `attempt`, `generationKey`, `dueAt`, and `timer` rather than adding a parallel scheduler;
@@ -253,51 +253,36 @@ On WS process bootstrap or authoritative table restore, an active table restored
 - `ws-server/poker/persistence/chips-ledger.mjs`
   - reuse unchanged if repository verification during implementation confirms its `tx` path and strict `TABLE_BUY_IN` contract remain as analyzed;
   - do not broaden it to cash-out, reconciliation, or a generic transaction framework.
-
-### Configuration and account provisioning
-
-- `shared/poker-domain/bots.mjs::getBotConfig()`
-  - change the fallback `bankrollSystemKey` from `TREASURY` to `POKER_BOT_BANKROLL` so initial bot seed and replacement funding share the approved future source.
-- `netlify/functions/_shared/poker-bots.mjs::getBotConfig()`
-  - keep the duplicate compatibility config aligned with the same fallback; do not change autoplay policy.
 - `ws-server/shared/poker-domain/bots.mjs`
-  - re-export `getBotConfig` so `server.mjs` uses the shared parser rather than duplicating environment parsing.
-- `supabase/migrations/20260714113000_poker_bot_bankroll_system_account.sql`
-  - idempotently create active `SYSTEM` account `POKER_BOT_BANKROLL`;
-  - allocate an owner-approved initial amount from `TREASURY` with a balanced, idempotent ledger transaction and locked-account/non-negative guards;
-  - use the existing `ADMIN_ADJUST` transaction type with a dedicated key such as `seed:poker-bot-bankroll:v1`; do not add another enum or directly seed a non-zero balance without ledger entries.
+  - additively re-export the existing `getBotConfig` so `server.mjs` reuses the current funding-source parser rather than duplicating environment parsing.
 - `docs/poker-deployment.md`
-  - document the new default, required account, existing environment variable, system actor requirement, stage/prod scoping, WS preview deployment, monitoring, and rollback order.
+  - document the WS preview requirement, failure monitoring, and that #705 adds no account, migration, environment value, or replenishment workflow.
 - `docs/poker-bots.md`
-  - document the replacement delta invariant and state that terminal return remains owned by #706.
+  - document the replacement delta invariant, continued use of the current `TREASURY` source, and that terminal return remains owned by #706.
 
 ### Explicitly unchanged
 
 - `shared/poker-domain/inactive-cleanup.mjs` and `netlify/functions/_shared/poker-bot-cashout.mjs`: #706 scope; terminal behavior is not changed here.
 - Reconciliation modules or admin mutation endpoints: #707 and future remediation scope.
+- `shared/poker-domain/bots.mjs::getBotConfig()` and `netlify/functions/_shared/poker-bots.mjs::getBotConfig()`: their `TREASURY` fallback and all existing ENV behavior remain unchanged.
+- Chips account provisioning, balances, and migrations: no database or production-data change is required.
 - `poker_seats` schema and rows: replacement identity continues to be represented in persisted poker state and restored through the existing seat-number mapping.
 - Poker action reducer, payout rules, snapshots, WS protocol, bot policy/autoplay decision logic, browser/JSP/HTML/CSS, and CSP.
 - No script is added, so no CSP SHA is required. No CSS is changed; the one-selector-per-line rule is unaffected.
 
+## Deferred optional economy control
+
+GitHub issue #710 owns the optional future evaluation of a dedicated poker bot bankroll. It may consider account isolation, allocation policy, limits, alerts, replenishment, live-table cutover, and provenance after #705 is deployed and verified.
+
+#710 is not a dependency or production-readiness gate for this fix. #705 must not create that account, move balances, change the current funding ENV, or require owner top-ups. The atomic delta funding contract remains valid if a later issue deliberately changes the configured `SYSTEM` source.
+
 ## Implementation phases
 
-### Phase 0 — owner and deployment prerequisites
+### Phase 1 — existing source verification
 
-Owner-controlled decisions and tasks:
-
-- approve the initial chips allocation moved from `TREASURY` to `POKER_BOT_BANKROLL`;
-- confirm `POKER_SYSTEM_ACTOR_USER_ID` is a valid operational UUID in WS preview and production;
-- configure `POKER_BOT_BANKROLL_SYSTEM_KEY=POKER_BOT_BANKROLL` separately for WS preview and production;
-- plan a normal drain/close of pre-rollout poker tables before switching the bankroll, avoiding mixed funding provenance within one live table.
-
-Exit criteria: the migration amount is approved, environment scopes are known, and no active legacy-funded table will cross the bankroll cutover unless it is intentionally flagged for later manual review.
-
-### Phase 1 — additive bankroll provisioning and configuration
-
-- add and apply the idempotent system-account allocation migration;
-- align both existing bot config parsers and the WS re-export;
-- update deployment documentation;
-- verify the account is active and funded before enabling the new default.
+- verify that current initial bot seeding resolves the shared `bankrollSystemKey` to the deployed `TREASURY` source and posts the established `SYSTEM(-) + ESCROW(+)` shape;
+- add only the WS re-export needed to consume the same parser in `server.mjs`;
+- make no migration, account, balance, ENV, or production-data change.
 
 ### Phase 2 — pure replacement funding evidence
 
@@ -324,12 +309,12 @@ Exit criteria: the migration amount is approved, environment scopes are known, a
 
 No new automated test or test framework is planned.
 
-1. Confirm an initial bot seed debits `POKER_BOT_BANKROLL`, not `TREASURY`, and credits the table escrow.
+1. Confirm an initial bot seed continues to debit the existing `TREASURY` account and credit table escrow; #705 must not change that transaction.
 2. Settle a hand with one bot at stack 1. Confirm one replacement `TABLE_BUY_IN` for 99 and a target replacement claim of 100 before blind posting.
 3. Repeat with stack 0 and confirm a delta of 100.
 4. Settle a hand with two broke bots and confirm two per-seat transactions plus one state transition commit atomically.
 5. Verify the idempotency keys use the same table/version/seat on retry and no duplicate ledger entry appears.
-6. Temporarily make the stage bankroll insufficient or inactive long enough to exhaust fast retries. Confirm the state remains `SETTLED`, escrow is unchanged, no candidate snapshot/autoplay is emitted, retry switches to one 60-second timer, and recovery succeeds after the account is restored without any user action.
+6. Cause a controlled ledger failure in the isolated stage flow long enough to exhaust fast retries. Confirm the state remains `SETTLED`, escrow is unchanged, no candidate snapshot/autoplay is emitted, retry switches to one 60-second timer, and recovery succeeds after the dependency is restored without any user action. This verifies failure behavior; it does not introduce a new manual bankroll replenishment process.
 7. Force a state-version conflict. Confirm the CAS fails before ledger posting and the persisted state is restored.
 8. Restart the WS service while a table is waiting in slow recovery. Confirm bootstrap restores the settled table, recreates the retry, and advances after the dependency recovers. Then restart immediately after a successful replacement commit and confirm the new hand is restored without duplicate funding.
 9. Verify a table with no broke bot performs no ledger operation and follows the current rollover behavior.
@@ -342,20 +327,17 @@ No new automated test or test framework is planned.
 
 ### Deployment
 
-1. Apply the additive migration to stage and verify the dedicated account and balanced allocation transaction.
-2. Set the WS-preview-scoped bankroll and system actor configuration.
-3. Run a **WS Preview Deploy** because `ws-server` runtime and persistence code change; an ordinary Netlify deploy preview alone is insufficient.
-4. Complete the manual stage scenarios, including failure, retry, restart, and ledger inspection.
-5. Drain or normally close legacy-funded production tables.
-6. Apply the production migration and production-scoped environment value.
-7. Deploy the WS service, then monitor replacement success/failure, retry counts, bankroll balance, escrow deltas, persistence conflicts, and settled-hand age.
+1. Read-only verify that WS preview resolves the existing bot funding source to `TREASURY` and that the existing system actor configuration is valid; do not change account balances or ENV for #705.
+2. Run a **WS Preview Deploy** because `ws-server` runtime and persistence code change; an ordinary Netlify deploy preview alone is insufficient.
+3. Complete the manual stage scenarios, including failure, retry, restart, and ledger inspection.
+4. Deploy the WS service without a migration, ENV cutover, table drain, or bankroll allocation step.
+5. Monitor replacement success/failure, retry counts, `TREASURY` debit and escrow-credit deltas, persistence conflicts, and settled-hand age.
 
 ### Rollback
 
-- The system account and valid ledger allocation are additive and remain auditable; do not delete the account or reverse committed replacement buy-ins during an application rollback.
 - Reverting to the old WS code reintroduces the P0 unfunded-replacement defect. Before any code rollback, stop new bot tables and drain/close active bot tables or temporarily disable poker traffic.
-- Do not switch an active table from `POKER_BOT_BANKROLL` back to `TREASURY` mid-lifecycle.
-- If the new path fails, the safe runtime state is the prior settled hand. Restore service after fixing configuration/bankroll capacity instead of manually advancing state or patching balances.
+- Do not reverse valid replacement `TABLE_BUY_IN` transactions during an application rollback; they back already committed table claims.
+- If the new path fails, the safe runtime state is the prior settled hand. Restore service after the existing ledger dependency recovers instead of manually advancing state or patching balances.
 
 ## Breaking and operational impact
 
@@ -363,24 +345,24 @@ No new automated test or test framework is planned.
 | --- | --- |
 | Poker gameplay | Intentional fail-closed change: a next hand with a replacement bot no longer starts when funding is unavailable. The table stays settled and retries instead of inventing chips. |
 | Bot replacement | Replacement identity, seat, target stack, dealer progression, cards, and autoplay policy remain the same after a successful commit. |
-| Initial bot funding | Operationally breaking default changes from `TREASURY` to `POKER_BOT_BANKROLL`; the account, allocation, and scoped environment value must exist before rollout. |
+| Initial bot funding | No change. Initial bot seeding and replacement deltas use the current configured source, expected to remain `TREASURY`. |
 | Runtime API | Conditionally breaking: new prepare/commit methods are additive, but a production persistence-backed caller can no longer use `rolloverSettledHand()` to commit a funded replacement. Guest/in-memory callers remain supported through the guarded economy-free path; every persistent caller must migrate to writer receipt plus commit. |
 | Persistence | `writeMutation()` receives optional additive inputs. Normal action/start/timeout callers remain unchanged. Mandatory replacement funding now participates in the state transaction. |
 | Ledger | Adds one `TABLE_BUY_IN` transaction per replacement seat. No transaction enum, balance semantics, or cash-out behavior changes. |
 | Restore/retry | A failed replacement may keep a table in `SETTLED` longer. Fast retries transition to a 60-second recovery cadence and survive process restart through restored-state scheduling; operational monitoring is required. |
 | Inactive cleanup | No code change. More correctly backed bot value may remain in escrow until #706 implements terminal return. |
 | Reconciliation | No implementation. Replacement ledger metadata creates cleaner future evidence for #707. |
-| Database | Additive data migration creates and funds one `SYSTEM` account; no table/column/schema contract changes. |
-| ENV/secrets | No new variable, but existing `POKER_BOT_BANKROLL_SYSTEM_KEY` and `POKER_SYSTEM_ACTOR_USER_ID` become deployment-critical for replacement funding. |
+| Database | No migration, new account, schema change, or production-data mutation. |
+| ENV/secrets | No new or changed value. The implementation consumes the current bot funding parser and existing system actor configuration. |
 | WS/browser contract | None. No snapshot field, message type, JSP, JavaScript browser compatibility, HTML, CSS, or CSP change. |
 | Tests | No new or modified tests. Existing checks are run unchanged, followed by the manual stage verification above. |
 
-The most important breaking risk is operational: deploying the code before provisioning and funding `POKER_BOT_BANKROLL` would intentionally stop replacement rollover at `SETTLED`. That failure mode is safe for accounting but visible to players, so migration and environment ordering are release gates.
+The most important breaking risk is the intentional fail-closed gameplay behavior: if the existing `TREASURY` ledger transfer is unavailable, replacement rollover remains in `SETTLED` and retries instead of inventing chips. There is no new account-provisioning, funding, or ENV release gate.
 
 ## Acceptance criteria
 
 - Every replacement descriptor uses an integer old stack of 0 or 1, target 100, and exact positive delta `target - old`.
-- The configured dedicated bankroll is debited by exactly the sum of replacement deltas and table escrow is credited by the same amount.
+- The existing `TREASURY` source is debited by exactly the sum of replacement deltas and table escrow is credited by the same amount.
 - State CAS and all replacement ledger posts commit or roll back together.
 - The live runtime, snapshots, and bot autoplay do not observe the replacement state before database success.
 - Multiple replacements in one rollover are atomic and independently auditable by deterministic per-seat keys.
@@ -389,7 +371,7 @@ The most important breaking risk is operational: deploying the code before provi
 - Exhausting fast retries cannot permanently strand an active settled table; slow recovery continues until success, state change, or eviction.
 - A persistence-backed replacement candidate with a funding intent cannot be committed through the compatibility wrapper or without a matching writer receipt.
 - `fundingDelta` is bound to the idempotency operation by the existing payload hash; a changed amount for the same table/version/seat is rejected rather than assigned a second key.
-- Initial bot funding after rollout also uses `POKER_BOT_BANKROLL`.
+- Initial bot funding remains unchanged and continues to use the current `TREASURY` source.
 - Guest tables remain outside the chips economy.
 - Inactive cleanup, terminal cash-out, and reconciliation remain unchanged and explicitly deferred to #706/#707.
 - Existing checks pass without adding or changing tests.
@@ -397,7 +379,7 @@ The most important breaking risk is operational: deploying the code before provi
 
 ## Definition of Done
 
-- The owner-approved bankroll allocation and deployment configuration are complete in stage and production scopes.
+- No new account, allocation, migration, ENV change, or manual replenishment workflow is introduced.
 - Engine replacement returns closed, validated funding evidence without performing I/O.
 - Persistent rollover follows prepare → atomic persist/fund → runtime commit.
 - Existing `TABLE_BUY_IN` validation and transaction helpers are reused; no new framework or generic ledger abstraction is introduced.
