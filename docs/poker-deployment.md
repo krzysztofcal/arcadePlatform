@@ -54,6 +54,7 @@ Operational notes:
 - Values above are Netlify runtime config env vars (not secrets unless explicitly sensitive).
 - Bot/gameplay orchestration runs server-side in WS runtime (no client-side bot scripts).
 - Bot replacement funding continues to use the existing configured source (default `TREASURY`); it adds no account, migration, environment variable, balance move, or manual replenishment step.
+- Replacement funding is an internal `SYSTEM -> ESCROW` transaction with `created_by = NULL` and closed bot/replacement metadata. It does not depend on `POKER_SYSTEM_ACTOR_USER_ID`; that existing setting still applies to separate legacy bot cash-out paths.
 - A replacement funding failure leaves the table in `SETTLED`, retries with bounded fast backoff, then retries at most once per minute until the same generation succeeds or changes. Monitor `ws_settled_rollover_persist_failed` for the controlled reason, requested replacement count, and total delta.
 
 ### Local development

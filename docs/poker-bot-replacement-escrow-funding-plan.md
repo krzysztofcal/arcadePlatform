@@ -131,7 +131,6 @@ nextStateOverride
 privateStateForHoleCardsOverride
 replacementFundings
 botFundingSystemKey
-systemActorUserId
 deferRuntimeVersionUpdate
 ```
 
@@ -147,9 +146,11 @@ For a guest table, retain the current economy-free in-memory rollover and do not
 
 Extend `writeMutation()` and `writeViaDb()` with the optional, closed `replacementFundings` input. Reuse `postTransaction()` from `ws-server/poker/persistence/chips-ledger.mjs`; do not create a new ledger client or transaction framework.
 
+Replacement funding is an automatic internal `SYSTEM -> ESCROW` operation, so its ledger row uses `createdBy: null` and the closed metadata `actor: BOT`, `reason: BOT_REPLACEMENT_BUY_IN`. This matches the nullable `chips_transactions.created_by` schema and does not invent a human accounting actor. It also avoids adding or depending on an environment variable for #705; the separate legacy bot cash-out paths retain their existing actor requirements until #706.
+
 Within the existing `beginSqlWs()` callback, use this order:
 
-1. validate the prepared funding descriptors, bankroll key, system actor UUID, and target escrow key;
+1. validate the prepared funding descriptors, bankroll key, and target escrow key;
 2. execute the current optimistic `poker_state` update for `expectedVersion`;
 3. if the CAS did not update a row, return conflict/equal-state handling without posting any ledger entry;
 4. if the CAS succeeded, post every replacement `TABLE_BUY_IN` using the same `tx`;
@@ -184,13 +185,13 @@ This deliberately satisfies the issue requirement that the amount be bound to id
 
 The replacement UUID is deterministically derived from table, seat, and version, so it is redundant in the key. The old bot UUID and settled hand ID are useful audit evidence but are not required for uniqueness. Include both identities, `settledHandId`, from/to versions, old/target stack, delta, source `SYSTEM` key, and reason `BOT_REPLACEMENT_BUY_IN` in transaction metadata and reference.
 
-Use the existing `POKER_SYSTEM_ACTOR_USER_ID` as `createdBy`. Missing or invalid system actor configuration fails closed before the state CAS. Do not choose a connected human as the accounting actor.
+Use `createdBy: null` for this server-internal `SYSTEM -> ESCROW` transaction. Do not choose a connected human or require `POKER_SYSTEM_ACTOR_USER_ID` for replacement funding.
 
 ## Failure, retry, and restore behavior
 
 ### Before database commit
 
-For missing/inactive bankroll, insufficient bankroll balance, invalid delta, invalid actor, account mismatch, ledger validation failure, or state CAS conflict:
+For missing/inactive bankroll, insufficient bankroll balance, invalid delta, account mismatch, ledger validation failure, or state CAS conflict:
 
 - the database transaction rolls back;
 - no replacement state, ledger transaction, account delta, broadcast, or autoplay is committed;
@@ -240,7 +241,7 @@ On WS process bootstrap or authoritative table restore, an active table restored
   - expose the two new methods from the manager object;
   - do not add persisted or table-level pending-funding properties.
 - `ws-server/server.mjs`
-  - resolve the existing bot funding source through the unchanged shared `getBotConfig(process.env)` parser and resolve the existing system actor once at startup;
+  - resolve the existing bot funding source through the unchanged shared `getBotConfig(process.env)` parser without adding another runtime configuration dependency;
   - change `maybeScheduleSettledRollover()` to prepare, atomically persist/fund, commit runtime, then broadcast/autoplay;
   - extend `persistMutatedState()` only with optional prepared-state/funding inputs;
   - add the fixed fast/slow delay constants and extend each `settledRolloverTimerByTableId` record with `mode`, `attempt`, `generationKey`, `dueAt`, and `timer` rather than adding a parallel scheduler;

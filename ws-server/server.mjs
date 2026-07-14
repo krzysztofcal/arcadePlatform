@@ -252,9 +252,6 @@ const streamLog = createStreamLog({ cap: Number(process.env.WS_STREAM_REPLAY_CAP
 const tableSnapshotLoader = createTableSnapshotLoader({ env: process.env });
 const persistedStateWriter = persistedStateWriteEnabled ? createPersistedStateWriter({ env: process.env, klog: klogSafe }) : null;
 const botFundingSystemKey = getBotConfig(process.env).bankrollSystemKey;
-const pokerSystemActorUserId = typeof process.env.POKER_SYSTEM_ACTOR_USER_ID === "string"
-  ? process.env.POKER_SYSTEM_ACTOR_USER_ID.trim()
-  : "";
 const lastSnapshotBySessionAndTable = new Map();
 const persistedSeatTouchByTableUser = new Map();
 const lobbySubscribers = new Set();
@@ -1158,7 +1155,6 @@ async function persistMutatedState({
   privateStateForHoleCardsOverride = null,
   replacementFundings = undefined,
   replacementFundingSystemKey = null,
-  replacementFundingActorUserId = null,
   deferRuntimeVersionUpdate = false
 }) {
   if (isGuestTableId(tableId)) {
@@ -1188,8 +1184,7 @@ async function persistMutatedState({
     meta: { mutationKind },
     acceptedActionAudit,
     replacementFundings,
-    botFundingSystemKey: replacementFundingSystemKey,
-    systemActorUserId: replacementFundingActorUserId
+    botFundingSystemKey: replacementFundingSystemKey
   });
   if (!persisted?.ok) {
     klogSafe("ws_state_persist_failed", { tableId, expectedVersion, mutationKind, reason: persisted?.reason || "unknown" });
@@ -1592,7 +1587,6 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     privateStateForHoleCardsOverride: candidatePokerState,
     replacementFundings: prepared.replacementFundings,
     replacementFundingSystemKey: botFundingSystemKey,
-    replacementFundingActorUserId: pokerSystemActorUserId,
     deferRuntimeVersionUpdate: true
   });
   if (!persisted?.ok || persisted.alreadyApplied) {

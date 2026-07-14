@@ -818,7 +818,7 @@ function createReplacementFundingDbHarness({ tableId, version = 7, state, treasu
           if (durable.failFunding) throw new Error("simulated_funding_failure");
           const idempotencyKey = params[3];
           if (working.transactions.has(idempotencyKey)) throw new Error("duplicate_idempotency_key");
-          const transaction = { id: `tx-${working.transactions.size + 1}`, idempotency_key: idempotencyKey, payload_hash: params[4] };
+          const transaction = { id: `tx-${working.transactions.size + 1}`, idempotency_key: idempotencyKey, payload_hash: params[4], created_by: params[7] };
           working.transactions.set(idempotencyKey, transaction);
           working.ledgerInsertCount += 1;
           return [{ ...transaction }];
@@ -871,7 +871,7 @@ function replacementFundingFixture({ tableId, expectedVersion = 7, oldStack = 1 
   }];
 }
 
-test("replacement funding atomically increases escrow once and survives writer restart", async () => {
+test("replacement funding without a configured human actor atomically increases escrow once and survives writer restart", async () => {
   const tableId = "00000000-0000-4000-8000-000000000705";
   const previousState = { tableId, handId: "hand_replacement_funding", phase: "SETTLED", stacks: {} };
   const nextState = { tableId, handId: "hand_after_replacement", phase: "PREFLOP", stacks: {} };
@@ -885,14 +885,14 @@ test("replacement funding atomically increases escrow once and survives writer r
     expectedVersion: 7,
     nextState,
     replacementFundings: funding,
-    botFundingSystemKey: "TREASURY",
-    systemActorUserId: "00000000-0000-4000-8000-0000000000a1"
+    botFundingSystemKey: "TREASURY"
   });
 
   assert.equal(first.ok, true);
   assert.equal(first.replacementFundingCommitted, true);
   assert.equal(harness.balance(`POKER_TABLE:${tableId}`), escrowBefore + funding[0].fundingDelta);
   assert.equal(harness.durable.ledgerInsertCount, 1);
+  assert.equal([...harness.durable.transactions.values()][0]?.created_by, null);
 
   const restartedManager = createTableManager({ maxSeats: 6, tableBootstrapLoader: async () => ({ ok: false }) });
   assert.equal(restartedManager.restoreTableFromPersisted(tableId, {
@@ -918,8 +918,7 @@ test("replacement funding atomically increases escrow once and survives writer r
     expectedVersion: 7,
     nextState,
     replacementFundings: funding,
-    botFundingSystemKey: "TREASURY",
-    systemActorUserId: "00000000-0000-4000-8000-0000000000a1"
+    botFundingSystemKey: "TREASURY"
   });
   assert.equal(replay.alreadyApplied, true);
   assert.equal(harness.durable.ledgerInsertCount, 1);
@@ -930,8 +929,7 @@ test("replacement funding atomically increases escrow once and survives writer r
     expectedVersion: 7,
     nextState: { ...nextState, handId: "different_candidate" },
     replacementFundings: funding,
-    botFundingSystemKey: "TREASURY",
-    systemActorUserId: "00000000-0000-4000-8000-0000000000a1"
+    botFundingSystemKey: "TREASURY"
   });
   assert.equal(conflict.ok, false);
   assert.equal(conflict.reason, "conflict");
@@ -955,8 +953,7 @@ test("replacement funding failure rolls back persisted state and escrow", async 
     expectedVersion: 7,
     nextState,
     replacementFundings: replacementFundingFixture({ tableId }),
-    botFundingSystemKey: "TREASURY",
-    systemActorUserId: "00000000-0000-4000-8000-0000000000a1"
+    botFundingSystemKey: "TREASURY"
   });
 
   assert.equal(result.ok, false);

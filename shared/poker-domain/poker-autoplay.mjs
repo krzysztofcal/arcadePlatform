@@ -76,7 +76,7 @@ export const runBotAutoplayLoop = async ({
     ? Math.max(maxActions, botsOnlyHandCompletionHardCap)
     : maxActions;
 
-  const buildBotRequestId = (statePublic, botTurnUserId, stepIndex) => {
+  const buildBotRequestId = (statePublic, botTurnUserId, stateVersion, stepIndex) => {
     const handId = typeof statePublic?.handId === "string" && statePublic.handId.trim()
       ? statePublic.handId.trim()
       : "unknown_hand";
@@ -86,7 +86,10 @@ export const runBotAutoplayLoop = async ({
     const actor = typeof botTurnUserId === "string" && botTurnUserId.trim()
       ? botTurnUserId.trim()
       : "unknown_actor";
-    return `bot:${requestId}:${handId}:${phase}:${actor}:${stepIndex}`;
+    const version = Number.isInteger(Number(stateVersion)) && Number(stateVersion) >= 0
+      ? Number(stateVersion)
+      : "unknown_version";
+    return `bot:${requestId}:${handId}:${phase}:${actor}:v${version}:${stepIndex}`;
   };
 
   while (botActionCount < effectiveMaxBotActions) {
@@ -144,7 +147,7 @@ export const runBotAutoplayLoop = async ({
     });
     if (!botChoice || !botChoice.type) { botStopReason = "no_legal_action"; break; }
 
-    const botRequestId = buildBotRequestId(responseFinalState, botTurnUserId, botActionCount + 1);
+    const botRequestId = buildBotRequestId(responseFinalState, botTurnUserId, loopVersion, botActionCount + 1);
     const botAction = { ...botChoice, userId: botTurnUserId, requestId: botRequestId };
     let botApplied;
     try {

@@ -6,7 +6,6 @@ const HAND_SETTLED_ACTION_TYPE = "HAND_SETTLED";
 const SETTLEMENT_AUDIT_VERSION = 1;
 const ACCEPTED_ACTION_AUDIT_VERSION = 1;
 const ACCEPTED_ACTION_TYPES = new Set(["FOLD", "CHECK", "CALL", "BET", "RAISE", "ALL_IN"]);
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_REPLACEMENT_FUNDINGS = 10;
 
 function normalizeJsonState(value) {
@@ -402,13 +401,12 @@ function normalizeReplacementFundings({ replacementFundings, tableId, expectedVe
   return { ok: true, supplied: true, fundings };
 }
 
-async function writeReplacementFundings({ tx, tableId, fundings, botFundingSystemKey, systemActorUserId }) {
+async function writeReplacementFundings({ tx, tableId, fundings, botFundingSystemKey }) {
   if (fundings.length === 0) {
     return [];
   }
   const sourceSystemKey = typeof botFundingSystemKey === "string" ? botFundingSystemKey.trim() : "";
-  const createdBy = typeof systemActorUserId === "string" ? systemActorUserId.trim() : "";
-  if (!sourceSystemKey || !UUID_RE.test(createdBy)) {
+  if (!sourceSystemKey) {
     const error = new Error("replacement_funding_config_invalid");
     error.code = "replacement_funding_config_invalid";
     throw error;
@@ -451,7 +449,7 @@ async function writeReplacementFundings({ tx, tableId, fundings, botFundingSyste
           metadata: { reason: "BOT_REPLACEMENT_BUY_IN", tableId, seatNo: funding.seatNo }
         }
       ],
-      createdBy,
+      createdBy: null,
       tx
     });
     const transactionId = typeof result?.transaction?.id === "string" ? result.transaction.id : "";
@@ -480,8 +478,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     privateStateForHoleCards = null,
     acceptedActionAudit = null,
     replacementFundingPlan,
-    botFundingSystemKey = null,
-    systemActorUserId = null
+    botFundingSystemKey = null
   }) {
     return beginSql(async (tx) => {
       const persistedState = sanitizePersistedState(nextState);
@@ -497,8 +494,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
           tx,
           tableId,
           fundings: replacementFundingPlan.fundings,
-          botFundingSystemKey,
-          systemActorUserId
+          botFundingSystemKey
         });
         await tx.unsafe("update public.poker_tables set last_activity_at = now() where id = $1;", [tableId]);
         try {
@@ -600,8 +596,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     meta = null,
     acceptedActionAudit = null,
     replacementFundings = undefined,
-    botFundingSystemKey = null,
-    systemActorUserId = null
+    botFundingSystemKey = null
   }) {
     if (!tableId || !Number.isInteger(expectedVersion) || expectedVersion < 0) {
       return { ok: false, reason: "invalid" };
@@ -624,8 +619,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     }
     if (replacementFundingPlan.fundings.length > 0) {
       const sourceSystemKey = typeof botFundingSystemKey === "string" ? botFundingSystemKey.trim() : "";
-      const createdBy = typeof systemActorUserId === "string" ? systemActorUserId.trim() : "";
-      if (!sourceSystemKey || !UUID_RE.test(createdBy)) {
+      if (!sourceSystemKey) {
         return { ok: false, reason: "replacement_funding_config_invalid" };
       }
     }
@@ -656,8 +650,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
         privateStateForHoleCards: holeCardPrivateState,
         acceptedActionAudit,
         replacementFundingPlan,
-        botFundingSystemKey,
-        systemActorUserId
+        botFundingSystemKey
       });
     } catch (error) {
       klog("ws_persisted_state_write_error", {
