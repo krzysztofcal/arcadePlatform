@@ -1231,25 +1231,6 @@
     return Math.max(0, Math.trunc(Number(value)));
   }
 
-  function isContestableOpponentSeat(seat, currentUserId){
-    if (!seat || typeof seat.userId !== 'string' || !seat.userId) return false;
-    if (seat.userId === currentUserId) return false;
-    if (/FOLD/i.test(seat.status || '')) return false;
-    return true;
-  }
-
-  function resolveMaxContestableOpponentBehindAmount(currentUserId){
-    if (!currentUserId || !Array.isArray(state.seats)) return null;
-    var max = null;
-    state.seats.forEach(function(seat){
-      if (!isContestableOpponentSeat(seat, currentUserId)) return;
-      var amount = resolveStack(seat.userId);
-      if (!Number.isFinite(amount) || amount <= 0) return;
-      max = max == null ? amount : Math.max(max, amount);
-    });
-    return max;
-  }
-
   function getAllowedActions(){
     return Array.isArray(state.legalActions) ? state.legalActions.slice() : [];
   }
@@ -2248,28 +2229,23 @@
     if (!stackAmount || stackAmount < 1) return null;
     var constraints = state.actionConstraints || {};
     var toCall = Number.isFinite(constraints.toCall) ? Math.max(0, Math.trunc(constraints.toCall)) : null;
-    var contestableOpponentBehind = resolveMaxContestableOpponentBehindAmount(state.currentUserId);
-    var cappedTotalContribution = contestableOpponentBehind == null
-      ? stackAmount
-      : Math.max(0, Math.min(stackAmount, (toCall || 0) + Math.trunc(contestableOpponentBehind)));
     if (allowed.indexOf('CALL') !== -1 && toCall != null && toCall > 0 && stackAmount <= toCall){
       return { type: 'CALL', amount: null };
     }
     if (allowed.indexOf('RAISE') !== -1 && Number.isFinite(constraints.maxRaiseTo)){
       var maxRaiseTo = Math.max(1, Math.trunc(constraints.maxRaiseTo));
-      var minRaiseTo = Number.isFinite(constraints.minRaiseTo) ? Math.max(1, Math.trunc(constraints.minRaiseTo)) : 1;
-      var currentUserBet = Math.max(0, maxRaiseTo - stackAmount);
-      var cappedRaiseTo = Math.min(maxRaiseTo, Math.max(currentUserBet + cappedTotalContribution, minRaiseTo));
-      if (toCall != null && toCall > 0 && cappedRaiseTo <= currentUserBet + toCall){
-        return { type: 'CALL', amount: null };
-      }
-      return { type: 'RAISE', amount: cappedRaiseTo };
+      return { type: 'RAISE', amount: maxRaiseTo };
     }
     if (allowed.indexOf('BET') !== -1){
       var maxBet = Number.isFinite(constraints.maxBetAmount) ? Math.max(1, Math.trunc(constraints.maxBetAmount)) : stackAmount;
-      return { type: 'BET', amount: Math.max(1, Math.min(maxBet, cappedTotalContribution || maxBet)) };
+      return { type: 'BET', amount: maxBet };
     }
     return null;
+  }
+
+  function canQueueAllInPreaction(){
+    var stackAmount = resolveStack(state.currentUserId);
+    return stackAmount == null || stackAmount > 0;
   }
 
   function resolveAmountBounds(amountAction, stackAmount){
@@ -2361,7 +2337,7 @@
       queuedPreaction.amount = queuedAmount;
       return;
     }
-    if (queuedPreaction.slot === 'allIn' && !preactionState.allInPlan) clearQueuedPreaction();
+    if (queuedPreaction.slot === 'allIn' && !preactionState.allInAvailable) clearQueuedPreaction();
   }
 
   function resolveQueuedPreactionExecution(liveState){
@@ -2402,7 +2378,7 @@
     var projectedAllowed = preactionMode ? resolveProjectedAllowedActions() : [];
     var preactionPrimary = resolvePrimaryAction(projectedAllowed);
     var preactionAmountAction = resolveAmountAction(projectedAllowed);
-    var preactionAllInPlan = resolveAllInPlan(projectedAllowed);
+    var preactionAllInAvailable = preactionMode && canQueueAllInPreaction();
     var preactionAmountBounds = resolveAmountBounds(preactionAmountAction, stackAmount);
     var displayPrimary = primary || preactionPrimary || 'CHECK';
     var displayAmountAction = amountAction || preactionAmountAction || 'BET';
@@ -2416,7 +2392,7 @@
         foldVisible: isFoldAvailable(),
         primaryAction: preactionPrimary,
         amountAction: preactionAmountAction,
-        allInPlan: preactionAllInPlan,
+        allInAvailable: preactionAllInAvailable,
         amountBounds: preactionAmountBounds
       });
     }
@@ -2505,7 +2481,7 @@
     if (els.allInPreactionWrap) els.allInPreactionWrap.hidden = !preactionMode;
     if (els.allInPreaction) {
       els.allInPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'allIn');
-      els.allInPreaction.disabled = !liveReady || controlsLocked || !preactionAllInPlan;
+      els.allInPreaction.disabled = !liveReady || controlsLocked || !preactionAllInAvailable;
       els.allInPreaction.dataset.slot = 'allIn';
     }
     if (els.amountInputWrap){

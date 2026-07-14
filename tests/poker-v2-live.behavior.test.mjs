@@ -986,7 +986,7 @@ test('poker v2 keeps action buttons stable while exposing single-select preactio
   assert.equal(harness.elements.pokerV2AllInPreactionWrap.hidden, false);
   assert.equal(harness.elements.pokerV2PrimaryPreactionText.textContent, 'Call (6)');
   assert.equal(harness.elements.pokerV2AmountPreactionText.textContent, 'Raise');
-  assert.equal(harness.elements.pokerV2AllInPreaction.disabled, true);
+  assert.equal(harness.elements.pokerV2AllInPreaction.disabled, false);
 
   harness.elements.pokerV2PrimaryPreaction.click();
   await harness.flush();
@@ -1072,6 +1072,148 @@ test('poker v2 auto-executes a queued preaction without moving the live action b
   assert.equal(harness.elements.pokerV2PrimaryBtn.hidden, false);
   assert.equal(harness.elements.pokerV2AmountBtn.hidden, false);
   assert.equal(harness.elements.pokerV2AllInBtn.hidden, false);
+});
+
+test('poker v2 queues all-in intent without pre-turn raise limits and resolves it from live turn constraints', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 34,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-preaction-all-in', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'villain-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 18, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD'] },
+        actionConstraints: { toCall: 6, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+        stacks: { 'user-1': 100, 'villain-1': 80 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2AllInPreaction.disabled, false);
+  harness.elements.pokerV2AllInPreaction.click();
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AllInPreaction.checked, true);
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 35,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-preaction-all-in', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 24, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CALL', 'RAISE'] },
+        actionConstraints: { toCall: 6, minRaiseTo: 18, maxRaiseTo: 100, maxBetAmount: null },
+        stacks: { 'user-1': 100, 'villain-1': 80 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-preaction-all-in', action: 'RAISE', amount: 100 }));
+});
+
+test('poker v2 clears queued all-in intent when the live turn has no legal all-in realization', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 36,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-preaction-all-in-invalid', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'villain-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 18, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD'] },
+        actionConstraints: { toCall: 6, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+        stacks: { 'user-1': 100, 'villain-1': 80 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  harness.elements.pokerV2AllInPreaction.click();
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AllInPreaction.checked, true);
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 37,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-preaction-all-in-invalid', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 18, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CHECK'] },
+        actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+        stacks: { 'user-1': 100, 'villain-1': 80 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.actPayloads.length, 0);
+  assert.equal(harness.elements.pokerV2AllInPreaction.checked, false);
+  assert.equal(harness.elements.pokerV2AllInBtn.hidden, false);
+  assert.equal(harness.elements.pokerV2AllInBtn.disabled, true);
 });
 
 test('poker v2 enables only legal actions without removing or moving the other buttons', async () => {
@@ -1165,7 +1307,7 @@ test('poker v2 enables only legal actions without removing or moving the other b
   assert.equal(harness.actPayloads.length, 0);
 });
 
-test('poker v2 caps raise all-in to call plus the biggest active opponent stack behind', async () => {
+test('poker v2 sends authoritative maxRaiseTo for all-in even when the active opponent stack is smaller', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -1208,7 +1350,7 @@ test('poker v2 caps raise all-in to call plus the biggest active opponent stack 
   harness.elements.pokerV2AllInBtn.click();
   await harness.flush();
 
-  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-all-in', action: 'RAISE', amount: 45 }));
+  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-all-in', action: 'RAISE', amount: 100 }));
 });
 
 test('poker v2 auto-joins from query params after live auth', async () => {
