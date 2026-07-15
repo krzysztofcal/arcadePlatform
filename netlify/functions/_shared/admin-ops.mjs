@@ -1,10 +1,10 @@
 import { parseAdminUserIds } from "./admin-auth.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./poker-idempotency.mjs";
-import { cashoutBotSeatIfNeeded, ensureBotSeatInactiveForCashout } from "./poker-bot-cashout.mjs";
 import { parseStakes } from "./poker-stakes.mjs";
 import { beginSql, executeSql, klog } from "./supabase-admin.mjs";
 import { executeInactiveCleanup } from "../../../shared/poker-domain/inactive-cleanup.mjs";
+import { executeTerminalPokerCloseInTx } from "../../../shared/poker-domain/terminal-close.mjs";
 import { evaluateTableHealth } from "../../../ws-server/poker/runtime/table-janitor.mjs";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -158,50 +158,6 @@ function normalizeState(value) {
   }
   if (typeof value === "object" && !Array.isArray(value)) return value;
   return {};
-}
-
-function normalizeNonNegativeInt(value) {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 0 || Math.abs(parsed) > Number.MAX_SAFE_INTEGER) return null;
-  return parsed;
-}
-
-function resolveStateStacks(state) {
-  if (!state || typeof state !== "object" || Array.isArray(state)) return {};
-  if (!state.stacks || typeof state.stacks !== "object" || Array.isArray(state.stacks)) return {};
-  return state.stacks;
-}
-
-function stateFirstStackAmount({ state, seat, userId }) {
-  const stateAmount = normalizeNonNegativeInt(resolveStateStacks(state)?.[userId]);
-  if (stateAmount != null) return { amount: stateAmount, source: "state" };
-  const seatAmount = normalizeNonNegativeInt(seat?.stack);
-  if (seatAmount != null) return { amount: seatAmount, source: "seat" };
-  return { amount: 0, source: "none" };
-}
-
-function toClosedInertState(stateInput) {
-  return {
-    ...stateInput,
-    phase: "HAND_DONE",
-    handId: "",
-    handSeed: "",
-    showdown: null,
-    community: [],
-    communityDealt: 0,
-    pot: 0,
-    potTotal: 0,
-    sidePots: [],
-    turnUserId: null,
-    turnStartedAt: null,
-    turnDeadlineAt: null,
-    lastAggressorUserId: null,
-    currentBet: 0,
-    toCallByUserId: {},
-    betThisRoundByUserId: {},
-    actedThisRoundByUserId: {},
-    stacks: {},
-  };
 }
 
 function buildTableActionType(action) {
@@ -471,84 +427,15 @@ async function forceCloseTableInTx(tx, {
   reason,
   classification,
 }) {
-  const tableRows = await tx.unsafe(
-    "select id, status, created_at, updated_at, last_activity_at from public.poker_tables where id = $1 limit 1 for update;",
-    [tableId],
-  );
-  const table = tableRows?.[0] || null;
-  if (!table) {
-    throw notFound("table_not_found", "table_not_found");
-  }
-  const seatRows = await tx.unsafe(
-    "select user_id, seat_no, status, is_bot, stack from public.poker_seats where table_id = $1 order by seat_no asc for update;",
-    [tableId],
-  );
-  const stateRows = await tx.unsafe(
-    "select state from public.poker_state where table_id = $1 limit 1 for update;",
-    [tableId],
-  );
-  const state = normalizeState(stateRows?.[0]?.state);
-  const allSeats = Array.isArray(seatRows) ? seatRows : [];
-  for (const seat of allSeats) {
-    const seatUserId = typeof seat?.user_id === "string" ? seat.user_id : "";
-    if (!seatUserId) continue;
-    const target = stateFirstStackAmount({ state, seat, userId: seatUserId });
-    if (seat?.is_bot === true) {
-      await ensureBotSeatInactiveForCashout(tx, { tableId, botUserId: seatUserId });
-      await cashoutBotSeatIfNeeded(tx, {
-        tableId,
-        botUserId: seatUserId,
-        seatNo: seat.seat_no,
-        reason: "ADMIN_FORCE_CLOSE",
-        actorUserId: adminUserId,
-        idempotencyKeySuffix: requestId,
-        expectedAmount: target.amount,
-      });
-      continue;
-    }
-    if (target.amount <= 0) continue;
-    await postTransaction({
-      userId: seatUserId,
-      txType: "TABLE_CASH_OUT",
-      idempotencyKey: `admin-force-close:${tableId}:${seatUserId}`,
-      reference: `table:${tableId}`,
-      metadata: {
-        source: "admin_page",
-        reason: "ADMIN_FORCE_CLOSE",
-        tableId,
-        targetUserId: seatUserId,
-        adminUserId,
-      },
-      entries: [
-        { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -target.amount },
-        { accountType: "USER", amount: target.amount },
-      ],
-      createdBy: adminUserId,
-      tx,
-    });
-  }
-  await tx.unsafe(
-    "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1;",
-    [tableId],
-  );
-  if (stateRows?.[0]) {
-    await tx.unsafe(
-      "update public.poker_state set state = $2 where table_id = $1;",
-      [tableId, JSON.stringify(toClosedInertState(state))],
-    );
-  }
-  await tx.unsafe(
-    "update public.poker_tables set status = 'CLOSED', updated_at = now(), last_activity_at = now() where id = $1;",
-    [tableId],
-  );
-  const result = {
-    ok: true,
-    changed: true,
-    closed: true,
-    status: "force_closed",
-    humanSeatCount: allSeats.filter((seat) => seat?.is_bot !== true).length,
-    botSeatCount: allSeats.filter((seat) => seat?.is_bot === true).length,
-  };
+  const result = await executeTerminalPokerCloseInTx({
+    tx,
+    tableId,
+    postTransaction,
+    createdBy: adminUserId,
+    closeReason: "ADMIN_FORCE_CLOSE",
+    successStatus: "force_closed",
+    klog,
+  });
   await insertTableAdminAction(tx, {
     tableId,
     adminUserId,

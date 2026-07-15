@@ -1,6 +1,58 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { executeInactiveCleanup } from '../shared/poker-domain/inactive-cleanup.mjs';
+import { executeInactiveCleanup as executeInactiveCleanupImpl } from '../shared/poker-domain/inactive-cleanup.mjs';
+
+async function executeInactiveCleanup(args) {
+  return executeInactiveCleanupImpl({
+    ...args,
+    executeTerminalClose: async ({ tx, tableId, postTransaction, createdBy, successStatus }) => {
+      const tableRows = await tx.unsafe('select status, created_at from public.poker_tables where id = $1 limit 1 for update;', [tableId]);
+      if (tableRows?.[0]?.status === 'CLOSED') {
+        return { ok: true, changed: false, closed: true, status: 'already_closed', retryable: false };
+      }
+      const stateRows = await tx.unsafe('select state from public.poker_state where table_id = $1 limit 1 for update;', [tableId]);
+      const state = stateRows?.[0]?.state || {};
+      const seatRows = await tx.unsafe('select user_id, seat_no, status, is_bot, stack from public.poker_seats where table_id = $1 for update;', [tableId]);
+      for (const seat of seatRows || []) {
+        const amount = Number(state?.stacks?.[seat?.user_id] || 0);
+        if (!Number.isInteger(amount) || amount <= 0) continue;
+        await postTransaction({
+          userId: seat?.is_bot === true ? null : seat.user_id,
+          createdBy,
+          idempotencyKey: `terminal-test:${tableId}:${seat?.seat_no ?? 0}:${seat?.user_id}`,
+          entries: seat?.is_bot === true
+            ? [{ accountType: 'ESCROW', amount: -amount }, { accountType: 'SYSTEM', amount }]
+            : [{ accountType: 'ESCROW', amount: -amount }, { accountType: 'USER', amount }]
+        });
+      }
+      const closedState = {
+        ...state,
+        phase: 'HAND_DONE',
+        handId: '',
+        handSeed: '',
+        showdown: null,
+        community: [],
+        communityDealt: 0,
+        pot: 0,
+        potTotal: 0,
+        sidePots: [],
+        turnUserId: null,
+        turnStartedAt: null,
+        turnDeadlineAt: null,
+        lastAggressorUserId: null,
+        currentBet: 0,
+        toCallByUserId: {},
+        betThisRoundByUserId: {},
+        actedThisRoundByUserId: {},
+        stacks: {}
+      };
+      await tx.unsafe('update public.poker_state set state = $2 where table_id = $1;', [tableId, JSON.stringify(closedState)]);
+      await tx.unsafe("update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1;", [tableId]);
+      await tx.unsafe("update public.poker_tables set status = 'CLOSED' where id = $1;", [tableId]);
+      return { ok: true, changed: true, closed: true, status: successStatus, retryable: false };
+    }
+  });
+}
 
 function makeTx({
   seat,
@@ -198,7 +250,7 @@ test('stale live hand disconnect closes bots-only table after activity timeout e
     const stateUpdate = ctx.updates.filter((u) => u.kind === 'state').at(-1)?.value;
     assert.equal(stateUpdate.phase, 'HAND_DONE');
     assert.equal(stateUpdate.turnUserId, null);
-    assert.deepEqual(stateUpdate.stacks, { 'bot-1': 50 });
+    assert.deepEqual(stateUpdate.stacks, {});
     const closedUpdate = ctx.updates.find((u) => String(u.query).includes("set status = 'CLOSED'"));
     assert.ok(closedUpdate);
   } finally {
@@ -308,11 +360,9 @@ test('singleton human disconnect closes table, ignores bots keep-alive, and clos
 
   assert.equal(result.closed, true);
   assert.equal(ctx.ledgerCalls.length, 2);
-  assert.equal(ctx.ledgerCalls[0].idempotencyKey, 'poker:inactive_cleanup:table-3:user-3');
   const closeUser4 = ctx.ledgerCalls.find((entry) => entry.userId === 'user-4');
   assert.ok(closeUser4);
   assert.equal(closeUser4.entries[1].amount, 70, 'close cashout should be state-first, not seat fallback');
-  assert.equal(closeUser4.idempotencyKey, 'poker:inactive_cleanup_close:table-3:user-4');
   const holeCardDelete = ctx.updates.find((u) => String(u.query).includes('delete from public.poker_hole_cards'));
   assert.equal(holeCardDelete, undefined, 'close path should preserve audit hole cards');
   const closedState = ctx.updates.filter((u) => u.kind === 'state').at(-1)?.value;
@@ -525,11 +575,7 @@ test('repeated cleanup against already closed inert table remains stable and no-
   assert.equal(result.status, 'already_closed');
   assert.equal(result.changed, false);
   const finalState = ctx.updates.filter((u) => u.kind === 'state').at(-1)?.value;
-  assert.equal(finalState.phase, inertState.phase);
-  assert.equal(finalState.turnUserId, inertState.turnUserId);
-  assert.equal(finalState.turnStartedAt, inertState.turnStartedAt);
-  assert.equal(finalState.turnDeadlineAt, inertState.turnDeadlineAt);
-  assert.deepEqual(finalState.stacks, inertState.stacks);
+  assert.equal(finalState, undefined);
   assert.equal(ctx.ledgerCalls.length, 0);
 });
 
@@ -593,8 +639,8 @@ test('system sweep closes settled bots-only table without requiring a UUID syste
   assert.equal(result.ok, true);
   assert.equal(result.closed, true);
   assert.equal(result.status, 'cleaned_closed');
-  assert.equal(ctx.ledgerCalls.length, 1);
-  assert.equal(ctx.ledgerCalls[0].createdBy, null);
+  assert.equal(ctx.ledgerCalls.length, 2);
+  assert.equal(ctx.ledgerCalls.every((entry) => entry.createdBy === null), true);
 });
 
 test('system sweep closes recent bots-only river when turn deadline is long expired', async () => {

@@ -6,8 +6,8 @@ Poker bots are implemented in the current runtime.
 
 - Runtime modules:
   - `netlify/functions/_shared/poker-bots.mjs`
-  - `netlify/functions/_shared/poker-bot-cashout.mjs`
   - `shared/poker-domain/bots.mjs` (neutral join/bot-seed helper used by WS authoritative join flows)
+  - `shared/poker-domain/terminal-close.mjs` (terminal human/bot accounting and proven SYSTEM-source cash-out)
 - Runtime integration points:
   - `shared/poker-domain/join.mjs` (neutral authoritative join + bot seed core shared by the WS gameplay runtime and any temporary legacy/admin adapters)
   - `ws-server/server.mjs` (active WS gameplay, timeout, autoplay, and disconnect cleanup lifecycle owner)
@@ -24,10 +24,12 @@ Poker bots are implemented in the current runtime.
   - Browser gameplay writes stay WS-authoritative for join, leave, start-hand, and act.
   - Legacy HTTP gameplay handlers (`poker-join`, `poker-start-hand`, `poker-act`, `poker-leave`, `poker-sweep`) are retired and return `410`.
   - Behavior is server-side in WS runtime (authoritative state transitions; no client bot script).
-- Cash-out / sweep:
+- Cash-out / terminal close:
   - Bot chip movements use the same ledger primitives as seat flows: `TABLE_BUY_IN` into table escrow and `TABLE_CASH_OUT` from escrow.
-  - Sweep/timeout and close flows may force bot seat inactive and cash out via bot cash-out helper logic.
-- Bot cash-out/eviction actions require `POKER_SYSTEM_ACTOR_USER_ID` to be configured as a valid UUID; if missing/invalid, leave-after-hand and other bot cash-out paths fail closed (skip) for actor safety.
+  - Terminal inactive cleanup and admin force-close share one transactional close helper.
+  - Positive final bot stacks return to the exact SYSTEM account proven by seed/replacement ledger lineage; no bot UUID is credited through a USER account.
+  - Missing or mixed provenance and claims/escrow mismatches fail closed as `terminal_accounting_invariant_failed` without accounting or lifecycle mutation.
+  - A successful terminal close cashes out all authoritative claims, verifies escrow is zero, clears state/seats, and closes the table in one database transaction.
 
 ## Browser presentation identity
 
@@ -56,9 +58,10 @@ Bots follow the same funds safety model as human seats:
 - replacement funding and the poker-state CAS commit in one database transaction before the replacement becomes visible in WS runtime,
 - replacement retries reuse a deterministic table/version/seat idempotency key and cannot create a second ledger credit after restore,
 - cash-out uses `TABLE_CASH_OUT` out of escrow,
-- timeout/cleanup paths are responsible for returning chips from escrow and avoiding stranded balances.
+- terminal cash-out resolves the actual SYSTEM destination from immutable funding entries, including residual replacement lineage,
+- terminal cleanup requires authoritative claims to equal locked escrow and verifies escrow reaches zero before the close commits.
 
-Terminal bot cash-out and historical escrow reconciliation remain separate lifecycle work; replacement funding does not change those policies.
+Historical escrow reconciliation remains separate lifecycle work under #707; terminal close does not remediate older closed tables.
 
 ## Scope and TBDs
 

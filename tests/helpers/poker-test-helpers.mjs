@@ -19,7 +19,6 @@ import {
   makeBotUserId,
 } from "../../netlify/functions/_shared/poker-bots.mjs";
 import { applySeatsAndStacksToState, seedBotsForJoin } from "../../shared/poker-domain/bots.mjs";
-import { cashoutBotSeatIfNeeded, ensureBotSeatInactiveForCashout } from "../../netlify/functions/_shared/poker-bot-cashout.mjs";
 import { startHandCore } from "../../netlify/functions/_shared/poker-start-hand-core.mjs";
 import { isValidUuid } from "../../netlify/functions/_shared/poker-utils.mjs";
 import { isStateStorageValid, withoutPrivateState } from "../../netlify/functions/_shared/poker-state-utils.mjs";
@@ -149,8 +148,6 @@ export const loadPokerHandler = (filePath, mocks) => {
     "getBotConfig",
     "makeBotSystemKey",
     "makeBotUserId",
-    "cashoutBotSeatIfNeeded",
-    "ensureBotSeatInactiveForCashout",
     "startHandCore",
     "tableIdleCutoffExprSql",
     "hasActiveHumanGuardSql",
@@ -202,8 +199,6 @@ return handler;`
       getBotConfig,
       makeBotSystemKey,
       makeBotUserId,
-      cashoutBotSeatIfNeeded,
-      ensureBotSeatInactiveForCashout,
       startHandCore,
       tableIdleCutoffExprSql,
       hasActiveHumanGuardSql,

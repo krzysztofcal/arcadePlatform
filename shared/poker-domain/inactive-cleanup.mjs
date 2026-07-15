@@ -1,4 +1,5 @@
 import { requireAuthoritativeHumanStack } from "./human-stack-accounting.mjs";
+import { executeTerminalPokerCloseInTx } from "./terminal-close.mjs";
 
 const normalizeState = (value) => {
   if (!value) return {};
@@ -100,10 +101,6 @@ function isTurnProtected({ state, userId, nowMs, seatPresenceFresh = null }) {
   return turnDeadlineAt > nowMs;
 }
 
-function hasAnyActiveHuman(seats) {
-  return (seats || []).some((row) => row?.is_bot !== true && row?.status === "ACTIVE");
-}
-
 function activeSeatUserIdSet(seats) {
   const ids = new Set();
   for (const row of seats || []) {
@@ -126,30 +123,6 @@ function hasReplacementBotSeatMatch({ state, seats, userId }) {
     && row?.is_bot === true
     && normalizeSeatNo(row?.seat_no) === seatNo
   ));
-}
-
-function toClosedInertState({ state, stacks }) {
-  return {
-    ...state,
-    phase: "HAND_DONE",
-    handId: "",
-    handSeed: "",
-    showdown: null,
-    community: [],
-    communityDealt: 0,
-    pot: 0,
-    potTotal: 0,
-    sidePots: [],
-    turnUserId: null,
-    turnStartedAt: null,
-    turnDeadlineAt: null,
-    lastAggressorUserId: null,
-    currentBet: 0,
-    toCallByUserId: {},
-    betThisRoundByUserId: {},
-    actedThisRoundByUserId: {},
-    stacks
-  };
 }
 
 function isLedgerIdempotencyDuplicate(error) {
@@ -192,7 +165,8 @@ export async function executeInactiveCleanup({
   env = process.env,
   klog = () => {},
   postTransaction,
-  hasConnectedHumanPresence = () => false
+  hasConnectedHumanPresence = () => false,
+  executeTerminalClose = executeTerminalPokerCloseInTx
 }) {
   const normalizedUserId = typeof userId === "string" && userId.trim() ? userId.trim() : null;
   const configuredSystemActorUserId = String(env?.POKER_SYSTEM_ACTOR_USER_ID || "").trim();
@@ -228,7 +202,6 @@ export async function executeInactiveCleanup({
       "select status, created_at, last_activity_at, updated_at from public.poker_tables where id = $1 limit 1 for update;",
       [tableId]
     );
-    const tableStatus = tableRows?.[0]?.status || null;
     const tableCreatedAtMs = parseTimestampMs(tableRows?.[0]?.created_at);
     const tableLastActivityAtMs =
       parseTimestampMs(tableRows?.[0]?.last_activity_at)
@@ -277,51 +250,55 @@ export async function executeInactiveCleanup({
       });
     }
 
-    const stacks = { ...resolveStateStacks(state) };
-    if (seatWasActive) {
-      let targetCashout;
-      try {
-        targetCashout = requireAuthoritativeHumanStack({ state, userId: normalizedUserId });
-      } catch (error) {
-        klog("poker_inactive_cleanup_stack_ambiguous", { tableId, reason: error?.code || "stack_ambiguous", source: "ambiguous" });
-        throw error;
-      }
-      await postCashout({
-        postTransaction,
-        tx,
-        tableId,
-        userId: normalizedUserId,
-        amount: targetCashout.amount,
-        idempotencyKey: `poker:inactive_cleanup:${tableId}:${normalizedUserId}`,
-        createdBy: normalizedUserId,
-        reason: "ws_disconnect_inactive_cleanup"
-      });
-      delete stacks[normalizedUserId];
-      await tx.unsafe("update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2;", [tableId, normalizedUserId]);
-    }
-
     const allSeatRows = await tx.unsafe(
       "select user_id, seat_no, status, is_bot, stack from public.poker_seats where table_id = $1 for update;",
       [tableId]
     );
-
-    let nextState = state;
-    if (stateRow) {
-      nextState = { ...state, stacks };
-      const turnUserId = typeof nextState.turnUserId === "string" ? nextState.turnUserId : null;
-      if (
-        turnUserId
-        && !activeSeatUserIdSet(allSeatRows).has(turnUserId)
-        && !hasReplacementBotSeatMatch({ state: nextState, seats: allSeatRows, userId: turnUserId })
-      ) {
-        nextState.turnUserId = null;
-      }
-      await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(nextState)]);
-    }
-
-    if (hasAnyActiveHuman(allSeatRows)) {
+    const anotherActiveHumanRemains = (allSeatRows || []).some((row) => (
+      row?.is_bot !== true
+      && row?.status === "ACTIVE"
+      && !(seatWasActive && row?.user_id === normalizedUserId)
+    ));
+    if (anotherActiveHumanRemains) {
       if (!normalizedUserId) {
         return { ok: true, changed: false, status: "active_human_present", closed: false, retryable: false };
+      }
+      const stacks = { ...resolveStateStacks(state) };
+      if (seatWasActive) {
+        let targetCashout;
+        try {
+          targetCashout = requireAuthoritativeHumanStack({ state, userId: normalizedUserId });
+        } catch (error) {
+          klog("poker_inactive_cleanup_stack_ambiguous", { tableId, reason: error?.code || "stack_ambiguous", source: "ambiguous" });
+          throw error;
+        }
+        await postCashout({
+          postTransaction,
+          tx,
+          tableId,
+          userId: normalizedUserId,
+          amount: targetCashout.amount,
+          idempotencyKey: `poker:inactive_cleanup:${tableId}:${normalizedUserId}`,
+          createdBy: normalizedUserId,
+          reason: "ws_disconnect_inactive_cleanup"
+        });
+        delete stacks[normalizedUserId];
+        await tx.unsafe("update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2;", [tableId, normalizedUserId]);
+      }
+      if (stateRow) {
+        const nextState = { ...state, stacks };
+        const turnUserId = typeof nextState.turnUserId === "string" ? nextState.turnUserId : null;
+        const projectedSeats = seatWasActive
+          ? allSeatRows.map((row) => row?.user_id === normalizedUserId ? { ...row, status: "INACTIVE", stack: 0 } : row)
+          : allSeatRows;
+        if (
+          turnUserId
+          && !activeSeatUserIdSet(projectedSeats).has(turnUserId)
+          && !hasReplacementBotSeatMatch({ state: nextState, seats: projectedSeats, userId: turnUserId })
+        ) {
+          nextState.turnUserId = null;
+        }
+        await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(nextState)]);
       }
       return { ok: true, changed: seatWasActive, status: seatWasActive ? "cleaned" : "already_inactive", closed: false, retryable: false };
     }
@@ -330,13 +307,13 @@ export async function executeInactiveCleanup({
       klog("poker_inactive_cleanup_table_close_skipped_human_presence", {
         tableId,
         userId: normalizedUserId,
-        phase: typeof nextState?.phase === "string" ? nextState.phase : null,
+        phase: typeof state?.phase === "string" ? state.phase : null,
         seatWasActive
       });
       return {
         ok: true,
-        changed: seatWasActive,
-        status: seatWasActive ? "cleaned_human_presence_present" : "human_presence_present",
+        changed: false,
+        status: "human_presence_present",
         closed: false,
         retryable: false
       };
@@ -345,52 +322,14 @@ export async function executeInactiveCleanup({
     if (tableCreatedAtMs != null && nowMs - tableCreatedAtMs < closeGraceMs) {
       return { ok: false, code: "grace_period", retryable: true, status: "grace_period", closed: false };
     }
-
-    for (const row of allSeatRows || []) {
-      if (row?.is_bot === true) continue;
-      const hasPendingAuthoritativeStack = Object.prototype.hasOwnProperty.call(stacks, row?.user_id);
-      if (String(row?.status || "").toUpperCase() !== "ACTIVE" && !hasPendingAuthoritativeStack) continue;
-      if (seatWasActive && row?.user_id === normalizedUserId) continue;
-      const closeCashout = requireAuthoritativeHumanStack({ state: { stacks }, userId: row.user_id });
-      klog("poker_inactive_cleanup_post_hand_cashout", {
-        tableId,
-        userId: row?.user_id ?? null,
-        amount: closeCashout.amount,
-        source: closeCashout.source
-      });
-      await postCashout({
-        postTransaction,
-        tx,
-        tableId,
-        userId: row.user_id,
-        amount: closeCashout.amount,
-        idempotencyKey: `poker:inactive_cleanup_close:${tableId}:${row.user_id}`,
-        createdBy: sweepActorUserId,
-        reason: "ws_disconnect_table_close"
-      });
-      delete stacks[row.user_id];
-    }
-
-    if (stateRow) {
-      const finalState = toClosedInertState({ state, stacks });
-      await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(finalState)]);
-    }
-
-    await tx.unsafe("update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1;", [tableId]);
-
-    let closed = false;
-    if (tableStatus !== "CLOSED") {
-      await tx.unsafe("update public.poker_tables set status = 'CLOSED', updated_at = now() where id = $1;", [tableId]);
-      closed = true;
-    }
-
-    klog("poker_inactive_cleanup_table_closed_terminal_bots_only", {
+    return executeTerminalClose({
+      tx,
       tableId,
-      userId: normalizedUserId,
-      closed,
-      phase: typeof nextState?.phase === "string" ? nextState.phase : null
+      postTransaction,
+      createdBy: sweepActorUserId,
+      closeReason: normalizedUserId ? "WS_DISCONNECT_TABLE_CLOSE" : "WS_INACTIVE_TABLE_CLOSE",
+      successStatus: "cleaned_closed",
+      klog
     });
-
-    return { ok: true, changed: seatWasActive || closed, status: closed ? "cleaned_closed" : "already_closed", closed, retryable: false };
   });
 }

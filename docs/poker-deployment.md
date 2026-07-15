@@ -54,7 +54,7 @@ Operational notes:
 - Values above are Netlify runtime config env vars (not secrets unless explicitly sensitive).
 - Bot/gameplay orchestration runs server-side in WS runtime (no client-side bot scripts).
 - Bot replacement funding continues to use the existing configured source (default `TREASURY`); it adds no account, migration, environment variable, balance move, or manual replenishment step.
-- Replacement funding is an internal `SYSTEM -> ESCROW` transaction with `created_by = NULL` and closed bot/replacement metadata. It does not depend on `POKER_SYSTEM_ACTOR_USER_ID`; that existing setting still applies to separate legacy bot cash-out paths.
+- Replacement funding is an internal `SYSTEM -> ESCROW` transaction with `created_by = NULL` and closed bot/replacement metadata. It does not depend on `POKER_SYSTEM_ACTOR_USER_ID`. Terminal bot cash-out resolves the destination SYSTEM account from that actual funding provenance instead of using an actor identity or creating a USER account for the bot UUID.
 - A replacement funding failure leaves the table in `SETTLED`, retries with bounded fast backoff, then retries at most once per minute until the same generation succeeds or changes. Monitor `ws_settled_rollover_persist_failed` for the controlled reason, requested replacement count, and total delta.
 
 ### Local development
@@ -113,6 +113,8 @@ It does not manage Caddy.
 The host is a single shared preview runtime, so automatic deployment from every PR is intentionally disabled: concurrent PRs would overwrite each other and a Netlify preview could silently use another branch's backend.
 
 Changes to bot replacement funding touch the authoritative WS runtime and therefore require a manual WS preview deploy before stage acceptance. Verify a replacement with old stack `0` or `1`, then confirm the next hand starts and the table escrow increased by exactly the funded delta. A Netlify deploy preview alone is not sufficient for this server-side path.
+
+Terminal bot cash-out also requires a manual WS preview deploy. Test it only with a newly created preview table: allow at least one bot replacement, close the table through the terminal inactive-cleanup path, and verify that every positive final bot stack moves from table ESCROW to the exact SYSTEM account proven by its seed/replacement ledger lineage. A successful close must leave the escrow balance at `0`; repeating cleanup must not create another transfer. Missing or mixed provenance, a mismatch between authoritative claims and escrow, or any non-zero post-cash-out escrow must return `terminal_accounting_invariant_failed` and leave table accounting and lifecycle state unchanged.
 Repo-side Caddy ownership is unified: `infra/vps/Caddyfile` is the single source of truth for both production and preview WS routing, so any Caddy change for either host must be made in that file.
 
 ### Dispatch a preview deploy for a selected ref

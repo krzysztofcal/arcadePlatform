@@ -1,6 +1,6 @@
 # Poker terminal bot cash-out to proven SYSTEM source
 
-Status: planning only for GitHub issue #706. This document does not implement code, change production data, remediate historical tables, or introduce a dedicated bot bankroll.
+Status: implemented on PR #716 for GitHub issue #706. This change does not alter production data during deployment, remediate historical tables, or introduce a dedicated bot bankroll.
 
 ## Goal
 
@@ -172,7 +172,7 @@ Within the same transaction it:
 
 The claims arrays are local implementation details, not a new public DTO or framework. Only aggregate counts/amounts and allowlisted failure reasons are logged with `klog`.
 
-If a force-close encounters a live pot or another liability not represented by final stacks, the claims-to-escrow equality fails. Return `manual_review` without mutation. #706 does not define a new live-hand refund or settlement policy.
+If a force-close encounters a live pot or another liability not represented by final stacks, the claims-to-escrow equality fails. Return `terminal_accounting_invariant_failed` without mutation. #706 does not define a new live-hand refund or settlement policy.
 
 ### 5. Preserve nonterminal cleanup
 
@@ -198,7 +198,7 @@ The two entry points do not need identical outer orchestration. They only share 
 
 ## Fail-closed contract
 
-Before any cash-out or lifecycle mutation, return a controlled nonretryable `manual_review` result for:
+Before any cash-out or lifecycle mutation, return a controlled nonretryable `terminal_accounting_invariant_failed` result for:
 
 - missing/invalid authoritative state stack;
 - current bot identity not mappable by seat number;
@@ -214,7 +214,7 @@ No large result model is needed. A compact shape is sufficient:
 
 ```text
 ok: false
-code: manual_review
+code: terminal_accounting_invariant_failed
 reason: <allowlisted reason>
 changed: false
 closed: false
@@ -254,7 +254,7 @@ Log table ID, state version, reason, claim counts, aggregate amounts, and latenc
   - remove the ESCROW-to-USER implementation and its seat-stack fallback;
   - delete the file if no caller remains, otherwise leave only a compatibility export that cannot accept a bot USER destination.
 - `docs/poker-deployment.md`
-  - document new-table terminal smoke verification and `manual_review` handling.
+  - document new-table terminal smoke verification and `terminal_accounting_invariant_failed` handling.
 
 ### Existing verification files only
 
@@ -264,7 +264,7 @@ Log table ID, state version, reason, claim counts, aggregate amounts, and latenc
 - `ws-server/poker/persistence/inactive-cleanup-adapter.behavior.test.mjs`;
 - existing admin ops/function tests.
 
-Update only stale imports, mocks, and expectations required by the removed USER-credit contract. Do not add new test files or new test cases.
+Update stale imports, mocks, and expectations required by the removed USER-credit contract. For this accounting-critical issue, add only the accepted minimal regression cases to these existing suites: proven SYSTEM cash-out, replacement lineage, mixed/missing provenance fail-closed, idempotency, claims/escrow mismatch, and absence of a bot USER credit. Do not add a new test framework or new test file.
 
 ### Explicitly unchanged
 
@@ -306,7 +306,7 @@ Update only stale imports, mocks, and expectations required by the removed USER-
 
 ## Verification
 
-Do not add tests. Run the existing suites that already exercise the touched contracts:
+Add only the accepted regression cases to existing suites, then run the existing registered coverage:
 
 ```text
 npm test
@@ -335,14 +335,14 @@ Use only newly created stage tables:
 6. Verify terminal cash-outs equal the pre-close escrow, final escrow is exactly zero, state stacks are empty, seats are inactive, table is closed, and state version advanced.
 7. Run cleanup again and verify no second ledger transaction or balance change.
 8. On a second new settled table, run admin force-close and verify the same result.
-9. On a table with unresolved live liabilities, verify `manual_review` and no ledger/state/seat/table mutation.
+9. On a table with unresolved live liabilities, verify `terminal_accounting_invariant_failed` and no ledger/state/seat/table mutation.
 
 ## Deployment and rollback
 
 - Merge no migration and add no ENV.
 - Deploy Netlify and WS from the same commit.
 - Smoke-test new stage tables before production.
-- Monitor successful closes, `manual_review` reasons, retryable failures, and positive escrow on newly closed tables.
+- Monitor successful closes, `terminal_accounting_invariant_failed` reasons, retryable failures, and positive escrow on newly closed tables.
 - Do not repair historical closed residuals as part of rollout.
 - Do not reverse already committed valid SYSTEM cash-outs on rollback.
 - If rollback would restore the bot USER path, disable affected terminal cleanup or new bot-table creation until a safe version is redeployed.
@@ -353,7 +353,7 @@ Use only newly created stage tables:
 |---|---|
 | Poker accounting | Intentional correction: bot terminal value returns to the proven SYSTEM owner. |
 | Terminal inactive cleanup | Becomes atomic across the last human and remaining bots; ambiguity preserves the table instead of partially closing it. |
-| Admin force-close | Can return `manual_review` for live or ambiguous liabilities instead of deleting evidence. |
+| Admin force-close | Can return `terminal_accounting_invariant_failed` for live or ambiguous liabilities instead of deleting evidence. |
 | Nonterminal cleanup | No intended behavior change. |
 | Concurrency | Terminal close increments state version so stale WS persistence conflicts. |
 | Historical data | No remediation; #707 remains responsible. |
@@ -368,7 +368,7 @@ Use only newly created stage tables:
 - No bot UUID receives a USER credit.
 - Successful close leaves escrow exactly zero and advances state version.
 - Nonterminal cleanup behavior remains unchanged.
-- Ambiguous/live-liability cases return controlled `manual_review` without mutation.
+- Ambiguous/live-liability cases return controlled `terminal_accounting_invariant_failed` without mutation.
 - Existing tests/checks pass with only necessary in-place updates.
 - A new-table WS Preview smoke verifies replacement provenance, idempotency, and zero escrow.
 
