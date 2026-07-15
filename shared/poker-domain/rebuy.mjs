@@ -102,6 +102,13 @@ export async function executePokerRebuyAuthoritative({
     }
     if (request.status === "pending") throw makeError("request_pending");
 
+    // Match the high-frequency persistence order: poker_state -> seat/table.
+    // Reversing this order can deadlock with bot autoplay, which updates state
+    // before projecting seats and table activity.
+    const locked = await loadStateForUpdate(tx, tableId);
+    if (!locked?.ok) throw makeError(locked?.reason === "not_found" ? "state_missing" : "state_invalid");
+    const state = parseState(locked.state);
+
     const tableRows = await tx.unsafe(
       "select id, status from public.poker_tables where id = $1 for update;",
       [tableId]
@@ -123,9 +130,6 @@ export async function executePokerRebuyAuthoritative({
     const seatNo = Number(seat.seat_no);
     if (!Number.isInteger(seatNo) || seatNo < 1) throw makeError("state_invalid");
 
-    const locked = await loadStateForUpdate(tx, tableId);
-    if (!locked?.ok) throw makeError(locked?.reason === "not_found" ? "state_missing" : "state_invalid");
-    const state = parseState(locked.state);
     const stackEvidence = requireAuthoritativeHumanStack({ state, userId });
     if (stackEvidence.amount !== 0) throw makeError("rebuy_not_available");
     if (currentHandUserIds(state).has(userId)) throw makeError("rebuy_not_available");

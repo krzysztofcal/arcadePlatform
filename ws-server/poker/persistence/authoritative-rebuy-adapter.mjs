@@ -36,7 +36,12 @@ async function loadLockedStateHelpersDefault() {
 
 function normalizeError(error) {
   const sourceCode = typeof error?.code === "string" ? error.code : "authoritative_rebuy_failed";
-  const code = sourceCode === "insufficient_funds" ? "insufficient_chips" : sourceCode;
+  const sourceMessage = typeof error?.message === "string" ? error.message.trim() : "";
+  const code = sourceCode === "insufficient_funds" || (sourceCode === "P0001" && sourceMessage === "insufficient_funds")
+    ? "insufficient_chips"
+    : sourceCode === "40P01" || sourceCode === "40001"
+      ? "temporarily_unavailable"
+      : sourceCode;
   const allowed = new Set([
     "invalid_request",
     "invalid_rebuy_amount",
@@ -52,6 +57,7 @@ function normalizeError(error) {
     "state_invalid",
     "state_conflict",
     "seat_projection_conflict",
+    "temporarily_unavailable",
     "insufficient_chips",
     "system_account_missing",
     "system_account_inactive",
@@ -111,7 +117,8 @@ export function createAuthoritativeRebuyExecutor({
       });
     } catch (error) {
       const normalized = normalizeError(error);
-      klog("ws_rebuy_authoritative_failed", { tableId, requestId: requestId || null, code: normalized.code });
+      const sourceCode = typeof error?.code === "string" && /^[A-Za-z0-9_]{2,64}$/.test(error.code) ? error.code : null;
+      klog("ws_rebuy_authoritative_failed", { tableId, requestId: requestId || null, code: normalized.code, sourceCode });
       return normalized;
     }
   };

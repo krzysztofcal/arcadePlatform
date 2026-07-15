@@ -8,6 +8,7 @@ function clone(value) {
 }
 
 function createHarness({ ledgerFails = false, stateUpdateFails = false, handSeats = [], state = null, validateStateForStorage = () => true } = {}) {
+  const lockOrder = [];
   let store = {
     table: { id: "table-1", status: "OPEN" },
     seat: { user_id: "user-1", seat_no: 2, stack: 0, status: "ACTIVE", is_bot: false },
@@ -40,8 +41,14 @@ function createHarness({ ledgerFails = false, stateUpdateFails = false, handSeat
           delete draft.requests[params[2]];
           return [];
         }
-        if (sql.includes("from public.poker_tables") && sql.includes("for update")) return [draft.table];
-        if (sql.includes("from public.poker_seats") && sql.includes("for update")) return [draft.seat];
+        if (sql.includes("from public.poker_tables") && sql.includes("for update")) {
+          lockOrder.push("table");
+          return [draft.table];
+        }
+        if (sql.includes("from public.poker_seats") && sql.includes("for update")) {
+          lockOrder.push("seat");
+          return [draft.seat];
+        }
         if (sql.includes("update public.poker_seats")) {
           if (draft.seat.user_id !== params[1] || draft.seat.seat_no !== params[2]) return [];
           draft.seat.stack = params[3];
@@ -56,7 +63,10 @@ function createHarness({ ledgerFails = false, stateUpdateFails = false, handSeat
     return result;
   };
 
-  const loadStateForUpdate = async (tx) => ({ ok: true, version: tx.__draft.stateVersion, state: clone(tx.__draft.state) });
+  const loadStateForUpdate = async (tx) => {
+    lockOrder.push("state");
+    return { ok: true, version: tx.__draft.stateVersion, state: clone(tx.__draft.state) };
+  };
   const updateStateLocked = async (tx, { nextState }) => {
     if (stateUpdateFails) return { ok: false, reason: "conflict" };
     tx.__draft.stateVersion += 1;
@@ -84,7 +94,7 @@ function createHarness({ ledgerFails = false, stateUpdateFails = false, handSeat
     updateStateLocked,
     validateStateForStorage
   });
-  return { execute, read: () => clone(store) };
+  return { execute, read: () => clone(store), readLockOrder: () => lockOrder.slice() };
 }
 
 test("manual rebuy atomically funds USER to ESCROW and queues the next hand", async () => {
@@ -99,6 +109,7 @@ test("manual rebuy atomically funds USER to ESCROW and queues the next hand", as
   assert.equal(after.state.waitingForNextHandByUserId["user-1"], true);
   assert.equal(after.seat.stack, 100);
   assert.deepEqual(after.state.handSeats, []);
+  assert.deepEqual(harness.readLockOrder(), ["state", "table", "seat"]);
 });
 
 test("stored rebuy result survives restart semantics and cannot fund twice", async () => {

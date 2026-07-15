@@ -993,10 +993,12 @@ test('poker v2 renders authoritative out-of-chips state with stable disabled act
   harness.elements.pokerV2RebuyBtn.click();
   await harness.flush();
   assert.equal(JSON.stringify(harness.rebuyPayloads), JSON.stringify([{ tableId: 'table-1', amount: 100 }]));
+  assert.equal(harness.elements.pokerV2RebuyPanel.hidden, true, 'accepted rebuy must close the prompt immediately');
 
   ws.onSnapshot(snapshot({ status: 'WAITING_NEXT_HAND', stack: 100, canRebuy: false }));
   await harness.flush();
   assert.equal(harness.elements.pokerV2TurnText.textContent, 'Funded · Joining next hand');
+  assert.equal(harness.elements.pokerV2RebuyPanel.hidden, true, 'waiting snapshot must not reopen an accepted rebuy prompt');
   assert.equal(harness.elements.pokerV2RebuyBtn.hidden, true);
 });
 

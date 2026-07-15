@@ -2557,12 +2557,12 @@
     var outOfChips = !!playerState && playerState.status === 'OUT_OF_CHIPS';
     var waiting = !!playerState && playerState.status === 'WAITING_NEXT_HAND';
     var show = ((outOfChips && playerState.canRebuy === true) || waiting) && !rebuyPanelDismissed;
+    if (els.rebuyBtn) els.rebuyBtn.hidden = waiting;
     els.rebuyPanel.hidden = !show;
     if (!show) return;
     if (els.rebuyTitle) els.rebuyTitle.textContent = waiting ? 'Buy-in confirmed' : 'Out of chips';
     if (els.rebuyCopy) els.rebuyCopy.textContent = waiting ? 'Funded · Joining next hand' : 'The table will keep playing. Buy in to join the next hand.';
     if (els.rebuyBtn) {
-      els.rebuyBtn.hidden = waiting;
       els.rebuyBtn.disabled = rebuyInFlight || !isWsReady() || playerState.canRebuy !== true;
       els.rebuyBtn.textContent = rebuyInFlight ? 'Buying in…' : 'Buy in 100 CH';
     }
@@ -3222,6 +3222,7 @@
     renderRebuyPanel();
     return sendCommand('sendRebuy', { tableId: state.tableId, amount: 100 }).then(function(){
       state.statusText = 'Buy-in accepted';
+      rebuyPanelDismissed = true;
     }).catch(function(error){
       var reason = error && (error.code || error.message) ? String(error.code || error.message) : 'rebuy_failed';
       if (els.rebuyAccountLink) els.rebuyAccountLink.hidden = reason !== 'insufficient_chips';

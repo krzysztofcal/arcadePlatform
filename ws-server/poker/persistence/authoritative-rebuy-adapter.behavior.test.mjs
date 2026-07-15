@@ -36,9 +36,28 @@ test("authoritative rebuy adapter maps insufficient funds and fails closed for f
   }));
   assert.deepEqual(await insufficient({ tableId: "table", userId: "user", requestId: "request" }), { ok: false, code: "insufficient_chips" });
 
+  const postgresInsufficient = createAuthoritativeRebuyExecutor(dependencies(async () => {
+    throw Object.assign(new Error("insufficient_funds"), { code: "P0001" });
+  }));
+  assert.deepEqual(await postgresInsufficient({ tableId: "table", userId: "user", requestId: "request" }), { ok: false, code: "insufficient_chips" });
+
   const fileOnly = createAuthoritativeRebuyExecutor({
     ...dependencies(async () => ({ ok: true })),
     env: { WS_PERSISTED_STATE_FILE: "/tmp/poker.json" }
   });
   assert.deepEqual(await fileOnly({ tableId: "table", userId: "user", requestId: "request" }), { ok: false, code: "temporarily_unavailable" });
+});
+
+test("authoritative rebuy adapter exposes deadlocks as retryable without leaking raw errors", async () => {
+  const logs = [];
+  const executor = createAuthoritativeRebuyExecutor({
+    ...dependencies(async () => {
+      throw Object.assign(new Error("deadlock details"), { code: "40P01" });
+    }),
+    klog: (event, detail) => logs.push({ event, detail })
+  });
+
+  assert.deepEqual(await executor({ tableId: "table", userId: "user", requestId: "request" }), { ok: false, code: "temporarily_unavailable" });
+  assert.equal(logs.at(-1)?.detail?.sourceCode, "40P01");
+  assert.equal(Object.prototype.hasOwnProperty.call(logs.at(-1)?.detail || {}, "message"), false);
 });
