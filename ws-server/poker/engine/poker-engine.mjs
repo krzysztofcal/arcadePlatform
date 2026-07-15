@@ -84,9 +84,10 @@ function orderedSeatMembers(coreState) {
     .sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
 }
 
-export function isContinuationEligibleByStack(userId, stacksByUserId) {
+export function isContinuationEligibleByStack(userId, stacksByUserId, { isBot = false } = {}) {
   const stack = Number(stacksByUserId?.[userId] ?? 0);
-  return Number.isFinite(stack) && stack >= MIN_STACK_TO_JOIN_HAND;
+  const minimumStack = isBot ? MIN_STACK_TO_JOIN_HAND : 1;
+  return Number.isFinite(stack) && stack >= minimumStack;
 }
 
 export function orderedEligibleSeatMembers(coreState, stacksByUserId = null) {
@@ -94,7 +95,9 @@ export function orderedEligibleSeatMembers(coreState, stacksByUserId = null) {
   if (!stacksByUserId || typeof stacksByUserId !== "object" || Array.isArray(stacksByUserId)) {
     return members;
   }
-  return members.filter((member) => isContinuationEligibleByStack(member.userId, stacksByUserId));
+  return members.filter((member) => isContinuationEligibleByStack(member.userId, stacksByUserId, {
+    isBot: coreState?.seatDetailsByUserId?.[member.userId]?.isBot === true
+  }));
 }
 
 export function buildBootstrappedPokerState({ tableId, coreState, dealerSeatNo = null, startingStacks = null, handVersion = null }) {
@@ -179,12 +182,14 @@ export function buildBootstrappedPokerState({ tableId, coreState, dealerSeatNo =
   };
 }
 
-export function resolveNextDealerSeatNo({ members, settledState }) {
+export function resolveNextDealerSeatNo({ members, settledState, coreState = null }) {
   if (!Array.isArray(members) || members.length === 0) {
     return null;
   }
 
-  const eligibleMembers = members.filter((member) => isContinuationEligibleByStack(member.userId, settledState?.stacks));
+  const eligibleMembers = members.filter((member) => isContinuationEligibleByStack(member.userId, settledState?.stacks, {
+    isBot: coreState?.seatDetailsByUserId?.[member.userId]?.isBot === true
+  }));
   if (eligibleMembers.length === 0) {
     return null;
   }
@@ -201,14 +206,29 @@ export function resolveNextDealerSeatNo({ members, settledState }) {
 
 export function buildNextHandStateFromSettled({ tableId, coreState, settledState, nextVersion }) {
   const members = orderedEligibleSeatMembers(coreState, settledState?.stacks);
-  const nextDealerSeatNo = resolveNextDealerSeatNo({ members, settledState });
-  return buildBootstrappedPokerState({
+  const nextDealerSeatNo = resolveNextDealerSeatNo({ members, settledState, coreState });
+  const nextHandState = buildBootstrappedPokerState({
     tableId,
     coreState,
     dealerSeatNo: nextDealerSeatNo,
     startingStacks: settledState?.stacks,
     handVersion: nextVersion
   });
+  if (!nextHandState) return null;
+  const durableStacks = { ...nextHandState.stacks };
+  const settledStacks = settledState?.stacks && typeof settledState.stacks === "object" && !Array.isArray(settledState.stacks)
+    ? settledState.stacks
+    : {};
+  for (const [userId, rawStack] of Object.entries(settledStacks)) {
+    if (Object.prototype.hasOwnProperty.call(durableStacks, userId)) continue;
+    const stack = Number(rawStack);
+    if (Number.isInteger(stack) && stack >= 0) durableStacks[userId] = stack;
+  }
+  const waitingForNextHandByUserId = settledState?.waitingForNextHandByUserId && typeof settledState.waitingForNextHandByUserId === "object" && !Array.isArray(settledState.waitingForNextHandByUserId)
+    ? { ...settledState.waitingForNextHandByUserId }
+    : {};
+  for (const seat of nextHandState.handSeats) delete waitingForNextHandByUserId[seat.userId];
+  return { ...nextHandState, stacks: durableStacks, waitingForNextHandByUserId };
 }
 
 function nextBotReplacementUserId({ tableId, seatNo, version, existingUserIds }) {

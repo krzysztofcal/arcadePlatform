@@ -115,6 +115,7 @@ function createHarness(options = {}){
     'pokerHeroCards', 'pokerV2LiveStatus', 'pokerV2TableMeta', 'pokerV2TurnText',
     'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2GuestPanel', 'pokerV2GuestBadge', 'pokerV2SignInBtn', 'pokerV2SeatNo',
     'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
+    'pokerV2RebuyPanel', 'pokerV2RebuyTitle', 'pokerV2RebuyCopy', 'pokerV2RebuyBalance', 'pokerV2RebuyBtn', 'pokerV2RebuyLobbyBtn', 'pokerV2RebuyWatchBtn', 'pokerV2RebuyAccountLink',
     'pokerV2ClosedTableModal', 'pokerV2ClosedTableTitle', 'pokerV2ClosedTableCountdown',
     'pokerV2DemoPill', 'pokerV2FoldBtn', 'pokerV2PrimaryBtn', 'pokerV2AmountBtn',
     'pokerV2AllInBtn', 'pokerV2FoldPreactionWrap', 'pokerV2FoldPreaction', 'pokerV2FoldPreactionText',
@@ -137,6 +138,7 @@ function createHarness(options = {}){
   elements.pokerV2AllInPreaction.type = 'checkbox';
   elements.pokerV2LeaveConfirmModal.hidden = true;
   elements.pokerV2ClosedTableModal.hidden = true;
+  elements.pokerV2RebuyPanel.hidden = true;
   elements.pokerMenuPanel.setAttribute('hidden', 'hidden');
 
   const documentEvents = {};
@@ -145,6 +147,7 @@ function createHarness(options = {}){
   const actPayloads = [];
   const startPayloads = [];
   const leavePayloads = [];
+  const rebuyPayloads = [];
   let createOptions = null;
 
   const token = Object.prototype.hasOwnProperty.call(options, 'token')
@@ -169,6 +172,11 @@ function createHarness(options = {}){
     },
     sendAct(payload){ actPayloads.push(payload); return Promise.resolve({ ok: true }); },
     sendStartHand(payload){ startPayloads.push(payload); return Promise.resolve({ ok: true }); },
+    sendRebuy(payload){
+      rebuyPayloads.push(payload);
+      if (typeof options.sendRebuy === 'function') return options.sendRebuy(payload, { attempt: rebuyPayloads.length });
+      return Promise.resolve({ ok: true });
+    },
     sendLeave(payload){
       leavePayloads.push(payload);
       if (typeof options.sendLeave === 'function') return options.sendLeave(payload, { attempt: leavePayloads.length });
@@ -306,6 +314,7 @@ async function flush(){
     actPayloads,
     startPayloads,
     leavePayloads,
+    rebuyPayloads,
     fireDomContentLoaded,
     fireDocumentEvent,
     flush,
@@ -942,6 +951,55 @@ test('poker v2 keeps fold available even when live legalActions omit fold', asyn
   await harness.flush();
 
   assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-fold-always', action: 'FOLD' }));
+});
+
+test('poker v2 renders authoritative out-of-chips state with stable disabled actions and explicit rebuy', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  const snapshot = (playerState) => ({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 40,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }, { userId: 'bot-1', seat: 2 }] },
+      public: {
+        seats: [{ userId: 'user-1', seatNo: 1, status: playerState.status }, { userId: 'bot-1', seatNo: 2, status: 'ACTIVE', isBot: true }],
+        stacks: { 'user-1': playerState.stack, 'bot-1': 98 },
+        hand: { handId: 'bot-hand', status: 'PREFLOP', dealerSeatNo: 2 },
+        turn: { userId: 'bot-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 3, sidePots: [] },
+        legalActions: { seat: 1, actions: [] }
+      },
+      private: { userId: 'user-1', seat: 1, holeCards: [], playerState },
+      you: { seat: 1 }
+    }
+  });
+  ws.onSnapshot(snapshot({ status: 'OUT_OF_CHIPS', stack: 0, canRebuy: false }));
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2RebuyPanel.hidden, true, 'non-actionable out-of-chips state must not offer rebuy before rollover');
+
+  ws.onSnapshot(snapshot({ status: 'OUT_OF_CHIPS', stack: 0, canRebuy: true }));
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2TurnText.textContent, 'Out of chips · Sitting out');
+  assert.equal(harness.elements.pokerV2RebuyPanel.hidden, false);
+  assert.equal(harness.elements.pokerV2RebuyBtn.disabled, false);
+  for (const id of ['pokerV2FoldBtn', 'pokerV2PrimaryBtn', 'pokerV2AmountBtn', 'pokerV2AllInBtn']) {
+    assert.equal(harness.elements[id].hidden, false);
+    assert.equal(harness.elements[id].disabled, true);
+  }
+  harness.elements.pokerV2RebuyBtn.click();
+  await harness.flush();
+  assert.equal(JSON.stringify(harness.rebuyPayloads), JSON.stringify([{ tableId: 'table-1', amount: 100 }]));
+  assert.equal(harness.elements.pokerV2RebuyPanel.hidden, true, 'accepted rebuy must close the prompt immediately');
+
+  ws.onSnapshot(snapshot({ status: 'WAITING_NEXT_HAND', stack: 100, canRebuy: false }));
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2TurnText.textContent, 'Funded · Joining next hand');
+  assert.equal(harness.elements.pokerV2RebuyPanel.hidden, true, 'waiting snapshot must not reopen an accepted rebuy prompt');
+  assert.equal(harness.elements.pokerV2RebuyBtn.hidden, true);
 });
 
 test('poker v2 keeps action buttons stable while exposing single-select preactions off-turn', async () => {

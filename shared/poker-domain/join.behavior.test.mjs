@@ -84,10 +84,12 @@ test("shared join module imports without Netlify adapter dependency at module lo
   const stagedDir = path.join(tempDir, "shared", "poker-domain");
   const stagedJoin = path.join(stagedDir, "join.mjs");
   const stagedBots = path.join(stagedDir, "bots.mjs");
+  const stagedTableBuyIn = path.join(stagedDir, "table-buy-in.mjs");
   try {
     await fs.mkdir(stagedDir, { recursive: true });
     await fs.copyFile("shared/poker-domain/join.mjs", stagedJoin);
     await fs.copyFile("shared/poker-domain/bots.mjs", stagedBots);
+    await fs.copyFile("shared/poker-domain/table-buy-in.mjs", stagedTableBuyIn);
     const module = await import(pathToFileURL(stagedJoin).href);
     assert.equal(typeof module.executePokerJoinAuthoritative, "function");
   } finally {

@@ -718,7 +718,7 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
   const stackMap = copyMap(state.stacks);
   const hasStackEntry = Object.prototype.hasOwnProperty.call(stackMap, userId);
   const alreadyLeft = !!state.leftTableByUserId?.[userId];
-  if (!userInHandSeats && !userInTableSeats && !alreadyLeft) {
+  if (!userInHandSeats && !userInTableSeats && !hasStackEntry && !alreadyLeft) {
     throw new Error("invalid_player");
   }
   if (alreadyLeft && !userInHandSeats && !userInTableSeats && !hasStackEntry) {

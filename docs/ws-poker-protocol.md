@@ -53,6 +53,8 @@ Example envelope:
 | `resume` | `{ "sessionId": string, "lastSeq": integer }` | Requests stream resume from last acknowledged sequence. |
 | `ping` | `{ "clientTime": string }` | Keepalive/latency probe. No state mutation. |
 | `join` | `{ "tableId": string }` | Legacy alias of `table_join`; default runtime behavior is authoritative seat/join mutation (idempotent). Optional observe-only runtime mode can make it transport-only. Requires auth. |
+| `table_rebuy` | `{ "tableId": string, "amount": 100 }` | Canonical explicit manual rebuy for an eligible out-of-chips seat. Requires auth and `requestId`; funding and authoritative state commit atomically. |
+| `rebuy` | `{ "tableId": string, "amount": 100 }` | Legacy client alias of `table_rebuy`. Atomically debits 100 CH from the authenticated USER account, credits table ESCROW, and queues the out-of-chips seat for the next hand. Requires auth and `requestId`. |
 | `act` | `{ "handId": string, "action": "fold"|"check"|"call"|"bet"|"raise", "amount": integer }` | Requests poker action mutation. Requires auth and turn validity. |
 | `leave` | `{ "reason": string }` | Requests leave/cashout workflow. |
 | `ack` | `{ "seq": integer }` | Acknowledges latest processed server sequence (flow-control aid). |
@@ -182,7 +184,7 @@ Canonical payload branches:
 - `payload.table: object`
 - `payload.you: object`
 - `payload.public: object`
-- `payload.private?: object` (only for the authenticated seated user; omitted for observers). Runtime includes `{ userId, seat, holeCards }` for seated users.
+- `payload.private?: object` (only for the authenticated seated user; omitted for observers). Runtime includes `{ userId, seat, holeCards, playerState? }` for seated users.
 
 Canonical room-core fields in `payload.public`:
 
@@ -206,6 +208,15 @@ Canonical compatibility fields:
 - `payload.you.seat: number | null` (null for authenticated non-seated observer)
 
 Missing room-core data MUST fail safe to canonical defaults and never expose foreign private state: `public.hand.status` resolves to `"LOBBY"` (members present) or `"EMPTY"` (no members), `public.pot.total` resolves to `0`, list fields resolve to `[]`, and optional scalars remain `null` when unavailable.
+
+Out-of-chips lifecycle contract delta:
+
+- `payload.private.playerState` is additive and has `{ status: "ACTIVE"|"OUT_OF_CHIPS"|"WAITING_NEXT_HAND", stack: integer, canRebuy: boolean }`;
+- `canRebuy` is true only for the authenticated active non-bot seat owner at an open table, with authoritative stack `0`, after the player is absent from current `handSeats` and before a rebuy is committed;
+- canonical `table_rebuy` and alias `rebuy` accept only `{ tableId, amount: 100 }` and require a unique request ID;
+- successful rebuy is one atomic `TABLE_BUY_IN` (`USER -100`, table `ESCROW +100`) plus state/seat projection and sets `WAITING_NEXT_HAND` without adding the player to a hand already in progress;
+- repeated delivery of the same successful request ID returns its stored result and does not debit again;
+- insufficient balance, a nonzero/ambiguous stack, current-hand membership, a closed table, or a non-active/bot seat rejects without visible runtime mutation.
 
 Poker profile avatar contract delta: authenticated non-bot seats may include an additive `profile` object in `table_state.payload.seats` and `stateSnapshot.payload.public.seats`:
 
@@ -293,7 +304,7 @@ Close vs error event rules:
 
 ## Idempotency
 
-- Every stateful client command (`table_join`/`join`, `act`, `leave`, `resync`, `table_state_sub`) MUST include `requestId` UUID.
+- Every stateful client command (`table_join`/`join`, `table_rebuy`/`rebuy`, `act`, `leave`, `resync`, `table_state_sub`) MUST include `requestId` UUID.
 - Server MUST treat `(userId, roomId, type, requestId)` as idempotency scope.
 - Duplicate request handling:
   - If original command already resolved, server MUST return same `commandResult` semantics (or `error.code = "DUPLICATE_REQUEST"` with prior outcome reference) and MUST NOT apply mutation twice.
@@ -351,6 +362,7 @@ Gameplay write commands are authoritative over WS. `start_hand` and `act` use `c
 - `join` / `table_join` payload: `{ tableId, seatNo?, autoSeat?, preferredSeatNo?, buyIn }` (`buyIn` required for gameplay-equivalent authoritative joins)
 - `start_hand` payload: `{ tableId }`
 - `act` payload: `{ handId, action, amount? }`
+- `table_rebuy` / `rebuy` payload: `{ tableId, amount: 100 }`
 
 Success contract:
 

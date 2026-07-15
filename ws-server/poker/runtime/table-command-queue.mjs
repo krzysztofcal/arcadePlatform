@@ -8,7 +8,7 @@ export function createTableCommandQueue({ onError = noop } = {}) {
       queueStateByTableId.set(tableId, {
         tail: Promise.resolve(),
         pendingByKey: new Map(),
-        activeCount: 0
+        pendingCount: 0
       });
     }
     return queueStateByTableId.get(tableId);
@@ -16,7 +16,7 @@ export function createTableCommandQueue({ onError = noop } = {}) {
 
   function cleanupQueueState(tableId, state) {
     if (!state) return;
-    if (state.activeCount !== 0) return;
+    if (state.pendingCount !== 0) return;
     if (state.pendingByKey.size !== 0) return;
     queueStateByTableId.delete(tableId);
   }
@@ -37,12 +37,12 @@ export function createTableCommandQueue({ onError = noop } = {}) {
       return state.pendingByKey.get(normalizedDedupeKey);
     }
 
+    state.pendingCount += 1;
     const execute = async () => {
-      state.activeCount += 1;
       try {
         return await run();
       } finally {
-        state.activeCount = Math.max(0, state.activeCount - 1);
+        state.pendingCount = Math.max(0, state.pendingCount - 1);
         if (normalizedDedupeKey) {
           state.pendingByKey.delete(normalizedDedupeKey);
         }

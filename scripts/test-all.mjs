@@ -73,6 +73,8 @@ run("node", ["tests/poker-handSeats-seats-undefined.behavior.test.mjs"], "poker-
 run("node", ["tests/poker-handSeats-reset.behavior.test.mjs"], "poker-handseats-reset-behavior");
 run("node", ["tests/poker-legal-actions.left-player.invalid-player.behavior.test.mjs"], "poker-legal-actions-left-player-invalid-player-behavior");
 run("node", ["shared/poker-domain/leave.behavior.test.mjs"], "poker-domain-leave-behavior");
+run("node", ["shared/poker-domain/human-stack-accounting.behavior.test.mjs"], "poker-domain-human-stack-accounting-behavior");
+run("node", ["shared/poker-domain/rebuy.behavior.test.mjs"], "poker-domain-rebuy-behavior");
 run("node", ["tests/poker-table-list.left-player-filter.behavior.test.mjs"], "poker-table-list-left-player-filter-behavior");
 run("node", ["shared/poker-domain/inactive-cleanup.behavior.test.mjs"], "poker-domain-inactive-cleanup-behavior");
 run("node", ["tests/poker-inactive-cleanup.behavior.test.mjs"], "poker-inactive-cleanup-behavior");
@@ -83,6 +85,8 @@ run("node", ["tests/poker-settlement-presentation.unit.test.mjs"], "poker-settle
 run("node", ["tests/poker-v2-live.behavior.test.mjs"], "poker-v2-live-behavior");
 run("node", ["ws-server/poker/persistence/inactive-cleanup-adapter.behavior.test.mjs"], "ws-inactive-cleanup-adapter-behavior");
 run("node", ["ws-server/poker/persistence/persisted-state-writer.behavior.test.mjs"], "ws-persisted-state-writer-behavior");
+run("node", ["ws-server/poker/persistence/authoritative-rebuy-adapter.behavior.test.mjs"], "ws-authoritative-rebuy-adapter-behavior");
+run("node", ["ws-server/poker/handlers/rebuy.behavior.test.mjs"], "ws-rebuy-handler-behavior");
 run("node", ["ws-server/poker/runtime/disconnect-cleanup.behavior.test.mjs"], "ws-disconnect-cleanup-runtime-behavior");
 run("node", ["ws-server/poker/runtime/accepted-bot-autoplay-adapter.behavior.test.mjs"], "ws-accepted-bot-autoplay-adapter-behavior");
 run("node", ["ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs"], "ws-lobby-join-public-snapshot-behavior");

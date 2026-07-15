@@ -12,7 +12,7 @@ test("adapter maps persisted rows into deterministic ws table/core state", () =>
       { user_id: "user_a", seat_no: 2, status: "ACTIVE", is_bot: false, stack: 120 },
       { user_id: "user_x", seat_no: 3, status: "LEFT", is_bot: false }
     ],
-    stateRow: { version: 12, state: { phase: "PREFLOP", handId: "h1" } }
+    stateRow: { version: 12, state: { phase: "PREFLOP", handId: "h1", stacks: { user_a: 120, user_b: 80 } } }
   });
 
   assert.equal(result.ok, true);
@@ -46,6 +46,7 @@ test("adapter accepts legacy stringified persisted poker state JSON", () => {
       version: 4,
       state: JSON.stringify({
         phase: "PREFLOP",
+        stacks: { user_a: 100 },
         hand: { handId: "h_legacy", pots: JSON.stringify([{ amount: 120 }]) }
       })
     }
@@ -96,6 +97,7 @@ test("adapter drops stale state seats that are no longer ACTIVE in persisted sea
       version: 10,
       state: {
         phase: "HAND_DONE",
+        stacks: { user_a: 120 },
         seats: [
           { userId: "user_a", seatNo: 1, status: "ACTIVE" },
           { userId: "user_b", seatNo: 2, status: "ACTIVE" }
@@ -221,7 +223,7 @@ test("adapter restores replacement bot identity from persisted state when seat r
   assert.equal(result.table.presenceByUserId.has("bot_old_2"), false);
 });
 
-test("adapter keeps public stacks from active seat rows for non-replacement members", () => {
+test("adapter keeps authoritative human stack while retaining bot seat projection", () => {
   const result = adaptPersistedBootstrap({
     tableId: "table_public_stack_restore",
     tableRow: { id: "table_public_stack_restore", max_players: 6, status: "OPEN" },
@@ -250,7 +252,30 @@ test("adapter keeps public stacks from active seat rows for non-replacement memb
 
   assert.equal(result.ok, true);
   assert.deepEqual(result.table.coreState.publicStacks, {
-    user_a: 150,
+    user_a: 149,
     bot_2: 100
   });
+});
+
+test("adapter restores an out-of-chips human at zero despite a stale positive seat projection", () => {
+  const result = adaptPersistedBootstrap({
+    tableId: "table_busted_restore",
+    tableRow: { id: "table_busted_restore", max_players: 6, status: "OPEN" },
+    seatRows: [{ user_id: "user_a", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 }],
+    stateRow: { version: 4, state: { phase: "PREFLOP", handId: "next_hand", handSeats: [], seats: [], stacks: { user_a: 0 } } }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.table.coreState.publicStacks.user_a, 0);
+});
+
+test("adapter fails closed when an active human has no authoritative state stack", () => {
+  const result = adaptPersistedBootstrap({
+    tableId: "table_ambiguous_restore",
+    tableRow: { id: "table_ambiguous_restore", max_players: 6, status: "OPEN" },
+    seatRows: [{ user_id: "user_a", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 }],
+    stateRow: { version: 4, state: { phase: "PREFLOP", handId: "hand" } }
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "invalid_persisted_state");
+  assert.equal(result.message, "human_stack_ambiguous");
 });

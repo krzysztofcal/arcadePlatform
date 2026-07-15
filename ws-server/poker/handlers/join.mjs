@@ -236,7 +236,9 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
     seatNo: joinIntent.seatNo,
     autoSeat: joinIntent.autoSeat,
     preferredSeatNo: joinIntent.preferredSeatNo,
-    buyIn: joinIntent.buyIn,
+    buyIn: authoritativeJoinResult?.rejoin === true
+      ? null
+      : (authoritativeJoinResult?.stack ?? joinIntent.buyIn),
     authoritativeSeatNo: authoritativeJoinResult?.seatNo ?? null
   });
   klog("ws_join_attach_result", {

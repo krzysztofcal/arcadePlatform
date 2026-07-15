@@ -263,6 +263,8 @@ test("persistent bot replacement commits runtime only with matching funding rece
       tableId,
       expectedVersion: prepared.expectedVersion,
       newVersion: prepared.stateVersion,
+      humanStackProjectionCommitted: true,
+      projectedHumanStacks: prepared.humanStackUpdates.map(({ userId, seatNo, stack }) => ({ userId, seatNo, stack })),
       replacementFundingCommitted: true,
       fundedReplacements: [{
         seatNo: funding.seatNo,

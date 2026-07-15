@@ -141,6 +141,22 @@ function normalizeHandSettlement(handSettlement) {
   };
 }
 
+function normalizePlayerState(playerState) {
+  if (!playerState || typeof playerState !== "object" || Array.isArray(playerState)) {
+    return null;
+  }
+  const allowedStatuses = new Set(["ACTIVE", "OUT_OF_CHIPS", "WAITING_NEXT_HAND"]);
+  const status = typeof playerState.status === "string" ? playerState.status.trim().toUpperCase() : "";
+  if (!allowedStatuses.has(status) || !Number.isInteger(playerState.stack) || playerState.stack < 0) {
+    return null;
+  }
+  return {
+    status,
+    stack: playerState.stack,
+    canRebuy: playerState.canRebuy === true
+  };
+}
+
 function normalizePrivateBranch(privateBranch, { userId, youSeat }) {
   const base = { userId, seat: youSeat };
   if (!privateBranch || typeof privateBranch !== "object" || Array.isArray(privateBranch)) {
@@ -148,9 +164,11 @@ function normalizePrivateBranch(privateBranch, { userId, youSeat }) {
   }
 
   const holeCards = normalizeCards(privateBranch.holeCards);
+  const playerState = normalizePlayerState(privateBranch.playerState);
   return {
     ...base,
-    holeCards
+    holeCards,
+    ...(playerState ? { playerState } : {})
   };
 }
 

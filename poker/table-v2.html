@@ -137,6 +137,21 @@
       </div>
     </div>
 
+    <div class="poker-rebuy-panel" id="pokerV2RebuyPanel" role="dialog" aria-modal="false" aria-labelledby="pokerV2RebuyTitle" hidden>
+      <div class="poker-rebuy-panel__card">
+        <div class="poker-rebuy-panel__eyebrow">Sitting out</div>
+        <div class="poker-rebuy-panel__title" id="pokerV2RebuyTitle">Out of chips</div>
+        <p class="poker-rebuy-panel__copy" id="pokerV2RebuyCopy">The table will keep playing. Buy in to join the next hand.</p>
+        <div class="poker-rebuy-panel__balance" id="pokerV2RebuyBalance">Buy-in: 100 CH</div>
+        <div class="poker-rebuy-panel__actions">
+          <button type="button" class="poker-live-btn poker-live-btn--accent" id="pokerV2RebuyBtn">Buy in 100 CH</button>
+          <button type="button" class="poker-live-btn" id="pokerV2RebuyLobbyBtn">Return to lobby</button>
+          <button type="button" class="poker-live-btn poker-rebuy-panel__watch" id="pokerV2RebuyWatchBtn">Keep watching</button>
+        </div>
+        <a class="poker-rebuy-panel__account" id="pokerV2RebuyAccountLink" href="/account.html" hidden>Open chips account</a>
+      </div>
+    </div>
+
     <div class="poker-confirm-modal poker-closed-table-modal" id="pokerV2ClosedTableModal" role="status" aria-live="assertive" hidden>
       <div class="poker-confirm-dialog poker-closed-table-dialog">
         <div class="poker-confirm-title poker-closed-table-title" id="pokerV2ClosedTableTitle">This table has ended. Returning to lobby in 5 seconds…</div>

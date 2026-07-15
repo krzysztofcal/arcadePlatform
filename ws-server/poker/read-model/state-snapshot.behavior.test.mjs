@@ -99,6 +99,54 @@ test("buildStateSnapshotPayload for observer never exposes private branch", () =
   assert.equal(payload.public.turn.userId, "user_a");
 });
 
+test("buildStateSnapshotPayload preserves the validated private out-of-chips rebuy state", () => {
+  const payload = buildStateSnapshotPayload({
+    userId: "user_a",
+    tableSnapshot: {
+      tableId: "table_busted",
+      roomId: "table_busted",
+      stateVersion: 41,
+      members: [
+        { userId: "user_a", seat: 1 },
+        { userId: "bot_a", seat: 2 }
+      ],
+      memberCount: 2,
+      maxSeats: 6,
+      youSeat: 1,
+      status: "OPEN",
+      seats: [
+        { userId: "user_a", seatNo: 1, status: "OUT_OF_CHIPS" },
+        { userId: "bot_a", seatNo: 2, status: "ACTIVE", isBot: true }
+      ],
+      stacks: { user_a: 0, bot_a: 200 },
+      hand: { handId: "bot_hand", status: "PREFLOP", round: "PREFLOP", dealerSeatNo: 2 },
+      board: { cards: [] },
+      pot: { total: 3, sidePots: [] },
+      turn: { userId: "bot_a", seat: 2, startedAt: null, deadlineAt: null },
+      legalActions: { seat: 1, actions: [] },
+      private: {
+        userId: "user_a",
+        seat: 1,
+        holeCards: [],
+        playerState: {
+          status: "OUT_OF_CHIPS",
+          stack: 0,
+          canRebuy: true,
+          internalLedgerBalance: 999
+        }
+      }
+    }
+  });
+
+  assert.deepEqual(payload.private, {
+    userId: "user_a",
+    seat: 1,
+    holeCards: [],
+    playerState: { status: "OUT_OF_CHIPS", stack: 0, canRebuy: true }
+  });
+  assert.equal("internalLedgerBalance" in payload.private.playerState, false);
+});
+
 test("buildStateSnapshotPayload missing table snapshot returns canonical empty room-core shape", () => {
   const tableManager = createTableManager({ maxSeats: 6 });
 

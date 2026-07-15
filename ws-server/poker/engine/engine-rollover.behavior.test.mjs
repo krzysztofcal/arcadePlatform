@@ -105,7 +105,56 @@ test("fold settlement carryover preserves stack-eligible members and determinist
     { userId: "user_b", seatNo: 2 },
     { userId: "user_c", seatNo: 3 }
   ]);
+  assert.equal(next.stacks.user_a, 0);
+  assert.equal(next.handSeats.some((seat) => seat.userId === "user_a"), false);
   assert.equal(next.turnUserId, "user_b");
+});
+
+test("human with one chip remains eligible and posts a partial blind", () => {
+  const coreState = {
+    roomId: "table_one_chip",
+    version: 4,
+    members: [{ userId: "human", seat: 1 }, { userId: "bot", seat: 2 }],
+    seats: { human: 1, bot: 2 },
+    seatDetailsByUserId: { human: { isBot: false }, bot: { isBot: true } },
+    pokerState: null
+  };
+  const next = buildNextHandStateFromSettled({
+    tableId: "table_one_chip",
+    coreState,
+    settledState: { handId: "settled_one_chip", phase: "SETTLED", dealerSeatNo: 2, stacks: { human: 1, bot: 100 } },
+    nextVersion: 5
+  });
+  assert.ok(next);
+  assert.equal(next.handSeats.some((seat) => seat.userId === "human"), true);
+  assert.equal(next.stacks.human, 0);
+  assert.equal(next.contributionsByUserId.human, 1);
+});
+
+test("rollover preserves an authoritative stack awaiting cleanup after runtime presence is pruned", () => {
+  const coreState = {
+    roomId: "table_disconnected_human",
+    version: 8,
+    members: [{ userId: "bot_a", seat: 2 }, { userId: "bot_b", seat: 3 }],
+    seats: { bot_a: 2, bot_b: 3 },
+    seatDetailsByUserId: { bot_a: { isBot: true }, bot_b: { isBot: true } },
+    pokerState: null
+  };
+  const next = buildNextHandStateFromSettled({
+    tableId: "table_disconnected_human",
+    coreState,
+    settledState: {
+      handId: "settled_disconnected_human",
+      phase: "SETTLED",
+      dealerSeatNo: 2,
+      stacks: { disconnected_human: 318, bot_a: 400, bot_b: 3282 }
+    },
+    nextVersion: 9
+  });
+
+  assert.ok(next);
+  assert.equal(next.handSeats.some((seat) => seat.userId === "disconnected_human"), false);
+  assert.equal(next.stacks.disconnected_human, 318);
 });
 
 test("rollover does not bootstrap a live hand when fewer than two stack-eligible players remain", () => {

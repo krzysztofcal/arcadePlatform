@@ -44,7 +44,7 @@ export async function loadPersistedTableFromFile({ filePath, tableId }) {
   };
 }
 
-export async function writePersistedTableToFile({ filePath, tableId, expectedVersion, nextState }) {
+export async function writePersistedTableToFile({ filePath, tableId, expectedVersion, nextState, humanStackUpdates = [] }) {
   if (!filePath || !tableId || !Number.isInteger(expectedVersion) || expectedVersion < 0) {
     return { ok: false, reason: "invalid" };
   }
@@ -61,9 +61,30 @@ export async function writePersistedTableToFile({ filePath, tableId, expectedVer
     return { ok: false, reason: "conflict", currentVersion };
   }
   const nextVersion = currentVersion + 1;
+  const projectedHumanStacks = [];
+  for (const update of humanStackUpdates) {
+    const matches = (Array.isArray(row.seatRows) ? row.seatRows : []).filter((seat) => (
+      seat?.user_id === update.userId
+      && Number(seat?.seat_no) === update.seatNo
+      && String(seat?.status || "ACTIVE").toUpperCase() === "ACTIVE"
+      && seat?.is_bot !== true
+    ));
+    if (matches.length !== 1) return { ok: false, reason: "human_stack_projection_conflict" };
+    matches[0].stack = update.stack;
+    projectedHumanStacks.push({ userId: update.userId, seatNo: update.seatNo, stack: update.stack });
+  }
   row.stateRow = { version: nextVersion, state: nextState };
   row.lastActivityAt = new Date().toISOString();
   store.tables[tableId] = row;
   await writeStore(filePath, store);
-  return { ok: true, newVersion: nextVersion };
+  return {
+    ok: true,
+    newVersion: nextVersion,
+    ...(humanStackUpdates.length > 0 ? {
+      tableId,
+      expectedVersion,
+      humanStackProjectionCommitted: true,
+      projectedHumanStacks
+    } : {})
+  };
 }

@@ -1,6 +1,7 @@
 import { postTransaction } from "../../netlify/functions/_shared/chips-ledger.mjs";
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "../../netlify/functions/_shared/poker-idempotency.mjs";
 import { updatePokerStateOptimistic } from "../../netlify/functions/_shared/poker-state-write.mjs";
+import { requireAuthoritativeHumanStack } from "./human-stack-accounting.mjs";
 import { advanceIfNeeded, applyLeaveTable } from "../../netlify/functions/_shared/poker-reducer.mjs";
 import { isStateStorageValid, withoutPrivateState } from "../../netlify/functions/_shared/poker-state-utils.mjs";
 import { buildSeatBotMap, isBotTurn } from "../../netlify/functions/_shared/poker-bots.mjs";
@@ -155,6 +156,11 @@ const hasAnyActiveHuman = (seats) =>
 const hasLiveHandSignal = (state) => {
   const phase = typeof state?.phase === "string" ? state.phase : "";
   return ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(phase);
+};
+
+const isUserInCurrentHand = (state, userId) => {
+  const handSeats = Array.isArray(state?.handSeats) ? state.handSeats : parseSeats(state?.seats);
+  return handSeats.some((seat) => seat?.userId === userId);
 };
 
 const toClosedInertState = (stateInput, stacks) => ({
@@ -554,10 +560,15 @@ export async function executePokerLeave({
         }
         const rawSeatStack = seatRow ? seatRow.stack : null;
         const stackValue = normalizeSeatStack(rawSeatStack);
-        const stateStackRaw = currentState?.stacks?.[userId];
-        const stateStack = normalizeNonNegativeInt(Number(stateStackRaw));
-        const seatStack = normalizeNonNegativeInt(Number(rawSeatStack));
-        const cashOutAmount = stateStack ?? seatStack ?? 0;
+        let authoritativeStack;
+        try {
+          authoritativeStack = requireAuthoritativeHumanStack({ state: currentState, userId });
+        } catch (error) {
+          klog("poker_leave_stack_ambiguous", { tableId, userId, seatNo, reason: error?.code || "stack_ambiguous", source: "ambiguous" });
+          throw makeError(409, "stack_ambiguous");
+        }
+        const stateStack = authoritativeStack.amount;
+        const cashOutAmount = authoritativeStack.amount;
         const isStackMissing = rawSeatStack == null;
         if (isStackMissing) {
           klog("poker_leave_stack_missing", { tableId, userId: userId, seatNo });
@@ -621,7 +632,7 @@ export async function executePokerLeave({
         }
 
         const leaveState = normalizeState(leaveApplied.state);
-        const deferDetachUntilHandComplete = hasLiveHandSignal(leaveState);
+        const deferDetachUntilHandComplete = hasLiveHandSignal(leaveState) && isUserInCurrentHand(currentState, userId);
         const baseSeats = deferDetachUntilHandComplete
           ? parseSeats(currentState.seats)
           : (Array.isArray(leaveState.seats) ? leaveState.seats : parseSeats(currentState.seats));
@@ -631,7 +642,7 @@ export async function executePokerLeave({
         const seats = parseSeats(baseSeats);
         const updatedStacks = parseStacks(baseStacks);
         if (deferDetachUntilHandComplete) {
-          const restoredStack = stateStack ?? seatStack;
+          const restoredStack = stateStack;
           if (normalizeNonNegativeInt(restoredStack) != null && normalizeNonNegativeInt(updatedStacks[userId]) == null) {
             updatedStacks[userId] = restoredStack;
           }
@@ -798,7 +809,7 @@ export async function executePokerLeave({
           }
         }
 
-        const shouldDetachSeatAndStack = !hasLiveHandSignal(latestState);
+        const shouldDetachSeatAndStack = !deferDetachUntilHandComplete || !hasLiveHandSignal(latestState);
         let detachedCashOutAmount = 0;
         if (shouldDetachSeatAndStack) {
           const latestStacks = parseStacks(latestState.stacks);
@@ -812,7 +823,13 @@ export async function executePokerLeave({
             hasSeatInState: latestSeats.some((seatItem) => seatItem?.userId === userId),
             hasStackInState: Object.prototype.hasOwnProperty.call(latestStacks, userId)
           });
-          detachedCashOutAmount = normalizeNonNegativeInt(Number(latestStacks[userId])) ?? cashOutAmount;
+          try {
+            const latestHasAuthoritativeStack = Object.prototype.hasOwnProperty.call(latestStacks, userId);
+            detachedCashOutAmount = requireAuthoritativeHumanStack({ state: latestHasAuthoritativeStack ? latestState : currentState, userId }).amount;
+          } catch (error) {
+            klog("poker_leave_post_hand_stack_ambiguous", { tableId, userId, reason: error?.code || "stack_ambiguous", source: "ambiguous" });
+            throw makeError(409, "stack_ambiguous");
+          }
           klog("poker_leave_post_hand_cashout", {
             tableId,
             userId,
@@ -888,7 +905,7 @@ export async function executePokerLeave({
           userId: userId,
           amount: shouldDetachSeatAndStack ? detachedCashOutAmount : 0,
           seatNo,
-          stackSource: stateStack != null ? "state" : seatStack != null ? "seat" : "none",
+          stackSource: "authoritative_state",
           hadStack: stackValue != null,
           deferred: !shouldDetachSeatAndStack,
         });
@@ -914,9 +931,7 @@ export async function executePokerLeave({
             if (row?.is_bot === true) continue;
             const targetUserId = typeof row?.user_id === "string" ? row.user_id : null;
             if (!targetUserId) continue;
-            const stateStackAmount = normalizeNonNegativeInt(Number(closedStacks[targetUserId]));
-            const seatStackAmount = normalizeNonNegativeInt(Number(row?.stack));
-            const closeCashoutAmount = stateStackAmount ?? seatStackAmount ?? 0;
+            const closeCashoutAmount = requireAuthoritativeHumanStack({ state: { stacks: closedStacks }, userId: targetUserId }).amount;
             if (closeCashoutAmount > 0) {
               await postTransaction({
                 userId: targetUserId,

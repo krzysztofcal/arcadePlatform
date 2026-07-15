@@ -731,6 +731,7 @@ export function createTableManager({
       members,
       userId,
       youSeat,
+      tableStatus,
       publicProfilesByUserId: table ? publicProfilesForSnapshot(table) : {},
       publicProfileStorageBaseUrl
     });
@@ -1015,6 +1016,33 @@ export function createTableManager({
     });
   }
 
+  function normalizedHumanStackUpdates({ coreState, settledState, fromStateVersion, toStateVersion }) {
+    const members = Array.isArray(coreState?.members) ? coreState.members : [];
+    const humanMembers = members.filter((member) => !isCoreStateBotUser(coreState, member?.userId));
+    const updates = humanMembers.map((member) => ({
+        userId: member.userId,
+        seatNo: member.seat,
+        stack: Number(settledState?.stacks?.[member.userId]),
+        settledHandId: typeof settledState?.handId === "string" ? settledState.handId : null,
+        fromStateVersion,
+        toStateVersion
+      }));
+    if (updates.some((entry) => !entry.userId || !Number.isInteger(entry.seatNo) || !Number.isInteger(entry.stack) || entry.stack < 0 || !entry.settledHandId)) {
+      return null;
+    }
+    return updates.sort((left, right) => left.seatNo - right.seatNo || left.userId.localeCompare(right.userId));
+  }
+
+  function humanStackReceiptMatches({ tableId, expectedVersion, stateVersion, humanStackUpdates, persistenceReceipt }) {
+    if (!persistenceReceipt || persistenceReceipt.ok !== true
+      || persistenceReceipt.tableId !== tableId
+      || persistenceReceipt.expectedVersion !== expectedVersion
+      || persistenceReceipt.newVersion !== stateVersion
+      || persistenceReceipt.humanStackProjectionCommitted !== true) return false;
+    const projected = Array.isArray(persistenceReceipt.projectedHumanStacks) ? persistenceReceipt.projectedHumanStacks : [];
+    return JSON.stringify(projected) === JSON.stringify(humanStackUpdates.map(({ userId, seatNo, stack }) => ({ userId, seatNo, stack })));
+  }
+
   function isEconomyFreeRollover({ tableId, economyMode }) {
     return typeof tableBootstrapLoader !== "function"
       || (economyMode === "none" && typeof tableId === "string" && tableId.startsWith("guest_table_"));
@@ -1072,9 +1100,21 @@ export function createTableManager({
       };
     }
 
+    const humanStackUpdates = normalizedHumanStackUpdates({
+      coreState: recycled.coreState,
+      settledState: recycled.settledState,
+      fromStateVersion: Number(table.coreState.version),
+      toStateVersion: nextVersion
+    });
+    if (!humanStackUpdates) {
+      return { ok: false, changed: false, reason: "human_stack_ambiguous", stateVersion: table.coreState.version };
+    }
+    const projectedPublicStacks = { ...(recycled.coreState.publicStacks || {}) };
+    for (const update of humanStackUpdates) projectedPublicStacks[update.userId] = update.stack;
     const nextCoreState = {
       ...recycled.coreState,
       version: nextVersion,
+      publicStacks: projectedPublicStacks,
       pokerState: stampTurnDeadline(nextHandState, resolveNowMs({ nowMs }))
     };
 
@@ -1086,7 +1126,8 @@ export function createTableManager({
       stateVersion: nextVersion,
       nextCoreState,
       handId: nextCoreState?.pokerState?.handId ?? null,
-      replacementFundings: normalizedReplacementFundingShape(recycled.replacementFundings)
+      replacementFundings: normalizedReplacementFundingShape(recycled.replacementFundings),
+      humanStackUpdates
     };
   }
 
@@ -1095,6 +1136,7 @@ export function createTableManager({
     expectedVersion,
     nextCoreState,
     replacementFundings = [],
+    humanStackUpdates = [],
     persistenceReceipt = null,
     economyMode = null,
     nowMs = Date.now()
@@ -1131,6 +1173,24 @@ export function createTableManager({
       persistenceReceipt
     })) {
       return { ok: false, changed: false, reason: "replacement_funding_unconfirmed", stateVersion: currentVersion };
+    }
+    const expectedHumanUpdates = normalizedHumanStackUpdates({
+      coreState: recalculated.coreState,
+      settledState: recalculated.settledState,
+      fromStateVersion: expectedVersion,
+      toStateVersion: nextVersion
+    });
+    if (!expectedHumanUpdates || JSON.stringify(expectedHumanUpdates) !== JSON.stringify(humanStackUpdates)) {
+      return { ok: false, changed: false, reason: "human_stack_projection_mismatch", stateVersion: currentVersion };
+    }
+    if (!economyFree && !humanStackReceiptMatches({
+      tableId,
+      expectedVersion,
+      stateVersion: nextVersion,
+      humanStackUpdates,
+      persistenceReceipt
+    })) {
+      return { ok: false, changed: false, reason: "human_stack_projection_unconfirmed", stateVersion: currentVersion };
     }
 
     table.coreState = nextCoreState;

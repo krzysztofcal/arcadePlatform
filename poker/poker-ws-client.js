@@ -398,6 +398,7 @@
       requestResync: requestResync,
       sendAct: function(payload, requestId){ return sendCommand('act', payload || {}, requestId); },
       sendJoin: function(payload, requestId){ return sendCommand('join', payload || { tableId: tableId }, requestId); },
+      sendRebuy: function(payload, requestId){ return sendCommand('rebuy', payload || { tableId: tableId, amount: 100 }, requestId); },
       sendLeave: function(payload, requestId){ return sendCommand('leave', payload || { tableId: tableId }, requestId); },
       sendLeaveQueued: function(payload, requestId){ return queueCommand('leave', payload || { tableId: tableId }, requestId); },
       sendStartHand: function(payload, requestId){ return sendCommand('start_hand', payload || { tableId: tableId }, requestId); }

@@ -264,7 +264,10 @@ function sendFrame(ws, frame) {
 async function writePersistedFile(fixture) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ws-persist-"));
   const filePath = path.join(dir, "persisted-state.json");
-  await fs.writeFile(filePath, `${JSON.stringify(fixture)}
+  const coherentFixture = fixture?.tables && typeof fixture.tables === "object" && !Array.isArray(fixture.tables)
+    ? { ...fixture, tables: coherentPersistedBootstrapFixtures(fixture.tables) }
+    : fixture;
+  await fs.writeFile(filePath, `${JSON.stringify(coherentFixture)}
 `, "utf8");
   return { dir, filePath };
 }
@@ -1598,12 +1601,15 @@ test("table_leave rejects when authoritative success state still contains actor 
     await auth(actor, actorToken, "auth-leave-still-present-actor");
     await auth(other, keepToken, "auth-leave-still-present-keep");
 
+    const actorJoinAck = nextCommandResultForRequest(actor, "join-leave-still-present-actor");
+    const actorJoinState = nextJoinTableState(actor, { requestId: "join-leave-still-present-actor", tableId });
     sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-still-present-actor", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
-    await nextCommandResultForRequest(actor, "join-leave-still-present-actor");
-    await nextJoinTableState(actor, { requestId: "join-leave-still-present-actor", tableId });
+    await Promise.all([actorJoinAck, actorJoinState]);
+
+    const otherJoinAckPromise = nextCommandResultForRequest(other, "join-leave-still-present-keep");
+    const otherJoinState = nextJoinTableState(other, { requestId: "join-leave-still-present-keep", tableId });
     sendFrame(other, { version: "1.0", type: "table_join", requestId: "join-leave-still-present-keep", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
-    const otherJoinAck = await nextCommandResultForRequest(other, "join-leave-still-present-keep");
-    await nextJoinTableState(other, { requestId: "join-leave-still-present-keep", tableId });
+    const [otherJoinAck] = await Promise.all([otherJoinAckPromise, otherJoinState]);
     assert.equal(otherJoinAck.payload.status, "accepted");
 
     const leaveResult = nextCommandResultForRequest(actor, "leave-still-present");
@@ -2291,9 +2297,61 @@ test("resume continuity for session A is not invalidated by high-traffic session
   }
 });
 
+function coherentPersistedBootstrapFixtures(fixtures) {
+  return Object.fromEntries(Object.entries(fixtures || {}).map(([tableId, fixture]) => {
+    const stateValue = fixture?.stateRow?.state;
+    let state = null;
+    let stringified = false;
+    if (stateValue && typeof stateValue === "object" && !Array.isArray(stateValue)) {
+      state = { ...stateValue };
+    } else if (typeof stateValue === "string") {
+      try {
+        const parsed = JSON.parse(stateValue);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          state = { ...parsed };
+          stringified = true;
+        }
+      } catch {
+        return [tableId, fixture];
+      }
+    }
+    if (!state) return [tableId, fixture];
+
+    const stacks = state.stacks && typeof state.stacks === "object" && !Array.isArray(state.stacks)
+      ? { ...state.stacks }
+      : {};
+    const fixtureSeatRows = Array.isArray(fixture?.seatRows) ? fixture.seatRows : [];
+    for (const seat of fixtureSeatRows) {
+      if (seat?.is_bot === true || String(seat?.status || "").toUpperCase() !== "ACTIVE") continue;
+      const userId = typeof seat?.user_id === "string" ? seat.user_id.trim() : "";
+      if (!userId || Object.prototype.hasOwnProperty.call(stacks, userId)) continue;
+      const seatStack = Number(seat?.stack);
+      const hasSeatStack = seat?.stack !== null && seat?.stack !== undefined && Number.isSafeInteger(seatStack) && seatStack >= 0;
+      stacks[userId] = hasSeatStack ? seatStack : 100;
+    }
+    const coherentSeatRows = fixtureSeatRows.map((seat) => {
+      if (seat?.is_bot === true || String(seat?.status || "").toUpperCase() !== "ACTIVE") return seat;
+      const userId = typeof seat?.user_id === "string" ? seat.user_id.trim() : "";
+      const seatStack = Number(seat?.stack);
+      const stateStack = Number(stacks[userId]);
+      const hasSeatStack = seat?.stack !== null && seat?.stack !== undefined && Number.isSafeInteger(seatStack) && seatStack >= 0;
+      return !hasSeatStack && userId && Number.isSafeInteger(stateStack) && stateStack >= 0 ? { ...seat, stack: stateStack } : seat;
+    });
+    const coherentState = { ...state, stacks };
+    return [tableId, {
+      ...fixture,
+      seatRows: coherentSeatRows,
+      stateRow: fixture?.stateRow
+        ? { ...fixture.stateRow, state: stringified ? JSON.stringify(coherentState) : coherentState }
+        : fixture?.stateRow
+    }];
+  }));
+}
+
 function persistedBootstrapFixturesEnv(fixtures) {
+  const coherentFixtures = coherentPersistedBootstrapFixtures(fixtures);
   return {
-    WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(fixtures)
+    WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(coherentFixtures)
   };
 }
 
