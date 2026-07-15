@@ -45,13 +45,12 @@ Set these as Netlify environment variables (Site settings -> Environment variabl
 - `POKER_BOTS_ENABLED` (`0`/`1`)
 - `POKER_BOTS_MAX_PER_TABLE` (default: `2`)
 - `POKER_BOT_PROFILE_DEFAULT` (default: `TRIVIAL`)
-- `POKER_BOT_BUYIN_BB` (example: `100`)
 - `POKER_BOT_BANKROLL_SYSTEM_KEY` (default now: `TREASURY`; optional later: `POKER_BOT_BANKROLL`)
 - Optional later: `POKER_BOTS_MAX_ACTIONS_PER_POLL`
 
 Operational notes:
 - Bot runtime is guarded by `POKER_BOTS_ENABLED`.
-- `POKER_BOT_BUYIN_BB` is measured in big blinds, not chips. For example, `100` at stakes with `bb = 2 CH` funds each initial bot with `200 CH`.
+- Initial humans, initial bots, manual rebuys, and replacement bots use the current fixed `100 CH` starting stack. The retired `POKER_BOT_BUYIN_BB` setting is ignored so table stakes or bot-only configuration cannot make the initial bot stack diverge from the human and replacement stack.
 - Values above are Netlify runtime config env vars (not secrets unless explicitly sensitive).
 - Bot/gameplay orchestration runs server-side in WS runtime (no client-side bot scripts).
 - Bot replacement funding continues to use the existing configured source (default `TREASURY`); it adds no account, migration, environment variable, balance move, or manual replenishment step.

@@ -6259,7 +6259,6 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
       WS_AUTHORITATIVE_JOIN_ENABLED: "1",
       POKER_BOTS_ENABLED: "1",
       POKER_BOTS_MAX_PER_TABLE: "2",
-      POKER_BOT_BUYIN_BB: "100",
       POKER_BOT_PROFILE_DEFAULT: "NORMAL"
     }
   });
@@ -6275,7 +6274,7 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
       type: "table_join",
       requestId: "join-bots-1",
       ts: "2026-02-28T06:00:00Z",
-      payload: { tableId, seatNo: 1, buyIn: 150 }
+      payload: { tableId, seatNo: 1, buyIn: 100 }
     });
     const firstAck = await nextCommandResultForRequest(ws, "join-bots-1");
     sendFrame(ws, {
@@ -6301,16 +6300,16 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
       { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "NORMAL" },
       { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "NORMAL" }
     ]);
-    assert.equal(typeof firstState.payload.stacks.bot_seed_human, "number");
-    assert.equal(typeof firstState.payload.stacks[botSeat2], "number");
-    assert.equal(typeof firstState.payload.stacks[botSeat3], "number");
+    assert.equal(firstState.payload.stacks.bot_seed_human, 100);
+    assert.equal(firstState.payload.stacks[botSeat2], 100);
+    assert.equal(firstState.payload.stacks[botSeat3], 100);
 
     sendFrame(ws, {
       version: "1.0",
       type: "table_join",
       requestId: "join-bots-1",
       ts: "2026-02-28T06:00:01Z",
-      payload: { tableId, seatNo: 1, buyIn: 150 }
+      payload: { tableId, seatNo: 1, buyIn: 100 }
     });
     const secondAck = await nextCommandResultForRequest(ws, "join-bots-1");
     sendFrame(ws, {

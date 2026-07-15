@@ -13,7 +13,7 @@ import {
   assert.equal(cfg.minPerTable, 2);
   assert.equal(cfg.maxPerTable, 5);
   assert.equal(cfg.defaultProfile, "RANDOM");
-  assert.equal(cfg.buyInBB, 100);
+  assert.equal(cfg.buyInChips, 100);
   assert.equal(cfg.bankrollSystemKey, "TREASURY");
   assert.equal(cfg.maxActionsPerPoll, 2);
 }
@@ -25,7 +25,7 @@ import {
   assert.equal(getBotConfig({ POKER_BOTS_ENABLED: "false" }).enabled, false);
   assert.equal(getBotConfig({ POKER_BOTS_MIN_PER_TABLE: "1" }).minPerTable, 1);
   assert.equal(getBotConfig({ POKER_BOTS_MAX_PER_TABLE: "99" }).maxPerTable, 9);
-  assert.equal(getBotConfig({ POKER_BOT_BUYIN_BB: "0" }).buyInBB, 1);
+  assert.equal(getBotConfig({ POKER_BOT_BUYIN_BB: "250" }).buyInChips, 100);
   assert.equal(getBotConfig({ POKER_BOT_PROFILE_DEFAULT: " tight " }).defaultProfile, "TIGHT");
 }
 
