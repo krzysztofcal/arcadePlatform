@@ -51,6 +51,7 @@ Set these as Netlify environment variables (Site settings -> Environment variabl
 
 Operational notes:
 - Bot runtime is guarded by `POKER_BOTS_ENABLED`.
+- `POKER_BOT_BUYIN_BB` is measured in big blinds, not chips. For example, `100` at stakes with `bb = 2 CH` funds each initial bot with `200 CH`.
 - Values above are Netlify runtime config env vars (not secrets unless explicitly sensitive).
 - Bot/gameplay orchestration runs server-side in WS runtime (no client-side bot scripts).
 - Bot replacement funding continues to use the existing configured source (default `TREASURY`); it adds no account, migration, environment variable, balance move, or manual replenishment step.

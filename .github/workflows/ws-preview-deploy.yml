@@ -121,11 +121,21 @@ jobs:
           fi
 
           if [ -d netlify/functions/_shared ]; then
+            mkdir -p "$PREVIEW_STAGE_DIR"/netlify/functions/_shared
+            cp netlify/functions/_shared/chips-ledger.mjs "$PREVIEW_STAGE_DIR"/netlify/functions/_shared/
+            cp netlify/functions/_shared/poker-*.mjs "$PREVIEW_STAGE_DIR"/netlify/functions/_shared/
+            cp netlify/functions/_shared/supabase-admin.mjs "$PREVIEW_STAGE_DIR"/netlify/functions/_shared/
             mkdir -p "$PREVIEW_STAGE_WS_DIR"/netlify/functions/_shared
             cp netlify/functions/_shared/chips-ledger.mjs "$PREVIEW_STAGE_WS_DIR"/netlify/functions/_shared/
             cp netlify/functions/_shared/poker-*.mjs "$PREVIEW_STAGE_WS_DIR"/netlify/functions/_shared/
             cp netlify/functions/_shared/supabase-admin.mjs "$PREVIEW_STAGE_WS_DIR"/netlify/functions/_shared/
           fi
+
+          test -f "$PREVIEW_STAGE_DIR/netlify/functions/_shared/chips-ledger.mjs"
+          (
+            cd "$PREVIEW_STAGE_DIR"
+            node --input-type=module -e "await import('./ws-server/shared/poker-domain/inactive-cleanup-deps.mjs')"
+          )
 
           tar \
             --sort=name \
@@ -239,11 +249,14 @@ jobs:
             sudo -n test -f "$TMP_EXTRACT_DIR/ws-server/server.mjs"
             sudo -n test -f "$TMP_EXTRACT_DIR/shared/poker-domain/join.mjs"
             sudo -n test -f "$TMP_EXTRACT_DIR/ws-server/shared/poker-domain/inactive-cleanup-deps.mjs"
+            sudo -n test -f "$TMP_EXTRACT_DIR/netlify/functions/_shared/chips-ledger.mjs"
             sudo -n test -d "$TMP_EXTRACT_DIR/node_modules/postgres"
 
             sudo -n rsync -a --delete "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/
             sudo -n mkdir -p "$PREVIEW_BASE_DIR/shared"
             sudo -n rsync -a --delete "$TMP_EXTRACT_DIR/shared/" "$PREVIEW_BASE_DIR/shared"/
+            sudo -n mkdir -p "$PREVIEW_BASE_DIR/netlify/functions/_shared"
+            sudo -n rsync -a --delete "$TMP_EXTRACT_DIR/netlify/functions/_shared/" "$PREVIEW_BASE_DIR/netlify/functions/_shared"/
             sudo -n mkdir -p "$PREVIEW_BASE_DIR/node_modules"
             sudo -n rsync -a --delete "$TMP_EXTRACT_DIR/node_modules/" "$PREVIEW_BASE_DIR/node_modules"/
 
