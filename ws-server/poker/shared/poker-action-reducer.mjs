@@ -201,8 +201,12 @@ function resolveNextTurnUserId(state, currentUserId) {
   }
 
   const activeUserIds = seats.map((seat) => seat.userId).filter((userId) => isSelectableActor(state, userId));
-  if (activeUserIds.length <= 1) {
+  if (activeUserIds.length === 0) {
     return null;
+  }
+  if (activeUserIds.length === 1) {
+    const onlyUserId = activeUserIds[0];
+    return Number(state.toCallByUserId?.[onlyUserId] ?? 0) > 0 ? onlyUserId : null;
   }
 
   const currentIndex = seats.findIndex((seat) => seat.userId === currentUserId);
@@ -232,8 +236,11 @@ function recomputeToCall(state) {
 function isBettingClosed(state) {
   const seats = orderedSeats(state);
   const active = seats.filter((seat) => isSelectableActor(state, seat.userId));
-  if (active.length <= 1) {
+  if (active.length === 0) {
     return true;
+  }
+  if (active.length === 1) {
+    return Number(state.toCallByUserId?.[active[0].userId] ?? 0) === 0;
   }
 
   const allMatched = active.every((seat) => Number(state.toCallByUserId?.[seat.userId] ?? 0) === 0);
@@ -349,6 +356,20 @@ function advanceStreetIfClosed(state) {
   return true;
 }
 
+function advanceClosedStreets(state, nowIso) {
+  let advanced = false;
+  while (isBettingClosed(state)) {
+    if (state.phase === "RIVER") {
+      return { advanced: true, settled: true, state: settleHandState(state, nowIso) };
+    }
+    if (!advanceStreetIfClosed(state)) {
+      break;
+    }
+    advanced = true;
+  }
+  return { advanced, settled: false, state };
+}
+
 export function applyAction({ pokerState, userId, action, amount, nowIso = "1970-01-01T00:00:00.000Z" }) {
   if (!pokerState || typeof pokerState !== "object" || Array.isArray(pokerState)) {
     return { ok: false, reason: "invalid_state" };
@@ -454,8 +475,15 @@ export function applyAction({ pokerState, userId, action, amount, nowIso = "1970
     };
   }
 
-  const closedRound = advanceStreetIfClosed(nextState);
-  if (!closedRound) {
+  const progression = advanceClosedStreets(nextState, nowIso);
+  if (progression.settled) {
+    return {
+      ok: true,
+      action: normalizedAction,
+      state: progression.state
+    };
+  }
+  if (!progression.advanced) {
     nextState.turnUserId = resolveNextTurnUserId(nextState, userId);
   }
 

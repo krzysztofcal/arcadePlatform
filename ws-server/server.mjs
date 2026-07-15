@@ -2006,7 +2006,7 @@ async function listStaleActiveHumanSeatCandidates({ limit = 25 } = {}) {
   const cutoffIso = new Date(Date.now() - activeSeatFreshMs).toISOString();
   try {
     const beginSqlWs = await loadBeginSqlWs();
-    return beginSqlWs(async (tx) => {
+    return await beginSqlWs(async (tx) => {
       const rows = await tx.unsafe(
         `select s.table_id, s.user_id
          from public.poker_seats s

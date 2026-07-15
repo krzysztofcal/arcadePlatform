@@ -270,7 +270,7 @@ function resolveRevealedShowdownParticipants({ statePublic, state }) {
   const comparedUserIds = [];
   const comparedUserIdSet = new Set();
   potsAwarded.forEach((pot) => {
-    if (!pot || typeof pot !== "object" || !Array.isArray(pot.eligibleUserIds)) return;
+    if (!pot || typeof pot !== "object" || !Array.isArray(pot.eligibleUserIds) || pot.eligibleUserIds.length < 2) return;
     pot.eligibleUserIds.forEach((userId) => {
       if (typeof userId !== "string" || !userId || comparedUserIdSet.has(userId)) return;
       comparedUserIdSet.add(userId);

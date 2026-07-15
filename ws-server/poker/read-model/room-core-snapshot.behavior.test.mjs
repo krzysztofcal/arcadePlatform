@@ -364,6 +364,54 @@ test("projectRoomCoreSnapshot projects settled showdown fields without leaking p
   assert.deepEqual(seated.private, { userId: "seated_user", seat: 1, holeCards: ["AH", "AD"] });
 });
 
+test("projectRoomCoreSnapshot does not reveal a folded player's cards for an uncalled return", () => {
+  const snapshot = projectRoomCoreSnapshot({
+    tableId: "table_settled_return",
+    roomId: "table_settled_return",
+    coreState: {
+      seats: { folded_user: 1, player_a: 2, player_b: 3 },
+      pokerState: {
+        roomId: "table_settled_return",
+        handId: "hand_settled_return",
+        phase: "SETTLED",
+        showdown: {
+          handId: "hand_settled_return",
+          winners: ["player_a"],
+          potsAwarded: [
+            { amount: 30, winners: ["player_a"], eligibleUserIds: ["player_a", "player_b"] },
+            { amount: 90, winners: ["folded_user"], eligibleUserIds: ["folded_user"] }
+          ],
+          potAwardedTotal: 120,
+          reason: "computed"
+        },
+        handSettlement: {
+          handId: "hand_settled_return",
+          settledAt: "2026-03-01T00:00:00.000Z",
+          payouts: { folded_user: 90, player_a: 30 }
+        },
+        foldedByUserId: { folded_user: true, player_a: false, player_b: false },
+        holeCardsByUserId: {
+          folded_user: ["AS", "KH"],
+          player_a: ["AH", "AD"],
+          player_b: ["2C", "2D"]
+        }
+      }
+    },
+    members: [
+      { userId: "folded_user", seat: 1 },
+      { userId: "player_a", seat: 2 },
+      { userId: "player_b", seat: 3 }
+    ],
+    userId: "observer",
+    youSeat: null
+  });
+
+  assert.deepEqual(snapshot.showdown.revealedShowdownParticipants, [
+    { userId: "player_a", holeCards: ["AH", "AD"] },
+    { userId: "player_b", holeCards: ["2C", "2D"] }
+  ]);
+});
+
 test("projectRoomCoreSnapshot does not reveal showdown participant cards when hand ends by folds", () => {
   const snapshot = projectRoomCoreSnapshot({
     tableId: "table_settled_folded",

@@ -5,41 +5,87 @@ const normalizeContribution = (value) => {
   return Math.floor(num);
 };
 
-const normalizeContributions = ({ contributionsByUserId, eligibleUserIds }) => {
-  if (!Array.isArray(eligibleUserIds) || eligibleUserIds.length === 0) return [];
+const normalizeContributions = ({ contributionsByUserId, participantUserIds, eligibleUserIds }) => {
+  const userIds = Array.isArray(participantUserIds) ? participantUserIds : eligibleUserIds;
+  if (!Array.isArray(userIds) || userIds.length === 0) return [];
   const source = contributionsByUserId && typeof contributionsByUserId === "object"
     ? contributionsByUserId
     : {};
-  return eligibleUserIds.map((userId) => ({
+  return userIds.map((userId) => ({
     userId,
     contribution: normalizeContribution(source[userId]),
   }));
 };
 
-const buildSidePots = ({ contributionsByUserId, eligibleUserIds }) => {
+const resolveUncalledReturn = (normalized) => {
+  if (!Array.isArray(normalized) || normalized.length < 2) return null;
+  const ranked = normalized.slice().sort((a, b) => b.contribution - a.contribution);
+  const highest = ranked[0];
+  const secondHighestContribution = ranked[1].contribution;
+  if (highest.contribution <= secondHighestContribution) return null;
+  return {
+    userId: highest.userId,
+    amount: highest.contribution - secondHighestContribution,
+    minContribution: secondHighestContribution,
+    maxContribution: highest.contribution,
+  };
+};
+
+const buildSidePots = ({ contributionsByUserId, participantUserIds, eligibleUserIds }) => {
   if (!Array.isArray(eligibleUserIds) || eligibleUserIds.length === 0) return [];
-  const normalized = normalizeContributions({ contributionsByUserId, eligibleUserIds });
-  const levels = [...new Set(normalized.map(({ contribution }) => contribution).filter((value) => value > 0))]
+  const normalized = normalizeContributions({ contributionsByUserId, participantUserIds, eligibleUserIds });
+  const eligibleUserIdSet = new Set(eligibleUserIds);
+  const uncalledReturn = resolveUncalledReturn(normalized);
+  const contestable = normalized.map(({ userId, contribution }) => ({
+    userId,
+    contribution: uncalledReturn?.userId === userId
+      ? uncalledReturn.minContribution
+      : contribution,
+  }));
+  const levels = [...new Set(contestable.map(({ contribution }) => contribution).filter((value) => value > 0))]
     .sort((a, b) => a - b);
-  if (levels.length === 0) return [];
   const pots = [];
   let prev = 0;
   levels.forEach((level) => {
-    const participants = normalized
+    const participants = contestable
       .filter(({ contribution }) => contribution >= level)
       .map(({ userId }) => userId);
     const delta = level - prev;
     const amount = delta * participants.length;
     if (amount > 0) {
-      pots.push({
-        amount,
-        eligibleUserIds: participants,
-        minContribution: prev,
-        maxContribution: level,
-      });
+      const eligibleForBand = participants.filter((userId) => eligibleUserIdSet.has(userId));
+      if (eligibleForBand.length > 0) {
+        pots.push({
+          amount,
+          eligibleUserIds: eligibleForBand,
+          minContribution: prev,
+          maxContribution: level,
+        });
+      } else if (pots.length > 0) {
+        // Matched folded/left contributions remain dead money in the nearest lower contestable pot.
+        const target = pots[pots.length - 1];
+        target.amount += amount;
+        target.maxContribution = level;
+      } else {
+        pots.push({
+          amount,
+          eligibleUserIds: eligibleUserIds.slice(),
+          minContribution: prev,
+          maxContribution: level,
+        });
+      }
     }
     prev = level;
   });
+  if (uncalledReturn) {
+    pots.push({
+      amount: uncalledReturn.amount,
+      eligibleUserIds: [uncalledReturn.userId],
+      minContribution: uncalledReturn.minContribution,
+      maxContribution: uncalledReturn.maxContribution,
+      returnUserId: uncalledReturn.userId,
+    });
+  }
   return pots;
 };
 

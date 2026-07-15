@@ -69,6 +69,32 @@ test("bootstrap maps dealer/SB/BB/UTG deterministically for 2-player and 3-playe
   assert.equal(threePlayer.coreState.pokerState.betThisRoundByUserId.user_c, 2);
 });
 
+test("bootstrap preserves authoritative funded stacks from the public projection", () => {
+  const fundedCore = {
+    ...coreStateBase(),
+    publicStacks: { user_a: 100, user_b: 200, user_c: 200 },
+    seatDetailsByUserId: {
+      user_a: { isBot: false },
+      user_b: { isBot: true },
+      user_c: { isBot: true }
+    }
+  };
+
+  const result = bootstrapCoreStateHand({ tableId: "table_engine", coreState: fundedCore, nowMs: 1_000 });
+
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.coreState.pokerState.stacks, {
+    user_a: 100,
+    user_b: 199,
+    user_c: 198
+  });
+  assert.equal(
+    Object.values(result.coreState.pokerState.stacks).reduce((total, stack) => total + stack, 0)
+      + result.coreState.pokerState.potTotal,
+    500
+  );
+});
+
 test("bootstrap no-op paths preserve stable result shape", () => {
   const insufficientPlayers = {
     roomId: "table_engine_short",

@@ -2322,7 +2322,7 @@ function coherentPersistedBootstrapFixtures(fixtures) {
       : {};
     const fixtureSeatRows = Array.isArray(fixture?.seatRows) ? fixture.seatRows : [];
     for (const seat of fixtureSeatRows) {
-      if (seat?.is_bot === true || String(seat?.status || "").toUpperCase() !== "ACTIVE") continue;
+      if (String(seat?.status || "").toUpperCase() !== "ACTIVE") continue;
       const userId = typeof seat?.user_id === "string" ? seat.user_id.trim() : "";
       if (!userId || Object.prototype.hasOwnProperty.call(stacks, userId)) continue;
       const seatStack = Number(seat?.stack);
@@ -2330,7 +2330,7 @@ function coherentPersistedBootstrapFixtures(fixtures) {
       stacks[userId] = hasSeatStack ? seatStack : 100;
     }
     const coherentSeatRows = fixtureSeatRows.map((seat) => {
-      if (seat?.is_bot === true || String(seat?.status || "").toUpperCase() !== "ACTIVE") return seat;
+      if (String(seat?.status || "").toUpperCase() !== "ACTIVE") return seat;
       const userId = typeof seat?.user_id === "string" ? seat.user_id.trim() : "";
       const seatStack = Number(seat?.stack);
       const stateStack = Number(stacks[userId]);

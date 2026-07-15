@@ -415,6 +415,51 @@ test("applyAction showdown side-pot payout remains deterministic", () => {
   assert.deepEqual(settled.state.handSettlement.payouts, { u1: 50, u2: 150 });
 });
 
+test("all-in keeps the sole funded opponent on preflop until it calls or folds", () => {
+  const allInPending = stateFixture({
+    seats: [
+      { userId: "human", seatNo: 1 },
+      { userId: "bot_fold", seatNo: 2 },
+      { userId: "bot_call", seatNo: 3 }
+    ],
+    handSeats: [
+      { userId: "human", seatNo: 1 },
+      { userId: "bot_fold", seatNo: 2 },
+      { userId: "bot_call", seatNo: 3 }
+    ],
+    turnUserId: "bot_fold",
+    currentBet: 488,
+    lastRaiseSize: 486,
+    potTotal: 491,
+    stacks: { human: 0, bot_fold: 13, bot_call: 96 },
+    toCallByUserId: { human: 0, bot_fold: 487, bot_call: 486 },
+    betThisRoundByUserId: { human: 488, bot_fold: 1, bot_call: 2 },
+    actedThisRoundByUserId: { human: true, bot_fold: false, bot_call: false },
+    foldedByUserId: { human: false, bot_fold: false, bot_call: false },
+    contributionsByUserId: { human: 488, bot_fold: 1, bot_call: 2 },
+    holeCardsByUserId: {
+      human: ["AS", "AD"],
+      bot_fold: ["KS", "KD"],
+      bot_call: ["QS", "QD"]
+    }
+  });
+
+  const folded = applyAction({ pokerState: allInPending, userId: "bot_fold", action: "FOLD", amount: 0 });
+
+  assert.equal(folded.ok, true);
+  assert.equal(folded.state.phase, "PREFLOP");
+  assert.equal(folded.state.turnUserId, "bot_call");
+  assert.equal(folded.state.toCallByUserId.bot_call, 486);
+
+  const called = applyAction({ pokerState: folded.state, userId: "bot_call", action: "CALL", amount: 0 });
+
+  assert.equal(called.ok, true);
+  assert.equal(called.state.phase, "SETTLED");
+  assert.equal(called.state.contributionsByUserId.bot_call, 98);
+  assert.equal(called.state.showdown.potAwardedTotal, 587);
+  assert.equal(Object.values(called.state.handSettlement.payouts).reduce((total, amount) => total + amount, 0), 587);
+});
+
 test("applyAction terminal-closing replay remains deterministic", () => {
   const riverPending = stateFixture({
     phase: "RIVER",
