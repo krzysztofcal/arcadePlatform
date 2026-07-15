@@ -179,8 +179,12 @@ test("engine accepts short-stack CALL as all-in contribution", () => {
 
   assert.equal(shortCall.accepted, true);
   assert.equal(shortCall.reason, null);
-  assert.equal(shortCall.coreState.pokerState.stacks.user_b, 0);
+  assert.equal(shortCall.coreState.pokerState.phase, "SETTLED");
   assert.equal(shortCall.coreState.pokerState.contributionsByUserId.user_b, 5);
+  assert.equal(
+    Object.values(shortCall.coreState.pokerState.handSettlement.payouts).reduce((total, amount) => total + amount, 0),
+    11
+  );
 });
 
 test("engine accepts out-of-turn fold when a seated player wants to leave the hand immediately", () => {

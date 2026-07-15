@@ -69,7 +69,11 @@ const awardPotsAtShowdown = ({ state, seatUserIdsInOrder, computeShowdown, nowIs
 
   let pots = normalizeSidePots(state.sidePots);
   if (!pots && isPlainObject(state.contributionsByUserId)) {
-    pots = buildSidePots({ contributionsByUserId: state.contributionsByUserId, eligibleUserIds: showdownUserIds })
+    pots = buildSidePots({
+      contributionsByUserId: state.contributionsByUserId,
+      participantUserIds: seatUserIdsInOrder,
+      eligibleUserIds: showdownUserIds
+    })
       .map((pot) => ({ amount: normalizePotAmount(pot.amount), eligibleUserIds: pot.eligibleUserIds.slice() }));
     if (pots.length === 0) {
       pots = null;

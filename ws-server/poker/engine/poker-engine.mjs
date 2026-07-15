@@ -383,7 +383,11 @@ export function bootstrapCoreStateHand({ tableId, coreState, nowMs = Date.now() 
     };
   }
 
-  const bootstrappedState = buildBootstrappedPokerState({ tableId, coreState });
+  const bootstrappedState = buildBootstrappedPokerState({
+    tableId,
+    coreState,
+    startingStacks: coreState?.publicStacks
+  });
   if (!bootstrappedState) {
     return { ok: true, changed: false, bootstrap: "not_eligible", stateVersion: coreState.version, coreState };
   }

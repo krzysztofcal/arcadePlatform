@@ -5,20 +5,22 @@ const normalizeContribution = (value) => {
   return Math.floor(num);
 };
 
-const normalizeContributions = ({ contributionsByUserId, eligibleUserIds }) => {
-  if (!Array.isArray(eligibleUserIds) || eligibleUserIds.length === 0) return [];
+const normalizeContributions = ({ contributionsByUserId, participantUserIds, eligibleUserIds }) => {
+  const userIds = Array.isArray(participantUserIds) ? participantUserIds : eligibleUserIds;
+  if (!Array.isArray(userIds) || userIds.length === 0) return [];
   const source = contributionsByUserId && typeof contributionsByUserId === "object"
     ? contributionsByUserId
     : {};
-  return eligibleUserIds.map((userId) => ({
+  return userIds.map((userId) => ({
     userId,
     contribution: normalizeContribution(source[userId]),
   }));
 };
 
-const buildSidePots = ({ contributionsByUserId, eligibleUserIds }) => {
+const buildSidePots = ({ contributionsByUserId, participantUserIds, eligibleUserIds }) => {
   if (!Array.isArray(eligibleUserIds) || eligibleUserIds.length === 0) return [];
-  const normalized = normalizeContributions({ contributionsByUserId, eligibleUserIds });
+  const normalized = normalizeContributions({ contributionsByUserId, participantUserIds, eligibleUserIds });
+  const eligibleUserIdSet = new Set(eligibleUserIds);
   const levels = [...new Set(normalized.map(({ contribution }) => contribution).filter((value) => value > 0))]
     .sort((a, b) => a - b);
   if (levels.length === 0) return [];
@@ -33,7 +35,7 @@ const buildSidePots = ({ contributionsByUserId, eligibleUserIds }) => {
     if (amount > 0) {
       pots.push({
         amount,
-        eligibleUserIds: participants,
+        eligibleUserIds: participants.filter((userId) => eligibleUserIdSet.has(userId)),
         minContribution: prev,
         maxContribution: level,
       });

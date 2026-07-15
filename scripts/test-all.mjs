@@ -79,6 +79,7 @@ run("node", ["tests/poker-table-list.left-player-filter.behavior.test.mjs"], "po
 run("node", ["shared/poker-domain/inactive-cleanup.behavior.test.mjs"], "poker-domain-inactive-cleanup-behavior");
 run("node", ["tests/poker-inactive-cleanup.behavior.test.mjs"], "poker-inactive-cleanup-behavior");
 run("node", ["tests/poker-materialize-settlement.payouts.test.mjs"], "poker-materialize-settlement-payouts");
+run("node", ["tests/poker-dead-money-settlement.behavior.test.mjs"], "poker-dead-money-settlement-behavior");
 
 run("node", ["tests/poker-ui.behavior.test.mjs"], "poker-ui-behavior");
 run("node", ["tests/poker-settlement-presentation.unit.test.mjs"], "poker-settlement-presentation-unit");
