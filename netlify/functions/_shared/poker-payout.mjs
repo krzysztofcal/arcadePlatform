@@ -106,7 +106,9 @@ const awardPotsAtShowdown = ({ state, seatUserIdsInOrder, computeShowdown, nowIs
     }
     const eligibleSet = new Set(Array.isArray(pot.eligibleUserIds) ? pot.eligibleUserIds : []);
     const eligible = seatUserIdsInOrder.filter((userId) => showdownUserIdSet.has(userId) && eligibleSet.has(userId));
-    if (eligible.length === 0) continue;
+    if (eligible.length === 0) {
+      throw new Error("showdown_pot_without_eligible_player");
+    }
 
     const players = eligible.map((userId) => ({ userId, holeCards: ensureHoleCardsPresent({ holeCardsByUserId, userId }) }));
     const result = computeShowdown({ community, players });

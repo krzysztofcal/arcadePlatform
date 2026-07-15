@@ -55,6 +55,7 @@ const runTypicalSidePotsTest = () => {
       eligibleUserIds: ["A"],
       minContribution: 50,
       maxContribution: 100,
+      returnUserId: "A",
     },
   ]);
 };
@@ -76,6 +77,7 @@ const runIgnoreNonEligibleTest = () => {
       eligibleUserIds: ["A"],
       minContribution: 10,
       maxContribution: 40,
+      returnUserId: "A",
     },
   ]);
 };
@@ -103,6 +105,7 @@ const runStableOrderingTest = () => {
       eligibleUserIds: ["A"],
       minContribution: 50,
       maxContribution: 100,
+      returnUserId: "A",
     },
   ]);
 };
@@ -124,6 +127,44 @@ const runInvalidContributionsTest = () => {
       eligibleUserIds: ["A"],
       minContribution: 4,
       maxContribution: 10,
+      returnUserId: "A",
+    },
+  ]);
+};
+
+const runMatchedFoldedContributionsTest = () => {
+  const pots = buildSidePots({
+    contributionsByUserId: { folded_a: 100, folded_b: 100, active_c: 10 },
+    participantUserIds: ["folded_a", "folded_b", "active_c"],
+    eligibleUserIds: ["active_c"],
+  });
+  assert.deepEqual(pots, [{
+    amount: 210,
+    eligibleUserIds: ["active_c"],
+    minContribution: 0,
+    maxContribution: 100,
+  }]);
+};
+
+const runUniqueUncalledExcessTest = () => {
+  const pots = buildSidePots({
+    contributionsByUserId: { folded_a: 100, folded_b: 80, active_c: 10 },
+    participantUserIds: ["folded_a", "folded_b", "active_c"],
+    eligibleUserIds: ["active_c"],
+  });
+  assert.deepEqual(pots, [
+    {
+      amount: 170,
+      eligibleUserIds: ["active_c"],
+      minContribution: 0,
+      maxContribution: 80,
+    },
+    {
+      amount: 20,
+      eligibleUserIds: ["folded_a"],
+      minContribution: 80,
+      maxContribution: 100,
+      returnUserId: "folded_a",
     },
   ]);
 };
@@ -135,3 +176,5 @@ runTypicalSidePotsTest();
 runIgnoreNonEligibleTest();
 runStableOrderingTest();
 runInvalidContributionsTest();
+runMatchedFoldedContributionsTest();
+runUniqueUncalledExcessTest();
