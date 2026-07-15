@@ -21,13 +21,19 @@ const buildSidePots = ({ contributionsByUserId, participantUserIds, eligibleUser
   if (!Array.isArray(eligibleUserIds) || eligibleUserIds.length === 0) return [];
   const normalized = normalizeContributions({ contributionsByUserId, participantUserIds, eligibleUserIds });
   const eligibleUserIdSet = new Set(eligibleUserIds);
-  const levels = [...new Set(normalized.map(({ contribution }) => contribution).filter((value) => value > 0))]
+  const maxEligibleContribution = normalized.reduce((max, { userId, contribution }) => (
+    eligibleUserIdSet.has(userId) ? Math.max(max, contribution) : max
+  ), 0);
+  const contestable = normalized.map(({ userId, contribution }) => ({
+    userId,
+    contribution: Math.min(contribution, maxEligibleContribution),
+  }));
+  const levels = [...new Set(contestable.map(({ contribution }) => contribution).filter((value) => value > 0))]
     .sort((a, b) => a - b);
-  if (levels.length === 0) return [];
   const pots = [];
   let prev = 0;
   levels.forEach((level) => {
-    const participants = normalized
+    const participants = contestable
       .filter(({ contribution }) => contribution >= level)
       .map(({ userId }) => userId);
     const delta = level - prev;
@@ -41,6 +47,17 @@ const buildSidePots = ({ contributionsByUserId, participantUserIds, eligibleUser
       });
     }
     prev = level;
+  });
+  normalized.forEach(({ userId, contribution }) => {
+    const amount = contribution - maxEligibleContribution;
+    if (amount <= 0) return;
+    pots.push({
+      amount,
+      eligibleUserIds: [userId],
+      minContribution: maxEligibleContribution,
+      maxContribution: contribution,
+      returnUserId: userId,
+    });
   });
   return pots;
 };

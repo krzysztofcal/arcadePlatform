@@ -18,6 +18,7 @@ const normalizeSidePots = (sidePots) => {
     return {
       amount: normalizePotAmount(pot.amount),
       eligibleUserIds: pot.eligibleUserIds.slice(),
+      ...(typeof pot.returnUserId === "string" && pot.returnUserId ? { returnUserId: pot.returnUserId } : {}),
     };
   });
 };
@@ -74,7 +75,11 @@ const awardPotsAtShowdown = ({ state, seatUserIdsInOrder, computeShowdown, nowIs
       participantUserIds: seatUserIdsInOrder,
       eligibleUserIds: showdownUserIds
     })
-      .map((pot) => ({ amount: normalizePotAmount(pot.amount), eligibleUserIds: pot.eligibleUserIds.slice() }));
+      .map((pot) => ({
+        amount: normalizePotAmount(pot.amount),
+        eligibleUserIds: pot.eligibleUserIds.slice(),
+        ...(pot.returnUserId ? { returnUserId: pot.returnUserId } : {}),
+      }));
     if (pots.length === 0) {
       pots = null;
     }
@@ -87,10 +92,25 @@ const awardPotsAtShowdown = ({ state, seatUserIdsInOrder, computeShowdown, nowIs
   const potsAwarded = [];
   const handsByUserId = {};
   const winnersUnion = new Set();
+  const seatUserIdSet = new Set(seatUserIdsInOrder);
   let potAwardedTotal = 0;
 
   for (const pot of pots) {
     const amount = normalizePotAmount(pot.amount);
+    const returnUserId = typeof pot.returnUserId === "string" ? pot.returnUserId : "";
+    if (returnUserId) {
+      if (!seatUserIdSet.has(returnUserId) || pot.eligibleUserIds.length !== 1 || pot.eligibleUserIds[0] !== returnUserId) {
+        throw new Error("showdown_invalid_return");
+      }
+      const baseStack = Number(nextStacks[returnUserId] ?? 0);
+      if (!Number.isFinite(baseStack)) {
+        throw new Error("showdown_invalid_stack");
+      }
+      nextStacks[returnUserId] = baseStack + amount;
+      potAwardedTotal += amount;
+      potsAwarded.push({ amount, winners: [returnUserId], eligibleUserIds: [returnUserId] });
+      continue;
+    }
     const eligibleSet = new Set(Array.isArray(pot.eligibleUserIds) ? pot.eligibleUserIds : []);
     const eligible = seatUserIdsInOrder.filter((userId) => showdownUserIdSet.has(userId) && eligibleSet.has(userId));
     if (eligible.length === 0) continue;

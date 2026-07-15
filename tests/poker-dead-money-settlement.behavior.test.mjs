@@ -44,4 +44,38 @@ for (const [label, awardPotsAtShowdown] of implementations) {
     assert.equal(nextState.stacks.player_c, 21);
     assert.equal(nextState.showdown.potsAwarded.some((pot) => pot.eligibleUserIds.includes("folded")), false);
   });
+
+  test(`${label} settlement returns a folded player's uncalled excess`, () => {
+    const state = {
+      phase: "RIVER",
+      community: ["2H", "3D", "4S", "9C", "KD"],
+      holeCardsByUserId: {
+        folded: ["AS", "AD"],
+        player_a: ["KS", "KH"],
+        player_b: ["QS", "QH"]
+      },
+      foldedByUserId: { folded: true, player_a: false, player_b: false },
+      leftTableByUserId: { folded: true },
+      stacks: { folded: 0, player_a: 90, player_b: 90 },
+      contributionsByUserId: { folded: 100, player_a: 10, player_b: 10 },
+      pot: 120
+    };
+    const computeShowdown = () => ({ winners: ["player_a"] });
+
+    const { nextState } = awardPotsAtShowdown({
+      state,
+      seatUserIdsInOrder: ["folded", "player_a", "player_b"],
+      computeShowdown,
+      nowIso: "2026-07-15T00:00:00.000Z"
+    });
+
+    assert.equal(nextState.showdown.potAwardedTotal, 120);
+    assert.deepEqual(nextState.showdown.winners, ["player_a"]);
+    assert.deepEqual(nextState.showdown.potsAwarded, [
+      { amount: 30, winners: ["player_a"], eligibleUserIds: ["player_a", "player_b"] },
+      { amount: 90, winners: ["folded"], eligibleUserIds: ["folded"] }
+    ]);
+    assert.deepEqual(nextState.stacks, { folded: 90, player_a: 120, player_b: 90 });
+    assert.equal(Object.values(nextState.stacks).reduce((total, stack) => total + stack, 0), 300);
+  });
 }
