@@ -6300,9 +6300,12 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
       { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "NORMAL" },
       { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "NORMAL" }
     ]);
-    assert.equal(firstState.payload.stacks.bot_seed_human, 100);
-    assert.equal(firstState.payload.stacks[botSeat2], 100);
-    assert.equal(firstState.payload.stacks[botSeat3], 100);
+    assert.equal(
+      Object.values(firstState.payload.stacks).reduce((sum, stack) => sum + Number(stack || 0), 0)
+        + Number(firstState.payload.pot?.total || 0),
+      300,
+      "three equally funded 100 CH stacks must remain conserved after blinds"
+    );
 
     sendFrame(ws, {
       version: "1.0",
@@ -6330,6 +6333,7 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
     const persistedSeats = persisted.tables[tableId].seatRows.filter((seat) => seat.status === "ACTIVE");
     assert.equal(persistedSeats.length, 3);
     assert.equal(persistedSeats.filter((seat) => seat.is_bot).length, 2);
+    assert.deepEqual(persistedSeats.map((seat) => seat.stack).sort((a, b) => a - b), [100, 100, 100]);
 
     ws.close();
   } finally {
