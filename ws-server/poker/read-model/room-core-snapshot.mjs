@@ -235,7 +235,7 @@ function resolvePrivateBranch({ state, statePublic, userId, youSeat, stack, isBo
   const handSeats = Array.isArray(statePublic?.handSeats) ? statePublic.handSeats : Array.isArray(statePublic?.seats) ? statePublic.seats : [];
   const inCurrentHand = handSeats.some((seat) => seat?.userId === userId);
   const waiting = statePublic?.waitingForNextHandByUserId?.[userId] === true;
-  const status = waiting ? "WAITING_NEXT_HAND" : stack === 0 ? "OUT_OF_CHIPS" : "ACTIVE";
+  const status = waiting ? "WAITING_NEXT_HAND" : stack === 0 && !inCurrentHand ? "OUT_OF_CHIPS" : "ACTIVE";
   const branch = {
     userId,
     seat: youSeat,
@@ -304,11 +304,13 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
   const statePublic = state ? withoutPrivateState(state) : null;
   let publicSeats = resolvePublicSeats({ statePublic, members, coreState, publicProfilesByUserId, publicProfileStorageBaseUrl });
   const publicStacks = resolvePublicStacks({ statePublic, coreState, seats: publicSeats });
+  const handSeats = Array.isArray(statePublic?.handSeats) ? statePublic.handSeats : Array.isArray(statePublic?.seats) ? statePublic.seats : [];
+  const currentHandUserIds = new Set(handSeats.map((seat) => seat?.userId).filter((seatUserId) => typeof seatUserId === "string" && seatUserId));
   publicSeats = publicSeats.map((seat) => {
     if (seat.isBot === true) return seat;
     const stack = Number(publicStacks[seat.userId]);
     if (statePublic?.waitingForNextHandByUserId?.[seat.userId] === true) return { ...seat, status: "WAITING_NEXT_HAND" };
-    if (Number.isInteger(stack) && stack === 0) return { ...seat, status: "OUT_OF_CHIPS" };
+    if (Number.isInteger(stack) && stack === 0 && !currentHandUserIds.has(seat.userId)) return { ...seat, status: "OUT_OF_CHIPS" };
     return seat;
   });
   const effectiveYouSeat = hasLeftTable(statePublic, userId) ? null : youSeat;

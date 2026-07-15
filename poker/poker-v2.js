@@ -2556,7 +2556,7 @@
     var playerState = state.playerState || null;
     var outOfChips = !!playerState && playerState.status === 'OUT_OF_CHIPS';
     var waiting = !!playerState && playerState.status === 'WAITING_NEXT_HAND';
-    var show = (outOfChips || waiting) && !rebuyPanelDismissed;
+    var show = ((outOfChips && playerState.canRebuy === true) || waiting) && !rebuyPanelDismissed;
     els.rebuyPanel.hidden = !show;
     if (!show) return;
     if (els.rebuyTitle) els.rebuyTitle.textContent = waiting ? 'Buy-in confirmed' : 'Out of chips';

@@ -976,6 +976,10 @@ test('poker v2 renders authoritative out-of-chips state with stable disabled act
       you: { seat: 1 }
     }
   });
+  ws.onSnapshot(snapshot({ status: 'OUT_OF_CHIPS', stack: 0, canRebuy: false }));
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2RebuyPanel.hidden, true, 'non-actionable out-of-chips state must not offer rebuy before rollover');
+
   ws.onSnapshot(snapshot({ status: 'OUT_OF_CHIPS', stack: 0, canRebuy: true }));
   await harness.flush();
 

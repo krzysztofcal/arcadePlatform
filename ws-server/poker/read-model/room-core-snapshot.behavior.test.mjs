@@ -595,6 +595,17 @@ test("projectRoomCoreSnapshot derives OUT_OF_CHIPS, canRebuy, and WAITING_NEXT_H
   assert.deepEqual(busted.private.playerState, { status: "OUT_OF_CHIPS", stack: 0, canRebuy: true });
   assert.deepEqual(busted.legalActions.actions, []);
 
+  const allInCore = {
+    ...coreState,
+    pokerState: {
+      ...coreState.pokerState,
+      handSeats: [{ userId: "human", seatNo: 1 }, { userId: "bot", seatNo: 2, isBot: true }]
+    }
+  };
+  const allIn = projectRoomCoreSnapshot({ tableId: "table_busted", roomId: "table_busted", coreState: allInCore, members: allInCore.members, userId: "human", youSeat: 1, tableStatus: "OPEN" });
+  assert.equal(allIn.seats.find((seat) => seat.userId === "human")?.status, "ACTIVE");
+  assert.deepEqual(allIn.private.playerState, { status: "ACTIVE", stack: 0, canRebuy: false });
+
   const settledCore = {
     ...coreState,
     pokerState: {
@@ -604,7 +615,8 @@ test("projectRoomCoreSnapshot derives OUT_OF_CHIPS, canRebuy, and WAITING_NEXT_H
     }
   };
   const settled = projectRoomCoreSnapshot({ tableId: "table_busted", roomId: "table_busted", coreState: settledCore, members: settledCore.members, userId: "human", youSeat: 1, tableStatus: "OPEN" });
-  assert.equal(settled.private.playerState.canRebuy, false);
+  assert.equal(settled.seats.find((seat) => seat.userId === "human")?.status, "ACTIVE");
+  assert.deepEqual(settled.private.playerState, { status: "ACTIVE", stack: 0, canRebuy: false });
 
   const waitingCore = {
     ...coreState,
