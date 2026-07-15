@@ -1601,12 +1601,15 @@ test("table_leave rejects when authoritative success state still contains actor 
     await auth(actor, actorToken, "auth-leave-still-present-actor");
     await auth(other, keepToken, "auth-leave-still-present-keep");
 
+    const actorJoinAck = nextCommandResultForRequest(actor, "join-leave-still-present-actor");
+    const actorJoinState = nextJoinTableState(actor, { requestId: "join-leave-still-present-actor", tableId });
     sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-still-present-actor", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
-    await nextCommandResultForRequest(actor, "join-leave-still-present-actor");
-    await nextJoinTableState(actor, { requestId: "join-leave-still-present-actor", tableId });
+    await Promise.all([actorJoinAck, actorJoinState]);
+
+    const otherJoinAckPromise = nextCommandResultForRequest(other, "join-leave-still-present-keep");
+    const otherJoinState = nextJoinTableState(other, { requestId: "join-leave-still-present-keep", tableId });
     sendFrame(other, { version: "1.0", type: "table_join", requestId: "join-leave-still-present-keep", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
-    const otherJoinAck = await nextCommandResultForRequest(other, "join-leave-still-present-keep");
-    await nextJoinTableState(other, { requestId: "join-leave-still-present-keep", tableId });
+    const [otherJoinAck] = await Promise.all([otherJoinAckPromise, otherJoinState]);
     assert.equal(otherJoinAck.payload.status, "accepted");
 
     const leaveResult = nextCommandResultForRequest(actor, "leave-still-present");
