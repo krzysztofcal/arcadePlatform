@@ -30,6 +30,33 @@ function currentHandUserIds(state) {
   return new Set(source.map((seat) => String(seat?.userId || "").trim()).filter(Boolean));
 }
 
+function normalizeCardCodeForValidation(cardCode) {
+  if (typeof cardCode !== "string") return null;
+  const code = cardCode.trim().toUpperCase();
+  if (!/^(10|[2-9TJQKA])[CDHS]$/.test(code)) return null;
+  const suit = code.slice(-1);
+  const rankCode = code.slice(0, -1);
+  const rank = rankCode === "A"
+    ? 14
+    : rankCode === "K"
+      ? 13
+      : rankCode === "Q"
+        ? 12
+        : rankCode === "J"
+          ? 11
+          : rankCode === "T"
+            ? 10
+            : Number(rankCode);
+  return Number.isInteger(rank) && rank >= 2 && rank <= 14 ? { r: rank, s: suit } : null;
+}
+
+function normalizeStateForStorageValidation(state) {
+  if (!state || typeof state !== "object" || Array.isArray(state) || !Array.isArray(state.community)) return state;
+  const community = state.community.map((card) => typeof card === "string" ? normalizeCardCodeForValidation(card) : card);
+  if (community.some((card) => !card)) return state;
+  return { ...state, community };
+}
+
 function normalizeStoredResult(result) {
   if (!result || typeof result !== "object" || result.ok !== true) return null;
   const stack = Number(result.stack);
@@ -117,7 +144,7 @@ export async function executePokerRebuyAuthoritative({
         [userId]: true
       }
     };
-    if (!validateStateForStorage(nextState)) throw makeError("state_invalid");
+    if (!validateStateForStorage(normalizeStateForStorageValidation(nextState))) throw makeError("state_invalid");
 
     const updated = await updateStateLocked(tx, { tableId, nextState });
     if (!updated?.ok) throw makeError(updated?.reason === "not_found" ? "state_missing" : "state_conflict");

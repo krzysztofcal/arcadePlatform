@@ -1,17 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { executePokerRebuyAuthoritative } from "./rebuy.mjs";
+import { isStateStorageValid } from "../../ws-server/poker/snapshot-runtime/poker-state-utils.mjs";
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function createHarness({ ledgerFails = false, stateUpdateFails = false, handSeats = [] } = {}) {
+function createHarness({ ledgerFails = false, stateUpdateFails = false, handSeats = [], state = null, validateStateForStorage = () => true } = {}) {
   let store = {
     table: { id: "table-1", status: "OPEN" },
     seat: { user_id: "user-1", seat_no: 2, stack: 0, status: "ACTIVE", is_bot: false },
     stateVersion: 7,
-    state: { phase: "PREFLOP", handId: "hand-1", handSeats, seats: handSeats, stacks: { "user-1": 0, bot: 90 } },
+    state: state || { phase: "PREFLOP", handId: "hand-1", handSeats, seats: handSeats, stacks: { "user-1": 0, bot: 90 } },
     requests: {},
     ledger: { user: 500, escrow: 200, posts: 0 }
   };
@@ -81,7 +82,7 @@ function createHarness({ ledgerFails = false, stateUpdateFails = false, handSeat
     postTransactionFn,
     loadStateForUpdate,
     updateStateLocked,
-    validateStateForStorage: () => true
+    validateStateForStorage
   });
   return { execute, read: () => clone(store) };
 }
@@ -131,4 +132,32 @@ test("rebuy is rejected while the busted player remains in current handSeats", a
   const harness = createHarness({ handSeats: [{ userId: "user-1", seatNo: 2 }] });
   await assert.rejects(harness.execute(), (error) => error?.code === "rebuy_not_available");
   assert.equal(harness.read().ledger.posts, 0);
+});
+
+test("manual rebuy accepts a live persisted hand with compact community card codes", async () => {
+  const botSeat = { userId: "bot", seatNo: 3 };
+  const harness = createHarness({
+    state: {
+      phase: "FLOP",
+      handId: "hand-live",
+      handSeats: [botSeat],
+      seats: [botSeat],
+      stacks: { "user-1": 0, bot: 90 },
+      community: ["AS", "KD", "QC"],
+      communityDealt: 3,
+      contributionsByUserId: { bot: 10 },
+      sidePots: []
+    },
+    validateStateForStorage: (state) => isStateStorageValid(state, {
+      requireNoDeck: true,
+      requireHandSeed: false,
+      requireCommunityDealt: false
+    })
+  });
+
+  const result = await harness.execute();
+
+  assert.equal(result.ok, true);
+  assert.equal(harness.read().state.stacks["user-1"], 100);
+  assert.deepEqual(harness.read().state.community, ["AS", "KD", "QC"]);
 });
