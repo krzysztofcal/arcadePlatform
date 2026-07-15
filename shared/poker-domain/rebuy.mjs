@@ -167,7 +167,7 @@ export async function executePokerRebuyAuthoritative({
 
     const projectedRows = await tx.unsafe(
       `update public.poker_seats
-       set stack = $4, updated_at = now()
+       set stack = $4
        where table_id = $1 and user_id = $2 and seat_no = $3 and status = 'ACTIVE' and is_bot = false
        returning user_id;`,
       [tableId, userId, seatNo, normalizedAmount]

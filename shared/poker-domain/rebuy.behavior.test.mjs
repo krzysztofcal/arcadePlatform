@@ -9,6 +9,7 @@ function clone(value) {
 
 function createHarness({ ledgerFails = false, stateUpdateFails = false, handSeats = [], state = null, validateStateForStorage = () => true } = {}) {
   const lockOrder = [];
+  let seatProjectionSql = "";
   let store = {
     table: { id: "table-1", status: "OPEN" },
     seat: { user_id: "user-1", seat_no: 2, stack: 0, status: "ACTIVE", is_bot: false },
@@ -50,6 +51,7 @@ function createHarness({ ledgerFails = false, stateUpdateFails = false, handSeat
           return [draft.seat];
         }
         if (sql.includes("update public.poker_seats")) {
+          seatProjectionSql = String(query);
           if (draft.seat.user_id !== params[1] || draft.seat.seat_no !== params[2]) return [];
           draft.seat.stack = params[3];
           return [{ user_id: draft.seat.user_id }];
@@ -94,7 +96,7 @@ function createHarness({ ledgerFails = false, stateUpdateFails = false, handSeat
     updateStateLocked,
     validateStateForStorage
   });
-  return { execute, read: () => clone(store), readLockOrder: () => lockOrder.slice() };
+  return { execute, read: () => clone(store), readLockOrder: () => lockOrder.slice(), readSeatProjectionSql: () => seatProjectionSql };
 }
 
 test("manual rebuy atomically funds USER to ESCROW and queues the next hand", async () => {
@@ -110,6 +112,8 @@ test("manual rebuy atomically funds USER to ESCROW and queues the next hand", as
   assert.equal(after.seat.stack, 100);
   assert.deepEqual(after.state.handSeats, []);
   assert.deepEqual(harness.readLockOrder(), ["state", "table", "seat"]);
+  assert.match(harness.readSeatProjectionSql(), /set stack = \$4/i);
+  assert.doesNotMatch(harness.readSeatProjectionSql(), /updated_at/i);
 });
 
 test("stored rebuy result survives restart semantics and cannot fund twice", async () => {
