@@ -216,11 +216,13 @@ export function buildNextHandStateFromSettled({ tableId, coreState, settledState
   });
   if (!nextHandState) return null;
   const durableStacks = { ...nextHandState.stacks };
-  const nextHandUserIds = new Set(nextHandState.handSeats.map((seat) => seat.userId));
-  for (const member of orderedSeatMembers(coreState)) {
-    if (nextHandUserIds.has(member.userId)) continue;
-    const stack = Number(settledState?.stacks?.[member.userId]);
-    if (Number.isInteger(stack) && stack >= 0) durableStacks[member.userId] = stack;
+  const settledStacks = settledState?.stacks && typeof settledState.stacks === "object" && !Array.isArray(settledState.stacks)
+    ? settledState.stacks
+    : {};
+  for (const [userId, rawStack] of Object.entries(settledStacks)) {
+    if (Object.prototype.hasOwnProperty.call(durableStacks, userId)) continue;
+    const stack = Number(rawStack);
+    if (Number.isInteger(stack) && stack >= 0) durableStacks[userId] = stack;
   }
   const waitingForNextHandByUserId = settledState?.waitingForNextHandByUserId && typeof settledState.waitingForNextHandByUserId === "object" && !Array.isArray(settledState.waitingForNextHandByUserId)
     ? { ...settledState.waitingForNextHandByUserId }

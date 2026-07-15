@@ -144,3 +144,48 @@ test("table command queue runs non-deduped bot-step cascade commands even while 
     "bot_step:second:end"
   ]);
 });
+
+test("table command queue retains serialization while an older queued command becomes active", async () => {
+  const queue = createTableCommandQueue();
+  const order = [];
+  let releaseFirst;
+  let releaseSecond;
+  let markSecondStarted;
+  const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+  const secondGate = new Promise((resolve) => { releaseSecond = resolve; });
+  const secondStarted = new Promise((resolve) => { markSecondStarted = resolve; });
+
+  const first = queue.enqueue({
+    tableId: "cleanup-race-table",
+    run: async () => {
+      order.push("first:start");
+      await firstGate;
+      order.push("first:end");
+    }
+  });
+  const second = queue.enqueue({
+    tableId: "cleanup-race-table",
+    run: async () => {
+      order.push("second:start");
+      markSecondStarted();
+      await secondGate;
+      order.push("second:end");
+    }
+  });
+
+  releaseFirst();
+  await secondStarted;
+  const third = queue.enqueue({
+    tableId: "cleanup-race-table",
+    run: async () => {
+      order.push("third:start");
+      order.push("third:end");
+    }
+  });
+  await Promise.resolve();
+  assert.deepEqual(order, ["first:start", "first:end", "second:start"]);
+
+  releaseSecond();
+  await Promise.all([first, second, third]);
+  assert.deepEqual(order, ["first:start", "first:end", "second:start", "second:end", "third:start", "third:end"]);
+});

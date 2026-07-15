@@ -158,6 +158,11 @@ const hasLiveHandSignal = (state) => {
   return ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(phase);
 };
 
+const isUserInCurrentHand = (state, userId) => {
+  const handSeats = Array.isArray(state?.handSeats) ? state.handSeats : parseSeats(state?.seats);
+  return handSeats.some((seat) => seat?.userId === userId);
+};
+
 const toClosedInertState = (stateInput, stacks) => ({
   ...stateInput,
   phase: "HAND_DONE",
@@ -627,7 +632,7 @@ export async function executePokerLeave({
         }
 
         const leaveState = normalizeState(leaveApplied.state);
-        const deferDetachUntilHandComplete = hasLiveHandSignal(leaveState);
+        const deferDetachUntilHandComplete = hasLiveHandSignal(leaveState) && isUserInCurrentHand(currentState, userId);
         const baseSeats = deferDetachUntilHandComplete
           ? parseSeats(currentState.seats)
           : (Array.isArray(leaveState.seats) ? leaveState.seats : parseSeats(currentState.seats));
@@ -804,7 +809,7 @@ export async function executePokerLeave({
           }
         }
 
-        const shouldDetachSeatAndStack = !hasLiveHandSignal(latestState);
+        const shouldDetachSeatAndStack = !deferDetachUntilHandComplete || !hasLiveHandSignal(latestState);
         let detachedCashOutAmount = 0;
         if (shouldDetachSeatAndStack) {
           const latestStacks = parseStacks(latestState.stacks);

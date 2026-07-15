@@ -131,6 +131,32 @@ test("human with one chip remains eligible and posts a partial blind", () => {
   assert.equal(next.contributionsByUserId.human, 1);
 });
 
+test("rollover preserves an authoritative stack awaiting cleanup after runtime presence is pruned", () => {
+  const coreState = {
+    roomId: "table_disconnected_human",
+    version: 8,
+    members: [{ userId: "bot_a", seat: 2 }, { userId: "bot_b", seat: 3 }],
+    seats: { bot_a: 2, bot_b: 3 },
+    seatDetailsByUserId: { bot_a: { isBot: true }, bot_b: { isBot: true } },
+    pokerState: null
+  };
+  const next = buildNextHandStateFromSettled({
+    tableId: "table_disconnected_human",
+    coreState,
+    settledState: {
+      handId: "settled_disconnected_human",
+      phase: "SETTLED",
+      dealerSeatNo: 2,
+      stacks: { disconnected_human: 318, bot_a: 400, bot_b: 3282 }
+    },
+    nextVersion: 9
+  });
+
+  assert.ok(next);
+  assert.equal(next.handSeats.some((seat) => seat.userId === "disconnected_human"), false);
+  assert.equal(next.stacks.disconnected_human, 318);
+});
+
 test("rollover does not bootstrap a live hand when fewer than two stack-eligible players remain", () => {
   const baseCore = {
     roomId: "table_engine_roll_no_start",

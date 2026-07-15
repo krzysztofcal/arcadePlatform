@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { isStateStorageValid as realIsStateStorageValid } from "../../netlify/functions/_shared/poker-state-utils.mjs";
+import { applyLeaveTable as realApplyLeaveTable } from "../../netlify/functions/_shared/poker-reducer.mjs";
 import { requireAuthoritativeHumanStack as realRequireAuthoritativeHumanStack } from "./human-stack-accounting.mjs";
 
 const root = process.cwd();
@@ -19,6 +20,7 @@ const userId = "99999999-9999-4999-8999-999999999999";
 const makeMocks = () => {
   const calls = { cashouts: 0, actions: 0, deleteSeat: 0, storeResult: 0, updates: 0, closeTable: 0, holeCardDelete: 0 };
   const state = { version: 2, value: { tableId, phase: "INIT", seats: [{ userId, seatNo: 1 }], stacks: { [userId]: 50 }, leftTableByUserId: {} } };
+  const seatRowsByUserId = new Map();
   let tableStatus = "OPEN";
   const requests = new Map();
   const tx = { unsafe: async (query, params) => {
@@ -26,6 +28,7 @@ const makeMocks = () => {
     if (text.includes("select id, status from public.poker_tables")) return [{ id: tableId, status: tableStatus }];
     if (text.includes("from public.poker_state")) return [{ version: state.version, state: state.value }];
     if (text.includes("select seat_no, status, stack from public.poker_seats") && text.includes("for update")) {
+      if (seatRowsByUserId.has(params[1])) return [seatRowsByUserId.get(params[1])];
       const seat = Array.isArray(state.value?.seats)
         ? state.value.seats.find((entry) => entry && entry.userId === params[1])
         : null;
@@ -52,6 +55,7 @@ const makeMocks = () => {
     if (text.includes("delete from public.poker_seats")) {
       calls.deleteSeat += 1;
       const targetUserId = params[1];
+      seatRowsByUserId.delete(targetUserId);
       if (Array.isArray(state.value?.seats)) {
         state.value.seats = state.value.seats.filter((seat) => seat && seat.userId !== targetUserId);
       }
@@ -75,6 +79,7 @@ const makeMocks = () => {
   return {
     calls,
     state,
+    seatRowsByUserId,
     requests,
     mocks: {
       ensurePokerRequest: async (_tx, { requestId }) => requests.get(requestId) || { status: "proceed" },
@@ -159,6 +164,80 @@ for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
   assert.equal(ctx.calls.cashouts, 1);
   assert.equal(ctx.calls.deleteSeat, 1);
   assert.equal(result.state.state.seats.some((seat) => seat.userId === userId), false);
+  assert.equal(result.state.state.stacks[userId], undefined);
+}
+
+{
+  const stackOnlyState = {
+    tableId,
+    phase: "TURN",
+    handId: "hand-bots-only-with-pending-human-stack",
+    handSeed: "seed-bots-only-with-pending-human-stack",
+    seats: [{ userId: "bot-1", seatNo: 2, isBot: true }, { userId: "bot-2", seatNo: 3, isBot: true }],
+    handSeats: [{ userId: "bot-1", seatNo: 2 }, { userId: "bot-2", seatNo: 3 }],
+    stacks: { [userId]: 318, "bot-1": 400, "bot-2": 3282 },
+    leftTableByUserId: {},
+    sitOutByUserId: {},
+    pendingAutoSitOutByUserId: {},
+    missedTurnsByUserId: {},
+    foldedByUserId: { "bot-1": false, "bot-2": false },
+    actedThisRoundByUserId: { "bot-1": false, "bot-2": false },
+    betThisRoundByUserId: { "bot-1": 0, "bot-2": 0 },
+    toCallByUserId: { "bot-1": 0, "bot-2": 0 },
+    contributionsByUserId: { "bot-1": 0, "bot-2": 0 },
+    allInByUserId: { "bot-1": false, "bot-2": false },
+    community: ["2H", "3D", "4S", "5C"],
+    communityDealt: 4,
+    currentBet: 0,
+    pot: 0,
+    potTotal: 0,
+    turnUserId: "bot-1"
+  };
+  const reduced = realApplyLeaveTable(stackOnlyState, { userId, requestId: "stack-only-reducer" });
+  assert.equal(reduced.state.leftTableByUserId[userId], true);
+  assert.equal(reduced.state.stacks[userId], undefined);
+  assert.deepEqual(reduced.state.handSeats, stackOnlyState.handSeats);
+}
+
+{
+  const ctx = makeMocks();
+  ctx.state.value = {
+    tableId,
+    phase: "TURN",
+    handId: "hand-bots-only-cashout",
+    handSeed: "seed-bots-only-cashout",
+    seats: [{ userId: "bot-1", seatNo: 2, isBot: true }, { userId: "bot-2", seatNo: 3, isBot: true }],
+    handSeats: [{ userId: "bot-1", seatNo: 2 }, { userId: "bot-2", seatNo: 3 }],
+    stacks: { [userId]: 318, "bot-1": 400, "bot-2": 3282 },
+    leftTableByUserId: {},
+    foldedByUserId: { "bot-1": false, "bot-2": false },
+    actedThisRoundByUserId: { "bot-1": false, "bot-2": false }
+  };
+  ctx.seatRowsByUserId.set(userId, { seat_no: 1, status: "ACTIVE", stack: 318 });
+  ctx.mocks.applyLeaveTable = (stateInput) => ({
+    state: {
+      ...stateInput,
+      stacks: { "bot-1": 400, "bot-2": 3282 },
+      leftTableByUserId: { [userId]: true }
+    },
+    events: [{ type: "PLAYER_LEFT_TABLE", userId }]
+  });
+  const executePokerLeave = loadExecutePokerLeave(ctx.mocks);
+  const result = await executePokerLeave({
+    beginSql: ctx.beginSql,
+    tableId,
+    userId,
+    requestId: "stack-only-cashout",
+    includeState: true,
+    runPostLeaveBotAutoplay: false,
+    klog: () => {}
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.cashedOut, 318);
+  assert.equal(ctx.calls.cashouts, 1);
+  assert.equal(ctx.calls.deleteSeat, 1);
+  assert.equal(result.state.state.phase, "TURN");
   assert.equal(result.state.state.stacks[userId], undefined);
 }
 
