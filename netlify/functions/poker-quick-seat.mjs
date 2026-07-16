@@ -140,6 +140,9 @@ const recommendSeatAtTable = async (tx, { tableId, userId, maxPlayers, allowCrea
 };
 
 export async function handler(event) {
+  if (process.env.CHIPS_ENABLED !== "1") {
+    return { statusCode: 404, headers: baseHeaders(), body: JSON.stringify({ error: "not_found" }) };
+  }
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
   if (!cors) {

@@ -1,8 +1,8 @@
 # Plan jednorazowego resetu ekonomii CH i monitoringu poker escrow
 
-Status: planning only. Dokument nie implementuje resetu, nie zawiera wykonywalnego SQL i nie zmienia runtime.
+Status: implementation prepared in PR #717. Runtime guards, manual SQL, runbook and read-only Admin/Ops monitoring are included, but no stage or production operation has been executed.
 
-Plan został ponownie zweryfikowany bezpośrednio względem aktualnego `origin/main` o SHA `176d8b86cbdd5d3b180eff23e944c9bd361a4bdf`. Przed resetem wymagany jest osobny mały prerequisite PR domykający aplikacyjny maintenance guard w dwóch aktywnych Netlify Functions.
+Plan został ponownie zweryfikowany bezpośrednio względem aktualnego `origin/main` o SHA `176d8b86cbdd5d3b180eff23e944c9bd361a4bdf`. PR #717 zawiera prerequisite domykający aplikacyjny maintenance guard w dwóch aktywnych Netlify Functions; guard musi zostać wdrożony przed użyciem resetu.
 
 ## 1. Cel i decyzje produktowe
 
@@ -118,7 +118,7 @@ Implementacja potrzebuje tylko:
 
 Nie powstają manifesty, endpoint resetu, UI, scheduler ani framework audytowy. Po wykonaniu obu resetów skrypt należy usunąć z aktywnego drzewa albo oznaczyć jako retired.
 
-Mały prerequisite PR jest osobną zmianą runtime i nie należy do skryptu resetującego. Nie dodaje migracji, nowego ENV ani systemu maintenance.
+Prerequisite jest osobną fazą runtime w tym PR i nie należy do skryptu resetującego. Nie dodaje migracji, nowego ENV ani systemu maintenance.
 
 ## 4. Inventory writerów i maintenance
 
@@ -309,7 +309,7 @@ Jeżeli nie można jednoznacznie potwierdzić rollbacku albo restore, środowisk
 
 ## 6. Follow-up: monitoring residuali w Admin/Ops
 
-To osobny PR po resecie. Nie wymaga background joba ani zmian WS.
+Monitoring jest przygotowany w PR #717, ale jego operacyjna weryfikacja następuje po resecie. Nie wymaga background joba ani zmian WS.
 
 ### Backend
 
