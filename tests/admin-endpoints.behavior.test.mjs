@@ -37,12 +37,36 @@ test("admin-me returns admin payload for an allowlisted caller", async () => {
     ok: true,
     isAdmin: true,
     userId: "00000000-0000-4000-8000-000000000010",
+    chipsEnabled: true,
+    maintenance: false,
+  });
+});
+
+test("admin-me preserves allowlisted admin bootstrap during CH maintenance", async () => {
+  let authCalls = 0;
+  const handler = createAdminMeHandler({
+    env: { CHIPS_ENABLED: "0" },
+    requireAdminUser: async () => {
+      authCalls += 1;
+      return { userId: "00000000-0000-4000-8000-000000000010" };
+    },
+  });
+  const response = await handler(event("GET"));
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(authCalls, 1);
+  assert.deepEqual(JSON.parse(response.body), {
+    ok: true,
+    isAdmin: true,
+    userId: "00000000-0000-4000-8000-000000000010",
+    chipsEnabled: false,
+    maintenance: true,
   });
 });
 
 test("admin-me fails closed for non-admin callers", async () => {
   const handler = createAdminMeHandler({
-    env: { CHIPS_ENABLED: "1" },
+    env: { CHIPS_ENABLED: "0" },
     requireAdminUser: async () => {
       const error = new Error("admin_required");
       error.status = 403;
@@ -60,6 +84,7 @@ test("admin WS Preview bot reaction proxy forwards only a controlled payload wit
   let seen = null;
   const handler = createAdminWsPreviewBotReactionHandler({
     env: {
+      CHIPS_ENABLED: "1",
       POKER_WS_INTERNAL_BASE_URL: "https://ws-preview.kcswh.pl",
       POKER_WS_INTERNAL_TOKEN: "preview-internal-token",
     },
@@ -98,6 +123,7 @@ test("admin WS Preview bot reaction proxy rejects non-admin and non-preview requ
   let fetchCalls = 0;
   const deps = {
     env: {
+      CHIPS_ENABLED: "1",
       POKER_WS_INTERNAL_BASE_URL: "https://ws-preview.kcswh.pl",
       POKER_WS_INTERNAL_TOKEN: "preview-internal-token",
     },
@@ -137,9 +163,38 @@ test("admin WS Preview bot reaction body allowlist rejects unexpected fields", (
   assert.throws(() => parseBotReactionBody(JSON.stringify({ mode: "override", minMs: 500, maxMs: 500, updatedBy: "spoofed" })), { code: "invalid_request" });
 });
 
+test("admin WS Preview bot reaction endpoint stays unavailable during CH maintenance", async () => {
+  let authCalls = 0;
+  let fetchCalls = 0;
+  const handler = createAdminWsPreviewBotReactionHandler({
+    env: {
+      CHIPS_ENABLED: "0",
+      POKER_WS_INTERNAL_BASE_URL: "https://ws-preview.kcswh.pl",
+      POKER_WS_INTERNAL_TOKEN: "preview-internal-token",
+    },
+    requireAdminUser: async () => {
+      authCalls += 1;
+      return { userId: "admin-1" };
+    },
+    buildStageIdentity: previewStageIdentity,
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      throw new Error("unexpected_fetch");
+    },
+  });
+  for (const method of ["GET", "POST"]) {
+    const response = await handler(event(method, {}, method === "POST" ? JSON.stringify({ mode: "default" }) : undefined));
+    assert.equal(response.statusCode, 404);
+    assert.deepEqual(JSON.parse(response.body), { error: "not_found" });
+  }
+  assert.equal(authCalls, 0);
+  assert.equal(fetchCalls, 0);
+});
+
 test("admin WS Preview bot reaction proxy rejects a non-JSON Caddy fallback response", async () => {
   const handler = createAdminWsPreviewBotReactionHandler({
     env: {
+      CHIPS_ENABLED: "1",
       POKER_WS_INTERNAL_BASE_URL: "https://ws-preview.kcswh.pl",
       POKER_WS_INTERNAL_TOKEN: "preview-internal-token",
     },

@@ -143,7 +143,7 @@ test("admin-stage-identity endpoint requires admin and returns sanitized payload
   const handler = createAdminStageIdentityHandler({
     env: {
       CONTEXT: "deploy-preview",
-      CHIPS_ENABLED: "1",
+      CHIPS_ENABLED: "0",
       SUPABASE_URL: "https://stageabc.supabase.co",
       SUPABASE_STAGE_PROJECT_REF: "stageabc",
     },
@@ -155,4 +155,5 @@ test("admin-stage-identity endpoint requires admin and returns sanitized payload
   assert.equal(response.statusCode, 200);
   assert.equal(body.databaseTarget, "stage");
   assert.equal(body.supabaseProjectRef, "stageabc");
+  assert.equal(body.chipsEnabled, false);
 });

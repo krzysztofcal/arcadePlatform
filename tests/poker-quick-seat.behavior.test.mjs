@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 import { isStateStorageValid, normalizeJsonState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 
+process.env.CHIPS_ENABLED = "1";
+
 const userId = "user-quick";
 
 const callQuickSeat = async (handler, body = {}) => {
@@ -306,6 +308,19 @@ const run = async () => {
     assert.equal(lockCalls.length, 2);
     assert.equal(lockCalls[0]?.params?.[0], "quickseat:6:1:2");
     assert.equal(lockCalls[1]?.params?.[0], "quickseat:6:1:2");
+  }
+  {
+    const queries = [];
+    const handler = makeHandler({ mode: "create", queries });
+    process.env.CHIPS_ENABLED = "0";
+    try {
+      const response = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
+      assert.equal(response.statusCode, 404);
+      assert.deepEqual(JSON.parse(response.body), { error: "not_found" });
+      assert.equal(queries.length, 0);
+    } finally {
+      process.env.CHIPS_ENABLED = "1";
+    }
   }
 
 };

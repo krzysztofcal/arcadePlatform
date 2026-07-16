@@ -5,10 +5,6 @@ function createAdminMeHandler(deps = {}) {
   const env = deps.env || process.env;
   const requireAdmin = deps.requireAdminUser || requireAdminUser;
   return async function handler(event) {
-    if (env.CHIPS_ENABLED !== "1") {
-      return { statusCode: 404, headers: baseHeaders(), body: JSON.stringify({ error: "not_found" }) };
-    }
-
     const origin = event.headers?.origin || event.headers?.Origin;
     const cors = corsHeaders(origin);
     if (!cors) {
@@ -26,7 +22,13 @@ function createAdminMeHandler(deps = {}) {
       return {
         statusCode: 200,
         headers: cors,
-        body: JSON.stringify({ ok: true, isAdmin: true, userId: admin.userId }),
+        body: JSON.stringify({
+          ok: true,
+          isAdmin: true,
+          userId: admin.userId,
+          chipsEnabled: env.CHIPS_ENABLED === "1",
+          maintenance: env.CHIPS_ENABLED !== "1",
+        }),
       };
     } catch (error) {
       return adminAuthErrorResponse(error, cors);
