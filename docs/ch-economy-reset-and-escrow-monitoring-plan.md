@@ -2,6 +2,8 @@
 
 Status: planning only. Dokument nie implementuje resetu, nie zawiera wykonywalnego SQL i nie zmienia runtime.
 
+Plan został ponownie zweryfikowany bezpośrednio względem aktualnego `origin/main` o SHA `176d8b86cbdd5d3b180eff23e944c9bd361a4bdf`. Przed resetem wymagany jest osobny mały prerequisite PR domykający aplikacyjny maintenance guard w dwóch aktywnych Netlify Functions.
+
 ## 1. Cel i decyzje produktowe
 
 Cała obecna ekonomia CH na stage i prod jest traktowana jako zbiór przedprodukcyjnych danych testowych. Zamiast selektywnego reconciliation historycznych stołów wykonujemy jednorazowy pełny reset:
@@ -116,6 +118,8 @@ Implementacja potrzebuje tylko:
 
 Nie powstają manifesty, endpoint resetu, UI, scheduler ani framework audytowy. Po wykonaniu obu resetów skrypt należy usunąć z aktywnego drzewa albo oznaczyć jako retired.
 
+Mały prerequisite PR jest osobną zmianą runtime i nie należy do skryptu resetującego. Nie dodaje migracji, nowego ENV ani systemu maintenance.
+
 ## 4. Inventory writerów i maintenance
 
 ### 4.1 Netlify CH i bonusy
@@ -132,18 +136,40 @@ Nie powstają manifesty, endpoint resetu, UI, scheduler ani framework audytowy. 
 | netlify/functions/admin-table-cleanup.mjs | createAdminTableCleanupHandler() | CHIPS_ENABLED=0 |
 | netlify/functions/admin-table-force-close.mjs | createAdminTableForceCloseHandler() | CHIPS_ENABLED=0 |
 
+`CHIPS_ENABLED=0` jest warstwą defense-in-depth, a nie samodzielnym maintenance gate. Netlify Functions otrzymują wartości environment variables utrwalone dla danego deployu; zmiana wartości wymaga nowego build/deploy i nie aktualizuje starych deploy previews.
+
 ### 4.2 Netlify poker create
 
 netlify/functions/poker-create-table.mjs::handler() oraz netlify/functions/poker-quick-seat.mjs::handler() używają createPokerTableWithState(), ale nie respektują CHIPS_ENABLED.
 
-Maintenance wymaga operacyjnej blokady dostępu obejmującej także bezpośrednie /.netlify/functions/*. Przed resetem operator musi negatywnie zweryfikować requesty do:
+#### Prerequisite PR
+
+Przed resetem oba handlery muszą otrzymać ten sam fail-closed kontrakt co pozostałe funkcje ekonomii:
+
+- sprawdzenie `CHIPS_ENABLED !== "1"` na początku handlera, przed auth i `beginSql()`;
+- odpowiedź `404` z kontrolowanym `not_found`;
+- brak połączenia z DB, aktualizacji stołu i powiadomienia WS;
+- brak zmian protokołu, schematu i ENV.
+
+Ten prerequisite domyka aplikacyjną lukę i ułatwia przyszłe maintenance, ale nie unieważnia starych deployów zawierających wcześniejszy kod.
+
+#### Twardy maintenance gate
+
+Właściwy reset wymaga wyłączenia całego projektu Netlify przez `Project configuration -> General -> Danger zone -> Disable project`. Jest to najmniejszy istniejący mechanizm blokujący stronę, Functions, deploy previews, branch deploys, historyczne deploy URLs i scheduled Functions bez dodawania maintenance routera.
+
+Przed resetem operator musi negatywnie zweryfikować requesty do:
 
 - poker-create-table;
 - poker-quick-seat;
 - chips-balance;
 - bonus-campaigns.
 
-Jeżeli mechanizm dostępu Netlify nie obejmuje function URLs, konieczny jest tymczasowy maintenance deploy lub reguła ruchu blokująca te endpointy. Samo ukrycie UI nie wystarcza.
+Jeżeli `Disable project` nie blokuje któregokolwiek bezpośredniego function URL, reset zostaje przerwany. Firewall Traffic Rules są dopuszczalną alternatywą tylko wtedy, gdy mogą jawnie blokować cały ruch published i unpublished deploys, ale nie są preferowaną ścieżką.
+
+Oficjalne odniesienia operacyjne:
+
+- https://docs.netlify.com/manage/projects/disable-project/
+- https://docs.netlify.com/build/functions/environment-variables/
 
 ### 4.3 WS
 
@@ -166,6 +192,15 @@ Wycofany HTTP poker-sweep nie mutuje danych. W czasie maintenance blokujemy tak�
 
 ## 5. Plan resetu stage i prod
 
+### Phase 0 — prerequisite PR
+
+1. Dodać `CHIPS_ENABLED` guard do `poker-create-table.mjs` i `poker-quick-seat.mjs`.
+2. Opublikować zmianę najpierw jako Deploy Preview, a następnie na produkcji.
+3. Dla deployów utworzonych z `CHIPS_ENABLED=0` potwierdzić `404` oraz brak nowych rekordów `poker_tables` i `chips_accounts`.
+4. Nie rozpoczynać resetu przed wdrożeniem tego prerequisite.
+
+Guard jest obroną dodatkową. Twardym warunkiem resetu pozostaje późniejsze `Disable project`, ponieważ stare deploy previews zachowują kod i environment z czasu swojego deploymentu.
+
 ### Phase 1 — preflight read-only
 
 1. Ustawić RESET_TARGET, EXPECTED_SUPABASE_PROJECT_REF i DB URL.
@@ -179,12 +214,13 @@ Wycofany HTTP poker-sweep nie mutuje danych. W czasie maintenance blokujemy tak�
 ### Phase 2 — maintenance i backup
 
 1. Zamrozić deploymenty, migracje oraz ręczne operacje admin/SQL.
-2. Ustawić i opublikować CHIPS_ENABLED=0.
-3. Zablokować Netlify writery, w tym bezpośrednie function URLs.
-4. Zatrzymać właściwy WS service.
-5. Potwierdzić, że próby zapisów są odrzucane.
-6. Wykonać pełny backup obejmujący public i auth.
-7. Zweryfikować backup i zachować jego checksumę poza repo.
+2. Ustawić `CHIPS_ENABLED=0` dla właściwych kontekstów Netlify i opublikować deploy; traktować to jako defense-in-depth.
+3. Wyłączyć cały projekt Netlify przez `Disable project`.
+4. Potwierdzić niedostępność production URL, znanego Deploy Preview oraz bezpośrednich function URLs.
+5. Zatrzymać właściwy WS service.
+6. Potwierdzić brak procesu WS i aktywnych writerów DB.
+7. Wykonać pełny backup obejmujący public i auth.
+8. Zweryfikować backup i zachować jego checksumę poza repo.
 
 Nie przechodzimy dalej, jeżeli target, blokada writerów lub backup nie są jednoznacznie potwierdzone.
 
@@ -227,10 +263,13 @@ Jeżeli transakcja nie została zatwierdzona, rollback jest wystarczający. Jeż
 
 ### Phase 5 — kolejność rollout
 
-1. Wykonać cały proces na stage.
-2. Uruchomić stage i wykonać smoke.
-3. Dopiero po akceptacji stage wykonać osobny backup i ten sam skrypt na prod.
-4. Po prod assertions uruchomić usługi i wykonać prod smoke.
+1. Dla stage opublikować znany Deploy Preview z `CHIPS_ENABLED=0`, następnie wyłączyć cały projekt Netlify i zatrzymać `ws-server-preview.service`.
+2. Wykonać stage backup, reset i assertions.
+3. Po poprawnych assertions przywrócić wartość deploy-preview `CHIPS_ENABLED=1`, włączyć projekt, opublikować świeży Deploy Preview, uruchomić `ws-server-preview.service` i wykonać stage smoke.
+4. Po akceptacji stage ustawić produkcyjny `CHIPS_ENABLED=0` i opublikować production maintenance deploy. Następnie ponownie wyłączyć cały projekt Netlify i zatrzymać `ws-server.service`.
+5. Wykonać osobny prod backup, uruchomić ten sam skrypt na prod i potwierdzić prod assertions.
+6. Ustawić produkcyjny `CHIPS_ENABLED=1`, włączyć projekt, opublikować świeży production deploy, uruchomić `ws-server.service` i wykonać prod smoke.
+7. Nie polegać na zmianie samej wartości ENV: każda zmiana `CHIPS_ENABLED` musi zostać utrwalona w nowym deployu właściwego kontekstu.
 
 ### Minimalny smoke
 
@@ -308,4 +347,3 @@ Monitoring jest addytywny i tylko do odczytu. Nie wpływa na gameplay ani ledger
 - nowe testy;
 - zmiany GitHub issues;
 - wykonanie resetu w ramach PR-a dokumentacyjnego.
-
