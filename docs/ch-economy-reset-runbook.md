@@ -176,7 +176,19 @@ Verify the maintenance deploy:
     curl -i -X POST 'https://<deploy-preview>/.netlify/functions/poker-create-table'
     curl -i -X POST 'https://<deploy-preview>/.netlify/functions/poker-quick-seat'
 
-Both must return HTTP 404 with not_found. Do not continue on 401, 403, 500 or 200.
+Complete the following maintenance checklist against the freshly deployed Deploy Preview:
+
+- the same active allowlisted administrator session still opens the Admin panel and can view the Ops tab;
+- the Admin panel shows the explicit economy maintenance banner;
+- Runtime and Stage Identity show `CHIPS_ENABLED off`;
+- Stage Identity reports the expected stage database target and project ref, including `databaseTarget=stage`, `stageProjectRefMatches=true` and `databaseMatchesSupabaseProjectRef=true`;
+- `/.netlify/functions/admin-me`, `/.netlify/functions/admin-stage-identity` and `/.netlify/functions/admin-ops-summary` return HTTP 200 for the allowlisted administrator;
+- a separately verified account whose user ID is not in `ADMIN_USER_IDS` still cannot access the Admin panel;
+- `/.netlify/functions/poker-create-table`, `/.netlify/functions/poker-quick-seat`, `/.netlify/functions/admin-ops-actions` and `/.netlify/functions/admin-ws-preview-bot-reaction` each return controlled HTTP 404 with `not_found` when invoked with their normal mutating method and a valid administrator session.
+
+Record every item as PASS. A 401, 403, 500, unexpected environment/project identity, missing maintenance banner, accessible mutation or loss of the allowlisted administrator's Admin/Ops access is a failed maintenance deploy. Restore `CHIPS_ENABLED=1`, produce a fresh deploy and stop for diagnosis.
+
+Do not disable the Netlify project, stop WS Preview or create the backup until every checklist item above has passed.
 
 ### 4.2 Freeze traffic and writers
 
