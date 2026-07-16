@@ -18,40 +18,119 @@ Do not begin a reset unless all conditions are true:
 
 CHIPS_ENABLED=0 is defense-in-depth. Netlify Disable project is the hard traffic gate. Stopping WS is a separate mandatory gate.
 
-## 2. Local prerequisites
+## 2. Operator prerequisites — Ubuntu VPS
 
-Required tools:
+Run the preflight and later reset from an Ubuntu VPS checkout of this repository. The Supabase SQL Editor is not the preferred execution method: the reset file uses `psql` meta-commands (`\if`, `\set`, `\quit`) and command-line `-v` parameters that the Dashboard SQL Editor does not implement.
 
-- Node.js;
-- PostgreSQL client compatible with the Supabase PostgreSQL version;
+### 2.1 Verify tools
+
+From an interactive Bash shell on the VPS, check:
+
+    psql --version
+    node --version
+
+If `psql` is missing (`command not found`), install only the Ubuntu PostgreSQL client:
+
+    sudo apt update
+    sudo apt install -y postgresql-client
+    psql --version
+
+If `node` is missing, stop. Do not copy an unreviewed installer command from the internet. Install Node.js through the VPS's existing approved provisioning method, then rerun `node --version` before continuing.
+
+Later maintenance sections additionally require:
+
 - Netlify CLI authenticated and linked to the Arcade Platform project;
-- SSH access with sudo permission for ws-server-preview.service;
+- SSH access with sudo permission for `ws-server-preview.service`;
 - enough encrypted local or remote storage for a full database backup.
 
-Never paste DB URLs, passwords, service-role tokens or backup contents into a PR, issue or chat.
+### 2.2 Confirm the repository file
+
+Change to the root of the Arcade Platform checkout, then verify the manual script:
+
+    test -f supabase/manual/chips-economy-test-reset.sql
+    test -r supabase/manual/chips-economy-test-reset.sql
+    ls -l supabase/manual/chips-economy-test-reset.sql
+
+Any non-zero result means the checkout or current revision is wrong. Stop instead of copying the SQL into another tool.
+
+### 2.3 Obtain the stage connection information
+
+In Supabase Dashboard, select the stage project, not production:
+
+1. Open `Settings -> General` and copy `Project Settings -> Reference ID`. This is the stage project ref used for the independent comparison.
+2. Click `Connect` at the top of the project Dashboard and choose the PostgreSQL connection string in URI form.
+3. Prefer `Direct connection` for the persistent Ubuntu VPS when it can reach Supabase over IPv6 (or the project has the IPv4 add-on).
+4. If the VPS is IPv4-only, use `Session pooler` on port `5432`. Do not prefer Transaction pooler on port `6543` for this operator workflow.
+5. Replace the password placeholder only in the private shell prompt described below.
+
+The database password and complete connection string are secrets. The project ref is not an authentication credential, but it is still operational metadata and should not be posted publicly without need. Never put the connection string or password in the repository, a commit, PR, issue, chat, shell script, runbook output or `tee` output.
+
+### 2.4 Protect secrets and output
+
+Use a private interactive shell. Disable Bash history before entering the connection string and use a silent prompt so the value is neither echoed nor stored as a literal command:
+
+    set +o history
+    umask 077
+    read -rsp 'Stage PostgreSQL connection string: ' SUPABASE_STAGE_DB_URL
+    printf '\n'
+    export SUPABASE_STAGE_DB_URL
+
+Do not use `export SUPABASE_STAGE_DB_URL='real-secret-url'` in an interactive command that may be written to shell history. The preflight output does not intentionally print the URL or password. `umask 077` ensures a newly created output file is readable only by its owner.
+
+After the approved operation, clear the variables and restore the previous history behavior:
+
+    unset SUPABASE_STAGE_DB_URL EXPECTED_SUPABASE_PROJECT_REF ACTUAL_SUPABASE_PROJECT_REF RESET_TARGET
+    set -o history
+
+Keep the preflight output outside the repository with mode `600`, or remove it after review:
+
+    chmod 600 stage-ch-reset-preflight.txt
+    mv stage-ch-reset-preflight.txt '<approved-private-directory>/'
+
+If it does not need to be retained, remove it instead:
+
+    rm -f stage-ch-reset-preflight.txt
+
+`shred -u` may be used as a best-effort alternative on traditional local disks, but it is not a reliable erasure guarantee on snapshots, SSDs or copy-on-write storage.
 
 ## 3. Stage read-only preflight
 
 This section is safe to run before maintenance. It does not change Netlify, WS or the database.
 
-Set the stage connection and independently obtained project ref:
+Set the non-secret target and enter the independently obtained project ref. Enter the connection string through the silent prompt from section 2.4:
 
     export RESET_TARGET=stage
-    export SUPABASE_STAGE_DB_URL='<stage direct or pooler Postgres URL>'
-    export EXPECTED_SUPABASE_PROJECT_REF='<stage project ref>'
+    read -rp 'Expected stage Supabase project ref: ' EXPECTED_SUPABASE_PROJECT_REF
+    export EXPECTED_SUPABASE_PROJECT_REF
 
 Derive the project ref from the DB URL and compare it with the expected value:
 
     ACTUAL_SUPABASE_PROJECT_REF="$(node -e 'const u=new URL(process.env.SUPABASE_STAGE_DB_URL); const host=/^db\.([a-z0-9-]+)\.supabase\.co$/i.exec(u.hostname); const user=/^postgres\.([a-z0-9-]+)$/i.exec(decodeURIComponent(u.username||"")); const ref=(host&&host[1])||(user&&user[1])||""; if(!ref) process.exit(2); process.stdout.write(ref);')"
-    test "$ACTUAL_SUPABASE_PROJECT_REF" = "$EXPECTED_SUPABASE_PROJECT_REF"
+    if [ "$ACTUAL_SUPABASE_PROJECT_REF" != "$EXPECTED_SUPABASE_PROJECT_REF" ]; then
+      echo 'STOP: project ref mismatch; no database command was run.' >&2
+      unset SUPABASE_STAGE_DB_URL EXPECTED_SUPABASE_PROJECT_REF ACTUAL_SUPABASE_PROJECT_REF RESET_TARGET
+      exit 1
+    fi
+    printf 'Project ref verified: %s\n' "$ACTUAL_SUPABASE_PROJECT_REF"
 
-A non-zero exit stops the procedure.
+A Node.js error, empty ref or mismatch stops the procedure. Do not override this comparison.
 
-Run the SQL in preflight-only mode:
+Run the SQL from the repository in preflight-only mode. `pipefail` and `PIPESTATUS[0]` preserve the real `psql` exit status even though output is also sent through `tee`:
 
-    psql "$SUPABASE_STAGE_DB_URL" -X       -v ON_ERROR_STOP=1       -v reset_target=stage       -v expected_project_ref="$EXPECTED_SUPABASE_PROJECT_REF"       -v reset_apply=0       -f supabase/manual/chips-economy-test-reset.sql       | tee stage-ch-reset-preflight.txt
+    set -o pipefail
+    psql "$SUPABASE_STAGE_DB_URL" -X \
+      -v ON_ERROR_STOP=1 \
+      -v reset_target=stage \
+      -v expected_project_ref="$EXPECTED_SUPABASE_PROJECT_REF" \
+      -v reset_apply=0 \
+      -f supabase/manual/chips-economy-test-reset.sql \
+      2>&1 | tee stage-ch-reset-preflight.txt
+    PREFLIGHT_EXIT=${PIPESTATUS[0]}
+    printf 'Preflight exit code: %s\n' "$PREFLIGHT_EXIT"
+    chmod 600 stage-ch-reset-preflight.txt
+    test "$PREFLIGHT_EXIT" -eq 0
 
-Expected final line:
+Successful preflight has exit code `0` and contains this final SQL message before the printed exit-code line:
 
     PRE-FLIGHT ONLY. No rows or schema objects were modified.
 
@@ -64,6 +143,16 @@ Review and retain:
 - absence of missing-schema, missing-trigger, missing-migration or unexpected-FK errors.
 
 Stop here and obtain explicit approval before entering maintenance.
+
+### 3.1 Error handling
+
+- `psql: command not found`: install `postgresql-client` as described in section 2.1, verify `psql --version`, then restart preflight from the beginning.
+- project ref mismatch or ref extraction failure: do not connect. Re-select the stage project and independently re-copy both values. Never change the expected ref merely to match an unexpected URL.
+- connection, DNS, IPv6, authentication or TLS failure: do not continue. Recheck the stage URI and password. If Direct Connection is unreachable from an IPv4-only VPS, use the stage Session pooler URI from `Connect` and repeat the external ref comparison.
+- any SQL/preflight error or non-zero exit code: do not enter maintenance. Retain the protected output for diagnosis and leave Netlify, WS, `CHIPS_ENABLED` and the database unchanged.
+- missing success message even with an apparent zero status: treat it as failure and stop.
+
+At this stage do not set `CHIPS_ENABLED=0`, deploy maintenance code, disable Netlify, stop WS, create a backup or run reset apply.
 
 ## 4. Stage maintenance preparation
 
@@ -223,3 +312,73 @@ It preserves Auth users, user profiles, XP, favorites, avatars, bonus campaign d
 
 The prerequisite guards return 404 for table creation and quick-seat whenever CHIPS_ENABLED is not exactly 1. Monitoring adds one read-only aggregate query whenever Admin/Ops is loaded or refreshed.
 
+## 11. Ubuntu VPS copy/paste checklist — stage preflight only
+
+Run this block from the repository root. It contains placeholders and prompts, not real secrets or project refs. It performs only tool installation/checks and the read-only SQL preflight; it does not enter maintenance.
+
+    if ! command -v psql >/dev/null 2>&1; then
+      sudo apt update
+      sudo apt install -y postgresql-client
+    fi
+    psql --version || { echo 'STOP: psql unavailable' >&2; exit 1; }
+    node --version || { echo 'STOP: node unavailable' >&2; exit 1; }
+    test -f supabase/manual/chips-economy-test-reset.sql || { echo 'STOP: reset SQL missing' >&2; exit 1; }
+    test -r supabase/manual/chips-economy-test-reset.sql || { echo 'STOP: reset SQL unreadable' >&2; exit 1; }
+
+    (
+      set +o history
+      set -o pipefail
+      umask 077
+      export RESET_TARGET=stage
+
+      read -rsp 'Stage PostgreSQL direct/session-pooler URI: ' SUPABASE_STAGE_DB_URL
+      printf '\n'
+      export SUPABASE_STAGE_DB_URL
+      read -rp 'Expected stage Supabase project ref: ' EXPECTED_SUPABASE_PROJECT_REF
+      export EXPECTED_SUPABASE_PROJECT_REF
+
+      ACTUAL_SUPABASE_PROJECT_REF="$(node -e 'const u=new URL(process.env.SUPABASE_STAGE_DB_URL); const host=/^db\.([a-z0-9-]+)\.supabase\.co$/i.exec(u.hostname); const user=/^postgres\.([a-z0-9-]+)$/i.exec(decodeURIComponent(u.username||"")); const ref=(host&&host[1])||(user&&user[1])||""; if(!ref) process.exit(2); process.stdout.write(ref);')"
+      if [ "$ACTUAL_SUPABASE_PROJECT_REF" != "$EXPECTED_SUPABASE_PROJECT_REF" ]; then
+        echo 'STOP: project ref mismatch; no database command was run.' >&2
+        exit 1
+      fi
+      printf 'Project ref verified: %s\n' "$ACTUAL_SUPABASE_PROJECT_REF"
+
+      psql "$SUPABASE_STAGE_DB_URL" -X \
+        -v ON_ERROR_STOP=1 \
+        -v reset_target=stage \
+        -v expected_project_ref="$EXPECTED_SUPABASE_PROJECT_REF" \
+        -v reset_apply=0 \
+        -f supabase/manual/chips-economy-test-reset.sql \
+        2>&1 | tee stage-ch-reset-preflight.txt
+      PREFLIGHT_EXIT=${PIPESTATUS[0]}
+      printf 'Preflight exit code: %s\n' "$PREFLIGHT_EXIT"
+      chmod 600 stage-ch-reset-preflight.txt
+
+      if [ "$PREFLIGHT_EXIT" -ne 0 ]; then
+        echo 'STOP: preflight failed; do not enter maintenance.' >&2
+        exit 1
+      fi
+      if ! grep -Fq 'PRE-FLIGHT ONLY. No rows or schema objects were modified.' stage-ch-reset-preflight.txt; then
+        echo 'STOP: success marker missing; do not enter maintenance.' >&2
+        exit 1
+      fi
+      echo 'READ-ONLY STAGE PREFLIGHT PASSED. Stop and submit the protected output for review.'
+    )
+
+Expected success evidence:
+
+    PRE-FLIGHT ONLY. No rows or schema objects were modified.
+    Preflight exit code: 0
+    READ-ONLY STAGE PREFLIGHT PASSED. Stop and submit the protected output for review.
+
+After review, either move the protected output outside the repository or delete it:
+
+    chmod 600 stage-ch-reset-preflight.txt
+    mv stage-ch-reset-preflight.txt '<approved-private-directory>/'
+
+or:
+
+    rm -f stage-ch-reset-preflight.txt
+
+Stop after this checklist. Do not set `CHIPS_ENABLED=0`, disable Netlify, stop WS, run `pg_dump` or execute reset apply until the preflight output has been reviewed and the next maintenance step is explicitly authorized.
