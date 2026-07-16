@@ -538,6 +538,16 @@ function isBotTimeoutSafetyRetrySuppressed(tableId) {
   return false;
 }
 
+function pruneBotTimeoutSafetySuppressions() {
+  if (suppressedBotTimeoutSafetyFailures.size === 0) return;
+  const loadedTableIds = new Set(tableManager.listTableIds());
+  for (const tableId of suppressedBotTimeoutSafetyFailures.keys()) {
+    if (!loadedTableIds.has(tableId) || tableManager.isTableClosed(tableId) === true) {
+      suppressedBotTimeoutSafetyFailures.delete(tableId);
+    }
+  }
+}
+
 function scheduleBotStep({ tableId, trigger, requestId, frameTs }) {
   const enqueueStep = () => enqueueTableCommand({
     tableId,
@@ -2243,6 +2253,7 @@ async function sweepOpenTableJanitorAndBroadcast() {
 
 async function sweepTurnTimeoutsAndBroadcast() {
   const nowMs = Date.now();
+  pruneBotTimeoutSafetySuppressions();
   const timeoutUpdates = tableManager.listDueTurnTimeouts({
     nowMs,
     shouldProcessTable: (tableId) => (
