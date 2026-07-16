@@ -1150,29 +1150,30 @@
         nodes.opsPokerEscrow.innerHTML = "";
       } else {
         var escrow = summary.pokerEscrowResiduals;
-        var residualCount = escrow && Number(escrow.closedResidualTableCount);
-        var residualChips = escrow && Number(escrow.closedResidualChips);
-        var escrowAvailable = escrow && escrow.available === true && Number.isFinite(residualCount) && Number.isFinite(residualChips);
+        var problemCount = escrow && Number(escrow.problemAccountCount);
+        var problemChips = escrow && Number(escrow.problemChips);
+        var escrowAvailable = escrow && escrow.available === true && Number.isFinite(problemCount) && Number.isFinite(problemChips);
         if (!escrowAvailable){
           nodes.opsPokerEscrow.innerHTML = [
             '<div class="admin-surface">',
-            '<div class="admin-list__title"><span>Closed-table escrow</span>' + pill("Unavailable", "info") + "</div>",
+            '<div class="admin-list__title"><span>Poker escrow health</span>' + pill("Unavailable", "info") + "</div>",
             '<p class="admin-empty">Residual data could not be loaded. This state is not considered healthy.</p>',
             "</div>"
           ].join("");
         } else {
-          var residualTone = residualCount === 0 ? "success" : "danger";
-          var residualLabel = residualCount === 0 ? "Healthy" : String(residualCount) + " residuals";
+          var residualTone = problemCount === 0 ? "success" : "danger";
+          var residualLabel = problemCount === 0 ? "Healthy" : String(problemCount) + (problemCount === 1 ? " problem" : " problems");
           var residualItems = Array.isArray(escrow.items) ? escrow.items : [];
           nodes.opsPokerEscrow.innerHTML = [
             '<div class="admin-surface">',
-            '<div class="admin-list__title"><span>Closed-table escrow</span>' + pill(residualLabel, residualTone) + "</div>",
+            '<div class="admin-list__title"><span>Poker escrow health</span>' + pill(residualLabel, residualTone) + "</div>",
             '<div class="admin-kv">',
             renderKvRow("All poker escrow accounts", formatAmount(escrow.totalAccountCount)),
-            renderKvRow("Closed tables with residual", formatAmount(residualCount)),
-            renderKvRow("Residual CH total", formatAmount(residualChips)),
-            renderKvRow("Largest residual", formatAmount(escrow.largestResidualChips)),
-            renderKvRow("Last detected", formatTimestamp(escrow.lastResidualAt)),
+            renderKvRow("Closed tables with residual", formatAmount(escrow.closedResidualTableCount) + " · " + formatAmount(escrow.closedResidualChips) + " CH"),
+            renderKvRow("Orphan escrow accounts", formatAmount(escrow.orphanResidualAccountCount) + " · " + formatAmount(escrow.orphanResidualChips) + " CH"),
+            renderKvRow("Problem escrow total", formatAmount(problemChips) + " CH"),
+            renderKvRow("Largest residual", formatAmount(escrow.largestResidualChips) + " CH"),
+            renderKvRow("Latest escrow update", formatTimestamp(escrow.latestEscrowUpdateAt)),
             "</div>",
             renderMiniList(residualItems.map(function(item){
               return {

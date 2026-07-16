@@ -21,31 +21,35 @@ with poker_escrow as (
   from public.chips_accounts a
   where a.account_type = 'ESCROW'
     and a.system_key like 'POKER_TABLE:%'
-), closed_residuals as (
+), problem_residuals as (
   select
-    t.id::text as table_id,
+    e.table_id_text as table_id,
     e.balance,
-    t.status,
+    case when t.id is null then 'ORPHANED' else t.status end as status,
     t.created_at as table_created_at,
     t.updated_at as table_updated_at,
     t.last_activity_at,
     e.escrow_updated_at
   from poker_escrow e
-  join public.poker_tables t on t.id::text = e.table_id_text
-  where t.status = 'CLOSED'
-    and e.balance > 0
+  left join public.poker_tables t on t.id::text = e.table_id_text
+  where e.balance > 0
+    and (t.status = 'CLOSED' or t.id is null)
 ), limited_items as (
   select *
-  from closed_residuals
+  from problem_residuals
   order by balance desc, escrow_updated_at desc, table_id asc
   limit 10
 )
 select
   (select count(*)::bigint from poker_escrow) as total_account_count,
-  (select count(*)::bigint from closed_residuals) as closed_residual_table_count,
-  coalesce((select sum(balance)::bigint from closed_residuals), 0) as closed_residual_chips,
-  coalesce((select max(balance)::bigint from closed_residuals), 0) as largest_residual_chips,
-  (select max(escrow_updated_at) from closed_residuals) as last_residual_at,
+  (select count(*)::bigint from problem_residuals where status = 'CLOSED') as closed_residual_table_count,
+  coalesce((select sum(balance)::bigint from problem_residuals where status = 'CLOSED'), 0) as closed_residual_chips,
+  (select count(*)::bigint from problem_residuals where status = 'ORPHANED') as orphan_residual_account_count,
+  coalesce((select sum(balance)::bigint from problem_residuals where status = 'ORPHANED'), 0) as orphan_residual_chips,
+  (select count(*)::bigint from problem_residuals) as problem_account_count,
+  coalesce((select sum(balance)::bigint from problem_residuals), 0) as problem_chips,
+  coalesce((select max(balance)::bigint from problem_residuals), 0) as largest_residual_chips,
+  (select max(escrow_updated_at) from problem_residuals) as latest_escrow_update_at,
   coalesce(
     (select jsonb_agg(jsonb_build_object(
       'tableId', table_id,
@@ -66,8 +70,12 @@ select
       totalAccountCount: Number(row.total_account_count || 0),
       closedResidualTableCount: Number(row.closed_residual_table_count || 0),
       closedResidualChips: Number(row.closed_residual_chips || 0),
+      orphanResidualAccountCount: Number(row.orphan_residual_account_count || 0),
+      orphanResidualChips: Number(row.orphan_residual_chips || 0),
+      problemAccountCount: Number(row.problem_account_count || 0),
+      problemChips: Number(row.problem_chips || 0),
       largestResidualChips: Number(row.largest_residual_chips || 0),
-      lastResidualAt: row.last_residual_at || null,
+      latestEscrowUpdateAt: row.latest_escrow_update_at || null,
       items: Array.isArray(row.items) ? row.items : [],
     };
   } catch (error) {
@@ -77,8 +85,12 @@ select
       totalAccountCount: null,
       closedResidualTableCount: null,
       closedResidualChips: null,
+      orphanResidualAccountCount: null,
+      orphanResidualChips: null,
+      problemAccountCount: null,
+      problemChips: null,
       largestResidualChips: null,
-      lastResidualAt: null,
+      latestEscrowUpdateAt: null,
       items: [],
     };
   }

@@ -318,13 +318,17 @@ Rozszerzyć netlify/functions/admin-ops-summary.mjs::loadOpsSummary() o lokalny 
 - totalAccountCount;
 - closedResidualTableCount;
 - closedResidualChips;
+- orphanResidualAccountCount;
+- orphanResidualChips;
+- problemAccountCount;
+- problemChips;
 - largestResidualChips;
-- lastResidualAt;
+- latestEscrowUpdateAt;
 - items.
 
 Każdy element items zawiera tableId, balance, status, tableCreatedAt, tableUpdatedAt, lastActivityAt i escrowUpdatedAt. Lista ma maksymalnie 10 problematycznych pozycji.
 
-Zapytanie łączy chips_accounts dla account_type=ESCROW i system_key LIKE POKER_TABLE:% z poker_tables, agregując zamknięte stoły z dodatnim saldem. Obecna skala nie wymaga migracji, indeksu, cursora ani materializacji.
+Zapytanie używa LEFT JOIN między chips_accounts dla account_type=ESCROW i system_key LIKE POKER_TABLE:% a poker_tables. Problemem jest zarówno zamknięty stół z dodatnim saldem, jak i dodatnie konto escrow bez odpowiadającego rekordu stołu. Osierocone konto otrzymuje status ORPHANED. Obecna skala nie wymaga migracji, indeksu, cursora ani materializacji.
 
 Endpoint zachowuje istniejący requireAdminUser() z netlify/functions/_shared/admin-auth.mjs.
 
@@ -340,8 +344,8 @@ Zmienić istniejące:
 
 Stan:
 
-- zielony wyłącznie dla kompletnej odpowiedzi z closedResidualTableCount równym 0;
-- czerwony dla co najmniej jednego residualu, z liczbą stołów i sumą CH;
+- zielony wyłącznie dla kompletnej odpowiedzi z problemAccountCount równym 0;
+- czerwony dla co najmniej jednego zamkniętego lub osieroconego residualu, z liczbą kont i sumą CH;
 - Unavailable przy błędzie, nigdy fałszywie zielony;
 - krótka lista największych lub najnowszych residuali.
 
