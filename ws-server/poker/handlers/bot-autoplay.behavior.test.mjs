@@ -1,6 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handleBotStepCommand } from "./bot-autoplay.mjs";
+import { handleBotStepCommand, shouldSuppressBotTimeoutSafetyRetry } from "./bot-autoplay.mjs";
+
+test("bot timeout safety suppresses deterministic same-state invariant retries only", () => {
+  assert.equal(shouldSuppressBotTimeoutSafetyRetry({ ok: false, changed: false, reason: "showdown_incomplete_community" }), true);
+  assert.equal(shouldSuppressBotTimeoutSafetyRetry({ ok: false, changed: false, reason: "showdown_missing_hole_cards" }), true);
+  assert.equal(shouldSuppressBotTimeoutSafetyRetry({ ok: false, changed: false, reason: "persist_failed" }), false);
+  assert.equal(shouldSuppressBotTimeoutSafetyRetry({ ok: true, changed: false, reason: "turn_not_bot" }), false);
+  assert.equal(shouldSuppressBotTimeoutSafetyRetry({ ok: false, changed: true, reason: "state_invalid" }), false);
+});
 
 test("handleBotStepCommand broadcasts when autoplay changes state", async () => {
   const calls = { snapshots: 0 };

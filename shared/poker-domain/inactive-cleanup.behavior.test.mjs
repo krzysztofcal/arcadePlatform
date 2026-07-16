@@ -88,6 +88,12 @@ function createCleanupHarness({
           postTransaction: async (entry) => {
             cashouts.push(entry);
             return { ok: true };
+          },
+          executeTerminalClose: async () => {
+            tableState.stateRow = { state: { ...tableState.stateRow.state, phase: "HAND_DONE", turnUserId: null, stacks: {} } };
+            tableState.tableStatus = "CLOSED";
+            for (let i = 0; i < seatState.length; i += 1) seatState[i] = { ...seatState[i], status: "INACTIVE", stack: 0 };
+            return { ok: true, changed: true, closed: true, status: "cleaned_closed", retryable: false };
           }
         });
       } finally {
@@ -105,6 +111,12 @@ function createCleanupHarness({
           postTransaction: async (entry) => {
             cashouts.push(entry);
             return { ok: true };
+          },
+          executeTerminalClose: async () => {
+            tableState.stateRow = { state: { ...tableState.stateRow.state, phase: "HAND_DONE", turnUserId: null, stacks: {} } };
+            tableState.tableStatus = "CLOSED";
+            for (let i = 0; i < seatState.length; i += 1) seatState[i] = { ...seatState[i], status: "INACTIVE", stack: 0 };
+            return { ok: true, changed: true, closed: true, status: "cleaned_closed", retryable: false };
           }
         });
       } finally {
@@ -290,7 +302,7 @@ test("inactive cleanup closes stale live hand for disconnected human after activ
   assert.equal(harness.seatState.every((row) => row.status === "INACTIVE"), true);
   assert.equal(harness.tableState.stateRow.state.phase, "HAND_DONE");
   assert.equal(harness.tableState.stateRow.state.turnUserId, null);
-  assert.deepEqual(harness.tableState.stateRow.state.stacks, { bot_1: 170 });
+  assert.deepEqual(harness.tableState.stateRow.state.stacks, {});
 });
 
 test("inactive cleanup does not close stale live hand when another active human remains", async () => {
@@ -411,8 +423,7 @@ test("inactive cleanup system sweep closes stale bots-only live table after acti
   assert.equal(harness.seatState.every((row) => row.status === "INACTIVE"), true);
   assert.equal(harness.tableState.stateRow.state.phase, "HAND_DONE");
   assert.equal(harness.tableState.stateRow.state.turnUserId, null);
-  assert.deepEqual(harness.tableState.stateRow.state.stacks, { bot_1: 200 });
-  assert.equal(harness.cashouts[0]?.createdBy, null);
+  assert.deepEqual(harness.tableState.stateRow.state.stacks, {});
 });
 
 test("inactive cleanup system sweep closes bots-only live table with expired turn despite recent activity", async () => {
@@ -442,7 +453,7 @@ test("inactive cleanup system sweep closes bots-only live table with expired tur
   assert.equal(harness.seatState.every((row) => row.status === "INACTIVE"), true);
   assert.equal(harness.tableState.stateRow.state.phase, "HAND_DONE");
   assert.equal(harness.tableState.stateRow.state.turnUserId, null);
-  assert.deepEqual(harness.tableState.stateRow.state.stacks, { bot_1: 200 });
+  assert.deepEqual(harness.tableState.stateRow.state.stacks, {});
 });
 
 test("inactive cleanup system sweep closes bots-only action phase with missing turn holder", async () => {
@@ -470,7 +481,7 @@ test("inactive cleanup system sweep closes bots-only action phase with missing t
   assert.equal(harness.seatState.every((row) => row.status === "INACTIVE"), true);
   assert.equal(harness.tableState.stateRow.state.phase, "HAND_DONE");
   assert.equal(harness.tableState.stateRow.state.turnUserId, null);
-  assert.deepEqual(harness.tableState.stateRow.state.stacks, { bot_1: 200 });
+  assert.deepEqual(harness.tableState.stateRow.state.stacks, {});
 });
 
 test("inactive cleanup system sweep closes bots-only settled table", async () => {
@@ -495,8 +506,7 @@ test("inactive cleanup system sweep closes bots-only settled table", async () =>
   assert.equal(harness.seatState.every((row) => row.status === "INACTIVE"), true);
   assert.equal(harness.tableState.stateRow.state.phase, "HAND_DONE");
   assert.equal(harness.tableState.stateRow.state.turnUserId, null);
-  assert.deepEqual(harness.tableState.stateRow.state.stacks, { bot_1: 200 });
-  assert.equal(harness.cashouts[0]?.createdBy, null);
+  assert.deepEqual(harness.tableState.stateRow.state.stacks, {});
 });
 
 test("inactive cleanup keeps fresh table open during close grace period", async () => {

@@ -124,7 +124,11 @@ function resolveSettlementCommunity(state) {
 }
 
 function eligibleUserIdsForSettlement(state) {
-  return seatUserIdsInOrder(state).filter((userId) => !state.foldedByUserId?.[userId]);
+  return seatUserIdsInOrder(state).filter((userId) => (
+    !state.foldedByUserId?.[userId]
+    && !state.leftTableByUserId?.[userId]
+    && !state.sitOutByUserId?.[userId]
+  ));
 }
 
 function settleHandState(state, nowIso) {
@@ -187,7 +191,7 @@ function orderedSeats(state) {
 }
 
 function isSelectableActor(state, userId) {
-  if (state.foldedByUserId?.[userId]) {
+  if (state.foldedByUserId?.[userId] || state.leftTableByUserId?.[userId] || state.sitOutByUserId?.[userId]) {
     return false;
   }
   const stack = Number(state.stacks?.[userId] ?? 0);

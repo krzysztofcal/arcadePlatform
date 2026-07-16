@@ -24,6 +24,7 @@ function parseIntClamped(value, fallback, min, max) {
 }
 
 const BOT_PROFILES = ["TIGHT", "NORMAL", "LOOSE"];
+const BOT_STARTING_STACK_CHIPS = 100;
 
 function parseProfile(value, fallback = "RANDOM") {
   const normalized = normalizeString(value).toUpperCase();
@@ -87,7 +88,7 @@ function getBotConfig(env = process.env) {
     minPerTable: parseIntClamped(env?.POKER_BOTS_MIN_PER_TABLE, 2, 0, 9),
     maxPerTable: parseIntClamped(env?.POKER_BOTS_MAX_PER_TABLE, 5, 0, 9),
     defaultProfile: parseProfile(env?.POKER_BOT_PROFILE_DEFAULT, "RANDOM"),
-    buyInBB: parseIntClamped(env?.POKER_BOT_BUYIN_BB, 100, 1, 1000),
+    buyInChips: BOT_STARTING_STACK_CHIPS,
     bankrollSystemKey: normalizeString(env?.POKER_BOT_BANKROLL_SYSTEM_KEY) || "TREASURY"
   };
 }
@@ -226,7 +227,7 @@ async function seedBotsForJoin({ tx, tableId, maxPlayers, tableStakes, cfg, huma
   if (toSeed <= 0) return [];
 
   const occupied = new Set(activeSeats.map((row) => normalizeSeatNo(row?.seat_no)).filter(Boolean));
-  const buyInChips = Math.max(1, Math.trunc(Number(cfg.buyInBB) * Number(stakesParsed.value.bb)));
+  const buyInChips = Math.max(1, Math.trunc(Number(cfg.buyInChips)));
   const escrowSystemKey = `POKER_TABLE:${tableId}`;
   const seededBots = [];
 

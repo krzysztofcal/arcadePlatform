@@ -682,10 +682,26 @@ function validateEntries(entries, payloadUserId, { txType = null, createdBy = nu
     systemAmount < 0 &&
     escrowAmount > 0 &&
     (systemAmount + escrowAmount) === 0;
+  const allowEscrowOnlyTableCashOut =
+    !hasUserEntry &&
+    txType === "TABLE_CASH_OUT" &&
+    payloadUserIdNormalized === "" &&
+    (createdByNormalized === "" || isUuidLike(createdByNormalized)) &&
+    entries.length === 2 &&
+    hasEscrowEntry &&
+    hasSystemEntry &&
+    escrowEntryCount === 1 &&
+    systemEntryCount === 1 &&
+    escrowAmount < 0 &&
+    systemAmount > 0 &&
+    (systemAmount + escrowAmount) === 0;
   if (!hasUserEntry && txType === "TABLE_BUY_IN" && !allowEscrowOnlyTableBuyIn) {
     throw badRequest("invalid_escrow_only_entries", "Escrow-only TABLE_BUY_IN requires SYSTEM(-) and ESCROW(+) strict shape");
   }
-  if (!hasUserEntry && txType !== "TABLE_BUY_IN") {
+  if (!hasUserEntry && txType === "TABLE_CASH_OUT" && !allowEscrowOnlyTableCashOut) {
+    throw badRequest("invalid_escrow_only_entries", "Escrow-only TABLE_CASH_OUT requires ESCROW(-) and SYSTEM(+) strict shape");
+  }
+  if (!hasUserEntry && txType !== "TABLE_BUY_IN" && txType !== "TABLE_CASH_OUT") {
     throw badRequest("missing_user_entry", "Transactions must include the user account");
   }
   return sanitized;
@@ -747,6 +763,13 @@ async function postTransaction({
     }
     if (account.status !== "active") {
       throw badRequest("system_account_inactive", `System account ${key} is not active`);
+    }
+  }
+  for (const entry of normalizedEntries) {
+    if (entry.kind === "USER") continue;
+    const account = systemMap.get(entry.systemKey);
+    if (account?.account_type !== entry.kind) {
+      throw badRequest("system_account_type_mismatch", `Account ${entry.systemKey} does not match ${entry.kind}`);
     }
   }
 

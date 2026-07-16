@@ -121,6 +121,41 @@ test("applyAction keeps current hand turn order on handSeats when seated joiner 
   assert.deepEqual(computeSharedLegalActions({ statePublic: checked.state, userId: "u3" }).actions, []);
 });
 
+test("applyAction never returns the turn to a player who left during the hand", () => {
+  const flop = stateFixture({
+    phase: "FLOP",
+    seats: [
+      { userId: "u1", seatNo: 1 },
+      { userId: "u2", seatNo: 2 },
+      { userId: "u3", seatNo: 3 }
+    ],
+    handSeats: [
+      { userId: "u1", seatNo: 1 },
+      { userId: "u2", seatNo: 2 },
+      { userId: "u3", seatNo: 3 }
+    ],
+    community: ["3H", "4H", "5H"],
+    communityDealt: 3,
+    deck: ["6H", "7H"],
+    currentBet: 0,
+    turnUserId: "u1",
+    stacks: { u1: 99, u2: 98, u3: 100 },
+    toCallByUserId: { u1: 0, u2: 0, u3: 0 },
+    betThisRoundByUserId: { u1: 0, u2: 0, u3: 0 },
+    actedThisRoundByUserId: { u1: false, u2: false, u3: false },
+    foldedByUserId: { u1: false, u2: false, u3: false },
+    leftTableByUserId: { u2: true },
+    contributionsByUserId: { u1: 2, u2: 2, u3: 2 },
+    holeCardsByUserId: { u1: ["AS", "KD"], u2: ["2C", "2D"], u3: ["QS", "QH"] }
+  });
+
+  const checked = applyAction({ pokerState: flop, userId: "u1", action: "CHECK", amount: 0 });
+  assert.equal(checked.ok, true);
+  assert.equal(checked.state.phase, "FLOP");
+  assert.equal(checked.state.turnUserId, "u3");
+  assert.deepEqual(computeSharedLegalActions({ statePublic: checked.state, userId: "u2" }).actions, []);
+});
+
 test("applyAction records last betting-round action labels including all-in", () => {
   const preflopCall = stateFixture({
     seats: [

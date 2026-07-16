@@ -12,6 +12,15 @@ function isTerminalLoaderFailure(error) {
   return code === "ERR_MODULE_NOT_FOUND" || /Cannot find module/i.test(message) || /Failed to resolve module specifier/i.test(message);
 }
 
+function isRetryableCleanupFailure(error) {
+  const status = Number(error?.status ?? error?.statusCode);
+  const code = typeof error?.code === "string" ? error.code : "";
+  if (status === 408 || status === 425 || status === 429) return true;
+  if (Number.isInteger(status) && status >= 400 && status < 500) return false;
+  if (code === "terminal_accounting_invariant_failed") return false;
+  return true;
+}
+
 export function createInactiveCleanupExecutor({
   env = process.env,
   klog = () => {},
@@ -50,7 +59,11 @@ export function createInactiveCleanupExecutor({
         message: error?.message || "unknown",
         code: typeof error?.code === "string" ? error.code : null
       });
-      return { ok: false, code: typeof error?.code === "string" ? error.code : "inactive_cleanup_failed" };
+      return {
+        ok: false,
+        code: typeof error?.code === "string" ? error.code : "inactive_cleanup_failed",
+        retryable: isRetryableCleanupFailure(error)
+      };
     }
   };
 }

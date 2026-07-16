@@ -33,6 +33,10 @@ const run = async () => {
       const existing = state.transactions.find((tx) => tx.idempotency_key === params[0]);
       return existing ? [existing] : [];
     }
+    if (text.includes("with txn as") && text.includes("chips_entries")) {
+      const transaction = state.transactions.find((tx) => tx.id === params[0]) || null;
+      return [{ transaction, entries: state.entries.filter((entry) => entry.transaction_id === params[0]), account: null }];
+    }
     return [];
   };
 
@@ -40,7 +44,13 @@ const run = async () => {
     const sqlTx = async (strings, ...values) => {
       const text = String(strings).toLowerCase();
       if (text.includes("insert into public.chips_transactions")) {
-        const row = { id: `tx-${state.nextTxId++}`, tx_type: values[5], user_id: values[6], idempotency_key: values[3] };
+        if (state.transactions.some((transaction) => transaction.idempotency_key === values[3])) {
+          const error = new Error("duplicate key value violates unique constraint chips_transactions_idempotency_key_unique");
+          error.code = "23505";
+          error.constraint = "chips_transactions_idempotency_key_unique";
+          throw error;
+        }
+        const row = { id: `tx-${state.nextTxId++}`, tx_type: values[5], user_id: values[6], idempotency_key: values[3], payload_hash: values[4] };
         state.transactions.push(row);
         return [row];
       }
@@ -92,6 +102,25 @@ const run = async () => {
   assert.equal(state.userLookups, 0);
   assert.equal(result.entries.length, 2);
   assert.deepEqual(result.entries.map((entry) => entry.account_id).sort(), ["acct-escrow", "acct-system"]);
+
+  const cashoutPayload = {
+    userId: null,
+    txType: "TABLE_CASH_OUT",
+    idempotencyKey: "poker:bot-terminal-cashout:v1:test:2:3:bot",
+    entries: [
+      { accountType: "ESCROW", systemKey: "POKER_TABLE:test", amount: -200 },
+      { accountType: "SYSTEM", systemKey: "TREASURY", amount: 200 },
+    ],
+  };
+  const cashout = await postTransaction(cashoutPayload);
+  const replay = await postTransaction(cashoutPayload);
+  assert.equal(cashout.transaction.tx_type, "TABLE_CASH_OUT");
+  assert.equal(cashout.transaction.user_id, null);
+  assert.equal(replay.transaction.id, cashout.transaction.id);
+  assert.equal(state.accounts.get("acct-escrow").balance, 0);
+  assert.equal(state.accounts.get("acct-system").balance, 10000);
+  assert.equal(state.userLookups, 0);
+  assert.equal(cashout.entries.some((entry) => state.accounts.get(entry.account_id)?.account_type === "USER"), false);
 };
 
 run().catch((error) => {

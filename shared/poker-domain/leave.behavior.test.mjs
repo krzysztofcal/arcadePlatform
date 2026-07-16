@@ -10,7 +10,7 @@ const loadExecutePokerLeave = (mocks) => {
   const source = fs.readFileSync(path.join(root, "shared/poker-domain/leave.mjs"), "utf8");
   const withoutImports = source.replace(/^\s*import[\s\S]*?;\s*$/gm, "");
   const rewritten = withoutImports.replace(/export\s+async\s+function\s+executePokerLeave\s*\(/, "async function executePokerLeave(");
-  const factory = new Function("mocks", `"use strict"; const { postTransaction, deletePokerRequest, ensurePokerRequest, storePokerRequestResult, updatePokerStateOptimistic, advanceIfNeeded, applyLeaveTable, isStateStorageValid, withoutPrivateState, buildSeatBotMap, isBotTurn, deriveCommunityCards, deriveRemainingDeck, isHoleCardsTableMissing, loadHoleCardsByUserId, hasParticipatingHumanInHand, runAdvanceLoop, runBotAutoplayLoop, requireAuthoritativeHumanStack } = mocks; ${rewritten}; return executePokerLeave;`);
+  const factory = new Function("mocks", `"use strict"; const { postTransaction, deletePokerRequest, ensurePokerRequest, storePokerRequestResult, updatePokerStateOptimistic, advanceIfNeeded, applyLeaveTable, isStateStorageValid, withoutPrivateState, buildSeatBotMap, isBotTurn, deriveCommunityCards, deriveRemainingDeck, isHoleCardsTableMissing, loadHoleCardsByUserId, hasParticipatingHumanInHand, runAdvanceLoop, runBotAutoplayLoop, requireAuthoritativeHumanStack, executeTerminalPokerCloseInTx } = mocks; ${rewritten}; return executePokerLeave;`);
   return factory(mocks);
 };
 
@@ -18,7 +18,7 @@ const tableId = "77777777-7777-4777-8777-777777777777";
 const userId = "99999999-9999-4999-8999-999999999999";
 
 const makeMocks = () => {
-  const calls = { cashouts: 0, actions: 0, deleteSeat: 0, storeResult: 0, updates: 0, closeTable: 0, holeCardDelete: 0 };
+  const calls = { cashouts: 0, actions: 0, deleteSeat: 0, storeResult: 0, updates: 0, closeTable: 0, terminalCloses: 0, holeCardDelete: 0 };
   const state = { version: 2, value: { tableId, phase: "INIT", seats: [{ userId, seatNo: 1 }], stacks: { [userId]: 50 }, leftTableByUserId: {} } };
   const seatRowsByUserId = new Map();
   let tableStatus = "OPEN";
@@ -101,6 +101,25 @@ const makeMocks = () => {
       runAdvanceLoop: (s) => ({ nextState: s }),
       runBotAutoplayLoop: async () => ({ responseFinalState: state.value, loopVersion: state.version, botActionCount: 0, botStopReason: "not_applicable" }),
       requireAuthoritativeHumanStack: realRequireAuthoritativeHumanStack,
+      executeTerminalPokerCloseInTx: async () => {
+        calls.terminalCloses += 1;
+        calls.closeTable += 1;
+        calls.updates += 1;
+        state.version += 1;
+        state.value = {
+          ...state.value,
+          phase: "HAND_DONE",
+          handId: "",
+          handSeed: "",
+          seats: [],
+          stacks: {},
+          handSeats: [],
+          turnUserId: null,
+          pot: 0,
+          potTotal: 0,
+        };
+        return { ok: true, changed: true, closed: true, stateVersion: state.version };
+      },
     },
     beginSql: async (fn) => fn(tx),
   };
@@ -165,6 +184,64 @@ for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
   assert.equal(ctx.calls.deleteSeat, 1);
   assert.equal(result.state.state.seats.some((seat) => seat.userId === userId), false);
   assert.equal(result.state.state.stacks[userId], undefined);
+}
+
+{
+  const ctx = makeMocks();
+  const settledHandId = "hand-settled-leave-must-not-rollover";
+  ctx.state.value = {
+    tableId,
+    phase: "SETTLED",
+    handId: settledHandId,
+    handSeed: "seed-settled-leave-must-not-rollover",
+    seats: [{ userId, seatNo: 1 }, { userId: "bot-1", seatNo: 2, isBot: true }],
+    handSeats: [{ userId, seatNo: 1 }, { userId: "bot-1", seatNo: 2, isBot: true }],
+    stacks: { [userId]: 41, "bot-1": 59 },
+    leftTableByUserId: {},
+    community: ["2H", "3D", "4S", "5C", "6H"],
+    communityDealt: 5,
+    showdown: { handId: settledHandId, winners: ["bot-1"], potsAwarded: [], potAwardedTotal: 0 },
+    handSettlement: { handId: settledHandId, settledAt: "2026-07-16T00:00:00.000Z", payouts: {} },
+  };
+  ctx.mocks.applyLeaveTable = () => assert.fail("SETTLED leave must not invoke rollover-capable reducer");
+  const executePokerLeave = loadExecutePokerLeave(ctx.mocks);
+  const result = await executePokerLeave({
+    beginSql: ctx.beginSql,
+    tableId,
+    userId,
+    requestId: "settled-no-rollover",
+    includeState: true,
+    hasConnectedHumanPresence: () => true,
+    klog: () => {},
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.tableStatus, "OPEN");
+  assert.equal(result.state.state.handId, settledHandId);
+  assert.equal(result.state.state.phase, "SETTLED");
+  assert.equal(result.state.state.handSeed, "seed-settled-leave-must-not-rollover");
+  assert.equal(result.state.state.handSettlement.handId, settledHandId);
+  assert.equal(ctx.calls.terminalCloses, 0);
+}
+
+{
+  const ctx = makeMocks();
+  ctx.state.value = {
+    tableId,
+    phase: "HAND_DONE",
+    seats: [{ userId, seatNo: 1 }, { userId: "bot-1", seatNo: 2, isBot: true }],
+    stacks: { [userId]: 40, "bot-1": 60 },
+    leftTableByUserId: {},
+  };
+  ctx.mocks.executeTerminalPokerCloseInTx = async () => ({
+    ok: false,
+    code: "terminal_accounting_invariant_failed",
+    reason: "bot_provenance_missing",
+  });
+  const executePokerLeave = loadExecutePokerLeave(ctx.mocks);
+  await assert.rejects(
+    () => executePokerLeave({ beginSql: ctx.beginSql, tableId, userId, requestId: "terminal-fail-closed", klog: () => {} }),
+    /terminal_accounting_invariant_failed/
+  );
 }
 
 {

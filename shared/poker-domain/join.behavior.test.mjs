@@ -16,7 +16,7 @@ function withBotEnv(fn) {
   };
   process.env.POKER_BOTS_ENABLED = "1";
   process.env.POKER_BOTS_MAX_PER_TABLE = "2";
-  process.env.POKER_BOT_BUYIN_BB = "100";
+  process.env.POKER_BOT_BUYIN_BB = "250";
   process.env.POKER_BOT_PROFILE_DEFAULT = "NORMAL";
   return Promise.resolve()
     .then(fn)
@@ -984,7 +984,7 @@ test("first human authoritative join seeds exactly two bots and persists bot sea
     userId: "human_1",
     requestId: "join-bots-1",
     seatNo: 1,
-    buyIn: 150,
+    buyIn: 100,
     postTransactionFn: async (payload) => {
       store.ledgerCalls.push(payload);
       return { ok: true };
@@ -999,8 +999,8 @@ test("first human authoritative join seeds exactly two bots and persists bot sea
     { seatNo: 2, botProfile: "NORMAL", leaveAfterHand: false },
     { seatNo: 3, botProfile: "NORMAL", leaveAfterHand: false }
   ]);
-  assert.equal(result.snapshot.stacks.human_1, 150);
-  assert.equal(Object.values(result.snapshot.stacks).filter((stack) => stack === 200).length, 2);
+  assert.equal(result.snapshot.stacks.human_1, 100);
+  assert.deepEqual(Object.values(result.snapshot.stacks), [100, 100, 100]);
   assert.equal(result.snapshot.stateVersion, 4);
   assert.equal(store.stateRow.version, 4);
   assert.equal(store.seatRows.filter((seat) => seat.is_bot).length, 2);

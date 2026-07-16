@@ -46,6 +46,8 @@ const listEligibleUserIds = ({ state, seatUserIdsInOrder }) => {
   const eligible = [];
   for (const userId of seatOrder) {
     if (state.foldedByUserId?.[userId]) continue;
+    if (state.leftTableByUserId?.[userId]) continue;
+    if (state.sitOutByUserId?.[userId]) continue;
     if (!Object.prototype.hasOwnProperty.call(stacks, userId)) continue;
     normalizeChipAmount("stack", stacks[userId]);
     eligible.push(userId);

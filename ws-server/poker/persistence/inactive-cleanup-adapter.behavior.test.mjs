@@ -66,3 +66,36 @@ test('inactive cleanup loader transient failure remains retryable', async () => 
   assert.equal(result.code, 'temporarily_unavailable');
   assert.equal(result.retryable, true);
 });
+
+test('inactive cleanup ledger contract failure is non-retryable', async () => {
+  const exec = createInactiveCleanupExecutor({
+    beginSql: async () => {
+      const error = new Error('Transactions must include the user account');
+      error.code = 'missing_user_entry';
+      error.status = 400;
+      throw error;
+    },
+    loadInactiveCleanupModule: async () => ({ executeInactiveCleanup: async ({ beginSql }) => beginSql(() => {}) }),
+    loadDepsModule: async () => ({ postTransaction: async () => {}, isHoleCardsTableMissing: () => false })
+  });
+
+  const result = await exec({ tableId: 't1', userId: 'u1', requestId: 'r1' });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'missing_user_entry');
+  assert.equal(result.retryable, false);
+});
+
+test('inactive cleanup unexpected runtime failure remains retryable', async () => {
+  const exec = createInactiveCleanupExecutor({
+    beginSql: async () => {
+      throw new Error('temporary database outage');
+    },
+    loadInactiveCleanupModule: async () => ({ executeInactiveCleanup: async ({ beginSql }) => beginSql(() => {}) }),
+    loadDepsModule: async () => ({ postTransaction: async () => {}, isHoleCardsTableMissing: () => false })
+  });
+
+  const result = await exec({ tableId: 't1', userId: 'u1', requestId: 'r1' });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'inactive_cleanup_failed');
+  assert.equal(result.retryable, true);
+});
