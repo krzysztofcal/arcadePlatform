@@ -8,6 +8,7 @@ import { buildSeatBotMap, isBotTurn } from "../../netlify/functions/_shared/poke
 import { deriveCommunityCards, deriveRemainingDeck } from "../../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../../netlify/functions/_shared/poker-hole-cards-store.mjs";
 import { hasParticipatingHumanInHand, runAdvanceLoop, runBotAutoplayLoop } from "../../netlify/functions/_shared/poker-autoplay.mjs";
+import { executeTerminalPokerCloseInTx } from "./terminal-close.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 const BOT_AUTOPLAY_MAX_ACTIONS = 8;
@@ -157,6 +158,21 @@ const hasLiveHandSignal = (state) => {
   const phase = typeof state?.phase === "string" ? state.phase : "";
   return ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(phase);
 };
+
+const isTerminalSettlementPhase = (state) => state?.phase === "SETTLED" || state?.phase === "HAND_DONE";
+
+const applyTerminalSettlementLeave = (state, userId) => ({
+  state: {
+    ...state,
+    seats: parseSeats(state?.seats).filter((seat) => seat?.userId !== userId),
+    stacks: { ...parseStacks(state?.stacks) },
+    leftTableByUserId: {
+      ...(isPlainObject(state?.leftTableByUserId) ? state.leftTableByUserId : {}),
+      [userId]: true,
+    },
+  },
+  events: [{ type: "PLAYER_LEFT_TABLE", userId }],
+});
 
 const isUserInCurrentHand = (state, userId) => {
   const handSeats = Array.isArray(state?.handSeats) ? state.handSeats : parseSeats(state?.seats);
@@ -580,7 +596,9 @@ export async function executePokerLeave({
         const reducerRequestId = requestId || undefined;
         let leaveApplied = null;
         try {
-          leaveApplied = applyLeaveTable(currentState, { userId: userId, requestId: reducerRequestId });
+          leaveApplied = isTerminalSettlementPhase(currentState)
+            ? applyTerminalSettlementLeave(currentState, userId)
+            : applyLeaveTable(currentState, { userId: userId, requestId: reducerRequestId });
         } catch (error) {
           const isInvalidPlayer = isInvalidPlayerLeaveNoop(error);
           klog("poker_leave_reducer_throw", {
@@ -926,53 +944,24 @@ export async function executePokerLeave({
           });
         }
         if (!hasAnyActiveHuman(allSeatRows) && !hasLiveHandSignal(latestState) && !connectedHumanPresence) {
-          const closedStacks = parseStacks(latestState.stacks);
-          for (const row of allSeatRows || []) {
-            if (row?.is_bot === true) continue;
-            const targetUserId = typeof row?.user_id === "string" ? row.user_id : null;
-            if (!targetUserId) continue;
-            const closeCashoutAmount = requireAuthoritativeHumanStack({ state: { stacks: closedStacks }, userId: targetUserId }).amount;
-            if (closeCashoutAmount > 0) {
-              await postTransaction({
-                userId: targetUserId,
-                txType: "TABLE_CASH_OUT",
-                idempotencyKey: `poker:leave:table_close:${tableId}:${targetUserId}`,
-                entries: [
-                  { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -closeCashoutAmount },
-                  { accountType: "USER", amount: closeCashoutAmount },
-                ],
-                createdBy: userId,
-                tx,
-              });
-            }
-            delete closedStacks[targetUserId];
-          }
-          const closedState = sanitizePersistedState(toClosedInertState(latestState, closedStacks));
-          validatePersistedStateOrThrow(closedState, makeError);
-          const closeUpdateResult = await updatePokerStateOptimistic(tx, {
+          const terminalCloseResult = await executeTerminalPokerCloseInTx({
+            tx,
             tableId,
-            expectedVersion: latestVersion,
-            nextState: closedState,
+            postTransaction,
+            createdBy: userId,
+            closeReason: "WS_LEAVE_TABLE_CLOSE",
+            successStatus: "leave_closed",
+            klog,
           });
-          if (!closeUpdateResult.ok) {
-            if (closeUpdateResult.reason === "conflict") throw makeError(409, "state_conflict");
-            throw makeError(409, "state_invalid");
+          if (!terminalCloseResult?.ok) {
+            throw makeError(409, "terminal_accounting_invariant_failed");
           }
-          latestVersion = closeUpdateResult.newVersion;
-          latestState = closedState;
-          mutated = true;
-
-          await tx.unsafe(
-            "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1;",
-            [tableId]
-          );
+          latestVersion = Number.isInteger(terminalCloseResult.stateVersion)
+            ? terminalCloseResult.stateVersion
+            : latestVersion;
+          latestState = sanitizePersistedState(toClosedInertState(latestState, {}));
           finalTableStatus = "CLOSED";
-          if (table.status !== "CLOSED") {
-            await tx.unsafe(
-              "update public.poker_tables set status = 'CLOSED', updated_at = now(), last_activity_at = now() where id = $1;",
-              [tableId]
-            );
-          }
+          mutated = terminalCloseResult.changed === true || mutated;
           klog("poker_leave_table_closed_terminal_bots_only", {
             tableId,
             userId,

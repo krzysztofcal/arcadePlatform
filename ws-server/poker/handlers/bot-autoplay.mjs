@@ -1,3 +1,17 @@
+const BOT_AUTOPLAY_SAME_STATE_INVARIANT_FAILURES = new Set([
+  "showdown_incomplete_community",
+  "showdown_missing_hole_cards",
+  "not_enough_cards",
+  "state_invalid",
+]);
+
+export function shouldSuppressBotTimeoutSafetyRetry(result) {
+  const reason = typeof result?.reason === "string" ? result.reason.trim() : "";
+  return result?.ok === false
+    && result?.changed !== true
+    && BOT_AUTOPLAY_SAME_STATE_INVARIANT_FAILURES.has(reason);
+}
+
 export async function handleBotStepCommand({
   tableId,
   trigger,

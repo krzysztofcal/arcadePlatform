@@ -25,7 +25,7 @@ import { handleJoinCommand } from "./poker/handlers/join.mjs";
 import { handleActCommand } from "./poker/handlers/act.mjs";
 import { handleStartHandCommand } from "./poker/handlers/start-hand.mjs";
 import { handleTurnTimeoutCommand } from "./poker/handlers/turn-timeout.mjs";
-import { handleBotStepCommand } from "./poker/handlers/bot-autoplay.mjs";
+import { handleBotStepCommand, shouldSuppressBotTimeoutSafetyRetry } from "./poker/handlers/bot-autoplay.mjs";
 import { handleLeaveCommand } from "./poker/handlers/leave.mjs";
 import { handleRebuyCommand } from "./poker/handlers/rebuy.mjs";
 import { createTableCommandQueue } from "./poker/runtime/table-command-queue.mjs";
@@ -527,6 +527,16 @@ async function runBotStep({ tableId, trigger, requestId, frameTs }) {
 }
 
 const scheduledObservedBotTurnKeys = new Map();
+const suppressedBotTimeoutSafetyFailures = new Map();
+
+function isBotTimeoutSafetyRetrySuppressed(tableId) {
+  const suppressed = suppressedBotTimeoutSafetyFailures.get(tableId);
+  if (!suppressed) return false;
+  const currentStateVersion = Number(tableManager.persistedStateVersion(tableId));
+  if (Number.isFinite(currentStateVersion) && currentStateVersion === suppressed.stateVersion) return true;
+  suppressedBotTimeoutSafetyFailures.delete(tableId);
+  return false;
+}
 
 function scheduleBotStep({ tableId, trigger, requestId, frameTs }) {
   const enqueueStep = () => enqueueTableCommand({
@@ -2238,6 +2248,7 @@ async function sweepTurnTimeoutsAndBroadcast() {
     shouldProcessTable: (tableId) => (
       tableManager.isTableClosed(tableId) !== true
       && !isTurnTimeoutTableQuarantined(tableId, nowMs)
+      && !isBotTimeoutSafetyRetrySuppressed(tableId)
     )
   });
   await Promise.allSettled(timeoutUpdates.map((update) => enqueueTableCommand({
@@ -2251,7 +2262,7 @@ async function sweepTurnTimeoutsAndBroadcast() {
           turnUserId: update.turnUserId || null,
           stateVersion: Number.isFinite(Number(update.stateVersion)) ? Number(update.stateVersion) : null
         });
-        return handleBotStepCommand({
+        const result = await handleBotStepCommand({
           tableId: update.tableId,
           trigger: "bot_timeout_safety",
           requestId: `bot-timeout-safety:${update.tableId}:${nowMs}`,
@@ -2260,6 +2271,20 @@ async function sweepTurnTimeoutsAndBroadcast() {
           broadcastStateSnapshots,
           klog: klogSafe
         });
+        if (shouldSuppressBotTimeoutSafetyRetry(result)) {
+          suppressedBotTimeoutSafetyFailures.set(update.tableId, {
+            stateVersion: Number(update.stateVersion),
+            reason: result.reason,
+          });
+          klogSafe("ws_bot_timeout_safety_same_state_retry_suppressed", {
+            tableId: update.tableId,
+            stateVersion: Number(update.stateVersion),
+            reason: result.reason,
+          });
+        } else {
+          suppressedBotTimeoutSafetyFailures.delete(update.tableId);
+        }
+        return result;
       }
       const result = await handleTurnTimeoutCommand({
         tableId: update.tableId,
