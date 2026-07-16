@@ -271,6 +271,31 @@ Jeżeli transakcja nie została zatwierdzona, rollback jest wystarczający. Jeż
 6. Ustawić produkcyjny `CHIPS_ENABLED=1`, włączyć projekt, opublikować świeży production deploy, uruchomić `ws-server.service` i wykonać prod smoke.
 7. Nie polegać na zmianie samej wartości ENV: każda zmiana `CHIPS_ENABLED` musi zostać utrwalona w nowym deployu właściwego kontekstu.
 
+### Phase 6 — abort i przywrócenie usług
+
+Procedura recovery jest obowiązkowa również wtedy, gdy operator rezygnuje przed uruchomieniem SQL. Sam rollback bazy nie przywraca Netlify ani WS.
+
+#### Reset nie rozpoczął się albo transakcja zrobiła rollback
+
+1. Zatrzymać dalsze kroki resetu i potwierdzić brak aktywnej sesji mutującej.
+2. Read-only potwierdzić, że baza zachowała stan sprzed resetu, wymagane triggery są aktywne, a tabele i konta SYSTEM istnieją.
+3. Przywrócić `CHIPS_ENABLED=1` dla kontekstu, który został przełączony na maintenance.
+4. Utworzyć świeży deploy właściwego kontekstu i potwierdzić, że zawiera `CHIPS_ENABLED=1`; samo przestawienie ENV nie wystarcza.
+5. Jeżeli Netlify nie pozwala zbudować deployu przy wyłączonym projekcie, włączyć projekt z ostatnim maintenance deployem nadal mającym `CHIPS_ENABLED=0`, a następnie natychmiast opublikować świeży deploy. WS pozostaje zatrzymany do zakończenia deploymentu.
+6. Włączyć projekt Netlify, jeżeli nadal jest wyłączony.
+7. Uruchomić odpowiedni `ws-server-preview.service` lub `ws-server.service` dopiero po sukcesie deployu.
+8. Potwierdzić podstawowe operacje: odczyt salda, brak nieoczekiwanej mutacji, utworzenie nowego stołu i poprawne połączenie WS.
+
+#### COMMIT przeszedł, ale końcowe assertions lub smoke zawiodły
+
+1. Nie włączać projektu i nie uruchamiać WS.
+2. Pozostawić `CHIPS_ENABLED=0` oraz maintenance deploy.
+3. Przywrócić pełny backup zgodnie z runbookiem.
+4. Read-only potwierdzić integralność przywróconego ledgeru, triggerów, stołów i kont SYSTEM.
+5. Dopiero po poprawnym restore wykonać powyższą procedurę przywrócenia `CHIPS_ENABLED=1`, świeżego deployu, Netlify i WS.
+
+Jeżeli nie można jednoznacznie potwierdzić rollbacku albo restore, środowisko pozostaje w maintenance. Nie wolno przywracać writerów do niezweryfikowanego stanu.
+
 ### Minimalny smoke
 
 1. Istniejący użytkownik loguje się.
@@ -336,6 +361,8 @@ Reset celowo i bezpowrotnie bez backupu usuwa:
 Nie usuwa Auth users, profili, awatarów, XP, ulubionych, kampanii ani allowlist. Po resecie użytkownik ma 0 CH do czasu nowej transakcji i może ponownie odebrać aktywny bonus.
 
 Monitoring jest addytywny i tylko do odczytu. Nie wpływa na gameplay ani ledger poza kosztem jednego agregującego zapytania przy odświeżeniu Admin/Ops.
+
+Operacyjny abort nie powinien zmienić danych, jeżeli transakcja zrobi rollback, ale powoduje downtime do czasu jawnego przywrócenia ENV, świeżego deployu, projektu Netlify i WS. Niekompletna procedura recovery może pozostawić aplikację poprawnie zabezpieczoną, lecz niedostępną.
 
 ## 8. Świadomie poza zakresem
 
