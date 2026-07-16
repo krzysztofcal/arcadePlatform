@@ -128,7 +128,13 @@
           </div>
         </section>
 
+        <section class="xp-card" id="adminUnavailable" hidden aria-labelledby="adminUnavailableTitle">
+          <h2 class="xp-card__title" id="adminUnavailableTitle">Admin temporarily unavailable</h2>
+          <p class="admin-empty" id="adminUnavailableText">Admin authorization could not be verified. Try again after the service is available.</p>
+        </section>
+
         <section id="adminApp" hidden>
+          <div class="admin-status" id="adminMaintenance" data-tone="error" role="status" hidden>Economy maintenance is active. CH and poker mutations are disabled; only read-only Ops observability is available.</div>
           <section class="xp-card admin-tabbar" aria-labelledby="adminTabBarTitle">
             <h2 class="visually-hidden" id="adminTabBarTitle">Admin sections</h2>
             <div class="admin-tabs" role="tablist" aria-label="Admin panel sections">

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 import { isStateStorageValid, normalizeJsonState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 
+process.env.CHIPS_ENABLED = "1";
+
 const makeHandler = (queries, options = {}) =>
   loadPokerHandler("netlify/functions/poker-create-table.mjs", {
     baseHeaders: () => ({}),
@@ -112,7 +114,26 @@ const runSlowNotifyDoesNotDelayResponse = async () => {
   resolveNotify({ ok: true });
 };
 
+const runMaintenanceGuard = async () => {
+  const queries = [];
+  const handler = makeHandler(queries);
+  process.env.CHIPS_ENABLED = "0";
+  try {
+    const response = await handler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ maxPlayers: 6, stakes: "1/2" }),
+    });
+    assert.equal(response.statusCode, 404);
+    assert.deepEqual(JSON.parse(response.body), { error: "not_found" });
+    assert.equal(queries.length, 0);
+  } finally {
+    process.env.CHIPS_ENABLED = "1";
+  }
+};
+
 await runMissingStakes();
 await runInvalidStakes();
 await runSlashStakes();
 await runSlowNotifyDoesNotDelayResponse();
+await runMaintenanceGuard();

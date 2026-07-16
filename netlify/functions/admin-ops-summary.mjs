@@ -124,9 +124,6 @@ function createAdminOpsSummaryHandler(deps = {}) {
   const requireAdmin = deps.requireAdminUser || requireAdminUser;
   const loadSummary = deps.loadOpsSummary || (() => loadOpsSummary(env));
   return async function handler(event) {
-    if (env.CHIPS_ENABLED !== "1") {
-      return { statusCode: 404, headers: baseHeaders(), body: JSON.stringify({ error: "not_found" }) };
-    }
     const origin = event.headers?.origin || event.headers?.Origin;
     const cors = corsHeaders(origin);
     if (!cors) {
