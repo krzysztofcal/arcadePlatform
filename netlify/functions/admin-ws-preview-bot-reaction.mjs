@@ -143,6 +143,9 @@ function createAdminWsPreviewBotReactionHandler(deps = {}) {
   const buildIdentity = deps.buildStageIdentity || (() => buildStageIdentity(env));
   const fetchImpl = deps.fetchImpl || globalThis.fetch;
   return async function handler(event) {
+    if (env.CHIPS_ENABLED !== "1") {
+      return jsonResponse(404, baseHeaders(), { error: "not_found" });
+    }
     const origin = event.headers?.origin || event.headers?.Origin;
     const cors = corsHeaders(origin);
     if (!cors) return jsonResponse(403, baseHeaders(), { error: "forbidden_origin" });

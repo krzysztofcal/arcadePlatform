@@ -242,6 +242,9 @@ function createAdminDom() {
     "adminStatus",
     "adminUnauthorized",
     "adminUnauthorizedText",
+    "adminUnavailable",
+    "adminUnavailableText",
+    "adminMaintenance",
     "adminApp",
     "adminUsersBody",
     "adminUsersEmpty",
@@ -359,7 +362,19 @@ function buildContext(options = {}) {
     fetchCalls.push(String(url || ""));
     const text = String(url || "");
     if (text.includes("/.netlify/functions/admin-me")) {
-      return { ok: true, json: async () => ({ userId: "admin-1" }) };
+      if (opts.meUnavailable){
+        return { ok: false, status: 503, json: async () => ({ error: "server_error" }) };
+      }
+      if (opts.nonAdmin){
+        return { ok: false, status: 403, json: async () => ({ error: "admin_required" }) };
+      }
+      return { ok: true, json: async () => ({
+        ok: true,
+        isAdmin: true,
+        userId: "admin-1",
+        chipsEnabled: !opts.maintenance,
+        maintenance: opts.maintenance === true,
+      }) };
     }
     if (text.includes("/.netlify/functions/admin-users-list")) {
       return { ok: true, json: async () => ({ items: [], pagination: null }) };
@@ -423,7 +438,7 @@ function buildContext(options = {}) {
       return { ok: true, json: async () => ({
         summary: {},
         janitor: { openTableCount: 0, staleHumanSeatCount: 0, staleOpenTableCount: 0, flaggedTableCount: 0 },
-        runtime: { buildId: "test-build", chipsEnabled: true, adminUserIdsConfigured: true, janitorConfig: {}, healthy: true },
+        runtime: { buildId: "test-build", chipsEnabled: !opts.maintenance, adminUserIdsConfigured: true, janitorConfig: {}, healthy: !opts.maintenance },
         recentJanitorActivity: { adminActions: [], cleanupTransactions: [] },
         pokerEscrowResiduals: {
           available: true,
@@ -459,7 +474,7 @@ function buildContext(options = {}) {
         supabaseProjectRef: "stageabc",
         expectedStageProjectRef: "stageabc",
         databaseTarget: "stage",
-        chipsEnabled: true,
+        chipsEnabled: !opts.maintenance,
         stageProjectRefConfigured: true,
         stageProjectRefMatches: true,
         serviceRoleProjectRef: "stageabc",
@@ -719,6 +734,56 @@ test("admin page still renders ops summary when stage identity request fails", a
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /Stage identity unavailable/);
   assert.match(document.getElementById("adminOpsStats").innerHTML, /OPEN tables/);
   assert.match(document.getElementById("adminOpsRuntime").innerHTML, /Runtime health/);
+});
+
+test("admin page keeps read-only Ops available during CH maintenance", async () => {
+  const { context, document, tabs, panels, fetchCalls } = buildContext({ maintenance: true });
+  vm.runInContext(source, context, { filename: "js/admin-page.js" });
+
+  await flush();
+  await flush();
+  await flush();
+
+  assert.equal(document.getElementById("adminApp").hidden, false);
+  assert.equal(document.getElementById("adminUnauthorized").hidden, true);
+  assert.equal(document.getElementById("adminUnavailable").hidden, true);
+  assert.equal(document.getElementById("adminMaintenance").hidden, false);
+  assert.equal(tabs[5].getAttribute("aria-selected"), "true");
+  assert.equal(panels[5].hidden, false);
+  assert.equal(tabs.slice(0, 5).every((tab) => tab.disabled === true), true);
+  assert.equal(fetchCalls.some((url) => url.includes("admin-users-list")), false);
+  assert.equal(fetchCalls.includes("/.netlify/functions/admin-stage-identity"), true);
+  assert.equal(fetchCalls.includes("/.netlify/functions/admin-ops-summary"), true);
+  assert.equal(fetchCalls.includes("/.netlify/functions/admin-ws-preview-bot-reaction"), false);
+  assert.match(document.getElementById("adminOpsIdentity").innerHTML, /CHIPS_ENABLED/);
+  assert.match(document.getElementById("adminOpsIdentity").innerHTML, /off/);
+  assert.match(document.getElementById("adminOpsRuntime").innerHTML, /off/);
+  assert.equal(document.getElementById("adminOpsRunReconciler").disabled, true);
+  assert.equal(document.getElementById("adminOpsRunStaleSweep").disabled, true);
+  assert.equal(document.getElementById("adminOpsBotReactionDelay").disabled, true);
+  assert.equal(document.getElementById("adminOpsBotReactionApply").disabled, true);
+  assert.equal(document.getElementById("adminOpsBotReactionDefault").disabled, true);
+});
+
+test("admin page distinguishes unavailable bootstrap from a non-admin account", async () => {
+  const unavailable = buildContext({ meUnavailable: true });
+  vm.runInContext(source, unavailable.context, { filename: "js/admin-page.js" });
+  await flush();
+  await flush();
+
+  assert.equal(unavailable.document.getElementById("adminUnavailable").hidden, false);
+  assert.equal(unavailable.document.getElementById("adminUnauthorized").hidden, true);
+  assert.match(unavailable.document.getElementById("adminUnavailableText").textContent, /temporarily unavailable/i);
+  assert.doesNotMatch(unavailable.document.getElementById("adminUnavailableText").textContent, /not.*allowlist/i);
+
+  const nonAdmin = buildContext({ nonAdmin: true });
+  vm.runInContext(source, nonAdmin.context, { filename: "js/admin-page.js" });
+  await flush();
+  await flush();
+
+  assert.equal(nonAdmin.document.getElementById("adminUnauthorized").hidden, false);
+  assert.equal(nonAdmin.document.getElementById("adminUnavailable").hidden, true);
+  assert.match(nonAdmin.document.getElementById("adminUnauthorizedText").textContent, /allowlisted/i);
 });
 
 test("admin bonus campaign form explains invalid campaign codes before sending a request", async () => {

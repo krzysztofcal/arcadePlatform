@@ -6,6 +6,7 @@
   var BONUS_CAMPAIGN_CODE_RE = /^[a-z0-9][a-z0-9_-]*$/;
   var state = {
     adminUserId: null,
+    maintenance: false,
     activeTab: "users",
     users: {
       page: 1,
@@ -82,6 +83,9 @@
     nodes.status = doc.getElementById("adminStatus");
     nodes.unauthorized = doc.getElementById("adminUnauthorized");
     nodes.unauthorizedText = doc.getElementById("adminUnauthorizedText");
+    nodes.unavailable = doc.getElementById("adminUnavailable");
+    nodes.unavailableText = doc.getElementById("adminUnavailableText");
+    nodes.maintenance = doc.getElementById("adminMaintenance");
     nodes.app = doc.getElementById("adminApp");
     nodes.tabs = Array.prototype.slice.call(doc.querySelectorAll("[data-admin-tab]"));
     nodes.panels = Array.prototype.slice.call(doc.querySelectorAll("[data-admin-panel]"));
@@ -273,15 +277,29 @@
 
   function showUnauthorized(message){
     setVisible(nodes.app, false);
+    setVisible(nodes.unavailable, false);
     setVisible(nodes.unauthorized, true);
     if (nodes.unauthorizedText){
       nodes.unauthorizedText.textContent = message || t("adminUnauthorized", "This page is available only for allowlisted admin accounts.");
     }
   }
 
+  function showUnavailable(message){
+    setVisible(nodes.app, false);
+    setVisible(nodes.unauthorized, false);
+    setVisible(nodes.unavailable, true);
+    if (nodes.unavailableText){
+      nodes.unavailableText.textContent = message || "Admin authorization could not be verified. Try again after the service is available.";
+    }
+  }
+
   function showApp(){
     setVisible(nodes.unauthorized, false);
+    setVisible(nodes.unavailable, false);
     setVisible(nodes.app, true);
+    setVisible(nodes.maintenance, state.maintenance);
+    if (nodes.opsRunReconciler) nodes.opsRunReconciler.disabled = state.maintenance;
+    if (nodes.opsRunStaleSweep) nodes.opsRunStaleSweep.disabled = state.maintenance;
   }
 
   function buildQuery(params){
@@ -1204,6 +1222,8 @@
         };
       })) : "";
     }
+    if (nodes.opsRunReconciler) nodes.opsRunReconciler.disabled = state.maintenance;
+    if (nodes.opsRunStaleSweep) nodes.opsRunStaleSweep.disabled = state.maintenance;
   }
 
   function formatReactionRange(range){
@@ -1218,7 +1238,7 @@
     var value = state.ops.botReaction;
     var errorCode = state.ops.botReactionError;
     var pending = state.ops.botReactionPending === true;
-    var unavailable = errorCode === "preview_only" || errorCode === "ws_preview_unavailable" || errorCode === "ws_preview_timeout";
+    var unavailable = state.maintenance || errorCode === "maintenance" || errorCode === "preview_only" || errorCode === "ws_preview_unavailable" || errorCode === "ws_preview_timeout";
     if (nodes.opsBotReactionSummary){
       if (value){
         var mode = value.mode === "override" ? "Override" : "Default";
@@ -1232,7 +1252,9 @@
           "</div>"
         ].join("");
       } else if (errorCode){
-        var errorText = errorCode === "preview_only"
+        var errorText = errorCode === "maintenance"
+          ? "Disabled while CHIPS_ENABLED is off."
+          : errorCode === "preview_only"
           ? "Available only on WS Preview."
           : errorCode === "ws_preview_timeout"
             ? "WS Preview did not respond in time."
@@ -1313,7 +1335,11 @@
 
   function renderTabs(){
     (nodes.tabs || []).forEach(function(button){
-      var isActive = button.getAttribute("data-admin-tab") === state.activeTab;
+      var tab = button.getAttribute("data-admin-tab");
+      var maintenanceDisabled = state.maintenance && tab !== "ops";
+      var isActive = tab === state.activeTab;
+      button.disabled = maintenanceDisabled;
+      button.setAttribute("aria-disabled", maintenanceDisabled ? "true" : "false");
       button.classList.toggle("is-active", isActive);
       button.setAttribute("aria-selected", isActive ? "true" : "false");
       button.setAttribute("tabindex", isActive ? "0" : "-1");
@@ -1326,6 +1352,7 @@
   }
 
   function setActiveTab(tab){
+    if (state.maintenance && tab !== "ops") tab = "ops";
     if (!tab || state.activeTab === tab && tab !== "ops") {
       renderTabs();
       return;
@@ -1345,12 +1372,22 @@
     try {
       var me = await apiFetch("/.netlify/functions/admin-me", { method: "GET" });
       state.adminUserId = me.userId || null;
+      state.maintenance = me.maintenance === true || me.chipsEnabled === false;
       showApp();
       setStatus("", "");
-      loadUsers();
+      if (state.maintenance){
+        setActiveTab("ops");
+      } else {
+        loadUsers();
+      }
     } catch (err){
       state.adminUserId = null;
-      showUnauthorized(getUnauthorizedMessage(err));
+      state.maintenance = false;
+      if (err && (err.status === 401 || (err.status === 403 && err.code === "admin_required"))){
+        showUnauthorized(getUnauthorizedMessage(err));
+      } else {
+        showUnavailable("Admin access verification is temporarily unavailable. Try again after the service is available.");
+      }
       setStatus("", "");
     }
   }
@@ -1701,7 +1738,7 @@
       var results = await Promise.allSettled([
         apiFetch("/.netlify/functions/admin-stage-identity", { method: "GET" }),
         apiFetch("/.netlify/functions/admin-ops-summary", { method: "GET" }),
-        apiFetch("/.netlify/functions/admin-ws-preview-bot-reaction", { method: "GET", cache: "no-store" })
+        state.maintenance ? Promise.resolve(null) : apiFetch("/.netlify/functions/admin-ws-preview-bot-reaction", { method: "GET", cache: "no-store" })
       ]);
       if (results[0].status === "fulfilled"){
         state.ops.identity = results[0].value || null;
@@ -1716,7 +1753,11 @@
       }
       var payload = results[1].value || {};
       state.ops.summary = payload;
-      if (results[2].status === "fulfilled"){
+      if (state.maintenance){
+        state.ops.botReaction = null;
+        state.ops.botReactionError = "maintenance";
+        state.ops.botReactionMessage = "";
+      } else if (results[2].status === "fulfilled"){
         state.ops.botReaction = results[2].value || null;
         state.ops.botReactionError = null;
         state.ops.botReactionMessage = "";
@@ -1748,6 +1789,10 @@
 
   async function submitBotReactionOverride(event){
     event.preventDefault();
+    if (state.maintenance){
+      setStatus("CH and poker mutations are disabled during maintenance.", "error");
+      return;
+    }
     var delayMs = Number(nodes.opsBotReactionDelay && nodes.opsBotReactionDelay.value);
     if (!Number.isInteger(delayMs) || delayMs < 100 || delayMs > 10000){
       state.ops.botReactionError = "invalid_range";
@@ -1775,6 +1820,10 @@
   }
 
   async function clearBotReactionOverride(){
+    if (state.maintenance){
+      setStatus("CH and poker mutations are disabled during maintenance.", "error");
+      return;
+    }
     state.ops.botReactionPending = true;
     state.ops.botReactionError = null;
     state.ops.botReactionMessage = "";
@@ -1795,6 +1844,10 @@
   }
 
   async function runOpsAction(action){
+    if (state.maintenance){
+      setStatus("CH and poker mutations are disabled during maintenance.", "error");
+      return;
+    }
     setStatus(t("loading", "Loading..."), "info");
     try {
       var payload = await apiFetch("/.netlify/functions/admin-ops-actions", {
@@ -1818,7 +1871,7 @@
   }
 
   function handleApiError(err, fallback){
-    if (err && (err.status === 401 || err.status === 403)){
+    if (err && (err.status === 401 || (err.status === 403 && err.code === "admin_required"))){
       showUnauthorized(getUnauthorizedMessage(err));
       setStatus("", "");
       return;

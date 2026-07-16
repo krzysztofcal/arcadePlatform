@@ -309,6 +309,19 @@ const run = async () => {
     assert.equal(lockCalls[0]?.params?.[0], "quickseat:6:1:2");
     assert.equal(lockCalls[1]?.params?.[0], "quickseat:6:1:2");
   }
+  {
+    const queries = [];
+    const handler = makeHandler({ mode: "create", queries });
+    process.env.CHIPS_ENABLED = "0";
+    try {
+      const response = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
+      assert.equal(response.statusCode, 404);
+      assert.deepEqual(JSON.parse(response.body), { error: "not_found" });
+      assert.equal(queries.length, 0);
+    } finally {
+      process.env.CHIPS_ENABLED = "1";
+    }
+  }
 
 };
 
