@@ -53,6 +53,22 @@ test("admin-ops-summary still rejects a non-admin during maintenance", async () 
   assert.equal(loadCalls, 0);
 });
 
+test("admin-ops-summary maps a PostgreSQL summary failure to the isolation probe contract", async () => {
+  const handler = createAdminOpsSummaryHandler({
+    env: { CHIPS_ENABLED: "0" },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    loadOpsSummary: async () => {
+      const error = new Error("connect timeout");
+      error.code = "CONNECT_TIMEOUT";
+      throw error;
+    },
+  });
+  const response = await handler(createEvent());
+
+  assert.equal(response.statusCode, 500);
+  assert.equal(response.body, JSON.stringify({ error: "server_error" }));
+});
+
 test("poker escrow monitoring treats positive orphan escrow as a problem", async () => {
   let capturedSql = "";
   const summary = await loadPokerEscrowResidualSummary(async (sql) => {

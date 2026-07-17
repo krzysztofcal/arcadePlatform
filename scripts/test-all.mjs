@@ -123,6 +123,7 @@ run("node", ["tests/poker-workflows.playwright-install.guard.test.mjs"], "poker-
 run("node", ["tests/poker-workflows.no-http-sweep.guard.test.mjs"], "poker-workflows-no-http-sweep-guard");
 run("node", ["tests/db-stage-workflows.guard.test.mjs"], "db-stage-workflows-guard");
 run("node", ["tests/chips-economy-reset-cli.contract.test.mjs"], "chips-economy-reset-cli-contract");
+run("node", ["tests/ch-economy-network-maintenance.behavior.test.mjs"], "ch-economy-network-maintenance-behavior");
 
 try { run("npm", ["run", "-s", "lint:games"], "unit"); } catch { /* optional */ }
 

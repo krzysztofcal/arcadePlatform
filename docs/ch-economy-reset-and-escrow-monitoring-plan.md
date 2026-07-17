@@ -83,7 +83,7 @@ Nie tworzymy fingerprintów danych ani osobnych manifestów. Repo ma istniejący
 - netlify/functions/admin-stage-identity.mjs::parseProjectRefFromSupabaseUrl();
 - netlify/functions/admin-stage-identity.mjs::buildStageIdentity().
 
-Runbook wymaga jednorazowych wartości RESET_TARGET=stage|prod i EXPECTED_SUPABASE_PROJECT_REF. Bezpośrednio przed psql project ref jest wyprowadzany z DB URL i musi być zgodny z oczekiwaną wartością. SQL nie potrafi wiarygodnie poznać Supabase project ref od wewnątrz bazy, dlatego walidacja connection stringa jest obowiązkowym zewnętrznym guardem.
+Runbook wymaga `RESET_TARGET=stage|prod`, target-specific DB URL i obu niezależnie skopiowanych expected refów. Skrypt operatorski porównuje ref wyprowadzony z wybranego URL oraz expected ref z wersjonowanym kanonicznym refem środowiska. SQL nadal otrzymuje wybrany ref jako parametr, ponieważ nie potrafi wiarygodnie poznać Supabase project ref od wewnątrz bazy.
 
 Preflight i apply nadal sprawdzają tabele, migracje, FK, triggery oraz liczniki. Brak zgodności kończy operację przed mutacją.
 
@@ -114,7 +114,7 @@ Reset nie modyfikuje tych tabel, a FK prowadzą od rekordów usuwanych do zachow
 Implementacja potrzebuje tylko:
 
 - supabase/manual/chips-economy-test-reset.sql;
-- scripts/ops/stage-network-maintenance.sh;
+- scripts/ops/ch-economy-network-maintenance.sh;
 - krótkiego runbooka z zatwierdzonymi komendami operacyjnymi.
 
 Nie powstają manifesty, endpoint resetu, UI, scheduler ani framework audytowy. Po wykonaniu obu resetów skrypt należy usunąć z aktywnego drzewa albo oznaczyć jako retired.
@@ -156,13 +156,15 @@ Ten prerequisite domyka aplikacyjną lukę. Historyczne Deploy Preview nadal mog
 
 #### Twardy stage maintenance gate
 
-Stage używa Supabase Network Restrictions zamiast `Disable Project`. Jednorazowy skrypt `scripts/ops/stage-network-maintenance.sh`:
+Stage i produkcja używają Supabase Network Restrictions zamiast `Disable Project`. Skrypt `scripts/ops/ch-economy-network-maintenance.sh`:
 
 - odczytuje i zapisuje dokładną poprzednią konfigurację IPv4/IPv6 poza repo;
-- wymaga dwóch zgodnych stage project refów oraz `RESET_TARGET=stage`;
+- wiąże `RESET_TARGET` z wersjonowanym kanonicznym project refem, target-specific DB URL, expected refem, nazwą usługi WS i osobnym recovery;
 - zastępuje allowlistę wyłącznie publicznymi host CIDR-ami VPS;
 - czeka na `status=applied` i porównuje dokładny zestaw;
-- deterministycznie przywraca zapisany stan przed ponownym uruchomieniem Netlify/WS.
+- zapisuje fazy `captured`, `restricting` i `restricted`, dzięki czemu przerwanie przed/po update może zostać rozpoznane po restarcie;
+- deterministycznie przywraca zapisany stan przed ponownym uruchomieniem Netlify/WS;
+- serializuje stage i prod jednym lokalnym lockiem, zachowując osobne recovery files.
 
 Network Restrictions obejmują direct Postgres i Supabase pooler, więc blokują historyczne Deploy Preview bez ich usuwania. Nie obejmują Supabase HTTPS API, dlatego opublikowany maintenance deploy z `CHIPS_ENABLED=0`, zamrożenie automatyzacji i RLS pozostają defense-in-depth. Produkcja pozostaje online podczas resetu stage.
 
@@ -206,7 +208,7 @@ Guard jest obroną dodatkową. Twardym warunkiem stage resetu pozostaje późnie
 
 ### Phase 1 — preflight read-only
 
-1. Ustawić RESET_TARGET, EXPECTED_SUPABASE_PROJECT_REF i DB URL.
+1. Ustawić RESET_TARGET, target-specific DB URL oraz oba expected project refy; skrypt wymusza kanoniczne refy z wersjonowanej konfiguracji.
 2. Zweryfikować project ref z DB URL przed połączeniem mutującym.
 3. Wyświetlić konta SYSTEM, salda, liczbę USER/ESCROW, transakcji, wpisów, claimów, stołów i residuali.
 4. Sprawdzić wymagane tabele, kolumny, migracje, FK i triggery.
@@ -269,9 +271,9 @@ Jeżeli transakcja nie została zatwierdzona, rollback jest wystarczający. Jeż
 1. Dla stage opublikować znany Deploy Preview z `CHIPS_ENABLED=0`, zatrzymać `ws-server-preview.service`, zapisać Network Restrictions i ograniczyć stage DB do VPS. Produkcja pozostaje online, a historyczne Deploy Preview nie są usuwane.
 2. Wykonać stage backup, reset i assertions.
 3. Po poprawnych assertions przywrócić dokładną poprzednią konfigurację Network Restrictions. Dopiero potem przywrócić wartość deploy-preview `CHIPS_ENABLED=1`, opublikować świeży Deploy Preview, uruchomić `ws-server-preview.service` i wykonać stage smoke.
-4. Po akceptacji stage ustawić produkcyjny `CHIPS_ENABLED=0` i opublikować production maintenance deploy. Następnie ponownie wyłączyć cały projekt Netlify i zatrzymać `ws-server.service`.
-5. Wykonać osobny prod backup, uruchomić ten sam skrypt na prod i potwierdzić prod assertions.
-6. Ustawić produkcyjny `CHIPS_ENABLED=1`, włączyć projekt, opublikować świeży production deploy, uruchomić `ws-server.service` i wykonać prod smoke.
+4. Po akceptacji stage i rehearsal probe `admin-ops-summary` ustawić produkcyjny `CHIPS_ENABLED=0`, opublikować production maintenance deploy, zatrzymać `ws-server.service`, a następnie ograniczyć produkcyjny Postgres/pooler do VPS przez ten sam target-bound skrypt. Produkcyjna strona HTTP pozostaje online w maintenance mode.
+5. Potwierdzić kontrolowane `500` z read-only Netlify isolation probe, wykonać osobny prod backup, uruchomić ten sam reset SQL na prod i potwierdzić prod assertions.
+6. Przy nadal zatrzymanym WS przywrócić dokładne produkcyjne Network Restrictions, ustawić `CHIPS_ENABLED=1`, opublikować świeży production deploy, uruchomić `ws-server.service` i wykonać prod smoke.
 7. Nie polegać na zmianie samej wartości ENV: każda zmiana `CHIPS_ENABLED` musi zostać utrwalona w nowym deployu właściwego kontekstu.
 
 ### Phase 6 — abort i przywrócenie usług
