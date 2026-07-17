@@ -248,6 +248,18 @@ Any unexpected CIDR, non-`applied` status, active WS service, failed VPS `psql` 
 
 ## 5. Stage backup
 
+The `pg_dump` and `pg_restore` client major versions must match the PostgreSQL server major version. Stage currently runs PostgreSQL 17, so do not use the Ubuntu-default PostgreSQL 16 clients that were sufficient for `psql` preflight. Verify all three values before creating the archive:
+
+    SERVER_MAJOR="$(psql "$SUPABASE_STAGE_DB_URL" -X -Atq -v ON_ERROR_STOP=1 -c "select current_setting('server_version_num')::int / 10000;")"
+    PG_DUMP_MAJOR="$(pg_dump --version | awk '{print $3}' | cut -d. -f1)"
+    PG_RESTORE_MAJOR="$(pg_restore --version | awk '{print $3}' | cut -d. -f1)"
+    printf 'PostgreSQL server/client majors: server=%s pg_dump=%s pg_restore=%s\n' "$SERVER_MAJOR" "$PG_DUMP_MAJOR" "$PG_RESTORE_MAJOR"
+    test "$SERVER_MAJOR" = "17"
+    test "$PG_DUMP_MAJOR" = "$SERVER_MAJOR"
+    test "$PG_RESTORE_MAJOR" = "$SERVER_MAJOR"
+
+If either client does not report major version 17, stop and install the approved PostgreSQL 17 client packages before continuing. Do not attempt the backup with an older client.
+
 Create a full custom-format backup. The command includes all accessible schemas, including public and auth:
 
     BACKUP_FILE="arcade-stage-before-ch-reset-$(date -u +%Y%m%dT%H%M%SZ).dump"
@@ -260,9 +272,18 @@ Verify that the archive can be read:
     grep -q 'SCHEMA.*public' "$BACKUP_FILE.list"
     grep -q 'SCHEMA.*auth' "$BACKUP_FILE.list"
 
-Generate a checksum and copy the backup to approved encrypted storage outside the repository:
+Generate a checksum manifest containing relative file names, verify it locally, then copy the archive, list and manifest together to approved encrypted storage outside the repository. Relative names keep `sha256sum --check` valid after the three files are copied away from the VPS:
 
-    sha256sum "$BACKUP_FILE" "$BACKUP_FILE.list"
+    BACKUP_DIR="$(dirname "$BACKUP_FILE")"
+    BACKUP_NAME="$(basename "$BACKUP_FILE")"
+    (
+      cd "$BACKUP_DIR"
+      sha256sum "$BACKUP_NAME" "$BACKUP_NAME.list" > "$BACKUP_NAME.sha256"
+      chmod 600 "$BACKUP_NAME" "$BACKUP_NAME.list" "$BACKUP_NAME.sha256"
+      sha256sum --check "$BACKUP_NAME.sha256"
+    )
+
+After copying, enter the destination directory and run `sha256sum --check "$BACKUP_NAME.sha256"` again before accepting the external backup. The manifest must contain only `$BACKUP_NAME` and `$BACKUP_NAME.list`, without absolute VPS paths.
 
 Do not continue if pg_dump, pg_restore listing, schema checks, checksum or external storage fails.
 
