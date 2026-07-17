@@ -114,6 +114,25 @@ test("target is anchored to versioned canonical refs and rejects a complete pair
   assert.equal(fs.existsSync(f.cliLog), false, "validation must fail before Management API access");
 });
 
+test("both expected refs are independently anchored even when the selected pair is correct", () => {
+  const f = fixture();
+  const wrongOpposite = { ...f.env, EXPECTED_SUPABASE_PROD_PROJECT_REF: "aaaaaaaaaaaaaaaaaaaa" };
+  const result = run("status", wrongOpposite);
+  assert.notEqual(result.status, 0, output(result));
+  assert.match(output(result), /production expected ref/);
+  assert.equal(fs.existsSync(f.cliLog), false);
+});
+
+test("missing target-specific input fails before CLI access", () => {
+  const f = fixture();
+  const missing = { ...f.env, RESET_TARGET: "prod" };
+  delete missing.SUPABASE_PROD_DB_URL;
+  const result = run("status", missing);
+  assert.notEqual(result.status, 0, output(result));
+  assert.match(output(result), /SUPABASE_PROD_DB_URL is required/);
+  assert.equal(fs.existsSync(f.cliLog), false);
+});
+
 test("stage preflight writes captured recovery and cancel archives it without update", () => {
   const f = fixture();
   const preflight = run("preflight", f.env);
@@ -203,6 +222,50 @@ test("production binds ws-server service, requires confirmation, and restores un
   assert.equal(restore.status, 0, output(restore));
   assert.deepEqual(readApi(f).config, { dbAllowedCidrs: ["0.0.0.0/0"], dbAllowedCidrsV6: ["::/0"] });
   assert.doesNotMatch(fs.readFileSync(f.cliLog, "utf8"), /--append/);
+});
+
+test("restrict fails closed while the target WS service is active", () => {
+  const f = fixture();
+  assert.equal(run("preflight", f.env).status, 0);
+  const result = run("restrict", f.env, { FAKE_SYSTEMCTL_STATE: "active" });
+  assert.notEqual(result.status, 0, output(result));
+  assert.match(output(result), /ws-server-preview\.service/);
+  assert.equal(readRecovery(f).phase, "captured");
+});
+
+test("status reports controlled mode without recovery and malformed API responses fail closed", () => {
+  const f = fixture();
+  const result = run("status", f.env);
+  assert.equal(result.status, 0, output(result));
+  const status = JSON.parse(result.stdout);
+  assert.equal(status.target, "stage");
+  assert.equal(status.projectRef, STAGE_REF);
+  assert.equal(status.status, "applied");
+  assert.equal(status.mode, "restricted-untracked");
+  assert.equal(status.recoveryPhase, "none");
+
+  fs.writeFileSync(f.apiState, JSON.stringify({ status: "applied" }));
+  const malformed = run("status", f.env);
+  assert.notEqual(malformed.status, 0, output(malformed));
+});
+
+test("changed restrictions block cancel and preserve recovery", () => {
+  const f = fixture();
+  assert.equal(run("preflight", f.env).status, 0);
+  setApi(f, "applied", DESIRED);
+  const result = run("cancel", f.env);
+  assert.notEqual(result.status, 0, output(result));
+  assert.match(output(result), /differ from captured snapshot/);
+  assert.equal(fs.existsSync(recoveryPath(f)), true);
+});
+
+test("cross-target recovery is never consumed by the other target", () => {
+  const f = fixture();
+  assert.equal(run("preflight", f.env).status, 0);
+  const prod = run("restore", { ...f.env, RESET_TARGET: "prod" });
+  assert.notEqual(prod.status, 0, output(prod));
+  assert.match(output(prod), /recovery file is missing/);
+  assert.equal(fs.existsSync(recoveryPath(f)), true);
 });
 
 test("active legacy and unknown recovery fail closed while restored archives do not block", () => {

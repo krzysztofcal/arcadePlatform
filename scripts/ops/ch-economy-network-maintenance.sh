@@ -106,6 +106,8 @@ validate_target() {
   esac
 
   DB_PROJECT_REF="$(derive_project_ref "$DB_URL")"
+  [[ "$EXPECTED_SUPABASE_STAGE_PROJECT_REF" == "$CANONICAL_STAGE_PROJECT_REF" ]] || fail "stage expected ref does not match the versioned canonical stage ref"
+  [[ "$EXPECTED_SUPABASE_PROD_PROJECT_REF" == "$CANONICAL_PROD_PROJECT_REF" ]] || fail "production expected ref does not match the versioned canonical production ref"
   [[ "$EXPECTED_PROJECT_REF" == "$CANONICAL_PROJECT_REF" ]] || fail "$TARGET expected ref does not match the versioned canonical ref"
   [[ "$DB_PROJECT_REF" == "$CANONICAL_PROJECT_REF" ]] || fail "$TARGET DB URL does not match the versioned canonical ref"
   [[ "$CANONICAL_STAGE_PROJECT_REF" != "$CANONICAL_PROD_PROJECT_REF" ]] || fail "versioned stage and production refs must differ"
@@ -222,7 +224,7 @@ configs_equal() { [[ "$(canonical_config "$1")" == "$(canonical_config "$2")" ]]
 
 config_mode() {
   local config="$1" unrestricted='{"dbAllowedCidrs":["0.0.0.0/0"],"dbAllowedCidrsV6":["::/0"]}'
-  if configs_equal "$config" "$unrestricted"; then printf 'unrestricted'; else printf 'restricted'; fi
+  if configs_equal "$config" "$unrestricted"; then printf 'unrestricted'; else printf 'restricted-untracked'; fi
 }
 
 restricted_config() {
@@ -464,8 +466,18 @@ command_restore() {
 
 command_status() {
   verify_cli_version
-  local response status current mode="untracked" phase="none"
+  local response status current mode phase="none"
   response="$(get_network_response)"; status="$(response_status "$response")"; current="$(response_config "$response")"
+  mode="$(config_mode "$current")"
+  if [[ -n "${VPS_IPV4_CIDR:-}" ]]; then
+    validate_cidr 4 "$VPS_IPV4_CIDR"
+    [[ -z "${VPS_IPV6_CIDR:-}" ]] || validate_cidr 6 "$VPS_IPV6_CIDR"
+    [[ "$mode" == "unrestricted" ]] || {
+      local desired
+      desired="$(restricted_config)"
+      configs_equal "$current" "$desired" && mode="restricted-to-vps"
+    }
+  fi
   if [[ -f "$RECOVERY_FILE" ]]; then
     local recovery previous desired
     recovery="$(read_recovery_json)"

@@ -245,10 +245,25 @@ Do not stop WS Preview, run the Network Restrictions preflight/restrict commands
 
 10. Confirm the Netlify database boundary with the exact read-only isolation probe. Before restriction, the authenticated allowlisted-admin request must have returned HTTP 200. After `status=applied`, repeat it with a cache-busting query and the same allowed Origin and Bearer token until the stage-rehearsed bound expires:
 
-        curl -sS -o /tmp/admin-ops-isolation.json -w '%{http_code}\n' \
-          -H 'Authorization: Bearer <admin-stage-access-token>' \
-          -H 'Origin: https://<deploy-preview>.netlify.app' \
-          'https://<deploy-preview>.netlify.app/.netlify/functions/admin-ops-summary?network_probe=<unique-value>'
+        export NETWORK_PROBE_BOUND_SECONDS='<recorded stage-rehearsed bound, e.g. 30>'
+        PROBE_DEADLINE=$(( $(date +%s) + NETWORK_PROBE_BOUND_SECONDS ))
+        PROBE_OK=0
+        while (( $(date +%s) < PROBE_DEADLINE )); do
+          PROBE_BODY="$(mktemp)"
+          PROBE_STATUS="$(curl -sS --max-time 12 -o "$PROBE_BODY" -w '%{http_code}' \
+            -H 'Authorization: Bearer <admin-stage-access-token>' \
+            -H 'Origin: https://<deploy-preview>.netlify.app' \
+            "https://<deploy-preview>.netlify.app/.netlify/functions/admin-ops-summary?network_probe=$(date +%s%N)" || true)"
+          if [ "$PROBE_STATUS" = 500 ] && [ "$(tr -d '\r\n' < "$PROBE_BODY")" = '{"error":"server_error"}' ]; then
+            PROBE_OK=1
+            rm -f "$PROBE_BODY"
+            break
+          fi
+          rm -f "$PROBE_BODY"
+          sleep 2
+        done
+        unset NETWORK_PROBE_BOUND_SECONDS PROBE_DEADLINE PROBE_STATUS PROBE_BODY
+        test "$PROBE_OK" -eq 1 || { echo 'STOP: Netlify isolation probe did not reach exact controlled 500.' >&2; false; }
 
     Required isolated result is HTTP `500` and an exact body `{"error":"server_error"}`. HTTP 200, 401, 403, a timeout or any other body blocks reset apply. `admin-ops-summary` uses direct PostgreSQL with `connect_timeout: 10`; do not assume a shorter response bound. This gate is authorized for production only after the exact stage `200 -> 500 -> 200` rehearsal has been recorded.
 
