@@ -174,7 +174,7 @@ The deployed code must return 404 before auth or DB access when CHIPS_ENABLED is
 
 Set the Deploy Preview Functions-scoped value:
 
-    netlify env:set CHIPS_ENABLED 0 --scope functions --context deploy-preview
+    netlify env:set CHIPS_ENABLED 0 --context deploy-preview --force
 
 Environment changes require a new deploy. Trigger a fresh Deploy Preview for the approved commit and wait for Netlify success.
 
@@ -273,15 +273,38 @@ Reconfirm the external target check immediately before apply:
     test "$RESET_TARGET" = "stage"
     test "$ACTUAL_SUPABASE_PROJECT_REF" = "$EXPECTED_SUPABASE_PROJECT_REF"
 
-Run the destructive mode exactly once:
+Run the destructive mode exactly once. As in the read-only preflight, `pipefail` and `PIPESTATUS[0]` preserve the real `psql` result instead of accepting `tee` success:
 
-    psql "$SUPABASE_STAGE_DB_URL" -X       -v ON_ERROR_STOP=1       -v reset_target=stage       -v expected_project_ref="$EXPECTED_SUPABASE_PROJECT_REF"       -v reset_apply=1       -v confirm_reset=RESET_STAGE_CH_ECONOMY       -f supabase/manual/chips-economy-test-reset.sql       | tee stage-ch-reset-apply.txt
+    set -o pipefail
+    psql "$SUPABASE_STAGE_DB_URL" -X \
+      -v ON_ERROR_STOP=1 \
+      -v reset_target=stage \
+      -v expected_project_ref="$EXPECTED_SUPABASE_PROJECT_REF" \
+      -v reset_apply=1 \
+      -v confirm_reset=RESET_STAGE_CH_ECONOMY \
+      -f supabase/manual/chips-economy-test-reset.sql \
+      2>&1 | tee stage-ch-reset-apply.txt
+    APPLY_EXIT=${PIPESTATUS[0]}
+    printf 'Apply exit code: %s\n' "$APPLY_EXIT"
+    chmod 600 stage-ch-reset-apply.txt
 
-Expected final line:
+    if [ "$APPLY_EXIT" -ne 0 ]; then
+      echo 'STOP: reset apply failed; keep maintenance active.' >&2
+      exit 1
+    fi
+    if ! grep -Fxq 'RESET COMMITTED AND POST-COMMIT BASELINE VERIFIED FOR: stage' stage-ch-reset-apply.txt; then
+      echo 'STOP: exact post-commit marker missing; keep maintenance active.' >&2
+      exit 1
+    fi
+    echo 'STAGE RESET APPLY VERIFIED. Continue only with the network restore and service gates.'
+
+Required success evidence is all three lines:
 
     RESET COMMITTED AND POST-COMMIT BASELINE VERIFIED FOR: stage
+    Apply exit code: 0
+    STAGE RESET APPLY VERIFIED. Continue only with the network restore and service gates.
 
-Any other exit or final result is failure. Keep `CHIPS_ENABLED=0`, the VPS-only Network Restrictions and WS stopped until the failure path is resolved.
+A non-zero `APPLY_EXIT`, missing exact marker, failed `chmod` or any other unexpected result is failure. Keep `CHIPS_ENABLED=0`, the VPS-only Network Restrictions and WS stopped until the failure path is resolved.
 
 ## 7. Stage service restore and smoke
 
@@ -297,7 +320,7 @@ The command archives the protected recovery file only after the Management API r
 
 Only after the verified network restore, restore the Deploy Preview Functions-scoped value:
 
-    netlify env:set CHIPS_ENABLED 1 --scope functions --context deploy-preview
+    netlify env:set CHIPS_ENABLED 1 --context deploy-preview --force
 
 Environment changes require a fresh deploy.
 
