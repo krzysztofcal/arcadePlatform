@@ -51,11 +51,6 @@ jobs:
           MONEY_HANDS: "100"
           MONEY_STEPS: "400"
 
-      - name: Sweep endpoint retired notice
-        run: |
-          set -euo pipefail
-          echo "HTTP poker-sweep endpoint is retired (410); WS runtime owns gameplay cleanup."
-
       - name: Run poker E2E scripts (PROD TEMPORARILY ALLOWED)
         run: |
           set -euo pipefail

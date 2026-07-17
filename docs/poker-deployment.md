@@ -33,6 +33,8 @@ HTTP gameplay endpoints are intentionally retired and return `410 Gone`:
 - `/.netlify/functions/poker-leave`
 - `/.netlify/functions/poker-sweep`
 
+There is no scheduled HTTP sweep. Gameplay cleanup is owned exclusively by the WS runtime through `runTableJanitor()` and the serialized inactive-cleanup primitives. The retained `poker-sweep` function is a compatibility tombstone only and must remain non-authoritative.
+
 
 ## Poker Bots (Phase 1)
 
@@ -211,4 +213,4 @@ These secrets are intentionally separate from the production WS deploy credentia
 
 
 ## Post-deploy migration note
-Legacy HTTP sweep is retired for gameplay authority. Any stale active gameplay cleanup must run from WS-owned runtime/ops flows, not from `/.netlify/functions/poker-sweep`.
+Legacy HTTP sweep is retired for gameplay authority and no scheduler invokes it. Any stale active gameplay cleanup must run from WS-owned runtime/ops flows, not from `/.netlify/functions/poker-sweep`.
