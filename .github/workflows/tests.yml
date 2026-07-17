@@ -9,6 +9,21 @@ on:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: contractpass
+          POSTGRES_DB: reset_contract
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d reset_contract"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CHIPS_RESET_CLI_TEST_DB_URL: postgresql://postgres:contractpass@127.0.0.1:5432/reset_contract
     steps:
       - name: Checkout
         uses: actions/checkout@v4

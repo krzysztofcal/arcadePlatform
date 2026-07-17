@@ -124,6 +124,15 @@ begin
     from pg_trigger tg
     join pg_class tbl on tbl.oid = tg.tgrelid
     join pg_namespace ns on ns.oid = tbl.relnamespace
+    where ns.nspname = 'public' and tbl.relname = 'chips_entries'
+      and tg.tgname = 'chips_entries_balanced_transaction'
+      and not tg.tgisinternal and tg.tgenabled <> 'D'
+      and tg.tgdeferrable and tg.tginitdeferred
+  ) or not exists (
+    select 1
+    from pg_trigger tg
+    join pg_class tbl on tbl.oid = tg.tgrelid
+    join pg_namespace ns on ns.oid = tbl.relnamespace
     where ns.nspname = 'public' and tbl.relname = 'chips_transactions'
       and tg.tgname = 'chips_transactions_block_deletes' and not tg.tgisinternal and tg.tgenabled <> 'D'
   ) or not exists (
@@ -276,6 +285,13 @@ order by system_key;
   alter table public.chips_transactions disable trigger chips_transactions_block_deletes;
 
   delete from public.chips_entries;
+
+  -- DELETE queues the DEFERRABLE INITIALLY DEFERRED balance trigger once per
+  -- entry. Drain those events before ALTER TABLE re-enables the append-only
+  -- blocker; PostgreSQL rejects ALTER TABLE while this table has pending
+  -- trigger events. The trigger remains enabled throughout the reset.
+  set constraints chips_entries_balanced_transaction immediate;
+
   delete from public.chips_transactions;
   delete from public.chips_accounts;
 

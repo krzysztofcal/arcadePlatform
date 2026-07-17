@@ -275,28 +275,35 @@ Reconfirm the external target check immediately before apply:
 
 Run the destructive mode exactly once. As in the read-only preflight, `pipefail` and `PIPESTATUS[0]` preserve the real `psql` result instead of accepting `tee` success:
 
-    set -o pipefail
-    psql "$SUPABASE_STAGE_DB_URL" -X \
-      -v ON_ERROR_STOP=1 \
-      -v reset_target=stage \
-      -v expected_project_ref="$EXPECTED_SUPABASE_PROJECT_REF" \
-      -v reset_apply=1 \
-      -v confirm_reset=RESET_STAGE_CH_ECONOMY \
-      -f supabase/manual/chips-economy-test-reset.sql \
-      2>&1 | tee stage-ch-reset-apply.txt
-    APPLY_EXIT=${PIPESTATUS[0]}
-    printf 'Apply exit code: %s\n' "$APPLY_EXIT"
-    chmod 600 stage-ch-reset-apply.txt
+    RESET_APPLY_VERIFIED=0
+    if (
+      set -o pipefail
+      psql "$SUPABASE_STAGE_DB_URL" -X \
+        -v ON_ERROR_STOP=1 \
+        -v reset_target=stage \
+        -v expected_project_ref="$EXPECTED_SUPABASE_PROJECT_REF" \
+        -v reset_apply=1 \
+        -v confirm_reset=RESET_STAGE_CH_ECONOMY \
+        -f supabase/manual/chips-economy-test-reset.sql \
+        2>&1 | tee stage-ch-reset-apply.txt
+      APPLY_EXIT=${PIPESTATUS[0]}
+      printf 'Apply exit code: %s\n' "$APPLY_EXIT"
+      chmod 600 stage-ch-reset-apply.txt
 
-    if [ "$APPLY_EXIT" -ne 0 ]; then
-      echo 'STOP: reset apply failed; keep maintenance active.' >&2
-      exit 1
+      if [ "$APPLY_EXIT" -ne 0 ]; then
+        echo 'STOP: reset apply failed; keep maintenance active.' >&2
+        exit 1
+      fi
+      if ! grep -Fxq 'RESET COMMITTED AND POST-COMMIT BASELINE VERIFIED FOR: stage' stage-ch-reset-apply.txt; then
+        echo 'STOP: exact post-commit marker missing; keep maintenance active.' >&2
+        exit 1
+      fi
+    ); then
+      RESET_APPLY_VERIFIED=1
+      echo 'STAGE RESET APPLY VERIFIED. Continue only with the network restore and service gates.'
+    else
+      echo 'STOP: reset was rolled back or could not be verified. Keep maintenance active and do not continue this runbook.' >&2
     fi
-    if ! grep -Fxq 'RESET COMMITTED AND POST-COMMIT BASELINE VERIFIED FOR: stage' stage-ch-reset-apply.txt; then
-      echo 'STOP: exact post-commit marker missing; keep maintenance active.' >&2
-      exit 1
-    fi
-    echo 'STAGE RESET APPLY VERIFIED. Continue only with the network restore and service gates.'
 
 Required success evidence is all three lines:
 
@@ -304,7 +311,7 @@ Required success evidence is all three lines:
     Apply exit code: 0
     STAGE RESET APPLY VERIFIED. Continue only with the network restore and service gates.
 
-A non-zero `APPLY_EXIT`, missing exact marker, failed `chmod` or any other unexpected result is failure. Keep `CHIPS_ENABLED=0`, the VPS-only Network Restrictions and WS stopped until the failure path is resolved.
+A non-zero `APPLY_EXIT`, missing exact marker, failed `chmod` or any other unexpected result is failure. The apply and verification commands run in a subshell used as the condition of `if`, so their `exit 1` returns failure to that condition but does not terminate the operator's interactive SSH shell. On failure `RESET_APPLY_VERIFIED` remains `0`: stop there and keep `CHIPS_ENABLED=0`, the VPS-only Network Restrictions and WS stopped until the failure path is resolved.
 
 ## 7. Stage service restore and smoke
 
