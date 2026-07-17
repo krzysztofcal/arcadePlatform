@@ -278,6 +278,7 @@ function createAdminDom() {
     "adminOpsStats",
     "adminOpsIdentity",
     "adminOpsRuntime",
+    "adminOpsPokerEscrow",
     "adminOpsBotReactionSummary",
     "adminOpsBotReactionDelay",
     "adminOpsBotReactionApply",
@@ -439,6 +440,19 @@ function buildContext(options = {}) {
         janitor: { openTableCount: 0, staleHumanSeatCount: 0, staleOpenTableCount: 0, flaggedTableCount: 0 },
         runtime: { buildId: "test-build", chipsEnabled: !opts.maintenance, adminUserIdsConfigured: true, janitorConfig: {}, healthy: !opts.maintenance },
         recentJanitorActivity: { adminActions: [], cleanupTransactions: [] },
+        pokerEscrowResiduals: {
+          available: true,
+          totalAccountCount: 3,
+          closedResidualTableCount: 0,
+          closedResidualChips: 0,
+          orphanResidualAccountCount: 1,
+          orphanResidualChips: 500,
+          problemAccountCount: 1,
+          problemChips: 500,
+          largestResidualChips: 500,
+          latestEscrowUpdateAt: "2026-07-16T15:00:00.000Z",
+          items: [{ tableId: "missing-table", balance: 500, status: "ORPHANED", escrowUpdatedAt: "2026-07-16T15:00:00.000Z", tableUpdatedAt: null }],
+        },
       }) };
     }
     if (text.includes("/.netlify/functions/admin-ws-preview-bot-reaction")) {
@@ -697,6 +711,10 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /stage/);
   assert.match(document.getElementById("adminOpsBotReactionSummary").innerHTML, /Default/);
   assert.match(document.getElementById("adminOpsBotReactionSummary").innerHTML, /2000–4000 ms/);
+  assert.match(document.getElementById("adminOpsPokerEscrow").innerHTML, /1 problem/);
+  assert.match(document.getElementById("adminOpsPokerEscrow").innerHTML, /ORPHANED/);
+  assert.match(document.getElementById("adminOpsPokerEscrow").innerHTML, /Latest escrow update/);
+  assert.doesNotMatch(document.getElementById("adminOpsPokerEscrow").innerHTML, /Healthy/);
   assert.equal(document.getElementById("adminOpsBotReactionDelay").value, "2000");
 });
 

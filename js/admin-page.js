@@ -128,6 +128,7 @@
     nodes.opsStats = doc.getElementById("adminOpsStats");
     nodes.opsIdentity = doc.getElementById("adminOpsIdentity");
     nodes.opsRuntime = doc.getElementById("adminOpsRuntime");
+    nodes.opsPokerEscrow = doc.getElementById("adminOpsPokerEscrow");
     nodes.opsBotReactionSummary = doc.getElementById("adminOpsBotReactionSummary");
     nodes.opsBotReactionForm = doc.getElementById("adminOpsBotReactionForm");
     nodes.opsBotReactionDelay = doc.getElementById("adminOpsBotReactionDelay");
@@ -1102,6 +1103,7 @@
       if (nodes.opsStats) nodes.opsStats.innerHTML = "";
       if (nodes.opsIdentity) nodes.opsIdentity.innerHTML = "";
       if (nodes.opsRuntime) nodes.opsRuntime.innerHTML = "";
+      if (nodes.opsPokerEscrow) nodes.opsPokerEscrow.innerHTML = "";
       if (nodes.opsRecentActions) nodes.opsRecentActions.innerHTML = "";
       if (nodes.opsRecentCleanup) nodes.opsRecentCleanup.innerHTML = "";
       return;
@@ -1159,6 +1161,47 @@
         renderKvRow("Live-hand stale", runtime.janitorConfig ? String(runtime.janitorConfig.liveHandStaleMs) + "ms" : "—"),
         "</div>"
       ].join("");
+      }
+    }
+    if (nodes.opsPokerEscrow){
+      if (!summary){
+        nodes.opsPokerEscrow.innerHTML = "";
+      } else {
+        var escrow = summary.pokerEscrowResiduals;
+        var problemCount = escrow && Number(escrow.problemAccountCount);
+        var problemChips = escrow && Number(escrow.problemChips);
+        var escrowAvailable = escrow && escrow.available === true && Number.isFinite(problemCount) && Number.isFinite(problemChips);
+        if (!escrowAvailable){
+          nodes.opsPokerEscrow.innerHTML = [
+            '<div class="admin-surface">',
+            '<div class="admin-list__title"><span>Poker escrow health</span>' + pill("Unavailable", "info") + "</div>",
+            '<p class="admin-empty">Residual data could not be loaded. This state is not considered healthy.</p>',
+            "</div>"
+          ].join("");
+        } else {
+          var residualTone = problemCount === 0 ? "success" : "danger";
+          var residualLabel = problemCount === 0 ? "Healthy" : String(problemCount) + (problemCount === 1 ? " problem" : " problems");
+          var residualItems = Array.isArray(escrow.items) ? escrow.items : [];
+          nodes.opsPokerEscrow.innerHTML = [
+            '<div class="admin-surface">',
+            '<div class="admin-list__title"><span>Poker escrow health</span>' + pill(residualLabel, residualTone) + "</div>",
+            '<div class="admin-kv">',
+            renderKvRow("All poker escrow accounts", formatAmount(escrow.totalAccountCount)),
+            renderKvRow("Closed tables with residual", formatAmount(escrow.closedResidualTableCount) + " · " + formatAmount(escrow.closedResidualChips) + " CH"),
+            renderKvRow("Orphan escrow accounts", formatAmount(escrow.orphanResidualAccountCount) + " · " + formatAmount(escrow.orphanResidualChips) + " CH"),
+            renderKvRow("Problem escrow total", formatAmount(problemChips) + " CH"),
+            renderKvRow("Largest residual", formatAmount(escrow.largestResidualChips) + " CH"),
+            renderKvRow("Latest escrow update", formatTimestamp(escrow.latestEscrowUpdateAt)),
+            "</div>",
+            renderMiniList(residualItems.map(function(item){
+              return {
+                title: escapeHtml((item.tableId || "unknown table") + " · " + formatAmount(item.balance) + " CH"),
+                meta: escapeHtml((item.status || "unknown") + " · escrow " + formatTimestamp(item.escrowUpdatedAt) + " · table " + formatTimestamp(item.tableUpdatedAt)),
+              };
+            })),
+            "</div>"
+          ].join("");
+        }
       }
     }
     if (nodes.opsRecentActions){

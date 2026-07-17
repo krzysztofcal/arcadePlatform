@@ -122,6 +122,7 @@ run("node", ["tests/poker-idempotency-scope.guard.test.mjs"], "poker-idempotency
 run("node", ["tests/poker-workflows.playwright-install.guard.test.mjs"], "poker-workflows-playwright-install-guard");
 run("node", ["tests/poker-workflows.no-http-sweep.guard.test.mjs"], "poker-workflows-no-http-sweep-guard");
 run("node", ["tests/db-stage-workflows.guard.test.mjs"], "db-stage-workflows-guard");
+run("node", ["tests/chips-economy-reset-cli.contract.test.mjs"], "chips-economy-reset-cli-contract");
 
 try { run("npm", ["run", "-s", "lint:games"], "unit"); } catch { /* optional */ }
 

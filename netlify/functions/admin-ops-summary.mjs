@@ -6,7 +6,95 @@ import {
   resolveEnvVisibility,
   resolveJanitorConfig,
 } from "./_shared/admin-ops.mjs";
-import { baseHeaders, corsHeaders, executeSql } from "./_shared/supabase-admin.mjs";
+import { baseHeaders, corsHeaders, executeSql, klog } from "./_shared/supabase-admin.mjs";
+
+async function loadPokerEscrowResidualSummary(runSql = executeSql) {
+  try {
+    const rows = await runSql(
+      `
+with poker_escrow as (
+  select
+    a.system_key,
+    a.balance,
+    a.updated_at as escrow_updated_at,
+    substring(a.system_key from char_length('POKER_TABLE:') + 1) as table_id_text
+  from public.chips_accounts a
+  where a.account_type = 'ESCROW'
+    and a.system_key like 'POKER_TABLE:%'
+), problem_residuals as (
+  select
+    e.table_id_text as table_id,
+    e.balance,
+    case when t.id is null then 'ORPHANED' else t.status end as status,
+    t.created_at as table_created_at,
+    t.updated_at as table_updated_at,
+    t.last_activity_at,
+    e.escrow_updated_at
+  from poker_escrow e
+  left join public.poker_tables t on t.id::text = e.table_id_text
+  where e.balance > 0
+    and (t.status = 'CLOSED' or t.id is null)
+), limited_items as (
+  select *
+  from problem_residuals
+  order by balance desc, escrow_updated_at desc, table_id asc
+  limit 10
+)
+select
+  (select count(*)::bigint from poker_escrow) as total_account_count,
+  (select count(*)::bigint from problem_residuals where status = 'CLOSED') as closed_residual_table_count,
+  coalesce((select sum(balance)::bigint from problem_residuals where status = 'CLOSED'), 0) as closed_residual_chips,
+  (select count(*)::bigint from problem_residuals where status = 'ORPHANED') as orphan_residual_account_count,
+  coalesce((select sum(balance)::bigint from problem_residuals where status = 'ORPHANED'), 0) as orphan_residual_chips,
+  (select count(*)::bigint from problem_residuals) as problem_account_count,
+  coalesce((select sum(balance)::bigint from problem_residuals), 0) as problem_chips,
+  coalesce((select max(balance)::bigint from problem_residuals), 0) as largest_residual_chips,
+  (select max(escrow_updated_at) from problem_residuals) as latest_escrow_update_at,
+  coalesce(
+    (select jsonb_agg(jsonb_build_object(
+      'tableId', table_id,
+      'balance', balance,
+      'status', status,
+      'tableCreatedAt', table_created_at,
+      'tableUpdatedAt', table_updated_at,
+      'lastActivityAt', last_activity_at,
+      'escrowUpdatedAt', escrow_updated_at
+    ) order by balance desc, escrow_updated_at desc, table_id asc) from limited_items),
+    '[]'::jsonb
+  ) as items;
+      `,
+    );
+    const row = rows?.[0] || {};
+    return {
+      available: true,
+      totalAccountCount: Number(row.total_account_count || 0),
+      closedResidualTableCount: Number(row.closed_residual_table_count || 0),
+      closedResidualChips: Number(row.closed_residual_chips || 0),
+      orphanResidualAccountCount: Number(row.orphan_residual_account_count || 0),
+      orphanResidualChips: Number(row.orphan_residual_chips || 0),
+      problemAccountCount: Number(row.problem_account_count || 0),
+      problemChips: Number(row.problem_chips || 0),
+      largestResidualChips: Number(row.largest_residual_chips || 0),
+      latestEscrowUpdateAt: row.latest_escrow_update_at || null,
+      items: Array.isArray(row.items) ? row.items : [],
+    };
+  } catch (error) {
+    klog("admin_ops_poker_escrow_residuals_failed", { reason: error?.code || "query_failed" });
+    return {
+      available: false,
+      totalAccountCount: null,
+      closedResidualTableCount: null,
+      closedResidualChips: null,
+      orphanResidualAccountCount: null,
+      orphanResidualChips: null,
+      problemAccountCount: null,
+      problemChips: null,
+      largestResidualChips: null,
+      latestEscrowUpdateAt: null,
+      items: [],
+    };
+  }
+}
 
 async function loadOpsSummary(env = process.env) {
   const janitorConfig = resolveJanitorConfig(env);
@@ -15,7 +103,7 @@ async function loadOpsSummary(env = process.env) {
   ).toISOString();
   const idleThresholdMinutes = 15;
   const idleCutoffIso = new Date(Date.now() - idleThresholdMinutes * 60 * 1000).toISOString();
-  const [openTableRows, statsRows, recentActions, recentCleanupTransactions, wsHealth] = await Promise.all([
+  const [openTableRows, statsRows, recentActions, recentCleanupTransactions, wsHealth, pokerEscrowResiduals] = await Promise.all([
     executeSql("select id from public.poker_tables where status = 'OPEN' order by updated_at asc, id asc;"),
     executeSql(
       `
@@ -60,6 +148,7 @@ limit 16;
       `,
     ),
     fetchWsHealth(env),
+    loadPokerEscrowResidualSummary(),
   ]);
   const openTableIds = (Array.isArray(openTableRows) ? openTableRows : []).map((row) => row.id).filter(Boolean);
   const snapshots = await loadPersistedTableSnapshots(openTableIds);
@@ -116,6 +205,7 @@ limit 16;
       wsHealth,
       healthy: envVisibility.chipsEnabled && envVisibility.adminUserIdsConfigured && wsHealth.ok !== false,
     },
+    pokerEscrowResiduals,
   };
 }
 
@@ -152,5 +242,6 @@ const handler = createAdminOpsSummaryHandler();
 export {
   createAdminOpsSummaryHandler,
   handler,
+  loadPokerEscrowResidualSummary,
   loadOpsSummary,
 };
