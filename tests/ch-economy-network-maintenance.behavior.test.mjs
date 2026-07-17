@@ -109,7 +109,7 @@ test("target is anchored to versioned canonical refs and rejects a complete pair
   for (const target of ["stage", "prod"]) {
     const result = run("status", { ...swapped, RESET_TARGET: target });
     assert.notEqual(result.status, 0, output(result));
-    assert.match(output(result), /canonical ref/);
+    assert.match(output(result), /expected ref does not match the versioned canonical (?:stage|production) ref/);
   }
   assert.equal(fs.existsSync(f.cliLog), false, "validation must fail before Management API access");
 });
