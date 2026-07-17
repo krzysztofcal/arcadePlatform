@@ -7,13 +7,13 @@
 \if :{?reset_target}
 \else
   \echo 'ERROR: pass -v reset_target=stage or -v reset_target=prod'
-  \quit 3
+  do $reset_abort$ begin raise exception 'reset_guard_missing_reset_target'; end $reset_abort$;
 \endif
 
 \if :{?expected_project_ref}
 \else
   \echo 'ERROR: pass -v expected_project_ref=<Supabase project ref>'
-  \quit 3
+  do $reset_abort$ begin raise exception 'reset_guard_missing_expected_project_ref'; end $reset_abort$;
 \endif
 
 \if :{?reset_apply}
@@ -34,24 +34,38 @@ select :'reset_target' in ('stage', 'prod') as reset_target_valid,
 \if :reset_guard_reset_target_valid
 \else
   \echo 'ERROR: reset_target must be stage or prod'
-  \quit 3
+  do $reset_abort$ begin raise exception 'reset_guard_invalid_reset_target'; end $reset_abort$;
 \endif
 
 \if :reset_guard_expected_project_ref_present
 \else
   \echo 'ERROR: expected_project_ref cannot be empty'
-  \quit 3
+  do $reset_abort$ begin raise exception 'reset_guard_empty_expected_project_ref'; end $reset_abort$;
 \endif
 
 \if :reset_guard_reset_apply_valid
 \else
   \echo 'ERROR: reset_apply must be exactly 0 or 1'
-  \quit 3
+  do $reset_abort$ begin raise exception 'reset_guard_invalid_reset_apply'; end $reset_abort$;
 \endif
 
 \echo 'CH economy reset target:' :reset_target
 \echo 'Expected Supabase project ref (validated externally):' :expected_project_ref
 \echo 'Apply mode:' :reset_apply
+
+-- Validate destructive intent before schema reads and before BEGIN. A SQL exception
+-- gives psql 16 a reliable non-zero exit with ON_ERROR_STOP.
+\if :reset_apply
+  select :'confirm_reset' = ('RESET_' || upper(:'reset_target') || '_CH_ECONOMY') as confirmation_valid
+  \gset reset_confirm_
+
+  \if :reset_confirm_confirmation_valid
+    \echo 'APPLY CONFIRMED. Running fail-closed schema preflight for:' :reset_target
+  \else
+    \echo 'ERROR: apply requires -v confirm_reset=RESET_' :reset_target '_CH_ECONOMY (target upper-case)'
+    do $reset_abort$ begin raise exception 'reset_guard_invalid_confirmation'; end $reset_abort$;
+  \endif
+\endif
 
 -- Fail before printing counts when the checked-in schema contract is not present.
 do $preflight$
@@ -217,16 +231,7 @@ where account_type = 'SYSTEM'
 order by system_key;
 
 \if :reset_apply
-  select :'confirm_reset' = ('RESET_' || upper(:'reset_target') || '_CH_ECONOMY') as confirmation_valid
-  \gset reset_confirm_
-
-  \if :reset_confirm_confirmation_valid
-  \else
-    \echo 'ERROR: apply requires -v confirm_reset=RESET_' :reset_target '_CH_ECONOMY (target upper-case)'
-    \quit 3
-  \endif
-
-  \echo 'APPLY CONFIRMED. Beginning one-transaction reset for:' :reset_target
+  \echo 'SCHEMA PREFLIGHT PASSED. Beginning one-transaction reset for:' :reset_target
 
   begin;
 

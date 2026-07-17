@@ -21,7 +21,7 @@ For the stage reset, `CHIPS_ENABLED=0` is defense-in-depth and Supabase Network 
 
 ## 2. Operator prerequisites — Ubuntu VPS
 
-Run the preflight and later reset from an Ubuntu VPS checkout of this repository. The Supabase SQL Editor is not the preferred execution method: the reset file uses `psql` meta-commands (`\if`, `\set`, `\quit`) and command-line `-v` parameters that the Dashboard SQL Editor does not implement.
+Run the preflight and later reset from an Ubuntu VPS checkout of this repository. The Supabase SQL Editor is not the preferred execution method: the reset file uses `psql` meta-commands (`\if`, `\set`, `\gset`) and command-line `-v` parameters that the Dashboard SQL Editor does not implement.
 
 ### 2.1 Verify tools
 
