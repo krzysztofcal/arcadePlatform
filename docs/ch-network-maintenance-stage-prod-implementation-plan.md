@@ -9,7 +9,7 @@ Replace the production `Disable Project` step with the same database-boundary ma
 The implementation will generalize the existing stage script rather than create a second copy:
 
 - one script with explicit `RESET_TARGET=stage|prod`;
-- the same `preflight`, `restrict`, `status`, and `restore` commands;
+- the same `preflight`, `restrict`, `status`, `restore`, and `cancel` commands;
 - exact target-to-project and target-to-WS-service binding;
 - separate recovery evidence for stage and production;
 - no automatic restore and no application-runtime changes.
@@ -100,24 +100,31 @@ Files:
 
 Properties:
 
-- keep commands `preflight|restrict|status|restore`;
+- keep commands `preflight|restrict|status|restore` and add `cancel` for a captured read-only preflight that will not proceed to restriction;
 - require `RESET_TARGET` to be exactly `stage` or `prod`;
 - derive immutable target configuration once, immediately after validation:
+  - stage database input: `SUPABASE_STAGE_DB_URL`;
+  - stage independently sourced identity: `EXPECTED_SUPABASE_STAGE_PROJECT_REF`;
+  - production database input: `SUPABASE_PROD_DB_URL`;
+  - production independently sourced identity: `EXPECTED_SUPABASE_PROD_PROJECT_REF`;
   - stage WS service: `ws-server-preview.service`;
   - prod WS service: `ws-server.service`;
   - target label used in every message and recovery record;
+- select the database URL and expected project ref internally from this fixed mapping; do not accept generic `SUPABASE_DB_URL`, `SUPABASE_PROJECT_REF`, or `EXPECTED_SUPABASE_PROJECT_REF` as target-selection inputs;
 - do not accept an operator-provided service name in normal execution;
 - retain test-only command injection only where required by the existing test pattern.
 
 `validate_target()` must require:
 
-- `EXPECTED_SUPABASE_PROJECT_REF`: independently copied for the selected target;
-- `SUPABASE_PROJECT_REF`: derived from that target's DB URL by the runbook;
-- exact equality and the existing project-ref format check;
+- the target-specific database URL and expected project ref selected above;
+- a project ref derived by the script from the selected database URL;
+- exact equality between that derived ref and the selected target-specific expected ref, plus the existing project-ref format check;
+- both expected refs to be present and different, so the script has an independent anti-cross reference for each environment;
+- the selected ref to differ from the opposite environment's expected ref; `RESET_TARGET=prod` with a stage DB URL and matching stage ref must fail, as must the inverse;
 - a production-only confirmation value bound to the project ref for `restrict`, for example `NETWORK_MAINTENANCE_CONFIRM=RESTRICT_PROD_<project-ref>`;
 - no production confirmation requirement for read-only `status` or emergency `restore` after valid recovery evidence has been loaded.
 
-The production confirmation is an operator-intent guard, not a substitute for project-ref comparison.
+The production confirmation is an operator-intent guard, not a substitute for the target-specific mapping or anti-cross validation.
 
 ### Task 2 — Isolate recovery evidence and serialization
 
@@ -135,10 +142,23 @@ Required model:
   - `stage-network-restrictions.json`;
   - `prod-network-restrictions.json`;
 - recovery schema includes `schemaVersion`, `target`, `projectRef`, `capturedAt`, pinned CLI version, prior restriction mode, and exact IPv4/IPv6 arrays;
+- recovery schema includes `phase`, initially `captured` and changed atomically to `restricted` only after exact VPS-only convergence has been verified;
 - reading recovery requires exact match of both `target` and `projectRef`;
 - stage recovery can never authorize production restore, and vice versa;
 - `preflight` refuses to create a new recovery file while either target has unresolved recovery evidence;
 - restored evidence is archived with target and UTC timestamp and remains mode `600`.
+
+The single lock is a deliberate change from independent target locks. It serializes stage and production maintenance even though their recovery files remain target-specific. This is intentionally stricter: one operator host cannot capture, restrict, cancel, or restore one environment while another environment has an unresolved operation, reducing cross-target mistakes and recovery-file races at the cost of forbidding otherwise independent concurrent maintenance.
+
+`command_cancel()` is the only supported way to resolve a read-only preflight that will not continue:
+
+1. acquire the same global lock and load target-bound recovery;
+2. require `phase: captured`; `phase: restricted` must fail and instruct the operator to use `restore`;
+3. read the current restrictions from the Management API without issuing an update;
+4. require an exact semantic match with the captured IPv4/IPv6 arrays and prior mode;
+5. archive the recovery record only after that equality check passes.
+
+`cancel` must fail closed and retain recovery if the response is unauthorized, malformed, transitional, or different. Manual deletion of a recovery file is never part of the normal runbook. `restore` handles only `phase: restricted`; this keeps cancellation provably read-only.
 
 Do not introduce a database table, remote state store, or secret manager for this one-shot operator state.
 
@@ -205,7 +225,7 @@ Replace stage-only command references with the generic script and add a producti
 6. stop `ws-server.service` and verify it is inactive;
 7. verify no other same-VPS production DB writer is active;
 8. run generic `preflight`, review protected recovery evidence, then `restrict` and `status` for `RESET_TARGET=prod`;
-9. confirm operator `psql` still works and Netlify direct database observability no longer does;
+9. confirm operator `psql` still works and run the exact Netlify database-isolation probe defined below;
 10. run PostgreSQL 17 backup, relative checksum verification, reset apply, and SQL assertions using the already reviewed reset contract;
 11. run `restore` while WS remains stopped and verify the exact previous mode/configuration;
 12. only after network restore, deploy production with `CHIPS_ENABLED=1`;
@@ -220,6 +240,16 @@ Failure paths:
 - after successful SQL commit but failed assertions/smoke: keep writers stopped and follow the verified PostgreSQL 17 backup-restore procedure;
 - failed CLI restore: use the target-bound recovery JSON and Supabase Dashboard emergency procedure;
 - never start Netlify writers or WS before restoration is independently verified.
+
+Concrete Netlify isolation probe after `restrict`:
+
+- use the already authenticated allowlisted administrator session against the active target Netlify deploy;
+- send `GET /.netlify/functions/admin-ops-summary` with the normal `Authorization: Bearer <Supabase access token>` and allowed `Origin` headers;
+- record that the same request returned HTTP `200` immediately before restriction;
+- after VPS-only restriction, require HTTP `500` with the controlled body `{\"error\":\"server_error\"}` within the normal function timeout, because `loadOpsSummary()` performs direct PostgreSQL queries through `SUPABASE_DB_URL` while admin authorization continues through the unaffected Auth HTTPS API;
+- HTTP `200`, a timeout, an auth response (`401`/`403`), malformed output, or any other result is not proof of database isolation and blocks reset apply.
+
+This probe is read-only. It intentionally confirms that Netlify cannot reach Postgres; `admin-stage-identity` is not suitable because it reports sanitized configuration without querying the database, and `admin-ops-summary` must not be expected to remain usable during the network-restricted interval.
 
 ### Task 6 — Update architecture documentation
 
@@ -246,19 +276,22 @@ Required cases:
 
 1. `RESET_TARGET=stage` binds only `ws-server-preview.service` and stage recovery evidence.
 2. `RESET_TARGET=prod` binds only `ws-server.service` and prod recovery evidence.
-3. unknown/missing target, malformed ref, or project-ref mismatch fails before any CLI update.
-4. production `restrict` fails without the exact project-bound confirmation.
-5. `restrict` fails while the target WS service is active.
-6. stage/prod recovery evidence cannot be crossed or overwritten.
-7. the global lock prevents overlapping target operations.
-8. exact IPv4/IPv6 replacement contains no `--append`.
-9. restricted prior config is restored with semantically exact CIDR sets after canonical sorting.
-10. unrestricted prior config is restored through the verified official CLI contract.
-11. malformed/unauthorized/transitional CLI responses fail closed.
-12. `status` reports target, project ref, API status, and one controlled mode without secrets.
-13. successful restore archives recovery only after verified convergence.
-14. restore timeout/failure retains the original recovery file.
-15. repository docs contain no executable reference to the retired stage-only script.
+3. unknown/missing target, missing target-specific input, malformed ref, or project-ref mismatch fails before any CLI update.
+4. a DB-derived ref and expected ref that agree with each other but both belong to the opposite environment fail before any CLI update, for both stage-to-prod and prod-to-stage crossing.
+5. production `restrict` fails without the exact project-bound confirmation.
+6. `restrict` fails while the target WS service is active.
+7. stage/prod recovery evidence cannot be crossed or overwritten.
+8. the global lock prevents overlapping target operations and deliberately serializes stage and production.
+9. `preflight` writes `phase: captured`; successful verified restriction changes it to `phase: restricted`.
+10. `cancel` archives an unchanged `captured` recovery without an API update, while changed/malformed state or `phase: restricted` retains evidence and fails.
+11. `restore` accepts `phase: restricted`, rejects `phase: captured`, and archives only after verified convergence.
+12. exact IPv4/IPv6 replacement contains no `--append`.
+13. restricted prior config is restored with semantically exact CIDR sets after canonical sorting.
+14. unrestricted prior config is restored through the verified official CLI contract.
+15. malformed/unauthorized/transitional CLI responses fail closed.
+16. `status` reports target, project ref, API status, recovery phase, and one controlled mode without secrets.
+17. restore timeout/failure retains the original recovery file.
+18. repository docs contain no executable reference to the retired stage-only script.
 
 Static tests may verify command construction, but state transitions must execute the shell script against fakes so quoting, files, permissions, locks, and exit statuses are exercised.
 
@@ -275,7 +308,7 @@ Operator rollout after merge:
 
 1. run `status`/`preflight` read-only against stage with the generic script;
 2. compare captured stage evidence with the previously proven stage configuration;
-3. archive/resolve the local preflight evidence without changing restrictions if no stage maintenance is planned;
+3. run `cancel` to re-read and exactly match current restrictions, then archive `phase: captured` evidence without an API update if no stage maintenance is planned;
 4. run production `status` and entitlement check read-only;
 5. stop and review the production output before authorizing any production maintenance step;
 6. production mutation follows only the updated runbook and a separately approved maintenance window.
@@ -285,11 +318,15 @@ Do not test production `restrict` merely to validate the implementation.
 ## 6. Acceptance criteria
 
 - One operator script supports only explicit `stage|prod` targets.
-- Target selects an immutable project/service/recovery namespace and cannot be overridden accidentally.
+- Target selects immutable target-specific DB URL/ref variables, project/service/recovery namespace, and cannot be overridden accidentally.
+- Matching DB-derived and expected refs from the wrong environment are rejected independently of the production confirmation token.
 - Production mutation requires an explicit project-bound confirmation.
 - Exact previous restrictions, including unrestricted mode, can be restored deterministically.
 - Recovery evidence from one environment is rejected by the other.
+- Recovery phases distinguish captured preflight from applied restriction; unchanged preflight can be cancelled without an API update or manual file deletion.
+- One intentional global lock serializes stage and production commands while recovery files remain target-specific.
 - Both `restrict` and `restore` require the correct WS service to be inactive.
+- The documented `admin-ops-summary` probe proves Netlify's direct PostgreSQL path is blocked before reset apply.
 - The script never changes application ENV, deploys, starts/stops services, runs backup, or runs reset SQL.
 - Runbook no longer requires Netlify `Disable Project` for production.
 - Runbook still requires `CHIPS_ENABLED=0`, writer freeze, PostgreSQL 17 backup, exact reset marker, and restore-before-writers.
