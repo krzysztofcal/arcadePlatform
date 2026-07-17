@@ -11,12 +11,13 @@ Do not begin a reset unless all conditions are true:
 - the prerequisite guards in poker-create-table and poker-quick-seat are deployed;
 - the target Supabase project ref is known independently from the DB URL;
 - only one operator controls the reset;
-- Netlify deployments, migrations, admin actions and SQL Editor writes are frozen;
+- Netlify Deploy Preview deployments, migrations, admin actions and SQL Editor writes are frozen;
 - a verified full backup can be produced;
 - the operator has permission to disable and re-enable the two ledger DELETE triggers;
+- the operator has Supabase Owner/Admin access capable of reading and updating stage Network Restrictions;
 - stage is completed before any production reset.
 
-CHIPS_ENABLED=0 is defense-in-depth. Netlify Disable project is the hard traffic gate. Stopping WS is a separate mandatory gate.
+For the stage reset, `CHIPS_ENABLED=0` is defense-in-depth and Supabase Network Restrictions are the hard database traffic gate. The production site remains online. Stopping WS Preview before applying the restriction is a separate mandatory gate. Do not delete historical Deploy Previews.
 
 ## 2. Operator prerequisites — Ubuntu VPS
 
@@ -28,6 +29,9 @@ From an interactive Bash shell on the VPS, check:
 
     psql --version
     node --version
+    npx --version
+    curl --version
+    flock --version
 
 If `psql` is missing (`command not found`), install only the Ubuntu PostgreSQL client:
 
@@ -40,6 +44,7 @@ If `node` is missing, stop. Do not copy an unreviewed installer command from the
 Later maintenance sections additionally require:
 
 - Netlify CLI authenticated and linked to the Arcade Platform project;
+- Supabase CLI authentication through an existing login or a privately supplied `SUPABASE_ACCESS_TOKEN` with `database_network_restrictions_read` and `database_network_restrictions_write`;
 - SSH access with sudo permission for `ws-server-preview.service`;
 - enough encrypted local or remote storage for a full database backup.
 
@@ -50,6 +55,8 @@ Change to the root of the Arcade Platform checkout, then verify the manual scrip
     test -f supabase/manual/chips-economy-test-reset.sql
     test -r supabase/manual/chips-economy-test-reset.sql
     ls -l supabase/manual/chips-economy-test-reset.sql
+    test -x scripts/ops/stage-network-maintenance.sh
+    ls -l scripts/ops/stage-network-maintenance.sh
 
 Any non-zero result means the checkout or current revision is wrong. Stop instead of copying the SQL into another tool.
 
@@ -152,7 +159,7 @@ Stop here and obtain explicit approval before entering maintenance.
 - any SQL/preflight error or non-zero exit code: do not enter maintenance. Retain the protected output for diagnosis and leave Netlify, WS, `CHIPS_ENABLED` and the database unchanged.
 - missing success message even with an apparent zero status: treat it as failure and stop.
 
-At this stage do not set `CHIPS_ENABLED=0`, deploy maintenance code, disable Netlify, stop WS, create a backup or run reset apply.
+At this stage do not set `CHIPS_ENABLED=0`, deploy maintenance code, change Network Restrictions, stop WS, create a backup or run reset apply.
 
 ## 4. Stage maintenance preparation
 
@@ -188,23 +195,56 @@ Complete the following maintenance checklist against the freshly deployed Deploy
 
 Record every item as PASS. A 401, 403, 500, unexpected environment/project identity, missing maintenance banner, accessible mutation or loss of the allowlisted administrator's Admin/Ops access is a failed maintenance deploy. Restore `CHIPS_ENABLED=1`, produce a fresh deploy and stop for diagnosis.
 
-Do not disable the Netlify project, stop WS Preview or create the backup until every checklist item above has passed.
+Do not stop WS Preview, run the Network Restrictions preflight/restrict commands or create the backup until every checklist item above has passed.
 
 ### 4.2 Freeze traffic and writers
 
-1. Freeze merges, deployments, migrations, admin operations and SQL Editor writes.
-2. In Netlify open Project configuration -> General -> Danger zone -> Disable project.
-3. Verify the production URL, the selected Deploy Preview and direct function URLs are unavailable.
-4. Stop WS Preview on the VPS:
+1. Freeze merges, Deploy Preview deployments, stage DB workflows, migrations, admin operations and SQL Editor writes. Production remains online.
+2. Do not delete or manually disable historical Deploy Previews. Their Postgres and pooler access will be blocked at the stage Supabase project boundary.
+3. In a separate browser session, confirm the operator can open the stage Supabase Dashboard Network Restrictions panel with Owner/Admin access. Keep that authenticated emergency recovery path available throughout maintenance. A successful read-only CLI preflight cannot prove that credentials will retain write permission for the entire window.
+4. Export the stage identity. `SUPABASE_PROJECT_REF` must be the ref already derived from `SUPABASE_STAGE_DB_URL` in section 3, while `EXPECTED_SUPABASE_PROJECT_REF` remains the independently copied Dashboard value:
+
+       export RESET_TARGET=stage
+       export SUPABASE_PROJECT_REF="$ACTUAL_SUPABASE_PROJECT_REF"
+       test "$SUPABASE_PROJECT_REF" = "$EXPECTED_SUPABASE_PROJECT_REF"
+
+5. Determine the VPS's current public addresses independently and export host CIDRs. Use `/32` for IPv4 and `/128` for IPv6. Do not copy these placeholders literally:
+
+       export VPS_IPV4_CIDR='<current-vps-ipv4>/32'
+       export VPS_IPV6_CIDR='<current-vps-ipv6>/128'
+
+   If the VPS has no working public IPv6 route, leave `VPS_IPV6_CIDR` unset and ensure the selected PostgreSQL connection route works over the allowlisted IPv4 address.
+
+6. Stop WS Preview before restricting the database. The service runs on the allowlisted VPS, so Network Restrictions would not block it:
 
        sudo systemctl stop ws-server-preview.service
        sudo systemctl is-active ws-server-preview.service
 
    Expected is inactive.
 
-5. Confirm no operator or automation is running a DB migration or manual poker/admin action.
+7. Save the exact current Network Restrictions configuration. This is read-only and refuses to overwrite an unresolved recovery file:
 
-If any direct Netlify Function remains reachable, abort before backup or SQL.
+       scripts/ops/stage-network-maintenance.sh preflight
+
+   Expected evidence:
+
+       NETWORK PREFLIGHT PASSED.
+       No Network Restrictions were modified.
+
+8. Restrict stage Postgres and its pooler to the VPS only, then inspect the applied state:
+
+       scripts/ops/stage-network-maintenance.sh restrict
+       scripts/ops/stage-network-maintenance.sh status
+
+   Required status is `applied` with mode `restricted-to-vps` and exactly the exported VPS CIDRs. The script uses pinned Supabase CLI `2.109.1`, replaces the complete CIDR set without `--append`, and stores recovery state outside the repository with mode `600`.
+
+9. Confirm the operator's `psql` connection from the VPS still works:
+
+       psql "$SUPABASE_STAGE_DB_URL" -X -v ON_ERROR_STOP=1 -c 'select 1;'
+
+10. Confirm no operator or automation is running a DB migration or manual poker/admin action. Do not rely on Admin/Ops during this restricted phase: Netlify's direct Postgres connection is intentionally outside the VPS allowlist.
+
+Any unexpected CIDR, non-`applied` status, active WS service, failed VPS `psql` connection or missing recovery file is an abort before backup or reset SQL. Use `restore` or the Supabase Dashboard emergency procedure in section 8; do not widen the allowlist ad hoc.
 
 ## 5. Stage backup
 
@@ -241,27 +281,36 @@ Expected final line:
 
     RESET COMMITTED AND POST-COMMIT BASELINE VERIFIED FOR: stage
 
-Any other exit or final result is failure. Keep Netlify disabled, CHIPS_ENABLED=0 and WS stopped until the failure path is resolved.
+Any other exit or final result is failure. Keep `CHIPS_ENABLED=0`, the VPS-only Network Restrictions and WS stopped until the failure path is resolved.
 
 ## 7. Stage service restore and smoke
 
-Restore the Deploy Preview Functions-scoped value:
+First restore the exact Network Restrictions configuration captured before maintenance, while WS Preview is still inactive:
+
+    scripts/ops/stage-network-maintenance.sh restore
+
+Expected evidence includes:
+
+    NETWORK RESTORE VERIFIED.
+
+The command archives the protected recovery file only after the Management API reports `status=applied` and the exact previous IPv4/IPv6 configuration. Confirm the archived path printed by the command and verify the VPS still connects with `psql`.
+
+Only after the verified network restore, restore the Deploy Preview Functions-scoped value:
 
     netlify env:set CHIPS_ENABLED 1 --scope functions --context deploy-preview
 
 Environment changes require a fresh deploy.
 
-1. Enable the Netlify project.
-2. Trigger a fresh Deploy Preview and wait for success.
-3. Confirm admin Stage Identity reports databaseTarget=stage, stageProjectRefMatches=true and chipsEnabled=true.
-4. Start WS Preview:
+1. Trigger a fresh Deploy Preview and wait for success. The production site has remained online throughout the stage reset.
+2. Confirm admin Stage Identity reports databaseTarget=stage, stageProjectRefMatches=true and chipsEnabled=true.
+3. Start WS Preview:
 
        sudo systemctl start ws-server-preview.service
        sudo systemctl is-active ws-server-preview.service
 
    Expected is active.
 
-5. Perform the smoke:
+4. Perform the full application smoke. It happens after network restore because Netlify Functions do not originate from the VPS CIDRs:
    - log in with an existing test user;
    - hard-refresh and fetch chips balance;
    - confirm a new USER account starts at 0 CH;
@@ -282,20 +331,22 @@ Retain the table ID, relevant sanitized WS log lines, final user balance, final 
 
 1. Stop further reset work.
 2. Read-only verify that old accounts/tables remain and all required triggers are enabled.
-3. Set the affected Netlify context back to CHIPS_ENABLED=1.
-4. Produce a fresh deploy. Changing ENV alone is insufficient.
-5. If Netlify cannot build while disabled, enable the project with the maintenance deploy still on CHIPS_ENABLED=0, then immediately publish the fresh deploy.
+3. Keep WS stopped and run `scripts/ops/stage-network-maintenance.sh restore`. Verify `NETWORK RESTORE VERIFIED` before reconnecting any application writer.
+4. Set the affected Netlify context back to CHIPS_ENABLED=1.
+5. Produce a fresh deploy. Changing ENV alone is insufficient.
 6. Keep WS stopped until the fresh deploy succeeds.
 7. Start the applicable WS service.
 8. Verify balance read, table creation and WS connectivity.
 
+If the CLI cannot restore the configuration, use Supabase Dashboard -> Database Settings -> Network Restrictions as the emergency recovery path. Read the protected recovery JSON, confirm its project ref, recreate exactly both saved CIDR arrays, wait for the Dashboard to report the applied configuration, and independently re-read it with the script's `status` command. Never copy a recovery file from another project.
+
 ### 8.2 COMMIT succeeded but post-commit checks or smoke failed
 
-1. Keep Netlify disabled.
+1. Keep the VPS-only Network Restrictions active.
 2. Keep CHIPS_ENABLED=0 and WS stopped.
 3. Restore the verified full backup using the approved Supabase/PostgreSQL restore procedure.
 4. Read-only verify ledger integrity, triggers, tables and SYSTEM accounts.
-5. Only then follow the no-COMMIT service recovery steps.
+5. Only then run the network `restore` command and follow the remaining no-COMMIT service recovery steps.
 
 If rollback or restore cannot be proven, keep the environment in maintenance and escalate. Never reconnect writers to an ambiguous database state.
 
@@ -309,7 +360,7 @@ Do not prepare or execute production maintenance until the owner provides all of
 - successful stage smoke table ID and logs;
 - Admin/Ops residual result equal to 0 tables and 0 CH.
 
-Production uses the same SQL file with a separately verified production project ref, a separate full backup and confirmation RESET_PROD_CH_ECONOMY. Production commands are intentionally not authorized by completion of the stage procedure.
+Production uses the same SQL file with a separately verified production project ref, a separate full backup and confirmation RESET_PROD_CH_ECONOMY. The stage-only Network Restrictions script does not authorize or implement a production network change. Production commands are intentionally not authorized by completion of the stage procedure.
 
 ## 10. Breaking impact
 
@@ -393,4 +444,56 @@ or:
 
     rm -f stage-ch-reset-preflight.txt
 
-Stop after this checklist. Do not set `CHIPS_ENABLED=0`, disable Netlify, stop WS, run `pg_dump` or execute reset apply until the preflight output has been reviewed and the next maintenance step is explicitly authorized.
+Stop after this checklist. Do not set `CHIPS_ENABLED=0`, change Network Restrictions, stop WS, run `pg_dump` or execute reset apply until the preflight output has been reviewed and the next maintenance step is explicitly authorized.
+
+## 12. Ubuntu VPS copy/paste checklist — resume approved stage maintenance
+
+Use this only after the SQL preflight and section 4.1 Admin maintenance checklist have both been accepted. It intentionally stops after applying and verifying the VPS-only restriction; backup and reset remain separate, explicit steps.
+
+    (
+      set +o history
+      set -Eeuo pipefail
+      umask 077
+      export RESET_TARGET=stage
+
+      read -rsp 'Stage PostgreSQL direct/session-pooler URI: ' SUPABASE_STAGE_DB_URL
+      printf '\n'
+      export SUPABASE_STAGE_DB_URL
+      read -rp 'Expected stage Supabase project ref: ' EXPECTED_SUPABASE_PROJECT_REF
+      export EXPECTED_SUPABASE_PROJECT_REF
+
+      ACTUAL_SUPABASE_PROJECT_REF="$(node -e 'const u=new URL(process.env.SUPABASE_STAGE_DB_URL); const host=/^db\.([a-z0-9-]+)\.supabase\.co$/i.exec(u.hostname); const user=/^postgres\.([a-z0-9-]+)$/i.exec(decodeURIComponent(u.username||"")); const ref=(host&&host[1])||(user&&user[1])||""; if(!ref) process.exit(2); process.stdout.write(ref);')"
+      test "$ACTUAL_SUPABASE_PROJECT_REF" = "$EXPECTED_SUPABASE_PROJECT_REF" || {
+        echo 'STOP: project ref mismatch.' >&2
+        exit 1
+      }
+      export SUPABASE_PROJECT_REF="$ACTUAL_SUPABASE_PROJECT_REF"
+
+      read -rp 'Current VPS public IPv4 host CIDR (x.x.x.x/32): ' VPS_IPV4_CIDR
+      export VPS_IPV4_CIDR
+      read -rp 'Current VPS public IPv6 host CIDR (address/128, blank if unavailable): ' VPS_IPV6_CIDR
+      export VPS_IPV6_CIDR
+
+      sudo systemctl stop ws-server-preview.service
+      test "$(systemctl is-active ws-server-preview.service || true)" = inactive
+
+      scripts/ops/stage-network-maintenance.sh preflight
+      scripts/ops/stage-network-maintenance.sh restrict
+      scripts/ops/stage-network-maintenance.sh status
+      psql "$SUPABASE_STAGE_DB_URL" -X -v ON_ERROR_STOP=1 -c 'select 1;'
+
+      echo 'STAGE NETWORK GATE PASSED. Stop here and review status before backup/reset.'
+    )
+
+Required evidence before backup:
+
+    NETWORK PREFLIGHT PASSED.
+    NETWORK RESTRICTION APPLIED.
+    "status": "applied"
+    "mode": "restricted-to-vps"
+    STAGE NETWORK GATE PASSED. Stop here and review status before backup/reset.
+
+If any command fails, do not run backup or reset. Keep WS stopped. If `preflight` created a recovery file, run `restore` with the same target variables or use the Dashboard emergency path from section 8. After the operation, clear secrets and targeting variables:
+
+    unset SUPABASE_STAGE_DB_URL SUPABASE_ACCESS_TOKEN EXPECTED_SUPABASE_PROJECT_REF SUPABASE_PROJECT_REF RESET_TARGET VPS_IPV4_CIDR VPS_IPV6_CIDR
+    set -o history
