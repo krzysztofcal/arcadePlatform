@@ -55,8 +55,8 @@ Change to the root of the Arcade Platform checkout, then verify the manual scrip
     test -f supabase/manual/chips-economy-test-reset.sql
     test -r supabase/manual/chips-economy-test-reset.sql
     ls -l supabase/manual/chips-economy-test-reset.sql
-    test -x scripts/ops/stage-network-maintenance.sh
-    ls -l scripts/ops/stage-network-maintenance.sh
+    test -x scripts/ops/ch-economy-network-maintenance.sh
+    ls -l scripts/ops/ch-economy-network-maintenance.sh
 
 Any non-zero result means the checkout or current revision is wrong. Stop instead of copying the SQL into another tool.
 
@@ -202,11 +202,12 @@ Do not stop WS Preview, run the Network Restrictions preflight/restrict commands
 1. Freeze merges, Deploy Preview deployments, stage DB workflows, migrations, admin operations and SQL Editor writes. Production remains online.
 2. Do not delete or manually disable historical Deploy Previews. Their Postgres and pooler access will be blocked at the stage Supabase project boundary.
 3. In a separate browser session, confirm the operator can open the stage Supabase Dashboard Network Restrictions panel with Owner/Admin access. Keep that authenticated emergency recovery path available throughout maintenance. A successful read-only CLI preflight cannot prove that credentials will retain write permission for the entire window.
-4. Export the stage identity. `SUPABASE_PROJECT_REF` must be the ref already derived from `SUPABASE_STAGE_DB_URL` in section 3, while `EXPECTED_SUPABASE_PROJECT_REF` remains the independently copied Dashboard value:
+4. Export both independently copied public project refs. The generic script selects the stage URL/ref pair from `RESET_TARGET`, derives the ref from the URL itself, and checks all values against its reviewed versioned canonical mapping. The production DB URL is not needed for a stage command:
 
        export RESET_TARGET=stage
-       export SUPABASE_PROJECT_REF="$ACTUAL_SUPABASE_PROJECT_REF"
-       test "$SUPABASE_PROJECT_REF" = "$EXPECTED_SUPABASE_PROJECT_REF"
+       export EXPECTED_SUPABASE_STAGE_PROJECT_REF="$EXPECTED_SUPABASE_PROJECT_REF"
+       read -rp 'Expected production Supabase project ref: ' EXPECTED_SUPABASE_PROD_PROJECT_REF
+       export EXPECTED_SUPABASE_PROD_PROJECT_REF
 
 5. Determine the VPS's current public addresses independently and export host CIDRs. Use `/32` for IPv4 and `/128` for IPv6. Do not copy these placeholders literally:
 
@@ -224,17 +225,17 @@ Do not stop WS Preview, run the Network Restrictions preflight/restrict commands
 
 7. Save the exact current Network Restrictions configuration. This is read-only and refuses to overwrite an unresolved recovery file:
 
-       scripts/ops/stage-network-maintenance.sh preflight
+       scripts/ops/ch-economy-network-maintenance.sh preflight
 
    Expected evidence:
 
-       NETWORK PREFLIGHT PASSED.
+       NETWORK PREFLIGHT PASSED for stage.
        No Network Restrictions were modified.
 
 8. Restrict stage Postgres and its pooler to the VPS only, then inspect the applied state:
 
-       scripts/ops/stage-network-maintenance.sh restrict
-       scripts/ops/stage-network-maintenance.sh status
+       scripts/ops/ch-economy-network-maintenance.sh restrict
+       scripts/ops/ch-economy-network-maintenance.sh status
 
    Required status is `applied` with mode `restricted-to-vps` and exactly the exported VPS CIDRs. The script uses pinned Supabase CLI `2.109.1`, replaces the complete CIDR set without `--append`, and stores recovery state outside the repository with mode `600`.
 
@@ -242,9 +243,30 @@ Do not stop WS Preview, run the Network Restrictions preflight/restrict commands
 
        psql "$SUPABASE_STAGE_DB_URL" -X -v ON_ERROR_STOP=1 -c 'select 1;'
 
-10. Confirm no operator or automation is running a DB migration or manual poker/admin action. Do not rely on Admin/Ops during this restricted phase: Netlify's direct Postgres connection is intentionally outside the VPS allowlist.
+10. Confirm the Netlify database boundary with the exact read-only isolation probe. Before restriction, the authenticated allowlisted-admin request must have returned HTTP 200. After `status=applied`, repeat it with a cache-busting query and the same allowed Origin and Bearer token until the stage-rehearsed bound expires:
+
+        curl -sS -o /tmp/admin-ops-isolation.json -w '%{http_code}\n' \
+          -H 'Authorization: Bearer <admin-stage-access-token>' \
+          -H 'Origin: https://<deploy-preview>.netlify.app' \
+          'https://<deploy-preview>.netlify.app/.netlify/functions/admin-ops-summary?network_probe=<unique-value>'
+
+    Required isolated result is HTTP `500` and an exact body `{"error":"server_error"}`. HTTP 200, 401, 403, a timeout or any other body blocks reset apply. `admin-ops-summary` uses direct PostgreSQL with `connect_timeout: 10`; do not assume a shorter response bound. This gate is authorized for production only after the exact stage `200 -> 500 -> 200` rehearsal has been recorded.
+
+11. Confirm no operator or automation is running a DB migration or manual poker/admin action. Admin/Ops is intentionally unavailable during this restricted interval; Auth and `admin-stage-identity` alone do not prove database isolation.
 
 Any unexpected CIDR, non-`applied` status, active WS service, failed VPS `psql` connection or missing recovery file is an abort before backup or reset SQL. Use `restore` or the Supabase Dashboard emergency procedure in section 8; do not widen the allowlist ad hoc.
+
+### 4.3 Recovery phases and legacy evidence
+
+The active recovery file is target-specific and mode `600`; one global lock intentionally serializes stage and production maintenance:
+
+- `captured`: read-only preflight completed and no restriction update was authorized;
+- `restricting`: the exact original and intended VPS-only configurations were persisted before the first API update;
+- `restricted`: the Management API reported `applied` with the exact VPS-only configuration.
+
+If a read-only preflight is abandoned, run `cancel`. It re-reads the API, requires exact equality with the captured snapshot and archives evidence without an API update. During `restricting`, rerun `restrict` to resume/finalize or run `restore` when the API shows the saved VPS-only intent. An unknown/transitional configuration that matches neither saved snapshot is fail-closed and requires Dashboard recovery.
+
+Files named `.restored-*`, `.cancelled-*` or `.legacy-resolved-*` are archives and never authorize another update. An active schema v1 file from the retired stage-only script blocks normal commands. Do not delete it: use the explicit stage-only `migrate-recovery`, which performs no API update and only resolves an exact original config or converts an exact VPS-only config to schema v2. Unknown schema, malformed JSON, wrong permissions or mismatched target/ref remains active for manual review.
 
 ## 5. Stage backup
 
@@ -338,11 +360,11 @@ A non-zero `APPLY_EXIT`, missing exact marker, failed `chmod` or any other unexp
 
 First restore the exact Network Restrictions configuration captured before maintenance, while WS Preview is still inactive:
 
-    scripts/ops/stage-network-maintenance.sh restore
+    scripts/ops/ch-economy-network-maintenance.sh restore
 
 Expected evidence includes:
 
-    NETWORK RESTORE VERIFIED.
+    NETWORK RESTORE VERIFIED for stage.
 
 The command archives the protected recovery file only after the Management API reports `status=applied` and the exact previous IPv4/IPv6 configuration. Confirm the archived path printed by the command and verify the VPS still connects with `psql`.
 
@@ -382,7 +404,7 @@ Retain the table ID, relevant sanitized WS log lines, final user balance, final 
 
 1. Stop further reset work.
 2. Read-only verify that old accounts/tables remain and all required triggers are enabled.
-3. Keep WS stopped and run `scripts/ops/stage-network-maintenance.sh restore`. Verify `NETWORK RESTORE VERIFIED` before reconnecting any application writer.
+3. Keep WS stopped and run `scripts/ops/ch-economy-network-maintenance.sh restore`. Verify `NETWORK RESTORE VERIFIED` before reconnecting any application writer. If only a read-only `preflight` ran, use `cancel` instead; never delete active recovery evidence manually.
 4. Set the affected Netlify context back to CHIPS_ENABLED=1.
 5. Produce a fresh deploy. Changing ENV alone is insufficient.
 6. Keep WS stopped until the fresh deploy succeeds.
@@ -401,7 +423,7 @@ If the CLI cannot restore the configuration, use Supabase Dashboard -> Database 
 
 If rollback or restore cannot be proven, keep the environment in maintenance and escalate. Never reconnect writers to an ambiguous database state.
 
-## 9. Production hold point
+## 9. Production hold point and Network Restrictions procedure
 
 Do not prepare or execute production maintenance until the owner provides all of:
 
@@ -411,7 +433,32 @@ Do not prepare or execute production maintenance until the owner provides all of
 - successful stage smoke table ID and logs;
 - Admin/Ops residual result equal to 0 tables and 0 CH.
 
-Production uses the same SQL file with a separately verified production project ref, a separate full backup and confirmation RESET_PROD_CH_ECONOMY. The stage-only Network Restrictions script does not authorize or implement a production network change. Production commands are intentionally not authorized by completion of the stage procedure.
+Production uses the same SQL file with the independently verified production project ref, a separate PostgreSQL 17 full backup and confirmation `RESET_PROD_CH_ECONOMY`. The generic network script supports production, but stage completion never authorizes a production mutation.
+
+Before production maintenance:
+
+1. complete the exact stage isolation rehearsal: authenticated `admin-ops-summary` returns `200` before restriction, controlled `500 {"error":"server_error"}` after exact VPS-only convergence, and `200` after restore; record the elapsed isolation time;
+2. freeze merges, production Netlify deploys, WS deployment, migrations, SQL Editor, nightly/manual poker runs and admin mutations;
+3. enter `SUPABASE_PROD_DB_URL` with shell history disabled, independently copy both expected project refs, and set `RESET_TARGET=prod`;
+4. deploy production with `CHIPS_ENABLED=0` and verify the maintenance banner, correct production identity, read-only Admin endpoints and controlled 404s from every documented mutation endpoint;
+5. keep Supabase Dashboard Network Restrictions open as emergency recovery;
+6. stop `ws-server.service`, verify `inactive`, and verify no other same-VPS process/timer uses the production DB URL;
+7. export the verified VPS `/32` and optional `/128`, then run:
+
+       scripts/ops/ch-economy-network-maintenance.sh preflight
+       export NETWORK_MAINTENANCE_CONFIRM="RESTRICT_PROD_otbqfijerkieoxwpxjnm"
+       scripts/ops/ch-economy-network-maintenance.sh restrict
+       scripts/ops/ch-economy-network-maintenance.sh status
+
+8. require target `prod`, canonical project ref `otbqfijerkieoxwpxjnm`, recovery phase `restricted`, `status=applied`, and exact VPS-only CIDRs;
+9. confirm VPS `psql` succeeds, then execute the exact authenticated Netlify probe. Require the already rehearsed controlled `500`; any other response blocks backup/reset;
+10. create and verify the separate production PostgreSQL 17 backup with relative checksums;
+11. run the reset SQL with `reset_target=prod`, `confirm_reset=RESET_PROD_CH_ECONOMY`, `ON_ERROR_STOP=1`, `pipefail`, captured `PIPESTATUS[0]`, mode-600 output, and require exact marker `RESET COMMITTED AND POST-COMMIT BASELINE VERIFIED FOR: prod`;
+12. while WS remains stopped, run `restore` and verify exact prior Network Restrictions;
+13. confirm `admin-ops-summary` returns 200 again, deploy production with `CHIPS_ENABLED=1`, then start `ws-server.service`;
+14. execute the full production smoke and require green residual monitoring.
+
+If production `preflight` is abandoned before `restrict`, run `cancel`; it re-reads and exactly compares current restrictions before archiving recovery without an API update. If `restrict` was interrupted, keep WS and writers stopped and use `status`, `restrict`, or `restore` according to the saved `captured|restricting|restricted` phase. Unknown configuration or recovery schema remains fail-closed and requires Dashboard review.
 
 ## 10. Breaking impact
 
@@ -512,14 +559,15 @@ Use this only after the SQL preflight and section 4.1 Admin maintenance checklis
       export SUPABASE_STAGE_DB_URL
       read -rp 'Expected stage Supabase project ref: ' EXPECTED_SUPABASE_PROJECT_REF
       export EXPECTED_SUPABASE_PROJECT_REF
+      export EXPECTED_SUPABASE_STAGE_PROJECT_REF="$EXPECTED_SUPABASE_PROJECT_REF"
+      read -rp 'Expected production Supabase project ref: ' EXPECTED_SUPABASE_PROD_PROJECT_REF
+      export EXPECTED_SUPABASE_PROD_PROJECT_REF
 
       ACTUAL_SUPABASE_PROJECT_REF="$(node -e 'const u=new URL(process.env.SUPABASE_STAGE_DB_URL); const host=/^db\.([a-z0-9-]+)\.supabase\.co$/i.exec(u.hostname); const user=/^postgres\.([a-z0-9-]+)$/i.exec(decodeURIComponent(u.username||"")); const ref=(host&&host[1])||(user&&user[1])||""; if(!ref) process.exit(2); process.stdout.write(ref);')"
       test "$ACTUAL_SUPABASE_PROJECT_REF" = "$EXPECTED_SUPABASE_PROJECT_REF" || {
         echo 'STOP: project ref mismatch.' >&2
         exit 1
       }
-      export SUPABASE_PROJECT_REF="$ACTUAL_SUPABASE_PROJECT_REF"
-
       read -rp 'Current VPS public IPv4 host CIDR (x.x.x.x/32): ' VPS_IPV4_CIDR
       export VPS_IPV4_CIDR
       read -rp 'Current VPS public IPv6 host CIDR (address/128, blank if unavailable): ' VPS_IPV6_CIDR
@@ -528,9 +576,9 @@ Use this only after the SQL preflight and section 4.1 Admin maintenance checklis
       sudo systemctl stop ws-server-preview.service
       test "$(systemctl is-active ws-server-preview.service || true)" = inactive
 
-      scripts/ops/stage-network-maintenance.sh preflight
-      scripts/ops/stage-network-maintenance.sh restrict
-      scripts/ops/stage-network-maintenance.sh status
+      scripts/ops/ch-economy-network-maintenance.sh preflight
+      scripts/ops/ch-economy-network-maintenance.sh restrict
+      scripts/ops/ch-economy-network-maintenance.sh status
       psql "$SUPABASE_STAGE_DB_URL" -X -v ON_ERROR_STOP=1 -c 'select 1;'
 
       echo 'STAGE NETWORK GATE PASSED. Stop here and review status before backup/reset.'
@@ -538,13 +586,13 @@ Use this only after the SQL preflight and section 4.1 Admin maintenance checklis
 
 Required evidence before backup:
 
-    NETWORK PREFLIGHT PASSED.
-    NETWORK RESTRICTION APPLIED.
+    NETWORK PREFLIGHT PASSED for stage.
+    NETWORK RESTRICTION APPLIED for stage.
     "status": "applied"
     "mode": "restricted-to-vps"
     STAGE NETWORK GATE PASSED. Stop here and review status before backup/reset.
 
 If any command fails, do not run backup or reset. Keep WS stopped. If `preflight` created a recovery file, run `restore` with the same target variables or use the Dashboard emergency path from section 8. After the operation, clear secrets and targeting variables:
 
-    unset SUPABASE_STAGE_DB_URL SUPABASE_ACCESS_TOKEN EXPECTED_SUPABASE_PROJECT_REF SUPABASE_PROJECT_REF RESET_TARGET VPS_IPV4_CIDR VPS_IPV6_CIDR
+    unset SUPABASE_STAGE_DB_URL SUPABASE_PROD_DB_URL SUPABASE_ACCESS_TOKEN EXPECTED_SUPABASE_PROJECT_REF EXPECTED_SUPABASE_STAGE_PROJECT_REF EXPECTED_SUPABASE_PROD_PROJECT_REF RESET_TARGET VPS_IPV4_CIDR VPS_IPV6_CIDR NETWORK_MAINTENANCE_CONFIRM
     set -o history

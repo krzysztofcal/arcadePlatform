@@ -1,6 +1,6 @@
 # CH economy Network Restrictions — stage/prod implementation plan
 
-Status: planning only. This document does not authorize changing Network Restrictions, stopping services, deploying maintenance configuration, backing up, or resetting stage/production.
+Status: implementation included in PR #719. This document does not authorize changing Network Restrictions, stopping services, deploying maintenance configuration, backing up, or resetting stage/production.
 
 ## 1. Goal and decision
 
