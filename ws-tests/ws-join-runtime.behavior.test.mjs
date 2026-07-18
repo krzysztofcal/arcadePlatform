@@ -11,6 +11,43 @@ import { makeBotUserId } from "../shared/poker-domain/bots.mjs";
 
 const require = createRequire(new URL("../ws-server/package.json", import.meta.url));
 const WebSocket = require("ws");
+const messageQueues = new WeakMap();
+
+function getMessageQueue(ws) {
+  const existing = messageQueues.get(ws);
+  if (existing) return existing;
+  const state = { frames: [], waiters: [], terminalError: null };
+
+  const rejectWaiters = (error) => {
+    state.terminalError = error;
+    const waiters = state.waiters.splice(0);
+    waiters.forEach((waiter) => {
+      clearTimeout(waiter.timer);
+      waiter.reject(error);
+    });
+  };
+
+  ws.on("message", (data) => {
+    let frame;
+    try {
+      frame = JSON.parse(String(data));
+    } catch (error) {
+      rejectWaiters(error);
+      return;
+    }
+    const waiter = state.waiters.shift();
+    if (waiter) {
+      clearTimeout(waiter.timer);
+      waiter.resolve(frame);
+      return;
+    }
+    state.frames.push(frame);
+  });
+  ws.once("error", rejectWaiters);
+  ws.once("close", (code) => rejectWaiters(new Error(`Socket closed before message: ${code}`)));
+  messageQueues.set(ws, state);
+  return state;
+}
 
 function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -99,43 +136,24 @@ function createServer({ env = {} } = {}) {
 function connectClient(port) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+    getMessageQueue(ws);
     ws.once("open", () => resolve(ws));
     ws.once("error", reject);
   });
 }
 
 function nextMessage(ws, timeoutMs = 10000) {
+  const state = getMessageQueue(ws);
+  if (state.frames.length > 0) return Promise.resolve(state.frames.shift());
+  if (state.terminalError) return Promise.reject(state.terminalError);
   return new Promise((resolve, reject) => {
-    const cleanup = () => {
-      clearTimeout(timer);
-      ws.off("message", onMessage);
-      ws.off("error", onError);
-      ws.off("close", onClose);
-    };
-
-    const onMessage = (data) => {
-      cleanup();
-      resolve(JSON.parse(String(data)));
-    };
-
-    const onError = (error) => {
-      cleanup();
-      reject(error);
-    };
-
-    const onClose = (code) => {
-      cleanup();
-      reject(new Error(`Socket closed before message: ${code}`));
-    };
-
-    const timer = setTimeout(() => {
-      cleanup();
+    const waiter = { resolve, reject, timer: null };
+    waiter.timer = setTimeout(() => {
+      const index = state.waiters.indexOf(waiter);
+      if (index >= 0) state.waiters.splice(index, 1);
       reject(new Error("Timed out waiting for websocket message"));
     }, timeoutMs);
-
-    ws.on("message", onMessage);
-    ws.on("error", onError);
-    ws.on("close", onClose);
+    state.waiters.push(waiter);
   });
 }
 
