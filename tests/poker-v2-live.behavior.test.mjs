@@ -1477,6 +1477,26 @@ test('poker v2 retries Play now auto-join after a transient authoritative join f
   assert.equal(harness.logs.some((entry) => entry.kind === 'poker_auto_join_failed' && entry.data.retryScheduled === true), true);
 });
 
+test('poker v2 renders insufficient funds as controlled non-retryable buy-in copy', async () => {
+  const harness = createHarness({
+    search: '?tableId=table-1&seatNo=4&autoJoin=1',
+    sendJoin(){
+      const error = new Error('insufficient_funds');
+      error.code = 'insufficient_funds';
+      return Promise.reject(error);
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  await waitFor(() => harness.joinPayloads.length === 1);
+
+  assert.equal(harness.elements.pokerV2ErrorText.textContent, 'You need at least 100 CH to join a table.');
+  assert.equal(harness.elements.pokerV2ErrorText.hidden, false);
+  harness.advanceTime(5000);
+  await harness.flush();
+  assert.equal(harness.joinPayloads.length, 1, 'insufficient funds must not schedule auto-join retry');
+});
+
 test('poker v2 safely rejoins the same authoritative seat after a socket reconnect', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();

@@ -6,6 +6,7 @@ import { formatStakes, parseStakes } from "../../netlify/functions/_shared/poker
 import { clearMissedTurns } from "../../netlify/functions/_shared/poker-missed-turns.mjs";
 import { patchSitOutByUserId } from "../../netlify/functions/_shared/poker-sitout-flag.mjs";
 import { createPokerTableWithState } from "../../netlify/functions/_shared/poker-table-init.mjs";
+import { readPokerBuyInEligibility } from "../../netlify/functions/_shared/poker-buy-in-eligibility.mjs";
 import { shouldHideSeatRowFromReadModel } from "../../netlify/functions/_shared/poker-list-seat-visibility.mjs";
 import { notifyWsLobbyMaterialize } from "../../netlify/functions/_shared/poker-ws-runtime-notify.mjs";
 import {
@@ -29,6 +30,7 @@ import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../../netlify/fu
 import { deriveCommunityCards, deriveRemainingDeck } from "../../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { store as upstashStore, isMemoryStore as upstashIsMemoryStore } from "../../netlify/functions/_shared/store-upstash.mjs";
 import { executePokerLeave } from "../../shared/poker-domain/leave.mjs";
+import { DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../../shared/poker-domain/table-economy.mjs";
 
 const root = process.cwd();
 const sharedLeavePath = path.join(root, "shared/poker-domain/leave.mjs");
@@ -131,6 +133,8 @@ export const loadPokerHandler = (filePath, mocks) => {
     "upgradeLegacyInitState",
     "upgradeLegacyInitStateWithSeats",
     "createPokerTableWithState",
+    "readPokerBuyInEligibility",
+    "DEFAULT_CASH_TABLE_BUY_IN_CHIPS",
     "notifyWsLobbyMaterialize",
     "PRESENCE_TTL_SEC",
     "HEARTBEAT_INTERVAL_SEC",
@@ -186,6 +190,8 @@ return handler;`
       patchSitOutByUserId,
       shouldHideSeatRowFromReadModel,
       createPokerTableWithState,
+      readPokerBuyInEligibility,
+      DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
       notifyWsLobbyMaterialize,
       computeTargetBotCount,
       getBotAutoplayConfig,

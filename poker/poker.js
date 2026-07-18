@@ -196,6 +196,8 @@
     var err = new Error(body.error || 'request_failed');
     err.status = res.status;
     err.code = body.error || 'request_failed';
+    if (Number.isSafeInteger(body.balance) && body.balance >= 0) err.balance = body.balance;
+    if (Number.isSafeInteger(body.requiredBuyIn) && body.requiredBuyIn > 0) err.requiredBuyIn = body.requiredBuyIn;
     throw err;
   }
 
@@ -1490,6 +1492,41 @@
     var lobbyReconnectAttempt = 0;
     var lobbyWsGeneration = 0;
 
+    function requiredCashBuyIn(){
+      var value = lobbyContent && lobbyContent.dataset ? Number(lobbyContent.dataset.requiredBuyIn) : NaN;
+      return Number.isSafeInteger(value) && value > 0 ? value : null;
+    }
+
+    function insufficientChipsMessage(requiredBuyIn){
+      var amount = Number.isSafeInteger(requiredBuyIn) && requiredBuyIn > 0 ? requiredBuyIn : requiredCashBuyIn();
+      return t('pokerErrInsufficientChips', 'You need at least {amount} CH to join a table.').replace('{amount}', formatChips(amount));
+    }
+
+    async function hasFreshCashBuyInBalance(){
+      var requiredBuyIn = requiredCashBuyIn();
+      if (!requiredBuyIn || !window.ChipsClient || typeof window.ChipsClient.fetchBalance !== 'function') return true;
+      try {
+        var result = await window.ChipsClient.fetchBalance();
+        var balance = result && Number.isSafeInteger(result.balance) && result.balance >= 0 ? result.balance : null;
+        if (balance !== null && balance < requiredBuyIn){
+          setError(errorEl, insufficientChipsMessage(requiredBuyIn));
+          return false;
+        }
+      } catch (err){
+        klog('poker_buy_in_balance_precheck_failed', { reason: err && (err.code || err.message) ? (err.code || err.message) : 'unknown' });
+      }
+      return true;
+    }
+
+    function handleInsufficientChips(error){
+      if (!error || error.code !== 'insufficient_chips') return false;
+      setError(errorEl, insufficientChipsMessage(error.requiredBuyIn));
+      if (window.ChipsClient && typeof window.ChipsClient.fetchBalance === 'function') {
+        window.ChipsClient.fetchBalance().catch(function(){});
+      }
+      return true;
+    }
+
     function stopAuthWatch(){
       if (authTimer){
         clearInterval(authTimer);
@@ -1842,6 +1879,7 @@
         }
         setError(errorEl, t('pokerErrNoTableId', 'Table created but no ID returned'));
       } catch (err){
+        if (handleInsufficientChips(err)) return;
         if (isAuthError(err)){
           handleAuthExpired({
             authMsg: authMsg,
@@ -1871,6 +1909,7 @@
       var maxPlayers = parseInt(maxPlayersInput ? maxPlayersInput.value : 6, 10) || 6;
       setLoading(createBtn, true);
       try {
+        if (!(await hasFreshCashBuyInBalance())) return;
         var data = await apiPost(CREATE_URL, { stakes: { sb: sb, bb: bb }, maxPlayers: maxPlayers });
         if (data.tableId){
           navigateToPokerTable(data.tableId);
@@ -1878,6 +1917,7 @@
           setError(errorEl, t('pokerErrNoTableId', 'Table created but no ID returned'));
         }
       } catch (err){
+        if (handleInsufficientChips(err)) return;
         if (isAuthError(err)){
           handleAuthExpired({
             authMsg: authMsg,

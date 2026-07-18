@@ -1,0 +1,1 @@
+export const DEFAULT_CASH_TABLE_BUY_IN_CHIPS = 100;

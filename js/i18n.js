@@ -330,6 +330,7 @@ homeBonusLoadError: { en: 'Could not load available bonuses.', pl: 'Nie udało s
     pokerErrMissingTableId: { en: 'No tableId provided', pl: 'Nie podano ID stołu' },
     pokerErrLoadTable: { en: 'Failed to load table', pl: 'Nie udało się załadować stołu' },
     pokerErrJoin: { en: 'Failed to join', pl: 'Nie udało się dołączyć' },
+    pokerErrInsufficientChips: { en: 'You need at least {amount} CH to join a table.', pl: 'Potrzebujesz co najmniej {amount} CH, aby dołączyć do stołu.' },
     pokerErrLeave: { en: 'Failed to leave', pl: 'Nie udało się opuścić stołu' },
     pokerErrActionNotAllowed: { en: 'Action not allowed right now', pl: 'Akcja jest teraz niedozwolona' },
     pokerErrStateChanged: { en: 'State changed. Refreshing...', pl: 'Stan gry się zmienił. Odświeżam...' },
