@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import process from "node:process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { canonicalizeXpGameId, SUPPORTED_XP_GAME_IDS } from "../netlify/functions/_shared/xp-identity.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -179,6 +180,41 @@ async function analyzeFile(relPath) {
   return { relPath, issues };
 }
 
+async function validateCatalogXpIds() {
+  const catalog = JSON.parse(await readFile(join(projectRoot, "js/games.json"), "utf8"));
+  const issues = [];
+  const catalogIds = new Set();
+
+  for (const game of catalog.games || []) {
+    if (game.id === "open-poker") continue;
+    const canonicalId = canonicalizeXpGameId(game.id);
+    const canonicalSlug = canonicalizeXpGameId(game.slug);
+    if (!SUPPORTED_XP_GAME_IDS.includes(canonicalId) || canonicalId !== canonicalSlug) {
+      issues.push(`catalog game ${game.id} does not map to one supported XP id`);
+      continue;
+    }
+    catalogIds.add(canonicalId);
+
+    const page = game.source?.page;
+    if (!page || !existsSync(join(projectRoot, page))) {
+      issues.push(`catalog game ${game.id} has no readable source page`);
+      continue;
+    }
+    const html = stripHtmlComments(await readFile(join(projectRoot, page), "utf8"));
+    const body = html.match(/<body\b[^>]*>/i)?.[0] || "";
+    const pageGameId = body.match(/\bdata-game-id\s*=\s*(?:"([^"]+)"|'([^']+)')/i);
+    const canonicalPageId = canonicalizeXpGameId(pageGameId?.[1] || pageGameId?.[2]);
+    if (!pageGameId || canonicalPageId !== canonicalId) {
+      issues.push(`catalog game ${game.id} source page data-game-id does not map to ${canonicalId}`);
+    }
+  }
+
+  for (const supportedId of SUPPORTED_XP_GAME_IDS) {
+    if (!catalogIds.has(supportedId)) issues.push(`supported XP game ${supportedId} is missing from the catalog`);
+  }
+  return issues;
+}
+
 async function main() {
   try {
     const files = await resolveFiles();
@@ -188,6 +224,8 @@ async function main() {
     }
 
     const results = await Promise.all(files.map((file) => analyzeFile(file)));
+    const catalogIssues = await validateCatalogXpIds();
+    if (catalogIssues.length > 0) results.push({ relPath: "js/games.json", issues: catalogIssues });
     const problems = results.filter((result) => result.issues.length > 0);
 
     if (problems.length > 0) {

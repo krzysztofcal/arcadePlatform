@@ -18,7 +18,8 @@ import { store, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
 import { extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { validateServerSession, touchSession } from "./start-session.mjs";
 import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
-import { canonicalizeXpGameId, getXpPolicy, isValidXpAnonId, migrateAnonXpToUser, resolveXpIdentity } from "./_shared/xp-identity.mjs";
+import { getXpPolicy, isValidXpAnonId, migrateAnonXpToUser, resolveXpIdentity } from "./_shared/xp-identity.mjs";
+import { normalizeXpAwardInput, XP_AWARD_MAX_BODY_BYTES } from "./_shared/xp-award-input.mjs";
 import { createXpLedgerKeys, executeAtomicXpAward, readXpTotals } from "./_shared/xp-ledger.mjs";
 import { createXpLeaderboardKeys, getXpLeaderboardPeriods } from "./_shared/xp-leaderboard.mjs";
 import { persistXpProfileSnapshot, readCanonicalXpStatus } from "./_shared/xp-status.mjs";
@@ -115,13 +116,13 @@ const BLOCK_STACKER_XP_RULES = {
 };
 
 // Game-specific XP rules
+const DEFAULT_XP_RULES = {
+  baseXpPerSecond: BASELINE_XP_PER_SECOND,
+  scoreToXpRatio: 0.01,
+  maxScoreXpPerWindow: 50,
+};
+
 const GAME_XP_RULES = {
-  // Default rules for unknown games
-  default: {
-    baseXpPerSecond: BASELINE_XP_PER_SECOND,
-    scoreToXpRatio: 0.01,  // 100 score = 1 XP
-    maxScoreXpPerWindow: 50,
-  },
   // Block Stacker keeps the legacy tetris gameId for compatibility.
   tetris: BLOCK_STACKER_XP_RULES,
   "block-stacker": BLOCK_STACKER_XP_RULES,
@@ -418,7 +419,7 @@ function calculateXP({
   boostMultiplier = 1,
   gameEvents = [],
 }) {
-  const rules = GAME_XP_RULES[gameId?.toLowerCase()] || GAME_XP_RULES.default;
+  const rules = GAME_XP_RULES[gameId] || DEFAULT_XP_RULES;
 
   // Calculate activity ratio (0-1)
   const windowSeconds = Math.max(1, windowMs / 1000);
@@ -680,6 +681,10 @@ export async function handler(event) {
     return json(405, { error: "method_not_allowed" }, origin);
   }
 
+  if (Buffer.byteLength(event.body || "", "utf8") > XP_AWARD_MAX_BODY_BYTES) {
+    return json(413, { error: "payload_too_large" }, origin);
+  }
+
   // Parse body
   let body = {};
   try {
@@ -715,10 +720,10 @@ export async function handler(event) {
 
   const userId = identityId;
 
-  let conversion = null;
-  if (supabaseUserId && resolvedAnonId) {
+  const convertAnonymousXp = async () => {
+    if (!supabaseUserId || !resolvedAnonId) return null;
     try {
-      conversion = await migrateAnonXpToUser({
+      const result = await migrateAnonXpToUser({
         store,
         namespace: KEY_NS,
         anonId: resolvedAnonId,
@@ -727,15 +732,18 @@ export async function handler(event) {
         leaderboardAllTimeKey: XP_LEADERBOARD_KEYS.allTime(),
         leaderboardHiddenKey: XP_LEADERBOARD_KEYS.hidden(supabaseUserId),
       });
-      if (conversion.converted > 0) {
-        await persistUserProfile({ userId: supabaseUserId, totalXp: conversion.userTotal, now });
+      if (result.converted > 0) {
+        await persistUserProfile({ userId: supabaseUserId, totalXp: result.userTotal, now });
       }
+      return result;
     } catch (err) {
       klog("calc_anon_migration_failed", { error: err?.message });
+      return null;
     }
-  }
+  };
 
   if (operation === "status") {
+    const conversion = await convertAnonymousXp();
     const dayKey = getDailyKey(now);
     try {
       const result = await readCanonicalXpStatus({
@@ -776,6 +784,7 @@ export async function handler(event) {
 
   // SECURITY: Server-side session token validation
   const sessionToken = body.sessionToken || event.headers?.["x-session-token"];
+  let validatedServerSessionId = null;
   if (REQUIRE_SERVER_SESSION || SERVER_SESSION_WARN_MODE) {
     const validation = await validateXpAwardSession({ sessionToken, userId, headers: event.headers });
     if (validation.kind === "misconfigured") {
@@ -811,19 +820,32 @@ export async function handler(event) {
         identityType: supabaseUserId ? "authenticated" : "anonymous",
       });
     } else if (validation.kind === "valid") {
-      touchSession(validation.serverSessionId).catch(() => {});
+      validatedServerSessionId = validation.serverSessionId;
     }
   }
 
-  // Extract game event data
-  const gameId = canonicalizeXpGameId(body.gameId);
-  const windowStart = Number(body.windowStart) || 0;
-  const windowEnd = Number(body.windowEnd) || now;
-  const windowMs = Math.max(0, Math.min(30000, windowEnd - windowStart)); // Cap at 30s
-  const inputEvents = Math.max(0, Math.floor(Number(body.inputEvents) || 0));
-  const visibilitySeconds = Math.max(0, Number(body.visibilitySeconds) || 0);
-  const scoreDelta = Math.max(0, Math.floor(Number(body.scoreDelta) || 0));
-  const gameEvents = Array.isArray(body.gameEvents) ? body.gameEvents.slice(0, 50) : []; // Limit events
+  const normalizedInput = normalizeXpAwardInput(body);
+  if (!normalizedInput.ok) {
+    klog("calc_award_payload_rejected", { error: normalizedInput.error, field: normalizedInput.field });
+    return json(422, {
+      error: normalizedInput.error,
+      ...(normalizedInput.field ? { field: normalizedInput.field } : {}),
+    }, origin);
+  }
+
+  if (validatedServerSessionId) touchSession(validatedServerSessionId).catch(() => {});
+  const conversion = await convertAnonymousXp();
+
+  const {
+    gameId,
+    windowStart,
+    windowEnd,
+    windowMs,
+    inputEvents,
+    visibilitySeconds,
+    scoreDelta,
+    gameEvents,
+  } = normalizedInput.value;
   const clientBoost = Math.max(1, Math.min(5, Number(body.boostMultiplier) || 1)); // Diagnostic only; not trusted for awards
 
   // Timestamp validation
