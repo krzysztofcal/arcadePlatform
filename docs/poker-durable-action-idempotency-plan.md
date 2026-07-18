@@ -257,6 +257,20 @@ payload_hash
 
 If CAS or another already-required persistence step fails, the reservation disappears with transaction rollback.
 
+### Durable ACT must bypass the equal-state fallback
+
+`persisted-state-writer.mjs::writeViaDb()` currently handles a failed CAS by loading the authoritative row and comparing it with `nextState`. For existing mutation kinds, equal state may return `alreadyApplied: true` to tolerate an ambiguous persistence result.
+
+That fallback is not proof that a particular ACT request caused the state transition. For a mutation carrying `durableActionRequest`, it must therefore be disabled locally:
+
+- only a successful CAS performed after this transaction reserved a new ACT row may return `committed`;
+- a failed CAS must roll back the newly reserved ACT row and return `failure`/state conflict;
+- equal authoritative state must not convert that failure into `committed` or `durable_replay`;
+- `durable_replay` may come only from an ACT row that already existed, has the same payload hash, and contains a valid final `result_json`;
+- the existing equal-state/`alreadyApplied` behavior remains unchanged for mutation kinds without `durableActionRequest`.
+
+This is a conditional branch in the existing writer, not a global removal or refactor of the fallback.
+
 ### Writer outcomes
 
 `writeMutation()` must return an explicit `outcome` rather than making every successful return look like a fresh commit:
@@ -316,6 +330,9 @@ Use existing Node and WS test patterns; do not create a new framework.
 
 - ACT reservation, state CAS, and final result commit atomically.
 - CAS failure or rollback leaves no durable success row.
+- For durable ACT, a failed CAS followed by equal authoritative state still returns failure and rolls back the reservation.
+- Equal-state fallback remains available for existing non-durable mutation kinds.
+- Durable replay is returned only from a pre-existing, valid ACT row, never inferred from state equality.
 - Final result update must affect exactly one matching row.
 - Same key/hash after a new writer instance returns durable replay.
 - Same key with another hash returns conflict.
@@ -356,6 +373,7 @@ Rollback to the previous WS version is safe because the schema change is additiv
 - A committed persistent human action replays after reconnect, restore, eviction, and WS restart without another mutation.
 - Same scoped key with a different payload returns `idempotency_conflict`.
 - State CAS and durable ACT result are atomic.
+- A failed durable ACT CAS cannot become `committed` or `durable_replay` through the writer's equal-state/`alreadyApplied` fallback.
 - A two-worker race produces one state commit.
 - Race loser restores authoritative state without gameplay broadcast or side effects.
 - Only `outcome: "committed"` triggers broadcast, bot scheduling, and rollover.
