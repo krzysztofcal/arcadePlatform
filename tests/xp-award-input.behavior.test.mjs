@@ -24,10 +24,14 @@ for (const [field, value] of [
   ["inputEvents", "1"],
   ["scoreDelta", Number.NaN],
   ["gameplayActions", Number.POSITIVE_INFINITY],
+  ["scoreDelta", null],
+  ["gameplayActions", null],
 ]) {
   const result = normalizeXpAwardInput({ ...valid, [field]: value });
   assert.deepEqual({ error: result.error, field: result.field }, { error: "invalid_award_payload", field });
 }
+
+assert.equal(normalizeXpAwardInput({ ...valid, gameEvents: null }).field, "gameEvents");
 
 assert.equal(normalizeXpAwardInput({ ...valid, windowEnd: 999 }).field, "window");
 assert.equal(normalizeXpAwardInput({ ...valid, windowEnd: 31_001 }).field, "window");

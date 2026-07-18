@@ -20,12 +20,12 @@ export function normalizeXpAwardInput(body, { maxWindowMs = XP_AWARD_MAX_WINDOW_
   if (!isNonNegativeSafeInteger(body.inputEvents)) return invalid("inputEvents");
   if (!Number.isFinite(body.visibilitySeconds) || body.visibilitySeconds < 0) return invalid("visibilitySeconds");
 
-  const scoreDelta = body.scoreDelta == null ? 0 : body.scoreDelta;
+  const scoreDelta = body.scoreDelta === undefined ? 0 : body.scoreDelta;
   if (!isNonNegativeSafeInteger(scoreDelta)) return invalid("scoreDelta");
-  const gameplayActions = body.gameplayActions == null ? 0 : body.gameplayActions;
+  const gameplayActions = body.gameplayActions === undefined ? 0 : body.gameplayActions;
   if (!isNonNegativeSafeInteger(gameplayActions)) return invalid("gameplayActions");
 
-  const gameEvents = body.gameEvents == null ? [] : body.gameEvents;
+  const gameEvents = body.gameEvents === undefined ? [] : body.gameEvents;
   if (!Array.isArray(gameEvents) || gameEvents.length > XP_AWARD_MAX_GAME_EVENTS) return invalid("gameEvents");
 
   return {
