@@ -1017,3 +1017,133 @@ test("replacement funding failure rolls back persisted state and escrow", async 
   assert.equal(harness.balance(`POKER_TABLE:${tableId}`), escrowBefore);
   assert.equal(harness.durable.ledgerInsertCount, 0);
 });
+
+function createDurableActionDbHarness({ tableId, version = 1, state = { tableId, handId: "h1", phase: "PREFLOP" } } = {}) {
+  const durable = { version, state: structuredClone(state), requests: new Map(), casCount: 0, failAudit: false };
+  const requestKey = (userId, requestId) => `${tableId}:ACT:${requestId}:${userId}`;
+
+  async function beginSql(fn) {
+    const working = {
+      version: durable.version,
+      state: structuredClone(durable.state),
+      requests: new Map([...durable.requests].map(([key, value]) => [key, structuredClone(value)])),
+      casCount: durable.casCount,
+      failAudit: durable.failAudit
+    };
+    const tx = {
+      unsafe: async (query, params = []) => {
+        const text = String(query).replace(/\s+/g, " ").trim();
+        if (text.startsWith("insert into public.poker_requests")) {
+          const key = requestKey(params[1], params[2]);
+          if (working.requests.has(key)) return [];
+          working.requests.set(key, { payload_hash: params[4], result_json: null });
+          return [{ request_id: params[2] }];
+        }
+        if (text.startsWith("select payload_hash, result_json from public.poker_requests")) {
+          const row = working.requests.get(requestKey(params[3], params[2]));
+          return row ? [structuredClone(row)] : [];
+        }
+        if (text.startsWith("update public.poker_requests set result_json")) {
+          const key = requestKey(params[3], params[2]);
+          const row = working.requests.get(key);
+          if (!row || row.payload_hash !== params[4]) return [];
+          row.result_json = JSON.parse(params[5]);
+          return [{ request_id: params[2] }];
+        }
+        if (text.startsWith("update public.poker_state set version = version + 1")) {
+          if (working.version !== Number(params[1])) return [];
+          working.version += 1;
+          working.state = JSON.parse(params[2]);
+          working.casCount += 1;
+          return [{ version: working.version }];
+        }
+        if (text.startsWith("select id from public.poker_actions") || text.startsWith("update public.poker_tables set last_activity_at")) return [];
+        if (text.startsWith("insert into public.poker_actions")) {
+          if (working.failAudit) throw new Error("audit_failed");
+          return [];
+        }
+        if (text.startsWith("select version, state from public.poker_state")) return [{ version: working.version, state: structuredClone(working.state) }];
+        return [];
+      }
+    };
+    const result = await fn(tx);
+    durable.version = working.version;
+    durable.state = working.state;
+    durable.requests = working.requests;
+    durable.casCount = working.casCount;
+    return result;
+  }
+
+  return { beginSql, durable, requestKey };
+}
+
+function durableActionRequestFixture({ requestId = "action-1", payloadHash = "a".repeat(64), stateVersion = 2 } = {}) {
+  return {
+    userId: "00000000-0000-4000-8000-000000000001",
+    requestId,
+    payloadHash,
+    result: { status: "accepted", reason: null, handId: "h1", stateVersion }
+  };
+}
+
+test("durable ACT commits with state CAS and replays after writer restart", async () => {
+  const tableId = "00000000-0000-4000-8000-000000000377";
+  const harness = createDurableActionDbHarness({ tableId });
+  const options = { env: { SUPABASE_DB_URL: "postgres://example.invalid/db" }, beginSql: harness.beginSql, klog: () => {} };
+  const writer = createPersistedStateWriter(options);
+  const request = durableActionRequestFixture();
+  const nextState = { tableId, handId: "h1", phase: "FLOP" };
+
+  assert.deepEqual(await writer.readDurableActionRequest({ tableId, userId: request.userId, requestId: request.requestId, payloadHash: request.payloadHash }), { outcome: "missing" });
+  const committed = await writer.writeMutation({ tableId, expectedVersion: 1, nextState, durableActionRequest: request });
+  assert.equal(committed.ok, true);
+  assert.equal(committed.outcome, "committed");
+  assert.deepEqual(committed.durableResult, request.result);
+  assert.equal(harness.durable.version, 2);
+  assert.equal(harness.durable.casCount, 1);
+
+  const restartedWriter = createPersistedStateWriter(options);
+  const lookup = await restartedWriter.readDurableActionRequest({ tableId, userId: request.userId, requestId: request.requestId, payloadHash: request.payloadHash });
+  assert.deepEqual(lookup, { outcome: "durable_replay", durableResult: request.result });
+  const raceReplay = await restartedWriter.writeMutation({ tableId, expectedVersion: 1, nextState, durableActionRequest: request });
+  assert.equal(raceReplay.outcome, "durable_replay");
+  assert.equal(harness.durable.casCount, 1);
+
+  const conflict = await restartedWriter.readDurableActionRequest({ tableId, userId: request.userId, requestId: request.requestId, payloadHash: "b".repeat(64) });
+  assert.equal(conflict.outcome, "idempotency_conflict");
+});
+
+test("durable ACT failed CAS rolls back reservation and cannot use equal-state fallback", async () => {
+  const tableId = "00000000-0000-4000-8000-000000000378";
+  const equalState = { tableId, handId: "h1", phase: "FLOP" };
+  const harness = createDurableActionDbHarness({ tableId, version: 2, state: equalState });
+  const writer = createPersistedStateWriter({ env: { SUPABASE_DB_URL: "postgres://example.invalid/db" }, beginSql: harness.beginSql, klog: () => {} });
+  const request = durableActionRequestFixture({ requestId: "cas-loser" });
+
+  const result = await writer.writeMutation({ tableId, expectedVersion: 1, nextState: equalState, durableActionRequest: request });
+  assert.equal(result.ok, false);
+  assert.equal(result.outcome, "failure");
+  assert.equal(result.reason, "conflict");
+  assert.equal(harness.durable.requests.has(harness.requestKey(request.userId, request.requestId)), false);
+  assert.equal(harness.durable.casCount, 0);
+});
+
+test("durable ACT keeps accepted action audit best-effort", async () => {
+  const tableId = "00000000-0000-4000-8000-000000000379";
+  const harness = createDurableActionDbHarness({ tableId });
+  harness.durable.failAudit = true;
+  const logs = [];
+  const writer = createPersistedStateWriter({ env: { SUPABASE_DB_URL: "postgres://example.invalid/db" }, beginSql: harness.beginSql, klog: (event) => logs.push(event) });
+  const request = durableActionRequestFixture({ requestId: "audit-best-effort" });
+  const result = await writer.writeMutation({
+    tableId,
+    expectedVersion: 1,
+    nextState: { tableId, handId: "h1", phase: "FLOP" },
+    durableActionRequest: request,
+    acceptedActionAudit: { handId: "h1", actorUserId: request.userId, action: "CHECK", requestId: request.requestId }
+  });
+
+  assert.equal(result.outcome, "committed");
+  assert.equal(harness.durable.requests.get(harness.requestKey(request.userId, request.requestId)).result_json.status, "accepted");
+  assert.equal(logs.includes("ws_accepted_action_audit_failed"), true);
+});

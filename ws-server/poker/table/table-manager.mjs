@@ -803,14 +803,14 @@ export function createTableManager({
     };
   }
 
-  function applyAction({ tableId, handId, userId, requestId, action, amount, nowIso, nowMs }) {
+  function applyAction({ tableId, handId, userId, requestId, action, amount, nowIso, nowMs, useActionReplayCache = true }) {
     const table = tables.get(tableId);
     if (!table) {
       return rejectAction({ reason: "table_not_found", stateVersion: 0 });
     }
 
     const replayKey = makeActionReplayKey({ userId, requestId });
-    if (replayKey && table.actionResultsByRequestId.has(replayKey)) {
+    if (useActionReplayCache && replayKey && table.actionResultsByRequestId.has(replayKey)) {
       return asReplayedResult(table.actionResultsByRequestId.get(replayKey));
     }
 
@@ -829,7 +829,7 @@ export function createTableManager({
 
     if (!applied.accepted) {
       const rejected = rejectAction({ reason: applied.reason || "action_rejected", stateVersion: applied.stateVersion });
-      rememberActionResult(table, requestId, { ...rejected, userId });
+      if (useActionReplayCache) rememberActionResult(table, requestId, { ...rejected, userId });
       return rejected;
     }
 
@@ -857,7 +857,7 @@ export function createTableManager({
       })
     };
 
-    rememberActionResult(table, requestId, { ...accepted, userId });
+    if (useActionReplayCache) rememberActionResult(table, requestId, { ...accepted, userId });
 
     return accepted;
   }

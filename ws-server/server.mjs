@@ -255,6 +255,9 @@ const persistedSeatTouchThrottleMs = resolvePositiveInt(
 const streamLog = createStreamLog({ cap: Number(process.env.WS_STREAM_REPLAY_CAP || 128) });
 const tableSnapshotLoader = createTableSnapshotLoader({ env: process.env });
 const persistedStateWriter = persistedStateWriteEnabled ? createPersistedStateWriter({ env: process.env, klog: klogSafe }) : null;
+const durableActionStore = hasSupabaseDbUrl && persistedStateWriter?.readDurableActionRequest
+  ? persistedStateWriter
+  : null;
 const botFundingSystemKey = getBotConfig(process.env).bankrollSystemKey;
 const lastSnapshotBySessionAndTable = new Map();
 const persistedSeatTouchByTableUser = new Map();
@@ -1191,6 +1194,7 @@ async function persistMutatedState({
   replacementFundings = undefined,
   humanStackUpdates = undefined,
   replacementFundingSystemKey = null,
+  durableActionRequest = null,
   deferRuntimeVersionUpdate = false
 }) {
   if (isGuestTableId(tableId)) {
@@ -1233,14 +1237,15 @@ async function persistMutatedState({
     acceptedActionAudit,
     replacementFundings,
     humanStackUpdates,
-    botFundingSystemKey: replacementFundingSystemKey
+    botFundingSystemKey: replacementFundingSystemKey,
+    durableActionRequest
   });
   if (!persisted?.ok) {
     klogSafe("ws_state_persist_failed", { tableId, expectedVersion, mutationKind, reason: persisted?.reason || "unknown" });
     return persisted;
   }
   klogSafe("ws_state_persist_result", { ok: true, newVersion: persisted.newVersion ?? null });
-  if (!deferRuntimeVersionUpdate) {
+  if (!deferRuntimeVersionUpdate && persisted.outcome !== "durable_replay") {
     tableManager.setPersistedStateVersion(tableId, persisted.newVersion);
   }
   return persisted;
@@ -3229,6 +3234,8 @@ wss.on("connection", (ws) => {
           restoreTableFromPersisted,
           broadcastResyncRequired,
           broadcastStateSnapshots,
+          durableActionRequired: !isGuestTableId(frame.__resolvedTableId),
+          durableActionStore,
           scheduleSettledRollover: maybeScheduleSettledRollover,
           scheduleBotStep,
           klog: klogSafe
