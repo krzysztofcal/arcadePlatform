@@ -865,7 +865,7 @@
     }
 
     let attempt = 0;
-    const payloadJson = JSON.stringify(body);
+    let sessionRenewed = false;
     const allowBeacon = opts.allowBeacon === true;
     const authToken = await ensureAuthTokenWithRetry();
     if (!authToken && await isUserLoggedIn()) {
@@ -873,6 +873,7 @@
     }
     const headers = await buildAuthHeaders({ "content-type": "application/json" });
     while (attempt < 3) {
+      const payloadJson = JSON.stringify(body);
       let networkError = false;
       let lastError = null;
       let res = null;
@@ -904,6 +905,20 @@
             // Rate limited - back off
             state.backoffUntil = Date.now() + 60000;
             throw new Error("Rate limited");
+          }
+
+          if (res.status === 401 && parsed?.error === "invalid_session" && parsed?.requiresNewSession === true) {
+            if (sessionRenewed) {
+              throw new Error("XP session renewal rejected");
+            }
+            sessionRenewed = true;
+            clearServerSession();
+            const renewed = await ensureServerSession();
+            if (!renewed.token) {
+              throw new Error(renewed.error || "XP session renewal failed");
+            }
+            body.sessionToken = renewed.token;
+            continue;
           }
 
           throw new Error(parsed?.message || parsed?.error || `Server calc failed (${res.status})`);
