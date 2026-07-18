@@ -14,7 +14,7 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ mode, queries, notifications = [], balance = 100, balanceError = false }) =>
+const makeHandler = ({ mode, queries, notifications = [], logs = [], balance = 100, balanceError = false }) =>
   loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -77,7 +77,7 @@ const makeHandler = ({ mode, queries, notifications = [], balance = 100, balance
       notifications.push(payload);
       return { ok: true };
     },
-    klog: () => {},
+    klog: (kind, data) => { logs.push({ kind, data }); },
   });
 
 const findLockCall = (queries) =>
@@ -123,7 +123,8 @@ const run = async () => {
   {
     const queries = [];
     const notifications = [];
-    const handler = makeHandler({ mode: "prefer_humans", queries, notifications, balance: 99 });
+    const logs = [];
+    const handler = makeHandler({ mode: "prefer_humans", queries, notifications, logs, balance: 99 });
     const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
     assert.equal(res.statusCode, 409);
     assert.deepEqual(JSON.parse(res.body), { error: "insufficient_chips", requiredBuyIn: 100, balance: 99 });
@@ -132,6 +133,9 @@ const run = async () => {
     assert.equal(notifications.length, 0);
     const candidateCalls = queries.filter((entry) => entry.query.toLowerCase().includes("from public.poker_tables t"));
     assert.equal(candidateCalls.length, 1, "insufficient result must not continue to another candidate");
+    assert.equal(logs.some((entry) => entry.kind === "poker_quick_seat_selected"), false);
+    assert.equal(logs.filter((entry) => entry.kind === "poker_quick_seat_insufficient_chips").length, 1);
+    assert.equal(Object.prototype.hasOwnProperty.call(logs.find((entry) => entry.kind === "poker_quick_seat_insufficient_chips")?.data || {}, "userId"), false);
   }
 
   {
