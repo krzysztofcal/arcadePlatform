@@ -133,7 +133,7 @@ These requirements align with the protocol sections for envelope, errors, idempo
 
 ## Operational requirements
 
-- Sweep endpoint must be protected by shared secret (`POKER_SWEEP_SECRET`) as an operational security requirement.
+- Gameplay cleanup is owned exclusively by the WS runtime through its table janitor and serialized cleanup primitives. The retired HTTP sweep tombstone has no mutation authority and requires no scheduler secret.
 - WS engine must preserve data consistency needed by cleanup:
   - coherent seat status transitions,
   - synchronized stack persistence at lifecycle boundaries,
