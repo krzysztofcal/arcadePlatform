@@ -1,7 +1,9 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { formatStakes, parseStakes } from "./_shared/poker-stakes.mjs";
 import { createPokerTableWithState } from "./_shared/poker-table-init.mjs";
+import { readPokerBuyInEligibility } from "./_shared/poker-buy-in-eligibility.mjs";
 import { notifyWsLobbyMaterialize } from "./_shared/poker-ws-runtime-notify.mjs";
+import { DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../../shared/poker-domain/table-economy.mjs";
 
 const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
 
@@ -78,14 +80,38 @@ export async function handler(event) {
   }
   const stakesJson = formatStakes(stakesParsed.value);
 
-  let tableId = null;
+  let transactionResult = null;
   try {
-    await beginSql(async (tx) => {
+    transactionResult = await beginSql(async (tx) => {
+      const eligibility = await readPokerBuyInEligibility(tx, {
+        userId: auth.userId,
+        requiredBuyIn: DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
+      });
+      if (!eligibility.eligible) {
+        return { kind: "insufficient_chips", balance: eligibility.balance, requiredBuyIn: eligibility.requiredBuyIn };
+      }
       const created = await createPokerTableWithState(tx, { userId: auth.userId, maxPlayers, stakesJson });
-      tableId = created.tableId;
+      return { kind: "created", tableId: created.tableId };
     });
   } catch (error) {
     klog("poker_create_table_error", { message: error?.message || "unknown_error" });
+    return { statusCode: 500, headers: mergeHeaders(cors), body: JSON.stringify({ error: "server_error" }) };
+  }
+
+  if (transactionResult?.kind === "insufficient_chips") {
+    return {
+      statusCode: 409,
+      headers: mergeHeaders(cors),
+      body: JSON.stringify({
+        error: "insufficient_chips",
+        requiredBuyIn: transactionResult.requiredBuyIn,
+        balance: transactionResult.balance,
+      }),
+    };
+  }
+  const tableId = transactionResult?.kind === "created" ? transactionResult.tableId : null;
+  if (!tableId) {
+    klog("poker_create_table_error", { message: "invalid_transaction_result" });
     return { statusCode: 500, headers: mergeHeaders(cors), body: JSON.stringify({ error: "server_error" }) };
   }
 

@@ -247,6 +247,7 @@ function loadLobbyHarness(options = {}){
   elements.pokerSb.value = '1';
   elements.pokerBb.value = '2';
   elements.pokerMaxPlayers.value = '6';
+  elements.pokerLobbyContent.dataset.requiredBuyIn = '100';
 
   const fetchCalls = [];
   const wsCreates = [];
@@ -287,7 +288,10 @@ function loadLobbyHarness(options = {}){
       removeEventListener: () => {},
       __RUNNING_POKER_UI_TESTS__: false,
       KLog: { log: () => {} },
-        SupabaseAuthBridge: { getAccessToken: options.getAccessToken || (async () => 'token') },
+      ChipsClient: options.balanceError
+        ? { fetchBalance: async () => { throw new Error('balance_failed'); } }
+        : (options.balanceResult ? { fetchBalance: async () => options.balanceResult } : null),
+      SupabaseAuthBridge: { getAccessToken: options.getAccessToken || (async () => 'token') },
       PokerWsClient: {
         create: (options) => {
           const record = {
@@ -336,6 +340,7 @@ function loadLobbyHarness(options = {}){
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
     fetch: async (url) => {
       fetchCalls.push(String(url));
+      if (typeof options.fetchResponse === 'function') return options.fetchResponse(String(url));
       return { ok: true, json: async () => ({ ok: true }) };
     },
     atob: (value) => Buffer.from(String(value), 'base64').toString('binary'),
@@ -394,6 +399,47 @@ assert.equal(lobbyHarness.elements.pokerTableList.children[0].children[0].textCo
 lobbyHarness.elements.pokerRefresh.click();
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(lobbyHarness.getRequestLobbySnapshotCalls(), 1, 'lobby refresh should request a fresh websocket lobby snapshot');
+
+{
+  const insufficientHarness = loadLobbyHarness({ balanceResult: { balance: 99 } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  insufficientHarness.elements.pokerCreate.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(insufficientHarness.fetchCalls.some((url) => url.includes('poker-create-table')), false, 'confirmed insufficient balance should suppress create-table API');
+  assert.equal(insufficientHarness.elements.pokerError.textContent, 'You need at least 100 CH to join a table.');
+  assert.equal(insufficientHarness.elements.pokerCreate.disabled, false, 'create-table should leave loading state after local rejection');
+  assert.equal(insufficientHarness.getLobbyClient().client.isReady(), true, 'local buy-in rejection should keep the lobby active');
+}
+
+{
+  const quickSeatGuardHarness = loadLobbyHarness({
+    fetchResponse: async (url) => url.includes('poker-quick-seat')
+      ? { ok: false, status: 409, json: async () => ({ error: 'insufficient_chips', requiredBuyIn: 100, balance: 99 }) }
+      : { ok: true, status: 200, json: async () => ({ ok: true }) },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  quickSeatGuardHarness.elements.pokerQuickSeat.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(quickSeatGuardHarness.fetchCalls.some((url) => url.includes('poker-quick-seat')), true, 'quick-seat should let backend preserve funded-seat reconnect semantics');
+  assert.equal(quickSeatGuardHarness.elements.pokerError.textContent, 'You need at least 100 CH to join a table.');
+  assert.equal(quickSeatGuardHarness.elements.pokerQuickSeat.disabled, false);
+}
+
+{
+  const fallbackHarness = loadLobbyHarness({
+    balanceError: true,
+    fetchResponse: async (url) => ({
+      ok: true,
+      status: 200,
+      json: async () => url.includes('poker-create-table') ? { tableId: 'table-after-fallback' } : { ok: true },
+    }),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  fallbackHarness.elements.pokerCreate.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(fallbackHarness.fetchCalls.some((url) => url.includes('poker-create-table')), true, 'balance lookup failure should fall through to guarded create endpoint');
+}
 
 {
   const reconnectHarness = loadLobbyHarness();

@@ -3067,6 +3067,16 @@
     return value.trim().toLowerCase();
   }
 
+  function joinErrorMessage(error){
+    var code = autoJoinErrorCode(error);
+    if (code !== 'insufficient_funds' && code !== 'insufficient_chips') {
+      return error && error.message ? error.message : 'Failed to join';
+    }
+    var buyIn = els.joinBuyIn ? parseInt(els.joinBuyIn.value, 10) : NaN;
+    var amount = Number.isFinite(buyIn) && buyIn > 0 ? Math.trunc(buyIn) : 100;
+    return t('pokerErrInsufficientChips', 'You need at least {amount} CH to join a table.').replace('{amount}', String(amount));
+  }
+
   function isRetryableAutoJoinError(error){
     var code = autoJoinErrorCode(error);
     if (!code) return false;
@@ -3129,7 +3139,7 @@
         retryScheduled: retryScheduled,
         retryCount: autoJoinRetryCount
       });
-      setError(err && err.message ? err.message : 'Failed to auto-join');
+      setError(joinErrorMessage(err));
     });
   }
 
@@ -3294,7 +3304,7 @@
         state.statusText = result && result.seatNo != null ? ('Joined seat ' + result.seatNo) : 'Join accepted';
         renderInfoPanel();
       }).catch(function(err){
-        setError(err && err.message ? err.message : 'Failed to join');
+        setError(joinErrorMessage(err));
       });
     });
     if (els.leaveBtn) els.leaveBtn.addEventListener('click', function(){

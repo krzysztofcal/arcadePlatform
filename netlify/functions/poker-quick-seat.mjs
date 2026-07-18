@@ -1,7 +1,9 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { formatStakes, parseStakes } from "./_shared/poker-stakes.mjs";
 import { createPokerTableWithState } from "./_shared/poker-table-init.mjs";
+import { readPokerBuyInEligibility } from "./_shared/poker-buy-in-eligibility.mjs";
 import { notifyWsLobbyMaterialize } from "./_shared/poker-ws-runtime-notify.mjs";
+import { DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../../shared/poker-domain/table-economy.mjs";
 
 const DEFAULT_MAX_PLAYERS = 6;
 const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
@@ -55,11 +57,18 @@ const toUiSeatNo = (seatNoDb, maxPlayers) => {
 };
 
 const createAndRecommend = async (tx, { userId, maxPlayers, stakesJson }) => {
+  const eligibility = await readPokerBuyInEligibility(tx, {
+    userId,
+    requiredBuyIn: DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
+  });
+  if (!eligibility.eligible) {
+    return { kind: "insufficient_chips", balance: eligibility.balance, requiredBuyIn: eligibility.requiredBuyIn };
+  }
   const created = await createPokerTableWithState(tx, { userId, maxPlayers, stakesJson });
   const tableId = created.tableId;
   await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
   const seatNoUi = 1;
-  return { tableId, seatNo: seatNoUi, strategy: "create" };
+  return { kind: "recommended", tableId, seatNo: seatNoUi, strategy: "create" };
 };
 
 const triggerWsLobbyMaterialize = ({ tableId, maxPlayers, stakes, klog }) => {
@@ -123,7 +132,15 @@ const recommendSeatAtTable = async (tx, { tableId, userId, maxPlayers, allowCrea
   const existingSeatNoDb = existingSeatRows?.[0]?.seat_no;
   if (Number.isInteger(existingSeatNoDb)) {
     await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
-    return { tableId, seatNo: toUiSeatNo(existingSeatNoDb, maxPlayers) };
+    return { kind: "recommended", tableId, seatNo: toUiSeatNo(existingSeatNoDb, maxPlayers) };
+  }
+
+  const eligibility = await readPokerBuyInEligibility(tx, {
+    userId,
+    requiredBuyIn: DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
+  });
+  if (!eligibility.eligible) {
+    return { kind: "insufficient_chips", balance: eligibility.balance, requiredBuyIn: eligibility.requiredBuyIn };
   }
 
   const activeSeatRows = await tx.unsafe(
@@ -133,10 +150,10 @@ const recommendSeatAtTable = async (tx, { tableId, userId, maxPlayers, allowCrea
   const seatNoDb = pickSeatNo(activeSeatRows, maxPlayers);
   if (seatNoDb == null) {
     if (allowCreateFallback) return createAndRecommend(tx, createPayload);
-    return null;
+    return { kind: "unavailable" };
   }
   await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
-  return { tableId, seatNo: toUiSeatNo(seatNoDb, maxPlayers) };
+  return { kind: "recommended", tableId, seatNo: toUiSeatNo(seatNoDb, maxPlayers) };
 };
 
 export async function handler(event) {
@@ -197,7 +214,6 @@ export async function handler(event) {
 
       const preferredRows = await selectCandidate(tx, { stakesJson, maxPlayers, requireHuman: true, humanSeatFreshCutoffIso });
       if (preferredRows?.[0]?.id) {
-        klog("poker_quick_seat_selected", { tableId: preferredRows[0].id, strategy: "prefer_humans", maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb });
         const recommendation = await recommendSeatAtTable(tx, {
           tableId: preferredRows[0].id,
           userId: auth.userId,
@@ -205,12 +221,15 @@ export async function handler(event) {
           allowCreateFallback: true,
           createPayload,
         });
-        if (recommendation) return { ...recommendation, strategy: "prefer_humans" };
+        if (recommendation.kind === "insufficient_chips") return recommendation;
+        if (recommendation.kind === "recommended") {
+          klog("poker_quick_seat_selected", { tableId: recommendation.tableId, strategy: "prefer_humans", maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb });
+          return { ...recommendation, strategy: "prefer_humans" };
+        }
       }
 
       const anyRows = await selectCandidate(tx, { stakesJson, maxPlayers, requireHuman: false, humanSeatFreshCutoffIso });
       if (anyRows?.[0]?.id) {
-        klog("poker_quick_seat_selected", { tableId: anyRows[0].id, strategy: "any_open", maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb });
         const recommendation = await recommendSeatAtTable(tx, {
           tableId: anyRows[0].id,
           userId: auth.userId,
@@ -218,15 +237,33 @@ export async function handler(event) {
           allowCreateFallback: true,
           createPayload,
         });
-        if (recommendation) return { ...recommendation, strategy: "any_open" };
+        if (recommendation.kind === "insufficient_chips") return recommendation;
+        if (recommendation.kind === "recommended") {
+          klog("poker_quick_seat_selected", { tableId: recommendation.tableId, strategy: "any_open", maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb });
+          return { ...recommendation, strategy: "any_open" };
+        }
       }
 
       const createdRecommendation = await createAndRecommend(tx, createPayload);
-      klog("poker_quick_seat_selected", { tableId: createdRecommendation.tableId, strategy: "create", maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb });
+      if (createdRecommendation.kind === "recommended") {
+        klog("poker_quick_seat_selected", { tableId: createdRecommendation.tableId, strategy: "create", maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb });
+      }
       return createdRecommendation;
     });
 
-    if (result?.strategy === "create" && typeof result?.tableId === "string" && result.tableId) {
+    if (result?.kind === "insufficient_chips") {
+      klog("poker_quick_seat_insufficient_chips", { requiredBuyIn: result.requiredBuyIn, maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb });
+      return {
+        statusCode: 409,
+        headers: mergeHeaders(cors),
+        body: JSON.stringify({ error: "insufficient_chips", requiredBuyIn: result.requiredBuyIn, balance: result.balance }),
+      };
+    }
+    if (result?.kind !== "recommended" || typeof result?.tableId !== "string" || !result.tableId) {
+      throw new Error("invalid_quick_seat_result");
+    }
+
+    if (result.strategy === "create") {
       triggerWsLobbyMaterialize({ tableId: result.tableId, maxPlayers, stakes: stakesParsed.value, klog });
     }
 

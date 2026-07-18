@@ -1,8 +1,22 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 import { isStateStorageValid, normalizeJsonState } from "../netlify/functions/_shared/poker-state-utils.mjs";
+import { readPokerBuyInEligibility } from "../netlify/functions/_shared/poker-buy-in-eligibility.mjs";
 
 process.env.CHIPS_ENABLED = "1";
+
+const genericEligibility = await readPokerBuyInEligibility(
+  { unsafe: async () => [{ balance: 999 }] },
+  { userId: "user-1", requiredBuyIn: 1000 }
+);
+assert.deepEqual(genericEligibility, { eligible: false, balance: 999, requiredBuyIn: 1000 });
+await assert.rejects(
+  readPokerBuyInEligibility(
+    { unsafe: async () => [{ balance: -1 }] },
+    { userId: "user-1", requiredBuyIn: 100 }
+  ),
+  /chips_balance_integrity_error/
+);
 
 const makeHandler = (queries, options = {}) =>
   loadPokerHandler("netlify/functions/poker-create-table.mjs", {
@@ -17,6 +31,11 @@ const makeHandler = (queries, options = {}) =>
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
+          if (text.includes("account_type = 'user'")) {
+            if (options.balanceError) throw new Error("balance_read_failed");
+            if (options.missingAccount) return [];
+            return [{ balance: options.balance ?? 100 }];
+          }
           if (text.includes("insert into public.poker_tables")) {
             return [{ id: "table-1" }];
           }
@@ -132,8 +151,53 @@ const runMaintenanceGuard = async () => {
   }
 };
 
+const runInsufficientBalance = async () => {
+  const queries = [];
+  const notifications = [];
+  const handler = makeHandler(queries, {
+    balance: 99,
+    notifyWsLobbyMaterialize: async (payload) => { notifications.push(payload); },
+  });
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ maxPlayers: 6, stakes: "1/2" }),
+  });
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(JSON.parse(response.body), { error: "insufficient_chips", requiredBuyIn: 100, balance: 99 });
+  assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")), false);
+  assert.equal(notifications.length, 0);
+};
+
+const runMissingAccount = async () => {
+  const queries = [];
+  const handler = makeHandler(queries, { missingAccount: true });
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ maxPlayers: 6, stakes: "1/2" }),
+  });
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(JSON.parse(response.body), { error: "insufficient_chips", requiredBuyIn: 100, balance: 0 });
+};
+
+const runBalanceReadFailure = async () => {
+  const queries = [];
+  const handler = makeHandler(queries, { balanceError: true });
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ maxPlayers: 6, stakes: "1/2" }),
+  });
+  assert.equal(response.statusCode, 500);
+  assert.equal(JSON.parse(response.body).error, "server_error");
+};
+
 await runMissingStakes();
 await runInvalidStakes();
 await runSlashStakes();
 await runSlowNotifyDoesNotDelayResponse();
 await runMaintenanceGuard();
+await runInsufficientBalance();
+await runMissingAccount();
+await runBalanceReadFailure();
