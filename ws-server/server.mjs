@@ -169,7 +169,6 @@ function resolveAuthoritativeJoinEnabled(rawValue, { hasSupabaseDbUrl = false, o
 }
 
 const hasSupabaseDbUrl = Boolean(process.env.SUPABASE_DB_URL);
-const hasPersistedStateFile = Boolean(process.env.WS_PERSISTED_STATE_FILE);
 const publicProfileStorageBaseUrl = process.env.SUPABASE_URL || process.env.SUPABASE_URL_V2 || "";
 const persistedBootstrapEnabled = Boolean(hasSupabaseDbUrl || process.env.WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON || process.env.WS_PERSISTED_STATE_FILE);
 const persistedStateWriteEnabled = Boolean(process.env.SUPABASE_DB_URL || process.env.WS_PERSISTED_STATE_FILE);
@@ -3235,7 +3234,7 @@ wss.on("connection", (ws) => {
           restoreTableFromPersisted,
           broadcastResyncRequired,
           broadcastStateSnapshots,
-          durableActionRequired: !isGuestTableId(frame.__resolvedTableId) && !hasPersistedStateFile,
+          durableActionRequired: hasSupabaseDbUrl && !isGuestTableId(frame.__resolvedTableId),
           durableActionStore,
           scheduleSettledRollover: maybeScheduleSettledRollover,
           scheduleBotStep,
