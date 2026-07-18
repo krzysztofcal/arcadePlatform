@@ -1,7 +1,13 @@
 import crypto from "node:crypto";
 import { store } from "./_shared/store-upstash.mjs";
-import { extractBearerToken, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
+import { extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { buildCorsAllowlist, buildCorsHeaders } from "./_shared/xp-cors.mjs";
+import {
+  createSignedXpSessionToken,
+  createXpSessionFingerprint,
+  resolveXpSessionSecret,
+  verifySignedXpSessionToken,
+} from "./_shared/xp-server-session.mjs";
 
 // Configuration
 const SESSION_TTL_SEC = Math.max(0, Number(process.env.XP_SESSION_TTL_SEC) || 604800); // 7 days default
@@ -13,18 +19,6 @@ const CORS_ALLOW = buildCorsAllowlist({ xpCorsAllow: process.env.XP_CORS_ALLOW, 
 // Rate limiting for session creation
 const SESSION_RATE_LIMIT_PER_IP_PER_MIN = Math.max(0, Number(process.env.XP_SESSION_RATE_LIMIT_IP) || 5);
 const SESSION_RATE_LIMIT_ENABLED = process.env.XP_SESSION_RATE_LIMIT_ENABLED !== "0";
-
-// SECURITY: HMAC signing utilities
-const signPayload = (payload, secret) =>
-  crypto.createHmac("sha256", secret).update(payload).digest("base64url");
-
-const safeEquals = (a, b) => {
-  if (a.length !== b.length) return false;
-  const left = Buffer.from(a, "utf8");
-  const right = Buffer.from(b, "utf8");
-  if (left.length !== right.length) return false;
-  return crypto.timingSafeEqual(left, right);
-};
 
 // Hash helper
 const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
@@ -66,66 +60,14 @@ function generateSessionId() {
 }
 
 // Create session token with HMAC signature (userId represents identityId: anonId today, Supabase userId later)
-function createSignedSessionToken({ sessionId, userId, createdAt, fingerprint, secret }) {
-  const payload = JSON.stringify({
-    sid: sessionId,
-    uid: userId,
-    ts: createdAt,
-    fp: fingerprint,
-  });
-  const encoded = Buffer.from(payload, "utf8").toString("base64url");
-  const signature = signPayload(payload, secret);
-  return `${encoded}.${signature}`;
-}
-
 // Verify and decode session token
 export function verifySessionToken(token, secret) {
-  if (!token || typeof token !== "string") {
-    return { valid: false, reason: "missing_token" };
-  }
-
-  const [encodedPayload, signature] = token.split(".");
-  if (!encodedPayload || !signature) {
-    return { valid: false, reason: "malformed_token" };
-  }
-
-  let payloadJson;
-  try {
-    payloadJson = Buffer.from(encodedPayload, "base64url").toString("utf8");
-  } catch {
-    return { valid: false, reason: "invalid_encoding" };
-  }
-
-  const expectedSig = signPayload(payloadJson, secret);
-  if (!safeEquals(signature, expectedSig)) {
-    return { valid: false, reason: "invalid_signature" };
-  }
-
-  try {
-    const parsed = JSON.parse(payloadJson);
-    return {
-      valid: true,
-      sessionId: parsed.sid,
-      userId: parsed.uid,
-      createdAt: parsed.ts,
-      fingerprint: parsed.fp,
-    };
-  } catch {
-    return { valid: false, reason: "invalid_payload" };
-  }
+  return verifySignedXpSessionToken(token, secret);
 }
 
 // Generate client fingerprint from request headers
-function generateFingerprint(headers, ip) {
-  const userAgent = headers?.["user-agent"] || "";
-  const acceptLanguage = headers?.["accept-language"] || "";
-  const acceptEncoding = headers?.["accept-encoding"] || "";
-
-  // Create a fingerprint from stable browser characteristics
-  // Note: IP is NOT included to allow for network changes (mobile, VPN, etc.)
-  // Instead, we use browser characteristics that are more stable
-  const fingerprintData = `${userAgent}|${acceptLanguage}|${acceptEncoding}`;
-  return hash(fingerprintData).substring(0, 16);
+function generateFingerprint(headers) {
+  return createXpSessionFingerprint(headers);
 }
 
 // Rate limiting for session creation
@@ -169,8 +111,8 @@ async function storeSession({ sessionId, userId, createdAt, fingerprint, ip }) {
     await store.setex(key, SESSION_TTL_SEC, sessionData);
     return { stored: true };
   } catch (err) {
-    console.error("[start-session] Failed to store session:", err);
-    return { stored: false, error: err.message };
+    klog("xp_session_store_failed", { outcome: "unavailable" });
+    return { stored: false, unavailable: true };
   }
 }
 
@@ -203,8 +145,8 @@ export async function validateServerSession({ sessionId, userId, fingerprint }) 
       lastActivity: data.lastActivity,
     };
   } catch (err) {
-    console.error("[start-session] Failed to validate session:", err);
-    return { valid: false, reason: "validation_error" };
+    klog("xp_session_validation_failed", { outcome: "unavailable" });
+    return { valid: false, reason: "validation_unavailable", unavailable: true };
   }
 }
 
@@ -261,12 +203,10 @@ export async function handler(event) {
   }
 
   // Validate secret is configured and has sufficient entropy
-  const secret = process.env.XP_DAILY_SECRET;
-  if (!secret) {
-    return json(500, { error: "server_config", message: "secret_not_configured" }, origin);
-  }
-  if (secret.length < 32) {
-    return json(500, { error: "server_config", message: "secret_too_short" }, origin);
+  const sessionConfig = resolveXpSessionSecret(process.env);
+  if (!sessionConfig.valid) {
+    klog("xp_session_config_invalid", { outcome: "misconfigured", reason: sessionConfig.reason });
+    return json(500, { error: "server_config" }, origin);
   }
 
   // Get client IP
@@ -330,15 +270,15 @@ export async function handler(event) {
   // Generate session data
   const now = Date.now();
   const sessionId = generateSessionId();
-  const fingerprint = generateFingerprint(event.headers, clientIp);
+  const fingerprint = generateFingerprint(event.headers);
 
   // Create signed session token
-  const sessionToken = createSignedSessionToken({
+  const sessionToken = createSignedXpSessionToken({
     sessionId,
     userId: identityId, // userId field carries identityId (Supabase userId when authenticated)
     createdAt: now,
     fingerprint,
-    secret,
+    secret: sessionConfig.secret,
   });
 
   // Store session in Redis
@@ -351,7 +291,7 @@ export async function handler(event) {
   });
 
   if (!storeResult.stored) {
-    return json(500, { error: "session_storage_failed" }, origin);
+    return json(503, { error: "session_unavailable", requiresNewSession: false }, origin, { "Retry-After": "5" });
   }
 
   // Build response

@@ -19,7 +19,8 @@
 # (Site configuration > Environment variables) for security reasons.
 #
 # REQUIRED SECRETS (set in Netlify UI, never in this file):
-# - XP_DAILY_SECRET: 32+ character HMAC secret for cookie/token signing
+# - XP_DAILY_SECRET: 32+ character HMAC secret for cookie signing and temporary session fallback
+# - XP_SESSION_SECRET: preferred 32+ character HMAC secret for signed XP sessions
 # - UPSTASH_REDIS_REST_URL: Upstash Redis REST API URL
 # - UPSTASH_REDIS_REST_TOKEN: Upstash Redis REST API token
 #
@@ -103,6 +104,8 @@
 # Session Enforcement:
 #   XP_SERVER_SESSION_WARN_MODE - Log but allow requests without valid tokens
 #   XP_REQUIRE_SERVER_SESSION   - Reject requests without valid tokens (401)
+#   XP_SESSION_SECRET           - Preferred 32+ character signed-session secret
+#                                 (temporarily falls back to XP_DAILY_SECRET)
 #
 # Session Configuration:
 #   XP_SESSION_TTL_SEC          - Session TTL in seconds (default: 604800 = 7 days)
@@ -129,6 +132,7 @@
 # Security:
 #   XP_COOKIE_SECURE - Force HTTPS-only cookies (recommended: 1)
 #   XP_DAILY_SECRET  - HMAC secret for signing (32+ chars, set in UI)
+#   XP_SESSION_SECRET - Signed XP session HMAC secret (32+ chars, set in UI)
 #
 # Debugging:
 #   XP_DEBUG - Include debug info in responses (0 for production)

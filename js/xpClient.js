@@ -24,6 +24,7 @@
     statusPromise: null,
     backoffUntil: 0,
     serverSessionPromise: null,
+    serverSessionRenewalPromise: null,
     serverSessionToken: null,
     sessionStatus: SESSION_NONE,
     authToken: null,
@@ -716,6 +717,23 @@
     }
   }
 
+  async function renewServerSession() {
+    if (state.serverSessionRenewalPromise) {
+      return state.serverSessionRenewalPromise;
+    }
+
+    clearServerSession();
+    const renewalPromise = startServerSession(true);
+    state.serverSessionRenewalPromise = renewalPromise;
+    try {
+      return await renewalPromise;
+    } finally {
+      if (state.serverSessionRenewalPromise === renewalPromise) {
+        state.serverSessionRenewalPromise = null;
+      }
+    }
+  }
+
   /**
    * Get current session status without triggering fetch.
    * Returns { status, token }
@@ -865,7 +883,7 @@
     }
 
     let attempt = 0;
-    const payloadJson = JSON.stringify(body);
+    let sessionRenewed = false;
     const allowBeacon = opts.allowBeacon === true;
     const authToken = await ensureAuthTokenWithRetry();
     if (!authToken && await isUserLoggedIn()) {
@@ -873,6 +891,7 @@
     }
     const headers = await buildAuthHeaders({ "content-type": "application/json" });
     while (attempt < 3) {
+      const payloadJson = JSON.stringify(body);
       let networkError = false;
       let lastError = null;
       let res = null;
@@ -904,6 +923,17 @@
             // Rate limited - back off
             state.backoffUntil = Date.now() + 60000;
             throw new Error("Rate limited");
+          }
+
+          if (res.status === 401 && parsed?.error === "invalid_session" && parsed?.requiresNewSession === true) {
+            if (sessionRenewed) {
+              throw new Error("XP session renewal rejected");
+            }
+            sessionRenewed = true;
+            const renewedToken = await renewServerSession();
+            if (!renewedToken) throw new Error("XP session renewal failed");
+            body.sessionToken = renewedToken;
+            continue;
           }
 
           throw new Error(parsed?.message || parsed?.error || `Server calc failed (${res.status})`);

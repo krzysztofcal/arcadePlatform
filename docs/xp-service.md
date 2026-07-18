@@ -16,10 +16,12 @@ The former `/.netlify/functions/award-xp` compatibility endpoint has been remove
 
 - `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
 - `SUPABASE_JWT_SECRET` or `SUPABASE_JWT_SECRET_V2`
-- `XP_DAILY_SECRET` / `XP_SESSION_SECRET` with a strong value
+- `XP_SESSION_SECRET` with a strong 32+ character value. `XP_DAILY_SECRET` remains a temporary fallback for signed sessions during migration.
 - `XP_CORS_ALLOW` and `URL`
 
 Recommended production enforcement: `XP_REQUIRE_SERVER_SESSION=1` and `XP_REQUIRE_ACTIVITY=1`. Roll out signed-session enforcement through warn mode only while observing `klog` events.
+
+Deploy the client that can renew one rejected session before setting a new `XP_SESSION_SECRET`. Changing from the fallback invalidates existing signed-session tokens; the supported client renews them once. Avoid another secret rotation during rollout or rollback, and monitor session issuance rate limits while tokens converge.
 
 ## Anonymous conversion
 

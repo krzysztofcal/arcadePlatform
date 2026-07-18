@@ -16,12 +16,17 @@
 import crypto from "node:crypto";
 import { store, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
 import { extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
+import { validateServerSession, touchSession } from "./start-session.mjs";
 import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
 import { canonicalizeXpGameId, getXpPolicy, isValidXpAnonId, migrateAnonXpToUser, resolveXpIdentity } from "./_shared/xp-identity.mjs";
 import { createXpLedgerKeys, executeAtomicXpAward, readXpTotals } from "./_shared/xp-ledger.mjs";
 import { createXpLeaderboardKeys, getXpLeaderboardPeriods } from "./_shared/xp-leaderboard.mjs";
 import { persistXpProfileSnapshot, readCanonicalXpStatus } from "./_shared/xp-status.mjs";
+import {
+  createXpSessionFingerprint,
+  resolveXpSessionSecret,
+  verifySignedXpSessionToken,
+} from "./_shared/xp-server-session.mjs";
 
 // ============================================================================
 // Configuration Constants
@@ -62,7 +67,7 @@ const SESSION_TTL_MS = XP_POLICY.sessionTtlMs;
 const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
 const DRIFT_MS = Math.max(0, asNumber(process.env.XP_DRIFT_MS, 30_000));
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
-const SESSION_SECRET = process.env.XP_SESSION_SECRET || process.env.XP_DAILY_SECRET || "";
+const SESSION_CONFIG = resolveXpSessionSecret(process.env);
 const REQUIRE_SERVER_SESSION = process.env.XP_REQUIRE_SERVER_SESSION === "1";
 const SERVER_SESSION_WARN_MODE = process.env.XP_SERVER_SESSION_WARN_MODE === "1";
 
@@ -190,15 +195,32 @@ const GAME_XP_RULES = {
 
 const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
 
-/**
- * Generate fingerprint from request headers for session validation
- */
-function generateFingerprint(headers) {
-  if (!headers) return "";
-  const ua = headers["user-agent"] || "";
-  const lang = headers["accept-language"] || "";
-  const enc = headers["accept-encoding"] || "";
-  return hash(`${ua}|${lang}|${enc}`).slice(0, 16);
+const publicSessionReason = (reason) => {
+  if (reason === "missing_session_token") return "missing";
+  if (reason === "session_not_found") return "expired";
+  if (reason === "token_user_mismatch" || reason === "token_fingerprint_mismatch"
+    || reason === "user_mismatch" || reason === "fingerprint_mismatch") return "mismatch";
+  return "invalid";
+};
+
+async function validateXpAwardSession({ sessionToken, userId, headers }) {
+  if (!SESSION_CONFIG.valid) return { kind: "misconfigured", reason: SESSION_CONFIG.reason };
+  if (!sessionToken) return { kind: "invalid", reason: "missing_session_token" };
+
+  const fingerprint = createXpSessionFingerprint(headers);
+  const tokenResult = verifySignedXpSessionToken(sessionToken, SESSION_CONFIG.secret);
+  if (!tokenResult.valid) return { kind: "invalid", reason: `token_${tokenResult.reason}` };
+  if (tokenResult.userId !== userId) return { kind: "invalid", reason: "token_user_mismatch" };
+  if (tokenResult.fingerprint !== fingerprint) return { kind: "invalid", reason: "token_fingerprint_mismatch" };
+
+  const serverValidation = await validateServerSession({
+    sessionId: tokenResult.sessionId,
+    userId,
+    fingerprint,
+  });
+  if (serverValidation.unavailable === true) return { kind: "unavailable", reason: "session_store_unavailable" };
+  if (!serverValidation.valid) return { kind: "invalid", reason: serverValidation.reason || "session_invalid" };
+  return { kind: "valid", serverSessionId: tokenResult.sessionId };
 }
 
 const getDailyKey = (ms = Date.now()) => warsawDayKey(ms);
@@ -755,72 +777,41 @@ export async function handler(event) {
   // SECURITY: Server-side session token validation
   const sessionToken = body.sessionToken || event.headers?.["x-session-token"];
   if (REQUIRE_SERVER_SESSION || SERVER_SESSION_WARN_MODE) {
-    const fingerprint = generateFingerprint(event.headers);
-    let sessionValid = false;
-    let sessionError = null;
-
-    if (!sessionToken) {
-      sessionError = "missing_session_token";
-    } else if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
-      // If no secret configured or too short, skip validation but warn
-      klog("calc_session_secret_missing_or_short", {});
-      sessionValid = true;
-    } else {
-      // Verify HMAC signature on token
-      const tokenResult = verifySessionToken(sessionToken, SESSION_SECRET);
-      if (!tokenResult.valid) {
-        sessionError = `token_${tokenResult.reason}`;
-      } else if (tokenResult.userId !== userId) {
-        sessionError = "token_user_mismatch";
-      } else if (tokenResult.fingerprint !== fingerprint) {
-        sessionError = "token_fingerprint_mismatch";
-      } else {
-        // Verify session exists in Redis and matches
-          const serverValidation = await validateServerSession({
-            sessionId: tokenResult.sessionId,
-            userId,
-            fingerprint,
-          });
-        if (!serverValidation.valid) {
-          sessionError = `session_${serverValidation.reason}`;
-          if (serverValidation.suspicious) {
-            klog("calc_session_validation_suspicious", {
-              reason: serverValidation.reason,
-              identityType: supabaseUserId ? "authenticated" : "anonymous",
-            });
-          }
-        } else {
-          sessionValid = true;
-          // Update session last activity
-          touchSession(tokenResult.sessionId).catch(() => {});
-        }
-      }
+    const validation = await validateXpAwardSession({ sessionToken, userId, headers: event.headers });
+    if (validation.kind === "misconfigured") {
+      klog("calc_session_config_invalid", { outcome: "misconfigured", reason: validation.reason });
+      return json(500, { error: "server_config" }, origin);
     }
-
-    if (!sessionValid) {
+    if (validation.kind === "unavailable") {
+      klog("calc_session_validation_unavailable", {
+        outcome: "unavailable",
+        identityType: supabaseUserId ? "authenticated" : "anonymous",
+        hasToken: !!sessionToken,
+      });
+      return json(503, { error: "session_unavailable", requiresNewSession: false }, origin, { "Retry-After": "5" });
+    }
+    if (validation.kind === "invalid") {
       if (REQUIRE_SERVER_SESSION) {
-        // Enforce mode: reject request
-        const payload = {
-          error: "invalid_session",
-          message: sessionError || "session_validation_failed",
-          requiresNewSession: true,
-        };
-        if (DEBUG_ENABLED) {
-          payload.debug = {
-            sessionError,
-            hasToken: !!sessionToken,
-            fingerprint,
-          };
-        }
-        return json(401, payload, origin);
-      } else if (SERVER_SESSION_WARN_MODE) {
-        // Warn mode: log but don't block
-        klog("calc_session_validation_warn_mode_failed", {
-          sessionError,
-          hasToken: !!sessionToken,
+        klog("calc_session_validation_rejected", {
+          outcome: "invalid",
+          reason: validation.reason,
           identityType: supabaseUserId ? "authenticated" : "anonymous",
+          hasToken: !!sessionToken,
         });
+        return json(401, {
+          error: "invalid_session",
+          reason: publicSessionReason(validation.reason),
+          requiresNewSession: true,
+        }, origin);
       }
+      klog("calc_session_validation_warn_mode_failed", {
+        outcome: "warn",
+        reason: validation.reason,
+        hasToken: !!sessionToken,
+        identityType: supabaseUserId ? "authenticated" : "anonymous",
+      });
+    } else if (validation.kind === "valid") {
+      touchSession(validation.serverSessionId).catch(() => {});
     }
   }
 
