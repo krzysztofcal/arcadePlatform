@@ -8,6 +8,21 @@ function mapActReason(reason) {
   return reason;
 }
 
+async function restoreDurableRuntimeOrReject({ tableId, requestId, ws, connState, restoreTableFromPersisted, broadcastResyncRequired, sendCommandResult }) {
+  const restored = await restoreTableFromPersisted(tableId);
+  if (restored?.ok) return true;
+  if (typeof broadcastResyncRequired === "function") {
+    broadcastResyncRequired(tableId, "durable_action_restore_failed");
+  }
+  sendCommandResult(ws, connState, {
+    requestId: requestId ?? null,
+    tableId,
+    status: "rejected",
+    reason: "durable_action_restore_failed"
+  });
+  return false;
+}
+
 export async function handleActCommand({ frame, ws, connState, tableManager, ensureTableLoadedErrorMapper, sendError, sendCommandResult, persistMutatedState, restoreTableFromPersisted, broadcastResyncRequired, broadcastStateSnapshots, durableActionRequired = false, durableActionStore = null, scheduleSettledRollover = () => {}, scheduleBotStep = () => {}, klog = () => {} }) {
   const tableId = frame.__resolvedTableId;
   const handId = typeof frame.payload?.handId === "string" ? frame.payload.handId.trim() : "";
@@ -98,7 +113,8 @@ export async function handleActCommand({ frame, ws, connState, tableManager, ens
       ? projectDurableActionResult({ status: "accepted", reason: mapActReason(result.reason), handId: result.handId || handId, stateVersion: result.stateVersion })
       : null;
     if (durableActionRequired && !durableResult) {
-      await restoreTableFromPersisted(tableId);
+      const restored = await restoreDurableRuntimeOrReject({ tableId, requestId: frame.requestId, ws, connState, restoreTableFromPersisted, broadcastResyncRequired, sendCommandResult });
+      if (!restored) return;
       sendCommandResult(ws, connState, { requestId: frame.requestId ?? null, tableId, status: "rejected", reason: "durable_action_result_invalid" });
       return;
     }
@@ -114,12 +130,8 @@ export async function handleActCommand({ frame, ws, connState, tableManager, ens
         : null
     });
     if (durableActionRequired && ["durable_replay", "idempotency_conflict", "invalid"].includes(persisted?.outcome)) {
-      const restored = await restoreTableFromPersisted(tableId);
-      if (!restored?.ok) {
-        if (typeof broadcastResyncRequired === "function") broadcastResyncRequired(tableId, "durable_action_restore_failed");
-        sendCommandResult(ws, connState, { requestId: frame.requestId ?? null, tableId, status: "rejected", reason: "durable_action_restore_failed" });
-        return;
-      }
+      const restored = await restoreDurableRuntimeOrReject({ tableId, requestId: frame.requestId, ws, connState, restoreTableFromPersisted, broadcastResyncRequired, sendCommandResult });
+      if (!restored) return;
       const replay = persisted.outcome === "durable_replay" ? persisted.durableResult : null;
       sendCommandResult(ws, connState, {
         requestId: frame.requestId ?? null,
@@ -144,7 +156,8 @@ export async function handleActCommand({ frame, ws, connState, tableManager, ens
       return;
     }
     if (durableActionRequired && persisted.outcome !== "committed") {
-      await restoreTableFromPersisted(tableId);
+      const restored = await restoreDurableRuntimeOrReject({ tableId, requestId: frame.requestId, ws, connState, restoreTableFromPersisted, broadcastResyncRequired, sendCommandResult });
+      if (!restored) return;
       sendCommandResult(ws, connState, { requestId: frame.requestId ?? null, tableId, status: "rejected", reason: "durable_action_outcome_invalid" });
       return;
     }

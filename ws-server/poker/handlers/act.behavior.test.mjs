@@ -265,6 +265,50 @@ test('durable race loser restores without gameplay broadcast or side effects', a
   assert.deepEqual({ restores: calls.restores, snapshots: calls.snapshots, autoplay: calls.autoplay, rollover: calls.rollover, resync: calls.resync }, { restores: 1, snapshots: 0, autoplay: 0, rollover: 0, resync: 0 });
 });
 
+for (const scenario of [
+  {
+    name: 'invalid projected durable result',
+    applyResult: { accepted: true, replayed: false, changed: true, stateVersion: null, handId: 'h1', reason: null },
+    persistResult: null
+  },
+  {
+    name: 'unexpected successful writer outcome',
+    applyResult: { accepted: true, replayed: false, changed: true, stateVersion: 2, handId: 'h1', reason: null },
+    persistResult: { ok: true, outcome: 'unexpected' }
+  }
+]) {
+  test(`durable ${scenario.name} fails closed when authoritative restore fails`, async () => {
+    const calls = { results: [], persist: 0, resync: 0, snapshots: 0, autoplay: 0, rollover: 0 };
+    await handleActCommand({
+      frame: { __resolvedTableId: 't1', requestId: `restore-${scenario.name}`, ts: new Date().toISOString(), payload: { handId: 'h1', action: 'CHECK' } },
+      ws: {},
+      connState: { session: { userId: 'u1' } },
+      tableManager: {
+        ensureTableLoaded: async () => ({ ok: true }),
+        applyAction: () => scenario.applyResult
+      },
+      durableActionRequired: true,
+      durableActionStore: { readDurableActionRequest: async () => ({ outcome: 'missing' }) },
+      ensureTableLoadedErrorMapper: (value) => value,
+      sendError: () => assert.fail('unexpected sendError'),
+      sendCommandResult: (_ws, _state, payload) => calls.results.push(payload),
+      persistMutatedState: async () => { calls.persist += 1; return scenario.persistResult; },
+      restoreTableFromPersisted: async () => ({ ok: false, reason: 'restore_failed' }),
+      broadcastResyncRequired: () => { calls.resync += 1; },
+      broadcastStateSnapshots: () => { calls.snapshots += 1; },
+      scheduleBotStep: () => { calls.autoplay += 1; },
+      scheduleSettledRollover: () => { calls.rollover += 1; }
+    });
+
+    assert.equal(calls.results.length, 1);
+    assert.equal(calls.results[0].status, 'rejected');
+    assert.equal(calls.results[0].reason, 'durable_action_restore_failed');
+    assert.equal(calls.resync, 1);
+    assert.deepEqual({ snapshots: calls.snapshots, autoplay: calls.autoplay, rollover: calls.rollover }, { snapshots: 0, autoplay: 0, rollover: 0 });
+    assert.equal(calls.persist, scenario.persistResult ? 1 : 0);
+  });
+}
+
 test('persistent human action fails closed when durable capability is unavailable', async () => {
   const results = [];
   let applyCalls = 0;

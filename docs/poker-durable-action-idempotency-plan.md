@@ -2,7 +2,7 @@
 
 Issue: [#377](https://github.com/krzysztofcal/arcadePlatform/issues/377)
 
-Status: planning only. This document does not implement runtime, database, protocol, or client changes.
+Status: implemented by PR #725. This document is retained as the design and deployment contract for the runtime and additive database migration in that PR.
 
 ## 1. Goal and scope
 
@@ -382,13 +382,17 @@ Rollback to the previous WS version is safe because the schema change is additiv
 
 ## 13. Breaking impact
 
-The sole intentional behavioral change is that a previously accepted `requestId` reused with a different normalized payload returns `idempotency_conflict` instead of being re-evaluated or receiving an unrelated cached result.
+Intentional behavioral changes:
+
+- a previously accepted `requestId` reused with a different normalized payload returns `idempotency_conflict` instead of being re-evaluated or receiving an unrelated cached result;
+- `BET` and `RAISE` amounts must be integer CH values at the handler boundary; fractional amounts that previously passed the preliminary finite-number check are rejected before the reducer.
 
 Operational impact:
 
 - an additive database migration must precede the WS deployment;
-- persistent human actions require the durable DB capability;
-- file-store or misconfigured persistent runtime cannot silently claim the durable guarantee.
+- DB-backed persistent human actions require the durable DB capability;
+- the additive migration must be applied on stage before WS Preview deployment and smoke verification;
+- fixture and file-store test modes retain the legacy in-memory replay cache and do not claim the durable guarantee.
 
 No breaking change applies to poker rules, WS frame shape, guest tables, timeout actions, bots, client retry, ledger, settlement, JSP, CSS, or CSP.
 
