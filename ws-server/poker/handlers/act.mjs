@@ -1,4 +1,5 @@
 import { recoverFromPersistConflict } from "../runtime/persist-conflict-recovery.mjs";
+import { hashActionCommand, normalizeActionCommand, projectDurableActionResult } from "../idempotency/action-command.mjs";
 
 function mapActReason(reason) {
   if (reason === "illegal_action") return "action_not_allowed";
@@ -7,7 +8,22 @@ function mapActReason(reason) {
   return reason;
 }
 
-export async function handleActCommand({ frame, ws, connState, tableManager, ensureTableLoadedErrorMapper, sendError, sendCommandResult, persistMutatedState, restoreTableFromPersisted, broadcastResyncRequired, broadcastStateSnapshots, scheduleSettledRollover = () => {}, scheduleBotStep = () => {}, klog = () => {} }) {
+async function restoreDurableRuntimeOrReject({ tableId, requestId, ws, connState, restoreTableFromPersisted, broadcastResyncRequired, sendCommandResult }) {
+  const restored = await restoreTableFromPersisted(tableId);
+  if (restored?.ok) return true;
+  if (typeof broadcastResyncRequired === "function") {
+    broadcastResyncRequired(tableId, "durable_action_restore_failed");
+  }
+  sendCommandResult(ws, connState, {
+    requestId: requestId ?? null,
+    tableId,
+    status: "rejected",
+    reason: "durable_action_restore_failed"
+  });
+  return false;
+}
+
+export async function handleActCommand({ frame, ws, connState, tableManager, ensureTableLoadedErrorMapper, sendError, sendCommandResult, persistMutatedState, restoreTableFromPersisted, broadcastResyncRequired, broadcastStateSnapshots, durableActionRequired = false, durableActionStore = null, scheduleSettledRollover = () => {}, scheduleBotStep = () => {}, klog = () => {} }) {
   const tableId = frame.__resolvedTableId;
   const handId = typeof frame.payload?.handId === "string" ? frame.payload.handId.trim() : "";
   const action = typeof frame.payload?.action === "string" ? frame.payload.action.trim().toUpperCase() : "";
@@ -31,7 +47,7 @@ export async function handleActCommand({ frame, ws, connState, tableManager, ens
     return;
   }
 
-  if ((action === "BET" || action === "RAISE") && !Number.isFinite(amount)) {
+  if ((action === "BET" || action === "RAISE") && !Number.isInteger(amount)) {
     sendError(ws, connState, {
       code: "INVALID_COMMAND",
       message: "act requires numeric payload.amount for bet/raise",
@@ -52,25 +68,78 @@ export async function handleActCommand({ frame, ws, connState, tableManager, ens
     return;
   }
 
+  const userId = connState.session.userId;
+  let payloadHash = null;
+  if (durableActionRequired) {
+    if (!durableActionStore || typeof durableActionStore.readDurableActionRequest !== "function") {
+      sendCommandResult(ws, connState, { requestId: frame.requestId ?? null, tableId, status: "rejected", reason: "durable_action_store_unavailable" });
+      return;
+    }
+    const normalizedCommand = normalizeActionCommand({ tableId, userId, handId, action, amount });
+    payloadHash = normalizedCommand ? hashActionCommand(normalizedCommand) : null;
+    if (!payloadHash) {
+      sendError(ws, connState, { code: "INVALID_COMMAND", message: "act payload cannot be normalized", requestId: frame.requestId ?? null });
+      return;
+    }
+    const durableLookup = await durableActionStore.readDurableActionRequest({ tableId, userId, requestId: frame.requestId, payloadHash });
+    if (durableLookup?.outcome === "durable_replay") {
+      sendCommandResult(ws, connState, { requestId: frame.requestId ?? null, tableId, ...durableLookup.durableResult });
+      return;
+    }
+    if (durableLookup?.outcome !== "missing") {
+      sendCommandResult(ws, connState, {
+        requestId: frame.requestId ?? null,
+        tableId,
+        status: "rejected",
+        reason: durableLookup?.reason || durableLookup?.outcome || "durable_action_read_failed"
+      });
+      return;
+    }
+  }
+
   const result = tableManager.applyAction({
     tableId,
     handId,
-    userId: connState.session.userId,
+    userId,
     requestId: frame.requestId,
     action,
     amount,
-    nowIso: frame.ts
+    nowIso: frame.ts,
+    useActionReplayCache: !durableActionRequired
   });
 
   if (result.accepted && !result.replayed && result.changed) {
+    const durableResult = durableActionRequired
+      ? projectDurableActionResult({ status: "accepted", reason: mapActReason(result.reason), handId: result.handId || handId, stateVersion: result.stateVersion })
+      : null;
+    if (durableActionRequired && !durableResult) {
+      const restored = await restoreDurableRuntimeOrReject({ tableId, requestId: frame.requestId, ws, connState, restoreTableFromPersisted, broadcastResyncRequired, sendCommandResult });
+      if (!restored) return;
+      sendCommandResult(ws, connState, { requestId: frame.requestId ?? null, tableId, status: "rejected", reason: "durable_action_result_invalid" });
+      return;
+    }
     const persisted = await persistMutatedState({
       tableId,
       expectedVersion: Number(result.stateVersion) - 1,
       mutationKind: "act",
       acceptedActionAudit: result.acceptedActionAudit
         ? { ...result.acceptedActionAudit, source: "human" }
+        : null,
+      durableActionRequest: durableActionRequired
+        ? { userId, requestId: frame.requestId, payloadHash, result: durableResult }
         : null
     });
+    if (durableActionRequired && ["durable_replay", "idempotency_conflict", "invalid"].includes(persisted?.outcome)) {
+      const restored = await restoreDurableRuntimeOrReject({ tableId, requestId: frame.requestId, ws, connState, restoreTableFromPersisted, broadcastResyncRequired, sendCommandResult });
+      if (!restored) return;
+      const replay = persisted.outcome === "durable_replay" ? persisted.durableResult : null;
+      sendCommandResult(ws, connState, {
+        requestId: frame.requestId ?? null,
+        tableId,
+        ...(replay || { status: "rejected", reason: persisted.reason || persisted.outcome })
+      });
+      return;
+    }
     if (!persisted?.ok) {
       await recoverFromPersistConflict({
         tableId,
@@ -84,6 +153,12 @@ export async function handleActCommand({ frame, ws, connState, tableManager, ens
         status: "rejected",
         reason: persisted?.reason || "persist_failed"
       });
+      return;
+    }
+    if (durableActionRequired && persisted.outcome !== "committed") {
+      const restored = await restoreDurableRuntimeOrReject({ tableId, requestId: frame.requestId, ws, connState, restoreTableFromPersisted, broadcastResyncRequired, sendCommandResult });
+      if (!restored) return;
+      sendCommandResult(ws, connState, { requestId: frame.requestId ?? null, tableId, status: "rejected", reason: "durable_action_outcome_invalid" });
       return;
     }
   }

@@ -1,6 +1,7 @@
 import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 import { writePersistedTableToFile } from "./persisted-state-file-store.mjs";
+import { projectDurableActionResult } from "../idempotency/action-command.mjs";
 
 const HAND_SETTLED_ACTION_TYPE = "HAND_SETTLED";
 const SETTLEMENT_AUDIT_VERSION = 1;
@@ -8,6 +9,8 @@ const ACCEPTED_ACTION_AUDIT_VERSION = 1;
 const ACCEPTED_ACTION_TYPES = new Set(["FOLD", "CHECK", "CALL", "BET", "RAISE", "ALL_IN"]);
 const MAX_REPLACEMENT_FUNDINGS = 10;
 const MAX_HUMAN_STACK_UPDATES = 10;
+const DURABLE_ACTION_KIND = "ACT";
+const PAYLOAD_HASH_PATTERN = /^[a-f0-9]{64}$/;
 
 function normalizeJsonState(value) {
   if (!value) return {};
@@ -29,6 +32,89 @@ function sanitizePersistedState(value) {
   const state = normalizeJsonState(value);
   const { deck: _ignoredDeck, holeCardsByUserId: _ignoredHoleCards, ...persistedState } = state;
   return persistedState;
+}
+
+function parseJsonObject(value) {
+  if (!value) return null;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function normalizeDurableActionRequest(value, { expectedVersion = null } = {}) {
+  if (value === undefined || value === null) return { ok: true, supplied: false, request: null };
+  const identity = normalizeDurableActionIdentity(value);
+  if (!identity) {
+    return { ok: false, supplied: true, reason: "invalid_durable_action_request" };
+  }
+  const result = projectDurableActionResult(value?.result);
+  if (!result) {
+    return { ok: false, supplied: true, reason: "invalid_durable_action_request" };
+  }
+  if (Number.isInteger(expectedVersion) && result.stateVersion !== expectedVersion + 1) {
+    return { ok: false, supplied: true, reason: "invalid_durable_action_request" };
+  }
+  return { ok: true, supplied: true, request: { ...identity, result } };
+}
+
+function normalizeDurableActionIdentity(value) {
+  const userId = typeof value?.userId === "string" ? value.userId.trim() : "";
+  const requestId = typeof value?.requestId === "string" ? value.requestId.trim() : "";
+  const payloadHash = typeof value?.payloadHash === "string" ? value.payloadHash.trim().toLowerCase() : "";
+  if (!userId || !requestId || requestId.length > 200 || !PAYLOAD_HASH_PATTERN.test(payloadHash)) return null;
+  return { userId, requestId, payloadHash };
+}
+
+function classifyDurableActionRow(row, payloadHash) {
+  if (!row) return { outcome: "missing" };
+  const storedHash = typeof row?.payload_hash === "string" ? row.payload_hash.trim().toLowerCase() : "";
+  if (!PAYLOAD_HASH_PATTERN.test(storedHash)) return { outcome: "invalid", reason: "idempotency_record_invalid" };
+  if (storedHash !== payloadHash) return { outcome: "idempotency_conflict", reason: "idempotency_conflict" };
+  const durableResult = projectDurableActionResult(parseJsonObject(row?.result_json));
+  if (!durableResult) return { outcome: "invalid", reason: "idempotency_record_invalid" };
+  return { outcome: "durable_replay", durableResult };
+}
+
+async function readDurableActionRow(tx, { tableId, userId, requestId, lock = false }) {
+  const lockClause = lock ? " for update" : "";
+  const rows = await tx.unsafe(
+    `select payload_hash, result_json from public.poker_requests where table_id = $1 and kind = $2 and request_id = $3 and user_id = $4 limit 1${lockClause};`,
+    [tableId, DURABLE_ACTION_KIND, requestId, userId]
+  );
+  return rows?.[0] || null;
+}
+
+async function reserveDurableActionRequest(tx, { tableId, request }) {
+  const insertedRows = await tx.unsafe(
+    `insert into public.poker_requests (table_id, user_id, request_id, kind, payload_hash, result_json)
+     values ($1, $2, $3, $4, $5, null)
+     on conflict (table_id, kind, request_id, user_id) do nothing
+     returning request_id;`,
+    [tableId, request.userId, request.requestId, DURABLE_ACTION_KIND, request.payloadHash]
+  );
+  if (insertedRows?.[0]?.request_id) return { outcome: "reserved" };
+  const existingRow = await readDurableActionRow(tx, { tableId, userId: request.userId, requestId: request.requestId, lock: true });
+  return classifyDurableActionRow(existingRow, request.payloadHash);
+}
+
+async function finalizeDurableActionRequest(tx, { tableId, request }) {
+  const rows = await tx.unsafe(
+    `update public.poker_requests set result_json = $6::jsonb
+     where table_id = $1 and kind = $2 and request_id = $3 and user_id = $4 and payload_hash = $5
+     returning request_id;`,
+    [tableId, DURABLE_ACTION_KIND, request.requestId, request.userId, request.payloadHash, JSON.stringify(request.result)]
+  );
+  if (!Array.isArray(rows) || rows.length !== 1 || rows[0]?.request_id !== request.requestId) {
+    const error = new Error("durable_action_finalize_conflict");
+    error.code = "durable_action_finalize_conflict";
+    throw error;
+  }
 }
 
 const stableStringify = (value) =>
@@ -524,12 +610,22 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     acceptedActionAudit = null,
     replacementFundingPlan,
     humanStackUpdatePlan,
-    botFundingSystemKey = null
+    botFundingSystemKey = null,
+    durableActionPlan
   }) {
     return beginSql(async (tx) => {
       const persistedState = sanitizePersistedState(nextState);
       const holeCardState = normalizeJsonState(privateStateForHoleCards) || {};
       const payload = JSON.stringify(persistedState);
+      if (durableActionPlan.supplied) {
+        const reservation = await reserveDurableActionRequest(tx, { tableId, request: durableActionPlan.request });
+        if (reservation.outcome !== "reserved") {
+          return {
+            ok: reservation.outcome === "durable_replay",
+            ...reservation
+          };
+        }
+      }
       const rows = await tx.unsafe(
         "update public.poker_state set version = version + 1, state = $3::jsonb, updated_at = now() where table_id = $1 and version = $2 returning version;",
         [tableId, expectedVersion, payload]
@@ -576,9 +672,16 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
             reason: error?.message || "unknown"
           });
         }
+        if (durableActionPlan.supplied) {
+          await finalizeDurableActionRequest(tx, { tableId, request: durableActionPlan.request });
+        }
         return {
           ok: true,
           newVersion,
+          ...(durableActionPlan.supplied ? {
+            outcome: "committed",
+            durableResult: durableActionPlan.request.result
+          } : {}),
           ...(replacementFundingPlan.supplied ? {
             tableId,
             expectedVersion,
@@ -592,6 +695,12 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
             projectedHumanStacks
           } : {})
         };
+      }
+
+      if (durableActionPlan.supplied) {
+        const error = new Error("durable_action_state_conflict");
+        error.code = "durable_action_state_conflict";
+        throw error;
       }
 
       const stateRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 limit 1;", [tableId]);
@@ -650,7 +759,8 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     acceptedActionAudit = null,
     replacementFundings = undefined,
     humanStackUpdates = undefined,
-    botFundingSystemKey = null
+    botFundingSystemKey = null,
+    durableActionRequest = null
   }) {
     if (!tableId || !Number.isInteger(expectedVersion) || expectedVersion < 0) {
       return { ok: false, reason: "invalid" };
@@ -673,6 +783,8 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     }
     const humanStackUpdatePlan = normalizeHumanStackUpdates({ humanStackUpdates, expectedVersion });
     if (!humanStackUpdatePlan.ok) return { ok: false, reason: humanStackUpdatePlan.reason };
+    const durableActionPlan = normalizeDurableActionRequest(durableActionRequest, { expectedVersion });
+    if (!durableActionPlan.ok) return { ok: false, outcome: "invalid", reason: durableActionPlan.reason };
     if (replacementFundingPlan.fundings.length > 0) {
       const sourceSystemKey = typeof botFundingSystemKey === "string" ? botFundingSystemKey.trim() : "";
       if (!sourceSystemKey) {
@@ -686,6 +798,9 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
         return { ok: false, reason: "conflict" };
       }
       if (env.WS_PERSISTED_STATE_FILE) {
+        if (durableActionPlan.supplied) {
+          return { ok: false, outcome: "failure", reason: "durable_action_store_unavailable" };
+        }
         if (replacementFundingPlan.fundings.length > 0) {
           return { ok: false, reason: "ledger_unavailable" };
         }
@@ -708,7 +823,8 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
         acceptedActionAudit,
         replacementFundingPlan,
         humanStackUpdatePlan,
-        botFundingSystemKey
+        botFundingSystemKey,
+        durableActionPlan
       });
     } catch (error) {
       klog("ws_persisted_state_write_error", {
@@ -718,9 +834,34 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
         message: error?.message || "unknown",
         ...(meta && typeof meta === "object" ? meta : {})
       });
-      return { ok: false, reason: "db_error", message: error?.message || "unknown" };
+      const stateConflict = error?.code === "durable_action_state_conflict";
+      return {
+        ok: false,
+        ...(durableActionPlan.supplied ? { outcome: "failure" } : {}),
+        reason: stateConflict ? "conflict" : "db_error",
+        message: error?.message || "unknown"
+      };
     }
   }
 
-  return { writeMutation };
+  async function readDurableActionRequest({ tableId, userId, requestId, payloadHash }) {
+    const identity = normalizeDurableActionIdentity({ userId, requestId, payloadHash });
+    if (!tableId || !identity) {
+      return { outcome: "invalid", reason: "invalid_durable_action_request" };
+    }
+    if (!env.SUPABASE_DB_URL || env.WS_PERSISTED_STATE_FILE) {
+      return { outcome: "failure", reason: "durable_action_store_unavailable" };
+    }
+    try {
+      return await beginSql(async (tx) => {
+        const row = await readDurableActionRow(tx, { tableId, userId: identity.userId, requestId: identity.requestId });
+        return classifyDurableActionRow(row, identity.payloadHash);
+      }, { env });
+    } catch (error) {
+      klog("ws_durable_action_read_error", { tableId, reason: "db_error", message: error?.message || "unknown" });
+      return { outcome: "failure", reason: "db_error" };
+    }
+  }
+
+  return { writeMutation, readDurableActionRequest };
 }

@@ -1856,6 +1856,43 @@ test("applyAction is idempotent for requestId and does not double-apply", () => 
   assert.deepEqual(after, mid);
 });
 
+test("applyAction can bypass the in-memory replay cache for durable human actions", () => {
+  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true });
+  const wsA = fakeWs("durable-a");
+  const wsB = fakeWs("durable-b");
+  const tableId = "table_apply_durable_cache_bypass";
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.bootstrapHand(tableId).ok, true);
+
+  const before = tableManager.tableSnapshot(tableId, "user_a");
+  const first = tableManager.applyAction({
+    tableId,
+    handId: before.hand.handId,
+    userId: "user_a",
+    requestId: "req-durable",
+    action: "CALL",
+    amount: 0,
+    useActionReplayCache: false
+  });
+  const second = tableManager.applyAction({
+    tableId,
+    handId: before.hand.handId,
+    userId: "user_a",
+    requestId: "req-durable",
+    action: "CALL",
+    amount: 0,
+    useActionReplayCache: false
+  });
+
+  assert.equal(first.accepted, true);
+  assert.equal(first.replayed, false);
+  assert.equal(second.accepted, false);
+  assert.equal(second.replayed, false);
+  assert.equal(tableManager.__debugCore(tableId).actionResultsCacheSize, 0);
+});
+
 test("applyAction same requestId from different users does not collide", () => {
   const tableManager = createTableManager({ maxSeats: 4, actionResultCacheMax: 8 });
   const wsA = fakeWs("scope-a");
