@@ -180,5 +180,33 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     assert.notEqual(awardCalls[0].sessionId, awardCalls[1].sessionId);
   }
 
+  // Concurrent invalid sessions share one renewal request.
+  {
+    let startSessionCalls = 0;
+    let releaseSession;
+    const sessionReady = new Promise(resolve => { releaseSession = resolve; });
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (url === '/.netlify/functions/start-session') {
+        startSessionCalls += 1;
+        await sessionReady;
+        return response(200, { ok: true, sessionId: 'renewed-session', sessionToken: 'renewed-token', expiresIn: 600 });
+      }
+      if (body.operation === 'status') return response(200, { ok: true, status: 'statusOnly' });
+      if (body.sessionToken === 'renewed-token') return response(200, { ok: true, awarded: 1 });
+      return response(401, { error: 'invalid_session', reason: 'invalid', requiresNewSession: true });
+    });
+
+    const first = XPClient.postWindowServerCalc(semanticWindow(1));
+    const second = XPClient.postWindowServerCalc(semanticWindow(1));
+    for (let i = 0; i < 20 && startSessionCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(startSessionCalls, 1);
+    releaseSession();
+    await Promise.all([first, second]);
+    assert.equal(startSessionCalls, 1);
+  }
+
   console.log('xp-client contract tests passed');
 })();

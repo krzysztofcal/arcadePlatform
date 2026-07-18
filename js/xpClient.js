@@ -24,6 +24,7 @@
     statusPromise: null,
     backoffUntil: 0,
     serverSessionPromise: null,
+    serverSessionRenewalPromise: null,
     serverSessionToken: null,
     sessionStatus: SESSION_NONE,
     authToken: null,
@@ -716,6 +717,23 @@
     }
   }
 
+  async function renewServerSession() {
+    if (state.serverSessionRenewalPromise) {
+      return state.serverSessionRenewalPromise;
+    }
+
+    clearServerSession();
+    const renewalPromise = startServerSession(true);
+    state.serverSessionRenewalPromise = renewalPromise;
+    try {
+      return await renewalPromise;
+    } finally {
+      if (state.serverSessionRenewalPromise === renewalPromise) {
+        state.serverSessionRenewalPromise = null;
+      }
+    }
+  }
+
   /**
    * Get current session status without triggering fetch.
    * Returns { status, token }
@@ -912,12 +930,9 @@
               throw new Error("XP session renewal rejected");
             }
             sessionRenewed = true;
-            clearServerSession();
-            const renewed = await ensureServerSession();
-            if (!renewed.token) {
-              throw new Error(renewed.error || "XP session renewal failed");
-            }
-            body.sessionToken = renewed.token;
+            const renewedToken = await renewServerSession();
+            if (!renewedToken) throw new Error("XP session renewal failed");
+            body.sessionToken = renewedToken;
             continue;
           }
 
