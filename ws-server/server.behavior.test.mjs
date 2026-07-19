@@ -1551,9 +1551,10 @@ test("table_leave rejects when authoritative executor returns invalid state cont
     await hello(actor);
     await auth(actor, actorToken, "auth-leave-invalid-state");
 
+    const joinResultPromise = nextMessageOfType(actor, "commandResult");
+    const joinStatePromise = nextMessageOfType(actor, "table_state");
     sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-invalid-state", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
-    await nextMessageOfType(actor, "commandResult");
-    await nextMessageOfType(actor, "table_state");
+    await Promise.all([joinResultPromise, joinStatePromise]);
 
     sendFrame(actor, { version: "1.0", type: "table_leave", requestId: "leave-invalid-state", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
     const first = await nextMessageOfType(actor, "commandResult");
