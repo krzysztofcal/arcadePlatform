@@ -47,7 +47,37 @@ const GAME_ID_ALIASES = Object.freeze({
   "catch-cats": "cats",
   "game-cats": "cats",
   game_cats: "cats",
+  "open-snake": "snake",
+  "open-flappy": "flappy",
+  "open-breakout": "breakout",
+  "open-minesweeper": "minesweeper",
+  "open-pong": "pong",
+  "open-space-invaders": "space-invaders",
+  "open-asteroids": "asteroids",
+  "open-frogger": "frogger",
+  "open-galaga": "galaga",
+  "open-missile-command": "missile-command",
+  "open-simon": "simon",
+  "open-connect-four": "connect-four",
+  "open-whac-a-mole": "whac-a-mole",
+  "open-memory-match": "memory-match",
+  "open-sokoban": "sokoban",
+  "open-brick-breaker": "brick-breaker",
+  "open-tic-tac-toe": "tic-tac-toe",
+  "open-hangman": "hangman",
+  "open-solitaire": "solitaire",
+  "open-sudoku": "sudoku",
 });
+
+export const SUPPORTED_XP_GAME_IDS = Object.freeze([
+  "freedoom", "t-rex", "cats", "2048", "tetris", "pacman", "snake", "flappy",
+  "breakout", "minesweeper", "pong", "space-invaders", "asteroids", "frogger",
+  "galaga", "missile-command", "simon", "connect-four", "whac-a-mole",
+  "memory-match", "sokoban", "brick-breaker", "tic-tac-toe", "hangman",
+  "solitaire", "sudoku",
+]);
+
+const SUPPORTED_XP_GAME_ID_SET = new Set(SUPPORTED_XP_GAME_IDS);
 
 export function canonicalizeXpGameId(value) {
   const normalized = typeof value === "string"
@@ -55,6 +85,10 @@ export function canonicalizeXpGameId(value) {
     : "";
   if (!normalized) return "default";
   return GAME_ID_ALIASES[normalized] || normalized;
+}
+
+export function isSupportedXpGameId(value) {
+  return SUPPORTED_XP_GAME_ID_SET.has(canonicalizeXpGameId(value));
 }
 
 const keyTotal = (namespace, userId) => `${namespace}:total:${userId}`;

@@ -18,7 +18,7 @@ This document preserves the developer workflow details that were previously embe
 
 ## Wiring commands
 - `npm run wire:xp` walks committed game HTML, injects the bridge scripts (`xp.js`, `xp-game-hook.js`), and adds the inline auto-bootstrap. Run this after adding a new playable surface or whenever the bridge snippet drifts from the template. The command is idempotent and will not duplicate bridge tags.
-- `npm run check:games-xp-hook` validates every committed playable page includes exactly one copy of the XP bridge trio. Use it in isolation for quick checks or rely on `npm run check:all` during CI.
+- `npm run check:games-xp-hook` validates every committed playable page includes exactly one copy of the XP bridge trio. It also keeps non-Poker catalog IDs, source-page `data-game-id` values, aliases, and the server XP allowlist synchronized. Use it in isolation for quick checks or rely on `npm run check:all` during CI.
 - The inspected paths live in [`scripts/check-games-xp-hook.mjs`](../scripts/check-games-xp-hook.mjs) (`shouldInspect()`). Keep that list and this doc in sync when you add new playable folders.
 
 If the wire script reports an already-injected page it leaves the markup untouched, making it safe to re-run while you iterate.
