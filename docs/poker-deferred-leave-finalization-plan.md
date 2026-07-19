@@ -10,7 +10,7 @@ An authoritative leave during a live hand sets `leftTableByUserId[userId] = true
 2. Add `finalizeDeferredLeavesAfterSettlement()`. In one SQL transaction it locks table, state, and seats and collects active human seats flagged in `leftTableByUserId`.
 3. If another active human remains, cash out deferred leavers from authoritative `state.stacks`, remove them from state and `poker_seats`, and persist one CAS before rollover.
 4. If no active human remains, delegate directly to `executeTerminalPokerCloseInTx()`. The server trusts its controlled result and does not duplicate escrow validation.
-5. Invoke finalization after the settlement reveal delay and before replacement funding or next-hand preparation. Restore runtime after every committed change.
+5. Invoke finalization for Supabase-persisted tables after the settlement reveal delay and before replacement funding or next-hand preparation. Economy-free guest and file-store harness tables retain their existing rollover path. Restore runtime after every committed change.
 6. Make the janitor ignore a persisted `seat.user_id` explicitly flagged in `leftTableByUserId` as defense in depth.
 
 Failures roll back and prevent rollover. Retryable DB/CAS failures use settled-rollover retry; `terminal_accounting_invariant_failed` remains reserved for the existing terminal accounting invariant. Repeated finalization is a no-op and ledger cash-outs use deterministic idempotency keys.

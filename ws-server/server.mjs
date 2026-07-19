@@ -1609,7 +1609,7 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     return { ok: true, changed: false, reason: "settled_generation_changed" };
   }
   klogSafe("ws_settled_rollover_start", { tableId, attempt });
-  if (!isGuestTableId(tableId)) {
+  if (!isGuestTableId(tableId) && hasSupabaseDbUrl) {
     const finalizeDeferredLeaves = await loadDeferredLeaveFinalizer();
     const finalized = await finalizeDeferredLeaves({ tableId });
     if (finalized?.ok !== true) {
