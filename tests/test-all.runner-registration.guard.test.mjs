@@ -34,9 +34,12 @@ assert.match(source, /run\("node", \["ws-server\/poker\/persistence\/inactive-cl
 assert.match(source, /run\("node", \["ws-server\/poker\/runtime\/disconnect-cleanup\.behavior\.test\.mjs"\],/, "runner should include ws disconnect cleanup runtime behavior test");
 assert.match(source, /run\("node", \["ws-server\/poker\/runtime\/accepted-bot-autoplay-adapter\.behavior\.test\.mjs"\],/, "runner should include ws accepted bot autoplay adapter behavior test");
 assert.match(source, /run\("node", \["shared\/poker-domain\/inactive-cleanup\.behavior\.test\.mjs"\],/, "runner should include shared poker-domain inactive cleanup behavior test");
+assert.match(source, /run\("node", \["shared\/poker-domain\/deferred-leave-finalization\.behavior\.test\.mjs"\],/, "runner should include deferred leave finalization behavior test");
 assert.match(source, /run\("node", \["shared\/poker-domain\/human-stack-accounting\.behavior\.test\.mjs"\],/, "runner should include human stack accounting behavior test");
 assert.match(source, /run\("node", \["shared\/poker-domain\/rebuy\.behavior\.test\.mjs"\],/, "runner should include manual rebuy accounting behavior test");
 assert.match(source, /run\("node", \["ws-server\/poker\/persistence\/authoritative-rebuy-adapter\.behavior\.test\.mjs"\],/, "runner should include authoritative rebuy adapter behavior test");
+assert.match(source, /run\("node", \["ws-server\/poker\/persistence\/deferred-leave-finalization-adapter\.behavior\.test\.mjs"\],/, "runner should include deferred leave finalization adapter behavior test");
+assert.match(source, /run\("node", \["ws-server\/poker\/runtime\/table-janitor\.behavior\.test\.mjs"\],/, "runner should include table janitor behavior test");
 assert.match(source, /run\("node", \["ws-server\/poker\/handlers\/rebuy\.behavior\.test\.mjs"\],/, "runner should include rebuy handler behavior test");
 assert.doesNotMatch(source, /poker-heartbeat\.behavior\.test\.mjs/, "runner should not include removed heartbeat behavior tests");
 assert.doesNotMatch(source, /tests\/poker-sweep\.behavior\.test\.mjs/, "runner should not include removed legacy sweep behavior test");

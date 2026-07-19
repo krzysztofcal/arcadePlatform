@@ -95,9 +95,12 @@ function hasLiveHandSignal(state) {
   return LIVE_HAND_PHASES.has(phase);
 }
 
-function listActiveHumanSeats(seats) {
+function listActiveHumanSeats(seats, state) {
+  const leftTableByUserId = state?.leftTableByUserId && typeof state.leftTableByUserId === "object"
+    ? state.leftTableByUserId
+    : {};
   return (Array.isArray(seats) ? seats : [])
-    .filter((seat) => seat?.status === "ACTIVE" && seat?.is_bot !== true)
+    .filter((seat) => seat?.status === "ACTIVE" && seat?.is_bot !== true && leftTableByUserId[seat?.user_id] !== true)
     .map((seat) => ({
       ...seat,
       user_id: typeof seat?.user_id === "string" ? seat.user_id.trim() : ""
@@ -242,7 +245,7 @@ export function evaluateTableHealth({
 } = {}) {
   const tableStatus = normalizeStatus(persistedTable?.status, "OPEN");
   const state = normalizeState(persistedState);
-  const activeHumanSeats = listActiveHumanSeats(persistedSeats);
+  const activeHumanSeats = listActiveHumanSeats(persistedSeats, state);
   const connectedUserIds = resolveConnectedUserIds(runtime);
   const concerns = buildConcerns({ tableStatus, runtime });
   if (tableStatus !== "OPEN") {

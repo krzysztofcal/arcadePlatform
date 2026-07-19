@@ -59,7 +59,7 @@ const getDeclaredIdentifiers = (src) => {
 const buildExecutePokerLeaveFromMocks = (mocks) => {
   const source = fs.readFileSync(sharedLeavePath, "utf8");
   const withoutImports = stripImports(source);
-  const rewritten = withoutImports.replace(/export\s+async\s+function\s+executePokerLeave\s*\(/, "async function executePokerLeave(");
+  const rewritten = withoutImports.replace(/export\s+async\s+function\s+/g, "async function ");
   const factory = new Function(
     "mocks",
     `"use strict";

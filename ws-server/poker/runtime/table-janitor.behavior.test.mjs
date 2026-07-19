@@ -37,6 +37,36 @@ test("evaluateTableHealth keeps healthy active human tables as noop", () => {
   assert.equal(result.reasonCode, "healthy_active_human_present");
 });
 
+test("evaluateTableHealth does not count a persisted active seat flagged left in authoritative state", () => {
+  const result = evaluateTableHealth({
+    tableId: "t_deferred_leave",
+    nowMs: NOW_MS,
+    tableCloseGraceMs: 1,
+    persistedTable: {
+      status: "OPEN",
+      created_at: iso(-300_000),
+      last_activity_at: iso(-5_000)
+    },
+    persistedSeats: [
+      { user_id: "u1", status: "ACTIVE", is_bot: false, last_seen_at: iso(-5_000) }
+    ],
+    persistedState: {
+      phase: "SETTLED",
+      leftTableByUserId: { u1: true }
+    },
+    runtime: {
+      loaded: true,
+      tableStatus: "OPEN",
+      hasConnectedHumanPresence: true,
+      connectedUserIds: ["u1"]
+    }
+  });
+
+  assert.equal(result.healthy, false);
+  assert.equal(result.classification, "open_inert_table");
+  assert.equal(result.reasonCode, "open_table_without_active_humans");
+});
+
 test("evaluateTableHealth classifies stale human seats from last_seen_at", () => {
   const result = evaluateTableHealth({
     tableId: "t_stale_human",
