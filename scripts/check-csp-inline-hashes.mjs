@@ -40,9 +40,10 @@ function parseHeaders(headersText) {
 }
 
 function inlineScripts(html) {
-  const withoutComments = html.replace(/<!--[\s\S]*?-->/g, "");
+  const comments = [...html.matchAll(/<!--[\s\S]*?-->/g)].map((match) => [match.index, match.index + match[0].length]);
   const scripts = [];
-  for (const match of withoutComments.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
+  for (const match of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script(?:\s[^>]*)?>/gi)) {
+    if (comments.some(([start, end]) => match.index >= start && match.index < end)) continue;
     const attributes = match[1];
     const source = match[2];
     if (/\bsrc\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/i.test(attributes) || source.length === 0) continue;
