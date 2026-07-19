@@ -264,7 +264,10 @@ test("ws authoritative leave adapter default loader resolves in artifact-shaped 
 test("ws-local leave wrapper is the only allowed bridge to repo-root shared leave module", () => {
   const wrapperFile = "ws-server/shared/poker-domain/leave.mjs";
   const wrapperText = fs.readFileSync(wrapperFile, "utf8");
-  assert.match(wrapperText, /export\s*\{\s*executePokerLeave\s*\}\s*from\s*["']\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs["']/);
+  assert.match(
+    wrapperText,
+    /export\s*\{\s*executePokerLeave\s*,\s*finalizeDeferredLeavesAfterSettlement\s*\}\s*from\s*["']\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs["']/
+  );
 
   const wsFiles = fs.readdirSync("ws-server", { recursive: true })
     .filter((entry) => typeof entry === "string" && entry.endsWith('.mjs'))
