@@ -511,3 +511,6 @@ body::before{ content:""; position:fixed; inset:0; pointer-events:none; backgrou
 .hero-card.card:hover{ transform:none; border-color:rgba(50,246,255,.42); box-shadow:0 20px 70px rgba(0,0,0,.38), 0 0 42px rgba(50,246,255,.18), inset 0 1px 0 rgba(255,255,255,.1); }
 @media (min-width: 720px){ .hero-card.card{ min-height:190px; grid-template-columns:1fr 150px; padding:24px; } }
 @media (min-width: 1180px){ .hero-card.card{ grid-template-columns:1fr 180px; } }
+html.netlify-drawer-active .site-footer{ transform:translateY(-48px); }
+html.netlify-drawer-active .mobile-bottom-nav{ transform:translateY(-48px); }
+html.netlify-drawer-active #klaro .cookie-notice{ transform:translateY(-48px); }

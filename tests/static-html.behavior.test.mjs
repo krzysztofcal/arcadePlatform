@@ -63,6 +63,7 @@ assert.match(tableV2Html, /id="pokerBootSplash"/, 'poker table v2 should render 
 assert.match(tableV2Html, /id="pokerV2AmountValue"/, 'poker table v2 should render a compact amount value for the action slider');
 assert.match(consentManagerJs, /#manageCookies, \.manage-cookies, \[data-manage-cookies\]/, 'consent manager should delegate clicks from all manage cookies links');
 assert.match(consentManagerJs, /window\.klaro\.show\(window\.klaroConfig, true\)/, 'manage cookies should open the Klaro preference modal');
+assert.match(consentManagerJs, /netlify-drawer-active/, 'consent runtime should expose the active Netlify drawer state to responsive UI');
 assert.match(consentServicesJs, /arcadeConsentChanged/, 'consent services should emit consent updates for AdSense slot initialization');
 assert.match(klaroConfigJs, /cookieDomain: sharedDomain/, 'Klaro should share consent across matching kcswh.pl subdomains');
 assert.match(indexHtml, /js\/vendor\/klaro\/klaro\.js/, 'portal pages should load Klaro');

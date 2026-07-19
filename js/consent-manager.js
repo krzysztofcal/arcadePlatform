@@ -35,6 +35,16 @@
     try { alert('Consent manager not loaded yet.'); } catch (_err) {}
   }
 
+  function syncNetlifyDrawerState(){
+    var active = !!document.querySelector('[data-netlify-deploy-id] iframe[src^="https://app.netlify.com/"]');
+    document.documentElement.classList.toggle('netlify-drawer-active', active);
+  }
+
+  syncNetlifyDrawerState();
+  if (typeof MutationObserver === 'function' && document.documentElement) {
+    new MutationObserver(syncNetlifyDrawerState).observe(document.documentElement, { childList: true, subtree: true });
+  }
+
   document.addEventListener('click', function(event){
     var link = findManageLink(event && event.target);
     if (!link) return;
