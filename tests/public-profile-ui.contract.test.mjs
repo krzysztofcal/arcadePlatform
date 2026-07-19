@@ -22,8 +22,8 @@ async function listHtmlFiles(directory = new URL("../", import.meta.url), prefix
 }
 
 test("public profile route, editor, and legal release gate are present", async () => {
-  const [account, page, config, privacyEn, privacyPl, termsEn, termsPl, portalCss, accountJs, profileClient] = await Promise.all([
-    read("account.html"), read("profile.html"), read("netlify.toml"), read("legal/privacy.en.html"), read("legal/privacy.pl.html"), read("legal/terms.en.html"), read("legal/terms.pl.html"), read("css/portal.css"), read("js/account-page.js"), read("js/profile-client.js")
+  const [account, page, config, headers, privacyEn, privacyPl, termsEn, termsPl, portalCss, accountJs, profileClient] = await Promise.all([
+    read("account.html"), read("profile.html"), read("netlify.toml"), read("_headers"), read("legal/privacy.en.html"), read("legal/privacy.pl.html"), read("legal/terms.en.html"), read("legal/terms.pl.html"), read("css/portal.css"), read("js/account-page.js"), read("js/profile-client.js")
   ]);
   assert.match(account, /id="publicProfileEditor"/);
   assert.match(account, /id="publicProfileForm"/);
@@ -63,7 +63,7 @@ test("public profile route, editor, and legal release gate are present", async (
   assert.match(config, /from = "\/u\/:handle"\s+to = "\/profile\.html"/);
   assert.match(config, /\[context\.deploy-preview\.environment\][\s\S]*?PUBLIC_PROFILES_ENABLED = "1"/);
   assert.match(config, /\[context\.production\.environment\][\s\S]*?PUBLIC_PROFILES_ENABLED = "0"/);
-  assert.match(config, /img-src[^;]*https:\/\/\*\.supabase\.co/, "public avatar Storage URLs must be allowed by CSP");
+  assert.match(headers, /img-src[^;]*https:\/\/\*\.supabase\.co/, "public avatar Storage URLs must be allowed by canonical CSP");
   for (const document of [privacyEn, privacyPl, termsEn, termsPl]) assert.match(document, /profil|profile/i);
 });
 

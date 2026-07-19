@@ -71,13 +71,17 @@ test.describe('Security Headers Tests', () => {
       expect(headers['x-frame-options']).toBe('DENY');
     });
 
-    test('should have X-Frame-Options on all HTML pages', async ({ request }) => {
-      const pages = ['/', '/play.html', '/game.html'];
+    test('should keep portal pages denied and game documents same-origin frameable', async ({ request }) => {
+      const pages = [
+        { path: '/', expected: 'DENY' },
+        { path: '/play.html', expected: 'DENY' },
+        { path: '/game.html', expected: 'SAMEORIGIN' },
+      ];
 
       for (const page of pages) {
-        const response = await request.get(page);
+        const response = await request.get(page.path);
         const headers = response.headers();
-        expect(headers['x-frame-options']).toBe('DENY');
+        expect(headers['x-frame-options']).toBe(page.expected);
       }
     });
   });
@@ -186,15 +190,19 @@ test.describe('Security Headers Tests', () => {
     });
 
     test('should maintain security headers on all routes', async ({ request }) => {
-      const routes = ['/', '/play.html', '/game.html'];
+      const routes = [
+        { path: '/', expectedFramePolicy: 'DENY' },
+        { path: '/play.html', expectedFramePolicy: 'DENY' },
+        { path: '/game.html', expectedFramePolicy: 'SAMEORIGIN' },
+      ];
 
       for (const route of routes) {
-        const response = await request.get(route);
+        const response = await request.get(route.path);
         const headers = response.headers();
 
         // Each route should have security headers
-        expect(headers['x-frame-options'], `Missing X-Frame-Options on ${route}`).toBe('DENY');
-        expect(headers['x-content-type-options'], `Missing X-Content-Type-Options on ${route}`).toBe('nosniff');
+        expect(headers['x-frame-options'], `Missing X-Frame-Options on ${route.path}`).toBe(route.expectedFramePolicy);
+        expect(headers['x-content-type-options'], `Missing X-Content-Type-Options on ${route.path}`).toBe('nosniff');
       }
     });
 

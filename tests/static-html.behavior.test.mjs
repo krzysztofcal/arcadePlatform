@@ -30,6 +30,7 @@ const freedoomCss = await readFile(path.join(root, 'games-open', 'freedoom', 'st
 const headersFile = await readFile(path.join(root, '_headers'), 'utf8');
 const playHtml = await readFile(path.join(root, 'play.html'), 'utf8');
 const netlifyToml = await readFile(path.join(root, 'netlify.toml'), 'utf8');
+const gamesCatalog = JSON.parse(await readFile(path.join(root, 'js', 'games.json'), 'utf8'));
 assert.match(indexHtml, /src="\/js\/build-info\.js" defer/, 'poker index should include build-info bootstrap script');
 assert.equal(indexHtml.indexOf('/js/build-info.js') < indexHtml.indexOf('/poker/poker-ws-client.js'), true, 'poker index should load build-info before ws client');
 assert.doesNotMatch(indexHtml, /pokerClassicEntry/, 'poker lobby should no longer expose the classic table entry');
@@ -117,9 +118,20 @@ assert.equal(existsSync(path.join(root, 'games-open', 'freedoom', 'vendor', 'dwa
 assert.equal(existsSync(path.join(root, 'games-open', 'freedoom', 'vendor', 'dwasm', 'worker-bundle.js')), false, 'Freedoom should not keep the old archive worker bundle in the runtime path');
 assert.match(headersFile, /\/games-open\/freedoom\/\*/, 'Freedoom should have a scoped CSP in _headers');
 assert.doesNotMatch(headersFile, /dwasm\.m-h\.org\.uk/, 'Freedoom CSP should not rely on a remote WAD mirror');
-assert.match(netlifyToml, /for = "\/games-open\/freedoom\/\*"/, 'Netlify should emit a scoped Freedoom CSP');
-assert.doesNotMatch(netlifyToml, /dwasm\.m-h\.org\.uk/, 'Netlify Freedoom CSP should not rely on a remote WAD mirror');
-assert.ok(netlifyToml.includes('Content-Security-Policy = "'), 'Netlify deploys should emit a CSP header');
+assert.match(headersFile, /\/\*\s+[\s\S]*?frame-ancestors 'none'[\s\S]*?X-Frame-Options: DENY/, 'portal routes should deny framing by default');
+for (const route of ['/games-open/*', '/game*.html', '/poker/*', '/games-open/freedoom/*']) {
+  const routeStart = headersFile.indexOf(`\n${route}\n`);
+  assert.notEqual(routeStart, -1, `${route} should have a scoped frame policy`);
+  const routeBlock = headersFile.slice(routeStart, headersFile.indexOf('\n/', routeStart + route.length + 2) === -1 ? undefined : headersFile.indexOf('\n/', routeStart + route.length + 2));
+  assert.match(routeBlock, /frame-ancestors 'self'/, `${route} should allow same-origin framing`);
+  assert.match(routeBlock, /X-Frame-Options: SAMEORIGIN/, `${route} should use a matching X-Frame-Options policy`);
+}
+const framedPages = gamesCatalog.games.map((game) => game?.source?.page).filter((page) => typeof page === 'string');
+for (const page of framedPages) {
+  assert.equal(/^(games-open\/|game[^/]*\.html$|poker\/)/.test(page), true, `catalog frame page must match a scoped header route: ${page}`);
+}
+assert.doesNotMatch(netlifyToml, /Content-Security-Policy\s*=/, 'CSP should have one canonical source in _headers');
+assert.doesNotMatch(netlifyToml, /X-Frame-Options\s*=/, 'X-Frame-Options should have one canonical source in _headers');
 assert.doesNotMatch(netlifyToml, /cookiebot/i, 'Netlify CSP should not require Cookiebot hosts after the Klaro migration');
 const playInlineScriptHashes = [...playHtml.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)]
   .map((match) => createHash('sha256').update(match[1]).digest('base64'));
@@ -212,6 +224,7 @@ try {
     env: {
       ...process.env,
       CONTEXT: "deploy-preview",
+      DEPLOY_PRIME_URL: "https://deploy-preview-388--arcade.netlify.app/build/path",
       SUPABASE_URL: "https://stageabc.supabase.co",
       SUPABASE_ANON_KEY: "stage-anon-key",
     },
@@ -223,6 +236,7 @@ try {
   assert.match(generatedSupabaseConfig, /stage-anon-key/, "build should publish the deploy context Supabase anon key to the browser config");
   assert.doesNotMatch(generatedSupabaseConfig, /otbqfijerkieoxwpxjnm/, "deploy-preview browser config should not retain the production project ref");
   assert.match(generatedDeployContext, /BUILD_DEPLOY_CONTEXT = "deploy-preview"/, "build should embed the Netlify context for server functions");
+  assert.match(generatedDeployContext, /BUILD_DEPLOY_ORIGIN = "https:\/\/deploy-preview-388--arcade\.netlify\.app"/, "build should embed only the exact deploy origin for server functions");
 } finally {
   await rm(buildTmpDir, { recursive: true, force: true });
 }
