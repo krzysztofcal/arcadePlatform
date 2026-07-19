@@ -127,7 +127,8 @@ assert.equal(cspBlocks.length > 0, true, 'canonical headers should define CSP bl
 cspBlocks.forEach((csp) => {
   assert.match(csp, /frame-src[^;]*https:\/\/app\.netlify\.com/, 'every CSP variant should allow the Netlify Deploy Preview toolbar frame');
   assert.match(csp, /connect-src[^;]*https:\/\/region1\.google-analytics\.com/, 'every CSP variant should allow the active GA collection endpoint');
-  assert.match(csp, /connect-src[^;]*https:\/\/ep1\.adtrafficquality\.google/, 'every CSP variant should allow the active Google Ads quality endpoint');
+  assert.match(csp, /connect-src[^;]*https:\/\/\*\.adtrafficquality\.google/, 'every CSP variant should allow Google Ads quality connections');
+  assert.match(csp, /script-src[^;]*https:\/\/\*\.adtrafficquality\.google/, 'every CSP variant should allow Google Ads quality runtime scripts');
 });
 for (const route of ['/games-open/*', '/game*.html', '/poker/*', '/games-open/freedoom/*']) {
   const routeStart = headersFile.indexOf(`\n${route}\n`);
