@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { store } from "./_shared/store-upstash.mjs";
 import { extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { buildCorsAllowlist, buildCorsHeaders } from "./_shared/xp-cors.mjs";
+import { buildApiCorsPolicy, buildCorsHeaders } from "./_shared/api-cors.mjs";
 import {
   createSignedXpSessionToken,
   createXpSessionFingerprint,
@@ -13,8 +13,10 @@ import {
 const SESSION_TTL_SEC = Math.max(0, Number(process.env.XP_SESSION_TTL_SEC) || 604800); // 7 days default
 const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
-// Build CORS allowlist from env var + auto-include Netlify site URL
-const CORS_ALLOW = buildCorsAllowlist({ xpCorsAllow: process.env.XP_CORS_ALLOW, siteUrl: process.env.URL });
+const API_CORS_POLICY = buildApiCorsPolicy();
+if (API_CORS_POLICY.invalidConfiguredOriginCount > 0) {
+  klog("api_cors_config_invalid", { context: API_CORS_POLICY.buildContext, invalidOriginCount: API_CORS_POLICY.invalidConfiguredOriginCount });
+}
 
 // Rate limiting for session creation
 const SESSION_RATE_LIMIT_PER_IP_PER_MIN = Math.max(0, Number(process.env.XP_SESSION_RATE_LIMIT_IP) || 5);
@@ -29,7 +31,7 @@ const keySessionRateLimitIp = (ip) => `${KEY_NS}:session-ratelimit:ip:${hash(ip)
 
 // CORS headers
 function corsHeaders(origin) {
-  return buildCorsHeaders({ origin, allowlist: CORS_ALLOW, methods: "POST,OPTIONS", headers: "content-type,authorization,x-api-key" });
+  return buildCorsHeaders({ origin, policy: API_CORS_POLICY, methods: "POST,OPTIONS", allowedHeaders: "content-type,authorization,x-api-key" });
 }
 
 const json = (statusCode, obj, origin, extraHeaders) => {
@@ -171,9 +173,8 @@ export async function touchSession(sessionId) {
 export async function handler(event) {
   const origin = event.headers?.origin;
 
-  // SECURITY: Validate CORS before any side effects
-  const isNetlifyDomain = origin ? /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin) : false;
-  if (origin && !isNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
+  // SECURITY: Validate CORS before any side effects.
+  if (origin && !corsHeaders(origin)) {
     return {
       statusCode: 403,
       headers: {

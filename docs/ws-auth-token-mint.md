@@ -11,12 +11,12 @@ Set these in Netlify (function runtime) and keep WS verifier settings aligned wi
 - `WS_AUTH_HS256_SECRET=<shared-hs256-secret>` — signing key used by mint endpoint; must match WS server verify secret.
 - Optional: `WS_MINT_TTL_SEC=300` — minted token expiry in seconds.
 
-User-mode CORS allowlist (`corsHeaders(origin)` in `netlify/functions/ws-mint-token.mjs`, aligned with project CORS rules):
+User-mode CORS uses the shared exact-origin API policy in `netlify/functions/_shared/api-cors.mjs`:
 
-- `XP_CORS_ALLOW` — comma-separated explicit origin allowlist used by user mint.
-- `URL` — automatically added to the same allowlist when present.
-- `https://*.netlify.app` origins are accepted by built-in Netlify domain rule.
-- Non-Netlify origins are denied when neither `XP_CORS_ALLOW` nor `URL` allow them (fail-closed behavior).
+- the current production/deploy-preview/branch-deploy origin is embedded at build time from `DEPLOY_PRIME_URL`;
+- `XP_CORS_ALLOW` is the compatibility input for comma-separated additional exact API origins;
+- arbitrary `https://*.netlify.app` origins are not trusted;
+- malformed entries are ignored and Origin-bearing requests fail closed when no valid origin is available.
 
 WS server verification env alignment:
 
@@ -54,7 +54,7 @@ User mint requires:
 
 - `Authorization: Bearer <supabase_jwt>`
 - `Origin` header present
-- origin must be allowlisted by runtime CORS logic (`XP_CORS_ALLOW` / `URL` / `*.netlify.app` rule)
+- origin must equal the current build deploy origin or an explicit `XP_CORS_ALLOW` entry
 
 The endpoint always mints for the authenticated user id and ignores body `sub`.
 

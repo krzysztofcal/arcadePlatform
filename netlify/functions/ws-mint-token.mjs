@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { buildApiCorsPolicy, buildCorsHeaders } from "./_shared/api-cors.mjs";
 
 function klog(kind, data) {
   const payload = data && typeof data === "object" ? ` ${JSON.stringify(data)}` : "";
@@ -12,37 +13,19 @@ function baseHeaders() {
   };
 }
 
-function corsAllowList(env = process.env) {
-  const fromEnv = (env.XP_CORS_ALLOW ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const siteUrl = env.URL;
-  if (siteUrl && !fromEnv.includes(siteUrl)) {
-    fromEnv.push(siteUrl);
-  }
-  return fromEnv;
-}
-
 function corsHeaders(origin, env = process.env) {
-  const headers = baseHeaders();
-  if (!origin) {
-    return headers;
+  const policy = buildApiCorsPolicy({ configuredOrigins: env.XP_CORS_ALLOW });
+  if (policy.invalidConfiguredOriginCount > 0) {
+    klog("api_cors_config_invalid", { context: policy.buildContext, invalidOriginCount: policy.invalidConfiguredOriginCount });
   }
-
-  const allow = corsAllowList(env);
-  const isNetlifyDomain = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin);
-  if (!isNetlifyDomain && !allow.includes(origin)) {
-    return null;
-  }
-
-  return {
-    ...headers,
-    "access-control-allow-origin": origin,
-    "access-control-allow-credentials": "true",
-    "access-control-allow-headers": "authorization, content-type",
-    "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
-  };
+  return buildCorsHeaders({
+    origin,
+    policy,
+    methods: "POST,OPTIONS",
+    allowedHeaders: "authorization, content-type",
+    credentials: true,
+    baseHeaders: baseHeaders(),
+  });
 }
 
 function extractBearerToken(headers) {

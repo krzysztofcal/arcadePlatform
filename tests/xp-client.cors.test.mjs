@@ -1,6 +1,22 @@
 import assert from 'node:assert/strict';
+import { buildApiCorsPolicy, buildCorsHeaders } from '../netlify/functions/_shared/api-cors.mjs';
 
 process.env.XP_DAILY_SECRET = 'test-secret-for-sessions-32chars!';
+
+const normalizedPolicy = buildApiCorsPolicy({
+  configuredOrigins: 'https://allowed.test,not-a-url,https://user:pass@example.test,https://allowed.test/path',
+  buildContext: 'deploy-preview',
+  buildDeployOrigin: 'https://current-preview.netlify.app',
+});
+assert.deepEqual(normalizedPolicy.origins, ['https://allowed.test', 'https://current-preview.netlify.app']);
+assert.equal(normalizedPolicy.invalidConfiguredOriginCount, 3);
+const credentialedHeaders = buildCorsHeaders({ origin: 'https://allowed.test', policy: normalizedPolicy, credentials: true });
+assert.equal(credentialedHeaders['access-control-allow-credentials'], 'true');
+assert.equal(buildCorsHeaders({ origin: 'https://allowed.test:443', policy: normalizedPolicy })['access-control-allow-origin'], 'https://allowed.test');
+assert.equal(buildCorsHeaders({ origin: 'https://allowed.test', policy: normalizedPolicy, baseHeaders: { Vary: 'Accept-Encoding' } }).Vary, 'Accept-Encoding, Origin');
+assert.equal(buildCorsHeaders({ origin: 'https://allowed.test', policy: normalizedPolicy, baseHeaders: { vary: 'Accept-Encoding, origin' } }).vary, 'Accept-Encoding, origin');
+assert.equal(buildCorsHeaders({ origin: 'https://other-preview.netlify.app', policy: normalizedPolicy }), null);
+assert.equal(buildCorsHeaders({ origin: 'https://allowed.test/path', policy: normalizedPolicy }), null);
 
 async function createHandler(ns = 'test:cors') {
   process.env.XP_DEBUG = '0';
@@ -17,6 +33,7 @@ async function createHandler(ns = 'test:cors') {
   const options = await handler({ httpMethod: 'OPTIONS', headers: { origin: 'https://allowed.test' } });
   assert.equal(options.statusCode, 204);
   assert.equal(options.headers['access-control-allow-origin'], 'https://allowed.test');
+  assert.equal(options.headers.Vary, 'Origin');
 
   // Test 2: Blocked origin should be rejected with 403
   const blocked = await handler({
@@ -28,6 +45,14 @@ async function createHandler(ns = 'test:cors') {
   const blockedPayload = JSON.parse(blocked.body);
   assert.equal(blockedPayload.error, 'forbidden');
   assert.equal(blockedPayload.message, 'origin_not_allowed');
+  assert.equal(blocked.headers['access-control-allow-origin'], undefined);
+  assert.equal(blocked.headers['access-control-allow-credentials'], undefined);
+
+  const unrelatedPreview = await handler({
+    httpMethod: 'OPTIONS',
+    headers: { origin: 'https://unrelated-preview.netlify.app' },
+  });
+  assert.equal(unrelatedPreview.statusCode, 403);
 
   // Test 3: Allowed origin should get proper response
   const allowed = await handler({

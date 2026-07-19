@@ -1,6 +1,7 @@
 const { test, expect } = require('@playwright/test');
 
 async function loadCalculateHandler(envOverrides = {}) {
+  envOverrides = { XP_CORS_ALLOW: 'https://example.com', ...envOverrides };
   const previous = new Map();
   for (const [key, value] of Object.entries(envOverrides)) {
     previous.set(key, process.env[key]);

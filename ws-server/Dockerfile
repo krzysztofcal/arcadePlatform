@@ -15,6 +15,8 @@ COPY shared/profile-avatar-projection.mjs ./shared/
 COPY netlify/functions/_shared/chips-ledger.mjs ./netlify/functions/_shared/
 COPY netlify/functions/_shared/poker-*.mjs ./netlify/functions/_shared/
 COPY netlify/functions/_shared/supabase-admin.mjs ./netlify/functions/_shared/
+COPY netlify/functions/_shared/api-cors.mjs ./netlify/functions/_shared/
+COPY netlify/functions/_generated/deploy-context.mjs ./netlify/functions/_generated/
 
 
 EXPOSE 3000

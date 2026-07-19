@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import postgres from "postgres";
+import { buildApiCorsPolicy, buildCorsHeaders } from "./api-cors.mjs";
 
 // Exception policy: console.* usage is allowed ONLY inside klog.
 // All other logging must go through klog for consistent log capture.
@@ -95,38 +96,23 @@ if (SUPABASE_DB_URL) {
   klog("chips_db_client_init", { dbHost, preparedStatementsDisabled: POSTGRES_OPTIONS.prepare === false });
 }
 
-const CORS_ALLOW = (() => {
-  const fromEnv = (process.env.XP_CORS_ALLOW ?? "")
-    .split(",")
-    .map(s => s.trim())
-    .filter(Boolean);
-  const siteUrl = process.env.URL;
-  if (siteUrl && !fromEnv.includes(siteUrl)) {
-    fromEnv.push(siteUrl);
-  }
-  return fromEnv;
-})();
+const API_CORS_POLICY = buildApiCorsPolicy();
+if (API_CORS_POLICY.invalidConfiguredOriginCount > 0) {
+  klog("api_cors_config_invalid", {
+    context: API_CORS_POLICY.buildContext,
+    invalidOriginCount: API_CORS_POLICY.invalidConfiguredOriginCount,
+  });
+}
 
-function corsHeaders(origin) {
-  const headers = baseHeaders();
-
-  if (!origin) {
-    return headers;
-  }
-
-  const isNetlifyDomain = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin);
-
-  if (!isNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
-    return null;
-  }
-
-  return {
-    ...headers,
-    "access-control-allow-origin": origin,
-    "access-control-allow-credentials": "true",
-    "access-control-allow-headers": "authorization, content-type",
-    "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
-  };
+function corsHeaders(origin, options = {}) {
+  return buildCorsHeaders({
+    origin,
+    policy: API_CORS_POLICY,
+    methods: options.methods || "GET, POST, DELETE, OPTIONS",
+    allowedHeaders: options.allowedHeaders || "authorization, content-type",
+    credentials: options.credentials !== false,
+    baseHeaders: baseHeaders(),
+  });
 }
 
 const extractBearerToken = (headers) => {

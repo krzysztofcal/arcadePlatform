@@ -14,8 +14,9 @@ test("mint doc exists and includes admin/user mint sections", () => {
 test("mint doc includes user-origin allowlist and admin no-origin security statements", () => {
   const text = fs.readFileSync(MINT_DOC, "utf8");
   assert.match(text, /XP_CORS_ALLOW/);
-  assert.match(text, /\bURL\b/);
-  assert.match(text, /origin must be allowlisted/i);
+  assert.match(text, /DEPLOY_PRIME_URL/);
+  assert.match(text, /origin must equal the current build deploy origin or an explicit `XP_CORS_ALLOW` entry/i);
+  assert.match(text, /arbitrary `https:\/\/\*\.netlify\.app` origins are not trusted/i);
   assert.match(text, /admin mint/i);
   assert.match(text, /does not require/i);
   assert.match(text, /`Origin`|Origin/);

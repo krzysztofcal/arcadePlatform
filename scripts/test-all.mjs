@@ -3,6 +3,13 @@ import "../tests/_setup/poker-deal-secret.mjs";
 
 process.env.NODE_ENV = process.env.NODE_ENV || "test";
 process.env.XP_TEST_MODE = "1";
+process.env.XP_CORS_ALLOW = process.env.XP_CORS_ALLOW || [
+  "https://arcade.test",
+  "https://example.test",
+  "https://play.kcswh.pl",
+  "https://deploy-preview-123--mysite.netlify.app",
+  "http://127.0.0.1:4173",
+].join(",");
 
 function run(cmd, args, name){
   const r = spawnSync(cmd, args, { stdio: "inherit", env: process.env });

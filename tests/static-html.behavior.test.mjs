@@ -8,10 +8,12 @@ import path from 'node:path';
 import vm from 'node:vm';
 
 const root = process.cwd();
+const portalIndexHtml = await readFile(path.join(root, 'index.html'), 'utf8');
 const indexHtml = await readFile(path.join(root, 'poker', 'index.html'), 'utf8');
 const tableV2Html = await readFile(path.join(root, 'poker', 'table-v2.html'), 'utf8');
 const tableV2Css = await readFile(path.join(root, 'poker', 'poker-v2.css'), 'utf8');
 const consentManagerJs = await readFile(path.join(root, 'js', 'consent-manager.js'), 'utf8');
+const debugJs = await readFile(path.join(root, 'js', 'debug.js'), 'utf8');
 const consentServicesJs = await readFile(path.join(root, 'js', 'consent-services.js'), 'utf8');
 const klaroConfigJs = await readFile(path.join(root, 'js', 'klaro-config.js'), 'utf8');
 const adsenseInitJs = await readFile(path.join(root, 'js', 'adsense-init.js'), 'utf8');
@@ -30,6 +32,7 @@ const freedoomCss = await readFile(path.join(root, 'games-open', 'freedoom', 'st
 const headersFile = await readFile(path.join(root, '_headers'), 'utf8');
 const playHtml = await readFile(path.join(root, 'play.html'), 'utf8');
 const netlifyToml = await readFile(path.join(root, 'netlify.toml'), 'utf8');
+const gamesCatalog = JSON.parse(await readFile(path.join(root, 'js', 'games.json'), 'utf8'));
 assert.match(indexHtml, /src="\/js\/build-info\.js" defer/, 'poker index should include build-info bootstrap script');
 assert.equal(indexHtml.indexOf('/js/build-info.js') < indexHtml.indexOf('/poker/poker-ws-client.js'), true, 'poker index should load build-info before ws client');
 assert.doesNotMatch(indexHtml, /pokerClassicEntry/, 'poker lobby should no longer expose the classic table entry');
@@ -60,6 +63,7 @@ assert.match(tableV2Html, /id="pokerBootSplash"/, 'poker table v2 should render 
 assert.match(tableV2Html, /id="pokerV2AmountValue"/, 'poker table v2 should render a compact amount value for the action slider');
 assert.match(consentManagerJs, /#manageCookies, \.manage-cookies, \[data-manage-cookies\]/, 'consent manager should delegate clicks from all manage cookies links');
 assert.match(consentManagerJs, /window\.klaro\.show\(window\.klaroConfig, true\)/, 'manage cookies should open the Klaro preference modal');
+assert.match(consentManagerJs, /netlify-drawer-active/, 'consent runtime should expose the active Netlify drawer state to responsive UI');
 assert.match(consentServicesJs, /arcadeConsentChanged/, 'consent services should emit consent updates for AdSense slot initialization');
 assert.match(klaroConfigJs, /cookieDomain: sharedDomain/, 'Klaro should share consent across matching kcswh.pl subdomains');
 assert.match(indexHtml, /js\/vendor\/klaro\/klaro\.js/, 'portal pages should load Klaro');
@@ -117,15 +121,38 @@ assert.equal(existsSync(path.join(root, 'games-open', 'freedoom', 'vendor', 'dwa
 assert.equal(existsSync(path.join(root, 'games-open', 'freedoom', 'vendor', 'dwasm', 'worker-bundle.js')), false, 'Freedoom should not keep the old archive worker bundle in the runtime path');
 assert.match(headersFile, /\/games-open\/freedoom\/\*/, 'Freedoom should have a scoped CSP in _headers');
 assert.doesNotMatch(headersFile, /dwasm\.m-h\.org\.uk/, 'Freedoom CSP should not rely on a remote WAD mirror');
-assert.match(netlifyToml, /for = "\/games-open\/freedoom\/\*"/, 'Netlify should emit a scoped Freedoom CSP');
-assert.doesNotMatch(netlifyToml, /dwasm\.m-h\.org\.uk/, 'Netlify Freedoom CSP should not rely on a remote WAD mirror');
-assert.ok(netlifyToml.includes('Content-Security-Policy = "'), 'Netlify deploys should emit a CSP header');
+assert.match(headersFile, /\/\*\s+[\s\S]*?frame-ancestors 'none'[\s\S]*?X-Frame-Options: DENY/, 'portal routes should deny framing by default');
+const cspBlocks = [...headersFile.matchAll(/Content-Security-Policy:\s*([^\n]+)/g)].map((match) => match[1]);
+assert.equal(cspBlocks.length > 0, true, 'canonical headers should define CSP blocks');
+cspBlocks.forEach((csp) => {
+  assert.match(csp, /frame-src[^;]*https:\/\/app\.netlify\.com/, 'every CSP variant should allow the Netlify Deploy Preview toolbar frame');
+  assert.match(csp, /connect-src[^;]*https:\/\/region1\.google-analytics\.com/, 'every CSP variant should allow the active GA collection endpoint');
+  assert.match(csp, /connect-src[^;]*https:\/\/\*\.adtrafficquality\.google/, 'every CSP variant should allow Google Ads quality connections');
+  assert.match(csp, /script-src[^;]*https:\/\/\*\.adtrafficquality\.google/, 'every CSP variant should allow Google Ads quality runtime scripts');
+  assert.match(csp, /frame-src[^;]*https:\/\/\*\.adtrafficquality\.google/, 'every CSP variant should allow Google Ads quality frames');
+  assert.match(csp, /img-src[^;]*https:\/\/\*\.adtrafficquality\.google/, 'every CSP variant should allow Google Ads quality pixels');
+});
+for (const route of ['/games-open/*', '/game*.html', '/poker/*', '/games-open/freedoom/*']) {
+  const routeStart = headersFile.indexOf(`\n${route}\n`);
+  assert.notEqual(routeStart, -1, `${route} should have a scoped frame policy`);
+  const routeBlock = headersFile.slice(routeStart, headersFile.indexOf('\n/', routeStart + route.length + 2) === -1 ? undefined : headersFile.indexOf('\n/', routeStart + route.length + 2));
+  assert.match(routeBlock, /frame-ancestors 'self'/, `${route} should allow same-origin framing`);
+  assert.match(routeBlock, /X-Frame-Options: SAMEORIGIN/, `${route} should use a matching X-Frame-Options policy`);
+}
+const framedPages = gamesCatalog.games.map((game) => game?.source?.page).filter((page) => typeof page === 'string');
+for (const page of framedPages) {
+  assert.equal(/^(games-open\/|game[^/]*\.html$|poker\/)/.test(page), true, `catalog frame page must match a scoped header route: ${page}`);
+}
+assert.doesNotMatch(netlifyToml, /Content-Security-Policy\s*=/, 'CSP should have one canonical source in _headers');
+assert.doesNotMatch(netlifyToml, /X-Frame-Options\s*=/, 'X-Frame-Options should have one canonical source in _headers');
 assert.doesNotMatch(netlifyToml, /cookiebot/i, 'Netlify CSP should not require Cookiebot hosts after the Klaro migration');
 const playInlineScriptHashes = [...playHtml.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)]
   .map((match) => createHash('sha256').update(match[1]).digest('base64'));
 playInlineScriptHashes.forEach((hash) => {
   assert.ok(headersFile.includes(`'sha256-${hash}'`), `play.html inline script hash ${hash} must be allowlisted by CSP`);
 });
+assert.doesNotMatch(portalIndexHtml, /<script(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/i, 'portal entry page should not require an inline script for its dev badge');
+assert.match(debugJs, /actions\/workflows\/tests\.yml/, 'external debug runtime should own the optional CI badge');
 assert.match(netlifyToml, /WELCOME_BONUS_START_AT = "2025-06-01T00:00:00Z"/, 'Netlify config should set the welcome bonus rollout date');
 assert.match(netlifyToml, /WELCOME_BONUS_CHIPS = "500"/, 'Netlify config should set the welcome bonus amount');
 assert.match(netlifyToml, /for = "\/css\/\*"[\s\S]*?Cache-Control = "public, max-age=0, must-revalidate"/, 'CSS files use stable names and should revalidate after deploys');
@@ -212,6 +239,7 @@ try {
     env: {
       ...process.env,
       CONTEXT: "deploy-preview",
+      DEPLOY_PRIME_URL: "https://deploy-preview-388--arcade.netlify.app/build/path",
       SUPABASE_URL: "https://stageabc.supabase.co",
       SUPABASE_ANON_KEY: "stage-anon-key",
     },
@@ -223,6 +251,7 @@ try {
   assert.match(generatedSupabaseConfig, /stage-anon-key/, "build should publish the deploy context Supabase anon key to the browser config");
   assert.doesNotMatch(generatedSupabaseConfig, /otbqfijerkieoxwpxjnm/, "deploy-preview browser config should not retain the production project ref");
   assert.match(generatedDeployContext, /BUILD_DEPLOY_CONTEXT = "deploy-preview"/, "build should embed the Netlify context for server functions");
+  assert.match(generatedDeployContext, /BUILD_DEPLOY_ORIGIN = "https:\/\/deploy-preview-388--arcade\.netlify\.app"/, "build should embed only the exact deploy origin for server functions");
 } finally {
   await rm(buildTmpDir, { recursive: true, force: true });
 }

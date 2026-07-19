@@ -11,7 +11,9 @@ Implemented comprehensive Content Security Policy (CSP) headers to protect again
 
 ### 1. Security Headers Added (`_headers`)
 
-Added the following security headers to all pages:
+`_headers` is the canonical source for CSP and X-Frame-Options. `netlify.toml` must not duplicate either policy.
+
+Added the following security headers to portal pages:
 
 - **Content-Security-Policy:** Comprehensive policy with SHA-256 hashes for inline scripts
 - **X-Frame-Options:** DENY (prevents clickjacking)
@@ -79,7 +81,7 @@ frame-src 'self' https://consentcdn.cookiebot.com https://app.netlify.com
   - Allow iframes from same origin, Cookiebot consent banner, and Netlify preview bar
 
 frame-ancestors 'none'
-  - Prevent site from being embedded in iframes (clickjacking protection)
+  - Prevent portal pages from being embedded in iframes (clickjacking protection)
 
 base-uri 'self'
   - Restrict base tag to same origin
@@ -90,6 +92,16 @@ form-action 'self'
 upgrade-insecure-requests
   - Automatically upgrade HTTP to HTTPS
 ```
+
+### Same-origin game frame exceptions
+
+`play.html` intentionally embeds catalog game documents. `_headers` narrows the exception to the current catalog route families:
+
+- `/games-open/*`
+- `/game*.html`
+- `/poker/*`
+
+These routes use the consistent pair `X-Frame-Options: SAMEORIGIN` and `frame-ancestors 'self'`. All other routes retain `DENY` and `'none'`. The Freedoom route keeps its additional WASM and worker directives. When a new catalog path family is introduced, update `_headers` and the existing static catalog/header contract together.
 
 ## Testing
 

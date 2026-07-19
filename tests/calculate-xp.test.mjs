@@ -217,7 +217,7 @@ describe("calculate-xp endpoint", () => {
       expect(response.statusCode).not.toBe(403);
     });
 
-    it("should allow Netlify domains", async () => {
+    it("should reject arbitrary Netlify domains that are not explicitly allowed", async () => {
       const event = {
         httpMethod: "POST",
         headers: {
@@ -235,7 +235,8 @@ describe("calculate-xp endpoint", () => {
       };
 
       const response = await handler(event);
-      expect(response.statusCode).not.toBe(403);
+      expect(response.statusCode).toBe(403);
+      expect(JSON.parse(response.body).error).toBe("forbidden");
     });
   });
 
