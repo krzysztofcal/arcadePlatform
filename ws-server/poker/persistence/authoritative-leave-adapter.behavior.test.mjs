@@ -14,7 +14,10 @@ test("default loader uses single explicit artifact-relative path", () => {
 
 test("ws-local authoritative leave module bridges to repo-root authoritative contract", async () => {
   const source = await fs.readFile("ws-server/shared/poker-domain/leave.mjs", "utf8");
-  assert.match(source, /export\s*\{\s*executePokerLeave\s*\}\s*from\s*"\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs"\s*;/);
+  assert.match(
+    source,
+    /export\s*\{\s*executePokerLeave\s*,\s*finalizeDeferredLeavesAfterSettlement\s*\}\s*from\s*"\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs"\s*;/
+  );
   assert.doesNotMatch(source, /currentMembers/);
   assert.doesNotMatch(source, /seats\s*:\s*\[/);
 });
