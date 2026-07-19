@@ -129,6 +129,7 @@ cspBlocks.forEach((csp) => {
   assert.match(csp, /connect-src[^;]*https:\/\/region1\.google-analytics\.com/, 'every CSP variant should allow the active GA collection endpoint');
   assert.match(csp, /connect-src[^;]*https:\/\/\*\.adtrafficquality\.google/, 'every CSP variant should allow Google Ads quality connections');
   assert.match(csp, /script-src[^;]*https:\/\/\*\.adtrafficquality\.google/, 'every CSP variant should allow Google Ads quality runtime scripts');
+  assert.match(csp, /frame-src[^;]*https:\/\/\*\.adtrafficquality\.google/, 'every CSP variant should allow Google Ads quality frames');
 });
 for (const route of ['/games-open/*', '/game*.html', '/poker/*', '/games-open/freedoom/*']) {
   const routeStart = headersFile.indexOf(`\n${route}\n`);
