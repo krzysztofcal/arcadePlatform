@@ -18,7 +18,8 @@ test("ws mint token handler has no direct postgres dependency", () => {
   assert.doesNotMatch(text, /(from|import)\s+["']postgres["']/);
 });
 
-test("ws mint token handler does not import local _shared modules", () => {
+test("ws mint token handler imports only the pure shared CORS helper", () => {
   const text = handlerText();
-  assert.doesNotMatch(text, /(from|import)\s+["']\.?\.?\/[^"']*_shared\//);
+  const imports = [...text.matchAll(/(?:from|import)\s+["']([^"']*_shared\/[^"']+)["']/g)].map((match) => match[1]);
+  assert.deepEqual(imports, ["./_shared/api-cors.mjs"]);
 });
