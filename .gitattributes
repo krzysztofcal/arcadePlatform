@@ -1,0 +1,3 @@
+*.html text eol=lf
+*.jsp text eol=lf
+_headers text eol=lf

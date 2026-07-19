@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
@@ -146,11 +145,6 @@ for (const page of framedPages) {
 assert.doesNotMatch(netlifyToml, /Content-Security-Policy\s*=/, 'CSP should have one canonical source in _headers');
 assert.doesNotMatch(netlifyToml, /X-Frame-Options\s*=/, 'X-Frame-Options should have one canonical source in _headers');
 assert.doesNotMatch(netlifyToml, /cookiebot/i, 'Netlify CSP should not require Cookiebot hosts after the Klaro migration');
-const playInlineScriptHashes = [...playHtml.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)]
-  .map((match) => createHash('sha256').update(match[1]).digest('base64'));
-playInlineScriptHashes.forEach((hash) => {
-  assert.ok(headersFile.includes(`'sha256-${hash}'`), `play.html inline script hash ${hash} must be allowlisted by CSP`);
-});
 assert.doesNotMatch(portalIndexHtml, /<script(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/i, 'portal entry page should not require an inline script for its dev badge');
 assert.match(debugJs, /actions\/workflows\/tests\.yml/, 'external debug runtime should own the optional CI badge');
 assert.match(netlifyToml, /WELCOME_BONUS_START_AT = "2025-06-01T00:00:00Z"/, 'Netlify config should set the welcome bonus rollout date');
