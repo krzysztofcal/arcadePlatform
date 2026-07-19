@@ -12,6 +12,9 @@ assert.deepEqual(normalizedPolicy.origins, ['https://allowed.test', 'https://cur
 assert.equal(normalizedPolicy.invalidConfiguredOriginCount, 3);
 const credentialedHeaders = buildCorsHeaders({ origin: 'https://allowed.test', policy: normalizedPolicy, credentials: true });
 assert.equal(credentialedHeaders['access-control-allow-credentials'], 'true');
+assert.equal(buildCorsHeaders({ origin: 'https://allowed.test:443', policy: normalizedPolicy })['access-control-allow-origin'], 'https://allowed.test');
+assert.equal(buildCorsHeaders({ origin: 'https://allowed.test', policy: normalizedPolicy, baseHeaders: { Vary: 'Accept-Encoding' } }).Vary, 'Accept-Encoding, Origin');
+assert.equal(buildCorsHeaders({ origin: 'https://allowed.test', policy: normalizedPolicy, baseHeaders: { vary: 'Accept-Encoding, origin' } }).vary, 'Accept-Encoding, origin');
 assert.equal(buildCorsHeaders({ origin: 'https://other-preview.netlify.app', policy: normalizedPolicy }), null);
 assert.equal(buildCorsHeaders({ origin: 'https://allowed.test/path', policy: normalizedPolicy }), null);
 

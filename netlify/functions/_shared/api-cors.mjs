@@ -44,8 +44,14 @@ export function buildApiCorsPolicy({
 export function isOriginAllowed({ origin, policy }) {
   if (!origin) return true;
   const normalized = normalizeCorsOrigin(origin);
-  if (!normalized || normalized !== String(origin).trim().replace(/\/$/, "")) return false;
-  return Array.isArray(policy?.origins) && policy.origins.includes(normalized);
+  return Boolean(normalized) && Array.isArray(policy?.origins) && policy.origins.includes(normalized);
+}
+
+function appendVaryOrigin(headers) {
+  const varyKey = Object.keys(headers).find((key) => key.toLowerCase() === "vary") || "Vary";
+  const values = String(headers[varyKey] || "").split(",").map((value) => value.trim()).filter(Boolean);
+  if (!values.some((value) => value.toLowerCase() === "origin")) values.push("Origin");
+  headers[varyKey] = values.join(", ");
 }
 
 export function buildCorsHeaders({
@@ -66,6 +72,6 @@ export function buildCorsHeaders({
   headers["access-control-allow-headers"] = allowedHeaders;
   headers["access-control-allow-methods"] = methods;
   if (credentials) headers["access-control-allow-credentials"] = "true";
-  headers.Vary = "Origin";
+  appendVaryOrigin(headers);
   return headers;
 }
