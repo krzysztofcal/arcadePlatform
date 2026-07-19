@@ -23,6 +23,7 @@ import { normalizeXpAwardInput, XP_AWARD_MAX_BODY_BYTES } from "./_shared/xp-awa
 import { createXpLedgerKeys, executeAtomicXpAward, readXpTotals } from "./_shared/xp-ledger.mjs";
 import { createXpLeaderboardKeys, getXpLeaderboardPeriods } from "./_shared/xp-leaderboard.mjs";
 import { persistXpProfileSnapshot, readCanonicalXpStatus } from "./_shared/xp-status.mjs";
+import { buildApiCorsPolicy, buildCorsHeaders } from "./_shared/api-cors.mjs";
 import {
   createXpSessionFingerprint,
   resolveXpSessionSecret,
@@ -81,18 +82,10 @@ async function persistUserProfile({ userId, totalXp, now }) {
   return persistXpProfileSnapshot({ userId, totalXp, now, logKind: "calc_save_user_profile_failed" });
 }
 
-// CORS
-const CORS_ALLOW = (() => {
-  const fromEnv = (process.env.XP_CORS_ALLOW ?? "")
-    .split(",")
-    .map(s => s.trim())
-    .filter(Boolean);
-  const siteUrl = process.env.URL;
-  if (siteUrl && !fromEnv.includes(siteUrl)) {
-    fromEnv.push(siteUrl);
-  }
-  return fromEnv;
-})();
+const API_CORS_POLICY = buildApiCorsPolicy();
+if (API_CORS_POLICY.invalidConfiguredOriginCount > 0) {
+  klog("api_cors_config_invalid", { context: API_CORS_POLICY.buildContext, invalidOriginCount: API_CORS_POLICY.invalidConfiguredOriginCount });
+}
 
 const BLOCK_STACKER_EVENT_ALIASES = Object.freeze({
   tetris: "four_line_clear",
@@ -602,27 +595,7 @@ async function checkRateLimit({ userId, ip }) {
 // ============================================================================
 
 function corsHeaders(origin) {
-  const headers = {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-  };
-
-  if (!origin) {
-    return headers;
-  }
-
-  const isNetlifyDomain = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin);
-
-  if (!isNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
-    return null;
-  }
-
-  headers["access-control-allow-origin"] = origin;
-  headers["access-control-allow-headers"] = "content-type,authorization,x-api-key";
-  headers["access-control-allow-methods"] = "POST,OPTIONS";
-  headers["Vary"] = "Origin";
-
-  return headers;
+  return buildCorsHeaders({ origin, policy: API_CORS_POLICY, methods: "POST,OPTIONS", allowedHeaders: "content-type,authorization,x-api-key" });
 }
 
 function json(statusCode, obj, origin, extraHeaders) {
@@ -656,8 +629,7 @@ export async function handler(event) {
   const now = Date.now();
 
   // CORS validation before any side effects
-  const isNetlifyDomain = origin ? /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin) : false;
-  if (origin && !isNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
+  if (origin && !corsHeaders(origin)) {
     return {
       statusCode: 403,
       headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },

@@ -8,6 +8,8 @@ on:
       - "netlify/functions/_shared/chips-ledger.mjs"
       - "netlify/functions/_shared/poker-*.mjs"
       - "netlify/functions/_shared/supabase-admin.mjs"
+      - "netlify/functions/_shared/api-cors.mjs"
+      - "netlify/functions/_generated/deploy-context.mjs"
       - "ws-tests/**"
       - ".github/workflows/ws-server-deploy.yml"
   push:
@@ -19,6 +21,8 @@ on:
       - "netlify/functions/_shared/chips-ledger.mjs"
       - "netlify/functions/_shared/poker-*.mjs"
       - "netlify/functions/_shared/supabase-admin.mjs"
+      - "netlify/functions/_shared/api-cors.mjs"
+      - "netlify/functions/_generated/deploy-context.mjs"
       - ".github/workflows/ws-server-deploy.yml"
   workflow_dispatch:
 
@@ -120,11 +124,16 @@ jobs:
             cp netlify/functions/_shared/chips-ledger.mjs "$STAGE_ROOT"/netlify/functions/_shared/
             cp netlify/functions/_shared/poker-*.mjs "$STAGE_ROOT"/netlify/functions/_shared/
             cp netlify/functions/_shared/supabase-admin.mjs "$STAGE_ROOT"/netlify/functions/_shared/
+            cp netlify/functions/_shared/api-cors.mjs "$STAGE_ROOT"/netlify/functions/_shared/
+            mkdir -p "$STAGE_ROOT"/netlify/functions/_generated
+            cp netlify/functions/_generated/deploy-context.mjs "$STAGE_ROOT"/netlify/functions/_generated/
           fi
 
           test -f "$STAGE_WS_DIR/server.mjs"
           test -f "$STAGE_ROOT/shared/profile-avatar-projection.mjs"
           test -f "$STAGE_ROOT/netlify/functions/_shared/chips-ledger.mjs"
+          test -f "$STAGE_ROOT/netlify/functions/_shared/api-cors.mjs"
+          test -f "$STAGE_ROOT/netlify/functions/_generated/deploy-context.mjs"
           test -d "$STAGE_ROOT/node_modules/postgres"
           (
             cd "$STAGE_ROOT"

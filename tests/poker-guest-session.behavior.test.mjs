@@ -35,7 +35,7 @@ function guestSessionEvent(method) {
 
 test("guest session endpoint mints an expiring guest token that verifies", async () => {
   await withEnv({
-    URL: "https://arcade.test",
+    XP_CORS_ALLOW: "https://arcade.test",
     WS_AUTH_TEST_SECRET: "guest-secret",
   }, async () => {
     const response = await pokerGuestSessionHandler(guestSessionEvent("POST"));

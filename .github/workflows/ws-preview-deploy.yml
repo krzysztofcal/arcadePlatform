@@ -125,13 +125,20 @@ jobs:
             cp netlify/functions/_shared/chips-ledger.mjs "$PREVIEW_STAGE_DIR"/netlify/functions/_shared/
             cp netlify/functions/_shared/poker-*.mjs "$PREVIEW_STAGE_DIR"/netlify/functions/_shared/
             cp netlify/functions/_shared/supabase-admin.mjs "$PREVIEW_STAGE_DIR"/netlify/functions/_shared/
+            cp netlify/functions/_shared/api-cors.mjs "$PREVIEW_STAGE_DIR"/netlify/functions/_shared/
             mkdir -p "$PREVIEW_STAGE_WS_DIR"/netlify/functions/_shared
             cp netlify/functions/_shared/chips-ledger.mjs "$PREVIEW_STAGE_WS_DIR"/netlify/functions/_shared/
             cp netlify/functions/_shared/poker-*.mjs "$PREVIEW_STAGE_WS_DIR"/netlify/functions/_shared/
             cp netlify/functions/_shared/supabase-admin.mjs "$PREVIEW_STAGE_WS_DIR"/netlify/functions/_shared/
+            cp netlify/functions/_shared/api-cors.mjs "$PREVIEW_STAGE_WS_DIR"/netlify/functions/_shared/
+            mkdir -p "$PREVIEW_STAGE_DIR"/netlify/functions/_generated "$PREVIEW_STAGE_WS_DIR"/netlify/functions/_generated
+            cp netlify/functions/_generated/deploy-context.mjs "$PREVIEW_STAGE_DIR"/netlify/functions/_generated/
+            cp netlify/functions/_generated/deploy-context.mjs "$PREVIEW_STAGE_WS_DIR"/netlify/functions/_generated/
           fi
 
           test -f "$PREVIEW_STAGE_DIR/netlify/functions/_shared/chips-ledger.mjs"
+          test -f "$PREVIEW_STAGE_DIR/netlify/functions/_shared/api-cors.mjs"
+          test -f "$PREVIEW_STAGE_DIR/netlify/functions/_generated/deploy-context.mjs"
           (
             cd "$PREVIEW_STAGE_DIR"
             node --input-type=module -e "await import('./ws-server/shared/poker-domain/inactive-cleanup-deps.mjs')"

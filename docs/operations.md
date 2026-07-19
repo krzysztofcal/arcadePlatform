@@ -125,6 +125,8 @@ Repeat both requests for `today` and `week`. Confirm both public and `me` respon
 - Admin UI → Ops → Runtime / environment shows the same identity block.
 - Manual preview verification:
 
+The function runtime accepts browser CORS only from the exact build origin generated from `DEPLOY_PRIME_URL` and any explicit `XP_CORS_ALLOW` entries. A different or stale Deploy Preview URL must receive a controlled forbidden-origin response even though it also ends in `.netlify.app`.
+
 ```
 curl -H "Authorization: Bearer <admin access token>" \
   https://<deploy-preview>.netlify.app/.netlify/functions/admin-stage-identity

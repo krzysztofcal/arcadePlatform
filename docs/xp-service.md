@@ -17,7 +17,7 @@ The former `/.netlify/functions/award-xp` compatibility endpoint has been remove
 - `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
 - `SUPABASE_JWT_SECRET` or `SUPABASE_JWT_SECRET_V2`
 - `XP_SESSION_SECRET` with a strong 32+ character value. `XP_DAILY_SECRET` remains a temporary fallback for signed sessions during migration.
-- `XP_CORS_ALLOW` and `URL`
+- the generated exact build deploy origin, plus optional `XP_CORS_ALLOW` entries. Despite its compatibility name, `XP_CORS_ALLOW` supplies additional exact origins to the shared browser API CORS policy; wildcard Netlify deploy origins are rejected.
 
 Recommended production enforcement: `XP_REQUIRE_SERVER_SESSION=1` and `XP_REQUIRE_ACTIVITY=1`. Roll out signed-session enforcement through warn mode only while observing `klog` events.
 
