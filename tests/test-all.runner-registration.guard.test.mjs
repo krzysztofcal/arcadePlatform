@@ -58,6 +58,7 @@ assert.match(source, /run\("node", \["ws-tests\/ws-lobby-join-public-snapshot\.b
 assert.match(source, /run\("node", \["tests\/admin-stage-identity\.behavior\.test\.mjs"\],/, "runner should include admin stage identity behavior test");
 assert.match(source, /run\("node", \["tests\/i18n\.behavior\.test\.mjs"\],/, "runner should include i18n.behavior test");
 assert.match(source, /run\("node", \["tests\/static-html\.behavior\.test\.mjs"\],/, "runner should include static-html.behavior test");
+assert.match(source, /run\("node", \["tests\/csp-inline-hashes\.behavior\.test\.mjs"\],/, "runner should include CSP inline hash behavior test");
 assert.match(source, /run\("node", \["tests\/ch-economy-network-maintenance\.behavior\.test\.mjs"\],/, "runner should include CH economy network maintenance behavior test");
 
 assert.match(source, /run\("node", \["tests\/poker-runtime-docs\.behavior\.test\.mjs"\],/, "runner should include poker runtime docs behavior test");

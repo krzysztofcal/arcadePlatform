@@ -6,6 +6,7 @@
     "check:lifecycle": "node scripts/check-lifecycle.js",
     "check:xpbadge": "node scripts/check-xpbadge.js",
     "check:games-xp-hook": "node scripts/check-games-xp-hook.mjs",
+    "check:csp-inline": "node scripts/check-csp-inline-hashes.mjs",
     "check:all": "node scripts/check-lifecycle.js && node scripts/check-xpbadge.js && node scripts/check-games-xp-hook.mjs && node scripts/check-xp-authoritative-transport.mjs",
     "guard:lifecycle": "node scripts/guard-lifecycle.js",
     "guard:badge": "node scripts/guard-badge.js",

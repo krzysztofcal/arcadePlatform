@@ -1,5 +1,7 @@
 # Content Security Policy Implementation
 
+Run `npm run check:csp-inline` after changing an inline `<script>` or `_headers`. The guard scans served HTML/JSP documents, hashes exact executable inline script contents, and verifies the hash against the effective one of the five repository CSP routes. External scripts and JSON data blocks are ignored; `unsafe-inline` remains restricted to `/games-open/freedoom/*`.
+
 **Date:** 2025-11-19
 **Related:** SECURITY-ISSUES.md Critical Issue #1
 
