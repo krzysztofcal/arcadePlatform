@@ -24,15 +24,16 @@ function parseHeaders(headersText) {
   const lines = headersText.split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
     const route = lines[index].trim();
-    if (!ROUTES.includes(route)) continue;
-    if (blocks.has(route)) throw new Error(`duplicate CSP route in _headers: ${route}`);
+    if (!route || /^\s/.test(lines[index]) || route.startsWith("#")) continue;
     let csp = "";
     for (index += 1; index < lines.length && /^\s/.test(lines[index]); index += 1) {
       const match = lines[index].match(/^\s*Content-Security-Policy:\s*(.+)$/i);
       if (match) csp = match[1];
     }
     index -= 1;
-    if (!csp) throw new Error(`missing CSP for route: ${route}`);
+    if (!csp) continue;
+    if (!ROUTES.includes(route)) throw new Error(`unsupported CSP route in _headers: ${route}`);
+    if (blocks.has(route)) throw new Error(`duplicate CSP route in _headers: ${route}`);
     blocks.set(route, csp);
   }
   for (const route of ROUTES) if (!blocks.has(route)) throw new Error(`missing CSP route in _headers: ${route}`);

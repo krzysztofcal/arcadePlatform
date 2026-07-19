@@ -24,5 +24,25 @@ const combinedFixture = `
 assert.equal(verifyInlineScriptHashes({ documents: [{ path: "play.html", content: combinedFixture }], headersText: headers() }), true);
 assert.equal(verifyInlineScriptHashes({ documents: [{ path: "games-open/freedoom/index.html", content: "<script>legacy()</script>" }], headersText: headers() }), true);
 assert.throws(() => verifyInlineScriptHashes({ documents: [], headersText: headers([], { "/*": "script-src 'self' 'unsafe-inline'" }) }), /unsafe-inline policy mismatch/);
+assert.throws(() => verifyInlineScriptHashes({ documents: [], headersText: `${headers()}\n/account/*\n  Content-Security-Policy: script-src 'self'\n` }), /unsupported CSP route/);
+
+const scoped = { portal: "portal()", gameOpen: "gameOpen()", gameFile: "gameFile()", poker: "poker()" };
+const scopedHeaders = headers([], {
+  "/*": `script-src 'self' '${hashInlineScript(scoped.portal)}'`,
+  "/games-open/*": `script-src 'self' '${hashInlineScript(scoped.gameOpen)}'`,
+  "/game*.html": `script-src 'self' '${hashInlineScript(scoped.gameFile)}'`,
+  "/poker/*": `script-src 'self' '${hashInlineScript(scoped.poker)}'`,
+});
+const scopedDocuments = [
+  { path: "index.html", content: `<script>${scoped.portal}</script>` },
+  { path: "games-open/foo/index.html", content: `<script>${scoped.gameOpen}</script>` },
+  { path: "game_trex.html", content: `<script>${scoped.gameFile}</script>` },
+  { path: "poker/index.html", content: `<script>${scoped.poker}</script>` },
+];
+assert.equal(verifyInlineScriptHashes({ documents: scopedDocuments, headersText: scopedHeaders }), true);
+assert.throws(() => verifyInlineScriptHashes({
+  documents: [scopedDocuments[1]],
+  headersText: headers([], { "/*": `script-src 'self' '${hashInlineScript(scoped.gameOpen)}'`, "/games-open/*": "script-src 'self'" }),
+}), /missing 'sha256-/);
 
 process.stdout.write("csp-inline-hashes behavior tests passed\n");
