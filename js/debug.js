@@ -356,7 +356,47 @@
     };
   }
 
+  function installDevCiBadge() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const dev = params.get("dev") === "1" || window.localStorage.getItem("devMode") === "1";
+      if (!dev || !document.body) return;
+
+      const link = document.createElement("a");
+      link.href = "https://github.com/krzysztofcal/arcadePlatform/actions/workflows/tests.yml";
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.style.position = "fixed";
+      link.style.right = "10px";
+      link.style.bottom = "10px";
+      link.style.background = "rgba(17,23,53,.85)";
+      link.style.border = "1px solid #202a55";
+      link.style.borderRadius = "8px";
+      link.style.padding = "4px 6px";
+      link.style.display = "inline-flex";
+      link.style.alignItems = "center";
+      link.style.gap = "6px";
+      link.style.zIndex = "9999";
+
+      const img = document.createElement("img");
+      img.src = "https://github.com/krzysztofcal/arcadePlatform/actions/workflows/tests.yml/badge.svg?branch=main";
+      img.alt = "CI Tests Status";
+      img.style.height = "18px";
+      img.style.filter = "drop-shadow(0 0 2px rgba(0,0,0,.4))";
+
+      const text = document.createElement("span");
+      text.textContent = "Tests";
+      text.style.color = "#9fb0d0";
+      text.style.font = "12px Poppins, system-ui, sans-serif";
+
+      link.appendChild(img);
+      link.appendChild(text);
+      document.body.appendChild(link);
+    } catch (_) {}
+  }
+
   hydrateFromStorage();
+  installDevCiBadge();
 
   const api = {
     start,

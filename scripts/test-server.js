@@ -104,7 +104,7 @@ function getHeadersForPath(pathname) {
   // Keep other security headers for testing, but simplify CSP
   if (headers['Content-Security-Policy']) {
     // Simplify CSP for test environment - allow inline scripts and styles
-    headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'";
+    headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'self' https://app.netlify.com; frame-ancestors 'none'; base-uri 'self'";
   }
 
   return headers;

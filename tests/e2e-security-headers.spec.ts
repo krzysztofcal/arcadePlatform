@@ -52,6 +52,14 @@ test.describe('Security Headers Tests', () => {
       expect(csp).toContain("script-src");
     });
 
+    test('should allow the Netlify Deploy Preview toolbar frame', async ({ request }) => {
+      const response = await request.get('/');
+      const csp = response.headers()['content-security-policy'];
+
+      expect(csp).toBeTruthy();
+      expect(csp).toMatch(/frame-src[^;]*https:\/\/app\.netlify\.com/);
+    });
+
     test('should have default-src directive', async ({ request }) => {
       const response = await request.get('/');
       const headers = response.headers();

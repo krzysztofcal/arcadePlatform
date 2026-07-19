@@ -8,10 +8,12 @@ import path from 'node:path';
 import vm from 'node:vm';
 
 const root = process.cwd();
+const portalIndexHtml = await readFile(path.join(root, 'index.html'), 'utf8');
 const indexHtml = await readFile(path.join(root, 'poker', 'index.html'), 'utf8');
 const tableV2Html = await readFile(path.join(root, 'poker', 'table-v2.html'), 'utf8');
 const tableV2Css = await readFile(path.join(root, 'poker', 'poker-v2.css'), 'utf8');
 const consentManagerJs = await readFile(path.join(root, 'js', 'consent-manager.js'), 'utf8');
+const debugJs = await readFile(path.join(root, 'js', 'debug.js'), 'utf8');
 const consentServicesJs = await readFile(path.join(root, 'js', 'consent-services.js'), 'utf8');
 const klaroConfigJs = await readFile(path.join(root, 'js', 'klaro-config.js'), 'utf8');
 const adsenseInitJs = await readFile(path.join(root, 'js', 'adsense-init.js'), 'utf8');
@@ -119,6 +121,11 @@ assert.equal(existsSync(path.join(root, 'games-open', 'freedoom', 'vendor', 'dwa
 assert.match(headersFile, /\/games-open\/freedoom\/\*/, 'Freedoom should have a scoped CSP in _headers');
 assert.doesNotMatch(headersFile, /dwasm\.m-h\.org\.uk/, 'Freedoom CSP should not rely on a remote WAD mirror');
 assert.match(headersFile, /\/\*\s+[\s\S]*?frame-ancestors 'none'[\s\S]*?X-Frame-Options: DENY/, 'portal routes should deny framing by default');
+const cspBlocks = [...headersFile.matchAll(/Content-Security-Policy:\s*([^\n]+)/g)].map((match) => match[1]);
+assert.equal(cspBlocks.length > 0, true, 'canonical headers should define CSP blocks');
+cspBlocks.forEach((csp) => {
+  assert.match(csp, /frame-src[^;]*https:\/\/app\.netlify\.com/, 'every CSP variant should allow the Netlify Deploy Preview toolbar frame');
+});
 for (const route of ['/games-open/*', '/game*.html', '/poker/*', '/games-open/freedoom/*']) {
   const routeStart = headersFile.indexOf(`\n${route}\n`);
   assert.notEqual(routeStart, -1, `${route} should have a scoped frame policy`);
@@ -138,6 +145,8 @@ const playInlineScriptHashes = [...playHtml.matchAll(/<script(?![^>]*\bsrc=)[^>]
 playInlineScriptHashes.forEach((hash) => {
   assert.ok(headersFile.includes(`'sha256-${hash}'`), `play.html inline script hash ${hash} must be allowlisted by CSP`);
 });
+assert.doesNotMatch(portalIndexHtml, /<script(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/i, 'portal entry page should not require an inline script for its dev badge');
+assert.match(debugJs, /actions\/workflows\/tests\.yml/, 'external debug runtime should own the optional CI badge');
 assert.match(netlifyToml, /WELCOME_BONUS_START_AT = "2025-06-01T00:00:00Z"/, 'Netlify config should set the welcome bonus rollout date');
 assert.match(netlifyToml, /WELCOME_BONUS_CHIPS = "500"/, 'Netlify config should set the welcome bonus amount');
 assert.match(netlifyToml, /for = "\/css\/\*"[\s\S]*?Cache-Control = "public, max-age=0, must-revalidate"/, 'CSS files use stable names and should revalidate after deploys');
