@@ -133,7 +133,7 @@ test("user mode rejects non-netlify origin when allowlist is empty", async () =>
   assert.equal(JSON.parse(response.body).error, "forbidden_origin");
 });
 
-test("user mode allows netlify origin when allowlist is empty and auth is valid", async () => {
+test("user mode rejects arbitrary netlify origin when allowlist is empty", async () => {
   const handler = await loadHandler();
   process.env.XP_CORS_ALLOW = "";
   process.env.URL = "";
@@ -149,11 +149,8 @@ test("user mode allows netlify origin when allowlist is empty and auth is valid"
       body: {},
     })
   );
-  assert.equal(response.statusCode, 200);
-  const payload = JSON.parse(response.body);
-  assert.equal(payload.ok, true);
-  assert.equal(payload.mode, "user");
-  assert.equal(payload.userId, "real_user");
+  assert.equal(response.statusCode, 403);
+  assert.equal(JSON.parse(response.body).error, "forbidden_origin");
 });
 test("user mode rejects missing or invalid authorization", async () => {
   const handler = await loadHandler();
