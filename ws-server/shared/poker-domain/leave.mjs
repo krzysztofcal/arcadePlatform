@@ -1,1 +1,1 @@
-export { executePokerLeave } from "../../../shared/poker-domain/leave.mjs";
+export { executePokerLeave, finalizeDeferredLeavesAfterSettlement } from "../../../shared/poker-domain/leave.mjs";

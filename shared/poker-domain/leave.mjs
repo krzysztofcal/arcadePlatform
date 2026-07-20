@@ -151,6 +151,31 @@ const normalizeSeatStack = (value) => {
 const normalizeNonNegativeInt = (n) =>
   Number.isInteger(n) && n >= 0 && Math.abs(n) <= Number.MAX_SAFE_INTEGER ? n : null;
 
+const postHumanLeaveCashoutInTx = async ({
+  tx,
+  tableId,
+  userId,
+  amount,
+  idempotencyKey,
+  createdBy = userId,
+  postTransactionFn = postTransaction
+}) => {
+  if (!Number.isInteger(amount) || amount < 0) throw makeError(409, "stack_ambiguous");
+  if (amount === 0) return null;
+  const result = await postTransactionFn({
+    userId,
+    txType: "TABLE_CASH_OUT",
+    idempotencyKey,
+    entries: [
+      { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -amount },
+      { accountType: "USER", amount },
+    ],
+    createdBy,
+    tx,
+  });
+  return result?.transaction?.id || null;
+};
+
 const hasAnyActiveHuman = (seats) =>
   Array.isArray(seats) && seats.some((row) => row?.is_bot !== true && row?.status === "ACTIVE");
 
@@ -857,23 +882,17 @@ export async function executePokerLeave({
             amount: detachedCashOutAmount
           });
           if (detachedCashOutAmount > 0) {
-            const escrowSystemKey = `POKER_TABLE:${tableId}`;
             const idempotencyKey = requestId
               ? `poker:leave:${tableId}:${userId}:${requestId}`
               : `poker:leave:${tableId}:${userId}:${detachedCashOutAmount}`;
 
-            const txResult = await postTransaction({
-              userId: userId,
-              txType: "TABLE_CASH_OUT",
-              idempotencyKey,
-              entries: [
-                { accountType: "ESCROW", systemKey: escrowSystemKey, amount: -detachedCashOutAmount },
-                { accountType: "USER", amount: detachedCashOutAmount },
-              ],
-              createdBy: userId,
+            txId = await postHumanLeaveCashoutInTx({
               tx,
+              tableId,
+              userId,
+              amount: detachedCashOutAmount,
+              idempotencyKey,
             });
-            txId = txResult?.transaction?.id || null;
             mutated = true;
           }
           const detachedSeats = parseSeats(latestState.seats).filter((seatItem) => seatItem?.userId !== userId);
@@ -1023,4 +1042,120 @@ export async function executePokerLeave({
       }
     });
   return result;
+}
+
+export async function finalizeDeferredLeavesAfterSettlement({
+  beginSql,
+  tableId,
+  klog = () => {},
+  postTransactionFn = postTransaction,
+  executeTerminalClose = executeTerminalPokerCloseInTx,
+}) {
+  if (typeof beginSql !== "function" || typeof tableId !== "string" || !tableId.trim()) {
+    throw new Error("deferred_leave_dependencies_invalid");
+  }
+  return beginSql(async (tx) => {
+    const tableRows = await tx.unsafe(
+      "select id, status from public.poker_tables where id = $1 limit 1 for update;",
+      [tableId]
+    );
+    const table = tableRows?.[0] || null;
+    if (!table) return { ok: false, changed: false, code: "table_not_found", retryable: false };
+    if (normalizeTableStatus(table.status) === "CLOSED") {
+      return { ok: true, changed: false, closed: true, status: "already_closed", retryable: false };
+    }
+
+    const stateRows = await tx.unsafe(
+      "select version, state from public.poker_state where table_id = $1 limit 1 for update;",
+      [tableId]
+    );
+    const stateRow = stateRows?.[0] || null;
+    const expectedVersion = Number(stateRow?.version);
+    const state = normalizeState(stateRow?.state);
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 0 || !isTerminalSettlementPhase(state)) {
+      return { ok: true, changed: false, closed: false, status: "not_settled", retryable: false };
+    }
+
+    const seatRows = await tx.unsafe(
+      "select user_id, seat_no, status, is_bot, stack from public.poker_seats where table_id = $1 order by seat_no asc for update;",
+      [tableId]
+    );
+    const leftMap = isPlainObject(state.leftTableByUserId) ? state.leftTableByUserId : {};
+    const activeHumans = (Array.isArray(seatRows) ? seatRows : []).filter(
+      (seat) => seat?.status === "ACTIVE" && seat?.is_bot !== true && typeof seat?.user_id === "string" && seat.user_id.trim()
+    );
+    const deferredSeats = activeHumans.filter((seat) => leftMap[seat.user_id] === true);
+    if (deferredSeats.length === 0) {
+      return { ok: true, changed: false, closed: false, status: "no_deferred_leaves", retryable: false };
+    }
+    const remainingActiveHumans = activeHumans.filter((seat) => leftMap[seat.user_id] !== true);
+    if (remainingActiveHumans.length === 0) {
+      return executeTerminalClose({
+        tx,
+        tableId,
+        postTransaction: postTransactionFn,
+        createdBy: deferredSeats[0].user_id,
+        closeReason: "WS_DEFERRED_LEAVE_TABLE_CLOSE",
+        successStatus: "deferred_leave_closed",
+        klog,
+      });
+    }
+
+    const nextStacks = parseStacks(state.stacks);
+    const deferredUserIds = deferredSeats.map((seat) => seat.user_id);
+    const handId = typeof state.handId === "string" && state.handId.trim() ? state.handId.trim() : "settled";
+    for (const seat of deferredSeats) {
+      const userId = seat.user_id;
+      const amount = requireAuthoritativeHumanStack({ state, userId }).amount;
+      await postHumanLeaveCashoutInTx({
+        tx,
+        tableId,
+        userId,
+        amount,
+        idempotencyKey: `poker:deferred-leave:v1:${tableId}:${expectedVersion}:${userId}`,
+        postTransactionFn,
+      });
+      delete nextStacks[userId];
+    }
+    const deferredSet = new Set(deferredUserIds);
+    const nextState = sanitizePersistedState({
+      ...state,
+      seats: parseSeats(state.seats).filter((seat) => !deferredSet.has(seat?.userId)),
+      stacks: nextStacks,
+      leftTableByUserId: { ...leftMap },
+    });
+    validatePersistedStateOrThrow(nextState, makeError);
+    const stateUpdate = await updatePokerStateOptimistic(tx, {
+      tableId,
+      expectedVersion,
+      nextState,
+    });
+    if (!stateUpdate?.ok) {
+      throw makeError(409, stateUpdate?.reason === "conflict" ? "state_conflict" : "state_invalid");
+    }
+    await tx.unsafe(
+      "delete from public.poker_seats where table_id = $1 and user_id = any($2::uuid[]);",
+      [tableId, deferredUserIds]
+    );
+    await tx.unsafe(
+      "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
+      [tableId]
+    );
+    klog("poker_deferred_leaves_finalized", {
+      tableId,
+      handId,
+      finalizedCount: deferredUserIds.length,
+      remainingActiveHumanCount: remainingActiveHumans.length,
+      stateVersion: stateUpdate.newVersion,
+    });
+    return {
+      ok: true,
+      changed: true,
+      closed: false,
+      status: "deferred_leaves_finalized",
+      retryable: false,
+      stateVersion: stateUpdate.newVersion,
+      finalizedCount: deferredUserIds.length,
+    };
+  });
 }

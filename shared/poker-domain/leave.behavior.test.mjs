@@ -9,7 +9,7 @@ const root = process.cwd();
 const loadExecutePokerLeave = (mocks) => {
   const source = fs.readFileSync(path.join(root, "shared/poker-domain/leave.mjs"), "utf8");
   const withoutImports = source.replace(/^\s*import[\s\S]*?;\s*$/gm, "");
-  const rewritten = withoutImports.replace(/export\s+async\s+function\s+executePokerLeave\s*\(/, "async function executePokerLeave(");
+  const rewritten = withoutImports.replace(/export\s+async\s+function\s+/g, "async function ");
   const factory = new Function("mocks", `"use strict"; const { postTransaction, deletePokerRequest, ensurePokerRequest, storePokerRequestResult, updatePokerStateOptimistic, advanceIfNeeded, applyLeaveTable, isStateStorageValid, withoutPrivateState, buildSeatBotMap, isBotTurn, deriveCommunityCards, deriveRemainingDeck, isHoleCardsTableMissing, loadHoleCardsByUserId, hasParticipatingHumanInHand, runAdvanceLoop, runBotAutoplayLoop, requireAuthoritativeHumanStack, executeTerminalPokerCloseInTx } = mocks; ${rewritten}; return executePokerLeave;`);
   return factory(mocks);
 };

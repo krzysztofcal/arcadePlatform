@@ -277,6 +277,7 @@ let authoritativeLeaveExecutorPromise = null;
 let authoritativeJoinExecutorPromise = null;
 let authoritativeRebuyExecutorPromise = null;
 let inactiveCleanupExecutorPromise = null;
+let deferredLeaveFinalizerPromise = null;
 let acceptedBotAutoplayExecutorPromise = null;
 let beginSqlWsLoaderPromise = null;
 const timeoutFailureTrackerByTableId = new Map();
@@ -331,6 +332,14 @@ async function loadInactiveCleanupExecutor() {
     })();
   }
   return inactiveCleanupExecutorPromise;
+}
+
+async function loadDeferredLeaveFinalizer() {
+  if (!deferredLeaveFinalizerPromise) {
+    deferredLeaveFinalizerPromise = import("./poker/persistence/deferred-leave-finalization-adapter.mjs")
+      .then((module) => module.createDeferredLeaveFinalizer({ env: process.env, klog: klogSafe }));
+  }
+  return deferredLeaveFinalizerPromise;
 }
 
 async function loadAcceptedBotAutoplayExecutor() {
@@ -1595,11 +1604,42 @@ function scheduleSettledRolloverRetry({ tableId, generationKey, attempt }) {
 }
 
 async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }) {
-  const pokerState = tableManager.persistedPokerState(tableId);
+  let pokerState = tableManager.persistedPokerState(tableId);
   if (settledRolloverGenerationKey(tableId, pokerState) !== generationKey) {
     return { ok: true, changed: false, reason: "settled_generation_changed" };
   }
   klogSafe("ws_settled_rollover_start", { tableId, attempt });
+  if (!isGuestTableId(tableId) && hasSupabaseDbUrl) {
+    const finalizeDeferredLeaves = await loadDeferredLeaveFinalizer();
+    const finalized = await finalizeDeferredLeaves({ tableId });
+    if (finalized?.ok !== true) {
+      klogSafe("ws_settled_rollover_deferred_leave_failed", {
+        tableId,
+        code: finalized?.code || "unknown",
+        retryable: finalized?.retryable !== false,
+      });
+      if (finalized?.retryable !== false) {
+        scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
+      }
+      return finalized;
+    }
+    if (finalized.changed === true || finalized.closed === true) {
+      const synced = await syncCleanupRuntimeState({
+        tableId,
+        result: finalized,
+        logPrefix: "ws_settled_rollover_deferred_leave",
+      });
+      if (!synced?.ok) {
+        scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
+        return { ok: false, changed: true, code: "runtime_restore_failed", retryable: true };
+      }
+      if (finalized.closed === true) return finalized;
+      pokerState = tableManager.persistedPokerState(tableId);
+      if (!pokerState || pokerState.phase !== "SETTLED") {
+        return { ok: true, changed: true, reason: "deferred_leave_state_changed" };
+      }
+    }
+  }
   if (!tableManager.hasActiveHumanMember(tableId)) {
     if (tableManager.hasConnectedHumanPresence(tableId)) {
       klogSafe("ws_settled_rollover_close_skipped_human_presence", { tableId, phase: pokerState?.phase || null });
