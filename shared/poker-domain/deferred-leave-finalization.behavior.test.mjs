@@ -6,8 +6,8 @@ const tableId = "11111111-1111-4111-8111-111111111111";
 const leaverId = "22222222-2222-4222-8222-222222222222";
 const activeId = "33333333-3333-4333-8333-333333333333";
 
-function createFixture({ withActiveHuman }) {
-  let version = 7;
+function createFixture({ withActiveHuman, initialVersion = 7 }) {
+  let version = initialVersion;
   let state = {
     tableId,
     phase: "HAND_DONE",
@@ -96,4 +96,16 @@ test("delegates the last deferred human to existing terminal close", async () =>
   assert.equal(result.closed, true);
   assert.equal(terminalCalls, 1);
   assert.equal(fixture.cashouts.length, 0);
+});
+
+test("uses different idempotency keys for separate deferred leaves on the same table", async () => {
+  const first = createFixture({ withActiveHuman: true, initialVersion: 7 });
+  const second = createFixture({ withActiveHuman: true, initialVersion: 12 });
+
+  await finalizeDeferredLeavesAfterSettlement({ beginSql: first.beginSql, tableId, postTransactionFn: first.postTransactionFn });
+  await finalizeDeferredLeavesAfterSettlement({ beginSql: second.beginSql, tableId, postTransactionFn: second.postTransactionFn });
+
+  assert.equal(first.cashouts[0].idempotencyKey, `poker:deferred-leave:v1:${tableId}:7:${leaverId}`);
+  assert.equal(second.cashouts[0].idempotencyKey, `poker:deferred-leave:v1:${tableId}:12:${leaverId}`);
+  assert.notEqual(first.cashouts[0].idempotencyKey, second.cashouts[0].idempotencyKey);
 });

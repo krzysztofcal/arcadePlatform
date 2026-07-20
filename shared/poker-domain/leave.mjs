@@ -1112,7 +1112,7 @@ export async function finalizeDeferredLeavesAfterSettlement({
         tableId,
         userId,
         amount,
-        idempotencyKey: `poker:deferred-leave:v1:${tableId}:${handId}:${userId}`,
+        idempotencyKey: `poker:deferred-leave:v1:${tableId}:${expectedVersion}:${userId}`,
         postTransactionFn,
       });
       delete nextStacks[userId];
