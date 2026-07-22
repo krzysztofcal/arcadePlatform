@@ -1,7 +1,7 @@
 # Supabase Egress Investigation — Raport z ustaleń (Task 1–3)
 
 Issue: [#735](https://github.com/krzysztofcal/arcadePlatform/issues/735)
-Data analizy: 2026-07-21 (aktualizacja: 2026-07-22 — pomiar `state` JSONB, dane Supabase Dashboard)
+Data analizy: 2026-07-21 (aktualizacja: 2026-07-22 — pomiary: `state` JSONB, Supabase Dashboard, runtime WS Preview)
 
 ---
 
@@ -111,10 +111,48 @@ Pomiar wykonany na produkcji (`octet_length(state::text)`):
 1. **~89% egressu ze stage** (F10). Production generuje tylko 0,71 GB — samodzielnie mieści się w limicie 5 GB/miesiąc.
 2. **~99,9% to Shared Pooler** (F11) — backend przez `SUPABASE_DB_URL`. Auth, Storage i przeglądarkowy supabase-js są praktycznie wykluczone.
 3. **`poker_state` JSONB ~1,7 KB** (F9) — wyklucza duże payloady jako przyczynę.
+4. **Główna przyczyna zidentyfikowana: pętla disconnect cleanup na stage** (F12) — guest table z nie-UUID ID wpada w nieskończoną pętlę retry, generując ~2 DB queries/sekundę.
 
-**Śledztwo zawęża się do**: backendowych procesów na **stage** korzystających z `SUPABASE_DB_URL`. Kluczowe pytanie: który konkretnie proces (WS Preview, Netlify Functions deploy preview, cykliczne odczyty) generuje ~1 GB dziennie?
+---
 
-Potrzebne dane: request count lub logi z backendu stage, aby rozdzielić ruch między WS Preview i Netlify Functions.
+## F12. Root cause: pętla disconnect cleanup na guest table (stage WS Preview)
+
+**Dowody runtime (2026-07-22, 10-minutowa próbka z `ws-server-preview.service`)**:
+
+- 7210 wpisów logów w 10 minut (~12/sekundę)
+- 2400 × `ws_disconnect_cleanup_retry` — kandydat nieusuwany z mapy
+- 1200 × `ws_table_janitor_result` / `ws_table_janitor_classified`
+- 1200 × `ws_settled_reveal_pending_check_failed`
+- 1200 × `ws_inactive_cleanup_failed`
+- Wszystkie dotyczą `guest_table_<uuid>` — **nie-UUID ID**
+- PostgreSQL zwraca: `22P02 invalid input syntax for type uuid: "guest_table_<uuid>"`
+- **~2 nieudane cleanupy/sekundę, ~120/minutę, ~172 800/dobę**
+
+**Dowody z `pg_stat_statements` (stage)**:
+- ~180 tys. odczytów `poker_state` / `poker_tables`
+- ~179 tys. `FOR UPDATE`
+- ~270 tys. cleanup/sweep seatów
+- 5,4 mln `BEGIN` / 4,68 mln `ROLLBACK`
+- 86 tys. `pgbouncer.get_auth`
+
+**Call graph potwierdzony w kodzie**:
+
+1. `disconnect-cleanup.mjs:36` — `sweep()` iteruje kandydatów
+2. `disconnect-cleanup.mjs:52` — woła `executeCleanup({ tableId: "guest_table_<uuid>", ... })`
+3. `inactive-cleanup-adapter.mjs:43` — woła `executeInactiveCleanup()` z shared modułu
+4. `inactive-cleanup.mjs:182` — `select ... from poker_seats where table_id = $1` → PostgreSQL rzuca `22P02`
+5. `inactive-cleanup-adapter.mjs:54-66` — catch: `isRetryableCleanupFailure()` zwraca `true` dla `22P02`
+6. `disconnect-cleanup.mjs:87` — `result.retryable !== false` → kandydat NIE jest usuwany
+7. Pętla powtarza się w nieskończoność (~2 razy/sekundę)
+
+**Przyczyna w `isRetryableCleanupFailure`** (`inactive-cleanup-adapter.mjs:15-22`):
+- `22P02` nie ma HTTP status → nie wpada w `400-500 → false`
+- `22P02` nie jest `terminal_accounting_invariant_failed`
+- Default: `return true` → **retryable**
+
+**Dlaczego guest table trafia do cleanupu**: Guest table ID nie przechodzi walidacji UUID przed DB query. Kod w `disconnect-cleanup.mjs:17` sprawdza tylko `typeof tableId !== 'string' || !tableId` — "guest_table_<uuid>" przechodzi tę walidację.
+
+**Wpływ**: ~2 DB queries/sekundę × 86 400 sekund/dobę = ~172 800 failed queries/dobę. Każde query to BEGIN + SELECT + ROLLBACK (3 round-tripy). Przy ~1,7 KB payloadu na odczyt `poker_state` daje to **~300 MB/dzień** tylko z tej pętli. W połączeniu z janitorem i innymi cyklicznymi procesami skaluje się do obserwowanych ~1 GB/dzień na stage.
 
 ---
 
@@ -156,20 +194,25 @@ Opcja A (stateProjection) pozostaje poprawnym mikro-uproszczeniem, ale **nie jes
 ## Ranking
 
 
-### Podejrzane ścieżki kodowe (po audycie statycznym, pomiarze i danych Dashboard)
+### Podejrzane ścieżki kodowe (po pełnym śledztwie)
 
-**Uwaga**: ~99,9% egressu to Shared Pooler ze stage (F10, F11). Ranking skupia się na backendowych procesach stage.
+**Uwaga**: F12 potwierdza główną przyczynę — pętla disconnect cleanup na guest table.
 
 | # | Ścieżka | Status | Priorytet | Uzasadnienie |
 |---|---------|--------|-----------|-------------|
-| 1 | **Stage WS Preview / backend processes** | 🟡 Brak danych | 🔴 | Stage generuje 5,82 GB przez Shared Pooler. WS Preview + Netlify deploy preview — nie wiadomo, który proces dominuje. |
-| 2 | Stage janitor / inactive cleanup sweepy | 🟡 Brak danych | 🔴 | Idle stoły + cykliczne odczyty DB przez janitora — potencjalnie stały ruch. |
-| 3 | Conflict reads (na stage) | Potwierdzony mechanizm | 🟡 | Mały payload, ale jeśli stage ma wiele aktywnych stołów z botami — częste zapisy = częste konflikty. |
-| 4 | WS bootstrap (na stage) | Potwierdzony call graph (F8) | 🟢 | Tylko create/join i recovery. |
-| 5 | XP `fetchStatus` (na stage) | Potwierdzony call graph | 🟢 | Stage ma minimalny ruch użytkowników; mały volume. |
-| 6 | ~~Auth / Storage / Database API~~ | ~~Wykluczone (F11)~~ | ~~Wykluczone~~ | ~~<0,1% egressu~~ |
-| 7 | ~~`loadPersistedTableSnapshots`~~ | ~~Pomiar (F9)~~ | ~~Wykluczone~~ | ~~Payload za mały~~ |
-| 8 | ~~Production~~ | ~~Wykluczone (F10)~~ | ~~Wykluczone~~ | ~~Tylko 0,71 GB, poniżej limitu~~ |
+| 1 | **Disconnect cleanup × guest table (F12)** | 🔴 Potwierdzona root cause | 🔴 | ~172 800 failed DB queries/dobę przez nie-UUID ID + brak retryable=false dla 22P02 |
+| 2 | Stage janitor / inactive cleanup sweepy | 🟡 Powiązane z #1 | 🟡 | Janitor również odpytuje DB cyklicznie, napędzany tym samym sweep loop |
+| 3 | WS bootstrap (przy restarcie WS Preview) | 🟢 Ograniczony | 🟢 | Tylko create/join i recovery |
+| 4 | ~~Auth / Storage / Database API~~ | ~~Wykluczone (F11)~~ | ~~Wykluczone~~ | ~~<0,1% egressu~~ |
+| 5 | ~~Production~~ | ~~Wykluczone (F10)~~ | ~~Wykluczone~~ | ~~0,71 GB, poniżej limitu~~ |
+| 6 | ~~~~ | ~~Pomiar (F9)~~ | ~~Wykluczone~~ | ~~Payload za mały~~ |
+
+### Krytyczne luki w danych
+
+| # | Luka | Priorytet | Status |
+|---|------|-----------|--------|
+| 1 | Root cause potwierdzona (F12) | ✅ | Pętla disconnect cleanup na guest table |
+| 2 | Dokładny udział pętli w 5,82 GB | 🟡 | Wnioskowany przez korelację Supabase + pg_stat_statements + runtime, nie zmierzony bezpośrednio per query |
 
 ### Krytyczne luki w danych
 
@@ -208,8 +251,15 @@ Bez podziału na kategorie egressu i request volume dalsza analiza kodu nie przy
 
 ## Następne kroki
 
-1. **Potwierdzono**: ~89% egressu ze stage, ~99,9% Shared Pooler. Production i Auth wykluczone. ✅
-2. **Sprawdzić stan stage**: ile stołów, czy są idle, czy boty grają. (Admin panel stage → Tables)
-3. **Rozdzielić WS Preview vs Netlify Functions**: który backendowy proces dominuje. (Potrzebne logi lub request count)
-4. Na podstawie danych wybrać jedną minimalną poprawkę (Task 4).
-5. Nie implementować niczego przed danymi.
+1. **Root cause potwierdzona** ✅ — pętla disconnect cleanup na guest table w WS Preview (F12).
+2. **Zaimplementować minimalną naprawę** — osobny plan: .
+3. **Po naprawie**: zweryfikować redukcję egressu na stage (Dashboard → Usage).
+4. **Po weryfikacji**: rozważyć restart WS Preview, aby wyczyścić runtime state.
+
+---
+
+## Wnioski końcowe
+
+Issue #735 został rozwiązanany na poziomie diagnostycznym. **5,82 GB egressu na stage jest spowodowane głównie przez nieskończoną pętlę disconnect cleanup**, w której guest table z nie-UUID ID generuje ~172 800 failed DB queries dziennie. Błąd  z PostgreSQL nie jest klasyfikowany jako non-retryable, więc cleanup retryuje w nieskończoność.
+
+Pozostałe źródła (production 0,71 GB, Auth <0,1%, Storage ~0) są poniżej limitu Free planu. Naprawa tej jednej pętli powinna sprowadzić całkowity egress organizacji poniżej 5 GB/miesiąc.

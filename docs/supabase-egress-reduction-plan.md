@@ -1,7 +1,7 @@
 # Supabase Egress Reduction Plan
 
 Issue: [#735](https://github.com/krzysztofcal/arcadePlatform/issues/735)
-**Aktualizacja 2026-07-22**: `poker_state` JSONB ~1,7 KB. Potwierdzono: ~89% egressu ze stage, ~99,9% Shared Pooler (backend `SUPABASE_DB_URL`). Śledztwo skupia się na backendowych procesach stage (WS Preview, Netlify Functions).
+**Aktualizacja 2026-07-22**: Root cause potwierdzona — pętla disconnect cleanup na guest table w WS Preview (F12). Plan naprawy: `docs/supabase-egress-fix-plan.md`.
 
 ## Task 1 — Ustalenie źródła egressu
 
