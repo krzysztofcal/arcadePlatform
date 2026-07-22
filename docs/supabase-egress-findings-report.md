@@ -23,8 +23,8 @@ Data analizy: 2026-07-21 (aktualizacja: 2026-07-22 — pomiar `state` JSONB)
 - **Call graph**: `admin-tables-list.mjs` (lista), `admin-ops-summary.mjs` (dashboard), `admin-table-details.mjs`, `admin-table-evaluate.mjs`
 - **Dla list/summary**: Klasyfikacja janitora używa tylko 4 pól z `state`, reszta niepotrzebna.
 - **Pomiar — 2026-07-22**: `octet_length(state::text)` na 6 stołach: **średnia ~1,7 KB, max 2,1 KB** (pełne dane w F9).
-- **Skala**: Przy 6 stołach i ~1,7 KB każdy, pojedynczy refresh admin dashboard to ~10 KB. Nawet 1000 refreshów dziennie to tylko **~10 MB/dzień ≈ 300 MB/miesiąc** — **nie może wyjaśnić 5,72 GB**.
-- **Wniosek**: Potwierdzona nieefektywność, ale **nieistotna dla rozwiązania #735**. Opcja A pozostaje poprawnym mikro-uproszczeniem kodu, ale nie jako naprawa egressu.
+- **Skala**: Przy 6 stołach i ~1,7 KB każdy, pojedynczy refresh admin dashboard to ~10 KB. Przy przykładowym założeniu 1000 refreshów dziennie byłoby to **~10 MB/dzień ≈ 300 MB/miesiąc (~5% limitu)**. Rzeczywisty udział pozostaje nieznany bez request count, ale mały rozmiar payloadu (~1,7 KB) oznacza, że nawet bardzo wysoki volume z tej ścieżki nie wystarczy do wyjaśnienia 5,72 GB.
+- **Wniosek**: Potwierdzona nieefektywność, ale **payload jest zbyt mały, by wyjaśnić 5,72 GB**. Przeniesione do sekcji „Deferred cleanup” — poprawne mikro-uproszczenie, nie rozwiązanie #735.
 
 ### F2. `poker_state` i `poker_hole_cards` są zablokowane dla standardowych ról przeglądarkowych
 
@@ -108,7 +108,7 @@ Pomiar wykonany na produkcji (`octet_length(state::text)`):
 
 ## Przełomowe ustalenie
 
-**`poker_state` JSONB ma średnio 1,7 KB.** Żadna ścieżka odczytująca ten stan (admin dashboard, conflict reads, bootstrap) nie może wyjaśnić 5,72 GB egressu. Problem leży w **kategorii i wolumenie requestów**, nie w rozmiarze pojedynczych payloadów.
+**`poker_state` JSONB ma średnio 1,7 KB.** Mały rozmiar payloadu wyklucza duże pojedyncze odpowiedzi jako przyczynę 5,72 GB. Problem leży najprawdopodobniej w **kategorii i wolumenie requestów**, nie w rozmiarze pojedynczych payloadów. Ścieżki odczytujące `state` (admin dashboard, conflict reads, bootstrap) nie są wykluczone — ich wpływ zależy od request volume — ale sam rozmiar payloadu nie czyni ich głównym podejrzanym.
 
 **Od tego momentu śledztwo skupia się na:**
 1. Kategorii egressu (Database / Shared Pooler / Auth / Storage)
@@ -165,7 +165,7 @@ Opcja A (stateProjection) pozostaje poprawnym mikro-uproszczeniem, ale **nie jes
 | # | Ścieżka | Status dowodów | Priorytet dla #735 | Uzasadnienie |
 |---|---------|---------------|-------------------|-------------|
 | 1 | XP `fetchStatus` | Potwierdzony call graph | 🟡 | Każda strona, każda nawigacja; duży potencjalny volume |
-| 2 | Conflict reads | Potwierdzony mechanizm | 🟡 | Full state przy CAS fail; nieznana częstotliwość |
+| 2 | Conflict reads | Potwierdzony mechanizm | 🟡 | Mały payload (~1,7 KB) obniża ryzyko, ale nie wyklucza pętli konfliktów lub retry — zależne od częstotliwości |
 | 3 | Stage activity (idle stoły, janitor sweepy) | Brak danych | 🟡 | Nieznana liczba stołów i częstotliwość sweepów |
 | 4 | WS bootstrap | Potwierdzony call graph (F8) | 🟢 | Przy create/join i recovery; ograniczona częstotliwość |
 | 5 | chips-ledger `returning *` | Potwierdzone | 🟢 | Wąskie tabele |
@@ -182,11 +182,16 @@ Opcja A (stateProjection) pozostaje poprawnym mikro-uproszczeniem, ale **nie jes
 
 ---
 
-## Opcja A — mikro-uproszczenie (NIE rozwiązanie #735)
+## Deferred cleanup — mikro-uproszczenia (NIE rozwiązania #735)
 
-**Pomiar wykluczył Opcję A jako rozwiązanie issue #735.** Przy ~1,7 KB na state nawet 1000 refreshów admina dziennie to tylko ~300 MB/miesiąc — mniej niż 5% całkowitego egressu.
+Poniższe zmiany są poprawnymi ulepszeniami kodu, ale **nie rozwiążą issue #735**. Można je zaimplementować przy okazji, bez związku z egressem.
 
-`stateProjection: "janitor"` pozostaje poprawnym mikro-uproszczeniem kodu, które można zaimplementować przy okazji, ale **nie wpłynie istotnie na przekroczenie limitu Supabase**.
+### `stateProjection: "janitor"` w `loadPersistedTableSnapshots()`
+
+Pomiar `poker_state` (~1,7 KB) potwierdził, że ta zmiana nie wpłynie istotnie na egress. Pozostaje mikro-uproszczeniem:
+- SQL pobiera tylko `state->>'phase'`, `state->>'turnUserId'`, `state->>'turnDeadlineAt'`, `state->'leftTableByUserId'` zamiast pełnego `state`
+- Domyślnie (bez parametru) — pełny `state` dla `admin-table-details` i `admin-table-evaluate`
+- **Pliki**: `admin-ops.mjs`, `admin-tables-list.mjs`, `admin-ops-summary.mjs`
 
 ---
 
@@ -196,13 +201,11 @@ Bez podziału na kategorie egressu i request volume dalsza analiza kodu nie przy
 
 | # | Potrzebne | Priorytet | Gdzie |
 |---|----------|-----------|-------|
-| 1 | Kategoria egressu dla kilku dni | 🔴 | Dashboard → Usage → Total Egress → najedź na dzień |
-| 2 | Podział prod vs stage | 🔴 | Wybierz każdy projekt osobno |
-| 3 | Request count (jeśli dostępny w metrykach) | 🔴 | Log Explorer lub API metrics |
-
-| 3 | Request volume per endpoint (jeśli dostępny w metrykach) | 🔴 Krytyczny | Log Explorer lub API metrics |
+| 1 | Kategoria egressu dla kilku dni | 🔴 Krytyczny | Dashboard → Usage → Total Egress → najedź na dzień |
+| 2 | Podział prod vs stage | 🔴 Krytyczny | Wybierz każdy projekt osobno |
+| 3 | Request volume per endpoint (jeśli dostępny) | 🔴 Krytyczny | Log Explorer lub API metrics |
 | 4 | Liczba otwartych stołów na stage i prod | 🟡 Wysoki | Admin panel → Tables (dla obu środowisk) |
-| 5 | Konfiguracja WS servera — project ref/hostname (bez haseł) | 🟡 Wysoki | SSH: `systemctl cat ws-server.service ws-server-preview.service \| grep EnvironmentFile`; potem bezpiecznie `grep -o 'db\.[a-z0-9-]*\.supabase\.co' <plik>` |
+| 5 | Konfiguracja WS servera — project ref/hostname (bez haseł) | 🟡 Wysoki | SSH: `systemctl cat ws-server.service ws-server-preview.service \| grep EnvironmentFile`; potem `grep -o 'db\.[a-z0-9-]*\.supabase\.co' <plik>` |
 | 6 | Netlify env vars: różne `SUPABASE_DB_URL` dla prod i stage? | 🟡 Wysoki | `netlify env:list` (bez kopiowania wartości) |
 
 ---

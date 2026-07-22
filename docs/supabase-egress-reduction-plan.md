@@ -213,43 +213,13 @@ Po zakończeniu śledztwa usunąć lub ograniczyć logi.
 
 Dopiero po ustaleniu źródła egressu (Task 1 + 3) zaproponować najmniejszą możliwą zmianę.
 
-### Opcja A: `loadPersistedTableSnapshots()` — projekcja pól janitora
+**Uwaga 2026-07-22**: `poker_state` JSONB ~1,7 KB. Opcja A przeniesiona do sekcji "Deferred cleanup" — nie jest rozwiązaniem #735.
 
-**Jeśli głównym źródłem jest admin dashboard ładujący pełny `state` JSONB.**
+### Opcja A: Redukcja payloadu conflict reads
 
-Obecnie `loadPersistedTableSnapshots()` (admin-ops.mjs:227-273) zawsze ładuje:
-```sql
-select table_id, version, state, updated_at from public.poker_state where table_id in (...);
-```
-Klasyfikacja janitora (`evaluateTableHealth` w table-janitor.mjs) używa ze `state` tylko:
-- `state.phase` (linia 94, 195)
-- `state.turnUserId` (linia 197)
-- `state.turnDeadlineAt` (linia 201)
-- `state.leftTableByUserId` (linia 99-100)
+**Jeśli conflict reads okażą się istotnym źródłem.**
 
-**Proponowana zmiana**: Dodać opcjonalny parametr `stateProjection` do `loadPersistedTableSnapshots()`:
-- `stateProjection: "janitor"` — SQL pobiera tylko:
-  ```sql
-  select table_id, version,
-    state->>'phase' as phase,
-    state->>'turnUserId' as turn_user_id,
-    state->>'turnDeadlineAt' as turn_deadline_at,
-    state->'leftTableByUserId' as left_table_by_user_id,
-    updated_at
-  from public.poker_state where table_id in (...);
-  ```
-  i buduje minimalny obiekt `{ phase, turnUserId, turnDeadlineAt, leftTableByUserId }` kompatybilny z `evaluateTableHealth`.
-- Domyślnie (bez parametru) — nadal pobiera pełny `state` dla `loadPersistedTableSnapshot()` (używanej przez `admin-table-details`, `admin-table-evaluate`), które mogą potrzebować pełnego stanu.
-
-**Pliki**: `admin-ops.mjs`, `admin-tables-list.mjs`, `admin-ops-summary.mjs`.
-**Przed deklaracją "Breaking: brak"**: Zweryfikować, czy `evaluatePersistedTableSnapshot()` i wszystkie funkcje poniżej nie używają innych pól `state` pośrednio (np. przez destrukturyzację lub przekazanie do dalszych funkcji).
-**Ryzyko**: Jeśli w przyszłości janitor będzie potrzebował więcej pól — rozszerzyć projekcję.
-
-### Opcja B: Redukcja payloadu conflict reads
-
-**Jeśli głównym źródłem są conflict read-y przy zapisach poker state.**
-
-Aktualny zapis zwraca tylko `RETURNING version` (integer — OK). Pełny `state` jest czytany dopiero przy nieudanym CAS, do porównania `stableStringify` i obsługi `alreadyApplied`.
+Aktualny zapis zwraca tylko `RETURNING version` (integer — OK). Pełny `state` jest czytany dopiero przy nieudanym CAS, do porównania `stableStringify` i obsługi `alreadyApplied`. Mały rozmiar `state` (~1,7 KB, F9) obniża wpływ pojedynczego konfliktu, ale nie wyklucza pętli konfliktów lub retry.
 
 Przed wyborem rozwiązania sprawdzić:
 - czy konflikty faktycznie występują (częstotliwość);
@@ -262,7 +232,7 @@ Przed wyborem rozwiązania sprawdzić:
 
 **Pliki do pomiaru**: `poker-state-write.mjs:33` (Netlify) i `persisted-state-writer.mjs:706` (WS).
 
-### Opcja C: Kliencka redukcja duplikatów XP status
+### Opcja B: Kliencka redukcja duplikatów XP status
 
 **Jeśli głównym źródłem jest częste odpytywanie `fetchStatus` XP.**
 
@@ -278,7 +248,7 @@ Zamiast tego:
 3. Jeśli duplikaty występują — dodać krótki cache w pamięci klienta (np. 5s throttle, `state.statusPromise` już istnieje — sprawdzić, czy jest poprawnie użyty).
 4. Nie wprowadzać publicznego CDN cache dla tego endpointu.
 
-### Opcja D: Ograniczenie aktywności stage (po pomiarze)
+### Opcja C: Ograniczenie aktywności stage (po pomiarze)
 
 **Jeśli głównym źródłem jest stage.**
 
@@ -289,13 +259,26 @@ Na podstawie pomiarów z 3.G:
 - Nie wyłączać profilaktycznie — każda zmiana musi być poprzedzona pomiarem potwierdzającym, że stage jest głównym źródłem.
 - Nie ustawiać `CHIPS_ENABLED=0` globalnie na stage — zmienia zachowanie testowego środowiska.
 
-### Opcja E: Rate limiting dla potwierdzonego abuse
+### Opcja D: Rate limiting dla potwierdzonego abuse
 
 **Jeśli potwierdzono crawler/bot.**
 
 - Sprawdzić istniejące konfiguracje routingu i eksporty `config` w funkcjach Netlify. Jeśli abuse zostanie potwierdzone, użyć natywnego `config.rateLimit` dla konkretnej funkcji lub ścieżki (code-based rate limiting dostępny również na Free planie, limit dwóch reguł na projekt, agregacja per domena i IP).
 - Nie konfiguruje się function rate limiting w `netlify.toml`.
 - **Nie** implementować in-memory rate limitera — niespójny w serverless.
+
+---
+
+## Deferred cleanup — mikro-uproszczenia (NIE rozwiązania #735)
+
+Poniższe zmiany są poprawnymi ulepszeniami kodu, ale **nie rozwiążą issue #735** (potwierdzone pomiarem `poker_state` ~1,7 KB). Można je zaimplementować przy okazji.
+
+### `stateProjection: "janitor"` w `loadPersistedTableSnapshots()`
+
+- `stateProjection: "janitor"` → SQL pobiera tylko `state->>'phase'`, `state->>'turnUserId'`, `state->>'turnDeadlineAt'`, `state->'leftTableByUserId'` zamiast pełnego `state`
+- Domyślnie (bez parametru) → pełny `state` dla `admin-table-details` i `admin-table-evaluate`
+- **Pliki**: `admin-ops.mjs`, `admin-tables-list.mjs`, `admin-ops-summary.mjs`
+- **Ryzyko**: Jeśli janitor będzie potrzebował więcej pól — rozszerzyć projekcję.
 
 ---
 
