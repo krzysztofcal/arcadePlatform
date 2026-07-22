@@ -1,7 +1,7 @@
 # Supabase Egress Investigation — Raport z ustaleń (Task 1–3)
 
 Issue: [#735](https://github.com/krzysztofcal/arcadePlatform/issues/735)
-Data analizy: 2026-07-21
+Data analizy: 2026-07-21 (aktualizacja: 2026-07-22 — pomiar `state` JSONB)
 
 ---
 
@@ -17,17 +17,14 @@ Data analizy: 2026-07-21
 
 ## Potwierdzone fakty
 
-### F1. `loadPersistedTableSnapshots()` ładuje pełny `state` JSONB
+### F1. `loadPersistedTableSnapshots()` ładuje pełny `state` JSONB — **niski wpływ potwierdzony pomiarem**
 
 - **Plik**: `netlify/functions/_shared/admin-ops.mjs:227-273`
-- **Call graph**:
-  - `admin-tables-list.mjs:139` — lista stołów (domyślnie 20 na stronę), używa do klasyfikacji janitora
-  - `admin-ops-summary.mjs:154` — dashboard Ops, używa do klasyfikacji janitora
-  - `admin-table-details.mjs:19` — szczegóły pojedynczego stołu (może potrzebować pełnego state)
-  - `admin-table-evaluate.mjs:6` — ewaluacja pojedynczego stołu (może potrzebować pełnego state)
-- **Dla list/summary**: Klasyfikacja janitora (`evaluateTableHealth` w `table-janitor.mjs`) używa tylko 4 pól z `state`: `phase`, `turnUserId`, `turnDeadlineAt`, `leftTableByUserId`. Reszta (stacks, board, hand history, deck, hole cards) jest transferowana niepotrzebnie.
-- **Dla details/evaluate**: Pełny `state` może być uzasadniony — te endpointy wyświetlają szczegóły stołu.
-- **Nieznane**: Rzeczywisty rozmiar `state` JSONB, request count admin dashboardu, udział w całkowitym egressie.
+- **Call graph**: `admin-tables-list.mjs` (lista), `admin-ops-summary.mjs` (dashboard), `admin-table-details.mjs`, `admin-table-evaluate.mjs`
+- **Dla list/summary**: Klasyfikacja janitora używa tylko 4 pól z `state`, reszta niepotrzebna.
+- **Pomiar — 2026-07-22**: `octet_length(state::text)` na 6 stołach: **średnia ~1,7 KB, max 2,1 KB** (pełne dane w F9).
+- **Skala**: Przy 6 stołach i ~1,7 KB każdy, pojedynczy refresh admin dashboard to ~10 KB. Nawet 1000 refreshów dziennie to tylko **~10 MB/dzień ≈ 300 MB/miesiąc** — **nie może wyjaśnić 5,72 GB**.
+- **Wniosek**: Potwierdzona nieefektywność, ale **nieistotna dla rozwiązania #735**. Opcja A pozostaje poprawnym mikro-uproszczeniem kodu, ale nie jako naprawa egressu.
 
 ### F2. `poker_state` i `poker_hole_cards` są zablokowane dla standardowych ról przeglądarkowych
 
@@ -92,6 +89,32 @@ Wniosek: Przejrzano wszystkie migracje chronologicznie — nie znaleziono późn
 - **Nie występuje przy**: Zwykłym reconnect — linia 2906 używa `tableManager.persistedPokerState()` z pamięci.
 - **Skala**: Pełny odczyt DB występuje w bootstrapie uruchamianym przez flow tworzenia/dołączania stołu (linia 1269) oraz w table recovery (linia 1800). Nie występuje w zwykłym resyncu korzystającym z pamięci. Dokładna częstotliwość zależy od tego, jak często te ścieżki faktycznie docierają do DB — do potwierdzenia pomiarem.
 
+### F9. Pomiar rozmiaru `poker_state.state` — 2026-07-22
+
+Pomiar wykonany na produkcji (`octet_length(state::text)`):
+
+| table_id | stored_bytes | approx_bytes |
+|----------|-------------|-------------|
+| afe199df... | 1924 | 2076 |
+| 3cf6fd0f... | 1539 | 1665 |
+| ca52f1f4... | 1538 | 1664 |
+| 57feb479... | 1536 | 1662 |
+| cef7809d... | 1485 | 1609 |
+| edc46172... | 1482 | 1606 |
+
+**Średnia ~1,7 KB, maksimum 2,1 KB.** To wyklucza `loadPersistedTableSnapshots` jako istotne źródło 5,72 GB — nawet 1000 refreshów admina dziennie to tylko ~300 MB/miesiąc. Problem leży gdzie indziej — kluczowe jest poznanie kategorii egressu i request volume.
+
+---
+
+## Przełomowe ustalenie
+
+**`poker_state` JSONB ma średnio 1,7 KB.** Żadna ścieżka odczytująca ten stan (admin dashboard, conflict reads, bootstrap) nie może wyjaśnić 5,72 GB egressu. Problem leży w **kategorii i wolumenie requestów**, nie w rozmiarze pojedynczych payloadów.
+
+**Od tego momentu śledztwo skupia się na:**
+1. Kategorii egressu (Database / Shared Pooler / Auth / Storage)
+2. Podziale prod vs stage
+3. Request volume — co generuje najwięcej zapytań, nie największe payloady
+
 ---
 
 ## Hipotezy wymagające danych
@@ -110,17 +133,15 @@ Nie wiadomo, czy `arcade-portal` czy `arcade-portal-stage` generuje większość
 - Production z ruchem użytkowników + admin dashboard
 - Stage z WS Preview
 
-### H3. Udział `loadPersistedTableSnapshots` w całkowitym egressie
-Potwierdzona nieefektywność kodowa, ale bez pomiarów nie wiadomo, czy jest istotna.
+### H3. Udział `loadPersistedTableSnapshots` — **wykluczony jako istotne źródło**
 
-**Wymagane obliczenie (per endpoint)**:
+Potwierdzona nieefektywność kodowa, ale **pomiar wykluczył ją jako wyjaśnienie 5,72 GB**:
 ```
-admin-tables-list:   listRequests × avgTableCount × avgStateSize
-admin-ops-summary:   summaryRequests × avgTableCount × avgStateSize
-admin-table-details: detailRequests × 1 × avgStateSize (pełny state może być uzasadniony)
-admin-table-evaluate: evaluateRequests × 1 × avgStateSize (pełny state może być uzasadniony)
+6 stołów × ~1,7 KB × 1000 refreshów/dzień = ~10 MB/dzień ≈ 300 MB/miesiąc
 ```
-Gdzie `avgTableCount` zależy od liczby aktywnych stołów (nie zawsze 20). Jeśli suma jest rzędu dziesiątek MB dziennie — istotne. Jeśli poniżej 1 MB — pomijalne.
+Stanowi to max ~5% całkowitego egressu przy bardzo agresywnych założeniach. Realistycznie poniżej 1%.
+
+Opcja A (stateProjection) pozostaje poprawnym mikro-uproszczeniem, ale **nie jest rozwiązaniem #735**.
 
 ### H4. Częstotliwość XP `fetchStatus`
 `statusPromise` deduplikuje równoległe requesty, ale nie ogranicza requestów przy kolejnych nawigacjach między stronami ani w osobnych instancjach strony (iframe, nowa karta).
@@ -139,64 +160,56 @@ Gdzie `avgTableCount` zależy od liczby aktywnych stołów (nie zawsze 20). Jeś
 
 ## Ranking
 
-### Podejrzane ścieżki kodowe (po audycie statycznym)
+### Podejrzane ścieżki kodowe (po audycie statycznym i pomiarze)
 
-| # | Ścieżka | Status dowodów | Co wiadomo | Czego brakuje |
-|---|---------|---------------|------------|---------------|
-| 1 | `loadPersistedTableSnapshots` | Potwierdzona nieefektywność | Pełny state zamiast 4 pól janitora (dla list/summary) | `octet_length`, request count |
-| 2 | XP `fetchStatus` | Potwierdzony call graph | Każda strona z badge, dedup równoległy | Liczba wywołań dziennie, payload size |
-| 3 | Conflict reads | Potwierdzony mechanizm | Full state przy CAS fail | Częstotliwość konfliktów |
-| 4 | Stage activity (idle stoły, janitor sweepy) | Brak danych | — | Liczba stołów na stage, częstotliwość janitora |
-| 5 | WS bootstrap | Potwierdzony call graph (F8) | Bootstrap przy create/join i recovery; nie przy resync | Jak często linie 1269/1800 faktycznie docierają do DB |
-| 6 | chips-ledger `returning *` | Potwierdzone, niski priorytet | Wąskie tabele | — |
-| 7 | Playwright cron | Niska pewność (H6) | Cron codziennie 2am, lokalny Vite | Czy realnie łączy się z Supabase |
+| # | Ścieżka | Status dowodów | Priorytet dla #735 | Uzasadnienie |
+|---|---------|---------------|-------------------|-------------|
+| 1 | XP `fetchStatus` | Potwierdzony call graph | 🟡 | Każda strona, każda nawigacja; duży potencjalny volume |
+| 2 | Conflict reads | Potwierdzony mechanizm | 🟡 | Full state przy CAS fail; nieznana częstotliwość |
+| 3 | Stage activity (idle stoły, janitor sweepy) | Brak danych | 🟡 | Nieznana liczba stołów i częstotliwość sweepów |
+| 4 | WS bootstrap | Potwierdzony call graph (F8) | 🟢 | Przy create/join i recovery; ograniczona częstotliwość |
+| 5 | chips-ledger `returning *` | Potwierdzone | 🟢 | Wąskie tabele |
+| 6 | Playwright cron | Niska pewność (H6) | 🟢 | Lokalny Vite, niepotwierdzone łączenie z Supabase |
+| ~~7~~ | ~~`loadPersistedTableSnapshots`~~ | ~~Pomiar (F9)~~ | ~~Wykluczone~~ | ~~Max ~5% egressu przy agresywnych założeniach (F9)~~ |
 
 ### Krytyczne luki w danych (poza kodem)
 
 | # | Luka | Priorytet | Wpływ na decyzję |
 |---|------|-----------|-----------------|
-| 1 | Kategoria egressu (Database / Shared Pooler / Auth) | 🔴 Krytyczny | Bez tego nie wiadomo, która warstwa dominuje |
+| 1 | Kategoria egressu (Database / Shared Pooler / Auth / Storage) | 🔴 Krytyczny | **Najważniejszy brakujący element** — bez tego nie wiadomo, która warstwa generuje 5,72 GB |
 | 2 | Podział prod vs stage | 🔴 Krytyczny | Bez tego nie wiadomo, które środowisko naprawiać |
-| 3 | Rozmiar `state` JSONB | 🟡 Wysoki | Warunek do oszacowania Opcji A |
-| 4 | Request count per endpoint | 🟡 Wysoki | Mnożnik we wzorze H3 |
+| 3 | Request volume per endpoint | 🔴 Krytyczny | ~~Rozmiar state~~ — już znany (1,7 KB). Wolumen teraz kluczowy |
 
 ---
 
-## Opcja A jako kandydat na quick win
+## Opcja A — mikro-uproszczenie (NIE rozwiązanie #735)
 
-**Najbardziej oczywista potwierdzona nieefektywność w kodzie.** Jej udział w całkowitym egressie pozostaje nieznany do czasu uzupełnienia pomiarów.
+**Pomiar wykluczył Opcję A jako rozwiązanie issue #735.** Przy ~1,7 KB na state nawet 1000 refreshów admina dziennie to tylko ~300 MB/miesiąc — mniej niż 5% całkowitego egressu.
 
-**Zmiana**: `stateProjection: "janitor"` w `loadPersistedTableSnapshots()`:
-- SQL pobiera tylko `state->>'phase'`, `state->>'turnUserId'`, `state->>'turnDeadlineAt'`, `state->'leftTableByUserId'` zamiast pełnego `state`
-- Domyślnie (bez parametru) — pełny `state` dla `admin-table-details` i `admin-table-evaluate`
-
-**Pliki**: `admin-ops.mjs`, `admin-tables-list.mjs`, `admin-ops-summary.mjs`
-
-**Warunek wstępny do rozważenia implementacji**: Patrz wzór H3 — potrzebny `avgStateSize` (octet_length) i request count per endpoint.
-
-Bez tego nie wiadomo, czy zmiana przyniesie istotną redukcję egressu.
-
-**Nie jest to rekomendowana naprawa issue #735** przed uzyskaniem danych prod/stage i kategorii egressu. Jest to jedynie najlepszy kandydat na minimalny quick win spośród przeanalizowanych ścieżek.
+`stateProjection: "janitor"` pozostaje poprawnym mikro-uproszczeniem kodu, które można zaimplementować przy okazji, ale **nie wpłynie istotnie na przekroczenie limitu Supabase**.
 
 ---
 
-## Minimalna lista danych właściciela (w kolejności priorytetu)
+## Następny krok — kluczowe dane
 
-| # | Potrzebne | Priorytet | Gdzie / jak |
-|---|----------|-----------|-------------|
-| 1 | Dzienny egress prod vs stage za okres 26 cze – 26 lip 2026 | 🔴 Krytyczny | Supabase Dashboard → Organization → Usage → Total Egress → wybierz `arcade-portal` i `arcade-portal-stage` osobno |
-| 2 | Podział na kategorie (Database / Shared Pooler / Auth / Storage) dla kilku reprezentatywnych dni | 🔴 Krytyczny | Najedź na dzień w Total Egress — pokazuje podział per usługa |
-| 3 | Rozmiar `state` JSONB | 🟡 Wysoki | Supabase SQL Editor (stage lub prod): `SELECT table_id, pg_column_size(state) AS stored_bytes, octet_length(state::text) AS approx_bytes FROM public.poker_state ORDER BY octet_length(state::text) DESC LIMIT 20;` |
+Bez podziału na kategorie egressu i request volume dalsza analiza kodu nie przybliży rozwiązania. **Potrzebne z Supabase Dashboard:**
+
+| # | Potrzebne | Priorytet | Gdzie |
+|---|----------|-----------|-------|
+| 1 | Kategoria egressu dla kilku dni | 🔴 | Dashboard → Usage → Total Egress → najedź na dzień |
+| 2 | Podział prod vs stage | 🔴 | Wybierz każdy projekt osobno |
+| 3 | Request count (jeśli dostępny w metrykach) | 🔴 | Log Explorer lub API metrics |
+
+| 3 | Request volume per endpoint (jeśli dostępny w metrykach) | 🔴 Krytyczny | Log Explorer lub API metrics |
 | 4 | Liczba otwartych stołów na stage i prod | 🟡 Wysoki | Admin panel → Tables (dla obu środowisk) |
-| 5 | Konfiguracja WS servera — project ref/hostname dla prod i preview (bez haseł) | 🟡 Wysoki | SSH na VPS. **Uwaga**: nie kopiować pełnych connection stringów. Najpierw sprawdzić źródła konfiguracji: `systemctl cat ws-server.service ws-server-preview.service \| grep -E 'EnvironmentFile\|SUPABASE_DB_URL'`. Jeśli connection string jest w `EnvironmentFile`, sprawdzić wskazany plik. Bezpieczne wyodrębnienie hosta: `grep -o 'db\.[a-z0-9-]*\.supabase\.co' <plik>`. Jeśli żadna z komend nie znajduje hosta, connection string może być w drop-in override, pliku `.env` lub systemd credentials. |
-| 6 | Netlify env vars: `SUPABASE_DB_URL` dla production i deploy-preview | 🟡 Wysoki | `netlify env:list` (wymaga uprawnień właściciela). **Uwaga**: nie kopiować pełnych wartości do raportu. Wystarczy informacja, czy production i deploy-preview mają różne URL-e. |
+| 5 | Konfiguracja WS servera — project ref/hostname (bez haseł) | 🟡 Wysoki | SSH: `systemctl cat ws-server.service ws-server-preview.service \| grep EnvironmentFile`; potem bezpiecznie `grep -o 'db\.[a-z0-9-]*\.supabase\.co' <plik>` |
+| 6 | Netlify env vars: różne `SUPABASE_DB_URL` dla prod i stage? | 🟡 Wysoki | `netlify env:list` (bez kopiowania wartości) |
 
 ---
 
 ## Następne kroki
 
-1. Uzupełnić dane #1 i #2 (dashboard Supabase) — to **warunek konieczny** do wyboru Task 4.
-2. Uzupełnić dane #3 (rozmiar state) — do oszacowania wpływu Opcji A.
-3. Uzupełnić dane #4–6 (konfiguracja) — do weryfikacji Task 2.
-4. Na podstawie danych wybrać jedną minimalną poprawkę (Task 4).
-5. Nie implementować niczego przed pomiarem baseline.
+1. **Uzyskać podział na kategorie egressu** (Dashboard → Usage → najedź na dzień) — to jedyny sposób, by zrozumieć, skąd pochodzi 5,72 GB.
+2. **Uzyskać podział prod vs stage** — zawęzić środowisko.
+3. Na podstawie kategorii **zawęzić śledztwo** do konkretnej warstwy (np. jeśli Shared Pooler dominuje → audyt Netlify Functions i WS servera pod kątem request volume; jeśli Database API → audyt przeglądarkowego supabase-js).
+4. Nie implementować niczego przed danymi.

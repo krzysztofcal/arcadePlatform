@@ -1,6 +1,7 @@
 # Supabase Egress Reduction Plan
 
 Issue: [#735](https://github.com/krzysztofcal/arcadePlatform/issues/735)
+**Aktualizacja 2026-07-22**: `poker_state` JSONB ~1,7 KB (pomiar). Opcja A (stateProjection) wykluczona jako rozwiązanie #735. Śledztwo skupia się na kategorii egressu i request volume.
 
 ## Task 1 — Ustalenie źródła egressu
 
