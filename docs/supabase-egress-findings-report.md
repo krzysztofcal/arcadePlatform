@@ -1,7 +1,7 @@
 # Supabase Egress Investigation — Raport z ustaleń (Task 1–3)
 
 Issue: [#735](https://github.com/krzysztofcal/arcadePlatform/issues/735)
-Data analizy: 2026-07-21 (aktualizacja: 2026-07-22 — pomiar `state` JSONB)
+Data analizy: 2026-07-21 (aktualizacja: 2026-07-22 — pomiar `state` JSONB, dane Supabase Dashboard)
 
 ---
 
@@ -9,7 +9,7 @@ Data analizy: 2026-07-21 (aktualizacja: 2026-07-22 — pomiar `state` JSONB)
 
 | Task | Status | Uzasadnienie |
 |------|--------|-------------|
-| **Task 1** — Ustalenie źródła egressu | 🔶 Nieukończony | Przeanalizowano Netlify i GitHub Actions. Brak kluczowych danych: nie wiadomo, który projekt (prod vs stage) i która kategoria (Database / Shared Pooler / Auth) wygenerowały większość 5,72 GB. |
+| **Task 1** — Ustalenie źródła egressu | 🟢 Znaczący postęp | Potwierdzono: ~89% egressu ze stage, ~99.9% to Shared Pooler (backend przez `SUPABASE_DB_URL`). Production tylko 0,71 GB. |
 | **Task 2** — Bezpieczeństwo i dostęp | 🔶 Częściowo | Audyt kodu źródłowego (RLS, sekrety, migracje) zakończony. Faktyczna konfiguracja 4 środowisk (Netlify prod/preview, WS prod/preview) niepotwierdzona — brak dostępu do zmiennych. |
 | **Task 3** — Inwentaryzacja zapytań | ✅ Zakończony (audyt statyczny) | Pełny audyt statyczny wszystkich 7 podejrzanych ścieżek, call graph, analiza RLS. Częstotliwości runtime i request count pozostają nieznane — wymagają pomiaru. |
 
@@ -106,32 +106,27 @@ Pomiar wykonany na produkcji (`octet_length(state::text)`):
 
 ---
 
-## Przełomowe ustalenie
+## Przełomowe ustalenia (zaktualizowane 2026-07-22)
 
-**`poker_state` JSONB ma średnio 1,7 KB.** Mały rozmiar payloadu wyklucza duże pojedyncze odpowiedzi jako przyczynę 5,72 GB. Problem leży najprawdopodobniej w **kategorii i wolumenie requestów**, nie w rozmiarze pojedynczych payloadów. Ścieżki odczytujące `state` (admin dashboard, conflict reads, bootstrap) nie są wykluczone — ich wpływ zależy od request volume — ale sam rozmiar payloadu nie czyni ich głównym podejrzanym.
+1. **~89% egressu ze stage** (F10). Production generuje tylko 0,71 GB — samodzielnie mieści się w limicie 5 GB/miesiąc.
+2. **~99,9% to Shared Pooler** (F11) — backend przez `SUPABASE_DB_URL`. Auth, Storage i przeglądarkowy supabase-js są praktycznie wykluczone.
+3. **`poker_state` JSONB ~1,7 KB** (F9) — wyklucza duże payloady jako przyczynę.
 
-**Od tego momentu śledztwo skupia się na:**
-1. Kategorii egressu (Database / Shared Pooler / Auth / Storage)
-2. Podziale prod vs stage
-3. Request volume — co generuje najwięcej zapytań, nie największe payloady
+**Śledztwo zawęża się do**: backendowych procesów na **stage** korzystających z `SUPABASE_DB_URL`. Kluczowe pytanie: który konkretnie proces (WS Preview, Netlify Functions deploy preview, cykliczne odczyty) generuje ~1 GB dziennie?
+
+Potrzebne dane: request count lub logi z backendu stage, aby rozdzielić ruch między WS Preview i Netlify Functions.
 
 ---
 
 ## Hipotezy wymagające danych
 
-### H1. Kategoria egressu — Database vs Shared Pooler vs Auth vs Storage
+### H1. Kategoria egressu — **potwierdzona: Shared Pooler dominuje**
 
-Bez tego podziału nie wiadomo, czy egress pochodzi z:
-- **Database Egress**: Data API/PostgREST — zapytania tabel przez supabase-js z przeglądarki
-- **Shared Pooler Egress**: backendowy Postgres przez `SUPABASE_DB_URL` z Netlify Functions i WS servera
-- **Auth Egress**: sesje, JWT verification, login/logout
-- **Storage Egress**: avatary i obiekty
+~~Hipoteza~~ → Potwierdzone przez F11. **~99,9% egressu na stage to Shared Pooler** (backend przez `SUPABASE_DB_URL`). Database API, Auth i Storage są pomijalne.
 
-### H2. Podział prod vs stage
-Nie wiadomo, czy `arcade-portal` czy `arcade-portal-stage` generuje większość egressu. Możliwe scenariusze:
-- Stage ze starymi idle stołami + janitor sweepy
-- Production z ruchem użytkowników + admin dashboard
-- Stage z WS Preview
+### H2. Podział prod vs stage — **potwierdzony: ~89% ze stage**
+
+~~Hipoteza~~ → Potwierdzone przez F10. **5,82 GB z 6,53 GB całkowitego egressu pochodzi ze stage.** Production (0,71 GB) samodzielnie mieści się w limicie.
 
 ### H3. Udział `loadPersistedTableSnapshots` — **wykluczony jako istotne źródło**
 
@@ -160,28 +155,29 @@ Opcja A (stateProjection) pozostaje poprawnym mikro-uproszczeniem, ale **nie jes
 
 ## Ranking
 
-### Podejrzane ścieżki kodowe (po audycie statycznym i pomiarze)
 
-| # | Ścieżka | Status dowodów | Priorytet dla #735 | Uzasadnienie |
-|---|---------|---------------|-------------------|-------------|
-| 1 | XP `fetchStatus` | Potwierdzony call graph | 🟡 | Każda strona, każda nawigacja; duży potencjalny volume |
-| 2 | Conflict reads | Potwierdzony mechanizm | 🟡 | Mały payload (~1,7 KB) obniża ryzyko, ale nie wyklucza pętli konfliktów lub retry — zależne od częstotliwości |
-| 3 | Stage activity (idle stoły, janitor sweepy) | Brak danych | 🟡 | Nieznana liczba stołów i częstotliwość sweepów |
-| 4 | WS bootstrap | Potwierdzony call graph (F8) | 🟢 | Przy create/join i recovery; ograniczona częstotliwość |
-| 5 | chips-ledger `returning *` | Potwierdzone | 🟢 | Wąskie tabele |
-| 6 | Playwright cron | Niska pewność (H6) | 🟢 | Lokalny Vite, niepotwierdzone łączenie z Supabase |
-| ~~7~~ | ~~`loadPersistedTableSnapshots`~~ | ~~Pomiar (F9)~~ | ~~Wykluczone~~ | ~~Max ~5% egressu przy agresywnych założeniach (F9)~~ |
+### Podejrzane ścieżki kodowe (po audycie statycznym, pomiarze i danych Dashboard)
 
-### Krytyczne luki w danych (poza kodem)
+**Uwaga**: ~99,9% egressu to Shared Pooler ze stage (F10, F11). Ranking skupia się na backendowych procesach stage.
+
+| # | Ścieżka | Status | Priorytet | Uzasadnienie |
+|---|---------|--------|-----------|-------------|
+| 1 | **Stage WS Preview / backend processes** | 🟡 Brak danych | 🔴 | Stage generuje 5,82 GB przez Shared Pooler. WS Preview + Netlify deploy preview — nie wiadomo, który proces dominuje. |
+| 2 | Stage janitor / inactive cleanup sweepy | 🟡 Brak danych | 🔴 | Idle stoły + cykliczne odczyty DB przez janitora — potencjalnie stały ruch. |
+| 3 | Conflict reads (na stage) | Potwierdzony mechanizm | 🟡 | Mały payload, ale jeśli stage ma wiele aktywnych stołów z botami — częste zapisy = częste konflikty. |
+| 4 | WS bootstrap (na stage) | Potwierdzony call graph (F8) | 🟢 | Tylko create/join i recovery. |
+| 5 | XP `fetchStatus` (na stage) | Potwierdzony call graph | 🟢 | Stage ma minimalny ruch użytkowników; mały volume. |
+| 6 | ~~Auth / Storage / Database API~~ | ~~Wykluczone (F11)~~ | ~~Wykluczone~~ | ~~<0,1% egressu~~ |
+| 7 | ~~`loadPersistedTableSnapshots`~~ | ~~Pomiar (F9)~~ | ~~Wykluczone~~ | ~~Payload za mały~~ |
+| 8 | ~~Production~~ | ~~Wykluczone (F10)~~ | ~~Wykluczone~~ | ~~Tylko 0,71 GB, poniżej limitu~~ |
+
+### Krytyczne luki w danych
 
 | # | Luka | Priorytet | Wpływ na decyzję |
 |---|------|-----------|-----------------|
-| 1 | Kategoria egressu (Database / Shared Pooler / Auth / Storage) | 🔴 Krytyczny | **Najważniejszy brakujący element** — bez tego nie wiadomo, która warstwa generuje 5,72 GB |
-| 2 | Podział prod vs stage | 🔴 Krytyczny | Bez tego nie wiadomo, które środowisko naprawiać |
-| 3 | Request volume per endpoint | 🔴 Krytyczny | ~~Rozmiar state~~ — już znany (1,7 KB). Wolumen teraz kluczowy |
-
----
-
+| 1 | Rozdzielenie WS Preview vs Netlify Functions na stage | 🔴 | Który proces generuje ~1 GB/dzień? |
+| 2 | Liczba i stan stołów na stage | 🔴 | Czy stage ma idle stoły z aktywnymi botami? |
+| 3 | Request count per backend process | 🔴 | Wolumen zamiast payload size |
 ## Deferred cleanup — mikro-uproszczenia (NIE rozwiązania #735)
 
 Poniższe zmiany są poprawnymi ulepszeniami kodu, ale **nie rozwiążą issue #735**. Można je zaimplementować przy okazji, bez związku z egressem.
@@ -203,16 +199,17 @@ Bez podziału na kategorie egressu i request volume dalsza analiza kodu nie przy
 |---|----------|-----------|-------|
 | 1 | Kategoria egressu dla kilku dni | 🔴 Krytyczny | Dashboard → Usage → Total Egress → najedź na dzień |
 | 2 | Podział prod vs stage | 🔴 Krytyczny | Wybierz każdy projekt osobno |
-| 3 | Request volume per endpoint (jeśli dostępny) | 🔴 Krytyczny | Log Explorer lub API metrics |
-| 4 | Liczba otwartych stołów na stage i prod | 🟡 Wysoki | Admin panel → Tables (dla obu środowisk) |
-| 5 | Konfiguracja WS servera — project ref/hostname (bez haseł) | 🟡 Wysoki | SSH: `systemctl cat ws-server.service ws-server-preview.service \| grep EnvironmentFile`; potem `grep -o 'db\.[a-z0-9-]*\.supabase\.co' <plik>` |
-| 6 | Netlify env vars: różne `SUPABASE_DB_URL` dla prod i stage? | 🟡 Wysoki | `netlify env:list` (bez kopiowania wartości) |
+| 3 | Request count / logi z backendu stage | 🔴 Krytyczny | Rozdzielenie WS Preview vs Netlify Functions |
+| 4 | Liczba i stan stołów na stage | 🔴 Krytyczny | Admin panel stage → Tables |
+| 5 | Konfiguracja WS servera — project ref/hostname (bez haseł) | 🟡 Wysoki | SSH: `systemctl cat ws-server-preview.service` |
+| 6 | Netlify env vars: stage używa poprawnego `SUPABASE_DB_URL`? | 🟡 Wysoki | `netlify env:list` (deploy-preview context) |
 
 ---
 
 ## Następne kroki
 
-1. **Uzyskać podział na kategorie egressu** (Dashboard → Usage → najedź na dzień) — to jedyny sposób, by zrozumieć, skąd pochodzi 5,72 GB.
-2. **Uzyskać podział prod vs stage** — zawęzić środowisko.
-3. Na podstawie kategorii **zawęzić śledztwo** do konkretnej warstwy (np. jeśli Shared Pooler dominuje → audyt Netlify Functions i WS servera pod kątem request volume; jeśli Database API → audyt przeglądarkowego supabase-js).
-4. Nie implementować niczego przed danymi.
+1. **Potwierdzono**: ~89% egressu ze stage, ~99,9% Shared Pooler. Production i Auth wykluczone. ✅
+2. **Sprawdzić stan stage**: ile stołów, czy są idle, czy boty grają. (Admin panel stage → Tables)
+3. **Rozdzielić WS Preview vs Netlify Functions**: który backendowy proces dominuje. (Potrzebne logi lub request count)
+4. Na podstawie danych wybrać jedną minimalną poprawkę (Task 4).
+5. Nie implementować niczego przed danymi.

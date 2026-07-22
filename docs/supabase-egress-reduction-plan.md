@@ -1,7 +1,7 @@
 # Supabase Egress Reduction Plan
 
 Issue: [#735](https://github.com/krzysztofcal/arcadePlatform/issues/735)
-**Aktualizacja 2026-07-22**: `poker_state` JSONB ~1,7 KB (pomiar). Opcja A (stateProjection) wykluczona jako rozwiązanie #735. Śledztwo skupia się na kategorii egressu i request volume.
+**Aktualizacja 2026-07-22**: `poker_state` JSONB ~1,7 KB. Potwierdzono: ~89% egressu ze stage, ~99,9% Shared Pooler (backend `SUPABASE_DB_URL`). Śledztwo skupia się na backendowych procesach stage (WS Preview, Netlify Functions).
 
 ## Task 1 — Ustalenie źródła egressu
 
