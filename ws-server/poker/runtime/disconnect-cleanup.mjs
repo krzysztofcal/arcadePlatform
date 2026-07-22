@@ -9,6 +9,8 @@ export function createDisconnectCleanupRuntime({
 } = {}) {
   const candidates = new Map();
 
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
   function key(tableId, userId) {
     return `${tableId}:${userId}`;
   }
@@ -46,6 +48,13 @@ export function createDisconnectCleanupRuntime({
         continue;
       }
       if (Number.isFinite(candidate.retryNotBeforeMs) && candidate.retryNotBeforeMs > currentNowMs) {
+        continue;
+      }
+
+      // Guest and other non-persisted tables have non-UUID IDs.
+      // DB-backed cleanup requires valid UUIDs; drop invalid candidates.
+      if (!UUID_RE.test(candidate.tableId)) {
+        candidates.delete(key(candidate.tableId, candidate.userId));
         continue;
       }
 
