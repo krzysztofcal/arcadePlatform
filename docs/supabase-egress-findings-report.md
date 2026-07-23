@@ -102,7 +102,7 @@ Pomiar wykonany na produkcji (`octet_length(state::text)`):
 | cef7809d... | 1485 | 1609 |
 | edc46172... | 1482 | 1606 |
 
-****Średnia ~1,7 KB, maksimum 2,1 KB.** To wyklucza `loadPersistedTableSnapshots` jako istotne źródło 5,72 GB. Przy realistycznym wolumenie admin dashboardu ta ścieżka jest mało prawdopodobnym źródłem większości egressu.
+~Średnia ~1,7 KB, maksimum 2,1 KB.** To wyklucza `loadPersistedTableSnapshots` jako istotne źródło 5,72 GB. Przy realistycznym wolumenie admin dashboardu ta ścieżka jest mało prawdopodobnym źródłem większości egressu.
 
 ---
 
@@ -111,11 +111,11 @@ Pomiar wykonany na produkcji (`octet_length(state::text)`):
 1. **~89% egressu ze stage** (F10). Production generuje tylko 0,71 GB — samodzielnie mieści się w limicie 5 GB/miesiąc.
 2. **~99,9% to Shared Pooler** (F11) — backend przez `SUPABASE_DB_URL`. Auth, Storage i przeglądarkowy supabase-js są praktycznie wykluczone.
 3. **`poker_state` JSONB ~1,7 KB** (F9) — wyklucza duże payloady jako przyczynę.
-4. **Główna przyczyna zidentyfikowana: pętla disconnect cleanup na stage** (F12) — guest table z nie-UUID ID wpada w nieskończoną pętlę retry, generując ~2 failed cleanup attempts/s.
+4. **Potwierdzona nieskończona pętla disconnect cleanup na stage** — główny zidentyfikowany generator zbędnego ruchu (F12) — guest table z nie-UUID ID wpada w nieskończoną pętlę retry, generując ~2 failed cleanup attempts/s.
 
 ---
 
-## F12. Root cause: pętla disconnect cleanup na guest table (stage WS Preview)
+## F12. Potwierdzona nieskończona pętla disconnect cleanup na guest table
 
 **Dowody runtime (2026-07-22, 10-minutowa próbka z `ws-server-preview.service`)**:
 
@@ -260,6 +260,6 @@ Bez podziału na kategorie egressu i request volume dalsza analiza kodu nie przy
 
 ## Wnioski końcowe
 
-Issue #735 został rozwiązanany na poziomie diagnostycznym. **5,82 GB egressu na stage jest spowodowane głównie przez nieskończoną pętlę disconnect cleanup**, w której guest table z nie-UUID ID generuje ~172 800 cleanup attempts dziennie. Błąd  z PostgreSQL nie jest klasyfikowany jako non-retryable, więc cleanup retryuje w nieskończoność.
+Issue #735 został zdiagnozowany. **Potwierdzona nieskończona pętla disconnect cleanup na stage** jest głównym zidentyfikowanym źródłem zbędnego ruchu — guest table z nie-UUID ID generuje ~172 800 cleanup attempts dziennie. Błąd `22P02` nie był klasyfikowany jako non-retryable, więc cleanup retryował w nieskończoność. Dokładny udział pętli w historycznych 5,82 GB zweryfikuje pomiar egressu po wdrożeniu poprawki.
 
-Pozostałe źródła (production 0,71 GB, Auth <0,1%, Storage ~0) są poniżej limitu Free planu. Naprawa tej jednej pętli powinna znacząco zredukować egress na stage — dokładna wartość wymaga pomiaru po wdrożeniu.
+Pozostałe źródła (production 0,71 GB, Auth <0,1%, Storage ~0) są poniżej limitu Free planu. Naprawa (3 zmiany: `22P02` non-retryable, UUID guard przy `hasSupabaseDbUrl`, retry backoff/limit) została zaimplementowana w PR #736. Weryfikacja przez pomiar egressu po WS Preview Deploy.

@@ -57,10 +57,10 @@ Guest/non-persisted table IDs (`guest_table_<uuid>`) nie przechodzą walidacji U
 
 **Plik**: `ws-server/poker/runtime/disconnect-cleanup.mjs:12,36,91`
 
-- `MAX_CLEANUP_RETRIES = 8` — maksymalna liczba retry przed wymuszeniem usunięcia
+- `MAX_CLEANUP_FAILURES = 8` — maksymalna liczba retry przed wymuszeniem usunięcia
 - `CLEANUP_RETRY_BACKOFF_BASE_MS = 1000` — wykładniczy backoff (1s, 2s, 4s, ..., max 120s)
 - `retryCount` — dodany do obiektu kandydata, inkrementowany przy każdym retry
-- Po przekroczeniu `MAX_CLEANUP_RETRIES` kandydat jest usuwany
+- Po przekroczeniu `MAX_CLEANUP_FAILURES = 8` (czyli po 9 nieudanych próbach) kandydat jest usuwany
 
 Backoff zapobiega ponownej eskalacji ~2 retry/sekundę, gdyby inny typ błędu zachowywał się podobnie do `22P02`.
 

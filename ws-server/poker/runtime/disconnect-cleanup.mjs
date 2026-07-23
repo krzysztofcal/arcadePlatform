@@ -8,7 +8,7 @@ export function createDisconnectCleanupRuntime({
   nowMs = () => Date.now()
 } = {}) {
   const candidates = new Map();
-  const MAX_CLEANUP_RETRIES = 8;
+  const MAX_CLEANUP_FAILURES = 8;
   const CLEANUP_RETRY_BACKOFF_BASE_MS = 1000;
 
   function key(tableId, userId) {
@@ -97,7 +97,7 @@ export function createDisconnectCleanupRuntime({
         code: result?.code || 'unknown'
       });
       candidate.retryCount = Number.isFinite(candidate.retryCount) ? candidate.retryCount + 1 : 1;
-      if (candidate.retryCount > MAX_CLEANUP_RETRIES) {
+      if (candidate.retryCount > MAX_CLEANUP_FAILURES) {
         candidates.delete(key(candidate.tableId, candidate.userId));
         continue;
       }
