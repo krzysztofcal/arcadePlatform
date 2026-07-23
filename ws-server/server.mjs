@@ -264,7 +264,7 @@ const janitorLiveHandStaleMs = resolvePositiveInt(process.env.POKER_LIVE_HAND_ST
 });
 const persistedSeatTouchThrottleMs = resolvePositiveInt(
   process.env.WS_PERSISTED_SEAT_TOUCH_THROTTLE_MS,
-  Math.max(1_000, Math.trunc(HEARTBEAT_MS / 2)),
+  30_000,
   { min: 1_000, max: 60_000 }
 );
 const streamLog = createStreamLog({ cap: Number(process.env.WS_STREAM_REPLAY_CAP || 128) });
