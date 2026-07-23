@@ -2349,6 +2349,11 @@ async function sweepZombieTablesAndBroadcast() {
 async function listOpenTableIdsForJanitor({ limit = 10 } = {}) {
   if (!persistedBootstrapEnabled) return [];
   const boundedLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 10;
+  const hasCursor = Boolean(Number.isFinite(openTableJanitorCursor?.updatedAtMs)
+    && typeof openTableJanitorCursor?.tableId === "string"
+    && openTableJanitorCursor.tableId.trim());
+  const cursorUpdatedAt = hasCursor ? new Date(openTableJanitorCursor.updatedAtMs).toISOString() : null;
+  const cursorTableId = hasCursor ? openTableJanitorCursor.tableId.trim() : null;
   try {
     const beginSqlWs = await loadBeginSqlWs();
     return beginSqlWs(async (tx) => {
@@ -2356,7 +2361,16 @@ async function listOpenTableIdsForJanitor({ limit = 10 } = {}) {
         `select t.id, t.updated_at
          from public.poker_tables t
          where t.status = 'OPEN'
-         order by t.updated_at asc, t.id asc;`
+         order by
+           case
+             when $1::timestamptz is null then 0
+             when (t.updated_at, t.id) > ($1::timestamptz, $2::uuid) then 0
+             else 1
+           end asc,
+           t.updated_at asc,
+           t.id asc
+         limit $3;`,
+        [cursorUpdatedAt, cursorTableId, boundedLimit]
       );
       const selected = selectOpenTableJanitorBatch({
         tables: Array.isArray(rows) ? rows : [],
@@ -2366,7 +2380,7 @@ async function listOpenTableIdsForJanitor({ limit = 10 } = {}) {
       openTableJanitorCursor = selected.cursor;
       klogSafe("ws_open_table_reconciler_batch_selected", {
         limit: boundedLimit,
-        totalOpenTables: selected.total,
+        returnedOpenTableCount: selected.total,
         wrapped: selected.wrapped,
         cursorTableId: selected.cursor?.tableId || null,
         tableIds: selected.tableIds
