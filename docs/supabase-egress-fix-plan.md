@@ -1,106 +1,95 @@
 # Supabase Egress Fix Plan — Disconnect Cleanup Loop
 
 Issue: [#735](https://github.com/krzysztofcal/arcadePlatform/issues/735)
-Data: 2026-07-22
+Data: 2026-07-22 (zaktualizowany 2026-07-23)
 
 ## Root cause
 
-Guest table z nie-UUID ID (`guest_table_<uuid>`) utknął w nieskończonej pętli disconnect cleanup na stage WS Preview. PostgreSQL zwraca `22P02 invalid input syntax for type uuid`, ale `isRetryableCleanupFailure()` nie klasyfikuje tego błędu jako non-retryable. Kandydat nigdy nie jest usuwany z mapy, generując ~172 800 failed DB queries dziennie.
+Guest table z nie-UUID ID (`guest_table_<uuid>`) utknął w nieskończonej pętli disconnect cleanup na stage WS Preview. PostgreSQL zwraca `22P02 invalid input syntax for type uuid`, ale `isRetryableCleanupFailure()` nie klasyfikuje tego błędu jako non-retryable. Kandydat nigdy nie jest usuwany z mapy, generując ~172 800 cleanup attempts dziennie.
 
 **Call graph**:
-1. `disconnect-cleanup.mjs:36` — `sweep()` iteruje kandydatów
-2. `disconnect-cleanup.mjs:52` — `executeCleanup({ tableId: "guest_table_<uuid>", ... })`
-3. `inactive-cleanup-adapter.mjs:43` — `executeInactiveCleanup()`
-4. `inactive-cleanup.mjs:182` — `select ... from poker_seats where table_id = $1` → `22P02`
-5. `inactive-cleanup-adapter.mjs:62-65` — catch → `isRetryableCleanupFailure()` → `true`
-6. `disconnect-cleanup.mjs:87` — `retryable !== false` → kandydat zostaje
+1. `server.mjs:3367/3387` — disconnect handler → `enqueueDisconnectCleanupCandidate({ tableId, userId })`
+2. `server.mjs:1874` — `enqueueDisconnectCleanupCandidate()` → `disconnectCleanupRuntime.enqueue()`
+3. `disconnect-cleanup.mjs:36` — `sweep()` iteruje kandydatów
+4. `disconnect-cleanup.mjs:52` — `executeCleanup({ tableId: "guest_table_<uuid>", ... })`
+5. `inactive-cleanup-adapter.mjs:43` — `executeInactiveCleanup()`
+6. `inactive-cleanup.mjs:182` — `select ... from poker_seats where table_id = $1` → PostgreSQL rzuca `22P02`
+7. `inactive-cleanup-adapter.mjs:62-65` — catch → `isRetryableCleanupFailure()` → `true` (default)
+8. `disconnect-cleanup.mjs:91` — `ws_disconnect_cleanup_retry` → kandydat zostaje w mapie
 
-## Minimalna naprawa
+## Zaimplementowana naprawa
 
-Trzy zmiany w dwóch plikach. Każda jest samodzielnie wystarczająca, razem dają defense-in-depth.
+Trzy zmiany w trzech plikach, defense-in-depth.
 
-### Zmiana 1 (główna): Klasyfikuj `22P02` jako non-retryable
+### Zmiana 1: Klasyfikuj `22P02` jako non-retryable
 
-**Plik**: `ws-server/poker/persistence/inactive-cleanup-adapter.mjs:15-22`
-
-Funkcja `isRetryableCleanupFailure()` obecnie nie obsługuje błędów Postgres wire protocol (klas 22, 23, 42 itp.). Dodać klasyfikację dla deterministycznych błędów typu:
+**Plik**: `ws-server/poker/persistence/inactive-cleanup-adapter.mjs:20`
 
 ```js
-function isRetryableCleanupFailure(error) {
-  const status = Number(error?.status ?? error?.statusCode);
-  const code = typeof error?.code === "string" ? error.code : "";
-  if (status === 408 || status === 425 || status === 429) return true;
-  if (Number.isInteger(status) && status >= 400 && status < 500) return false;
-  if (code === "terminal_accounting_invariant_failed") return false;
-  // Postgres Class 22 — Data Exception (invalid_text_representation, etc.)
-  // These are deterministic: the same input will always fail.
-  if (code === "22P02" || code.startsWith("22")) return false;
-  return true;
+// 22P02 = invalid_text_representation (e.g. non-UUID where UUID expected).
+// Deterministic: the same input will always fail — do not retry.
+if (code === "22P02") return false;
+```
+
+Po pierwszym nieudanym cleanupie z `22P02`, adapter zwraca `retryable: false`. `disconnect-cleanup.mjs:87-89` usuwa kandydata z mapy. Pętla się urywa.
+
+### Zmiana 2: Source-level guard — nie enqueue'uj non-UUID table IDs
+
+**Plik**: `ws-server/server.mjs:1874` — `enqueueDisconnectCleanupCandidate()`
+
+```js
+function enqueueDisconnectCleanupCandidate({ tableId, userId }) {
+  // Persisted tables always have UUID IDs. Guest and other non-persisted
+  // tables use prefixed string IDs that cannot target DB-backed cleanup.
+  // Drop them here to prevent deterministic 22P02 failures.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (typeof tableId !== "string" || !UUID_RE.test(tableId)) return;
+  if (typeof userId !== "string" || !userId) return;
+  disconnectCleanupRuntime.enqueue({ tableId, userId });
 }
 ```
 
-### Zmiana 2 (druga linia obrony): Waliduj tableId przed DB query
+Guest/non-persisted table IDs (`guest_table_<uuid>`) nie przechodzą walidacji UUID i nie trafiają do DB-backed cleanupu. `userId` również jest walidowany — oba pola w logach mają prefix `guest_`.
 
-**Plik**: `ws-server/poker/runtime/disconnect-cleanup.mjs:16`
+**Dlaczego tutaj, a nie w `disconnect-cleanup.mjs`**: `disconnect-cleanup` to moduł generyczny — testy używają dowolnych string-IDs. Walidacja na poziomie entry pointu WS servera (`enqueueDisconnectCleanupCandidate`) jest najprostsza i nie zmienia kontraktu generycznego modułu. UUID_RE używane tutaj jest identyczne z istniejącymi w repo (`table-manager.mjs:25`, `admin-ops.mjs:10`).
 
-Funkcja `enqueue()` obecnie akceptuje każdy niepusty string jako `tableId`. Dodać walidację UUID dla persisted cleanup path:
+### Zmiana 3: Retry backoff i limit jako defense-in-depth
 
-```js
-function enqueue({ tableId, userId }) {
-  if (typeof tableId !== 'string' || !tableId) return false;
-  if (typeof userId !== 'string' || !userId) return false;
-  // Guest/non-persisted tables have non-UUID IDs — they should never
-  // reach DB-backed cleanup. Reject them at enqueue time.
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  if (!UUID_RE.test(tableId)) return false;
-  // ...
-```
+**Plik**: `ws-server/poker/runtime/disconnect-cleanup.mjs:12,36,91`
 
-Alternatywnie (mniej inwazyjnie): dodać tę samą walidację w `sweep()` przed wywołaniem `executeCleanup()`, usuwając nie-UUID kandydatów:
+- `MAX_CLEANUP_RETRIES = 8` — maksymalna liczba retry przed wymuszeniem usunięcia
+- `CLEANUP_RETRY_BACKOFF_BASE_MS = 1000` — wykładniczy backoff (1s, 2s, 4s, ..., max 120s)
+- `retryCount` — dodany do obiektu kandydata, inkrementowany przy każdym retry
+- Po przekroczeniu `MAX_CLEANUP_RETRIES` kandydat jest usuwany
 
-```js
-async function sweep() {
-  for (const candidate of [...candidates.values()]) {
-    // ...
-    // Drop non-UUID candidates before they reach DB
-    if (!UUID_RE.test(candidate.tableId)) {
-      candidates.delete(key(candidate.tableId, candidate.userId));
-      continue;
-    }
-    const result = await executeCleanup({...});
-    // ...
-```
+Backoff zapobiega ponownej eskalacji ~2 retry/sekundę, gdyby inny typ błędu zachowywał się podobnie do `22P02`.
 
-### Zmiana 3 (opcjonalna): Limit retry / backoff
+## Pliki zmienione
 
-Jeśli zmiany 1 i 2 są wdrożone, ta zmiana nie jest konieczna. Jako dodatkowe zabezpieczenie: dodać licznik retry w kandydacie i usuwać po N próbach.
+| Plik | Zmiana |
+|------|--------|
+| `ws-server/poker/persistence/inactive-cleanup-adapter.mjs` | `22P02` → `retryable: false` |
+| `ws-server/server.mjs` | `enqueueDisconnectCleanupCandidate()` — UUID guard dla tableId i userId |
+| `ws-server/poker/runtime/disconnect-cleanup.mjs` | Retry count, backoff, max retries |
 
-## Pliki do zmiany
+## Breaking impact
 
-| Plik | Zmiana | Ryzyko |
-|------|--------|--------|
-| `ws-server/poker/persistence/inactive-cleanup-adapter.mjs:22` | Dodaj `22P02` do non-retryable | Minimalne — błędy typu 22 są zawsze deterministyczne |
-| `ws-server/poker/runtime/disconnect-cleanup.mjs:16` | Waliduj UUID w `enqueue()` | Średnie — zmienia kontrakt dla guest tables; alternatywnie waliduj w `sweep()` |
-
-## Czego NIE zmieniać
-
-- Nie zmieniać kontraktu `executeInactiveCleanup()` dla prawidłowych UUID tables
-- Nie zmieniać logiki cleanupu dla persisted tables
-- Nie wyłączać WS Preview ani janitora
-- Nie dodawać migracji DB
+- **Persisted UUID tables**: bez zmian — cleanup działa identycznie.
+- **Guest tables na stage**: przestają być enqueue'owane do DB-backed cleanupu (były enqueue'owane błędnie). Guest table cleanup nadal działa przez inne ścieżki (in-memory).
+- **WS Production**: UUID guard jest bezpieczny — production ma tylko persisted UUID tables. Backoff/limit nie zmienia poprawnego flow.
+- **WS Preview Deploy**: wymagany do wdrożenia na stage.
 
 ## Deployment
 
-1. Zastosować zmiany w branchu
+1. Zmiany już w branchu `docs/supabase-egress-plan`
 2. WS Preview Deploy (manualny, przez `ws-preview-deploy.yml`)
 3. Zweryfikować logi — `ws_disconnect_cleanup_retry` powinno zniknąć
 4. Zweryfikować egress w Supabase Dashboard po 24h
 5. Merge do main
-6. WS Production Deploy (jeśli zmiana dotyczy shared kodu)
+6. WS Production Deploy
 
 ## Weryfikacja
 
-- **Przed**: ~172 800 failed queries/dobę, ~2/s pętla
-- **Po**: 0 failed queries dla guest_table, cleanup kończy się natychmiast
-- **Dashboard**: egress stage powinien spaść z ~1 GB/dzień do poziomu production (~0,02 GB/dzień)
-- **Projekcja miesięczna**: z 5,82 GB do <1 GB (stage + production razem)
+- **Przed**: ~172 800 cleanup attempts/dobę, ~2/s pętla
+- **Po**: 0 failed attempts dla guest_table; cleanup dla persisted tables bez zmian
+- **Dashboard**: egress stage powinien znacząco spaść — dokładna wartość do pomiaru po wdrożeniu

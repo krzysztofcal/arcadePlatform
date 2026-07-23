@@ -18,9 +18,9 @@ function isRetryableCleanupFailure(error) {
   if (status === 408 || status === 425 || status === 429) return true;
   if (Number.isInteger(status) && status >= 400 && status < 500) return false;
   if (code === "terminal_accounting_invariant_failed") return false;
-  // Postgres Class 22 — Data Exception. Deterministic: same input will always fail.
   // 22P02 = invalid_text_representation (e.g. non-UUID where UUID expected).
-  if (code === "22P02" || code.startsWith("22")) return false;
+  // Deterministic: the same input will always fail — do not retry.
+  if (code === "22P02") return false;
   return true;
 }
 

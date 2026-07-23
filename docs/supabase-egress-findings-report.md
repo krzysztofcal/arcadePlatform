@@ -102,7 +102,7 @@ Pomiar wykonany na produkcji (`octet_length(state::text)`):
 | cef7809d... | 1485 | 1609 |
 | edc46172... | 1482 | 1606 |
 
-**Średnia ~1,7 KB, maksimum 2,1 KB.** To wyklucza `loadPersistedTableSnapshots` jako istotne źródło 5,72 GB — nawet 1000 refreshów admina dziennie to tylko ~300 MB/miesiąc. Problem leży gdzie indziej — kluczowe jest poznanie kategorii egressu i request volume.
+****Średnia ~1,7 KB, maksimum 2,1 KB.** To wyklucza `loadPersistedTableSnapshots` jako istotne źródło 5,72 GB. Przy realistycznym wolumenie admin dashboardu ta ścieżka jest mało prawdopodobnym źródłem większości egressu.
 
 ---
 
@@ -111,7 +111,7 @@ Pomiar wykonany na produkcji (`octet_length(state::text)`):
 1. **~89% egressu ze stage** (F10). Production generuje tylko 0,71 GB — samodzielnie mieści się w limicie 5 GB/miesiąc.
 2. **~99,9% to Shared Pooler** (F11) — backend przez `SUPABASE_DB_URL`. Auth, Storage i przeglądarkowy supabase-js są praktycznie wykluczone.
 3. **`poker_state` JSONB ~1,7 KB** (F9) — wyklucza duże payloady jako przyczynę.
-4. **Główna przyczyna zidentyfikowana: pętla disconnect cleanup na stage** (F12) — guest table z nie-UUID ID wpada w nieskończoną pętlę retry, generując ~2 DB queries/sekundę.
+4. **Główna przyczyna zidentyfikowana: pętla disconnect cleanup na stage** (F12) — guest table z nie-UUID ID wpada w nieskończoną pętlę retry, generując ~2 failed cleanup attempts/s.
 
 ---
 
@@ -126,7 +126,7 @@ Pomiar wykonany na produkcji (`octet_length(state::text)`):
 - 1200 × `ws_inactive_cleanup_failed`
 - Wszystkie dotyczą `guest_table_<uuid>` — **nie-UUID ID**
 - PostgreSQL zwraca: `22P02 invalid input syntax for type uuid: "guest_table_<uuid>"`
-- **~2 nieudane cleanupy/sekundę, ~120/minutę, ~172 800/dobę**
+- **~2 nieudane cleanupy/sekundę, ~120/minutę, ~172 800 cleanup attempts/dobę**
 
 **Dowody z `pg_stat_statements` (stage)**:
 - ~180 tys. odczytów `poker_state` / `poker_tables`
@@ -152,7 +152,7 @@ Pomiar wykonany na produkcji (`octet_length(state::text)`):
 
 **Dlaczego guest table trafia do cleanupu**: Guest table ID nie przechodzi walidacji UUID przed DB query. Kod w `disconnect-cleanup.mjs:17` sprawdza tylko `typeof tableId !== 'string' || !tableId` — "guest_table_<uuid>" przechodzi tę walidację.
 
-**Wpływ**: ~2 DB queries/sekundę × 86 400 sekund/dobę = ~172 800 failed queries/dobę. Każde query to BEGIN + SELECT + ROLLBACK (3 round-tripy). Przy ~1,7 KB payloadu na odczyt `poker_state` daje to **~300 MB/dzień** tylko z tej pętli. W połączeniu z janitorem i innymi cyklicznymi procesami skaluje się do obserwowanych ~1 GB/dzień na stage.
+**Wpływ**: ~2 failed cleanup attempts/s × 86 400 sekund/dobę = ~172 800 cleanup attempts/dobę. Każde query to BEGIN + SELECT + ROLLBACK (3 round-tripy). Przy ~1,7 KB payloadu na odczyt `poker_state` daje to **~300 MB/dzień** tylko z tej pętli. W połączeniu z janitorem i innymi cyklicznymi procesami skaluje się do obserwowanych ~1 GB/dzień na stage.
 
 ---
 
@@ -200,7 +200,7 @@ Opcja A (stateProjection) pozostaje poprawnym mikro-uproszczeniem, ale **nie jes
 
 | # | Ścieżka | Status | Priorytet | Uzasadnienie |
 |---|---------|--------|-----------|-------------|
-| 1 | **Disconnect cleanup × guest table (F12)** | 🔴 Potwierdzona root cause | 🔴 | ~172 800 failed DB queries/dobę przez nie-UUID ID + brak retryable=false dla 22P02 |
+| 1 | **Disconnect cleanup × guest table (F12)** | 🔴 Potwierdzona root cause | 🔴 | ~172 800 cleanup attempts/dobę przez nie-UUID ID + brak retryable=false dla 22P02 |
 | 2 | Stage janitor / inactive cleanup sweepy | 🟡 Powiązane z #1 | 🟡 | Janitor również odpytuje DB cyklicznie, napędzany tym samym sweep loop |
 | 3 | WS bootstrap (przy restarcie WS Preview) | 🟢 Ograniczony | 🟢 | Tylko create/join i recovery |
 | 4 | ~~Auth / Storage / Database API~~ | ~~Wykluczone (F11)~~ | ~~Wykluczone~~ | ~~<0,1% egressu~~ |
@@ -260,6 +260,6 @@ Bez podziału na kategorie egressu i request volume dalsza analiza kodu nie przy
 
 ## Wnioski końcowe
 
-Issue #735 został rozwiązanany na poziomie diagnostycznym. **5,82 GB egressu na stage jest spowodowane głównie przez nieskończoną pętlę disconnect cleanup**, w której guest table z nie-UUID ID generuje ~172 800 failed DB queries dziennie. Błąd  z PostgreSQL nie jest klasyfikowany jako non-retryable, więc cleanup retryuje w nieskończoność.
+Issue #735 został rozwiązanany na poziomie diagnostycznym. **5,82 GB egressu na stage jest spowodowane głównie przez nieskończoną pętlę disconnect cleanup**, w której guest table z nie-UUID ID generuje ~172 800 cleanup attempts dziennie. Błąd  z PostgreSQL nie jest klasyfikowany jako non-retryable, więc cleanup retryuje w nieskończoność.
 
-Pozostałe źródła (production 0,71 GB, Auth <0,1%, Storage ~0) są poniżej limitu Free planu. Naprawa tej jednej pętli powinna sprowadzić całkowity egress organizacji poniżej 5 GB/miesiąc.
+Pozostałe źródła (production 0,71 GB, Auth <0,1%, Storage ~0) są poniżej limitu Free planu. Naprawa tej jednej pętli powinna znacząco zredukować egress na stage — dokładna wartość wymaga pomiaru po wdrożeniu.
