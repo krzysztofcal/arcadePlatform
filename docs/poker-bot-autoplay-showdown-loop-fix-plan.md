@@ -4,7 +4,7 @@ Status: plan po analizie `origin/main` i logów systemd z 2026-07-23.
 
 ## Cel
 
-Usunąć przyczynę niepełnego boardu podczas automatycznej akcji bota, a jednocześnie zagwarantować, że deterministyczny błąd dla niezmienionego stanu nie uruchomi ponownie tej samej operacji bez końca. Poprawka ma zachować zwykły bot autoplay, runout all-in, showdown, settlement i rollover.
+Najpierw zatrzymać nieskończone ponawianie deterministycznego błędu autoplay dla niezmienionego stanu, następnie odtworzyć i ustalić osobną przyczynę niepełnego boardu, a dopiero na podstawie reprodukcji zaprojektować źródłową korektę logiki gry. Poprawka ma zachować zwykły bot autoplay, runout, showdown, settlement i rollover.
 
 ## Potwierdzone fakty
 
@@ -18,20 +18,16 @@ Usunąć przyczynę niepełnego boardu podczas automatycznej akcji bota, a jedno
 - Prawie równe liczniki oraz niezmieniony `stateVersion` potwierdzają pętlę timeout-safety bez skutecznej mutacji stanu.
 - `ws-server.service` i `ws-server-preview.service` były 2026-07-23 aktywne odpowiednio od 09:45:19 UTC i 09:49:45 UTC.
 - Od tych restartów do czasu analizy żaden serwis nie zarejestrował `poker_act_bot_autoplay_step_error`, `ws_bot_timeout_safety_autoplay` ani `showdown_incomplete_community`.
-- Journal zajmuje 3,8 GB. Próba pełnego wielokrotnego skanu od 2026-07-01 była zbyt kosztowna do użycia jako powtarzalny check; liczby historyczne pochodzą z agregatu zapisanego w issue. Krótkie okna kontrolne dla obu usług nie wykazały badanego wzorca.
+- Journal zajmuje 3,8 GB. Próba pełnego wielokrotnego skanu od 2026-07-01 była zbyt kosztowna do użycia jako powtarzalny check; liczby historyczne pochodzą z agregatu zapisanego w issue.
 
 ### Wersja kodu
 
 - Analiza została wykonana po `git fetch --prune origin` na commitcie `fd26caf2bd31a44f2300f256e530848b131f9c84`, równym aktualnemu `origin/main` w chwili analizy.
 - Produkcyjny symlink `/opt/ws-server/current` wskazywał release tego samego commita.
-- Preview działa z `/opt/arcade-ws-preview/ws-server`. Metadane checkoutu wskazują historyczny branch `codex/migrate-gameplay-writes-to-ws-only`, ale kluczowe uruchomione pliki:
-  - `ws-server/server.mjs`;
-  - `ws-server/poker/handlers/bot-autoplay.mjs`;
-  - `shared/poker-domain/poker-autoplay.mjs`
+- Preview działa z `/opt/arcade-ws-preview/ws-server`. Metadane checkoutu wskazują historyczny branch `codex/migrate-gameplay-writes-to-ws-only`, ale uruchomione kopie `ws-server/server.mjs`, `ws-server/poker/handlers/bot-autoplay.mjs` i `shared/poker-domain/poker-autoplay.mjs` były identyczne z `origin/main`.
+- Historyczna nazwa brancha katalogu preview nie jest wiarygodnym identyfikatorem artefaktu. Ręczny deploy i log startowy powinny wskazywać konkretny branch oraz SHA.
 
-  są identyczne z `origin/main`. Historyczna nazwa brancha nie może być używana jako identyfikator wdrożonego artefaktu; deploy powinien publikować jawny SHA.
-
-## Call graph i luka w obecnym zabezpieczeniu
+## Potwierdzona przyczyna nieskończonego retry
 
 ```text
 sweepTurnTimeoutsAndBroadcast()
@@ -41,148 +37,142 @@ sweepTurnTimeoutsAndBroadcast()
   -> acceptedBotAutoplayExecutor()
   -> runBotAutoplayLoop()
   -> applyAction()
-  -> settleHandState()
-  -> materializeShowdownAndPayout()
-  -> showdown_incomplete_community
 ```
 
-1. `shared/poker-domain/poker-autoplay.mjs` łapie wyjątek z `applyAction()`.
-2. Loguje konkretny `error`, ale zapisuje wynik pętli tylko jako `botStopReason: "apply_action_failed"`.
-3. `accepted-bot-autoplay-adapter.mjs` zwraca następnie `ok: true`, `changed: false` i `reason: "apply_action_failed"`.
-4. `shouldSuppressBotTimeoutSafetyRetry()` blokuje retry wyłącznie dla `ok: false`, `changed !== true` i konkretnego powodu, między innymi `showdown_incomplete_community`.
-5. W rezultacie obecne zabezpieczenie nie może zadziałać dla dokładnie tej ścieżki. Scheduler widzi nadal przeterminowaną turę bota na tym samym `stateVersion` i próbuje ponownie.
+Potwierdzony kontrakt błędu wygląda następująco:
 
-To wyjaśnia nieograniczone retry, ale nie wyjaśnia jeszcze, dlaczego stan nie potrafił zbudować pięciokartowego boardu. Tę przyczynę trzeba naprawić, a nie tylko wyciszyć scheduler.
+1. `applyAction()` zwraca konkretny błąd `showdown_incomplete_community`.
+2. `runBotAutoplayLoop()` redukuje go do ogólnego `botStopReason: "apply_action_failed"`.
+3. `accepted-bot-autoplay-adapter.mjs` zwraca `ok: true`, `changed: false` i `reason: "apply_action_failed"`.
+4. `shouldSuppressBotTimeoutSafetyRetry()` wymaga `ok: false`, braku zmiany i konkretnego powodu inwariantu.
+5. Suppression nie aktywuje się, a scheduler ponawia autoplay dla tego samego niezmienionego stanu.
 
-## Plan implementacji
+To potwierdza przyczynę pętli operacyjnej. Nie potwierdza przyczyny niepełnego boardu. Brakujące dane w reducerze, błędny runout, niepełny restore prywatnego runtime i historyczny niepoprawny stan persisted pozostają hipotezami do sprawdzenia, a nie założonym zakresem naprawy.
 
-### 1. Dodać reprodukcję na granicy reducer–autoplay
+## Source of truth i pakowanie
 
-Pliki:
+- Source of truth logiki wspólnego autoplay: `shared/poker-domain/poker-autoplay.mjs`.
+- Adapter WS: `ws-server/poker/runtime/accepted-bot-autoplay-adapter.mjs`.
+- `ws-server/shared/poker-domain/poker-autoplay.mjs` jest wyłącznie statycznym re-exportem source of truth.
+- `netlify/functions/_shared/poker-autoplay.mjs` jest wrapperem importującym source of truth.
+- Nie istnieje generowany artefakt zawierający kopię implementacji autoplay ani skrypt generujący taką kopię.
+- Istniejące workflow `.github/workflows/ws-preview-deploy.yml` i `.github/workflows/ws-server-deploy.yml` pakują pliki repo do artefaktu wdrożeniowego. Nie należy ręcznie kopiować ani synchronizować implementacji między katalogami.
 
-- `ws-server/poker/shared/poker-action-reducer.behavior.test.mjs`;
-- `ws-server/poker/runtime/accepted-bot-autoplay-adapter.behavior.test.mjs`;
-- `ws-server/server.behavior.test.mjs`.
+## Strategia realizacji
 
-Zbudować fixture odpowiadający obserwacji: tura bota, legalny `CALL`, brak zmiany wersji, przejście w kierunku showdown i niepełna `community`. Warianty fixture powinny rozróżnić:
+Zmianę należy podzielić na trzy małe PR-y. PR A jest pilnym ograniczeniem skutków operacyjnych. PR B może powstać dopiero po potwierdzeniu źródłowej przyczyny. PR C pozostaje niezależny od logiki gry.
 
-- prawidłowy runout z kompletnym `deck`;
-- odtworzenie boardu z `handSeed`, gdy prywatny `deck` jest niedostępny;
-- stan, w którym brakuje zarówno wystarczającego `deck`, jak i poprawnego materiału do deterministycznego odtworzenia;
-- stan odtworzony po restarcie z publicznym snapshotem nałożonym na prywatny runtime.
+### PR A — zatrzymanie pętli operacyjnej
 
-Test integracyjny schedulera ma wykonać dwa sweepy dla tego samego `stateVersion` i potwierdzić, że `applyAction()` zostaje wywołane tylko raz po sklasyfikowaniu deterministycznego błędu.
+Zakres:
 
-### 2. Naprawić źródłowe przejście do showdown
+- w `shared/poker-domain/poker-autoplay.mjs` zachować strukturalne `botFailureReason` obok ogólnego `botStopReason`;
+- w `ws-server/poker/runtime/accepted-bot-autoplay-adapter.mjs` zwrócić dla tego błędu `ok: false`, `changed: false` i konkretny `reason`;
+- w `ws-server/poker/handlers/bot-autoplay.mjs` oraz `ws-server/server.mjs` zastosować suppression dla klucza `tableId + handId + stateVersion + turnUserId`;
+- wykonać najwyżej jeden kontrolowany restore z persisted state;
+- jeśli po restore wystąpi identyczny konkretny błąd dla tego samego klucza stanu, zablokować kolejne autoplay;
+- zapisać pojedynczy terminalny `klog` z `tableId`, `handId`, `stateVersion`, `phase`, `turnUserId` i konkretnym `reason`;
+- usunąć suppression po zmianie `stateVersion` lub `handId`, wyładowaniu/zamknięciu stołu albo skutecznym recovery.
 
-Pliki docelowe zależą od wyniku fixture, przede wszystkim:
+Zachowanie po suppression:
 
-- `ws-server/poker/shared/poker-action-reducer.mjs`;
-- `ws-server/poker/shared/runtime-hand-state.mjs`;
-- `ws-server/poker/runtime/accepted-bot-autoplay-adapter.mjs`;
-- `ws-server/poker/shared/settlement/poker-materialize-showdown.mjs`.
+- suppression zatrzymuje automatyczne retry, ale nie naprawia stołu;
+- PR A nie wykonuje automatycznego settlementu;
+- PR A nie modyfikuje stosów ani puli;
+- PR A nie zamyka i nie naprawia stołu bez osobnego, bezpiecznego projektu księgowego;
+- po nieudanym restore stół może pozostać aktywny bez postępu;
+- terminalny log oznacza jawny stan wymagający recovery lub ręcznej analizy.
 
-Wymagana własność: zanim settlement wymagający porównania układów zostanie uruchomiony, runtime musi posiadać dokładnie pięć kart community pochodzących z autorytatywnego prywatnego stanu.
+Termin `quarantine` nie jest używany w PR A, ponieważ nie ma istniejącej semantyki produktu ani lifecycle stołu odpowiadających takiej operacji.
 
-Preferowana kolejność źródeł:
+Minimalne testy regresyjne należy dodać przez rozszerzenie istniejących plików, bez nowego frameworka:
 
-1. istniejąca kompletna `community`;
-2. pozostałe karty z autorytatywnego `deck`;
-3. deterministyczne odtworzenie z `handSeed` i kolejności graczy bieżącego rozdania.
+- `ws-server/poker/runtime/accepted-bot-autoplay-adapter.behavior.test.mjs`: konkretny `botFailureReason` przechodzi przez cały kontrakt, a adapter zwraca `ok: false`, `changed: false`;
+- `ws-server/server.behavior.test.mjs`: drugi sweep tego samego `tableId/handId/stateVersion/turnUserId` nie uruchamia ponownie `applyAction()`, natomiast zmiana `stateVersion` lub `handId` usuwa suppression;
+- `ws-server/poker/handlers/bot-autoplay.behavior.test.mjs`: zwykłe `completed`, `turn_not_bot` i `non_action_phase` pozostają poprawnymi wynikami `ok: true`.
 
-Nie wolno syntetyzować losowych kart ani rozliczać puli na podstawie niepełnego/publicznego snapshotu. Jeśli stan jest nieodtwarzalny, akcja ma zakończyć się jawnym błędem inwariantu i wejść w kontrolowaną ścieżkę recovery/quarantine, bez mutacji żetonów i bez kolejnego automatycznego `CALL`.
+PR A ogranicza skutki operacyjne, ale nie zamyka #737.
 
-### 3. Zachować konkretną przyczynę błędu w kontrakcie autoplay
+### PR B — źródłowa naprawa niepełnego boardu
 
-Pliki:
+Najpierw odtworzyć reprezentatywny stan na granicy reducer–autoplay. Reprodukcja ma ustalić, w którym miejscu po raz pierwszy łamany jest inwariant pięciokartowego boardu i które dane są wtedy autorytatywne.
 
-- `shared/poker-domain/poker-autoplay.mjs`;
-- `ws-server/poker/runtime/accepted-bot-autoplay-adapter.mjs`;
-- odpowiednie kopie generowane używane przez artefakt deploy.
+Dopiero wynik reprodukcji wybiera miejsce korekty:
 
-Rozszerzyć wynik pętli o strukturalne pole błędu, na przykład:
+- reducer;
+- runtime restore;
+- runout;
+- settlement;
+- albo migracja/obsługa historycznego stanu persisted.
 
-```js
-{
-  botStopReason: "apply_action_failed",
-  botFailureReason: "showdown_incomplete_community"
-}
-```
+Nie należy z góry wdrażać rekonstrukcji z `deck`, `handSeed` ani restore prywatnego runtime. Nie należy łączyć kilku hipotetycznych korekt w jednym PR.
 
-Adapter powinien zwracać `ok: false`, `changed: false` i konkretny `reason` dla błędu aplikacji akcji bez persistu. Nie należy parsować tekstu logu ani zastępować wszystkich błędów ogólnym `apply_action_failed`.
+Minimalne testy PR B:
 
-Testy mają potwierdzić, że błędy persistence/conflict zachowują własną klasyfikację i nadal korzystają z istniejącego recovery, a zwykłe powody zatrzymania (`turn_not_bot`, `non_action_phase`, `completed`) pozostają poprawnymi wynikami `ok: true`.
+- jeden test regresyjny dokładnie dla potwierdzonego scenariusza źródłowego w istniejącym pliku najbliższym naprawianej granicy;
+- poprawny all-in/runout kończy się pięcioma kartami community i dokładnie jednym settlementem, jeśli reprodukcja dotyczy tej ścieżki;
+- stan nieodtwarzalny nie zmienia żetonów ani puli.
 
-### 4. Wzmocnić blokadę retry dla niezmienionego stanu
+Jeżeli po udokumentowanej analizie stan historyczny pozostanie niereprodukowalny, decyzja o uznaniu go za zdarzenie historyczne musi być jawna i oparta na monitoringu po PR A. Dopiero wtedy można zdecydować, czy #737 można zamknąć bez PR B.
 
-Pliki:
+### PR C — obserwowalność
 
-- `ws-server/poker/handlers/bot-autoplay.mjs`;
-- `ws-server/server.mjs`.
+Zakres niezależny od logiki gry:
 
-Po naprawie kontraktu istniejący mechanizm suppression zacznie obsługiwać `showdown_incomplete_community`. Należy dodatkowo:
+- logowanie branch/SHA i środowiska przy starcie artefaktu;
+- ograniczenie powtarzalnych logów dla tego samego klucza stanu i reason;
+- zagregowane liczniki po reason;
+- zachowanie pierwszego i terminalnego zdarzenia.
 
-- kluczować blokadę co najmniej przez `tableId + stateVersion + handId + turnUserId`, aby nie przenieść jej na inne rozdanie;
-- usuwać blokadę po zmianie wersji, zamknięciu/wyładowaniu stołu lub udanym recovery;
-- dla nieodtwarzalnego inwariantu uruchomić jeden kontrolowany restore z persisted state, a dopiero przy identycznym wyniku po restore ustawić suppression/quarantine;
-- zalogować pojedyncze zdarzenie terminalne zawierające `tableId`, `handId`, `stateVersion`, `phase`, `turnUserId` i konkretny reason;
-- nie dodawać czasowego retry, które po upływie backoffu ponowi ten sam deterministyczny błąd bez zmiany stanu.
+PR C nie zmienia reducerów, autoplay, settlementu, stosów ani puli.
 
-### 5. Uzupełnić identyfikację artefaktu i obserwowalność
+## Weryfikacja PR A
 
-- Przy starcie obu usług logować deploy SHA i środowisko.
-- W procesie deploy preview zapisywać SHA niezależnie od metadanych starego checkoutu.
-- Dodać liczniki zagregowane po `reason`, bez logowania pełnego stanu, kart prywatnych lub sekretów.
-- Rozważyć rate limiting powtarzalnych logów tego samego `tableId/stateVersion/reason`; pierwsze i terminalne zdarzenie muszą pozostać widoczne.
-
-## Weryfikacja przed merge
-
-Uruchomić co najmniej:
+Uruchomić minimalny zestaw istniejących testów:
 
 ```bash
-node --test ws-server/poker/shared/poker-action-reducer.behavior.test.mjs
 node --test ws-server/poker/handlers/bot-autoplay.behavior.test.mjs
 node --test ws-server/poker/runtime/accepted-bot-autoplay-adapter.behavior.test.mjs
 node --test ws-server/server.behavior.test.mjs
-npm run test:ws
 ```
 
-Scenariusze akceptacyjne:
-
-- zwykły bot `CALL` aktualizuje stan i scheduler kontynuuje;
-- all-in przed riverem odkrywa pełny board i settlement wykonuje się dokładnie raz;
-- board może zostać bezpiecznie odtworzony z `handSeed` po restarcie;
-- nieodtwarzalny stan nie zmienia stosów ani puli;
-- drugi sweep tego samego uszkodzonego `stateVersion` nie uruchamia ponownie autoplay;
-- zmiana wersji lub skuteczny restore odblokowuje poprawne przetwarzanie;
-- produkcja i preview korzystają z tego samego kontraktu.
+Każda komenda powyżej jest niezależna i jednowierszowa. Nie należy dodawać nowego runnera ani szerokiego zestawu spekulacyjnych fixture.
 
 ## Rollout i monitoring
 
-1. Wdrożyć najpierw na `ws-server-preview`.
-2. Zanotować czas wdrożenia i SHA.
-3. Przez minimum 30 minut aktywnego ruchu oraz ponownie po 24 godzinach porównać:
+1. Uruchomić ręczny workflow `WS Preview Deploy` dla konkretnego brancha lub SHA PR A.
+2. Zanotować czas wdrożenia, branch i SHA z logu startowego.
+3. Zweryfikować preview jednowierszową komendą:
 
 ```bash
-sudo journalctl -u ws-server-preview --since "<deploy time>" --no-pager \
-  | rg "poker_act_bot_autoplay_step_error|ws_bot_timeout_safety_autoplay|ws_bot_timeout_safety_same_state_retry_suppressed|showdown_incomplete_community"
+sudo journalctl -u ws-server-preview --since "<deploy time>" --no-pager | grep -E "poker_act_bot_autoplay_step_error|ws_bot_timeout_safety_autoplay|ws_bot_timeout_safety_same_state_retry_suppressed|showdown_incomplete_community"
 ```
 
-4. Kryterium powodzenia:
-   - brak serii powtórzeń dla tego samego `tableId/handId/stateVersion`;
-   - brak zatrzymanych aktywnych rozdań;
-   - normalne autoplay i settlement w testowych stołach;
-   - brak wzrostu Shared Pooler egress skorelowanego z timeout-safety.
-5. Po pozytywnej obserwacji wdrożyć produkcję i wykonać analogiczny check dla `ws-server.service`.
+4. Potwierdzić brak serii powtórzeń dla tego samego `tableId/handId/stateVersion`, poprawne autoplay zwykłych rozdań oraz widoczny pojedynczy terminalny log dla stanu zablokowanego.
+5. Po pozytywnej obserwacji preview uruchomić produkcyjny rollout konkretnego SHA.
+6. Zweryfikować produkcję analogiczną jednowierszową komendą:
 
-Rollback powinien cofnąć artefakt do poprzedniego SHA. Jeżeli źródłowa korekta przejścia stanu okaże się ryzykowna, można osobno wdrożyć naprawę kontraktu błędu i suppression jako zabezpieczenie operacyjne, ale nie zamykać #737, dopóki reprodukcja źródłowego niepełnego boardu nie jest naprawiona.
+```bash
+sudo journalctl -u ws-server.service --since "<deploy time>" --no-pager | grep -E "poker_act_bot_autoplay_step_error|ws_bot_timeout_safety_autoplay|ws_bot_timeout_safety_same_state_retry_suppressed|showdown_incomplete_community"
+```
 
-## Zakres proponowanego PR implementacyjnego
+7. Powtórzyć kontrolę po minimum 30 minutach aktywnego ruchu i po 24 godzinach.
 
-Jeden PR może objąć kroki 1–4, jeśli fixture jednoznacznie wskaże pojedynczą przyczynę. Jeżeli reprodukcja ujawni niezależny błąd restore prywatnego stanu, bezpieczniejszy podział to:
+Rollback powinien przywrócić poprzedni znany SHA. Suppression nie jest dowodem naprawy źródłowego problemu i nie może być użyte do ukrycia stołów wymagających ręcznej analizy.
 
-1. PR A: propagacja konkretnego błędu, skuteczne same-state suppression i test schedulera;
-2. PR B: korekta rehydratacji/runoutu oraz testy settlement;
-3. PR C: identyfikacja SHA i ograniczenie log volume.
+## Notes
 
-PR A ogranicza skutki operacyjne, ale sam nie spełnia warunku zamknięcia issue.
+- Zadanie dotyczy krytycznej logiki realtime poker: przejść stanu, autoplay, settlementu i ochrony przed nieskończoną pętlą.
+- Zmiany mają być proste, małe i ograniczone do potwierdzonego problemu danego PR.
+- Należy użyć istniejących funkcji, adapterów i mechanizmu suppression.
+- Nie wolno tworzyć duplikującej ścieżki autoplay ani ręcznie synchronizowanej kopii source of truth.
+- Zmiana kontraktu wyniku autoplay z `ok: true` na `ok: false` dla błędu aplikacji akcji ma możliwy breaking impact dla callerów i wymaga jawnego audytu wszystkich konsumentów.
+- WS pozostaje source of truth dla aktywnego runtime; DB jest wtórnym persisted state i nie może nadpisywać nowszego stanu WS bez istniejącej kontroli wersji.
+- Logowanie wyłącznie przez `klog`.
+- Nie logować kart prywatnych, pełnego state ani sekretów.
+- JSP: not applicable.
+- CSS: not applicable.
+- CSP: not applicable, o ile plan nie zmienia browser scripts.
+- Każdy PR wpływający na WS wymaga ręcznego `WS Preview Deploy` dla konkretnego brancha lub SHA.
+- Testy są w tym zadaniu świadomym wyjątkiem od ogólnej zasady niedodawania testów, ponieważ zabezpieczają krytyczne przejścia stanu i regresję nieskończonej pętli.
+- Testy mają rozszerzać istniejące pliki, używać istniejącego runnera i obejmować wyłącznie minimalne deterministyczne przypadki.
