@@ -612,7 +612,7 @@ function resolveEnvVisibility(env = process.env) {
       seatedReconnectGraceMs: resolveJanitorConfig(env).seatedReconnectGraceMs,
       tableCloseGraceMs: resolveJanitorConfig(env).tableCloseGraceMs,
       liveHandStaleMs: resolveJanitorConfig(env).liveHandStaleMs,
-      staleSeatSweepMs: resolvePositiveInt(env.WS_STALE_ACTIVE_SEAT_SWEEP_MS, 5_000, { min: 500, max: 60_000 }),
+      staleSeatSweepMs: resolvePositiveInt(env.WS_STALE_ACTIVE_SEAT_SWEEP_MS, 30_000, { min: 500, max: 60_000 }),
       openTableSweepBatch: resolvePositiveInt(env.WS_OPEN_TABLE_JANITOR_SWEEP_BATCH, 10, { min: 1, max: 100 }),
       zombieSweepBatch: resolvePositiveInt(env.WS_ZOMBIE_TABLE_SWEEP_BATCH, 25, { min: 1, max: 100 }),
     },

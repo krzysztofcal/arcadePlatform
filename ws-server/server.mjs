@@ -3544,7 +3544,7 @@ const disconnectCleanupTimer = setInterval(() => {
 }, Number.isFinite(disconnectCleanupSweepMs) && disconnectCleanupSweepMs > 0 ? disconnectCleanupSweepMs : 500);
 disconnectCleanupTimer.unref();
 
-const staleActiveSeatSweepMs = resolvePositiveInt(process.env.WS_STALE_ACTIVE_SEAT_SWEEP_MS, 5_000, { min: 500, max: 60_000 });
+const staleActiveSeatSweepMs = resolvePositiveInt(process.env.WS_STALE_ACTIVE_SEAT_SWEEP_MS, 30_000, { min: 500, max: 60_000 });
 const staleActiveSeatSweepTimer = setInterval(() => {
   void sweepStaleActiveHumanSeatsAndBroadcast();
 }, staleActiveSeatSweepMs);
