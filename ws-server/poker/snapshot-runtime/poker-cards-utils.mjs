@@ -29,16 +29,19 @@ const normalizeSuit = (value) => {
 };
 
 export const isValidCard = (card) => {
-  if (!card || typeof card !== "object") return false;
-  const rank = normalizeRank(card.r);
-  const suit = normalizeSuit(card.s);
-  if (!rank) return false;
-  if (!SUIT_SET.has(suit)) return false;
-  return true;
+  return normalizeCardForCompare(card) !== null;
 };
 
 
 export const normalizeCardForCompare = (card) => {
+  if (typeof card === "string") {
+    const match = /^(10|[2-9TJQKA])([SHDC])$/i.exec(card.trim());
+    if (!match) return null;
+    return {
+      r: normalizeRank(match[1]),
+      s: normalizeSuit(match[2])
+    };
+  }
   const rank = normalizeRank(card?.r);
   const suit = normalizeSuit(card?.s);
   if (!rank || !SUIT_SET.has(suit)) return null;
