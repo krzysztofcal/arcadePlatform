@@ -18,8 +18,9 @@ function failureReason(data) {
   return asLogValue(data?.error) || asLogValue(data?.reason) || "unknown";
 }
 
-function failureFingerprint(data) {
+function failureFingerprint(kind, data) {
   return [
+    kind,
     asLogValue(data?.tableId),
     asLogValue(data?.handId),
     Number.isFinite(Number(data?.stateVersion ?? data?.lastKnownStateVersion))
@@ -84,7 +85,7 @@ export function createBotAutoplayObservability({
     }
 
     const reason = failureReason(data);
-    const fingerprint = failureFingerprint(data);
+    const fingerprint = failureFingerprint(kind, data);
     const alreadySeen = seenFingerprints.has(fingerprint);
     if (!alreadySeen && seenFingerprints.size >= maxFingerprints) {
       flush("capacity");

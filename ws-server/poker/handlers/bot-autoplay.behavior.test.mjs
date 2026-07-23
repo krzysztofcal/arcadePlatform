@@ -26,8 +26,9 @@ test("bot autoplay observability preserves first and terminal events while aggre
   };
 
   assert.equal(observer.log("poker_act_bot_autoplay_step_error", failure), true);
+  assert.equal(observer.log("ws_bot_autoplay_failed", failure), true);
   assert.equal(observer.log("poker_act_bot_autoplay_step_error", failure), false);
-  assert.equal(observer.log("poker_act_bot_autoplay_step_error", failure), false);
+  assert.equal(observer.log("ws_bot_autoplay_failed", failure), false);
   nowMs += 25;
   assert.equal(observer.log("ws_bot_timeout_safety_same_state_retry_suppressed", {
     tableId: "t1",
@@ -39,11 +40,12 @@ test("bot autoplay observability preserves first and terminal events while aggre
 
   assert.deepEqual(logs.map((entry) => entry.kind), [
     "poker_act_bot_autoplay_step_error",
+    "ws_bot_autoplay_failed",
     "ws_bot_timeout_safety_same_state_retry_suppressed",
     "ws_bot_autoplay_failure_summary"
   ]);
-  assert.deepEqual(logs[2].data.countsByReason, {
-    showdown_incomplete_community: { total: 3, logged: 1, suppressed: 2 }
+  assert.deepEqual(logs[3].data.countsByReason, {
+    showdown_incomplete_community: { total: 4, logged: 2, suppressed: 2 }
   });
 });
 
