@@ -278,6 +278,7 @@ const lastSnapshotBySessionAndTable = new Map();
 const persistedSeatTouchByTableUser = new Map();
 const lobbySubscribers = new Set();
 const activeLobbyTablesById = new Map();
+const pendingTableJanitorEvaluationByTableId = new Map();
 const lobbyEmptyJoinableGraceMs = resolveEmptyJoinableGraceMs(process.env.POKER_TABLE_CLOSE_GRACE_MS);
 const internalRuntimeToken = typeof process.env.POKER_WS_INTERNAL_TOKEN === "string" ? process.env.POKER_WS_INTERNAL_TOKEN.trim() : "";
 const botReactionOverrideStore = createBotReactionOverrideStore({ env: process.env });
@@ -2258,30 +2259,58 @@ function buildTableJanitorRuntimeContext(tableId, persistedSeats = []) {
   };
 }
 
-async function runEvaluatedTableJanitor({ tableId, trigger, requestId }) {
+async function evaluateTableForJanitor(tableId) {
   const persistedHealth = await loadPersistedTableHealthSnapshot(tableId);
   if (!persistedHealth?.table) {
     return {
-      ok: true,
-      changed: false,
-      skipped: true,
-      status: "table_missing"
+      result: {
+        ok: true,
+        changed: false,
+        skipped: true,
+        status: "table_missing"
+      }
     };
   }
-  const classification = evaluateTableHealth({
-    tableId,
-    persistedTable: persistedHealth.table,
-    persistedSeats: persistedHealth.seats,
-    persistedState: persistedHealth.state,
-    runtime: buildTableJanitorRuntimeContext(tableId, persistedHealth.seats),
-    nowMs: Date.now(),
-    activeSeatFreshMs,
-    seatedReconnectGraceMs,
-    tableCloseGraceMs: lobbyEmptyJoinableGraceMs,
-    liveHandStaleMs: janitorLiveHandStaleMs
-  });
+  return {
+    classification: evaluateTableHealth({
+      tableId,
+      persistedTable: persistedHealth.table,
+      persistedSeats: persistedHealth.seats,
+      persistedState: persistedHealth.state,
+      runtime: buildTableJanitorRuntimeContext(tableId, persistedHealth.seats),
+      nowMs: Date.now(),
+      activeSeatFreshMs,
+      seatedReconnectGraceMs,
+      tableCloseGraceMs: lobbyEmptyJoinableGraceMs,
+      liveHandStaleMs: janitorLiveHandStaleMs
+    })
+  };
+}
+
+async function runEvaluatedTableJanitor({ tableId, trigger, requestId }) {
+  let pendingEvaluation = pendingTableJanitorEvaluationByTableId.get(tableId);
+  if (pendingEvaluation) {
+    klogSafe("ws_table_janitor_evaluation_coalesced", {
+      tableId,
+      trigger,
+      requestId: requestId || null
+    });
+  } else {
+    const evaluation = evaluateTableForJanitor(tableId);
+    pendingEvaluation = evaluation.finally(() => {
+      if (pendingTableJanitorEvaluationByTableId.get(tableId) === pendingEvaluation) {
+        pendingTableJanitorEvaluationByTableId.delete(tableId);
+      }
+    });
+    pendingTableJanitorEvaluationByTableId.set(tableId, pendingEvaluation);
+  }
+
+  const evaluated = await pendingEvaluation;
+  if (evaluated?.result) {
+    return evaluated.result;
+  }
   return runTableJanitor({
-    classification,
+    classification: evaluated?.classification,
     trigger,
     requestId,
     primitives: tableJanitorPrimitives,
