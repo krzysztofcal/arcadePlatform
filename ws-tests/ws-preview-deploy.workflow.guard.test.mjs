@@ -102,12 +102,17 @@ test("ws preview deploy workflow packages and validates shared runtime files", (
   assert.match(text, /cp -R ws-server\/poker "\$PREVIEW_STAGE_WS_DIR"\/poker/);
   assert.match(text, /cp -R ws-server\/shared\/poker-domain "\$PREVIEW_STAGE_WS_DIR"\/shared\/poker-domain/);
   assert.match(text, /cp -R ws-server\/node_modules "\$PREVIEW_STAGE_WS_DIR"\/node_modules/);
+  assert.match(text, /RELEASE_ENVIRONMENT: preview/);
+  assert.match(text, /release-metadata\.json/);
+  assert.match(text, /releaseSha: process\.env\.RELEASE_SHA/);
+  assert.match(text, /deployRef: process\.env\.DEPLOY_REF/);
   assert.match(text, /cp -R ws-server\/node_modules "\$PREVIEW_STAGE_DIR"\/node_modules/);
   assert.match(text, /cp -R shared "\$PREVIEW_STAGE_DIR"\/shared/);
   assert.match(text, /cp netlify\/functions\/_shared\/chips-ledger\.mjs "\$PREVIEW_STAGE_DIR"\/netlify\/functions\/_shared\//);
   assert.match(text, /node --input-type=module -e "await import\('\.\/ws-server\/shared\/poker-domain\/inactive-cleanup-deps\.mjs'\)"/);
   assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/shared\/poker-domain\/join\.mjs"/);
   assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/ws-server\/server\.mjs"/);
+  assert.match(text, /test -f "\$PREVIEW_STAGE_WS_DIR\/release-metadata\.json"/);
   assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/ws-server\/shared\/poker-domain\/inactive-cleanup-deps\.mjs"/);
   assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/chips-ledger\.mjs"/);
   assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/deploy-context\.mjs"/);

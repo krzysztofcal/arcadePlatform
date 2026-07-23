@@ -82,6 +82,10 @@ jobs:
           node-version: 20
 
       - name: Build and package preview ws-server artifact
+        env:
+          RELEASE_SHA: ${{ steps.selected_ref.outputs.sha }}
+          DEPLOY_REF: ${{ inputs.ref }}
+          RELEASE_ENVIRONMENT: preview
         run: |
           set -euo pipefail
 
@@ -106,6 +110,7 @@ jobs:
           if [ -f ws-server/server.mjs ]; then
             cp ws-server/server.mjs "$PREVIEW_STAGE_WS_DIR"/
           fi
+          node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ releaseSha: process.env.RELEASE_SHA, deployRef: process.env.DEPLOY_REF, environment: process.env.RELEASE_ENVIRONMENT }) + "\n")' "$PREVIEW_STAGE_WS_DIR/release-metadata.json"
 
           if [ -d ws-server/poker ]; then
             cp -R ws-server/poker "$PREVIEW_STAGE_WS_DIR"/poker
@@ -137,6 +142,7 @@ jobs:
           fi
 
           test -f "$PREVIEW_STAGE_DIR/netlify/functions/_shared/chips-ledger.mjs"
+          test -f "$PREVIEW_STAGE_WS_DIR/release-metadata.json"
           test -f "$PREVIEW_STAGE_DIR/netlify/functions/_shared/api-cors.mjs"
           test -f "$PREVIEW_STAGE_DIR/netlify/functions/_generated/deploy-context.mjs"
           (

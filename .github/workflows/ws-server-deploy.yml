@@ -78,6 +78,10 @@ jobs:
           node-version: 20
 
       - name: Build and package ws-server deploy artifact
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          DEPLOY_REF: ${{ github.ref_name }}
+          RELEASE_ENVIRONMENT: production
         run: |
           set -euo pipefail
           ARTIFACT_DIR="$GITHUB_WORKSPACE/.artifacts/ws-server"
@@ -106,6 +110,7 @@ jobs:
           if [ -f ws-server/server.mjs ]; then
             cp ws-server/server.mjs "$STAGE_WS_DIR"/
           fi
+          node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ releaseSha: process.env.RELEASE_SHA, deployRef: process.env.DEPLOY_REF, environment: process.env.RELEASE_ENVIRONMENT }) + "\n")' "$STAGE_WS_DIR/release-metadata.json"
 
           if [ -d ws-server/poker ]; then
             cp -R ws-server/poker "$STAGE_WS_DIR"/poker
@@ -130,6 +135,7 @@ jobs:
           fi
 
           test -f "$STAGE_WS_DIR/server.mjs"
+          test -f "$STAGE_WS_DIR/release-metadata.json"
           test -f "$STAGE_ROOT/shared/profile-avatar-projection.mjs"
           test -f "$STAGE_ROOT/netlify/functions/_shared/chips-ledger.mjs"
           test -f "$STAGE_ROOT/netlify/functions/_shared/api-cors.mjs"
