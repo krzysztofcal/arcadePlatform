@@ -506,6 +506,16 @@ export function createTableManager({
     return connStateBySocket.get(ws);
   }
 
+  function connectionTableAssociation(ws) {
+    const conn = connStateBySocket.get(ws);
+    if (!conn) {
+      return null;
+    }
+    const joinedTableId = conn.joinedTableId && tables.has(conn.joinedTableId) ? conn.joinedTableId : null;
+    const subscribedTableId = conn.subscribedTableId && tables.has(conn.subscribedTableId) ? conn.subscribedTableId : null;
+    return { joinedTableId, subscribedTableId };
+  }
+
   function ensureTable(tableId) {
     if (!tables.has(tableId)) {
       const initialCoreState = createInitialCoreState({ roomId: tableId, maxSeats });
@@ -2160,6 +2170,7 @@ export function createTableManager({
     tableMeta,
     materializeLobbyTable,
     materializeGuestTable,
+    connectionTableAssociation,
     resolveImplicitLeaveTableId,
     sweepExpiredPresence,
     persistedPokerState,
