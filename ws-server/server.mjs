@@ -16,7 +16,7 @@ import { adaptPersistedBootstrap } from "./poker/bootstrap/persisted-bootstrap-a
 import { createSessionStore } from "./poker/runtime/session-store.mjs";
 import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
 import { createBotReactionOverrideStore } from "./poker/runtime/bot-reaction-override.mjs";
-import { evaluateTableHealth, runTableJanitor, selectOpenTableJanitorBatch } from "./poker/runtime/table-janitor.mjs";
+import { evaluateTableHealth, runTableJanitor } from "./poker/runtime/table-janitor.mjs";
 import { buildStateSnapshotPayload } from "./poker/read-model/state-snapshot.mjs";
 import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
 import { createStreamLog } from "./poker/runtime/stream-log.mjs";
@@ -2349,43 +2349,46 @@ async function sweepZombieTablesAndBroadcast() {
 async function listOpenTableIdsForJanitor({ limit = 10 } = {}) {
   if (!persistedBootstrapEnabled) return [];
   const boundedLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 10;
-  const hasCursor = Boolean(Number.isFinite(openTableJanitorCursor?.updatedAtMs)
+  const hasCursor = Boolean(typeof openTableJanitorCursor?.updatedAt === "string"
+    && openTableJanitorCursor.updatedAt.trim()
     && typeof openTableJanitorCursor?.tableId === "string"
     && openTableJanitorCursor.tableId.trim());
-  const cursorUpdatedAt = hasCursor ? new Date(openTableJanitorCursor.updatedAtMs).toISOString() : null;
+  const cursorUpdatedAt = hasCursor ? openTableJanitorCursor.updatedAt.trim() : null;
   const cursorTableId = hasCursor ? openTableJanitorCursor.tableId.trim() : null;
   try {
     const beginSqlWs = await loadBeginSqlWs();
     return beginSqlWs(async (tx) => {
       const rows = await tx.unsafe(
-        `select t.id, t.updated_at
+        `select
+           t.id,
+           t.updated_at::text as cursor_updated_at,
+           case
+             when $1::timestamptz is null then false
+             when (t.updated_at, t.id) > ($1::timestamptz, $2::uuid) then false
+             else true
+           end as cursor_wrapped
          from public.poker_tables t
          where t.status = 'OPEN'
-         order by
-           case
-             when $1::timestamptz is null then 0
-             when (t.updated_at, t.id) > ($1::timestamptz, $2::uuid) then 0
-             else 1
-           end asc,
-           t.updated_at asc,
-           t.id asc
+         order by cursor_wrapped asc, t.updated_at asc, t.id asc
          limit $3;`,
         [cursorUpdatedAt, cursorTableId, boundedLimit]
       );
-      const selected = selectOpenTableJanitorBatch({
-        tables: Array.isArray(rows) ? rows : [],
-        limit: boundedLimit,
-        cursor: openTableJanitorCursor
-      });
-      openTableJanitorCursor = selected.cursor;
+      const selectedRows = Array.isArray(rows)
+        ? rows.filter((row) => typeof row?.id === "string" && row.id)
+        : [];
+      const tableIds = selectedRows.map((row) => row.id);
+      const lastRow = selectedRows.at(-1) || null;
+      openTableJanitorCursor = lastRow && typeof lastRow?.cursor_updated_at === "string"
+        ? { tableId: lastRow.id, updatedAt: lastRow.cursor_updated_at }
+        : null;
       klogSafe("ws_open_table_reconciler_batch_selected", {
         limit: boundedLimit,
-        returnedOpenTableCount: selected.total,
-        wrapped: selected.wrapped,
-        cursorTableId: selected.cursor?.tableId || null,
-        tableIds: selected.tableIds
+        returnedOpenTableCount: tableIds.length,
+        wrapped: selectedRows.some((row) => row?.cursor_wrapped === true),
+        cursorTableId: openTableJanitorCursor?.tableId || null,
+        tableIds
       });
-      return selected.tableIds;
+      return tableIds;
     }, { env: process.env });
   } catch (error) {
     klogSafe("ws_open_table_reconciler_list_failed", { message: error?.message || "unknown" });
