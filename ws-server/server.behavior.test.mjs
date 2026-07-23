@@ -4684,6 +4684,153 @@ test("table_state_sub schedules autoplay for restored live bot turn before timeo
   }
 });
 
+test("bot timeout safety suppresses repeated autoplay for the same failed turn fingerprint", async () => {
+  const secret = "bot-timeout-same-state-suppression-secret";
+  const tableId = "table_bot_timeout_same_state_suppression";
+  const humanUserId = "timeout_suppression_human";
+  const botSeat2 = makeBotUserId(tableId, 2);
+  const botSeat3 = makeBotUserId(tableId, 3);
+  const baseCoreState = {
+    roomId: tableId,
+    version: 12,
+    maxSeats: 6,
+    members: [
+      { userId: humanUserId, seat: 1 },
+      { userId: botSeat2, seat: 2 },
+      { userId: botSeat3, seat: 3 }
+    ],
+    seats: [
+      { userId: humanUserId, seatNo: 1, status: "ACTIVE" },
+      { userId: botSeat2, seatNo: 2, status: "ACTIVE" },
+      { userId: botSeat3, seatNo: 3, status: "ACTIVE" }
+    ],
+    seatDetailsByUserId: {
+      [humanUserId]: { isBot: false, stack: 100 },
+      [botSeat2]: { isBot: true, botProfile: "NORMAL", stack: 100 },
+      [botSeat3]: { isBot: true, botProfile: "NORMAL", stack: 100 }
+    },
+    publicStacks: {
+      [humanUserId]: 100,
+      [botSeat2]: 100,
+      [botSeat3]: 100
+    }
+  };
+  const liveState = {
+    ...buildBootstrappedPokerState({
+      tableId,
+      coreState: baseCoreState,
+      dealerSeatNo: 2,
+      startingStacks: baseCoreState.publicStacks,
+      handVersion: baseCoreState.version
+    }),
+    turnStartedAt: Date.now() - 10_000,
+    turnDeadlineAt: Date.now() - 5_000
+  };
+  assert.equal(liveState.turnUserId, botSeat2);
+
+  const { dir, filePath } = await writePersistedFile({
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+        seatRows: [
+          { user_id: humanUserId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 },
+          { user_id: botSeat2, seat_no: 2, status: "ACTIVE", is_bot: true, stack: 100, bot_profile: "NORMAL" },
+          { user_id: botSeat3, seat_no: 3, status: "ACTIVE", is_bot: true, stack: 100, bot_profile: "NORMAL" }
+        ],
+        stateRow: { version: baseCoreState.version, state: liveState }
+      }
+    }
+  });
+  const invocationFile = path.join(dir, "bot-timeout-invocations.log");
+  const autoplayModule = await writeTestModule(`
+import fs from "node:fs";
+const invocationFile = ${JSON.stringify(invocationFile)};
+export function createAcceptedBotStepExecutor() {
+  return async ({ trigger }) => {
+    fs.appendFileSync(invocationFile, \`\${trigger || "unknown"}\\n\`, "utf8");
+    return {
+      ok: false,
+      changed: false,
+      actionCount: 0,
+      reason: "showdown_incomplete_community",
+      phase: "PREFLOP"
+    };
+  };
+}
+`, "same-state-bot-timeout-adapter.mjs");
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_ACCEPTED_BOT_AUTOPLAY_ADAPTER_MODULE_PATH: autoplayModule.filePath,
+      WS_TIMEOUT_SWEEP_MS: "50",
+      WS_ZOMBIE_TABLE_SWEEP_MS: "60000"
+    }
+  });
+  const serverLogs = [];
+  child.stdout.on("data", (buf) => {
+    serverLogs.push(String(buf));
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: humanUserId }), "auth-bot-timeout-suppression");
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "sub-bot-timeout-suppression",
+      ts: "2026-07-23T00:00:00Z",
+      payload: { tableId }
+    });
+    await nextMessageOfType(ws, "table_state");
+
+    const suppressionDeadline = Date.now() + 3000;
+    while (Date.now() < suppressionDeadline) {
+      if (serverLogs.join("").includes("ws_bot_timeout_safety_same_state_retry_suppressed")) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.match(serverLogs.join(""), /ws_bot_timeout_safety_same_state_retry_suppressed/);
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const suppressedRaw = await fs.readFile(invocationFile, "utf8");
+    const suppressedInvocationCount = suppressedRaw.trim().split("\n").length;
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "resync",
+      requestId: "resync-bot-timeout-suppression",
+      ts: "2026-07-23T00:00:01Z",
+      payload: { tableId }
+    });
+    await nextMessageOfType(ws, "table_state");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    const finalRaw = await fs.readFile(invocationFile, "utf8");
+    assert.equal(finalRaw.trim().split("\n").length, suppressedInvocationCount);
+
+    const joinedLogs = serverLogs.join("");
+    const terminalLogs = joinedLogs
+      .split("\n")
+      .filter((line) => line.includes("ws_bot_timeout_safety_same_state_retry_suppressed"));
+    assert.equal(terminalLogs.length, 1, joinedLogs);
+    assert.match(terminalLogs[0], new RegExp(`"tableId":"${tableId}"`));
+    assert.match(terminalLogs[0], new RegExp(`"handId":"${liveState.handId}"`));
+    assert.match(terminalLogs[0], /"stateVersion":12/);
+    assert.match(terminalLogs[0], new RegExp(`"turnUserId":"${botSeat2}"`));
+    assert.match(terminalLogs[0], /"phase":"PREFLOP"/);
+    assert.match(terminalLogs[0], /"reason":"showdown_incomplete_community"/);
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(autoplayModule.dir, { recursive: true, force: true });
+  }
+});
+
 test("resync schedules autoplay for restored live bot turn before timeout sweep", async () => {
   const secret = "restored-bot-turn-resync-secret";
   const tableId = "table_restored_bot_turn_resync_autoplay";

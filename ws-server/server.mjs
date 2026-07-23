@@ -25,7 +25,12 @@ import { handleJoinCommand } from "./poker/handlers/join.mjs";
 import { handleActCommand } from "./poker/handlers/act.mjs";
 import { handleStartHandCommand } from "./poker/handlers/start-hand.mjs";
 import { handleTurnTimeoutCommand } from "./poker/handlers/turn-timeout.mjs";
-import { handleBotStepCommand, shouldSuppressBotTimeoutSafetyRetry } from "./poker/handlers/bot-autoplay.mjs";
+import {
+  handleBotStepCommand,
+  matchesBotTimeoutSafetySuppression,
+  shouldClearBotTimeoutSafetySuppression,
+  shouldSuppressBotTimeoutSafetyRetry
+} from "./poker/handlers/bot-autoplay.mjs";
 import { handleLeaveCommand } from "./poker/handlers/leave.mjs";
 import { handleRebuyCommand } from "./poker/handlers/rebuy.mjs";
 import { createTableCommandQueue } from "./poker/runtime/table-command-queue.mjs";
@@ -541,13 +546,33 @@ async function runBotStep({ tableId, trigger, requestId, frameTs }) {
 const scheduledObservedBotTurnKeys = new Map();
 const suppressedBotTimeoutSafetyFailures = new Map();
 
+function buildBotTimeoutSafetyFingerprint(tableId) {
+  const pokerState = tableManager.persistedPokerState(tableId);
+  if (!pokerState || typeof pokerState !== "object") return null;
+  const stateVersion = Number(tableManager.persistedStateVersion(tableId));
+  if (!Number.isFinite(stateVersion)) return null;
+  return {
+    tableId,
+    handId: typeof pokerState.handId === "string" ? pokerState.handId.trim() : "",
+    stateVersion,
+    turnUserId: typeof pokerState.turnUserId === "string" ? pokerState.turnUserId.trim() : "",
+    phase: typeof pokerState.phase === "string" ? pokerState.phase.trim() : ""
+  };
+}
+
 function isBotTimeoutSafetyRetrySuppressed(tableId) {
   const suppressed = suppressedBotTimeoutSafetyFailures.get(tableId);
   if (!suppressed) return false;
-  const currentStateVersion = Number(tableManager.persistedStateVersion(tableId));
-  if (Number.isFinite(currentStateVersion) && currentStateVersion === suppressed.stateVersion) return true;
+  const current = buildBotTimeoutSafetyFingerprint(tableId);
+  if (matchesBotTimeoutSafetySuppression(suppressed, current)) return true;
   suppressedBotTimeoutSafetyFailures.delete(tableId);
   return false;
+}
+
+function clearBotTimeoutSafetySuppressionAfterSuccess(tableId, result) {
+  if (shouldClearBotTimeoutSafetySuppression(result)) {
+    suppressedBotTimeoutSafetyFailures.delete(tableId);
+  }
 }
 
 function pruneBotTimeoutSafetySuppressions() {
@@ -564,15 +589,28 @@ function scheduleBotStep({ tableId, trigger, requestId, frameTs }) {
   const enqueueStep = () => enqueueTableCommand({
     tableId,
     commandName: "bot_step",
-    run: async () => handleBotStepCommand({
-      tableId,
-      trigger,
-      requestId,
-      frameTs,
-      runBotStep,
-      broadcastStateSnapshots,
-      klog: klogSafe
-    })
+    run: async () => {
+      if (isBotTimeoutSafetyRetrySuppressed(tableId)) {
+        return {
+          ok: true,
+          changed: false,
+          actionCount: 0,
+          reason: "same_state_retry_suppressed",
+          suppressed: true
+        };
+      }
+      const result = await handleBotStepCommand({
+        tableId,
+        trigger,
+        requestId,
+        frameTs,
+        runBotStep,
+        broadcastStateSnapshots,
+        klog: klogSafe
+      });
+      clearBotTimeoutSafetySuppressionAfterSuccess(tableId, result);
+      return result;
+    }
   });
 
   const runCascade = () => {
@@ -2336,17 +2374,19 @@ async function sweepTurnTimeoutsAndBroadcast() {
           klog: klogSafe
         });
         if (shouldSuppressBotTimeoutSafetyRetry(result)) {
-          suppressedBotTimeoutSafetyFailures.set(update.tableId, {
-            stateVersion: Number(update.stateVersion),
-            reason: result.reason,
-          });
-          klogSafe("ws_bot_timeout_safety_same_state_retry_suppressed", {
-            tableId: update.tableId,
-            stateVersion: Number(update.stateVersion),
-            reason: result.reason,
-          });
+          const fingerprint = buildBotTimeoutSafetyFingerprint(update.tableId);
+          if (fingerprint && fingerprint.stateVersion === Number(update.stateVersion)) {
+            suppressedBotTimeoutSafetyFailures.set(update.tableId, {
+              ...fingerprint,
+              reason: result.reason
+            });
+            klogSafe("ws_bot_timeout_safety_same_state_retry_suppressed", {
+              ...fingerprint,
+              reason: result.reason
+            });
+          }
         } else {
-          suppressedBotTimeoutSafetyFailures.delete(update.tableId);
+          clearBotTimeoutSafetySuppressionAfterSuccess(update.tableId, result);
         }
         return result;
       }

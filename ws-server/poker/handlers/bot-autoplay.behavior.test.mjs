@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handleBotStepCommand, shouldSuppressBotTimeoutSafetyRetry } from "./bot-autoplay.mjs";
+import {
+  handleBotStepCommand,
+  matchesBotTimeoutSafetySuppression,
+  shouldClearBotTimeoutSafetySuppression,
+  shouldSuppressBotTimeoutSafetyRetry
+} from "./bot-autoplay.mjs";
 
 test("bot timeout safety suppresses deterministic same-state invariant retries only", () => {
   assert.equal(shouldSuppressBotTimeoutSafetyRetry({ ok: false, changed: false, reason: "showdown_incomplete_community" }), true);
@@ -8,6 +13,28 @@ test("bot timeout safety suppresses deterministic same-state invariant retries o
   assert.equal(shouldSuppressBotTimeoutSafetyRetry({ ok: false, changed: false, reason: "persist_failed" }), false);
   assert.equal(shouldSuppressBotTimeoutSafetyRetry({ ok: true, changed: false, reason: "turn_not_bot" }), false);
   assert.equal(shouldSuppressBotTimeoutSafetyRetry({ ok: false, changed: true, reason: "state_invalid" }), false);
+});
+
+test("bot timeout safety suppression matches the complete unchanged turn fingerprint", () => {
+  const suppressed = {
+    tableId: "t1",
+    handId: "h1",
+    stateVersion: 12,
+    turnUserId: "bot_2",
+    reason: "showdown_incomplete_community"
+  };
+  assert.equal(matchesBotTimeoutSafetySuppression(suppressed, { ...suppressed }), true);
+  assert.equal(matchesBotTimeoutSafetySuppression(suppressed, { ...suppressed, stateVersion: 13 }), false);
+  assert.equal(matchesBotTimeoutSafetySuppression(suppressed, { ...suppressed, handId: "h2" }), false);
+  assert.equal(matchesBotTimeoutSafetySuppression(suppressed, { ...suppressed, turnUserId: "bot_3" }), false);
+});
+
+test("bot timeout safety suppression clears only after autoplay changes state successfully", () => {
+  assert.equal(shouldClearBotTimeoutSafetySuppression({ ok: true, changed: true, reason: "completed" }), true);
+  assert.equal(shouldClearBotTimeoutSafetySuppression({ ok: true, changed: false, reason: "completed" }), false);
+  assert.equal(shouldClearBotTimeoutSafetySuppression({ ok: true, changed: false, reason: "turn_not_bot" }), false);
+  assert.equal(shouldClearBotTimeoutSafetySuppression({ ok: true, changed: false, reason: "non_action_phase" }), false);
+  assert.equal(shouldClearBotTimeoutSafetySuppression({ ok: false, changed: true, reason: "persist_failed" }), false);
 });
 
 test("handleBotStepCommand broadcasts when autoplay changes state", async () => {
@@ -110,3 +137,20 @@ test("handleBotStepCommand does not broadcast when autoplay is a clean noop", as
   assert.equal(result.ok, true);
   assert.equal(calls.snapshots, 0);
 });
+
+for (const reason of ["completed", "turn_not_bot", "non_action_phase"]) {
+  test(`handleBotStepCommand preserves ${reason} as a successful clean stop`, async () => {
+    const result = await handleBotStepCommand({
+      tableId: "t-clean-stop",
+      trigger: "test",
+      runBotStep: async () => ({ ok: true, changed: false, actionCount: 0, reason }),
+      broadcastStateSnapshots: () => {
+        throw new Error("clean stop must not broadcast");
+      }
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.changed, false);
+    assert.equal(result.reason, reason);
+  });
+}
