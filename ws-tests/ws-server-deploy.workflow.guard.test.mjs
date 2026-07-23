@@ -16,6 +16,10 @@ test("ws-server deploy workflow has guarded triggers, secrets and concurrency", 
   assert.match(text, /"netlify\/functions\/_shared\/supabase-admin\.mjs"/);
   assert.match(text, /concurrency:\n\s+group: ws-server-\$\{\{ github\.ref \}\}/);
   assert.match(text, /permissions:\n\s+contents: read/);
+  assert.match(text, /RELEASE_ENVIRONMENT: production/);
+  assert.match(text, /release-metadata\.json/);
+  assert.match(text, /releaseSha: process\.env\.RELEASE_SHA/);
+  assert.match(text, /deployRef: process\.env\.DEPLOY_REF/);
 
   assert.match(text, /host: \$\{\{ secrets\.WS_HOST \}\}/);
   assert.match(text, /username: \$\{\{ secrets\.WS_USER \}\}/);

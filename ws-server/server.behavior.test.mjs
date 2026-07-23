@@ -1204,6 +1204,30 @@ test("server supports healthz and hello/helloAck smoke flow", async () => {
   }
 });
 
+test("server logs deploy identity at artifact startup", async () => {
+  const { child } = await createServer({
+    env: {
+      WS_RELEASE_SHA: "test-release-sha",
+      WS_DEPLOY_REF: "agent/test-release-ref",
+      WS_DEPLOY_ENVIRONMENT: "preview"
+    }
+  });
+  const logs = [];
+  child.stdout.on("data", (chunk) => logs.push(String(chunk)));
+
+  try {
+    await waitForListening(child, 5000);
+    const joined = logs.join("");
+    assert.match(joined, /ws_artifact_start/);
+    assert.match(joined, /"releaseSha":"test-release-sha"/);
+    assert.match(joined, /"deployRef":"agent\/test-release-ref"/);
+    assert.match(joined, /"environment":"preview"/);
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 
 
 test("server boots with leave handler wired in default env without override", async () => {

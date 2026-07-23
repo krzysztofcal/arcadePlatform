@@ -1,11 +1,51 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  createBotAutoplayObservability,
   handleBotStepCommand,
   matchesBotTimeoutSafetySuppression,
   shouldClearBotTimeoutSafetySuppression,
   shouldSuppressBotTimeoutSafetyRetry
 } from "./bot-autoplay.mjs";
+
+test("bot autoplay observability preserves first and terminal events while aggregating repeated failures", () => {
+  const logs = [];
+  let nowMs = 1_000;
+  const observer = createBotAutoplayObservability({
+    klog: (kind, data) => logs.push({ kind, data }),
+    now: () => nowMs,
+    summaryIntervalMs: 60_000
+  });
+  const failure = {
+    tableId: "t1",
+    handId: "h1",
+    stateVersion: 12,
+    turnUserId: "bot_2",
+    reason: "apply_action_failed",
+    error: "showdown_incomplete_community"
+  };
+
+  assert.equal(observer.log("poker_act_bot_autoplay_step_error", failure), true);
+  assert.equal(observer.log("poker_act_bot_autoplay_step_error", failure), false);
+  assert.equal(observer.log("poker_act_bot_autoplay_step_error", failure), false);
+  nowMs += 25;
+  assert.equal(observer.log("ws_bot_timeout_safety_same_state_retry_suppressed", {
+    tableId: "t1",
+    handId: "h1",
+    stateVersion: 12,
+    turnUserId: "bot_2",
+    reason: "showdown_incomplete_community"
+  }), true);
+
+  assert.deepEqual(logs.map((entry) => entry.kind), [
+    "poker_act_bot_autoplay_step_error",
+    "ws_bot_timeout_safety_same_state_retry_suppressed",
+    "ws_bot_autoplay_failure_summary"
+  ]);
+  assert.deepEqual(logs[2].data.countsByReason, {
+    showdown_incomplete_community: { total: 3, logged: 1, suppressed: 2 }
+  });
+});
 
 test("bot timeout safety suppresses deterministic same-state invariant retries only", () => {
   assert.equal(shouldSuppressBotTimeoutSafetyRetry({ ok: false, changed: false, reason: "showdown_incomplete_community" }), true);

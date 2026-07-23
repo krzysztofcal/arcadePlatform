@@ -1,4 +1,5 @@
 import http from "http";
+import fs from "node:fs";
 import WebSocket, { WebSocketServer } from "ws";
 import { MAX_FRAME_BYTES } from "./poker/protocol/constants.mjs";
 import { makeErrorFrame, parseFrame, validateEnvelope } from "./poker/protocol/envelope.mjs";
@@ -26,6 +27,7 @@ import { handleActCommand } from "./poker/handlers/act.mjs";
 import { handleStartHandCommand } from "./poker/handlers/start-hand.mjs";
 import { handleTurnTimeoutCommand } from "./poker/handlers/turn-timeout.mjs";
 import {
+  createBotAutoplayObservability,
   handleBotStepCommand,
   matchesBotTimeoutSafetySuppression,
   shouldClearBotTimeoutSafetySuppression,
@@ -381,7 +383,7 @@ async function loadAcceptedBotAutoplayExecutor() {
           },
           getBotReactionOverride: () => botReactionOverrideStore.getOverrideRange(),
           env: process.env,
-          klog: klogSafe
+          klog: botAutoplayObservability.log
         });
       } catch (error) {
         klogSafe("ws_bot_autoplay_executor_unavailable", {
@@ -435,6 +437,45 @@ function klogSafe(kind, data) {
     klog(kind, data);
   } catch {
     // Logging must never break request handling.
+  }
+}
+
+const botAutoplayLogSummaryMs = resolvePositiveInt(process.env.WS_BOT_AUTOPLAY_LOG_SUMMARY_MS, 60_000, {
+  min: 10_000,
+  max: 3_600_000
+});
+const botAutoplayObservability = createBotAutoplayObservability({
+  klog: klogSafe,
+  summaryIntervalMs: botAutoplayLogSummaryMs
+});
+const botAutoplaySummaryTimer = setInterval(() => {
+  botAutoplayObservability.flush("interval");
+}, botAutoplayLogSummaryMs);
+botAutoplaySummaryTimer.unref();
+
+function loadReleaseMetadata() {
+  const fallback = {
+    releaseSha: typeof process.env.WS_RELEASE_SHA === "string" ? process.env.WS_RELEASE_SHA.trim() : "",
+    deployRef: typeof process.env.WS_DEPLOY_REF === "string" ? process.env.WS_DEPLOY_REF.trim() : "",
+    environment: typeof process.env.WS_DEPLOY_ENVIRONMENT === "string"
+      ? process.env.WS_DEPLOY_ENVIRONMENT.trim()
+      : (process.env.NODE_ENV || "unknown")
+  };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(new URL("./release-metadata.json", import.meta.url), "utf8"));
+    return {
+      releaseSha: typeof parsed?.releaseSha === "string" && parsed.releaseSha.trim()
+        ? parsed.releaseSha.trim()
+        : fallback.releaseSha,
+      deployRef: typeof parsed?.deployRef === "string" && parsed.deployRef.trim()
+        ? parsed.deployRef.trim()
+        : fallback.deployRef,
+      environment: typeof parsed?.environment === "string" && parsed.environment.trim()
+        ? parsed.environment.trim()
+        : fallback.environment
+    };
+  } catch {
+    return fallback;
   }
 }
 
@@ -614,7 +655,7 @@ function scheduleBotStep({ tableId, trigger, requestId, frameTs }) {
         frameTs,
         runBotStep,
         broadcastStateSnapshots,
-        klog: klogSafe
+        klog: botAutoplayObservability.log
       });
       clearBotTimeoutSafetySuppressionAfterSuccess(tableId, result);
       return result;
@@ -2379,7 +2420,7 @@ async function sweepTurnTimeoutsAndBroadcast() {
           frameTs: null,
           runBotStep,
           broadcastStateSnapshots,
-          klog: klogSafe
+          klog: botAutoplayObservability.log
         });
         if (shouldSuppressBotTimeoutSafetyRetry(result)) {
           const fingerprint = buildBotTimeoutSafetyFingerprint(update.tableId);
@@ -2388,7 +2429,7 @@ async function sweepTurnTimeoutsAndBroadcast() {
               ...fingerprint,
               reason: result.reason
             });
-            klogSafe("ws_bot_timeout_safety_same_state_retry_suppressed", {
+            botAutoplayObservability.log("ws_bot_timeout_safety_same_state_retry_suppressed", {
               ...fingerprint,
               reason: result.reason
             });
@@ -3490,6 +3531,12 @@ const lobbyVisibilitySweepTimer = setInterval(() => {
 lobbyVisibilitySweepTimer.unref();
 
 async function startServer() {
+  const release = loadReleaseMetadata();
+  klogSafe("ws_artifact_start", {
+    releaseSha: release.releaseSha || null,
+    deployRef: release.deployRef || null,
+    environment: release.environment || "unknown"
+  });
   server.listen(PORT, "0.0.0.0", () => {
     klogSafe("ws_listening", { message: `WS listening on ${PORT}`, port: PORT });
   });
