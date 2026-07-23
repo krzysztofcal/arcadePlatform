@@ -2349,12 +2349,9 @@ async function sweepZombieTablesAndBroadcast() {
 async function listOpenTableIdsForJanitor({ limit = 10 } = {}) {
   if (!persistedBootstrapEnabled) return [];
   const boundedLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 10;
-  // Keep the cursor on immutable creation order so table activity cannot requeue the boundary row.
-  const hasCursor = Boolean(typeof openTableJanitorCursor?.createdAt === "string"
-    && openTableJanitorCursor.createdAt.trim()
-    && typeof openTableJanitorCursor?.tableId === "string"
+  // UUID order is immutable and round-trips exactly, so the boundary row cannot requeue itself.
+  const hasCursor = Boolean(typeof openTableJanitorCursor?.tableId === "string"
     && openTableJanitorCursor.tableId.trim());
-  const cursorCreatedAt = hasCursor ? openTableJanitorCursor.createdAt.trim() : null;
   const cursorTableId = hasCursor ? openTableJanitorCursor.tableId.trim() : null;
   try {
     const beginSqlWs = await loadBeginSqlWs();
@@ -2362,26 +2359,23 @@ async function listOpenTableIdsForJanitor({ limit = 10 } = {}) {
       const rows = await tx.unsafe(
          `select
            t.id,
-           t.created_at::text as cursor_created_at,
            case
-             when $1::timestamptz is null then false
-             when (t.created_at, t.id) > ($1::timestamptz, $2::uuid) then false
+             when $1::uuid is null then false
+             when t.id > $1::uuid then false
              else true
            end as cursor_wrapped
          from public.poker_tables t
          where t.status = 'OPEN'
-         order by cursor_wrapped asc, t.created_at asc, t.id asc
-         limit $3;`,
-        [cursorCreatedAt, cursorTableId, boundedLimit]
+         order by cursor_wrapped asc, t.id asc
+         limit $2;`,
+        [cursorTableId, boundedLimit]
       );
       const selectedRows = Array.isArray(rows)
         ? rows.filter((row) => typeof row?.id === "string" && row.id)
         : [];
       const tableIds = selectedRows.map((row) => row.id);
       const lastRow = selectedRows.at(-1) || null;
-      openTableJanitorCursor = lastRow && typeof lastRow?.cursor_created_at === "string"
-        ? { tableId: lastRow.id, createdAt: lastRow.cursor_created_at }
-        : null;
+      openTableJanitorCursor = lastRow ? { tableId: lastRow.id } : null;
       klogSafe("ws_open_table_reconciler_batch_selected", {
         limit: boundedLimit,
         returnedOpenTableCount: tableIds.length,
