@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   handleBotStepCommand,
   matchesBotTimeoutSafetySuppression,
+  shouldClearBotTimeoutSafetySuppression,
   shouldSuppressBotTimeoutSafetyRetry
 } from "./bot-autoplay.mjs";
 
@@ -26,6 +27,14 @@ test("bot timeout safety suppression matches the complete unchanged turn fingerp
   assert.equal(matchesBotTimeoutSafetySuppression(suppressed, { ...suppressed, stateVersion: 13 }), false);
   assert.equal(matchesBotTimeoutSafetySuppression(suppressed, { ...suppressed, handId: "h2" }), false);
   assert.equal(matchesBotTimeoutSafetySuppression(suppressed, { ...suppressed, turnUserId: "bot_3" }), false);
+});
+
+test("bot timeout safety suppression clears only after autoplay changes state successfully", () => {
+  assert.equal(shouldClearBotTimeoutSafetySuppression({ ok: true, changed: true, reason: "completed" }), true);
+  assert.equal(shouldClearBotTimeoutSafetySuppression({ ok: true, changed: false, reason: "completed" }), false);
+  assert.equal(shouldClearBotTimeoutSafetySuppression({ ok: true, changed: false, reason: "turn_not_bot" }), false);
+  assert.equal(shouldClearBotTimeoutSafetySuppression({ ok: true, changed: false, reason: "non_action_phase" }), false);
+  assert.equal(shouldClearBotTimeoutSafetySuppression({ ok: false, changed: true, reason: "persist_failed" }), false);
 });
 
 test("handleBotStepCommand broadcasts when autoplay changes state", async () => {

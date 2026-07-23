@@ -4747,10 +4747,7 @@ import fs from "node:fs";
 const invocationFile = ${JSON.stringify(invocationFile)};
 export function createAcceptedBotStepExecutor() {
   return async ({ trigger }) => {
-    if (trigger !== "bot_timeout_safety") {
-      return { ok: true, changed: false, actionCount: 0, reason: "completed" };
-    }
-    fs.appendFileSync(invocationFile, "applyAction\\n", "utf8");
+    fs.appendFileSync(invocationFile, \`\${trigger || "unknown"}\\n\`, "utf8");
     return {
       ok: false,
       changed: false,
@@ -4790,19 +4787,29 @@ export function createAcceptedBotStepExecutor() {
     });
     await nextMessageOfType(ws, "table_state");
 
-    const failureDeadline = Date.now() + 3000;
-    let invocationCount = 0;
-    while (Date.now() < failureDeadline) {
-      const raw = await fs.readFile(invocationFile, "utf8").catch(() => "");
-      invocationCount = raw.trim() ? raw.trim().split("\n").length : 0;
-      if (invocationCount >= 1) break;
+    const suppressionDeadline = Date.now() + 3000;
+    while (Date.now() < suppressionDeadline) {
+      if (serverLogs.join("").includes("ws_bot_timeout_safety_same_state_retry_suppressed")) break;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
-    assert.equal(invocationCount, 1);
+    assert.match(serverLogs.join(""), /ws_bot_timeout_safety_same_state_retry_suppressed/);
 
     await new Promise((resolve) => setTimeout(resolve, 250));
+    const suppressedRaw = await fs.readFile(invocationFile, "utf8");
+    const suppressedInvocationCount = suppressedRaw.trim().split("\n").length;
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "resync",
+      requestId: "resync-bot-timeout-suppression",
+      ts: "2026-07-23T00:00:01Z",
+      payload: { tableId }
+    });
+    await nextMessageOfType(ws, "table_state");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
     const finalRaw = await fs.readFile(invocationFile, "utf8");
-    assert.equal(finalRaw.trim().split("\n").length, 1);
+    assert.equal(finalRaw.trim().split("\n").length, suppressedInvocationCount);
 
     const joinedLogs = serverLogs.join("");
     const terminalLogs = joinedLogs

@@ -28,6 +28,7 @@ import { handleTurnTimeoutCommand } from "./poker/handlers/turn-timeout.mjs";
 import {
   handleBotStepCommand,
   matchesBotTimeoutSafetySuppression,
+  shouldClearBotTimeoutSafetySuppression,
   shouldSuppressBotTimeoutSafetyRetry
 } from "./poker/handlers/bot-autoplay.mjs";
 import { handleLeaveCommand } from "./poker/handlers/leave.mjs";
@@ -569,7 +570,7 @@ function isBotTimeoutSafetyRetrySuppressed(tableId) {
 }
 
 function clearBotTimeoutSafetySuppressionAfterSuccess(tableId, result) {
-  if (result?.ok === true) {
+  if (shouldClearBotTimeoutSafetySuppression(result)) {
     suppressedBotTimeoutSafetyFailures.delete(tableId);
   }
 }
@@ -589,6 +590,15 @@ function scheduleBotStep({ tableId, trigger, requestId, frameTs }) {
     tableId,
     commandName: "bot_step",
     run: async () => {
+      if (isBotTimeoutSafetyRetrySuppressed(tableId)) {
+        return {
+          ok: true,
+          changed: false,
+          actionCount: 0,
+          reason: "same_state_retry_suppressed",
+          suppressed: true
+        };
+      }
       const result = await handleBotStepCommand({
         tableId,
         trigger,

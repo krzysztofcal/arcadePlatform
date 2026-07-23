@@ -20,6 +20,10 @@ export function matchesBotTimeoutSafetySuppression(suppressed, current) {
     && suppressed.turnUserId === current.turnUserId;
 }
 
+export function shouldClearBotTimeoutSafetySuppression(result) {
+  return result?.ok === true && result?.changed === true;
+}
+
 export async function handleBotStepCommand({
   tableId,
   trigger,
