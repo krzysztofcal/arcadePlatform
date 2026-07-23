@@ -1,4 +1,5 @@
 import { parseStakes } from "../../shared/poker-domain/bots.mjs";
+import { areCardsUnique, isValidTwoCards } from "../snapshot-runtime/poker-cards-utils.mjs";
 import { deriveDeterministicRuntimeHandState } from "../shared/runtime-hand-state.mjs";
 
 const LIVE_HAND_PHASES = new Set(["PREFLOP", "FLOP", "TURN", "RIVER"]);
@@ -7,16 +8,19 @@ function hasCompleteRuntimePrivateHandState(state) {
   const handSeats = Array.isArray(state?.handSeats) && state.handSeats.length > 0
     ? state.handSeats
     : state?.seats;
-  const seatUserIds = Array.isArray(handSeats)
+  const showdownUserIds = Array.isArray(handSeats)
     ? handSeats
         .map((seat) => typeof seat?.userId === "string" ? seat.userId.trim() : "")
-        .filter(Boolean)
+        .filter((userId) => userId
+          && !state?.foldedByUserId?.[userId]
+          && !state?.leftTableByUserId?.[userId]
+          && !state?.sitOutByUserId?.[userId])
     : [];
   const communityDealt = Number.isInteger(state?.communityDealt)
     ? state.communityDealt
     : (Array.isArray(state?.community) ? state.community.length : -1);
   if (
-    seatUserIds.length < 2
+    showdownUserIds.length < 2
     || communityDealt < 0
     || communityDealt > 5
     || !Array.isArray(state?.community)
@@ -29,8 +33,15 @@ function hasCompleteRuntimePrivateHandState(state) {
   ) {
     return false;
   }
-  return seatUserIds.every((userId) => Array.isArray(state.holeCardsByUserId[userId])
-    && state.holeCardsByUserId[userId].length === 2);
+  const showdownHoleCards = showdownUserIds.map((userId) => state.holeCardsByUserId[userId]);
+  if (!showdownHoleCards.every(isValidTwoCards)) {
+    return false;
+  }
+  return areCardsUnique([
+    ...state.community,
+    ...state.deck,
+    ...showdownHoleCards.flat()
+  ]);
 }
 
 function isTerminalAllInCallPending(state) {

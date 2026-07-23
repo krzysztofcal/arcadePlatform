@@ -220,6 +220,50 @@ test("adapter rejects a legacy live all-in hand that cannot reconstruct the show
   assert.deepEqual(persistedState, before);
 });
 
+test("adapter rejects an unrecoverable all-in hand with invalid or duplicate private runtime cards", () => {
+  const tableId = "table_invalid_private_runtime_cards";
+  const persistedState = {
+    tableId,
+    handId: "hand_invalid_private_runtime_cards",
+    phase: "TURN",
+    community: ["AS", "KD", "QC", "JH"],
+    communityDealt: 4,
+    deck: ["AS"],
+    holeCardsByUserId: {
+      human: ["2C", "2D"],
+      bot_call: ["not-a-card", "3D"]
+    },
+    turnUserId: "bot_call",
+    seats: [
+      { userId: "human", seatNo: 1, status: "ACTIVE" },
+      { userId: "bot_call", seatNo: 2, status: "ACTIVE", isBot: true }
+    ],
+    handSeats: [
+      { userId: "human", seatNo: 1, status: "ACTIVE" },
+      { userId: "bot_call", seatNo: 2, status: "ACTIVE", isBot: true }
+    ],
+    currentBet: 100,
+    potTotal: 200,
+    stacks: { human: 0, bot_call: 50 },
+    toCallByUserId: { human: 0, bot_call: 50 },
+    foldedByUserId: { human: false, bot_call: false }
+  };
+
+  const result = adaptPersistedBootstrap({
+    tableId,
+    tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+    seatRows: [
+      { user_id: "human", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 0 },
+      { user_id: "bot_call", seat_no: 2, status: "ACTIVE", is_bot: true, stack: 50 }
+    ],
+    stateRow: { version: 333, state: persistedState }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "invalid_persisted_state");
+  assert.equal(result.reason, "live_hand_runtime_unrecoverable");
+});
+
 test("adapter restores replacement bot identity from persisted state when seat rows still reference prior bot id", () => {
   const result = adaptPersistedBootstrap({
     tableId: "table_replacement_bot_restore",
