@@ -16,7 +16,7 @@ import { adaptPersistedBootstrap } from "./poker/bootstrap/persisted-bootstrap-a
 import { createSessionStore } from "./poker/runtime/session-store.mjs";
 import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
 import { createBotReactionOverrideStore } from "./poker/runtime/bot-reaction-override.mjs";
-import { evaluateTableHealth, runTableJanitor, selectOpenTableJanitorBatch } from "./poker/runtime/table-janitor.mjs";
+import { evaluateTableHealth, runTableJanitor } from "./poker/runtime/table-janitor.mjs";
 import { buildStateSnapshotPayload } from "./poker/read-model/state-snapshot.mjs";
 import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
 import { createStreamLog } from "./poker/runtime/stream-log.mjs";
@@ -2349,29 +2349,41 @@ async function sweepZombieTablesAndBroadcast() {
 async function listOpenTableIdsForJanitor({ limit = 10 } = {}) {
   if (!persistedBootstrapEnabled) return [];
   const boundedLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 10;
+  // UUID order is immutable and round-trips exactly, so the boundary row cannot requeue itself.
+  const hasCursor = Boolean(typeof openTableJanitorCursor?.tableId === "string"
+    && openTableJanitorCursor.tableId.trim());
+  const cursorTableId = hasCursor ? openTableJanitorCursor.tableId.trim() : null;
   try {
     const beginSqlWs = await loadBeginSqlWs();
     return beginSqlWs(async (tx) => {
       const rows = await tx.unsafe(
-        `select t.id, t.updated_at
+         `select
+           t.id,
+           case
+             when $1::uuid is null then false
+             when t.id > $1::uuid then false
+             else true
+           end as cursor_wrapped
          from public.poker_tables t
          where t.status = 'OPEN'
-         order by t.updated_at asc, t.id asc;`
+         order by cursor_wrapped asc, t.id asc
+         limit $2;`,
+        [cursorTableId, boundedLimit]
       );
-      const selected = selectOpenTableJanitorBatch({
-        tables: Array.isArray(rows) ? rows : [],
-        limit: boundedLimit,
-        cursor: openTableJanitorCursor
-      });
-      openTableJanitorCursor = selected.cursor;
+      const selectedRows = Array.isArray(rows)
+        ? rows.filter((row) => typeof row?.id === "string" && row.id)
+        : [];
+      const tableIds = selectedRows.map((row) => row.id);
+      const lastRow = selectedRows.at(-1) || null;
+      openTableJanitorCursor = lastRow ? { tableId: lastRow.id } : null;
       klogSafe("ws_open_table_reconciler_batch_selected", {
         limit: boundedLimit,
-        totalOpenTables: selected.total,
-        wrapped: selected.wrapped,
-        cursorTableId: selected.cursor?.tableId || null,
-        tableIds: selected.tableIds
+        returnedOpenTableCount: tableIds.length,
+        wrapped: selectedRows.some((row) => row?.cursor_wrapped === true),
+        cursorTableId: openTableJanitorCursor?.tableId || null,
+        tableIds
       });
-      return selected.tableIds;
+      return tableIds;
     }, { env: process.env });
   } catch (error) {
     klogSafe("ws_open_table_reconciler_list_failed", { message: error?.message || "unknown" });
