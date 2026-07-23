@@ -135,6 +135,13 @@
   - stale, zombie, and open-table sweeps independently call `runEvaluatedTableJanitor()` using `Promise.allSettled`;
   - no map, set, queue, or promise registry guards evaluation by `tableId`;
   - each invocation independently loads persisted health and may route to a cleanup primitive.
+- Current caller/parameter semantics:
+  - the only current callers are `sweepStaleActiveHumanSeatsAndBroadcast()`, `sweepZombieTablesAndBroadcast()`, and `sweepOpenTableJanitorAndBroadcast()`;
+  - all pass the same semantic `tableId`, but distinct `trigger` and `requestId` values;
+  - `trigger` and `requestId` are not inputs to `loadPersistedTableHealthSnapshot()`, `buildTableJanitorRuntimeContext()`, or `evaluateTableHealth()`, so current snapshot and classification are independent of them;
+  - `runTableJanitor()` includes both values in `klog` and forwards them to the selected primitive;
+  - the current stale/zombie/inactive primitives ignore `trigger` in their destructured inputs, while `requestId` is forwarded into the existing cleanup path;
+  - the three sweep callers consume only settlement of the returned promise through `Promise.allSettled`; they do not branch, broadcast, or schedule retry from the returned value.
 - DB operations per evaluation:
   - SELECT table metadata;
   - SELECT all persisted seats;
@@ -147,14 +154,20 @@
   - every overlapping evaluation repeats three SELECTs and state/seat transfer;
   - cleanup primitives use idempotency and locks, but those protections do not eliminate the duplicate health reads.
 - Safety boundary:
+  - before implementation, repeat a complete caller and parameter audit because this behavior may have changed since this plan SHA;
+  - coalescing by `tableId` is permitted only if snapshot, classification, primitive routing, broadcast, retry, and caller result semantics remain independent of `trigger`;
+  - caller-specific `trigger` and `requestId` diagnostics must not silently disappear;
+  - if any caller-specific effect becomes required, share only the DB snapshot/classification and execute the distinct required post-classification effect without loading the snapshot again;
   - coalescing must be in-flight only, not a TTL cache;
   - the promise entry must be removed on success and failure;
   - no later evaluation may be suppressed after the first finishes;
   - no cleanup result, ledger movement, or runtime state may be manufactured by the coalescer.
 - Recommendation:
-  - add one server-local in-flight promise map keyed only by `tableId`;
-  - return the existing promise for overlapping callers and delete it in `finally`;
-  - use `klog` for any new observability and do not introduce a cache framework.
+  - first document every current caller and the use of `tableId`, `trigger`, `requestId`, classification, primitive result, broadcast, and retry;
+  - if the audit still proves semantic independence, add one server-local in-flight promise map keyed only by `tableId`, return the existing operation to overlapping callers, and delete it in `finally`;
+  - preserve a bounded caller-specific `klog` record for a coalesced request using its original `trigger` and `requestId`;
+  - otherwise coalesce only snapshot/classification by `tableId` and preserve each distinct required effect without a second DB snapshot;
+  - do not introduce a cache framework.
 - Expected reduction: three SELECTs for each overlapping evaluation avoided; exact savings require runtime overlap counters.
 
 ### F5 — repeated `maybeWriteHoleCards()`
@@ -185,11 +198,19 @@
   - a failed write must not mark the cards as durable;
   - process restart must safely cause another idempotent write;
   - new hand, changed private-card fingerprint, and restore/recovery must not reuse a stale acknowledgement;
+  - terminal close, normal runtime unload, explicit eviction, and long-lived processes that observe many table IDs must not leave acknowledgement entries indefinitely;
   - no private cards or full private state may be logged.
 - Recommendation:
   - in `createPersistedStateWriter()`, keep a minimal process-local acknowledgement keyed by table and containing `{handId, fingerprint}` only after `maybeWriteHoleCards()` succeeds;
   - skip the SQL call only when the current normalized rows match that acknowledgement;
-  - clear/replace on a new hand or changed fingerprint; an empty map after restart intentionally causes one recovery-safe upsert;
+  - replace the entry on a new hand or changed fingerprint;
+  - expose one narrow writer lifecycle method that forgets the acknowledgement for a `tableId`;
+  - call it from the existing server lifecycle hook `evictClosedRuntimeTable()` for terminal close and from `restoreTableFromPersisted()` before applying restored runtime, so the next mutation performs a recovery-safe upsert;
+  - add one narrowly named `onTableEvicted(tableId)` callback option to the existing table manager, invoke it from `evictTable()`, and route normal table removal through that existing method instead of leaving direct `tables.delete()` paths invisible;
+  - have the server callback call only the writer's table-specific forget method; do not expose writer state to the table manager;
+  - verify every current deletion path in `leave()`, connection cleanup, expired-presence cleanup, explicit eviction, and terminal close;
+  - do not add a timer, general cache, or generic eviction framework;
+  - an empty acknowledgement structure after process restart intentionally causes one recovery-safe upsert;
   - do not cache live poker state and do not query DB merely to populate the acknowledgement.
 - Expected reduction: from one hole-card statement per persisted mutation to normally one per hand per WS process, plus retries after failure/restart. Exact percentage depends on actions/hand.
 
@@ -326,11 +347,17 @@ The order below starts with bounded read-result reduction, then removes duplicat
   - `runEvaluatedTableJanitor()`;
   - existing `loadPersistedTableHealthSnapshot()` and `runTableJanitor()`.
 - Current behavior: every caller immediately loads a fresh persisted snapshot.
+- Mandatory pre-implementation gate:
+  - enumerate every current caller of `runEvaluatedTableJanitor()` and record its `tableId`, `trigger`, and `requestId`;
+  - trace those parameters through `runTableJanitor()` and every reachable primitive;
+  - confirm whether they affect only diagnostics or also classification, cleanup routing, table-command dedupe, broadcast, retry, idempotency, or caller-visible results;
+  - approve a `tableId`-only key only when all evaluation and execution semantics are independent of trigger.
 - Minimal change:
-  - store the in-flight evaluation promise by `tableId`;
-  - return it to overlapping callers;
+  - if the gate passes, store the in-flight evaluation/cleanup promise by `tableId` and return it to overlapping callers;
+  - preserve caller-specific coalesced diagnostics with the original `trigger` and `requestId`;
+  - if the gate fails, share only the snapshot/classification promise and preserve distinct required effects without repeating the DB snapshot;
   - delete the entry in `finally`;
-  - optionally record a single `klog` coalescing event without state/cards.
+  - record only bounded `klog` coalescing metadata without state/cards.
 - Must not change:
   - classification logic;
   - cleanup primitive selection;
@@ -340,7 +367,7 @@ The order below starts with bounded read-result reduction, then removes duplicat
 - After change: concurrent calls share one evaluation; the next later call always reevaluates.
 - Predicted reduction: three SELECTs per overlapping call, plus avoidance of duplicate cleanup entry; runtime evidence is required for percentage.
 - Risk: medium.
-- Breaking impact: trigger-specific duplicate logs may disappear; no cleanup should be skipped after completion.
+- Breaking impact: trigger-specific logs, request identity, retry, broadcast, and result semantics could be lost if a `tableId`-only key is approved without the mandatory caller audit; no cleanup may be skipped after completion.
 - Rollback: remove the map wrapper; no persisted rollback or migration.
 - Verification:
   - use existing janitor and server behavior tests;
@@ -420,19 +447,27 @@ The order below starts with bounded read-result reduction, then removes duplicat
 
 - Goal: persist private cards once per hand/process in the normal case while keeping recovery retries.
 - Dependencies: PRs A–D are independent; establish a query-count baseline for actions/hand.
-- File: `ws-server/poker/persistence/persisted-state-writer.mjs`.
+- Files:
+  - `ws-server/poker/persistence/persisted-state-writer.mjs`;
+  - `ws-server/server.mjs`;
+  - `ws-server/poker/table/table-manager.mjs` only for routing existing runtime deletion paths through the existing `evictTable()` lifecycle.
 - Symbols:
   - `createPersistedStateWriter()`;
   - `buildHoleCardRows()`;
   - `maybeWriteHoleCards()`;
   - `writeViaDb()`;
-  - new minimal acknowledgement map local to the writer instance.
+  - new minimal acknowledgement map and narrow forget method local to the writer instance;
+  - `restoreTableFromPersisted()`;
+  - `evictClosedRuntimeTable()`;
+  - `tableManager.evictTable()`, a narrow `onTableEvicted(tableId)` callback, and current direct `tables.delete()` paths.
 - Current behavior: identical bulk UPSERT after every successful mutation and equal-state replay path.
 - Minimal change:
   - derive a stable fingerprint from normalized `{tableId, handId, userId, cards}` rows;
   - skip only when the same writer instance has already observed a successful write for that table/hand/fingerprint;
   - record acknowledgement only after SQL success;
-  - replace on hand/fingerprint change.
+  - replace on hand/fingerprint change;
+  - clear immediately on restore and terminal close;
+  - make all normal runtime table removals reach the existing `evictTable()` lifecycle and invoke the narrow server callback that clears the corresponding writer entry.
 - Must not change:
   - public persisted state;
   - card validation;
@@ -441,6 +476,12 @@ The order below starts with bounded read-result reduction, then removes duplicat
   - state versioning;
   - any log payload to include private cards.
 - After change: first write, failed-write retry, process restart, new hand, and changed fingerprint still execute the idempotent upsert.
+- Lifecycle after change:
+  - new hand/fingerprint replaces the single entry for that table;
+  - restore clears it before restored state can be persisted;
+  - terminal close clears it through `evictClosedRuntimeTable()`;
+  - normal unload/connection cleanup/expired-presence deletion clears it through `tableManager.evictTable()`;
+  - a long-running process therefore retains at most acknowledgements for runtime tables that have not been evicted, without a separate cache framework.
 - Predicted reduction: normally `persisted mutations per hand - 1` statements; quantify using representative human/bot hands.
 - Risk: high.
 - Breaking impact: an incorrect acknowledgement can make private-card recovery incomplete.
@@ -449,6 +490,7 @@ The order below starts with bounded read-result reduction, then removes duplicat
   - use existing `persisted-state-writer.behavior.test.mjs`, bootstrap, table-snapshot, hole-card contract/RLS, autoplay, and server behavior tests;
   - manually verify start and recovery of a hand, human actions, multiple bot autoplay steps, settlement, and WS restart;
   - force a hole-card write failure and confirm the next mutation retries;
+  - verify terminal close, explicit eviction, normal unload, restore, new hand, and churn through many table IDs do not retain stale acknowledgements;
   - never log private cards or full private state;
   - manual `WS Preview Deploy` for the exact PR ref/SHA is mandatory.
 
@@ -540,12 +582,14 @@ The order below starts with bounded read-result reduction, then removes duplicat
 
 ### Task set B — in-flight janitor coalescing
 
-1. In `ws-server/server.mjs`, add one `Map` beside other server-local runtime maps.
-2. Split the current body of `runEvaluatedTableJanitor()` only as much as needed to wrap it with get/set/finally behavior.
-3. Key solely by normalized `tableId`; do not key by trigger and do not cache completed results.
-4. Reuse `loadPersistedTableHealthSnapshot()`, `evaluateTableHealth()`, `runTableJanitor()`, and existing primitives unchanged.
-5. Use only `klogSafe`/`klog` if logging coalescing; never use `console.log`.
-6. Verify one DB snapshot during overlap, cleanup still runs once, and later retry works after rejection.
+1. In `ws-server/server.mjs`, enumerate all callers of `runEvaluatedTableJanitor()` and trace `tableId`, `trigger`, `requestId`, classification, primitive arguments/results, broadcasts, and retries.
+2. Record the conclusion in the implementation PR; do not approve a `tableId`-only key if trigger changes evaluation or required effects.
+3. If semantics remain independent, add one `Map` beside other server-local runtime maps and wrap the in-flight operation with get/set/finally behavior.
+4. Preserve a caller-specific `klog` entry for every coalesced invocation using its original trigger/request ID.
+5. If semantics are not independent, coalesce `loadPersistedTableHealthSnapshot()` plus classification only, then preserve distinct required post-classification effects without re-reading DB.
+6. Do not cache completed results and do not suppress any invocation after the shared promise settles.
+7. Reuse `loadPersistedTableHealthSnapshot()`, `evaluateTableHealth()`, `runTableJanitor()`, and existing primitives; never use `console.log`.
+8. Verify one DB snapshot during overlap, required caller effects remain observable, cleanup runs with correct routing, and later retry works after rejection.
 
 ### Task set C — stale sweep cadence
 
@@ -570,8 +614,14 @@ The order below starts with bounded read-result reduction, then removes duplicat
 3. Make `maybeWriteHoleCards()` return enough non-secret metadata to record success without logging card values.
 4. Set acknowledgement only after the SQL call resolves successfully; keep failure retry behavior.
 5. Skip only an identical normalized table/hand/fingerprint; a changed hand, user set, or card code must write.
-6. Do not alter `poker_hole_cards`, private-state recovery, RLS, state sanitizer, or transaction accounting.
-7. Verify query count across start, multiple actions, bot autoplay, settlement, equal-state replay, and restart.
+6. Add one narrow writer method to forget an acknowledgement by `tableId`; do not expose the map or create a generic cache API.
+7. In `ws-server/server.mjs`, invoke that method from `restoreTableFromPersisted()` and the existing `evictClosedRuntimeTable()` hook.
+8. In `ws-server/poker/table/table-manager.mjs`, add only a narrow `onTableEvicted(tableId)` option, invoke it from `evictTable()`, audit every direct `tables.delete()` path, and route runtime removal through `evictTable()`.
+9. In `ws-server/server.mjs`, supply that callback and have it call only the writer's table-specific forget method, covering normal unload as well as terminal close without exposing the acknowledgement map.
+10. Confirm a new hand replaces the prior entry and process restart starts with no acknowledgements.
+11. Verify long-running table churn cannot grow the map beyond currently retained runtime table IDs.
+12. Do not alter `poker_hole_cards`, private-state recovery, RLS, state sanitizer, or transaction accounting.
+13. Verify query count across start, multiple actions, bot autoplay, settlement, equal-state replay, restart, restore, terminal close, unload, and many table IDs.
 
 ### Task set F — audit uniqueness and insert
 
@@ -677,7 +727,9 @@ These environment checks are gates, not assumptions. If the required metric is u
 - **Delayed cleanup:** slower sweep cadence intentionally delays stale-seat detection.
 - **Zombie/open tables:** broken SQL wrap or excessive timer changes can leave tables open indefinitely.
 - **Concurrent or missed janitors:** a coalescing map that is not cleared in `finally` can permanently suppress cleanup; an overly broad key can merge unrelated tables.
-- **Private-card recovery:** premature hole-card acknowledgement can make a hand unrecoverable after restart.
+- **Janitor caller semantics:** coalescing the full operation by `tableId` can discard required trigger/request-specific logging, routing, broadcast, retry, or caller results unless the mandatory current-caller audit proves independence.
+- **Private-card recovery:** premature or stale hole-card acknowledgement can make a hand unrecoverable after restart.
+- **Writer lifecycle growth:** acknowledgement entries must be removed on terminal close, restore, and every normal runtime eviction; direct table deletion paths must not bypass lifecycle cleanup.
 - **Lost action audit:** an incorrect partial predicate or conflict target can suppress a legitimate action.
 - **Duplicate/missing settlement audit:** uniqueness must match exactly one settlement per table/hand without affecting settlement computation.
 - **Reconnect:** freshness, grace, heartbeat, and restart behavior are coupled and must be verified together before changing presence cadence.
