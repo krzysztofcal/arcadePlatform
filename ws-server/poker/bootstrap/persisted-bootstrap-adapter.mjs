@@ -1,5 +1,61 @@
 import { parseStakes } from "../../shared/poker-domain/bots.mjs";
 import { deriveDeterministicRuntimeHandState } from "../shared/runtime-hand-state.mjs";
+
+const LIVE_HAND_PHASES = new Set(["PREFLOP", "FLOP", "TURN", "RIVER"]);
+
+function hasCompleteRuntimePrivateHandState(state) {
+  const handSeats = Array.isArray(state?.handSeats) && state.handSeats.length > 0
+    ? state.handSeats
+    : state?.seats;
+  const seatUserIds = Array.isArray(handSeats)
+    ? handSeats
+        .map((seat) => typeof seat?.userId === "string" ? seat.userId.trim() : "")
+        .filter(Boolean)
+    : [];
+  const communityDealt = Number.isInteger(state?.communityDealt)
+    ? state.communityDealt
+    : (Array.isArray(state?.community) ? state.community.length : -1);
+  if (
+    seatUserIds.length < 2
+    || communityDealt < 0
+    || communityDealt > 5
+    || !Array.isArray(state?.community)
+    || state.community.length !== communityDealt
+    || !Array.isArray(state?.deck)
+    || state.deck.length < 5 - communityDealt
+    || !state?.holeCardsByUserId
+    || typeof state.holeCardsByUserId !== "object"
+    || Array.isArray(state.holeCardsByUserId)
+  ) {
+    return false;
+  }
+  return seatUserIds.every((userId) => Array.isArray(state.holeCardsByUserId[userId])
+    && state.holeCardsByUserId[userId].length === 2);
+}
+
+function isTerminalAllInCallPending(state) {
+  const turnUserId = typeof state?.turnUserId === "string" ? state.turnUserId.trim() : "";
+  const turnStack = Number(state?.stacks?.[turnUserId]);
+  const turnToCall = Number(state?.toCallByUserId?.[turnUserId]);
+  if (!turnUserId || !Number.isFinite(turnStack) || !Number.isFinite(turnToCall)) return false;
+  if (turnStack <= 0 || turnToCall <= 0 || turnStack > turnToCall) return false;
+
+  const handSeats = Array.isArray(state?.handSeats) && state.handSeats.length > 0
+    ? state.handSeats
+    : state?.seats;
+  const eligibleUserIds = Array.isArray(handSeats)
+    ? handSeats
+        .map((seat) => typeof seat?.userId === "string" ? seat.userId.trim() : "")
+        .filter((userId) => userId
+          && !state?.foldedByUserId?.[userId]
+          && !state?.leftTableByUserId?.[userId]
+          && !state?.sitOutByUserId?.[userId])
+    : [];
+  return eligibleUserIds.length > 1 && eligibleUserIds.every((userId) => (
+    userId === turnUserId || Number(state?.stacks?.[userId] ?? 0) <= 0
+  ));
+}
+
 function asPlainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
@@ -312,6 +368,19 @@ export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow 
   const publicStacks = publicStackResult.stacks;
   const normalizedPokerState = { ...pokerState, seats: stateSeats };
   const derivedRuntimeHandState = deriveDeterministicRuntimeHandState(normalizedPokerState);
+  if (
+    LIVE_HAND_PHASES.has(normalizedPokerState.phase)
+    && !derivedRuntimeHandState
+    && !hasCompleteRuntimePrivateHandState(normalizedPokerState)
+    && isTerminalAllInCallPending(normalizedPokerState)
+  ) {
+    return {
+      ok: false,
+      code: "invalid_persisted_state",
+      message: "invalid_persisted_state",
+      reason: "live_hand_runtime_unrecoverable"
+    };
+  }
   const seatDetailsByUserId = {};
   for (const seat of runtimeSeats) {
     seatDetailsByUserId[seat.userId] = {

@@ -197,12 +197,20 @@ function createPersistedBootstrapLoader({ env = process.env } = {}) {
   return async function loadPersistedTableBootstrap({ tableId }) {
     const repository = await loadRepository();
     const loaded = await repository.load(tableId);
-    return adaptPersistedBootstrap({
+    const adapted = adaptPersistedBootstrap({
       tableId,
       tableRow: loaded?.tableRow,
       seatRows: loaded?.seatRows,
       stateRow: loaded?.stateRow
     });
+    if (adapted?.reason === "live_hand_runtime_unrecoverable") {
+      klogSafe("ws_persisted_bootstrap_live_hand_rejected", {
+        tableId,
+        code: adapted.code,
+        reason: adapted.reason
+      });
+    }
+    return adapted;
   };
 }
 
