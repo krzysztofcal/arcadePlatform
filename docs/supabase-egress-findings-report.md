@@ -23,7 +23,7 @@ Data analizy: 2026-07-21 (aktualizacja: 2026-07-22 — pomiary: `state` JSONB, S
 - **Call graph**: `admin-tables-list.mjs` (lista), `admin-ops-summary.mjs` (dashboard), `admin-table-details.mjs`, `admin-table-evaluate.mjs`
 - **Dla list/summary**: Klasyfikacja janitora używa tylko 4 pól z `state`, reszta niepotrzebna.
 - **Pomiar — 2026-07-22**: `octet_length(state::text)` na 6 stołach: **średnia ~1,7 KB, max 2,1 KB** (pełne dane w F9).
-- **Skala**: Przy 6 stołach i ~1,7 KB każdy, pojedynczy refresh admin dashboard to ~10 KB. Przy przykładowym założeniu 1000 refreshów dziennie byłoby to **~10 MB/dzień ≈ 300 MB/miesiąc (~5% limitu)**. Rzeczywisty udział pozostaje nieznany bez request count, ale mały rozmiar payloadu (~1,7 KB) oznacza, że nawet bardzo wysoki volume z tej ścieżki nie wystarczy do wyjaśnienia 5,72 GB.
+- **Skala**: Przy 6 stołach i ~1,7 KB każdy, pojedynczy refresh admin dashboard to ~10 KB. Przy przykładowym założeniu 1000 refreshów dziennie byłoby to ~10 MB/dzień ≈ 300 MB/miesiąc. Rzeczywisty udział zależy od request count, ale przy realistycznym wolumenie admin dashboardu ta ścieżka jest mało prawdopodobnym źródłem większości egressu.
 - **Wniosek**: Potwierdzona nieefektywność, ale **payload jest zbyt mały, by wyjaśnić 5,72 GB**. Przeniesione do sekcji „Deferred cleanup” — poprawne mikro-uproszczenie, nie rozwiązanie #735.
 
 ### F2. `poker_state` i `poker_hole_cards` są zablokowane dla standardowych ról przeglądarkowych
@@ -152,7 +152,7 @@ Pomiar wykonany na produkcji (`octet_length(state::text)`):
 
 **Dlaczego guest table trafia do cleanupu**: Guest table ID nie przechodzi walidacji UUID przed DB query. Kod w `disconnect-cleanup.mjs:17` sprawdza tylko `typeof tableId !== 'string' || !tableId` — "guest_table_<uuid>" przechodzi tę walidację.
 
-**Wpływ**: ~2 failed cleanup attempts/s × 86 400 sekund/dobę = ~172 800 cleanup attempts/dobę. Każde query to BEGIN + SELECT + ROLLBACK (3 round-tripy). Przy ~1,7 KB payloadu na odczyt `poker_state` daje to **~300 MB/dzień** tylko z tej pętli. W połączeniu z janitorem i innymi cyklicznymi procesami skaluje się do obserwowanych ~1 GB/dzień na stage.
+**Wpływ**: Pętla generowała około 172 800 nieudanych cleanup attempts na dobę oraz wiele transakcji i round-tripów przez Shared Pooler. Dokładny transfer w bajtach na próbę nie został zmierzony — błędna ścieżka kończy się `22P02` przed zwróceniem poprawnego `poker_state`.
 
 ---
 
@@ -172,7 +172,7 @@ Potwierdzona nieefektywność kodowa, ale **pomiar wykluczył ją jako wyjaśnie
 ```
 6 stołów × ~1,7 KB × 1000 refreshów/dzień = ~10 MB/dzień ≈ 300 MB/miesiąc
 ```
-Stanowi to max ~5% całkowitego egressu przy bardzo agresywnych założeniach. Realistycznie poniżej 1%.
+Przy przykładowym założeniu 1000 refreshów dziennie byłoby to około 300 MB miesięcznie. Rzeczywisty udział zależy od request count, ale przy realistycznym korzystaniu z panelu ścieżka jest mało prawdopodobnym źródłem większości egressu.
 
 Opcja A (stateProjection) pozostaje poprawnym mikro-uproszczeniem, ale **nie jest rozwiązaniem #735**.
 
