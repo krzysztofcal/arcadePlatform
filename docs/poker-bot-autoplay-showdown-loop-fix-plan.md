@@ -68,11 +68,15 @@ Zakres:
 
 - w `shared/poker-domain/poker-autoplay.mjs` zachować strukturalne `botFailureReason` obok ogólnego `botStopReason`;
 - w `ws-server/poker/runtime/accepted-bot-autoplay-adapter.mjs` zwrócić dla tego błędu `ok: false`, `changed: false` i konkretny `reason`;
-- w `ws-server/poker/handlers/bot-autoplay.mjs` oraz `ws-server/server.mjs` zastosować suppression dla klucza `tableId + handId + stateVersion + turnUserId`;
-- wykonać najwyżej jeden kontrolowany restore z persisted state;
-- jeśli po restore wystąpi identyczny konkretny błąd dla tego samego klucza stanu, zablokować kolejne autoplay;
+- przed zmianą kontraktu wyszukać i przejrzeć wszystkich konsumentów wyniku `runBotAutoplayLoop()`, `acceptedBotAutoplayExecutor()` i `handleBotStepCommand()`, a dla każdego jawnie potwierdzić obsługę nowego `ok: false` i konkretnego `reason`;
+- rozszerzyć istniejącą mapę `suppressedBotTimeoutSafetyFailures` w `ws-server/server.mjs`, bez tworzenia drugiego rejestru suppression;
+- zachować klucz mapy `tableId`, ponieważ `listDueTurnTimeouts()` filtruje po tabeli, a w wartości zapisać fingerprint `{ handId, stateVersion, turnUserId, reason }`;
+- w `isBotTimeoutSafetyRetrySuppressed()` porównać zapisany fingerprint z bieżącym stanem runtime i zwrócić `true` wyłącznie dla identycznego `tableId + handId + stateVersion + turnUserId`;
+- zablokować kolejne autoplay po pierwszym konkretnym deterministycznym błędzie dla tego samego fingerprintu;
 - zapisać pojedynczy terminalny `klog` z `tableId`, `handId`, `stateVersion`, `phase`, `turnUserId` i konkretnym `reason`;
-- usunąć suppression po zmianie `stateVersion` lub `handId`, wyładowaniu/zamknięciu stołu albo skutecznym recovery.
+- w `isBotTimeoutSafetyRetrySuppressed()` usunąć wpis po zmianie `stateVersion`, `handId` lub `turnUserId`;
+- w istniejącym `pruneBotTimeoutSafetySuppressions()` usuwać wpis po wyładowaniu albo zamknięciu stołu;
+- przy każdym poprawnie zakończonym autoplay dla tabeli usunąć jej wpis z `suppressedBotTimeoutSafetyFailures`.
 
 Zachowanie po suppression:
 
@@ -80,10 +84,26 @@ Zachowanie po suppression:
 - PR A nie wykonuje automatycznego settlementu;
 - PR A nie modyfikuje stosów ani puli;
 - PR A nie zamyka i nie naprawia stołu bez osobnego, bezpiecznego projektu księgowego;
-- po nieudanym restore stół może pozostać aktywny bez postępu;
+- PR A nie dodaje ani nie wywołuje restore dla tej nowej ścieżki błędu;
+- stół może pozostać aktywny bez postępu;
 - terminalny log oznacza jawny stan wymagający recovery lub ręcznej analizy.
 
 Termin `quarantine` nie jest używany w PR A, ponieważ nie ma istniejącej semantyki produktu ani lifecycle stołu odpowiadających takiej operacji.
+
+#### Decyzja dotycząca restore
+
+Istniejący call graph recovery obejmuje `recoverFromPersistConflict()` w `ws-server/poker/runtime/persist-conflict-recovery.mjs`, następnie `restoreTableFromPersisted()` w `ws-server/server.mjs`, a na końcu `tableManager.restoreTableFromPersisted()` w `ws-server/poker/table/table-manager.mjs`.
+
+Ta ścieżka jest obecnie przeznaczona dla konfliktów persistence. `restoreTableFromPersisted()` ładuje persisted bootstrap, a metoda table managera podmienia `table.coreState` bez porównania załadowanej wersji z bieżącą wersją runtime. Nie jest więc gotowym, bezpiecznym mechanizmem recovery dla błędu inwariantu autoplay.
+
+W konsekwencji PR A:
+
+- nie może bezpośrednio wywołać `recoverFromPersistConflict()` dla `showdown_incomplete_community`;
+- nie może dodać nowego odczytu DB ani nowej ścieżki podmiany runtime;
+- nie może zastąpić runtime stanem o niższej lub tej samej wersji tylko dlatego, że autoplay zwróciło błąd;
+- ogranicza się do suppression i terminalnego `klog`.
+
+Projekt recovery należy do PR B. Jeżeli reprodukcja potwierdzi potrzebę restore, projekt musi użyć istniejących metod po dodaniu jawnej kontroli wersji przed mutacją: persisted version nie może być niższa od runtime, a zastąpienie stanu o tej samej wersji wymaga dodatkowego, deterministycznego dowodu uszkodzenia runtime oraz testu braku utraty zaakceptowanej akcji. Walidacja ma nastąpić przed wywołaniem mutującego `tableManager.restoreTableFromPersisted()`.
 
 Minimalne testy regresyjne należy dodać przez rozszerzenie istniejących plików, bez nowego frameworka:
 
@@ -106,6 +126,8 @@ Dopiero wynik reprodukcji wybiera miejsce korekty:
 - albo migracja/obsługa historycznego stanu persisted.
 
 Nie należy z góry wdrażać rekonstrukcji z `deck`, `handSeed` ani restore prywatnego runtime. Nie należy łączyć kilku hipotetycznych korekt w jednym PR.
+
+Jeżeli przyczyna wymaga recovery z persisted state, PR B musi zaprojektować kontrolę wersji i walidację przed mutacją w istniejącym call graphie `recoverFromPersistConflict()` → `restoreTableFromPersisted()` → `tableManager.restoreTableFromPersisted()`. Nie należy tworzyć równoległej ścieżki DB→runtime.
 
 Minimalne testy PR B:
 
@@ -141,11 +163,11 @@ Każda komenda powyżej jest niezależna i jednowierszowa. Nie należy dodawać 
 ## Rollout i monitoring
 
 1. Uruchomić ręczny workflow `WS Preview Deploy` dla konkretnego brancha lub SHA PR A.
-2. Zanotować czas wdrożenia, branch i SHA z logu startowego.
+2. Podać jawny SHA jako wejście workflow, a następnie zapisać w wynikach weryfikacji URL/ID GitHub Actions runu, branch, podany SHA i czas zakończenia deployu. Log startowy z SHA nie jest warunkiem rollout PR A.
 3. Zweryfikować preview jednowierszową komendą:
 
 ```bash
-sudo journalctl -u ws-server-preview --since "<deploy time>" --no-pager | grep -E "poker_act_bot_autoplay_step_error|ws_bot_timeout_safety_autoplay|ws_bot_timeout_safety_same_state_retry_suppressed|showdown_incomplete_community"
+sudo journalctl -u ws-server-preview.service --since "<deploy time>" --no-pager | grep -E "poker_act_bot_autoplay_step_error|ws_bot_timeout_safety_autoplay|ws_bot_timeout_safety_same_state_retry_suppressed|showdown_incomplete_community"
 ```
 
 4. Potwierdzić brak serii powtórzeń dla tego samego `tableId/handId/stateVersion`, poprawne autoplay zwykłych rozdań oraz widoczny pojedynczy terminalny log dla stanu zablokowanego.
