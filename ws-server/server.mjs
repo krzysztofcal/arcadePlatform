@@ -1872,6 +1872,14 @@ const disconnectCleanupRuntime = createDisconnectCleanupRuntime({
 });
 
 function enqueueDisconnectCleanupCandidate({ tableId, userId }) {
+  if (typeof userId !== "string" || !userId) return;
+  // When DB-backed persistence is active, persisted tables always have UUID
+  // IDs. Guest and other non-persisted tables use prefixed string IDs that
+  // cannot target DB-backed cleanup. Filter them out to prevent 22P02 failures.
+  if (hasSupabaseDbUrl) {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (typeof tableId !== "string" || !UUID_RE.test(tableId)) return;
+  }
   disconnectCleanupRuntime.enqueue({ tableId, userId });
 }
 

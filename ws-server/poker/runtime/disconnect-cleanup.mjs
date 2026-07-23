@@ -8,6 +8,8 @@ export function createDisconnectCleanupRuntime({
   nowMs = () => Date.now()
 } = {}) {
   const candidates = new Map();
+  const MAX_CLEANUP_FAILURES = 8;
+  const CLEANUP_RETRY_BACKOFF_BASE_MS = 1000;
 
   function key(tableId, userId) {
     return `${tableId}:${userId}`;
@@ -28,7 +30,8 @@ export function createDisconnectCleanupRuntime({
       tableId,
       userId,
       enqueuedAt,
-      retryNotBeforeMs
+      retryNotBeforeMs,
+      retryCount: Number.isFinite(existing?.retryCount) ? existing.retryCount : 0,
     });
     return true;
   }
@@ -93,6 +96,17 @@ export function createDisconnectCleanupRuntime({
         userId: candidate.userId,
         code: result?.code || 'unknown'
       });
+      candidate.retryCount = Number.isFinite(candidate.retryCount) ? candidate.retryCount + 1 : 1;
+      if (candidate.retryCount > MAX_CLEANUP_FAILURES) {
+        candidates.delete(key(candidate.tableId, candidate.userId));
+        continue;
+      }
+      const backoffMs = Math.min(
+        CLEANUP_RETRY_BACKOFF_BASE_MS * Math.pow(2, Math.min(candidate.retryCount, 6)),
+        120_000
+      );
+      candidate.retryNotBeforeMs = currentNowMs + backoffMs;
+      candidates.set(key(candidate.tableId, candidate.userId), candidate);
     }
   }
 
