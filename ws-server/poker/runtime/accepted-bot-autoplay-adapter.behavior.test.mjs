@@ -6,7 +6,7 @@ import { createBotReactionOverrideStore } from "./bot-reaction-override.mjs";
 import { initHandState, applyAction as applyRuntimeAction, advanceIfNeeded } from "../snapshot-runtime/poker-reducer.mjs";
 import { buildBootstrappedPokerState, applyCoreStateAction } from "../engine/poker-engine.mjs";
 import { computeSharedLegalActions } from "../shared/poker-primitives.mjs";
-import { runAdvanceLoop } from "../../shared/poker-domain/poker-autoplay.mjs";
+import { runAdvanceLoop, runBotAutoplayLoop } from "../../shared/poker-domain/poker-autoplay.mjs";
 import { materializeShowdownAndPayout } from "../snapshot-runtime/poker-materialize-showdown.mjs";
 import { computeShowdown } from "../snapshot-runtime/poker-showdown.mjs";
 import { awardPotsAtShowdown } from "../snapshot-runtime/poker-payout.mjs";
@@ -70,6 +70,44 @@ test("autoplay adapter resolves shared autoplay from neutral shared module path"
 
   const sharedSource = fs.readFileSync(new URL("../../shared/poker-domain/poker-autoplay.mjs", import.meta.url), "utf8");
   assert.doesNotMatch(sharedSource, /netlify\/functions\/_shared/);
+});
+
+test("shared autoplay preserves the concrete apply failure reason", async () => {
+  const state = {
+    handId: "h-shared-contract",
+    phase: "TURN",
+    turnUserId: "bot_2"
+  };
+  const result = await runBotAutoplayLoop({
+    tableId: "t-shared-contract",
+    requestId: "r-shared-contract",
+    initialState: state,
+    initialPrivateState: state,
+    initialVersion: 12,
+    seatBotMap: new Map([["bot_2", true]]),
+    seatUserIdsInOrder: ["bot_2"],
+    maxActions: 1,
+    botsOnlyHandCompletionHardCap: 1,
+    policyVersion: "test",
+    klog: () => {},
+    isActionPhase: () => true,
+    isBotTurn: () => true,
+    computeLegalActions: () => ({ actions: [{ type: "CALL" }] }),
+    chooseBotActionTrivial: () => ({ type: "CALL" }),
+    withoutPrivateState: (value) => value,
+    applyAction: () => {
+      throw new Error("showdown_incomplete_community");
+    },
+    advanceIfNeeded: (value) => ({ state: value, events: [] }),
+    buildPersistedFromPrivateState: (value) => value,
+    persistStep: async () => {
+      throw new Error("failed apply must not persist");
+    }
+  });
+
+  assert.equal(result.botActionCount, 0);
+  assert.equal(result.botStopReason, "apply_action_failed");
+  assert.equal(result.botFailureReason, "showdown_incomplete_community");
 });
 
 test("accepted bot autoplay executes and persists when bot is on turn", async () => {
@@ -799,6 +837,55 @@ test("accepted bot autoplay unavailable shared helper returns safe non-fatal res
   assert.equal(result.reason, "autoplay_unavailable");
   assert.equal(result.changed, false);
   assert.equal(result.noop, true);
+});
+
+test("accepted bot autoplay preserves a concrete shared apply failure as an unchanged error", async () => {
+  const state = {
+    version: 12,
+    tableId: "t-shared-failure",
+    handId: "h-shared-failure",
+    phase: "TURN",
+    turnUserId: "bot_2",
+    seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }],
+    stacks: { human_1: 100, bot_2: 100 }
+  };
+  const moduleSource = `
+    export async function runBotAutoplayLoop({ initialState, initialPrivateState, initialVersion }) {
+      return {
+        responseFinalState: initialState,
+        loopPrivateState: initialPrivateState,
+        loopVersion: initialVersion,
+        botActionCount: 0,
+        botStopReason: "apply_action_failed",
+        botFailureReason: "showdown_incomplete_community"
+      };
+    }
+  `;
+  const moduleUrl = `data:text/javascript,${encodeURIComponent(moduleSource)}`;
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager: {
+      persistedPokerState: () => ({ ...state }),
+      persistedStateVersion: () => state.version,
+      tableSnapshot: () => ({ seats: state.seats })
+    },
+    persistMutatedState: async () => {
+      throw new Error("failure without a changed state must not persist");
+    },
+    restoreTableFromPersisted: async () => {
+      throw new Error("PR A must not restore this invariant failure");
+    },
+    broadcastResyncRequired: () => {},
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    klog: () => {}
+  });
+
+  const result = await run({ tableId: state.tableId, trigger: "bot_timeout_safety", requestId: "r-shared-failure" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.changed, false);
+  assert.equal(result.reason, "showdown_incomplete_community");
+  assert.equal(result.botStopReason, "apply_action_failed");
+  assert.equal(result.botFailureReason, "showdown_incomplete_community");
 });
 
 test("accepted bot autoplay showdown uses trusted private hole cards even for public showdown state", async () => {

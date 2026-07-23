@@ -12,6 +12,14 @@ export function shouldSuppressBotTimeoutSafetyRetry(result) {
     && BOT_AUTOPLAY_SAME_STATE_INVARIANT_FAILURES.has(reason);
 }
 
+export function matchesBotTimeoutSafetySuppression(suppressed, current) {
+  if (!suppressed || !current) return false;
+  return suppressed.tableId === current.tableId
+    && suppressed.handId === current.handId
+    && suppressed.stateVersion === current.stateVersion
+    && suppressed.turnUserId === current.turnUserId;
+}
+
 export async function handleBotStepCommand({
   tableId,
   trigger,

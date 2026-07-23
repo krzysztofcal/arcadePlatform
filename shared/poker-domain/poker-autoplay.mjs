@@ -69,6 +69,7 @@ export const runBotAutoplayLoop = async ({
   let loopSeatUserIdsInOrder = Array.isArray(seatUserIdsInOrder) ? seatUserIdsInOrder.slice() : [];
   let botActionCount = 0;
   let botStopReason = "not_attempted";
+  let botFailureReason = null;
   let lastBotActionSummary = null;
   let responseEvents = [];
   const botsOnlyAtStart = !hasParticipatingHumanInHand(responseFinalState, loopSeatBotMap);
@@ -154,6 +155,9 @@ export const runBotAutoplayLoop = async ({
       botApplied = applyAction(loopPrivateState, botAction);
     } catch (error) {
       botStopReason = "apply_action_failed";
+      botFailureReason = typeof error?.message === "string" && error.message.trim()
+        ? error.message.trim()
+        : "apply_action_failed";
       klog("poker_act_bot_autoplay_step_error", {
         tableId,
         handId: typeof responseFinalState?.handId === "string" && responseFinalState.handId.trim() ? responseFinalState.handId.trim() : null,
@@ -163,7 +167,7 @@ export const runBotAutoplayLoop = async ({
         reason: botStopReason,
         actionType: botAction.type || null,
         actionAmount: botAction.amount ?? null,
-        error: error?.message || "apply_action_failed"
+        error: botFailureReason
       });
       break;
     }
@@ -238,6 +242,7 @@ export const runBotAutoplayLoop = async ({
     loopVersion,
     botActionCount,
     botStopReason,
+    botFailureReason,
     botsOnlyAtStart,
     effectiveMaxBotActions,
     lastBotActionSummary,

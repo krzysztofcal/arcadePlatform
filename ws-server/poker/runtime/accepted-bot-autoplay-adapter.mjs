@@ -1172,12 +1172,18 @@ export function createAcceptedBotStepExecutor({
       const pendingBotTurn = !!finalPublicState
         && isActionPhase(finalPublicState.phase)
         && isBotTurnAuthoritatively(tableManager, tableId, finalTurnUserId, finalSeatBotMap);
+      const botFailureReason =
+        typeof botLoop?.botFailureReason === "string" && botLoop.botFailureReason.trim()
+          ? botLoop.botFailureReason.trim()
+          : null;
 
       return {
-        ok: true,
+        ok: botFailureReason === null,
         changed: (botLoop?.botActionCount || 0) > 0,
         actionCount: botLoop?.botActionCount || 0,
-        reason: botLoop?.botStopReason || "not_attempted",
+        reason: botFailureReason || botLoop?.botStopReason || "not_attempted",
+        botStopReason: botLoop?.botStopReason || "not_attempted",
+        botFailureReason,
         broadcastedStepCount,
         lastBroadcastStateVersion,
         finalStateVersion,
