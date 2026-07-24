@@ -3013,6 +3013,7 @@ wss.on("connection", (ws) => {
           klog: klogSafe
         })
       });
+      maybeScheduleSettledRollover(frame.__resolvedTableId);
       maybeTouchPersistedSeatLastSeen(ws, connState);
       return;
     }

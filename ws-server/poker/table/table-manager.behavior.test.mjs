@@ -191,6 +191,13 @@ test("rolloverSettledHand delays next-hand bootstrap until explicitly invoked", 
   assert.equal(restored.ok, true);
   assert.equal(tableManager.persistedPokerState(tableId).phase, "SETTLED");
 
+  const bootstrap = tableManager.bootstrapHand(tableId, { nowMs: 4_000 });
+  assert.equal(bootstrap.ok, true);
+  assert.equal(bootstrap.changed, false);
+  assert.equal(bootstrap.bootstrap, "settlement_pending");
+  assert.equal(bootstrap.stateVersion, 7);
+  assert.equal(tableManager.persistedPokerState(tableId).phase, "SETTLED");
+
   const rollover = tableManager.rolloverSettledHand({ tableId, nowMs: 5_000 });
 
   assert.equal(rollover.ok, true);

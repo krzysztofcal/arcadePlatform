@@ -780,7 +780,8 @@ export function createTableManager({
 
     const resolvedNowMs = resolveNowMs({ nowMs });
     const existingLiveState = asLiveHandState(table.coreState?.pokerState);
-    if (!existingLiveState && !hasHandEligibleHumanMember({ table, nowMs: resolvedNowMs })) {
+    const settlementPending = table.coreState?.pokerState?.phase === "SETTLED";
+    if (!existingLiveState && !settlementPending && !hasHandEligibleHumanMember({ table, nowMs: resolvedNowMs })) {
       return {
         ok: true,
         changed: false,
@@ -789,7 +790,7 @@ export function createTableManager({
         handId: null
       };
     }
-    const handEligibleCoreState = existingLiveState
+    const handEligibleCoreState = existingLiveState || settlementPending
       ? table.coreState
       : buildHandEligibleCoreState({ table, nowMs: resolvedNowMs });
     const result = bootstrapCoreStateHand({ tableId, coreState: handEligibleCoreState, nowMs: resolvedNowMs });
