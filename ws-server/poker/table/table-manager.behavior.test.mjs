@@ -670,7 +670,11 @@ test("persistedPokerState keeps runtime private cards available for autoplay", (
 });
 
 test("evictTable removes restored runtime table state", () => {
-  const tableManager = createTableManager({ maxSeats: 6 });
+  const evictedTableIds = [];
+  const tableManager = createTableManager({
+    maxSeats: 6,
+    onTableEvicted: (tableId) => evictedTableIds.push(tableId)
+  });
   const tableId = "table_evict_runtime";
 
   const restored = tableManager.restoreTableFromPersisted(tableId, {
@@ -701,6 +705,23 @@ test("evictTable removes restored runtime table state", () => {
   assert.equal(tableManager.evictTable(tableId).existed, true);
   assert.equal(tableManager.listTableIds().includes(tableId), false);
   assert.deepEqual(tableManager.tableState(tableId), { tableId, members: [] });
+  assert.deepEqual(evictedTableIds, [tableId]);
+});
+
+test("normal empty-table removal uses the eviction lifecycle callback", () => {
+  const evictedTableIds = [];
+  const tableManager = createTableManager({
+    maxSeats: 2,
+    presenceTtlMs: 0,
+    onTableEvicted: (tableId) => evictedTableIds.push(tableId)
+  });
+  const tableId = "table_normal_eviction";
+  const ws = fakeWs("ws-normal-eviction");
+
+  assert.equal(tableManager.join({ ws, userId: "user_1", tableId, requestId: "join-1", nowTs: 100 }).ok, true);
+  assert.equal(tableManager.leave({ ws, userId: "user_1", tableId, requestId: "leave-1" }).ok, true);
+  assert.equal(tableManager.listTableIds().includes(tableId), false);
+  assert.deepEqual(evictedTableIds, [tableId]);
 });
 
 test("table manager exposes connected members as sorted {userId, seat} and reuses freed seats", () => {

@@ -169,7 +169,7 @@ test("persisted state writer persists WS hand hole cards after successful db mut
   ]);
 });
 
-test("persisted state writer hole card persistence is idempotent on replayed state write", async () => {
+test("persisted state writer skips acknowledged hole cards on replayed state write", async () => {
   let stateVersion = 4;
   let currentState = null;
   const queries = [];
@@ -212,8 +212,62 @@ test("persisted state writer hole card persistence is idempotent on replayed sta
   assert.deepEqual(first, { ok: true, newVersion: 5 });
   assert.deepEqual(second, { ok: true, newVersion: 5, alreadyApplied: true });
   const holeCardInserts = queries.filter((entry) => entry.query.startsWith("insert into public.poker_hole_cards"));
-  assert.equal(holeCardInserts.length, 2);
+  assert.equal(holeCardInserts.length, 1);
   assert.equal(holeCardInserts.every((entry) => entry.query.includes("on conflict (table_id, hand_id, user_id) do update")), true);
+});
+
+test("persisted state writer rewrites changed or forgotten hole-card acknowledgements", async () => {
+  let stateVersion = 4;
+  const holeCardInserts = [];
+  const writer = createPersistedStateWriter({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: async (fn) => fn({
+      unsafe: async (query) => {
+        const text = String(query);
+        if (text.startsWith("update public.poker_state set version = version + 1")) {
+          stateVersion += 1;
+          return [{ version: stateVersion }];
+        }
+        if (text.startsWith("insert into public.poker_hole_cards")) {
+          holeCardInserts.push(text);
+        }
+        return [];
+      }
+    }),
+    klog: () => {}
+  });
+  const tableId = "00000000-0000-4000-8000-000000000012";
+  const privateState = {
+    tableId,
+    handId: "hand_ack_1",
+    phase: "PREFLOP",
+    holeCardsByUserId: {
+      "00000000-0000-4000-8000-0000000000a1": ["AS", "KD"],
+      "00000000-0000-4000-8000-0000000000b2": ["2C", "2D"]
+    }
+  };
+
+  assert.equal((await writer.writeMutation({ tableId, expectedVersion: 4, nextState: privateState })).ok, true);
+  assert.equal((await writer.writeMutation({ tableId, expectedVersion: 5, nextState: privateState })).ok, true);
+  assert.equal(holeCardInserts.length, 1);
+
+  const changedCards = {
+    ...privateState,
+    holeCardsByUserId: {
+      ...privateState.holeCardsByUserId,
+      "00000000-0000-4000-8000-0000000000b2": ["3C", "3D"]
+    }
+  };
+  assert.equal((await writer.writeMutation({ tableId, expectedVersion: 6, nextState: changedCards })).ok, true);
+  assert.equal(holeCardInserts.length, 2);
+
+  assert.equal(writer.forgetHoleCardAcknowledgement(tableId), true);
+  assert.equal((await writer.writeMutation({ tableId, expectedVersion: 7, nextState: changedCards })).ok, true);
+  assert.equal(holeCardInserts.length, 3);
+
+  const nextHand = { ...changedCards, handId: "hand_ack_2" };
+  assert.equal((await writer.writeMutation({ tableId, expectedVersion: 8, nextState: nextHand })).ok, true);
+  assert.equal(holeCardInserts.length, 4);
 });
 
 test("persisted state writer persists hole cards from real WS bootstrap private audit state when public state is sanitized", async () => {
@@ -331,18 +385,24 @@ test("persisted state writer persists hole cards from real WS rollover private a
 
 test("persisted state writer logs hole card persistence failures without failing gameplay or leaking cards", async () => {
   const logs = [];
+  let stateVersion = 4;
+  let holeCardAttempts = 0;
   const writer = createPersistedStateWriter({
     env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
     beginSql: async (fn) => fn({
       unsafe: async (query) => {
         const text = String(query);
         if (text.startsWith("update public.poker_state set version = version + 1")) {
-          return [{ version: 5 }];
+          stateVersion += 1;
+          return [{ version: stateVersion }];
         }
         if (text.startsWith("insert into public.poker_hole_cards")) {
-          const error = new Error("driver leaked AS KD");
-          error.code = "23505";
-          throw error;
+          holeCardAttempts += 1;
+          if (holeCardAttempts === 1) {
+            const error = new Error("driver leaked AS KD");
+            error.code = "23505";
+            throw error;
+          }
         }
         return [];
       }
@@ -350,7 +410,7 @@ test("persisted state writer logs hole card persistence failures without failing
     klog: (kind, payload) => logs.push({ kind, payload })
   });
 
-  const result = await writer.writeMutation({
+  const mutation = {
     tableId: "00000000-0000-4000-8000-000000000003",
     expectedVersion: 4,
     nextState: {
@@ -363,10 +423,14 @@ test("persisted state writer logs hole card persistence failures without failing
       },
       deck: ["3H"]
     }
-  });
+  };
+  const result = await writer.writeMutation(mutation);
+  const retry = await writer.writeMutation({ ...mutation, expectedVersion: 5 });
 
   assert.deepEqual(result, { ok: true, newVersion: 5 });
-  assert.deepEqual(logs, [{
+  assert.deepEqual(retry, { ok: true, newVersion: 6 });
+  assert.equal(holeCardAttempts, 2);
+  assert.deepEqual(logs.filter((entry) => entry.kind === "ws_hole_cards_persist_failed"), [{
     kind: "ws_hole_cards_persist_failed",
     payload: {
       tableId: "00000000-0000-4000-8000-000000000003",
@@ -375,6 +439,7 @@ test("persisted state writer logs hole card persistence failures without failing
       reason: "23505"
     }
   }]);
+  assert.equal(logs.filter((entry) => entry.kind === "ws_hole_cards_persist_written").length, 1);
   const serializedLogs = JSON.stringify(logs);
   assert.equal(serializedLogs.includes("AS"), false);
   assert.equal(serializedLogs.includes("KD"), false);

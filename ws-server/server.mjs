@@ -238,6 +238,7 @@ function createPublicProfileLoader({ env = process.env } = {}) {
 
 const loadPersistedTableBootstrap = persistedBootstrapEnabled ? createPersistedBootstrapLoader() : null;
 const loadPublicProfiles = hasSupabaseDbUrl ? createPublicProfileLoader() : null;
+let persistedStateWriter = null;
 
 const tableManager = createTableManager({
   presenceTtlMs: resolvePresenceTtlMs(process.env.WS_PRESENCE_TTL_MS),
@@ -247,6 +248,7 @@ const tableManager = createTableManager({
   publicProfileLoader: loadPublicProfiles,
   publicProfileStorageBaseUrl,
   publicProfileLog: klogSafe,
+  onTableEvicted: (tableId) => persistedStateWriter?.forgetHoleCardAcknowledgement(tableId),
   observeOnlyJoin: observeOnlyJoinEnabled
 });
 const tableCommandQueue = createTableCommandQueue({
@@ -274,7 +276,7 @@ const persistedSeatTouchThrottleMs = resolvePositiveInt(
 );
 const streamLog = createStreamLog({ cap: Number(process.env.WS_STREAM_REPLAY_CAP || 128) });
 const tableSnapshotLoader = createTableSnapshotLoader({ env: process.env });
-const persistedStateWriter = persistedStateWriteEnabled ? createPersistedStateWriter({ env: process.env, klog: klogSafe }) : null;
+persistedStateWriter = persistedStateWriteEnabled ? createPersistedStateWriter({ env: process.env, klog: klogSafe }) : null;
 const durableActionStore = hasSupabaseDbUrl && persistedStateWriter?.readDurableActionRequest
   ? persistedStateWriter
   : null;
@@ -1397,6 +1399,7 @@ async function restoreTableFromPersisted(tableId) {
     if (!restored?.ok || !restored?.table) {
       return { ok: false, reason: restored?.code || "restore_failed" };
     }
+    persistedStateWriter?.forgetHoleCardAcknowledgement(tableId);
     const applied = tableManager.restoreTableFromPersisted(tableId, restored.table);
     klogSafe("ws_restore_apply_result", { ok: applied?.ok === true });
     if (!applied?.ok) {
