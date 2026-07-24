@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { executeInactiveCleanup } from "./inactive-cleanup.mjs";
+import { executeTerminalPokerCloseInTx } from "./terminal-close.mjs";
 
 function createCleanupHarness({
   seatRows,
@@ -9,21 +10,35 @@ function createCleanupHarness({
   createdAt = "2026-03-01T00:00:00.000Z",
   lastActivityAt = null,
   updatedAt = null,
-  nowMs = Date.parse("2026-03-01T00:02:00.000Z")
+  nowMs = Date.parse("2026-03-01T00:02:00.000Z"),
+  useRealTerminalClose = false,
+  escrowBalance = null
 }) {
   const seatState = seatRows.map((row) => ({ ...row }));
   const tableState = {
-    stateRow: { state: { ...state } },
+    stateRow: { version: 7, state: { ...state } },
     tableStatus,
     createdAt,
     lastActivityAt,
     updatedAt
   };
+  const escrowState = {
+    id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    balance: escrowBalance
+  };
   const cashouts = [];
+  const logs = [];
+  let tableCloseCount = 0;
   const originalDateNow = Date.now;
 
   const tx = {
     unsafe: async (sql, params = []) => {
+      if (sql.includes("select id, status from public.poker_tables")) {
+        return [{ id: "table_1", status: tableState.tableStatus }];
+      }
+      if (sql.includes("select version, state from public.poker_state")) {
+        return [{ version: tableState.stateRow.version, state: { ...tableState.stateRow.state } }];
+      }
       if (sql.includes("where table_id = $1 and user_id = $2 limit 1 for update")) {
         const [, userId] = params;
         const seat = seatState.find((row) => row.user_id === userId) || null;
@@ -44,8 +59,28 @@ function createCleanupHarness({
       if (sql.includes("select user_id, seat_no, status, is_bot, stack from public.poker_seats")) {
         return seatState.map((row) => ({ ...row }));
       }
+      if (sql.includes("select id, account_type, system_key, status, balance from public.chips_accounts")) {
+        return [{
+          id: escrowState.id,
+          account_type: "ESCROW",
+          system_key: "POKER_TABLE:table_1",
+          status: "active",
+          balance: escrowState.balance
+        }];
+      }
+      if (sql.includes("select balance from public.chips_accounts where id = $1")) {
+        return [{ balance: escrowState.balance }];
+      }
+      if (sql.includes("update public.poker_state set version = version + 1")) {
+        if (Number(params[1]) !== tableState.stateRow.version) return [];
+        tableState.stateRow = {
+          version: tableState.stateRow.version + 1,
+          state: JSON.parse(params[2])
+        };
+        return [{ version: tableState.stateRow.version }];
+      }
       if (sql.includes("update public.poker_state set state = $2 where table_id = $1")) {
-        tableState.stateRow = { state: JSON.parse(params[1]) };
+        tableState.stateRow = { ...tableState.stateRow, state: JSON.parse(params[1]) };
         return [];
       }
       if (sql.includes("select status, created_at") && sql.includes("from public.poker_tables")) {
@@ -58,7 +93,8 @@ function createCleanupHarness({
       }
       if (sql.includes("update public.poker_tables set status = 'CLOSED'")) {
         tableState.tableStatus = "CLOSED";
-        return [];
+        tableCloseCount += 1;
+        return [{ id: "table_1" }];
       }
       if (sql.includes("delete from public.poker_hole_cards")) {
         return [];
@@ -76,7 +112,12 @@ function createCleanupHarness({
   return {
     seatState,
     tableState,
+    escrowState,
     cashouts,
+    logs,
+    get tableCloseCount() {
+      return tableCloseCount;
+    },
     run: async () => {
       Date.now = () => nowMs;
       try {
@@ -87,14 +128,21 @@ function createCleanupHarness({
           requestId: "req-1",
           postTransaction: async (entry) => {
             cashouts.push(entry);
+            if (useRealTerminalClose) {
+              const escrowDebit = entry.entries?.find((ledgerEntry) => ledgerEntry.accountType === "ESCROW")?.amount;
+              escrowState.balance += Number(escrowDebit || 0);
+            }
             return { ok: true };
           },
-          executeTerminalClose: async () => {
-            tableState.stateRow = { state: { ...tableState.stateRow.state, phase: "HAND_DONE", turnUserId: null, stacks: {} } };
-            tableState.tableStatus = "CLOSED";
-            for (let i = 0; i < seatState.length; i += 1) seatState[i] = { ...seatState[i], status: "INACTIVE", stack: 0 };
-            return { ok: true, changed: true, closed: true, status: "cleaned_closed", retryable: false };
-          }
+          executeTerminalClose: useRealTerminalClose
+            ? executeTerminalPokerCloseInTx
+            : async () => {
+                tableState.stateRow = { ...tableState.stateRow, state: { ...tableState.stateRow.state, phase: "HAND_DONE", turnUserId: null, stacks: {} } };
+                tableState.tableStatus = "CLOSED";
+                for (let i = 0; i < seatState.length; i += 1) seatState[i] = { ...seatState[i], status: "INACTIVE", stack: 0 };
+                return { ok: true, changed: true, closed: true, status: "cleaned_closed", retryable: false };
+              },
+          klog: (event, payload) => logs.push({ event, payload })
         });
       } finally {
         Date.now = originalDateNow;
@@ -303,6 +351,89 @@ test("inactive cleanup closes stale live hand for disconnected human after activ
   assert.equal(harness.tableState.stateRow.state.phase, "HAND_DONE");
   assert.equal(harness.tableState.stateRow.state.turnUserId, null);
   assert.deepEqual(harness.tableState.stateRow.state.stacks, {});
+});
+
+test("inactive cleanup refunds stale live-hand contributions including zero-stack all-in participant", async () => {
+  const harness = createCleanupHarness({
+    seatRows: [
+      { user_id: "human_1", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 590 },
+      { user_id: "human_all_in", seat_no: 2, status: "INACTIVE", is_bot: false, stack: 0 }
+    ],
+    state: {
+      phase: "PREFLOP",
+      handId: "h-stale-live-refund",
+      turnUserId: "human_1",
+      turnDeadlineAt: null,
+      seats: [
+        { userId: "human_1", seatNo: 1, status: "ACTIVE" },
+        { userId: "human_all_in", seatNo: 2, status: "ACTIVE" }
+      ],
+      stacks: { human_1: 590 },
+      contributionsByUserId: { human_1: 5, human_all_in: 5 },
+      potTotal: 10,
+      sidePots: []
+    },
+    createdAt: "2026-03-01T00:00:00.000Z",
+    lastActivityAt: "2026-03-01T00:00:10.000Z",
+    nowMs: Date.parse("2026-03-01T00:02:00.000Z"),
+    useRealTerminalClose: true,
+    escrowBalance: 600
+  });
+
+  const result = await harness.run();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.closed, true);
+  assert.equal(result.claimPolicy, "live_hand_cancellation_refund");
+  assert.equal(result.contributionTotal, 10);
+  assert.equal(result.escrowBefore, 600);
+  assert.deepEqual(
+    harness.cashouts.map((cashout) => [cashout.userId, -cashout.entries[0].amount]),
+    [["human_1", 595], ["human_all_in", 5]]
+  );
+  assert.equal(harness.escrowState.balance, 0);
+  assert.equal(harness.tableCloseCount, 1);
+  assert.equal(harness.tableState.tableStatus, "CLOSED");
+  assert.equal(harness.logs.filter((entry) => entry.event === "poker_terminal_accounting_closed").length, 1);
+});
+
+test("inactive cleanup keeps inconsistent stale live-hand contributions fail-closed", async () => {
+  const harness = createCleanupHarness({
+    seatRows: [
+      { user_id: "human_1", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 590 },
+      { user_id: "human_all_in", seat_no: 2, status: "INACTIVE", is_bot: false, stack: 0 }
+    ],
+    state: {
+      phase: "PREFLOP",
+      handId: "h-stale-live-invalid-refund",
+      turnUserId: "human_1",
+      turnDeadlineAt: null,
+      seats: [
+        { userId: "human_1", seatNo: 1, status: "ACTIVE" },
+        { userId: "human_all_in", seatNo: 2, status: "ACTIVE" }
+      ],
+      stacks: { human_1: 590, human_all_in: 0 },
+      contributionsByUserId: { human_1: 5, human_all_in: 4 },
+      potTotal: 10,
+      sidePots: []
+    },
+    createdAt: "2026-03-01T00:00:00.000Z",
+    lastActivityAt: "2026-03-01T00:00:10.000Z",
+    nowMs: Date.parse("2026-03-01T00:02:00.000Z"),
+    useRealTerminalClose: true,
+    escrowBalance: 600
+  });
+
+  const result = await harness.run();
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "terminal_accounting_invariant_failed");
+  assert.equal(result.reason, "terminal_contribution_total_mismatch");
+  assert.equal(harness.cashouts.length, 0);
+  assert.equal(harness.escrowState.balance, 600);
+  assert.equal(harness.tableCloseCount, 0);
+  assert.equal(harness.tableState.tableStatus, "OPEN");
+  assert.equal(harness.tableState.stateRow.version, 7);
 });
 
 test("inactive cleanup does not close stale live hand when another active human remains", async () => {
