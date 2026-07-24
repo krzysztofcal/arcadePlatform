@@ -350,15 +350,15 @@ async function maybeWriteSettlementAudit({ tx, tableId, stateVersion, state, klo
   if (!auditMeta) {
     return { ok: true, skipped: true };
   }
-  const existingRows = await tx.unsafe(
-    "select id from public.poker_actions where table_id = $1 and hand_id = $2 and action_type = $3 limit 1;",
-    [tableId, auditMeta.handId, HAND_SETTLED_ACTION_TYPE]
-  );
-  if (existingRows?.[0]?.id) {
-    return { ok: true, skipped: true, alreadyApplied: true };
-  }
-  await tx.unsafe(
-    "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
+  const insertedRows = await tx.unsafe(
+    `insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+     on conflict (table_id, hand_id)
+       where hand_id is not null
+         and btrim(hand_id) <> ''
+         and action_type = 'HAND_SETTLED'
+     do nothing
+     returning id;`,
     [
       tableId,
       stateVersion,
@@ -372,6 +372,9 @@ async function maybeWriteSettlementAudit({ tx, tableId, stateVersion, state, klo
       JSON.stringify(auditMeta)
     ]
   );
+  if (!insertedRows?.[0]?.id) {
+    return { ok: true, skipped: true, alreadyApplied: true };
+  }
   klog("ws_hand_settlement_audit_written", {
     tableId,
     handId: auditMeta.handId,
@@ -387,16 +390,15 @@ async function maybeWriteAcceptedActionAudit({ tx, tableId, stateVersion, state,
     return { ok: true, skipped: true };
   }
 
-  const existingRows = await tx.unsafe(
-    "select id from public.poker_actions where table_id = $1 and request_id = $2 limit 1;",
-    [tableId, audit.requestId]
-  );
-  if (existingRows?.[0]?.id) {
-    return { ok: true, skipped: true, alreadyApplied: true };
-  }
-
-  await tx.unsafe(
-    "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
+  const insertedRows = await tx.unsafe(
+    `insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+     on conflict (table_id, request_id)
+       where request_id is not null
+         and btrim(request_id) <> ''
+         and action_type in ('FOLD', 'CHECK', 'CALL', 'BET', 'RAISE', 'ALL_IN')
+     do nothing
+     returning id;`,
     [
       audit.tableId,
       audit.version,
@@ -410,6 +412,9 @@ async function maybeWriteAcceptedActionAudit({ tx, tableId, stateVersion, state,
       JSON.stringify(audit.meta)
     ]
   );
+  if (!insertedRows?.[0]?.id) {
+    return { ok: true, skipped: true, alreadyApplied: true };
+  }
   klog("ws_accepted_action_audit_written", {
     tableId,
     handId: audit.handId,
