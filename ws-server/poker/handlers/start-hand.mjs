@@ -42,7 +42,11 @@ export async function handleStartHandCommand({ frame, ws, connState, tableManage
   }
 
   if (!started.changed) {
-    const reason = started.bootstrap === "already_live" ? "already_live" : "not_enough_players";
+    const reason = started.bootstrap === "already_live"
+      ? "already_live"
+      : started.bootstrap === "settlement_pending"
+        ? "settlement_pending"
+        : "not_enough_players";
     sendCommandResult(ws, connState, {
       requestId: frame.requestId ?? null,
       tableId,

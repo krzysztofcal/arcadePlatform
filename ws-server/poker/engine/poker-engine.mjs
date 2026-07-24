@@ -371,6 +371,18 @@ export function replaceBrokeBotsForNextHand({ coreState, settledState, nextVersi
 }
 
 export function bootstrapCoreStateHand({ tableId, coreState, nowMs = Date.now() }) {
+  const currentPokerState = coreState?.pokerState;
+  if (currentPokerState?.phase === "SETTLED") {
+    return {
+      ok: true,
+      changed: false,
+      bootstrap: "settlement_pending",
+      handId: currentPokerState.handId ?? null,
+      stateVersion: coreState.version,
+      coreState
+    };
+  }
+
   const existingLiveState = asLiveHandState(coreState?.pokerState);
   if (existingLiveState) {
     return {

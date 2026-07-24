@@ -5757,6 +5757,117 @@ test("optimistic conflict restore to settled state still schedules delayed rollo
   }
 });
 
+test("join during SETTLED skips generic bootstrap persistence and schedules exactly one rollover", async () => {
+  const secret = "settled-join-rollover-secret";
+  const tableId = "table_ws_settled_join_rollover";
+  const settledVersion = 7;
+  const settledHandId = "hand_ws_settled_join_rollover";
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "active" },
+        seatRows: [
+          { user_id: "seat_actor", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 102 },
+          { user_id: "seat_other", seat_no: 2, status: "ACTIVE", is_bot: false, stack: 98 }
+        ],
+        stateRow: {
+          version: settledVersion,
+          state: {
+            phase: "SETTLED",
+            handId: settledHandId,
+            dealerSeatNo: 1,
+            seats: [
+              { userId: "seat_actor", seatNo: 1, status: "ACTIVE" },
+              { userId: "seat_other", seatNo: 2, status: "ACTIVE" }
+            ],
+            stacks: { seat_actor: 102, seat_other: 98 },
+            pot: 0,
+            potTotal: 0,
+            contributionsByUserId: {},
+            turnUserId: null,
+            turnStartedAt: null,
+            turnDeadlineAt: null,
+            showdown: {
+              handId: settledHandId,
+              winners: ["seat_actor"],
+              reason: "computed"
+            },
+            handSettlement: {
+              handId: settledHandId,
+              settledAt: new Date().toISOString(),
+              payouts: { seat_actor: 4 }
+            }
+          }
+        }
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_POKER_SETTLED_REVEAL_MS: "50",
+      WS_TEST_PERSIST_FAIL_KIND: "bootstrap"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "seat_actor" }), "auth-settled-join-rollover");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "join-settled-rollover",
+      ts: "2026-07-24T12:00:00Z",
+      payload: { tableId }
+    });
+    const joined = await nextMessageOfType(ws, "commandResult");
+    assert.equal(joined.payload.requestId, "join-settled-rollover");
+    assert.equal(joined.payload.status, "accepted");
+    await nextMessageOfType(ws, "table_state");
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "snapshot-after-settled-rollover",
+      ts: "2026-07-24T12:00:01Z",
+      payload: { tableId, view: "snapshot" }
+    });
+    const rolled = await nextMessageForRequest(ws, {
+      type: "stateSnapshot",
+      requestId: "snapshot-after-settled-rollover"
+    });
+    assert.equal(rolled.payload.public.hand.status, "PREFLOP");
+    assert.equal(rolled.payload.stateVersion, settledVersion + 1);
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "snapshot-after-single-rollover",
+      ts: "2026-07-24T12:00:02Z",
+      payload: { tableId, view: "snapshot" }
+    });
+    const stable = await nextMessageForRequest(ws, {
+      type: "stateSnapshot",
+      requestId: "snapshot-after-single-rollover"
+    });
+    assert.equal(stable.payload.public.hand.status, "PREFLOP");
+    assert.equal(stable.payload.stateVersion, settledVersion + 1);
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("failed bootstrap persistence reloads persisted state before further snapshots", async () => {
   const secret = "bootstrap-fail-secret";
   const tableId = "table_ws_bootstrap_fail";
