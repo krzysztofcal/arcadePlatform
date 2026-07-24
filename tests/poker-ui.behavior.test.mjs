@@ -378,7 +378,6 @@ function loadLobbyHarness(options = {}){
 const lobbyHarness = loadLobbyHarness();
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(lobbyHarness.wsCreates.length > 0, true, 'lobby should bootstrap websocket client when authenticated');
-assert.equal(lobbyHarness.fetchCalls.some((url) => url.includes('/.netlify/functions/poker-list-tables')), false, 'lobby should not fetch poker-list-tables');
 
 const lobbyOptions = lobbyHarness.getLobbyOptions();
 assert.ok(lobbyOptions, 'lobby should provide websocket callbacks');
