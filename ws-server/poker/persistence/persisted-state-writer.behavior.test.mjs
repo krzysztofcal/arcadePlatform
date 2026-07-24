@@ -462,9 +462,6 @@ test("persisted state writer appends accepted human action audit row", async () 
         if (text === "update public.poker_tables set last_activity_at = now() where id = $1;") {
           return [];
         }
-        if (text.startsWith("select id from public.poker_actions where table_id = $1 and request_id = $2")) {
-          return [];
-        }
         if (text.startsWith("insert into public.poker_actions")) {
           return [{ id: 100 }];
         }
@@ -513,6 +510,11 @@ test("persisted state writer appends accepted human action audit row", async () 
   assert.deepEqual(result, { ok: true, newVersion: 8 });
   const actionInsert = queries.find((entry) => entry.query.startsWith("insert into public.poker_actions"));
   assert.ok(actionInsert);
+  assert.match(actionInsert.query, /on conflict \(table_id, request_id\)/);
+  assert.match(actionInsert.query, /btrim\(request_id\) <> ''/);
+  assert.match(actionInsert.query, /action_type in \('FOLD', 'CHECK', 'CALL', 'BET', 'RAISE', 'ALL_IN'\)/);
+  assert.match(actionInsert.query, /do nothing\s+returning id/);
+  assert.equal(queries.some((entry) => entry.query.startsWith("select id from public.poker_actions")), false);
   assert.equal(actionInsert.params[0], "t_action");
   assert.equal(actionInsert.params[1], 8);
   assert.equal(actionInsert.params[2], "u2");
@@ -548,11 +550,12 @@ test("persisted state writer appends accepted human action audit row", async () 
   assert.equal(JSON.stringify(meta).includes("AD"), false);
 });
 
-test("persisted state writer dedupes replayed accepted action audit by request_id", async () => {
+test("persisted state writer atomically dedupes concurrent accepted action audit replay", async () => {
   let stateVersion = 7;
   let currentState = null;
   let actionExists = false;
   const queries = [];
+  const logs = [];
   const writer = createPersistedStateWriter({
     env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
     beginSql: async (fn) => fn({
@@ -573,17 +576,15 @@ test("persisted state writer dedupes replayed accepted action audit by request_i
         if (text.startsWith("select version, state from public.poker_state where table_id = $1 limit 1;")) {
           return [{ version: stateVersion, state: currentState }];
         }
-        if (text.startsWith("select id from public.poker_actions where table_id = $1 and request_id = $2")) {
-          return actionExists ? [{ id: 1 }] : [];
-        }
         if (text.startsWith("insert into public.poker_actions")) {
+          if (actionExists) return [];
           actionExists = true;
           return [{ id: 1 }];
         }
         return [];
       }
     }),
-    klog: () => {}
+    klog: (kind, payload) => logs.push({ kind, payload })
   });
 
   const nextState = { tableId: "t_action", handId: "hand_action", phase: "FLOP", potTotal: 12, stacks: { u2: 94 } };
@@ -597,12 +598,17 @@ test("persisted state writer dedupes replayed accepted action audit by request_i
     phaseTo: "FLOP"
   };
 
-  const first = await writer.writeMutation({ tableId: "t_action", expectedVersion: 7, nextState, acceptedActionAudit });
-  const second = await writer.writeMutation({ tableId: "t_action", expectedVersion: 7, nextState, acceptedActionAudit });
+  const [first, second] = await Promise.all([
+    writer.writeMutation({ tableId: "t_action", expectedVersion: 7, nextState, acceptedActionAudit }),
+    writer.writeMutation({ tableId: "t_action", expectedVersion: 7, nextState, acceptedActionAudit })
+  ]);
 
   assert.deepEqual(first, { ok: true, newVersion: 8 });
   assert.deepEqual(second, { ok: true, newVersion: 8, alreadyApplied: true });
-  assert.equal(queries.filter((entry) => entry.query.startsWith("insert into public.poker_actions")).length, 1);
+  assert.equal(queries.filter((entry) => entry.query.startsWith("select id from public.poker_actions")).length, 0);
+  assert.equal(queries.filter((entry) => entry.query.startsWith("insert into public.poker_actions")).length, 2);
+  assert.equal(logs.filter((entry) => entry.kind === "ws_accepted_action_audit_written").length, 1);
+  assert.equal(logs.filter((entry) => entry.kind === "ws_accepted_action_audit_failed").length, 0);
 });
 
 test("persisted state writer logs accepted action audit failures without private hole cards", async () => {
@@ -616,9 +622,6 @@ test("persisted state writer logs accepted action audit failures without private
           return [{ version: 8 }];
         }
         if (text === "update public.poker_tables set last_activity_at = now() where id = $1;") {
-          return [];
-        }
-        if (text.startsWith("select id from public.poker_actions where table_id = $1 and request_id = $2")) {
           return [];
         }
         if (text.startsWith("insert into public.poker_actions")) {
@@ -676,9 +679,6 @@ test("persisted state writer appends exactly one HAND_SETTLED audit event with s
         if (text === "update public.poker_tables set last_activity_at = now() where id = $1;") {
           return [];
         }
-        if (text.startsWith("select id from public.poker_actions where table_id = $1 and hand_id = $2 and action_type = $3")) {
-          return [];
-        }
         if (text.startsWith("insert into public.poker_actions")) {
           return [{ id: 99 }];
         }
@@ -722,6 +722,11 @@ test("persisted state writer appends exactly one HAND_SETTLED audit event with s
   assert.deepEqual(result, { ok: true, newVersion: 5 });
   const auditInsert = queries.find((entry) => entry.query.startsWith("insert into public.poker_actions"));
   assert.ok(auditInsert);
+  assert.match(auditInsert.query, /on conflict \(table_id, hand_id\)/);
+  assert.match(auditInsert.query, /btrim\(hand_id\) <> ''/);
+  assert.match(auditInsert.query, /action_type = 'HAND_SETTLED'/);
+  assert.match(auditInsert.query, /do nothing\s+returning id/);
+  assert.equal(queries.some((entry) => entry.query.startsWith("select id from public.poker_actions")), false);
   assert.equal(auditInsert.params[3], "HAND_SETTLED");
   const auditMeta = JSON.parse(auditInsert.params[9]);
   assert.deepEqual(auditMeta, {
@@ -741,11 +746,12 @@ test("persisted state writer appends exactly one HAND_SETTLED audit event with s
   });
 });
 
-test("persisted state writer does not duplicate HAND_SETTLED audit on replayed settlement write", async () => {
+test("persisted state writer atomically dedupes concurrent HAND_SETTLED audit replay", async () => {
   let stateVersion = 4;
   let currentState = null;
   let auditExists = false;
   const queries = [];
+  const logs = [];
   const writer = createPersistedStateWriter({
     env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
     beginSql: async (fn) => fn({
@@ -766,17 +772,15 @@ test("persisted state writer does not duplicate HAND_SETTLED audit on replayed s
         if (text.startsWith("select version, state from public.poker_state where table_id = $1 limit 1;")) {
           return [{ version: stateVersion, state: currentState }];
         }
-        if (text.startsWith("select id from public.poker_actions where table_id = $1 and hand_id = $2 and action_type = $3")) {
-          return auditExists ? [{ id: 1 }] : [];
-        }
         if (text.startsWith("insert into public.poker_actions")) {
+          if (auditExists) return [];
           auditExists = true;
           return [{ id: 1 }];
         }
         return [];
       }
     }),
-    klog: () => {}
+    klog: (kind, payload) => logs.push({ kind, payload })
   });
 
   const nextState = {
@@ -790,12 +794,17 @@ test("persisted state writer does not duplicate HAND_SETTLED audit on replayed s
     showdown: { reason: "all_folded", winners: ["u1"], potsAwarded: [{ amount: 10, winners: ["u1"], eligibleUserIds: ["u1"] }] }
   };
 
-  const first = await writer.writeMutation({ tableId: "t_settled", expectedVersion: 4, nextState });
-  const second = await writer.writeMutation({ tableId: "t_settled", expectedVersion: 4, nextState });
+  const [first, second] = await Promise.all([
+    writer.writeMutation({ tableId: "t_settled", expectedVersion: 4, nextState }),
+    writer.writeMutation({ tableId: "t_settled", expectedVersion: 4, nextState })
+  ]);
 
   assert.deepEqual(first, { ok: true, newVersion: 5 });
   assert.deepEqual(second, { ok: true, newVersion: 5, alreadyApplied: true });
-  assert.equal(queries.filter((entry) => entry.query.startsWith("insert into public.poker_actions")).length, 1);
+  assert.equal(queries.filter((entry) => entry.query.startsWith("select id from public.poker_actions")).length, 0);
+  assert.equal(queries.filter((entry) => entry.query.startsWith("insert into public.poker_actions")).length, 2);
+  assert.equal(logs.filter((entry) => entry.kind === "ws_hand_settlement_audit_written").length, 1);
+  assert.equal(logs.filter((entry) => entry.kind === "ws_hand_settlement_audit_failed").length, 0);
 });
 
 test("persisted state writer logs settlement audit failures without private hole cards", async () => {
@@ -809,9 +818,6 @@ test("persisted state writer logs settlement audit failures without private hole
           return [{ version: 5 }];
         }
         if (text === "update public.poker_tables set last_activity_at = now() where id = $1;") {
-          return [];
-        }
-        if (text.startsWith("select id from public.poker_actions where table_id = $1 and hand_id = $2 and action_type = $3")) {
           return [];
         }
         if (text.startsWith("insert into public.poker_actions")) {
