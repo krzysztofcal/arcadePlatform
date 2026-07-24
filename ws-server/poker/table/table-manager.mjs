@@ -283,6 +283,7 @@ export function createTableManager({
   publicProfileFreshMs = DEFAULT_PUBLIC_PROFILE_FRESH_MS,
   publicProfileTimeoutMs = DEFAULT_PUBLIC_PROFILE_TIMEOUT_MS,
   publicProfileLog = null,
+  onTableEvicted = null,
   observeOnlyJoin = false,
   enableDebugCore = false,
   nodeEnv = process.env.NODE_ENV
@@ -1513,7 +1514,7 @@ export function createTableManager({
     }
 
     if (table.coreState.members.length === 0 && table.subscribers.size === 0) {
-      tables.delete(resolvedTableId);
+      evictTable(resolvedTableId);
     }
 
     return {
@@ -1788,7 +1789,7 @@ export function createTableManager({
     }
 
     if (table.coreState.members.length === 0 && table.subscribers.size === 0) {
-      tables.delete(resolvedTableId);
+      evictTable(resolvedTableId);
     }
 
     const nextMembersJson = JSON.stringify(nextMembers);
@@ -1896,7 +1897,7 @@ export function createTableManager({
         }
 
         if (table.coreState.members.length === 0 && table.subscribers.size === 0) {
-          tables.delete(joinedTableId);
+          evictTable(joinedTableId);
         }
       }
 
@@ -1914,7 +1915,7 @@ export function createTableManager({
         table.subscribers.delete(ws);
         shouldEmitUpdate = persistedPokerState(subscribedTableId)?.phase === "SETTLED";
         if (table.coreState.members.length === 0 && table.subscribers.size === 0) {
-          tables.delete(subscribedTableId);
+          evictTable(subscribedTableId);
         }
       }
       conn.subscribedTableId = null;
@@ -1940,7 +1941,7 @@ export function createTableManager({
         table.presenceByUserId.delete(userId);
       }
       if (table.coreState.members.length === 0 && table.subscribers.size === 0) {
-        tables.delete(tableId);
+        evictTable(tableId);
       }
     }
     return updates;
@@ -2030,6 +2031,9 @@ export function createTableManager({
 
   function evictTable(tableId) {
     const existed = tables.delete(tableId);
+    if (typeof onTableEvicted === "function") {
+      onTableEvicted(tableId);
+    }
     return { ok: true, existed };
   }
 
