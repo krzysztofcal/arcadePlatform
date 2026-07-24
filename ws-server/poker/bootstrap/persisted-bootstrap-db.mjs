@@ -38,10 +38,51 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
       const tableId = params?.[0];
       const table = tables?.[tableId] || null;
 
+      if (sql.includes("from public.poker_seats s") && sql.includes("order by s.last_seen_at")) {
+        const cutoffMs = Date.parse(String(params?.[0] || ""));
+        const limit = Number(params?.[1]) || 25;
+        return Object.entries(tables)
+          .filter(([, candidate]) => String(candidate?.tableRow?.status || "OPEN").toUpperCase() === "OPEN")
+          .flatMap(([candidateTableId, candidate]) => (candidate?.seatRows || [])
+            .filter((seat) => (
+              String(seat?.status || "ACTIVE").toUpperCase() === "ACTIVE"
+              && seat?.is_bot !== true
+              && Number.isFinite(Date.parse(String(seat?.last_seen_at || "")))
+              && Date.parse(String(seat.last_seen_at)) < cutoffMs
+            ))
+            .map((seat) => ({ table_id: candidateTableId, user_id: seat.user_id, last_seen_at: seat.last_seen_at })))
+          .sort((left, right) => Date.parse(left.last_seen_at) - Date.parse(right.last_seen_at))
+          .slice(0, limit);
+      }
+
+      if (sql.includes("from public.poker_tables t") && sql.includes("cursor_wrapped")) {
+        const cursorTableId = typeof params?.[0] === "string" ? params[0] : "";
+        const limit = Number(params?.[1]) || 10;
+        const openTableIds = Object.entries(tables)
+          .filter(([, candidate]) => String(candidate?.tableRow?.status || "OPEN").toUpperCase() === "OPEN")
+          .map(([candidateTableId]) => candidateTableId)
+          .sort();
+        const afterCursor = cursorTableId
+          ? [...openTableIds.filter((id) => id > cursorTableId), ...openTableIds.filter((id) => id <= cursorTableId)]
+          : openTableIds;
+        return afterCursor.slice(0, limit).map((id) => ({
+          id,
+          cursor_wrapped: Boolean(cursorTableId && id <= cursorTableId)
+        }));
+      }
+
       if (sql.includes("from public.poker_tables")) {
         if (!table?.tableRow) return [];
         const row = table.tableRow;
-        return [{ id: row.id || tableId, status: row.status || "OPEN", max_players: row.max_players || row.maxPlayers || 6, stakes: row.stakes ?? '{"sb":1,"bb":2}' }];
+        return [{
+          id: row.id || tableId,
+          status: row.status || "OPEN",
+          max_players: row.max_players || row.maxPlayers || 6,
+          stakes: row.stakes ?? '{"sb":1,"bb":2}',
+          created_at: row.created_at ?? null,
+          updated_at: row.updated_at ?? null,
+          last_activity_at: row.last_activity_at ?? null
+        }];
       }
 
       if (sql.includes("from public.poker_seats") && sql.includes("order by seat_no asc;")) {
@@ -58,7 +99,8 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
           is_bot: !!r.is_bot,
           bot_profile: r.bot_profile ?? null,
           leave_after_hand: !!r.leave_after_hand,
-          stack: r.stack ?? 0
+          stack: r.stack ?? 0,
+          last_seen_at: r.last_seen_at ?? null
         }));
       }
 
