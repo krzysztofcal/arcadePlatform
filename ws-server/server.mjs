@@ -264,7 +264,7 @@ const janitorLiveHandStaleMs = resolvePositiveInt(process.env.POKER_LIVE_HAND_ST
 });
 const persistedSeatTouchThrottleMs = resolvePositiveInt(
   process.env.WS_PERSISTED_SEAT_TOUCH_THROTTLE_MS,
-  Math.max(1_000, Math.trunc(HEARTBEAT_MS / 2)),
+  30_000,
   { min: 1_000, max: 60_000 }
 );
 const streamLog = createStreamLog({ cap: Number(process.env.WS_STREAM_REPLAY_CAP || 128) });
@@ -544,8 +544,9 @@ async function touchPersistedSeatLastSeen({ tableId, userId }) {
   }
 }
 
-function maybeTouchPersistedSeatLastSeen(connState) {
-  const tableId = connState?.joinedTableId || connState?.subscribedTableId || null;
+function maybeTouchPersistedSeatLastSeen(ws, connState) {
+  const association = tableManager.connectionTableAssociation(ws);
+  const tableId = association?.joinedTableId || association?.subscribedTableId || null;
   const userId = connState?.session?.userId || null;
   if (!tableId || !userId) return;
   void touchPersistedSeatLastSeen({ tableId, userId });
@@ -2821,7 +2822,7 @@ wss.on("connection", (ws) => {
       }
 
       sendFrame(ws, response.frame);
-      maybeTouchPersistedSeatLastSeen(connState);
+      maybeTouchPersistedSeatLastSeen(ws, connState);
       return;
     }
 
@@ -3012,7 +3013,7 @@ wss.on("connection", (ws) => {
           klog: klogSafe
         })
       });
-      maybeTouchPersistedSeatLastSeen(connState);
+      maybeTouchPersistedSeatLastSeen(ws, connState);
       return;
     }
 
@@ -3055,7 +3056,7 @@ wss.on("connection", (ws) => {
         const resyncedSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: resynced.tableState, tableSnapshot: resyncedSnapshot });
         maybeScheduleSettledRollover(tableId);
-        maybeTouchPersistedSeatLastSeen(connState);
+        maybeTouchPersistedSeatLastSeen(ws, connState);
         scheduleObservedBotTurn({
           tableId,
           trigger: "resync",
@@ -3316,7 +3317,7 @@ wss.on("connection", (ws) => {
         const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         sendStateSnapshot(ws, connState, { requestId: frame.requestId ?? null, tableSnapshot });
         maybeScheduleSettledRollover(tableId);
-        maybeTouchPersistedSeatLastSeen(connState);
+        maybeTouchPersistedSeatLastSeen(ws, connState);
         return;
       }
 
@@ -3350,7 +3351,7 @@ wss.on("connection", (ws) => {
       const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
       sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: subscribed.tableState, tableSnapshot });
       maybeScheduleSettledRollover(tableId);
-      maybeTouchPersistedSeatLastSeen(connState);
+      maybeTouchPersistedSeatLastSeen(ws, connState);
       scheduleObservedBotTurn({
         tableId,
         trigger: "table_state_sub",
@@ -3382,7 +3383,7 @@ wss.on("connection", (ws) => {
         return;
       }
       sendGameplaySnapshot(ws, connState, { requestId: frame.requestId ?? null, tableId, snapshot: loaded.snapshot });
-      maybeTouchPersistedSeatLastSeen(connState);
+      maybeTouchPersistedSeatLastSeen(ws, connState);
       return;
     }
 
@@ -3419,7 +3420,7 @@ wss.on("connection", (ws) => {
           klog: klogSafe
         })
       });
-      maybeTouchPersistedSeatLastSeen(connState);
+      maybeTouchPersistedSeatLastSeen(ws, connState);
       return;
     }
 
