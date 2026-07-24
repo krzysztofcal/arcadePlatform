@@ -18,7 +18,6 @@
   - effective production and preview environment values for all timer/freshness variables;
   - number of active WS instances;
   - actual production indexes, constraints, and pre-existing duplicate audit rows;
-  - external consumers of legacy lobby endpoints;
   - measured statement counts and egress before and after each optimization.
 
 ## Revalidated findings
@@ -266,34 +265,7 @@
   - never infer production schema solely from migrations.
 - Expected reduction: none from indexes alone; they enable the one-statement F6 change.
 
-### F8 — legacy lobby endpoints
-
-**Classification: wymaga danych runtime lub sprawdzenia konfiguracji produkcyjnej.**
-
-- Files and methods:
-  - `netlify/functions/poker-list-tables.mjs` — `handler()`, `buildSeatCountsByTableId()`;
-  - `netlify/functions/poker-list-my-tables.mjs` — `handler()`, `buildSeatCountsByTableId()`;
-  - current first-party client: `poker/poker-ws-client.js` subscribes through `lobby_subscribe` and consumes `lobby_snapshot`.
-- DB operations:
-  - list tables: one bounded table SELECT, then one active-seat query joining `poker_state` for returned IDs;
-  - list my tables: one user-seat/table/state SELECT, then the same active-seat/state query;
-  - the state JSON can be repeated for every seat although JavaScript only derives visibility and counts.
-- Frequency:
-  - no current in-repo browser reference to either HTTP endpoint was found;
-  - frequency is zero for the inspected first-party path but cannot be asserted for old builds, bookmarks, external consumers, or direct API users.
-- Query-count and egress:
-  - one or two statements/request;
-  - repeated state JSON may dominate egress for called endpoints.
-- Safety boundary:
-  - removal must not break fallback discovery, external clients, admin/operational tooling, or recovery entry points;
-  - WS lobby remains authoritative for the current browser path.
-- Recommendation:
-  - verify access logs and external consumers first;
-  - if unused for an agreed observation window, remove the endpoints in a dedicated PR;
-  - if retained, optimize their read model separately rather than caching live state.
-- Expected reduction: zero if they are already unused; otherwise equal to observed endpoint traffic. It cannot be estimated statically.
-
-### F9 — dependencies on recovery, cleanup, settlement, and accounting
+### F8 — dependencies on recovery, cleanup, settlement, and accounting
 
 **Classification: nadal aktualny. These operations are correctness boundaries, not removal candidates.**
 
@@ -546,29 +518,6 @@ The order below starts with bounded read-result reduction, then removes duplicat
   - confirm no lost/duplicated action or settlement audit;
   - manual `WS Preview Deploy` for the exact PR ref/SHA is mandatory.
 
-### PR G — decide legacy lobby endpoint disposition from observed consumers
-
-- Goal: remove unused persisted lobby traffic or reduce response duplication if consumers exist.
-- Dependencies: access-log/API-consumer verification over an agreed window.
-- Files:
-  - `netlify/functions/poker-list-tables.mjs`;
-  - `netlify/functions/poker-list-my-tables.mjs`;
-  - consumer references, documentation, or redirects only if confirmed.
-- Current behavior: no first-party browser caller found; each external request performs one or two SQL reads and can repeat state JSON per seat.
-- Minimal change:
-  - if unused, remove the two endpoints and references in a dedicated PR;
-  - if used, retain the contract and replace repeated state/seat transfer with one bounded visibility/count projection;
-  - do not add caching.
-- Predicted reduction: must be based on observed endpoint calls; zero if already unused.
-- Risk: medium.
-- Breaking impact: endpoint removal is explicitly breaking for unknown external clients.
-- Rollback: restore functions or revert the read-model query.
-- Verification:
-  - current WS lobby subscribe/snapshot path;
-  - direct endpoint contract if retained;
-  - first-party quick-seat/create/join flows;
-  - CSP/JSP reminder: if any future implementation adds browser script, preserve plain JSP-compatible JavaScript and update the CSP SHA; no JavaScript or CSS is expected for this candidate.
-
 ## Detailed implementation tasks
 
 ### Task set A — SQL-bounded open-table selection
@@ -632,14 +581,6 @@ The order below starts with bounded read-result reduction, then removes duplicat
 5. Reuse existing audit metadata builders and `klog`; do not alter settlement or ledger logic.
 6. Verify actual insert, duplicate no-op, SQL error, state rollback behavior, and audit timeline.
 
-### Task set G — legacy endpoint decision
-
-1. Confirm external consumers and observed calls before modifying either endpoint.
-2. If unused, remove only the two functions and directly related documentation/configuration.
-3. If used, preserve response contracts and reuse `shouldHideSeatRowFromReadModel()` while moving counts/visibility into bounded SQL.
-4. Do not introduce polling, cache, live-state fallback, JavaScript, or CSS.
-5. Verify WS lobby remains the first-party authority and quick-seat/create flows remain unchanged.
-
 ## Verification strategy
 
 ### This documentation PR
@@ -698,7 +639,6 @@ Operational verification and any added diagnostics must use `klog` only, never `
 - repeated hole-card invocation paths;
 - read-then-insert audit SQL;
 - migration-defined indexes and all in-repo `poker_actions` writers;
-- absence of first-party references to the two legacy list endpoints.
 
 ### Requires environment or production access
 
@@ -714,7 +654,6 @@ Operational verification and any added diagnostics must use `klog` only, never `
 - number of WS instances and whether traffic is partitioned;
 - actual `pg_indexes` and `pg_constraint` definitions in each deployed database;
 - duplicate accepted-action and settlement audit rows;
-- external/legacy endpoint consumers and request frequency;
 - `pg_stat_statements` or equivalent before/after evidence, if available;
 - Supabase DB/pooler egress before/after over comparable windows;
 - table counts, batch occupancy, overlap rate, actions/hand, and bot-action distribution.
@@ -736,7 +675,6 @@ These environment checks are gates, not assumptions. If the required metric is u
 - **Idempotency:** durable request lookup/reserve/finalize remains unchanged; no optimization may replace it with memory-only state.
 - **Balance and ledger:** no planned optimization changes account lookup, ledger posting, escrow checks, stack projection, cashout, or idempotency keys.
 - **Terminal chip conservation:** terminal close reads and writes remain untouched; query reduction is never allowed to bypass claim/escrow equality or zero-escrow verification.
-- **Legacy API breaking impact:** removing either legacy endpoint is breaking for unknown external consumers and requires evidence plus explicit release documentation.
 - **Observability:** changes to log counts or meanings must be stated; all logging remains through `klog`.
 - **CSP/JSP/CSS:** no browser code is planned. If a later implementation unexpectedly adds a script, it must remain plain JSP-compatible JavaScript and its CSP SHA must be updated. Any future CSS must retain one line per selector.
 

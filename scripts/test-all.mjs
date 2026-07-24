@@ -76,7 +76,6 @@ run("node", ["shared/poker-domain/leave.behavior.test.mjs"], "poker-domain-leave
 run("node", ["shared/poker-domain/deferred-leave-finalization.behavior.test.mjs"], "poker-domain-deferred-leave-finalization-behavior");
 run("node", ["shared/poker-domain/human-stack-accounting.behavior.test.mjs"], "poker-domain-human-stack-accounting-behavior");
 run("node", ["shared/poker-domain/rebuy.behavior.test.mjs"], "poker-domain-rebuy-behavior");
-run("node", ["tests/poker-table-list.left-player-filter.behavior.test.mjs"], "poker-table-list-left-player-filter-behavior");
 run("node", ["shared/poker-domain/inactive-cleanup.behavior.test.mjs"], "poker-domain-inactive-cleanup-behavior");
 run("node", ["tests/poker-inactive-cleanup.behavior.test.mjs"], "poker-inactive-cleanup-behavior");
 run("node", ["tests/poker-materialize-settlement.payouts.test.mjs"], "poker-materialize-settlement-payouts");
