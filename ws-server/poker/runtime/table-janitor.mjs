@@ -4,6 +4,7 @@ const DEFAULT_TABLE_CLOSE_GRACE_MS = 60_000;
 const DEFAULT_LIVE_HAND_STALE_MS = 15_000;
 const LIVE_HAND_PHASES = new Set(["POSTING_BLINDS", "PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"]);
 const ACTION_HAND_PHASES = new Set(["PREFLOP", "FLOP", "TURN", "RIVER"]);
+const TERMINAL_ACCOUNTING_INVARIANT_FAILED = "terminal_accounting_invariant_failed";
 
 function normalizePositiveInt(value, fallback) {
   const parsed = Number(value);
@@ -17,6 +18,80 @@ function normalizeStatus(value, fallback = "OPEN") {
   if (typeof value !== "string") return fallback;
   const normalized = value.trim().toUpperCase();
   return normalized || fallback;
+}
+
+function normalizeRequiredString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+export function createNonRetryableTerminalJanitorSuppression({
+  tableId,
+  stateVersion,
+  tableStatus,
+  classification,
+  result,
+  nowMs = Date.now(),
+  ttlMs
+} = {}) {
+  const normalizedTableId = normalizeRequiredString(tableId);
+  const normalizedStateVersion = stateVersion;
+  const normalizedTableStatus = normalizeStatus(tableStatus, "");
+  const normalizedClassification = normalizeRequiredString(classification?.classification);
+  const action = normalizeRequiredString(classification?.action);
+  const reasonCode = normalizeRequiredString(classification?.reasonCode);
+  const targetUserId = normalizeRequiredString(classification?.userId);
+  const code = normalizeRequiredString(result?.code);
+  const reason = normalizeRequiredString(result?.reason);
+  const normalizedNowMs = Number(nowMs);
+  const normalizedTtlMs = Number(ttlMs);
+  if (
+    !normalizedTableId
+    || !Number.isInteger(normalizedStateVersion)
+    || normalizedStateVersion < 0
+    || !normalizedTableStatus
+    || !normalizedClassification
+    || !action
+    || !reasonCode
+    || !Number.isFinite(normalizedNowMs)
+    || !Number.isFinite(normalizedTtlMs)
+    || normalizedTtlMs <= 0
+    || result?.ok !== false
+    || result?.changed !== false
+    || result?.closed !== false
+    || result?.retryable !== false
+    || code !== TERMINAL_ACCOUNTING_INVARIANT_FAILED
+    || !reason
+  ) {
+    return null;
+  }
+  return {
+    tableId: normalizedTableId,
+    stateVersion: normalizedStateVersion,
+    tableStatus: normalizedTableStatus,
+    classification: normalizedClassification,
+    action,
+    reasonCode,
+    targetUserId,
+    code,
+    reason,
+    expiresAt: normalizedNowMs + normalizedTtlMs
+  };
+}
+
+export function matchesNonRetryableTerminalJanitorSuppression(
+  suppression,
+  { tableId, stateVersion, tableStatus, classification, nowMs = Date.now() } = {}
+) {
+  if (!suppression || typeof suppression !== "object") return false;
+  const normalizedNowMs = Number(nowMs);
+  if (!Number.isFinite(normalizedNowMs) || normalizedNowMs >= Number(suppression.expiresAt)) return false;
+  return suppression.tableId === normalizeRequiredString(tableId)
+    && suppression.stateVersion === stateVersion
+    && suppression.tableStatus === normalizeStatus(tableStatus, "")
+    && suppression.classification === normalizeRequiredString(classification?.classification)
+    && suppression.action === normalizeRequiredString(classification?.action)
+    && suppression.reasonCode === normalizeRequiredString(classification?.reasonCode)
+    && suppression.targetUserId === normalizeRequiredString(classification?.userId);
 }
 
 function normalizeState(value) {

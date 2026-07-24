@@ -16,7 +16,12 @@ import { adaptPersistedBootstrap } from "./poker/bootstrap/persisted-bootstrap-a
 import { createSessionStore } from "./poker/runtime/session-store.mjs";
 import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
 import { createBotReactionOverrideStore } from "./poker/runtime/bot-reaction-override.mjs";
-import { evaluateTableHealth, runTableJanitor } from "./poker/runtime/table-janitor.mjs";
+import {
+  createNonRetryableTerminalJanitorSuppression,
+  evaluateTableHealth,
+  matchesNonRetryableTerminalJanitorSuppression,
+  runTableJanitor
+} from "./poker/runtime/table-janitor.mjs";
 import { buildStateSnapshotPayload } from "./poker/read-model/state-snapshot.mjs";
 import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
 import { createStreamLog } from "./poker/runtime/stream-log.mjs";
@@ -279,6 +284,15 @@ const persistedSeatTouchByTableUser = new Map();
 const lobbySubscribers = new Set();
 const activeLobbyTablesById = new Map();
 const pendingTableJanitorEvaluationByTableId = new Map();
+const suppressedNonRetryableTerminalJanitorFailuresByTableId = new Map();
+const suppressedTerminalJanitorCountsByReason = new Map();
+const AUTOMATIC_TABLE_JANITOR_TRIGGERS = new Set([
+  "stale_active_seat_sweep",
+  "zombie_table_sweep",
+  "open_table_reconciler"
+]);
+const TERMINAL_JANITOR_SUPPRESSION_TTL_MS = 10 * 60_000;
+const TERMINAL_JANITOR_SUPPRESSION_MAX = 1_000;
 const lobbyEmptyJoinableGraceMs = resolveEmptyJoinableGraceMs(process.env.POKER_TABLE_CLOSE_GRACE_MS);
 const internalRuntimeToken = typeof process.env.POKER_WS_INTERNAL_TOKEN === "string" ? process.env.POKER_WS_INTERNAL_TOKEN.trim() : "";
 const botReactionOverrideStore = createBotReactionOverrideStore({ env: process.env });
@@ -453,6 +467,25 @@ const botAutoplaySummaryTimer = setInterval(() => {
   botAutoplayObservability.flush("interval");
 }, botAutoplayLogSummaryMs);
 botAutoplaySummaryTimer.unref();
+
+function flushSuppressedTerminalJanitorSummary() {
+  if (suppressedTerminalJanitorCountsByReason.size === 0) return;
+  const countsByReason = Object.fromEntries(
+    [...suppressedTerminalJanitorCountsByReason.entries()].sort(([left], [right]) => left.localeCompare(right))
+  );
+  const total = Object.values(countsByReason).reduce((sum, count) => sum + count, 0);
+  suppressedTerminalJanitorCountsByReason.clear();
+  klogSafe("ws_table_janitor_terminal_failure_suppression_summary", {
+    intervalMs: 60_000,
+    total,
+    countsByReason
+  });
+}
+
+const terminalJanitorSuppressionSummaryTimer = setInterval(() => {
+  flushSuppressedTerminalJanitorSummary();
+}, 60_000);
+terminalJanitorSuppressionSummaryTimer.unref();
 
 function loadReleaseMetadata() {
   const fallback = {
@@ -2209,12 +2242,13 @@ async function loadPersistedTableHealthSnapshot(tableId) {
         [tableId]
       );
       const stateRows = await tx.unsafe(
-        "select state from public.poker_state where table_id = $1 limit 1;",
+        "select version, state from public.poker_state where table_id = $1 limit 1;",
         [tableId]
       );
       return {
         table: tableRows?.[0] || null,
         seats: Array.isArray(seatRows) ? seatRows : [],
+        stateVersion: Number.isInteger(Number(stateRows?.[0]?.version)) ? Number(stateRows[0].version) : null,
         state: stateRows?.[0]?.state ?? null
       };
     }, { env: process.env });
@@ -2272,20 +2306,104 @@ async function evaluateTableForJanitor(tableId) {
       }
     };
   }
+  const classification = evaluateTableHealth({
+    tableId,
+    persistedTable: persistedHealth.table,
+    persistedSeats: persistedHealth.seats,
+    persistedState: persistedHealth.state,
+    runtime: buildTableJanitorRuntimeContext(tableId, persistedHealth.seats),
+    nowMs: Date.now(),
+    activeSeatFreshMs,
+    seatedReconnectGraceMs,
+    tableCloseGraceMs: lobbyEmptyJoinableGraceMs,
+    liveHandStaleMs: janitorLiveHandStaleMs
+  });
   return {
-    classification: evaluateTableHealth({
+    classification,
+    suppressionContext: {
       tableId,
-      persistedTable: persistedHealth.table,
-      persistedSeats: persistedHealth.seats,
-      persistedState: persistedHealth.state,
-      runtime: buildTableJanitorRuntimeContext(tableId, persistedHealth.seats),
-      nowMs: Date.now(),
-      activeSeatFreshMs,
-      seatedReconnectGraceMs,
-      tableCloseGraceMs: lobbyEmptyJoinableGraceMs,
-      liveHandStaleMs: janitorLiveHandStaleMs
-    })
+      stateVersion: persistedHealth.stateVersion,
+      tableStatus: typeof persistedHealth.table?.status === "string"
+        ? persistedHealth.table.status.trim().toUpperCase()
+        : "",
+      handId: typeof persistedHealth.state?.handId === "string" ? persistedHealth.state.handId.trim() : "",
+      phase: typeof persistedHealth.state?.phase === "string" ? persistedHealth.state.phase.trim() : ""
+    }
   };
+}
+
+function suppressedTerminalJanitorResult({ trigger, classification, suppressionContext }) {
+  if (!AUTOMATIC_TABLE_JANITOR_TRIGGERS.has(trigger)) return null;
+  const tableId = suppressionContext?.tableId;
+  const existing = suppressedNonRetryableTerminalJanitorFailuresByTableId.get(tableId);
+  if (!existing) return null;
+  if (!matchesNonRetryableTerminalJanitorSuppression(existing, {
+    ...suppressionContext,
+    classification,
+    nowMs: Date.now()
+  })) {
+    suppressedNonRetryableTerminalJanitorFailuresByTableId.delete(tableId);
+    return null;
+  }
+  suppressedTerminalJanitorCountsByReason.set(
+    existing.reason,
+    (suppressedTerminalJanitorCountsByReason.get(existing.reason) || 0) + 1
+  );
+  return {
+    ok: false,
+    changed: false,
+    closed: false,
+    retryable: false,
+    suppressed: true,
+    code: existing.code,
+    reason: existing.reason,
+    status: "same_state_terminal_failure_suppressed"
+  };
+}
+
+function rememberNonRetryableTerminalJanitorFailure({
+  trigger,
+  classification,
+  suppressionContext,
+  result
+}) {
+  if (!AUTOMATIC_TABLE_JANITOR_TRIGGERS.has(trigger)) return;
+  const suppression = createNonRetryableTerminalJanitorSuppression({
+    ...suppressionContext,
+    classification,
+    result,
+    nowMs: Date.now(),
+    ttlMs: TERMINAL_JANITOR_SUPPRESSION_TTL_MS
+  });
+  if (!suppression) return;
+  const existing = suppressedNonRetryableTerminalJanitorFailuresByTableId.get(suppression.tableId);
+  if (existing && matchesNonRetryableTerminalJanitorSuppression(existing, {
+    ...suppressionContext,
+    classification,
+    nowMs: Date.now()
+  })) {
+    return;
+  }
+  if (
+    !suppressedNonRetryableTerminalJanitorFailuresByTableId.has(suppression.tableId)
+    && suppressedNonRetryableTerminalJanitorFailuresByTableId.size >= TERMINAL_JANITOR_SUPPRESSION_MAX
+  ) {
+    const oldestTableId = suppressedNonRetryableTerminalJanitorFailuresByTableId.keys().next().value;
+    if (oldestTableId) {
+      suppressedNonRetryableTerminalJanitorFailuresByTableId.delete(oldestTableId);
+    }
+  }
+  suppressedNonRetryableTerminalJanitorFailuresByTableId.set(suppression.tableId, suppression);
+  klogSafe("ws_table_janitor_terminal_failure_suppression_activated", {
+    tableId: suppression.tableId,
+    stateVersion: suppression.stateVersion,
+    status: suppression.tableStatus,
+    handId: suppressionContext?.handId || null,
+    phase: suppressionContext?.phase || null,
+    code: suppression.code,
+    reason: suppression.reason,
+    ttlMs: TERMINAL_JANITOR_SUPPRESSION_TTL_MS
+  });
 }
 
 async function runEvaluatedTableJanitor({ tableId, trigger, requestId }) {
@@ -2308,15 +2426,29 @@ async function runEvaluatedTableJanitor({ tableId, trigger, requestId }) {
 
   const evaluated = await pendingEvaluation;
   if (evaluated?.result) {
+    suppressedNonRetryableTerminalJanitorFailuresByTableId.delete(tableId);
     return evaluated.result;
   }
-  return runTableJanitor({
+  const suppressedResult = suppressedTerminalJanitorResult({
+    trigger,
+    classification: evaluated?.classification,
+    suppressionContext: evaluated?.suppressionContext
+  });
+  if (suppressedResult) return suppressedResult;
+  const result = await runTableJanitor({
     classification: evaluated?.classification,
     trigger,
     requestId,
     primitives: tableJanitorPrimitives,
     klog: klogSafe
   });
+  rememberNonRetryableTerminalJanitorFailure({
+    trigger,
+    classification: evaluated?.classification,
+    suppressionContext: evaluated?.suppressionContext,
+    result
+  });
+  return result;
 }
 
 async function sweepStaleActiveHumanSeatsAndBroadcast() {

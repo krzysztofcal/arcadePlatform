@@ -284,6 +284,102 @@ async function writeTestModule(source, filename = "ws-test-module.mjs") {
   return { dir, filePath };
 }
 
+async function waitForJsonCounter(filePath, expected, timeoutMs = 5000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const count = Number(JSON.parse(await fs.readFile(filePath, "utf8"))?.count);
+      if (count >= expected) return count;
+    } catch {
+      // The fixture writer may be between its atomic test steps.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Timed out waiting for counter ${expected}`);
+}
+
+async function createTerminalJanitorSuppressionHarness({
+  tableId,
+  cleanupDelayMs = 0,
+  staleSweepMs = "500",
+  openSweepMs = "60000"
+}) {
+  const nowMs = Date.now();
+  const persisted = await writePersistedFile({
+    tables: {
+      [tableId]: {
+        tableRow: {
+          id: tableId,
+          status: "OPEN",
+          max_players: 6,
+          created_at: new Date(nowMs - 600_000).toISOString(),
+          updated_at: new Date(nowMs - 300_000).toISOString(),
+          last_activity_at: new Date(nowMs - 300_000).toISOString()
+        },
+        seatRows: [{
+          user_id: "11111111-1111-4111-8111-111111111111",
+          seat_no: 1,
+          status: "ACTIVE",
+          is_bot: false,
+          stack: 585,
+          last_seen_at: new Date(nowMs - 300_000).toISOString()
+        }],
+        stateRow: {
+          version: 159,
+          state: {
+            tableId,
+            handId: "hand-terminal-suppression",
+            phase: "SETTLED",
+            stacks: { "11111111-1111-4111-8111-111111111111": 585 }
+          }
+        }
+      }
+    }
+  });
+  const counterFile = path.join(persisted.dir, "cleanup-count.json");
+  await fs.writeFile(counterFile, JSON.stringify({ count: 0 }), "utf8");
+  const cleanupModule = await writeTestModule(`
+import fs from "node:fs/promises";
+export function createInactiveCleanupExecutor({ env }) {
+  return async () => {
+    const current = JSON.parse(await fs.readFile(env.WS_TEST_JANITOR_COUNTER_FILE, "utf8"));
+    await fs.writeFile(env.WS_TEST_JANITOR_COUNTER_FILE, JSON.stringify({ count: Number(current.count || 0) + 1 }), "utf8");
+    const delayMs = Number(env.WS_TEST_JANITOR_CLEANUP_DELAY_MS || 0);
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    return {
+      ok: false,
+      changed: false,
+      closed: false,
+      retryable: false,
+      code: "terminal_accounting_invariant_failed",
+      reason: "terminal_claims_mismatch"
+    };
+  };
+}
+`, "inactive-cleanup-terminal-suppression.mjs");
+  const server = await createServer({
+    env: {
+      WS_PERSISTED_STATE_FILE: persisted.filePath,
+      WS_TEST_JANITOR_COUNTER_FILE: counterFile,
+      WS_TEST_JANITOR_CLEANUP_DELAY_MS: String(cleanupDelayMs),
+      WS_INACTIVE_CLEANUP_ADAPTER_MODULE_PATH: `file://${cleanupModule.filePath}`,
+      WS_STALE_ACTIVE_SEAT_SWEEP_MS: staleSweepMs,
+      WS_OPEN_TABLE_JANITOR_SWEEP_MS: openSweepMs,
+      WS_ZOMBIE_TABLE_SWEEP_MS: "60000",
+      WS_TIMEOUT_SWEEP_MS: "60000",
+      WS_DISCONNECT_CLEANUP_SWEEP_MS: "60000"
+    }
+  });
+  return { ...server, ...persisted, counterFile, cleanupModule };
+}
+
+async function destroyTerminalJanitorSuppressionHarness(harness) {
+  harness.child.kill("SIGTERM");
+  await waitForExit(harness.child);
+  await fs.rm(harness.dir, { recursive: true, force: true });
+  await fs.rm(harness.cleanupModule.dir, { recursive: true, force: true });
+}
+
 async function nextMessageOfType(ws, type, timeoutMs = 10000) {
   try {
     return await nextMessageMatching(
@@ -542,6 +638,64 @@ test("zombie cleanup keeps live bots-only table open while the hand is still run
     child.kill("SIGTERM");
     await waitForExit(child);
     await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("automatic janitor suppresses the second unchanged terminal accounting failure before the adapter", async () => {
+  const harness = await createTerminalJanitorSuppressionHarness({
+    tableId: "75200000-0000-4000-8000-000000000001"
+  });
+  try {
+    await waitForListening(harness.child, 5000);
+    await waitForJsonCounter(harness.counterFile, 1);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    const counter = JSON.parse(await fs.readFile(harness.counterFile, "utf8"));
+    assert.equal(counter.count, 1);
+  } finally {
+    await destroyTerminalJanitorSuppressionHarness(harness);
+  }
+});
+
+test("automatic janitor retries once after the persisted state version changes", async () => {
+  const harness = await createTerminalJanitorSuppressionHarness({
+    tableId: "75200000-0000-4000-8000-000000000002"
+  });
+  try {
+    await waitForListening(harness.child, 5000);
+    await waitForJsonCounter(harness.counterFile, 1);
+    const persisted = await readPersistedFile(harness.filePath);
+    const table = persisted.tables["75200000-0000-4000-8000-000000000002"];
+    table.stateRow.version += 1;
+    await fs.writeFile(harness.filePath, `${JSON.stringify(persisted)}\n`, "utf8");
+    await waitForJsonCounter(harness.counterFile, 2);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    const counter = JSON.parse(await fs.readFile(harness.counterFile, "utf8"));
+    assert.equal(counter.count, 2);
+  } finally {
+    await destroyTerminalJanitorSuppressionHarness(harness);
+  }
+});
+
+test("overlapping stale-seat and open-table janitor triggers share one cleanup execution", async () => {
+  const harness = await createTerminalJanitorSuppressionHarness({
+    tableId: "75200000-0000-4000-8000-000000000003",
+    cleanupDelayMs: 6000,
+    staleSweepMs: "500",
+    openSweepMs: "5000"
+  });
+  const logs = [];
+  harness.child.stdout.on("data", (chunk) => logs.push(String(chunk)));
+  try {
+    await waitForListening(harness.child, 5000);
+    await waitForJsonCounter(harness.counterFile, 1);
+    await new Promise((resolve) => setTimeout(resolve, 7000));
+    const counter = JSON.parse(await fs.readFile(harness.counterFile, "utf8"));
+    const joinedLogs = logs.join("");
+    assert.equal(counter.count, 1);
+    assert.match(joinedLogs, /"trigger":"stale_active_seat_sweep"/);
+    assert.match(joinedLogs, /"trigger":"open_table_reconciler"/);
+  } finally {
+    await destroyTerminalJanitorSuppressionHarness(harness);
   }
 });
 
