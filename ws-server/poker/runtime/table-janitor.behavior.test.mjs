@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evaluateTableHealth, runTableJanitor, selectOpenTableJanitorBatch } from "./table-janitor.mjs";
+import {
+  createNonRetryableTerminalJanitorSuppression,
+  evaluateTableHealth,
+  matchesNonRetryableTerminalJanitorSuppression,
+  runTableJanitor,
+  selectOpenTableJanitorBatch
+} from "./table-janitor.mjs";
 
 const NOW_MS = Date.parse("2026-04-23T13:12:00.000Z");
 
@@ -316,4 +322,105 @@ test("runTableJanitor keeps runtime/db mismatch traceable while routing cleanup"
   assert.equal(calls[0].tableId, "t_runtime_mismatch");
   assert.equal(logs[0].kind, "ws_table_janitor_classified");
   assert.equal(logs[0].data.reasonCode, "open_table_without_active_humans");
+});
+
+test("non-retryable terminal janitor suppression matches only the same unexpired state and classification", () => {
+  const classification = {
+    classification: "stale_human_seat",
+    action: "stale_seat_cleanup",
+    reasonCode: "stale_human_last_seen_expired",
+    userId: "user-1"
+  };
+  const suppression = createNonRetryableTerminalJanitorSuppression({
+    tableId: "table-1",
+    stateVersion: 159,
+    tableStatus: "OPEN",
+    classification,
+    result: {
+      ok: false,
+      changed: false,
+      closed: false,
+      retryable: false,
+      code: "terminal_accounting_invariant_failed",
+      reason: "terminal_claims_mismatch"
+    },
+    nowMs: NOW_MS,
+    ttlMs: 600_000
+  });
+
+  assert.equal(suppression?.reason, "terminal_claims_mismatch");
+  assert.equal(matchesNonRetryableTerminalJanitorSuppression(suppression, {
+    tableId: "table-1",
+    stateVersion: 159,
+    tableStatus: "OPEN",
+    classification,
+    nowMs: NOW_MS + 599_999
+  }), true);
+  assert.equal(matchesNonRetryableTerminalJanitorSuppression(suppression, {
+    tableId: "table-1",
+    stateVersion: 160,
+    tableStatus: "OPEN",
+    classification,
+    nowMs: NOW_MS + 1
+  }), false);
+  assert.equal(matchesNonRetryableTerminalJanitorSuppression(suppression, {
+    tableId: "table-1",
+    stateVersion: 159,
+    tableStatus: "OPEN",
+    classification: { ...classification, action: "noop" },
+    nowMs: NOW_MS + 1
+  }), false);
+  assert.equal(matchesNonRetryableTerminalJanitorSuppression(suppression, {
+    tableId: "table-1",
+    stateVersion: 159,
+    tableStatus: "OPEN",
+    classification,
+    nowMs: NOW_MS + 600_000
+  }), false);
+});
+
+test("terminal janitor suppression rejects changed, retryable, and unrelated results", () => {
+  const base = {
+    tableId: "table-1",
+    stateVersion: 159,
+    tableStatus: "OPEN",
+    classification: {
+      classification: "stale_human_seat",
+      action: "stale_seat_cleanup",
+      reasonCode: "stale_human_last_seen_expired",
+      userId: "user-1"
+    },
+    nowMs: NOW_MS,
+    ttlMs: 600_000
+  };
+  const terminalFailure = {
+    ok: false,
+    changed: false,
+    closed: false,
+    retryable: false,
+    code: "terminal_accounting_invariant_failed",
+    reason: "terminal_claims_mismatch"
+  };
+
+  assert.equal(createNonRetryableTerminalJanitorSuppression({
+    ...base,
+    result: { ...terminalFailure, changed: true }
+  }), null);
+  assert.equal(createNonRetryableTerminalJanitorSuppression({
+    ...base,
+    result: { ...terminalFailure, closed: true }
+  }), null);
+  assert.equal(createNonRetryableTerminalJanitorSuppression({
+    ...base,
+    result: { ...terminalFailure, retryable: true }
+  }), null);
+  assert.equal(createNonRetryableTerminalJanitorSuppression({
+    ...base,
+    result: { ...terminalFailure, code: "inactive_cleanup_failed" }
+  }), null);
+  assert.equal(createNonRetryableTerminalJanitorSuppression({
+    ...base,
+    stateVersion: null,
+    result: terminalFailure
+  }), null);
 });
