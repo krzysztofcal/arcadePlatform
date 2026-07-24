@@ -1,5 +1,6 @@
 const TERMINAL_ACCOUNTING_ERROR = "terminal_accounting_invariant_failed";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const LIVE_ACTION_PHASES = new Set(["PREFLOP", "FLOP", "TURN", "RIVER"]);
 
 function normalizeJsonObject(value) {
   if (value && typeof value === "object" && !Array.isArray(value)) return value;
@@ -21,6 +22,10 @@ function normalizeNonNegativeInt(value) {
 function normalizePositiveInt(value) {
   const parsed = normalizeNonNegativeInt(value);
   return parsed != null && parsed > 0 ? parsed : null;
+}
+
+function normalizeStateChipAmount(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
 function normalizeSeatNo(value) {
@@ -50,6 +55,10 @@ function invariantFailure(reason, extra = {}) {
 function addSafe(left, right) {
   const total = left + right;
   return Number.isSafeInteger(total) && total >= 0 ? total : null;
+}
+
+function hasOwn(value, key) {
+  return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 function toClosedInertState(state) {
@@ -293,15 +302,130 @@ export async function postTerminalBotCashout({
   });
 }
 
-function classifyClaims({ state, seatRows }) {
+function projectTerminalClaimAmounts({ state, escrowBefore }) {
   const stacks = normalizeJsonObject(state?.stacks);
   if (!stacks) return invariantFailure("terminal_stack_state_invalid");
+  const normalizedStacks = new Map();
+  let stackTotal = 0;
+  for (const [userIdRaw, amountRaw] of Object.entries(stacks)) {
+    const userId = normalizeString(userIdRaw);
+    const amount = normalizeStateChipAmount(amountRaw);
+    if (!userId || amount == null || normalizedStacks.has(userId)) {
+      return invariantFailure("terminal_stack_state_invalid");
+    }
+    normalizedStacks.set(userId, amount);
+    stackTotal = addSafe(stackTotal, amount);
+    if (stackTotal == null) return invariantFailure("terminal_claims_overflow");
+  }
+
+  const phase = normalizeString(state?.phase).toUpperCase();
+  const liveActionPhase = LIVE_ACTION_PHASES.has(phase);
+  const potPresent = hasOwn(state, "pot");
+  const potTotalPresent = hasOwn(state, "potTotal");
+  const pot = potPresent ? normalizeStateChipAmount(state.pot) : null;
+  const potTotal = potTotalPresent ? normalizeStateChipAmount(state.potTotal) : null;
+  if ((potPresent && pot == null) || (potTotalPresent && potTotal == null)) {
+    return invariantFailure("terminal_pot_state_invalid");
+  }
+  if (potPresent && potTotalPresent && pot !== potTotal) {
+    return invariantFailure("terminal_pot_state_mismatch");
+  }
+  if (liveActionPhase && !potPresent && !potTotalPresent) {
+    return invariantFailure("terminal_pot_state_invalid");
+  }
+  const canonicalPotTotal = potTotalPresent ? potTotal : potPresent ? pot : 0;
+
+  if (!liveActionPhase) {
+    if (canonicalPotTotal !== 0) return invariantFailure("terminal_unresolved_pot");
+    return {
+      ok: true,
+      claimAmounts: normalizedStacks,
+      totalClaims: stackTotal,
+      claimPolicy: "final_stacks",
+      contributionTotal: 0,
+      potTotal: canonicalPotTotal
+    };
+  }
+
+  const contributions = normalizeJsonObject(state?.contributionsByUserId);
+  if (!contributions) return invariantFailure("terminal_contribution_state_invalid");
+  const normalizedContributions = new Map();
+  let contributionTotal = 0;
+  for (const [userIdRaw, amountRaw] of Object.entries(contributions)) {
+    const userId = normalizeString(userIdRaw);
+    const amount = normalizeStateChipAmount(amountRaw);
+    if (!userId || amount == null || normalizedContributions.has(userId)) {
+      return invariantFailure("terminal_contribution_state_invalid");
+    }
+    normalizedContributions.set(userId, amount);
+    contributionTotal = addSafe(contributionTotal, amount);
+    if (contributionTotal == null) return invariantFailure("terminal_claims_overflow");
+  }
+  if (contributionTotal !== canonicalPotTotal) {
+    return invariantFailure("terminal_contribution_total_mismatch");
+  }
+
+  if (hasOwn(state, "sidePots")) {
+    if (!Array.isArray(state.sidePots)) return invariantFailure("terminal_side_pot_state_invalid");
+    if (state.sidePots.length > 0) {
+      let sidePotTotal = 0;
+      for (const sidePot of state.sidePots) {
+        const amount = normalizeStateChipAmount(sidePot?.amount);
+        if (!sidePot || typeof sidePot !== "object" || Array.isArray(sidePot) || amount == null) {
+          return invariantFailure("terminal_side_pot_state_invalid");
+        }
+        sidePotTotal = addSafe(sidePotTotal, amount);
+        if (sidePotTotal == null) return invariantFailure("terminal_claims_overflow");
+      }
+      if (sidePotTotal !== canonicalPotTotal) {
+        return invariantFailure("terminal_side_pot_total_mismatch");
+      }
+    }
+  }
+
+  const settledHandId = normalizeString(state?.handSettlement?.handId);
+  const handId = normalizeString(state?.handId);
+  if (settledHandId && settledHandId !== handId) {
+    return invariantFailure("terminal_settlement_hand_mismatch");
+  }
+
+  const conservedTotal = addSafe(stackTotal, canonicalPotTotal);
+  if (conservedTotal == null) return invariantFailure("terminal_claims_overflow");
+  if (conservedTotal !== escrowBefore) {
+    return invariantFailure("terminal_claims_mismatch", { totalClaims: conservedTotal });
+  }
+
+  const claimUserIds = new Set([...normalizedStacks.keys(), ...normalizedContributions.keys()]);
+  const claimAmounts = new Map();
+  let totalClaims = 0;
+  for (const userId of claimUserIds) {
+    const amount = addSafe(normalizedStacks.get(userId) ?? 0, normalizedContributions.get(userId) ?? 0);
+    if (amount == null) return invariantFailure("terminal_claims_overflow");
+    claimAmounts.set(userId, amount);
+    totalClaims = addSafe(totalClaims, amount);
+    if (totalClaims == null) return invariantFailure("terminal_claims_overflow");
+  }
+  return {
+    ok: true,
+    claimAmounts,
+    totalClaims,
+    claimPolicy: "live_hand_cancellation_refund",
+    contributionTotal,
+    potTotal: canonicalPotTotal
+  };
+}
+
+function classifyClaims({ state, seatRows, escrowBefore }) {
+  const projected = projectTerminalClaimAmounts({ state, escrowBefore });
+  if (!projected.ok) return projected;
   const seatByUserId = new Map();
   const seatByNo = new Map();
   for (const row of Array.isArray(seatRows) ? seatRows : []) {
     const userId = normalizeString(row?.user_id);
     const seatNo = normalizeSeatNo(row?.seat_no);
-    if (!userId || !seatNo || seatByNo.has(seatNo)) return invariantFailure("terminal_seat_state_invalid");
+    if (!userId || !seatNo || seatByUserId.has(userId) || seatByNo.has(seatNo)) {
+      return invariantFailure("terminal_seat_state_invalid");
+    }
     seatByUserId.set(userId, row);
     seatByNo.set(seatNo, row);
   }
@@ -323,22 +447,26 @@ function classifyClaims({ state, seatRows }) {
   const occupiedClaimSeats = new Set();
   const humanClaims = [];
   const botClaims = [];
-  let totalClaims = 0;
-  for (const [userIdRaw, amountRaw] of Object.entries(stacks)) {
-    const userId = normalizeString(userIdRaw);
-    const amount = normalizeNonNegativeInt(amountRaw);
-    if (!userId || amount == null) return invariantFailure("terminal_stack_state_invalid");
+  for (const [userId, amount] of projected.claimAmounts.entries()) {
     if (amount === 0) continue;
     const directSeat = seatByUserId.get(userId) || null;
-    if (directSeat && directSeat?.is_bot !== true) {
+    const stateSeatNo = stateSeatByUserId.get(userId) || null;
+    if (directSeat?.is_bot === false) {
       const seatNo = normalizeSeatNo(directSeat?.seat_no);
-      if (occupiedClaimSeats.has(seatNo)) return invariantFailure("terminal_seat_state_invalid");
+      if (
+        !seatNo
+        || stateSeatNo !== seatNo
+        || stateUserIdBySeatNo.get(seatNo) !== userId
+        || occupiedClaimSeats.has(seatNo)
+      ) {
+        return invariantFailure("terminal_seat_state_invalid");
+      }
       occupiedClaimSeats.add(seatNo);
       humanClaims.push({ userId, seatNo, amount });
     } else {
       const seatNo = directSeat?.is_bot === true
         ? normalizeSeatNo(directSeat?.seat_no)
-        : stateSeatByUserId.get(userId) || null;
+        : stateSeatNo;
       const projectedSeat = seatNo ? seatByNo.get(seatNo) : null;
       if (
         !seatNo
@@ -352,10 +480,16 @@ function classifyClaims({ state, seatRows }) {
       occupiedClaimSeats.add(seatNo);
       botClaims.push({ botUserId: userId, seatNo, amount });
     }
-    totalClaims = addSafe(totalClaims, amount);
-    if (totalClaims == null) return invariantFailure("terminal_claims_overflow");
   }
-  return { ok: true, humanClaims, botClaims, totalClaims };
+  return {
+    ok: true,
+    humanClaims,
+    botClaims,
+    totalClaims: projected.totalClaims,
+    claimPolicy: projected.claimPolicy,
+    contributionTotal: projected.contributionTotal,
+    potTotal: projected.potTotal
+  };
 }
 
 async function postTerminalHumanCashout({ postTransaction, tx, tableId, toStateVersion, claim, createdBy, closeReason }) {
@@ -433,8 +567,6 @@ export async function executeTerminalPokerCloseInTx({
     "select user_id, seat_no, status, is_bot, stack from public.poker_seats where table_id = $1 order by seat_no asc for update;",
     [tableId]
   );
-  const claims = classifyClaims({ state, seatRows });
-  if (!claims.ok) return fail(claims.reason, { stateVersion });
 
   const escrowSystemKey = `POKER_TABLE:${tableId}`;
   const escrowRows = await tx.unsafe(
@@ -452,6 +584,12 @@ export async function executeTerminalPokerCloseInTx({
   ) {
     return fail("escrow_account_missing_or_invalid", { stateVersion });
   }
+  const claims = classifyClaims({ state, seatRows, escrowBefore });
+  if (!claims.ok) return fail(claims.reason, {
+    stateVersion,
+    escrowBefore,
+    totalClaims: claims.totalClaims ?? null
+  });
   if (claims.totalClaims !== escrowBefore) {
     return fail("terminal_claims_mismatch", { stateVersion, escrowBefore, totalClaims: claims.totalClaims });
   }
@@ -548,6 +686,9 @@ export async function executeTerminalPokerCloseInTx({
     retryable: false,
     stateVersion: toStateVersion,
     escrowBefore,
+    claimPolicy: claims.claimPolicy,
+    contributionTotal: claims.contributionTotal,
+    potTotal: claims.potTotal,
     humanSeatCount: claims.humanClaims.length,
     botSeatCount: claims.botClaims.length
   };
@@ -555,6 +696,9 @@ export async function executeTerminalPokerCloseInTx({
     tableId,
     stateVersion: toStateVersion,
     escrowBefore,
+    claimPolicy: result.claimPolicy,
+    contributionTotal: result.contributionTotal,
+    potTotal: result.potTotal,
     humanSeatCount: result.humanSeatCount,
     botSeatCount: result.botSeatCount
   });
