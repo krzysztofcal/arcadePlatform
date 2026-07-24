@@ -29,6 +29,7 @@ The runbook does not authorize adding the unexplained difference to a player, bo
 - Treat `poker_seats.stack` and public stack projections as secondary data.
 - Keep `terminal_claims_mismatch` fail-closed.
 - Never run recovery while a socket, WS runtime, janitor, or admin action may mutate the same table.
+- Enforce recovery isolation with database locks or a runtime-recognized recovery marker; a procedural maintenance window alone is insufficient.
 - Do not use `force_close` to bypass an invariant. The existing endpoint calls the same terminal accounting guard and must fail for an inconsistent table.
 - Do not post a compensating ledger transaction before ownership is proven.
 - Do not directly edit escrow balance, transaction rows, ledger entries, action audits, or idempotency records.
@@ -269,10 +270,27 @@ Only a separately reviewed one-off tool may apply a replayed state. It must:
 - require the expected current state version and state fingerprint;
 - lock the table, state, seats and escrow using existing transaction/locking patterns;
 - abort if any fingerprint, version, escrow, identity or audit value changed;
-- persist one corrected state with an audit record;
-- release the transaction before normal terminal close is invoked through the existing path;
 - remain idempotent;
 - never synthesize the missing amount or modify past ledger rows.
+
+The preferred execution contract is one transaction under one set of locks:
+
+1. Revalidate the approved state version, fingerprint, escrow, identities, audit boundary and replay result after acquiring the locks.
+2. Persist the corrected state and recovery audit.
+3. Invoke the existing terminal accounting and close logic inside the same transaction, reusing its cash-out, idempotency, escrow-zero, inert-state and table-close guarantees.
+4. Commit only after the corrected claims close successfully and all terminal invariants pass.
+
+If terminal close fails, the transaction must roll back the corrected state, recovery audit, cash-outs, ledger entries, seat changes and table changes together. No corrected intermediate state may become visible to runtime or janitors.
+
+A two-transaction implementation is acceptable only if the first transaction atomically writes a technical recovery marker which every WS load, join, action, autoplay, reconnect, janitor and admin mutation path enforces before the corrected state becomes visible. The second transaction must:
+
+- reacquire the same table, state, seat and escrow locks;
+- require the exact recovery marker;
+- revalidate the exact expected state version, fingerprint, escrow, identities, audit boundary and replay result;
+- invoke existing terminal close while the locks remain held;
+- clear the recovery marker only as part of the successful terminal close.
+
+Any mismatch must leave the marker in place and the table unavailable for normal mutation pending investigation. Do not choose the two-transaction design unless all affected runtime and operational callers have been audited and enforcement of the marker is covered by the separately reviewed recovery PR. Merely stopping janitors operationally or assuming that no concurrent socket exists is not sufficient.
 
 The one-off tool and its execution require a separate PR and approval. They are not authorized by this documentation PR.
 
@@ -287,6 +305,7 @@ For every executed Class A or B recovery, record:
 - [ ] preflight state version and phase;
 - [ ] stack, contribution, pot, side-pot and escrow totals;
 - [ ] selected recovery class and approver;
+- [ ] recovery correction and terminal close were atomic under the same locks, or an enforced recovery marker and complete second-transaction revalidation were proven;
 - [ ] one terminal close;
 - [ ] expected and actual cash-out count;
 - [ ] expected and actual aggregate claim total;
