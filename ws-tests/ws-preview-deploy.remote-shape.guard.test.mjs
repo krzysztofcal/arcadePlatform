@@ -34,17 +34,17 @@ test("ws preview deploy remote script matches fixed preview app-dir contract", (
   assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/chips-ledger\.mjs"/);
   assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/deploy-context\.mjs"/);
   assert.match(text, /sudo -n test -d "\$TMP_EXTRACT_DIR\/node_modules\/postgres"/);
-  assert.match(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/ws-server\/" "\$PREVIEW_APP_DIR"\//);
+  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/ws-server\/" "\$PREVIEW_APP_DIR"\//);
   assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/shared"/);
-  assert.match(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/shared\/" "\$PREVIEW_BASE_DIR\/shared"\//);
+  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/shared\/" "\$PREVIEW_BASE_DIR\/shared"\//);
   assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"/);
-  assert.match(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"\//);
+  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"\//);
   assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"/);
-  assert.match(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"\//);
+  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"\//);
   assert.match(text, /sudo -n test -f "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated\/deploy-context\.mjs"/);
   assert.match(text, /sudo -n node --input-type=module -e "await import\('\.\/ws-server\/shared\/poker-domain\/inactive-cleanup-deps\.mjs'\)"/);
   assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/node_modules"/);
-  assert.match(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/node_modules\/" "\$PREVIEW_BASE_DIR\/node_modules"\//);
+  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/node_modules\/" "\$PREVIEW_BASE_DIR\/node_modules"\//);
   assert.doesNotMatch(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR"\/ "\$PREVIEW_BASE_DIR"\//);
   assert.doesNotMatch(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/node_modules"\/ "\$PREVIEW_BASE_DIR\/node_modules"\//);
   assert.doesNotMatch(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/ws-server"\/ "\$PREVIEW_APP_DIR"\//);
@@ -80,7 +80,7 @@ test("ws preview deploy remote script rejects non-stage Supabase env", () => {
 test("ws preview deploy verifies release identity before and after rsync and after restart", () => {
   const text = workflowText();
   const beforeRsync = text.indexOf('verify_release_metadata "$TMP_EXTRACT_DIR/ws-server/release-metadata.json"');
-  const firstRsync = text.indexOf('sudo -n rsync -a --delete "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/');
+  const firstRsync = text.indexOf('sudo -n rsync -a --checksum --delete "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/');
   const afterRsync = text.indexOf('verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json"');
   const restart = text.indexOf('sudo -n systemctl restart "$PREVIEW_SERVICE_NAME"');
   const journalCheck = text.indexOf('sudo -n journalctl -u "$PREVIEW_SERVICE_NAME" --since "$RESTART_SINCE"');
