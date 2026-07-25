@@ -167,6 +167,7 @@ The preview VPS contract is:
 - Supabase target: `SUPABASE_STAGE_PROJECT_REF` must be set, and `SUPABASE_URL` plus `SUPABASE_DB_URL` must target that same stage project ref
 - Internal admin token: `POKER_WS_INTERNAL_TOKEN` must be a long preview-only secret shared only with the deploy-preview-scoped Netlify Function configuration
 - Optional close grace: `POKER_TABLE_CLOSE_GRACE_MS=60000` keeps newly created empty tables open for 60s before cleanup may close them
+- Optional transport watchdog timeout: `WS_TRANSPORT_PONG_TIMEOUT_MS=60000` waits for one outstanding WebSocket control-ping acknowledgement before terminating an unresponsive socket through the existing close/reconnect lifecycle. The accepted range is 30–300 seconds.
 
 Preview deploys unpack into a temporary directory under `/tmp/arcadeplatform-ws-preview` and then sync the extracted files into `/opt/arcade-ws-preview/ws-server`.
 The `WS_PREVIEW_USER` SSH account must have passwordless sudo available to non-interactive GitHub Actions sessions. The workflow checks this with `sudo -n bash -c 'true'` before touching preview app contents because it needs elevated access to validate the systemd unit, read the preview env file, sync files into `/opt/arcade-ws-preview`, and restart `ws-server-preview.service`. Do not use `sudo -n -v` as the local smoke check here: it can still require a password when the same user has both normal passworded sudo rules and command-specific `NOPASSWD` rules.

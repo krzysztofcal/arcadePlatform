@@ -11,6 +11,13 @@ import WebSocket from "ws";
 import { makeBotUserId } from "../shared/poker-domain/bots.mjs";
 import { dealHoleCards, deriveDeck, toCardCodes } from "./poker/shared/poker-primitives.mjs";
 import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
+import { createConnState } from "./poker/runtime/conn-state.mjs";
+import {
+  acknowledgeTransportEvidence,
+  beginTransportTermination,
+  decideTransportWatchdogAction,
+  markTransportPingSent
+} from "./poker/runtime/transport-watchdog.mjs";
 import { buildBootstrappedPokerState } from "./poker/engine/poker-engine.mjs";
 import { createTableManager } from "./poker/table/table-manager.mjs";
 
@@ -18,6 +25,260 @@ const FIXED_RANDOM_BOT_AUTOPLAY_ADAPTER_URL = new URL(
   "./poker/runtime/accepted-bot-autoplay-adapter.fixed-random.fixture.mjs",
   import.meta.url
 ).href;
+
+test("transport watchdog keeps one pending probe and terminates at the timeout boundary", () => {
+  const connState = createConnState();
+
+  const first = decideTransportWatchdogAction(connState, { nowMs: 1_000, timeoutMs: 60_000 });
+  assert.equal(first.action, "ping");
+  assert.equal(markTransportPingSent(connState, first.nowMs), true);
+
+  const beforeBoundary = decideTransportWatchdogAction(connState, { nowMs: 60_999, timeoutMs: 60_000 });
+  assert.deepEqual(beforeBoundary, { action: "noop", reason: "probe_pending", ageMs: 59_999 });
+  assert.equal(markTransportPingSent(connState, 60_999), false, "a pending probe must not be replaced");
+
+  assert.equal(acknowledgeTransportEvidence(connState), true);
+  assert.equal(connState.pendingTransportPingSentAtMs, null);
+
+  const second = decideTransportWatchdogAction(connState, { nowMs: 61_000, timeoutMs: 60_000 });
+  assert.equal(second.action, "ping");
+  assert.equal(markTransportPingSent(connState, second.nowMs), true);
+
+  const atBoundary = decideTransportWatchdogAction(connState, { nowMs: 121_000, timeoutMs: 60_000 });
+  assert.deepEqual(atBoundary, { action: "terminate", reason: "pong_timeout", ageMs: 60_000 });
+  assert.equal(connState.transportTerminationStarted, true);
+
+  const afterBoundaryState = createConnState();
+  assert.equal(markTransportPingSent(afterBoundaryState, 1_000), true);
+  assert.deepEqual(
+    decideTransportWatchdogAction(afterBoundaryState, { nowMs: 61_001, timeoutMs: 60_000 }),
+    { action: "terminate", reason: "pong_timeout", ageMs: 60_001 }
+  );
+});
+
+test("transport watchdog ignores late pong and message evidence after termination starts", () => {
+  const connState = createConnState();
+  assert.equal(markTransportPingSent(connState, 1_000), true);
+  assert.equal(
+    decideTransportWatchdogAction(connState, { nowMs: 61_001, timeoutMs: 60_000 }).action,
+    "terminate"
+  );
+
+  assert.equal(acknowledgeTransportEvidence(connState), false);
+  assert.equal(connState.pendingTransportPingSentAtMs, 1_000);
+  assert.deepEqual(
+    decideTransportWatchdogAction(connState, { nowMs: 70_000, timeoutMs: 60_000 }),
+    { action: "noop", reason: "termination_started" }
+  );
+  assert.equal(beginTransportTermination(connState), false, "termination must remain idempotent");
+});
+
+test("transport watchdog keeps an auto-pong client connected", async () => {
+  const { port, child } = await createServer({
+    env: {
+      NODE_ENV: "test",
+      WS_TRANSPORT_PONG_TIMEOUT_MS: "75"
+    }
+  });
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(ws.readyState, WebSocket.OPEN);
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "hello",
+      requestId: "req-watchdog-healthy",
+      ts: "2026-02-28T00:00:00Z",
+      payload: { supportedVersions: ["1.0"] }
+    });
+    const helloAck = await nextMessage(ws);
+    assert.equal(helloAck.type, "helloAck");
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("transport watchdog terminates a silent autoPong false client exactly once", async () => {
+  const { port, child } = await createServer({
+    env: {
+      NODE_ENV: "test",
+      WS_TRANSPORT_PONG_TIMEOUT_MS: "75"
+    }
+  });
+  let output = "";
+  child.stdout.on("data", (chunk) => {
+    output += String(chunk);
+  });
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port, { autoPong: false });
+    let closeCount = 0;
+    ws.on("close", () => {
+      closeCount += 1;
+    });
+
+    await waitForSocketClose(ws);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    assert.equal(closeCount, 1);
+    assert.equal(
+      output.split("ws_transport_watchdog_terminated").length - 1,
+      1,
+      "one unresponsive socket should emit one terminal watchdog event"
+    );
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("transport watchdog leaves a seat connected when another table socket stays healthy", async () => {
+  const secret = "watchdog-multi-secret";
+  const userId = "watchdog_multi_user";
+  const tableId = "table_watchdog_multi";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+      seatRows: [{ user_id: userId, seat_no: 2, status: "ACTIVE", is_bot: false, stack: 123 }],
+      stateRow: {
+        version: 4,
+        state: {
+          tableId,
+          handId: "hand_watchdog_multi",
+          phase: "PREFLOP",
+          turnUserId: userId,
+          stacks: { [userId]: 123 }
+        }
+      }
+    }
+  };
+  const { port, child } = await createServer({
+    env: {
+      NODE_ENV: "test",
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TRANSPORT_PONG_TIMEOUT_MS: "500",
+      WS_PRESENCE_TTL_MS: "5000",
+      ...persistedBootstrapFixturesEnv(fixtures)
+    }
+  });
+  try {
+    await waitForListening(child, 5000);
+    const token = makeHs256Jwt({ secret, sub: userId });
+    const staleSocket = await connectClient(port, { autoPong: false });
+    await hello(staleSocket);
+    await auth(staleSocket, token, "auth-watchdog-multi-a");
+    sendFrame(staleSocket, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "join-watchdog-multi-a",
+      ts: "2026-02-28T00:00:02Z",
+      payload: { tableId }
+    });
+    await nextMessageOfType(staleSocket, "commandResult");
+
+    const healthySocket = await connectClient(port);
+    await hello(healthySocket);
+    await auth(healthySocket, token, "auth-watchdog-multi-b");
+    sendFrame(healthySocket, {
+      version: "1.0",
+      type: "resync",
+      requestId: "resync-watchdog-multi-b",
+      ts: "2026-02-28T00:00:03Z",
+      payload: { tableId }
+    });
+    const beforeTermination = await nextMessageOfType(healthySocket, "table_state");
+    assert.deepEqual(beforeTermination.payload.members, [{ userId, seat: 2 }]);
+
+    await waitForSocketClose(staleSocket, 3000);
+
+    sendFrame(healthySocket, {
+      version: "1.0",
+      type: "resync",
+      requestId: "resync-watchdog-multi-after",
+      ts: "2026-02-28T00:00:04Z",
+      payload: { tableId }
+    });
+    const afterTermination = await nextMessageOfType(healthySocket, "table_state");
+    assert.deepEqual(afterTermination.payload.members, [{ userId, seat: 2 }]);
+    assert.equal(afterTermination.payload.stacks[userId], 123);
+    healthySocket.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("transport watchdog allows reconnect within grace with the same seat and stack", async () => {
+  const secret = "watchdog-reconnect-secret";
+  const userId = "watchdog_reconnect_user";
+  const tableId = "table_watchdog_reconnect";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+      seatRows: [{ user_id: userId, seat_no: 3, status: "ACTIVE", is_bot: false, stack: 147 }],
+      stateRow: {
+        version: 6,
+        state: {
+          tableId,
+          handId: "hand_watchdog_reconnect",
+          phase: "PREFLOP",
+          turnUserId: userId,
+          stacks: { [userId]: 147 }
+        }
+      }
+    }
+  };
+  const { port, child } = await createServer({
+    env: {
+      NODE_ENV: "test",
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TRANSPORT_PONG_TIMEOUT_MS: "500",
+      WS_PRESENCE_TTL_MS: "5000",
+      WS_SEATED_RECONNECT_GRACE_MS: "5000",
+      ...persistedBootstrapFixturesEnv(fixtures)
+    }
+  });
+  try {
+    await waitForListening(child, 5000);
+    const token = makeHs256Jwt({ secret, sub: userId });
+    const staleSocket = await connectClient(port, { autoPong: false });
+    await hello(staleSocket);
+    await auth(staleSocket, token, "auth-watchdog-reconnect-a");
+    sendFrame(staleSocket, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "join-watchdog-reconnect-a",
+      ts: "2026-02-28T00:00:02Z",
+      payload: { tableId }
+    });
+    await nextMessageOfType(staleSocket, "commandResult");
+    await waitForSocketClose(staleSocket, 3000);
+
+    const reconnectedSocket = await connectClient(port);
+    await hello(reconnectedSocket);
+    await auth(reconnectedSocket, token, "auth-watchdog-reconnect-b");
+    sendFrame(reconnectedSocket, {
+      version: "1.0",
+      type: "resync",
+      requestId: "resync-watchdog-reconnect-b",
+      ts: "2026-02-28T00:00:03Z",
+      payload: { tableId }
+    });
+    const reconnectedState = await nextMessageOfType(reconnectedSocket, "table_state");
+    assert.deepEqual(reconnectedState.payload.members, [{ userId, seat: 3 }]);
+    assert.equal(reconnectedState.payload.stacks[userId], 147);
+    reconnectedSocket.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
 
 test("internal bot reaction admin endpoint requires its token and fails closed outside WS Preview", async () => {
   const { port, child } = await createServer({
@@ -138,11 +399,29 @@ function createServer({ env = {} } = {}) {
   });
 }
 
-function connectClient(port) {
+function connectClient(port, options = {}) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`, options);
     ws.once("open", () => resolve(ws));
     ws.once("error", reject);
+  });
+}
+
+function waitForSocketClose(ws, timeoutMs = 2000) {
+  return new Promise((resolve, reject) => {
+    if (ws.readyState === WebSocket.CLOSED) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => {
+      ws.off("close", onClose);
+      reject(new Error("Timed out waiting for watchdog socket close"));
+    }, timeoutMs);
+    const onClose = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    ws.once("close", onClose);
   });
 }
 
