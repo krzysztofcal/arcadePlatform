@@ -272,13 +272,16 @@ jobs:
                 try {
                   metadata = JSON.parse(fs.readFileSync(metadataFile, "utf8"));
                 } catch {
+                  process.stderr.write(`release metadata missing or invalid: ${metadataFile}\n`);
                   process.exit(1);
                 }
-                if (
-                  metadata?.releaseSha !== expectedSha
-                  || metadata?.deployRef !== expectedRef
-                  || metadata?.environment !== expectedEnvironment
-                ) {
+                const mismatchedFields = [
+                  metadata?.releaseSha !== expectedSha ? "releaseSha" : null,
+                  metadata?.deployRef !== expectedRef ? "deployRef" : null,
+                  metadata?.environment !== expectedEnvironment ? "environment" : null
+                ].filter(Boolean);
+                if (mismatchedFields.length > 0) {
+                  process.stderr.write(`release metadata mismatch: ${mismatchedFields.join(",")}\n`);
                   process.exit(1);
                 }
               ' "$metadata_file" "$RELEASE_SHA" "$DEPLOY_REF" preview
@@ -359,8 +362,9 @@ jobs:
                       } catch {
                         return false;
                       }
-                    });
+                  });
                   if (!matched) {
+                    process.stderr.write("expected ws_artifact_start identity not found\n");
                     process.exit(1);
                   }
                 ' "$RELEASE_SHA" "$DEPLOY_REF" preview
