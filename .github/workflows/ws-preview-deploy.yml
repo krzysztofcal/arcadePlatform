@@ -265,14 +265,21 @@ jobs:
 
             verify_release_metadata() {
               metadata_file="$1"
+              verification_stage="$2"
               sudo -n node -e '
                 const fs = require("fs");
-                const [metadataFile, expectedSha, expectedRef, expectedEnvironment] = process.argv.slice(1);
+                const [
+                  metadataFile,
+                  expectedSha,
+                  expectedRef,
+                  expectedEnvironment,
+                  verificationStage
+                ] = process.argv.slice(1);
                 let metadata;
                 try {
                   metadata = JSON.parse(fs.readFileSync(metadataFile, "utf8"));
                 } catch {
-                  process.stderr.write(`release metadata missing or invalid: ${metadataFile}\n`);
+                  process.stderr.write(`release metadata missing or invalid at ${verificationStage}\n`);
                   process.exit(1);
                 }
                 const mismatchedFields = [
@@ -281,10 +288,14 @@ jobs:
                   metadata?.environment !== expectedEnvironment ? "environment" : null
                 ].filter(Boolean);
                 if (mismatchedFields.length > 0) {
-                  process.stderr.write(`release metadata mismatch: ${mismatchedFields.join(",")}\n`);
+                  process.stderr.write(
+                    `release metadata mismatch at ${verificationStage}: ${mismatchedFields.join(",")}`
+                    + ` expectedSha=${expectedSha} actualSha=${metadata?.releaseSha ?? "missing"}`
+                    + ` expectedRef=${expectedRef} actualRef=${metadata?.deployRef ?? "missing"}\n`
+                  );
                   process.exit(1);
                 }
-              ' "$metadata_file" "$RELEASE_SHA" "$DEPLOY_REF" preview
+              ' "$metadata_file" "$RELEASE_SHA" "$DEPLOY_REF" preview "$verification_stage"
             }
 
             sudo -n rm -rf "$TMP_EXTRACT_DIR"
@@ -297,7 +308,7 @@ jobs:
             sudo -n test -f "$TMP_EXTRACT_DIR/netlify/functions/_generated/deploy-context.mjs"
             sudo -n test -d "$TMP_EXTRACT_DIR/node_modules/postgres"
 
-            verify_release_metadata "$TMP_EXTRACT_DIR/ws-server/release-metadata.json"
+            verify_release_metadata "$TMP_EXTRACT_DIR/ws-server/release-metadata.json" extracted
 
             sudo -n rsync -a --delete "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/
             sudo -n mkdir -p "$PREVIEW_BASE_DIR/shared"
@@ -309,7 +320,7 @@ jobs:
             sudo -n mkdir -p "$PREVIEW_BASE_DIR/node_modules"
             sudo -n rsync -a --delete "$TMP_EXTRACT_DIR/node_modules/" "$PREVIEW_BASE_DIR/node_modules"/
 
-            verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json"
+            verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json" installed-before-restart
             sudo -n test -f "$PREVIEW_BASE_DIR/netlify/functions/_generated/deploy-context.mjs"
             (
               cd "$PREVIEW_BASE_DIR"
@@ -369,7 +380,7 @@ jobs:
                   }
                 ' "$RELEASE_SHA" "$DEPLOY_REF" preview
 
-            verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json"
+            verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json" installed-after-restart
             BASH
             rc=$?
             if [ "$rc" != "0" ]; then
