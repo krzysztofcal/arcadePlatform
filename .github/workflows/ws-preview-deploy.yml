@@ -9,7 +9,7 @@ on:
         type: string
 
 concurrency:
-  group: ws-preview-deploy-${{ inputs.ref }}
+  group: ws-preview-deploy
   cancel-in-progress: false
 
 jobs:
@@ -55,7 +55,7 @@ jobs:
       PREVIEW_ARTIFACT_FILE: ${{ github.workspace }}/.artifacts/ws-preview/ws-preview-dist.tgz
       PREVIEW_STAGE_DIR: ${{ github.workspace }}/.artifacts/ws-preview/stage
       PREVIEW_STAGE_WS_DIR: ${{ github.workspace }}/.artifacts/ws-preview/stage/ws-server
-      PREVIEW_REMOTE_TMP_DIR: /tmp/arcadeplatform-ws-preview
+      PREVIEW_REMOTE_TMP_DIR: /tmp/arcadeplatform-ws-preview-${{ github.run_id }}-${{ github.run_attempt }}
       PREVIEW_BASE_DIR: /opt/arcade-ws-preview
       PREVIEW_APP_DIR: /opt/arcade-ws-preview/ws-server
       PREVIEW_ENV_FILE: /opt/arcade-ws-preview/.env.preview
@@ -167,7 +167,7 @@ jobs:
           username: ${{ secrets.WS_PREVIEW_USER }}
           key: ${{ secrets.WS_PREVIEW_SSH_KEY }}
           source: .artifacts/ws-preview/ws-preview-dist.tgz
-          target: /tmp/arcadeplatform-ws-preview
+          target: ${{ env.PREVIEW_REMOTE_TMP_DIR }}
 
       - name: Atomic preview release switch + restart + health gates on preview VPS
         uses: appleboy/ssh-action@v1.0.3
@@ -201,9 +201,22 @@ jobs:
             set -Eeuo pipefail
 
             TMP_ARCHIVE="$PREVIEW_REMOTE_TMP_DIR/.artifacts/ws-preview/ws-preview-dist.tgz"
-            TMP_EXTRACT_DIR="$PREVIEW_REMOTE_TMP_DIR/extract-$RELEASE_SHA"
+            TMP_EXTRACT_DIR="$PREVIEW_REMOTE_TMP_DIR/extract"
             HEALTH_RETRIES=30
             HEALTH_SLEEP_SEC=1
+
+            case "$PREVIEW_REMOTE_TMP_DIR" in
+              /tmp/arcadeplatform-ws-preview-[0-9]*-[0-9]*) ;;
+              *) echo "invalid run-scoped preview temp dir: $PREVIEW_REMOTE_TMP_DIR"; exit 1 ;;
+            esac
+
+            cleanup() {
+              sudo -n rm -rf -- "$PREVIEW_REMOTE_TMP_DIR" >/dev/null 2>&1 \
+                || rm -rf -- "$PREVIEW_REMOTE_TMP_DIR" >/dev/null 2>&1 \
+                || true
+            }
+
+            trap cleanup EXIT
 
             command -v node >/dev/null 2>&1 || { echo "preview VPS missing nodejs"; exit 1; }
             command -v systemctl >/dev/null 2>&1 || { echo "preview VPS missing systemctl"; exit 1; }
@@ -250,11 +263,40 @@ jobs:
 
             test -f "$TMP_ARCHIVE"
 
-            cleanup() {
-              sudo -n rm -rf "$TMP_EXTRACT_DIR"
+            verify_release_metadata() {
+              metadata_file="$1"
+              verification_stage="$2"
+              sudo -n node -e '
+                const fs = require("fs");
+                const [
+                  metadataFile,
+                  expectedSha,
+                  expectedRef,
+                  expectedEnvironment,
+                  verificationStage
+                ] = process.argv.slice(1);
+                let metadata;
+                try {
+                  metadata = JSON.parse(fs.readFileSync(metadataFile, "utf8"));
+                } catch {
+                  process.stderr.write(`release metadata missing or invalid at ${verificationStage}\n`);
+                  process.exit(1);
+                }
+                const mismatchedFields = [
+                  metadata?.releaseSha !== expectedSha ? "releaseSha" : null,
+                  metadata?.deployRef !== expectedRef ? "deployRef" : null,
+                  metadata?.environment !== expectedEnvironment ? "environment" : null
+                ].filter(Boolean);
+                if (mismatchedFields.length > 0) {
+                  process.stderr.write(
+                    `release metadata mismatch at ${verificationStage}: ${mismatchedFields.join(",")}`
+                    + ` expectedSha=${expectedSha} actualSha=${metadata?.releaseSha ?? "missing"}`
+                    + ` expectedRef=${expectedRef} actualRef=${metadata?.deployRef ?? "missing"}\n`
+                  );
+                  process.exit(1);
+                }
+              ' "$metadata_file" "$RELEASE_SHA" "$DEPLOY_REF" preview "$verification_stage"
             }
-
-            trap cleanup EXIT
 
             sudo -n rm -rf "$TMP_EXTRACT_DIR"
             sudo -n mkdir -p "$TMP_EXTRACT_DIR"
@@ -266,22 +308,26 @@ jobs:
             sudo -n test -f "$TMP_EXTRACT_DIR/netlify/functions/_generated/deploy-context.mjs"
             sudo -n test -d "$TMP_EXTRACT_DIR/node_modules/postgres"
 
-            sudo -n rsync -a --delete "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/
-            sudo -n mkdir -p "$PREVIEW_BASE_DIR/shared"
-            sudo -n rsync -a --delete "$TMP_EXTRACT_DIR/shared/" "$PREVIEW_BASE_DIR/shared"/
-            sudo -n mkdir -p "$PREVIEW_BASE_DIR/netlify/functions/_shared"
-            sudo -n rsync -a --delete "$TMP_EXTRACT_DIR/netlify/functions/_shared/" "$PREVIEW_BASE_DIR/netlify/functions/_shared"/
-            sudo -n mkdir -p "$PREVIEW_BASE_DIR/netlify/functions/_generated"
-            sudo -n rsync -a --delete "$TMP_EXTRACT_DIR/netlify/functions/_generated/" "$PREVIEW_BASE_DIR/netlify/functions/_generated"/
-            sudo -n mkdir -p "$PREVIEW_BASE_DIR/node_modules"
-            sudo -n rsync -a --delete "$TMP_EXTRACT_DIR/node_modules/" "$PREVIEW_BASE_DIR/node_modules"/
+            verify_release_metadata "$TMP_EXTRACT_DIR/ws-server/release-metadata.json" extracted
 
+            sudo -n rsync -a --checksum --delete "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/
+            sudo -n mkdir -p "$PREVIEW_BASE_DIR/shared"
+            sudo -n rsync -a --checksum --delete "$TMP_EXTRACT_DIR/shared/" "$PREVIEW_BASE_DIR/shared"/
+            sudo -n mkdir -p "$PREVIEW_BASE_DIR/netlify/functions/_shared"
+            sudo -n rsync -a --checksum --delete "$TMP_EXTRACT_DIR/netlify/functions/_shared/" "$PREVIEW_BASE_DIR/netlify/functions/_shared"/
+            sudo -n mkdir -p "$PREVIEW_BASE_DIR/netlify/functions/_generated"
+            sudo -n rsync -a --checksum --delete "$TMP_EXTRACT_DIR/netlify/functions/_generated/" "$PREVIEW_BASE_DIR/netlify/functions/_generated"/
+            sudo -n mkdir -p "$PREVIEW_BASE_DIR/node_modules"
+            sudo -n rsync -a --checksum --delete "$TMP_EXTRACT_DIR/node_modules/" "$PREVIEW_BASE_DIR/node_modules"/
+
+            verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json" installed-before-restart
             sudo -n test -f "$PREVIEW_BASE_DIR/netlify/functions/_generated/deploy-context.mjs"
             (
               cd "$PREVIEW_BASE_DIR"
               sudo -n node --input-type=module -e "await import('./ws-server/shared/poker-domain/inactive-cleanup-deps.mjs')"
             )
 
+            RESTART_SINCE="$(date --utc +'%Y-%m-%d %H:%M:%S UTC')"
             sudo -n systemctl restart "$PREVIEW_SERVICE_NAME"
 
             LOCAL_HEALTHZ_BODY=""
@@ -308,8 +354,33 @@ jobs:
               sleep "$HEALTH_SLEEP_SEC"
             done
 
-            trap - EXIT
-            cleanup
+            sudo -n journalctl -u "$PREVIEW_SERVICE_NAME" --since "$RESTART_SINCE" --no-pager -o cat \
+              | node -e '
+                  const fs = require("fs");
+                  const [expectedSha, expectedRef, expectedEnvironment] = process.argv.slice(1);
+                  const prefix = "[klog] ws_artifact_start ";
+                  const matched = fs.readFileSync(0, "utf8")
+                    .split(/\r?\n/)
+                    .filter((line) => line.startsWith(prefix))
+                    .some((line) => {
+                      try {
+                        const metadata = JSON.parse(line.slice(prefix.length));
+                        return (
+                          metadata?.releaseSha === expectedSha
+                          && metadata?.deployRef === expectedRef
+                          && metadata?.environment === expectedEnvironment
+                        );
+                      } catch {
+                        return false;
+                      }
+                  });
+                  if (!matched) {
+                    process.stderr.write("expected ws_artifact_start identity not found\n");
+                    process.exit(1);
+                  }
+                ' "$RELEASE_SHA" "$DEPLOY_REF" preview
+
+            verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json" installed-after-restart
             BASH
             rc=$?
             if [ "$rc" != "0" ]; then
