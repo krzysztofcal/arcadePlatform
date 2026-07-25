@@ -1,11 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const WORKFLOW_PATH = ".github/workflows/ws-preview-deploy.yml";
 
 function workflowText() {
   return fs.readFileSync(WORKFLOW_PATH, "utf8");
+}
+
+function metadataVerifierSource(text) {
+  const match = text.match(
+    /verify_release_metadata\(\) \{[\s\S]*?sudo -n node -e '\n([\s\S]*?)\n\s+' "\$metadata_file"/
+  );
+  assert.ok(match, "missing executable release metadata verifier");
+  return match[1];
 }
 
 test("ws preview deploy remote script matches fixed preview app-dir contract", () => {
@@ -64,4 +75,69 @@ test("ws preview deploy remote script rejects non-stage Supabase env", () => {
   assert.match(text, /preview env SUPABASE_DB_URL must target SUPABASE_STAGE_PROJECT_REF/);
   assert.match(text, /preview env file must define POKER_WS_INTERNAL_TOKEN/);
   assert.match(text, /WS_BOT_REACTION_\(MIN\|MAX\)_MS/);
+});
+
+test("ws preview deploy verifies release identity before and after rsync and after restart", () => {
+  const text = workflowText();
+  const beforeRsync = text.indexOf('verify_release_metadata "$TMP_EXTRACT_DIR/ws-server/release-metadata.json"');
+  const firstRsync = text.indexOf('sudo -n rsync -a --delete "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/');
+  const afterRsync = text.indexOf('verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json"');
+  const restart = text.indexOf('sudo -n systemctl restart "$PREVIEW_SERVICE_NAME"');
+  const journalCheck = text.indexOf('sudo -n journalctl -u "$PREVIEW_SERVICE_NAME" --since "$RESTART_SINCE"');
+  const finalMetadataCheck = text.lastIndexOf('verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json"');
+
+  assert.ok(beforeRsync > 0 && beforeRsync < firstRsync, "archive metadata must be verified before rsync");
+  assert.ok(afterRsync > firstRsync && afterRsync < restart, "installed metadata must be verified before restart");
+  assert.ok(journalCheck > restart, "runtime startup identity must be verified after restart");
+  assert.ok(finalMetadataCheck > journalCheck, "installed metadata must be verified again after runtime startup");
+  assert.match(text, /metadata\?\.releaseSha !== expectedSha/);
+  assert.match(text, /metadata\?\.deployRef !== expectedRef/);
+  assert.match(text, /metadata\?\.environment !== expectedEnvironment/);
+  assert.match(text, /metadata\?\.releaseSha === expectedSha/);
+  assert.match(text, /metadata\?\.deployRef === expectedRef/);
+  assert.match(text, /metadata\?\.environment === expectedEnvironment/);
+  assert.match(text, /ws_artifact_start/);
+});
+
+test("ws preview deploy metadata verifier fails closed on a mismatched SHA", () => {
+  const source = metadataVerifierSource(workflowText());
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ws-preview-metadata-"));
+  const metadataPath = path.join(tempDir, "release-metadata.json");
+  try {
+    fs.writeFileSync(
+      metadataPath,
+      JSON.stringify({ releaseSha: "sha-a", deployRef: "branch-a", environment: "preview" })
+    );
+    const matching = spawnSync(process.execPath, [
+      "-e",
+      source,
+      metadataPath,
+      "sha-a",
+      "branch-a",
+      "preview"
+    ]);
+    assert.equal(matching.status, 0);
+
+    const mismatched = spawnSync(process.execPath, [
+      "-e",
+      source,
+      metadataPath,
+      "sha-b",
+      "branch-a",
+      "preview"
+    ]);
+    assert.notEqual(mismatched.status, 0);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("ws preview deploy cleanup is scoped to the current run temp directory and keeps health gates", () => {
+  const text = workflowText();
+
+  assert.match(text, /trap cleanup EXIT/);
+  assert.match(text, /sudo -n rm -rf -- "\$PREVIEW_REMOTE_TMP_DIR"/);
+  assert.doesNotMatch(text, /rm -rf --? "\/tmp\/arcadeplatform-ws-preview"/);
+  assert.match(text, /curl -fsS "\$PREVIEW_LOCAL_HEALTHZ_URL"/);
+  assert.match(text, /curl -fsS "\$PREVIEW_PUBLIC_HEALTHZ_URL"/);
 });

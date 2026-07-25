@@ -71,6 +71,21 @@ test("ws preview deploy validates workflow files from workflow ref and builds ap
   assert.doesNotMatch(validateSection, /Validate preview-only workflow contract literals/);
 });
 
+test("ws preview deploy serializes all refs and uses one run-scoped remote temp directory", () => {
+  const text = workflowText();
+  const concurrencyBlock = text.match(/^concurrency:\n([\s\S]*?)(?=\n\S)/m)?.[0] ?? "";
+
+  assert.match(concurrencyBlock, /group: ws-preview-deploy\n/);
+  assert.doesNotMatch(concurrencyBlock, /inputs\.ref/);
+  assert.match(
+    text,
+    /PREVIEW_REMOTE_TMP_DIR: \/tmp\/arcadeplatform-ws-preview-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/
+  );
+  assert.match(text, /target: \$\{\{ env\.PREVIEW_REMOTE_TMP_DIR \}\}/);
+  assert.match(text, /PREVIEW_REMOTE_TMP_DIR: \$\{\{ env\.PREVIEW_REMOTE_TMP_DIR \}\}/);
+  assert.match(text, /TMP_ARCHIVE="\$PREVIEW_REMOTE_TMP_DIR\/\.artifacts\/ws-preview\/ws-preview-dist\.tgz"/);
+});
+
 
 test("ws preview deploy workflow keeps preview runtime contract and does not manage Caddy", () => {
   const text = workflowText();
