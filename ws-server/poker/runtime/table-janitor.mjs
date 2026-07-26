@@ -495,7 +495,8 @@ export async function runTableJanitor({
   trigger = "table_janitor",
   requestId = null,
   primitives = {},
-  klog = () => {}
+  klog = () => {},
+  klogVerbose = () => {}
 } = {}) {
   const normalizedClassification = classification && typeof classification === "object"
     ? classification
@@ -518,6 +519,17 @@ export async function runTableJanitor({
       status: "healthy_noop",
       reasonCode: normalizedClassification.reasonCode || null
     };
+    klogVerbose("ws_table_janitor_result", () => ({
+      tableId: normalizedClassification.tableId || null,
+      trigger,
+      requestId: requestId || null,
+      classification: normalizedClassification.classification || null,
+      action,
+      status: result.status,
+      ok: true,
+      changed: false,
+      reasonCode: normalizedClassification.reasonCode || null
+    }));
     return result;
   }
 

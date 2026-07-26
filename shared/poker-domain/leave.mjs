@@ -377,6 +377,7 @@ const executePostLeaveBotAutoplayLoop = async ({
   validatePersistedState,
   botsOnlyInHand,
   klog,
+  klogVerbose,
 }) => {
   if (!isActionPhase(state?.phase)) {
     return { state, version, attempted: false, reason: "not_applicable" };
@@ -415,6 +416,14 @@ const executePostLeaveBotAutoplayLoop = async ({
     return { state, version, attempted: true, reason: privateStateResult.reason };
   }
 
+  const autoplayStartedAtMs = Date.now();
+  klogVerbose("poker_leave_bot_autoplay_loop", () => ({
+    tableId,
+    requestId: requestId || null,
+    stage: "start",
+    phase: typeof autoplayStartState?.phase === "string" ? autoplayStartState.phase : null,
+    botsOnlyInHand
+  }));
   const botLoop = await runBotAutoplayLoop({
     tableId,
     requestId: `bot-auto:post-leave:${requestId || "no-request-id"}`,
@@ -466,6 +475,15 @@ const executePostLeaveBotAutoplayLoop = async ({
       };
     },
   });
+  klogVerbose("poker_leave_bot_autoplay_loop", () => ({
+    tableId,
+    requestId: requestId || null,
+    stage: "outcome",
+    ok: botLoop.botFailureReason == null,
+    actionCount: Number(botLoop.botActionCount || 0),
+    reason: botLoop.botFailureReason || botLoop.botStopReason || "completed",
+    durationMs: Math.max(0, Date.now() - autoplayStartedAtMs)
+  }));
 
   return {
     state: sanitizePersistedState(botLoop.responseFinalState),
@@ -505,6 +523,7 @@ export async function executePokerLeave({
   requestId = null,
   nowMs = Date.now(),
   klog,
+  klogVerbose = () => {},
   includeState = false,
   runPostLeaveBotAutoplay = true,
   hasConnectedHumanPresence = () => false
@@ -827,6 +846,7 @@ export async function executePokerLeave({
               validatePersistedState: (stateToValidate) => validatePersistedStateOrThrow(stateToValidate, makeError),
               botsOnlyInHand,
               klog,
+              klogVerbose,
             });
             latestState = autoplayResult.state;
             latestVersion = autoplayResult.version;

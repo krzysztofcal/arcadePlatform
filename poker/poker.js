@@ -1716,6 +1716,7 @@
           if (status === 'auth_ok'){
             lobbyReconnectAttempt = 0;
             setLobbyConnectingState(null);
+            klog('poker_lobby_ws_connected', { reason: reason });
             return;
           }
           if (status === 'closed'){
