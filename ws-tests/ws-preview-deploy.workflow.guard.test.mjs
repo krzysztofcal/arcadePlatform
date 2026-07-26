@@ -71,6 +71,21 @@ test("ws preview deploy validates workflow files from workflow ref and builds ap
   assert.doesNotMatch(validateSection, /Validate preview-only workflow contract literals/);
 });
 
+test("ws preview deploy serializes all refs and uses one run-scoped remote temp directory", () => {
+  const text = workflowText();
+  const concurrencyBlock = text.match(/^concurrency:\n([\s\S]*?)(?=\n\S)/m)?.[0] ?? "";
+
+  assert.match(concurrencyBlock, /group: ws-preview-deploy\n/);
+  assert.doesNotMatch(concurrencyBlock, /inputs\.ref/);
+  assert.match(
+    text,
+    /PREVIEW_REMOTE_TMP_DIR: \/tmp\/arcadeplatform-ws-preview-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/
+  );
+  assert.match(text, /target: \$\{\{ env\.PREVIEW_REMOTE_TMP_DIR \}\}/);
+  assert.match(text, /PREVIEW_REMOTE_TMP_DIR: \$\{\{ env\.PREVIEW_REMOTE_TMP_DIR \}\}/);
+  assert.match(text, /TMP_ARCHIVE="\$PREVIEW_REMOTE_TMP_DIR\/\.artifacts\/ws-preview\/ws-preview-dist\.tgz"/);
+});
+
 
 test("ws preview deploy workflow keeps preview runtime contract and does not manage Caddy", () => {
   const text = workflowText();
@@ -117,16 +132,16 @@ test("ws preview deploy workflow packages and validates shared runtime files", (
   assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/chips-ledger\.mjs"/);
   assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/deploy-context\.mjs"/);
   assert.match(text, /sudo -n test -d "\$TMP_EXTRACT_DIR\/node_modules\/postgres"/);
-  assert.match(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/ws-server\/" "\$PREVIEW_APP_DIR"\//);
+  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/ws-server\/" "\$PREVIEW_APP_DIR"\//);
   assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/shared"/);
-  assert.match(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/shared\/" "\$PREVIEW_BASE_DIR\/shared"\//);
+  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/shared\/" "\$PREVIEW_BASE_DIR\/shared"\//);
   assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"/);
-  assert.match(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"\//);
+  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"\//);
   assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"/);
-  assert.match(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"\//);
+  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"\//);
   assert.match(text, /sudo -n test -f "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated\/deploy-context\.mjs"/);
   assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/node_modules"/);
-  assert.match(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/node_modules\/" "\$PREVIEW_BASE_DIR\/node_modules"\//);
+  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/node_modules\/" "\$PREVIEW_BASE_DIR\/node_modules"\//);
   assert.doesNotMatch(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR"\/ "\$PREVIEW_BASE_DIR"\//);
 });
 
