@@ -243,6 +243,7 @@ function loadLobbyHarness(options = {}){
     pokerBb: makeElement('pokerBb'),
     pokerMaxPlayers: makeElement('pokerMaxPlayers'),
     pokerSignIn: makeElement('pokerSignIn'),
+    pokerGuestPlay: makeElement('pokerGuestPlay'),
   };
   elements.pokerSb.value = '1';
   elements.pokerBb.value = '2';
@@ -256,6 +257,7 @@ function loadLobbyHarness(options = {}){
   const windowEvents = {};
   const documentEvents = {};
   const timeoutTimers = [];
+  const sessionStorageEntries = new Map();
   let nextTimeoutId = 1;
   let nextIntervalId = 1;
   let nowMs = 0;
@@ -288,6 +290,11 @@ function loadLobbyHarness(options = {}){
       removeEventListener: () => {},
       __RUNNING_POKER_UI_TESTS__: false,
       KLog: { log: () => {} },
+      sessionStorage: {
+        getItem(key){ return sessionStorageEntries.has(String(key)) ? sessionStorageEntries.get(String(key)) : null; },
+        setItem(key, value){ sessionStorageEntries.set(String(key), String(value)); },
+        removeItem(key){ sessionStorageEntries.delete(String(key)); }
+      },
       ChipsClient: options.balanceError
         ? { fetchBalance: async () => { throw new Error('balance_failed'); } }
         : (options.balanceResult ? { fetchBalance: async () => options.balanceResult } : null),
@@ -364,6 +371,8 @@ function loadLobbyHarness(options = {}){
     getLobbyOptions: () => lobbyClients.length ? lobbyClients[lobbyClients.length - 1].options : null,
     getLobbyClient: (index) => lobbyClients[index == null ? lobbyClients.length - 1 : index] || null,
     getRequestLobbySnapshotCalls: () => requestLobbySnapshotCalls,
+    getSessionStorage: (key) => sandbox.window.sessionStorage.getItem(key),
+    getLocationHref: () => sandbox.window.location.href,
     advanceTime(ms){
       nowMs += Math.max(0, Number(ms) || 0);
       flushTimers();
@@ -378,6 +387,30 @@ function loadLobbyHarness(options = {}){
 const lobbyHarness = loadLobbyHarness();
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(lobbyHarness.wsCreates.length > 0, true, 'lobby should bootstrap websocket client when authenticated');
+
+const guestLobbyHarness = loadLobbyHarness({
+  fetchResponse: async (url) => {
+    if (url.includes('/.netlify/functions/poker-guest-session')) {
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          token: 'guest-token',
+          tableId: 'guest_table_new',
+          guestId: 'guest_new',
+          nickname: 'Guest1234',
+          expiresInSec: 1800
+        })
+      };
+    }
+    return { ok: true, json: async () => ({ ok: true }) };
+  }
+});
+guestLobbyHarness.elements.pokerGuestPlay.click();
+await new Promise((resolve) => setTimeout(resolve, 0));
+const createdGuestSession = JSON.parse(guestLobbyHarness.getSessionStorage('poker:guestSession'));
+assert.equal(createdGuestSession.createPending, true, 'lobby must mark a newly minted guest table as pending initial creation');
+assert.match(guestLobbyHarness.getLocationHref(), /tableId=guest_table_new/);
 
 const lobbyOptions = lobbyHarness.getLobbyOptions();
 assert.ok(lobbyOptions, 'lobby should provide websocket callbacks');
