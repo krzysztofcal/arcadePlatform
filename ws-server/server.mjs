@@ -1535,7 +1535,6 @@ async function syncCleanupRuntimeState({ tableId, result, logPrefix, onRestore =
   }
   const restored = await restoreTableFromPersisted(tableId);
   if (!restored?.ok) {
-    klogSafe(`${logPrefix}_restore_failed`, { tableId, reason: restored?.reason || "unknown" });
     return { ok: false, changed: true, evicted: false, restored: false };
   }
   broadcastStateSnapshots(tableId);
