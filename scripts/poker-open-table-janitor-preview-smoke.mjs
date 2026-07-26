@@ -46,26 +46,31 @@ async function createTable() {
   return payload.tableId;
 }
 
-async function readTableStatus(tableId) {
-  const url = new URL(adminTablesListUrl);
-  url.searchParams.set("status", "ALL");
-  url.searchParams.set("tableId", tableId);
-  url.searchParams.set("limit", "2");
-  const payload = await requestJson(url, {
-    headers: {
-      origin,
-      authorization: `Bearer ${bearerToken}`
-    }
-  });
-  const exact = Array.isArray(payload?.items)
-    ? payload.items.find((item) => item?.tableId === tableId)
-    : null;
-  return exact?.status || null;
-}
-
 async function readStatuses(tableIds) {
-  const entries = await Promise.all(tableIds.map(async (tableId) => [tableId, await readTableStatus(tableId)]));
-  return Object.fromEntries(entries);
+  const targetIds = new Set(tableIds);
+  const statuses = Object.fromEntries(tableIds.map((tableId) => [tableId, null]));
+  const pageLimit = 100;
+  let page = 1;
+  while (targetIds.size > 0) {
+    const url = new URL(adminTablesListUrl);
+    url.searchParams.set("status", "ALL");
+    url.searchParams.set("page", String(page));
+    url.searchParams.set("limit", String(pageLimit));
+    const payload = await requestJson(url, {
+      headers: {
+        origin,
+        authorization: `Bearer ${bearerToken}`
+      }
+    });
+    for (const item of Array.isArray(payload?.items) ? payload.items : []) {
+      if (!targetIds.has(item?.tableId)) continue;
+      statuses[item.tableId] = item?.status || null;
+      targetIds.delete(item.tableId);
+    }
+    if (targetIds.size === 0 || payload?.pagination?.hasNextPage !== true) break;
+    page += 1;
+  }
+  return statuses;
 }
 
 const startedAtMs = Date.now();
