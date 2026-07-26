@@ -26,12 +26,12 @@ The issue is therefore valid and remains present at the analyzed revision. The p
 
 Implement one small CSS-only change in the existing `@media (max-width:420px)` block in `poker/poker-v2.css`:
 
-1. Set `.poker-settlement-summary` to `width:min(72vw, 270px)` while retaining its existing mobile `max-height` and font size.
+1. Set `.poker-settlement-summary` to `width:min(36vw, 135px)` while retaining its existing mobile `max-height` and font size.
 2. Keep the existing one-column row layout and left-aligned, wrapping recipient text. These rules preserve readability after narrowing the container.
 3. Keep the existing desktop declaration unchanged. The new width applies only at or below 420 px.
 4. Preserve the repository's one-line-per-selector CSS format.
 
-This produces a panel of approximately 230 px at a 320 px viewport, 259 px at 360 px, 270 px at 390 px, and 270 px at 420 px. It is materially narrower than the current panel without requiring abbreviated labels or a new presentation component.
+This produces a panel of approximately 115 px at a 320 px viewport, 130 px at 360 px, and 135 px at 390–420 px. It is approximately half the width of the initial implementation proposal and is intentionally compact without requiring abbreviated labels or a new presentation component.
 
 Do not change:
 
@@ -115,7 +115,7 @@ Revert the single mobile width declaration. No data migration, server rollback, 
 
 ## Acceptance mapping
 
-- Noticeably narrower on mobile: the explicit `72vw`/`270px` bound replaces the effective 79–86% viewport width at the affected sizes.
+- Noticeably narrower on mobile: the explicit `36vw`/`135px` bound replaces the effective 79–86% viewport width at the affected sizes.
 - Important table information remains visible: the overlay releases horizontal space on both sides; visual verification covers representative mobile widths.
 - Multiple entries remain readable: the existing one-column rows, wrapping recipients, bounded height, and scrolling remain unchanged.
 - Desktop is unaffected: the override is scoped to the existing `max-width:420px` media query and is checked immediately above the breakpoint and at desktop widths.
