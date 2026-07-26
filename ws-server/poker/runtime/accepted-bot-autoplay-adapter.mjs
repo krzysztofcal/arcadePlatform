@@ -997,7 +997,7 @@ export function createAcceptedBotStepExecutor({
               actionType: action?.type || null
             });
           }
-          klog("ws_bot_autoplay_decision", {
+          logVerbose("ws_bot_autoplay_decision", {
             ...baseLog,
             ...buildBotDecisionDiagnostics({
               legalActions,

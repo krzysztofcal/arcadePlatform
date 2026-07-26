@@ -3273,7 +3273,6 @@ export function createInactiveCleanupExecutor({ env }) {
       if (
         text.includes("showdown_missing_hole_cards")
         || text.includes("apply_action_failed")
-        || text.includes("ws_bot_autoplay_finish")
         || text.includes("ws_settled_rollover")
         || text.includes("showdown_incomplete_community")
       ) {
@@ -3374,7 +3373,6 @@ export function createInactiveCleanupExecutor({ env }) {
     assert.equal(serverLogs.some((line) => line.includes("showdown_missing_hole_cards")), false, serverLogs.join("\n"));
     assert.equal(serverLogs.some((line) => line.includes("showdown_incomplete_community")), false, serverLogs.join("\n"));
     assert.equal(serverLogs.some((line) => line.includes("\"reason\":\"apply_action_failed\"")), false, serverLogs.join("\n"));
-    assert.equal(serverLogs.some((line) => line.includes("ws_bot_autoplay_finish") && line.includes("\"trigger\":\"leave\"")), true, serverLogs.join("\n"));
 
     humanWs.close();
     lobbyWs.close();

@@ -612,16 +612,6 @@ function nextEventLoopTurn() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-function buildAutoplayStartSnapshot(tableId) {
-  const state = tableManager.persistedPokerState(tableId);
-  const stateVersion = Number(tableManager.persistedStateVersion(tableId) || 0);
-  return {
-    stateVersionBeforeAutoplay: stateVersion || null,
-    turnUserIdBeforeAutoplay: typeof state?.turnUserId === "string" ? state.turnUserId : null,
-    phaseBeforeAutoplay: typeof state?.phase === "string" ? state.phase : null
-  };
-}
-
 function buildBotTurnScheduleKey(tableId) {
   const state = tableManager.persistedPokerState(tableId);
   if (!state || typeof state !== "object") return null;
@@ -636,15 +626,6 @@ function buildBotTurnScheduleKey(tableId) {
 
 async function runBotStep({ tableId, trigger, requestId, frameTs }) {
   const acceptedBotAutoplayExecutor = await loadAcceptedBotAutoplayExecutor();
-  const startSnapshot = buildAutoplayStartSnapshot(tableId);
-  klogSafe("ws_bot_autoplay_start", {
-    tableId,
-    requestId: requestId || null,
-    trigger: trigger || null,
-    stateVersion_before_autoplay: startSnapshot.stateVersionBeforeAutoplay,
-    turnUserId_before_autoplay: startSnapshot.turnUserIdBeforeAutoplay,
-    phase_before_autoplay: startSnapshot.phaseBeforeAutoplay
-  });
   const result = await acceptedBotAutoplayExecutor({ tableId, trigger, requestId, frameTs });
   maybeScheduleSettledRollover(tableId);
   return result;
@@ -746,11 +727,6 @@ function scheduleObservedBotTurn({ tableId, trigger, requestId = null, frameTs =
   scheduledObservedBotTurnKeys.set(tableId, scheduleKey);
   try {
     scheduleBotStep({ tableId, trigger, requestId, frameTs });
-    klogSafe("ws_observed_bot_turn_autoplay_scheduled", {
-      tableId,
-      trigger: trigger || null,
-      scheduleKey
-    });
     return true;
   } catch (error) {
     scheduledObservedBotTurnKeys.delete(tableId);
@@ -1379,7 +1355,6 @@ async function persistMutatedState({
   const privateStateForHoleCards = privateStateForHoleCardsOverride || (typeof tableManager.privatePokerStateForAudit === "function"
     ? tableManager.privatePokerStateForAudit(tableId)
     : nextState);
-  klogSafe("ws_state_persist_start", { tableId, expectedVersion, mutationKind });
   const persisted = await persistedStateWriter.writeMutation({
     tableId,
     expectedVersion,
@@ -1398,7 +1373,6 @@ async function persistMutatedState({
     klogSafe("ws_state_persist_failed", { tableId, expectedVersion, mutationKind, reason: persisted?.reason || "unknown" });
     return persisted;
   }
-  klogSafe("ws_state_persist_result", { ok: true, newVersion: persisted.newVersion ?? null });
   if (!deferRuntimeVersionUpdate && persisted.outcome !== "durable_replay") {
     tableManager.setPersistedStateVersion(tableId, persisted.newVersion);
   }
@@ -2640,13 +2614,6 @@ async function listOpenTableIdsForJanitor({ limit = 10 } = {}) {
       const tableIds = selectedRows.map((row) => row.id);
       const lastRow = selectedRows.at(-1) || null;
       openTableJanitorCursor = lastRow ? { tableId: lastRow.id } : null;
-      klogSafe("ws_open_table_reconciler_batch_selected", {
-        limit: boundedLimit,
-        returnedOpenTableCount: tableIds.length,
-        wrapped: selectedRows.some((row) => row?.cursor_wrapped === true),
-        cursorTableId: openTableJanitorCursor?.tableId || null,
-        tableIds
-      });
       return tableIds;
     }, { env: process.env });
   } catch (error) {

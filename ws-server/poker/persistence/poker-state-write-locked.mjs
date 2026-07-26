@@ -7,7 +7,6 @@ export async function updatePokerStateLocked(tx, { tableId, nextState }) {
     klog("ws_state_update_invalid", { reason: "invalid_state_payload" });
     return { ok: false, reason: "invalid" };
   }
-  klog("ws_state_update_start", { tableId });
   let payload;
   try {
     payload = JSON.stringify(nextState);
@@ -24,7 +23,6 @@ export async function updatePokerStateLocked(tx, { tableId, nextState }) {
     klog("ws_state_update_invalid", { reason: rows?.length ? "invalid_version" : "not_found" });
     return { ok: false, reason: rows?.length ? "invalid" : "not_found" };
   }
-  klog("ws_state_update_result", { newVersion });
   return { ok: true, newVersion };
 }
 

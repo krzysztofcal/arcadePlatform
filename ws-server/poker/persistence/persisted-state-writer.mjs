@@ -415,13 +415,6 @@ async function maybeWriteAcceptedActionAudit({ tx, tableId, stateVersion, state,
   if (!insertedRows?.[0]?.id) {
     return { ok: true, skipped: true, alreadyApplied: true };
   }
-  klog("ws_accepted_action_audit_written", {
-    tableId,
-    handId: audit.handId,
-    requestId: audit.requestId,
-    actionType: audit.actionType,
-    stateVersion
-  });
   return { ok: true };
 }
 

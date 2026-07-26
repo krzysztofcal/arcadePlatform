@@ -100,7 +100,7 @@ Evidence must include, when present:
 - `poker_inactive_cleanup_stale_live_hand_closing`;
 - `poker_terminal_accounting_invariant_failed`;
 - `poker_terminal_accounting_closed`;
-- `ws_state_persist_start`;
+- `ws_state_persist_failed`;
 - `ws_hand_settlement_audit_written`;
 - `ws_settled_rollover_*`;
 - admin cleanup results.
