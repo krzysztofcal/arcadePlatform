@@ -86,9 +86,17 @@ export function createStreamLog({ cap = DEFAULT_STREAM_CAP } = {}) {
     };
   }
 
+  function forgetTable(tableId) {
+    if (typeof tableId !== "string" || tableId.trim() === "") {
+      return false;
+    }
+    return streamByTableId.delete(tableId.trim());
+  }
+
   return {
     append,
     latestSeq,
-    eventsAfter
+    eventsAfter,
+    forgetTable
   };
 }

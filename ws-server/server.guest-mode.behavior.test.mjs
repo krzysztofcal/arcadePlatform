@@ -74,6 +74,17 @@ function waitForExit(proc) {
   return new Promise((resolve) => proc.once("exit", resolve));
 }
 
+async function waitForOutput(getOutput, pattern, timeoutMs = 5000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (pattern.test(getOutput())) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.fail(`Timed out waiting for server output matching ${pattern}. Recent output: ${getOutput().slice(-4000)}`);
+}
+
 function createServer({ env = {} } = {}) {
   return getFreePort().then((port) => {
     const child = spawn(process.execPath, ["ws-server/server.mjs"], {
@@ -294,6 +305,135 @@ test("guest can auth and join only its token-bound guest_table_*", async () => {
     assert.equal(rejected.payload.reason, "guest_multiplayer_requires_account");
 
     ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("explicit guest leave evicts the in-memory table without authoritative persistence", async () => {
+  const secret = "guest-explicit-leave-secret";
+  const guestUserId = "guest_user_explicit_leave";
+  const guestTableId = "guest_table_explicit_leave";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+    },
+  });
+  let output = "";
+  child.stdout.on("data", (buf) => {
+    output += String(buf);
+  });
+  child.stderr.on("data", (buf) => {
+    output += String(buf);
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(
+      ws,
+      makeGuestJwt({ secret, sub: guestUserId, tableId: guestTableId, nickname: "Guest3101" }),
+      "auth-guest-explicit-leave"
+    );
+    const joined = await joinTable(ws, guestTableId, "join-guest-explicit-leave");
+    assert.equal(joined.ack.payload.status, "accepted");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_leave",
+      requestId: "leave-guest-explicit",
+      ts: "2026-02-28T00:00:03Z",
+      payload: { tableId: guestTableId },
+    });
+    const leave = await nextCommandResultForRequest(ws, "leave-guest-explicit");
+    assert.equal(leave.payload.status, "accepted");
+
+    await waitForOutput(
+      () => output,
+      /ws_guest_table_evicted \{.*"trigger":"explicit_leave".*"evicted":true/
+    );
+    assert.equal((output.match(/\[klog\] ws_guest_table_evicted /g) || []).length, 1);
+    assert.equal(output.includes("ws_leave_authoritative_failed"), false);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("guest reconnect within grace preserves the table, then disconnect evicts it exactly once", async () => {
+  const secret = "guest-disconnect-grace-secret";
+  const guestUserId = "guest_user_disconnect_grace";
+  const guestTableId = "guest_table_disconnect_grace";
+  const guestToken = makeGuestJwt({
+    secret,
+    sub: guestUserId,
+    tableId: guestTableId,
+    nickname: "Guest3102",
+  });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_SEATED_RECONNECT_GRACE_MS: "150",
+      WS_DISCONNECT_CLEANUP_SWEEP_MS: "25",
+      WS_TIMEOUT_SWEEP_MS: "60000",
+    },
+  });
+  let output = "";
+  child.stdout.on("data", (buf) => {
+    output += String(buf);
+  });
+  child.stderr.on("data", (buf) => {
+    output += String(buf);
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const first = await connectClient(port);
+    await hello(first);
+    await auth(first, guestToken, "auth-guest-disconnect-first");
+    const firstJoin = await joinTable(first, guestTableId, "join-guest-disconnect-first");
+    assert.equal(firstJoin.ack.payload.status, "accepted");
+    const firstStack = firstJoin.tableState.payload?.stacks?.[guestUserId];
+    assert.equal(Number.isFinite(Number(firstStack)), true);
+
+    first.terminate();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const second = await connectClient(port);
+    await hello(second);
+    await auth(second, guestToken, "auth-guest-disconnect-second");
+    const secondJoin = await joinTable(second, guestTableId, "join-guest-disconnect-second");
+    assert.equal(secondJoin.ack.payload.status, "accepted");
+    assert.equal(secondJoin.ack.payload.reason, "already_joined");
+    assert.equal(secondJoin.tableState.payload?.stacks?.[guestUserId], firstStack);
+
+    await waitForOutput(
+      () => output,
+      /ws_guest_table_cleanup_cancelled \{.*"tableId":"guest_table_disconnect_grace"/
+    );
+    assert.equal(output.includes('"trigger":"disconnect_cleanup","requestId"'), false);
+
+    second.terminate();
+    await waitForOutput(
+      () => output,
+      /ws_guest_table_evicted \{.*"tableId":"guest_table_disconnect_grace".*"trigger":"disconnect_cleanup".*"evicted":true/,
+      5000
+    );
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    const scheduledCount = (output.match(/\[klog\] ws_guest_table_cleanup_scheduled /g) || []).length;
+    const evictedCount = (output.match(/\[klog\] ws_guest_table_evicted /g) || []).length;
+    assert.equal(scheduledCount, 2, "each real disconnect schedules one candidate");
+    assert.equal(evictedCount, 1, "reconnect cancellation and final disconnect must produce one eviction");
+    assert.equal(output.includes("ws_disconnect_cleanup_retry"), false);
+    assert.equal(output.includes("ws_table_janitor_"), false);
+    assert.equal(output.includes("poker_ledger"), false);
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);

@@ -254,7 +254,10 @@ const tableManager = createTableManager({
   publicProfileLoader: loadPublicProfiles,
   publicProfileStorageBaseUrl,
   publicProfileLog: klogSafe,
-  onTableEvicted: (tableId) => persistedStateWriter?.forgetHoleCardAcknowledgement(tableId),
+  onTableEvicted: (tableId) => {
+    persistedStateWriter?.forgetHoleCardAcknowledgement(tableId);
+    releaseTableRuntimeResources(tableId);
+  },
   observeOnlyJoin: observeOnlyJoinEnabled
 });
 const tableCommandQueue = createTableCommandQueue({
@@ -559,9 +562,9 @@ function staleSeatCandidateKey(tableId, userId) {
 }
 
 function tableSocketMatches(socket, tableId) {
-  const conn = socket && socket.__connState;
-  const joined = conn?.joinedTableId || null;
-  const subscribed = conn?.subscribedTableId || null;
+  const association = tableManager.connectionTableAssociation(socket);
+  const joined = association?.joinedTableId || null;
+  const subscribed = association?.subscribedTableId || null;
   return joined === tableId || subscribed === tableId;
 }
 
@@ -1460,6 +1463,27 @@ function clearSnapshotCacheForTable(tableId) {
   }
 }
 
+function clearPersistedSeatTouchForTable(tableId) {
+  for (const key of [...persistedSeatTouchByTableUser.keys()]) {
+    if (key.startsWith(`${tableId}:`)) {
+      persistedSeatTouchByTableUser.delete(key);
+    }
+  }
+}
+
+function releaseTableRuntimeResources(tableId) {
+  clearSettledRolloverTimer(tableId);
+  clearTurnTimeoutFailureTracker(tableId);
+  clearSnapshotCacheForTable(tableId);
+  clearPersistedSeatTouchForTable(tableId);
+  scheduledObservedBotTurnKeys.delete(tableId);
+  suppressedBotTimeoutSafetyFailures.delete(tableId);
+  pendingTableJanitorEvaluationByTableId.delete(tableId);
+  suppressedNonRetryableTerminalJanitorFailuresByTableId.delete(tableId);
+  guestDisconnectCleanupRuntime?.forgetTable(tableId);
+  streamLog.forgetTable(tableId);
+}
+
 function shouldEvictClosedRuntimeTable(tableId, result) {
   const status = typeof result?.status === "string" ? result.status : null;
   const isClosedResult = result?.closed === true || status === "cleaned_closed" || status === "already_closed";
@@ -1482,9 +1506,6 @@ function shouldSyncCleanupRuntimeState(tableId, result) {
 }
 
 function evictClosedRuntimeTable({ tableId, logPrefix, status = null }) {
-  clearSettledRolloverTimer(tableId);
-  clearTurnTimeoutFailureTracker(tableId);
-  clearSnapshotCacheForTable(tableId);
   const evicted = typeof tableManager?.evictTable === "function"
     ? tableManager.evictTable(tableId)
     : { ok: false, existed: false };
@@ -2014,8 +2035,67 @@ const disconnectCleanupRuntime = createDisconnectCleanupRuntime({
   klog: klogSafe
 });
 
+async function evictDisconnectedGuestTable({ tableId, userId, requestId }) {
+  return enqueueTableCommand({
+    tableId,
+    commandName: "guest_disconnect_cleanup",
+    dedupeKey: "guest_disconnect_cleanup",
+    run: async () => {
+      if (!isGuestTableId(tableId)) {
+        return { ok: false, changed: false, retryable: false, code: "not_guest_table" };
+      }
+      if (!tableManager.listTableIds().includes(tableId)) {
+        return { ok: true, changed: false, closed: true, status: "already_evicted" };
+      }
+      const hasLiveSocket = sessionStore.connectionsForUser(userId)
+        .some((socket) => tableSocketMatches(socket, tableId));
+      if (hasLiveSocket || tableManager.hasConnectedHumanPresence(tableId)) {
+        return { ok: true, changed: false, status: "guest_reconnected" };
+      }
+      const evicted = tableManager.evictTable(tableId);
+      klogSafe("ws_guest_table_evicted", {
+        tableId,
+        trigger: "disconnect_cleanup",
+        requestId,
+        evicted: evicted?.existed === true
+      });
+      return {
+        ok: true,
+        changed: evicted?.existed === true,
+        closed: true,
+        status: evicted?.existed === true ? "guest_evicted" : "already_evicted"
+      };
+    }
+  });
+}
+
+const guestDisconnectCleanupRuntime = createDisconnectCleanupRuntime({
+  executeCleanup: evictDisconnectedGuestTable,
+  listActiveSocketsForUser: (userId) => sessionStore.connectionsForUser(userId),
+  socketMatchesTable: (socket, tableId) => tableSocketMatches(socket, tableId),
+  seatedReconnectGraceMs,
+  onChanged: async () => {},
+  onCancelled: ({ tableId }) => {
+    klogSafe("ws_guest_table_cleanup_cancelled", {
+      tableId,
+      reason: "active_socket"
+    });
+  },
+  klog: klogSafe
+});
+
 function enqueueDisconnectCleanupCandidate({ tableId, userId }) {
   if (typeof userId !== "string" || !userId) return;
+  if (isGuestTableId(tableId)) {
+    const enqueued = guestDisconnectCleanupRuntime.enqueue({ tableId, userId });
+    if (enqueued) {
+      klogSafe("ws_guest_table_cleanup_scheduled", {
+        tableId,
+        graceMs: seatedReconnectGraceMs
+      });
+    }
+    return;
+  }
   // When DB-backed persistence is active, persisted tables always have UUID
   // IDs. Guest and other non-persisted tables use prefixed string IDs that
   // cannot target DB-backed cleanup. Filter them out to prevent 22P02 failures.
@@ -2214,6 +2294,7 @@ async function recordTurnTimeoutOutcome({ tableId, result, nowMs }) {
 
 async function sweepDisconnectCleanupAndBroadcast() {
   await disconnectCleanupRuntime.sweep();
+  await guestDisconnectCleanupRuntime.sweep();
 }
 
 async function listStaleActiveHumanSeatCandidates({ limit = 25 } = {}) {
@@ -3403,6 +3484,63 @@ wss.on("connection", (ws) => {
           code: "INVALID_ROOM_ID",
           message: "roomId is required",
           requestId: frame.requestId ?? null
+        });
+        return;
+      }
+      if (isGuestSession(connState)) {
+        if (!isGuestTableId(tableId) || (connState.guestTableId && connState.guestTableId !== tableId)) {
+          sendCommandResult(ws, connState, {
+            requestId: frame.requestId ?? null,
+            tableId,
+            status: "rejected",
+            reason: "guest_multiplayer_requires_account"
+          });
+          return;
+        }
+        await enqueueTableCommand({
+          tableId,
+          commandName: "guest_leave",
+          dedupeKey: "guest_leave",
+          run: async () => {
+            const detached = tableManager.leave({
+              ws,
+              userId: connState.session.userId,
+              tableId,
+              requestId: frame.requestId
+            });
+            if (!detached?.ok) {
+              sendCommandResult(ws, connState, {
+                requestId: frame.requestId ?? null,
+                tableId,
+                status: "rejected",
+                reason: detached?.code || "state_invalid"
+              });
+              return detached;
+            }
+            const hasLiveSocket = sessionStore.connectionsForUser(connState.session.userId)
+              .some((socket) => tableSocketMatches(socket, tableId));
+            const evicted = hasLiveSocket
+              ? { ok: true, existed: false }
+              : tableManager.evictTable(tableId);
+            sendCommandResult(ws, connState, {
+              requestId: frame.requestId ?? null,
+              tableId,
+              status: "accepted",
+              reason: detached.changed === false ? "already_left" : null
+            });
+            klogSafe("ws_guest_table_evicted", {
+              tableId,
+              trigger: "explicit_leave",
+              requestId: frame.requestId ?? null,
+              evicted: evicted?.existed === true
+            });
+            return {
+              ok: true,
+              changed: detached.changed === true || evicted?.existed === true,
+              closed: evicted?.existed === true,
+              status: evicted?.existed === true ? "guest_evicted" : "guest_leave_detached"
+            };
+          }
         });
         return;
       }
