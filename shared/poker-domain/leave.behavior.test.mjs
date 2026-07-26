@@ -709,14 +709,13 @@ for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
   assert.equal(ctx.calls.closeTable, 1);
   assert.equal(ctx.calls.holeCardDelete, 0, "close path should preserve audit hole cards");
   assert.equal(ctx.calls.storeResult, 1);
-  assert.equal(logNames.includes("poker_leave_bot_autoplay_start"), true);
-  assert.equal(logNames.includes("poker_leave_bot_autoplay_finish"), true);
-  assert.equal(logNames.includes("poker_leave_detach_start"), true);
-  assert.equal(logNames.includes("poker_leave_post_hand_cashout"), true);
-  assert.equal(logNames.includes("poker_leave_detach_finish"), true);
-  assert.equal(logNames.includes("poker_leave_table_closed_terminal_bots_only"), true);
-  assert.equal(logNames.indexOf("poker_leave_bot_autoplay_start") < logNames.indexOf("poker_leave_bot_autoplay_finish"), true);
-  assert.equal(logNames.indexOf("poker_leave_detach_start") < logNames.indexOf("poker_leave_detach_finish"), true);
+  assert.equal(logNames.includes("poker_leave_bot_autoplay_start"), false);
+  assert.equal(logNames.includes("poker_leave_bot_autoplay_finish"), false);
+  assert.equal(logNames.includes("poker_leave_detach_start"), false);
+  assert.equal(logNames.includes("poker_leave_post_hand_cashout"), false);
+  assert.equal(logNames.includes("poker_leave_detach_finish"), false);
+  assert.equal(logNames.includes("poker_leave_table_closed_terminal_bots_only"), false);
+  assert.equal(logNames.includes("poker_leave_cashout"), true);
 }
 
 {

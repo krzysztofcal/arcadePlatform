@@ -875,7 +875,7 @@ test("accepted bot autoplay preserves a concrete shared apply failure as an unch
       throw new Error("PR A must not restore this invariant failure");
     },
     broadcastResyncRequired: () => {},
-    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl, WS_BOT_AUTOPLAY_VERBOSE_LOGS: "1" },
     klog: () => {}
   });
 
@@ -929,7 +929,7 @@ test("accepted bot autoplay showdown uses trusted private hole cards even for pu
       return { ok: true };
     },
     broadcastResyncRequired: () => {},
-    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl, WS_BOT_AUTOPLAY_VERBOSE_LOGS: "1" },
     klog: (event, payload) => logs.push({ event, payload })
   });
   const result = await run({ tableId: "t-showdown", trigger: "act", requestId: "r-showdown" });
@@ -984,7 +984,7 @@ test("accepted bot autoplay accepts fallback supplement when primary showdown ha
     broadcastResyncRequired: () => {
       calls.resync += 1;
     },
-    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl, WS_BOT_AUTOPLAY_VERBOSE_LOGS: "1" },
     klog: (event, payload) => logs.push({ event, payload })
   });
 
@@ -1040,7 +1040,7 @@ test("accepted bot autoplay preserves fresh showdown gameplay fields when fallba
     broadcastResyncRequired: () => {
       calls.resync += 1;
     },
-    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl, WS_BOT_AUTOPLAY_VERBOSE_LOGS: "1" },
     klog: (event, payload) => logs.push({ event, payload })
   });
 
@@ -1098,7 +1098,7 @@ test("accepted bot autoplay reloads trusted private showdown hole cards after bo
       return { ok: true };
     },
     broadcastResyncRequired: () => {},
-    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl, WS_BOT_AUTOPLAY_VERBOSE_LOGS: "1" },
     klog: (event, payload) => logs.push({ event, payload })
   });
 
@@ -1151,7 +1151,7 @@ test("accepted bot autoplay merges partial loop-private showdown cards with pers
     broadcastResyncRequired: () => {
       calls.resync += 1;
     },
-    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl, WS_BOT_AUTOPLAY_VERBOSE_LOGS: "1" },
     klog: (event, payload) => logs.push({ event, payload })
   });
 
@@ -1202,7 +1202,7 @@ test("accepted bot autoplay ignores malformed fallback showdown hole-card arrays
     broadcastResyncRequired: () => {
       calls.resync += 1;
     },
-    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl, WS_BOT_AUTOPLAY_VERBOSE_LOGS: "1" },
     klog: (event, payload) => logs.push({ event, payload })
   });
 
@@ -1213,7 +1213,7 @@ test("accepted bot autoplay ignores malformed fallback showdown hole-card arrays
   assert.equal(calls.resync, 0);
   const focusedLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_input_missing");
   assert.ok(focusedLog);
-  assert.deepEqual(focusedLog.payload.missingHoleCardsUserIds, ["human_1"]);
+  assert.equal(focusedLog.payload.missingHoleCardsCount, 1);
 });
 
 test("accepted bot autoplay emits focused showdown-input log and restores on missing trusted hole cards", async () => {
@@ -1255,7 +1255,7 @@ test("accepted bot autoplay emits focused showdown-input log and restores on mis
     broadcastResyncRequired: () => {
       calls.resync += 1;
     },
-    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl, WS_BOT_AUTOPLAY_VERBOSE_LOGS: "1" },
     klog: (event, payload) => logs.push({ event, payload })
   });
 
@@ -1266,11 +1266,11 @@ test("accepted bot autoplay emits focused showdown-input log and restores on mis
   assert.equal(calls.resync, 0);
   const focusedLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_input_missing");
   assert.ok(focusedLog);
-  assert.deepEqual(focusedLog.payload.missingHoleCardsUserIds, ["human_1"]);
+  assert.equal(focusedLog.payload.missingHoleCardsCount, 1);
   const preflightLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_preflight");
   assert.ok(preflightLog);
-  assert.deepEqual(preflightLog.payload.eligibleUserIds, ["human_1", "bot_2"]);
-  assert.deepEqual(preflightLog.payload.showdownComparedUserIds, ["bot_2"]);
+  assert.equal(preflightLog.payload.eligibleCount, 2);
+  assert.equal(preflightLog.payload.showdownComparedCount, 1);
   assert.equal(preflightLog.payload.communityLen, 5);
 });
 
@@ -1321,7 +1321,7 @@ test("accepted bot autoplay showdown comparison ignores mid-hand joiners outside
     broadcastResyncRequired: () => {
       calls.resync += 1;
     },
-    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl, WS_BOT_AUTOPLAY_VERBOSE_LOGS: "1" },
     klog: (event, payload) => logs.push({ event, payload })
   });
 
@@ -1331,8 +1331,8 @@ test("accepted bot autoplay showdown comparison ignores mid-hand joiners outside
   assert.equal(calls.resync, 0);
   const preflightLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_preflight");
   assert.ok(preflightLog);
-  assert.deepEqual(preflightLog.payload.eligibleUserIds, ["human_1", "bot_2"]);
-  assert.deepEqual(preflightLog.payload.showdownComparedUserIds, ["human_1", "bot_2"]);
+  assert.equal(preflightLog.payload.eligibleCount, 2);
+  assert.equal(preflightLog.payload.showdownComparedCount, 2);
 });
 
 test("accepted bot autoplay rejects cross-hand fallback for degraded showdown runtime state", async () => {
@@ -1374,7 +1374,7 @@ test("accepted bot autoplay rejects cross-hand fallback for degraded showdown ru
     broadcastResyncRequired: () => {
       calls.resync += 1;
     },
-    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl, WS_BOT_AUTOPLAY_VERBOSE_LOGS: "1" },
     klog: (event, payload) => logs.push({ event, payload })
   });
 
@@ -1427,7 +1427,7 @@ test("accepted bot autoplay does not treat untrusted fallback handId drift as tr
     broadcastResyncRequired: () => {
       calls.resync += 1;
     },
-    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl, WS_BOT_AUTOPLAY_VERBOSE_LOGS: "1" },
     klog: (event, payload) => logs.push({ event, payload })
   });
 
@@ -1474,7 +1474,7 @@ test("accepted bot autoplay prefers trusted runtime private showdown source when
     persistMutatedState: async () => ({ ok: true }),
     restoreTableFromPersisted: async () => ({ ok: true }),
     broadcastResyncRequired: () => {},
-    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl, WS_BOT_AUTOPLAY_VERBOSE_LOGS: "1" },
     klog: (event, payload) => logs.push({ event, payload })
   });
 
@@ -1526,7 +1526,7 @@ test("accepted bot autoplay resolves single-winner terminal hands without showdo
     broadcastResyncRequired: () => {
       calls.resync += 1;
     },
-    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl, WS_BOT_AUTOPLAY_VERBOSE_LOGS: "1" },
     klog: (event, payload) => logs.push({ event, payload })
   });
 
@@ -1593,6 +1593,7 @@ test("accepted bot autoplay handles mixed human+bot runtime path through showdow
     broadcastResyncRequired: () => {
       calls.resync += 1;
     },
+    env: { WS_BOT_AUTOPLAY_VERBOSE_LOGS: "1" },
     klog: (event, payload) => logs.push({ event, payload })
   });
   let guard = 0;

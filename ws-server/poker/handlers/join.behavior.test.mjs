@@ -500,7 +500,7 @@ test('handleJoinCommand preserves temporarily_unavailable for runtime authoritat
   assert.equal(calls.snapshots, 0);
 });
 
-test('logs authoritative join lifecycle for debugging', async () => {
+test('does not emit routine authoritative join lifecycle logs', async () => {
   const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 100 });
   ctx.authoritativeJoinEnabled = true;
   ctx.persistedBootstrapEnabled = true;
@@ -528,9 +528,9 @@ test('logs authoritative join lifecycle for debugging', async () => {
   await handleJoinCommand(ctx);
 
   const eventNames = calls.logs.map((entry) => entry.event);
-  assert.equal(eventNames.includes('ws_join_authoritative_start'), true);
-  assert.equal(eventNames.includes('ws_join_authoritative_result'), true);
-  assert.equal(eventNames.includes('ws_join_restore_result'), true);
-  assert.equal(eventNames.includes('ws_join_restore_validate'), true);
+  assert.equal(eventNames.includes('ws_join_authoritative_start'), false);
+  assert.equal(eventNames.includes('ws_join_authoritative_result'), false);
+  assert.equal(eventNames.includes('ws_join_restore_result'), false);
+  assert.equal(eventNames.includes('ws_join_restore_validate'), false);
   assert.equal(calls.command[0].status, 'accepted');
 });

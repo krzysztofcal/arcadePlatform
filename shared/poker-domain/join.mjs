@@ -553,7 +553,6 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
     throw makeError("temporarily_unavailable");
   }
   const runPostTransaction = await resolvePostTransactionFn(postTransactionFn);
-  klog("shared_join_start", { tableId, userId, seatNo, autoSeat: autoSeat === true, preferredSeatNo, buyIn });
   return beginSql(async (tx) => {
     try {
       const resolvedBuyIn = normalizePositiveInt(buyIn);
@@ -589,7 +588,6 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
             throw makeError("authoritative_state_invalid");
           }
           await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
-          klog("shared_join_success", { seatNo: persisted.seatNo, stack: persisted.stack, snapshotVersion: stateRow.version });
           return {
             ok: true,
             tableId,
@@ -618,9 +616,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         }
         const updatedState = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState: nextStateForStorage }));
         const snapshotVersion = requirePostMutationVersion({ previousVersion: stateRow.version, nextVersion: updatedState.version });
-        klog("shared_join_state_written", { previousVersion: stateRow.version, newVersion: snapshotVersion });
         await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
-        klog("shared_join_success", { seatNo: persisted.seatNo, stack: persisted.stack, snapshotVersion });
         return {
           ok: true,
           tableId,
@@ -673,7 +669,6 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       }
 
       if (!Number.isInteger(resolvedSeatNo)) throw makeError("table_full");
-      klog("shared_join_seat_selected", { seatNo: resolvedSeatNo, occupiedCount: occupied.size });
 
       while (true) {
         const insertedRows = await insertSeatRow({
@@ -717,7 +712,6 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         : `join-buyin:${tableId}:${userId}:${resolvedSeatNo}:${resolvedBuyIn}`;
 
       let buyInDuplicated = false;
-      klog("shared_join_ledger_start", { buyIn: resolvedBuyIn });
       try {
         await postUserTableBuyIn({
           postTransaction: runPostTransaction,
@@ -732,7 +726,6 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         buyInDuplicated = true;
         klog("ws_join_authoritative_buyin_duplicate_idempotency", { tableId, userId, idempotencyKey });
       }
-      klog("shared_join_ledger_result", { ok: true });
 
       let fundedStack = resolvedBuyIn;
       if (buyInDuplicated) {
@@ -747,7 +740,6 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           [tableId, userId, resolvedSeatNo, resolvedBuyIn]
         );
       }
-      klog("shared_join_stack_updated", { userId, stack: fundedStack });
 
       const botCfg = getBotConfig(process.env);
       const seededBots = await seedBotsForJoin({
@@ -759,10 +751,6 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       humanUserId: userId,
       postTransaction: runPostTransaction,
       klog
-      });
-      klog("shared_join_bots_seeded", {
-        botCount: Array.isArray(seededBots) ? seededBots.length : 0,
-        botSeats: Array.isArray(seededBots) ? seededBots.map((bot) => Number(bot?.seatNo)).filter((botSeatNo) => Number.isInteger(botSeatNo) && botSeatNo >= 1) : []
       });
       const updatedStateRow = await syncStateSeatAndStack({
       tx,
@@ -776,10 +764,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       maxPlayers,
       botCfg
       });
-      klog("shared_join_state_written", { previousVersion: null, newVersion: updatedStateRow.version });
       await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
-      klog("ws_join_authoritative_persisted", { tableId, userId, seatNo: resolvedSeatNo, autoSeat: autoSeat === true, preferredSeatNo: preferredSeatNoRequested, buyIn: resolvedBuyIn, fundedStack });
-      klog("shared_join_success", { seatNo: resolvedSeatNo, stack: fundedStack, snapshotVersion: updatedStateRow.version });
       return {
         ok: true,
         tableId,
@@ -798,10 +783,6 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         })
       };
     } catch (error) {
-      klog("shared_join_error", {
-        code: typeof error?.code === "string" ? error.code : "authoritative_join_failed",
-        message: error?.message || "unknown"
-      });
       throw error;
     }
   });

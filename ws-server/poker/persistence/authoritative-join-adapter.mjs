@@ -132,11 +132,6 @@ export function createAuthoritativeJoinExecutor({
   loadLockedStateHelpersFn = loadLockedStateHelpers,
 } = {}) {
   return async function executeAuthoritativeJoin({ tableId, userId, requestId, seatNo = null, autoSeat = false, preferredSeatNo = null, buyIn = null }) {
-    klog("ws_authoritative_adapter_start", {
-      tableId,
-      userId,
-      requestId: requestId || null
-    });
     const override = resolveJoinTestOverride(env);
     if (override) {
       return override;
@@ -236,23 +231,8 @@ export function createAuthoritativeJoinExecutor({
         }
         return normalized;
       }
-      klog("ws_authoritative_adapter_success", {
-        seatNo: normalized.seatNo,
-        stack: normalized.stack,
-        rejoin: normalized.rejoin === true,
-        snapshotVersion: Number(normalized?.snapshot?.stateVersion) || null,
-        seatsCount: Array.isArray(normalized?.snapshot?.seats) ? normalized.snapshot.seats.length : 0,
-        stacksCount: normalized?.snapshot?.stacks && typeof normalized.snapshot.stacks === "object" && !Array.isArray(normalized.snapshot.stacks)
-          ? Object.keys(normalized.snapshot.stacks).length
-          : 0,
-        seededBotsCount: Array.isArray(normalized?.seededBots) ? normalized.seededBots.length : 0
-      });
       return normalized;
     } catch (error) {
-      klog("ws_authoritative_adapter_error", {
-        code: typeof error?.code === "string" ? error.code : "authoritative_join_failed",
-        message: error?.message || "unknown"
-      });
       klog("ws_join_authoritative_failed", {
         tableId,
         userId,
