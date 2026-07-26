@@ -9,6 +9,12 @@ import { handleAuth } from "./poker/handlers/auth.mjs";
 import { handleProtectedEcho } from "./poker/handlers/protected-echo.mjs";
 import { verifyToken } from "./poker/auth/verify-token.mjs";
 import { createConnState, HEARTBEAT_MS } from "./poker/runtime/conn-state.mjs";
+import {
+  acknowledgeTransportEvidence,
+  beginTransportTermination,
+  decideTransportWatchdogAction,
+  markTransportPingSent
+} from "./poker/runtime/transport-watchdog.mjs";
 import { ackSessionSeq, touchSession } from "./poker/runtime/session.mjs";
 import { recordProtocolViolation, shouldClose } from "./poker/runtime/conn-guards.mjs";
 import { createTableManager } from "./poker/table/table-manager.mjs";
@@ -436,6 +442,18 @@ function resolvePositiveInt(rawValue, fallback, { min = 1, max = Number.MAX_SAFE
   if (rounded > max) return max;
   return rounded;
 }
+
+const transportPongTimeoutMs = resolvePositiveInt(
+  process.env.WS_TRANSPORT_PONG_TIMEOUT_MS,
+  60_000,
+  {
+    min: process.env.NODE_ENV === "test" ? 25 : HEARTBEAT_MS * 2,
+    max: 5 * 60_000
+  }
+);
+const transportWatchdogSweepMs = process.env.NODE_ENV === "test"
+  ? Math.min(HEARTBEAT_MS, transportPongTimeoutMs)
+  : HEARTBEAT_MS;
 
 const turnTimeoutFailureThreshold = resolvePositiveInt(process.env.WS_TIMEOUT_FAILURE_THRESHOLD, 5, { min: 1, max: 100 });
 const turnTimeoutQuarantineMs = resolvePositiveInt(process.env.WS_TIMEOUT_QUARANTINE_MS, 300_000, {
@@ -2843,6 +2861,7 @@ wss.on("connection", (ws) => {
   ws.__connState = connState;
 
   let messageQueue = Promise.resolve();
+  let connectionCleanupStarted = false;
 
   async function processMessage(msg, isBinary) {
     sweepExpiredSessionsOnly();
@@ -3606,6 +3625,10 @@ wss.on("connection", (ws) => {
   }
 
   ws.on("message", (msg, isBinary) => {
+    if (connState.transportTerminationStarted === true) {
+      return;
+    }
+    acknowledgeTransportEvidence(connState);
     messageQueue = messageQueue
       .then(() => processMessage(msg, isBinary))
       .catch((error) => {
@@ -3627,7 +3650,18 @@ wss.on("connection", (ws) => {
       });
   });
 
-  ws.on("error", (err) => {
+  ws.on("pong", () => {
+    if (connState.transportTerminationStarted === true) {
+      return;
+    }
+    acknowledgeTransportEvidence(connState);
+  });
+
+  const cleanupConnectionOnce = () => {
+    if (connectionCleanupStarted) {
+      return;
+    }
+    connectionCleanupStarted = true;
     lobbySubscribers.delete(ws);
     sessionStore.untrackConnection({ ws, userId: connState.session.userId });
     const cleanupUpdates = tableManager.cleanupConnection({
@@ -3644,28 +3678,75 @@ wss.on("connection", (ws) => {
     }
     sweepExpiredSessionsOnly();
     void sweepDisconnectCleanupAndBroadcast();
+  };
+
+  ws.on("error", (err) => {
+    cleanupConnectionOnce();
     klogSafe("ws_error", { message: err.message });
   });
 
   ws.on("close", () => {
-    lobbySubscribers.delete(ws);
-    sessionStore.untrackConnection({ ws, userId: connState.session.userId });
-    const cleanupUpdates = tableManager.cleanupConnection({
-      ws,
-      userId: connState.session.userId,
-      nowTs: Date.now(),
-      activeSockets: sessionStore.connectionsForUser(connState.session.userId)
-    });
-    for (const update of cleanupUpdates) {
-      broadcastTableState(update.tableId);
-      if (update && update.disconnectedUserId) {
-        enqueueDisconnectCleanupCandidate({ tableId: update.tableId, userId: update.disconnectedUserId });
-      }
-    }
-    sweepExpiredSessionsOnly();
-    void sweepDisconnectCleanupAndBroadcast();
+    cleanupConnectionOnce();
   });
 });
+
+function terminateUnresponsiveTransport(ws, connState, { ageMs, reason }) {
+  klogSafe("ws_transport_watchdog_terminated", {
+    sessionId: connState?.session?.sessionId || connState?.sessionId || null,
+    userId: connState?.session?.userId || null,
+    reason,
+    ageMs,
+    timeoutMs: transportPongTimeoutMs
+  });
+  try {
+    ws.terminate();
+  } catch (error) {
+    klogSafe("ws_transport_watchdog_terminate_failed", {
+      sessionId: connState?.session?.sessionId || connState?.sessionId || null,
+      reason,
+      message: error?.message || "unknown"
+    });
+  }
+}
+
+function sweepTransportWatchdog() {
+  const nowMs = Date.now();
+  for (const ws of wss.clients) {
+    if (ws.readyState !== WebSocket.OPEN) {
+      continue;
+    }
+    const connState = ws.__connState;
+    const decision = decideTransportWatchdogAction(connState, {
+      nowMs,
+      timeoutMs: transportPongTimeoutMs
+    });
+    if (decision.action === "ping") {
+      try {
+        ws.ping();
+        markTransportPingSent(connState, decision.nowMs);
+      } catch (error) {
+        if (beginTransportTermination(connState)) {
+          terminateUnresponsiveTransport(ws, connState, {
+            ageMs: 0,
+            reason: "ping_failed"
+          });
+        }
+      }
+      continue;
+    }
+    if (decision.action === "terminate") {
+      terminateUnresponsiveTransport(ws, connState, {
+        ageMs: decision.ageMs,
+        reason: decision.reason
+      });
+    }
+  }
+}
+
+const transportWatchdogTimer = setInterval(() => {
+  sweepTransportWatchdog();
+}, transportWatchdogSweepMs);
+transportWatchdogTimer.unref();
 
 
 const timeoutSweepIntervalMs = Number(process.env.WS_TIMEOUT_SWEEP_MS || 250);

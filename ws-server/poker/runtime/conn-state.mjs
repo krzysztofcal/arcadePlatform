@@ -11,6 +11,8 @@ export function createConnState(nowTs = () => new Date().toISOString()) {
     negotiatedVersion: PROTOCOL_VERSION,
     protocolViolations: [],
     userId: null,
+    pendingTransportPingSentAtMs: null,
+    transportTerminationStarted: false,
     session: createSession({ sessionId, nowTs })
   };
 }
