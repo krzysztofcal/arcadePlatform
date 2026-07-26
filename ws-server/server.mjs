@@ -3156,59 +3156,84 @@ wss.on("connection", (ws) => {
           });
           return;
         }
-        const materializedGuest = tableManager.materializeGuestTable({
-          tableId: frame.__resolvedTableId,
-          guestUserId: connState.session.userId,
-          nickname: connState.session.nickname || connState.nickname || null,
-          nowMs: Date.now()
+        const tableId = frame.__resolvedTableId;
+        const guestJoinIntent = frame.payload?.guestJoinIntent === "create" ? "create" : "resume";
+        await enqueueTableCommand({
+          tableId,
+          commandName: "guest_join",
+          run: async () => {
+            const runtimeExists = tableManager.listTableIds().includes(tableId);
+            if (!runtimeExists && guestJoinIntent !== "create") {
+              sendCommandResult(ws, connState, {
+                requestId: frame.requestId ?? null,
+                tableId,
+                status: "rejected",
+                reason: "table_closed"
+              });
+              return { ok: false, changed: false, code: "table_closed", retryable: false };
+            }
+            if (!runtimeExists) {
+              const materializedGuest = tableManager.materializeGuestTable({
+                tableId,
+                guestUserId: connState.session.userId,
+                nickname: connState.session.nickname || connState.nickname || null,
+                nowMs: Date.now()
+              });
+              if (!materializedGuest?.ok) {
+                sendCommandResult(ws, connState, {
+                  requestId: frame.requestId ?? null,
+                  tableId,
+                  status: "rejected",
+                  reason: materializedGuest?.code || "guest_table_failed"
+                });
+                return materializedGuest;
+              }
+            }
+            sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
+            const joined = tableManager.join({
+              ws,
+              userId: connState.session.userId,
+              tableId,
+              requestId: frame.requestId,
+              nowTs: Date.now(),
+              authoritativeSeatNo: 1,
+              buyIn: 100
+            });
+            if (!joined.ok) {
+              sendCommandResult(ws, connState, {
+                requestId: frame.requestId ?? null,
+                tableId,
+                status: "rejected",
+                reason: joined.code || "join_failed"
+              });
+              return joined;
+            }
+            const bootstrapped = tableManager.bootstrapHand(tableId, { nowMs: Date.now() });
+            sendCommandResult(ws, connState, {
+              requestId: frame.requestId ?? null,
+              tableId,
+              status: "accepted",
+              reason: joined.changed ? null : "already_joined"
+            });
+            const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
+            sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: joined.tableState, tableSnapshot });
+            if (joined.changed || bootstrapped?.changed) {
+              broadcastStateSnapshots(tableId);
+              broadcastTableState(tableId, { excludeWs: ws });
+              scheduleBotStep({
+                tableId,
+                trigger: "guest_join_bootstrap",
+                requestId: frame.requestId ?? null,
+                frameTs: frame.ts
+              });
+            }
+            return {
+              ok: true,
+              changed: joined.changed === true || bootstrapped?.changed === true,
+              status: joined.changed ? "guest_joined" : "already_joined"
+            };
+          }
         });
-        if (!materializedGuest?.ok) {
-          sendCommandResult(ws, connState, {
-            requestId: frame.requestId ?? null,
-            tableId: frame.__resolvedTableId,
-            status: "rejected",
-            reason: materializedGuest?.code || "guest_table_failed"
-          });
-          return;
-        }
-        sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
-        const joined = tableManager.join({
-          ws,
-          userId: connState.session.userId,
-          tableId: frame.__resolvedTableId,
-          requestId: frame.requestId,
-          nowTs: Date.now(),
-          authoritativeSeatNo: 1,
-          buyIn: 100
-        });
-        if (!joined.ok) {
-          sendCommandResult(ws, connState, {
-            requestId: frame.requestId ?? null,
-            tableId: frame.__resolvedTableId,
-            status: "rejected",
-            reason: joined.code || "join_failed"
-          });
-          return;
-        }
-        const bootstrapped = tableManager.bootstrapHand(frame.__resolvedTableId, { nowMs: Date.now() });
-        sendCommandResult(ws, connState, {
-          requestId: frame.requestId ?? null,
-          tableId: frame.__resolvedTableId,
-          status: "accepted",
-          reason: joined.changed ? null : "already_joined"
-        });
-        const tableSnapshot = tableManager.tableSnapshot(frame.__resolvedTableId, connState.session.userId);
-        sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: joined.tableState, tableSnapshot });
-        if (joined.changed || bootstrapped?.changed) {
-          broadcastStateSnapshots(frame.__resolvedTableId);
-          broadcastTableState(frame.__resolvedTableId, { excludeWs: ws });
-          scheduleBotStep({
-            tableId: frame.__resolvedTableId,
-            trigger: "guest_join_bootstrap",
-            requestId: frame.requestId ?? null,
-            frameTs: frame.ts
-          });
-        }
         return;
       }
 

@@ -1830,7 +1830,8 @@
           tableId: data.tableId,
           guestId: data.guestId || data.userId || null,
           nickname: data.nickname || null,
-          expiresAt: Date.now() + Math.max(1, Number(data.expiresInSec || 1800)) * 1000
+          expiresAt: Date.now() + Math.max(1, Number(data.expiresInSec || 1800)) * 1000,
+          createPending: true
         }));
         return true;
       } catch (_err){

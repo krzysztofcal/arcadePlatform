@@ -253,18 +253,21 @@ async function auth(ws, token, requestId = "req-auth") {
   return nextMessage(ws);
 }
 
-function tableJoinFrame(tableId, requestId) {
+function tableJoinFrame(tableId, requestId, guestJoinIntent = null) {
+  const payload = { tableId };
+  if (guestJoinIntent) payload.guestJoinIntent = guestJoinIntent;
+  else if (tableId.startsWith("guest_table_")) payload.guestJoinIntent = "create";
   return {
     version: "1.0",
     type: "table_join",
     requestId,
     ts: "2026-02-28T00:00:02Z",
-    payload: { tableId },
+    payload,
   };
 }
 
-async function joinTable(ws, tableId, requestId) {
-  sendFrame(ws, tableJoinFrame(tableId, requestId));
+async function joinTable(ws, tableId, requestId, guestJoinIntent = null) {
+  sendFrame(ws, tableJoinFrame(tableId, requestId, guestJoinIntent));
   const ack = await nextCommandResultForRequest(ws, requestId);
   const tableState = await nextMessageOfType(ws, "table_state");
   return { ack, tableState };
@@ -294,6 +297,17 @@ test("guest can auth and join only its token-bound guest_table_*", async () => {
     assert.equal(authOk.type, "authOk");
     assert.equal(authOk.payload.mode, "guest");
     assert.equal(authOk.payload.nickname, "Guest2468");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "join-guest-missing-intent",
+      ts: "2026-02-28T00:00:02Z",
+      payload: { tableId: boundTableId },
+    });
+    const missingIntent = await nextCommandResultForRequest(ws, "join-guest-missing-intent");
+    assert.equal(missingIntent.payload.status, "rejected");
+    assert.equal(missingIntent.payload.reason, "table_closed");
 
     const accepted = await joinTable(ws, boundTableId, "join-guest-bound");
     assert.equal(accepted.ack.payload.status, "accepted");
@@ -400,7 +414,9 @@ test("guest reconnect within grace preserves the table, then disconnect evicts i
     const firstJoin = await joinTable(first, guestTableId, "join-guest-disconnect-first");
     assert.equal(firstJoin.ack.payload.status, "accepted");
     const firstStack = firstJoin.tableState.payload?.stacks?.[guestUserId];
+    const firstHandId = firstJoin.tableState.payload?.hand?.handId;
     assert.equal(Number.isFinite(Number(firstStack)), true);
+    assert.equal(typeof firstHandId, "string");
 
     first.terminate();
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -408,10 +424,11 @@ test("guest reconnect within grace preserves the table, then disconnect evicts i
     const second = await connectClient(port);
     await hello(second);
     await auth(second, guestToken, "auth-guest-disconnect-second");
-    const secondJoin = await joinTable(second, guestTableId, "join-guest-disconnect-second");
+    const secondJoin = await joinTable(second, guestTableId, "join-guest-disconnect-second", "resume");
     assert.equal(secondJoin.ack.payload.status, "accepted");
     assert.equal(secondJoin.ack.payload.reason, "already_joined");
     assert.equal(secondJoin.tableState.payload?.stacks?.[guestUserId], firstStack);
+    assert.equal(secondJoin.tableState.payload?.hand?.handId, firstHandId);
 
     await waitForOutput(
       () => output,
@@ -434,6 +451,22 @@ test("guest reconnect within grace preserves the table, then disconnect evicts i
     assert.equal(output.includes("ws_disconnect_cleanup_retry"), false);
     assert.equal(output.includes("ws_table_janitor_"), false);
     assert.equal(output.includes("poker_ledger"), false);
+
+    const afterEvictionOutputOffset = output.lastIndexOf("[klog] ws_guest_table_evicted ");
+    const third = await connectClient(port);
+    await hello(third);
+    await auth(third, guestToken, "auth-guest-disconnect-third");
+    sendFrame(third, tableJoinFrame(guestTableId, "join-guest-after-eviction", "resume"));
+    const rejected = await nextCommandResultForRequest(third, "join-guest-after-eviction");
+    assert.equal(rejected.payload.status, "rejected");
+    assert.equal(rejected.payload.reason, "table_closed");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(
+      output.slice(afterEvictionOutputOffset).includes('"trigger":"guest_join_bootstrap"'),
+      false,
+      "resume after eviction must not recreate the guest runtime or schedule bots"
+    );
+    third.close();
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);

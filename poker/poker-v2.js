@@ -381,6 +381,20 @@
     }
   }
 
+  function consumeGuestJoinIntent(){
+    if (!isGuestMode || !currentGuestSession) return null;
+    var intent = currentGuestSession.createPending === true ? 'create' : 'resume';
+    if (intent === 'create'){
+      currentGuestSession.createPending = false;
+      try {
+        if (window.sessionStorage) {
+          window.sessionStorage.setItem('poker:guestSession', JSON.stringify(currentGuestSession));
+        }
+      } catch (_err){}
+    }
+    return intent;
+  }
+
   function klog(kind, data){
     try {
       if (window.KLog && typeof window.KLog.log === 'function') window.KLog.log(kind, data || {});
@@ -2996,6 +3010,8 @@
     } else {
       payload.seatNo = preferredSeatNo;
     }
+    var guestJoinIntent = consumeGuestJoinIntent();
+    if (guestJoinIntent) payload.guestJoinIntent = guestJoinIntent;
     return payload;
   }
 
@@ -3158,11 +3174,13 @@
     var preferredSeatNo = reconnectSeatNo;
     autoJoinAttempted = true;
     setError('');
-    sendCommand('sendJoin', {
+    var reconnectPayload = {
       tableId: state.tableId,
       autoSeat: true,
       preferredSeatNo: preferredSeatNo
-    }).then(function(result){
+    };
+    if (isGuestMode) reconnectPayload.guestJoinIntent = 'resume';
+    sendCommand('sendJoin', reconnectPayload).then(function(result){
       var resolvedSeatNo = result && Number.isInteger(Number(result.seatNo))
         ? Number(result.seatNo)
         : preferredSeatNo;

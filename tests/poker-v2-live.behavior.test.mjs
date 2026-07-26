@@ -320,7 +320,8 @@ async function flush(){
     flush,
     advanceTime,
     getCreateOptions(){ return createOptions; },
-    getIntervalCount(){ return intervalTimers.length; }
+    getIntervalCount(){ return intervalTimers.length; },
+    getSessionStorage(key){ return sandbox.sessionStorage.getItem(key); }
   };
 }
 
@@ -449,7 +450,8 @@ test('poker v2 guest mode shows restrictions panel, hides XP badge, and still au
       tableId: 'guest_table_1',
       guestId: 'guest_user_1',
       nickname: 'Guest1234',
-      expiresAt: Date.now() + 3_600_000
+      expiresAt: Date.now() + 3_600_000,
+      createPending: true
     }
   });
   harness.fireDomContentLoaded();
@@ -463,7 +465,49 @@ test('poker v2 guest mode shows restrictions panel, hides XP badge, and still au
   assert.equal(harness.elements.pokerV2GuestPanel.hidden, false, 'guest mode should show the restrictions panel');
 
   await waitFor(() => harness.joinPayloads.length === 1);
-  assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({ tableId: 'guest_table_1', buyIn: 100, autoSeat: true, preferredSeatNo: 1 }));
+  assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({
+    tableId: 'guest_table_1',
+    buyIn: 100,
+    autoSeat: true,
+    preferredSeatNo: 1,
+    guestJoinIntent: 'create'
+  }));
+  const storedGuestSession = JSON.parse(harness.getSessionStorage('poker:guestSession'));
+  assert.equal(storedGuestSession.createPending, false, 'create intent must be consumed before the join resolves');
+});
+
+test('poker v2 treats a historical guest session as resume-only and redirects on table_closed', async () => {
+  const guestPayload = Buffer.from(JSON.stringify({ sub: 'guest_user_resume' })).toString('base64url');
+  const guestToken = `aaa.${guestPayload}.zzz`;
+  const harness = createHarness({
+    search: '?tableId=guest_table_resume&guest=1&autoJoin=1',
+    token: null,
+    guestSession: {
+      token: guestToken,
+      tableId: 'guest_table_resume',
+      guestId: 'guest_user_resume',
+      nickname: 'Guest4321',
+      expiresAt: Date.now() + 3_600_000
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  await waitFor(() => harness.joinPayloads.length === 1);
+  assert.equal(harness.joinPayloads[0].guestJoinIntent, 'resume');
+
+  const ws = harness.getCreateOptions();
+  ws.onStatus('command_result', { reason: 'table_closed' });
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2ClosedTableModal.hidden, false);
+  assert.equal(harness.elements.pokerV2ClosedTableCountdown.textContent, 'Returning to lobby in 5 seconds…');
+
+  for (let i = 0; i < 5; i += 1){
+    harness.advanceTime(1000);
+    await harness.flush();
+  }
+  assert.equal(harness.windowLocation.href, '/poker/');
+  assert.equal(harness.joinPayloads.length, 1, 'closed guest table must not trigger another auto-join');
 });
 
 test('poker v2 authenticated user takes precedence over a matching guest session', async () => {
