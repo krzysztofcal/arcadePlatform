@@ -183,6 +183,13 @@ Forbidden:
 
 This is a future stage, not part of the initial log-removal PRs.
 
+Until severity filtering exists, retained high-volume diagnostics use only static startup configuration and remain off by default:
+
+- `WS_POKER_VERBOSE_LOGS=1` enables bounded reconciler and persistence/update timing diagnostics;
+- the existing `WS_BOT_AUTOPLAY_VERBOSE_LOGS=1` enables autoplay scheduling, decision and loop outcome diagnostics.
+
+These flags are not dynamic overrides, do not add severity semantics and require a process restart. Production should leave them unset except during a controlled, time-bounded investigation.
+
 The target model is deliberately small:
 
 - production and preview have separate default configuration;

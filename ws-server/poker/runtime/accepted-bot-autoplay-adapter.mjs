@@ -786,6 +786,21 @@ export function createAcceptedBotStepExecutor({
       trigger: trigger || null,
       requestId: requestId || null
     };
+    const finish = (result, diagnosticState = null) => {
+      logVerbose("ws_bot_autoplay_loop_stop", {
+        ...baseLog,
+        ok: result?.ok !== false,
+        changed: result?.changed === true,
+        botActionCount: Number(result?.actionCount || 0),
+        reason: result?.reason || "not_attempted",
+        ...buildDiagnosticSnapshot(diagnosticState),
+        stateVersion: Number.isFinite(Number(result?.finalStateVersion))
+          ? Number(result.finalStateVersion)
+          : Number(tableManager.persistedStateVersion(tableId) || 0),
+        shouldContinue: result?.shouldContinue === true
+      });
+      return result;
+    };
     let lastKnown = {
       stage: "init",
       state: null,
@@ -795,7 +810,7 @@ export function createAcceptedBotStepExecutor({
     };
     let privateState = tableManager.persistedPokerState(tableId);
     if (!privateState || typeof privateState !== "object") {
-      return { ok: true, changed: false, actionCount: 0, reason: "missing_state" };
+      return finish({ ok: true, changed: false, actionCount: 0, reason: "missing_state" });
     }
 
     const runtimeFlavor = isEngineStateShape(privateState) ? "engine" : "legacy";
@@ -822,7 +837,7 @@ export function createAcceptedBotStepExecutor({
     let state = withoutPrivateState(privateState);
     lastKnown.state = state;
     if (!isActionPhase(state?.phase) || !state?.turnUserId) {
-      return { ok: true, changed: false, actionCount: 0, reason: "not_action_phase" };
+      return finish({ ok: true, changed: false, actionCount: 0, reason: "not_action_phase" }, state);
     }
 
     let runBotAutoplayLoop;
@@ -837,7 +852,7 @@ export function createAcceptedBotStepExecutor({
         moduleUrl: sharedAutoplayModuleUrl,
         message: error?.message || "unknown"
       });
-      return { ok: true, changed: false, actionCount: 0, reason: "autoplay_unavailable", noop: true };
+      return finish({ ok: true, changed: false, actionCount: 0, reason: "autoplay_unavailable", noop: true }, state);
     }
 
     let turnSnapshot = tableManager.tableSnapshot(tableId, state.turnUserId);
@@ -1151,16 +1166,6 @@ export function createAcceptedBotStepExecutor({
         }
       });
 
-      if (botLoop?.botActionCount > 0 || botLoop?.botStopReason) {
-        logVerbose("ws_bot_autoplay_loop_stop", {
-          ...baseLog,
-          botActionCount: botLoop?.botActionCount || 0,
-          reason: botLoop?.botStopReason || "not_attempted",
-          ...buildDiagnosticSnapshot(botLoop?.responseFinalState || lastKnown.state),
-          stateVersion: Number(tableManager.persistedStateVersion(tableId) || 0)
-        });
-      }
-
       const finalPrivateState = tableManager.persistedPokerState(tableId);
       const finalPublicState = finalPrivateState ? withoutPrivateState(finalPrivateState) : null;
       const finalTurnUserId = typeof finalPublicState?.turnUserId === "string" ? finalPublicState.turnUserId : null;
@@ -1177,7 +1182,7 @@ export function createAcceptedBotStepExecutor({
           ? botLoop.botFailureReason.trim()
           : null;
 
-      return {
+      return finish({
         ok: botFailureReason === null,
         changed: (botLoop?.botActionCount || 0) > 0,
         actionCount: botLoop?.botActionCount || 0,
@@ -1191,7 +1196,7 @@ export function createAcceptedBotStepExecutor({
         phase: typeof finalPublicState?.phase === "string" ? finalPublicState.phase : null,
         turnUserId: finalTurnUserId,
         shouldContinue: (botLoop?.botActionCount || 0) > 0 && pendingBotTurn === true
-      };
+      }, finalPublicState);
     } catch (error) {
       const lastState = lastKnown.state;
       const diagnostic = buildDiagnosticSnapshot(lastState);
@@ -1222,13 +1227,13 @@ export function createAcceptedBotStepExecutor({
         restoreOk,
         restoreReason
       });
-      return {
+      return finish({
         ok: false,
         changed: false,
         actionCount: 0,
         reason: failureReason,
         restoreOk
-      };
+      }, lastState);
     }
   };
 }
