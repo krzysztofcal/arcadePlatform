@@ -775,9 +775,9 @@ export function createAcceptedBotStepExecutor({
   klog = () => {}
 } = {}) {
   const verboseAutoplayLogs = env?.WS_BOT_AUTOPLAY_VERBOSE_LOGS === "1";
-  const logVerbose = (kind, payload) => {
+  const logVerbose = (kind, createPayload) => {
     if (!verboseAutoplayLogs) return;
-    klog(kind, payload);
+    klog(kind, createPayload());
   };
 
   return async function runAcceptedBotStep({ tableId, trigger, requestId, frameTs }) {
@@ -785,6 +785,21 @@ export function createAcceptedBotStepExecutor({
       tableId,
       trigger: trigger || null,
       requestId: requestId || null
+    };
+    const finish = (result, diagnosticState = null) => {
+      logVerbose("ws_bot_autoplay_loop_stop", () => ({
+        ...baseLog,
+        ok: result?.ok !== false,
+        changed: result?.changed === true,
+        botActionCount: Number(result?.actionCount || 0),
+        reason: result?.reason || "not_attempted",
+        ...buildDiagnosticSnapshot(diagnosticState),
+        stateVersion: Number.isFinite(Number(result?.finalStateVersion))
+          ? Number(result.finalStateVersion)
+          : Number(tableManager.persistedStateVersion(tableId) || 0),
+        shouldContinue: result?.shouldContinue === true
+      }));
+      return result;
     };
     let lastKnown = {
       stage: "init",
@@ -795,7 +810,7 @@ export function createAcceptedBotStepExecutor({
     };
     let privateState = tableManager.persistedPokerState(tableId);
     if (!privateState || typeof privateState !== "object") {
-      return { ok: true, changed: false, actionCount: 0, reason: "missing_state" };
+      return finish({ ok: true, changed: false, actionCount: 0, reason: "missing_state" });
     }
 
     const runtimeFlavor = isEngineStateShape(privateState) ? "engine" : "legacy";
@@ -822,7 +837,7 @@ export function createAcceptedBotStepExecutor({
     let state = withoutPrivateState(privateState);
     lastKnown.state = state;
     if (!isActionPhase(state?.phase) || !state?.turnUserId) {
-      return { ok: true, changed: false, actionCount: 0, reason: "not_action_phase" };
+      return finish({ ok: true, changed: false, actionCount: 0, reason: "not_action_phase" }, state);
     }
 
     let runBotAutoplayLoop;
@@ -837,20 +852,20 @@ export function createAcceptedBotStepExecutor({
         moduleUrl: sharedAutoplayModuleUrl,
         message: error?.message || "unknown"
       });
-      return { ok: true, changed: false, actionCount: 0, reason: "autoplay_unavailable", noop: true };
+      return finish({ ok: true, changed: false, actionCount: 0, reason: "autoplay_unavailable", noop: true }, state);
     }
 
     let turnSnapshot = tableManager.tableSnapshot(tableId, state.turnUserId);
     let seatBotMap = buildSeatBotMap(turnSnapshot?.seats);
     let seatUserIdsInOrder = buildSeatUserIdsInOrder(privateState);
     const cfg = getBotAutoplayConfig(env);
-    logVerbose("ws_bot_autoplay_loop_start", {
+    logVerbose("ws_bot_autoplay_loop_start", () => ({
       ...baseLog,
       runtimeFlavor,
       ...buildDiagnosticSnapshot(state),
       stateVersion: Number(tableManager.persistedStateVersion(tableId) || 0),
       maxActions: 1
-    });
+    }));
     try {
       let broadcastedStepCount = 0;
       let lastBroadcastStateVersion = null;
@@ -911,13 +926,13 @@ export function createAcceptedBotStepExecutor({
           };
           const legalSummary = summarizeLegalActions(botLegal?.actions);
           lastKnown = { ...lastKnown, stage: "turn_snapshot", state: statePublic, legalActionSummary: legalSummary };
-          logVerbose("ws_bot_autoplay_turn_snapshot", {
+          logVerbose("ws_bot_autoplay_turn_snapshot", () => ({
             ...baseLog,
             botTurnUserId: userId || null,
             legalActionSummary: legalSummary,
             ...buildDiagnosticSnapshot(statePublic),
             stateVersion: Number(tableManager.persistedStateVersion(tableId) || 0)
-          });
+          }));
           return botLegal;
         },
         beforeBotActionStep: async ({
@@ -941,14 +956,14 @@ export function createAcceptedBotStepExecutor({
             now
           });
           if (reactionDelayMs > 0) {
-            logVerbose("ws_bot_autoplay_reaction_delay", {
+            logVerbose("ws_bot_autoplay_reaction_delay", () => ({
               ...baseLog,
               botTurnUserId: botTurnUserId || null,
               botActionCount,
               delayMs: reactionDelayMs,
               ...buildDiagnosticSnapshot(responseFinalState),
               stateVersion: Number(loopVersion || tableManager.persistedStateVersion(tableId) || 0)
-            });
+            }));
             await sleep(reactionDelayMs);
           }
 
@@ -997,7 +1012,7 @@ export function createAcceptedBotStepExecutor({
               actionType: action?.type || null
             });
           }
-          klog("ws_bot_autoplay_decision", {
+          logVerbose("ws_bot_autoplay_decision", () => ({
             ...baseLog,
             ...buildBotDecisionDiagnostics({
               legalActions,
@@ -1007,21 +1022,21 @@ export function createAcceptedBotStepExecutor({
               action
             }),
             legalActionSummary: summarizeLegalActions(legalActions)
-          });
+          }));
           lastKnown = { ...lastKnown, stage: "action_chosen", actionType: action?.type || null, actionAmount: action?.amount ?? null };
-          logVerbose("ws_bot_autoplay_action_chosen", {
+          logVerbose("ws_bot_autoplay_action_chosen", () => ({
             ...baseLog,
             botTurnUserId: typeof lastKnown?.state?.turnUserId === "string" ? lastKnown.state.turnUserId : null,
             actionType: action?.type || null,
             amount: action?.amount ?? null
-          });
+          }));
           return action;
         },
         isBotTurn,
         applyAction: (loopPrivateState, botAction) => {
           const safeState = withoutPrivateState(loopPrivateState);
           lastKnown = { ...lastKnown, stage: "apply_start", state: safeState, actionType: botAction?.type || null, actionAmount: botAction?.amount ?? null };
-          logVerbose("ws_bot_autoplay_apply_start", {
+          logVerbose("ws_bot_autoplay_apply_start", () => ({
             ...baseLog,
             botTurnUserId: typeof safeState?.turnUserId === "string" ? safeState.turnUserId : null,
             actionType: botAction?.type || null,
@@ -1029,11 +1044,11 @@ export function createAcceptedBotStepExecutor({
             ...buildDiagnosticSnapshot(safeState),
             legalActionSummary: lastKnown.legalActionSummary,
             stateVersion: Number(tableManager.persistedStateVersion(tableId) || 0)
-          });
+          }));
           const applied = applyRuntimeAction(loopPrivateState, botAction);
           const nextState = withoutPrivateState(applied?.state);
           lastKnown = { ...lastKnown, stage: "apply_result", state: nextState };
-          logVerbose("ws_bot_autoplay_apply_result", {
+          logVerbose("ws_bot_autoplay_apply_result", () => ({
             ...baseLog,
             botTurnUserId: typeof safeState?.turnUserId === "string" ? safeState.turnUserId : null,
             actionType: botAction?.type || null,
@@ -1041,11 +1056,11 @@ export function createAcceptedBotStepExecutor({
             ...buildDiagnosticSnapshot(nextState),
             legalActionSummary: lastKnown.legalActionSummary,
             stateVersion: Number(tableManager.persistedStateVersion(tableId) || 0)
-          });
+          }));
           return applied;
         },
         persistStep: async ({ botTurnUserId, botAction, botRequestId, fromState }) => {
-          logVerbose("ws_bot_autoplay_persist_start", {
+          logVerbose("ws_bot_autoplay_persist_start", () => ({
             ...baseLog,
             botTurnUserId: botTurnUserId || null,
             actionType: botAction?.type || null,
@@ -1053,7 +1068,7 @@ export function createAcceptedBotStepExecutor({
             ...buildDiagnosticSnapshot(fromState),
             legalActionSummary: lastKnown.legalActionSummary,
             stateVersion: Number(tableManager.persistedStateVersion(tableId) || 0)
-          });
+          }));
           const applied = tableManager.applyAction({
             tableId,
             handId: fromState?.handId,
@@ -1065,14 +1080,14 @@ export function createAcceptedBotStepExecutor({
           });
 
           if (!applied?.accepted || applied?.replayed || !applied?.changed) {
-            logVerbose("ws_bot_autoplay_persist_result", {
+            logVerbose("ws_bot_autoplay_persist_result", () => ({
               ...baseLog,
               botTurnUserId: botTurnUserId || null,
               actionType: botAction?.type || null,
               amount: botAction?.amount ?? null,
               ok: false,
               reason: applied?.reason || "bot_action_rejected"
-            });
+            }));
             return { ok: false, reason: applied?.reason || "bot_action_rejected" };
           }
 
@@ -1091,29 +1106,29 @@ export function createAcceptedBotStepExecutor({
               restoreTableFromPersisted,
               broadcastResyncRequired
             });
-            logVerbose("ws_bot_autoplay_persist_result", {
+            logVerbose("ws_bot_autoplay_persist_result", () => ({
               ...baseLog,
               botTurnUserId: botTurnUserId || null,
               actionType: botAction?.type || null,
               amount: botAction?.amount ?? null,
               ok: false,
               reason: persisted?.reason || "persist_failed"
-            });
+            }));
             return { ok: false, reason: persisted?.reason || "persist_failed" };
           }
 
           const latestPrivateState = tableManager.persistedPokerState(tableId);
           const latestState = withoutPrivateState(latestPrivateState);
           lastKnown = { ...lastKnown, stage: "state_after_step", state: latestState };
-          logVerbose("ws_bot_autoplay_persist_result", {
+          logVerbose("ws_bot_autoplay_persist_result", () => ({
             ...baseLog,
             botTurnUserId: botTurnUserId || null,
             actionType: botAction?.type || null,
             amount: botAction?.amount ?? null,
             ok: true,
             stateVersion: Number(applied.stateVersion)
-          });
-          logVerbose("ws_bot_autoplay_state_after_step", {
+          }));
+          logVerbose("ws_bot_autoplay_state_after_step", () => ({
             ...baseLog,
             botTurnUserId: botTurnUserId || null,
             actionType: botAction?.type || null,
@@ -1121,7 +1136,7 @@ export function createAcceptedBotStepExecutor({
             ...buildDiagnosticSnapshot(latestState),
             legalActionSummary: lastKnown.legalActionSummary,
             stateVersion: Number(applied.stateVersion)
-          });
+          }));
           try {
             await onBotStepPersisted({
               tableId,
@@ -1151,16 +1166,6 @@ export function createAcceptedBotStepExecutor({
         }
       });
 
-      if (botLoop?.botActionCount > 0 || botLoop?.botStopReason) {
-        logVerbose("ws_bot_autoplay_loop_stop", {
-          ...baseLog,
-          botActionCount: botLoop?.botActionCount || 0,
-          reason: botLoop?.botStopReason || "not_attempted",
-          ...buildDiagnosticSnapshot(botLoop?.responseFinalState || lastKnown.state),
-          stateVersion: Number(tableManager.persistedStateVersion(tableId) || 0)
-        });
-      }
-
       const finalPrivateState = tableManager.persistedPokerState(tableId);
       const finalPublicState = finalPrivateState ? withoutPrivateState(finalPrivateState) : null;
       const finalTurnUserId = typeof finalPublicState?.turnUserId === "string" ? finalPublicState.turnUserId : null;
@@ -1177,7 +1182,7 @@ export function createAcceptedBotStepExecutor({
           ? botLoop.botFailureReason.trim()
           : null;
 
-      return {
+      return finish({
         ok: botFailureReason === null,
         changed: (botLoop?.botActionCount || 0) > 0,
         actionCount: botLoop?.botActionCount || 0,
@@ -1191,7 +1196,7 @@ export function createAcceptedBotStepExecutor({
         phase: typeof finalPublicState?.phase === "string" ? finalPublicState.phase : null,
         turnUserId: finalTurnUserId,
         shouldContinue: (botLoop?.botActionCount || 0) > 0 && pendingBotTurn === true
-      };
+      }, finalPublicState);
     } catch (error) {
       const lastState = lastKnown.state;
       const diagnostic = buildDiagnosticSnapshot(lastState);
@@ -1222,13 +1227,13 @@ export function createAcceptedBotStepExecutor({
         restoreOk,
         restoreReason
       });
-      return {
+      return finish({
         ok: false,
         changed: false,
         actionCount: 0,
         reason: failureReason,
         restoreOk
-      };
+      }, lastState);
     }
   };
 }

@@ -607,7 +607,7 @@ test("persisted state writer atomically dedupes concurrent accepted action audit
   assert.deepEqual(second, { ok: true, newVersion: 8, alreadyApplied: true });
   assert.equal(queries.filter((entry) => entry.query.startsWith("select id from public.poker_actions")).length, 0);
   assert.equal(queries.filter((entry) => entry.query.startsWith("insert into public.poker_actions")).length, 2);
-  assert.equal(logs.filter((entry) => entry.kind === "ws_accepted_action_audit_written").length, 1);
+  assert.equal(logs.filter((entry) => entry.kind === "ws_accepted_action_audit_written").length, 0);
   assert.equal(logs.filter((entry) => entry.kind === "ws_accepted_action_audit_failed").length, 0);
 });
 

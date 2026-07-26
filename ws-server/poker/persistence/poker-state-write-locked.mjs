@@ -2,12 +2,14 @@ import { normalizeJsonState } from "../snapshot-runtime/poker-state-utils.mjs";
 
 export async function updatePokerStateLocked(tx, { tableId, nextState }) {
   const klog = typeof tx?.klog === "function" ? tx.klog : () => {};
+  const verboseLogs = process.env.WS_POKER_VERBOSE_LOGS === "1";
   if (!tableId) return { ok: false, reason: "invalid" };
   if (!nextState || typeof nextState !== "object" || Array.isArray(nextState)) {
     klog("ws_state_update_invalid", { reason: "invalid_state_payload" });
     return { ok: false, reason: "invalid" };
   }
-  klog("ws_state_update_start", { tableId });
+  const updateStartedAtMs = verboseLogs ? Date.now() : 0;
+  if (verboseLogs) klog("ws_state_update_start", { tableId });
   let payload;
   try {
     payload = JSON.stringify(nextState);
@@ -24,7 +26,13 @@ export async function updatePokerStateLocked(tx, { tableId, nextState }) {
     klog("ws_state_update_invalid", { reason: rows?.length ? "invalid_version" : "not_found" });
     return { ok: false, reason: rows?.length ? "invalid" : "not_found" };
   }
-  klog("ws_state_update_result", { newVersion });
+  if (verboseLogs) {
+    klog("ws_state_update_result", {
+      tableId,
+      newVersion,
+      durationMs: Math.max(0, Date.now() - updateStartedAtMs)
+    });
+  }
   return { ok: true, newVersion };
 }
 

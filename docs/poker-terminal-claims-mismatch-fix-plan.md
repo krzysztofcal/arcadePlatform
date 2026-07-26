@@ -416,8 +416,8 @@ PR B smoke:
 Use one-line commands and `grep`:
 
 ```text
-sudo journalctl -u ws-server-preview.service -f | grep -E 'ws_state_persist_start|ws_settled_rollover_|poker_terminal_|ws_table_janitor_'
-sudo journalctl -u ws-server.service -f | grep -E 'ws_state_persist_start|ws_settled_rollover_|poker_terminal_|ws_table_janitor_'
+sudo journalctl -u ws-server-preview.service -f | grep -E 'ws_state_persist_failed|ws_settled_rollover_|poker_terminal_|ws_table_janitor_'
+sudo journalctl -u ws-server.service -f | grep -E 'ws_state_persist_failed|ws_settled_rollover_|poker_terminal_|ws_table_janitor_'
 ```
 
 ## Rollout order
