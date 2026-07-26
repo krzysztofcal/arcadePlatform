@@ -4,6 +4,7 @@ export function createDisconnectCleanupRuntime({
   socketMatchesTable,
   seatedReconnectGraceMs = 0,
   onChanged = () => {},
+  onCancelled = () => {},
   klog = () => {},
   nowMs = () => Date.now()
 } = {}) {
@@ -46,6 +47,7 @@ export function createDisconnectCleanupRuntime({
       });
       if (hasLiveSocket) {
         candidates.delete(key(candidate.tableId, candidate.userId));
+        await onCancelled(candidate, "active_socket");
         continue;
       }
       if (Number.isFinite(candidate.retryNotBeforeMs) && candidate.retryNotBeforeMs > currentNowMs) {
@@ -114,5 +116,16 @@ export function createDisconnectCleanupRuntime({
     return candidates.size;
   }
 
-  return { enqueue, sweep, size };
+  function forgetTable(tableId) {
+    if (typeof tableId !== 'string' || !tableId) return 0;
+    let deleted = 0;
+    for (const candidate of [...candidates.values()]) {
+      if (candidate.tableId === tableId && candidates.delete(key(candidate.tableId, candidate.userId))) {
+        deleted += 1;
+      }
+    }
+    return deleted;
+  }
+
+  return { enqueue, sweep, size, forgetTable };
 }

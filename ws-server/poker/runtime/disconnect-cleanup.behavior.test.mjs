@@ -286,3 +286,19 @@ test('awaited async onChanged', async () => {
     'onChanged:end'
   ]);
 });
+
+test('forgetTable removes only cleanup candidates owned by the evicted table', () => {
+  const runtime = createDisconnectCleanupRuntime({
+    executeCleanup: async () => ({ ok: true }),
+    listActiveSocketsForUser: () => [],
+    socketMatchesTable: () => false
+  });
+
+  runtime.enqueue({ tableId: 't_evicted', userId: 'u1' });
+  runtime.enqueue({ tableId: 't_evicted', userId: 'u2' });
+  runtime.enqueue({ tableId: 't_retained', userId: 'u3' });
+
+  assert.equal(runtime.forgetTable('t_evicted'), 2);
+  assert.equal(runtime.forgetTable('t_evicted'), 0);
+  assert.equal(runtime.size(), 1);
+});

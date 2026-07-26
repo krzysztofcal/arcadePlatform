@@ -65,3 +65,14 @@ test("receiver-scoped window is unaffected by unrelated receiver traffic", () =>
   assert.equal(replayB.ok, false);
   assert.equal(replayB.reason, "last_seq_out_of_window");
 });
+
+test("forgetTable removes only the selected replay stream and is idempotent", () => {
+  const streamLog = createStreamLog({ cap: 3 });
+  streamLog.append({ tableId: "forgotten", frame: { type: "stateSnapshot" }, receiverKey: "sess_a" });
+  streamLog.append({ tableId: "retained", frame: { type: "stateSnapshot" }, receiverKey: "sess_b" });
+
+  assert.equal(streamLog.forgetTable("forgotten"), true);
+  assert.equal(streamLog.forgetTable("forgotten"), false);
+  assert.equal(streamLog.latestSeq("forgotten"), 0);
+  assert.equal(streamLog.latestSeq("retained"), 1);
+});
