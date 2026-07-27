@@ -201,3 +201,46 @@ test("bot claims recovery proxies an explicitly confirmed execute request", asyn
   assert.equal(upstream.adminUserId, "00000000-0000-4000-8000-000000000010");
   assert.match(upstream.requestId, /^admin-recovery:/);
 });
+
+test("bot claims recovery maps an incomplete execute outcome to HTTP conflict", async () => {
+  const handler = createAdminTableBotClaimsRecoveryHandler({
+    env: {
+      CHIPS_ENABLED: "1",
+      POKER_WS_INTERNAL_BASE_URL: "https://ws-preview.kcswh.pl",
+      POKER_WS_INTERNAL_TOKEN: "internal-test-token",
+    },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    buildStageIdentity: () => ({
+      environmentContext: "deploy-preview",
+      databaseTarget: "stage",
+      stageProjectRefMatches: true,
+      databaseMatchesSupabaseProjectRef: true,
+      serviceRoleStageProjectRefMatches: true,
+    }),
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: false,
+        eligible: false,
+        changed: false,
+        closed: false,
+        environment: "ws-preview",
+        reason: "active_table_presence",
+        bots: [],
+      }),
+    }),
+  });
+  const response = await handler(createPostEvent({
+    mode: "execute",
+    tableId: "00000000-0000-4000-8000-000000000111",
+    expectedStateVersion: 78,
+    expectedInputHash: "a".repeat(64),
+    idempotencyKey: "client-recovery-active",
+    confirmation: "REPAIR BOT CLAIMS AND CLOSE",
+    reason: "approved Preview repair",
+  }));
+
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(JSON.parse(response.body), { error: "active_table_presence" });
+});

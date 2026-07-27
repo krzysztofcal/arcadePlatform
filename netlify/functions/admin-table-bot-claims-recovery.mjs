@@ -5,6 +5,16 @@ import { buildStageIdentity } from "./admin-stage-identity.mjs";
 
 const WS_PREVIEW_ORIGIN = "https://ws-preview.kcswh.pl";
 const CONFIRMATION = "REPAIR BOT CLAIMS AND CLOSE";
+const EXPOSED_RECOVERY_ERRORS = new Set([
+  "active_table_presence",
+  "foreign_human_history",
+  "other_request_pending",
+  "participant_identity_unknown",
+  "preview_only",
+  "recovery_input_changed",
+  "request_pending",
+  "state_version_changed",
+]);
 
 function jsonResponse(statusCode, headers, body) {
   return {
@@ -108,7 +118,12 @@ function isValidRecoveryResponse(value, mode) {
       return false;
     }
   }
-  if (mode === "execute" && value.ok === true && value.closed !== true) return false;
+  if (
+    mode === "execute"
+    && (typeof value.changed !== "boolean" || typeof value.closed !== "boolean")
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -139,21 +154,24 @@ async function proxyRecovery({ payload, env, fetchImpl }) {
       body = await response.json();
     } catch {}
     if (!response.ok) {
-      const exposed = new Set([
-        "active_table_presence",
-        "foreign_human_history",
-        "other_request_pending",
-        "participant_identity_unknown",
-        "preview_only",
-        "recovery_input_changed",
-        "request_pending",
-        "state_version_changed",
-      ]);
       const upstreamCode = typeof body?.error === "string" ? body.error : "ws_preview_unavailable";
-      throw recoveryError(exposed.has(upstreamCode) ? upstreamCode : "ws_preview_unavailable", response.status);
+      throw recoveryError(
+        EXPOSED_RECOVERY_ERRORS.has(upstreamCode) ? upstreamCode : "ws_preview_unavailable",
+        response.status,
+      );
     }
     if (!isValidRecoveryResponse(body, payload.mode)) {
       throw recoveryError("ws_preview_invalid_response", 502);
+    }
+    if (
+      payload.mode === "execute"
+      && (body.ok !== true || body.changed !== true || body.closed !== true)
+    ) {
+      const outcomeCode = typeof body.reason === "string" ? body.reason : "";
+      throw recoveryError(
+        EXPOSED_RECOVERY_ERRORS.has(outcomeCode) ? outcomeCode : "recovery_not_completed",
+        409,
+      );
     }
     return body;
   } catch (error) {

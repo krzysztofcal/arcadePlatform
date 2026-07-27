@@ -1688,7 +1688,7 @@
     setStatus(t("loading", "Loading..."), "info");
     try {
       var keyScope = "bot-claims-recovery-" + tableId;
-      await apiFetch("/.netlify/functions/admin-table-bot-claims-recovery", {
+      var result = await apiFetch("/.netlify/functions/admin-table-bot-claims-recovery", {
         method: "POST",
         body: JSON.stringify({
           mode: "execute",
@@ -1700,6 +1700,12 @@
           reason: reason,
         }),
       });
+      if (!result || result.ok !== true || result.changed !== true || result.closed !== true){
+        var outcomeError = new Error(result && result.reason ? String(result.reason) : "recovery_not_completed");
+        outcomeError.status = 409;
+        outcomeError.code = result && result.reason ? result.reason : "recovery_not_completed";
+        throw outcomeError;
+      }
       resetDraftIdempotencyKey(keyScope);
       state.tables.recovery = null;
       setStatus("Bot claims repaired and table closed.", "success");

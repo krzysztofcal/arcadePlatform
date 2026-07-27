@@ -20,6 +20,11 @@ test("admin table recovery requires explicit analysis before the confirmed repai
   assert.match(source, /REPAIR BOT CLAIMS AND CLOSE/);
   assert.match(source, /expectedStateVersion: recovery\.stateVersion/);
   assert.match(source, /expectedInputHash: recovery\.inputHash/);
+  assert.match(source, /result\.ok !== true \|\| result\.changed !== true \|\| result\.closed !== true/);
+  assert.ok(
+    source.indexOf("result.ok !== true") < source.indexOf("resetDraftIdempotencyKey(keyScope)"),
+    "recovery outcome must be verified before clearing its idempotency key",
+  );
 });
 
 function createClassList(node) {
