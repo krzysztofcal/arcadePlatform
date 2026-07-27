@@ -12,6 +12,21 @@ const source = await readFile(path.join(repoRoot, "js", "admin-page.js"), "utf8"
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
+test("admin table recovery requires explicit analysis before the confirmed repair action", () => {
+  assert.match(source, /Analyze bot recovery/);
+  assert.match(source, /Repair bot claims and close/);
+  assert.match(source, /mode: "preflight"/);
+  assert.match(source, /mode: "execute"/);
+  assert.match(source, /REPAIR BOT CLAIMS AND CLOSE/);
+  assert.match(source, /expectedStateVersion: recovery\.stateVersion/);
+  assert.match(source, /expectedInputHash: recovery\.inputHash/);
+  assert.match(source, /result\.ok !== true \|\| result\.changed !== true \|\| result\.closed !== true/);
+  assert.ok(
+    source.indexOf("result.ok !== true") < source.indexOf("resetDraftIdempotencyKey(keyScope)"),
+    "recovery outcome must be verified before clearing its idempotency key",
+  );
+});
+
 function createClassList(node) {
   function read() {
     return String(node.className || "").split(/\s+/).filter(Boolean);

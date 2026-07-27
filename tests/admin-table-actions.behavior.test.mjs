@@ -4,6 +4,7 @@ import test from "node:test";
 const { createAdminTableEvaluateHandler } = await import("../netlify/functions/admin-table-evaluate.mjs");
 const { createAdminTableCleanupHandler } = await import("../netlify/functions/admin-table-cleanup.mjs");
 const { createAdminTableForceCloseHandler } = await import("../netlify/functions/admin-table-force-close.mjs");
+const { createAdminTableBotClaimsRecoveryHandler } = await import("../netlify/functions/admin-table-bot-claims-recovery.mjs");
 
 function createGetEvent(queryStringParameters = {}) {
   return {
@@ -127,4 +128,123 @@ test("admin-table-force-close forwards dangerous action only after validation", 
   assert.equal(seen.requestedAction, "force_close");
   assert.match(seen.idempotencyKey, /^admin-force-close:/);
   assert.equal(body.result.status, "force_closed");
+});
+
+test("bot claims recovery remains fail-closed outside exact Preview stage identity", async () => {
+  const handler = createAdminTableBotClaimsRecoveryHandler({
+    env: { CHIPS_ENABLED: "1" },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    buildStageIdentity: () => ({
+      environmentContext: "production",
+      databaseTarget: "production",
+      stageProjectRefMatches: false,
+      databaseMatchesSupabaseProjectRef: true,
+      serviceRoleStageProjectRefMatches: false,
+    }),
+  });
+  const response = await handler(createPostEvent({
+    mode: "preflight",
+    tableId: "00000000-0000-4000-8000-000000000111",
+  }));
+
+  assert.equal(response.statusCode, 403);
+  assert.deepEqual(JSON.parse(response.body), { error: "preview_only" });
+});
+
+test("bot claims recovery proxies an explicitly confirmed execute request", async () => {
+  let upstream = null;
+  const tableId = "00000000-0000-4000-8000-000000000111";
+  const uiGeneratedKey = `bot-claims-recovery-${tableId}-mabc1234-r4nd0m12`;
+  assert.ok(uiGeneratedKey.length > 64);
+  const handler = createAdminTableBotClaimsRecoveryHandler({
+    env: {
+      CHIPS_ENABLED: "1",
+      POKER_WS_INTERNAL_BASE_URL: "https://ws-preview.kcswh.pl",
+      POKER_WS_INTERNAL_TOKEN: "internal-test-token",
+    },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    buildStageIdentity: () => ({
+      environmentContext: "deploy-preview",
+      databaseTarget: "stage",
+      stageProjectRefMatches: true,
+      databaseMatchesSupabaseProjectRef: true,
+      serviceRoleStageProjectRefMatches: true,
+    }),
+    fetchImpl: async (_url, options) => {
+      upstream = JSON.parse(options.body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          eligible: true,
+          changed: true,
+          closed: true,
+          environment: "ws-preview",
+          stateVersion: 78,
+          finalStateVersion: 80,
+          inputHash: "a".repeat(64),
+          bots: [],
+        }),
+      };
+    },
+  });
+  const response = await handler(createPostEvent({
+    mode: "execute",
+    tableId,
+    expectedStateVersion: 78,
+    expectedInputHash: "a".repeat(64),
+    idempotencyKey: uiGeneratedKey,
+    confirmation: "REPAIR BOT CLAIMS AND CLOSE",
+    reason: "approved Preview repair",
+  }));
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(upstream.mode, "execute");
+  assert.equal(upstream.adminUserId, "00000000-0000-4000-8000-000000000010");
+  assert.match(upstream.requestId, /^admin-recovery:/);
+  assert.ok(upstream.requestId.length <= 140);
+});
+
+test("bot claims recovery maps an incomplete execute outcome to HTTP conflict", async () => {
+  const handler = createAdminTableBotClaimsRecoveryHandler({
+    env: {
+      CHIPS_ENABLED: "1",
+      POKER_WS_INTERNAL_BASE_URL: "https://ws-preview.kcswh.pl",
+      POKER_WS_INTERNAL_TOKEN: "internal-test-token",
+    },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    buildStageIdentity: () => ({
+      environmentContext: "deploy-preview",
+      databaseTarget: "stage",
+      stageProjectRefMatches: true,
+      databaseMatchesSupabaseProjectRef: true,
+      serviceRoleStageProjectRefMatches: true,
+    }),
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: false,
+        eligible: false,
+        changed: false,
+        closed: false,
+        environment: "ws-preview",
+        reason: "active_table_presence",
+        bots: [],
+      }),
+    }),
+  });
+  const response = await handler(createPostEvent({
+    mode: "execute",
+    tableId: "00000000-0000-4000-8000-000000000111",
+    expectedStateVersion: 78,
+    expectedInputHash: "a".repeat(64),
+    idempotencyKey: "client-recovery-active",
+    confirmation: "REPAIR BOT CLAIMS AND CLOSE",
+    reason: "approved Preview repair",
+  }));
+
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(JSON.parse(response.body), { error: "active_table_presence" });
 });

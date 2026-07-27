@@ -2,6 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { executeInactiveCleanup } from "./inactive-cleanup.mjs";
 import { executeTerminalPokerCloseInTx } from "./terminal-close.mjs";
+import {
+  collectParticipantEvidence,
+  projectBotClaimsRepair,
+} from "./bot-claims-recovery.mjs";
 
 function createCleanupHarness({
   seatRows,
@@ -654,4 +658,135 @@ test("inactive cleanup keeps fresh table open during close grace period", async 
   assert.equal(result.code, "grace_period");
   assert.equal(result.retryable, true);
   assert.equal(harness.tableState.tableStatus, "OPEN");
+});
+
+test("bot claims recovery assigns a positive delta to the lowest-seat confirmed bot", () => {
+  const adminUserId = "00000000-0000-4000-8000-000000000001";
+  const botLow = "00000000-0000-4000-8000-000000000002";
+  const botHigh = "00000000-0000-4000-8000-000000000003";
+  const result = projectBotClaimsRepair({
+    state: { stacks: { [adminUserId]: 50, [botHigh]: 30, [botLow]: 20 } },
+    seats: [
+      { user_id: adminUserId, seat_no: 1, is_bot: false },
+      { user_id: botHigh, seat_no: 3, is_bot: true },
+      { user_id: botLow, seat_no: 2, is_bot: true },
+    ],
+    escrowBefore: 115,
+    adminUserId,
+    identityEvidence: { ok: true, botUserIds: new Set([botLow, botHigh]) },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.delta, 15);
+  assert.equal(result.humanStack, 50);
+  assert.deepEqual(result.bots.map(({ seatNo, before, after }) => ({ seatNo, before, after })), [
+    { seatNo: 2, before: 20, after: 35 },
+    { seatNo: 3, before: 30, after: 30 },
+  ]);
+});
+
+test("bot claims recovery drains a negative delta in seat order without changing the human", () => {
+  const adminUserId = "00000000-0000-4000-8000-000000000001";
+  const botLow = "00000000-0000-4000-8000-000000000002";
+  const botHigh = "00000000-0000-4000-8000-000000000003";
+  const result = projectBotClaimsRepair({
+    state: { stacks: { [adminUserId]: 50, [botLow]: 20, [botHigh]: 30 } },
+    seats: [
+      { user_id: adminUserId, seat_no: 1, is_bot: false },
+      { user_id: botLow, seat_no: 2, is_bot: true },
+      { user_id: botHigh, seat_no: 3, is_bot: true },
+    ],
+    escrowBefore: 65,
+    adminUserId,
+    identityEvidence: { ok: true, botUserIds: new Set([botLow, botHigh]) },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.delta, -35);
+  assert.equal(result.correctedStacks[adminUserId], 50);
+  assert.equal(result.correctedStacks[botLow], 0);
+  assert.equal(result.correctedStacks[botHigh], 15);
+});
+
+test("bot claims recovery fails closed when confirmed bot stacks cannot cover the deficit", () => {
+  const adminUserId = "00000000-0000-4000-8000-000000000001";
+  const botUserId = "00000000-0000-4000-8000-000000000002";
+  const result = projectBotClaimsRepair({
+    state: { stacks: { [adminUserId]: 50, [botUserId]: 10 } },
+    seats: [
+      { user_id: adminUserId, seat_no: 1, is_bot: false },
+      { user_id: botUserId, seat_no: 2, is_bot: true },
+    ],
+    escrowBefore: 40,
+    adminUserId,
+    identityEvidence: { ok: true, botUserIds: new Set([botUserId]) },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "insufficient_bot_stacks");
+});
+
+test("bot claims recovery rejects an unconfirmed non-admin claimant", () => {
+  const adminUserId = "00000000-0000-4000-8000-000000000001";
+  const foreignHumanId = "00000000-0000-4000-8000-000000000004";
+  const result = projectBotClaimsRepair({
+    state: { stacks: { [adminUserId]: 50, [foreignHumanId]: 10 } },
+    seats: [
+      { user_id: adminUserId, seat_no: 1, is_bot: false },
+      { user_id: foreignHumanId, seat_no: 2, is_bot: false },
+    ],
+    escrowBefore: 60,
+    adminUserId,
+    identityEvidence: { ok: true, botUserIds: new Set() },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "bot_claimant_unconfirmed");
+});
+
+test("bot-only recovery does not treat an unrelated table creator as a participant", () => {
+  const adminUserId = "00000000-0000-4000-8000-000000000001";
+  const creatorUserId = "00000000-0000-4000-8000-000000000005";
+  const botUserId = "00000000-0000-4000-8000-000000000002";
+  const result = collectParticipantEvidence({
+    adminUserId,
+    table: { created_by: creatorUserId },
+    state: {
+      stacks: { [botUserId]: 100 },
+      seats: [{ userId: botUserId, seatNo: 1, isBot: true }],
+    },
+    seats: [{ user_id: botUserId, seat_no: 1, is_bot: true }],
+    actions: [],
+    requests: [],
+    ledgerTransactions: [],
+    ledgerUserIds: [],
+    fundingRecords: [{ kind: "seed", botUserId }],
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.participants.has(creatorUserId), false);
+  assert.equal(result.botUserIds.has(botUserId), true);
+});
+
+test("table creator confirmed by gameplay evidence remains a human participant", () => {
+  const adminUserId = "00000000-0000-4000-8000-000000000001";
+  const creatorUserId = "00000000-0000-4000-8000-000000000005";
+  const botUserId = "00000000-0000-4000-8000-000000000002";
+  const result = collectParticipantEvidence({
+    adminUserId,
+    table: { created_by: creatorUserId },
+    state: {
+      stacks: { [botUserId]: 100 },
+      seats: [{ userId: botUserId, seatNo: 1, isBot: true }],
+    },
+    seats: [{ user_id: botUserId, seat_no: 1, is_bot: true }],
+    actions: [{ user_id: creatorUserId, action_type: "CHECK", meta: null }],
+    requests: [],
+    ledgerTransactions: [],
+    ledgerUserIds: [],
+    fundingRecords: [{ kind: "seed", botUserId }],
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "foreign_human_history");
 });

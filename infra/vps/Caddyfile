@@ -25,6 +25,11 @@ ws-preview.kcswh.pl {
     reverse_proxy 127.0.0.1:3001
   }
 
+  @botClaimsRecoveryAdmin path /internal/admin/bot-claims-recovery
+  handle @botClaimsRecoveryAdmin {
+    reverse_proxy 127.0.0.1:3001
+  }
+
   @ws path /ws*
   handle @ws {
     reverse_proxy 127.0.0.1:3001

@@ -49,6 +49,7 @@ import { handleRebuyCommand } from "./poker/handlers/rebuy.mjs";
 import { createTableCommandQueue } from "./poker/runtime/table-command-queue.mjs";
 import { recoverFromPersistConflict } from "./poker/runtime/persist-conflict-recovery.mjs";
 import { resolveSettledRevealDueAt } from "./poker/runtime/settled-reveal-timing.mjs";
+import { loadBotClaimsRecoveryExecutorIfInactive } from "./poker/persistence/bot-claims-recovery-adapter.mjs";
 import { getBotConfig, parseStakes } from "./shared/poker-domain/bots.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
@@ -320,6 +321,7 @@ let authoritativeRebuyExecutorPromise = null;
 let inactiveCleanupExecutorPromise = null;
 let deferredLeaveFinalizerPromise = null;
 let acceptedBotAutoplayExecutorPromise = null;
+let botClaimsRecoveryExecutorPromise = null;
 let beginSqlWsLoaderPromise = null;
 const timeoutFailureTrackerByTableId = new Map();
 const settledRolloverTimerByTableId = new Map();
@@ -339,6 +341,14 @@ async function loadAuthoritativeLeaveExecutor() {
       }));
   }
   return authoritativeLeaveExecutorPromise;
+}
+
+async function loadBotClaimsRecoveryExecutor() {
+  if (!botClaimsRecoveryExecutorPromise) {
+    botClaimsRecoveryExecutorPromise = import("./poker/persistence/bot-claims-recovery-adapter.mjs")
+      .then((module) => module.createBotClaimsRecoveryExecutor({ env: process.env, klog: klogSafe }));
+  }
+  return botClaimsRecoveryExecutorPromise;
 }
 
 async function loadAuthoritativeJoinExecutor() {
@@ -2895,6 +2905,127 @@ async function handleInternalBotReactionConfig(req, res) {
   }
 }
 
+async function handleInternalBotClaimsRecovery(req, res) {
+  if (req.method !== "POST") {
+    sendInternalJson(res, 405, { error: "method_not_allowed" });
+    return;
+  }
+  if (!internalRuntimeToken) {
+    sendInternalJson(res, 503, { error: "internal_runtime_token_missing" });
+    return;
+  }
+  const authHeader = typeof req.headers?.authorization === "string" ? req.headers.authorization.trim() : "";
+  if (authHeader !== `Bearer ${internalRuntimeToken}`) {
+    sendInternalJson(res, 401, { error: "unauthorized" });
+    return;
+  }
+  if (loadReleaseMetadata().environment !== "preview") {
+    sendInternalJson(res, 403, { error: "preview_only" });
+    return;
+  }
+
+  try {
+    const payload = await readJsonBody(req, { maxBytes: 4_096 });
+    const mode = typeof payload?.mode === "string" ? payload.mode.trim() : "";
+    const tableId = typeof payload?.tableId === "string" ? payload.tableId.trim() : "";
+    const adminUserId = typeof payload?.adminUserId === "string" ? payload.adminUserId.trim() : "";
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const preflightKeys = ["adminUserId", "mode", "tableId"];
+    const executeKeys = [
+      "adminUserId",
+      "expectedInputHash",
+      "expectedStateVersion",
+      "mode",
+      "reason",
+      "requestId",
+      "tableId"
+    ];
+    const validPreflight = mode === "preflight"
+      && hasExactKeys(payload, preflightKeys)
+      && Object.keys(payload).length === preflightKeys.length;
+    const validExecute = mode === "execute"
+      && hasExactKeys(payload, executeKeys)
+      && Object.keys(payload).length === executeKeys.length
+      && Number.isSafeInteger(payload.expectedStateVersion)
+      && payload.expectedStateVersion >= 0
+      && /^[a-f0-9]{64}$/i.test(String(payload.expectedInputHash || ""))
+      && typeof payload.requestId === "string"
+      && payload.requestId.trim().length >= 8
+      && payload.requestId.trim().length <= 140
+      && typeof payload.reason === "string"
+      && payload.reason.trim().length >= 3
+      && payload.reason.trim().length <= 240;
+    if ((!validPreflight && !validExecute) || !UUID_RE.test(tableId) || !UUID_RE.test(adminUserId)) {
+      sendInternalJson(res, 400, { error: "invalid_request" });
+      return;
+    }
+
+    const result = await enqueueTableCommand({
+      tableId,
+      commandName: `admin_bot_claims_recovery_${mode}`,
+      dedupeKey: mode === "execute" ? `admin_bot_claims_recovery:${payload.requestId.trim()}` : null,
+      run: async () => {
+        const hasActivePresence = () => (
+          [...wss.clients].some((socket) => tableSocketMatches(socket, tableId))
+          || tableManager.hasConnectedHumanPresence(tableId)
+        );
+        const executeRecovery = await loadBotClaimsRecoveryExecutorIfInactive({
+          hasActivePresence,
+          loadExecutor: loadBotClaimsRecoveryExecutor,
+        });
+        if (!executeRecovery) {
+          return {
+            ok: false,
+            eligible: false,
+            changed: false,
+            closed: false,
+            reason: "active_table_presence"
+          };
+        }
+        const recoveryResult = await executeRecovery({
+          mode,
+          tableId,
+          adminUserId,
+          requestId: validExecute ? payload.requestId.trim() : null,
+          expectedStateVersion: validExecute ? payload.expectedStateVersion : null,
+          expectedInputHash: validExecute ? payload.expectedInputHash.trim() : null,
+          reason: validExecute ? payload.reason.trim() : null,
+          hasActivePresence
+        });
+        if (mode === "execute" && recoveryResult?.closed === true) {
+          evictClosedRuntimeTable({
+            tableId,
+            logPrefix: "ws_bot_claims_recovery",
+            status: "bot_claims_recovered_closed"
+          });
+        }
+        return recoveryResult;
+      }
+    });
+    klogSafe("ws_bot_claims_recovery_outcome", {
+      tableId,
+      mode,
+      ok: result?.ok === true,
+      eligible: result?.eligible === true,
+      changed: result?.changed === true,
+      closed: result?.closed === true,
+      reason: result?.reason || null,
+      stateVersion: result?.stateVersion ?? null,
+      finalStateVersion: result?.finalStateVersion ?? null,
+      delta: result?.delta ?? null,
+      botCount: Array.isArray(result?.bots) ? result.bots.length : 0,
+      humanPreserved: result?.humanStack != null
+    });
+    sendInternalJson(res, 200, { ...result, environment: "ws-preview" });
+  } catch (error) {
+    const code = error?.code || (error instanceof SyntaxError ? "invalid_json" : "internal_server_error");
+    const statusCode = Number(error?.status)
+      || (code === "body_too_large" || code === "invalid_json" ? 400 : 500);
+    klogSafe("ws_bot_claims_recovery_failed", { code, statusCode });
+    sendInternalJson(res, statusCode, { error: code });
+  }
+}
+
 async function handleInternalLobbyMaterialize(req, res) {
   if (req.method !== "POST") {
     res.writeHead(405, { "content-type": "application/json" });
@@ -2971,6 +3102,11 @@ async function handleHttpRequest(req, res) {
 
   if (req.url === "/internal/admin/bot-reaction") {
     await handleInternalBotReactionConfig(req, res);
+    return;
+  }
+
+  if (req.url === "/internal/admin/bot-claims-recovery") {
+    await handleInternalBotClaimsRecovery(req, res);
     return;
   }
 
