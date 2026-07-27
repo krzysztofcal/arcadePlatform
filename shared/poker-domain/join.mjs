@@ -89,9 +89,12 @@ function isStorageStateValid(validateStateForStorage, state) {
   return validateStateForStorage(normalizeStateForStorageValidation(state));
 }
 
-function makeError(code) {
+function makeError(code, validationReason = null) {
   const error = new Error(code);
   error.code = code;
+  if (typeof validationReason === "string" && /^[a-z0-9]+(?:_[a-z0-9]+)*$/.test(validationReason)) {
+    error.validationReason = validationReason;
+  }
   return error;
 }
 
@@ -138,17 +141,17 @@ function writeLockedStateResult(result) {
   }
   const version = Number(result.newVersion);
   if (!Number.isInteger(version) || version <= 0) {
-    throw makeError("authoritative_state_invalid");
+    throw makeError("authoritative_state_invalid", "locked_state_write_version_invalid");
   }
   return { version };
 }
 
 function requirePostMutationVersion({ previousVersion, nextVersion }) {
   if (!Number.isInteger(nextVersion) || nextVersion <= 0) {
-    throw makeError("authoritative_state_invalid");
+    throw makeError("authoritative_state_invalid", "post_mutation_version_invalid");
   }
   if (Number.isInteger(previousVersion) && nextVersion <= previousVersion) {
-    throw makeError("authoritative_state_invalid");
+    throw makeError("authoritative_state_invalid", "post_mutation_version_not_advanced");
   }
   return nextVersion;
 }
@@ -442,15 +445,24 @@ function assertAuthoritativeJoinStateComplete({ seatRows, state, version, userId
   );
   const stateStacks = state?.stacks && typeof state.stacks === "object" && !Array.isArray(state.stacks) ? state.stacks : {};
 
-  if (!Number.isInteger(version) || version <= 0) throw makeError("authoritative_state_invalid");
+  if (!Number.isInteger(version) || version <= 0) {
+    throw makeError("authoritative_state_invalid", "authoritative_snapshot_version_invalid");
+  }
   if (!persistedSeatKeys.has(`${userId}:${seatNo}`) || Number(stateStacks[userId]) !== Number(stack)) {
-    throw makeError("authoritative_state_invalid");
+    const validationReason = !persistedSeatKeys.has(`${userId}:${seatNo}`)
+      ? "human_seat_missing_from_authoritative_snapshot"
+      : "human_stack_mismatch_in_authoritative_snapshot";
+    throw makeError("authoritative_state_invalid", validationReason);
   }
   for (const persistedSeatKey of persistedSeatKeys) {
-    if (!stateSeatKeys.has(persistedSeatKey)) throw makeError("authoritative_state_invalid");
+    if (!stateSeatKeys.has(persistedSeatKey)) {
+      throw makeError("authoritative_state_invalid", "persisted_seat_missing_from_authoritative_snapshot");
+    }
   }
   for (const [stackUserId, persistedStack] of activeStackEntries(seatRows)) {
-    if (Number(stateStacks[stackUserId]) !== persistedStack) throw makeError("authoritative_state_invalid");
+    if (Number(stateStacks[stackUserId]) !== persistedStack) {
+      throw makeError("authoritative_state_invalid", "persisted_stack_mismatch_in_authoritative_snapshot");
+    }
   }
 
   const activeRows = activeSeatRows(seatRows);
@@ -459,7 +471,9 @@ function assertAuthoritativeJoinStateComplete({ seatRows, state, version, userId
     ? computeTargetBotCount({ maxPlayers, humanCount, maxBots: botCfg.maxPerTable })
     : 0;
   const activeBotCount = activeRows.filter((row) => row?.is_bot).length;
-  if (activeBotCount < expectedBotCount) throw makeError("authoritative_state_invalid");
+  if (activeBotCount < expectedBotCount) {
+    throw makeError("authoritative_state_invalid", "seeded_bot_projection_incomplete");
+  }
 }
 
 async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, stack, loadStateForUpdate, updateStateLocked, validateStateForStorage, maxPlayers, botCfg }) {
@@ -472,7 +486,7 @@ async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, stack, loadS
   });
   const nextStateForStorage = sanitizeStateForStorage(nextState);
   if (!isStorageStateValid(validateStateForStorage, nextStateForStorage)) {
-    throw makeError("state_invalid");
+    throw makeError("state_invalid", "storage_state_validation_failed");
   }
   const updated = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState: nextStateForStorage }));
   const version = requirePostMutationVersion({ previousVersion: stateRow.version, nextVersion: updated.version });
@@ -585,7 +599,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         const persisted = await readPersistedSeatStack({ tx, tableId, userId });
         if (stateAlreadyRepresentsActiveSeatRows(stateRow.state, seatRows, userId)) {
           if (!Number.isInteger(stateRow.version) || stateRow.version <= 0) {
-            throw makeError("authoritative_state_invalid");
+            throw makeError("authoritative_state_invalid", "rejoin_state_version_invalid");
           }
           await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
           return {
@@ -612,7 +626,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         });
         const nextStateForStorage = sanitizeStateForStorage(nextState);
         if (!isStorageStateValid(validateStateForStorage, nextStateForStorage)) {
-          throw makeError("state_invalid");
+          throw makeError("state_invalid", "storage_state_validation_failed");
         }
         const updatedState = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState: nextStateForStorage }));
         const snapshotVersion = requirePostMutationVersion({ previousVersion: stateRow.version, nextVersion: updatedState.version });

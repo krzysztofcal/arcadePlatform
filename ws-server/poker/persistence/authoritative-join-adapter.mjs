@@ -50,8 +50,11 @@ function resolveJoinTestOverride(env = process.env) {
 
 function normalizeJoinError(error) {
   const code = typeof error?.code === "string" ? error.code : "authoritative_join_failed";
+  const validationReason = typeof error?.validationReason === "string" && /^[a-z0-9]+(?:_[a-z0-9]+)*$/.test(error.validationReason)
+    ? error.validationReason
+    : null;
   if (["table_not_found", "table_closed", "table_not_open", "seat_taken", "table_full", "table_full_bot_leaving", "state_missing", "poker_state_missing", "state_invalid", "duplicate_seat", "invalid_seat_no", "invalid_buy_in", "request_pending", "insufficient_funds", "system_account_missing", "chips_apply_failed", "chips_apply_mismatch", "missing_idempotency_key", "invalid_escrow_only_entries", "authoritative_state_invalid"].includes(code)) {
-    return { ok: false, code };
+    return validationReason ? { ok: false, code, validationReason } : { ok: false, code };
   }
   return { ok: false, code: "authoritative_join_failed" };
 }
@@ -85,18 +88,20 @@ function noopPostTransaction() {
   return { ok: true };
 }
 
-function normalizeSuccess(result, { tableId, userId, requestId, klog }) {
+function invalidAuthoritativeState(validationReason) {
+  return { ok: false, code: "authoritative_state_invalid", validationReason };
+}
+
+function normalizeSuccess(result, { tableId, userId, requestId }) {
   if (!result?.ok) return result;
   const seatNo = Number(result?.seatNo);
   if (!Number.isInteger(seatNo) || seatNo < 1) {
-    klog("ws_join_authoritative_failed", { tableId, userId, requestId: requestId || null, code: "authoritative_state_invalid", message: "invalid_seat" });
-    return { ok: false, code: "authoritative_state_invalid" };
+    return invalidAuthoritativeState("invalid_seat_number");
   }
   const stack = Number(result?.stack);
   const rejoin = result?.rejoin === true;
   if (!Number.isInteger(stack) || stack <= 0) {
-    klog("ws_join_authoritative_failed", { tableId, userId, requestId: requestId || null, code: "authoritative_state_invalid", message: "invalid_stack" });
-    return { ok: false, code: "authoritative_state_invalid" };
+    return invalidAuthoritativeState("invalid_stack");
   }
   const seededBots = Array.isArray(result?.seededBots) ? result.seededBots : [];
   const snapshot = result?.snapshot && typeof result.snapshot === "object" ? result.snapshot : null;
@@ -112,21 +117,30 @@ function normalizeSuccess(result, { tableId, userId, requestId, klog }) {
       })
       .filter(Boolean)
   );
-  if (!snapshot || !Number.isInteger(snapshotVersion) || snapshotVersion <= 0) {
-    klog("ws_join_authoritative_failed", { tableId, userId, requestId: requestId || null, code: "authoritative_state_invalid", message: "invalid_snapshot_version" });
-    return { ok: false, code: "authoritative_state_invalid" };
+  if (!snapshot) {
+    return invalidAuthoritativeState("missing_snapshot");
   }
-  if (!snapshotSeatKeys.has(`${userId}:${seatNo}`) || Number(snapshotStacks[userId]) <= 0 || (!rejoin && Number(snapshotStacks[userId]) !== stack)) {
-    klog("ws_join_authoritative_failed", { tableId, userId, requestId: requestId || null, code: "authoritative_state_invalid", message: "missing_human_snapshot_state" });
-    return { ok: false, code: "authoritative_state_invalid" };
+  if (!Number.isInteger(snapshotVersion) || snapshotVersion <= 0) {
+    return invalidAuthoritativeState("invalid_snapshot_version");
+  }
+  if (!snapshotSeatKeys.has(`${userId}:${seatNo}`)) {
+    return invalidAuthoritativeState("missing_human_snapshot_seat");
+  }
+  if (Number(snapshotStacks[userId]) <= 0) {
+    return invalidAuthoritativeState("missing_human_snapshot_stack");
+  }
+  if (!rejoin && Number(snapshotStacks[userId]) !== stack) {
+    return invalidAuthoritativeState("human_snapshot_stack_mismatch");
   }
   for (const bot of seededBots) {
     const botUserId = typeof bot?.userId === "string" ? bot.userId : "";
     const botSeatNo = Number(bot?.seatNo);
     const botStack = Number(bot?.stack);
-    if (!botUserId || !Number.isInteger(botSeatNo) || botSeatNo < 1 || !snapshotSeatKeys.has(`${botUserId}:${botSeatNo}`) || Number(snapshotStacks[botUserId]) !== botStack) {
-      klog("ws_join_authoritative_failed", { tableId, userId, requestId: requestId || null, code: "authoritative_state_invalid", message: "missing_seeded_bot_snapshot_state" });
-      return { ok: false, code: "authoritative_state_invalid" };
+    if (!botUserId || !Number.isInteger(botSeatNo) || botSeatNo < 1 || !snapshotSeatKeys.has(`${botUserId}:${botSeatNo}`)) {
+      return invalidAuthoritativeState("missing_seeded_bot_snapshot_seat");
+    }
+    if (Number(snapshotStacks[botUserId]) !== botStack) {
+      return invalidAuthoritativeState("missing_seeded_bot_snapshot_stack");
     }
   }
   return {
@@ -240,12 +254,15 @@ export function createAuthoritativeJoinExecutor({
       if (buyIn !== null && buyIn !== undefined) sharedArgs.buyIn = buyIn;
 
       const result = await joinModule.executePokerJoinAuthoritative(sharedArgs);
-      const normalized = normalizeSuccess(result, { tableId, userId, requestId, klog });
+      const normalized = normalizeSuccess(result, { tableId, userId, requestId });
       if (!normalized?.ok) {
         if (normalized?.code === "authoritative_state_invalid") {
-          klog("ws_authoritative_adapter_invalid_snapshot", {
-            snapshotVersion: Number(result?.snapshot?.stateVersion) || null,
-            reason: "authoritative_state_invalid"
+          klog("ws_join_authoritative_failed", {
+            tableId,
+            userId,
+            requestId: requestId || null,
+            code: normalized.code,
+            validationReason: normalized.validationReason || "unknown_validation_failure"
           });
         }
         return normalized;
@@ -253,12 +270,13 @@ export function createAuthoritativeJoinExecutor({
       return normalized;
     } catch (error) {
       if (shouldLogAuthoritativeJoinFailure(error)) {
+        const normalized = normalizeJoinError(error);
         klog("ws_join_authoritative_failed", {
           tableId,
           userId,
           requestId: requestId || null,
-          code: typeof error?.code === "string" ? error.code : null,
-          message: error?.message || "unknown",
+          code: normalized.code,
+          validationReason: normalized.validationReason || null
         });
       }
       return normalizeJoinError(error);
