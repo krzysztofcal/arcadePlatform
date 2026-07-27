@@ -19,12 +19,31 @@ import {
   markTransportPingSent
 } from "./poker/runtime/transport-watchdog.mjs";
 import { buildBootstrappedPokerState } from "./poker/engine/poker-engine.mjs";
+import { loadBotClaimsRecoveryExecutorIfInactive } from "./poker/persistence/bot-claims-recovery-adapter.mjs";
 import { createTableManager } from "./poker/table/table-manager.mjs";
 
 const FIXED_RANDOM_BOT_AUTOPLAY_ADAPTER_URL = new URL(
   "./poker/runtime/accepted-bot-autoplay-adapter.fixed-random.fixture.mjs",
   import.meta.url
 ).href;
+
+test("bot claims recovery stops when a socket appears while the executor is loading", async () => {
+  let activePresence = false;
+  let loadCalls = 0;
+  const executor = await loadBotClaimsRecoveryExecutorIfInactive({
+    hasActivePresence: () => activePresence,
+    loadExecutor: async () => {
+      loadCalls += 1;
+      activePresence = true;
+      return () => {
+        throw new Error("recovery must not execute");
+      };
+    },
+  });
+
+  assert.equal(loadCalls, 1);
+  assert.equal(executor, null);
+});
 
 test("transport watchdog keeps one pending probe and terminates at the timeout boundary", () => {
   const connState = createConnState();

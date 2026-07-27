@@ -49,6 +49,7 @@ import { handleRebuyCommand } from "./poker/handlers/rebuy.mjs";
 import { createTableCommandQueue } from "./poker/runtime/table-command-queue.mjs";
 import { recoverFromPersistConflict } from "./poker/runtime/persist-conflict-recovery.mjs";
 import { resolveSettledRevealDueAt } from "./poker/runtime/settled-reveal-timing.mjs";
+import { loadBotClaimsRecoveryExecutorIfInactive } from "./poker/persistence/bot-claims-recovery-adapter.mjs";
 import { getBotConfig, parseStakes } from "./shared/poker-domain/bots.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
@@ -2964,8 +2965,15 @@ async function handleInternalBotClaimsRecovery(req, res) {
       commandName: `admin_bot_claims_recovery_${mode}`,
       dedupeKey: mode === "execute" ? `admin_bot_claims_recovery:${payload.requestId.trim()}` : null,
       run: async () => {
-        const hasActiveSocket = [...wss.clients].some((socket) => tableSocketMatches(socket, tableId));
-        if (hasActiveSocket || tableManager.hasConnectedHumanPresence(tableId)) {
+        const hasActivePresence = () => (
+          [...wss.clients].some((socket) => tableSocketMatches(socket, tableId))
+          || tableManager.hasConnectedHumanPresence(tableId)
+        );
+        const executeRecovery = await loadBotClaimsRecoveryExecutorIfInactive({
+          hasActivePresence,
+          loadExecutor: loadBotClaimsRecoveryExecutor,
+        });
+        if (!executeRecovery) {
           return {
             ok: false,
             eligible: false,
@@ -2974,7 +2982,6 @@ async function handleInternalBotClaimsRecovery(req, res) {
             reason: "active_table_presence"
           };
         }
-        const executeRecovery = await loadBotClaimsRecoveryExecutor();
         const recoveryResult = await executeRecovery({
           mode,
           tableId,
@@ -2982,7 +2989,8 @@ async function handleInternalBotClaimsRecovery(req, res) {
           requestId: validExecute ? payload.requestId.trim() : null,
           expectedStateVersion: validExecute ? payload.expectedStateVersion : null,
           expectedInputHash: validExecute ? payload.expectedInputHash.trim() : null,
-          reason: validExecute ? payload.reason.trim() : null
+          reason: validExecute ? payload.reason.trim() : null,
+          hasActivePresence
         });
         if (mode === "execute" && recoveryResult?.closed === true) {
           evictClosedRuntimeTable({

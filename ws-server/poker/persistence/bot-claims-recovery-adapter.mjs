@@ -5,6 +5,15 @@ async function beginSqlDefault(fn, { env = process.env } = {}) {
 
 const DEFAULT_RECOVERY_MODULE_URL = new URL("../../shared/poker-domain/bot-claims-recovery.mjs", import.meta.url).href;
 
+export async function loadBotClaimsRecoveryExecutorIfInactive({
+  hasActivePresence,
+  loadExecutor,
+}) {
+  if (typeof hasActivePresence !== "function" || hasActivePresence()) return null;
+  const executor = await loadExecutor();
+  return hasActivePresence() ? null : executor;
+}
+
 export function createBotClaimsRecoveryExecutor({
   env = process.env,
   klog = () => {},
@@ -25,6 +34,7 @@ export function createBotClaimsRecoveryExecutor({
       expectedStateVersion: input.expectedStateVersion,
       expectedInputHash: input.expectedInputHash,
       reason: input.reason,
+      hasActivePresence: input.hasActivePresence,
       klog,
     });
   };

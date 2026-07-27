@@ -144,7 +144,7 @@ function collectParticipantEvidence({
     botEvidence.add(userId);
   };
 
-  addHuman(table?.created_by);
+  const creatorUserId = normalizeString(table?.created_by);
   for (const seat of seats) {
     if (seat?.is_bot === true) addParticipant(seat.user_id);
     else if (seat?.is_bot === false) addHuman(seat.user_id);
@@ -171,14 +171,18 @@ function collectParticipantEvidence({
   }
   for (const action of actions) {
     const actionType = normalizeString(action?.action_type).toUpperCase();
-    if (!actionType.startsWith("ADMIN_")) addParticipant(action?.user_id);
+    if (!actionType.startsWith("ADMIN_")) {
+      if (normalizeString(action?.user_id) === creatorUserId) addHuman(action.user_id);
+      else addParticipant(action?.user_id);
+    }
     if (actionType === "HAND_SETTLED") {
       for (const userId of normalizeSettlementPayoutIds(action?.meta)) addParticipant(userId);
     }
   }
   for (const request of requests) {
     if (GAMEPLAY_REQUEST_KINDS.has(normalizeString(request?.kind).toUpperCase())) {
-      addParticipant(request?.user_id);
+      if (normalizeString(request?.user_id) === creatorUserId) addHuman(request.user_id);
+      else addParticipant(request?.user_id);
     }
   }
   for (const transaction of ledgerTransactions) {
@@ -474,6 +478,7 @@ export async function executeBotClaimsRecovery({
   expectedStateVersion,
   expectedInputHash,
   reason,
+  hasActivePresence,
   klog = () => {},
 }) {
   if (typeof beginSql !== "function") throw new Error("bot_claims_recovery_begin_sql_missing");
@@ -505,6 +510,9 @@ export async function executeBotClaimsRecovery({
     if (!evaluated.ok) throw conflict(evaluated.reason);
     if (evaluated.stateVersion !== expectedStateVersion) throw conflict("state_version_changed");
     if (expectedInputHash && evaluated.inputHash !== expectedInputHash) throw conflict("recovery_input_changed");
+    if (typeof hasActivePresence === "function" && hasActivePresence()) {
+      throw conflict("active_table_presence");
+    }
 
     const correctedVersion = evaluated.stateVersion + 1;
     if (!Number.isSafeInteger(correctedVersion)) throw conflict("state_version_invalid");
@@ -575,4 +583,7 @@ export async function executeBotClaimsRecovery({
   });
 }
 
-export { RECOVERY_KIND };
+export {
+  RECOVERY_KIND,
+  collectParticipantEvidence,
+};
