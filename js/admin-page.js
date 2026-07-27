@@ -24,6 +24,7 @@
       pagination: null,
       selectedTableId: null,
       detail: null,
+      recovery: null,
       loaded: false,
     },
     ledger: {
@@ -842,8 +843,35 @@
     html.push('<button class="admin-btn admin-btn--ghost" type="button" data-table-action="stale_seat_cleanup" data-table-id="' + escapeHtml(table.tableId || "") + '">Stale-seat cleanup</button>');
     html.push('<button class="admin-btn admin-btn--ghost" type="button" data-table-action="reconcile" data-table-id="' + escapeHtml(table.tableId || "") + '">Reconcile</button>');
     html.push('<button class="admin-btn admin-btn--danger" type="button" data-table-action="force_close" data-table-id="' + escapeHtml(table.tableId || "") + '">Force close</button>');
+    if (table.persistedStatus === "OPEN" && table.phase === "SETTLED" && janitor.healthy === false){
+      html.push('<button class="admin-btn admin-btn--ghost" type="button" data-table-action="analyze_bot_recovery" data-table-id="' + escapeHtml(table.tableId || "") + '">Analyze bot recovery</button>');
+    }
     html.push("</div>");
     html.push('<p class="admin-note' + (janitor.healthy === false ? " admin-note--danger" : "") + '">Recommended action: ' + escapeHtml(janitor.action || "noop") + (janitor.reasonCode ? " · " + escapeHtml(janitor.reasonCode) : "") + "</p>");
+    var recovery = state.tables.recovery;
+    if (recovery && recovery.tableId === table.tableId){
+      if (recovery.eligible === true){
+        html.push('<div class="admin-surface"><h3 class="admin-section-title">Bot claims recovery</h3>');
+        html.push('<div class="admin-kv">');
+        html.push(renderKvRow("Environment", recovery.environment || "ws-preview"));
+        html.push(renderKvRow("Table", table.tableId));
+        html.push(renderKvRow("Claim total", formatAmount(recovery.claimTotal)));
+        html.push(renderKvRow("Escrow", formatAmount(recovery.escrow)));
+        html.push(renderKvRow("Signed delta", formatSignedAmount(recovery.delta)));
+        html.push(renderKvRow("Human stack preserved", recovery.humanStack == null ? "none" : formatAmount(recovery.humanStack)));
+        html.push("</div>");
+        html.push('<div><h4 class="admin-section-title">Bot stacks before / after</h4>' + renderMiniList((recovery.bots || []).map(function(bot){
+          return {
+            title: "Seat " + escapeHtml(bot.seatNo),
+            meta: escapeHtml(formatAmount(bot.before) + " → " + formatAmount(bot.after)),
+          };
+        })) + "</div>");
+        html.push('<p class="admin-note admin-note--danger">This assigns the unexplained difference only to bot economy and permanently closes the table.</p>');
+        html.push('<button class="admin-btn admin-btn--danger" type="button" data-table-action="execute_bot_recovery" data-table-id="' + escapeHtml(table.tableId) + '">Repair bot claims and close</button></div>');
+      } else {
+        html.push('<p class="admin-note admin-note--danger">Bot recovery is not eligible: ' + escapeHtml(recovery.reason || "unknown") + "</p>");
+      }
+    }
     html.push('<div><h3 class="admin-section-title">Seats</h3>' + renderMiniList((detail.seats || []).map(function(seat){
       var label = (seat.userId || "user") + " · seat " + (seat.seatNo || "—") + " · " + (seat.isBot ? "bot" : "human");
       return {
@@ -1545,6 +1573,9 @@
     try {
       var payload = await apiFetch("/.netlify/functions/admin-table-details?tableId=" + encodeURIComponent(tableId), { method: "GET" });
       state.tables.detail = payload;
+      if (!state.tables.recovery || state.tables.recovery.tableId !== tableId){
+        state.tables.recovery = null;
+      }
       renderTableDetail();
       setStatus("", "");
     } catch (err){
@@ -1616,6 +1647,73 @@
       loadOps();
     } catch (err){
       handleApiError(err, "Could not run table action.");
+    }
+  }
+
+  async function analyzeBotRecovery(tableId){
+    setStatus(t("loading", "Loading..."), "info");
+    try {
+      var result = await apiFetch("/.netlify/functions/admin-table-bot-claims-recovery", {
+        method: "POST",
+        body: JSON.stringify({ mode: "preflight", tableId: tableId }),
+      });
+      state.tables.recovery = Object.assign({ tableId: tableId }, result);
+      renderTableDetail();
+      setStatus(result.eligible === true ? "Bot recovery analysis completed." : "Table is not eligible for bot recovery.", result.eligible === true ? "success" : "error");
+    } catch (err){
+      state.tables.recovery = null;
+      handleApiError(err, "Could not analyze bot recovery.");
+    }
+  }
+
+  async function executeBotRecovery(tableId){
+    var recovery = state.tables.recovery;
+    if (!recovery || recovery.tableId !== tableId || recovery.eligible !== true){
+      setStatus("Run bot recovery analysis first.", "error");
+      return;
+    }
+    if (typeof window.confirm === "function" && !window.confirm("Repair bot claims and permanently close table " + tableId + "?")){
+      return;
+    }
+    var confirmation = typeof window.prompt === "function"
+      ? window.prompt("Type REPAIR BOT CLAIMS AND CLOSE to confirm.", "")
+      : "";
+    if (String(confirmation || "").trim() !== "REPAIR BOT CLAIMS AND CLOSE"){
+      setStatus("Bot recovery cancelled.", "info");
+      return;
+    }
+    var reasonNode = doc.getElementById("adminTableReason");
+    var reason = reasonNode && typeof reasonNode.value === "string" ? reasonNode.value.trim() : "";
+    if (!reason) reason = "approved Preview bot claims recovery";
+    setStatus(t("loading", "Loading..."), "info");
+    try {
+      var keyScope = "bot-claims-recovery-" + tableId;
+      await apiFetch("/.netlify/functions/admin-table-bot-claims-recovery", {
+        method: "POST",
+        body: JSON.stringify({
+          mode: "execute",
+          tableId: tableId,
+          expectedStateVersion: recovery.stateVersion,
+          expectedInputHash: recovery.inputHash,
+          idempotencyKey: getDraftIdempotencyKey(keyScope),
+          confirmation: "REPAIR BOT CLAIMS AND CLOSE",
+          reason: reason,
+        }),
+      });
+      resetDraftIdempotencyKey(keyScope);
+      state.tables.recovery = null;
+      setStatus("Bot claims repaired and table closed.", "success");
+      await loadTableDetail(tableId, true);
+      await loadTables();
+      await loadOps();
+    } catch (err){
+      if (err && (err.code === "state_version_changed" || err.code === "recovery_input_changed")){
+        state.tables.recovery = null;
+        renderTableDetail();
+        handleApiError(err, "Table changed. Analyze bot recovery again.");
+        return;
+      }
+      handleApiError(err, "Could not repair bot claims.");
     }
   }
 
@@ -1972,6 +2070,16 @@
     if (action === "evaluate"){
       setActiveTab("tables");
       evaluateTable(tableId);
+      return;
+    }
+    if (action === "analyze_bot_recovery"){
+      setActiveTab("tables");
+      analyzeBotRecovery(tableId);
+      return;
+    }
+    if (action === "execute_bot_recovery"){
+      setActiveTab("tables");
+      executeBotRecovery(tableId);
       return;
     }
     setActiveTab("tables");
