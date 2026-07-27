@@ -565,7 +565,7 @@ export async function runTableJanitor({
     reasonCode: normalizedClassification.reasonCode || null,
     classification: normalizedClassification
   });
-  klog("ws_table_janitor_result", {
+  const createResultLogPayload = () => ({
     tableId: normalizedClassification.tableId || null,
     trigger,
     requestId: requestId || null,
@@ -577,5 +577,14 @@ export async function runTableJanitor({
     reasonCode: normalizedClassification.reasonCode || null,
     code: result?.code || null
   });
+  const routineSeatMissingNoop = result?.ok === true
+    && result?.changed !== true
+    && result?.closed !== true
+    && result?.status === "seat_missing";
+  if (routineSeatMissingNoop) {
+    klogVerbose("ws_table_janitor_result", createResultLogPayload);
+  } else {
+    klog("ws_table_janitor_result", createResultLogPayload());
+  }
   return result;
 }
