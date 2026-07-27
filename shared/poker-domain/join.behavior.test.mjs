@@ -135,7 +135,7 @@ test("rejects malformed stringified state with state_invalid", async () => {
   );
 });
 
-test("allows second human join during live post-flop hand when persisted community uses string card codes", async () => withBotsDisabled(async () => {
+test("fresh funded join preserves existing authoritative stacks when seat projections are stale", async () => withBotsDisabled(async () => {
   const seatRows = [
     { user_id: "human_1", seat_no: 1, status: "ACTIVE", stack: 98, is_bot: false, bot_profile: null, leave_after_hand: false },
     { user_id: "bot_1", seat_no: 2, status: "ACTIVE", stack: 100, is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false },
@@ -355,8 +355,8 @@ test("rejoin projects stale state-only seats out of the authoritative snapshot",
     table: { id: "t-poison-rejoin", status: "OPEN", max_players: 4, stakes: '{"sb":1,"bb":2}' },
     seatRows: [
       { user_id: "human_1", seat_no: 1, status: "ACTIVE", stack: 100, is_bot: false, bot_profile: null, leave_after_hand: false },
-      { user_id: "bot_1", seat_no: 2, status: "ACTIVE", stack: 200, is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false },
-      { user_id: "bot_2", seat_no: 3, status: "ACTIVE", stack: 200, is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false }
+      { user_id: "bot_1", seat_no: 2, status: "ACTIVE", stack: 100, is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false },
+      { user_id: "bot_2", seat_no: 3, status: "ACTIVE", stack: 100, is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false }
     ],
     stateRow: {
       version: 8,
@@ -544,6 +544,10 @@ test("new join replaces stale state-only seat occupants that conflict with the i
   assert.equal(result.snapshot.stateVersion, 6);
   assert.deepEqual(result.snapshot.seats.map((seat) => seat.userId), ["human_1", "bot_1", "bot_2", "human_2"]);
   assert.equal(result.snapshot.stacks.human_2, 120);
+  assert.equal(result.snapshot.stacks.human_1, 100);
+  assert.equal(result.snapshot.stacks.bot_1, 200);
+  assert.equal(result.snapshot.stacks.bot_2, 200);
+  assert.deepEqual(store.stateRow.state.stacks, { human_1: 100, bot_1: 200, bot_2: 200, human_2: 120 });
   assert.deepEqual(store.stateRow.state.seats.map((seat) => seat.userId), ["human_1", "bot_1", "bot_2", "human_2"]);
   assert.equal(Object.prototype.hasOwnProperty.call(store.stateRow.state.stacks, "ghost_human"), false);
 });
@@ -919,6 +923,7 @@ test("rejoin with missing authoritative stack fails closed and does not write st
       postTransactionFn: async () => ({ ok: true })
     })),
     (error) => error?.code === "authoritative_state_invalid"
+      && error?.validationReason === "active_seat_authoritative_stack_missing"
   );
   assert.equal(writes.state, 0);
 });
@@ -1083,7 +1088,7 @@ test("authoritative join replay does not duplicate bots and only fills missing b
   const state = {
     table: { id: "t-bots-replay", status: "OPEN", max_players: 6, stakes: '{"sb":1,"bb":2}' },
     seatRows: [
-      { user_id: "existing_bot", seat_no: 2, status: "ACTIVE", is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false, stack: 200 }
+      { user_id: "existing_bot", seat_no: 2, status: "ACTIVE", is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false, stack: 999 }
     ],
     stateRow: {
       version: 4,
@@ -1155,6 +1160,10 @@ test("authoritative join replay does not duplicate bots and only fills missing b
   assert.equal(first.seededBots.length, 1);
   assert.equal(first.snapshot.seats.filter((seat) => seat.isBot).length, 2);
   assert.equal(first.snapshot.stateVersion, 5);
+  assert.equal(first.snapshot.stacks.existing_bot, 200);
+  assert.equal(state.stateRow.state.stacks.existing_bot, 200);
+  assert.equal(first.snapshot.stacks[first.seededBots[0].userId], first.seededBots[0].stack);
+  assert.equal(state.stateRow.state.stacks[first.seededBots[0].userId], first.seededBots[0].stack);
 
   const second = await runJoin("join-replay-2");
   assert.equal(second.rejoin, true);
