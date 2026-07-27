@@ -350,46 +350,62 @@ function runtimeSeatEntries(runtimeSeats) {
     .filter(Boolean);
 }
 
-function runtimeStackEntries(runtimeSeats) {
-  return (Array.isArray(runtimeSeats) ? runtimeSeats : [])
-    .map((seat) => {
-      const stack = Number(seat?.stack);
-      return typeof seat?.userId === "string" && seat.userId && Number.isInteger(stack) && stack > 0
-        ? [seat.userId, stack]
-        : null;
-    })
-    .filter(Boolean);
+function normalizeFundedStackEntries(entries) {
+  const fundedStacks = new Map();
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const userId = typeof entry?.[0] === "string" ? entry[0].trim() : "";
+    const stack = Number(entry?.[1]);
+    if (!userId || !Number.isInteger(stack) || stack < 0) {
+      throw makeError("authoritative_state_invalid", "funded_stack_invalid");
+    }
+    fundedStacks.set(userId, stack);
+  }
+  return fundedStacks;
 }
 
-function applyAuthoritativeSeatRowsToState(state, { tableId, seatEntries = [], stackEntries = [] } = {}) {
+function applyAuthoritativeSeatRowsToState(state, { tableId, seatEntries = [], fundedStackEntries = [] } = {}) {
   const currentState = state && typeof state === "object" && !Array.isArray(state) ? state : {};
   const incomingSeats = (Array.isArray(seatEntries) ? seatEntries : []).map(asSeatSnapshot).filter(Boolean);
   const incomingUserIds = new Set(incomingSeats.map((seat) => seat.userId));
   const incomingSeatNos = new Set(incomingSeats.map((seat) => seat.seatNo));
   const currentSeats = (Array.isArray(currentState.seats) ? currentState.seats : []).map(asSeatSnapshot).filter(Boolean);
-  const removedUserIds = new Set();
+  const displacedUserIds = new Set();
   const preservedSeats = currentSeats.filter((seat) => {
-    const conflict = incomingUserIds.has(seat.userId) || incomingSeatNos.has(seat.seatNo);
-    if (conflict) removedUserIds.add(seat.userId);
+    const sameUser = incomingUserIds.has(seat.userId);
+    const sameSeat = incomingSeatNos.has(seat.seatNo);
+    const conflict = sameUser || sameSeat;
+    if (sameSeat && !sameUser) displacedUserIds.add(seat.userId);
     return !conflict;
   });
-  const stacks = currentState.stacks && typeof currentState.stacks === "object" && !Array.isArray(currentState.stacks)
+  const previousStacks = currentState.stacks && typeof currentState.stacks === "object" && !Array.isArray(currentState.stacks)
     ? { ...currentState.stacks }
     : {};
-  for (const removedUserId of removedUserIds) {
-    delete stacks[removedUserId];
+  const stacks = { ...previousStacks };
+  const fundedStacks = normalizeFundedStackEntries(fundedStackEntries);
+  for (const displacedUserId of displacedUserIds) {
+    delete stacks[displacedUserId];
   }
-  for (const entry of Array.isArray(stackEntries) ? stackEntries : []) {
-    const userId = typeof entry?.[0] === "string" ? entry[0] : "";
-    const stack = Number(entry?.[1]);
-    if (!userId || !Number.isInteger(stack) || stack < 0) continue;
+  for (const [userId, stack] of fundedStacks) {
     stacks[userId] = stack;
   }
+
+  for (const [userId, previousStack] of Object.entries(previousStacks)) {
+    if (fundedStacks.has(userId) || displacedUserIds.has(userId)) continue;
+    if (!Object.prototype.hasOwnProperty.call(stacks, userId) || stacks[userId] !== previousStack) {
+      throw makeError("authoritative_state_invalid", "unfunded_stack_changed_during_join");
+    }
+  }
+
   return {
-    ...currentState,
-    tableId: currentState.tableId || tableId,
-    seats: [...preservedSeats, ...incomingSeats].sort((left, right) => left.seatNo - right.seatNo || left.userId.localeCompare(right.userId)),
-    stacks
+    state: {
+      ...currentState,
+      tableId: currentState.tableId || tableId,
+      seats: [...preservedSeats, ...incomingSeats].sort((left, right) => left.seatNo - right.seatNo || left.userId.localeCompare(right.userId)),
+      stacks
+    },
+    displacedUserIds,
+    fundedStacks,
+    previousStacks
   };
 }
 
@@ -401,12 +417,11 @@ function buildProjectedSnapshot({ state, seatRows, maxPlayers, stateVersion }) {
   const stacks = Object.fromEntries(runtimeSeats.map((seat) => {
     const userId = typeof seat?.userId === "string" ? seat.userId.trim() : "";
     const stateStack = Number(stateStacks[userId]);
-    const seatStack = Number(seat?.stack);
-    const stack = seat?.preferStatePublicStack === true && Number.isFinite(stateStack) && stateStack >= 0
-      ? stateStack
-      : seatStack;
-    return userId && Number.isFinite(stack) ? [userId, stack] : null;
-  }).filter(Boolean));
+    if (!userId || !Object.prototype.hasOwnProperty.call(stateStacks, userId) || !Number.isInteger(stateStack) || stateStack < 0) {
+      throw makeError("authoritative_state_invalid", "active_seat_authoritative_stack_missing");
+    }
+    return [userId, stateStack];
+  }));
   return {
     stateVersion,
     seats: runtimeSeatEntries(runtimeSeats),
@@ -414,17 +429,18 @@ function buildProjectedSnapshot({ state, seatRows, maxPlayers, stateVersion }) {
   };
 }
 
-function activeStackEntries(rows) {
-  return activeSeatRows(rows)
-    .map((row) => {
-      const rowUserId = typeof row?.user_id === "string" ? row.user_id.trim() : "";
-      const rowStack = Number(row?.stack);
-      return rowUserId && Number.isInteger(rowStack) && rowStack > 0 ? [rowUserId, rowStack] : null;
-    })
-    .filter(Boolean);
-}
-
-function assertAuthoritativeJoinStateComplete({ seatRows, state, version, userId, seatNo, stack, maxPlayers, botCfg }) {
+function assertAuthoritativeJoinStateComplete({
+  seatRows,
+  state,
+  version,
+  userId,
+  seatNo,
+  maxPlayers,
+  botCfg,
+  previousStacks,
+  fundedStacks,
+  displacedUserIds
+}) {
   const persistedSeatKeys = new Set(
     activeSeatRows(seatRows)
       .map((row) => {
@@ -448,20 +464,35 @@ function assertAuthoritativeJoinStateComplete({ seatRows, state, version, userId
   if (!Number.isInteger(version) || version <= 0) {
     throw makeError("authoritative_state_invalid", "authoritative_snapshot_version_invalid");
   }
-  if (!persistedSeatKeys.has(`${userId}:${seatNo}`) || Number(stateStacks[userId]) !== Number(stack)) {
-    const validationReason = !persistedSeatKeys.has(`${userId}:${seatNo}`)
-      ? "human_seat_missing_from_authoritative_snapshot"
-      : "human_stack_mismatch_in_authoritative_snapshot";
-    throw makeError("authoritative_state_invalid", validationReason);
+  if (!persistedSeatKeys.has(`${userId}:${seatNo}`)) {
+    throw makeError("authoritative_state_invalid", "human_seat_missing_from_authoritative_snapshot");
   }
   for (const persistedSeatKey of persistedSeatKeys) {
     if (!stateSeatKeys.has(persistedSeatKey)) {
       throw makeError("authoritative_state_invalid", "persisted_seat_missing_from_authoritative_snapshot");
     }
   }
-  for (const [stackUserId, persistedStack] of activeStackEntries(seatRows)) {
-    if (Number(stateStacks[stackUserId]) !== persistedStack) {
-      throw makeError("authoritative_state_invalid", "persisted_stack_mismatch_in_authoritative_snapshot");
+  for (const row of activeSeatRows(seatRows)) {
+    const stackUserId = typeof row?.user_id === "string" ? row.user_id.trim() : "";
+    const authoritativeStack = Number(stateStacks[stackUserId]);
+    if (!Object.prototype.hasOwnProperty.call(stateStacks, stackUserId) || !Number.isInteger(authoritativeStack) || authoritativeStack < 0) {
+      throw makeError("authoritative_state_invalid", "active_seat_authoritative_stack_missing");
+    }
+  }
+  for (const [stackUserId, trustedStack] of fundedStacks) {
+    if (Number(stateStacks[stackUserId]) !== trustedStack) {
+      throw makeError("authoritative_state_invalid", "funded_stack_mismatch_in_authoritative_snapshot");
+    }
+  }
+  for (const [stackUserId, previousStack] of Object.entries(previousStacks)) {
+    if (fundedStacks.has(stackUserId) || displacedUserIds.has(stackUserId)) continue;
+    if (!Object.prototype.hasOwnProperty.call(stateStacks, stackUserId) || stateStacks[stackUserId] !== previousStack) {
+      throw makeError("authoritative_state_invalid", "unfunded_stack_changed_during_join");
+    }
+  }
+  for (const displacedUserId of displacedUserIds) {
+    if (Object.prototype.hasOwnProperty.call(stateStacks, displacedUserId)) {
+      throw makeError("authoritative_state_invalid", "displaced_user_stack_retained");
     }
   }
 
@@ -476,21 +507,33 @@ function assertAuthoritativeJoinStateComplete({ seatRows, state, version, userId
   }
 }
 
-async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, stack, loadStateForUpdate, updateStateLocked, validateStateForStorage, maxPlayers, botCfg }) {
+async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, fundedStackEntries, loadStateForUpdate, updateStateLocked, validateStateForStorage, maxPlayers, botCfg }) {
   const stateRow = normalizeLockedStateResult(await loadStateForUpdate(tx, tableId));
   const seatRows = await loadSeatRows(tx, tableId);
-  const nextState = applyAuthoritativeSeatRowsToState(stateRow.state, {
+  const merged = applyAuthoritativeSeatRowsToState(stateRow.state, {
     tableId,
     seatEntries: activeSeatRows(seatRows).map(asSeatSnapshot).filter(Boolean),
-    stackEntries: activeStackEntries(seatRows)
+    fundedStackEntries
   });
+  const nextState = merged.state;
   const nextStateForStorage = sanitizeStateForStorage(nextState);
   if (!isStorageStateValid(validateStateForStorage, nextStateForStorage)) {
     throw makeError("state_invalid", "storage_state_validation_failed");
   }
   const updated = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState: nextStateForStorage }));
   const version = requirePostMutationVersion({ previousVersion: stateRow.version, nextVersion: updated.version });
-  assertAuthoritativeJoinStateComplete({ seatRows, state: nextStateForStorage, version, userId, seatNo, stack, maxPlayers, botCfg });
+  assertAuthoritativeJoinStateComplete({
+    seatRows,
+    state: nextStateForStorage,
+    version,
+    userId,
+    seatNo,
+    maxPlayers,
+    botCfg,
+    previousStacks: merged.previousStacks,
+    fundedStacks: merged.fundedStacks,
+    displacedUserIds: merged.displacedUserIds
+  });
   return { version, state: nextStateForStorage, seatRows };
 }
 
@@ -505,6 +548,18 @@ async function readPersistedSeatStack({ tx, tableId, userId }) {
     throw makeError("state_invalid");
   }
   return { seatNo, stack };
+}
+
+async function readPersistedSeatIdentity({ tx, tableId, userId }) {
+  const rows = await tx.unsafe(
+    "select seat_no, stack from public.poker_seats where table_id = $1 and user_id = $2 and status = 'ACTIVE' limit 1;",
+    [tableId, userId]
+  );
+  const seatNo = Number(rows?.[0]?.seat_no);
+  if (!Number.isInteger(seatNo) || seatNo < 1) {
+    throw makeError("state_invalid");
+  }
+  return { seatNo };
 }
 
 async function insertSeatRow({ tx, tableId, userId, seatNo }) {
@@ -596,18 +651,19 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           "update public.poker_seats set status = 'ACTIVE', last_seen_at = now() where table_id = $1 and user_id = $2;",
           [tableId, userId]
         );
-        const persisted = await readPersistedSeatStack({ tx, tableId, userId });
+        const persisted = await readPersistedSeatIdentity({ tx, tableId, userId });
         if (stateAlreadyRepresentsActiveSeatRows(stateRow.state, seatRows, userId)) {
           if (!Number.isInteger(stateRow.version) || stateRow.version <= 0) {
             throw makeError("authoritative_state_invalid", "rejoin_state_version_invalid");
           }
+          const authoritativeStack = Number(stateRow.state?.stacks?.[userId]);
           await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
           return {
             ok: true,
             tableId,
             userId,
             seatNo: persisted.seatNo,
-            stack: persisted.stack,
+            stack: authoritativeStack,
             rejoin: true,
             requestId: requestId || null,
             me: { seated: true },
@@ -619,10 +675,17 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
             })
           };
         }
-        const nextState = applyAuthoritativeSeatRowsToState(stateRow.state, {
+        const merged = applyAuthoritativeSeatRowsToState(stateRow.state, {
           tableId,
           seatEntries: seatRows.map(asSeatSnapshot).filter(Boolean),
-          stackEntries: activeStackEntries(seatRows)
+          fundedStackEntries: []
+        });
+        const nextState = merged.state;
+        buildProjectedSnapshot({
+          state: nextState,
+          seatRows,
+          maxPlayers,
+          stateVersion: stateRow.version
         });
         const nextStateForStorage = sanitizeStateForStorage(nextState);
         if (!isStorageStateValid(validateStateForStorage, nextStateForStorage)) {
@@ -636,7 +699,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           tableId,
           userId,
           seatNo: persisted.seatNo,
-          stack: persisted.stack,
+          stack: Number(nextStateForStorage.stacks?.[userId]),
           rejoin: true,
           requestId: requestId || null,
           me: { seated: true },
@@ -771,7 +834,10 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       tableId,
       userId,
       seatNo: resolvedSeatNo,
-      stack: fundedStack,
+      fundedStackEntries: [
+        [userId, fundedStack],
+        ...seededBots.map((bot) => [bot.userId, bot.stack])
+      ],
       loadStateForUpdate,
       updateStateLocked,
       validateStateForStorage,
