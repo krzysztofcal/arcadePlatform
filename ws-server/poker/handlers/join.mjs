@@ -77,6 +77,14 @@ function evaluateRestoredAuthoritativeState({ restoredTable, userId, seatNo, see
   };
 }
 
+function restoredAuthoritativeValidationReason(validation) {
+  if (validation?.expectedVersionValid !== true) return "restore_expected_version_invalid";
+  if (validation?.humanSeatValid !== true) return "restore_human_seat_missing";
+  if (validation?.humanStackValid !== true) return "restore_human_stack_missing";
+  if (validation?.seededBotProjectionValid !== true) return "restore_seeded_bot_projection_invalid";
+  return "restore_validation_failed";
+}
+
 import { recoverFromPersistConflict } from "../runtime/persist-conflict-recovery.mjs";
 
 export async function handleJoinCommand({ frame, ws, connState, sessionStore, tableManager, ensureTableLoadedErrorMapper, restoreTableFromPersisted, persistMutatedState, broadcastResyncRequired, broadcastStateSnapshots, broadcastTableState, sendError, sendCommandResult, sendTableState, authoritativeJoinEnabled, observeOnlyJoinEnabled, persistedBootstrapEnabled, loadAuthoritativeJoinExecutor, scheduleBotStep = () => {}, klog = () => {}, klogVerbose = () => {}, verboseLogsEnabled = false }) {
@@ -187,10 +195,12 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
       expectedStateVersion: expectedVersionRaw
     });
     if (!restoreValidation.ok) {
+      const validationReason = restoredAuthoritativeValidationReason(restoreValidation);
       klog("ws_join_restore_invalid", {
         tableId,
         requestId: frame.requestId ?? null,
         reason: "validation_failed",
+        validationReason,
         restoredVersion: Number.isInteger(restoredVersion) ? restoredVersion : null,
         expectedVersion: Number.isInteger(expectedVersion) ? expectedVersion : null,
         expectedVersionValid: restoreValidation.expectedVersionValid,

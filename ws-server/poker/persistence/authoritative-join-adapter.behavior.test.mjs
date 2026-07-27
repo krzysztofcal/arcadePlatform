@@ -175,7 +175,7 @@ test("authoritative join adapter rejects malformed success payload", async () =>
   });
 
   const result = await execute({ tableId: "t1", userId: "u1", requestId: "r3", buyIn: 100 });
-  assert.deepEqual(result, { ok: false, code: "authoritative_state_invalid" });
+  assert.deepEqual(result, { ok: false, code: "authoritative_state_invalid", validationReason: "invalid_stack" });
 });
 
 test("authoritative join adapter rejects partial human-only success snapshot", async () => {
@@ -205,7 +205,7 @@ test("authoritative join adapter rejects partial human-only success snapshot", a
   });
 
   const result = await execute({ tableId: "t1", userId: "u1", requestId: "r-partial" });
-  assert.deepEqual(result, { ok: false, code: "authoritative_state_invalid" });
+  assert.deepEqual(result, { ok: false, code: "authoritative_state_invalid", validationReason: "invalid_snapshot_version" });
 });
 
 test("authoritative join adapter rejects successful fresh-join snapshot when stateVersion stays at 0", async () => {
@@ -227,7 +227,7 @@ test("authoritative join adapter rejects successful fresh-join snapshot when sta
   });
 
   const result = await execute({ tableId: "t1", userId: "u1", requestId: "r-version-zero" });
-  assert.deepEqual(result, { ok: false, code: "authoritative_state_invalid" });
+  assert.deepEqual(result, { ok: false, code: "authoritative_state_invalid", validationReason: "invalid_snapshot_version" });
 });
 
 test("authoritative join adapter accepts successful fresh-join snapshot once stateVersion moves positive", async () => {
