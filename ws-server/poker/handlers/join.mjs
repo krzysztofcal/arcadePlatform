@@ -47,31 +47,39 @@ function classifyRestoreFailureAsMissingState(reason) {
   return ["state_missing", "poker_state_missing", "invalid_persisted_state"].includes(String(reason || ""));
 }
 
-function countObjectKeys(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return 0;
-  return Object.keys(value).length;
-}
-
-function restoredAuthoritativeStateLooksComplete({ restoredTable, userId, seatNo, seededBots = [], expectedStateVersion = null }) {
+function evaluateRestoredAuthoritativeState({ restoredTable, userId, seatNo, seededBots = [], expectedStateVersion = null }) {
   const coreState = restoredTable?.coreState && typeof restoredTable.coreState === "object" ? restoredTable.coreState : null;
   const seats = coreState?.seats && typeof coreState.seats === "object" && !Array.isArray(coreState.seats) ? coreState.seats : {};
   const stacks = coreState?.publicStacks && typeof coreState.publicStacks === "object" && !Array.isArray(coreState.publicStacks) ? coreState.publicStacks : {};
   const restoredVersion = Number(coreState?.version);
-  if (!Number.isInteger(restoredVersion) || restoredVersion <= 0) return false;
-  if (expectedStateVersion !== null && restoredVersion !== Number(expectedStateVersion)) return false;
-  if (Number(seats[userId]) !== Number(seatNo) || Number(stacks[userId]) <= 0) return false;
-  for (const bot of seededBots) {
+  const expectedVersionValid = Number.isInteger(restoredVersion)
+    && restoredVersion > 0
+    && (expectedStateVersion === null || restoredVersion === Number(expectedStateVersion));
+  const humanSeatValid = Number(seats[userId]) === Number(seatNo);
+  const humanStackValid = Number(stacks[userId]) > 0;
+  const seededBotProjectionValid = seededBots.every((bot) => {
     const botUserId = typeof bot?.userId === "string" ? bot.userId : "";
     const botSeatNo = Number(bot?.seatNo);
-    if (!botUserId || !Number.isInteger(botSeatNo) || botSeatNo < 1) return false;
-    if (Number(seats[botUserId]) !== botSeatNo || Number(stacks[botUserId]) <= 0) return false;
-  }
-  return true;
+    return Boolean(
+      botUserId
+      && Number.isInteger(botSeatNo)
+      && botSeatNo >= 1
+      && Number(seats[botUserId]) === botSeatNo
+      && Number(stacks[botUserId]) > 0
+    );
+  });
+  return {
+    ok: expectedVersionValid && humanSeatValid && humanStackValid && seededBotProjectionValid,
+    expectedVersionValid,
+    humanSeatValid,
+    humanStackValid,
+    seededBotProjectionValid
+  };
 }
 
 import { recoverFromPersistConflict } from "../runtime/persist-conflict-recovery.mjs";
 
-export async function handleJoinCommand({ frame, ws, connState, sessionStore, tableManager, ensureTableLoadedErrorMapper, restoreTableFromPersisted, persistMutatedState, broadcastResyncRequired, broadcastStateSnapshots, broadcastTableState, sendError, sendCommandResult, sendTableState, authoritativeJoinEnabled, observeOnlyJoinEnabled, persistedBootstrapEnabled, loadAuthoritativeJoinExecutor, scheduleBotStep = () => {}, klog = () => {} }) {
+export async function handleJoinCommand({ frame, ws, connState, sessionStore, tableManager, ensureTableLoadedErrorMapper, restoreTableFromPersisted, persistMutatedState, broadcastResyncRequired, broadcastStateSnapshots, broadcastTableState, sendError, sendCommandResult, sendTableState, authoritativeJoinEnabled, observeOnlyJoinEnabled, persistedBootstrapEnabled, loadAuthoritativeJoinExecutor, scheduleBotStep = () => {}, klog = () => {}, klogVerbose = () => {}, verboseLogsEnabled = false }) {
   const tableId = frame.__resolvedTableId;
   const authoritativeJoinRequired = authoritativeJoinEnabled && !observeOnlyJoinEnabled;
   const parsedJoinIntent = parseJoinIntent(frame.payload);
@@ -98,14 +106,11 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
 
   if (authoritativeJoinRequired && persistedBootstrapEnabled) {
     const authoritativeJoinExecutor = await loadAuthoritativeJoinExecutor();
-    klog("ws_join_authoritative_start", {
+    const authoritativeJoinStartedAtMs = verboseLogsEnabled ? Date.now() : null;
+    klogVerbose("ws_join_authoritative_start", () => ({
       tableId,
-      userId: connState.session.userId,
-      seatNo: joinIntent.seatNo,
-      autoSeat: joinIntent.autoSeat,
-      preferredSeatNo: joinIntent.preferredSeatNo,
-      buyIn: joinIntent.buyIn
-    });
+      requestId: frame.requestId ?? null
+    }));
     const authoritativeJoin = await authoritativeJoinExecutor({
       tableId,
       userId: connState.session.userId,
@@ -115,31 +120,21 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
       preferredSeatNo: joinIntent.preferredSeatNo,
       buyIn: joinIntent.buyIn
     });
-    const resultSnapshotVersion = Number(authoritativeJoin?.snapshot?.stateVersion);
-    klog("ws_join_authoritative_result", {
-      ok: authoritativeJoin?.ok === true,
-      seatNo: authoritativeJoin?.seatNo ?? null,
-      stack: authoritativeJoin?.stack ?? null,
-      rejoin: authoritativeJoin?.rejoin === true,
-      hasSnapshot: Boolean(authoritativeJoin?.snapshot && typeof authoritativeJoin.snapshot === "object"),
-      snapshotVersion: Number.isInteger(resultSnapshotVersion) ? resultSnapshotVersion : null,
-      seededBotsCount: Array.isArray(authoritativeJoin?.seededBots) ? authoritativeJoin.seededBots.length : 0
-    });
     if (!authoritativeJoin?.ok) {
       let reason = normalizeAuthoritativeJoinReason(authoritativeJoin?.code);
       if (reason === "authoritative_join_failed") {
-        klog("ws_join_restore_start", { tableId });
         const restored = await restoreTableFromPersisted(tableId);
-        klog("ws_join_restore_result", {
-          ok: restored?.ok === true,
-          version: restored?.restoredTable?.coreState?.version ?? null,
-          seatsCount: countObjectKeys(restored?.restoredTable?.coreState?.seats),
-          stacksCount: countObjectKeys(restored?.restoredTable?.coreState?.publicStacks)
-        });
         if (!restored?.ok && classifyRestoreFailureAsMissingState(restored?.reason || restored?.code)) {
           reason = "state_missing";
         }
       }
+      klogVerbose("ws_join_authoritative_result", () => ({
+        tableId,
+        requestId: frame.requestId ?? null,
+        ok: false,
+        reason,
+        durationMs: Math.max(0, Date.now() - authoritativeJoinStartedAtMs)
+      }));
       sendCommandResult(ws, connState, {
         requestId: frame.requestId ?? null,
         tableId,
@@ -148,6 +143,14 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
       });
       return;
     }
+    klogVerbose("ws_join_authoritative_result", () => ({
+      tableId,
+      requestId: frame.requestId ?? null,
+      ok: true,
+      rejoin: authoritativeJoin?.rejoin === true,
+      stateVersion: Number(authoritativeJoin?.snapshot?.stateVersion) || null,
+      durationMs: Math.max(0, Date.now() - authoritativeJoinStartedAtMs)
+    }));
     authoritativeJoinResult = authoritativeJoin;
   }
 
@@ -163,14 +166,7 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
   }
 
   if (authoritativeJoinRequired && persistedBootstrapEnabled) {
-    klog("ws_join_restore_start", { tableId });
     const restored = await restoreTableFromPersisted(tableId);
-    klog("ws_join_restore_result", {
-      ok: restored?.ok === true,
-      version: restored?.restoredTable?.coreState?.version ?? null,
-      seatsCount: countObjectKeys(restored?.restoredTable?.coreState?.seats),
-      stacksCount: countObjectKeys(restored?.restoredTable?.coreState?.publicStacks)
-    });
     if (!restored.ok) {
       sendError(ws, connState, {
         code: "TABLE_BOOTSTRAP_FAILED",
@@ -182,34 +178,25 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
     const restoredVersion = Number(restored?.restoredTable?.coreState?.version);
     const expectedVersionRaw = authoritativeJoinResult?.snapshot?.stateVersion ?? null;
     const expectedVersion = expectedVersionRaw === null || expectedVersionRaw === undefined ? null : Number(expectedVersionRaw);
-    const restoredSeats = restored?.restoredTable?.coreState?.seats && typeof restored.restoredTable.coreState.seats === "object" && !Array.isArray(restored.restoredTable.coreState.seats)
-      ? restored.restoredTable.coreState.seats
-      : {};
-    const restoredStacks = restored?.restoredTable?.coreState?.publicStacks && typeof restored.restoredTable.coreState.publicStacks === "object" && !Array.isArray(restored.restoredTable.coreState.publicStacks)
-      ? restored.restoredTable.coreState.publicStacks
-      : {};
     const seededBots = Array.isArray(authoritativeJoinResult?.seededBots) ? authoritativeJoinResult.seededBots : [];
-    const userSeatMatch = Number(restoredSeats[connState.session.userId]) === Number(authoritativeJoinResult?.seatNo);
-    const userStackValid = Number(restoredStacks[connState.session.userId]) > 0;
-    const botsValidated = seededBots.every((bot) => Number(restoredSeats[bot?.userId]) === Number(bot?.seatNo) && Number(restoredStacks[bot?.userId]) > 0);
-    klog("ws_join_restore_validate", {
-      restoredVersion: Number.isInteger(restoredVersion) ? restoredVersion : null,
-      expectedVersion: Number.isInteger(expectedVersion) ? expectedVersion : null,
-      userSeatMatch,
-      userStackValid,
-      botsValidated
-    });
-    if (!restoredAuthoritativeStateLooksComplete({
+    const restoreValidation = evaluateRestoredAuthoritativeState({
       restoredTable: restored?.restoredTable,
       userId: connState.session.userId,
       seatNo: authoritativeJoinResult?.seatNo,
       seededBots,
       expectedStateVersion: expectedVersionRaw
-    })) {
+    });
+    if (!restoreValidation.ok) {
       klog("ws_join_restore_invalid", {
+        tableId,
+        requestId: frame.requestId ?? null,
         reason: "validation_failed",
         restoredVersion: Number.isInteger(restoredVersion) ? restoredVersion : null,
-        expectedVersion: Number.isInteger(expectedVersion) ? expectedVersion : null
+        expectedVersion: Number.isInteger(expectedVersion) ? expectedVersion : null,
+        expectedVersionValid: restoreValidation.expectedVersionValid,
+        humanSeatValid: restoreValidation.humanSeatValid,
+        humanStackValid: restoreValidation.humanStackValid,
+        seededBotProjectionValid: restoreValidation.seededBotProjectionValid
       });
       sendCommandResult(ws, connState, {
         requestId: frame.requestId ?? null,
@@ -222,11 +209,6 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
   }
 
   sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
-  klog("ws_join_attach_start", {
-    userId: connState.session.userId,
-    tableId,
-    authoritativeSeatNo: authoritativeJoinResult?.seatNo ?? null
-  });
   const joined = tableManager.join({
     ws,
     userId: connState.session.userId,
@@ -241,12 +223,12 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
       : (authoritativeJoinResult?.stack ?? joinIntent.buyIn),
     authoritativeSeatNo: authoritativeJoinResult?.seatNo ?? null
   });
-  klog("ws_join_attach_result", {
-    ok: joined?.ok === true,
-    changed: joined?.changed === true,
-    hasTableState: Boolean(joined?.tableState)
-  });
   if (!joined.ok) {
+    klog("ws_join_attach_failed", {
+      tableId,
+      requestId: frame.requestId ?? null,
+      code: joined?.code || "join_failed"
+    });
     sendCommandResult(ws, connState, {
       requestId: frame.requestId ?? null,
       tableId,

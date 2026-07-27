@@ -113,6 +113,11 @@ export function createAuthoritativeLeaveExecutor({
   beginSql = beginSqlDefault
 } = {}) {
   const maxRetryAttempts = 2;
+  const verboseBotAutoplayLogs = env?.WS_BOT_AUTOPLAY_VERBOSE_LOGS === "1";
+  const klogVerbose = (kind, createPayload) => {
+    if (!verboseBotAutoplayLogs) return;
+    klog(kind, createPayload());
+  };
   return async function executeAuthoritativeLeave({ tableId, userId, requestId }) {
     const override = resolveLeaveTestOverride(env);
     if (override) {
@@ -145,7 +150,9 @@ export function createAuthoritativeLeaveExecutor({
           includeState: true,
           runPostLeaveBotAutoplay: false,
           hasConnectedHumanPresence,
-          klog
+          klog,
+          klogVerbose,
+          verboseLogsEnabled: verboseBotAutoplayLogs
         });
         return normalizeValidatedResult({ result, tableId, userId, requestId, klog });
       } catch (error) {

@@ -320,7 +320,8 @@ test("runTableJanitor keeps runtime/db mismatch traceable while routing cleanup"
   assert.equal(result.status, "cleaned_closed");
   assert.equal(calls.length, 1);
   assert.equal(calls[0].tableId, "t_runtime_mismatch");
-  assert.equal(logs[0].kind, "ws_table_janitor_classified");
+  assert.equal(logs[0].kind, "ws_table_janitor_result");
+  assert.equal(logs[0].data.classification, "open_inert_table");
   assert.equal(logs[0].data.reasonCode, "open_table_without_active_humans");
 });
 

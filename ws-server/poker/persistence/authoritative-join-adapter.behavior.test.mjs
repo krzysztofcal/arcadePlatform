@@ -37,9 +37,10 @@ test("authoritative join adapter returns unavailable when join core is missing",
 });
 
 test("authoritative join adapter maps unknown thrown errors", async () => {
+  const logs = [];
   const execute = createAuthoritativeJoinExecutor({
     env: {},
-    klog: () => {},
+    klog: (event, payload) => logs.push({ event, payload }),
     loadLockedStateHelpersFn: lockedStateHelpers,
     loadPostTransactionFn: async () => async () => ({ ok: true }),
     loadJoinModule: async () => ({
@@ -50,6 +51,7 @@ test("authoritative join adapter maps unknown thrown errors", async () => {
   });
   const result = await execute({ tableId: "t1", userId: "u1", requestId: "r1" });
   assert.deepEqual(result, { ok: false, code: "authoritative_join_failed" });
+  assert.equal(logs.filter((entry) => entry.event === "ws_join_authoritative_failed").length, 1);
 });
 
 test("authoritative join adapter returns unavailable when locked-state validator helper is missing", async () => {
@@ -325,9 +327,10 @@ test("authoritative join adapter preserves poker_state_missing as protocol-safe 
 
 
 test("authoritative join adapter preserves seat_taken as protocol-safe known code", async () => {
+  const logs = [];
   const execute = createAuthoritativeJoinExecutor({
     env: {},
-    klog: () => {},
+    klog: (event, payload) => logs.push({ event, payload }),
     beginSql: async (fn) => fn({ ok: true }),
     loadLockedStateHelpersFn: lockedStateHelpers,
     loadPostTransactionFn: async () => async () => ({ ok: true }),
@@ -342,6 +345,7 @@ test("authoritative join adapter preserves seat_taken as protocol-safe known cod
 
   const result = await execute({ tableId: "t1", userId: "u1", requestId: "r7", buyIn: 100 });
   assert.deepEqual(result, { ok: false, code: "seat_taken" });
+  assert.equal(logs.some((entry) => entry.event === "ws_join_authoritative_failed"), false);
 });
 
 

@@ -1410,30 +1410,69 @@ async function restoreTableFromPersisted(tableId) {
   if (typeof loadPersistedTableBootstrap !== "function") {
     return { ok: false, reason: "persisted_bootstrap_disabled" };
   }
+  const restoreStartedAtMs = verbosePokerLogs ? Date.now() : null;
+  klogVerbose("ws_restore_start", () => ({
+    tableId,
+    stage: "load",
+    ok: null,
+    durationMs: 0
+  }));
   try {
-    klogSafe("ws_restore_load_start", { tableId });
     const restored = await loadPersistedTableBootstrap({ tableId });
-    klogSafe("ws_restore_load_result", {
-      ok: restored?.ok === true,
-      hasTable: Boolean(restored?.table),
-      version: restored?.table?.coreState?.version ?? null
-    });
     if (!restored?.ok || !restored?.table) {
-      return { ok: false, reason: restored?.code || "restore_failed" };
+      const reason = restored?.code || "restore_failed";
+      klogSafe("ws_restore_failed", {
+        tableId,
+        stage: "load",
+        reason
+      });
+      klogVerbose("ws_restore_outcome", () => ({
+        tableId,
+        stage: "load",
+        ok: false,
+        reason,
+        durationMs: Math.max(0, Date.now() - restoreStartedAtMs)
+      }));
+      return { ok: false, reason };
     }
     persistedStateWriter?.forgetHoleCardAcknowledgement(tableId);
     const applied = tableManager.restoreTableFromPersisted(tableId, restored.table);
-    klogSafe("ws_restore_apply_result", { ok: applied?.ok === true });
     if (!applied?.ok) {
+      const reason = applied?.reason || applied?.code || "restore_failed";
+      klogSafe("ws_restore_failed", {
+        tableId,
+        stage: "apply",
+        reason
+      });
+      klogVerbose("ws_restore_outcome", () => ({
+        tableId,
+        stage: "apply",
+        ok: false,
+        reason,
+        durationMs: Math.max(0, Date.now() - restoreStartedAtMs)
+      }));
       return applied;
     }
     maybeScheduleSettledRollover(tableId);
+    klogVerbose("ws_restore_outcome", () => ({
+      tableId,
+      stage: "apply",
+      ok: true,
+      durationMs: Math.max(0, Date.now() - restoreStartedAtMs)
+    }));
     return {
       ...applied,
       restoredTable: restored.table
     };
   } catch (error) {
     klogSafe("ws_state_restore_failed", { tableId, message: error?.message || "unknown" });
+    klogVerbose("ws_restore_outcome", () => ({
+      tableId,
+      stage: "exception",
+      ok: false,
+      reason: "restore_error",
+      durationMs: Math.max(0, Date.now() - restoreStartedAtMs)
+    }));
     return { ok: false, reason: "restore_error" };
   }
 }
@@ -1527,17 +1566,13 @@ async function syncCleanupRuntimeState({ tableId, result, logPrefix, onRestore =
     return { ok: true, changed: false, evicted: false, restored: false };
   }
   if (shouldEvictClosedRuntimeTable(tableId, result)) {
-    klogSafe(`${logPrefix}_evict_closed_start`, { tableId, status: result?.status || null });
     evictClosedRuntimeTable({ tableId, logPrefix, status: result?.status || null });
     return { ok: true, changed: true, evicted: true, restored: false };
   }
-  klogSafe(`${logPrefix}_restore_start`, { tableId, status: result?.status || null });
   const restored = await restoreTableFromPersisted(tableId);
   if (!restored?.ok) {
-    klogSafe(`${logPrefix}_restore_failed`, { tableId, reason: restored?.reason || "unknown" });
     return { ok: false, changed: true, evicted: false, restored: false };
   }
-  klogSafe(`${logPrefix}_restore_success`, { tableId, status: result?.status || null });
   broadcastStateSnapshots(tableId);
   broadcastTableState(tableId);
   if (typeof onRestore === "function") {
@@ -1637,7 +1672,6 @@ async function executeUserInactiveCleanupPrimitive({
         });
         return result;
       }
-      klogSafe(`${logPrefix}_noop`, { tableId, userId, status: result?.status || null });
       return result;
     }
   });
@@ -1736,7 +1770,12 @@ function scheduleSettledRolloverTimer({ tableId, generationKey, dueAt, attempt =
   clearSettledRolloverTimer(tableId);
   const nowMs = Date.now();
   const delayMs = Math.max(0, dueAt - nowMs);
-  klogSafe("ws_settled_rollover_scheduled", { tableId, dueAt, delayMs, attempt, mode });
+  klogVerbose("ws_settled_rollover_scheduled", () => ({
+    tableId,
+    delayMs,
+    attempt,
+    mode
+  }));
   const timer = setTimeout(() => {
     settledRolloverTimerByTableId.delete(tableId);
     void enqueueTableCommand({
@@ -1769,11 +1808,24 @@ function scheduleSettledRolloverRetry({ tableId, generationKey, attempt }) {
 }
 
 async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }) {
+  const rolloverStartedAtMs = verbosePokerLogs ? Date.now() : null;
+  const finishSettledRollover = (result) => {
+    klogVerbose("ws_settled_rollover_outcome", () => ({
+      tableId,
+      attempt,
+      ok: result?.ok !== false,
+      changed: result?.changed === true,
+      closed: result?.closed === true,
+      reason: result?.reason || result?.code || result?.status || (result?.changed === true ? "changed" : "unchanged"),
+      durationMs: Math.max(0, Date.now() - rolloverStartedAtMs)
+    }));
+    return result;
+  };
   let pokerState = tableManager.persistedPokerState(tableId);
   if (settledRolloverGenerationKey(tableId, pokerState) !== generationKey) {
-    return { ok: true, changed: false, reason: "settled_generation_changed" };
+    return finishSettledRollover({ ok: true, changed: false, reason: "settled_generation_changed" });
   }
-  klogSafe("ws_settled_rollover_start", { tableId, attempt });
+  klogVerbose("ws_settled_rollover_start", () => ({ tableId, attempt }));
   if (!isGuestTableId(tableId) && hasSupabaseDbUrl) {
     const finalizeDeferredLeaves = await loadDeferredLeaveFinalizer();
     const finalized = await finalizeDeferredLeaves({ tableId });
@@ -1786,7 +1838,7 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
       if (finalized?.retryable !== false) {
         scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
       }
-      return finalized;
+      return finishSettledRollover(finalized);
     }
     if (finalized.changed === true || finalized.closed === true) {
       const synced = await syncCleanupRuntimeState({
@@ -1796,31 +1848,32 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
       });
       if (!synced?.ok) {
         scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
-        return { ok: false, changed: true, code: "runtime_restore_failed", retryable: true };
+        return finishSettledRollover({ ok: false, changed: true, code: "runtime_restore_failed", retryable: true });
       }
-      if (finalized.closed === true) return finalized;
+      if (finalized.closed === true) return finishSettledRollover(finalized);
       pokerState = tableManager.persistedPokerState(tableId);
       if (!pokerState || pokerState.phase !== "SETTLED") {
-        return { ok: true, changed: true, reason: "deferred_leave_state_changed" };
+        return finishSettledRollover({ ok: true, changed: true, reason: "deferred_leave_state_changed" });
       }
     }
   }
   if (!tableManager.hasActiveHumanMember(tableId)) {
     if (tableManager.hasConnectedHumanPresence(tableId)) {
       klogSafe("ws_settled_rollover_close_skipped_human_presence", { tableId, phase: pokerState?.phase || null });
-      return { ok: true, changed: false, deferred: true, reason: "human_presence_present" };
+      return finishSettledRollover({ ok: true, changed: false, deferred: true, reason: "human_presence_present" });
     }
-    return applyInactiveCleanupAndBroadcast({
+    const cleanupResult = await applyInactiveCleanupAndBroadcast({
       tableId,
       requestId: `ws-settled-rollover-close:${tableId}`,
       logPrefix: "ws_settled_rollover_close"
     });
+    return finishSettledRollover(cleanupResult);
   }
 
   if (isGuestTableId(tableId)) {
     const guestRollover = tableManager.rolloverSettledHand({ tableId, nowMs: Date.now(), economyMode: "none" });
     if (!guestRollover?.ok || !guestRollover.changed) {
-      return guestRollover;
+      return finishSettledRollover(guestRollover);
     }
     broadcastStateSnapshots(tableId);
     try {
@@ -1828,13 +1881,12 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     } catch (error) {
       klogSafe("ws_settled_rollover_bot_autoplay_failed", { tableId, message: error?.message || "unknown" });
     }
-    return guestRollover;
+    return finishSettledRollover(guestRollover);
   }
 
   const prepared = tableManager.prepareSettledHandRollover({ tableId, nowMs: Date.now() });
   if (!prepared?.ok || !prepared.changed) {
-    klogSafe("ws_settled_rollover_noop", { tableId, reason: prepared?.reason || "unchanged" });
-    return prepared;
+    return finishSettledRollover(prepared);
   }
 
   const candidatePokerState = prepared.nextCoreState?.pokerState;
@@ -1875,12 +1927,12 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     if (!persisted?.alreadyApplied) {
       scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
     }
-    return {
+    return finishSettledRollover({
       ok: Boolean(persisted?.alreadyApplied),
       changed: false,
       reason: persisted?.alreadyApplied ? "already_applied_restored" : (persisted?.reason || "persist_failed"),
       stateVersion: prepared.stateVersion
-    };
+    });
   }
 
   const rollover = tableManager.commitSettledHandRollover({
@@ -1900,7 +1952,7 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     } catch (error) {
       klogSafe("ws_settled_rollover_bot_autoplay_failed", { tableId, message: error?.message || "unknown" });
     }
-    return rollover;
+    return finishSettledRollover(rollover);
   }
 
   tableManager.setPersistedStateVersion(tableId, persisted.newVersion);
@@ -1910,7 +1962,7 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
   } catch (error) {
     klogSafe("ws_settled_rollover_bot_autoplay_failed", { tableId, message: error?.message || "unknown" });
   }
-  return rollover;
+  return finishSettledRollover(rollover);
 }
 
 function maybeScheduleSettledRollover(tableId) {
@@ -2026,7 +2078,8 @@ const disconnectCleanupRuntime = createDisconnectCleanupRuntime({
       trigger: "disconnect_cleanup",
       requestId,
       primitives: tableJanitorPrimitives,
-      klog: klogSafe
+      klog: klogSafe,
+      klogVerbose
     });
   },
   listActiveSocketsForUser: (userId) => sessionStore.connectionsForUser(userId),
@@ -2543,7 +2596,8 @@ async function runEvaluatedTableJanitor({ tableId, trigger, requestId }) {
     trigger,
     requestId,
     primitives: tableJanitorPrimitives,
-    klog: klogSafe
+    klog: klogSafe,
+    klogVerbose
   });
   rememberNonRetryableTerminalJanitorFailure({
     trigger,
@@ -3273,7 +3327,9 @@ wss.on("connection", (ws) => {
           persistedBootstrapEnabled,
           loadAuthoritativeJoinExecutor,
           scheduleBotStep,
-          klog: klogSafe
+          klog: klogSafe,
+          klogVerbose,
+          verboseLogsEnabled: verbosePokerLogs
         })
       });
       maybeScheduleSettledRollover(frame.__resolvedTableId);

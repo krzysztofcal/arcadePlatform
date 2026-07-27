@@ -209,7 +209,6 @@ export async function handler(event) {
       const matchKey = `quickseat:${maxPlayers}:${stakesParsed.value.sb}:${stakesParsed.value.bb}`;
       const humanSeatFreshCutoffIso = new Date(Date.now() - resolveHumanSeatFreshMs(process.env.POKER_ACTIVE_HUMAN_SEAT_FRESH_MS)).toISOString();
 
-      klog("poker_quick_seat_lock", { matchKey, maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb, stakesJson });
       await tx.unsafe("select pg_advisory_xact_lock(hashtext($1));", [matchKey]);
 
       const preferredRows = await selectCandidate(tx, { stakesJson, maxPlayers, requireHuman: true, humanSeatFreshCutoffIso });
@@ -223,7 +222,6 @@ export async function handler(event) {
         });
         if (recommendation.kind === "insufficient_chips") return recommendation;
         if (recommendation.kind === "recommended") {
-          klog("poker_quick_seat_selected", { tableId: recommendation.tableId, strategy: "prefer_humans", maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb });
           return { ...recommendation, strategy: "prefer_humans" };
         }
       }
@@ -239,15 +237,11 @@ export async function handler(event) {
         });
         if (recommendation.kind === "insufficient_chips") return recommendation;
         if (recommendation.kind === "recommended") {
-          klog("poker_quick_seat_selected", { tableId: recommendation.tableId, strategy: "any_open", maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb });
           return { ...recommendation, strategy: "any_open" };
         }
       }
 
       const createdRecommendation = await createAndRecommend(tx, createPayload);
-      if (createdRecommendation.kind === "recommended") {
-        klog("poker_quick_seat_selected", { tableId: createdRecommendation.tableId, strategy: "create", maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb });
-      }
       return createdRecommendation;
     });
 
@@ -267,7 +261,6 @@ export async function handler(event) {
       triggerWsLobbyMaterialize({ tableId: result.tableId, maxPlayers, stakes: stakesParsed.value, klog });
     }
 
-    klog("poker_quick_seat_ok", { tableId: result.tableId, seatNo: result.seatNo, userId: auth.userId, strategy: result.strategy });
     return {
       statusCode: 200,
       headers: mergeHeaders(cors),

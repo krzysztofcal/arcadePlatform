@@ -875,22 +875,9 @@
     flyoutEl.classList.remove('poker-showdown-flyout--exiting');
     void flyoutEl.offsetWidth;
     flyoutEl.classList.add('poker-showdown-flyout--visible');
-    klog('poker_showdown_flyout_show', {
-      tableId: tableIdValue || null,
-      handId: handId || null,
-      reason: reason || null,
-      winnersCount: winners.length,
-      payoutCount: payoutUserIds.length,
-      viewerWon: viewerWon,
-      cardsVisible: canShowCards && viewerWon && viewerHoleCards.length === 2
-    });
     showdownFlyoutHideTimer = setTimeout(function(){
       flyoutEl.classList.remove('poker-showdown-flyout--visible');
       flyoutEl.classList.add('poker-showdown-flyout--exiting');
-      klog('poker_showdown_flyout_hide', {
-        tableId: tableIdValue || null,
-        handId: handId || null
-      });
       if (showdownFlyoutExitTimer){
         clearTimeout(showdownFlyoutExitTimer);
       }
@@ -1591,7 +1578,6 @@
       ensureLobbyLoadingVisible();
       if (lobbyWsClient && lobbyWsClient.isReady()) {
         if (lobbyWsClient.requestLobbySnapshot()) {
-          klog('poker_lobby_ws_snapshot_request', { reason: reason || 'refresh' });
           return true;
         }
       }
@@ -1762,7 +1748,6 @@
           if (tableList) tableList.innerHTML = '';
         }
       });
-      klog('poker_lobby_ws_connect_start', { reason: reason });
       lobbyWsClient.start();
     }
 
@@ -1981,7 +1966,6 @@
 
   // ========== INIT ==========
   function init(){
-    klog('poker_ui_loaded', { version: UI_VERSION, page: 'lobby' });
     initLobby();
   }
 

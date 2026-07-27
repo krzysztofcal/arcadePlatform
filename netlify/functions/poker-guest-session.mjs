@@ -108,7 +108,6 @@ export async function handler(event) {
   const expiresInSec = resolveTtlSec(process.env);
   const token = signGuestToken({ sub: guestId, nickname, tableId, secret: mintSecret, ttlSec: expiresInSec });
 
-  klog("poker_guest_session_created", { tableId, guestIdPrefix: guestId.slice(0, 12), expiresInSec });
   return {
     statusCode: 200,
     headers: originCors,

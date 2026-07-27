@@ -495,7 +495,8 @@ export async function runTableJanitor({
   trigger = "table_janitor",
   requestId = null,
   primitives = {},
-  klog = () => {}
+  klog = () => {},
+  klogVerbose = () => {}
 } = {}) {
   const normalizedClassification = classification && typeof classification === "object"
     ? classification
@@ -510,18 +511,6 @@ export async function runTableJanitor({
   const action = typeof normalizedClassification?.action === "string" && normalizedClassification.action
     ? normalizedClassification.action
     : "noop";
-  klog("ws_table_janitor_classified", {
-    tableId: normalizedClassification.tableId || null,
-    trigger,
-    requestId: requestId || null,
-    classification: normalizedClassification.classification || null,
-    action,
-    reasonCode: normalizedClassification.reasonCode || null,
-    userId: normalizedClassification.userId || null,
-    healthy: normalizedClassification.healthy === true,
-    concerns: Array.isArray(normalizedClassification.concerns) ? normalizedClassification.concerns : []
-  });
-
   if (action === "noop") {
     const result = {
       ok: true,
@@ -530,16 +519,17 @@ export async function runTableJanitor({
       status: "healthy_noop",
       reasonCode: normalizedClassification.reasonCode || null
     };
-    klog("ws_table_janitor_result", {
+    klogVerbose("ws_table_janitor_result", () => ({
       tableId: normalizedClassification.tableId || null,
       trigger,
       requestId: requestId || null,
+      classification: normalizedClassification.classification || null,
       action,
       status: result.status,
       ok: true,
       changed: false,
       reasonCode: normalizedClassification.reasonCode || null
-    });
+    }));
     return result;
   }
 
@@ -556,6 +546,7 @@ export async function runTableJanitor({
       tableId: normalizedClassification.tableId || null,
       trigger,
       requestId: requestId || null,
+      classification: normalizedClassification.classification || null,
       action,
       status: result.status,
       ok: false,
@@ -574,10 +565,11 @@ export async function runTableJanitor({
     reasonCode: normalizedClassification.reasonCode || null,
     classification: normalizedClassification
   });
-  klog("ws_table_janitor_result", {
+  const createResultLogPayload = () => ({
     tableId: normalizedClassification.tableId || null,
     trigger,
     requestId: requestId || null,
+    classification: normalizedClassification.classification || null,
     action,
     status: result?.status || null,
     ok: result?.ok === true,
@@ -585,5 +577,14 @@ export async function runTableJanitor({
     reasonCode: normalizedClassification.reasonCode || null,
     code: result?.code || null
   });
+  const routineSeatMissingNoop = result?.ok === true
+    && result?.changed !== true
+    && result?.closed !== true
+    && result?.status === "seat_missing";
+  if (routineSeatMissingNoop) {
+    klogVerbose("ws_table_janitor_result", createResultLogPayload);
+  } else {
+    klog("ws_table_janitor_result", createResultLogPayload());
+  }
   return result;
 }

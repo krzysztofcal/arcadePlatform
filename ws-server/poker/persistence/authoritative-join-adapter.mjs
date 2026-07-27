@@ -56,6 +56,25 @@ function normalizeJoinError(error) {
   return { ok: false, code: "authoritative_join_failed" };
 }
 
+const EXPECTED_JOIN_REJECTION_CODES = new Set([
+  "table_not_found",
+  "table_closed",
+  "table_not_open",
+  "seat_taken",
+  "table_full",
+  "table_full_bot_leaving",
+  "duplicate_seat",
+  "invalid_seat_no",
+  "invalid_buy_in",
+  "request_pending",
+  "insufficient_funds"
+]);
+
+function shouldLogAuthoritativeJoinFailure(error) {
+  const code = typeof error?.code === "string" ? error.code : "";
+  return !EXPECTED_JOIN_REJECTION_CODES.has(code);
+}
+
 function shouldUseLedgerFallback(env = process.env) {
   const hasFileStore = Boolean(typeof env?.WS_PERSISTED_STATE_FILE === "string" && env.WS_PERSISTED_STATE_FILE.trim());
   const hasSupabaseDb = Boolean(typeof env?.SUPABASE_DB_URL === "string" && env.SUPABASE_DB_URL.trim());
@@ -132,11 +151,6 @@ export function createAuthoritativeJoinExecutor({
   loadLockedStateHelpersFn = loadLockedStateHelpers,
 } = {}) {
   return async function executeAuthoritativeJoin({ tableId, userId, requestId, seatNo = null, autoSeat = false, preferredSeatNo = null, buyIn = null }) {
-    klog("ws_authoritative_adapter_start", {
-      tableId,
-      userId,
-      requestId: requestId || null
-    });
     const override = resolveJoinTestOverride(env);
     if (override) {
       return override;
@@ -236,30 +250,17 @@ export function createAuthoritativeJoinExecutor({
         }
         return normalized;
       }
-      klog("ws_authoritative_adapter_success", {
-        seatNo: normalized.seatNo,
-        stack: normalized.stack,
-        rejoin: normalized.rejoin === true,
-        snapshotVersion: Number(normalized?.snapshot?.stateVersion) || null,
-        seatsCount: Array.isArray(normalized?.snapshot?.seats) ? normalized.snapshot.seats.length : 0,
-        stacksCount: normalized?.snapshot?.stacks && typeof normalized.snapshot.stacks === "object" && !Array.isArray(normalized.snapshot.stacks)
-          ? Object.keys(normalized.snapshot.stacks).length
-          : 0,
-        seededBotsCount: Array.isArray(normalized?.seededBots) ? normalized.seededBots.length : 0
-      });
       return normalized;
     } catch (error) {
-      klog("ws_authoritative_adapter_error", {
-        code: typeof error?.code === "string" ? error.code : "authoritative_join_failed",
-        message: error?.message || "unknown"
-      });
-      klog("ws_join_authoritative_failed", {
-        tableId,
-        userId,
-        requestId: requestId || null,
-        code: typeof error?.code === "string" ? error.code : null,
-        message: error?.message || "unknown",
-      });
+      if (shouldLogAuthoritativeJoinFailure(error)) {
+        klog("ws_join_authoritative_failed", {
+          tableId,
+          userId,
+          requestId: requestId || null,
+          code: typeof error?.code === "string" ? error.code : null,
+          message: error?.message || "unknown",
+        });
+      }
       return normalizeJoinError(error);
     }
   };

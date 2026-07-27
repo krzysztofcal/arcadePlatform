@@ -632,17 +632,17 @@ function materializeShowdownState(stateToMaterialize, seatOrder, holeCardsByUser
       holeCardsByUserId,
       trustedStateSource: typeof options?.trustedStateSource === "string" ? options.trustedStateSource : "trusted_private"
     });
-    if (typeof klog === "function") {
+    if (options?.verboseLogs === true && typeof klog === "function") {
       klog("ws_bot_autoplay_showdown_preflight", {
         handId: typeof stateToMaterialize?.handId === "string" ? stateToMaterialize.handId : null,
         phase: typeof stateToMaterialize?.phase === "string" ? stateToMaterialize.phase : null,
         communityLen: showdownInputs.communityLen,
-        eligibleUserIds: showdownInputs.eligibleUserIds,
-        showdownComparedUserIds: showdownInputs.showdownComparedUserIds,
-        missingHoleCardsUserIds: showdownInputs.missingHoleCardsUserIds,
-        invalidHoleCardsUserIds: showdownInputs.invalidHoleCardsUserIds,
-        invalidSeatUserIds: showdownInputs.invalidSeatUserIds,
-        eligibleMissingFromShowdownUserIds: showdownInputs.eligibleMissingFromShowdownUserIds,
+        eligibleCount: showdownInputs.eligibleCount,
+        showdownComparedCount: showdownInputs.showdownComparedCount,
+        missingHoleCardsCount: showdownInputs.missingHoleCardsUserIds.length,
+        invalidHoleCardsCount: showdownInputs.invalidHoleCardsUserIds.length,
+        invalidSeatCount: showdownInputs.invalidSeatUserIds.length,
+        eligibleMissingFromShowdownCount: showdownInputs.eligibleMissingFromShowdownUserIds.length,
         trustedStateSource: showdownInputs.trustedStateSource
       });
     }
@@ -656,12 +656,10 @@ function materializeShowdownState(stateToMaterialize, seatOrder, holeCardsByUser
           communityLen: showdownInputs.communityLen,
           eligibleCount: showdownInputs.eligibleCount,
           showdownComparedCount: showdownInputs.showdownComparedCount,
-          eligibleUserIds: showdownInputs.eligibleUserIds,
-          showdownComparedUserIds: showdownInputs.showdownComparedUserIds,
-          missingHoleCardsUserIds: showdownInputs.missingHoleCardsUserIds,
-          invalidHoleCardsUserIds: showdownInputs.invalidHoleCardsUserIds,
-          invalidSeatUserIds: showdownInputs.invalidSeatUserIds,
-          eligibleMissingFromShowdownUserIds: showdownInputs.eligibleMissingFromShowdownUserIds,
+          missingHoleCardsCount: showdownInputs.missingHoleCardsUserIds.length,
+          invalidHoleCardsCount: showdownInputs.invalidHoleCardsUserIds.length,
+          invalidSeatCount: showdownInputs.invalidSeatUserIds.length,
+          eligibleMissingFromShowdownCount: showdownInputs.eligibleMissingFromShowdownUserIds.length,
           trustedStateSource: showdownInputs.trustedStateSource
         });
       }
@@ -711,10 +709,6 @@ function buildDiagnosticSnapshot(state) {
   const seats = isCurrentHandPhase(state?.phase) && Array.isArray(state?.handSeats) && state.handSeats.length > 0
     ? state.handSeats
     : (Array.isArray(state?.seats) ? state.seats : []);
-  const seatUserIds = seats
-    .filter((seat) => typeof seat?.userId === "string" && seat.userId.trim())
-    .sort((a, b) => Number(a?.seatNo ?? 0) - Number(b?.seatNo ?? 0))
-    .map((seat) => seat.userId.trim());
   const stacks = state?.stacks && typeof state.stacks === "object" && !Array.isArray(state.stacks) ? state.stacks : {};
   const communityCards = Array.isArray(state?.community) ? state.community : [];
   return {
@@ -729,8 +723,6 @@ function buildDiagnosticSnapshot(state) {
     communityDealt: Number.isFinite(Number(state?.communityDealt)) ? Number(state.communityDealt) : communityCards.length,
     communityLen: communityCards.length,
     seatsCount: seats.length,
-    seatUserIds,
-    stacksKeys: Object.keys(stacks),
     stackCount: Object.keys(stacks).length
   };
 }
@@ -914,6 +906,7 @@ export function createAcceptedBotStepExecutor({
             {
               ...options,
               runtimeFlavor,
+              verboseLogs: verboseAutoplayLogs,
               trustedStateSource
             }
           );
