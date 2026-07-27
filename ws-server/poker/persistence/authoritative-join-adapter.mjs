@@ -139,8 +139,11 @@ function normalizeSuccess(result, { tableId, userId, requestId }) {
     if (!botUserId || !Number.isInteger(botSeatNo) || botSeatNo < 1 || !snapshotSeatKeys.has(`${botUserId}:${botSeatNo}`)) {
       return invalidAuthoritativeState("missing_seeded_bot_snapshot_seat");
     }
-    if (Number(snapshotStacks[botUserId]) !== botStack) {
+    if (!Object.prototype.hasOwnProperty.call(snapshotStacks, botUserId)) {
       return invalidAuthoritativeState("missing_seeded_bot_snapshot_stack");
+    }
+    if (Number(snapshotStacks[botUserId]) !== botStack) {
+      return invalidAuthoritativeState("seeded_bot_snapshot_stack_mismatch");
     }
   }
   return {
