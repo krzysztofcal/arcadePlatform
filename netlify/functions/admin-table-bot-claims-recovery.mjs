@@ -71,17 +71,18 @@ function parseBody(body, adminUserId) {
     throw recoveryError("invalid_confirmation");
   }
   const clientKey = parseIdempotencyKey(payload.idempotencyKey);
-  if (clientKey.length > 64) throw recoveryError("invalid_idempotency_key");
   const reason = parseOptionalText(payload.reason, { maxLength: 240 });
   if (reason.length < 3) throw recoveryError("missing_reason");
   const tableId = parseUuid(payload.tableId, "invalid_table_id");
+  const requestId = `admin-recovery:${tableId}:${clientKey}`;
+  if (requestId.length > 140) throw recoveryError("invalid_idempotency_key");
   return {
     mode,
     tableId,
     adminUserId,
     expectedStateVersion,
     expectedInputHash,
-    requestId: `admin-recovery:${tableId}:${clientKey}`,
+    requestId,
     reason,
   };
 }

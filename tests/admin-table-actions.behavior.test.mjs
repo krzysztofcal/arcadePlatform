@@ -153,6 +153,9 @@ test("bot claims recovery remains fail-closed outside exact Preview stage identi
 
 test("bot claims recovery proxies an explicitly confirmed execute request", async () => {
   let upstream = null;
+  const tableId = "00000000-0000-4000-8000-000000000111";
+  const uiGeneratedKey = `bot-claims-recovery-${tableId}-mabc1234-r4nd0m12`;
+  assert.ok(uiGeneratedKey.length > 64);
   const handler = createAdminTableBotClaimsRecoveryHandler({
     env: {
       CHIPS_ENABLED: "1",
@@ -188,10 +191,10 @@ test("bot claims recovery proxies an explicitly confirmed execute request", asyn
   });
   const response = await handler(createPostEvent({
     mode: "execute",
-    tableId: "00000000-0000-4000-8000-000000000111",
+    tableId,
     expectedStateVersion: 78,
     expectedInputHash: "a".repeat(64),
-    idempotencyKey: "client-recovery-1",
+    idempotencyKey: uiGeneratedKey,
     confirmation: "REPAIR BOT CLAIMS AND CLOSE",
     reason: "approved Preview repair",
   }));
@@ -200,6 +203,7 @@ test("bot claims recovery proxies an explicitly confirmed execute request", asyn
   assert.equal(upstream.mode, "execute");
   assert.equal(upstream.adminUserId, "00000000-0000-4000-8000-000000000010");
   assert.match(upstream.requestId, /^admin-recovery:/);
+  assert.ok(upstream.requestId.length <= 140);
 });
 
 test("bot claims recovery maps an incomplete execute outcome to HTTP conflict", async () => {
