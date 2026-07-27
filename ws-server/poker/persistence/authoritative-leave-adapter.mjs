@@ -151,7 +151,8 @@ export function createAuthoritativeLeaveExecutor({
           runPostLeaveBotAutoplay: false,
           hasConnectedHumanPresence,
           klog,
-          klogVerbose
+          klogVerbose,
+          verboseLogsEnabled: verboseBotAutoplayLogs
         });
         return normalizeValidatedResult({ result, tableId, userId, requestId, klog });
       } catch (error) {

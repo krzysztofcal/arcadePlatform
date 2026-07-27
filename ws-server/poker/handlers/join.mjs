@@ -79,7 +79,7 @@ function evaluateRestoredAuthoritativeState({ restoredTable, userId, seatNo, see
 
 import { recoverFromPersistConflict } from "../runtime/persist-conflict-recovery.mjs";
 
-export async function handleJoinCommand({ frame, ws, connState, sessionStore, tableManager, ensureTableLoadedErrorMapper, restoreTableFromPersisted, persistMutatedState, broadcastResyncRequired, broadcastStateSnapshots, broadcastTableState, sendError, sendCommandResult, sendTableState, authoritativeJoinEnabled, observeOnlyJoinEnabled, persistedBootstrapEnabled, loadAuthoritativeJoinExecutor, scheduleBotStep = () => {}, klog = () => {}, klogVerbose = () => {} }) {
+export async function handleJoinCommand({ frame, ws, connState, sessionStore, tableManager, ensureTableLoadedErrorMapper, restoreTableFromPersisted, persistMutatedState, broadcastResyncRequired, broadcastStateSnapshots, broadcastTableState, sendError, sendCommandResult, sendTableState, authoritativeJoinEnabled, observeOnlyJoinEnabled, persistedBootstrapEnabled, loadAuthoritativeJoinExecutor, scheduleBotStep = () => {}, klog = () => {}, klogVerbose = () => {}, verboseLogsEnabled = false }) {
   const tableId = frame.__resolvedTableId;
   const authoritativeJoinRequired = authoritativeJoinEnabled && !observeOnlyJoinEnabled;
   const parsedJoinIntent = parseJoinIntent(frame.payload);
@@ -106,7 +106,7 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
 
   if (authoritativeJoinRequired && persistedBootstrapEnabled) {
     const authoritativeJoinExecutor = await loadAuthoritativeJoinExecutor();
-    const authoritativeJoinStartedAtMs = Date.now();
+    const authoritativeJoinStartedAtMs = verboseLogsEnabled ? Date.now() : null;
     klogVerbose("ws_join_authoritative_start", () => ({
       tableId,
       requestId: frame.requestId ?? null

@@ -378,6 +378,7 @@ const executePostLeaveBotAutoplayLoop = async ({
   botsOnlyInHand,
   klog,
   klogVerbose,
+  verboseLogsEnabled,
 }) => {
   if (!isActionPhase(state?.phase)) {
     return { state, version, attempted: false, reason: "not_applicable" };
@@ -416,7 +417,7 @@ const executePostLeaveBotAutoplayLoop = async ({
     return { state, version, attempted: true, reason: privateStateResult.reason };
   }
 
-  const autoplayStartedAtMs = Date.now();
+  const autoplayStartedAtMs = verboseLogsEnabled ? Date.now() : null;
   klogVerbose("poker_leave_bot_autoplay_loop", () => ({
     tableId,
     requestId: requestId || null,
@@ -524,6 +525,7 @@ export async function executePokerLeave({
   nowMs = Date.now(),
   klog,
   klogVerbose = () => {},
+  verboseLogsEnabled = false,
   includeState = false,
   runPostLeaveBotAutoplay = true,
   hasConnectedHumanPresence = () => false
@@ -847,6 +849,7 @@ export async function executePokerLeave({
               botsOnlyInHand,
               klog,
               klogVerbose,
+              verboseLogsEnabled,
             });
             latestState = autoplayResult.state;
             latestVersion = autoplayResult.version;

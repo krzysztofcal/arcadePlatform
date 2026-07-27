@@ -1410,7 +1410,7 @@ async function restoreTableFromPersisted(tableId) {
   if (typeof loadPersistedTableBootstrap !== "function") {
     return { ok: false, reason: "persisted_bootstrap_disabled" };
   }
-  const restoreStartedAtMs = Date.now();
+  const restoreStartedAtMs = verbosePokerLogs ? Date.now() : null;
   klogVerbose("ws_restore_start", () => ({
     tableId,
     stage: "load",
@@ -1808,7 +1808,7 @@ function scheduleSettledRolloverRetry({ tableId, generationKey, attempt }) {
 }
 
 async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }) {
-  const rolloverStartedAtMs = Date.now();
+  const rolloverStartedAtMs = verbosePokerLogs ? Date.now() : null;
   const finishSettledRollover = (result) => {
     klogVerbose("ws_settled_rollover_outcome", () => ({
       tableId,
@@ -3328,7 +3328,8 @@ wss.on("connection", (ws) => {
           loadAuthoritativeJoinExecutor,
           scheduleBotStep,
           klog: klogSafe,
-          klogVerbose
+          klogVerbose,
+          verboseLogsEnabled: verbosePokerLogs
         })
       });
       maybeScheduleSettledRollover(frame.__resolvedTableId);
