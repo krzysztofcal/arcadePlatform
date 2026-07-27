@@ -135,11 +135,11 @@ test("rejects malformed stringified state with state_invalid", async () => {
   );
 });
 
-test("allows second human join during live post-flop hand when persisted community uses string card codes", async () => withBotsDisabled(async () => {
+test("fresh funded join preserves existing authoritative stacks when seat projections are stale", async () => withBotsDisabled(async () => {
   const seatRows = [
     { user_id: "human_1", seat_no: 1, status: "ACTIVE", stack: 98, is_bot: false, bot_profile: null, leave_after_hand: false },
-    { user_id: "bot_1", seat_no: 2, status: "ACTIVE", stack: 101, is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false },
-    { user_id: "bot_2", seat_no: 3, status: "ACTIVE", stack: 101, is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false }
+    { user_id: "bot_1", seat_no: 2, status: "ACTIVE", stack: 100, is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false },
+    { user_id: "bot_2", seat_no: 3, status: "ACTIVE", stack: 100, is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false }
   ];
   const stateRow = {
     version: 5,
@@ -152,7 +152,7 @@ test("allows second human join during live post-flop hand when persisted communi
         { userId: "bot_1", seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" },
         { userId: "bot_2", seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" }
       ],
-      stacks: { human_1: 98, bot_1: 101, bot_2: 101 },
+      stacks: { human_1: 98, bot_1: 120, bot_2: 84 },
       community: ["AS", "KS", "QS"],
       communityDealt: 3,
       dealerSeatNo: 1,
@@ -215,6 +215,10 @@ test("allows second human join during live post-flop hand when persisted communi
   assert.equal(result.snapshot.stateVersion, 6);
   assert.equal(result.snapshot.seats.length, 4);
   assert.equal(result.snapshot.stacks.human_2, 100);
+  assert.equal(result.snapshot.stacks.bot_1, 120);
+  assert.equal(result.snapshot.stacks.bot_2, 84);
+  assert.equal(stateRow.state.stacks.bot_1, 120);
+  assert.equal(stateRow.state.stacks.bot_2, 84);
   assert.deepEqual(stateRow.state.community, ["AS", "KS", "QS"]);
 }));
 
@@ -310,7 +314,7 @@ test("allows second human join when legacy persisted private cards leaked into s
   assert.deepEqual(stateRow.state.community, ["AS", "KS", "QS", "JD", "TC"]);
 }));
 
-test("returns canonical db seat number and persisted stack on rejoin", async () => {
+test("returns canonical db seat number and authoritative stack on rejoin", async () => {
   const result = await executePokerJoinAuthoritative(withLockedState({
     beginSql: async (fn) => fn({
       unsafe: async (sql, params) => {
@@ -319,7 +323,16 @@ test("returns canonical db seat number and persisted stack on rejoin", async () 
         if (sql.includes("from public.poker_seats") && sql.includes("order by seat_no asc;")) {
           return [{ user_id: "u1", seat_no: 4, status: "ACTIVE", stack: 330, is_bot: false, bot_profile: null, leave_after_hand: false }];
         }
-        if (sql.includes("select version, state from public.poker_state")) return [{ version: 1, state: { tableId: 't1', seats: [], stacks: {} } }];
+        if (sql.includes("select version, state from public.poker_state")) {
+          return [{
+            version: 1,
+            state: {
+              tableId: "t1",
+              seats: [{ userId: "u1", seatNo: 4, status: "ACTIVE" }],
+              stacks: { u1: 330 }
+            }
+          }];
+        }
         if (sql.includes("update public.poker_state set state")) return [{ version: 2 }];
         return [];
       }
@@ -342,8 +355,8 @@ test("rejoin projects stale state-only seats out of the authoritative snapshot",
     table: { id: "t-poison-rejoin", status: "OPEN", max_players: 4, stakes: '{"sb":1,"bb":2}' },
     seatRows: [
       { user_id: "human_1", seat_no: 1, status: "ACTIVE", stack: 100, is_bot: false, bot_profile: null, leave_after_hand: false },
-      { user_id: "bot_1", seat_no: 2, status: "ACTIVE", stack: 200, is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false },
-      { user_id: "bot_2", seat_no: 3, status: "ACTIVE", stack: 200, is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false }
+      { user_id: "bot_1", seat_no: 2, status: "ACTIVE", stack: 100, is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false },
+      { user_id: "bot_2", seat_no: 3, status: "ACTIVE", stack: 100, is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false }
     ],
     stateRow: {
       version: 8,
@@ -531,6 +544,10 @@ test("new join replaces stale state-only seat occupants that conflict with the i
   assert.equal(result.snapshot.stateVersion, 6);
   assert.deepEqual(result.snapshot.seats.map((seat) => seat.userId), ["human_1", "bot_1", "bot_2", "human_2"]);
   assert.equal(result.snapshot.stacks.human_2, 120);
+  assert.equal(result.snapshot.stacks.human_1, 100);
+  assert.equal(result.snapshot.stacks.bot_1, 200);
+  assert.equal(result.snapshot.stacks.bot_2, 200);
+  assert.deepEqual(store.stateRow.state.stacks, { human_1: 100, bot_1: 200, bot_2: 200, human_2: 120 });
   assert.deepEqual(store.stateRow.state.seats.map((seat) => seat.userId), ["human_1", "bot_1", "bot_2", "human_2"]);
   assert.equal(Object.prototype.hasOwnProperty.call(store.stateRow.state.stacks, "ghost_human"), false);
 });
@@ -613,7 +630,16 @@ test("authoritative join funds stack only after financial mutation succeeds", as
           if (row) row.stack = params[3];
           return [{ ok: true }];
         }
-        if (sql.includes("select version, state from public.poker_state")) return [{ version: 1, state: { tableId: 't1', seats: [], stacks: {} } }];
+        if (sql.includes("select version, state from public.poker_state")) {
+          return [{
+            version: 1,
+            state: {
+              tableId: "t1",
+              seats: [{ userId: "u-existing", seatNo: 1, status: "ACTIVE" }],
+              stacks: { "u-existing": 50 }
+            }
+          }];
+        }
         if (sql.includes("update public.poker_state set state")) { sequence.push('update_state'); return [{ version: 2 }]; }
         return [];
       }
@@ -652,7 +678,20 @@ test("authoritative auto-seat respects preferred seat and initializes stack from
           if (row) row.stack = params[3];
           return [{ ok: true }];
         }
-        if (sql.includes("select version, state from public.poker_state")) return [{ version: 1, state: { tableId: 't1', seats: [], stacks: {} } }];
+        if (sql.includes("select version, state from public.poker_state")) {
+          return [{
+            version: 1,
+            state: {
+              tableId: "t1",
+              seats: [
+                { userId: "u-seat-1", seatNo: 1, status: "ACTIVE" },
+                { userId: "u-seat-2", seatNo: 2, status: "ACTIVE" },
+                { userId: "u-seat-5", seatNo: 5, status: "ACTIVE" }
+              ],
+              stacks: { "u-seat-1": 100, "u-seat-2": 100, "u-seat-5": 100 }
+            }
+          }];
+        }
         if (sql.includes("update public.poker_state set state")) { writes.push(JSON.parse(params[1])); return [{ version: 2 }]; }
         return [];
       }
@@ -700,7 +739,19 @@ test("authoritative auto-seat retries past stale seat conflicts and uses the nex
           if (row) row.stack = params[3];
           return [{ ok: true }];
         }
-        if (sql.includes("select version, state from public.poker_state")) return [{ version: 1, state: { tableId: "t1", seats: [], stacks: {} } }];
+        if (sql.includes("select version, state from public.poker_state")) {
+          return [{
+            version: 1,
+            state: {
+              tableId: "t1",
+              seats: [
+                { userId: "u-seat-2", seatNo: 2, status: "ACTIVE" },
+                { userId: "u-seat-3", seatNo: 3, status: "ACTIVE" }
+              ],
+              stacks: { "u-seat-2": 100, "u-seat-3": 100 }
+            }
+          }];
+        }
         if (sql.includes("update public.poker_state set state")) return [{ version: 2 }];
         return [];
       }
@@ -743,7 +794,19 @@ test("authoritative auto-seat retries when insert is skipped by unique conflict 
           if (row) row.stack = params[3];
           return [{ ok: true }];
         }
-        if (sql.includes("select version, state from public.poker_state")) return [{ version: 1, state: { tableId: "t1", seats: [], stacks: {} } }];
+        if (sql.includes("select version, state from public.poker_state")) {
+          return [{
+            version: 1,
+            state: {
+              tableId: "t1",
+              seats: [
+                { userId: "u-seat-2", seatNo: 2, status: "ACTIVE" },
+                { userId: "u-seat-3", seatNo: 3, status: "ACTIVE" }
+              ],
+              stacks: { "u-seat-2": 100, "u-seat-3": 100 }
+            }
+          }];
+        }
         if (sql.includes("update public.poker_state set state")) return [{ version: 2 }];
         return [];
       }
@@ -805,7 +868,20 @@ test("authoritative auto-seat reclaims inactive seat blockers before reporting t
           if (row) row.stack = params[3];
           return [{ ok: true }];
         }
-        if (sql.includes("select version, state from public.poker_state")) return [{ version: 1, state: { tableId: "t1", seats: [], stacks: {} } }];
+        if (sql.includes("select version, state from public.poker_state")) {
+          return [{
+            version: 1,
+            state: {
+              tableId: "t1",
+              seats: [
+                { userId: "u-seat-1", seatNo: 1, status: "ACTIVE" },
+                { userId: "u-seat-2", seatNo: 2, status: "ACTIVE" },
+                { userId: "u-seat-3", seatNo: 3, status: "ACTIVE" }
+              ],
+              stacks: { "u-seat-1": 100, "u-seat-2": 100, "u-seat-3": 100 }
+            }
+          }];
+        }
         if (sql.includes("update public.poker_state set state")) return [{ version: 2 }];
         return [];
       }
@@ -826,7 +902,7 @@ test("authoritative auto-seat reclaims inactive seat blockers before reporting t
 }));
 
 
-test("rejoin with invalid persisted stack fails closed and does not write state", async () => {
+test("rejoin with missing authoritative stack fails closed and does not write state", async () => {
   const writes = { state: 0 };
   await assert.rejects(
     () => executePokerJoinAuthoritative(withLockedState({
@@ -846,7 +922,8 @@ test("rejoin with invalid persisted stack fails closed and does not write state"
       buyIn: 999,
       postTransactionFn: async () => ({ ok: true })
     })),
-    (error) => error?.code === "state_invalid"
+    (error) => error?.code === "authoritative_state_invalid"
+      && error?.validationReason === "active_seat_authoritative_stack_missing"
   );
   assert.equal(writes.state, 0);
 });
@@ -1011,7 +1088,7 @@ test("authoritative join replay does not duplicate bots and only fills missing b
   const state = {
     table: { id: "t-bots-replay", status: "OPEN", max_players: 6, stakes: '{"sb":1,"bb":2}' },
     seatRows: [
-      { user_id: "existing_bot", seat_no: 2, status: "ACTIVE", is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false, stack: 200 }
+      { user_id: "existing_bot", seat_no: 2, status: "ACTIVE", is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false, stack: 999 }
     ],
     stateRow: {
       version: 4,
@@ -1083,6 +1160,10 @@ test("authoritative join replay does not duplicate bots and only fills missing b
   assert.equal(first.seededBots.length, 1);
   assert.equal(first.snapshot.seats.filter((seat) => seat.isBot).length, 2);
   assert.equal(first.snapshot.stateVersion, 5);
+  assert.equal(first.snapshot.stacks.existing_bot, 200);
+  assert.equal(state.stateRow.state.stacks.existing_bot, 200);
+  assert.equal(first.snapshot.stacks[first.seededBots[0].userId], first.seededBots[0].stack);
+  assert.equal(state.stateRow.state.stacks[first.seededBots[0].userId], first.seededBots[0].stack);
 
   const second = await runJoin("join-replay-2");
   assert.equal(second.rejoin, true);
