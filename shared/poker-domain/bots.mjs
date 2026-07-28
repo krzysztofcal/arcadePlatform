@@ -206,7 +206,7 @@ async function loadSeatRows(tx, tableId) {
   return Array.isArray(rows) ? rows : [];
 }
 
-async function seedBotsForJoin({ tx, tableId, maxPlayers, tableStakes, cfg, humanUserId, postTransaction, klog = () => {}, random = Math.random }) {
+async function seedBotsForJoin({ tx, tableId, maxPlayers, tableStakes, cfg, humanUserId, postTransaction, targetBotCount = null, klog = () => {}, random = Math.random }) {
   if (!cfg?.enabled || typeof postTransaction !== "function") return [];
   const stakesParsed = parseStakes(tableStakes);
   if (!stakesParsed.ok) {
@@ -219,7 +219,9 @@ async function seedBotsForJoin({ tx, tableId, maxPlayers, tableStakes, cfg, huma
   const humanCount = activeSeats.filter((row) => !row?.is_bot).length;
   if (!shouldSeedBotsOnJoin({ humanCount })) return [];
 
-  const targetBots = computeTargetBotCount({ maxPlayers, humanCount, minBots: cfg.minPerTable, maxBots: cfg.maxPerTable, random });
+  const targetBots = Number.isInteger(targetBotCount)
+    ? targetBotCount
+    : computeTargetBotCount({ maxPlayers, humanCount, minBots: cfg.minPerTable, maxBots: cfg.maxPerTable, random });
   if (!Number.isInteger(targetBots) || targetBots <= 0) return [];
 
   const existingBotCount = activeSeats.filter((row) => row?.is_bot).length;
