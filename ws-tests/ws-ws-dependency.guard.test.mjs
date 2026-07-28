@@ -230,13 +230,21 @@ test("ws authoritative leave adapter default loader resolves in artifact-shaped 
   try {
     const stagedAdapter = path.join(stageDir, "poker/persistence/authoritative-leave-adapter.mjs");
     const stagedBootstrap = path.join(stageDir, "poker/bootstrap/persisted-bootstrap-db.mjs");
+    const stagedLogPolicy = path.join(stageDir, "poker/observability/poker-log-policy.mjs");
+    const stagedLogRuntimeControl = path.join(stageDir, "poker/observability/poker-log-runtime-control.mjs");
     const stagedLeave = path.join(stageDir, "shared/poker-domain/leave.mjs");
 
     await fsp.mkdir(path.dirname(stagedAdapter), { recursive: true });
     await fsp.mkdir(path.dirname(stagedBootstrap), { recursive: true });
+    await fsp.mkdir(path.dirname(stagedLogPolicy), { recursive: true });
     await fsp.mkdir(path.dirname(stagedLeave), { recursive: true });
 
     await fsp.copyFile(srcAdapter, stagedAdapter);
+    await fsp.copyFile("ws-server/poker/observability/poker-log-policy.mjs", stagedLogPolicy);
+    await fsp.copyFile(
+      "ws-server/poker/observability/poker-log-runtime-control.mjs",
+      stagedLogRuntimeControl
+    );
     await fsp.writeFile(stagedBootstrap, "export async function beginSqlWs(fn) { return fn({}); }\n", "utf8");
     await fsp.writeFile(
       stagedLeave,
