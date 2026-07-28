@@ -1,4 +1,5 @@
 import postgres from "postgres";
+import { serializePokerLogPayload } from "../observability/poker-log-policy.mjs";
 
 const SUPABASE_DB_URL = process.env.SUPABASE_DB_URL || "";
 const DB_MAX_RAW = Number(process.env.SUPABASE_DB_MAX || process.env.POKER_DB_MAX || 5);
@@ -8,8 +9,7 @@ const POSTGRES_OPTIONS = { max: DB_MAX, idle_timeout: 30, connect_timeout: 10, p
 const sql = SUPABASE_DB_URL ? postgres(SUPABASE_DB_URL, POSTGRES_OPTIONS) : null;
 
 function klog(kind, data) {
-  const payload = data && typeof data === "object" ? ` ${JSON.stringify(data)}` : "";
-  process.stdout.write(`[klog] ${kind}${payload}\n`);
+  process.stdout.write(`[klog] ${kind} ${serializePokerLogPayload(kind, data)}\n`);
 }
 
 async function beginSql(fn) {

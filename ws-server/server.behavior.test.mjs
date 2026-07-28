@@ -7,6 +7,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
+import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 import { makeBotUserId } from "../shared/poker-domain/bots.mjs";
 import { dealHoleCards, deriveDeck, toCardCodes } from "./poker/shared/poker-primitives.mjs";
@@ -18,6 +19,14 @@ import {
   decideTransportWatchdogAction,
   markTransportPingSent
 } from "./poker/runtime/transport-watchdog.mjs";
+import {
+  buildPokerLogPayload,
+  listClassifiedPokerLogEvents,
+  POKER_LOG_CATEGORIES,
+  POKER_LOG_SEVERITIES,
+  resolvePokerLogPolicy,
+  serializePokerLogPayload
+} from "./poker/observability/poker-log-policy.mjs";
 import { buildBootstrappedPokerState } from "./poker/engine/poker-engine.mjs";
 import { loadBotClaimsRecoveryExecutorIfInactive } from "./poker/persistence/bot-claims-recovery-adapter.mjs";
 import { createTableManager } from "./poker/table/table-manager.mjs";
@@ -26,6 +35,169 @@ const FIXED_RANDOM_BOT_AUTOPLAY_ADAPTER_URL = new URL(
   "./poker/runtime/accepted-bot-autoplay-adapter.fixed-random.fixture.mjs",
   import.meta.url
 ).href;
+
+async function listProductionModuleFiles(rootPath) {
+  const stat = await fs.stat(rootPath);
+  if (stat.isFile()) return [rootPath];
+  const files = [];
+  for (const entry of await fs.readdir(rootPath, { withFileTypes: true })) {
+    const entryPath = path.join(rootPath, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === "fixtures") continue;
+      files.push(...await listProductionModuleFiles(entryPath));
+      continue;
+    }
+    if (
+      entry.isFile()
+      && entry.name.endsWith(".mjs")
+      && !entry.name.endsWith(".test.mjs")
+      && !entry.name.endsWith(".fixture.mjs")
+    ) {
+      files.push(entryPath);
+    }
+  }
+  return files;
+}
+
+test("poker log policy classifies every production WS poker event", async () => {
+  const wsRoot = path.dirname(fileURLToPath(import.meta.url));
+  const sourceRoots = [
+    path.join(wsRoot, "server.mjs"),
+    path.join(wsRoot, "poker"),
+    path.join(wsRoot, "..", "shared", "poker-domain")
+  ];
+  const sourceFiles = (await Promise.all(sourceRoots.map(listProductionModuleFiles))).flat();
+  const literalEvents = new Set();
+  const dynamicPrefixes = new Set();
+  const dynamicSuffixes = new Set();
+  let hasAutoplayFallbackChoice = false;
+
+  for (const sourceFile of sourceFiles) {
+    const source = await fs.readFile(sourceFile, "utf8");
+    const literalPattern = /\b(?:klog|klogSafe|klogVerbose|klogBotAutoplayVerbose|logVerbose)\(\s*["']((?:ws|poker|shared|chips)_[a-z0-9_]+)["']/g;
+    let match;
+    while ((match = literalPattern.exec(source))) {
+      literalEvents.add(match[1]);
+    }
+    const prefixPattern = /logPrefix:\s*"([a-z0-9_]+)"/g;
+    while ((match = prefixPattern.exec(source))) {
+      dynamicPrefixes.add(match[1]);
+    }
+    const suffixPattern = /\$\{logPrefix\}_([a-z0-9_]+)/g;
+    while ((match = suffixPattern.exec(source))) {
+      dynamicSuffixes.add(match[1]);
+    }
+    if (
+      source.includes('"ws_bot_autoplay_fallback_action"')
+      && source.includes('"ws_bot_autoplay_no_fallback_action"')
+    ) {
+      hasAutoplayFallbackChoice = true;
+      literalEvents.add("ws_bot_autoplay_fallback_action");
+      literalEvents.add("ws_bot_autoplay_no_fallback_action");
+    }
+  }
+
+  const missing = [...literalEvents]
+    .filter((eventName) => !resolvePokerLogPolicy(eventName, { ok: true, changed: true }).classified)
+    .sort();
+  assert.deepEqual(missing, []);
+  assert.equal(hasAutoplayFallbackChoice, true);
+
+  for (const prefix of dynamicPrefixes) {
+    for (const suffix of dynamicSuffixes) {
+      assert.equal(
+        resolvePokerLogPolicy(`${prefix}_${suffix}`, { ok: true, changed: true }).classified,
+        true,
+        `dynamic event ${prefix}_${suffix} must be classified`
+      );
+    }
+  }
+
+  const catalogWithoutConditionalEvents = new Set(listClassifiedPokerLogEvents());
+  const sourceWithoutConditionalEvents = new Set(literalEvents);
+  sourceWithoutConditionalEvents.delete("ws_table_janitor_result");
+  assert.deepEqual(
+    [...catalogWithoutConditionalEvents].filter((eventName) => !sourceWithoutConditionalEvents.has(eventName)),
+    []
+  );
+});
+
+test("poker log policy owns envelope metadata and preserves compatibility for unknown events", () => {
+  assert.deepEqual(POKER_LOG_SEVERITIES, ["DEBUG", "INFO", "WARN", "ERROR"]);
+  assert.equal(new Set(POKER_LOG_CATEGORIES).size, POKER_LOG_CATEGORIES.length);
+
+  const artifactPayload = buildPokerLogPayload("ws_artifact_start", {
+    releaseSha: "abc123",
+    severity: "ERROR",
+    category: "ledger"
+  });
+  assert.deepEqual(artifactPayload, {
+    releaseSha: "abc123",
+    severity: "INFO",
+    category: "deployment"
+  });
+
+  assert.deepEqual(
+    resolvePokerLogPolicy("ws_table_janitor_result", { ok: true, changed: false, status: "seat_missing" }),
+    { severity: "DEBUG", category: "janitor", classified: true }
+  );
+  assert.deepEqual(
+    resolvePokerLogPolicy("ws_table_janitor_result", { ok: false, changed: false }),
+    { severity: "ERROR", category: "janitor", classified: true }
+  );
+  assert.deepEqual(
+    resolvePokerLogPolicy("future_legacy_event"),
+    { severity: "UNSPECIFIED", category: null, classified: false }
+  );
+  assert.deepEqual(
+    buildPokerLogPayload("future_legacy_event", { ok: true }),
+    { ok: true, severity: "UNSPECIFIED", category: null }
+  );
+});
+
+test("poker log serialization failures use a safe classified fallback", () => {
+  const circularPayload = {};
+  circularPayload.self = circularPayload;
+  assert.deepEqual(
+    JSON.parse(serializePokerLogPayload("ws_state_persist_failed", circularPayload)),
+    {
+      serializationError: true,
+      severity: "ERROR",
+      category: "persistence"
+    }
+  );
+
+  const throwingPayload = {};
+  Object.defineProperty(throwingPayload, "value", {
+    enumerable: true,
+    get() {
+      throw new Error("getter_failed");
+    }
+  });
+  assert.deepEqual(
+    JSON.parse(serializePokerLogPayload("ws_restore_failed", throwingPayload)),
+    {
+      serializationError: true,
+      severity: "ERROR",
+      category: "recovery"
+    }
+  );
+
+  const circularJanitorPayload = {
+    ok: true,
+    changed: false,
+    status: "seat_missing"
+  };
+  circularJanitorPayload.self = circularJanitorPayload;
+  assert.deepEqual(
+    JSON.parse(serializePokerLogPayload("ws_table_janitor_result", circularJanitorPayload)),
+    {
+      serializationError: true,
+      severity: "DEBUG",
+      category: "janitor"
+    }
+  );
+});
 
 test("bot claims recovery stops when a socket appears while the executor is loading", async () => {
   let activePresence = false;
@@ -1674,6 +1846,8 @@ test("server logs deploy identity at artifact startup", async () => {
     assert.match(joined, /"releaseSha":"test-release-sha"/);
     assert.match(joined, /"deployRef":"agent\/test-release-ref"/);
     assert.match(joined, /"environment":"preview"/);
+    assert.match(joined, /"severity":"INFO"/);
+    assert.match(joined, /"category":"deployment"/);
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
