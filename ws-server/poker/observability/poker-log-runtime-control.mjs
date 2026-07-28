@@ -138,18 +138,15 @@ export function createPokerLogRuntimeControl({
     }
   }
 
-  function mayBuildDebugPayload(eventName) {
+  function mayBuildDebugPayload(eventName, { tableId = null } = {}) {
     const policy = eventName === "ws_table_janitor_result"
       ? { severity: "DEBUG", category: "janitor", classified: true }
       : resolvePokerLogPolicy(eventName);
     if (policy.severity !== "DEBUG") return shouldEmit(eventName);
-    pruneExpired();
-    return defaultLevel === "DEBUG"
-      || globalOverride !== null
-      || categoryOverrides.has(policy.category)
-      || tableOverrides.size > 0
-      || (legacyAutoplayDebug && policy.category === "autoplay")
-      || (legacyPokerDebug && policy.category !== "autoplay");
+    return debugEnabled({
+      category: policy.category,
+      tableId: normalizeTableId(tableId)
+    });
   }
 
   function enable({ scope, category = null, tableId = null, ttlMs, adminUserId = null }) {

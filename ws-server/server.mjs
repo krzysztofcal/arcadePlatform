@@ -493,13 +493,13 @@ function klogSafe(kind, data) {
   }
 }
 
-function klogVerbose(kind, createData) {
-  if (!pokerLogRuntimeControl.mayBuildDebugPayload(kind)) return;
+function klogVerbose(kind, createData, { tableId = null } = {}) {
+  if (!pokerLogRuntimeControl.mayBuildDebugPayload(kind, { tableId })) return;
   klogSafe(kind, createData());
 }
 
-function klogBotAutoplayVerbose(kind, createData) {
-  if (!pokerLogRuntimeControl.mayBuildDebugPayload(kind)) return;
+function klogBotAutoplayVerbose(kind, createData, { tableId = null } = {}) {
+  if (!pokerLogRuntimeControl.mayBuildDebugPayload(kind, { tableId })) return;
   klogSafe(kind, createData());
 }
 
@@ -761,7 +761,7 @@ function scheduleObservedBotTurn({ tableId, trigger, requestId = null, frameTs =
       tableId,
       trigger: trigger || null,
       scheduleKey
-    }));
+    }), { tableId });
     return true;
   } catch (error) {
     scheduledObservedBotTurnKeys.delete(tableId);
@@ -1390,8 +1390,8 @@ async function persistMutatedState({
   const privateStateForHoleCards = privateStateForHoleCardsOverride || (typeof tableManager.privatePokerStateForAudit === "function"
     ? tableManager.privatePokerStateForAudit(tableId)
     : nextState);
-  const persistStartedAtMs = pokerLogRuntimeControl.mayBuildDebugPayload("ws_state_persist_start") ? Date.now() : 0;
-  klogVerbose("ws_state_persist_start", () => ({ tableId, expectedVersion, mutationKind }));
+  const persistStartedAtMs = pokerLogRuntimeControl.mayBuildDebugPayload("ws_state_persist_start", { tableId }) ? Date.now() : 0;
+  klogVerbose("ws_state_persist_start", () => ({ tableId, expectedVersion, mutationKind }), { tableId });
   const persisted = await persistedStateWriter.writeMutation({
     tableId,
     expectedVersion,
@@ -1416,7 +1416,7 @@ async function persistMutatedState({
     mutationKind,
     newVersion: persisted.newVersion ?? null,
     durationMs: Math.max(0, Date.now() - persistStartedAtMs)
-  }));
+  }), { tableId });
   if (!deferRuntimeVersionUpdate && persisted.outcome !== "durable_replay") {
     tableManager.setPersistedStateVersion(tableId, persisted.newVersion);
   }
@@ -1427,13 +1427,13 @@ async function restoreTableFromPersisted(tableId) {
   if (typeof loadPersistedTableBootstrap !== "function") {
     return { ok: false, reason: "persisted_bootstrap_disabled" };
   }
-  const restoreStartedAtMs = pokerLogRuntimeControl.mayBuildDebugPayload("ws_restore_start") ? Date.now() : null;
+  const restoreStartedAtMs = pokerLogRuntimeControl.mayBuildDebugPayload("ws_restore_start", { tableId }) ? Date.now() : null;
   klogVerbose("ws_restore_start", () => ({
     tableId,
     stage: "load",
     ok: null,
     durationMs: 0
-  }));
+  }), { tableId });
   try {
     const restored = await loadPersistedTableBootstrap({ tableId });
     if (!restored?.ok || !restored?.table) {
@@ -1449,7 +1449,7 @@ async function restoreTableFromPersisted(tableId) {
         ok: false,
         reason,
         durationMs: Math.max(0, Date.now() - restoreStartedAtMs)
-      }));
+      }), { tableId });
       return { ok: false, reason };
     }
     persistedStateWriter?.forgetHoleCardAcknowledgement(tableId);
@@ -1467,7 +1467,7 @@ async function restoreTableFromPersisted(tableId) {
         ok: false,
         reason,
         durationMs: Math.max(0, Date.now() - restoreStartedAtMs)
-      }));
+      }), { tableId });
       return applied;
     }
     maybeScheduleSettledRollover(tableId);
@@ -1476,7 +1476,7 @@ async function restoreTableFromPersisted(tableId) {
       stage: "apply",
       ok: true,
       durationMs: Math.max(0, Date.now() - restoreStartedAtMs)
-    }));
+    }), { tableId });
     return {
       ...applied,
       restoredTable: restored.table
@@ -1489,7 +1489,7 @@ async function restoreTableFromPersisted(tableId) {
       ok: false,
       reason: "restore_error",
       durationMs: Math.max(0, Date.now() - restoreStartedAtMs)
-    }));
+    }), { tableId });
     return { ok: false, reason: "restore_error" };
   }
 }
@@ -1792,7 +1792,7 @@ function scheduleSettledRolloverTimer({ tableId, generationKey, dueAt, attempt =
     delayMs,
     attempt,
     mode
-  }));
+  }), { tableId });
   const timer = setTimeout(() => {
     settledRolloverTimerByTableId.delete(tableId);
     void enqueueTableCommand({
@@ -1825,7 +1825,7 @@ function scheduleSettledRolloverRetry({ tableId, generationKey, attempt }) {
 }
 
 async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }) {
-  const rolloverStartedAtMs = pokerLogRuntimeControl.mayBuildDebugPayload("ws_settled_rollover_start") ? Date.now() : null;
+  const rolloverStartedAtMs = pokerLogRuntimeControl.mayBuildDebugPayload("ws_settled_rollover_start", { tableId }) ? Date.now() : null;
   const finishSettledRollover = (result) => {
     klogVerbose("ws_settled_rollover_outcome", () => ({
       tableId,
@@ -1835,14 +1835,14 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
       closed: result?.closed === true,
       reason: result?.reason || result?.code || result?.status || (result?.changed === true ? "changed" : "unchanged"),
       durationMs: Math.max(0, Date.now() - rolloverStartedAtMs)
-    }));
+    }), { tableId });
     return result;
   };
   let pokerState = tableManager.persistedPokerState(tableId);
   if (settledRolloverGenerationKey(tableId, pokerState) !== generationKey) {
     return finishSettledRollover({ ok: true, changed: false, reason: "settled_generation_changed" });
   }
-  klogVerbose("ws_settled_rollover_start", () => ({ tableId, attempt }));
+  klogVerbose("ws_settled_rollover_start", () => ({ tableId, attempt }), { tableId });
   if (!isGuestTableId(tableId) && hasSupabaseDbUrl) {
     const finalizeDeferredLeaves = await loadDeferredLeaveFinalizer();
     const finalized = await finalizeDeferredLeaves({ tableId });
@@ -3546,7 +3546,9 @@ wss.on("connection", (ws) => {
           scheduleBotStep,
           klog: klogSafe,
           klogVerbose,
-          verboseLogsEnabled: pokerLogRuntimeControl.mayBuildDebugPayload("ws_join_authoritative_start")
+          verboseLogsEnabled: pokerLogRuntimeControl.mayBuildDebugPayload("ws_join_authoritative_start", {
+            tableId: frame.__resolvedTableId
+          })
         })
       });
       maybeScheduleSettledRollover(frame.__resolvedTableId);

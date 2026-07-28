@@ -223,13 +223,31 @@ test("poker log runtime control isolates DEBUG scopes, preserves ERROR, and expi
   assert.equal(control.mayBuildDebugPayload("ws_state_persist_start"), false);
   assert.equal(control.mayBuildDebugPayload("ws_table_janitor_result"), false);
   control.enable({ scope: "table", tableId: tableA, ttlMs: 60_000 });
-  assert.equal(control.mayBuildDebugPayload("ws_state_persist_start"), true);
+  let tableAFactoryCalls = 0;
+  let tableBFactoryCalls = 0;
+  const buildDebugPayload = (tableId, factory) => {
+    if (control.mayBuildDebugPayload("ws_state_persist_start", { tableId })) factory();
+  };
+  buildDebugPayload(tableB, () => {
+    tableBFactoryCalls += 1;
+  });
+  buildDebugPayload(tableA, () => {
+    tableAFactoryCalls += 1;
+  });
+  assert.equal(tableBFactoryCalls, 0);
+  assert.equal(tableAFactoryCalls, 1);
+  assert.equal(control.mayBuildDebugPayload("ws_state_persist_start"), false);
   assert.equal(control.shouldEmit("ws_state_persist_start", { tableId: tableA }), true);
   assert.equal(control.shouldEmit("ws_state_persist_start", { tableId: tableB }), false);
   control.enable({ scope: "category", category: "autoplay", ttlMs: 120_000 });
+  assert.equal(
+    control.mayBuildDebugPayload("ws_bot_autoplay_loop_start", { tableId: tableB }),
+    true
+  );
   assert.equal(control.shouldEmit("ws_bot_autoplay_loop_start", { tableId: tableB }), true);
   assert.equal(control.shouldEmit("ws_restore_start", { tableId: tableB }), false);
   control.enable({ scope: "global", ttlMs: 180_000 });
+  assert.equal(control.mayBuildDebugPayload("ws_restore_start", { tableId: tableB }), true);
   assert.equal(control.shouldEmit("ws_restore_start", { tableId: tableB }), true);
   control.disable({ scope: "global" });
   assert.equal(control.shouldEmit("ws_restore_start", { tableId: tableB }), false);

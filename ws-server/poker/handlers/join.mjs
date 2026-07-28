@@ -118,7 +118,7 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
     klogVerbose("ws_join_authoritative_start", () => ({
       tableId,
       requestId: frame.requestId ?? null
-    }));
+    }), { tableId });
     const authoritativeJoin = await authoritativeJoinExecutor({
       tableId,
       userId: connState.session.userId,
@@ -142,7 +142,7 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
         ok: false,
         reason,
         durationMs: Math.max(0, Date.now() - authoritativeJoinStartedAtMs)
-      }));
+      }), { tableId });
       sendCommandResult(ws, connState, {
         requestId: frame.requestId ?? null,
         tableId,
@@ -158,7 +158,7 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
       rejoin: authoritativeJoin?.rejoin === true,
       stateVersion: Number(authoritativeJoin?.snapshot?.stateVersion) || null,
       durationMs: Math.max(0, Date.now() - authoritativeJoinStartedAtMs)
-    }));
+    }), { tableId });
     authoritativeJoinResult = authoritativeJoin;
   }
 

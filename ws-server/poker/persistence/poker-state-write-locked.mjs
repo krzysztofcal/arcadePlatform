@@ -3,7 +3,7 @@ import { pokerLogRuntimeControl } from "../observability/poker-log-runtime-contr
 
 export async function updatePokerStateLocked(tx, { tableId, nextState }) {
   const klog = typeof tx?.klog === "function" ? tx.klog : () => {};
-  const verboseLogs = pokerLogRuntimeControl.mayBuildDebugPayload("ws_state_update_start");
+  const verboseLogs = pokerLogRuntimeControl.mayBuildDebugPayload("ws_state_update_start", { tableId });
   if (!tableId) return { ok: false, reason: "invalid" };
   if (!nextState || typeof nextState !== "object" || Array.isArray(nextState)) {
     klog("ws_state_update_invalid", { reason: "invalid_state_payload" });
