@@ -5,6 +5,7 @@ const { createAdminMeHandler } = await import("../netlify/functions/admin-me.mjs
 const { createAdminUserBalanceHandler } = await import("../netlify/functions/admin-user-balance.mjs");
 const { createAdminUserLedgerHandler } = await import("../netlify/functions/admin-user-ledger.mjs");
 const { createAdminWsPreviewBotReactionHandler, parseBody: parseBotReactionBody } = await import("../netlify/functions/admin-ws-preview-bot-reaction.mjs");
+const { createAdminPokerLogControlHandler, parseBody: parsePokerLogControlBody } = await import("../netlify/functions/admin-poker-log-control.mjs");
 
 function event(method, queryStringParameters = {}, body = null) {
   return {
@@ -21,6 +22,21 @@ function previewStageIdentity() {
     databaseTarget: "stage",
     stageProjectRefMatches: true,
     databaseMatchesSupabaseProjectRef: true,
+    serviceRoleStageProjectRefMatches: true,
+  };
+}
+
+function pokerLogSnapshot() {
+  return {
+    defaultLevel: "INFO",
+    serverNow: "2026-07-28T13:00:00.000Z",
+    ttl: {
+      minMs: 60000,
+      defaultMs: 900000,
+      maxMs: 3600000,
+      presetsMs: [900000, 1800000, 3600000],
+    },
+    overrides: [],
   };
 }
 
@@ -188,6 +204,118 @@ test("admin WS Preview bot reaction endpoint stays unavailable during CH mainten
     assert.deepEqual(JSON.parse(response.body), { error: "not_found" });
   }
   assert.equal(authCalls, 0);
+  assert.equal(fetchCalls, 0);
+});
+
+test("admin poker log control binds Preview and Production contexts to exact WS origins", async () => {
+  const seen = [];
+  const baseDeps = {
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    fetchImpl: async (url, options) => {
+      seen.push({ url, options });
+      return { ok: true, status: 200, json: async () => pokerLogSnapshot() };
+    },
+  };
+  const previewHandler = createAdminPokerLogControlHandler({
+    ...baseDeps,
+    env: {
+      CHIPS_ENABLED: "1",
+      POKER_WS_INTERNAL_BASE_URL: "https://ws-preview.kcswh.pl",
+      POKER_WS_INTERNAL_TOKEN: "preview-token",
+    },
+    buildStageIdentity: previewStageIdentity,
+  });
+  const previewResponse = await previewHandler(event("GET"));
+  assert.equal(previewResponse.statusCode, 200);
+  assert.equal(JSON.parse(previewResponse.body).environment, "preview");
+  assert.equal(seen[0].url, "https://ws-preview.kcswh.pl/internal/admin/poker-log-control");
+
+  const productionHandler = createAdminPokerLogControlHandler({
+    ...baseDeps,
+    env: {
+      CHIPS_ENABLED: "1",
+      POKER_WS_INTERNAL_BASE_URL: "https://ws.kcswh.pl",
+      POKER_WS_INTERNAL_TOKEN: "production-token",
+    },
+    buildStageIdentity: () => ({ environmentContext: "production", databaseTarget: "production" }),
+  });
+  const productionResponse = await productionHandler(event("GET"));
+  assert.equal(productionResponse.statusCode, 200);
+  assert.equal(JSON.parse(productionResponse.body).environment, "production");
+  assert.equal(seen[1].url, "https://ws.kcswh.pl/internal/admin/poker-log-control");
+  assert.equal(productionResponse.headers["cache-control"], "no-store");
+});
+
+test("admin poker log control forwards exact allowlisted scope with trusted admin identity", async () => {
+  let forwarded = null;
+  const handler = createAdminPokerLogControlHandler({
+    env: {
+      CHIPS_ENABLED: "1",
+      POKER_WS_INTERNAL_BASE_URL: "https://ws-preview.kcswh.pl",
+      POKER_WS_INTERNAL_TOKEN: "preview-token",
+    },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    buildStageIdentity: previewStageIdentity,
+    fetchImpl: async (_url, options) => {
+      forwarded = JSON.parse(options.body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ...pokerLogSnapshot(),
+          overrides: [{
+            scope: "table",
+            tableId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            expiresAt: "2026-07-28T13:15:00.000Z",
+          }],
+        }),
+      };
+    },
+  });
+  const payload = {
+    operation: "enable",
+    scope: "table",
+    category: null,
+    tableId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    ttlMs: 900000,
+  };
+  const response = await handler(event("POST", {}, JSON.stringify(payload)));
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(forwarded, {
+    ...payload,
+    adminUserId: "00000000-0000-4000-8000-000000000010",
+  });
+});
+
+test("admin poker log control rejects unknown fields, cross-environment origins, and invalid categories", async () => {
+  assert.throws(
+    () => parsePokerLogControlBody(JSON.stringify({
+      operation: "enable", scope: "global", category: null, tableId: null, ttlMs: 900000, wildcard: "*",
+    })),
+    { code: "invalid_request" },
+  );
+  assert.throws(
+    () => parsePokerLogControlBody(JSON.stringify({
+      operation: "enable", scope: "category", category: "anything", tableId: null, ttlMs: 900000,
+    })),
+    { code: "invalid_request" },
+  );
+  let fetchCalls = 0;
+  const handler = createAdminPokerLogControlHandler({
+    env: {
+      CHIPS_ENABLED: "1",
+      POKER_WS_INTERNAL_BASE_URL: "https://ws.kcswh.pl",
+      POKER_WS_INTERNAL_TOKEN: "wrong-context-token",
+    },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    buildStageIdentity: previewStageIdentity,
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      throw new Error("unexpected_fetch");
+    },
+  });
+  const response = await handler(event("GET"));
+  assert.equal(response.statusCode, 503);
   assert.equal(fetchCalls, 0);
 });
 

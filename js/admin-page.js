@@ -51,6 +51,18 @@
       botReactionError: null,
       botReactionMessage: "",
       botReactionPending: false,
+      pokerLogControl: null,
+      pokerLogControlError: null,
+      pokerLogControlMessage: "",
+      pokerLogControlPending: false,
+      pokerLogDisablePendingIndex: null,
+      pokerLogDisableErrorIndex: null,
+      pokerLogTables: [],
+      pokerLogTablesError: null,
+      pokerLogClockBaseMs: null,
+      pokerLogClockReceivedAtMs: null,
+      pokerLogExpiryRefreshDone: false,
+      pokerLogCountdownTimer: null,
       loaded: false,
     },
     pokerAudit: {
@@ -136,6 +148,25 @@
     nodes.opsBotReactionApply = doc.getElementById("adminOpsBotReactionApply");
     nodes.opsBotReactionDefault = doc.getElementById("adminOpsBotReactionDefault");
     nodes.opsBotReactionStatus = doc.getElementById("adminOpsBotReactionStatus");
+    nodes.opsPokerLogSummary = doc.getElementById("adminOpsPokerLogSummary");
+    nodes.opsPokerLogForm = doc.getElementById("adminOpsPokerLogForm");
+    nodes.opsPokerLogScope = doc.getElementById("adminOpsPokerLogScope");
+    nodes.opsPokerLogCategoryField = doc.getElementById("adminOpsPokerLogCategoryField");
+    nodes.opsPokerLogCategory = doc.getElementById("adminOpsPokerLogCategory");
+    nodes.opsPokerLogTableFields = doc.getElementById("adminOpsPokerLogTableFields");
+    nodes.opsPokerLogTable = doc.getElementById("adminOpsPokerLogTable");
+    nodes.opsPokerLogManualField = doc.getElementById("adminOpsPokerLogManualField");
+    nodes.opsPokerLogManualTable = doc.getElementById("adminOpsPokerLogManualTable");
+    nodes.opsPokerLogTablesRefresh = doc.getElementById("adminOpsPokerLogTablesRefresh");
+    nodes.opsPokerLogTablesStatus = doc.getElementById("adminOpsPokerLogTablesStatus");
+    nodes.opsPokerLogTtlPresets = doc.getElementById("adminOpsPokerLogTtlPresets");
+    nodes.opsPokerLogCustomTtlField = doc.getElementById("adminOpsPokerLogCustomTtlField");
+    nodes.opsPokerLogCustomTtl = doc.getElementById("adminOpsPokerLogCustomTtl");
+    nodes.opsPokerLogTtlHint = doc.getElementById("adminOpsPokerLogTtlHint");
+    nodes.opsPokerLogEnable = doc.getElementById("adminOpsPokerLogEnable");
+    nodes.opsPokerLogStatus = doc.getElementById("adminOpsPokerLogStatus");
+    nodes.opsPokerLogOverrides = doc.getElementById("adminOpsPokerLogOverrides");
+    nodes.opsPokerLogRefresh = doc.getElementById("adminOpsPokerLogRefresh");
     nodes.opsRefresh = doc.getElementById("adminOpsRefresh");
     nodes.opsRunReconciler = doc.getElementById("adminOpsRunReconciler");
     nodes.opsRunStaleSweep = doc.getElementById("adminOpsRunStaleSweep");
@@ -1127,6 +1158,7 @@
     var summary = state.ops.summary;
     var identity = state.ops.identity;
     renderBotReactionControl();
+    renderPokerLogControl();
     if (!summary && !identity){
       if (nodes.opsStats) nodes.opsStats.innerHTML = "";
       if (nodes.opsIdentity) nodes.opsIdentity.innerHTML = "";
@@ -1306,6 +1338,154 @@
     }
   }
 
+  function pokerLogNowMs(){
+    if (!Number.isFinite(state.ops.pokerLogClockBaseMs) || !Number.isFinite(state.ops.pokerLogClockReceivedAtMs)){
+      return Date.now();
+    }
+    return state.ops.pokerLogClockBaseMs + Math.max(0, Date.now() - state.ops.pokerLogClockReceivedAtMs);
+  }
+
+  function formatRemaining(expiresAt){
+    var remainingMs = Math.max(0, Date.parse(expiresAt) - pokerLogNowMs());
+    var seconds = Math.ceil(remainingMs / 1000);
+    var minutes = Math.floor(seconds / 60);
+    var rest = seconds % 60;
+    return minutes > 0 ? String(minutes) + "m " + String(rest) + "s remaining" : String(rest) + "s remaining";
+  }
+
+  function shortTableId(tableId){
+    var value = String(tableId || "");
+    return value.length > 8 ? value.slice(0, 8) + "…" : value;
+  }
+
+  function setPokerLogSnapshot(snapshot){
+    state.ops.pokerLogControl = snapshot || null;
+    state.ops.pokerLogClockBaseMs = snapshot ? Date.parse(snapshot.serverNow) : null;
+    state.ops.pokerLogClockReceivedAtMs = snapshot ? Date.now() : null;
+    state.ops.pokerLogExpiryRefreshDone = false;
+  }
+
+  function syncPokerLogCountdownTimer(){
+    var shouldRun = state.activeTab === "ops"
+      && state.ops.pokerLogControl
+      && Array.isArray(state.ops.pokerLogControl.overrides)
+      && state.ops.pokerLogControl.overrides.length > 0;
+    if (!shouldRun && state.ops.pokerLogCountdownTimer){
+      window.clearInterval(state.ops.pokerLogCountdownTimer);
+      state.ops.pokerLogCountdownTimer = null;
+    }
+    if (shouldRun && !state.ops.pokerLogCountdownTimer){
+      state.ops.pokerLogCountdownTimer = window.setInterval(function(){
+        var overrides = state.ops.pokerLogControl && state.ops.pokerLogControl.overrides || [];
+        var expired = overrides.some(function(item){ return Date.parse(item.expiresAt) <= pokerLogNowMs(); });
+        renderPokerLogOverrides();
+        if (expired && !state.ops.pokerLogExpiryRefreshDone){
+          state.ops.pokerLogExpiryRefreshDone = true;
+          loadPokerLogControl(true);
+        }
+      }, 1000);
+    }
+  }
+
+  function renderPokerLogOverrides(){
+    if (!nodes.opsPokerLogOverrides) return;
+    var snapshot = state.ops.pokerLogControl;
+    var overrides = snapshot && Array.isArray(snapshot.overrides) ? snapshot.overrides : [];
+    if (!overrides.length){
+      nodes.opsPokerLogOverrides.innerHTML = '<p class="admin-empty">No active DEBUG overrides.</p>';
+      syncPokerLogCountdownTimer();
+      return;
+    }
+    nodes.opsPokerLogOverrides.innerHTML = '<div class="admin-list">' + overrides.map(function(item, index){
+      var label = item.scope === "global"
+        ? "Global DEBUG"
+        : item.scope === "category"
+          ? "Category: " + item.category
+          : "Table: " + shortTableId(item.tableId);
+      return [
+        '<div class="admin-list__item">',
+        '<div class="admin-list__title"><span title="' + escapeHtml(item.tableId || item.category || "global") + '">' + escapeHtml(label) + "</span>",
+        '<button class="admin-btn admin-btn--ghost" type="button" data-poker-log-disable="' + String(index) + '"' + (state.ops.pokerLogControlPending || state.ops.pokerLogDisablePendingIndex === index ? " disabled" : "") + ">Disable</button></div>",
+        '<div class="admin-list__meta">' + escapeHtml(formatRemaining(item.expiresAt)) + (state.ops.pokerLogDisableErrorIndex === index ? " · Could not disable DEBUG." : "") + "</div>",
+        "</div>"
+      ].join("");
+    }).join("") + "</div>";
+    syncPokerLogCountdownTimer();
+  }
+
+  function renderPokerLogTables(){
+    if (!nodes.opsPokerLogTable) return;
+    var selected = nodes.opsPokerLogTable.value;
+    var items = state.ops.pokerLogTables || [];
+    var options = items.map(function(item){
+      var label = shortTableId(item.tableId) + " · " + (item.status || "OPEN") + "/" + (item.phase || "—");
+      if (item.humanCount != null && item.botCount != null){
+        label += " · " + item.humanCount + "H/" + item.botCount + "B";
+      }
+      return '<option value="' + escapeHtml(item.tableId) + '">' + escapeHtml(label) + "</option>";
+    });
+    options.push('<option value="__manual__">Enter table ID manually...</option>');
+    nodes.opsPokerLogTable.innerHTML = options.join("");
+    if (selected && items.some(function(item){ return item.tableId === selected; })) nodes.opsPokerLogTable.value = selected;
+    else if (!items.length) nodes.opsPokerLogTable.value = "__manual__";
+    var manual = nodes.opsPokerLogTable.value === "__manual__";
+    setVisible(nodes.opsPokerLogManualField, manual);
+    if (nodes.opsPokerLogTablesStatus){
+      nodes.opsPokerLogTablesStatus.textContent = state.ops.pokerLogTablesError
+        ? "Open tables unavailable. Enter a table ID manually."
+        : manual
+          ? items.length ? "Manual table ID is active." : "No open tables. Enter a table ID manually."
+          : "Selected OPEN table is active.";
+    }
+  }
+
+  function renderPokerLogControl(){
+    var snapshot = state.ops.pokerLogControl;
+    var pending = state.ops.pokerLogControlPending === true;
+    var scope = nodes.opsPokerLogScope ? nodes.opsPokerLogScope.value || "table" : "table";
+    if (nodes.opsPokerLogSummary){
+      nodes.opsPokerLogSummary.innerHTML = snapshot
+        ? '<div class="admin-surface"><div class="admin-list__title"><span>Target environment</span>' + pill(snapshot.environment === "production" ? "Production" : "WS Preview", snapshot.environment === "production" ? "danger" : "info") + '</div><div class="admin-kv">' + renderKvRow("Default level", snapshot.defaultLevel) + "</div></div>"
+        : '<p class="admin-empty">' + escapeHtml(state.ops.pokerLogControlError ? "DEBUG control unavailable: " + state.ops.pokerLogControlError : "Loading DEBUG control…") + "</p>";
+    }
+    setVisible(nodes.opsPokerLogCategoryField, scope === "category");
+    setVisible(nodes.opsPokerLogTableFields, scope === "table");
+    if (nodes.opsPokerLogCategory && snapshot){
+      var selectedCategory = nodes.opsPokerLogCategory.value;
+      nodes.opsPokerLogCategory.innerHTML = (snapshot.categories || []).map(function(category){
+        return '<option value="' + escapeHtml(category) + '">' + escapeHtml(category) + "</option>";
+      }).join("");
+      if ((snapshot.categories || []).includes(selectedCategory)) nodes.opsPokerLogCategory.value = selectedCategory;
+    }
+    renderPokerLogTables();
+    if (nodes.opsPokerLogTtlPresets && snapshot){
+      var checked = nodes.opsPokerLogForm && nodes.opsPokerLogForm.querySelector('input[name="pokerLogTtl"]:checked');
+      var selectedTtl = checked ? checked.value : String(snapshot.ttl.defaultMs);
+      var presets = (snapshot.ttl.presetsMs || []).filter(function(value){ return value >= snapshot.ttl.minMs && value <= snapshot.ttl.maxMs; });
+      if (selectedTtl !== "custom" && !presets.some(function(value){ return String(value) === selectedTtl; })){
+        selectedTtl = presets.length ? String(presets[0]) : "custom";
+      }
+      nodes.opsPokerLogTtlPresets.innerHTML = presets.map(function(value){
+        var minutes = value / 60000;
+        return '<label><input type="radio" name="pokerLogTtl" value="' + String(value) + '"' + (selectedTtl === String(value) ? " checked" : "") + '> ' + String(minutes) + " min</label>";
+      }).join("") + '<label><input type="radio" name="pokerLogTtl" value="custom"' + (selectedTtl === "custom" ? " checked" : "") + "> Custom...</label>";
+      var customActive = selectedTtl === "custom";
+      setVisible(nodes.opsPokerLogCustomTtlField, customActive);
+      if (nodes.opsPokerLogCustomTtl){
+        nodes.opsPokerLogCustomTtl.min = String(Math.ceil(snapshot.ttl.minMs / 60000));
+        nodes.opsPokerLogCustomTtl.max = String(Math.floor(snapshot.ttl.maxMs / 60000));
+      }
+      if (nodes.opsPokerLogTtlHint){
+        nodes.opsPokerLogTtlHint.textContent = "Allowed: " + Math.ceil(snapshot.ttl.minMs / 60000) + "–" + Math.floor(snapshot.ttl.maxMs / 60000) + " minutes.";
+      }
+    }
+    if (nodes.opsPokerLogEnable) nodes.opsPokerLogEnable.disabled = pending || !snapshot;
+    if (nodes.opsPokerLogRefresh) nodes.opsPokerLogRefresh.disabled = pending;
+    if (nodes.opsPokerLogTablesRefresh) nodes.opsPokerLogTablesRefresh.disabled = pending;
+    if (nodes.opsPokerLogStatus) nodes.opsPokerLogStatus.textContent = pending ? "Updating DEBUG control…" : state.ops.pokerLogControlMessage || state.ops.pokerLogControlError || "";
+    renderPokerLogOverrides();
+  }
+
   function renderStat(label, value){
     return '<div class="admin-stat"><span class="admin-stat__label">' + escapeHtml(label) + '</span><span class="admin-stat__value">' + escapeHtml(value == null ? "—" : String(value)) + "</span></div>";
   }
@@ -1386,6 +1566,7 @@
       return;
     }
     state.activeTab = tab;
+    if (tab !== "ops") syncPokerLogCountdownTimer();
     renderTabs();
     if (tab === "users" && !state.users.loaded) loadUsers();
     if (tab === "tables" && !state.tables.loaded) loadTables();
@@ -1836,13 +2017,132 @@
     }
   }
 
+  async function loadPokerLogTables(){
+    state.ops.pokerLogTablesError = null;
+    try {
+      var payload = await apiFetch("/.netlify/functions/admin-tables-list?status=OPEN&sort=last_activity_desc&page=1&limit=100", { method: "GET" });
+      state.ops.pokerLogTables = Array.isArray(payload.items) ? payload.items : [];
+    } catch (err){
+      state.ops.pokerLogTables = [];
+      state.ops.pokerLogTablesError = err && err.code ? err.code : "request_failed";
+    }
+    renderPokerLogTables();
+  }
+
+  async function loadPokerLogControl(quiet){
+    if (!quiet) state.ops.pokerLogControlMessage = "";
+    try {
+      var snapshot = await apiFetch("/.netlify/functions/admin-poker-log-control", { method: "GET", cache: "no-store" });
+      setPokerLogSnapshot(snapshot);
+      state.ops.pokerLogControlError = null;
+    } catch (err){
+      state.ops.pokerLogControlError = err && err.code ? err.code : "request_failed";
+      if (!quiet) state.ops.pokerLogControl = null;
+    }
+    renderPokerLogControl();
+  }
+
+  function selectedPokerLogTtlMs(){
+    var selected = nodes.opsPokerLogForm && nodes.opsPokerLogForm.querySelector('input[name="pokerLogTtl"]:checked');
+    if (!selected) return null;
+    if (selected.value !== "custom") return Number(selected.value);
+    var minutes = Number(nodes.opsPokerLogCustomTtl && nodes.opsPokerLogCustomTtl.value);
+    return Number.isSafeInteger(minutes) ? minutes * 60000 : null;
+  }
+
+  function selectedPokerLogTableId(){
+    if (!nodes.opsPokerLogTable) return "";
+    if (nodes.opsPokerLogTable.value === "__manual__"){
+      return String(nodes.opsPokerLogManualTable && nodes.opsPokerLogManualTable.value || "").trim();
+    }
+    return String(nodes.opsPokerLogTable.value || "").trim();
+  }
+
+  async function submitPokerLogOverride(event){
+    event.preventDefault();
+    var snapshot = state.ops.pokerLogControl;
+    if (!snapshot) return;
+    var scope = nodes.opsPokerLogScope ? nodes.opsPokerLogScope.value : "table";
+    var category = scope === "category" ? String(nodes.opsPokerLogCategory && nodes.opsPokerLogCategory.value || "") : null;
+    var tableId = scope === "table" ? selectedPokerLogTableId() : null;
+    var ttlMs = selectedPokerLogTtlMs();
+    if (!Number.isSafeInteger(ttlMs) || ttlMs < snapshot.ttl.minMs || ttlMs > snapshot.ttl.maxMs){
+      state.ops.pokerLogControlMessage = "Select a valid TTL within the advertised bounds.";
+      renderPokerLogControl();
+      return;
+    }
+    if (scope === "table" && !tableId){
+      state.ops.pokerLogControlMessage = "Select or enter an exact table ID.";
+      renderPokerLogControl();
+      return;
+    }
+    if (
+      scope === "global"
+      && snapshot.environment === "production"
+      && typeof window.confirm === "function"
+      && !window.confirm("Enable Global DEBUG on Production for " + Math.ceil(ttlMs / 60000) + " minutes?")
+    ) return;
+    state.ops.pokerLogControlPending = true;
+    state.ops.pokerLogControlMessage = "";
+    renderPokerLogControl();
+    try {
+      var result = await apiFetch("/.netlify/functions/admin-poker-log-control", {
+        method: "POST",
+        body: JSON.stringify({ operation: "enable", scope: scope, category: category, tableId: tableId, ttlMs: ttlMs })
+      });
+      setPokerLogSnapshot(result);
+      state.ops.pokerLogControlError = null;
+      state.ops.pokerLogControlMessage = "DEBUG override enabled.";
+    } catch (err){
+      state.ops.pokerLogControlError = err && err.code ? err.code : "request_failed";
+      state.ops.pokerLogControlMessage = "Could not enable DEBUG.";
+    } finally {
+      state.ops.pokerLogControlPending = false;
+      renderPokerLogControl();
+    }
+  }
+
+  async function disablePokerLogOverride(index){
+    var snapshot = state.ops.pokerLogControl;
+    var item = snapshot && snapshot.overrides && snapshot.overrides[index];
+    if (!item || state.ops.pokerLogControlPending || state.ops.pokerLogDisablePendingIndex != null) return;
+    state.ops.pokerLogDisablePendingIndex = index;
+    state.ops.pokerLogDisableErrorIndex = null;
+    state.ops.pokerLogControlMessage = "";
+    renderPokerLogControl();
+    try {
+      var result = await apiFetch("/.netlify/functions/admin-poker-log-control", {
+        method: "POST",
+        body: JSON.stringify({
+          operation: "disable",
+          scope: item.scope,
+          category: item.category || null,
+          tableId: item.tableId || null
+        })
+      });
+      setPokerLogSnapshot(result);
+      state.ops.pokerLogControlError = null;
+      state.ops.pokerLogDisableErrorIndex = null;
+      state.ops.pokerLogControlMessage = "DEBUG override disabled.";
+    } catch (err){
+      state.ops.pokerLogControlError = err && err.code ? err.code : "request_failed";
+      state.ops.pokerLogDisableErrorIndex = index;
+      state.ops.pokerLogControlMessage = "Could not disable DEBUG.";
+    } finally {
+      state.ops.pokerLogDisablePendingIndex = null;
+      renderPokerLogControl();
+    }
+  }
+
   async function loadOps(){
     setStatus(t("loading", "Loading..."), "info");
     try {
       var results = await Promise.allSettled([
         apiFetch("/.netlify/functions/admin-stage-identity", { method: "GET" }),
         apiFetch("/.netlify/functions/admin-ops-summary", { method: "GET" }),
-        state.maintenance ? Promise.resolve(null) : apiFetch("/.netlify/functions/admin-ws-preview-bot-reaction", { method: "GET", cache: "no-store" })
+        state.maintenance ? Promise.resolve(null) : apiFetch("/.netlify/functions/admin-ws-preview-bot-reaction", { method: "GET", cache: "no-store" }),
+        apiFetch("/.netlify/functions/admin-poker-log-control", { method: "GET", cache: "no-store" }),
+        apiFetch("/.netlify/functions/admin-tables-list?status=OPEN&sort=last_activity_desc&page=1&limit=100", { method: "GET" })
       ]);
       if (results[0].status === "fulfilled"){
         state.ops.identity = results[0].value || null;
@@ -1871,6 +2171,20 @@
         state.ops.botReactionMessage = "";
         klog("admin_ws_preview_bot_reaction_load_failed", { code: state.ops.botReactionError });
       }
+      if (results[3].status === "fulfilled"){
+        setPokerLogSnapshot(results[3].value || null);
+        state.ops.pokerLogControlError = null;
+      } else {
+        state.ops.pokerLogControl = null;
+        state.ops.pokerLogControlError = results[3].reason && results[3].reason.code ? results[3].reason.code : "request_failed";
+      }
+      if (results[4].status === "fulfilled"){
+        state.ops.pokerLogTables = Array.isArray(results[4].value && results[4].value.items) ? results[4].value.items : [];
+        state.ops.pokerLogTablesError = null;
+      } else {
+        state.ops.pokerLogTables = [];
+        state.ops.pokerLogTablesError = results[4].reason && results[4].reason.code ? results[4].reason.code : "request_failed";
+      }
       state.ops.loaded = true;
       renderOps();
       setStatus("", "");
@@ -1889,6 +2203,20 @@
     state.ops.botReactionMessage = fallback || "Could not update WS Preview timing.";
     klog("admin_ws_preview_bot_reaction_update_failed", { code: state.ops.botReactionError });
     renderBotReactionControl();
+  }
+
+  function handlePokerLogControlChange(event){
+    var target = event && event.target;
+    if (target === nodes.opsPokerLogScope || target === nodes.opsPokerLogTable || target && target.name === "pokerLogTtl"){
+      renderPokerLogControl();
+    }
+  }
+
+  function handlePokerLogOverridesClick(event){
+    var target = closestEventTarget(event && event.target, "[data-poker-log-disable]");
+    if (!target) return;
+    var index = Number(target.getAttribute("data-poker-log-disable"));
+    if (Number.isInteger(index) && index >= 0) disablePokerLogOverride(index);
   }
 
   async function submitBotReactionOverride(event){
@@ -2190,6 +2518,11 @@
     if (nodes.pokerAuditFilters) nodes.pokerAuditFilters.addEventListener("submit", handlePokerAuditSubmit);
     if (nodes.opsBotReactionForm) nodes.opsBotReactionForm.addEventListener("submit", submitBotReactionOverride);
     if (nodes.opsBotReactionDefault) nodes.opsBotReactionDefault.addEventListener("click", clearBotReactionOverride);
+    if (nodes.opsPokerLogForm) nodes.opsPokerLogForm.addEventListener("submit", submitPokerLogOverride);
+    if (nodes.opsPokerLogForm) nodes.opsPokerLogForm.addEventListener("change", handlePokerLogControlChange);
+    if (nodes.opsPokerLogOverrides) nodes.opsPokerLogOverrides.addEventListener("click", handlePokerLogOverridesClick);
+    if (nodes.opsPokerLogRefresh) nodes.opsPokerLogRefresh.addEventListener("click", function(){ loadPokerLogControl(false); });
+    if (nodes.opsPokerLogTablesRefresh) nodes.opsPokerLogTablesRefresh.addEventListener("click", loadPokerLogTables);
     if (nodes.usersRefresh) nodes.usersRefresh.addEventListener("click", function(){ loadUsers(); });
     if (nodes.tablesRefresh) nodes.tablesRefresh.addEventListener("click", function(){ loadTables(); });
     if (nodes.bonusCampaignsRefresh) nodes.bonusCampaignsRefresh.addEventListener("click", function(){ loadBonusCampaigns(); });

@@ -703,6 +703,63 @@
                 <div class="admin-note" id="adminOpsBotReactionStatus" aria-live="polite"></div>
               </section>
 
+              <section class="xp-card admin-card admin-card--wide" aria-labelledby="adminOpsPokerLogTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminOpsPokerLogTitle">Poker DEBUG control</h2>
+                    <p class="admin-card__subtitle">Temporary process-local diagnostics. ERROR logging always remains enabled.</p>
+                  </div>
+                  <div class="admin-card__actions">
+                    <button class="admin-btn admin-btn--ghost" id="adminOpsPokerLogRefresh" type="button">Refresh state</button>
+                  </div>
+                </div>
+                <div id="adminOpsPokerLogSummary"></div>
+                <form class="admin-adjust" id="adminOpsPokerLogForm">
+                  <label class="admin-field">
+                    <span class="admin-field__label">Scope</span>
+                    <select class="admin-input" id="adminOpsPokerLogScope" name="scope">
+                      <option value="table">Table DEBUG</option>
+                      <option value="category">Category DEBUG</option>
+                      <option value="global">Global DEBUG</option>
+                    </select>
+                  </label>
+                  <label class="admin-field" id="adminOpsPokerLogCategoryField" hidden>
+                    <span class="admin-field__label">Category</span>
+                    <select class="admin-input" id="adminOpsPokerLogCategory" name="category"></select>
+                  </label>
+                  <div id="adminOpsPokerLogTableFields">
+                    <label class="admin-field">
+                      <span class="admin-field__label">Select an open table</span>
+                      <select class="admin-input" id="adminOpsPokerLogTable" name="tableId"></select>
+                    </label>
+                    <label class="admin-field" id="adminOpsPokerLogManualField" hidden>
+                      <span class="admin-field__label">Table ID</span>
+                      <input class="admin-input" id="adminOpsPokerLogManualTable" type="text" autocomplete="off" placeholder="Exact tableId">
+                      <span class="admin-field__hint">Manual table ID overrides the dropdown selection.</span>
+                    </label>
+                    <div class="admin-filter-actions">
+                      <button class="admin-btn admin-btn--ghost" id="adminOpsPokerLogTablesRefresh" type="button">Refresh tables</button>
+                    </div>
+                    <div class="admin-note" id="adminOpsPokerLogTablesStatus" aria-live="polite"></div>
+                  </div>
+                  <fieldset class="admin-field">
+                    <legend class="admin-field__label">TTL</legend>
+                    <div class="admin-filter-actions" id="adminOpsPokerLogTtlPresets"></div>
+                    <label class="admin-field" id="adminOpsPokerLogCustomTtlField" hidden>
+                      <span class="admin-field__label">Custom minutes</span>
+                      <input class="admin-input" id="adminOpsPokerLogCustomTtl" type="number" min="1" max="60" step="1" inputmode="numeric">
+                    </label>
+                    <span class="admin-field__hint" id="adminOpsPokerLogTtlHint"></span>
+                  </fieldset>
+                  <div class="admin-filter-actions">
+                    <button class="admin-btn admin-btn--primary" id="adminOpsPokerLogEnable" type="submit">Enable DEBUG</button>
+                  </div>
+                </form>
+                <div class="admin-note" id="adminOpsPokerLogStatus" aria-live="polite"></div>
+                <h3 class="admin-section-title">Active overrides</h3>
+                <div id="adminOpsPokerLogOverrides"></div>
+              </section>
+
               <section class="xp-card admin-card" aria-labelledby="adminOpsActionsTitle">
                 <div class="admin-card__head">
                   <div>
