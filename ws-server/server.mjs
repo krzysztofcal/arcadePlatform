@@ -50,6 +50,7 @@ import { createTableCommandQueue } from "./poker/runtime/table-command-queue.mjs
 import { recoverFromPersistConflict } from "./poker/runtime/persist-conflict-recovery.mjs";
 import { resolveSettledRevealDueAt } from "./poker/runtime/settled-reveal-timing.mjs";
 import { loadBotClaimsRecoveryExecutorIfInactive } from "./poker/persistence/bot-claims-recovery-adapter.mjs";
+import { buildPokerLogPayload } from "./poker/observability/poker-log-policy.mjs";
 import { getBotConfig, parseStakes } from "./shared/poker-domain/bots.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
@@ -475,8 +476,8 @@ const turnTimeoutQuarantineMs = resolvePositiveInt(process.env.WS_TIMEOUT_QUARAN
 });
 
 function klog(kind, data) {
-  const payload = data && typeof data === "object" ? ` ${JSON.stringify(data)}` : "";
-  process.stdout.write(`[klog] ${kind}${payload}\n`);
+  const payload = buildPokerLogPayload(kind, data);
+  process.stdout.write(`[klog] ${kind} ${JSON.stringify(payload)}\n`);
 }
 
 
