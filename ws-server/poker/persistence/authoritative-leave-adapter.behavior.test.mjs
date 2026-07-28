@@ -27,13 +27,18 @@ test("default loader resolves in artifact-shaped layout without loader-unavailab
   try {
     const stagedAdapter = path.join(stageDir, "poker/persistence/authoritative-leave-adapter.mjs");
     const stagedBootstrap = path.join(stageDir, "poker/bootstrap/persisted-bootstrap-db.mjs");
+    const stagedLogPolicy = path.join(stageDir, "poker/observability/poker-log-policy.mjs");
+    const stagedLogControl = path.join(stageDir, "poker/observability/poker-log-runtime-control.mjs");
     const stagedLeave = path.join(stageDir, "shared/poker-domain/leave.mjs");
 
     await fs.mkdir(path.dirname(stagedAdapter), { recursive: true });
     await fs.mkdir(path.dirname(stagedBootstrap), { recursive: true });
+    await fs.mkdir(path.dirname(stagedLogPolicy), { recursive: true });
     await fs.mkdir(path.dirname(stagedLeave), { recursive: true });
 
     await fs.copyFile("ws-server/poker/persistence/authoritative-leave-adapter.mjs", stagedAdapter);
+    await fs.copyFile("ws-server/poker/observability/poker-log-policy.mjs", stagedLogPolicy);
+    await fs.copyFile("ws-server/poker/observability/poker-log-runtime-control.mjs", stagedLogControl);
     await fs.writeFile(stagedBootstrap, "export async function beginSqlWs(fn) { return fn({}); }\n", "utf8");
     await fs.writeFile(stagedLeave, "export async function executePokerLeave(){ throw Object.assign(new Error('state_invalid'), { code: 'state_invalid' }); }\n", "utf8");
 

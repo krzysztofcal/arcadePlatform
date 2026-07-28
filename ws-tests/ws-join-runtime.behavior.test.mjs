@@ -783,6 +783,7 @@ test("authoritative join adapter resolves in ws artifact layout without netlify 
       ["ws-server/poker/persistence/sql-admin.mjs", "poker/persistence/sql-admin.mjs"],
       ["ws-server/poker/persistence/poker-state-write-locked.mjs", "poker/persistence/poker-state-write-locked.mjs"],
       ["ws-server/poker/observability/poker-log-policy.mjs", "poker/observability/poker-log-policy.mjs"],
+      ["ws-server/poker/observability/poker-log-runtime-control.mjs", "poker/observability/poker-log-runtime-control.mjs"],
       ["ws-server/poker/snapshot-runtime/poker-state-utils.mjs", "poker/snapshot-runtime/poker-state-utils.mjs"],
       ["ws-server/poker/bootstrap/persisted-bootstrap-db.mjs", "poker/bootstrap/persisted-bootstrap-db.mjs"],
       ["shared/poker-domain/join.mjs", "shared/poker-domain/join.mjs"],

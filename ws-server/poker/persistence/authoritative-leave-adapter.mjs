@@ -1,3 +1,5 @@
+import { pokerLogRuntimeControl } from "../observability/poker-log-runtime-control.mjs";
+
 async function beginSqlDefault(fn, { env = process.env } = {}) {
   const bootstrapDb = await import("../bootstrap/persisted-bootstrap-db.mjs");
   return bootstrapDb.beginSqlWs(fn, { env });
@@ -113,9 +115,12 @@ export function createAuthoritativeLeaveExecutor({
   beginSql = beginSqlDefault
 } = {}) {
   const maxRetryAttempts = 2;
-  const verboseBotAutoplayLogs = env?.WS_BOT_AUTOPLAY_VERBOSE_LOGS === "1";
-  const klogVerbose = (kind, createPayload) => {
-    if (!verboseBotAutoplayLogs) return;
+  const staticVerboseBotAutoplayLogs = env?.WS_BOT_AUTOPLAY_VERBOSE_LOGS === "1";
+  const klogVerbose = (kind, createPayload, { tableId = null } = {}) => {
+    if (
+      !staticVerboseBotAutoplayLogs
+      && !pokerLogRuntimeControl.mayBuildDebugPayload(kind, { tableId })
+    ) return;
     klog(kind, createPayload());
   };
   return async function executeAuthoritativeLeave({ tableId, userId, requestId }) {
@@ -151,8 +156,9 @@ export function createAuthoritativeLeaveExecutor({
           runPostLeaveBotAutoplay: false,
           hasConnectedHumanPresence,
           klog,
-          klogVerbose,
-          verboseLogsEnabled: verboseBotAutoplayLogs
+          klogVerbose: (kind, createPayload) => klogVerbose(kind, createPayload, { tableId }),
+          verboseLogsEnabled: staticVerboseBotAutoplayLogs
+            || pokerLogRuntimeControl.mayBuildDebugPayload("poker_leave_bot_autoplay_loop", { tableId })
         });
         return normalizeValidatedResult({ result, tableId, userId, requestId, klog });
       } catch (error) {

@@ -91,6 +91,9 @@ register("INFO", "accounting", [
 
 register("INFO", "admin", [
   "ws_bot_claims_recovery_outcome",
+  "ws_poker_debug_override_disabled",
+  "ws_poker_debug_override_enabled",
+  "ws_poker_debug_override_expired",
   "ws_preview_bot_reaction_updated"
 ]);
 
@@ -246,6 +249,7 @@ register("ERROR", "http", [
 ]);
 
 register("ERROR", "admin", [
+  "ws_poker_log_config_invalid",
   "ws_preview_bot_reaction_failed"
 ]);
 

@@ -14,6 +14,7 @@ import { computeShowdown as computeLegacyShowdown } from "../snapshot-runtime/po
 import { awardPotsAtShowdown as awardLegacyPotsAtShowdown } from "../snapshot-runtime/poker-payout.mjs";
 import { withoutPrivateState as withoutLegacyPrivateState } from "../snapshot-runtime/poker-state-utils.mjs";
 import { computeLegalActions as computeLegacyLegalActions } from "../snapshot-runtime/poker-legal-actions.mjs";
+import { pokerLogRuntimeControl } from "../observability/poker-log-runtime-control.mjs";
 
 const DEFAULT_SHARED_AUTOPLAY_MODULE_URL = new URL("../../shared/poker-domain/poker-autoplay.mjs", import.meta.url).href;
 const sharedAutoplayModulePromiseByUrl = new Map();
@@ -634,6 +635,7 @@ function materializeShowdownState(stateToMaterialize, seatOrder, holeCardsByUser
     });
     if (options?.verboseLogs === true && typeof klog === "function") {
       klog("ws_bot_autoplay_showdown_preflight", {
+        tableId: options?.tableId || null,
         handId: typeof stateToMaterialize?.handId === "string" ? stateToMaterialize.handId : null,
         phase: typeof stateToMaterialize?.phase === "string" ? stateToMaterialize.phase : null,
         communityLen: showdownInputs.communityLen,
@@ -766,9 +768,12 @@ export function createAcceptedBotStepExecutor({
   sleep = sleepMs,
   klog = () => {}
 } = {}) {
-  const verboseAutoplayLogs = env?.WS_BOT_AUTOPLAY_VERBOSE_LOGS === "1";
-  const logVerbose = (kind, createPayload) => {
-    if (!verboseAutoplayLogs) return;
+  const staticVerboseAutoplayLogs = env?.WS_BOT_AUTOPLAY_VERBOSE_LOGS === "1";
+  const logVerbose = (kind, createPayload, { tableId = null } = {}) => {
+    if (
+      !staticVerboseAutoplayLogs
+      && !pokerLogRuntimeControl.mayBuildDebugPayload(kind, { tableId })
+    ) return;
     klog(kind, createPayload());
   };
 
@@ -790,7 +795,7 @@ export function createAcceptedBotStepExecutor({
           ? Number(result.finalStateVersion)
           : Number(tableManager.persistedStateVersion(tableId) || 0),
         shouldContinue: result?.shouldContinue === true
-      }));
+      }), { tableId });
       return result;
     };
     let lastKnown = {
@@ -857,7 +862,7 @@ export function createAcceptedBotStepExecutor({
       ...buildDiagnosticSnapshot(state),
       stateVersion: Number(tableManager.persistedStateVersion(tableId) || 0),
       maxActions: 1
-    }));
+    }), { tableId });
     try {
       let broadcastedStepCount = 0;
       let lastBroadcastStateVersion = null;
@@ -906,7 +911,9 @@ export function createAcceptedBotStepExecutor({
             {
               ...options,
               runtimeFlavor,
-              verboseLogs: verboseAutoplayLogs,
+              tableId,
+              verboseLogs: staticVerboseAutoplayLogs
+                || pokerLogRuntimeControl.mayBuildDebugPayload("ws_bot_autoplay_showdown_preflight", { tableId }),
               trustedStateSource
             }
           );
@@ -925,7 +932,7 @@ export function createAcceptedBotStepExecutor({
             legalActionSummary: legalSummary,
             ...buildDiagnosticSnapshot(statePublic),
             stateVersion: Number(tableManager.persistedStateVersion(tableId) || 0)
-          }));
+          }), { tableId });
           return botLegal;
         },
         beforeBotActionStep: async ({
@@ -956,7 +963,7 @@ export function createAcceptedBotStepExecutor({
               delayMs: reactionDelayMs,
               ...buildDiagnosticSnapshot(responseFinalState),
               stateVersion: Number(loopVersion || tableManager.persistedStateVersion(tableId) || 0)
-            }));
+            }), { tableId });
             await sleep(reactionDelayMs);
           }
 
@@ -1015,14 +1022,14 @@ export function createAcceptedBotStepExecutor({
               action
             }),
             legalActionSummary: summarizeLegalActions(legalActions)
-          }));
+          }), { tableId });
           lastKnown = { ...lastKnown, stage: "action_chosen", actionType: action?.type || null, actionAmount: action?.amount ?? null };
           logVerbose("ws_bot_autoplay_action_chosen", () => ({
             ...baseLog,
             botTurnUserId: typeof lastKnown?.state?.turnUserId === "string" ? lastKnown.state.turnUserId : null,
             actionType: action?.type || null,
             amount: action?.amount ?? null
-          }));
+          }), { tableId });
           return action;
         },
         isBotTurn,
@@ -1037,7 +1044,7 @@ export function createAcceptedBotStepExecutor({
             ...buildDiagnosticSnapshot(safeState),
             legalActionSummary: lastKnown.legalActionSummary,
             stateVersion: Number(tableManager.persistedStateVersion(tableId) || 0)
-          }));
+          }), { tableId });
           const applied = applyRuntimeAction(loopPrivateState, botAction);
           const nextState = withoutPrivateState(applied?.state);
           lastKnown = { ...lastKnown, stage: "apply_result", state: nextState };
@@ -1049,7 +1056,7 @@ export function createAcceptedBotStepExecutor({
             ...buildDiagnosticSnapshot(nextState),
             legalActionSummary: lastKnown.legalActionSummary,
             stateVersion: Number(tableManager.persistedStateVersion(tableId) || 0)
-          }));
+          }), { tableId });
           return applied;
         },
         persistStep: async ({ botTurnUserId, botAction, botRequestId, fromState }) => {
@@ -1061,7 +1068,7 @@ export function createAcceptedBotStepExecutor({
             ...buildDiagnosticSnapshot(fromState),
             legalActionSummary: lastKnown.legalActionSummary,
             stateVersion: Number(tableManager.persistedStateVersion(tableId) || 0)
-          }));
+          }), { tableId });
           const applied = tableManager.applyAction({
             tableId,
             handId: fromState?.handId,
@@ -1080,7 +1087,7 @@ export function createAcceptedBotStepExecutor({
               amount: botAction?.amount ?? null,
               ok: false,
               reason: applied?.reason || "bot_action_rejected"
-            }));
+            }), { tableId });
             return { ok: false, reason: applied?.reason || "bot_action_rejected" };
           }
 
@@ -1106,7 +1113,7 @@ export function createAcceptedBotStepExecutor({
               amount: botAction?.amount ?? null,
               ok: false,
               reason: persisted?.reason || "persist_failed"
-            }));
+            }), { tableId });
             return { ok: false, reason: persisted?.reason || "persist_failed" };
           }
 
@@ -1120,7 +1127,7 @@ export function createAcceptedBotStepExecutor({
             amount: botAction?.amount ?? null,
             ok: true,
             stateVersion: Number(applied.stateVersion)
-          }));
+          }), { tableId });
           logVerbose("ws_bot_autoplay_state_after_step", () => ({
             ...baseLog,
             botTurnUserId: botTurnUserId || null,
@@ -1129,7 +1136,7 @@ export function createAcceptedBotStepExecutor({
             ...buildDiagnosticSnapshot(latestState),
             legalActionSummary: lastKnown.legalActionSummary,
             stateVersion: Number(applied.stateVersion)
-          }));
+          }), { tableId });
           try {
             await onBotStepPersisted({
               tableId,

@@ -529,7 +529,7 @@ export async function runTableJanitor({
       ok: true,
       changed: false,
       reasonCode: normalizedClassification.reasonCode || null
-    }));
+    }), { tableId: normalizedClassification.tableId || null });
     return result;
   }
 
@@ -582,7 +582,9 @@ export async function runTableJanitor({
     && result?.closed !== true
     && result?.status === "seat_missing";
   if (routineSeatMissingNoop) {
-    klogVerbose("ws_table_janitor_result", createResultLogPayload);
+    klogVerbose("ws_table_janitor_result", createResultLogPayload, {
+      tableId: normalizedClassification.tableId || null
+    });
   } else {
     klog("ws_table_janitor_result", createResultLogPayload());
   }
