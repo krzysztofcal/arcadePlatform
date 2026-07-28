@@ -1003,7 +1003,14 @@ test("authoritative join rejects explicit and preferred seat numbers below 1", a
   );
 });
 
-test("first human authoritative join seeds exactly two bots and persists bot seat fields", async () => withBotEnv(async () => {
+test("first human authoritative join validates the same randomized bot target that it seeds", async () => withBotEnv(async () => {
+  process.env.POKER_BOTS_MAX_PER_TABLE = "5";
+  const originalRandom = Math.random;
+  let randomCalls = 0;
+  Math.random = () => {
+    randomCalls += 1;
+    return randomCalls === 1 ? 0 : 0.999999;
+  };
   const store = {
     table: { id: "t-bots", status: "OPEN", max_players: 6, stakes: '{"sb":1,"bb":2}' },
     seatRows: [],
@@ -1011,7 +1018,8 @@ test("first human authoritative join seeds exactly two bots and persists bot sea
     ledgerCalls: []
   };
 
-  const result = await executePokerJoinAuthoritative(withLockedState({
+  try {
+    const result = await executePokerJoinAuthoritative(withLockedState({
     beginSql: async (fn) => fn({
       unsafe: async (sql, params = []) => {
         if (sql.includes("from public.poker_tables")) return [store.table];
@@ -1068,20 +1076,24 @@ test("first human authoritative join seeds exactly two bots and persists bot sea
     }
   }));
 
-  assert.equal(result.ok, true);
-  assert.equal(result.seededBots.length, 2);
-  assert.equal(result.snapshot.seats.length, 3);
-  assert.deepEqual(result.snapshot.seats.map((seat) => seat.seatNo), [1, 2, 3]);
-  assert.deepEqual(result.snapshot.seats.filter((seat) => seat.isBot).map((seat) => ({ seatNo: seat.seatNo, botProfile: seat.botProfile, leaveAfterHand: seat.leaveAfterHand === true })), [
-    { seatNo: 2, botProfile: "NORMAL", leaveAfterHand: false },
-    { seatNo: 3, botProfile: "NORMAL", leaveAfterHand: false }
-  ]);
-  assert.equal(result.snapshot.stacks.human_1, 100);
-  assert.deepEqual(Object.values(result.snapshot.stacks), [100, 100, 100]);
-  assert.equal(result.snapshot.stateVersion, 4);
-  assert.equal(store.stateRow.version, 4);
-  assert.equal(store.seatRows.filter((seat) => seat.is_bot).length, 2);
-  assert.equal(store.ledgerCalls.length, 3);
+    assert.equal(result.ok, true);
+    assert.equal(result.seededBots.length, 2);
+    assert.equal(result.snapshot.seats.length, 3);
+    assert.deepEqual(result.snapshot.seats.map((seat) => seat.seatNo), [1, 2, 3]);
+    assert.deepEqual(result.snapshot.seats.filter((seat) => seat.isBot).map((seat) => ({ seatNo: seat.seatNo, botProfile: seat.botProfile, leaveAfterHand: seat.leaveAfterHand === true })), [
+      { seatNo: 2, botProfile: "NORMAL", leaveAfterHand: false },
+      { seatNo: 3, botProfile: "NORMAL", leaveAfterHand: false }
+    ]);
+    assert.equal(result.snapshot.stacks.human_1, 100);
+    assert.deepEqual(Object.values(result.snapshot.stacks), [100, 100, 100]);
+    assert.equal(result.snapshot.stateVersion, 4);
+    assert.equal(store.stateRow.version, 4);
+    assert.equal(store.seatRows.filter((seat) => seat.is_bot).length, 2);
+    assert.equal(store.ledgerCalls.length, 3);
+    assert.equal(randomCalls, 1);
+  } finally {
+    Math.random = originalRandom;
+  }
 }));
 
 test("authoritative join replay does not duplicate bots and only fills missing bot seat", async () => withBotEnv(async () => {

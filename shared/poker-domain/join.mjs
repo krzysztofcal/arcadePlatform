@@ -435,8 +435,7 @@ function assertAuthoritativeJoinStateComplete({
   version,
   userId,
   seatNo,
-  maxPlayers,
-  botCfg,
+  targetBotCount,
   previousStacks,
   fundedStacks,
   displacedUserIds
@@ -497,17 +496,14 @@ function assertAuthoritativeJoinStateComplete({
   }
 
   const activeRows = activeSeatRows(seatRows);
-  const humanCount = activeRows.filter((row) => !row?.is_bot).length;
-  const expectedBotCount = botCfg?.enabled && shouldSeedBotsOnJoin({ humanCount })
-    ? computeTargetBotCount({ maxPlayers, humanCount, maxBots: botCfg.maxPerTable })
-    : 0;
+  const expectedBotCount = Number.isInteger(targetBotCount) ? targetBotCount : 0;
   const activeBotCount = activeRows.filter((row) => row?.is_bot).length;
   if (activeBotCount < expectedBotCount) {
     throw makeError("authoritative_state_invalid", "seeded_bot_projection_incomplete");
   }
 }
 
-async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, fundedStackEntries, loadStateForUpdate, updateStateLocked, validateStateForStorage, maxPlayers, botCfg }) {
+async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, fundedStackEntries, loadStateForUpdate, updateStateLocked, validateStateForStorage, targetBotCount }) {
   const stateRow = normalizeLockedStateResult(await loadStateForUpdate(tx, tableId));
   const seatRows = await loadSeatRows(tx, tableId);
   const merged = applyAuthoritativeSeatRowsToState(stateRow.state, {
@@ -528,8 +524,7 @@ async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, fundedStackE
     version,
     userId,
     seatNo,
-    maxPlayers,
-    botCfg,
+    targetBotCount,
     previousStacks: merged.previousStacks,
     fundedStacks: merged.fundedStacks,
     displacedUserIds: merged.displacedUserIds
@@ -819,6 +814,15 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       }
 
       const botCfg = getBotConfig(process.env);
+      const humanCountAfterJoin = activeSeatRows(seatRows).filter((row) => !row?.is_bot).length + 1;
+      const targetBotCount = botCfg.enabled && shouldSeedBotsOnJoin({ humanCount: humanCountAfterJoin })
+        ? computeTargetBotCount({
+          maxPlayers,
+          humanCount: humanCountAfterJoin,
+          minBots: botCfg.minPerTable,
+          maxBots: botCfg.maxPerTable
+        })
+        : 0;
       const seededBots = await seedBotsForJoin({
       tx,
       tableId,
@@ -827,6 +831,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       cfg: botCfg,
       humanUserId: userId,
       postTransaction: runPostTransaction,
+      targetBotCount,
       klog
       });
       const updatedStateRow = await syncStateSeatAndStack({
@@ -841,8 +846,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       loadStateForUpdate,
       updateStateLocked,
       validateStateForStorage,
-      maxPlayers,
-      botCfg
+      targetBotCount
       });
       await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
       return {
