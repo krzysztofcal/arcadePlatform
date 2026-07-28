@@ -182,6 +182,21 @@ test("poker log serialization failures use a safe classified fallback", () => {
       category: "recovery"
     }
   );
+
+  const circularJanitorPayload = {
+    ok: true,
+    changed: false,
+    status: "seat_missing"
+  };
+  circularJanitorPayload.self = circularJanitorPayload;
+  assert.deepEqual(
+    JSON.parse(serializePokerLogPayload("ws_table_janitor_result", circularJanitorPayload)),
+    {
+      serializationError: true,
+      severity: "DEBUG",
+      category: "janitor"
+    }
+  );
 });
 
 test("bot claims recovery stops when a socket appears while the executor is loading", async () => {

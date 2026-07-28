@@ -356,10 +356,16 @@ export function buildPokerLogPayload(eventName, data = null) {
 }
 
 export function serializePokerLogPayload(eventName, data = null) {
+  let policy = { severity: "UNSPECIFIED", category: null };
   try {
-    return JSON.stringify(buildPokerLogPayload(eventName, data));
+    const context = data && typeof data === "object" && !Array.isArray(data) ? data : {};
+    policy = resolvePokerLogPolicy(eventName, context);
+    return JSON.stringify({
+      ...context,
+      severity: policy.severity,
+      category: policy.category
+    });
   } catch {
-    const policy = resolvePokerLogPolicy(eventName);
     return JSON.stringify({
       serializationError: true,
       severity: policy.severity,
