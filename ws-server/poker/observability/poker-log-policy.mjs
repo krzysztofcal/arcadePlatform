@@ -355,6 +355,19 @@ export function buildPokerLogPayload(eventName, data = null) {
   };
 }
 
+export function serializePokerLogPayload(eventName, data = null) {
+  try {
+    return JSON.stringify(buildPokerLogPayload(eventName, data));
+  } catch {
+    const policy = resolvePokerLogPolicy(eventName);
+    return JSON.stringify({
+      serializationError: true,
+      severity: policy.severity,
+      category: policy.category
+    });
+  }
+}
+
 export function listClassifiedPokerLogEvents() {
   return [...policyByEventName.keys()].sort();
 }

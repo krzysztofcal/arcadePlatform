@@ -24,7 +24,8 @@ import {
   listClassifiedPokerLogEvents,
   POKER_LOG_CATEGORIES,
   POKER_LOG_SEVERITIES,
-  resolvePokerLogPolicy
+  resolvePokerLogPolicy,
+  serializePokerLogPayload
 } from "./poker/observability/poker-log-policy.mjs";
 import { buildBootstrappedPokerState } from "./poker/engine/poker-engine.mjs";
 import { loadBotClaimsRecoveryExecutorIfInactive } from "./poker/persistence/bot-claims-recovery-adapter.mjs";
@@ -151,6 +152,35 @@ test("poker log policy owns envelope metadata and preserves compatibility for un
   assert.deepEqual(
     buildPokerLogPayload("future_legacy_event", { ok: true }),
     { ok: true, severity: "UNSPECIFIED", category: null }
+  );
+});
+
+test("poker log serialization failures use a safe classified fallback", () => {
+  const circularPayload = {};
+  circularPayload.self = circularPayload;
+  assert.deepEqual(
+    JSON.parse(serializePokerLogPayload("ws_state_persist_failed", circularPayload)),
+    {
+      serializationError: true,
+      severity: "ERROR",
+      category: "persistence"
+    }
+  );
+
+  const throwingPayload = {};
+  Object.defineProperty(throwingPayload, "value", {
+    enumerable: true,
+    get() {
+      throw new Error("getter_failed");
+    }
+  });
+  assert.deepEqual(
+    JSON.parse(serializePokerLogPayload("ws_restore_failed", throwingPayload)),
+    {
+      serializationError: true,
+      severity: "ERROR",
+      category: "recovery"
+    }
   );
 });
 
