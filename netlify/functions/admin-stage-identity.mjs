@@ -78,6 +78,10 @@ function resolveExpectedStageProjectRef(env = process.env) {
   ) || null;
 }
 
+function resolveExpectedProductionProjectRef(env = process.env) {
+  return normalizeString(env.EXPECTED_SUPABASE_PROD_PROJECT_REF) || null;
+}
+
 function resolveDatabaseTarget({ environmentContext, projectRef, expectedStageProjectRef } = {}) {
   if (expectedStageProjectRef && projectRef && projectRef === expectedStageProjectRef) return "stage";
   if (environmentContext === "production") return "production";
@@ -90,6 +94,7 @@ function buildStageIdentity(env = process.env, options = {}) {
   const databaseProjectRef = parseProjectRefFromDbUrl(env.SUPABASE_DB_URL);
   const supabaseProjectRef = supabaseUrlProjectRef || databaseProjectRef || resolveConfiguredProjectRef(env);
   const expectedStageProjectRef = resolveExpectedStageProjectRef(env);
+  const expectedProductionProjectRef = resolveExpectedProductionProjectRef(env);
   const serviceRoleProjectRef = parseProjectRefFromSupabaseJwt(env.SUPABASE_SERVICE_ROLE_KEY);
   const stageProjectRefMatches = !!expectedStageProjectRef && !!supabaseProjectRef && expectedStageProjectRef === supabaseProjectRef;
   const databaseTarget = resolveDatabaseTarget({
@@ -105,12 +110,22 @@ function buildStageIdentity(env = process.env, options = {}) {
     databaseProjectRef: databaseProjectRef || null,
     databaseMatchesSupabaseProjectRef: !!supabaseUrlProjectRef && !!databaseProjectRef && supabaseUrlProjectRef === databaseProjectRef,
     expectedStageProjectRef,
+    expectedProductionProjectRef,
     databaseTarget,
     chipsEnabled: env.CHIPS_ENABLED === "1",
     stageProjectRefConfigured: !!expectedStageProjectRef,
     stageProjectRefMatches,
     serviceRoleProjectRef: serviceRoleProjectRef || null,
     serviceRoleStageProjectRefMatches: !!expectedStageProjectRef && !!serviceRoleProjectRef && expectedStageProjectRef === serviceRoleProjectRef,
+    supabaseUrlProductionProjectRefMatches: !!expectedProductionProjectRef
+      && !!supabaseUrlProjectRef
+      && expectedProductionProjectRef === supabaseUrlProjectRef,
+    databaseProductionProjectRefMatches: !!expectedProductionProjectRef
+      && !!databaseProjectRef
+      && expectedProductionProjectRef === databaseProjectRef,
+    serviceRoleProductionProjectRefMatches: !!expectedProductionProjectRef
+      && !!serviceRoleProjectRef
+      && expectedProductionProjectRef === serviceRoleProjectRef,
     config: {
       hasSupabaseUrl: !!normalizeString(env.SUPABASE_URL || env.SUPABASE_URL_V2),
       hasSupabaseDbUrl: !!normalizeString(env.SUPABASE_DB_URL),

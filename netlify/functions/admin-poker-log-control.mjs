@@ -78,7 +78,16 @@ function resolveTarget(identity) {
     && identity?.databaseMatchesSupabaseProjectRef === true
     && identity?.serviceRoleStageProjectRefMatches === true
   ) return "preview";
-  if (identity?.environmentContext === "production" && identity?.databaseTarget === "production") {
+  if (
+    identity?.environmentContext === "production"
+    && identity?.databaseTarget === "production"
+    && typeof identity?.expectedProductionProjectRef === "string"
+    && identity.expectedProductionProjectRef.length > 0
+    && identity?.supabaseUrlProductionProjectRefMatches === true
+    && identity?.databaseProductionProjectRefMatches === true
+    && identity?.serviceRoleProductionProjectRefMatches === true
+    && identity?.databaseMatchesSupabaseProjectRef === true
+  ) {
     return "production";
   }
   return null;

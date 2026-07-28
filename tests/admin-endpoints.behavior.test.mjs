@@ -26,6 +26,18 @@ function previewStageIdentity() {
   };
 }
 
+function productionStageIdentity() {
+  return {
+    environmentContext: "production",
+    databaseTarget: "production",
+    expectedProductionProjectRef: "production-project-ref",
+    supabaseUrlProductionProjectRefMatches: true,
+    databaseProductionProjectRefMatches: true,
+    serviceRoleProductionProjectRefMatches: true,
+    databaseMatchesSupabaseProjectRef: true,
+  };
+}
+
 function pokerLogSnapshot() {
   return {
     defaultLevel: "INFO",
@@ -237,13 +249,57 @@ test("admin poker log control binds Preview and Production contexts to exact WS 
       POKER_WS_INTERNAL_BASE_URL: "https://ws.kcswh.pl",
       POKER_WS_INTERNAL_TOKEN: "production-token",
     },
-    buildStageIdentity: () => ({ environmentContext: "production", databaseTarget: "production" }),
+    buildStageIdentity: productionStageIdentity,
   });
   const productionResponse = await productionHandler(event("GET"));
   assert.equal(productionResponse.statusCode, 200);
   assert.equal(JSON.parse(productionResponse.body).environment, "production");
   assert.equal(seen[1].url, "https://ws.kcswh.pl/internal/admin/poker-log-control");
   assert.equal(productionResponse.headers["cache-control"], "no-store");
+});
+
+test("admin poker log control fails closed for unverified Production project identity", async () => {
+  const invalidIdentities = [
+    {
+      ...productionStageIdentity(),
+      expectedProductionProjectRef: null,
+    },
+    {
+      ...productionStageIdentity(),
+      supabaseUrlProductionProjectRefMatches: false,
+      databaseProductionProjectRefMatches: false,
+      serviceRoleProductionProjectRefMatches: false,
+    },
+    {
+      ...productionStageIdentity(),
+      databaseMatchesSupabaseProjectRef: false,
+      databaseProductionProjectRefMatches: false,
+    },
+    {
+      ...productionStageIdentity(),
+      serviceRoleProductionProjectRefMatches: false,
+    },
+  ];
+  let fetchCalls = 0;
+  for (const identity of invalidIdentities) {
+    const handler = createAdminPokerLogControlHandler({
+      env: {
+        CHIPS_ENABLED: "1",
+        POKER_WS_INTERNAL_BASE_URL: "https://ws.kcswh.pl",
+        POKER_WS_INTERNAL_TOKEN: "production-token",
+      },
+      requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+      buildStageIdentity: () => identity,
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        throw new Error("unexpected_fetch");
+      },
+    });
+    const response = await handler(event("GET"));
+    assert.equal(response.statusCode, 403);
+    assert.deepEqual(JSON.parse(response.body), { error: "environment_not_allowed" });
+  }
+  assert.equal(fetchCalls, 0);
 });
 
 test("admin poker log control forwards exact allowlisted scope with trusted admin identity", async () => {
