@@ -20,7 +20,9 @@ function normalizeCategory(value) {
 
 function normalizeTableId(value) {
   const normalized = typeof value === "string" ? value.trim() : "";
-  return UUID_RE.test(normalized) || GUEST_TABLE_RE.test(normalized) ? normalized : null;
+  return UUID_RE.test(normalized) || GUEST_TABLE_RE.test(normalized)
+    ? normalized.toLowerCase()
+    : null;
 }
 
 function makeError(code, status = 400) {

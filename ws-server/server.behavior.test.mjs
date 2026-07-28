@@ -283,6 +283,32 @@ test("poker log runtime control rejects invalid scopes, TTLs, categories, and ta
   );
 });
 
+test("poker log runtime control canonicalizes table override identifiers", () => {
+  const control = createPokerLogRuntimeControl({
+    env: { WS_POKER_LOG_LEVEL: "INFO" },
+    setTimer: () => ({ unref() {} }),
+    clearTimer: () => {}
+  });
+  const uppercaseTableId = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
+  const lowercaseTableId = uppercaseTableId.toLowerCase();
+
+  const enabled = control.enable({
+    scope: "table",
+    tableId: uppercaseTableId,
+    ttlMs: 60_000
+  });
+  assert.equal(enabled.overrides[0].tableId, lowercaseTableId);
+  assert.equal(
+    control.mayBuildDebugPayload("ws_state_persist_start", { tableId: lowercaseTableId }),
+    true
+  );
+  assert.equal(
+    control.shouldEmit("ws_state_persist_start", { tableId: lowercaseTableId }),
+    true
+  );
+  assert.equal(control.disable({ scope: "table", tableId: lowercaseTableId }).overrides.length, 0);
+});
+
 test("bot claims recovery stops when a socket appears while the executor is loading", async () => {
   let activePresence = false;
   let loadCalls = 0;
