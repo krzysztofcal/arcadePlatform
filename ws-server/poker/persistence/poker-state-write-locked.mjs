@@ -1,8 +1,9 @@
 import { normalizeJsonState } from "../snapshot-runtime/poker-state-utils.mjs";
+import { pokerLogRuntimeControl } from "../observability/poker-log-runtime-control.mjs";
 
 export async function updatePokerStateLocked(tx, { tableId, nextState }) {
   const klog = typeof tx?.klog === "function" ? tx.klog : () => {};
-  const verboseLogs = process.env.WS_POKER_VERBOSE_LOGS === "1";
+  const verboseLogs = pokerLogRuntimeControl.mayBuildDebugPayload("ws_state_update_start");
   if (!tableId) return { ok: false, reason: "invalid" };
   if (!nextState || typeof nextState !== "object" || Array.isArray(nextState)) {
     klog("ws_state_update_invalid", { reason: "invalid_state_payload" });

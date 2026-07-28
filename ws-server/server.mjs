@@ -51,6 +51,10 @@ import { recoverFromPersistConflict } from "./poker/runtime/persist-conflict-rec
 import { resolveSettledRevealDueAt } from "./poker/runtime/settled-reveal-timing.mjs";
 import { loadBotClaimsRecoveryExecutorIfInactive } from "./poker/persistence/bot-claims-recovery-adapter.mjs";
 import { serializePokerLogPayload } from "./poker/observability/poker-log-policy.mjs";
+import {
+  pokerLogRuntimeControl,
+  setPokerLogRuntimeAuditLogger
+} from "./poker/observability/poker-log-runtime-control.mjs";
 import { getBotConfig, parseStakes } from "./shared/poker-domain/bots.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
@@ -476,6 +480,7 @@ const turnTimeoutQuarantineMs = resolvePositiveInt(process.env.WS_TIMEOUT_QUARAN
 });
 
 function klog(kind, data) {
+  if (!pokerLogRuntimeControl.shouldEmit(kind, data)) return;
   process.stdout.write(`[klog] ${kind} ${serializePokerLogPayload(kind, data)}\n`);
 }
 
@@ -488,17 +493,19 @@ function klogSafe(kind, data) {
   }
 }
 
-const verbosePokerLogs = process.env.WS_POKER_VERBOSE_LOGS === "1";
-const verboseBotAutoplayLogs = process.env.WS_BOT_AUTOPLAY_VERBOSE_LOGS === "1";
-
 function klogVerbose(kind, createData) {
-  if (!verbosePokerLogs) return;
+  if (!pokerLogRuntimeControl.mayBuildDebugPayload(kind)) return;
   klogSafe(kind, createData());
 }
 
 function klogBotAutoplayVerbose(kind, createData) {
-  if (!verboseBotAutoplayLogs) return;
+  if (!pokerLogRuntimeControl.mayBuildDebugPayload(kind)) return;
   klogSafe(kind, createData());
+}
+
+setPokerLogRuntimeAuditLogger(klogSafe);
+if (pokerLogRuntimeControl.invalidConfiguredLevel) {
+  klogSafe("ws_poker_log_config_invalid", { fallbackLevel: pokerLogRuntimeControl.defaultLevel });
 }
 
 const botAutoplayLogSummaryMs = resolvePositiveInt(process.env.WS_BOT_AUTOPLAY_LOG_SUMMARY_MS, 60_000, {
@@ -1383,7 +1390,7 @@ async function persistMutatedState({
   const privateStateForHoleCards = privateStateForHoleCardsOverride || (typeof tableManager.privatePokerStateForAudit === "function"
     ? tableManager.privatePokerStateForAudit(tableId)
     : nextState);
-  const persistStartedAtMs = verbosePokerLogs ? Date.now() : 0;
+  const persistStartedAtMs = pokerLogRuntimeControl.mayBuildDebugPayload("ws_state_persist_start") ? Date.now() : 0;
   klogVerbose("ws_state_persist_start", () => ({ tableId, expectedVersion, mutationKind }));
   const persisted = await persistedStateWriter.writeMutation({
     tableId,
@@ -1420,7 +1427,7 @@ async function restoreTableFromPersisted(tableId) {
   if (typeof loadPersistedTableBootstrap !== "function") {
     return { ok: false, reason: "persisted_bootstrap_disabled" };
   }
-  const restoreStartedAtMs = verbosePokerLogs ? Date.now() : null;
+  const restoreStartedAtMs = pokerLogRuntimeControl.mayBuildDebugPayload("ws_restore_start") ? Date.now() : null;
   klogVerbose("ws_restore_start", () => ({
     tableId,
     stage: "load",
@@ -1818,7 +1825,7 @@ function scheduleSettledRolloverRetry({ tableId, generationKey, attempt }) {
 }
 
 async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }) {
-  const rolloverStartedAtMs = verbosePokerLogs ? Date.now() : null;
+  const rolloverStartedAtMs = pokerLogRuntimeControl.mayBuildDebugPayload("ws_settled_rollover_start") ? Date.now() : null;
   const finishSettledRollover = (result) => {
     klogVerbose("ws_settled_rollover_outcome", () => ({
       tableId,
@@ -2678,7 +2685,7 @@ async function sweepZombieTablesAndBroadcast() {
 async function listOpenTableIdsForJanitor({ limit = 10 } = {}) {
   if (!persistedBootstrapEnabled) return [];
   const boundedLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 10;
-  const selectionStartedAtMs = verbosePokerLogs ? Date.now() : 0;
+  const selectionStartedAtMs = pokerLogRuntimeControl.mayBuildDebugPayload("ws_open_table_reconciler_batch_selected") ? Date.now() : 0;
   // UUID order is immutable and round-trips exactly, so the boundary row cannot requeue itself.
   const hasCursor = Boolean(typeof openTableJanitorCursor?.tableId === "string"
     && openTableJanitorCursor.tableId.trim());
@@ -2905,6 +2912,75 @@ async function handleInternalBotReactionConfig(req, res) {
   }
 }
 
+async function handleInternalPokerLogControl(req, res) {
+  if (req.method !== "GET" && req.method !== "POST") {
+    sendInternalJson(res, 405, { error: "method_not_allowed" });
+    return;
+  }
+  if (!internalRuntimeToken) {
+    sendInternalJson(res, 503, { error: "internal_runtime_token_missing" });
+    return;
+  }
+  const authHeader = typeof req.headers?.authorization === "string" ? req.headers.authorization.trim() : "";
+  if (authHeader !== `Bearer ${internalRuntimeToken}`) {
+    sendInternalJson(res, 401, { error: "unauthorized" });
+    return;
+  }
+  try {
+    if (req.method === "GET") {
+      sendInternalJson(res, 200, pokerLogRuntimeControl.snapshot());
+      return;
+    }
+    const payload = await readJsonBody(req, { maxBytes: 2_048 });
+    const operation = typeof payload?.operation === "string" ? payload.operation.trim().toLowerCase() : "";
+    const scope = typeof payload?.scope === "string" ? payload.scope.trim().toLowerCase() : "";
+    const adminUserId = typeof payload?.adminUserId === "string" ? payload.adminUserId.trim() : "";
+    const adminIdValid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(adminUserId);
+    const scopeFieldsValid = (
+      (scope === "global" && payload?.category === null && payload?.tableId === null)
+      || (scope === "category" && typeof payload?.category === "string" && payload?.tableId === null)
+      || (scope === "table" && payload?.category === null && typeof payload?.tableId === "string")
+    );
+    const commonValid = adminIdValid && scopeFieldsValid;
+    let result;
+    if (
+      operation === "enable"
+      && commonValid
+      && hasExactKeys(payload, ["operation", "scope", "category", "tableId", "ttlMs", "adminUserId"])
+      && Object.keys(payload).length === 6
+    ) {
+      result = pokerLogRuntimeControl.enable({
+        scope,
+        category: payload.category,
+        tableId: payload.tableId,
+        ttlMs: payload.ttlMs,
+        adminUserId
+      });
+    } else if (
+      operation === "disable"
+      && commonValid
+      && hasExactKeys(payload, ["operation", "scope", "category", "tableId", "adminUserId"])
+      && Object.keys(payload).length === 5
+    ) {
+      result = pokerLogRuntimeControl.disable({
+        scope,
+        category: payload.category,
+        tableId: payload.tableId,
+        adminUserId
+      });
+    } else {
+      sendInternalJson(res, 400, { error: "invalid_request" });
+      return;
+    }
+    sendInternalJson(res, 200, result);
+  } catch (error) {
+    const code = error?.code || (error instanceof SyntaxError ? "invalid_json" : "internal_server_error");
+    const statusCode = Number(error?.status)
+      || (code === "body_too_large" || code === "invalid_json" ? 400 : 500);
+    sendInternalJson(res, statusCode, { error: code });
+  }
+}
+
 async function handleInternalBotClaimsRecovery(req, res) {
   if (req.method !== "POST") {
     sendInternalJson(res, 405, { error: "method_not_allowed" });
@@ -3102,6 +3178,11 @@ async function handleHttpRequest(req, res) {
 
   if (req.url === "/internal/admin/bot-reaction") {
     await handleInternalBotReactionConfig(req, res);
+    return;
+  }
+
+  if (req.url === "/internal/admin/poker-log-control") {
+    await handleInternalPokerLogControl(req, res);
     return;
   }
 
@@ -3465,7 +3546,7 @@ wss.on("connection", (ws) => {
           scheduleBotStep,
           klog: klogSafe,
           klogVerbose,
-          verboseLogsEnabled: verbosePokerLogs
+          verboseLogsEnabled: pokerLogRuntimeControl.mayBuildDebugPayload("ws_join_authoritative_start")
         })
       });
       maybeScheduleSettledRollover(frame.__resolvedTableId);

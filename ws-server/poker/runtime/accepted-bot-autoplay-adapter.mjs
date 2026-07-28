@@ -14,6 +14,7 @@ import { computeShowdown as computeLegacyShowdown } from "../snapshot-runtime/po
 import { awardPotsAtShowdown as awardLegacyPotsAtShowdown } from "../snapshot-runtime/poker-payout.mjs";
 import { withoutPrivateState as withoutLegacyPrivateState } from "../snapshot-runtime/poker-state-utils.mjs";
 import { computeLegalActions as computeLegacyLegalActions } from "../snapshot-runtime/poker-legal-actions.mjs";
+import { pokerLogRuntimeControl } from "../observability/poker-log-runtime-control.mjs";
 
 const DEFAULT_SHARED_AUTOPLAY_MODULE_URL = new URL("../../shared/poker-domain/poker-autoplay.mjs", import.meta.url).href;
 const sharedAutoplayModulePromiseByUrl = new Map();
@@ -634,6 +635,7 @@ function materializeShowdownState(stateToMaterialize, seatOrder, holeCardsByUser
     });
     if (options?.verboseLogs === true && typeof klog === "function") {
       klog("ws_bot_autoplay_showdown_preflight", {
+        tableId: options?.tableId || null,
         handId: typeof stateToMaterialize?.handId === "string" ? stateToMaterialize.handId : null,
         phase: typeof stateToMaterialize?.phase === "string" ? stateToMaterialize.phase : null,
         communityLen: showdownInputs.communityLen,
@@ -766,9 +768,9 @@ export function createAcceptedBotStepExecutor({
   sleep = sleepMs,
   klog = () => {}
 } = {}) {
-  const verboseAutoplayLogs = env?.WS_BOT_AUTOPLAY_VERBOSE_LOGS === "1";
+  const staticVerboseAutoplayLogs = env?.WS_BOT_AUTOPLAY_VERBOSE_LOGS === "1";
   const logVerbose = (kind, createPayload) => {
-    if (!verboseAutoplayLogs) return;
+    if (!staticVerboseAutoplayLogs && !pokerLogRuntimeControl.mayBuildDebugPayload(kind)) return;
     klog(kind, createPayload());
   };
 
@@ -906,7 +908,9 @@ export function createAcceptedBotStepExecutor({
             {
               ...options,
               runtimeFlavor,
-              verboseLogs: verboseAutoplayLogs,
+              tableId,
+              verboseLogs: staticVerboseAutoplayLogs
+                || pokerLogRuntimeControl.mayBuildDebugPayload("ws_bot_autoplay_showdown_preflight"),
               trustedStateSource
             }
           );

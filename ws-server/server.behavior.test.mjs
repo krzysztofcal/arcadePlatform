@@ -27,6 +27,7 @@ import {
   resolvePokerLogPolicy,
   serializePokerLogPayload
 } from "./poker/observability/poker-log-policy.mjs";
+import { createPokerLogRuntimeControl } from "./poker/observability/poker-log-runtime-control.mjs";
 import { buildBootstrappedPokerState } from "./poker/engine/poker-engine.mjs";
 import { loadBotClaimsRecoveryExecutorIfInactive } from "./poker/persistence/bot-claims-recovery-adapter.mjs";
 import { createTableManager } from "./poker/table/table-manager.mjs";
@@ -74,7 +75,7 @@ test("poker log policy classifies every production WS poker event", async () => 
 
   for (const sourceFile of sourceFiles) {
     const source = await fs.readFile(sourceFile, "utf8");
-    const literalPattern = /\b(?:klog|klogSafe|klogVerbose|klogBotAutoplayVerbose|logVerbose)\(\s*["']((?:ws|poker|shared|chips)_[a-z0-9_]+)["']/g;
+    const literalPattern = /\b(?:audit|klog|klogSafe|klogVerbose|klogBotAutoplayVerbose|logVerbose)\(\s*["']((?:ws|poker|shared|chips)_[a-z0-9_]+)["']/g;
     let match;
     while ((match = literalPattern.exec(source))) {
       literalEvents.add(match[1]);
@@ -196,6 +197,71 @@ test("poker log serialization failures use a safe classified fallback", () => {
       severity: "DEBUG",
       category: "janitor"
     }
+  );
+});
+
+test("poker log runtime control isolates DEBUG scopes, preserves ERROR, and expires overrides", () => {
+  let nowMs = Date.parse("2026-07-28T12:00:00Z");
+  const audits = [];
+  const timers = new Set();
+  const control = createPokerLogRuntimeControl({
+    env: { WS_POKER_LOG_LEVEL: "INFO" },
+    now: () => nowMs,
+    setTimer: (fn) => {
+      const timer = { fn, unref() {} };
+      timers.add(timer);
+      return timer;
+    },
+    clearTimer: (timer) => timers.delete(timer),
+    audit: (event, payload) => audits.push({ event, payload })
+  });
+  const tableA = "11111111-1111-4111-8111-111111111111";
+  const tableB = "22222222-2222-4222-8222-222222222222";
+
+  assert.equal(control.shouldEmit("ws_state_persist_start", { tableId: tableA }), false);
+  assert.equal(control.shouldEmit("ws_state_persist_failed", { tableId: tableA }), true);
+  assert.equal(control.mayBuildDebugPayload("ws_state_persist_start"), false);
+  assert.equal(control.mayBuildDebugPayload("ws_table_janitor_result"), false);
+  control.enable({ scope: "table", tableId: tableA, ttlMs: 60_000 });
+  assert.equal(control.mayBuildDebugPayload("ws_state_persist_start"), true);
+  assert.equal(control.shouldEmit("ws_state_persist_start", { tableId: tableA }), true);
+  assert.equal(control.shouldEmit("ws_state_persist_start", { tableId: tableB }), false);
+  control.enable({ scope: "category", category: "autoplay", ttlMs: 120_000 });
+  assert.equal(control.shouldEmit("ws_bot_autoplay_loop_start", { tableId: tableB }), true);
+  assert.equal(control.shouldEmit("ws_restore_start", { tableId: tableB }), false);
+  control.enable({ scope: "global", ttlMs: 180_000 });
+  assert.equal(control.shouldEmit("ws_restore_start", { tableId: tableB }), true);
+  control.disable({ scope: "global" });
+  assert.equal(control.shouldEmit("ws_restore_start", { tableId: tableB }), false);
+
+  nowMs += 61_000;
+  for (const timer of [...timers]) timer.fn();
+  assert.equal(control.shouldEmit("ws_state_persist_start", { tableId: tableA }), false);
+  assert.equal(audits.some(({ event }) => event === "ws_poker_debug_override_expired"), true);
+  assert.equal(control.disable({ scope: "table", tableId: tableA }).overrides.length, 1);
+});
+
+test("poker log runtime control rejects invalid scopes, TTLs, categories, and table capacity", () => {
+  const invalidConfig = createPokerLogRuntimeControl({
+    env: { WS_POKER_LOG_LEVEL: "anything" },
+    setTimer: () => ({ unref() {} }),
+    clearTimer: () => {}
+  });
+  assert.equal(invalidConfig.defaultLevel, "INFO");
+  assert.equal(invalidConfig.invalidConfiguredLevel, true);
+
+  const control = createPokerLogRuntimeControl({
+    tableOverrideLimit: 1,
+    setTimer: () => ({ unref() {} }),
+    clearTimer: () => {}
+  });
+  assert.throws(() => control.enable({ scope: "global", ttlMs: 1 }), /invalid_ttl/);
+  assert.throws(() => control.enable({ scope: "category", category: "anything", ttlMs: 60_000 }), /invalid_category/);
+  assert.throws(() => control.enable({ scope: "user", ttlMs: 60_000 }), /invalid_scope/);
+  control.enable({ scope: "table", tableId: "guest_one", ttlMs: 60_000 });
+  assert.throws(
+    () => control.enable({ scope: "table", tableId: "guest_two", ttlMs: 60_000 }),
+    /table_override_capacity/
   );
 });
 
@@ -493,6 +559,78 @@ test("internal bot reaction admin endpoint requires its token and fails closed o
     });
     assert.equal(blocked.status, 403);
     assert.deepEqual(await blocked.json(), { error: "preview_only" });
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("internal poker log control requires auth and exposes bounded no-store enable/disable state", async () => {
+  const token = "internal-log-control-token";
+  const adminUserId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const { port, child } = await createServer({
+    env: {
+      POKER_WS_INTERNAL_TOKEN: token,
+      WS_POKER_LOG_LEVEL: "INFO"
+    }
+  });
+  const url = `http://127.0.0.1:${port}/internal/admin/poker-log-control`;
+  try {
+    await waitForListening(child, 5000);
+    assert.equal((await fetch(url)).status, 401);
+
+    const headers = {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    };
+    const initial = await fetch(url, { headers });
+    assert.equal(initial.status, 200);
+    assert.equal(initial.headers.get("cache-control"), "no-store");
+    assert.deepEqual((await initial.json()).overrides, []);
+
+    const enabled = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        operation: "enable",
+        scope: "table",
+        category: null,
+        tableId: "guest_runtime_debug",
+        ttlMs: 60_000,
+        adminUserId
+      })
+    });
+    assert.equal(enabled.status, 200);
+    assert.equal((await enabled.json()).overrides[0].tableId, "guest_runtime_debug");
+
+    const disabled = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        operation: "disable",
+        scope: "table",
+        category: null,
+        tableId: "guest_runtime_debug",
+        adminUserId
+      })
+    });
+    assert.equal(disabled.status, 200);
+    assert.deepEqual((await disabled.json()).overrides, []);
+
+    const invalid = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        operation: "enable",
+        scope: "global",
+        category: null,
+        tableId: null,
+        ttlMs: 1,
+        adminUserId
+      })
+    });
+    assert.equal(invalid.status, 400);
+    assert.deepEqual(await invalid.json(), { error: "invalid_ttl" });
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
