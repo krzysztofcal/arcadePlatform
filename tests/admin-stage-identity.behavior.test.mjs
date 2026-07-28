@@ -8,6 +8,7 @@ const {
   parseProjectRefFromSupabaseUrl,
   parseProjectRefFromSupabaseJwt,
 } = await import("../netlify/functions/admin-stage-identity.mjs");
+const { resolveTarget: resolvePokerLogControlTarget } = await import("../netlify/functions/admin-poker-log-control.mjs");
 
 function makeUnsignedSupabaseJwt(projectRef) {
   const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
@@ -63,6 +64,36 @@ test("admin-stage-identity marks production context as production when stage ref
 
   assert.equal(identity.databaseTarget, "production");
   assert.equal(identity.stageProjectRefMatches, false);
+});
+
+test("poker log control positively verifies every Production Supabase identity source", () => {
+  const productionEnv = {
+    CONTEXT: "production",
+    SUPABASE_URL: "https://prodabc.supabase.co",
+    SUPABASE_DB_URL: "postgresql://postgres.prodabc:secret@aws-0-eu.pooler.supabase.com:6543/postgres",
+    SUPABASE_SERVICE_ROLE_KEY: makeUnsignedSupabaseJwt("prodabc"),
+    EXPECTED_SUPABASE_PROD_PROJECT_REF: "prodabc",
+  };
+
+  assert.equal(resolvePokerLogControlTarget(buildStageIdentity(productionEnv)), "production");
+  assert.equal(resolvePokerLogControlTarget(buildStageIdentity({
+    ...productionEnv,
+    SUPABASE_URL: "https://stageabc.supabase.co",
+    SUPABASE_DB_URL: "postgresql://postgres.stageabc:secret@aws-0-eu.pooler.supabase.com:6543/postgres",
+    SUPABASE_SERVICE_ROLE_KEY: makeUnsignedSupabaseJwt("stageabc"),
+  })), null);
+  assert.equal(resolvePokerLogControlTarget(buildStageIdentity({
+    ...productionEnv,
+    SUPABASE_DB_URL: "postgresql://postgres.otherabc:secret@aws-0-eu.pooler.supabase.com:6543/postgres",
+  })), null);
+  assert.equal(resolvePokerLogControlTarget(buildStageIdentity({
+    ...productionEnv,
+    SUPABASE_SERVICE_ROLE_KEY: makeUnsignedSupabaseJwt("otherabc"),
+  })), null);
+  assert.equal(resolvePokerLogControlTarget(buildStageIdentity({
+    ...productionEnv,
+    EXPECTED_SUPABASE_PROD_PROJECT_REF: "",
+  })), null);
 });
 
 test("admin-stage-identity uses the build-generated production target when Netlify omits runtime context", () => {

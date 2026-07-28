@@ -172,7 +172,7 @@ The preview VPS contract is:
 Preview deploys unpack into a temporary directory under `/tmp/arcadeplatform-ws-preview` and then sync the extracted files into `/opt/arcade-ws-preview/ws-server`.
 The `WS_PREVIEW_USER` SSH account must have passwordless sudo available to non-interactive GitHub Actions sessions. The workflow checks this with `sudo -n bash -c 'true'` before touching preview app contents because it needs elevated access to validate the systemd unit, read the preview env file, sync files into `/opt/arcade-ws-preview`, and restart `ws-server-preview.service`. Do not use `sudo -n -v` as the local smoke check here: it can still require a password when the same user has both normal passworded sudo rules and command-specific `NOPASSWD` rules.
 The workflow fails fast before mutating preview app contents when passwordless sudo, the preview base root, app dir, env file, service, Node.js, `tar`, `rsync`, `curl`, required `PORT=3001`, `WS_AUTHORITATIVE_JOIN_ENABLED=1`, non-empty `SUPABASE_DB_URL`, preview-only `POKER_WS_INTERNAL_TOKEN`, or stage Supabase project-ref match is missing. It also rejects retired `WS_BOT_REACTION_MIN_MS` and `WS_BOT_REACTION_MAX_MS` values so runtime changes have one source of truth.
-Preview routing stays in `infra/vps/Caddyfile`, which must continue to define both the `ws.kcswh.pl -> 127.0.0.1:3000` and `ws-preview.kcswh.pl -> 127.0.0.1:3001` site blocks. Only the preview host exposes the exact `/internal/admin/bot-reaction` reverse-proxy route; the production host must not expose it.
+Preview routing stays in `infra/vps/Caddyfile`, which must continue to define both the `ws.kcswh.pl -> 127.0.0.1:3000` and `ws-preview.kcswh.pl -> 127.0.0.1:3001` site blocks. Only the preview host exposes the exact `/internal/admin/bot-reaction` reverse-proxy route. Both hosts expose the exact `/internal/admin/poker-log-control` route for the environment-bound authenticated Netlify proxy; no wildcard `/internal/admin/*` route is allowed.
 
 ### WS Preview bot reaction control
 
@@ -186,6 +186,14 @@ Manual verification after both Netlify Deploy Preview and an explicit WS Preview
 2. Set `500 ms`, start a poker hand, and confirm subsequent bot decisions occur after about half a second.
 3. Click **Set default**, continue playing, and confirm subsequent bot decisions again vary within approximately `2000–4000 ms`.
 4. Restart or redeploy the preview WS and confirm the card returns to `Default` without database cleanup.
+
+### Poker DEBUG control
+
+Admin → Ops exposes process-local Global, Category, and Table DEBUG overrides with a mandatory server-bounded TTL. The Netlify context is bound to one WS origin: deploy previews use `https://ws-preview.kcswh.pl`, while production uses `https://ws.kcswh.pl`. Each context must define its own `POKER_WS_INTERNAL_BASE_URL` and matching `POKER_WS_INTERNAL_TOKEN`; never reuse the Preview token in Production.
+
+Table DEBUG is the normal diagnostic scope. The selector reuses the authenticated OPEN-table list and retains a manual exact-ID fallback. Global DEBUG is emergency-only and requires an additional browser confirmation on Production. Active overrides display a local countdown derived from `serverNow`; expiry remains authoritative in WS and does not depend on the Admin page.
+
+The control does not read journald, store logs in Supabase, change poker state, or suppress `ERROR`. Disable submits the exact active scope returned by WS. A restart clears all process-local overrides.
 
 Minimal preview sudoers coverage for `WS_PREVIEW_USER` must include the concrete programs used by the workflow: `systemctl`, `test`, `grep`, `bash`, `rm`, `mkdir`, `tar`, and `rsync`. On Ubuntu, verify the actual binary paths with `command -v systemctl test grep bash rm mkdir tar rsync`, then keep `/etc/sudoers.d/ws-preview-deploy` mode `0440`.
 

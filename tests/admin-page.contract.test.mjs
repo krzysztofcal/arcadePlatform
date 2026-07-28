@@ -40,6 +40,20 @@ test("admin ops exposes the WS Preview bot reaction control", () => {
   assert.match(adminHtml, />WS Preview</);
 });
 
+test("admin ops exposes bounded poker DEBUG controls without a log viewer", () => {
+  assert.match(adminHtml, /id="adminOpsPokerLogScope"/);
+  assert.match(adminHtml, />Table DEBUG</);
+  assert.match(adminHtml, />Category DEBUG</);
+  assert.match(adminHtml, />Global DEBUG</);
+  assert.match(adminHtml, /id="adminOpsPokerLogTable"/);
+  assert.match(adminHtml, /id="adminOpsPokerLogManualTable"/);
+  assert.match(adminHtml, /id="adminOpsPokerLogTablesRefresh"/);
+  assert.match(adminHtml, /id="adminOpsPokerLogTtlPresets"/);
+  assert.match(adminHtml, /id="adminOpsPokerLogOverrides"/);
+  assert.match(adminHtml, /Active overrides/);
+  assert.doesNotMatch(adminHtml, /journalctl/);
+});
+
 test("admin bonus campaign form exposes campaign type suggestions", () => {
   assert.match(adminHtml, /name="campaignType"[^>]+list="adminBonusCampaignTypeOptions"/);
   assert.match(adminHtml, /<datalist id="adminBonusCampaignTypeOptions">/);

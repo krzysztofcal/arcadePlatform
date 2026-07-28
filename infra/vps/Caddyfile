@@ -9,6 +9,11 @@ ws.kcswh.pl {
     reverse_proxy 127.0.0.1:3000
   }
 
+  @pokerLogControlAdmin path /internal/admin/poker-log-control
+  handle @pokerLogControlAdmin {
+    reverse_proxy 127.0.0.1:3000
+  }
+
   handle {
     respond "OK" 200
   }
@@ -27,6 +32,11 @@ ws-preview.kcswh.pl {
 
   @botClaimsRecoveryAdmin path /internal/admin/bot-claims-recovery
   handle @botClaimsRecoveryAdmin {
+    reverse_proxy 127.0.0.1:3001
+  }
+
+  @pokerLogControlAdmin path /internal/admin/poker-log-control
+  handle @pokerLogControlAdmin {
     reverse_proxy 127.0.0.1:3001
   }
 

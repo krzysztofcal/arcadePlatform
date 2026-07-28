@@ -27,6 +27,18 @@ test("admin table recovery requires explicit analysis before the confirmed repai
   );
 });
 
+test("admin poker DEBUG control keeps bounded scopes, TTL, manual fallback, and Production confirmation", () => {
+  assert.match(source, /operation: "enable"/);
+  assert.match(source, /operation: "disable"/);
+  assert.match(source, /scope === "global"/);
+  assert.match(source, /snapshot\.environment === "production"/);
+  assert.match(source, /Enable Global DEBUG on Production/);
+  assert.match(source, /__manual__/);
+  assert.match(source, /admin-tables-list\?status=OPEN/);
+  assert.match(source, /pokerLogExpiryRefreshDone/);
+  assert.doesNotMatch(source, /journalctl/);
+});
+
 function createClassList(node) {
   function read() {
     return String(node.className || "").split(/\s+/).filter(Boolean);
@@ -299,6 +311,24 @@ function createAdminDom() {
     "adminOpsBotReactionApply",
     "adminOpsBotReactionDefault",
     "adminOpsBotReactionStatus",
+    "adminOpsPokerLogSummary",
+    "adminOpsPokerLogScope",
+    "adminOpsPokerLogCategoryField",
+    "adminOpsPokerLogCategory",
+    "adminOpsPokerLogTableFields",
+    "adminOpsPokerLogTable",
+    "adminOpsPokerLogManualField",
+    "adminOpsPokerLogManualTable",
+    "adminOpsPokerLogTablesRefresh",
+    "adminOpsPokerLogTablesStatus",
+    "adminOpsPokerLogTtlPresets",
+    "adminOpsPokerLogCustomTtlField",
+    "adminOpsPokerLogCustomTtl",
+    "adminOpsPokerLogTtlHint",
+    "adminOpsPokerLogEnable",
+    "adminOpsPokerLogStatus",
+    "adminOpsPokerLogOverrides",
+    "adminOpsPokerLogRefresh",
     "adminOpsRefresh",
     "adminOpsRunReconciler",
     "adminOpsRunStaleSweep",
@@ -338,6 +368,7 @@ function createAdminDom() {
   addField(pokerAuditFilters, { name: "handId", value: "" });
   addField(pokerAuditFilters, { name: "limit", value: "20" });
   createForm(document, "adminOpsBotReactionForm");
+  createForm(document, "adminOpsPokerLogForm");
 
   const tabs = ["users", "tables", "ledger", "bonusCampaigns", "pokerAudit", "ops"].map((tab, index) => {
     const button = registerNode(document, createElement("button", `adminTabButton${tab[0].toUpperCase()}${tab.slice(1)}`));
@@ -478,6 +509,21 @@ function buildContext(options = {}) {
         defaults: { minMs: 2000, maxMs: 4000 },
         active: { minMs: 2000, maxMs: 4000 },
         override: null,
+      }) };
+    }
+    if (text.includes("/.netlify/functions/admin-poker-log-control")) {
+      return { ok: true, json: async () => ({
+        environment: "preview",
+        defaultLevel: "INFO",
+        serverNow: "2026-07-28T13:00:00.000Z",
+        ttl: {
+          minMs: 60000,
+          defaultMs: 900000,
+          maxMs: 3600000,
+          presetsMs: [900000, 1800000, 3600000],
+        },
+        categories: ["autoplay", "persistence", "janitor"],
+        overrides: [],
       }) };
     }
     if (text.includes("/.netlify/functions/admin-stage-identity")) {
@@ -720,12 +766,18 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.equal(fetchCalls.includes("/.netlify/functions/admin-stage-identity"), true);
   assert.equal(fetchCalls.includes("/.netlify/functions/admin-ops-summary"), true);
   assert.equal(fetchCalls.includes("/.netlify/functions/admin-ws-preview-bot-reaction"), true);
+  assert.equal(fetchCalls.includes("/.netlify/functions/admin-poker-log-control"), true);
+  assert.equal(fetchCalls.includes("/.netlify/functions/admin-tables-list?status=OPEN&sort=last_activity_desc&page=1&limit=100"), true);
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /Database target/);
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /stageabc/);
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /Service role stage match/);
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /stage/);
   assert.match(document.getElementById("adminOpsBotReactionSummary").innerHTML, /Default/);
   assert.match(document.getElementById("adminOpsBotReactionSummary").innerHTML, /2000–4000 ms/);
+  assert.match(document.getElementById("adminOpsPokerLogSummary").innerHTML, /WS Preview/);
+  assert.match(document.getElementById("adminOpsPokerLogSummary").innerHTML, /INFO/);
+  assert.match(document.getElementById("adminOpsPokerLogTtlPresets").innerHTML, /15 min/);
+  assert.match(document.getElementById("adminOpsPokerLogOverrides").innerHTML, /No active DEBUG overrides/);
   assert.match(document.getElementById("adminOpsPokerEscrow").innerHTML, /1 problem/);
   assert.match(document.getElementById("adminOpsPokerEscrow").innerHTML, /ORPHANED/);
   assert.match(document.getElementById("adminOpsPokerEscrow").innerHTML, /Latest escrow update/);
