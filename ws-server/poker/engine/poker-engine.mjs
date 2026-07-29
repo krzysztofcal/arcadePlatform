@@ -654,11 +654,49 @@ export function applyCoreStateTurnTimeout({ tableId, coreState, nowMs = Date.now
     return { ok: true, changed: false, reason: decision.reason, stateVersion: coreState.version, coreState };
   }
 
+  const actorUserId = decision.actorUserId;
+  const leftTableByUserId = liveState.leftTableByUserId && typeof liveState.leftTableByUserId === "object" && !Array.isArray(liveState.leftTableByUserId)
+    ? liveState.leftTableByUserId
+    : null;
+  const actorDeferredLeave = leftTableByUserId?.[actorUserId] === true;
+  const actorSeatNo = actorDeferredLeave
+    ? (() => {
+        const stateSeats = Array.isArray(liveState.handSeats) && liveState.handSeats.length > 0
+          ? liveState.handSeats
+          : Array.isArray(liveState.seats)
+            ? liveState.seats
+            : [];
+        const match = stateSeats.find((seat) => seat?.userId === actorUserId);
+        return Number.isInteger(Number(match?.seatNo))
+          ? Number(match.seatNo)
+          : Number.isInteger(Number(match?.seat))
+            ? Number(match.seat)
+            : null;
+      })()
+    : null;
+  const timeoutCoreState = actorDeferredLeave
+    ? {
+        ...coreState,
+        seats: Number.isInteger(actorSeatNo)
+          ? { ...(coreState?.seats && typeof coreState.seats === "object" && !Array.isArray(coreState.seats) ? coreState.seats : {}), [actorUserId]: actorSeatNo }
+          : coreState?.seats,
+        members: Number.isInteger(actorSeatNo) && Array.isArray(coreState?.members) && !coreState.members.some((member) => member?.userId === actorUserId)
+          ? [...coreState.members, { userId: actorUserId, seat: actorSeatNo }]
+          : coreState?.members,
+        pokerState: {
+          ...liveState,
+          leftTableByUserId: {
+            ...leftTableByUserId,
+            [actorUserId]: false
+          }
+        }
+      }
+    : coreState;
   const applied = applyCoreStateAction({
     tableId,
-    coreState,
+    coreState: timeoutCoreState,
     handId: liveState.handId,
-    userId: decision.actorUserId,
+    userId: actorUserId,
     action: decision.action.type,
     amount: null,
     nowIso: new Date(nowMs).toISOString(),
@@ -671,19 +709,31 @@ export function applyCoreStateTurnTimeout({ tableId, coreState, nowMs = Date.now
       changed: false,
       reason: applied.reason || "timeout_rejected",
       stateVersion: coreState.version,
-      actorUserId: decision.actorUserId,
+      actorUserId,
       action: decision.action.type,
       coreState
     };
   }
 
+  const nextCoreState = actorDeferredLeave
+    ? {
+        ...applied.coreState,
+        seats: coreState?.seats,
+        members: coreState?.members,
+        pokerState: {
+          ...applied.coreState.pokerState,
+          leftTableByUserId: { ...leftTableByUserId }
+        }
+      }
+    : applied.coreState;
+
   return {
     ok: true,
     changed: true,
     reason: null,
-    actorUserId: decision.actorUserId,
+    actorUserId,
     action: decision.action.type,
     stateVersion: applied.stateVersion,
-    coreState: applied.coreState
+    coreState: nextCoreState
   };
 }

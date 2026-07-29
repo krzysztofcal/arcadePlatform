@@ -24,7 +24,19 @@ function isLiveHand(state) {
 }
 
 function defaultTimeoutActionFor(state, userId) {
-  const legalInfo = computeSharedLegalActions({ statePublic: state, userId });
+  const leftTableByUserId = state?.leftTableByUserId && typeof state.leftTableByUserId === "object" && !Array.isArray(state.leftTableByUserId)
+    ? state.leftTableByUserId
+    : null;
+  const statePublic = leftTableByUserId?.[userId] === true
+    ? {
+        ...state,
+        leftTableByUserId: {
+          ...leftTableByUserId,
+          [userId]: false
+        }
+      }
+    : state;
+  const legalInfo = computeSharedLegalActions({ statePublic, userId });
   const actions = Array.isArray(legalInfo.actions) ? legalInfo.actions : [];
   if (actions.includes("CHECK")) {
     return { type: "CHECK", userId };
