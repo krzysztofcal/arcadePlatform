@@ -126,6 +126,48 @@ export function shouldClearBotTimeoutSafetySuppression(result) {
   return result?.ok === true && result?.changed === true;
 }
 
+export function createBotAutoplayCascadeScheduler({
+  runStep,
+  defer = (callback) => setImmediate(callback)
+} = {}) {
+  if (typeof runStep !== "function") {
+    throw new Error("bot_autoplay_cascade_scheduler_requires_run_step");
+  }
+  if (typeof defer !== "function") {
+    throw new Error("bot_autoplay_cascade_scheduler_requires_defer");
+  }
+
+  const activeCascadeByTableId = new Map();
+
+  const schedule = ({ tableId, ...stepContext }) => {
+    const normalizedTableId = typeof tableId === "string" ? tableId.trim() : "";
+    if (!normalizedTableId) {
+      throw new Error("bot_autoplay_cascade_scheduler_requires_table_id");
+    }
+
+    const activeCascade = activeCascadeByTableId.get(normalizedTableId);
+    if (activeCascade) return activeCascade;
+
+    const runCascade = async () => {
+      const result = await runStep({ tableId: normalizedTableId, ...stepContext });
+      if (result?.ok !== true || result?.shouldContinue !== true) return result;
+      await new Promise((resolve) => defer(resolve));
+      return runCascade();
+    };
+
+    const cascade = runCascade().finally(() => {
+      if (activeCascadeByTableId.get(normalizedTableId) === cascade) {
+        activeCascadeByTableId.delete(normalizedTableId);
+      }
+    });
+    activeCascadeByTableId.set(normalizedTableId, cascade);
+    void cascade.catch(() => {});
+    return cascade;
+  };
+
+  return { schedule };
+}
+
 export async function handleBotStepCommand({
   tableId,
   trigger,

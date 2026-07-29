@@ -38,6 +38,7 @@ import { handleActCommand } from "./poker/handlers/act.mjs";
 import { handleStartHandCommand } from "./poker/handlers/start-hand.mjs";
 import { handleTurnTimeoutCommand } from "./poker/handlers/turn-timeout.mjs";
 import {
+  createBotAutoplayCascadeScheduler,
   createBotAutoplayObservability,
   handleBotStepCommand,
   matchesBotTimeoutSafetySuppression,
@@ -709,8 +710,8 @@ function pruneBotTimeoutSafetySuppressions() {
   }
 }
 
-function scheduleBotStep({ tableId, trigger, requestId, frameTs }) {
-  const enqueueStep = () => enqueueTableCommand({
+const botAutoplayCascadeScheduler = createBotAutoplayCascadeScheduler({
+  runStep: ({ tableId, trigger, requestId, frameTs }) => enqueueTableCommand({
     tableId,
     commandName: "bot_step",
     run: async () => {
@@ -735,22 +736,11 @@ function scheduleBotStep({ tableId, trigger, requestId, frameTs }) {
       clearBotTimeoutSafetySuppressionAfterSuccess(tableId, result);
       return result;
     }
-  });
+  })
+});
 
-  const runCascade = () => {
-    const queued = enqueueStep();
-    void queued
-      .then((result) => {
-        if (result?.ok === true && result?.shouldContinue === true) {
-          setImmediate(() => {
-            void runCascade();
-          });
-        }
-      })
-      .catch(() => {});
-    return queued;
-  };
-  return runCascade();
+function scheduleBotStep({ tableId, trigger, requestId, frameTs }) {
+  return botAutoplayCascadeScheduler.schedule({ tableId, trigger, requestId, frameTs });
 }
 
 function scheduleObservedBotTurn({ tableId, trigger, requestId = null, frameTs = null }) {
