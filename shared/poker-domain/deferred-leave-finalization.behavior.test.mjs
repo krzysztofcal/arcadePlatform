@@ -6,7 +6,7 @@ const tableId = "11111111-1111-4111-8111-111111111111";
 const leaverId = "22222222-2222-4222-8222-222222222222";
 const activeId = "33333333-3333-4333-8333-333333333333";
 
-function createFixture({ withActiveHuman, initialVersion = 7 }) {
+function createFixture({ withActiveHuman, initialVersion = 7, managedContinuous = false }) {
   let version = initialVersion;
   let state = {
     tableId,
@@ -30,7 +30,14 @@ function createFixture({ withActiveHuman, initialVersion = 7 }) {
   const tx = {
     unsafe: async (query, params) => {
       const sql = String(query).toLowerCase();
-      if (sql.includes("select id, status from public.poker_tables")) return [{ id: tableId, status: "OPEN" }];
+      if (sql.includes("select id, status, lifecycle_kind, managed_profile_key from public.poker_tables")) {
+        return [{
+          id: tableId,
+          status: "OPEN",
+          lifecycle_kind: managedContinuous ? "CONTINUOUS_BOT" : null,
+          managed_profile_key: managedContinuous ? "CONTINUOUS_BOT_DEFAULT" : null
+        }];
+      }
       if (sql.includes("select version, state from public.poker_state") && sql.includes("for update")) return [{ version, state }];
       if (sql.includes("select user_id, seat_no, status, is_bot, stack from public.poker_seats")) return seats;
       if (sql.includes("update public.poker_state set version = version + 1")) {
@@ -96,6 +103,32 @@ test("delegates the last deferred human to existing terminal close", async () =>
   assert.equal(result.closed, true);
   assert.equal(terminalCalls, 1);
   assert.equal(fixture.cashouts.length, 0);
+});
+
+test("managed continuous table finalizes the last deferred human without terminal close", async () => {
+  const fixture = createFixture({ withActiveHuman: false, managedContinuous: true });
+  let terminalCalls = 0;
+
+  const result = await finalizeDeferredLeavesAfterSettlement({
+    beginSql: fixture.beginSql,
+    tableId,
+    postTransactionFn: fixture.postTransactionFn,
+    executeTerminalClose: async () => {
+      terminalCalls += 1;
+      return { ok: true, changed: true, closed: true, status: "should_not_happen" };
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, true);
+  assert.equal(result.closed, false);
+  assert.equal(result.status, "deferred_leaves_finalized");
+  assert.equal(terminalCalls, 0);
+  assert.equal(fixture.cashouts.length, 1);
+  assert.equal(fixture.cashouts[0].entries[0].amount, -25);
+  assert.deepEqual(fixture.getSeats(), []);
+  assert.deepEqual(fixture.getState().seats, []);
+  assert.equal(Object.hasOwn(fixture.getState().stacks, leaverId), false);
 });
 
 test("uses different idempotency keys for separate deferred leaves on the same table", async () => {

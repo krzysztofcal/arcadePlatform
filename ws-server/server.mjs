@@ -1633,13 +1633,16 @@ async function executeUserInactiveCleanupPrimitive({
     commandName,
     dedupeKey,
     run: async () => {
+      const tableMeta = tableManager.tableMeta(tableId);
+      const managedContinuousTable = tableMeta?.lifecycleKind === "CONTINUOUS_BOT"
+        && tableMeta?.managedProfileKey === "CONTINUOUS_BOT_DEFAULT";
       if (!skipSocketCheck) {
         const activeSockets = sessionStore.connectionsForUser(userId) || [];
         if (activeSockets.some((socket) => tableSocketMatches(socket, tableId))) {
           return { ok: true, changed: false, status: "socket_present" };
         }
       }
-      if (await isSettledRevealPending(tableId)) {
+      if (!managedContinuousTable && await isSettledRevealPending(tableId)) {
         maybeScheduleSettledRollover(tableId);
         klogSafe(`${logPrefix}_settled_reveal_deferred`, {
           tableId,

@@ -13,6 +13,7 @@ import { executeTerminalPokerCloseInTx } from "./terminal-close.mjs";
 const REQUEST_PENDING_STALE_SEC = 30;
 const BOT_AUTOPLAY_MAX_ACTIONS = 8;
 const BOT_AUTOPLAY_BOTS_ONLY_HARD_CAP = 30;
+const MANAGED_CONTINUOUS_PROFILE_KEY = "CONTINUOUS_BOT_DEFAULT";
 
 
 const isPlainObjectValue = (value) => value && typeof value === "object" && !Array.isArray(value);
@@ -53,6 +54,12 @@ const normalizeTableStatus = (value) => {
   if (typeof value !== "string") return "OPEN";
   const normalized = value.trim().toUpperCase();
   return normalized || "OPEN";
+};
+
+const isManagedContinuousTable = (table) => {
+  const lifecycleKind = typeof table?.lifecycle_kind === "string" ? table.lifecycle_kind.trim().toUpperCase() : "";
+  const managedProfileKey = typeof table?.managed_profile_key === "string" ? table.managed_profile_key.trim().toUpperCase() : "";
+  return lifecycleKind === "CONTINUOUS_BOT" && managedProfileKey === MANAGED_CONTINUOUS_PROFILE_KEY;
 };
 
 const normalizeCardCodeForValidation = (cardCode) => {
@@ -1019,7 +1026,7 @@ export async function finalizeDeferredLeavesAfterSettlement({
   }
   return beginSql(async (tx) => {
     const tableRows = await tx.unsafe(
-      "select id, status from public.poker_tables where id = $1 limit 1 for update;",
+      "select id, status, lifecycle_kind, managed_profile_key from public.poker_tables where id = $1 limit 1 for update;",
       [tableId]
     );
     const table = tableRows?.[0] || null;
@@ -1052,7 +1059,7 @@ export async function finalizeDeferredLeavesAfterSettlement({
       return { ok: true, changed: false, closed: false, status: "no_deferred_leaves", retryable: false };
     }
     const remainingActiveHumans = activeHumans.filter((seat) => leftMap[seat.user_id] !== true);
-    if (remainingActiveHumans.length === 0) {
+    if (remainingActiveHumans.length === 0 && !isManagedContinuousTable(table)) {
       return executeTerminalClose({
         tx,
         tableId,
