@@ -184,6 +184,37 @@ test("fold settlement carryover preserves stack-eligible members and determinist
   assert.equal(next.turnUserId, "user_b");
 });
 
+test("settled rollover admits a funded waiting player and clears only their next-hand marker", () => {
+  const coreState = {
+    roomId: "table_waiting_join",
+    version: 20,
+    seats: { user_a: 1, user_b: 2, user_joining: 3 },
+    members: [
+      { userId: "user_a", seat: 1 },
+      { userId: "user_b", seat: 2 },
+      { userId: "user_joining", seat: 3 }
+    ],
+    pokerState: null
+  };
+  const next = buildNextHandStateFromSettled({
+    tableId: coreState.roomId,
+    coreState,
+    settledState: {
+      handId: "settled_before_join",
+      phase: "SETTLED",
+      dealerSeatNo: 2,
+      stacks: { user_a: 90, user_b: 110, user_joining: 100 },
+      waitingForNextHandByUserId: { user_joining: true, unrelated_user: true }
+    },
+    nextVersion: 21
+  });
+
+  assert.equal(next.handSeats.some((seat) => seat.userId === "user_joining"), true);
+  assert.equal(next.stacks.user_joining, 100);
+  assert.equal(next.waitingForNextHandByUserId.user_joining, undefined);
+  assert.equal(next.waitingForNextHandByUserId.unrelated_user, true);
+});
+
 for (const stakes of [{ sb: 1, bb: 2 }, { sb: 5, bb: 10 }]) {
   test(`settled rollover posts configured ${stakes.sb}/${stakes.bb} blinds`, () => {
     const coreState = {

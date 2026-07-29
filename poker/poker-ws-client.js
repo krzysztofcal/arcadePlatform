@@ -124,12 +124,49 @@
       return rid;
     }
 
-    function rejectAllPending(code){
+    function markJoinPending(entry, reason){
+      if (!entry || entry.type !== 'join') return;
+      if (entry.timer) clearTimeout(entry.timer);
+      entry.timer = null;
+      entry.softPending = true;
+      emitStatus('join_pending', {
+        requestId: entry.requestId,
+        reason: reason || 'pending'
+      });
+    }
+
+    function armCommandTimer(entry){
+      if (!entry) return;
+      if (entry.timer) clearTimeout(entry.timer);
+      entry.timer = setTimeout(function(){
+        if (!pending.has(entry.requestId)) return;
+        if (entry.type === 'join'){
+          markJoinPending(entry, 'soft_timeout');
+          requestGameplaySnapshot();
+          return;
+        }
+        pending.delete(entry.requestId);
+        entry.reject(createError('timeout'));
+      }, COMMAND_TIMEOUT_MS);
+    }
+
+    function rejectAllPending(code, options){
+      var preserveJoins = !!(options && options.preserveJoins);
       pending.forEach(function(entry){
-        clearTimeout(entry.timer);
+        if (preserveJoins && entry.type === 'join'){
+          markJoinPending(entry, code || 'ws_closed');
+          return;
+        }
+        if (entry.timer) clearTimeout(entry.timer);
         entry.reject(createError(code || 'ws_closed'));
       });
-      pending.clear();
+      if (!preserveJoins) {
+        pending.clear();
+        return;
+      }
+      pending.forEach(function(entry, requestId){
+        if (entry.type !== 'join') pending.delete(requestId);
+      });
     }
 
     function sendCommand(type, payload, requestId){
@@ -137,11 +174,29 @@
       var rid = send(type, payload, requestId || null);
       if (!rid) return Promise.reject(createError('ws_unavailable'));
       return new Promise(function(resolve, reject){
-        var timer = setTimeout(function(){
-          pending.delete(rid);
-          reject(createError('timeout'));
-        }, COMMAND_TIMEOUT_MS);
-        pending.set(rid, { resolve: resolve, reject: reject, timer: timer, type: type });
+        var entry = {
+          resolve: resolve,
+          reject: reject,
+          timer: null,
+          type: type,
+          requestId: rid,
+          payload: payload || {},
+          softPending: false
+        };
+        pending.set(rid, entry);
+        armCommandTimer(entry);
+      });
+    }
+
+    function retryPendingJoins(){
+      if (!authOk || !ws || ws.readyState !== 1) return;
+      pending.forEach(function(entry){
+        if (entry.type !== 'join' || !entry.softPending) return;
+        var retriedRequestId = send('join', entry.payload || {}, entry.requestId);
+        if (!retriedRequestId) return;
+        entry.softPending = false;
+        armCommandTimer(entry);
+        emitStatus('join_retry', { requestId: entry.requestId });
       });
     }
 
@@ -283,7 +338,7 @@
         mintAndAuth().catch(function(err){ var code = safeErrorCode(err); log('poker_ws_auth_error', { tableId: tableId, code: code }); emitStatus('failed', { stage: 'auth', code: code }); emitProtocolError(code, 'auth_failed'); destroy(); });
         return;
       }
-      if (frame.type === 'authOk') { authOk = true; reconnectAttempt = 0; emitStatus('auth_ok', { roomId: frame.payload && frame.payload.roomId ? frame.payload.roomId : null }); requestLiveState(); return; }
+      if (frame.type === 'authOk') { authOk = true; reconnectAttempt = 0; emitStatus('auth_ok', { roomId: frame.payload && frame.payload.roomId ? frame.payload.roomId : null }); requestLiveState(); retryPendingJoins(); return; }
       if (frame.type === 'lobby_snapshot') {
         var initialLobby = !initialLobbySnapshotDelivered;
         initialLobbySnapshotDelivered = true;
@@ -313,8 +368,14 @@
         var rid = frame.requestId || (frame.payload && frame.payload.requestId) || null;
         var commandErrorHandled = false;
         if (rid && pending.has(rid)) {
-          var entry = pending.get(rid); pending.delete(rid); clearTimeout(entry.timer); entry.reject(createError(frame.payload && frame.payload.code ? frame.payload.code : 'ws_error'));
-          commandErrorHandled = true;
+          var entry = pending.get(rid);
+          if (entry.type === 'join') {
+            markJoinPending(entry, frame.payload && frame.payload.code ? frame.payload.code : 'ws_error');
+            commandErrorHandled = true;
+          } else {
+            pending.delete(rid); clearTimeout(entry.timer); entry.reject(createError(frame.payload && frame.payload.code ? frame.payload.code : 'ws_error'));
+            commandErrorHandled = true;
+          }
         }
         var code = frame.payload && frame.payload.code ? frame.payload.code : 'ws_error';
         if (commandErrorHandled) {
@@ -357,7 +418,7 @@
         authOk = false;
         connecting = false;
         clearHeartbeat();
-        rejectAllPending('ws_closed');
+        rejectAllPending('ws_closed', { preserveJoins: true });
         log('poker_ws_close', { tableId: tableId, readyState: safeReadyState(ws), code: code, reason: sanitizeText(evt && evt.reason), wasClean: !!(evt && evt.wasClean) });
         emitStatus('closed', { code: code });
         ws = null;
@@ -384,7 +445,7 @@
       authOk = false;
       clearHeartbeat();
       clearReconnect();
-      rejectAllPending('ws_closed');
+      rejectAllPending('ws_closed', { preserveJoins: true });
       if (ws && ws.readyState <= 1){ try { ws.close(1000, 'client_shutdown'); } catch (_err){} }
       ws = null;
     }

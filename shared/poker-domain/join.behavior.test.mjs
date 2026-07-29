@@ -147,6 +147,11 @@ test("fresh funded join preserves existing authoritative stacks when seat projec
       tableId: "t-live",
       phase: "FLOP",
       handId: "hand_live_join",
+      handSeats: [
+        { userId: "human_1", seatNo: 1 },
+        { userId: "bot_1", seatNo: 2, isBot: true },
+        { userId: "bot_2", seatNo: 3, isBot: true }
+      ],
       seats: [
         { userId: "human_1", seatNo: 1, status: "ACTIVE" },
         { userId: "bot_1", seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" },
@@ -217,6 +222,9 @@ test("fresh funded join preserves existing authoritative stacks when seat projec
   assert.equal(result.snapshot.stacks.human_2, 100);
   assert.equal(result.snapshot.stacks.bot_1, 120);
   assert.equal(result.snapshot.stacks.bot_2, 84);
+  assert.equal(result.joinStatus, "WAITING_NEXT_HAND");
+  assert.equal(stateRow.state.waitingForNextHandByUserId.human_2, true);
+  assert.deepEqual(stateRow.state.handSeats.map((seat) => seat.userId), ["human_1", "bot_1", "bot_2"]);
   assert.equal(stateRow.state.stacks.bot_1, 120);
   assert.equal(stateRow.state.stacks.bot_2, 84);
   assert.deepEqual(stateRow.state.community, ["AS", "KS", "QS"]);
@@ -1096,7 +1104,7 @@ test("first human authoritative join validates the same randomized bot target th
   }
 }));
 
-test("authoritative join replay does not duplicate bots and only fills missing bot seat", async () => withBotEnv(async () => {
+test("same-request authoritative join replay becomes rejoin without duplicate seat, stack, or buy-in", async () => withBotEnv(async () => {
   const state = {
     table: { id: "t-bots-replay", status: "OPEN", max_players: 6, stakes: '{"sb":1,"bb":2}' },
     seatRows: [
@@ -1168,7 +1176,7 @@ test("authoritative join replay does not duplicate bots and only fills missing b
     }
   }));
 
-  const first = await runJoin("join-replay-1");
+  const first = await runJoin("join-replay-same-request");
   assert.equal(first.seededBots.length, 1);
   assert.equal(first.snapshot.seats.filter((seat) => seat.isBot).length, 2);
   assert.equal(first.snapshot.stateVersion, 5);
@@ -1177,10 +1185,14 @@ test("authoritative join replay does not duplicate bots and only fills missing b
   assert.equal(first.snapshot.stacks[first.seededBots[0].userId], first.seededBots[0].stack);
   assert.equal(state.stateRow.state.stacks[first.seededBots[0].userId], first.seededBots[0].stack);
 
-  const second = await runJoin("join-replay-2");
+  const second = await runJoin("join-replay-same-request");
   assert.equal(second.rejoin, true);
+  assert.equal(second.seatNo, first.seatNo);
+  assert.equal(second.joinStatus, "ACTIVE");
   assert.equal(second.snapshot.seats.filter((seat) => seat.isBot).length, 2);
   assert.equal(second.snapshot.stacks.existing_bot, 200);
+  assert.equal(state.seatRows.filter((seat) => seat.user_id === "human_replay").length, 1);
+  assert.equal(state.stateRow.state.stacks.human_replay, 120);
   assert.equal(state.seatRows.filter((seat) => seat.is_bot).length, 2);
   assert.equal(state.ledgerCalls.filter((payload) => payload.txType === "TABLE_BUY_IN").length, 2);
 }));

@@ -1282,7 +1282,7 @@ function sendResumeAck(ws, connState, { requestId = null, tableId }) {
   sendFrame(ws, frame);
 }
 
-function sendCommandResult(ws, connState, { requestId = null, tableId = null, status, reason = null }) {
+function sendCommandResult(ws, connState, { requestId = null, tableId = null, status, reason = null, ...result }) {
   const frame = {
     version: "1.0",
     type: "commandResult",
@@ -1291,7 +1291,8 @@ function sendCommandResult(ws, connState, { requestId = null, tableId = null, st
     payload: {
       requestId,
       status,
-      reason
+      reason,
+      ...result
     }
   };
 
