@@ -30,7 +30,10 @@ import {
 import { createPokerLogRuntimeControl } from "./poker/observability/poker-log-runtime-control.mjs";
 import { buildBootstrappedPokerState } from "./poker/engine/poker-engine.mjs";
 import { loadBotClaimsRecoveryExecutorIfInactive } from "./poker/persistence/bot-claims-recovery-adapter.mjs";
-import { normalizeContinuousBotProfile } from "./poker/persistence/continuous-bot-table-repository.mjs";
+import {
+  normalizeContinuousBotProfile,
+  tableMatchesContinuousBotProfile
+} from "./poker/persistence/continuous-bot-table-repository.mjs";
 import { createContinuousBotTableSupervisor } from "./poker/runtime/continuous-bot-table-supervisor.mjs";
 import { createTableManager } from "./poker/table/table-manager.mjs";
 
@@ -69,6 +72,33 @@ test("continuous bot profile validation accepts only the bounded V1 singleton", 
     big_blind: 2,
     max_seats: 6
   }), null);
+});
+
+test("continuous bot profile comparison accepts Postgres stringified jsonb stakes", () => {
+  const profile = normalizeContinuousBotProfile({
+    profile_key: "CONTINUOUS_BOT_DEFAULT",
+    enabled: true,
+    desired_table_count: 1,
+    min_bot_count: 2,
+    target_bot_count: 3,
+    max_bot_count: 3,
+    rotation_interval_seconds: 900,
+    postpone_interval_seconds: 300,
+    small_blind: 5,
+    big_blind: 10,
+    max_seats: 6
+  });
+
+  assert.equal(tableMatchesContinuousBotProfile({
+    managed_profile_key: "CONTINUOUS_BOT_DEFAULT",
+    max_players: 6,
+    stakes: "{\"sb\":5,\"bb\":10}"
+  }, profile), true);
+  assert.equal(tableMatchesContinuousBotProfile({
+    managed_profile_key: "CONTINUOUS_BOT_DEFAULT",
+    max_players: 6,
+    stakes: "{\"sb\":1,\"bb\":2}"
+  }, profile), false);
 });
 
 test("continuous bot supervisor coalesces overlapping sweeps and activates each table once", async () => {

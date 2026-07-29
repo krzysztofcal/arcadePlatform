@@ -2,6 +2,7 @@ import { createPokerTableWithState } from "../../../netlify/functions/_shared/po
 import {
   applySeatsAndStacksToState,
   getBotConfig,
+  parseStakes,
   seedBotsForJoin
 } from "../../shared/poker-domain/bots.mjs";
 import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
@@ -63,13 +64,11 @@ export function normalizeContinuousBotProfile(row) {
 }
 
 function canonicalStakes(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const sb = Number(value.sb);
-  const bb = Number(value.bb);
-  return Number.isInteger(sb) && Number.isInteger(bb) ? { sb, bb } : null;
+  const parsed = parseStakes(value);
+  return parsed?.ok ? parsed.value : null;
 }
 
-function tableMatchesCreationProfile(table, profile) {
+export function tableMatchesContinuousBotProfile(table, profile) {
   const stakes = canonicalStakes(table?.stakes);
   return table?.managed_profile_key === profile.profileKey
     && Number(table?.max_players) === profile.maxSeats
@@ -151,7 +150,7 @@ export function createContinuousBotTableRepository({
         const desiredCount = profile.enabled ? profile.desiredTableCount : 0;
         const retirementTableIds = [];
         for (const table of openTables) {
-          if (!tableMatchesCreationProfile(table, profile)) {
+          if (!tableMatchesContinuousBotProfile(table, profile)) {
             retirementTableIds.push(table.id);
           }
         }
