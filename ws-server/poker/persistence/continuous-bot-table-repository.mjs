@@ -3,7 +3,7 @@ import {
   applySeatsAndStacksToState,
   getBotConfig,
   seedBotsForJoin
-} from "../../../shared/poker-domain/bots.mjs";
+} from "../../shared/poker-domain/bots.mjs";
 import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 
