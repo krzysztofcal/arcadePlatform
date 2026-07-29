@@ -264,7 +264,7 @@ test("adapter rejects an unrecoverable all-in hand with invalid or duplicate pri
   assert.equal(result.reason, "live_hand_runtime_unrecoverable");
 });
 
-test("adapter restores current replacement bot identity from persisted seat rows", () => {
+test("adapter preserves persisted live-hand identity when seat rows still reference a prior bot", () => {
   const result = adaptPersistedBootstrap({
     tableId: "table_replacement_bot_restore",
     tableRow: { id: "table_replacement_bot_restore", max_players: 6, status: "OPEN" },
@@ -299,31 +299,73 @@ test("adapter restores current replacement bot identity from persisted seat rows
 
   assert.equal(result.ok, true);
   assert.deepEqual(result.table.coreState.members, [
-    { userId: "bot_old_2", seat: 2 },
+    { userId: "bot_auto_2_38", seat: 2 },
     { userId: "bot_keep_3", seat: 3 }
   ]);
   assert.deepEqual(result.table.coreState.seats, {
-    bot_old_2: 2,
+    bot_auto_2_38: 2,
     bot_keep_3: 3
   });
   assert.deepEqual(result.table.coreState.publicStacks, {
-    bot_old_2: 1,
+    bot_auto_2_38: 100,
     bot_keep_3: 87
   });
   assert.deepEqual(result.table.coreState.pokerState.stacks, {
-    bot_old_2: 1,
+    bot_auto_2_38: 100,
     bot_keep_3: 87
   });
-  assert.equal(result.table.coreState.seatDetailsByUserId.bot_old_2?.isBot, true);
-  assert.equal(result.table.coreState.seatDetailsByUserId.bot_old_2?.botProfile, "TRIVIAL");
-  assert.equal(result.table.coreState.pokerState.turnUserId, "bot_old_2");
+  assert.equal(result.table.coreState.seatDetailsByUserId.bot_auto_2_38?.isBot, true);
+  assert.equal(result.table.coreState.seatDetailsByUserId.bot_auto_2_38?.botProfile, "TRIVIAL");
+  assert.equal(result.table.coreState.pokerState.turnUserId, "bot_auto_2_38");
   assert.deepEqual(result.table.coreState.pokerState.seats, [
     { userId: "user_a", seatNo: 1, status: "ACTIVE" },
-    { userId: "bot_old_2", seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" },
+    { userId: "bot_auto_2_38", seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" },
     { userId: "bot_keep_3", seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" }
   ]);
-  assert.equal(result.table.presenceByUserId.has("bot_old_2"), true);
-  assert.equal(result.table.presenceByUserId.has("bot_auto_2_38"), false);
+  assert.equal(result.table.presenceByUserId.has("bot_auto_2_38"), true);
+  assert.equal(result.table.presenceByUserId.has("bot_old_2"), false);
+});
+
+test("adapter restores settled replacement identity from the current persisted seat row", () => {
+  const result = adaptPersistedBootstrap({
+    tableId: "table_replacement_bot_restore_settled",
+    tableRow: { id: "table_replacement_bot_restore_settled", max_players: 6, status: "OPEN" },
+    seatRows: [
+      { user_id: "bot_current_2", seat_no: 2, status: "ACTIVE", is_bot: true, bot_profile: "TRIVIAL", stack: 100 },
+      { user_id: "bot_keep_3", seat_no: 3, status: "ACTIVE", is_bot: true, bot_profile: "TRIVIAL", stack: 87 }
+    ],
+    stateRow: {
+      version: 23,
+      state: {
+        tableId: "table_replacement_bot_restore_settled",
+        handId: "hand_replacement_bot_restore_settled",
+        phase: "SETTLED",
+        seats: [
+          { userId: "bot_old_2", seatNo: 2, status: "ACTIVE", isBot: true },
+          { userId: "bot_keep_3", seatNo: 3, status: "ACTIVE", isBot: true }
+        ],
+        stacks: { bot_old_2: 1, bot_keep_3: 87 }
+      }
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.table.coreState.members, [
+    { userId: "bot_current_2", seat: 2 },
+    { userId: "bot_keep_3", seat: 3 }
+  ]);
+  assert.deepEqual(result.table.coreState.seats, {
+    bot_current_2: 2,
+    bot_keep_3: 3
+  });
+  assert.deepEqual(result.table.coreState.pokerState.stacks, {
+    bot_current_2: 100,
+    bot_keep_3: 87
+  });
+  assert.equal(result.table.coreState.pokerState.seats[0].userId, "bot_current_2");
+  assert.equal(result.table.coreState.pokerState.stacks.bot_old_2, undefined);
+  assert.equal(result.table.presenceByUserId.has("bot_current_2"), true);
+  assert.equal(result.table.presenceByUserId.has("bot_old_2"), false);
 });
 
 test("adapter keeps authoritative human stack while retaining bot seat projection", () => {

@@ -59,6 +59,10 @@ import {
 import { getBotConfig, parseStakes } from "./shared/poker-domain/bots.mjs";
 import { createContinuousBotTableRepository } from "./poker/persistence/continuous-bot-table-repository.mjs";
 import { createContinuousBotTableSupervisor } from "./poker/runtime/continuous-bot-table-supervisor.mjs";
+import {
+  isManagedReplacementSeatProjectionConflict,
+  retireManagedTableAfterReplacementConflict as retireManagedTableAfterReplacementConflictFlow
+} from "./poker/runtime/continuous-bot-retirement.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const PROTECTED_MESSAGE_TYPES = new Set([
@@ -1951,9 +1955,11 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     deferRuntimeVersionUpdate: true
   });
   if (!persisted?.ok || persisted.alreadyApplied) {
-    const replacementSeatConflict = managedContinuousTable
-      && prepared.replacementFundings.length > 0
-      && persisted?.reason === "replacement_seat_projection_conflict";
+    const replacementSeatConflict = isManagedReplacementSeatProjectionConflict({
+      managedContinuousTable,
+      replacementFundingCount: prepared.replacementFundings.length,
+      persisted
+    });
     if (replacementSeatConflict) {
       const retirement = await retireManagedTableAfterReplacementConflict({
         tableId,
@@ -4273,41 +4279,25 @@ async function materializeCreatedContinuousBotTable({ tableId, created = false }
 }
 
 async function retireManagedTableAfterReplacementConflict({ tableId, generationKey, attempt }) {
-  const persisted = await continuousBotTableRepository?.requestRetirement?.(tableId);
-  if (!persisted?.ok) {
-    return persisted || { ok: false, reason: "retirement_request_unavailable" };
-  }
-
-  continuousBotRetirementRequested.add(tableId);
-  const restored = await restoreTableFromPersisted(tableId);
-  if (!restored?.ok) {
-    tableManager.markTableRotationDue?.(tableId, Date.now());
-    scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
-    return {
-      ok: true,
-      changed: false,
-      deferred: true,
-      reason: "managed_retirement_restore_pending",
-      retryable: true
-    };
-  }
-  broadcastStateSnapshots(tableId);
-
-  if (tableManager.hasActiveHumanMember(tableId) || tableManager.hasConnectedHumanPresence(tableId)) {
-    scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
-    return {
-      ok: true,
-      changed: false,
-      deferred: true,
-      reason: "managed_retirement_human_present",
-      retryable: true
-    };
-  }
-
-  return applyInactiveCleanupAndBroadcast({
+  return retireManagedTableAfterReplacementConflictFlow({
     tableId,
-    requestId: `continuous-bot-table-close:${tableId}`,
-    logPrefix: "ws_continuous_bot_table_retirement"
+    generationKey,
+    attempt,
+    requestRetirement: (requestedTableId) => continuousBotTableRepository?.requestRetirement?.(requestedTableId),
+    markRetirementRequested: (requestedTableId) => continuousBotRetirementRequested.add(requestedTableId),
+    restoreTableFromPersisted,
+    markTableRotationDue: (requestedTableId, dueAtMs) => tableManager.markTableRotationDue?.(requestedTableId, dueAtMs),
+    scheduleSettledRolloverRetry: (requestedTableId, requestedGenerationKey, requestedAttempt) => {
+      scheduleSettledRolloverRetry({
+        tableId: requestedTableId,
+        generationKey: requestedGenerationKey,
+        attempt: requestedAttempt
+      });
+    },
+    broadcastStateSnapshots,
+    hasActiveHumanMember: (requestedTableId) => tableManager.hasActiveHumanMember(requestedTableId),
+    hasConnectedHumanPresence: (requestedTableId) => tableManager.hasConnectedHumanPresence(requestedTableId),
+    applyInactiveCleanupAndBroadcast
   });
 }
 

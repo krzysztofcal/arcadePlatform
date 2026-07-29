@@ -35,6 +35,10 @@ import {
   tableMatchesContinuousBotProfile
 } from "./poker/persistence/continuous-bot-table-repository.mjs";
 import { createContinuousBotTableSupervisor } from "./poker/runtime/continuous-bot-table-supervisor.mjs";
+import {
+  isManagedReplacementSeatProjectionConflict,
+  retireManagedTableAfterReplacementConflict
+} from "./poker/runtime/continuous-bot-retirement.mjs";
 import { createTableManager } from "./poker/table/table-manager.mjs";
 
 const FIXED_RANDOM_BOT_AUTOPLAY_ADAPTER_URL = new URL(
@@ -134,6 +138,192 @@ test("continuous bot supervisor coalesces overlapping sweeps and activates each 
   assert.equal(calls, 2);
   assert.deepEqual(activated, ["table-a"]);
   supervisor.stop();
+});
+
+test("replacement projection conflict eligibility is limited to managed replacement funding", () => {
+  assert.equal(isManagedReplacementSeatProjectionConflict({
+    managedContinuousTable: true,
+    replacementFundingCount: 1,
+    persisted: { ok: false, reason: "replacement_seat_projection_conflict" }
+  }), true);
+  assert.equal(isManagedReplacementSeatProjectionConflict({
+    managedContinuousTable: false,
+    replacementFundingCount: 1,
+    persisted: { ok: false, reason: "replacement_seat_projection_conflict" }
+  }), false);
+  assert.equal(isManagedReplacementSeatProjectionConflict({
+    managedContinuousTable: true,
+    replacementFundingCount: 0,
+    persisted: { ok: false, reason: "replacement_seat_projection_conflict" }
+  }), false);
+  assert.equal(isManagedReplacementSeatProjectionConflict({
+    managedContinuousTable: true,
+    replacementFundingCount: 1,
+    persisted: { ok: false, reason: "conflict" }
+  }), false);
+});
+
+test("replacement projection conflict closes a managed table once when no human remains", async () => {
+  const calls = { request: 0, restore: 0, close: 0, retry: 0 };
+  const result = await retireManagedTableAfterReplacementConflict({
+    tableId: "managed-close",
+    generationKey: "managed-close:7:hand",
+    attempt: 0,
+    requestRetirement: async () => {
+      calls.request += 1;
+      if (calls.request > 1) return { ok: false, reason: "managed_table_not_found" };
+      return { ok: true, changed: true };
+    },
+    restoreTableFromPersisted: async () => {
+      calls.restore += 1;
+      return { ok: true };
+    },
+    scheduleSettledRolloverRetry: () => { calls.retry += 1; },
+    broadcastStateSnapshots: () => {},
+    hasActiveHumanMember: () => false,
+    hasConnectedHumanPresence: () => false,
+    applyInactiveCleanupAndBroadcast: async (args) => {
+      calls.close += 1;
+      assert.deepEqual(args, {
+        tableId: "managed-close",
+        requestId: "continuous-bot-table-close:managed-close",
+        logPrefix: "ws_continuous_bot_table_retirement"
+      });
+      return { ok: true, changed: true, closed: true };
+    }
+  });
+  assert.deepEqual(result, { ok: true, changed: true, closed: true });
+  assert.deepEqual(calls, { request: 1, restore: 1, close: 1, retry: 0 });
+  const replay = await retireManagedTableAfterReplacementConflict({
+    tableId: "managed-close",
+    generationKey: "managed-close:7:hand",
+    attempt: 1,
+    requestRetirement: async () => {
+      calls.request += 1;
+      return { ok: false, reason: "managed_table_not_found" };
+    },
+    restoreTableFromPersisted: async () => {
+      calls.restore += 1;
+      return { ok: true };
+    },
+    scheduleSettledRolloverRetry: () => { calls.retry += 1; },
+    broadcastStateSnapshots: () => {},
+    hasActiveHumanMember: () => false,
+    hasConnectedHumanPresence: () => false,
+    applyInactiveCleanupAndBroadcast: async () => {
+      calls.close += 1;
+      return { ok: true, changed: true, closed: true };
+    }
+  });
+  assert.deepEqual(replay, { ok: false, reason: "managed_table_not_found" });
+  assert.deepEqual(calls, { request: 2, restore: 1, close: 1, retry: 0 });
+});
+
+test("replacement projection conflict defers retirement while a human is present", async () => {
+  const calls = { request: 0, restore: 0, close: 0, retry: [] };
+  let humanPresent = true;
+  const dependencies = {
+    tableId: "managed-deferred",
+    generationKey: "managed-deferred:8:hand",
+    attempt: 2,
+    requestRetirement: async () => {
+      calls.request += 1;
+      return { ok: true, changed: calls.request === 1 };
+    },
+    restoreTableFromPersisted: async () => {
+      calls.restore += 1;
+      return { ok: true };
+    },
+    scheduleSettledRolloverRetry: (...args) => { calls.retry.push(args); },
+    broadcastStateSnapshots: () => {},
+    hasActiveHumanMember: () => humanPresent,
+    hasConnectedHumanPresence: () => false,
+    applyInactiveCleanupAndBroadcast: async () => {
+      calls.close += 1;
+      return { ok: true, changed: true, closed: true };
+    }
+  };
+  const result = await retireManagedTableAfterReplacementConflict(dependencies);
+  assert.deepEqual(result, {
+    ok: true,
+    changed: false,
+    deferred: true,
+    reason: "managed_retirement_human_present",
+    retryable: true
+  });
+  assert.deepEqual(calls, {
+    request: 1,
+    restore: 1,
+    close: 0,
+    retry: [["managed-deferred", "managed-deferred:8:hand", 3]]
+  });
+
+  humanPresent = false;
+  const closed = await retireManagedTableAfterReplacementConflict({
+    ...dependencies,
+    attempt: 3
+  });
+  assert.deepEqual(closed, { ok: true, changed: true, closed: true });
+  assert.equal(calls.request, 2);
+  assert.equal(calls.restore, 2);
+  assert.equal(calls.close, 1);
+});
+
+test("replacement projection conflict keeps the existing retry when retirement persistence fails", async () => {
+  const calls = { restore: 0, due: 0, retry: 0, close: 0 };
+  const result = await retireManagedTableAfterReplacementConflict({
+    tableId: "managed-retirement-write-failure",
+    generationKey: "managed-retirement-write-failure:9:hand",
+    attempt: 1,
+    requestRetirement: async () => ({ ok: false, reason: "retirement_request_failed" }),
+    restoreTableFromPersisted: async () => {
+      calls.restore += 1;
+      return { ok: true };
+    },
+    markTableRotationDue: () => { calls.due += 1; },
+    scheduleSettledRolloverRetry: () => { calls.retry += 1; },
+    broadcastStateSnapshots: () => {},
+    hasActiveHumanMember: () => false,
+    hasConnectedHumanPresence: () => false,
+    applyInactiveCleanupAndBroadcast: async () => {
+      calls.close += 1;
+      return { ok: true, changed: true, closed: true };
+    }
+  });
+  assert.deepEqual(result, { ok: false, reason: "retirement_request_failed" });
+  assert.deepEqual(calls, { restore: 0, due: 0, retry: 0, close: 0 });
+});
+
+test("replacement projection conflict resumes durable retirement after restore failure", async () => {
+  const calls = { request: 0, due: [], retry: [] };
+  const result = await retireManagedTableAfterReplacementConflict({
+    tableId: "managed-restore-retry",
+    generationKey: "managed-restore-retry:10:hand",
+    attempt: 3,
+    requestRetirement: async () => {
+      calls.request += 1;
+      return { ok: true, changed: false };
+    },
+    restoreTableFromPersisted: async () => ({ ok: false, reason: "restore_failed" }),
+    markTableRotationDue: (...args) => { calls.due.push(args); },
+    scheduleSettledRolloverRetry: (...args) => { calls.retry.push(args); },
+    broadcastStateSnapshots: () => {},
+    hasActiveHumanMember: () => false,
+    hasConnectedHumanPresence: () => false,
+    applyInactiveCleanupAndBroadcast: async () => ({ ok: true, changed: true, closed: true })
+  });
+  assert.deepEqual(result, {
+    ok: true,
+    changed: false,
+    deferred: true,
+    reason: "managed_retirement_restore_pending",
+    retryable: true
+  });
+  assert.equal(calls.request, 1);
+  assert.equal(calls.due.length, 1);
+  assert.equal(calls.due[0][0], "managed-restore-retry");
+  assert.equal(Number.isFinite(calls.due[0][1]), true);
+  assert.deepEqual(calls.retry, [["managed-restore-retry", "managed-restore-retry:10:hand", 4]]);
 });
 
 async function listProductionModuleFiles(rootPath) {
