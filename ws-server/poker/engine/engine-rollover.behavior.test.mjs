@@ -184,6 +184,43 @@ test("fold settlement carryover preserves stack-eligible members and determinist
   assert.equal(next.turnUserId, "user_b");
 });
 
+for (const stakes of [{ sb: 1, bb: 2 }, { sb: 5, bb: 10 }]) {
+  test(`settled rollover posts configured ${stakes.sb}/${stakes.bb} blinds`, () => {
+    const coreState = {
+      roomId: `table_rollover_${stakes.sb}_${stakes.bb}`,
+      version: 9,
+      seats: { user_a: 1, user_b: 2, user_c: 3 },
+      members: [
+        { userId: "user_a", seat: 1 },
+        { userId: "user_b", seat: 2 },
+        { userId: "user_c", seat: 3 }
+      ],
+      pokerState: null
+    };
+    const next = buildNextHandStateFromSettled({
+      tableId: coreState.roomId,
+      coreState,
+      settledState: {
+        handId: "settled_configured_stakes",
+        phase: "SETTLED",
+        dealerSeatNo: 3,
+        stacks: { user_a: 100, user_b: 100, user_c: 100 }
+      },
+      nextVersion: 10,
+      stakes
+    });
+
+    assert.equal(next.betThisRoundByUserId.user_b, stakes.sb);
+    assert.equal(next.betThisRoundByUserId.user_c, stakes.bb);
+    assert.equal(next.contributionsByUserId.user_b, stakes.sb);
+    assert.equal(next.contributionsByUserId.user_c, stakes.bb);
+    assert.equal(next.potTotal, stakes.sb + stakes.bb);
+    assert.equal(next.currentBet, stakes.bb);
+    assert.equal(next.lastRaiseSize, stakes.bb);
+    assert.equal(next.toCallByUserId.user_a, stakes.bb);
+  });
+}
+
 test("human with one chip remains eligible and posts a partial blind", () => {
   const coreState = {
     roomId: "table_one_chip",

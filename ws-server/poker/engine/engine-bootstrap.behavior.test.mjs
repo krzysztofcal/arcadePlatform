@@ -42,6 +42,30 @@ test("engine bootstrap creates deterministic preflop hand with expected invarian
   assert.equal(typeof pokerState.roomId, "string");
 });
 
+for (const stakes of [{ sb: 1, bb: 2 }, { sb: 5, bb: 10 }]) {
+  test(`engine bootstrap posts configured ${stakes.sb}/${stakes.bb} blinds`, () => {
+    const result = bootstrapCoreStateHand({
+      tableId: `table_engine_${stakes.sb}_${stakes.bb}`,
+      coreState: {
+        ...coreStateBase(),
+        publicStacks: { user_a: 100, user_b: 100, user_c: 100 }
+      },
+      stakes,
+      nowMs: 1_000
+    });
+
+    const state = result.coreState.pokerState;
+    assert.equal(state.betThisRoundByUserId.user_b, stakes.sb);
+    assert.equal(state.betThisRoundByUserId.user_c, stakes.bb);
+    assert.equal(state.contributionsByUserId.user_b, stakes.sb);
+    assert.equal(state.contributionsByUserId.user_c, stakes.bb);
+    assert.equal(state.potTotal, stakes.sb + stakes.bb);
+    assert.equal(state.currentBet, stakes.bb);
+    assert.equal(state.lastRaiseSize, stakes.bb);
+    assert.equal(state.toCallByUserId.user_a, stakes.bb);
+  });
+}
+
 test("bootstrap maps dealer/SB/BB/UTG deterministically for 2-player and 3-player tables", () => {
   const twoPlayerCore = {
     roomId: "table_engine_2p",

@@ -100,7 +100,24 @@ export function orderedEligibleSeatMembers(coreState, stacksByUserId = null) {
   }));
 }
 
-export function buildBootstrappedPokerState({ tableId, coreState, dealerSeatNo = null, startingStacks = null, handVersion = null }) {
+function normalizeHandStakes(stakes) {
+  const smallBlind = Number(stakes?.sb);
+  const bigBlind = Number(stakes?.bb);
+  if (Number.isInteger(smallBlind) && smallBlind > 0
+    && Number.isInteger(bigBlind) && bigBlind > smallBlind) {
+    return { smallBlind, bigBlind };
+  }
+  return { smallBlind: 1, bigBlind: 2 };
+}
+
+export function buildBootstrappedPokerState({
+  tableId,
+  coreState,
+  dealerSeatNo = null,
+  startingStacks = null,
+  handVersion = null,
+  stakes = null
+}) {
   const members = orderedEligibleSeatMembers(coreState, startingStacks);
   if (members.length < MIN_PLAYERS_TO_BOOTSTRAP) {
     return null;
@@ -144,8 +161,9 @@ export function buildBootstrappedPokerState({ tableId, coreState, dealerSeatNo =
     return posted;
   };
 
-  const sbPosted = postBlind(sbUserId, 1);
-  const bbPosted = postBlind(bbUserId, 2);
+  const { smallBlind, bigBlind } = normalizeHandStakes(stakes);
+  const sbPosted = postBlind(sbUserId, smallBlind);
+  const bbPosted = postBlind(bbUserId, bigBlind);
   const currentBet = Math.max(sbPosted, bbPosted);
   for (const userId of userIds) {
     toCallByUserId[userId] = Math.max(0, currentBet - Number(betThisRoundByUserId[userId] ?? 0));
@@ -167,7 +185,7 @@ export function buildBootstrappedPokerState({ tableId, coreState, dealerSeatNo =
     potTotal: sbPosted + bbPosted,
     sidePots: [],
     currentBet,
-    lastRaiseSize: bbPosted,
+    lastRaiseSize: bigBlind,
     stacks,
     toCallByUserId,
     betThisRoundByUserId,
@@ -204,7 +222,7 @@ export function resolveNextDealerSeatNo({ members, settledState, coreState = nul
   return eligibleMembers[nextIndex]?.seat ?? eligibleMembers[0].seat;
 }
 
-export function buildNextHandStateFromSettled({ tableId, coreState, settledState, nextVersion }) {
+export function buildNextHandStateFromSettled({ tableId, coreState, settledState, nextVersion, stakes = null }) {
   const members = orderedEligibleSeatMembers(coreState, settledState?.stacks);
   const nextDealerSeatNo = resolveNextDealerSeatNo({ members, settledState, coreState });
   const nextHandState = buildBootstrappedPokerState({
@@ -212,7 +230,8 @@ export function buildNextHandStateFromSettled({ tableId, coreState, settledState
     coreState,
     dealerSeatNo: nextDealerSeatNo,
     startingStacks: settledState?.stacks,
-    handVersion: nextVersion
+    handVersion: nextVersion,
+    stakes
   });
   if (!nextHandState) return null;
   const durableStacks = { ...nextHandState.stacks };
@@ -460,7 +479,7 @@ export function replaceBrokeBotsForNextHand({ coreState, settledState, nextVersi
   };
 }
 
-export function bootstrapCoreStateHand({ tableId, coreState, nowMs = Date.now() }) {
+export function bootstrapCoreStateHand({ tableId, coreState, nowMs = Date.now(), stakes = null }) {
   const currentPokerState = coreState?.pokerState;
   if (currentPokerState?.phase === "SETTLED") {
     return {
@@ -488,7 +507,8 @@ export function bootstrapCoreStateHand({ tableId, coreState, nowMs = Date.now() 
   const bootstrappedState = buildBootstrappedPokerState({
     tableId,
     coreState,
-    startingStacks: coreState?.publicStacks
+    startingStacks: coreState?.publicStacks,
+    stakes
   });
   if (!bootstrappedState) {
     return { ok: true, changed: false, bootstrap: "not_eligible", stateVersion: coreState.version, coreState };

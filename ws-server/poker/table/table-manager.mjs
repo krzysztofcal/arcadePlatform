@@ -816,7 +816,12 @@ export function createTableManager({
     const handEligibleCoreState = existingLiveState || settlementPending
       ? table.coreState
       : buildHandEligibleCoreState({ table, nowMs: resolvedNowMs });
-    const result = bootstrapCoreStateHand({ tableId, coreState: handEligibleCoreState, nowMs: resolvedNowMs });
+    const result = bootstrapCoreStateHand({
+      tableId,
+      coreState: handEligibleCoreState,
+      nowMs: resolvedNowMs,
+      stakes: table.tableMeta?.stakes
+    });
     table.coreState = result.changed && !existingLiveState
       ? {
           ...table.coreState,
@@ -1178,7 +1183,8 @@ export function createTableManager({
         ? toppedUp.coreState
         : buildHandEligibleCoreState({ table, coreState: toppedUp.coreState, nowMs }),
       settledState: toppedUp.settledState,
-      nextVersion
+      nextVersion,
+      stakes: table.tableMeta?.stakes
     });
 
     if (!nextHandState) {
