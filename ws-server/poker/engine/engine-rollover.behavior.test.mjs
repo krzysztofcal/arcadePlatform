@@ -6,7 +6,8 @@ import {
   buildBootstrappedPokerState,
   buildNextHandStateFromSettled,
   calculateReplacementFundingDelta,
-  replaceBrokeBotsForNextHand
+  replaceBrokeBotsForNextHand,
+  topUpManagedBotsForNextHand
 } from "./poker-engine.mjs";
 import { dealHoleCards, deriveDeck, toCardCodes } from "../shared/poker-primitives.mjs";
 
@@ -24,6 +25,79 @@ test("replacement funding delta rejects invalid accounting inputs", () => {
   }
   assert.equal(calculateReplacementFundingDelta({ oldStack: 1, targetStack: 0 }).ok, false);
   assert.equal(calculateReplacementFundingDelta({ oldStack: 1, targetStack: Number.NaN }).ok, false);
+});
+
+test("managed settled top-up fills vacant bot seats deterministically without changing humans", () => {
+  const coreState = {
+    roomId: "table_managed_top_up",
+    version: 7,
+    maxSeats: 6,
+    members: [
+      { userId: "human_a", seat: 1 },
+      { userId: "bot_a", seat: 2 }
+    ],
+    seats: { human_a: 1, bot_a: 2 },
+    publicStacks: { human_a: 250, bot_a: 80 },
+    seatDetailsByUserId: {
+      human_a: { isBot: false },
+      bot_a: { isBot: true, botProfile: "NORMAL" }
+    }
+  };
+  const settledState = {
+    handId: "hand_managed_top_up",
+    phase: "SETTLED",
+    stacks: { human_a: 250, bot_a: 80 }
+  };
+
+  const result = topUpManagedBotsForNextHand({
+    coreState,
+    settledState,
+    nextVersion: 8,
+    minBotCount: 2,
+    targetBotCount: 3,
+    maxBotCount: 3
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.topUpFundings.length, 2);
+  assert.deepEqual(result.topUpFundings.map((entry) => entry.seatNo), [3, 4]);
+  assert.equal(result.settledState.stacks.human_a, 250);
+  assert.equal(result.coreState.publicStacks.human_a, 250);
+  assert.equal(result.coreState.members.length, 4);
+  assert.equal(result.topUpFundings.every((entry) => entry.fundingDelta === 100), true);
+});
+
+test("managed settled top-up never displaces humans when capacity cannot reach target", () => {
+  const members = [
+    { userId: "human_a", seat: 1 },
+    { userId: "human_b", seat: 2 },
+    { userId: "human_c", seat: 3 },
+    { userId: "human_d", seat: 4 },
+    { userId: "bot_a", seat: 5 }
+  ];
+  const details = Object.fromEntries(members.map((member) => [member.userId, { isBot: member.userId.startsWith("bot_") }]));
+  const stacks = Object.fromEntries(members.map((member) => [member.userId, 100]));
+  const result = topUpManagedBotsForNextHand({
+    coreState: {
+      roomId: "table_managed_capacity",
+      version: 2,
+      maxSeats: 6,
+      members,
+      seats: Object.fromEntries(members.map((member) => [member.userId, member.seat])),
+      publicStacks: stacks,
+      seatDetailsByUserId: details
+    },
+    settledState: { handId: "hand_capacity", phase: "SETTLED", stacks },
+    nextVersion: 3,
+    minBotCount: 2,
+    targetBotCount: 3,
+    maxBotCount: 3
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.topUpFundings.length, 1);
+  assert.equal(result.topUpFundings[0].seatNo, 6);
+  assert.deepEqual(result.coreState.members.filter((member) => member.userId.startsWith("human_")), members.slice(0, 4));
 });
 
 function initialCore() {
@@ -109,6 +183,74 @@ test("fold settlement carryover preserves stack-eligible members and determinist
   assert.equal(next.handSeats.some((seat) => seat.userId === "user_a"), false);
   assert.equal(next.turnUserId, "user_b");
 });
+
+test("settled rollover admits a funded waiting player and clears only their next-hand marker", () => {
+  const coreState = {
+    roomId: "table_waiting_join",
+    version: 20,
+    seats: { user_a: 1, user_b: 2, user_joining: 3 },
+    members: [
+      { userId: "user_a", seat: 1 },
+      { userId: "user_b", seat: 2 },
+      { userId: "user_joining", seat: 3 }
+    ],
+    pokerState: null
+  };
+  const next = buildNextHandStateFromSettled({
+    tableId: coreState.roomId,
+    coreState,
+    settledState: {
+      handId: "settled_before_join",
+      phase: "SETTLED",
+      dealerSeatNo: 2,
+      stacks: { user_a: 90, user_b: 110, user_joining: 100 },
+      waitingForNextHandByUserId: { user_joining: true, unrelated_user: true }
+    },
+    nextVersion: 21
+  });
+
+  assert.equal(next.handSeats.some((seat) => seat.userId === "user_joining"), true);
+  assert.equal(next.stacks.user_joining, 100);
+  assert.equal(next.waitingForNextHandByUserId.user_joining, undefined);
+  assert.equal(next.waitingForNextHandByUserId.unrelated_user, true);
+});
+
+for (const stakes of [{ sb: 1, bb: 2 }, { sb: 5, bb: 10 }]) {
+  test(`settled rollover posts configured ${stakes.sb}/${stakes.bb} blinds`, () => {
+    const coreState = {
+      roomId: `table_rollover_${stakes.sb}_${stakes.bb}`,
+      version: 9,
+      seats: { user_a: 1, user_b: 2, user_c: 3 },
+      members: [
+        { userId: "user_a", seat: 1 },
+        { userId: "user_b", seat: 2 },
+        { userId: "user_c", seat: 3 }
+      ],
+      pokerState: null
+    };
+    const next = buildNextHandStateFromSettled({
+      tableId: coreState.roomId,
+      coreState,
+      settledState: {
+        handId: "settled_configured_stakes",
+        phase: "SETTLED",
+        dealerSeatNo: 3,
+        stacks: { user_a: 100, user_b: 100, user_c: 100 }
+      },
+      nextVersion: 10,
+      stakes
+    });
+
+    assert.equal(next.betThisRoundByUserId.user_b, stakes.sb);
+    assert.equal(next.betThisRoundByUserId.user_c, stakes.bb);
+    assert.equal(next.contributionsByUserId.user_b, stakes.sb);
+    assert.equal(next.contributionsByUserId.user_c, stakes.bb);
+    assert.equal(next.potTotal, stakes.sb + stakes.bb);
+    assert.equal(next.currentBet, stakes.bb);
+    assert.equal(next.lastRaiseSize, stakes.bb);
+    assert.equal(next.toCallByUserId.user_a, stakes.bb);
+  });
+}
 
 test("human with one chip remains eligible and posts a partial blind", () => {
   const coreState = {

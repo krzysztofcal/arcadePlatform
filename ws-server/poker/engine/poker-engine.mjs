@@ -100,7 +100,24 @@ export function orderedEligibleSeatMembers(coreState, stacksByUserId = null) {
   }));
 }
 
-export function buildBootstrappedPokerState({ tableId, coreState, dealerSeatNo = null, startingStacks = null, handVersion = null }) {
+function normalizeHandStakes(stakes) {
+  const smallBlind = Number(stakes?.sb);
+  const bigBlind = Number(stakes?.bb);
+  if (Number.isInteger(smallBlind) && smallBlind > 0
+    && Number.isInteger(bigBlind) && bigBlind > smallBlind) {
+    return { smallBlind, bigBlind };
+  }
+  return { smallBlind: 1, bigBlind: 2 };
+}
+
+export function buildBootstrappedPokerState({
+  tableId,
+  coreState,
+  dealerSeatNo = null,
+  startingStacks = null,
+  handVersion = null,
+  stakes = null
+}) {
   const members = orderedEligibleSeatMembers(coreState, startingStacks);
   if (members.length < MIN_PLAYERS_TO_BOOTSTRAP) {
     return null;
@@ -144,8 +161,9 @@ export function buildBootstrappedPokerState({ tableId, coreState, dealerSeatNo =
     return posted;
   };
 
-  const sbPosted = postBlind(sbUserId, 1);
-  const bbPosted = postBlind(bbUserId, 2);
+  const { smallBlind, bigBlind } = normalizeHandStakes(stakes);
+  const sbPosted = postBlind(sbUserId, smallBlind);
+  const bbPosted = postBlind(bbUserId, bigBlind);
   const currentBet = Math.max(sbPosted, bbPosted);
   for (const userId of userIds) {
     toCallByUserId[userId] = Math.max(0, currentBet - Number(betThisRoundByUserId[userId] ?? 0));
@@ -167,7 +185,7 @@ export function buildBootstrappedPokerState({ tableId, coreState, dealerSeatNo =
     potTotal: sbPosted + bbPosted,
     sidePots: [],
     currentBet,
-    lastRaiseSize: bbPosted,
+    lastRaiseSize: bigBlind,
     stacks,
     toCallByUserId,
     betThisRoundByUserId,
@@ -204,7 +222,7 @@ export function resolveNextDealerSeatNo({ members, settledState, coreState = nul
   return eligibleMembers[nextIndex]?.seat ?? eligibleMembers[0].seat;
 }
 
-export function buildNextHandStateFromSettled({ tableId, coreState, settledState, nextVersion }) {
+export function buildNextHandStateFromSettled({ tableId, coreState, settledState, nextVersion, stakes = null }) {
   const members = orderedEligibleSeatMembers(coreState, settledState?.stacks);
   const nextDealerSeatNo = resolveNextDealerSeatNo({ members, settledState, coreState });
   const nextHandState = buildBootstrappedPokerState({
@@ -212,7 +230,8 @@ export function buildNextHandStateFromSettled({ tableId, coreState, settledState
     coreState,
     dealerSeatNo: nextDealerSeatNo,
     startingStacks: settledState?.stacks,
-    handVersion: nextVersion
+    handVersion: nextVersion,
+    stakes
   });
   if (!nextHandState) return null;
   const durableStacks = { ...nextHandState.stacks };
@@ -242,6 +261,96 @@ function nextBotReplacementUserId({ tableId, seatNo, version, existingUserIds })
   }
   existingUserIds.add(candidate);
   return candidate;
+}
+
+export function topUpManagedBotsForNextHand({
+  coreState,
+  settledState,
+  nextVersion,
+  minBotCount,
+  targetBotCount,
+  maxBotCount
+} = {}) {
+  if (!coreState || typeof coreState !== "object" || !settledState || typeof settledState !== "object") {
+    return { ok: false, reason: "invalid_managed_top_up_state", coreState, settledState, topUpFundings: [] };
+  }
+  if (Number(coreState.version) + 1 !== nextVersion) {
+    return { ok: false, reason: "invalid_managed_top_up_version", coreState, settledState, topUpFundings: [] };
+  }
+  const minimum = Number(minBotCount);
+  const target = Number(targetBotCount);
+  const maximum = Number(maxBotCount);
+  if (!Number.isInteger(minimum) || !Number.isInteger(target) || !Number.isInteger(maximum)
+    || minimum < 0 || minimum > target || target > maximum) {
+    return { ok: false, reason: "invalid_managed_top_up_config", coreState, settledState, topUpFundings: [] };
+  }
+  const members = orderedSeatMembers(coreState);
+  const details = coreState.seatDetailsByUserId && typeof coreState.seatDetailsByUserId === "object"
+    ? coreState.seatDetailsByUserId
+    : {};
+  const botCount = members.filter((member) => details?.[member.userId]?.isBot === true).length;
+  if (botCount >= minimum) {
+    return { ok: true, coreState, settledState, topUpFundings: [] };
+  }
+  const maxSeats = Number(coreState.maxSeats);
+  if (!Number.isInteger(maxSeats) || maxSeats < 2) {
+    return { ok: false, reason: "invalid_managed_top_up_capacity", coreState, settledState, topUpFundings: [] };
+  }
+  const toAdd = Math.min(Math.max(0, target - botCount), Math.max(0, maximum - botCount), Math.max(0, maxSeats - members.length));
+  if (toAdd <= 0) {
+    return { ok: true, coreState, settledState, topUpFundings: [] };
+  }
+  const occupied = new Set(members.map((member) => member.seat));
+  const existingUserIds = new Set(members.map((member) => member.userId));
+  const nextMembers = members.slice();
+  const nextSeats = { ...(coreState.seats || {}) };
+  const nextDetails = { ...details };
+  const nextStacks = { ...(settledState.stacks || {}) };
+  const nextPublicStacks = { ...(coreState.publicStacks || {}) };
+  const topUpFundings = [];
+  for (let seatNo = 1; seatNo <= maxSeats && topUpFundings.length < toAdd; seatNo += 1) {
+    if (occupied.has(seatNo)) continue;
+    const botUserId = nextBotReplacementUserId({
+      tableId: `managed_top_up:${coreState.roomId || ""}`,
+      seatNo,
+      version: nextVersion,
+      existingUserIds
+    });
+    nextMembers.push({ userId: botUserId, seat: seatNo });
+    nextSeats[botUserId] = seatNo;
+    nextDetails[botUserId] = {
+      seatNo,
+      isBot: true,
+      botProfile: "NORMAL",
+      status: "ACTIVE",
+      leaveAfterHand: false
+    };
+    nextStacks[botUserId] = BOT_REPLACEMENT_STACK;
+    nextPublicStacks[botUserId] = BOT_REPLACEMENT_STACK;
+    topUpFundings.push({
+      seatNo,
+      botUserId,
+      botProfile: "NORMAL",
+      targetStack: BOT_REPLACEMENT_STACK,
+      fundingDelta: BOT_REPLACEMENT_STACK,
+      settledHandId: settledState.handId,
+      fromStateVersion: Number(coreState.version),
+      toStateVersion: nextVersion
+    });
+    occupied.add(seatNo);
+  }
+  return {
+    ok: true,
+    coreState: {
+      ...coreState,
+      members: nextMembers.sort((left, right) => left.seat - right.seat),
+      seats: nextSeats,
+      seatDetailsByUserId: nextDetails,
+      publicStacks: nextPublicStacks
+    },
+    settledState: { ...settledState, stacks: nextStacks },
+    topUpFundings
+  };
 }
 
 export function replaceBrokeBotsForNextHand({ coreState, settledState, nextVersion }) {
@@ -370,7 +479,7 @@ export function replaceBrokeBotsForNextHand({ coreState, settledState, nextVersi
   };
 }
 
-export function bootstrapCoreStateHand({ tableId, coreState, nowMs = Date.now() }) {
+export function bootstrapCoreStateHand({ tableId, coreState, nowMs = Date.now(), stakes = null }) {
   const currentPokerState = coreState?.pokerState;
   if (currentPokerState?.phase === "SETTLED") {
     return {
@@ -398,7 +507,8 @@ export function bootstrapCoreStateHand({ tableId, coreState, nowMs = Date.now() 
   const bootstrappedState = buildBootstrappedPokerState({
     tableId,
     coreState,
-    startingStacks: coreState?.publicStacks
+    startingStacks: coreState?.publicStacks,
+    stakes
   });
   if (!bootstrappedState) {
     return { ok: true, changed: false, bootstrap: "not_eligible", stateVersion: coreState.version, coreState };
@@ -544,11 +654,49 @@ export function applyCoreStateTurnTimeout({ tableId, coreState, nowMs = Date.now
     return { ok: true, changed: false, reason: decision.reason, stateVersion: coreState.version, coreState };
   }
 
+  const actorUserId = decision.actorUserId;
+  const leftTableByUserId = liveState.leftTableByUserId && typeof liveState.leftTableByUserId === "object" && !Array.isArray(liveState.leftTableByUserId)
+    ? liveState.leftTableByUserId
+    : null;
+  const actorDeferredLeave = leftTableByUserId?.[actorUserId] === true;
+  const actorSeatNo = actorDeferredLeave
+    ? (() => {
+        const stateSeats = Array.isArray(liveState.handSeats) && liveState.handSeats.length > 0
+          ? liveState.handSeats
+          : Array.isArray(liveState.seats)
+            ? liveState.seats
+            : [];
+        const match = stateSeats.find((seat) => seat?.userId === actorUserId);
+        return Number.isInteger(Number(match?.seatNo))
+          ? Number(match.seatNo)
+          : Number.isInteger(Number(match?.seat))
+            ? Number(match.seat)
+            : null;
+      })()
+    : null;
+  const timeoutCoreState = actorDeferredLeave
+    ? {
+        ...coreState,
+        seats: Number.isInteger(actorSeatNo)
+          ? { ...(coreState?.seats && typeof coreState.seats === "object" && !Array.isArray(coreState.seats) ? coreState.seats : {}), [actorUserId]: actorSeatNo }
+          : coreState?.seats,
+        members: Number.isInteger(actorSeatNo) && Array.isArray(coreState?.members) && !coreState.members.some((member) => member?.userId === actorUserId)
+          ? [...coreState.members, { userId: actorUserId, seat: actorSeatNo }]
+          : coreState?.members,
+        pokerState: {
+          ...liveState,
+          leftTableByUserId: {
+            ...leftTableByUserId,
+            [actorUserId]: false
+          }
+        }
+      }
+    : coreState;
   const applied = applyCoreStateAction({
     tableId,
-    coreState,
+    coreState: timeoutCoreState,
     handId: liveState.handId,
-    userId: decision.actorUserId,
+    userId: actorUserId,
     action: decision.action.type,
     amount: null,
     nowIso: new Date(nowMs).toISOString(),
@@ -561,19 +709,31 @@ export function applyCoreStateTurnTimeout({ tableId, coreState, nowMs = Date.now
       changed: false,
       reason: applied.reason || "timeout_rejected",
       stateVersion: coreState.version,
-      actorUserId: decision.actorUserId,
+      actorUserId,
       action: decision.action.type,
       coreState
     };
   }
 
+  const nextCoreState = actorDeferredLeave
+    ? {
+        ...applied.coreState,
+        seats: coreState?.seats,
+        members: coreState?.members,
+        pokerState: {
+          ...applied.coreState.pokerState,
+          leftTableByUserId: { ...leftTableByUserId }
+        }
+      }
+    : applied.coreState;
+
   return {
     ok: true,
     changed: true,
     reason: null,
-    actorUserId: decision.actorUserId,
+    actorUserId,
     action: decision.action.type,
     stateVersion: applied.stateVersion,
-    coreState: applied.coreState
+    coreState: nextCoreState
   };
 }

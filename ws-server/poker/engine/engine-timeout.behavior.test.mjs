@@ -153,3 +153,37 @@ test("timeout on a turn with legal CHECK applies CHECK and advances turn", () =>
   assert.equal(timeout.coreState.pokerState.phase, "FLOP");
   assert.equal(timeout.coreState.pokerState.turnUserId, "user_a");
 });
+
+test("timeout can fold a deferred-leave human even when runtime membership already excludes them", () => {
+  const boot = bootstrapCoreStateHand({ tableId: "table_engine_timeout", coreState: initialCore(), nowMs: 10_000 });
+  const actorUserId = boot.coreState.pokerState.turnUserId;
+  const actorSeat = boot.coreState.seats[actorUserId];
+  const deadline = boot.coreState.pokerState.turnDeadlineAt;
+
+  const deferredCore = {
+    ...boot.coreState,
+    seats: { user_b: 2 },
+    members: [{ userId: "user_b", seat: 2 }],
+    pokerState: {
+      ...boot.coreState.pokerState,
+      leftTableByUserId: { [actorUserId]: true }
+    }
+  };
+
+  const timeout = applyCoreStateTurnTimeout({
+    tableId: "table_engine_timeout",
+    coreState: deferredCore,
+    nowMs: deadline + 1
+  });
+
+  assert.equal(timeout.changed, true);
+  assert.equal(timeout.actorUserId, actorUserId);
+  assert.equal(timeout.action, "FOLD");
+  assert.equal(timeout.coreState.pokerState.foldedByUserId[actorUserId], true);
+  assert.equal(timeout.coreState.pokerState.leftTableByUserId[actorUserId], true);
+  assert.equal(timeout.coreState.seats[actorUserId], undefined);
+  assert.equal(timeout.coreState.members.some((member) => member.userId === actorUserId), false);
+  assert.equal(timeout.coreState.pokerState.phase, "SETTLED");
+  assert.equal(timeout.coreState.pokerState.turnUserId, null);
+  assert.equal(actorSeat, 1);
+});

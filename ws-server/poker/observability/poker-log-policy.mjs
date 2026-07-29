@@ -121,6 +121,9 @@ register("INFO", "table_lifecycle", [
   "poker_leave_advanced",
   "poker_leave_retained_live_hand",
   "poker_rebuy_committed",
+  "ws_continuous_bot_table_created",
+  "ws_continuous_bot_table_restored",
+  "ws_continuous_bot_table_retirement_requested",
   "ws_guest_table_evicted"
 ]);
 
@@ -236,6 +239,7 @@ register("ERROR", "recovery", [
 ]);
 
 register("ERROR", "runtime", [
+  "ws_continuous_bot_table_supervisor_failed",
   "ws_error",
   "ws_message_processing_error",
   "ws_table_command_failed",
@@ -297,6 +301,7 @@ register("ERROR", "gameplay", [
 
 const cleanupPrefixCategories = Object.freeze({
   ws_bot_claims_recovery: "recovery",
+  ws_continuous_bot_table_retirement: "table_lifecycle",
   ws_disconnect_cleanup: "janitor",
   ws_settled_rollover_close: "janitor",
   ws_settled_rollover_deferred_leave: "janitor",

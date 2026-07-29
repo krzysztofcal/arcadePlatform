@@ -11,6 +11,8 @@ function createCleanupHarness({
   seatRows,
   state,
   tableStatus = "OPEN",
+  lifecycleKind = null,
+  managedProfileKey = null,
   createdAt = "2026-03-01T00:00:00.000Z",
   lastActivityAt = null,
   updatedAt = null,
@@ -42,6 +44,13 @@ function createCleanupHarness({
       }
       if (sql.includes("select version, state from public.poker_state")) {
         return [{ version: tableState.stateRow.version, state: { ...tableState.stateRow.state } }];
+      }
+      if (sql.includes("delete from public.poker_seats where table_id = $1 and user_id = $2")) {
+        const [, userId] = params;
+        for (let i = seatState.length - 1; i >= 0; i -= 1) {
+          if (seatState[i].user_id === userId) seatState.splice(i, 1);
+        }
+        return [];
       }
       if (sql.includes("where table_id = $1 and user_id = $2 limit 1 for update")) {
         const [, userId] = params;
@@ -92,7 +101,9 @@ function createCleanupHarness({
           status: tableState.tableStatus,
           created_at: tableState.createdAt,
           last_activity_at: tableState.lastActivityAt,
-          updated_at: tableState.updatedAt
+          updated_at: tableState.updatedAt,
+          lifecycle_kind: lifecycleKind,
+          managed_profile_key: managedProfileKey
         }];
       }
       if (sql.includes("update public.poker_tables set status = 'CLOSED'")) {
@@ -355,6 +366,47 @@ test("inactive cleanup closes stale live hand for disconnected human after activ
   assert.equal(harness.tableState.stateRow.state.phase, "HAND_DONE");
   assert.equal(harness.tableState.stateRow.state.turnUserId, null);
   assert.deepEqual(harness.tableState.stateRow.state.stacks, {});
+});
+
+test("inactive cleanup defers the last human on a managed continuous live hand instead of closing the table", async () => {
+  const harness = createCleanupHarness({
+    seatRows: [
+      { user_id: "human_1", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 250 },
+      { user_id: "bot_1", seat_no: 2, status: "ACTIVE", is_bot: true, stack: 170 },
+      { user_id: "bot_2", seat_no: 3, status: "ACTIVE", is_bot: true, stack: 165 }
+    ],
+    state: {
+      phase: "PREFLOP",
+      handId: "h-managed-stale-disconnect",
+      turnUserId: "human_1",
+      turnDeadlineAt: null,
+      seats: [
+        { userId: "human_1", seatNo: 1, status: "ACTIVE" },
+        { userId: "bot_1", seatNo: 2, status: "ACTIVE", isBot: true },
+        { userId: "bot_2", seatNo: 3, status: "ACTIVE", isBot: true }
+      ],
+      stacks: { human_1: 250, bot_1: 170, bot_2: 165 },
+      leftTableByUserId: {}
+    },
+    lifecycleKind: "CONTINUOUS_BOT",
+    managedProfileKey: "CONTINUOUS_BOT_DEFAULT",
+    createdAt: "2026-03-01T00:00:00.000Z",
+    lastActivityAt: "2026-03-01T00:00:10.000Z",
+    nowMs: Date.parse("2026-03-01T00:02:00.000Z")
+  });
+
+  const result = await harness.run();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, true);
+  assert.equal(result.closed, false);
+  assert.equal(result.status, "managed_continuous_human_deferred");
+  assert.equal(harness.cashouts.length, 0);
+  assert.equal(harness.tableState.tableStatus, "OPEN");
+  assert.equal(harness.seatState.find((row) => row.user_id === "human_1")?.status, "ACTIVE");
+  assert.equal(harness.tableState.stateRow.state.leftTableByUserId.human_1, true);
+  assert.equal(harness.tableState.stateRow.state.phase, "PREFLOP");
+  assert.deepEqual(harness.tableState.stateRow.state.stacks, { human_1: 250, bot_1: 170, bot_2: 165 });
 });
 
 test("inactive cleanup refunds stale live-hand contributions including zero-stack all-in participant", async () => {

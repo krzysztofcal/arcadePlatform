@@ -378,3 +378,49 @@ test("adapter fails closed when an active human has no authoritative state stack
   assert.equal(result.code, "invalid_persisted_state");
   assert.equal(result.message, "human_stack_ambiguous");
 });
+
+test("adapter carries only the trusted managed lifecycle binding into runtime metadata", () => {
+  const managed = adaptPersistedBootstrap({
+    tableId: "table_managed_meta",
+    tableRow: {
+      id: "table_managed_meta",
+      max_players: 6,
+      status: "OPEN",
+      stakes: { sb: 1, bb: 2 },
+      lifecycle_kind: "CONTINUOUS_BOT",
+      managed_profile_key: "CONTINUOUS_BOT_DEFAULT",
+      rotation_due_at: "2026-07-29T12:00:00.000Z"
+    },
+    seatRows: [
+      { user_id: "bot_a", seat_no: 1, status: "ACTIVE", is_bot: true, bot_profile: "NORMAL", stack: 100 },
+      { user_id: "bot_b", seat_no: 2, status: "ACTIVE", is_bot: true, bot_profile: "NORMAL", stack: 100 }
+    ],
+    stateRow: {
+      version: 0,
+      state: { tableId: "table_managed_meta", phase: "INIT", seats: [
+        { userId: "bot_a", seatNo: 1, isBot: true },
+        { userId: "bot_b", seatNo: 2, isBot: true }
+      ], stacks: { bot_a: 100, bot_b: 100 } }
+    }
+  });
+  assert.equal(managed.ok, true);
+  assert.equal(managed.table.tableMeta.lifecycleKind, "CONTINUOUS_BOT");
+  assert.equal(managed.table.tableMeta.managedProfileKey, "CONTINUOUS_BOT_DEFAULT");
+  assert.equal(managed.table.tableMeta.rotationDueAtMs, Date.parse("2026-07-29T12:00:00.000Z"));
+
+  const untrusted = adaptPersistedBootstrap({
+    tableId: "table_untrusted_meta",
+    tableRow: {
+      id: "table_untrusted_meta",
+      max_players: 6,
+      status: "OPEN",
+      lifecycle_kind: "CONTINUOUS_BOT",
+      managed_profile_key: "OTHER"
+    },
+    seatRows: [],
+    stateRow: { version: 0, state: { tableId: "table_untrusted_meta", phase: "INIT", seats: [], stacks: {} } }
+  });
+  assert.equal(untrusted.ok, true);
+  assert.equal(untrusted.table.tableMeta.lifecycleKind, "STANDARD");
+  assert.equal(untrusted.table.tableMeta.managedProfileKey, null);
+});

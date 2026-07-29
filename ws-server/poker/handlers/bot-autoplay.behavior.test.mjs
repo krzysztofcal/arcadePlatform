@@ -1,12 +1,79 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  createBotAutoplayCascadeScheduler,
   createBotAutoplayObservability,
   handleBotStepCommand,
   matchesBotTimeoutSafetySuppression,
   shouldClearBotTimeoutSafetySuppression,
   shouldSuppressBotTimeoutSafetyRetry
 } from "./bot-autoplay.mjs";
+import { createTableCommandQueue } from "../runtime/table-command-queue.mjs";
+
+test("bot autoplay cascade coalesces triggers and lets a human join run before its next step", async () => {
+  const queue = createTableCommandQueue();
+  const order = [];
+  let releaseFirstStep;
+  let resolveFirstStepStarted;
+  const firstStepGate = new Promise((resolve) => { releaseFirstStep = resolve; });
+  const firstStepStarted = new Promise((resolve) => { resolveFirstStepStarted = resolve; });
+  let stepCount = 0;
+
+  const scheduler = createBotAutoplayCascadeScheduler({
+    runStep: ({ tableId }) => queue.enqueue({
+      tableId,
+      run: async () => {
+        stepCount += 1;
+        order.push(`bot:${stepCount}:start`);
+        if (stepCount === 1) {
+          resolveFirstStepStarted();
+          await firstStepGate;
+        }
+        order.push(`bot:${stepCount}:end`);
+        return { ok: true, shouldContinue: stepCount === 1 };
+      }
+    })
+  });
+
+  const firstCascade = scheduler.schedule({ tableId: "managed-table", trigger: "created" });
+  await firstStepStarted;
+  const overlappingCascade = scheduler.schedule({ tableId: "managed-table", trigger: "observed_turn" });
+  assert.equal(overlappingCascade, firstCascade);
+
+  const humanJoin = queue.enqueue({
+    tableId: "managed-table",
+    run: async () => {
+      order.push("human:join");
+      return { ok: true };
+    }
+  });
+  releaseFirstStep();
+
+  await Promise.all([firstCascade, humanJoin]);
+  assert.equal(stepCount, 2);
+  assert.deepEqual(order, [
+    "bot:1:start",
+    "bot:1:end",
+    "human:join",
+    "bot:2:start",
+    "bot:2:end"
+  ]);
+});
+
+test("bot autoplay cascade clears after stopping so a later trigger starts a fresh step", async () => {
+  let stepCount = 0;
+  const scheduler = createBotAutoplayCascadeScheduler({
+    runStep: async () => {
+      stepCount += 1;
+      return { ok: true, shouldContinue: false };
+    }
+  });
+
+  await scheduler.schedule({ tableId: "managed-table", trigger: "first" });
+  await scheduler.schedule({ tableId: "managed-table", trigger: "second" });
+
+  assert.equal(stepCount, 2);
+});
 
 test("bot autoplay observability preserves first and terminal events while aggregating repeated failures", () => {
   const logs = [];

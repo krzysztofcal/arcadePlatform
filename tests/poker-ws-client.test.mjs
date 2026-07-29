@@ -184,7 +184,7 @@ test('poker ws client gameplay commands including rebuy resolve and reject by co
   await assert.rejects(actPromise, (err) => err && err.code === 'hand_not_live');
 });
 
-test('poker ws client keeps the socket ready after a command-scoped error frame', async () => {
+test('poker ws client keeps an ambiguous join pending after a command-scoped attach error', async () => {
   const h = loadClientHarness();
   h.client.start();
   const ws = h.FakeWebSocket.instances[0];
@@ -204,11 +204,101 @@ test('poker ws client keeps the socket ready after a command-scoped error frame'
     }
   });
 
-  await assert.rejects(joinPromise, (err) => err && err.code === 'TABLE_BOOTSTRAP_FAILED');
-  assert.equal(h.client.isReady(), true);
   assert.equal(h.statuses.some((entry) => entry.status === 'command_error' && entry.data.code === 'TABLE_BOOTSTRAP_FAILED'), true);
+  assert.equal(h.statuses.some((entry) => entry.status === 'join_pending' && entry.data.requestId === 'join_bootstrap_retry'), true);
+  ws.message({
+    type: 'commandResult',
+    requestId: 'join_bootstrap_retry',
+    payload: {
+      requestId: 'join_bootstrap_retry',
+      status: 'accepted',
+      seatNo: 3,
+      joinStatus: 'WAITING_NEXT_HAND'
+    }
+  });
+  const result = await joinPromise;
+  assert.equal(result.seatNo, 3);
+  assert.equal(result.joinStatus, 'WAITING_NEXT_HAND');
+  assert.equal(h.client.isReady(), true);
   assert.equal(h.statuses.some((entry) => entry.status === 'error'), false);
   assert.equal(h.protocolErrors.length, 0);
+});
+
+test('poker ws client keeps a server recovery-pending join under the same request id', async () => {
+  const h = loadClientHarness();
+  h.client.start();
+  const ws = h.FakeWebSocket.instances[0];
+  ws.open();
+  ws.message({ type: 'helloAck', payload: { version: '1.0' } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  ws.message({ type: 'authOk', payload: { roomId: 'table_test_1' } });
+
+  const joinPromise = h.client.sendJoin({ tableId: 'table_test_1' }, 'join_recovery_1');
+  ws.message({
+    type: 'commandResult',
+    requestId: 'join_recovery_1',
+    payload: {
+      requestId: 'join_recovery_1',
+      status: 'pending',
+      reason: 'runtime_attach_failed'
+    }
+  });
+
+  assert.equal(h.statuses.some((entry) => entry.status === 'join_pending'
+    && entry.data.requestId === 'join_recovery_1'
+    && entry.data.reason === 'runtime_attach_failed'), true);
+
+  ws.message({
+    type: 'commandResult',
+    requestId: 'join_recovery_1',
+    payload: {
+      requestId: 'join_recovery_1',
+      status: 'accepted',
+      seatNo: 2,
+      joinStatus: 'WAITING_NEXT_HAND'
+    }
+  });
+
+  const result = await joinPromise;
+  assert.equal(result.requestId, 'join_recovery_1');
+  assert.equal(result.seatNo, 2);
+  assert.equal(result.joinStatus, 'WAITING_NEXT_HAND');
+});
+
+test('poker ws client treats the join timeout as soft and accepts a late result', async () => {
+  let commandTimeout = null;
+  const h = loadClientHarness({
+    setTimeout(fn, delay){
+      if (delay === 12_000) commandTimeout = fn;
+      return 1;
+    },
+    clearTimeout(){}
+  });
+  h.client.start();
+  const ws = h.FakeWebSocket.instances[0];
+  ws.open();
+  ws.message({ type: 'helloAck', payload: { version: '1.0' } });
+  await Promise.resolve();
+  await Promise.resolve();
+  ws.message({ type: 'authOk', payload: { roomId: 'table_test_1' } });
+
+  const joinPromise = h.client.sendJoin({ tableId: 'table_test_1', autoSeat: true }, 'join_soft_timeout');
+  assert.equal(typeof commandTimeout, 'function');
+  commandTimeout();
+  assert.equal(h.statuses.some((entry) => entry.status === 'join_pending' && entry.data.requestId === 'join_soft_timeout'), true);
+  assert.equal(h.sentFrames.some((frame) => frame.type === 'table_state_sub' && frame.payload.view === 'snapshot'), true);
+
+  ws.message({
+    type: 'commandResult',
+    requestId: 'join_soft_timeout',
+    payload: {
+      requestId: 'join_soft_timeout',
+      status: 'accepted',
+      seatNo: 4,
+      joinStatus: 'WAITING_NEXT_HAND'
+    }
+  });
+  assert.equal((await joinPromise).seatNo, 4);
 });
 
 test('poker ws client can queue leave without waiting for commandResult', async () => {

@@ -87,6 +87,9 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-seat--folded .poker-seat-cards,.poker-seat--folded .poker-seat-name,.poker-seat--folded .poker-seat-action-badge,.poker-seat--folded .poker-seat-best-hand{opacity:0.46;}
 
 .poker-seat--folded .poker-seat-status{color:#f9c1c1; border-color:rgba(236,132,132,0.52); background:rgba(73,17,17,0.66);}
+.poker-seat--waiting-next-hand{opacity:1;}
+.poker-seat--waiting-next-hand .poker-seat-avatar{filter:none; border-color:#f4c95d; box-shadow:0 0 0 3px rgba(244,201,93,0.22),0 0 18px rgba(244,201,93,0.32);}
+.poker-seat--waiting-next-hand .poker-seat-status{color:#fff1b8; border-color:rgba(244,201,93,0.72); background:rgba(85,61,12,0.88);}
 
 .poker-seat--hero{width:124px;}
 

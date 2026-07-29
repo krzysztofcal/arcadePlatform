@@ -56,6 +56,49 @@ test("resolveNextDealerSeatNo skips ineligible seats based on settled continuati
   assert.equal(nextDealer, 3);
 });
 
+test("bots-only bootstrap requires both trusted managed metadata and explicit internal intent", () => {
+  const tableId = "table_managed_bootstrap_gate";
+  const manager = createTableManager({ maxSeats: 6 });
+  const restored = manager.restoreTableFromPersisted(tableId, {
+    tableMeta: {
+      maxPlayers: 6,
+      stakes: { sb: 1, bb: 2 },
+      lifecycleKind: "CONTINUOUS_BOT",
+      managedProfileKey: "CONTINUOUS_BOT_DEFAULT"
+    },
+    coreState: {
+      version: 0,
+      roomId: tableId,
+      maxSeats: 6,
+      members: [
+        { userId: "bot_a", seat: 1 },
+        { userId: "bot_b", seat: 2 }
+      ],
+      seats: { bot_a: 1, bot_b: 2 },
+      publicStacks: { bot_a: 100, bot_b: 100 },
+      seatDetailsByUserId: {
+        bot_a: { isBot: true, botProfile: "NORMAL" },
+        bot_b: { isBot: true, botProfile: "NORMAL" }
+      },
+      pokerState: {
+        tableId,
+        phase: "INIT",
+        seats: [
+          { userId: "bot_a", seatNo: 1, isBot: true },
+          { userId: "bot_b", seatNo: 2, isBot: true }
+        ],
+        stacks: { bot_a: 100, bot_b: 100 }
+      }
+    }
+  });
+  assert.equal(restored.ok, true);
+  assert.equal(manager.bootstrapHand(tableId, { nowMs: 1_000 }).changed, false);
+  const started = manager.bootstrapHand(tableId, { nowMs: 1_000, allowManagedBotsOnly: true });
+  assert.equal(started.ok, true);
+  assert.equal(started.changed, true);
+  assert.equal(manager.persistedPokerState(tableId).phase, "PREFLOP");
+});
+
 test("applyAction returns accepted action audit context without private cards", () => {
   const tableManager = createTableManager({ maxSeats: 4 });
   const tableId = "table_action_audit_context";
@@ -207,6 +250,105 @@ test("rolloverSettledHand delays next-hand bootstrap until explicitly invoked", 
   assert.equal(nextState.dealerSeatNo, 2);
   assert.equal(nextState.turnStartedAt, 5_000);
   assert.equal(nextState.turnDeadlineAt > nextState.turnStartedAt, true);
+});
+
+test("managed continuous table rolls the same table into the next bots-only hand after the last human was finalized", () => {
+  const tableManager = createTableManager({ maxSeats: 6 });
+  const tableId = "table_managed_continuous_same_table";
+  const restored = tableManager.restoreTableFromPersisted(tableId, {
+    tableMeta: {
+      maxPlayers: 6,
+      stakes: { sb: 1, bb: 2 },
+      lifecycleKind: "CONTINUOUS_BOT",
+      managedProfileKey: "CONTINUOUS_BOT_DEFAULT"
+    },
+    coreState: {
+      version: 14,
+      roomId: tableId,
+      maxSeats: 6,
+      members: [
+        { userId: "bot_a", seat: 2 },
+        { userId: "bot_b", seat: 3 },
+        { userId: "bot_c", seat: 4 }
+      ],
+      seats: { bot_a: 2, bot_b: 3, bot_c: 4 },
+      publicStacks: { bot_a: 110, bot_b: 95, bot_c: 105 },
+      seatDetailsByUserId: {
+        bot_a: { isBot: true, botProfile: "NORMAL", leaveAfterHand: false },
+        bot_b: { isBot: true, botProfile: "NORMAL", leaveAfterHand: false },
+        bot_c: { isBot: true, botProfile: "NORMAL", leaveAfterHand: false }
+      },
+      pokerState: {
+        tableId,
+        roomId: tableId,
+        handId: "hand_managed_after_human_cleanup",
+        phase: "SETTLED",
+        dealerSeatNo: 2,
+        seats: [
+          { userId: "bot_a", seatNo: 2, status: "ACTIVE", isBot: true },
+          { userId: "bot_b", seatNo: 3, status: "ACTIVE", isBot: true },
+          { userId: "bot_c", seatNo: 4, status: "ACTIVE", isBot: true }
+        ],
+        stacks: { bot_a: 110, bot_b: 95, bot_c: 105 },
+        leftTableByUserId: { human_1: true },
+        showdown: {
+          handId: "hand_managed_after_human_cleanup",
+          winners: ["bot_a"],
+          potsAwarded: [{ amount: 12, winners: ["bot_a"], eligibleUserIds: ["bot_a", "bot_b", "bot_c"] }],
+          potAwardedTotal: 12,
+          reason: "computed"
+        },
+        handSettlement: {
+          handId: "hand_managed_after_human_cleanup",
+          settledAt: "2026-07-29T14:00:00.000Z",
+          payouts: { bot_a: 12 }
+        },
+        holeCardsByUserId: {
+          bot_a: ["AS", "KD"],
+          bot_b: ["2C", "2D"],
+          bot_c: ["3H", "3S"]
+        }
+      }
+    }
+  });
+
+  assert.equal(restored.ok, true);
+
+  const prepared = tableManager.prepareSettledHandRollover({
+    tableId,
+    nowMs: 8_000,
+    allowManagedBotsOnly: true,
+    managedBotProfile: {
+      minBotCount: 2,
+      targetBotCount: 3,
+      maxBotCount: 3
+    }
+  });
+
+  assert.equal(prepared.ok, true);
+  assert.equal(prepared.changed, true);
+  const committed = tableManager.commitSettledHandRollover({
+    tableId,
+    expectedVersion: prepared.expectedVersion,
+    nextCoreState: prepared.nextCoreState,
+    replacementFundings: prepared.replacementFundings,
+    managedBotTopUps: prepared.managedBotTopUps,
+    managedBotProfile: { minBotCount: 2, targetBotCount: 3, maxBotCount: 3 },
+    humanStackUpdates: prepared.humanStackUpdates,
+    persistenceReceipt: { ok: true, tableId, expectedVersion: prepared.expectedVersion, newVersion: prepared.stateVersion },
+    economyMode: "none",
+    nowMs: 8_000
+  });
+
+  assert.equal(committed.ok, true);
+  assert.equal(committed.changed, true);
+  assert.equal(committed.handId !== "hand_managed_after_human_cleanup", true);
+  const nextState = tableManager.persistedPokerState(tableId);
+  assert.equal(nextState.phase, "PREFLOP");
+  assert.equal(nextState.roomId, tableId);
+  assert.deepEqual(nextState.handSeats.map((seat) => seat.userId).sort(), ["bot_a", "bot_b", "bot_c"]);
+  assert.equal(nextState.handSeats.length, 3);
+  assert.equal(Object.hasOwn(nextState.stacks, "human_1"), false);
 });
 
 test("persistent bot replacement commits runtime only with matching funding receipt", () => {

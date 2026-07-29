@@ -163,6 +163,12 @@
   var autoJoinErrorActive = false;
   var reconnectSeatNo = null;
   var lastKnownCurrentSeatNo = null;
+  var joinOperation = {
+    phase: 'idle',
+    requestId: null,
+    payload: null,
+    source: null
+  };
   var bootReady = false;
   var queuedPreaction = null;
   var queuedPreactionInFlight = false;
@@ -1470,6 +1476,78 @@
     return null;
   }
 
+  function isJoinOperationPending(){
+    return joinOperation.phase === 'reserving' || joinOperation.phase === 'checking';
+  }
+
+  function pendingJoinStorageKey(){
+    if (!state.currentUserId || !state.tableId) return null;
+    return 'poker:pendingJoin:' + String(state.currentUserId) + ':' + String(state.tableId);
+  }
+
+  function persistPendingJoin(){
+    var key = pendingJoinStorageKey();
+    if (!key || !joinOperation.requestId || !joinOperation.payload) return;
+    try {
+      if (window.sessionStorage) {
+        window.sessionStorage.setItem(key, JSON.stringify({
+          requestId: joinOperation.requestId,
+          tableId: state.tableId,
+          payload: joinOperation.payload,
+          phase: 'unresolved'
+        }));
+      }
+    } catch (_err){}
+  }
+
+  function clearPendingJoin(){
+    var key = pendingJoinStorageKey();
+    if (!key) return;
+    try { if (window.sessionStorage) window.sessionStorage.removeItem(key); } catch (_err){}
+  }
+
+  function loadPendingJoin(){
+    var key = pendingJoinStorageKey();
+    if (!key) return null;
+    try {
+      var raw = window.sessionStorage ? window.sessionStorage.getItem(key) : null;
+      var parsed = raw ? JSON.parse(raw) : null;
+      if (!parsed || parsed.tableId !== state.tableId || typeof parsed.requestId !== 'string' || !parsed.requestId || !isObject(parsed.payload)) return null;
+      return {
+        requestId: parsed.requestId,
+        payload: parsed.payload
+      };
+    } catch (_err){
+      return null;
+    }
+  }
+
+  function setJoinOperationPhase(phase){
+    joinOperation.phase = phase;
+    if (phase === 'reserving') state.statusText = 'Reserving seat…';
+    else if (phase === 'checking') state.statusText = 'Checking seat reservation…';
+    else if (phase === 'waiting_next_hand') state.statusText = 'Seat reserved · Joining next hand';
+    else if (phase === 'active') state.statusText = LIVE_STATUS_COPY.live;
+    renderInfoPanel();
+    renderControls();
+  }
+
+  function buildJoinRequestId(){
+    return 'join_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+  }
+
+  function reconcileJoinOperationFromSnapshot(){
+    var seat = deriveCurrentSeat();
+    if (!seat) return false;
+    var waiting = currentPlayerStatus() === 'WAITING_NEXT_HAND';
+    joinOperation.phase = waiting ? 'waiting_next_hand' : 'active';
+    state.statusText = waiting ? 'Seat reserved · Joining next hand' : LIVE_STATUS_COPY.live;
+    joinOperation.requestId = null;
+    joinOperation.payload = null;
+    clearPendingJoin();
+    return true;
+  }
+
   function hasRenderableCurrentSeat(){
     var currentUserId = state.currentUserId;
     if (!currentUserId) return false;
@@ -2312,6 +2390,7 @@
       var hero = isCurrentUserSeat(seat);
       var lastAction = getSeatLastBettingRoundAction(seat);
       var folded = !!(seat && /FOLD/i.test(seat.status || ''));
+      var waitingNextHand = !!(seat && String(seat.status || '').toUpperCase() === 'WAITING_NEXT_HAND');
       var rotatedIndex = rotateSeatIndex(i, state.maxSeats);
       var anchor = getSeatAnchor(rotatedIndex, state.maxSeats);
       if (hero && state.maxSeats >= 4) anchor = { x: 34, y: 91 };
@@ -2324,6 +2403,7 @@
         + (seat && hasWonContestedPot(seat) ? ' poker-seat--pot-winner' : '')
         + (seat && hasReturnedChips(seat) ? ' poker-seat--returned' : '')
         + (hero ? ' poker-seat--hero' : '')
+        + (waitingNextHand ? ' poker-seat--waiting-next-hand' : '')
         + (!seat ? ' poker-seat--empty' : '');
       article.style.left = anchor.x + '%';
       article.style.top = anchor.y + '%';
@@ -2340,7 +2420,7 @@
 
       var cards = document.createElement('div');
       cards.className = 'poker-seat-cards';
-      if (!hero && seat && seat.userId){
+      if (!hero && seat && seat.userId && !waitingNextHand){
         var revealCards = getSeatRevealCards(seat);
         if (revealCards){
           revealCards.forEach(function(card){
@@ -2360,6 +2440,7 @@
       var statusPosition = getSeatStatusBadgePosition(rotatedIndex, hero);
       status.className = 'poker-seat-status';
       status.textContent = seat ? String(seat.status || 'ACTIVE').replace(/_/g, ' ') : 'OPEN';
+      if (waitingNextHand) status.textContent = 'NEXT HAND';
       status.style.left = statusPosition.left;
       status.style.top = statusPosition.top;
 
@@ -2423,6 +2504,11 @@
   function renderHeroCards(){
     if (!els.heroCards) return;
     els.heroCards.innerHTML = '';
+    if (currentPlayerStatus() === 'WAITING_NEXT_HAND'){
+      els.heroCards.hidden = true;
+      return;
+    }
+    els.heroCards.hidden = false;
     if (isCurrentUserFolded()) els.heroCards.className = 'poker-hero-cards poker-hero-cards--folded';
     else els.heroCards.className = 'poker-hero-cards';
     var cards = Array.isArray(state.heroCards) ? state.heroCards : [];
@@ -2786,10 +2872,11 @@
     var preactionAmountBounds = resolveAmountBounds(preactionAmountAction, stackAmount);
     var displayPrimary = primary || preactionPrimary || 'CHECK';
     var displayAmountAction = amountAction || preactionAmountAction || 'BET';
-    var showActionButtons = signedIn && seated;
+    var showActionButtons = signedIn && seated && currentPlayerStatus() !== 'WAITING_NEXT_HAND';
     var showLiveActionButtons = showActionButtons && !preactionMode;
     var actionControlsLocked = !liveReady || !usersTurn || controlsLocked || playerSittingOut;
-    var joinDisabled = !signedIn || seated || !state.tableId || !liveReady;
+    var joinPending = isJoinOperationPending();
+    var joinDisabled = !signedIn || seated || !state.tableId || !liveReady || joinPending;
     if (!seated || !activeHand || isCurrentUserFolded() || playerSittingOut) clearQueuedPreaction();
     if (preactionMode) {
       syncQueuedPreactionWithPreactionState({
@@ -2809,10 +2896,15 @@
     if (els.joinBtn) els.joinBtn.hidden = false;
     if (els.joinBtn) els.joinBtn.disabled = joinDisabled;
     if (els.joinBtn) {
-      if (seated) els.joinBtn.textContent = 'Joined';
+      if (joinOperation.phase === 'reserving') els.joinBtn.textContent = 'Reserving seat…';
+      else if (joinOperation.phase === 'checking') els.joinBtn.textContent = 'Checking reservation…';
+      else if (seated && currentPlayerStatus() === 'WAITING_NEXT_HAND') els.joinBtn.textContent = 'Joining next hand';
+      else if (seated) els.joinBtn.textContent = 'Joined';
       else if (!signedIn) els.joinBtn.textContent = 'Join';
       else if (!liveReady) els.joinBtn.textContent = 'Connecting…';
       else els.joinBtn.textContent = 'Join';
+      if (joinPending) els.joinBtn.setAttribute('aria-busy', 'true');
+      else els.joinBtn.removeAttribute('aria-busy');
     }
     if (els.joinSeat) els.joinSeat.disabled = !signedIn || seated || !liveReady;
     if (els.joinBuyIn) els.joinBuyIn.disabled = !signedIn || seated || !liveReady;
@@ -3015,12 +3107,63 @@
     return payload;
   }
 
-  function sendCommand(methodName, payload){
+  function sendCommand(methodName, payload, requestId){
     if (!wsClient || typeof wsClient[methodName] !== 'function' || !isWsReady()){
       setError('Live table connection is still starting');
       return Promise.reject(new Error('ws_unavailable'));
     }
-    return wsClient[methodName](payload || {});
+    return wsClient[methodName](payload || {}, requestId || null);
+  }
+
+  function beginJoinOperation(payload, options){
+    var opts = options || {};
+    if (isJoinOperationPending() && opts.resume !== true) return joinOperation.promise || Promise.resolve({ ok: true, pending: true });
+    var requestId = typeof opts.requestId === 'string' && opts.requestId ? opts.requestId : buildJoinRequestId();
+    joinOperation = {
+      phase: opts.resume === true ? 'checking' : 'reserving',
+      requestId: requestId,
+      payload: payload,
+      source: opts.source || 'manual',
+      promise: null
+    };
+    persistPendingJoin();
+    setError('');
+    setJoinOperationPhase(joinOperation.phase);
+    var promise = sendCommand('sendJoin', payload, requestId).then(function(result){
+      if (joinOperation.requestId !== requestId) return result;
+      clearPendingJoin();
+      joinOperation.requestId = null;
+      joinOperation.payload = null;
+      setJoinOperationPhase(result && result.joinStatus === 'WAITING_NEXT_HAND' ? 'waiting_next_hand' : 'active');
+      return result;
+    }).catch(function(error){
+      if (joinOperation.requestId !== requestId) return;
+      clearPendingJoin();
+      joinOperation.requestId = null;
+      joinOperation.payload = null;
+      joinOperation.phase = 'rejected';
+      renderControls();
+      throw error;
+    });
+    joinOperation.promise = promise;
+    return promise;
+  }
+
+  function resumePendingJoinOperation(){
+    if (deriveCurrentSeat()){
+      reconcileJoinOperationFromSnapshot();
+      return false;
+    }
+    var pendingJoin = loadPendingJoin();
+    if (!pendingJoin) return false;
+    void beginJoinOperation(pendingJoin.payload, {
+      requestId: pendingJoin.requestId,
+      source: 'resume_pending',
+      resume: true
+    }).catch(function(error){
+      setError(joinErrorMessage(error));
+    });
+    return true;
   }
 
   function queueLeaveAndNavigateImmediately(){
@@ -3142,9 +3285,11 @@
     if (suggestedSeatNoParam && els.joinSeat) els.joinSeat.value = String(suggestedSeatNoParam);
     autoJoinErrorActive = false;
     setError('');
-    sendCommand('sendJoin', buildJoinPayloadWithOptions({ autoSeat: true })).then(function(result){
+    beginJoinOperation(buildJoinPayloadWithOptions({ autoSeat: true }), { source: 'auto' }).then(function(result){
       resetAutoJoinRetryState();
-      state.statusText = result && result.seatNo != null ? ('Joined seat ' + result.seatNo) : 'Join accepted';
+      state.statusText = result && result.joinStatus === 'WAITING_NEXT_HAND'
+        ? 'Seat reserved · Joining next hand'
+        : (result && result.seatNo != null ? ('Joined seat ' + result.seatNo) : 'Join accepted');
       renderInfoPanel();
     }).catch(function(err){
       autoJoinAttempted = false;
@@ -3180,13 +3325,15 @@
       preferredSeatNo: preferredSeatNo
     };
     if (isGuestMode) reconnectPayload.guestJoinIntent = 'resume';
-    sendCommand('sendJoin', reconnectPayload).then(function(result){
+    beginJoinOperation(reconnectPayload, { source: 'reconnect' }).then(function(result){
       var resolvedSeatNo = result && Number.isInteger(Number(result.seatNo))
         ? Number(result.seatNo)
         : preferredSeatNo;
       reconnectSeatNo = null;
       lastKnownCurrentSeatNo = resolvedSeatNo;
-      state.statusText = 'Reconnected to seat ' + resolvedSeatNo;
+      state.statusText = result && result.joinStatus === 'WAITING_NEXT_HAND'
+        ? 'Seat reserved · Joining next hand'
+        : ('Reconnected to seat ' + resolvedSeatNo);
       renderInfoPanel();
     }).catch(function(err){
       autoJoinAttempted = false;
@@ -3317,9 +3464,10 @@
       handleAction('FOLD');
     });
     if (els.joinBtn) els.joinBtn.addEventListener('click', function(){
-      setError('');
-      sendCommand('sendJoin', buildJoinPayloadWithOptions({ autoSeat: true })).then(function(result){
-        state.statusText = result && result.seatNo != null ? ('Joined seat ' + result.seatNo) : 'Join accepted';
+      beginJoinOperation(buildJoinPayloadWithOptions({ autoSeat: true }), { source: 'manual' }).then(function(result){
+        state.statusText = result && result.joinStatus === 'WAITING_NEXT_HAND'
+          ? 'Seat reserved · Joining next hand'
+          : (result && result.seatNo != null ? ('Joined seat ' + result.seatNo) : 'Join accepted');
         renderInfoPanel();
       }).catch(function(err){
         setError(joinErrorMessage(err));
@@ -3535,7 +3683,11 @@
             leaveAndReturnToLobby();
             return;
           }
-          if (!rejoinSeatAfterReconnect()) autoJoinSeat();
+          if (!resumePendingJoinOperation() && !rejoinSeatAfterReconnect()) autoJoinSeat();
+        } else if (status === 'join_pending'){
+          if (joinOperation.requestId && info && info.requestId === joinOperation.requestId) {
+            setJoinOperationPhase('checking');
+          }
         } else if (status === 'reconnecting'){
           cancelSettlementAnimations();
           suppressSettlementAnimationUntilAuthoritativeSnapshot = true;
@@ -3585,6 +3737,7 @@
         }
         var previousVisual = captureVisualSnapshot();
         mergeSnapshot(payload, frame);
+        reconcileJoinOperationFromSnapshot();
         maybeExecuteQueuedPreaction();
         render();
         var nextVisual = captureVisualSnapshot();

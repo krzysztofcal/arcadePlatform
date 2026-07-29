@@ -26,11 +26,24 @@ const ACTION_HAND_PHASES = new Set(["PREFLOP", "FLOP", "TURN", "RIVER"]);
 const LIVE_HAND_PHASES = new Set([...ACTION_HAND_PHASES, "SHOWDOWN"]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LEDGER_IDEMPOTENCY_CONSTRAINT = "chips_transactions_idempotency_key_unique";
+const MANAGED_CONTINUOUS_PROFILE_KEY = "CONTINUOUS_BOT_DEFAULT";
 
 function normalizePositiveInt(n) {
   const value = Number(n);
   if (!Number.isInteger(value) || value <= 0 || Math.abs(value) > Number.MAX_SAFE_INTEGER) return null;
   return value;
+}
+
+function normalizeTableStatus(value) {
+  if (typeof value !== "string") return "OPEN";
+  const normalized = value.trim().toUpperCase();
+  return normalized || "OPEN";
+}
+
+function isManagedContinuousTable(tableRow) {
+  const lifecycleKind = typeof tableRow?.lifecycle_kind === "string" ? tableRow.lifecycle_kind.trim().toUpperCase() : "";
+  const managedProfileKey = typeof tableRow?.managed_profile_key === "string" ? tableRow.managed_profile_key.trim().toUpperCase() : "";
+  return lifecycleKind === "CONTINUOUS_BOT" && managedProfileKey === MANAGED_CONTINUOUS_PROFILE_KEY;
 }
 
 function normalizeSeatNo(value) {
@@ -112,6 +125,22 @@ function activeSeatUserIdSet(seats) {
   return ids;
 }
 
+function parseSeats(state) {
+  return Array.isArray(state?.seats) ? state.seats : [];
+}
+
+function parseStacks(state) {
+  return state?.stacks && typeof state.stacks === "object" && !Array.isArray(state.stacks)
+    ? { ...state.stacks }
+    : {};
+}
+
+function parseWaitingForNextHand(state) {
+  return state?.waitingForNextHandByUserId && typeof state.waitingForNextHandByUserId === "object" && !Array.isArray(state.waitingForNextHandByUserId)
+    ? { ...state.waitingForNextHandByUserId }
+    : {};
+}
+
 function hasReplacementBotSeatMatch({ state, seats, userId }) {
   if (typeof userId !== "string" || !userId) return false;
   const stateSeats = Array.isArray(state?.seats) ? state.seats : [];
@@ -187,7 +216,7 @@ export async function executeInactiveCleanup({
       if (seat.is_bot === true) return { ok: true, changed: false, status: "bot_skipped", retryable: false };
     }
 
-    const stateRows = await tx.unsafe("select state from public.poker_state where table_id = $1 limit 1 for update;", [tableId]);
+    const stateRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 limit 1 for update;", [tableId]);
     const stateRow = stateRows?.[0] || null;
     const state = normalizeState(stateRow?.state);
     const nowMs = Date.now();
@@ -199,9 +228,11 @@ export async function executeInactiveCleanup({
     }
 
     const tableRows = await tx.unsafe(
-      "select status, created_at, last_activity_at, updated_at from public.poker_tables where id = $1 limit 1 for update;",
+      "select status, created_at, last_activity_at, updated_at, lifecycle_kind, managed_profile_key from public.poker_tables where id = $1 limit 1 for update;",
       [tableId]
     );
+    const tableRow = tableRows?.[0] || null;
+    const managedContinuousTable = isManagedContinuousTable(tableRow);
     const tableCreatedAtMs = parseTimestampMs(tableRows?.[0]?.created_at);
     const tableLastActivityAtMs =
       parseTimestampMs(tableRows?.[0]?.last_activity_at)
@@ -259,6 +290,77 @@ export async function executeInactiveCleanup({
       && row?.status === "ACTIVE"
       && !(seatWasActive && row?.user_id === normalizedUserId)
     ));
+    if (!anotherActiveHumanRemains && normalizedUserId && seatWasActive && managedContinuousTable && normalizeTableStatus(tableRow?.status) === "OPEN") {
+      const phase = typeof state?.phase === "string" ? state.phase : "";
+      if (hasLiveHandSignal(state)) {
+        const nextLeftTableByUserId = state?.leftTableByUserId && typeof state.leftTableByUserId === "object" && !Array.isArray(state.leftTableByUserId)
+          ? { ...state.leftTableByUserId }
+          : {};
+        if (nextLeftTableByUserId[normalizedUserId] === true) {
+          return { ok: true, changed: false, status: "managed_continuous_human_deferred", closed: false, retryable: false };
+        }
+        nextLeftTableByUserId[normalizedUserId] = true;
+        const nextWaitingForNextHandByUserId = parseWaitingForNextHand(state);
+        delete nextWaitingForNextHandByUserId[normalizedUserId];
+        const nextState = {
+          ...state,
+          leftTableByUserId: nextLeftTableByUserId,
+          waitingForNextHandByUserId: nextWaitingForNextHandByUserId
+        };
+        if (stateRow) {
+          await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(nextState)]);
+        }
+        return {
+          ok: true,
+          changed: true,
+          closed: false,
+          status: "managed_continuous_human_deferred",
+          retryable: false
+        };
+      }
+
+      let targetCashout;
+      try {
+        targetCashout = requireAuthoritativeHumanStack({ state, userId: normalizedUserId });
+      } catch (error) {
+        klog("poker_inactive_cleanup_stack_ambiguous", { tableId, reason: error?.code || "stack_ambiguous", source: "ambiguous" });
+        throw error;
+      }
+      await postCashout({
+        postTransaction,
+        tx,
+        tableId,
+        userId: normalizedUserId,
+        amount: targetCashout.amount,
+        idempotencyKey: `poker:deferred-leave:v1:${tableId}:${Number(stateRow?.version || 0)}:${normalizedUserId}`,
+        createdBy: normalizedUserId,
+        reason: "ws_disconnect_inactive_cleanup"
+      });
+      const nextStacks = parseStacks(state);
+      delete nextStacks[normalizedUserId];
+      const nextLeftTableByUserId = state?.leftTableByUserId && typeof state.leftTableByUserId === "object" && !Array.isArray(state.leftTableByUserId)
+        ? { ...state.leftTableByUserId }
+        : {};
+      nextLeftTableByUserId[normalizedUserId] = true;
+      const nextState = {
+        ...state,
+        seats: parseSeats(state).filter((seatEntry) => seatEntry?.userId !== normalizedUserId),
+        stacks: nextStacks,
+        leftTableByUserId: nextLeftTableByUserId,
+      };
+      if (stateRow) {
+        await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(nextState)]);
+      }
+      await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [tableId, normalizedUserId]);
+      await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
+      return {
+        ok: true,
+        changed: true,
+        closed: false,
+        status: "managed_continuous_human_removed",
+        retryable: false
+      };
+    }
     if (anotherActiveHumanRemains) {
       if (!normalizedUserId) {
         return { ok: true, changed: false, status: "active_human_present", closed: false, retryable: false };

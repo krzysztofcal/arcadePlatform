@@ -144,6 +144,7 @@ function createHarness(options = {}){
   const documentEvents = {};
   const logs = [];
   const joinPayloads = [];
+  const joinRequestIds = [];
   const actPayloads = [];
   const startPayloads = [];
   const leavePayloads = [];
@@ -165,9 +166,10 @@ function createHarness(options = {}){
     },
     destroy(){ this._ready = false; },
     isReady(){ return this._ready; },
-    sendJoin(payload){
+    sendJoin(payload, requestId){
       joinPayloads.push(payload);
-      if (typeof options.sendJoin === 'function') return options.sendJoin(payload, { attempt: joinPayloads.length });
+      joinRequestIds.push(requestId || null);
+      if (typeof options.sendJoin === 'function') return options.sendJoin(payload, { attempt: joinPayloads.length, requestId: requestId || null });
       return Promise.resolve({ ok: true, seatNo: payload.seatNo || payload.preferredSeatNo || 1 });
     },
     sendAct(payload){ actPayloads.push(payload); return Promise.resolve({ ok: true }); },
@@ -311,6 +313,7 @@ async function flush(){
     logs,
     windowLocation: sandbox.window.location,
     joinPayloads,
+    joinRequestIds,
     actPayloads,
     startPayloads,
     leavePayloads,
@@ -437,6 +440,69 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(harness.leavePayloads.length, 1);
   assert.equal(JSON.stringify(harness.leavePayloads[0]), JSON.stringify({ tableId: 'table-1' }));
   assert.equal(harness.windowLocation.href, '/poker/');
+});
+
+test('poker v2 shows one reserved next-hand join without cards, actions, or folded styling', async () => {
+  const unresolvedJoin = new Promise(() => {});
+  const harness = createHarness({
+    sendJoin: () => unresolvedJoin
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  await waitFor(() => harness.elements.pokerV2JoinBtn.disabled === false);
+
+  harness.elements.pokerV2JoinBtn.click();
+  harness.elements.pokerV2JoinBtn.click();
+  await harness.flush();
+
+  assert.equal(harness.joinPayloads.length, 1);
+  assert.equal(harness.elements.pokerV2JoinBtn.disabled, true);
+  assert.equal(harness.elements.pokerV2JoinBtn.textContent, 'Reserving seat…');
+  assert.equal(harness.elements.pokerV2JoinBtn.attributes['aria-busy'], 'true');
+  assert.ok(harness.getSessionStorage('poker:pendingJoin:user-1:table-1'));
+
+  ws.onStatus('join_pending', { requestId: harness.joinRequestIds[0], reason: 'soft_timeout' });
+  assert.equal(harness.elements.pokerV2JoinBtn.textContent, 'Checking reservation…');
+  assert.equal(harness.elements.pokerV2ErrorText.hidden, true);
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 8,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [{ userId: 'user-1', seat: 4, status: 'WAITING_NEXT_HAND' }]
+      },
+      public: {
+        hand: { handId: 'hand-live', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'bot-1' },
+        board: [],
+        pot: { total: 15, sidePots: [] },
+        legalActions: { seat: null, actions: [] }
+      },
+      private: {
+        playerState: { status: 'WAITING_NEXT_HAND', stack: 100, canRebuy: false },
+        holeCards: []
+      },
+      you: { seat: 4 }
+    }
+  });
+  await harness.flush();
+
+  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  assert.ok(heroSeat);
+  assert.match(heroSeat.className, /poker-seat--waiting-next-hand/);
+  assert.doesNotMatch(heroSeat.className, /poker-seat--folded/);
+  assert.equal(findSeatChild(heroSeat, 'poker-seat-status').textContent, 'NEXT HAND');
+  assert.equal(findSeatChild(heroSeat, 'poker-seat-cards'), undefined);
+  assert.equal(harness.elements.pokerHeroCards.hidden, true);
+  assert.equal(harness.elements.pokerV2FoldBtn.hidden, true);
+  assert.equal(harness.elements.pokerV2JoinBtn.textContent, 'Joining next hand');
+  assert.equal(harness.getSessionStorage('poker:pendingJoin:user-1:table-1'), null);
 });
 
 test('poker v2 guest mode shows restrictions panel, hides XP badge, and still auto-joins', async () => {

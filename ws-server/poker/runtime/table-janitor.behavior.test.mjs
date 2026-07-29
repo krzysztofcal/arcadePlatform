@@ -425,3 +425,39 @@ test("terminal janitor suppression rejects changed, retryable, and unrelated res
     result: terminalFailure
   }), null);
 });
+
+test("managed continuous inert table remains supervisor-owned until retirement is due", () => {
+  const base = {
+    tableId: "managed-table",
+    persistedSeats: [
+      { user_id: "bot-a", seat_no: 1, status: "ACTIVE", is_bot: true, stack: 100 }
+    ],
+    persistedState: { phase: "SETTLED", stacks: { "bot-a": 100 } },
+    runtime: { loaded: true, tableStatus: "OPEN", connectedUserIds: [] },
+    nowMs: NOW_MS
+  };
+  const healthy = evaluateTableHealth({
+    ...base,
+    persistedTable: {
+      status: "OPEN",
+      lifecycle_kind: "CONTINUOUS_BOT",
+      managed_profile_key: "CONTINUOUS_BOT_DEFAULT",
+      rotation_due_at: new Date(NOW_MS + 60_000).toISOString(),
+      created_at: new Date(NOW_MS - 600_000).toISOString()
+    }
+  });
+  assert.equal(healthy.action, "noop");
+  assert.equal(healthy.reasonCode, "managed_continuous_table_supervisor_owned");
+
+  const due = evaluateTableHealth({
+    ...base,
+    persistedTable: {
+      status: "OPEN",
+      lifecycle_kind: "CONTINUOUS_BOT",
+      managed_profile_key: "CONTINUOUS_BOT_DEFAULT",
+      rotation_due_at: new Date(NOW_MS - 1).toISOString(),
+      created_at: new Date(NOW_MS - 600_000).toISOString()
+    }
+  });
+  assert.equal(due.action, "zombie_cleanup");
+});

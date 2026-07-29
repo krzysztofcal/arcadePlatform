@@ -409,6 +409,33 @@ function applyAuthoritativeSeatRowsToState(state, { tableId, seatEntries = [], f
   };
 }
 
+const LIVE_JOIN_PHASES = new Set(["POSTING_BLINDS", "PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"]);
+
+function joinStatusForState(state, userId) {
+  return state?.waitingForNextHandByUserId?.[userId] === true ? "WAITING_NEXT_HAND" : "ACTIVE";
+}
+
+function markFreshJoinWaitingForNextHand(state, userId) {
+  const phase = typeof state?.phase === "string" ? state.phase.trim().toUpperCase() : "";
+  const handSeats = Array.isArray(state?.handSeats) ? state.handSeats : [];
+  const alreadyInHand = handSeats.some((seat) => seat?.userId === userId);
+  if (!LIVE_JOIN_PHASES.has(phase) || alreadyInHand) {
+    return { state, joinStatus: joinStatusForState(state, userId) };
+  }
+  return {
+    state: {
+      ...state,
+      waitingForNextHandByUserId: {
+        ...(state?.waitingForNextHandByUserId && typeof state.waitingForNextHandByUserId === "object" && !Array.isArray(state.waitingForNextHandByUserId)
+          ? state.waitingForNextHandByUserId
+          : {}),
+        [userId]: true
+      }
+    },
+    joinStatus: "WAITING_NEXT_HAND"
+  };
+}
+
 function buildProjectedSnapshot({ state, seatRows, maxPlayers, stateVersion }) {
   const { runtimeSeats } = projectEffectiveRuntimeSeats({ state, seatRows, maxPlayers });
   const stateStacks = state?.stacks && typeof state.stacks === "object" && !Array.isArray(state.stacks)
@@ -503,7 +530,7 @@ function assertAuthoritativeJoinStateComplete({
   }
 }
 
-async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, fundedStackEntries, loadStateForUpdate, updateStateLocked, validateStateForStorage, targetBotCount }) {
+async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, fundedStackEntries, loadStateForUpdate, updateStateLocked, validateStateForStorage, targetBotCount, markFreshJoinWaiting = false }) {
   const stateRow = normalizeLockedStateResult(await loadStateForUpdate(tx, tableId));
   const seatRows = await loadSeatRows(tx, tableId);
   const merged = applyAuthoritativeSeatRowsToState(stateRow.state, {
@@ -511,7 +538,10 @@ async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, fundedStackE
     seatEntries: activeSeatRows(seatRows).map(asSeatSnapshot).filter(Boolean),
     fundedStackEntries
   });
-  const nextState = merged.state;
+  const waitingProjection = markFreshJoinWaiting
+    ? markFreshJoinWaitingForNextHand(merged.state, userId)
+    : { state: merged.state, joinStatus: "ACTIVE" };
+  const nextState = waitingProjection.state;
   const nextStateForStorage = sanitizeStateForStorage(nextState);
   if (!isStorageStateValid(validateStateForStorage, nextStateForStorage)) {
     throw makeError("state_invalid", "storage_state_validation_failed");
@@ -529,7 +559,7 @@ async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, fundedStackE
     fundedStacks: merged.fundedStacks,
     displacedUserIds: merged.displacedUserIds
   });
-  return { version, state: nextStateForStorage, seatRows };
+  return { version, state: nextStateForStorage, seatRows, joinStatus: waitingProjection.joinStatus };
 }
 
 async function readPersistedSeatStack({ tx, tableId, userId }) {
@@ -662,6 +692,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
             rejoin: true,
             requestId: requestId || null,
             me: { seated: true },
+            joinStatus: joinStatusForState(stateRow.state, userId),
             snapshot: buildProjectedSnapshot({
               state: stateRow.state,
               seatRows,
@@ -698,6 +729,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           rejoin: true,
           requestId: requestId || null,
           me: { seated: true },
+          joinStatus: joinStatusForState(nextStateForStorage, userId),
           snapshot: buildProjectedSnapshot({
             state: nextStateForStorage,
             seatRows,
@@ -846,7 +878,8 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       loadStateForUpdate,
       updateStateLocked,
       validateStateForStorage,
-      targetBotCount
+      targetBotCount,
+      markFreshJoinWaiting: true
       });
       await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
       return {
@@ -858,6 +891,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         rejoin: false,
         requestId: requestId || null,
         me: { seated: true },
+        joinStatus: updatedStateRow.joinStatus,
         seededBots,
         snapshot: buildProjectedSnapshot({
           state: updatedStateRow.state,

@@ -12,7 +12,8 @@ import {
   isContinuationEligibleByStack,
   orderedEligibleSeatMembers,
   replaceBrokeBotsForNextHand,
-  resolveNextDealerSeatNo
+  resolveNextDealerSeatNo,
+  topUpManagedBotsForNextHand
 } from "../engine/poker-engine.mjs";
 import { deriveDeterministicRuntimeHandState } from "../shared/runtime-hand-state.mjs";
 import { stampTurnDeadline } from "../shared/poker-turn-timeout.mjs";
@@ -191,13 +192,31 @@ function normalizeTableMeta(value, fallbackMaxPlayers, { defaultCreatedAtMs = nu
     ?? createdAtMs
     ?? defaultLastActivityAtMs
     ?? defaultCreatedAtMs;
+  const lifecycleKindRaw = typeof value?.lifecycleKind === "string"
+    ? value.lifecycleKind.trim().toUpperCase()
+    : typeof value?.lifecycle_kind === "string"
+      ? value.lifecycle_kind.trim().toUpperCase()
+      : "STANDARD";
+  const managedProfileKeyRaw = typeof value?.managedProfileKey === "string"
+    ? value.managedProfileKey.trim().toUpperCase()
+    : typeof value?.managed_profile_key === "string"
+      ? value.managed_profile_key.trim().toUpperCase()
+      : null;
+  const lifecycleKind = lifecycleKindRaw === "CONTINUOUS_BOT" && managedProfileKeyRaw === "CONTINUOUS_BOT_DEFAULT"
+    ? "CONTINUOUS_BOT"
+    : "STANDARD";
   return {
     maxPlayers,
     stakes: stakes && Number.isInteger(stakes.sb) && Number.isInteger(stakes.bb)
       ? stakes
       : null,
     createdAtMs,
-    lastActivityAtMs
+    lastActivityAtMs,
+    lifecycleKind,
+    managedProfileKey: lifecycleKind === "CONTINUOUS_BOT" ? managedProfileKeyRaw : null,
+    rotationDueAtMs: lifecycleKind === "CONTINUOUS_BOT"
+      ? normalizeTimestampMs(value?.rotationDueAtMs ?? value?.rotation_due_at ?? value?.rotationDueAt)
+      : null
   };
 }
 
@@ -773,7 +792,7 @@ export function createTableManager({
     };
   }
 
-  function bootstrapHand(tableId, { nowMs } = {}) {
+  function bootstrapHand(tableId, { nowMs, allowManagedBotsOnly = false } = {}) {
     const table = tables.get(tableId);
     if (!table) {
       return { ok: false, code: "table_missing", bootstrap: "table_missing" };
@@ -782,7 +801,10 @@ export function createTableManager({
     const resolvedNowMs = resolveNowMs({ nowMs });
     const existingLiveState = asLiveHandState(table.coreState?.pokerState);
     const settlementPending = table.coreState?.pokerState?.phase === "SETTLED";
-    if (!existingLiveState && !settlementPending && !hasHandEligibleHumanMember({ table, nowMs: resolvedNowMs })) {
+    const managedBotsOnlyAllowed = allowManagedBotsOnly === true
+      && table.tableMeta?.lifecycleKind === "CONTINUOUS_BOT"
+      && table.tableMeta?.managedProfileKey === "CONTINUOUS_BOT_DEFAULT";
+    if (!existingLiveState && !settlementPending && !managedBotsOnlyAllowed && !hasHandEligibleHumanMember({ table, nowMs: resolvedNowMs })) {
       return {
         ok: true,
         changed: false,
@@ -794,7 +816,12 @@ export function createTableManager({
     const handEligibleCoreState = existingLiveState || settlementPending
       ? table.coreState
       : buildHandEligibleCoreState({ table, nowMs: resolvedNowMs });
-    const result = bootstrapCoreStateHand({ tableId, coreState: handEligibleCoreState, nowMs: resolvedNowMs });
+    const result = bootstrapCoreStateHand({
+      tableId,
+      coreState: handEligibleCoreState,
+      nowMs: resolvedNowMs,
+      stakes: table.tableMeta?.stakes
+    });
     table.coreState = result.changed && !existingLiveState
       ? {
           ...table.coreState,
@@ -1028,6 +1055,39 @@ export function createTableManager({
     });
   }
 
+  function normalizedManagedTopUpShape(value) {
+    if (!Array.isArray(value)) return [];
+    return value.map((entry) => ({
+      seatNo: entry?.seatNo,
+      botUserId: entry?.botUserId,
+      botProfile: entry?.botProfile,
+      targetStack: entry?.targetStack,
+      fundingDelta: entry?.fundingDelta,
+      settledHandId: entry?.settledHandId,
+      fromStateVersion: entry?.fromStateVersion,
+      toStateVersion: entry?.toStateVersion
+    }));
+  }
+
+  function managedTopUpReceiptMatches({ tableId, expectedVersion, stateVersion, topUps, persistenceReceipt }) {
+    if (topUps.length === 0) return true;
+    if (!persistenceReceipt || persistenceReceipt.ok !== true
+      || persistenceReceipt.tableId !== tableId
+      || persistenceReceipt.expectedVersion !== expectedVersion
+      || persistenceReceipt.newVersion !== stateVersion
+      || persistenceReceipt.managedBotTopUpCommitted !== true) return false;
+    const funded = Array.isArray(persistenceReceipt.fundedManagedBotTopUps)
+      ? persistenceReceipt.fundedManagedBotTopUps
+      : [];
+    return funded.length === topUps.length && topUps.every((entry, index) => {
+      const receipt = funded[index];
+      return receipt?.seatNo === entry.seatNo
+        && receipt?.botUserId === entry.botUserId
+        && receipt?.fundingDelta === entry.fundingDelta
+        && receipt?.idempotencyKey === `poker:managed-bot-top-up:v1:${tableId}:${stateVersion}:${entry.seatNo}`;
+    });
+  }
+
   function normalizedHumanStackUpdates({ coreState, settledState, fromStateVersion, toStateVersion }) {
     const members = Array.isArray(coreState?.members) ? coreState.members : [];
     const humanMembers = members.filter((member) => !isCoreStateBotUser(coreState, member?.userId));
@@ -1060,7 +1120,12 @@ export function createTableManager({
       || (economyMode === "none" && typeof tableId === "string" && tableId.startsWith("guest_table_"));
   }
 
-  function prepareSettledHandRollover({ tableId, nowMs = Date.now() } = {}) {
+  function prepareSettledHandRollover({
+    tableId,
+    nowMs = Date.now(),
+    allowManagedBotsOnly = false,
+    managedBotProfile = null
+  } = {}) {
     const table = tables.get(tableId);
     if (!table) {
       return { ok: false, changed: false, reason: "table_not_found", stateVersion: 0 };
@@ -1088,7 +1153,23 @@ export function createTableManager({
         stateVersion: table.coreState.version
       };
     }
-    if (!hasHandEligibleHumanMember({ table, coreState: recycled.coreState, nowMs })) {
+    const managedBotsOnlyAllowed = allowManagedBotsOnly === true
+      && table.tableMeta?.lifecycleKind === "CONTINUOUS_BOT"
+      && table.tableMeta?.managedProfileKey === "CONTINUOUS_BOT_DEFAULT";
+    const toppedUp = managedBotsOnlyAllowed
+      ? topUpManagedBotsForNextHand({
+          coreState: recycled.coreState,
+          settledState: recycled.settledState,
+          nextVersion,
+          minBotCount: managedBotProfile?.minBotCount,
+          targetBotCount: managedBotProfile?.targetBotCount,
+          maxBotCount: managedBotProfile?.maxBotCount
+        })
+      : { ok: true, coreState: recycled.coreState, settledState: recycled.settledState, topUpFundings: [] };
+    if (!toppedUp?.ok) {
+      return { ok: false, changed: false, reason: toppedUp?.reason || "managed_bot_top_up_invalid", stateVersion: table.coreState.version };
+    }
+    if (!managedBotsOnlyAllowed && !hasHandEligibleHumanMember({ table, coreState: toppedUp.coreState, nowMs })) {
       return {
         ok: true,
         changed: false,
@@ -1098,9 +1179,12 @@ export function createTableManager({
     }
     const nextHandState = buildNextHandStateFromSettled({
       tableId,
-      coreState: buildHandEligibleCoreState({ table, coreState: recycled.coreState, nowMs }),
-      settledState: recycled.settledState,
-      nextVersion
+      coreState: managedBotsOnlyAllowed
+        ? toppedUp.coreState
+        : buildHandEligibleCoreState({ table, coreState: toppedUp.coreState, nowMs }),
+      settledState: toppedUp.settledState,
+      nextVersion,
+      stakes: table.tableMeta?.stakes
     });
 
     if (!nextHandState) {
@@ -1113,8 +1197,8 @@ export function createTableManager({
     }
 
     const humanStackUpdates = normalizedHumanStackUpdates({
-      coreState: recycled.coreState,
-      settledState: recycled.settledState,
+      coreState: toppedUp.coreState,
+      settledState: toppedUp.settledState,
       fromStateVersion: Number(table.coreState.version),
       toStateVersion: nextVersion
     });
@@ -1124,7 +1208,7 @@ export function createTableManager({
     const projectedPublicStacks = { ...(recycled.coreState.publicStacks || {}) };
     for (const update of humanStackUpdates) projectedPublicStacks[update.userId] = update.stack;
     const nextCoreState = {
-      ...recycled.coreState,
+      ...toppedUp.coreState,
       version: nextVersion,
       publicStacks: projectedPublicStacks,
       pokerState: stampTurnDeadline(nextHandState, resolveNowMs({ nowMs }))
@@ -1139,6 +1223,7 @@ export function createTableManager({
       nextCoreState,
       handId: nextCoreState?.pokerState?.handId ?? null,
       replacementFundings: normalizedReplacementFundingShape(recycled.replacementFundings),
+      managedBotTopUps: normalizedManagedTopUpShape(toppedUp.topUpFundings),
       humanStackUpdates
     };
   }
@@ -1148,6 +1233,8 @@ export function createTableManager({
     expectedVersion,
     nextCoreState,
     replacementFundings = [],
+    managedBotTopUps = [],
+    managedBotProfile = null,
     humanStackUpdates = [],
     persistenceReceipt = null,
     economyMode = null,
@@ -1174,6 +1261,23 @@ export function createTableManager({
     if (!recalculated?.ok || !replacementFundingPlansEqual(recalculated.replacementFundings, replacementFundings)) {
       return { ok: false, changed: false, reason: "replacement_funding_mismatch", stateVersion: currentVersion };
     }
+    const managed = table.tableMeta?.lifecycleKind === "CONTINUOUS_BOT"
+      && table.tableMeta?.managedProfileKey === "CONTINUOUS_BOT_DEFAULT";
+    const recalculatedTopUp = managed
+      ? topUpManagedBotsForNextHand({
+          coreState: recalculated.coreState,
+          settledState: recalculated.settledState,
+          nextVersion,
+          minBotCount: managedBotProfile?.minBotCount,
+          targetBotCount: managedBotProfile?.targetBotCount,
+          maxBotCount: managedBotProfile?.maxBotCount
+        })
+      : { ok: true, coreState: recalculated.coreState, settledState: recalculated.settledState, topUpFundings: [] };
+    const normalizedTopUps = normalizedManagedTopUpShape(managedBotTopUps);
+    if (!recalculatedTopUp?.ok
+      || JSON.stringify(normalizedManagedTopUpShape(recalculatedTopUp.topUpFundings)) !== JSON.stringify(normalizedTopUps)) {
+      return { ok: false, changed: false, reason: "managed_bot_top_up_mismatch", stateVersion: currentVersion };
+    }
 
     const normalizedFundings = normalizedReplacementFundingShape(replacementFundings);
     const economyFree = isEconomyFreeRollover({ tableId, economyMode });
@@ -1185,6 +1289,15 @@ export function createTableManager({
       persistenceReceipt
     })) {
       return { ok: false, changed: false, reason: "replacement_funding_unconfirmed", stateVersion: currentVersion };
+    }
+    if (!economyFree && !managedTopUpReceiptMatches({
+      tableId,
+      expectedVersion,
+      stateVersion: nextVersion,
+      topUps: normalizedTopUps,
+      persistenceReceipt
+    })) {
+      return { ok: false, changed: false, reason: "managed_bot_top_up_unconfirmed", stateVersion: currentVersion };
     }
     const expectedHumanUpdates = normalizedHumanStackUpdates({
       coreState: recalculated.coreState,
@@ -1213,7 +1326,8 @@ export function createTableManager({
       reason: null,
       stateVersion: nextVersion,
       handId: nextCoreState?.pokerState?.handId ?? null,
-      replacementFundings: normalizedFundings
+      replacementFundings: normalizedFundings,
+      managedBotTopUps: normalizedTopUps
     };
   }
 
