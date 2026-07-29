@@ -206,7 +206,22 @@ async function loadSeatRows(tx, tableId) {
   return Array.isArray(rows) ? rows : [];
 }
 
-async function seedBotsForJoin({ tx, tableId, maxPlayers, tableStakes, cfg, humanUserId, postTransaction, targetBotCount = null, klog = () => {}, random = Math.random }) {
+async function seedBotsForJoin({
+  tx,
+  tableId,
+  maxPlayers,
+  tableStakes,
+  cfg,
+  humanUserId,
+  postTransaction,
+  targetBotCount = null,
+  allowBotsOnly = false,
+  requireExactTarget = false,
+  fundingReason = "BOT_SEED_BUY_IN",
+  idempotencyPrefix = "bot-seed-buyin",
+  klog = () => {},
+  random = Math.random
+}) {
   if (!cfg?.enabled || typeof postTransaction !== "function") return [];
   const stakesParsed = parseStakes(tableStakes);
   if (!stakesParsed.ok) {
@@ -217,7 +232,10 @@ async function seedBotsForJoin({ tx, tableId, maxPlayers, tableStakes, cfg, huma
   const seatRows = await loadSeatRows(tx, tableId);
   const activeSeats = seatRows.filter((row) => String(row?.status || "ACTIVE").toUpperCase() === "ACTIVE");
   const humanCount = activeSeats.filter((row) => !row?.is_bot).length;
-  if (!shouldSeedBotsOnJoin({ humanCount })) return [];
+  if (!allowBotsOnly && !shouldSeedBotsOnJoin({ humanCount })) return [];
+  if (allowBotsOnly && humanCount !== 0) {
+    throw new Error("managed_bot_seed_human_present");
+  }
 
   const targetBots = Number.isInteger(targetBotCount)
     ? targetBotCount
@@ -253,7 +271,7 @@ returning seat_no;
       await postTransaction({
         userId: null,
         txType: "TABLE_BUY_IN",
-        idempotencyKey: `bot-seed-buyin:${tableId}:${seatNo}`,
+        idempotencyKey: `${idempotencyPrefix}:${tableId}:${seatNo}`,
         metadata: {
           actor: "BOT",
           botUserId,
@@ -261,13 +279,13 @@ returning seat_no;
           tableId,
           seatNo,
           botProfile: botProfile,
-          reason: "BOT_SEED_BUY_IN"
+          reason: fundingReason
         },
         entries: [
           { accountType: "SYSTEM", systemKey: cfg.bankrollSystemKey, amount: -buyInChips },
           { accountType: "ESCROW", systemKey: escrowSystemKey, amount: buyInChips }
         ],
-        createdBy: humanUserId,
+        createdBy: allowBotsOnly ? null : humanUserId,
         tx
       });
       seededBots.push({
@@ -289,6 +307,11 @@ returning seat_no;
     }
   }
 
+  if (requireExactTarget && existingBotCount + seededBots.length !== targetBots) {
+    const error = new Error("managed_bot_table_seed_incomplete");
+    error.code = "managed_bot_table_seed_incomplete";
+    throw error;
+  }
   return seededBots;
 }
 

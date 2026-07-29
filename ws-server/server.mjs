@@ -56,6 +56,8 @@ import {
   setPokerLogRuntimeAuditLogger
 } from "./poker/observability/poker-log-runtime-control.mjs";
 import { getBotConfig, parseStakes } from "./shared/poker-domain/bots.mjs";
+import { createContinuousBotTableRepository } from "./poker/persistence/continuous-bot-table-repository.mjs";
+import { createContinuousBotTableSupervisor } from "./poker/runtime/continuous-bot-table-supervisor.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const PROTECTED_MESSAGE_TYPES = new Set([
@@ -296,6 +298,9 @@ const durableActionStore = hasSupabaseDbUrl && persistedStateWriter?.readDurable
   ? persistedStateWriter
   : null;
 const botFundingSystemKey = getBotConfig(process.env).bankrollSystemKey;
+const continuousBotTableRepository = hasSupabaseDbUrl
+  ? createContinuousBotTableRepository({ env: process.env, klog: klogSafe })
+  : null;
 const lastSnapshotBySessionAndTable = new Map();
 const persistedSeatTouchByTableUser = new Map();
 const lobbySubscribers = new Set();
@@ -303,6 +308,7 @@ const activeLobbyTablesById = new Map();
 const pendingTableJanitorEvaluationByTableId = new Map();
 const suppressedNonRetryableTerminalJanitorFailuresByTableId = new Map();
 const suppressedTerminalJanitorCountsByReason = new Map();
+const continuousBotRetirementRequested = new Set();
 const AUTOMATIC_TABLE_JANITOR_TRIGGERS = new Set([
   "stale_active_seat_sweep",
   "zombie_table_sweep",
@@ -1357,6 +1363,7 @@ async function persistMutatedState({
   nextStateOverride = null,
   privateStateForHoleCardsOverride = null,
   replacementFundings = undefined,
+  managedBotTopUps = undefined,
   humanStackUpdates = undefined,
   replacementFundingSystemKey = null,
   durableActionRequest = null,
@@ -1366,7 +1373,8 @@ async function persistMutatedState({
     return { ok: true, skipped: true, guest: true };
   }
   if (!persistedStateWriter) {
-    if (Array.isArray(replacementFundings) && replacementFundings.length > 0) {
+    if ((Array.isArray(replacementFundings) && replacementFundings.length > 0)
+      || (Array.isArray(managedBotTopUps) && managedBotTopUps.length > 0)) {
       return { ok: false, reason: "persistence_required" };
     }
     if (process.env.WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON && Array.isArray(humanStackUpdates)) {
@@ -1402,6 +1410,7 @@ async function persistMutatedState({
     meta: { mutationKind },
     acceptedActionAudit,
     replacementFundings,
+    managedBotTopUps,
     humanStackUpdates,
     botFundingSystemKey: replacementFundingSystemKey,
     durableActionRequest
@@ -1539,6 +1548,7 @@ function releaseTableRuntimeResources(tableId) {
   suppressedNonRetryableTerminalJanitorFailuresByTableId.delete(tableId);
   guestDisconnectCleanupRuntime?.forgetTable(tableId);
   streamLog.forgetTable(tableId);
+  continuousBotRetirementRequested.delete(tableId);
 }
 
 function shouldEvictClosedRuntimeTable(tableId, result) {
@@ -1874,7 +1884,13 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
       }
     }
   }
-  if (!tableManager.hasActiveHumanMember(tableId)) {
+  const tableMeta = tableManager.tableMeta(tableId);
+  const managedContinuousTable = tableMeta?.lifecycleKind === "CONTINUOUS_BOT"
+    && tableMeta?.managedProfileKey === "CONTINUOUS_BOT_DEFAULT";
+  const managedRetirementDue = managedContinuousTable
+    && Number.isFinite(tableMeta?.rotationDueAtMs)
+    && tableMeta.rotationDueAtMs <= Date.now();
+  if (!managedContinuousTable && !tableManager.hasActiveHumanMember(tableId)) {
     if (tableManager.hasConnectedHumanPresence(tableId)) {
       klogSafe("ws_settled_rollover_close_skipped_human_presence", { tableId, phase: pokerState?.phase || null });
       return finishSettledRollover({ ok: true, changed: false, deferred: true, reason: "human_presence_present" });
@@ -1885,6 +1901,17 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
       logPrefix: "ws_settled_rollover_close"
     });
     return finishSettledRollover(cleanupResult);
+  }
+  if (managedRetirementDue) {
+    if (tableManager.hasActiveHumanMember(tableId) || tableManager.hasConnectedHumanPresence(tableId)) {
+      scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
+      return finishSettledRollover({ ok: true, changed: false, deferred: true, reason: "managed_retirement_human_present" });
+    }
+    return finishSettledRollover(await applyInactiveCleanupAndBroadcast({
+      tableId,
+      requestId: `continuous-bot-table-close:${tableId}`,
+      logPrefix: "ws_continuous_bot_table_retirement"
+    }));
   }
 
   if (isGuestTableId(tableId)) {
@@ -1901,7 +1928,17 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     return finishSettledRollover(guestRollover);
   }
 
-  const prepared = tableManager.prepareSettledHandRollover({ tableId, nowMs: Date.now() });
+  const managedBotProfile = managedContinuousTable ? continuousBotTableRepository?.currentProfile() : null;
+  if (managedContinuousTable && !managedBotProfile) {
+    scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
+    return finishSettledRollover({ ok: false, changed: false, reason: "managed_profile_unavailable" });
+  }
+  const prepared = tableManager.prepareSettledHandRollover({
+    tableId,
+    nowMs: Date.now(),
+    allowManagedBotsOnly: managedContinuousTable,
+    managedBotProfile
+  });
   if (!prepared?.ok || !prepared.changed) {
     return finishSettledRollover(prepared);
   }
@@ -1914,6 +1951,7 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     nextStateOverride: candidatePokerState,
     privateStateForHoleCardsOverride: candidatePokerState,
     replacementFundings: prepared.replacementFundings,
+    managedBotTopUps: prepared.managedBotTopUps,
     humanStackUpdates: prepared.humanStackUpdates,
     replacementFundingSystemKey: botFundingSystemKey,
     deferRuntimeVersionUpdate: true
@@ -1957,6 +1995,8 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     expectedVersion: prepared.expectedVersion,
     nextCoreState: prepared.nextCoreState,
     replacementFundings: prepared.replacementFundings,
+    managedBotTopUps: prepared.managedBotTopUps,
+    managedBotProfile,
     humanStackUpdates: prepared.humanStackUpdates,
     persistenceReceipt: persisted,
     nowMs: Date.now()
@@ -2407,7 +2447,7 @@ async function loadPersistedTableHealthSnapshot(tableId) {
     const beginSqlWs = await loadBeginSqlWs();
     return beginSqlWs(async (tx) => {
       const tableRows = await tx.unsafe(
-        "select id, status, created_at, updated_at, last_activity_at from public.poker_tables where id = $1 limit 1;",
+        "select id, status, created_at, updated_at, last_activity_at, lifecycle_kind, managed_profile_key, rotation_due_at from public.poker_tables where id = $1 limit 1;",
         [tableId]
       );
       const seatRows = await tx.unsafe(
@@ -4184,6 +4224,79 @@ function sweepTransportWatchdog() {
   }
 }
 
+async function materializeCreatedContinuousBotTable({ tableId, created = false }) {
+  return enqueueTableCommand({
+    tableId,
+    commandName: "continuous_bot_table_materialize",
+    dedupeKey: "continuous_bot_table_materialize",
+    run: async () => {
+      const restored = await restoreTableFromPersisted(tableId);
+      if (!restored?.ok) return restored;
+      const expectedVersion = tableManager.persistedStateVersion(tableId);
+      const bootstrapped = tableManager.bootstrapHand(tableId, {
+        nowMs: Date.now(),
+        allowManagedBotsOnly: true
+      });
+      if (!bootstrapped?.ok) return bootstrapped;
+      let stateVersion = bootstrapped.stateVersion;
+      if (bootstrapped.changed) {
+        const persisted = await persistMutatedState({
+          tableId,
+          expectedVersion,
+          mutationKind: "continuous_bot_table_bootstrap"
+        });
+        if (!persisted?.ok) {
+          await restoreTableFromPersisted(tableId);
+          return persisted;
+        }
+        stateVersion = persisted.newVersion;
+      }
+      syncLobbyTable(tableId);
+      maybeBroadcastLobbySnapshot({ force: true });
+      broadcastStateSnapshots(tableId);
+      scheduleBotStep({ tableId, trigger: "continuous_bot_table_created", requestId: null, frameTs: null });
+      if (created) {
+        klogSafe("ws_continuous_bot_table_created", { tableId, stateVersion });
+      } else {
+        klogSafe("ws_continuous_bot_table_restored", { tableId, stateVersion });
+      }
+      return { ok: true, changed: bootstrapped.changed === true, stateVersion };
+    }
+  });
+}
+
+async function requestContinuousBotTableRetirement({ tableId }) {
+  if (continuousBotRetirementRequested.has(tableId)) return { ok: true, changed: false };
+  continuousBotRetirementRequested.add(tableId);
+  return enqueueTableCommand({
+    tableId,
+    commandName: "continuous_bot_table_retirement",
+    dedupeKey: "continuous_bot_table_retirement",
+    run: async () => {
+      const restored = await restoreTableFromPersisted(tableId);
+      if (!restored?.ok) {
+        continuousBotRetirementRequested.delete(tableId);
+        return restored;
+      }
+      klogSafe("ws_continuous_bot_table_retirement_requested", {
+        tableId,
+        phase: tableManager.persistedPokerState(tableId)?.phase || null
+      });
+      maybeScheduleSettledRollover(tableId);
+      return { ok: true, changed: false };
+    }
+  });
+}
+
+const continuousBotTableSupervisor = continuousBotTableRepository
+  ? createContinuousBotTableSupervisor({
+      repository: continuousBotTableRepository,
+      onCreatedTable: materializeCreatedContinuousBotTable,
+      onRetirementRequested: requestContinuousBotTableRetirement,
+      klog: klogSafe
+    })
+  : null;
+
 const transportWatchdogTimer = setInterval(() => {
   sweepTransportWatchdog();
 }, transportWatchdogSweepMs);
@@ -4237,6 +4350,7 @@ async function startServer() {
     deployRef: release.deployRef || null,
     environment: release.environment || "unknown"
   });
+  continuousBotTableSupervisor?.start();
   server.listen(PORT, "0.0.0.0", () => {
     klogSafe("ws_listening", { message: `WS listening on ${PORT}`, port: PORT });
   });

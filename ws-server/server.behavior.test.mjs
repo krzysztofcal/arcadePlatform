@@ -30,12 +30,81 @@ import {
 import { createPokerLogRuntimeControl } from "./poker/observability/poker-log-runtime-control.mjs";
 import { buildBootstrappedPokerState } from "./poker/engine/poker-engine.mjs";
 import { loadBotClaimsRecoveryExecutorIfInactive } from "./poker/persistence/bot-claims-recovery-adapter.mjs";
+import { normalizeContinuousBotProfile } from "./poker/persistence/continuous-bot-table-repository.mjs";
+import { createContinuousBotTableSupervisor } from "./poker/runtime/continuous-bot-table-supervisor.mjs";
 import { createTableManager } from "./poker/table/table-manager.mjs";
 
 const FIXED_RANDOM_BOT_AUTOPLAY_ADAPTER_URL = new URL(
   "./poker/runtime/accepted-bot-autoplay-adapter.fixed-random.fixture.mjs",
   import.meta.url
 ).href;
+
+test("continuous bot profile validation accepts only the bounded V1 singleton", () => {
+  const valid = normalizeContinuousBotProfile({
+    profile_key: "CONTINUOUS_BOT_DEFAULT",
+    enabled: true,
+    desired_table_count: 1,
+    min_bot_count: 2,
+    target_bot_count: 3,
+    max_bot_count: 3,
+    rotation_interval_seconds: 900,
+    postpone_interval_seconds: 300,
+    small_blind: 1,
+    big_blind: 2,
+    max_seats: 6
+  });
+  assert.equal(valid?.desiredTableCount, 1);
+  assert.equal(valid?.targetBotCount, 3);
+  assert.equal(normalizeContinuousBotProfile({ ...valid, profile_key: "OTHER" }), null);
+  assert.equal(normalizeContinuousBotProfile({
+    profile_key: "CONTINUOUS_BOT_DEFAULT",
+    enabled: true,
+    desired_table_count: 3,
+    min_bot_count: 2,
+    target_bot_count: 3,
+    max_bot_count: 3,
+    rotation_interval_seconds: 900,
+    postpone_interval_seconds: 300,
+    small_blind: 1,
+    big_blind: 2,
+    max_seats: 6
+  }), null);
+});
+
+test("continuous bot supervisor coalesces overlapping sweeps and activates each table once", async () => {
+  let release;
+  let calls = 0;
+  const activated = [];
+  const repository = {
+    reconcile: async () => {
+      calls += 1;
+      if (calls === 1) await new Promise((resolve) => { release = resolve; });
+      return {
+        ok: true,
+        profile: { profileKey: "CONTINUOUS_BOT_DEFAULT" },
+        createdTableIds: calls === 1 ? ["table-a"] : [],
+        activeTableIds: ["table-a"],
+        retirementTableIds: []
+      };
+    }
+  };
+  const supervisor = createContinuousBotTableSupervisor({
+    repository,
+    onCreatedTable: async ({ tableId }) => {
+      activated.push(tableId);
+      return { ok: true };
+    }
+  });
+  const first = supervisor.sweep();
+  const overlapping = await supervisor.sweep();
+  assert.equal(overlapping.skipped, true);
+  release();
+  await first;
+  await supervisor.sweep();
+  assert.equal(calls, 2);
+  assert.deepEqual(activated, ["table-a"]);
+  supervisor.stop();
+});
 
 async function listProductionModuleFiles(rootPath) {
   const stat = await fs.stat(rootPath);

@@ -84,6 +84,11 @@ from public.poker_tables t
 where t.status = 'OPEN'
   and t.max_players = $1
   and t.stakes = $2::jsonb
+  and not (
+    t.lifecycle_kind = 'CONTINUOUS_BOT'
+    and t.rotation_due_at is not null
+    and t.rotation_due_at <= now()
+  )
   and (select count(*)::int from public.poker_seats s where s.table_id = t.id and s.status = 'ACTIVE') < t.max_players
   and not exists (
     select 1
@@ -102,6 +107,7 @@ where t.status = 'OPEN'
         and coalesce(hs.is_bot, false) = false
         and coalesce(hs.last_seen_at, to_timestamp(0)) >= $4::timestamptz
     )
+    or t.lifecycle_kind = 'CONTINUOUS_BOT'
     or coalesce((
       select ps.state ->> 'phase'
       from public.poker_state ps

@@ -9,6 +9,7 @@ const SETTLEMENT_AUDIT_VERSION = 1;
 const ACCEPTED_ACTION_AUDIT_VERSION = 1;
 const ACCEPTED_ACTION_TYPES = new Set(["FOLD", "CHECK", "CALL", "BET", "RAISE", "ALL_IN"]);
 const MAX_REPLACEMENT_FUNDINGS = 10;
+const MAX_MANAGED_BOT_TOP_UPS = 6;
 const MAX_HUMAN_STACK_UPDATES = 10;
 const DURABLE_ACTION_KIND = "ACT";
 const PAYLOAD_HASH_PATTERN = /^[a-f0-9]{64}$/;
@@ -500,6 +501,48 @@ function normalizeReplacementFundings({ replacementFundings, tableId, expectedVe
   return { ok: true, supplied: true, fundings };
 }
 
+function normalizeManagedBotTopUps({ managedBotTopUps, tableId, expectedVersion }) {
+  if (managedBotTopUps === undefined) return { ok: true, supplied: false, fundings: [] };
+  if (!Array.isArray(managedBotTopUps) || managedBotTopUps.length > MAX_MANAGED_BOT_TOP_UPS) {
+    return { ok: false, reason: "invalid_managed_bot_top_ups" };
+  }
+  const seenSeats = new Set();
+  const fundings = [];
+  for (const value of managedBotTopUps) {
+    const seatNo = Number(value?.seatNo);
+    const botUserId = typeof value?.botUserId === "string" ? value.botUserId.trim() : "";
+    const botProfile = typeof value?.botProfile === "string" ? value.botProfile.trim().toUpperCase() : "";
+    const targetStack = Number(value?.targetStack);
+    const fundingDelta = Number(value?.fundingDelta);
+    const settledHandId = typeof value?.settledHandId === "string" ? value.settledHandId.trim() : "";
+    const fromStateVersion = Number(value?.fromStateVersion);
+    const toStateVersion = Number(value?.toStateVersion);
+    if (!Number.isInteger(seatNo) || seatNo < 1 || seatNo > MAX_MANAGED_BOT_TOP_UPS || seenSeats.has(seatNo)
+      || !botUserId || !botProfile
+      || !Number.isInteger(targetStack) || targetStack <= 0
+      || fundingDelta !== targetStack
+      || !settledHandId
+      || fromStateVersion !== expectedVersion
+      || toStateVersion !== expectedVersion + 1) {
+      return { ok: false, reason: "invalid_managed_bot_top_ups" };
+    }
+    seenSeats.add(seatNo);
+    fundings.push({
+      seatNo,
+      botUserId,
+      botProfile,
+      targetStack,
+      fundingDelta,
+      settledHandId,
+      fromStateVersion,
+      toStateVersion,
+      idempotencyKey: `poker:managed-bot-top-up:v1:${tableId}:${toStateVersion}:${seatNo}`
+    });
+  }
+  fundings.sort((left, right) => left.seatNo - right.seatNo);
+  return { ok: true, supplied: true, fundings };
+}
+
 function normalizeHumanStackUpdates({ humanStackUpdates, expectedVersion }) {
   if (humanStackUpdates === undefined) return { ok: true, supplied: false, updates: [] };
   if (!Array.isArray(humanStackUpdates) || humanStackUpdates.length > MAX_HUMAN_STACK_UPDATES) {
@@ -613,6 +656,72 @@ async function writeReplacementFundings({ tx, tableId, fundings, botFundingSyste
   return fundedReplacements;
 }
 
+async function writeManagedBotTopUps({ tx, tableId, fundings, botFundingSystemKey }) {
+  if (fundings.length === 0) return [];
+  const sourceSystemKey = typeof botFundingSystemKey === "string" ? botFundingSystemKey.trim() : "";
+  if (!sourceSystemKey) throw Object.assign(new Error("managed_bot_top_up_config_invalid"), { code: "managed_bot_top_up_config_invalid" });
+  const escrowSystemKey = `POKER_TABLE:${tableId}`;
+  const funded = [];
+  for (const funding of fundings) {
+    const inserted = await tx.unsafe(
+      `insert into public.poker_seats
+         (table_id, user_id, seat_no, status, is_bot, bot_profile, leave_after_hand, stack, last_seen_at, joined_at)
+       values ($1, $2, $3, 'ACTIVE', true, $4, false, $5, now(), now())
+       on conflict (table_id, seat_no) do update
+         set user_id = excluded.user_id,
+             status = 'ACTIVE',
+             is_bot = true,
+             bot_profile = excluded.bot_profile,
+             leave_after_hand = false,
+             stack = excluded.stack,
+             last_seen_at = now(),
+             joined_at = now()
+       where poker_seats.is_bot = true and poker_seats.status <> 'ACTIVE'
+       returning seat_no;`,
+      [tableId, funding.botUserId, funding.seatNo, funding.botProfile, funding.targetStack]
+    );
+    if (Number(inserted?.[0]?.seat_no) !== funding.seatNo) {
+      throw Object.assign(new Error("managed_bot_top_up_seat_conflict"), { code: "managed_bot_top_up_seat_conflict" });
+    }
+    const result = await postTransaction({
+      userId: null,
+      txType: "TABLE_BUY_IN",
+      idempotencyKey: funding.idempotencyKey,
+      reference: `MANAGED_BOT_TOP_UP:${tableId}:${funding.toStateVersion}:${funding.seatNo}`,
+      description: "Poker managed bot top-up funding",
+      metadata: {
+        actor: "BOT",
+        reason: "BOT_SEED_BUY_IN",
+        lifecycleReason: "MANAGED_BOT_TOP_UP",
+        tableId,
+        seatNo: funding.seatNo,
+        botUserId: funding.botUserId,
+        botProfile: funding.botProfile,
+        settledHandId: funding.settledHandId,
+        fromStateVersion: funding.fromStateVersion,
+        toStateVersion: funding.toStateVersion,
+        sourceSystemKey
+      },
+      entries: [
+        { accountType: "SYSTEM", systemKey: sourceSystemKey, amount: -funding.fundingDelta, metadata: { reason: "BOT_SEED_BUY_IN", tableId, seatNo: funding.seatNo } },
+        { accountType: "ESCROW", systemKey: escrowSystemKey, amount: funding.fundingDelta, metadata: { reason: "BOT_SEED_BUY_IN", tableId, seatNo: funding.seatNo } }
+      ],
+      createdBy: null,
+      tx
+    });
+    const transactionId = typeof result?.transaction?.id === "string" ? result.transaction.id : "";
+    if (!transactionId) throw Object.assign(new Error("managed_bot_top_up_receipt_invalid"), { code: "managed_bot_top_up_receipt_invalid" });
+    funded.push({
+      seatNo: funding.seatNo,
+      botUserId: funding.botUserId,
+      fundingDelta: funding.fundingDelta,
+      idempotencyKey: funding.idempotencyKey,
+      transactionId
+    });
+  }
+  return funded;
+}
+
 export function createPersistedStateWriter({ env = process.env, beginSql = beginSqlWs, klog = () => {} } = {}) {
   const holeCardAcknowledgementByTableId = new Map();
 
@@ -623,6 +732,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     privateStateForHoleCards = null,
     acceptedActionAudit = null,
     replacementFundingPlan,
+    managedBotTopUpPlan,
     humanStackUpdatePlan,
     botFundingSystemKey = null,
     durableActionPlan
@@ -652,6 +762,12 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
           tx,
           tableId,
           fundings: replacementFundingPlan.fundings,
+          botFundingSystemKey
+        });
+        const fundedManagedBotTopUps = await writeManagedBotTopUps({
+          tx,
+          tableId,
+          fundings: managedBotTopUpPlan.fundings,
           botFundingSystemKey
         });
         await tx.unsafe("update public.poker_tables set last_activity_at = now() where id = $1;", [tableId]);
@@ -709,6 +825,12 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
             expectedVersion,
             replacementFundingCommitted: true,
             fundedReplacements
+          } : {}),
+          ...(managedBotTopUpPlan.supplied ? {
+            tableId,
+            expectedVersion,
+            managedBotTopUpCommitted: true,
+            fundedManagedBotTopUps
           } : {}),
           ...(humanStackUpdatePlan.supplied ? {
             tableId,
@@ -795,6 +917,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     meta = null,
     acceptedActionAudit = null,
     replacementFundings = undefined,
+    managedBotTopUps = undefined,
     humanStackUpdates = undefined,
     botFundingSystemKey = null,
     durableActionRequest = null
@@ -818,11 +941,13 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     if (!replacementFundingPlan.ok) {
       return { ok: false, reason: replacementFundingPlan.reason };
     }
+    const managedBotTopUpPlan = normalizeManagedBotTopUps({ managedBotTopUps, tableId, expectedVersion });
+    if (!managedBotTopUpPlan.ok) return { ok: false, reason: managedBotTopUpPlan.reason };
     const humanStackUpdatePlan = normalizeHumanStackUpdates({ humanStackUpdates, expectedVersion });
     if (!humanStackUpdatePlan.ok) return { ok: false, reason: humanStackUpdatePlan.reason };
     const durableActionPlan = normalizeDurableActionRequest(durableActionRequest, { expectedVersion });
     if (!durableActionPlan.ok) return { ok: false, outcome: "invalid", reason: durableActionPlan.reason };
-    if (replacementFundingPlan.fundings.length > 0) {
+    if (replacementFundingPlan.fundings.length > 0 || managedBotTopUpPlan.fundings.length > 0) {
       const sourceSystemKey = typeof botFundingSystemKey === "string" ? botFundingSystemKey.trim() : "";
       if (!sourceSystemKey) {
         return { ok: false, reason: "replacement_funding_config_invalid" };
@@ -838,7 +963,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
         if (durableActionPlan.supplied) {
           return { ok: false, outcome: "failure", reason: "durable_action_store_unavailable" };
         }
-        if (replacementFundingPlan.fundings.length > 0) {
+        if (replacementFundingPlan.fundings.length > 0 || managedBotTopUpPlan.fundings.length > 0) {
           return { ok: false, reason: "ledger_unavailable" };
         }
         return writePersistedTableToFile({
@@ -859,6 +984,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
         privateStateForHoleCards: holeCardPrivateState,
         acceptedActionAudit,
         replacementFundingPlan,
+        managedBotTopUpPlan,
         humanStackUpdatePlan,
         botFundingSystemKey,
         durableActionPlan

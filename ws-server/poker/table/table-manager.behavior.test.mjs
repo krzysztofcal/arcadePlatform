@@ -56,6 +56,49 @@ test("resolveNextDealerSeatNo skips ineligible seats based on settled continuati
   assert.equal(nextDealer, 3);
 });
 
+test("bots-only bootstrap requires both trusted managed metadata and explicit internal intent", () => {
+  const tableId = "table_managed_bootstrap_gate";
+  const manager = createTableManager({ maxSeats: 6 });
+  const restored = manager.restoreTableFromPersisted(tableId, {
+    tableMeta: {
+      maxPlayers: 6,
+      stakes: { sb: 1, bb: 2 },
+      lifecycleKind: "CONTINUOUS_BOT",
+      managedProfileKey: "CONTINUOUS_BOT_DEFAULT"
+    },
+    coreState: {
+      version: 0,
+      roomId: tableId,
+      maxSeats: 6,
+      members: [
+        { userId: "bot_a", seat: 1 },
+        { userId: "bot_b", seat: 2 }
+      ],
+      seats: { bot_a: 1, bot_b: 2 },
+      publicStacks: { bot_a: 100, bot_b: 100 },
+      seatDetailsByUserId: {
+        bot_a: { isBot: true, botProfile: "NORMAL" },
+        bot_b: { isBot: true, botProfile: "NORMAL" }
+      },
+      pokerState: {
+        tableId,
+        phase: "INIT",
+        seats: [
+          { userId: "bot_a", seatNo: 1, isBot: true },
+          { userId: "bot_b", seatNo: 2, isBot: true }
+        ],
+        stacks: { bot_a: 100, bot_b: 100 }
+      }
+    }
+  });
+  assert.equal(restored.ok, true);
+  assert.equal(manager.bootstrapHand(tableId, { nowMs: 1_000 }).changed, false);
+  const started = manager.bootstrapHand(tableId, { nowMs: 1_000, allowManagedBotsOnly: true });
+  assert.equal(started.ok, true);
+  assert.equal(started.changed, true);
+  assert.equal(manager.persistedPokerState(tableId).phase, "PREFLOP");
+});
+
 test("applyAction returns accepted action audit context without private cards", () => {
   const tableManager = createTableManager({ maxSeats: 4 });
   const tableId = "table_action_audit_context";

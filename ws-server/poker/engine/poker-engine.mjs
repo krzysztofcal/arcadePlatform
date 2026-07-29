@@ -244,6 +244,96 @@ function nextBotReplacementUserId({ tableId, seatNo, version, existingUserIds })
   return candidate;
 }
 
+export function topUpManagedBotsForNextHand({
+  coreState,
+  settledState,
+  nextVersion,
+  minBotCount,
+  targetBotCount,
+  maxBotCount
+} = {}) {
+  if (!coreState || typeof coreState !== "object" || !settledState || typeof settledState !== "object") {
+    return { ok: false, reason: "invalid_managed_top_up_state", coreState, settledState, topUpFundings: [] };
+  }
+  if (Number(coreState.version) + 1 !== nextVersion) {
+    return { ok: false, reason: "invalid_managed_top_up_version", coreState, settledState, topUpFundings: [] };
+  }
+  const minimum = Number(minBotCount);
+  const target = Number(targetBotCount);
+  const maximum = Number(maxBotCount);
+  if (!Number.isInteger(minimum) || !Number.isInteger(target) || !Number.isInteger(maximum)
+    || minimum < 0 || minimum > target || target > maximum) {
+    return { ok: false, reason: "invalid_managed_top_up_config", coreState, settledState, topUpFundings: [] };
+  }
+  const members = orderedSeatMembers(coreState);
+  const details = coreState.seatDetailsByUserId && typeof coreState.seatDetailsByUserId === "object"
+    ? coreState.seatDetailsByUserId
+    : {};
+  const botCount = members.filter((member) => details?.[member.userId]?.isBot === true).length;
+  if (botCount >= minimum) {
+    return { ok: true, coreState, settledState, topUpFundings: [] };
+  }
+  const maxSeats = Number(coreState.maxSeats);
+  if (!Number.isInteger(maxSeats) || maxSeats < 2) {
+    return { ok: false, reason: "invalid_managed_top_up_capacity", coreState, settledState, topUpFundings: [] };
+  }
+  const toAdd = Math.min(Math.max(0, target - botCount), Math.max(0, maximum - botCount), Math.max(0, maxSeats - members.length));
+  if (toAdd <= 0) {
+    return { ok: true, coreState, settledState, topUpFundings: [] };
+  }
+  const occupied = new Set(members.map((member) => member.seat));
+  const existingUserIds = new Set(members.map((member) => member.userId));
+  const nextMembers = members.slice();
+  const nextSeats = { ...(coreState.seats || {}) };
+  const nextDetails = { ...details };
+  const nextStacks = { ...(settledState.stacks || {}) };
+  const nextPublicStacks = { ...(coreState.publicStacks || {}) };
+  const topUpFundings = [];
+  for (let seatNo = 1; seatNo <= maxSeats && topUpFundings.length < toAdd; seatNo += 1) {
+    if (occupied.has(seatNo)) continue;
+    const botUserId = nextBotReplacementUserId({
+      tableId: `managed_top_up:${coreState.roomId || ""}`,
+      seatNo,
+      version: nextVersion,
+      existingUserIds
+    });
+    nextMembers.push({ userId: botUserId, seat: seatNo });
+    nextSeats[botUserId] = seatNo;
+    nextDetails[botUserId] = {
+      seatNo,
+      isBot: true,
+      botProfile: "NORMAL",
+      status: "ACTIVE",
+      leaveAfterHand: false
+    };
+    nextStacks[botUserId] = BOT_REPLACEMENT_STACK;
+    nextPublicStacks[botUserId] = BOT_REPLACEMENT_STACK;
+    topUpFundings.push({
+      seatNo,
+      botUserId,
+      botProfile: "NORMAL",
+      targetStack: BOT_REPLACEMENT_STACK,
+      fundingDelta: BOT_REPLACEMENT_STACK,
+      settledHandId: settledState.handId,
+      fromStateVersion: Number(coreState.version),
+      toStateVersion: nextVersion
+    });
+    occupied.add(seatNo);
+  }
+  return {
+    ok: true,
+    coreState: {
+      ...coreState,
+      members: nextMembers.sort((left, right) => left.seat - right.seat),
+      seats: nextSeats,
+      seatDetailsByUserId: nextDetails,
+      publicStacks: nextPublicStacks
+    },
+    settledState: { ...settledState, stacks: nextStacks },
+    topUpFundings
+  };
+}
+
 export function replaceBrokeBotsForNextHand({ coreState, settledState, nextVersion }) {
   if (!coreState || typeof coreState !== "object" || Array.isArray(coreState)) {
     return { ok: false, reason: "invalid_core_state", coreState, settledState, replacementFundings: [] };

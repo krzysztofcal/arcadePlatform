@@ -1,11 +1,21 @@
-export const createPokerTableWithState = async (tx, { userId, maxPlayers, stakesJson }) => {
+export const createPokerTableWithState = async (tx, {
+  userId,
+  maxPlayers,
+  stakesJson,
+  lifecycleKind = "STANDARD",
+  managedProfileKey = null,
+  rotationDueAt = null
+}) => {
   const tableRows = await tx.unsafe(
     `
-insert into public.poker_tables (stakes, max_players, status, created_by, updated_at, last_activity_at)
-values ($1::jsonb, $2, 'OPEN', $3, now(), now())
+insert into public.poker_tables (
+  stakes, max_players, status, created_by, updated_at, last_activity_at,
+  lifecycle_kind, managed_profile_key, rotation_due_at
+)
+values ($1::jsonb, $2, 'OPEN', $3, now(), now(), $4, $5, $6)
 returning id;
     `,
-    [stakesJson, maxPlayers, userId]
+    [stakesJson, maxPlayers, userId, lifecycleKind, managedProfileKey, rotationDueAt]
   );
   const tableId = tableRows?.[0]?.id || null;
   if (!tableId) {

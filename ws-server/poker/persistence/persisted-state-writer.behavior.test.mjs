@@ -937,6 +937,9 @@ function createReplacementFundingDbHarness({ tableId, version = 7, state, treasu
         if (text.includes("from public.chips_accounts") && text.includes("system_key = any")) {
           return params[0].map((key) => working.accounts.get(key)).filter(Boolean).map((account) => ({ ...account }));
         }
+        if (text.includes("insert into public.poker_seats")) {
+          return [{ seat_no: Number(params[2]) }];
+        }
         if (text.includes("insert into public.chips_transactions")) {
           durable.transactionInsertSql = text;
           if (durable.failFunding) throw new Error("simulated_funding_failure");
@@ -1059,6 +1062,42 @@ test("replacement funding without a configured human actor atomically increases 
   assert.equal(conflict.ok, false);
   assert.equal(conflict.reason, "conflict");
   assert.equal(harness.durable.ledgerInsertCount, 1);
+});
+
+test("managed bot top-up atomically persists state, seat and SYSTEM funding without a human actor", async () => {
+  const tableId = "00000000-0000-4000-8000-0000000007a5";
+  const previousState = { tableId, handId: "hand_managed_settled", phase: "SETTLED", stacks: {} };
+  const nextState = { tableId, handId: "hand_managed_next", phase: "PREFLOP", stacks: {} };
+  const harness = createReplacementFundingDbHarness({ tableId, state: previousState, escrowBalance: 200 });
+  const writer = createPersistedStateWriter({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: harness.beginSql,
+    klog: () => {}
+  });
+  const escrowBefore = harness.balance(`POKER_TABLE:${tableId}`);
+  const result = await writer.writeMutation({
+    tableId,
+    expectedVersion: 7,
+    nextState,
+    managedBotTopUps: [{
+      seatNo: 3,
+      botUserId: "00000000-0000-5000-8000-0000000000d3",
+      botProfile: "NORMAL",
+      targetStack: 100,
+      fundingDelta: 100,
+      settledHandId: "hand_managed_settled",
+      fromStateVersion: 7,
+      toStateVersion: 8
+    }],
+    botFundingSystemKey: "TREASURY"
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.managedBotTopUpCommitted, true);
+  assert.equal(result.fundedManagedBotTopUps.length, 1);
+  assert.equal(result.fundedManagedBotTopUps[0].seatNo, 3);
+  assert.equal(harness.balance(`POKER_TABLE:${tableId}`), escrowBefore + 100);
+  assert.equal([...harness.durable.transactions.values()][0]?.created_by, null);
 });
 
 test("replacement funding failure rolls back persisted state and escrow", async () => {

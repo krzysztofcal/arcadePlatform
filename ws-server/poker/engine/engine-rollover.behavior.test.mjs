@@ -6,7 +6,8 @@ import {
   buildBootstrappedPokerState,
   buildNextHandStateFromSettled,
   calculateReplacementFundingDelta,
-  replaceBrokeBotsForNextHand
+  replaceBrokeBotsForNextHand,
+  topUpManagedBotsForNextHand
 } from "./poker-engine.mjs";
 import { dealHoleCards, deriveDeck, toCardCodes } from "../shared/poker-primitives.mjs";
 
@@ -24,6 +25,79 @@ test("replacement funding delta rejects invalid accounting inputs", () => {
   }
   assert.equal(calculateReplacementFundingDelta({ oldStack: 1, targetStack: 0 }).ok, false);
   assert.equal(calculateReplacementFundingDelta({ oldStack: 1, targetStack: Number.NaN }).ok, false);
+});
+
+test("managed settled top-up fills vacant bot seats deterministically without changing humans", () => {
+  const coreState = {
+    roomId: "table_managed_top_up",
+    version: 7,
+    maxSeats: 6,
+    members: [
+      { userId: "human_a", seat: 1 },
+      { userId: "bot_a", seat: 2 }
+    ],
+    seats: { human_a: 1, bot_a: 2 },
+    publicStacks: { human_a: 250, bot_a: 80 },
+    seatDetailsByUserId: {
+      human_a: { isBot: false },
+      bot_a: { isBot: true, botProfile: "NORMAL" }
+    }
+  };
+  const settledState = {
+    handId: "hand_managed_top_up",
+    phase: "SETTLED",
+    stacks: { human_a: 250, bot_a: 80 }
+  };
+
+  const result = topUpManagedBotsForNextHand({
+    coreState,
+    settledState,
+    nextVersion: 8,
+    minBotCount: 2,
+    targetBotCount: 3,
+    maxBotCount: 3
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.topUpFundings.length, 2);
+  assert.deepEqual(result.topUpFundings.map((entry) => entry.seatNo), [3, 4]);
+  assert.equal(result.settledState.stacks.human_a, 250);
+  assert.equal(result.coreState.publicStacks.human_a, 250);
+  assert.equal(result.coreState.members.length, 4);
+  assert.equal(result.topUpFundings.every((entry) => entry.fundingDelta === 100), true);
+});
+
+test("managed settled top-up never displaces humans when capacity cannot reach target", () => {
+  const members = [
+    { userId: "human_a", seat: 1 },
+    { userId: "human_b", seat: 2 },
+    { userId: "human_c", seat: 3 },
+    { userId: "human_d", seat: 4 },
+    { userId: "bot_a", seat: 5 }
+  ];
+  const details = Object.fromEntries(members.map((member) => [member.userId, { isBot: member.userId.startsWith("bot_") }]));
+  const stacks = Object.fromEntries(members.map((member) => [member.userId, 100]));
+  const result = topUpManagedBotsForNextHand({
+    coreState: {
+      roomId: "table_managed_capacity",
+      version: 2,
+      maxSeats: 6,
+      members,
+      seats: Object.fromEntries(members.map((member) => [member.userId, member.seat])),
+      publicStacks: stacks,
+      seatDetailsByUserId: details
+    },
+    settledState: { handId: "hand_capacity", phase: "SETTLED", stacks },
+    nextVersion: 3,
+    minBotCount: 2,
+    targetBotCount: 3,
+    maxBotCount: 3
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.topUpFundings.length, 1);
+  assert.equal(result.topUpFundings[0].seatNo, 6);
+  assert.deepEqual(result.coreState.members.filter((member) => member.userId.startsWith("human_")), members.slice(0, 4));
 });
 
 function initialCore() {

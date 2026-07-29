@@ -81,7 +81,10 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
           stakes: row.stakes ?? '{"sb":1,"bb":2}',
           created_at: row.created_at ?? null,
           updated_at: row.updated_at ?? null,
-          last_activity_at: row.last_activity_at ?? null
+          last_activity_at: row.last_activity_at ?? null,
+          lifecycle_kind: row.lifecycle_kind ?? "STANDARD",
+          managed_profile_key: row.managed_profile_key ?? null,
+          rotation_due_at: row.rotation_due_at ?? null
         }];
       }
 

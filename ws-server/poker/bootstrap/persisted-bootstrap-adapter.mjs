@@ -166,11 +166,25 @@ function normalizeTableMeta(tableRow, maxSeats) {
   const stakesParsed = parseStakes(tableRow?.stakes);
   const createdAtMs = normalizeTimestampMs(tableRow?.created_at ?? tableRow?.createdAt);
   const lastActivityAtMs = normalizeTimestampMs(tableRow?.last_activity_at ?? tableRow?.lastActivityAt) ?? createdAtMs;
+  const lifecycleKind = typeof tableRow?.lifecycle_kind === "string"
+    ? tableRow.lifecycle_kind.trim().toUpperCase()
+    : "STANDARD";
+  const managedProfileKey = typeof tableRow?.managed_profile_key === "string"
+    ? tableRow.managed_profile_key.trim().toUpperCase()
+    : null;
+  const trustedLifecycleKind = lifecycleKind === "CONTINUOUS_BOT" && managedProfileKey === "CONTINUOUS_BOT_DEFAULT"
+    ? lifecycleKind
+    : "STANDARD";
   return {
     maxPlayers,
     stakes: stakesParsed.ok ? stakesParsed.value : null,
     createdAtMs,
-    lastActivityAtMs
+    lastActivityAtMs,
+    lifecycleKind: trustedLifecycleKind,
+    managedProfileKey: trustedLifecycleKind === "CONTINUOUS_BOT" ? managedProfileKey : null,
+    rotationDueAtMs: trustedLifecycleKind === "CONTINUOUS_BOT"
+      ? normalizeTimestampMs(tableRow?.rotation_due_at ?? tableRow?.rotationDueAt)
+      : null
   };
 }
 

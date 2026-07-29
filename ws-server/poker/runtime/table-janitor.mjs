@@ -396,6 +396,23 @@ export function evaluateTableHealth({
     });
   }
 
+  const managedContinuousTable = normalizeStatus(persistedTable?.lifecycle_kind, "") === "CONTINUOUS_BOT"
+    && normalizeRequiredString(persistedTable?.managed_profile_key).toUpperCase() === "CONTINUOUS_BOT_DEFAULT";
+  const rotationDueAtMs = parseTimestampMs(persistedTable?.rotation_due_at);
+  if (managedContinuousTable && (rotationDueAtMs == null || rotationDueAtMs > nowMs)) {
+    return buildClassification({
+      tableId,
+      healthy: true,
+      classification: "healthy",
+      action: "noop",
+      reasonCode: "managed_continuous_table_supervisor_owned",
+      concerns,
+      details: {
+        phase: typeof state?.phase === "string" ? state.phase : null
+      }
+    });
+  }
+
   if (activeHumanSeats.length === 0) {
     const normalizedCloseGraceMs = normalizePositiveInt(tableCloseGraceMs, DEFAULT_TABLE_CLOSE_GRACE_MS);
     const tableCreatedAtMs = resolveTableCreatedAtMs(persistedTable);

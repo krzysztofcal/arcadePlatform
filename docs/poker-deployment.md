@@ -117,6 +117,42 @@ The host is a single shared preview runtime, so automatic deployment from every 
 Changes to bot replacement funding touch the authoritative WS runtime and therefore require a manual WS preview deploy before stage acceptance. Verify a replacement with old stack `0` or `1`, then confirm the next hand starts and the table escrow increased by exactly the funded delta. A Netlify deploy preview alone is not sufficient for this server-side path.
 
 Terminal bot cash-out also requires a manual WS preview deploy. Test it only with a newly created preview table: allow at least one bot replacement, close the table through the terminal inactive-cleanup path, and verify that every positive final bot stack moves from table ESCROW to the exact SYSTEM account proven by its seed/replacement ledger lineage. A successful close must leave the escrow balance at `0`; repeating cleanup must not create another transfer. Missing or mixed provenance, a mismatch between authoritative claims and escrow, or any non-zero post-cash-out escrow must return `terminal_accounting_invariant_failed` and leave table accounting and lifecycle state unchanged.
+
+## Continuous bot tables (foundation)
+
+Continuous bot tables are controlled by the single database profile
+`public.poker_managed_table_profiles.profile_key = 'CONTINUOUS_BOT_DEFAULT'`.
+The migration seeds it disabled with `desired_table_count = 0`; deployment alone
+does not create a table. There are no continuous-table ENV settings.
+
+The V1 foundation supports at most two six-seat tables. Profile constraints and
+runtime validation bound desired count, bot counts, stakes and timing values.
+The supervisor polls the profile, serializes create/retire decisions with a
+database advisory transaction lock and retains the last valid profile across a
+transient read failure. Only a successfully read disabled/zero profile requests
+graceful retirement.
+
+Initial managed bots and settled-boundary top-ups use the established internal
+`SYSTEM -> ESCROW` funding shape with `created_by = NULL`. The actual SYSTEM
+account and immutable ledger entries are the funding authority. Do not create a
+technical USER actor and do not pass bot identities through human join, leave or
+rebuy contracts.
+
+Preview rollout:
+
+1. Apply `20260729100000_poker_managed_table_profiles.sql` to stage.
+2. Deploy the exact PR SHA with manual `WS Preview Deploy`.
+3. Verify release metadata, `ws_artifact_start`, local/public `/healthz` and no supervisor failure.
+4. Confirm the seeded profile is disabled and no managed table was created.
+5. In one reviewed database update set `enabled = true`, `desired_table_count = 1` and `updated_at = now()`.
+6. Verify exactly one `CONTINUOUS_BOT` table, three initial bots, one escrow account, three seed funding transactions and one playable persisted hand.
+7. Join as a real player through normal quick-seat/direct join; verify actions, settlement, reconnect, rebuy and leave.
+8. Verify settled rollover, bot replacement/top-up idempotency and absence of accounting/persistence failures.
+9. Set the valid profile to `enabled = false`, `desired_table_count = 0`; verify the table waits for `SETTLED`, never removes a human, then closes once through terminal accounting with escrow `0`.
+
+Do not change stakes or `max_seats` on an active production profile without
+expecting graceful retirement. Existing tables keep their persisted stakes and
+capacity; replacements use the new construction values.
 Repo-side Caddy ownership is unified: `infra/vps/Caddyfile` is the single source of truth for both production and preview WS routing, so any Caddy change for either host must be made in that file.
 
 ### Dispatch a preview deploy for a selected ref
