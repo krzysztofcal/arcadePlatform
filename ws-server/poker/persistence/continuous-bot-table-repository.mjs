@@ -201,8 +201,53 @@ export function createContinuousBotTableRepository({
     }
   }
 
+  async function requestRetirement(tableId) {
+    const normalizedTableId = typeof tableId === "string" ? tableId.trim() : "";
+    if (!normalizedTableId) {
+      return { ok: false, reason: "invalid_table_id" };
+    }
+    try {
+      return await beginSql(async (tx) => {
+        await tx.unsafe("select pg_advisory_xact_lock(hashtext($1));", ["poker:continuous-bot-supervisor:v1"]);
+        const tableRows = await tx.unsafe(
+          `select id, rotation_due_at
+             from public.poker_tables
+            where id = $1
+              and status = 'OPEN'
+              and lifecycle_kind = 'CONTINUOUS_BOT'
+              and managed_profile_key = $2
+            for update;`,
+          [normalizedTableId, CONTINUOUS_BOT_PROFILE_KEY]
+        );
+        if (!Array.isArray(tableRows) || tableRows.length !== 1) {
+          return { ok: false, reason: "managed_table_not_found" };
+        }
+        const updatedRows = await tx.unsafe(
+          `update public.poker_tables
+              set rotation_due_at = least(coalesce(rotation_due_at, now()), now()), updated_at = now()
+            where id = $1
+            returning id, rotation_due_at;`,
+          [normalizedTableId]
+        );
+        return {
+          ok: updatedRows?.length === 1,
+          changed: updatedRows?.length === 1 && !tableRows[0]?.rotation_due_at,
+          rotationDueAt: updatedRows?.[0]?.rotation_due_at ?? tableRows[0]?.rotation_due_at ?? null,
+          reason: updatedRows?.length === 1 ? null : "retirement_request_failed"
+        };
+      }, { env });
+    } catch (error) {
+      klog("ws_continuous_bot_table_retirement_persist_failed", {
+        tableId: normalizedTableId,
+        reason: error?.code || error?.message || "unknown"
+      });
+      return { ok: false, reason: error?.code || error?.message || "retirement_request_failed" };
+    }
+  }
+
   return {
     reconcile,
+    requestRetirement,
     currentProfile: () => lastKnownProfile
   };
 }

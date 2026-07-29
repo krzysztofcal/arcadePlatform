@@ -2243,6 +2243,27 @@ export function createTableManager({
     return normalizeTableMeta(table.tableMeta, table?.coreState?.maxSeats || maxSeats);
   }
 
+  function markTableRotationDue(tableId, dueAtMs = Date.now()) {
+    const table = tables.get(tableId);
+    if (!table || table.tableMeta?.lifecycleKind !== "CONTINUOUS_BOT") {
+      return { ok: false, changed: false, reason: "managed_table_not_found" };
+    }
+    const normalizedDueAtMs = normalizeTimestampMs(dueAtMs);
+    if (!Number.isFinite(normalizedDueAtMs)) {
+      return { ok: false, changed: false, reason: "invalid_rotation_due_at" };
+    }
+    const previousDueAtMs = normalizeTimestampMs(table.tableMeta?.rotationDueAtMs);
+    table.tableMeta = normalizeTableMeta({
+      ...table.tableMeta,
+      rotationDueAtMs: previousDueAtMs == null ? normalizedDueAtMs : Math.min(previousDueAtMs, normalizedDueAtMs)
+    }, table?.coreState?.maxSeats || maxSeats);
+    return {
+      ok: true,
+      changed: previousDueAtMs == null || normalizedDueAtMs < previousDueAtMs,
+      rotationDueAtMs: table.tableMeta.rotationDueAtMs
+    };
+  }
+
   function resolveImplicitLeaveTableId({ ws, userId }) {
     const conn = connStateBySocket.get(ws);
     if (conn?.joinedTableId) {
@@ -2287,6 +2308,7 @@ export function createTableManager({
     orderedConnectionsForTable,
     listTableIds,
     tableMeta,
+    markTableRotationDue,
     materializeLobbyTable,
     materializeGuestTable,
     connectionTableAssociation,

@@ -1951,6 +1951,19 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     deferRuntimeVersionUpdate: true
   });
   if (!persisted?.ok || persisted.alreadyApplied) {
+    const replacementSeatConflict = managedContinuousTable
+      && prepared.replacementFundings.length > 0
+      && persisted?.reason === "replacement_seat_projection_conflict";
+    if (replacementSeatConflict) {
+      const retirement = await retireManagedTableAfterReplacementConflict({
+        tableId,
+        generationKey,
+        attempt
+      });
+      if (retirement?.ok === true) {
+        return finishSettledRollover(retirement);
+      }
+    }
     if (!persisted?.alreadyApplied) {
       klogSafe("ws_settled_rollover_persist_failed", {
         tableId,
@@ -4259,8 +4272,51 @@ async function materializeCreatedContinuousBotTable({ tableId, created = false }
   });
 }
 
+async function retireManagedTableAfterReplacementConflict({ tableId, generationKey, attempt }) {
+  const persisted = await continuousBotTableRepository?.requestRetirement?.(tableId);
+  if (!persisted?.ok) {
+    return persisted || { ok: false, reason: "retirement_request_unavailable" };
+  }
+
+  continuousBotRetirementRequested.add(tableId);
+  const restored = await restoreTableFromPersisted(tableId);
+  if (!restored?.ok) {
+    tableManager.markTableRotationDue?.(tableId, Date.now());
+    scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
+    return {
+      ok: true,
+      changed: false,
+      deferred: true,
+      reason: "managed_retirement_restore_pending",
+      retryable: true
+    };
+  }
+  broadcastStateSnapshots(tableId);
+
+  if (tableManager.hasActiveHumanMember(tableId) || tableManager.hasConnectedHumanPresence(tableId)) {
+    scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
+    return {
+      ok: true,
+      changed: false,
+      deferred: true,
+      reason: "managed_retirement_human_present",
+      retryable: true
+    };
+  }
+
+  return applyInactiveCleanupAndBroadcast({
+    tableId,
+    requestId: `continuous-bot-table-close:${tableId}`,
+    logPrefix: "ws_continuous_bot_table_retirement"
+  });
+}
+
 async function requestContinuousBotTableRetirement({ tableId }) {
   if (continuousBotRetirementRequested.has(tableId)) return { ok: true, changed: false };
+  const persisted = await continuousBotTableRepository?.requestRetirement?.(tableId);
+  if (!persisted?.ok) {
+    return persisted || { ok: false, reason: "retirement_request_unavailable" };
+  }
   continuousBotRetirementRequested.add(tableId);
   return enqueueTableCommand({
     tableId,

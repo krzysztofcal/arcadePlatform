@@ -87,6 +87,7 @@ run("node", ["tests/poker-v2-live.behavior.test.mjs"], "poker-v2-live-behavior")
 run("node", ["ws-server/poker/persistence/inactive-cleanup-adapter.behavior.test.mjs"], "ws-inactive-cleanup-adapter-behavior");
 run("node", ["ws-server/poker/persistence/deferred-leave-finalization-adapter.behavior.test.mjs"], "ws-deferred-leave-finalization-adapter-behavior");
 run("node", ["ws-server/poker/persistence/persisted-state-writer.behavior.test.mjs"], "ws-persisted-state-writer-behavior");
+run("node", ["ws-server/poker/persistence/continuous-bot-table-repository.behavior.test.mjs"], "ws-continuous-bot-table-repository-behavior");
 run("node", ["ws-server/poker/idempotency/action-command.behavior.test.mjs"], "ws-action-command-idempotency-behavior");
 run("node", ["ws-server/poker/persistence/authoritative-rebuy-adapter.behavior.test.mjs"], "ws-authoritative-rebuy-adapter-behavior");
 run("node", ["ws-server/poker/handlers/rebuy.behavior.test.mjs"], "ws-rebuy-handler-behavior");

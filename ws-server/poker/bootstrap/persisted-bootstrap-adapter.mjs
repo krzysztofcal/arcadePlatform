@@ -261,6 +261,110 @@ function normalizeSeatRows(seatRows, maxSeats) {
   return activeSeats;
 }
 
+function remapUserId(value, aliases) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized && aliases?.[normalized] ? aliases[normalized] : value;
+}
+
+function remapUserKeyedObject(value, aliases, { preferSeatStacks = false, seatRowsByUserId = null } = {}) {
+  if (!asPlainObject(value) || !aliases || Object.keys(aliases).length === 0) {
+    return value;
+  }
+  const remapped = {};
+  for (const [userId, entry] of Object.entries(value)) {
+    if (!aliases[userId]) {
+      remapped[userId] = entry;
+    }
+  }
+  for (const [userId, entry] of Object.entries(value)) {
+    const currentUserId = aliases[userId];
+    if (!currentUserId) {
+      continue;
+    }
+    if (preferSeatStacks) {
+      const seatRow = seatRowsByUserId?.get(currentUserId);
+      const seatStack = Number(seatRow?.stack);
+      if (Number.isSafeInteger(seatStack) && seatStack >= 0) {
+        remapped[currentUserId] = seatStack;
+        continue;
+      }
+    }
+    if (!Object.prototype.hasOwnProperty.call(remapped, currentUserId)) {
+      remapped[currentUserId] = entry;
+    }
+  }
+  return remapped;
+}
+
+function remapUserIdArray(value, aliases) {
+  if (!Array.isArray(value) || !aliases || Object.keys(aliases).length === 0) {
+    return value;
+  }
+  return value.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
+    const userId = typeof entry.userId === "string" ? entry.userId.trim() : "";
+    return userId && aliases[userId] ? { ...entry, userId: aliases[userId] } : entry;
+  });
+}
+
+function reconcilePersistedStateIdentity(pokerState, normalizedSeatRows) {
+  if (!asPlainObject(pokerState)) return pokerState;
+  const seatRows = Array.isArray(normalizedSeatRows) ? normalizedSeatRows : [];
+  const seatRowsBySeatNo = new Map(seatRows.map((seat) => [seat.seat, seat]));
+  const seatRowsByUserId = new Map(seatRows.map((seat) => [seat.userId, seat]));
+  const aliases = {};
+  for (const stateSeat of Array.isArray(pokerState.seats) ? pokerState.seats : []) {
+    const stateUserId = typeof stateSeat?.userId === "string" ? stateSeat.userId.trim() : "";
+    const seatNo = normalizeSeatNo(stateSeat?.seatNo ?? stateSeat?.seat_no ?? stateSeat?.seat);
+    const currentSeat = seatRowsBySeatNo.get(seatNo);
+    if (stateUserId && currentSeat?.userId && currentSeat.userId !== stateUserId) {
+      aliases[stateUserId] = currentSeat.userId;
+    }
+  }
+
+  const reconciled = { ...pokerState };
+  const userKeyedFields = [
+    "contributionsByUserId",
+    "betThisRoundByUserId",
+    "actedThisRoundByUserId",
+    "toCallByUserId",
+    "foldedByUserId",
+    "allInByUserId",
+    "sitOutByUserId",
+    "waitingForNextHandByUserId",
+    "holeCardsByUserId",
+    "privateCardsByUserId"
+  ];
+  for (const field of userKeyedFields) {
+    if (asPlainObject(pokerState[field])) {
+      reconciled[field] = remapUserKeyedObject(pokerState[field], aliases);
+    }
+  }
+  if (asPlainObject(pokerState.stacks)) {
+    reconciled.stacks = remapUserKeyedObject(pokerState.stacks, aliases, {
+      preferSeatStacks: true,
+      seatRowsByUserId
+    });
+  }
+  if (Array.isArray(pokerState.handSeats)) {
+    reconciled.handSeats = remapUserIdArray(pokerState.handSeats, aliases);
+  }
+  for (const field of ["turnUserId", "dealerUserId", "lastAggressorUserId", "winnerUserId"]) {
+    if (typeof pokerState[field] === "string" && aliases[pokerState[field]]) {
+      reconciled[field] = remapUserId(pokerState[field], aliases);
+    }
+  }
+
+  for (const seat of seatRows) {
+    if (seat.isBot !== true || !Number.isSafeInteger(Number(seat.stack)) || Number(seat.stack) < 0) continue;
+    const currentUserId = seat.userId;
+    if (!Object.prototype.hasOwnProperty.call(reconciled.stacks || {}, currentUserId)) {
+      reconciled.stacks = { ...(reconciled.stacks || {}), [currentUserId]: Number(seat.stack) };
+    }
+  }
+  return reconciled;
+}
+
 function mergeSeatMetadata(seat, metadata) {
   const mergedSeat = { ...seat };
   if (metadata?.isBot === true) mergedSeat.isBot = true;
@@ -288,6 +392,7 @@ function mergeStateSeatsWithSeatRows(pokerState, normalizedSeatRows) {
   const metadataBySeatNo = new Map(seatRows.map((seat) => [seat.seat, seat]));
   const leftTableByUserId = asPlainObject(pokerState?.leftTableByUserId) || {};
   const replacementSeatNos = new Set();
+  const representedSeatNos = new Set();
   const mergedStateSeats = Array.isArray(stateSeats)
     ? stateSeats
         .map((seat) => {
@@ -303,10 +408,19 @@ function mergeStateSeatsWithSeatRows(pokerState, normalizedSeatRows) {
             return null;
           }
           if (replacementBotMetadata) replacementSeatNos.add(seatNo);
-          return mergeSeatMetadata({ ...seat, seatNo }, directMetadata || replacementBotMetadata);
+          const currentMetadata = directMetadata || replacementBotMetadata;
+          const currentUserId = currentMetadata?.userId || userId;
+          representedSeatNos.add(seatNo);
+          return mergeSeatMetadata({ ...seat, userId: currentUserId, seatNo }, currentMetadata);
         })
         .filter(Boolean)
     : [];
+
+  for (const seat of seatRows) {
+    if (representedSeatNos.has(seat.seat)) continue;
+    representedSeatNos.add(seat.seat);
+    mergedStateSeats.push(toSeatSnapshot(seat));
+  }
 
   return {
     stateSeats: mergedStateSeats.length > 0 ? mergedStateSeats : seatRows.map(toSeatSnapshot),
@@ -383,15 +497,16 @@ export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow 
     return { ok: false, code: "invalid_table_state", message: "invalid_table_state" };
   }
 
-  const { stateSeats, replacementSeatNos, leftTableByUserId } = mergeStateSeatsWithSeatRows(pokerState, seats);
+  const reconciledPokerState = reconcilePersistedStateIdentity(pokerState, seats);
+  const { stateSeats, replacementSeatNos, leftTableByUserId } = mergeStateSeatsWithSeatRows(reconciledPokerState, seats);
   const runtimeSeats = buildRuntimeSeats({ seatRows: seats, stateSeats, replacementSeatNos, leftTableByUserId });
   const members = runtimeSeats.map((seat) => ({ userId: seat.userId, seat: seat.seat }));
-  const publicStackResult = normalizePublicStacks(runtimeSeats, pokerState);
+  const publicStackResult = normalizePublicStacks(runtimeSeats, reconciledPokerState);
   if (!publicStackResult.ok) {
     return { ok: false, code: "invalid_persisted_state", message: "human_stack_ambiguous" };
   }
   const publicStacks = publicStackResult.stacks;
-  const normalizedPokerState = { ...pokerState, seats: stateSeats };
+  const normalizedPokerState = { ...reconciledPokerState, seats: stateSeats };
   const derivedRuntimeHandState = deriveDeterministicRuntimeHandState(normalizedPokerState);
   if (
     LIVE_HAND_PHASES.has(normalizedPokerState.phase)
