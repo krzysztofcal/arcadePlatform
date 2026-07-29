@@ -315,6 +315,11 @@
       var rid = payload.requestId || frame.requestId || null;
       if (!rid || !pending.has(rid)) return;
       var entry = pending.get(rid);
+      if (entry.type === 'join' && payload.status === 'pending') {
+        markJoinPending(entry, payload.reason || 'server_recovery_pending');
+        requestGameplaySnapshot();
+        return;
+      }
       pending.delete(rid);
       clearTimeout(entry.timer);
       if (payload.status === 'accepted') {

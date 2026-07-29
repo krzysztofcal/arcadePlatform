@@ -85,6 +85,15 @@ function restoredAuthoritativeValidationReason(validation) {
   return "restore_validation_failed";
 }
 
+function sendRecoverableJoinResult({ sendCommandResult, ws, connState, requestId, tableId, reason }) {
+  sendCommandResult(ws, connState, {
+    requestId: requestId ?? null,
+    tableId,
+    status: "pending",
+    reason: reason || "join_runtime_recovery_required"
+  });
+}
+
 import { recoverFromPersistConflict } from "../runtime/persist-conflict-recovery.mjs";
 
 export async function handleJoinCommand({ frame, ws, connState, sessionStore, tableManager, ensureTableLoadedErrorMapper, restoreTableFromPersisted, persistMutatedState, broadcastResyncRequired, broadcastStateSnapshots, broadcastTableState, sendError, sendCommandResult, sendTableState, authoritativeJoinEnabled, observeOnlyJoinEnabled, persistedBootstrapEnabled, loadAuthoritativeJoinExecutor, scheduleBotStep = () => {}, klog = () => {}, klogVerbose = () => {}, verboseLogsEnabled = false }) {
@@ -208,10 +217,12 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
         humanStackValid: restoreValidation.humanStackValid,
         seededBotProjectionValid: restoreValidation.seededBotProjectionValid
       });
-      sendCommandResult(ws, connState, {
-        requestId: frame.requestId ?? null,
+      sendRecoverableJoinResult({
+        sendCommandResult,
+        ws,
+        connState,
+        requestId: frame.requestId,
         tableId,
-        status: "rejected",
         reason: "authoritative_state_invalid"
       });
       return;
@@ -239,12 +250,23 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
       requestId: frame.requestId ?? null,
       code: joined?.code || "join_failed"
     });
-    sendCommandResult(ws, connState, {
-      requestId: frame.requestId ?? null,
-      tableId,
-      status: "rejected",
-      reason: joined.code || "join_failed"
-    });
+    if (authoritativeJoinResult) {
+      sendRecoverableJoinResult({
+        sendCommandResult,
+        ws,
+        connState,
+        requestId: frame.requestId,
+        tableId,
+        reason: joined.code || "join_failed"
+      });
+    } else {
+      sendCommandResult(ws, connState, {
+        requestId: frame.requestId ?? null,
+        tableId,
+        status: "rejected",
+        reason: joined.code || "join_failed"
+      });
+    }
     return;
   }
 
@@ -267,12 +289,23 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
         broadcastStateSnapshots,
         broadcastResyncRequired
       });
-      sendCommandResult(ws, connState, {
-        requestId: frame.requestId ?? null,
-        tableId,
-        status: "rejected",
-        reason: persisted?.reason || "persist_failed"
-      });
+      if (authoritativeJoinResult) {
+        sendRecoverableJoinResult({
+          sendCommandResult,
+          ws,
+          connState,
+          requestId: frame.requestId,
+          tableId,
+          reason: persisted?.reason || "persist_failed"
+        });
+      } else {
+        sendCommandResult(ws, connState, {
+          requestId: frame.requestId ?? null,
+          tableId,
+          status: "rejected",
+          reason: persisted?.reason || "persist_failed"
+        });
+      }
       return;
     }
   }

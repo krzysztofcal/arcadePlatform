@@ -224,6 +224,47 @@ test('poker ws client keeps an ambiguous join pending after a command-scoped att
   assert.equal(h.protocolErrors.length, 0);
 });
 
+test('poker ws client keeps a server recovery-pending join under the same request id', async () => {
+  const h = loadClientHarness();
+  h.client.start();
+  const ws = h.FakeWebSocket.instances[0];
+  ws.open();
+  ws.message({ type: 'helloAck', payload: { version: '1.0' } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  ws.message({ type: 'authOk', payload: { roomId: 'table_test_1' } });
+
+  const joinPromise = h.client.sendJoin({ tableId: 'table_test_1' }, 'join_recovery_1');
+  ws.message({
+    type: 'commandResult',
+    requestId: 'join_recovery_1',
+    payload: {
+      requestId: 'join_recovery_1',
+      status: 'pending',
+      reason: 'runtime_attach_failed'
+    }
+  });
+
+  assert.equal(h.statuses.some((entry) => entry.status === 'join_pending'
+    && entry.data.requestId === 'join_recovery_1'
+    && entry.data.reason === 'runtime_attach_failed'), true);
+
+  ws.message({
+    type: 'commandResult',
+    requestId: 'join_recovery_1',
+    payload: {
+      requestId: 'join_recovery_1',
+      status: 'accepted',
+      seatNo: 2,
+      joinStatus: 'WAITING_NEXT_HAND'
+    }
+  });
+
+  const result = await joinPromise;
+  assert.equal(result.requestId, 'join_recovery_1');
+  assert.equal(result.seatNo, 2);
+  assert.equal(result.joinStatus, 'WAITING_NEXT_HAND');
+});
+
 test('poker ws client treats the join timeout as soft and accepts a late result', async () => {
   let commandTimeout = null;
   const h = loadClientHarness({

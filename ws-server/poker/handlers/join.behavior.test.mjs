@@ -160,7 +160,7 @@ test('handleJoinCommand authoritative rehydrate failure does not emit accepted s
   assert.equal(calls.table, 0);
 });
 
-test('handleJoinCommand rejects restored human-only authoritative state instead of broadcasting success', async () => {
+test('handleJoinCommand keeps a persisted authoritative join pending when restored state validation fails', async () => {
   const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 200 });
   ctx.authoritativeJoinEnabled = true;
   ctx.persistedBootstrapEnabled = true;
@@ -191,7 +191,7 @@ test('handleJoinCommand rejects restored human-only authoritative state instead 
   await handleJoinCommand(ctx);
 
   assert.equal(calls.command.length, 1);
-  assert.equal(calls.command[0].status, 'rejected');
+  assert.equal(calls.command[0].status, 'pending');
   assert.equal(calls.command[0].reason, 'authoritative_state_invalid');
   assert.equal(calls.joinArgs, null);
   assert.equal(calls.actorTableState, 0);
@@ -251,7 +251,52 @@ test('handleJoinCommand accepts restored authoritative state before live members
   assert.equal(calls.snapshots, 0);
 });
 
-test('handleJoinCommand rejects restored authoritative state when restore version diverges from join snapshot version', async () => {
+test('handleJoinCommand keeps the same request pending when runtime attach fails after authoritative join', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 200 });
+  ctx.authoritativeJoinEnabled = true;
+  ctx.persistedBootstrapEnabled = true;
+  ctx.loadAuthoritativeJoinExecutor = async () => async (args) => {
+    calls.authoritativeArgs = args;
+    return {
+      ok: true,
+      seatNo: 1,
+      stack: 200,
+      snapshot: {
+        stateVersion: 2,
+        seats: [{ userId: 'u1', seatNo: 1, status: 'ACTIVE' }],
+        stacks: { u1: 200 }
+      }
+    };
+  };
+  ctx.restoreTableFromPersisted = async () => ({
+    ok: true,
+    restoredTable: {
+      coreState: {
+        version: 2,
+        seats: { u1: 1 },
+        publicStacks: { u1: 200 }
+      }
+    }
+  });
+  ctx.tableManager.join = (args) => {
+    calls.joinArgs = args;
+    return { ok: false, code: 'runtime_attach_failed' };
+  };
+
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.command.length, 1);
+  assert.deepEqual(calls.command[0], {
+    requestId: 'r1',
+    tableId: 't1',
+    status: 'pending',
+    reason: 'runtime_attach_failed'
+  });
+  assert.equal(calls.authoritativeArgs.requestId, 'r1');
+  assert.equal(calls.actorTableState, 0);
+});
+
+test('handleJoinCommand keeps a persisted authoritative join pending when restore version diverges', async () => {
   const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 200 });
   ctx.authoritativeJoinEnabled = true;
   ctx.persistedBootstrapEnabled = true;
@@ -279,7 +324,7 @@ test('handleJoinCommand rejects restored authoritative state when restore versio
   await handleJoinCommand(ctx);
 
   assert.equal(calls.command.length, 1);
-  assert.equal(calls.command[0].status, 'rejected');
+  assert.equal(calls.command[0].status, 'pending');
   assert.equal(calls.command[0].reason, 'authoritative_state_invalid');
   assert.equal(calls.joinArgs, null);
   assert.equal(calls.actorTableState, 0);
@@ -316,7 +361,7 @@ test('handleJoinCommand rejects seatNo 0 and preferredSeatNo 0 deterministically
   }
 });
 
-test('handleJoinCommand emits one rejected result when bootstrap persist fails', async () => {
+test('handleJoinCommand emits one rejected result when non-authoritative bootstrap persist fails', async () => {
   const { ctx, calls } = baseCtx({ seatNo: 2, buyIn: 100 });
   ctx.tableManager.bootstrapHand = () => ({ ok: true, changed: true });
   ctx.persistMutatedState = async () => ({ ok: false, reason: 'persist_failed' });
@@ -330,7 +375,7 @@ test('handleJoinCommand emits one rejected result when bootstrap persist fails',
   assert.equal(calls.snapshots, 1);
 });
 
-test('handleJoinCommand emits resync only when bootstrap restore fails after persist conflict', async () => {
+test('handleJoinCommand emits resync when non-authoritative bootstrap conflict recovery fails', async () => {
   const { ctx, calls } = baseCtx({ seatNo: 2, buyIn: 100 });
   ctx.tableManager.bootstrapHand = () => ({ ok: true, changed: true });
   ctx.persistMutatedState = async () => ({ ok: false, reason: 'persist_failed' });
