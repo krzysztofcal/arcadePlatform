@@ -600,6 +600,31 @@ async function writeReplacementFundings({ tx, tableId, fundings, botFundingSyste
   const escrowSystemKey = `POKER_TABLE:${tableId}`;
   const fundedReplacements = [];
   for (const funding of fundings) {
+    const replacedSeats = await tx.unsafe(
+      `update public.poker_seats
+          set user_id = $4,
+              stack = $5,
+              status = 'ACTIVE',
+              is_bot = true,
+              leave_after_hand = false,
+              last_seen_at = now(),
+              joined_at = now()
+        where table_id = $1
+          and seat_no = $2
+          and user_id = $3
+          and status = 'ACTIVE'
+          and is_bot = true
+        returning seat_no, user_id, stack;`,
+      [tableId, funding.seatNo, funding.oldBotUserId, funding.replacementBotUserId, funding.targetStack]
+    );
+    if (replacedSeats?.length !== 1
+      || Number(replacedSeats[0]?.seat_no) !== funding.seatNo
+      || String(replacedSeats[0]?.user_id || "") !== funding.replacementBotUserId
+      || Number(replacedSeats[0]?.stack) !== funding.targetStack) {
+      const error = new Error("replacement_seat_projection_conflict");
+      error.code = "replacement_seat_projection_conflict";
+      throw error;
+    }
     const result = await postTransaction({
       userId: null,
       txType: "TABLE_BUY_IN",
