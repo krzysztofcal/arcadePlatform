@@ -59,6 +59,10 @@ import {
 import { getBotConfig, parseStakes } from "./shared/poker-domain/bots.mjs";
 import { createContinuousBotTableRepository } from "./poker/persistence/continuous-bot-table-repository.mjs";
 import { createContinuousBotTableSupervisor } from "./poker/runtime/continuous-bot-table-supervisor.mjs";
+import {
+  isManagedReplacementSeatProjectionConflict,
+  retireManagedTableAfterReplacementConflict as retireManagedTableAfterReplacementConflictFlow
+} from "./poker/runtime/continuous-bot-retirement.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const PROTECTED_MESSAGE_TYPES = new Set([
@@ -1951,6 +1955,21 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     deferRuntimeVersionUpdate: true
   });
   if (!persisted?.ok || persisted.alreadyApplied) {
+    const replacementSeatConflict = isManagedReplacementSeatProjectionConflict({
+      managedContinuousTable,
+      replacementFundingCount: prepared.replacementFundings.length,
+      persisted
+    });
+    if (replacementSeatConflict) {
+      const retirement = await retireManagedTableAfterReplacementConflict({
+        tableId,
+        generationKey,
+        attempt
+      });
+      if (retirement?.ok === true) {
+        return finishSettledRollover(retirement);
+      }
+    }
     if (!persisted?.alreadyApplied) {
       klogSafe("ws_settled_rollover_persist_failed", {
         tableId,
@@ -4259,8 +4278,35 @@ async function materializeCreatedContinuousBotTable({ tableId, created = false }
   });
 }
 
+async function retireManagedTableAfterReplacementConflict({ tableId, generationKey, attempt }) {
+  return retireManagedTableAfterReplacementConflictFlow({
+    tableId,
+    generationKey,
+    attempt,
+    requestRetirement: (requestedTableId) => continuousBotTableRepository?.requestRetirement?.(requestedTableId),
+    markRetirementRequested: (requestedTableId) => continuousBotRetirementRequested.add(requestedTableId),
+    restoreTableFromPersisted,
+    markTableRotationDue: (requestedTableId, dueAtMs) => tableManager.markTableRotationDue?.(requestedTableId, dueAtMs),
+    scheduleSettledRolloverRetry: (requestedTableId, requestedGenerationKey, requestedAttempt) => {
+      scheduleSettledRolloverRetry({
+        tableId: requestedTableId,
+        generationKey: requestedGenerationKey,
+        attempt: requestedAttempt
+      });
+    },
+    broadcastStateSnapshots,
+    hasActiveHumanMember: (requestedTableId) => tableManager.hasActiveHumanMember(requestedTableId),
+    hasConnectedHumanPresence: (requestedTableId) => tableManager.hasConnectedHumanPresence(requestedTableId),
+    applyInactiveCleanupAndBroadcast
+  });
+}
+
 async function requestContinuousBotTableRetirement({ tableId }) {
   if (continuousBotRetirementRequested.has(tableId)) return { ok: true, changed: false };
+  const persisted = await continuousBotTableRepository?.requestRetirement?.(tableId);
+  if (!persisted?.ok) {
+    return persisted || { ok: false, reason: "retirement_request_unavailable" };
+  }
   continuousBotRetirementRequested.add(tableId);
   return enqueueTableCommand({
     tableId,

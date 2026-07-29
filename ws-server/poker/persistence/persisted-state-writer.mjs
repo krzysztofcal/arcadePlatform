@@ -1023,10 +1023,11 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
         ...(meta && typeof meta === "object" ? meta : {})
       });
       const stateConflict = error?.code === "durable_action_state_conflict";
+      const replacementSeatProjectionConflict = error?.code === "replacement_seat_projection_conflict";
       return {
         ok: false,
         ...(durableActionPlan.supplied ? { outcome: "failure" } : {}),
-        reason: stateConflict ? "conflict" : "db_error",
+        reason: replacementSeatProjectionConflict ? "replacement_seat_projection_conflict" : (stateConflict ? "conflict" : "db_error"),
         message: error?.message || "unknown"
       };
     }

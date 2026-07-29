@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { adaptPersistedBootstrap } from "./persisted-bootstrap-adapter.mjs";
 import { dealHoleCards, deriveDeck, toCardCodes } from "../shared/poker-primitives.mjs";
 import { applyAction } from "../shared/poker-action-reducer.mjs";
+import { createTableManager } from "../table/table-manager.mjs";
 
 test("adapter maps persisted rows into deterministic ws table/core state", () => {
   const result = adaptPersistedBootstrap({
@@ -264,7 +265,7 @@ test("adapter rejects an unrecoverable all-in hand with invalid or duplicate pri
   assert.equal(result.reason, "live_hand_runtime_unrecoverable");
 });
 
-test("adapter restores replacement bot identity from persisted state when seat rows still reference prior bot id", () => {
+test("adapter preserves persisted live-hand identity when seat rows still reference a prior bot", () => {
   const result = adaptPersistedBootstrap({
     tableId: "table_replacement_bot_restore",
     tableRow: { id: "table_replacement_bot_restore", max_players: 6, status: "OPEN" },
@@ -310,6 +311,10 @@ test("adapter restores replacement bot identity from persisted state when seat r
     bot_auto_2_38: 100,
     bot_keep_3: 87
   });
+  assert.deepEqual(result.table.coreState.pokerState.stacks, {
+    bot_auto_2_38: 100,
+    bot_keep_3: 87
+  });
   assert.equal(result.table.coreState.seatDetailsByUserId.bot_auto_2_38?.isBot, true);
   assert.equal(result.table.coreState.seatDetailsByUserId.bot_auto_2_38?.botProfile, "TRIVIAL");
   assert.equal(result.table.coreState.pokerState.turnUserId, "bot_auto_2_38");
@@ -320,6 +325,128 @@ test("adapter restores replacement bot identity from persisted state when seat r
   ]);
   assert.equal(result.table.presenceByUserId.has("bot_auto_2_38"), true);
   assert.equal(result.table.presenceByUserId.has("bot_old_2"), false);
+});
+
+test("adapter restores settled replacement identity from the current persisted seat row", () => {
+  const result = adaptPersistedBootstrap({
+    tableId: "table_replacement_bot_restore_settled",
+    tableRow: {
+      id: "table_replacement_bot_restore_settled",
+      max_players: 6,
+      status: "OPEN",
+      lifecycle_kind: "CONTINUOUS_BOT",
+      managed_profile_key: "CONTINUOUS_BOT_DEFAULT"
+    },
+    seatRows: [
+      { user_id: "bot_current_2", seat_no: 2, status: "ACTIVE", is_bot: true, bot_profile: "TRIVIAL", stack: 100 },
+      { user_id: "bot_keep_3", seat_no: 3, status: "ACTIVE", is_bot: true, bot_profile: "TRIVIAL", stack: 87 }
+    ],
+    stateRow: {
+      version: 23,
+      state: {
+        tableId: "table_replacement_bot_restore_settled",
+        handId: "hand_replacement_bot_restore_settled",
+        phase: "SETTLED",
+        dealerUserId: "bot_old_2",
+        lastAggressorUserId: "bot_old_2",
+        winnerUserId: "bot_old_2",
+        seats: [
+          { userId: "bot_old_2", seatNo: 2, status: "ACTIVE", isBot: true },
+          { userId: "bot_keep_3", seatNo: 3, status: "ACTIVE", isBot: true }
+        ],
+        handSeats: [
+          { userId: "bot_old_2", seatNo: 2, status: "ACTIVE", isBot: true },
+          { userId: "bot_keep_3", seatNo: 3, status: "ACTIVE", isBot: true }
+        ],
+        stacks: { bot_old_2: 1, bot_keep_3: 87 },
+        contributionsByUserId: { bot_old_2: 12, bot_keep_3: 12 },
+        foldedByUserId: { bot_old_2: false, bot_keep_3: true },
+        holeCardsByUserId: { bot_old_2: ["AS", "KD"], bot_keep_3: ["2C", "2D"] },
+        privateCardsByUserId: { bot_old_2: ["AS", "KD"] }
+      }
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.table.coreState.members, [
+    { userId: "bot_current_2", seat: 2 },
+    { userId: "bot_keep_3", seat: 3 }
+  ]);
+  assert.deepEqual(result.table.coreState.seats, {
+    bot_current_2: 2,
+    bot_keep_3: 3
+  });
+  assert.deepEqual(result.table.coreState.pokerState.stacks, {
+    bot_current_2: 100,
+    bot_keep_3: 87
+  });
+  assert.equal(result.table.coreState.pokerState.seats[0].userId, "bot_current_2");
+  assert.equal(result.table.coreState.pokerState.stacks.bot_old_2, undefined);
+  assert.deepEqual(result.table.coreState.pokerState.handSeats, [
+    { userId: "bot_old_2", seatNo: 2, status: "ACTIVE", isBot: true },
+    { userId: "bot_keep_3", seatNo: 3, status: "ACTIVE", isBot: true }
+  ]);
+  assert.deepEqual(result.table.coreState.pokerState.contributionsByUserId, {
+    bot_old_2: 12,
+    bot_keep_3: 12
+  });
+  assert.deepEqual(result.table.coreState.pokerState.holeCardsByUserId, {
+    bot_old_2: ["AS", "KD"],
+    bot_keep_3: ["2C", "2D"]
+  });
+  assert.equal(result.table.coreState.pokerState.dealerUserId, "bot_old_2");
+  assert.equal(result.table.coreState.pokerState.lastAggressorUserId, "bot_old_2");
+  assert.equal(result.table.coreState.pokerState.winnerUserId, "bot_old_2");
+  assert.equal(result.table.presenceByUserId.has("bot_current_2"), true);
+  assert.equal(result.table.presenceByUserId.has("bot_old_2"), false);
+
+  const tableManager = createTableManager({
+    maxSeats: 6,
+    tableBootstrapLoader: async () => ({ ok: false })
+  });
+  assert.equal(tableManager.restoreTableFromPersisted(result.table.tableId, result.table).ok, true);
+  const prepared = tableManager.prepareSettledHandRollover({
+    tableId: result.table.tableId,
+    nowMs: 1_000,
+    allowManagedBotsOnly: true,
+    managedBotProfile: { minBotCount: 2, targetBotCount: 3, maxBotCount: 3 }
+  });
+  assert.equal(prepared.ok, true);
+  assert.equal(prepared.changed, true);
+  assert.deepEqual(prepared.nextCoreState.pokerState.handSeats.map((seat) => seat.userId).sort(), [
+    "bot_current_2",
+    "bot_keep_3"
+  ]);
+  assert.equal(prepared.nextCoreState.pokerState.stacks.bot_old_2, undefined);
+});
+
+test("adapter fails closed instead of remapping a settled human identity", () => {
+  const result = adaptPersistedBootstrap({
+    tableId: "table_settled_human_identity_conflict",
+    tableRow: { id: "table_settled_human_identity_conflict", max_players: 6, status: "OPEN" },
+    seatRows: [
+      { user_id: "human_current", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 },
+      { user_id: "bot_keep", seat_no: 2, status: "ACTIVE", is_bot: true, stack: 100 }
+    ],
+    stateRow: {
+      version: 24,
+      state: {
+        tableId: "table_settled_human_identity_conflict",
+        phase: "SETTLED",
+        seats: [
+          { userId: "human_old", seatNo: 1, status: "ACTIVE" },
+          { userId: "bot_keep", seatNo: 2, status: "ACTIVE", isBot: true }
+        ],
+        stacks: { human_old: 100, bot_keep: 100 },
+        winnerUserId: "human_old",
+        holeCardsByUserId: { human_old: ["AS", "KD"] }
+      }
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "invalid_persisted_state");
+  assert.equal(result.message, "persisted_seat_identity_conflict");
 });
 
 test("adapter keeps authoritative human stack while retaining bot seat projection", () => {

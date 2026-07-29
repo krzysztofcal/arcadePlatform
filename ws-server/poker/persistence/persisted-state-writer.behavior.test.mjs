@@ -1185,7 +1185,7 @@ test("replacement seat identity conflict fails closed before ledger funding", as
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.reason, "db_error");
+  assert.equal(result.reason, "replacement_seat_projection_conflict");
   assert.equal(harness.durable.version, 7);
   assert.deepEqual(harness.durable.state, previousState);
   assert.equal(harness.durable.seats.get(2)?.user_id, "00000000-0000-4000-8000-0000000000ff");

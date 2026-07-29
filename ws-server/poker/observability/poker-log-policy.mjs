@@ -283,7 +283,8 @@ register("ERROR", "table_lifecycle", [
   "ws_leave_authoritative_failed",
   "ws_leave_authoritative_unavailable",
   "ws_rebuy_authoritative_failed",
-  "ws_rebuy_authoritative_unavailable"
+  "ws_rebuy_authoritative_unavailable",
+  "ws_continuous_bot_table_retirement_persist_failed"
 ]);
 
 register("ERROR", "transport", [
