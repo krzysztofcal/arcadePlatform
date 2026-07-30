@@ -46,7 +46,7 @@ async function executeInactiveCleanup(args) {
         actedThisRoundByUserId: {},
         stacks: {}
       };
-      await tx.unsafe('update public.poker_state set state = $2 where table_id = $1;', [tableId, JSON.stringify(closedState)]);
+      await tx.unsafe('update public.poker_state set state = $2 where table_id = $1;', [tableId, closedState]);
       await tx.unsafe("update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1;", [tableId]);
       await tx.unsafe("update public.poker_tables set status = 'CLOSED' where id = $1;", [tableId]);
       return { ok: true, changed: true, closed: true, status: successStatus, retryable: false };
