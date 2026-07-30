@@ -59,7 +59,7 @@ function withLockedState(args, { validateStateForStorage = () => true } = {}) {
       return { ok: true, version: row.version, state: row.state };
     },
     updateStateLocked: async (tx, { tableId, nextState }) => {
-      const rows = await tx.unsafe("update public.poker_state set state = $2::jsonb where table_id = $1;", [tableId, JSON.stringify(nextState)]);
+      const rows = await tx.unsafe("update public.poker_state set state = $2::jsonb where table_id = $1;", [tableId, nextState]);
       if (!Array.isArray(rows) || rows.length === 0) return { ok: false, reason: "not_found" };
       const nextVersion = Number(rows?.[0]?.version);
       if (!Number.isInteger(nextVersion) || nextVersion <= 0) return { ok: false, reason: "invalid" };
