@@ -2264,6 +2264,27 @@ export function createTableManager({
     };
   }
 
+  function setTableRotationDueAt(tableId, dueAtMs) {
+    const table = tables.get(tableId);
+    if (!table || table.tableMeta?.lifecycleKind !== "CONTINUOUS_BOT") {
+      return { ok: false, changed: false, reason: "managed_table_not_found" };
+    }
+    const normalizedDueAtMs = normalizeTimestampMs(dueAtMs);
+    if (!Number.isFinite(normalizedDueAtMs)) {
+      return { ok: false, changed: false, reason: "invalid_rotation_due_at" };
+    }
+    const previousDueAtMs = normalizeTimestampMs(table.tableMeta?.rotationDueAtMs);
+    table.tableMeta = normalizeTableMeta({
+      ...table.tableMeta,
+      rotationDueAtMs: normalizedDueAtMs
+    }, table?.coreState?.maxSeats || maxSeats);
+    return {
+      ok: true,
+      changed: previousDueAtMs !== normalizedDueAtMs,
+      rotationDueAtMs: table.tableMeta.rotationDueAtMs
+    };
+  }
+
   function resolveImplicitLeaveTableId({ ws, userId }) {
     const conn = connStateBySocket.get(ws);
     if (conn?.joinedTableId) {
@@ -2309,6 +2330,7 @@ export function createTableManager({
     listTableIds,
     tableMeta,
     markTableRotationDue,
+    setTableRotationDueAt,
     materializeLobbyTable,
     materializeGuestTable,
     connectionTableAssociation,

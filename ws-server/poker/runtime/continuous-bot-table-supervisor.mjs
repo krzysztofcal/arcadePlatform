@@ -4,6 +4,7 @@ export function createContinuousBotTableSupervisor({
   repository,
   onCreatedTable = async () => {},
   onRetirementRequested = async () => {},
+  onRotationScheduled = async () => {},
   klog = () => {},
   sweepMs = DEFAULT_SWEEP_MS
 } = {}) {
@@ -28,6 +29,13 @@ export function createContinuousBotTableSupervisor({
       for (const tableId of result.retirementTableIds || []) {
         await onRetirementRequested({ tableId, profile: result.profile });
         activatedTableIds.delete(tableId);
+      }
+      for (const tableId of result.rotationScheduledTableIds || []) {
+        await onRotationScheduled({
+          tableId,
+          profile: result.profile,
+          rotationDueAt: result.rotationDueAtByTableId?.[tableId] || null
+        });
       }
       for (const tableId of [...activatedTableIds]) {
         if (!active.has(tableId)) activatedTableIds.delete(tableId);
