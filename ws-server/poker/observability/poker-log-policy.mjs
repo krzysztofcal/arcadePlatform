@@ -86,7 +86,8 @@ register("DEBUG", "table_lifecycle", [
 
 register("INFO", "accounting", [
   "poker_leave_cashout",
-  "poker_terminal_accounting_closed"
+  "poker_terminal_accounting_closed",
+  "ws_action_history_cleanup_complete"
 ]);
 
 register("INFO", "admin", [
@@ -263,7 +264,8 @@ register("ERROR", "http", [
 
 register("ERROR", "admin", [
   "ws_poker_log_config_invalid",
-  "ws_preview_bot_reaction_failed"
+  "ws_preview_bot_reaction_failed",
+  "ws_action_history_cleanup_failed"
 ]);
 
 register("ERROR", "session", [
