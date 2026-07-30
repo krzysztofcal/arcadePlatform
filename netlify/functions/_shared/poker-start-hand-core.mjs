@@ -145,7 +145,7 @@ export const startHandCore = async ({
 
   const holeCardValues = activeUserIdList.map((activeId) => ({ userId: activeId, cards: dealtHoleCards[activeId] }));
   const holeCardPlaceholders = holeCardValues.map((_, index) => `($${index * 4 + 1}, $${index * 4 + 2}, $${index * 4 + 3}, $${index * 4 + 4}::jsonb)`).join(", ");
-  const holeCardParams = holeCardValues.flatMap((entry) => [tableId, handId, entry.userId, JSON.stringify(entry.cards)]);
+  const holeCardParams = holeCardValues.flatMap((entry) => [tableId, handId, entry.userId, entry.cards]);
 
   let holeCardInsertRows;
   try {
@@ -209,13 +209,13 @@ export const startHandCore = async ({
   const actionMeta = { determinism: { handSeed, dealContext: "poker-deal:v1" } };
   await tx.unsafe(
     "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
-    [tableId, newVersion, userId, "START_HAND", null, handId, requestId, currentState.phase || null, updatedState.phase || null, JSON.stringify(actionMeta)]
+    [tableId, newVersion, userId, "START_HAND", null, handId, requestId, currentState.phase || null, updatedState.phase || null, actionMeta]
   );
   for (const blindAction of [{ type: "POST_SB", userId: sbUserId, amount: sbPosted }, { type: "POST_BB", userId: bbUserId, amount: bbPosted }]) {
     if (!blindAction.userId) continue;
     await tx.unsafe(
       "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
-      [tableId, newVersion, blindAction.userId, blindAction.type, blindAction.amount, handId, requestId, currentState.phase || null, updatedState.phase || null, JSON.stringify({})]
+      [tableId, newVersion, blindAction.userId, blindAction.type, blindAction.amount, handId, requestId, currentState.phase || null, updatedState.phase || null, {}]
     );
   }
 
