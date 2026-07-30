@@ -124,9 +124,11 @@ register("INFO", "table_lifecycle", [
   "ws_continuous_bot_table_created",
   "ws_continuous_bot_table_restored",
   "ws_continuous_bot_table_rotation_completed",
+  "ws_continuous_bot_table_rotation_evaluated",
   "ws_continuous_bot_table_rotation_scheduled",
   "ws_continuous_bot_table_rotation_started",
   "ws_continuous_bot_table_retirement_requested",
+  "ws_continuous_bot_table_runtime_metadata",
   "ws_guest_table_evicted"
 ]);
 

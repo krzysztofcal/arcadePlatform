@@ -105,3 +105,96 @@ test("postponeRotation extends only an already-due managed table", async () => {
   });
   assert.equal(queries.some(({ sql }) => sql.includes("rotation_due_at <= now()")), true);
 });
+
+test("reconcile always returns rotationScheduledTableIds and rotationDueAtByTableId in its result shape", async () => {
+  const repository = createContinuousBotTableRepository({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db", POKER_BOTS_ENABLED: "1" },
+    beginSql: async (run) => run({
+      unsafe: async (sql) => {
+        if (sql.includes("from public.poker_managed_table_profiles")) {
+          return [{
+            profile_key: "CONTINUOUS_BOT_DEFAULT",
+            enabled: true,
+            desired_table_count: 0,
+            min_bot_count: 2,
+            target_bot_count: 3,
+            max_bot_count: 3,
+            rotation_interval_seconds: 900,
+            postpone_interval_seconds: 300,
+            small_blind: 1,
+            big_blind: 2,
+            max_seats: 6
+          }];
+        }
+        if (sql.includes("from public.poker_tables") && sql.includes("for update")) {
+          return [];
+        }
+        return [];
+      }
+    })
+  });
+
+  const result = await repository.reconcile();
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.createdTableIds, []);
+  assert.ok(Array.isArray(result.rotationScheduledTableIds), "rotationScheduledTableIds is present");
+  assert.equal(typeof result.rotationDueAtByTableId, "object");
+  assert.equal(result.rotationDueAtByTableId !== null, true);
+});
+
+test("reconcile includes a newly created table in rotationScheduledTableIds", async () => {
+  const newTableId = "00000000-0000-4000-8000-000000000811";
+  const repository = createContinuousBotTableRepository({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db", POKER_BOTS_ENABLED: "1" },
+    beginSql: async (run) => run({
+      unsafe: async (sql, params) => {
+        if (sql.includes("from public.poker_managed_table_profiles")) {
+          return [{
+            profile_key: "CONTINUOUS_BOT_DEFAULT",
+            enabled: true,
+            desired_table_count: 1,
+            min_bot_count: 0,
+            target_bot_count: 0,
+            max_bot_count: 0,
+            rotation_interval_seconds: 900,
+            postpone_interval_seconds: 300,
+            small_blind: 1,
+            big_blind: 2,
+            max_seats: 6
+          }];
+        }
+        if (sql.includes("from public.poker_tables") && sql.includes("for update")) {
+          return [];
+        }
+        if (sql.includes("insert into public.poker_tables")) {
+          return [{ id: newTableId }];
+        }
+        if (sql.includes("from public.poker_seats") && sql.includes("order by seat_no asc")) {
+          return [];
+        }
+        if (sql.includes("select state from public.poker_state")) {
+          return [{ state: { tableId: newTableId, phase: "INIT", seats: [], stacks: {} } }];
+        }
+        if (sql.includes("update public.poker_state")) {
+          return [{ table_id: newTableId }];
+        }
+        if (sql.includes("insert into public.chips_accounts")) {
+          return [{ id: "escrow-id" }];
+        }
+        return [];
+      }
+    })
+  });
+
+  const result = await repository.reconcile();
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.createdTableIds, [newTableId]);
+  assert.deepEqual(result.rotationScheduledTableIds, [newTableId]);
+  assert.equal(typeof result.rotationDueAtByTableId[newTableId], "string");
+  assert.ok(
+    Number.isFinite(Date.parse(result.rotationDueAtByTableId[newTableId])),
+    "rotationDueAtByTableId entry must be a valid ISO timestamp"
+  );
+});

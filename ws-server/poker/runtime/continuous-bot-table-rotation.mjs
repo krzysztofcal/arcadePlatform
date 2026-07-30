@@ -19,6 +19,21 @@ export async function handleContinuousBotRotationAtSettled({
   const rotationDue = managedContinuousTable
     && Number.isFinite(tableMeta?.rotationDueAtMs)
     && tableMeta.rotationDueAtMs <= nowMs;
+  if (managedContinuousTable) {
+    klog("ws_continuous_bot_table_rotation_evaluated", {
+      tableId,
+      nowMs,
+      lifecycleKind: tableMeta?.lifecycleKind,
+      managedProfileKey: tableMeta?.managedProfileKey,
+      rotationDueAtMs: tableMeta?.rotationDueAtMs,
+      typeofRotationDueAtMs: typeof tableMeta?.rotationDueAtMs,
+      isFiniteRotationDueAtMs: Number.isFinite(tableMeta?.rotationDueAtMs),
+      managedContinuousTable,
+      rotationDue,
+      hasActiveHumanMember: tableManager.hasActiveHumanMember(tableId),
+      hasConnectedHumanPresence: tableManager.hasConnectedHumanPresence(tableId)
+    });
+  }
   if (!rotationDue) {
     return { handled: false, managedContinuousTable, rotationDue: false };
   }

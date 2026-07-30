@@ -4247,6 +4247,18 @@ async function materializeCreatedContinuousBotTable({ tableId, created = false }
     run: async () => {
       const restored = await restoreTableFromPersisted(tableId);
       if (!restored?.ok) return restored;
+      const meta = tableManager.tableMeta(tableId);
+      if (meta?.lifecycleKind === "CONTINUOUS_BOT") {
+        klogSafe("ws_continuous_bot_table_runtime_metadata", {
+          tableId,
+          created,
+          lifecycleKind: meta.lifecycleKind,
+          managedProfileKey: meta.managedProfileKey,
+          rotationDueAtMs: meta.rotationDueAtMs,
+          typeofRotationDueAtMs: typeof meta.rotationDueAtMs,
+          isFiniteRotationDueAtMs: Number.isFinite(meta.rotationDueAtMs)
+        });
+      }
       const expectedVersion = tableManager.persistedStateVersion(tableId);
       const bootstrapped = tableManager.bootstrapHand(tableId, {
         nowMs: Date.now(),

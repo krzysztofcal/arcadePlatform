@@ -84,13 +84,14 @@ export function tableMatchesContinuousBotProfile(table, profile) {
 
 async function createManagedTable(tx, { profile, botConfig, klog }) {
   const stakes = { sb: profile.smallBlind, bb: profile.bigBlind };
+  const rotationDueAt = new Date(Date.now() + profile.rotationIntervalSeconds * 1_000).toISOString();
   const created = await createPokerTableWithState(tx, {
     userId: null,
     maxPlayers: profile.maxSeats,
     stakesJson: JSON.stringify(stakes),
     lifecycleKind: "CONTINUOUS_BOT",
     managedProfileKey: profile.profileKey,
-    rotationDueAt: new Date(Date.now() + profile.rotationIntervalSeconds * 1_000).toISOString()
+    rotationDueAt
   });
   const seededBots = await seedBotsForJoin({
     tx,
@@ -122,7 +123,7 @@ async function createManagedTable(tx, { profile, botConfig, klog }) {
     [created.tableId, JSON.stringify(projectedState)]
   );
   if (updatedRows?.length !== 1) throw new Error("managed_bot_state_projection_failed");
-  return created.tableId;
+  return { tableId: created.tableId, rotationDueAt };
 }
 
 export function createContinuousBotTableRepository({
@@ -195,7 +196,10 @@ export function createContinuousBotTableRepository({
         const retainedCount = openTables.length;
         for (let index = retainedCount; index < desiredCount; index += 1) {
           if (!botConfig.enabled) throw Object.assign(new Error("bots_disabled"), { code: "bots_disabled" });
-          createdTableIds.push(await createManagedTable(tx, { profile, botConfig, klog }));
+          const created = await createManagedTable(tx, { profile, botConfig, klog });
+          createdTableIds.push(created.tableId);
+          rotationScheduledTableIds.push(created.tableId);
+          rotationDueAtByTableId[created.tableId] = created.rotationDueAt;
         }
         return {
           profile,
