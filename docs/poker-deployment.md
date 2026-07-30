@@ -287,7 +287,7 @@ Cleanup runs in two sequential phases inside a single database transaction:
 
 **Phase 2 — settlement markers.** Deletes old `HAND_SETTLED` rows only when no ordinary actions remain for the same hand (correlated `NOT EXISTS`). This guarantees Phase 1 processes a hand before Phase 2 removes its marker, even if a sweep backlog builds up.
 
-Phase 1 always runs before Phase 2 in the same transaction. Both phases use the same three-level CTE structure: `locked_tables` (bounded `FOR UPDATE SKIP LOCKED`) → `candidates` (UNION ALL with per-classification cutoffs) → `DELETE … RETURNING id`.
+Phase 1 always runs before Phase 2 in the same transaction. Both phases use bounded `locked_tables` and candidate CTEs followed by `DELETE … RETURNING id`. Bot and human cutoffs are selected through classification predicates (`has_human_participant`) inside each CTE.
 
 `batchSize` limits the number of candidate hands (Phase 1) or settlement rows (Phase 2) selected per sweep, not the number of ordinary action rows deleted. A single Phase 1 candidate hand may contain dozens of ordinary action rows, so `phase1Deleted` in the log may be much larger than `batchSize`.
 
@@ -374,7 +374,7 @@ curl -s http://127.0.0.1:3001/healthz
 sudo journalctl -u ws-server-preview.service --no-pager | grep "ws_action_history_cleanup_"
 
 # Inspect running environment values
-sudo cat /opt/arcade-ws-preview/.env.preview | grep WS_POKER_ACTION_HISTORY
+sudo grep -E '^WS_POKER_(BOT|HUMAN)_(ACTION|SETTLED)_RETENTION_MS=|^WS_POKER_ACTION_HISTORY_(SWEEP_MS|BATCH_SIZE)=' /opt/arcade-ws-preview/.env.preview
 ```
 
 **SQL verification queries:**
