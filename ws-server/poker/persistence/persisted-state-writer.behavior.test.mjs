@@ -981,7 +981,7 @@ function createReplacementFundingDbHarness({ tableId, version = 7, state, treasu
           return [{ ...transaction }];
         }
         if (text.includes("select count(*) from apply_balance")) {
-          const entries = params[0];
+          const entries = JSON.parse(params[0]);
           for (const entry of entries) {
             const account = [...working.accounts.values()].find((candidate) => candidate.id === entry.account_id);
             if (!account || account.balance + entry.amount < 0) throw new Error("insufficient_funds");
@@ -990,7 +990,7 @@ function createReplacementFundingDbHarness({ tableId, version = 7, state, treasu
           return [{ updated_accounts: entries.length, expected_accounts: entries.length, guard_ok: true }];
         }
         if (text.includes("insert into public.chips_entries")) {
-          const entries = params[1];
+          const entries = JSON.parse(params[1]);
           return [{ entries: entries.map((entry, index) => ({ ...entry, entry_seq: index + 1 })) }];
         }
         return [];
