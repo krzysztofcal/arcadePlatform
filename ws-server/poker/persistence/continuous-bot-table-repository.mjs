@@ -68,6 +68,12 @@ function canonicalStakes(value) {
   return parsed?.ok ? parsed.value : null;
 }
 
+function rotationDueAtForTable(table, profile) {
+  const createdAtMs = table?.created_at ? new Date(table.created_at).getTime() : Number.NaN;
+  const baseMs = Number.isFinite(createdAtMs) ? createdAtMs : Date.now();
+  return new Date(baseMs + profile.rotationIntervalSeconds * 1_000).toISOString();
+}
+
 export function tableMatchesContinuousBotProfile(table, profile) {
   const stakes = canonicalStakes(table?.stakes);
   return table?.managed_profile_key === profile.profileKey
@@ -84,7 +90,7 @@ async function createManagedTable(tx, { profile, botConfig, klog }) {
     stakesJson: JSON.stringify(stakes),
     lifecycleKind: "CONTINUOUS_BOT",
     managedProfileKey: profile.profileKey,
-    rotationDueAt: null
+    rotationDueAt: new Date(Date.now() + profile.rotationIntervalSeconds * 1_000).toISOString()
   });
   const seededBots = await seedBotsForJoin({
     tx,
@@ -140,7 +146,7 @@ export function createContinuousBotTableRepository({
         const profile = normalizeContinuousBotProfile(profileRows?.[0]);
         if (!profile) throw Object.assign(new Error("managed_profile_invalid"), { code: "managed_profile_invalid" });
         const tableRows = await tx.unsafe(
-          `select id, status, max_players, stakes, managed_profile_key, rotation_due_at
+          `select id, status, max_players, stakes, managed_profile_key, rotation_due_at, created_at
              from public.poker_tables
             where status = 'OPEN' and lifecycle_kind = 'CONTINUOUS_BOT'
             order by created_at asc, id asc
@@ -162,6 +168,23 @@ export function createContinuousBotTableRepository({
           retirementTableIds.splice(0, retirementTableIds.length, ...openTables.map((table) => table.id));
         }
         const uniqueRetirements = [...new Set(retirementTableIds)];
+        const rotationScheduledTableIds = [];
+        const rotationDueAtByTableId = {};
+        for (const table of openTables) {
+          if (uniqueRetirements.includes(table.id) || table.rotation_due_at) continue;
+          const rotationDueAt = rotationDueAtForTable(table, profile);
+          const scheduledRows = await tx.unsafe(
+            `update public.poker_tables
+                set rotation_due_at = $2, updated_at = now()
+              where id = $1 and rotation_due_at is null
+              returning id, rotation_due_at;`,
+            [table.id, rotationDueAt]
+          );
+          if (scheduledRows?.length === 1) {
+            rotationScheduledTableIds.push(table.id);
+            rotationDueAtByTableId[table.id] = new Date(scheduledRows[0].rotation_due_at).toISOString();
+          }
+        }
         if (uniqueRetirements.length > 0) {
           await tx.unsafe(
             "update public.poker_tables set rotation_due_at = least(coalesce(rotation_due_at, now()), now()), updated_at = now() where id = any($1::uuid[]);",
@@ -181,7 +204,9 @@ export function createContinuousBotTableRepository({
             ...openTables.filter((table) => !uniqueRetirements.includes(table.id)).map((table) => table.id),
             ...createdTableIds
           ],
-          retirementTableIds: uniqueRetirements
+          retirementTableIds: uniqueRetirements,
+          rotationScheduledTableIds,
+          rotationDueAtByTableId
         };
       }, { env });
       lastKnownProfile = result.profile;
@@ -196,7 +221,9 @@ export function createContinuousBotTableRepository({
         profile: lastKnownProfile,
         createdTableIds: [],
         activeTableIds: [],
-        retirementTableIds: []
+        retirementTableIds: [],
+        rotationScheduledTableIds: [],
+        rotationDueAtByTableId: {}
       };
     }
   }
@@ -245,9 +272,51 @@ export function createContinuousBotTableRepository({
     }
   }
 
+  async function postponeRotation(tableId, rotationDueAt) {
+    const normalizedTableId = typeof tableId === "string" ? tableId.trim() : "";
+    const normalizedDueAt = rotationDueAt instanceof Date
+      ? rotationDueAt.toISOString()
+      : typeof rotationDueAt === "string" ? rotationDueAt.trim() : "";
+    if (!normalizedTableId || !normalizedDueAt || !Number.isFinite(new Date(normalizedDueAt).getTime())) {
+      return { ok: false, reason: "invalid_rotation_due_at" };
+    }
+    try {
+      return await beginSql(async (tx) => {
+        await tx.unsafe("select pg_advisory_xact_lock(hashtext($1));", ["poker:continuous-bot-supervisor:v1"]);
+        const updatedRows = await tx.unsafe(
+          `update public.poker_tables
+              set rotation_due_at = $2, updated_at = now()
+            where id = $1
+              and status = 'OPEN'
+              and lifecycle_kind = 'CONTINUOUS_BOT'
+              and managed_profile_key = $3
+              and rotation_due_at is not null
+              and rotation_due_at <= now()
+            returning id, rotation_due_at;`,
+          [normalizedTableId, normalizedDueAt, CONTINUOUS_BOT_PROFILE_KEY]
+        );
+        if (!Array.isArray(updatedRows) || updatedRows.length !== 1) {
+          return { ok: false, reason: "rotation_not_due" };
+        }
+        return {
+          ok: true,
+          changed: true,
+          rotationDueAt: new Date(updatedRows[0].rotation_due_at).toISOString()
+        };
+      }, { env });
+    } catch (error) {
+      klog("ws_continuous_bot_table_rotation_postpone_failed", {
+        tableId: normalizedTableId,
+        reason: error?.code || error?.message || "unknown"
+      });
+      return { ok: false, reason: error?.code || error?.message || "rotation_postpone_failed" };
+    }
+  }
+
   return {
     reconcile,
     requestRetirement,
+    postponeRotation,
     currentProfile: () => lastKnownProfile
   };
 }

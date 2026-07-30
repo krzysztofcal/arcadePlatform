@@ -59,6 +59,7 @@ import {
 import { getBotConfig, parseStakes } from "./shared/poker-domain/bots.mjs";
 import { createContinuousBotTableRepository } from "./poker/persistence/continuous-bot-table-repository.mjs";
 import { createContinuousBotTableSupervisor } from "./poker/runtime/continuous-bot-table-supervisor.mjs";
+import { handleContinuousBotRotationAtSettled } from "./poker/runtime/continuous-bot-table-rotation.mjs";
 import {
   isManagedReplacementSeatProjectionConflict,
   retireManagedTableAfterReplacementConflict as retireManagedTableAfterReplacementConflictFlow
@@ -1885,9 +1886,6 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
   const tableMeta = tableManager.tableMeta(tableId);
   const managedContinuousTable = tableMeta?.lifecycleKind === "CONTINUOUS_BOT"
     && tableMeta?.managedProfileKey === "CONTINUOUS_BOT_DEFAULT";
-  const managedRetirementDue = managedContinuousTable
-    && Number.isFinite(tableMeta?.rotationDueAtMs)
-    && tableMeta.rotationDueAtMs <= Date.now();
   if (!managedContinuousTable && !tableManager.hasActiveHumanMember(tableId)) {
     if (tableManager.hasConnectedHumanPresence(tableId)) {
       klogSafe("ws_settled_rollover_close_skipped_human_presence", { tableId, phase: pokerState?.phase || null });
@@ -1900,16 +1898,20 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     });
     return finishSettledRollover(cleanupResult);
   }
-  if (managedRetirementDue) {
-    if (tableManager.hasActiveHumanMember(tableId) || tableManager.hasConnectedHumanPresence(tableId)) {
-      scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
-      return finishSettledRollover({ ok: true, changed: false, deferred: true, reason: "managed_retirement_human_present" });
-    }
-    return finishSettledRollover(await applyInactiveCleanupAndBroadcast({
-      tableId,
-      requestId: `continuous-bot-table-close:${tableId}`,
-      logPrefix: "ws_continuous_bot_table_retirement"
-    }));
+  const rotation = await handleContinuousBotRotationAtSettled({
+    tableId,
+    tableMeta,
+    phase: pokerState?.phase,
+    tableManager,
+    continuousBotTableRepository,
+    applyInactiveCleanupAndBroadcast,
+    scheduleSettledRolloverRetry,
+    generationKey,
+    attempt,
+    klog: klogSafe
+  });
+  if (rotation.handled) {
+    return finishSettledRollover(rotation.result);
   }
 
   if (isGuestTableId(tableId)) {
@@ -4333,6 +4335,14 @@ const continuousBotTableSupervisor = continuousBotTableRepository
       repository: continuousBotTableRepository,
       onCreatedTable: materializeCreatedContinuousBotTable,
       onRetirementRequested: requestContinuousBotTableRetirement,
+      onRotationScheduled: async ({ tableId, rotationDueAt }) => {
+        const dueAtMs = Date.parse(rotationDueAt);
+        const marked = tableManager.setTableRotationDueAt(tableId, dueAtMs);
+        if (!marked?.ok) return marked;
+        klogSafe("ws_continuous_bot_table_rotation_scheduled", { tableId, rotationDueAt: dueAtMs });
+        maybeScheduleSettledRollover(tableId);
+        return marked;
+      },
       klog: klogSafe
     })
   : null;

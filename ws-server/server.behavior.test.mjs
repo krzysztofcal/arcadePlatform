@@ -35,6 +35,7 @@ import {
   tableMatchesContinuousBotProfile
 } from "./poker/persistence/continuous-bot-table-repository.mjs";
 import { createContinuousBotTableSupervisor } from "./poker/runtime/continuous-bot-table-supervisor.mjs";
+import { handleContinuousBotRotationAtSettled } from "./poker/runtime/continuous-bot-table-rotation.mjs";
 import {
   isManagedReplacementSeatProjectionConflict,
   retireManagedTableAfterReplacementConflict
@@ -138,6 +139,194 @@ test("continuous bot supervisor coalesces overlapping sweeps and activates each 
   assert.equal(calls, 2);
   assert.deepEqual(activated, ["table-a"]);
   supervisor.stop();
+});
+
+test("continuous bot supervisor forwards a newly scheduled rotation once", async () => {
+  const scheduled = [];
+  let reconcileCount = 0;
+  const repository = {
+    reconcile: async () => {
+      reconcileCount += 1;
+      return {
+        ok: true,
+        profile: { profileKey: "CONTINUOUS_BOT_DEFAULT" },
+        createdTableIds: [],
+        activeTableIds: ["table-rotation"],
+        retirementTableIds: [],
+        rotationScheduledTableIds: reconcileCount === 1 ? ["table-rotation"] : [],
+        rotationDueAtByTableId: reconcileCount === 1
+          ? { "table-rotation": "2026-07-29T12:15:00.000Z" }
+          : {}
+      };
+    }
+  };
+  const supervisor = createContinuousBotTableSupervisor({
+    repository,
+    onCreatedTable: async () => ({ ok: true }),
+    onRotationScheduled: async (event) => {
+      scheduled.push(event);
+      return { ok: true };
+    }
+  });
+
+  await supervisor.sweep();
+  await supervisor.sweep();
+
+  assert.deepEqual(scheduled, [{
+    tableId: "table-rotation",
+    profile: { profileKey: "CONTINUOUS_BOT_DEFAULT" },
+    rotationDueAt: "2026-07-29T12:15:00.000Z"
+  }]);
+  supervisor.stop();
+});
+
+test("managed settled rotation closes a due bots-only table exactly once", async () => {
+  const calls = { close: 0, retry: 0, logs: [] };
+  const result = await handleContinuousBotRotationAtSettled({
+    tableId: "managed-rotation-close",
+    phase: "SETTLED",
+    nowMs: 1_000,
+    tableMeta: {
+      lifecycleKind: "CONTINUOUS_BOT",
+      managedProfileKey: "CONTINUOUS_BOT_DEFAULT",
+      rotationDueAtMs: 900
+    },
+    tableManager: {
+      hasActiveHumanMember: () => false,
+      hasConnectedHumanPresence: () => false
+    },
+    applyInactiveCleanupAndBroadcast: async (input) => {
+      calls.close += 1;
+      assert.equal(input.requestId, "continuous-bot-table-close:managed-rotation-close");
+      return { ok: true, changed: true, closed: true };
+    },
+    scheduleSettledRolloverRetry: () => { calls.retry += 1; },
+    klog: (eventName) => calls.logs.push(eventName)
+  });
+
+  assert.deepEqual(result, {
+    handled: true,
+    result: { ok: true, changed: true, closed: true }
+  });
+  assert.deepEqual(calls, {
+    close: 1,
+    retry: 0,
+    logs: [
+      "ws_continuous_bot_table_rotation_started",
+      "ws_continuous_bot_table_rotation_completed"
+    ]
+  });
+});
+
+test("managed settled rotation postpones durably for a present human and lets rollover continue", async () => {
+  const calls = { postpone: [], runtimeDue: [], close: 0, retry: 0 };
+  const result = await handleContinuousBotRotationAtSettled({
+    tableId: "managed-rotation-human",
+    phase: "SETTLED",
+    nowMs: 1_000,
+    tableMeta: {
+      lifecycleKind: "CONTINUOUS_BOT",
+      managedProfileKey: "CONTINUOUS_BOT_DEFAULT",
+      rotationDueAtMs: 900
+    },
+    tableManager: {
+      hasActiveHumanMember: () => true,
+      hasConnectedHumanPresence: () => false,
+      setTableRotationDueAt: (tableId, dueAtMs) => {
+        const normalizedDueAtMs = typeof dueAtMs === "string" ? Date.parse(dueAtMs) : dueAtMs;
+        calls.runtimeDue.push([tableId, normalizedDueAtMs]);
+        return { ok: true, rotationDueAtMs: normalizedDueAtMs };
+      }
+    },
+    continuousBotTableRepository: {
+      currentProfile: () => ({ postponeIntervalSeconds: 300 }),
+      postponeRotation: async (tableId, dueAt) => {
+        calls.postpone.push([tableId, dueAt]);
+        return { ok: true, changed: true, rotationDueAt: dueAt };
+      }
+    },
+    applyInactiveCleanupAndBroadcast: async () => {
+      calls.close += 1;
+      return { ok: true, changed: true, closed: true };
+    },
+    scheduleSettledRolloverRetry: () => { calls.retry += 1; }
+  });
+
+  assert.equal(result.handled, false);
+  assert.equal(result.postponed, true);
+  assert.equal(result.rotationDueAtMs, 301_000);
+  assert.deepEqual(calls.runtimeDue, [["managed-rotation-human", 301_000]]);
+  assert.equal(calls.postpone.length, 1);
+  assert.equal(calls.close, 0);
+  assert.equal(calls.retry, 0);
+});
+
+test("managed settled rotation preserves retry when postponement persistence fails", async () => {
+  const retries = [];
+  const result = await handleContinuousBotRotationAtSettled({
+    tableId: "managed-rotation-postpone-failure",
+    phase: "SETTLED",
+    nowMs: 1_000,
+    attempt: 2,
+    generationKey: "managed-rotation-postpone-failure:4:hand",
+    tableMeta: {
+      lifecycleKind: "CONTINUOUS_BOT",
+      managedProfileKey: "CONTINUOUS_BOT_DEFAULT",
+      rotationDueAtMs: 900
+    },
+    tableManager: {
+      hasActiveHumanMember: () => false,
+      hasConnectedHumanPresence: () => true
+    },
+    continuousBotTableRepository: {
+      currentProfile: () => ({ postponeIntervalSeconds: 300 }),
+      postponeRotation: async () => ({ ok: false, reason: "db_unavailable" })
+    },
+    scheduleSettledRolloverRetry: (input) => retries.push(input)
+  });
+
+  assert.deepEqual(result, {
+    handled: true,
+    result: { ok: false, changed: false, reason: "db_unavailable", retryable: true }
+  });
+  assert.deepEqual(retries, [{
+    tableId: "managed-rotation-postpone-failure",
+    generationKey: "managed-rotation-postpone-failure:4:hand",
+    attempt: 3
+  }]);
+});
+
+test("continuous rotation does not run before SETTLED or for a normal table", async () => {
+  let close = 0;
+  const base = {
+    tableId: "normal-table",
+    nowMs: 1_000,
+    tableMeta: {
+      lifecycleKind: "STANDARD",
+      managedProfileKey: null,
+      rotationDueAtMs: 900
+    },
+    tableManager: {
+      hasActiveHumanMember: () => false,
+      hasConnectedHumanPresence: () => false
+    },
+    applyInactiveCleanupAndBroadcast: async () => {
+      close += 1;
+      return { ok: true, changed: true, closed: true };
+    }
+  };
+  assert.equal((await handleContinuousBotRotationAtSettled({ ...base, phase: "SETTLED" })).handled, false);
+  assert.equal((await handleContinuousBotRotationAtSettled({
+    ...base,
+    tableId: "managed-live-hand",
+    phase: "TURN",
+    tableMeta: {
+      lifecycleKind: "CONTINUOUS_BOT",
+      managedProfileKey: "CONTINUOUS_BOT_DEFAULT",
+      rotationDueAtMs: 900
+    }
+  })).handled, false);
+  assert.equal(close, 0);
 });
 
 test("replacement projection conflict eligibility is limited to managed replacement funding", () => {

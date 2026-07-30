@@ -123,8 +123,15 @@ register("INFO", "table_lifecycle", [
   "poker_rebuy_committed",
   "ws_continuous_bot_table_created",
   "ws_continuous_bot_table_restored",
+  "ws_continuous_bot_table_rotation_completed",
+  "ws_continuous_bot_table_rotation_scheduled",
+  "ws_continuous_bot_table_rotation_started",
   "ws_continuous_bot_table_retirement_requested",
   "ws_guest_table_evicted"
+]);
+
+register("INFO", "table_lifecycle", [
+  "ws_continuous_bot_table_rotation_postponed"
 ]);
 
 register("WARN", "autoplay", [
@@ -284,7 +291,8 @@ register("ERROR", "table_lifecycle", [
   "ws_leave_authoritative_unavailable",
   "ws_rebuy_authoritative_failed",
   "ws_rebuy_authoritative_unavailable",
-  "ws_continuous_bot_table_retirement_persist_failed"
+  "ws_continuous_bot_table_retirement_persist_failed",
+  "ws_continuous_bot_table_rotation_postpone_failed"
 ]);
 
 register("ERROR", "transport", [
