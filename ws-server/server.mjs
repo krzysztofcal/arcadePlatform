@@ -60,6 +60,7 @@ import { getBotConfig, parseStakes } from "./shared/poker-domain/bots.mjs";
 import { createContinuousBotTableRepository } from "./poker/persistence/continuous-bot-table-repository.mjs";
 import { createContinuousBotTableSupervisor } from "./poker/runtime/continuous-bot-table-supervisor.mjs";
 import { handleContinuousBotRotationAtSettled } from "./poker/runtime/continuous-bot-table-rotation.mjs";
+import { createActionHistoryCleanup } from "./poker/persistence/action-history-cleanup.mjs";
 import {
   isManagedReplacementSeatProjectionConflict,
   retireManagedTableAfterReplacementConflict as retireManagedTableAfterReplacementConflictFlow
@@ -4404,6 +4405,26 @@ const lobbyVisibilitySweepTimer = setInterval(() => {
   maybeBroadcastLobbySnapshot();
 }, lobbyVisibilitySweepMs);
 lobbyVisibilitySweepTimer.unref();
+
+// --- Action history retention cleanup ---------------------------------
+// Validation (action=0 + settled>0, settled<action) is inside the module.
+
+const actionHistoryCleanupSweepMs = resolvePositiveInt(
+  process.env.WS_POKER_ACTION_HISTORY_SWEEP_MS, 300_000, { min: 30_000, max: 3_600_000 }
+);
+
+const actionHistoryCleanup = hasSupabaseDbUrl
+  ? createActionHistoryCleanup({ env: process.env, klog: klogSafe })
+  : null;
+
+if (actionHistoryCleanup) {
+  const actionHistoryCleanupTimer = setInterval(() => {
+    void actionHistoryCleanup.sweep();
+  }, actionHistoryCleanupSweepMs);
+  actionHistoryCleanupTimer.unref();
+}
+
+// -----------------------------------------------------------------------
 
 async function startServer() {
   const release = loadReleaseMetadata();

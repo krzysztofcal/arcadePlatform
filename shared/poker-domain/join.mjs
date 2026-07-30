@@ -653,11 +653,23 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       if (!resolvedBuyIn) throw makeError("invalid_buy_in");
 
       const tableRows = await tx.unsafe(
-        "select id, status, max_players, stakes from public.poker_tables where id = $1 limit 1;",
+        "select id, status, max_players, stakes from public.poker_tables where id = $1 limit 1 for update;",
         [tableId]
       );
       const table = tableRows?.[0] || null;
       if (!table) throw makeError("table_not_found");
+
+      // Lock the table row before any mutation.  Mark human participation
+      // one-way (false -> true) so that action history retention uses the
+      // correct (long) window for tables with human gameplay.  The flag
+      // rolls back if the join transaction fails.
+      await tx.unsafe(
+        `update public.poker_tables
+            set has_human_participant = true
+          where id = $1 and has_human_participant = false`,
+        [tableId]
+      );
+
       const maxPlayers = Number(table.max_players);
       if (!Number.isInteger(maxPlayers) || maxPlayers < 1) throw makeError("table_not_open");
 

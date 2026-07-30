@@ -1,0 +1,334 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createActionHistoryCleanup } from "./action-history-cleanup.mjs";
+
+function mockTx(handlers) {
+  return {
+    unsafe: async (sql, params) => {
+      for (const [pattern, handler] of handlers) {
+        if (sql.includes(pattern)) {
+          return handler(sql, params);
+        }
+      }
+      return [];
+    }
+  };
+}
+
+const HOUR = 3_600_000;
+const DAY = 86_400_000;
+
+// ---------------------------------------------------------------------------
+// Phase 1
+// ---------------------------------------------------------------------------
+
+test("phase 1 deletes ordinary actions for bot-only table past cutoff", async () => {
+  let phase1DeletedCount = 0;
+  const tx = mockTx([
+    // Phase 1 uses "candidate_hands" CTE name + "action_type != 'HAND_SETTLED'" in DELETE
+    ["candidate_hands", (sql) => {
+      if (sql.includes("action_type != 'HAND_SETTLED'")) {
+        phase1DeletedCount = 3;
+        return [{ id: 1 }, { id: 2 }, { id: 3 }];
+      }
+      return [];
+    }],
+    ["id in (select id from candidates)", () => []],
+  ]);
+
+  const cleanup = createActionHistoryCleanup({
+    env: {
+      WS_POKER_BOT_ACTION_RETENTION_MS: String(HOUR),
+      WS_POKER_BOT_SETTLED_RETENTION_MS: "0",
+      WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+      WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+      WS_POKER_ACTION_HISTORY_BATCH_SIZE: "10",
+      SUPABASE_DB_URL: "postgres://test/db"
+    },
+    beginSql: async (fn) => fn(tx)
+  });
+
+  const result = await cleanup.sweep();
+  assert.equal(result.ok, true);
+  assert.equal(result.phase1Deleted, 3);
+  assert.equal(result.phase2Deleted, 0);
+});
+
+test("phase 1 deletes nothing when all retentions are 0", async () => {
+  const tx = mockTx([
+    ["candidate_hands", () => []],
+    ["id in (select id from candidates)", () => []],
+  ]);
+
+  const cleanup = createActionHistoryCleanup({
+    env: {
+      WS_POKER_BOT_ACTION_RETENTION_MS: "0",
+      WS_POKER_BOT_SETTLED_RETENTION_MS: "0",
+      WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+      WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+      WS_POKER_ACTION_HISTORY_BATCH_SIZE: "10",
+      SUPABASE_DB_URL: "postgres://test/db"
+    },
+    beginSql: async (fn) => fn(tx)
+  });
+
+  const result = await cleanup.sweep();
+  assert.equal(result.skipped, true);
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2
+// ---------------------------------------------------------------------------
+
+test("phase 2 deletes HAND_SETTLED when ordinary actions already gone", async () => {
+  let phase1Called = false;
+  let phase2DeletedCount = 0;
+  const tx = mockTx([
+    // Phase 1 returns nothing
+    ["candidate_hands", () => { phase1Called = true; return []; }],
+    // Phase 2 uses "id in (select id from candidates)" pattern
+    ["id in (select id from candidates)", () => {
+      phase2DeletedCount = 2;
+      return [{ id: 100 }, { id: 101 }];
+    }],
+  ]);
+
+  const cleanup = createActionHistoryCleanup({
+    env: {
+      WS_POKER_BOT_ACTION_RETENTION_MS: String(HOUR),
+      WS_POKER_BOT_SETTLED_RETENTION_MS: String(7 * DAY),
+      WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+      WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+      WS_POKER_ACTION_HISTORY_BATCH_SIZE: "5",
+      SUPABASE_DB_URL: "postgres://test/db"
+    },
+    beginSql: async (fn) => fn(tx)
+  });
+
+  const result = await cleanup.sweep();
+  assert.equal(result.ok, true);
+  assert.equal(phase1Called, true);  // Phase 1 always runs first
+  assert.equal(result.phase2Deleted, 2);
+});
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+test("bot action=0 + settled>0 throws", () => {
+  assert.throws(() => {
+    createActionHistoryCleanup({
+      env: {
+        WS_POKER_BOT_ACTION_RETENTION_MS: "0",
+        WS_POKER_BOT_SETTLED_RETENTION_MS: String(HOUR),
+        WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+        WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+        WS_POKER_ACTION_HISTORY_BATCH_SIZE: "10",
+        SUPABASE_DB_URL: "postgres://test/db"
+      },
+      beginSql: async () => {}
+    });
+  }, /is unsafe|must be >=/);
+});
+
+test("0/0 is valid (cleanup disabled)", () => {
+  const cleanup = createActionHistoryCleanup({
+    env: {
+      WS_POKER_BOT_ACTION_RETENTION_MS: "0",
+      WS_POKER_BOT_SETTLED_RETENTION_MS: "0",
+      WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+      WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+      WS_POKER_ACTION_HISTORY_BATCH_SIZE: "10",
+      SUPABASE_DB_URL: "postgres://test/db"
+    },
+    beginSql: async () => {}
+  });
+  assert.equal(typeof cleanup.sweep, "function");
+});
+
+// ---------------------------------------------------------------------------
+// Idempotency
+// ---------------------------------------------------------------------------
+
+test("idempotent: second sweep deletes nothing", async () => {
+  const tx = mockTx([
+    ["candidate_hands", () => []],
+    ["id in (select id from candidates)", () => []],
+  ]);
+
+  const cleanup = createActionHistoryCleanup({
+    env: {
+      WS_POKER_BOT_ACTION_RETENTION_MS: String(HOUR),
+      WS_POKER_BOT_SETTLED_RETENTION_MS: "0",
+      WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+      WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+      WS_POKER_ACTION_HISTORY_BATCH_SIZE: "10",
+      SUPABASE_DB_URL: "postgres://test/db"
+    },
+    beginSql: async (fn) => fn(tx)
+  });
+
+  const result = await cleanup.sweep();
+  assert.equal(result.phase1Deleted, 0);
+  assert.equal(result.phase2Deleted, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Batch config
+// ---------------------------------------------------------------------------
+
+test("batch size and lockLimit passed to SQL", async () => {
+  let capturedParams = null;
+  const tx = mockTx([
+    ["candidate_hands", (sql, params) => {
+      capturedParams = params;
+      return [];
+    }],
+    ["id in (select id from candidates)", () => []],
+  ]);
+
+  const cleanup = createActionHistoryCleanup({
+    env: {
+      WS_POKER_BOT_ACTION_RETENTION_MS: String(HOUR),
+      WS_POKER_BOT_SETTLED_RETENTION_MS: "0",
+      WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+      WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+      WS_POKER_ACTION_HISTORY_BATCH_SIZE: "7",
+      SUPABASE_DB_URL: "postgres://test/db"
+    },
+    beginSql: async (fn) => fn(tx)
+  });
+
+  await cleanup.sweep();
+  assert.equal(capturedParams[2], 7);
+  assert.equal(capturedParams[3], 14);
+});
+
+// ---------------------------------------------------------------------------
+// Fail-fast validation of individual values
+// ---------------------------------------------------------------------------
+
+test("rejects NaN retention", () => {
+  assert.throws(() => {
+    createActionHistoryCleanup({
+      env: {
+        WS_POKER_BOT_ACTION_RETENTION_MS: "8640000x",
+        WS_POKER_BOT_SETTLED_RETENTION_MS: "0",
+        WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+        WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+        WS_POKER_ACTION_HISTORY_BATCH_SIZE: "10",
+        SUPABASE_DB_URL: "postgres://test/db"
+      },
+      beginSql: async () => {}
+    });
+  }, /must be a finite non-negative integer/);
+});
+
+test("rejects negative retention", () => {
+  assert.throws(() => {
+    createActionHistoryCleanup({
+      env: {
+        WS_POKER_BOT_ACTION_RETENTION_MS: "-100",
+        WS_POKER_BOT_SETTLED_RETENTION_MS: "0",
+        WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+        WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+        WS_POKER_ACTION_HISTORY_BATCH_SIZE: "10",
+        SUPABASE_DB_URL: "postgres://test/db"
+      },
+      beginSql: async () => {}
+    });
+  }, /must be a finite non-negative integer/);
+});
+
+test("rejects non-integer retention", () => {
+  assert.throws(() => {
+    createActionHistoryCleanup({
+      env: {
+        WS_POKER_BOT_ACTION_RETENTION_MS: "12.5",
+        WS_POKER_BOT_SETTLED_RETENTION_MS: "0",
+        WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+        WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+        WS_POKER_ACTION_HISTORY_BATCH_SIZE: "10",
+        SUPABASE_DB_URL: "postgres://test/db"
+      },
+      beginSql: async () => {}
+    });
+  }, /must be a finite non-negative integer/);
+});
+
+test("rejects batchSize 0", () => {
+  assert.throws(() => {
+    createActionHistoryCleanup({
+      env: {
+        WS_POKER_BOT_ACTION_RETENTION_MS: String(HOUR),
+        WS_POKER_BOT_SETTLED_RETENTION_MS: "0",
+        WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+        WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+        WS_POKER_ACTION_HISTORY_BATCH_SIZE: "0",
+        SUPABASE_DB_URL: "postgres://test/db"
+      },
+      beginSql: async () => {}
+    });
+  }, /BATCH_SIZE.*must be an integer 1-100/);
+});
+
+test("rejects batchSize >100", () => {
+  assert.throws(() => {
+    createActionHistoryCleanup({
+      env: {
+        WS_POKER_BOT_ACTION_RETENTION_MS: String(HOUR),
+        WS_POKER_BOT_SETTLED_RETENTION_MS: "0",
+        WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+        WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+        WS_POKER_ACTION_HISTORY_BATCH_SIZE: "101",
+        SUPABASE_DB_URL: "postgres://test/db"
+      },
+      beginSql: async () => {}
+    });
+  }, /BATCH_SIZE.*must be an integer 1-100/);
+});
+
+// ---------------------------------------------------------------------------
+// Sweep-in-progress guard
+// ---------------------------------------------------------------------------
+
+test("skips sweep when previous sweep is still in progress", async () => {
+  let calls = 0;
+  let resolveTx;
+  const txPromise = new Promise((resolve) => { resolveTx = resolve; });
+
+  const tx = mockTx([
+    ["candidate_hands", async () => {
+      calls++;
+      await txPromise; // hold the transaction open
+      return [];
+    }],
+    ["id in (select id from candidates)", () => []],
+  ]);
+
+  const cleanup = createActionHistoryCleanup({
+    env: {
+      WS_POKER_BOT_ACTION_RETENTION_MS: String(HOUR),
+      WS_POKER_BOT_SETTLED_RETENTION_MS: "0",
+      WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+      WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+      WS_POKER_ACTION_HISTORY_BATCH_SIZE: "10",
+      SUPABASE_DB_URL: "postgres://test/db"
+    },
+    beginSql: async (fn) => fn(tx)
+  });
+
+  // Start first sweep (will hang on txPromise)
+  const first = cleanup.sweep();
+
+  // Attempt second sweep while first is in progress
+  const second = await cleanup.sweep();
+
+  assert.equal(second.skipped, true);
+  assert.equal(second.reason, "sweep_in_progress");
+
+  // Release first sweep
+  resolveTx();
+  const firstResult = await first;
+  assert.equal(firstResult.ok, true);
+});
