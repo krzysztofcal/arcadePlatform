@@ -308,7 +308,7 @@ export async function executeInactiveCleanup({
           waitingForNextHandByUserId: nextWaitingForNextHandByUserId
         };
         if (stateRow) {
-          await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(nextState)]);
+          await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, nextState]);
         }
         return {
           ok: true,
@@ -349,7 +349,7 @@ export async function executeInactiveCleanup({
         leftTableByUserId: nextLeftTableByUserId,
       };
       if (stateRow) {
-        await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(nextState)]);
+        await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, nextState]);
       }
       await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [tableId, normalizedUserId]);
       await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
@@ -400,7 +400,7 @@ export async function executeInactiveCleanup({
         ) {
           nextState.turnUserId = null;
         }
-        await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(nextState)]);
+        await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, nextState]);
       }
       return { ok: true, changed: seatWasActive, status: seatWasActive ? "cleaned" : "already_inactive", closed: false, retryable: false };
     }
