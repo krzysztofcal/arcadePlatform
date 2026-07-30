@@ -19,7 +19,9 @@ export async function handleContinuousBotRotationAtSettled({
   const rotationDue = managedContinuousTable
     && Number.isFinite(tableMeta?.rotationDueAtMs)
     && tableMeta.rotationDueAtMs <= nowMs;
-  if (managedContinuousTable) {
+  const rotationDueAtMsMissing = managedContinuousTable
+    && !Number.isFinite(tableMeta?.rotationDueAtMs);
+  if (rotationDue || rotationDueAtMsMissing) {
     klog("ws_continuous_bot_table_rotation_evaluated", {
       tableId,
       nowMs,

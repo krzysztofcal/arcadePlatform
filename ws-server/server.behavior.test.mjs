@@ -212,6 +212,7 @@ test("managed settled rotation closes a due bots-only table exactly once", async
     close: 1,
     retry: 0,
     logs: [
+      "ws_continuous_bot_table_rotation_evaluated",
       "ws_continuous_bot_table_rotation_started",
       "ws_continuous_bot_table_rotation_completed"
     ]
@@ -327,6 +328,47 @@ test("continuous rotation does not run before SETTLED or for a normal table", as
     }
   })).handled, false);
   assert.equal(close, 0);
+});
+
+test("continuous bot supervisor calls onRotationScheduled for a newly created table after onCreatedTable", async () => {
+  const calls = [];
+  const newTableId = "table-new-rotation";
+  const deadline = "2026-07-29T12:15:00.000Z";
+  const repository = {
+    reconcile: async () => ({
+      ok: true,
+      profile: { profileKey: "CONTINUOUS_BOT_DEFAULT" },
+      createdTableIds: [newTableId],
+      activeTableIds: [newTableId],
+      retirementTableIds: [],
+      rotationScheduledTableIds: [newTableId],
+      rotationDueAtByTableId: { [newTableId]: deadline }
+    })
+  };
+  const supervisor = createContinuousBotTableSupervisor({
+    repository,
+    onCreatedTable: async (event) => {
+      calls.push({ kind: "created", event });
+      return { ok: true };
+    },
+    onRotationScheduled: async (event) => {
+      calls.push({ kind: "rotationScheduled", event });
+      return { ok: true };
+    }
+  });
+
+  await supervisor.sweep();
+
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0], {
+    kind: "created",
+    event: { tableId: newTableId, profile: { profileKey: "CONTINUOUS_BOT_DEFAULT" }, created: true }
+  });
+  assert.deepEqual(calls[1], {
+    kind: "rotationScheduled",
+    event: { tableId: newTableId, profile: { profileKey: "CONTINUOUS_BOT_DEFAULT" }, rotationDueAt: deadline }
+  });
+  supervisor.stop();
 });
 
 test("replacement projection conflict eligibility is limited to managed replacement funding", () => {
