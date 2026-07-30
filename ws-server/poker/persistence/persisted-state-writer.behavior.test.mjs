@@ -151,7 +151,7 @@ test("persisted state writer persists WS hand hole cards after successful db mut
   assert.deepEqual(result, { ok: true, newVersion: 5 });
   const stateUpdate = queries.find((entry) => entry.query.startsWith("update public.poker_state set version = version + 1"));
   assert.ok(stateUpdate);
-  const storedState = JSON.parse(stateUpdate.params[2]);
+  const storedState = stateUpdate.params[2];
   assert.equal(Object.prototype.hasOwnProperty.call(storedState, "holeCardsByUserId"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(storedState, "deck"), false);
   const holeCardInsert = queries.find((entry) => entry.query.startsWith("insert into public.poker_hole_cards"));
@@ -161,11 +161,11 @@ test("persisted state writer persists WS hand hole cards after successful db mut
     "00000000-0000-4000-8000-000000000001",
     "hand_ws_1",
     "00000000-0000-4000-8000-0000000000a1",
-    "[\"AS\",\"KD\"]",
+    ["AS", "KD"],
     "00000000-0000-4000-8000-000000000001",
     "hand_ws_1",
     "00000000-0000-4000-8000-0000000000b2",
-    "[\"2C\",\"2D\"]"
+    ["2C", "2D"]
   ]);
 });
 
@@ -182,7 +182,7 @@ test("persisted state writer skips acknowledged hole cards on replayed state wri
         if (text.startsWith("update public.poker_state set version = version + 1")) {
           if (stateVersion === 4) {
             stateVersion = 5;
-            currentState = JSON.parse(params[2]);
+            currentState = params[2];
             return [{ version: stateVersion }];
           }
           return [];
@@ -316,8 +316,8 @@ test("persisted state writer persists hole cards from real WS bootstrap private 
   assert.equal(holeCardInsert.params[4], tableId);
   assert.equal(holeCardInsert.params[5], privateStateForHoleCards.handId);
   assert.equal(holeCardInsert.params[6], userB);
-  assert.equal(JSON.parse(holeCardInsert.params[3]).length, 2);
-  assert.equal(JSON.parse(holeCardInsert.params[7]).length, 2);
+  assert.equal(holeCardInsert.params[3].length, 2);
+  assert.equal(holeCardInsert.params[7].length, 2);
 });
 
 test("persisted state writer persists hole cards from real WS rollover private audit state when public state is sanitized", async () => {
@@ -378,7 +378,7 @@ test("persisted state writer persists hole cards from real WS rollover private a
     assert.equal(holeCardInsert.params[index], tableId);
     assert.equal(holeCardInsert.params[index + 1], privateStateForHoleCards.handId);
     persistedUsers.add(holeCardInsert.params[index + 2]);
-    assert.equal(JSON.parse(holeCardInsert.params[index + 3]).length, 2);
+    assert.equal(holeCardInsert.params[index + 3].length, 2);
   }
   assert.deepEqual(persistedUsers, new Set([userA, userB]));
 });
@@ -524,7 +524,7 @@ test("persisted state writer appends accepted human action audit row", async () 
   assert.equal(actionInsert.params[6], "req-call");
   assert.equal(actionInsert.params[7], "PREFLOP");
   assert.equal(actionInsert.params[8], "FLOP");
-  const meta = JSON.parse(actionInsert.params[9]);
+  const meta = actionInsert.params[9];
   assert.deepEqual(meta, {
     auditVersion: 1,
     tableId: "t_action",
@@ -565,7 +565,7 @@ test("persisted state writer atomically dedupes concurrent accepted action audit
         if (text.startsWith("update public.poker_state set version = version + 1")) {
           if (stateVersion === 7) {
             stateVersion = 8;
-            currentState = JSON.parse(params[2]);
+            currentState = params[2];
             return [{ version: stateVersion }];
           }
           return [];
@@ -673,7 +673,7 @@ test("persisted state writer appends exactly one HAND_SETTLED audit event with s
         queries.push({ query: text, params });
         if (text.startsWith("update public.poker_state set version = version + 1")) {
           stateVersion = 5;
-          currentState = JSON.parse(params[2]);
+          currentState = params[2];
           return [{ version: stateVersion }];
         }
         if (text === "update public.poker_tables set last_activity_at = now() where id = $1;") {
@@ -728,7 +728,7 @@ test("persisted state writer appends exactly one HAND_SETTLED audit event with s
   assert.match(auditInsert.query, /do nothing\s+returning id/);
   assert.equal(queries.some((entry) => entry.query.startsWith("select id from public.poker_actions")), false);
   assert.equal(auditInsert.params[3], "HAND_SETTLED");
-  const auditMeta = JSON.parse(auditInsert.params[9]);
+  const auditMeta = auditInsert.params[9];
   assert.deepEqual(auditMeta, {
     auditVersion: 1,
     tableId: "t_settled",
@@ -761,7 +761,7 @@ test("persisted state writer atomically dedupes concurrent HAND_SETTLED audit re
         if (text.startsWith("update public.poker_state set version = version + 1")) {
           if (stateVersion === 4) {
             stateVersion = 5;
-            currentState = JSON.parse(params[2]);
+            currentState = params[2];
             return [{ version: stateVersion }];
           }
           return [];
@@ -938,7 +938,7 @@ function createReplacementFundingDbHarness({ tableId, version = 7, state, treasu
         if (text.startsWith("update public.poker_state set version = version + 1")) {
           if (working.version !== params[1]) return [];
           working.version += 1;
-          working.state = JSON.parse(params[2]);
+          working.state = params[2];
           return [{ version: working.version }];
         }
         if (text.startsWith("select version, state from public.poker_state")) {
@@ -981,7 +981,7 @@ function createReplacementFundingDbHarness({ tableId, version = 7, state, treasu
           return [{ ...transaction }];
         }
         if (text.includes("select count(*) from apply_balance")) {
-          const entries = JSON.parse(params[0]);
+          const entries = params[0];
           for (const entry of entries) {
             const account = [...working.accounts.values()].find((candidate) => candidate.id === entry.account_id);
             if (!account || account.balance + entry.amount < 0) throw new Error("insufficient_funds");
@@ -990,7 +990,7 @@ function createReplacementFundingDbHarness({ tableId, version = 7, state, treasu
           return [{ updated_accounts: entries.length, expected_accounts: entries.length, guard_ok: true }];
         }
         if (text.includes("insert into public.chips_entries")) {
-          const entries = JSON.parse(params[1]);
+          const entries = params[1];
           return [{ entries: entries.map((entry, index) => ({ ...entry, entry_seq: index + 1 })) }];
         }
         return [];
@@ -1222,13 +1222,13 @@ function createDurableActionDbHarness({ tableId, version = 1, state = { tableId,
           const key = requestKey(params[3], params[2]);
           const row = working.requests.get(key);
           if (!row || row.payload_hash !== params[4]) return [];
-          row.result_json = JSON.parse(params[5]);
+          row.result_json = params[5];
           return [{ request_id: params[2] }];
         }
         if (text.startsWith("update public.poker_state set version = version + 1")) {
           if (working.version !== Number(params[1])) return [];
           working.version += 1;
-          working.state = JSON.parse(params[2]);
+          working.state = params[2];
           working.casCount += 1;
           return [{ version: working.version }];
         }

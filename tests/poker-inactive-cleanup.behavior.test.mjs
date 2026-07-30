@@ -84,7 +84,7 @@ function makeTx({
           }];
         }
         if (q.startsWith('update public.poker_state set state')) {
-          mutableState = JSON.parse(params[1]);
+          mutableState = params[1];
           updates.push({ kind: 'state', value: mutableState });
           return [];
         }

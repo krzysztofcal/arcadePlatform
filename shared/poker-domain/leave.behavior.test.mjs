@@ -50,7 +50,7 @@ const makeMocks = () => {
         stack: stacks[seat.userId] ?? 0,
       }));
     }
-    if (text.includes("update public.poker_state") && text.includes("version = version + 1")) { state.version += 1; state.value = JSON.parse(params[2]); calls.updates += 1; return [{ version: state.version }]; }
+    if (text.includes("update public.poker_state") && text.includes("version = version + 1")) { state.version += 1; state.value = params[2]; calls.updates += 1; return [{ version: state.version }]; }
     if (text.includes("insert into public.poker_actions")) { calls.actions += 1; return [{ id: 1 }]; }
     if (text.includes("delete from public.poker_seats")) {
       calls.deleteSeat += 1;

@@ -88,12 +88,12 @@ function createCleanupHarness({
         if (Number(params[1]) !== tableState.stateRow.version) return [];
         tableState.stateRow = {
           version: tableState.stateRow.version + 1,
-          state: JSON.parse(params[2])
+          state: params[2]
         };
         return [{ version: tableState.stateRow.version }];
       }
       if (sql.includes("update public.poker_state set state = $2 where table_id = $1")) {
-        tableState.stateRow = { ...tableState.stateRow, state: JSON.parse(params[1]) };
+        tableState.stateRow = { ...tableState.stateRow, state: params[1] };
         return [];
       }
       if (sql.includes("select status, created_at") && sql.includes("from public.poker_tables")) {
