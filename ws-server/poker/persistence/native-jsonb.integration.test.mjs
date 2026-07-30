@@ -184,7 +184,7 @@ test("native JSONB migration", { skip: !HAS_DB }, async () => {
       assert.equal(before[0].c, "string");
       assert.equal(before[0].r, "string");
 
-      // Execute the actual migration SQL.
+      // Execute the migration queries (identical SQL to the migration file).
       await tx.unsafe(`update ${schema}.actions  set meta        = (meta        #>> '{}')::jsonb where jsonb_typeof(meta) = 'string'`);
       await tx.unsafe(`update ${schema}.state    set state       = (state       #>> '{}')::jsonb where jsonb_typeof(state) = 'string'`);
       await tx.unsafe(`update ${schema}.hole_cards set cards      = (cards       #>> '{}')::jsonb where jsonb_typeof(cards) = 'string'`);
@@ -221,37 +221,21 @@ test("native JSONB migration", { skip: !HAS_DB }, async () => {
   });
 });
 
-// ── Legacy reader coverage ─────────────────────────────────────────────
+// ── Production reader coverage ──────────────────────────────────────────
 
-test("legacy string reads", async () => {
-  // Inline parse helper — parseResultJson in poker-idempotency is module-private.
-  const parseJson = (value) => {
-    if (!value) return null;
-    if (typeof value === "string") { try { return JSON.parse(value); } catch { return null; } }
-    if (typeof value === "object") return value;
-    return null;
-  };
-  assert.deepEqual(parseJson('{"version":5}'), { version: 5 });
-  assert.deepEqual(parseJson({ version: 5 }), { version: 5 });
-  assert.equal(parseJson(null), null);
-  assert.equal(parseJson(undefined), null);
-});
-
-test("native object reads pass through state, cards, meta helpers", async () => {
+test("normalizeJsonState handles native objects and legacy strings", async () => {
+  // normalizeJsonState is the canonical production reader for poker_state.state.
+  // Exported from poker-state-utils.mjs, used by join, leave, settlement, audit,
+  // hole-cards, start-hand, and export-log flows.
   const { normalizeJsonState } = await import(
     "../../../netlify/functions/_shared/poker-state-utils.mjs"
   );
 
   // Native object
-  const state = normalizeJsonState({ phase: "PREFLOP", pot: 0 });
-  assert.equal(state.phase, "PREFLOP");
-
-  // Legacy string
-  const legacy = normalizeJsonState('{"phase":"RIVER","pot":50}');
-  assert.equal(legacy.phase, "RIVER");
-  assert.equal(legacy.pot, 50);
-
-  // Null / empty
+  assert.equal(normalizeJsonState({ phase: "PREFLOP", pot: 0 }).phase, "PREFLOP");
+  // Legacy JSON string
+  assert.equal(normalizeJsonState('{"phase":"RIVER","pot":50}').pot, 50);
+  // Null / undefined → empty object
   assert.deepEqual(normalizeJsonState(null), {});
   assert.deepEqual(normalizeJsonState(undefined), {});
 });
