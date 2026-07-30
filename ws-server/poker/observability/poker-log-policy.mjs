@@ -187,7 +187,8 @@ register("WARN", "table_lifecycle", [
 ]);
 
 register("ERROR", "accounting", [
-  "poker_terminal_accounting_invariant_failed"
+  "poker_terminal_accounting_invariant_failed",
+  "ws_action_history_cleanup_failed"
 ]);
 
 register("ERROR", "autoplay", [
@@ -264,8 +265,7 @@ register("ERROR", "http", [
 
 register("ERROR", "admin", [
   "ws_poker_log_config_invalid",
-  "ws_preview_bot_reaction_failed",
-  "ws_action_history_cleanup_failed"
+  "ws_preview_bot_reaction_failed"
 ]);
 
 register("ERROR", "session", [
