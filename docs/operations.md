@@ -384,3 +384,7 @@ Server-side session validation prevents session hijacking and token forgery atta
 - Session exists and is valid in Redis
 
 See `netlify.toml` for the complete environment variable reference.
+
+## Poker
+
+See `docs/poker-deployment.md` for poker-specific operational documentation, including the action-history retention cleanup configuration.

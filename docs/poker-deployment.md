@@ -259,3 +259,181 @@ These secrets are intentionally separate from the production WS deploy credentia
 
 ## Post-deploy migration note
 Legacy HTTP sweep is retired for gameplay authority and no scheduler invokes it. Any stale active gameplay cleanup must run from WS-owned runtime/ops flows, not from `/.netlify/functions/poker-sweep`.
+
+## Poker action-history retention cleanup
+
+**Purpose and ownership.** The retention cleanup is owned by the authoritative WS server process (`ws-server/server.mjs`). It bounds the growth of `public.poker_actions` by deleting rows from completed hands older than configurable retention windows. The cleanup is a continuous background sweep inside the WS runtime; it is not an HTTP endpoint, Supabase scheduled job, cron job, or table janitor operation.
+
+Implementation: `ws-server/poker/persistence/action-history-cleanup.mjs`, scheduler wiring in `ws-server/server.mjs`.
+
+### Data classification — `has_human_participant`
+
+The one-way boolean column `public.poker_tables.has_human_participant` classifies tables for retention purposes:
+
+| Value | Meaning | Retention |
+|-------|---------|-----------|
+| `false` | No human participation detected | Uses **bot** retention windows |
+| `true` | Human has played at this table | Uses **human** retention windows |
+
+Once set to `true` the flag never returns to `false`. Existing tables are backfilled by the migration `20260730160000_poker_tables_has_human_participant.sql` from three sources: current human seats (`poker_seats.is_bot IS NOT TRUE`), historical human gameplay requests (`poker_requests.kind IN ('JOIN','LEAVE','ACT','REBUY')`), and creator gameplay evidence (`poker_actions.user_id = poker_tables.created_by` with a non-ADMIN action).
+
+This classification affects retention only. It does not make the database authoritative for active gameplay, does not replace `poker_seats` or `poker_state`, and is not consulted by bot claims recovery, terminal accounting, or any gameplay decision.
+
+### Two-phase deletion semantics
+
+Cleanup runs in two sequential phases inside a single database transaction:
+
+**Phase 1 — ordinary actions.** Deletes all action rows except `HAND_SETTLED` for completed hands whose `HAND_SETTLED` audit row is older than the applicable action-retention cutoff. Only hands that still have ordinary action rows are selected (correlated `EXISTS`). A table's retention classification is read while holding a row lock (`FOR UPDATE OF t SKIP LOCKED`) and locked tables are bounded by `lockLimit = batchSize * 2`.
+
+**Phase 2 — settlement markers.** Deletes old `HAND_SETTLED` rows only when no ordinary actions remain for the same hand (correlated `NOT EXISTS`). This guarantees Phase 1 processes a hand before Phase 2 removes its marker, even if a sweep backlog builds up.
+
+Phase 1 always runs before Phase 2 in the same transaction. Both phases use the same three-level CTE structure: `locked_tables` (bounded `FOR UPDATE SKIP LOCKED`) → `candidates` (UNION ALL with per-classification cutoffs) → `DELETE … RETURNING id`.
+
+`batchSize` limits the number of candidate hands (Phase 1) or settlement rows (Phase 2) selected per sweep, not the number of ordinary action rows deleted. A single Phase 1 candidate hand may contain dozens of ordinary action rows, so `phase1Deleted` in the log may be much larger than `batchSize`.
+
+### Environment variables
+
+| Variable | Unit | Default | Range | Disabled | Meaning |
+|----------|------|---------|-------|----------|---------|
+| `WS_POKER_BOT_ACTION_RETENTION_MS` | ms | `0` | finite non-negative integer | `0` | Delete ordinary actions for bot-only tables after this many ms since the hand's `HAND_SETTLED` marker |
+| `WS_POKER_BOT_SETTLED_RETENTION_MS` | ms | `0` | finite non-negative integer | `0` | Delete `HAND_SETTLED` markers for bot-only tables after this many ms, and only when ordinary actions are already gone |
+| `WS_POKER_HUMAN_ACTION_RETENTION_MS` | ms | `0` | finite non-negative integer | `0` | Same as bot-action but for tables where a human ever played |
+| `WS_POKER_HUMAN_SETTLED_RETENTION_MS` | ms | `0` | finite non-negative integer | `0` | Same as bot-settled but for human-participated tables |
+| `WS_POKER_ACTION_HISTORY_SWEEP_MS` | ms | `300000` (5 min) | `30_000`–`3_600_000` | N/A | Interval between cleanup sweep invocations |
+| `WS_POKER_ACTION_HISTORY_BATCH_SIZE` | count | `20` | `1`–`100` integer | N/A | Maximum candidate hands/settlements per phase per sweep. `lockLimit` is derived as `batchSize * 2` |
+
+Validation rules (fail-fast at WS startup):
+
+- Every retention value must be a finite, non-negative integer.
+- `action = 0` with `settled > 0` is **invalid** — throws at startup.
+- When both `> 0`, `settled` must be `>= action`.
+- `batchSize` must be an integer from 1 through 100.
+- Bot and human retention pairs are validated independently.
+- All defaults are `0`, so cleanup is disabled until explicitly configured.
+
+A sweep-in-progress guard prevents concurrent sweeps when a sweep takes longer than the sweep interval.
+
+### Current WS Preview policy
+
+The following policy is intentionally enabled on Preview in `/opt/arcade-ws-preview/.env.preview`:
+
+```
+WS_POKER_BOT_ACTION_RETENTION_MS=86400000
+WS_POKER_BOT_SETTLED_RETENTION_MS=604800000
+WS_POKER_HUMAN_ACTION_RETENTION_MS=604800000
+WS_POKER_HUMAN_SETTLED_RETENTION_MS=2592000000
+WS_POKER_ACTION_HISTORY_SWEEP_MS=300000
+WS_POKER_ACTION_HISTORY_BATCH_SIZE=50
+```
+
+Human-readable equivalents:
+- Bot ordinary actions: **24 hours**
+- Bot settlements: **7 days**
+- Human-table ordinary actions: **7 days**
+- Human-table settlements: **30 days**
+- Sweep interval: **5 minutes**
+- Batch size: **50** (lock limit: **100**)
+
+This Preview policy is distinct from code defaults. Production defaults remain `0` (disabled) until separately configured. The `/opt/arcade-ws-preview/.env.preview` file is **not touched** by the `ws-preview-deploy.yml` workflow — rsync syncs only `ws-server/`, `shared/`, and `netlify/functions/_shared/` directories, so Preview env configuration persists across deploys.
+
+### Required migrations and deployment order
+
+Two migrations are introduced by this feature:
+
+| Migration | Purpose |
+|-----------|---------|
+| `20260730160000_poker_tables_has_human_participant.sql` | Add `has_human_participant` column + 3-source backfill |
+| `20260730160001_poker_actions_hand_settled_cleanup_idx.sql` | Partial index `(table_id, created_at) WHERE action_type = 'HAND_SETTLED'` |
+
+Deployment order:
+1. Apply both migrations to the target database.
+2. Deploy the matching WS revision.
+3. Configure non-zero retention values for the environment.
+4. Restart the WS service and verify health.
+
+Editing an already-applied migration is not allowed. Use a new timestamped migration file for corrections.
+
+### Observability and verification
+
+**klog events:**
+
+| Event | Severity | Fields |
+|-------|----------|--------|
+| `ws_action_history_cleanup_complete` | INFO | `phase1Deleted`, `phase2Deleted`, `batchSize`, `lockLimit` |
+| `ws_action_history_cleanup_failed` | ERROR | `reason` (error code or message) |
+
+The `complete` event is emitted only when at least one row was deleted. The `failed` event is emitted on any unexpected error.
+
+**Preview verification commands:**
+
+```bash
+# Health check
+curl -s http://127.0.0.1:3001/healthz
+
+# Cleanup logs since the service activation timestamp
+sudo journalctl -u ws-server-preview.service --no-pager | grep "ws_action_history_cleanup_"
+
+# Inspect running environment values
+sudo cat /opt/arcade-ws-preview/.env.preview | grep WS_POKER_ACTION_HISTORY
+```
+
+**SQL verification queries:**
+
+```sql
+-- Count expired bot ordinary actions (actions past bot-action retention
+-- belonging to a completed, settled hand)
+SELECT COUNT(*)
+FROM public.poker_actions pa
+JOIN public.poker_tables t ON t.id = pa.table_id
+WHERE t.has_human_participant = false
+  AND pa.action_type != 'HAND_SETTLED'
+  AND EXISTS (
+    SELECT 1 FROM public.poker_actions hs
+    WHERE hs.table_id = pa.table_id
+      AND hs.hand_id = pa.hand_id
+      AND hs.action_type = 'HAND_SETTLED'
+      AND hs.created_at < now() - interval '24 hours'
+  );
+
+-- Group expired bot settlement markers by table
+SELECT pa.table_id, COUNT(*) AS expired_settlements
+FROM public.poker_actions pa
+JOIN public.poker_tables t ON t.id = pa.table_id
+WHERE t.has_human_participant = false
+  AND pa.action_type = 'HAND_SETTLED'
+  AND pa.created_at < now() - interval '7 days'
+  AND NOT EXISTS (
+    SELECT 1 FROM public.poker_actions oa
+    WHERE oa.table_id = pa.table_id
+      AND oa.hand_id = pa.hand_id
+      AND oa.action_type != 'HAND_SETTLED'
+  )
+GROUP BY pa.table_id
+ORDER BY expired_settlements DESC;
+
+-- Verify has_human_participant for a specific table
+SELECT id, status, lifecycle_kind, has_human_participant, created_at
+FROM public.poker_tables
+WHERE id = '<TABLE_ID>';
+```
+
+A shared stage database may contain a historical backlog. A recently active continuous bot table may still show expired rows while the sweep processes older tables first. Successful repeated bounded-deletion logs plus decreasing global eligible counts demonstrate progress; a single active table not reaching zero immediately does not indicate a failure.
+
+### Safety, disabling, and rollback
+
+**This process permanently deletes historical `poker_actions` rows.**
+
+- Set all four retention values to `0` to disable deletion entirely.
+- Restart the WS service after changing configuration — the values are read once at process start.
+- Disabling cleanup stops future deletion but **cannot restore already deleted rows**.
+- Do not accidentally apply a short human retention — human and bot retention are independently configurable.
+- The `has_human_participant` flag is one-way and not reversible. If a table is incorrectly classified, only the retention values (not the flag) can be adjusted.
+
+### Preview smoke evidence (2026-07-30)
+
+- Deployed SHA: `a9eacc3f6ac37d9dab473e6f12febf417b4f06d1`
+- Local health (`http://127.0.0.1:3001/healthz`) returned `200`; public health passed.
+- Both phases deleted rows against real PostgreSQL on the stage database.
+- Bounded `phase1Deleted` and `phase2Deleted` values were observed in `ws_action_history_cleanup_complete` logs.
+- No `ws_action_history_cleanup_failed` events were observed.
+- Preview was then configured for continuous retention with the policy documented above.
