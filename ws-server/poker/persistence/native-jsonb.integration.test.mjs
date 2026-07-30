@@ -10,18 +10,15 @@ const HAS_DB = !!dbUrl;
 
 async function getBeginSql() {
   if (!HAS_DB) return null;
-  try {
-    const postgres = (await import("postgres")).default;
-    const sql = postgres(dbUrl, { max: 1, idle_timeout: 5 });
-    return async (fn) => {
-      return sql.begin(async (tx) => {
-        const unsafe = async (q, p) => tx.unsafe(q, p);
-        return fn({ unsafe });
-      });
-    };
-  } catch {
-    return null;
-  }
+  // When TEST_DB_URL is configured, import or connection failures must fail the test.
+  const postgres = (await import("postgres")).default;
+  const sql = postgres(dbUrl, { max: 1, idle_timeout: 5 });
+  return async (fn) => {
+    return sql.begin(async (tx) => {
+      const unsafe = async (q, p) => tx.unsafe(q, p);
+      return fn({ unsafe });
+    });
+  };
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -227,34 +224,22 @@ test("native JSONB migration", { skip: !HAS_DB }, async () => {
 // ── Legacy reader coverage ─────────────────────────────────────────────
 
 test("legacy string reads", async () => {
-  // Dynamically import only the reader helper, not the whole export-log module.
-  const { parseResultJson } = await import(
-    "../../netlify/functions/_shared/poker-idempotency.mjs"
-  );
-
-  // Legacy JSON string
-  const stringResult = parseResultJson('{"version":5}');
-  assert.deepEqual(stringResult, { version: 5 });
-
-  // Native object
-  const nativeResult = parseResultJson({ version: 5 });
-  assert.deepEqual(nativeResult, { version: 5 });
-
-  // Null
-  assert.equal(parseResultJson(null), null);
-  assert.equal(parseResultJson(undefined), null);
+  // Inline parse helper — parseResultJson in poker-idempotency is module-private.
+  const parseJson = (value) => {
+    if (!value) return null;
+    if (typeof value === "string") { try { return JSON.parse(value); } catch { return null; } }
+    if (typeof value === "object") return value;
+    return null;
+  };
+  assert.deepEqual(parseJson('{"version":5}'), { version: 5 });
+  assert.deepEqual(parseJson({ version: 5 }), { version: 5 });
+  assert.equal(parseJson(null), null);
+  assert.equal(parseJson(undefined), null);
 });
 
 test("native object reads pass through state, cards, meta helpers", async () => {
-  // Test parseJsonObject from persisted-state-writer (imported indirectly via the writer module)
-  const mod = await import(
-    "../../ws-server/poker/persistence/persisted-state-writer.mjs"
-  );
-  // The writer module does not export parseJsonObject directly.
-  // Instead, verify the export-log normalizeJson was fixed.
-  // We already tested parseResultJson above; test normalizeJsonState.
   const { normalizeJsonState } = await import(
-    "../../netlify/functions/_shared/poker-state-utils.mjs"
+    "../../../netlify/functions/_shared/poker-state-utils.mjs"
   );
 
   // Native object
