@@ -163,6 +163,13 @@
   var autoJoinErrorActive = false;
   var reconnectSeatNo = null;
   var lastKnownCurrentSeatNo = null;
+  var liveModeGeneration = 0;
+  var snapshotRecoveryTimer = null;
+  var snapshotRecoveryAttempts = 0;
+  var snapshotRecoveryTimedOut = false;
+  var SNAPSHOT_RECOVERY_TIMEOUT_MS = 5000;
+  var SNAPSHOT_RECOVERY_MAX_ATTEMPTS = 3;
+  var SNAPSHOT_RECOVERY_TIMEOUT_COPY = 'Snapshot recovery timed out';
   var joinOperation = {
     phase: 'idle',
     requestId: null,
@@ -310,6 +317,9 @@
       tableId: nextTableId || null,
       tableStatus: 'OPEN',
       maxSeats: 6,
+      stateVersion: null,
+      hasAppliedAuthoritativeSnapshot: false,
+      reconnectGate: false,
       seats: [],
       stacks: {},
       potTotal: 0,
@@ -1308,6 +1318,11 @@
     var frameKind = frame && typeof frame.kind === 'string' ? frame.kind : 'stateSnapshot';
     var frameInitial = !!(frame && frame.initial);
     var authoritativeFull = frameKind === 'stateSnapshot' || (frameKind === 'table_state' && frameInitial);
+    // Single source of truth for version tracking: never regress an applied version.
+    var incomingVersion = Number(payload.stateVersion);
+    if (Number.isInteger(incomingVersion) && incomingVersion >= 0){
+      state.stateVersion = Math.max(Number(state.stateVersion) || 0, incomingVersion);
+    }
     var snapshotTableId = typeof payload.tableId === 'string' && payload.tableId ? payload.tableId : null;
     var publicObj = isObject(payload.public) ? payload.public : {};
     var privateObj = isObject(payload.private) ? payload.private : {};
@@ -1440,8 +1455,12 @@
       && state.phase === 'SETTLED';
     syncStickyWinnerReveal(liveSettlementTransition ? Date.now() + WINNER_REVEAL_MS : null);
     state.actionConstraints = normalizeConstraints(constraintsPrimary, legalSource && legalSource.actionConstraints);
-    state.statusText = LIVE_STATUS_COPY.live;
-    if (!autoJoinErrorActive) state.errorText = '';
+    // While a snapshot recovery timeout is pending, snapshots must not overwrite a
+    // newer status/error raised after the timeout; the recovery gate-open handles it.
+    if (!snapshotRecoveryTimedOut){
+      state.statusText = LIVE_STATUS_COPY.live;
+      if (!autoJoinErrorActive) state.errorText = '';
+    }
     if (pendingLeaveNavigation && !hasRenderableCurrentSeat()){
       pendingLeaveRetryAfterReconnect = false;
       pendingLeaveNavigation = false;
@@ -3150,6 +3169,7 @@
   }
 
   function resumePendingJoinOperation(){
+    if (state.reconnectGate) return false;
     if (deriveCurrentSeat()){
       reconcileJoinOperationFromSnapshot();
       return false;
@@ -3190,6 +3210,7 @@
 
   function handleAction(actionType, amount){
     if (!actionType) return Promise.resolve();
+    if (state.reconnectGate) return Promise.resolve();
     var payload = { handId: state.handId || null, action: actionType };
     if (Number.isFinite(amount)) payload.amount = Math.trunc(amount);
     setError('');
@@ -3202,6 +3223,7 @@
   }
 
   function maybeExecuteQueuedPreaction(){
+    if (state.reconnectGate) return;
     if (!queuedPreaction || queuedPreactionInFlight || !isUsersTurn()) return;
     var allowed = getAllowedActions();
     var liveState = {
@@ -3273,6 +3295,7 @@
   }
 
   function autoJoinSeat(){
+    if (state.reconnectGate) return;
     if (!shouldAutoJoin) return;
     if (deriveCurrentSeat()){
       autoJoinAttempted = false;
@@ -3314,6 +3337,7 @@
   }
 
   function rejoinSeatAfterReconnect(){
+    if (state.reconnectGate) return false;
     if (!Number.isInteger(reconnectSeatNo) || reconnectSeatNo < 1) return false;
     if (autoJoinAttempted) return true;
     var preferredSeatNo = reconnectSeatNo;
@@ -3603,7 +3627,55 @@
     markBootReady();
   }
 
+  function stopSnapshotRecoveryTimer(){
+    if (!snapshotRecoveryTimer) return;
+    window.clearTimeout(snapshotRecoveryTimer);
+    snapshotRecoveryTimer = null;
+  }
+
+  function issueSnapshotRecoveryRequest(gen){
+    if (gen !== liveModeGeneration) return;
+    if (!state.reconnectGate) return;
+    if (wsClient && typeof wsClient.requestGameplaySnapshot === 'function'){
+      wsClient.requestGameplaySnapshot();
+    }
+  }
+
+  function scheduleSnapshotRecovery(gen){
+    stopSnapshotRecoveryTimer();
+    snapshotRecoveryTimer = window.setTimeout(function(){
+      snapshotRecoveryTimer = null;
+      if (gen !== liveModeGeneration) return;
+      if (!state.reconnectGate) return;
+      if (snapshotRecoveryAttempts >= SNAPSHOT_RECOVERY_MAX_ATTEMPTS){
+        snapshotRecoveryTimedOut = true;
+        state.statusText = LIVE_STATUS_COPY.error;
+        setError(SNAPSHOT_RECOVERY_TIMEOUT_COPY);
+        renderInfoPanel();
+        renderControls();
+        return;
+      }
+      snapshotRecoveryAttempts += 1;
+      issueSnapshotRecoveryRequest(gen);
+      scheduleSnapshotRecovery(gen);
+    }, SNAPSHOT_RECOVERY_TIMEOUT_MS);
+  }
+
+  // Shared bounded snapshot recovery for both reconnect (after auth_ok) and
+  // server-initiated resync: the first full snapshot request is sent immediately,
+  // the timer only schedules up to SNAPSHOT_RECOVERY_MAX_ATTEMPTS retries.
+  function startSnapshotRecovery(gen){
+    if (gen !== liveModeGeneration) return;
+    if (!state.reconnectGate) return;
+    snapshotRecoveryAttempts = 0;
+    snapshotRecoveryTimedOut = false;
+    issueSnapshotRecoveryRequest(gen);
+    scheduleSnapshotRecovery(gen);
+  }
+
   function stopLiveMode(){
+    liveModeGeneration += 1;
+    stopSnapshotRecoveryTimer();
     stopTurnClock();
     clearWinnerRevealTimer();
     cancelSettlementAnimations();
@@ -3658,10 +3730,29 @@
       render();
       return;
     }
+    // 1. Stop/invalidate the old client first (stopLiveMode increments the
+    //    generation, so any late callback from the previous instance is stale).
+    var preservingState = !!(state && state.mode === 'live'
+      && state.hasAppliedAuthoritativeSnapshot
+      && state.tableId && state.tableId === tableId);
     stopLiveMode();
     startTurnClock();
-    state = createEmptyLiveState(tableId, getUserIdFromToken(token));
-    render();
+    // 2. THEN capture the new generation (old = N, stop => N+1 stale, this => N+2 active).
+    var gen = ++liveModeGeneration;
+    if (preservingState){
+      // Reconnect: keep the last applied authoritative state and raise a recovery gate.
+      state.wsReady = false;
+      state.statusText = LIVE_STATUS_COPY.connecting;
+      state.errorText = '';
+      state.reconnectGate = true;
+      renderInfoPanel();
+      renderControls();
+    } else {
+      // Cold start: a fresh empty model is fine.
+      state = createEmptyLiveState(tableId, getUserIdFromToken(token));
+      state.reconnectGate = false;
+      render();
+    }
     markBootReady();
     wsClient = window.PokerWsClient.create({
       tableId: tableId,
@@ -3669,18 +3760,25 @@
       getAccessToken: function(){ return Promise.resolve(currentAccessToken); },
       klog: klog,
       onStatus: function(status, info){
+        if (gen !== liveModeGeneration) return;
         if (status === 'hello_ack' || status === 'minting_token' || status === 'authenticating'){
           state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.connecting;
           renderInfoPanel();
           renderControls();
         } else if (status === 'auth_ok'){
+          // Socket is authenticated, but the table is NOT ready until a full
+          // authoritative snapshot is applied. Do not open the recovery gate here.
           state.wsReady = true;
           state.statusText = LIVE_STATUS_COPY.live;
           state.errorText = '';
           render();
           if (pendingLeaveRetryAfterReconnect){
-            leaveAndReturnToLobby();
+            if (!state.reconnectGate) leaveAndReturnToLobby();
+            return;
+          }
+          if (state.reconnectGate){
+            startSnapshotRecovery(gen);
             return;
           }
           if (!resumePendingJoinOperation() && !rejoinSeatAfterReconnect()) autoJoinSeat();
@@ -3694,6 +3792,7 @@
           rememberSeatForReconnect();
           state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.connecting;
+          state.reconnectGate = true;
           renderInfoPanel();
           renderControls();
         } else if (status === 'command_result') {
@@ -3701,18 +3800,25 @@
         } else if (status === 'resync'){
           cancelSettlementAnimations();
           suppressSettlementAnimationUntilAuthoritativeSnapshot = true;
+          state.reconnectGate = true;
+          renderInfoPanel();
+          renderControls();
+          startSnapshotRecovery(gen);
         } else if (status === 'failed'){
+          stopSnapshotRecoveryTimer();
           cancelSettlementAnimations();
           state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.error;
           setError(info && info.code ? info.code : 'Live connection failed');
         } else if (status === 'error'){
+          stopSnapshotRecoveryTimer();
           cancelSettlementAnimations();
           state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.error;
           syncClosedTableRedirectFromSignal(info && info.code ? info.code : null);
           setError(info && info.code ? info.code : 'Live table unavailable');
         } else if (status === 'closed'){
+          stopSnapshotRecoveryTimer();
           cancelSettlementAnimations();
           state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.disconnected;
@@ -3721,6 +3827,7 @@
         }
       },
       onSnapshot: function(snapshot){
+        if (gen !== liveModeGeneration) return;
         var payload = snapshot && snapshot.payload ? snapshot.payload : null;
         var frame = {
           kind: snapshot && typeof snapshot.kind === 'string' ? snapshot.kind : 'stateSnapshot',
@@ -3729,6 +3836,11 @@
           payload: payload
         };
         var authoritativeSnapshot = frame.kind === 'stateSnapshot' || (frame.kind === 'table_state' && frame.initial);
+        // Snapshot acceptance contract: current tableId, no version regression.
+        if (payload && payload.tableId && state.tableId && payload.tableId !== state.tableId) return;
+        var incomingVersion = Number(payload && payload.stateVersion) || 0;
+        var appliedVersion = Number(state.stateVersion) || 0;
+        if (incomingVersion > 0 && appliedVersion > 0 && incomingVersion < appliedVersion) return;
         if (authoritativeSnapshot) suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
         if (shouldDeferSnapshotUntilRevealEnds(payload)){
           pendingPostRevealSnapshot = frame;
@@ -3737,7 +3849,34 @@
         }
         var previousVisual = captureVisualSnapshot();
         mergeSnapshot(payload, frame);
-        reconcileJoinOperationFromSnapshot();
+        if (authoritativeSnapshot) state.hasAppliedAuthoritativeSnapshot = true;
+        // Open the reconnect gate only after a full authoritative snapshot is merged.
+        var openedRecoveryGate = false;
+        if (authoritativeSnapshot && state.reconnectGate){
+          state.reconnectGate = false;
+          stopSnapshotRecoveryTimer();
+          openedRecoveryGate = true;
+          if (snapshotRecoveryTimedOut){
+            // A late snapshot arrived after the bounded retries exhausted. Clear the
+            // recovery status/error ONLY if the current error is still the recovery
+            // timeout — a newer unrelated error (failed/error status, rejected async
+            // op) must not be wiped by a stale timeout flag.
+            var clearingRecoveryTimeout = state.errorText === SNAPSHOT_RECOVERY_TIMEOUT_COPY;
+            snapshotRecoveryTimedOut = false;
+            if (clearingRecoveryTimeout){
+              state.statusText = LIVE_STATUS_COPY.live;
+              state.errorText = '';
+            }
+          }
+          if (pendingLeaveRetryAfterReconnect){
+            leaveAndReturnToLobby();
+            return;
+          }
+          if (!resumePendingJoinOperation() && !rejoinSeatAfterReconnect()) autoJoinSeat();
+        }
+        // reconcileJoinOperationFromSnapshot() resets joinOperation.requestId; do not
+        // run it right after the recovery gate already started a deferred join/rejoin.
+        if (!openedRecoveryGate) reconcileJoinOperationFromSnapshot();
         maybeExecuteQueuedPreaction();
         render();
         var nextVisual = captureVisualSnapshot();
@@ -3745,6 +3884,7 @@
         autoJoinSeat();
       },
       onProtocolError: function(info){
+        if (gen !== liveModeGeneration) return;
         state.wsReady = false;
         state.statusText = LIVE_STATUS_COPY.error;
         if (info && info.code === 'missing_access_token'){

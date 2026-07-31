@@ -28,7 +28,7 @@ import {
   matchesNonRetryableTerminalJanitorSuppression,
   runTableJanitor
 } from "./poker/runtime/table-janitor.mjs";
-import { buildStateSnapshotPayload } from "./poker/read-model/state-snapshot.mjs";
+import { buildStateSnapshotPayload, normalizePrivateBranch } from "./poker/read-model/state-snapshot.mjs";
 import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
 import { createStreamLog } from "./poker/runtime/stream-log.mjs";
 import { createPersistedStateWriter } from "./poker/persistence/persisted-state-writer.mjs";
@@ -1136,7 +1136,7 @@ function maybeBroadcastLobbySnapshot({ force = false } = {}) {
   }
 }
 
-function buildTableStatePayload({ tableState, tableSnapshot }) {
+function buildTableStatePayload({ tableState, tableSnapshot, userId }) {
   const payload = {
     tableId: tableState.tableId,
     members: Array.isArray(tableState.members) ? tableState.members : []
@@ -1170,6 +1170,13 @@ function buildTableStatePayload({ tableState, tableSnapshot }) {
   if (tableSnapshot.showdown && typeof tableSnapshot.showdown === "object") payload.showdown = tableSnapshot.showdown;
   if (tableSnapshot.handSettlement && typeof tableSnapshot.handSettlement === "object") payload.handSettlement = tableSnapshot.handSettlement;
 
+  // Identyczny bezpieczny kontrakt jak buildStateSnapshotPayload:
+  // prywatny branch tylko dla siedzącego usera, hole cards przeciwników nie wyciekają.
+  const youSeat = Number.isInteger(tableSnapshot.youSeat) ? tableSnapshot.youSeat : null;
+  if (youSeat !== null && typeof userId === "string" && userId) {
+    payload.private = normalizePrivateBranch(tableSnapshot?.private, { userId, youSeat });
+  }
+
   return payload;
 }
 
@@ -1180,7 +1187,7 @@ function sendTableState(ws, connState, { requestId = null, tableState, tableSnap
     ts: nowTs(),
     roomId: tableState.tableId,
     sessionId: connState.sessionId,
-    payload: buildTableStatePayload({ tableState, tableSnapshot })
+    payload: buildTableStatePayload({ tableState, tableSnapshot, userId: connState.session.userId })
   };
 
   if (requestId) {
