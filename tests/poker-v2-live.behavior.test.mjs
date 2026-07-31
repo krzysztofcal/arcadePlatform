@@ -1644,6 +1644,37 @@ test('poker v2 safely rejoins the same authoritative seat after a socket reconne
   ws.onStatus('auth_ok', { roomId: 'table-1' });
   await harness.flush();
 
+  // auth_ok alone must not open the reconnect gate or trigger rejoin;
+  // the gate opens only after a fresh authoritative snapshot is merged.
+  assert.equal(harness.joinPayloads.length, 0);
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 41,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'bot-1', seat: 1, displayName: 'Bot 1', isBot: true },
+          { userId: 'user-1', seat: 4, displayName: 'Hero' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-after-reconnect', status: 'TURN', dealerSeatNo: 1 },
+        turn: { userId: 'bot-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 12, sidePots: [] },
+        legalActions: { seat: 4, actions: [] },
+        stacks: { 'bot-1': 100, 'user-1': 100 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 4 }
+    }
+  });
+  await harness.flush();
+
   assert.equal(harness.joinPayloads.length, 1);
   assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({
     tableId: 'table-1',
@@ -1694,7 +1725,37 @@ test('poker v2 retries the same reconnect seat after a transient join failure', 
   ws.onStatus('reconnecting', { attempt: 1 });
   ws.onStatus('auth_ok', { roomId: 'table-1' });
   await harness.flush();
-  assert.equal(harness.joinPayloads.length, 1);
+  // auth_ok alone must not open the reconnect gate or trigger a reconnect rejoin.
+  assert.equal(harness.joinPayloads.length, 0);
+
+  // Fresh authoritative snapshot opens the reconnect gate and triggers the first rejoin.
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 41,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'bot-1', seat: 1, displayName: 'Bot 1', isBot: true },
+          { userId: 'user-1', seat: 4, displayName: 'Hero' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-reconnect-retry-2', status: 'TURN', dealerSeatNo: 1 },
+        turn: { userId: 'bot-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 12, sidePots: [] },
+        legalActions: { seat: 4, actions: [] },
+        stacks: { 'bot-1': 100, 'user-1': 100 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 4 }
+    }
+  });
+  await harness.flush();
+  assert.equal(harness.joinPayloads.length, 1, 'reconnect rejoin attempt after snapshot opens gate');
 
   ws.onStatus('auth_ok', { roomId: 'table-1' });
   await harness.flush();
@@ -2751,6 +2812,30 @@ test('poker v2 retries leave once after stale session reconnect', async () => {
   await harness.flush();
   await harness.flush();
 
+  assert.equal(harness.leavePayloads.length, 1, 'first leave attempt fails with STALE_SESSION');
+
+  // STALE_SESSION triggers a live-mode restart; fetch the CURRENT generation's
+  // client and deliver a fresh authoritative snapshot to open the recovery gate.
+  const currentWs = harness.getCreateOptions();
+  currentWs.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        seats: [{ userId: 'user-1', seatNo: 1, status: 'ACTIVE' }],
+        hand: { handId: 'hand-leave-retry', status: 'TURN', dealerSeatNo: 1 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 4, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CALL'] }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
   assert.equal(harness.leavePayloads.length, 2);
   assert.equal(harness.windowLocation.href, '/poker/');
 });
@@ -2841,13 +2926,14 @@ test('poker v2 leaves cleanly before the first live snapshot even when the remov
   harness.fireDomContentLoaded();
   await harness.flush();
 
-  const ws = harness.getCreateOptions();
   confirmLeave(harness);
   await harness.flush();
 
   assert.equal(harness.leavePayloads.length, 1);
   assert.equal(harness.windowLocation.href, '', 'leave should stay pending until the client learns the seat is gone');
 
+  // Fetch the CURRENT generation's client options after the leave-retry restart.
+  const ws = harness.getCreateOptions();
   ws.onSnapshot({
     kind: 'stateSnapshot',
     payload: {

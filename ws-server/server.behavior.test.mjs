@@ -2637,6 +2637,103 @@ test("resync message requires auth", async () => {
   }
 });
 
+test("table_state_sub without view delivers own private.holeCards and keeps patch subscription", async () => {
+  const secret = "private-sub-secret";
+  const tableId = "table_private_subscribe";
+  const hero = "private_hero";
+  const villain = "private_villain";
+  const { dir, filePath } = await writePersistedFile({
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+        seatRows: [
+          { user_id: hero, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 },
+          { user_id: villain, seat_no: 2, status: "ACTIVE", is_bot: false, stack: 100 }
+        ],
+        stateRow: {
+          version: 11,
+          state: {
+            tableId,
+            roomId: tableId,
+            handId: "hand_private_subscribe",
+            phase: "PREFLOP",
+            dealerSeatNo: 1,
+            seats: [
+              { userId: hero, seatNo: 1, status: "ACTIVE" },
+              { userId: villain, seatNo: 2, status: "ACTIVE" }
+            ],
+            stacks: { [hero]: 100, [villain]: 100 },
+            community: [],
+            communityDealt: 0,
+            pot: 0,
+            potTotal: 0,
+            turnUserId: hero,
+            turnStartedAt: Date.now() - 500,
+            turnDeadlineAt: Date.now() + 25_000,
+            holeCardsByUserId: { [hero]: ["AS", "KD"], [villain]: ["2C", "2D"] }
+          }
+        }
+      }
+    }
+  });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_TIMEOUT_SWEEP_MS: "60000",
+      WS_ZOMBIE_TABLE_SWEEP_MS: "60000",
+      WS_OPEN_TABLE_JANITOR_SWEEP_MS: "60000"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const heroWs = await connectClient(port);
+    await hello(heroWs);
+    await auth(heroWs, makeHs256Jwt({ secret, sub: hero }), "auth-private-sub-hero");
+
+    // Plain table_state_sub (no view) — must subscribe AND include the private branch.
+    sendFrame(heroWs, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "sub-private-hero",
+      ts: "2026-02-28T03:00:01Z",
+      payload: { tableId }
+    });
+    const tableState = await nextMessageOfType(heroWs, "table_state");
+    assert.equal(typeof tableState.payload.private, "object");
+    assert.deepEqual(tableState.payload.private.holeCards, ["AS", "KD"]);
+    assert.equal(tableState.payload.private.userId, hero);
+    assert.equal(tableState.payload.private.seat, 1);
+    // Opponent cards must not leak into the public payload or private branch.
+    assert.equal(JSON.stringify(tableState.payload).includes('"2C"'), false);
+    assert.equal(JSON.stringify(tableState.payload).includes('"2D"'), false);
+
+    // Subscription must still deliver subsequent state updates after an accepted action.
+    const baseline = tableState.payload;
+    const stateUpdatePromise = nextStateUpdate(heroWs, { baseline, timeoutMs: 5000 });
+    sendFrame(heroWs, {
+      version: "1.0",
+      type: "act",
+      requestId: "act-private-sub-hero",
+      ts: "2026-02-28T03:00:02Z",
+      payload: { tableId, handId: "hand_private_subscribe", action: "fold" }
+    });
+    const actResult = await nextCommandResultForRequest(heroWs, "act-private-sub-hero");
+    assert.equal(actResult.payload.status, "accepted");
+    const update = await stateUpdatePromise;
+    assert.equal(Number(update.payload.stateVersion) > Number(baseline.stateVersion), true);
+
+    heroWs.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+
 test("table_state_sub snapshot view requires auth and does not leak stateSnapshot", async () => {
   const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: "test-secret" } });
 

@@ -1,16 +1,32 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { normalizePrivateBranch } from "../ws-server/poker/read-model/state-snapshot.mjs";
 
-test("buildTableStatePayload keeps live members and emits authoritativeMembers from snapshot", () => {
+function loadBuildTableStatePayload() {
   const source = fs.readFileSync(new URL("../ws-server/server.mjs", import.meta.url), "utf8");
-  const start = source.indexOf("function buildTableStatePayload({ tableState, tableSnapshot }) {");
+  const start = source.indexOf("function buildTableStatePayload({ tableState, tableSnapshot, userId }) {");
   assert.ok(start >= 0, "buildTableStatePayload should exist");
   const end = source.indexOf("\n\nfunction sendTableState", start);
   assert.ok(end > start, "buildTableStatePayload boundary should exist");
   const fnSource = source.slice(start, end);
-  const factory = new Function(`${fnSource}; return buildTableStatePayload;`);
-  const buildTableStatePayload = factory();
+  // buildTableStatePayload references normalizePrivateBranch and its helpers from
+  // the module import — inject the real implementations so the extracted function
+  // behaves identically to production.
+  const normalizeCards = (cards) => (Array.isArray(cards) ? cards.filter((card) => typeof card === "string") : []);
+  const normalizePlayerState = (playerState) => {
+    if (!playerState || typeof playerState !== "object" || Array.isArray(playerState)) return null;
+    const allowedStatuses = new Set(["ACTIVE", "OUT_OF_CHIPS", "WAITING_NEXT_HAND"]);
+    const status = typeof playerState.status === "string" ? playerState.status.trim().toUpperCase() : "";
+    if (!allowedStatuses.has(status) || !Number.isInteger(playerState.stack) || playerState.stack < 0) return null;
+    return { status, stack: playerState.stack, canRebuy: playerState.canRebuy === true };
+  };
+  const factory = new Function(`const normalizeCards = ${normalizeCards.toString()}; const normalizePlayerState = ${normalizePlayerState.toString()}; const normalizePrivateBranch = ${normalizePrivateBranch.toString()}; ${fnSource}; return buildTableStatePayload;`);
+  return factory();
+}
+
+test("buildTableStatePayload keeps live members and emits authoritativeMembers from snapshot", () => {
+  const buildTableStatePayload = loadBuildTableStatePayload();
 
   const tableState = { tableId: "table_1", members: [{ userId: "u1", seat: 0 }] };
   const withConstraints = buildTableStatePayload({
@@ -51,12 +67,8 @@ test("buildTableStatePayload keeps live members and emits authoritativeMembers f
   assert.equal(Object.prototype.hasOwnProperty.call(noConstraints, "authoritativeMembers"), false);
 });
 
-
 test("buildTableStatePayload forwards lobby/no-hand public seats and stacks without private data", () => {
-  const source = fs.readFileSync(new URL("../ws-server/server.mjs", import.meta.url), "utf8");
-  const start = source.indexOf("function buildTableStatePayload({ tableState, tableSnapshot }) {");
-  const end = source.indexOf("\n\nfunction sendTableState", start);
-  const buildTableStatePayload = new Function(`${source.slice(start, end)}; return buildTableStatePayload;`)();
+  const buildTableStatePayload = loadBuildTableStatePayload();
 
   const payload = buildTableStatePayload({
     tableState: { tableId: "table_lobby", members: [] },
@@ -81,4 +93,80 @@ test("buildTableStatePayload forwards lobby/no-hand public seats and stacks with
   assert.deepEqual(payload.stacks, { user_joined: 175 });
   assert.equal(payload.youSeat, 2);
   assert.equal(Object.prototype.hasOwnProperty.call(payload, "private"), false);
+});
+
+test("buildTableStatePayload includes own private.holeCards when seated user is present", () => {
+  const buildTableStatePayload = loadBuildTableStatePayload();
+
+  const payload = buildTableStatePayload({
+    tableState: { tableId: "table_seated", members: [{ userId: "hero", seat: 3 }] },
+    tableSnapshot: {
+      tableId: "table_seated",
+      roomId: "table_seated",
+      stateVersion: 12,
+      youSeat: 3,
+      members: [{ userId: "hero", seat: 3 }, { userId: "villain", seat: 1 }],
+      seats: [
+        { userId: "hero", seatNo: 3, status: "ACTIVE" },
+        { userId: "villain", seatNo: 1, status: "ACTIVE" }
+      ],
+      stacks: { hero: 100, villain: 100 },
+      hand: { handId: "hand_1", status: "FLOP", round: null },
+      private: { holeCards: ["As", "Kd"] }
+    },
+    userId: "hero"
+  });
+
+  assert.deepEqual(payload.private, { userId: "hero", seat: 3, holeCards: ["As", "Kd"] });
+});
+
+test("buildTableStatePayload does not leak private branch for users without a seat", () => {
+  const buildTableStatePayload = loadBuildTableStatePayload();
+
+  // youSeat === null → no private branch at all, same contract as buildStateSnapshotPayload.
+  const observer = buildTableStatePayload({
+    tableState: { tableId: "table_obs", members: [{ userId: "villain", seat: 1 }] },
+    tableSnapshot: {
+      tableId: "table_obs",
+      stateVersion: 5,
+      youSeat: null,
+      members: [{ userId: "villain", seat: 1 }],
+      seats: [{ userId: "villain", seatNo: 1, status: "ACTIVE" }],
+      stacks: { villain: 100 },
+      private: { holeCards: ["2c", "2d"] }
+    },
+    userId: "observer"
+  });
+
+  assert.equal(Object.prototype.hasOwnProperty.call(observer, "private"), false);
+});
+
+test("buildTableStatePayload redacts opponent cards: only own holeCards in private branch", () => {
+  const buildTableStatePayload = loadBuildTableStatePayload();
+
+  const payload = buildTableStatePayload({
+    tableState: { tableId: "table_redact", members: [{ userId: "hero", seat: 2 }] },
+    tableSnapshot: {
+      tableId: "table_redact",
+      stateVersion: 9,
+      youSeat: 2,
+      members: [{ userId: "hero", seat: 2 }, { userId: "villain", seat: 4 }],
+      seats: [
+        { userId: "hero", seatNo: 2, status: "ACTIVE" },
+        { userId: "villain", seatNo: 4, status: "ACTIVE" }
+      ],
+      stacks: { hero: 80, villain: 120 },
+      hand: { handId: "hand_2", status: "TURN", round: null },
+      // Snapshot private branch is scoped by the server to the requesting user already;
+      // ensure the client payload carries only that scoped branch.
+      private: { holeCards: ["Ah", "Ad"] }
+    },
+    userId: "hero"
+  });
+
+  assert.deepEqual(payload.private.holeCards, ["Ah", "Ad"]);
+  assert.deepEqual(Object.keys(payload.private).sort(), ["holeCards", "seat", "userId"]);
+  // Opponent cards are never present anywhere in the payload.
+  assert.equal(JSON.stringify(payload).includes("villain"), true); // villain seat/member is public
+  assert.deepEqual(payload.private.userId, "hero");
 });

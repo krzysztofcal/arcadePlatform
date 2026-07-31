@@ -157,7 +157,7 @@ function normalizePlayerState(playerState) {
   };
 }
 
-function normalizePrivateBranch(privateBranch, { userId, youSeat }) {
+export function normalizePrivateBranch(privateBranch, { userId, youSeat }) {
   const base = { userId, seat: youSeat };
   if (!privateBranch || typeof privateBranch !== "object" || Array.isArray(privateBranch)) {
     return base;
