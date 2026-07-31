@@ -472,7 +472,7 @@ const executePostLeaveBotAutoplayLoop = async ({
           botRequestId,
           fromState.phase || null,
           persistedState.phase || null,
-          JSON.stringify({ actor: "BOT", botUserId: botTurnUserId, policyVersion: "leave-v1", reason: "AUTO_TURN" }),
+          { actor: "BOT", botUserId: botTurnUserId, policyVersion: "leave-v1", reason: "AUTO_TURN" },
         ]
       );
       return {
@@ -775,7 +775,7 @@ export async function executePokerLeave({
                 requestId,
                 currentState.phase || null,
                 leaveState.phase || null,
-                JSON.stringify({ source: "poker-leave" }),
+                { source: "poker-leave" },
               ]
             );
           } else {
@@ -796,7 +796,7 @@ export async function executePokerLeave({
                 null,
                 currentState.phase || null,
                 leaveState.phase || null,
-                JSON.stringify({ source: "poker-leave" }),
+                { source: "poker-leave" },
               ]
             );
           }

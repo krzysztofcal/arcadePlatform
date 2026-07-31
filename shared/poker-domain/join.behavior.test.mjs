@@ -59,7 +59,7 @@ function withLockedState(args, { validateStateForStorage = () => true } = {}) {
       return { ok: true, version: row.version, state: row.state };
     },
     updateStateLocked: async (tx, { tableId, nextState }) => {
-      const rows = await tx.unsafe("update public.poker_state set state = $2::jsonb where table_id = $1;", [tableId, JSON.stringify(nextState)]);
+      const rows = await tx.unsafe("update public.poker_state set state = $2::jsonb where table_id = $1;", [tableId, nextState]);
       if (!Array.isArray(rows) || rows.length === 0) return { ok: false, reason: "not_found" };
       const nextVersion = Number(rows?.[0]?.version);
       if (!Number.isInteger(nextVersion) || nextVersion <= 0) return { ok: false, reason: "invalid" };
@@ -197,7 +197,7 @@ test("fresh funded join preserves existing authoritative stacks when seat projec
         }
         if (sql.includes("select version, state from public.poker_state")) return [stateRow];
         if (sql.includes("update public.poker_state set state")) {
-          stateRow.state = JSON.parse(params[1]);
+          stateRow.state = params[1];
           stateRow.version += 1;
           return [{ version: stateRow.version }];
         }
@@ -294,7 +294,7 @@ test("allows second human join when legacy persisted private cards leaked into s
         }
         if (sql.includes("select version, state from public.poker_state")) return [stateRow];
         if (sql.includes("update public.poker_state set state")) {
-          stateRow.state = JSON.parse(params[1]);
+          stateRow.state = params[1];
           stateRow.version += 1;
           return [{ version: stateRow.version }];
         }
@@ -443,7 +443,7 @@ test("rejoin does not zero stale active seat rows while projecting them out of t
         }
         if (sql.includes("select version, state from public.poker_state")) return [store.stateRow];
         if (sql.includes("update public.poker_state set state")) {
-          store.stateRow.state = JSON.parse(params[1]);
+          store.stateRow.state = params[1];
           store.stateRow.version += 1;
           return [{ version: store.stateRow.version }];
         }
@@ -529,7 +529,7 @@ test("new join replaces stale state-only seat occupants that conflict with the i
         }
         if (sql.includes("select version, state from public.poker_state")) return [store.stateRow];
         if (sql.includes("update public.poker_state set state")) {
-          store.stateRow.state = JSON.parse(params[1]);
+          store.stateRow.state = params[1];
           store.stateRow.version += 1;
           return [{ version: store.stateRow.version }];
         }
@@ -700,7 +700,7 @@ test("authoritative auto-seat respects preferred seat and initializes stack from
             }
           }];
         }
-        if (sql.includes("update public.poker_state set state")) { writes.push(JSON.parse(params[1])); return [{ version: 2 }]; }
+        if (sql.includes("update public.poker_state set state")) { writes.push(params[1]); return [{ version: 2 }]; }
         return [];
       }
     }),
@@ -1056,7 +1056,7 @@ test("first human authoritative join validates the same randomized bot target th
         }
         if (sql.includes("select version, state from public.poker_state")) return [store.stateRow];
         if (sql.includes("update public.poker_state set state")) {
-          store.stateRow.state = JSON.parse(params[1]);
+          store.stateRow.state = params[1];
           store.stateRow.version += 1;
           return [{ version: store.stateRow.version }];
         }
@@ -1151,7 +1151,7 @@ test("same-request authoritative join replay becomes rejoin without duplicate se
         }
         if (sql.includes("select version, state from public.poker_state")) return [state.stateRow];
         if (sql.includes("update public.poker_state set state")) {
-          state.stateRow.state = JSON.parse(params[1]);
+          state.stateRow.state = params[1];
           state.stateRow.version += 1;
           return [{ version: state.stateRow.version }];
         }
@@ -1239,7 +1239,7 @@ test("fresh authoritative join starting from version 0 returns the persisted pos
         }
         if (sql.includes("select version, state from public.poker_state")) return [store.stateRow];
         if (sql.includes("update public.poker_state set state")) {
-          store.stateRow.state = JSON.parse(params[1]);
+          store.stateRow.state = params[1];
           store.stateRow.version += 1;
           store.updateVersions.push(store.stateRow.version);
           return [{ version: store.stateRow.version }];

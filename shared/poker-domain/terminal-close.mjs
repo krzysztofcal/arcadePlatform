@@ -657,7 +657,7 @@ export async function executeTerminalPokerCloseInTx({
 
   const stateUpdateRows = await tx.unsafe(
     "update public.poker_state set version = version + 1, state = $3::jsonb, updated_at = now() where table_id = $1 and version = $2 returning version;",
-    [tableId, stateVersion, JSON.stringify(toClosedInertState(state))]
+    [tableId, stateVersion, toClosedInertState(state)]
   );
   if (Number(stateUpdateRows?.[0]?.version) !== toStateVersion) {
     const error = new Error("terminal_state_conflict");

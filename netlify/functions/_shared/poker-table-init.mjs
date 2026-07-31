@@ -47,7 +47,7 @@ returning id;
   };
   await tx.unsafe(
     "insert into public.poker_state (table_id, version, state) values ($1, 0, $2::jsonb);",
-    [tableId, JSON.stringify(state)]
+    [tableId, state]
   );
 
   const escrowSystemKey = `POKER_TABLE:${tableId}`;

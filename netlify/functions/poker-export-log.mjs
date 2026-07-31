@@ -14,7 +14,15 @@ const parseHandId = (event) => {
 };
 
 const normalizeJson = (value) => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (!value) return null;
+  // Legacy double-serialized JSON string — parse once.
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return (parsed && typeof parsed === "object" && !Array.isArray(parsed)) ? parsed : null;
+    } catch { return null; }
+  }
+  if (typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 };
 

@@ -522,7 +522,7 @@ export async function executeBotClaimsRecovery({
        set version = version + 1, state = $3::jsonb, updated_at = now()
        where table_id = $1 and version = $2
        returning version;`,
-      [tableId, evaluated.stateVersion, JSON.stringify(correctedState)],
+      [tableId, evaluated.stateVersion, correctedState],
     );
     if (Number(updatedRows?.[0]?.version) !== correctedVersion) throw conflict("state_version_changed");
 

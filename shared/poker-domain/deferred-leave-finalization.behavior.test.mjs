@@ -42,7 +42,7 @@ function createFixture({ withActiveHuman, initialVersion = 7, managedContinuous 
       if (sql.includes("select user_id, seat_no, status, is_bot, stack from public.poker_seats")) return seats;
       if (sql.includes("update public.poker_state set version = version + 1")) {
         assert.equal(params[1], version);
-        state = JSON.parse(params[2]);
+        state = params[2];
         version += 1;
         return [{ version }];
       }

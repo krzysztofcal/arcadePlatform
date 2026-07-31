@@ -120,7 +120,7 @@ async function createManagedTable(tx, { profile, botConfig, klog }) {
   });
   const updatedRows = await tx.unsafe(
     "update public.poker_state set state = $2::jsonb, updated_at = now() where table_id = $1 and version = 0 returning table_id;",
-    [created.tableId, JSON.stringify(projectedState)]
+    [created.tableId, projectedState]
   );
   if (updatedRows?.length !== 1) throw new Error("managed_bot_state_projection_failed");
   return { tableId: created.tableId, rotationDueAt };

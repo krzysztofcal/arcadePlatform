@@ -110,7 +110,7 @@ async function finalizeDurableActionRequest(tx, { tableId, request }) {
     `update public.poker_requests set result_json = $6::jsonb
      where table_id = $1 and kind = $2 and request_id = $3 and user_id = $4 and payload_hash = $5
      returning request_id;`,
-    [tableId, DURABLE_ACTION_KIND, request.requestId, request.userId, request.payloadHash, JSON.stringify(request.result)]
+    [tableId, DURABLE_ACTION_KIND, request.requestId, request.userId, request.payloadHash, request.result]
   );
   if (!Array.isArray(rows) || rows.length !== 1 || rows[0]?.request_id !== request.requestId) {
     const error = new Error("durable_action_finalize_conflict");
@@ -370,7 +370,7 @@ async function maybeWriteSettlementAudit({ tx, tableId, stateVersion, state, klo
       `audit:settlement:${tableId}:${auditMeta.handId}`,
       null,
       "SETTLED",
-      JSON.stringify(auditMeta)
+      auditMeta
     ]
   );
   if (!insertedRows?.[0]?.id) {
@@ -410,7 +410,7 @@ async function maybeWriteAcceptedActionAudit({ tx, tableId, stateVersion, state,
       audit.requestId,
       audit.phaseFrom,
       audit.phaseTo,
-      JSON.stringify(audit.meta)
+      audit.meta
     ]
   );
   if (!insertedRows?.[0]?.id) {
@@ -439,7 +439,7 @@ async function maybeWriteHoleCards({ tx, tableId, state, acknowledgement = null,
     return { ok: true, skipped: true, acknowledged: true };
   }
   const placeholders = rows.map((_, index) => `($${index * 4 + 1}, $${index * 4 + 2}, $${index * 4 + 3}, $${index * 4 + 4}::jsonb)`).join(", ");
-  const params = rows.flatMap((entry) => [tableId, handId, entry.userId, JSON.stringify(entry.cards)]);
+  const params = rows.flatMap((entry) => [tableId, handId, entry.userId, entry.cards]);
   await tx.unsafe(
     `insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ${placeholders} on conflict (table_id, hand_id, user_id) do update set cards = excluded.cards;`,
     params
@@ -766,7 +766,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     const result = await beginSql(async (tx) => {
       const persistedState = sanitizePersistedState(nextState);
       const holeCardState = normalizeJsonState(privateStateForHoleCards) || {};
-      const payload = JSON.stringify(persistedState);
+      const payload = persistedState;
       if (durableActionPlan.supplied) {
         const reservation = await reserveDurableActionRequest(tx, { tableId, request: durableActionPlan.request });
         if (reservation.outcome !== "reserved") {

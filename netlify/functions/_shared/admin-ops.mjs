@@ -364,7 +364,7 @@ values ($1, $2, $3, $4, $5, $6, $7::jsonb);
       requestId,
       classification?.details?.phase || null,
       result?.closed === true ? "HAND_DONE" : classification?.details?.phase || null,
-      JSON.stringify({
+      {
         source: "admin_page",
         adminUserId,
         targetUserId,
@@ -375,7 +375,7 @@ values ($1, $2, $3, $4, $5, $6, $7::jsonb);
         idempotencyKey: requestId,
         classification,
         result,
-      }),
+      },
     ],
   );
 }

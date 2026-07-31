@@ -72,6 +72,6 @@ export const storePokerRequestResult = async (tx, { tableId, userId, requestId, 
   if (!requestId) return;
   await tx.unsafe(
     "update public.poker_requests set result_json = $5::jsonb where table_id = $1 and user_id = $2 and request_id = $3 and kind = $4;",
-    [tableId, userId, requestId, kind, JSON.stringify(result)]
+    [tableId, userId, requestId, kind, result]
   );
 };
