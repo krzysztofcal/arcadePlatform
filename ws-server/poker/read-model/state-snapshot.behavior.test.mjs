@@ -528,3 +528,30 @@ test("buildStateSnapshotPayload keeps minBetAmount for a later BET turn in the s
   assert.ok(payload.public.legalActions.actions.includes("BET"));
   assert.equal(payload.public.actionConstraints.minBetAmount, 2, "live BET turn must keep minBetAmount from legalInfo");
 });
+
+test("buildStateSnapshotPayload exposes projected RAISE minimum for a seated viewer who is not acting", () => {
+  const tableManager = createTableManager({ maxSeats: 6 });
+  const ws = {};
+  const tableId = "table_proj_raise";
+
+  for (const [index, userId] of ["user_a", "user_b", "user_c"].entries()) {
+    assert.equal(tableManager.join({ ws, userId, tableId, requestId: "join-" + index }).ok, true);
+  }
+  assert.equal(tableManager.bootstrapHand(tableId).ok, true);
+  const handId = tableManager.tableSnapshot(tableId, "user_a").hand.handId;
+  assert.equal(typeof handId, "string");
+
+  // Advance preflop until another player (user_c) is acting while user_a is a
+  // seated viewer who already faces a call.
+  assert.equal(tableManager.applyAction({ tableId, handId, userId: "user_a", requestId: "a-call", action: "CALL" }).accepted, true);
+  assert.equal(tableManager.applyAction({ tableId, handId, userId: "user_b", requestId: "b-raise", action: "RAISE", amount: 4 }).accepted, true);
+
+  const snapshot = tableManager.tableSnapshot(tableId, "user_a");
+  const payload = buildStateSnapshotPayload({ tableSnapshot: snapshot, userId: "user_a" });
+
+  assert.equal(payload.public.turn.userId, "user_c", "another player must be acting");
+  assert.deepEqual(payload.public.legalActions.actions, ["FOLD"], "legalActions must keep current-turn semantics");
+  assert.equal(payload.public.actionConstraints.toCall, 2, "viewer toCall must be the real viewer call amount");
+  assert.equal(payload.public.actionConstraints.minRaiseTo, 6, "projected raise minimum must be the real minimum raise-to, not null or 1");
+  assert.equal(payload.public.actionConstraints.maxRaiseTo, 100, "projected raise maximum must be the real all-in amount");
+});

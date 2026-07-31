@@ -1,4 +1,4 @@
-import { computeSharedLegalActions } from "../shared/poker-primitives.mjs";
+import { computeProjectedLegalActions, computeSharedLegalActions } from "../shared/poker-primitives.mjs";
 import { normalizePublicPokerIdentity } from "./public-poker-identity.mjs";
 
 function asObject(value) {
@@ -361,9 +361,17 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
   const turnSeat = Number.isInteger(seatByUserId[turnUserId]) ? seatByUserId[turnUserId] : null;
   const turnIdentity = resolveTurnIdentity({ statePublic, turnUserId, turnSeat });
   const turnTimer = resolveTurnTimer({ statePublic, turnUserId: turnIdentity.userId });
+  const isTurnPlayer = Number.isInteger(effectiveYouSeat) && turnUserId === userId;
   const legalInfo = Number.isInteger(effectiveYouSeat)
     ? computeSharedLegalActions({ statePublic, userId })
     : { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  // For a seated viewer who is not acting, expose the projected pre-action
+  // amount constraints (real toCall/minRaiseTo/minBetAmount from the same
+  // authoritative rules) instead of nulls, so the client never falls back to
+  // an invented 1 CH minimum for a queued BET/RAISE.
+  const constraintsInfo = Number.isInteger(effectiveYouSeat) && !isTurnPlayer
+    ? computeProjectedLegalActions({ statePublic, userId })
+    : legalInfo;
 
   const snapshot = {
     roomId: typeof statePublic.roomId === "string" ? statePublic.roomId : roomId || tableId,
@@ -394,11 +402,11 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
       actions: Number.isInteger(effectiveYouSeat) ? normalizeActions(legalInfo.actions) : []
     },
     actionConstraints: {
-      toCall: Number.isFinite(legalInfo.toCall) ? legalInfo.toCall : null,
-      minRaiseTo: Number.isFinite(legalInfo.minRaiseTo) ? legalInfo.minRaiseTo : null,
-      maxRaiseTo: Number.isFinite(legalInfo.maxRaiseTo) ? legalInfo.maxRaiseTo : null,
-      maxBetAmount: Number.isFinite(legalInfo.maxBetAmount) ? legalInfo.maxBetAmount : null,
-      minBetAmount: Number.isFinite(legalInfo.minBetAmount) ? legalInfo.minBetAmount : null
+      toCall: Number.isFinite(constraintsInfo.toCall) ? constraintsInfo.toCall : null,
+      minRaiseTo: Number.isFinite(constraintsInfo.minRaiseTo) ? constraintsInfo.minRaiseTo : null,
+      maxRaiseTo: Number.isFinite(constraintsInfo.maxRaiseTo) ? constraintsInfo.maxRaiseTo : null,
+      maxBetAmount: Number.isFinite(constraintsInfo.maxBetAmount) ? constraintsInfo.maxBetAmount : null,
+      minBetAmount: Number.isFinite(constraintsInfo.minBetAmount) ? constraintsInfo.minBetAmount : null
     },
     betThisRoundByUserId: normalizeNumericUserMap(statePublic.betThisRoundByUserId),
     committedByUserId: normalizeNumericUserMap(statePublic.committedByUserId),

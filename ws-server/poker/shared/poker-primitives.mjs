@@ -179,26 +179,7 @@ function isSeatedPlayer(state, userId) {
   return !!(state.stacks && typeof state.stacks === "object" && Object.prototype.hasOwnProperty.call(state.stacks, userId));
 }
 
-function computeSharedLegalActions({ statePublic, userId } = {}) {
-  const state = statePublic || {};
-  if (!state || typeof state !== "object" || Array.isArray(state)) {
-    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
-  }
-  const phase = typeof state.phase === "string" ? state.phase : "";
-  if (!ACTION_PHASES.has(phase)) {
-    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
-  }
-  if (!userId || typeof userId !== "string") {
-    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
-  }
-  if (!isSeatedPlayer(state, userId) || !isActivePlayer(state, userId)) {
-    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
-  }
-  const turnUserId = typeof state.turnUserId === "string" ? state.turnUserId : "";
-  if (!turnUserId) {
-    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
-  }
-
+function computeLegalActionsForSeatedPlayer(state, userId) {
   const stack = toSafeInt(state.stacks?.[userId], 0);
   const currentUserBet = toSafeInt(state.betThisRoundByUserId?.[userId], 0);
   const currentBet = deriveCurrentBet(state);
@@ -206,9 +187,6 @@ function computeSharedLegalActions({ statePublic, userId } = {}) {
   const toCall = Math.max(0, currentBet - currentUserBet);
   if (stack <= 0) {
     return { actions: [], toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
-  }
-  if (turnUserId !== userId) {
-    return { actions: ["FOLD"], toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
   }
 
   if (toCall > 0) {
@@ -234,9 +212,58 @@ function computeSharedLegalActions({ statePublic, userId } = {}) {
   return { actions, toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: stack, minBetAmount };
 }
 
+function computeSharedLegalActions({ statePublic, userId } = {}) {
+  const state = statePublic || {};
+  if (!state || typeof state !== "object" || Array.isArray(state)) {
+    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  const phase = typeof state.phase === "string" ? state.phase : "";
+  if (!ACTION_PHASES.has(phase)) {
+    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  if (!userId || typeof userId !== "string") {
+    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  if (!isSeatedPlayer(state, userId) || !isActivePlayer(state, userId)) {
+    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  const turnUserId = typeof state.turnUserId === "string" ? state.turnUserId : "";
+  if (!turnUserId) {
+    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  if (turnUserId !== userId) {
+    const toCall = Math.max(0, deriveCurrentBet(state) - toSafeInt(state.betThisRoundByUserId?.[userId], 0));
+    return { actions: ["FOLD"], toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  return computeLegalActionsForSeatedPlayer(state, userId);
+}
+
+// Projected amount constraints for a seated viewer who is not currently acting:
+// the legal actions the viewer would face if the action came to them at the
+// current betting-round state. Uses the same authoritative NLHE rules as the
+// live computation so the client never has to derive minimums itself.
+function computeProjectedLegalActions({ statePublic, userId } = {}) {
+  const state = statePublic || {};
+  if (!state || typeof state !== "object" || Array.isArray(state)) {
+    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  const phase = typeof state.phase === "string" ? state.phase : "";
+  if (!ACTION_PHASES.has(phase)) {
+    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  if (!userId || typeof userId !== "string") {
+    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  if (!isSeatedPlayer(state, userId) || !isActivePlayer(state, userId)) {
+    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  return computeLegalActionsForSeatedPlayer(state, userId);
+}
+
 export {
   asCardCode,
   computeSharedLegalActions,
+  computeProjectedLegalActions,
   createDeck,
   dealHoleCards,
   deriveBigBlind,
