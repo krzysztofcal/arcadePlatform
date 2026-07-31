@@ -1170,7 +1170,7 @@ test('poker v2 keeps action buttons stable while exposing single-select preactio
   assert.equal(harness.elements.pokerV2AmountPreactionWrap.hidden, false);
   assert.equal(harness.elements.pokerV2AllInPreactionWrap.hidden, false);
   assert.equal(harness.elements.pokerV2PrimaryPreactionText.textContent, 'Call (6)');
-  assert.equal(harness.elements.pokerV2AmountPreactionText.textContent, 'Raise');
+  assert.equal(harness.elements.pokerV2AmountPreactionText.textContent, 'Raise (20)');
   assert.equal(harness.elements.pokerV2AllInPreaction.disabled, false);
 
   harness.elements.pokerV2PrimaryPreaction.click();
@@ -3865,4 +3865,60 @@ test('off-turn RAISE stays disabled when the server projection withholds raising
   await harness.flush();
   assert.equal(harness.elements.pokerV2AllInPreaction.checked, false, 'ALL IN must not be queueable');
   assert.equal(harness.actPayloads.length, 0, 'no action may be sent from the disabled pre-actions');
+});
+
+test('poker v2 shows the current slider amount on Bet/Raise buttons', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  // 1. BET shows the current slider value.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-btn-amounts',
+    phase: 'FLOP',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 42,
+    actions: ['FOLD', 'CHECK', 'BET'],
+    constraints: { toCall: 0, minBetAmount: 10, maxBetAmount: 100 },
+    stateVersion: 30
+  }));
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AmountBtn.textContent, 'Bet (20)', 'BET button must show the current slider value');
+
+  // 2. The input event updates the label immediately while the slider moves.
+  harness.elements.pokerV2AmountInput.value = '45';
+  (harness.elements.pokerV2AmountInput._listeners.input || []).forEach((fn) => fn({ target: harness.elements.pokerV2AmountInput }));
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AmountBtn.textContent, 'Bet (45)', 'input event must update the label immediately');
+
+  // 3. Snapshot-driven clamp synchronizes slider and label to the same value.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-btn-amounts',
+    phase: 'FLOP',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 42,
+    actions: ['FOLD', 'CHECK', 'BET'],
+    constraints: { toCall: 0, minBetAmount: 60, maxBetAmount: 100 },
+    stateVersion: 31
+  }));
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AmountInput.value, '60', 'slider must clamp to the new minimum');
+  assert.equal(harness.elements.pokerV2AmountBtn.textContent, 'Bet (60)', 'label must follow the clamped slider value');
+
+  // 4. Switching to RAISE shows the exact raise-to amount.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-btn-amounts',
+    phase: 'TURN',
+    board: ['As', 'Kd', '3h', '2c'],
+    potTotal: 60,
+    actions: ['FOLD', 'CALL', 'RAISE'],
+    constraints: { toCall: 10, minRaiseTo: 80, maxRaiseTo: 200 },
+    stateVersion: 32
+  }));
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AmountInput.min, '80', 'raise slider min should come from minRaiseTo');
+  assert.equal(harness.elements.pokerV2AmountBtn.textContent, 'Raise (80)', 'RAISE button must show the exact raise-to value');
+
+  harness.elements.pokerV2AmountInput.value = '120';
+  (harness.elements.pokerV2AmountInput._listeners.input || []).forEach((fn) => fn({ target: harness.elements.pokerV2AmountInput }));
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AmountBtn.textContent, 'Raise (120)', 'RAISE label must follow the slider');
 });
