@@ -3453,13 +3453,17 @@ test('poker v2 late snapshot does not clear a newer unrelated error raised after
   assert.equal(harness.elements.pokerV2ErrorText.textContent.indexOf('Snapshot recovery timed out'), -1, 'old timeout message replaced by newer error');
 });
 
-function amountSnapshot({ handId, phase, board, potTotal, actions, constraints, stateVersion, turnUserId = 'user-1', bigBlind = null, stacks, projectedActions = null }){
+function amountSnapshot({ handId, phase, board, potTotal, actions, constraints, stateVersion, turnUserId = 'user-1', bigBlind = null, stacks, projectedActions = null, youSeat = 1, members, holeCards }){
+  const resolvedMembers = members === undefined ? [{ userId: 'user-1', seat: 1 }] : members;
+  const resolvedPrivate = holeCards === null
+    ? undefined
+    : { holeCards: holeCards || [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] };
   return {
     kind: 'stateSnapshot',
     payload: {
       tableId: 'table-1',
       stateVersion,
-      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: resolvedMembers },
       public: {
         hand: { handId, status: phase, dealerSeatNo: 2 },
         turn: { userId: turnUserId, deadlineAt: Date.now() + 5000 },
@@ -3471,8 +3475,8 @@ function amountSnapshot({ handId, phase, board, potTotal, actions, constraints, 
         legalActions: { seat: 1, actions },
         actionConstraints: constraints
       },
-      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
-      you: { seat: 1 }
+      ...(resolvedPrivate ? { private: resolvedPrivate } : {}),
+      you: { seat: youSeat }
     }
   };
 }
@@ -3921,4 +3925,59 @@ test('poker v2 shows the current slider amount on Bet/Raise buttons', async () =
   (harness.elements.pokerV2AmountInput._listeners.input || []).forEach((fn) => fn({ target: harness.elements.pokerV2AmountInput }));
   await harness.flush();
   assert.equal(harness.elements.pokerV2AmountBtn.textContent, 'Raise (120)', 'RAISE label must follow the slider');
+});
+
+test('poker v2 clears stale private hole cards when a full snapshot removes the user seat', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  // Seated with private cards in an active hand.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-stale-1',
+    phase: 'FLOP',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 42,
+    actions: ['FOLD', 'CHECK', 'BET'],
+    constraints: { toCall: 0, minBetAmount: 10, maxBetAmount: 100 },
+    stateVersion: 40,
+    holeCards: ['3C', '7S']
+  }));
+  await harness.flush();
+  assert.equal(harness.elements.pokerHeroCards.hidden, false, 'seated user should see the hero cards area');
+  assert.equal(harness.elements.pokerHeroCards.children.length, 2);
+  assert.ok(harness.elements.pokerHeroCards.children.every((child) => !/poker-card--back/.test(child.className)), 'seated user should see face-up cards');
+
+  // Reconnect full authoritative snapshot: the user no longer has a seat and
+  // the private branch is absent — stale cards must be cleared from state.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-stale-1',
+    phase: 'FLOP',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 42,
+    actions: ['FOLD', 'CHECK', 'BET'],
+    constraints: { toCall: 0, minBetAmount: 10, maxBetAmount: 100 },
+    stateVersion: 41,
+    youSeat: null,
+    members: [],
+    holeCards: null
+  }));
+  await harness.flush();
+  assert.equal(harness.elements.pokerHeroCards.hidden, true, 'hero cards must be hidden without a seat');
+
+  // A new hand where the user is seated again but has no private cards yet:
+  // the stale 3C/7S must never reappear — only the standard face-down
+  // placeholders are rendered.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-stale-2',
+    phase: 'PREFLOP',
+    board: [],
+    potTotal: 3,
+    actions: ['FOLD', 'CALL', 'RAISE'],
+    constraints: { toCall: 2, minRaiseTo: 4, maxRaiseTo: 100 },
+    stateVersion: 42,
+    holeCards: null
+  }));
+  await harness.flush();
+  assert.equal(harness.elements.pokerHeroCards.hidden, false, 'seated user keeps the hero cards area');
+  assert.equal(harness.elements.pokerHeroCards.children.length, 2, 'two placeholders');
+  assert.ok(harness.elements.pokerHeroCards.children.every((child) => /poker-card--back/.test(child.className)), 'placeholders must be face-down, not the stale 3C/7S cards');
 });

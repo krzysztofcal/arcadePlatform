@@ -1423,7 +1423,16 @@
     var nextHeroCards = null;
     if (Array.isArray(payload.myHoleCards)) nextHeroCards = normalizeCards(payload.myHoleCards);
     else if (Array.isArray(privateObj.holeCards)) nextHeroCards = normalizeCards(privateObj.holeCards);
-    if (nextHeroCards) state.heroCards = nextHeroCards;
+    // Private hole cards belong to the current hand and current seat only.
+    // An authoritative full snapshot without new private cards (e.g. the user
+    // lost their seat during a reconnect) or a hand-id change must clear any
+    // stale cards from a previous hand/session instead of retaining them.
+    var handIdChanged = !!(state.handId && previousHandId && state.handId !== previousHandId);
+    if (nextHeroCards && nextHeroCards.length >= 2){
+      state.heroCards = nextHeroCards.slice(0, 2);
+    } else if (authoritativeFull || handIdChanged){
+      state.heroCards = [];
+    }
 
     if (Number.isInteger(payload.youSeat)) state.youSeat = payload.youSeat;
     else if (Number.isInteger(youObj.seat)) state.youSeat = youObj.seat;
@@ -2558,6 +2567,12 @@
     if (!els.heroCards) return;
     els.heroCards.innerHTML = '';
     if (currentPlayerStatus() === 'WAITING_NEXT_HAND'){
+      els.heroCards.hidden = true;
+      return;
+    }
+    // Private cards are only rendered for an authoritatively seated user; a
+    // spectator/unseated viewer must never see the hero-card area.
+    if (!deriveCurrentSeat()){
       els.heroCards.hidden = true;
       return;
     }
