@@ -3449,3 +3449,115 @@ test('poker v2 late snapshot does not clear a newer unrelated error raised after
   assert.match(harness.elements.pokerV2ErrorText.textContent, /newer_error/, 'newer error preserved');
   assert.equal(harness.elements.pokerV2ErrorText.textContent.indexOf('Snapshot recovery timed out'), -1, 'old timeout message replaced by newer error');
 });
+
+function amountSnapshot({ handId, phase, board, potTotal, actions, constraints, stateVersion }){
+  return {
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        hand: { handId, status: phase, dealerSeatNo: 2 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        board,
+        pot: { total: potTotal, sidePots: [] },
+        stacks: { 'user-1': 100 },
+        legalActions: { seat: 1, actions },
+        actionConstraints: constraints
+      },
+      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  };
+}
+
+async function bootSeatedHarness(){
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  await waitFor(() => harness.elements.pokerV2JoinBtn.disabled === false);
+  harness.elements.pokerV2SeatNo.value = '1';
+  harness.elements.pokerV2JoinBtn.click();
+  await harness.flush();
+  return { harness, ws };
+}
+
+test('poker v2 amount slider reflects BET constraints (minBetAmount/maxBetAmount)', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-bet-min',
+    phase: 'FLOP',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 42,
+    actions: ['FOLD', 'CHECK', 'BET'],
+    constraints: { toCall: 0, minBetAmount: 10, maxBetAmount: 100 },
+    stateVersion: 4
+  }));
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2AmountInput.min, '10', 'BET slider min should come from actionConstraints.minBetAmount');
+  assert.equal(harness.elements.pokerV2AmountInput.max, '100', 'BET slider max should come from actionConstraints.maxBetAmount');
+  const betValue = Number(harness.elements.pokerV2AmountInput.value);
+  assert.ok(Number.isFinite(betValue) && betValue >= 10 && betValue <= 100, 'BET slider value should stay within the legal range');
+});
+
+test('poker v2 amount slider reflects RAISE constraints (minRaiseTo/maxRaiseTo)', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-raise-min',
+    phase: 'TURN',
+    board: ['As', 'Kd', '3h', '2c'],
+    potTotal: 60,
+    actions: ['FOLD', 'CALL', 'RAISE'],
+    constraints: { toCall: 10, minRaiseTo: 20, maxRaiseTo: 90 },
+    stateVersion: 5
+  }));
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2AmountInput.min, '20', 'RAISE slider min should come from actionConstraints.minRaiseTo');
+  assert.equal(harness.elements.pokerV2AmountInput.max, '90', 'RAISE slider max should come from actionConstraints.maxRaiseTo');
+  const raiseValue = Number(harness.elements.pokerV2AmountInput.value);
+  assert.ok(Number.isFinite(raiseValue) && raiseValue >= 20 && raiseValue <= 90, 'RAISE slider value should stay within the legal range');
+});
+
+test('poker v2 amount button sends the selected legal boundary amount', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-amount-bet',
+    phase: 'FLOP',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 42,
+    actions: ['FOLD', 'CHECK', 'BET'],
+    constraints: { toCall: 0, minBetAmount: 10, maxBetAmount: 100 },
+    stateVersion: 6
+  }));
+  await harness.flush();
+
+  harness.elements.pokerV2AmountInput.value = '10';
+  harness.elements.pokerV2AmountBtn.click();
+  await harness.flush();
+
+  assert.equal(harness.actPayloads.length, 1);
+  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-amount-bet', action: 'BET', amount: 10 }));
+
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-amount-raise',
+    phase: 'TURN',
+    board: ['As', 'Kd', '3h', '2c'],
+    potTotal: 60,
+    actions: ['FOLD', 'CALL', 'RAISE'],
+    constraints: { toCall: 10, minRaiseTo: 20, maxRaiseTo: 90 },
+    stateVersion: 7
+  }));
+  await harness.flush();
+
+  harness.elements.pokerV2AmountInput.value = '90';
+  harness.elements.pokerV2AmountBtn.click();
+  await harness.flush();
+
+  assert.equal(harness.actPayloads.length, 2);
+  assert.equal(JSON.stringify(harness.actPayloads[1]), JSON.stringify({ handId: 'hand-amount-raise', action: 'RAISE', amount: 90 }));
+});
