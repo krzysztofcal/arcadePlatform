@@ -1143,6 +1143,7 @@ test('poker v2 keeps action buttons stable while exposing single-select preactio
         hand: { handId: 'hand-stable-controls-off-turn', status: 'TURN', dealerSeatNo: 2 },
         turn: { userId: 'villain-1', deadlineAt: Date.now() + 5000 },
         pot: { total: 18, sidePots: [] },
+        stacks: { 'user-1': 100, 'villain-1': 80 },
         legalActions: { seat: 1, actions: [] },
         actionConstraints: { toCall: 6, minRaiseTo: 18, maxRaiseTo: 120 }
       },
@@ -1258,7 +1259,7 @@ test('poker v2 auto-executes a queued preaction without moving the live action b
   assert.equal(harness.elements.pokerV2AllInBtn.hidden, false);
 });
 
-test('poker v2 queues all-in intent without pre-turn raise limits and resolves it from live turn constraints', async () => {
+test('poker v2 queues all-in intent from projected actions and resolves it from live turn constraints', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -1283,7 +1284,8 @@ test('poker v2 queues all-in intent without pre-turn raise limits and resolves i
         turn: { userId: 'villain-1', deadlineAt: Date.now() + 5000 },
         pot: { total: 18, sidePots: [] },
         legalActions: { seat: 1, actions: ['FOLD'] },
-        actionConstraints: { toCall: 6, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+        actionConstraints: { toCall: 6, minRaiseTo: 18, maxRaiseTo: 100, maxBetAmount: null },
+        projectedLegalActions: { seat: 1, actions: ['FOLD', 'CALL', 'RAISE'] },
         stacks: { 'user-1': 100, 'villain-1': 80 }
       },
       private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
@@ -1353,7 +1355,8 @@ test('poker v2 clears queued all-in intent when the live turn has no legal all-i
         turn: { userId: 'villain-1', deadlineAt: Date.now() + 5000 },
         pot: { total: 18, sidePots: [] },
         legalActions: { seat: 1, actions: ['FOLD'] },
-        actionConstraints: { toCall: 6, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+        actionConstraints: { toCall: 6, minRaiseTo: 18, maxRaiseTo: 100, maxBetAmount: null },
+        projectedLegalActions: { seat: 1, actions: ['FOLD', 'CALL', 'RAISE'] },
         stacks: { 'user-1': 100, 'villain-1': 80 }
       },
       private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
@@ -3854,22 +3857,12 @@ test('off-turn RAISE stays disabled when the server projection withholds raising
 
   assert.equal(harness.elements.pokerV2AmountPreaction.disabled, true, 'RAISE pre-action must stay disabled without reopening rights');
 
-  // ALL IN cannot bypass the closed raising rights either.
+  // ALL IN cannot bypass the closed raising rights: with stack (90) above
+  // toCall (5) and no RAISE/BET in the projection, an all-in would be an
+  // illegal raise to 90, so the pre-action must be disabled and unqueueable.
+  assert.equal(harness.elements.pokerV2AllInPreaction.disabled, true, 'ALL IN pre-action must be disabled when it would be an illegal raise');
   harness.elements.pokerV2AllInPreaction.click();
   await harness.flush();
-  assert.equal(harness.elements.pokerV2AllInPreaction.checked, true, 'ALL IN pre-action should be queueable');
-
-  ws.onSnapshot(amountSnapshot({
-    handId: 'hand-no-raise',
-    phase: 'TURN',
-    board: ['As', 'Kd', 'Qc', '3h'],
-    potTotal: 60,
-    actions: ['FOLD', 'CALL'],
-    constraints: { toCall: 5, minRaiseTo: null, maxRaiseTo: 110, maxBetAmount: null, minBetAmount: null },
-    stateVersion: 22
-  }));
-  await harness.flush();
-
-  assert.equal(harness.actPayloads.length, 0, 'ALL IN must not bypass closed raising rights');
-  assert.equal(harness.elements.pokerV2AllInPreaction.checked, false, 'queued ALL IN must be cancelled at turn arrival');
+  assert.equal(harness.elements.pokerV2AllInPreaction.checked, false, 'ALL IN must not be queueable');
+  assert.equal(harness.actPayloads.length, 0, 'no action may be sent from the disabled pre-actions');
 });

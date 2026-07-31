@@ -1376,15 +1376,22 @@
 
     // Authoritative projected pre-action list for a seated off-turn viewer; the
     // server honors reopening rights, so the browser must not re-derive RAISE
-    // availability from numeric constraints.
-    var projectedLegalSource = payload.projectedLegalActions != null ? payload.projectedLegalActions : publicObj.projectedLegalActions;
-    if (projectedLegalSource && typeof projectedLegalSource === 'object'){
-      state.projectedLegalActions = {
-        seat: Number.isInteger(projectedLegalSource.seat) ? projectedLegalSource.seat : null,
-        actions: Array.isArray(projectedLegalSource.actions)
-          ? projectedLegalSource.actions.filter((action) => typeof action === 'string')
-          : []
-      };
+    // availability from numeric constraints. Field presence (not list length)
+    // is authoritative: an intentionally empty projected list must not fall
+    // back to browser reconstruction.
+    var projectedLegalPresent = hasOwn(payload, 'projectedLegalActions') || hasOwn(publicObj, 'projectedLegalActions');
+    if (projectedLegalPresent){
+      var projectedLegalSource = payload.projectedLegalActions != null ? payload.projectedLegalActions : publicObj.projectedLegalActions;
+      state.projectedLegalActions = (projectedLegalSource && typeof projectedLegalSource === 'object')
+        ? {
+            seat: Number.isInteger(projectedLegalSource.seat) ? projectedLegalSource.seat : null,
+            actions: Array.isArray(projectedLegalSource.actions)
+              ? projectedLegalSource.actions.filter((action) => typeof action === 'string')
+              : []
+          }
+        : { seat: null, actions: [] };
+    } else {
+      state.projectedLegalActions = undefined;
     }
 
     var previousHandId = state.handId;
@@ -1655,10 +1662,11 @@
   function resolveProjectedAllowedActions(){
     if (!isFoldAvailable()) return [];
     // Authoritative projected action list from the server (honors reopening
-    // rights); do not re-derive RAISE availability from numeric constraints.
+    // rights). Field presence decides authority: an intentionally empty list
+    // means no pre-actions and must NOT fall back to browser reconstruction.
     var projected = state.projectedLegalActions;
-    if (projected && Array.isArray(projected.actions) && projected.actions.length){
-      return projected.actions.slice();
+    if (projected !== undefined && projected !== null){
+      return Array.isArray(projected.actions) ? projected.actions.slice() : [];
     }
     // Legacy fallback: reconstruct from constraints. Only a finite minRaiseTo
     // signals raising rights; maxRaiseTo or stack never imply a raise.
@@ -2777,11 +2785,6 @@
     return null;
   }
 
-  function canQueueAllInPreaction(){
-    var stackAmount = resolveStack(state.currentUserId);
-    return stackAmount == null || stackAmount > 0;
-  }
-
   function resolveAmountBounds(amountAction, stackAmount){
     if (!amountAction) return null;
     var constraints = state.actionConstraints || {};
@@ -2925,7 +2928,11 @@
     var projectedAllowed = preactionMode ? resolveProjectedAllowedActions() : [];
     var preactionPrimary = resolvePrimaryAction(projectedAllowed);
     var preactionAmountAction = resolveAmountAction(projectedAllowed);
-    var preactionAllInAvailable = preactionMode && canQueueAllInPreaction();
+    // Off-turn ALL IN availability follows the authoritative projected actions
+    // (CALL all-in when stack <= toCall, RAISE/BET all-in when those are legal);
+    // a positive stack alone never implies an all-in.
+    var preactionAllInPlan = preactionMode ? resolveAllInPlan(projectedAllowed) : null;
+    var preactionAllInAvailable = !!preactionAllInPlan;
     // A short stack below the big blind cannot make an ordinary opening bet; the
     // only legal opening bet is the all-in, which the ALL IN pre-action already
     // represents. Do not offer a selectable BET amount for it.
