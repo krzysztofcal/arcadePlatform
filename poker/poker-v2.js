@@ -169,6 +169,7 @@
   var snapshotRecoveryTimedOut = false;
   var SNAPSHOT_RECOVERY_TIMEOUT_MS = 5000;
   var SNAPSHOT_RECOVERY_MAX_ATTEMPTS = 3;
+  var SNAPSHOT_RECOVERY_TIMEOUT_COPY = 'Snapshot recovery timed out';
   var joinOperation = {
     phase: 'idle',
     requestId: null,
@@ -1454,8 +1455,12 @@
       && state.phase === 'SETTLED';
     syncStickyWinnerReveal(liveSettlementTransition ? Date.now() + WINNER_REVEAL_MS : null);
     state.actionConstraints = normalizeConstraints(constraintsPrimary, legalSource && legalSource.actionConstraints);
-    state.statusText = LIVE_STATUS_COPY.live;
-    if (!autoJoinErrorActive) state.errorText = '';
+    // While a snapshot recovery timeout is pending, snapshots must not overwrite a
+    // newer status/error raised after the timeout; the recovery gate-open handles it.
+    if (!snapshotRecoveryTimedOut){
+      state.statusText = LIVE_STATUS_COPY.live;
+      if (!autoJoinErrorActive) state.errorText = '';
+    }
     if (pendingLeaveNavigation && !hasRenderableCurrentSeat()){
       pendingLeaveRetryAfterReconnect = false;
       pendingLeaveNavigation = false;
@@ -3645,7 +3650,7 @@
       if (snapshotRecoveryAttempts >= SNAPSHOT_RECOVERY_MAX_ATTEMPTS){
         snapshotRecoveryTimedOut = true;
         state.statusText = LIVE_STATUS_COPY.error;
-        setError('Snapshot recovery timed out');
+        setError(SNAPSHOT_RECOVERY_TIMEOUT_COPY);
         renderInfoPanel();
         renderControls();
         return;
@@ -3852,11 +3857,16 @@
           stopSnapshotRecoveryTimer();
           openedRecoveryGate = true;
           if (snapshotRecoveryTimedOut){
-            // A late snapshot arrived after the bounded retries exhausted: clear only
-            // the recovery timeout status/error so the UI returns to live.
+            // A late snapshot arrived after the bounded retries exhausted. Clear the
+            // recovery status/error ONLY if the current error is still the recovery
+            // timeout — a newer unrelated error (failed/error status, rejected async
+            // op) must not be wiped by a stale timeout flag.
+            var clearingRecoveryTimeout = state.errorText === SNAPSHOT_RECOVERY_TIMEOUT_COPY;
             snapshotRecoveryTimedOut = false;
-            state.statusText = LIVE_STATUS_COPY.live;
-            if (!autoJoinErrorActive) state.errorText = '';
+            if (clearingRecoveryTimeout){
+              state.statusText = LIVE_STATUS_COPY.live;
+              state.errorText = '';
+            }
           }
           if (pendingLeaveRetryAfterReconnect){
             leaveAndReturnToLobby();
