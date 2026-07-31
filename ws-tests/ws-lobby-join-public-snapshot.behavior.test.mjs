@@ -3,13 +3,25 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { adaptPersistedBootstrap } from "../ws-server/poker/bootstrap/persisted-bootstrap-adapter.mjs";
 import { createTableManager } from "../ws-server/poker/table/table-manager.mjs";
+import { normalizePrivateBranch } from "../ws-server/poker/read-model/state-snapshot.mjs";
 
 function loadBuildTableStatePayload() {
   const source = fs.readFileSync(new URL("../ws-server/server.mjs", import.meta.url), "utf8");
-  const start = source.indexOf("function buildTableStatePayload({ tableState, tableSnapshot }) {");
+  const start = source.indexOf("function buildTableStatePayload({ tableState, tableSnapshot, userId }) {");
   const end = source.indexOf("\n\nfunction sendTableState", start);
   assert.ok(start >= 0 && end > start, "buildTableStatePayload must exist in ws-server/server.mjs");
-  return new Function(`${source.slice(start, end)}; return buildTableStatePayload;`)();
+  // buildTableStatePayload references normalizePrivateBranch and its helpers from
+  // the module import — inject the real implementations so the extracted function
+  // behaves identically to production.
+  const normalizeCards = (cards) => (Array.isArray(cards) ? cards.filter((card) => typeof card === "string") : []);
+  const normalizePlayerState = (playerState) => {
+    if (!playerState || typeof playerState !== "object" || Array.isArray(playerState)) return null;
+    const allowedStatuses = new Set(["ACTIVE", "OUT_OF_CHIPS", "WAITING_NEXT_HAND"]);
+    const status = typeof playerState.status === "string" ? playerState.status.trim().toUpperCase() : "";
+    if (!allowedStatuses.has(status) || !Number.isInteger(playerState.stack) || playerState.stack < 0) return null;
+    return { status, stack: playerState.stack, canRebuy: playerState.canRebuy === true };
+  };
+  return new Function(`const normalizeCards = ${normalizeCards.toString()}; const normalizePlayerState = ${normalizePlayerState.toString()}; const normalizePrivateBranch = ${normalizePrivateBranch.toString()}; ${source.slice(start, end)}; return buildTableStatePayload;`)();
 }
 
 test("lobby/no-hand table snapshot payload includes bumped-version joined seat and stack for UI rendering", async () => {
