@@ -644,11 +644,15 @@ const applyAction = (state, action) => {
     const amount = Number(action.amount);
     const minBetAmount = Math.min(deriveBigBlind(next), stack);
     if (!Number.isFinite(amount) || amount < minBetAmount || amount > stack) throw new Error("invalid_action");
+    const nextBet = currentBet + amount;
     next.stacks[userId] = stack - amount;
-    next.betThisRoundByUserId[userId] = currentBet + amount;
+    next.betThisRoundByUserId[userId] = nextBet;
     next.pot += amount;
     next.contributionsByUserId[userId] = (next.contributionsByUserId[userId] || 0) + amount;
-    next.currentBet = amount;
+    // BET.amount is always an increment over the player's current wager; the
+    // global wager is the max (e.g. big-blind preflop option: posted 10,
+    // BET 10 -> total 20, currentBet 20).
+    next.currentBet = Math.max(roundCurrentBet, nextBet);
     // Opening bet contract: a full opening bet sets the full-raise size to the
     // bet amount; a short all-in opening bet must not lower the floor below the
     // big blind.
@@ -656,7 +660,7 @@ const applyAction = (state, action) => {
     next.lastAggressorUserId = userId;
     for (const seat of getActiveSeats(next)) {
       if (seat.userId !== userId) {
-        next.toCallByUserId[seat.userId] = amount - (next.betThisRoundByUserId[seat.userId] || 0);
+        next.toCallByUserId[seat.userId] = nextBet - (next.betThisRoundByUserId[seat.userId] || 0);
       }
     }
     next.toCallByUserId[userId] = 0;

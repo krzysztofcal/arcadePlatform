@@ -891,6 +891,34 @@ const run = async () => {
     );
   }
 
+  {
+    // Big-blind preflop option: BET is an increment over the posted blind and
+    // must raise the global currentBet to the new total.
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t-bb-option", seats, stacks, rng: makeRng(32) });
+    const preflop = {
+      ...state,
+      phase: "PREFLOP",
+      turnUserId: "user-1",
+      currentBet: 10,
+      lastRaiseSize: 10,
+      bigBlind: 10,
+      toCallByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+      betThisRoundByUserId: { "user-1": 10, "user-2": 10, "user-3": 10 },
+      actedThisRoundByUserId: { "user-1": false, "user-2": true, "user-3": true },
+      foldedByUserId: { "user-1": false, "user-2": false, "user-3": false },
+      stacks: { "user-1": 90, "user-2": 90, "user-3": 90 },
+    };
+
+    const betResult = applyAction(preflop, { type: "BET", userId: "user-1", amount: 10 });
+    assert.equal(betResult.state.betThisRoundByUserId["user-1"], 20);
+    assert.equal(betResult.state.currentBet, 20);
+    assert.equal(betResult.state.lastRaiseSize, 10);
+    assert.equal(betResult.state.stacks["user-1"], 80);
+    assert.equal(betResult.state.toCallByUserId["user-2"], 10);
+    assert.equal(betResult.state.toCallByUserId["user-3"], 10);
+  }
+
 };
 
 await run();
