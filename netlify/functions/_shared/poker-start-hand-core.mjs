@@ -182,6 +182,7 @@ export const startHandCore = async ({
     foldedByUserId,
     contributionsByUserId,
     currentBet,
+    bigBlind: bbAmount,
     lastRaiseSize,
     lastActionRequestIdByUserId: {},
     lastStartHandRequestId: requestId || null,

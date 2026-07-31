@@ -975,7 +975,8 @@
       toCall: raw.toCall != null ? Number(raw.toCall) : null,
       minRaiseTo: raw.minRaiseTo != null ? Number(raw.minRaiseTo) : null,
       maxRaiseTo: raw.maxRaiseTo != null ? Number(raw.maxRaiseTo) : null,
-      maxBetAmount: raw.maxBetAmount != null ? Number(raw.maxBetAmount) : null
+      maxBetAmount: raw.maxBetAmount != null ? Number(raw.maxBetAmount) : null,
+      minBetAmount: raw.minBetAmount != null ? Number(raw.minBetAmount) : null
     };
   }
 
@@ -2759,7 +2760,9 @@
   function resolveAmountBounds(amountAction, stackAmount){
     if (!amountAction) return null;
     var constraints = state.actionConstraints || {};
-    var min = amountAction === 'RAISE' && Number.isFinite(constraints.minRaiseTo) ? Math.max(1, Math.trunc(constraints.minRaiseTo)) : 1;
+    var min = amountAction === 'RAISE'
+      ? (Number.isFinite(constraints.minRaiseTo) ? Math.max(1, Math.trunc(constraints.minRaiseTo)) : 1)
+      : (Number.isFinite(constraints.minBetAmount) ? Math.max(1, Math.trunc(constraints.minBetAmount)) : 1);
     var max = amountAction === 'RAISE'
       ? (Number.isFinite(constraints.maxRaiseTo) ? Math.max(min, Math.trunc(constraints.maxRaiseTo)) : null)
       : (Number.isFinite(constraints.maxBetAmount) ? Math.max(1, Math.trunc(constraints.maxBetAmount)) : stackAmount);

@@ -204,6 +204,18 @@ const deriveLastRaiseSize = (state, currentBet) => {
   return lastRaiseSize;
 };
 
+const deriveBigBlind = (state) => {
+  const bigBlind = toSafeInt(state?.bigBlind, 0);
+  return bigBlind > 0 ? bigBlind : 1;
+};
+
+// A player who already acted this round may RAISE only when facing at least a
+// full raise (toCall >= lastRaiseSize). Players who have not acted yet always
+// retain their option. Cumulative short all-ins are handled because toCall
+// grows while lastRaiseSize is only updated on full bets/raises.
+const canRaise = (state, userId, toCall, lastRaiseSize) =>
+  !state?.actedThisRoundByUserId?.[userId] || toCall >= lastRaiseSize;
+
 const makeHandId = () => {
   if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
     return globalThis.crypto.randomUUID();
@@ -545,8 +557,9 @@ const getLegalActions = (state, userId) => {
     const raiseMax = stack + currentUserBet;
     const raiseMin = Math.min(currentBet + lastRaiseSize, raiseMax);
 
-    // Only include RAISE if it is actually possible.
-    if (raiseMax > currentBet) {
+    // Only include RAISE if it is actually possible and the player retains the
+    // right to raise (already-acted players need to face at least a full raise).
+    if (canRaise(state, userId, toCall, lastRaiseSize) && raiseMax > currentBet) {
       actions.push({ type: "RAISE", min: raiseMin, max: raiseMax });
     }
 
@@ -555,7 +568,7 @@ const getLegalActions = (state, userId) => {
   return [
     { type: "FOLD" },
     { type: "CHECK" },
-    { type: "BET", min: 1, max: stack },
+    { type: "BET", min: Math.min(deriveBigBlind(state), stack), max: stack },
   ];
 };
 
@@ -629,13 +642,17 @@ const applyAction = (state, action) => {
   } else if (action.type === "BET") {
     if (toCall > 0) throw new Error("invalid_action");
     const amount = Number(action.amount);
-    if (!Number.isFinite(amount) || amount <= 0 || amount > stack) throw new Error("invalid_action");
+    const minBetAmount = Math.min(deriveBigBlind(next), stack);
+    if (!Number.isFinite(amount) || amount < minBetAmount || amount > stack) throw new Error("invalid_action");
     next.stacks[userId] = stack - amount;
     next.betThisRoundByUserId[userId] = currentBet + amount;
     next.pot += amount;
     next.contributionsByUserId[userId] = (next.contributionsByUserId[userId] || 0) + amount;
     next.currentBet = amount;
-    next.lastRaiseSize = amount;
+    // Opening bet contract: a full opening bet sets the full-raise size to the
+    // bet amount; a short all-in opening bet must not lower the floor below the
+    // big blind.
+    next.lastRaiseSize = Math.max(deriveBigBlind(next), amount);
     next.lastAggressorUserId = userId;
     for (const seat of getActiveSeats(next)) {
       if (seat.userId !== userId) {
@@ -645,6 +662,7 @@ const applyAction = (state, action) => {
     next.toCallByUserId[userId] = 0;
   } else if (action.type === "RAISE") {
     if (toCall <= 0) throw new Error("invalid_action");
+    if (!canRaise(next, userId, toCall, roundLastRaiseSize)) throw new Error("invalid_action");
     const amount = Number(action.amount);
     const available = stack + currentBet;
     const rawMinRaiseTo = roundCurrentBet + roundLastRaiseSize;

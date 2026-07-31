@@ -550,3 +550,246 @@ test("applyAction rejects invalid actor/phase/amount deterministically", () => {
   assert.equal(invalidAmount.ok, false);
   assert.equal(invalidAmount.reason, "invalid_amount");
 });
+
+// ---------------------------------------------------------------------------
+// Big-blind minimum opening bet, full-raise contract and reopening rights
+// (Issue #814). Fixtures model a 5/10 table: bigBlind = 10.
+// ---------------------------------------------------------------------------
+
+function bbFlop(overrides = {}) {
+  return {
+    roomId: "table_bb",
+    handId: "h_bb",
+    phase: "FLOP",
+    dealerSeatNo: 1,
+    turnUserId: "a",
+    seats: [
+      { userId: "a", seatNo: 1 },
+      { userId: "b", seatNo: 2 },
+      { userId: "c", seatNo: 3 }
+    ],
+    community: ["3H", "4H", "5H"],
+    communityDealt: 3,
+    deck: ["6S", "7S", "8S", "9S", "TS"],
+    potTotal: 30,
+    sidePots: [],
+    currentBet: 0,
+    lastRaiseSize: 10,
+    bigBlind: 10,
+    stacks: { a: 100, b: 100, c: 100 },
+    toCallByUserId: { a: 0, b: 0, c: 0 },
+    betThisRoundByUserId: { a: 0, b: 0, c: 0 },
+    actedThisRoundByUserId: { a: false, b: false, c: false },
+    foldedByUserId: { a: false, b: false, c: false },
+    contributionsByUserId: { a: 10, b: 10, c: 10 },
+    holeCardsByUserId: { a: ["AS", "KD"], b: ["2C", "2D"], c: ["3C", "3D"] },
+    ...overrides
+  };
+}
+
+test("BET below the big blind is rejected; BET at the big blind is accepted", () => {
+  const legal = computeSharedLegalActions({ statePublic: bbFlop(), userId: "a" });
+  assert.deepEqual(legal.actions, ["FOLD", "CHECK", "BET"]);
+  assert.equal(legal.minBetAmount, 10);
+  assert.equal(legal.maxBetAmount, 100);
+
+  const below = applyAction({ pokerState: bbFlop(), userId: "a", action: "BET", amount: 1 });
+  assert.equal(below.ok, false);
+  assert.equal(below.reason, "invalid_amount");
+
+  const atBb = applyAction({ pokerState: bbFlop(), userId: "a", action: "BET", amount: 10 });
+  assert.equal(atBb.ok, true);
+  assert.equal(atBb.state.currentBet, 10);
+  assert.equal(atBb.state.lastRaiseSize, 10);
+});
+
+test("a player with a stack below the big blind may bet all-in only", () => {
+  const short = bbFlop({ turnUserId: "c", stacks: { a: 100, b: 100, c: 3 } });
+  const legal = computeSharedLegalActions({ statePublic: short, userId: "c" });
+  assert.equal(legal.minBetAmount, 3);
+  assert.equal(legal.maxBetAmount, 3);
+
+  const rejected = applyAction({ pokerState: short, userId: "c", action: "BET", amount: 2 });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.reason, "invalid_amount");
+
+  const allIn = applyAction({ pokerState: short, userId: "c", action: "BET", amount: 3 });
+  assert.equal(allIn.ok, true);
+  assert.equal(allIn.state.betThisRoundByUserId.c, 3);
+  assert.equal(allIn.state.lastRaiseSize, 10);
+});
+
+test("BB preflop option: BET is an increment over the posted blind", () => {
+  // 5/10 preflop: dealer a, sb b (posted 5), bb c (posted 10); everyone called,
+  // action is back on the big blind with toCall = 0.
+  const preflop = {
+    roomId: "table_bb_preflop",
+    handId: "h_bb_preflop",
+    phase: "PREFLOP",
+    dealerSeatNo: 1,
+    turnUserId: "c",
+    seats: [
+      { userId: "a", seatNo: 1 },
+      { userId: "b", seatNo: 2 },
+      { userId: "c", seatNo: 3 }
+    ],
+    community: [],
+    communityDealt: 0,
+    deck: ["6S", "7S", "8S", "9S", "TS"],
+    potTotal: 30,
+    sidePots: [],
+    currentBet: 10,
+    lastRaiseSize: 10,
+    bigBlind: 10,
+    stacks: { a: 90, b: 90, c: 90 },
+    toCallByUserId: { a: 0, b: 0, c: 0 },
+    betThisRoundByUserId: { a: 10, b: 10, c: 10 },
+    actedThisRoundByUserId: { a: true, b: true, c: false },
+    foldedByUserId: { a: false, b: false, c: false },
+    contributionsByUserId: { a: 10, b: 10, c: 10 },
+    holeCardsByUserId: { a: ["AS", "KD"], b: ["2C", "2D"], c: ["3C", "3D"] }
+  };
+
+  const legal = computeSharedLegalActions({ statePublic: preflop, userId: "c" });
+  assert.equal(legal.minBetAmount, 10);
+  assert.equal(legal.maxBetAmount, 90);
+
+  const miniRaise = applyAction({ pokerState: preflop, userId: "c", action: "BET", amount: 1 });
+  assert.equal(miniRaise.ok, false);
+  assert.equal(miniRaise.reason, "invalid_amount");
+
+  const fullRaise = applyAction({ pokerState: preflop, userId: "c", action: "BET", amount: 10 });
+  assert.equal(fullRaise.ok, true);
+  assert.equal(fullRaise.state.betThisRoundByUserId.c, 20);
+  assert.equal(fullRaise.state.currentBet, 20);
+
+  const shortStack = { ...preflop, stacks: { a: 90, b: 90, c: 3 } };
+  const allInBet = applyAction({ pokerState: shortStack, userId: "c", action: "BET", amount: 3 });
+  assert.equal(allInBet.ok, true);
+  assert.equal(allInBet.state.betThisRoundByUserId.c, 13);
+});
+
+test("full raise minimum stays based on the previous full bet/raise", () => {
+  const bet = applyAction({ pokerState: bbFlop(), userId: "a", action: "BET", amount: 10 });
+  assert.equal(bet.ok, true);
+
+  const shortRaise = applyAction({ pokerState: bet.state, userId: "b", action: "RAISE", amount: 15 });
+  assert.equal(shortRaise.ok, false);
+  assert.equal(shortRaise.reason, "invalid_amount");
+
+  const fullRaise = applyAction({ pokerState: bet.state, userId: "b", action: "RAISE", amount: 20 });
+  assert.equal(fullRaise.ok, true);
+  assert.equal(fullRaise.state.currentBet, 20);
+  assert.equal(fullRaise.state.lastRaiseSize, 10);
+});
+
+test("short all-in raise does not lower the full-raise size", () => {
+  const three = bbFlop({ stacks: { a: 100, b: 13, c: 100 } });
+  const bet = applyAction({ pokerState: three, userId: "a", action: "BET", amount: 10 });
+  assert.equal(bet.ok, true);
+
+  const shortAllIn = applyAction({ pokerState: bet.state, userId: "b", action: "RAISE", amount: 13 });
+  assert.equal(shortAllIn.ok, true);
+  assert.equal(shortAllIn.state.currentBet, 13);
+  assert.equal(shortAllIn.state.lastRaiseSize, 10);
+
+  const legalC = computeSharedLegalActions({ statePublic: shortAllIn.state, userId: "c" });
+  assert.equal(legalC.minRaiseTo, 23);
+});
+
+test("short all-in does not reopen RAISE for already-acted players", () => {
+  const three = bbFlop({ stacks: { a: 100, b: 100, c: 13 } });
+  const betA = applyAction({ pokerState: three, userId: "a", action: "BET", amount: 10 });
+  assert.equal(betA.ok, true);
+  const callB = applyAction({ pokerState: betA.state, userId: "b", action: "CALL", amount: 0 });
+  assert.equal(callB.ok, true);
+  const allInC = applyAction({ pokerState: callB.state, userId: "c", action: "RAISE", amount: 13 });
+  assert.equal(allInC.ok, true);
+  assert.equal(allInC.state.currentBet, 13);
+  assert.equal(allInC.state.lastRaiseSize, 10);
+
+  const legalA = computeSharedLegalActions({ statePublic: allInC.state, userId: "a" });
+  assert.deepEqual(legalA.actions, ["FOLD", "CALL"]);
+
+  const raiseA = applyAction({ pokerState: allInC.state, userId: "a", action: "RAISE", amount: 25 });
+  assert.equal(raiseA.ok, false);
+  assert.equal(raiseA.reason, "illegal_action");
+
+  const callA = applyAction({ pokerState: allInC.state, userId: "a", action: "CALL", amount: 0 });
+  assert.equal(callA.ok, true);
+  const legalB = computeSharedLegalActions({ statePublic: callA.state, userId: "b" });
+  assert.deepEqual(legalB.actions, ["FOLD", "CALL"]);
+});
+
+test("check-raise stays legal for a player who already acted but faces a full bet", () => {
+  const flop = bbFlop({
+    seats: [
+      { userId: "a", seatNo: 1 },
+      { userId: "b", seatNo: 2 }
+    ],
+    stacks: { a: 100, b: 100 },
+    toCallByUserId: { a: 0, b: 0 },
+    betThisRoundByUserId: { a: 0, b: 0 },
+    actedThisRoundByUserId: { a: false, b: false },
+    foldedByUserId: { a: false, b: false },
+    contributionsByUserId: { a: 10, b: 10 },
+    holeCardsByUserId: { a: ["AS", "KD"], b: ["2C", "2D"] }
+  });
+  const checkA = applyAction({ pokerState: flop, userId: "a", action: "CHECK", amount: 0 });
+  assert.equal(checkA.ok, true);
+  const betB = applyAction({ pokerState: checkA.state, userId: "b", action: "BET", amount: 10 });
+  assert.equal(betB.ok, true);
+
+  const legalA = computeSharedLegalActions({ statePublic: betB.state, userId: "a" });
+  assert.ok(legalA.actions.includes("RAISE"));
+  assert.equal(legalA.minRaiseTo, 20);
+});
+
+test("cumulative short all-ins reopen betting once toCall reaches a full raise", () => {
+  const four = bbFlop({
+    seats: [
+      { userId: "a", seatNo: 1 },
+      { userId: "b", seatNo: 2 },
+      { userId: "c", seatNo: 3 },
+      { userId: "d", seatNo: 4 }
+    ],
+    stacks: { a: 100, b: 100, c: 14, d: 20 },
+    toCallByUserId: { a: 0, b: 0, c: 0, d: 0 },
+    betThisRoundByUserId: { a: 0, b: 0, c: 0, d: 0 },
+    actedThisRoundByUserId: { a: false, b: false, c: false, d: false },
+    foldedByUserId: { a: false, b: false, c: false, d: false },
+    contributionsByUserId: { a: 10, b: 10, c: 10, d: 10 },
+    holeCardsByUserId: {
+      a: ["AS", "KD"],
+      b: ["2C", "2D"],
+      c: ["3C", "3D"],
+      d: ["4C", "4D"]
+    }
+  });
+
+  const betA = applyAction({ pokerState: four, userId: "a", action: "BET", amount: 10 });
+  assert.equal(betA.ok, true);
+  const callB = applyAction({ pokerState: betA.state, userId: "b", action: "CALL", amount: 0 });
+  assert.equal(callB.ok, true);
+  const allInC = applyAction({ pokerState: callB.state, userId: "c", action: "RAISE", amount: 14 });
+  assert.equal(allInC.ok, true);
+  assert.equal(allInC.state.lastRaiseSize, 10);
+  const allInD = applyAction({ pokerState: allInC.state, userId: "d", action: "RAISE", amount: 20 });
+  assert.equal(allInD.ok, true);
+
+  const after = allInD.state;
+  assert.equal(after.currentBet, 20);
+  assert.equal(after.lastRaiseSize, 10);
+
+  const legalA = computeSharedLegalActions({ statePublic: after, userId: "a" });
+  assert.ok(legalA.actions.includes("RAISE"));
+  assert.equal(legalA.toCall, 10);
+  assert.equal(legalA.minRaiseTo, 30);
+
+  const callA = applyAction({ pokerState: after, userId: "a", action: "CALL", amount: 0 });
+  assert.equal(callA.ok, true);
+  const legalB = computeSharedLegalActions({ statePublic: callA.state, userId: "b" });
+  assert.ok(legalB.actions.includes("RAISE"));
+  assert.equal(legalB.toCall, 10);
+  assert.equal(legalB.minRaiseTo, 30);
+});

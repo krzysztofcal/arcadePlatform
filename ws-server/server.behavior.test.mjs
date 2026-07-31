@@ -6506,7 +6506,7 @@ test("observer snapshot stays public-state consistent with seated snapshot after
     assert.deepEqual(observerSnapshot.payload.public, {
       ...seatedPayload.public,
       legalActions: { seat: null, actions: [] },
-      actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null }
+      actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null }
     });
     assert.equal(observerSnapshot.payload.table.memberCount, observerSnapshot.payload.table.members.length);
     assert.equal(Object.prototype.hasOwnProperty.call(observerSnapshot.payload.public, "holeCardsByUserId"), false);

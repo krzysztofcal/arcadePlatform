@@ -239,7 +239,7 @@ test("buildStateSnapshotPayload projects bootstrapped PREFLOP state from table m
     { userId: "user_b", seatNo: 2, status: "ACTIVE" }
   ]);
   assert.deepEqual(seatedPayload.public.legalActions, { seat: 1, actions: ["FOLD", "CALL", "RAISE"] });
-  assert.deepEqual(seatedPayload.public.actionConstraints, { toCall: 1, minRaiseTo: 4, maxRaiseTo: 100, maxBetAmount: null });
+  assert.deepEqual(seatedPayload.public.actionConstraints, { toCall: 1, minRaiseTo: 4, maxRaiseTo: 100, maxBetAmount: null, minBetAmount: null });
   assert.deepEqual(seatedPayload.public.betThisRoundByUserId, { user_a: 1, user_b: 2 });
   assert.deepEqual(seatedPayload.public.committedByUserId, {});
   assert.deepEqual(seatedPayload.public.lastBettingRoundActionByUserId, {});
@@ -249,7 +249,7 @@ test("buildStateSnapshotPayload projects bootstrapped PREFLOP state from table m
   assert.deepEqual(observerPayload.public, {
     ...seatedPayload.public,
     legalActions: { seat: null, actions: [] },
-    actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null }
+    actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null }
   });
   assert.equal(seatedPayload.table.memberCount, seatedPayload.table.members.length);
 });
@@ -275,7 +275,7 @@ test("buildStateSnapshotPayload keeps committed chips distinct from current-roun
       pot: { total: 23, sidePots: [] },
       turn: { userId: "user_a", seat: 1, startedAt: null, deadlineAt: null },
       legalActions: { seat: 1, actions: ["CHECK"] },
-      actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+      actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null },
       private: { holeCards: ["AS", "AD"] }
     }
   });
@@ -302,7 +302,7 @@ test("buildStateSnapshotPayload serializes last betting-round action labels", ()
       pot: { total: 14, sidePots: [] },
       turn: { userId: "user_b", seat: 2, startedAt: 1710000000000, deadlineAt: 1710000015000 },
       legalActions: { seat: 1, actions: ["FOLD", "CALL"] },
-      actionConstraints: { toCall: 4, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+      actionConstraints: { toCall: 4, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null },
       lastBettingRoundActionByUserId: { user_a: "call", user_b: "raise", ignored: "bad" },
       private: { holeCards: ["AS", "AD"] }
     }
@@ -333,7 +333,7 @@ test("buildStateSnapshotPayload serializes folded seat statuses for live table s
       pot: { total: 14, sidePots: [] },
       turn: { userId: "user_b", seat: 2, startedAt: 1710000000000, deadlineAt: 1710000015000 },
       legalActions: { seat: 1, actions: [] },
-      actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+      actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null },
       private: { holeCards: ["AS", "AD"] }
     }
   });
@@ -359,7 +359,7 @@ test("buildStateSnapshotPayload includes terminal showdown/settlement fields whe
       pot: { total: 0, sidePots: [] },
       turn: { userId: null, seat: null, startedAt: null, deadlineAt: null },
       legalActions: { seat: 1, actions: [] },
-      actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+      actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null },
       private: { holeCards: ["AS", "AD"] },
       showdown: {
         handId: "h_terminal",
@@ -381,7 +381,7 @@ test("buildStateSnapshotPayload includes terminal showdown/settlement fields whe
   assert.deepEqual(payload.public.showdown.revealedShowdownParticipants, [{ userId: "user_a", holeCards: ["AS", "AD"] }]);
   assert.equal(payload.public.showdown.potAwardedTotal, 5);
   assert.deepEqual(payload.public.turn, { userId: null, seat: null, startedAt: null, deadlineAt: null });
-  assert.deepEqual(payload.public.actionConstraints, { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null });
+  assert.deepEqual(payload.public.actionConstraints, { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null });
   assert.deepEqual(payload.public.handSettlement.payouts, { user_a: 5 });
   assert.deepEqual(payload.private, { userId: "user_a", seat: 1, holeCards: ["AS", "AD"] });
 });
@@ -401,7 +401,7 @@ test("buildStateSnapshotPayload omits revealed showdown participant cards for al
       pot: { total: 0, sidePots: [] },
       turn: { userId: null, seat: null, startedAt: null, deadlineAt: null },
       legalActions: { seat: 1, actions: [] },
-      actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+      actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null },
       showdown: {
         handId: "h_terminal_folded",
         winners: ["user_a"],

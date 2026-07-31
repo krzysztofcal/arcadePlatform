@@ -148,9 +148,12 @@ function enrichBotLegalActions(legalInfo = {}) {
   const minRaiseTo = Number(legalInfo?.minRaiseTo);
   const maxRaiseTo = Number(legalInfo?.maxRaiseTo);
   const maxBetAmount = Number(legalInfo?.maxBetAmount);
+  const minBetAmount = Number(legalInfo?.minBetAmount);
   const normalizedMinRaiseTo = Number.isFinite(minRaiseTo) ? Math.trunc(minRaiseTo) : null;
   const normalizedMaxRaiseTo = Number.isFinite(maxRaiseTo) ? Math.trunc(maxRaiseTo) : null;
   const normalizedMaxBetAmount = Number.isFinite(maxBetAmount) ? Math.trunc(maxBetAmount) : null;
+  const normalizedMinBetAmount = Number.isFinite(minBetAmount) ? Math.trunc(minBetAmount) : null;
+  const botMinBet = normalizedMinBetAmount > 0 ? normalizedMinBetAmount : 1;
   return actions.map((action) => {
     const type = typeof action === "string"
       ? action.toUpperCase()
@@ -158,9 +161,9 @@ function enrichBotLegalActions(legalInfo = {}) {
     if (type === "BET" && normalizedMaxBetAmount > 0) {
       return {
         type: "BET",
-        min: 1,
-        minAmount: 1,
-        amount: 1,
+        min: botMinBet,
+        minAmount: botMinBet,
+        amount: botMinBet,
         max: normalizedMaxBetAmount,
         maxAmount: normalizedMaxBetAmount
       };
