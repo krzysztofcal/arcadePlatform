@@ -3450,7 +3450,7 @@ test('poker v2 late snapshot does not clear a newer unrelated error raised after
   assert.equal(harness.elements.pokerV2ErrorText.textContent.indexOf('Snapshot recovery timed out'), -1, 'old timeout message replaced by newer error');
 });
 
-function amountSnapshot({ handId, phase, board, potTotal, actions, constraints, stateVersion, turnUserId = 'user-1' }){
+function amountSnapshot({ handId, phase, board, potTotal, actions, constraints, stateVersion, turnUserId = 'user-1', bigBlind = null, stacks }){
   return {
     kind: 'stateSnapshot',
     payload: {
@@ -3462,7 +3462,8 @@ function amountSnapshot({ handId, phase, board, potTotal, actions, constraints, 
         turn: { userId: turnUserId, deadlineAt: Date.now() + 5000 },
         board,
         pot: { total: potTotal, sidePots: [] },
-        stacks: { 'user-1': 100 },
+        stacks: stacks || { 'user-1': 100 },
+        ...(bigBlind != null ? { bigBlind } : {}),
         legalActions: { seat: 1, actions },
         actionConstraints: constraints
       },
@@ -3681,4 +3682,122 @@ test('queued RAISE pre-action outside the authoritative range is cancelled and n
   assert.equal(harness.actPayloads.length, 0, 'out-of-range queued RAISE must never be sent');
   assert.equal(harness.elements.pokerV2AmountPreaction.checked, false, 'queued RAISE must be cancelled when the stored amount is out of range');
   assert.equal(harness.elements.pokerV2AmountInput.min, '20', 'slider must sync back to the authoritative raise minimum');
+});
+
+test('off-turn BET slider minimum comes from the big blind, never 1', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  // Another player's turn; constraints carry no minBetAmount, so the BET min
+  // must be derived from the authoritative bigBlind (10), not a generic 1.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-bb-min',
+    phase: 'FLOP',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 42,
+    actions: ['FOLD', 'CHECK', 'BET'],
+    constraints: { toCall: 0, maxBetAmount: 100 },
+    bigBlind: 10,
+    stateVersion: 14,
+    turnUserId: 'villain-1'
+  }));
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2AmountInput.min, '10', 'off-turn BET min must be the big blind when minBetAmount is absent');
+});
+
+test('short stack below the big blind is represented as all-in off-turn', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  // 7 CH with BB=10: an ordinary opening BET is impossible; the legal bet is
+  // the all-in, so the ALL IN pre-action represents it and the BET amount
+  // pre-action must not offer an ordinary selectable range.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-bb-short',
+    phase: 'FLOP',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 42,
+    actions: ['FOLD', 'CHECK', 'BET'],
+    constraints: { toCall: 0, maxBetAmount: 7 },
+    bigBlind: 10,
+    stacks: { 'user-1': 7 },
+    stateVersion: 15,
+    turnUserId: 'villain-1'
+  }));
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2AmountPreaction.disabled, true, 'ordinary BET pre-action must not be offered below the big blind');
+  assert.equal(harness.elements.pokerV2AllInPreaction.disabled, false, 'all-in pre-action must represent the short-stack bet');
+});
+
+test('queued RAISE 100 executes unchanged when the live range becomes 80..200', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-raise-ok',
+    phase: 'TURN',
+    board: ['As', 'Kd', '3h', '2c'],
+    potTotal: 60,
+    actions: ['FOLD', 'CALL', 'RAISE'],
+    constraints: { toCall: 10, minRaiseTo: 50, maxRaiseTo: 200 },
+    stateVersion: 16,
+    turnUserId: 'villain-1'
+  }));
+  await harness.flush();
+
+  harness.elements.pokerV2AmountInput.value = '100';
+  harness.elements.pokerV2AmountPreaction.click();
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AmountPreaction.checked, true, 'queued RAISE 100 should be selected');
+
+  // Turn arrives: minimum raise is now 80, but 100 is still legal.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-raise-ok',
+    phase: 'TURN',
+    board: ['As', 'Kd', '3h', '2c'],
+    potTotal: 60,
+    actions: ['FOLD', 'CALL', 'RAISE'],
+    constraints: { toCall: 10, minRaiseTo: 80, maxRaiseTo: 200 },
+    stateVersion: 17
+  }));
+  await harness.flush();
+
+  assert.equal(harness.actPayloads.length, 1);
+  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-raise-ok', action: 'RAISE', amount: 100 }), 'legal queued amount must execute unchanged');
+});
+
+test('queued RAISE 100 is cancelled with a message when the live minimum becomes 120', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-raise-cancel',
+    phase: 'TURN',
+    board: ['As', 'Kd', '3h', '2c'],
+    potTotal: 60,
+    actions: ['FOLD', 'CALL', 'RAISE'],
+    constraints: { toCall: 10, minRaiseTo: 50, maxRaiseTo: 200 },
+    stateVersion: 18,
+    turnUserId: 'villain-1'
+  }));
+  await harness.flush();
+
+  harness.elements.pokerV2AmountInput.value = '100';
+  harness.elements.pokerV2AmountPreaction.click();
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AmountPreaction.checked, true, 'queued RAISE 100 should be selected');
+
+  // Turn arrives: minimum raise is now 120, so the queued 100 is illegal.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-raise-cancel',
+    phase: 'TURN',
+    board: ['As', 'Kd', '3h', '2c'],
+    potTotal: 60,
+    actions: ['FOLD', 'CALL', 'RAISE'],
+    constraints: { toCall: 10, minRaiseTo: 120, maxRaiseTo: 200 },
+    stateVersion: 19
+  }));
+  await harness.flush();
+
+  assert.equal(harness.actPayloads.length, 0, 'cancelled queued RAISE must never be sent (no silent 100->120)');
+  assert.equal(harness.elements.pokerV2AmountPreaction.checked, false, 'queued RAISE must be cancelled');
+  assert.match(harness.elements.pokerV2ErrorText.textContent, /Pre-action cancelled: minimum raise is now 120\./, 'cancellation message must be shown');
 });

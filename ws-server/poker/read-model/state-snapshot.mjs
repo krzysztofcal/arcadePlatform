@@ -216,6 +216,7 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId, publicProfile
       },
       seats: normalizeSeatRows(tableSnapshot?.seats, { publicProfileStorageBaseUrl }),
       stacks: normalizeStacks(tableSnapshot?.stacks),
+      bigBlind: Number.isInteger(tableSnapshot?.bigBlind) && tableSnapshot.bigBlind > 0 ? tableSnapshot.bigBlind : null,
       betThisRoundByUserId: normalizeNumericUserMap(tableSnapshot?.betThisRoundByUserId),
       committedByUserId: normalizeNumericUserMap(tableSnapshot?.committedByUserId),
       pot: {

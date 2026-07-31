@@ -125,6 +125,7 @@
     lastBettingRoundActionByUserId: { victor: 'call', marcus: 'raise', nico: 'fold' },
     legalActions: ['FOLD', 'CHECK', 'BET'],
     actionConstraints: { toCall: 0, maxBetAmount: 240, minRaiseTo: null, maxRaiseTo: null },
+    bigBlind: null,
     currentUserId: 'hero',
     youSeat: 3,
     statusText: LIVE_STATUS_COPY.demo,
@@ -1367,6 +1368,11 @@
 
     var nextStacks = normalizeStacks(payload);
     if (nextStacks) state.stacks = nextStacks;
+
+    // Authoritative big blind for the current hand; used to derive legal BET
+    // minimums off-turn (min(bigBlind, stack)) when minBetAmount is absent.
+    var bigBlindRaw = hasOwn(payload, 'bigBlind') ? payload.bigBlind : (hasOwn(publicObj, 'bigBlind') ? publicObj.bigBlind : undefined);
+    if (Number.isFinite(Number(bigBlindRaw)) && Number(bigBlindRaw) > 0) state.bigBlind = Math.trunc(Number(bigBlindRaw));
 
     var previousHandId = state.handId;
     var previousPhase = state.phase;
@@ -2760,9 +2766,11 @@
   function resolveAmountBounds(amountAction, stackAmount){
     if (!amountAction) return null;
     var constraints = state.actionConstraints || {};
+    var bigBlindAmount = Number.isFinite(state.bigBlind) ? Math.max(1, Math.trunc(state.bigBlind)) : null;
     var min = amountAction === 'RAISE'
       ? (Number.isFinite(constraints.minRaiseTo) ? Math.max(1, Math.trunc(constraints.minRaiseTo)) : 1)
-      : (Number.isFinite(constraints.minBetAmount) ? Math.max(1, Math.trunc(constraints.minBetAmount)) : 1);
+      : (Number.isFinite(constraints.minBetAmount) ? Math.max(1, Math.trunc(constraints.minBetAmount))
+        : (bigBlindAmount != null && Number.isFinite(stackAmount) ? Math.min(bigBlindAmount, Math.max(0, Math.trunc(stackAmount))) : 1));
     var max = amountAction === 'RAISE'
       ? (Number.isFinite(constraints.maxRaiseTo) ? Math.max(min, Math.trunc(constraints.maxRaiseTo)) : null)
       : (Number.isFinite(constraints.maxBetAmount) ? Math.max(1, Math.trunc(constraints.maxBetAmount)) : stackAmount);
@@ -2790,6 +2798,13 @@
 
   function clearQueuedPreaction(){
     queuedPreaction = null;
+  }
+
+  function notifyPreactionCancelled(amountAction, bounds){
+    if (amountAction !== 'RAISE' && amountAction !== 'BET') return;
+    if (!bounds || !Number.isFinite(bounds.min)) return;
+    var noun = amountAction === 'RAISE' ? 'raise' : 'bet';
+    setError('Pre-action cancelled: minimum ' + noun + ' is now ' + Math.trunc(bounds.min) + '.');
   }
 
   function resetQueuedPreactionState(){
@@ -2842,6 +2857,7 @@
       }
       var queuedAmount = readQueuedAmount();
       if (!Number.isFinite(queuedAmount) || queuedAmount < preactionState.amountBounds.min || (preactionState.amountBounds.max != null && queuedAmount > preactionState.amountBounds.max)){
+        notifyPreactionCancelled(queuedPreaction.action, preactionState.amountBounds);
         clearQueuedPreaction();
         return;
       }
@@ -2891,6 +2907,12 @@
     var preactionPrimary = resolvePrimaryAction(projectedAllowed);
     var preactionAmountAction = resolveAmountAction(projectedAllowed);
     var preactionAllInAvailable = preactionMode && canQueueAllInPreaction();
+    // A short stack below the big blind cannot make an ordinary opening bet; the
+    // only legal opening bet is the all-in, which the ALL IN pre-action already
+    // represents. Do not offer a selectable BET amount for it.
+    if (preactionMode && preactionAmountAction === 'BET' && Number.isFinite(stackAmount) && Number.isFinite(state.bigBlind) && stackAmount < Math.trunc(state.bigBlind) && preactionAllInAvailable){
+      preactionAmountAction = null;
+    }
     var preactionAmountBounds = resolveAmountBounds(preactionAmountAction, stackAmount);
     var displayPrimary = primary || preactionPrimary || 'CHECK';
     var displayAmountAction = amountAction || preactionAmountAction || 'BET';
@@ -3237,6 +3259,12 @@
       amountBounds: resolveAmountBounds(resolveAmountAction(allowed), resolveStack(state.currentUserId))
     };
     var nextAction = resolveQueuedPreactionExecution(liveState);
+    if (!nextAction && queuedPreaction && queuedPreaction.slot === 'amount' && queuedPreaction.action === liveState.amountAction && liveState.amountBounds){
+      var queuedAmountValue = queuedPreaction.amount;
+      if (!Number.isFinite(queuedAmountValue) || queuedAmountValue < liveState.amountBounds.min || (liveState.amountBounds.max != null && queuedAmountValue > liveState.amountBounds.max)){
+        notifyPreactionCancelled(queuedPreaction.action, liveState.amountBounds);
+      }
+    }
     clearQueuedPreaction();
     if (!nextAction || !nextAction.action) return;
     queuedPreactionInFlight = true;

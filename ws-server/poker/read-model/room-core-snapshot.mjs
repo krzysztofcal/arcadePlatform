@@ -320,6 +320,7 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
       roomId,
       seats: publicSeats,
       stacks: publicStacks,
+      bigBlind: null,
       hand: {
         handId: null,
         status: members.length > 0 ? "LOBBY" : "EMPTY",
@@ -368,6 +369,7 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
     roomId: typeof statePublic.roomId === "string" ? statePublic.roomId : roomId || tableId,
     seats: publicSeats,
     stacks: publicStacks,
+    bigBlind: Number.isInteger(statePublic?.bigBlind) && statePublic.bigBlind > 0 ? statePublic.bigBlind : null,
     hand: {
       handId: typeof statePublic.handId === "string" && statePublic.handId.trim() ? statePublic.handId : null,
       status: typeof statePublic.phase === "string" ? statePublic.phase : null,
