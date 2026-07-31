@@ -3627,6 +3627,14 @@
     snapshotRecoveryTimer = null;
   }
 
+  function issueSnapshotRecoveryRequest(gen){
+    if (gen !== liveModeGeneration) return;
+    if (!state.reconnectGate) return;
+    if (wsClient && typeof wsClient.requestGameplaySnapshot === 'function'){
+      wsClient.requestGameplaySnapshot();
+    }
+  }
+
   function scheduleSnapshotRecovery(gen){
     stopSnapshotRecoveryTimer();
     snapshotRecoveryTimer = window.setTimeout(function(){
@@ -3641,17 +3649,19 @@
         return;
       }
       snapshotRecoveryAttempts += 1;
-      if (wsClient && typeof wsClient.requestGameplaySnapshot === 'function'){
-        wsClient.requestGameplaySnapshot();
-      }
+      issueSnapshotRecoveryRequest(gen);
       scheduleSnapshotRecovery(gen);
     }, SNAPSHOT_RECOVERY_TIMEOUT_MS);
   }
 
+  // Shared bounded snapshot recovery for both reconnect (after auth_ok) and
+  // server-initiated resync: the first full snapshot request is sent immediately,
+  // the timer only schedules up to SNAPSHOT_RECOVERY_MAX_ATTEMPTS retries.
   function startSnapshotRecovery(gen){
     if (gen !== liveModeGeneration) return;
     if (!state.reconnectGate) return;
     snapshotRecoveryAttempts = 0;
+    issueSnapshotRecoveryRequest(gen);
     scheduleSnapshotRecovery(gen);
   }
 
@@ -3785,9 +3795,7 @@
           state.reconnectGate = true;
           renderInfoPanel();
           renderControls();
-          if (wsClient && typeof wsClient.requestGameplaySnapshot === 'function'){
-            wsClient.requestGameplaySnapshot();
-          }
+          startSnapshotRecovery(gen);
         } else if (status === 'failed'){
           stopSnapshotRecoveryTimer();
           cancelSettlementAnimations();
