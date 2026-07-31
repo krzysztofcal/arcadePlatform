@@ -2818,6 +2818,28 @@
     return value;
   }
 
+  // Show the current slider amount on the dynamic Bet/Raise button (and the
+  // queued pre-action label). The amount is the raise-to value for RAISE and
+  // the opening-bet value for BET; the caller supplies it (renderControls
+  // passes the value returned by syncAmountInput, the slider input listener
+  // passes the live slider value).
+  function syncAmountActionLabels(amount){
+    if (!Number.isFinite(amount)) return;
+    var compact = formatCompactAmount(amount);
+    if (els.amountBtn){
+      var liveAction = els.amountBtn.dataset.action || '';
+      if (liveAction === 'BET' || liveAction === 'RAISE'){
+        els.amountBtn.textContent = (liveAction === 'RAISE' ? 'Raise' : 'Bet') + ' (' + compact + ')';
+      }
+    }
+    if (els.amountPreactionText){
+      var preAction = els.amountPreaction ? (els.amountPreaction.dataset.action || '') : '';
+      if (preAction === 'BET' || preAction === 'RAISE'){
+        els.amountPreactionText.textContent = (preAction === 'RAISE' ? 'Raise' : 'Bet') + ' (' + compact + ')';
+      }
+    }
+  }
+
   function clearQueuedPreaction(){
     queuedPreaction = null;
   }
@@ -3065,6 +3087,10 @@
     if (els.amountValue && !(usersTurn ? amountAction : preactionMode ? preactionAmountAction : null)) {
       els.amountValue.textContent = formatCompactAmount(parseInt(els.amountInput && els.amountInput.value ? els.amountInput.value : '20', 10) || 20);
     }
+    // Keep Bet/Raise labels in sync with the authoritative (clamped) slider
+    // value; syncAmountInput returns undefined when no amount action is active,
+    // in which case the base Bet/Raise label set above is preserved.
+    syncAmountActionLabels(syncedAmount);
   }
 
   function resolveSettlementRecipientName(userId){
@@ -3590,6 +3616,7 @@
     });
     if (els.amountInput) els.amountInput.addEventListener('input', function(){
       if (els.amountValue) els.amountValue.textContent = formatCompactAmount(parseInt(els.amountInput.value, 10) || 0);
+      syncAmountActionLabels(readQueuedAmount());
       if (queuedPreaction && queuedPreaction.slot === 'amount'){
         var queuedAmount = readQueuedAmount();
         if (Number.isFinite(queuedAmount)) queuedPreaction.amount = queuedAmount;
