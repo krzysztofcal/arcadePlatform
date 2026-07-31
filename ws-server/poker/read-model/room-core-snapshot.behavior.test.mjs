@@ -679,3 +679,51 @@ test("projectRoomCoreSnapshot derives OUT_OF_CHIPS, canRebuy, and WAITING_NEXT_H
   assert.equal(waiting.seats.find((seat) => seat.userId === "human")?.status, "WAITING_NEXT_HAND");
   assert.deepEqual(waiting.private.playerState, { status: "WAITING_NEXT_HAND", stack: 100, canRebuy: false });
 });
+
+test("projectRoomCoreSnapshot projects no raise for a viewer who already acted without reopening rights", () => {
+  const coreState = {
+    seats: { viewer: 1, player_b: 2, player_c: 3 },
+    publicStacks: { viewer: 90, player_b: 80, player_c: 70 },
+    pokerState: {
+      roomId: "table_proj_closed_raise",
+      handId: "hand_proj_closed_raise",
+      phase: "TURN",
+      turnUserId: "player_c",
+      community: ["AS", "KD", "QC", "3H"],
+      potTotal: 60,
+      bigBlind: 10,
+      currentBet: 25,
+      lastRaiseSize: 10,
+      stacks: { viewer: 90, player_b: 80, player_c: 70 },
+      betThisRoundByUserId: { viewer: 20, player_b: 25, player_c: 25 },
+      toCallByUserId: { viewer: 5, player_b: 0, player_c: 0 },
+      actedThisRoundByUserId: { viewer: true, player_b: true, player_c: true },
+      foldedByUserId: { viewer: false, player_b: false, player_c: false },
+      leftTableByUserId: { viewer: false, player_b: false, player_c: false },
+      sitOutByUserId: { viewer: false, player_b: false, player_c: false },
+      holeCardsByUserId: { viewer: ["AH", "AD"], player_b: ["2C", "2D"], player_c: ["3C", "3D"] },
+      handSeed: "sensitive",
+      deck: []
+    }
+  };
+
+  const snapshot = projectRoomCoreSnapshot({
+    tableId: "table_proj_closed_raise",
+    roomId: "table_proj_closed_raise",
+    coreState,
+    members: [
+      { userId: "viewer", seat: 1 },
+      { userId: "player_b", seat: 2 },
+      { userId: "player_c", seat: 3 }
+    ],
+    userId: "viewer",
+    youSeat: 1
+  });
+
+  // Viewer already acted; toCall 5 < lastRaiseSize 10 -> no reopening.
+  assert.deepEqual(snapshot.projectedLegalActions, { seat: 1, actions: ["FOLD", "CALL"] }, "projected actions must not include RAISE");
+  assert.equal(snapshot.actionConstraints.toCall, 5);
+  assert.equal(snapshot.actionConstraints.minRaiseTo, null, "minRaiseTo must be null without raising rights");
+  assert.equal(snapshot.actionConstraints.maxRaiseTo, 110, "maxRaiseTo may stay numeric without implying a raise");
+  assert.deepEqual(snapshot.legalActions.actions, ["FOLD"], "current-turn legalActions keep their semantics");
+});

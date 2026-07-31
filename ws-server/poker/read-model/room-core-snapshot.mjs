@@ -344,6 +344,10 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
         seat: null,
         actions: []
       },
+      projectedLegalActions: {
+        seat: null,
+        actions: []
+      },
       betThisRoundByUserId: {},
       committedByUserId: {},
       private: Number.isInteger(effectiveYouSeat)
@@ -401,6 +405,13 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
       seat: Number.isInteger(effectiveYouSeat) ? effectiveYouSeat : null,
       actions: Number.isInteger(effectiveYouSeat) ? normalizeActions(legalInfo.actions) : []
     },
+    // Authoritative pre-action action list for a seated viewer who is not
+    // acting (e.g. RAISE presence honors reopening rights); empty for the
+    // current actor and observers. The browser uses this instead of inferring
+    // raising rights from numeric constraints.
+    projectedLegalActions: Number.isInteger(effectiveYouSeat) && !isTurnPlayer
+      ? { seat: effectiveYouSeat, actions: normalizeActions(constraintsInfo.actions) }
+      : { seat: null, actions: [] },
     actionConstraints: {
       toCall: Number.isFinite(constraintsInfo.toCall) ? constraintsInfo.toCall : null,
       minRaiseTo: Number.isFinite(constraintsInfo.minRaiseTo) ? constraintsInfo.minRaiseTo : null,

@@ -233,6 +233,10 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId, publicProfile
         seat: normalizeSeat(tableSnapshot?.legalActions?.seat),
         actions: normalizeActionList(tableSnapshot?.legalActions?.actions)
       },
+      projectedLegalActions: {
+        seat: normalizeSeat(tableSnapshot?.projectedLegalActions?.seat),
+        actions: normalizeActionList(tableSnapshot?.projectedLegalActions?.actions)
+      },
       actionConstraints: {
         toCall: Number.isFinite(tableSnapshot?.actionConstraints?.toCall) ? Number(tableSnapshot.actionConstraints.toCall) : null,
         minRaiseTo: Number.isFinite(tableSnapshot?.actionConstraints?.minRaiseTo) ? Number(tableSnapshot.actionConstraints.minRaiseTo) : null,

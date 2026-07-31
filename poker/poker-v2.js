@@ -1374,6 +1374,19 @@
     var bigBlindRaw = hasOwn(payload, 'bigBlind') ? payload.bigBlind : (hasOwn(publicObj, 'bigBlind') ? publicObj.bigBlind : undefined);
     if (Number.isFinite(Number(bigBlindRaw)) && Number(bigBlindRaw) > 0) state.bigBlind = Math.trunc(Number(bigBlindRaw));
 
+    // Authoritative projected pre-action list for a seated off-turn viewer; the
+    // server honors reopening rights, so the browser must not re-derive RAISE
+    // availability from numeric constraints.
+    var projectedLegalSource = payload.projectedLegalActions != null ? payload.projectedLegalActions : publicObj.projectedLegalActions;
+    if (projectedLegalSource && typeof projectedLegalSource === 'object'){
+      state.projectedLegalActions = {
+        seat: Number.isInteger(projectedLegalSource.seat) ? projectedLegalSource.seat : null,
+        actions: Array.isArray(projectedLegalSource.actions)
+          ? projectedLegalSource.actions.filter((action) => typeof action === 'string')
+          : []
+      };
+    }
+
     var previousHandId = state.handId;
     var previousPhase = state.phase;
     if (typeof handObj.status === 'string' && handObj.status) state.phase = handObj.status.toUpperCase();
@@ -1641,6 +1654,14 @@
 
   function resolveProjectedAllowedActions(){
     if (!isFoldAvailable()) return [];
+    // Authoritative projected action list from the server (honors reopening
+    // rights); do not re-derive RAISE availability from numeric constraints.
+    var projected = state.projectedLegalActions;
+    if (projected && Array.isArray(projected.actions) && projected.actions.length){
+      return projected.actions.slice();
+    }
+    // Legacy fallback: reconstruct from constraints. Only a finite minRaiseTo
+    // signals raising rights; maxRaiseTo or stack never imply a raise.
     var allowed = ['FOLD'];
     var constraints = state.actionConstraints || {};
     var stackAmount = resolveStack(state.currentUserId);
@@ -1648,9 +1669,7 @@
     if (toCall > 0) allowed.push('CALL');
     else allowed.push('CHECK');
     if (toCall > 0){
-      if (Number.isFinite(constraints.maxRaiseTo) || Number.isFinite(constraints.minRaiseTo) || (Number.isFinite(stackAmount) && stackAmount > toCall)){
-        allowed.push('RAISE');
-      }
+      if (Number.isFinite(constraints.minRaiseTo)) allowed.push('RAISE');
     } else if ((Number.isFinite(constraints.maxBetAmount) && Math.max(0, Math.trunc(constraints.maxBetAmount)) > 0) || (Number.isFinite(stackAmount) && stackAmount > 0)){
       allowed.push('BET');
     }

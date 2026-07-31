@@ -3450,7 +3450,7 @@ test('poker v2 late snapshot does not clear a newer unrelated error raised after
   assert.equal(harness.elements.pokerV2ErrorText.textContent.indexOf('Snapshot recovery timed out'), -1, 'old timeout message replaced by newer error');
 });
 
-function amountSnapshot({ handId, phase, board, potTotal, actions, constraints, stateVersion, turnUserId = 'user-1', bigBlind = null, stacks }){
+function amountSnapshot({ handId, phase, board, potTotal, actions, constraints, stateVersion, turnUserId = 'user-1', bigBlind = null, stacks, projectedActions = null }){
   return {
     kind: 'stateSnapshot',
     payload: {
@@ -3464,6 +3464,7 @@ function amountSnapshot({ handId, phase, board, potTotal, actions, constraints, 
         pot: { total: potTotal, sidePots: [] },
         stacks: stacks || { 'user-1': 100 },
         ...(bigBlind != null ? { bigBlind } : {}),
+        ...(projectedActions ? { projectedLegalActions: { seat: 1, actions: projectedActions } } : {}),
         legalActions: { seat: 1, actions },
         actionConstraints: constraints
       },
@@ -3827,4 +3828,48 @@ test('queued RAISE 100 is cancelled with a message when the live minimum becomes
   assert.equal(harness.actPayloads.length, 0, 'cancelled queued RAISE must never be sent (no silent 100->120)');
   assert.equal(harness.elements.pokerV2AmountPreaction.checked, false, 'queued RAISE must be cancelled');
   assert.match(harness.elements.pokerV2ErrorText.textContent, /Pre-action cancelled: minimum raise is now 120\./, 'cancellation message must be shown');
+});
+
+test('off-turn RAISE stays disabled when the server projection withholds raising rights', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  // Real projected room-core payload: the viewer already acted, lastRaiseSize
+  // is 10, a cumulative short all-in left toCall 5, and reopening rights are
+  // closed -> projectedLegalActions has no RAISE and minRaiseTo is null while
+  // maxRaiseTo stays numeric.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-no-raise',
+    phase: 'TURN',
+    board: ['As', 'Kd', 'Qc', '3h'],
+    potTotal: 60,
+    actions: ['FOLD'],
+    constraints: { toCall: 5, minRaiseTo: null, maxRaiseTo: 110, maxBetAmount: null, minBetAmount: null },
+    projectedActions: ['FOLD', 'CALL'],
+    bigBlind: 10,
+    stacks: { 'user-1': 90 },
+    stateVersion: 21,
+    turnUserId: 'villain-1'
+  }));
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2AmountPreaction.disabled, true, 'RAISE pre-action must stay disabled without reopening rights');
+
+  // ALL IN cannot bypass the closed raising rights either.
+  harness.elements.pokerV2AllInPreaction.click();
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AllInPreaction.checked, true, 'ALL IN pre-action should be queueable');
+
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-no-raise',
+    phase: 'TURN',
+    board: ['As', 'Kd', 'Qc', '3h'],
+    potTotal: 60,
+    actions: ['FOLD', 'CALL'],
+    constraints: { toCall: 5, minRaiseTo: null, maxRaiseTo: 110, maxBetAmount: null, minBetAmount: null },
+    stateVersion: 22
+  }));
+  await harness.flush();
+
+  assert.equal(harness.actPayloads.length, 0, 'ALL IN must not bypass closed raising rights');
+  assert.equal(harness.elements.pokerV2AllInPreaction.checked, false, 'queued ALL IN must be cancelled at turn arrival');
 });
