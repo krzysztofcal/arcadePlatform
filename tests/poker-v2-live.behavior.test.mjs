@@ -3309,3 +3309,73 @@ test('poker v2 resync runs bounded snapshot recovery: immediate request then max
   assert.equal(harness.getSnapshotRequestCount(), 4, 'no request after retries exhausted');
   assert.match(harness.elements.pokerV2LiveStatus.textContent, /error|unavailable/i, 'controlled error after retries exhausted');
 });
+
+test('poker v2 late snapshot after recovery timeout restores live status and clears the timeout error', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 10,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'bot-1', seat: 1, displayName: 'Bot 1', isBot: true }, { userId: 'user-1', seat: 4 }] },
+      public: {
+        hand: { handId: 'hand-late-snapshot', status: 'TURN', dealerSeatNo: 1 },
+        turn: { userId: 'bot-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 12, sidePots: [] },
+        legalActions: { seat: 4, actions: [] },
+        stacks: { 'bot-1': 100, 'user-1': 100 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 4 }
+    }
+  });
+  await harness.flush();
+
+  // Server-initiated resync triggers bounded recovery.
+  ws.onStatus('resync', { reason: 'version_conflict' });
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2JoinBtn.disabled, true, 'resync gate blocks actions');
+
+  // Exhaust the retries (1 immediate + 3 retries) and let the cap timer fire the timeout.
+  harness.advanceTime(5000);
+  await harness.flush();
+  harness.advanceTime(5000);
+  await harness.flush();
+  harness.advanceTime(5000);
+  await harness.flush();
+  harness.advanceTime(5000);
+  await harness.flush();
+  assert.equal(harness.getSnapshotRequestCount(), 4, 'bounded retries exhausted');
+  assert.match(harness.elements.pokerV2LiveStatus.textContent, /error|unavailable/i, 'timeout raised');
+  assert.match(harness.elements.pokerV2ErrorText.textContent, /Snapshot recovery timed out/);
+
+  // A late valid authoritative snapshot arrives after the timeout.
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 11,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'bot-1', seat: 1, displayName: 'Bot 1', isBot: true }, { userId: 'user-1', seat: 4 }] },
+      public: {
+        hand: { handId: 'hand-late-snapshot-2', status: 'TURN', dealerSeatNo: 1 },
+        turn: { userId: 'bot-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 12, sidePots: [] },
+        legalActions: { seat: 4, actions: [] },
+        stacks: { 'bot-1': 100, 'user-1': 100 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 4 }
+    }
+  });
+  await harness.flush();
+
+  // Gate opens (status/error UI restored), even though the player is seated so
+  // the join button stays disabled for the seated state.
+  assert.match(harness.elements.pokerV2LiveStatus.textContent, /live/i, 'status back to live');
+  assert.equal(harness.elements.pokerV2ErrorText.textContent.indexOf('Snapshot recovery timed out'), -1, 'timeout message cleared');
+  assert.equal(harness.elements.pokerV2ErrorText.textContent.trim(), '', 'error text cleared');
+});

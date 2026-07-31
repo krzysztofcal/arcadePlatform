@@ -166,6 +166,7 @@
   var liveModeGeneration = 0;
   var snapshotRecoveryTimer = null;
   var snapshotRecoveryAttempts = 0;
+  var snapshotRecoveryTimedOut = false;
   var SNAPSHOT_RECOVERY_TIMEOUT_MS = 5000;
   var SNAPSHOT_RECOVERY_MAX_ATTEMPTS = 3;
   var joinOperation = {
@@ -3642,6 +3643,7 @@
       if (gen !== liveModeGeneration) return;
       if (!state.reconnectGate) return;
       if (snapshotRecoveryAttempts >= SNAPSHOT_RECOVERY_MAX_ATTEMPTS){
+        snapshotRecoveryTimedOut = true;
         state.statusText = LIVE_STATUS_COPY.error;
         setError('Snapshot recovery timed out');
         renderInfoPanel();
@@ -3661,6 +3663,7 @@
     if (gen !== liveModeGeneration) return;
     if (!state.reconnectGate) return;
     snapshotRecoveryAttempts = 0;
+    snapshotRecoveryTimedOut = false;
     issueSnapshotRecoveryRequest(gen);
     scheduleSnapshotRecovery(gen);
   }
@@ -3848,6 +3851,13 @@
           state.reconnectGate = false;
           stopSnapshotRecoveryTimer();
           openedRecoveryGate = true;
+          if (snapshotRecoveryTimedOut){
+            // A late snapshot arrived after the bounded retries exhausted: clear only
+            // the recovery timeout status/error so the UI returns to live.
+            snapshotRecoveryTimedOut = false;
+            state.statusText = LIVE_STATUS_COPY.live;
+            if (!autoJoinErrorActive) state.errorText = '';
+          }
           if (pendingLeaveRetryAfterReconnect){
             leaveAndReturnToLobby();
             return;
