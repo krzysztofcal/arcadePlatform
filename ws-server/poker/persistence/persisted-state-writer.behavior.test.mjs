@@ -527,14 +527,6 @@ test("persisted state writer appends accepted human action audit row", async () 
   const meta = actionInsert.params[9];
   assert.deepEqual(meta, {
     auditVersion: 1,
-    tableId: "t_action",
-    handId: "hand_action",
-    actorUserId: "u2",
-    action: "CALL",
-    phaseFrom: "PREFLOP",
-    phaseTo: "FLOP",
-    stateVersionAfter: 8,
-    amount: 4,
     isBot: false,
     source: "human",
     stateVersionBefore: 7,

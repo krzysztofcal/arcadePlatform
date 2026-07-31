@@ -251,17 +251,9 @@ function buildAcceptedActionAuditMeta({ tableId, stateVersionAfter, auditAction,
     || `audit:action:${tableId}:${handId}:${stateVersionAfter}:${actorUserId}:${actionType}`;
 
   const meta = {
-    auditVersion: ACCEPTED_ACTION_AUDIT_VERSION,
-    tableId,
-    handId,
-    actorUserId,
-    action: actionType,
-    phaseFrom: phaseFrom || null,
-    phaseTo: phaseTo || null,
-    stateVersionAfter
+    auditVersion: ACCEPTED_ACTION_AUDIT_VERSION
   };
 
-  if (amount !== null) meta.amount = amount;
   if (typeof auditAction.isBot === "boolean") meta.isBot = auditAction.isBot;
   if (normalizeAuditString(auditAction.source ?? auditAction.trigger)) meta.source = normalizeAuditString(auditAction.source ?? auditAction.trigger);
   const stateVersionBefore = normalizeAuditNumber(auditAction.stateVersionBefore);
