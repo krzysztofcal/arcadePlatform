@@ -362,7 +362,7 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
   const turnTimer = resolveTurnTimer({ statePublic, turnUserId: turnIdentity.userId });
   const legalInfo = Number.isInteger(effectiveYouSeat)
     ? computeSharedLegalActions({ statePublic, userId })
-    : { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
+    : { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
 
   const snapshot = {
     roomId: typeof statePublic.roomId === "string" ? statePublic.roomId : roomId || tableId,
@@ -395,7 +395,8 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
       toCall: Number.isFinite(legalInfo.toCall) ? legalInfo.toCall : null,
       minRaiseTo: Number.isFinite(legalInfo.minRaiseTo) ? legalInfo.minRaiseTo : null,
       maxRaiseTo: Number.isFinite(legalInfo.maxRaiseTo) ? legalInfo.maxRaiseTo : null,
-      maxBetAmount: Number.isFinite(legalInfo.maxBetAmount) ? legalInfo.maxBetAmount : null
+      maxBetAmount: Number.isFinite(legalInfo.maxBetAmount) ? legalInfo.maxBetAmount : null,
+      minBetAmount: Number.isFinite(legalInfo.minBetAmount) ? legalInfo.minBetAmount : null
     },
     betThisRoundByUserId: normalizeNumericUserMap(statePublic.betThisRoundByUserId),
     committedByUserId: normalizeNumericUserMap(statePublic.committedByUserId),

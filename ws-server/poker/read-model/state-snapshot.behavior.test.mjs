@@ -499,3 +499,32 @@ test("buildStateSnapshotPayload keeps next-hand timer metadata and omits stale t
   assert.equal("showdown" in payload.public, false);
   assert.equal("handSettlement" in payload.public, false);
 });
+
+test("buildStateSnapshotPayload keeps minBetAmount for a later BET turn in the same hand", () => {
+  const tableManager = createTableManager({ maxSeats: 6 });
+  const wsA = {};
+  const wsB = {};
+  const tableId = "table_bet_min_live";
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a" }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b" }).ok, true);
+  assert.equal(tableManager.bootstrapHand(tableId).ok, true);
+
+  const preflopHandId = tableManager.tableSnapshot(tableId, "user_a").hand.handId;
+  assert.equal(typeof preflopHandId, "string");
+
+  // First turn: user_a calls preflop, user_b checks -> FLOP, action returns to
+  // user_a with a legal opening BET on the flop.
+  const callA = tableManager.applyAction({ tableId, handId: preflopHandId, userId: "user_a", requestId: "a-call", action: "CALL" });
+  assert.equal(callA.accepted, true);
+  const checkB = tableManager.applyAction({ tableId, handId: preflopHandId, userId: "user_b", requestId: "b-check", action: "CHECK" });
+  assert.equal(checkB.accepted, true);
+  assert.equal(tableManager.tableSnapshot(tableId, "user_b").hand.status, "FLOP");
+
+  const snapshot = tableManager.tableSnapshot(tableId, "user_a");
+  const payload = buildStateSnapshotPayload({ tableSnapshot: snapshot, userId: "user_a" });
+
+  assert.equal(payload.public.turn.userId, "user_a");
+  assert.ok(payload.public.legalActions.actions.includes("BET"));
+  assert.equal(payload.public.actionConstraints.minBetAmount, 2, "live BET turn must keep minBetAmount from legalInfo");
+});

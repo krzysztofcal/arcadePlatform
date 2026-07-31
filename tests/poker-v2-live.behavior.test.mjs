@@ -3561,3 +3561,44 @@ test('poker v2 amount button sends the selected legal boundary amount', async ()
   assert.equal(harness.actPayloads.length, 2);
   assert.equal(JSON.stringify(harness.actPayloads[1]), JSON.stringify({ handId: 'hand-amount-raise', action: 'RAISE', amount: 90 }));
 });
+
+test('poker v2 keeps the BET slider minimum across turns in the same hand', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  // First BET turn: constraints carry minBetAmount=10.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-multiturn',
+    phase: 'FLOP',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 42,
+    actions: ['FOLD', 'CHECK', 'BET'],
+    constraints: { toCall: 0, minBetAmount: 10, maxBetAmount: 100 },
+    stateVersion: 8
+  }));
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AmountInput.min, '10', 'first BET turn slider min should be minBetAmount');
+
+  // The user submits a legal boundary bet.
+  harness.elements.pokerV2AmountInput.value = '10';
+  harness.elements.pokerV2AmountBtn.click();
+  await harness.flush();
+  assert.equal(harness.actPayloads.length, 1);
+  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-multiturn', action: 'BET', amount: 10 }));
+
+  // Subsequent snapshots from other players/street lead to another BET turn for
+  // the same user in the same hand; the slider must keep the server minimum.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-multiturn',
+    phase: 'FLOP',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 62,
+    actions: ['FOLD', 'CHECK', 'BET'],
+    constraints: { toCall: 0, minBetAmount: 10, maxBetAmount: 100 },
+    stateVersion: 9
+  }));
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2AmountInput.min, '10', 'later BET turn must keep minBetAmount');
+  const laterValue = Number(harness.elements.pokerV2AmountInput.value);
+  assert.ok(Number.isFinite(laterValue) && laterValue >= 10, 'later BET turn slider value must stay within the legal range');
+});
