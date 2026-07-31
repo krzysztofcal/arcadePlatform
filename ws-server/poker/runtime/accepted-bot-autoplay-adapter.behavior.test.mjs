@@ -234,6 +234,53 @@ test("accepted bot autoplay enriches legal bet with a positive amount", async ()
   assert.equal(observed.action.amount > 0, true);
 });
 
+test("accepted bot autoplay bets the server-provided big-blind minimum", async () => {
+  const observed = { action: null };
+  const state = {
+    version: 2,
+    tableId: "t-bb-min",
+    handId: "h-bb-min",
+    phase: "FLOP",
+    turnUserId: "bot_2",
+    seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }],
+    stacks: { human_1: 100, bot_2: 100 },
+    holeCardsByUserId: { bot_2: ["AS", "AD"] },
+    community: ["3H", "4H", "5H"],
+    communityDealt: 3,
+    deck: ["6S", "7S", "8S", "9S", "TS"],
+    currentBet: 0,
+    lastRaiseSize: 10,
+    bigBlind: 10,
+    toCallByUserId: { bot_2: 0, human_1: 0 },
+    betThisRoundByUserId: { bot_2: 0, human_1: 0 },
+    actedThisRoundByUserId: { bot_2: false, human_1: true },
+    foldedByUserId: { bot_2: false, human_1: false }
+  };
+  const tableManager = {
+    persistedPokerState: () => ({ ...state }),
+    persistedStateVersion: () => 2,
+    tableSnapshot: () => ({ seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true, botProfile: "NORMAL" }] }),
+    applyAction: ({ action, amount }) => {
+      observed.action = { action, amount };
+      return { accepted: true, changed: true, replayed: false, stateVersion: 3 };
+    }
+  };
+
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    random: () => 0,
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    klog: () => {}
+  });
+
+  const result = await run({ tableId: "t-bb-min", trigger: "act", requestId: "r-bb-min" });
+  assert.equal(result.ok, true);
+  assert.equal(observed.action?.action, "BET");
+  assert.equal(observed.action?.amount, 10);
+});
+
 test("accepted bot autoplay enriches legal raise with a positive amount", async () => {
   const observed = { action: null };
   const state = {

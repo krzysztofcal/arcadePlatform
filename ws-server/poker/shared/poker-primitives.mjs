@@ -143,6 +143,19 @@ function deriveLastRaiseSize(state, currentBet) {
   return lastRaiseSize;
 }
 
+function deriveBigBlind(state) {
+  const bigBlind = toSafeInt(state?.bigBlind, 0);
+  return bigBlind > 0 ? bigBlind : 1;
+}
+
+// A player who already acted this round may RAISE only when facing at least a
+// full raise (toCall >= lastRaiseSize). Players who have not acted yet always
+// retain their option. Cumulative short all-ins are handled because toCall
+// grows while lastRaiseSize is only updated on full bets/raises.
+function canRaise(state, userId, toCall, lastRaiseSize) {
+  return !state?.actedThisRoundByUserId?.[userId] || toCall >= lastRaiseSize;
+}
+
 function isActivePlayer(state, userId) {
   if (!state || !userId) return false;
   if (state.leftTableByUserId && state.leftTableByUserId[userId]) return false;
@@ -166,36 +179,14 @@ function isSeatedPlayer(state, userId) {
   return !!(state.stacks && typeof state.stacks === "object" && Object.prototype.hasOwnProperty.call(state.stacks, userId));
 }
 
-function computeSharedLegalActions({ statePublic, userId } = {}) {
-  const state = statePublic || {};
-  if (!state || typeof state !== "object" || Array.isArray(state)) {
-    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
-  }
-  const phase = typeof state.phase === "string" ? state.phase : "";
-  if (!ACTION_PHASES.has(phase)) {
-    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
-  }
-  if (!userId || typeof userId !== "string") {
-    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
-  }
-  if (!isSeatedPlayer(state, userId) || !isActivePlayer(state, userId)) {
-    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
-  }
-  const turnUserId = typeof state.turnUserId === "string" ? state.turnUserId : "";
-  if (!turnUserId) {
-    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
-  }
-
+function computeLegalActionsForSeatedPlayer(state, userId) {
   const stack = toSafeInt(state.stacks?.[userId], 0);
   const currentUserBet = toSafeInt(state.betThisRoundByUserId?.[userId], 0);
   const currentBet = deriveCurrentBet(state);
   const lastRaiseSize = deriveLastRaiseSize(state, currentBet);
   const toCall = Math.max(0, currentBet - currentUserBet);
   if (stack <= 0) {
-    return { actions: [], toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
-  }
-  if (turnUserId !== userId) {
-    return { actions: ["FOLD"], toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
+    return { actions: [], toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
   }
 
   if (toCall > 0) {
@@ -203,26 +194,79 @@ function computeSharedLegalActions({ statePublic, userId } = {}) {
     const maxRaiseTo = stack + currentUserBet;
     const rawMinRaiseTo = currentBet + lastRaiseSize;
     const minRaiseTo = maxRaiseTo > 0 ? Math.min(rawMinRaiseTo, maxRaiseTo) : rawMinRaiseTo;
-    if (maxRaiseTo > currentBet) actions.push("RAISE");
+    const mayRaise = canRaise(state, userId, toCall, lastRaiseSize) && maxRaiseTo > currentBet;
+    if (mayRaise) actions.push("RAISE");
     return {
       actions,
       toCall,
-      minRaiseTo: maxRaiseTo > currentBet ? minRaiseTo : null,
+      minRaiseTo: mayRaise ? minRaiseTo : null,
       maxRaiseTo,
-      maxBetAmount: null
+      maxBetAmount: null,
+      minBetAmount: null
     };
   }
 
   const actions = ["FOLD", "CHECK"];
   if (stack > 0) actions.push("BET");
-  return { actions, toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: stack };
+  const minBetAmount = Math.min(deriveBigBlind(state), stack);
+  return { actions, toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: stack, minBetAmount };
+}
+
+function computeSharedLegalActions({ statePublic, userId } = {}) {
+  const state = statePublic || {};
+  if (!state || typeof state !== "object" || Array.isArray(state)) {
+    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  const phase = typeof state.phase === "string" ? state.phase : "";
+  if (!ACTION_PHASES.has(phase)) {
+    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  if (!userId || typeof userId !== "string") {
+    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  if (!isSeatedPlayer(state, userId) || !isActivePlayer(state, userId)) {
+    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  const turnUserId = typeof state.turnUserId === "string" ? state.turnUserId : "";
+  if (!turnUserId) {
+    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  if (turnUserId !== userId) {
+    const toCall = Math.max(0, deriveCurrentBet(state) - toSafeInt(state.betThisRoundByUserId?.[userId], 0));
+    return { actions: ["FOLD"], toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  return computeLegalActionsForSeatedPlayer(state, userId);
+}
+
+// Projected amount constraints for a seated viewer who is not currently acting:
+// the legal actions the viewer would face if the action came to them at the
+// current betting-round state. Uses the same authoritative NLHE rules as the
+// live computation so the client never has to derive minimums itself.
+function computeProjectedLegalActions({ statePublic, userId } = {}) {
+  const state = statePublic || {};
+  if (!state || typeof state !== "object" || Array.isArray(state)) {
+    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  const phase = typeof state.phase === "string" ? state.phase : "";
+  if (!ACTION_PHASES.has(phase)) {
+    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  if (!userId || typeof userId !== "string") {
+    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  if (!isSeatedPlayer(state, userId) || !isActivePlayer(state, userId)) {
+    return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+  }
+  return computeLegalActionsForSeatedPlayer(state, userId);
 }
 
 export {
   asCardCode,
   computeSharedLegalActions,
+  computeProjectedLegalActions,
   createDeck,
   dealHoleCards,
+  deriveBigBlind,
   deriveDeck,
   toCardCodes,
   toHoleCardCodeMap

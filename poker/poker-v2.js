@@ -125,6 +125,7 @@
     lastBettingRoundActionByUserId: { victor: 'call', marcus: 'raise', nico: 'fold' },
     legalActions: ['FOLD', 'CHECK', 'BET'],
     actionConstraints: { toCall: 0, maxBetAmount: 240, minRaiseTo: null, maxRaiseTo: null },
+    bigBlind: null,
     currentUserId: 'hero',
     youSeat: 3,
     statusText: LIVE_STATUS_COPY.demo,
@@ -975,7 +976,8 @@
       toCall: raw.toCall != null ? Number(raw.toCall) : null,
       minRaiseTo: raw.minRaiseTo != null ? Number(raw.minRaiseTo) : null,
       maxRaiseTo: raw.maxRaiseTo != null ? Number(raw.maxRaiseTo) : null,
-      maxBetAmount: raw.maxBetAmount != null ? Number(raw.maxBetAmount) : null
+      maxBetAmount: raw.maxBetAmount != null ? Number(raw.maxBetAmount) : null,
+      minBetAmount: raw.minBetAmount != null ? Number(raw.minBetAmount) : null
     };
   }
 
@@ -1367,6 +1369,31 @@
     var nextStacks = normalizeStacks(payload);
     if (nextStacks) state.stacks = nextStacks;
 
+    // Authoritative big blind for the current hand; used to derive legal BET
+    // minimums off-turn (min(bigBlind, stack)) when minBetAmount is absent.
+    var bigBlindRaw = hasOwn(payload, 'bigBlind') ? payload.bigBlind : (hasOwn(publicObj, 'bigBlind') ? publicObj.bigBlind : undefined);
+    if (Number.isFinite(Number(bigBlindRaw)) && Number(bigBlindRaw) > 0) state.bigBlind = Math.trunc(Number(bigBlindRaw));
+
+    // Authoritative projected pre-action list for a seated off-turn viewer; the
+    // server honors reopening rights, so the browser must not re-derive RAISE
+    // availability from numeric constraints. Field presence (not list length)
+    // is authoritative: an intentionally empty projected list must not fall
+    // back to browser reconstruction.
+    var projectedLegalPresent = hasOwn(payload, 'projectedLegalActions') || hasOwn(publicObj, 'projectedLegalActions');
+    if (projectedLegalPresent){
+      var projectedLegalSource = payload.projectedLegalActions != null ? payload.projectedLegalActions : publicObj.projectedLegalActions;
+      state.projectedLegalActions = (projectedLegalSource && typeof projectedLegalSource === 'object')
+        ? {
+            seat: Number.isInteger(projectedLegalSource.seat) ? projectedLegalSource.seat : null,
+            actions: Array.isArray(projectedLegalSource.actions)
+              ? projectedLegalSource.actions.filter((action) => typeof action === 'string')
+              : []
+          }
+        : { seat: null, actions: [] };
+    } else {
+      state.projectedLegalActions = undefined;
+    }
+
     var previousHandId = state.handId;
     var previousPhase = state.phase;
     if (typeof handObj.status === 'string' && handObj.status) state.phase = handObj.status.toUpperCase();
@@ -1634,6 +1661,15 @@
 
   function resolveProjectedAllowedActions(){
     if (!isFoldAvailable()) return [];
+    // Authoritative projected action list from the server (honors reopening
+    // rights). Field presence decides authority: an intentionally empty list
+    // means no pre-actions and must NOT fall back to browser reconstruction.
+    var projected = state.projectedLegalActions;
+    if (projected !== undefined && projected !== null){
+      return Array.isArray(projected.actions) ? projected.actions.slice() : [];
+    }
+    // Legacy fallback: reconstruct from constraints. Only a finite minRaiseTo
+    // signals raising rights; maxRaiseTo or stack never imply a raise.
     var allowed = ['FOLD'];
     var constraints = state.actionConstraints || {};
     var stackAmount = resolveStack(state.currentUserId);
@@ -1641,9 +1677,7 @@
     if (toCall > 0) allowed.push('CALL');
     else allowed.push('CHECK');
     if (toCall > 0){
-      if (Number.isFinite(constraints.maxRaiseTo) || Number.isFinite(constraints.minRaiseTo) || (Number.isFinite(stackAmount) && stackAmount > toCall)){
-        allowed.push('RAISE');
-      }
+      if (Number.isFinite(constraints.minRaiseTo)) allowed.push('RAISE');
     } else if ((Number.isFinite(constraints.maxBetAmount) && Math.max(0, Math.trunc(constraints.maxBetAmount)) > 0) || (Number.isFinite(stackAmount) && stackAmount > 0)){
       allowed.push('BET');
     }
@@ -2751,15 +2785,14 @@
     return null;
   }
 
-  function canQueueAllInPreaction(){
-    var stackAmount = resolveStack(state.currentUserId);
-    return stackAmount == null || stackAmount > 0;
-  }
-
   function resolveAmountBounds(amountAction, stackAmount){
     if (!amountAction) return null;
     var constraints = state.actionConstraints || {};
-    var min = amountAction === 'RAISE' && Number.isFinite(constraints.minRaiseTo) ? Math.max(1, Math.trunc(constraints.minRaiseTo)) : 1;
+    var bigBlindAmount = Number.isFinite(state.bigBlind) ? Math.max(1, Math.trunc(state.bigBlind)) : null;
+    var min = amountAction === 'RAISE'
+      ? (Number.isFinite(constraints.minRaiseTo) ? Math.max(1, Math.trunc(constraints.minRaiseTo)) : 1)
+      : (Number.isFinite(constraints.minBetAmount) ? Math.max(1, Math.trunc(constraints.minBetAmount))
+        : (bigBlindAmount != null && Number.isFinite(stackAmount) ? Math.min(bigBlindAmount, Math.max(0, Math.trunc(stackAmount))) : 1));
     var max = amountAction === 'RAISE'
       ? (Number.isFinite(constraints.maxRaiseTo) ? Math.max(min, Math.trunc(constraints.maxRaiseTo)) : null)
       : (Number.isFinite(constraints.maxBetAmount) ? Math.max(1, Math.trunc(constraints.maxBetAmount)) : stackAmount);
@@ -2787,6 +2820,13 @@
 
   function clearQueuedPreaction(){
     queuedPreaction = null;
+  }
+
+  function notifyPreactionCancelled(amountAction, bounds){
+    if (amountAction !== 'RAISE' && amountAction !== 'BET') return;
+    if (!bounds || !Number.isFinite(bounds.min)) return;
+    var noun = amountAction === 'RAISE' ? 'raise' : 'bet';
+    setError('Pre-action cancelled: minimum ' + noun + ' is now ' + Math.trunc(bounds.min) + '.');
   }
 
   function resetQueuedPreactionState(){
@@ -2839,6 +2879,7 @@
       }
       var queuedAmount = readQueuedAmount();
       if (!Number.isFinite(queuedAmount) || queuedAmount < preactionState.amountBounds.min || (preactionState.amountBounds.max != null && queuedAmount > preactionState.amountBounds.max)){
+        notifyPreactionCancelled(queuedPreaction.action, preactionState.amountBounds);
         clearQueuedPreaction();
         return;
       }
@@ -2887,7 +2928,17 @@
     var projectedAllowed = preactionMode ? resolveProjectedAllowedActions() : [];
     var preactionPrimary = resolvePrimaryAction(projectedAllowed);
     var preactionAmountAction = resolveAmountAction(projectedAllowed);
-    var preactionAllInAvailable = preactionMode && canQueueAllInPreaction();
+    // Off-turn ALL IN availability follows the authoritative projected actions
+    // (CALL all-in when stack <= toCall, RAISE/BET all-in when those are legal);
+    // a positive stack alone never implies an all-in.
+    var preactionAllInPlan = preactionMode ? resolveAllInPlan(projectedAllowed) : null;
+    var preactionAllInAvailable = !!preactionAllInPlan;
+    // A short stack below the big blind cannot make an ordinary opening bet; the
+    // only legal opening bet is the all-in, which the ALL IN pre-action already
+    // represents. Do not offer a selectable BET amount for it.
+    if (preactionMode && preactionAmountAction === 'BET' && Number.isFinite(stackAmount) && Number.isFinite(state.bigBlind) && stackAmount < Math.trunc(state.bigBlind) && preactionAllInAvailable){
+      preactionAmountAction = null;
+    }
     var preactionAmountBounds = resolveAmountBounds(preactionAmountAction, stackAmount);
     var displayPrimary = primary || preactionPrimary || 'CHECK';
     var displayAmountAction = amountAction || preactionAmountAction || 'BET';
@@ -3234,6 +3285,12 @@
       amountBounds: resolveAmountBounds(resolveAmountAction(allowed), resolveStack(state.currentUserId))
     };
     var nextAction = resolveQueuedPreactionExecution(liveState);
+    if (!nextAction && queuedPreaction && queuedPreaction.slot === 'amount' && queuedPreaction.action === liveState.amountAction && liveState.amountBounds){
+      var queuedAmountValue = queuedPreaction.amount;
+      if (!Number.isFinite(queuedAmountValue) || queuedAmountValue < liveState.amountBounds.min || (liveState.amountBounds.max != null && queuedAmountValue > liveState.amountBounds.max)){
+        notifyPreactionCancelled(queuedPreaction.action, liveState.amountBounds);
+      }
+    }
     clearQueuedPreaction();
     if (!nextAction || !nextAction.action) return;
     queuedPreactionInFlight = true;

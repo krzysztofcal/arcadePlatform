@@ -836,6 +836,89 @@ const run = async () => {
     assert.ok(advanced.events.some((event) => event.type === "HAND_RESET"));
   }
 
+  {
+    // Big-blind minimum opening bet, full-raise contract and reopening rights.
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t-bb-min", seats, stacks, rng: makeRng(31) });
+    const flop = {
+      ...state,
+      phase: "FLOP",
+      community: ["3H", "4H", "5H"],
+      communityDealt: 3,
+      turnUserId: "user-1",
+      currentBet: 0,
+      lastRaiseSize: 10,
+      bigBlind: 10,
+      toCallByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+      betThisRoundByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+      actedThisRoundByUserId: { "user-1": false, "user-2": false, "user-3": false },
+      foldedByUserId: { "user-1": false, "user-2": false, "user-3": false },
+    };
+
+    const betAction = getLegalActions(flop, "user-1").find((action) => action.type === "BET");
+    assert.equal(betAction.min, 10);
+    assert.equal(betAction.max, 100);
+
+    assert.throws(
+      () => applyAction(flop, { type: "BET", userId: "user-1", amount: 1 }),
+      (error) => error?.message === "invalid_action"
+    );
+
+    const betResult = applyAction(flop, { type: "BET", userId: "user-1", amount: 10 });
+    assert.equal(betResult.state.currentBet, 10);
+    assert.equal(betResult.state.lastRaiseSize, 10);
+    assert.equal(betResult.state.betThisRoundByUserId["user-1"], 10);
+
+    // A player with a stack below the big blind may only bet all-in.
+    const shortFlop = { ...flop, turnUserId: "user-2", stacks: { ...flop.stacks, "user-2": 3 } };
+    const shortBetAction = getLegalActions(shortFlop, "user-2").find((action) => action.type === "BET");
+    assert.equal(shortBetAction.min, 3);
+    assert.equal(shortBetAction.max, 3);
+    const shortAllIn = applyAction(shortFlop, { type: "BET", userId: "user-2", amount: 3 });
+    assert.equal(shortAllIn.state.betThisRoundByUserId["user-2"], 3);
+    assert.equal(shortAllIn.state.lastRaiseSize, 10);
+
+    // A short all-in raise does not reopen RAISE for already-acted players.
+    let reopened = applyAction(flop, { type: "BET", userId: "user-1", amount: 10 }).state;
+    reopened = applyAction(reopened, { type: "CALL", userId: "user-2" }).state;
+    reopened = applyAction({ ...reopened, stacks: { ...reopened.stacks, "user-3": 13 } }, { type: "RAISE", userId: "user-3", amount: 13 }).state;
+    assert.equal(reopened.currentBet, 13);
+    assert.equal(reopened.lastRaiseSize, 10);
+    assert.deepEqual(getLegalActions(reopened, "user-1").map((action) => action.type), ["FOLD", "CALL"]);
+    assert.throws(
+      () => applyAction(reopened, { type: "RAISE", userId: "user-1", amount: 25 }),
+      (error) => error?.message === "invalid_action"
+    );
+  }
+
+  {
+    // Big-blind preflop option: BET is an increment over the posted blind and
+    // must raise the global currentBet to the new total.
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t-bb-option", seats, stacks, rng: makeRng(32) });
+    const preflop = {
+      ...state,
+      phase: "PREFLOP",
+      turnUserId: "user-1",
+      currentBet: 10,
+      lastRaiseSize: 10,
+      bigBlind: 10,
+      toCallByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+      betThisRoundByUserId: { "user-1": 10, "user-2": 10, "user-3": 10 },
+      actedThisRoundByUserId: { "user-1": false, "user-2": true, "user-3": true },
+      foldedByUserId: { "user-1": false, "user-2": false, "user-3": false },
+      stacks: { "user-1": 90, "user-2": 90, "user-3": 90 },
+    };
+
+    const betResult = applyAction(preflop, { type: "BET", userId: "user-1", amount: 10 });
+    assert.equal(betResult.state.betThisRoundByUserId["user-1"], 20);
+    assert.equal(betResult.state.currentBet, 20);
+    assert.equal(betResult.state.lastRaiseSize, 10);
+    assert.equal(betResult.state.stacks["user-1"], 80);
+    assert.equal(betResult.state.toCallByUserId["user-2"], 10);
+    assert.equal(betResult.state.toCallByUserId["user-3"], 10);
+  }
+
 };
 
 await run();

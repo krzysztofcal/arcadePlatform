@@ -1155,6 +1155,7 @@ function buildTableStatePayload({ tableState, tableSnapshot, userId }) {
   if (Number.isInteger(tableSnapshot.dealerSeatNo)) payload.dealerSeatNo = tableSnapshot.dealerSeatNo;
   if (Array.isArray(tableSnapshot.seats)) payload.seats = tableSnapshot.seats;
   if (tableSnapshot.stacks && typeof tableSnapshot.stacks === "object" && !Array.isArray(tableSnapshot.stacks)) payload.stacks = tableSnapshot.stacks;
+  if (Number.isInteger(tableSnapshot.bigBlind) && tableSnapshot.bigBlind > 0) payload.bigBlind = tableSnapshot.bigBlind;
   if (tableSnapshot.hand && typeof tableSnapshot.hand === "object") {
     payload.hand = { ...tableSnapshot.hand };
     if (!Number.isInteger(payload.hand.dealerSeatNo) && Number.isInteger(tableSnapshot.dealerSeatNo)) {
@@ -1165,6 +1166,7 @@ function buildTableStatePayload({ tableState, tableSnapshot, userId }) {
   if (tableSnapshot.pot && typeof tableSnapshot.pot === "object") payload.pot = tableSnapshot.pot;
   if (tableSnapshot.turn && typeof tableSnapshot.turn === "object") payload.turn = tableSnapshot.turn;
   if (tableSnapshot.legalActions && typeof tableSnapshot.legalActions === "object") payload.legalActions = tableSnapshot.legalActions;
+  if (tableSnapshot.projectedLegalActions && typeof tableSnapshot.projectedLegalActions === "object") payload.projectedLegalActions = tableSnapshot.projectedLegalActions;
   if (tableSnapshot.actionConstraints && typeof tableSnapshot.actionConstraints === "object") payload.actionConstraints = tableSnapshot.actionConstraints;
   if (Array.isArray(tableSnapshot.members)) payload.authoritativeMembers = tableSnapshot.members;
   if (tableSnapshot.showdown && typeof tableSnapshot.showdown === "object") payload.showdown = tableSnapshot.showdown;

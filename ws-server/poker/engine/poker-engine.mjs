@@ -185,6 +185,7 @@ export function buildBootstrappedPokerState({
     potTotal: sbPosted + bbPosted,
     sidePots: [],
     currentBet,
+    bigBlind,
     lastRaiseSize: bigBlind,
     stacks,
     toCallByUserId,
@@ -576,7 +577,8 @@ export function applyCoreStateAction({ tableId, coreState, handId, userId, actio
   if (normalizedAction === "BET") {
     const betAmount = toInt(amount);
     const maxBetAmount = Number(legalInfo.maxBetAmount ?? 0);
-    if (!Number.isInteger(betAmount) || betAmount < 1 || betAmount > maxBetAmount) {
+    const minBetAmount = Number(legalInfo.minBetAmount ?? 1);
+    if (!Number.isInteger(betAmount) || betAmount < minBetAmount || betAmount > maxBetAmount) {
       return { ok: true, accepted: false, changed: false, reason: "invalid_amount", stateVersion: coreState.version, coreState };
     }
     if (!Number.isFinite(stack) || betAmount > stack) {

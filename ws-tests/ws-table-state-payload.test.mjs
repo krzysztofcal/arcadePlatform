@@ -42,7 +42,7 @@ test("buildTableStatePayload keeps live members and emits authoritativeMembers f
       pot: { total: 90, sidePots: [] },
       turn: { userId: "u1", seat: 0, deadlineAt: 123 },
       legalActions: { seat: 0, actions: ["CHECK", "BET"] },
-      actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: 500 },
+      actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: 500, minBetAmount: 10 },
       members: [{ userId: "seed_user", seat: 2 }],
       private: { shouldNotBeIncluded: true }
     }
@@ -55,7 +55,7 @@ test("buildTableStatePayload keeps live members and emits authoritativeMembers f
   assert.deepEqual(withConstraints.seats, [{ userId: "seed_user", seatNo: 2, status: "ACTIVE" }]);
   assert.deepEqual(withConstraints.stacks, { seed_user: 180 });
   assert.deepEqual(withConstraints.legalActions, { seat: 0, actions: ["CHECK", "BET"] });
-  assert.deepEqual(withConstraints.actionConstraints, { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: 500 });
+  assert.deepEqual(withConstraints.actionConstraints, { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: 500, minBetAmount: 10 });
   assert.deepEqual(withConstraints.authoritativeMembers, [{ userId: "seed_user", seat: 2 }]);
   assert.equal(Object.prototype.hasOwnProperty.call(withConstraints, "private"), false);
 

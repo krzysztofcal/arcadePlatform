@@ -58,7 +58,8 @@ test("computeSharedLegalActions allows fold outside the current turn for an acti
     toCall: 0,
     minRaiseTo: null,
     maxRaiseTo: null,
-    maxBetAmount: null
+    maxBetAmount: null,
+    minBetAmount: null
   });
 });
 
@@ -86,6 +87,7 @@ test("computeSharedLegalActions keeps fold available when check is legal on the 
     toCall: 0,
     minRaiseTo: null,
     maxRaiseTo: null,
-    maxBetAmount: 90
+    maxBetAmount: 90,
+    minBetAmount: 1
   });
 });

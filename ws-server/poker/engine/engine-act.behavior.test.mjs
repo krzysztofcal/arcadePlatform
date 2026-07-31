@@ -418,3 +418,81 @@ test("engine legality gate rejects invalid bet amount with no mutation", () => {
   assert.equal(invalidBet.stateVersion, coreState.version);
   assert.equal(invalidBet.coreState, coreState);
 });
+
+test("engine bootstraps a 5/10 hand with bigBlind persisted in state", () => {
+  const boot = bootstrapCoreStateHand({
+    tableId: "table_engine_act",
+    coreState: initialCore(),
+    nowMs: 8_000,
+    stakes: { sb: 5, bb: 10 }
+  });
+  assert.equal(boot.ok, true);
+  assert.equal(boot.coreState.pokerState.bigBlind, 10);
+  assert.equal(boot.coreState.pokerState.lastRaiseSize, 10);
+});
+
+test("engine rejects a flop opening bet below the big blind without mutation", () => {
+  let coreState = bootstrapCoreStateHand({
+    tableId: "table_engine_act",
+    coreState: initialCore(),
+    nowMs: 8_100,
+    stakes: { sb: 5, bb: 10 }
+  }).coreState;
+
+  const preflopCall = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState,
+    handId: coreState.pokerState.handId,
+    userId: "user_a",
+    action: "CALL",
+    nowIso: new Date(8_101).toISOString(),
+    nowMs: 8_101
+  });
+  assert.equal(preflopCall.accepted, true);
+  coreState = preflopCall.coreState;
+
+  const preflopCheck = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState,
+    handId: coreState.pokerState.handId,
+    userId: "user_b",
+    action: "CHECK",
+    nowIso: new Date(8_102).toISOString(),
+    nowMs: 8_102
+  });
+  assert.equal(preflopCheck.accepted, true);
+  coreState = preflopCheck.coreState;
+  assert.equal(coreState.pokerState.phase, "FLOP");
+
+  const bettor = coreState.pokerState.turnUserId;
+  const versionBefore = coreState.version;
+
+  const below = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState,
+    handId: coreState.pokerState.handId,
+    userId: bettor,
+    action: "BET",
+    amount: 1,
+    nowIso: new Date(8_103).toISOString(),
+    nowMs: 8_103
+  });
+  assert.equal(below.accepted, false);
+  assert.equal(below.reason, "invalid_amount");
+  assert.equal(below.stateVersion, versionBefore);
+  assert.equal(below.coreState, coreState);
+
+  const atBb = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState,
+    handId: coreState.pokerState.handId,
+    userId: bettor,
+    action: "BET",
+    amount: 10,
+    nowIso: new Date(8_103).toISOString(),
+    nowMs: 8_103
+  });
+  assert.equal(atBb.accepted, true);
+  assert.equal(atBb.coreState.pokerState.currentBet, 10);
+  assert.equal(atBb.coreState.pokerState.lastRaiseSize, 10);
+});

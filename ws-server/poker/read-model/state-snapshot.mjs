@@ -216,6 +216,7 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId, publicProfile
       },
       seats: normalizeSeatRows(tableSnapshot?.seats, { publicProfileStorageBaseUrl }),
       stacks: normalizeStacks(tableSnapshot?.stacks),
+      bigBlind: Number.isInteger(tableSnapshot?.bigBlind) && tableSnapshot.bigBlind > 0 ? tableSnapshot.bigBlind : null,
       betThisRoundByUserId: normalizeNumericUserMap(tableSnapshot?.betThisRoundByUserId),
       committedByUserId: normalizeNumericUserMap(tableSnapshot?.committedByUserId),
       pot: {
@@ -232,11 +233,16 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId, publicProfile
         seat: normalizeSeat(tableSnapshot?.legalActions?.seat),
         actions: normalizeActionList(tableSnapshot?.legalActions?.actions)
       },
+      projectedLegalActions: {
+        seat: normalizeSeat(tableSnapshot?.projectedLegalActions?.seat),
+        actions: normalizeActionList(tableSnapshot?.projectedLegalActions?.actions)
+      },
       actionConstraints: {
         toCall: Number.isFinite(tableSnapshot?.actionConstraints?.toCall) ? Number(tableSnapshot.actionConstraints.toCall) : null,
         minRaiseTo: Number.isFinite(tableSnapshot?.actionConstraints?.minRaiseTo) ? Number(tableSnapshot.actionConstraints.minRaiseTo) : null,
         maxRaiseTo: Number.isFinite(tableSnapshot?.actionConstraints?.maxRaiseTo) ? Number(tableSnapshot.actionConstraints.maxRaiseTo) : null,
-        maxBetAmount: Number.isFinite(tableSnapshot?.actionConstraints?.maxBetAmount) ? Number(tableSnapshot.actionConstraints.maxBetAmount) : null
+        maxBetAmount: Number.isFinite(tableSnapshot?.actionConstraints?.maxBetAmount) ? Number(tableSnapshot.actionConstraints.maxBetAmount) : null,
+        minBetAmount: Number.isFinite(tableSnapshot?.actionConstraints?.minBetAmount) ? Number(tableSnapshot.actionConstraints.minBetAmount) : null
       },
       lastBettingRoundActionByUserId: normalizeLastBettingRoundActionByUserId(tableSnapshot?.lastBettingRoundActionByUserId)
     }

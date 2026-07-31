@@ -1143,6 +1143,7 @@ test('poker v2 keeps action buttons stable while exposing single-select preactio
         hand: { handId: 'hand-stable-controls-off-turn', status: 'TURN', dealerSeatNo: 2 },
         turn: { userId: 'villain-1', deadlineAt: Date.now() + 5000 },
         pot: { total: 18, sidePots: [] },
+        stacks: { 'user-1': 100, 'villain-1': 80 },
         legalActions: { seat: 1, actions: [] },
         actionConstraints: { toCall: 6, minRaiseTo: 18, maxRaiseTo: 120 }
       },
@@ -1258,7 +1259,7 @@ test('poker v2 auto-executes a queued preaction without moving the live action b
   assert.equal(harness.elements.pokerV2AllInBtn.hidden, false);
 });
 
-test('poker v2 queues all-in intent without pre-turn raise limits and resolves it from live turn constraints', async () => {
+test('poker v2 queues all-in intent from projected actions and resolves it from live turn constraints', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -1283,7 +1284,8 @@ test('poker v2 queues all-in intent without pre-turn raise limits and resolves i
         turn: { userId: 'villain-1', deadlineAt: Date.now() + 5000 },
         pot: { total: 18, sidePots: [] },
         legalActions: { seat: 1, actions: ['FOLD'] },
-        actionConstraints: { toCall: 6, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+        actionConstraints: { toCall: 6, minRaiseTo: 18, maxRaiseTo: 100, maxBetAmount: null },
+        projectedLegalActions: { seat: 1, actions: ['FOLD', 'CALL', 'RAISE'] },
         stacks: { 'user-1': 100, 'villain-1': 80 }
       },
       private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
@@ -1353,7 +1355,8 @@ test('poker v2 clears queued all-in intent when the live turn has no legal all-i
         turn: { userId: 'villain-1', deadlineAt: Date.now() + 5000 },
         pot: { total: 18, sidePots: [] },
         legalActions: { seat: 1, actions: ['FOLD'] },
-        actionConstraints: { toCall: 6, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+        actionConstraints: { toCall: 6, minRaiseTo: 18, maxRaiseTo: 100, maxBetAmount: null },
+        projectedLegalActions: { seat: 1, actions: ['FOLD', 'CALL', 'RAISE'] },
         stacks: { 'user-1': 100, 'villain-1': 80 }
       },
       private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
@@ -3448,4 +3451,418 @@ test('poker v2 late snapshot does not clear a newer unrelated error raised after
 
   assert.match(harness.elements.pokerV2ErrorText.textContent, /newer_error/, 'newer error preserved');
   assert.equal(harness.elements.pokerV2ErrorText.textContent.indexOf('Snapshot recovery timed out'), -1, 'old timeout message replaced by newer error');
+});
+
+function amountSnapshot({ handId, phase, board, potTotal, actions, constraints, stateVersion, turnUserId = 'user-1', bigBlind = null, stacks, projectedActions = null }){
+  return {
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        hand: { handId, status: phase, dealerSeatNo: 2 },
+        turn: { userId: turnUserId, deadlineAt: Date.now() + 5000 },
+        board,
+        pot: { total: potTotal, sidePots: [] },
+        stacks: stacks || { 'user-1': 100 },
+        ...(bigBlind != null ? { bigBlind } : {}),
+        ...(projectedActions ? { projectedLegalActions: { seat: 1, actions: projectedActions } } : {}),
+        legalActions: { seat: 1, actions },
+        actionConstraints: constraints
+      },
+      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  };
+}
+
+async function bootSeatedHarness(){
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  await waitFor(() => harness.elements.pokerV2JoinBtn.disabled === false);
+  harness.elements.pokerV2SeatNo.value = '1';
+  harness.elements.pokerV2JoinBtn.click();
+  await harness.flush();
+  return { harness, ws };
+}
+
+test('poker v2 amount slider reflects BET constraints (minBetAmount/maxBetAmount)', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-bet-min',
+    phase: 'FLOP',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 42,
+    actions: ['FOLD', 'CHECK', 'BET'],
+    constraints: { toCall: 0, minBetAmount: 10, maxBetAmount: 100 },
+    stateVersion: 4
+  }));
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2AmountInput.min, '10', 'BET slider min should come from actionConstraints.minBetAmount');
+  assert.equal(harness.elements.pokerV2AmountInput.max, '100', 'BET slider max should come from actionConstraints.maxBetAmount');
+  const betValue = Number(harness.elements.pokerV2AmountInput.value);
+  assert.ok(Number.isFinite(betValue) && betValue >= 10 && betValue <= 100, 'BET slider value should stay within the legal range');
+});
+
+test('poker v2 amount slider reflects RAISE constraints (minRaiseTo/maxRaiseTo)', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-raise-min',
+    phase: 'TURN',
+    board: ['As', 'Kd', '3h', '2c'],
+    potTotal: 60,
+    actions: ['FOLD', 'CALL', 'RAISE'],
+    constraints: { toCall: 10, minRaiseTo: 20, maxRaiseTo: 90 },
+    stateVersion: 5
+  }));
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2AmountInput.min, '20', 'RAISE slider min should come from actionConstraints.minRaiseTo');
+  assert.equal(harness.elements.pokerV2AmountInput.max, '90', 'RAISE slider max should come from actionConstraints.maxRaiseTo');
+  const raiseValue = Number(harness.elements.pokerV2AmountInput.value);
+  assert.ok(Number.isFinite(raiseValue) && raiseValue >= 20 && raiseValue <= 90, 'RAISE slider value should stay within the legal range');
+});
+
+test('poker v2 amount button sends the selected legal boundary amount', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-amount-bet',
+    phase: 'FLOP',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 42,
+    actions: ['FOLD', 'CHECK', 'BET'],
+    constraints: { toCall: 0, minBetAmount: 10, maxBetAmount: 100 },
+    stateVersion: 6
+  }));
+  await harness.flush();
+
+  harness.elements.pokerV2AmountInput.value = '10';
+  harness.elements.pokerV2AmountBtn.click();
+  await harness.flush();
+
+  assert.equal(harness.actPayloads.length, 1);
+  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-amount-bet', action: 'BET', amount: 10 }));
+
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-amount-raise',
+    phase: 'TURN',
+    board: ['As', 'Kd', '3h', '2c'],
+    potTotal: 60,
+    actions: ['FOLD', 'CALL', 'RAISE'],
+    constraints: { toCall: 10, minRaiseTo: 20, maxRaiseTo: 90 },
+    stateVersion: 7
+  }));
+  await harness.flush();
+
+  harness.elements.pokerV2AmountInput.value = '90';
+  harness.elements.pokerV2AmountBtn.click();
+  await harness.flush();
+
+  assert.equal(harness.actPayloads.length, 2);
+  assert.equal(JSON.stringify(harness.actPayloads[1]), JSON.stringify({ handId: 'hand-amount-raise', action: 'RAISE', amount: 90 }));
+});
+
+test('poker v2 keeps the BET slider minimum across turns in the same hand', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  // First BET turn: constraints carry minBetAmount=10.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-multiturn',
+    phase: 'FLOP',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 42,
+    actions: ['FOLD', 'CHECK', 'BET'],
+    constraints: { toCall: 0, minBetAmount: 10, maxBetAmount: 100 },
+    stateVersion: 8
+  }));
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AmountInput.min, '10', 'first BET turn slider min should be minBetAmount');
+
+  // The user submits a legal boundary bet.
+  harness.elements.pokerV2AmountInput.value = '10';
+  harness.elements.pokerV2AmountBtn.click();
+  await harness.flush();
+  assert.equal(harness.actPayloads.length, 1);
+  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-multiturn', action: 'BET', amount: 10 }));
+
+  // Subsequent snapshots from other players/street lead to another BET turn for
+  // the same user in the same hand; the slider must keep the server minimum.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-multiturn',
+    phase: 'FLOP',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 62,
+    actions: ['FOLD', 'CHECK', 'BET'],
+    constraints: { toCall: 0, minBetAmount: 10, maxBetAmount: 100 },
+    stateVersion: 9
+  }));
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2AmountInput.min, '10', 'later BET turn must keep minBetAmount');
+  const laterValue = Number(harness.elements.pokerV2AmountInput.value);
+  assert.ok(Number.isFinite(laterValue) && laterValue >= 10, 'later BET turn slider value must stay within the legal range');
+});
+
+test('queued BET pre-action is cancelled when the authoritative minimum rises above it', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  // Another player's turn; the projected constraints (real server path) give
+  // the viewer a legal BET range of 10..100, so the slider cannot offer 1.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-queued-bet',
+    phase: 'FLOP',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 42,
+    actions: ['FOLD', 'CHECK', 'BET'],
+    constraints: { toCall: 0, minBetAmount: 10, maxBetAmount: 100 },
+    stateVersion: 10,
+    turnUserId: 'villain-1'
+  }));
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2AmountInput.min, '10', 'projected BET minimum must be legal off-turn');
+  assert.equal(harness.elements.pokerV2AmountPreaction.disabled, false, 'BET pre-action should be available off-turn');
+  harness.elements.pokerV2AmountInput.value = '20';
+  harness.elements.pokerV2AmountPreaction.click();
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AmountPreaction.checked, true, 'queued BET 20 should be selected');
+
+  // Authoritative turn arrives with a higher minimum: the queued 20 is illegal.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-queued-bet',
+    phase: 'FLOP',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 42,
+    actions: ['FOLD', 'CHECK', 'BET'],
+    constraints: { toCall: 0, minBetAmount: 30, maxBetAmount: 100 },
+    stateVersion: 11
+  }));
+  await harness.flush();
+
+  assert.equal(harness.actPayloads.length, 0, 'illegal queued BET must never be sent');
+  assert.equal(harness.elements.pokerV2AmountPreaction.checked, false, 'queued BET must be cancelled when the stored amount is out of range');
+  assert.match(harness.elements.pokerV2ErrorText.textContent, /Pre-action cancelled: minimum bet is now 30\./, 'cancellation message must be shown');
+  assert.equal(harness.elements.pokerV2AmountInput.min, '30', 'slider must sync back to the authoritative minimum');
+  assert.equal(harness.elements.pokerV2AmountBtn.disabled, false, 'normal BET controls must remain active');
+});
+
+test('queued RAISE pre-action is cancelled when the authoritative minimum rises above it', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  // Another player's turn facing a bet; the projected constraints (real server
+  // path) give the viewer a legal RAISE range of 20..90.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-queued-raise',
+    phase: 'TURN',
+    board: ['As', 'Kd', '3h', '2c'],
+    potTotal: 60,
+    actions: ['FOLD', 'CALL', 'RAISE'],
+    constraints: { toCall: 10, minRaiseTo: 20, maxRaiseTo: 90 },
+    stateVersion: 12,
+    turnUserId: 'villain-1'
+  }));
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2AmountInput.min, '20', 'projected RAISE minimum must be legal off-turn');
+  harness.elements.pokerV2AmountInput.value = '50';
+  harness.elements.pokerV2AmountPreaction.click();
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AmountPreaction.checked, true, 'queued RAISE 50 should be selected');
+
+  // Authoritative turn arrives with a higher minimum: the queued 50 is illegal.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-queued-raise',
+    phase: 'TURN',
+    board: ['As', 'Kd', '3h', '2c'],
+    potTotal: 60,
+    actions: ['FOLD', 'CALL', 'RAISE'],
+    constraints: { toCall: 10, minRaiseTo: 80, maxRaiseTo: 90 },
+    stateVersion: 13
+  }));
+  await harness.flush();
+
+  assert.equal(harness.actPayloads.length, 0, 'illegal queued RAISE must never be sent');
+  assert.equal(harness.elements.pokerV2AmountPreaction.checked, false, 'queued RAISE must be cancelled when the stored amount is out of range');
+  assert.match(harness.elements.pokerV2ErrorText.textContent, /Pre-action cancelled: minimum raise is now 80\./, 'cancellation message must be shown');
+  assert.equal(harness.elements.pokerV2AmountInput.min, '80', 'slider must sync back to the authoritative raise minimum');
+});
+
+test('off-turn RAISE slider minimum comes from the projected snapshot constraints, never 1', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  // The exact projected payload the room-core snapshot now emits for a seated
+  // viewer who is not acting: real toCall/minRaiseTo/maxRaiseTo.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-raise-proj',
+    phase: 'PREFLOP',
+    board: [],
+    potTotal: 6,
+    actions: ['FOLD', 'CALL', 'RAISE'],
+    constraints: { toCall: 2, minRaiseTo: 6, maxRaiseTo: 100, maxBetAmount: null, minBetAmount: null },
+    bigBlind: 2,
+    stateVersion: 20,
+    turnUserId: 'villain-1'
+  }));
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2AmountInput.min, '6', 'off-turn RAISE min must be the real projected minimum raise-to');
+  const raiseValue = Number(harness.elements.pokerV2AmountInput.value);
+  assert.ok(raiseValue >= 6, 'off-turn RAISE slider value must stay within the legal range');
+});
+
+test('off-turn BET slider minimum comes from the big blind, never 1', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  // Another player's turn; constraints carry no minBetAmount, so the BET min
+  // must be derived from the authoritative bigBlind (10), not a generic 1.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-bb-min',
+    phase: 'FLOP',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 42,
+    actions: ['FOLD', 'CHECK', 'BET'],
+    constraints: { toCall: 0, maxBetAmount: 100 },
+    bigBlind: 10,
+    stateVersion: 14,
+    turnUserId: 'villain-1'
+  }));
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2AmountInput.min, '10', 'off-turn BET min must be the big blind when minBetAmount is absent');
+});
+
+test('short stack below the big blind is represented as all-in off-turn', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  // 7 CH with BB=10: an ordinary opening BET is impossible; the legal bet is
+  // the all-in, so the ALL IN pre-action represents it and the BET amount
+  // pre-action must not offer an ordinary selectable range.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-bb-short',
+    phase: 'FLOP',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 42,
+    actions: ['FOLD', 'CHECK', 'BET'],
+    constraints: { toCall: 0, maxBetAmount: 7 },
+    bigBlind: 10,
+    stacks: { 'user-1': 7 },
+    stateVersion: 15,
+    turnUserId: 'villain-1'
+  }));
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2AmountPreaction.disabled, true, 'ordinary BET pre-action must not be offered below the big blind');
+  assert.equal(harness.elements.pokerV2AllInPreaction.disabled, false, 'all-in pre-action must represent the short-stack bet');
+});
+
+test('queued RAISE 100 executes unchanged when the live range becomes 80..200', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-raise-ok',
+    phase: 'TURN',
+    board: ['As', 'Kd', '3h', '2c'],
+    potTotal: 60,
+    actions: ['FOLD', 'CALL', 'RAISE'],
+    constraints: { toCall: 10, minRaiseTo: 50, maxRaiseTo: 200 },
+    stateVersion: 16,
+    turnUserId: 'villain-1'
+  }));
+  await harness.flush();
+
+  harness.elements.pokerV2AmountInput.value = '100';
+  harness.elements.pokerV2AmountPreaction.click();
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AmountPreaction.checked, true, 'queued RAISE 100 should be selected');
+
+  // Turn arrives: minimum raise is now 80, but 100 is still legal.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-raise-ok',
+    phase: 'TURN',
+    board: ['As', 'Kd', '3h', '2c'],
+    potTotal: 60,
+    actions: ['FOLD', 'CALL', 'RAISE'],
+    constraints: { toCall: 10, minRaiseTo: 80, maxRaiseTo: 200 },
+    stateVersion: 17
+  }));
+  await harness.flush();
+
+  assert.equal(harness.actPayloads.length, 1);
+  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-raise-ok', action: 'RAISE', amount: 100 }), 'legal queued amount must execute unchanged');
+});
+
+test('queued RAISE 100 is cancelled with a message when the live minimum becomes 120', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-raise-cancel',
+    phase: 'TURN',
+    board: ['As', 'Kd', '3h', '2c'],
+    potTotal: 60,
+    actions: ['FOLD', 'CALL', 'RAISE'],
+    constraints: { toCall: 10, minRaiseTo: 50, maxRaiseTo: 200 },
+    stateVersion: 18,
+    turnUserId: 'villain-1'
+  }));
+  await harness.flush();
+
+  harness.elements.pokerV2AmountInput.value = '100';
+  harness.elements.pokerV2AmountPreaction.click();
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AmountPreaction.checked, true, 'queued RAISE 100 should be selected');
+
+  // Turn arrives: minimum raise is now 120, so the queued 100 is illegal.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-raise-cancel',
+    phase: 'TURN',
+    board: ['As', 'Kd', '3h', '2c'],
+    potTotal: 60,
+    actions: ['FOLD', 'CALL', 'RAISE'],
+    constraints: { toCall: 10, minRaiseTo: 120, maxRaiseTo: 200 },
+    stateVersion: 19
+  }));
+  await harness.flush();
+
+  assert.equal(harness.actPayloads.length, 0, 'cancelled queued RAISE must never be sent (no silent 100->120)');
+  assert.equal(harness.elements.pokerV2AmountPreaction.checked, false, 'queued RAISE must be cancelled');
+  assert.match(harness.elements.pokerV2ErrorText.textContent, /Pre-action cancelled: minimum raise is now 120\./, 'cancellation message must be shown');
+});
+
+test('off-turn RAISE stays disabled when the server projection withholds raising rights', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  // Real projected room-core payload: the viewer already acted, lastRaiseSize
+  // is 10, a cumulative short all-in left toCall 5, and reopening rights are
+  // closed -> projectedLegalActions has no RAISE and minRaiseTo is null while
+  // maxRaiseTo stays numeric.
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-no-raise',
+    phase: 'TURN',
+    board: ['As', 'Kd', 'Qc', '3h'],
+    potTotal: 60,
+    actions: ['FOLD'],
+    constraints: { toCall: 5, minRaiseTo: null, maxRaiseTo: 110, maxBetAmount: null, minBetAmount: null },
+    projectedActions: ['FOLD', 'CALL'],
+    bigBlind: 10,
+    stacks: { 'user-1': 90 },
+    stateVersion: 21,
+    turnUserId: 'villain-1'
+  }));
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2AmountPreaction.disabled, true, 'RAISE pre-action must stay disabled without reopening rights');
+
+  // ALL IN cannot bypass the closed raising rights: with stack (90) above
+  // toCall (5) and no RAISE/BET in the projection, an all-in would be an
+  // illegal raise to 90, so the pre-action must be disabled and unqueueable.
+  assert.equal(harness.elements.pokerV2AllInPreaction.disabled, true, 'ALL IN pre-action must be disabled when it would be an illegal raise');
+  harness.elements.pokerV2AllInPreaction.click();
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AllInPreaction.checked, false, 'ALL IN must not be queueable');
+  assert.equal(harness.actPayloads.length, 0, 'no action may be sent from the disabled pre-actions');
 });

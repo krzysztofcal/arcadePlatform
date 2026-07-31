@@ -1,4 +1,4 @@
-import { computeSharedLegalActions, dealHoleCards, deriveDeck, toCardCodes } from "./poker-primitives.mjs";
+import { computeSharedLegalActions, dealHoleCards, deriveBigBlind, deriveDeck, toCardCodes } from "./poker-primitives.mjs";
 import { materializeShowdownAndPayout } from "./settlement/poker-materialize-showdown.mjs";
 import { awardPotsAtShowdown } from "./settlement/poker-payout.mjs";
 import { computeShowdown } from "./settlement/poker-showdown.mjs";
@@ -416,7 +416,8 @@ export function applyAction({ pokerState, userId, action, amount, nowIso = "1970
     nextState.actedThisRoundByUserId[userId] = true;
   } else if (normalizedAction === "BET") {
     const betAmount = toInt(amount);
-    if (!Number.isInteger(betAmount) || betAmount < 1 || betAmount > stack) {
+    const minBetAmount = Number(legalInfo.minBetAmount ?? 1);
+    if (!Number.isInteger(betAmount) || betAmount < minBetAmount || betAmount > stack) {
       return { ok: false, reason: "invalid_amount" };
     }
 
@@ -425,7 +426,10 @@ export function applyAction({ pokerState, userId, action, amount, nowIso = "1970
     nextState.stacks[userId] = stack - contribution;
     nextState.betThisRoundByUserId[userId] = nextBet;
     nextState.currentBet = Math.max(Number(nextState.currentBet ?? 0), nextBet);
-    nextState.lastRaiseSize = contribution;
+    // Opening bet contract: a full opening bet sets the full-raise size to the
+    // bet amount; a short all-in opening bet must not lower the floor below the
+    // big blind.
+    nextState.lastRaiseSize = Math.max(deriveBigBlind(nextState), contribution);
     nextState.contributionsByUserId[userId] = Number(nextState.contributionsByUserId[userId] ?? 0) + contribution;
     nextState.potTotal = Number(nextState.potTotal ?? 0) + contribution;
     nextState.actedThisRoundByUserId[userId] = true;
@@ -442,7 +446,13 @@ export function applyAction({ pokerState, userId, action, amount, nowIso = "1970
     nextState.betThisRoundByUserId[userId] = raiseTo;
     const previousCurrentBet = Number(nextState.currentBet ?? 0);
     nextState.currentBet = Math.max(previousCurrentBet, raiseTo);
-    nextState.lastRaiseSize = Math.max(1, raiseTo - previousCurrentBet);
+    // Only a full raise updates the full-raise size; a short all-in raise must
+    // not lower the minimum increment for subsequent raises.
+    const raiseSize = raiseTo - previousCurrentBet;
+    const previousLastRaiseSize = Number(nextState.lastRaiseSize ?? 0);
+    if (raiseSize >= previousLastRaiseSize) {
+      nextState.lastRaiseSize = raiseSize;
+    }
     nextState.contributionsByUserId[userId] = Number(nextState.contributionsByUserId[userId] ?? 0) + contribution;
     nextState.potTotal = Number(nextState.potTotal ?? 0) + contribution;
     nextState.actedThisRoundByUserId[userId] = true;
