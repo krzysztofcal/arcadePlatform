@@ -83,20 +83,15 @@ test("ws preview deploy verifies release identity before and after rsync and aft
   const firstRsync = text.indexOf('sudo -n rsync -a --checksum --delete "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/');
   const afterRsync = text.indexOf('verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json"');
   const restart = text.indexOf('sudo -n systemctl restart "$PREVIEW_SERVICE_NAME"');
-  const journalCheck = text.indexOf('sudo -n journalctl -u "$PREVIEW_SERVICE_NAME" --since "$RESTART_SINCE"');
   const finalMetadataCheck = text.lastIndexOf('verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json"');
 
   assert.ok(beforeRsync > 0 && beforeRsync < firstRsync, "archive metadata must be verified before rsync");
   assert.ok(afterRsync > firstRsync && afterRsync < restart, "installed metadata must be verified before restart");
-  assert.ok(journalCheck > restart, "runtime startup identity must be verified after restart");
-  assert.ok(finalMetadataCheck > journalCheck, "installed metadata must be verified again after runtime startup");
+  assert.ok(finalMetadataCheck > restart, "installed metadata must be verified again after runtime restart");
   assert.match(text, /metadata\?\.releaseSha !== expectedSha/);
   assert.match(text, /metadata\?\.deployRef !== expectedRef/);
   assert.match(text, /metadata\?\.environment !== expectedEnvironment/);
-  assert.match(text, /metadata\?\.releaseSha === expectedSha/);
-  assert.match(text, /metadata\?\.deployRef === expectedRef/);
-  assert.match(text, /metadata\?\.environment === expectedEnvironment/);
-  assert.match(text, /ws_artifact_start/);
+  assert.doesNotMatch(text, /journalctl -u "\$PREVIEW_SERVICE_NAME"/);
 });
 
 test("ws preview deploy metadata verifier fails closed on a mismatched SHA", () => {
