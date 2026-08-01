@@ -691,17 +691,24 @@ test("persisted state writer appends exactly one HAND_SETTLED audit event with s
       handId: "hand_settled",
       phase: "SETTLED",
       community: ["3H", "4H", "5H", "6H", "7H"],
+      handSeats: [{ userId: "u1", seatNo: 1 }, { userId: "u2", seatNo: 2 }],
       seats: [{ userId: "u1", seatNo: 1, status: "ACTIVE" }, { userId: "u2", seatNo: 2, status: "ACTIVE" }],
-      stacks: { u1: 110, u2: 90 },
+      stacks: { u1: 550, u2: 450 },
+      handStartStacksByUserId: { u1: 500, u2: 500 },
+      contributionsByUserId: { u1: 240, u2: 50 },
+      foldedByUserId: { u1: false, u2: false },
       handSettlement: {
         handId: "hand_settled",
         settledAt: "2026-07-01T18:00:00.000Z",
-        payouts: { u1: 10 }
+        payouts: { u1: 290 }
       },
       showdown: {
         reason: "computed",
         winners: ["u1"],
-        potsAwarded: [{ amount: 10, winners: ["u1"], eligibleUserIds: ["u1", "u2"] }],
+        potsAwarded: [
+          { amount: 100, winners: ["u1"], eligibleUserIds: ["u1", "u2"] },
+          { amount: 190, winners: ["u1"], eligibleUserIds: ["u1"], returnUserId: "u1" }
+        ],
         handsByUserId: {
           u1: { category: 4, name: "Straight", ranks: [7], best5: [{ r: 3, s: "H" }, { r: 4, s: "H" }, { r: 5, s: "H" }, { r: 6, s: "H" }, { r: 7, s: "H" }] },
           u2: { category: 1, name: "Pair", ranks: [2, 7, 6, 5], best5: [{ r: 2, s: "C" }, { r: 2, s: "D" }, { r: 7, s: "H" }, { r: 6, s: "H" }, { r: 5, s: "H" }] }
@@ -722,19 +729,36 @@ test("persisted state writer appends exactly one HAND_SETTLED audit event with s
   assert.equal(auditInsert.params[3], "HAND_SETTLED");
   const auditMeta = auditInsert.params[9];
   assert.deepEqual(auditMeta, {
-    auditVersion: 1,
+    auditVersion: 2,
     tableId: "t_settled",
     handId: "hand_settled",
     settledAt: "2026-07-01T18:00:00.000Z",
     reason: "computed",
     communityCards: ["3H", "4H", "5H", "6H", "7H"],
     winners: ["u1"],
-    payoutByUserId: { u1: 10 },
-    potsAwarded: [{ amount: 10, winners: ["u1"], eligibleUserIds: ["u1", "u2"] }],
-    evaluatedHands: [
-      { userId: "u1", category: 4, name: "Straight", ranks: [7], bestFiveCards: ["3H", "4H", "5H", "6H", "7H"] },
-      { userId: "u2", category: 1, name: "Pair", ranks: [2, 7, 6, 5], bestFiveCards: ["2C", "2D", "7H", "6H", "5H"] }
-    ]
+    payoutByUserId: { u1: 290 },
+    potsAwarded: [
+      { amount: 100, winners: ["u1"], eligibleUserIds: ["u1", "u2"] },
+      { amount: 190, winners: ["u1"], eligibleUserIds: ["u1"], returnUserId: "u1" }
+    ],
+    participants: [
+      { userId: "u1", seatNo: 1, folded: false, startingStack: 500, endingStack: 550, contribution: 240, payout: 290 },
+      { userId: "u2", seatNo: 2, folded: false, startingStack: 500, endingStack: 450, contribution: 50, payout: 0 }
+    ],
+    integrity: {
+      status: "OK",
+      flags: [],
+      startingStackTotal: 1000,
+      endingStackTotal: 1000,
+      contributionTotal: 290,
+      contestablePotTotal: 100,
+      returnedTotal: 190,
+      awardedPotTotal: 290,
+      payoutTotal: 290,
+      stackConservationDelta: 0,
+      potConservationDelta: 0,
+      payoutConservationDelta: 0
+    }
   });
 });
 

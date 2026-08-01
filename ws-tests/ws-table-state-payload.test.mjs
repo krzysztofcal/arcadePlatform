@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { normalizePrivateBranch } from "../ws-server/poker/read-model/state-snapshot.mjs";
+import { projectRoomCoreSnapshot } from "../ws-server/poker/read-model/room-core-snapshot.mjs";
 
 function loadBuildTableStatePayload() {
   const source = fs.readFileSync(new URL("../ws-server/server.mjs", import.meta.url), "utf8");
@@ -169,4 +170,39 @@ test("buildTableStatePayload redacts opponent cards: only own holeCards in priva
   // Opponent cards are never present anywhere in the payload.
   assert.equal(JSON.stringify(payload).includes("villain"), true); // villain seat/member is public
   assert.deepEqual(payload.private.userId, "hero");
+});
+
+test("final table_state payload excludes internal returnUserId from normalized showdown", () => {
+  const buildTableStatePayload = loadBuildTableStatePayload();
+  const tableSnapshot = projectRoomCoreSnapshot({
+    tableId: "table_return_projection",
+    roomId: "table_return_projection",
+    coreState: {
+      seats: { hero: 1, villain: 2 },
+      pokerState: {
+        tableId: "table_return_projection",
+        handId: "hand_return_projection",
+        phase: "SETTLED",
+        seats: [{ userId: "hero", seatNo: 1 }, { userId: "villain", seatNo: 2 }],
+        stacks: { hero: 110, villain: 90 },
+        showdown: {
+          handId: "hand_return_projection",
+          winners: ["hero"],
+          potsAwarded: [{ amount: 20, winners: ["hero"], eligibleUserIds: ["hero"], returnUserId: "hero" }],
+          potAwardedTotal: 20,
+          reason: "computed"
+        }
+      }
+    },
+    members: [{ userId: "hero", seat: 1 }, { userId: "villain", seat: 2 }],
+    userId: "observer",
+    youSeat: null
+  });
+  const payload = buildTableStatePayload({
+    tableState: { tableId: "table_return_projection", members: [] },
+    tableSnapshot,
+    userId: "observer"
+  });
+
+  assert.equal("returnUserId" in payload.showdown.potsAwarded[0], false);
 });

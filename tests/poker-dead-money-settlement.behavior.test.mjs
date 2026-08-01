@@ -73,7 +73,7 @@ for (const [label, awardPotsAtShowdown] of implementations) {
     assert.deepEqual(nextState.showdown.winners, ["player_a"]);
     assert.deepEqual(nextState.showdown.potsAwarded, [
       { amount: 30, winners: ["player_a"], eligibleUserIds: ["player_a", "player_b"] },
-      { amount: 90, winners: ["folded"], eligibleUserIds: ["folded"] }
+      { amount: 90, winners: ["folded"], eligibleUserIds: ["folded"], returnUserId: "folded" }
     ]);
     assert.deepEqual(nextState.stacks, { folded: 90, player_a: 120, player_b: 90 });
     assert.equal(Object.values(nextState.stacks).reduce((total, stack) => total + stack, 0), 300);
@@ -137,7 +137,7 @@ for (const [label, awardPotsAtShowdown] of implementations) {
     assert.deepEqual(nextState.showdown.winners, ["active_c"]);
     assert.deepEqual(nextState.showdown.potsAwarded, [
       { amount: 170, winners: ["active_c"], eligibleUserIds: ["active_c"] },
-      { amount: 20, winners: ["folded_a"], eligibleUserIds: ["folded_a"] }
+      { amount: 20, winners: ["folded_a"], eligibleUserIds: ["folded_a"], returnUserId: "folded_a" }
     ]);
     assert.deepEqual(nextState.stacks, { folded_a: 20, folded_b: 20, active_c: 260 });
     assert.equal(Object.values(nextState.stacks).reduce((total, stack) => total + stack, 0), 300);

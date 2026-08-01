@@ -101,13 +101,26 @@ function normalizeLastBettingRoundActionByUserId(value) {
   );
 }
 
+function normalizeAwardedPots(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((pot) => pot && typeof pot === "object" && !Array.isArray(pot))
+    .map((pot) => ({
+      amount: Number.isFinite(Number(pot.amount)) ? Number(pot.amount) : 0,
+      winners: Array.isArray(pot.winners) ? pot.winners.filter((userId) => typeof userId === "string") : [],
+      eligibleUserIds: Array.isArray(pot.eligibleUserIds)
+        ? pot.eligibleUserIds.filter((userId) => typeof userId === "string")
+        : []
+    }));
+}
+
 function normalizeShowdown(showdown) {
   if (!showdown || typeof showdown !== "object" || Array.isArray(showdown)) {
     return null;
   }
   const normalized = {
     winners: Array.isArray(showdown.winners) ? showdown.winners.filter((userId) => typeof userId === "string") : [],
-    potsAwarded: Array.isArray(showdown.potsAwarded) ? showdown.potsAwarded : [],
+    potsAwarded: normalizeAwardedPots(showdown.potsAwarded),
     potAwardedTotal: Number.isFinite(showdown.potAwardedTotal)
       ? showdown.potAwardedTotal
       : Number.isFinite(showdown.potAwarded)

@@ -101,7 +101,7 @@ const awardPotsAtShowdown = ({ state, seatUserIdsInOrder, computeShowdown, nowIs
       }
       nextStacks[returnUserId] = baseStack + amount;
       potAwardedTotal += amount;
-      potsAwarded.push({ amount, winners: [returnUserId], eligibleUserIds: [returnUserId] });
+      potsAwarded.push({ amount, winners: [returnUserId], eligibleUserIds: [returnUserId], returnUserId });
       continue;
     }
     const eligibleSet = new Set(Array.isArray(pot.eligibleUserIds) ? pot.eligibleUserIds : []);

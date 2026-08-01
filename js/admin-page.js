@@ -1073,9 +1073,16 @@
     var potRows = settlement && Array.isArray(settlement.potsAwarded) ? settlement.potsAwarded.map(function(pot){
       return {
         title: escapeHtml("pot " + formatAmount(pot && pot.amount)),
-        meta: escapeHtml("eligible " + joinList(pot && pot.eligibleUserIds || []) + " · winners " + joinList(pot && pot.winners || [])),
+        meta: escapeHtml("eligible " + joinList(pot && pot.eligibleUserIds || []) + " · winners " + joinList(pot && pot.winners || []) + (pot && pot.returnUserId ? " · return " + pot.returnUserId : "")),
       };
     }) : [];
+    var participantRows = settlement && Array.isArray(settlement.participants) ? settlement.participants.map(function(participant){
+      return {
+        title: escapeHtml((participant && participant.userId || "user") + " · seat " + (participant && participant.seatNo == null ? "—" : participant.seatNo)),
+        meta: escapeHtml("start " + formatAmount(participant && participant.startingStack) + " · end " + formatAmount(participant && participant.endingStack) + " · contribution " + formatAmount(participant && participant.contribution) + " · payout " + formatAmount(participant && participant.payout) + (participant && participant.folded ? " · folded" : "")),
+      };
+    }) : [];
+    var integrity = settlement && settlement.integrity ? settlement.integrity : null;
     var evaluatedRows = settlement && Array.isArray(settlement.evaluatedHands) ? settlement.evaluatedHands.map(function(item){
       return {
         title: escapeHtml((item && item.userId || "user") + " · " + formatEvaluatedHandLabel(item)),
@@ -1104,6 +1111,8 @@
     html.push('<div><h3 class="admin-section-title">Board</h3>' + renderCardCodes(settlement && settlement.communityCards || []) + "</div>");
     html.push('<div><h3 class="admin-section-title">Winners / payouts</h3>' + renderMiniList(payoutRows) + "</div>");
     html.push('<div><h3 class="admin-section-title">Pots</h3>' + renderMiniList(potRows) + "</div>");
+    html.push('<div><h3 class="admin-section-title">Participants</h3>' + renderMiniList(participantRows) + "</div>");
+    html.push('<div><h3 class="admin-section-title">Integrity</h3>' + (integrity ? '<div class="admin-kv">' + renderKvRow("status", integrity.status || "—") + renderKvRow("stack delta", formatAmount(integrity.stackConservationDelta)) + renderKvRow("pot delta", formatAmount(integrity.potConservationDelta)) + renderKvRow("payout delta", formatAmount(integrity.payoutConservationDelta)) + renderKvRow("flags", joinList(integrity.flags || [])) + "</div>" : '<p class="admin-empty">No v2 integrity summary recorded.</p>') + "</div>");
     html.push('<div><h3 class="admin-section-title">Evaluated hands</h3>' + renderMiniList(evaluatedRows) + "</div>");
     html.push('<div><h3 class="admin-section-title">Private cards</h3>');
     html.push('<p class="admin-note admin-note--danger">Private cards are sensitive. Reveal only for audit/debugging.</p>');
