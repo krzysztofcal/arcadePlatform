@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDisconnectCleanupRuntime } from './disconnect-cleanup.mjs';
+import { runTableJanitor } from './table-janitor.mjs';
 
 function socketFor(tableId) {
   return { __connState: { joinedTableId: tableId, subscribedTableId: null } };
@@ -301,4 +302,212 @@ test('forgetTable removes only cleanup candidates owned by the evicted table', (
   assert.equal(runtime.forgetTable('t_evicted'), 2);
   assert.equal(runtime.forgetTable('t_evicted'), 0);
   assert.equal(runtime.size(), 1);
+});
+
+
+test('concurrent sweeps coalesce cleanup and emit one janitor result', async () => {
+  let releaseCleanup;
+  let cleanupStartedResolve;
+  const cleanupStarted = new Promise((resolve) => {
+    cleanupStartedResolve = resolve;
+  });
+  const cleanupGate = new Promise((resolve) => {
+    releaseCleanup = resolve;
+  });
+  const cleanupCalls = [];
+  const logs = [];
+  const runtime = createDisconnectCleanupRuntime({
+    executeCleanup: async (input) => {
+      cleanupCalls.push(input);
+      cleanupStartedResolve();
+      await cleanupGate;
+      return runTableJanitor({
+        classification: {
+          tableId: input.tableId,
+          healthy: false,
+          classification: 'disconnect_cleanup',
+          action: 'disconnect_cleanup',
+          reasonCode: 'disconnect_candidate',
+          concerns: [],
+          userId: input.userId
+        },
+        trigger: 'disconnect_cleanup',
+        requestId: input.requestId,
+        primitives: {
+          disconnect_cleanup: async () => ({
+            ok: true,
+            changed: true,
+            status: 'managed_continuous_human_removed',
+            retryable: false
+          })
+        },
+        klog: (kind, data) => logs.push({ kind, data }),
+        klogVerbose: () => {}
+      });
+    },
+    listActiveSocketsForUser: () => [],
+    socketMatchesTable: () => false
+  });
+
+  runtime.enqueue({ tableId: 't_coalesced', userId: 'u_coalesced' });
+  const firstSweep = runtime.sweep();
+  await cleanupStarted;
+  const secondSweep = runtime.sweep();
+  assert.strictEqual(firstSweep, secondSweep);
+
+  releaseCleanup();
+  await secondSweep;
+
+  assert.equal(cleanupCalls.length, 1);
+  assert.deepEqual(logs.map((entry) => entry.kind), ['ws_table_janitor_result']);
+  assert.equal(logs[0].data.status, 'managed_continuous_human_removed');
+});
+
+test('sweep requests during an active round schedule one follow-up round', async () => {
+  let releaseFirst;
+  let firstStartedResolve;
+  const firstStarted = new Promise((resolve) => {
+    firstStartedResolve = resolve;
+  });
+  const firstGate = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  const calls = [];
+  const runtime = createDisconnectCleanupRuntime({
+    executeCleanup: async ({ tableId }) => {
+      calls.push(tableId);
+      if (tableId === 't_first') {
+        firstStartedResolve();
+        await firstGate;
+      }
+      return { ok: true, changed: true, status: 'cleaned', retryable: false };
+    },
+    listActiveSocketsForUser: () => [],
+    socketMatchesTable: () => false
+  });
+
+  runtime.enqueue({ tableId: 't_first', userId: 'u_first' });
+  const firstSweep = runtime.sweep();
+  await firstStarted;
+  runtime.enqueue({ tableId: 't_second', userId: 'u_second' });
+  const secondSweep = runtime.sweep();
+  assert.strictEqual(firstSweep, secondSweep);
+
+  releaseFirst();
+  await firstSweep;
+
+  assert.deepEqual(calls, ['t_first', 't_second']);
+  assert.equal(runtime.size(), 0);
+});
+
+test('sweep state is cleared after a failed round', async () => {
+  let shouldFail = true;
+  let cleanupCalls = 0;
+  const runtime = createDisconnectCleanupRuntime({
+    executeCleanup: async () => {
+      cleanupCalls += 1;
+      if (shouldFail) {
+        shouldFail = false;
+        throw new Error('cleanup_failed');
+      }
+      return { ok: true, changed: true, status: 'cleaned', retryable: false };
+    },
+    listActiveSocketsForUser: () => [],
+    socketMatchesTable: () => false
+  });
+
+  runtime.enqueue({ tableId: 't_failed_round', userId: 'u_failed_round' });
+  await assert.rejects(runtime.sweep(), /cleanup_failed/);
+  assert.equal(runtime.size(), 1);
+
+  await runtime.sweep();
+  assert.equal(cleanupCalls, 2);
+  assert.equal(runtime.size(), 0);
+});
+
+
+test('concurrent janitor failure emits one ERROR result', async () => {
+  let releaseCleanup;
+  let cleanupStartedResolve;
+  const cleanupStarted = new Promise((resolve) => {
+    cleanupStartedResolve = resolve;
+  });
+  const cleanupGate = new Promise((resolve) => {
+    releaseCleanup = resolve;
+  });
+  const cleanupCalls = [];
+  const logs = [];
+  const runtime = createDisconnectCleanupRuntime({
+    executeCleanup: async (input) => {
+      cleanupCalls.push(input);
+      cleanupStartedResolve();
+      await cleanupGate;
+      return runTableJanitor({
+        classification: {
+          tableId: input.tableId,
+          healthy: false,
+          classification: 'disconnect_cleanup',
+          action: 'disconnect_cleanup',
+          reasonCode: 'disconnect_candidate',
+          concerns: [],
+          userId: input.userId
+        },
+        trigger: 'disconnect_cleanup',
+        requestId: input.requestId,
+        primitives: {
+          disconnect_cleanup: async () => ({
+            ok: false,
+            changed: false,
+            status: 'cleanup_failed',
+            code: 'inactive_cleanup_failed',
+            retryable: false
+          })
+        },
+        klog: (kind, data) => logs.push({ kind, data }),
+        klogVerbose: () => {}
+      });
+    },
+    listActiveSocketsForUser: () => [],
+    socketMatchesTable: () => false
+  });
+
+  runtime.enqueue({ tableId: 't_failed', userId: 'u_failed' });
+  const firstSweep = runtime.sweep();
+  await cleanupStarted;
+  const secondSweep = runtime.sweep();
+  assert.strictEqual(firstSweep, secondSweep);
+
+  releaseCleanup();
+  await secondSweep;
+
+  assert.equal(cleanupCalls.length, 1);
+  assert.deepEqual(logs.map((entry) => entry.kind), ['ws_table_janitor_result']);
+  assert.equal(logs[0].data.ok, false);
+});
+
+
+test('a requested follow-up round still runs after a failed round', async () => {
+  let shouldFail = true;
+  let cleanupCalls = 0;
+  const runtime = createDisconnectCleanupRuntime({
+    executeCleanup: async () => {
+      cleanupCalls += 1;
+      if (shouldFail) {
+        shouldFail = false;
+        throw new Error('cleanup_failed');
+      }
+      return { ok: true, changed: true, status: 'cleaned', retryable: false };
+    },
+    listActiveSocketsForUser: () => [],
+    socketMatchesTable: () => false
+  });
+
+  runtime.enqueue({ tableId: 't_failed_rerun', userId: 'u_failed_rerun' });
+  const firstSweep = runtime.sweep();
+  const secondSweep = runtime.sweep();
+  assert.strictEqual(firstSweep, secondSweep);
+  await assert.rejects(firstSweep, /cleanup_failed/);
+
+  assert.equal(cleanupCalls, 2);
+  assert.equal(runtime.size(), 0);
 });

@@ -11,6 +11,8 @@ export function createDisconnectCleanupRuntime({
   const candidates = new Map();
   const MAX_CLEANUP_FAILURES = 8;
   const CLEANUP_RETRY_BACKOFF_BASE_MS = 1000;
+  let sweepInFlight = null;
+  let sweepAgainRequested = false;
 
   function key(tableId, userId) {
     return `${tableId}:${userId}`;
@@ -37,7 +39,7 @@ export function createDisconnectCleanupRuntime({
     return true;
   }
 
-  async function sweep() {
+  async function sweepOnce() {
     for (const candidate of [...candidates.values()]) {
       const currentNowMs = nowMs();
       const activeSockets = typeof listActiveSocketsForUser === 'function' ? (listActiveSocketsForUser(candidate.userId) || []) : [];
@@ -110,6 +112,35 @@ export function createDisconnectCleanupRuntime({
       candidate.retryNotBeforeMs = currentNowMs + backoffMs;
       candidates.set(key(candidate.tableId, candidate.userId), candidate);
     }
+  }
+
+  function sweep() {
+    if (sweepInFlight) {
+      sweepAgainRequested = true;
+      return sweepInFlight;
+    }
+
+    sweepAgainRequested = false;
+    sweepInFlight = Promise.resolve().then(async () => {
+      let firstError = null;
+      try {
+        while (true) {
+          try {
+            await sweepOnce();
+          } catch (error) {
+            if (firstError === null) firstError = error;
+          }
+          if (!sweepAgainRequested) break;
+          sweepAgainRequested = false;
+        }
+        if (firstError !== null) throw firstError;
+      } finally {
+        sweepAgainRequested = false;
+        sweepInFlight = null;
+      }
+    });
+
+    return sweepInFlight;
   }
 
   function size() {

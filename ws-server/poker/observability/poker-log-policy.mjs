@@ -344,6 +344,9 @@ function resolveDynamicCleanupPolicy(eventName) {
 
 function resolveJanitorResultPolicy(data) {
   if (data?.ok !== true) return { severity: "ERROR", category: "janitor", classified: true };
+  if (data?.status === "managed_continuous_human_removed") {
+    return { severity: "DEBUG", category: "janitor", classified: true };
+  }
   if (data?.changed === true || data?.closed === true) {
     return { severity: "INFO", category: "janitor", classified: true };
   }
