@@ -306,6 +306,7 @@ test("projectRoomCoreSnapshot projects settled showdown fields without leaking p
       roomId: "table_settled",
       handId: "hand_settled_1",
       phase: "SETTLED",
+      handStartStacksByUserId: { seated_user: 100, other_user: 100 },
       turnUserId: "seated_user",
       community: ["2H", "3H", "4H", "9C", "KD"],
       potTotal: 0,
@@ -313,7 +314,7 @@ test("projectRoomCoreSnapshot projects settled showdown fields without leaking p
       showdown: {
         handId: "hand_settled_1",
         winners: ["other_user"],
-        potsAwarded: [{ amount: 6, winners: ["other_user"], eligibleUserIds: ["seated_user", "other_user"] }],
+        potsAwarded: [{ amount: 6, winners: ["other_user"], eligibleUserIds: ["seated_user", "other_user"], returnUserId: "other_user" }],
         potAwardedTotal: 6,
         reason: "computed"
       },
@@ -360,7 +361,9 @@ test("projectRoomCoreSnapshot projects settled showdown fields without leaking p
   ]);
   assert.deepEqual(seated.handSettlement.payouts, { other_user: 6 });
   assert.equal(observer.private, null);
+  assert.equal("handStartStacksByUserId" in seated, false);
   assert.equal(observer.showdown.potsAwarded[0].eligibleUserIds.includes("seated_user"), true);
+  assert.equal("returnUserId" in observer.showdown.potsAwarded[0], false);
   assert.deepEqual(seated.private, { userId: "seated_user", seat: 1, holeCards: ["AH", "AD"] });
 });
 

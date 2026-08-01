@@ -182,7 +182,7 @@ const upgradeLegacyInitStateWithSeats = (state, seatsOrdered) => {
 
 const withoutPrivateState = (state) => {
   if (!state || typeof state !== "object" || Array.isArray(state)) return state;
-  const { holeCardsByUserId, deck, handSeed, ...rest } = state;
+  const { holeCardsByUserId, deck, handSeed, handStartStacksByUserId, ...rest } = state;
   return rest;
 };
 

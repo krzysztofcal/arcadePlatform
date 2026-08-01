@@ -51,12 +51,15 @@ const rows = [
     phase_to: "SETTLED",
     created_at: "2026-07-01T10:01:00.000Z",
     meta: JSON.stringify({
+      auditVersion: 2,
       reason: "computed",
       settledAt: "2026-07-01T10:01:00.000Z",
       communityCards: ["6C", "4S", "4C", "9D", "TD"],
       winners: ["00000000-0000-4000-8000-0000000000a1"],
       payoutByUserId: { "00000000-0000-4000-8000-0000000000a1": 44 },
       potsAwarded: [{ amount: 44, eligibleUserIds: ["00000000-0000-4000-8000-0000000000a1"], winners: ["00000000-0000-4000-8000-0000000000a1"] }],
+      participants: [{ userId: "00000000-0000-4000-8000-0000000000a1", seatNo: 1, folded: false, startingStack: 100, endingStack: 144, contribution: 44, payout: 44 }],
+      integrity: { status: "OK", flags: [], startingStackTotal: 100, endingStackTotal: 144, contributionTotal: 44, contestablePotTotal: 44, returnedTotal: 0, awardedPotTotal: 44, payoutTotal: 44, stackConservationDelta: 0, potConservationDelta: 0, payoutConservationDelta: 0 },
       evaluatedHands: [{ userId: "00000000-0000-4000-8000-0000000000a1", name: "Pair", category: 1, ranks: [10, 9], bestFiveCards: ["TD", "TC", "9D", "6C", "4S"] }],
       deck: ["3H"]
     })
@@ -129,8 +132,11 @@ test("search by handId returns selected hand and parses action plus settlement m
   assert.equal(payload.selectedHand.actions[0].source, "human");
   assert.equal(payload.selectedHand.actions[0].potTotalBefore, 8);
   assert.equal(payload.selectedHand.settlement.reason, "computed");
+  assert.equal(payload.selectedHand.settlement.auditVersion, 2);
   assert.deepEqual(payload.selectedHand.settlement.communityCards, ["6C", "4S", "4C", "9D", "TD"]);
   assert.equal(payload.selectedHand.settlement.payoutByUserId["00000000-0000-4000-8000-0000000000a1"], 44);
+  assert.equal(payload.selectedHand.settlement.participants[0].startingStack, 100);
+  assert.equal(payload.selectedHand.settlement.integrity.status, "OK");
   assert.equal(payload.selectedHand.settlement.evaluatedHands[0].name, "Pair");
   assert.equal(Object.prototype.hasOwnProperty.call(payload.selectedHand, "privateCardsByUserId"), false);
 });
@@ -187,6 +193,40 @@ test("response does not expose raw hole cards or deck keys", async () => {
   assert.equal(serialized.includes("AS"), false);
   assert.equal(serialized.includes("AD"), false);
   assert.equal(serialized.includes("3H"), false);
+});
+
+test("admin reader keeps v1 compatibility while exposing v2 audit fields", async () => {
+  const legacyRow = {
+    ...rows[1],
+    meta: JSON.stringify({
+      auditVersion: 1,
+      reason: "all_folded",
+      winners: ["legacy-user"],
+      payoutByUserId: { "legacy-user": 5 },
+      potsAwarded: [{ amount: 5, winners: ["legacy-user"], eligibleUserIds: ["legacy-user"] }]
+    })
+  };
+  const currentRow = {
+    ...rows[1],
+    meta: JSON.stringify({
+      auditVersion: 2,
+      reason: "computed",
+      winners: ["current-user"],
+      payoutByUserId: { "current-user": 5 },
+      potsAwarded: [{ amount: 5, winners: ["current-user"], eligibleUserIds: ["current-user"], returnUserId: "current-user" }],
+      participants: [{ userId: "current-user", seatNo: 1, folded: false, startingStack: 10, endingStack: 10, contribution: 5, payout: 5 }],
+      integrity: { status: "OK", flags: [], stackConservationDelta: 0, potConservationDelta: 0, payoutConservationDelta: 0 }
+    })
+  };
+  const payload = await loadPokerAudit({
+    handId: "hand-audit-1",
+    executeSqlFn: async () => [legacyRow, currentRow]
+  });
+
+  assert.equal(payload.ok, true);
+  assert.equal(payload.selectedHand.settlement.auditVersion, 1);
+  assert.deepEqual(payload.selectedHand.settlement.participants, []);
+  assert.equal(payload.selectedHand.settlement.integrity, null);
 });
 
 test("parseMeta defensively handles json strings and strips hidden state keys", () => {

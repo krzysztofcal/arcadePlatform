@@ -5,7 +5,7 @@ import { writePersistedTableToFile } from "./persisted-state-file-store.mjs";
 import { projectDurableActionResult } from "../idempotency/action-command.mjs";
 
 const HAND_SETTLED_ACTION_TYPE = "HAND_SETTLED";
-const SETTLEMENT_AUDIT_VERSION = 1;
+const SETTLEMENT_AUDIT_VERSION = 2;
 const ACCEPTED_ACTION_AUDIT_VERSION = 1;
 const ACCEPTED_ACTION_TYPES = new Set(["FOLD", "CHECK", "CALL", "BET", "RAISE", "ALL_IN"]);
 const MAX_REPLACEMENT_FUNDINGS = 10;
@@ -223,6 +223,21 @@ function normalizeAuditNumber(value) {
   return Number.isFinite(numberValue) ? numberValue : null;
 }
 
+function normalizeAuditChipAmount(value) {
+  const numberValue = normalizeAuditNumber(value);
+  return numberValue !== null && Number.isInteger(numberValue) && numberValue >= 0 ? numberValue : null;
+}
+
+function hasOwn(value, key) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? Object.prototype.hasOwnProperty.call(value, key)
+    : false;
+}
+
+function sumAuditAmounts(values) {
+  return values.reduce((total, value) => total + value, 0);
+}
+
 function readActorStack(state, actorUserId) {
   if (!state || typeof state !== "object" || Array.isArray(state) || !actorUserId) {
     return null;
@@ -290,27 +305,162 @@ function normalizePotsAwarded(potsAwarded) {
   }
   return potsAwarded
     .filter((pot) => pot && typeof pot === "object" && !Array.isArray(pot))
-    .map((pot) => ({
-      amount: Number.isFinite(Number(pot.amount)) ? Number(pot.amount) : 0,
-      winners: normalizeStringList(pot.winners),
-      eligibleUserIds: normalizeStringList(pot.eligibleUserIds)
-    }));
+    .map((pot) => {
+      const normalized = {
+        amount: Number.isFinite(Number(pot.amount)) ? Number(pot.amount) : 0,
+        winners: normalizeStringList(pot.winners),
+        eligibleUserIds: normalizeStringList(pot.eligibleUserIds)
+      };
+      const returnUserId = normalizeAuditString(pot.returnUserId);
+      if (returnUserId) normalized.returnUserId = returnUserId;
+      return normalized;
+    });
 }
 
-function normalizeEvaluatedHands(handsByUserId) {
-  if (!handsByUserId || typeof handsByUserId !== "object" || Array.isArray(handsByUserId)) {
-    return [];
+function buildSettlementAuditDetails({ state, potsAwarded, payoutByUserId }) {
+  const flags = new Set();
+  const handSeats = Array.isArray(state?.handSeats) ? state.handSeats : [];
+  if (handSeats.length === 0) flags.add("HAND_SEATS_MISSING");
+
+  const foldedByUserId = state?.foldedByUserId;
+  const contributionsByUserId = state?.contributionsByUserId;
+  const stacks = state?.stacks;
+  const handStartStacksByUserId = state?.handStartStacksByUserId;
+  const participants = [];
+  const participantUserIds = new Set();
+
+  for (const seat of handSeats) {
+    const userId = normalizeAuditString(seat?.userId);
+    const seatNo = Number.isInteger(seat?.seatNo) ? seat.seatNo : null;
+    if (!userId || seatNo === null || participantUserIds.has(userId)) {
+      flags.add("HAND_SEATS_INVALID");
+      continue;
+    }
+    participantUserIds.add(userId);
+
+    const contribution = normalizeAuditChipAmount(contributionsByUserId?.[userId]);
+    const endingStack = normalizeAuditChipAmount(stacks?.[userId]);
+    const payout = hasOwn(payoutByUserId, userId)
+      ? normalizeAuditChipAmount(payoutByUserId[userId])
+      : 0;
+    const persistedStartingStack = hasOwn(handStartStacksByUserId, userId)
+      ? normalizeAuditChipAmount(handStartStacksByUserId[userId])
+      : null;
+    let startingStack = persistedStartingStack;
+
+    if (persistedStartingStack === null) {
+      flags.add("STARTING_STACK_DERIVED");
+      const derivedStartingStack = endingStack !== null && contribution !== null && payout !== null
+        ? endingStack + contribution - payout
+        : null;
+      startingStack = derivedStartingStack !== null && derivedStartingStack >= 0 ? derivedStartingStack : null;
+      if (startingStack === null) flags.add("STARTING_STACK_MISSING");
+    }
+    if (contribution === null) flags.add("CONTRIBUTION_MISSING");
+    if (endingStack === null) flags.add("ENDING_STACK_MISSING");
+    if (payout === null) flags.add("PAYOUT_INVALID");
+
+    participants.push({
+      userId,
+      seatNo,
+      folded: foldedByUserId?.[userId] === true,
+      startingStack,
+      endingStack,
+      contribution,
+      payout
+    });
   }
-  return Object.entries(handsByUserId)
-    .filter(([userId, hand]) => typeof userId === "string" && userId.trim() && hand && typeof hand === "object" && !Array.isArray(hand))
-    .map(([userId, hand]) => ({
-      userId: userId.trim(),
-      category: hand.category ?? null,
-      name: typeof hand.name === "string" ? hand.name : null,
-      ranks: Array.isArray(hand.ranks) ? hand.ranks.filter((rank) => Number.isFinite(Number(rank))).map((rank) => Number(rank)) : [],
-      bestFiveCards: normalizeCardList(hand.best5)
-    }))
-    .sort((left, right) => left.userId.localeCompare(right.userId));
+
+  for (const userId of Object.keys(payoutByUserId)) {
+    if (!participantUserIds.has(userId)) flags.add("PAYOUT_USER_NOT_IN_HAND_SEATS");
+  }
+
+  let contestablePotTotal = 0;
+  let returnedTotal = 0;
+  let awardedPotTotal = 0;
+  for (const pot of potsAwarded) {
+    const amount = normalizeAuditChipAmount(pot.amount);
+    if (amount === null) {
+      flags.add("POT_AMOUNT_INVALID");
+      continue;
+    }
+    awardedPotTotal += amount;
+    const returnUserId = normalizeAuditString(pot.returnUserId);
+    if (returnUserId) {
+      returnedTotal += amount;
+      if (pot.eligibleUserIds.length !== 1 || pot.eligibleUserIds[0] !== returnUserId) {
+        flags.add("RETURN_POT_INVALID");
+      }
+    } else {
+      contestablePotTotal += amount;
+    }
+  }
+
+  const startingStackTotal = participants.length > 0 && participants.every((participant) => participant.startingStack !== null)
+    ? sumAuditAmounts(participants.map((participant) => participant.startingStack))
+    : null;
+  const endingStackTotal = participants.length > 0 && participants.every((participant) => participant.endingStack !== null)
+    ? sumAuditAmounts(participants.map((participant) => participant.endingStack))
+    : null;
+  const contributionTotal = participants.length > 0 && participants.every((participant) => participant.contribution !== null)
+    ? sumAuditAmounts(participants.map((participant) => participant.contribution))
+    : null;
+  const payoutTotal = Object.values(payoutByUserId).every((amount) => normalizeAuditChipAmount(amount) !== null)
+    ? sumAuditAmounts(Object.values(payoutByUserId).map((amount) => normalizeAuditChipAmount(amount)))
+    : null;
+
+  let stackConservationDelta = null;
+  let potConservationDelta = null;
+  let payoutConservationDelta = null;
+  if (startingStackTotal !== null && endingStackTotal !== null && contributionTotal !== null && payoutTotal !== null) {
+    stackConservationDelta = startingStackTotal - endingStackTotal - contributionTotal + payoutTotal;
+  }
+  if (contributionTotal !== null) {
+    potConservationDelta = contributionTotal - contestablePotTotal - returnedTotal;
+  }
+  if (payoutTotal !== null) {
+    payoutConservationDelta = awardedPotTotal - payoutTotal;
+  }
+
+  for (const participant of participants) {
+    if ([participant.startingStack, participant.endingStack, participant.contribution, participant.payout].every((value) => value !== null)
+      && participant.startingStack !== participant.endingStack + participant.contribution - participant.payout) {
+      flags.add("PLAYER_STACK_CONSERVATION_MISMATCH");
+    }
+  }
+
+  const deltas = [stackConservationDelta, potConservationDelta, payoutConservationDelta];
+  const hasMismatch = deltas.some((delta) => delta !== null && delta !== 0)
+    || flags.has("PLAYER_STACK_CONSERVATION_MISMATCH")
+    || flags.has("RETURN_POT_INVALID")
+    || flags.has("POT_AMOUNT_INVALID");
+  const hasIncompleteData = deltas.some((delta) => delta === null)
+    || flags.has("HAND_SEATS_MISSING")
+    || flags.has("HAND_SEATS_INVALID")
+    || flags.has("STARTING_STACK_DERIVED")
+    || flags.has("STARTING_STACK_MISSING")
+    || flags.has("CONTRIBUTION_MISSING")
+    || flags.has("ENDING_STACK_MISSING")
+    || flags.has("PAYOUT_INVALID")
+    || flags.has("PAYOUT_USER_NOT_IN_HAND_SEATS");
+
+  return {
+    participants,
+    integrity: {
+      status: hasMismatch ? "MISMATCH" : hasIncompleteData ? "INCOMPLETE" : "OK",
+      flags: [...flags].sort(),
+      startingStackTotal,
+      endingStackTotal,
+      contributionTotal,
+      contestablePotTotal,
+      returnedTotal,
+      awardedPotTotal,
+      payoutTotal,
+      stackConservationDelta,
+      potConservationDelta,
+      payoutConservationDelta
+    }
+  };
 }
 
 function buildSettlementAuditMeta({ tableId, state }) {
@@ -331,10 +481,13 @@ function buildSettlementAuditMeta({ tableId, state }) {
     payoutByUserId: normalizePayoutMap(state?.handSettlement?.payouts),
     potsAwarded: normalizePotsAwarded(state?.showdown?.potsAwarded)
   };
-  const evaluatedHands = normalizeEvaluatedHands(state?.showdown?.handsByUserId);
-  if (evaluatedHands.length > 0) {
-    meta.evaluatedHands = evaluatedHands;
-  }
+  const details = buildSettlementAuditDetails({
+    state,
+    potsAwarded: meta.potsAwarded,
+    payoutByUserId: meta.payoutByUserId
+  });
+  meta.participants = details.participants;
+  meta.integrity = details.integrity;
   return meta;
 }
 

@@ -142,6 +142,7 @@ export function buildBootstrappedPokerState({
     const stack = Number(startingStacks?.[userId]);
     return [userId, Number.isFinite(stack) && stack >= 0 ? Math.trunc(stack) : 100];
   }));
+  const handStartStacksByUserId = { ...stacks };
   const betThisRoundByUserId = Object.fromEntries(userIds.map((userId) => [userId, 0]));
   const toCallByUserId = Object.fromEntries(userIds.map((userId) => [userId, 0]));
   const actedThisRoundByUserId = Object.fromEntries(userIds.map((userId) => [userId, false]));
@@ -188,6 +189,7 @@ export function buildBootstrappedPokerState({
     bigBlind,
     lastRaiseSize: bigBlind,
     stacks,
+    handStartStacksByUserId,
     toCallByUserId,
     betThisRoundByUserId,
     actedThisRoundByUserId,

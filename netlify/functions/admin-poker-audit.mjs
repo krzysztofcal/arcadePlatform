@@ -107,11 +107,47 @@ function payoutTotal(payoutByUserId) {
   return Object.values(payoutByUserId || {}).reduce((sum, amount) => sum + (Number.isFinite(Number(amount)) ? Number(amount) : 0), 0);
 }
 
+function normalizeAuditParticipants(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((participant) => participant && typeof participant === "object" && !Array.isArray(participant))
+    .map((participant) => ({
+      userId: normalizeText(participant.userId),
+      seatNo: Number.isInteger(participant.seatNo) ? participant.seatNo : null,
+      folded: participant.folded === true,
+      startingStack: normalizeNumber(participant.startingStack),
+      endingStack: normalizeNumber(participant.endingStack),
+      contribution: normalizeNumber(participant.contribution),
+      payout: normalizeNumber(participant.payout)
+    }))
+    .filter((participant) => participant.userId);
+}
+
+function normalizeAuditIntegrity(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const status = typeof value.status === "string" ? value.status : null;
+  return {
+    status,
+    flags: normalizeStringList(value.flags),
+    startingStackTotal: normalizeNumber(value.startingStackTotal),
+    endingStackTotal: normalizeNumber(value.endingStackTotal),
+    contributionTotal: normalizeNumber(value.contributionTotal),
+    contestablePotTotal: normalizeNumber(value.contestablePotTotal),
+    returnedTotal: normalizeNumber(value.returnedTotal),
+    awardedPotTotal: normalizeNumber(value.awardedPotTotal),
+    payoutTotal: normalizeNumber(value.payoutTotal),
+    stackConservationDelta: normalizeNumber(value.stackConservationDelta),
+    potConservationDelta: normalizeNumber(value.potConservationDelta),
+    payoutConservationDelta: normalizeNumber(value.payoutConservationDelta)
+  };
+}
+
 function normalizeSettlement(row) {
   if (!row) return null;
   const meta = parseMeta(row.meta);
   const payoutByUserId = normalizePayoutMap(meta.payoutByUserId);
   return {
+    auditVersion: Number.isInteger(Number(meta.auditVersion)) ? Number(meta.auditVersion) : null,
     reason: typeof meta.reason === "string" ? meta.reason : null,
     settledAt: typeof meta.settledAt === "string" ? meta.settledAt : (row.created_at || null),
     communityCards: normalizeStringList(meta.communityCards),
@@ -119,6 +155,8 @@ function normalizeSettlement(row) {
     payoutByUserId,
     payoutTotal: payoutTotal(payoutByUserId),
     potsAwarded: Array.isArray(meta.potsAwarded) ? meta.potsAwarded : [],
+    participants: normalizeAuditParticipants(meta.participants),
+    integrity: normalizeAuditIntegrity(meta.integrity),
     evaluatedHands: Array.isArray(meta.evaluatedHands) ? meta.evaluatedHands : []
   };
 }

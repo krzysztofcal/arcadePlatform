@@ -98,6 +98,7 @@ export const startHandCore = async ({
     });
     throw makeError(409, "state_invalid");
   }
+  const handStartStacksByUserId = { ...nextStacks };
 
   const toCallByUserId = Object.fromEntries(activeUserIdList.map((activeId) => [activeId, 0]));
   const betThisRoundByUserId = Object.fromEntries(activeUserIdList.map((activeId) => [activeId, 0]));
@@ -174,6 +175,7 @@ export const startHandCore = async ({
     seats: derivedSeats,
     handSeats: derivedSeats.slice(),
     stacks: nextStacks,
+    handStartStacksByUserId,
     dealerSeatNo,
     turnUserId,
     toCallByUserId,

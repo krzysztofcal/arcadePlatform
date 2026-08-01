@@ -39,6 +39,7 @@ test("engine bootstrap creates deterministic preflop hand with expected invarian
   assert.ok(pokerState.turnDeadlineAt > nowMs);
   assert.equal(Array.isArray(pokerState.seats), true);
   assert.deepEqual(pokerState.handSeats, pokerState.seats);
+  assert.deepEqual(pokerState.handStartStacksByUserId, { user_a: 100, user_b: 100, user_c: 100 });
   assert.equal(typeof pokerState.roomId, "string");
 });
 
@@ -55,6 +56,7 @@ for (const stakes of [{ sb: 1, bb: 2 }, { sb: 5, bb: 10 }]) {
     });
 
     const state = result.coreState.pokerState;
+    assert.deepEqual(state.handStartStacksByUserId, { user_a: 100, user_b: 100, user_c: 100 });
     assert.equal(state.betThisRoundByUserId.user_b, stakes.sb);
     assert.equal(state.betThisRoundByUserId.user_c, stakes.bb);
     assert.equal(state.contributionsByUserId.user_b, stakes.sb);

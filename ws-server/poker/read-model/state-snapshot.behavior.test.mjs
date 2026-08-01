@@ -364,7 +364,7 @@ test("buildStateSnapshotPayload includes terminal showdown/settlement fields whe
       showdown: {
         handId: "h_terminal",
         winners: ["user_a"],
-        potsAwarded: [{ amount: 5, winners: ["user_a"] }],
+        potsAwarded: [{ amount: 5, winners: ["user_a"], eligibleUserIds: ["user_a"], returnUserId: "user_a" }],
         potAwardedTotal: 5,
         reason: "computed",
         revealedShowdownParticipants: [{ userId: "user_a", holeCards: ["AS", "AD"] }]
@@ -380,6 +380,7 @@ test("buildStateSnapshotPayload includes terminal showdown/settlement fields whe
   assert.deepEqual(payload.public.showdown.winners, ["user_a"]);
   assert.deepEqual(payload.public.showdown.revealedShowdownParticipants, [{ userId: "user_a", holeCards: ["AS", "AD"] }]);
   assert.equal(payload.public.showdown.potAwardedTotal, 5);
+  assert.equal("returnUserId" in payload.public.showdown.potsAwarded[0], false);
   assert.deepEqual(payload.public.turn, { userId: null, seat: null, startedAt: null, deadlineAt: null });
   assert.deepEqual(payload.public.actionConstraints, { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null });
   assert.deepEqual(payload.public.handSettlement.payouts, { user_a: 5 });
