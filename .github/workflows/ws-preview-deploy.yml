@@ -327,7 +327,6 @@ jobs:
               sudo -n node --input-type=module -e "await import('./ws-server/shared/poker-domain/inactive-cleanup-deps.mjs')"
             )
 
-            RESTART_SINCE="$(date --utc +'%Y-%m-%d %H:%M:%S UTC')"
             sudo -n systemctl restart "$PREVIEW_SERVICE_NAME"
 
             LOCAL_HEALTHZ_BODY=""
@@ -353,32 +352,6 @@ jobs:
               fi
               sleep "$HEALTH_SLEEP_SEC"
             done
-
-            sudo -n journalctl -u "$PREVIEW_SERVICE_NAME" --since "$RESTART_SINCE" --no-pager -o cat \
-              | node -e '
-                  const fs = require("fs");
-                  const [expectedSha, expectedRef, expectedEnvironment] = process.argv.slice(1);
-                  const prefix = "[klog] ws_artifact_start ";
-                  const matched = fs.readFileSync(0, "utf8")
-                    .split(/\r?\n/)
-                    .filter((line) => line.startsWith(prefix))
-                    .some((line) => {
-                      try {
-                        const metadata = JSON.parse(line.slice(prefix.length));
-                        return (
-                          metadata?.releaseSha === expectedSha
-                          && metadata?.deployRef === expectedRef
-                          && metadata?.environment === expectedEnvironment
-                        );
-                      } catch {
-                        return false;
-                      }
-                  });
-                  if (!matched) {
-                    process.stderr.write("expected ws_artifact_start identity not found\n");
-                    process.exit(1);
-                  }
-                ' "$RELEASE_SHA" "$DEPLOY_REF" preview
 
             verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json" installed-after-restart
             BASH

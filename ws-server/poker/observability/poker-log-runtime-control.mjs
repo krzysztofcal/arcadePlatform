@@ -58,7 +58,7 @@ export function createPokerLogRuntimeControl({
   audit = () => {}
 } = {}) {
   const configuredLevel = normalizeLevel(env?.WS_POKER_LOG_LEVEL);
-  const defaultLevel = configuredLevel || "INFO";
+  const defaultLevel = configuredLevel || "ERROR";
   const invalidConfiguredLevel = env?.WS_POKER_LOG_LEVEL != null && !configuredLevel;
   const legacyPokerDebug = env?.WS_POKER_VERBOSE_LOGS === "1";
   const legacyAutoplayDebug = env?.WS_BOT_AUTOPLAY_VERBOSE_LOGS === "1";

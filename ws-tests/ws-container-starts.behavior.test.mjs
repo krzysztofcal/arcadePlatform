@@ -60,6 +60,8 @@ function startWsContainer(imageTag, containerName) {
     containerName,
     "-e",
     "PORT=3000",
+    "-e",
+    "WS_POKER_LOG_LEVEL=INFO",
     "-p",
     "0:3000",
     imageTag

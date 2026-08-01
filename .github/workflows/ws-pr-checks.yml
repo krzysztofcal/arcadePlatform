@@ -22,6 +22,7 @@ on:
 env:
   WS_DOCKER_BUILD_CONTEXT: "."
   WS_DOCKERFILE_PATH: "ws-server/Dockerfile"
+  WS_POKER_LOG_LEVEL: "INFO"
 
 jobs:
   ws-harness:

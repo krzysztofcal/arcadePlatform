@@ -676,6 +676,38 @@ test("poker log policy owns envelope metadata and preserves compatibility for un
   );
 });
 
+test("managed continuous human removal is DEBUG-gated and janitor errors remain visible", () => {
+  const success = {
+    ok: true,
+    changed: true,
+    status: "managed_continuous_human_removed"
+  };
+  assert.deepEqual(
+    resolvePokerLogPolicy("ws_table_janitor_result", success),
+    { severity: "DEBUG", category: "janitor", classified: true }
+  );
+
+  const control = createPokerLogRuntimeControl({
+    env: { WS_POKER_LOG_LEVEL: "ERROR" },
+    setTimer: () => ({ unref() {} }),
+    clearTimer: () => {}
+  });
+  assert.equal(control.shouldEmit("ws_table_janitor_result", success), false);
+  control.enable({ scope: "category", category: "janitor", ttlMs: 60_000 });
+  assert.equal(control.shouldEmit("ws_table_janitor_result", success), true);
+
+  const failure = {
+    ok: false,
+    changed: false,
+    status: "cleanup_failed"
+  };
+  assert.deepEqual(
+    resolvePokerLogPolicy("ws_table_janitor_result", failure),
+    { severity: "ERROR", category: "janitor", classified: true }
+  );
+  assert.equal(control.shouldEmit("ws_table_janitor_result", failure), true);
+});
+
 test("poker log serialization failures use a safe classified fallback", () => {
   const circularPayload = {};
   circularPayload.self = circularPayload;
@@ -785,8 +817,15 @@ test("poker log runtime control rejects invalid scopes, TTLs, categories, and ta
     setTimer: () => ({ unref() {} }),
     clearTimer: () => {}
   });
-  assert.equal(invalidConfig.defaultLevel, "INFO");
+  assert.equal(invalidConfig.defaultLevel, "ERROR");
   assert.equal(invalidConfig.invalidConfiguredLevel, true);
+
+  const defaultConfig = createPokerLogRuntimeControl({
+    env: {},
+    setTimer: () => ({ unref() {} }),
+    clearTimer: () => {}
+  });
+  assert.equal(defaultConfig.defaultLevel, "ERROR");
 
   const control = createPokerLogRuntimeControl({
     tableOverrideLimit: 1,
