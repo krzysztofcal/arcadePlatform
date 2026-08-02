@@ -24,6 +24,7 @@ function snapshot(environment = "preview") {
   return {
     environment,
     measuredAt: "2026-08-02T19:00:00.000Z",
+    secretDiagnostic: "must-not-forward",
     rootFilesystem: null,
     logs: { varLogBytes: null, journaldBytes: null },
     runtime: { wsCpuPercent: null },
@@ -56,7 +57,9 @@ test("admin VPS metrics requires an admin and forwards the verified target", asy
   assert.equal(capturedUrl, "https://ws-preview.kcswh.pl/internal/admin/vps-metrics");
   assert.equal(capturedOptions.method, "GET");
   assert.equal(capturedOptions.headers.authorization, "Bearer preview-token");
-  assert.equal(JSON.parse(response.body).environment, "preview");
+  const body = JSON.parse(response.body);
+  assert.equal(body.environment, "preview");
+  assert.equal(Object.prototype.hasOwnProperty.call(body, "secretDiagnostic"), false);
 
   const unauthorized = createAdminVpsMetricsHandler({
     env: { CHIPS_ENABLED: "0" },

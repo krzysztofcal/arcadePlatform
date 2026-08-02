@@ -3125,7 +3125,9 @@ function projectContinuousTablesMetrics(repositoryResult) {
   return {
     active: Array.isArray(repositoryResult.tables) ? repositoryResult.tables.length : null,
     desired: safeMetricInteger(repositoryResult.profile.desiredTableCount),
-    enabled: repositoryResult.profile.enabled === true
+    enabled: typeof repositoryResult.profile.enabled === "boolean"
+      ? repositoryResult.profile.enabled
+      : null
   };
 }
 
@@ -3142,7 +3144,9 @@ function projectCleanupMetrics(cleanupResult) {
     backlog: backlog && typeof backlog === "object" ? {
       ordinaryActionRows: safeMetricInteger(backlog.ordinaryActionRows),
       handSettledRows: safeMetricInteger(backlog.handSettledRows),
-      cappedAtBatchSize: backlog.cappedAtBatchSize === true,
+      cappedAtBatchSize: typeof backlog.cappedAtBatchSize === "boolean"
+        ? backlog.cappedAtBatchSize
+        : null,
       measuredAt: typeof backlog.measuredAt === "string" ? backlog.measuredAt : null
     } : null,
     lastRun: lastRun && typeof lastRun === "object" ? {

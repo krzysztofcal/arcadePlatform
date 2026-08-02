@@ -69,6 +69,16 @@ function resolveTimeoutMs(env) {
     : DEFAULT_TIMEOUT_MS;
 }
 
+function projectFields(source, fields) {
+  if (!source || typeof source !== "object" || Array.isArray(source)) return null;
+  return fields.reduce((result, field) => {
+    result[field] = Object.prototype.hasOwnProperty.call(source, field) && source[field] !== undefined
+      ? source[field]
+      : null;
+    return result;
+  }, {});
+}
+
 function normalizeMetricsSnapshot(value, target) {
   if (!value || typeof value !== "object" || value.environment !== target) {
     throw controlError("ws_vps_metrics_environment_mismatch", 502);
@@ -76,7 +86,39 @@ function normalizeMetricsSnapshot(value, target) {
   if (typeof value.measuredAt !== "string" || !Number.isFinite(Date.parse(value.measuredAt))) {
     throw controlError("ws_vps_metrics_invalid_response", 502);
   }
-  return value;
+  const rootFilesystem = projectFields(value.rootFilesystem, [
+    "totalBytes", "usedBytes", "availableBytes", "usedPercent"
+  ]);
+  if (rootFilesystem) {
+    rootFilesystem.inodes = projectFields(value.rootFilesystem.inodes, [
+      "total", "used", "available", "usedPercent"
+    ]);
+  }
+  const runtime = projectFields(value.runtime, [
+    "wsCpuPercent", "wsRssBytes", "wsUptimeSeconds", "hostAvailableRamBytes",
+    "hostLogicalCpuCount", "ioWaitPercent"
+  ]);
+  if (runtime) {
+    runtime.loadAverage = projectFields(value.runtime.loadAverage, ["one", "five", "fifteen"]);
+  }
+  const cleanup = projectFields(value.cleanup, []);
+  if (cleanup) {
+    cleanup.backlog = projectFields(value.cleanup.backlog, [
+      "ordinaryActionRows", "handSettledRows", "cappedAtBatchSize", "measuredAt"
+    ]);
+    cleanup.lastRun = projectFields(value.cleanup.lastRun, [
+      "finishedAt", "durationMs", "deletedRows", "result"
+    ]);
+  }
+  return {
+    environment: target,
+    measuredAt: value.measuredAt,
+    rootFilesystem,
+    logs: projectFields(value.logs, ["varLogBytes", "journaldBytes"]),
+    runtime,
+    continuousTables: projectFields(value.continuousTables, ["active", "desired", "enabled"]),
+    cleanup,
+  };
 }
 
 async function proxyVpsMetrics({ target, env, fetchImpl }) {

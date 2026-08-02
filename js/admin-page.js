@@ -1258,14 +1258,21 @@
     var availabilityTone = availabilityLabel === "Available" ? "success" : "info";
     var diskPercent = root && Number(root.usedPercent);
     var inodePercent = root && root.inodes && Number(root.inodes.usedPercent);
+    var healthPercent = Number.isFinite(diskPercent) ? diskPercent : null;
+    if (Number.isFinite(inodePercent) && (healthPercent == null || inodePercent > healthPercent)){
+      healthPercent = inodePercent;
+    }
     var healthLabel = "Unavailable";
     var healthTone = "info";
-    if (Number.isFinite(diskPercent) && Number.isFinite(inodePercent)){
-      var highestPercent = Math.max(diskPercent, inodePercent);
+    if (healthPercent != null){
+      var highestPercent = healthPercent;
       healthLabel = highestPercent >= 90 ? "Critical" : highestPercent >= 80 ? "Warning" : "Healthy";
       healthTone = healthLabel === "Critical" ? "danger" : healthLabel === "Healthy" ? "success" : "info";
     }
-    if (state.ops.vpsMetricsStale) availabilityLabel = "Stale";
+    if (state.ops.vpsMetricsStale){
+      availabilityLabel = "Stale";
+      availabilityTone = "info";
+    }
     var loadAvailable = [load.one, load.five, load.fifteen].every(function(value){ return Number.isFinite(Number(value)); });
     var loadText = loadAvailable
       ? Number(load.one).toFixed(1) + " / " + Number(load.five).toFixed(1) + " / " + Number(load.fifteen).toFixed(1) + " · " + String(runtime.hostLogicalCpuCount || "—") + " CPUs"
@@ -1301,7 +1308,7 @@
       '<div class="admin-kv">',
       renderKvRow("Active", tables ? tables.active : null),
       renderKvRow("Desired", tables ? tables.desired : null),
-      renderKvRow("Maintenance", tables ? (tables.enabled ? "enabled" : "disabled") : null),
+      renderKvRow("Maintenance", tables && tables.enabled != null ? (tables.enabled ? "enabled" : "disabled") : null),
       "</div>",
       "</div>",
       '<div class="admin-surface">',
@@ -1309,7 +1316,7 @@
       '<div class="admin-kv">',
       renderKvRow("Next cleanup batch · ordinary rows", backlog ? backlog.ordinaryActionRows : null),
       renderKvRow("Next cleanup batch · HAND_SETTLED", backlog ? backlog.handSettledRows : null),
-      renderKvRow("Batch capped", backlog ? (backlog.cappedAtBatchSize ? "yes" : "no") : null),
+      renderKvRow("Batch capped", backlog && backlog.cappedAtBatchSize != null ? (backlog.cappedAtBatchSize ? "yes" : "no") : null),
       renderKvRow("Last cleanup", lastRun ? formatTimestamp(lastRun.finishedAt) : "No run recorded"),
       renderKvRow("Last cleanup deleted", deletedRows),
       renderKvRow("Last cleanup result", lastRun ? lastRun.result : "No run recorded"),

@@ -41,10 +41,10 @@ export function parseProcStatCpu(text) {
   if (!line) return null;
   const fields = line.trim().split(/\s+/).slice(1).map(Number);
   if (fields.length < 5 || fields.some((value) => !Number.isSafeInteger(value) || value < 0)) return null;
-  const total = fields.reduce((sum, value) => sum + value, 0);
+  const total = fields.slice(0, 8).reduce((sum, value) => sum + value, 0);
   return {
     total,
-    iowait: fields[3],
+    iowait: fields[4],
   };
 }
 

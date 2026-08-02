@@ -405,6 +405,7 @@ function buildContext(options = {}) {
   const opts = options || {};
   const { document, tabs, panels } = createAdminDom();
   const fetchCalls = [];
+  var vpsMetricsCalls = 0;
   const fetch = async (url) => {
     fetchCalls.push(String(url || ""));
     const text = String(url || "");
@@ -528,6 +529,10 @@ function buildContext(options = {}) {
       }) };
     }
     if (text.includes("/.netlify/functions/admin-vps-metrics")) {
+      vpsMetricsCalls += 1;
+      if (opts.vpsMetricsFailsAfterFirst && vpsMetricsCalls > 1){
+        return { ok: false, status: 504, json: async () => ({ error: "ws_vps_metrics_timeout" }) };
+      }
       return { ok: true, json: async () => ({
         environment: "preview",
         measuredAt: "2026-08-02T19:00:00.000Z",
@@ -817,6 +822,22 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.match(document.getElementById("adminOpsVpsMetrics").innerHTML, /WS uptime/);
   assert.match(document.getElementById("adminOpsVpsMetrics").innerHTML, /37/);
   assert.equal(document.getElementById("adminOpsBotReactionDelay").value, "2000");
+});
+
+test("admin page marks the previous VPS metrics snapshot stale after a refresh failure", async () => {
+  const { context, document, tabs } = buildContext({ vpsMetricsFailsAfterFirst: true });
+  vm.runInContext(source, context, { filename: "js/admin-page.js" });
+
+  await flush();
+  tabs[5].dispatchEvent({ type: "click", bubbles: true, target: tabs[5], preventDefault() {} });
+  await flush();
+  await flush();
+  assert.match(document.getElementById("adminOpsVpsMetrics").innerHTML, /Available/);
+
+  document.getElementById("adminOpsRefresh").dispatchEvent({ type: "click", preventDefault() {} });
+  await flush();
+  await flush();
+  assert.match(document.getElementById("adminOpsVpsMetrics").innerHTML, /admin-pill admin-pill--info">Stale/);
 });
 
 test("admin page still renders ops summary when stage identity request fails", async () => {

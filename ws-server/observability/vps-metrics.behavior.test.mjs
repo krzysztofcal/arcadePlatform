@@ -4,6 +4,7 @@ import {
   createVpsMetricsCollector,
   parseDuBytes,
   parseMemAvailable,
+  parseProcStatCpu,
 } from "./vps-metrics.mjs";
 
 function createDeps({ journalFailure = false } = {}) {
@@ -67,6 +68,10 @@ test("VPS collector returns storage, runtime and host metrics without an aggrega
   assert.equal(parseMemAvailable("MemFree: 10 kB\n"), null);
   assert.equal(parseDuBytes("123\t/var/log\n", "/var/log"), 123);
   assert.equal(parseDuBytes("123\n456\n", "/var/log"), null);
+  assert.deepEqual(
+    parseProcStatCpu("cpu 100 2 3 4 5 6 7 8 90 10\n"),
+    { total: 135, iowait: 5 }
+  );
 
   const snapshot = await createVpsMetricsCollector(createDeps()).collect();
   assert.equal(snapshot.rootFilesystem.usedBytes, 600_000 * 4096);
