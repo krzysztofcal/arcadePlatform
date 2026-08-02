@@ -6,8 +6,9 @@ const WS_ORIGINS = Object.freeze({
   preview: "https://ws-preview.kcswh.pl",
   production: "https://ws.kcswh.pl",
 });
-const WS_ENVIRONMENTS = Object.freeze({
+const WS_ENVIRONMENT_BY_TARGET = Object.freeze({
   preview: "preview",
+  "deploy-preview": "preview",
   production: "production",
 });
 const DEFAULT_TIMEOUT_MS = 4_000;
@@ -28,8 +29,9 @@ function controlError(code, status = 400) {
 }
 
 function resolveWsEnvironment(target) {
-  return Object.prototype.hasOwnProperty.call(WS_ENVIRONMENTS, target)
-    ? WS_ENVIRONMENTS[target]
+  const normalizedTarget = typeof target === "string" ? target.trim() : "";
+  return Object.prototype.hasOwnProperty.call(WS_ENVIRONMENT_BY_TARGET, normalizedTarget)
+    ? WS_ENVIRONMENT_BY_TARGET[normalizedTarget]
     : null;
 }
 
@@ -40,7 +42,7 @@ function resolveTarget(identity) {
     && identity?.stageProjectRefMatches === true
     && identity?.databaseMatchesSupabaseProjectRef === true
     && identity?.serviceRoleStageProjectRefMatches === true
-  ) return WS_ENVIRONMENTS.preview;
+  ) return WS_ENVIRONMENT_BY_TARGET.preview;
   if (
     identity?.environmentContext === "production"
     && identity?.databaseTarget === "production"
@@ -50,19 +52,20 @@ function resolveTarget(identity) {
     && identity?.databaseProductionProjectRefMatches === true
     && identity?.serviceRoleProductionProjectRefMatches === true
     && identity?.databaseMatchesSupabaseProjectRef === true
-  ) return WS_ENVIRONMENTS.production;
+  ) return WS_ENVIRONMENT_BY_TARGET.production;
   return null;
 }
 
 function resolveBaseUrl(env, target) {
+  const wsEnvironment = resolveWsEnvironment(target);
   const raw = typeof env?.POKER_WS_INTERNAL_BASE_URL === "string"
     ? env.POKER_WS_INTERNAL_BASE_URL.trim()
     : "";
-  if (!raw || !WS_ORIGINS[target]) return null;
+  if (!raw || !WS_ORIGINS[wsEnvironment]) return null;
   try {
     const url = new URL(raw);
     if (
-      url.origin !== WS_ORIGINS[target]
+      url.origin !== WS_ORIGINS[wsEnvironment]
       || (url.pathname !== "/" && url.pathname !== "")
       || url.username || url.password || url.search || url.hash
     ) return null;

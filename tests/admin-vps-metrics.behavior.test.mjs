@@ -7,6 +7,7 @@ const {
   resolveTarget,
   resolveWsEnvironment,
 } = await import("../netlify/functions/admin-vps-metrics.mjs");
+const { buildStageIdentity } = await import("../netlify/functions/admin-stage-identity.mjs");
 
 const adminId = "00000000-0000-4000-8000-000000000010";
 const previewIdentity = {
@@ -88,6 +89,37 @@ test("admin VPS metrics maps Netlify deploy-preview to the WS preview environmen
   assert.equal(target, "preview");
   assert.equal(resolveWsEnvironment(target), "preview");
   assert.equal(normalizeMetricsSnapshot(snapshot("preview"), target).environment, "preview");
+});
+
+test("admin VPS metrics handler accepts the actual deploy-preview to WS preview flow", async () => {
+  const stageProjectRef = "stage-project";
+  const serviceRolePayload = Buffer.from(JSON.stringify({ ref: stageProjectRef })).toString("base64url");
+  const identityEnv = {
+    CONTEXT: "deploy-preview",
+    SUPABASE_URL: `https://${stageProjectRef}.supabase.co`,
+    SUPABASE_DB_URL: `postgres://postgres.${stageProjectRef}:password@db.${stageProjectRef}.supabase.co:5432/postgres`,
+    SUPABASE_STAGE_PROJECT_REF: stageProjectRef,
+    SUPABASE_SERVICE_ROLE_KEY: `header.${serviceRolePayload}.signature`,
+  };
+  let capturedUrl = null;
+  const handler = createAdminVpsMetricsHandler({
+    env: {
+      ...identityEnv,
+      POKER_WS_INTERNAL_BASE_URL: "https://ws-preview.kcswh.pl",
+      POKER_WS_INTERNAL_TOKEN: "preview-token",
+    },
+    requireAdminUser: async () => ({ userId: adminId }),
+    buildStageIdentity: () => buildStageIdentity(identityEnv, { buildDeployContext: "unknown" }),
+    fetchImpl: async (url) => {
+      capturedUrl = url;
+      return { ok: true, status: 200, json: async () => snapshot("preview") };
+    },
+  });
+
+  const response = await handler(event());
+  assert.equal(response.statusCode, 200);
+  assert.equal(capturedUrl, "https://ws-preview.kcswh.pl/internal/admin/vps-metrics");
+  assert.equal(JSON.parse(response.body).environment, "preview");
 });
 
 test("admin VPS metrics rejects an upstream environment mismatch", async () => {
