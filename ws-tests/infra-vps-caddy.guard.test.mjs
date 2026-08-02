@@ -30,6 +30,7 @@ test("infra/vps/Caddyfile is the unified prod+preview WS source of truth", () =>
   assert.match(prod, /@ws path \/ws\*/);
   assert.match(prod, /@pokerLogControlAdmin path \/internal\/admin\/poker-log-control/);
   assert.match(prod, /@pokerMaintenanceAdmin path \/internal\/admin\/poker-maintenance/);
+  assert.match(prod, /@vpsMetricsAdmin path \/internal\/admin\/vps-metrics/);
   assert.match(prod, /reverse_proxy 127\.0\.0\.1:3000/);
   assert.match(prod, /respond "OK" 200/);
 
@@ -38,6 +39,7 @@ test("infra/vps/Caddyfile is the unified prod+preview WS source of truth", () =>
   assert.match(preview, /@botClaimsRecoveryAdmin path \/internal\/admin\/bot-claims-recovery/);
   assert.match(preview, /@pokerLogControlAdmin path \/internal\/admin\/poker-log-control/);
   assert.match(preview, /@pokerMaintenanceAdmin path \/internal\/admin\/poker-maintenance/);
+  assert.match(preview, /@vpsMetricsAdmin path \/internal\/admin\/vps-metrics/);
   assert.match(preview, /@ws path \/ws\*/);
   assert.match(preview, /reverse_proxy 127\.0\.0\.1:3001/);
   assert.match(preview, /respond "OK" 200/);

@@ -1366,6 +1366,42 @@ test("internal poker maintenance route keeps the Production desired-table cap", 
   }
 });
 
+test("internal VPS metrics route is token-protected, read-only, and returns runtime context", async () => {
+  const token = "internal-vps-metrics-token";
+  const { port, child } = await createServer({
+    env: {
+      POKER_WS_INTERNAL_TOKEN: token,
+      WS_DEPLOY_ENVIRONMENT: "preview",
+      SUPABASE_DB_URL: "",
+      WS_POKER_LOG_LEVEL: "INFO"
+    }
+  });
+  const url = `http://127.0.0.1:${port}/internal/admin/vps-metrics`;
+  try {
+    await waitForListening(child, 5000);
+    assert.equal((await fetch(url)).status, 401);
+
+    const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    const body = await response.json();
+    assert.equal(body.environment, "preview");
+    assert.equal(typeof body.measuredAt, "string");
+    assert.equal(typeof body.runtime.hostLogicalCpuCount, "number");
+    assert.equal(typeof body.runtime.wsUptimeSeconds, "number");
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "status"), false);
+
+    const queryResponse = await fetch(`${url}?refresh=1`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    assert.equal(queryResponse.status, 400);
+    assert.deepEqual(await queryResponse.json(), { error: "query_not_supported" });
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 function getFreePort() {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();

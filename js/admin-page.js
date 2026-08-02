@@ -66,6 +66,9 @@
       pokerMaintenance: null,
       pokerMaintenanceError: null,
       pokerMaintenancePending: false,
+      vpsMetrics: null,
+      vpsMetricsError: null,
+      vpsMetricsStale: false,
       loaded: false,
     },
     pokerAudit: {
@@ -184,6 +187,7 @@
     nodes.opsMaintenanceReconcile = doc.getElementById("adminOpsMaintenanceReconcile");
     nodes.opsMaintenanceCleanup = doc.getElementById("adminOpsMaintenanceCleanup");
     nodes.opsMaintenanceStatus = doc.getElementById("adminOpsMaintenanceStatus");
+    nodes.opsVpsMetrics = doc.getElementById("adminOpsVpsMetrics");
   }
 
   function setVisible(node, visible){
@@ -211,6 +215,20 @@
     var amount = Number(value);
     if (!Number.isFinite(amount)) return "—";
     return amount.toLocaleString();
+  }
+
+  function formatBytes(value){
+    var bytes = Number(value);
+    if (!Number.isFinite(bytes) || bytes < 0) return "—";
+    if (bytes < 1024) return String(Math.round(bytes)) + " B";
+    var units = ["KB", "MB", "GB", "TB"];
+    var index = -1;
+    var scaled = bytes;
+    while (scaled >= 1024 && index < units.length - 1){
+      scaled /= 1024;
+      index += 1;
+    }
+    return scaled.toFixed(scaled >= 10 ? 0 : 1) + " " + units[index];
   }
 
   function formatSignedAmount(value){
@@ -1174,12 +1192,139 @@
     nodes.pokerAuditDetail.innerHTML = html.join("");
   }
 
+  function formatUptime(seconds){
+    var value = Number(seconds);
+    if (!Number.isFinite(value) || value < 0) return "—";
+    var total = Math.floor(value);
+    var days = Math.floor(total / 86400);
+    var hours = Math.floor((total % 86400) / 3600);
+    var minutes = Math.floor((total % 3600) / 60);
+    var parts = [];
+    if (days) parts.push(String(days) + "d");
+    if (hours || days) parts.push(String(hours) + "h");
+    parts.push(String(minutes) + "m");
+    return parts.join(" ");
+  }
+
+  function formatMetricPercent(value){
+    var number = Number(value);
+    return Number.isFinite(number) ? number.toFixed(1) + "%" : "—";
+  }
+
+  function renderVpsMetrics(){
+    if (!nodes.opsVpsMetrics) return;
+    var snapshot = state.ops.vpsMetrics;
+    if (!snapshot){
+      var unavailableMessage = state.ops.vpsMetricsError
+        ? "Stress health metrics unavailable: " + state.ops.vpsMetricsError
+        : "Loading stress health metrics…";
+      nodes.opsVpsMetrics.innerHTML = '<p class="admin-empty">' + escapeHtml(unavailableMessage) + "</p>";
+      return;
+    }
+    var root = snapshot.rootFilesystem || null;
+    var logs = snapshot.logs || {};
+    var runtime = snapshot.runtime || {};
+    var load = runtime.loadAverage || {};
+    var tables = snapshot.continuousTables || null;
+    var cleanup = snapshot.cleanup || null;
+    var backlog = cleanup && cleanup.backlog || null;
+    var lastRun = cleanup && cleanup.lastRun || null;
+    var hostAvailable = Boolean(root)
+      || runtime.wsRssBytes != null
+      || runtime.hostAvailableRamBytes != null
+      || load.one != null;
+    var primarySources = [hostAvailable, Boolean(tables), Boolean(cleanup)].filter(Boolean).length;
+    var missingMetric = !root
+      || !root.inodes
+      || logs.varLogBytes == null
+      || logs.journaldBytes == null
+      || runtime.wsCpuPercent == null
+      || runtime.wsRssBytes == null
+      || runtime.wsUptimeSeconds == null
+      || runtime.hostAvailableRamBytes == null
+      || runtime.hostLogicalCpuCount == null
+      || load.one == null
+      || load.five == null
+      || load.fifteen == null
+      || runtime.ioWaitPercent == null
+      || !tables
+      || tables.active == null
+      || tables.desired == null
+      || tables.enabled == null
+      || !backlog
+      || backlog.ordinaryActionRows == null
+      || backlog.handSettledRows == null;
+    var availabilityLabel = primarySources < 2 ? "Unavailable" : missingMetric ? "Partial" : "Available";
+    var availabilityTone = availabilityLabel === "Available" ? "success" : "info";
+    var diskPercent = root && Number(root.usedPercent);
+    var inodePercent = root && root.inodes && Number(root.inodes.usedPercent);
+    var healthLabel = "Unavailable";
+    var healthTone = "info";
+    if (Number.isFinite(diskPercent) && Number.isFinite(inodePercent)){
+      var highestPercent = Math.max(diskPercent, inodePercent);
+      healthLabel = highestPercent >= 90 ? "Critical" : highestPercent >= 80 ? "Warning" : "Healthy";
+      healthTone = healthLabel === "Critical" ? "danger" : healthLabel === "Healthy" ? "success" : "info";
+    }
+    if (state.ops.vpsMetricsStale) availabilityLabel = "Stale";
+    var loadAvailable = [load.one, load.five, load.fifteen].every(function(value){ return Number.isFinite(Number(value)); });
+    var loadText = loadAvailable
+      ? Number(load.one).toFixed(1) + " / " + Number(load.five).toFixed(1) + " / " + Number(load.fifteen).toFixed(1) + " · " + String(runtime.hostLogicalCpuCount || "—") + " CPUs"
+      : "—";
+    var deletedRows = lastRun && lastRun.deletedRows != null ? formatAmount(lastRun.deletedRows) : "No run recorded";
+    nodes.opsVpsMetrics.innerHTML = [
+      '<div class="admin-surface">',
+      '<div class="admin-list__title"><span>Snapshot</span>' + pill(availabilityLabel, availabilityTone) + " " + pill(healthLabel, healthTone) + "</div>",
+      '<div class="admin-kv">',
+      renderKvRow("Environment", snapshot.environment || "—"),
+      renderKvRow("Measured at", formatTimestamp(snapshot.measuredAt)),
+      renderKvRow("Root used", root ? formatBytes(root.usedBytes) + " / " + formatBytes(root.totalBytes) + " (" + formatMetricPercent(root.usedPercent) + ")" : "—"),
+      renderKvRow("Root available", root ? formatBytes(root.availableBytes) : "—"),
+      renderKvRow("Inodes", root && root.inodes ? formatAmount(root.inodes.used) + " used / " + formatAmount(root.inodes.total) + " (" + formatMetricPercent(root.inodes.usedPercent) + ")" : "—"),
+      renderKvRow("Inodes available", root && root.inodes ? formatAmount(root.inodes.available) : "—"),
+      renderKvRow("/var/log", formatBytes(logs.varLogBytes)),
+      renderKvRow("Journald", formatBytes(logs.journaldBytes)),
+      "</div>",
+      "</div>",
+      '<div class="admin-surface">',
+      '<div class="admin-list__title"><span>WS and host runtime</span></div>',
+      '<div class="admin-kv">',
+      renderKvRow("WS CPU · one-core scale", formatMetricPercent(runtime.wsCpuPercent)),
+      renderKvRow("WS RSS", formatBytes(runtime.wsRssBytes)),
+      renderKvRow("WS uptime", formatUptime(runtime.wsUptimeSeconds)),
+      renderKvRow("Host available RAM", formatBytes(runtime.hostAvailableRamBytes)),
+      renderKvRow("Load average", loadText),
+      renderKvRow("Host I/O wait", formatMetricPercent(runtime.ioWaitPercent)),
+      "</div>",
+      "</div>",
+      '<div class="admin-surface">',
+      '<div class="admin-list__title"><span>Continuous tables</span></div>',
+      '<div class="admin-kv">',
+      renderKvRow("Active", tables ? tables.active : null),
+      renderKvRow("Desired", tables ? tables.desired : null),
+      renderKvRow("Maintenance", tables ? (tables.enabled ? "enabled" : "disabled") : null),
+      "</div>",
+      "</div>",
+      '<div class="admin-surface">',
+      '<div class="admin-list__title"><span>Cleanup</span></div>',
+      '<div class="admin-kv">',
+      renderKvRow("Next cleanup batch · ordinary rows", backlog ? backlog.ordinaryActionRows : null),
+      renderKvRow("Next cleanup batch · HAND_SETTLED", backlog ? backlog.handSettledRows : null),
+      renderKvRow("Batch capped", backlog ? (backlog.cappedAtBatchSize ? "yes" : "no") : null),
+      renderKvRow("Last cleanup", lastRun ? formatTimestamp(lastRun.finishedAt) : "No run recorded"),
+      renderKvRow("Last cleanup deleted", deletedRows),
+      renderKvRow("Last cleanup result", lastRun ? lastRun.result : "No run recorded"),
+      "</div>",
+      "</div>"
+    ].join("");
+  }
+
   function renderOps(){
     var summary = state.ops.summary;
     var identity = state.ops.identity;
     renderBotReactionControl();
     renderPokerLogControl();
     renderPokerMaintenance();
+    renderVpsMetrics();
     if (!summary && !identity){
       if (nodes.opsStats) nodes.opsStats.innerHTML = "";
       if (nodes.opsIdentity) nodes.opsIdentity.innerHTML = "";
@@ -2246,7 +2391,8 @@
         state.maintenance ? Promise.resolve(null) : apiFetch("/.netlify/functions/admin-ws-preview-bot-reaction", { method: "GET", cache: "no-store" }),
         apiFetch("/.netlify/functions/admin-poker-log-control", { method: "GET", cache: "no-store" }),
         apiFetch("/.netlify/functions/admin-tables-list?status=OPEN&sort=last_activity_desc&page=1&limit=100", { method: "GET" }),
-        apiFetch("/.netlify/functions/admin-poker-maintenance", { method: "GET", cache: "no-store" })
+        apiFetch("/.netlify/functions/admin-poker-maintenance", { method: "GET", cache: "no-store" }),
+        apiFetch("/.netlify/functions/admin-vps-metrics", { method: "GET", cache: "no-store" })
       ]);
       if (results[0].status === "fulfilled"){
         state.ops.identity = results[0].value || null;
@@ -2296,6 +2442,15 @@
         state.ops.pokerMaintenance = null;
         state.ops.pokerMaintenanceError = results[5].reason && results[5].reason.code ? results[5].reason.code : "request_failed";
         klog("admin_poker_maintenance_load_failed", { code: state.ops.pokerMaintenanceError });
+      }
+      if (results[6].status === "fulfilled"){
+        state.ops.vpsMetrics = results[6].value || null;
+        state.ops.vpsMetricsError = null;
+        state.ops.vpsMetricsStale = false;
+      } else {
+        state.ops.vpsMetricsError = results[6].reason && results[6].reason.code ? results[6].reason.code : "request_failed";
+        state.ops.vpsMetricsStale = Boolean(state.ops.vpsMetrics);
+        klog("admin_vps_metrics_load_failed", { code: state.ops.vpsMetricsError });
       }
       state.ops.loaded = true;
       renderOps();
