@@ -1531,6 +1531,9 @@
       nodes.opsMaintenance.innerHTML = '<p class="admin-empty">' + escapeHtml(state.ops.pokerMaintenanceError ? "Continuous maintenance unavailable: " + state.ops.pokerMaintenanceError : "Loading continuous maintenance…") + "</p>";
     } else {
       var continuous = snapshot.continuous || {};
+      var maxDesiredTableCount = Number.isInteger(continuous.maxDesiredTableCount)
+        ? continuous.maxDesiredTableCount
+        : 2;
       var supervisor = continuous.supervisor || {};
       var cleanup = snapshot.cleanup || {};
       var lastRun = cleanup.lastRun || {};
@@ -1548,6 +1551,8 @@
         '<div class="admin-list__title"><span>Continuous tables</span>' + pill(continuous.maintenanceEnabled ? "Enabled" : "Disabled — retiring gracefully", continuous.maintenanceEnabled ? "success" : "info") + "</div>",
         '<div class="admin-kv">',
         renderKvRow("Configured desired count", continuous.desiredTableCount),
+        renderKvRow("Maximum desired count", maxDesiredTableCount),
+        renderKvRow("Creation limit per sweep", continuous.creationLimitPerReconcile || 2),
         renderKvRow("Effective desired count", continuous.effectiveDesiredTableCount),
         renderKvRow("Supervisor started", supervisor.started ? "yes" : "no"),
         renderKvRow("Sweep in progress", supervisor.sweepInProgress ? "yes" : "no"),
@@ -1557,9 +1562,10 @@
         '</div>',
         '<form class="admin-adjust" id="adminOpsMaintenanceForm">',
         '<label class="admin-field"><span class="admin-field__label">Maintenance</span><select class="admin-input" id="adminOpsMaintenanceEnabled"><option value="true">Enabled</option><option value="false">Disabled — existing tables retire gracefully</option></select></label>',
-        '<label class="admin-field"><span class="admin-field__label">Desired tables</span><input class="admin-input" id="adminOpsMaintenanceCount" type="number" min="0" max="100" step="1" required></label>',
+        '<label class="admin-field"><span class="admin-field__label">Desired tables</span><input class="admin-input" id="adminOpsMaintenanceCount" type="number" min="0" max="' + String(maxDesiredTableCount) + '" step="1" required></label>',
         '<div class="admin-filter-actions"><button class="admin-btn admin-btn--primary" id="adminOpsMaintenanceApply" type="submit">Apply maintenance state</button><button class="admin-btn admin-btn--ghost" id="adminOpsMaintenanceReconcile" type="button">Reconcile now</button><button class="admin-btn admin-btn--ghost" id="adminOpsMaintenanceCleanup" type="button">Run cleanup now</button></div>',
         '</form>',
+        '<div class="admin-note">New tables are created at most ' + String(continuous.creationLimitPerReconcile || 2) + ' per reconcile sweep. Preview stress tests should increase the target gradually.</div>',
         '<div class="admin-note" id="adminOpsMaintenanceStatus" aria-live="polite"></div>',
         '<h3 class="admin-section-title">Managed tables</h3>',
         renderMiniList(tableItems),
@@ -1570,6 +1576,7 @@
         renderKvRow("Human actions retention", cleanup.retention && cleanup.retention.humanActionsMs),
         renderKvRow("Human HAND_SETTLED retention", cleanup.retention && cleanup.retention.humanSettledMs),
         renderKvRow("Batch size", cleanup.batchSize),
+        renderKvRow("Cleanup rounds per sweep", cleanup.sweepRounds),
         renderKvRow("Next cleanup batch · ordinary rows", cleanup.backlog && cleanup.backlog.available ? cleanup.backlog.ordinaryActionRows : "unavailable"),
         renderKvRow("Next cleanup batch · HAND_SETTLED", cleanup.backlog && cleanup.backlog.available ? cleanup.backlog.handSettledRows : "unavailable"),
         renderKvRow("Last cleanup", formatTimestamp(lastRun.finishedAt)),
@@ -2438,11 +2445,18 @@
     event.preventDefault();
     var enabled = nodes.opsMaintenanceEnabled && nodes.opsMaintenanceEnabled.value === "true";
     var desiredTableCount = Number(nodes.opsMaintenanceCount && nodes.opsMaintenanceCount.value);
-    if (!Number.isInteger(desiredTableCount) || desiredTableCount < 0 || desiredTableCount > 100){
-      state.ops.pokerMaintenanceError = "desired_table_count must be between 0 and 100";
+    var continuous = state.ops.pokerMaintenance && state.ops.pokerMaintenance.continuous;
+    var maxDesiredTableCount = continuous && Number.isInteger(continuous.maxDesiredTableCount)
+      ? continuous.maxDesiredTableCount
+      : 2;
+    if (!Number.isInteger(desiredTableCount) || desiredTableCount < 0 || desiredTableCount > maxDesiredTableCount){
+      state.ops.pokerMaintenanceError = "desired_table_count must be between 0 and " + String(maxDesiredTableCount);
       renderPokerMaintenance();
       return;
     }
+    if (desiredTableCount > 10 && typeof window !== "undefined"
+      && typeof window.confirm === "function"
+      && !window.confirm("This is a high-volume Preview stress test. Continue with " + String(desiredTableCount) + " desired tables?")) return;
     runPokerMaintenance("set_desired_state", { enabled: enabled, desiredTableCount: desiredTableCount });
   }
 

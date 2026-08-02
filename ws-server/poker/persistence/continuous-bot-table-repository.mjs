@@ -9,7 +9,10 @@ import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 
 export const CONTINUOUS_BOT_PROFILE_KEY = "CONTINUOUS_BOT_DEFAULT";
-const MAX_DESIRED_TABLES = 100;
+const DEFAULT_MAX_DESIRED_TABLES = 2;
+const ABSOLUTE_MAX_DESIRED_TABLES = 100;
+const MAX_DESIRED_TABLE_COUNT_INCREASE = 10;
+const MAX_TABLES_CREATED_PER_RECONCILE = 2;
 const MAX_SEATS = 6;
 const MAX_INTERVAL_SECONDS = 86_400;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -23,9 +26,14 @@ function intInRange(value, min, max) {
   return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : null;
 }
 
-export function normalizeContinuousBotProfile(row) {
+export function normalizeContinuousBotProfile(row, { maxDesiredTables = DEFAULT_MAX_DESIRED_TABLES } = {}) {
+  const desiredTableLimit = Number.isInteger(maxDesiredTables)
+    && maxDesiredTables >= DEFAULT_MAX_DESIRED_TABLES
+    && maxDesiredTables <= ABSOLUTE_MAX_DESIRED_TABLES
+    ? maxDesiredTables
+    : DEFAULT_MAX_DESIRED_TABLES;
   const profileKey = typeof row?.profile_key === "string" ? row.profile_key.trim().toUpperCase() : "";
-  const desiredTableCount = intInRange(row?.desired_table_count, 0, MAX_DESIRED_TABLES);
+  const desiredTableCount = intInRange(row?.desired_table_count, 0, desiredTableLimit);
   const maxSeats = intInRange(row?.max_seats, 2, MAX_SEATS);
   const minBotCount = intInRange(row?.min_bot_count, 0, MAX_SEATS - 1);
   const targetBotCount = intInRange(row?.target_bot_count, 0, MAX_SEATS - 1);
@@ -133,9 +141,15 @@ async function createManagedTable(tx, { profile, botConfig, klog }) {
 
 export function createContinuousBotTableRepository({
   env = process.env,
+  maxDesiredTables = DEFAULT_MAX_DESIRED_TABLES,
   beginSql = beginSqlWs,
   klog = () => {}
 } = {}) {
+  const desiredTableLimit = Number.isInteger(maxDesiredTables)
+    && maxDesiredTables >= DEFAULT_MAX_DESIRED_TABLES
+    && maxDesiredTables <= ABSOLUTE_MAX_DESIRED_TABLES
+    ? maxDesiredTables
+    : DEFAULT_MAX_DESIRED_TABLES;
   let lastKnownProfile = null;
 
   async function reconcile() {
@@ -144,7 +158,7 @@ export function createContinuousBotTableRepository({
       const result = await beginSql(async (tx) => {
         await tx.unsafe("select pg_advisory_xact_lock(hashtext($1));", ["poker:continuous-bot-supervisor:v1"]);
         const profileRows = await tx.unsafe(PROFILE_SELECT, [CONTINUOUS_BOT_PROFILE_KEY]);
-        const profile = normalizeContinuousBotProfile(profileRows?.[0]);
+        const profile = normalizeContinuousBotProfile(profileRows?.[0], { maxDesiredTables: desiredTableLimit });
         if (!profile) throw Object.assign(new Error("managed_profile_invalid"), { code: "managed_profile_invalid" });
         const tableRows = await tx.unsafe(
           `select id, status, max_players, stakes, managed_profile_key, rotation_due_at, created_at
@@ -194,13 +208,18 @@ export function createContinuousBotTableRepository({
         }
         const createdTableIds = [];
         const retainedCount = openTables.length;
-        for (let index = retainedCount; index < desiredCount; index += 1) {
+        const creationTarget = Math.min(
+          desiredCount,
+          retainedCount + MAX_TABLES_CREATED_PER_RECONCILE
+        );
+        for (let index = retainedCount; index < creationTarget; index += 1) {
           if (!botConfig.enabled) throw Object.assign(new Error("bots_disabled"), { code: "bots_disabled" });
           const created = await createManagedTable(tx, { profile, botConfig, klog });
           createdTableIds.push(created.tableId);
           rotationScheduledTableIds.push(created.tableId);
           rotationDueAtByTableId[created.tableId] = created.rotationDueAt;
         }
+        const remainingTableCount = Math.max(0, desiredCount - (retainedCount + createdTableIds.length));
         return {
           profile,
           createdTableIds,
@@ -210,7 +229,10 @@ export function createContinuousBotTableRepository({
           ],
           retirementTableIds: uniqueRetirements,
           rotationScheduledTableIds,
-          rotationDueAtByTableId
+          rotationDueAtByTableId,
+          creationLimitPerReconcile: MAX_TABLES_CREATED_PER_RECONCILE,
+          creationLimited: remainingTableCount > 0,
+          remainingTableCount
         };
       }, { env });
       lastKnownProfile = result.profile;
@@ -328,7 +350,7 @@ export function createContinuousBotTableRepository({
 
   async function setDesiredState({ enabled, desiredTableCount, updatedBy } = {}) {
     if (typeof enabled !== "boolean") return { ok: false, reason: "invalid_enabled" };
-    if (!Number.isInteger(desiredTableCount) || desiredTableCount < 0 || desiredTableCount > MAX_DESIRED_TABLES) {
+    if (!Number.isInteger(desiredTableCount) || desiredTableCount < 0 || desiredTableCount > desiredTableLimit) {
       return { ok: false, reason: "invalid_desired_table_count" };
     }
     const actorUserId = typeof updatedBy === "string" ? updatedBy.trim() : "";
@@ -337,8 +359,11 @@ export function createContinuousBotTableRepository({
       const result = await beginSql(async (tx) => {
         await tx.unsafe("select pg_advisory_xact_lock(hashtext($1));", ["poker:continuous-bot-supervisor:v1"]);
         const previousRows = await tx.unsafe(PROFILE_SELECT, [CONTINUOUS_BOT_PROFILE_KEY]);
-        const previous = normalizeContinuousBotProfile(previousRows?.[0]);
+        const previous = normalizeContinuousBotProfile(previousRows?.[0], { maxDesiredTables: desiredTableLimit });
         if (!previous) throw Object.assign(new Error("managed_profile_invalid"), { code: "managed_profile_invalid" });
+        if (desiredTableCount > previous.desiredTableCount + MAX_DESIRED_TABLE_COUNT_INCREASE) {
+          throw Object.assign(new Error("invalid_desired_table_count_step"), { code: "invalid_desired_table_count_step" });
+        }
         const rows = await tx.unsafe(
           `update public.poker_managed_table_profiles
               set enabled = $2,
@@ -350,7 +375,7 @@ export function createContinuousBotTableRepository({
                       rotation_interval_seconds, postpone_interval_seconds, small_blind, big_blind, max_seats, updated_at;`,
           [CONTINUOUS_BOT_PROFILE_KEY, enabled, desiredTableCount, actorUserId]
         );
-        const profile = normalizeContinuousBotProfile(rows?.[0]);
+        const profile = normalizeContinuousBotProfile(rows?.[0], { maxDesiredTables: desiredTableLimit });
         if (!profile) throw Object.assign(new Error("managed_profile_invalid"), { code: "managed_profile_invalid" });
         return {
           profile,
@@ -387,10 +412,12 @@ export function createContinuousBotTableRepository({
             [CONTINUOUS_BOT_PROFILE_KEY]
           )
         ]);
-        const profile = normalizeContinuousBotProfile(profileRows?.[0]);
+        const profile = normalizeContinuousBotProfile(profileRows?.[0], { maxDesiredTables: desiredTableLimit });
         if (!profile) throw Object.assign(new Error("managed_profile_invalid"), { code: "managed_profile_invalid" });
         return {
           profile,
+          maxDesiredTableCount: desiredTableLimit,
+          creationLimitPerReconcile: MAX_TABLES_CREATED_PER_RECONCILE,
           tables: (Array.isArray(tableRows) ? tableRows : []).map((table) => ({
             tableId: table.id,
             status: table.status || null,
@@ -417,6 +444,8 @@ export function createContinuousBotTableRepository({
     postponeRotation,
     setDesiredState,
     readStatus,
-    currentProfile: () => lastKnownProfile
+    currentProfile: () => lastKnownProfile,
+    maxDesiredTables: desiredTableLimit,
+    creationLimitPerReconcile: MAX_TABLES_CREATED_PER_RECONCILE
   };
 }

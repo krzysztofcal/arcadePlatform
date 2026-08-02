@@ -20,12 +20,13 @@ test("setDesiredState persists a bounded profile and keeps configured desired co
   let updatedParams = null;
   const repository = createContinuousBotTableRepository({
     env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    maxDesiredTables: 100,
     beginSql: async (run) => run({
       unsafe: async (sql, params) => {
         if (sql.includes("from public.poker_managed_table_profiles")) return [{ ...PROFILE }];
         if (sql.includes("update public.poker_managed_table_profiles")) {
           updatedParams = params;
-          return [{ ...PROFILE, desired_table_count: 100, updated_at: "2026-08-01T00:00:00.000Z" }];
+          return [{ ...PROFILE, desired_table_count: 10, updated_at: "2026-08-01T00:00:00.000Z" }];
         }
         return [];
       }
@@ -34,14 +35,72 @@ test("setDesiredState persists a bounded profile and keeps configured desired co
 
   const result = await repository.setDesiredState({
     enabled: false,
-    desiredTableCount: 100,
+    desiredTableCount: 10,
     updatedBy: "00000000-0000-4000-8000-000000000010"
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.profile.enabled, false);
-  assert.equal(result.profile.desiredTableCount, 100);
-  assert.deepEqual(updatedParams.slice(1, 4), [false, 100, "00000000-0000-4000-8000-000000000010"]);
+  assert.equal(result.profile.desiredTableCount, 10);
+  assert.deepEqual(updatedParams.slice(1, 4), [false, 10, "00000000-0000-4000-8000-000000000010"]);
+});
+
+test("setDesiredState rejects a desired-count jump larger than the ramp-up step", async () => {
+  let updateCalled = false;
+  const repository = createContinuousBotTableRepository({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    maxDesiredTables: 100,
+    beginSql: async (run) => run({
+      unsafe: async (sql) => {
+        if (sql.includes("from public.poker_managed_table_profiles")) return [{ ...PROFILE }];
+        if (sql.includes("update public.poker_managed_table_profiles")) updateCalled = true;
+        return [];
+      }
+    })
+  });
+
+  const result = await repository.setDesiredState({
+    enabled: true,
+    desiredTableCount: 13,
+    updatedBy: "00000000-0000-4000-8000-000000000010"
+  });
+
+  assert.deepEqual(result, { ok: false, reason: "invalid_desired_table_count_step" });
+  assert.equal(updateCalled, false);
+});
+
+test("reconcile creates at most two missing tables per sweep", async () => {
+  const createdTableIds = [
+    "00000000-0000-4000-8000-000000000821",
+    "00000000-0000-4000-8000-000000000822"
+  ];
+  let createIndex = 0;
+  const repository = createContinuousBotTableRepository({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db", POKER_BOTS_ENABLED: "1" },
+    maxDesiredTables: 100,
+    beginSql: async (run) => run({
+      unsafe: async (sql) => {
+        if (sql.includes("from public.poker_managed_table_profiles")) {
+          return [{ ...PROFILE, enabled: true, desired_table_count: 100, min_bot_count: 0, target_bot_count: 0, max_bot_count: 0 }];
+        }
+        if (sql.includes("from public.poker_tables") && sql.includes("for update")) return [];
+        if (sql.includes("insert into public.poker_tables")) return [{ id: createdTableIds[createIndex++] }];
+        if (sql.includes("from public.poker_seats") && sql.includes("order by seat_no asc")) return [];
+        if (sql.includes("select state from public.poker_state")) return [{ state: { tableId: createdTableIds[createIndex - 1], phase: "INIT", seats: [], stacks: {} } }];
+        if (sql.includes("update public.poker_state")) return [{ table_id: createdTableIds[createIndex - 1] }];
+        if (sql.includes("insert into public.chips_accounts")) return [{ id: "escrow-id" }];
+        return [];
+      }
+    })
+  });
+
+  const result = await repository.reconcile();
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.createdTableIds, createdTableIds);
+  assert.equal(result.creationLimitPerReconcile, 2);
+  assert.equal(result.creationLimited, true);
+  assert.equal(result.remainingTableCount, 98);
 });
 
 test("requestRetirement persists a due rotation for the exact managed table", async () => {

@@ -13,6 +13,7 @@ const EXPOSED_ERRORS = new Set([
   "invalid_request",
   "invalid_enabled",
   "invalid_desired_table_count",
+  "invalid_desired_table_count_step",
   "invalid_table_id",
   "table_not_found",
   "not_managed_table",
@@ -52,12 +53,12 @@ function exactKeys(value, expected) {
   return keys.length === wanted.length && keys.every((key, index) => key === wanted[index]);
 }
 
-function parseBody(body) {
+function parseBody(body, { maxDesiredTableCount = 2 } = {}) {
   const value = parseJsonObject(body);
   const operation = typeof value.operation === "string" ? value.operation.trim().toLowerCase() : "";
   if (operation === "set_desired_state" && exactKeys(value, ["operation", "enabled", "desiredTableCount"])) {
     if (typeof value.enabled !== "boolean" || !Number.isInteger(value.desiredTableCount)
-      || value.desiredTableCount < 0 || value.desiredTableCount > 100) {
+      || value.desiredTableCount < 0 || value.desiredTableCount > maxDesiredTableCount) {
       throw controlError("invalid_desired_table_count");
     }
     return { operation, enabled: value.enabled, desiredTableCount: value.desiredTableCount };
@@ -175,7 +176,9 @@ function createAdminPokerMaintenanceHandler(deps = {}) {
       const admin = await requireAdmin(event, env);
       const target = resolveTarget(buildIdentity());
       if (!target) return jsonResponse(403, cors, { error: "environment_not_allowed" });
-      const payload = event.httpMethod === "POST" ? parseBody(event.body) : null;
+      const payload = event.httpMethod === "POST"
+        ? parseBody(event.body, { maxDesiredTableCount: target === "preview" ? 100 : 2 })
+        : null;
       const result = await proxyMaintenance({
         method: event.httpMethod,
         payload,
