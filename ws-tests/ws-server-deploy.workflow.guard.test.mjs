@@ -10,6 +10,7 @@ test("ws-server deploy workflow has guarded triggers, secrets and concurrency", 
   const text = workflowText();
 
   assert.match(text, /"ws-server\/\*\*"/);
+  assert.match(text, /cp -R ws-server\/observability "\$STAGE_WS_DIR"\/observability/);
   assert.match(text, /"shared\/\*\*"/);
   assert.match(text, /"netlify\/functions\/_shared\/chips-ledger\.mjs"/);
   assert.match(text, /"netlify\/functions\/_shared\/poker-\*\.mjs"/);

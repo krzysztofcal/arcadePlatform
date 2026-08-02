@@ -115,6 +115,7 @@ test("ws preview deploy workflow packages and validates shared runtime files", (
   assert.match(text, /PREVIEW_STAGE_WS_DIR:/);
   assert.match(text, /mkdir -p "\$PREVIEW_STAGE_WS_DIR"/);
   assert.match(text, /cp -R ws-server\/poker "\$PREVIEW_STAGE_WS_DIR"\/poker/);
+  assert.match(text, /cp -R ws-server\/observability "\$PREVIEW_STAGE_WS_DIR"\/observability/);
   assert.match(text, /cp -R ws-server\/shared\/poker-domain "\$PREVIEW_STAGE_WS_DIR"\/shared\/poker-domain/);
   assert.match(text, /cp -R ws-server\/node_modules "\$PREVIEW_STAGE_WS_DIR"\/node_modules/);
   assert.match(text, /RELEASE_ENVIRONMENT: preview/);

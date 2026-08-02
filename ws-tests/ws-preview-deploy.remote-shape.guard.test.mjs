@@ -28,7 +28,9 @@ test("ws preview deploy remote script matches fixed preview app-dir contract", (
   assert.match(text, /preview deploy user must be allowed to run sudo -n bash for ws-preview deploy/);
   assert.match(text, /sudo -n test -d "\$PREVIEW_APP_DIR"/);
   assert.match(text, /cp -R ws-server\/shared\/poker-domain "\$PREVIEW_STAGE_WS_DIR"\/shared\/poker-domain/);
+  assert.match(text, /cp -R ws-server\/observability "\$PREVIEW_STAGE_WS_DIR"\/observability/);
   assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/ws-server\/server\.mjs"/);
+  assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/ws-server\/observability\/vps-metrics\.mjs"/);
   assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/shared\/poker-domain\/join\.mjs"/);
   assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/ws-server\/shared\/poker-domain\/inactive-cleanup-deps\.mjs"/);
   assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/chips-ledger\.mjs"/);
