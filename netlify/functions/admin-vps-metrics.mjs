@@ -6,6 +6,10 @@ const WS_ORIGINS = Object.freeze({
   preview: "https://ws-preview.kcswh.pl",
   production: "https://ws.kcswh.pl",
 });
+const WS_ENVIRONMENTS = Object.freeze({
+  preview: "preview",
+  production: "production",
+});
 const DEFAULT_TIMEOUT_MS = 4_000;
 
 function jsonResponse(statusCode, headers, body) {
@@ -23,6 +27,12 @@ function controlError(code, status = 400) {
   return error;
 }
 
+function resolveWsEnvironment(target) {
+  return Object.prototype.hasOwnProperty.call(WS_ENVIRONMENTS, target)
+    ? WS_ENVIRONMENTS[target]
+    : null;
+}
+
 function resolveTarget(identity) {
   if (
     identity?.environmentContext === "deploy-preview"
@@ -30,7 +40,7 @@ function resolveTarget(identity) {
     && identity?.stageProjectRefMatches === true
     && identity?.databaseMatchesSupabaseProjectRef === true
     && identity?.serviceRoleStageProjectRefMatches === true
-  ) return "preview";
+  ) return WS_ENVIRONMENTS.preview;
   if (
     identity?.environmentContext === "production"
     && identity?.databaseTarget === "production"
@@ -40,7 +50,7 @@ function resolveTarget(identity) {
     && identity?.databaseProductionProjectRefMatches === true
     && identity?.serviceRoleProductionProjectRefMatches === true
     && identity?.databaseMatchesSupabaseProjectRef === true
-  ) return "production";
+  ) return WS_ENVIRONMENTS.production;
   return null;
 }
 
@@ -80,7 +90,8 @@ function projectFields(source, fields) {
 }
 
 function normalizeMetricsSnapshot(value, target) {
-  if (!value || typeof value !== "object" || value.environment !== target) {
+  const expectedEnvironment = resolveWsEnvironment(target);
+  if (!expectedEnvironment || !value || typeof value !== "object" || value.environment !== expectedEnvironment) {
     throw controlError("ws_vps_metrics_environment_mismatch", 502);
   }
   if (typeof value.measuredAt !== "string" || !Number.isFinite(Date.parse(value.measuredAt))) {
@@ -111,7 +122,7 @@ function normalizeMetricsSnapshot(value, target) {
     ]);
   }
   return {
-    environment: target,
+    environment: expectedEnvironment,
     measuredAt: value.measuredAt,
     rootFilesystem,
     logs: projectFields(value.logs, ["varLogBytes", "journaldBytes"]),
@@ -194,4 +205,5 @@ export {
   proxyVpsMetrics,
   resolveBaseUrl,
   resolveTarget,
+  resolveWsEnvironment,
 };

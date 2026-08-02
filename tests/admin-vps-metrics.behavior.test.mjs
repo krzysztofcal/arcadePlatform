@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { createAdminVpsMetricsHandler } = await import("../netlify/functions/admin-vps-metrics.mjs");
+const {
+  createAdminVpsMetricsHandler,
+  normalizeMetricsSnapshot,
+  resolveTarget,
+  resolveWsEnvironment,
+} = await import("../netlify/functions/admin-vps-metrics.mjs");
 
 const adminId = "00000000-0000-4000-8000-000000000010";
 const previewIdentity = {
@@ -73,6 +78,16 @@ test("admin VPS metrics requires an admin and forwards the verified target", asy
   const unauthorizedResponse = await unauthorized(event());
   assert.equal(unauthorizedResponse.statusCode, 403);
   assert.deepEqual(JSON.parse(unauthorizedResponse.body), { error: "admin_required" });
+});
+
+test("admin VPS metrics maps Netlify deploy-preview to the WS preview environment", () => {
+  const target = resolveTarget({
+    ...previewIdentity,
+    environmentContext: "deploy-preview",
+  });
+  assert.equal(target, "preview");
+  assert.equal(resolveWsEnvironment(target), "preview");
+  assert.equal(normalizeMetricsSnapshot(snapshot("preview"), target).environment, "preview");
 });
 
 test("admin VPS metrics rejects an upstream environment mismatch", async () => {
