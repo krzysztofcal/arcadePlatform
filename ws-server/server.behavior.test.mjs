@@ -141,6 +141,29 @@ test("continuous bot supervisor coalesces overlapping sweeps and activates each 
   supervisor.stop();
 });
 
+test("continuous bot supervisor status separates timer state from the last sweep result", async () => {
+  const supervisor = createContinuousBotTableSupervisor({
+    repository: {
+      reconcile: async () => ({ ok: true, profile: { profileKey: "CONTINUOUS_BOT_DEFAULT" }, createdTableIds: [], activeTableIds: [], retirementTableIds: [] })
+    }
+  });
+
+  assert.deepEqual(supervisor.status(), {
+    started: false,
+    sweepInProgress: false,
+    lastSweepStartedAt: null,
+    lastSweepFinishedAt: null,
+    lastSweepResult: null,
+    lastError: null
+  });
+  await supervisor.sweep();
+  const afterSweep = supervisor.status();
+  assert.equal(afterSweep.sweepInProgress, false);
+  assert.equal(afterSweep.lastSweepResult.ok, true);
+  assert.equal(typeof afterSweep.lastSweepStartedAt, "string");
+  assert.equal(typeof afterSweep.lastSweepFinishedAt, "string");
+});
+
 test("continuous bot supervisor forwards a newly scheduled rotation once", async () => {
   const scheduled = [];
   let reconcileCount = 0;
@@ -1234,6 +1257,28 @@ test("internal poker log control requires auth and exposes bounded no-store enab
     });
     assert.equal(invalid.status, 400);
     assert.deepEqual(await invalid.json(), { error: "invalid_ttl" });
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("internal poker maintenance route is token-protected and does not expose a public browser path", async () => {
+  const token = "internal-maintenance-token";
+  const { port, child } = await createServer({
+    env: {
+      POKER_WS_INTERNAL_TOKEN: token,
+      SUPABASE_DB_URL: "",
+      WS_POKER_LOG_LEVEL: "INFO"
+    }
+  });
+  const url = `http://127.0.0.1:${port}/internal/admin/poker-maintenance`;
+  try {
+    await waitForListening(child, 5000);
+    assert.equal((await fetch(url)).status, 401);
+    const authorized = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+    assert.equal(authorized.status, 503);
+    assert.deepEqual(await authorized.json(), { ok: false, error: "continuous_maintenance_unavailable" });
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);

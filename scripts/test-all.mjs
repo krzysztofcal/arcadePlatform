@@ -104,6 +104,7 @@ run("node", ["tests/admin-tables-list.behavior.test.mjs"], "admin-tables-list-be
 run("node", ["tests/admin-ledger-list.behavior.test.mjs"], "admin-ledger-list-behavior");
 run("node", ["tests/admin-table-actions.behavior.test.mjs"], "admin-table-actions-behavior");
 run("node", ["tests/admin-ops-summary.behavior.test.mjs"], "admin-ops-summary-behavior");
+run("node", ["tests/admin-poker-maintenance.behavior.test.mjs"], "admin-poker-maintenance-behavior");
 run("node", ["tests/admin-stage-identity.behavior.test.mjs"], "admin-stage-identity-behavior");
 run("node", ["tests/admin-page.contract.test.mjs"], "admin-page-contract");
 run("node", ["tests/admin-page.behavior.test.mjs"], "admin-page-behavior");

@@ -2,6 +2,48 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createContinuousBotTableRepository } from "./continuous-bot-table-repository.mjs";
 
+const PROFILE = {
+  profile_key: "CONTINUOUS_BOT_DEFAULT",
+  enabled: false,
+  desired_table_count: 2,
+  min_bot_count: 2,
+  target_bot_count: 3,
+  max_bot_count: 3,
+  rotation_interval_seconds: 900,
+  postpone_interval_seconds: 300,
+  small_blind: 1,
+  big_blind: 2,
+  max_seats: 6
+};
+
+test("setDesiredState persists a bounded profile and keeps configured desired count while disabled", async () => {
+  let updatedParams = null;
+  const repository = createContinuousBotTableRepository({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: async (run) => run({
+      unsafe: async (sql, params) => {
+        if (sql.includes("from public.poker_managed_table_profiles")) return [{ ...PROFILE }];
+        if (sql.includes("update public.poker_managed_table_profiles")) {
+          updatedParams = params;
+          return [{ ...PROFILE, updated_at: "2026-08-01T00:00:00.000Z" }];
+        }
+        return [];
+      }
+    })
+  });
+
+  const result = await repository.setDesiredState({
+    enabled: false,
+    desiredTableCount: 2,
+    updatedBy: "00000000-0000-4000-8000-000000000010"
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.profile.enabled, false);
+  assert.equal(result.profile.desiredTableCount, 2);
+  assert.deepEqual(updatedParams.slice(1, 4), [false, 2, "00000000-0000-4000-8000-000000000010"]);
+});
+
 test("requestRetirement persists a due rotation for the exact managed table", async () => {
   const tableId = "00000000-0000-4000-8000-000000000807";
   const queries = [];
@@ -10,8 +52,14 @@ test("requestRetirement persists a due rotation for the exact managed table", as
     beginSql: async (run) => run({
       unsafe: async (sql, params) => {
         queries.push({ sql, params });
-        if (sql.includes("select id, rotation_due_at")) {
-          return [{ id: tableId, rotation_due_at: null }];
+        if (sql.includes("select id, status, lifecycle_kind, managed_profile_key, rotation_due_at")) {
+          return [{
+            id: tableId,
+            status: "OPEN",
+            lifecycle_kind: "CONTINUOUS_BOT",
+            managed_profile_key: "CONTINUOUS_BOT_DEFAULT",
+            rotation_due_at: null
+          }];
         }
         if (sql.includes("update public.poker_tables")) {
           return [{ id: tableId, rotation_due_at: "2026-07-29T15:00:00.000Z" }];
@@ -26,7 +74,7 @@ test("requestRetirement persists a due rotation for the exact managed table", as
   assert.equal(result.ok, true);
   assert.equal(result.changed, true);
   assert.equal(queries.some(({ sql }) => sql.includes("pg_advisory_xact_lock")), true);
-  assert.equal(queries.some(({ sql }) => sql.includes("lifecycle_kind = 'CONTINUOUS_BOT'")), true);
+  assert.equal(queries.some(({ sql }) => sql.includes("lifecycle_kind")), true);
   assert.equal(queries.some(({ sql }) => sql.includes("rotation_due_at = least")), true);
 });
 

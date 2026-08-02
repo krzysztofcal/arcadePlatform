@@ -10,6 +10,7 @@ const repoRoot = path.join(__dirname, "..");
 
 const adminHtml = await readFile(path.join(repoRoot, "admin.html"), "utf8");
 const adminCss = await readFile(path.join(repoRoot, "css", "admin.css"), "utf8");
+const adminJs = await readFile(path.join(repoRoot, "js", "admin-page.js"), "utf8");
 
 test("admin page includes admin CSS and JS once", () => {
   assert.equal((adminHtml.match(/href="css\/admin\.css"/g) || []).length, 1);
@@ -52,6 +53,14 @@ test("admin ops exposes bounded poker DEBUG controls without a log viewer", () =
   assert.match(adminHtml, /id="adminOpsPokerLogOverrides"/);
   assert.match(adminHtml, /Active overrides/);
   assert.doesNotMatch(adminHtml, /journalctl/);
+});
+
+test("admin ops exposes continuous maintenance and cleanup controls", () => {
+  assert.match(adminHtml, /id="adminOpsMaintenance"/);
+  assert.match(adminHtml, /id="adminOpsMaintenanceTitle"/);
+  assert.match(adminHtml, /Disabling maintenance does not interrupt an active human hand/);
+  assert.match(adminJs, /Run cleanup now/);
+  assert.match(adminJs, /Reconcile now/);
 });
 
 test("admin bonus campaign form exposes campaign type suggestions", () => {
