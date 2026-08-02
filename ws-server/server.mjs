@@ -3202,7 +3202,7 @@ async function handleInternalPokerMaintenance(req, res) {
       changed: result?.changed === true,
       skipped: result?.skipped === true
     });
-    sendInternalJson(res, result?.ok === true ? 200 : 409, result);
+    sendInternalJson(res, result?.ok === true ? 200 : 409, { ...result, environment });
   } catch (error) {
     const code = error?.code || (error instanceof SyntaxError ? "invalid_json" : "internal_server_error");
     const statusCode = Number(error?.status)
