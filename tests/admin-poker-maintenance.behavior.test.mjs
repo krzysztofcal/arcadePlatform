@@ -62,7 +62,15 @@ test("maintenance proxy selects verified Preview/Production target and signs act
     requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
     fetchImpl: async (url, options) => {
       seen.push({ url, options });
-      return { ok: true, status: 200, json: async () => ({ ok: true, operation: "set_desired_state" }) };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          operation: "set_desired_state",
+          environment: url.includes("ws-preview") ? "preview" : "production"
+        })
+      };
     },
   };
   const preview = createAdminPokerMaintenanceHandler({
@@ -86,6 +94,23 @@ test("maintenance proxy selects verified Preview/Production target and signs act
   assert.equal(productionResponse.statusCode, 200);
   assert.equal(JSON.parse(productionResponse.body).environment, "production");
   assert.equal(seen[1].url, "https://ws.kcswh.pl/internal/admin/poker-maintenance");
+});
+
+test("maintenance proxy rejects an upstream environment mismatch", async () => {
+  const handler = createAdminPokerMaintenanceHandler({
+    env: {
+      CHIPS_ENABLED: "1",
+      POKER_WS_INTERNAL_BASE_URL: "https://ws-preview.kcswh.pl",
+      POKER_WS_INTERNAL_TOKEN: "preview-token"
+    },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    buildStageIdentity: previewIdentity,
+    fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, environment: "production" }) })
+  });
+
+  const response = await handler(event("GET"));
+  assert.equal(response.statusCode, 502);
+  assert.deepEqual(JSON.parse(response.body), { error: "ws_maintenance_environment_mismatch" });
 });
 
 test("maintenance proxy does not contact WS for non-admin or unverified environment", async () => {

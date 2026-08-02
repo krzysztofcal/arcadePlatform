@@ -78,6 +78,27 @@ test("requestRetirement persists a due rotation for the exact managed table", as
   assert.equal(queries.some(({ sql }) => sql.includes("rotation_due_at = least")), true);
 });
 
+test("readStatus limits maintenance status to open continuous tables", async () => {
+  const repository = createContinuousBotTableRepository({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: async (run) => run({
+      unsafe: async (sql) => {
+        if (sql.includes("from public.poker_managed_table_profiles")) return [{ ...PROFILE, enabled: true }];
+        if (sql.includes("from public.poker_tables")) {
+          assert.match(sql, /where status = 'OPEN'/);
+          assert.match(sql, /lifecycle_kind = 'CONTINUOUS_BOT'/);
+          return [{ id: "00000000-0000-4000-8000-000000000810", status: "OPEN" }];
+        }
+        return [];
+      }
+    })
+  });
+
+  const result = await repository.readStatus();
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.tables.map((table) => table.tableId), ["00000000-0000-4000-8000-000000000810"]);
+});
+
 test("reconcile schedules a missing rotation deadline from the table creation time", async () => {
   const tableId = "00000000-0000-4000-8000-000000000808";
   const queries = [];

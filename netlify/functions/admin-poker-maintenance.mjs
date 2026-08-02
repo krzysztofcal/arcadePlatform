@@ -145,6 +145,9 @@ async function proxyMaintenance({ method, payload, adminUserId, target, env, fet
       const exposed = EXPOSED_ERRORS.has(upstream);
       throw controlError(exposed ? upstream : "ws_maintenance_unavailable", exposed ? response.status : 502);
     }
+    if (!body || body.environment !== target) {
+      throw controlError("ws_maintenance_environment_mismatch", 502);
+    }
     return body;
   } catch (error) {
     if (error?.name === "AbortError") throw controlError("ws_maintenance_timeout", 504);
@@ -189,7 +192,7 @@ function createAdminPokerMaintenanceHandler(deps = {}) {
           ok: result?.ok === true,
         });
       }
-      return jsonResponse(200, cors, { ...result, environment: target });
+      return jsonResponse(200, cors, result);
     } catch (error) {
       if (error?.status === 401 || (error?.status === 403 && error?.code === "admin_required")) {
         return adminAuthErrorResponse(error, cors);

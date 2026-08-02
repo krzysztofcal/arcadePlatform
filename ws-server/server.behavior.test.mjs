@@ -1268,6 +1268,7 @@ test("internal poker maintenance route is token-protected and does not expose a 
   const { port, child } = await createServer({
     env: {
       POKER_WS_INTERNAL_TOKEN: token,
+      WS_DEPLOY_ENVIRONMENT: "preview",
       SUPABASE_DB_URL: "",
       WS_POKER_LOG_LEVEL: "INFO"
     }
@@ -1279,6 +1280,40 @@ test("internal poker maintenance route is token-protected and does not expose a 
     const authorized = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
     assert.equal(authorized.status, 503);
     assert.deepEqual(await authorized.json(), { ok: false, error: "continuous_maintenance_unavailable" });
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("internal poker maintenance route rejects an unknown WS environment before GET or POST", async () => {
+  const token = "internal-maintenance-environment-token";
+  const { port, child } = await createServer({
+    env: {
+      POKER_WS_INTERNAL_TOKEN: token,
+      WS_DEPLOY_ENVIRONMENT: "unknown",
+      SUPABASE_DB_URL: "",
+      WS_POKER_LOG_LEVEL: "INFO"
+    }
+  });
+  const url = `http://127.0.0.1:${port}/internal/admin/poker-maintenance`;
+  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  try {
+    await waitForListening(child, 5000);
+    const getResponse = await fetch(url, { headers });
+    assert.equal(getResponse.status, 503);
+    assert.deepEqual(await getResponse.json(), { error: "environment_not_allowed" });
+    const postResponse = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        operation: "reconcile",
+        actorUserId: "00000000-0000-4000-8000-000000000010",
+        requestId: "unknown-environment-request"
+      })
+    });
+    assert.equal(postResponse.status, 503);
+    assert.deepEqual(await postResponse.json(), { error: "environment_not_allowed" });
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);

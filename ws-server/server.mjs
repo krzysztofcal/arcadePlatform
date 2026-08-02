@@ -3051,7 +3051,12 @@ function isUuid(value) {
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.trim());
 }
 
-async function buildInternalPokerMaintenanceStatus() {
+function getPokerMaintenanceEnvironment() {
+  const environment = loadReleaseMetadata().environment;
+  return environment === "preview" || environment === "production" ? environment : null;
+}
+
+async function buildInternalPokerMaintenanceStatus(environment) {
   const repositoryStatus = await continuousBotTableRepository?.readStatus?.();
   if (!repositoryStatus?.ok) {
     return { ok: false, error: repositoryStatus?.reason || "continuous_maintenance_unavailable" };
@@ -3076,7 +3081,7 @@ async function buildInternalPokerMaintenanceStatus() {
     : null;
   return {
     ok: true,
-    environment: loadReleaseMetadata().environment || "unknown",
+    environment,
     continuous: {
       maintenanceEnabled: repositoryStatus.profile.enabled,
       desiredTableCount: repositoryStatus.profile.desiredTableCount,
@@ -3112,9 +3117,15 @@ async function handleInternalPokerMaintenance(req, res) {
     sendInternalJson(res, 401, { error: "unauthorized" });
     return;
   }
+  const environment = getPokerMaintenanceEnvironment();
+  if (!environment) {
+    klogSafe("ws_admin_poker_maintenance_failed", { code: "environment_not_allowed", statusCode: 503 });
+    sendInternalJson(res, 503, { error: "environment_not_allowed" });
+    return;
+  }
   try {
     if (req.method === "GET") {
-      const status = await buildInternalPokerMaintenanceStatus();
+      const status = await buildInternalPokerMaintenanceStatus(environment);
       sendInternalJson(res, status.ok ? 200 : 503, status);
       return;
     }

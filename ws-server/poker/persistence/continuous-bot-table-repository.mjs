@@ -380,9 +380,10 @@ export function createContinuousBotTableRepository({
           tx.unsafe(
             `select id, status, lifecycle_kind, managed_profile_key, created_at, rotation_due_at
                from public.poker_tables
-              where lifecycle_kind = 'CONTINUOUS_BOT'
+              where status = 'OPEN'
+                and lifecycle_kind = 'CONTINUOUS_BOT'
                 and managed_profile_key = $1
-              order by status asc, created_at asc, id asc;`,
+              order by created_at asc, id asc;`,
             [CONTINUOUS_BOT_PROFILE_KEY]
           )
         ]);

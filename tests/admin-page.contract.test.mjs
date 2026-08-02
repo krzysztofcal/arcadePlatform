@@ -61,6 +61,8 @@ test("admin ops exposes continuous maintenance and cleanup controls", () => {
   assert.match(adminHtml, /Disabling maintenance does not interrupt an active human hand/);
   assert.match(adminJs, /Run cleanup now/);
   assert.match(adminJs, /Reconcile now/);
+  assert.match(adminJs, /Next cleanup batch · ordinary rows/);
+  assert.match(adminJs, /Next cleanup batch · HAND_SETTLED/);
 });
 
 test("admin bonus campaign form exposes campaign type suggestions", () => {
