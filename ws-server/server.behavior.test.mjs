@@ -141,6 +141,29 @@ test("continuous bot supervisor coalesces overlapping sweeps and activates each 
   supervisor.stop();
 });
 
+test("continuous bot supervisor status separates timer state from the last sweep result", async () => {
+  const supervisor = createContinuousBotTableSupervisor({
+    repository: {
+      reconcile: async () => ({ ok: true, profile: { profileKey: "CONTINUOUS_BOT_DEFAULT" }, createdTableIds: [], activeTableIds: [], retirementTableIds: [] })
+    }
+  });
+
+  assert.deepEqual(supervisor.status(), {
+    started: false,
+    sweepInProgress: false,
+    lastSweepStartedAt: null,
+    lastSweepFinishedAt: null,
+    lastSweepResult: null,
+    lastError: null
+  });
+  await supervisor.sweep();
+  const afterSweep = supervisor.status();
+  assert.equal(afterSweep.sweepInProgress, false);
+  assert.equal(afterSweep.lastSweepResult.ok, true);
+  assert.equal(typeof afterSweep.lastSweepStartedAt, "string");
+  assert.equal(typeof afterSweep.lastSweepFinishedAt, "string");
+});
+
 test("continuous bot supervisor forwards a newly scheduled rotation once", async () => {
   const scheduled = [];
   let reconcileCount = 0;
@@ -1234,6 +1257,63 @@ test("internal poker log control requires auth and exposes bounded no-store enab
     });
     assert.equal(invalid.status, 400);
     assert.deepEqual(await invalid.json(), { error: "invalid_ttl" });
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("internal poker maintenance route is token-protected and does not expose a public browser path", async () => {
+  const token = "internal-maintenance-token";
+  const { port, child } = await createServer({
+    env: {
+      POKER_WS_INTERNAL_TOKEN: token,
+      WS_DEPLOY_ENVIRONMENT: "preview",
+      SUPABASE_DB_URL: "",
+      WS_POKER_LOG_LEVEL: "INFO"
+    }
+  });
+  const url = `http://127.0.0.1:${port}/internal/admin/poker-maintenance`;
+  try {
+    await waitForListening(child, 5000);
+    assert.equal((await fetch(url)).status, 401);
+    const authorized = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+    assert.equal(authorized.status, 503);
+    assert.deepEqual(await authorized.json(), { ok: false, error: "continuous_maintenance_unavailable" });
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("internal poker maintenance route rejects an unknown WS environment before GET or POST", async () => {
+  const token = "internal-maintenance-environment-token";
+  const { port, child } = await createServer({
+    env: {
+      POKER_WS_INTERNAL_TOKEN: token,
+      WS_DEPLOY_ENVIRONMENT: "unknown",
+      SUPABASE_DB_URL: "",
+      WS_POKER_LOG_LEVEL: "INFO"
+    }
+  });
+  const url = `http://127.0.0.1:${port}/internal/admin/poker-maintenance`;
+  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  try {
+    await waitForListening(child, 5000);
+    const getResponse = await fetch(url, { headers });
+    assert.equal(getResponse.status, 503);
+    assert.deepEqual(await getResponse.json(), { error: "environment_not_allowed" });
+    const postResponse = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        operation: "reconcile",
+        actorUserId: "00000000-0000-4000-8000-000000000010",
+        requestId: "unknown-environment-request"
+      })
+    });
+    assert.equal(postResponse.status, 503);
+    assert.deepEqual(await postResponse.json(), { error: "environment_not_allowed" });
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);

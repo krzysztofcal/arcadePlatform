@@ -91,6 +91,7 @@ register("INFO", "accounting", [
 ]);
 
 register("INFO", "admin", [
+  "ws_admin_poker_maintenance_action",
   "ws_bot_claims_recovery_outcome",
   "ws_poker_debug_override_disabled",
   "ws_poker_debug_override_enabled",
@@ -250,6 +251,8 @@ register("ERROR", "recovery", [
 ]);
 
 register("ERROR", "runtime", [
+  "ws_continuous_bot_table_profile_update_failed",
+  "ws_continuous_bot_table_status_failed",
   "ws_continuous_bot_table_supervisor_failed",
   "ws_error",
   "ws_message_processing_error",
@@ -264,6 +267,7 @@ register("ERROR", "http", [
 ]);
 
 register("ERROR", "admin", [
+  "ws_admin_poker_maintenance_failed",
   "ws_poker_log_config_invalid",
   "ws_preview_bot_reaction_failed"
 ]);

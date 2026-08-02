@@ -3046,6 +3046,172 @@ async function handleInternalPokerLogControl(req, res) {
   }
 }
 
+function isUuid(value) {
+  return typeof value === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.trim());
+}
+
+function getPokerMaintenanceEnvironment() {
+  const environment = loadReleaseMetadata().environment;
+  return environment === "preview" || environment === "production" ? environment : null;
+}
+
+async function buildInternalPokerMaintenanceStatus(environment) {
+  const repositoryStatus = await continuousBotTableRepository?.readStatus?.();
+  if (!repositoryStatus?.ok) {
+    return { ok: false, error: repositoryStatus?.reason || "continuous_maintenance_unavailable" };
+  }
+  const loadedTableIds = new Set(tableManager.listTableIds());
+  const tables = repositoryStatus.tables.map((table) => {
+    const loaded = loadedTableIds.has(table.tableId);
+    const pokerState = loaded ? tableManager.persistedPokerState(table.tableId) : null;
+    const hasHuman = loaded && (
+      tableManager.hasActiveHumanMember(table.tableId)
+      || tableManager.hasConnectedHumanPresence(table.tableId)
+    );
+    return {
+      ...table,
+      humanParticipation: loaded ? (hasHuman ? "present" : "none") : "unknown",
+      phase: pokerState?.phase || null,
+      loaded
+    };
+  });
+  const cleanup = actionHistoryCleanup
+    ? await actionHistoryCleanup.status()
+    : null;
+  return {
+    ok: true,
+    environment,
+    continuous: {
+      maintenanceEnabled: repositoryStatus.profile.enabled,
+      desiredTableCount: repositoryStatus.profile.desiredTableCount,
+      effectiveDesiredTableCount: repositoryStatus.profile.enabled
+        ? repositoryStatus.profile.desiredTableCount
+        : 0,
+      profileUpdatedAt: repositoryStatus.profile.updatedAt || null,
+      tables,
+      supervisor: continuousBotTableSupervisor?.status?.() || {
+        started: false,
+        sweepInProgress: false,
+        lastSweepStartedAt: null,
+        lastSweepFinishedAt: null,
+        lastSweepResult: null,
+        lastError: null
+      }
+    },
+    cleanup
+  };
+}
+
+async function handleInternalPokerMaintenance(req, res) {
+  if (req.method !== "GET" && req.method !== "POST") {
+    sendInternalJson(res, 405, { error: "method_not_allowed" });
+    return;
+  }
+  if (!internalRuntimeToken) {
+    sendInternalJson(res, 503, { error: "internal_runtime_token_missing" });
+    return;
+  }
+  const authHeader = typeof req.headers?.authorization === "string" ? req.headers.authorization.trim() : "";
+  if (authHeader !== `Bearer ${internalRuntimeToken}`) {
+    sendInternalJson(res, 401, { error: "unauthorized" });
+    return;
+  }
+  const environment = getPokerMaintenanceEnvironment();
+  if (!environment) {
+    klogSafe("ws_admin_poker_maintenance_failed", { code: "environment_not_allowed", statusCode: 503 });
+    sendInternalJson(res, 503, { error: "environment_not_allowed" });
+    return;
+  }
+  try {
+    if (req.method === "GET") {
+      const status = await buildInternalPokerMaintenanceStatus(environment);
+      sendInternalJson(res, status.ok ? 200 : 503, status);
+      return;
+    }
+    const payload = await readJsonBody(req, { maxBytes: 4_096 });
+    const operation = typeof payload?.operation === "string" ? payload.operation.trim() : "";
+    const actorUserId = typeof payload?.actorUserId === "string" ? payload.actorUserId.trim() : "";
+    const requestId = typeof payload?.requestId === "string" ? payload.requestId.trim() : "";
+    const validRequestId = requestId.length >= 8 && requestId.length <= 140;
+    if (!isUuid(actorUserId) || !validRequestId) {
+      sendInternalJson(res, 400, { error: "invalid_request" });
+      return;
+    }
+    let result;
+    if (
+      operation === "set_desired_state"
+      && hasExactKeys(payload, ["operation", "enabled", "desiredTableCount", "actorUserId", "requestId"])
+      && typeof payload.enabled === "boolean"
+      && Number.isInteger(payload.desiredTableCount)
+    ) {
+      const profileResult = await continuousBotTableRepository?.setDesiredState?.({
+        enabled: payload.enabled,
+        desiredTableCount: payload.desiredTableCount,
+        updatedBy: actorUserId
+      });
+      if (!profileResult?.ok) {
+        sendInternalJson(res, 400, { error: profileResult?.reason || "profile_update_failed" });
+        return;
+      }
+      const reconciliation = await continuousBotTableSupervisor?.sweep?.();
+      result = {
+        ok: true,
+        operation,
+        profileChanged: profileResult.profileChanged === true,
+        reconciliationStarted: reconciliation?.skipped !== true,
+        reconciliationSkipped: reconciliation?.skipped === true,
+        effectiveDesiredTableCount: profileResult.profile.enabled ? profileResult.profile.desiredTableCount : 0,
+        reconciliationResult: reconciliation?.ok === true ? "ok" : "failed"
+      };
+    } else if (
+      operation === "request_rotation"
+      && hasExactKeys(payload, ["operation", "tableId", "actorUserId", "requestId"])
+      && isUuid(payload.tableId)
+    ) {
+      result = await requestContinuousBotTableRetirement({ tableId: payload.tableId.trim() });
+      result = { ok: result?.ok === true, operation, ...result };
+    } else if (
+      operation === "reconcile"
+      && hasExactKeys(payload, ["operation", "actorUserId", "requestId"])
+    ) {
+      const reconciliation = await continuousBotTableSupervisor?.sweep?.();
+      result = {
+        ok: reconciliation?.ok === true,
+        operation,
+        reconciliationStarted: reconciliation?.skipped !== true,
+        reconciliationSkipped: reconciliation?.skipped === true,
+        reconciliationResult: reconciliation?.ok === true ? "ok" : "failed",
+        reason: reconciliation?.reason || null
+      };
+    } else if (
+      operation === "cleanup"
+      && hasExactKeys(payload, ["operation", "actorUserId", "requestId"])
+    ) {
+      const cleanupResult = await actionHistoryCleanup?.sweep?.();
+      result = { ok: cleanupResult?.ok === true, operation, ...cleanupResult };
+    } else {
+      sendInternalJson(res, 400, { error: "invalid_request" });
+      return;
+    }
+    klogSafe("ws_admin_poker_maintenance_action", {
+      operation,
+      actorUserId,
+      requestId,
+      ok: result?.ok === true,
+      changed: result?.changed === true,
+      skipped: result?.skipped === true
+    });
+    sendInternalJson(res, result?.ok === true ? 200 : 409, { ...result, environment });
+  } catch (error) {
+    const code = error?.code || (error instanceof SyntaxError ? "invalid_json" : "internal_server_error");
+    const statusCode = Number(error?.status)
+      || (code === "body_too_large" || code === "invalid_json" ? 400 : 500);
+    klogSafe("ws_admin_poker_maintenance_failed", { code: String(code).slice(0, 120), statusCode });
+    sendInternalJson(res, statusCode, { error: code });
+  }
+}
+
 async function handleInternalBotClaimsRecovery(req, res) {
   if (req.method !== "POST") {
     sendInternalJson(res, 405, { error: "method_not_allowed" });
@@ -3248,6 +3414,11 @@ async function handleHttpRequest(req, res) {
 
   if (req.url === "/internal/admin/poker-log-control") {
     await handleInternalPokerLogControl(req, res);
+    return;
+  }
+
+  if (req.url === "/internal/admin/poker-maintenance") {
+    await handleInternalPokerMaintenance(req, res);
     return;
   }
 
@@ -4325,12 +4496,13 @@ async function retireManagedTableAfterReplacementConflict({ tableId, generationK
   });
 }
 
-async function requestContinuousBotTableRetirement({ tableId }) {
-  if (continuousBotRetirementRequested.has(tableId)) return { ok: true, changed: false };
+async function requestContinuousBotTableRetirement({ tableId, forceQueue = false }) {
+  if (continuousBotRetirementRequested.has(tableId)) return { ok: true, changed: false, reason: "already_requested" };
   const persisted = await continuousBotTableRepository?.requestRetirement?.(tableId);
   if (!persisted?.ok) {
     return persisted || { ok: false, reason: "retirement_request_unavailable" };
   }
+  if (!forceQueue && persisted.changed !== true) return persisted;
   continuousBotRetirementRequested.add(tableId);
   return enqueueTableCommand({
     tableId,
@@ -4356,7 +4528,7 @@ const continuousBotTableSupervisor = continuousBotTableRepository
   ? createContinuousBotTableSupervisor({
       repository: continuousBotTableRepository,
       onCreatedTable: materializeCreatedContinuousBotTable,
-      onRetirementRequested: requestContinuousBotTableRetirement,
+      onRetirementRequested: ({ tableId }) => requestContinuousBotTableRetirement({ tableId, forceQueue: true }),
       onRotationScheduled: async ({ tableId, rotationDueAt }) => {
         const dueAtMs = Date.parse(rotationDueAt);
         const marked = tableManager.setTableRotationDueAt(tableId, dueAtMs);

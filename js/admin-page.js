@@ -63,6 +63,9 @@
       pokerLogClockReceivedAtMs: null,
       pokerLogExpiryRefreshDone: false,
       pokerLogCountdownTimer: null,
+      pokerMaintenance: null,
+      pokerMaintenanceError: null,
+      pokerMaintenancePending: false,
       loaded: false,
     },
     pokerAudit: {
@@ -173,6 +176,13 @@
     nodes.opsActionResult = doc.getElementById("adminOpsActionResult");
     nodes.opsRecentActions = doc.getElementById("adminOpsRecentActions");
     nodes.opsRecentCleanup = doc.getElementById("adminOpsRecentCleanup");
+    nodes.opsMaintenance = doc.getElementById("adminOpsMaintenance");
+    nodes.opsMaintenanceEnabled = doc.getElementById("adminOpsMaintenanceEnabled");
+    nodes.opsMaintenanceCount = doc.getElementById("adminOpsMaintenanceCount");
+    nodes.opsMaintenanceApply = doc.getElementById("adminOpsMaintenanceApply");
+    nodes.opsMaintenanceReconcile = doc.getElementById("adminOpsMaintenanceReconcile");
+    nodes.opsMaintenanceCleanup = doc.getElementById("adminOpsMaintenanceCleanup");
+    nodes.opsMaintenanceStatus = doc.getElementById("adminOpsMaintenanceStatus");
   }
 
   function setVisible(node, visible){
@@ -1168,6 +1178,7 @@
     var identity = state.ops.identity;
     renderBotReactionControl();
     renderPokerLogControl();
+    renderPokerMaintenance();
     if (!summary && !identity){
       if (nodes.opsStats) nodes.opsStats.innerHTML = "";
       if (nodes.opsIdentity) nodes.opsIdentity.innerHTML = "";
@@ -1510,6 +1521,79 @@
     return '<div class="admin-list">' + items.map(function(item){
       return '<div class="admin-list__item"><div class="admin-list__title"><span>' + item.title + '</span></div><div class="admin-list__meta">' + item.meta + "</div></div>";
     }).join("") + "</div>";
+  }
+
+  function renderPokerMaintenance(){
+    if (!nodes.opsMaintenance) return;
+    var snapshot = state.ops.pokerMaintenance;
+    var pending = state.ops.pokerMaintenancePending === true;
+    if (!snapshot){
+      nodes.opsMaintenance.innerHTML = '<p class="admin-empty">' + escapeHtml(state.ops.pokerMaintenanceError ? "Continuous maintenance unavailable: " + state.ops.pokerMaintenanceError : "Loading continuous maintenance…") + "</p>";
+    } else {
+      var continuous = snapshot.continuous || {};
+      var supervisor = continuous.supervisor || {};
+      var cleanup = snapshot.cleanup || {};
+      var lastRun = cleanup.lastRun || {};
+      var tableItems = (Array.isArray(continuous.tables) ? continuous.tables : []).map(function(table){
+        var rotationButton = table.status === "OPEN"
+          ? '<button class="admin-btn admin-btn--ghost" type="button" data-maintenance-rotate="' + escapeHtml(table.tableId || "") + '">Request rotation</button>'
+          : "";
+        return {
+          title: '<span class="admin-mono">' + escapeHtml(shortTableId(table.tableId)) + "</span> " + pill(table.status || "unknown", table.status === "OPEN" ? "success" : "info") + rotationButton,
+          meta: escapeHtml((table.phase || "no loaded phase") + " · human: " + (table.humanParticipation || "unknown") + " · due: " + formatTimestamp(table.rotationDueAt))
+        };
+      });
+      nodes.opsMaintenance.innerHTML = [
+        '<div class="admin-surface">',
+        '<div class="admin-list__title"><span>Continuous tables</span>' + pill(continuous.maintenanceEnabled ? "Enabled" : "Disabled — retiring gracefully", continuous.maintenanceEnabled ? "success" : "info") + "</div>",
+        '<div class="admin-kv">',
+        renderKvRow("Configured desired count", continuous.desiredTableCount),
+        renderKvRow("Effective desired count", continuous.effectiveDesiredTableCount),
+        renderKvRow("Supervisor started", supervisor.started ? "yes" : "no"),
+        renderKvRow("Sweep in progress", supervisor.sweepInProgress ? "yes" : "no"),
+        renderKvRow("Last sweep", formatTimestamp(supervisor.lastSweepFinishedAt)),
+        renderKvRow("Last sweep result", supervisor.lastSweepResult && supervisor.lastSweepResult.ok ? "OK" : supervisor.lastError ? "failed" : "—"),
+        '</div>',
+        '</div>',
+        '<form class="admin-adjust" id="adminOpsMaintenanceForm">',
+        '<label class="admin-field"><span class="admin-field__label">Maintenance</span><select class="admin-input" id="adminOpsMaintenanceEnabled"><option value="true">Enabled</option><option value="false">Disabled — existing tables retire gracefully</option></select></label>',
+        '<label class="admin-field"><span class="admin-field__label">Desired tables</span><input class="admin-input" id="adminOpsMaintenanceCount" type="number" min="0" max="2" step="1" required></label>',
+        '<div class="admin-filter-actions"><button class="admin-btn admin-btn--primary" id="adminOpsMaintenanceApply" type="submit">Apply maintenance state</button><button class="admin-btn admin-btn--ghost" id="adminOpsMaintenanceReconcile" type="button">Reconcile now</button><button class="admin-btn admin-btn--ghost" id="adminOpsMaintenanceCleanup" type="button">Run cleanup now</button></div>',
+        '</form>',
+        '<div class="admin-note" id="adminOpsMaintenanceStatus" aria-live="polite"></div>',
+        '<h3 class="admin-section-title">Managed tables</h3>',
+        renderMiniList(tableItems),
+        '<h3 class="admin-section-title">Action-history cleanup</h3>',
+        '<div class="admin-kv">',
+        renderKvRow("Bot actions retention", cleanup.retention && cleanup.retention.botActionsMs),
+        renderKvRow("Bot HAND_SETTLED retention", cleanup.retention && cleanup.retention.botSettledMs),
+        renderKvRow("Human actions retention", cleanup.retention && cleanup.retention.humanActionsMs),
+        renderKvRow("Human HAND_SETTLED retention", cleanup.retention && cleanup.retention.humanSettledMs),
+        renderKvRow("Batch size", cleanup.batchSize),
+        renderKvRow("Next cleanup batch · ordinary rows", cleanup.backlog && cleanup.backlog.available ? cleanup.backlog.ordinaryActionRows : "unavailable"),
+        renderKvRow("Next cleanup batch · HAND_SETTLED", cleanup.backlog && cleanup.backlog.available ? cleanup.backlog.handSettledRows : "unavailable"),
+        renderKvRow("Last cleanup", formatTimestamp(lastRun.finishedAt)),
+        renderKvRow("Last cleanup result", lastRun.result || "—"),
+        renderKvRow("Last phase deletes", lastRun.phase1Deleted == null ? "—" : String(lastRun.phase1Deleted) + "/" + String(lastRun.phase2Deleted || 0)),
+        renderKvRow("Last duration", lastRun.durationMs == null ? "—" : String(lastRun.durationMs) + " ms"),
+        '</div>'
+      ].join("");
+      nodes.opsMaintenanceEnabled = doc.getElementById("adminOpsMaintenanceEnabled");
+      nodes.opsMaintenanceCount = doc.getElementById("adminOpsMaintenanceCount");
+      nodes.opsMaintenanceApply = doc.getElementById("adminOpsMaintenanceApply");
+      nodes.opsMaintenanceReconcile = doc.getElementById("adminOpsMaintenanceReconcile");
+      nodes.opsMaintenanceCleanup = doc.getElementById("adminOpsMaintenanceCleanup");
+      nodes.opsMaintenanceStatus = doc.getElementById("adminOpsMaintenanceStatus");
+      nodes.opsMaintenanceEnabled.value = continuous.maintenanceEnabled ? "true" : "false";
+      nodes.opsMaintenanceCount.value = continuous.desiredTableCount == null ? "0" : String(continuous.desiredTableCount);
+    }
+    var disabled = pending || state.maintenance;
+    if (nodes.opsMaintenanceEnabled) nodes.opsMaintenanceEnabled.disabled = disabled;
+    if (nodes.opsMaintenanceCount) nodes.opsMaintenanceCount.disabled = disabled;
+    if (nodes.opsMaintenanceApply) nodes.opsMaintenanceApply.disabled = disabled;
+    if (nodes.opsMaintenanceReconcile) nodes.opsMaintenanceReconcile.disabled = disabled;
+    if (nodes.opsMaintenanceCleanup) nodes.opsMaintenanceCleanup.disabled = disabled;
+    if (nodes.opsMaintenanceStatus) nodes.opsMaintenanceStatus.textContent = pending ? "Updating poker maintenance…" : state.ops.pokerMaintenanceError || "";
   }
 
   function closestEventTarget(target, selector){
@@ -2151,7 +2235,8 @@
         apiFetch("/.netlify/functions/admin-ops-summary", { method: "GET" }),
         state.maintenance ? Promise.resolve(null) : apiFetch("/.netlify/functions/admin-ws-preview-bot-reaction", { method: "GET", cache: "no-store" }),
         apiFetch("/.netlify/functions/admin-poker-log-control", { method: "GET", cache: "no-store" }),
-        apiFetch("/.netlify/functions/admin-tables-list?status=OPEN&sort=last_activity_desc&page=1&limit=100", { method: "GET" })
+        apiFetch("/.netlify/functions/admin-tables-list?status=OPEN&sort=last_activity_desc&page=1&limit=100", { method: "GET" }),
+        apiFetch("/.netlify/functions/admin-poker-maintenance", { method: "GET", cache: "no-store" })
       ]);
       if (results[0].status === "fulfilled"){
         state.ops.identity = results[0].value || null;
@@ -2193,6 +2278,14 @@
       } else {
         state.ops.pokerLogTables = [];
         state.ops.pokerLogTablesError = results[4].reason && results[4].reason.code ? results[4].reason.code : "request_failed";
+      }
+      if (results[5].status === "fulfilled"){
+        state.ops.pokerMaintenance = results[5].value || null;
+        state.ops.pokerMaintenanceError = null;
+      } else {
+        state.ops.pokerMaintenance = null;
+        state.ops.pokerMaintenanceError = results[5].reason && results[5].reason.code ? results[5].reason.code : "request_failed";
+        klog("admin_poker_maintenance_load_failed", { code: state.ops.pokerMaintenanceError });
       }
       state.ops.loaded = true;
       renderOps();
@@ -2309,6 +2402,48 @@
     } catch (err){
       handleApiError(err, "Could not run ops action.");
     }
+  }
+
+  async function runPokerMaintenance(operation, extra){
+    if (state.maintenance){
+      setStatus("CH and poker mutations are disabled during maintenance.", "error");
+      return;
+    }
+    state.ops.pokerMaintenancePending = true;
+    state.ops.pokerMaintenanceError = null;
+    renderPokerMaintenance();
+    try {
+      await apiFetch("/.netlify/functions/admin-poker-maintenance", {
+        method: "POST",
+        body: JSON.stringify(Object.assign({ operation: operation }, extra || {}))
+      });
+      state.ops.pokerMaintenanceError = null;
+      await loadOps();
+      setStatus("Poker maintenance action completed.", "success");
+    } catch (err){
+      state.ops.pokerMaintenanceError = err && err.code ? err.code : "request_failed";
+      if (state.ops.pokerMaintenanceError === "ws_maintenance_timeout"){
+        await loadOps();
+        state.ops.pokerMaintenanceError = "Request timed out; refreshing status to show the current result.";
+      } else {
+        handleApiError(err, "Could not update poker maintenance.");
+      }
+    } finally {
+      state.ops.pokerMaintenancePending = false;
+      renderPokerMaintenance();
+    }
+  }
+
+  function submitPokerMaintenance(event){
+    event.preventDefault();
+    var enabled = nodes.opsMaintenanceEnabled && nodes.opsMaintenanceEnabled.value === "true";
+    var desiredTableCount = Number(nodes.opsMaintenanceCount && nodes.opsMaintenanceCount.value);
+    if (!Number.isInteger(desiredTableCount) || desiredTableCount < 0 || desiredTableCount > 2){
+      state.ops.pokerMaintenanceError = "desired_table_count must be between 0 and 2";
+      renderPokerMaintenance();
+      return;
+    }
+    runPokerMaintenance("set_desired_state", { enabled: enabled, desiredTableCount: desiredTableCount });
   }
 
   function handleApiError(err, fallback){
@@ -2615,6 +2750,19 @@
         handleTableAction(tableButton.getAttribute("data-table-action"), tableButton.getAttribute("data-table-id"));
         return;
       }
+      var maintenanceRotateButton = closestEventTarget(event.target, "[data-maintenance-rotate]");
+      if (maintenanceRotateButton){
+        runPokerMaintenance("request_rotation", { tableId: maintenanceRotateButton.getAttribute("data-maintenance-rotate") });
+        return;
+      }
+      if (event.target && event.target.id === "adminOpsMaintenanceReconcile"){
+        runPokerMaintenance("reconcile");
+        return;
+      }
+      if (event.target && event.target.id === "adminOpsMaintenanceCleanup"){
+        runPokerMaintenance("cleanup");
+        return;
+      }
       var auditButton = closestEventTarget(event.target, "[data-audit-action]");
       if (auditButton){
         handleAuditAction(auditButton.getAttribute("data-audit-action"), auditButton.getAttribute("data-audit-table-id"), auditButton.getAttribute("data-audit-hand-id"));
@@ -2653,7 +2801,12 @@
       if (form && form.id === "adminAdjustForm"){
         submitAdjustForm(event);
       }
+      if (form && form.id === "adminOpsMaintenanceForm"){
+        submitPokerMaintenance(event);
+      }
     });
+    if (nodes.opsMaintenanceReconcile) nodes.opsMaintenanceReconcile.addEventListener("click", function(){ runPokerMaintenance("reconcile"); });
+    if (nodes.opsMaintenanceCleanup) nodes.opsMaintenanceCleanup.addEventListener("click", function(){ runPokerMaintenance("cleanup"); });
     doc.addEventListener("input", function(event){
       var target = event.target;
       if (target && (target.id === "adminAdjustAmount" || target.id === "adminAdjustReason") && state.users.detail && state.users.detail.user){

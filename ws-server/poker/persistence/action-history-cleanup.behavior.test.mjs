@@ -332,3 +332,36 @@ test("skips sweep when previous sweep is still in progress", async () => {
   const firstResult = await first;
   assert.equal(firstResult.ok, true);
 });
+
+test("status exposes effective cleanup configuration and phase-2-only HAND_SETTLED backlog", async () => {
+  const queries = [];
+  const cleanup = createActionHistoryCleanup({
+    env: {
+      WS_POKER_BOT_ACTION_RETENTION_MS: String(HOUR),
+      WS_POKER_BOT_SETTLED_RETENTION_MS: String(2 * HOUR),
+      WS_POKER_HUMAN_ACTION_RETENTION_MS: String(24 * HOUR),
+      WS_POKER_HUMAN_SETTLED_RETENTION_MS: String(7 * DAY),
+      WS_POKER_ACTION_HISTORY_BATCH_SIZE: "10",
+      SUPABASE_DB_URL: "postgres://test/db"
+    },
+    beginSql: async (fn) => fn({
+      unsafe: async (sql) => {
+        queries.push(sql);
+        if (sql.includes("ordinary_action_rows")) return [{ ordinary_action_rows: 4, hand_settled_rows: 2 }];
+        return [];
+      }
+    })
+  });
+
+  const status = await cleanup.status();
+  assert.equal(status.retention.botActionsMs, HOUR);
+  assert.equal(status.retention.humanSettledMs, 7 * DAY);
+  assert.equal(status.batchSize, 10);
+  assert.equal(status.backlog.available, true);
+  assert.equal(status.backlog.ordinaryActionRows, 4);
+  assert.equal(status.backlog.handSettledRows, 2);
+  assert.equal(status.backlog.cappedAtBatchSize, true);
+  const backlogQuery = queries.find((sql) => sql.includes("ordinary_action_rows"));
+  assert.match(backlogQuery, /not exists[\s\S]+action_type != 'HAND_SETTLED'/);
+  assert.equal(queries.some((sql) => sql.includes("statement_timeout")), true);
+});

@@ -37,6 +37,9 @@ jobs:
       - name: Install dependencies
         run: npm ci || npm i
 
+      - name: Install WS server runtime dependencies
+        run: npm ci --prefix ws-server --omit=dev
+
       - name: Native JSONB integration test
         run: node --test ws-server/poker/persistence/native-jsonb.integration.test.mjs
 
