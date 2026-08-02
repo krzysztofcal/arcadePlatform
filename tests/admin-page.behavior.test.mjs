@@ -553,8 +553,8 @@ function buildContext(options = {}) {
           loadAverage: { one: 1.2, five: 0.9, fifteen: 0.7 },
           ioWaitPercent: 3.4,
         },
-        continuousTables: { active: 2, desired: 2, enabled: true },
-        cleanup: {
+        continuousTables: opts.vpsMetricsHostOnly ? null : { active: 2, desired: 2, enabled: true },
+        cleanup: opts.vpsMetricsHostOnly ? null : {
           backlog: { ordinaryActionRows: 0, handSettledRows: 0, cappedAtBatchSize: true, measuredAt: "2026-08-02T18:59:58.000Z" },
           lastRun: { finishedAt: "2026-08-02T18:55:00.000Z", durationMs: 184, deletedRows: 37, result: "success" },
         },
@@ -838,6 +838,20 @@ test("admin page marks the previous VPS metrics snapshot stale after a refresh f
   await flush();
   await flush();
   assert.match(document.getElementById("adminOpsVpsMetrics").innerHTML, /admin-pill admin-pill--info">Stale/);
+  assert.match(document.getElementById("adminOpsVpsMetrics").innerHTML, /admin-pill admin-pill--info">Unknown/);
+  assert.doesNotMatch(document.getElementById("adminOpsVpsMetrics").innerHTML, /Healthy/);
+});
+
+test("admin page marks host-only VPS metrics as partial", async () => {
+  const { context, document, tabs } = buildContext({ vpsMetricsHostOnly: true });
+  vm.runInContext(source, context, { filename: "js/admin-page.js" });
+
+  await flush();
+  tabs[5].dispatchEvent({ type: "click", bubbles: true, target: tabs[5], preventDefault() {} });
+  await flush();
+  await flush();
+  assert.match(document.getElementById("adminOpsVpsMetrics").innerHTML, /admin-pill admin-pill--info">Partial/);
+  assert.doesNotMatch(document.getElementById("adminOpsVpsMetrics").innerHTML, /Unavailable/);
 });
 
 test("admin page still renders ops summary when stage identity request fails", async () => {

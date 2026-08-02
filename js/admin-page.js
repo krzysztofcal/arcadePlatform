@@ -1254,7 +1254,7 @@
       || !backlog
       || backlog.ordinaryActionRows == null
       || backlog.handSettledRows == null;
-    var availabilityLabel = primarySources < 2 ? "Unavailable" : missingMetric ? "Partial" : "Available";
+    var availabilityLabel = primarySources === 0 ? "Unavailable" : missingMetric ? "Partial" : "Available";
     var availabilityTone = availabilityLabel === "Available" ? "success" : "info";
     var diskPercent = root && Number(root.usedPercent);
     var inodePercent = root && root.inodes && Number(root.inodes.usedPercent);
@@ -1272,6 +1272,8 @@
     if (state.ops.vpsMetricsStale){
       availabilityLabel = "Stale";
       availabilityTone = "info";
+      healthLabel = "Unknown";
+      healthTone = "info";
     }
     var loadAvailable = [load.one, load.five, load.fifteen].every(function(value){ return Number.isFinite(Number(value)); });
     var loadText = loadAvailable
