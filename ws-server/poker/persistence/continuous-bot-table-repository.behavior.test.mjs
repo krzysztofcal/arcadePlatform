@@ -25,7 +25,7 @@ test("setDesiredState persists a bounded profile and keeps configured desired co
         if (sql.includes("from public.poker_managed_table_profiles")) return [{ ...PROFILE }];
         if (sql.includes("update public.poker_managed_table_profiles")) {
           updatedParams = params;
-          return [{ ...PROFILE, updated_at: "2026-08-01T00:00:00.000Z" }];
+          return [{ ...PROFILE, desired_table_count: 100, updated_at: "2026-08-01T00:00:00.000Z" }];
         }
         return [];
       }
@@ -34,14 +34,14 @@ test("setDesiredState persists a bounded profile and keeps configured desired co
 
   const result = await repository.setDesiredState({
     enabled: false,
-    desiredTableCount: 2,
+    desiredTableCount: 100,
     updatedBy: "00000000-0000-4000-8000-000000000010"
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.profile.enabled, false);
-  assert.equal(result.profile.desiredTableCount, 2);
-  assert.deepEqual(updatedParams.slice(1, 4), [false, 2, "00000000-0000-4000-8000-000000000010"]);
+  assert.equal(result.profile.desiredTableCount, 100);
+  assert.deepEqual(updatedParams.slice(1, 4), [false, 100, "00000000-0000-4000-8000-000000000010"]);
 });
 
 test("requestRetirement persists a due rotation for the exact managed table", async () => {

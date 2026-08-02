@@ -57,7 +57,7 @@ function parseBody(body) {
   const operation = typeof value.operation === "string" ? value.operation.trim().toLowerCase() : "";
   if (operation === "set_desired_state" && exactKeys(value, ["operation", "enabled", "desiredTableCount"])) {
     if (typeof value.enabled !== "boolean" || !Number.isInteger(value.desiredTableCount)
-      || value.desiredTableCount < 0 || value.desiredTableCount > 2) {
+      || value.desiredTableCount < 0 || value.desiredTableCount > 100) {
       throw controlError("invalid_desired_table_count");
     }
     return { operation, enabled: value.enabled, desiredTableCount: value.desiredTableCount };

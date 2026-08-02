@@ -44,22 +44,22 @@ function productionIdentity() {
   };
 }
 
-test("maintenance parser keeps operations bounded and rejects browser actor fields", () => {
+test("maintenance parser accepts the 100-table bound and rejects browser actor fields", () => {
   assert.deepEqual(parseBody(JSON.stringify({
     operation: "set_desired_state",
     enabled: false,
-    desiredTableCount: 2,
+    desiredTableCount: 100,
   })), {
     operation: "set_desired_state",
     enabled: false,
-    desiredTableCount: 2,
+    desiredTableCount: 100,
   });
   assert.deepEqual(parseBody(JSON.stringify({ operation: "request_rotation", tableId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" })), {
     operation: "request_rotation",
     tableId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   });
   assert.throws(() => parseBody(JSON.stringify({ operation: "set_desired_state", enabled: true, desiredTableCount: 2, actorUserId: "spoofed" })), { code: "invalid_request" });
-  assert.throws(() => parseBody(JSON.stringify({ operation: "set_desired_state", enabled: true, desiredTableCount: 3 })), { code: "invalid_desired_table_count" });
+  assert.throws(() => parseBody(JSON.stringify({ operation: "set_desired_state", enabled: true, desiredTableCount: 101 })), { code: "invalid_desired_table_count" });
 });
 
 test("maintenance proxy selects verified Preview/Production target and signs actor context internally", async () => {

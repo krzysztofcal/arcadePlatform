@@ -1557,7 +1557,7 @@
         '</div>',
         '<form class="admin-adjust" id="adminOpsMaintenanceForm">',
         '<label class="admin-field"><span class="admin-field__label">Maintenance</span><select class="admin-input" id="adminOpsMaintenanceEnabled"><option value="true">Enabled</option><option value="false">Disabled — existing tables retire gracefully</option></select></label>',
-        '<label class="admin-field"><span class="admin-field__label">Desired tables</span><input class="admin-input" id="adminOpsMaintenanceCount" type="number" min="0" max="2" step="1" required></label>',
+        '<label class="admin-field"><span class="admin-field__label">Desired tables</span><input class="admin-input" id="adminOpsMaintenanceCount" type="number" min="0" max="100" step="1" required></label>',
         '<div class="admin-filter-actions"><button class="admin-btn admin-btn--primary" id="adminOpsMaintenanceApply" type="submit">Apply maintenance state</button><button class="admin-btn admin-btn--ghost" id="adminOpsMaintenanceReconcile" type="button">Reconcile now</button><button class="admin-btn admin-btn--ghost" id="adminOpsMaintenanceCleanup" type="button">Run cleanup now</button></div>',
         '</form>',
         '<div class="admin-note" id="adminOpsMaintenanceStatus" aria-live="polite"></div>',
@@ -2438,8 +2438,8 @@
     event.preventDefault();
     var enabled = nodes.opsMaintenanceEnabled && nodes.opsMaintenanceEnabled.value === "true";
     var desiredTableCount = Number(nodes.opsMaintenanceCount && nodes.opsMaintenanceCount.value);
-    if (!Number.isInteger(desiredTableCount) || desiredTableCount < 0 || desiredTableCount > 2){
-      state.ops.pokerMaintenanceError = "desired_table_count must be between 0 and 2";
+    if (!Number.isInteger(desiredTableCount) || desiredTableCount < 0 || desiredTableCount > 100){
+      state.ops.pokerMaintenanceError = "desired_table_count must be between 0 and 100";
       renderPokerMaintenance();
       return;
     }

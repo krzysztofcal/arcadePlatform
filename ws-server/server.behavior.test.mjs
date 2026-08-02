@@ -47,7 +47,7 @@ const FIXED_RANDOM_BOT_AUTOPLAY_ADAPTER_URL = new URL(
   import.meta.url
 ).href;
 
-test("continuous bot profile validation accepts only the bounded V1 singleton", () => {
+test("continuous bot profile validation accepts desired counts up to 100", () => {
   const valid = normalizeContinuousBotProfile({
     profile_key: "CONTINUOUS_BOT_DEFAULT",
     enabled: true,
@@ -67,7 +67,7 @@ test("continuous bot profile validation accepts only the bounded V1 singleton", 
   assert.equal(normalizeContinuousBotProfile({
     profile_key: "CONTINUOUS_BOT_DEFAULT",
     enabled: true,
-    desired_table_count: 3,
+    desired_table_count: 101,
     min_bot_count: 2,
     target_bot_count: 3,
     max_bot_count: 3,
@@ -77,6 +77,20 @@ test("continuous bot profile validation accepts only the bounded V1 singleton", 
     big_blind: 2,
     max_seats: 6
   }), null);
+  const maxProfile = normalizeContinuousBotProfile({
+    profile_key: "CONTINUOUS_BOT_DEFAULT",
+    enabled: true,
+    desired_table_count: 100,
+    min_bot_count: 2,
+    target_bot_count: 3,
+    max_bot_count: 3,
+    rotation_interval_seconds: 900,
+    postpone_interval_seconds: 300,
+    small_blind: 1,
+    big_blind: 2,
+    max_seats: 6
+  });
+  assert.equal(maxProfile?.desiredTableCount, 100);
 });
 
 test("continuous bot profile comparison accepts Postgres stringified jsonb stakes", () => {

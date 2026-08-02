@@ -9,7 +9,7 @@ import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 
 export const CONTINUOUS_BOT_PROFILE_KEY = "CONTINUOUS_BOT_DEFAULT";
-const MAX_DESIRED_TABLES = 2;
+const MAX_DESIRED_TABLES = 100;
 const MAX_SEATS = 6;
 const MAX_INTERVAL_SECONDS = 86_400;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
