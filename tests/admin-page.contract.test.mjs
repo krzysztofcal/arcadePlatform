@@ -61,6 +61,10 @@ test("admin ops exposes continuous maintenance and cleanup controls", () => {
   assert.match(adminHtml, /Disabling maintenance does not interrupt an active human hand/);
   assert.match(adminJs, /Run cleanup now/);
   assert.match(adminJs, /Reconcile now/);
+  assert.match(adminJs, /id="adminOpsMaintenanceStop"[^>]+data-maintenance-stop[^>]*>Stop continuous tables/);
+  assert.match(adminJs, /Stop continuous tables\? Continuous maintenance will be disabled\./);
+  assert.match(adminJs, /runPokerMaintenance\("set_desired_state", \{ enabled: false, desiredTableCount: desiredTableCount \}\)/);
+  assert.doesNotMatch(adminJs, /requestRetirement/);
   assert.match(adminJs, /Next cleanup batch · ordinary rows/);
   assert.match(adminJs, /Next cleanup batch · HAND_SETTLED/);
 });

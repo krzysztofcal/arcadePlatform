@@ -180,6 +180,7 @@
     nodes.opsMaintenanceEnabled = doc.getElementById("adminOpsMaintenanceEnabled");
     nodes.opsMaintenanceCount = doc.getElementById("adminOpsMaintenanceCount");
     nodes.opsMaintenanceApply = doc.getElementById("adminOpsMaintenanceApply");
+    nodes.opsMaintenanceStop = doc.getElementById("adminOpsMaintenanceStop");
     nodes.opsMaintenanceReconcile = doc.getElementById("adminOpsMaintenanceReconcile");
     nodes.opsMaintenanceCleanup = doc.getElementById("adminOpsMaintenanceCleanup");
     nodes.opsMaintenanceStatus = doc.getElementById("adminOpsMaintenanceStatus");
@@ -1563,7 +1564,7 @@
         '<form class="admin-adjust" id="adminOpsMaintenanceForm">',
         '<label class="admin-field"><span class="admin-field__label">Maintenance</span><select class="admin-input" id="adminOpsMaintenanceEnabled"><option value="true">Enabled</option><option value="false">Disabled — existing tables retire gracefully</option></select></label>',
         '<label class="admin-field"><span class="admin-field__label">Desired tables</span><input class="admin-input" id="adminOpsMaintenanceCount" type="number" min="0" max="' + String(maxDesiredTableCount) + '" step="1" required></label>',
-        '<div class="admin-filter-actions"><button class="admin-btn admin-btn--primary" id="adminOpsMaintenanceApply" type="submit">Apply maintenance state</button><button class="admin-btn admin-btn--ghost" id="adminOpsMaintenanceReconcile" type="button">Reconcile now</button><button class="admin-btn admin-btn--ghost" id="adminOpsMaintenanceCleanup" type="button">Run cleanup now</button></div>',
+        '<div class="admin-filter-actions"><button class="admin-btn admin-btn--primary" id="adminOpsMaintenanceApply" type="submit">Apply maintenance state</button><button class="admin-btn admin-btn--danger" id="adminOpsMaintenanceStop" type="button" data-maintenance-stop>Stop continuous tables</button><button class="admin-btn admin-btn--ghost" id="adminOpsMaintenanceReconcile" type="button">Reconcile now</button><button class="admin-btn admin-btn--ghost" id="adminOpsMaintenanceCleanup" type="button">Run cleanup now</button></div>',
         '</form>',
         '<div class="admin-note">New tables are created at most ' + String(continuous.creationLimitPerReconcile || 2) + ' per reconcile sweep. Preview stress tests should increase the target gradually.</div>',
         '<div class="admin-note" id="adminOpsMaintenanceStatus" aria-live="polite"></div>',
@@ -1588,6 +1589,7 @@
       nodes.opsMaintenanceEnabled = doc.getElementById("adminOpsMaintenanceEnabled");
       nodes.opsMaintenanceCount = doc.getElementById("adminOpsMaintenanceCount");
       nodes.opsMaintenanceApply = doc.getElementById("adminOpsMaintenanceApply");
+      nodes.opsMaintenanceStop = doc.getElementById("adminOpsMaintenanceStop");
       nodes.opsMaintenanceReconcile = doc.getElementById("adminOpsMaintenanceReconcile");
       nodes.opsMaintenanceCleanup = doc.getElementById("adminOpsMaintenanceCleanup");
       nodes.opsMaintenanceStatus = doc.getElementById("adminOpsMaintenanceStatus");
@@ -1598,6 +1600,7 @@
     if (nodes.opsMaintenanceEnabled) nodes.opsMaintenanceEnabled.disabled = disabled;
     if (nodes.opsMaintenanceCount) nodes.opsMaintenanceCount.disabled = disabled;
     if (nodes.opsMaintenanceApply) nodes.opsMaintenanceApply.disabled = disabled;
+    if (nodes.opsMaintenanceStop) nodes.opsMaintenanceStop.disabled = disabled;
     if (nodes.opsMaintenanceReconcile) nodes.opsMaintenanceReconcile.disabled = disabled;
     if (nodes.opsMaintenanceCleanup) nodes.opsMaintenanceCleanup.disabled = disabled;
     if (nodes.opsMaintenanceStatus) nodes.opsMaintenanceStatus.textContent = pending ? "Updating poker maintenance…" : state.ops.pokerMaintenanceError || "";
@@ -2460,6 +2463,17 @@
     runPokerMaintenance("set_desired_state", { enabled: enabled, desiredTableCount: desiredTableCount });
   }
 
+  function stopContinuousTables(){
+    var continuous = state.ops.pokerMaintenance && state.ops.pokerMaintenance.continuous;
+    var desiredTableCount = continuous && Number.isInteger(continuous.desiredTableCount)
+      ? continuous.desiredTableCount
+      : 0;
+    if (typeof window !== "undefined"
+      && typeof window.confirm === "function"
+      && !window.confirm("Stop continuous tables? Continuous maintenance will be disabled. No new managed tables will be created. Existing managed tables will retire gracefully after their current hand. Tables with active human presence may remain alive until they can safely retire.")) return;
+    runPokerMaintenance("set_desired_state", { enabled: false, desiredTableCount: desiredTableCount });
+  }
+
   function handleApiError(err, fallback){
     if (err && (err.status === 401 || (err.status === 403 && err.code === "admin_required"))){
       showUnauthorized(getUnauthorizedMessage(err));
@@ -2767,6 +2781,11 @@
       var maintenanceRotateButton = closestEventTarget(event.target, "[data-maintenance-rotate]");
       if (maintenanceRotateButton){
         runPokerMaintenance("request_rotation", { tableId: maintenanceRotateButton.getAttribute("data-maintenance-rotate") });
+        return;
+      }
+      var maintenanceStopButton = closestEventTarget(event.target, "[data-maintenance-stop]");
+      if (maintenanceStopButton){
+        stopContinuousTables();
         return;
       }
       if (event.target && event.target.id === "adminOpsMaintenanceReconcile"){
