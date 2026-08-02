@@ -61,6 +61,7 @@ import { createContinuousBotTableRepository } from "./poker/persistence/continuo
 import { createContinuousBotTableSupervisor } from "./poker/runtime/continuous-bot-table-supervisor.mjs";
 import { handleContinuousBotRotationAtSettled } from "./poker/runtime/continuous-bot-table-rotation.mjs";
 import { createActionHistoryCleanup } from "./poker/persistence/action-history-cleanup.mjs";
+import { createVpsMetricsCollector } from "./observability/vps-metrics.mjs";
 import {
   isManagedReplacementSeatProjectionConflict,
   retireManagedTableAfterReplacementConflict as retireManagedTableAfterReplacementConflictFlow
@@ -309,6 +310,7 @@ function continuousBotMaxDesiredTablesForRuntime() {
   return loadReleaseMetadata().environment === "preview" ? 100 : 2;
 }
 const continuousBotMaxDesiredTables = continuousBotMaxDesiredTablesForRuntime();
+const vpsMetricsCollector = createVpsMetricsCollector();
 const continuousBotTableRepository = hasSupabaseDbUrl
   ? createContinuousBotTableRepository({
       env: process.env,
@@ -3113,6 +3115,113 @@ async function buildInternalPokerMaintenanceStatus(environment) {
   };
 }
 
+function safeMetricInteger(value) {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0 ? number : null;
+}
+
+function projectContinuousTablesMetrics(repositoryResult) {
+  if (!repositoryResult?.ok || !repositoryResult.profile) return null;
+  return {
+    active: Array.isArray(repositoryResult.tables) ? repositoryResult.tables.length : null,
+    desired: safeMetricInteger(repositoryResult.profile.desiredTableCount),
+    enabled: typeof repositoryResult.profile.enabled === "boolean"
+      ? repositoryResult.profile.enabled
+      : null
+  };
+}
+
+function projectCleanupMetrics(cleanupResult) {
+  if (!cleanupResult || typeof cleanupResult !== "object") return null;
+  const backlog = cleanupResult.backlog;
+  const lastRun = cleanupResult.lastRun;
+  const phase1Deleted = safeMetricInteger(lastRun?.phase1Deleted);
+  const phase2Deleted = safeMetricInteger(lastRun?.phase2Deleted);
+  const deletedRows = phase1Deleted != null && phase2Deleted != null
+    ? phase1Deleted + phase2Deleted
+    : null;
+  return {
+    backlog: backlog && typeof backlog === "object" ? {
+      ordinaryActionRows: safeMetricInteger(backlog.ordinaryActionRows),
+      handSettledRows: safeMetricInteger(backlog.handSettledRows),
+      cappedAtBatchSize: typeof backlog.cappedAtBatchSize === "boolean"
+        ? backlog.cappedAtBatchSize
+        : null,
+      measuredAt: typeof backlog.measuredAt === "string" ? backlog.measuredAt : null
+    } : null,
+    lastRun: lastRun && typeof lastRun === "object" ? {
+      finishedAt: typeof lastRun.finishedAt === "string" ? lastRun.finishedAt : null,
+      durationMs: safeMetricInteger(lastRun.durationMs),
+      deletedRows: Number.isSafeInteger(deletedRows) ? deletedRows : null,
+      result: typeof lastRun.result === "string" ? lastRun.result : null
+    } : null
+  };
+}
+
+async function handleInternalVpsMetrics(req, res) {
+  if (req.method !== "GET") {
+    sendInternalJson(res, 405, { error: "method_not_allowed" });
+    return;
+  }
+  if (!internalRuntimeToken) {
+    sendInternalJson(res, 503, { error: "internal_runtime_token_missing" });
+    return;
+  }
+  const authHeader = typeof req.headers?.authorization === "string" ? req.headers.authorization.trim() : "";
+  if (authHeader !== `Bearer ${internalRuntimeToken}`) {
+    sendInternalJson(res, 401, { error: "unauthorized" });
+    return;
+  }
+  const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
+  if (requestUrl.search) {
+    sendInternalJson(res, 400, { error: "query_not_supported" });
+    return;
+  }
+  const environment = getPokerMaintenanceEnvironment();
+  if (!environment) {
+    klogSafe("ws_vps_metrics_failed", { code: "environment_not_allowed" });
+    sendInternalJson(res, 503, { error: "environment_not_allowed" });
+    return;
+  }
+
+  const [hostResult, tablesResult, cleanupResult] = await Promise.allSettled([
+    vpsMetricsCollector.collect(),
+    continuousBotTableRepository?.readStatus?.() || Promise.resolve(null),
+    actionHistoryCleanup?.status?.() || Promise.resolve(null)
+  ]);
+  if (hostResult.status === "rejected") {
+    klogSafe("ws_vps_metrics_collection_failed", { source: "host", code: "collector_failed" });
+  }
+  const host = hostResult.status === "fulfilled" && hostResult.value ? hostResult.value : {
+    rootFilesystem: null,
+    logs: { varLogBytes: null, journaldBytes: null },
+    runtime: {
+      wsCpuPercent: null,
+      wsRssBytes: null,
+      wsUptimeSeconds: null,
+      hostAvailableRamBytes: null,
+      hostLogicalCpuCount: null,
+      loadAverage: { one: null, five: null, fifteen: null },
+      ioWaitPercent: null
+    }
+  };
+  const tables = tablesResult.status === "fulfilled"
+    ? projectContinuousTablesMetrics(tablesResult.value)
+    : null;
+  const cleanup = cleanupResult.status === "fulfilled"
+    ? projectCleanupMetrics(cleanupResult.value)
+    : null;
+  sendInternalJson(res, 200, {
+    environment,
+    measuredAt: new Date().toISOString(),
+    rootFilesystem: host.rootFilesystem || null,
+    logs: host.logs || { varLogBytes: null, journaldBytes: null },
+    runtime: host.runtime || null,
+    continuousTables: tables,
+    cleanup
+  });
+}
+
 async function handleInternalPokerMaintenance(req, res) {
   if (req.method !== "GET" && req.method !== "POST") {
     sendInternalJson(res, 405, { error: "method_not_allowed" });
@@ -3437,6 +3546,12 @@ async function handleHttpRequest(req, res) {
 
   if (req.url === "/internal/admin/poker-maintenance") {
     await handleInternalPokerMaintenance(req, res);
+    return;
+  }
+
+  const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
+  if (requestUrl.pathname === "/internal/admin/vps-metrics") {
+    await handleInternalVpsMetrics(req, res);
     return;
   }
 

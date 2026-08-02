@@ -19,6 +19,11 @@ ws.kcswh.pl {
     reverse_proxy 127.0.0.1:3000
   }
 
+  @vpsMetricsAdmin path /internal/admin/vps-metrics
+  handle @vpsMetricsAdmin {
+    reverse_proxy 127.0.0.1:3000
+  }
+
   handle {
     respond "OK" 200
   }
@@ -47,6 +52,11 @@ ws-preview.kcswh.pl {
 
   @pokerMaintenanceAdmin path /internal/admin/poker-maintenance
   handle @pokerMaintenanceAdmin {
+    reverse_proxy 127.0.0.1:3001
+  }
+
+  @vpsMetricsAdmin path /internal/admin/vps-metrics
+  handle @vpsMetricsAdmin {
     reverse_proxy 127.0.0.1:3001
   }
 

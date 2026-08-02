@@ -88,6 +88,7 @@ run("node", ["ws-server/poker/persistence/inactive-cleanup-adapter.behavior.test
 run("node", ["ws-server/poker/persistence/deferred-leave-finalization-adapter.behavior.test.mjs"], "ws-deferred-leave-finalization-adapter-behavior");
 run("node", ["ws-server/poker/persistence/persisted-state-writer.behavior.test.mjs"], "ws-persisted-state-writer-behavior");
 run("node", ["ws-server/poker/persistence/continuous-bot-table-repository.behavior.test.mjs"], "ws-continuous-bot-table-repository-behavior");
+run("node", ["ws-server/observability/vps-metrics.behavior.test.mjs"], "ws-vps-metrics-behavior");
 run("node", ["ws-server/poker/idempotency/action-command.behavior.test.mjs"], "ws-action-command-idempotency-behavior");
 run("node", ["ws-server/poker/persistence/authoritative-rebuy-adapter.behavior.test.mjs"], "ws-authoritative-rebuy-adapter-behavior");
 run("node", ["ws-server/poker/handlers/rebuy.behavior.test.mjs"], "ws-rebuy-handler-behavior");
@@ -104,6 +105,7 @@ run("node", ["tests/admin-tables-list.behavior.test.mjs"], "admin-tables-list-be
 run("node", ["tests/admin-ledger-list.behavior.test.mjs"], "admin-ledger-list-behavior");
 run("node", ["tests/admin-table-actions.behavior.test.mjs"], "admin-table-actions-behavior");
 run("node", ["tests/admin-ops-summary.behavior.test.mjs"], "admin-ops-summary-behavior");
+run("node", ["tests/admin-vps-metrics.behavior.test.mjs"], "admin-vps-metrics-behavior");
 run("node", ["tests/admin-poker-maintenance.behavior.test.mjs"], "admin-poker-maintenance-behavior");
 run("node", ["tests/admin-stage-identity.behavior.test.mjs"], "admin-stage-identity-behavior");
 run("node", ["tests/admin-page.contract.test.mjs"], "admin-page-contract");

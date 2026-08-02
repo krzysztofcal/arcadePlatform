@@ -305,6 +305,7 @@ function createAdminDom() {
     "adminOpsStats",
     "adminOpsIdentity",
     "adminOpsRuntime",
+    "adminOpsVpsMetrics",
     "adminOpsPokerEscrow",
     "adminOpsBotReactionSummary",
     "adminOpsBotReactionDelay",
@@ -404,6 +405,7 @@ function buildContext(options = {}) {
   const opts = options || {};
   const { document, tabs, panels } = createAdminDom();
   const fetchCalls = [];
+  var vpsMetricsCalls = 0;
   const fetch = async (url) => {
     fetchCalls.push(String(url || ""));
     const text = String(url || "");
@@ -524,6 +526,38 @@ function buildContext(options = {}) {
         },
         categories: ["autoplay", "persistence", "janitor"],
         overrides: [],
+      }) };
+    }
+    if (text.includes("/.netlify/functions/admin-vps-metrics")) {
+      vpsMetricsCalls += 1;
+      if (opts.vpsMetricsFailsAfterFirst && vpsMetricsCalls > 1){
+        return { ok: false, status: 504, json: async () => ({ error: "ws_vps_metrics_timeout" }) };
+      }
+      return { ok: true, json: async () => ({
+        environment: "preview",
+        measuredAt: "2026-08-02T19:00:00.000Z",
+        rootFilesystem: {
+          totalBytes: 50 * 1024 * 1024 * 1024,
+          usedBytes: 10 * 1024 * 1024 * 1024,
+          availableBytes: 40 * 1024 * 1024 * 1024,
+          usedPercent: 20,
+          inodes: { total: 3200000, used: 120000, available: 3080000, usedPercent: 3.8 },
+        },
+        logs: { varLogBytes: 70 * 1024 * 1024, journaldBytes: 50 * 1024 * 1024 },
+        runtime: {
+          wsCpuPercent: 42.5,
+          wsRssBytes: 256 * 1024 * 1024,
+          wsUptimeSeconds: 6580,
+          hostAvailableRamBytes: 4 * 1024 * 1024 * 1024,
+          hostLogicalCpuCount: 2,
+          loadAverage: { one: 1.2, five: 0.9, fifteen: 0.7 },
+          ioWaitPercent: 3.4,
+        },
+        continuousTables: opts.vpsMetricsHostOnly ? null : { active: 2, desired: 2, enabled: true },
+        cleanup: opts.vpsMetricsHostOnly ? null : {
+          backlog: { ordinaryActionRows: 0, handSettledRows: 0, cappedAtBatchSize: true, measuredAt: "2026-08-02T18:59:58.000Z" },
+          lastRun: { finishedAt: "2026-08-02T18:55:00.000Z", durationMs: 184, deletedRows: 37, result: "success" },
+        },
       }) };
     }
     if (text.includes("/.netlify/functions/admin-stage-identity")) {
@@ -768,6 +802,7 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.equal(fetchCalls.includes("/.netlify/functions/admin-ws-preview-bot-reaction"), true);
   assert.equal(fetchCalls.includes("/.netlify/functions/admin-poker-log-control"), true);
   assert.equal(fetchCalls.includes("/.netlify/functions/admin-tables-list?status=OPEN&sort=last_activity_desc&page=1&limit=100"), true);
+  assert.equal(fetchCalls.includes("/.netlify/functions/admin-vps-metrics"), true);
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /Database target/);
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /stageabc/);
   assert.match(document.getElementById("adminOpsIdentity").innerHTML, /Service role stage match/);
@@ -782,7 +817,41 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   assert.match(document.getElementById("adminOpsPokerEscrow").innerHTML, /ORPHANED/);
   assert.match(document.getElementById("adminOpsPokerEscrow").innerHTML, /Latest escrow update/);
   assert.doesNotMatch(document.getElementById("adminOpsPokerEscrow").innerHTML, /Healthy/);
+  assert.match(document.getElementById("adminOpsVpsMetrics").innerHTML, /Continuous tables/);
+  assert.match(document.getElementById("adminOpsVpsMetrics").innerHTML, /2 CPUs/);
+  assert.match(document.getElementById("adminOpsVpsMetrics").innerHTML, /WS uptime/);
+  assert.match(document.getElementById("adminOpsVpsMetrics").innerHTML, /37/);
   assert.equal(document.getElementById("adminOpsBotReactionDelay").value, "2000");
+});
+
+test("admin page marks the previous VPS metrics snapshot stale after a refresh failure", async () => {
+  const { context, document, tabs } = buildContext({ vpsMetricsFailsAfterFirst: true });
+  vm.runInContext(source, context, { filename: "js/admin-page.js" });
+
+  await flush();
+  tabs[5].dispatchEvent({ type: "click", bubbles: true, target: tabs[5], preventDefault() {} });
+  await flush();
+  await flush();
+  assert.match(document.getElementById("adminOpsVpsMetrics").innerHTML, /Available/);
+
+  document.getElementById("adminOpsRefresh").dispatchEvent({ type: "click", preventDefault() {} });
+  await flush();
+  await flush();
+  assert.match(document.getElementById("adminOpsVpsMetrics").innerHTML, /admin-pill admin-pill--info">Stale/);
+  assert.match(document.getElementById("adminOpsVpsMetrics").innerHTML, /admin-pill admin-pill--info">Unknown/);
+  assert.doesNotMatch(document.getElementById("adminOpsVpsMetrics").innerHTML, /Healthy/);
+});
+
+test("admin page marks host-only VPS metrics as partial", async () => {
+  const { context, document, tabs } = buildContext({ vpsMetricsHostOnly: true });
+  vm.runInContext(source, context, { filename: "js/admin-page.js" });
+
+  await flush();
+  tabs[5].dispatchEvent({ type: "click", bubbles: true, target: tabs[5], preventDefault() {} });
+  await flush();
+  await flush();
+  assert.match(document.getElementById("adminOpsVpsMetrics").innerHTML, /admin-pill admin-pill--info">Partial/);
+  assert.doesNotMatch(document.getElementById("adminOpsVpsMetrics").innerHTML, /Unavailable/);
 });
 
 test("admin page still renders ops summary when stage identity request fails", async () => {

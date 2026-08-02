@@ -116,6 +116,10 @@ jobs:
             cp -R ws-server/poker "$STAGE_WS_DIR"/poker
           fi
 
+          if [ -d ws-server/observability ]; then
+            cp -R ws-server/observability "$STAGE_WS_DIR"/observability
+          fi
+
           if [ -d ws-server/shared ]; then
             cp -R ws-server/shared "$STAGE_WS_DIR"/shared
           fi
@@ -246,6 +250,7 @@ jobs:
             sudo -n mkdir -p "$NEW_RELEASE_DIR"
             sudo -n tar -xzf "$TMP_ARCHIVE" -C "$NEW_RELEASE_DIR"
             sudo -n test -f "$NEW_RELEASE_APP_DIR/server.mjs"
+            sudo -n test -f "$NEW_RELEASE_APP_DIR/observability/vps-metrics.mjs"
             sudo -n test -f "$NEW_RELEASE_DIR/shared/profile-avatar-projection.mjs"
             sudo -n test -f "$NEW_RELEASE_DIR/netlify/functions/_shared/chips-ledger.mjs"
             sudo -n test -d "$NEW_RELEASE_DIR/node_modules/postgres"
