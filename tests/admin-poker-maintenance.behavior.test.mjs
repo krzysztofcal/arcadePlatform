@@ -44,22 +44,23 @@ function productionIdentity() {
   };
 }
 
-test("maintenance parser keeps operations bounded and rejects browser actor fields", () => {
+test("maintenance parser accepts the 100-table bound and rejects browser actor fields", () => {
   assert.deepEqual(parseBody(JSON.stringify({
     operation: "set_desired_state",
     enabled: false,
-    desiredTableCount: 2,
-  })), {
+    desiredTableCount: 100,
+  }), { maxDesiredTableCount: 100 }), {
     operation: "set_desired_state",
     enabled: false,
-    desiredTableCount: 2,
+    desiredTableCount: 100,
   });
   assert.deepEqual(parseBody(JSON.stringify({ operation: "request_rotation", tableId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" })), {
     operation: "request_rotation",
     tableId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   });
   assert.throws(() => parseBody(JSON.stringify({ operation: "set_desired_state", enabled: true, desiredTableCount: 2, actorUserId: "spoofed" })), { code: "invalid_request" });
-  assert.throws(() => parseBody(JSON.stringify({ operation: "set_desired_state", enabled: true, desiredTableCount: 3 })), { code: "invalid_desired_table_count" });
+  assert.throws(() => parseBody(JSON.stringify({ operation: "set_desired_state", enabled: true, desiredTableCount: 100 })), { code: "invalid_desired_table_count" });
+  assert.throws(() => parseBody(JSON.stringify({ operation: "set_desired_state", enabled: true, desiredTableCount: 101 }), { maxDesiredTableCount: 100 }), { code: "invalid_desired_table_count" });
 });
 
 test("maintenance proxy selects verified Preview/Production target and signs actor context internally", async () => {
@@ -95,6 +96,33 @@ test("maintenance proxy selects verified Preview/Production target and signs act
   const productionResponse = await production(event("GET"));
   assert.equal(productionResponse.statusCode, 502);
   assert.equal(seen[1].url, "https://ws.kcswh.pl/internal/admin/poker-maintenance");
+});
+
+test("maintenance proxy rejects a 100-table request for the verified Production target", async () => {
+  let fetchCalls = 0;
+  const handler = createAdminPokerMaintenanceHandler({
+    env: {
+      CHIPS_ENABLED: "1",
+      POKER_WS_INTERNAL_BASE_URL: "https://ws.kcswh.pl",
+      POKER_WS_INTERNAL_TOKEN: "production-token"
+    },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    buildStageIdentity: productionIdentity,
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      throw new Error("unexpected_fetch");
+    }
+  });
+
+  const response = await handler(event("POST", JSON.stringify({
+    operation: "set_desired_state",
+    enabled: true,
+    desiredTableCount: 100
+  })));
+
+  assert.equal(response.statusCode, 400);
+  assert.deepEqual(JSON.parse(response.body), { error: "invalid_desired_table_count" });
+  assert.equal(fetchCalls, 0);
 });
 
 function getFreePort() {

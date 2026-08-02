@@ -54,6 +54,9 @@ export function createContinuousBotTableSupervisor({
       lastSweepResult = {
         ok: true,
         createdCount: Array.isArray(result.createdTableIds) ? result.createdTableIds.length : 0,
+        creationLimitPerReconcile: Number(result.creationLimitPerReconcile || 0),
+        creationLimited: result.creationLimited === true,
+        remainingTableCount: Number(result.remainingTableCount || 0),
         retirementCount: Array.isArray(result.retirementTableIds) ? result.retirementTableIds.length : 0,
         rotationScheduledCount: Array.isArray(result.rotationScheduledTableIds)
           ? result.rotationScheduledTableIds.length

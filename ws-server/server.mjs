@@ -305,8 +305,16 @@ const durableActionStore = hasSupabaseDbUrl && persistedStateWriter?.readDurable
   ? persistedStateWriter
   : null;
 const botFundingSystemKey = getBotConfig(process.env).bankrollSystemKey;
+function continuousBotMaxDesiredTablesForRuntime() {
+  return loadReleaseMetadata().environment === "preview" ? 100 : 2;
+}
+const continuousBotMaxDesiredTables = continuousBotMaxDesiredTablesForRuntime();
 const continuousBotTableRepository = hasSupabaseDbUrl
-  ? createContinuousBotTableRepository({ env: process.env, klog: klogSafe })
+  ? createContinuousBotTableRepository({
+      env: process.env,
+      maxDesiredTables: continuousBotMaxDesiredTables,
+      klog: klogSafe
+    })
   : null;
 const lastSnapshotBySessionAndTable = new Map();
 const persistedSeatTouchByTableUser = new Map();
@@ -3085,6 +3093,8 @@ async function buildInternalPokerMaintenanceStatus(environment) {
     continuous: {
       maintenanceEnabled: repositoryStatus.profile.enabled,
       desiredTableCount: repositoryStatus.profile.desiredTableCount,
+      maxDesiredTableCount: repositoryStatus.maxDesiredTableCount || continuousBotMaxDesiredTables,
+      creationLimitPerReconcile: repositoryStatus.creationLimitPerReconcile || 2,
       effectiveDesiredTableCount: repositoryStatus.profile.enabled
         ? repositoryStatus.profile.desiredTableCount
         : 0,
@@ -3145,6 +3155,10 @@ async function handleInternalPokerMaintenance(req, res) {
       && typeof payload.enabled === "boolean"
       && Number.isInteger(payload.desiredTableCount)
     ) {
+      if (payload.desiredTableCount < 0 || payload.desiredTableCount > continuousBotMaxDesiredTables) {
+        sendInternalJson(res, 400, { error: "invalid_desired_table_count" });
+        return;
+      }
       const profileResult = await continuousBotTableRepository?.setDesiredState?.({
         enabled: payload.enabled,
         desiredTableCount: payload.desiredTableCount,
@@ -3162,6 +3176,10 @@ async function handleInternalPokerMaintenance(req, res) {
         reconciliationStarted: reconciliation?.skipped !== true,
         reconciliationSkipped: reconciliation?.skipped === true,
         effectiveDesiredTableCount: profileResult.profile.enabled ? profileResult.profile.desiredTableCount : 0,
+        maxDesiredTableCount: continuousBotMaxDesiredTables,
+        creationLimitPerReconcile: reconciliation?.creationLimitPerReconcile || 2,
+        creationLimited: reconciliation?.creationLimited === true,
+        remainingTableCount: Number(reconciliation?.remainingTableCount || 0),
         reconciliationResult: reconciliation?.ok === true ? "ok" : "failed"
       };
     } else if (
@@ -4595,7 +4613,11 @@ const actionHistoryCleanupSweepMs = resolvePositiveInt(
 );
 
 const actionHistoryCleanup = hasSupabaseDbUrl
-  ? createActionHistoryCleanup({ env: process.env, klog: klogSafe })
+  ? createActionHistoryCleanup({
+      env: process.env,
+      maxSweepRounds: loadReleaseMetadata().environment === "preview" ? 10 : 1,
+      klog: klogSafe
+    })
   : null;
 
 if (actionHistoryCleanup) {

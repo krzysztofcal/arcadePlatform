@@ -13,6 +13,9 @@
 import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
 
 const BACKLOG_CACHE_TTL_MS = 15_000;
+const DEFAULT_MAX_SWEEP_ROUNDS = 1;
+const MAX_SWEEP_ROUNDS = 20;
+// Preview uses bounded repeated batches for stress tests; Production stays at one round.
 
 function resolveCutoff(retentionMs) {
   if (!Number.isFinite(retentionMs) || retentionMs <= 0) return null;
@@ -160,6 +163,7 @@ returning id;`,
 
 export function createActionHistoryCleanup({
   env = process.env,
+  maxSweepRounds = DEFAULT_MAX_SWEEP_ROUNDS,
   beginSql = beginSqlWs,
   klog = () => {}
 } = {}) {
@@ -211,6 +215,11 @@ export function createActionHistoryCleanup({
 
   const batchSize = resolveBatchSize(env.WS_POKER_ACTION_HISTORY_BATCH_SIZE);
   const lockLimit = batchSize * 2;
+  const sweepRounds = Number.isInteger(maxSweepRounds)
+    && maxSweepRounds >= DEFAULT_MAX_SWEEP_ROUNDS
+    && maxSweepRounds <= MAX_SWEEP_ROUNDS
+    ? maxSweepRounds
+    : DEFAULT_MAX_SWEEP_ROUNDS;
 
   function buildCutoffs() {
 
@@ -368,32 +377,37 @@ select
 
       try {
         result = await beginSql(async (tx) => {
-        // Phase 1 — ordinary actions (must run before Phase 2)
-        const phase1Deleted = await sweepPhase1({
-          tx,
-          botActionCutoff: cutoffs.botActionCutoff,
-          humanActionCutoff: cutoffs.humanActionCutoff,
-          batchSize,
-          lockLimit,
-          klog
-        });
-
-        // Phase 2 — HAND_SETTLED rows whose ordinary actions are already gone
-        const phase2Deleted = await sweepPhase2({
-          tx,
-          botSettledCutoff: cutoffs.botSettledCutoff,
-          humanSettledCutoff: cutoffs.humanSettledCutoff,
-          batchSize,
-          lockLimit,
-          klog
-        });
+        let phase1Deleted = 0;
+        let phase2Deleted = 0;
+        for (let round = 0; round < sweepRounds; round += 1) {
+          const phase1RoundDeleted = await sweepPhase1({
+            tx,
+            botActionCutoff: cutoffs.botActionCutoff,
+            humanActionCutoff: cutoffs.humanActionCutoff,
+            batchSize,
+            lockLimit,
+            klog
+          });
+          const phase2RoundDeleted = await sweepPhase2({
+            tx,
+            botSettledCutoff: cutoffs.botSettledCutoff,
+            humanSettledCutoff: cutoffs.humanSettledCutoff,
+            batchSize,
+            lockLimit,
+            klog
+          });
+          phase1Deleted += phase1RoundDeleted;
+          phase2Deleted += phase2RoundDeleted;
+          if (phase1RoundDeleted === 0 && phase2RoundDeleted === 0) break;
+        }
 
         if (phase1Deleted > 0 || phase2Deleted > 0) {
           klog("ws_action_history_cleanup_complete", {
             phase1Deleted,
             phase2Deleted,
             batchSize,
-            lockLimit
+            lockLimit,
+            sweepRounds
           });
         }
 
@@ -434,6 +448,7 @@ select
         humanSettledMs: humanSettledMs
       },
       batchSize,
+      sweepRounds,
       sweepInProgress,
       lastRun,
       lastError,

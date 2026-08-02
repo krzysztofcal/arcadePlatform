@@ -333,6 +333,36 @@ test("skips sweep when previous sweep is still in progress", async () => {
   assert.equal(firstResult.ok, true);
 });
 
+test("preview stress cleanup repeats bounded batches without changing the production default", async () => {
+  let phase1Calls = 0;
+  const cleanup = createActionHistoryCleanup({
+    maxSweepRounds: 3,
+    env: {
+      WS_POKER_BOT_ACTION_RETENTION_MS: String(HOUR),
+      WS_POKER_BOT_SETTLED_RETENTION_MS: "0",
+      WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+      WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+      WS_POKER_ACTION_HISTORY_BATCH_SIZE: "10",
+      SUPABASE_DB_URL: "postgres://test/db"
+    },
+    beginSql: async (fn) => fn({
+      unsafe: async (sql) => {
+        if (sql.includes("candidate_hands")) {
+          phase1Calls += 1;
+          return phase1Calls < 3 ? [{ id: 1 }] : [];
+        }
+        return [];
+      }
+    })
+  });
+
+  const result = await cleanup.sweep();
+  const status = await cleanup.status();
+  assert.equal(result.phase1Deleted, 2);
+  assert.equal(phase1Calls, 3);
+  assert.equal(status.sweepRounds, 3);
+});
+
 test("status exposes effective cleanup configuration and phase-2-only HAND_SETTLED backlog", async () => {
   const queries = [];
   const cleanup = createActionHistoryCleanup({
@@ -357,6 +387,7 @@ test("status exposes effective cleanup configuration and phase-2-only HAND_SETTL
   assert.equal(status.retention.botActionsMs, HOUR);
   assert.equal(status.retention.humanSettledMs, 7 * DAY);
   assert.equal(status.batchSize, 10);
+  assert.equal(status.sweepRounds, 1);
   assert.equal(status.backlog.available, true);
   assert.equal(status.backlog.ordinaryActionRows, 4);
   assert.equal(status.backlog.handSettledRows, 2);

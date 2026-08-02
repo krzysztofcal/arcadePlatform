@@ -47,7 +47,7 @@ const FIXED_RANDOM_BOT_AUTOPLAY_ADAPTER_URL = new URL(
   import.meta.url
 ).href;
 
-test("continuous bot profile validation accepts only the bounded V1 singleton", () => {
+test("continuous bot profile validation accepts desired counts up to 100", () => {
   const valid = normalizeContinuousBotProfile({
     profile_key: "CONTINUOUS_BOT_DEFAULT",
     enabled: true,
@@ -67,7 +67,7 @@ test("continuous bot profile validation accepts only the bounded V1 singleton", 
   assert.equal(normalizeContinuousBotProfile({
     profile_key: "CONTINUOUS_BOT_DEFAULT",
     enabled: true,
-    desired_table_count: 3,
+    desired_table_count: 101,
     min_bot_count: 2,
     target_bot_count: 3,
     max_bot_count: 3,
@@ -77,6 +77,20 @@ test("continuous bot profile validation accepts only the bounded V1 singleton", 
     big_blind: 2,
     max_seats: 6
   }), null);
+  const maxProfile = normalizeContinuousBotProfile({
+    profile_key: "CONTINUOUS_BOT_DEFAULT",
+    enabled: true,
+    desired_table_count: 100,
+    min_bot_count: 2,
+    target_bot_count: 3,
+    max_bot_count: 3,
+    rotation_interval_seconds: 900,
+    postpone_interval_seconds: 300,
+    small_blind: 1,
+    big_blind: 2,
+    max_seats: 6
+  }, { maxDesiredTables: 100 });
+  assert.equal(maxProfile?.desiredTableCount, 100);
 });
 
 test("continuous bot profile comparison accepts Postgres stringified jsonb stakes", () => {
@@ -1314,6 +1328,38 @@ test("internal poker maintenance route rejects an unknown WS environment before 
     });
     assert.equal(postResponse.status, 503);
     assert.deepEqual(await postResponse.json(), { error: "environment_not_allowed" });
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("internal poker maintenance route keeps the Production desired-table cap", async () => {
+  const token = "internal-production-maintenance-token";
+  const { port, child } = await createServer({
+    env: {
+      POKER_WS_INTERNAL_TOKEN: token,
+      WS_DEPLOY_ENVIRONMENT: "production",
+      SUPABASE_DB_URL: "",
+      WS_POKER_LOG_LEVEL: "INFO"
+    }
+  });
+  const url = `http://127.0.0.1:${port}/internal/admin/poker-maintenance`;
+  try {
+    await waitForListening(child, 5000);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        operation: "set_desired_state",
+        enabled: true,
+        desiredTableCount: 100,
+        actorUserId: "00000000-0000-4000-8000-000000000010",
+        requestId: "production-cap-request"
+      })
+    });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: "invalid_desired_table_count" });
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
