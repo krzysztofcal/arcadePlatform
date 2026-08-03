@@ -1832,7 +1832,7 @@
     if (!Number.isInteger(seatNo) || seatNo < 1 || !entry || !ownerUserId) return;
     var previous = reactionBubblesBySeatNo[seatNo];
     if (previous && previous.timer) window.clearTimeout(previous.timer);
-    var bubble = { reactionKey: reactionKey, ownerUserId: ownerUserId, timer: null };
+    var bubble = { reactionKey: reactionKey, ownerUserId: ownerUserId, animate: true, timer: null };
     bubble.timer = window.setTimeout(function(){
       if (reactionBubblesBySeatNo[seatNo] !== bubble) return;
       delete reactionBubblesBySeatNo[seatNo];
@@ -2668,7 +2668,7 @@
       var reactionEntry = reactionBubble ? findReactionEntry(reactionBubble.reactionKey) : null;
       if (reactionEntry){
         var bubble = document.createElement('div');
-        bubble.className = 'poker-seat-reaction-bubble';
+        bubble.className = 'poker-seat-reaction-bubble' + (reactionBubble.animate ? ' poker-seat-reaction-bubble--enter' : '');
         bubble.setAttribute('role', 'status');
         bubble.textContent = reactionEntry.emoji + ' ' + reactionEntry.label;
         article.appendChild(bubble);
@@ -2718,6 +2718,10 @@
       }
       els.seatLayer.appendChild(article);
     }
+    Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
+      var reactionBubble = reactionBubblesBySeatNo[seatNo];
+      if (reactionBubble) reactionBubble.animate = false;
+    });
   }
 
   function renderCommunityCards(){

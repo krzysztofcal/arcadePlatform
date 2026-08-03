@@ -65,7 +65,7 @@ const actionBarIndex = tableV2Html.indexOf('class="poker-action-bar"');
 const actionButtonsIndex = tableV2Html.indexOf('class="poker-action-buttons"');
 assert.equal(actionBarIndex < reactionControlIndex && reactionControlIndex < actionButtonsIndex, true, 'reaction control should live above the poker action buttons');
 assert.match(tableV2Html, /id="pokerV2ReactionControl" hidden/, 'reaction control should stay hidden until a seated player can use it');
-assert.match(tableV2Css, /\.poker-seat-reaction-bubble\{[^}]*animation:poker-reaction-bubble-flyout/, 'reaction bubbles should have a flyout animation');
+assert.match(tableV2Css, /\.poker-seat-reaction-bubble--enter\{[^}]*animation:poker-reaction-bubble-flyout/, 'reaction bubble entry should have a flyout animation');
 assert.match(tableV2Css, /\.poker-action-reaction \.poker-reaction-menu\{[^}]*bottom:calc\(100% \+ 8px\)/, 'reaction menu should fly out above the poker actions');
 assert.match(consentManagerJs, /#manageCookies, \.manage-cookies, \[data-manage-cookies\]/, 'consent manager should delegate clicks from all manage cookies links');
 assert.match(consentManagerJs, /window\.klaro\.show\(window\.klaroConfig, true\)/, 'manage cookies should open the Klaro preference modal');

@@ -520,7 +520,7 @@ test('poker v2 removes a reaction bubble when the seat owner changes', async () 
   await harness.flush();
   ws.onReaction({ payload: { seatNo: 1, reactionKey: 'wow' } });
   await harness.flush();
-  assert.ok(harness.elements.pokerSeatLayer.children.some((seat) => findSeatChild(seat, 'poker-seat-reaction-bubble')));
+  assert.ok(harness.elements.pokerSeatLayer.children.some((seat) => (seat.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))));
 
   ws.onSnapshot({
     kind: 'stateSnapshot',
@@ -538,6 +538,49 @@ test('poker v2 removes a reaction bubble when the seat owner changes', async () 
   });
   await harness.flush();
   assert.equal(harness.elements.pokerSeatLayer.children.some((seat) => findSeatChild(seat, 'poker-seat-reaction-bubble')), false);
+});
+
+test('poker v2 animates a reaction bubble only on its first render', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  const snapshot = (stateVersion) => ({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        hand: { handId: null, status: 'LOBBY' },
+        pot: { total: 0 },
+        seats: [{ userId: 'user-1', seatNo: 1, status: 'ACTIVE' }]
+      },
+      you: { seat: 1 }
+    }
+  });
+  ws.onSnapshot(snapshot(1));
+  await harness.flush();
+  ws.onReaction({ payload: { seatNo: 1, reactionKey: 'wow' } });
+  await harness.flush();
+
+  const findReactionBubble = () => {
+    for (const seat of harness.elements.pokerSeatLayer.children) {
+      const bubble = (seat.children || []).find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'));
+      if (bubble) return bubble;
+    }
+    return null;
+  };
+  const firstBubble = findReactionBubble();
+  assert.ok(firstBubble);
+  assert.equal(firstBubble.className, 'poker-seat-reaction-bubble poker-seat-reaction-bubble--enter', 'the received reaction should animate on entry');
+
+  ws.onSnapshot(snapshot(2));
+  await harness.flush();
+  const secondBubble = findReactionBubble();
+  assert.ok(secondBubble);
+  assert.equal(secondBubble.className, 'poker-seat-reaction-bubble');
 });
 
 test('poker v2 applies local cooldown after a server reaction rate limit', async () => {
