@@ -2149,14 +2149,13 @@ function ensureSettlementRevealDeadlineForTable(tableId, nowMs = Date.now()) {
     return null;
   }
   const handId = resolveSettledHandId(pokerState);
+  const existing = settlementRevealDeadlineByTableId.get(tableId);
+  if (handId && existing?.handId === handId && Number.isSafeInteger(existing.dueAt)) {
+    return existing.dueAt;
+  }
   const settledAt = pokerState?.handSettlement?.settledAt;
   if (!handId || !isValidTargetedSettlementTimestamp(settledAt, nowMs)) {
-    clearSettlementRevealDeadline(tableId);
     return null;
-  }
-  const existing = settlementRevealDeadlineByTableId.get(tableId);
-  if (existing?.handId === handId && Number.isSafeInteger(existing.dueAt)) {
-    return existing.dueAt;
   }
   const dueAt = nowMs + settledRevealMs;
   settlementRevealDeadlineByTableId.set(tableId, { handId, dueAt });
@@ -2165,8 +2164,7 @@ function ensureSettlementRevealDeadlineForTable(tableId, nowMs = Date.now()) {
 
 function resolveSettlementRevealDueAtForTable(tableId, nowMs = Date.now()) {
   const pokerState = tableManager.persistedPokerState(tableId);
-  const settledAt = pokerState?.handSettlement?.settledAt;
-  if (!pokerState || pokerState.phase !== "SETTLED" || !isValidTargetedSettlementTimestamp(settledAt, nowMs)) {
+  if (!pokerState || pokerState.phase !== "SETTLED") {
     clearSettlementRevealDeadline(tableId);
     return null;
   }
@@ -2175,6 +2173,7 @@ function resolveSettlementRevealDueAtForTable(tableId, nowMs = Date.now()) {
   if (handId && existing?.handId === handId && Number.isSafeInteger(existing.dueAt)) {
     return existing.dueAt;
   }
+  const settledAt = pokerState?.handSettlement?.settledAt;
   const dueAt = resolveSettledRevealDueAt({ settledAt, nowMs, revealMs: settledRevealMs });
   return Number.isSafeInteger(dueAt) && dueAt >= 0 ? dueAt : null;
 }
