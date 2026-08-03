@@ -270,7 +270,7 @@ function waitForExit(proc, timeoutMs = 5000) {
 function createServer({ env = {} } = {}) {
   return getFreePort().then((port) => {
     const child = spawn(process.execPath, ["ws-server/server.mjs"], {
-      env: { ...process.env, PORT: String(port), ...env },
+      env: { ...process.env, WS_POKER_LOG_LEVEL: "INFO", PORT: String(port), ...env },
       stdio: ["ignore", "pipe", "pipe"]
     });
     return { port, child };
@@ -617,6 +617,88 @@ test("default runtime join is command-first and still mutates membership", async
 
     subscriber.close();
     actor.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+}));
+
+test("reaction_send broadcasts an ephemeral table event without stream replay", async () => runSerial(async () => {
+  const secret = "test-secret";
+  const tableId = "table_reaction_contract";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "active" },
+      seatRows: [{ user_id: "reaction_human", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 }],
+      stateRow: { version: 1, state: { handId: null, phase: "LOBBY", stacks: { reaction_human: 100 } } }
+    }
+  };
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      ...observeOnlyJoinEnv(),
+      WS_PRESENCE_TTL_MS: "0",
+      ...persistedBootstrapFixturesEnv(fixtures)
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const sender = await connectClient(port);
+    const observer = await connectClient(port);
+    await hello(sender, "req-hello-reaction-sender");
+    await hello(observer, "req-hello-reaction-observer");
+    assert.equal((await auth(sender, secret, "reaction_human", "req-auth-reaction-sender")).type, "authOk");
+    assert.equal((await auth(observer, secret, "reaction_observer", "req-auth-reaction-observer")).type, "authOk");
+
+    for (const [socket, suffix] of [[sender, "sender"], [observer, "observer"]]) {
+      sendFrame(socket, {
+        version: "1.0",
+        type: "table_state_sub",
+        requestId: `req-sub-reaction-${suffix}`,
+        ts: "2026-08-03T00:00:00Z",
+        payload: { tableId }
+      });
+      assert.equal((await nextMessageOfType(socket, "table_state", 5000, `reactionInitial-${suffix}`)).type, "table_state");
+    }
+
+    const senderResultPromise = nextMessageOfType(sender, "commandResult", 5000, "reactionCommandResult");
+    const senderReactionPromise = nextMessageOfType(sender, "table_reaction", 5000, "reactionSenderEvent");
+    const observerReactionPromise = nextMessageOfType(observer, "table_reaction", 5000, "reactionObserverEvent");
+    sendFrame(sender, {
+      version: "1.0",
+      type: "reaction_send",
+      requestId: "req-reaction-send",
+      ts: "2026-08-03T00:00:01Z",
+      payload: { tableId, reactionKey: "wow" }
+    });
+
+    const commandResult = await senderResultPromise;
+    assert.equal(commandResult.payload.status, "accepted");
+    assert.equal(commandResult.payload.reason, null);
+    for (const reaction of await Promise.all([senderReactionPromise, observerReactionPromise])) {
+      assert.equal(reaction.type, "table_reaction");
+      assert.equal(reaction.roomId, tableId);
+      assert.deepEqual(reaction.payload, { seatNo: 1, reactionKey: "wow" });
+    }
+
+    observer.close();
+    const reconnectedObserver = await connectClient(port);
+    await hello(reconnectedObserver, "req-hello-reaction-reconnect");
+    assert.equal((await auth(reconnectedObserver, secret, "reaction_observer", "req-auth-reaction-reconnect")).type, "authOk");
+    sendFrame(reconnectedObserver, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-reaction-reconnect",
+      ts: "2026-08-03T00:00:02Z",
+      payload: { tableId }
+    });
+    assert.equal((await nextMessageOfType(reconnectedObserver, "table_state", 5000, "reactionReconnectState")).type, "table_state");
+    await expectNoFrameOfType(reconnectedObserver, ["table_reaction"], 400);
+
+    sender.close();
+    reconnectedObserver.close();
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);

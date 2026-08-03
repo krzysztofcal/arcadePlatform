@@ -36,6 +36,7 @@ import { createTableSnapshotLoader } from "./poker/table/table-snapshot.mjs";
 import { handleJoinCommand } from "./poker/handlers/join.mjs";
 import { handleActCommand } from "./poker/handlers/act.mjs";
 import { handleStartHandCommand } from "./poker/handlers/start-hand.mjs";
+import { evaluateHumanReactionCommand, tryCreateBotReaction, clearTable as clearReactionTable } from "./poker/handlers/reaction.mjs";
 import { handleTurnTimeoutCommand } from "./poker/handlers/turn-timeout.mjs";
 import {
   createBotAutoplayCascadeScheduler,
@@ -79,13 +80,14 @@ const PROTECTED_MESSAGE_TYPES = new Set([
   "lobby_subscribe",
   "table_state_sub",
   "table_snapshot",
+  "reaction_send",
   "act",
   "start_hand",
   "resync",
   "resume",
   "ack"
 ]);
-const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "rebuy", "table_rebuy", "lobby_subscribe", "table_state_sub", "table_snapshot", "act", "start_hand", "resync", "resume"]);
+const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "rebuy", "table_rebuy", "lobby_subscribe", "table_state_sub", "table_snapshot", "reaction_send", "act", "start_hand", "resync", "resume"]);
 const TABLE_SNAPSHOT_KNOWN_FAILURE_CODES = new Set([
   "invalid_table_id",
   "table_not_found",
@@ -442,8 +444,21 @@ async function loadAcceptedBotAutoplayExecutor() {
           persistMutatedState,
           restoreTableFromPersisted,
           broadcastResyncRequired,
-          onBotStepPersisted: ({ tableId }) => {
+          onBotStepPersisted: async ({ tableId, botTurnUserId, botAction }) => {
             broadcastStateSnapshots(tableId);
+            if (tableManager.isBotUser(tableId, botTurnUserId) !== true) return;
+            const botSnapshot = tableManager.tableSnapshot(tableId, botTurnUserId);
+            const reaction = tryCreateBotReaction({
+              tableId,
+              botUserId: botTurnUserId,
+              botSeatNo: botSnapshot?.youSeat,
+              botAction,
+              tableClosed: tableManager.isTableClosed(tableId),
+              nowMs: Date.now()
+            });
+            if (reaction) {
+              broadcastTableReaction(tableId, reaction);
+            }
           },
           getBotReactionOverride: () => botReactionOverrideStore.getOverrideRange(),
           env: process.env,
@@ -1563,6 +1578,7 @@ function releaseTableRuntimeResources(tableId) {
   pendingTableJanitorEvaluationByTableId.delete(tableId);
   suppressedNonRetryableTerminalJanitorFailuresByTableId.delete(tableId);
   guestDisconnectCleanupRuntime?.forgetTable(tableId);
+  clearReactionTable(tableId);
   streamLog.forgetTable(tableId);
   continuousBotRetirementRequested.delete(tableId);
 }
@@ -2141,6 +2157,50 @@ function broadcastStateSnapshots(tableId) {
     const tableSnapshot = tableManager.tableSnapshot(tableId, recipientConnState.session.userId);
     sendStateSnapshot(recipient, recipientConnState, { tableSnapshot });
   }
+}
+
+function broadcastTableReaction(tableId, { seatNo, reactionKey } = {}) {
+  const recipients = tableManager.orderedConnectionsForTable(tableId, (socket) => socket.__connState?.sessionId ?? "");
+  let sentCount = 0;
+  let skippedCount = 0;
+  let failedCount = 0;
+
+  for (const recipient of recipients) {
+    const recipientConnState = recipient?.__connState;
+    if (!recipientConnState || recipient.readyState !== WebSocket.OPEN) {
+      skippedCount += 1;
+      continue;
+    }
+
+    try {
+      sendFrame(recipient, {
+        version: "1.0",
+        type: "table_reaction",
+        ts: nowTs(),
+        roomId: tableId,
+        sessionId: recipientConnState.sessionId,
+        payload: {
+          seatNo,
+          reactionKey
+        }
+      });
+      sentCount += 1;
+    } catch {
+      failedCount += 1;
+    }
+  }
+
+  if (failedCount > 0) {
+    klogSafe("ws_table_reaction_broadcast_failed", {
+      tableId,
+      recipientCount: recipients.length,
+      sentCount,
+      skippedCount,
+      failedCount
+    });
+  }
+
+  return { sentCount, skippedCount, failedCount };
 }
 
 function sweepExpiredSessionsOnly() {
@@ -3766,6 +3826,81 @@ wss.on("connection", (ws) => {
     if (frame.type === "protected_echo") {
       const response = handleProtectedEcho({ frame, connState, nowTs });
       sendFrame(ws, response.frame);
+      return;
+    }
+
+    if (frame.type === "reaction_send") {
+      const resolvedRoomId = resolveRoomId(frame);
+      if (!resolvedRoomId.ok) {
+        sendError(ws, connState, {
+          code: resolvedRoomId.code,
+          message: resolvedRoomId.message,
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+
+      const tableId = resolvedRoomId.roomId;
+      const association = tableManager.connectionTableAssociation(ws);
+      const connectedToTable = association?.joinedTableId === tableId || association?.subscribedTableId === tableId;
+      if (!connectedToTable) {
+        sendCommandResult(ws, connState, {
+          requestId: frame.requestId ?? null,
+          tableId,
+          status: "rejected",
+          reason: "not_seated"
+        });
+        return;
+      }
+
+      const senderUserId = connState.session.userId;
+      if (tableManager.isBotUser(tableId, senderUserId) === true) {
+        sendCommandResult(ws, connState, {
+          requestId: frame.requestId ?? null,
+          tableId,
+          status: "rejected",
+          reason: "invalid_sender"
+        });
+        return;
+      }
+
+      const senderSnapshot = tableManager.tableSnapshot(tableId, senderUserId);
+      const senderSeatNo = Number.isInteger(senderSnapshot?.youSeat) ? senderSnapshot.youSeat : null;
+      if (!Number.isInteger(senderSeatNo)) {
+        sendCommandResult(ws, connState, {
+          requestId: frame.requestId ?? null,
+          tableId,
+          status: "rejected",
+          reason: "not_seated"
+        });
+        return;
+      }
+
+      const result = evaluateHumanReactionCommand({
+        tableId,
+        senderUserId,
+        senderSeatNo,
+        reactionKey: frame.payload?.reactionKey,
+        tableClosed: tableManager.isTableClosed(tableId),
+        nowMs: Date.now()
+      });
+      if (!result.ok) {
+        sendCommandResult(ws, connState, {
+          requestId: frame.requestId ?? null,
+          tableId,
+          status: "rejected",
+          reason: result.reason
+        });
+        return;
+      }
+
+      sendCommandResult(ws, connState, {
+        requestId: frame.requestId ?? null,
+        tableId,
+        status: "accepted",
+        reason: null
+      });
+      broadcastTableReaction(tableId, result);
       return;
     }
 

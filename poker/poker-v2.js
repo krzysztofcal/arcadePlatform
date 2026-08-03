@@ -84,6 +84,18 @@
     raise: 'Raise',
     all_in: 'All in'
   };
+  var REACTION_CATALOG = [
+    { key: 'hello', emoji: '👋', label: 'Hello' },
+    { key: 'nice_hand', emoji: '👍', label: 'Nice hand!' },
+    { key: 'well_played', emoji: '👏', label: 'Well played!' },
+    { key: 'thinking', emoji: '🤔', label: 'Thinking...' },
+    { key: 'haha', emoji: '😄', label: 'Haha' },
+    { key: 'wow', emoji: '😮', label: 'Wow!' },
+    { key: 'bad_beat', emoji: '😢', label: 'Bad beat' },
+    { key: 'nice_bluff', emoji: '😎', label: 'Nice bluff' },
+    { key: 'good_luck', emoji: '🤝', label: 'Good luck' },
+    { key: 'thanks', emoji: '❤️', label: 'Thanks' }
+  ];
   var seatAnchors = [
     { x: 50, y: 10 },
     { x: 86, y: 28 },
@@ -199,6 +211,9 @@
   var settlementAnimationTimers = [];
   var settlementAnimationNodes = [];
   var suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
+  var reactionBubblesBySeatNo = {};
+  var reactionControlTimer = null;
+  var reactionControlUntilMs = 0;
   var els = {};
 
   function cloneState(source){
@@ -1730,6 +1745,115 @@
     return Math.round(num).toLocaleString();
   }
 
+  function findReactionEntry(reactionKey){
+    for (var i = 0; i < REACTION_CATALOG.length; i++){
+      if (REACTION_CATALOG[i].key === reactionKey) return REACTION_CATALOG[i];
+    }
+    return null;
+  }
+
+  function clearReactionControlTimer(){
+    if (reactionControlTimer){
+      window.clearTimeout(reactionControlTimer);
+      reactionControlTimer = null;
+    }
+  }
+
+  function clearReactionBubbles(){
+    Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
+      var bubble = reactionBubblesBySeatNo[seatNo];
+      if (bubble && bubble.timer) window.clearTimeout(bubble.timer);
+    });
+    reactionBubblesBySeatNo = {};
+  }
+
+  function closeReactionMenu(){
+    if (!els.reactionMenu || !els.reactionBtn) return;
+    els.reactionMenu.hidden = true;
+    els.reactionBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function renderReactionControl(){
+    if (!els.reactionBtn) return;
+    var signedIn = isSignedIn();
+    var seated = !!deriveCurrentSeat();
+    var cooldownActive = reactionControlUntilMs > Date.now();
+    var canUse = signedIn && seated && isWsReady() && !state.reconnectGate;
+    els.reactionBtn.hidden = !signedIn || !seated;
+    els.reactionBtn.disabled = !canUse || cooldownActive;
+    if (els.reactionHint){
+      els.reactionHint.hidden = !cooldownActive;
+      els.reactionHint.textContent = cooldownActive ? 'You can react once every 4 seconds' : '';
+    }
+    if (!canUse) closeReactionMenu();
+  }
+
+  function startReactionCooldown(){
+    clearReactionControlTimer();
+    reactionControlUntilMs = Date.now() + 4_000;
+    renderReactionControl();
+    reactionControlTimer = window.setTimeout(function(){
+      reactionControlTimer = null;
+      reactionControlUntilMs = 0;
+      renderReactionControl();
+    }, 4_000);
+  }
+
+  function handleTableReaction(event){
+    var payload = event && event.payload && typeof event.payload === 'object' ? event.payload : {};
+    var seatNo = Number(payload.seatNo);
+    var reactionKey = typeof payload.reactionKey === 'string' ? payload.reactionKey : '';
+    var entry = findReactionEntry(reactionKey);
+    if (!Number.isInteger(seatNo) || seatNo < 1 || !entry) return;
+    var previous = reactionBubblesBySeatNo[seatNo];
+    if (previous && previous.timer) window.clearTimeout(previous.timer);
+    var bubble = { reactionKey: reactionKey, timer: null };
+    bubble.timer = window.setTimeout(function(){
+      if (reactionBubblesBySeatNo[seatNo] !== bubble) return;
+      delete reactionBubblesBySeatNo[seatNo];
+      renderSeats();
+    }, 3_500);
+    reactionBubblesBySeatNo[seatNo] = bubble;
+    renderSeats();
+  }
+
+  function sendReaction(reactionKey){
+    if (!wsClient || typeof wsClient.sendReaction !== 'function' || !isWsReady() || !deriveCurrentSeat()) {
+      return Promise.resolve(null);
+    }
+    closeReactionMenu();
+    return wsClient.sendReaction(reactionKey).then(function(result){
+      startReactionCooldown();
+      return result;
+    }).catch(function(error){
+      var code = normalizeSignalCode(error && (error.code || error.message));
+      if (code === 'reaction_rate_limited') return null;
+      if (code === 'not_seated' || code === 'table_closed'){
+        renderControls();
+        if (wsClient && typeof wsClient.requestGameplaySnapshot === 'function') wsClient.requestGameplaySnapshot();
+        return null;
+      }
+      klog('poker_reaction_error', { code: code || 'reaction_failed' });
+      return null;
+    });
+  }
+
+  function buildReactionMenu(){
+    if (!els.reactionMenu) return;
+    els.reactionMenu.innerHTML = '';
+    REACTION_CATALOG.forEach(function(entry){
+      var option = document.createElement('button');
+      option.type = 'button';
+      option.className = 'poker-reaction-option';
+      option.setAttribute('role', 'menuitem');
+      option.setAttribute('aria-label', entry.label);
+      option.dataset.reactionKey = entry.key;
+      option.textContent = entry.emoji + ' ' + entry.label;
+      option.addEventListener('click', function(){ sendReaction(entry.key); });
+      els.reactionMenu.appendChild(option);
+    });
+  }
+
   function formatCompactAmount(value){
     var num = Number(value || 0);
     if (!Number.isFinite(num) || num <= 0) return '0';
@@ -2507,6 +2631,15 @@
       status.style.top = statusPosition.top;
 
       article.appendChild(avatar);
+      var reactionBubble = seat && reactionBubblesBySeatNo[seat.seatNo];
+      var reactionEntry = reactionBubble ? findReactionEntry(reactionBubble.reactionKey) : null;
+      if (reactionEntry){
+        var bubble = document.createElement('div');
+        bubble.className = 'poker-seat-reaction-bubble';
+        bubble.setAttribute('role', 'status');
+        bubble.textContent = reactionEntry.emoji + ' ' + reactionEntry.label;
+        article.appendChild(bubble);
+      }
       if (seat && lastAction){
         var actionBadge = document.createElement('div');
         var badgePosition = getSeatActionBadgePosition(rotatedIndex, hero);
@@ -3106,6 +3239,7 @@
     // value; syncAmountInput returns undefined when no amount action is active,
     // in which case the base Bet/Raise label set above is preserved.
     syncAmountActionLabels(syncedAmount);
+    renderReactionControl();
   }
 
   function resolveSettlementRecipientName(userId){
@@ -3645,6 +3779,23 @@
       if (!plan) return;
       handleAction(plan.type, plan.amount == null ? undefined : plan.amount);
     });
+    buildReactionMenu();
+    if (els.reactionBtn) els.reactionBtn.addEventListener('click', function(){
+      if (els.reactionBtn.disabled || !els.reactionMenu) return;
+      var hidden = els.reactionMenu.hidden;
+      els.reactionMenu.hidden = !hidden;
+      els.reactionBtn.setAttribute('aria-expanded', hidden ? 'true' : 'false');
+    });
+    document.addEventListener('click', function(event){
+      var target = event && event.target;
+      if (!target || target === els.reactionBtn || target === els.reactionMenu) return;
+      if (els.reactionBtn && typeof els.reactionBtn.contains === 'function' && els.reactionBtn.contains(target)) return;
+      if (els.reactionMenu && typeof els.reactionMenu.contains === 'function' && els.reactionMenu.contains(target)) return;
+      closeReactionMenu();
+    });
+    document.addEventListener('keydown', function(event){
+      if (event && event.key === 'Escape') closeReactionMenu();
+    });
     bindPreaction('fold');
     bindPreaction('primary');
     bindPreaction('amount');
@@ -3681,6 +3832,9 @@
     els.joinSeat = document.getElementById('pokerV2SeatNo');
     els.joinBuyIn = document.getElementById('pokerV2BuyIn');
     els.leaveBtn = document.getElementById('pokerV2LeaveBtn');
+    els.reactionBtn = document.getElementById('pokerV2ReactionBtn');
+    els.reactionMenu = document.getElementById('pokerV2ReactionMenu');
+    els.reactionHint = document.getElementById('pokerV2ReactionHint');
     els.leaveConfirmModal = document.getElementById('pokerV2LeaveConfirmModal');
     els.leaveConfirmYes = document.getElementById('pokerV2LeaveConfirmYes');
     els.leaveConfirmCancel = document.getElementById('pokerV2LeaveConfirmCancel');
@@ -3776,6 +3930,9 @@
     liveModeGeneration += 1;
     stopSnapshotRecoveryTimer();
     stopTurnClock();
+    clearReactionControlTimer();
+    reactionControlUntilMs = 0;
+    clearReactionBubbles();
     clearWinnerRevealTimer();
     cancelSettlementAnimations();
     cancelClosedTableRedirect();
@@ -3858,6 +4015,10 @@
       guestToken: isGuestMode && currentGuestSession ? currentGuestSession.token : null,
       getAccessToken: function(){ return Promise.resolve(currentAccessToken); },
       klog: klog,
+      onReaction: function(event){
+        if (gen !== liveModeGeneration) return;
+        handleTableReaction(event);
+      },
       onStatus: function(status, info){
         if (gen !== liveModeGeneration) return;
         if (status === 'hello_ack' || status === 'minting_token' || status === 'authenticating'){
@@ -3888,6 +4049,7 @@
         } else if (status === 'reconnecting'){
           cancelSettlementAnimations();
           suppressSettlementAnimationUntilAuthoritativeSnapshot = true;
+          clearReactionBubbles();
           rememberSeatForReconnect();
           state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.connecting;

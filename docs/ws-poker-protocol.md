@@ -59,6 +59,7 @@ Example envelope:
 | `leave` | `{ "reason": string }` | Requests leave/cashout workflow. |
 | `ack` | `{ "seq": integer }` | Acknowledges latest processed server sequence (flow-control aid). |
 | `table_snapshot` | `{ "tableId": string }` (or envelope `roomId`) | Protected read-only gameplay snapshot command. **Requires `requestId`** like other stateful protected commands. Returns viewer-scoped poker state and does not mutate presence membership. |
+| `reaction_send` | `{ "tableId": string, "reactionKey": "hello"|"nice_hand"|"well_played"|"thinking"|"haha"|"wow"|"bad_beat"|"nice_bluff"|"good_luck"|"thanks" }` | Requests one predefined ephemeral reaction. Requires an authenticated seated human sender and `requestId`; the server enforces a four-second sender cooldown. |
 
 ### Server → Client
 
@@ -73,8 +74,9 @@ Example envelope:
 | `commandResult` | `{ "requestId": string, "status": "accepted"|"rejected", "reason": string|null }` | Deterministic outcome for a client command. |
 | `resync` | `{ "mode": "required", "reason": string, "expectedSeq": integer }` | Signals that client must request/accept full snapshot. |
 | `error` | `{ "code": string, "message": string, "retryable": boolean, "requestId": string|null }` | Protocol or domain error (see Errors). |
+| `table_reaction` | `{ "seatNo": integer, "reactionKey": string }` | Ephemeral table event delivered to the current table connections supported by the runtime. It is not stored in `streamLog`, snapshots, Supabase, or reconnect replay. Future spectator delivery can use the same event and payload without a protocol change. |
 
-Minimal server-initiated events in v1 include: `error`, `resync`, `pong`, and state updates (`stateSnapshot`/`statePatch`).
+Minimal server-initiated events in v1 include: `error`, `resync`, `pong`, state updates (`stateSnapshot`/`statePatch`), and ephemeral `table_reaction` events.
 
 Examples:
 

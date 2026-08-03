@@ -115,6 +115,7 @@ function createHarness(options = {}){
     'pokerHeroCards', 'pokerV2LiveStatus', 'pokerV2TableMeta', 'pokerV2TurnText',
     'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2GuestPanel', 'pokerV2GuestBadge', 'pokerV2SignInBtn', 'pokerV2SeatNo',
     'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
+    'pokerV2ReactionBtn', 'pokerV2ReactionMenu', 'pokerV2ReactionHint',
     'pokerV2RebuyPanel', 'pokerV2RebuyTitle', 'pokerV2RebuyCopy', 'pokerV2RebuyBalance', 'pokerV2RebuyBtn', 'pokerV2RebuyLobbyBtn', 'pokerV2RebuyWatchBtn', 'pokerV2RebuyAccountLink',
     'pokerV2ClosedTableModal', 'pokerV2ClosedTableTitle', 'pokerV2ClosedTableCountdown',
     'pokerV2DemoPill', 'pokerV2FoldBtn', 'pokerV2PrimaryBtn', 'pokerV2AmountBtn',
@@ -150,6 +151,7 @@ function createHarness(options = {}){
   const startPayloads = [];
   const leavePayloads = [];
   const rebuyPayloads = [];
+  const reactionPayloads = [];
   let createOptions = null;
 
   const token = Object.prototype.hasOwnProperty.call(options, 'token')
@@ -183,6 +185,11 @@ function createHarness(options = {}){
     sendLeave(payload){
       leavePayloads.push(payload);
       if (typeof options.sendLeave === 'function') return options.sendLeave(payload, { attempt: leavePayloads.length });
+      return Promise.resolve({ ok: true });
+    },
+    sendReaction(reactionKey){
+      reactionPayloads.push(reactionKey);
+      if (typeof options.sendReaction === 'function') return options.sendReaction(reactionKey, { attempt: reactionPayloads.length });
       return Promise.resolve({ ok: true });
     },
     requestGameplaySnapshot(){
@@ -324,6 +331,7 @@ async function flush(){
     startPayloads,
     leavePayloads,
     rebuyPayloads,
+    reactionPayloads,
     getSnapshotRequestCount(){ return snapshotRequestCount; },
     fireDomContentLoaded,
     fireDocumentEvent,
@@ -447,6 +455,46 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(harness.leavePayloads.length, 1);
   assert.equal(JSON.stringify(harness.leavePayloads[0]), JSON.stringify({ tableId: 'table-1' }));
   assert.equal(harness.windowLocation.href, '/poker/');
+});
+
+test('poker v2 disables reactions for four seconds after an accepted reaction', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: { hand: { handId: null, status: 'LOBBY' }, pot: { total: 0 } },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2ReactionBtn.hidden, false);
+  assert.equal(harness.elements.pokerV2ReactionBtn.disabled, false);
+  harness.elements.pokerV2ReactionBtn.click();
+  const wowOption = harness.elements.pokerV2ReactionMenu.children.find((child) => child.dataset.reactionKey === 'wow');
+  assert.ok(wowOption);
+  wowOption.click();
+  await harness.flush();
+
+  assert.deepEqual(harness.reactionPayloads, ['wow']);
+  assert.equal(harness.elements.pokerV2ReactionBtn.disabled, true);
+  assert.equal(harness.elements.pokerV2ReactionHint.hidden, false);
+  assert.equal(harness.elements.pokerV2ReactionHint.textContent, 'You can react once every 4 seconds');
+
+  harness.advanceTime(3_999);
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2ReactionBtn.disabled, true);
+  harness.advanceTime(1);
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2ReactionBtn.disabled, false);
+  assert.equal(harness.elements.pokerV2ReactionHint.hidden, true);
 });
 
 test('poker v2 shows one reserved next-hand join without cards, actions, or folded styling', async () => {
