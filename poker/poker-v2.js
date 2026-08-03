@@ -1792,10 +1792,12 @@
     });
   }
 
-  function getTargetedReactionDeadlineMs(presentation){
+  function getTargetedReactionDeadlineMs(sticky){
+    var presentation = sticky && sticky.settlementPresentation;
     var settledAtMs = presentation && typeof presentation.settledAt === 'string' ? Date.parse(presentation.settledAt) : NaN;
     if (!Number.isFinite(settledAtMs) || settledAtMs > Date.now() + 1000) return null;
-    return settledAtMs + WINNER_REVEAL_MS;
+    var visibleUntilMs = Number(sticky && sticky.visibleUntilMs);
+    return Number.isFinite(visibleUntilMs) ? visibleUntilMs : null;
   }
 
   function getTargetedReactionOffers(){
@@ -1803,7 +1805,7 @@
     var sticky = getActiveWinnerReveal();
     var presentation = sticky && sticky.settlementPresentation;
     if (!sticky || !presentation || presentation.valid !== true || !presentation.handId) return [];
-    var deadlineMs = getTargetedReactionDeadlineMs(presentation);
+    var deadlineMs = getTargetedReactionDeadlineMs(sticky);
     if (!Number.isFinite(deadlineMs) || deadlineMs - 250 <= Date.now()) return [];
     var currentSeat = deriveCurrentSeat();
     var offers = [];
@@ -1823,7 +1825,7 @@
   function scheduleTargetedReactionDismiss(){
     clearTargetedReactionDismissTimer();
     var sticky = getActiveWinnerReveal();
-    var deadlineMs = getTargetedReactionDeadlineMs(sticky && sticky.settlementPresentation);
+    var deadlineMs = getTargetedReactionDeadlineMs(sticky);
     if (!sticky || !Number.isFinite(deadlineMs)) return;
     var delayMs = deadlineMs - Date.now() - 250;
     if (delayMs <= 0) return;

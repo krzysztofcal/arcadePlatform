@@ -504,7 +504,7 @@ test('poker v2 disables reactions for four seconds after an accepted reaction', 
   assert.equal(harness.elements.pokerV2ReactionHint.hidden, true);
 });
 
-test('poker v2 offers targeted nice hand reactions to every other main-pot winner for the current hand', async () => {
+test('poker v2 keeps targeted reactions aligned with the local winner reveal window', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -538,7 +538,7 @@ test('poker v2 offers targeted nice hand reactions to every other main-pot winne
     }
   });
   await harness.flush();
-  const settledAt = new Date(1_700_000_000_000 - 1_000).toISOString();
+  const settledAt = new Date(1_700_000_000_000 - 10_000).toISOString();
   ws.onSnapshot({
     kind: 'stateSnapshot',
     payload: {
@@ -598,12 +598,18 @@ test('poker v2 offers targeted nice hand reactions to every other main-pot winne
   assert.ok(Math.abs(Number.parseFloat(reactionDeltaY)) > 50, 'vertical delta should use the reaction layer height');
   assert.equal(harness.elements.pokerReactionLayer.children.some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))), false);
 
-  harness.advanceTime(2_750);
+  harness.advanceTime(3_000);
   await harness.flush();
-  const targetButtonsAfterSettlementDeadline = harness.elements.pokerReactionLayer.children
+  const targetButtonsBeforeLocalRevealDeadline = harness.elements.pokerReactionLayer.children
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
-  assert.equal(targetButtonsAfterSettlementDeadline.length, 0, 'targeted offers should follow settledAt + reveal window, not a sticky presentation extension');
+  assert.equal(targetButtonsBeforeLocalRevealDeadline.length, 1, 'the unselected targeted offer should remain available with the local winner reveal after a delayed settlement');
+  harness.advanceTime(750);
+  await harness.flush();
+  const targetButtonsAfterLocalRevealDeadline = harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
+  assert.equal(targetButtonsAfterLocalRevealDeadline.length, 0, 'targeted offers should expire with the local winner reveal window');
 });
 
 test('poker v2 preserves an active targeted reaction animation across unrelated snapshots', async () => {
