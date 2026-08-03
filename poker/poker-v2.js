@@ -54,6 +54,7 @@
   };
   var CLOSED_TABLE_REDIRECT_SECONDS = 5;
   var WINNER_REVEAL_MS = 4_000;
+  var TARGETED_REACTION_EFFECT_TTL_MS = 1_200;
   var CHIP_FLY_MS = 420;
   var SETTLEMENT_CHIP_FLY_MS = 780;
   var AUTO_JOIN_RETRY_DELAYS_MS = [250, 750, 1500, 3000];
@@ -212,6 +213,8 @@
   var settlementAnimationNodes = [];
   var suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
   var reactionBubblesBySeatNo = {};
+  var targetedReactionEffectsById = {};
+  var nextTargetedReactionEffectId = 1;
   var dismissedTargetedReactionOffersByKey = {};
   var targetedReactionDismissTimer = null;
   var reactionControlTimer = null;
@@ -1787,14 +1790,19 @@
     });
   }
 
+  function getTargetedReactionDeadlineMs(presentation){
+    var settledAtMs = presentation && typeof presentation.settledAt === 'string' ? Date.parse(presentation.settledAt) : NaN;
+    if (!Number.isFinite(settledAtMs) || settledAtMs > Date.now() + 1000) return null;
+    return settledAtMs + WINNER_REVEAL_MS;
+  }
+
   function getTargetedReactionOffers(){
     if (state.reconnectGate || !deriveCurrentSeat()) return [];
     var sticky = getActiveWinnerReveal();
     var presentation = sticky && sticky.settlementPresentation;
     if (!sticky || !presentation || presentation.valid !== true || !presentation.handId) return [];
-    var settledAtMs = typeof presentation.settledAt === 'string' ? Date.parse(presentation.settledAt) : NaN;
-    if (!Number.isFinite(settledAtMs) || settledAtMs > Date.now() + 1000) return [];
-    if (sticky.visibleUntilMs - 250 <= Date.now()) return [];
+    var deadlineMs = getTargetedReactionDeadlineMs(presentation);
+    if (!Number.isFinite(deadlineMs) || deadlineMs - 250 <= Date.now()) return [];
     var currentSeat = deriveCurrentSeat();
     var offers = [];
     state.seats.forEach(function(seat){
@@ -1813,8 +1821,9 @@
   function scheduleTargetedReactionDismiss(){
     clearTargetedReactionDismissTimer();
     var sticky = getActiveWinnerReveal();
-    if (!sticky) return;
-    var delayMs = sticky.visibleUntilMs - Date.now() - 250;
+    var deadlineMs = getTargetedReactionDeadlineMs(sticky && sticky.settlementPresentation);
+    if (!sticky || !Number.isFinite(deadlineMs)) return;
+    var delayMs = deadlineMs - Date.now() - 250;
     if (delayMs <= 0) return;
     targetedReactionDismissTimer = window.setTimeout(function(){
       targetedReactionDismissTimer = null;
@@ -1828,6 +1837,11 @@
       if (bubble && bubble.timer) window.clearTimeout(bubble.timer);
     });
     reactionBubblesBySeatNo = {};
+    Object.keys(targetedReactionEffectsById).forEach(function(effectId){
+      var effect = targetedReactionEffectsById[effectId];
+      if (effect && effect.timer) window.clearTimeout(effect.timer);
+    });
+    targetedReactionEffectsById = {};
     clearTargetedReactionDismissTimer();
     dismissedTargetedReactionOffersByKey = {};
     if (els.reactionLayer) els.reactionLayer.innerHTML = '';
@@ -1846,6 +1860,23 @@
     var bubble = reactionBubblesBySeatNo[seatNo];
     if (bubble && bubble.timer) window.clearTimeout(bubble.timer);
     delete reactionBubblesBySeatNo[seatNo];
+  }
+
+  function clearTargetedReactionEffect(effectId){
+    var effect = targetedReactionEffectsById[effectId];
+    if (effect && effect.timer) window.clearTimeout(effect.timer);
+    delete targetedReactionEffectsById[effectId];
+  }
+
+  function clearTargetedReactionEffectsWithChangedOwners(){
+    Object.keys(targetedReactionEffectsById).forEach(function(effectId){
+      var effect = targetedReactionEffectsById[effectId];
+      if (!effect
+        || currentSeatOwnerUserId(effect.senderSeatNo) !== effect.senderOwnerUserId
+        || currentSeatOwnerUserId(effect.targetSeatNo) !== effect.targetOwnerUserId){
+        clearTargetedReactionEffect(effectId);
+      }
+    });
   }
 
   function clearReactionBubblesWithChangedOwners(){
@@ -1933,6 +1964,30 @@
     var entry = findReactionEntry(reactionKey);
     var ownerUserId = currentSeatOwnerUserId(seatNo);
     if (!Number.isInteger(seatNo) || seatNo < 1 || !entry || !ownerUserId) return;
+    var hasTargetSeatNo = Object.prototype.hasOwnProperty.call(payload, 'targetSeatNo');
+    if (hasTargetSeatNo){
+      var targetSeatNo = Number(payload.targetSeatNo);
+      var targetOwnerUserId = currentSeatOwnerUserId(targetSeatNo);
+      if (!Number.isInteger(targetSeatNo) || targetSeatNo < 1 || targetSeatNo === seatNo || !targetOwnerUserId) return;
+      var effectId = String(nextTargetedReactionEffectId++);
+      var effect = {
+        senderSeatNo: seatNo,
+        targetSeatNo: targetSeatNo,
+        senderOwnerUserId: ownerUserId,
+        targetOwnerUserId: targetOwnerUserId,
+        reactionKey: reactionKey,
+        animate: true,
+        timer: null
+      };
+      effect.timer = window.setTimeout(function(){
+        if (targetedReactionEffectsById[effectId] !== effect) return;
+        clearTargetedReactionEffect(effectId);
+        renderSeats();
+      }, TARGETED_REACTION_EFFECT_TTL_MS);
+      targetedReactionEffectsById[effectId] = effect;
+      renderSeats();
+      return;
+    }
     var previous = reactionBubblesBySeatNo[seatNo];
     if (previous && previous.timer) window.clearTimeout(previous.timer);
     var bubble = { reactionKey: reactionKey, ownerUserId: ownerUserId, animate: true, timer: null };
@@ -2687,6 +2742,7 @@
   function renderSeats(){
     if (!els.seatLayer) return;
     clearReactionBubblesWithChangedOwners();
+    clearTargetedReactionEffectsWithChangedOwners();
     els.seatLayer.innerHTML = '';
     renderedSeatAnchors = {};
     renderedSeatSlots = {};
@@ -2819,6 +2875,29 @@
   function renderReactionBubbles(){
     if (!els.reactionLayer) return;
     els.reactionLayer.innerHTML = '';
+    Object.keys(targetedReactionEffectsById).forEach(function(effectId){
+      var effect = targetedReactionEffectsById[effectId];
+      var entry = effect ? findReactionEntry(effect.reactionKey) : null;
+      var senderAnchor = effect && renderedSeatAnchors[effect.senderSeatNo];
+      var targetAnchor = effect && renderedSeatAnchors[effect.targetSeatNo];
+      if (!effect || !entry || !senderAnchor || !targetAnchor){
+        clearTargetedReactionEffect(effectId);
+        return;
+      }
+      var anchorNode = document.createElement('div');
+      anchorNode.className = 'poker-reaction-anchor poker-seat-target-reaction-effect';
+      anchorNode.style.left = senderAnchor.x + '%';
+      anchorNode.style.top = senderAnchor.y + '%';
+      var flyout = document.createElement('div');
+      flyout.className = 'poker-seat-target-reaction-flyout' + (effect.animate ? ' poker-seat-target-reaction-flyout--enter' : '');
+      flyout.setAttribute('role', 'status');
+      flyout.setAttribute('aria-label', entry.label);
+      flyout.textContent = entry.emoji;
+      flyout.style.setProperty('--reaction-delta-x', (targetAnchor.x - senderAnchor.x) + '%');
+      flyout.style.setProperty('--reaction-delta-y', (targetAnchor.y - senderAnchor.y) + '%');
+      anchorNode.appendChild(flyout);
+      els.reactionLayer.appendChild(anchorNode);
+    });
     var targetedOffers = getTargetedReactionOffers();
     targetedOffers.forEach(function(offer){
       var anchor = renderedSeatAnchors[offer.targetSeatNo];
@@ -2861,6 +2940,10 @@
       bubble.textContent = reactionEntry.emoji + ' ' + reactionEntry.label;
       anchorNode.appendChild(bubble);
       els.reactionLayer.appendChild(anchorNode);
+    });
+    Object.keys(targetedReactionEffectsById).forEach(function(effectId){
+      var effect = targetedReactionEffectsById[effectId];
+      if (effect) effect.animate = false;
     });
   }
 

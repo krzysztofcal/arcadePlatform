@@ -510,7 +510,35 @@ test('poker v2 offers targeted nice hand reactions to every other main-pot winne
   await harness.flush();
 
   const ws = harness.getCreateOptions();
-  const settledAt = new Date(1_700_000_000_000).toISOString();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 0,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1 },
+          { userId: 'user-2', seat: 2 },
+          { userId: 'user-3', seat: 3 }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-1', status: 'TURN' },
+        pot: { total: 100 },
+        seats: [
+          { userId: 'user-1', seatNo: 1, status: 'ACTIVE' },
+          { userId: 'user-2', seatNo: 2, status: 'ACTIVE' },
+          { userId: 'user-3', seatNo: 3, status: 'ACTIVE' }
+        ]
+      },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+  const settledAt = new Date(1_700_000_000_000 - 1_000).toISOString();
   ws.onSnapshot({
     kind: 'stateSnapshot',
     payload: {
@@ -554,6 +582,24 @@ test('poker v2 offers targeted nice hand reactions to every other main-pot winne
   targetButtons[0].click();
   await harness.flush();
   assert.deepEqual(harness.targetedReactionPayloads, [{ targetSeatNo: 2, handId: 'hand-1' }]);
+
+  ws.onReaction({ payload: { seatNo: 1, targetSeatNo: 2, reactionKey: 'nice_hand' } });
+  await harness.flush();
+  const targetedEffectAnchor = harness.elements.pokerReactionLayer.children.find((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect'));
+  assert.ok(targetedEffectAnchor, 'targeted reactions should render a dedicated sender-to-target effect');
+  const targetedEffect = targetedEffectAnchor.children[0];
+  assert.ok(targetedEffect);
+  assert.equal(targetedEffect.className, 'poker-seat-target-reaction-flyout poker-seat-target-reaction-flyout--enter');
+  assert.notEqual(targetedEffect.style.getPropertyValue('--reaction-delta-x'), '0%');
+  assert.notEqual(targetedEffect.style.getPropertyValue('--reaction-delta-y'), '0%');
+  assert.equal(harness.elements.pokerReactionLayer.children.some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))), false);
+
+  harness.advanceTime(2_750);
+  await harness.flush();
+  const targetButtonsAfterSettlementDeadline = harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
+  assert.equal(targetButtonsAfterSettlementDeadline.length, 0, 'targeted offers should follow settledAt + reveal window, not a sticky presentation extension');
 });
 
 test('poker v2 does not offer targeted reactions for an invalid settlement', async () => {

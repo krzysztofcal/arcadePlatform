@@ -3958,9 +3958,10 @@ wss.on("connection", (ws) => {
           && isValidTargetedSettlementTimestamp(pokerState?.handSettlement?.settledAt, Date.now())
           && isSettledRevealPendingForState(pokerState);
         const members = tableManager.tableSnapshot(tableId, null)?.members;
-        const targetMember = Array.isArray(members)
-          ? members.find((member) => member && member.seat === targetSeatNo)
-          : null;
+        const matchingTargetMembers = Array.isArray(members)
+          ? members.filter((member) => member && member.seat === targetSeatNo)
+          : [];
+        const targetMember = matchingTargetMembers.length === 1 ? matchingTargetMembers[0] : null;
         targetOccupied = !!(targetMember && typeof targetMember.userId === "string" && targetMember.userId.trim());
         if (targetOccupied && settlementMatchesHand) {
           const targetableWinnerUserIds = collectTargetableWinnerUserIds(pokerState?.showdown);
