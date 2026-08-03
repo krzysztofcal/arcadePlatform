@@ -57,7 +57,9 @@ assert.match(tableV2Css, /\.poker-closed-table-modal\{z-index:65;\}/, 'poker tab
 assert.match(tableV2Css, /\.poker-guest-panel\{margin-top:12px; padding:14px 14px 12px; border-radius:18px; border:1px solid rgba\(255,223,180,0\.2\); background:rgba\(8,13,22,0\.72\);\}/, 'poker table v2 should style the guest restrictions panel');
 assert.match(tableV2Css, /\.poker-guest-panel__item--blocked::before\{content:"✕"; color:#ffb5b5;\}/, 'guest restrictions panel should visibly mark blocked items');
 assert.match(tableV2Css, /\.poker-action-bar\{position:fixed; right:max\(10px, env\(safe-area-inset-right\)\); bottom:max\(10px, env\(safe-area-inset-bottom\)\); width:min\(33vw, 196px\); display:grid; grid-template-columns:40px minmax\(0, 1fr\);/, 'poker table v2 action rail should dock to the bottom-right with a left-side vertical amount slider');
-assert.match(tableV2Css, /\.poker-reaction-layer\{position:absolute; inset:0; z-index:14; pointer-events:none;\}/, 'reaction bubbles should render in a non-interactive layer above chips');
+assert.match(tableV2Css, /\.poker-reaction-layer\{position:absolute; inset:0; z-index:100; pointer-events:none;\}/, 'reaction bubbles should render in a non-interactive layer above scene effects');
+assert.match(tableV2Css, /\.poker-seat-target-reaction\{[^}]*left:-52px;top:-38px;z-index:102;/, 'targeted reaction control should sit above the winner avatar and settlement overlays');
+assert.match(tableV2Css, /\.poker-seat-target-reaction-flyout\{[^}]*z-index:103;/, 'targeted reaction flight should remain above the other scene layers');
 assert.doesNotMatch(tableV2Css, /\.poker-seat--hero \.poker-seat-avatar\{[^}]*border-color:/, 'hero avatar should not keep an always-on active ring');
 assert.match(tableV2Css, /\.poker-seat--hero\.poker-seat--active \.poker-seat-avatar\{border-color:rgba\(84,245,152,0\.88\);/, 'hero avatar should turn green only on the active turn');
 assert.match(tableV2Html, /id="pokerBootSplash"/, 'poker table v2 should render a boot splash to avoid raw HTML flash');
