@@ -214,6 +214,8 @@
   var suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
   var reactionBubblesBySeatNo = {};
   var targetedReactionEffectsById = {};
+  var targetedReactionEffectNodesById = {};
+  var reactionRenderNodes = [];
   var nextTargetedReactionEffectId = 1;
   var dismissedTargetedReactionOffersByKey = {};
   var targetedReactionDismissTimer = null;
@@ -1842,6 +1844,12 @@
       if (effect && effect.timer) window.clearTimeout(effect.timer);
     });
     targetedReactionEffectsById = {};
+    Object.keys(targetedReactionEffectNodesById).forEach(function(effectId){
+      var node = targetedReactionEffectNodesById[effectId];
+      if (node && node.parentNode) node.parentNode.removeChild(node);
+    });
+    targetedReactionEffectNodesById = {};
+    reactionRenderNodes = [];
     clearTargetedReactionDismissTimer();
     dismissedTargetedReactionOffersByKey = {};
     if (els.reactionLayer) els.reactionLayer.innerHTML = '';
@@ -1865,6 +1873,9 @@
   function clearTargetedReactionEffect(effectId){
     var effect = targetedReactionEffectsById[effectId];
     if (effect && effect.timer) window.clearTimeout(effect.timer);
+    var node = targetedReactionEffectNodesById[effectId];
+    if (node && node.parentNode) node.parentNode.removeChild(node);
+    delete targetedReactionEffectNodesById[effectId];
     delete targetedReactionEffectsById[effectId];
   }
 
@@ -2872,9 +2883,35 @@
     });
   }
 
-  function renderReactionBubbles(){
-    if (!els.reactionLayer) return;
-    els.reactionLayer.innerHTML = '';
+  function clearReactionRenderNodes(){
+    reactionRenderNodes.forEach(function(node){
+      if (node && node.parentNode) node.parentNode.removeChild(node);
+    });
+    reactionRenderNodes = [];
+  }
+
+  function appendReactionRenderNode(node){
+    if (!node || !els.reactionLayer) return;
+    els.reactionLayer.appendChild(node);
+    reactionRenderNodes.push(node);
+  }
+
+  function getReactionLayerDimensions(){
+    var width = Number(els.reactionLayer && els.reactionLayer.clientWidth);
+    var height = Number(els.reactionLayer && els.reactionLayer.clientHeight);
+    if ((!width || !height) && els.reactionLayer && typeof els.reactionLayer.getBoundingClientRect === 'function'){
+      var rect = els.reactionLayer.getBoundingClientRect();
+      if (!width) width = Number(rect && rect.width);
+      if (!height) height = Number(rect && rect.height);
+    }
+    return {
+      width: Number.isFinite(width) && width > 0 ? width : 0,
+      height: Number.isFinite(height) && height > 0 ? height : 0
+    };
+  }
+
+  function renderTargetedReactionEffects(){
+    var dimensions = getReactionLayerDimensions();
     Object.keys(targetedReactionEffectsById).forEach(function(effectId){
       var effect = targetedReactionEffectsById[effectId];
       var entry = effect ? findReactionEntry(effect.reactionKey) : null;
@@ -2884,20 +2921,41 @@
         clearTargetedReactionEffect(effectId);
         return;
       }
-      var anchorNode = document.createElement('div');
-      anchorNode.className = 'poker-reaction-anchor poker-seat-target-reaction-effect';
-      anchorNode.style.left = senderAnchor.x + '%';
-      anchorNode.style.top = senderAnchor.y + '%';
-      var flyout = document.createElement('div');
-      flyout.className = 'poker-seat-target-reaction-flyout' + (effect.animate ? ' poker-seat-target-reaction-flyout--enter' : '');
+      var reducedMotion = prefersReducedMotion();
+      var anchorNode = targetedReactionEffectNodesById[effectId];
+      if (!anchorNode){
+        anchorNode = document.createElement('div');
+        anchorNode.className = 'poker-reaction-anchor poker-seat-target-reaction-effect';
+        var newFlyout = document.createElement('div');
+        newFlyout.setAttribute('role', 'status');
+        anchorNode.appendChild(newFlyout);
+        targetedReactionEffectNodesById[effectId] = anchorNode;
+        els.reactionLayer.appendChild(anchorNode);
+      }
+      var flyout = anchorNode.children && anchorNode.children[0];
+      if (!flyout){
+        clearTargetedReactionEffect(effectId);
+        return;
+      }
+      var fromX = reducedMotion ? targetAnchor.x : senderAnchor.x;
+      var fromY = reducedMotion ? targetAnchor.y : senderAnchor.y;
+      var deltaX = reducedMotion ? 0 : ((targetAnchor.x - senderAnchor.x) / 100) * dimensions.width;
+      var deltaY = reducedMotion ? 0 : ((targetAnchor.y - senderAnchor.y) / 100) * dimensions.height;
+      anchorNode.style.left = fromX + '%';
+      anchorNode.style.top = fromY + '%';
+      flyout.className = 'poker-seat-target-reaction-flyout' + (effect.animate && !reducedMotion ? ' poker-seat-target-reaction-flyout--enter' : '');
       flyout.setAttribute('role', 'status');
       flyout.setAttribute('aria-label', entry.label);
       flyout.textContent = entry.emoji;
-      flyout.style.setProperty('--reaction-delta-x', (targetAnchor.x - senderAnchor.x) + '%');
-      flyout.style.setProperty('--reaction-delta-y', (targetAnchor.y - senderAnchor.y) + '%');
-      anchorNode.appendChild(flyout);
-      els.reactionLayer.appendChild(anchorNode);
+      flyout.style.setProperty('--reaction-delta-x', deltaX + 'px');
+      flyout.style.setProperty('--reaction-delta-y', deltaY + 'px');
     });
+  }
+
+  function renderReactionBubbles(){
+    if (!els.reactionLayer) return;
+    clearReactionRenderNodes();
+    renderTargetedReactionEffects();
     var targetedOffers = getTargetedReactionOffers();
     targetedOffers.forEach(function(offer){
       var anchor = renderedSeatAnchors[offer.targetSeatNo];
@@ -2918,7 +2976,7 @@
         sendTargetedReaction(offer.targetSeatNo, offer.handId);
       });
       anchorNode.appendChild(button);
-      els.reactionLayer.appendChild(anchorNode);
+      appendReactionRenderNode(anchorNode);
     });
     Object.keys(reactionBubblesBySeatNo).forEach(function(seatNoKey){
       var seatNo = Number(seatNoKey);
@@ -2939,11 +2997,7 @@
       bubble.setAttribute('role', 'status');
       bubble.textContent = reactionEntry.emoji + ' ' + reactionEntry.label;
       anchorNode.appendChild(bubble);
-      els.reactionLayer.appendChild(anchorNode);
-    });
-    Object.keys(targetedReactionEffectsById).forEach(function(effectId){
-      var effect = targetedReactionEffectsById[effectId];
-      if (effect) effect.animate = false;
+      appendReactionRenderNode(anchorNode);
     });
   }
 

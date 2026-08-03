@@ -590,8 +590,12 @@ test('poker v2 offers targeted nice hand reactions to every other main-pot winne
   const targetedEffect = targetedEffectAnchor.children[0];
   assert.ok(targetedEffect);
   assert.equal(targetedEffect.className, 'poker-seat-target-reaction-flyout poker-seat-target-reaction-flyout--enter');
-  assert.notEqual(targetedEffect.style.getPropertyValue('--reaction-delta-x'), '0%');
-  assert.notEqual(targetedEffect.style.getPropertyValue('--reaction-delta-y'), '0%');
+  const reactionDeltaX = targetedEffect.style.getPropertyValue('--reaction-delta-x');
+  const reactionDeltaY = targetedEffect.style.getPropertyValue('--reaction-delta-y');
+  assert.match(reactionDeltaX, /px$/);
+  assert.match(reactionDeltaY, /px$/);
+  assert.ok(Math.abs(Number.parseFloat(reactionDeltaX)) > 50, 'horizontal delta should use the reaction layer width');
+  assert.ok(Math.abs(Number.parseFloat(reactionDeltaY)) > 50, 'vertical delta should use the reaction layer height');
   assert.equal(harness.elements.pokerReactionLayer.children.some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))), false);
 
   harness.advanceTime(2_750);
@@ -600,6 +604,51 @@ test('poker v2 offers targeted nice hand reactions to every other main-pot winne
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(targetButtonsAfterSettlementDeadline.length, 0, 'targeted offers should follow settledAt + reveal window, not a sticky presentation extension');
+});
+
+test('poker v2 preserves an active targeted reaction animation across unrelated snapshots', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  const snapshot = (stateVersion) => ({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [{ userId: 'user-1', seat: 1 }, { userId: 'user-2', seat: 2 }]
+      },
+      public: {
+        hand: { handId: null, status: 'LOBBY' },
+        pot: { total: 0 },
+        seats: [
+          { userId: 'user-1', seatNo: 1, status: 'ACTIVE' },
+          { userId: 'user-2', seatNo: 2, status: 'ACTIVE' }
+        ]
+      },
+      you: { seat: 1 }
+    }
+  });
+
+  ws.onSnapshot(snapshot(1));
+  await harness.flush();
+  ws.onReaction({ payload: { seatNo: 1, targetSeatNo: 2, reactionKey: 'nice_hand' } });
+  await harness.flush();
+  const firstEffectAnchor = harness.elements.pokerReactionLayer.children.find((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect'));
+  assert.ok(firstEffectAnchor);
+  const firstEffect = firstEffectAnchor.children[0];
+  assert.match(firstEffect.className, /poker-seat-target-reaction-flyout--enter/);
+
+  ws.onSnapshot(snapshot(2));
+  await harness.flush();
+  const effectAfterSnapshot = harness.elements.pokerReactionLayer.children.find((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect'));
+  assert.equal(effectAfterSnapshot, firstEffectAnchor, 'unrelated rerenders should preserve the active effect node');
+  assert.match(effectAfterSnapshot.children[0].className, /poker-seat-target-reaction-flyout--enter/);
 });
 
 test('poker v2 does not offer targeted reactions for an invalid settlement', async () => {
