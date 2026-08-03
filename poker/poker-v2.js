@@ -1797,7 +1797,9 @@
     var settledAtMs = presentation && typeof presentation.settledAt === 'string' ? Date.parse(presentation.settledAt) : NaN;
     if (!Number.isFinite(settledAtMs) || settledAtMs > Date.now() + 1000) return null;
     var visibleUntilMs = Number(sticky && sticky.visibleUntilMs);
-    return Number.isFinite(visibleUntilMs) ? visibleUntilMs : null;
+    var serverDeadlineMs = settledAtMs + WINNER_REVEAL_MS;
+    if (!Number.isFinite(visibleUntilMs)) return serverDeadlineMs;
+    return Math.min(visibleUntilMs, serverDeadlineMs);
   }
 
   function getTargetedReactionOffers(){

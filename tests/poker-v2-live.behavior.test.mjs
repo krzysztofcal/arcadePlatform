@@ -538,7 +538,7 @@ test('poker v2 keeps targeted reactions aligned with the local winner reveal win
     }
   });
   await harness.flush();
-  const settledAt = new Date(1_700_000_000_000 - 10_000).toISOString();
+  const settledAt = new Date(1_700_000_000_000 - 1_000).toISOString();
   ws.onSnapshot({
     kind: 'stateSnapshot',
     payload: {
@@ -598,18 +598,71 @@ test('poker v2 keeps targeted reactions aligned with the local winner reveal win
   assert.ok(Math.abs(Number.parseFloat(reactionDeltaY)) > 50, 'vertical delta should use the reaction layer height');
   assert.equal(harness.elements.pokerReactionLayer.children.some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))), false);
 
-  harness.advanceTime(3_000);
+  harness.advanceTime(2_500);
   await harness.flush();
-  const targetButtonsBeforeLocalRevealDeadline = harness.elements.pokerReactionLayer.children
+  const targetButtonsBeforeServerRevealDeadline = harness.elements.pokerReactionLayer.children
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
-  assert.equal(targetButtonsBeforeLocalRevealDeadline.length, 1, 'the unselected targeted offer should remain available with the local winner reveal after a delayed settlement');
-  harness.advanceTime(750);
+  assert.equal(targetButtonsBeforeServerRevealDeadline.length, 1, 'the unselected targeted offer should remain available before the authoritative reveal deadline');
+  harness.advanceTime(500);
   await harness.flush();
-  const targetButtonsAfterLocalRevealDeadline = harness.elements.pokerReactionLayer.children
+  const targetButtonsAfterServerRevealDeadline = harness.elements.pokerReactionLayer.children
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
-  assert.equal(targetButtonsAfterLocalRevealDeadline.length, 0, 'targeted offers should expire with the local winner reveal window');
+  assert.equal(targetButtonsAfterServerRevealDeadline.length, 0, 'targeted offers should expire with the authoritative reveal deadline');
+});
+
+test('poker v2 does not offer targeted reactions after the authoritative settlement window', async () => {
+  const nowMs = 1_700_000_000_000;
+  const harness = createHarness({ nowMs });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1 },
+          { userId: 'user-2', seat: 2 },
+          { userId: 'user-3', seat: 3 }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-expired', status: 'SETTLED' },
+        pot: { total: 100 },
+        showdown: {
+          handId: 'hand-expired',
+          reason: 'computed',
+          potAwardedTotal: 100,
+          potsAwarded: [{ amount: 100, winners: ['user-2', 'user-3'], eligibleUserIds: ['user-1', 'user-2', 'user-3'] }]
+        },
+        handSettlement: {
+          handId: 'hand-expired',
+          settledAt: new Date(nowMs - 10_000).toISOString(),
+          payouts: { 'user-2': 50, 'user-3': 50 }
+        },
+        seats: [
+          { userId: 'user-1', seatNo: 1, status: 'ACTIVE' },
+          { userId: 'user-2', seatNo: 2, status: 'ACTIVE' },
+          { userId: 'user-3', seatNo: 3, status: 'ACTIVE' }
+        ]
+      },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const targetButtons = harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
+  assert.equal(targetButtons.length, 0, 'an expired settlement must not expose a reaction that the server will reject');
 });
 
 test('poker v2 preserves an active targeted reaction animation across unrelated snapshots', async () => {
