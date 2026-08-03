@@ -220,6 +220,21 @@ test('poker ws client sends reactions and handles table reactions outside the sn
   assert.equal(h.reactions[0].ts, '2026-08-03T00:00:00Z');
   assert.equal(h.reactions[0].payload.seatNo, 2);
   assert.equal(h.reactions[0].payload.reactionKey, 'haha');
+
+  const targetedPromise = h.client.sendTargetedReaction(4, 'settled-hand-1', 'reaction_target_req_1');
+  assert.equal(h.sentFrames.at(-1).type, 'reaction_send');
+  assert.deepEqual(h.sentFrames.at(-1).payload, {
+    tableId: 'table_test_1',
+    reactionKey: 'nice_hand',
+    targetSeatNo: 4,
+    handId: 'settled-hand-1'
+  });
+  ws.message({
+    type: 'commandResult',
+    requestId: 'reaction_target_req_1',
+    payload: { requestId: 'reaction_target_req_1', status: 'accepted', reason: null }
+  });
+  assert.equal((await targetedPromise).ok, true);
 });
 
 test('poker ws client keeps an ambiguous join pending after a command-scoped attach error', async () => {

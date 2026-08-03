@@ -212,6 +212,8 @@
   var settlementAnimationNodes = [];
   var suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
   var reactionBubblesBySeatNo = {};
+  var dismissedTargetedReactionOffersByKey = {};
+  var targetedReactionDismissTimer = null;
   var reactionControlTimer = null;
   var reactionControlUntilMs = 0;
   var els = {};
@@ -1759,12 +1761,75 @@
     }
   }
 
+  function clearTargetedReactionDismissTimer(){
+    if (!targetedReactionDismissTimer) return;
+    window.clearTimeout(targetedReactionDismissTimer);
+    targetedReactionDismissTimer = null;
+  }
+
+  function targetedReactionOfferKey(handId, targetSeatNo){
+    return String(handId || '') + ':' + String(targetSeatNo);
+  }
+
+  function dismissTargetedReactionOffer(handId, targetSeatNo){
+    if (!handId || !Number.isInteger(targetSeatNo)) return;
+    dismissedTargetedReactionOffersByKey[targetedReactionOfferKey(handId, targetSeatNo)] = true;
+  }
+
+  function dismissTargetedReactionOffersForHand(handId){
+    if (!handId) return;
+    var prefix = String(handId) + ':';
+    Object.keys(dismissedTargetedReactionOffersByKey).forEach(function(key){
+      if (key.indexOf(prefix) === 0) delete dismissedTargetedReactionOffersByKey[key];
+    });
+    state.seats.forEach(function(seat){
+      if (seat && Number.isInteger(seat.seatNo)) dismissTargetedReactionOffer(handId, seat.seatNo);
+    });
+  }
+
+  function getTargetedReactionOffers(){
+    if (state.reconnectGate || !deriveCurrentSeat()) return [];
+    var sticky = getActiveWinnerReveal();
+    var presentation = sticky && sticky.settlementPresentation;
+    if (!sticky || !presentation || presentation.valid !== true || !presentation.handId) return [];
+    var settledAtMs = typeof presentation.settledAt === 'string' ? Date.parse(presentation.settledAt) : NaN;
+    if (!Number.isFinite(settledAtMs) || settledAtMs > Date.now() + 1000) return [];
+    if (sticky.visibleUntilMs - 250 <= Date.now()) return [];
+    var currentSeat = deriveCurrentSeat();
+    var offers = [];
+    state.seats.forEach(function(seat){
+      if (!seat || !seat.userId || !Number.isInteger(seat.seatNo)) return;
+      if (seat.seatNo === currentSeat.seatNo || !hasWonContestedPot(seat)) return;
+      if (dismissedTargetedReactionOffersByKey[targetedReactionOfferKey(presentation.handId, seat.seatNo)]) return;
+      offers.push({
+        handId: presentation.handId,
+        targetSeatNo: seat.seatNo,
+        targetUserId: seat.userId
+      });
+    });
+    return offers;
+  }
+
+  function scheduleTargetedReactionDismiss(){
+    clearTargetedReactionDismissTimer();
+    var sticky = getActiveWinnerReveal();
+    if (!sticky) return;
+    var delayMs = sticky.visibleUntilMs - Date.now() - 250;
+    if (delayMs <= 0) return;
+    targetedReactionDismissTimer = window.setTimeout(function(){
+      targetedReactionDismissTimer = null;
+      renderSeats();
+    }, delayMs);
+  }
+
   function clearReactionBubbles(){
     Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
       var bubble = reactionBubblesBySeatNo[seatNo];
       if (bubble && bubble.timer) window.clearTimeout(bubble.timer);
     });
     reactionBubblesBySeatNo = {};
+    clearTargetedReactionDismissTimer();
+    dismissedTargetedReactionOffersByKey = {};
     if (els.reactionLayer) els.reactionLayer.innerHTML = '';
   }
 
@@ -1817,11 +1882,48 @@
     clearReactionControlTimer();
     reactionControlUntilMs = Date.now() + 4_000;
     renderReactionControl();
+    renderSeats();
     reactionControlTimer = window.setTimeout(function(){
       reactionControlTimer = null;
       reactionControlUntilMs = 0;
       renderReactionControl();
+      renderSeats();
     }, 4_000);
+  }
+
+  function sendTargetedReaction(targetSeatNo, handId){
+    if (!wsClient || typeof wsClient.sendTargetedReaction !== 'function' || !isWsReady() || !deriveCurrentSeat()) {
+      return Promise.resolve(null);
+    }
+    return wsClient.sendTargetedReaction(targetSeatNo, handId).then(function(result){
+      dismissTargetedReactionOffer(handId, targetSeatNo);
+      startReactionCooldown();
+      return result;
+    }).catch(function(error){
+      var code = normalizeSignalCode(error && (error.code || error.message));
+      if (code === 'reaction_rate_limited'){
+        startReactionCooldown();
+        return null;
+      }
+      if (code === 'settlement_reaction_window_closed' || code === 'settlement_mismatch'){
+        dismissTargetedReactionOffersForHand(handId);
+        renderSeats();
+        return null;
+      }
+      if (code === 'target_not_available' || code === 'invalid_reaction'){
+        dismissTargetedReactionOffer(handId, targetSeatNo);
+        renderSeats();
+        if (code === 'invalid_reaction') klog('poker_targeted_reaction_invalid', { targetSeatNo: targetSeatNo });
+        return null;
+      }
+      if (code === 'not_seated' || code === 'table_closed'){
+        renderControls();
+        if (wsClient && typeof wsClient.requestGameplaySnapshot === 'function') wsClient.requestGameplaySnapshot();
+        return null;
+      }
+      klog('poker_targeted_reaction_error', { code: code || 'targeted_reaction_failed' });
+      return null;
+    });
   }
 
   function handleTableReaction(event){
@@ -2706,6 +2808,7 @@
       }
       els.seatLayer.appendChild(article);
     }
+    scheduleTargetedReactionDismiss();
     renderReactionBubbles();
     Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
       var reactionBubble = reactionBubblesBySeatNo[seatNo];
@@ -2716,6 +2819,28 @@
   function renderReactionBubbles(){
     if (!els.reactionLayer) return;
     els.reactionLayer.innerHTML = '';
+    var targetedOffers = getTargetedReactionOffers();
+    targetedOffers.forEach(function(offer){
+      var anchor = renderedSeatAnchors[offer.targetSeatNo];
+      if (!anchor) return;
+      var anchorNode = document.createElement('div');
+      anchorNode.className = 'poker-reaction-anchor';
+      anchorNode.style.left = anchor.x + '%';
+      anchorNode.style.top = anchor.y + '%';
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'poker-seat-target-reaction';
+      button.textContent = '👍';
+      button.setAttribute('aria-label', 'Send Nice hand');
+      button.title = 'Send Nice hand';
+      button.disabled = reactionControlUntilMs > Date.now();
+      button.addEventListener('click', function(event){
+        if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+        sendTargetedReaction(offer.targetSeatNo, offer.handId);
+      });
+      anchorNode.appendChild(button);
+      els.reactionLayer.appendChild(anchorNode);
+    });
     Object.keys(reactionBubblesBySeatNo).forEach(function(seatNoKey){
       var seatNo = Number(seatNoKey);
       var reactionBubble = reactionBubblesBySeatNo[seatNoKey];

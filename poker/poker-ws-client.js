@@ -480,7 +480,15 @@
       sendLeave: function(payload, requestId){ return sendCommand('leave', payload || { tableId: tableId }, requestId); },
       sendLeaveQueued: function(payload, requestId){ return queueCommand('leave', payload || { tableId: tableId }, requestId); },
       sendStartHand: function(payload, requestId){ return sendCommand('start_hand', payload || { tableId: tableId }, requestId); },
-      sendReaction: function(reactionKey, requestId){ return sendCommand('reaction_send', { tableId: tableId, reactionKey: reactionKey }, requestId); }
+      sendReaction: function(reactionKey, requestId){ return sendCommand('reaction_send', { tableId: tableId, reactionKey: reactionKey }, requestId); },
+      sendTargetedReaction: function(targetSeatNo, handId, requestId){
+        return sendCommand('reaction_send', {
+          tableId: tableId,
+          reactionKey: 'nice_hand',
+          targetSeatNo: targetSeatNo,
+          handId: handId
+        }, requestId);
+      }
     };
   }
 

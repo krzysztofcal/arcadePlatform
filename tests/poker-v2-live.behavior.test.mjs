@@ -152,6 +152,7 @@ function createHarness(options = {}){
   const leavePayloads = [];
   const rebuyPayloads = [];
   const reactionPayloads = [];
+  const targetedReactionPayloads = [];
   let createOptions = null;
 
   const token = Object.prototype.hasOwnProperty.call(options, 'token')
@@ -190,6 +191,11 @@ function createHarness(options = {}){
     sendReaction(reactionKey){
       reactionPayloads.push(reactionKey);
       if (typeof options.sendReaction === 'function') return options.sendReaction(reactionKey, { attempt: reactionPayloads.length });
+      return Promise.resolve({ ok: true });
+    },
+    sendTargetedReaction(targetSeatNo, handId){
+      targetedReactionPayloads.push({ targetSeatNo, handId });
+      if (typeof options.sendTargetedReaction === 'function') return options.sendTargetedReaction(targetSeatNo, handId, { attempt: targetedReactionPayloads.length });
       return Promise.resolve({ ok: true });
     },
     requestGameplaySnapshot(){
@@ -332,6 +338,7 @@ async function flush(){
     leavePayloads,
     rebuyPayloads,
     reactionPayloads,
+    targetedReactionPayloads,
     getSnapshotRequestCount(){ return snapshotRequestCount; },
     fireDomContentLoaded,
     fireDocumentEvent,
@@ -495,6 +502,137 @@ test('poker v2 disables reactions for four seconds after an accepted reaction', 
   await harness.flush();
   assert.equal(harness.elements.pokerV2ReactionBtn.disabled, false);
   assert.equal(harness.elements.pokerV2ReactionHint.hidden, true);
+});
+
+test('poker v2 offers targeted nice hand reactions to every other main-pot winner for the current hand', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  const settledAt = new Date(1_700_000_000_000).toISOString();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1 },
+          { userId: 'user-2', seat: 2 },
+          { userId: 'user-3', seat: 3 }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-1', status: 'SETTLED' },
+        pot: { total: 100 },
+        showdown: {
+          handId: 'hand-1',
+          reason: 'computed',
+          potAwardedTotal: 100,
+          potsAwarded: [{ amount: 100, winners: ['user-2', 'user-3'], eligibleUserIds: ['user-1', 'user-2', 'user-3'] }]
+        },
+        handSettlement: { handId: 'hand-1', settledAt, payouts: { 'user-2': 50, 'user-3': 50 } },
+        seats: [
+          { userId: 'user-1', seatNo: 1, status: 'ACTIVE' },
+          { userId: 'user-2', seatNo: 2, status: 'ACTIVE' },
+          { userId: 'user-3', seatNo: 3, status: 'ACTIVE' }
+        ]
+      },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const targetButtons = harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
+  assert.equal(targetButtons.length, 2);
+  targetButtons[0].click();
+  await harness.flush();
+  assert.deepEqual(harness.targetedReactionPayloads, [{ targetSeatNo: 2, handId: 'hand-1' }]);
+});
+
+test('poker v2 does not offer targeted reactions for an invalid settlement', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  const settledAt = new Date(1_700_000_000_000).toISOString();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [{ userId: 'user-1', seat: 1 }, { userId: 'user-2', seat: 2 }]
+      },
+      public: {
+        hand: { handId: 'hand-invalid', status: 'SETTLED' },
+        pot: { total: 100 },
+        showdown: {
+          handId: 'hand-invalid',
+          reason: 'all_folded',
+          potAwardedTotal: 100,
+          potsAwarded: [
+            { amount: 50, winners: ['user-2'], eligibleUserIds: ['user-2'] },
+            { amount: 50, winners: ['user-2'], eligibleUserIds: ['user-2'] }
+          ]
+        },
+        handSettlement: { handId: 'hand-invalid', settledAt, payouts: { 'user-2': 100 } },
+        seats: [
+          { userId: 'user-1', seatNo: 1, status: 'ACTIVE' },
+          { userId: 'user-2', seatNo: 2, status: 'ACTIVE' }
+        ]
+      },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const targetButtons = harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
+  assert.equal(targetButtons.length, 0);
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [{ userId: 'user-1', seat: 1 }, { userId: 'user-2', seat: 2 }]
+      },
+      public: {
+        hand: { handId: 'hand-invalid-time', status: 'SETTLED' },
+        pot: { total: 100 },
+        showdown: {
+          handId: 'hand-invalid-time',
+          reason: 'computed',
+          potAwardedTotal: 100,
+          potsAwarded: [{ amount: 100, winners: ['user-2'], eligibleUserIds: ['user-1', 'user-2'] }]
+        },
+        handSettlement: { handId: 'hand-invalid-time', settledAt: 'not-a-timestamp', payouts: { 'user-2': 100 } },
+        seats: [
+          { userId: 'user-1', seatNo: 1, status: 'ACTIVE' },
+          { userId: 'user-2', seatNo: 2, status: 'ACTIVE' }
+        ]
+      },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionLayer.children.length, 0);
 });
 
 test('poker v2 removes a reaction bubble when the seat owner changes', async () => {

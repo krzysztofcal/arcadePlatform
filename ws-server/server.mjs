@@ -2113,6 +2113,64 @@ function isSettledRevealPendingForState(pokerState, nowMs = Date.now()) {
   return dueAt > nowMs;
 }
 
+function isValidTargetedSettlementTimestamp(settledAt, nowMs = Date.now()) {
+  if (typeof settledAt !== "string" || !settledAt.trim()) return false;
+  const settledAtMs = Date.parse(settledAt);
+  return Number.isFinite(settledAtMs) && settledAtMs <= nowMs + 1_000;
+}
+
+function normalizeTargetReactionUserIds(value) {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const result = [];
+  const seen = new Set();
+  for (const rawUserId of value) {
+    const userId = typeof rawUserId === "string" ? rawUserId.trim() : "";
+    if (!userId || seen.has(userId)) return null;
+    seen.add(userId);
+    result.push(userId);
+  }
+  return result;
+}
+
+function collectTargetableWinnerUserIds(showdown) {
+  if (!showdown || typeof showdown !== "object" || Array.isArray(showdown)) return null;
+  const reason = typeof showdown.reason === "string" ? showdown.reason.trim().toLowerCase() : "";
+  const pots = showdown.potsAwarded;
+  if ((reason !== "all_folded" && reason !== "computed") || !Array.isArray(pots) || pots.length === 0) return null;
+  if (reason === "all_folded" && pots.length !== 1) return null;
+
+  const targetableWinnerUserIds = new Set();
+  for (let potIndex = 0; potIndex < pots.length; potIndex += 1) {
+    const pot = pots[potIndex];
+    if (!pot || typeof pot !== "object" || Array.isArray(pot)) return null;
+    if (!Number.isSafeInteger(pot.amount) || pot.amount < 0) return null;
+    const winners = normalizeTargetReactionUserIds(pot.winners);
+    const eligibleUserIds = normalizeTargetReactionUserIds(pot.eligibleUserIds);
+    if (!winners || !eligibleUserIds || winners.some((userId) => !eligibleUserIds.includes(userId))) return null;
+
+    let kind = null;
+    if (reason === "all_folded") {
+      if (potIndex === 0
+        && eligibleUserIds.length === 1
+        && winners.length === 1
+        && eligibleUserIds[0] === winners[0]) {
+        kind = "main";
+      }
+    } else if (potIndex === 0) {
+      if (eligibleUserIds.length >= 2) kind = "main";
+    } else if (eligibleUserIds.length >= 2) {
+      kind = "side";
+    } else if (eligibleUserIds.length === 1 && winners.length === 1 && eligibleUserIds[0] === winners[0]) {
+      kind = "return";
+    }
+    if (!kind) return null;
+    if (kind === "main" || kind === "side") {
+      winners.forEach((userId) => targetableWinnerUserIds.add(userId));
+    }
+  }
+  return targetableWinnerUserIds;
+}
+
 async function isSettledRevealPending(tableId, nowMs = Date.now()) {
   const runtimeState = tableManager.persistedPokerState(tableId);
   if (isSettledRevealPendingForState(runtimeState, nowMs)) {
@@ -2159,7 +2217,7 @@ function broadcastStateSnapshots(tableId) {
   }
 }
 
-function broadcastTableReaction(tableId, { seatNo, reactionKey } = {}) {
+function broadcastTableReaction(tableId, { seatNo, targetSeatNo, reactionKey } = {}) {
   const recipients = tableManager.orderedConnectionsForTable(tableId, (socket) => socket.__connState?.sessionId ?? "");
   let sentCount = 0;
   let skippedCount = 0;
@@ -2181,6 +2239,7 @@ function broadcastTableReaction(tableId, { seatNo, reactionKey } = {}) {
         sessionId: recipientConnState.sessionId,
         payload: {
           seatNo,
+          ...(Number.isInteger(targetSeatNo) ? { targetSeatNo } : {}),
           reactionKey
         }
       });
@@ -3876,11 +3935,50 @@ wss.on("connection", (ws) => {
         return;
       }
 
+      const reactionPayload = frame.payload && typeof frame.payload === "object" ? frame.payload : {};
+      const hasTargetSeatNo = Object.prototype.hasOwnProperty.call(reactionPayload, "targetSeatNo");
+      const hasHandId = Object.prototype.hasOwnProperty.call(reactionPayload, "handId");
+      const targeted = hasTargetSeatNo || hasHandId;
+      let targetSeatNo = reactionPayload.targetSeatNo;
+      let targetOccupied = false;
+      let targetIsWinner = false;
+      let settlementMatchesHand = false;
+      let settlementWindowOpen = false;
+      if (targeted) {
+        const pokerState = tableManager.persistedPokerState(tableId);
+        const requestedHandId = typeof reactionPayload.handId === "string" ? reactionPayload.handId.trim() : "";
+        const currentHandId = typeof pokerState?.handId === "string" ? pokerState.handId.trim() : "";
+        const showdownHandId = typeof pokerState?.showdown?.handId === "string" ? pokerState.showdown.handId.trim() : "";
+        const settlementHandId = typeof pokerState?.handSettlement?.handId === "string" ? pokerState.handSettlement.handId.trim() : "";
+        settlementMatchesHand = !!requestedHandId
+          && requestedHandId === currentHandId
+          && requestedHandId === showdownHandId
+          && requestedHandId === settlementHandId;
+        settlementWindowOpen = settlementMatchesHand
+          && isValidTargetedSettlementTimestamp(pokerState?.handSettlement?.settledAt, Date.now())
+          && isSettledRevealPendingForState(pokerState);
+        const members = tableManager.tableSnapshot(tableId, null)?.members;
+        const targetMember = Array.isArray(members)
+          ? members.find((member) => member && member.seat === targetSeatNo)
+          : null;
+        targetOccupied = !!(targetMember && typeof targetMember.userId === "string" && targetMember.userId.trim());
+        if (targetOccupied && settlementMatchesHand) {
+          const targetableWinnerUserIds = collectTargetableWinnerUserIds(pokerState?.showdown);
+          targetIsWinner = targetableWinnerUserIds instanceof Set && targetableWinnerUserIds.has(targetMember.userId.trim());
+        }
+      }
+
       const result = evaluateHumanReactionCommand({
         tableId,
         senderUserId,
         senderSeatNo,
-        reactionKey: frame.payload?.reactionKey,
+        reactionKey: reactionPayload.reactionKey,
+        targeted,
+        targetSeatNo,
+        targetOccupied,
+        targetIsWinner,
+        settlementMatchesHand,
+        settlementWindowOpen,
         tableClosed: tableManager.isTableClosed(tableId),
         nowMs: Date.now()
       });
