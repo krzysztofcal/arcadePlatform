@@ -10,6 +10,7 @@ function loadClientHarness(options = {}){
   const statuses = [];
   const snapshots = [];
   const lobbySnapshots = [];
+  const reactions = [];
   const protocolErrors = [];
   let fetchCalls = [];
 
@@ -77,10 +78,11 @@ function loadClientHarness(options = {}){
     onStatus: (status, data) => statuses.push({ status, data }),
     onSnapshot: (snapshot) => snapshots.push(snapshot),
     onLobbySnapshot: (snapshot) => lobbySnapshots.push(snapshot),
+    onReaction: (reaction) => reactions.push(reaction),
     onProtocolError: (info) => protocolErrors.push(info)
   }, options.clientOptions || {}));
 
-  return { client, FakeWebSocket, sentFrames, logs, statuses, snapshots, lobbySnapshots, protocolErrors, getFetchCalls: () => fetchCalls };
+  return { client, FakeWebSocket, sentFrames, logs, statuses, snapshots, lobbySnapshots, reactions, protocolErrors, getFetchCalls: () => fetchCalls };
 }
 
 function getLogEntries(logs, kind){
@@ -182,6 +184,42 @@ test('poker ws client gameplay commands including rebuy resolve and reject by co
   const actPromise = h.client.sendAct({ handId: 'h1', action: 'CHECK' }, 'act_req_1');
   ws.message({ type: 'commandResult', requestId: 'act_req_1', payload: { requestId: 'act_req_1', status: 'rejected', reason: 'hand_not_live' } });
   await assert.rejects(actPromise, (err) => err && err.code === 'hand_not_live');
+});
+
+test('poker ws client sends reactions and handles table reactions outside the snapshot stream', async () => {
+  const h = loadClientHarness();
+  h.client.start();
+  const ws = h.FakeWebSocket.instances[0];
+  ws.open();
+  ws.message({ type: 'helloAck', payload: { version: '1.0' } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  ws.message({ type: 'authOk', payload: { roomId: 'table_test_1' } });
+
+  const reactionPromise = h.client.sendReaction('wow', 'reaction_req_1');
+  assert.equal(h.sentFrames.at(-1).type, 'reaction_send');
+  assert.deepEqual(h.sentFrames.at(-1).payload, { tableId: 'table_test_1', reactionKey: 'wow' });
+  ws.message({
+    type: 'commandResult',
+    requestId: 'reaction_req_1',
+    payload: { requestId: 'reaction_req_1', status: 'accepted', reason: null }
+  });
+  assert.equal((await reactionPromise).ok, true);
+
+  ws.message({
+    version: '1.0',
+    type: 'table_reaction',
+    roomId: 'table_test_1',
+    sessionId: 'session_1',
+    ts: '2026-08-03T00:00:00Z',
+    payload: { seatNo: 2, reactionKey: 'haha' }
+  });
+  assert.equal(h.snapshots.length, 0);
+  assert.equal(h.reactions.length, 1);
+  assert.equal(h.reactions[0].roomId, 'table_test_1');
+  assert.equal(h.reactions[0].sessionId, 'session_1');
+  assert.equal(h.reactions[0].ts, '2026-08-03T00:00:00Z');
+  assert.equal(h.reactions[0].payload.seatNo, 2);
+  assert.equal(h.reactions[0].payload.reactionKey, 'haha');
 });
 
 test('poker ws client keeps an ambiguous join pending after a command-scoped attach error', async () => {

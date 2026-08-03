@@ -92,6 +92,7 @@ run("node", ["ws-server/observability/vps-metrics.behavior.test.mjs"], "ws-vps-m
 run("node", ["ws-server/poker/idempotency/action-command.behavior.test.mjs"], "ws-action-command-idempotency-behavior");
 run("node", ["ws-server/poker/persistence/authoritative-rebuy-adapter.behavior.test.mjs"], "ws-authoritative-rebuy-adapter-behavior");
 run("node", ["ws-server/poker/handlers/rebuy.behavior.test.mjs"], "ws-rebuy-handler-behavior");
+run("node", ["ws-server/poker/handlers/reaction.behavior.test.mjs"], "ws-reaction-handler-behavior");
 run("node", ["ws-server/poker/runtime/disconnect-cleanup.behavior.test.mjs"], "ws-disconnect-cleanup-runtime-behavior");
 run("node", ["ws-server/poker/runtime/table-janitor.behavior.test.mjs"], "ws-table-janitor-behavior");
 run("node", ["ws-server/poker/runtime/accepted-bot-autoplay-adapter.behavior.test.mjs"], "ws-accepted-bot-autoplay-adapter-behavior");

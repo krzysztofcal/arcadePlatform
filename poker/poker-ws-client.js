@@ -87,6 +87,7 @@
     var onStatus = typeof options.onStatus === 'function' ? options.onStatus : function(){};
     var onSnapshot = typeof options.onSnapshot === 'function' ? options.onSnapshot : function(){};
     var onLobbySnapshot = typeof options.onLobbySnapshot === 'function' ? options.onLobbySnapshot : function(){};
+    var onReaction = typeof options.onReaction === 'function' ? options.onReaction : function(){};
     var onProtocolError = typeof options.onProtocolError === 'function' ? options.onProtocolError : function(){};
     var log = typeof options.klog === 'function' ? options.klog : klog;
     var mintUrl = typeof options.mintUrl === 'string' && options.mintUrl ? options.mintUrl : DEFAULT_MINT_URL;
@@ -358,6 +359,17 @@
         return;
       }
       if (isSnapshotFrameType(frame.type)) { var initial = !initialSnapshotDelivered; initialSnapshotDelivered = true; var normalized = normalizeSnapshot(frame, initial); if (normalized) onSnapshot(normalized); return; }
+      if (frame.type === 'table_reaction') {
+        try {
+          onReaction({
+            roomId: frame.roomId || tableId || null,
+            sessionId: frame.sessionId || null,
+            ts: frame.ts || null,
+            payload: frame.payload || {}
+          });
+        } catch (_err){}
+        return;
+      }
       if (frame.type === 'commandResult') { handleCommandResult(frame); emitStatus('command_result', { status: frame.payload && frame.payload.status ? frame.payload.status : null, reason: frame.payload && frame.payload.reason ? frame.payload.reason : null }); return; }
       if (frame.type === 'resync') {
         emitStatus('resync', {
@@ -467,7 +479,8 @@
       sendRebuy: function(payload, requestId){ return sendCommand('rebuy', payload || { tableId: tableId, amount: 100 }, requestId); },
       sendLeave: function(payload, requestId){ return sendCommand('leave', payload || { tableId: tableId }, requestId); },
       sendLeaveQueued: function(payload, requestId){ return queueCommand('leave', payload || { tableId: tableId }, requestId); },
-      sendStartHand: function(payload, requestId){ return sendCommand('start_hand', payload || { tableId: tableId }, requestId); }
+      sendStartHand: function(payload, requestId){ return sendCommand('start_hand', payload || { tableId: tableId }, requestId); },
+      sendReaction: function(reactionKey, requestId){ return sendCommand('reaction_send', { tableId: tableId, reactionKey: reactionKey }, requestId); }
     };
   }
 

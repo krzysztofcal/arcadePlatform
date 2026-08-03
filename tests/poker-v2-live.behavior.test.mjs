@@ -111,10 +111,11 @@ function createHarness(options = {}){
   [
     'xpBadge',
     'pokerMenuToggle', 'pokerMenuPanel', 'pokerLobbyLink',
-    'pokerSeatLayer', 'pokerSeatChipLayer', 'pokerChipFxLayer', 'pokerPotPill', 'pokerPotChipStack', 'pokerCommunityCards', 'pokerDealerChip',
+    'pokerSeatLayer', 'pokerSeatChipLayer', 'pokerChipFxLayer', 'pokerReactionLayer', 'pokerPotPill', 'pokerPotChipStack', 'pokerCommunityCards', 'pokerDealerChip',
     'pokerHeroCards', 'pokerV2LiveStatus', 'pokerV2TableMeta', 'pokerV2TurnText',
     'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2GuestPanel', 'pokerV2GuestBadge', 'pokerV2SignInBtn', 'pokerV2SeatNo',
     'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
+    'pokerV2ReactionControl', 'pokerV2ReactionBtn', 'pokerV2ReactionMenu', 'pokerV2ReactionHint',
     'pokerV2RebuyPanel', 'pokerV2RebuyTitle', 'pokerV2RebuyCopy', 'pokerV2RebuyBalance', 'pokerV2RebuyBtn', 'pokerV2RebuyLobbyBtn', 'pokerV2RebuyWatchBtn', 'pokerV2RebuyAccountLink',
     'pokerV2ClosedTableModal', 'pokerV2ClosedTableTitle', 'pokerV2ClosedTableCountdown',
     'pokerV2DemoPill', 'pokerV2FoldBtn', 'pokerV2PrimaryBtn', 'pokerV2AmountBtn',
@@ -150,6 +151,7 @@ function createHarness(options = {}){
   const startPayloads = [];
   const leavePayloads = [];
   const rebuyPayloads = [];
+  const reactionPayloads = [];
   let createOptions = null;
 
   const token = Object.prototype.hasOwnProperty.call(options, 'token')
@@ -183,6 +185,11 @@ function createHarness(options = {}){
     sendLeave(payload){
       leavePayloads.push(payload);
       if (typeof options.sendLeave === 'function') return options.sendLeave(payload, { attempt: leavePayloads.length });
+      return Promise.resolve({ ok: true });
+    },
+    sendReaction(reactionKey){
+      reactionPayloads.push(reactionKey);
+      if (typeof options.sendReaction === 'function') return options.sendReaction(reactionKey, { attempt: reactionPayloads.length });
       return Promise.resolve({ ok: true });
     },
     requestGameplaySnapshot(){
@@ -324,6 +331,7 @@ async function flush(){
     startPayloads,
     leavePayloads,
     rebuyPayloads,
+    reactionPayloads,
     getSnapshotRequestCount(){ return snapshotRequestCount; },
     fireDomContentLoaded,
     fireDocumentEvent,
@@ -447,6 +455,196 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(harness.leavePayloads.length, 1);
   assert.equal(JSON.stringify(harness.leavePayloads[0]), JSON.stringify({ tableId: 'table-1' }));
   assert.equal(harness.windowLocation.href, '/poker/');
+});
+
+test('poker v2 disables reactions for four seconds after an accepted reaction', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: { hand: { handId: null, status: 'LOBBY' }, pot: { total: 0 } },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2ReactionBtn.hidden, false);
+  assert.equal(harness.elements.pokerV2ReactionBtn.disabled, false);
+  harness.elements.pokerV2ReactionBtn.click();
+  const wowOption = harness.elements.pokerV2ReactionMenu.children.find((child) => child.dataset.reactionKey === 'wow');
+  assert.ok(wowOption);
+  wowOption.click();
+  await harness.flush();
+
+  assert.deepEqual(harness.reactionPayloads, ['wow']);
+  assert.equal(harness.elements.pokerV2ReactionBtn.disabled, true);
+  assert.equal(harness.elements.pokerV2ReactionHint.hidden, false);
+  assert.equal(harness.elements.pokerV2ReactionHint.textContent, 'You can react once every 4 seconds');
+
+  harness.advanceTime(3_999);
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2ReactionBtn.disabled, true);
+  harness.advanceTime(1);
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2ReactionBtn.disabled, false);
+  assert.equal(harness.elements.pokerV2ReactionHint.hidden, true);
+});
+
+test('poker v2 removes a reaction bubble when the seat owner changes', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        hand: { handId: null, status: 'LOBBY' },
+        pot: { total: 0 },
+        seats: [{ userId: 'user-1', seatNo: 1, status: 'ACTIVE' }]
+      },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+  ws.onReaction({ payload: { seatNo: 1, reactionKey: 'wow' } });
+  await harness.flush();
+  assert.ok(harness.elements.pokerReactionLayer.children.some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))));
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-2', seat: 1 }] },
+      public: {
+        hand: { handId: null, status: 'LOBBY' },
+        pot: { total: 0 },
+        seats: [{ userId: 'user-2', seatNo: 1, status: 'ACTIVE' }]
+      },
+      you: { seat: null }
+    }
+  });
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionLayer.children.length, 0);
+});
+
+test('poker v2 clears reaction bubbles immediately when reconnecting starts', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        hand: { handId: null, status: 'LOBBY' },
+        pot: { total: 0 },
+        seats: [{ userId: 'user-1', seatNo: 1, status: 'ACTIVE' }]
+      },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+  ws.onReaction({ payload: { seatNo: 1, reactionKey: 'wow' } });
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionLayer.children.length, 1);
+
+  ws.onStatus('reconnecting', { attempt: 1 });
+  assert.equal(harness.elements.pokerReactionLayer.children.length, 0);
+});
+
+test('poker v2 animates a reaction bubble only on its first render', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  const snapshot = (stateVersion) => ({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        hand: { handId: null, status: 'LOBBY' },
+        pot: { total: 0 },
+        seats: [{ userId: 'user-1', seatNo: 1, status: 'ACTIVE' }]
+      },
+      you: { seat: 1 }
+    }
+  });
+  ws.onSnapshot(snapshot(1));
+  await harness.flush();
+  ws.onReaction({ payload: { seatNo: 1, reactionKey: 'wow' } });
+  await harness.flush();
+
+  const findReactionBubble = () => {
+    for (const anchor of harness.elements.pokerReactionLayer.children) {
+      const bubble = (anchor.children || []).find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'));
+      if (bubble) return bubble;
+    }
+    return null;
+  };
+  const firstBubble = findReactionBubble();
+  assert.ok(firstBubble);
+  assert.equal(firstBubble.className, 'poker-seat-reaction-bubble poker-seat-reaction-bubble--enter', 'the received reaction should animate on entry');
+
+  ws.onSnapshot(snapshot(2));
+  await harness.flush();
+  const secondBubble = findReactionBubble();
+  assert.ok(secondBubble);
+  assert.equal(secondBubble.className, 'poker-seat-reaction-bubble');
+});
+
+test('poker v2 applies local cooldown after a server reaction rate limit', async () => {
+  const harness = createHarness({
+    sendReaction: () => {
+      const error = new Error('reaction_rate_limited');
+      error.code = 'reaction_rate_limited';
+      return Promise.reject(error);
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: { hand: { handId: null, status: 'LOBBY' }, pot: { total: 0 } },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+  harness.elements.pokerV2ReactionBtn.click();
+  const wowOption = harness.elements.pokerV2ReactionMenu.children.find((child) => child.dataset.reactionKey === 'wow');
+  wowOption.click();
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2ReactionBtn.disabled, true);
+  assert.equal(harness.elements.pokerV2ReactionHint.hidden, false);
+  harness.advanceTime(4_000);
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2ReactionBtn.disabled, false);
 });
 
 test('poker v2 shows one reserved next-hand join without cards, actions, or folded styling', async () => {

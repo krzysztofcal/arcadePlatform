@@ -1481,6 +1481,7 @@ function createServer({ env = {} } = {}) {
     const child = spawn(process.execPath, ["ws-server/server.mjs"], {
       env: {
         ...process.env,
+        WS_POKER_LOG_LEVEL: "INFO",
         PORT: String(port),
         WS_BOT_REACTION_MIN_MS: "0",
         WS_BOT_REACTION_MAX_MS: "0",
