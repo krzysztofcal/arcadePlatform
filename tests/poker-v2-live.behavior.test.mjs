@@ -540,6 +540,35 @@ test('poker v2 removes a reaction bubble when the seat owner changes', async () 
   assert.equal(harness.elements.pokerReactionLayer.children.length, 0);
 });
 
+test('poker v2 clears reaction bubbles immediately when reconnecting starts', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        hand: { handId: null, status: 'LOBBY' },
+        pot: { total: 0 },
+        seats: [{ userId: 'user-1', seatNo: 1, status: 'ACTIVE' }]
+      },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+  ws.onReaction({ payload: { seatNo: 1, reactionKey: 'wow' } });
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionLayer.children.length, 1);
+
+  ws.onStatus('reconnecting', { attempt: 1 });
+  assert.equal(harness.elements.pokerReactionLayer.children.length, 0);
+});
+
 test('poker v2 animates a reaction bubble only on its first render', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();

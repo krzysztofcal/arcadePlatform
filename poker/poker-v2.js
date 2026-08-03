@@ -1765,6 +1765,7 @@
       if (bubble && bubble.timer) window.clearTimeout(bubble.timer);
     });
     reactionBubblesBySeatNo = {};
+    if (els.reactionLayer) els.reactionLayer.innerHTML = '';
   }
 
   function currentSeatOwnerUserId(seatNo){
