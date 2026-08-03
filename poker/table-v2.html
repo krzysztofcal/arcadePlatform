@@ -58,9 +58,6 @@
         <button type="button" class="poker-live-btn" id="pokerV2SignInBtn">Create account and get 500 CH Welcome Bonus</button>
         <button type="button" class="poker-live-btn poker-live-btn--accent" id="pokerV2JoinBtn">Join</button>
         <button type="button" class="poker-live-btn" id="pokerV2LeaveBtn" hidden>Leave</button>
-        <button type="button" class="poker-live-btn poker-reaction-btn" id="pokerV2ReactionBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="pokerV2ReactionMenu" hidden>React</button>
-        <div class="poker-reaction-menu" id="pokerV2ReactionMenu" role="menu" aria-label="Reactions" hidden></div>
-        <div class="poker-reaction-hint" id="pokerV2ReactionHint" role="status" aria-live="polite" hidden></div>
         <input type="hidden" id="pokerV2SeatNo" value="1">
         <input type="hidden" id="pokerV2BuyIn" value="100">
       </div>
@@ -105,6 +102,11 @@
       <div class="poker-action-amount-input" id="pokerV2AmountInputWrap">
         <strong id="pokerV2AmountValue">20</strong>
         <input type="range" id="pokerV2AmountInput" value="20" min="1" max="20" step="1">
+      </div>
+      <div class="poker-action-reaction" id="pokerV2ReactionControl" hidden>
+        <button type="button" class="poker-live-btn poker-reaction-btn" id="pokerV2ReactionBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="pokerV2ReactionMenu" hidden>React</button>
+        <div class="poker-reaction-menu" id="pokerV2ReactionMenu" role="menu" aria-label="Reactions" hidden></div>
+        <div class="poker-reaction-hint" id="pokerV2ReactionHint" role="status" aria-live="polite" hidden></div>
       </div>
       <div class="poker-action-buttons">
         <button type="button" class="poker-action-btn poker-action-btn--fold" id="pokerV2FoldBtn" hidden>Fold</button>

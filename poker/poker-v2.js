@@ -1802,6 +1802,7 @@
     var seated = !!deriveCurrentSeat();
     var cooldownActive = reactionControlUntilMs > Date.now();
     var canUse = signedIn && seated && isWsReady() && !state.reconnectGate;
+    if (els.reactionControl) els.reactionControl.hidden = !signedIn || !seated;
     els.reactionBtn.hidden = !signedIn || !seated;
     els.reactionBtn.disabled = !canUse || cooldownActive;
     if (els.reactionHint){
@@ -3865,6 +3866,7 @@
     els.joinBuyIn = document.getElementById('pokerV2BuyIn');
     els.leaveBtn = document.getElementById('pokerV2LeaveBtn');
     els.reactionBtn = document.getElementById('pokerV2ReactionBtn');
+    els.reactionControl = document.getElementById('pokerV2ReactionControl');
     els.reactionMenu = document.getElementById('pokerV2ReactionMenu');
     els.reactionHint = document.getElementById('pokerV2ReactionHint');
     els.leaveConfirmModal = document.getElementById('pokerV2LeaveConfirmModal');

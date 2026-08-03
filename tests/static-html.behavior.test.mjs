@@ -60,6 +60,13 @@ assert.doesNotMatch(tableV2Css, /\.poker-seat--hero \.poker-seat-avatar\{[^}]*bo
 assert.match(tableV2Css, /\.poker-seat--hero\.poker-seat--active \.poker-seat-avatar\{border-color:rgba\(84,245,152,0\.88\);/, 'hero avatar should turn green only on the active turn');
 assert.match(tableV2Html, /id="pokerBootSplash"/, 'poker table v2 should render a boot splash to avoid raw HTML flash');
 assert.match(tableV2Html, /id="pokerV2AmountValue"/, 'poker table v2 should render a compact amount value for the action slider');
+const reactionControlIndex = tableV2Html.indexOf('id="pokerV2ReactionControl"');
+const actionBarIndex = tableV2Html.indexOf('class="poker-action-bar"');
+const actionButtonsIndex = tableV2Html.indexOf('class="poker-action-buttons"');
+assert.equal(actionBarIndex < reactionControlIndex && reactionControlIndex < actionButtonsIndex, true, 'reaction control should live above the poker action buttons');
+assert.match(tableV2Html, /id="pokerV2ReactionControl" hidden/, 'reaction control should stay hidden until a seated player can use it');
+assert.match(tableV2Css, /\.poker-seat-reaction-bubble\{[^}]*animation:poker-reaction-bubble-flyout/, 'reaction bubbles should have a flyout animation');
+assert.match(tableV2Css, /\.poker-action-reaction \.poker-reaction-menu\{[^}]*bottom:calc\(100% \+ 8px\)/, 'reaction menu should fly out above the poker actions');
 assert.match(consentManagerJs, /#manageCookies, \.manage-cookies, \[data-manage-cookies\]/, 'consent manager should delegate clicks from all manage cookies links');
 assert.match(consentManagerJs, /window\.klaro\.show\(window\.klaroConfig, true\)/, 'manage cookies should open the Klaro preference modal');
 assert.match(consentManagerJs, /netlify-drawer-active/, 'consent runtime should expose the active Netlify drawer state to responsive UI');
