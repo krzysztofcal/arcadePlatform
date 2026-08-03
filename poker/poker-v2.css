@@ -23,7 +23,7 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-seat-layer{position:absolute; inset:0; z-index:3;}
 .poker-seat-chip-layer{position:absolute; inset:0; z-index:4; pointer-events:none;}
 .poker-chip-fx-layer{position:absolute; inset:0; z-index:12; pointer-events:none; overflow:hidden;}
-.poker-reaction-layer{position:absolute; inset:0; z-index:14; pointer-events:none;}
+.poker-reaction-layer{position:absolute; inset:0; z-index:100; pointer-events:none;}
 .poker-reaction-anchor{position:absolute; width:0; height:0; transform:translate(-50%, -50%);}
 
 .poker-seat{position:absolute; width:113px; transform:translate(-50%, -50%); text-align:center;}
@@ -31,10 +31,10 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-seat-action-badge{position:absolute; transform:translate(-50%, -50%); min-width:42px; padding:4px 7px 5px; border-radius:999px; border:1px solid rgba(255,255,255,0.16); background:rgba(14,19,30,0.92); color:#eef4ff; font-size:0.56rem; font-weight:800; letter-spacing:0.04em; line-height:1; text-transform:uppercase; white-space:nowrap; box-shadow:0 6px 14px rgba(0,0,0,0.36); z-index:6; pointer-events:none;}
 .poker-seat-reaction-bubble{position:absolute;left:0;top:-42px;z-index:30;max-width:150px;padding:6px 9px;border:1px solid rgba(255,223,180,0.34);border-radius:999px;background:rgba(7,13,24,0.94);box-shadow:0 7px 16px rgba(0,0,0,0.38);color:#fff4dc;font-size:0.68rem;font-weight:700;line-height:1.1;white-space:nowrap;transform:translateX(-50%);pointer-events:none;}
 .poker-seat-reaction-bubble--enter{animation:poker-reaction-bubble-flyout 360ms cubic-bezier(.22,.8,.28,1);}
-.poker-seat-target-reaction{position:absolute;left:0;top:-78px;z-index:32;min-width:34px;min-height:34px;padding:4px 7px;border:1px solid rgba(255,223,180,0.46);border-radius:999px;background:linear-gradient(180deg,rgba(111,77,184,0.98),rgba(61,39,113,0.98));box-shadow:0 7px 16px rgba(0,0,0,0.42);font-size:1.05rem;line-height:1;transform:translateX(-50%);pointer-events:auto;cursor:pointer;}
+.poker-seat-target-reaction{position:absolute;left:-52px;top:-38px;z-index:102;min-width:34px;min-height:34px;padding:4px 7px;border:1px solid rgba(255,223,180,0.46);border-radius:999px;background:linear-gradient(180deg,rgba(111,77,184,0.98),rgba(61,39,113,0.98));box-shadow:0 7px 16px rgba(0,0,0,0.42);font-size:1.05rem;line-height:1;transform:translate(-50%, -50%);pointer-events:auto;cursor:pointer;}
 .poker-seat-target-reaction:disabled{opacity:0.5;cursor:default;}
-.poker-seat-target-reaction-effect{position:absolute;left:0;top:0;z-index:34;width:0;height:0;pointer-events:none;}
-.poker-seat-target-reaction-flyout{position:absolute;left:0;top:0;z-index:34;display:flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid rgba(255,223,180,0.5);border-radius:50%;background:linear-gradient(180deg,rgba(111,77,184,0.98),rgba(61,39,113,0.98));box-shadow:0 7px 16px rgba(0,0,0,0.42);font-size:1.05rem;line-height:1;transform:translate(calc(-50% + var(--reaction-delta-x)),calc(-50% + var(--reaction-delta-y))) scale(1);}
+.poker-seat-target-reaction-effect{position:absolute;left:0;top:0;z-index:103;width:0;height:0;pointer-events:none;}
+.poker-seat-target-reaction-flyout{position:absolute;left:0;top:0;z-index:103;display:flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid rgba(255,223,180,0.5);border-radius:50%;background:linear-gradient(180deg,rgba(111,77,184,0.98),rgba(61,39,113,0.98));box-shadow:0 7px 16px rgba(0,0,0,0.42);font-size:1.05rem;line-height:1;transform:translate(calc(-50% + var(--reaction-delta-x)),calc(-50% + var(--reaction-delta-y))) scale(1);}
 .poker-seat-target-reaction-flyout--enter{animation:poker-target-reaction-flyout 720ms cubic-bezier(.22,.8,.28,1) both;}
 @keyframes poker-reaction-bubble-flyout{0%{opacity:0;transform:translateX(-50%) translateY(14px) scale(.72);}55%{opacity:1;transform:translateX(-50%) translateY(-4px) scale(1.04);}100%{opacity:1;transform:translateX(-50%) translateY(0) scale(1);}}
 @keyframes poker-target-reaction-flyout{0%{opacity:0;transform:translate(-50%,-50%) scale(.62);}18%{opacity:1;}100%{opacity:1;transform:translate(calc(-50% + var(--reaction-delta-x)),calc(-50% + var(--reaction-delta-y))) scale(1);}}
