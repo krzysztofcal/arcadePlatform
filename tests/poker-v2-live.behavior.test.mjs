@@ -504,7 +504,7 @@ test('poker v2 disables reactions for four seconds after an accepted reaction', 
   assert.equal(harness.elements.pokerV2ReactionHint.hidden, true);
 });
 
-test('poker v2 keeps targeted reactions aligned with the local winner reveal window', async () => {
+test('poker v2 uses the WS settlement reveal deadline for targeted reactions', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -555,6 +555,7 @@ test('poker v2 keeps targeted reactions aligned with the local winner reveal win
         ]
       },
       public: {
+        settlementRevealDueAt: 1_700_000_001_500,
         hand: { handId: 'hand-1', status: 'SETTLED' },
         pot: { total: 100 },
         showdown: {
@@ -598,12 +599,12 @@ test('poker v2 keeps targeted reactions aligned with the local winner reveal win
   assert.ok(Math.abs(Number.parseFloat(reactionDeltaY)) > 50, 'vertical delta should use the reaction layer height');
   assert.equal(harness.elements.pokerReactionLayer.children.some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))), false);
 
-  harness.advanceTime(2_500);
+  harness.advanceTime(1_000);
   await harness.flush();
   const targetButtonsBeforeServerRevealDeadline = harness.elements.pokerReactionLayer.children
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
-  assert.equal(targetButtonsBeforeServerRevealDeadline.length, 1, 'the unselected targeted offer should remain available before the authoritative reveal deadline');
+  assert.equal(targetButtonsBeforeServerRevealDeadline.length, 2, 'targeted offers should remain available before the authoritative reveal deadline');
   harness.advanceTime(500);
   await harness.flush();
   const targetButtonsAfterServerRevealDeadline = harness.elements.pokerReactionLayer.children

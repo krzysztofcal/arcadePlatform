@@ -1196,6 +1196,7 @@ function buildTableStatePayload({ tableState, tableSnapshot, userId }) {
   if (Array.isArray(tableSnapshot.members)) payload.authoritativeMembers = tableSnapshot.members;
   if (tableSnapshot.showdown && typeof tableSnapshot.showdown === "object") payload.showdown = tableSnapshot.showdown;
   if (tableSnapshot.handSettlement && typeof tableSnapshot.handSettlement === "object") payload.handSettlement = tableSnapshot.handSettlement;
+  if (Number.isSafeInteger(tableSnapshot.settlementRevealDueAt) && tableSnapshot.settlementRevealDueAt >= 0) payload.settlementRevealDueAt = tableSnapshot.settlementRevealDueAt;
 
   // Identyczny bezpieczny kontrakt jak buildStateSnapshotPayload:
   // prywatny branch tylko dla siedzącego usera, hole cards przeciwników nie wyciekają.
@@ -1208,13 +1209,17 @@ function buildTableStatePayload({ tableState, tableSnapshot, userId }) {
 }
 
 function sendTableState(ws, connState, { requestId = null, tableState, tableSnapshot = null }) {
+  const settlementRevealDueAt = resolveSettlementRevealDueAtForTable(tableState.tableId);
+  const snapshotWithRevealDeadline = tableSnapshot && settlementRevealDueAt !== null
+    ? { ...tableSnapshot, settlementRevealDueAt }
+    : tableSnapshot;
   const frame = {
     version: "1.0",
     type: "table_state",
     ts: nowTs(),
     roomId: tableState.tableId,
     sessionId: connState.sessionId,
-    payload: buildTableStatePayload({ tableState, tableSnapshot, userId: connState.session.userId })
+    payload: buildTableStatePayload({ tableState, tableSnapshot: snapshotWithRevealDeadline, userId: connState.session.userId })
   };
 
   if (requestId) {
@@ -1226,10 +1231,12 @@ function sendTableState(ws, connState, { requestId = null, tableState, tableSnap
 
 function sendStateSnapshot(ws, connState, { requestId = null, tableSnapshot, reason = null }) {
   maybeScheduleSettledRollover(tableSnapshot.tableId);
+  const settlementRevealDueAt = resolveSettlementRevealDueAtForTable(tableSnapshot.tableId);
   const payload = buildStateSnapshotPayload({
     tableSnapshot,
     userId: connState.session.userId,
-    publicProfileStorageBaseUrl
+    publicProfileStorageBaseUrl,
+    settlementRevealDueAt
   });
 
   const frame = {
@@ -1254,10 +1261,12 @@ function sendStateSnapshot(ws, connState, { requestId = null, tableSnapshot, rea
 }
 
 function sendStateDelta(ws, connState, { tableSnapshot }) {
+  const settlementRevealDueAt = resolveSettlementRevealDueAtForTable(tableSnapshot.tableId);
   const payload = buildStateSnapshotPayload({
     tableSnapshot,
     userId: connState.session.userId,
-    publicProfileStorageBaseUrl
+    publicProfileStorageBaseUrl,
+    settlementRevealDueAt
   });
   const cacheKey = snapshotCacheKey(connState.sessionId, tableSnapshot.tableId);
   const previousPayload = lastSnapshotBySessionAndTable.get(cacheKey) ?? null;
@@ -2117,6 +2126,16 @@ function isValidTargetedSettlementTimestamp(settledAt, nowMs = Date.now()) {
   if (typeof settledAt !== "string" || !settledAt.trim()) return false;
   const settledAtMs = Date.parse(settledAt);
   return Number.isFinite(settledAtMs) && settledAtMs <= nowMs + 1_000;
+}
+
+function resolveSettlementRevealDueAtForTable(tableId, nowMs = Date.now()) {
+  const pokerState = tableManager.persistedPokerState(tableId);
+  const settledAt = pokerState?.handSettlement?.settledAt;
+  if (!pokerState || pokerState.phase !== "SETTLED" || !isValidTargetedSettlementTimestamp(settledAt, nowMs)) {
+    return null;
+  }
+  const dueAt = resolveSettledRevealDueAt({ settledAt, nowMs, revealMs: settledRevealMs });
+  return Number.isSafeInteger(dueAt) && dueAt >= 0 ? dueAt : null;
 }
 
 function normalizeTargetReactionUserIds(value) {

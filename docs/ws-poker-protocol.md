@@ -199,6 +199,7 @@ Canonical room-core fields in `payload.public`:
 - `payload.public.seats: Array<{ userId: string, seatNo: number, status: string, profile?: object }>`
 - `payload.public.showdown?: { winners: string[], potsAwarded: any[], potAwardedTotal: number, reason: string|null, handId: string|null }`
 - `payload.public.handSettlement?: { handId: string|null, settledAt: string|null, payouts: Record<string, number> }`
+- `payload.public.settlementRevealDueAt?: integer` — server-authoritative epoch-millisecond deadline for the current settled-hand reveal and targeted `nice_hand` window; omitted outside `SETTLED` or when the settlement timestamp is invalid.
 
 Canonical compatibility fields:
 
