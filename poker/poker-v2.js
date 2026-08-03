@@ -1767,6 +1767,29 @@
     reactionBubblesBySeatNo = {};
   }
 
+  function currentSeatOwnerUserId(seatNo){
+    for (var i = 0; i < state.seats.length; i++){
+      var seat = state.seats[i];
+      if (!seat || seat.seatNo !== seatNo) continue;
+      return typeof seat.userId === 'string' && seat.userId.trim() ? seat.userId.trim() : null;
+    }
+    return null;
+  }
+
+  function clearReactionBubble(seatNo){
+    var bubble = reactionBubblesBySeatNo[seatNo];
+    if (bubble && bubble.timer) window.clearTimeout(bubble.timer);
+    delete reactionBubblesBySeatNo[seatNo];
+  }
+
+  function clearReactionBubblesWithChangedOwners(){
+    Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
+      var bubble = reactionBubblesBySeatNo[seatNo];
+      var ownerUserId = currentSeatOwnerUserId(Number(seatNo));
+      if (!bubble || !ownerUserId || bubble.ownerUserId !== ownerUserId) clearReactionBubble(seatNo);
+    });
+  }
+
   function closeReactionMenu(){
     if (!els.reactionMenu || !els.reactionBtn) return;
     els.reactionMenu.hidden = true;
@@ -1804,10 +1827,11 @@
     var seatNo = Number(payload.seatNo);
     var reactionKey = typeof payload.reactionKey === 'string' ? payload.reactionKey : '';
     var entry = findReactionEntry(reactionKey);
-    if (!Number.isInteger(seatNo) || seatNo < 1 || !entry) return;
+    var ownerUserId = currentSeatOwnerUserId(seatNo);
+    if (!Number.isInteger(seatNo) || seatNo < 1 || !entry || !ownerUserId) return;
     var previous = reactionBubblesBySeatNo[seatNo];
     if (previous && previous.timer) window.clearTimeout(previous.timer);
-    var bubble = { reactionKey: reactionKey, timer: null };
+    var bubble = { reactionKey: reactionKey, ownerUserId: ownerUserId, timer: null };
     bubble.timer = window.setTimeout(function(){
       if (reactionBubblesBySeatNo[seatNo] !== bubble) return;
       delete reactionBubblesBySeatNo[seatNo];
@@ -1827,7 +1851,10 @@
       return result;
     }).catch(function(error){
       var code = normalizeSignalCode(error && (error.code || error.message));
-      if (code === 'reaction_rate_limited') return null;
+      if (code === 'reaction_rate_limited'){
+        startReactionCooldown();
+        return null;
+      }
       if (code === 'not_seated' || code === 'table_closed'){
         renderControls();
         if (wsClient && typeof wsClient.requestGameplaySnapshot === 'function') wsClient.requestGameplaySnapshot();
@@ -2555,6 +2582,7 @@
 
   function renderSeats(){
     if (!els.seatLayer) return;
+    clearReactionBubblesWithChangedOwners();
     els.seatLayer.innerHTML = '';
     renderedSeatAnchors = {};
     renderedSeatSlots = {};
@@ -2632,6 +2660,10 @@
 
       article.appendChild(avatar);
       var reactionBubble = seat && reactionBubblesBySeatNo[seat.seatNo];
+      if (reactionBubble && reactionBubble.ownerUserId !== currentSeatOwnerUserId(seat.seatNo)){
+        clearReactionBubble(seat.seatNo);
+        reactionBubble = null;
+      }
       var reactionEntry = reactionBubble ? findReactionEntry(reactionBubble.reactionKey) : null;
       if (reactionEntry){
         var bubble = document.createElement('div');
