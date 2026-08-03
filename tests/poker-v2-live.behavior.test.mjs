@@ -111,7 +111,7 @@ function createHarness(options = {}){
   [
     'xpBadge',
     'pokerMenuToggle', 'pokerMenuPanel', 'pokerLobbyLink',
-    'pokerSeatLayer', 'pokerSeatChipLayer', 'pokerChipFxLayer', 'pokerPotPill', 'pokerPotChipStack', 'pokerCommunityCards', 'pokerDealerChip',
+    'pokerSeatLayer', 'pokerSeatChipLayer', 'pokerChipFxLayer', 'pokerReactionLayer', 'pokerPotPill', 'pokerPotChipStack', 'pokerCommunityCards', 'pokerDealerChip',
     'pokerHeroCards', 'pokerV2LiveStatus', 'pokerV2TableMeta', 'pokerV2TurnText',
     'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2GuestPanel', 'pokerV2GuestBadge', 'pokerV2SignInBtn', 'pokerV2SeatNo',
     'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
@@ -520,7 +520,7 @@ test('poker v2 removes a reaction bubble when the seat owner changes', async () 
   await harness.flush();
   ws.onReaction({ payload: { seatNo: 1, reactionKey: 'wow' } });
   await harness.flush();
-  assert.ok(harness.elements.pokerSeatLayer.children.some((seat) => (seat.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))));
+  assert.ok(harness.elements.pokerReactionLayer.children.some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))));
 
   ws.onSnapshot({
     kind: 'stateSnapshot',
@@ -537,7 +537,7 @@ test('poker v2 removes a reaction bubble when the seat owner changes', async () 
     }
   });
   await harness.flush();
-  assert.equal(harness.elements.pokerSeatLayer.children.some((seat) => findSeatChild(seat, 'poker-seat-reaction-bubble')), false);
+  assert.equal(harness.elements.pokerReactionLayer.children.length, 0);
 });
 
 test('poker v2 animates a reaction bubble only on its first render', async () => {
@@ -566,8 +566,8 @@ test('poker v2 animates a reaction bubble only on its first render', async () =>
   await harness.flush();
 
   const findReactionBubble = () => {
-    for (const seat of harness.elements.pokerSeatLayer.children) {
-      const bubble = (seat.children || []).find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'));
+    for (const anchor of harness.elements.pokerReactionLayer.children) {
+      const bubble = (anchor.children || []).find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'));
       if (bubble) return bubble;
     }
     return null;

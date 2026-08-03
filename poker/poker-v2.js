@@ -2660,19 +2660,6 @@
       status.style.top = statusPosition.top;
 
       article.appendChild(avatar);
-      var reactionBubble = seat && reactionBubblesBySeatNo[seat.seatNo];
-      if (reactionBubble && reactionBubble.ownerUserId !== currentSeatOwnerUserId(seat.seatNo)){
-        clearReactionBubble(seat.seatNo);
-        reactionBubble = null;
-      }
-      var reactionEntry = reactionBubble ? findReactionEntry(reactionBubble.reactionKey) : null;
-      if (reactionEntry){
-        var bubble = document.createElement('div');
-        bubble.className = 'poker-seat-reaction-bubble' + (reactionBubble.animate ? ' poker-seat-reaction-bubble--enter' : '');
-        bubble.setAttribute('role', 'status');
-        bubble.textContent = reactionEntry.emoji + ' ' + reactionEntry.label;
-        article.appendChild(bubble);
-      }
       if (seat && lastAction){
         var actionBadge = document.createElement('div');
         var badgePosition = getSeatActionBadgePosition(rotatedIndex, hero);
@@ -2718,9 +2705,36 @@
       }
       els.seatLayer.appendChild(article);
     }
+    renderReactionBubbles();
     Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
       var reactionBubble = reactionBubblesBySeatNo[seatNo];
       if (reactionBubble) reactionBubble.animate = false;
+    });
+  }
+
+  function renderReactionBubbles(){
+    if (!els.reactionLayer) return;
+    els.reactionLayer.innerHTML = '';
+    Object.keys(reactionBubblesBySeatNo).forEach(function(seatNoKey){
+      var seatNo = Number(seatNoKey);
+      var reactionBubble = reactionBubblesBySeatNo[seatNoKey];
+      var ownerUserId = currentSeatOwnerUserId(seatNo);
+      var anchor = renderedSeatAnchors[seatNo];
+      var reactionEntry = reactionBubble ? findReactionEntry(reactionBubble.reactionKey) : null;
+      if (!reactionBubble || !ownerUserId || reactionBubble.ownerUserId !== ownerUserId || !anchor || !reactionEntry){
+        clearReactionBubble(seatNo);
+        return;
+      }
+      var anchorNode = document.createElement('div');
+      anchorNode.className = 'poker-reaction-anchor';
+      anchorNode.style.left = anchor.x + '%';
+      anchorNode.style.top = anchor.y + '%';
+      var bubble = document.createElement('div');
+      bubble.className = 'poker-seat-reaction-bubble' + (reactionBubble.animate ? ' poker-seat-reaction-bubble--enter' : '');
+      bubble.setAttribute('role', 'status');
+      bubble.textContent = reactionEntry.emoji + ' ' + reactionEntry.label;
+      anchorNode.appendChild(bubble);
+      els.reactionLayer.appendChild(anchorNode);
     });
   }
 
@@ -3852,6 +3866,7 @@
     els.seatLayer = document.getElementById('pokerSeatLayer');
     els.seatChipLayer = document.getElementById('pokerSeatChipLayer');
     els.chipFxLayer = document.getElementById('pokerChipFxLayer');
+    els.reactionLayer = document.getElementById('pokerReactionLayer');
     els.potPill = document.getElementById('pokerPotPill');
     els.potChipStack = document.getElementById('pokerPotChipStack');
     els.communityCards = document.getElementById('pokerCommunityCards');
