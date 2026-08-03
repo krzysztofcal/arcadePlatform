@@ -505,7 +505,8 @@ test('poker v2 disables reactions for four seconds after an accepted reaction', 
 });
 
 test('poker v2 uses the WS settlement reveal deadline for targeted reactions', async () => {
-  const harness = createHarness();
+  const nowMs = 1_700_000_000_000;
+  const harness = createHarness({ nowMs });
   harness.fireDomContentLoaded();
   await harness.flush();
 
@@ -538,7 +539,7 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
     }
   });
   await harness.flush();
-  const settledAt = new Date(1_700_000_000_000 - 1_000).toISOString();
+  const settledAt = new Date(nowMs - 3_900).toISOString();
   ws.onSnapshot({
     kind: 'stateSnapshot',
     payload: {
@@ -555,7 +556,7 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
         ]
       },
       public: {
-        settlementRevealDueAt: 1_700_000_001_500,
+        settlementRevealDueAt: nowMs + 4_000,
         hand: { handId: 'hand-1', status: 'SETTLED' },
         pot: { total: 100 },
         showdown: {
@@ -599,13 +600,13 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
   assert.ok(Math.abs(Number.parseFloat(reactionDeltaY)) > 50, 'vertical delta should use the reaction layer height');
   assert.equal(harness.elements.pokerReactionLayer.children.some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))), false);
 
-  harness.advanceTime(1_000);
+  harness.advanceTime(3_500);
   await harness.flush();
   const targetButtonsBeforeServerRevealDeadline = harness.elements.pokerReactionLayer.children
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
-  assert.equal(targetButtonsBeforeServerRevealDeadline.length, 2, 'targeted offers should remain available before the authoritative reveal deadline');
-  harness.advanceTime(500);
+  assert.equal(targetButtonsBeforeServerRevealDeadline.length, 1, 'the unused targeted offer should remain available for nearly four seconds from publication');
+  harness.advanceTime(300);
   await harness.flush();
   const targetButtonsAfterServerRevealDeadline = harness.elements.pokerReactionLayer.children
     .flatMap((anchor) => anchor.children || [])
