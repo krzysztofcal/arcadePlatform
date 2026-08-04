@@ -279,26 +279,33 @@ Once set to `true` the flag never returns to `false`. Existing tables are backfi
 
 This classification affects retention only. It does not make the database authoritative for active gameplay, does not replace `poker_seats` or `poker_state`, and is not consulted by bot claims recovery, terminal accounting, or any gameplay decision.
 
-### Two-phase deletion semantics
+### Three-phase deletion semantics
 
-Cleanup runs in two sequential phases inside a single database transaction:
+Cleanup runs in bounded rounds. Each phase has its own database transaction, so
+a successful phase is not rolled back when a later phase fails:
+
+**Hole cards phase.** Deletes `poker_hole_cards` for unique `(table_id, hand_id)`
+hands whose `HAND_SETTLED` marker is older than the applicable action-retention
+cutoff. `batchSize` limits candidate hands; `holeCardsDeleted` counts physical
+hole-card rows. A failed hole-card phase is not retried in later rounds of the
+same sweep, but is retried by the next sweep.
 
 **Phase 1 — ordinary actions.** Deletes all action rows except `HAND_SETTLED` for completed hands whose `HAND_SETTLED` audit row is older than the applicable action-retention cutoff. Only hands that still have ordinary action rows are selected (correlated `EXISTS`). A table's retention classification is read while holding a row lock (`FOR UPDATE OF t SKIP LOCKED`) and locked tables are bounded by `lockLimit = batchSize * 2`.
 
-**Phase 2 — settlement markers.** Deletes old `HAND_SETTLED` rows only when no ordinary actions remain for the same hand (correlated `NOT EXISTS`). This guarantees Phase 1 processes a hand before Phase 2 removes its marker, even if a sweep backlog builds up.
+**Phase 2 — settlement markers.** Deletes old `HAND_SETTLED` rows only when no ordinary actions and no `poker_hole_cards` remain for the same hand (two correlated `NOT EXISTS` checks). This guarantees that a marker remains available for a later hole-card retry if that phase previously failed.
 
-Phase 1 always runs before Phase 2 in the same transaction. Both phases use bounded `locked_tables` and candidate CTEs followed by `DELETE … RETURNING id`. Bot and human cutoffs are selected through classification predicates (`has_human_participant`) inside each CTE.
+The order in every round is hole cards, Phase 1, then Phase 2. A hole-card failure does not block the action phases. A Phase 1 or Phase 2 failure stops later rounds. All phases use bounded `locked_tables` and candidate CTEs followed by `DELETE … RETURNING id`. Bot and human cutoffs are selected through classification predicates (`has_human_participant`) inside each CTE.
 
-`batchSize` limits the number of candidate hands (Phase 1) or settlement rows (Phase 2) selected per sweep, not the number of ordinary action rows deleted. A single Phase 1 candidate hand may contain dozens of ordinary action rows, so `phase1Deleted` in the log may be much larger than `batchSize`.
+`batchSize` limits the number of candidate hands (hole cards and Phase 1) or settlement rows (Phase 2) selected per sweep, not the number of physical rows deleted. A single candidate hand may contain multiple hole-card or ordinary-action rows, so the corresponding deleted counters may be much larger than `batchSize`.
 
 ### Environment variables
 
 | Variable | Unit | Default | Range | Disabled | Meaning |
 |----------|------|---------|-------|----------|---------|
-| `WS_POKER_BOT_ACTION_RETENTION_MS` | ms | `0` | finite non-negative integer | `0` | Delete ordinary actions for bot-only tables after this many ms since the hand's `HAND_SETTLED` marker |
-| `WS_POKER_BOT_SETTLED_RETENTION_MS` | ms | `0` | finite non-negative integer | `0` | Delete `HAND_SETTLED` markers for bot-only tables after this many ms, and only when ordinary actions are already gone |
+| `WS_POKER_BOT_ACTION_RETENTION_MS` | ms | `0` | finite non-negative integer | `0` | Delete ordinary actions and eligible hole cards for bot-only tables after this many ms since the hand's `HAND_SETTLED` marker |
+| `WS_POKER_BOT_SETTLED_RETENTION_MS` | ms | `0` | finite non-negative integer | `0` | Delete `HAND_SETTLED` markers for bot-only tables after this many ms, only when ordinary actions and hole cards are gone |
 | `WS_POKER_HUMAN_ACTION_RETENTION_MS` | ms | `0` | finite non-negative integer | `0` | Same as bot-action but for tables where a human ever played |
-| `WS_POKER_HUMAN_SETTLED_RETENTION_MS` | ms | `0` | finite non-negative integer | `0` | Same as bot-settled but for human-participated tables |
+| `WS_POKER_HUMAN_SETTLED_RETENTION_MS` | ms | `0` | finite non-negative integer | `0` | Delete `HAND_SETTLED` markers for human-participated tables after this many ms, only when ordinary actions and hole cards are gone |
 | `WS_POKER_ACTION_HISTORY_SWEEP_MS` | ms | `300000` (5 min) | `30_000`–`3_600_000` | N/A | Interval between cleanup sweep invocations |
 | `WS_POKER_ACTION_HISTORY_BATCH_SIZE` | count | `20` | `1`–`100` integer | N/A | Maximum candidate hands/settlements per phase per sweep. `lockLimit` is derived as `batchSize * 2` |
 
@@ -359,10 +366,10 @@ Editing an already-applied migration is not allowed. Use a new timestamped migra
 
 | Event | Severity | Fields |
 |-------|----------|--------|
-| `ws_action_history_cleanup_complete` | INFO | `phase1Deleted`, `phase2Deleted`, `batchSize`, `lockLimit` |
-| `ws_action_history_cleanup_failed` | ERROR | `reason` (error code or message) |
+| `ws_action_history_cleanup_complete` | INFO | `holeCardsDeleted`, `phase1Deleted`, `phase2Deleted`, `batchSize`, `lockLimit` |
+| `ws_action_history_cleanup_failed` | ERROR | stable `errorCode`, ordered `failedPhases`, completed phase counters |
 
-The `complete` event is emitted only when at least one row was deleted. The `failed` event is emitted on any unexpected error.
+The `complete` event is emitted only when at least one row was deleted. A no-op with enabled retention remains a successful, quiet sweep. The `failed` event is emitted after a sweep with one or more failed phases. Because transactions are separate, `failed` does not mean that successful phase counters were rolled back; the panel may show positive deletion counts together with `failed`.
 
 **Preview verification commands:**
 
@@ -434,6 +441,6 @@ A shared stage database may contain a historical backlog. A recently active cont
 - Deployed SHA: `a9eacc3f6ac37d9dab473e6f12febf417b4f06d1`
 - Local health (`http://127.0.0.1:3001/healthz`) returned `200`; public health passed.
 - Both phases deleted rows against real PostgreSQL on the stage database.
-- Bounded `phase1Deleted` and `phase2Deleted` values were observed in `ws_action_history_cleanup_complete` logs.
+- Bounded `holeCardsDeleted`, `phase1Deleted`, and `phase2Deleted` values were observed in `ws_action_history_cleanup_complete` logs.
 - No `ws_action_history_cleanup_failed` events were observed.
 - Preview was then configured for continuous retention with the policy documented above.

@@ -3348,11 +3348,16 @@ function projectCleanupMetrics(cleanupResult) {
   if (!cleanupResult || typeof cleanupResult !== "object") return null;
   const backlog = cleanupResult.backlog;
   const lastRun = cleanupResult.lastRun;
+  const holeCardsDeleted = safeMetricInteger(lastRun?.holeCardsDeleted);
   const phase1Deleted = safeMetricInteger(lastRun?.phase1Deleted);
   const phase2Deleted = safeMetricInteger(lastRun?.phase2Deleted);
   const deletedRows = phase1Deleted != null && phase2Deleted != null
-    ? phase1Deleted + phase2Deleted
+    ? (holeCardsDeleted || 0) + phase1Deleted + phase2Deleted
     : null;
+  const failedPhaseOrder = ["hole_cards", "ordinary_actions", "hand_settled"];
+  const failedPhases = Array.isArray(lastRun?.failedPhases)
+    ? failedPhaseOrder.filter((phase) => lastRun.failedPhases.includes(phase))
+    : [];
   return {
     backlog: backlog && typeof backlog === "object" ? {
       ordinaryActionRows: safeMetricInteger(backlog.ordinaryActionRows),
@@ -3365,8 +3370,13 @@ function projectCleanupMetrics(cleanupResult) {
     lastRun: lastRun && typeof lastRun === "object" ? {
       finishedAt: typeof lastRun.finishedAt === "string" ? lastRun.finishedAt : null,
       durationMs: safeMetricInteger(lastRun.durationMs),
+      holeCardsDeleted,
+      phase1Deleted,
+      phase2Deleted,
       deletedRows: Number.isSafeInteger(deletedRows) ? deletedRows : null,
-      result: typeof lastRun.result === "string" ? lastRun.result : null
+      result: typeof lastRun.result === "string" ? lastRun.result : null,
+      errorCode: typeof lastRun.errorCode === "string" ? lastRun.errorCode : null,
+      failedPhases
     } : null
   };
 }

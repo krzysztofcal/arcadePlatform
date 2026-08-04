@@ -195,8 +195,10 @@ test("maintenance proxy accepts the environment from an actual WS POST response"
     assert.deepEqual(JSON.parse(response.body), {
       ok: true,
       operation: "cleanup",
+      holeCardsDeleted: 0,
       phase1Deleted: 0,
       phase2Deleted: 0,
+      failedPhases: [],
       skipped: true,
       reason: "cleanup_disabled",
       environment: "preview"
@@ -222,6 +224,46 @@ test("maintenance proxy rejects an upstream environment mismatch", async () => {
   const response = await handler(event("GET"));
   assert.equal(response.statusCode, 502);
   assert.deepEqual(JSON.parse(response.body), { error: "ws_maintenance_environment_mismatch" });
+});
+
+test("maintenance proxy preserves cleanup failure counters and failed phases from HTTP 409", async () => {
+  const handler = createAdminPokerMaintenanceHandler({
+    env: {
+      CHIPS_ENABLED: "1",
+      POKER_WS_INTERNAL_BASE_URL: "https://ws-preview.kcswh.pl",
+      POKER_WS_INTERNAL_TOKEN: "preview-token"
+    },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    buildStageIdentity: previewIdentity,
+    fetchImpl: async () => ({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        ok: false,
+        operation: "cleanup",
+        result: "failed",
+        holeCardsDeleted: 4,
+        phase1Deleted: 9,
+        phase2Deleted: 2,
+        errorCode: "hole_cards_cleanup_failed",
+        failedPhases: ["hole_cards"],
+        environment: "preview"
+      })
+    })
+  });
+
+  const response = await handler(event("POST", JSON.stringify({ operation: "cleanup" })));
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(JSON.parse(response.body), {
+    operation: "cleanup",
+    result: "failed",
+    holeCardsDeleted: 4,
+    phase1Deleted: 9,
+    phase2Deleted: 2,
+    errorCode: "hole_cards_cleanup_failed",
+    failedPhases: ["hole_cards"],
+    error: "cleanup_failed"
+  });
 });
 
 test("maintenance proxy does not contact WS for non-admin or unverified environment", async () => {

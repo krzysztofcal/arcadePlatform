@@ -43,6 +43,9 @@ jobs:
       - name: Native JSONB integration test
         run: node --test ws-server/poker/persistence/native-jsonb.integration.test.mjs
 
+      - name: Action-history cleanup PostgreSQL integration test
+        run: node --test ws-server/poker/persistence/action-history-cleanup.integration.test.mjs
+
       - name: Validate games catalog
         run: npm run lint:games
 

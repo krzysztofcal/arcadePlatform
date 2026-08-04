@@ -1322,6 +1322,7 @@
       renderKvRow("Last cleanup", lastRun ? formatTimestamp(lastRun.finishedAt) : "No run recorded"),
       renderKvRow("Last cleanup deleted", deletedRows),
       renderKvRow("Last cleanup result", lastRun ? lastRun.result : "No run recorded"),
+      renderKvRow("Failed phases", lastRun && Array.isArray(lastRun.failedPhases) && lastRun.failedPhases.length ? lastRun.failedPhases.join(", ") : "—"),
       "</div>",
       "</div>"
     ].join("");
@@ -1736,7 +1737,10 @@
         renderKvRow("Next cleanup batch · HAND_SETTLED", cleanup.backlog && cleanup.backlog.available ? cleanup.backlog.handSettledRows : "unavailable"),
         renderKvRow("Last cleanup", formatTimestamp(lastRun.finishedAt)),
         renderKvRow("Last cleanup result", lastRun.result || "—"),
+        renderKvRow("Last hole-card deletes", lastRun.holeCardsDeleted == null ? "—" : String(lastRun.holeCardsDeleted)),
         renderKvRow("Last phase deletes", lastRun.phase1Deleted == null ? "—" : String(lastRun.phase1Deleted) + "/" + String(lastRun.phase2Deleted || 0)),
+        renderKvRow("Failed phases", Array.isArray(lastRun.failedPhases) && lastRun.failedPhases.length ? lastRun.failedPhases.join(", ") : "—"),
+        renderKvRow("Last error code", lastRun.errorCode || "—"),
         renderKvRow("Last duration", lastRun.durationMs == null ? "—" : String(lastRun.durationMs) + " ms"),
         '</div>'
       ].join("");
@@ -2599,6 +2603,10 @@
       if (state.ops.pokerMaintenanceError === "ws_maintenance_timeout"){
         await loadOps();
         state.ops.pokerMaintenanceError = "Request timed out; refreshing status to show the current result.";
+      } else if (operation === "cleanup" && err && err.payload && Array.isArray(err.payload.failedPhases)) {
+        try { await loadOps(); } catch (_refreshError) {}
+        state.ops.pokerMaintenanceError = "cleanup_failed";
+        setStatus("Cleanup failed in one or more phases; completed phase counts were preserved.", "error");
       } else {
         handleApiError(err, "Could not update poker maintenance.");
       }

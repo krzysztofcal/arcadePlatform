@@ -307,6 +307,14 @@ function createAdminDom() {
     "adminOpsRuntime",
     "adminOpsVpsMetrics",
     "adminOpsPokerEscrow",
+    "adminOpsMaintenance",
+    "adminOpsMaintenanceEnabled",
+    "adminOpsMaintenanceCount",
+    "adminOpsMaintenanceApply",
+    "adminOpsMaintenanceStop",
+    "adminOpsMaintenanceReconcile",
+    "adminOpsMaintenanceCleanup",
+    "adminOpsMaintenanceStatus",
     "adminOpsBotReactionSummary",
     "adminOpsBotReactionDelay",
     "adminOpsBotReactionApply",
@@ -406,7 +414,7 @@ function buildContext(options = {}) {
   const { document, tabs, panels } = createAdminDom();
   const fetchCalls = [];
   var vpsMetricsCalls = 0;
-  const fetch = async (url) => {
+  const fetch = async (url, options) => {
     fetchCalls.push(String(url || ""));
     const text = String(url || "");
     if (text.includes("/.netlify/functions/admin-me")) {
@@ -558,6 +566,40 @@ function buildContext(options = {}) {
           backlog: { ordinaryActionRows: 0, handSettledRows: 0, cappedAtBatchSize: true, measuredAt: "2026-08-02T18:59:58.000Z" },
           lastRun: { finishedAt: "2026-08-02T18:55:00.000Z", durationMs: 184, deletedRows: 37, result: "success" },
         },
+      }) };
+    }
+    if (text.includes("/.netlify/functions/admin-poker-maintenance")) {
+      if (opts.cleanupFails && options && options.method === "POST") {
+        return { ok: false, status: 409, json: async () => ({
+          error: "cleanup_failed",
+          operation: "cleanup",
+          result: "failed",
+          holeCardsDeleted: 4,
+          phase1Deleted: 9,
+          phase2Deleted: 2,
+          errorCode: "hole_cards_cleanup_failed",
+          failedPhases: ["hole_cards"]
+        }) };
+      }
+      return { ok: true, json: async () => ({
+        ok: true,
+        environment: "preview",
+        continuous: {
+          maintenanceEnabled: true,
+          desiredTableCount: 2,
+          maxDesiredTableCount: 2,
+          creationLimitPerReconcile: 2,
+          effectiveDesiredTableCount: 2,
+          tables: [],
+          supervisor: { started: true, sweepInProgress: false, lastSweepFinishedAt: null, lastSweepResult: null, lastError: null }
+        },
+        cleanup: {
+          retention: { botActionsMs: 1000, botSettledMs: 2000, humanActionsMs: 3000, humanSettledMs: 4000 },
+          batchSize: 5,
+          sweepRounds: 1,
+          backlog: { available: true, ordinaryActionRows: 0, handSettledRows: 0 },
+          lastRun: { finishedAt: null, durationMs: 1, holeCardsDeleted: 0, phase1Deleted: 0, phase2Deleted: 0, result: "success", failedPhases: [], errorCode: null }
+        }
       }) };
     }
     if (text.includes("/.netlify/functions/admin-stage-identity")) {
@@ -831,7 +873,6 @@ test("admin page marks the previous VPS metrics snapshot stale after a refresh f
   await flush();
   tabs[5].dispatchEvent({ type: "click", bubbles: true, target: tabs[5], preventDefault() {} });
   await flush();
-  await flush();
   assert.match(document.getElementById("adminOpsVpsMetrics").innerHTML, /Available/);
 
   document.getElementById("adminOpsRefresh").dispatchEvent({ type: "click", preventDefault() {} });
@@ -899,6 +940,26 @@ test("admin page keeps read-only Ops available during CH maintenance", async () 
   assert.equal(document.getElementById("adminOpsBotReactionDelay").disabled, true);
   assert.equal(document.getElementById("adminOpsBotReactionApply").disabled, true);
   assert.equal(document.getElementById("adminOpsBotReactionDefault").disabled, true);
+});
+
+test("admin cleanup failure preserves phase details and refreshes status", async () => {
+  const { context, document, tabs } = buildContext({ cleanupFails: true });
+  vm.runInContext(source, context, { filename: "js/admin-page.js" });
+
+  await flush();
+  tabs[5].dispatchEvent({ type: "click", bubbles: true, target: tabs[5], preventDefault() {} });
+  await flush();
+  await flush();
+  await flush();
+
+  const cleanupButton = document.getElementById("adminOpsMaintenanceCleanup");
+  assert.ok(cleanupButton);
+  cleanupButton.dispatchEvent({ type: "click", bubbles: true, target: cleanupButton, preventDefault() {} });
+  await flush();
+  await flush();
+
+  assert.match(document.getElementById("adminStatus").textContent, /completed phase counts were preserved/);
+  assert.match(document.getElementById("adminOpsMaintenance").innerHTML, /Failed phases/);
 });
 
 test("admin page distinguishes unavailable bootstrap from a non-admin account", async () => {
