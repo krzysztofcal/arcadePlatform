@@ -303,9 +303,9 @@ The order in every round is hole cards, Phase 1, then Phase 2. A hole-card failu
 | Variable | Unit | Default | Range | Disabled | Meaning |
 |----------|------|---------|-------|----------|---------|
 | `WS_POKER_BOT_ACTION_RETENTION_MS` | ms | `0` | finite non-negative integer | `0` | Delete ordinary actions and eligible hole cards for bot-only tables after this many ms since the hand's `HAND_SETTLED` marker |
-| `WS_POKER_BOT_SETTLED_RETENTION_MS` | ms | `0` | finite non-negative integer | `0` | Delete `HAND_SETTLED` markers for bot-only tables after this many ms, and only when ordinary actions are already gone |
+| `WS_POKER_BOT_SETTLED_RETENTION_MS` | ms | `0` | finite non-negative integer | `0` | Delete `HAND_SETTLED` markers for bot-only tables after this many ms, only when ordinary actions and hole cards are gone |
 | `WS_POKER_HUMAN_ACTION_RETENTION_MS` | ms | `0` | finite non-negative integer | `0` | Same as bot-action but for tables where a human ever played |
-| `WS_POKER_HUMAN_SETTLED_RETENTION_MS` | ms | `0` | finite non-negative integer | `0` | Same as bot-settled but for human-participated tables |
+| `WS_POKER_HUMAN_SETTLED_RETENTION_MS` | ms | `0` | finite non-negative integer | `0` | Delete `HAND_SETTLED` markers for human-participated tables after this many ms, only when ordinary actions and hole cards are gone |
 | `WS_POKER_ACTION_HISTORY_SWEEP_MS` | ms | `300000` (5 min) | `30_000`–`3_600_000` | N/A | Interval between cleanup sweep invocations |
 | `WS_POKER_ACTION_HISTORY_BATCH_SIZE` | count | `20` | `1`–`100` integer | N/A | Maximum candidate hands/settlements per phase per sweep. `lockLimit` is derived as `batchSize * 2` |
 
