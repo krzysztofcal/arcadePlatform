@@ -705,6 +705,113 @@ test("reaction_send broadcasts an ephemeral table event without stream replay", 
   }
 }));
 
+test("targeted nice_hand requires the matching settled hand and broadcasts the target seat", async () => runSerial(async () => {
+  const secret = "test-secret";
+  const tableId = "table_targeted_reaction_contract";
+  const handId = "settled-hand-targeted";
+  const settledAt = new Date().toISOString();
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "active" },
+      seatRows: [
+        { user_id: "reaction_sender", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 },
+        { user_id: "reaction_winner", seat_no: 2, status: "ACTIVE", is_bot: false, stack: 100 }
+      ],
+      stateRow: {
+        version: 4,
+        state: {
+          handId,
+          phase: "SETTLED",
+          stacks: { reaction_sender: 100, reaction_winner: 100 },
+          showdown: {
+            handId,
+            reason: "computed",
+            potAwardedTotal: 100,
+            potsAwarded: [{ amount: 100, winners: ["reaction_winner"], eligibleUserIds: ["reaction_sender", "reaction_winner"] }]
+          },
+          handSettlement: {
+            handId,
+            settledAt,
+            payouts: { reaction_winner: 100 }
+          }
+        }
+      }
+    }
+  };
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      ...observeOnlyJoinEnv(),
+      WS_PRESENCE_TTL_MS: "0",
+      ...persistedBootstrapFixturesEnv(fixtures)
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const sender = await connectClient(port);
+    const recipient = await connectClient(port);
+    await hello(sender, "req-hello-targeted-sender");
+    await hello(recipient, "req-hello-targeted-recipient");
+    assert.equal((await auth(sender, secret, "reaction_sender", "req-auth-targeted-sender")).type, "authOk");
+    assert.equal((await auth(recipient, secret, "reaction_recipient", "req-auth-targeted-recipient")).type, "authOk");
+
+    for (const [socket, suffix] of [[sender, "sender"], [recipient, "recipient"]]) {
+      sendFrame(socket, {
+        version: "1.0",
+        type: "table_state_sub",
+        requestId: `req-sub-targeted-${suffix}`,
+        ts: "2026-08-03T00:00:00Z",
+        payload: { tableId }
+      });
+      const initial = await nextMessageOfType(socket, "table_state", 5000, `targetedInitial-${suffix}`);
+      assert.equal(initial.type, "table_state");
+      assert.equal(Number.isSafeInteger(initial.payload.settlementRevealDueAt), true);
+      assert.ok(initial.payload.settlementRevealDueAt > Date.now() + 3_500);
+      assert.ok(initial.payload.settlementRevealDueAt <= Date.now() + 5_000);
+    }
+
+    const mismatchResultPromise = nextMessageOfType(sender, "commandResult", 5000, "targetedMismatchResult");
+    sendFrame(sender, {
+      version: "1.0",
+      type: "reaction_send",
+      requestId: "req-targeted-mismatch",
+      ts: "2026-08-03T00:00:01Z",
+      payload: { tableId, reactionKey: "nice_hand", targetSeatNo: 2, handId: "old-hand" }
+    });
+    const mismatchResult = await mismatchResultPromise;
+    assert.equal(mismatchResult.payload.status, "rejected");
+    assert.equal(mismatchResult.payload.reason, "settlement_mismatch");
+
+    const senderResultPromise = nextMessageOfType(sender, "commandResult", 5000, "targetedCommandResult");
+    const senderReactionPromise = nextMessageOfType(sender, "table_reaction", 5000, "targetedSenderEvent");
+    const recipientReactionPromise = nextMessageOfType(recipient, "table_reaction", 5000, "targetedRecipientEvent");
+    sendFrame(sender, {
+      version: "1.0",
+      type: "reaction_send",
+      requestId: "req-targeted-valid",
+      ts: "2026-08-03T00:00:02Z",
+      payload: { tableId, reactionKey: "nice_hand", targetSeatNo: 2, handId }
+    });
+
+    const commandResult = await senderResultPromise;
+    assert.equal(commandResult.payload.status, "accepted");
+    assert.equal(commandResult.payload.reason, null);
+    for (const reaction of await Promise.all([senderReactionPromise, recipientReactionPromise])) {
+      assert.equal(reaction.type, "table_reaction");
+      assert.equal(reaction.roomId, tableId);
+      assert.deepEqual(reaction.payload, { seatNo: 1, targetSeatNo: 2, reactionKey: "nice_hand" });
+    }
+
+    sender.close();
+    recipient.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+}));
+
 test("table_join is observe-only and does not emit membership mutation broadcasts", async () => runSerial(async () => {
   const secret = "test-secret";
   const fixtures = {

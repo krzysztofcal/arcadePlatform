@@ -59,6 +59,12 @@ export function evaluateHumanReactionCommand({
   senderUserId,
   senderSeatNo,
   reactionKey,
+  targeted = false,
+  targetSeatNo,
+  targetOccupied = false,
+  targetIsWinner = false,
+  settlementMatchesHand = false,
+  settlementWindowOpen = false,
   tableClosed = false,
   nowMs
 } = {}) {
@@ -73,6 +79,23 @@ export function evaluateHumanReactionCommand({
   if (!REACTION_KEY_SET.has(normalizedReactionKey)) {
     return { ok: false, reason: "invalid_reaction" };
   }
+  if (targeted === true) {
+    if (normalizedReactionKey !== "nice_hand") {
+      return { ok: false, reason: "invalid_reaction" };
+    }
+    if (!isPositiveSeatNo(targetSeatNo) || targetSeatNo === senderSeatNo) {
+      return { ok: false, reason: "target_not_available" };
+    }
+    if (settlementMatchesHand !== true) {
+      return { ok: false, reason: "settlement_mismatch" };
+    }
+    if (targetOccupied !== true || targetIsWinner !== true) {
+      return { ok: false, reason: "target_not_available" };
+    }
+    if (settlementWindowOpen !== true) {
+      return { ok: false, reason: "settlement_reaction_window_closed" };
+    }
+  }
   if (tableClosed === true) {
     return { ok: false, reason: "table_closed" };
   }
@@ -86,7 +109,8 @@ export function evaluateHumanReactionCommand({
   return {
     ok: true,
     seatNo: senderSeatNo,
-    reactionKey: normalizedReactionKey
+    reactionKey: normalizedReactionKey,
+    ...(targeted === true ? { targetSeatNo } : {})
   };
 }
 

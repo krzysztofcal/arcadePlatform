@@ -53,7 +53,8 @@
     error: 'Live table unavailable'
   };
   var CLOSED_TABLE_REDIRECT_SECONDS = 5;
-  var WINNER_REVEAL_MS = 4_000;
+  var WINNER_REVEAL_MS = 3_500;
+  var TARGETED_REACTION_EFFECT_TTL_MS = 1_200;
   var CHIP_FLY_MS = 420;
   var SETTLEMENT_CHIP_FLY_MS = 780;
   var AUTO_JOIN_RETRY_DELAYS_MS = [250, 750, 1500, 3000];
@@ -198,6 +199,9 @@
   var stickyWinnerReveal = {
     handId: null,
     visibleUntilMs: 0,
+    authoritativeTargetedWindow: false,
+    authoritativeRevealDueAtMs: null,
+    presentationReceivedAtMs: null,
     settlementPresentation: null,
     showdownWinnerUserIds: [],
     revealedShowdownCardsByUserId: {},
@@ -212,6 +216,12 @@
   var settlementAnimationNodes = [];
   var suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
   var reactionBubblesBySeatNo = {};
+  var targetedReactionEffectsById = {};
+  var targetedReactionEffectNodesById = {};
+  var reactionRenderNodes = [];
+  var nextTargetedReactionEffectId = 1;
+  var dismissedTargetedReactionOffersByKey = {};
+  var targetedReactionDismissTimer = null;
   var reactionControlTimer = null;
   var reactionControlUntilMs = 0;
   var els = {};
@@ -357,6 +367,7 @@
       wsReady: false,
       showdown: null,
       handSettlement: null,
+      settlementRevealDueAtMs: null,
       settlementPresentation: null,
       revealedShowdownCardsByUserId: {},
       playerState: null
@@ -967,7 +978,7 @@
       handId: state.handId || null,
       committedByUserId: Object.assign({}, seatCommittedByUserId),
       lastActionByUserId: Object.assign({}, state.lastBettingRoundActionByUserId || {}),
-      settlementPresentation: cloneSettlementPresentation(getDisplaySettlementPresentation())
+      settlementPresentation: cloneSettlementPresentation(getCurrentSettlementPresentation())
     };
   }
 
@@ -1226,28 +1237,50 @@
     return source ? cloneState(source) : null;
   }
 
-  function resolveSettlementRevealDueAt(presentation){
+  function normalizeSettlementRevealDueAt(value){
+    if (value == null || value === '') return null;
+    var dueAtMs = Number(value);
+    return Number.isFinite(dueAtMs) && dueAtMs >= 0 ? dueAtMs : null;
+  }
+
+  function resolveSettlementRevealDueAt(presentation, authoritativeDueAtMs){
+    var normalizedAuthoritativeDueAtMs = normalizeSettlementRevealDueAt(authoritativeDueAtMs);
+    if (Number.isFinite(normalizedAuthoritativeDueAtMs)) return normalizedAuthoritativeDueAtMs;
     var settledAtMs = presentation && presentation.settledAt ? Date.parse(presentation.settledAt) : NaN;
     return Number.isFinite(settledAtMs) && settledAtMs <= Date.now() + 1000 ? settledAtMs + WINNER_REVEAL_MS : Date.now() + WINNER_REVEAL_MS;
   }
 
-  function syncStickyWinnerReveal(minimumVisibleUntilMs){
+  function syncStickyWinnerReveal(minimumVisibleUntilMs, settlementPairComplete){
     var handId = state.handId || (state.handSettlement && state.handSettlement.handId) || (state.showdown && state.showdown.handId) || null;
     if (!handId || state.phase !== 'SETTLED' || (!state.showdown && !state.settlementPresentation)) return;
+    if (stickyWinnerReveal.handId !== handId && lastPresentedSettlementHandId !== handId && settlementPairComplete !== true) return;
+    var authoritativeRevealDueAtMs = normalizeSettlementRevealDueAt(state.settlementRevealDueAtMs);
+    var settlementPresentation = state.settlementPresentation;
+    var authoritativeTargetedWindow = Number.isFinite(authoritativeRevealDueAtMs)
+      && settlementPresentation
+      && settlementPresentation.valid === true
+      && settlementPresentation.handId === handId;
+    if (Number.isFinite(authoritativeRevealDueAtMs) && authoritativeTargetedWindow !== true) return;
     if (stickyWinnerReveal.handId !== handId && lastPresentedSettlementHandId !== handId){
-      var visibleUntilMs = resolveSettlementRevealDueAt(state.settlementPresentation || state.handSettlement);
-      if (Number.isFinite(minimumVisibleUntilMs)) visibleUntilMs = Math.max(visibleUntilMs, minimumVisibleUntilMs);
+      var visibleUntilMs = authoritativeTargetedWindow
+        ? Math.min(Date.now() + WINNER_REVEAL_MS, authoritativeRevealDueAtMs)
+        : resolveSettlementRevealDueAt(settlementPresentation || state.handSettlement, null);
+      if (!authoritativeTargetedWindow && Number.isFinite(minimumVisibleUntilMs)) visibleUntilMs = Math.max(visibleUntilMs, minimumVisibleUntilMs);
       stickyWinnerReveal = {
         handId: handId,
         visibleUntilMs: visibleUntilMs,
-        settlementPresentation: cloneSettlementPresentation(state.settlementPresentation),
+        authoritativeTargetedWindow: authoritativeTargetedWindow,
+        authoritativeRevealDueAtMs: authoritativeRevealDueAtMs,
+        presentationReceivedAtMs: Date.now(),
+        settlementPresentation: cloneSettlementPresentation(settlementPresentation),
         showdownWinnerUserIds: state.showdown && Array.isArray(state.showdown.winners) ? state.showdown.winners.filter(function(userId){ return typeof userId === 'string' && !!userId; }) : [],
         revealedShowdownCardsByUserId: cloneRevealedShowdownCards(state.revealedShowdownCardsByUserId),
         communityCards: Array.isArray(state.communityCards) ? state.communityCards.slice(0, 5) : []
       };
       lastPresentedSettlementHandId = handId;
     } else if (stickyWinnerReveal.handId === handId){
-      stickyWinnerReveal.settlementPresentation = cloneSettlementPresentation(state.settlementPresentation);
+      stickyWinnerReveal.authoritativeRevealDueAtMs = normalizeSettlementRevealDueAt(state.settlementRevealDueAtMs);
+      stickyWinnerReveal.settlementPresentation = cloneSettlementPresentation(settlementPresentation);
       stickyWinnerReveal.showdownWinnerUserIds = state.showdown && Array.isArray(state.showdown.winners) ? state.showdown.winners.filter(function(userId){ return typeof userId === 'string' && !!userId; }) : [];
       stickyWinnerReveal.revealedShowdownCardsByUserId = cloneRevealedShowdownCards(state.revealedShowdownCardsByUserId);
       stickyWinnerReveal.communityCards = Array.isArray(state.communityCards) ? state.communityCards.slice(0, 5) : [];
@@ -1299,8 +1332,13 @@
     return !!(nextHandId && sticky.handId && nextHandId !== sticky.handId);
   }
 
-  function getDisplaySettlementPresentation(){
+  function getCurrentSettlementPresentation(){
     if (state.phase === 'SETTLED' && state.settlementPresentation) return state.settlementPresentation;
+    var sticky = getActiveWinnerReveal();
+    return sticky ? sticky.settlementPresentation : null;
+  }
+
+  function getDisplaySettlementPresentation(){
     var sticky = getActiveWinnerReveal();
     return sticky ? sticky.settlementPresentation : null;
   }
@@ -1350,6 +1388,7 @@
     var potObj = isObject(payload.pot) ? payload.pot : isObject(publicObj.pot) ? publicObj.pot : {};
     var showdownField = readSnapshotField(payload, publicObj, 'showdown');
     var handSettlementField = readSnapshotField(payload, publicObj, 'handSettlement');
+    var settlementRevealDueAtField = readSnapshotField(payload, publicObj, 'settlementRevealDueAt');
     var playerStateField = hasOwn(payload, 'private') && isObject(payload.private) && hasOwn(payload.private, 'playerState')
       ? { present: true, value: payload.private.playerState }
       : { present: false, value: undefined };
@@ -1469,17 +1508,22 @@
       state.revealedShowdownCardsByUserId = mapRevealedShowdownCards(state.showdown);
     }
     if (authoritativeFull || handSettlementField.present) state.handSettlement = normalizeHandSettlement(handSettlementField.value);
+    if (authoritativeFull || settlementRevealDueAtField.present) state.settlementRevealDueAtMs = settlementRevealDueAtField.present
+      ? normalizeSettlementRevealDueAt(settlementRevealDueAtField.value)
+      : null;
     var handChanged = !!(state.handId && previousHandId && state.handId !== previousHandId);
     var explicitSettlementClear = (showdownField.present && showdownField.value == null) || (handSettlementField.present && handSettlementField.value == null);
-    var completeSettlementPair = showdownField.present && handSettlementField.present && state.showdown && state.handSettlement;
+    var settlementPairComplete = !!(state.showdown && state.handSettlement
+      && (authoritativeFull || showdownField.present || handSettlementField.present));
     if (state.phase !== 'SETTLED' || handChanged || explicitSettlementClear){
+      state.settlementRevealDueAtMs = null;
       state.settlementPresentation = null;
       if (explicitSettlementClear && stickyWinnerReveal.handId === (state.handId || previousHandId)){
         clearWinnerRevealTimer();
         stickyWinnerReveal.visibleUntilMs = 0;
       }
       cancelSettlementAnimations();
-    } else if ((authoritativeFull && state.showdown && state.handSettlement) || completeSettlementPair){
+    } else if (settlementPairComplete){
       state.settlementPresentation = buildSettlementPresentation({ showdown: state.showdown, handSettlement: state.handSettlement });
       if (!state.settlementPresentation.valid){
         var failureKey = String(state.settlementPresentation.handId || state.handId || 'unknown') + ':' + state.settlementPresentation.failureReason;
@@ -1504,7 +1548,7 @@
       && previousHandId === state.handId
       && previousPhase !== 'SETTLED'
       && state.phase === 'SETTLED';
-    syncStickyWinnerReveal(liveSettlementTransition ? Date.now() + WINNER_REVEAL_MS : null);
+    syncStickyWinnerReveal(liveSettlementTransition ? Date.now() + WINNER_REVEAL_MS : null, settlementPairComplete);
     state.actionConstraints = normalizeConstraints(constraintsPrimary, legalSource && legalSource.actionConstraints);
     // While a snapshot recovery timeout is pending, snapshots must not overwrite a
     // newer status/error raised after the timeout; the recovery gate-open handles it.
@@ -1759,12 +1803,92 @@
     }
   }
 
+  function clearTargetedReactionDismissTimer(){
+    if (!targetedReactionDismissTimer) return;
+    window.clearTimeout(targetedReactionDismissTimer);
+    targetedReactionDismissTimer = null;
+  }
+
+  function targetedReactionOfferKey(handId, targetSeatNo){
+    return String(handId || '') + ':' + String(targetSeatNo);
+  }
+
+  function dismissTargetedReactionOffer(handId, targetSeatNo){
+    if (!handId || !Number.isInteger(targetSeatNo)) return;
+    dismissedTargetedReactionOffersByKey[targetedReactionOfferKey(handId, targetSeatNo)] = true;
+  }
+
+  function dismissTargetedReactionOffersForHand(handId){
+    if (!handId) return;
+    var prefix = String(handId) + ':';
+    Object.keys(dismissedTargetedReactionOffersByKey).forEach(function(key){
+      if (key.indexOf(prefix) === 0) delete dismissedTargetedReactionOffersByKey[key];
+    });
+    state.seats.forEach(function(seat){
+      if (seat && Number.isInteger(seat.seatNo)) dismissTargetedReactionOffer(handId, seat.seatNo);
+    });
+  }
+
+  function getTargetedReactionDeadlineMs(sticky){
+    if (!sticky || sticky.authoritativeTargetedWindow !== true) return null;
+    var visibleUntilMs = Number(sticky.visibleUntilMs);
+    return Number.isFinite(visibleUntilMs) ? visibleUntilMs : null;
+  }
+
+  function getTargetedReactionOffers(){
+    if (state.reconnectGate || !deriveCurrentSeat()) return [];
+    var sticky = getActiveWinnerReveal();
+    var presentation = sticky && sticky.settlementPresentation;
+    if (!sticky || !presentation || presentation.valid !== true || !presentation.handId) return [];
+    var deadlineMs = getTargetedReactionDeadlineMs(sticky);
+    if (!Number.isFinite(deadlineMs) || deadlineMs <= Date.now()) return [];
+    var currentSeat = deriveCurrentSeat();
+    var offers = [];
+    state.seats.forEach(function(seat){
+      if (!seat || !seat.userId || !Number.isInteger(seat.seatNo)) return;
+      if (seat.seatNo === currentSeat.seatNo || !hasWonContestedPot(seat)) return;
+      if (dismissedTargetedReactionOffersByKey[targetedReactionOfferKey(presentation.handId, seat.seatNo)]) return;
+      offers.push({
+        handId: presentation.handId,
+        targetSeatNo: seat.seatNo,
+        targetUserId: seat.userId
+      });
+    });
+    return offers;
+  }
+
+  function scheduleTargetedReactionDismiss(){
+    clearTargetedReactionDismissTimer();
+    var sticky = getActiveWinnerReveal();
+    var deadlineMs = getTargetedReactionDeadlineMs(sticky);
+    if (!sticky || !Number.isFinite(deadlineMs)) return;
+    var delayMs = deadlineMs - Date.now();
+    if (delayMs <= 0) return;
+    targetedReactionDismissTimer = window.setTimeout(function(){
+      targetedReactionDismissTimer = null;
+      renderSeats();
+    }, delayMs);
+  }
+
   function clearReactionBubbles(){
     Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
       var bubble = reactionBubblesBySeatNo[seatNo];
       if (bubble && bubble.timer) window.clearTimeout(bubble.timer);
     });
     reactionBubblesBySeatNo = {};
+    Object.keys(targetedReactionEffectsById).forEach(function(effectId){
+      var effect = targetedReactionEffectsById[effectId];
+      if (effect && effect.timer) window.clearTimeout(effect.timer);
+    });
+    targetedReactionEffectsById = {};
+    Object.keys(targetedReactionEffectNodesById).forEach(function(effectId){
+      var node = targetedReactionEffectNodesById[effectId];
+      if (node && node.parentNode) node.parentNode.removeChild(node);
+    });
+    targetedReactionEffectNodesById = {};
+    reactionRenderNodes = [];
+    clearTargetedReactionDismissTimer();
+    dismissedTargetedReactionOffersByKey = {};
     if (els.reactionLayer) els.reactionLayer.innerHTML = '';
   }
 
@@ -1781,6 +1905,26 @@
     var bubble = reactionBubblesBySeatNo[seatNo];
     if (bubble && bubble.timer) window.clearTimeout(bubble.timer);
     delete reactionBubblesBySeatNo[seatNo];
+  }
+
+  function clearTargetedReactionEffect(effectId){
+    var effect = targetedReactionEffectsById[effectId];
+    if (effect && effect.timer) window.clearTimeout(effect.timer);
+    var node = targetedReactionEffectNodesById[effectId];
+    if (node && node.parentNode) node.parentNode.removeChild(node);
+    delete targetedReactionEffectNodesById[effectId];
+    delete targetedReactionEffectsById[effectId];
+  }
+
+  function clearTargetedReactionEffectsWithChangedOwners(){
+    Object.keys(targetedReactionEffectsById).forEach(function(effectId){
+      var effect = targetedReactionEffectsById[effectId];
+      if (!effect
+        || currentSeatOwnerUserId(effect.senderSeatNo) !== effect.senderOwnerUserId
+        || currentSeatOwnerUserId(effect.targetSeatNo) !== effect.targetOwnerUserId){
+        clearTargetedReactionEffect(effectId);
+      }
+    });
   }
 
   function clearReactionBubblesWithChangedOwners(){
@@ -1817,11 +1961,48 @@
     clearReactionControlTimer();
     reactionControlUntilMs = Date.now() + 4_000;
     renderReactionControl();
+    renderSeats();
     reactionControlTimer = window.setTimeout(function(){
       reactionControlTimer = null;
       reactionControlUntilMs = 0;
       renderReactionControl();
+      renderSeats();
     }, 4_000);
+  }
+
+  function sendTargetedReaction(targetSeatNo, handId){
+    if (!wsClient || typeof wsClient.sendTargetedReaction !== 'function' || !isWsReady() || !deriveCurrentSeat()) {
+      return Promise.resolve(null);
+    }
+    return wsClient.sendTargetedReaction(targetSeatNo, handId).then(function(result){
+      dismissTargetedReactionOffer(handId, targetSeatNo);
+      startReactionCooldown();
+      return result;
+    }).catch(function(error){
+      var code = normalizeSignalCode(error && (error.code || error.message));
+      if (code === 'reaction_rate_limited'){
+        startReactionCooldown();
+        return null;
+      }
+      if (code === 'settlement_reaction_window_closed' || code === 'settlement_mismatch'){
+        dismissTargetedReactionOffersForHand(handId);
+        renderSeats();
+        return null;
+      }
+      if (code === 'target_not_available' || code === 'invalid_reaction'){
+        dismissTargetedReactionOffer(handId, targetSeatNo);
+        renderSeats();
+        if (code === 'invalid_reaction') klog('poker_targeted_reaction_invalid', { targetSeatNo: targetSeatNo });
+        return null;
+      }
+      if (code === 'not_seated' || code === 'table_closed'){
+        renderControls();
+        if (wsClient && typeof wsClient.requestGameplaySnapshot === 'function') wsClient.requestGameplaySnapshot();
+        return null;
+      }
+      klog('poker_targeted_reaction_error', { code: code || 'targeted_reaction_failed' });
+      return null;
+    });
   }
 
   function handleTableReaction(event){
@@ -1831,6 +2012,30 @@
     var entry = findReactionEntry(reactionKey);
     var ownerUserId = currentSeatOwnerUserId(seatNo);
     if (!Number.isInteger(seatNo) || seatNo < 1 || !entry || !ownerUserId) return;
+    var hasTargetSeatNo = Object.prototype.hasOwnProperty.call(payload, 'targetSeatNo');
+    if (hasTargetSeatNo){
+      var targetSeatNo = Number(payload.targetSeatNo);
+      var targetOwnerUserId = currentSeatOwnerUserId(targetSeatNo);
+      if (!Number.isInteger(targetSeatNo) || targetSeatNo < 1 || targetSeatNo === seatNo || !targetOwnerUserId) return;
+      var effectId = String(nextTargetedReactionEffectId++);
+      var effect = {
+        senderSeatNo: seatNo,
+        targetSeatNo: targetSeatNo,
+        senderOwnerUserId: ownerUserId,
+        targetOwnerUserId: targetOwnerUserId,
+        reactionKey: reactionKey,
+        animate: true,
+        timer: null
+      };
+      effect.timer = window.setTimeout(function(){
+        if (targetedReactionEffectsById[effectId] !== effect) return;
+        clearTargetedReactionEffect(effectId);
+        renderSeats();
+      }, TARGETED_REACTION_EFFECT_TTL_MS);
+      targetedReactionEffectsById[effectId] = effect;
+      renderSeats();
+      return;
+    }
     var previous = reactionBubblesBySeatNo[seatNo];
     if (previous && previous.timer) window.clearTimeout(previous.timer);
     var bubble = { reactionKey: reactionKey, ownerUserId: ownerUserId, animate: true, timer: null };
@@ -2585,6 +2790,7 @@
   function renderSeats(){
     if (!els.seatLayer) return;
     clearReactionBubblesWithChangedOwners();
+    clearTargetedReactionEffectsWithChangedOwners();
     els.seatLayer.innerHTML = '';
     renderedSeatAnchors = {};
     renderedSeatSlots = {};
@@ -2706,6 +2912,7 @@
       }
       els.seatLayer.appendChild(article);
     }
+    scheduleTargetedReactionDismiss();
     renderReactionBubbles();
     Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
       var reactionBubble = reactionBubblesBySeatNo[seatNo];
@@ -2713,9 +2920,101 @@
     });
   }
 
+  function clearReactionRenderNodes(){
+    reactionRenderNodes.forEach(function(node){
+      if (node && node.parentNode) node.parentNode.removeChild(node);
+    });
+    reactionRenderNodes = [];
+  }
+
+  function appendReactionRenderNode(node){
+    if (!node || !els.reactionLayer) return;
+    els.reactionLayer.appendChild(node);
+    reactionRenderNodes.push(node);
+  }
+
+  function getReactionLayerDimensions(){
+    var width = Number(els.reactionLayer && els.reactionLayer.clientWidth);
+    var height = Number(els.reactionLayer && els.reactionLayer.clientHeight);
+    if ((!width || !height) && els.reactionLayer && typeof els.reactionLayer.getBoundingClientRect === 'function'){
+      var rect = els.reactionLayer.getBoundingClientRect();
+      if (!width) width = Number(rect && rect.width);
+      if (!height) height = Number(rect && rect.height);
+    }
+    return {
+      width: Number.isFinite(width) && width > 0 ? width : 0,
+      height: Number.isFinite(height) && height > 0 ? height : 0
+    };
+  }
+
+  function renderTargetedReactionEffects(){
+    var dimensions = getReactionLayerDimensions();
+    Object.keys(targetedReactionEffectsById).forEach(function(effectId){
+      var effect = targetedReactionEffectsById[effectId];
+      var entry = effect ? findReactionEntry(effect.reactionKey) : null;
+      var senderAnchor = effect && renderedSeatAnchors[effect.senderSeatNo];
+      var targetAnchor = effect && renderedSeatAnchors[effect.targetSeatNo];
+      if (!effect || !entry || !senderAnchor || !targetAnchor){
+        clearTargetedReactionEffect(effectId);
+        return;
+      }
+      var reducedMotion = prefersReducedMotion();
+      var anchorNode = targetedReactionEffectNodesById[effectId];
+      if (!anchorNode){
+        anchorNode = document.createElement('div');
+        anchorNode.className = 'poker-reaction-anchor poker-seat-target-reaction-effect';
+        var newFlyout = document.createElement('div');
+        newFlyout.setAttribute('role', 'status');
+        anchorNode.appendChild(newFlyout);
+        targetedReactionEffectNodesById[effectId] = anchorNode;
+        els.reactionLayer.appendChild(anchorNode);
+      }
+      var flyout = anchorNode.children && anchorNode.children[0];
+      if (!flyout){
+        clearTargetedReactionEffect(effectId);
+        return;
+      }
+      var fromX = reducedMotion ? targetAnchor.x : senderAnchor.x;
+      var fromY = reducedMotion ? targetAnchor.y : senderAnchor.y;
+      var deltaX = reducedMotion ? 0 : ((targetAnchor.x - senderAnchor.x) / 100) * dimensions.width;
+      var deltaY = reducedMotion ? 0 : ((targetAnchor.y - senderAnchor.y) / 100) * dimensions.height;
+      anchorNode.style.left = fromX + '%';
+      anchorNode.style.top = fromY + '%';
+      flyout.className = 'poker-seat-target-reaction-flyout' + (effect.animate && !reducedMotion ? ' poker-seat-target-reaction-flyout--enter' : '');
+      flyout.setAttribute('role', 'status');
+      flyout.setAttribute('aria-label', entry.label);
+      flyout.textContent = entry.emoji;
+      flyout.style.setProperty('--reaction-delta-x', deltaX + 'px');
+      flyout.style.setProperty('--reaction-delta-y', deltaY + 'px');
+    });
+  }
+
   function renderReactionBubbles(){
     if (!els.reactionLayer) return;
-    els.reactionLayer.innerHTML = '';
+    clearReactionRenderNodes();
+    renderTargetedReactionEffects();
+    var targetedOffers = getTargetedReactionOffers();
+    targetedOffers.forEach(function(offer){
+      var anchor = renderedSeatAnchors[offer.targetSeatNo];
+      if (!anchor) return;
+      var anchorNode = document.createElement('div');
+      anchorNode.className = 'poker-reaction-anchor';
+      anchorNode.style.left = anchor.x + '%';
+      anchorNode.style.top = anchor.y + '%';
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'poker-seat-target-reaction';
+      button.textContent = '👍';
+      button.setAttribute('aria-label', 'Send Nice hand');
+      button.title = 'Send Nice hand';
+      button.disabled = reactionControlUntilMs > Date.now();
+      button.addEventListener('click', function(event){
+        if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+        sendTargetedReaction(offer.targetSeatNo, offer.handId);
+      });
+      anchorNode.appendChild(button);
+      appendReactionRenderNode(anchorNode);
+    });
     Object.keys(reactionBubblesBySeatNo).forEach(function(seatNoKey){
       var seatNo = Number(seatNoKey);
       var reactionBubble = reactionBubblesBySeatNo[seatNoKey];
@@ -2735,7 +3034,7 @@
       bubble.setAttribute('role', 'status');
       bubble.textContent = reactionEntry.emoji + ' ' + reactionEntry.label;
       anchorNode.appendChild(bubble);
-      els.reactionLayer.appendChild(anchorNode);
+      appendReactionRenderNode(anchorNode);
     });
   }
 

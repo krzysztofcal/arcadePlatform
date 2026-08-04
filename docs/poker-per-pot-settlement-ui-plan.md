@@ -183,7 +183,7 @@ This classification distinguishes a real uncontested main-pot win after folds fr
 - add `state.settlementPresentation` and derive it through the local `buildSettlementPresentation()` only when a complete authoritative settlement is available;
 - replace `stickyWinnerReveal.winners` with a cloned immutable `settlementPresentation`; retain revealed cards and community cards;
 - add `lastPresentedSettlementHandId` so duplicate/replayed snapshots for the same hand cannot restart or extend an expired reveal window;
-- calculate the local reveal deadline from `handSettlement.settledAt + WINNER_REVEAL_MS`; for a same-hand live transition observed by the page, guarantee one `WINNER_REVEAL_MS` window from receipt because persistence/broadcast latency can consume the server-side interval, while initial/reconnect/resync snapshots use only the remaining authoritative deadline; never reset the deadline for the same hand;
+- calculate one local reveal deadline from the first complete settlement received by the page: `localDueAt = min(receivedAt + 3500ms, settlementRevealDueAt)`; initial/reconnect/resync snapshots use only the remaining authoritative deadline, and clients without the authoritative deadline retain the ordinary fallback without targeted actions; never reset the deadline for the same hand;
 - replace `getDisplayWinnerUserIds()`/`isWinnerSeat()` with `getDisplaySettlementPresentation()` and `getSeatSettlementAwards(userId)` for labels and amounts;
 - retain a separate helper for which compared hands/cards are revealed; award recipients and revealed showdown participants are different concepts;
 - add `renderSettlementSummary()` and call it from `render()`;
@@ -268,7 +268,7 @@ Phase 2 starts only after the Phase 1 model and static behavior pass their focus
 - remove already-running settlement fly nodes when cancellation occurs, while leaving unrelated bet-to-pot fly nodes untouched;
 - when `matchMedia('(prefers-reduced-motion: reduce)')` matches, create no flying-chip DOM nodes or timers. Static information remains complete and immediate.
 
-No change to `ws-server/server.mjs::maybeScheduleSettledRollover()`, `resolveSettledRevealDueAt()`, or `WS_POKER_SETTLED_REVEAL_MS` is planned. Animation is subordinate to the authoritative reveal/rollover lifecycle.
+Per-pot animation does not create another deadline. It remains subordinate to the authoritative reveal/rollover lifecycle: the first complete settlement publication establishes `settlementRevealDueAt`, while disconnect cleanup retains its independent grace window.
 
 ## Required automated verification
 

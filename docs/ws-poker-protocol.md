@@ -59,7 +59,7 @@ Example envelope:
 | `leave` | `{ "reason": string }` | Requests leave/cashout workflow. |
 | `ack` | `{ "seq": integer }` | Acknowledges latest processed server sequence (flow-control aid). |
 | `table_snapshot` | `{ "tableId": string }` (or envelope `roomId`) | Protected read-only gameplay snapshot command. **Requires `requestId`** like other stateful protected commands. Returns viewer-scoped poker state and does not mutate presence membership. |
-| `reaction_send` | `{ "tableId": string, "reactionKey": "hello"|"nice_hand"|"well_played"|"thinking"|"haha"|"wow"|"bad_beat"|"nice_bluff"|"good_luck"|"thanks" }` | Requests one predefined ephemeral reaction. Requires an authenticated seated human sender and `requestId`; the server enforces a four-second sender cooldown. |
+| `reaction_send` | `{ "tableId": string, "reactionKey": "hello"|"nice_hand"|"well_played"|"thinking"|"haha"|"wow"|"bad_beat"|"nice_bluff"|"good_luck"|"thanks", "targetSeatNo"?: integer, "handId"?: string }` | Requests one predefined ephemeral reaction. Requires an authenticated seated human sender and `requestId`; the server enforces a four-second sender cooldown. A targeted request must contain both `targetSeatNo` and `handId`, and currently supports only `nice_hand` during the matching settlement reveal window. |
 
 ### Server → Client
 
@@ -74,7 +74,7 @@ Example envelope:
 | `commandResult` | `{ "requestId": string, "status": "accepted"|"rejected", "reason": string|null }` | Deterministic outcome for a client command. |
 | `resync` | `{ "mode": "required", "reason": string, "expectedSeq": integer }` | Signals that client must request/accept full snapshot. |
 | `error` | `{ "code": string, "message": string, "retryable": boolean, "requestId": string|null }` | Protocol or domain error (see Errors). |
-| `table_reaction` | `{ "seatNo": integer, "reactionKey": string }` | Ephemeral table event delivered to the current table connections supported by the runtime. It is not stored in `streamLog`, snapshots, Supabase, or reconnect replay. Future spectator delivery can use the same event and payload without a protocol change. |
+| `table_reaction` | `{ "seatNo": integer, "targetSeatNo"?: integer, "reactionKey": string }` | Ephemeral table event delivered to the current table connections supported by the runtime. It is not stored in `streamLog`, snapshots, Supabase, or reconnect replay. Future spectator delivery can use the same event and payload without a protocol change. |
 
 Minimal server-initiated events in v1 include: `error`, `resync`, `pong`, state updates (`stateSnapshot`/`statePatch`), and ephemeral `table_reaction` events.
 
@@ -199,6 +199,9 @@ Canonical room-core fields in `payload.public`:
 - `payload.public.seats: Array<{ userId: string, seatNo: number, status: string, profile?: object }>`
 - `payload.public.showdown?: { winners: string[], potsAwarded: any[], potAwardedTotal: number, reason: string|null, handId: string|null }`
 - `payload.public.handSettlement?: { handId: string|null, settledAt: string|null, payouts: Record<string, number> }`
+- `payload.public.settlementRevealDueAt?: integer` — server-authoritative epoch-millisecond deadline for the current settled-hand reveal and targeted `nice_hand` window, established once per `tableId` + `handId` when the settlement is first published; omitted outside `SETTLED` or when the settlement timestamp is invalid.
+
+The default published settlement reveal window is 5 seconds. Disconnect cleanup keeps its separate 4-second grace semantics and does not extend the published settlement deadline.
 
 Canonical compatibility fields:
 

@@ -60,6 +60,96 @@ test('human reactions use the closed allowlist and atomically reserve the sender
   clearTable(tableId);
 });
 
+test('targeted human reactions require nice_hand, matching settlement facts, and share the cooldown', () => {
+  const tableId = 'reaction-targeted-contract';
+  clearTable(tableId);
+
+  const first = evaluateHumanReactionCommand({
+    tableId,
+    senderUserId: 'human-1',
+    senderSeatNo: 2,
+    reactionKey: 'nice_hand',
+    targeted: true,
+    targetSeatNo: 4,
+    targetOccupied: true,
+    targetIsWinner: true,
+    settlementMatchesHand: true,
+    settlementWindowOpen: true,
+    nowMs: 1_000
+  });
+  assert.deepEqual(first, { ok: true, seatNo: 2, targetSeatNo: 4, reactionKey: 'nice_hand' });
+
+  assert.deepEqual(evaluateHumanReactionCommand({
+    tableId,
+    senderUserId: 'human-1',
+    senderSeatNo: 2,
+    reactionKey: 'nice_hand',
+    targeted: true,
+    targetSeatNo: 4,
+    targetOccupied: true,
+    targetIsWinner: true,
+    settlementMatchesHand: true,
+    settlementWindowOpen: true,
+    nowMs: 1_000
+  }), { ok: false, reason: 'reaction_rate_limited' });
+
+  clearTable(tableId);
+  assert.deepEqual(evaluateHumanReactionCommand({
+    tableId,
+    senderUserId: 'human-2',
+    senderSeatNo: 2,
+    reactionKey: 'wow',
+    targeted: true,
+    targetSeatNo: 4,
+    targetOccupied: true,
+    targetIsWinner: true,
+    settlementMatchesHand: true,
+    settlementWindowOpen: true,
+    nowMs: 2_000
+  }), { ok: false, reason: 'invalid_reaction' });
+  assert.deepEqual(evaluateHumanReactionCommand({
+    tableId,
+    senderUserId: 'human-3',
+    senderSeatNo: 2,
+    reactionKey: 'nice_hand',
+    targeted: true,
+    targetSeatNo: 4,
+    targetOccupied: true,
+    targetIsWinner: true,
+    settlementMatchesHand: false,
+    settlementWindowOpen: true,
+    nowMs: 2_000
+  }), { ok: false, reason: 'settlement_mismatch' });
+  assert.deepEqual(evaluateHumanReactionCommand({
+    tableId,
+    senderUserId: 'human-4',
+    senderSeatNo: 2,
+    reactionKey: 'nice_hand',
+    targeted: true,
+    targetSeatNo: 4,
+    targetOccupied: true,
+    targetIsWinner: false,
+    settlementMatchesHand: true,
+    settlementWindowOpen: true,
+    nowMs: 2_000
+  }), { ok: false, reason: 'target_not_available' });
+  assert.deepEqual(evaluateHumanReactionCommand({
+    tableId,
+    senderUserId: 'human-5',
+    senderSeatNo: 2,
+    reactionKey: 'nice_hand',
+    targeted: true,
+    targetSeatNo: 4,
+    targetOccupied: true,
+    targetIsWinner: true,
+    settlementMatchesHand: true,
+    settlementWindowOpen: false,
+    nowMs: 2_000
+  }), { ok: false, reason: 'settlement_reaction_window_closed' });
+
+  clearTable(tableId);
+});
+
 test('bot reactions use the real bot action object and table-level throttle', () => {
   const tableId = 'reaction-bot-contract';
   clearTable(tableId);

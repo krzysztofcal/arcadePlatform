@@ -178,10 +178,15 @@ function resolveObserveOnlyJoin(rawValue) {
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 }
 
+const DEFAULT_SETTLED_REVEAL_MS = 5_000;
+// Disconnect cleanup intentionally keeps the historical shorter grace window;
+// it must not inherit the longer client-facing settlement reveal budget.
+const DEFAULT_DISCONNECT_SETTLED_REVEAL_MS = 4_000;
+
 function resolveSettledRevealMs(rawValue) {
   const parsed = Number(rawValue);
   if (!Number.isFinite(parsed) || parsed < 0) {
-    return 4_000;
+    return DEFAULT_SETTLED_REVEAL_MS;
   }
   return Math.trunc(parsed);
 }
@@ -355,11 +360,13 @@ let botClaimsRecoveryExecutorPromise = null;
 let beginSqlWsLoaderPromise = null;
 const timeoutFailureTrackerByTableId = new Map();
 const settledRolloverTimerByTableId = new Map();
+const settlementRevealDeadlineByTableId = new Map();
 const TURN_TIMEOUT_FATAL_PREFIXES = ["showdown_"];
 const TURN_TIMEOUT_FATAL_REASONS = new Set(["timeout_apply_failed"]);
 const DEFAULT_INACTIVE_CLEANUP_ADAPTER_URL = new URL("./poker/persistence/inactive-cleanup-adapter.mjs", import.meta.url).href;
 const DEFAULT_ACCEPTED_BOT_AUTOPLAY_ADAPTER_URL = new URL("./poker/runtime/accepted-bot-autoplay-adapter.mjs", import.meta.url).href;
 const settledRevealMs = resolveSettledRevealMs(process.env.WS_POKER_SETTLED_REVEAL_MS);
+const disconnectSettledRevealMs = Math.min(settledRevealMs, DEFAULT_DISCONNECT_SETTLED_REVEAL_MS);
 
 async function loadAuthoritativeLeaveExecutor() {
   if (!authoritativeLeaveExecutorPromise) {
@@ -1196,6 +1203,7 @@ function buildTableStatePayload({ tableState, tableSnapshot, userId }) {
   if (Array.isArray(tableSnapshot.members)) payload.authoritativeMembers = tableSnapshot.members;
   if (tableSnapshot.showdown && typeof tableSnapshot.showdown === "object") payload.showdown = tableSnapshot.showdown;
   if (tableSnapshot.handSettlement && typeof tableSnapshot.handSettlement === "object") payload.handSettlement = tableSnapshot.handSettlement;
+  if (Number.isSafeInteger(tableSnapshot.settlementRevealDueAt) && tableSnapshot.settlementRevealDueAt >= 0) payload.settlementRevealDueAt = tableSnapshot.settlementRevealDueAt;
 
   // Identyczny bezpieczny kontrakt jak buildStateSnapshotPayload:
   // prywatny branch tylko dla siedzącego usera, hole cards przeciwników nie wyciekają.
@@ -1208,13 +1216,19 @@ function buildTableStatePayload({ tableState, tableSnapshot, userId }) {
 }
 
 function sendTableState(ws, connState, { requestId = null, tableState, tableSnapshot = null }) {
+  const preparedReveal = preparePublishedSettlementReveal(tableState.tableId, tableSnapshot);
+  const settlementRevealDueAt = preparedReveal?.dueAt ?? null;
+  maybeScheduleSettledRollover(tableState.tableId, preparedReveal?.dueAt ?? null);
+  const snapshotWithRevealDeadline = tableSnapshot && settlementRevealDueAt !== null
+    ? { ...tableSnapshot, settlementRevealDueAt }
+    : tableSnapshot;
   const frame = {
     version: "1.0",
     type: "table_state",
     ts: nowTs(),
     roomId: tableState.tableId,
     sessionId: connState.sessionId,
-    payload: buildTableStatePayload({ tableState, tableSnapshot, userId: connState.session.userId })
+    payload: buildTableStatePayload({ tableState, tableSnapshot: snapshotWithRevealDeadline, userId: connState.session.userId })
   };
 
   if (requestId) {
@@ -1225,11 +1239,14 @@ function sendTableState(ws, connState, { requestId = null, tableState, tableSnap
 }
 
 function sendStateSnapshot(ws, connState, { requestId = null, tableSnapshot, reason = null }) {
-  maybeScheduleSettledRollover(tableSnapshot.tableId);
+  const preparedReveal = preparePublishedSettlementReveal(tableSnapshot.tableId, tableSnapshot);
+  const settlementRevealDueAt = preparedReveal?.dueAt ?? null;
+  maybeScheduleSettledRollover(tableSnapshot.tableId, preparedReveal?.dueAt ?? null);
   const payload = buildStateSnapshotPayload({
     tableSnapshot,
     userId: connState.session.userId,
-    publicProfileStorageBaseUrl
+    publicProfileStorageBaseUrl,
+    settlementRevealDueAt
   });
 
   const frame = {
@@ -1254,10 +1271,14 @@ function sendStateSnapshot(ws, connState, { requestId = null, tableSnapshot, rea
 }
 
 function sendStateDelta(ws, connState, { tableSnapshot }) {
+  const preparedReveal = preparePublishedSettlementReveal(tableSnapshot.tableId, tableSnapshot);
+  const settlementRevealDueAt = preparedReveal?.dueAt ?? null;
+  maybeScheduleSettledRollover(tableSnapshot.tableId, preparedReveal?.dueAt ?? null);
   const payload = buildStateSnapshotPayload({
     tableSnapshot,
     userId: connState.session.userId,
-    publicProfileStorageBaseUrl
+    publicProfileStorageBaseUrl,
+    settlementRevealDueAt
   });
   const cacheKey = snapshotCacheKey(connState.sessionId, tableSnapshot.tableId);
   const previousPayload = lastSnapshotBySessionAndTable.get(cacheKey) ?? null;
@@ -1366,7 +1387,9 @@ function sendGameplaySnapshot(ws, connState, { requestId = null, tableId, snapsh
 
 function broadcastTableState(tableId, { excludeWs = null } = {}) {
   maybeBroadcastLobbySnapshot();
-  maybeScheduleSettledRollover(tableId);
+  const publicationSnapshot = tableManager.tableSnapshot(tableId, null);
+  const preparedReveal = preparePublishedSettlementReveal(tableId, publicationSnapshot);
+  maybeScheduleSettledRollover(tableId, preparedReveal?.dueAt ?? null);
   const tableState = tableManager.tableState(tableId);
   const subscribers = tableManager.orderedSubscribers(tableId, (socket) => socket.__connState?.sessionId ?? "");
 
@@ -1552,6 +1575,10 @@ function clearSettledRolloverTimer(tableId) {
   settledRolloverTimerByTableId.delete(tableId);
 }
 
+function clearSettlementRevealDeadline(tableId) {
+  settlementRevealDeadlineByTableId.delete(tableId);
+}
+
 function clearSnapshotCacheForTable(tableId) {
   for (const key of [...lastSnapshotBySessionAndTable.keys()]) {
     if (key.endsWith(`:${tableId}`)) {
@@ -1570,6 +1597,7 @@ function clearPersistedSeatTouchForTable(tableId) {
 
 function releaseTableRuntimeResources(tableId) {
   clearSettledRolloverTimer(tableId);
+  clearSettlementRevealDeadline(tableId);
   clearTurnTimeoutFailureTracker(tableId);
   clearSnapshotCacheForTable(tableId);
   clearPersistedSeatTouchForTable(tableId);
@@ -1688,7 +1716,7 @@ async function executeUserInactiveCleanupPrimitive({
         klogSafe(`${logPrefix}_settled_reveal_deferred`, {
           tableId,
           userId,
-          revealMs: settledRevealMs
+          revealMs: disconnectSettledRevealMs
         });
         return {
           ok: true,
@@ -2073,29 +2101,31 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
   return finishSettledRollover(rollover);
 }
 
-function maybeScheduleSettledRollover(tableId) {
+function maybeScheduleSettledRollover(tableId, preparedDueAt = null) {
   const pokerState = tableManager.persistedPokerState(tableId);
   if (!pokerState || pokerState.phase !== "SETTLED") {
     clearSettledRolloverTimer(tableId);
+    clearSettlementRevealDeadline(tableId);
     return;
   }
 
-  const nowMs = Date.now();
-  const dueAt = resolveSettledRevealDueAt({
-    settledAt: pokerState?.handSettlement?.settledAt || null,
-    nowMs,
-    revealMs: settledRevealMs
-  });
+  const dueAt = Number.isSafeInteger(preparedDueAt)
+    ? preparedDueAt
+    : resolvePublishedSettlementRevealDueAtForTable(tableId);
+  if (!Number.isSafeInteger(dueAt)) {
+    clearSettledRolloverTimer(tableId);
+    return;
+  }
   const generationKey = settledRolloverGenerationKey(tableId, pokerState);
   const existing = settledRolloverTimerByTableId.get(tableId);
-  if (existing && existing.generationKey === generationKey) {
+  if (existing && existing.generationKey === generationKey && existing.dueAt === dueAt) {
     return;
   }
   scheduleSettledRolloverTimer({ tableId, generationKey, dueAt });
 }
 
 function isSettledRevealPendingForState(pokerState, nowMs = Date.now()) {
-  if (settledRevealMs <= 0) {
+  if (disconnectSettledRevealMs <= 0) {
     return false;
   }
   if (!pokerState || pokerState.phase !== "SETTLED") {
@@ -2108,9 +2138,129 @@ function isSettledRevealPendingForState(pokerState, nowMs = Date.now()) {
   const dueAt = resolveSettledRevealDueAt({
     settledAt,
     nowMs,
-    revealMs: settledRevealMs
+    revealMs: disconnectSettledRevealMs
   });
   return dueAt > nowMs;
+}
+
+function isValidTargetedSettlementTimestamp(settledAt, nowMs = Date.now()) {
+  if (typeof settledAt !== "string" || !settledAt.trim()) return false;
+  const settledAtMs = Date.parse(settledAt);
+  return Number.isFinite(settledAtMs) && settledAtMs <= nowMs + 1_000;
+}
+
+function resolveSettledHandId(pokerState) {
+  const stateHandId = typeof pokerState?.handId === "string" ? pokerState.handId.trim() : "";
+  const settlementHandId = typeof pokerState?.handSettlement?.handId === "string"
+    ? pokerState.handSettlement.handId.trim()
+    : "";
+  if (stateHandId && settlementHandId && stateHandId !== settlementHandId) return null;
+  return stateHandId || settlementHandId || null;
+}
+
+function preparePublishedSettlementReveal(tableId, tableSnapshot, nowMs = Date.now()) {
+  if (!tableSnapshot || tableSnapshot.tableId !== tableId) {
+    return null;
+  }
+  const handStatus = tableSnapshot?.hand?.status;
+  const handId = typeof tableSnapshot?.hand?.handId === "string"
+    ? tableSnapshot.hand.handId.trim()
+    : "";
+  const showdownHandId = typeof tableSnapshot?.showdown?.handId === "string"
+    ? tableSnapshot.showdown.handId.trim()
+    : "";
+  const settlementHandId = typeof tableSnapshot?.handSettlement?.handId === "string"
+    ? tableSnapshot.handSettlement.handId.trim()
+    : "";
+  if (handStatus !== "SETTLED" || !handId || !showdownHandId || !settlementHandId
+    || handId !== showdownHandId || handId !== settlementHandId
+    || !isValidTargetedSettlementTimestamp(tableSnapshot?.handSettlement?.settledAt, nowMs)) {
+    return null;
+  }
+  const existing = settlementRevealDeadlineByTableId.get(tableId);
+  if (handId && existing?.handId === handId && Number.isSafeInteger(existing.dueAt)) {
+    return { handId, dueAt: existing.dueAt };
+  }
+  const dueAt = nowMs + settledRevealMs;
+  settlementRevealDeadlineByTableId.set(tableId, { handId, dueAt });
+  return { handId, dueAt };
+}
+
+function resolvePublishedSettlementRevealDueAtForTable(tableId) {
+  const pokerState = tableManager.persistedPokerState(tableId);
+  if (!pokerState || pokerState.phase !== "SETTLED") {
+    clearSettlementRevealDeadline(tableId);
+    return null;
+  }
+  const handId = resolveSettledHandId(pokerState);
+  const existing = settlementRevealDeadlineByTableId.get(tableId);
+  if (handId && existing?.handId === handId && Number.isSafeInteger(existing.dueAt)) {
+    return existing.dueAt;
+  }
+  return null;
+}
+
+function isPublishedSettlementRevealPendingForTable(tableId, nowMs = Date.now()) {
+  const pokerState = tableManager.persistedPokerState(tableId);
+  const handId = resolveSettledHandId(pokerState);
+  const entry = settlementRevealDeadlineByTableId.get(tableId);
+  return pokerState?.phase === "SETTLED"
+    && !!handId
+    && entry?.handId === handId
+    && Number.isSafeInteger(entry.dueAt)
+    && entry.dueAt > nowMs;
+}
+
+function normalizeTargetReactionUserIds(value) {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const result = [];
+  const seen = new Set();
+  for (const rawUserId of value) {
+    const userId = typeof rawUserId === "string" ? rawUserId.trim() : "";
+    if (!userId || seen.has(userId)) return null;
+    seen.add(userId);
+    result.push(userId);
+  }
+  return result;
+}
+
+function collectTargetableWinnerUserIds(showdown) {
+  if (!showdown || typeof showdown !== "object" || Array.isArray(showdown)) return null;
+  const reason = typeof showdown.reason === "string" ? showdown.reason.trim().toLowerCase() : "";
+  const pots = showdown.potsAwarded;
+  if ((reason !== "all_folded" && reason !== "computed") || !Array.isArray(pots) || pots.length === 0) return null;
+  if (reason === "all_folded" && pots.length !== 1) return null;
+
+  const targetableWinnerUserIds = new Set();
+  for (let potIndex = 0; potIndex < pots.length; potIndex += 1) {
+    const pot = pots[potIndex];
+    if (!pot || typeof pot !== "object" || Array.isArray(pot)) return null;
+    if (!Number.isSafeInteger(pot.amount) || pot.amount < 0) return null;
+    const winners = normalizeTargetReactionUserIds(pot.winners);
+    const eligibleUserIds = normalizeTargetReactionUserIds(pot.eligibleUserIds);
+    if (!winners || !eligibleUserIds || winners.some((userId) => !eligibleUserIds.includes(userId))) return null;
+
+    let kind = null;
+    if (reason === "all_folded") {
+      if (potIndex === 0
+        && eligibleUserIds.length === 1
+        && winners.length === 1
+        && eligibleUserIds[0] === winners[0]) {
+        kind = "main";
+      }
+    } else if (potIndex === 0) {
+      if (eligibleUserIds.length >= 2) kind = "main";
+    } else if (eligibleUserIds.length >= 2) {
+      kind = "side";
+    } else if (eligibleUserIds.length === 1 && winners.length === 1 && eligibleUserIds[0] === winners[0]) {
+      kind = "return";
+    }
+    if (!kind) return null;
+    if (kind === "main" || kind === "side") {
+      winners.forEach((userId) => targetableWinnerUserIds.add(userId));
+    }
+  }
+  return targetableWinnerUserIds;
 }
 
 async function isSettledRevealPending(tableId, nowMs = Date.now()) {
@@ -2147,7 +2297,9 @@ async function isSettledRevealPending(tableId, nowMs = Date.now()) {
 
 function broadcastStateSnapshots(tableId) {
   maybeBroadcastLobbySnapshot();
-  maybeScheduleSettledRollover(tableId);
+  const publicationSnapshot = tableManager.tableSnapshot(tableId, null);
+  const preparedReveal = preparePublishedSettlementReveal(tableId, publicationSnapshot);
+  maybeScheduleSettledRollover(tableId, preparedReveal?.dueAt ?? null);
   const recipients = tableManager.orderedConnectionsForTable(tableId, (socket) => socket.__connState?.sessionId ?? "");
   for (const recipient of recipients) {
     const recipientConnState = recipient.__connState;
@@ -2159,7 +2311,7 @@ function broadcastStateSnapshots(tableId) {
   }
 }
 
-function broadcastTableReaction(tableId, { seatNo, reactionKey } = {}) {
+function broadcastTableReaction(tableId, { seatNo, targetSeatNo, reactionKey } = {}) {
   const recipients = tableManager.orderedConnectionsForTable(tableId, (socket) => socket.__connState?.sessionId ?? "");
   let sentCount = 0;
   let skippedCount = 0;
@@ -2181,6 +2333,7 @@ function broadcastTableReaction(tableId, { seatNo, reactionKey } = {}) {
         sessionId: recipientConnState.sessionId,
         payload: {
           seatNo,
+          ...(Number.isInteger(targetSeatNo) ? { targetSeatNo } : {}),
           reactionKey
         }
       });
@@ -3876,11 +4029,51 @@ wss.on("connection", (ws) => {
         return;
       }
 
+      const reactionPayload = frame.payload && typeof frame.payload === "object" ? frame.payload : {};
+      const hasTargetSeatNo = Object.prototype.hasOwnProperty.call(reactionPayload, "targetSeatNo");
+      const hasHandId = Object.prototype.hasOwnProperty.call(reactionPayload, "handId");
+      const targeted = hasTargetSeatNo || hasHandId;
+      let targetSeatNo = reactionPayload.targetSeatNo;
+      let targetOccupied = false;
+      let targetIsWinner = false;
+      let settlementMatchesHand = false;
+      let settlementWindowOpen = false;
+      if (targeted) {
+        const pokerState = tableManager.persistedPokerState(tableId);
+        const requestedHandId = typeof reactionPayload.handId === "string" ? reactionPayload.handId.trim() : "";
+        const currentHandId = typeof pokerState?.handId === "string" ? pokerState.handId.trim() : "";
+        const showdownHandId = typeof pokerState?.showdown?.handId === "string" ? pokerState.showdown.handId.trim() : "";
+        const settlementHandId = typeof pokerState?.handSettlement?.handId === "string" ? pokerState.handSettlement.handId.trim() : "";
+        settlementMatchesHand = !!requestedHandId
+          && requestedHandId === currentHandId
+          && requestedHandId === showdownHandId
+          && requestedHandId === settlementHandId;
+        settlementWindowOpen = settlementMatchesHand
+          && isValidTargetedSettlementTimestamp(pokerState?.handSettlement?.settledAt, Date.now())
+          && isPublishedSettlementRevealPendingForTable(tableId);
+        const members = tableManager.tableSnapshot(tableId, null)?.members;
+        const matchingTargetMembers = Array.isArray(members)
+          ? members.filter((member) => member && member.seat === targetSeatNo)
+          : [];
+        const targetMember = matchingTargetMembers.length === 1 ? matchingTargetMembers[0] : null;
+        targetOccupied = !!(targetMember && typeof targetMember.userId === "string" && targetMember.userId.trim());
+        if (targetOccupied && settlementMatchesHand) {
+          const targetableWinnerUserIds = collectTargetableWinnerUserIds(pokerState?.showdown);
+          targetIsWinner = targetableWinnerUserIds instanceof Set && targetableWinnerUserIds.has(targetMember.userId.trim());
+        }
+      }
+
       const result = evaluateHumanReactionCommand({
         tableId,
         senderUserId,
         senderSeatNo,
-        reactionKey: frame.payload?.reactionKey,
+        reactionKey: reactionPayload.reactionKey,
+        targeted,
+        targetSeatNo,
+        targetOccupied,
+        targetIsWinner,
+        settlementMatchesHand,
+        settlementWindowOpen,
         tableClosed: tableManager.isTableClosed(tableId),
         nowMs: Date.now()
       });

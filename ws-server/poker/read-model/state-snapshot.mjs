@@ -185,7 +185,7 @@ export function normalizePrivateBranch(privateBranch, { userId, youSeat }) {
   };
 }
 
-export function buildStateSnapshotPayload({ tableSnapshot, userId, publicProfileStorageBaseUrl = "" }) {
+export function buildStateSnapshotPayload({ tableSnapshot, userId, publicProfileStorageBaseUrl = "", settlementRevealDueAt = null }) {
   const tableId = normalizeString(tableSnapshot?.tableId);
   const stateVersion = Number.isInteger(tableSnapshot?.stateVersion) ? tableSnapshot.stateVersion : 0;
   const maxSeats = Number.isInteger(tableSnapshot?.maxSeats) ? tableSnapshot.maxSeats : null;
@@ -273,6 +273,10 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId, publicProfile
   const handSettlement = normalizeHandSettlement(tableSnapshot?.handSettlement);
   if (handSettlement) {
     payload.public.handSettlement = handSettlement;
+  }
+
+  if (Number.isSafeInteger(settlementRevealDueAt) && settlementRevealDueAt >= 0) {
+    payload.public.settlementRevealDueAt = settlementRevealDueAt;
   }
 
   return payload;

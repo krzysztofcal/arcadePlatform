@@ -347,6 +347,7 @@ test("buildStateSnapshotPayload serializes folded seat statuses for live table s
 test("buildStateSnapshotPayload includes terminal showdown/settlement fields when present", () => {
   const payload = buildStateSnapshotPayload({
     userId: "user_a",
+    settlementRevealDueAt: 1772323200000,
     tableSnapshot: {
       tableId: "table_terminal",
       roomId: "table_terminal",
@@ -381,6 +382,7 @@ test("buildStateSnapshotPayload includes terminal showdown/settlement fields whe
   assert.deepEqual(payload.public.showdown.revealedShowdownParticipants, [{ userId: "user_a", holeCards: ["AS", "AD"] }]);
   assert.equal(payload.public.showdown.potAwardedTotal, 5);
   assert.equal("returnUserId" in payload.public.showdown.potsAwarded[0], false);
+  assert.equal(payload.public.settlementRevealDueAt, 1772323200000);
   assert.deepEqual(payload.public.turn, { userId: null, seat: null, startedAt: null, deadlineAt: null });
   assert.deepEqual(payload.public.actionConstraints, { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null });
   assert.deepEqual(payload.public.handSettlement.payouts, { user_a: 5 });
