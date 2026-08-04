@@ -178,7 +178,7 @@ function resolveObserveOnlyJoin(rawValue) {
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 }
 
-const DEFAULT_SETTLED_REVEAL_MS = 6_000;
+const DEFAULT_SETTLED_REVEAL_MS = 5_000;
 // Disconnect cleanup intentionally keeps the historical shorter grace window;
 // it must not inherit the longer client-facing settlement reveal budget.
 const DEFAULT_DISCONNECT_SETTLED_REVEAL_MS = 4_000;

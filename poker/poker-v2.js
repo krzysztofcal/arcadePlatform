@@ -53,7 +53,7 @@
     error: 'Live table unavailable'
   };
   var CLOSED_TABLE_REDIRECT_SECONDS = 5;
-  var WINNER_REVEAL_MS = 4_000;
+  var WINNER_REVEAL_MS = 3_500;
   var TARGETED_REACTION_EFFECT_TTL_MS = 1_200;
   var CHIP_FLY_MS = 420;
   var SETTLEMENT_CHIP_FLY_MS = 780;

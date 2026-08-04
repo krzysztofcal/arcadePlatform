@@ -556,7 +556,7 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
         ]
       },
       public: {
-        settlementRevealDueAt: nowMs + 6_000,
+        settlementRevealDueAt: nowMs + 5_000,
         hand: { handId: 'hand-1', status: 'SETTLED' },
         pot: { total: 100 },
         showdown: {
@@ -600,13 +600,13 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
   assert.ok(Math.abs(Number.parseFloat(reactionDeltaY)) > 50, 'vertical delta should use the reaction layer height');
   assert.equal(harness.elements.pokerReactionLayer.children.some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))), false);
 
-  harness.advanceTime(3_500);
+  harness.advanceTime(3_499);
   await harness.flush();
   const targetButtonsBeforeServerRevealDeadline = harness.elements.pokerReactionLayer.children
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
-  assert.equal(targetButtonsBeforeServerRevealDeadline.length, 1, 'the unused targeted offer should remain available for nearly four seconds from publication');
-  harness.advanceTime(500);
+  assert.equal(targetButtonsBeforeServerRevealDeadline.length, 1, 'the unused targeted offer should remain available for the local 3.5-second window');
+  harness.advanceTime(1);
   await harness.flush();
   const targetButtonsAfterServerRevealDeadline = harness.elements.pokerReactionLayer.children
     .flatMap((anchor) => anchor.children || [])
@@ -634,7 +634,7 @@ test('poker v2 starts one local reveal window when a settlement patch completes 
       ]
     },
     public: {
-      settlementRevealDueAt: nowMs + 6_000,
+      settlementRevealDueAt: nowMs + 5_000,
       hand: { handId: 'hand-patch', status: 'SETTLED' },
       pot: { total: 100 },
       showdown: {
@@ -669,7 +669,7 @@ test('poker v2 starts one local reveal window when a settlement patch completes 
           settledAt: new Date(nowMs - 100).toISOString(),
           payouts: { 'user-2': 100 }
         },
-        settlementRevealDueAt: nowMs + 6_000
+        settlementRevealDueAt: nowMs + 5_000
       },
       you: { seat: 1 }
     }
@@ -681,7 +681,7 @@ test('poker v2 starts one local reveal window when a settlement patch completes 
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(targetButtons.length, 1);
 
-  harness.advanceTime(3_999);
+  harness.advanceTime(3_499);
   await harness.flush();
   assert.equal(harness.elements.pokerReactionLayer.children
     .flatMap((anchor) => anchor.children || [])
@@ -692,7 +692,7 @@ test('poker v2 starts one local reveal window when a settlement patch completes 
     payload: {
       tableId: 'table-1',
       stateVersion: 3,
-      public: { settlementRevealDueAt: nowMs + 6_000 }
+      public: { settlementRevealDueAt: nowMs + 5_000 }
     },
     you: { seat: 1 }
   });
@@ -3046,7 +3046,7 @@ test('poker v2 keeps the previous reveal visible for the full local window befor
   assert.equal(harness.elements.pokerCommunityCards.children.length, 5);
   assert.equal(harness.elements.pokerHeroCards.children.length, 2);
 
-  harness.advanceTime(4000);
+  harness.advanceTime(3500);
   await harness.flush();
 
   const switchedVillainSeat = findSeatByLabel(harness, 'Villain 1');
@@ -3375,7 +3375,7 @@ test('poker v2 preserves a live settlement reveal received after the server time
   const summary = findChildByClass(harness.elements.pokerCenterLayer, 'poker-settlement-summary');
   assert.equal(summary.hidden, false, 'the next hand must wait for the local reveal window');
 
-  harness.advanceTime(3999);
+  harness.advanceTime(3499);
   await harness.flush();
   assert.equal(summary.hidden, false);
   harness.advanceTime(1);
