@@ -159,6 +159,8 @@ function createHarness(options = {}){
   const token = Object.prototype.hasOwnProperty.call(options, 'token')
     ? options.token
     : ('aaa.' + Buffer.from(JSON.stringify({ sub: 'user-1' })).toString('base64') + '.zzz');
+  let activeToken = token;
+  let authChangeHandler = null;
   const wsClient = {
     _ready: false,
     start(){
@@ -169,7 +171,10 @@ function createHarness(options = {}){
         }
       });
     },
-    destroy(){ this._ready = false; },
+    destroy(){
+      this._ready = false;
+      if (typeof options.onDestroy === 'function') options.onDestroy();
+    },
     isReady(){ return this._ready; },
     sendJoin(payload, requestId){
       joinPayloads.push(payload);
@@ -238,7 +243,7 @@ function createHarness(options = {}){
       },
       KLog: { log(kind, data){ logs.push({ kind, data }); } },
       SupabaseAuthBridge: {
-        getAccessToken: async () => token
+        getAccessToken: async () => activeToken
       },
       PokerWsClient: {
         create(opts){
@@ -290,7 +295,7 @@ function createHarness(options = {}){
   if (Object.prototype.hasOwnProperty.call(options, 'authUser')) {
     sandbox.window.SupabaseAuth = {
       getCurrentUser: async () => options.authUser,
-      onAuthChange(){ return function(){}; }
+      onAuthChange(handler){ authChangeHandler = handler; return function(){}; }
     };
   }
 
@@ -351,6 +356,8 @@ async function flush(){
     flush,
     advanceTime,
     getCreateOptions(){ return createOptions; },
+    setAuthToken(nextToken){ activeToken = nextToken; },
+    triggerAuthChange(user){ return authChangeHandler ? authChangeHandler('TOKEN_REFRESHED', user) : null; },
     getIntervalCount(){ return intervalTimers.length; },
     getSessionStorage(key){ return sandbox.sessionStorage.getItem(key); }
   };
@@ -1849,6 +1856,59 @@ test('poker v2 retries a rebuy error with the same id and ignores clicks while p
   resolveRetry({ ok: true, requestId: harness.rebuyRequestIds[0] });
   await harness.flush();
   assert.equal(harness.elements.pokerV2RebuyPanel.hidden, true);
+});
+
+test('poker v2 keeps a rebuy pending across a technical live restart and resumes it once', async () => {
+  let rejectRebuy = null;
+  const tokenOne = 'aaa.' + Buffer.from(JSON.stringify({ sub: 'user-1' })).toString('base64') + '.one';
+  const tokenTwo = 'aaa.' + Buffer.from(JSON.stringify({ sub: 'user-1' })).toString('base64') + '.two';
+  const buildSnapshot = () => ({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: { tableId: 'table-1', status: 'OPEN', members: [{ userId: 'user-1', seat: 1 }] },
+      public: { hand: { handId: 'hand-rebuy-restart', status: 'TURN' }, turn: { userId: 'bot-1' }, pot: { total: 0, sidePots: [] }, legalActions: { seat: null, actions: [] } },
+      private: { userId: 'user-1', seat: 1, playerState: { status: 'OUT_OF_CHIPS', stack: 0, canRebuy: true } },
+      you: { seat: 1 }
+    }
+  });
+
+  const harness = createHarness({
+    token: tokenOne,
+    authUser: { id: 'user-1' },
+    sendRebuy(){
+      return new Promise((_resolve, reject) => { rejectRebuy = reject; });
+    },
+    onDestroy(){
+      if (rejectRebuy) {
+        const reject = rejectRebuy;
+        rejectRebuy = null;
+        reject(Object.assign(new Error('ws_closed'), { code: 'ws_closed' }));
+      }
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  await harness.flush();
+  const firstWs = harness.getCreateOptions();
+  firstWs.onSnapshot(buildSnapshot());
+  await harness.flush();
+  harness.elements.pokerV2RebuyBtn.click();
+  await harness.flush();
+  assert.equal(harness.rebuyRequestIds.length, 1);
+  const requestId = harness.rebuyRequestIds[0];
+
+  harness.setAuthToken(tokenTwo);
+  await harness.triggerAuthChange({ id: 'user-1' });
+  await harness.flush();
+  harness.getCreateOptions().onSnapshot(buildSnapshot());
+  await harness.flush();
+
+  assert.deepEqual(harness.rebuyRequestIds, [requestId, requestId]);
+  harness.getCreateOptions().onSnapshot(buildSnapshot());
+  await harness.flush();
+  assert.deepEqual(harness.rebuyRequestIds, [requestId, requestId]);
 });
 
 test('poker v2 keeps action buttons stable while exposing single-select preactions off-turn', async () => {

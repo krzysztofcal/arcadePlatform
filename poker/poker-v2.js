@@ -194,7 +194,6 @@
   var queuedPreaction = null;
   var queuedPreactionInFlight = false;
   var rebuyOperation = null;
-  var pendingRebuyResumeAttempted = false;
   var rebuyPanelDismissed = false;
   var rebuyBalanceLoading = false;
   var stickyWinnerReveal = {
@@ -1633,7 +1632,6 @@
 
   function clearRebuyOperation(){
     rebuyOperation = null;
-    pendingRebuyResumeAttempted = false;
     clearPendingRebuyStorage();
   }
 
@@ -1650,6 +1648,7 @@
       }
       return {
         phase: parsed.phase === 'error' ? 'error' : 'pending',
+        resumeAttempted: false,
         requestId: parsed.requestId,
         tableId: parsed.tableId,
         userId: parsed.userId,
@@ -1682,6 +1681,13 @@
     }).catch(function(error){
       if (rebuyOperation !== operation) return null;
       var code = rebuyErrorCode(error);
+      if (code === 'ws_closed' && operation.preserveOnTechnicalRestart === true){
+        operation.preserveOnTechnicalRestart = false;
+        operation.phase = 'pending';
+        persistPendingRebuy();
+        renderRebuyPanel();
+        return null;
+      }
       if (isDefinitiveRebuyRejection(code)){
         clearRebuyOperation();
         rebuyPanelDismissed = false;
@@ -1713,9 +1719,9 @@
       rebuyPanelDismissed = true;
       return true;
     }
-    if (rebuyOperation.phase === 'pending' && !pendingRebuyResumeAttempted
+    if (rebuyOperation.phase === 'pending' && rebuyOperation.resumeAttempted !== true
       && status === 'OUT_OF_CHIPS' && stack === 0 && state.playerState.canRebuy === true){
-      pendingRebuyResumeAttempted = true;
+      rebuyOperation.resumeAttempted = true;
       persistPendingRebuy();
       void sendRebuyOperation();
     }
@@ -4128,7 +4134,7 @@
     if (rebuyOperation && rebuyOperation.phase === 'pending') return Promise.resolve({ ok: true, pending: true });
     if (rebuyOperation && rebuyOperation.phase === 'error'){
       rebuyOperation.phase = 'pending';
-      pendingRebuyResumeAttempted = true;
+      rebuyOperation.resumeAttempted = true;
       persistPendingRebuy();
       setError('');
       renderRebuyPanel();
@@ -4137,12 +4143,12 @@
     var requestId = buildRebuyRequestId();
     rebuyOperation = {
       phase: 'pending',
+      resumeAttempted: true,
       requestId: requestId,
       tableId: state.tableId,
       userId: state.currentUserId,
       payload: { tableId: state.tableId, amount: 100 }
     };
-    pendingRebuyResumeAttempted = true;
     persistPendingRebuy();
     setError('');
     renderRebuyPanel();
@@ -4482,6 +4488,11 @@
     var preservingState = !!(state && state.mode === 'live'
       && state.hasAppliedAuthoritativeSnapshot
       && state.tableId && state.tableId === tableId);
+    if (preservingState && rebuyOperation && rebuyOperation.phase === 'pending'){
+      rebuyOperation.preserveOnTechnicalRestart = true;
+      rebuyOperation.resumeAttempted = false;
+      persistPendingRebuy();
+    }
     stopLiveMode();
     startTurnClock();
     // 2. THEN capture the new generation (old = N, stop => N+1 stale, this => N+2 active).
