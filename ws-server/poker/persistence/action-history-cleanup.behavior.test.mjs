@@ -107,7 +107,7 @@ test("phase 2 deletes HAND_SETTLED when ordinary actions already gone", async ()
 
   const result = await cleanup.sweep();
   assert.equal(result.ok, true);
-  assert.equal(phase1Called, true);  // Phase 1 always runs first
+  assert.equal(phase1Called, true);  // Phase 1 runs before Phase 2
   assert.equal(result.phase2Deleted, 2);
 });
 
@@ -395,4 +395,170 @@ test("status exposes effective cleanup configuration and phase-2-only HAND_SETTL
   const backlogQuery = queries.find((sql) => sql.includes("ordinary_action_rows"));
   assert.match(backlogQuery, /not exists[\s\S]+action_type != 'HAND_SETTLED'/);
   assert.equal(queries.some((sql) => sql.includes("statement_timeout")), true);
+});
+
+test("hole-card phase deletes unique hands and phase 2 keeps the hole-card guard", async () => {
+  const queries = [];
+  const cleanup = createActionHistoryCleanup({
+    env: {
+      WS_POKER_BOT_ACTION_RETENTION_MS: String(HOUR),
+      WS_POKER_BOT_SETTLED_RETENTION_MS: String(2 * HOUR),
+      WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+      WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+      WS_POKER_ACTION_HISTORY_BATCH_SIZE: "5",
+      SUPABASE_DB_URL: "postgres://test/db"
+    },
+    beginSql: async (fn) => fn({
+      unsafe: async (sql) => {
+        queries.push(sql);
+        if (sql.includes("hole_card_candidates")) return [{ table_id: "t1", hand_id: "h1", user_id: "u1" }, { table_id: "t1", hand_id: "h1", user_id: "u2" }];
+        return [];
+      }
+    })
+  });
+
+  const result = await cleanup.sweep();
+  assert.equal(result.ok, true);
+  assert.equal(result.holeCardsDeleted, 2);
+  assert.equal(result.phase1Deleted, 0);
+  assert.equal(result.phase2Deleted, 0);
+  assert.deepEqual(result.failedPhases, []);
+  const holeCardQuery = queries.find((sql) => sql.includes("hole_card_candidates"));
+  const phase2Query = queries.find((sql) => sql.includes("id in (select id from candidates)"));
+  assert.match(holeCardQuery, /group by pa\.table_id, pa\.hand_id/);
+  assert.match(phase2Query, /poker_hole_cards/);
+  assert.match(phase2Query, /not exists[\s\S]+poker_hole_cards/);
+});
+
+test("hole-card failure is not retried in later rounds and remains failed after action cleanup succeeds", async () => {
+  let holeCardCalls = 0;
+  let phase1Calls = 0;
+  let phase2Calls = 0;
+  const cleanup = createActionHistoryCleanup({
+    maxSweepRounds: 3,
+    env: {
+      WS_POKER_BOT_ACTION_RETENTION_MS: String(HOUR),
+      WS_POKER_BOT_SETTLED_RETENTION_MS: String(2 * HOUR),
+      WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+      WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+      WS_POKER_ACTION_HISTORY_BATCH_SIZE: "5",
+      SUPABASE_DB_URL: "postgres://test/db"
+    },
+    beginSql: async (fn) => fn({
+      unsafe: async (sql) => {
+        if (sql.includes("hole_card_candidates")) {
+          holeCardCalls += 1;
+          throw new Error("hole-card database unavailable");
+        }
+        if (sql.includes("candidate_hands")) {
+          phase1Calls += 1;
+          return phase1Calls === 1 ? [{ id: 1 }, { id: 2 }] : [];
+        }
+        if (sql.includes("id in (select id from candidates)")) {
+          phase2Calls += 1;
+          return phase2Calls === 1 ? [{ id: 3 }] : [];
+        }
+        return [];
+      }
+    })
+  });
+
+  const result = await cleanup.sweep();
+  const status = await cleanup.status();
+  assert.equal(holeCardCalls, 1);
+  assert.equal(phase1Calls, 2);
+  assert.equal(phase2Calls, 2);
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, "hole_cards_cleanup_failed");
+  assert.deepEqual(result.failedPhases, ["hole_cards"]);
+  assert.equal(result.phase1Deleted, 2);
+  assert.equal(result.phase2Deleted, 1);
+  assert.equal(status.lastRun.result, "failed");
+  assert.equal(status.lastRun.errorCode, "hole_cards_cleanup_failed");
+  assert.deepEqual(status.lastRun.failedPhases, ["hole_cards"]);
+});
+
+test("next sweep retries hole cards after a failed hole-card transaction", async () => {
+  let holeCardCalls = 0;
+  const cleanup = createActionHistoryCleanup({
+    env: {
+      WS_POKER_BOT_ACTION_RETENTION_MS: String(HOUR),
+      WS_POKER_BOT_SETTLED_RETENTION_MS: String(2 * HOUR),
+      WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+      WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+      WS_POKER_ACTION_HISTORY_BATCH_SIZE: "5",
+      SUPABASE_DB_URL: "postgres://test/db"
+    },
+    beginSql: async (fn) => fn({
+      unsafe: async (sql) => {
+        if (sql.includes("hole_card_candidates")) {
+          holeCardCalls += 1;
+          if (holeCardCalls === 1) throw new Error("temporary hole-card failure");
+          return [{ id: 1 }, { id: 2 }];
+        }
+        return [];
+      }
+    })
+  });
+
+  const first = await cleanup.sweep();
+  const second = await cleanup.sweep();
+  assert.equal(first.ok, false);
+  assert.deepEqual(first.failedPhases, ["hole_cards"]);
+  assert.equal(second.ok, true);
+  assert.equal(second.holeCardsDeleted, 2);
+  assert.deepEqual(second.failedPhases, []);
+  assert.equal(holeCardCalls, 2);
+});
+
+test("failed phases are unique and ordered when a main phase fails after hole cards", async () => {
+  const cleanup = createActionHistoryCleanup({
+    env: {
+      WS_POKER_BOT_ACTION_RETENTION_MS: String(HOUR),
+      WS_POKER_BOT_SETTLED_RETENTION_MS: String(2 * HOUR),
+      WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+      WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+      WS_POKER_ACTION_HISTORY_BATCH_SIZE: "5",
+      SUPABASE_DB_URL: "postgres://test/db"
+    },
+    beginSql: async (fn) => fn({
+      unsafe: async (sql) => {
+        if (sql.includes("hole_card_candidates")) throw new Error("hole-card failure");
+        if (sql.includes("candidate_hands")) throw new Error("ordinary action failure");
+        return [];
+      }
+    })
+  });
+
+  const result = await cleanup.sweep();
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, "ordinary_actions_cleanup_failed");
+  assert.deepEqual(result.failedPhases, ["hole_cards", "ordinary_actions"]);
+  assert.equal(result.holeCardsDeleted, 0);
+  assert.equal(result.phase1Deleted, 0);
+  assert.equal(result.phase2Deleted, 0);
+});
+
+test("enabled no-op sweep is success and does not emit a completion log", async () => {
+  const events = [];
+  const cleanup = createActionHistoryCleanup({
+    klog: (...args) => events.push(args),
+    env: {
+      WS_POKER_BOT_ACTION_RETENTION_MS: String(HOUR),
+      WS_POKER_BOT_SETTLED_RETENTION_MS: "0",
+      WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+      WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+      WS_POKER_ACTION_HISTORY_BATCH_SIZE: "5",
+      SUPABASE_DB_URL: "postgres://test/db"
+    },
+    beginSql: async (fn) => fn({ unsafe: async () => [] })
+  });
+
+  const result = await cleanup.sweep();
+  assert.equal(result.ok, true);
+  assert.equal(result.skipped, false);
+  assert.equal(result.holeCardsDeleted, 0);
+  assert.equal(result.phase1Deleted, 0);
+  assert.equal(result.phase2Deleted, 0);
+  assert.equal(events.length, 0);
 });

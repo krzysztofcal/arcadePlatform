@@ -20,6 +20,7 @@ const EXPOSED_ERRORS = new Set([
   "already_closed",
   "already_due",
   "retirement_request_failed",
+  "cleanup_failed",
 ]);
 
 function jsonResponse(statusCode, headers, body) {
@@ -30,11 +31,35 @@ function jsonResponse(statusCode, headers, body) {
   };
 }
 
-function controlError(code, status = 400) {
+function controlError(code, status = 400, details = null) {
   const error = new Error(code);
   error.code = code;
   error.status = status;
+  if (details && typeof details === "object") error.details = details;
   return error;
+}
+
+function projectMaintenanceFailure(value) {
+  if (!value || typeof value !== "object") return {};
+  const allowedPhases = ["hole_cards", "ordinary_actions", "hand_settled"];
+  const failedPhases = Array.isArray(value.failedPhases)
+    ? allowedPhases.filter((phase) => value.failedPhases.includes(phase))
+    : [];
+  const result = {};
+  if (typeof value.operation === "string") result.operation = value.operation;
+  if (typeof value.result === "string") result.result = value.result;
+  if (Number.isSafeInteger(value.holeCardsDeleted) && value.holeCardsDeleted >= 0) {
+    result.holeCardsDeleted = value.holeCardsDeleted;
+  }
+  if (Number.isSafeInteger(value.phase1Deleted) && value.phase1Deleted >= 0) {
+    result.phase1Deleted = value.phase1Deleted;
+  }
+  if (Number.isSafeInteger(value.phase2Deleted) && value.phase2Deleted >= 0) {
+    result.phase2Deleted = value.phase2Deleted;
+  }
+  if (typeof value.errorCode === "string") result.errorCode = value.errorCode;
+  if (failedPhases.length > 0) result.failedPhases = failedPhases;
+  return result;
 }
 
 function parseJsonObject(body) {
@@ -141,10 +166,21 @@ async function proxyMaintenance({ method, payload, adminUserId, target, env, fet
     try {
       body = await response.json();
     } catch {}
+    if (body && body.environment != null && body.environment !== target) {
+      throw controlError("ws_maintenance_environment_mismatch", 502);
+    }
     if (!response.ok) {
-      const upstream = typeof body?.error === "string" ? body.error : "ws_maintenance_unavailable";
+      const upstream = typeof body?.error === "string"
+        ? body.error
+        : body?.operation === "cleanup" && body?.ok === false
+          ? "cleanup_failed"
+          : "ws_maintenance_unavailable";
       const exposed = EXPOSED_ERRORS.has(upstream);
-      throw controlError(exposed ? upstream : "ws_maintenance_unavailable", exposed ? response.status : 502);
+      throw controlError(
+        exposed ? upstream : "ws_maintenance_unavailable",
+        exposed ? response.status : 502,
+        exposed ? projectMaintenanceFailure(body) : null
+      );
     }
     if (!body || body.environment !== target) {
       throw controlError("ws_maintenance_environment_mismatch", 502);
@@ -203,7 +239,7 @@ function createAdminPokerMaintenanceHandler(deps = {}) {
       const status = Number(error?.status) || 500;
       const code = error?.code || "server_error";
       klog("admin_poker_maintenance_failed", { status, code });
-      return jsonResponse(status, cors, { error: code });
+      return jsonResponse(status, cors, { ...(error?.details || {}), error: code });
     }
   };
 }

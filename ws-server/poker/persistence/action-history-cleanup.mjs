@@ -1,10 +1,10 @@
 // Action-history retention cleanup.
 //
-// Two-phase sweep that runs on a timer (see server.mjs).
-// Phase 1 deletes ordinary actions (everything except HAND_SETTLED)
-// for completed hands older than the applicable retention cutoff.
-// Phase 2 deletes HAND_SETTLED audit rows for hands whose ordinary
-// actions have already been cleaned up.
+// Bounded three-phase sweep that runs on a timer (see server.mjs).
+// The hole-card phase deletes poker_hole_cards for completed hands older than
+// the applicable action retention cutoff. Phase 1 deletes ordinary actions
+// (everything except HAND_SETTLED). Phase 2 deletes HAND_SETTLED audit rows
+// only after both ordinary actions and hole cards are gone.
 //
 // Retention is per-table: bot-only tables (has_human_participant = false)
 // use a short window; tables with human gameplay use a long window.
@@ -16,10 +16,82 @@ const BACKLOG_CACHE_TTL_MS = 15_000;
 const DEFAULT_MAX_SWEEP_ROUNDS = 1;
 const MAX_SWEEP_ROUNDS = 20;
 // Preview uses bounded repeated batches for stress tests; Production stays at one round.
+const CLEANUP_PHASE_ORDER = Object.freeze(["hole_cards", "ordinary_actions", "hand_settled"]);
 
 function resolveCutoff(retentionMs) {
   if (!Number.isFinite(retentionMs) || retentionMs <= 0) return null;
   return new Date(Date.now() - retentionMs).toISOString();
+}
+
+// Hole-card rows are deleted by unique (table_id, hand_id) candidates. The
+// batch bounds hands, while the returned row count reflects all users/cards
+// deleted for those hands.
+async function sweepHoleCards({ tx, botActionCutoff, humanActionCutoff, batchSize, lockLimit }) {
+  const result = await tx.unsafe(
+    `with locked_tables as (
+  select t.id, t.has_human_participant
+    from public.poker_tables t
+   where exists (
+           select 1
+             from public.poker_actions pa
+            where pa.table_id = t.id
+              and pa.action_type = 'HAND_SETTLED'
+              and (
+                    (t.has_human_participant = false
+                     and $1::timestamptz is not null
+                     and pa.created_at < $1::timestamptz)
+                 or (t.has_human_participant = true
+                     and $2::timestamptz is not null
+                     and pa.created_at < $2::timestamptz)
+                  )
+              and exists (
+                    select 1
+                      from public.poker_hole_cards hc
+                     where hc.table_id = pa.table_id
+                       and hc.hand_id = pa.hand_id
+                  )
+         )
+   order by (
+     select min(pa2.created_at) from public.poker_actions pa2
+      where pa2.table_id = t.id
+        and pa2.action_type = 'HAND_SETTLED'
+   )
+   limit $4
+   for update skip locked
+), hole_card_candidates as (
+  select pa.table_id, pa.hand_id, min(pa.created_at) as created_at
+    from public.poker_actions pa
+    join locked_tables t on t.id = pa.table_id
+   where pa.action_type = 'HAND_SETTLED'
+     and (
+           (t.has_human_participant = false
+            and $1::timestamptz is not null
+            and pa.created_at < $1::timestamptz)
+        or (t.has_human_participant = true
+            and $2::timestamptz is not null
+            and pa.created_at < $2::timestamptz)
+         )
+     and exists (
+           select 1
+             from public.poker_hole_cards hc
+            where hc.table_id = pa.table_id
+              and hc.hand_id = pa.hand_id
+         )
+   group by pa.table_id, pa.hand_id
+   order by created_at
+   limit $3
+)
+delete from public.poker_hole_cards hc
+ where exists (
+   select 1
+     from hole_card_candidates ch
+    where ch.table_id = hc.table_id
+      and ch.hand_id = hc.hand_id
+ )
+returning hc.table_id, hc.hand_id, hc.user_id;`,
+    [botActionCutoff, humanActionCutoff, batchSize, lockLimit]
+  );
+  return Array.isArray(result) ? result.length : 0;
 }
 
 // Phase 1 — delete ordinary actions for completed hands.
@@ -121,6 +193,12 @@ async function sweepPhase2({ tx, botSettledCutoff, humanSettledCutoff, batchSize
                        and oa.hand_id = pa.hand_id
                        and oa.action_type != 'HAND_SETTLED'
                   )
+              and not exists (
+                    select 1
+                      from public.poker_hole_cards hc
+                     where hc.table_id = pa.table_id
+                       and hc.hand_id = pa.hand_id
+                  )
          )
    order by (
      select min(pa2.created_at) from public.poker_actions pa2
@@ -149,6 +227,12 @@ candidates as (
             where oa.table_id = pa.table_id
               and oa.hand_id = pa.hand_id
               and oa.action_type != 'HAND_SETTLED'
+         )
+     and not exists (
+           select 1
+             from public.poker_hole_cards hc
+            where hc.table_id = pa.table_id
+              and hc.hand_id = pa.hand_id
          )
    order by created_at
    limit $3
@@ -237,8 +321,18 @@ export function createActionHistoryCleanup({
 
   let sweepInProgress = false;
   let lastRun = null;
-  let lastError = null;
   let backlogCache = null;
+
+  function orderedFailedPhases(failedPhases) {
+    return CLEANUP_PHASE_ORDER.filter((phase) => failedPhases.has(phase));
+  }
+
+  function primaryErrorCode(failedPhases) {
+    if (failedPhases.has("ordinary_actions")) return "ordinary_actions_cleanup_failed";
+    if (failedPhases.has("hand_settled")) return "hand_settled_cleanup_failed";
+    if (failedPhases.has("hole_cards")) return "hole_cards_cleanup_failed";
+    return null;
+  }
 
   async function readBacklog(cutoffs) {
     const nowMs = Date.now();
@@ -302,6 +396,11 @@ export function createActionHistoryCleanup({
                        and oa.hand_id = pa.hand_id
                        and oa.action_type != 'HAND_SETTLED'
                   )
+              and not exists (
+                    select 1 from public.poker_hole_cards hc
+                     where hc.table_id = pa.table_id
+                       and hc.hand_id = pa.hand_id
+                  )
          )
    order by (select min(pa2.created_at) from public.poker_actions pa2
               where pa2.table_id = t.id and pa2.action_type = 'HAND_SETTLED')
@@ -318,6 +417,10 @@ export function createActionHistoryCleanup({
      and not exists (
            select 1 from public.poker_actions oa
             where oa.table_id = pa.table_id and oa.hand_id = pa.hand_id and oa.action_type != 'HAND_SETTLED'
+         )
+     and not exists (
+           select 1 from public.poker_hole_cards hc
+            where hc.table_id = pa.table_id and hc.hand_id = pa.hand_id
          )
    order by pa.created_at
    limit $3
@@ -361,7 +464,17 @@ select
   }
 
   async function sweep() {
-    if (sweepInProgress) return { ok: true, phase1Deleted: 0, phase2Deleted: 0, skipped: true, reason: "sweep_in_progress" };
+    if (sweepInProgress) {
+      return {
+        ok: true,
+        holeCardsDeleted: 0,
+        phase1Deleted: 0,
+        phase2Deleted: 0,
+        failedPhases: [],
+        skipped: true,
+        reason: "sweep_in_progress"
+      };
+    }
     sweepInProgress = true;
     const startedAtMs = Date.now();
     const startedAt = new Date(startedAtMs).toISOString();
@@ -371,69 +484,149 @@ select
       const anyEnabled = cutoffs.botActionEnabled || cutoffs.humanActionEnabled
         || cutoffs.botSettledEnabled || cutoffs.humanSettledEnabled;
       if (!anyEnabled) {
-        result = { ok: true, phase1Deleted: 0, phase2Deleted: 0, skipped: true, reason: "cleanup_disabled" };
+        result = {
+          ok: true,
+          holeCardsDeleted: 0,
+          phase1Deleted: 0,
+          phase2Deleted: 0,
+          failedPhases: [],
+          skipped: true,
+          reason: "cleanup_disabled"
+        };
         return result;
       }
 
-      try {
-        result = await beginSql(async (tx) => {
-        let phase1Deleted = 0;
-        let phase2Deleted = 0;
-        for (let round = 0; round < sweepRounds; round += 1) {
-          const phase1RoundDeleted = await sweepPhase1({
+      let holeCardsDeleted = 0;
+      let phase1Deleted = 0;
+      let phase2Deleted = 0;
+      let holeCardsPhaseEnabledForSweep = cutoffs.botActionEnabled || cutoffs.humanActionEnabled;
+      const failedPhases = new Set();
+
+      for (let round = 0; round < sweepRounds; round += 1) {
+        let holeCardsRoundDeleted = 0;
+        if (holeCardsPhaseEnabledForSweep) {
+          try {
+            holeCardsRoundDeleted = await beginSql((tx) => sweepHoleCards({
+              tx,
+              botActionCutoff: cutoffs.botActionCutoff,
+              humanActionCutoff: cutoffs.humanActionCutoff,
+              batchSize,
+              lockLimit
+            }), { env });
+            holeCardsDeleted += holeCardsRoundDeleted;
+          } catch (_error) {
+            failedPhases.add("hole_cards");
+            holeCardsPhaseEnabledForSweep = false;
+          }
+        }
+
+        let phase1RoundDeleted = 0;
+        try {
+          phase1RoundDeleted = await beginSql((tx) => sweepPhase1({
             tx,
             botActionCutoff: cutoffs.botActionCutoff,
             humanActionCutoff: cutoffs.humanActionCutoff,
             batchSize,
             lockLimit,
             klog
-          });
-          const phase2RoundDeleted = await sweepPhase2({
+          }), { env });
+          phase1Deleted += phase1RoundDeleted;
+        } catch (_error) {
+          failedPhases.add("ordinary_actions");
+          break;
+        }
+
+        let phase2RoundDeleted = 0;
+        try {
+          phase2RoundDeleted = await beginSql((tx) => sweepPhase2({
             tx,
             botSettledCutoff: cutoffs.botSettledCutoff,
             humanSettledCutoff: cutoffs.humanSettledCutoff,
             batchSize,
             lockLimit,
             klog
-          });
-          phase1Deleted += phase1RoundDeleted;
+          }), { env });
           phase2Deleted += phase2RoundDeleted;
-          if (phase1RoundDeleted === 0 && phase2RoundDeleted === 0) break;
+        } catch (_error) {
+          failedPhases.add("hand_settled");
+          break;
         }
 
-        if (phase1Deleted > 0 || phase2Deleted > 0) {
-          klog("ws_action_history_cleanup_complete", {
-            phase1Deleted,
-            phase2Deleted,
-            batchSize,
-            lockLimit,
-            sweepRounds
-          });
-        }
+        if (holeCardsRoundDeleted === 0 && phase1RoundDeleted === 0 && phase2RoundDeleted === 0) break;
+      }
 
-        return { ok: true, phase1Deleted, phase2Deleted };
-      }, { env });
+      const orderedPhases = orderedFailedPhases(failedPhases);
+      const errorCode = primaryErrorCode(failedPhases);
+      result = {
+        ok: orderedPhases.length === 0,
+        holeCardsDeleted,
+        phase1Deleted,
+        phase2Deleted,
+        failedPhases: orderedPhases,
+        errorCode,
+        skipped: false,
+        reason: errorCode
+      };
+
+      if (result.ok && (holeCardsDeleted > 0 || phase1Deleted > 0 || phase2Deleted > 0)) {
+        klog("ws_action_history_cleanup_complete", {
+          holeCardsDeleted,
+          phase1Deleted,
+          phase2Deleted,
+          batchSize,
+          lockLimit,
+          sweepRounds
+        });
+      } else if (!result.ok) {
+        klog("ws_action_history_cleanup_failed", {
+          errorCode,
+          failedPhases: orderedPhases,
+          holeCardsDeleted,
+          phase1Deleted,
+          phase2Deleted,
+          batchSize,
+          lockLimit,
+          sweepRounds
+        });
+      }
       return result;
-    } catch (error) {
+    } catch (_error) {
+      result = {
+        ok: false,
+        holeCardsDeleted: 0,
+        phase1Deleted: 0,
+        phase2Deleted: 0,
+        failedPhases: ["ordinary_actions"],
+        errorCode: "ordinary_actions_cleanup_failed",
+        skipped: false,
+        reason: "ordinary_actions_cleanup_failed"
+      };
       klog("ws_action_history_cleanup_failed", {
-        reason: error?.code || error?.message || "unknown"
+        errorCode: result.errorCode,
+        failedPhases: result.failedPhases,
+        holeCardsDeleted: 0,
+        phase1Deleted: 0,
+        phase2Deleted: 0,
+        batchSize,
+        lockLimit,
+        sweepRounds
       });
-      result = { ok: false, phase1Deleted: 0, phase2Deleted: 0, reason: error?.code || "cleanup_failed" };
       return result;
-    }
     } finally {
       sweepInProgress = false;
       const finishedAt = new Date().toISOString();
-      lastError = result?.ok === false ? { code: String(result.reason || "cleanup_failed").slice(0, 120) } : null;
       lastRun = {
         startedAt,
         finishedAt,
         durationMs: Math.max(0, Date.now() - startedAtMs),
+        holeCardsDeleted: Number(result?.holeCardsDeleted || 0),
         phase1Deleted: Number(result?.phase1Deleted || 0),
         phase2Deleted: Number(result?.phase2Deleted || 0),
         result: result?.ok === true ? (result?.skipped ? "skipped" : "success") : "failed",
         skipped: result?.skipped === true,
-        reason: result?.reason || null
+        reason: result?.reason || null,
+        errorCode: result?.errorCode || null,
+        failedPhases: Array.isArray(result?.failedPhases) ? result.failedPhases : []
       };
     }
   }
@@ -451,7 +644,7 @@ select
       sweepRounds,
       sweepInProgress,
       lastRun,
-      lastError,
+      lastError: lastRun?.errorCode ? { code: lastRun.errorCode } : null,
       backlog: await readBacklog(cutoffs)
     };
   }

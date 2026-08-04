@@ -121,7 +121,8 @@ function normalizeMetricsSnapshot(value, target) {
       "ordinaryActionRows", "handSettledRows", "cappedAtBatchSize", "measuredAt"
     ]);
     cleanup.lastRun = projectFields(value.cleanup.lastRun, [
-      "finishedAt", "durationMs", "deletedRows", "result"
+      "finishedAt", "durationMs", "holeCardsDeleted", "phase1Deleted", "phase2Deleted",
+      "deletedRows", "result", "errorCode", "failedPhases"
     ]);
   }
   return {
