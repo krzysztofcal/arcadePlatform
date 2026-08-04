@@ -556,7 +556,7 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
         ]
       },
       public: {
-        settlementRevealDueAt: nowMs + 4_000,
+        settlementRevealDueAt: nowMs + 6_000,
         hand: { handId: 'hand-1', status: 'SETTLED' },
         pot: { total: 100 },
         showdown: {
@@ -606,12 +606,160 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(targetButtonsBeforeServerRevealDeadline.length, 1, 'the unused targeted offer should remain available for nearly four seconds from publication');
-  harness.advanceTime(300);
+  harness.advanceTime(500);
   await harness.flush();
   const targetButtonsAfterServerRevealDeadline = harness.elements.pokerReactionLayer.children
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(targetButtonsAfterServerRevealDeadline.length, 0, 'targeted offers should expire with the authoritative reveal deadline');
+});
+
+test('poker v2 starts one local reveal window when a settlement patch completes the pair', async () => {
+  const nowMs = 1_700_000_100_000;
+  const harness = createHarness({ nowMs });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  const basePayload = {
+    tableId: 'table-1',
+    stateVersion: 1,
+    table: {
+      tableId: 'table-1',
+      status: 'OPEN',
+      maxSeats: 6,
+      members: [
+        { userId: 'user-1', seat: 1 },
+        { userId: 'user-2', seat: 2 }
+      ]
+    },
+    public: {
+      settlementRevealDueAt: nowMs + 6_000,
+      hand: { handId: 'hand-patch', status: 'SETTLED' },
+      pot: { total: 100 },
+      showdown: {
+        handId: 'hand-patch',
+        reason: 'computed',
+        potAwardedTotal: 100,
+        potsAwarded: [{ amount: 100, winners: ['user-2'], eligibleUserIds: ['user-1', 'user-2'] }]
+      },
+      seats: [
+        { userId: 'user-1', seatNo: 1, status: 'ACTIVE' },
+        { userId: 'user-2', seatNo: 2, status: 'ACTIVE' }
+      ]
+    },
+    you: { seat: 1 }
+  };
+
+  ws.onSnapshot({ kind: 'stateSnapshot', payload: basePayload });
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .filter((child) => String(child.className || '').includes('poker-seat-target-reaction')).length, 0);
+
+  ws.onSnapshot({
+    kind: 'statePatch',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      public: {
+        hand: { handId: 'hand-patch', status: 'SETTLED' },
+        handSettlement: {
+          handId: 'hand-patch',
+          settledAt: new Date(nowMs - 100).toISOString(),
+          payouts: { 'user-2': 100 }
+        },
+        settlementRevealDueAt: nowMs + 6_000
+      },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const targetButtons = harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
+  assert.equal(targetButtons.length, 1);
+
+  harness.advanceTime(3_999);
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .filter((child) => String(child.className || '').includes('poker-seat-target-reaction')).length, 1);
+
+  ws.onSnapshot({
+    kind: 'statePatch',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 3,
+      public: { settlementRevealDueAt: nowMs + 6_000 }
+    },
+    you: { seat: 1 }
+  });
+  await harness.flush();
+  harness.advanceTime(1);
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .filter((child) => String(child.className || '').includes('poker-seat-target-reaction')).length, 0);
+});
+
+test('poker v2 gives a late complete settlement only the remaining server window', async () => {
+  const nowMs = 1_700_000_200_000;
+  const harness = createHarness({ nowMs });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [{ userId: 'user-1', seat: 1 }, { userId: 'user-2', seat: 2 }]
+      },
+      public: {
+        settlementRevealDueAt: nowMs + 1_000,
+        hand: { handId: 'hand-late', status: 'SETTLED' },
+        pot: { total: 100 },
+        showdown: {
+          handId: 'hand-late',
+          reason: 'computed',
+          potAwardedTotal: 100,
+          potsAwarded: [{ amount: 100, winners: ['user-2'], eligibleUserIds: ['user-1', 'user-2'] }]
+        },
+        handSettlement: {
+          handId: 'hand-late',
+          settledAt: new Date(nowMs - 100).toISOString(),
+          payouts: { 'user-2': 100 }
+        },
+        seats: [
+          { userId: 'user-1', seatNo: 1, status: 'ACTIVE' },
+          { userId: 'user-2', seatNo: 2, status: 'ACTIVE' }
+        ]
+      },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .filter((child) => String(child.className || '').includes('poker-seat-target-reaction')).length, 1);
+  harness.advanceTime(999);
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .filter((child) => String(child.className || '').includes('poker-seat-target-reaction')).length, 1);
+  harness.advanceTime(1);
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .filter((child) => String(child.className || '').includes('poker-seat-target-reaction')).length, 0);
 });
 
 test('poker v2 does not offer targeted reactions after the authoritative settlement window', async () => {

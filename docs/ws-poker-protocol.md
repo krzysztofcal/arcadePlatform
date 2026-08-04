@@ -201,6 +201,8 @@ Canonical room-core fields in `payload.public`:
 - `payload.public.handSettlement?: { handId: string|null, settledAt: string|null, payouts: Record<string, number> }`
 - `payload.public.settlementRevealDueAt?: integer` — server-authoritative epoch-millisecond deadline for the current settled-hand reveal and targeted `nice_hand` window, established once per `tableId` + `handId` when the settlement is first published; omitted outside `SETTLED` or when the settlement timestamp is invalid.
 
+The default published settlement reveal window is 6 seconds. Disconnect cleanup keeps its separate 4-second grace semantics and does not extend the published settlement deadline.
+
 Canonical compatibility fields:
 
 - `payload.table.tableId: string`

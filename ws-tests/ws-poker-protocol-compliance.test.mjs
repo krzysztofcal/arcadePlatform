@@ -765,7 +765,11 @@ test("targeted nice_hand requires the matching settled hand and broadcasts the t
         ts: "2026-08-03T00:00:00Z",
         payload: { tableId }
       });
-      assert.equal((await nextMessageOfType(socket, "table_state", 5000, `targetedInitial-${suffix}`)).type, "table_state");
+      const initial = await nextMessageOfType(socket, "table_state", 5000, `targetedInitial-${suffix}`);
+      assert.equal(initial.type, "table_state");
+      assert.equal(Number.isSafeInteger(initial.payload.settlementRevealDueAt), true);
+      assert.ok(initial.payload.settlementRevealDueAt > Date.now() + 4_000);
+      assert.ok(initial.payload.settlementRevealDueAt <= Date.now() + 6_000);
     }
 
     const mismatchResultPromise = nextMessageOfType(sender, "commandResult", 5000, "targetedMismatchResult");

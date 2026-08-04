@@ -268,7 +268,7 @@ Phase 2 starts only after the Phase 1 model and static behavior pass their focus
 - remove already-running settlement fly nodes when cancellation occurs, while leaving unrelated bet-to-pot fly nodes untouched;
 - when `matchMedia('(prefers-reduced-motion: reduce)')` matches, create no flying-chip DOM nodes or timers. Static information remains complete and immediate.
 
-No change to `ws-server/server.mjs::maybeScheduleSettledRollover()`, `resolveSettledRevealDueAt()`, or `WS_POKER_SETTLED_REVEAL_MS` is planned. Animation is subordinate to the authoritative reveal/rollover lifecycle.
+Per-pot animation does not create another deadline. It remains subordinate to the authoritative reveal/rollover lifecycle: the first complete settlement publication establishes `settlementRevealDueAt`, while disconnect cleanup retains its independent grace window.
 
 ## Required automated verification
 

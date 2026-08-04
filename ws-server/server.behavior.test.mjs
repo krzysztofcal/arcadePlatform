@@ -2454,6 +2454,16 @@ test("accepted action that settles a hand schedules delayed rollover", async () 
     const rolled = await readPersistedFile(filePath);
     assert.equal(rolled.tables[tableId].stateRow.state.phase, "PREFLOP", `${JSON.stringify(settled.tables[tableId].stateRow.state.handSettlement)}\n${serverLogs.join("\n")}`);
     assert.equal(rolled.tables[tableId].stateRow.version > settled.tables[tableId].stateRow.version, true);
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "snapshot-after-settled-rollover",
+      ts: new Date().toISOString(),
+      payload: { tableId }
+    });
+    const rolledSnapshot = await nextMessageOfType(ws, "table_state", 5000, "snapshotAfterSettledRollover");
+    assert.equal(rolledSnapshot.payload.hand.status, "PREFLOP");
+    assert.equal(Object.prototype.hasOwnProperty.call(rolledSnapshot.payload, "settlementRevealDueAt"), false);
     ws.close();
   } finally {
     child.kill("SIGTERM");
@@ -2554,7 +2564,7 @@ test("disconnect cleanup defers fresh settled reveal and can close after reveal 
   const tableId = "table_disconnect_settled_reveal";
   const humanUserId = "disconnect_settled_human";
   const botUserId = makeBotUserId(tableId, 2);
-  const settledAtIso = new Date(Date.now() + 2_000).toISOString();
+  const settledAtIso = new Date(Date.now() - 100).toISOString();
   const settledRevealState = {
     tableId,
     roomId: tableId,
@@ -2567,12 +2577,10 @@ test("disconnect cleanup defers fresh settled reveal and can close after reveal 
     ],
     stacks: { [humanUserId]: 112, [botUserId]: 88 },
     showdown: {
-      handId: "hand_disconnect_settled_reveal",
       winners: [humanUserId],
       reason: "computed"
     },
     handSettlement: {
-      handId: "hand_disconnect_settled_reveal",
       settledAt: settledAtIso,
       payouts: { [humanUserId]: 12 }
     },
@@ -2640,7 +2648,7 @@ export function createInactiveCleanupExecutor({ env }) {
       WS_AUTH_TEST_SECRET: secret,
       WS_PERSISTED_STATE_FILE: filePath,
       WS_INACTIVE_CLEANUP_ADAPTER_MODULE_PATH: cleanupModule.filePath,
-      WS_POKER_SETTLED_REVEAL_MS: "400",
+      WS_POKER_SETTLED_REVEAL_MS: "6000",
       WS_SEATED_RECONNECT_GRACE_MS: "0",
       WS_DISCONNECT_CLEANUP_SWEEP_MS: "20",
       WS_TIMEOUT_SWEEP_MS: "60000",
@@ -2675,7 +2683,8 @@ export function createInactiveCleanupExecutor({ env }) {
     });
     const initial = await nextCommandResultForRequest(ws, "join-disconnect-settled-reveal");
     assert.equal(initial.payload.status, "accepted");
-    await nextMessageOfType(ws, "table_state");
+    const initialState = await nextMessageOfType(ws, "table_state");
+    assert.equal(Object.prototype.hasOwnProperty.call(initialState.payload, "settlementRevealDueAt"), false);
     const resetToSettled = await readPersistedFile(filePath);
     resetToSettled.tables[tableId].tableRow.status = "OPEN";
     resetToSettled.tables[tableId].stateRow = {
@@ -2692,8 +2701,9 @@ export function createInactiveCleanupExecutor({ env }) {
     assert.equal(duringReveal.tables[tableId].tableRow.status, "OPEN", logs.join("\n"));
     assert.equal(duringReveal.tables[tableId].stateRow.state.phase, "SETTLED");
     assert.equal(logs.some((line) => line.includes("ws_disconnect_cleanup_settled_reveal_deferred")), true);
+    assert.equal(logs.some((line) => line.includes('"revealMs":4000')), true);
 
-    await new Promise((resolve) => setTimeout(resolve, 2600));
+    await new Promise((resolve) => setTimeout(resolve, 4200));
     const afterReveal = await readPersistedFile(filePath);
     assert.equal(afterReveal.tables[tableId].tableRow.status, "CLOSED");
     assert.equal(afterReveal.tables[tableId].stateRow.state.phase, "HAND_DONE");
@@ -4826,11 +4836,13 @@ test("snapshot-only settled bootstrap schedules rollover without prior broadcast
           communityDealt: 0,
           turnUserId: null,
           handSettlement: {
+            handId: "h21",
             reason: "computed",
             settledAt: new Date(Date.now()).toISOString(),
             winners: [{ userId: "user_a", amount: 12 }]
           },
           showdown: {
+            handId: "h21",
             reason: "computed",
             winners: [{ userId: "user_a", amount: 12 }]
           },
@@ -5543,6 +5555,7 @@ test("timeout sweep advances seated persisted table state under observe-only run
       WS_AUTH_REQUIRED: "1",
       WS_AUTH_TEST_SECRET: secret,
       WS_POKER_TURN_MS: "600",
+      WS_POKER_SETTLED_REVEAL_MS: "500",
       WS_TIMEOUT_SWEEP_MS: "20",
       SUPABASE_DB_URL: "",
       ...observeOnlyJoinEnv(),

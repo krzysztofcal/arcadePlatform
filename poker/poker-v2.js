@@ -199,7 +199,9 @@
   var stickyWinnerReveal = {
     handId: null,
     visibleUntilMs: 0,
+    authoritativeTargetedWindow: false,
     authoritativeRevealDueAtMs: null,
+    presentationReceivedAtMs: null,
     settlementPresentation: null,
     showdownWinnerUserIds: [],
     revealedShowdownCardsByUserId: {},
@@ -976,7 +978,7 @@
       handId: state.handId || null,
       committedByUserId: Object.assign({}, seatCommittedByUserId),
       lastActionByUserId: Object.assign({}, state.lastBettingRoundActionByUserId || {}),
-      settlementPresentation: cloneSettlementPresentation(getDisplaySettlementPresentation())
+      settlementPresentation: cloneSettlementPresentation(getCurrentSettlementPresentation())
     };
   }
 
@@ -1248,18 +1250,29 @@
     return Number.isFinite(settledAtMs) && settledAtMs <= Date.now() + 1000 ? settledAtMs + WINNER_REVEAL_MS : Date.now() + WINNER_REVEAL_MS;
   }
 
-  function syncStickyWinnerReveal(minimumVisibleUntilMs){
+  function syncStickyWinnerReveal(minimumVisibleUntilMs, settlementPairComplete){
     var handId = state.handId || (state.handSettlement && state.handSettlement.handId) || (state.showdown && state.showdown.handId) || null;
     if (!handId || state.phase !== 'SETTLED' || (!state.showdown && !state.settlementPresentation)) return;
+    if (stickyWinnerReveal.handId !== handId && lastPresentedSettlementHandId !== handId && settlementPairComplete !== true) return;
+    var authoritativeRevealDueAtMs = normalizeSettlementRevealDueAt(state.settlementRevealDueAtMs);
+    var settlementPresentation = state.settlementPresentation;
+    var authoritativeTargetedWindow = Number.isFinite(authoritativeRevealDueAtMs)
+      && settlementPresentation
+      && settlementPresentation.valid === true
+      && settlementPresentation.handId === handId;
+    if (Number.isFinite(authoritativeRevealDueAtMs) && authoritativeTargetedWindow !== true) return;
     if (stickyWinnerReveal.handId !== handId && lastPresentedSettlementHandId !== handId){
-      var authoritativeRevealDueAtMs = normalizeSettlementRevealDueAt(state.settlementRevealDueAtMs);
-      var visibleUntilMs = resolveSettlementRevealDueAt(state.settlementPresentation || state.handSettlement, authoritativeRevealDueAtMs);
-      if (!Number.isFinite(authoritativeRevealDueAtMs) && Number.isFinite(minimumVisibleUntilMs)) visibleUntilMs = Math.max(visibleUntilMs, minimumVisibleUntilMs);
+      var visibleUntilMs = authoritativeTargetedWindow
+        ? Math.min(Date.now() + WINNER_REVEAL_MS, authoritativeRevealDueAtMs)
+        : resolveSettlementRevealDueAt(settlementPresentation || state.handSettlement, null);
+      if (!authoritativeTargetedWindow && Number.isFinite(minimumVisibleUntilMs)) visibleUntilMs = Math.max(visibleUntilMs, minimumVisibleUntilMs);
       stickyWinnerReveal = {
         handId: handId,
         visibleUntilMs: visibleUntilMs,
+        authoritativeTargetedWindow: authoritativeTargetedWindow,
         authoritativeRevealDueAtMs: authoritativeRevealDueAtMs,
-        settlementPresentation: cloneSettlementPresentation(state.settlementPresentation),
+        presentationReceivedAtMs: Date.now(),
+        settlementPresentation: cloneSettlementPresentation(settlementPresentation),
         showdownWinnerUserIds: state.showdown && Array.isArray(state.showdown.winners) ? state.showdown.winners.filter(function(userId){ return typeof userId === 'string' && !!userId; }) : [],
         revealedShowdownCardsByUserId: cloneRevealedShowdownCards(state.revealedShowdownCardsByUserId),
         communityCards: Array.isArray(state.communityCards) ? state.communityCards.slice(0, 5) : []
@@ -1267,7 +1280,7 @@
       lastPresentedSettlementHandId = handId;
     } else if (stickyWinnerReveal.handId === handId){
       stickyWinnerReveal.authoritativeRevealDueAtMs = normalizeSettlementRevealDueAt(state.settlementRevealDueAtMs);
-      stickyWinnerReveal.settlementPresentation = cloneSettlementPresentation(state.settlementPresentation);
+      stickyWinnerReveal.settlementPresentation = cloneSettlementPresentation(settlementPresentation);
       stickyWinnerReveal.showdownWinnerUserIds = state.showdown && Array.isArray(state.showdown.winners) ? state.showdown.winners.filter(function(userId){ return typeof userId === 'string' && !!userId; }) : [];
       stickyWinnerReveal.revealedShowdownCardsByUserId = cloneRevealedShowdownCards(state.revealedShowdownCardsByUserId);
       stickyWinnerReveal.communityCards = Array.isArray(state.communityCards) ? state.communityCards.slice(0, 5) : [];
@@ -1319,8 +1332,13 @@
     return !!(nextHandId && sticky.handId && nextHandId !== sticky.handId);
   }
 
-  function getDisplaySettlementPresentation(){
+  function getCurrentSettlementPresentation(){
     if (state.phase === 'SETTLED' && state.settlementPresentation) return state.settlementPresentation;
+    var sticky = getActiveWinnerReveal();
+    return sticky ? sticky.settlementPresentation : null;
+  }
+
+  function getDisplaySettlementPresentation(){
     var sticky = getActiveWinnerReveal();
     return sticky ? sticky.settlementPresentation : null;
   }
@@ -1495,7 +1513,8 @@
       : null;
     var handChanged = !!(state.handId && previousHandId && state.handId !== previousHandId);
     var explicitSettlementClear = (showdownField.present && showdownField.value == null) || (handSettlementField.present && handSettlementField.value == null);
-    var completeSettlementPair = showdownField.present && handSettlementField.present && state.showdown && state.handSettlement;
+    var settlementPairComplete = !!(state.showdown && state.handSettlement
+      && (authoritativeFull || showdownField.present || handSettlementField.present));
     if (state.phase !== 'SETTLED' || handChanged || explicitSettlementClear){
       state.settlementRevealDueAtMs = null;
       state.settlementPresentation = null;
@@ -1504,7 +1523,7 @@
         stickyWinnerReveal.visibleUntilMs = 0;
       }
       cancelSettlementAnimations();
-    } else if ((authoritativeFull && state.showdown && state.handSettlement) || completeSettlementPair){
+    } else if (settlementPairComplete){
       state.settlementPresentation = buildSettlementPresentation({ showdown: state.showdown, handSettlement: state.handSettlement });
       if (!state.settlementPresentation.valid){
         var failureKey = String(state.settlementPresentation.handId || state.handId || 'unknown') + ':' + state.settlementPresentation.failureReason;
@@ -1529,7 +1548,7 @@
       && previousHandId === state.handId
       && previousPhase !== 'SETTLED'
       && state.phase === 'SETTLED';
-    syncStickyWinnerReveal(liveSettlementTransition ? Date.now() + WINNER_REVEAL_MS : null);
+    syncStickyWinnerReveal(liveSettlementTransition ? Date.now() + WINNER_REVEAL_MS : null, settlementPairComplete);
     state.actionConstraints = normalizeConstraints(constraintsPrimary, legalSource && legalSource.actionConstraints);
     // While a snapshot recovery timeout is pending, snapshots must not overwrite a
     // newer status/error raised after the timeout; the recovery gate-open handles it.
@@ -1811,14 +1830,9 @@
   }
 
   function getTargetedReactionDeadlineMs(sticky){
-    var presentation = sticky && sticky.settlementPresentation;
-    var settledAtMs = presentation && typeof presentation.settledAt === 'string' ? Date.parse(presentation.settledAt) : NaN;
-    if (!Number.isFinite(settledAtMs) || settledAtMs > Date.now() + 1000) return null;
-    var visibleUntilMs = Number(sticky && sticky.visibleUntilMs);
-    if (Number.isFinite(Number(sticky && sticky.authoritativeRevealDueAtMs))) return visibleUntilMs;
-    var serverDeadlineMs = settledAtMs + WINNER_REVEAL_MS;
-    if (!Number.isFinite(visibleUntilMs)) return serverDeadlineMs;
-    return Math.min(visibleUntilMs, serverDeadlineMs);
+    if (!sticky || sticky.authoritativeTargetedWindow !== true) return null;
+    var visibleUntilMs = Number(sticky.visibleUntilMs);
+    return Number.isFinite(visibleUntilMs) ? visibleUntilMs : null;
   }
 
   function getTargetedReactionOffers(){
@@ -1827,7 +1841,7 @@
     var presentation = sticky && sticky.settlementPresentation;
     if (!sticky || !presentation || presentation.valid !== true || !presentation.handId) return [];
     var deadlineMs = getTargetedReactionDeadlineMs(sticky);
-    if (!Number.isFinite(deadlineMs) || deadlineMs - 250 <= Date.now()) return [];
+    if (!Number.isFinite(deadlineMs) || deadlineMs <= Date.now()) return [];
     var currentSeat = deriveCurrentSeat();
     var offers = [];
     state.seats.forEach(function(seat){
@@ -1848,7 +1862,7 @@
     var sticky = getActiveWinnerReveal();
     var deadlineMs = getTargetedReactionDeadlineMs(sticky);
     if (!sticky || !Number.isFinite(deadlineMs)) return;
-    var delayMs = deadlineMs - Date.now() - 250;
+    var delayMs = deadlineMs - Date.now();
     if (delayMs <= 0) return;
     targetedReactionDismissTimer = window.setTimeout(function(){
       targetedReactionDismissTimer = null;
