@@ -62,6 +62,7 @@ run("node", ["tests/poker-eval.test.mjs"], "poker-eval");
 run("node", ["tests/poker-cards-utils.test.mjs"], "poker-cards-utils");
 run("node", ["tests/poker-hole-cards-store.test.mjs"], "poker-hole-cards-store");
 run("node", ["tests/poker-db-lockdown.contract.test.mjs"], "poker-db-lockdown");
+run("node", ["tests/poker-managed-table-profiles.rls.contract.test.mjs"], "poker-managed-table-profiles-rls");
 run("node", ["tests/poker-hole-cards.rls.test.mjs"], "poker-hole-cards-rls");
 run("node", ["tests/poker-hole-cards.allow-bots.contract.test.mjs"], "poker-hole-cards-allow-bots-contract");
 run("node", ["tests/poker-rls.read.test.mjs"], "poker-rls-read");
