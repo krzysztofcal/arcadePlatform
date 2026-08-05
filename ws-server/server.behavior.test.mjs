@@ -48,7 +48,7 @@ const FIXED_RANDOM_BOT_AUTOPLAY_ADAPTER_URL = new URL(
   import.meta.url
 ).href;
 
-test("reaction timers are delayed, single-pending, revalidated, replay-safe, and cleanup-safe", () => {
+test("reaction timers are delayed, single-pending per bot, concurrent across bots, revalidated, replay-safe, and cleanup-safe", () => {
   const scheduled = [];
   const timers = createReactionTimers({
     setTimer(callback, delayMs) {
@@ -61,15 +61,15 @@ test("reaction timers are delayed, single-pending, revalidated, replay-safe, and
   const emitted = [];
   let classifierCalls = 0;
   let current = { handId: "hand-1", botUserId: "bot-1", botSeatNo: 3 };
-  const maybeSchedule = () => {
-    if (timers.hasPendingReaction("table-1")) return false;
+  const maybeSchedule = (botUserId = current.botUserId) => {
+    if (timers.hasPendingReaction("table-1", botUserId)) return false;
     classifierCalls += 1;
-    const expected = { ...current };
+    const expected = { ...current, botUserId };
     return timers.scheduleReaction({
       tableId: "table-1",
+      botUserId,
       delayMs: 300,
       validate: () => current.handId === expected.handId
-        && current.botUserId === expected.botUserId
         && current.botSeatNo === expected.botSeatNo,
       emit: () => emitted.push(expected)
     });
@@ -78,14 +78,20 @@ test("reaction timers are delayed, single-pending, revalidated, replay-safe, and
   assert.equal(maybeSchedule(), true);
   assert.deepEqual(emitted, [], "reaction must not emit synchronously");
   assert.equal(maybeSchedule(), false);
-  assert.equal(classifierCalls, 1, "pending must be checked before classification or throttle reservation");
+  assert.equal(classifierCalls, 1, "one bot must not reserve a second pending reaction");
+  assert.equal(maybeSchedule("bot-2"), true, "another bot may schedule concurrently at the same table");
   scheduled[0].callback();
   assert.deepEqual(emitted, [{ handId: "hand-1", botUserId: "bot-1", botSeatNo: 3 }]);
+  scheduled[1].callback();
+  assert.deepEqual(emitted, [
+    { handId: "hand-1", botUserId: "bot-1", botSeatNo: 3 },
+    { handId: "hand-1", botUserId: "bot-2", botSeatNo: 3 }
+  ]);
 
   assert.equal(maybeSchedule(), true);
   current = { ...current, handId: "hand-2" };
-  scheduled[1].callback();
-  assert.equal(emitted.length, 1, "stale hand/seat ownership must suppress emission");
+  scheduled[2].callback();
+  assert.equal(emitted.length, 2, "stale hand/seat ownership must suppress emission");
 
   const turn = { handId: "hand-2", userId: "human-1", startedAt: 100, deadlineAt: 1_100 };
   const originalDeadline = turn.deadlineAt;
@@ -98,20 +104,21 @@ test("reaction timers are delayed, single-pending, revalidated, replay-safe, and
     onDue: () => { hurryUpCount += 1; }
   });
   turn.userId = "human-2";
-  scheduled[2].callback();
+  scheduled[3].callback();
   assert.equal(hurryUpCount, 0);
   assert.equal(turn.deadlineAt, originalDeadline, "turn observer must never mutate gameplay timing");
 
-  timers.scheduleReaction({ tableId: "table-1", delayMs: 300, validate: () => true, emit: () => emitted.push("late") });
+  timers.scheduleReaction({ tableId: "table-1", botUserId: "bot-1", delayMs: 300, validate: () => true, emit: () => emitted.push("late-1") });
+  timers.scheduleReaction({ tableId: "table-1", botUserId: "bot-2", delayMs: 300, validate: () => true, emit: () => emitted.push("late-2") });
   timers.scheduleTurnObserver({ tableId: "table-1", delayMs: 800, validate: () => true, onDue: () => { hurryUpCount += 1; } });
-  const reactionTimer = scheduled[3];
-  const turnTimer = scheduled[4];
+  const reactionTimers = [scheduled[4], scheduled[5]];
+  const turnTimer = scheduled[6];
   timers.clearTable("table-1");
-  assert.equal(reactionTimer.cancelled, true);
+  assert.equal(reactionTimers.every((timer) => timer.cancelled), true);
   assert.equal(turnTimer.cancelled, true);
-  reactionTimer.callback();
+  reactionTimers.forEach((timer) => timer.callback());
   turnTimer.callback();
-  assert.equal(emitted.includes("late"), false);
+  assert.equal(emitted.some((entry) => typeof entry === "string" && entry.startsWith("late")), false);
   assert.equal(hurryUpCount, 0);
 
   assert.equal(shouldObservePersistedReactionMutation({ ok: true, outcome: "committed" }), true);

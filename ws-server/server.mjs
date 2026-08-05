@@ -41,6 +41,7 @@ import {
   classifyDirectedBotReaction,
   classifyRaiseReaction,
   classifySettlementReaction,
+  canBotStartReaction,
   deriveRiverChangedWinnerUserIds,
   evaluateHumanReactionCommand,
   isCompleteReactionSettlement,
@@ -461,6 +462,14 @@ function botSeatsForTable(tableId) {
     : [];
 }
 
+function availableBotSeatsForReaction(tableId) {
+  const nowMs = Date.now();
+  return botSeatsForTable(tableId).filter((bot) => (
+    !reactionTimers.hasPendingReaction(tableId, bot.userId)
+    && canBotStartReaction({ tableId, botUserId: bot.userId, nowMs })
+  ));
+}
+
 function seatOwnerForTable(tableId, seatNo) {
   const snapshot = tableManager.tableSnapshot(tableId, null);
   const member = Array.isArray(snapshot?.members)
@@ -470,9 +479,9 @@ function seatOwnerForTable(tableId, seatNo) {
 }
 
 function scheduleBotReactionCandidate(tableId, createCandidate, { handId = null, targetUserId = null } = {}) {
-  if (reactionTimers.hasPendingReaction(tableId)) return false;
   const candidate = createCandidate();
   if (!candidate) return false;
+  if (reactionTimers.hasPendingReaction(tableId, candidate.botUserId)) return false;
   const reserved = tryReserveBotReaction({
     tableId,
     botUserId: candidate.botUserId,
@@ -485,7 +494,7 @@ function scheduleBotReactionCandidate(tableId, createCandidate, { handId = null,
   if (!reserved) return false;
   const expectedTargetUserId = targetUserId
     || (Number.isInteger(candidate.targetSeatNo) ? seatOwnerForTable(tableId, candidate.targetSeatNo) : null);
-  return reactionTimers.scheduleReaction({ tableId, delayMs: reserved.delayMs, validate: () => {
+  return reactionTimers.scheduleReaction({ tableId, botUserId: candidate.botUserId, delayMs: reserved.delayMs, validate: () => {
     if (tableManager.isTableClosed(tableId)) return;
     if (tableManager.isBotUser(tableId, candidate.botUserId) !== true) return;
     if (seatOwnerForTable(tableId, candidate.botSeatNo) !== candidate.botUserId) return;
@@ -497,8 +506,8 @@ function scheduleBotReactionCandidate(tableId, createCandidate, { handId = null,
 }
 
 function scheduleReservedBotReaction(tableId, candidate, { botUserId, handId = null } = {}) {
-  if (!candidate || reactionTimers.hasPendingReaction(tableId)) return false;
-  return reactionTimers.scheduleReaction({ tableId, delayMs: candidate.delayMs, validate: () => {
+  if (!candidate || reactionTimers.hasPendingReaction(tableId, botUserId)) return false;
+  return reactionTimers.scheduleReaction({ tableId, botUserId, delayMs: candidate.delayMs, validate: () => {
     if (tableManager.isTableClosed(tableId)) return;
     if (tableManager.isBotUser(tableId, botUserId) !== true) return;
     if (seatOwnerForTable(tableId, candidate.seatNo) !== botUserId) return;
@@ -558,7 +567,7 @@ function observeFreshPokerMutation({ tableId, acceptedActionAudit, nextState }) 
     scheduleBotReactionCandidate(tableId, () => classifyRaiseReaction({
       actorUserId,
       actorSeatNo: actorSeat?.seatNo,
-      botSeats: botSeatsForTable(tableId)
+      botSeats: availableBotSeatsForReaction(tableId)
     }), { handId, targetUserId: actorUserId });
   }
 
@@ -567,7 +576,7 @@ function observeFreshPokerMutation({ tableId, acceptedActionAudit, nextState }) 
     evaluatedSettlementReactionHandByTableId.set(tableId, handId);
     scheduleBotReactionCandidate(tableId, () => classifySettlementReaction({
       state: nextState,
-      botSeats: botSeatsForTable(tableId)
+      botSeats: availableBotSeatsForReaction(tableId)
     }), { handId });
   }
 
@@ -600,7 +609,7 @@ function syncHumanTurnReactionTimer(tableId, state) {
     return true;
   }, onDue: () => {
     scheduleBotReactionCandidate(tableId, () => classifyDirectedBotReaction({
-      botSeats: botSeatsForTable(tableId),
+      botSeats: availableBotSeatsForReaction(tableId),
       excludedUserId: turnUserId,
       targetSeatNo: targetSeat.seatNo,
       reactionKeys: ["hurry_up"],
@@ -633,7 +642,7 @@ async function loadAcceptedBotAutoplayExecutor() {
           onBotStepPersisted: async ({ tableId, botTurnUserId, botAction }) => {
             broadcastStateSnapshots(tableId);
             if (tableManager.isBotUser(tableId, botTurnUserId) !== true) return;
-            if (reactionTimers.hasPendingReaction(tableId)) return;
+            if (reactionTimers.hasPendingReaction(tableId, botTurnUserId)) return;
             const botSnapshot = tableManager.tableSnapshot(tableId, botTurnUserId);
             const reaction = tryCreateBotReaction({
               tableId,
@@ -4315,7 +4324,7 @@ wss.on("connection", (ws) => {
         runReactionObserverSafely("targeted_nice_hand", () => scheduleBotReactionCandidate(
           tableId,
           () => classifyDirectedBotReaction({
-            botSeats: botSeatsForTable(tableId).filter((bot) => bot.userId === targetUserId),
+            botSeats: availableBotSeatsForReaction(tableId).filter((bot) => bot.userId === targetUserId),
             excludedUserId: senderUserId,
             targetSeatNo: senderSeatNo,
             reactionKeys: ["thanks"],
@@ -4482,7 +4491,7 @@ wss.on("connection", (ws) => {
         runReactionObserverSafely("human_join", () => scheduleBotReactionCandidate(
           frame.__resolvedTableId,
           () => classifyDirectedBotReaction({
-            botSeats: botSeatsForTable(frame.__resolvedTableId),
+            botSeats: availableBotSeatsForReaction(frame.__resolvedTableId),
             excludedUserId: joinResult.userId,
             targetSeatNo: joinResult.seatNo,
             reactionKeys: ["hello", "good_luck"],

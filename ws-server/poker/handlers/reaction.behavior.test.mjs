@@ -7,6 +7,7 @@ import {
   classifyDirectedBotReaction,
   classifyRaiseReaction,
   classifySettlementReaction,
+  canBotStartReaction,
   clearTable,
   deriveRiverChangedWinnerUserIds,
   evaluateHumanReactionCommand,
@@ -235,7 +236,7 @@ test('targeted human reactions allow each winner once per authoritative settled 
   clearTable(tableId);
 });
 
-test('bot reactions use the real bot action object and table-level throttle', () => {
+test('bot reactions use the real bot action object and independent sender cooldowns', () => {
   const tableId = 'reaction-bot-contract';
   clearTable(tableId);
 
@@ -250,17 +251,27 @@ test('bot reactions use the real bot action object and table-level throttle', ()
       return () => values.shift();
     })()
   });
-  const throttledForAnotherBot = tryCreateBotReaction({
+  const acceptedForAnotherBot = tryCreateBotReaction({
     tableId,
     botUserId: 'bot-2',
     botSeatNo: 4,
     botAction: { type: 'BET', amount: 20 },
     nowMs: 2_001,
-    random: () => 0.01
+    random: (() => { const values = [0.01, 0, 0]; return () => values.shift(); })()
   });
 
   assert.deepEqual(accepted, { seatNo: 3, reactionKey: 'haha', delayMs: 300 });
-  assert.equal(throttledForAnotherBot, null);
+  assert.deepEqual(acceptedForAnotherBot, { seatNo: 4, reactionKey: 'wow', delayMs: 300 });
+  assert.equal(canBotStartReaction({ tableId, botUserId: 'bot-1', nowMs: 2_001 }), false);
+  assert.equal(canBotStartReaction({ tableId, botUserId: 'bot-3', nowMs: 2_001 }), true);
+  assert.equal(tryCreateBotReaction({
+    tableId,
+    botUserId: 'bot-1',
+    botSeatNo: 3,
+    botAction: { type: 'BET', amount: 20 },
+    nowMs: 2_001,
+    random: () => 0.01
+  }), null, 'the same bot must retain its four-second cooldown');
   assert.equal(tryCreateBotReaction({
     tableId,
     botUserId: 'bot-3',

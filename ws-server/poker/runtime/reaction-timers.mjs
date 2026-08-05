@@ -1,5 +1,5 @@
 export function createReactionTimers({ setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
-  const pendingByTableId = new Map();
+  const pendingByTableBot = new Map();
   const turnByTableId = new Map();
 
   function clearEntry(map, tableId) {
@@ -8,17 +8,22 @@ export function createReactionTimers({ setTimer = setTimeout, clearTimer = clear
     map.delete(tableId);
   }
 
-  function scheduleReaction({ tableId, delayMs, validate, emit }) {
-    if (pendingByTableId.has(tableId)) return false;
+  function pendingKey(tableId, botUserId) {
+    return `${tableId}:${botUserId}`;
+  }
+
+  function scheduleReaction({ tableId, botUserId, delayMs, validate, emit }) {
+    const key = pendingKey(tableId, botUserId);
+    if (pendingByTableBot.has(key)) return false;
     const timer = setTimer(() => {
-      const pending = pendingByTableId.get(tableId);
+      const pending = pendingByTableBot.get(key);
       if (!pending || pending.timer !== timer) return;
-      pendingByTableId.delete(tableId);
+      pendingByTableBot.delete(key);
       if (validate() !== true) return;
       emit();
     }, delayMs);
     timer?.unref?.();
-    pendingByTableId.set(tableId, { timer });
+    pendingByTableBot.set(key, { tableId, timer });
     return true;
   }
 
@@ -38,12 +43,14 @@ export function createReactionTimers({ setTimer = setTimeout, clearTimer = clear
   }
 
   return Object.freeze({
-    hasPendingReaction: (tableId) => pendingByTableId.has(tableId),
+    hasPendingReaction: (tableId, botUserId) => pendingByTableBot.has(pendingKey(tableId, botUserId)),
     scheduleReaction,
     scheduleTurnObserver,
     clearTurnObserver: (tableId) => clearEntry(turnByTableId, tableId),
     clearTable(tableId) {
-      clearEntry(pendingByTableId, tableId);
+      for (const [key, entry] of pendingByTableBot) {
+        if (entry.tableId === tableId) clearEntry(pendingByTableBot, key);
+      }
       clearEntry(turnByTableId, tableId);
     }
   });

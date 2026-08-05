@@ -1,5 +1,4 @@
 const HUMAN_REACTION_COOLDOWN_MS = 4_000;
-const BOT_TABLE_THROTTLE_MS = 20_000;
 const BOT_REACTION_PROBABILITY = 0.02;
 const BOT_REACTION_JITTER_MIN_MS = 300;
 const BOT_REACTION_JITTER_MAX_MS = 1_200;
@@ -42,7 +41,6 @@ const BOT_REACTION_KEYS_BY_ACTION = Object.freeze({
 });
 
 const senderCooldownUntilByTableUser = new Map();
-const botReactionUntilByTable = new Map();
 const targetedNiceHandByTableUser = new Map();
 
 function normalizeString(value) {
@@ -346,23 +344,29 @@ export function tryCreateBotReaction({
   if (hasActiveCooldown(senderCooldownUntilByTableUser, senderKey, resolvedNowMs)) {
     return null;
   }
-  if (hasActiveCooldown(botReactionUntilByTable, normalizedTableId, resolvedNowMs)) {
-    return null;
-  }
-
   const selection = Number(random());
   const selectionIndex = Number.isFinite(selection) && selection >= 0 && selection < 1
     ? Math.floor(selection * availableReactionKeys.length)
     : 0;
 
   senderCooldownUntilByTableUser.set(senderKey, resolvedNowMs + HUMAN_REACTION_COOLDOWN_MS);
-  botReactionUntilByTable.set(normalizedTableId, resolvedNowMs + BOT_TABLE_THROTTLE_MS);
 
   return {
     seatNo: botSeatNo,
     reactionKey: availableReactionKeys[selectionIndex] || availableReactionKeys[0],
     delayMs: resolveJitterMs(random)
   };
+}
+
+export function canBotStartReaction({ tableId, botUserId, nowMs } = {}) {
+  const normalizedTableId = normalizeString(tableId);
+  const normalizedBotUserId = normalizeString(botUserId);
+  if (!normalizedTableId || !normalizedBotUserId) return false;
+  return !hasActiveCooldown(
+    senderCooldownUntilByTableUser,
+    `${normalizedTableId}:${normalizedBotUserId}`,
+    normalizeNowMs(nowMs)
+  );
 }
 
 export function tryReserveBotReaction({
@@ -384,9 +388,7 @@ export function tryReserveBotReaction({
   if (targetSeatNo != null && (!isPositiveSeatNo(targetSeatNo) || targetSeatNo === botSeatNo)) return null;
   const senderKey = `${normalizedTableId}:${normalizedBotUserId}`;
   if (hasActiveCooldown(senderCooldownUntilByTableUser, senderKey, resolvedNowMs)) return null;
-  if (hasActiveCooldown(botReactionUntilByTable, normalizedTableId, resolvedNowMs)) return null;
   senderCooldownUntilByTableUser.set(senderKey, resolvedNowMs + HUMAN_REACTION_COOLDOWN_MS);
-  botReactionUntilByTable.set(normalizedTableId, resolvedNowMs + BOT_TABLE_THROTTLE_MS);
   return {
     seatNo: botSeatNo,
     ...(isPositiveSeatNo(targetSeatNo) ? { targetSeatNo } : {}),
@@ -494,6 +496,5 @@ export function clearTable(tableId) {
   for (const key of [...targetedNiceHandByTableUser.keys()]) {
     if (key.startsWith(prefix)) targetedNiceHandByTableUser.delete(key);
   }
-  botReactionUntilByTable.delete(normalizedTableId);
 }
 import { compareHands, evaluateBestHand } from "../shared/settlement/poker-eval.mjs";
