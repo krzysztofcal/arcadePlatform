@@ -4048,12 +4048,13 @@ wss.on("connection", (ws) => {
       let targetIsWinner = false;
       let settlementMatchesHand = false;
       let settlementWindowOpen = false;
+      let settlementHandId = null;
       if (targeted) {
         const pokerState = tableManager.persistedPokerState(tableId);
         const requestedHandId = typeof reactionPayload.handId === "string" ? reactionPayload.handId.trim() : "";
         const currentHandId = typeof pokerState?.handId === "string" ? pokerState.handId.trim() : "";
         const showdownHandId = typeof pokerState?.showdown?.handId === "string" ? pokerState.showdown.handId.trim() : "";
-        const settlementHandId = typeof pokerState?.handSettlement?.handId === "string" ? pokerState.handSettlement.handId.trim() : "";
+        settlementHandId = typeof pokerState?.handSettlement?.handId === "string" ? pokerState.handSettlement.handId.trim() : "";
         settlementMatchesHand = !!requestedHandId
           && requestedHandId === currentHandId
           && requestedHandId === showdownHandId
@@ -4084,6 +4085,7 @@ wss.on("connection", (ws) => {
         targetIsWinner,
         settlementMatchesHand,
         settlementWindowOpen,
+        settlementHandId,
         tableClosed: tableManager.isTableClosed(tableId),
         nowMs: Date.now()
       });

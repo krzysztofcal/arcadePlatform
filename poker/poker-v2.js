@@ -221,6 +221,8 @@
   var reactionRenderNodes = [];
   var nextTargetedReactionEffectId = 1;
   var dismissedTargetedReactionOffersByKey = {};
+  var pendingTargetedReactionOfferKeys = new Set();
+  var targetedReactionOfferHandId = null;
   var targetedReactionDismissTimer = null;
   var reactionControlTimer = null;
   var reactionControlUntilMs = 0;
@@ -1942,8 +1944,17 @@
     return String(handId || '') + ':' + String(targetSeatNo);
   }
 
+  function syncTargetedReactionOfferHand(handId){
+    var normalizedHandId = handId ? String(handId) : null;
+    if (targetedReactionOfferHandId === normalizedHandId) return;
+    targetedReactionOfferHandId = normalizedHandId;
+    pendingTargetedReactionOfferKeys.clear();
+    dismissedTargetedReactionOffersByKey = {};
+  }
+
   function dismissTargetedReactionOffer(handId, targetSeatNo){
     if (!handId || !Number.isInteger(targetSeatNo)) return;
+    if (targetedReactionOfferHandId !== String(handId)) return;
     dismissedTargetedReactionOffersByKey[targetedReactionOfferKey(handId, targetSeatNo)] = true;
   }
 
@@ -1968,9 +1979,16 @@
     if (state.reconnectGate || !deriveCurrentSeat()) return [];
     var sticky = getActiveWinnerReveal();
     var presentation = sticky && sticky.settlementPresentation;
-    if (!sticky || !presentation || presentation.valid !== true || !presentation.handId) return [];
+    if (!sticky || !presentation || presentation.valid !== true || !presentation.handId){
+      syncTargetedReactionOfferHand(null);
+      return [];
+    }
     var deadlineMs = getTargetedReactionDeadlineMs(sticky);
-    if (!Number.isFinite(deadlineMs) || deadlineMs <= Date.now()) return [];
+    if (!Number.isFinite(deadlineMs) || deadlineMs <= Date.now()){
+      syncTargetedReactionOfferHand(null);
+      return [];
+    }
+    syncTargetedReactionOfferHand(presentation.handId);
     var currentSeat = deriveCurrentSeat();
     var offers = [];
     state.seats.forEach(function(seat){
@@ -2017,6 +2035,8 @@
     targetedReactionEffectNodesById = {};
     reactionRenderNodes = [];
     clearTargetedReactionDismissTimer();
+    pendingTargetedReactionOfferKeys.clear();
+    targetedReactionOfferHandId = null;
     dismissedTargetedReactionOffersByKey = {};
     if (els.reactionLayer) els.reactionLayer.innerHTML = '';
   }
@@ -2103,14 +2123,25 @@
     if (!wsClient || typeof wsClient.sendTargetedReaction !== 'function' || !isWsReady() || !deriveCurrentSeat()) {
       return Promise.resolve(null);
     }
+    var offerKey = targetedReactionOfferKey(handId, targetSeatNo);
+    if (pendingTargetedReactionOfferKeys.has(offerKey) || dismissedTargetedReactionOffersByKey[offerKey]) return Promise.resolve(null);
+    pendingTargetedReactionOfferKeys.add(offerKey);
+    renderSeats();
     return wsClient.sendTargetedReaction(targetSeatNo, handId).then(function(result){
+      pendingTargetedReactionOfferKeys.delete(offerKey);
       dismissTargetedReactionOffer(handId, targetSeatNo);
-      startReactionCooldown();
+      renderSeats();
       return result;
     }).catch(function(error){
+      pendingTargetedReactionOfferKeys.delete(offerKey);
       var code = normalizeSignalCode(error && (error.code || error.message));
+      if (code === 'reaction_already_sent'){
+        dismissTargetedReactionOffer(handId, targetSeatNo);
+        renderSeats();
+        return null;
+      }
       if (code === 'reaction_rate_limited'){
-        startReactionCooldown();
+        renderSeats();
         return null;
       }
       if (code === 'settlement_reaction_window_closed' || code === 'settlement_mismatch'){
@@ -2125,11 +2156,13 @@
         return null;
       }
       if (code === 'not_seated' || code === 'table_closed'){
+        renderSeats();
         renderControls();
         if (wsClient && typeof wsClient.requestGameplaySnapshot === 'function') wsClient.requestGameplaySnapshot();
         return null;
       }
       klog('poker_targeted_reaction_error', { code: code || 'targeted_reaction_failed' });
+      renderSeats();
       return null;
     });
   }
@@ -3136,7 +3169,7 @@
       button.textContent = '👍';
       button.setAttribute('aria-label', 'Send Nice hand');
       button.title = 'Send Nice hand';
-      button.disabled = reactionControlUntilMs > Date.now();
+      button.disabled = pendingTargetedReactionOfferKeys.has(targetedReactionOfferKey(offer.handId, offer.targetSeatNo));
       button.addEventListener('click', function(event){
         if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
         sendTargetedReaction(offer.targetSeatNo, offer.handId);
