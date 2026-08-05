@@ -435,10 +435,30 @@ test('settlement uses one aggregate lucky roll for close ranks and river reversa
   }).reactionKey, 'lucky');
 
   assert.deepEqual(deriveRiverChangedWinnerUserIds({
-    community: ['2H', '7H', '9S', 'KC', 'JH'],
-    holeCardsByUserId: { winner: ['AH', 'QH'], bot: ['KS', 'KD'] },
+    community: [
+      { r: 2, s: 'H' }, { r: 7, s: 'H' }, { r: 9, s: 'S' }, { r: 13, s: 'C' }, { r: 11, s: 'H' }
+    ],
+    holeCardsByUserId: {
+      winner: [{ r: 14, s: 'H' }, { r: 12, s: 'H' }],
+      bot: [{ r: 13, s: 'S' }, { r: 13, s: 'D' }]
+    },
     showdown: { winners: ['winner'], handsByUserId: { winner: {}, bot: {} } }
   }), ['winner'], 'the river flush should reverse the turn leader without mutating settlement');
+
+  assert.equal(classifySettlementReaction({
+    state: {
+      ...state,
+      showdown: {
+        ...state.showdown,
+        handsByUserId: {
+          winner: { category: 5, ranks: [14] },
+          bot: { category: 5, ranks: [5] }
+        }
+      }
+    },
+    botSeats: [{ userId: 'bot', seatNo: 2 }],
+    random: () => 0.99
+  }), null, 'one differing rank with a large gap must not qualify as almost identical');
 });
 
 test('directed classifier supports bot-only hurry up copy without exposing intent inference', () => {

@@ -161,7 +161,9 @@ function looksLuckyComparedWith(winningHand, losingHand) {
   const primaryRankCount = PRIMARY_RANK_COUNT_BY_CATEGORY[category];
   const kickerDecided = Number.isInteger(primaryRankCount) && firstDifference >= primaryRankCount;
   const narrowRankDifference = Math.abs((winningRanks[firstDifference] ?? 0) - (losingRanks[firstDifference] ?? 0)) === 1;
-  return kickerDecided || narrowRankDifference || differingIndexes.length === 1;
+  const almostIdentical = differingIndexes.length === 1
+    && Math.abs((winningRanks[firstDifference] ?? 0) - (losingRanks[firstDifference] ?? 0)) <= 1;
+  return kickerDecided || narrowRankDifference || almostIdentical;
 }
 
 function luckyWinner(state, handSeats, winners) {
@@ -178,12 +180,13 @@ function luckyWinner(state, handSeats, winners) {
     || losers.some((loser) => looksLuckyComparedWith(comparedHands[winner.userId], comparedHands[loser.userId]))) || null;
 }
 
-function reactionCard(cardCode) {
-  if (typeof cardCode !== "string") return null;
-  const match = cardCode.trim().toUpperCase().match(/^(10|[2-9TJQKA])([CDHS])$/);
-  if (!match) return null;
-  const rank = { T: 10, J: 11, Q: 12, K: 13, A: 14 }[match[1]] || Number(match[1]);
-  return { r: rank, s: match[2] };
+function reactionCard(card) {
+  if (!card || typeof card !== "object" || Array.isArray(card)) return null;
+  const rank = Number(card.r);
+  const suit = typeof card.s === "string" ? card.s.trim().toUpperCase() : "";
+  return Number.isInteger(rank) && rank >= 2 && rank <= 14 && /^[CDHS]$/.test(suit)
+    ? { r: rank, s: suit }
+    : null;
 }
 
 export function deriveRiverChangedWinnerUserIds(state) {
