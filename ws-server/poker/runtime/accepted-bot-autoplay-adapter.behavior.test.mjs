@@ -41,6 +41,16 @@ test("bot reaction override store defaults, validates, clears, and resets with a
 
   assert.deepEqual(store.read().active, { minMs: 2000, maxMs: 4000 });
   assert.equal(store.read().mode, "default");
+  assert.deepEqual(store.getReactionSettings(), { enabled: true, frequencyPercent: 100 });
+  const disabled = store.setReactionSettings({ enabled: false, frequencyPercent: 25, updatedBy: "admin-1" });
+  assert.deepEqual(disabled.reactionSettings, {
+    enabled: false,
+    frequencyPercent: 25,
+    updatedAt: "2026-07-14T12:00:00.000Z",
+    updatedBy: "admin-1"
+  });
+  assert.throws(() => store.setReactionSettings({ enabled: true, frequencyPercent: 0 }), { code: "invalid_reaction_settings" });
+  assert.throws(() => store.setReactionSettings({ enabled: "true", frequencyPercent: 100 }), { code: "invalid_reaction_settings" });
   assert.deepEqual(store.setOverride({ minMs: 500, maxMs: 500, updatedBy: "admin-1" }).active, { minMs: 500, maxMs: 500 });
   assert.throws(() => store.setOverride({ minMs: 99, maxMs: 500, updatedBy: "admin-1" }), { code: "invalid_range" });
   assert.throws(() => store.setOverride({ minMs: 600, maxMs: 500, updatedBy: "admin-1" }), { code: "invalid_range" });
@@ -48,6 +58,7 @@ test("bot reaction override store defaults, validates, clears, and resets with a
   assert.equal(store.clearOverride({ updatedBy: "admin-1" }).mode, "default");
   assert.equal(store.getOverrideRange(), null);
   assert.equal(createBotReactionOverrideStore({ env }).read().mode, "default");
+  assert.deepEqual(createBotReactionOverrideStore({ env }).getReactionSettings(), { enabled: true, frequencyPercent: 100 });
 });
 
 test("bot reaction override admin operations fail closed outside the exact WS Preview runtime", () => {
@@ -56,6 +67,7 @@ test("bot reaction override admin operations fail closed outside the exact WS Pr
   });
   assert.throws(() => productionStore.read(), { code: "preview_only" });
   assert.throws(() => productionStore.setOverride({ minMs: 500, maxMs: 500, updatedBy: "admin-1" }), { code: "preview_only" });
+  assert.throws(() => productionStore.setReactionSettings({ enabled: false, frequencyPercent: 25 }), { code: "preview_only" });
 
   const legacyConfiguredStore = createBotReactionOverrideStore({
     env: { ...previewRuntimeEnv(), WS_BOT_REACTION_MIN_MS: "500" }

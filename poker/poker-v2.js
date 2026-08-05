@@ -99,7 +99,21 @@
     { key: 'hurry_up', emoji: '⏳', label: 'Please, hurry up!', humanSelectable: false },
     { key: 'you_are_bluffing', emoji: '🧐', label: 'You are bluffing!', humanSelectable: false },
     { key: 'i_was_bluffing', emoji: '😏', label: 'I was bluffing!', humanSelectable: false },
-    { key: 'lucky', emoji: '🍀', label: 'Lucky!', humanSelectable: false }
+    { key: 'lucky', emoji: '🍀', label: 'Lucky!', humanSelectable: false },
+    { key: 'congrats', emoji: '🎉', label: 'Congrats!', humanSelectable: false },
+    { key: 'ambient_hmm', emoji: '💭', label: 'Hmm...', humanSelectable: false },
+    { key: 'ambient_interesting', emoji: '💭', label: 'Interesting...', humanSelectable: false },
+    { key: 'ambient_lets_see', emoji: '💭', label: "Let's see...", humanSelectable: false },
+    { key: 'ambient_well_see', emoji: '💭', label: "We'll see.", humanSelectable: false },
+    { key: 'ambient_watching', emoji: '👀', label: "I'm watching.", humanSelectable: false },
+    { key: 'ambient_good_move', emoji: '💬', label: 'Good move.', humanSelectable: false },
+    { key: 'ambient_bold', emoji: '💬', label: 'Bold.', humanSelectable: false },
+    { key: 'ambient_nice', emoji: '💬', label: 'Nice.', humanSelectable: false },
+    { key: 'ambient_tough_one', emoji: '💬', label: 'Tough one.', humanSelectable: false },
+    { key: 'ambient_here_we_go', emoji: '💬', label: 'Here we go!', humanSelectable: false },
+    { key: 'ambient_your_move', emoji: '💬', label: 'Your move.', humanSelectable: false },
+    { key: 'ambient_lets_play', emoji: '💬', label: "Let's play.", humanSelectable: false },
+    { key: 'ambient_thinking', emoji: '🤔', label: 'Thinking...', humanSelectable: false }
   ];
   var seatAnchors = [
     { x: 50, y: 10 },

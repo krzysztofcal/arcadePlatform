@@ -47,6 +47,9 @@ export function createReactionTimers({ setTimer = setTimeout, clearTimer = clear
     scheduleReaction,
     scheduleTurnObserver,
     clearTurnObserver: (tableId) => clearEntry(turnByTableId, tableId),
+    clearPendingReactions() {
+      for (const key of [...pendingByTableBot.keys()]) clearEntry(pendingByTableBot, key);
+    },
     clearTable(tableId) {
       for (const [key, entry] of pendingByTableBot) {
         if (entry.tableId === tableId) clearEntry(pendingByTableBot, key);

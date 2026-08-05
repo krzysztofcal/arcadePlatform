@@ -519,6 +519,7 @@ function buildContext(options = {}) {
         defaults: { minMs: 2000, maxMs: 4000 },
         active: { minMs: 2000, maxMs: 4000 },
         override: null,
+        reactionSettings: { enabled: true, frequencyPercent: 100 },
       }) };
     }
     if (text.includes("/.netlify/functions/admin-poker-log-control")) {

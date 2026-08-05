@@ -153,6 +153,11 @@
     nodes.opsBotReactionDelay = doc.getElementById("adminOpsBotReactionDelay");
     nodes.opsBotReactionApply = doc.getElementById("adminOpsBotReactionApply");
     nodes.opsBotReactionDefault = doc.getElementById("adminOpsBotReactionDefault");
+    nodes.opsBotReactionPolicyForm = doc.getElementById("adminOpsBotReactionPolicyForm");
+    nodes.opsBotReactionEnabled = doc.getElementById("adminOpsBotReactionEnabled");
+    nodes.opsBotReactionFrequency = doc.getElementById("adminOpsBotReactionFrequency");
+    nodes.opsBotReactionFrequencyValue = doc.getElementById("adminOpsBotReactionFrequencyValue");
+    nodes.opsBotReactionPolicyApply = doc.getElementById("adminOpsBotReactionPolicyApply");
     nodes.opsBotReactionStatus = doc.getElementById("adminOpsBotReactionStatus");
     nodes.opsPokerLogSummary = doc.getElementById("adminOpsPokerLogSummary");
     nodes.opsPokerLogForm = doc.getElementById("adminOpsPokerLogForm");
@@ -1484,6 +1489,8 @@
           '<div class="admin-kv">',
           renderKvRow("Environment", "WS Preview"),
           renderKvRow("Range", formatReactionRange(value.active)),
+          renderKvRow("Bot reactions", value.reactionSettings && value.reactionSettings.enabled ? "Enabled" : "Disabled"),
+          renderKvRow("Frequency", String(value.reactionSettings && value.reactionSettings.frequencyPercent || 100) + "%"),
           "</div>",
           "</div>"
         ].join("");
@@ -1506,11 +1513,23 @@
       nodes.opsBotReactionDelay.value = String(value.active && value.active.minMs != null ? value.active.minMs : 500);
     }
     if (nodes.opsBotReactionDelay) nodes.opsBotReactionDelay.disabled = pending || unavailable;
+    if (nodes.opsBotReactionEnabled && value && !pending) nodes.opsBotReactionEnabled.checked = value.reactionSettings?.enabled !== false;
+    if (nodes.opsBotReactionFrequency && value && !pending) nodes.opsBotReactionFrequency.value = String(value.reactionSettings?.frequencyPercent || 100);
+    if (nodes.opsBotReactionFrequencyValue) nodes.opsBotReactionFrequencyValue.textContent = String(Number(nodes.opsBotReactionFrequency?.value || 100)) + "%";
+    if (nodes.opsBotReactionEnabled) nodes.opsBotReactionEnabled.disabled = pending || unavailable;
+    if (nodes.opsBotReactionFrequency) nodes.opsBotReactionFrequency.disabled = pending || unavailable;
+    if (nodes.opsBotReactionPolicyApply) nodes.opsBotReactionPolicyApply.disabled = pending || unavailable;
     if (nodes.opsBotReactionApply) nodes.opsBotReactionApply.disabled = pending || unavailable;
     if (nodes.opsBotReactionDefault) nodes.opsBotReactionDefault.disabled = pending || unavailable || !value || value.mode !== "override";
     if (nodes.opsBotReactionStatus){
       var localError = errorCode && !unavailable ? errorCode : "";
       nodes.opsBotReactionStatus.textContent = pending ? "Updating WS Preview…" : state.ops.botReactionMessage || localError;
+    }
+  }
+
+  function renderBotReactionFrequencyValue(){
+    if (nodes.opsBotReactionFrequencyValue){
+      nodes.opsBotReactionFrequencyValue.textContent = String(Number(nodes.opsBotReactionFrequency?.value || 100)) + "%";
     }
   }
 
@@ -2555,6 +2574,37 @@
     }
   }
 
+  async function submitBotReactionPolicy(event){
+    event.preventDefault();
+    var frequencyPercent = Number(nodes.opsBotReactionFrequency && nodes.opsBotReactionFrequency.value);
+    if (!Number.isInteger(frequencyPercent) || frequencyPercent < 1 || frequencyPercent > 100){
+      state.ops.botReactionError = "invalid_reaction_settings";
+      state.ops.botReactionMessage = "Choose a frequency from 1% to 100%.";
+      renderBotReactionControl();
+      return;
+    }
+    state.ops.botReactionPending = true;
+    state.ops.botReactionError = null;
+    state.ops.botReactionMessage = "";
+    renderBotReactionControl();
+    try {
+      state.ops.botReaction = await apiFetch("/.netlify/functions/admin-ws-preview-bot-reaction", {
+        method: "POST",
+        body: JSON.stringify({
+          mode: "reaction_settings",
+          enabled: nodes.opsBotReactionEnabled && nodes.opsBotReactionEnabled.checked === true,
+          frequencyPercent: frequencyPercent
+        })
+      });
+      state.ops.botReactionMessage = "Bot reaction settings applied immediately.";
+    } catch (err){
+      handleBotReactionError(err, "Could not apply bot reaction settings.");
+    } finally {
+      state.ops.botReactionPending = false;
+      renderBotReactionControl();
+    }
+  }
+
   async function runOpsAction(action){
     if (state.maintenance){
       setStatus("CH and poker mutations are disabled during maintenance.", "error");
@@ -2862,6 +2912,8 @@
     if (nodes.pokerAuditFilters) nodes.pokerAuditFilters.addEventListener("submit", handlePokerAuditSubmit);
     if (nodes.opsBotReactionForm) nodes.opsBotReactionForm.addEventListener("submit", submitBotReactionOverride);
     if (nodes.opsBotReactionDefault) nodes.opsBotReactionDefault.addEventListener("click", clearBotReactionOverride);
+    if (nodes.opsBotReactionPolicyForm) nodes.opsBotReactionPolicyForm.addEventListener("submit", submitBotReactionPolicy);
+    if (nodes.opsBotReactionFrequency) nodes.opsBotReactionFrequency.addEventListener("input", renderBotReactionFrequencyValue);
     if (nodes.opsPokerLogForm) nodes.opsPokerLogForm.addEventListener("submit", submitPokerLogOverride);
     if (nodes.opsPokerLogForm) nodes.opsPokerLogForm.addEventListener("change", handlePokerLogControlChange);
     if (nodes.opsPokerLogOverrides) nodes.opsPokerLogOverrides.addEventListener("click", handlePokerLogOverridesClick);

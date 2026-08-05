@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   HUMAN_REACTION_KEYS,
   REACTION_KEYS,
+  classifyAmbientReaction,
   classifyDirectedBotReaction,
   classifyRaiseReaction,
   classifySettlementReaction,
@@ -33,7 +34,21 @@ test('human reactions use the closed allowlist and atomically reserve the sender
     'hurry_up',
     'you_are_bluffing',
     'i_was_bluffing',
-    'lucky'
+    'lucky',
+    'congrats',
+    'ambient_hmm',
+    'ambient_interesting',
+    'ambient_lets_see',
+    'ambient_well_see',
+    'ambient_watching',
+    'ambient_good_move',
+    'ambient_bold',
+    'ambient_nice',
+    'ambient_tough_one',
+    'ambient_here_we_go',
+    'ambient_your_move',
+    'ambient_lets_play',
+    'ambient_thinking'
   ]);
   assert.equal(HUMAN_REACTION_KEYS.includes('hurry_up'), false);
   assert.equal(HUMAN_REACTION_KEYS.includes('lucky'), false);
@@ -311,6 +326,14 @@ test('contextual classifiers keep raise and fold-win meanings distinct', () => {
   }), {
     botUserId: 'bot', botSeatNo: 4, targetSeatNo: 2, reactionKey: 'you_are_bluffing'
   });
+  assert.equal(classifyRaiseReaction({
+    actorUserId: 'human', actorSeatNo: 2, botSeats: [{ userId: 'bot', seatNo: 4 }],
+    reactionSettings: { enabled: false, frequencyPercent: 100 }, random: () => 0
+  }), null);
+  assert.equal(classifyRaiseReaction({
+    actorUserId: 'human', actorSeatNo: 2, botSeats: [{ userId: 'bot', seatNo: 4 }],
+    reactionSettings: { enabled: true, frequencyPercent: 1 }, random: () => 0.003
+  }), null, '1% frequency must scale the 20% base chance to 0.2%');
 
   const baseState = {
     phase: 'SETTLED',
@@ -406,6 +429,11 @@ test('settlement classifiers use deterministic seats and authoritative payouts',
     botSeats: [{ userId: 'bot-3', seatNo: 3 }],
     random: () => 0
   }), { botUserId: 'bot-3', botSeatNo: 3, targetSeatNo: 1, reactionKey: 'well_played', handId: 'split' });
+  assert.equal(classifySettlementReaction({
+    state: { ...shownHandState, showdown: { handId: 'split', winners: ['human'] } },
+    botSeats: [{ userId: 'bot-3', seatNo: 3 }],
+    random: (() => { const values = [0.1, 0.9]; return () => values.shift(); })()
+  }).reactionKey, 'congrats');
 
   assert.equal(classifySettlementReaction({
     state: { ...shownHandState, sitOutByUserId: { 'bot-3': true } },
@@ -498,4 +526,17 @@ test('directed classifier supports bot-only hurry up copy without exposing inten
     probability: 0.35,
     random: (() => { const values = [0, 0.9]; return () => values.shift(); })()
   }).reactionKey, 'good_luck');
+});
+
+test('ambient table talk uses one scaled roll and then selects one bot and message', () => {
+  assert.deepEqual(classifyAmbientReaction({
+    botSeats: [{ userId: 'bot-2', seatNo: 2 }, { userId: 'bot-4', seatNo: 4 }],
+    reactionSettings: { enabled: true, frequencyPercent: 100 },
+    random: (() => { const values = [0.1, 0.9, 0.99]; return () => values.shift(); })()
+  }), { botUserId: 'bot-4', botSeatNo: 4, reactionKey: 'ambient_thinking' });
+  assert.equal(classifyAmbientReaction({
+    botSeats: [{ userId: 'bot-2', seatNo: 2 }],
+    reactionSettings: { enabled: false, frequencyPercent: 100 },
+    random: () => 0
+  }), null);
 });

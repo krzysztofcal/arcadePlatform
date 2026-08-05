@@ -70,6 +70,21 @@ function invalidRangeError() {
   return error;
 }
 
+function invalidReactionSettingsError() {
+  const error = new Error("invalid_reaction_settings");
+  error.code = "invalid_reaction_settings";
+  error.status = 400;
+  return error;
+}
+
+function normalizeReactionSettings(enabled, frequencyPercent) {
+  const frequency = Number(frequencyPercent);
+  if (typeof enabled !== "boolean" || !Number.isInteger(frequency) || frequency < 1 || frequency > 100) {
+    throw invalidReactionSettingsError();
+  }
+  return { enabled, frequencyPercent: frequency };
+}
+
 function normalizeOverrideRange(minMs, maxMs) {
   const min = Number(minMs);
   const max = Number(maxMs);
@@ -99,6 +114,7 @@ function normalizeUpdatedBy(value) {
 export function createBotReactionOverrideStore({ env = process.env, now = Date.now } = {}) {
   const runtimeIdentity = resolveWsPreviewRuntimeIdentity(env);
   let override = null;
+  let reactionSettings = { enabled: true, frequencyPercent: 100, updatedAt: null, updatedBy: null };
 
   function requirePreviewRuntime() {
     if (!runtimeIdentity.ok) throw previewOnlyError();
@@ -115,7 +131,8 @@ export function createBotReactionOverrideStore({ env = process.env, now = Date.n
       mode: override ? "override" : "default",
       defaults: { minMs: DEFAULT_BOT_REACTION_MIN_MS, maxMs: DEFAULT_BOT_REACTION_MAX_MS },
       active,
-      override: override ? { ...override } : null
+      override: override ? { ...override } : null,
+      reactionSettings: { ...reactionSettings }
     };
   }
 
@@ -123,6 +140,20 @@ export function createBotReactionOverrideStore({ env = process.env, now = Date.n
     read: snapshot,
     getOverrideRange() {
       return override ? { minMs: override.minMs, maxMs: override.maxMs } : null;
+    },
+    getReactionSettings() {
+      return { enabled: reactionSettings.enabled, frequencyPercent: reactionSettings.frequencyPercent };
+    },
+    setReactionSettings({ enabled, frequencyPercent, updatedBy } = {}) {
+      requirePreviewRuntime();
+      const normalized = normalizeReactionSettings(enabled, frequencyPercent);
+      const timestampMs = typeof now === "function" ? Number(now()) : Date.now();
+      reactionSettings = {
+        ...normalized,
+        updatedAt: new Date(Number.isFinite(timestampMs) ? timestampMs : Date.now()).toISOString(),
+        updatedBy: normalizeUpdatedBy(updatedBy)
+      };
+      return snapshot();
     },
     setOverride({ minMs, maxMs, updatedBy } = {}) {
       requirePreviewRuntime();
@@ -147,6 +178,7 @@ export function createBotReactionOverrideStore({ env = process.env, now = Date.n
 
 export {
   normalizeOverrideRange,
+  normalizeReactionSettings,
   parseProjectRefFromDbUrl,
   parseProjectRefFromSupabaseUrl,
   resolveWsPreviewRuntimeIdentity

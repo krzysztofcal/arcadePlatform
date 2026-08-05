@@ -130,6 +130,7 @@ test("admin WS Preview bot reaction proxy forwards only a controlled payload wit
           defaults: { minMs: 2000, maxMs: 4000 },
           active: { minMs: 500, maxMs: 500 },
           override: { minMs: 500, maxMs: 500, updatedBy: "00000000-0000-4000-8000-000000000010" },
+          reactionSettings: { enabled: true, frequencyPercent: 100 },
         }),
       };
     },
@@ -143,6 +144,16 @@ test("admin WS Preview bot reaction proxy forwards only a controlled payload wit
     mode: "override",
     minMs: 500,
     maxMs: 500,
+    updatedBy: "00000000-0000-4000-8000-000000000010",
+  });
+  const settingsResponse = await handler(event("POST", {}, JSON.stringify({
+    mode: "reaction_settings", enabled: false, frequencyPercent: 25
+  })));
+  assert.equal(settingsResponse.statusCode, 200);
+  assert.deepEqual(JSON.parse(seen.options.body), {
+    mode: "reaction_settings",
+    enabled: false,
+    frequencyPercent: 25,
     updatedBy: "00000000-0000-4000-8000-000000000010",
   });
 });
@@ -187,6 +198,9 @@ test("admin WS Preview bot reaction proxy rejects non-admin and non-preview requ
 test("admin WS Preview bot reaction body allowlist rejects unexpected fields", () => {
   assert.deepEqual(parseBotReactionBody(JSON.stringify({ mode: "default" })), { mode: "default" });
   assert.deepEqual(parseBotReactionBody(JSON.stringify({ mode: "override", minMs: 500, maxMs: 500 })), { mode: "override", minMs: 500, maxMs: 500 });
+  assert.deepEqual(parseBotReactionBody(JSON.stringify({ mode: "reaction_settings", enabled: false, frequencyPercent: 25 })), {
+    mode: "reaction_settings", enabled: false, frequencyPercent: 25
+  });
   assert.throws(() => parseBotReactionBody(JSON.stringify({ mode: "default", minMs: 500 })), { code: "invalid_request" });
   assert.throws(() => parseBotReactionBody(JSON.stringify({ mode: "override", minMs: 500, maxMs: 500, updatedBy: "spoofed" })), { code: "invalid_request" });
 });

@@ -720,6 +720,21 @@
                     <button class="admin-btn admin-btn--ghost" id="adminOpsBotReactionDefault" type="button">Set default</button>
                   </div>
                 </form>
+                <form class="admin-adjust" id="adminOpsBotReactionPolicyForm">
+                  <label class="admin-field">
+                    <span class="admin-field__label">Bot reactions enabled</span>
+                    <input id="adminOpsBotReactionEnabled" type="checkbox" name="enabled">
+                    <span class="admin-field__hint">Disabling suppresses bot bubbles without changing poker gameplay.</span>
+                  </label>
+                  <label class="admin-field">
+                    <span class="admin-field__label">Bot reactions frequency: <span id="adminOpsBotReactionFrequencyValue">100%</span></span>
+                    <input id="adminOpsBotReactionFrequency" type="range" name="frequencyPercent" min="1" max="100" step="1" value="100">
+                    <span class="admin-field__hint">100% uses base probabilities; lower values scale every bot reaction chance.</span>
+                  </label>
+                  <div class="admin-filter-actions">
+                    <button class="admin-btn admin-btn--primary" id="adminOpsBotReactionPolicyApply" type="submit">Apply reaction settings</button>
+                  </div>
+                </form>
                 <div class="admin-note" id="adminOpsBotReactionStatus" aria-live="polite"></div>
               </section>
 

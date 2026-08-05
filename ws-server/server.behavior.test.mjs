@@ -80,9 +80,14 @@ test("reaction timers are delayed, single-pending per bot, concurrent across bot
   assert.equal(maybeSchedule(), false);
   assert.equal(classifierCalls, 1, "one bot must not reserve a second pending reaction");
   assert.equal(maybeSchedule("bot-2"), true, "another bot may schedule concurrently at the same table");
-  scheduled[0].callback();
+  timers.clearPendingReactions();
+  assert.equal(scheduled[0].cancelled, true);
+  assert.equal(scheduled[1].cancelled, true);
+  assert.equal(maybeSchedule(), true, "disabling reactions can cancel pending work immediately");
+  scheduled[2].callback();
   assert.deepEqual(emitted, [{ handId: "hand-1", botUserId: "bot-1", botSeatNo: 3 }]);
-  scheduled[1].callback();
+  assert.equal(maybeSchedule("bot-2"), true);
+  scheduled[3].callback();
   assert.deepEqual(emitted, [
     { handId: "hand-1", botUserId: "bot-1", botSeatNo: 3 },
     { handId: "hand-1", botUserId: "bot-2", botSeatNo: 3 }
@@ -90,7 +95,7 @@ test("reaction timers are delayed, single-pending per bot, concurrent across bot
 
   assert.equal(maybeSchedule(), true);
   current = { ...current, handId: "hand-2" };
-  scheduled[2].callback();
+  scheduled[4].callback();
   assert.equal(emitted.length, 2, "stale hand/seat ownership must suppress emission");
 
   const turn = { handId: "hand-2", userId: "human-1", startedAt: 100, deadlineAt: 1_100 };
@@ -104,15 +109,15 @@ test("reaction timers are delayed, single-pending per bot, concurrent across bot
     onDue: () => { hurryUpCount += 1; }
   });
   turn.userId = "human-2";
-  scheduled[3].callback();
+  scheduled[5].callback();
   assert.equal(hurryUpCount, 0);
   assert.equal(turn.deadlineAt, originalDeadline, "turn observer must never mutate gameplay timing");
 
   timers.scheduleReaction({ tableId: "table-1", botUserId: "bot-1", delayMs: 300, validate: () => true, emit: () => emitted.push("late-1") });
   timers.scheduleReaction({ tableId: "table-1", botUserId: "bot-2", delayMs: 300, validate: () => true, emit: () => emitted.push("late-2") });
   timers.scheduleTurnObserver({ tableId: "table-1", delayMs: 800, validate: () => true, onDue: () => { hurryUpCount += 1; } });
-  const reactionTimers = [scheduled[4], scheduled[5]];
-  const turnTimer = scheduled[6];
+  const reactionTimers = [scheduled[6], scheduled[7]];
+  const turnTimer = scheduled[8];
   timers.clearTable("table-1");
   assert.equal(reactionTimers.every((timer) => timer.cancelled), true);
   assert.equal(turnTimer.cancelled, true);
