@@ -626,6 +626,33 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
   assert.ok(Math.abs(Number.parseFloat(reactionDeltaY)) > 50, 'vertical delta should use the reaction layer height');
   assert.equal(harness.elements.pokerReactionLayer.children.some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))), false);
 
+  ws.onReaction({ payload: { seatNo: 3, targetSeatNo: 1, reactionKey: 'hurry_up' } });
+  await harness.flush();
+  const botOnlyBubble = harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'));
+  assert.equal(botOnlyBubble?.textContent, '⏳ Please, hurry up!');
+  assert.equal(harness.elements.pokerReactionLayer.children.filter((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect')).length, 1,
+    'a targeted bot-only reaction must not create a congratulations effect');
+  const menuKeys = harness.elements.pokerV2ReactionMenu.children.map((option) => option.dataset.reactionKey);
+  assert.equal(menuKeys.includes('hurry_up'), false);
+  assert.equal(menuKeys.includes('you_are_bluffing'), false);
+  assert.equal(menuKeys.includes('i_was_bluffing'), false);
+  assert.equal(menuKeys.includes('nice_bluff'), true);
+
+  ws.onReaction({ payload: { seatNo: 3, targetSeatNo: 1, reactionKey: 'you_are_bluffing' } });
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
+  '🧐 You are bluffing!');
+  ws.onReaction({ payload: { seatNo: 3, reactionKey: 'i_was_bluffing' } });
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
+  '😏 I was bluffing!');
+
   harness.advanceTime(3_499);
   await harness.flush();
   const targetButtonsBeforeServerRevealDeadline = harness.elements.pokerReactionLayer.children

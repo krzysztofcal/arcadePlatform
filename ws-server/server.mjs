@@ -36,7 +36,15 @@ import { createTableSnapshotLoader } from "./poker/table/table-snapshot.mjs";
 import { handleJoinCommand } from "./poker/handlers/join.mjs";
 import { handleActCommand } from "./poker/handlers/act.mjs";
 import { handleStartHandCommand } from "./poker/handlers/start-hand.mjs";
-import { evaluateHumanReactionCommand, tryCreateBotReaction, clearTable as clearReactionTable } from "./poker/handlers/reaction.mjs";
+import {
+  classifyDirectedBotReaction,
+  classifyRaiseReaction,
+  classifySettlementReaction,
+  evaluateHumanReactionCommand,
+  tryCreateBotReaction,
+  tryReserveBotReaction,
+  clearTable as clearReactionTable
+} from "./poker/handlers/reaction.mjs";
 import { handleTurnTimeoutCommand } from "./poker/handlers/turn-timeout.mjs";
 import {
   createBotAutoplayCascadeScheduler,
@@ -361,6 +369,9 @@ let beginSqlWsLoaderPromise = null;
 const timeoutFailureTrackerByTableId = new Map();
 const settledRolloverTimerByTableId = new Map();
 const settlementRevealDeadlineByTableId = new Map();
+const pendingBotReactionByTableId = new Map();
+const humanTurnReactionTimerByTableId = new Map();
+const evaluatedSettlementReactionHandByTableId = new Map();
 const TURN_TIMEOUT_FATAL_PREFIXES = ["showdown_"];
 const TURN_TIMEOUT_FATAL_REASONS = new Set(["timeout_apply_failed"]);
 const DEFAULT_INACTIVE_CLEANUP_ADAPTER_URL = new URL("./poker/persistence/inactive-cleanup-adapter.mjs", import.meta.url).href;
@@ -430,6 +441,154 @@ async function loadDeferredLeaveFinalizer() {
   return deferredLeaveFinalizerPromise;
 }
 
+function runReactionObserverSafely(name, observer) {
+  void Promise.resolve()
+    .then(observer)
+    .catch((error) => klogSafe("ws_reaction_observer_failed", {
+      observer: name,
+      message: error?.message || "unknown"
+    }));
+}
+
+function botSeatsForTable(tableId) {
+  const snapshot = tableManager.tableSnapshot(tableId, null);
+  return Array.isArray(snapshot?.members)
+    ? snapshot.members
+      .filter((member) => tableManager.isBotUser(tableId, member?.userId) === true)
+      .map((member) => ({ userId: member.userId, seatNo: member.seat }))
+    : [];
+}
+
+function seatOwnerForTable(tableId, seatNo) {
+  const snapshot = tableManager.tableSnapshot(tableId, null);
+  const member = Array.isArray(snapshot?.members)
+    ? snapshot.members.find((entry) => entry?.seat === seatNo)
+    : null;
+  return typeof member?.userId === "string" ? member.userId : null;
+}
+
+function clearPendingBotReaction(tableId) {
+  const pending = pendingBotReactionByTableId.get(tableId);
+  if (pending?.timer) clearTimeout(pending.timer);
+  pendingBotReactionByTableId.delete(tableId);
+}
+
+function scheduleBotReactionCandidate(tableId, createCandidate, { handId = null, targetUserId = null } = {}) {
+  if (pendingBotReactionByTableId.has(tableId)) return false;
+  const candidate = createCandidate();
+  if (!candidate) return false;
+  const reserved = tryReserveBotReaction({
+    tableId,
+    botUserId: candidate.botUserId,
+    botSeatNo: candidate.botSeatNo,
+    targetSeatNo: candidate.targetSeatNo,
+    reactionKey: candidate.reactionKey,
+    tableClosed: tableManager.isTableClosed(tableId),
+    nowMs: Date.now()
+  });
+  if (!reserved) return false;
+  const expectedTargetUserId = targetUserId
+    || (Number.isInteger(candidate.targetSeatNo) ? seatOwnerForTable(tableId, candidate.targetSeatNo) : null);
+  const timer = setTimeout(() => {
+    const pending = pendingBotReactionByTableId.get(tableId);
+    if (!pending || pending.timer !== timer) return;
+    pendingBotReactionByTableId.delete(tableId);
+    if (tableManager.isTableClosed(tableId)) return;
+    if (tableManager.isBotUser(tableId, candidate.botUserId) !== true) return;
+    if (seatOwnerForTable(tableId, candidate.botSeatNo) !== candidate.botUserId) return;
+    const state = tableManager.privatePokerStateForAudit?.(tableId);
+    if (handId && state?.handId !== handId) return;
+    if (expectedTargetUserId && seatOwnerForTable(tableId, candidate.targetSeatNo) !== expectedTargetUserId) return;
+    broadcastTableReaction(tableId, reserved);
+  }, reserved.delayMs);
+  timer.unref?.();
+  pendingBotReactionByTableId.set(tableId, { timer });
+  return true;
+}
+
+function scheduleReservedBotReaction(tableId, candidate, { botUserId, handId = null } = {}) {
+  if (!candidate || pendingBotReactionByTableId.has(tableId)) return false;
+  const timer = setTimeout(() => {
+    const pending = pendingBotReactionByTableId.get(tableId);
+    if (!pending || pending.timer !== timer) return;
+    pendingBotReactionByTableId.delete(tableId);
+    if (tableManager.isTableClosed(tableId)) return;
+    if (tableManager.isBotUser(tableId, botUserId) !== true) return;
+    if (seatOwnerForTable(tableId, candidate.seatNo) !== botUserId) return;
+    const state = tableManager.privatePokerStateForAudit?.(tableId);
+    if (handId && state?.handId !== handId) return;
+    broadcastTableReaction(tableId, candidate);
+  }, candidate.delayMs);
+  timer.unref?.();
+  pendingBotReactionByTableId.set(tableId, { timer });
+  return true;
+}
+
+function observeFreshPokerMutation({ tableId, acceptedActionAudit, nextState }) {
+  const handId = typeof nextState?.handId === "string" ? nextState.handId : null;
+  if (acceptedActionAudit?.action === "RAISE") {
+    const actorUserId = acceptedActionAudit.actorUserId;
+    const actorSeat = Array.isArray(nextState?.handSeats)
+      ? nextState.handSeats.find((seat) => seat?.userId === actorUserId)
+      : null;
+    scheduleBotReactionCandidate(tableId, () => classifyRaiseReaction({
+      actorUserId,
+      actorSeatNo: actorSeat?.seatNo,
+      botSeats: botSeatsForTable(tableId)
+    }), { handId, targetUserId: actorUserId });
+  }
+
+  if (nextState?.phase === "SETTLED" && handId && evaluatedSettlementReactionHandByTableId.get(tableId) !== handId) {
+    evaluatedSettlementReactionHandByTableId.set(tableId, handId);
+    scheduleBotReactionCandidate(tableId, () => classifySettlementReaction({
+      state: nextState,
+      botSeats: botSeatsForTable(tableId)
+    }), { handId });
+  }
+
+  syncHumanTurnReactionTimer(tableId, nextState);
+}
+
+function clearHumanTurnReactionTimer(tableId) {
+  const pending = humanTurnReactionTimerByTableId.get(tableId);
+  if (pending?.timer) clearTimeout(pending.timer);
+  humanTurnReactionTimerByTableId.delete(tableId);
+}
+
+function syncHumanTurnReactionTimer(tableId, state) {
+  clearHumanTurnReactionTimer(tableId);
+  const handId = typeof state?.handId === "string" ? state.handId : null;
+  const turnUserId = typeof state?.turnUserId === "string" ? state.turnUserId : null;
+  const turnStartedAt = Number(state?.turnStartedAt);
+  const turnDeadlineAt = Number(state?.turnDeadlineAt);
+  if (!handId || !turnUserId || tableManager.isBotUser(tableId, turnUserId) === true) return;
+  if (!Number.isFinite(turnStartedAt) || !Number.isFinite(turnDeadlineAt) || turnDeadlineAt <= turnStartedAt) return;
+  const triggerAt = turnStartedAt + Math.floor((turnDeadlineAt - turnStartedAt) * 0.8);
+  const delayMs = triggerAt - Date.now();
+  if (delayMs <= 0) return;
+  const targetSeat = Array.isArray(state?.handSeats)
+    ? state.handSeats.find((seat) => seat?.userId === turnUserId)
+    : null;
+  if (!Number.isInteger(targetSeat?.seatNo)) return;
+  const timer = setTimeout(() => {
+    const pending = humanTurnReactionTimerByTableId.get(tableId);
+    if (!pending || pending.timer !== timer) return;
+    humanTurnReactionTimerByTableId.delete(tableId);
+    const current = tableManager.privatePokerStateForAudit?.(tableId);
+    if (current?.handId !== handId || current?.turnUserId !== turnUserId) return;
+    if (Number(current?.turnStartedAt) !== turnStartedAt || Number(current?.turnDeadlineAt) !== turnDeadlineAt) return;
+    scheduleBotReactionCandidate(tableId, () => classifyDirectedBotReaction({
+      botSeats: botSeatsForTable(tableId),
+      excludedUserId: turnUserId,
+      targetSeatNo: targetSeat.seatNo,
+      reactionKeys: ["hurry_up"],
+      probability: 0.25
+    }), { handId, targetUserId: turnUserId });
+  }, delayMs);
+  timer.unref?.();
+  humanTurnReactionTimerByTableId.set(tableId, { timer });
+}
+
 async function loadAcceptedBotAutoplayExecutor() {
   if (!acceptedBotAutoplayExecutorPromise) {
     acceptedBotAutoplayExecutorPromise = (async () => {
@@ -454,6 +613,7 @@ async function loadAcceptedBotAutoplayExecutor() {
           onBotStepPersisted: async ({ tableId, botTurnUserId, botAction }) => {
             broadcastStateSnapshots(tableId);
             if (tableManager.isBotUser(tableId, botTurnUserId) !== true) return;
+            if (pendingBotReactionByTableId.has(tableId)) return;
             const botSnapshot = tableManager.tableSnapshot(tableId, botTurnUserId);
             const reaction = tryCreateBotReaction({
               tableId,
@@ -464,7 +624,8 @@ async function loadAcceptedBotAutoplayExecutor() {
               nowMs: Date.now()
             });
             if (reaction) {
-              broadcastTableReaction(tableId, reaction);
+              const state = tableManager.privatePokerStateForAudit?.(tableId);
+              scheduleReservedBotReaction(tableId, reaction, { botUserId: botTurnUserId, handId: state?.handId || null });
             }
           },
           getBotReactionOverride: () => botReactionOverrideStore.getOverrideRange(),
@@ -1483,6 +1644,13 @@ async function persistMutatedState({
   if (!deferRuntimeVersionUpdate && persisted.outcome !== "durable_replay") {
     tableManager.setPersistedStateVersion(tableId, persisted.newVersion);
   }
+  if (persisted.outcome !== "durable_replay") {
+    runReactionObserverSafely("fresh_poker_mutation", () => observeFreshPokerMutation({
+      tableId,
+      acceptedActionAudit,
+      nextState: privateStateForHoleCards
+    }));
+  }
   return persisted;
 }
 
@@ -1601,6 +1769,9 @@ function releaseTableRuntimeResources(tableId) {
   clearTurnTimeoutFailureTracker(tableId);
   clearSnapshotCacheForTable(tableId);
   clearPersistedSeatTouchForTable(tableId);
+  clearPendingBotReaction(tableId);
+  clearHumanTurnReactionTimer(tableId);
+  evaluatedSettlementReactionHandByTableId.delete(tableId);
   scheduledObservedBotTurnKeys.delete(tableId);
   suppressedBotTimeoutSafetyFailures.delete(tableId);
   pendingTableJanitorEvaluationByTableId.delete(tableId);
@@ -4049,6 +4220,7 @@ wss.on("connection", (ws) => {
       let settlementMatchesHand = false;
       let settlementWindowOpen = false;
       let settlementHandId = null;
+      let targetUserId = null;
       if (targeted) {
         const pokerState = tableManager.persistedPokerState(tableId);
         const requestedHandId = typeof reactionPayload.handId === "string" ? reactionPayload.handId.trim() : "";
@@ -4068,6 +4240,7 @@ wss.on("connection", (ws) => {
           : [];
         const targetMember = matchingTargetMembers.length === 1 ? matchingTargetMembers[0] : null;
         targetOccupied = !!(targetMember && typeof targetMember.userId === "string" && targetMember.userId.trim());
+        targetUserId = targetOccupied ? targetMember.userId.trim() : null;
         if (targetOccupied && settlementMatchesHand) {
           const targetableWinnerUserIds = collectTargetableWinnerUserIds(pokerState?.showdown);
           targetIsWinner = targetableWinnerUserIds instanceof Set && targetableWinnerUserIds.has(targetMember.userId.trim());
@@ -4105,7 +4278,21 @@ wss.on("connection", (ws) => {
         status: "accepted",
         reason: null
       });
-      broadcastTableReaction(tableId, result);
+      const broadcastResult = broadcastTableReaction(tableId, result);
+      if (targeted && result.reactionKey === "nice_hand" && broadcastResult.sentCount > 0
+        && targetUserId && tableManager.isBotUser(tableId, targetUserId) === true) {
+        runReactionObserverSafely("targeted_nice_hand", () => scheduleBotReactionCandidate(
+          tableId,
+          () => classifyDirectedBotReaction({
+            botSeats: botSeatsForTable(tableId).filter((bot) => bot.userId === targetUserId),
+            excludedUserId: senderUserId,
+            targetSeatNo: senderSeatNo,
+            reactionKeys: ["thanks"],
+            probability: 0.5
+          }),
+          { targetUserId: senderUserId }
+        ));
+      }
       return;
     }
 
@@ -4230,7 +4417,7 @@ wss.on("connection", (ws) => {
         return;
       }
 
-      await enqueueTableCommand({
+      const joinResult = await enqueueTableCommand({
         tableId: frame.__resolvedTableId,
         commandName: "join",
         run: async () => handleJoinCommand({
@@ -4260,6 +4447,19 @@ wss.on("connection", (ws) => {
           })
         })
       });
+      if (joinResult?.newHumanJoined === true && Number.isInteger(joinResult.seatNo)) {
+        runReactionObserverSafely("human_join", () => scheduleBotReactionCandidate(
+          frame.__resolvedTableId,
+          () => classifyDirectedBotReaction({
+            botSeats: botSeatsForTable(frame.__resolvedTableId),
+            excludedUserId: joinResult.userId,
+            targetSeatNo: joinResult.seatNo,
+            reactionKeys: ["hello", "good_luck"],
+            probability: 0.35
+          }),
+          { targetUserId: joinResult.userId }
+        ));
+      }
       maybeScheduleSettledRollover(frame.__resolvedTableId);
       maybeTouchPersistedSeatLastSeen(ws, connState);
       return;

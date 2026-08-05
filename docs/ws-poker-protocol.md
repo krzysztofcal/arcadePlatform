@@ -74,7 +74,7 @@ Example envelope:
 | `commandResult` | `{ "requestId": string, "status": "accepted"|"rejected", "reason": string|null }` | Deterministic outcome for a client command. |
 | `resync` | `{ "mode": "required", "reason": string, "expectedSeq": integer }` | Signals that client must request/accept full snapshot. |
 | `error` | `{ "code": string, "message": string, "retryable": boolean, "requestId": string|null }` | Protocol or domain error (see Errors). |
-| `table_reaction` | `{ "seatNo": integer, "targetSeatNo"?: integer, "reactionKey": string }` | Ephemeral table event delivered to the current table connections supported by the runtime. It is not stored in `streamLog`, snapshots, Supabase, or reconnect replay. Future spectator delivery can use the same event and payload without a protocol change. |
+| `table_reaction` | `{ "seatNo": integer, "targetSeatNo"?: integer, "reactionKey": string }` | Ephemeral table event delivered to current table connections; `targetSeatNo` is generic presentation metadata, while only targeted `nice_hand` uses the congratulations effect. Server-generated bot reactions may additionally use `hurry_up`, `you_are_bluffing`, and `i_was_bluffing`; these keys are not accepted from human `reaction_send`. Reactions are not stored in `streamLog`, snapshots, Supabase, or reconnect replay. |
 
 Minimal server-initiated events in v1 include: `error`, `resync`, `pong`, state updates (`stateSnapshot`/`statePatch`), and ephemeral `table_reaction` events.
 

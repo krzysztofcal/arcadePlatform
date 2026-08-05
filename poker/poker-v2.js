@@ -93,9 +93,12 @@
     { key: 'haha', emoji: '😄', label: 'Haha' },
     { key: 'wow', emoji: '😮', label: 'Wow!' },
     { key: 'bad_beat', emoji: '😢', label: 'Bad beat' },
-    { key: 'nice_bluff', emoji: '😎', label: 'Nice bluff' },
+    { key: 'nice_bluff', emoji: '😎', label: 'Nice bluff!' },
     { key: 'good_luck', emoji: '🤝', label: 'Good luck' },
-    { key: 'thanks', emoji: '❤️', label: 'Thanks' }
+    { key: 'thanks', emoji: '❤️', label: 'Thanks' },
+    { key: 'hurry_up', emoji: '⏳', label: 'Please, hurry up!', humanSelectable: false },
+    { key: 'you_are_bluffing', emoji: '🧐', label: 'You are bluffing!', humanSelectable: false },
+    { key: 'i_was_bluffing', emoji: '😏', label: 'I was bluffing!', humanSelectable: false }
   ];
   var seatAnchors = [
     { x: 50, y: 10 },
@@ -2175,7 +2178,7 @@
     var ownerUserId = currentSeatOwnerUserId(seatNo);
     if (!Number.isInteger(seatNo) || seatNo < 1 || !entry || !ownerUserId) return;
     var hasTargetSeatNo = Object.prototype.hasOwnProperty.call(payload, 'targetSeatNo');
-    if (hasTargetSeatNo){
+    if (hasTargetSeatNo && reactionKey === 'nice_hand'){
       var targetSeatNo = Number(payload.targetSeatNo);
       var targetOwnerUserId = currentSeatOwnerUserId(targetSeatNo);
       if (!Number.isInteger(targetSeatNo) || targetSeatNo < 1 || targetSeatNo === seatNo || !targetOwnerUserId) return;
@@ -2238,6 +2241,7 @@
     if (!els.reactionMenu) return;
     els.reactionMenu.innerHTML = '';
     REACTION_CATALOG.forEach(function(entry){
+      if (entry.humanSelectable === false) return;
       var option = document.createElement('button');
       option.type = 'button';
       option.className = 'poker-reaction-option';

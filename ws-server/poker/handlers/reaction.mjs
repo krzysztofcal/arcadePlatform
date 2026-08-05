@@ -1,8 +1,26 @@
 const HUMAN_REACTION_COOLDOWN_MS = 4_000;
 const BOT_TABLE_THROTTLE_MS = 20_000;
 const BOT_REACTION_PROBABILITY = 0.02;
+const BOT_REACTION_JITTER_MIN_MS = 300;
+const BOT_REACTION_JITTER_MAX_MS = 1_200;
 
 export const REACTION_KEYS = Object.freeze([
+  "hello",
+  "nice_hand",
+  "well_played",
+  "thinking",
+  "haha",
+  "wow",
+  "bad_beat",
+  "nice_bluff",
+  "good_luck",
+  "thanks",
+  "hurry_up",
+  "you_are_bluffing",
+  "i_was_bluffing"
+]);
+
+export const HUMAN_REACTION_KEYS = Object.freeze([
   "hello",
   "nice_hand",
   "well_played",
@@ -16,9 +34,9 @@ export const REACTION_KEYS = Object.freeze([
 ]);
 
 const REACTION_KEY_SET = new Set(REACTION_KEYS);
+const HUMAN_REACTION_KEY_SET = new Set(HUMAN_REACTION_KEYS);
 const BOT_REACTION_KEYS_BY_ACTION = Object.freeze({
   BET: Object.freeze(["wow", "haha"]),
-  RAISE: Object.freeze(["wow", "haha"]),
   ALL_IN: Object.freeze(["wow", "haha"])
 });
 
@@ -55,6 +73,56 @@ function normalizeBotActionType(botAction) {
   return value;
 }
 
+function samplePasses(random, probability) {
+  const sample = Number(random());
+  return Number.isFinite(sample) && sample >= 0 && sample < probability;
+}
+
+function resolveJitterMs(random) {
+  const sample = Number(random());
+  const normalized = Number.isFinite(sample) && sample >= 0 && sample < 1 ? sample : 0;
+  return BOT_REACTION_JITTER_MIN_MS
+    + Math.floor(normalized * (BOT_REACTION_JITTER_MAX_MS - BOT_REACTION_JITTER_MIN_MS + 1));
+}
+
+function normalizeBotSeats(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value
+    .map((entry) => ({
+      userId: normalizeString(entry?.userId),
+      seatNo: Number(entry?.seatNo)
+    }))
+    .filter((entry) => entry.userId && isPositiveSeatNo(entry.seatNo) && !seen.has(entry.userId) && seen.add(entry.userId))
+    .sort((left, right) => left.seatNo - right.seatNo);
+}
+
+function normalizeHandSeats(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value
+    .map((entry) => ({ userId: normalizeString(entry?.userId), seatNo: Number(entry?.seatNo) }))
+    .filter((entry) => entry.userId && isPositiveSeatNo(entry.seatNo) && !seen.has(entry.userId) && seen.add(entry.userId))
+    .sort((left, right) => left.seatNo - right.seatNo);
+}
+
+function winnerSeats(state, handSeats) {
+  const winners = new Set(Array.isArray(state?.showdown?.winners)
+    ? state.showdown.winners.map(normalizeString).filter(Boolean)
+    : []);
+  return handSeats.filter((seat) => winners.has(seat.userId));
+}
+
+function normalFoldWin(state, handSeats, winners) {
+  if (winners.length !== 1 || handSeats.length < 2) return false;
+  const winnerUserId = winners[0].userId;
+  return handSeats.every((seat) => seat.userId === winnerUserId || (
+    state?.foldedByUserId?.[seat.userId] === true
+    && state?.leftTableByUserId?.[seat.userId] !== true
+    && state?.sitOutByUserId?.[seat.userId] !== true
+  ));
+}
+
 export function evaluateHumanReactionCommand({
   tableId,
   senderUserId,
@@ -79,7 +147,7 @@ export function evaluateHumanReactionCommand({
   if (!normalizedTableId || !normalizedUserId || !isPositiveSeatNo(senderSeatNo)) {
     return { ok: false, reason: "invalid_sender" };
   }
-  if (!REACTION_KEY_SET.has(normalizedReactionKey)) {
+  if (!HUMAN_REACTION_KEY_SET.has(normalizedReactionKey)) {
     return { ok: false, reason: "invalid_reaction" };
   }
   if (targeted === true) {
@@ -161,8 +229,7 @@ export function tryCreateBotReaction({
     return null;
   }
 
-  const sample = Number(random());
-  if (!Number.isFinite(sample) || sample < 0 || sample >= BOT_REACTION_PROBABILITY) {
+  if (!samplePasses(random, BOT_REACTION_PROBABILITY)) {
     return null;
   }
 
@@ -184,8 +251,131 @@ export function tryCreateBotReaction({
 
   return {
     seatNo: botSeatNo,
-    reactionKey: availableReactionKeys[selectionIndex] || availableReactionKeys[0]
+    reactionKey: availableReactionKeys[selectionIndex] || availableReactionKeys[0],
+    delayMs: resolveJitterMs(random)
   };
+}
+
+export function tryReserveBotReaction({
+  tableId,
+  botUserId,
+  botSeatNo,
+  reactionKey,
+  targetSeatNo,
+  tableClosed = false,
+  nowMs,
+  random = Math.random
+} = {}) {
+  const normalizedTableId = normalizeString(tableId);
+  const normalizedBotUserId = normalizeString(botUserId);
+  const normalizedReactionKey = normalizeString(reactionKey);
+  const resolvedNowMs = normalizeNowMs(nowMs);
+  if (tableClosed === true || !normalizedTableId || !normalizedBotUserId || !isPositiveSeatNo(botSeatNo)) return null;
+  if (!REACTION_KEY_SET.has(normalizedReactionKey)) return null;
+  if (targetSeatNo != null && (!isPositiveSeatNo(targetSeatNo) || targetSeatNo === botSeatNo)) return null;
+  const senderKey = `${normalizedTableId}:${normalizedBotUserId}`;
+  if (hasActiveCooldown(senderCooldownUntilByTableUser, senderKey, resolvedNowMs)) return null;
+  if (hasActiveCooldown(botReactionUntilByTable, normalizedTableId, resolvedNowMs)) return null;
+  senderCooldownUntilByTableUser.set(senderKey, resolvedNowMs + HUMAN_REACTION_COOLDOWN_MS);
+  botReactionUntilByTable.set(normalizedTableId, resolvedNowMs + BOT_TABLE_THROTTLE_MS);
+  return {
+    seatNo: botSeatNo,
+    ...(isPositiveSeatNo(targetSeatNo) ? { targetSeatNo } : {}),
+    reactionKey: normalizedReactionKey,
+    delayMs: resolveJitterMs(random)
+  };
+}
+
+export function classifyRaiseReaction({ actorUserId, actorSeatNo, botSeats, random = Math.random } = {}) {
+  const normalizedActorUserId = normalizeString(actorUserId);
+  if (!normalizedActorUserId || !isPositiveSeatNo(actorSeatNo) || !samplePasses(random, 0.08)) return null;
+  const reactor = normalizeBotSeats(botSeats).find((bot) => bot.userId !== normalizedActorUserId);
+  return reactor ? {
+    botUserId: reactor.userId,
+    botSeatNo: reactor.seatNo,
+    targetSeatNo: actorSeatNo,
+    reactionKey: "you_are_bluffing"
+  } : null;
+}
+
+export function classifyDirectedBotReaction({
+  botSeats,
+  excludedUserId,
+  targetSeatNo,
+  reactionKeys,
+  probability,
+  random = Math.random
+} = {}) {
+  if (!isPositiveSeatNo(targetSeatNo) || !Array.isArray(reactionKeys) || reactionKeys.length === 0) return null;
+  if (!samplePasses(random, probability)) return null;
+  const normalizedExcludedUserId = normalizeString(excludedUserId);
+  const reactor = normalizeBotSeats(botSeats).find((bot) => bot.userId !== normalizedExcludedUserId);
+  const availableKeys = reactionKeys.map(normalizeString).filter((key) => REACTION_KEY_SET.has(key));
+  if (!reactor || availableKeys.length === 0) return null;
+  const selection = Number(random());
+  const selectionIndex = Number.isFinite(selection) && selection >= 0 && selection < 1
+    ? Math.floor(selection * availableKeys.length)
+    : 0;
+  return {
+    botUserId: reactor.userId,
+    botSeatNo: reactor.seatNo,
+    targetSeatNo,
+    reactionKey: availableKeys[selectionIndex] || availableKeys[0]
+  };
+}
+
+export function classifySettlementReaction({ state, botSeats, random = Math.random } = {}) {
+  if (!state || state.phase !== "SETTLED") return null;
+  const handId = normalizeString(state.handId);
+  const settlementHandId = normalizeString(state?.handSettlement?.handId);
+  const showdownHandId = normalizeString(state?.showdown?.handId);
+  if (!handId || handId !== settlementHandId || handId !== showdownHandId) return null;
+  const handSeats = normalizeHandSeats(state.handSeats);
+  const bots = normalizeBotSeats(botSeats);
+  const botByUserId = new Map(bots.map((bot) => [bot.userId, bot]));
+  const winners = winnerSeats(state, handSeats);
+  if (normalFoldWin(state, handSeats, winners)) {
+    const winner = winners[0];
+    const winningBot = botByUserId.get(winner.userId);
+    if (winningBot && samplePasses(random, 0.5)) {
+      return { botUserId: winningBot.userId, botSeatNo: winningBot.seatNo, reactionKey: "i_was_bluffing", handId };
+    }
+    const reactor = bots.find((bot) => bot.userId !== winner.userId
+      && handSeats.some((seat) => seat.userId === bot.userId)
+      && state?.leftTableByUserId?.[bot.userId] !== true);
+    if (reactor && samplePasses(random, 0.5)) {
+      return { botUserId: reactor.userId, botSeatNo: reactor.seatNo, targetSeatNo: winner.seatNo, reactionKey: "nice_bluff", handId };
+    }
+  }
+  const comparedHands = state?.showdown?.handsByUserId;
+  if (comparedHands && typeof comparedHands === "object" && Object.keys(comparedHands).length >= 2) {
+    const strongWinner = winners.find((winner) => Number(comparedHands?.[winner.userId]?.category) >= 4);
+    const reactor = bots.find((bot) => !winners.some((winner) => winner.userId === bot.userId)
+      && handSeats.some((seat) => seat.userId === bot.userId)
+      && state?.leftTableByUserId?.[bot.userId] !== true);
+    if (strongWinner && reactor && samplePasses(random, 0.5)) {
+      return { botUserId: reactor.userId, botSeatNo: reactor.seatNo, targetSeatNo: strongWinner.seatNo, reactionKey: "nice_hand", handId };
+    }
+  }
+  const bigBlind = Number(state.bigBlind);
+  if (Number.isInteger(bigBlind) && bigBlind > 0) {
+    const largeWinner = winners.find((winner) => {
+      const payout = Number(state?.handSettlement?.payouts?.[winner.userId]);
+      return botByUserId.has(winner.userId) && Number.isFinite(payout) && payout >= 20 * bigBlind;
+    });
+    if (largeWinner) {
+      const bot = botByUserId.get(largeWinner.userId);
+      return { botUserId: bot.userId, botSeatNo: bot.seatNo, reactionKey: "wow", handId };
+    }
+  }
+  const firstWinner = winners[0];
+  const reactor = bots.find((bot) => !winners.some((winner) => winner.userId === bot.userId)
+    && handSeats.some((seat) => seat.userId === bot.userId)
+    && state?.leftTableByUserId?.[bot.userId] !== true);
+  if (firstWinner && reactor && samplePasses(random, 0.25)) {
+    return { botUserId: reactor.userId, botSeatNo: reactor.seatNo, targetSeatNo: firstWinner.seatNo, reactionKey: "well_played", handId };
+  }
+  return null;
 }
 
 export function clearTable(tableId) {

@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  HUMAN_REACTION_KEYS,
   REACTION_KEYS,
+  classifyDirectedBotReaction,
+  classifyRaiseReaction,
+  classifySettlementReaction,
   clearTable,
   evaluateHumanReactionCommand,
   tryCreateBotReaction
@@ -22,8 +26,19 @@ test('human reactions use the closed allowlist and atomically reserve the sender
     'bad_beat',
     'nice_bluff',
     'good_luck',
-    'thanks'
+    'thanks',
+    'hurry_up',
+    'you_are_bluffing',
+    'i_was_bluffing'
   ]);
+  assert.equal(HUMAN_REACTION_KEYS.includes('hurry_up'), false);
+  assert.deepEqual(evaluateHumanReactionCommand({
+    tableId,
+    senderUserId: 'human-bot-key',
+    senderSeatNo: 6,
+    reactionKey: 'hurry_up',
+    nowMs: 1_000
+  }), { ok: false, reason: 'invalid_reaction' });
 
   const first = evaluateHumanReactionCommand({
     tableId,
@@ -224,10 +239,10 @@ test('bot reactions use the real bot action object and table-level throttle', ()
     tableId,
     botUserId: 'bot-1',
     botSeatNo: 3,
-    botAction: { type: ' raise ', amount: 40 },
+    botAction: { type: ' bet ', amount: 40 },
     nowMs: 2_000,
     random: (() => {
-      const values = [0.01, 0.9];
+      const values = [0.01, 0.9, 0];
       return () => values.shift();
     })()
   });
@@ -240,7 +255,7 @@ test('bot reactions use the real bot action object and table-level throttle', ()
     random: () => 0.01
   });
 
-  assert.deepEqual(accepted, { seatNo: 3, reactionKey: 'haha' });
+  assert.deepEqual(accepted, { seatNo: 3, reactionKey: 'haha', delayMs: 300 });
   assert.equal(throttledForAnotherBot, null);
   assert.equal(tryCreateBotReaction({
     tableId,
@@ -268,6 +283,120 @@ test('bot reactions use the real bot action object and table-level throttle', ()
     nowMs: 40_000,
     random: () => 0.01
   });
-  assert.deepEqual(afterClear, { seatNo: 3, reactionKey: 'wow' });
+  assert.deepEqual(afterClear, { seatNo: 3, reactionKey: 'wow', delayMs: 309 });
   clearTable(tableId);
+});
+
+test('contextual classifiers keep raise and fold-win meanings distinct', () => {
+  assert.deepEqual(classifyRaiseReaction({
+    actorUserId: 'human',
+    actorSeatNo: 2,
+    botSeats: [{ userId: 'bot', seatNo: 4 }],
+    random: () => 0
+  }), {
+    botUserId: 'bot', botSeatNo: 4, targetSeatNo: 2, reactionKey: 'you_are_bluffing'
+  });
+
+  const baseState = {
+    phase: 'SETTLED',
+    handId: 'hand-fold',
+    handSettlement: { handId: 'hand-fold', payouts: { bot: 100, human: 100 } },
+    showdown: { handId: 'hand-fold', winners: ['bot'] },
+    handSeats: [{ userId: 'human', seatNo: 2 }, { userId: 'bot', seatNo: 4 }],
+    foldedByUserId: { human: true },
+    leftTableByUserId: {},
+    sitOutByUserId: {},
+    bigBlind: 10
+  };
+  assert.equal(classifySettlementReaction({
+    state: baseState,
+    botSeats: [{ userId: 'bot', seatNo: 4 }],
+    random: () => 0
+  }).reactionKey, 'i_was_bluffing');
+
+  assert.deepEqual(classifySettlementReaction({
+    state: {
+      ...baseState,
+      showdown: { handId: 'hand-fold', winners: ['human'] },
+      foldedByUserId: { bot: true }
+    },
+    botSeats: [{ userId: 'bot', seatNo: 4 }],
+    random: () => 0
+  }), {
+    botUserId: 'bot', botSeatNo: 4, targetSeatNo: 2, reactionKey: 'nice_bluff', handId: 'hand-fold'
+  });
+});
+
+test('settlement classifiers use deterministic seats and authoritative payouts', () => {
+  const state = {
+    phase: 'SETTLED',
+    handId: 'split',
+    bigBlind: 10,
+    handSettlement: { handId: 'split', payouts: { 'bot-6': 199, 'bot-3': 200 } },
+    showdown: {
+      handId: 'split',
+      winners: ['bot-6', 'bot-3'],
+      handsByUserId: { 'bot-6': { category: 2 }, 'bot-3': { category: 2 }, human: { category: 1 } }
+    },
+    handSeats: [
+      { userId: 'bot-6', seatNo: 6 },
+      { userId: 'bot-3', seatNo: 3 },
+      { userId: 'human', seatNo: 1 }
+    ],
+    foldedByUserId: {}, leftTableByUserId: {}, sitOutByUserId: {}
+  };
+  assert.deepEqual(classifySettlementReaction({
+    state,
+    botSeats: [{ userId: 'bot-6', seatNo: 6 }, { userId: 'bot-3', seatNo: 3 }],
+    random: () => 0.99
+  }), { botUserId: 'bot-3', botSeatNo: 3, reactionKey: 'wow', handId: 'split' });
+
+  const shownHandState = {
+    ...state,
+    handSettlement: { handId: 'split', payouts: { human: 50 } },
+    showdown: {
+      handId: 'split',
+      winners: ['human'],
+      handsByUserId: { human: { category: 4 }, 'bot-3': { category: 2 } }
+    }
+  };
+  assert.deepEqual(classifySettlementReaction({
+    state: shownHandState,
+    botSeats: [{ userId: 'bot-3', seatNo: 3 }],
+    random: () => 0
+  }), { botUserId: 'bot-3', botSeatNo: 3, targetSeatNo: 1, reactionKey: 'nice_hand', handId: 'split' });
+
+  assert.deepEqual(classifySettlementReaction({
+    state: { ...shownHandState, showdown: { handId: 'split', winners: ['human'] } },
+    botSeats: [{ userId: 'bot-3', seatNo: 3 }],
+    random: () => 0
+  }), { botUserId: 'bot-3', botSeatNo: 3, targetSeatNo: 1, reactionKey: 'well_played', handId: 'split' });
+});
+
+test('directed classifier supports bot-only hurry up copy without exposing intent inference', () => {
+  assert.deepEqual(classifyDirectedBotReaction({
+    botSeats: [{ userId: 'bot', seatNo: 3 }],
+    excludedUserId: 'human',
+    targetSeatNo: 2,
+    reactionKeys: ['hurry_up'],
+    probability: 0.25,
+    random: () => 0
+  }), { botUserId: 'bot', botSeatNo: 3, targetSeatNo: 2, reactionKey: 'hurry_up' });
+
+  assert.equal(classifyDirectedBotReaction({
+    botSeats: [{ userId: 'bot', seatNo: 3 }],
+    excludedUserId: 'human',
+    targetSeatNo: 2,
+    reactionKeys: ['thanks'],
+    probability: 0.5,
+    random: () => 0
+  }).reactionKey, 'thanks');
+  assert.equal(classifyDirectedBotReaction({
+    botSeats: [{ userId: 'bot', seatNo: 3 }],
+    excludedUserId: 'human',
+    targetSeatNo: 2,
+    reactionKeys: ['hello', 'good_luck'],
+    probability: 0.35,
+    random: (() => { const values = [0, 0.9]; return () => values.shift(); })()
+  }).reactionKey, 'good_luck');
 });
