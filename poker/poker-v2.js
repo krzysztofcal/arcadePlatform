@@ -2778,8 +2778,8 @@
         betStack.style.top = chipAnchor.bet.y + '%';
         els.seatChipLayer.appendChild(betStack);
       }
-      var stackAmount = Math.max(0, Number(resolveStack(seat.userId)) || 0);
-      if (stackAmount > 0){
+      var stackAmount = resolveStack(seat.userId);
+      if (stackAmount != null){
         var seatStack = createChipStackVisual(stackAmount, isCurrentUserSeat(seat) ? 'hero-seat-stack' : 'seat-stack');
         appendSeatStackAmountLabel(seatStack, stackAmount);
         seatStack.style.left = chipAnchor.stack.x + '%';
