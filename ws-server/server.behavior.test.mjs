@@ -13,6 +13,7 @@ import { makeBotUserId } from "../shared/poker-domain/bots.mjs";
 import { dealHoleCards, deriveDeck, toCardCodes } from "./poker/shared/poker-primitives.mjs";
 import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
 import { createConnState } from "./poker/runtime/conn-state.mjs";
+import { createReactionTimers, shouldObservePersistedReactionMutation } from "./poker/runtime/reaction-timers.mjs";
 import {
   acknowledgeTransportEvidence,
   beginTransportTermination,
@@ -46,6 +47,76 @@ const FIXED_RANDOM_BOT_AUTOPLAY_ADAPTER_URL = new URL(
   "./poker/runtime/accepted-bot-autoplay-adapter.fixed-random.fixture.mjs",
   import.meta.url
 ).href;
+
+test("reaction timers are delayed, single-pending, revalidated, replay-safe, and cleanup-safe", () => {
+  const scheduled = [];
+  const timers = createReactionTimers({
+    setTimer(callback, delayMs) {
+      const timer = { callback, delayMs, cancelled: false, unref() {} };
+      scheduled.push(timer);
+      return timer;
+    },
+    clearTimer(timer) { timer.cancelled = true; }
+  });
+  const emitted = [];
+  let classifierCalls = 0;
+  let current = { handId: "hand-1", botUserId: "bot-1", botSeatNo: 3 };
+  const maybeSchedule = () => {
+    if (timers.hasPendingReaction("table-1")) return false;
+    classifierCalls += 1;
+    const expected = { ...current };
+    return timers.scheduleReaction({
+      tableId: "table-1",
+      delayMs: 300,
+      validate: () => current.handId === expected.handId
+        && current.botUserId === expected.botUserId
+        && current.botSeatNo === expected.botSeatNo,
+      emit: () => emitted.push(expected)
+    });
+  };
+
+  assert.equal(maybeSchedule(), true);
+  assert.deepEqual(emitted, [], "reaction must not emit synchronously");
+  assert.equal(maybeSchedule(), false);
+  assert.equal(classifierCalls, 1, "pending must be checked before classification or throttle reservation");
+  scheduled[0].callback();
+  assert.deepEqual(emitted, [{ handId: "hand-1", botUserId: "bot-1", botSeatNo: 3 }]);
+
+  assert.equal(maybeSchedule(), true);
+  current = { ...current, handId: "hand-2" };
+  scheduled[1].callback();
+  assert.equal(emitted.length, 1, "stale hand/seat ownership must suppress emission");
+
+  const turn = { handId: "hand-2", userId: "human-1", startedAt: 100, deadlineAt: 1_100 };
+  const originalDeadline = turn.deadlineAt;
+  let hurryUpCount = 0;
+  timers.scheduleTurnObserver({
+    tableId: "table-1",
+    delayMs: 800,
+    validate: () => turn.handId === "hand-2" && turn.userId === "human-1"
+      && turn.startedAt === 100 && turn.deadlineAt === 1_100,
+    onDue: () => { hurryUpCount += 1; }
+  });
+  turn.userId = "human-2";
+  scheduled[2].callback();
+  assert.equal(hurryUpCount, 0);
+  assert.equal(turn.deadlineAt, originalDeadline, "turn observer must never mutate gameplay timing");
+
+  timers.scheduleReaction({ tableId: "table-1", delayMs: 300, validate: () => true, emit: () => emitted.push("late") });
+  timers.scheduleTurnObserver({ tableId: "table-1", delayMs: 800, validate: () => true, onDue: () => { hurryUpCount += 1; } });
+  const reactionTimer = scheduled[3];
+  const turnTimer = scheduled[4];
+  timers.clearTable("table-1");
+  assert.equal(reactionTimer.cancelled, true);
+  assert.equal(turnTimer.cancelled, true);
+  reactionTimer.callback();
+  turnTimer.callback();
+  assert.equal(emitted.includes("late"), false);
+  assert.equal(hurryUpCount, 0);
+
+  assert.equal(shouldObservePersistedReactionMutation({ ok: true, outcome: "committed" }), true);
+  assert.equal(shouldObservePersistedReactionMutation({ ok: true, outcome: "durable_replay" }), false);
+});
 
 test("continuous bot profile validation accepts desired counts up to 100", () => {
   const valid = normalizeContinuousBotProfile({

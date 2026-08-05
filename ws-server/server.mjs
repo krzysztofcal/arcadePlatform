@@ -22,6 +22,7 @@ import { adaptPersistedBootstrap } from "./poker/bootstrap/persisted-bootstrap-a
 import { createSessionStore } from "./poker/runtime/session-store.mjs";
 import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
 import { createBotReactionOverrideStore } from "./poker/runtime/bot-reaction-override.mjs";
+import { createReactionTimers, shouldObservePersistedReactionMutation } from "./poker/runtime/reaction-timers.mjs";
 import {
   createNonRetryableTerminalJanitorSuppression,
   evaluateTableHealth,
@@ -370,8 +371,7 @@ let beginSqlWsLoaderPromise = null;
 const timeoutFailureTrackerByTableId = new Map();
 const settledRolloverTimerByTableId = new Map();
 const settlementRevealDeadlineByTableId = new Map();
-const pendingBotReactionByTableId = new Map();
-const humanTurnReactionTimerByTableId = new Map();
+const reactionTimers = createReactionTimers();
 const evaluatedSettlementReactionHandByTableId = new Map();
 const TURN_TIMEOUT_FATAL_PREFIXES = ["showdown_"];
 const TURN_TIMEOUT_FATAL_REASONS = new Set(["timeout_apply_failed"]);
@@ -468,14 +468,8 @@ function seatOwnerForTable(tableId, seatNo) {
   return typeof member?.userId === "string" ? member.userId : null;
 }
 
-function clearPendingBotReaction(tableId) {
-  const pending = pendingBotReactionByTableId.get(tableId);
-  if (pending?.timer) clearTimeout(pending.timer);
-  pendingBotReactionByTableId.delete(tableId);
-}
-
 function scheduleBotReactionCandidate(tableId, createCandidate, { handId = null, targetUserId = null } = {}) {
-  if (pendingBotReactionByTableId.has(tableId)) return false;
+  if (reactionTimers.hasPendingReaction(tableId)) return false;
   const candidate = createCandidate();
   if (!candidate) return false;
   const reserved = tryReserveBotReaction({
@@ -490,39 +484,27 @@ function scheduleBotReactionCandidate(tableId, createCandidate, { handId = null,
   if (!reserved) return false;
   const expectedTargetUserId = targetUserId
     || (Number.isInteger(candidate.targetSeatNo) ? seatOwnerForTable(tableId, candidate.targetSeatNo) : null);
-  const timer = setTimeout(() => {
-    const pending = pendingBotReactionByTableId.get(tableId);
-    if (!pending || pending.timer !== timer) return;
-    pendingBotReactionByTableId.delete(tableId);
+  return reactionTimers.scheduleReaction({ tableId, delayMs: reserved.delayMs, validate: () => {
     if (tableManager.isTableClosed(tableId)) return;
     if (tableManager.isBotUser(tableId, candidate.botUserId) !== true) return;
     if (seatOwnerForTable(tableId, candidate.botSeatNo) !== candidate.botUserId) return;
     const state = tableManager.privatePokerStateForAudit?.(tableId);
     if (handId && state?.handId !== handId) return;
     if (expectedTargetUserId && seatOwnerForTable(tableId, candidate.targetSeatNo) !== expectedTargetUserId) return;
-    broadcastTableReaction(tableId, reserved);
-  }, reserved.delayMs);
-  timer.unref?.();
-  pendingBotReactionByTableId.set(tableId, { timer });
-  return true;
+    return true;
+  }, emit: () => broadcastTableReaction(tableId, reserved) });
 }
 
 function scheduleReservedBotReaction(tableId, candidate, { botUserId, handId = null } = {}) {
-  if (!candidate || pendingBotReactionByTableId.has(tableId)) return false;
-  const timer = setTimeout(() => {
-    const pending = pendingBotReactionByTableId.get(tableId);
-    if (!pending || pending.timer !== timer) return;
-    pendingBotReactionByTableId.delete(tableId);
+  if (!candidate || reactionTimers.hasPendingReaction(tableId)) return false;
+  return reactionTimers.scheduleReaction({ tableId, delayMs: candidate.delayMs, validate: () => {
     if (tableManager.isTableClosed(tableId)) return;
     if (tableManager.isBotUser(tableId, botUserId) !== true) return;
     if (seatOwnerForTable(tableId, candidate.seatNo) !== botUserId) return;
     const state = tableManager.privatePokerStateForAudit?.(tableId);
     if (handId && state?.handId !== handId) return;
-    broadcastTableReaction(tableId, candidate);
-  }, candidate.delayMs);
-  timer.unref?.();
-  pendingBotReactionByTableId.set(tableId, { timer });
-  return true;
+    return true;
+  }, emit: () => broadcastTableReaction(tableId, candidate) });
 }
 
 function buildDetachedReactionContext(state) {
@@ -586,9 +568,7 @@ function observeFreshPokerMutation({ tableId, acceptedActionAudit, nextState }) 
 }
 
 function clearHumanTurnReactionTimer(tableId) {
-  const pending = humanTurnReactionTimerByTableId.get(tableId);
-  if (pending?.timer) clearTimeout(pending.timer);
-  humanTurnReactionTimerByTableId.delete(tableId);
+  reactionTimers.clearTurnObserver(tableId);
 }
 
 function syncHumanTurnReactionTimer(tableId, state) {
@@ -606,13 +586,12 @@ function syncHumanTurnReactionTimer(tableId, state) {
     ? state.handSeats.find((seat) => seat?.userId === turnUserId)
     : null;
   if (!Number.isInteger(targetSeat?.seatNo)) return;
-  const timer = setTimeout(() => {
-    const pending = humanTurnReactionTimerByTableId.get(tableId);
-    if (!pending || pending.timer !== timer) return;
-    humanTurnReactionTimerByTableId.delete(tableId);
+  reactionTimers.scheduleTurnObserver({ tableId, delayMs, validate: () => {
     const current = tableManager.privatePokerStateForAudit?.(tableId);
     if (current?.handId !== handId || current?.turnUserId !== turnUserId) return;
     if (Number(current?.turnStartedAt) !== turnStartedAt || Number(current?.turnDeadlineAt) !== turnDeadlineAt) return;
+    return true;
+  }, onDue: () => {
     scheduleBotReactionCandidate(tableId, () => classifyDirectedBotReaction({
       botSeats: botSeatsForTable(tableId),
       excludedUserId: turnUserId,
@@ -620,9 +599,7 @@ function syncHumanTurnReactionTimer(tableId, state) {
       reactionKeys: ["hurry_up"],
       probability: 0.25
     }), { handId, targetUserId: turnUserId });
-  }, delayMs);
-  timer.unref?.();
-  humanTurnReactionTimerByTableId.set(tableId, { timer });
+  } });
 }
 
 async function loadAcceptedBotAutoplayExecutor() {
@@ -649,7 +626,7 @@ async function loadAcceptedBotAutoplayExecutor() {
           onBotStepPersisted: async ({ tableId, botTurnUserId, botAction }) => {
             broadcastStateSnapshots(tableId);
             if (tableManager.isBotUser(tableId, botTurnUserId) !== true) return;
-            if (pendingBotReactionByTableId.has(tableId)) return;
+            if (reactionTimers.hasPendingReaction(tableId)) return;
             const botSnapshot = tableManager.tableSnapshot(tableId, botTurnUserId);
             const reaction = tryCreateBotReaction({
               tableId,
@@ -1680,7 +1657,7 @@ async function persistMutatedState({
   if (!deferRuntimeVersionUpdate && persisted.outcome !== "durable_replay") {
     tableManager.setPersistedStateVersion(tableId, persisted.newVersion);
   }
-  if (persisted.outcome !== "durable_replay") {
+  if (shouldObservePersistedReactionMutation(persisted)) {
     try {
       const reactionContext = buildDetachedReactionContext(privateStateForHoleCards);
       const reactionAction = acceptedActionAudit ? {
@@ -1817,8 +1794,7 @@ function releaseTableRuntimeResources(tableId) {
   clearTurnTimeoutFailureTracker(tableId);
   clearSnapshotCacheForTable(tableId);
   clearPersistedSeatTouchForTable(tableId);
-  clearPendingBotReaction(tableId);
-  clearHumanTurnReactionTimer(tableId);
+  reactionTimers.clearTable(tableId);
   evaluatedSettlementReactionHandByTableId.delete(tableId);
   scheduledObservedBotTurnKeys.delete(tableId);
   suppressedBotTimeoutSafetyFailures.delete(tableId);
