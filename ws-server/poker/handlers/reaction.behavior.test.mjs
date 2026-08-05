@@ -36,6 +36,7 @@ test('human reactions use the closed allowlist and atomically reserve the sender
     'i_was_bluffing',
     'lucky',
     'congrats',
+    'not_this_time',
     'ambient_hmm',
     'ambient_interesting',
     'ambient_lets_see',
@@ -52,11 +53,19 @@ test('human reactions use the closed allowlist and atomically reserve the sender
   ]);
   assert.equal(HUMAN_REACTION_KEYS.includes('hurry_up'), false);
   assert.equal(HUMAN_REACTION_KEYS.includes('lucky'), false);
+  assert.equal(HUMAN_REACTION_KEYS.includes('not_this_time'), false);
   assert.deepEqual(evaluateHumanReactionCommand({
     tableId,
     senderUserId: 'human-bot-key',
     senderSeatNo: 6,
     reactionKey: 'hurry_up',
+    nowMs: 1_000
+  }), { ok: false, reason: 'invalid_reaction' });
+  assert.deepEqual(evaluateHumanReactionCommand({
+    tableId,
+    senderUserId: 'human-fold',
+    senderSeatNo: 5,
+    reactionKey: 'not_this_time',
     nowMs: 1_000
   }), { ok: false, reason: 'invalid_reaction' });
 
@@ -287,14 +296,14 @@ test('bot reactions use the real bot action object and independent sender cooldo
     nowMs: 2_001,
     random: () => 0.01
   }), null, 'the same bot must retain its four-second cooldown');
-  assert.equal(tryCreateBotReaction({
+  assert.deepEqual(tryCreateBotReaction({
     tableId,
     botUserId: 'bot-3',
     botSeatNo: 5,
     botAction: { type: 'FOLD' },
     nowMs: 30_000,
-    random: () => 0.01
-  }), null);
+    random: (() => { const values = [0.69, 0, 0]; return () => values.shift(); })()
+  }), { seatNo: 5, reactionKey: 'not_this_time', delayMs: 300 });
   assert.equal(tryCreateBotReaction({
     tableId,
     botUserId: 'bot-4',
@@ -332,8 +341,8 @@ test('contextual classifiers keep raise and fold-win meanings distinct', () => {
   }), null);
   assert.equal(classifyRaiseReaction({
     actorUserId: 'human', actorSeatNo: 2, botSeats: [{ userId: 'bot', seatNo: 4 }],
-    reactionSettings: { enabled: true, frequencyPercent: 1 }, random: () => 0.003
-  }), null, '1% frequency must scale the 20% base chance to 0.2%');
+    reactionSettings: { enabled: true, frequencyPercent: 1 }, random: () => 0.007
+  }), null, '1% frequency must scale the 60% base chance to 0.6%');
 
   const baseState = {
     phase: 'SETTLED',

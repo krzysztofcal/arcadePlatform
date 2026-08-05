@@ -101,6 +101,7 @@
     { key: 'i_was_bluffing', emoji: '😏', label: 'I was bluffing!', humanSelectable: false },
     { key: 'lucky', emoji: '🍀', label: 'Lucky!', humanSelectable: false },
     { key: 'congrats', emoji: '🎉', label: 'Congrats!', humanSelectable: false },
+    { key: 'not_this_time', emoji: '😌', label: 'Not this time.', humanSelectable: false },
     { key: 'ambient_hmm', emoji: '💭', label: 'Hmm...', humanSelectable: false },
     { key: 'ambient_interesting', emoji: '💭', label: 'Interesting...', humanSelectable: false },
     { key: 'ambient_lets_see', emoji: '💭', label: "Let's see...", humanSelectable: false },

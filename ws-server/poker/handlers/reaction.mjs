@@ -1,5 +1,4 @@
 const HUMAN_REACTION_COOLDOWN_MS = 4_000;
-const BOT_REACTION_PROBABILITY = 0.02;
 const BOT_REACTION_JITTER_MIN_MS = 300;
 const BOT_REACTION_JITTER_MAX_MS = 1_200;
 
@@ -19,6 +18,7 @@ export const REACTION_KEYS = Object.freeze([
   "i_was_bluffing",
   "lucky",
   "congrats",
+  "not_this_time",
   "ambient_hmm",
   "ambient_interesting",
   "ambient_lets_see",
@@ -51,8 +51,10 @@ const REACTION_KEY_SET = new Set(REACTION_KEYS);
 const HUMAN_REACTION_KEY_SET = new Set(HUMAN_REACTION_KEYS);
 const BOT_REACTION_KEYS_BY_ACTION = Object.freeze({
   BET: Object.freeze(["wow", "haha"]),
-  ALL_IN: Object.freeze(["wow", "haha"])
+  ALL_IN: Object.freeze(["wow", "haha"]),
+  FOLD: Object.freeze(["not_this_time"])
 });
+const BOT_REACTION_PROBABILITY_BY_ACTION = Object.freeze({ BET: 0.6, ALL_IN: 0.6, FOLD: 0.7 });
 export const AMBIENT_REACTION_KEYS = Object.freeze([
   "ambient_hmm",
   "ambient_interesting",
@@ -370,7 +372,7 @@ export function tryCreateBotReaction({
     return null;
   }
 
-  if (!samplePasses(random, BOT_REACTION_PROBABILITY, reactionSettings)) {
+  if (!samplePasses(random, BOT_REACTION_PROBABILITY_BY_ACTION[actionType], reactionSettings)) {
     return null;
   }
 
@@ -434,7 +436,7 @@ export function tryReserveBotReaction({
 
 export function classifyRaiseReaction({ actorUserId, actorSeatNo, botSeats, reactionSettings, random = Math.random } = {}) {
   const normalizedActorUserId = normalizeString(actorUserId);
-  if (!normalizedActorUserId || !isPositiveSeatNo(actorSeatNo) || !samplePasses(random, 0.2, reactionSettings)) return null;
+  if (!normalizedActorUserId || !isPositiveSeatNo(actorSeatNo) || !samplePasses(random, 0.6, reactionSettings)) return null;
   const reactor = normalizeBotSeats(botSeats).find((bot) => bot.userId !== normalizedActorUserId);
   return reactor ? {
     botUserId: reactor.userId,
@@ -473,7 +475,7 @@ export function classifyDirectedBotReaction({
 
 export function classifyAmbientReaction({ botSeats, reactionSettings, random = Math.random } = {}) {
   const bots = normalizeBotSeats(botSeats);
-  if (bots.length === 0 || !samplePasses(random, 0.2, reactionSettings)) return null;
+  if (bots.length === 0 || !samplePasses(random, 0.5, reactionSettings)) return null;
   const botSample = Number(random());
   const botIndex = Number.isFinite(botSample) && botSample >= 0 && botSample < 1
     ? Math.floor(botSample * bots.length)
@@ -496,24 +498,24 @@ export function classifySettlementReaction({ state, botSeats, reactionSettings, 
   if (normalFoldWin(state, handSeats, winners)) {
     const winner = winners[0];
     const winningBot = botByUserId.get(winner.userId);
-    if (canBotSpeakAfterSettlement(state, handSeats, winningBot) && samplePasses(random, 0.5, reactionSettings)) {
+    if (canBotSpeakAfterSettlement(state, handSeats, winningBot) && samplePasses(random, 0.75, reactionSettings)) {
       return { botUserId: winningBot.userId, botSeatNo: winningBot.seatNo, reactionKey: "i_was_bluffing", handId };
     }
     const reactor = bots.find((bot) => canBotReactToSettlement(state, handSeats, bot, winners));
-    if (reactor && samplePasses(random, 0.5, reactionSettings)) {
+    if (reactor && samplePasses(random, 0.75, reactionSettings)) {
       return { botUserId: reactor.userId, botSeatNo: reactor.seatNo, targetSeatNo: winner.seatNo, reactionKey: "nice_bluff", handId };
     }
   }
   const comparedHands = state?.showdown?.handsByUserId;
   const luckyTarget = luckyWinner(state, handSeats, winners);
   const luckyReactor = bots.find((bot) => canBotReactToSettlement(state, handSeats, bot, winners));
-  if (luckyTarget && luckyReactor && samplePasses(random, 0.4, reactionSettings)) {
+  if (luckyTarget && luckyReactor && samplePasses(random, 0.7, reactionSettings)) {
     return { botUserId: luckyReactor.userId, botSeatNo: luckyReactor.seatNo, targetSeatNo: luckyTarget.seatNo, reactionKey: "lucky", handId };
   }
   if (comparedHands && typeof comparedHands === "object" && Object.keys(comparedHands).length >= 2) {
     const strongWinner = winners.find((winner) => Number(comparedHands?.[winner.userId]?.category) >= 4);
     const reactor = bots.find((bot) => canBotReactToSettlement(state, handSeats, bot, winners));
-    if (strongWinner && reactor && samplePasses(random, 0.7, reactionSettings)) {
+    if (strongWinner && reactor && samplePasses(random, 0.9, reactionSettings)) {
       return { botUserId: reactor.userId, botSeatNo: reactor.seatNo, targetSeatNo: strongWinner.seatNo, reactionKey: "nice_hand", handId };
     }
   }
@@ -530,7 +532,7 @@ export function classifySettlementReaction({ state, botSeats, reactionSettings, 
   }
   const firstWinner = winners[0];
   const reactor = bots.find((bot) => canBotReactToSettlement(state, handSeats, bot, winners));
-  if (firstWinner && reactor && samplePasses(random, 0.5, reactionSettings)) {
+  if (firstWinner && reactor && samplePasses(random, 0.8, reactionSettings)) {
     const selection = Number(random());
     const reactionKey = Number.isFinite(selection) && selection >= 0.5 && selection < 1 ? "congrats" : "well_played";
     return { botUserId: reactor.userId, botSeatNo: reactor.seatNo, targetSeatNo: firstWinner.seatNo, reactionKey, handId };

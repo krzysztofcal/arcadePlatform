@@ -633,7 +633,7 @@ function syncHumanTurnReactionTimer(tableId, state) {
       excludedUserId: turnUserId,
       targetSeatNo: targetSeat.seatNo,
       reactionKeys: ["hurry_up"],
-      probability: 0.5,
+      probability: 0.8,
       reactionSettings: currentBotReactionSettings()
     }), { handId, targetUserId: turnUserId });
   } });
@@ -4360,7 +4360,7 @@ wss.on("connection", (ws) => {
             excludedUserId: senderUserId,
             targetSeatNo: senderSeatNo,
             reactionKeys: ["thanks"],
-            probability: 0.5,
+            probability: 0.8,
             reactionSettings: currentBotReactionSettings()
           }),
           { targetUserId: senderUserId }
@@ -4528,7 +4528,7 @@ wss.on("connection", (ws) => {
             excludedUserId: joinResult.userId,
             targetSeatNo: joinResult.seatNo,
             reactionKeys: ["hello", "good_luck"],
-            probability: 0.6,
+            probability: 1,
             reactionSettings: currentBotReactionSettings()
           }),
           { targetUserId: joinResult.userId }
