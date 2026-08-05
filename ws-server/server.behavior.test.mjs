@@ -5546,7 +5546,7 @@ test("active replacement: seated act accepted and observer act rejected under ob
 
 
 
-test("fresh persisted raise schedules one delayed contextual reaction and durable replay schedules none", async () => {
+test("fresh persisted raise schedules one delayed contextual reaction and duplicate request schedules none", async () => {
   const secret = "reaction-integration-secret";
   const tableId = "table_reaction_integration";
   const humanUserId = "reaction_human";
@@ -5600,7 +5600,7 @@ test("fresh persisted raise schedules one delayed contextual reaction and durabl
     }
   });
   const randomModule = await writeTestModule("Math.random = () => 0;", "reaction-random-zero.mjs");
-  const { port, child } = await createServer({
+  const serverOptions = {
     nodeArgs: ["--import", randomModule.filePath],
     env: {
       WS_AUTH_REQUIRED: "1",
@@ -5609,10 +5609,11 @@ test("fresh persisted raise schedules one delayed contextual reaction and durabl
       WS_TIMEOUT_SWEEP_MS: "60000",
       WS_ZOMBIE_TABLE_SWEEP_MS: "60000"
     }
-  });
+  };
+  let serverRuntime = await createServer(serverOptions);
   try {
-    await waitForListening(child, 5000);
-    const ws = await connectClient(port);
+    await waitForListening(serverRuntime.child, 5000);
+    const ws = await connectClient(serverRuntime.port);
     await hello(ws);
     await auth(ws, makeHs256Jwt({ secret, sub: humanUserId }), "auth-reaction-integration");
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-reaction-integration", ts: "2026-08-05T18:00:00Z", payload: { tableId } });
@@ -5632,7 +5633,8 @@ test("fresh persisted raise schedules one delayed contextual reaction and durabl
     assert.deepEqual(reaction.payload, { seatNo: 2, targetSeatNo: 1, reactionKey: "you_are_bluffing" });
 
     sendFrame(ws, raiseFrame);
-    assert.equal((await nextCommandResultForRequest(ws, raiseFrame.requestId)).payload.status, "accepted");
+    const duplicateResult = await nextCommandResultForRequest(ws, raiseFrame.requestId);
+    assert.equal(duplicateResult.payload.status, "accepted", JSON.stringify(duplicateResult.payload));
     await assert.rejects(
       nextMessageMatching(ws, (frame) => frame?.type === "table_reaction", 500),
       /Timed out waiting for matching websocket message/
@@ -5644,8 +5646,8 @@ test("fresh persisted raise schedules one delayed contextual reaction and durabl
       "the persistence observer must leave the authoritative turn deadline unchanged");
     ws.close();
   } finally {
-    child.kill("SIGTERM");
-    await waitForExit(child);
+    if (serverRuntime.child.exitCode === null) serverRuntime.child.kill("SIGTERM");
+    await waitForExit(serverRuntime.child);
     await fs.rm(dir, { recursive: true, force: true });
     await fs.rm(randomModule.dir, { recursive: true, force: true });
   }
