@@ -354,6 +354,95 @@ test('poker ws client treats the join timeout as soft and accepts a late result'
   assert.equal((await joinPromise).seatNo, 4);
 });
 
+test('poker ws client treats rebuy timeout and request_pending as resumable', async () => {
+  let commandTimeout = null;
+  const h = loadClientHarness({
+    setTimeout(fn, delay){
+      if (delay === 12_000) commandTimeout = fn;
+      return 1;
+    },
+    clearTimeout(){}
+  });
+  h.client.start();
+  const ws = h.FakeWebSocket.instances[0];
+  ws.open();
+  ws.message({ type: 'helloAck', payload: { version: '1.0' } });
+  await Promise.resolve();
+  ws.message({ type: 'authOk', payload: { roomId: 'table_test_1' } });
+
+  const rebuyPromise = h.client.sendRebuy({ tableId: 'table_test_1', amount: 100 }, 'rebuy_soft_timeout');
+  commandTimeout();
+  let settled = false;
+  rebuyPromise.then(() => { settled = true; }, () => { settled = true; });
+  await Promise.resolve();
+  assert.equal(settled, false);
+  assert.equal(h.sentFrames.some((frame) => frame.type === 'table_state_sub' && frame.payload.view === 'snapshot'), true);
+
+  ws.message({
+    type: 'commandResult',
+    requestId: 'rebuy_soft_timeout',
+    payload: { requestId: 'rebuy_soft_timeout', status: 'accepted' }
+  });
+  assert.equal((await rebuyPromise).requestId, 'rebuy_soft_timeout');
+
+  const pendingVariants = [
+    { type: 'commandResult', requestId: 'rebuy_pending_result', payload: { requestId: 'rebuy_pending_result', status: 'pending', reason: 'request_pending' } },
+    { type: 'commandResult', requestId: 'rebuy_pending_rejected', payload: { requestId: 'rebuy_pending_rejected', status: 'rejected', reason: 'request_pending' } },
+    { type: 'error', requestId: 'rebuy_pending_error', payload: { requestId: 'rebuy_pending_error', code: 'request_pending' } }
+  ];
+  for (const frame of pendingVariants){
+    const requestId = frame.requestId;
+    const promise = h.client.sendRebuy({ tableId: 'table_test_1', amount: 100 }, requestId);
+    let variantSettled = false;
+    promise.then(() => { variantSettled = true; }, () => { variantSettled = true; });
+    ws.message(frame);
+    await Promise.resolve();
+    assert.equal(variantSettled, false, requestId);
+    ws.message({ type: 'commandResult', requestId, payload: { requestId, status: 'accepted' } });
+    assert.equal((await promise).requestId, requestId);
+  }
+});
+
+test('poker ws client retries the same rebuy request id once after reconnect', async () => {
+  const h = loadClientHarness({
+    clientOptions: { reconnectBaseMs: 5, reconnectMaxMs: 5 }
+  });
+  h.client.start();
+  const ws1 = h.FakeWebSocket.instances[0];
+  ws1.open();
+  ws1.message({ type: 'helloAck', payload: { version: '1.0' } });
+  await Promise.resolve();
+  ws1.message({ type: 'authOk', payload: { roomId: 'table_test_1' } });
+
+  const rebuyPromise = h.client.sendRebuy({ tableId: 'table_test_1', amount: 100 }, 'rebuy_reconnect_1');
+  ws1.close(1006, 'abnormal_close');
+  await new Promise((resolve) => setTimeout(resolve, 12));
+  const ws2 = h.FakeWebSocket.instances[1];
+  ws2.open();
+  ws2.message({ type: 'helloAck', payload: { version: '1.0' } });
+  await Promise.resolve();
+  ws2.message({ type: 'authOk', payload: { roomId: 'table_test_1' } });
+
+  const rebuyFrames = h.sentFrames.filter((frame) => frame.type === 'rebuy');
+  assert.equal(rebuyFrames.length, 2);
+  assert.deepEqual(rebuyFrames.map((frame) => frame.requestId), ['rebuy_reconnect_1', 'rebuy_reconnect_1']);
+  ws2.message({ type: 'commandResult', requestId: 'rebuy_reconnect_1', payload: { requestId: 'rebuy_reconnect_1', status: 'accepted' } });
+  assert.equal((await rebuyPromise).requestId, 'rebuy_reconnect_1');
+});
+
+test('poker ws client rejects an in-memory rebuy when reconnect is not possible', async () => {
+  const h = loadClientHarness({ clientOptions: { autoReconnect: false } });
+  h.client.start();
+  const ws = h.FakeWebSocket.instances[0];
+  ws.open();
+  ws.message({ type: 'helloAck', payload: { version: '1.0' } });
+  await Promise.resolve();
+  ws.message({ type: 'authOk', payload: { roomId: 'table_test_1' } });
+  const rebuyPromise = h.client.sendRebuy({ tableId: 'table_test_1', amount: 100 }, 'rebuy_close_1');
+  ws.close(1000, 'client_shutdown');
+  await assert.rejects(rebuyPromise, (err) => err && err.code === 'ws_closed');
+});
+
 test('poker ws client can queue leave without waiting for commandResult', async () => {
   const h = loadClientHarness();
   h.client.start();

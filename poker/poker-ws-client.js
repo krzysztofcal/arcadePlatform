@@ -125,12 +125,16 @@
       return rid;
     }
 
-    function markJoinPending(entry, reason){
-      if (!entry || entry.type !== 'join') return;
+    function isResumableCommand(entry){
+      return !!entry && (entry.type === 'join' || entry.type === 'rebuy');
+    }
+
+    function markResumablePending(entry, reason){
+      if (!isResumableCommand(entry)) return;
       if (entry.timer) clearTimeout(entry.timer);
       entry.timer = null;
       entry.softPending = true;
-      emitStatus('join_pending', {
+      emitStatus(entry.type === 'join' ? 'join_pending' : 'rebuy_pending', {
         requestId: entry.requestId,
         reason: reason || 'pending'
       });
@@ -141,8 +145,8 @@
       if (entry.timer) clearTimeout(entry.timer);
       entry.timer = setTimeout(function(){
         if (!pending.has(entry.requestId)) return;
-        if (entry.type === 'join'){
-          markJoinPending(entry, 'soft_timeout');
+        if (isResumableCommand(entry)){
+          markResumablePending(entry, 'soft_timeout');
           requestGameplaySnapshot();
           return;
         }
@@ -152,21 +156,21 @@
     }
 
     function rejectAllPending(code, options){
-      var preserveJoins = !!(options && options.preserveJoins);
+      var preserveResumable = !!(options && (options.preserveResumable || options.preserveJoins));
       pending.forEach(function(entry){
-        if (preserveJoins && entry.type === 'join'){
-          markJoinPending(entry, code || 'ws_closed');
+        if (preserveResumable && isResumableCommand(entry)){
+          markResumablePending(entry, code || 'ws_closed');
           return;
         }
         if (entry.timer) clearTimeout(entry.timer);
         entry.reject(createError(code || 'ws_closed'));
       });
-      if (!preserveJoins) {
+      if (!preserveResumable) {
         pending.clear();
         return;
       }
       pending.forEach(function(entry, requestId){
-        if (entry.type !== 'join') pending.delete(requestId);
+        if (!isResumableCommand(entry)) pending.delete(requestId);
       });
     }
 
@@ -189,15 +193,15 @@
       });
     }
 
-    function retryPendingJoins(){
+    function retryPendingResumableCommands(){
       if (!authOk || !ws || ws.readyState !== 1) return;
       pending.forEach(function(entry){
-        if (entry.type !== 'join' || !entry.softPending) return;
-        var retriedRequestId = send('join', entry.payload || {}, entry.requestId);
+        if (!isResumableCommand(entry) || !entry.softPending) return;
+        var retriedRequestId = send(entry.type, entry.payload || {}, entry.requestId);
         if (!retriedRequestId) return;
         entry.softPending = false;
         armCommandTimer(entry);
-        emitStatus('join_retry', { requestId: entry.requestId });
+        emitStatus(entry.type === 'join' ? 'join_retry' : 'rebuy_retry', { requestId: entry.requestId });
       });
     }
 
@@ -316,8 +320,9 @@
       var rid = payload.requestId || frame.requestId || null;
       if (!rid || !pending.has(rid)) return;
       var entry = pending.get(rid);
-      if (entry.type === 'join' && payload.status === 'pending') {
-        markJoinPending(entry, payload.reason || 'server_recovery_pending');
+      var requestPending = payload.reason === 'request_pending' || payload.code === 'request_pending';
+      if (isResumableCommand(entry) && (payload.status === 'pending' || requestPending)) {
+        markResumablePending(entry, payload.reason || 'server_recovery_pending');
         requestGameplaySnapshot();
         return;
       }
@@ -344,7 +349,7 @@
         mintAndAuth().catch(function(err){ var code = safeErrorCode(err); log('poker_ws_auth_error', { tableId: tableId, code: code }); emitStatus('failed', { stage: 'auth', code: code }); emitProtocolError(code, 'auth_failed'); destroy(); });
         return;
       }
-      if (frame.type === 'authOk') { authOk = true; reconnectAttempt = 0; emitStatus('auth_ok', { roomId: frame.payload && frame.payload.roomId ? frame.payload.roomId : null }); requestLiveState(); retryPendingJoins(); return; }
+      if (frame.type === 'authOk') { authOk = true; reconnectAttempt = 0; emitStatus('auth_ok', { roomId: frame.payload && frame.payload.roomId ? frame.payload.roomId : null }); requestLiveState(); retryPendingResumableCommands(); return; }
       if (frame.type === 'lobby_snapshot') {
         var initialLobby = !initialLobbySnapshotDelivered;
         initialLobbySnapshotDelivered = true;
@@ -383,18 +388,22 @@
       }
       if (frame.type === 'error') {
         var rid = frame.requestId || (frame.payload && frame.payload.requestId) || null;
+        var code = frame.payload && frame.payload.code ? frame.payload.code : 'ws_error';
         var commandErrorHandled = false;
         if (rid && pending.has(rid)) {
           var entry = pending.get(rid);
           if (entry.type === 'join') {
-            markJoinPending(entry, frame.payload && frame.payload.code ? frame.payload.code : 'ws_error');
+            markResumablePending(entry, code);
+            commandErrorHandled = true;
+          } else if (entry.type === 'rebuy' && code === 'request_pending') {
+            markResumablePending(entry, code);
+            requestGameplaySnapshot();
             commandErrorHandled = true;
           } else {
-            pending.delete(rid); clearTimeout(entry.timer); entry.reject(createError(frame.payload && frame.payload.code ? frame.payload.code : 'ws_error'));
+            pending.delete(rid); clearTimeout(entry.timer); entry.reject(createError(code));
             commandErrorHandled = true;
           }
         }
-        var code = frame.payload && frame.payload.code ? frame.payload.code : 'ws_error';
         if (commandErrorHandled) {
           emitStatus('command_error', { code: code, requestId: rid });
           return;
@@ -435,11 +444,12 @@
         authOk = false;
         connecting = false;
         clearHeartbeat();
-        rejectAllPending('ws_closed', { preserveJoins: true });
+        var willReconnect = shouldAutoReconnect(code);
+        rejectAllPending('ws_closed', { preserveResumable: willReconnect });
         log('poker_ws_close', { tableId: tableId, readyState: safeReadyState(ws), code: code, reason: sanitizeText(evt && evt.reason), wasClean: !!(evt && evt.wasClean) });
         emitStatus('closed', { code: code });
         ws = null;
-        if (shouldAutoReconnect(code)) {
+        if (willReconnect) {
           scheduleReconnect(code);
           return;
         }
@@ -462,7 +472,7 @@
       authOk = false;
       clearHeartbeat();
       clearReconnect();
-      rejectAllPending('ws_closed', { preserveJoins: true });
+      rejectAllPending('ws_closed', { preserveResumable: false });
       if (ws && ws.readyState <= 1){ try { ws.close(1000, 'client_shutdown'); } catch (_err){} }
       ws = null;
     }

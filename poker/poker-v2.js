@@ -193,7 +193,7 @@
   var bootReady = false;
   var queuedPreaction = null;
   var queuedPreactionInFlight = false;
-  var rebuyInFlight = false;
+  var rebuyOperation = null;
   var rebuyPanelDismissed = false;
   var rebuyBalanceLoading = false;
   var stickyWinnerReveal = {
@@ -1597,6 +1597,135 @@
   function pendingJoinStorageKey(){
     if (!state.currentUserId || !state.tableId) return null;
     return 'poker:pendingJoin:' + String(state.currentUserId) + ':' + String(state.tableId);
+  }
+
+  function buildRebuyRequestId(){
+    return 'rebuy_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+  }
+
+  function pendingRebuyStorageKey(){
+    if (!state.currentUserId || !state.tableId) return null;
+    return 'poker:pendingRebuy:' + String(state.currentUserId) + ':' + String(state.tableId);
+  }
+
+  function persistPendingRebuy(){
+    var key = pendingRebuyStorageKey();
+    if (!key || !rebuyOperation || !rebuyOperation.requestId || !rebuyOperation.payload) return;
+    try {
+      if (window.sessionStorage){
+        window.sessionStorage.setItem(key, JSON.stringify({
+          requestId: rebuyOperation.requestId,
+          tableId: rebuyOperation.tableId,
+          userId: rebuyOperation.userId,
+          payload: rebuyOperation.payload,
+          phase: rebuyOperation.phase
+        }));
+      }
+    } catch (_err){}
+  }
+
+  function clearPendingRebuyStorage(){
+    var key = pendingRebuyStorageKey();
+    if (!key) return;
+    try { if (window.sessionStorage) window.sessionStorage.removeItem(key); } catch (_err){}
+  }
+
+  function clearRebuyOperation(){
+    rebuyOperation = null;
+    clearPendingRebuyStorage();
+  }
+
+  function loadPendingRebuy(){
+    var key = pendingRebuyStorageKey();
+    if (!key) return null;
+    try {
+      var raw = window.sessionStorage ? window.sessionStorage.getItem(key) : null;
+      var parsed = raw ? JSON.parse(raw) : null;
+      if (!parsed || parsed.tableId !== state.tableId || parsed.userId !== state.currentUserId
+        || typeof parsed.requestId !== 'string' || !parsed.requestId || !isObject(parsed.payload)){
+        if (raw && window.sessionStorage) window.sessionStorage.removeItem(key);
+        return null;
+      }
+      return {
+        phase: parsed.phase === 'error' ? 'error' : 'pending',
+        resumeAttempted: false,
+        requestId: parsed.requestId,
+        tableId: parsed.tableId,
+        userId: parsed.userId,
+        payload: parsed.payload
+      };
+    } catch (_err){
+      return null;
+    }
+  }
+
+  function rebuyErrorCode(error){
+    return error && (error.code || error.message) ? String(error.code || error.message) : 'rebuy_failed';
+  }
+
+  function isDefinitiveRebuyRejection(code){
+    return ['insufficient_chips', 'invalid_rebuy_amount', 'table_not_found', 'table_not_open',
+      'seat_not_active', 'rebuy_not_allowed', 'rebuy_not_available'].indexOf(code) >= 0;
+  }
+
+  function sendRebuyOperation(){
+    if (!rebuyOperation || rebuyOperation.phase !== 'pending') return Promise.resolve({ ok: true, pending: true });
+    var operation = rebuyOperation;
+    return sendCommand('sendRebuy', operation.payload, operation.requestId).then(function(result){
+      if (rebuyOperation !== operation) return result;
+      clearRebuyOperation();
+      rebuyPanelDismissed = true;
+      state.statusText = 'Buy-in accepted';
+      render();
+      return result;
+    }).catch(function(error){
+      if (rebuyOperation !== operation) return null;
+      var code = rebuyErrorCode(error);
+      if (code === 'ws_closed' && operation.preserveOnTechnicalRestart === true){
+        operation.preserveOnTechnicalRestart = false;
+        operation.phase = 'pending';
+        persistPendingRebuy();
+        renderRebuyPanel();
+        return null;
+      }
+      if (isDefinitiveRebuyRejection(code)){
+        clearRebuyOperation();
+        rebuyPanelDismissed = false;
+      } else {
+        operation.phase = 'error';
+        persistPendingRebuy();
+      }
+      if (els.rebuyAccountLink) els.rebuyAccountLink.hidden = code !== 'insufficient_chips';
+      setError(code === 'insufficient_chips' ? 'Not enough CH for a 100 CH buy-in' : code);
+      render();
+      return null;
+    });
+  }
+
+  function reconcileRebuyOperationFromSnapshot(authoritativeSnapshot){
+    if (!authoritativeSnapshot || !state.currentUserId || !state.tableId || !Number.isInteger(state.youSeat) || !state.playerState) return false;
+    if (!rebuyOperation) rebuyOperation = loadPendingRebuy();
+    if (!rebuyOperation) return false;
+    if (rebuyOperation.tableId !== state.tableId || rebuyOperation.userId !== state.currentUserId){
+      clearRebuyOperation();
+      return false;
+    }
+    var stack = Number(state.playerState.stack);
+    var status = state.playerState.status;
+    var funded = Number.isFinite(stack) && stack > 0 && state.playerState.canRebuy !== true
+      && (status === 'WAITING_NEXT_HAND' || status === 'ACTIVE');
+    if (funded){
+      clearRebuyOperation();
+      rebuyPanelDismissed = true;
+      return true;
+    }
+    if (rebuyOperation.phase === 'pending' && rebuyOperation.resumeAttempted !== true
+      && status === 'OUT_OF_CHIPS' && stack === 0 && state.playerState.canRebuy === true){
+      rebuyOperation.resumeAttempted = true;
+      persistPendingRebuy();
+      void sendRebuyOperation();
+    }
+    return true;
   }
 
   function persistPendingJoin(){
@@ -3215,10 +3344,11 @@
     if (els.rebuyTitle) els.rebuyTitle.textContent = waiting ? 'Buy-in confirmed' : 'Out of chips';
     if (els.rebuyCopy) els.rebuyCopy.textContent = waiting ? 'Funded · Joining next hand' : 'The table will keep playing. Buy in to join the next hand.';
     if (els.rebuyBtn) {
-      els.rebuyBtn.disabled = rebuyInFlight || !isWsReady() || playerState.canRebuy !== true;
-      els.rebuyBtn.textContent = rebuyInFlight ? 'Buying in…' : 'Buy in 100 CH';
+      var rebuyPending = !!rebuyOperation && rebuyOperation.phase === 'pending';
+      els.rebuyBtn.disabled = rebuyPending || !isWsReady() || playerState.canRebuy !== true;
+      els.rebuyBtn.textContent = rebuyPending ? 'Buying in…' : (rebuyOperation && rebuyOperation.phase === 'error' ? 'Retry buy-in' : 'Buy in 100 CH');
     }
-    if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.disabled = rebuyInFlight || !isWsReady();
+    if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.disabled = (!!rebuyOperation && rebuyOperation.phase === 'pending') || !isWsReady();
     if (outOfChips) refreshRebuyBalance();
   }
 
@@ -3765,6 +3895,7 @@
 
   function queueLeaveAndNavigateImmediately(){
     if (!wsClient || typeof wsClient.sendLeaveQueued !== 'function' || !isWsReady()) return false;
+    clearRebuyOperation();
     wsClient.sendLeaveQueued({ tableId: state.tableId });
     pendingLeaveRetryAfterReconnect = false;
     pendingLeaveNavigation = false;
@@ -3973,6 +4104,7 @@
   }
 
   function leaveAndReturnToLobby(){
+    clearRebuyOperation();
     pendingLeaveNavigation = true;
     try {
       if (queueLeaveAndNavigateImmediately()) return Promise.resolve({ ok: true, queued: true });
@@ -3998,21 +4130,29 @@
   }
 
   function requestManualRebuy(){
-    if (rebuyInFlight || !state.playerState || state.playerState.canRebuy !== true) return Promise.resolve();
-    rebuyInFlight = true;
+    if (!state.playerState || state.playerState.canRebuy !== true) return Promise.resolve();
+    if (rebuyOperation && rebuyOperation.phase === 'pending') return Promise.resolve({ ok: true, pending: true });
+    if (rebuyOperation && rebuyOperation.phase === 'error'){
+      rebuyOperation.phase = 'pending';
+      rebuyOperation.resumeAttempted = true;
+      persistPendingRebuy();
+      setError('');
+      renderRebuyPanel();
+      return sendRebuyOperation();
+    }
+    var requestId = buildRebuyRequestId();
+    rebuyOperation = {
+      phase: 'pending',
+      resumeAttempted: true,
+      requestId: requestId,
+      tableId: state.tableId,
+      userId: state.currentUserId,
+      payload: { tableId: state.tableId, amount: 100 }
+    };
+    persistPendingRebuy();
     setError('');
     renderRebuyPanel();
-    return sendCommand('sendRebuy', { tableId: state.tableId, amount: 100 }).then(function(){
-      state.statusText = 'Buy-in accepted';
-      rebuyPanelDismissed = true;
-    }).catch(function(error){
-      var reason = error && (error.code || error.message) ? String(error.code || error.message) : 'rebuy_failed';
-      if (els.rebuyAccountLink) els.rebuyAccountLink.hidden = reason !== 'insufficient_chips';
-      setError(reason === 'insufficient_chips' ? 'Not enough CH for a 100 CH buy-in' : reason);
-    }).then(function(){
-      rebuyInFlight = false;
-      render();
-    });
+    return sendRebuyOperation();
   }
 
   function bindMenu(){
@@ -4300,6 +4440,7 @@
   }
 
   function applySignedOutState(){
+    clearRebuyOperation();
     stopLiveMode();
     resetQueuedPreactionState();
     state = createEmptyLiveState(tableId, null);
@@ -4308,6 +4449,7 @@
   }
 
   function applyAuthenticatedPendingState(user){
+    if (!user || !state.currentUserId || String(user.id || '') !== String(state.currentUserId)) clearRebuyOperation();
     stopLiveMode();
     resetQueuedPreactionState();
     isGuestMode = false;
@@ -4326,6 +4468,8 @@
 
   function restartAuthenticatedLiveMode(token){
     if (!tableId || !token) return;
+    var nextUserId = getUserIdFromToken(token);
+    if (nextUserId && state.currentUserId && nextUserId !== state.currentUserId) clearRebuyOperation();
     isGuestMode = false;
     currentGuestSession = null;
     clearGuestSession();
@@ -4344,6 +4488,11 @@
     var preservingState = !!(state && state.mode === 'live'
       && state.hasAppliedAuthoritativeSnapshot
       && state.tableId && state.tableId === tableId);
+    if (preservingState && rebuyOperation && rebuyOperation.phase === 'pending'){
+      rebuyOperation.preserveOnTechnicalRestart = true;
+      rebuyOperation.resumeAttempted = false;
+      persistPendingRebuy();
+    }
     stopLiveMode();
     startTurnClock();
     // 2. THEN capture the new generation (old = N, stop => N+1 stale, this => N+2 active).
@@ -4463,6 +4612,7 @@
         }
         var previousVisual = captureVisualSnapshot();
         mergeSnapshot(payload, frame);
+        reconcileRebuyOperationFromSnapshot(authoritativeSnapshot);
         if (authoritativeSnapshot) state.hasAppliedAuthoritativeSnapshot = true;
         // Open the reconnect gate only after a full authoritative snapshot is merged.
         var openedRecoveryGate = false;
