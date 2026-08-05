@@ -1636,6 +1636,52 @@ test('poker v2 prefers committed chip maps for seat bet stacks', async () => {
   assert.equal(stack.attributes['data-amount'], '124');
 });
 
+test('poker v2 keeps zero stack labels visible without rendering chips', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 13,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1 },
+          { userId: 'villain-1', seat: 2 }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-zero-stacks', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'villain-1', deadlineAt: Date.now() + 5000 },
+        stacks: { 'user-1': 0, 'villain-1': 0 },
+        pot: { total: 200, sidePots: [] },
+        legalActions: { seat: 2, actions: ['CHECK'] },
+        actionConstraints: { toCall: 0 }
+      },
+      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const stackVisuals = harness.elements.pokerSeatChipLayer.children;
+  assert.equal(stackVisuals.length, 2);
+  for (const stack of stackVisuals){
+    assert.equal(stack.attributes['data-amount'], '0');
+    assert.equal(stack.attributes['data-chip-count'], '0');
+    assert.equal(stack.attributes['data-stack-count'], '0');
+    assert.equal(stack.children.length, 1);
+    assert.equal(stack.children[0].className, 'poker-chip-stack-label');
+    assert.equal(stack.children[0].textContent, '0');
+  }
+});
+
 test('poker v2 keeps side-seat chip stacks beside avatars instead of the community-card lane', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
