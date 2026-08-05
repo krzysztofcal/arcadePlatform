@@ -123,6 +123,31 @@ function normalFoldWin(state, handSeats, winners) {
   ));
 }
 
+function canBotSpeakAfterSettlement(state, handSeats, bot) {
+  return !!bot
+    && handSeats.some((seat) => seat.userId === bot.userId)
+    && state?.leftTableByUserId?.[bot.userId] !== true
+    && state?.sitOutByUserId?.[bot.userId] !== true;
+}
+
+function canBotReactToSettlement(state, handSeats, bot, winners) {
+  return canBotSpeakAfterSettlement(state, handSeats, bot)
+    && !winners.some((winner) => winner.userId === bot.userId);
+}
+
+export function isCompleteReactionSettlement(state) {
+  if (!state || state.phase !== "SETTLED") return false;
+  const handId = normalizeString(state.handId);
+  return !!handId
+    && handId === normalizeString(state?.handSettlement?.handId)
+    && handId === normalizeString(state?.showdown?.handId)
+    && Array.isArray(state.handSeats)
+    && Array.isArray(state.showdown?.winners)
+    && !!state.handSettlement?.payouts
+    && typeof state.handSettlement.payouts === "object"
+    && !Array.isArray(state.handSettlement.payouts);
+}
+
 export function evaluateHumanReactionCommand({
   tableId,
   senderUserId,
@@ -325,11 +350,8 @@ export function classifyDirectedBotReaction({
 }
 
 export function classifySettlementReaction({ state, botSeats, random = Math.random } = {}) {
-  if (!state || state.phase !== "SETTLED") return null;
+  if (!isCompleteReactionSettlement(state)) return null;
   const handId = normalizeString(state.handId);
-  const settlementHandId = normalizeString(state?.handSettlement?.handId);
-  const showdownHandId = normalizeString(state?.showdown?.handId);
-  if (!handId || handId !== settlementHandId || handId !== showdownHandId) return null;
   const handSeats = normalizeHandSeats(state.handSeats);
   const bots = normalizeBotSeats(botSeats);
   const botByUserId = new Map(bots.map((bot) => [bot.userId, bot]));
@@ -337,12 +359,10 @@ export function classifySettlementReaction({ state, botSeats, random = Math.rand
   if (normalFoldWin(state, handSeats, winners)) {
     const winner = winners[0];
     const winningBot = botByUserId.get(winner.userId);
-    if (winningBot && samplePasses(random, 0.5)) {
+    if (canBotSpeakAfterSettlement(state, handSeats, winningBot) && samplePasses(random, 0.5)) {
       return { botUserId: winningBot.userId, botSeatNo: winningBot.seatNo, reactionKey: "i_was_bluffing", handId };
     }
-    const reactor = bots.find((bot) => bot.userId !== winner.userId
-      && handSeats.some((seat) => seat.userId === bot.userId)
-      && state?.leftTableByUserId?.[bot.userId] !== true);
+    const reactor = bots.find((bot) => canBotReactToSettlement(state, handSeats, bot, winners));
     if (reactor && samplePasses(random, 0.5)) {
       return { botUserId: reactor.userId, botSeatNo: reactor.seatNo, targetSeatNo: winner.seatNo, reactionKey: "nice_bluff", handId };
     }
@@ -350,9 +370,7 @@ export function classifySettlementReaction({ state, botSeats, random = Math.rand
   const comparedHands = state?.showdown?.handsByUserId;
   if (comparedHands && typeof comparedHands === "object" && Object.keys(comparedHands).length >= 2) {
     const strongWinner = winners.find((winner) => Number(comparedHands?.[winner.userId]?.category) >= 4);
-    const reactor = bots.find((bot) => !winners.some((winner) => winner.userId === bot.userId)
-      && handSeats.some((seat) => seat.userId === bot.userId)
-      && state?.leftTableByUserId?.[bot.userId] !== true);
+    const reactor = bots.find((bot) => canBotReactToSettlement(state, handSeats, bot, winners));
     if (strongWinner && reactor && samplePasses(random, 0.5)) {
       return { botUserId: reactor.userId, botSeatNo: reactor.seatNo, targetSeatNo: strongWinner.seatNo, reactionKey: "nice_hand", handId };
     }
@@ -369,9 +387,7 @@ export function classifySettlementReaction({ state, botSeats, random = Math.rand
     }
   }
   const firstWinner = winners[0];
-  const reactor = bots.find((bot) => !winners.some((winner) => winner.userId === bot.userId)
-    && handSeats.some((seat) => seat.userId === bot.userId)
-    && state?.leftTableByUserId?.[bot.userId] !== true);
+  const reactor = bots.find((bot) => canBotReactToSettlement(state, handSeats, bot, winners));
   if (firstWinner && reactor && samplePasses(random, 0.25)) {
     return { botUserId: reactor.userId, botSeatNo: reactor.seatNo, targetSeatNo: firstWinner.seatNo, reactionKey: "well_played", handId };
   }

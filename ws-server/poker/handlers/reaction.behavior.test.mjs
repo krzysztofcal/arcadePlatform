@@ -9,6 +9,7 @@ import {
   classifySettlementReaction,
   clearTable,
   evaluateHumanReactionCommand,
+  isCompleteReactionSettlement,
   tryCreateBotReaction
 } from './reaction.mjs';
 
@@ -325,6 +326,26 @@ test('contextual classifiers keep raise and fold-win meanings distinct', () => {
   }), {
     botUserId: 'bot', botSeatNo: 4, targetSeatNo: 2, reactionKey: 'nice_bluff', handId: 'hand-fold'
   });
+
+  const incomplete = { ...baseState, showdown: { winners: ['bot'] } };
+  assert.equal(isCompleteReactionSettlement(incomplete), false);
+  assert.equal(classifySettlementReaction({ state: incomplete, botSeats: [{ userId: 'bot', seatNo: 4 }], random: () => 0 }), null);
+  assert.equal(isCompleteReactionSettlement(baseState), true);
+  assert.equal(classifySettlementReaction({
+    state: { ...baseState, sitOutByUserId: { bot: true } },
+    botSeats: [{ userId: 'bot', seatNo: 4 }],
+    random: () => 0
+  }), null);
+  assert.equal(classifySettlementReaction({
+    state: {
+      ...baseState,
+      showdown: { handId: 'hand-fold', winners: ['human'] },
+      foldedByUserId: { bot: true },
+      sitOutByUserId: { bot: true }
+    },
+    botSeats: [{ userId: 'bot', seatNo: 4 }],
+    random: () => 0
+  }), null);
 });
 
 test('settlement classifiers use deterministic seats and authoritative payouts', () => {
@@ -371,6 +392,12 @@ test('settlement classifiers use deterministic seats and authoritative payouts',
     botSeats: [{ userId: 'bot-3', seatNo: 3 }],
     random: () => 0
   }), { botUserId: 'bot-3', botSeatNo: 3, targetSeatNo: 1, reactionKey: 'well_played', handId: 'split' });
+
+  assert.equal(classifySettlementReaction({
+    state: { ...shownHandState, sitOutByUserId: { 'bot-3': true } },
+    botSeats: [{ userId: 'bot-3', seatNo: 3 }],
+    random: () => 0
+  }), null);
 });
 
 test('directed classifier supports bot-only hurry up copy without exposing intent inference', () => {

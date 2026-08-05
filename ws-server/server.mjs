@@ -41,6 +41,7 @@ import {
   classifyRaiseReaction,
   classifySettlementReaction,
   evaluateHumanReactionCommand,
+  isCompleteReactionSettlement,
   tryCreateBotReaction,
   tryReserveBotReaction,
   clearTable as clearReactionTable
@@ -524,6 +525,40 @@ function scheduleReservedBotReaction(tableId, candidate, { botUserId, handId = n
   return true;
 }
 
+function buildDetachedReactionContext(state) {
+  const copyBooleanMap = (value) => Object.freeze(Object.fromEntries(Object.entries(value || {})
+    .filter(([, flag]) => flag === true)
+    .map(([userId]) => [userId, true])));
+  const handSeats = Object.freeze(Array.isArray(state?.handSeats)
+    ? state.handSeats.map((seat) => Object.freeze({ userId: seat?.userId, seatNo: seat?.seatNo }))
+    : []);
+  const payouts = state?.handSettlement?.payouts && typeof state.handSettlement.payouts === "object"
+    ? Object.freeze({ ...state.handSettlement.payouts })
+    : null;
+  const handsByUserId = state?.showdown?.handsByUserId && typeof state.showdown.handsByUserId === "object"
+    ? Object.freeze(Object.fromEntries(Object.entries(state.showdown.handsByUserId)
+      .map(([userId, hand]) => [userId, Object.freeze({ category: hand?.category })])))
+    : undefined;
+  return Object.freeze({
+    phase: state?.phase,
+    handId: state?.handId,
+    bigBlind: state?.bigBlind,
+    turnUserId: state?.turnUserId,
+    turnStartedAt: state?.turnStartedAt,
+    turnDeadlineAt: state?.turnDeadlineAt,
+    handSeats,
+    foldedByUserId: copyBooleanMap(state?.foldedByUserId),
+    leftTableByUserId: copyBooleanMap(state?.leftTableByUserId),
+    sitOutByUserId: copyBooleanMap(state?.sitOutByUserId),
+    handSettlement: state?.handSettlement ? Object.freeze({ handId: state.handSettlement.handId, payouts }) : null,
+    showdown: state?.showdown ? Object.freeze({
+      handId: state.showdown.handId,
+      winners: Array.isArray(state.showdown.winners) ? Object.freeze([...state.showdown.winners]) : null,
+      ...(handsByUserId ? { handsByUserId } : {})
+    }) : null
+  });
+}
+
 function observeFreshPokerMutation({ tableId, acceptedActionAudit, nextState }) {
   const handId = typeof nextState?.handId === "string" ? nextState.handId : null;
   if (acceptedActionAudit?.action === "RAISE") {
@@ -538,7 +573,8 @@ function observeFreshPokerMutation({ tableId, acceptedActionAudit, nextState }) 
     }), { handId, targetUserId: actorUserId });
   }
 
-  if (nextState?.phase === "SETTLED" && handId && evaluatedSettlementReactionHandByTableId.get(tableId) !== handId) {
+  if (isCompleteReactionSettlement(nextState)
+    && evaluatedSettlementReactionHandByTableId.get(tableId) !== handId) {
     evaluatedSettlementReactionHandByTableId.set(tableId, handId);
     scheduleBotReactionCandidate(tableId, () => classifySettlementReaction({
       state: nextState,
@@ -1645,11 +1681,23 @@ async function persistMutatedState({
     tableManager.setPersistedStateVersion(tableId, persisted.newVersion);
   }
   if (persisted.outcome !== "durable_replay") {
-    runReactionObserverSafely("fresh_poker_mutation", () => observeFreshPokerMutation({
-      tableId,
-      acceptedActionAudit,
-      nextState: privateStateForHoleCards
-    }));
+    try {
+      const reactionContext = buildDetachedReactionContext(privateStateForHoleCards);
+      const reactionAction = acceptedActionAudit ? {
+        action: acceptedActionAudit.action,
+        actorUserId: acceptedActionAudit.actorUserId
+      } : null;
+      runReactionObserverSafely("fresh_poker_mutation", () => observeFreshPokerMutation({
+        tableId,
+        acceptedActionAudit: reactionAction,
+        nextState: reactionContext
+      }));
+    } catch (error) {
+      klogSafe("ws_reaction_observer_failed", {
+        observer: "build_fresh_poker_mutation_context",
+        message: error?.message || "unknown"
+      });
+    }
   }
   return persisted;
 }

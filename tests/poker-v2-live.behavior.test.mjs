@@ -633,7 +633,7 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
     .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'));
   assert.equal(botOnlyBubble?.textContent, '⏳ Please, hurry up!');
   assert.equal(harness.elements.pokerReactionLayer.children.filter((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect')).length, 1,
-    'a targeted bot-only reaction must not create a congratulations effect');
+    'UI V1 keeps the target in the event but renders bot table talk only as a sender bubble, never as a congratulations effect');
   const menuKeys = harness.elements.pokerV2ReactionMenu.children.map((option) => option.dataset.reactionKey);
   assert.equal(menuKeys.includes('hurry_up'), false);
   assert.equal(menuKeys.includes('you_are_bluffing'), false);
