@@ -1547,9 +1547,9 @@ function waitForExit(proc) {
   return new Promise((resolve) => proc.once("exit", resolve));
 }
 
-function createServer({ env = {} } = {}) {
+function createServer({ env = {}, nodeArgs = [] } = {}) {
   return getFreePort().then((port) => {
-    const child = spawn(process.execPath, ["ws-server/server.mjs"], {
+    const child = spawn(process.execPath, [...nodeArgs, "ws-server/server.mjs"], {
       env: {
         ...process.env,
         WS_POKER_LOG_LEVEL: "INFO",
@@ -5545,6 +5545,111 @@ test("active replacement: seated act accepted and observer act rejected under ob
 
 
 
+
+test("fresh persisted raise schedules one delayed contextual reaction and durable replay schedules none", async () => {
+  const secret = "reaction-integration-secret";
+  const tableId = "table_reaction_integration";
+  const humanUserId = "reaction_human";
+  const botSeat2 = makeBotUserId(tableId, 2);
+  const botSeat3 = makeBotUserId(tableId, 3);
+  const coreState = {
+    roomId: tableId,
+    version: 8,
+    maxSeats: 6,
+    members: [
+      { userId: humanUserId, seat: 1 },
+      { userId: botSeat2, seat: 2 },
+      { userId: botSeat3, seat: 3 }
+    ],
+    seats: [
+      { userId: humanUserId, seatNo: 1, status: "ACTIVE" },
+      { userId: botSeat2, seatNo: 2, status: "ACTIVE" },
+      { userId: botSeat3, seatNo: 3, status: "ACTIVE" }
+    ],
+    seatDetailsByUserId: {
+      [humanUserId]: { isBot: false, stack: 100 },
+      [botSeat2]: { isBot: true, botProfile: "NORMAL", stack: 100 },
+      [botSeat3]: { isBot: true, botProfile: "NORMAL", stack: 100 }
+    },
+    publicStacks: { [humanUserId]: 100, [botSeat2]: 100, [botSeat3]: 100 }
+  };
+  const nowMs = Date.now();
+  const liveState = {
+    ...buildBootstrappedPokerState({
+      tableId,
+      coreState,
+      dealerSeatNo: 1,
+      startingStacks: coreState.publicStacks,
+      handVersion: coreState.version
+    }),
+    turnStartedAt: nowMs,
+    turnDeadlineAt: nowMs + 60_000
+  };
+  assert.equal(liveState.turnUserId, humanUserId);
+  const { dir, filePath } = await writePersistedFile({
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+        seatRows: [
+          { user_id: humanUserId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 },
+          { user_id: botSeat2, seat_no: 2, status: "ACTIVE", is_bot: true, stack: 100, bot_profile: "NORMAL" },
+          { user_id: botSeat3, seat_no: 3, status: "ACTIVE", is_bot: true, stack: 100, bot_profile: "NORMAL" }
+        ],
+        stateRow: { version: coreState.version, state: liveState }
+      }
+    }
+  });
+  const randomModule = await writeTestModule("Math.random = () => 0;", "reaction-random-zero.mjs");
+  const { port, child } = await createServer({
+    nodeArgs: ["--import", randomModule.filePath],
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_TIMEOUT_SWEEP_MS: "60000",
+      WS_ZOMBIE_TABLE_SWEEP_MS: "60000"
+    }
+  });
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: humanUserId }), "auth-reaction-integration");
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-reaction-integration", ts: "2026-08-05T18:00:00Z", payload: { tableId } });
+    assert.equal((await nextCommandResultForRequest(ws, "join-reaction-integration")).payload.status, "accepted");
+    await nextMessageOfType(ws, "table_state");
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-reaction-integration", ts: "2026-08-05T18:00:01Z", payload: { tableId, view: "snapshot" } });
+    const snapshot = await nextMessageOfType(ws, "stateSnapshot");
+    const handId = snapshot.payload.public.hand.handId;
+    const sentAt = Date.now();
+    const raiseFrame = { version: "1.0", type: "act", requestId: "raise-reaction-integration", ts: "2026-08-05T18:00:02Z", payload: { tableId, handId, action: "raise", amount: 4 } };
+    sendFrame(ws, raiseFrame);
+    assert.equal((await nextCommandResultForRequest(ws, raiseFrame.requestId)).payload.status, "accepted");
+    sendFrame(ws, raiseFrame);
+    assert.equal((await nextCommandResultForRequest(ws, raiseFrame.requestId)).payload.status, "accepted");
+    const reaction = await nextMessageMatching(ws, (frame) => frame?.type === "table_reaction", 2000);
+    assert.equal(Date.now() - sentAt >= 250, true, "the real server path must not emit the reaction synchronously");
+    assert.deepEqual(reaction.payload, { seatNo: 2, targetSeatNo: 1, reactionKey: "you_are_bluffing" });
+
+    sendFrame(ws, raiseFrame);
+    assert.equal((await nextCommandResultForRequest(ws, raiseFrame.requestId)).payload.status, "accepted");
+    await assert.rejects(
+      nextMessageMatching(ws, (frame) => frame?.type === "table_reaction", 500),
+      /Timed out waiting for matching websocket message/
+    );
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-reaction-deadline", ts: "2026-08-05T18:00:03Z", payload: { tableId, view: "snapshot" } });
+    const afterReplay = await nextMessageOfType(ws, "stateSnapshot");
+    const persisted = await readPersistedFile(filePath);
+    assert.equal(afterReplay.payload.public.turn.deadlineAt, persisted.tables[tableId].stateRow.state.turnDeadlineAt,
+      "the persistence observer must leave the authoritative turn deadline unchanged");
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(randomModule.dir, { recursive: true, force: true });
+  }
+});
 
 test("duplicate act requestId is idempotent and does not emit extra advancing state", async () => {
   const secret = "test-secret";
