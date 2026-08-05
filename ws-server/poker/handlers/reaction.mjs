@@ -24,6 +24,7 @@ const BOT_REACTION_KEYS_BY_ACTION = Object.freeze({
 
 const senderCooldownUntilByTableUser = new Map();
 const botReactionUntilByTable = new Map();
+const targetedNiceHandByTableUser = new Map();
 
 function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -65,12 +66,14 @@ export function evaluateHumanReactionCommand({
   targetIsWinner = false,
   settlementMatchesHand = false,
   settlementWindowOpen = false,
+  settlementHandId,
   tableClosed = false,
   nowMs
 } = {}) {
   const normalizedTableId = normalizeString(tableId);
   const normalizedUserId = normalizeString(senderUserId);
   const normalizedReactionKey = normalizeString(reactionKey);
+  const normalizedSettlementHandId = normalizeString(settlementHandId);
   const resolvedNowMs = normalizeNowMs(nowMs);
 
   if (!normalizedTableId || !normalizedUserId || !isPositiveSeatNo(senderSeatNo)) {
@@ -95,9 +98,31 @@ export function evaluateHumanReactionCommand({
     if (settlementWindowOpen !== true) {
       return { ok: false, reason: "settlement_reaction_window_closed" };
     }
+    if (!normalizedSettlementHandId) {
+      return { ok: false, reason: "settlement_mismatch" };
+    }
   }
   if (tableClosed === true) {
     return { ok: false, reason: "table_closed" };
+  }
+
+  if (targeted === true) {
+    const dedupeKey = `${normalizedTableId}:${normalizedUserId}`;
+    let dedupe = targetedNiceHandByTableUser.get(dedupeKey);
+    if (!dedupe || dedupe.settlementHandId !== normalizedSettlementHandId) {
+      dedupe = { settlementHandId: normalizedSettlementHandId, targetSeatNos: new Set() };
+      targetedNiceHandByTableUser.set(dedupeKey, dedupe);
+    }
+    if (dedupe.targetSeatNos.has(targetSeatNo)) {
+      return { ok: false, reason: "reaction_already_sent" };
+    }
+    dedupe.targetSeatNos.add(targetSeatNo);
+    return {
+      ok: true,
+      seatNo: senderSeatNo,
+      targetSeatNo,
+      reactionKey: normalizedReactionKey
+    };
   }
 
   const cooldownKey = `${normalizedTableId}:${normalizedUserId}`;
@@ -170,6 +195,9 @@ export function clearTable(tableId) {
   const prefix = `${normalizedTableId}:`;
   for (const key of [...senderCooldownUntilByTableUser.keys()]) {
     if (key.startsWith(prefix)) senderCooldownUntilByTableUser.delete(key);
+  }
+  for (const key of [...targetedNiceHandByTableUser.keys()]) {
+    if (key.startsWith(prefix)) targetedNiceHandByTableUser.delete(key);
   }
   botReactionUntilByTable.delete(normalizedTableId);
 }

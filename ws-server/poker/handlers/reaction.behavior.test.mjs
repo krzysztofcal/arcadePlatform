@@ -60,7 +60,7 @@ test('human reactions use the closed allowlist and atomically reserve the sender
   clearTable(tableId);
 });
 
-test('targeted human reactions require nice_hand, matching settlement facts, and share the cooldown', () => {
+test('targeted human reactions allow each winner once per authoritative settled hand', () => {
   const tableId = 'reaction-targeted-contract';
   clearTable(tableId);
 
@@ -75,9 +75,25 @@ test('targeted human reactions require nice_hand, matching settlement facts, and
     targetIsWinner: true,
     settlementMatchesHand: true,
     settlementWindowOpen: true,
+    settlementHandId: 'hand-a',
     nowMs: 1_000
   });
   assert.deepEqual(first, { ok: true, seatNo: 2, targetSeatNo: 4, reactionKey: 'nice_hand' });
+
+  assert.deepEqual(evaluateHumanReactionCommand({
+    tableId,
+    senderUserId: 'human-1',
+    senderSeatNo: 2,
+    reactionKey: 'nice_hand',
+    targeted: true,
+    targetSeatNo: 5,
+    targetOccupied: true,
+    targetIsWinner: true,
+    settlementMatchesHand: true,
+    settlementWindowOpen: true,
+    settlementHandId: 'hand-a',
+    nowMs: 1_000
+  }), { ok: true, seatNo: 2, targetSeatNo: 5, reactionKey: 'nice_hand' });
 
   assert.deepEqual(evaluateHumanReactionCommand({
     tableId,
@@ -90,9 +106,55 @@ test('targeted human reactions require nice_hand, matching settlement facts, and
     targetIsWinner: true,
     settlementMatchesHand: true,
     settlementWindowOpen: true,
+    settlementHandId: 'hand-a',
+    nowMs: 5_001
+  }), { ok: false, reason: 'reaction_already_sent' });
+
+  assert.deepEqual(evaluateHumanReactionCommand({
+    tableId,
+    senderUserId: 'human-1',
+    senderSeatNo: 2,
+    reactionKey: 'wow',
+    nowMs: 1_000
+  }), { ok: true, seatNo: 2, reactionKey: 'wow' });
+  assert.deepEqual(evaluateHumanReactionCommand({
+    tableId,
+    senderUserId: 'human-1',
+    senderSeatNo: 2,
+    reactionKey: 'hello',
     nowMs: 1_000
   }), { ok: false, reason: 'reaction_rate_limited' });
 
+  assert.deepEqual(evaluateHumanReactionCommand({
+    tableId,
+    senderUserId: 'human-1',
+    senderSeatNo: 2,
+    reactionKey: 'nice_hand',
+    targeted: true,
+    targetSeatNo: 4,
+    targetOccupied: true,
+    targetIsWinner: true,
+    settlementMatchesHand: true,
+    settlementWindowOpen: true,
+    settlementHandId: 'hand-b',
+    nowMs: 1_000
+  }), { ok: true, seatNo: 2, targetSeatNo: 4, reactionKey: 'nice_hand' });
+
+  clearTable(tableId);
+  assert.deepEqual(evaluateHumanReactionCommand({
+    tableId,
+    senderUserId: 'human-1',
+    senderSeatNo: 2,
+    reactionKey: 'nice_hand',
+    targeted: true,
+    targetSeatNo: 4,
+    targetOccupied: true,
+    targetIsWinner: true,
+    settlementMatchesHand: true,
+    settlementWindowOpen: true,
+    settlementHandId: 'hand-b',
+    nowMs: 1_000
+  }), { ok: true, seatNo: 2, targetSeatNo: 4, reactionKey: 'nice_hand' });
   clearTable(tableId);
   assert.deepEqual(evaluateHumanReactionCommand({
     tableId,
@@ -105,6 +167,7 @@ test('targeted human reactions require nice_hand, matching settlement facts, and
     targetIsWinner: true,
     settlementMatchesHand: true,
     settlementWindowOpen: true,
+    settlementHandId: 'hand-validation',
     nowMs: 2_000
   }), { ok: false, reason: 'invalid_reaction' });
   assert.deepEqual(evaluateHumanReactionCommand({
@@ -118,6 +181,7 @@ test('targeted human reactions require nice_hand, matching settlement facts, and
     targetIsWinner: true,
     settlementMatchesHand: false,
     settlementWindowOpen: true,
+    settlementHandId: 'hand-validation',
     nowMs: 2_000
   }), { ok: false, reason: 'settlement_mismatch' });
   assert.deepEqual(evaluateHumanReactionCommand({
@@ -131,6 +195,7 @@ test('targeted human reactions require nice_hand, matching settlement facts, and
     targetIsWinner: false,
     settlementMatchesHand: true,
     settlementWindowOpen: true,
+    settlementHandId: 'hand-validation',
     nowMs: 2_000
   }), { ok: false, reason: 'target_not_available' });
   assert.deepEqual(evaluateHumanReactionCommand({
@@ -144,6 +209,7 @@ test('targeted human reactions require nice_hand, matching settlement facts, and
     targetIsWinner: true,
     settlementMatchesHand: true,
     settlementWindowOpen: false,
+    settlementHandId: 'hand-validation',
     nowMs: 2_000
   }), { ok: false, reason: 'settlement_reaction_window_closed' });
 

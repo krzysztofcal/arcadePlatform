@@ -59,7 +59,7 @@ Example envelope:
 | `leave` | `{ "reason": string }` | Requests leave/cashout workflow. |
 | `ack` | `{ "seq": integer }` | Acknowledges latest processed server sequence (flow-control aid). |
 | `table_snapshot` | `{ "tableId": string }` (or envelope `roomId`) | Protected read-only gameplay snapshot command. **Requires `requestId`** like other stateful protected commands. Returns viewer-scoped poker state and does not mutate presence membership. |
-| `reaction_send` | `{ "tableId": string, "reactionKey": "hello"|"nice_hand"|"well_played"|"thinking"|"haha"|"wow"|"bad_beat"|"nice_bluff"|"good_luck"|"thanks", "targetSeatNo"?: integer, "handId"?: string }` | Requests one predefined ephemeral reaction. Requires an authenticated seated human sender and `requestId`; the server enforces a four-second sender cooldown. A targeted request must contain both `targetSeatNo` and `handId`, and currently supports only `nice_hand` during the matching settlement reveal window. |
+| `reaction_send` | `{ "tableId": string, "reactionKey": "hello"|"nice_hand"|"well_played"|"thinking"|"haha"|"wow"|"bad_beat"|"nice_bluff"|"good_luck"|"thanks", "targetSeatNo"?: integer, "handId"?: string }` | Requests one predefined ephemeral reaction. Requires an authenticated seated human sender and `requestId`; ordinary reactions have a four-second sender cooldown. A targeted request must contain both `targetSeatNo` and `handId`, and supports one `nice_hand` per sender, settled hand, and winning target during the unchanged settlement reveal window. |
 
 ### Server → Client
 

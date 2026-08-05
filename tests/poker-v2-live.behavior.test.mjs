@@ -595,8 +595,21 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(targetButtons.length, 2);
   targetButtons[0].click();
+  targetButtons[0].click();
   await harness.flush();
   assert.deepEqual(harness.targetedReactionPayloads, [{ targetSeatNo: 2, handId: 'hand-1' }]);
+
+  const remainingTargetButtons = harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
+  assert.equal(remainingTargetButtons.length, 1);
+  assert.equal(remainingTargetButtons[0].disabled, false);
+  remainingTargetButtons[0].click();
+  await harness.flush();
+  assert.deepEqual(harness.targetedReactionPayloads, [
+    { targetSeatNo: 2, handId: 'hand-1' },
+    { targetSeatNo: 3, handId: 'hand-1' }
+  ]);
 
   ws.onReaction({ payload: { seatNo: 1, targetSeatNo: 2, reactionKey: 'nice_hand' } });
   await harness.flush();
@@ -618,7 +631,7 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
   const targetButtonsBeforeServerRevealDeadline = harness.elements.pokerReactionLayer.children
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
-  assert.equal(targetButtonsBeforeServerRevealDeadline.length, 1, 'the unused targeted offer should remain available for the local 3.5-second window');
+  assert.equal(targetButtonsBeforeServerRevealDeadline.length, 0, 'consumed targeted offers should stay hidden for the hand');
   harness.advanceTime(1);
   await harness.flush();
   const targetButtonsAfterServerRevealDeadline = harness.elements.pokerReactionLayer.children
