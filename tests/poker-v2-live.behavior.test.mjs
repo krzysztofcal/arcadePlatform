@@ -638,6 +638,7 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
   assert.equal(menuKeys.includes('hurry_up'), false);
   assert.equal(menuKeys.includes('you_are_bluffing'), false);
   assert.equal(menuKeys.includes('i_was_bluffing'), false);
+  assert.equal(menuKeys.includes('lucky'), false);
   assert.equal(menuKeys.includes('nice_bluff'), true);
 
   ws.onReaction({ payload: { seatNo: 3, targetSeatNo: 1, reactionKey: 'you_are_bluffing' } });
@@ -652,6 +653,12 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
     .flatMap((anchor) => anchor.children || [])
     .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
   '😏 I was bluffing!');
+  ws.onReaction({ payload: { seatNo: 3, targetSeatNo: 1, reactionKey: 'lucky' } });
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
+  '🍀 Lucky!');
 
   harness.advanceTime(3_499);
   await harness.flush();

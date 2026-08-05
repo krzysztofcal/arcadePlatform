@@ -8,6 +8,7 @@ import {
   classifyRaiseReaction,
   classifySettlementReaction,
   clearTable,
+  deriveRiverChangedWinnerUserIds,
   evaluateHumanReactionCommand,
   isCompleteReactionSettlement,
   tryCreateBotReaction
@@ -30,9 +31,11 @@ test('human reactions use the closed allowlist and atomically reserve the sender
     'thanks',
     'hurry_up',
     'you_are_bluffing',
-    'i_was_bluffing'
+    'i_was_bluffing',
+    'lucky'
   ]);
   assert.equal(HUMAN_REACTION_KEYS.includes('hurry_up'), false);
+  assert.equal(HUMAN_REACTION_KEYS.includes('lucky'), false);
   assert.deepEqual(evaluateHumanReactionCommand({
     tableId,
     senderUserId: 'human-bot-key',
@@ -398,6 +401,44 @@ test('settlement classifiers use deterministic seats and authoritative payouts',
     botSeats: [{ userId: 'bot-3', seatNo: 3 }],
     random: () => 0
   }), null);
+});
+
+test('settlement uses one aggregate lucky roll for close ranks and river reversals', () => {
+  const state = {
+    phase: 'SETTLED',
+    handId: 'lucky-hand',
+    bigBlind: 10,
+    handSettlement: { handId: 'lucky-hand', payouts: { winner: 40 } },
+    showdown: {
+      handId: 'lucky-hand',
+      winners: ['winner'],
+      handsByUserId: {
+        winner: { category: 2, ranks: [10, 14, 9, 8], key: '2:10,14,9,8' },
+        bot: { category: 2, ranks: [10, 13, 9, 8], key: '2:10,13,9,8' }
+      }
+    },
+    handSeats: [{ userId: 'winner', seatNo: 4 }, { userId: 'bot', seatNo: 2 }],
+    foldedByUserId: {}, leftTableByUserId: {}, sitOutByUserId: {}
+  };
+  let rolls = 0;
+  assert.deepEqual(classifySettlementReaction({
+    state,
+    botSeats: [{ userId: 'bot', seatNo: 2 }],
+    random: () => { rolls += 1; return 0; }
+  }), { botUserId: 'bot', botSeatNo: 2, targetSeatNo: 4, reactionKey: 'lucky', handId: 'lucky-hand' });
+  assert.equal(rolls, 1, 'overlapping close-rank signals must share one lucky probability roll');
+
+  assert.equal(classifySettlementReaction({
+    state: { ...state, riverChangedWinnerUserIds: ['winner'], showdown: { ...state.showdown, handsByUserId: undefined } },
+    botSeats: [{ userId: 'bot', seatNo: 2 }],
+    random: () => 0
+  }).reactionKey, 'lucky');
+
+  assert.deepEqual(deriveRiverChangedWinnerUserIds({
+    community: ['2H', '7H', '9S', 'KC', 'JH'],
+    holeCardsByUserId: { winner: ['AH', 'QH'], bot: ['KS', 'KD'] },
+    showdown: { winners: ['winner'], handsByUserId: { winner: {}, bot: {} } }
+  }), ['winner'], 'the river flush should reverse the turn leader without mutating settlement');
 });
 
 test('directed classifier supports bot-only hurry up copy without exposing intent inference', () => {

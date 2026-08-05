@@ -41,6 +41,7 @@ import {
   classifyDirectedBotReaction,
   classifyRaiseReaction,
   classifySettlementReaction,
+  deriveRiverChangedWinnerUserIds,
   evaluateHumanReactionCommand,
   isCompleteReactionSettlement,
   tryCreateBotReaction,
@@ -519,8 +520,13 @@ function buildDetachedReactionContext(state) {
     : null;
   const handsByUserId = state?.showdown?.handsByUserId && typeof state.showdown.handsByUserId === "object"
     ? Object.freeze(Object.fromEntries(Object.entries(state.showdown.handsByUserId)
-      .map(([userId, hand]) => [userId, Object.freeze({ category: hand?.category })])))
+      .map(([userId, hand]) => [userId, Object.freeze({
+        category: hand?.category,
+        ranks: Array.isArray(hand?.ranks) ? Object.freeze([...hand.ranks]) : Object.freeze([]),
+        key: hand?.key
+      })])))
     : undefined;
+  const riverChangedWinnerUserIds = Object.freeze(deriveRiverChangedWinnerUserIds(state));
   return Object.freeze({
     phase: state?.phase,
     handId: state?.handId,
@@ -532,6 +538,7 @@ function buildDetachedReactionContext(state) {
     foldedByUserId: copyBooleanMap(state?.foldedByUserId),
     leftTableByUserId: copyBooleanMap(state?.leftTableByUserId),
     sitOutByUserId: copyBooleanMap(state?.sitOutByUserId),
+    riverChangedWinnerUserIds,
     handSettlement: state?.handSettlement ? Object.freeze({ handId: state.handSettlement.handId, payouts }) : null,
     showdown: state?.showdown ? Object.freeze({
       handId: state.showdown.handId,

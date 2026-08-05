@@ -17,7 +17,8 @@ export const REACTION_KEYS = Object.freeze([
   "thanks",
   "hurry_up",
   "you_are_bluffing",
-  "i_was_bluffing"
+  "i_was_bluffing",
+  "lucky"
 ]);
 
 export const HUMAN_REACTION_KEYS = Object.freeze([
@@ -133,6 +134,86 @@ function canBotSpeakAfterSettlement(state, handSeats, bot) {
 function canBotReactToSettlement(state, handSeats, bot, winners) {
   return canBotSpeakAfterSettlement(state, handSeats, bot)
     && !winners.some((winner) => winner.userId === bot.userId);
+}
+
+const PRIMARY_RANK_COUNT_BY_CATEGORY = Object.freeze({ 2: 1, 3: 2, 4: 1, 8: 1 });
+
+function validRankVector(hand) {
+  return Number.isInteger(Number(hand?.category))
+    && Array.isArray(hand?.ranks)
+    && hand.ranks.length > 0
+    && hand.ranks.every((rank) => Number.isInteger(Number(rank)))
+    ? hand.ranks.map(Number)
+    : null;
+}
+
+function looksLuckyComparedWith(winningHand, losingHand) {
+  const winningRanks = validRankVector(winningHand);
+  const losingRanks = validRankVector(losingHand);
+  const category = Number(winningHand?.category);
+  if (!winningRanks || !losingRanks || category !== Number(losingHand?.category)) return false;
+  const differingIndexes = [];
+  for (let index = 0; index < Math.max(winningRanks.length, losingRanks.length); index += 1) {
+    if ((winningRanks[index] ?? 0) !== (losingRanks[index] ?? 0)) differingIndexes.push(index);
+  }
+  if (differingIndexes.length === 0) return false;
+  const firstDifference = differingIndexes[0];
+  const primaryRankCount = PRIMARY_RANK_COUNT_BY_CATEGORY[category];
+  const kickerDecided = Number.isInteger(primaryRankCount) && firstDifference >= primaryRankCount;
+  const narrowRankDifference = Math.abs((winningRanks[firstDifference] ?? 0) - (losingRanks[firstDifference] ?? 0)) === 1;
+  return kickerDecided || narrowRankDifference || differingIndexes.length === 1;
+}
+
+function luckyWinner(state, handSeats, winners) {
+  const comparedHands = state?.showdown?.handsByUserId;
+  const riverChangedWinnerUserIds = new Set(Array.isArray(state?.riverChangedWinnerUserIds)
+    ? state.riverChangedWinnerUserIds.map(normalizeString).filter(Boolean)
+    : []);
+  if (!comparedHands || typeof comparedHands !== "object") {
+    return winners.find((winner) => riverChangedWinnerUserIds.has(winner.userId)) || null;
+  }
+  const winnerUserIds = new Set(winners.map((winner) => winner.userId));
+  const losers = handSeats.filter((seat) => !winnerUserIds.has(seat.userId));
+  return winners.find((winner) => riverChangedWinnerUserIds.has(winner.userId)
+    || losers.some((loser) => looksLuckyComparedWith(comparedHands[winner.userId], comparedHands[loser.userId]))) || null;
+}
+
+function reactionCard(cardCode) {
+  if (typeof cardCode !== "string") return null;
+  const match = cardCode.trim().toUpperCase().match(/^(10|[2-9TJQKA])([CDHS])$/);
+  if (!match) return null;
+  const rank = { T: 10, J: 11, Q: 12, K: 13, A: 14 }[match[1]] || Number(match[1]);
+  return { r: rank, s: match[2] };
+}
+
+export function deriveRiverChangedWinnerUserIds(state) {
+  if (!Array.isArray(state?.community) || state.community.length !== 5) return [];
+  const turnBoard = state.community.slice(0, 4).map(reactionCard);
+  if (turnBoard.some((card) => !card)) return [];
+  const shownUserIds = Object.keys(state?.showdown?.handsByUserId || {}).sort();
+  const turnHands = [];
+  for (const userId of shownUserIds) {
+    const holeCards = Array.isArray(state?.holeCardsByUserId?.[userId])
+      ? state.holeCardsByUserId[userId].map(reactionCard)
+      : [];
+    if (holeCards.length !== 2 || holeCards.some((card) => !card)) return [];
+    turnHands.push({ userId, hand: evaluateBestHand([...turnBoard, ...holeCards]) });
+  }
+  if (turnHands.length < 2) return [];
+  let best = turnHands[0].hand;
+  let turnWinners = [turnHands[0].userId];
+  for (const entry of turnHands.slice(1)) {
+    const comparison = compareHands(entry.hand, best);
+    if (comparison > 0) {
+      best = entry.hand;
+      turnWinners = [entry.userId];
+    } else if (comparison === 0) {
+      turnWinners.push(entry.userId);
+    }
+  }
+  const turnWinnerSet = new Set(turnWinners);
+  return (Array.isArray(state?.showdown?.winners) ? state.showdown.winners : [])
+    .filter((userId) => typeof userId === "string" && !turnWinnerSet.has(userId));
 }
 
 export function isCompleteReactionSettlement(state) {
@@ -368,6 +449,11 @@ export function classifySettlementReaction({ state, botSeats, random = Math.rand
     }
   }
   const comparedHands = state?.showdown?.handsByUserId;
+  const luckyTarget = luckyWinner(state, handSeats, winners);
+  const luckyReactor = bots.find((bot) => canBotReactToSettlement(state, handSeats, bot, winners));
+  if (luckyTarget && luckyReactor && samplePasses(random, 0.25)) {
+    return { botUserId: luckyReactor.userId, botSeatNo: luckyReactor.seatNo, targetSeatNo: luckyTarget.seatNo, reactionKey: "lucky", handId };
+  }
   if (comparedHands && typeof comparedHands === "object" && Object.keys(comparedHands).length >= 2) {
     const strongWinner = winners.find((winner) => Number(comparedHands?.[winner.userId]?.category) >= 4);
     const reactor = bots.find((bot) => canBotReactToSettlement(state, handSeats, bot, winners));
@@ -407,3 +493,4 @@ export function clearTable(tableId) {
   }
   botReactionUntilByTable.delete(normalizedTableId);
 }
+import { compareHands, evaluateBestHand } from "../shared/settlement/poker-eval.mjs";

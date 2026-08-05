@@ -98,7 +98,8 @@
     { key: 'thanks', emoji: '❤️', label: 'Thanks' },
     { key: 'hurry_up', emoji: '⏳', label: 'Please, hurry up!', humanSelectable: false },
     { key: 'you_are_bluffing', emoji: '🧐', label: 'You are bluffing!', humanSelectable: false },
-    { key: 'i_was_bluffing', emoji: '😏', label: 'I was bluffing!', humanSelectable: false }
+    { key: 'i_was_bluffing', emoji: '😏', label: 'I was bluffing!', humanSelectable: false },
+    { key: 'lucky', emoji: '🍀', label: 'Lucky!', humanSelectable: false }
   ];
   var seatAnchors = [
     { x: 50, y: 10 },

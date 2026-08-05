@@ -27,8 +27,9 @@ Poker bots are implemented in the current runtime.
 - Contextual reactions:
   - Reactions observe only freshly committed joins, actions, settlements, targeted congratulations, and existing turn timestamps. They are fire-and-forget UX and cannot change legal actions, turn deadlines, timeout handling, settlement, stacks, pots, seats, autoplay, persistence, or table lifecycle.
   - The runtime may emit `you_are_bluffing` after a raise (8%), `i_was_bluffing` after a bot wins by normal folds (50%), `nice_bluff` after another player wins by normal folds (50% fallback), `nice_hand` for a shown winning three-of-a-kind or better (50%), `wow` for a bot payout of at least 20 big blinds, and `well_played` after another win (25% fallback).
+  - One aggregate `lucky` classifier may target a winner (25%) when authoritative shown-hand rank vectors are unusually close, the same category is decided by a kicker, or a read-only turn-board comparison shows that the river changed the winner. Multiple matching signals still cause only one probability roll.
   - A bot may answer a successfully broadcast targeted `nice_hand` with `thanks` (50%), greet a newly joined human with `hello` or `good_luck` (35%), or emit bot-only `hurry_up` after observing 80% of an unchanged human turn window (25%).
-  - `hurry_up`, `you_are_bluffing`, and `i_was_bluffing` are bot-only keys. Humans retain the existing reaction menu, including `nice_bluff`.
+  - `hurry_up`, `you_are_bluffing`, `i_was_bluffing`, and `lucky` are bot-only keys. Humans retain the existing reaction menu, including `nice_bluff`.
   - Contextual reactions retain the existing four-second bot sender cooldown and 20-second table throttle, use one pending reaction timer per table, and add only bounded 300–1200 ms presentation jitter. Observer or timer failure is logged and otherwise ignored.
 - Cash-out / terminal close:
   - Bot chip movements use the same ledger primitives as seat flows: `TABLE_BUY_IN` into table escrow and `TABLE_CASH_OUT` from escrow.
