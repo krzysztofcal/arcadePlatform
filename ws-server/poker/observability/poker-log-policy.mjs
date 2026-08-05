@@ -254,6 +254,7 @@ register("ERROR", "runtime", [
   "ws_continuous_bot_table_profile_update_failed",
   "ws_continuous_bot_table_status_failed",
   "ws_continuous_bot_table_supervisor_failed",
+  "ws_reaction_observer_failed",
   "ws_table_reaction_broadcast_failed",
   "ws_error",
   "ws_message_processing_error",

@@ -13,6 +13,7 @@ import { makeBotUserId } from "../shared/poker-domain/bots.mjs";
 import { dealHoleCards, deriveDeck, toCardCodes } from "./poker/shared/poker-primitives.mjs";
 import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
 import { createConnState } from "./poker/runtime/conn-state.mjs";
+import { createReactionTimers, shouldObservePersistedReactionMutation } from "./poker/runtime/reaction-timers.mjs";
 import {
   acknowledgeTransportEvidence,
   beginTransportTermination,
@@ -46,6 +47,88 @@ const FIXED_RANDOM_BOT_AUTOPLAY_ADAPTER_URL = new URL(
   "./poker/runtime/accepted-bot-autoplay-adapter.fixed-random.fixture.mjs",
   import.meta.url
 ).href;
+
+test("reaction timers are delayed, single-pending per bot, concurrent across bots, revalidated, replay-safe, and cleanup-safe", () => {
+  const scheduled = [];
+  const timers = createReactionTimers({
+    setTimer(callback, delayMs) {
+      const timer = { callback, delayMs, cancelled: false, unref() {} };
+      scheduled.push(timer);
+      return timer;
+    },
+    clearTimer(timer) { timer.cancelled = true; }
+  });
+  const emitted = [];
+  let classifierCalls = 0;
+  let current = { handId: "hand-1", botUserId: "bot-1", botSeatNo: 3 };
+  const maybeSchedule = (botUserId = current.botUserId) => {
+    if (timers.hasPendingReaction("table-1", botUserId)) return false;
+    classifierCalls += 1;
+    const expected = { ...current, botUserId };
+    return timers.scheduleReaction({
+      tableId: "table-1",
+      botUserId,
+      delayMs: 300,
+      validate: () => current.handId === expected.handId
+        && current.botSeatNo === expected.botSeatNo,
+      emit: () => emitted.push(expected)
+    });
+  };
+
+  assert.equal(maybeSchedule(), true);
+  assert.deepEqual(emitted, [], "reaction must not emit synchronously");
+  assert.equal(maybeSchedule(), false);
+  assert.equal(classifierCalls, 1, "one bot must not reserve a second pending reaction");
+  assert.equal(maybeSchedule("bot-2"), true, "another bot may schedule concurrently at the same table");
+  timers.clearPendingReactions();
+  assert.equal(scheduled[0].cancelled, true);
+  assert.equal(scheduled[1].cancelled, true);
+  assert.equal(maybeSchedule(), true, "disabling reactions can cancel pending work immediately");
+  scheduled[2].callback();
+  assert.deepEqual(emitted, [{ handId: "hand-1", botUserId: "bot-1", botSeatNo: 3 }]);
+  assert.equal(maybeSchedule("bot-2"), true);
+  scheduled[3].callback();
+  assert.deepEqual(emitted, [
+    { handId: "hand-1", botUserId: "bot-1", botSeatNo: 3 },
+    { handId: "hand-1", botUserId: "bot-2", botSeatNo: 3 }
+  ]);
+
+  assert.equal(maybeSchedule(), true);
+  current = { ...current, handId: "hand-2" };
+  scheduled[4].callback();
+  assert.equal(emitted.length, 2, "stale hand/seat ownership must suppress emission");
+
+  const turn = { handId: "hand-2", userId: "human-1", startedAt: 100, deadlineAt: 1_100 };
+  const originalDeadline = turn.deadlineAt;
+  let hurryUpCount = 0;
+  timers.scheduleTurnObserver({
+    tableId: "table-1",
+    delayMs: 800,
+    validate: () => turn.handId === "hand-2" && turn.userId === "human-1"
+      && turn.startedAt === 100 && turn.deadlineAt === 1_100,
+    onDue: () => { hurryUpCount += 1; }
+  });
+  turn.userId = "human-2";
+  scheduled[5].callback();
+  assert.equal(hurryUpCount, 0);
+  assert.equal(turn.deadlineAt, originalDeadline, "turn observer must never mutate gameplay timing");
+
+  timers.scheduleReaction({ tableId: "table-1", botUserId: "bot-1", delayMs: 300, validate: () => true, emit: () => emitted.push("late-1") });
+  timers.scheduleReaction({ tableId: "table-1", botUserId: "bot-2", delayMs: 300, validate: () => true, emit: () => emitted.push("late-2") });
+  timers.scheduleTurnObserver({ tableId: "table-1", delayMs: 800, validate: () => true, onDue: () => { hurryUpCount += 1; } });
+  const reactionTimers = [scheduled[6], scheduled[7]];
+  const turnTimer = scheduled[8];
+  timers.clearTable("table-1");
+  assert.equal(reactionTimers.every((timer) => timer.cancelled), true);
+  assert.equal(turnTimer.cancelled, true);
+  reactionTimers.forEach((timer) => timer.callback());
+  turnTimer.callback();
+  assert.equal(emitted.some((entry) => typeof entry === "string" && entry.startsWith("late")), false);
+  assert.equal(hurryUpCount, 0);
+
+  assert.equal(shouldObservePersistedReactionMutation({ ok: true, outcome: "committed" }), true);
+  assert.equal(shouldObservePersistedReactionMutation({ ok: true, outcome: "durable_replay" }), false);
+});
 
 test("continuous bot profile validation accepts desired counts up to 100", () => {
   const valid = normalizeContinuousBotProfile({
@@ -1476,9 +1559,9 @@ function waitForExit(proc) {
   return new Promise((resolve) => proc.once("exit", resolve));
 }
 
-function createServer({ env = {} } = {}) {
+function createServer({ env = {}, nodeArgs = [] } = {}) {
   return getFreePort().then((port) => {
-    const child = spawn(process.execPath, ["ws-server/server.mjs"], {
+    const child = spawn(process.execPath, [...nodeArgs, "ws-server/server.mjs"], {
       env: {
         ...process.env,
         WS_POKER_LOG_LEVEL: "INFO",
@@ -5474,6 +5557,113 @@ test("active replacement: seated act accepted and observer act rejected under ob
 
 
 
+
+test("fresh persisted raise schedules one delayed contextual reaction and duplicate request schedules none", async () => {
+  const secret = "reaction-integration-secret";
+  const tableId = "table_reaction_integration";
+  const humanUserId = "reaction_human";
+  const botSeat2 = makeBotUserId(tableId, 2);
+  const botSeat3 = makeBotUserId(tableId, 3);
+  const coreState = {
+    roomId: tableId,
+    version: 8,
+    maxSeats: 6,
+    members: [
+      { userId: humanUserId, seat: 1 },
+      { userId: botSeat2, seat: 2 },
+      { userId: botSeat3, seat: 3 }
+    ],
+    seats: [
+      { userId: humanUserId, seatNo: 1, status: "ACTIVE" },
+      { userId: botSeat2, seatNo: 2, status: "ACTIVE" },
+      { userId: botSeat3, seatNo: 3, status: "ACTIVE" }
+    ],
+    seatDetailsByUserId: {
+      [humanUserId]: { isBot: false, stack: 100 },
+      [botSeat2]: { isBot: true, botProfile: "NORMAL", stack: 100 },
+      [botSeat3]: { isBot: true, botProfile: "NORMAL", stack: 100 }
+    },
+    publicStacks: { [humanUserId]: 100, [botSeat2]: 100, [botSeat3]: 100 }
+  };
+  const nowMs = Date.now();
+  const liveState = {
+    ...buildBootstrappedPokerState({
+      tableId,
+      coreState,
+      dealerSeatNo: 1,
+      startingStacks: coreState.publicStacks,
+      handVersion: coreState.version
+    }),
+    turnStartedAt: nowMs,
+    turnDeadlineAt: nowMs + 60_000
+  };
+  assert.equal(liveState.turnUserId, humanUserId);
+  const { dir, filePath } = await writePersistedFile({
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+        seatRows: [
+          { user_id: humanUserId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 },
+          { user_id: botSeat2, seat_no: 2, status: "ACTIVE", is_bot: true, stack: 100, bot_profile: "NORMAL" },
+          { user_id: botSeat3, seat_no: 3, status: "ACTIVE", is_bot: true, stack: 100, bot_profile: "NORMAL" }
+        ],
+        stateRow: { version: coreState.version, state: liveState }
+      }
+    }
+  });
+  const randomModule = await writeTestModule("Math.random = () => 0;", "reaction-random-zero.mjs");
+  const serverOptions = {
+    nodeArgs: ["--import", randomModule.filePath],
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_TIMEOUT_SWEEP_MS: "60000",
+      WS_ZOMBIE_TABLE_SWEEP_MS: "60000"
+    }
+  };
+  let serverRuntime = await createServer(serverOptions);
+  try {
+    await waitForListening(serverRuntime.child, 5000);
+    const ws = await connectClient(serverRuntime.port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: humanUserId }), "auth-reaction-integration");
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-reaction-integration", ts: "2026-08-05T18:00:00Z", payload: { tableId } });
+    assert.equal((await nextCommandResultForRequest(ws, "join-reaction-integration")).payload.status, "accepted");
+    await nextMessageOfType(ws, "table_state");
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-reaction-integration", ts: "2026-08-05T18:00:01Z", payload: { tableId, view: "snapshot" } });
+    const snapshot = await nextMessageOfType(ws, "stateSnapshot");
+    const handId = snapshot.payload.public.hand.handId;
+    const sentAt = Date.now();
+    const raiseFrame = { version: "1.0", type: "act", requestId: "raise-reaction-integration", ts: "2026-08-05T18:00:02Z", payload: { tableId, handId, action: "raise", amount: 4 } };
+    sendFrame(ws, raiseFrame);
+    assert.equal((await nextCommandResultForRequest(ws, raiseFrame.requestId)).payload.status, "accepted");
+    sendFrame(ws, raiseFrame);
+    assert.equal((await nextCommandResultForRequest(ws, raiseFrame.requestId)).payload.status, "accepted");
+    const reaction = await nextMessageMatching(ws, (frame) => frame?.type === "table_reaction", 2000);
+    assert.equal(Date.now() - sentAt >= 250, true, "the real server path must not emit the reaction synchronously");
+    assert.deepEqual(reaction.payload, { seatNo: 2, targetSeatNo: 1, reactionKey: "you_are_bluffing" });
+
+    sendFrame(ws, raiseFrame);
+    const duplicateResult = await nextCommandResultForRequest(ws, raiseFrame.requestId);
+    assert.equal(duplicateResult.payload.status, "accepted", JSON.stringify(duplicateResult.payload));
+    await assert.rejects(
+      nextMessageMatching(ws, (frame) => frame?.type === "table_reaction", 500),
+      /Timed out waiting for matching websocket message/
+    );
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-reaction-deadline", ts: "2026-08-05T18:00:03Z", payload: { tableId, view: "snapshot" } });
+    const afterReplay = await nextMessageOfType(ws, "stateSnapshot");
+    const persisted = await readPersistedFile(filePath);
+    assert.equal(afterReplay.payload.public.turn.deadlineAt, persisted.tables[tableId].stateRow.state.turnDeadlineAt,
+      "the persistence observer must leave the authoritative turn deadline unchanged");
+    ws.close();
+  } finally {
+    if (serverRuntime.child.exitCode === null) serverRuntime.child.kill("SIGTERM");
+    await waitForExit(serverRuntime.child);
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(randomModule.dir, { recursive: true, force: true });
+  }
+});
 
 test("duplicate act requestId is idempotent and does not emit extra advancing state", async () => {
   const secret = "test-secret";

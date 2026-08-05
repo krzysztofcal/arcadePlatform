@@ -626,6 +626,61 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
   assert.ok(Math.abs(Number.parseFloat(reactionDeltaY)) > 50, 'vertical delta should use the reaction layer height');
   assert.equal(harness.elements.pokerReactionLayer.children.some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))), false);
 
+  ws.onReaction({ payload: { seatNo: 3, targetSeatNo: 1, reactionKey: 'hurry_up' } });
+  await harness.flush();
+  const botOnlyBubble = harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'));
+  assert.equal(botOnlyBubble?.textContent, '⏳ Please, hurry up!');
+  assert.equal(harness.elements.pokerReactionLayer.children.filter((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect')).length, 1,
+    'UI V1 keeps the target in the event but renders bot table talk only as a sender bubble, never as a congratulations effect');
+  const menuKeys = harness.elements.pokerV2ReactionMenu.children.map((option) => option.dataset.reactionKey);
+  assert.equal(menuKeys.includes('hurry_up'), false);
+  assert.equal(menuKeys.includes('you_are_bluffing'), false);
+  assert.equal(menuKeys.includes('i_was_bluffing'), false);
+  assert.equal(menuKeys.includes('lucky'), false);
+  assert.equal(menuKeys.includes('congrats'), false);
+  assert.equal(menuKeys.includes('not_this_time'), false);
+  assert.equal(menuKeys.includes('ambient_hmm'), false);
+  assert.equal(menuKeys.includes('nice_bluff'), true);
+
+  ws.onReaction({ payload: { seatNo: 3, targetSeatNo: 1, reactionKey: 'you_are_bluffing' } });
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
+  '🧐 You are bluffing!');
+  ws.onReaction({ payload: { seatNo: 3, reactionKey: 'i_was_bluffing' } });
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
+  '😏 I was bluffing!');
+  ws.onReaction({ payload: { seatNo: 3, targetSeatNo: 1, reactionKey: 'lucky' } });
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
+  '🍀 Lucky!');
+  ws.onReaction({ payload: { seatNo: 3, targetSeatNo: 1, reactionKey: 'congrats' } });
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
+  '🎉 Congrats!');
+  ws.onReaction({ payload: { seatNo: 3, reactionKey: 'not_this_time' } });
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
+  '😌 Not this time.');
+  ws.onReaction({ payload: { seatNo: 3, reactionKey: 'ambient_here_we_go' } });
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
+  '💬 Here we go!');
+
   harness.advanceTime(3_499);
   await harness.flush();
   const targetButtonsBeforeServerRevealDeadline = harness.elements.pokerReactionLayer.children

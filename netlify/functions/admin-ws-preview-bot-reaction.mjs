@@ -38,6 +38,12 @@ function parseBody(body) {
       return { mode, minMs: payload.minMs, maxMs: payload.maxMs };
     }
   }
+  if (mode === "reaction_settings") {
+    const expectedKeys = ["enabled", "frequencyPercent", "mode"];
+    if (keys.length === expectedKeys.length && keys.every((key, index) => key === expectedKeys[index])) {
+      return { mode, enabled: payload.enabled, frequencyPercent: payload.frequencyPercent };
+    }
+  }
   const error = new Error("invalid_request");
   error.code = "invalid_request";
   error.status = 400;
@@ -76,7 +82,10 @@ function isValidBotReactionSnapshot(value) {
   if (value.mode !== "default" && value.mode !== "override") return false;
   const minMs = Number(value.active?.minMs);
   const maxMs = Number(value.active?.maxMs);
-  return Number.isInteger(minMs) && Number.isInteger(maxMs) && minMs >= 100 && maxMs <= 10_000 && minMs <= maxMs;
+  const frequencyPercent = Number(value.reactionSettings?.frequencyPercent);
+  return Number.isInteger(minMs) && Number.isInteger(maxMs) && minMs >= 100 && maxMs <= 10_000 && minMs <= maxMs
+    && typeof value.reactionSettings?.enabled === "boolean"
+    && Number.isInteger(frequencyPercent) && frequencyPercent >= 1 && frequencyPercent <= 100;
 }
 
 async function proxyBotReaction({ method, payload, adminUserId, env, fetchImpl }) {
@@ -111,7 +120,7 @@ async function proxyBotReaction({ method, payload, adminUserId, env, fetchImpl }
     } catch (_error) {}
     if (!response.ok) {
       const upstreamCode = typeof responseBody?.error === "string" ? responseBody.error : "ws_preview_unavailable";
-      const exposedCodes = new Set(["invalid_request", "invalid_range", "preview_only"]);
+      const exposedCodes = new Set(["invalid_request", "invalid_range", "invalid_reaction_settings", "preview_only"]);
       const error = new Error(exposedCodes.has(upstreamCode) ? upstreamCode : "ws_preview_unavailable");
       error.code = exposedCodes.has(upstreamCode) ? upstreamCode : "ws_preview_unavailable";
       error.status = upstreamCode === "preview_only" ? 403 : response.status === 400 ? 400 : 502;
@@ -177,7 +186,9 @@ function createAdminWsPreviewBotReactionHandler(deps = {}) {
         method: event.httpMethod,
         mode: result?.mode || null,
         minMs: result?.active?.minMs ?? null,
-        maxMs: result?.active?.maxMs ?? null
+        maxMs: result?.active?.maxMs ?? null,
+        reactionsEnabled: result?.reactionSettings?.enabled ?? null,
+        reactionFrequencyPercent: result?.reactionSettings?.frequencyPercent ?? null
       });
       return jsonResponse(200, cors, result);
     } catch (error) {

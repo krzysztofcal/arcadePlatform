@@ -24,6 +24,15 @@ Poker bots are implemented in the current runtime.
   - Browser gameplay writes stay WS-authoritative for join, leave, start-hand, and act.
   - Legacy HTTP gameplay handlers (`poker-join`, `poker-start-hand`, `poker-act`, `poker-leave`, `poker-sweep`) are retired and return `410`.
   - Behavior is server-side in WS runtime (authoritative state transitions; no client bot script).
+- Contextual reactions:
+  - Reactions observe only freshly committed joins, actions, settlements, targeted congratulations, and existing turn timestamps. They are fire-and-forget UX and cannot change legal actions, turn deadlines, timeout handling, settlement, stacks, pots, seats, autoplay, persistence, or table lifecycle.
+  - The runtime may emit `you_are_bluffing` after a raise (60%), `not_this_time` after the speaking bot's accepted fold (70%), `i_was_bluffing` after a bot wins by normal folds (75%), `nice_bluff` after another player wins by normal folds (75% fallback), `nice_hand` for a shown winning three-of-a-kind or better (90%), `wow` for a bot payout of at least 20 big blinds (100%), and either `well_played` or `congrats` after another win (one 80% roll). Accepted bot `BET` and `ALL_IN` actions use a 60% base chance for their existing reaction pool.
+  - One aggregate `lucky` classifier may target a winner (70%) when authoritative shown-hand rank vectors are unusually close, the same category is decided by a kicker, or a read-only turn-board comparison shows that the river changed the winner. Multiple matching signals still cause only one probability roll.
+  - A bot may answer a successfully broadcast targeted `nice_hand` with `thanks` (80%), greet a newly joined human with `hello` or `good_luck` (100%), or emit bot-only `hurry_up` after observing 80% of an unchanged human turn window (80%).
+  - Once per hand, one 50% ambient roll may select an available bot and one neutral table-talk message. Ambient state is process-local and cleared with table runtime resources.
+  - Admin → Ops exposes process-local `enabled` and 1–100% frequency controls for WS Preview. Frequency scales every base probability; disabling reactions also suppresses pending bot broadcasts without changing gameplay.
+  - `hurry_up`, `you_are_bluffing`, `i_was_bluffing`, `lucky`, `congrats`, `not_this_time`, and all `ambient_*` messages are bot-only keys. Humans retain the existing reaction menu, including `nice_bluff`.
+  - Contextual reactions use an independent four-second sender cooldown and at most one pending reaction timer per bot. Different bots at one table may react concurrently. Reactions retain bounded 300–1200 ms presentation jitter; observer or timer failure is logged and otherwise ignored.
 - Cash-out / terminal close:
   - Bot chip movements use the same ledger primitives as seat flows: `TABLE_BUY_IN` into table escrow and `TABLE_CASH_OUT` from escrow.
   - Terminal inactive cleanup and admin force-close share one transactional close helper.

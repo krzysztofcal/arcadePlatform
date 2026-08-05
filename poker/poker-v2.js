@@ -93,9 +93,28 @@
     { key: 'haha', emoji: '😄', label: 'Haha' },
     { key: 'wow', emoji: '😮', label: 'Wow!' },
     { key: 'bad_beat', emoji: '😢', label: 'Bad beat' },
-    { key: 'nice_bluff', emoji: '😎', label: 'Nice bluff' },
+    { key: 'nice_bluff', emoji: '😎', label: 'Nice bluff!' },
     { key: 'good_luck', emoji: '🤝', label: 'Good luck' },
-    { key: 'thanks', emoji: '❤️', label: 'Thanks' }
+    { key: 'thanks', emoji: '❤️', label: 'Thanks' },
+    { key: 'hurry_up', emoji: '⏳', label: 'Please, hurry up!', humanSelectable: false },
+    { key: 'you_are_bluffing', emoji: '🧐', label: 'You are bluffing!', humanSelectable: false },
+    { key: 'i_was_bluffing', emoji: '😏', label: 'I was bluffing!', humanSelectable: false },
+    { key: 'lucky', emoji: '🍀', label: 'Lucky!', humanSelectable: false },
+    { key: 'congrats', emoji: '🎉', label: 'Congrats!', humanSelectable: false },
+    { key: 'not_this_time', emoji: '😌', label: 'Not this time.', humanSelectable: false },
+    { key: 'ambient_hmm', emoji: '💭', label: 'Hmm...', humanSelectable: false },
+    { key: 'ambient_interesting', emoji: '💭', label: 'Interesting...', humanSelectable: false },
+    { key: 'ambient_lets_see', emoji: '💭', label: "Let's see...", humanSelectable: false },
+    { key: 'ambient_well_see', emoji: '💭', label: "We'll see.", humanSelectable: false },
+    { key: 'ambient_watching', emoji: '👀', label: "I'm watching.", humanSelectable: false },
+    { key: 'ambient_good_move', emoji: '💬', label: 'Good move.', humanSelectable: false },
+    { key: 'ambient_bold', emoji: '💬', label: 'Bold.', humanSelectable: false },
+    { key: 'ambient_nice', emoji: '💬', label: 'Nice.', humanSelectable: false },
+    { key: 'ambient_tough_one', emoji: '💬', label: 'Tough one.', humanSelectable: false },
+    { key: 'ambient_here_we_go', emoji: '💬', label: 'Here we go!', humanSelectable: false },
+    { key: 'ambient_your_move', emoji: '💬', label: 'Your move.', humanSelectable: false },
+    { key: 'ambient_lets_play', emoji: '💬', label: "Let's play.", humanSelectable: false },
+    { key: 'ambient_thinking', emoji: '🤔', label: 'Thinking...', humanSelectable: false }
   ];
   var seatAnchors = [
     { x: 50, y: 10 },
@@ -2175,7 +2194,7 @@
     var ownerUserId = currentSeatOwnerUserId(seatNo);
     if (!Number.isInteger(seatNo) || seatNo < 1 || !entry || !ownerUserId) return;
     var hasTargetSeatNo = Object.prototype.hasOwnProperty.call(payload, 'targetSeatNo');
-    if (hasTargetSeatNo){
+    if (hasTargetSeatNo && reactionKey === 'nice_hand'){
       var targetSeatNo = Number(payload.targetSeatNo);
       var targetOwnerUserId = currentSeatOwnerUserId(targetSeatNo);
       if (!Number.isInteger(targetSeatNo) || targetSeatNo < 1 || targetSeatNo === seatNo || !targetOwnerUserId) return;
@@ -2238,6 +2257,7 @@
     if (!els.reactionMenu) return;
     els.reactionMenu.innerHTML = '';
     REACTION_CATALOG.forEach(function(entry){
+      if (entry.humanSelectable === false) return;
       var option = document.createElement('button');
       option.type = 'button';
       option.className = 'poker-reaction-option';

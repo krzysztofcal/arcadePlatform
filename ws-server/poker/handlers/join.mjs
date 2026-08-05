@@ -343,4 +343,12 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
       });
     }
   }
+
+
+  return {
+    accepted: true,
+    newHumanJoined: joined.changed === true && authoritativeJoinResult?.rejoin !== true,
+    userId: connState.session.userId,
+    seatNo: authoritativeJoinResult?.seatNo ?? joined?.seatNo ?? null
+  };
 }
