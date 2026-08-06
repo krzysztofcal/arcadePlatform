@@ -1983,6 +1983,8 @@
       if (!entry) return;
       var row = document.createElement('div');
       row.className = 'poker-reaction-history__entry';
+      var author = document.createElement('span');
+      author.className = 'poker-reaction-history__author';
       var nickname = document.createElement('span');
       nickname.className = 'poker-reaction-history__nickname';
       nickname.textContent = item.senderDisplayName;
@@ -1999,8 +2001,9 @@
       var reaction = document.createElement('span');
       reaction.className = 'poker-reaction-history__reaction';
       reaction.textContent = entry.emoji + ' ' + entry.label;
-      row.appendChild(nickname);
-      row.appendChild(seat);
+      author.appendChild(nickname);
+      author.appendChild(seat);
+      row.appendChild(author);
       row.appendChild(separator);
       row.appendChild(reaction);
       els.reactionHistoryList.appendChild(row);
