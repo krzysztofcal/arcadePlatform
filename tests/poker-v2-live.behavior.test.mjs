@@ -451,7 +451,7 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
     payload: {
       tableId: 'table-1',
       stateVersion: 2,
-      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }, { userId: 'user-2', seat: 2, displayName: 'Viktor' }] },
       public: {
         hand: { handId: 'hand-1', status: 'TURN', dealerSeatNo: 2 },
         turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
@@ -478,6 +478,10 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(harness.elements.pokerV2JoinBtn.disabled, true, 'join should stay disabled once the user is seated');
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
   assert.ok(heroSeat, 'v2 should render a dedicated hero seat');
+  const occupiedSeatTwo = findSeatByLabel(harness, 'Viktor');
+  assert.equal(findSeatChild(occupiedSeatTwo, 'poker-seat-number').textContent, 'S2', 'occupied seats should render their authoritative seat number');
+  const emptySeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--empty/.test(node.className));
+  assert.equal(findSeatChild(emptySeat, 'poker-seat-number'), undefined, 'empty seats should not render occupied-player seat badges');
   assert.equal(heroSeat.style.left, '34%', 'hero seat should be shifted left to avoid the action rail');
   assert.equal(heroSeat.style.top, '91%', 'hero seat should stay near the bottom edge');
   assert.equal(harness.elements.pokerHeroCards.style.left, '42.3%', 'hero hole cards should shift left by half a card height toward the avatar');

@@ -3147,6 +3147,14 @@
       if (seat && Number.isInteger(seat.seatNo)) renderedSeatAvatars[seat.seatNo] = avatar;
       if (active) updateSeatTurnClock(avatar, getTurnClockState());
 
+      var seatNumber = null;
+      if (seat && Number.isInteger(seat.seatNo)){
+        seatNumber = document.createElement('span');
+        seatNumber.className = 'poker-seat-number';
+        seatNumber.textContent = 'S' + seat.seatNo;
+        seatNumber.setAttribute('aria-label', 'Seat ' + seat.seatNo);
+      }
+
       var cards = document.createElement('div');
       cards.className = 'poker-seat-cards';
       if (!hero && seat && seat.userId && !waitingNextHand){
@@ -3174,6 +3182,7 @@
       status.style.top = statusPosition.top;
 
       article.appendChild(avatar);
+      if (seatNumber) article.appendChild(seatNumber);
       if (seat && lastAction){
         var actionBadge = document.createElement('div');
         var badgePosition = getSeatActionBadgePosition(rotatedIndex, hero);
