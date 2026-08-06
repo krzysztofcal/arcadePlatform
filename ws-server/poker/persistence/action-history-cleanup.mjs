@@ -18,13 +18,26 @@ const BACKLOG_CACHE_TTL_MS = 15_000;
 const DEFAULT_MAX_SWEEP_ROUNDS = 1;
 const MAX_SWEEP_ROUNDS = 20;
 const ORPHAN_CLEANUP_LOCK_TIMEOUT_MS = 250;
-const ORPHAN_CLEANUP_STATEMENT_TIMEOUT_MS = 2_000;
+const ORPHAN_CLEANUP_STATEMENT_TIMEOUT_MS = 10_000;
+const ORPHAN_CLEANUP_MAX_HAND_BATCH_SIZE = 25;
 // Preview uses bounded repeated batches for stress tests; Production stays at one round.
 const CLEANUP_PHASE_ORDER = Object.freeze(["orphan_hole_cards", "hole_cards", "ordinary_actions", "hand_settled"]);
 
 function resolveCutoff(retentionMs) {
   if (!Number.isFinite(retentionMs) || retentionMs <= 0) return null;
   return new Date(Date.now() - retentionMs).toISOString();
+}
+
+function postgresErrorDetails(error) {
+  const text = (value, maxLength) => typeof value === "string" && value.length > 0
+    ? value.slice(0, maxLength)
+    : null;
+  return {
+    code: text(error?.code, 40),
+    message: text(error?.message, 500),
+    detail: text(error?.detail, 1_000),
+    where: text(error?.where, 1_000)
+  };
 }
 
 // Historical recovery path for hands whose action history (including
@@ -374,6 +387,7 @@ export function createActionHistoryCleanup({
   }
 
   const batchSize = resolveBatchSize(env.WS_POKER_ACTION_HISTORY_BATCH_SIZE);
+  const orphanBatchSize = Math.min(batchSize, ORPHAN_CLEANUP_MAX_HAND_BATCH_SIZE);
   const lockLimit = batchSize * 2;
   const sweepRounds = Number.isInteger(maxSweepRounds)
     && maxSweepRounds >= DEFAULT_MAX_SWEEP_ROUNDS
@@ -467,7 +481,7 @@ export function createActionHistoryCleanup({
 select count(*)::bigint as orphan_hand_rows,
        coalesce(sum(card_rows), 0)::bigint as orphan_card_rows
   from orphan_candidates;`,
-          [cutoffs.botActionCutoff, cutoffs.humanActionCutoff, batchSize, lockLimit]
+          [cutoffs.botActionCutoff, cutoffs.humanActionCutoff, orphanBatchSize, lockLimit]
         );
         const rows = await tx.unsafe(
           `with phase1_locked_tables as (
@@ -636,6 +650,7 @@ select
       let phase2Deleted = 0;
       let holeCardsPhaseEnabledForSweep = cutoffs.botActionEnabled || cutoffs.humanActionEnabled;
       let orphanHoleCardsPhaseEnabledForSweep = holeCardsPhaseEnabledForSweep;
+      let orphanFailure = null;
       const failedPhases = new Set();
 
       for (let round = 0; round < sweepRounds; round += 1) {
@@ -646,12 +661,13 @@ select
               tx,
               botActionCutoff: cutoffs.botActionCutoff,
               humanActionCutoff: cutoffs.humanActionCutoff,
-              batchSize,
+              batchSize: orphanBatchSize,
               lockLimit
             }), { env });
             orphanHoleCardsDeleted += orphanHoleCardsRoundDeleted;
-          } catch (_error) {
+          } catch (error) {
             failedPhases.add("orphan_hole_cards");
+            orphanFailure = postgresErrorDetails(error);
             orphanHoleCardsPhaseEnabledForSweep = false;
           }
         }
@@ -730,6 +746,7 @@ select
           phase1Deleted,
           phase2Deleted,
           batchSize,
+          orphanBatchSize,
           lockLimit,
           sweepRounds
         });
@@ -742,8 +759,10 @@ select
           phase1Deleted,
           phase2Deleted,
           batchSize,
+          orphanBatchSize,
           lockLimit,
-          sweepRounds
+          sweepRounds,
+          orphanFailure
         });
       }
       return result;

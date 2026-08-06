@@ -294,7 +294,8 @@ be an object with a string `handId`. A non-empty value protects that hand;
 Missing, null, or non-string values fail closed. Candidate age is based on
 `MAX(poker_hole_cards.created_at)`, so one fresh row protects the whole hand.
 The phase uses the existing bot/human action-retention cutoffs and sets local
-`250ms` lock and `2000ms` statement timeouts. Timeout or deadlock rolls back
+`250ms` lock and `10000ms` statement timeouts. The orphan hand batch is capped
+at 25 even when the shared cleanup batch is larger. Timeout or deadlock rolls back
 only this phase; normal cleanup continues and the orphan phase retries on the
 next sweep.
 
@@ -399,7 +400,7 @@ candidate `SELECT` through `EXPLAIN (ANALYZE, BUFFERS)`. Run the complete
 ```sql
 BEGIN;
 SET LOCAL lock_timeout = '250ms';
-SET LOCAL statement_timeout = '2000ms';
+SET LOCAL statement_timeout = '10000ms';
 EXPLAIN (ANALYZE, BUFFERS)
 WITH locked_states AS MATERIALIZED (...),
      orphan_candidates AS MATERIALIZED (...)
