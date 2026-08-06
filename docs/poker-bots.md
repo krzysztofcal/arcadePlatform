@@ -50,6 +50,7 @@ Poker bots are implemented in the current runtime.
 - The assignment is stateless and collision-free within the supported table capacity: reconnects, late observers, and authoritative restores derive the same result, while removing another bot does not rename remaining seats.
 - Images load from `/poker/assets/avatars/bots/` under the existing same-origin CSP policy. A failed image keeps the selected bot name and falls back to initials derived from that name.
 - Human public-profile avatars, guests, snapshots, poker persistence, and server runtime remain unchanged.
+- Authenticated Poker V2 users can locally hide reaction bubbles, reaction history, or bot reactions. These browser-only preferences are best-effort, user-scoped, and do not alter server reaction generation or gameplay; guest sessions always use in-memory defaults.
 
 ## Persisted seat fields used by bot flows
 

@@ -110,7 +110,8 @@ function createHarness(options = {}){
   const elements = {};
   [
     'xpBadge',
-    'pokerMenuToggle', 'pokerMenuPanel', 'pokerLobbyLink',
+    'pokerMenuToggle', 'pokerMenuPanel', 'pokerLobbyLink', 'pokerSocialSettingsToggle', 'pokerSocialSettingsPanel', 'pokerSocialSettingsClose',
+    'pokerReactionBubblesPreference', 'pokerReactionHistoryPreference', 'pokerBotReactionsPreference',
     'pokerSeatLayer', 'pokerSeatChipLayer', 'pokerChipFxLayer', 'pokerReactionLayer', 'pokerPotPill', 'pokerPotChipStack', 'pokerCommunityCards', 'pokerDealerChip',
     'pokerHeroCards', 'pokerV2LiveStatus', 'pokerV2TableMeta', 'pokerV2TurnText',
     'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2GuestPanel', 'pokerV2GuestBadge', 'pokerV2SignInBtn', 'pokerV2SeatNo',
@@ -142,6 +143,10 @@ function createHarness(options = {}){
   elements.pokerV2ClosedTableModal.hidden = true;
   elements.pokerV2RebuyPanel.hidden = true;
   elements.pokerMenuPanel.setAttribute('hidden', 'hidden');
+  elements.pokerSocialSettingsPanel.hidden = true;
+  elements.pokerReactionBubblesPreference.type = 'checkbox';
+  elements.pokerReactionHistoryPreference.type = 'checkbox';
+  elements.pokerBotReactionsPreference.type = 'checkbox';
 
   const documentEvents = {};
   const logs = [];
@@ -225,6 +230,7 @@ function createHarness(options = {}){
   const intervalTimers = [];
   const timeoutTimers = [];
   const sessionStorageEntries = new Map();
+  const localStorageEntries = options.localStorageEntries instanceof Map ? options.localStorageEntries : new Map();
   let nextTimeoutId = 1;
   let nowMs = Number.isFinite(options.nowMs) ? options.nowMs : 1_700_000_000_000;
   const FakeDate = class extends Date {
@@ -274,6 +280,18 @@ function createHarness(options = {}){
       removeItem(key){ sessionStorageEntries.delete(String(key)); },
       clear(){ sessionStorageEntries.clear(); }
     },
+    localStorage: {
+      getItem(key){
+        if (options.localStorageReadError) throw new Error('local storage read failed');
+        return localStorageEntries.has(String(key)) ? localStorageEntries.get(String(key)) : null;
+      },
+      setItem(key, value){
+        if (options.localStorageWriteError) throw new Error('local storage write failed');
+        localStorageEntries.set(String(key), String(value));
+      },
+      removeItem(key){ localStorageEntries.delete(String(key)); },
+      clear(){ localStorageEntries.clear(); }
+    },
     document: {
       readyState: 'loading',
       addEventListener(type, fn){ documentEvents[type] = documentEvents[type] || []; documentEvents[type].push(fn); },
@@ -293,6 +311,7 @@ function createHarness(options = {}){
   };
   sandbox.window.document = sandbox.document;
   sandbox.window.sessionStorage = sandbox.sessionStorage;
+  sandbox.window.localStorage = sandbox.localStorage;
   if (Object.prototype.hasOwnProperty.call(options, 'authUser')) {
     sandbox.window.SupabaseAuth = {
       getCurrentUser: async () => options.authUser,
@@ -360,7 +379,8 @@ async function flush(){
     setAuthToken(nextToken){ activeToken = nextToken; },
     triggerAuthChange(user){ return authChangeHandler ? authChangeHandler('TOKEN_REFRESHED', user) : null; },
     getIntervalCount(){ return intervalTimers.length; },
-    getSessionStorage(key){ return sandbox.sessionStorage.getItem(key); }
+    getSessionStorage(key){ return sandbox.sessionStorage.getItem(key); },
+    getLocalStorage(key){ return sandbox.localStorage.getItem(key); }
   };
 }
 
@@ -411,7 +431,7 @@ async function bootReactionHistoryHarness(options = {}){
         maxSeats: 6,
         members: [
           { userId: 'user-1', seat: 1, displayName: 'Alice' },
-          { userId: 'user-2', seat: 2, displayName: options.historySenderDisplayName || 'Viktor' }
+          { userId: 'user-2', seat: 2, displayName: options.historySenderDisplayName || 'Viktor', isBot: options.historySenderIsBot === true }
         ]
       },
       public: { hand: { handId: 'hand-1', status: 'TURN' }, pot: { total: 10 } },
@@ -420,6 +440,13 @@ async function bootReactionHistoryHarness(options = {}){
   });
   await harness.flush();
   return { harness, ws };
+}
+
+function reactionBubbleTexts(harness){
+  return harness.elements.pokerReactionLayer.children
+    .flatMap((anchor) => anchor.children || [])
+    .filter((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))
+    .map((child) => child.textContent);
 }
 
 test('poker v2 boots live mode, preserves table links, and sends WS commands', async () => {
@@ -635,6 +662,87 @@ test('reaction history survives same-table reconnect and clears on definitive le
   await harness.flush();
   assert.equal(reactionHistoryRows(harness).length, 0);
   assert.equal(harness.elements.pokerReactionHistoryCount.textContent, '0');
+});
+
+test('social preferences persist per authenticated user while guests stay in-memory and storage failures are safe', async () => {
+  const storage = new Map();
+  const first = createHarness({ localStorageEntries: storage });
+  first.fireDomContentLoaded();
+  await first.flush();
+  first.elements.pokerReactionBubblesPreference.click();
+  const userOneKey = 'kcswh:poker-social-preferences:v1:user-1';
+  assert.equal(JSON.parse(storage.get(userOneKey)).reactionBubblesEnabled, false);
+
+  const reload = createHarness({ localStorageEntries: storage });
+  reload.fireDomContentLoaded();
+  await reload.flush();
+  assert.equal(reload.elements.pokerReactionBubblesPreference.checked, false);
+
+  const userTwoToken = 'aaa.' + Buffer.from(JSON.stringify({ sub: 'user-2' })).toString('base64') + '.zzz';
+  const otherUser = createHarness({ localStorageEntries: storage, token: userTwoToken });
+  otherUser.fireDomContentLoaded();
+  await otherUser.flush();
+  assert.equal(otherUser.elements.pokerReactionBubblesPreference.checked, true);
+
+  const guest = createHarness({ localStorageEntries: storage, token: null, search: '?tableId=table-1&guest=1', guestSession: { token: 'guest-token', tableId: 'table-1', expiresAt: Date.now() + 60_000 } });
+  guest.fireDomContentLoaded();
+  await guest.flush();
+  guest.elements.pokerReactionHistoryPreference.click();
+  assert.equal([...storage.keys()].some((key) => key.includes('guest') || key.endsWith(':hero')), false);
+
+  const failing = createHarness({ localStorageEntries: storage, localStorageReadError: true, localStorageWriteError: true });
+  failing.fireDomContentLoaded();
+  await failing.flush();
+  assert.equal(failing.elements.pokerReactionBubblesPreference.checked, true);
+  failing.elements.pokerReactionBubblesPreference.click();
+  assert.equal(failing.elements.pokerReactionBubblesPreference.checked, false);
+  assert.ok(failing.logs.some((entry) => entry.kind === 'poker_social_preferences_read_failed'));
+  assert.ok(failing.logs.some((entry) => entry.kind === 'poker_social_preferences_write_failed'));
+});
+
+test('social preferences independently hide bubbles and history without dropping validated human history', async () => {
+  const { harness, ws } = await bootReactionHistoryHarness();
+  harness.elements.pokerReactionBubblesPreference.click();
+  ws.onReaction({ payload: { seatNo: 2, reactionKey: 'wow' } });
+  await harness.flush();
+  assert.deepEqual(reactionBubbleTexts(harness), []);
+  assert.equal(reactionHistoryRows(harness).length, 1);
+
+  harness.elements.pokerReactionHistoryPreference.click();
+  ws.onReaction({ payload: { seatNo: 1, reactionKey: 'hello' } });
+  await harness.flush();
+  assert.equal(harness.elements.pokerReactionHistory.hidden, true);
+  assert.equal(reactionHistoryRows(harness).length, 2);
+  harness.elements.pokerReactionHistoryPreference.click();
+  assert.equal(harness.elements.pokerReactionHistory.hidden, false);
+  assert.equal(reactionHistoryRows(harness).length, 2);
+});
+
+test('bot preference suppresses and clears bot artifacts while human reactions remain', async () => {
+  const { harness, ws } = await bootReactionHistoryHarness({ historySenderIsBot: true });
+  ws.onReaction({ payload: { seatNo: 2, reactionKey: 'wow' } });
+  harness.advanceTime(60_000);
+  ws.onReaction({ payload: { seatNo: 1, reactionKey: 'hello' } });
+  ws.onReaction({ payload: { seatNo: 2, reactionKey: 'wow' } });
+  await harness.flush();
+  assert.equal(reactionHistoryRows(harness).length, 3);
+  assert.deepEqual(reactionBubbleTexts(harness).sort(), ['👋 Hello', '😮 Wow!'].sort());
+
+  harness.elements.pokerBotReactionsPreference.click();
+  await harness.flush();
+  assert.equal(reactionHistoryRows(harness).length, 1);
+  assert.deepEqual(reactionBubbleTexts(harness), ['👋 Hello']);
+  ws.onReaction({ payload: { seatNo: 2, reactionKey: 'thanks' } });
+  ws.onReaction({ payload: { seatNo: 1, reactionKey: 'wow' } });
+  await harness.flush();
+  assert.equal(reactionHistoryRows(harness).length, 2);
+  assert.deepEqual(reactionBubbleTexts(harness), ['😮 Wow!']);
+  harness.advanceTime(9 * 60_000);
+  await harness.flush();
+  assert.equal(reactionHistoryRows(harness).length, 2);
+  harness.advanceTime(60_000);
+  await harness.flush();
+  assert.equal(reactionHistoryRows(harness).length, 0);
 });
 
 test('poker v2 uses the WS settlement reveal deadline for targeted reactions', async () => {

@@ -45,7 +45,15 @@
 
     <nav class="poker-menu-panel" id="pokerMenuPanel" hidden>
       <a id="pokerLobbyLink" href="/poker/">Back to lobby</a>
+      <button type="button" class="poker-menu-panel__button" id="pokerSocialSettingsToggle" aria-expanded="false" aria-controls="pokerSocialSettingsPanel">Social settings</button>
     </nav>
+
+    <section class="poker-social-settings" id="pokerSocialSettingsPanel" aria-labelledby="pokerSocialSettingsTitle" hidden>
+      <div class="poker-social-settings__header"><strong id="pokerSocialSettingsTitle">Social settings</strong><button type="button" class="poker-social-settings__close" id="pokerSocialSettingsClose" aria-label="Close social settings">×</button></div>
+      <label class="poker-social-settings__option"><input type="checkbox" id="pokerReactionBubblesPreference" checked> Reaction bubbles</label>
+      <label class="poker-social-settings__option"><input type="checkbox" id="pokerReactionHistoryPreference" checked> Reaction history</label>
+      <label class="poker-social-settings__option"><input type="checkbox" id="pokerBotReactionsPreference" checked> Bot reactions</label>
+    </section>
 
     <section class="poker-live-panel">
       <div class="poker-live-meta">
