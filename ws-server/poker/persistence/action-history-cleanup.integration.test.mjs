@@ -200,6 +200,26 @@ test("action-history cleanup executes hole-card and settlement SQL on PostgreSQL
       })
     });
 
+    const orphanFixture = await db.unsafe(
+      `select t.status,
+              t.has_human_participant,
+              ps.state,
+              jsonb_typeof(ps.state -> 'handId') as hand_id_type,
+              hc.created_at,
+              hc.hand_id <> ps.state ->> 'handId' as differs_from_current,
+              exists (select 1 from public.poker_actions pa where pa.table_id = hc.table_id and pa.hand_id = hc.hand_id) as has_actions
+         from public.poker_hole_cards hc
+         join public.poker_state ps on ps.table_id = hc.table_id
+         join public.poker_tables t on t.id = hc.table_id
+        where hc.table_id = $1 and hc.hand_id = $2`,
+      [tableId, orphanHandId]
+    );
+    assert.equal(orphanFixture.length, 1);
+    assert.equal(orphanFixture[0].status, "CLOSED", JSON.stringify(orphanFixture[0]));
+    assert.equal(orphanFixture[0].hand_id_type, "string", JSON.stringify(orphanFixture[0]));
+    assert.equal(orphanFixture[0].differs_from_current, true, JSON.stringify(orphanFixture[0]));
+    assert.equal(orphanFixture[0].has_actions, false, JSON.stringify(orphanFixture[0]));
+
     const first = await cleanup.sweep();
     assert.equal(first.ok, true);
     const orphanAfterFirst = await db.unsafe(
