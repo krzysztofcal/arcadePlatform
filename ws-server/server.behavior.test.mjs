@@ -5558,7 +5558,7 @@ test("active replacement: seated act accepted and observer act rejected under ob
 
 
 
-test("fresh persisted raise schedules one delayed contextual reaction and duplicate request schedules none", async () => {
+test("human hello gets one bot reply while preflop raise and duplicate request schedule no bluff accusation", async () => {
   const secret = "reaction-integration-secret";
   const tableId = "table_reaction_integration";
   const humanUserId = "reaction_human";
@@ -5634,21 +5634,33 @@ test("fresh persisted raise schedules one delayed contextual reaction and duplic
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-reaction-integration", ts: "2026-08-05T18:00:01Z", payload: { tableId, view: "snapshot" } });
     const snapshot = await nextMessageOfType(ws, "stateSnapshot");
     const handId = snapshot.payload.public.hand.handId;
-    const sentAt = Date.now();
+    const helloFrame = { version: "1.0", type: "reaction_send", requestId: "hello-reaction-integration", ts: "2026-08-05T18:00:02Z", payload: { tableId, reactionKey: "hello" } };
+    sendFrame(ws, helloFrame);
+    assert.equal((await nextCommandResultForRequest(ws, helloFrame.requestId)).payload.status, "accepted");
+    const humanHello = await nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.seatNo === 1, 1000);
+    assert.deepEqual(humanHello.payload, { seatNo: 1, reactionKey: "hello" });
+    const botHello = await nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.seatNo !== 1, 2000);
+    assert.deepEqual(botHello.payload, { seatNo: 2, targetSeatNo: 1, reactionKey: "hello" });
+    await assert.rejects(
+      nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.reactionKey === "hello", 1300),
+      /Timed out waiting for matching websocket message/
+    );
+
     const raiseFrame = { version: "1.0", type: "act", requestId: "raise-reaction-integration", ts: "2026-08-05T18:00:02Z", payload: { tableId, handId, action: "raise", amount: 4 } };
     sendFrame(ws, raiseFrame);
     assert.equal((await nextCommandResultForRequest(ws, raiseFrame.requestId)).payload.status, "accepted");
     sendFrame(ws, raiseFrame);
     assert.equal((await nextCommandResultForRequest(ws, raiseFrame.requestId)).payload.status, "accepted");
-    const reaction = await nextMessageMatching(ws, (frame) => frame?.type === "table_reaction", 2000);
-    assert.equal(Date.now() - sentAt >= 250, true, "the real server path must not emit the reaction synchronously");
-    assert.deepEqual(reaction.payload, { seatNo: 2, targetSeatNo: 1, reactionKey: "you_are_bluffing" });
+    await assert.rejects(
+      nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.reactionKey === "you_are_bluffing", 1500),
+      /Timed out waiting for matching websocket message/
+    );
 
     sendFrame(ws, raiseFrame);
     const duplicateResult = await nextCommandResultForRequest(ws, raiseFrame.requestId);
     assert.equal(duplicateResult.payload.status, "accepted", JSON.stringify(duplicateResult.payload));
     await assert.rejects(
-      nextMessageMatching(ws, (frame) => frame?.type === "table_reaction", 500),
+      nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.reactionKey === "you_are_bluffing", 500),
       /Timed out waiting for matching websocket message/
     );
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-reaction-deadline", ts: "2026-08-05T18:00:03Z", payload: { tableId, view: "snapshot" } });
@@ -5662,6 +5674,158 @@ test("fresh persisted raise schedules one delayed contextual reaction and duplic
     await waitForExit(serverRuntime.child);
     await fs.rm(dir, { recursive: true, force: true });
     await fs.rm(randomModule.dir, { recursive: true, force: true });
+  }
+});
+
+test("post-flop raise reaction emits only while the selected bot remains active through jitter", async () => {
+  const secret = "post-flop-reaction-secret";
+  const tableId = "table_post_flop_reaction";
+  const humanUserId = "post_flop_human";
+  const botSeat2 = makeBotUserId(tableId, 2);
+  const botSeat3 = makeBotUserId(tableId, 3);
+  const coreState = {
+    roomId: tableId,
+    version: 8,
+    maxSeats: 6,
+    members: [
+      { userId: humanUserId, seat: 1 },
+      { userId: botSeat2, seat: 2 },
+      { userId: botSeat3, seat: 3 }
+    ],
+    seats: [
+      { userId: humanUserId, seatNo: 1, status: "ACTIVE" },
+      { userId: botSeat2, seatNo: 2, status: "ACTIVE" },
+      { userId: botSeat3, seatNo: 3, status: "ACTIVE" }
+    ],
+    seatDetailsByUserId: {
+      [humanUserId]: { isBot: false, stack: 100 },
+      [botSeat2]: { isBot: true, botProfile: "NORMAL", stack: 100 },
+      [botSeat3]: { isBot: true, botProfile: "NORMAL", stack: 100 }
+    },
+    publicStacks: { [humanUserId]: 100, [botSeat2]: 100, [botSeat3]: 100 }
+  };
+  const nowMs = Date.now();
+  const bootstrapped = buildBootstrappedPokerState({
+    tableId,
+    coreState,
+    dealerSeatNo: 3,
+    startingStacks: coreState.publicStacks,
+    handVersion: coreState.version
+  });
+  const community = bootstrapped.deck.slice(0, 3);
+  const liveState = {
+    ...bootstrapped,
+    phase: "FLOP",
+    community,
+    communityDealt: 3,
+    deck: bootstrapped.deck.slice(3),
+    currentBet: 2,
+    lastRaiseSize: 2,
+    turnUserId: humanUserId,
+    turnStartedAt: nowMs,
+    turnDeadlineAt: nowMs + 60_000,
+    stacks: { ...bootstrapped.stacks, [botSeat3]: bootstrapped.stacks[botSeat3] - 2 },
+    contributionsByUserId: {
+      ...bootstrapped.contributionsByUserId,
+      [botSeat3]: bootstrapped.contributionsByUserId[botSeat3] + 2
+    },
+    toCallByUserId: { [humanUserId]: 2, [botSeat2]: 2, [botSeat3]: 0 },
+    betThisRoundByUserId: { [humanUserId]: 0, [botSeat2]: 0, [botSeat3]: 2 },
+    actedThisRoundByUserId: { [humanUserId]: false, [botSeat2]: false, [botSeat3]: true }
+  };
+  const randomModule = await writeTestModule("Math.random = () => 0;", "post-flop-reaction-random-zero.mjs");
+  const foldingAutoplayModule = await writeTestModule(`
+export function createAcceptedBotStepExecutor({ tableManager, persistMutatedState, onBotStepPersisted }) {
+  return async ({ tableId, requestId, frameTs }) => {
+    const state = tableManager.persistedPokerState(tableId);
+    const botUserId = state?.turnUserId;
+    const expectedVersion = tableManager.persistedStateVersion(tableId);
+    const applied = tableManager.applyAction({
+      tableId,
+      handId: state?.handId,
+      userId: botUserId,
+      requestId: \`fold-before-reaction:\${requestId || "test"}\`,
+      action: "FOLD",
+      amount: 0,
+      nowIso: frameTs || new Date().toISOString()
+    });
+    if (!applied?.accepted) return { ok: false, changed: false, reason: applied?.reason || "fold_rejected" };
+    const nextState = tableManager.privatePokerStateForAudit(tableId);
+    const persisted = await persistMutatedState({
+      tableId,
+      expectedVersion,
+      mutationKind: "bot_action",
+      acceptedActionAudit: applied.acceptedActionAudit,
+      nextStateOverride: nextState,
+      privateStateForHoleCardsOverride: nextState
+    });
+    if (!persisted?.ok) return { ...persisted, changed: false };
+    await onBotStepPersisted({ tableId, botTurnUserId: botUserId, botAction: "FOLD" });
+    return { ok: true, changed: true, actionCount: 1, finalStateVersion: persisted.newVersion };
+  };
+}
+`, "fold-before-post-flop-reaction.mjs");
+
+  async function runScenario({ foldDuringJitter }) {
+    const { dir, filePath } = await writePersistedFile({
+      tables: {
+        [tableId]: {
+          tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+          seatRows: [
+            { user_id: humanUserId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 },
+            { user_id: botSeat2, seat_no: 2, status: "ACTIVE", is_bot: true, stack: 100, bot_profile: "NORMAL" },
+            { user_id: botSeat3, seat_no: 3, status: "ACTIVE", is_bot: true, stack: 100, bot_profile: "NORMAL" }
+          ],
+          stateRow: { version: coreState.version, state: liveState }
+        }
+      }
+    });
+    const serverRuntime = await createServer({
+      nodeArgs: ["--import", randomModule.filePath],
+      env: {
+        WS_AUTH_REQUIRED: "1",
+        WS_AUTH_TEST_SECRET: secret,
+        WS_PERSISTED_STATE_FILE: filePath,
+        WS_TIMEOUT_SWEEP_MS: "60000",
+        WS_ZOMBIE_TABLE_SWEEP_MS: "60000",
+        ...(foldDuringJitter ? { WS_ACCEPTED_BOT_AUTOPLAY_ADAPTER_MODULE_PATH: foldingAutoplayModule.filePath } : {})
+      }
+    });
+    try {
+      await waitForListening(serverRuntime.child, 5000);
+      const ws = await connectClient(serverRuntime.port);
+      await hello(ws);
+      await auth(ws, makeHs256Jwt({ secret, sub: humanUserId }), `auth-post-flop-${foldDuringJitter}`);
+      const suffix = foldDuringJitter ? "folded" : "active";
+      sendFrame(ws, { version: "1.0", type: "table_join", requestId: `join-post-flop-${suffix}`, ts: "2026-08-06T12:00:00Z", payload: { tableId } });
+      assert.equal((await nextCommandResultForRequest(ws, `join-post-flop-${suffix}`)).payload.status, "accepted");
+      await nextMessageOfType(ws, "table_state");
+      sendFrame(ws, { version: "1.0", type: "act", requestId: `raise-post-flop-${suffix}`, ts: "2026-08-06T12:00:01Z", payload: { tableId, handId: liveState.handId, action: "raise", amount: 4 } });
+      const raiseResult = await nextCommandResultForRequest(ws, `raise-post-flop-${suffix}`);
+      assert.equal(raiseResult.payload.status, "accepted", JSON.stringify(raiseResult.payload));
+      if (foldDuringJitter) {
+        await assert.rejects(
+          nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.reactionKey === "you_are_bluffing", 1000),
+          /Timed out waiting for matching websocket message/
+        );
+      } else {
+        const reaction = await nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.reactionKey === "you_are_bluffing", 1500);
+        assert.deepEqual(reaction.payload, { seatNo: 2, targetSeatNo: 1, reactionKey: "you_are_bluffing" });
+      }
+      ws.close();
+    } finally {
+      if (serverRuntime.child.exitCode === null) serverRuntime.child.kill("SIGTERM");
+      await waitForExit(serverRuntime.child);
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  try {
+    await runScenario({ foldDuringJitter: false });
+    await runScenario({ foldDuringJitter: true });
+  } finally {
+    await fs.rm(randomModule.dir, { recursive: true, force: true });
+    await fs.rm(foldingAutoplayModule.dir, { recursive: true, force: true });
   }
 });
 
