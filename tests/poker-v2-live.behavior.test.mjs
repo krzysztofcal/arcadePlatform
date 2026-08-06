@@ -560,7 +560,12 @@ test('reaction history appends only an authoritative table_reaction once', async
   await harness.flush();
   assert.equal(reactionHistoryRows(harness).length, 1);
   assert.equal(reactionHistoryRows(harness)[0].textContent, 'Viktor · 😮 Wow!');
-  assert.equal(harness.elements.pokerReactionHistoryToggle.textContent, 'History (1)');
+
+  ws.onReaction({ payload: { seatNo: 1, reactionKey: 'wow' } });
+  await harness.flush();
+  assert.equal(reactionHistoryRows(harness).length, 2);
+  assert.equal(reactionHistoryRows(harness)[1].textContent, 'Alice · 😮 Wow!');
+  assert.equal(harness.elements.pokerReactionHistoryToggle.textContent, 'History (2)');
 });
 
 test('reaction history records one validated targeted nice_hand before its effect return', async () => {

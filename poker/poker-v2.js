@@ -2296,7 +2296,7 @@
       if (!Number.isInteger(targetSeatNo) || targetSeatNo < 1 || targetSeatNo === seatNo || !targetOwnerUserId) return;
     }
     var senderSeat = state.seats.find(function(seat){ return seat && seat.seatNo === seatNo && seat.userId === ownerUserId; });
-    appendReactionHistory(seatNo, getDisplayName(senderSeat || { userId: ownerUserId }), reactionKey);
+    appendReactionHistory(seatNo, getPublicDisplayName(senderSeat || { userId: ownerUserId }), reactionKey);
     if (hasTargetSeatNo && reactionKey === 'nice_hand'){
       var effectId = String(nextTargetedReactionEffectId++);
       var effect = {
@@ -2408,6 +2408,11 @@
   function getDisplayName(seat){
     if (!seat) return 'Open seat';
     if (isCurrentUserSeat(seat)) return 'You';
+    return seat.displayName || (seat.isBot ? 'Bot' : shortId(seat.userId)) || 'Player';
+  }
+
+  function getPublicDisplayName(seat){
+    if (!seat) return 'Player';
     return seat.displayName || (seat.isBot ? 'Bot' : shortId(seat.userId)) || 'Player';
   }
 
