@@ -44,6 +44,7 @@ import {
   classifySettlementReaction,
   canBotStartReaction,
   deriveRiverChangedWinnerUserIds,
+  eligibleActiveHandBotSeats,
   evaluateHumanReactionCommand,
   isCompleteReactionSettlement,
   tryCreateBotReaction,
@@ -115,6 +116,7 @@ const DEFAULT_SEATED_RECONNECT_GRACE_MS = 90_000;
 const DEFAULT_ACTIVE_SEAT_FRESH_MS = 120_000;
 const FAST_SETTLED_ROLLOVER_RETRY_DELAYS_MS = [1_000, 5_000, 15_000, 30_000];
 const SLOW_SETTLED_ROLLOVER_RETRY_MS = 60_000;
+const HUMAN_HELLO_REPLY_PROBABILITY = 0.6;
 
 function resolvePresenceTtlMs(rawValue) {
   const parsed = Number(rawValue);
@@ -484,7 +486,11 @@ function seatOwnerForTable(tableId, seatNo) {
   return typeof member?.userId === "string" ? member.userId : null;
 }
 
-function scheduleBotReactionCandidate(tableId, createCandidate, { handId = null, targetUserId = null } = {}) {
+function scheduleBotReactionCandidate(tableId, createCandidate, {
+  handId = null,
+  targetUserId = null,
+  validateCurrentState = null
+} = {}) {
   const candidate = createCandidate();
   if (!candidate) return false;
   if (reactionTimers.hasPendingReaction(tableId, candidate.botUserId)) return false;
@@ -509,8 +515,16 @@ function scheduleBotReactionCandidate(tableId, createCandidate, { handId = null,
     const state = tableManager.privatePokerStateForAudit?.(tableId);
     if (handId && state?.handId !== handId) return;
     if (expectedTargetUserId && seatOwnerForTable(tableId, candidate.targetSeatNo) !== expectedTargetUserId) return;
+    if (typeof validateCurrentState === "function" && validateCurrentState(candidate, state) !== true) return;
     return true;
   }, emit: () => broadcastTableReaction(tableId, reserved) });
+}
+
+function candidateRemainsActiveInHand(candidate, state) {
+  return eligibleActiveHandBotSeats({
+    state,
+    botSeats: [{ userId: candidate?.botUserId, seatNo: candidate?.botSeatNo }]
+  }).length === 1;
 }
 
 function scheduleReservedBotReaction(tableId, candidate, { botUserId, handId = null } = {}) {
@@ -576,9 +590,17 @@ function observeFreshPokerMutation({ tableId, acceptedActionAudit, nextState }) 
     scheduleBotReactionCandidate(tableId, () => classifyRaiseReaction({
       actorUserId,
       actorSeatNo: actorSeat?.seatNo,
-      botSeats: availableBotSeatsForReaction(tableId),
+      street: nextState?.phase,
+      botSeats: eligibleActiveHandBotSeats({
+        state: nextState,
+        botSeats: availableBotSeatsForReaction(tableId)
+      }),
       reactionSettings: currentBotReactionSettings()
-    }), { handId, targetUserId: actorUserId });
+    }), {
+      handId,
+      targetUserId: actorUserId,
+      validateCurrentState: candidateRemainsActiveInHand
+    });
   }
 
   if (isCompleteReactionSettlement(nextState)
@@ -595,9 +617,12 @@ function observeFreshPokerMutation({ tableId, acceptedActionAudit, nextState }) 
     && evaluatedAmbientReactionHandByTableId.get(tableId) !== handId) {
     evaluatedAmbientReactionHandByTableId.set(tableId, handId);
     scheduleBotReactionCandidate(tableId, () => classifyAmbientReaction({
-      botSeats: availableBotSeatsForReaction(tableId),
+      botSeats: eligibleActiveHandBotSeats({
+        state: nextState,
+        botSeats: availableBotSeatsForReaction(tableId)
+      }),
       reactionSettings: currentBotReactionSettings()
-    }), { handId });
+    }), { handId, validateCurrentState: candidateRemainsActiveInHand });
   }
 
   syncHumanTurnReactionTimer(tableId, nextState);
@@ -4351,6 +4376,20 @@ wss.on("connection", (ws) => {
         reason: null
       });
       const broadcastResult = broadcastTableReaction(tableId, result);
+      if (!targeted && result.reactionKey === "hello" && broadcastResult.sentCount > 0) {
+        runReactionObserverSafely("human_hello", () => scheduleBotReactionCandidate(
+          tableId,
+          () => classifyDirectedBotReaction({
+            botSeats: availableBotSeatsForReaction(tableId),
+            excludedUserId: senderUserId,
+            targetSeatNo: senderSeatNo,
+            reactionKeys: ["hello"],
+            probability: HUMAN_HELLO_REPLY_PROBABILITY,
+            reactionSettings: currentBotReactionSettings()
+          }),
+          { targetUserId: senderUserId }
+        ));
+      }
       if (targeted && result.reactionKey === "nice_hand" && broadcastResult.sentCount > 0
         && targetUserId && tableManager.isBotUser(tableId, targetUserId) === true) {
         runReactionObserverSafely("targeted_nice_hand", () => scheduleBotReactionCandidate(

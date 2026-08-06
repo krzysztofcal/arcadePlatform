@@ -5558,7 +5558,7 @@ test("active replacement: seated act accepted and observer act rejected under ob
 
 
 
-test("fresh persisted raise schedules one delayed contextual reaction and duplicate request schedules none", async () => {
+test("human hello gets one bot reply while preflop raise and duplicate request schedule no bluff accusation", async () => {
   const secret = "reaction-integration-secret";
   const tableId = "table_reaction_integration";
   const humanUserId = "reaction_human";
@@ -5634,21 +5634,33 @@ test("fresh persisted raise schedules one delayed contextual reaction and duplic
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-reaction-integration", ts: "2026-08-05T18:00:01Z", payload: { tableId, view: "snapshot" } });
     const snapshot = await nextMessageOfType(ws, "stateSnapshot");
     const handId = snapshot.payload.public.hand.handId;
-    const sentAt = Date.now();
+    const helloFrame = { version: "1.0", type: "reaction_send", requestId: "hello-reaction-integration", ts: "2026-08-05T18:00:02Z", payload: { tableId, reactionKey: "hello" } };
+    sendFrame(ws, helloFrame);
+    assert.equal((await nextCommandResultForRequest(ws, helloFrame.requestId)).payload.status, "accepted");
+    const humanHello = await nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.seatNo === 1, 1000);
+    assert.deepEqual(humanHello.payload, { seatNo: 1, reactionKey: "hello" });
+    const botHello = await nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.seatNo !== 1, 2000);
+    assert.deepEqual(botHello.payload, { seatNo: 2, targetSeatNo: 1, reactionKey: "hello" });
+    await assert.rejects(
+      nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.reactionKey === "hello", 1300),
+      /Timed out waiting for matching websocket message/
+    );
+
     const raiseFrame = { version: "1.0", type: "act", requestId: "raise-reaction-integration", ts: "2026-08-05T18:00:02Z", payload: { tableId, handId, action: "raise", amount: 4 } };
     sendFrame(ws, raiseFrame);
     assert.equal((await nextCommandResultForRequest(ws, raiseFrame.requestId)).payload.status, "accepted");
     sendFrame(ws, raiseFrame);
     assert.equal((await nextCommandResultForRequest(ws, raiseFrame.requestId)).payload.status, "accepted");
-    const reaction = await nextMessageMatching(ws, (frame) => frame?.type === "table_reaction", 2000);
-    assert.equal(Date.now() - sentAt >= 250, true, "the real server path must not emit the reaction synchronously");
-    assert.deepEqual(reaction.payload, { seatNo: 2, targetSeatNo: 1, reactionKey: "you_are_bluffing" });
+    await assert.rejects(
+      nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.reactionKey === "you_are_bluffing", 1500),
+      /Timed out waiting for matching websocket message/
+    );
 
     sendFrame(ws, raiseFrame);
     const duplicateResult = await nextCommandResultForRequest(ws, raiseFrame.requestId);
     assert.equal(duplicateResult.payload.status, "accepted", JSON.stringify(duplicateResult.payload));
     await assert.rejects(
-      nextMessageMatching(ws, (frame) => frame?.type === "table_reaction", 500),
+      nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.reactionKey === "you_are_bluffing", 500),
       /Timed out waiting for matching websocket message/
     );
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-reaction-deadline", ts: "2026-08-05T18:00:03Z", payload: { tableId, view: "snapshot" } });

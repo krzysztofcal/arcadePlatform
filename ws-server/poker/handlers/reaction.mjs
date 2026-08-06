@@ -1,6 +1,7 @@
 const HUMAN_REACTION_COOLDOWN_MS = 4_000;
 const BOT_REACTION_JITTER_MIN_MS = 300;
 const BOT_REACTION_JITTER_MAX_MS = 1_200;
+const POST_FLOP_STREETS = new Set(["FLOP", "TURN", "RIVER"]);
 
 export const REACTION_KEYS = Object.freeze([
   "hello",
@@ -138,6 +139,16 @@ function normalizeHandSeats(value) {
     .map((entry) => ({ userId: normalizeString(entry?.userId), seatNo: Number(entry?.seatNo) }))
     .filter((entry) => entry.userId && isPositiveSeatNo(entry.seatNo) && !seen.has(entry.userId) && seen.add(entry.userId))
     .sort((left, right) => left.seatNo - right.seatNo);
+}
+
+export function eligibleActiveHandBotSeats({ state, botSeats } = {}) {
+  const handUserIds = new Set(normalizeHandSeats(state?.handSeats).map((seat) => seat.userId));
+  return normalizeBotSeats(botSeats).filter((bot) => (
+    handUserIds.has(bot.userId)
+    && state?.foldedByUserId?.[bot.userId] !== true
+    && state?.leftTableByUserId?.[bot.userId] !== true
+    && state?.sitOutByUserId?.[bot.userId] !== true
+  ));
 }
 
 function winnerSeats(state, handSeats) {
@@ -434,9 +445,13 @@ export function tryReserveBotReaction({
   };
 }
 
-export function classifyRaiseReaction({ actorUserId, actorSeatNo, botSeats, reactionSettings, random = Math.random } = {}) {
+export function classifyRaiseReaction({ actorUserId, actorSeatNo, street, botSeats, reactionSettings, random = Math.random } = {}) {
   const normalizedActorUserId = normalizeString(actorUserId);
-  if (!normalizedActorUserId || !isPositiveSeatNo(actorSeatNo) || !samplePasses(random, 0.6, reactionSettings)) return null;
+  const normalizedStreet = normalizeString(street).toUpperCase();
+  if (!POST_FLOP_STREETS.has(normalizedStreet)
+    || !normalizedActorUserId
+    || !isPositiveSeatNo(actorSeatNo)
+    || !samplePasses(random, 0.6, reactionSettings)) return null;
   const reactor = normalizeBotSeats(botSeats).find((bot) => bot.userId !== normalizedActorUserId);
   return reactor ? {
     botUserId: reactor.userId,

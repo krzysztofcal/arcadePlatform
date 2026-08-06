@@ -11,6 +11,7 @@ import {
   canBotStartReaction,
   clearTable,
   deriveRiverChangedWinnerUserIds,
+  eligibleActiveHandBotSeats,
   evaluateHumanReactionCommand,
   isCompleteReactionSettlement,
   tryCreateBotReaction
@@ -326,10 +327,34 @@ test('bot reactions use the real bot action object and independent sender cooldo
   clearTable(tableId);
 });
 
-test('contextual classifiers keep raise and fold-win meanings distinct', () => {
+test('active-hand bot eligibility excludes folded, departed, sitting-out, and non-participating bots', () => {
+  assert.deepEqual(eligibleActiveHandBotSeats({
+    state: {
+      handSeats: [
+        { userId: 'bot-active', seatNo: 5 },
+        { userId: 'bot-folded', seatNo: 2 },
+        { userId: 'bot-left', seatNo: 3 },
+        { userId: 'bot-sit-out', seatNo: 4 }
+      ],
+      foldedByUserId: { 'bot-folded': true },
+      leftTableByUserId: { 'bot-left': true },
+      sitOutByUserId: { 'bot-sit-out': true }
+    },
+    botSeats: [
+      { userId: 'bot-active', seatNo: 5 },
+      { userId: 'bot-outside', seatNo: 1 },
+      { userId: 'bot-folded', seatNo: 2 },
+      { userId: 'bot-left', seatNo: 3 },
+      { userId: 'bot-sit-out', seatNo: 4 }
+    ]
+  }), [{ userId: 'bot-active', seatNo: 5 }]);
+});
+
+test('contextual classifiers keep post-flop raise and fold-win meanings distinct', () => {
   assert.deepEqual(classifyRaiseReaction({
     actorUserId: 'human',
     actorSeatNo: 2,
+    street: 'FLOP',
     botSeats: [{ userId: 'bot', seatNo: 4 }],
     random: () => 0
   }), {
@@ -337,12 +362,26 @@ test('contextual classifiers keep raise and fold-win meanings distinct', () => {
   });
   assert.equal(classifyRaiseReaction({
     actorUserId: 'human', actorSeatNo: 2, botSeats: [{ userId: 'bot', seatNo: 4 }],
+    street: 'TURN',
     reactionSettings: { enabled: false, frequencyPercent: 100 }, random: () => 0
   }), null);
   assert.equal(classifyRaiseReaction({
     actorUserId: 'human', actorSeatNo: 2, botSeats: [{ userId: 'bot', seatNo: 4 }],
+    street: 'RIVER',
     reactionSettings: { enabled: true, frequencyPercent: 1 }, random: () => 0.007
   }), null, '1% frequency must scale the 60% base chance to 0.6%');
+  assert.equal(classifyRaiseReaction({
+    actorUserId: 'human', actorSeatNo: 2, street: 'PREFLOP',
+    botSeats: [{ userId: 'bot', seatNo: 4 }], random: () => 0
+  }), null);
+  assert.equal(classifyRaiseReaction({
+    actorUserId: 'human', actorSeatNo: 2, street: 'SETTLED',
+    botSeats: [{ userId: 'bot', seatNo: 4 }], random: () => 0
+  }), null);
+  assert.equal(classifyRaiseReaction({
+    actorUserId: 'human', actorSeatNo: 2,
+    botSeats: [{ userId: 'bot', seatNo: 4 }], random: () => 0
+  }), null);
 
   const baseState = {
     phase: 'SETTLED',
