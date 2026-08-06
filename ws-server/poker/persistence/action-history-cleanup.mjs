@@ -47,19 +47,20 @@ async function sweepOrphanHoleCards({ tx, botActionCutoff, humanActionCutoff, ba
              from public.poker_hole_cards hc
             where hc.table_id = ps.table_id
               and hc.hand_id <> ps.state ->> 'handId'
-              and (
-                    (t.has_human_participant = false
-                     and $1::timestamptz is not null
-                     and hc.created_at < $1::timestamptz)
-                 or (t.has_human_participant = true
-                     and $2::timestamptz is not null
-                     and hc.created_at < $2::timestamptz)
-                  )
               and not exists (
                     select 1
                       from public.poker_actions pa
                      where pa.table_id = hc.table_id
                        and pa.hand_id = hc.hand_id
+                  )
+            group by hc.hand_id
+           having (
+                    (t.has_human_participant = false
+                     and $1::timestamptz is not null
+                     and max(hc.created_at) < $1::timestamptz)
+                 or (t.has_human_participant = true
+                     and $2::timestamptz is not null
+                     and max(hc.created_at) < $2::timestamptz)
                   )
          )
    order by ps.table_id
@@ -430,13 +431,16 @@ export function createActionHistoryCleanup({
            select 1 from public.poker_hole_cards hc
             where hc.table_id = ps.table_id
               and hc.hand_id <> ps.state ->> 'handId'
-              and (
-                    (t.has_human_participant = false and $1::timestamptz is not null and hc.created_at < $1::timestamptz)
-                 or (t.has_human_participant = true and $2::timestamptz is not null and hc.created_at < $2::timestamptz)
-                  )
               and not exists (
                     select 1 from public.poker_actions pa
                      where pa.table_id = hc.table_id and pa.hand_id = hc.hand_id
+                  )
+            group by hc.hand_id
+           having (
+                    (t.has_human_participant = false and $1::timestamptz is not null
+                     and max(hc.created_at) < $1::timestamptz)
+                 or (t.has_human_participant = true and $2::timestamptz is not null
+                     and max(hc.created_at) < $2::timestamptz)
                   )
          )
    order by ps.table_id

@@ -366,3 +366,70 @@ test("orphan cleanup skips a locked state and protects the hand committed as cur
     await Promise.all([cleanupDb.end(), writerDb.end()]);
   }
 });
+
+test("mixed-age tables cannot starve a later eligible orphan", { skip: !HAS_DB }, async () => {
+  const db = await connect();
+  const tableIds = [
+    "00000000-0000-0000-0000-000000000100",
+    "00000000-0000-0000-0000-000000000101",
+    "00000000-0000-0000-0000-000000000102"
+  ];
+  const oldCreatedAt = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const recentCreatedAt = new Date().toISOString();
+  const orphanHandId = `eligible-${randomUUID()}`;
+
+  try {
+    await ensureSchema(db);
+    for (const [index, tableId] of tableIds.entries()) {
+      await db.unsafe(
+        "insert into public.poker_tables (id, status, has_human_participant) values ($1, 'CLOSED', false)",
+        [tableId]
+      );
+      await db.unsafe(
+        "insert into public.poker_state (table_id, state) values ($1, $2::jsonb)",
+        [tableId, { phase: "HAND_DONE", handId: "" }]
+      );
+      const handId = index < 2 ? `mixed-${randomUUID()}` : orphanHandId;
+      const dates = index < 2 ? [oldCreatedAt, recentCreatedAt] : [oldCreatedAt];
+      for (const createdAt of dates) {
+        await db.unsafe(
+          `insert into public.poker_hole_cards (table_id, hand_id, user_id, cards, created_at)
+           values ($1, $2, $3, $4::jsonb, $5)`,
+          [tableId, handId, randomUUID(), JSON.stringify(["6H", "7H"]), createdAt]
+        );
+      }
+    }
+
+    const cleanup = createActionHistoryCleanup({
+      maxSweepRounds: 1,
+      env: {
+        WS_POKER_BOT_ACTION_RETENTION_MS: String(60 * 60 * 1000),
+        WS_POKER_BOT_SETTLED_RETENTION_MS: "0",
+        WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+        WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+        WS_POKER_ACTION_HISTORY_BATCH_SIZE: "1"
+      },
+      beginSql: beginSql(db)
+    });
+    const result = await cleanup.sweep();
+    assert.equal(result.ok, true);
+    assert.equal(result.orphanHoleCardsDeleted, 1);
+    const remaining = await db.unsafe(
+      "select count(*)::bigint as rows from public.poker_hole_cards where table_id = $1 and hand_id = $2",
+      [tableIds[2], orphanHandId]
+    );
+    assert.equal(Number(remaining[0].rows), 0);
+  } finally {
+    await db.unsafe("delete from public.poker_hole_cards where table_id = any($1::uuid[])", [tableIds]);
+    await db.unsafe("delete from public.poker_actions where table_id = any($1::uuid[])", [tableIds]);
+    await db.unsafe("delete from public.poker_state where table_id = any($1::uuid[])", [tableIds]);
+    await db.unsafe("delete from public.poker_tables where id = any($1::uuid[])", [tableIds]);
+    if (createdMinimalSchema) {
+      await db.unsafe("drop table if exists public.poker_hole_cards");
+      await db.unsafe("drop table if exists public.poker_actions");
+      await db.unsafe("drop table if exists public.poker_state");
+      await db.unsafe("drop table if exists public.poker_tables");
+    }
+    await db.end();
+  }
+});
