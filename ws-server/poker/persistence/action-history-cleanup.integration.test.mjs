@@ -116,7 +116,7 @@ test("action-history cleanup executes hole-card and settlement SQL on PostgreSQL
     );
     await db.unsafe(
       "insert into public.poker_state (table_id, state) values ($1, $2::jsonb)",
-      [tableId, JSON.stringify({ phase: "HAND_DONE", handId: "" })]
+      [tableId, { phase: "HAND_DONE", handId: "" }]
     );
 
     await db.unsafe(
@@ -165,7 +165,7 @@ test("action-history cleanup executes hole-card and settlement SQL on PostgreSQL
       if (protectedCase.state) {
         await db.unsafe(
           "insert into public.poker_state (table_id, state) values ($1, $2::jsonb)",
-          [protectedTableId, JSON.stringify(protectedCase.state)]
+          [protectedTableId, protectedCase.state]
         );
       }
       for (let index = 0; index < protectedCase.dates.length; index += 1) {
@@ -308,7 +308,7 @@ test("orphan cleanup skips a locked state and protects the hand committed as cur
     );
     await cleanupDb.unsafe(
       "insert into public.poker_state (table_id, state) values ($1, $2::jsonb)",
-      [tableId, JSON.stringify({ phase: "HAND_DONE", handId: "" })]
+      [tableId, { phase: "HAND_DONE", handId: "" }]
     );
     await cleanupDb.unsafe(
       `insert into public.poker_hole_cards (table_id, hand_id, user_id, cards, created_at)
@@ -322,7 +322,7 @@ test("orphan cleanup skips a locked state and protects the hand committed as cur
       await writerRelease;
       await tx.unsafe(
         "update public.poker_state set state = $2::jsonb where table_id = $1",
-        [tableId, JSON.stringify({ phase: "FLOP", handId })]
+        [tableId, { phase: "FLOP", handId }]
       );
     });
     await stateLocked;
