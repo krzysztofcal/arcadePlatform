@@ -1964,9 +1964,10 @@
     var live = state && state.mode === 'live' && !!state.tableId;
     if (els.reactionHistory) els.reactionHistory.hidden = !live;
     if (els.reactionHistoryToggle){
-      els.reactionHistoryToggle.textContent = 'History (' + reactionHistoryEntries.length + ')';
+      els.reactionHistoryToggle.setAttribute('aria-label', 'Reaction history, ' + reactionHistoryEntries.length + ' messages');
       els.reactionHistoryToggle.setAttribute('aria-expanded', live && reactionHistoryPanelOpen ? 'true' : 'false');
     }
+    if (els.reactionHistoryCount) els.reactionHistoryCount.textContent = String(reactionHistoryEntries.length);
     if (els.reactionHistoryPanel) els.reactionHistoryPanel.hidden = !live || !reactionHistoryPanelOpen;
     if (!els.reactionHistoryList) return;
     els.reactionHistoryList.innerHTML = '';
@@ -4497,6 +4498,7 @@
     els.reactionHint = document.getElementById('pokerV2ReactionHint');
     els.reactionHistory = document.getElementById('pokerReactionHistory');
     els.reactionHistoryToggle = document.getElementById('pokerReactionHistoryToggle');
+    els.reactionHistoryCount = document.getElementById('pokerReactionHistoryCount');
     els.reactionHistoryPanel = document.getElementById('pokerReactionHistoryPanel');
     els.reactionHistoryList = document.getElementById('pokerReactionHistoryList');
     els.leaveConfirmModal = document.getElementById('pokerV2LeaveConfirmModal');

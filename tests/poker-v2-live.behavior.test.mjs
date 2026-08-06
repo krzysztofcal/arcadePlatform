@@ -116,7 +116,7 @@ function createHarness(options = {}){
     'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2GuestPanel', 'pokerV2GuestBadge', 'pokerV2SignInBtn', 'pokerV2SeatNo',
     'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
     'pokerV2ReactionControl', 'pokerV2ReactionBtn', 'pokerV2ReactionMenu', 'pokerV2ReactionHint',
-    'pokerReactionHistory', 'pokerReactionHistoryToggle', 'pokerReactionHistoryPanel', 'pokerReactionHistoryList',
+    'pokerReactionHistory', 'pokerReactionHistoryToggle', 'pokerReactionHistoryCount', 'pokerReactionHistoryPanel', 'pokerReactionHistoryList',
     'pokerV2RebuyPanel', 'pokerV2RebuyTitle', 'pokerV2RebuyCopy', 'pokerV2RebuyBalance', 'pokerV2RebuyBtn', 'pokerV2RebuyLobbyBtn', 'pokerV2RebuyWatchBtn', 'pokerV2RebuyAccountLink',
     'pokerV2ClosedTableModal', 'pokerV2ClosedTableTitle', 'pokerV2ClosedTableCountdown',
     'pokerV2DemoPill', 'pokerV2FoldBtn', 'pokerV2PrimaryBtn', 'pokerV2AmountBtn',
@@ -565,7 +565,8 @@ test('reaction history appends only an authoritative table_reaction once', async
   await harness.flush();
   assert.equal(reactionHistoryRows(harness).length, 2);
   assert.equal(reactionHistoryRows(harness)[1].textContent, 'Alice · 😮 Wow!');
-  assert.equal(harness.elements.pokerReactionHistoryToggle.textContent, 'History (2)');
+  assert.equal(harness.elements.pokerReactionHistoryCount.textContent, '2');
+  assert.equal(harness.elements.pokerReactionHistoryToggle.attributes['aria-label'], 'Reaction history, 2 messages');
 });
 
 test('reaction history records one validated targeted nice_hand before its effect return', async () => {
@@ -613,7 +614,7 @@ test('reaction history survives same-table reconnect and clears on definitive le
   confirmLeave(harness);
   await harness.flush();
   assert.equal(reactionHistoryRows(harness).length, 0);
-  assert.equal(harness.elements.pokerReactionHistoryToggle.textContent, 'History (0)');
+  assert.equal(harness.elements.pokerReactionHistoryCount.textContent, '0');
 });
 
 test('poker v2 uses the WS settlement reveal deadline for targeted reactions', async () => {
