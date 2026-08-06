@@ -1983,7 +1983,26 @@
       if (!entry) return;
       var row = document.createElement('div');
       row.className = 'poker-reaction-history__entry';
-      row.textContent = item.senderDisplayName + ' · ' + entry.emoji + ' ' + entry.label;
+      var nickname = document.createElement('span');
+      nickname.className = 'poker-reaction-history__nickname';
+      nickname.textContent = item.senderDisplayName;
+      nickname.title = item.senderDisplayName;
+      nickname.setAttribute('aria-label', 'Player nickname: ' + item.senderDisplayName);
+      var seat = document.createElement('span');
+      seat.className = 'poker-reaction-history__seat';
+      seat.textContent = 'S' + item.senderSeatNo;
+      seat.setAttribute('aria-label', 'Seat ' + item.senderSeatNo);
+      var separator = document.createElement('span');
+      separator.className = 'poker-reaction-history__separator';
+      separator.textContent = '·';
+      separator.setAttribute('aria-hidden', 'true');
+      var reaction = document.createElement('span');
+      reaction.className = 'poker-reaction-history__reaction';
+      reaction.textContent = entry.emoji + ' ' + entry.label;
+      row.appendChild(nickname);
+      row.appendChild(seat);
+      row.appendChild(separator);
+      row.appendChild(reaction);
       els.reactionHistoryList.appendChild(row);
     });
   }

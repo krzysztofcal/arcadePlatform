@@ -411,7 +411,7 @@ async function bootReactionHistoryHarness(options = {}){
         maxSeats: 6,
         members: [
           { userId: 'user-1', seat: 1, displayName: 'Alice' },
-          { userId: 'user-2', seat: 2, displayName: 'Viktor' }
+          { userId: 'user-2', seat: 2, displayName: options.historySenderDisplayName || 'Viktor' }
         ]
       },
       public: { hand: { handId: 'hand-1', status: 'TURN' }, pot: { total: 10 } },
@@ -550,7 +550,8 @@ test('poker v2 disables reactions for four seconds after an accepted reaction', 
 });
 
 test('reaction history appends only an authoritative table_reaction once', async () => {
-  const { harness, ws } = await bootReactionHistoryHarness();
+  const longNickname = 'Smoke Profile 676 Very Long Nickname';
+  const { harness, ws } = await bootReactionHistoryHarness({ historySenderDisplayName: longNickname });
   harness.elements.pokerV2ReactionBtn.click();
   harness.elements.pokerV2ReactionMenu.children.find((child) => child.dataset.reactionKey === 'wow').click();
   await harness.flush();
@@ -559,12 +560,18 @@ test('reaction history appends only an authoritative table_reaction once', async
   ws.onReaction({ payload: { seatNo: 2, reactionKey: 'wow' } });
   await harness.flush();
   assert.equal(reactionHistoryRows(harness).length, 1);
-  assert.equal(reactionHistoryRows(harness)[0].textContent, 'Viktor · 😮 Wow!');
+  const firstRow = reactionHistoryRows(harness)[0];
+  const nickname = findChildByClass(firstRow, 'poker-reaction-history__nickname');
+  assert.equal(nickname.textContent, longNickname);
+  assert.equal(nickname.title, longNickname);
+  assert.equal(nickname.attributes['aria-label'], 'Player nickname: ' + longNickname);
+  assert.equal(findChildByClass(firstRow, 'poker-reaction-history__seat').textContent, 'S2');
+  assert.equal(findChildByClass(firstRow, 'poker-reaction-history__reaction').textContent, '😮 Wow!');
 
   ws.onReaction({ payload: { seatNo: 1, reactionKey: 'wow' } });
   await harness.flush();
   assert.equal(reactionHistoryRows(harness).length, 2);
-  assert.equal(reactionHistoryRows(harness)[1].textContent, 'Alice · 😮 Wow!');
+  assert.equal(findChildByClass(reactionHistoryRows(harness)[1], 'poker-reaction-history__nickname').textContent, 'Alice');
   assert.equal(harness.elements.pokerReactionHistoryCount.textContent, '2');
   assert.equal(harness.elements.pokerReactionHistoryToggle.attributes['aria-label'], 'Reaction history, 2 messages');
 });
@@ -587,7 +594,7 @@ test('reaction history keeps 25 newest entries and expires entries by age', asyn
   }
   await bounded.harness.flush();
   assert.equal(reactionHistoryRows(bounded.harness).length, 25);
-  assert.equal(reactionHistoryRows(bounded.harness).some((row) => row.textContent.includes('Hello')), false);
+  assert.equal(reactionHistoryRows(bounded.harness).some((row) => findChildByClass(row, 'poker-reaction-history__reaction').textContent.includes('Hello')), false);
 
   const expiring = await bootReactionHistoryHarness();
   expiring.ws.onReaction({ payload: { seatNo: 2, reactionKey: 'hello' } });
@@ -596,7 +603,7 @@ test('reaction history keeps 25 newest entries and expires entries by age', asyn
   expiring.harness.advanceTime(9 * 60_000);
   await expiring.harness.flush();
   assert.equal(reactionHistoryRows(expiring.harness).length, 1);
-  assert.equal(reactionHistoryRows(expiring.harness)[0].textContent, 'Viktor · 😮 Wow!');
+  assert.equal(findChildByClass(reactionHistoryRows(expiring.harness)[0], 'poker-reaction-history__reaction').textContent, '😮 Wow!');
   expiring.harness.advanceTime(60_000);
   await expiring.harness.flush();
   assert.equal(reactionHistoryRows(expiring.harness).length, 0);
