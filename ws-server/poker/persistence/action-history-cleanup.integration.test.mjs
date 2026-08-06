@@ -89,7 +89,7 @@ function beginSql(db, afterTransaction) {
 }
 
 function earlySortedTableId() {
-  return `00000000-0000-0000-0000-${randomUUID().slice(-12)}`;
+  return "00000000-0000-0000-0000-000000000000";
 }
 
 test("action-history cleanup executes hole-card and settlement SQL on PostgreSQL", { skip: !HAS_DB }, async () => {
