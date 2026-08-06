@@ -4352,9 +4352,11 @@
     els.menuToggle.setAttribute('aria-expanded', 'false');
   }
 
-  function closeSocialSettings(){
+  function closeSocialSettings(restoreFocus){
+    var wasOpen = !!(els.socialSettingsPanel && !els.socialSettingsPanel.hidden);
     if (els.socialSettingsPanel) els.socialSettingsPanel.hidden = true;
     if (els.socialSettingsToggle) els.socialSettingsToggle.setAttribute('aria-expanded', 'false');
+    if (restoreFocus && wasOpen && els.socialSettingsToggle && typeof els.socialSettingsToggle.focus === 'function') els.socialSettingsToggle.focus();
   }
 
   function updateSocialPreference(key, enabled){
@@ -4469,7 +4471,7 @@
       closeMenu();
     });
     document.addEventListener('keydown', function(event){
-      if (event && event.key === 'Escape') { closeMenu(); closeSocialSettings(); }
+      if (event && event.key === 'Escape') { closeMenu(); closeSocialSettings(true); }
     });
   }
 

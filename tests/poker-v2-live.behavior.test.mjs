@@ -65,8 +65,10 @@ function makeElement(id){
       return sceneRect;
     },
     setAttribute(name, value){ this.attributes[name] = String(value); },
+    getAttribute(name){ return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null; },
     removeAttribute(name){ delete this.attributes[name]; },
     hasAttribute(name){ return Object.prototype.hasOwnProperty.call(this.attributes, name); },
+    focus(){ this._focused = true; },
     click(){
       if (this.disabled) return;
       if (this.type === 'checkbox') this.checked = !this.checked;
@@ -743,6 +745,29 @@ test('bot preference suppresses and clears bot artifacts while human reactions r
   harness.advanceTime(60_000);
   await harness.flush();
   assert.equal(reactionHistoryRows(harness).length, 0);
+});
+
+test('Escape closes the social settings panel and restores focus to its toggle', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  harness.elements.pokerSocialSettingsToggle.click();
+  assert.equal(harness.elements.pokerSocialSettingsPanel.hidden, false);
+  assert.equal(harness.elements.pokerSocialSettingsToggle.getAttribute('aria-expanded'), 'true');
+
+  harness.fireDocumentEvent('keydown', { key: 'Escape' });
+  assert.equal(harness.elements.pokerSocialSettingsPanel.hidden, true);
+  assert.equal(harness.elements.pokerSocialSettingsToggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(harness.elements.pokerSocialSettingsToggle._focused, true);
+});
+
+test('Escape does not steal focus to the social settings toggle when the panel is already closed', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  harness.fireDocumentEvent('keydown', { key: 'Escape' });
+  assert.equal(harness.elements.pokerSocialSettingsPanel.hidden, true);
+  assert.equal(harness.elements.pokerSocialSettingsToggle._focused, undefined);
 });
 
 test('poker v2 uses the WS settlement reveal deadline for targeted reactions', async () => {
