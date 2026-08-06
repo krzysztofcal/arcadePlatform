@@ -279,10 +279,24 @@ Once set to `true` the flag never returns to `false`. Existing tables are backfi
 
 This classification affects retention only. It does not make the database authoritative for active gameplay, does not replace `poker_seats` or `poker_state`, and is not consulted by bot claims recovery, terminal accounting, or any gameplay decision.
 
-### Three-phase deletion semantics
+### Four-phase deletion semantics
 
 Cleanup runs in bounded rounds. Each phase has its own database transaction, so
 a successful phase is not rolled back when a later phase fails:
+
+**Historical orphan hole cards.** Before the regular phases, cleanup removes a
+bounded set of old `poker_hole_cards` from `CLOSED` tables only when no
+`poker_actions` exist for the hand. It requires and locks the authoritative
+`poker_state` row with `FOR UPDATE OF ps SKIP LOCKED`, but never locks
+`poker_tables`, avoiding a new cross-table lock-order cycle. The JSON state must
+be an object with a string `handId`. A non-empty value protects that hand;
+`handId: ""` is the canonical terminal sentinel and means no current hand.
+Missing, null, or non-string values fail closed. Candidate age is based on
+`MAX(poker_hole_cards.created_at)`, so one fresh row protects the whole hand.
+The phase uses the existing bot/human action-retention cutoffs and sets local
+`250ms` lock and `2000ms` statement timeouts. Timeout or deadlock rolls back
+only this phase; normal cleanup continues and the orphan phase retries on the
+next sweep.
 
 **Hole cards phase.** Deletes `poker_hole_cards` for unique `(table_id, hand_id)`
 hands whose `HAND_SETTLED` marker is older than the applicable action-retention
@@ -294,7 +308,11 @@ same sweep, but is retried by the next sweep.
 
 **Phase 2 — settlement markers.** Deletes old `HAND_SETTLED` rows only when no ordinary actions and no `poker_hole_cards` remain for the same hand (two correlated `NOT EXISTS` checks). This guarantees that a marker remains available for a later hole-card retry if that phase previously failed.
 
-The order in every round is hole cards, Phase 1, then Phase 2. A hole-card failure does not block the action phases. A Phase 1 or Phase 2 failure stops later rounds. All phases use bounded `locked_tables` and candidate CTEs followed by `DELETE … RETURNING id`. Bot and human cutoffs are selected through classification predicates (`has_human_participant`) inside each CTE.
+The order in every round is orphan hole cards, regular hole cards, Phase 1,
+then Phase 2. An orphan or regular hole-card failure does not block the action
+phases. A Phase 1 or Phase 2 failure stops later rounds. Candidate CTEs are
+bounded and feed `DELETE … RETURNING`; bot and human cutoffs are selected
+through `has_human_participant` predicates.
 
 `batchSize` limits the number of candidate hands (hole cards and Phase 1) or settlement rows (Phase 2) selected per sweep, not the number of physical rows deleted. A single candidate hand may contain multiple hole-card or ordinary-action rows, so the corresponding deleted counters may be much larger than `batchSize`.
 
@@ -366,10 +384,39 @@ Editing an already-applied migration is not allowed. Use a new timestamped migra
 
 | Event | Severity | Fields |
 |-------|----------|--------|
-| `ws_action_history_cleanup_complete` | INFO | `holeCardsDeleted`, `phase1Deleted`, `phase2Deleted`, `batchSize`, `lockLimit` |
+| `ws_action_history_cleanup_complete` | INFO | `orphanHoleCardsDeleted`, `holeCardsDeleted`, `phase1Deleted`, `phase2Deleted`, `batchSize`, `lockLimit` |
 | `ws_action_history_cleanup_failed` | ERROR | stable `errorCode`, ordered `failedPhases`, completed phase counters |
 
-The `complete` event is emitted only when at least one row was deleted. A no-op with enabled retention remains a successful, quiet sweep. The `failed` event is emitted after a sweep with one or more failed phases. Because transactions are separate, `failed` does not mean that successful phase counters were rolled back; the panel may show positive deletion counts together with `failed`.
+The `complete` event is emitted only when at least one row was deleted. A no-op with enabled retention remains a successful, quiet sweep. The `failed` event is emitted after a sweep with one or more failed phases. `orphan_hole_cards_cleanup_failed` identifies the recovery phase without weakening the regular `HAND_SETTLED` path. Because transactions are separate, `failed` does not mean that successful phase counters were rolled back; the panel may show positive deletion counts together with `failed`.
+
+### Historical orphan SQL rollout gate
+
+Do not deploy a revision that introduces or changes the orphan phase before
+examining its final SQL against the target Stage backlog. First run the
+candidate `SELECT` through `EXPLAIN (ANALYZE, BUFFERS)`. Run the complete
+`DELETE` plan only inside an explicitly rolled-back transaction:
+
+```sql
+BEGIN;
+SET LOCAL lock_timeout = '250ms';
+SET LOCAL statement_timeout = '2000ms';
+EXPLAIN (ANALYZE, BUFFERS)
+WITH locked_states AS MATERIALIZED (...),
+     orphan_candidates AS MATERIALIZED (...)
+DELETE FROM public.poker_hole_cards hc
+USING orphan_candidates oc
+WHERE hc.table_id = oc.table_id AND hc.hand_id = oc.hand_id
+RETURNING hc.table_id, hc.hand_id, hc.user_id;
+ROLLBACK;
+```
+
+Record the eligible orphan count before and after and require equality after
+the rollback. If the final query exceeds the statement budget or performs an
+unacceptable scan, compare real plans before choosing an index. In particular,
+evaluate existing indexes against `(table_id, hand_id, created_at)` and
+`(created_at, table_id, hand_id)`; do not add a migration speculatively. If an
+index is required, apply it to Stage and repeat both plans before the first WS
+Preview deploy containing the active phase.
 
 **Preview verification commands:**
 

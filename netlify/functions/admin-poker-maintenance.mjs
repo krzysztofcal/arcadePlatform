@@ -41,13 +41,16 @@ function controlError(code, status = 400, details = null) {
 
 function projectMaintenanceFailure(value) {
   if (!value || typeof value !== "object") return {};
-  const allowedPhases = ["hole_cards", "ordinary_actions", "hand_settled"];
+  const allowedPhases = ["orphan_hole_cards", "hole_cards", "ordinary_actions", "hand_settled"];
   const failedPhases = Array.isArray(value.failedPhases)
     ? allowedPhases.filter((phase) => value.failedPhases.includes(phase))
     : [];
   const result = {};
   if (typeof value.operation === "string") result.operation = value.operation;
   if (typeof value.result === "string") result.result = value.result;
+  if (Number.isSafeInteger(value.orphanHoleCardsDeleted) && value.orphanHoleCardsDeleted >= 0) {
+    result.orphanHoleCardsDeleted = value.orphanHoleCardsDeleted;
+  }
   if (Number.isSafeInteger(value.holeCardsDeleted) && value.holeCardsDeleted >= 0) {
     result.holeCardsDeleted = value.holeCardsDeleted;
   }

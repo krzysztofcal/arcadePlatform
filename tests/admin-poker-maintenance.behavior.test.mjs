@@ -195,6 +195,7 @@ test("maintenance proxy accepts the environment from an actual WS POST response"
     assert.deepEqual(JSON.parse(response.body), {
       ok: true,
       operation: "cleanup",
+      orphanHoleCardsDeleted: 0,
       holeCardsDeleted: 0,
       phase1Deleted: 0,
       phase2Deleted: 0,
@@ -242,6 +243,7 @@ test("maintenance proxy preserves cleanup failure counters and failed phases fro
         ok: false,
         operation: "cleanup",
         result: "failed",
+        orphanHoleCardsDeleted: 3,
         holeCardsDeleted: 4,
         phase1Deleted: 9,
         phase2Deleted: 2,
@@ -257,6 +259,7 @@ test("maintenance proxy preserves cleanup failure counters and failed phases fro
   assert.deepEqual(JSON.parse(response.body), {
     operation: "cleanup",
     result: "failed",
+    orphanHoleCardsDeleted: 3,
     holeCardsDeleted: 4,
     phase1Deleted: 9,
     phase2Deleted: 2,

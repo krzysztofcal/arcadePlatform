@@ -18,6 +18,78 @@ function mockTx(handlers) {
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
 
+test("orphan phase is bounded, state-locked, type-safe, and reports separate deletes", async () => {
+  const queries = [];
+  const timeoutValues = [];
+  const cleanup = createActionHistoryCleanup({
+    env: {
+      WS_POKER_BOT_ACTION_RETENTION_MS: String(HOUR),
+      WS_POKER_BOT_SETTLED_RETENTION_MS: "0",
+      WS_POKER_HUMAN_ACTION_RETENTION_MS: String(DAY),
+      WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+      WS_POKER_ACTION_HISTORY_BATCH_SIZE: "7"
+    },
+    beginSql: async (fn) => fn({
+      unsafe: async (sql, params) => {
+        queries.push(sql);
+        if (sql.includes("set_config")) {
+          timeoutValues.push(params?.[0]);
+          return [];
+        }
+        if (sql.includes("orphan_candidates") && sql.includes("delete from public.poker_hole_cards")) {
+          assert.equal(params[2], 7);
+          assert.equal(params[3], 14);
+          return [{ user_id: "u1" }, { user_id: "u2" }];
+        }
+        return [];
+      }
+    })
+  });
+
+  const result = await cleanup.sweep();
+  assert.equal(result.ok, true);
+  assert.equal(result.orphanHoleCardsDeleted, 2);
+  assert.equal(result.holeCardsDeleted, 0);
+  const orphanSql = queries.find((sql) => sql.includes("orphan_candidates") && sql.includes("delete from public.poker_hole_cards"));
+  assert.match(orphanSql, /for update of ps skip locked/i);
+  assert.doesNotMatch(orphanSql, /for update of t/i);
+  assert.match(orphanSql, /jsonb_typeof\(ps\.state -> 'handId'\) = 'string'/i);
+  assert.match(orphanSql, /max\(hc\.created_at\)/i);
+  assert.match(orphanSql, /not exists[\s\S]+public\.poker_actions/i);
+  assert.deepEqual(timeoutValues.slice(0, 2), ["250ms", "2000ms"]);
+});
+
+test("orphan phase failure is isolated from the existing cleanup phases", async () => {
+  let ordinaryCalls = 0;
+  const cleanup = createActionHistoryCleanup({
+    env: {
+      WS_POKER_BOT_ACTION_RETENTION_MS: String(HOUR),
+      WS_POKER_BOT_SETTLED_RETENTION_MS: "0",
+      WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+      WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+      WS_POKER_ACTION_HISTORY_BATCH_SIZE: "5"
+    },
+    beginSql: async (fn) => fn({
+      unsafe: async (sql) => {
+        if (sql.includes("set_config('lock_timeout'")) throw new Error("lock timeout");
+        if (sql.includes("candidate_hands")) {
+          ordinaryCalls += 1;
+          return [{ id: 1 }];
+        }
+        return [];
+      }
+    })
+  });
+
+  const result = await cleanup.sweep();
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, "orphan_hole_cards_cleanup_failed");
+  assert.deepEqual(result.failedPhases, ["orphan_hole_cards"]);
+  assert.equal(result.orphanHoleCardsDeleted, 0);
+  assert.equal(result.phase1Deleted, 1);
+  assert.equal(ordinaryCalls, 1);
+});
+
 // ---------------------------------------------------------------------------
 // Phase 1
 // ---------------------------------------------------------------------------

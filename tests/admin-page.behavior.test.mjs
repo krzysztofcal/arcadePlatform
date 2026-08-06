@@ -564,7 +564,7 @@ function buildContext(options = {}) {
         },
         continuousTables: opts.vpsMetricsHostOnly ? null : { active: 2, desired: 2, enabled: true },
         cleanup: opts.vpsMetricsHostOnly ? null : {
-          backlog: { ordinaryActionRows: 0, handSettledRows: 0, cappedAtBatchSize: true, measuredAt: "2026-08-02T18:59:58.000Z" },
+          backlog: { orphanHoleCardHands: 0, orphanHoleCardRows: 0, ordinaryActionRows: 0, handSettledRows: 0, cappedAtBatchSize: true, measuredAt: "2026-08-02T18:59:58.000Z" },
           lastRun: { finishedAt: "2026-08-02T18:55:00.000Z", durationMs: 184, deletedRows: 37, result: "success" },
         },
       }) };
@@ -575,6 +575,7 @@ function buildContext(options = {}) {
           error: "cleanup_failed",
           operation: "cleanup",
           result: "failed",
+          orphanHoleCardsDeleted: 3,
           holeCardsDeleted: 4,
           phase1Deleted: 9,
           phase2Deleted: 2,
@@ -598,8 +599,8 @@ function buildContext(options = {}) {
           retention: { botActionsMs: 1000, botSettledMs: 2000, humanActionsMs: 3000, humanSettledMs: 4000 },
           batchSize: 5,
           sweepRounds: 1,
-          backlog: { available: true, ordinaryActionRows: 0, handSettledRows: 0 },
-          lastRun: { finishedAt: null, durationMs: 1, holeCardsDeleted: 0, phase1Deleted: 0, phase2Deleted: 0, result: "success", failedPhases: [], errorCode: null }
+          backlog: { available: true, orphanHoleCardHands: 0, orphanHoleCardRows: 0, ordinaryActionRows: 0, handSettledRows: 0 },
+          lastRun: { finishedAt: null, durationMs: 1, orphanHoleCardsDeleted: 0, holeCardsDeleted: 0, phase1Deleted: 0, phase2Deleted: 0, result: "success", failedPhases: [], errorCode: null }
         }
       }) };
     }
