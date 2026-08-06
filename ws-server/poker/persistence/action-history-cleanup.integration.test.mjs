@@ -88,6 +88,10 @@ function beginSql(db, afterTransaction) {
   };
 }
 
+function earlySortedTableId() {
+  return `00000000-0000-0000-0000-${randomUUID().slice(-12)}`;
+}
+
 test("action-history cleanup executes hole-card and settlement SQL on PostgreSQL", { skip: !HAS_DB }, async () => {
   const db = await connect();
   let tableId = null;
@@ -104,7 +108,7 @@ test("action-history cleanup executes hole-card and settlement SQL on PostgreSQL
 
   try {
     await ensureSchema(db);
-    tableId = randomUUID();
+    tableId = earlySortedTableId();
     cleanupTableIds.push(tableId);
     await db.unsafe(
       "insert into public.poker_tables (id, status, has_human_participant) values ($1, 'CLOSED', false)",
@@ -263,7 +267,7 @@ test("orphan cleanup skips a locked state and protects the hand committed as cur
   const postgres = (await import("postgres")).default;
   const cleanupDb = postgres(dbUrl, { max: 1, idle_timeout: 5 });
   const writerDb = postgres(dbUrl, { max: 1, idle_timeout: 5 });
-  const tableId = randomUUID();
+  const tableId = earlySortedTableId();
   const handId = `cleanup-concurrent-${randomUUID()}`;
   const oldCreatedAt = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   let releaseWriter;
