@@ -1257,6 +1257,8 @@
       || tables.desired == null
       || tables.enabled == null
       || !backlog
+      || backlog.orphanHoleCardHands == null
+      || backlog.orphanHoleCardRows == null
       || backlog.ordinaryActionRows == null
       || backlog.handSettledRows == null;
     var availabilityLabel = primarySources === 0 ? "Unavailable" : missingMetric ? "Partial" : "Available";
@@ -1321,6 +1323,8 @@
       '<div class="admin-surface">',
       '<div class="admin-list__title"><span>Cleanup</span></div>',
       '<div class="admin-kv">',
+      renderKvRow("Next cleanup batch · orphan hands", backlog ? backlog.orphanHoleCardHands : null),
+      renderKvRow("Next cleanup batch · orphan card rows", backlog ? backlog.orphanHoleCardRows : null),
       renderKvRow("Next cleanup batch · ordinary rows", backlog ? backlog.ordinaryActionRows : null),
       renderKvRow("Next cleanup batch · HAND_SETTLED", backlog ? backlog.handSettledRows : null),
       renderKvRow("Batch capped", backlog && backlog.cappedAtBatchSize != null ? (backlog.cappedAtBatchSize ? "yes" : "no") : null),
@@ -1752,10 +1756,13 @@
         renderKvRow("Human HAND_SETTLED retention", cleanup.retention && cleanup.retention.humanSettledMs),
         renderKvRow("Batch size", cleanup.batchSize),
         renderKvRow("Cleanup rounds per sweep", cleanup.sweepRounds),
+        renderKvRow("Next cleanup batch · orphan hands", cleanup.backlog && cleanup.backlog.available ? cleanup.backlog.orphanHoleCardHands : "unavailable"),
+        renderKvRow("Next cleanup batch · orphan card rows", cleanup.backlog && cleanup.backlog.available ? cleanup.backlog.orphanHoleCardRows : "unavailable"),
         renderKvRow("Next cleanup batch · ordinary rows", cleanup.backlog && cleanup.backlog.available ? cleanup.backlog.ordinaryActionRows : "unavailable"),
         renderKvRow("Next cleanup batch · HAND_SETTLED", cleanup.backlog && cleanup.backlog.available ? cleanup.backlog.handSettledRows : "unavailable"),
         renderKvRow("Last cleanup", formatTimestamp(lastRun.finishedAt)),
         renderKvRow("Last cleanup result", lastRun.result || "—"),
+        renderKvRow("Last orphan hole-card deletes", lastRun.orphanHoleCardsDeleted == null ? "—" : String(lastRun.orphanHoleCardsDeleted)),
         renderKvRow("Last hole-card deletes", lastRun.holeCardsDeleted == null ? "—" : String(lastRun.holeCardsDeleted)),
         renderKvRow("Last phase deletes", lastRun.phase1Deleted == null ? "—" : String(lastRun.phase1Deleted) + "/" + String(lastRun.phase2Deleted || 0)),
         renderKvRow("Failed phases", Array.isArray(lastRun.failedPhases) && lastRun.failedPhases.length ? lastRun.failedPhases.join(", ") : "—"),

@@ -3616,18 +3616,21 @@ function projectCleanupMetrics(cleanupResult) {
   if (!cleanupResult || typeof cleanupResult !== "object") return null;
   const backlog = cleanupResult.backlog;
   const lastRun = cleanupResult.lastRun;
+  const orphanHoleCardsDeleted = safeMetricInteger(lastRun?.orphanHoleCardsDeleted);
   const holeCardsDeleted = safeMetricInteger(lastRun?.holeCardsDeleted);
   const phase1Deleted = safeMetricInteger(lastRun?.phase1Deleted);
   const phase2Deleted = safeMetricInteger(lastRun?.phase2Deleted);
   const deletedRows = phase1Deleted != null && phase2Deleted != null
-    ? (holeCardsDeleted || 0) + phase1Deleted + phase2Deleted
+    ? (orphanHoleCardsDeleted || 0) + (holeCardsDeleted || 0) + phase1Deleted + phase2Deleted
     : null;
-  const failedPhaseOrder = ["hole_cards", "ordinary_actions", "hand_settled"];
+  const failedPhaseOrder = ["orphan_hole_cards", "hole_cards", "ordinary_actions", "hand_settled"];
   const failedPhases = Array.isArray(lastRun?.failedPhases)
     ? failedPhaseOrder.filter((phase) => lastRun.failedPhases.includes(phase))
     : [];
   return {
     backlog: backlog && typeof backlog === "object" ? {
+      orphanHoleCardHands: safeMetricInteger(backlog.orphanHoleCardHands),
+      orphanHoleCardRows: safeMetricInteger(backlog.orphanHoleCardRows),
       ordinaryActionRows: safeMetricInteger(backlog.ordinaryActionRows),
       handSettledRows: safeMetricInteger(backlog.handSettledRows),
       cappedAtBatchSize: typeof backlog.cappedAtBatchSize === "boolean"
@@ -3638,6 +3641,7 @@ function projectCleanupMetrics(cleanupResult) {
     lastRun: lastRun && typeof lastRun === "object" ? {
       finishedAt: typeof lastRun.finishedAt === "string" ? lastRun.finishedAt : null,
       durationMs: safeMetricInteger(lastRun.durationMs),
+      orphanHoleCardsDeleted,
       holeCardsDeleted,
       phase1Deleted,
       phase2Deleted,

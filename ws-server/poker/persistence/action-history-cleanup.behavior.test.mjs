@@ -18,6 +18,92 @@ function mockTx(handlers) {
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
 
+test("orphan phase applies its hand cap and timeout without changing the shared lock limit", async () => {
+  const queries = [];
+  const timeoutValues = [];
+  const cleanup = createActionHistoryCleanup({
+    env: {
+      WS_POKER_BOT_ACTION_RETENTION_MS: String(HOUR),
+      WS_POKER_BOT_SETTLED_RETENTION_MS: "0",
+      WS_POKER_HUMAN_ACTION_RETENTION_MS: String(DAY),
+      WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+      WS_POKER_ACTION_HISTORY_BATCH_SIZE: "50"
+    },
+    beginSql: async (fn) => fn({
+      unsafe: async (sql, params) => {
+        queries.push(sql);
+        if (sql.includes("set_config")) {
+          timeoutValues.push(params?.[0]);
+          return [];
+        }
+        if (sql.includes("orphan_candidates") && sql.includes("delete from public.poker_hole_cards")) {
+          assert.equal(params[2], 25);
+          assert.equal(params[3], 100);
+          return [{ user_id: "u1" }, { user_id: "u2" }];
+        }
+        return [];
+      }
+    })
+  });
+
+  const result = await cleanup.sweep();
+  assert.equal(result.ok, true);
+  assert.equal(result.orphanHoleCardsDeleted, 2);
+  assert.equal(result.holeCardsDeleted, 0);
+  const orphanSql = queries.find((sql) => sql.includes("orphan_candidates") && sql.includes("delete from public.poker_hole_cards"));
+  assert.match(orphanSql, /for update of ps skip locked/i);
+  assert.doesNotMatch(orphanSql, /for update of t/i);
+  assert.match(orphanSql, /jsonb_typeof\(ps\.state -> 'handId'\) = 'string'/i);
+  assert.match(orphanSql, /max\(hc\.created_at\)/i);
+  assert.match(orphanSql, /not exists[\s\S]+public\.poker_actions/i);
+  assert.deepEqual(timeoutValues.slice(0, 2), ["250ms", "10000ms"]);
+});
+
+test("orphan phase failure is isolated from the existing cleanup phases", async () => {
+  let ordinaryCalls = 0;
+  const logs = [];
+  const databaseError = Object.assign(new Error("canceling statement due to statement timeout"), {
+    code: "57014",
+    detail: "bounded orphan candidate scan exceeded its statement budget",
+    where: "SQL statement in orphan cleanup"
+  });
+  const cleanup = createActionHistoryCleanup({
+    env: {
+      WS_POKER_BOT_ACTION_RETENTION_MS: String(HOUR),
+      WS_POKER_BOT_SETTLED_RETENTION_MS: "0",
+      WS_POKER_HUMAN_ACTION_RETENTION_MS: "0",
+      WS_POKER_HUMAN_SETTLED_RETENTION_MS: "0",
+      WS_POKER_ACTION_HISTORY_BATCH_SIZE: "5"
+    },
+    beginSql: async (fn) => fn({
+      unsafe: async (sql) => {
+        if (sql.includes("set_config('lock_timeout'")) throw databaseError;
+        if (sql.includes("candidate_hands")) {
+          ordinaryCalls += 1;
+          return [{ id: 1 }];
+        }
+        return [];
+      }
+    }),
+    klog: (event, fields) => logs.push({ event, fields })
+  });
+
+  const result = await cleanup.sweep();
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, "orphan_hole_cards_cleanup_failed");
+  assert.deepEqual(result.failedPhases, ["orphan_hole_cards"]);
+  assert.equal(result.orphanHoleCardsDeleted, 0);
+  assert.equal(result.phase1Deleted, 1);
+  assert.equal(ordinaryCalls, 1);
+  const failureLog = logs.find((entry) => entry.event === "ws_action_history_cleanup_failed");
+  assert.deepEqual(failureLog?.fields?.orphanFailure, {
+    code: "57014",
+    message: "canceling statement due to statement timeout",
+    detail: "bounded orphan candidate scan exceeded its statement budget",
+    where: "SQL statement in orphan cleanup"
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Phase 1
 // ---------------------------------------------------------------------------

@@ -1,7 +1,9 @@
 // Action-history retention cleanup.
 //
-// Bounded three-phase sweep that runs on a timer (see server.mjs).
-// The hole-card phase deletes poker_hole_cards for completed hands older than
+// Bounded four-phase sweep that runs on a timer (see server.mjs).
+// The orphan-hole-card phase removes old cards left on safely closed tables
+// without any action history. The regular hole-card phase deletes cards for
+// completed hands older than
 // the applicable action retention cutoff. Phase 1 deletes ordinary actions
 // (everything except HAND_SETTLED). Phase 2 deletes HAND_SETTLED audit rows
 // only after both ordinary actions and hole cards are gone.
@@ -15,12 +17,99 @@ import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
 const BACKLOG_CACHE_TTL_MS = 15_000;
 const DEFAULT_MAX_SWEEP_ROUNDS = 1;
 const MAX_SWEEP_ROUNDS = 20;
+const ORPHAN_CLEANUP_LOCK_TIMEOUT_MS = 250;
+const ORPHAN_CLEANUP_STATEMENT_TIMEOUT_MS = 10_000;
+const ORPHAN_CLEANUP_MAX_HAND_BATCH_SIZE = 25;
 // Preview uses bounded repeated batches for stress tests; Production stays at one round.
-const CLEANUP_PHASE_ORDER = Object.freeze(["hole_cards", "ordinary_actions", "hand_settled"]);
+const CLEANUP_PHASE_ORDER = Object.freeze(["orphan_hole_cards", "hole_cards", "ordinary_actions", "hand_settled"]);
 
 function resolveCutoff(retentionMs) {
   if (!Number.isFinite(retentionMs) || retentionMs <= 0) return null;
   return new Date(Date.now() - retentionMs).toISOString();
+}
+
+function postgresErrorDetails(error) {
+  const text = (value, maxLength) => typeof value === "string" && value.length > 0
+    ? value.slice(0, maxLength)
+    : null;
+  return {
+    code: text(error?.code, 40),
+    message: text(error?.message, 500),
+    detail: text(error?.detail, 1_000),
+    where: text(error?.where, 1_000)
+  };
+}
+
+// Historical recovery path for hands whose action history (including
+// HAND_SETTLED) was deleted before hole-card retention existed. Only the
+// authoritative poker_state row is locked; poker_tables is read through MVCC
+// so this phase cannot introduce a table->state or state->table lock cycle.
+async function sweepOrphanHoleCards({ tx, botActionCutoff, humanActionCutoff, batchSize, lockLimit }) {
+  await tx.unsafe("select set_config('lock_timeout', $1, true);", [`${ORPHAN_CLEANUP_LOCK_TIMEOUT_MS}ms`]);
+  await tx.unsafe("select set_config('statement_timeout', $1, true);", [`${ORPHAN_CLEANUP_STATEMENT_TIMEOUT_MS}ms`]);
+  const result = await tx.unsafe(
+    `with locked_states as materialized (
+  select ps.table_id, ps.state, t.has_human_participant
+    from public.poker_state ps
+    join public.poker_tables t on t.id = ps.table_id
+   where t.status = 'CLOSED'
+     and jsonb_typeof(ps.state) = 'object'
+     and jsonb_typeof(ps.state -> 'handId') = 'string'
+     and exists (
+           select 1
+             from public.poker_hole_cards hc
+            where hc.table_id = ps.table_id
+              and hc.hand_id <> ps.state ->> 'handId'
+              and not exists (
+                    select 1
+                      from public.poker_actions pa
+                     where pa.table_id = hc.table_id
+                       and pa.hand_id = hc.hand_id
+                  )
+            group by hc.hand_id
+           having (
+                    (t.has_human_participant = false
+                     and $1::timestamptz is not null
+                     and max(hc.created_at) < $1::timestamptz)
+                 or (t.has_human_participant = true
+                     and $2::timestamptz is not null
+                     and max(hc.created_at) < $2::timestamptz)
+                  )
+         )
+   order by ps.table_id
+   limit $4
+   for update of ps skip locked
+), orphan_candidates as materialized (
+  select hc.table_id, hc.hand_id, max(hc.created_at) as newest_card_at
+    from public.poker_hole_cards hc
+    join locked_states ls on ls.table_id = hc.table_id
+   where hc.hand_id <> ls.state ->> 'handId'
+     and not exists (
+           select 1
+             from public.poker_actions pa
+            where pa.table_id = hc.table_id
+              and pa.hand_id = hc.hand_id
+         )
+   group by hc.table_id, hc.hand_id, ls.has_human_participant
+  having (
+           (ls.has_human_participant = false
+            and $1::timestamptz is not null
+            and max(hc.created_at) < $1::timestamptz)
+        or (ls.has_human_participant = true
+            and $2::timestamptz is not null
+            and max(hc.created_at) < $2::timestamptz)
+         )
+   order by newest_card_at, hc.table_id, hc.hand_id
+   limit $3
+)
+delete from public.poker_hole_cards hc
+ using orphan_candidates oc
+ where hc.table_id = oc.table_id
+   and hc.hand_id = oc.hand_id
+returning hc.table_id, hc.hand_id, hc.user_id;`,
+    [botActionCutoff, humanActionCutoff, batchSize, lockLimit]
+  );
+  return Array.isArray(result) ? result.length : 0;
 }
 
 // Hole-card rows are deleted by unique (table_id, hand_id) candidates. The
@@ -298,6 +387,7 @@ export function createActionHistoryCleanup({
   }
 
   const batchSize = resolveBatchSize(env.WS_POKER_ACTION_HISTORY_BATCH_SIZE);
+  const orphanBatchSize = Math.min(batchSize, ORPHAN_CLEANUP_MAX_HAND_BATCH_SIZE);
   const lockLimit = batchSize * 2;
   const sweepRounds = Number.isInteger(maxSweepRounds)
     && maxSweepRounds >= DEFAULT_MAX_SWEEP_ROUNDS
@@ -331,6 +421,7 @@ export function createActionHistoryCleanup({
     if (failedPhases.has("ordinary_actions")) return "ordinary_actions_cleanup_failed";
     if (failedPhases.has("hand_settled")) return "hand_settled_cleanup_failed";
     if (failedPhases.has("hole_cards")) return "hole_cards_cleanup_failed";
+    if (failedPhases.has("orphan_hole_cards")) return "orphan_hole_cards_cleanup_failed";
     return null;
   }
 
@@ -342,6 +433,56 @@ export function createActionHistoryCleanup({
     try {
       const value = await beginSql(async (tx) => {
         await tx.unsafe("select set_config('statement_timeout', '2000ms', true);");
+        const orphanRows = await tx.unsafe(
+          `with eligible_states as materialized (
+  select ps.table_id, ps.state, t.has_human_participant
+    from public.poker_state ps
+    join public.poker_tables t on t.id = ps.table_id
+   where t.status = 'CLOSED'
+     and jsonb_typeof(ps.state) = 'object'
+     and jsonb_typeof(ps.state -> 'handId') = 'string'
+     and exists (
+           select 1 from public.poker_hole_cards hc
+            where hc.table_id = ps.table_id
+              and hc.hand_id <> ps.state ->> 'handId'
+              and not exists (
+                    select 1 from public.poker_actions pa
+                     where pa.table_id = hc.table_id and pa.hand_id = hc.hand_id
+                  )
+            group by hc.hand_id
+           having (
+                    (t.has_human_participant = false and $1::timestamptz is not null
+                     and max(hc.created_at) < $1::timestamptz)
+                 or (t.has_human_participant = true and $2::timestamptz is not null
+                     and max(hc.created_at) < $2::timestamptz)
+                  )
+         )
+   order by ps.table_id
+   limit $4
+), orphan_candidates as materialized (
+  select hc.table_id, hc.hand_id, count(*)::bigint as card_rows, max(hc.created_at) as newest_card_at
+    from public.poker_hole_cards hc
+    join eligible_states es on es.table_id = hc.table_id
+   where hc.hand_id <> es.state ->> 'handId'
+     and not exists (
+           select 1 from public.poker_actions pa
+            where pa.table_id = hc.table_id and pa.hand_id = hc.hand_id
+         )
+   group by hc.table_id, hc.hand_id, es.has_human_participant
+  having (
+           (es.has_human_participant = false and $1::timestamptz is not null
+            and max(hc.created_at) < $1::timestamptz)
+        or (es.has_human_participant = true and $2::timestamptz is not null
+            and max(hc.created_at) < $2::timestamptz)
+         )
+   order by newest_card_at, hc.table_id, hc.hand_id
+   limit $3
+)
+select count(*)::bigint as orphan_hand_rows,
+       coalesce(sum(card_rows), 0)::bigint as orphan_card_rows
+  from orphan_candidates;`,
+          [cutoffs.botActionCutoff, cutoffs.humanActionCutoff, orphanBatchSize, lockLimit]
+        );
         const rows = await tx.unsafe(
           `with phase1_locked_tables as (
   select t.id, t.has_human_participant
@@ -440,8 +581,11 @@ select
           ]
         );
         const row = rows?.[0] || {};
+        const orphanRow = orphanRows?.[0] || {};
         return {
           available: true,
+          orphanHoleCardHands: Number(orphanRow.orphan_hand_rows || 0),
+          orphanHoleCardRows: Number(orphanRow.orphan_card_rows || 0),
           ordinaryActionRows: Number(row.ordinary_action_rows || 0),
           handSettledRows: Number(row.hand_settled_rows || 0),
           measuredAt: new Date().toISOString(),
@@ -454,6 +598,8 @@ select
     } catch (error) {
       return {
         available: false,
+        orphanHoleCardHands: null,
+        orphanHoleCardRows: null,
         ordinaryActionRows: null,
         handSettledRows: null,
         measuredAt: new Date().toISOString(),
@@ -467,6 +613,7 @@ select
     if (sweepInProgress) {
       return {
         ok: true,
+        orphanHoleCardsDeleted: 0,
         holeCardsDeleted: 0,
         phase1Deleted: 0,
         phase2Deleted: 0,
@@ -486,6 +633,7 @@ select
       if (!anyEnabled) {
         result = {
           ok: true,
+          orphanHoleCardsDeleted: 0,
           holeCardsDeleted: 0,
           phase1Deleted: 0,
           phase2Deleted: 0,
@@ -496,13 +644,34 @@ select
         return result;
       }
 
+      let orphanHoleCardsDeleted = 0;
       let holeCardsDeleted = 0;
       let phase1Deleted = 0;
       let phase2Deleted = 0;
       let holeCardsPhaseEnabledForSweep = cutoffs.botActionEnabled || cutoffs.humanActionEnabled;
+      let orphanHoleCardsPhaseEnabledForSweep = holeCardsPhaseEnabledForSweep;
+      let orphanFailure = null;
       const failedPhases = new Set();
 
       for (let round = 0; round < sweepRounds; round += 1) {
+        let orphanHoleCardsRoundDeleted = 0;
+        if (orphanHoleCardsPhaseEnabledForSweep) {
+          try {
+            orphanHoleCardsRoundDeleted = await beginSql((tx) => sweepOrphanHoleCards({
+              tx,
+              botActionCutoff: cutoffs.botActionCutoff,
+              humanActionCutoff: cutoffs.humanActionCutoff,
+              batchSize: orphanBatchSize,
+              lockLimit
+            }), { env });
+            orphanHoleCardsDeleted += orphanHoleCardsRoundDeleted;
+          } catch (error) {
+            failedPhases.add("orphan_hole_cards");
+            orphanFailure = postgresErrorDetails(error);
+            orphanHoleCardsPhaseEnabledForSweep = false;
+          }
+        }
+
         let holeCardsRoundDeleted = 0;
         if (holeCardsPhaseEnabledForSweep) {
           try {
@@ -552,13 +721,15 @@ select
           break;
         }
 
-        if (holeCardsRoundDeleted === 0 && phase1RoundDeleted === 0 && phase2RoundDeleted === 0) break;
+        if (orphanHoleCardsRoundDeleted === 0 && holeCardsRoundDeleted === 0
+          && phase1RoundDeleted === 0 && phase2RoundDeleted === 0) break;
       }
 
       const orderedPhases = orderedFailedPhases(failedPhases);
       const errorCode = primaryErrorCode(failedPhases);
       result = {
         ok: orderedPhases.length === 0,
+        orphanHoleCardsDeleted,
         holeCardsDeleted,
         phase1Deleted,
         phase2Deleted,
@@ -568,12 +739,14 @@ select
         reason: errorCode
       };
 
-      if (result.ok && (holeCardsDeleted > 0 || phase1Deleted > 0 || phase2Deleted > 0)) {
+      if (result.ok && (orphanHoleCardsDeleted > 0 || holeCardsDeleted > 0 || phase1Deleted > 0 || phase2Deleted > 0)) {
         klog("ws_action_history_cleanup_complete", {
+          orphanHoleCardsDeleted,
           holeCardsDeleted,
           phase1Deleted,
           phase2Deleted,
           batchSize,
+          orphanBatchSize,
           lockLimit,
           sweepRounds
         });
@@ -581,18 +754,22 @@ select
         klog("ws_action_history_cleanup_failed", {
           errorCode,
           failedPhases: orderedPhases,
+          orphanHoleCardsDeleted,
           holeCardsDeleted,
           phase1Deleted,
           phase2Deleted,
           batchSize,
+          orphanBatchSize,
           lockLimit,
-          sweepRounds
+          sweepRounds,
+          orphanFailure
         });
       }
       return result;
     } catch (_error) {
       result = {
         ok: false,
+        orphanHoleCardsDeleted: 0,
         holeCardsDeleted: 0,
         phase1Deleted: 0,
         phase2Deleted: 0,
@@ -604,6 +781,7 @@ select
       klog("ws_action_history_cleanup_failed", {
         errorCode: result.errorCode,
         failedPhases: result.failedPhases,
+        orphanHoleCardsDeleted: 0,
         holeCardsDeleted: 0,
         phase1Deleted: 0,
         phase2Deleted: 0,
@@ -619,6 +797,7 @@ select
         startedAt,
         finishedAt,
         durationMs: Math.max(0, Date.now() - startedAtMs),
+        orphanHoleCardsDeleted: Number(result?.orphanHoleCardsDeleted || 0),
         holeCardsDeleted: Number(result?.holeCardsDeleted || 0),
         phase1Deleted: Number(result?.phase1Deleted || 0),
         phase2Deleted: Number(result?.phase2Deleted || 0),

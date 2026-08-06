@@ -118,10 +118,11 @@ function normalizeMetricsSnapshot(value, target) {
   const cleanup = projectFields(value.cleanup, []);
   if (cleanup) {
     cleanup.backlog = projectFields(value.cleanup.backlog, [
-      "ordinaryActionRows", "handSettledRows", "cappedAtBatchSize", "measuredAt"
+      "orphanHoleCardHands", "orphanHoleCardRows", "ordinaryActionRows", "handSettledRows",
+      "cappedAtBatchSize", "measuredAt"
     ]);
     cleanup.lastRun = projectFields(value.cleanup.lastRun, [
-      "finishedAt", "durationMs", "holeCardsDeleted", "phase1Deleted", "phase2Deleted",
+      "finishedAt", "durationMs", "orphanHoleCardsDeleted", "holeCardsDeleted", "phase1Deleted", "phase2Deleted",
       "deletedRows", "result", "errorCode", "failedPhases"
     ]);
   }
