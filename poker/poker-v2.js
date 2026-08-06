@@ -245,7 +245,15 @@
   var targetedReactionDismissTimer = null;
   var reactionControlTimer = null;
   var reactionControlUntilMs = 0;
+  var reactionHistoryTableId = null;
+  var reactionHistoryUserId = null;
+  var reactionHistoryEntries = [];
+  var reactionHistoryExpiryTimer = null;
+  var reactionHistoryPanelOpen = false;
   var els = {};
+
+  var REACTION_HISTORY_LIMIT = 25;
+  var REACTION_HISTORY_TTL_MS = 10 * 60 * 1000;
 
   function cloneState(source){
     return JSON.parse(JSON.stringify(source));
@@ -1946,6 +1954,92 @@
     return null;
   }
 
+  function clearReactionHistoryExpiryTimer(){
+    if (!reactionHistoryExpiryTimer) return;
+    window.clearTimeout(reactionHistoryExpiryTimer);
+    reactionHistoryExpiryTimer = null;
+  }
+
+  function renderReactionHistory(){
+    var live = state && state.mode === 'live' && !!state.tableId;
+    if (els.reactionHistory) els.reactionHistory.hidden = !live;
+    if (els.reactionHistoryToggle){
+      els.reactionHistoryToggle.textContent = 'History (' + reactionHistoryEntries.length + ')';
+      els.reactionHistoryToggle.setAttribute('aria-expanded', live && reactionHistoryPanelOpen ? 'true' : 'false');
+    }
+    if (els.reactionHistoryPanel) els.reactionHistoryPanel.hidden = !live || !reactionHistoryPanelOpen;
+    if (!els.reactionHistoryList) return;
+    els.reactionHistoryList.innerHTML = '';
+    if (!reactionHistoryEntries.length){
+      var empty = document.createElement('div');
+      empty.className = 'poker-reaction-history__empty';
+      empty.textContent = 'No reactions yet';
+      els.reactionHistoryList.appendChild(empty);
+      return;
+    }
+    reactionHistoryEntries.forEach(function(item){
+      var entry = findReactionEntry(item.reactionKey);
+      if (!entry) return;
+      var row = document.createElement('div');
+      row.className = 'poker-reaction-history__entry';
+      row.textContent = item.senderDisplayName + ' · ' + entry.emoji + ' ' + entry.label;
+      els.reactionHistoryList.appendChild(row);
+    });
+  }
+
+  function scheduleReactionHistoryExpiry(){
+    clearReactionHistoryExpiryTimer();
+    if (!reactionHistoryEntries.length) return;
+    var delayMs = Math.max(0, reactionHistoryEntries[0].createdAt + REACTION_HISTORY_TTL_MS - Date.now());
+    reactionHistoryExpiryTimer = window.setTimeout(function(){
+      reactionHistoryExpiryTimer = null;
+      pruneReactionHistory();
+      renderReactionHistory();
+      scheduleReactionHistoryExpiry();
+    }, delayMs);
+  }
+
+  function pruneReactionHistory(){
+    var oldestAllowedAt = Date.now() - REACTION_HISTORY_TTL_MS;
+    reactionHistoryEntries = reactionHistoryEntries.filter(function(item){ return item.createdAt > oldestAllowedAt; });
+    if (reactionHistoryEntries.length > REACTION_HISTORY_LIMIT){
+      reactionHistoryEntries = reactionHistoryEntries.slice(-REACTION_HISTORY_LIMIT);
+    }
+  }
+
+  function appendReactionHistory(seatNo, senderDisplayName, reactionKey){
+    reactionHistoryEntries.push({
+      senderSeatNo: seatNo,
+      senderDisplayName: senderDisplayName,
+      reactionKey: reactionKey,
+      createdAt: Date.now()
+    });
+    pruneReactionHistory();
+    renderReactionHistory();
+    scheduleReactionHistoryExpiry();
+  }
+
+  function clearReactionHistory(){
+    clearReactionHistoryExpiryTimer();
+    reactionHistoryTableId = null;
+    reactionHistoryUserId = null;
+    reactionHistoryEntries = [];
+    reactionHistoryPanelOpen = false;
+    renderReactionHistory();
+  }
+
+  function syncReactionHistoryContext(nextTableId, nextUserId){
+    var normalizedTableId = nextTableId ? String(nextTableId) : null;
+    var normalizedUserId = nextUserId ? String(nextUserId) : null;
+    if (reactionHistoryTableId === normalizedTableId && reactionHistoryUserId === normalizedUserId) return;
+    clearReactionHistoryExpiryTimer();
+    reactionHistoryTableId = normalizedTableId;
+    reactionHistoryUserId = normalizedUserId;
+    reactionHistoryEntries = [];
+    reactionHistoryPanelOpen = false;
+    renderReactionHistory();
+  }
+
   function clearReactionControlTimer(){
     if (reactionControlTimer){
       window.clearTimeout(reactionControlTimer);
@@ -2194,10 +2288,16 @@
     var ownerUserId = currentSeatOwnerUserId(seatNo);
     if (!Number.isInteger(seatNo) || seatNo < 1 || !entry || !ownerUserId) return;
     var hasTargetSeatNo = Object.prototype.hasOwnProperty.call(payload, 'targetSeatNo');
+    var targetSeatNo = null;
+    var targetOwnerUserId = null;
     if (hasTargetSeatNo && reactionKey === 'nice_hand'){
-      var targetSeatNo = Number(payload.targetSeatNo);
-      var targetOwnerUserId = currentSeatOwnerUserId(targetSeatNo);
+      targetSeatNo = Number(payload.targetSeatNo);
+      targetOwnerUserId = currentSeatOwnerUserId(targetSeatNo);
       if (!Number.isInteger(targetSeatNo) || targetSeatNo < 1 || targetSeatNo === seatNo || !targetOwnerUserId) return;
+    }
+    var senderSeat = state.seats.find(function(seat){ return seat && seat.seatNo === seatNo && seat.userId === ownerUserId; });
+    appendReactionHistory(seatNo, getDisplayName(senderSeat || { userId: ownerUserId }), reactionKey);
+    if (hasTargetSeatNo && reactionKey === 'nice_hand'){
       var effectId = String(nextTargetedReactionEffectId++);
       var effect = {
         senderSeatNo: seatNo,
@@ -3840,6 +3940,7 @@
     renderDealerChip();
     renderInfoPanel();
     renderControls();
+    renderReactionHistory();
     renderClosedTableNotice();
   }
 
@@ -4142,6 +4243,7 @@
 
   function navigateToLobby(){
     cancelClosedTableRedirect();
+    clearReactionHistory();
     if (!window || !window.location) return;
     window.location.href = '/poker/';
   }
@@ -4330,6 +4432,13 @@
       els.reactionMenu.hidden = !hidden;
       els.reactionBtn.setAttribute('aria-expanded', hidden ? 'true' : 'false');
     });
+    if (els.reactionHistoryToggle) els.reactionHistoryToggle.addEventListener('click', function(){
+      reactionHistoryPanelOpen = !reactionHistoryPanelOpen;
+      renderReactionHistory();
+      if (reactionHistoryPanelOpen && els.reactionHistoryList){
+        els.reactionHistoryList.scrollTop = els.reactionHistoryList.scrollHeight;
+      }
+    });
     document.addEventListener('click', function(event){
       var target = event && event.target;
       if (!target || target === els.reactionBtn || target === els.reactionMenu) return;
@@ -4381,6 +4490,10 @@
     els.reactionControl = document.getElementById('pokerV2ReactionControl');
     els.reactionMenu = document.getElementById('pokerV2ReactionMenu');
     els.reactionHint = document.getElementById('pokerV2ReactionHint');
+    els.reactionHistory = document.getElementById('pokerReactionHistory');
+    els.reactionHistoryToggle = document.getElementById('pokerReactionHistoryToggle');
+    els.reactionHistoryPanel = document.getElementById('pokerReactionHistoryPanel');
+    els.reactionHistoryList = document.getElementById('pokerReactionHistoryList');
     els.leaveConfirmModal = document.getElementById('pokerV2LeaveConfirmModal');
     els.leaveConfirmYes = document.getElementById('pokerV2LeaveConfirmYes');
     els.leaveConfirmCancel = document.getElementById('pokerV2LeaveConfirmCancel');
@@ -4494,6 +4607,7 @@
 
   function applySignedOutState(){
     clearRebuyOperation();
+    clearReactionHistory();
     stopLiveMode();
     resetQueuedPreactionState();
     state = createEmptyLiveState(tableId, null);
@@ -4503,6 +4617,7 @@
 
   function applyAuthenticatedPendingState(user){
     if (!user || !state.currentUserId || String(user.id || '') !== String(state.currentUserId)) clearRebuyOperation();
+    syncReactionHistoryContext(tableId, user && user.id ? String(user.id) : null);
     stopLiveMode();
     resetQueuedPreactionState();
     isGuestMode = false;
@@ -4536,6 +4651,7 @@
       render();
       return;
     }
+    syncReactionHistoryContext(tableId, getUserIdFromToken(token) || state.currentUserId || null);
     // 1. Stop/invalidate the old client first (stopLiveMode increments the
     //    generation, so any late callback from the previous instance is stale).
     var preservingState = !!(state && state.mode === 'live'
