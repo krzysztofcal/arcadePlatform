@@ -116,6 +116,7 @@ function createHarness(options = {}){
     'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2GuestPanel', 'pokerV2GuestBadge', 'pokerV2SignInBtn', 'pokerV2SeatNo',
     'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
     'pokerV2ReactionControl', 'pokerV2ReactionBtn', 'pokerV2ReactionMenu', 'pokerV2ReactionHint',
+    'pokerReactionHistory', 'pokerReactionHistoryToggle', 'pokerReactionHistoryCount', 'pokerReactionHistoryPanel', 'pokerReactionHistoryList',
     'pokerV2RebuyPanel', 'pokerV2RebuyTitle', 'pokerV2RebuyCopy', 'pokerV2RebuyBalance', 'pokerV2RebuyBtn', 'pokerV2RebuyLobbyBtn', 'pokerV2RebuyWatchBtn', 'pokerV2RebuyAccountLink',
     'pokerV2ClosedTableModal', 'pokerV2ClosedTableTitle', 'pokerV2ClosedTableCountdown',
     'pokerV2DemoPill', 'pokerV2FoldBtn', 'pokerV2PrimaryBtn', 'pokerV2AmountBtn',
@@ -390,6 +391,37 @@ function findChildByClass(node, className){
   return (node.children || []).find((child) => String(child.className || '').split(/\s+/).includes(className));
 }
 
+function reactionHistoryRows(harness){
+  return harness.elements.pokerReactionHistoryList.children.filter((child) => child.className === 'poker-reaction-history__entry');
+}
+
+async function bootReactionHistoryHarness(options = {}){
+  const harness = createHarness(options);
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Alice' },
+          { userId: 'user-2', seat: 2, displayName: options.historySenderDisplayName || 'Viktor' }
+        ]
+      },
+      public: { hand: { handId: 'hand-1', status: 'TURN' }, pot: { total: 10 } },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+  return { harness, ws };
+}
+
 test('poker v2 boots live mode, preserves table links, and sends WS commands', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
@@ -419,7 +451,7 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
     payload: {
       tableId: 'table-1',
       stateVersion: 2,
-      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }, { userId: 'user-2', seat: 2, displayName: 'Viktor' }] },
       public: {
         hand: { handId: 'hand-1', status: 'TURN', dealerSeatNo: 2 },
         turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
@@ -446,6 +478,10 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(harness.elements.pokerV2JoinBtn.disabled, true, 'join should stay disabled once the user is seated');
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
   assert.ok(heroSeat, 'v2 should render a dedicated hero seat');
+  const occupiedSeatTwo = findSeatByLabel(harness, 'Viktor');
+  assert.equal(findSeatChild(occupiedSeatTwo, 'poker-seat-number').textContent, 'S2', 'occupied seats should render their authoritative seat number');
+  const emptySeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--empty/.test(node.className));
+  assert.equal(findSeatChild(emptySeat, 'poker-seat-number'), undefined, 'empty seats should not render occupied-player seat badges');
   assert.equal(heroSeat.style.left, '34%', 'hero seat should be shifted left to avoid the action rail');
   assert.equal(heroSeat.style.top, '91%', 'hero seat should stay near the bottom edge');
   assert.equal(harness.elements.pokerHeroCards.style.left, '42.3%', 'hero hole cards should shift left by half a card height toward the avatar');
@@ -515,6 +551,90 @@ test('poker v2 disables reactions for four seconds after an accepted reaction', 
   await harness.flush();
   assert.equal(harness.elements.pokerV2ReactionBtn.disabled, false);
   assert.equal(harness.elements.pokerV2ReactionHint.hidden, true);
+});
+
+test('reaction history appends only an authoritative table_reaction once', async () => {
+  const longNickname = 'Smoke Profile 676 Very Long Nickname';
+  const { harness, ws } = await bootReactionHistoryHarness({ historySenderDisplayName: longNickname });
+  harness.elements.pokerV2ReactionBtn.click();
+  harness.elements.pokerV2ReactionMenu.children.find((child) => child.dataset.reactionKey === 'wow').click();
+  await harness.flush();
+  assert.equal(reactionHistoryRows(harness).length, 0);
+
+  ws.onReaction({ payload: { seatNo: 2, reactionKey: 'wow' } });
+  await harness.flush();
+  assert.equal(reactionHistoryRows(harness).length, 1);
+  const firstRow = reactionHistoryRows(harness)[0];
+  const author = findChildByClass(firstRow, 'poker-reaction-history__author');
+  const nickname = findChildByClass(author, 'poker-reaction-history__nickname');
+  const seat = findChildByClass(author, 'poker-reaction-history__seat');
+  const separator = findChildByClass(firstRow, 'poker-reaction-history__separator');
+  const reaction = findChildByClass(firstRow, 'poker-reaction-history__reaction');
+  assert.equal(nickname.textContent, longNickname);
+  assert.equal(nickname.title, longNickname);
+  assert.equal(nickname.attributes['aria-label'], 'Player nickname: ' + longNickname);
+  assert.equal(author.children[0], nickname);
+  assert.equal(author.children[1], seat);
+  assert.equal(seat.textContent, 'S2');
+  assert.equal(firstRow.children[0], author);
+  assert.equal(firstRow.children[1], separator);
+  assert.equal(firstRow.children[2], reaction);
+  assert.equal(reaction.textContent, '😮 Wow!');
+
+  ws.onReaction({ payload: { seatNo: 1, reactionKey: 'wow' } });
+  await harness.flush();
+  assert.equal(reactionHistoryRows(harness).length, 2);
+  assert.equal(findChildByClass(findChildByClass(reactionHistoryRows(harness)[1], 'poker-reaction-history__author'), 'poker-reaction-history__nickname').textContent, 'Alice');
+  assert.equal(harness.elements.pokerReactionHistoryCount.textContent, '2');
+  assert.equal(harness.elements.pokerReactionHistoryToggle.attributes['aria-label'], 'Reaction history, 2 messages');
+});
+
+test('reaction history records one validated targeted nice_hand before its effect return', async () => {
+  const { harness, ws } = await bootReactionHistoryHarness();
+  ws.onReaction({ payload: { seatNo: 2, targetSeatNo: 1, reactionKey: 'nice_hand' } });
+  await harness.flush();
+  assert.equal(reactionHistoryRows(harness).length, 1);
+
+  ws.onReaction({ payload: { seatNo: 2, targetSeatNo: 2, reactionKey: 'nice_hand' } });
+  await harness.flush();
+  assert.equal(reactionHistoryRows(harness).length, 1);
+});
+
+test('reaction history keeps 25 newest entries and expires entries by age', async () => {
+  const bounded = await bootReactionHistoryHarness();
+  for (let index = 0; index < 26; index += 1){
+    bounded.ws.onReaction({ payload: { seatNo: 2, reactionKey: index === 0 ? 'hello' : 'wow' } });
+  }
+  await bounded.harness.flush();
+  assert.equal(reactionHistoryRows(bounded.harness).length, 25);
+  assert.equal(reactionHistoryRows(bounded.harness).some((row) => findChildByClass(row, 'poker-reaction-history__reaction').textContent.includes('Hello')), false);
+
+  const expiring = await bootReactionHistoryHarness();
+  expiring.ws.onReaction({ payload: { seatNo: 2, reactionKey: 'hello' } });
+  expiring.harness.advanceTime(60_000);
+  expiring.ws.onReaction({ payload: { seatNo: 2, reactionKey: 'wow' } });
+  expiring.harness.advanceTime(9 * 60_000);
+  await expiring.harness.flush();
+  assert.equal(reactionHistoryRows(expiring.harness).length, 1);
+  assert.equal(findChildByClass(reactionHistoryRows(expiring.harness)[0], 'poker-reaction-history__reaction').textContent, '😮 Wow!');
+  expiring.harness.advanceTime(60_000);
+  await expiring.harness.flush();
+  assert.equal(reactionHistoryRows(expiring.harness).length, 0);
+});
+
+test('reaction history survives same-table reconnect and clears on definitive leave', async () => {
+  const { harness, ws } = await bootReactionHistoryHarness();
+  ws.onReaction({ payload: { seatNo: 2, reactionKey: 'wow' } });
+  ws.onStatus('reconnecting');
+  await harness.flush();
+  assert.equal(reactionHistoryRows(harness).length, 1);
+
+  ws.onStatus('auth_ok');
+  await harness.flush();
+  confirmLeave(harness);
+  await harness.flush();
+  assert.equal(reactionHistoryRows(harness).length, 0);
+  assert.equal(harness.elements.pokerReactionHistoryCount.textContent, '0');
 });
 
 test('poker v2 uses the WS settlement reveal deadline for targeted reactions', async () => {

@@ -100,6 +100,12 @@
     </div>
 
     <div class="poker-action-bar" id="pokerActionBar">
+      <div class="poker-reaction-history" id="pokerReactionHistory" hidden>
+        <button type="button" class="poker-live-btn poker-reaction-history__toggle" id="pokerReactionHistoryToggle" aria-label="Reaction history, 0 messages" aria-expanded="false" aria-controls="pokerReactionHistoryPanel"><span aria-hidden="true">💬</span><span class="poker-reaction-history__count" id="pokerReactionHistoryCount">0</span></button>
+      </div>
+      <section class="poker-reaction-history__panel" id="pokerReactionHistoryPanel" aria-label="Table reaction history" hidden>
+        <div class="poker-reaction-history__list" id="pokerReactionHistoryList"></div>
+      </section>
       <div class="poker-action-amount-input" id="pokerV2AmountInputWrap">
         <strong id="pokerV2AmountValue">20</strong>
         <input type="range" id="pokerV2AmountInput" value="20" min="1" max="20" step="1">
