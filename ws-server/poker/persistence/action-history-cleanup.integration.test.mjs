@@ -202,7 +202,12 @@ test("action-history cleanup executes hole-card and settlement SQL on PostgreSQL
 
     const first = await cleanup.sweep();
     assert.equal(first.ok, true);
-    assert.equal(first.orphanHoleCardsDeleted, 1);
+    const orphanAfterFirst = await db.unsafe(
+      "select count(*)::bigint as rows from public.poker_hole_cards where table_id = $1 and hand_id = $2",
+      [tableId, orphanHandId]
+    );
+    assert.equal(Number(orphanAfterFirst[0].rows), 0, `orphan cleanup result: ${JSON.stringify(first)}`);
+    assert.equal(first.orphanHoleCardsDeleted, 1, `orphan cleanup result: ${JSON.stringify(first)}`);
     assert.equal(first.holeCardsDeleted, 1);
     assert.equal(first.phase1Deleted, 1);
     assert.equal(first.phase2Deleted, 1);
