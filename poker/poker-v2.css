@@ -178,7 +178,6 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-menu-panel a{display:block; padding:10px 12px; border-radius:8px; text-decoration:none; color:#e7efff; font-size:0.93rem; font-weight:500; background:rgba(21,30,47,0.6); border:1px solid rgba(111,130,170,0.22);}
 
 .poker-menu-panel a:active{background:rgba(65,91,138,0.42);}
-.poker-menu-panel__button{display:block;width:100%;padding:10px 12px;border:1px solid rgba(111,130,170,0.22);border-radius:8px;background:rgba(21,30,47,0.6);color:#e7efff;font:inherit;font-size:0.93rem;text-align:left;}
 .poker-social-settings{position:fixed;top:calc(env(safe-area-inset-top) + 66px);left:calc(env(safe-area-inset-left) + 12px);z-index:32;width:min(260px,calc(100vw - 24px));padding:12px;border:1px solid rgba(255,215,157,0.28);border-radius:13px;background:linear-gradient(180deg,rgba(8,13,22,0.97),rgba(4,7,12,0.99));box-shadow:0 14px 24px rgba(0,0,0,0.55);color:#e7efff;}
 .poker-social-settings[hidden]{display:none;}
 .poker-social-settings__header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;color:#f4d7a5;}
@@ -216,6 +215,8 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-action-reaction .poker-reaction-hint{display:block;margin-top:4px;text-align:center;}
 .poker-reaction-history{position:relative;z-index:26;width:40px;grid-column:1;grid-row:1;align-self:end;}
 .poker-reaction-history[hidden]{display:none;}
+.poker-social-settings__toggle{position:relative;width:40px;min-height:42px;padding:0;border-radius:14px;background:linear-gradient(180deg,rgba(35,48,72,0.98),rgba(14,22,37,0.98));font-size:1.05rem;grid-column:1;grid-row:2;align-self:end;}
+.poker-social-settings__toggle[hidden]{display:none;}
 .poker-reaction-history__toggle{position:relative;width:40px;min-height:42px;padding:0;border-radius:14px;background:linear-gradient(180deg,rgba(35,48,72,0.98),rgba(14,22,37,0.98));font-size:1.05rem;}
 .poker-reaction-history__count{position:absolute;top:-5px;right:-5px;display:flex;align-items:center;justify-content:center;min-width:17px;height:17px;padding:0 4px;border:2px solid #111827;border-radius:999px;background:#dc4e4e;color:#fff;font-size:0.6rem;font-weight:800;line-height:1;}
 .poker-reaction-history__panel{position:absolute;right:0;bottom:calc(100% + 8px);z-index:26;width:min(280px,calc(100vw - 32px));max-height:220px;overflow:hidden;border:1px solid rgba(255,223,180,0.24);border-radius:14px;background:linear-gradient(180deg,rgba(12,18,31,0.98),rgba(5,9,16,0.99));box-shadow:0 14px 28px rgba(0,0,0,0.48);}
@@ -307,7 +308,7 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 
 .poker-action-bar{position:fixed; right:max(10px, env(safe-area-inset-right)); bottom:max(10px, env(safe-area-inset-bottom)); width:min(33vw, 196px); display:grid; grid-template-columns:40px minmax(0, 1fr); align-items:end; gap:8px; padding:8px; border-radius:20px; border:1px solid rgba(255,223,180,0.24); background:linear-gradient(180deg, rgba(9,12,20,0.94), rgba(2,4,8,0.98)); box-shadow:0 12px 22px rgba(0,0,0,0.56), inset 0 1px 1px rgba(255,255,255,0.12); z-index:25;}
 
-.poker-action-buttons{display:flex; flex-direction:column; justify-content:flex-end; gap:8px; min-height:182px; grid-column:2; grid-row:2;}
+.poker-action-buttons{display:flex; flex-direction:column; justify-content:flex-end; gap:8px; min-height:182px; grid-column:2; grid-row:3;}
 
 .poker-action-btn{min-height:50px; border:none; border-radius:17px; color:#f7f8fd; font-size:0.98rem; font-weight:700; letter-spacing:0.01em; box-shadow:inset 0 1px 1px rgba(255,255,255,0.22), 0 8px 14px rgba(0,0,0,0.42);}
 
@@ -351,7 +352,7 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 
 .poker-action-btn.is-selected{box-shadow:0 0 0 2px rgba(255,255,255,0.66), inset 0 1px 1px rgba(255,255,255,0.26), 0 10px 16px rgba(0,0,0,0.42);}
 
-.poker-action-amount-input{align-self:end; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:8px; height:182px; padding:10px 6px; border-radius:17px; border:1px solid rgba(255,223,180,0.22); background:rgba(8,12,21,0.86); grid-column:1; grid-row:2;}
+.poker-action-amount-input{align-self:end; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:8px; height:182px; padding:10px 6px; border-radius:17px; border:1px solid rgba(255,223,180,0.22); background:rgba(8,12,21,0.86); grid-column:1; grid-row:3;}
 
 .poker-action-amount-input strong{font-size:0.78rem; font-weight:700; color:#fff;}
 
@@ -363,7 +364,7 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 
 @media (min-width:480px){.poker-scene{height:min(76vh, 860px);} .poker-seat{width:126px;} .poker-hero-cards{bottom:136px;} .poker-card{width:50px; height:68px;}}
 
-@media (max-width:640px){.poker-live-actions{align-items:stretch;} .poker-live-input{width:calc(50% - 5px);} .poker-live-input input{width:100%;} .poker-action-bar{width:min(33vw, 156px); right:8px; bottom:8px; gap:6px; padding:6px; grid-template-columns:34px minmax(0, 1fr);} .poker-action-buttons{min-height:170px; gap:6px;} .poker-action-amount-input{height:170px;} .poker-action-amount-input input{height:106px; min-height:106px;} .poker-reaction-history{width:34px;} .poker-reaction-history__toggle{width:34px;} .poker-reaction-history__panel,.poker-reaction-history__list{max-height:180px;}}
+@media (max-width:640px){.poker-live-actions{align-items:stretch;} .poker-live-input{width:calc(50% - 5px);} .poker-live-input input{width:100%;} .poker-action-bar{width:min(33vw, 156px); right:8px; bottom:8px; gap:6px; padding:6px; grid-template-columns:34px minmax(0, 1fr);} .poker-action-buttons{min-height:170px; gap:6px;} .poker-action-amount-input{height:170px;} .poker-action-amount-input input{height:106px; min-height:106px;} .poker-reaction-history{width:34px;} .poker-reaction-history__toggle{width:34px;} .poker-social-settings__toggle{width:34px;} .poker-reaction-history__panel,.poker-reaction-history__list{max-height:180px;}}
 
 @media (max-width:479px){.poker-settlement-summary{width:min(36vw, 135px); max-height:132px; font-size:0.6rem;} .poker-settlement-summary__row{grid-template-columns:1fr; gap:2px;} .poker-settlement-summary__recipients{text-align:left;} .poker-seat-settlement-badge{max-width:112px;}}
 
