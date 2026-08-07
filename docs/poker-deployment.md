@@ -327,6 +327,8 @@ through `has_human_participant` predicates.
 | `WS_POKER_HUMAN_SETTLED_RETENTION_MS` | ms | `0` | finite non-negative integer | `0` | Delete `HAND_SETTLED` markers for human-participated tables after this many ms, only when ordinary actions and hole cards are gone |
 | `WS_POKER_ACTION_HISTORY_SWEEP_MS` | ms | `300000` (5 min) | `30_000`–`3_600_000` | N/A | Interval between cleanup sweep invocations |
 | `WS_POKER_ACTION_HISTORY_BATCH_SIZE` | count | `20` | `1`–`100` integer | N/A | Maximum candidate hands/settlements per phase per sweep. `lockLimit` is derived as `batchSize * 2` |
+| `WS_POKER_CLOSED_TABLE_RETENTION_MS` | ms | `604800000` (7 days) | finite non-negative integer | `0` | Delete old `CLOSED` poker tables after this many ms since terminal close (`updated_at`). Runs after the action-history sweep on the same timer; requires terminal state (`HAND_DONE` + empty `handId`), settled escrow (`balance = 0`), zero actions/hole cards, no fresh requests, and no unfinished durable `ACT` request |
+| `WS_POKER_CLOSED_TABLE_BATCH_SIZE` | count | `20` | `1`–`100` integer | N/A | Maximum candidate tables deleted per sweep. Runtime-loaded tables are excluded via `tableManager` retirement claims; the final guarded DELETE uses `FOR UPDATE SKIP LOCKED` |
 
 Validation rules (fail-fast at WS startup):
 
@@ -335,7 +337,7 @@ Validation rules (fail-fast at WS startup):
 - When both `> 0`, `settled` must be `>= action`.
 - `batchSize` must be an integer from 1 through 100.
 - Bot and human retention pairs are validated independently.
-- All defaults are `0`, so cleanup is disabled until explicitly configured.
+- Action-history retention defaults are `0` (disabled until configured). Closed-table retention defaults to 7 days; `0` disables it.
 
 A sweep-in-progress guard prevents concurrent sweeps when a sweep takes longer than the sweep interval.
 
@@ -350,6 +352,9 @@ WS_POKER_HUMAN_ACTION_RETENTION_MS=604800000
 WS_POKER_HUMAN_SETTLED_RETENTION_MS=2592000000
 WS_POKER_ACTION_HISTORY_SWEEP_MS=300000
 WS_POKER_ACTION_HISTORY_BATCH_SIZE=50
+# Closed-table retention (after terminal close + settled escrow):
+WS_POKER_CLOSED_TABLE_RETENTION_MS=604800000
+WS_POKER_CLOSED_TABLE_BATCH_SIZE=50
 ```
 
 Human-readable equivalents:
@@ -359,8 +364,9 @@ Human-readable equivalents:
 - Human-table settlements: **30 days**
 - Sweep interval: **5 minutes**
 - Batch size: **50** (lock limit: **100**)
+- Closed-table retention: **7 days** after terminal close, only when escrow is settled and history is gone
 
-This Preview policy is distinct from code defaults. Production defaults remain `0` (disabled) until separately configured. The `/opt/arcade-ws-preview/.env.preview` file is **not touched** by the `ws-preview-deploy.yml` workflow — rsync syncs only `ws-server/`, `shared/`, and `netlify/functions/_shared/` directories, so Preview env configuration persists across deploys.
+This Preview policy is distinct from code defaults. Action-history retention production defaults remain `0` (disabled) until separately configured; closed-table retention defaults to 7 days but only deletes tables that satisfy every safety guard. The `/opt/arcade-ws-preview/.env.preview` file is **not touched** by the `ws-preview-deploy.yml` workflow — rsync syncs only `ws-server/`, `shared/`, and `netlify/functions/_shared/` directories, so Preview env configuration persists across deploys.
 
 ### Required migrations and deployment order
 

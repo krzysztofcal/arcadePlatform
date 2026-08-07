@@ -46,6 +46,9 @@ jobs:
       - name: Action-history cleanup PostgreSQL integration test
         run: node --test ws-server/poker/persistence/action-history-cleanup.integration.test.mjs
 
+      - name: Closed-table cleanup PostgreSQL integration test
+        run: node --test ws-server/poker/persistence/closed-table-cleanup.integration.test.mjs
+
       - name: Validate games catalog
         run: npm run lint:games
 

@@ -87,7 +87,8 @@ register("DEBUG", "table_lifecycle", [
 register("INFO", "accounting", [
   "poker_leave_cashout",
   "poker_terminal_accounting_closed",
-  "ws_action_history_cleanup_complete"
+  "ws_action_history_cleanup_complete",
+  "ws_closed_table_cleanup_complete"
 ]);
 
 register("INFO", "admin", [
@@ -189,7 +190,8 @@ register("WARN", "table_lifecycle", [
 
 register("ERROR", "accounting", [
   "poker_terminal_accounting_invariant_failed",
-  "ws_action_history_cleanup_failed"
+  "ws_action_history_cleanup_failed",
+  "ws_closed_table_cleanup_failed"
 ]);
 
 register("ERROR", "autoplay", [

@@ -318,6 +318,7 @@ export function createTableManager({
     : DEFAULT_PUBLIC_PROFILE_TIMEOUT_MS;
   const tables = new Map();
   const pendingBootstrapByTableId = new Map();
+  const retiringTableIds = new Set();
   const connStateBySocket = new Map();
 
   function ensurePublicProfileState(table) {
@@ -538,6 +539,15 @@ export function createTableManager({
 
   function ensureTable(tableId) {
     if (!tables.has(tableId)) {
+      if (retiringTableIds.has(tableId)) {
+        // A retiring table (closed-table retention) must never be
+        // materialized again while its DB row is being deleted. Callers run
+        // inside enqueueTableCommand / handler error handling, so the coded
+        // throw propagates fail-closed without spreading branches to callers.
+        const error = new Error("table_retiring");
+        error.code = "table_retiring";
+        throw error;
+      }
       const initialCoreState = createInitialCoreState({ roomId: tableId, maxSeats });
       const nowMs = Date.now();
       tables.set(tableId, {
@@ -656,6 +666,12 @@ export function createTableManager({
   }
 
   async function ensureTableLoaded(tableId, { allowCreate = false } = {}) {
+    if (retiringTableIds.has(tableId)) {
+      // Retiring tables are fail-closed: they may only be read from
+      // persistence, never materialized back into the runtime while the
+      // closed-table retention cleanup is deleting their DB row.
+      return { ok: false, code: "table_retiring", message: "table_retiring" };
+    }
     const existingTable = tables.get(tableId);
     if (existingTable && !needsPersistedBootstrap(existingTable)) {
       return { ok: true, table: existingTable, cached: true };
@@ -2235,6 +2251,38 @@ export function createTableManager({
     return [...tables.keys()].sort((left, right) => left.localeCompare(right));
   }
 
+  // Closed-table retention coordination. beginTableRetirement atomically claims
+  // candidate table ids that are NOT currently materialized in the runtime
+  // (tables) and NOT mid-bootstrap (pendingBootstrapByTableId). Claimed ids
+  // are fail-closed in ensureTable/ensureTableLoaded until release.
+  function beginTableRetirement(tableIds) {
+    const claimed = [];
+    const skipped = [];
+    if (!Array.isArray(tableIds)) return { claimed, skipped };
+    for (const rawId of tableIds) {
+      const tableId = typeof rawId === "string" ? rawId.trim() : "";
+      if (!tableId || tables.has(tableId) || pendingBootstrapByTableId.has(tableId)) {
+        skipped.push(tableId || rawId);
+        continue;
+      }
+      retiringTableIds.add(tableId);
+      claimed.push(tableId);
+    }
+    return { claimed, skipped };
+  }
+
+  function endTableRetirement(tableIds) {
+    if (!Array.isArray(tableIds)) return;
+    for (const rawId of tableIds) {
+      const tableId = typeof rawId === "string" ? rawId.trim() : "";
+      if (tableId) retiringTableIds.delete(tableId);
+    }
+  }
+
+  function isTableRetiring(tableId) {
+    return typeof tableId === "string" && retiringTableIds.has(tableId.trim());
+  }
+
   function tableMeta(tableId) {
     const table = tables.get(tableId);
     if (!table) {
@@ -2328,6 +2376,9 @@ export function createTableManager({
     orderedSubscribers,
     orderedConnectionsForTable,
     listTableIds,
+    beginTableRetirement,
+    endTableRetirement,
+    isTableRetiring,
     tableMeta,
     markTableRotationDue,
     setTableRotationDueAt,

@@ -76,6 +76,7 @@ import { createContinuousBotTableRepository } from "./poker/persistence/continuo
 import { createContinuousBotTableSupervisor } from "./poker/runtime/continuous-bot-table-supervisor.mjs";
 import { handleContinuousBotRotationAtSettled } from "./poker/runtime/continuous-bot-table-rotation.mjs";
 import { createActionHistoryCleanup } from "./poker/persistence/action-history-cleanup.mjs";
+import { createClosedTableCleanup } from "./poker/persistence/closed-table-cleanup.mjs";
 import { createVpsMetricsCollector } from "./observability/vps-metrics.mjs";
 import {
   isManagedReplacementSeatProjectionConflict,
@@ -3570,6 +3571,9 @@ async function buildInternalPokerMaintenanceStatus(environment) {
   const cleanup = actionHistoryCleanup
     ? await actionHistoryCleanup.status()
     : null;
+  const closedTableCleanupStatus = closedTableCleanup
+    ? await closedTableCleanup.status()
+    : null;
   return {
     ok: true,
     environment,
@@ -3592,7 +3596,8 @@ async function buildInternalPokerMaintenanceStatus(environment) {
         lastError: null
       }
     },
-    cleanup
+    cleanup,
+    closedTableCleanup: closedTableCleanupStatus
   };
 }
 
@@ -5392,9 +5397,27 @@ const actionHistoryCleanup = hasSupabaseDbUrl
     })
   : null;
 
-if (actionHistoryCleanup) {
+// Closed-table retention cleanup runs AFTER the action-history sweep on the
+// same timer, so table rows are only deleted once their action/hole-card
+// history has been retained away. Runtime-loaded tables are excluded through
+// tableManager.beginTableRetirement/endTableRetirement.
+const closedTableCleanup = hasSupabaseDbUrl
+  ? createClosedTableCleanup({
+      env: process.env,
+      maxSweepRounds: loadReleaseMetadata().environment === "preview" ? 10 : 1,
+      klog: klogSafe
+    })
+  : null;
+
+if (actionHistoryCleanup || closedTableCleanup) {
   const actionHistoryCleanupTimer = setInterval(() => {
-    void actionHistoryCleanup.sweep();
+    void actionHistoryCleanup.sweep().finally(() => {
+      if (!closedTableCleanup) return;
+      void closedTableCleanup.sweep({
+        claimTableIds: (candidateIds) => tableManager.beginTableRetirement(candidateIds),
+        releaseTableIds: (claimedIds) => tableManager.endTableRetirement(claimedIds)
+      });
+    });
   }, actionHistoryCleanupSweepMs);
   actionHistoryCleanupTimer.unref();
 }

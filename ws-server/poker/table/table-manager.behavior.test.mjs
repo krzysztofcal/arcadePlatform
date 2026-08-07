@@ -3244,3 +3244,57 @@ test("public profile failure and timeout return initials fallback without reject
   assert.equal("profile" in snapshot.seats[0], false);
   assert.equal(snapshot.members.length, 1);
 });
+
+test("beginTableRetirement claims only unloaded ids and rejects materialization fail-closed", async () => {
+  const tableManager = createTableManager({ maxSeats: 6 });
+
+  // Load one table so it is resident in the runtime.
+  tableManager.materializeLobbyTable({ tableId: "loaded-table" });
+
+  const retirement = tableManager.beginTableRetirement(["loaded-table", "candidate-table"]);
+  assert.deepEqual(retirement.skipped, ["loaded-table"]);
+  assert.deepEqual(retirement.claimed, ["candidate-table"]);
+
+  assert.equal(tableManager.isTableRetiring("candidate-table"), true);
+  assert.equal(tableManager.isTableRetiring("loaded-table"), false);
+
+  // Materializing a retiring id must fail closed through the public path that
+  // reaches the central ensureTable choke-point.
+  assert.throws(() => tableManager.materializeLobbyTable({ tableId: "candidate-table" }), (error) => {
+    assert.equal(error.code, "table_retiring");
+    return true;
+  });
+
+  // ensureTableLoaded must fail closed as well.
+  const loaded = await tableManager.ensureTableLoaded("candidate-table");
+  assert.equal(loaded.ok, false);
+  assert.equal(loaded.code, "table_retiring");
+
+  // Release clears the claim so the id can be materialized again.
+  tableManager.endTableRetirement(["candidate-table"]);
+  assert.equal(tableManager.isTableRetiring("candidate-table"), false);
+  const materialized = tableManager.materializeLobbyTable({ tableId: "candidate-table" });
+  assert.equal(materialized.ok, true);
+});
+
+test("beginTableRetirement skips ids with an in-flight persisted bootstrap", async () => {
+  let releaseBootstrap;
+  const bootstrapGate = new Promise((resolve) => { releaseBootstrap = resolve; });
+  const tableManager = createTableManager({
+    maxSeats: 6,
+    tableBootstrapLoader: async () => {
+      await bootstrapGate;
+      return { ok: true, table: { coreState: { version: 0, roomId: "bootstrap-table", maxSeats: 6, members: [] } } };
+    }
+  });
+
+  const bootstrapPromise = tableManager.ensureTableLoaded("bootstrap-table");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const retirement = tableManager.beginTableRetirement(["bootstrap-table"]);
+  assert.deepEqual(retirement.claimed, []);
+  assert.deepEqual(retirement.skipped, ["bootstrap-table"]);
+
+  releaseBootstrap();
+  await bootstrapPromise;
+});
