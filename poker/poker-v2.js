@@ -250,10 +250,25 @@
   var reactionHistoryEntries = [];
   var reactionHistoryExpiryTimer = null;
   var reactionHistoryPanelOpen = false;
+  var socialPreferencesIdentity = null;
+  var socialPreferences = defaultSocialPreferences();
   var els = {};
 
   var REACTION_HISTORY_LIMIT = 25;
   var REACTION_HISTORY_TTL_MS = 10 * 60 * 1000;
+  var SOCIAL_PREFERENCES_STORAGE_PREFIX = 'kcswh:poker-social-preferences:v1:';
+
+  function defaultSocialPreferences(){
+    return { reactionBubblesEnabled: true, reactionHistoryEnabled: true, botReactionsEnabled: true };
+  }
+
+  function normalizeSocialPreferences(raw){
+    return {
+      reactionBubblesEnabled: raw && raw.reactionBubblesEnabled === false ? false : true,
+      reactionHistoryEnabled: raw && raw.reactionHistoryEnabled === false ? false : true,
+      botReactionsEnabled: raw && raw.botReactionsEnabled === false ? false : true
+    };
+  }
 
   function cloneState(source){
     return JSON.parse(JSON.stringify(source));
@@ -471,6 +486,38 @@
     try {
       if (window.KLog && typeof window.KLog.log === 'function') window.KLog.log(kind, data || {});
     } catch (_err){}
+  }
+
+  function renderSocialPreferences(){
+    if (els.reactionBubblesPreference) els.reactionBubblesPreference.checked = socialPreferences.reactionBubblesEnabled;
+    if (els.reactionHistoryPreference) els.reactionHistoryPreference.checked = socialPreferences.reactionHistoryEnabled;
+    if (els.botReactionsPreference) els.botReactionsPreference.checked = socialPreferences.botReactionsEnabled;
+    if (els.reactionHistory) els.reactionHistory.hidden = !(state && state.mode === 'live' && state.tableId && socialPreferences.reactionHistoryEnabled);
+  }
+
+  function syncSocialPreferencesIdentity(userId){
+    var normalizedUserId = typeof userId === 'string' && userId.trim() ? userId.trim() : null;
+    if (socialPreferencesIdentity === normalizedUserId) return;
+    socialPreferencesIdentity = normalizedUserId;
+    socialPreferences = defaultSocialPreferences();
+    if (normalizedUserId){
+      try {
+        var raw = window.localStorage ? window.localStorage.getItem(SOCIAL_PREFERENCES_STORAGE_PREFIX + normalizedUserId) : null;
+        if (raw) socialPreferences = normalizeSocialPreferences(JSON.parse(raw));
+      } catch (err){
+        klog('poker_social_preferences_read_failed', { message: err && err.message ? err.message : String(err || 'unknown') });
+      }
+    }
+    renderSocialPreferences();
+  }
+
+  function persistSocialPreferences(){
+    if (!socialPreferencesIdentity) return;
+    try {
+      if (window.localStorage) window.localStorage.setItem(SOCIAL_PREFERENCES_STORAGE_PREFIX + socialPreferencesIdentity, JSON.stringify(socialPreferences));
+    } catch (err){
+      klog('poker_social_preferences_write_failed', { message: err && err.message ? err.message : String(err || 'unknown') });
+    }
   }
 
   function t(key, fallback){
@@ -1962,13 +2009,14 @@
 
   function renderReactionHistory(){
     var live = state && state.mode === 'live' && !!state.tableId;
-    if (els.reactionHistory) els.reactionHistory.hidden = !live;
+    var visible = live && socialPreferences.reactionHistoryEnabled;
+    if (els.reactionHistory) els.reactionHistory.hidden = !visible;
     if (els.reactionHistoryToggle){
       els.reactionHistoryToggle.setAttribute('aria-label', 'Reaction history, ' + reactionHistoryEntries.length + ' messages');
       els.reactionHistoryToggle.setAttribute('aria-expanded', live && reactionHistoryPanelOpen ? 'true' : 'false');
     }
     if (els.reactionHistoryCount) els.reactionHistoryCount.textContent = String(reactionHistoryEntries.length);
-    if (els.reactionHistoryPanel) els.reactionHistoryPanel.hidden = !live || !reactionHistoryPanelOpen;
+    if (els.reactionHistoryPanel) els.reactionHistoryPanel.hidden = !visible || !reactionHistoryPanelOpen;
     if (!els.reactionHistoryList) return;
     els.reactionHistoryList.innerHTML = '';
     if (!reactionHistoryEntries.length){
@@ -2030,13 +2078,22 @@
     }
   }
 
-  function appendReactionHistory(seatNo, senderDisplayName, reactionKey){
+  function appendReactionHistory(seatNo, senderDisplayName, reactionKey, senderUserId, senderIsBot){
     reactionHistoryEntries.push({
       senderSeatNo: seatNo,
       senderDisplayName: senderDisplayName,
       reactionKey: reactionKey,
+      senderUserId: senderUserId,
+      senderIsBot: senderIsBot === true,
       createdAt: Date.now()
     });
+    pruneReactionHistory();
+    renderReactionHistory();
+    scheduleReactionHistoryExpiry();
+  }
+
+  function removeBotReactionHistory(){
+    reactionHistoryEntries = reactionHistoryEntries.filter(function(item){ return item.senderIsBot !== true; });
     pruneReactionHistory();
     renderReactionHistory();
     scheduleReactionHistoryExpiry();
@@ -2192,6 +2249,18 @@
     delete reactionBubblesBySeatNo[seatNo];
   }
 
+  function clearReactionArtifacts(filter){
+    Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
+      var bubble = reactionBubblesBySeatNo[seatNo];
+      if (!filter || filter(bubble)) clearReactionBubble(seatNo);
+    });
+    Object.keys(targetedReactionEffectsById).forEach(function(effectId){
+      var effect = targetedReactionEffectsById[effectId];
+      if (!filter || filter(effect)) clearTargetedReactionEffect(effectId);
+    });
+    renderSeats();
+  }
+
   function clearTargetedReactionEffect(effectId){
     var effect = targetedReactionEffectsById[effectId];
     if (effect && effect.timer) window.clearTimeout(effect.timer);
@@ -2319,13 +2388,18 @@
       if (!Number.isInteger(targetSeatNo) || targetSeatNo < 1 || targetSeatNo === seatNo || !targetOwnerUserId) return;
     }
     var senderSeat = state.seats.find(function(seat){ return seat && seat.seatNo === seatNo && seat.userId === ownerUserId; });
-    appendReactionHistory(seatNo, getPublicDisplayName(senderSeat || { userId: ownerUserId }), reactionKey);
+    var senderIsBot = !!(senderSeat && senderSeat.isBot === true);
+    if (senderIsBot && !socialPreferences.botReactionsEnabled) return;
+    appendReactionHistory(seatNo, getPublicDisplayName(senderSeat || { userId: ownerUserId }), reactionKey, ownerUserId, senderIsBot);
+    if (!socialPreferences.reactionBubblesEnabled) return;
     if (hasTargetSeatNo && reactionKey === 'nice_hand'){
       var effectId = String(nextTargetedReactionEffectId++);
       var effect = {
         senderSeatNo: seatNo,
         targetSeatNo: targetSeatNo,
         senderOwnerUserId: ownerUserId,
+        senderUserId: ownerUserId,
+        senderIsBot: senderIsBot,
         targetOwnerUserId: targetOwnerUserId,
         reactionKey: reactionKey,
         animate: true,
@@ -2342,7 +2416,7 @@
     }
     var previous = reactionBubblesBySeatNo[seatNo];
     if (previous && previous.timer) window.clearTimeout(previous.timer);
-    var bubble = { reactionKey: reactionKey, ownerUserId: ownerUserId, animate: true, timer: null };
+    var bubble = { reactionKey: reactionKey, ownerUserId: ownerUserId, senderUserId: ownerUserId, senderIsBot: senderIsBot, animate: true, timer: null };
     bubble.timer = window.setTimeout(function(){
       if (reactionBubblesBySeatNo[seatNo] !== bubble) return;
       delete reactionBubblesBySeatNo[seatNo];
@@ -4278,6 +4352,26 @@
     els.menuToggle.setAttribute('aria-expanded', 'false');
   }
 
+  function closeSocialSettings(restoreFocus){
+    var wasOpen = !!(els.socialSettingsPanel && !els.socialSettingsPanel.hidden);
+    if (els.socialSettingsPanel) els.socialSettingsPanel.hidden = true;
+    if (els.socialSettingsToggle) els.socialSettingsToggle.setAttribute('aria-expanded', 'false');
+    if (restoreFocus && wasOpen && els.socialSettingsToggle && typeof els.socialSettingsToggle.focus === 'function') els.socialSettingsToggle.focus();
+  }
+
+  function updateSocialPreference(key, enabled){
+    socialPreferences[key] = enabled === true;
+    if (key === 'reactionBubblesEnabled' && !socialPreferences.reactionBubblesEnabled) clearReactionArtifacts();
+    if (key === 'reactionHistoryEnabled' && !socialPreferences.reactionHistoryEnabled) reactionHistoryPanelOpen = false;
+    if (key === 'botReactionsEnabled' && !socialPreferences.botReactionsEnabled){
+      clearReactionArtifacts(function(item){ return item && item.senderIsBot === true; });
+      removeBotReactionHistory();
+    }
+    persistSocialPreferences();
+    renderSocialPreferences();
+    renderReactionHistory();
+  }
+
   function navigateToLobby(){
     cancelClosedTableRedirect();
     clearReactionHistory();
@@ -4361,6 +4455,13 @@
         closeMenu();
       });
     });
+    if (els.socialSettingsToggle) els.socialSettingsToggle.addEventListener('click', function(){
+      var opening = !!(els.socialSettingsPanel && els.socialSettingsPanel.hidden);
+      closeMenu();
+      if (els.socialSettingsPanel) els.socialSettingsPanel.hidden = !opening;
+      els.socialSettingsToggle.setAttribute('aria-expanded', opening ? 'true' : 'false');
+    });
+    if (els.socialSettingsClose) els.socialSettingsClose.addEventListener('click', closeSocialSettings);
     document.addEventListener('click', function(event){
       var target = event && event.target;
       if (!target) return;
@@ -4370,7 +4471,7 @@
       closeMenu();
     });
     document.addEventListener('keydown', function(event){
-      if (event && event.key === 'Escape') closeMenu();
+      if (event && event.key === 'Escape') { closeMenu(); closeSocialSettings(true); }
     });
   }
 
@@ -4476,6 +4577,9 @@
         els.reactionHistoryList.scrollTop = els.reactionHistoryList.scrollHeight;
       }
     });
+    if (els.reactionBubblesPreference) els.reactionBubblesPreference.addEventListener('change', function(){ updateSocialPreference('reactionBubblesEnabled', els.reactionBubblesPreference.checked); });
+    if (els.reactionHistoryPreference) els.reactionHistoryPreference.addEventListener('change', function(){ updateSocialPreference('reactionHistoryEnabled', els.reactionHistoryPreference.checked); });
+    if (els.botReactionsPreference) els.botReactionsPreference.addEventListener('change', function(){ updateSocialPreference('botReactionsEnabled', els.botReactionsPreference.checked); });
     document.addEventListener('click', function(event){
       var target = event && event.target;
       if (!target || target === els.reactionBtn || target === els.reactionMenu) return;
@@ -4502,6 +4606,12 @@
     els.menuToggle = document.getElementById('pokerMenuToggle');
     els.menuPanel = document.getElementById('pokerMenuPanel');
     els.lobbyLink = document.getElementById('pokerLobbyLink');
+    els.socialSettingsToggle = document.getElementById('pokerSocialSettingsToggle');
+    els.socialSettingsPanel = document.getElementById('pokerSocialSettingsPanel');
+    els.socialSettingsClose = document.getElementById('pokerSocialSettingsClose');
+    els.reactionBubblesPreference = document.getElementById('pokerReactionBubblesPreference');
+    els.reactionHistoryPreference = document.getElementById('pokerReactionHistoryPreference');
+    els.botReactionsPreference = document.getElementById('pokerBotReactionsPreference');
     els.seatLayer = document.getElementById('pokerSeatLayer');
     els.seatChipLayer = document.getElementById('pokerSeatChipLayer');
     els.chipFxLayer = document.getElementById('pokerChipFxLayer');
@@ -4644,6 +4754,7 @@
   }
 
   function applySignedOutState(){
+    syncSocialPreferencesIdentity(null);
     clearRebuyOperation();
     clearReactionHistory();
     stopLiveMode();
@@ -4656,6 +4767,7 @@
   function applyAuthenticatedPendingState(user){
     if (!user || !state.currentUserId || String(user.id || '') !== String(state.currentUserId)) clearRebuyOperation();
     syncReactionHistoryContext(tableId, user && user.id ? String(user.id) : null);
+    syncSocialPreferencesIdentity(user && user.id ? String(user.id) : null);
     stopLiveMode();
     resetQueuedPreactionState();
     isGuestMode = false;
@@ -4675,6 +4787,7 @@
   function restartAuthenticatedLiveMode(token){
     if (!tableId || !token) return;
     var nextUserId = getUserIdFromToken(token);
+    syncSocialPreferencesIdentity(nextUserId);
     if (nextUserId && state.currentUserId && nextUserId !== state.currentUserId) clearRebuyOperation();
     isGuestMode = false;
     currentGuestSession = null;
@@ -4946,6 +5059,7 @@
     isGuestMode = !!(currentGuestSession && currentGuestSession.token);
     if (isGuestMode){
       currentAccessToken = null;
+      syncSocialPreferencesIdentity(null);
       startLiveMode(currentGuestSession.token);
       startAuthWatch();
       return;
