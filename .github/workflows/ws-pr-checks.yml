@@ -91,6 +91,9 @@ jobs:
       - name: Run ws table manager behavior test
         run: node --test ws-server/poker/table/table-manager.behavior.test.mjs
 
+      - name: Run closed-table cleanup behavior test
+        run: node --test ws-server/poker/persistence/closed-table-cleanup.behavior.test.mjs
+
       - name: Run persisted state writer behavior test
         run: node --test ws-server/poker/persistence/persisted-state-writer.behavior.test.mjs
 
