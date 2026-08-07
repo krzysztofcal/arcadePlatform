@@ -14,6 +14,8 @@ export const REACTION_KEYS = Object.freeze([
   "nice_bluff",
   "good_luck",
   "thanks",
+  "cheers",
+  "gg",
   "hurry_up",
   "you_are_bluffing",
   "i_was_bluffing",
@@ -45,7 +47,10 @@ export const HUMAN_REACTION_KEYS = Object.freeze([
   "bad_beat",
   "nice_bluff",
   "good_luck",
-  "thanks"
+  "thanks",
+  "cheers",
+  "gg",
+  "hurry_up"
 ]);
 
 const REACTION_KEY_SET = new Set(REACTION_KEYS);

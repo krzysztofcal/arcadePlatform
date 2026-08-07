@@ -32,6 +32,8 @@ test('human reactions use the closed allowlist and atomically reserve the sender
     'nice_bluff',
     'good_luck',
     'thanks',
+    'cheers',
+    'gg',
     'hurry_up',
     'you_are_bluffing',
     'i_was_bluffing',
@@ -52,16 +54,30 @@ test('human reactions use the closed allowlist and atomically reserve the sender
     'ambient_lets_play',
     'ambient_thinking'
   ]);
-  assert.equal(HUMAN_REACTION_KEYS.includes('hurry_up'), false);
+  assert.deepEqual(HUMAN_REACTION_KEYS, [
+    'hello',
+    'nice_hand',
+    'well_played',
+    'thinking',
+    'haha',
+    'wow',
+    'bad_beat',
+    'nice_bluff',
+    'good_luck',
+    'thanks',
+    'cheers',
+    'gg',
+    'hurry_up'
+  ]);
   assert.equal(HUMAN_REACTION_KEYS.includes('lucky'), false);
   assert.equal(HUMAN_REACTION_KEYS.includes('not_this_time'), false);
   assert.deepEqual(evaluateHumanReactionCommand({
     tableId,
-    senderUserId: 'human-bot-key',
+    senderUserId: 'human-hurry',
     senderSeatNo: 6,
     reactionKey: 'hurry_up',
     nowMs: 1_000
-  }), { ok: false, reason: 'invalid_reaction' });
+  }), { ok: true, seatNo: 6, reactionKey: 'hurry_up' });
   assert.deepEqual(evaluateHumanReactionCommand({
     tableId,
     senderUserId: 'human-fold',
