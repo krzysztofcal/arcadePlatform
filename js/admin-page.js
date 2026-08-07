@@ -148,6 +148,7 @@
     nodes.opsIdentity = doc.getElementById("adminOpsIdentity");
     nodes.opsRuntime = doc.getElementById("adminOpsRuntime");
     nodes.opsPokerEscrow = doc.getElementById("adminOpsPokerEscrow");
+    nodes.opsLedgerCapacity = doc.getElementById("adminOpsLedgerCapacity");
     nodes.opsBotReactionSummary = doc.getElementById("adminOpsBotReactionSummary");
     nodes.opsBotReactionForm = doc.getElementById("adminOpsBotReactionForm");
     nodes.opsBotReactionDelay = doc.getElementById("adminOpsBotReactionDelay");
@@ -1349,6 +1350,7 @@
       if (nodes.opsIdentity) nodes.opsIdentity.innerHTML = "";
       if (nodes.opsRuntime) nodes.opsRuntime.innerHTML = "";
       if (nodes.opsPokerEscrow) nodes.opsPokerEscrow.innerHTML = "";
+      if (nodes.opsLedgerCapacity) nodes.opsLedgerCapacity.innerHTML = "";
       if (nodes.opsRecentActions) nodes.opsRecentActions.innerHTML = "";
       if (nodes.opsRecentCleanup) nodes.opsRecentCleanup.innerHTML = "";
       return;
@@ -1444,6 +1446,44 @@
                 meta: escapeHtml((item.status || "unknown") + " · escrow " + formatTimestamp(item.escrowUpdatedAt) + " · table " + formatTimestamp(item.tableUpdatedAt)),
               };
             })),
+            "</div>"
+          ].join("");
+        }
+      }
+    }
+    if (nodes.opsLedgerCapacity){
+      if (!summary){
+        nodes.opsLedgerCapacity.innerHTML = "";
+      } else {
+        var capacity = summary.ledgerCapacity;
+        var capacityAvailable = capacity && capacity.available === true;
+        if (!capacityAvailable){
+          nodes.opsLedgerCapacity.innerHTML = [
+            '<div class="admin-surface">',
+            '<div class="admin-list__title"><span>Ledger capacity</span>' + pill("Unavailable", "info") + "</div>",
+            '<p class="admin-empty">Capacity data could not be loaded.</p>',
+            "</div>"
+          ].join("");
+        } else {
+          var capacityTone = capacity.capacityStatus === "warning" ? "danger" : "success";
+          var capacityLabel = capacity.capacityStatus === "warning" ? "Warning" : "OK";
+          var thresholdLabel = Number(capacity.warningThresholdBytes) > 0
+            ? formatBytes(capacity.warningThresholdBytes)
+            : "disabled";
+          var shareText = Number.isFinite(Number(capacity.ledgerSharePercent))
+            ? " (" + String(capacity.ledgerSharePercent) + "% of database)"
+            : "";
+          nodes.opsLedgerCapacity.innerHTML = [
+            '<div class="admin-surface">',
+            '<div class="admin-list__title"><span>Ledger capacity</span>' + pill(capacityLabel, capacityTone) + "</div>",
+            '<div class="admin-kv">',
+            renderKvRow("Database total size", formatBytes(capacity.dbTotalBytes)),
+            renderKvRow("chips_transactions", formatAmount(capacity.transactionRowCount) + " rows · " + formatBytes(capacity.transactionTotalBytes) + " total · " + formatBytes(capacity.transactionTableBytes) + " table · " + formatBytes(capacity.transactionIndexBytes) + " indexes"),
+            renderKvRow("chips_entries", formatAmount(capacity.entryRowCount) + " rows · " + formatBytes(capacity.entryTotalBytes) + " total · " + formatBytes(capacity.entryTableBytes) + " table · " + formatBytes(capacity.entryIndexBytes) + " indexes"),
+            renderKvRow("Ledger total", formatBytes(capacity.ledgerTotalBytes) + shareText),
+            renderKvRow("Capacity status", String(capacity.capacityStatus || "—") + " · threshold " + thresholdLabel),
+            renderKvRow("Measured", formatTimestamp(capacity.measuredAt)),
+            "</div>",
             "</div>"
           ].join("");
         }

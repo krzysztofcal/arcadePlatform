@@ -329,6 +329,7 @@ through `has_human_participant` predicates.
 | `WS_POKER_ACTION_HISTORY_BATCH_SIZE` | count | `20` | `1`–`100` integer | N/A | Maximum candidate hands/settlements per phase per sweep. `lockLimit` is derived as `batchSize * 2` |
 | `WS_POKER_CLOSED_TABLE_RETENTION_MS` | ms | `604800000` (7 days) | finite non-negative integer | `0` | Delete old `CLOSED` poker tables after this many ms since terminal close (`updated_at`). Runs after the action-history sweep on the same timer; requires terminal state (`HAND_DONE` + empty `handId`), settled escrow (`balance = 0`), zero actions/hole cards, no fresh requests, and no unfinished durable `ACT` request |
 | `WS_POKER_CLOSED_TABLE_BATCH_SIZE` | count | `20` | `1`–`100` integer | N/A | Maximum candidate tables deleted per sweep. Runtime-loaded tables are excluded via `tableManager` retirement claims; the final guarded DELETE uses `FOR UPDATE SKIP LOCKED` |
+| `ADMIN_LEDGER_DB_WARNING_MB` | MB | `800` | finite non-negative integer | `0` | Database total size warning threshold for the admin Ops "Ledger / Database capacity" section. `0` disables the warning only (measurements are still reported and `capacityStatus` stays `OK`); invalid or negative values fall back to the default. Configure per environment according to the actual database capacity and operational policy. |
 
 Validation rules (fail-fast at WS startup):
 
