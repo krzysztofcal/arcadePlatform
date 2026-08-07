@@ -48,10 +48,17 @@
     </nav>
 
     <section class="poker-social-settings" id="pokerSocialSettingsPanel" aria-labelledby="pokerSocialSettingsTitle" hidden>
-      <div class="poker-social-settings__header"><strong id="pokerSocialSettingsTitle">Social settings</strong><button type="button" class="poker-social-settings__close" id="pokerSocialSettingsClose" aria-label="Close social settings">×</button></div>
+      <div class="poker-social-settings__header"><strong id="pokerSocialSettingsTitle">Table settings</strong><button type="button" class="poker-social-settings__close" id="pokerSocialSettingsClose" aria-label="Close table settings">×</button></div>
       <label class="poker-social-settings__option"><input type="checkbox" id="pokerReactionBubblesPreference" checked> Reaction bubbles</label>
       <label class="poker-social-settings__option"><input type="checkbox" id="pokerReactionHistoryPreference" checked> Reaction history</label>
       <label class="poker-social-settings__option"><input type="checkbox" id="pokerBotReactionsPreference" checked> Bot reactions</label>
+      <div class="poker-social-settings__option poker-social-settings__option--stacked" id="pokerAutoRebuyPreferenceWrap">
+        <label>
+          <input type="checkbox" id="pokerAutoRebuyPreference">
+          <span>Auto rebuy 100 CH when out of chips</span>
+        </label>
+        <p class="poker-social-settings__hint" id="pokerAutoRebuyPreferenceHint">Automatically uses 100 CH from your account each time you run out of chips.</p>
+      </div>
     </section>
 
     <section class="poker-live-panel">
@@ -113,7 +120,7 @@
       <section class="poker-reaction-history__panel" id="pokerReactionHistoryPanel" aria-label="Table reaction history" hidden>
         <div class="poker-reaction-history__list" id="pokerReactionHistoryList"></div>
       </section>
-      <button type="button" class="poker-live-btn poker-social-settings__toggle" id="pokerSocialSettingsToggle" aria-expanded="false" aria-controls="pokerSocialSettingsPanel" aria-label="Social settings"><span aria-hidden="true">⚙️</span></button>
+      <button type="button" class="poker-live-btn poker-social-settings__toggle" id="pokerSocialSettingsToggle" aria-expanded="false" aria-controls="pokerSocialSettingsPanel" aria-label="Table settings"><span aria-hidden="true">⚙️</span></button>
       <div class="poker-action-amount-input" id="pokerV2AmountInputWrap">
         <strong id="pokerV2AmountValue">20</strong>
         <input type="range" id="pokerV2AmountInput" value="20" min="1" max="20" step="1">

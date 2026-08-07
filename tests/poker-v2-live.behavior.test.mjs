@@ -2218,6 +2218,75 @@ test('poker v2 resumes a stored rebuy only after a full snapshot and never creat
   assert.deepEqual(pendingHarness.rebuyRequestIds, ['rebuy_reload_1']);
 });
 
+function autoRebuySnapshot(playerState){
+  return {
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }, { userId: 'bot-1', seat: 2 }] },
+      public: {
+        seats: [{ userId: 'user-1', seatNo: 1, status: playerState.status }, { userId: 'bot-1', seatNo: 2, status: 'ACTIVE', isBot: true }],
+        stacks: { 'user-1': playerState.stack, 'bot-1': 98 },
+        hand: { handId: 'auto-rebuy-hand', status: 'PREFLOP', dealerSeatNo: 2 },
+        turn: { userId: 'bot-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 3, sidePots: [] },
+        legalActions: { seat: 1, actions: [] }
+      },
+      private: { userId: 'user-1', seat: 1, holeCards: [], playerState },
+      you: { seat: 1 }
+    }
+  };
+}
+
+test('poker v2 auto-rebuy fires exactly one existing rebuy request when enabled and out of chips', async () => {
+  const harness = createHarness({
+    localStorageEntries: new Map([['kcswh:poker-auto-rebuy:v1:user-1', JSON.stringify({ enabled: true })]])
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  ws.onStatus('auth_ok', { roomId: 'table-1' });
+  await harness.flush();
+  ws.onSnapshot(autoRebuySnapshot({ status: 'OUT_OF_CHIPS', stack: 0, canRebuy: true }));
+  await harness.flush();
+  assert.equal(harness.rebuyPayloads.length, 1);
+  assert.equal(JSON.stringify(harness.rebuyPayloads[0]), JSON.stringify({ tableId: 'table-1', amount: 100 }));
+});
+
+test('poker v2 auto-rebuy stays silent when the preference is disabled', async () => {
+  const harness = createHarness({});
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  ws.onStatus('auth_ok', { roomId: 'table-1' });
+  await harness.flush();
+  ws.onSnapshot(autoRebuySnapshot({ status: 'OUT_OF_CHIPS', stack: 0, canRebuy: true }));
+  await harness.flush();
+  assert.equal(harness.rebuyPayloads.length, 0);
+});
+
+test('poker v2 auto-rebuy does not repeat on repeated snapshots or during a pending operation', async () => {
+  const harness = createHarness({
+    localStorageEntries: new Map([['kcswh:poker-auto-rebuy:v1:user-1', JSON.stringify({ enabled: true })]])
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  ws.onStatus('auth_ok', { roomId: 'table-1' });
+  await harness.flush();
+  ws.onSnapshot(autoRebuySnapshot({ status: 'OUT_OF_CHIPS', stack: 0, canRebuy: true }));
+  await harness.flush();
+  ws.onSnapshot(autoRebuySnapshot({ status: 'OUT_OF_CHIPS', stack: 0, canRebuy: true }));
+  await harness.flush();
+  assert.equal(harness.rebuyPayloads.length, 1, 'repeated snapshot must not re-trigger auto-rebuy');
+  ws.onSnapshot(autoRebuySnapshot({ status: 'ACTIVE', stack: 100, canRebuy: false }));
+  await harness.flush();
+  ws.onSnapshot(autoRebuySnapshot({ status: 'OUT_OF_CHIPS', stack: 0, canRebuy: true }));
+  await harness.flush();
+  assert.equal(harness.rebuyPayloads.length, 2, 'a later bust boundary must allow one new auto-rebuy');
+});
+
 test('poker v2 retries a rebuy error with the same id and ignores clicks while pending', async () => {
   let resolveRetry = null;
   const harness = createHarness({
