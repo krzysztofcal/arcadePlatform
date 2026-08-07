@@ -582,6 +582,34 @@ test('poker v2 disables reactions for four seconds after an accepted reaction', 
   assert.equal(harness.elements.pokerV2ReactionHint.hidden, true);
 });
 
+test('reaction menu exposes cheers and gg to humans and sends cheers through the existing path', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: { hand: { handId: null, status: 'LOBBY' }, pot: { total: 0 } },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  harness.elements.pokerV2ReactionBtn.click();
+  const cheersOption = harness.elements.pokerV2ReactionMenu.children.find((child) => child.dataset.reactionKey === 'cheers');
+  const ggOption = harness.elements.pokerV2ReactionMenu.children.find((child) => child.dataset.reactionKey === 'gg');
+  assert.ok(cheersOption, 'cheers should be selectable by humans');
+  assert.ok(ggOption, 'gg should be selectable by humans');
+  cheersOption.click();
+  await harness.flush();
+  assert.deepEqual(harness.reactionPayloads, ['cheers']);
+});
+
 test('reaction history appends only an authoritative table_reaction once', async () => {
   const longNickname = 'Smoke Profile 676 Very Long Nickname';
   const { harness, ws } = await bootReactionHistoryHarness({ historySenderDisplayName: longNickname });
@@ -888,7 +916,9 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
   assert.equal(harness.elements.pokerReactionLayer.children.filter((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect')).length, 1,
     'UI V1 keeps the target in the event but renders bot table talk only as a sender bubble, never as a congratulations effect');
   const menuKeys = harness.elements.pokerV2ReactionMenu.children.map((option) => option.dataset.reactionKey);
-  assert.equal(menuKeys.includes('hurry_up'), false);
+  assert.equal(menuKeys.includes('hurry_up'), true);
+  assert.equal(menuKeys.includes('cheers'), true);
+  assert.equal(menuKeys.includes('gg'), true);
   assert.equal(menuKeys.includes('you_are_bluffing'), false);
   assert.equal(menuKeys.includes('i_was_bluffing'), false);
   assert.equal(menuKeys.includes('lucky'), false);
