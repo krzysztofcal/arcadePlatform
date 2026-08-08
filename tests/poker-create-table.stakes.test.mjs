@@ -79,6 +79,19 @@ const runInvalidStakes = async () => {
   assert.equal(queries.length, 0);
 };
 
+const runInvalidBuyIn = async () => {
+  const queries = [];
+  const handler = makeHandler(queries);
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ maxPlayers: 6, stakes: "1/2", buyIn: 500.5 }),
+  });
+  assert.equal(response.statusCode, 400);
+  assert.equal(JSON.parse(response.body).error, "invalid_buy_in");
+  assert.equal(queries.length, 0);
+};
+
 const runSlashStakes = async () => {
   const queries = [];
   const notifications = [];
@@ -99,6 +112,7 @@ const runSlashStakes = async () => {
   const insertCall = queries.find((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables"));
   assert.ok(insertCall, "expected insert into poker_tables");
   assert.deepEqual(JSON.parse(insertCall.params?.[0]), { sb: 1, bb: 2 });
+  assert.equal(insertCall.params?.[1], 100);
   const stateInsertCall = queries.find((entry) => entry.query.toLowerCase().includes("insert into public.poker_state"));
   assert.ok(stateInsertCall, "expected insert into poker_state");
   const storedState = normalizeJsonState(stateInsertCall?.params?.[1]);
@@ -107,7 +121,31 @@ const runSlashStakes = async () => {
   assert.equal(notifications[0]?.tableId, "table-1");
   assert.equal(notifications[0]?.maxPlayers, 6);
   assert.deepEqual(notifications[0]?.stakes, { sb: 1, bb: 2 });
+  assert.equal(notifications[0]?.buyIn, 100);
   assert.equal(typeof notifications[0]?.klog, "function");
+};
+
+const runCustomBuyIn = async () => {
+  const queries = [];
+  const notifications = [];
+  const handler = makeHandler(queries, {
+    balance: 500,
+    notifyWsLobbyMaterialize: async (payload) => {
+      notifications.push(payload);
+      return { ok: true };
+    }
+  });
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ maxPlayers: 6, stakes: "1/2", buyIn: 500 }),
+  });
+  assert.equal(response.statusCode, 200);
+  const insertCall = queries.find((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables"));
+  assert.ok(insertCall, "expected insert into poker_tables");
+  assert.equal(insertCall.params?.[1], 500);
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0]?.buyIn, 500);
 };
 
 const runSlowNotifyDoesNotDelayResponse = async () => {
@@ -195,7 +233,9 @@ const runBalanceReadFailure = async () => {
 
 await runMissingStakes();
 await runInvalidStakes();
+await runInvalidBuyIn();
 await runSlashStakes();
+await runCustomBuyIn();
 await runSlowNotifyDoesNotDelayResponse();
 await runMaintenanceGuard();
 await runInsufficientBalance();

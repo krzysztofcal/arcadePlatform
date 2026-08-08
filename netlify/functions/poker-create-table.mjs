@@ -32,6 +32,13 @@ const parseMaxPlayers = (value) => {
   return num;
 };
 
+const parseBuyIn = (value) => {
+  if (value == null) return DEFAULT_CASH_TABLE_BUY_IN_CHIPS;
+  const num = Number(value);
+  if (!Number.isSafeInteger(num) || num <= 0) return null;
+  return num;
+};
+
 export async function handler(event) {
   if (process.env.CHIPS_ENABLED !== "1") {
     return { statusCode: 404, headers: baseHeaders(), body: JSON.stringify({ error: "not_found" }) };
@@ -67,6 +74,11 @@ export async function handler(event) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_max_players" }) };
   }
 
+  const buyIn = parseBuyIn(payload?.buyIn);
+  if (buyIn == null) {
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_buy_in" }) };
+  }
+
   const token = extractBearerToken(event.headers);
   const auth = await verifySupabaseJwt(token);
   if (!auth.valid || !auth.userId) {
@@ -79,7 +91,6 @@ export async function handler(event) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_stakes" }) };
   }
   const stakesJson = formatStakes(stakesParsed.value);
-  const buyIn = DEFAULT_CASH_TABLE_BUY_IN_CHIPS;
 
   let transactionResult = null;
   try {

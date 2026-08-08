@@ -1465,6 +1465,7 @@
     var createBtn = document.getElementById('pokerCreate');
     var sbInput = document.getElementById('pokerSb');
     var bbInput = document.getElementById('pokerBb');
+    var buyInInput = document.getElementById('pokerBuyIn');
     var maxPlayersInput = document.getElementById('pokerMaxPlayers');
     var signInBtn = document.getElementById('pokerSignIn');
     var guestPlayBtn = document.getElementById('pokerGuestPlay');
@@ -1489,8 +1490,10 @@
       return t('pokerErrInsufficientChips', 'You need at least {amount} CH to join a table.').replace('{amount}', formatChips(amount));
     }
 
-    async function hasFreshCashBuyInBalance(){
-      var requiredBuyIn = requiredCashBuyIn();
+    async function hasFreshCashBuyInBalance(requiredBuyInOverride){
+      var requiredBuyIn = Number.isSafeInteger(requiredBuyInOverride) && requiredBuyInOverride > 0
+        ? requiredBuyInOverride
+        : requiredCashBuyIn();
       if (!requiredBuyIn || !window.ChipsClient || typeof window.ChipsClient.fetchBalance !== 'function') return true;
       try {
         var result = await window.ChipsClient.fetchBalance();
@@ -1886,17 +1889,23 @@
       setError(errorEl, null);
       var sbRaw = sbInput ? sbInput.value : 1;
       var bbRaw = bbInput ? bbInput.value : 2;
+      var buyInRaw = buyInInput ? buyInInput.value : 100;
       var sb = parseInt(sbRaw, 10);
       var bb = parseInt(bbRaw, 10);
+      var buyIn = Number(buyInRaw);
       if (!isFinite(sb) || !isFinite(bb) || Math.floor(sb) !== sb || Math.floor(bb) !== bb || sb < 0 || bb <= 0 || sb >= bb){
         setError(errorEl, t('pokerErrInvalidStakes', 'Invalid stakes'));
+        return;
+      }
+      if (!Number.isSafeInteger(buyIn) || buyIn <= 0){
+        setError(errorEl, t('pokerErrInvalidBuyIn', 'Invalid buy-in'));
         return;
       }
       var maxPlayers = parseInt(maxPlayersInput ? maxPlayersInput.value : 6, 10) || 6;
       setLoading(createBtn, true);
       try {
-        if (!(await hasFreshCashBuyInBalance())) return;
-        var data = await apiPost(CREATE_URL, { stakes: { sb: sb, bb: bb }, maxPlayers: maxPlayers });
+        if (!(await hasFreshCashBuyInBalance(buyIn))) return;
+        var data = await apiPost(CREATE_URL, { stakes: { sb: sb, bb: bb }, maxPlayers: maxPlayers, buyIn: buyIn });
         if (data.tableId){
           navigateToPokerTable(data.tableId);
         } else {
