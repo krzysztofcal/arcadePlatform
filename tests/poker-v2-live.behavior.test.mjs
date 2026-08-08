@@ -2228,7 +2228,7 @@ function autoRebuySnapshot(playerState){
       public: {
         seats: [{ userId: 'user-1', seatNo: 1, status: playerState.status }, { userId: 'bot-1', seatNo: 2, status: 'ACTIVE', isBot: true }],
         stacks: { 'user-1': playerState.stack, 'bot-1': 98 },
-        hand: { handId: 'auto-rebuy-hand', status: 'PREFLOP', dealerSeatNo: 2 },
+        hand: { handId: 'auto-rebuy-hand', status: 'SETTLED', dealerSeatNo: 2 },
         turn: { userId: 'bot-1', deadlineAt: Date.now() + 5000 },
         pot: { total: 3, sidePots: [] },
         legalActions: { seat: 1, actions: [] }
@@ -2252,6 +2252,7 @@ test('poker v2 auto-rebuy fires exactly one existing rebuy request when enabled 
   await harness.flush();
   assert.equal(harness.rebuyPayloads.length, 1);
   assert.equal(JSON.stringify(harness.rebuyPayloads[0]), JSON.stringify({ tableId: 'table-1', amount: 100 }));
+  assert.equal(harness.elements.pokerV2RebuyPanel.hidden, true, 'auto-rebuy must not show the manual rebuy prompt');
 });
 
 test('poker v2 auto-rebuy stays silent when the preference is disabled', async () => {

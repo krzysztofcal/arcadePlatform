@@ -4793,6 +4793,7 @@ wss.on("connection", (ws) => {
           broadcastResyncRequired,
           sendCommandResult,
           scheduleBotStep,
+          scheduleSettledRolloverIfSettled: (tid) => maybeScheduleSettledRollover(tid),
           klog: klogSafe
         })
       });

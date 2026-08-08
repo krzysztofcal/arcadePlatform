@@ -246,7 +246,10 @@ function resolvePrivateBranch({ state, statePublic, userId, youSeat, stack, isBo
 
   const holeCards = normalizeCards(state?.holeCardsByUserId?.[userId]);
   const handSeats = Array.isArray(statePublic?.handSeats) ? statePublic.handSeats : Array.isArray(statePublic?.seats) ? statePublic.seats : [];
-  const inCurrentHand = handSeats.some((seat) => seat?.userId === userId);
+  const phase = typeof state?.phase === "string" ? state.phase.trim().toUpperCase() : "";
+  // A settled hand is over: the player may still be listed in the previous
+  // hand's handSeats, but is not in any live hand and can rebuy for the next one.
+  const inCurrentHand = phase !== "SETTLED" && handSeats.some((seat) => seat?.userId === userId);
   const waiting = statePublic?.waitingForNextHandByUserId?.[userId] === true;
   const status = waiting ? "WAITING_NEXT_HAND" : stack === 0 && !inCurrentHand ? "OUT_OF_CHIPS" : "ACTIVE";
   const branch = {
@@ -318,12 +321,17 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
   let publicSeats = resolvePublicSeats({ statePublic, members, coreState, publicProfilesByUserId, publicProfileStorageBaseUrl });
   const publicStacks = resolvePublicStacks({ statePublic, coreState, seats: publicSeats });
   const handSeats = Array.isArray(statePublic?.handSeats) ? statePublic.handSeats : Array.isArray(statePublic?.seats) ? statePublic.seats : [];
+  const publicPhase = typeof state?.phase === "string" ? state.phase.trim().toUpperCase() : "";
   const currentHandUserIds = new Set(handSeats.map((seat) => seat?.userId).filter((seatUserId) => typeof seatUserId === "string" && seatUserId));
   publicSeats = publicSeats.map((seat) => {
     if (seat.isBot === true) return seat;
     const stack = Number(publicStacks[seat.userId]);
     if (statePublic?.waitingForNextHandByUserId?.[seat.userId] === true) return { ...seat, status: "WAITING_NEXT_HAND" };
-    if (Number.isInteger(stack) && stack === 0 && !currentHandUserIds.has(seat.userId)) return { ...seat, status: "OUT_OF_CHIPS" };
+    // In SETTLED the previous hand is over; a player with stack 0 is not in a
+    // live hand and is shown as OUT_OF_CHIPS so a manual/auto rebuy is possible
+    // before the next hand starts.
+    const inCurrentHand = publicPhase !== "SETTLED" && currentHandUserIds.has(seat.userId);
+    if (Number.isInteger(stack) && stack === 0 && !inCurrentHand) return { ...seat, status: "OUT_OF_CHIPS" };
     return seat;
   });
   const effectiveYouSeat = hasLeftTable(statePublic, userId) ? null : youSeat;

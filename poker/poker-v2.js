@@ -4500,6 +4500,10 @@
     if (autoRebuyAttemptedForCurrentBust) return;
     if (rebuyOperation && (rebuyOperation.phase === 'pending' || rebuyOperation.phase === 'error')) return;
     autoRebuyAttemptedForCurrentBust = true;
+    // Suppress the manual rebuy prompt before requestManualRebuy() renders it
+    // synchronously. A definitive failure (e.g. insufficient_chips) later
+    // re-opens the panel for manual recovery.
+    rebuyPanelDismissed = true;
     requestManualRebuy();
   }
 

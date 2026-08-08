@@ -149,6 +149,28 @@ test("rebuy is rejected while the busted player remains in current handSeats", a
   assert.equal(harness.read().ledger.posts, 0);
 });
 
+test("rebuy is accepted during SETTLED and queues the player for the first next hand", async () => {
+  const settledSeats = [{ userId: "user-1", seatNo: 2 }, { userId: "bot", seatNo: 3 }];
+  const harness = createHarness({
+    state: {
+      phase: "SETTLED",
+      handId: "hand-settled",
+      handSeats: settledSeats,
+      seats: settledSeats,
+      stacks: { "user-1": 0, bot: 90 }
+    }
+  });
+  const before = harness.read();
+  const result = await harness.execute();
+  const after = harness.read();
+  assert.equal(result.ok, true);
+  assert.equal(after.ledger.user, before.ledger.user - 100);
+  assert.equal(after.ledger.escrow, before.ledger.escrow + 100);
+  assert.equal(after.state.stacks["user-1"], 100);
+  assert.equal(after.state.waitingForNextHandByUserId["user-1"], true);
+  assert.equal(after.seat.stack, 100);
+});
+
 test("manual rebuy accepts a live persisted hand with compact community card codes", async () => {
   const botSeat = { userId: "bot", seatNo: 3 };
   const harness = createHarness({

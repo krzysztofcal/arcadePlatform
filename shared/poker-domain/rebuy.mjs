@@ -132,7 +132,11 @@ export async function executePokerRebuyAuthoritative({
 
     const stackEvidence = requireAuthoritativeHumanStack({ state, userId });
     if (stackEvidence.amount !== 0) throw makeError("rebuy_not_available");
-    if (currentHandUserIds(state).has(userId)) throw makeError("rebuy_not_available");
+    // A settled hand is a safe hand boundary: the player is still listed in the
+    // previous hand's handSeats, but the hand is over and the next hand has not
+    // started yet. Rebuying here queues the player for the first next hand.
+    const phase = typeof state?.phase === "string" ? state.phase.trim().toUpperCase() : "";
+    if (phase !== "SETTLED" && currentHandUserIds(state).has(userId)) throw makeError("rebuy_not_available");
     if (state?.waitingForNextHandByUserId?.[userId] === true) throw makeError("rebuy_not_available");
 
     const nextState = {

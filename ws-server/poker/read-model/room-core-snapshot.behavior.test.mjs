@@ -367,6 +367,40 @@ test("projectRoomCoreSnapshot projects settled showdown fields without leaking p
   assert.deepEqual(seated.private, { userId: "seated_user", seat: 1, holeCards: ["AH", "AD"] });
 });
 
+test("projectRoomCoreSnapshot exposes OUT_OF_CHIPS + canRebuy for a busted player during SETTLED", () => {
+  const coreState = {
+    seats: { busted_user: 1, other_user: 2 },
+    pokerState: {
+      roomId: "table_settled_rebuy",
+      handId: "hand_settled_2",
+      phase: "SETTLED",
+      handSeats: [{ userId: "busted_user", seatNo: 1 }, { userId: "other_user", seatNo: 2 }],
+      seats: [{ userId: "busted_user", seatNo: 1 }, { userId: "other_user", seatNo: 2 }],
+      stacks: { busted_user: 0, other_user: 120 },
+      waitingForNextHandByUserId: {},
+      potTotal: 0,
+      sidePots: []
+    }
+  };
+
+  const seated = projectRoomCoreSnapshot({
+    tableId: "table_settled_rebuy",
+    roomId: "table_settled_rebuy",
+    coreState,
+    members: [
+      { userId: "busted_user", seat: 1 },
+      { userId: "other_user", seat: 2 }
+    ],
+    userId: "busted_user",
+    youSeat: 1
+  });
+
+  assert.equal(seated.hand.status, "SETTLED");
+  assert.deepEqual(seated.private.playerState, { status: "OUT_OF_CHIPS", stack: 0, canRebuy: true });
+  const bustedSeat = seated.seats.find((seat) => seat.userId === "busted_user");
+  assert.equal(bustedSeat.status, "OUT_OF_CHIPS");
+});
+
 test("projectRoomCoreSnapshot does not reveal a folded player's cards for an uncalled return", () => {
   const snapshot = projectRoomCoreSnapshot({
     tableId: "table_settled_return",
@@ -666,8 +700,10 @@ test("projectRoomCoreSnapshot derives OUT_OF_CHIPS, canRebuy, and WAITING_NEXT_H
     }
   };
   const settled = projectRoomCoreSnapshot({ tableId: "table_busted", roomId: "table_busted", coreState: settledCore, members: settledCore.members, userId: "human", youSeat: 1, tableStatus: "OPEN" });
-  assert.equal(settled.seats.find((seat) => seat.userId === "human")?.status, "ACTIVE");
-  assert.deepEqual(settled.private.playerState, { status: "ACTIVE", stack: 0, canRebuy: false });
+  // A settled hand is over: the busted player is not in a live hand and can
+  // rebuy for the first next hand during the settlement reveal window.
+  assert.equal(settled.seats.find((seat) => seat.userId === "human")?.status, "OUT_OF_CHIPS");
+  assert.deepEqual(settled.private.playerState, { status: "OUT_OF_CHIPS", stack: 0, canRebuy: true });
 
   const waitingCore = {
     ...coreState,

@@ -208,6 +208,7 @@ register("ERROR", "autoplay", [
   "ws_leave_schedule_bot_step_failed",
   "ws_observed_bot_turn_autoplay_failed",
   "ws_rebuy_schedule_bot_step_failed",
+  "ws_rebuy_schedule_settled_rollover_failed",
   "ws_settled_rollover_bot_autoplay_failed",
   "ws_start_hand_bot_autoplay_failed",
   "ws_timeout_bot_autoplay_failed"
