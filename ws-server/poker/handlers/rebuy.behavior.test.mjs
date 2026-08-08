@@ -44,3 +44,14 @@ test("rebuy handler requests resync when commit succeeded but runtime restore fa
   assert.equal(harness.events[1], "resync");
   assert.equal(harness.events.includes("snapshot"), false);
 });
+
+test("rebuy handler re-arms the settled rollover timer after a successful restore", async () => {
+  const harness = baseArgs({
+    scheduleSettledRolloverIfSettled: () => harness.events.push("rearm")
+  });
+  await handleRebuyCommand(harness.args);
+  assert.equal(harness.events[0].status, "accepted");
+  assert.equal(harness.events.includes("rearm"), true, "rollover timer must be re-armed after rebuy in SETTLED");
+  assert.equal(harness.events.indexOf("rearm") < harness.events.indexOf("snapshot"), true, "re-arm must happen before broadcast");
+  assert.deepEqual(harness.events.slice(1), ["rearm", "snapshot", "table", "bot"]);
+});

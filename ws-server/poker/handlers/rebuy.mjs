@@ -10,6 +10,7 @@ export async function handleRebuyCommand({
   broadcastResyncRequired,
   sendCommandResult,
   scheduleBotStep = () => {},
+  scheduleSettledRolloverIfSettled = () => {},
   klog = () => {}
 }) {
   const amount = frame?.payload?.amount === undefined ? 100 : Number(frame.payload.amount);
@@ -46,6 +47,16 @@ export async function handleRebuyCommand({
     });
     broadcastResyncRequired(tableId, "authoritative_rebuy_restore_failed");
     return;
+  }
+
+  // A rebuy during SETTLED changes the persisted state version, which is part
+  // of the settled-rollover generation key. Re-arm the rollover timer for the
+  // new generation while preserving the original reveal deadline, so the next
+  // hand still starts on time and includes the re-funded player.
+  try {
+    scheduleSettledRolloverIfSettled(tableId);
+  } catch (error) {
+    klog("ws_rebuy_schedule_settled_rollover_failed", { tableId, requestId: frame.requestId ?? null, message: error?.message || "unknown" });
   }
 
   broadcastStateSnapshots(tableId);

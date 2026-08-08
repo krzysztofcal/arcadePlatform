@@ -184,6 +184,9 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-social-settings__close{width:30px;height:30px;padding:0;border:1px solid rgba(255,215,157,0.25);border-radius:8px;background:rgba(21,30,47,0.7);color:#e7efff;font-size:1.15rem;line-height:1;}
 .poker-social-settings__option{display:flex;align-items:center;gap:9px;padding:9px 4px;font-size:0.88rem;}
 .poker-social-settings__option input{accent-color:#d6aa62;}
+.poker-social-settings__option--stacked{flex-direction:column;align-items:stretch;gap:4px;}
+.poker-social-settings__option--stacked > label{display:flex;align-items:center;gap:9px;}
+.poker-social-settings__hint{margin:0;font-size:0.74rem;line-height:1.35;color:#9fb2cf;}
 
 .poker-live-panel{position:relative; z-index:19; width:min(100%, 980px); margin:78px auto 0; padding:14px 16px; border-radius:22px; border:1px solid rgba(255,223,180,0.22); background:linear-gradient(180deg, rgba(10,15,24,0.88), rgba(4,6,11,0.96)); box-shadow:0 16px 28px rgba(0,0,0,0.46), inset 0 1px 1px rgba(255,255,255,0.08);}
 
