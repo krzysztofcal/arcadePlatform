@@ -52,7 +52,7 @@ Set these as Netlify environment variables (Site settings -> Environment variabl
 
 Operational notes:
 - Bot runtime is guarded by `POKER_BOTS_ENABLED`.
-- Initial humans, initial bots, manual rebuys, and replacement bots use the current fixed `100 CH` starting stack. The retired `POKER_BOT_BUYIN_BB` setting is ignored so table stakes or bot-only configuration cannot make the initial bot stack diverge from the human and replacement stack.
+- Initial humans, initial bots, manual rebuys, and replacement bots use the table's persisted `buy_in` value. The retired `POKER_BOT_BUYIN_BB` setting is ignored so table stakes or bot-only configuration cannot make stacks diverge from the table buy-in.
 - Values above are Netlify runtime config env vars (not secrets unless explicitly sensitive).
 - Bot/gameplay orchestration runs server-side in WS runtime (no client-side bot scripts).
 - Bot replacement funding continues to use the existing configured source (default `TREASURY`); it adds no account, migration, environment variable, balance move, or manual replenishment step.

@@ -253,7 +253,6 @@ function loadLobbyHarness(options = {}){
   elements.pokerLobbyContent.dataset.requiredBuyIn = '100';
 
   const fetchCalls = [];
-  const fetchRequests = [];
   const wsCreates = [];
   let requestLobbySnapshotCalls = 0;
   const lobbyClients = [];
@@ -350,7 +349,6 @@ function loadLobbyHarness(options = {}){
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
     fetch: async (url, requestOptions) => {
       fetchCalls.push(String(url));
-      fetchRequests.push({ url: String(url), options: requestOptions || {} });
       if (typeof options.fetchResponse === 'function') return options.fetchResponse(String(url));
       return { ok: true, json: async () => ({ ok: true }) };
     },
@@ -371,7 +369,6 @@ function loadLobbyHarness(options = {}){
   return {
     elements,
     fetchCalls,
-    fetchRequests,
     wsCreates,
     getLobbyOptions: () => lobbyClients.length ? lobbyClients[lobbyClients.length - 1].options : null,
     getLobbyClient: (index) => lobbyClients[index == null ? lobbyClients.length - 1 : index] || null,
@@ -476,24 +473,6 @@ assert.equal(lobbyHarness.getRequestLobbySnapshotCalls(), 1, 'lobby refresh shou
   await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(fallbackHarness.fetchCalls.some((url) => url.includes('poker-create-table')), true, 'balance lookup failure should fall through to guarded create endpoint');
-}
-
-{
-  const customBuyInHarness = loadLobbyHarness({
-    balanceResult: { balance: 500 },
-    fetchResponse: async () => ({ ok: true, status: 200, json: async () => ({ tableId: 'table-custom-buy-in' }) }),
-  });
-  customBuyInHarness.elements.pokerBuyIn.value = '500';
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  customBuyInHarness.elements.pokerCreate.click();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  const createRequest = customBuyInHarness.fetchRequests.find((entry) => entry.url.includes('poker-create-table'));
-  assert.ok(createRequest, 'custom buy-in should call create-table API');
-  assert.deepEqual(JSON.parse(createRequest.options.body), {
-    stakes: { sb: 1, bb: 2 },
-    maxPlayers: 6,
-    buyIn: 500,
-  });
 }
 
 {

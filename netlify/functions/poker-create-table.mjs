@@ -2,7 +2,7 @@ import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySup
 import { formatStakes, parseStakes } from "./_shared/poker-stakes.mjs";
 import { createPokerTableWithState } from "./_shared/poker-table-init.mjs";
 import { readPokerBuyInEligibility } from "./_shared/poker-buy-in-eligibility.mjs";
-import { notifyWsLobbyMaterialize } from "./_shared/poker-ws-runtime-notify.mjs";
+import { checkWsBuyInCapability, notifyWsLobbyMaterialize } from "./_shared/poker-ws-runtime-notify.mjs";
 import { DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../../shared/poker-domain/table-economy.mjs";
 
 const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
@@ -91,6 +91,21 @@ export async function handler(event) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_stakes" }) };
   }
   const stakesJson = formatStakes(stakesParsed.value);
+
+  if (buyIn !== DEFAULT_CASH_TABLE_BUY_IN_CHIPS) {
+    const capability = await checkWsBuyInCapability({ klog });
+    if (!capability?.ok) {
+      klog("poker_create_table_buy_in_capability_unavailable", {
+        buyIn,
+        reason: capability?.reason || "unknown"
+      });
+      return {
+        statusCode: 503,
+        headers: mergeHeaders(cors),
+        body: JSON.stringify({ error: "ws_buy_in_capability_unavailable" })
+      };
+    }
+  }
 
   let transactionResult = null;
   try {

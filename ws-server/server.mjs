@@ -4033,7 +4033,10 @@ async function handleInternalLobbyMaterialize(req, res) {
 
 async function handleHttpRequest(req, res) {
   if (req.url === "/healthz") {
-    res.writeHead(200, { "content-type": "text/plain" });
+    res.writeHead(200, {
+      "content-type": "text/plain",
+      "x-poker-buy-in-materialization": "1"
+    });
     res.end("ok");
     return;
   }

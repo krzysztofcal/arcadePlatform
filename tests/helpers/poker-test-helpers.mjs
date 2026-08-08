@@ -8,7 +8,7 @@ import { patchSitOutByUserId } from "../../netlify/functions/_shared/poker-sitou
 import { createPokerTableWithState } from "../../netlify/functions/_shared/poker-table-init.mjs";
 import { readPokerBuyInEligibility } from "../../netlify/functions/_shared/poker-buy-in-eligibility.mjs";
 import { shouldHideSeatRowFromReadModel } from "../../netlify/functions/_shared/poker-list-seat-visibility.mjs";
-import { notifyWsLobbyMaterialize } from "../../netlify/functions/_shared/poker-ws-runtime-notify.mjs";
+import { checkWsBuyInCapability, notifyWsLobbyMaterialize } from "../../netlify/functions/_shared/poker-ws-runtime-notify.mjs";
 import {
   buildSeatBotMap,
   chooseBotActionTrivial,
@@ -136,6 +136,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "readPokerBuyInEligibility",
     "DEFAULT_CASH_TABLE_BUY_IN_CHIPS",
     "notifyWsLobbyMaterialize",
+    "checkWsBuyInCapability",
     "PRESENCE_TTL_SEC",
     "HEARTBEAT_INTERVAL_SEC",
     "storePokerRequestResult",
@@ -193,6 +194,7 @@ return handler;`
       readPokerBuyInEligibility,
       DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
       notifyWsLobbyMaterialize,
+      checkWsBuyInCapability,
       computeTargetBotCount,
       getBotAutoplayConfig,
       chooseBotActionTrivial,
