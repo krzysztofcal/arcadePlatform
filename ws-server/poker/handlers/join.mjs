@@ -156,7 +156,10 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
         requestId: frame.requestId ?? null,
         tableId,
         status: "rejected",
-        reason
+        reason,
+        ...(Number.isSafeInteger(Number(authoritativeJoin?.buyIn)) ? { buyIn: Number(authoritativeJoin.buyIn) } : {}),
+        ...(Number.isSafeInteger(Number(authoritativeJoin?.requiredBankroll)) ? { requiredBankroll: Number(authoritativeJoin.requiredBankroll) } : {}),
+        ...(Number.isSafeInteger(Number(authoritativeJoin?.balance)) ? { balance: Number(authoritativeJoin.balance) } : {})
       });
       return;
     }

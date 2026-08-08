@@ -1,9 +1,8 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { formatStakes, parseStakes } from "./_shared/poker-stakes.mjs";
 import { createPokerTableWithState } from "./_shared/poker-table-init.mjs";
-import { readPokerBuyInEligibility } from "./_shared/poker-buy-in-eligibility.mjs";
 import { notifyWsLobbyMaterialize } from "./_shared/poker-ws-runtime-notify.mjs";
-import { DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../../shared/poker-domain/table-economy.mjs";
+import { calculateUnlockBankroll, evaluatePokerBuyInAccess, readPokerProgression } from "../../shared/poker-domain/poker-progression.mjs";
 
 const DEFAULT_MAX_PLAYERS = 6;
 const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
@@ -56,14 +55,17 @@ const toUiSeatNo = (seatNoDb, maxPlayers) => {
   return seatNoDb;
 };
 
-const createAndRecommend = async (tx, { userId, maxPlayers, stakesJson }) => {
-  const buyIn = DEFAULT_CASH_TABLE_BUY_IN_CHIPS;
-  const eligibility = await readPokerBuyInEligibility(tx, {
-    userId,
-    requiredBuyIn: buyIn,
-  });
-  if (!eligibility.eligible) {
-    return { kind: "insufficient_chips", balance: eligibility.balance, requiredBuyIn: eligibility.requiredBuyIn };
+const createAndRecommend = async (tx, { userId, maxPlayers, stakesJson, progression }) => {
+  const buyIn = progression?.highestUnlockedBuyIn;
+  if (!Number.isSafeInteger(buyIn) || buyIn <= 0) {
+    const firstTier = progression?.tiers?.[0] || null;
+    return {
+      kind: "buy_in_tier_locked",
+      balance: progression?.balance ?? 0,
+      buyIn: firstTier?.buyIn ?? null,
+      requiredBuyIn: firstTier?.buyIn ?? null,
+      requiredBankroll: firstTier?.unlockBankroll ?? null
+    };
   }
   const created = await createPokerTableWithState(tx, { userId, maxPlayers, stakesJson, buyIn });
   const tableId = created.tableId;
@@ -77,7 +79,24 @@ const triggerWsLobbyMaterialize = ({ tableId, maxPlayers, stakes, buyIn, klog })
   void notifyWsLobbyMaterialize({ tableId, maxPlayers, stakes, buyIn, klog });
 };
 
-const selectCandidate = async (tx, { stakesJson, maxPlayers, requireHuman, humanSeatFreshCutoffIso }) => {
+const selectExistingActiveSeat = async (tx, { userId, stakesJson, maxPlayers }) => {
+  return tx.unsafe(
+    `
+select t.id, t.max_players, t.buy_in
+from public.poker_tables t
+join public.poker_seats s on s.table_id = t.id
+where t.status = 'OPEN'
+  and t.max_players = $2
+  and t.stakes = $3::jsonb
+  and s.user_id = $1
+  and s.status = 'ACTIVE'
+limit 1;
+    `,
+    [userId, maxPlayers, stakesJson]
+  );
+};
+
+const selectCandidate = async (tx, { stakesJson, maxPlayers, requireHuman, humanSeatFreshCutoffIso, availableBuyIns }) => {
   return tx.unsafe(
     `
 select t.id, t.max_players, t.buy_in
@@ -122,16 +141,17 @@ where t.status = 'OPEN'
     where hs.table_id = t.id
       and hs.status = 'ACTIVE'
       and coalesce(hs.is_bot, false) = false
-      and coalesce(hs.last_seen_at, to_timestamp(0)) >= $4::timestamptz
+    and coalesce(hs.last_seen_at, to_timestamp(0)) >= $4::timestamptz
   ))
+  and t.buy_in = any($5::int[])
 order by t.last_activity_at desc nulls last, t.created_at asc nulls last
 limit 1;
     `,
-    [maxPlayers, stakesJson, requireHuman, humanSeatFreshCutoffIso]
+    [maxPlayers, stakesJson, requireHuman, humanSeatFreshCutoffIso, availableBuyIns]
   );
 };
 
-const recommendSeatAtTable = async (tx, { tableId, userId, maxPlayers, buyIn, allowCreateFallback, createPayload }) => {
+const recommendSeatAtTable = async (tx, { tableId, userId, maxPlayers, buyIn, progression, allowCreateFallback, createPayload }) => {
   const existingSeatRows = await tx.unsafe(
     "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
     [tableId, userId]
@@ -146,12 +166,19 @@ const recommendSeatAtTable = async (tx, { tableId, userId, maxPlayers, buyIn, al
   if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) {
     return { kind: "unavailable" };
   }
-  const eligibility = await readPokerBuyInEligibility(tx, {
-    userId,
-    requiredBuyIn: normalizedBuyIn,
+  const access = evaluatePokerBuyInAccess({
+    balance: progression?.balance ?? 0,
+    buyIn: normalizedBuyIn,
+    tiers: progression?.tiers?.map((tier) => tier.buyIn) || []
   });
-  if (!eligibility.eligible) {
-    return { kind: "insufficient_chips", balance: eligibility.balance, requiredBuyIn: eligibility.requiredBuyIn };
+  if (!access.configured || !access.eligible) {
+    return {
+      kind: "buy_in_tier_locked",
+      balance: access.balance,
+      buyIn: normalizedBuyIn,
+      requiredBuyIn: normalizedBuyIn,
+      requiredBankroll: access.requiredBankroll || calculateUnlockBankroll(normalizedBuyIn)
+    };
   }
 
   const activeSeatRows = await tx.unsafe(
@@ -216,39 +243,73 @@ export async function handler(event) {
 
   try {
     const result = await beginSql(async (tx) => {
-      const createPayload = { userId: auth.userId, maxPlayers, stakesJson };
       const matchKey = `quickseat:${maxPlayers}:${stakesParsed.value.sb}:${stakesParsed.value.bb}`;
       const humanSeatFreshCutoffIso = new Date(Date.now() - resolveHumanSeatFreshMs(process.env.POKER_ACTIVE_HUMAN_SEAT_FRESH_MS)).toISOString();
 
       await tx.unsafe("select pg_advisory_xact_lock(hashtext($1));", [matchKey]);
 
-      const preferredRows = await selectCandidate(tx, { stakesJson, maxPlayers, requireHuman: true, humanSeatFreshCutoffIso });
+      const existingRows = await selectExistingActiveSeat(tx, {
+        userId: auth.userId,
+        stakesJson,
+        maxPlayers
+      });
+      if (existingRows?.[0]?.id) {
+        const recommendation = await recommendSeatAtTable(tx, {
+          tableId: existingRows[0].id,
+          userId: auth.userId,
+          maxPlayers,
+          buyIn: existingRows[0].buy_in,
+          allowCreateFallback: false
+        });
+        if (recommendation.kind === "recommended") {
+          return { ...recommendation, strategy: "already_seated" };
+        }
+      }
+
+      const progression = await readPokerProgression(tx, { userId: auth.userId });
+      const createPayload = { userId: auth.userId, maxPlayers, stakesJson, progression };
+
+      const preferredRows = await selectCandidate(tx, {
+        stakesJson,
+        maxPlayers,
+        requireHuman: true,
+        humanSeatFreshCutoffIso,
+        availableBuyIns: progression.availableBuyIns
+      });
       if (preferredRows?.[0]?.id) {
         const recommendation = await recommendSeatAtTable(tx, {
           tableId: preferredRows[0].id,
           userId: auth.userId,
           maxPlayers,
           buyIn: preferredRows[0].buy_in,
+          progression,
           allowCreateFallback: true,
           createPayload,
         });
-        if (recommendation.kind === "insufficient_chips") return recommendation;
+        if (recommendation.kind === "buy_in_tier_locked") return recommendation;
         if (recommendation.kind === "recommended") {
           return { ...recommendation, strategy: "prefer_humans" };
         }
       }
 
-      const anyRows = await selectCandidate(tx, { stakesJson, maxPlayers, requireHuman: false, humanSeatFreshCutoffIso });
+      const anyRows = await selectCandidate(tx, {
+        stakesJson,
+        maxPlayers,
+        requireHuman: false,
+        humanSeatFreshCutoffIso,
+        availableBuyIns: progression.availableBuyIns
+      });
       if (anyRows?.[0]?.id) {
         const recommendation = await recommendSeatAtTable(tx, {
           tableId: anyRows[0].id,
           userId: auth.userId,
           maxPlayers,
           buyIn: anyRows[0].buy_in,
+          progression,
           allowCreateFallback: true,
           createPayload,
         });
-        if (recommendation.kind === "insufficient_chips") return recommendation;
+        if (recommendation.kind === "buy_in_tier_locked") return recommendation;
         if (recommendation.kind === "recommended") {
           return { ...recommendation, strategy: "any_open" };
         }
@@ -258,12 +319,24 @@ export async function handler(event) {
       return createdRecommendation;
     });
 
-    if (result?.kind === "insufficient_chips") {
-      klog("poker_quick_seat_insufficient_chips", { requiredBuyIn: result.requiredBuyIn, maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb });
+    if (result?.kind === "buy_in_tier_locked") {
+      klog("poker_quick_seat_buy_in_tier_locked", {
+        buyIn: result.buyIn,
+        requiredBankroll: result.requiredBankroll,
+        maxPlayers,
+        sb: stakesParsed.value.sb,
+        bb: stakesParsed.value.bb
+      });
       return {
         statusCode: 409,
         headers: mergeHeaders(cors),
-        body: JSON.stringify({ error: "insufficient_chips", requiredBuyIn: result.requiredBuyIn, balance: result.balance }),
+        body: JSON.stringify({
+          error: "buy_in_tier_locked",
+          buyIn: result.buyIn,
+          requiredBuyIn: result.requiredBuyIn,
+          requiredBankroll: result.requiredBankroll,
+          balance: result.balance
+        }),
       };
     }
     if (result?.kind !== "recommended" || typeof result?.tableId !== "string" || !result.tableId) {

@@ -244,6 +244,20 @@
 
 .poker-bonus-banner__copy span{font:600 12px/1.45 Poppins, sans-serif; color:#cdd6ff;}
 
+.poker-progression-bankroll{font:600 13px Poppins, sans-serif; color:var(--accent); margin-bottom:10px;}
+
+.poker-progression-celebration{background:rgba(110,231,231,.12); border:1px solid rgba(110,231,231,.35); border-radius:8px; padding:9px 12px; color:#d9ffff; font:600 13px Poppins, sans-serif; margin-bottom:10px;}
+
+.poker-progression-celebration[hidden]{display:none;}
+
+.poker-progression-roadmap{display:flex; flex-direction:column; gap:6px;}
+
+.poker-progression-row{display:flex; justify-content:space-between; gap:12px; padding:7px 10px; border-radius:8px; background:var(--card-2); color:#e8eeff; font:600 12px Poppins, sans-serif;}
+
+.poker-progression-row--locked{opacity:.55;}
+
+.poker-progression-row__detail{color:var(--muted); text-align:right;}
+
 .poker-actions-row{display:flex; align-items:center; flex-wrap:wrap; gap:6px;}
 
 .poker-actions-row .poker-btn{padding:6px 12px; font-size:12px;}
@@ -268,11 +282,15 @@
 
 .poker-table-row .stakes{color:var(--muted); width:70px;}
 
+.poker-table-row .buy-in{color:var(--accent); width:80px;}
+
 .poker-table-row .seats{color:var(--muted); width:60px;}
 
 .poker-table-row .status{color:var(--accent-2); width:60px;}
 
 .poker-table-row .poker-btn{margin-left:auto;}
+
+.poker-table-row--locked{opacity:.58;}
 
 .poker-error{background:rgba(239,68,68,.15); border:1px solid rgba(239,68,68,.4); border-radius:10px; padding:12px 16px; color:#fca5a5; font:600 13px Poppins, sans-serif; margin-bottom:12px;}
 

@@ -14,7 +14,7 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ mode, queries, notifications = [], logs = [], balance = 100, balanceError = false, candidateBuyIn = 100 }) =>
+const makeHandler = ({ mode, queries, notifications = [], logs = [], balance = 110, balanceError = false, candidateBuyIn = 100 }) =>
   loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -27,6 +27,11 @@ const makeHandler = ({ mode, queries, notifications = [], logs = [], balance = 1
           const text = String(query).toLowerCase();
 
           if (text.includes("pg_advisory_xact_lock")) return [];
+
+          if (text.includes("join public.poker_seats s") && text.includes("s.user_id = $1")) {
+            if (mode === "already_seated") return [{ id: "table-human", max_players: 6, buy_in: candidateBuyIn }];
+            return [];
+          }
 
           if (text.includes("account_type = 'user'")) {
             if (balanceError) throw new Error("balance_read_failed");
@@ -93,7 +98,7 @@ const run = async () => {
   {
     const queries = [];
     const notifications = [];
-    const handler = makeHandler({ mode: "prefer_humans", queries, notifications, balance: 500, candidateBuyIn: 500 });
+    const handler = makeHandler({ mode: "prefer_humans", queries, notifications, balance: 550, candidateBuyIn: 500 });
     const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -127,15 +132,15 @@ const run = async () => {
     const handler = makeHandler({ mode: "prefer_humans", queries, notifications, logs, balance: 99 });
     const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
     assert.equal(res.statusCode, 409);
-    assert.deepEqual(JSON.parse(res.body), { error: "insufficient_chips", requiredBuyIn: 100, balance: 99 });
+    assert.deepEqual(JSON.parse(res.body), { error: "buy_in_tier_locked", buyIn: 100, requiredBuyIn: 100, requiredBankroll: 110, balance: 99 });
     assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables")), false);
     assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")), false);
     assert.equal(notifications.length, 0);
-    const candidateCalls = queries.filter((entry) => entry.query.toLowerCase().includes("from public.poker_tables t"));
+    const candidateCalls = queries.filter((entry) => entry.query.toLowerCase().includes("t.buy_in = any"));
     assert.equal(candidateCalls.length, 1, "insufficient result must not continue to another candidate");
     assert.equal(logs.some((entry) => entry.kind === "poker_quick_seat_selected"), false);
-    assert.equal(logs.filter((entry) => entry.kind === "poker_quick_seat_insufficient_chips").length, 1);
-    assert.equal(Object.prototype.hasOwnProperty.call(logs.find((entry) => entry.kind === "poker_quick_seat_insufficient_chips")?.data || {}, "userId"), false);
+    assert.equal(logs.filter((entry) => entry.kind === "poker_quick_seat_buy_in_tier_locked").length, 1);
+    assert.equal(Object.prototype.hasOwnProperty.call(logs.find((entry) => entry.kind === "poker_quick_seat_buy_in_tier_locked")?.data || {}, "userId"), false);
   }
 
   {
@@ -268,7 +273,7 @@ const run = async () => {
           const text = String(query).toLowerCase();
           if (text.includes("pg_advisory_xact_lock")) return [];
           if (text.includes("from public.poker_tables t")) return [];
-          if (text.includes("account_type = 'user'")) return [{ balance: 100 }];
+          if (text.includes("account_type = 'user'")) return [{ balance: 110 }];
           if (text.includes("insert into public.poker_tables")) return [{ id: "table-slow-notify" }];
           if (text.includes("insert into public.poker_state")) return [];
           if (text.includes("from public.chips_accounts")) return [{ id: "escrow-1" }];
@@ -305,7 +310,7 @@ const run = async () => {
             const text = String(query).toLowerCase();
 
             if (text.includes("pg_advisory_xact_lock")) return [];
-            if (text.includes("account_type = 'user'")) return [{ balance: 100 }];
+            if (text.includes("account_type = 'user'")) return [{ balance: 110 }];
 
             if (
               text.includes("from public.poker_tables t") &&

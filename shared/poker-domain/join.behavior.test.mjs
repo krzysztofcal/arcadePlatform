@@ -54,6 +54,12 @@ function withLockedState(args, { validateStateForStorage = () => true } = {}) {
     ? Number(args.buyIn)
     : 100;
   const originalBeginSql = args?.beginSql;
+  const progressionBalance = Number.isSafeInteger(Number(args?.progressionBalance)) && Number(args.progressionBalance) >= 0
+    ? Number(args.progressionBalance)
+    : configuredBuyIn + Math.ceil(configuredBuyIn / 10);
+  const progressionEnv = args?.progressionEnv || {
+    POKER_BUY_IN_TIERS_JSON: JSON.stringify([100, 120, 140, 150, 180, 200, 250, 500, 999])
+  };
   const beginSql = typeof originalBeginSql === "function"
     ? (fn) => originalBeginSql(async (tx) => {
         const wrappedTx = Object.create(tx || null);
@@ -62,6 +68,9 @@ function withLockedState(args, { validateStateForStorage = () => true } = {}) {
           if (String(sql).includes("from public.poker_tables") && Array.isArray(rows)) {
             return rows.map((row) => row && row.buy_in == null ? { ...row, buy_in: configuredBuyIn } : row);
           }
+          if (String(sql).includes("from public.chips_accounts") && String(sql).includes("account_type = 'USER'") && Array.isArray(rows) && rows.length === 0) {
+            return [{ balance: progressionBalance }];
+          }
           return rows;
         };
         return fn(wrappedTx);
@@ -69,6 +78,7 @@ function withLockedState(args, { validateStateForStorage = () => true } = {}) {
     : originalBeginSql;
   return {
     ...args,
+    env: progressionEnv,
     beginSql,
     loadStateForUpdate: async (tx, tableId) => {
       const rows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 for update;", [tableId]);
@@ -103,11 +113,15 @@ test("shared join module imports without Netlify adapter dependency at module lo
   const stagedJoin = path.join(stagedDir, "join.mjs");
   const stagedBots = path.join(stagedDir, "bots.mjs");
   const stagedTableBuyIn = path.join(stagedDir, "table-buy-in.mjs");
+  const stagedTableEconomy = path.join(stagedDir, "table-economy.mjs");
+  const stagedProgression = path.join(stagedDir, "poker-progression.mjs");
   try {
     await fs.mkdir(stagedDir, { recursive: true });
     await fs.copyFile("shared/poker-domain/join.mjs", stagedJoin);
     await fs.copyFile("shared/poker-domain/bots.mjs", stagedBots);
     await fs.copyFile("shared/poker-domain/table-buy-in.mjs", stagedTableBuyIn);
+    await fs.copyFile("shared/poker-domain/table-economy.mjs", stagedTableEconomy);
+    await fs.copyFile("shared/poker-domain/poker-progression.mjs", stagedProgression);
     const module = await import(pathToFileURL(stagedJoin).href);
     assert.equal(typeof module.executePokerJoinAuthoritative, "function");
   } finally {
@@ -130,6 +144,49 @@ test("shared join requires injected locked-state validator", async () => {
     (error) => error?.code === "temporarily_unavailable"
   );
 });
+
+test("fresh join locks the bankroll row before posting the table buy-in", async () => withBotsDisabled(async () => {
+  const events = [];
+  const seatRows = [];
+  const result = await executePokerJoinAuthoritative(withStorageValidator({
+    beginSql: async (fn) => fn({
+      unsafe: async (sql) => {
+        const text = String(sql);
+        if (text.includes("from public.poker_tables")) return [{ id: "t-progression-lock", status: "OPEN", max_players: 6, buy_in: 500 }];
+        if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc;")) return seatRows.map((row) => ({ ...row }));
+        if (text.includes("from public.chips_accounts") && text.includes("account_type = 'USER'")) {
+          events.push(text);
+          return [{ balance: 550 }];
+        }
+        if (text.includes("insert into public.poker_seats")) {
+          seatRows.push({ user_id: "u-progression-lock", seat_no: 1, status: "ACTIVE", is_bot: false, bot_profile: null, leave_after_hand: false, stack: 0 });
+          return [{ seat_no: 1 }];
+        }
+        if (text.includes("select version, state from public.poker_state")) return [{ version: 1, state: { tableId: "t-progression-lock", seats: [], stacks: {} } }];
+        if (text.includes("update public.poker_state set state")) return [{ version: 2 }];
+        if (text.includes("update public.poker_seats set stack")) {
+          seatRows[0].stack = 500;
+          return [{ ok: true }];
+        }
+        if (text.includes("update public.poker_tables")) return [];
+        return [];
+      }
+    }),
+    tableId: "t-progression-lock",
+    userId: "u-progression-lock",
+    requestId: "join-progression-lock",
+    buyIn: 500,
+    progressionBalance: 550,
+    postTransactionFn: async () => {
+      events.push("postTransaction");
+      return { ok: true };
+    }
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.stack, 500);
+  assert.match(events[0], /for update/i);
+  assert.equal(events.indexOf("postTransaction") > 0, true);
+}));
 
 test("rejects malformed stringified state with state_invalid", async () => {
   await assert.rejects(

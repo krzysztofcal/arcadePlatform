@@ -49,8 +49,11 @@ Set these as Netlify environment variables (Site settings -> Environment variabl
 - `POKER_BOT_PROFILE_DEFAULT` (default: `TRIVIAL`)
 - `POKER_BOT_BANKROLL_SYSTEM_KEY` (default now: `TREASURY`; optional later: `POKER_BOT_BANKROLL`)
 - Optional later: `POKER_BOTS_MAX_ACTIONS_PER_POLL`
+- `POKER_BUY_IN_TIERS_JSON` (shared ordered buy-in tier catalog; omitted uses the built-in catalog)
 
 Operational notes:
+- Before production rollout, verify every active table buy-in is present in the initial catalog: `select distinct buy_in from public.poker_tables where status <> 'CLOSED';`.
+- Roll out the Netlify and WS revisions together; run the non-default-tier smoke only after both revisions report the same release SHA.
 - Bot runtime is guarded by `POKER_BOTS_ENABLED`.
 - Initial humans, initial bots, manual rebuys, and replacement bots use the table's persisted `buy_in` value. The retired `POKER_BOT_BUYIN_BB` setting is ignored so table stakes or bot-only configuration cannot make stacks diverge from the table buy-in.
 - Values above are Netlify runtime config env vars (not secrets unless explicitly sensitive).

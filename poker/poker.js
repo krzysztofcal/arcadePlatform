@@ -3,6 +3,7 @@
 
   var CREATE_URL = '/.netlify/functions/poker-create-table';
   var QUICK_SEAT_URL = '/.netlify/functions/poker-quick-seat';
+  var PROGRESSION_URL = '/.netlify/functions/poker-progression';
   var GUEST_SESSION_URL = '/.netlify/functions/poker-guest-session';
   var WS_JOIN_ENDPOINT = 'ws:join';
   var WS_LEAVE_ENDPOINT = 'ws:leave';
@@ -197,6 +198,8 @@
     err.status = res.status;
     err.code = body.error || 'request_failed';
     if (Number.isSafeInteger(body.balance) && body.balance >= 0) err.balance = body.balance;
+    if (Number.isSafeInteger(body.buyIn) && body.buyIn > 0) err.buyIn = body.buyIn;
+    if (Number.isSafeInteger(body.requiredBankroll) && body.requiredBankroll >= 0) err.requiredBankroll = body.requiredBankroll;
     if (Number.isSafeInteger(body.requiredBuyIn) && body.requiredBuyIn > 0) err.requiredBuyIn = body.requiredBuyIn;
     throw err;
   }
@@ -1471,6 +1474,12 @@
     var guestPlayBtn = document.getElementById('pokerGuestPlay');
     var welcomeBonusBanner = document.getElementById('pokerWelcomeBonusBanner');
     var welcomeBonusClaimBtn = document.getElementById('pokerWelcomeBonusClaim');
+    var progressionRoadmap = document.getElementById('pokerProgressRoadmap');
+    var progressionBankroll = document.getElementById('pokerProgressBankroll');
+    var progressionCelebration = document.getElementById('pokerProgressCelebration');
+    var progressionInFlight = null;
+    var progressionState = null;
+    var progressionCelebrationTimer = null;
 
     var LOBBY_RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000];
     var authTimer = null;
@@ -1490,29 +1499,24 @@
       return t('pokerErrInsufficientChips', 'You need at least {amount} CH to join a table.').replace('{amount}', formatChips(amount));
     }
 
-    async function hasFreshCashBuyInBalance(requiredBuyInOverride){
-      var requiredBuyIn = Number.isSafeInteger(requiredBuyInOverride) && requiredBuyInOverride > 0
-        ? requiredBuyInOverride
-        : requiredCashBuyIn();
-      if (!requiredBuyIn || !window.ChipsClient || typeof window.ChipsClient.fetchBalance !== 'function') return true;
-      try {
-        var result = await window.ChipsClient.fetchBalance();
-        var balance = result && Number.isSafeInteger(result.balance) && result.balance >= 0 ? result.balance : null;
-        if (balance !== null && balance < requiredBuyIn){
-          setError(errorEl, insufficientChipsMessage(requiredBuyIn));
-          return false;
-        }
-      } catch (err){
-        klog('poker_buy_in_balance_precheck_failed', { reason: err && (err.code || err.message) ? (err.code || err.message) : 'unknown' });
-      }
-      return true;
-    }
-
     function handleInsufficientChips(error){
       if (!error || error.code !== 'insufficient_chips') return false;
       setError(errorEl, insufficientChipsMessage(error.requiredBuyIn));
       if (window.ChipsClient && typeof window.ChipsClient.fetchBalance === 'function') {
         window.ChipsClient.fetchBalance().catch(function(){});
+      }
+      return true;
+    }
+
+    function handleTierLocked(error){
+      if (!error || error.code !== 'buy_in_tier_locked') return false;
+      var requiredBankroll = Number(error.requiredBankroll);
+      var buyIn = Number(error.buyIn || error.requiredBuyIn);
+      if (Number.isSafeInteger(requiredBankroll) && requiredBankroll > 0){
+        var tierLabel = Number.isSafeInteger(buyIn) && buyIn > 0 ? ' to unlock ' + formatChips(buyIn) + ' CH tables' : '';
+        setError(errorEl, 'You need at least ' + formatChips(requiredBankroll) + ' CH' + tierLabel + '.');
+      } else {
+        setError(errorEl, 'This table tier is locked for your current bankroll.');
       }
       return true;
     }
@@ -1654,6 +1658,109 @@
       return welcomeBonusInFlight;
     }
 
+    function progressionStorageKey(data){
+      var userId = data && typeof data.userId === 'string' ? data.userId.trim() : '';
+      return userId ? 'poker:progression:' + userId + ':highestTier' : null;
+    }
+
+    function showProgressionCelebration(data){
+      if (!progressionCelebration) return;
+      var highest = Number(data && data.highestUnlockedBuyIn);
+      if (!Number.isSafeInteger(highest) || highest <= 0) return;
+      progressionCelebration.textContent = '🎉 Congratulations! ' + formatChips(highest) + ' CH tables unlocked.';
+      progressionCelebration.hidden = false;
+      if (progressionCelebrationTimer) clearTimeout(progressionCelebrationTimer);
+      progressionCelebrationTimer = setTimeout(function(){
+        if (progressionCelebration) progressionCelebration.hidden = true;
+        progressionCelebrationTimer = null;
+      }, 6000);
+    }
+
+    function updateProgressionHighWaterMark(data){
+      var key = progressionStorageKey(data);
+      var current = Number(data && data.highestUnlockedIndex);
+      if (!key || !Number.isInteger(current) || current < 0) return;
+      try {
+        var storedRaw = window.localStorage.getItem(key);
+        if (storedRaw == null){
+          window.localStorage.setItem(key, String(current));
+          return;
+        }
+        var stored = Number(storedRaw);
+        if (!Number.isInteger(stored) || current > stored){
+          window.localStorage.setItem(key, String(Math.max(current, Number.isInteger(stored) ? stored : current)));
+          if (!Number.isInteger(stored) || current > stored) showProgressionCelebration(data);
+        }
+      } catch (_err){}
+    }
+
+    function renderProgression(data){
+      progressionState = data && typeof data === 'object' ? data : null;
+      if (progressionBankroll){
+        progressionBankroll.textContent = 'Current bankroll: ' + formatChips(data && data.balance) + ' CH';
+      }
+      if (buyInInput && data && Array.isArray(data.tiers)){
+        var previousBuyIn = Number(buyInInput.value);
+        buyInInput.innerHTML = '';
+        data.tiers.forEach(function(tier){
+          var option = document.createElement('option');
+          option.value = String(tier.buyIn);
+          option.textContent = formatChips(tier.buyIn) + ' CH';
+          if (Number(tier.buyIn) === previousBuyIn) option.selected = true;
+          buyInInput.appendChild(option);
+        });
+        if (!Number.isSafeInteger(previousBuyIn) || !data.tiers.some(function(tier){ return Number(tier.buyIn) === previousBuyIn; })){
+          buyInInput.value = data.tiers.length ? String(data.tiers[0].buyIn) : '100';
+        }
+      }
+      if (progressionRoadmap){
+        progressionRoadmap.innerHTML = '';
+        var tiers = data && Array.isArray(data.tiers) ? data.tiers : [];
+        tiers.forEach(function(tier, index){
+          var row = document.createElement('div');
+          row.className = 'poker-progression-row' + (tier.available ? ' poker-progression-row--available' : '') + (!tier.unlocked ? ' poker-progression-row--locked' : '');
+          var label = document.createElement('span');
+          label.className = 'poker-progression-row__tier';
+          label.textContent = (tier.unlocked ? '✅ ' : '🔒 ') + formatChips(tier.buyIn) + ' CH' + (index === Number(data.highestUnlockedIndex) ? ' (Current)' : '');
+          row.appendChild(label);
+          var detail = document.createElement('span');
+          detail.className = 'poker-progression-row__detail';
+          detail.textContent = tier.unlocked
+            ? 'Available'
+            : 'Requires ' + formatChips(tier.unlockBankroll) + ' CH · ' + formatChips(tier.progressPercent) + '%';
+          row.appendChild(detail);
+          progressionRoadmap.appendChild(row);
+        });
+      }
+      updateProgressionHighWaterMark(data);
+      if (tableList && progressionState){
+        var rows = tableList.children || [];
+        for (var rowIndex = 0; rowIndex < rows.length; rowIndex++){
+          var tableBuyIn = Number(rows[rowIndex].dataset && rows[rowIndex].dataset.buyIn);
+          var locked = Number.isSafeInteger(tableBuyIn)
+            && Array.isArray(progressionState.availableBuyIns)
+            && !progressionState.availableBuyIns.includes(tableBuyIn);
+          if (locked) rows[rowIndex].classList.add('poker-table-row--locked');
+          else rows[rowIndex].classList.remove('poker-table-row--locked');
+        }
+      }
+    }
+
+    async function refreshProgression(){
+      if (!progressionRoadmap && !progressionBankroll) return null;
+      if (progressionInFlight) return progressionInFlight;
+      progressionInFlight = apiGet(PROGRESSION_URL).then(function(data){
+        renderProgression(data);
+        return data;
+      }).catch(function(err){
+        if (!isAuthError(err)) klog('poker_progression_refresh_failed', { error: err && (err.code || err.message) ? (err.code || err.message) : 'unknown' });
+        return null;
+      }).finally(function(){
+        progressionInFlight = null;
+      });
+      return progressionInFlight;
+    }
+
     function isLobbyAuthProtocolError(code){
       var normalized = typeof code === 'string' ? code.trim().toLowerCase() : '';
       return normalized === 'missing_access_token'
@@ -1682,6 +1789,7 @@
       if (lobbyContent) lobbyContent.hidden = false;
       stopAuthWatch();
       refreshWelcomeBonusBanner();
+      refreshProgression();
       return true;
     }
 
@@ -1757,6 +1865,7 @@
     function refreshLobby(reason){
       checkAuth().then(function(authed){
         if (!authed) return;
+        refreshProgression();
         requestLiveLobbySnapshot(reason || 'refresh');
       });
     }
@@ -1766,6 +1875,7 @@
         clearLobbyReconnectTimer();
         return;
       }
+      refreshProgression();
       refreshLobby('visibility');
     }
 
@@ -1780,6 +1890,7 @@
         var tableId = tbl && typeof tbl.tableId === 'string' ? tbl.tableId : tbl.id;
         var row = document.createElement('div');
         row.className = 'poker-table-row';
+        row.dataset.buyIn = String(tbl && tbl.buyIn != null ? tbl.buyIn : '');
         var stakes = tbl.stakes;
         var maxPlayers = tbl.maxPlayers != null ? tbl.maxPlayers : 6;
         var seatCount = tbl.seatCount != null ? tbl.seatCount : 0;
@@ -1789,6 +1900,9 @@
         var stakesEl = document.createElement('span');
         stakesEl.className = 'stakes';
         stakesEl.textContent = formatStakesUi(stakes);
+        var buyInEl = document.createElement('span');
+        buyInEl.className = 'buy-in';
+        buyInEl.textContent = tbl && tbl.buyIn != null ? formatChips(tbl.buyIn) + ' CH' : '—';
         var seatsEl = document.createElement('span');
         seatsEl.className = 'seats';
         seatsEl.textContent = seatCount + '/' + maxPlayers;
@@ -1799,8 +1913,16 @@
         openBtn.className = 'poker-btn';
         openBtn.dataset.open = tableId;
         openBtn.textContent = t('open', 'Open');
+        var available = progressionState && Array.isArray(progressionState.availableBuyIns)
+          ? progressionState.availableBuyIns.includes(Number(tbl && tbl.buyIn))
+          : true;
+        if (!available){
+          row.className += ' poker-table-row--locked';
+          openBtn.title = 'Tier locked for current bankroll';
+        }
         row.appendChild(tid);
         row.appendChild(stakesEl);
+        row.appendChild(buyInEl);
         row.appendChild(seatsEl);
         row.appendChild(statusEl);
         row.appendChild(openBtn);
@@ -1868,6 +1990,7 @@
         }
         setError(errorEl, t('pokerErrNoTableId', 'Table created but no ID returned'));
       } catch (err){
+        if (handleTierLocked(err)) return;
         if (handleInsufficientChips(err)) return;
         if (isAuthError(err)){
           handleAuthExpired({
@@ -1904,7 +2027,6 @@
       var maxPlayers = parseInt(maxPlayersInput ? maxPlayersInput.value : 6, 10) || 6;
       setLoading(createBtn, true);
       try {
-        if (!(await hasFreshCashBuyInBalance(buyIn))) return;
         var data = await apiPost(CREATE_URL, { stakes: { sb: sb, bb: bb }, maxPlayers: maxPlayers, buyIn: buyIn });
         if (data.tableId){
           navigateToPokerTable(data.tableId);
@@ -1939,6 +2061,7 @@
 
     if (refreshBtn){
       refreshBtn.addEventListener('click', function(){
+        refreshProgression();
         refreshLobby('manual_refresh');
       });
     }
@@ -1966,7 +2089,10 @@
     window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-lobby(2026-01-01)
     window.addEventListener('beforeunload', stopLobbyWs); // xp-lifecycle-allow:poker-lobby-ws(2026-01-01)
     document.addEventListener('visibilitychange', handleLobbyVisibilityChange); // xp-lifecycle-allow:poker-lobby-visibility(2027-01-01)
-    document.addEventListener('chips:tx-complete', refreshWelcomeBonusBanner);
+    document.addEventListener('chips:tx-complete', function(){
+      refreshWelcomeBonusBanner();
+      refreshProgression();
+    });
 
     checkAuth().then(function(authed){
       if (authed) requestLiveLobbySnapshot('initial');

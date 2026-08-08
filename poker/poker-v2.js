@@ -4321,6 +4321,15 @@
 
   function joinErrorMessage(error){
     var code = autoJoinErrorCode(error);
+    if (code === 'buy_in_tier_locked') {
+      var requiredBankroll = Number(error && error.requiredBankroll);
+      var tableBuyIn = Number(error && error.buyIn);
+      if (Number.isSafeInteger(requiredBankroll) && requiredBankroll > 0){
+        var tierLabel = Number.isSafeInteger(tableBuyIn) && tableBuyIn > 0 ? (' to unlock ' + formatNumber(tableBuyIn) + ' CH tables') : '';
+        return 'You need at least ' + formatNumber(requiredBankroll) + ' CH' + tierLabel + '.';
+      }
+      return 'This table tier is locked for your current bankroll.';
+    }
     if (code !== 'insufficient_funds' && code !== 'insufficient_chips') {
       return error && error.message ? error.message : 'Failed to join';
     }

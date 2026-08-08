@@ -113,6 +113,15 @@
         <button id="pokerWelcomeBonusClaim" class="poker-btn poker-btn--primary" type="button">Claim bonus</button>
       </div>
 
+      <section class="poker-panel poker-progression-panel" aria-labelledby="pokerProgressTitle">
+        <h3 id="pokerProgressTitle">Progress Roadmap</h3>
+        <div id="pokerProgressBankroll" class="poker-progression-bankroll">Current bankroll: — CH</div>
+        <div id="pokerProgressCelebration" class="poker-progression-celebration" role="status" hidden></div>
+        <div id="pokerProgressRoadmap" class="poker-progression-roadmap">
+          <div class="poker-loading">Loading progression...</div>
+        </div>
+      </section>
+
       <div class="poker-panel">
         <h3 data-i18n="createTable">Create Table</h3>
         <div class="poker-form-row">
@@ -121,7 +130,9 @@
           <label class="poker-label"><span data-i18n="bb">BB</span>:</label>
           <input type="number" id="pokerBb" class="poker-input" value="2" min="1">
           <label class="poker-label"><span data-i18n="buyIn">Buy-in</span>:</label>
-          <input type="number" id="pokerBuyIn" class="poker-input" value="100" min="1" step="1">
+          <select id="pokerBuyIn" class="poker-input">
+            <option value="100" selected>100 CH</option>
+          </select>
           <label class="poker-label"><span data-i18n="maxPlayers">Max Players</span>:</label>
           <input type="number" id="pokerMaxPlayers" class="poker-input" value="6" min="2" max="10">
         </div>

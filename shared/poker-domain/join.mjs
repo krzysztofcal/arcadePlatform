@@ -1,4 +1,5 @@
 import { asSeatSnapshot, computeTargetBotCount, getBotConfig, loadSeatRows, seedBotsForJoin, shouldSeedBotsOnJoin } from "./bots.mjs";
+import { evaluatePokerBuyInAccess, readPokerBankroll, resolvePokerBuyInTiers } from "./poker-progression.mjs";
 import { postUserTableBuyIn } from "./table-buy-in.mjs";
 
 const BUY_IN_IDEMPOTENCY_CONSTRAINT = "chips_transactions_idempotency_key_unique";
@@ -89,11 +90,17 @@ function isStorageStateValid(validateStateForStorage, state) {
   return validateStateForStorage(normalizeStateForStorageValidation(state));
 }
 
-function makeError(code, validationReason = null) {
+function makeError(code, validationReason = null, details = null) {
   const error = new Error(code);
   error.code = code;
   if (typeof validationReason === "string" && /^[a-z0-9]+(?:_[a-z0-9]+)*$/.test(validationReason)) {
     error.validationReason = validationReason;
+  }
+  if (details && typeof details === "object" && !Array.isArray(details)) {
+    for (const key of ["buyIn", "requiredBankroll", "balance"]) {
+      const value = Number(details[key]);
+      if (Number.isSafeInteger(value) && value >= 0) error[key] = value;
+    }
   }
   return error;
 }
@@ -642,7 +649,7 @@ returning user_id;
   };
 }
 
-export async function executePokerJoinAuthoritative({ beginSql, tableId, userId, requestId, seatNo = null, autoSeat = false, preferredSeatNo = null, buyIn = null, klog = () => {}, postTransactionFn = null, loadStateForUpdate, updateStateLocked, validateStateForStorage }) {
+export async function executePokerJoinAuthoritative({ beginSql, tableId, userId, requestId, seatNo = null, autoSeat = false, preferredSeatNo = null, buyIn = null, klog = () => {}, postTransactionFn = null, loadStateForUpdate, updateStateLocked, validateStateForStorage, env = process.env }) {
   if (typeof loadStateForUpdate !== "function" || typeof updateStateLocked !== "function" || typeof validateStateForStorage !== "function") {
     throw makeError("temporarily_unavailable");
   }
@@ -755,6 +762,18 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
             stateVersion: snapshotVersion
           })
         };
+      }
+
+      const tiers = resolvePokerBuyInTiers(env);
+      const bankroll = await readPokerBankroll(tx, { userId, lock: true });
+      const access = evaluatePokerBuyInAccess({ balance: bankroll, buyIn: authoritativeBuyIn, tiers });
+      if (!access.configured) throw makeError("invalid_buy_in");
+      if (!access.eligible) {
+        throw makeError("buy_in_tier_locked", null, {
+          buyIn: authoritativeBuyIn,
+          requiredBankroll: access.requiredBankroll,
+          balance: access.balance
+        });
       }
 
       const status = String(table.status || "").toUpperCase();
