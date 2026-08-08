@@ -275,8 +275,8 @@ test("persisted state writer persists hole cards from real WS bootstrap private 
   const userA = "00000000-0000-4000-8000-0000000000a1";
   const userB = "00000000-0000-4000-8000-0000000000b2";
   const tableManager = createTableManager({ maxSeats: 4 });
-  assert.equal(tableManager.join({ ws: { id: "ws-a" }, userId: userA, tableId, requestId: "join-a", nowTs: 1 }).ok, true);
-  assert.equal(tableManager.join({ ws: { id: "ws-b" }, userId: userB, tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: { id: "ws-a" }, userId: userA, tableId, requestId: "join-a", nowTs: 1, buyIn: 500, authoritativeSeatNo: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: { id: "ws-b" }, userId: userB, tableId, requestId: "join-b", nowTs: 1, buyIn: 500, authoritativeSeatNo: 2 }).ok, true);
   const bootstrapped = tableManager.bootstrapHand(tableId, { nowMs: 1_000 });
   assert.equal(bootstrapped.changed, true);
 
@@ -325,8 +325,8 @@ test("persisted state writer persists hole cards from real WS rollover private a
   const userA = "00000000-0000-4000-8000-0000000000a1";
   const userB = "00000000-0000-4000-8000-0000000000b2";
   const tableManager = createTableManager({ maxSeats: 4 });
-  assert.equal(tableManager.join({ ws: { id: "ws-roll-a" }, userId: userA, tableId, requestId: "join-a", nowTs: 1 }).ok, true);
-  assert.equal(tableManager.join({ ws: { id: "ws-roll-b" }, userId: userB, tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: { id: "ws-roll-a" }, userId: userA, tableId, requestId: "join-a", nowTs: 1, buyIn: 500, authoritativeSeatNo: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: { id: "ws-roll-b" }, userId: userB, tableId, requestId: "join-b", nowTs: 1, buyIn: 500, authoritativeSeatNo: 2 }).ok, true);
   const bootstrapped = tableManager.bootstrapHand(tableId, { nowMs: 1_000 });
   assert.equal(bootstrapped.changed, true);
   const firstState = tableManager.persistedPokerState(tableId);

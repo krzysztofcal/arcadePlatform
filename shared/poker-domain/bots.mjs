@@ -24,7 +24,6 @@ function parseIntClamped(value, fallback, min, max) {
 }
 
 const BOT_PROFILES = ["TIGHT", "NORMAL", "LOOSE"];
-const BOT_STARTING_STACK_CHIPS = 100;
 
 function parseProfile(value, fallback = "RANDOM") {
   const normalized = normalizeString(value).toUpperCase();
@@ -88,7 +87,6 @@ function getBotConfig(env = process.env) {
     minPerTable: parseIntClamped(env?.POKER_BOTS_MIN_PER_TABLE, 2, 0, 9),
     maxPerTable: parseIntClamped(env?.POKER_BOTS_MAX_PER_TABLE, 5, 0, 9),
     defaultProfile: parseProfile(env?.POKER_BOT_PROFILE_DEFAULT, "RANDOM"),
-    buyInChips: BOT_STARTING_STACK_CHIPS,
     bankrollSystemKey: normalizeString(env?.POKER_BOT_BANKROLL_SYSTEM_KEY) || "TREASURY"
   };
 }
@@ -211,6 +209,7 @@ async function seedBotsForJoin({
   tableId,
   maxPlayers,
   tableStakes,
+  buyInChips,
   cfg,
   humanUserId,
   postTransaction,
@@ -223,6 +222,10 @@ async function seedBotsForJoin({
   random = Math.random
 }) {
   if (!cfg?.enabled || typeof postTransaction !== "function") return [];
+  const normalizedBuyIn = Number(buyInChips);
+  if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) {
+    throw new Error("invalid_bot_buy_in");
+  }
   const stakesParsed = parseStakes(tableStakes);
   if (!stakesParsed.ok) {
     klog("poker_join_bot_seed_skip_invalid_stakes", { tableId, stakes: tableStakes ?? null });
@@ -247,7 +250,6 @@ async function seedBotsForJoin({
   if (toSeed <= 0) return [];
 
   const occupied = new Set(activeSeats.map((row) => normalizeSeatNo(row?.seat_no)).filter(Boolean));
-  const buyInChips = Math.max(1, Math.trunc(Number(cfg.buyInChips)));
   const escrowSystemKey = `POKER_TABLE:${tableId}`;
   const seededBots = [];
 
@@ -263,7 +265,7 @@ values ($1, $2, $3, 'ACTIVE', true, $4, false, $5, now(), now())
 on conflict do nothing
 returning seat_no;
       `,
-      [tableId, botUserId, seatNo, botProfile, buyInChips]
+      [tableId, botUserId, seatNo, botProfile, normalizedBuyIn]
     );
     if (!insertRows?.length) continue;
 
@@ -282,8 +284,8 @@ returning seat_no;
           reason: fundingReason
         },
         entries: [
-          { accountType: "SYSTEM", systemKey: cfg.bankrollSystemKey, amount: -buyInChips },
-          { accountType: "ESCROW", systemKey: escrowSystemKey, amount: buyInChips }
+          { accountType: "SYSTEM", systemKey: cfg.bankrollSystemKey, amount: -normalizedBuyIn },
+          { accountType: "ESCROW", systemKey: escrowSystemKey, amount: normalizedBuyIn }
         ],
         createdBy: allowBotsOnly ? null : humanUserId,
         tx
@@ -295,7 +297,7 @@ returning seat_no;
         isBot: true,
         botProfile: botProfile,
         leaveAfterHand: false,
-        stack: buyInChips
+        stack: normalizedBuyIn
       });
       occupied.add(seatNo);
     } catch (error) {

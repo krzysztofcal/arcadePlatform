@@ -1,6 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { __testOnly, createTableManager } from "./table-manager.mjs";
+import { __testOnly, createTableManager as createRuntimeTableManager } from "./table-manager.mjs";
+
+function createTableManager(options = {}) {
+  const manager = createRuntimeTableManager({ defaultBuyIn: 100, ...options });
+  const originalJoin = manager.join;
+  const originalRestore = manager.restoreTableFromPersisted;
+
+  // Legacy fixtures represent the pre-buy-in schema, whose tables all used the
+  // standard 100 CH buy-in. Keep that fixture normalization local to this suite
+  // while production remains fail-closed when authoritative metadata is absent.
+  manager.join = (args = {}) => originalJoin({ buyIn: args.buyIn ?? 100, ...args });
+  manager.restoreTableFromPersisted = (tableId, restored = {}) => originalRestore(tableId, {
+    ...restored,
+    tableMeta: { buyIn: 100, ...(restored.tableMeta || {}) }
+  });
+  return manager;
+}
 
 function fakeWs(id) {
   return { id };
@@ -3243,6 +3259,24 @@ test("public profile failure and timeout return initials fallback without reject
   assert.equal(result.reason, "public_profile_timeout");
   assert.equal("profile" in snapshot.seats[0], false);
   assert.equal(snapshot.members.length, 1);
+});
+
+test("materialized table keeps its configured buy-in immutable", () => {
+  const tableManager = createTableManager({ maxSeats: 6 });
+  const first = tableManager.materializeLobbyTable({
+    tableId: "table-buy-in-immutable",
+    tableMeta: { maxPlayers: 6, buyIn: 500 }
+  });
+  assert.equal(first.ok, true);
+  assert.equal(tableManager.tableMeta("table-buy-in-immutable").buyIn, 500);
+
+  const changed = tableManager.materializeLobbyTable({
+    tableId: "table-buy-in-immutable",
+    tableMeta: { maxPlayers: 6, buyIn: 100 }
+  });
+  assert.equal(changed.ok, false);
+  assert.equal(changed.code, "buy_in_immutable");
+  assert.equal(tableManager.tableMeta("table-buy-in-immutable").buyIn, 500);
 });
 
 test("beginTableRetirement claims only unloaded ids and rejects materialization fail-closed", async () => {

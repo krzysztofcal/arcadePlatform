@@ -2450,7 +2450,7 @@ test("accepted action that settles a hand schedules delayed rollover", async () 
   const tableId = "table_act_settled_rollover";
   const actorUserId = "act_settled_actor";
   const otherUserId = "act_settled_other";
-  const fixtureManager = createTableManager({ maxSeats: 6 });
+  const fixtureManager = createTableManager({ maxSeats: 6, defaultBuyIn: 100 });
   const wsActor = new EventEmitter();
   const wsOther = new EventEmitter();
   wsActor.close = () => {};
@@ -2478,7 +2478,7 @@ test("accepted action that settles a hand schedules delayed rollover", async () 
   const { dir, filePath } = await writePersistedFile({
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 100 },
         seatRows: [
           { user_id: actorUserId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: Number(riverState.stacks?.[actorUserId] ?? 0) },
           { user_id: otherUserId, seat_no: 2, status: "ACTIVE", is_bot: false, stack: Number(riverState.stacks?.[otherUserId] ?? 0) }
@@ -2562,7 +2562,7 @@ test("zero settled reveal delay schedules immediate rollover instead of leaving 
   const { dir, filePath } = await writePersistedFile({
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 100 },
         seatRows: [
           { user_id: "user_zero_a", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 104 },
           { user_id: "user_zero_b", seat_no: 2, status: "ACTIVE", is_bot: false, stack: 96 }
@@ -2818,6 +2818,7 @@ test("server supports healthz and hello/helloAck smoke flow", async () => {
 
     const response = await fetch(`http://127.0.0.1:${port}/healthz`);
     assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-poker-buy-in-materialization"), "1");
     assert.equal(await response.text(), "ok");
   } finally {
     child.kill("SIGTERM");
@@ -3582,7 +3583,7 @@ test("invalid WS_PRESENCE_TTL_MS falls back safely and keeps seated resync conti
   const tableId = "table_badttl";
   const fixtures = {
     [tableId]: {
-      tableRow: { id: tableId, max_players: 6, status: "active" },
+      tableRow: { id: tableId, max_players: 6, status: "active", buy_in: 100 },
       seatRows: [{ user_id: "ttl_user", seat_no: 2, status: "ACTIVE", is_bot: false }],
       stateRow: { version: 8, state: { handId: "h8", phase: "PREFLOP", turnUserId: "ttl_user" } }
     }
@@ -3834,7 +3835,7 @@ test("resume fallback snapshot on settled table still schedules delayed rollover
   const tableId = "table_resume_settled";
   const fixtures = {
     [tableId]: {
-      tableRow: { id: tableId, max_players: 6, status: "active" },
+      tableRow: { id: tableId, max_players: 6, status: "active", buy_in: 100 },
       seatRows: [
         { user_id: "user_resume", seat_no: 1, status: "ACTIVE", is_bot: false },
         { user_id: "user_other", seat_no: 2, status: "ACTIVE", is_bot: false }
@@ -4853,7 +4854,7 @@ test("WS table_join hydrates from persisted bootstrap fixture", async () => {
   const tableId = "table_persisted_join";
   const fixtures = {
     [tableId]: {
-      tableRow: { id: tableId, max_players: 6, status: "active" },
+      tableRow: { id: tableId, max_players: 6, status: "active", buy_in: 100 },
       seatRows: [{ user_id: "user_a", seat_no: 3, status: "ACTIVE", is_bot: false }],
       stateRow: { version: 21, state: { handId: "h21", phase: "PREFLOP", turnUserId: "user_a", holeCardsByUserId: { user_a: ["As", "Kd"] } } }
     }
@@ -4904,7 +4905,7 @@ test("snapshot-only settled bootstrap schedules rollover without prior broadcast
   const tableId = "table_settled_snapshot_rollover";
   const fixtures = {
     [tableId]: {
-      tableRow: { id: tableId, max_players: 6, status: "active" },
+      tableRow: { id: tableId, max_players: 6, status: "active", buy_in: 100 },
       seatRows: [
         { user_id: "user_a", seat_no: 1, status: "ACTIVE", is_bot: false },
         { user_id: "user_b", seat_no: 2, status: "ACTIVE", is_bot: false }
@@ -5895,7 +5896,7 @@ test("timeout sweep advances seated persisted table state under observe-only run
   const tableId = "table_timeout_runtime";
   const fixtures = {
     [tableId]: {
-      tableRow: { id: tableId, max_players: 6, status: "active" },
+      tableRow: { id: tableId, max_players: 6, status: "active", buy_in: 100 },
       seatRows: [
         { user_id: "timeout_a", seat_no: 1, status: "ACTIVE", is_bot: false },
         { user_id: "timeout_b", seat_no: 2, status: "ACTIVE", is_bot: false }
@@ -5967,7 +5968,7 @@ test("timeout sweep plus queued bot step returns actionable human snapshot witho
   const tableId = "table_timeout_bot_step_runtime";
   const fixtures = {
     [tableId]: {
-      tableRow: { id: tableId, max_players: 6, status: "active" },
+      tableRow: { id: tableId, max_players: 6, status: "active", buy_in: 100 },
       seatRows: [
         { user_id: humanUserId, seat_no: 1, status: "ACTIVE", is_bot: false },
         { user_id: botUserId, seat_no: 2, status: "ACTIVE", is_bot: true }
@@ -6321,7 +6322,7 @@ test("timeout during disconnect does not close active table and reconnect snapsh
   const tableId = "table_disconnect_timeout_runtime";
   const fixtures = {
     [tableId]: {
-      tableRow: { id: tableId, max_players: 6, status: "active" },
+      tableRow: { id: tableId, max_players: 6, status: "active", buy_in: 100 },
       seatRows: [
         { user_id: humanUserId, seat_no: 1, status: "ACTIVE", is_bot: false },
         { user_id: botUserId, seat_no: 2, status: "ACTIVE", is_bot: true }
@@ -7094,7 +7095,7 @@ test("WS act persists state to file-backed optimistic store", async () => {
   const store = {
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "active" },
+        tableRow: { id: tableId, max_players: 6, status: "active", buy_in: 100 },
         seatRows: [
           { user_id: "seat_actor", seat_no: 1, status: "ACTIVE", is_bot: false },
           { user_id: "seat_other", seat_no: 2, status: "ACTIVE", is_bot: false }
@@ -7152,7 +7153,7 @@ test("disconnect cleanup close rewrite restores inert state and blocks repeated 
   const store = {
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "active" },
+        tableRow: { id: tableId, max_players: 6, status: "active", buy_in: 100 },
         seatRows: [{ user_id: "seat_user_closed", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 500 }],
         stateRow: {
           version: 17,
@@ -7277,7 +7278,7 @@ test("disconnect cleanup restore failure does not broadcast stale success", asyn
   const store = {
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "active" },
+        tableRow: { id: tableId, max_players: 6, status: "active", buy_in: 100 },
         seatRows: [{ user_id: "seat_user_fail", seat_no: 2, status: "ACTIVE", is_bot: false, stack: 500 }],
         stateRow: { version: 3, state: { handId: "h3", phase: "PREFLOP", turnUserId: "seat_user_fail", stacks: { seat_user_fail: 500 } } }
       }
@@ -7349,7 +7350,7 @@ test("disconnect cleanup already_closed evicts stale lobby table", async () => {
   const store = {
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "active" },
+        tableRow: { id: tableId, max_players: 6, status: "active", buy_in: 100 },
         seatRows: [{ user_id: "seat_user_already_closed", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 400 }],
         stateRow: {
           version: 8,
@@ -7677,7 +7678,7 @@ test("optimistic conflict restore to settled state still schedules delayed rollo
   const store = {
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "active" },
+        tableRow: { id: tableId, max_players: 6, status: "active", buy_in: 100 },
         seatRows: [
           { user_id: "seat_actor", seat_no: 1, status: "ACTIVE", is_bot: false },
           { user_id: "seat_other", seat_no: 2, status: "ACTIVE", is_bot: false }
@@ -7757,7 +7758,7 @@ test("join during SETTLED skips generic bootstrap persistence and schedules exac
   const store = {
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "active" },
+        tableRow: { id: tableId, max_players: 6, status: "active", buy_in: 100 },
         seatRows: [
           { user_id: "seat_actor", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 102 },
           { user_id: "seat_other", seat_no: 2, status: "ACTIVE", is_bot: false, stack: 98 }
@@ -8379,7 +8380,7 @@ test("authoritative join branch rehydrates from persisted source before attach",
   const store = {
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", buy_in: 100 },
         seatRows: [
           { user_id: "branch_user", seat_no: 1, status: "ACTIVE", is_bot: false }
         ],
@@ -8426,7 +8427,7 @@ test("authoritative join missing state row returns protocol-safe state_missing",
   const store = {
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", buy_in: 100 },
         seatRows: []
       }
     }
@@ -8467,7 +8468,7 @@ test("authoritative join with historical non-ACTIVE seat retries to the next sea
   const store = {
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", buy_in: 100 },
         seatRows: [{ user_id: "historical_user", seat_no: 1, status: "INACTIVE", is_bot: false }],
         stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
       }
@@ -8517,7 +8518,7 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
   const store = {
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 100 },
         seatRows: [],
         stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
       }

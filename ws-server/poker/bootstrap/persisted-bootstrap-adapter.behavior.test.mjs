@@ -334,11 +334,12 @@ test("adapter restores settled replacement identity from the current persisted s
       id: "table_replacement_bot_restore_settled",
       max_players: 6,
       status: "OPEN",
+      buy_in: 500,
       lifecycle_kind: "CONTINUOUS_BOT",
       managed_profile_key: "CONTINUOUS_BOT_DEFAULT"
     },
     seatRows: [
-      { user_id: "bot_current_2", seat_no: 2, status: "ACTIVE", is_bot: true, bot_profile: "TRIVIAL", stack: 100 },
+      { user_id: "bot_current_2", seat_no: 2, status: "ACTIVE", is_bot: true, bot_profile: "TRIVIAL", stack: 500 },
       { user_id: "bot_keep_3", seat_no: 3, status: "ACTIVE", is_bot: true, bot_profile: "TRIVIAL", stack: 87 }
     ],
     stateRow: {
@@ -377,7 +378,7 @@ test("adapter restores settled replacement identity from the current persisted s
     bot_keep_3: 3
   });
   assert.deepEqual(result.table.coreState.pokerState.stacks, {
-    bot_current_2: 100,
+    bot_current_2: 500,
     bot_keep_3: 87
   });
   assert.equal(result.table.coreState.pokerState.seats[0].userId, "bot_current_2");

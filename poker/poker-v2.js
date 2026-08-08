@@ -205,6 +205,10 @@
   var SNAPSHOT_RECOVERY_TIMEOUT_MS = 5000;
   var SNAPSHOT_RECOVERY_MAX_ATTEMPTS = 3;
   var SNAPSHOT_RECOVERY_TIMEOUT_COPY = 'Snapshot recovery timed out';
+  // Legacy declaration for an older WS deployment. The server remains the
+  // source of truth; this value is only sent when that WS cannot yet expose
+  // the table buy-in in snapshots.
+  var LEGACY_WS_BUY_IN = 100;
   var joinOperation = {
     phase: 'idle',
     requestId: null,
@@ -391,6 +395,7 @@
       tableId: nextTableId || null,
       tableStatus: 'OPEN',
       maxSeats: 6,
+      buyIn: null,
       stateVersion: null,
       hasAppliedAuthoritativeSnapshot: false,
       reconnectGate: false,
@@ -499,6 +504,30 @@
     if (els.reactionHistory) els.reactionHistory.hidden = !(state && state.mode === 'live' && state.tableId && socialPreferences.reactionHistoryEnabled);
     if (els.autoRebuyPreference) els.autoRebuyPreference.checked = isAutoRebuyEnabled();
     if (els.autoRebuyPreferenceWrap) els.autoRebuyPreferenceWrap.hidden = !socialPreferencesIdentity;
+    renderAutoRebuyCopy();
+  }
+
+  function currentTableBuyIn(){
+    var buyIn = Number(state && state.buyIn);
+    return Number.isSafeInteger(buyIn) && buyIn > 0 ? buyIn : null;
+  }
+
+  function clientBuyInDeclaration(){
+    return currentTableBuyIn() || LEGACY_WS_BUY_IN;
+  }
+
+  function renderAutoRebuyCopy(){
+    var buyIn = currentTableBuyIn();
+    if (els.autoRebuyPreferenceLabel){
+      els.autoRebuyPreferenceLabel.textContent = buyIn == null
+        ? 'Auto rebuy at the table buy-in when out of chips'
+        : 'Auto rebuy ' + formatNumber(buyIn) + ' CH when out of chips';
+    }
+    if (els.autoRebuyPreferenceHint){
+      els.autoRebuyPreferenceHint.textContent = buyIn == null
+        ? 'Automatically uses the current table buy-in from your account each time you run out of chips.'
+        : 'Automatically uses ' + formatNumber(buyIn) + ' CH from your account each time you run out of chips.';
+    }
   }
 
   function syncSocialPreferencesIdentity(userId){
@@ -1528,6 +1557,8 @@
 
     if (typeof tableObj.status === 'string' && tableObj.status) state.tableStatus = tableObj.status.toUpperCase();
     if (typeof payload.status === 'string' && payload.status) state.tableStatus = payload.status.toUpperCase();
+    var snapshotBuyIn = hasOwn(tableObj, 'buyIn') ? tableObj.buyIn : payload.buyIn;
+    if (Number.isSafeInteger(Number(snapshotBuyIn)) && Number(snapshotBuyIn) > 0) state.buyIn = Number(snapshotBuyIn);
     syncClosedTableRedirectFromSnapshot(payload);
 
     var resolvedMaxSeats = null;
@@ -1824,7 +1855,11 @@
         persistPendingRebuy();
       }
       if (els.rebuyAccountLink) els.rebuyAccountLink.hidden = code !== 'insufficient_chips';
-      setError(code === 'insufficient_chips' ? 'Not enough CH for a 100 CH buy-in' : code);
+      setError(code === 'insufficient_chips'
+        ? (currentTableBuyIn() == null
+          ? 'Not enough CH for this table buy-in'
+          : 'Not enough CH for a ' + formatNumber(currentTableBuyIn()) + ' CH buy-in')
+        : code);
       render();
       return null;
     });
@@ -3638,11 +3673,12 @@
   function refreshRebuyBalance(){
     if (rebuyBalanceLoading || !els.rebuyBalance || !window.ChipsClient || typeof window.ChipsClient.fetchBalance !== 'function') return;
     rebuyBalanceLoading = true;
+    var buyInLabel = currentTableBuyIn() == null ? 'table buy-in unavailable' : 'Buy-in: ' + formatNumber(currentTableBuyIn()) + ' CH';
     Promise.resolve(window.ChipsClient.fetchBalance()).then(function(balance){
       var amount = balance && Number.isFinite(Number(balance.balance)) ? Number(balance.balance) : Number(balance);
-      if (Number.isFinite(amount)) els.rebuyBalance.textContent = 'Balance: ' + formatNumber(amount) + ' CH · Buy-in: 100 CH';
+      if (Number.isFinite(amount)) els.rebuyBalance.textContent = 'Balance: ' + formatNumber(amount) + ' CH · ' + buyInLabel;
     }).catch(function(){
-      els.rebuyBalance.textContent = 'Buy-in: 100 CH';
+      els.rebuyBalance.textContent = buyInLabel;
     }).then(function(){
       rebuyBalanceLoading = false;
     });
@@ -3650,6 +3686,7 @@
 
   function renderRebuyPanel(){
     if (!els.rebuyPanel) return;
+    renderAutoRebuyCopy();
     var playerState = state.playerState || null;
     var outOfChips = !!playerState && playerState.status === 'OUT_OF_CHIPS';
     var waiting = !!playerState && playerState.status === 'WAITING_NEXT_HAND';
@@ -3662,7 +3699,10 @@
     if (els.rebuyBtn) {
       var rebuyPending = !!rebuyOperation && rebuyOperation.phase === 'pending';
       els.rebuyBtn.disabled = rebuyPending || !isWsReady() || playerState.canRebuy !== true;
-      els.rebuyBtn.textContent = rebuyPending ? 'Buying in…' : (rebuyOperation && rebuyOperation.phase === 'error' ? 'Retry buy-in' : 'Buy in 100 CH');
+      var buyIn = currentTableBuyIn();
+      els.rebuyBtn.textContent = rebuyPending ? 'Buying in…' : (rebuyOperation && rebuyOperation.phase === 'error'
+        ? 'Retry buy-in'
+        : (buyIn == null ? 'Buy in' : 'Buy in ' + formatNumber(buyIn) + ' CH'));
     }
     if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.disabled = (!!rebuyOperation && rebuyOperation.phase === 'pending') || !isWsReady();
     if (outOfChips) refreshRebuyBalance();
@@ -3913,7 +3953,7 @@
     var showLiveActionButtons = showActionButtons && !preactionMode;
     var actionControlsLocked = !liveReady || !usersTurn || controlsLocked || playerSittingOut;
     var joinPending = isJoinOperationPending();
-    var joinDisabled = !signedIn || seated || !state.tableId || !liveReady || joinPending;
+    var joinDisabled = !signedIn || seated || !state.tableId || !liveReady || !state.hasAppliedAuthoritativeSnapshot || joinPending;
     if (!seated || !activeHand || isCurrentUserFolded() || playerSittingOut) clearQueuedPreaction();
     if (preactionMode) {
       syncQueuedPreactionWithPreactionState({
@@ -4136,8 +4176,7 @@
   function buildJoinPayloadWithOptions(options){
     var opts = options || {};
     var payload = { tableId: state.tableId };
-    var buyIn = els.joinBuyIn ? parseInt(els.joinBuyIn.value, 10) : 100;
-    if (Number.isFinite(buyIn) && buyIn > 0) payload.buyIn = buyIn;
+    payload.buyIn = clientBuyInDeclaration();
     var preferredSeatNo = resolvePreferredSeatNo();
     if (opts.autoSeat === true) {
       payload.autoSeat = true;
@@ -4194,6 +4233,7 @@
 
   function resumePendingJoinOperation(){
     if (state.reconnectGate) return false;
+    if (!state.hasAppliedAuthoritativeSnapshot) return false;
     if (deriveCurrentSeat()){
       reconcileJoinOperationFromSnapshot();
       return false;
@@ -4284,9 +4324,9 @@
     if (code !== 'insufficient_funds' && code !== 'insufficient_chips') {
       return error && error.message ? error.message : 'Failed to join';
     }
-    var buyIn = els.joinBuyIn ? parseInt(els.joinBuyIn.value, 10) : NaN;
-    var amount = Number.isFinite(buyIn) && buyIn > 0 ? Math.trunc(buyIn) : 100;
-    return t('pokerErrInsufficientChips', 'You need at least {amount} CH to join a table.').replace('{amount}', String(amount));
+    var buyIn = currentTableBuyIn();
+    if (buyIn == null) return 'Not enough CH to join this table.';
+    return t('pokerErrInsufficientChips', 'You need at least {amount} CH to join a table.').replace('{amount}', String(buyIn));
   }
 
   function isRetryableAutoJoinError(error){
@@ -4326,6 +4366,7 @@
   }
 
   function autoJoinSeat(){
+    if (!state.hasAppliedAuthoritativeSnapshot) return;
     if (state.reconnectGate) return;
     if (!shouldAutoJoin) return;
     if (deriveCurrentSeat()){
@@ -4376,6 +4417,7 @@
     setError('');
     var reconnectPayload = {
       tableId: state.tableId,
+      buyIn: clientBuyInDeclaration(),
       autoSeat: true,
       preferredSeatNo: preferredSeatNo
     };
@@ -4485,8 +4527,9 @@
       requestId: requestId,
       tableId: state.tableId,
       userId: state.currentUserId,
-      payload: { tableId: state.tableId, amount: 100 }
+      payload: { tableId: state.tableId }
     };
+    rebuyOperation.payload.amount = clientBuyInDeclaration();
     persistPendingRebuy();
     setError('');
     renderRebuyPanel();
@@ -4537,7 +4580,10 @@
       closeMenu();
     });
     document.addEventListener('keydown', function(event){
-      if (event && event.key === 'Escape') { closeMenu(); closeSocialSettings(true); }
+      if (event && event.key === 'Escape') {
+        closeMenu();
+        closeSocialSettings(true);
+      }
     });
   }
 
@@ -4685,6 +4731,8 @@
     els.botReactionsPreference = document.getElementById('pokerBotReactionsPreference');
     els.autoRebuyPreference = document.getElementById('pokerAutoRebuyPreference');
     els.autoRebuyPreferenceWrap = document.getElementById('pokerAutoRebuyPreferenceWrap');
+    els.autoRebuyPreferenceLabel = document.querySelector ? document.querySelector('#pokerAutoRebuyPreferenceWrap label span') : null;
+    els.autoRebuyPreferenceHint = document.getElementById('pokerAutoRebuyPreferenceHint');
     els.seatLayer = document.getElementById('pokerSeatLayer');
     els.seatChipLayer = document.getElementById('pokerSeatChipLayer');
     els.chipFxLayer = document.getElementById('pokerChipFxLayer');

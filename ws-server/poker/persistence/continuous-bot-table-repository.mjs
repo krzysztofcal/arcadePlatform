@@ -7,6 +7,7 @@ import {
 } from "../../shared/poker-domain/bots.mjs";
 import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
+import { DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../../../shared/poker-domain/table-economy.mjs";
 
 export const CONTINUOUS_BOT_PROFILE_KEY = "CONTINUOUS_BOT_DEFAULT";
 const DEFAULT_MAX_DESIRED_TABLES = 2;
@@ -97,11 +98,13 @@ export function tableMatchesContinuousBotProfile(table, profile) {
 
 async function createManagedTable(tx, { profile, botConfig, klog }) {
   const stakes = { sb: profile.smallBlind, bb: profile.bigBlind };
+  const buyIn = DEFAULT_CASH_TABLE_BUY_IN_CHIPS;
   const rotationDueAt = new Date(Date.now() + profile.rotationIntervalSeconds * 1_000).toISOString();
   const created = await createPokerTableWithState(tx, {
     userId: null,
     maxPlayers: profile.maxSeats,
     stakesJson: JSON.stringify(stakes),
+    buyIn,
     lifecycleKind: "CONTINUOUS_BOT",
     managedProfileKey: profile.profileKey,
     rotationDueAt
@@ -111,6 +114,7 @@ async function createManagedTable(tx, { profile, botConfig, klog }) {
     tableId: created.tableId,
     maxPlayers: profile.maxSeats,
     tableStakes: stakes,
+    buyInChips: buyIn,
     cfg: botConfig,
     humanUserId: null,
     postTransaction,

@@ -241,7 +241,8 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
     preferredSeatNo: joinIntent.preferredSeatNo,
     buyIn: authoritativeJoinResult?.rejoin === true
       ? null
-      : (authoritativeJoinResult?.stack ?? joinIntent.buyIn),
+      : (authoritativeJoinResult?.buyIn ?? joinIntent.buyIn),
+    tableBuyIn: authoritativeJoinResult?.buyIn ?? null,
     authoritativeSeatNo: authoritativeJoinResult?.seatNo ?? null
   });
   if (!joined.ok) {

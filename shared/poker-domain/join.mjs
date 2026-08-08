@@ -649,15 +649,19 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
   const runPostTransaction = await resolvePostTransactionFn(postTransactionFn);
   return beginSql(async (tx) => {
     try {
-      const resolvedBuyIn = normalizePositiveInt(buyIn);
-      if (!resolvedBuyIn) throw makeError("invalid_buy_in");
-
       const tableRows = await tx.unsafe(
-        "select id, status, max_players, stakes from public.poker_tables where id = $1 limit 1 for update;",
+        "select id, status, max_players, stakes, buy_in from public.poker_tables where id = $1 limit 1 for update;",
         [tableId]
       );
       const table = tableRows?.[0] || null;
       if (!table) throw makeError("table_not_found");
+      const authoritativeBuyIn = normalizePositiveInt(table.buy_in);
+      if (!authoritativeBuyIn) throw makeError("invalid_buy_in");
+      const declaredBuyIn = buyIn == null ? null : normalizePositiveInt(buyIn);
+      if (buyIn != null && (!declaredBuyIn || declaredBuyIn !== authoritativeBuyIn)) {
+        throw makeError("invalid_buy_in");
+      }
+      const resolvedBuyIn = authoritativeBuyIn;
 
       // Lock the table row before any mutation.  Mark human participation
       // one-way (false -> true) so that action history retention uses the
@@ -701,6 +705,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
             userId,
             seatNo: persisted.seatNo,
             stack: authoritativeStack,
+            buyIn: authoritativeBuyIn,
             rejoin: true,
             requestId: requestId || null,
             me: { seated: true },
@@ -738,6 +743,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           userId,
           seatNo: persisted.seatNo,
           stack: Number(nextStateForStorage.stacks?.[userId]),
+          buyIn: authoritativeBuyIn,
           rejoin: true,
           requestId: requestId || null,
           me: { seated: true },
@@ -872,6 +878,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       tableId,
       maxPlayers,
       tableStakes: table.stakes,
+      buyInChips: authoritativeBuyIn,
       cfg: botCfg,
       humanUserId: userId,
       postTransaction: runPostTransaction,
@@ -900,6 +907,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         userId,
         seatNo: resolvedSeatNo,
         stack: fundedStack,
+        buyIn: authoritativeBuyIn,
         rejoin: false,
         requestId: requestId || null,
         me: { seated: true },

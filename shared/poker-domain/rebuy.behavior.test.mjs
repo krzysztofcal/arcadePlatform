@@ -7,11 +7,11 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function createHarness({ ledgerFails = false, stateUpdateFails = false, handSeats = [], state = null, validateStateForStorage = () => true } = {}) {
+function createHarness({ ledgerFails = false, stateUpdateFails = false, handSeats = [], state = null, validateStateForStorage = () => true, buyIn = 100 } = {}) {
   const lockOrder = [];
   let seatProjectionSql = "";
   let store = {
-    table: { id: "table-1", status: "OPEN" },
+    table: { id: "table-1", status: "OPEN", buy_in: buyIn },
     seat: { user_id: "user-1", seat_no: 2, stack: 0, status: "ACTIVE", is_bot: false },
     stateVersion: 7,
     state: state || { phase: "PREFLOP", handId: "hand-1", handSeats, seats: handSeats, stacks: { "user-1": 0, bot: 90 } },
@@ -85,12 +85,12 @@ function createHarness({ ledgerFails = false, stateUpdateFails = false, handSeat
     return { transaction: { id: "ledger-1" } };
   };
 
-  const execute = (requestId = "request-1") => executePokerRebuyAuthoritative({
+  const execute = (requestId = "request-1", amount = store.table.buy_in) => executePokerRebuyAuthoritative({
     beginSql,
     tableId: "table-1",
     userId: "user-1",
     requestId,
-    amount: 100,
+    amount,
     postTransactionFn,
     loadStateForUpdate,
     updateStateLocked,
@@ -126,6 +126,39 @@ test("stored rebuy result survives restart semantics and cannot fund twice", asy
   assert.equal(after.ledger.posts, 1);
   assert.equal(after.ledger.user, 400);
   assert.equal(after.ledger.escrow, 300);
+});
+
+test("authoritative rebuy uses a non-100 table buy-in for debit, stack, result, and replay", async () => {
+  const harness = createHarness({ buyIn: 500 });
+  const first = await harness.execute("non-100-request");
+  const second = await harness.execute("non-100-request");
+  const after = harness.read();
+  assert.equal(first.ok, true);
+  assert.equal(first.buyIn, 500);
+  assert.equal(first.stack, 500);
+  assert.equal(second.replayed, true);
+  assert.equal(second.buyIn, 500);
+  assert.equal(second.stack, 500);
+  assert.equal(after.ledger.user, 0);
+  assert.equal(after.ledger.escrow, 700);
+  assert.equal(after.state.stacks["user-1"], 500);
+  assert.equal(after.seat.stack, 500);
+  assert.equal(after.ledger.posts, 1);
+});
+
+test("rebuy replay validates a supplied amount against the authoritative table buy-in", async () => {
+  const harness = createHarness({ buyIn: 500 });
+  await harness.execute("replay-amount-request");
+  const before = harness.read();
+  await assert.rejects(harness.execute("replay-amount-request", 100), (error) => error?.code === "invalid_rebuy_amount");
+  assert.deepEqual(harness.read(), before);
+});
+
+test("rebuy rejects a client amount that does not match the authoritative table buy-in", async () => {
+  const harness = createHarness({ buyIn: 500 });
+  const before = harness.read();
+  await assert.rejects(harness.execute("mismatched-request", 100), (error) => error?.code === "invalid_rebuy_amount");
+  assert.deepEqual(harness.read(), before);
 });
 
 test("failed ledger funding rolls back state, seat, request, and balances", async () => {

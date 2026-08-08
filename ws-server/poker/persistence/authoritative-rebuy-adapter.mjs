@@ -80,7 +80,7 @@ export function createAuthoritativeRebuyExecutor({
   loadPostTransaction = loadPostTransactionDefault,
   loadLockedStateHelpers = loadLockedStateHelpersDefault
 } = {}) {
-  return async function executeAuthoritativeRebuy({ tableId, userId, requestId, amount = 100 }) {
+  return async function executeAuthoritativeRebuy({ tableId, userId, requestId, amount }) {
     if (fileStoreOnly(env)) return { ok: false, code: "temporarily_unavailable" };
 
     let rebuyModule;

@@ -241,12 +241,14 @@ function loadLobbyHarness(options = {}){
     pokerCreate: makeElement('pokerCreate'),
     pokerSb: makeElement('pokerSb'),
     pokerBb: makeElement('pokerBb'),
+    pokerBuyIn: makeElement('pokerBuyIn'),
     pokerMaxPlayers: makeElement('pokerMaxPlayers'),
     pokerSignIn: makeElement('pokerSignIn'),
     pokerGuestPlay: makeElement('pokerGuestPlay'),
   };
   elements.pokerSb.value = '1';
   elements.pokerBb.value = '2';
+  elements.pokerBuyIn.value = '100';
   elements.pokerMaxPlayers.value = '6';
   elements.pokerLobbyContent.dataset.requiredBuyIn = '100';
 
@@ -345,7 +347,7 @@ function loadLobbyHarness(options = {}){
     clearInterval: () => {},
     navigator: { userAgent: 'node' },
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
-    fetch: async (url) => {
+    fetch: async (url, requestOptions) => {
       fetchCalls.push(String(url));
       if (typeof options.fetchResponse === 'function') return options.fetchResponse(String(url));
       return { ok: true, json: async () => ({ ok: true }) };

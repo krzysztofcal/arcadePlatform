@@ -206,6 +206,10 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId, publicProfile
   if (maxSeats !== null) {
     table.maxSeats = maxSeats;
   }
+  const buyIn = Number(tableSnapshot?.buyIn);
+  if (Number.isSafeInteger(buyIn) && buyIn > 0) {
+    table.buyIn = buyIn;
+  }
 
   const payload = {
     stateVersion,

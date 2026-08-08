@@ -11,6 +11,7 @@ function initialCore() {
       { userId: "user_a", seat: 1 },
       { userId: "user_b", seat: 2 }
     ],
+    publicStacks: { user_a: 100, user_b: 100 },
     pokerState: null
   };
 }

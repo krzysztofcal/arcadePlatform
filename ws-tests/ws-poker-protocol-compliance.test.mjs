@@ -1849,7 +1849,7 @@ test("real authoritative join path stays stable without override shortcuts", asy
   const tableId = "table_protocol_real_auth_join";
   const fixtures = {
     [tableId]: {
-      tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+      tableRow: { id: tableId, max_players: 6, status: "OPEN", buy_in: 100 },
       seatRows: [{ user_id: "seed_other", seat_no: 2, status: "ACTIVE", is_bot: false }],
       stateRow: { version: 3, state: { tableId, seats: [{ userId: "seed_other", seatNo: 2 }], stacks: { seed_other: 100 } } }
     }
@@ -1895,7 +1895,7 @@ test("real authoritative join missing state row maps to state_missing error", as
   const tableId = "table_protocol_real_auth_missing_state";
   const fixtures = {
     [tableId]: {
-      tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+      tableRow: { id: tableId, max_players: 6, status: "OPEN", buy_in: 100 },
       seatRows: []
     }
   };
@@ -1969,7 +1969,7 @@ test("real authoritative join with historical non-ACTIVE seat retries to the nex
   const tableId = "table_protocol_real_auth_historical_non_active";
   const fixtures = {
     [tableId]: {
-      tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+      tableRow: { id: tableId, max_players: 6, status: "OPEN", buy_in: 100 },
       seatRows: [{ user_id: "historical_proto_user", seat_no: 1, status: "INACTIVE", is_bot: false }],
       stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
     }
