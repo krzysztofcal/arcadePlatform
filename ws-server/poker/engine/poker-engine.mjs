@@ -12,9 +12,8 @@ import { decideTurnTimeout, stampTurnDeadline } from "../shared/poker-turn-timeo
 const MIN_PLAYERS_TO_BOOTSTRAP = 2;
 const ENGINE_ACTIONS = new Set(["FOLD", "CHECK", "CALL", "BET", "RAISE"]);
 const MIN_STACK_TO_JOIN_HAND = 2;
-const BOT_REPLACEMENT_STACK = 100;
 
-export function calculateReplacementFundingDelta({ oldStack, targetStack = BOT_REPLACEMENT_STACK } = {}) {
+export function calculateReplacementFundingDelta({ oldStack, targetStack } = {}) {
   if (!Number.isInteger(targetStack) || targetStack <= 0) {
     return { ok: false, reason: "invalid_target_stack" };
   }
@@ -140,8 +139,9 @@ export function buildBootstrappedPokerState({
   const dealt = dealHoleCards(initialDeck, userIds);
   const stacks = Object.fromEntries(userIds.map((userId) => {
     const stack = Number(startingStacks?.[userId]);
-    return [userId, Number.isFinite(stack) && stack >= 0 ? Math.trunc(stack) : 100];
+    return [userId, Number.isSafeInteger(stack) && stack >= 0 ? stack : null];
   }));
+  if (Object.values(stacks).some((stack) => stack === null)) return null;
   const handStartStacksByUserId = { ...stacks };
   const betThisRoundByUserId = Object.fromEntries(userIds.map((userId) => [userId, 0]));
   const toCallByUserId = Object.fromEntries(userIds.map((userId) => [userId, 0]));
@@ -270,6 +270,7 @@ export function topUpManagedBotsForNextHand({
   coreState,
   settledState,
   nextVersion,
+  buyIn,
   minBotCount,
   targetBotCount,
   maxBotCount
@@ -283,6 +284,10 @@ export function topUpManagedBotsForNextHand({
   const minimum = Number(minBotCount);
   const target = Number(targetBotCount);
   const maximum = Number(maxBotCount);
+  const normalizedBuyIn = Number(buyIn);
+  if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) {
+    return { ok: false, reason: "invalid_managed_top_up_buy_in", coreState, settledState, topUpFundings: [] };
+  }
   if (!Number.isInteger(minimum) || !Number.isInteger(target) || !Number.isInteger(maximum)
     || minimum < 0 || minimum > target || target > maximum) {
     return { ok: false, reason: "invalid_managed_top_up_config", coreState, settledState, topUpFundings: [] };
@@ -328,14 +333,14 @@ export function topUpManagedBotsForNextHand({
       status: "ACTIVE",
       leaveAfterHand: false
     };
-    nextStacks[botUserId] = BOT_REPLACEMENT_STACK;
-    nextPublicStacks[botUserId] = BOT_REPLACEMENT_STACK;
+    nextStacks[botUserId] = normalizedBuyIn;
+    nextPublicStacks[botUserId] = normalizedBuyIn;
     topUpFundings.push({
       seatNo,
       botUserId,
       botProfile: "NORMAL",
-      targetStack: BOT_REPLACEMENT_STACK,
-      fundingDelta: BOT_REPLACEMENT_STACK,
+      targetStack: normalizedBuyIn,
+      fundingDelta: normalizedBuyIn,
       settledHandId: settledState.handId,
       fromStateVersion: Number(coreState.version),
       toStateVersion: nextVersion
@@ -356,7 +361,7 @@ export function topUpManagedBotsForNextHand({
   };
 }
 
-export function replaceBrokeBotsForNextHand({ coreState, settledState, nextVersion }) {
+export function replaceBrokeBotsForNextHand({ coreState, settledState, nextVersion, buyIn }) {
   if (!coreState || typeof coreState !== "object" || Array.isArray(coreState)) {
     return { ok: false, reason: "invalid_core_state", coreState, settledState, replacementFundings: [] };
   }
@@ -367,6 +372,10 @@ export function replaceBrokeBotsForNextHand({ coreState, settledState, nextVersi
   const fromStateVersion = Number(coreState.version);
   if (!Number.isInteger(fromStateVersion) || !Number.isInteger(nextVersion) || nextVersion !== fromStateVersion + 1) {
     return { ok: false, reason: "invalid_replacement_version", coreState, settledState, replacementFundings: [] };
+  }
+  const normalizedBuyIn = Number(buyIn);
+  if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) {
+    return { ok: false, reason: "invalid_replacement_buy_in", coreState, settledState, replacementFundings: [] };
   }
 
   const currentMembers = orderedSeatMembers(coreState);
@@ -405,7 +414,7 @@ export function replaceBrokeBotsForNextHand({ coreState, settledState, nextVersi
 
     const funding = calculateReplacementFundingDelta({
       oldStack: stack,
-      targetStack: BOT_REPLACEMENT_STACK
+      targetStack: normalizedBuyIn
     });
     if (!funding.ok) {
       return {
@@ -441,10 +450,10 @@ export function replaceBrokeBotsForNextHand({ coreState, settledState, nextVersi
     };
 
     delete nextStacks[userId];
-    nextStacks[replacementUserId] = BOT_REPLACEMENT_STACK;
+    nextStacks[replacementUserId] = normalizedBuyIn;
     if (nextPublicStacks) {
       delete nextPublicStacks[userId];
-      nextPublicStacks[replacementUserId] = BOT_REPLACEMENT_STACK;
+      nextPublicStacks[replacementUserId] = normalizedBuyIn;
     }
 
     replacementFundings.push({

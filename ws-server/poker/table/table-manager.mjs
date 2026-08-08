@@ -181,6 +181,8 @@ function normalizeTableMeta(value, fallbackMaxPlayers, { defaultCreatedAtMs = nu
   const maxPlayers = Number.isInteger(maxPlayersRaw) && maxPlayersRaw >= 1
     ? maxPlayersRaw
     : fallbackMaxPlayers;
+  const buyInRaw = Number(value?.buyIn ?? value?.buy_in);
+  const buyIn = Number.isSafeInteger(buyInRaw) && buyInRaw > 0 ? buyInRaw : null;
   const stakes = value?.stakes && typeof value.stakes === "object" && !Array.isArray(value.stakes)
     ? {
         sb: Number.isInteger(Number(value.stakes.sb)) ? Number(value.stakes.sb) : null,
@@ -207,6 +209,7 @@ function normalizeTableMeta(value, fallbackMaxPlayers, { defaultCreatedAtMs = nu
     : "STANDARD";
   return {
     maxPlayers,
+    buyIn,
     stakes: stakes && Number.isInteger(stakes.sb) && Number.isInteger(stakes.bb)
       ? stakes
       : null,
@@ -305,6 +308,7 @@ export function createTableManager({
   onTableEvicted = null,
   observeOnlyJoin = false,
   enableDebugCore = false,
+  defaultBuyIn = null,
   nodeEnv = process.env.NODE_ENV
 } = {}) {
   const normalizedActionResultCacheMax = Number.isInteger(actionResultCacheMax) && actionResultCacheMax > 0
@@ -316,6 +320,9 @@ export function createTableManager({
   const normalizedPublicProfileTimeoutMs = Number.isFinite(Number(publicProfileTimeoutMs)) && Number(publicProfileTimeoutMs) > 0
     ? Math.trunc(Number(publicProfileTimeoutMs))
     : DEFAULT_PUBLIC_PROFILE_TIMEOUT_MS;
+  const normalizedDefaultBuyIn = Number.isSafeInteger(Number(defaultBuyIn)) && Number(defaultBuyIn) > 0
+    ? Number(defaultBuyIn)
+    : null;
   const tables = new Map();
   const pendingBootstrapByTableId = new Map();
   const retiringTableIds = new Set();
@@ -553,7 +560,7 @@ export function createTableManager({
       tables.set(tableId, {
         tableId,
         tableStatus: "OPEN",
-        tableMeta: normalizeTableMeta(null, initialCoreState.maxSeats, {
+        tableMeta: normalizeTableMeta({ buyIn: normalizedDefaultBuyIn }, initialCoreState.maxSeats, {
           defaultCreatedAtMs: nowMs,
           defaultLastActivityAtMs: nowMs
         }),
@@ -602,7 +609,20 @@ export function createTableManager({
       };
     }
     table.tableStatus = normalizeTableStatus(table.tableStatus);
-    table.tableMeta = normalizeTableMeta({ ...table.tableMeta, ...(tableMeta || {}) }, table?.coreState?.maxSeats || maxSeats, {
+    const configuredBuyIn = Number(table.tableMeta?.buyIn);
+    const incomingBuyIn = tableMeta && Object.prototype.hasOwnProperty.call(tableMeta, "buyIn")
+      ? Number(tableMeta.buyIn)
+      : null;
+    if (existed && Number.isSafeInteger(configuredBuyIn) && configuredBuyIn > 0
+      && Number.isSafeInteger(incomingBuyIn) && incomingBuyIn > 0 && incomingBuyIn !== configuredBuyIn) {
+      return { ok: false, code: "buy_in_immutable" };
+    }
+    const nextTableMeta = { ...table.tableMeta, ...(tableMeta || {}) };
+    if (existed && Number.isSafeInteger(configuredBuyIn) && configuredBuyIn > 0
+      && (!Number.isSafeInteger(incomingBuyIn) || incomingBuyIn <= 0)) {
+      nextTableMeta.buyIn = configuredBuyIn;
+    }
+    table.tableMeta = normalizeTableMeta(nextTableMeta, table?.coreState?.maxSeats || maxSeats, {
       defaultCreatedAtMs: table?.tableMeta?.createdAtMs ?? nowMs,
       defaultLastActivityAtMs: nowMs
     });
@@ -644,7 +664,7 @@ export function createTableManager({
       publicStacks[botUserId] = resolvedStack;
     }
     table.tableStatus = "OPEN";
-    table.tableMeta = normalizeTableMeta({ maxPlayers: resolvedMaxPlayers, stakes: { sb: 1, bb: 2 }, createdAtMs: nowMs, lastActivityAtMs: nowMs }, resolvedMaxPlayers, {
+    table.tableMeta = normalizeTableMeta({ maxPlayers: resolvedMaxPlayers, buyIn: resolvedStack, stakes: { sb: 1, bb: 2 }, createdAtMs: nowMs, lastActivityAtMs: nowMs }, resolvedMaxPlayers, {
       defaultCreatedAtMs: nowMs,
       defaultLastActivityAtMs: nowMs
     });
@@ -791,6 +811,7 @@ export function createTableManager({
         memberCount: 0,
         maxSeats,
         youSeat,
+        buyIn: table?.tableMeta?.buyIn ?? null,
         ...roomCore
       };
     }
@@ -804,6 +825,7 @@ export function createTableManager({
       memberCount: members.length,
       maxSeats: table.coreState.maxSeats,
       youSeat,
+      buyIn: table.tableMeta?.buyIn ?? null,
       ...roomCore
     };
   }
@@ -1156,10 +1178,12 @@ export function createTableManager({
     }
 
     const nextVersion = Number(table.coreState.version || 0) + 1;
+    const tableBuyIn = Number(table.tableMeta?.buyIn);
     const recycled = replaceBrokeBotsForNextHand({
       coreState: table.coreState,
       settledState,
-      nextVersion
+      nextVersion,
+      buyIn: tableBuyIn
     });
     if (!recycled?.ok) {
       return {
@@ -1177,6 +1201,7 @@ export function createTableManager({
           coreState: recycled.coreState,
           settledState: recycled.settledState,
           nextVersion,
+          buyIn: tableBuyIn,
           minBotCount: managedBotProfile?.minBotCount,
           targetBotCount: managedBotProfile?.targetBotCount,
           maxBotCount: managedBotProfile?.maxBotCount
@@ -1272,7 +1297,8 @@ export function createTableManager({
     const recalculated = replaceBrokeBotsForNextHand({
       coreState: table.coreState,
       settledState: table.coreState.pokerState,
-      nextVersion
+      nextVersion,
+      buyIn: Number(table.tableMeta?.buyIn)
     });
     if (!recalculated?.ok || !replacementFundingPlansEqual(recalculated.replacementFundings, replacementFundings)) {
       return { ok: false, changed: false, reason: "replacement_funding_mismatch", stateVersion: currentVersion };
@@ -1284,6 +1310,7 @@ export function createTableManager({
           coreState: recalculated.coreState,
           settledState: recalculated.settledState,
           nextVersion,
+          buyIn: Number(table.tableMeta?.buyIn),
           minBotCount: managedBotProfile?.minBotCount,
           targetBotCount: managedBotProfile?.targetBotCount,
           maxBotCount: managedBotProfile?.maxBotCount
@@ -1418,7 +1445,7 @@ export function createTableManager({
     member.expiresAt = nowMs + presenceTtlMs;
   }
 
-  function join({ ws, userId, tableId, requestId, nowTs = Date.now(), authoritativeSeatNo = null, buyIn = null }) {
+  function join({ ws, userId, tableId, requestId, nowTs = Date.now(), authoritativeSeatNo = null, buyIn = null, tableBuyIn = null }) {
     const conn = ensureConn(ws);
     const activeTableId = conn.joinedTableId || conn.subscribedTableId;
     if (activeTableId && activeTableId !== tableId) {
@@ -1455,11 +1482,28 @@ export function createTableManager({
           ? table.coreState.publicStacks
           : {};
         const nextPublicStacks = { ...currentPublicStacks };
-        const nextBuyIn = Number.isFinite(Number(buyIn)) && Number(buyIn) > 0 ? Number(buyIn) : null;
+        const stackBuyInRaw = Number(buyIn);
+        const stackBuyIn = Number.isSafeInteger(stackBuyInRaw) && stackBuyInRaw > 0 ? stackBuyInRaw : null;
+        const configuredBuyIn = Number(table.tableMeta?.buyIn);
+        const configuredBuyInValid = Number.isSafeInteger(configuredBuyIn) && configuredBuyIn > 0;
+        const tableBuyInProvided = tableBuyIn !== null && tableBuyIn !== undefined;
+        const tableBuyInRaw = tableBuyInProvided
+          ? Number(tableBuyIn)
+          : (configuredBuyInValid ? configuredBuyIn : stackBuyInRaw);
+        const nextBuyIn = Number.isSafeInteger(tableBuyInRaw) && tableBuyInRaw > 0 ? tableBuyInRaw : null;
+        if (tableBuyInProvided && nextBuyIn === null) {
+          return { ok: false, code: "invalid_buy_in", message: "invalid_buy_in", tableState: tableState(tableId) };
+        }
+        if (nextBuyIn !== null && configuredBuyInValid && configuredBuyIn !== nextBuyIn) {
+          return { ok: false, code: "invalid_buy_in", message: "invalid_buy_in", tableState: tableState(tableId) };
+        }
+        if (nextBuyIn !== null && !configuredBuyInValid) {
+          table.tableMeta = normalizeTableMeta({ ...table.tableMeta, buyIn: nextBuyIn }, table?.coreState?.maxSeats || maxSeats);
+        }
         const membershipChanged = !existingMember || existingMember.seat !== authoritativeSeat;
-        const stackChanged = nextBuyIn !== null && currentPublicStacks[userId] !== nextBuyIn;
+        const stackChanged = stackBuyIn !== null && currentPublicStacks[userId] !== stackBuyIn;
         if (stackChanged) {
-          nextPublicStacks[userId] = nextBuyIn;
+          nextPublicStacks[userId] = stackBuyIn;
         }
         const changed = membershipChanged || stackChanged;
         table.coreState = {
@@ -1512,7 +1556,17 @@ export function createTableManager({
           return { ok: false, code: joinResult.error.code, message: joinResult.error.code, tableState: tableState(tableId) };
         }
 
-        table.coreState = joinResult.state;
+        const configuredBuyIn = Number(table.tableMeta?.buyIn);
+        const hasConfiguredBuyIn = Number.isSafeInteger(configuredBuyIn) && configuredBuyIn > 0;
+        const publicStacks = joinResult.state.publicStacks && typeof joinResult.state.publicStacks === "object" && !Array.isArray(joinResult.state.publicStacks)
+          ? joinResult.state.publicStacks
+          : {};
+        table.coreState = {
+          ...joinResult.state,
+          ...(hasConfiguredBuyIn && !Object.prototype.hasOwnProperty.call(publicStacks, userId)
+            ? { publicStacks: { ...publicStacks, [userId]: configuredBuyIn } }
+            : {})
+        };
         invalidatePublicProfilesForSeatChange(table);
       }
 

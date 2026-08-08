@@ -126,6 +126,11 @@ function normalizeMaxSeats(rawMaxSeats) {
   return parsed;
 }
 
+function normalizeBuyIn(rawBuyIn) {
+  const parsed = Number(rawBuyIn);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 function normalizeStateVersion(rawVersion) {
   const parsed = Number(rawVersion);
   if (!Number.isInteger(parsed) || parsed < 0) {
@@ -177,6 +182,7 @@ function normalizeTableMeta(tableRow, maxSeats) {
     : "STANDARD";
   return {
     maxPlayers,
+    buyIn: normalizeBuyIn(tableRow?.buy_in ?? tableRow?.buyIn),
     stakes: stakesParsed.ok ? stakesParsed.value : null,
     createdAtMs,
     lastActivityAtMs,

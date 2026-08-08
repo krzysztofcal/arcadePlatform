@@ -1332,6 +1332,7 @@ function buildLobbyTableEntry(tableId) {
     live: liveHand,
     joinable,
     stakes: tableMeta?.stakes ?? null,
+    buyIn: tableMeta?.buyIn ?? null,
     maxPlayers,
     seatCount: seats.length,
     humanCount
@@ -1421,6 +1422,7 @@ function buildTableStatePayload({ tableState, tableSnapshot, userId }) {
   if (Number.isInteger(tableSnapshot.stateVersion)) payload.stateVersion = tableSnapshot.stateVersion;
   if (Number.isInteger(tableSnapshot.memberCount)) payload.memberCount = tableSnapshot.memberCount;
   if (Number.isInteger(tableSnapshot.maxSeats)) payload.maxSeats = tableSnapshot.maxSeats;
+  if (Number.isSafeInteger(tableSnapshot.buyIn) && tableSnapshot.buyIn > 0) payload.buyIn = tableSnapshot.buyIn;
   if (Number.isInteger(tableSnapshot.youSeat)) payload.youSeat = tableSnapshot.youSeat;
   if (Number.isInteger(tableSnapshot.dealerSeatNo)) payload.dealerSeatNo = tableSnapshot.dealerSeatNo;
   if (Array.isArray(tableSnapshot.seats)) payload.seats = tableSnapshot.seats;
@@ -4003,11 +4005,18 @@ async function handleInternalLobbyMaterialize(req, res) {
     res.end(JSON.stringify({ error: "invalid_stakes" }));
     return;
   }
+  const buyIn = payload?.buyIn == null ? null : Number(payload.buyIn);
+  if (buyIn !== null && (!Number.isSafeInteger(buyIn) || buyIn <= 0)) {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid_buy_in" }));
+    return;
+  }
   const materialized = tableManager.materializeLobbyTable({
     tableId,
     tableMeta: {
       maxPlayers,
-      stakes: stakesParsed.value
+      stakes: stakesParsed.value,
+      ...(buyIn === null ? {} : { buyIn })
     },
     nowMs: Date.now()
   });
@@ -4488,7 +4497,7 @@ wss.on("connection", (ws) => {
               requestId: frame.requestId,
               nowTs: Date.now(),
               authoritativeSeatNo: 1,
-              buyIn: 100
+              buyIn: tableManager.tableMeta(tableId)?.buyIn ?? null
             });
             if (!joined.ok) {
               sendCommandResult(ws, connState, {

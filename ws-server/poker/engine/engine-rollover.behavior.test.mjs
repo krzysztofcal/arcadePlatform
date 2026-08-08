@@ -14,14 +14,14 @@ import { dealHoleCards, deriveDeck, toCardCodes } from "../shared/poker-primitiv
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 test("replacement funding delta preserves residual bot stack", () => {
-  assert.deepEqual(calculateReplacementFundingDelta({ oldStack: 0 }), { ok: true, oldStack: 0, targetStack: 100, fundingDelta: 100 });
-  assert.deepEqual(calculateReplacementFundingDelta({ oldStack: 1 }), { ok: true, oldStack: 1, targetStack: 100, fundingDelta: 99 });
-  assert.deepEqual(calculateReplacementFundingDelta({ oldStack: 99 }), { ok: true, oldStack: 99, targetStack: 100, fundingDelta: 1 });
+  assert.deepEqual(calculateReplacementFundingDelta({ oldStack: 0, targetStack: 500 }), { ok: true, oldStack: 0, targetStack: 500, fundingDelta: 500 });
+  assert.deepEqual(calculateReplacementFundingDelta({ oldStack: 1, targetStack: 500 }), { ok: true, oldStack: 1, targetStack: 500, fundingDelta: 499 });
+  assert.deepEqual(calculateReplacementFundingDelta({ oldStack: 499, targetStack: 500 }), { ok: true, oldStack: 499, targetStack: 500, fundingDelta: 1 });
 });
 
 test("replacement funding delta rejects invalid accounting inputs", () => {
-  for (const oldStack of [-1, Number.NaN, Number.POSITIVE_INFINITY, 100, 101, 1.5]) {
-    assert.equal(calculateReplacementFundingDelta({ oldStack }).ok, false);
+  for (const oldStack of [-1, Number.NaN, Number.POSITIVE_INFINITY, 500, 501, 1.5]) {
+    assert.equal(calculateReplacementFundingDelta({ oldStack, targetStack: 500 }).ok, false);
   }
   assert.equal(calculateReplacementFundingDelta({ oldStack: 1, targetStack: 0 }).ok, false);
   assert.equal(calculateReplacementFundingDelta({ oldStack: 1, targetStack: Number.NaN }).ok, false);
@@ -53,6 +53,7 @@ test("managed settled top-up fills vacant bot seats deterministically without ch
     coreState,
     settledState,
     nextVersion: 8,
+    buyIn: 500,
     minBotCount: 2,
     targetBotCount: 3,
     maxBotCount: 3
@@ -64,7 +65,7 @@ test("managed settled top-up fills vacant bot seats deterministically without ch
   assert.equal(result.settledState.stacks.human_a, 250);
   assert.equal(result.coreState.publicStacks.human_a, 250);
   assert.equal(result.coreState.members.length, 4);
-  assert.equal(result.topUpFundings.every((entry) => entry.fundingDelta === 100), true);
+  assert.equal(result.topUpFundings.every((entry) => entry.targetStack === 500 && entry.fundingDelta === 500), true);
 });
 
 test("managed settled top-up never displaces humans when capacity cannot reach target", () => {
@@ -89,6 +90,7 @@ test("managed settled top-up never displaces humans when capacity cannot reach t
     },
     settledState: { handId: "hand_capacity", phase: "SETTLED", stacks },
     nextVersion: 3,
+    buyIn: 500,
     minBotCount: 2,
     targetBotCount: 3,
     maxBotCount: 3
@@ -109,6 +111,7 @@ function initialCore() {
       { userId: "user_a", seat: 1 },
       { userId: "user_b", seat: 2 }
     ],
+    publicStacks: { user_a: 500, user_b: 500 },
     pokerState: null
   };
 }
@@ -366,7 +369,8 @@ test("replaceBrokeBotsForNextHand swaps too-short bot only after settlement", ()
   const recycled = replaceBrokeBotsForNextHand({
     coreState,
     settledState,
-    nextVersion: 31
+    nextVersion: 31,
+    buyIn: 500
   });
 
   assert.notEqual(recycled.coreState, coreState);
@@ -377,15 +381,15 @@ test("replaceBrokeBotsForNextHand swaps too-short bot only after settlement", ()
   assert.notEqual(replacementBot.userId, "bot_old");
   assert.match(replacementBot.userId, UUID_RE);
   assert.equal(recycled.coreState.seatDetailsByUserId[replacementBot.userId].isBot, true);
-  assert.equal(recycled.settledState.stacks[replacementBot.userId], 100);
+  assert.equal(recycled.settledState.stacks[replacementBot.userId], 500);
   assert.equal("bot_old" in recycled.settledState.stacks, false);
   assert.deepEqual(recycled.replacementFundings, [{
     seatNo: 2,
     oldBotUserId: "bot_old",
     replacementBotUserId: replacementBot.userId,
     oldStack: 1,
-    targetStack: 100,
-    fundingDelta: 99,
+    targetStack: 500,
+    fundingDelta: 499,
     settledHandId: "settled_bot_replace",
     fromStateVersion: 30,
     toStateVersion: 31

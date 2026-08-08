@@ -16,9 +16,9 @@ const parseBody = (body) => {
   }
 };
 
-const triggerWsLobbyMaterialize = ({ tableId, maxPlayers, stakes, klog }) => {
+const triggerWsLobbyMaterialize = ({ tableId, maxPlayers, stakes, buyIn, klog }) => {
   if (typeof tableId !== "string" || !tableId) return;
-  void notifyWsLobbyMaterialize({ tableId, maxPlayers, stakes, klog });
+  void notifyWsLobbyMaterialize({ tableId, maxPlayers, stakes, buyIn, klog });
 };
 
 const isPlainObject = (value) =>
@@ -79,18 +79,19 @@ export async function handler(event) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_stakes" }) };
   }
   const stakesJson = formatStakes(stakesParsed.value);
+  const buyIn = DEFAULT_CASH_TABLE_BUY_IN_CHIPS;
 
   let transactionResult = null;
   try {
     transactionResult = await beginSql(async (tx) => {
       const eligibility = await readPokerBuyInEligibility(tx, {
         userId: auth.userId,
-        requiredBuyIn: DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
+        requiredBuyIn: buyIn,
       });
       if (!eligibility.eligible) {
         return { kind: "insufficient_chips", balance: eligibility.balance, requiredBuyIn: eligibility.requiredBuyIn };
       }
-      const created = await createPokerTableWithState(tx, { userId: auth.userId, maxPlayers, stakesJson });
+      const created = await createPokerTableWithState(tx, { userId: auth.userId, maxPlayers, stakesJson, buyIn });
       return { kind: "created", tableId: created.tableId };
     });
   } catch (error) {
@@ -116,7 +117,7 @@ export async function handler(event) {
   }
 
   const escrowSystemKey = `POKER_TABLE:${tableId}`;
-  triggerWsLobbyMaterialize({ tableId, maxPlayers, stakes: stakesParsed.value, klog });
+  triggerWsLobbyMaterialize({ tableId, maxPlayers, stakes: stakesParsed.value, buyIn, klog });
   return {
     statusCode: 200,
     headers: mergeHeaders(cors),

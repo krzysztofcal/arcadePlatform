@@ -12,6 +12,7 @@ function coreStateBase() {
       { userId: "user_b", seat: 2 },
       { userId: "user_c", seat: 3 }
     ],
+    publicStacks: { user_a: 500, user_b: 500, user_c: 500 },
     pokerState: null
   };
 }
@@ -39,7 +40,7 @@ test("engine bootstrap creates deterministic preflop hand with expected invarian
   assert.ok(pokerState.turnDeadlineAt > nowMs);
   assert.equal(Array.isArray(pokerState.seats), true);
   assert.deepEqual(pokerState.handSeats, pokerState.seats);
-  assert.deepEqual(pokerState.handStartStacksByUserId, { user_a: 100, user_b: 100, user_c: 100 });
+  assert.deepEqual(pokerState.handStartStacksByUserId, { user_a: 500, user_b: 500, user_c: 500 });
   assert.equal(typeof pokerState.roomId, "string");
 });
 
@@ -77,6 +78,7 @@ test("bootstrap maps dealer/SB/BB/UTG deterministically for 2-player and 3-playe
       { userId: "user_a", seat: 1 },
       { userId: "user_b", seat: 2 }
     ],
+    publicStacks: { user_a: 500, user_b: 500 },
     pokerState: null
   };
 

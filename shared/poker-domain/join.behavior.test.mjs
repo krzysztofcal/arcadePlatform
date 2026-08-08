@@ -50,8 +50,26 @@ function withBotsDisabled(fn) {
 }
 
 function withLockedState(args, { validateStateForStorage = () => true } = {}) {
+  const configuredBuyIn = Number.isSafeInteger(Number(args?.buyIn)) && Number(args.buyIn) > 0
+    ? Number(args.buyIn)
+    : 100;
+  const originalBeginSql = args?.beginSql;
+  const beginSql = typeof originalBeginSql === "function"
+    ? (fn) => originalBeginSql(async (tx) => {
+        const wrappedTx = Object.create(tx || null);
+        wrappedTx.unsafe = async (sql, params = []) => {
+          const rows = await tx.unsafe(sql, params);
+          if (String(sql).includes("from public.poker_tables") && Array.isArray(rows)) {
+            return rows.map((row) => row && row.buy_in == null ? { ...row, buy_in: configuredBuyIn } : row);
+          }
+          return rows;
+        };
+        return fn(wrappedTx);
+      })
+    : originalBeginSql;
   return {
     ...args,
+    beginSql,
     loadStateForUpdate: async (tx, tableId) => {
       const rows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 for update;", [tableId]);
       const row = rows?.[0] || null;
@@ -1020,7 +1038,7 @@ test("first human authoritative join validates the same randomized bot target th
     return randomCalls === 1 ? 0 : 0.999999;
   };
   const store = {
-    table: { id: "t-bots", status: "OPEN", max_players: 6, stakes: '{"sb":1,"bb":2}' },
+    table: { id: "t-bots", status: "OPEN", max_players: 6, buy_in: 500, stakes: '{"sb":1,"bb":2}' },
     seatRows: [],
     stateRow: { version: 3, state: { tableId: "t-bots", seats: [], stacks: {} } },
     ledgerCalls: []
@@ -1077,7 +1095,7 @@ test("first human authoritative join validates the same randomized bot target th
     userId: "human_1",
     requestId: "join-bots-1",
     seatNo: 1,
-    buyIn: 100,
+    buyIn: 500,
     postTransactionFn: async (payload) => {
       store.ledgerCalls.push(payload);
       return { ok: true };
@@ -1092,12 +1110,15 @@ test("first human authoritative join validates the same randomized bot target th
       { seatNo: 2, botProfile: "NORMAL", leaveAfterHand: false },
       { seatNo: 3, botProfile: "NORMAL", leaveAfterHand: false }
     ]);
-    assert.equal(result.snapshot.stacks.human_1, 100);
-    assert.deepEqual(Object.values(result.snapshot.stacks), [100, 100, 100]);
+    assert.equal(result.snapshot.stacks.human_1, 500);
+    assert.deepEqual(Object.values(result.snapshot.stacks), [500, 500, 500]);
     assert.equal(result.snapshot.stateVersion, 4);
     assert.equal(store.stateRow.version, 4);
     assert.equal(store.seatRows.filter((seat) => seat.is_bot).length, 2);
     assert.equal(store.ledgerCalls.length, 3);
+    assert.equal(store.ledgerCalls.every((call) => call.entries.some((entry) => entry.accountType === "ESCROW" && entry.amount === 500)), true);
+    assert.equal(store.ledgerCalls.filter((call) => call.entries.some((entry) => entry.accountType === "USER" && entry.amount === -500)).length, 1);
+    assert.equal(store.ledgerCalls.filter((call) => call.entries.some((entry) => entry.accountType === "SYSTEM" && entry.amount === -500)).length, 2);
     assert.equal(randomCalls, 1);
   } finally {
     Math.random = originalRandom;

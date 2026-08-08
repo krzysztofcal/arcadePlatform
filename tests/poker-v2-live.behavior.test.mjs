@@ -399,6 +399,26 @@ async function waitFor(predicate, attempts = 6){
   }
 }
 
+function sendInitialTableSnapshot(harness, options = {}){
+  const tableId = options.tableId || 'table-1';
+  const payload = {
+    tableId,
+    stateVersion: 1,
+    table: { tableId, status: 'OPEN', maxSeats: 6, members: [] },
+    public: {
+      hand: { handId: null, status: 'INIT', dealerSeatNo: null },
+      turn: { userId: null, deadlineAt: null },
+      pot: { total: 0, sidePots: [] },
+      legalActions: { seat: null, actions: [] },
+      actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+      stacks: {}
+    },
+    you: { seat: null }
+  };
+  if (options.buyIn != null) payload.table.buyIn = options.buyIn;
+  harness.getCreateOptions().onSnapshot({ kind: 'stateSnapshot', payload });
+}
+
 function findSeatByLabel(harness, label){
   return harness.elements.pokerSeatLayer.children.find((node) => (
     node.children || []
@@ -458,6 +478,9 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
 
   const ws = harness.getCreateOptions();
   assert.ok(ws, 'v2 should bootstrap a WS client when tableId is present');
+  assert.equal(harness.elements.pokerV2JoinBtn.disabled, true, 'join must wait for the authoritative table snapshot');
+  sendInitialTableSnapshot(harness, { buyIn: 500 });
+  await harness.flush();
   await waitFor(() => harness.elements.pokerV2JoinBtn.disabled === false);
   assert.equal(harness.elements.pokerV2JoinBtn.textContent, 'Join', 'v2 should not mark the user as seated before a live snapshot confirms it');
   assert.equal(harness.elements.pokerV2StartBtn.hidden, true, 'start hand should stay hidden until a live seat is confirmed');
@@ -471,7 +494,7 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   await harness.flush();
 
   assert.equal(harness.joinPayloads.length, 1);
-  assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({ tableId: 'table-1', buyIn: 240, autoSeat: true, preferredSeatNo: 3 }));
+  assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({ tableId: 'table-1', buyIn: 500, autoSeat: true, preferredSeatNo: 3 }));
   assert.equal(harness.elements.pokerTableScreen.attributes['data-boot-ready'], '1');
   assert.equal(harness.elements.pokerBootSplash.hidden, true);
 
@@ -1461,6 +1484,8 @@ test('poker v2 shows one reserved next-hand join without cards, actions, or fold
   harness.fireDomContentLoaded();
   await harness.flush();
   const ws = harness.getCreateOptions();
+  sendInitialTableSnapshot(harness);
+  await harness.flush();
   await waitFor(() => harness.elements.pokerV2JoinBtn.disabled === false);
 
   harness.elements.pokerV2JoinBtn.click();
@@ -1541,6 +1566,8 @@ test('poker v2 guest mode shows restrictions panel, hides XP badge, and still au
   assert.equal(harness.elements.pokerV2GuestBadge.hidden, false, 'guest mode should show the guest badge');
   assert.equal(harness.elements.pokerV2GuestPanel.hidden, false, 'guest mode should show the restrictions panel');
 
+  sendInitialTableSnapshot(harness, { tableId: 'guest_table_1' });
+  await harness.flush();
   await waitFor(() => harness.joinPayloads.length === 1);
   assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({
     tableId: 'guest_table_1',
@@ -1570,6 +1597,8 @@ test('poker v2 treats a historical guest session as resume-only and redirects on
   harness.fireDomContentLoaded();
   await harness.flush();
 
+  sendInitialTableSnapshot(harness, { tableId: 'guest_table_resume' });
+  await harness.flush();
   await waitFor(() => harness.joinPayloads.length === 1);
   assert.equal(harness.joinPayloads[0].guestJoinIntent, 'resume');
 
@@ -2130,7 +2159,7 @@ test('poker v2 renders authoritative out-of-chips state with stable disabled act
     payload: {
       tableId: 'table-1',
       stateVersion: 40,
-      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }, { userId: 'bot-1', seat: 2 }] },
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, buyIn: 500, members: [{ userId: 'user-1', seat: 1 }, { userId: 'bot-1', seat: 2 }] },
       public: {
         seats: [{ userId: 'user-1', seatNo: 1, status: playerState.status }, { userId: 'bot-1', seatNo: 2, status: 'ACTIVE', isBot: true }],
         stacks: { 'user-1': playerState.stack, 'bot-1': 98 },
@@ -2159,10 +2188,10 @@ test('poker v2 renders authoritative out-of-chips state with stable disabled act
   }
   harness.elements.pokerV2RebuyBtn.click();
   await harness.flush();
-  assert.equal(JSON.stringify(harness.rebuyPayloads), JSON.stringify([{ tableId: 'table-1', amount: 100 }]));
+  assert.equal(JSON.stringify(harness.rebuyPayloads), JSON.stringify([{ tableId: 'table-1', amount: 500 }]));
   assert.equal(harness.elements.pokerV2RebuyPanel.hidden, true, 'accepted rebuy must close the prompt immediately');
 
-  ws.onSnapshot(snapshot({ status: 'WAITING_NEXT_HAND', stack: 100, canRebuy: false }));
+  ws.onSnapshot(snapshot({ status: 'WAITING_NEXT_HAND', stack: 500, canRebuy: false }));
   await harness.flush();
   assert.equal(harness.elements.pokerV2TurnText.textContent, 'Funded · Joining next hand');
   assert.equal(harness.elements.pokerV2RebuyPanel.hidden, true, 'waiting snapshot must not reopen an accepted rebuy prompt');
@@ -2175,14 +2204,14 @@ test('poker v2 resumes a stored rebuy only after a full snapshot and never creat
     requestId: 'rebuy_reload_1',
     tableId: 'table-1',
     userId: 'user-1',
-    payload: { tableId: 'table-1', amount: 100 }
+    payload: { tableId: 'table-1', amount: 500 }
   });
   const buildSnapshot = (playerState) => ({
     kind: 'stateSnapshot',
     payload: {
       tableId: 'table-1',
       stateVersion: 1,
-      table: { tableId: 'table-1', status: 'OPEN', members: [{ userId: 'user-1', seat: 1 }] },
+      table: { tableId: 'table-1', status: 'OPEN', buyIn: 500, members: [{ userId: 'user-1', seat: 1 }] },
       public: { hand: { handId: 'hand-rebuy-reload', status: 'TURN' }, turn: { userId: 'bot-1' }, pot: { total: 0, sidePots: [] }, legalActions: { seat: null, actions: [] } },
       private: { userId: 'user-1', seat: 1, playerState },
       you: { seat: 1 }
@@ -2197,7 +2226,7 @@ test('poker v2 resumes a stored rebuy only after a full snapshot and never creat
   assert.equal(fundedHarness.rebuyRequestIds.length, 0);
   fundedHarness.getCreateOptions().onStatus('auth_ok', { roomId: 'table-1' });
   await fundedHarness.flush();
-  fundedHarness.getCreateOptions().onSnapshot(buildSnapshot({ status: 'WAITING_NEXT_HAND', stack: 100, canRebuy: false }));
+  fundedHarness.getCreateOptions().onSnapshot(buildSnapshot({ status: 'WAITING_NEXT_HAND', stack: 500, canRebuy: false }));
   await fundedHarness.flush();
   assert.equal(fundedHarness.rebuyRequestIds.length, 0);
   assert.equal(fundedHarness.getSessionStorage('poker:pendingRebuy:user-1:table-1'), null);
@@ -2224,7 +2253,7 @@ function autoRebuySnapshot(playerState){
     payload: {
       tableId: 'table-1',
       stateVersion: 1,
-      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }, { userId: 'bot-1', seat: 2 }] },
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, buyIn: 500, members: [{ userId: 'user-1', seat: 1 }, { userId: 'bot-1', seat: 2 }] },
       public: {
         seats: [{ userId: 'user-1', seatNo: 1, status: playerState.status }, { userId: 'bot-1', seatNo: 2, status: 'ACTIVE', isBot: true }],
         stacks: { 'user-1': playerState.stack, 'bot-1': 98 },
@@ -2251,7 +2280,7 @@ test('poker v2 auto-rebuy fires exactly one existing rebuy request when enabled 
   ws.onSnapshot(autoRebuySnapshot({ status: 'OUT_OF_CHIPS', stack: 0, canRebuy: true }));
   await harness.flush();
   assert.equal(harness.rebuyPayloads.length, 1);
-  assert.equal(JSON.stringify(harness.rebuyPayloads[0]), JSON.stringify({ tableId: 'table-1', amount: 100 }));
+  assert.equal(JSON.stringify(harness.rebuyPayloads[0]), JSON.stringify({ tableId: 'table-1', amount: 500 }));
   assert.equal(harness.elements.pokerV2RebuyPanel.hidden, true, 'auto-rebuy must not show the manual rebuy prompt');
 });
 
@@ -2281,7 +2310,7 @@ test('poker v2 auto-rebuy does not repeat on repeated snapshots or during a pend
   ws.onSnapshot(autoRebuySnapshot({ status: 'OUT_OF_CHIPS', stack: 0, canRebuy: true }));
   await harness.flush();
   assert.equal(harness.rebuyPayloads.length, 1, 'repeated snapshot must not re-trigger auto-rebuy');
-  ws.onSnapshot(autoRebuySnapshot({ status: 'ACTIVE', stack: 100, canRebuy: false }));
+  ws.onSnapshot(autoRebuySnapshot({ status: 'ACTIVE', stack: 500, canRebuy: false }));
   await harness.flush();
   ws.onSnapshot(autoRebuySnapshot({ status: 'OUT_OF_CHIPS', stack: 0, canRebuy: true }));
   await harness.flush();
@@ -2803,9 +2832,12 @@ test('poker v2 auto-joins from query params after live auth', async () => {
   const harness = createHarness({ search: '?tableId=table-1&seatNo=4&autoJoin=1' });
   harness.fireDomContentLoaded();
   await harness.flush();
+  assert.equal(harness.joinPayloads.length, 0, 'auto-join must wait for the authoritative table snapshot');
+  sendInitialTableSnapshot(harness, { buyIn: 500 });
+  await harness.flush();
   await waitFor(() => harness.joinPayloads.length === 1);
 
-  assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({ tableId: 'table-1', buyIn: 100, autoSeat: true, preferredSeatNo: 4 }));
+  assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({ tableId: 'table-1', buyIn: 500, autoSeat: true, preferredSeatNo: 4 }));
 });
 
 test('poker v2 retries Play now auto-join after a transient authoritative join failure', async () => {
@@ -2822,27 +2854,9 @@ test('poker v2 retries Play now auto-join after a transient authoritative join f
   });
   harness.fireDomContentLoaded();
   await harness.flush();
-  await waitFor(() => harness.joinPayloads.length === 1);
-
-  const ws = harness.getCreateOptions();
-  ws.onSnapshot({
-    kind: 'stateSnapshot',
-    payload: {
-      tableId: 'table-1',
-      stateVersion: 0,
-      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [] },
-      public: {
-        hand: { handId: null, status: 'INIT', dealerSeatNo: null },
-        turn: { userId: null, deadlineAt: null },
-        pot: { total: 0, sidePots: [] },
-        legalActions: { seat: null, actions: [] },
-        actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
-        stacks: {}
-      },
-      you: { seat: null }
-    }
-  });
+  sendInitialTableSnapshot(harness, { buyIn: 500 });
   await harness.flush();
+  await waitFor(() => harness.joinPayloads.length === 1);
 
   assert.equal(harness.joinPayloads.length, 1);
   assert.equal(harness.elements.pokerV2ErrorText.textContent, 'authoritative_join_rehydrate_failed');
@@ -2852,7 +2866,7 @@ test('poker v2 retries Play now auto-join after a transient authoritative join f
   await harness.flush();
 
   assert.equal(harness.joinPayloads.length, 2);
-  assert.equal(JSON.stringify(harness.joinPayloads[1]), JSON.stringify({ tableId: 'table-1', buyIn: 100, autoSeat: true, preferredSeatNo: 4 }));
+  assert.equal(JSON.stringify(harness.joinPayloads[1]), JSON.stringify({ tableId: 'table-1', buyIn: 500, autoSeat: true, preferredSeatNo: 4 }));
   assert.equal(harness.logs.some((entry) => entry.kind === 'poker_auto_join_failed' && entry.data.retryScheduled === true), true);
 });
 
@@ -2867,9 +2881,11 @@ test('poker v2 renders insufficient funds as controlled non-retryable buy-in cop
   });
   harness.fireDomContentLoaded();
   await harness.flush();
+  sendInitialTableSnapshot(harness);
+  await harness.flush();
   await waitFor(() => harness.joinPayloads.length === 1);
 
-  assert.equal(harness.elements.pokerV2ErrorText.textContent, 'You need at least 100 CH to join a table.');
+  assert.equal(harness.elements.pokerV2ErrorText.textContent, 'Not enough CH to join this table.');
   assert.equal(harness.elements.pokerV2ErrorText.hidden, false);
   harness.advanceTime(5000);
   await harness.flush();
@@ -2947,10 +2963,11 @@ test('poker v2 safely rejoins the same authoritative seat after a socket reconne
   assert.equal(harness.joinPayloads.length, 1);
   assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({
     tableId: 'table-1',
+    buyIn: 100,
     autoSeat: true,
     preferredSeatNo: 4
   }));
-  assert.equal(Object.prototype.hasOwnProperty.call(harness.joinPayloads[0], 'buyIn'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(harness.joinPayloads[0], 'buyIn'), true);
 });
 
 test('poker v2 retries the same reconnect seat after a transient join failure', async () => {
@@ -3033,6 +3050,7 @@ test('poker v2 retries the same reconnect seat after a transient join failure', 
   harness.joinPayloads.forEach((payload) => {
     assert.equal(JSON.stringify(payload), JSON.stringify({
       tableId: 'table-1',
+      buyIn: 100,
       autoSeat: true,
       preferredSeatNo: 4
     }));

@@ -53,8 +53,8 @@ Example envelope:
 | `resume` | `{ "sessionId": string, "lastSeq": integer }` | Requests stream resume from last acknowledged sequence. |
 | `ping` | `{ "clientTime": string }` | Keepalive/latency probe. No state mutation. |
 | `join` | `{ "tableId": string }` | Legacy alias of `table_join`; default runtime behavior is authoritative seat/join mutation (idempotent). Optional observe-only runtime mode can make it transport-only. Requires auth. |
-| `table_rebuy` | `{ "tableId": string, "amount": 100 }` | Canonical explicit manual rebuy for an eligible out-of-chips seat. Requires auth and `requestId`; funding and authoritative state commit atomically. |
-| `rebuy` | `{ "tableId": string, "amount": 100 }` | Legacy client alias of `table_rebuy`. Atomically debits 100 CH from the authenticated USER account, credits table ESCROW, and queues the out-of-chips seat for the next hand. Requires auth and `requestId`. |
+| `table_rebuy` | `{ "tableId": string, "amount"?: integer }` | Canonical explicit manual rebuy for an eligible out-of-chips seat. The server uses the table's authoritative fixed buy-in; an optional amount is only a matching declaration. Requires auth and `requestId`; funding and authoritative state commit atomically. |
+| `rebuy` | `{ "tableId": string, "amount"?: integer }` | Legacy client alias of `table_rebuy`. Atomically debits the authenticated USER by the table's fixed buy-in, credits table ESCROW by the same amount, and queues the out-of-chips seat for the next hand. Requires auth and `requestId`. |
 | `act` | `{ "handId": string, "action": "fold"|"check"|"call"|"bet"|"raise", "amount": integer }` | Requests poker action mutation. Requires auth and turn validity. |
 | `leave` | `{ "reason": string }` | Requests leave/cashout workflow. |
 | `ack` | `{ "seq": integer }` | Acknowledges latest processed server sequence (flow-control aid). |
@@ -218,8 +218,8 @@ Out-of-chips lifecycle contract delta:
 
 - `payload.private.playerState` is additive and has `{ status: "ACTIVE"|"OUT_OF_CHIPS"|"WAITING_NEXT_HAND", stack: integer, canRebuy: boolean }`;
 - `canRebuy` is true only for the authenticated active non-bot seat owner at an open table, with authoritative stack `0`, after the player is absent from current `handSeats` and before a rebuy is committed;
-- canonical `table_rebuy` and alias `rebuy` accept only `{ tableId, amount: 100 }` and require a unique request ID;
-- successful rebuy is one atomic `TABLE_BUY_IN` (`USER -100`, table `ESCROW +100`) plus state/seat projection and sets `WAITING_NEXT_HAND` without adding the player to a hand already in progress;
+- canonical `table_rebuy` and alias `rebuy` use the table's fixed configured buy-in (and require a unique request ID); a supplied amount must match that configuration;
+- successful rebuy is one atomic `TABLE_BUY_IN` (`USER -<table buy-in>`, table `ESCROW +<table buy-in>`) plus state/seat projection and sets `WAITING_NEXT_HAND` without adding the player to a hand already in progress;
 - repeated delivery of the same successful request ID returns its stored result and does not debit again;
 - insufficient balance, a nonzero/ambiguous stack, current-hand membership, a closed table, or a non-active/bot seat rejects without visible runtime mutation.
 
@@ -364,10 +364,10 @@ Durability note: replay buffer is process-local and bounded; server restarts or 
 
 Gameplay write commands are authoritative over WS. `start_hand` and `act` use `commandResult` as the primary command ack. `join` / `table_join` preserves legacy actor-visible `table_state` first-frame behavior and may additionally emit `commandResult` for deterministic client ack.
 
-- `join` / `table_join` payload: `{ tableId, seatNo?, autoSeat?, preferredSeatNo?, buyIn }` (`buyIn` required for gameplay-equivalent authoritative joins)
+- `join` / `table_join` payload: `{ tableId, seatNo?, autoSeat?, preferredSeatNo?, buyIn? }`; the server derives the fixed table buy-in and validates an optional declaration.
 - `start_hand` payload: `{ tableId }`
 - `act` payload: `{ handId, action, amount? }`
-- `table_rebuy` / `rebuy` payload: `{ tableId, amount: 100 }`
+- `table_rebuy` / `rebuy` payload: `{ tableId, amount? }`; the authoritative server derives the amount from the fixed table buy-in and validates an optional declaration.
 
 Success contract:
 

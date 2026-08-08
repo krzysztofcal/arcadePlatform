@@ -57,29 +57,30 @@ const toUiSeatNo = (seatNoDb, maxPlayers) => {
 };
 
 const createAndRecommend = async (tx, { userId, maxPlayers, stakesJson }) => {
+  const buyIn = DEFAULT_CASH_TABLE_BUY_IN_CHIPS;
   const eligibility = await readPokerBuyInEligibility(tx, {
     userId,
-    requiredBuyIn: DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
+    requiredBuyIn: buyIn,
   });
   if (!eligibility.eligible) {
     return { kind: "insufficient_chips", balance: eligibility.balance, requiredBuyIn: eligibility.requiredBuyIn };
   }
-  const created = await createPokerTableWithState(tx, { userId, maxPlayers, stakesJson });
+  const created = await createPokerTableWithState(tx, { userId, maxPlayers, stakesJson, buyIn });
   const tableId = created.tableId;
   await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
   const seatNoUi = 1;
-  return { kind: "recommended", tableId, seatNo: seatNoUi, strategy: "create" };
+  return { kind: "recommended", tableId, seatNo: seatNoUi, strategy: "create", buyIn };
 };
 
-const triggerWsLobbyMaterialize = ({ tableId, maxPlayers, stakes, klog }) => {
+const triggerWsLobbyMaterialize = ({ tableId, maxPlayers, stakes, buyIn, klog }) => {
   if (typeof tableId !== "string" || !tableId) return;
-  void notifyWsLobbyMaterialize({ tableId, maxPlayers, stakes, klog });
+  void notifyWsLobbyMaterialize({ tableId, maxPlayers, stakes, buyIn, klog });
 };
 
 const selectCandidate = async (tx, { stakesJson, maxPlayers, requireHuman, humanSeatFreshCutoffIso }) => {
   return tx.unsafe(
     `
-select t.id, t.max_players
+select t.id, t.max_players, t.buy_in
 from public.poker_tables t
 where t.status = 'OPEN'
   and t.max_players = $1
@@ -130,7 +131,7 @@ limit 1;
   );
 };
 
-const recommendSeatAtTable = async (tx, { tableId, userId, maxPlayers, allowCreateFallback, createPayload }) => {
+const recommendSeatAtTable = async (tx, { tableId, userId, maxPlayers, buyIn, allowCreateFallback, createPayload }) => {
   const existingSeatRows = await tx.unsafe(
     "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
     [tableId, userId]
@@ -141,9 +142,13 @@ const recommendSeatAtTable = async (tx, { tableId, userId, maxPlayers, allowCrea
     return { kind: "recommended", tableId, seatNo: toUiSeatNo(existingSeatNoDb, maxPlayers) };
   }
 
+  const normalizedBuyIn = Number(buyIn);
+  if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) {
+    return { kind: "unavailable" };
+  }
   const eligibility = await readPokerBuyInEligibility(tx, {
     userId,
-    requiredBuyIn: DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
+    requiredBuyIn: normalizedBuyIn,
   });
   if (!eligibility.eligible) {
     return { kind: "insufficient_chips", balance: eligibility.balance, requiredBuyIn: eligibility.requiredBuyIn };
@@ -223,6 +228,7 @@ export async function handler(event) {
           tableId: preferredRows[0].id,
           userId: auth.userId,
           maxPlayers,
+          buyIn: preferredRows[0].buy_in,
           allowCreateFallback: true,
           createPayload,
         });
@@ -238,6 +244,7 @@ export async function handler(event) {
           tableId: anyRows[0].id,
           userId: auth.userId,
           maxPlayers,
+          buyIn: anyRows[0].buy_in,
           allowCreateFallback: true,
           createPayload,
         });
@@ -264,7 +271,7 @@ export async function handler(event) {
     }
 
     if (result.strategy === "create") {
-      triggerWsLobbyMaterialize({ tableId: result.tableId, maxPlayers, stakes: stakesParsed.value, klog });
+      triggerWsLobbyMaterialize({ tableId: result.tableId, maxPlayers, stakes: stakesParsed.value, buyIn: result.buyIn, klog });
     }
 
     return {

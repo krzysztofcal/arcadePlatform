@@ -21,7 +21,6 @@ const parseIntClamped = (value, fallback, min, max) => {
 };
 
 const BOT_PROFILES = ["TIGHT", "NORMAL", "LOOSE"];
-const BOT_STARTING_STACK_CHIPS = 100;
 
 const parseProfile = (value, fallback = "RANDOM") => {
   const normalized = normalizeString(value).toUpperCase();
@@ -69,7 +68,6 @@ function getBotConfig(env = process.env) {
     minPerTable: parseIntClamped(source.POKER_BOTS_MIN_PER_TABLE, 2, 0, 9),
     maxPerTable: parseIntClamped(source.POKER_BOTS_MAX_PER_TABLE, 5, 0, 9),
     defaultProfile: parseProfile(source.POKER_BOT_PROFILE_DEFAULT, "RANDOM"),
-    buyInChips: BOT_STARTING_STACK_CHIPS,
     bankrollSystemKey: normalizeString(source.POKER_BOT_BANKROLL_SYSTEM_KEY) || "TREASURY",
     maxActionsPerPoll: parseIntClamped(source.POKER_BOTS_MAX_ACTIONS_PER_POLL, 2, 0, 10),
   };

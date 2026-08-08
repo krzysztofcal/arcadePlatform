@@ -1,7 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createTableManager } from "../table/table-manager.mjs";
+import { createTableManager as createRuntimeTableManager } from "../table/table-manager.mjs";
 import { buildStateSnapshotPayload } from "./state-snapshot.mjs";
+
+function createTableManager(options = {}) {
+  const manager = createRuntimeTableManager({ defaultBuyIn: 100, ...options });
+  const originalJoin = manager.join;
+  // These fixtures predate table buy-in metadata and represent the existing
+  // 100 CH default; keep that compatibility shim in tests only.
+  manager.join = (args = {}) => originalJoin({ buyIn: args.buyIn ?? 100, ...args });
+  return manager;
+}
 
 test("buildStateSnapshotPayload returns canonical room-core payload for seated authenticated user", () => {
   const tableManager = createTableManager({ maxSeats: 6 });

@@ -13,7 +13,7 @@ export async function handleRebuyCommand({
   scheduleSettledRolloverIfSettled = () => {},
   klog = () => {}
 }) {
-  const amount = frame?.payload?.amount === undefined ? 100 : Number(frame.payload.amount);
+  const amount = frame?.payload?.amount === undefined ? undefined : Number(frame.payload.amount);
   const executeAuthoritativeRebuy = await loadAuthoritativeRebuyExecutor();
   const rebuy = await executeAuthoritativeRebuy({
     tableId,
@@ -33,11 +33,12 @@ export async function handleRebuyCommand({
 
   const restored = await restoreTableFromPersisted(tableId);
   sendCommandResult(ws, connState, {
-    requestId: frame.requestId ?? null,
-    tableId,
-    status: "accepted",
-    reason: rebuy.replayed === true ? "already_applied" : null
-  });
+      requestId: frame.requestId ?? null,
+      tableId,
+      status: "accepted",
+      reason: rebuy.replayed === true ? "already_applied" : null,
+      buyIn: rebuy.buyIn
+    });
   if (!restored?.ok) {
     klog("ws_rebuy_runtime_restore_failed", {
       tableId,

@@ -30,7 +30,8 @@ export function cloneCoreState(state) {
     version: state.version,
     members: state.members.map((member) => ({ userId: member.userId, seat: member.seat })),
     seats: { ...state.seats },
-    appliedRequestIds: [...state.appliedRequestIds]
+    appliedRequestIds: [...state.appliedRequestIds],
+    ...(isPlainObject(state.publicStacks) ? { publicStacks: { ...state.publicStacks } } : {})
   };
 }
 

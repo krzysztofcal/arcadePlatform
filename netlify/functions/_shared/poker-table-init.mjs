@@ -2,20 +2,25 @@ export const createPokerTableWithState = async (tx, {
   userId,
   maxPlayers,
   stakesJson,
+  buyIn,
   lifecycleKind = "STANDARD",
   managedProfileKey = null,
   rotationDueAt = null
 }) => {
+  const normalizedBuyIn = Number(buyIn);
+  if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) {
+    throw new Error("poker_table_buy_in_invalid");
+  }
   const tableRows = await tx.unsafe(
     `
 insert into public.poker_tables (
-  stakes, max_players, status, created_by, updated_at, last_activity_at,
+  stakes, buy_in, max_players, status, created_by, updated_at, last_activity_at,
   lifecycle_kind, managed_profile_key, rotation_due_at
 )
-values ($1::jsonb, $2, 'OPEN', $3, now(), now(), $4, $5, $6)
+values ($1::jsonb, $2, $3, 'OPEN', $4, now(), now(), $5, $6, $7)
 returning id;
     `,
-    [stakesJson, maxPlayers, userId, lifecycleKind, managedProfileKey, rotationDueAt]
+    [stakesJson, normalizedBuyIn, maxPlayers, userId, lifecycleKind, managedProfileKey, rotationDueAt]
   );
   const tableId = tableRows?.[0]?.id || null;
   if (!tableId) {

@@ -79,6 +79,7 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
           status: row.status || "OPEN",
           max_players: row.max_players || row.maxPlayers || 6,
           stakes: row.stakes ?? '{"sb":1,"bb":2}',
+          buy_in: row.buy_in ?? row.buyIn ?? null,
           created_at: row.created_at ?? null,
           updated_at: row.updated_at ?? null,
           last_activity_at: row.last_activity_at ?? null,

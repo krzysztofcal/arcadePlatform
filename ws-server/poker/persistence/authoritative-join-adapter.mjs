@@ -100,8 +100,15 @@ function normalizeSuccess(result, { tableId, userId, requestId }) {
   }
   const stack = Number(result?.stack);
   const rejoin = result?.rejoin === true;
-  if (!Number.isInteger(stack) || stack <= 0) {
+  const buyIn = Number(result?.buyIn ?? stack);
+  if (!Number.isSafeInteger(stack) || stack <= 0) {
     return invalidAuthoritativeState("invalid_stack");
+  }
+  if (!Number.isSafeInteger(buyIn) || buyIn <= 0) {
+    return invalidAuthoritativeState("invalid_buy_in");
+  }
+  if (!rejoin && buyIn !== stack) {
+    return invalidAuthoritativeState("human_buy_in_mismatch");
   }
   const seededBots = Array.isArray(result?.seededBots) ? result.seededBots : [];
   const snapshot = result?.snapshot && typeof result.snapshot === "object" ? result.snapshot : null;
@@ -152,6 +159,7 @@ function normalizeSuccess(result, { tableId, userId, requestId }) {
     userId,
     seatNo,
     stack,
+    buyIn,
     rejoin,
     requestId: requestId || null,
     seededBots,

@@ -31,7 +31,7 @@ export function createPersistedBootstrapRepository({ env = process.env } = {}) {
     const beginSql = await loadBeginSql();
     return beginSql(async (tx) => {
       const tableRows = await tx.unsafe(
-        "select id, status, max_players, stakes, created_at, updated_at, last_activity_at, lifecycle_kind, managed_profile_key, rotation_due_at from public.poker_tables where id = $1 limit 1;",
+        "select id, status, max_players, stakes, buy_in, created_at, updated_at, last_activity_at, lifecycle_kind, managed_profile_key, rotation_due_at from public.poker_tables where id = $1 limit 1;",
         [tableId]
       );
       const tableRow = tableRows?.[0] || null;

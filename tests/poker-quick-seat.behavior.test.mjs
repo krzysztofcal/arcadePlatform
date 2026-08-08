@@ -14,7 +14,7 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ mode, queries, notifications = [], logs = [], balance = 100, balanceError = false }) =>
+const makeHandler = ({ mode, queries, notifications = [], logs = [], balance = 100, balanceError = false, candidateBuyIn = 100 }) =>
   loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -41,12 +41,12 @@ const makeHandler = ({ mode, queries, notifications = [], logs = [], balance = 1
           ) {
             const requireHuman = params?.[2] === true;
             if (mode === "prefer_humans" || mode === "already_seated") {
-              if (requireHuman) return [{ id: "table-human", max_players: 6 }];
+              if (requireHuman) return [{ id: "table-human", max_players: 6, buy_in: candidateBuyIn }];
               return [];
             }
             if (mode === "any_open") {
               if (requireHuman) return [];
-              return [{ id: "table-any", max_players: 6 }];
+              return [{ id: "table-any", max_players: 6, buy_in: candidateBuyIn }];
             }
             return [];
           }
@@ -93,7 +93,7 @@ const run = async () => {
   {
     const queries = [];
     const notifications = [];
-    const handler = makeHandler({ mode: "prefer_humans", queries, notifications });
+    const handler = makeHandler({ mode: "prefer_humans", queries, notifications, balance: 500, candidateBuyIn: 500 });
     const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -313,7 +313,7 @@ const run = async () => {
               text.includes("t.max_players = $1") &&
               text.includes("t.stakes = $2::jsonb")
             ) {
-              if (state.created) return [{ id: "table-created", max_players: 6 }];
+              if (state.created) return [{ id: "table-created", max_players: 6, buy_in: 100 }];
               return [];
             }
 

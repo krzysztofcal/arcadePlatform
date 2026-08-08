@@ -393,7 +393,7 @@ test("authoritative WS table_join returns a fully seated stacked snapshot and ke
   const store = {
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 150 },
         seatRows: [],
         stateRow: { version: 0, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
       }
@@ -506,7 +506,7 @@ test("authoritative WS table_join can progress through human act and bot timeout
   const store = {
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 150 },
         seatRows: [],
         stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
       }
@@ -636,7 +636,7 @@ test("authoritative repeated and replayed table_join keep bot seating stable and
   const store = {
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 150 },
         seatRows: [],
         stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
       }

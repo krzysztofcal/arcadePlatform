@@ -24,6 +24,7 @@ export async function notifyWsLobbyMaterialize({
   tableId,
   maxPlayers,
   stakes,
+  buyIn,
   env = process.env,
   fetchImpl = globalThis.fetch,
   klog = () => {}
@@ -62,7 +63,7 @@ export async function notifyWsLobbyMaterialize({
     const response = await fetchImpl(`${baseUrl.replace(/\/$/, "")}/internal/lobby/materialize-table`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ tableId: normalizedTableId, maxPlayers, stakes }),
+      body: JSON.stringify({ tableId: normalizedTableId, maxPlayers, stakes, buyIn }),
       signal: controller.signal
     });
     if (!response.ok) {

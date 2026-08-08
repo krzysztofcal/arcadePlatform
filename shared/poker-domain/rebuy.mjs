@@ -2,7 +2,6 @@ import { ensurePokerRequest, storePokerRequestResult } from "../../netlify/funct
 import { requireAuthoritativeHumanStack } from "./human-stack-accounting.mjs";
 import { postUserTableBuyIn } from "./table-buy-in.mjs";
 
-export const POKER_REBUY_AMOUNT = 100;
 const POKER_REQUEST_KIND = "REBUY";
 const PENDING_STALE_SEC = 30;
 
@@ -11,6 +10,14 @@ function makeError(code, status = 409) {
   error.code = code;
   error.status = status;
   return error;
+}
+
+function validateRequestedBuyIn(amount, authoritativeBuyIn) {
+  if (amount === undefined || amount === null) return;
+  const declaredAmount = Number(amount);
+  if (!Number.isSafeInteger(declaredAmount) || declaredAmount !== authoritativeBuyIn) {
+    throw makeError("invalid_rebuy_amount", 400);
+  }
 }
 
 function parseState(value) {
@@ -57,13 +64,14 @@ function normalizeStateForStorageValidation(state) {
   return { ...state, community };
 }
 
-function normalizeStoredResult(result) {
+function normalizeStoredResult(result, { allowLegacy = false } = {}) {
   if (!result || typeof result !== "object" || result.ok !== true) return null;
   const stack = Number(result.stack);
+  const buyIn = Number(result.buyIn ?? (allowLegacy ? result.stack : NaN));
   const stateVersion = Number(result.stateVersion);
-  if (!Number.isInteger(stack) || stack !== POKER_REBUY_AMOUNT) return null;
+  if (!Number.isSafeInteger(buyIn) || buyIn <= 0 || !Number.isSafeInteger(stack) || stack !== buyIn) return null;
   if (!Number.isInteger(stateVersion) || stateVersion <= 0) return null;
-  return result;
+  return { ...result, buyIn, stack };
 }
 
 export async function executePokerRebuyAuthoritative({
@@ -71,7 +79,7 @@ export async function executePokerRebuyAuthoritative({
   tableId,
   userId,
   requestId,
-  amount = POKER_REBUY_AMOUNT,
+  amount,
   postTransactionFn,
   loadStateForUpdate,
   updateStateLocked,
@@ -83,9 +91,6 @@ export async function executePokerRebuyAuthoritative({
     throw makeError("temporarily_unavailable", 503);
   }
   if (!tableId || !userId || !requestId) throw makeError("invalid_request", 400);
-  const normalizedAmount = Number(amount);
-  if (!Number.isInteger(normalizedAmount) || normalizedAmount !== POKER_REBUY_AMOUNT) throw makeError("invalid_rebuy_amount", 400);
-
   return beginSql(async (tx) => {
     const request = await ensurePokerRequest(tx, {
       tableId,
@@ -95,10 +100,19 @@ export async function executePokerRebuyAuthoritative({
       pendingStaleSec: PENDING_STALE_SEC
     });
     if (request.status === "stored") {
-      const stored = normalizeStoredResult(request.result);
-      if (!stored) throw makeError("request_result_invalid");
+      const tableRows = await tx.unsafe(
+        "select id, buy_in from public.poker_tables where id = $1 limit 1 for update;",
+        [tableId]
+      );
+      const authoritativeBuyIn = Number(tableRows?.[0]?.buy_in);
+      const stored = normalizeStoredResult(request.result, { allowLegacy: true });
+      if (!Number.isSafeInteger(authoritativeBuyIn) || authoritativeBuyIn <= 0
+        || !stored || stored.buyIn !== authoritativeBuyIn) {
+        throw makeError("request_result_invalid");
+      }
+      validateRequestedBuyIn(amount, authoritativeBuyIn);
       klog("poker_rebuy_replayed", { tableId, requestId, stateVersion: stored.stateVersion });
-      return { ...stored, replayed: true };
+      return { ...stored, buyIn: authoritativeBuyIn, stack: authoritativeBuyIn, replayed: true };
     }
     if (request.status === "pending") throw makeError("request_pending");
 
@@ -110,12 +124,15 @@ export async function executePokerRebuyAuthoritative({
     const state = parseState(locked.state);
 
     const tableRows = await tx.unsafe(
-      "select id, status from public.poker_tables where id = $1 for update;",
+      "select id, status, buy_in from public.poker_tables where id = $1 for update;",
       [tableId]
     );
     const table = tableRows?.[0] || null;
     if (!table) throw makeError("table_not_found", 404);
     if (String(table.status || "").toUpperCase() !== "OPEN") throw makeError("table_not_open");
+    const authoritativeBuyIn = Number(table.buy_in);
+    if (!Number.isSafeInteger(authoritativeBuyIn) || authoritativeBuyIn <= 0) throw makeError("invalid_rebuy_amount", 400);
+    validateRequestedBuyIn(amount, authoritativeBuyIn);
 
     const seatRows = await tx.unsafe(
       `select user_id, seat_no, stack, status, is_bot
@@ -143,7 +160,7 @@ export async function executePokerRebuyAuthoritative({
       ...state,
       stacks: {
         ...(state.stacks && typeof state.stacks === "object" && !Array.isArray(state.stacks) ? state.stacks : {}),
-        [userId]: normalizedAmount
+        [userId]: authoritativeBuyIn
       },
       waitingForNextHandByUserId: {
         ...(state.waitingForNextHandByUserId && typeof state.waitingForNextHandByUserId === "object" && !Array.isArray(state.waitingForNextHandByUserId)
@@ -163,7 +180,7 @@ export async function executePokerRebuyAuthoritative({
       tx,
       tableId,
       userId,
-      amount: normalizedAmount,
+      amount: authoritativeBuyIn,
       idempotencyKey,
       reference: `poker-rebuy:${tableId}`,
       metadata: { tableId, seatNo, reason: "manual_rebuy" }
@@ -174,7 +191,7 @@ export async function executePokerRebuyAuthoritative({
        set stack = $4
        where table_id = $1 and user_id = $2 and seat_no = $3 and status = 'ACTIVE' and is_bot = false
        returning user_id;`,
-      [tableId, userId, seatNo, normalizedAmount]
+      [tableId, userId, seatNo, authoritativeBuyIn]
     );
     if (projectedRows?.length !== 1) throw makeError("seat_projection_conflict");
     await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
@@ -184,7 +201,8 @@ export async function executePokerRebuyAuthoritative({
       tableId,
       userId,
       seatNo,
-      stack: normalizedAmount,
+      buyIn: authoritativeBuyIn,
+      stack: authoritativeBuyIn,
       status: "WAITING_NEXT_HAND",
       stateVersion: Number(updated.newVersion),
       ledgerTransactionId: ledger?.transaction?.id || null,
@@ -197,7 +215,7 @@ export async function executePokerRebuyAuthoritative({
       kind: POKER_REQUEST_KIND,
       result
     });
-    klog("poker_rebuy_committed", { tableId, seatNo, stateVersion: result.stateVersion, amount: normalizedAmount });
+    klog("poker_rebuy_committed", { tableId, seatNo, stateVersion: result.stateVersion, amount: authoritativeBuyIn });
     return result;
   });
 }
