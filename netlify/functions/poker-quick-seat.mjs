@@ -1,8 +1,12 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { createPokerTableWithState } from "./_shared/poker-table-init.mjs";
-import { notifyWsLobbyMaterialize } from "./_shared/poker-ws-runtime-notify.mjs";
+import { checkWsBuyInCapability, notifyWsLobbyMaterialize } from "./_shared/poker-ws-runtime-notify.mjs";
 import { calculateUnlockBankroll, evaluatePokerBuyInAccess, readPokerProgression } from "../../shared/poker-domain/poker-progression.mjs";
-import { calculateCanonicalPokerStakes, isCanonicalPokerStakes } from "../../shared/poker-domain/table-economy.mjs";
+import {
+  calculateCanonicalPokerStakes,
+  DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
+  isCanonicalPokerStakes
+} from "../../shared/poker-domain/table-economy.mjs";
 
 const DEFAULT_MAX_PLAYERS = 6;
 const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
@@ -61,7 +65,7 @@ const parseTableStakes = (value) => {
   return value;
 };
 
-const createAndRecommend = async (tx, { userId, maxPlayers, progression }) => {
+const createAndRecommend = async (tx, { userId, maxPlayers, progression, ensureWsBuyInCapability }) => {
   const buyIn = progression?.highestUnlockedBuyIn;
   if (!Number.isSafeInteger(buyIn) || buyIn <= 0) {
     const firstTier = progression?.tiers?.[0] || null;
@@ -75,6 +79,10 @@ const createAndRecommend = async (tx, { userId, maxPlayers, progression }) => {
   }
   const canonicalStakes = calculateCanonicalPokerStakes(buyIn);
   if (!canonicalStakes) return { kind: "unavailable" };
+  if (buyIn !== DEFAULT_CASH_TABLE_BUY_IN_CHIPS) {
+    const capability = await ensureWsBuyInCapability(buyIn);
+    if (!capability?.ok) return { kind: "ws_buy_in_capability_unavailable", buyIn };
+  }
   const stakesJson = JSON.stringify(canonicalStakes);
   const created = await createPokerTableWithState(tx, { userId, maxPlayers, stakesJson, buyIn });
   const tableId = created.tableId;
@@ -200,7 +208,13 @@ const recommendSeatAtTable = async (tx, { tableId, userId, maxPlayers, buyIn, ta
     return { kind: "unavailable" };
   }
   await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
-  return { kind: "recommended", tableId, seatNo: toUiSeatNo(seatNoDb, maxPlayers) };
+  return {
+    kind: "recommended",
+    tableId,
+    seatNo: toUiSeatNo(seatNoDb, maxPlayers),
+    buyIn: normalizedBuyIn,
+    requiresWsBuyInCapability: normalizedBuyIn !== DEFAULT_CASH_TABLE_BUY_IN_CHIPS
+  };
 };
 
 export async function handler(event) {
@@ -243,6 +257,13 @@ export async function handler(event) {
     return { statusCode: 401, headers: mergeHeaders(cors), body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
   }
 
+  let wsBuyInCapabilityPromise = null;
+  const ensureWsBuyInCapability = async (buyIn) => {
+    if (Number(buyIn) === DEFAULT_CASH_TABLE_BUY_IN_CHIPS) return { ok: true, skipped: true };
+    if (!wsBuyInCapabilityPromise) wsBuyInCapabilityPromise = checkWsBuyInCapability({ klog });
+    return wsBuyInCapabilityPromise;
+  };
+
   try {
     const result = await beginSql(async (tx) => {
       const matchKey = `quickseat:${maxPlayers}`;
@@ -266,7 +287,7 @@ export async function handler(event) {
       }
 
       const progression = await readPokerProgression(tx, { userId: auth.userId });
-      const createPayload = { userId: auth.userId, maxPlayers, progression };
+      const createPayload = { userId: auth.userId, maxPlayers, progression, ensureWsBuyInCapability };
 
       const preferredRows = await selectCandidate(tx, {
         maxPlayers,
@@ -318,6 +339,33 @@ export async function handler(event) {
       return createdRecommendation;
     });
 
+    if (result?.kind === "ws_buy_in_capability_unavailable") {
+      klog("poker_quick_seat_buy_in_capability_unavailable", {
+        buyIn: result.buyIn,
+        maxPlayers,
+        reason: "buy_in_capability_unavailable"
+      });
+      return {
+        statusCode: 503,
+        headers: mergeHeaders(cors),
+        body: JSON.stringify({ error: "ws_buy_in_capability_unavailable" })
+      };
+    }
+    if (result?.kind === "recommended" && result.requiresWsBuyInCapability) {
+      const capability = await ensureWsBuyInCapability(result.buyIn);
+      if (!capability?.ok) {
+        klog("poker_quick_seat_buy_in_capability_unavailable", {
+          buyIn: result.buyIn,
+          maxPlayers,
+          reason: capability?.reason || "unknown"
+        });
+        return {
+          statusCode: 503,
+          headers: mergeHeaders(cors),
+          body: JSON.stringify({ error: "ws_buy_in_capability_unavailable" })
+        };
+      }
+    }
     if (result?.kind === "buy_in_tier_locked") {
       klog("poker_quick_seat_buy_in_tier_locked", {
         buyIn: result.buyIn,

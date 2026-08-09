@@ -4,7 +4,7 @@ import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const origin = "https://example.test";
 
-function makeHandler({ authResult, progression, calls, unsafe }) {
+function makeHandler({ authResult, progression, calls, unsafe, checkWsBuyInCapability = async () => ({ ok: true }), klog = () => {} }) {
   return loadPokerHandler("netlify/functions/poker-progression.mjs", {
     baseHeaders: () => ({ "cache-control": "no-store" }),
     corsHeaders: () => ({ "access-control-allow-origin": origin }),
@@ -13,11 +13,13 @@ function makeHandler({ authResult, progression, calls, unsafe }) {
       calls.tokens.push(token);
       return authResult;
     },
+    klog,
     beginSql: async (fn) => fn({ unsafe: unsafe || (async () => []) }),
     readPokerProgression: async (_tx, options) => {
       calls.progression.push(options);
       return progression;
-    }
+    },
+    checkWsBuyInCapability
   });
 }
 
@@ -99,6 +101,7 @@ test("poker progression table access allows available tiers, locks historical lo
         ]
       },
       calls: { tokens: [], progression: [] },
+      checkWsBuyInCapability: async () => ({ ok: true }),
       unsafe: async (sql) => {
         const text = String(sql).toLowerCase();
         if (text.includes("select distinct t.id")) return [{ id: tableId }].filter(() => seatRows.length > 0);
@@ -113,6 +116,28 @@ test("poker progression table access allows available tiers, locks historical lo
     });
     assert.equal(JSON.parse(allowed.body).tableAccess.allowed, true);
     assert.equal(JSON.parse(allowed.body).tableAccess.reason, "available");
+
+    const capabilityDenied = await makeHandler({
+      authResult: { valid: true, userId: "access-user" },
+      progression: {
+        balance: 5500,
+        highestUnlockedBuyIn: 5000,
+        availableBuyIns: [5000, 1000],
+        tiers: [{ buyIn: 5000, unlockBankroll: 5500, available: true }]
+      },
+      calls: { tokens: [], progression: [] },
+      checkWsBuyInCapability: async () => ({ ok: false, reason: "buy_in_capability_unavailable" }),
+      unsafe: async (sql) => {
+        const text = String(sql).toLowerCase();
+        if (text.includes("select id, status, buy_in, stakes")) return [{ id: "table-5000", status: "OPEN", buy_in: 5000, stakes: { sb: 50, bb: 100 } }];
+        return [];
+      }
+    })({
+      httpMethod: "GET", queryStringParameters: { tableId: "table-5000" }, headers: { origin, authorization: "Bearer token" }
+    });
+    assert.deepEqual(JSON.parse(capabilityDenied.body).tableAccess, {
+      tableId: "table-5000", buyIn: 5000, allowed: false, rejoin: false, reason: "ws_buy_in_capability_unavailable"
+    });
 
     const locked = await makeAccessHandler("table-100", { id: "table-100", status: "OPEN", buy_in: 100, stakes: { sb: 1, bb: 2 } })({
       httpMethod: "GET", queryStringParameters: { tableId: "table-100" }, headers: { origin, authorization: "Bearer token" }

@@ -2831,7 +2831,7 @@ test("server supports healthz and hello/helloAck smoke flow", async () => {
 
     const response = await fetch(`http://127.0.0.1:${port}/healthz`);
     assert.equal(response.status, 200);
-    assert.equal(response.headers.get("x-poker-buy-in-materialization"), "1");
+    assert.equal(response.headers.get("x-poker-buy-in-materialization"), "2");
     assert.equal(await response.text(), "ok");
   } finally {
     child.kill("SIGTERM");

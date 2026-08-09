@@ -22,7 +22,7 @@ const makeHandler = (queries, options = {}) =>
           if (text.includes("account_type = 'user'")) {
             if (options.balanceError) throw new Error("balance_read_failed");
             if (options.missingAccount) return [];
-            return [{ balance: options.balance ?? 100 }];
+            return [{ balance: options.balance ?? 110 }];
           }
           if (text.includes("insert into public.poker_tables")) {
             return [{ id: "table-1" }];
@@ -118,7 +118,7 @@ const runCustomBuyIn = async () => {
   const notifications = [];
   let capabilityChecks = 0;
   const handler = makeHandler(queries, {
-    balance: 500,
+    balance: 550,
     checkWsBuyInCapability: async () => {
       capabilityChecks += 1;
       return { ok: true };
@@ -147,7 +147,7 @@ const runCustomBuyIn = async () => {
 const runCustomBuyInRolloutGuard = async () => {
   const queries = [];
   const handler = makeHandler(queries, {
-    balance: 500,
+    balance: 550,
     checkWsBuyInCapability: async () => ({ ok: false, reason: "buy_in_capability_unavailable" })
   });
   const response = await handler({
@@ -157,7 +157,34 @@ const runCustomBuyInRolloutGuard = async () => {
   });
   assert.equal(response.statusCode, 503);
   assert.deepEqual(JSON.parse(response.body), { error: "ws_buy_in_capability_unavailable" });
-  assert.equal(queries.length, 0, "custom buy-in must not create a DB table while the WS is too old");
+  assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")), false, "custom buy-in must not create a DB table while the WS is too old");
+};
+
+const runLockedBuyIn = async () => {
+  const queries = [];
+  let capabilityChecks = 0;
+  const handler = makeHandler(queries, {
+    balance: 500,
+    checkWsBuyInCapability: async () => {
+      capabilityChecks += 1;
+      return { ok: true };
+    }
+  });
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ maxPlayers: 6, buyIn: 500 })
+  });
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(JSON.parse(response.body), {
+    error: "buy_in_tier_locked",
+    buyIn: 500,
+    requiredBuyIn: 500,
+    requiredBankroll: 550,
+    balance: 500
+  });
+  assert.equal(capabilityChecks, 0, "locked buy-in should be rejected before the WS capability check");
+  assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")), false);
 };
 
 const runWsCapabilityHeaderCheck = async () => {
@@ -166,7 +193,7 @@ const runWsCapabilityHeaderCheck = async () => {
     fetchImpl: async () => ({
       ok: true,
       status: 200,
-      headers: { get: (name) => name === "x-poker-buy-in-materialization" ? "1" : null }
+      headers: { get: (name) => name === "x-poker-buy-in-materialization" ? "2" : null }
     })
   });
   assert.equal(supported.ok, true);
@@ -176,7 +203,7 @@ const runWsCapabilityHeaderCheck = async () => {
     fetchImpl: async () => ({
       ok: true,
       status: 200,
-      headers: { get: () => null }
+      headers: { get: () => "1" }
     })
   });
   assert.equal(legacy.ok, false);
@@ -230,6 +257,7 @@ await runInvalidBuyIn();
 await runSlashStakes();
 await runCustomBuyIn();
 await runCustomBuyInRolloutGuard();
+await runLockedBuyIn();
 await runWsCapabilityHeaderCheck();
 await runSlowNotifyDoesNotDelayResponse();
 await runMaintenanceGuard();

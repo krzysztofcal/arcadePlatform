@@ -1490,6 +1490,7 @@
     var lobbyWsGeneration = 0;
 
     if (quickSeatBtn) quickSeatBtn.disabled = true;
+    if (createBtn) createBtn.disabled = true;
 
     function requiredCashBuyIn(){
       var value = lobbyContent && lobbyContent.dataset ? Number(lobbyContent.dataset.requiredBuyIn) : NaN;
@@ -1720,14 +1721,17 @@
           var option = document.createElement('option');
           option.value = String(tier.buyIn);
           option.textContent = formatChips(tier.buyIn) + ' CH · blinds ' + formatStakesUi(tier.stakes);
+          option.disabled = tier.available !== true;
           if (Number(tier.buyIn) === previousBuyIn) option.selected = true;
           buyInInput.appendChild(option);
         });
-        if (!Number.isSafeInteger(previousBuyIn) || !data.tiers.some(function(tier){ return Number(tier.buyIn) === previousBuyIn; })){
-          buyInInput.value = data.tiers.length ? String(data.tiers[0].buyIn) : '100';
+        var availableTiers = data.tiers.filter(function(tier){ return tier.available === true; });
+        if (!availableTiers.some(function(tier){ return Number(tier.buyIn) === previousBuyIn; })){
+          buyInInput.value = availableTiers.length ? String(availableTiers[0].buyIn) : (data.tiers.length ? String(data.tiers[0].buyIn) : '100');
         }
+        if (createBtn) createBtn.disabled = availableTiers.length === 0;
       }
-      if (quickSeatBtn) quickSeatBtn.disabled = !(progressionState && Array.isArray(progressionState.availableBuyIns));
+      if (quickSeatBtn) quickSeatBtn.disabled = !(progressionState && Array.isArray(progressionState.availableBuyIns) && progressionState.availableBuyIns.length > 0);
       if (progressionRoadmap){
         progressionRoadmap.innerHTML = '';
         var tiers = data && Array.isArray(data.tiers) ? data.tiers : [];
@@ -2046,14 +2050,18 @@
         setError(errorEl, t('pokerErrInvalidBuyIn', 'Invalid buy-in'));
         return;
       }
+      var tier = progressionState && Array.isArray(progressionState.tiers)
+        ? progressionState.tiers.find(function(item){ return Number(item.buyIn) === buyIn; })
+        : null;
+      if (!tier || tier.available !== true){
+        setError(errorEl, 'This table tier is not available for your current bankroll.');
+        return;
+      }
       var maxPlayers = parseInt(maxPlayersInput ? maxPlayersInput.value : 6, 10) || 6;
       setLoading(createBtn, true);
       try {
         var data = await apiPost(CREATE_URL, { maxPlayers: maxPlayers, buyIn: buyIn });
         if (data.tableId){
-          var tier = progressionState && Array.isArray(progressionState.tiers)
-            ? progressionState.tiers.find(function(item){ return Number(item.buyIn) === buyIn; })
-            : null;
           if (tier && tier.available === true){
             navigateToPokerTable(data.tableId);
           } else {
@@ -2064,6 +2072,7 @@
           setError(errorEl, t('pokerErrNoTableId', 'Table created but no ID returned'));
         }
       } catch (err){
+        if (handleTierLocked(err)) return;
         if (handleInsufficientChips(err)) return;
         if (isAuthError(err)){
           handleAuthExpired({

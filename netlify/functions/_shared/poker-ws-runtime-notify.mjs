@@ -1,3 +1,5 @@
+import { POKER_BUY_IN_MATERIALIZATION_CAPABILITY_VERSION } from "../../../shared/poker-domain/table-economy.mjs";
+
 const DEFAULT_NOTIFY_TIMEOUT_MS = 4_000;
 const BUY_IN_CAPABILITY_HEADER = "x-poker-buy-in-materialization";
 
@@ -64,7 +66,8 @@ export async function checkWsBuyInCapability({
       headers,
       signal: controller.signal
     });
-    const supported = response.ok && readHeader(response, BUY_IN_CAPABILITY_HEADER) === "1";
+    const supported = response.ok
+      && readHeader(response, BUY_IN_CAPABILITY_HEADER) === POKER_BUY_IN_MATERIALIZATION_CAPABILITY_VERSION;
     if (!supported) {
       klog("poker_ws_buy_in_capability_unavailable", {
         status: response.status,

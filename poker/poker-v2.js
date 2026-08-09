@@ -638,12 +638,24 @@
       headers: { Authorization: 'Bearer ' + token }
     }).then(function(response){
       return response.json().catch(function(){ return {}; }).then(function(body){
-        if (!response.ok) throw new Error(body && (body.error || body.reason) || 'table_access_failed');
+        if (!response.ok){
+          var responseError = new Error(body && (body.error || body.reason) || 'table_access_failed');
+          responseError.status = response.status;
+          responseError.allowWsFallback = response.status >= 500;
+          throw responseError;
+        }
         return body;
       });
+    }, function(error){
+      if (error && !Number.isInteger(error.status)) error.allowWsFallback = true;
+      throw error;
     }).then(function(body){
       var access = body && body.tableAccess;
-      if (!access || access.tableId !== tableId) throw new Error('table_access_unavailable');
+      if (!access || access.tableId !== tableId){
+        var accessError = new Error('table_access_unavailable');
+        accessError.allowWsFallback = true;
+        throw accessError;
+      }
       return access;
     });
   }
@@ -671,6 +683,11 @@
       return true;
     }).catch(function(error){
       klog('poker_table_access_preflight_failed', { code: error && (error.message || error.code) ? (error.message || error.code) : 'unknown' });
+      if (error && error.allowWsFallback === true){
+        currentAccessToken = token;
+        startLiveMode(token);
+        return true;
+      }
       state.statusText = LIVE_STATUS_COPY.error;
       setError('This table is not available. Return to the lobby.');
       markBootReady();

@@ -239,6 +239,9 @@ function loadLobbyHarness(options = {}){
     pokerRefresh: makeElement('pokerRefresh'),
     pokerQuickSeat: makeElement('pokerQuickSeat'),
     pokerCreate: makeElement('pokerCreate'),
+    pokerProgressRoadmap: makeElement('pokerProgressRoadmap'),
+    pokerProgressBankroll: makeElement('pokerProgressBankroll'),
+    pokerProgressCelebration: makeElement('pokerProgressCelebration'),
     pokerSb: makeElement('pokerSb'),
     pokerBb: makeElement('pokerBb'),
     pokerBuyIn: makeElement('pokerBuyIn'),
@@ -451,11 +454,24 @@ assert.equal(lobbyHarness.getRequestLobbySnapshotCalls(), 1, 'lobby refresh shou
 {
   const fallbackHarness = loadLobbyHarness({
     balanceError: true,
-    fetchResponse: async (url) => ({
-      ok: true,
-      status: 200,
-      json: async () => url.includes('poker-create-table') ? { tableId: 'table-after-fallback' } : { ok: true },
-    }),
+    fetchResponse: async (url) => {
+      if (url.includes('poker-progression')) return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          userId: 'user-1',
+          balance: 110,
+          highestUnlockedBuyIn: 100,
+          availableBuyIns: [100],
+          tiers: [{ buyIn: 100, available: true, unlocked: true, stakes: { sb: 1, bb: 2 } }]
+        })
+      };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => url.includes('poker-create-table') ? { tableId: 'table-after-fallback' } : { ok: true }
+      };
+    },
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
   fallbackHarness.elements.pokerCreate.click();

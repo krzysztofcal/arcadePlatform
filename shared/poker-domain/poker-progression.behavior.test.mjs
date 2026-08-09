@@ -31,6 +31,10 @@ test("progression accepts a sorted deduplicated configured catalog and rejects i
     (error) => error?.code === "poker_buy_in_tiers_config_invalid"
   );
   assert.throws(
+    () => resolvePokerBuyInTiers({ POKER_BUY_IN_TIERS_JSON: "[100, 125]" }),
+    (error) => error?.code === "poker_buy_in_tiers_config_invalid"
+  );
+  assert.throws(
     () => resolvePokerBuyInTiers({ POKER_BUY_IN_TIERS_JSON: "[]" }),
     (error) => error?.code === "poker_buy_in_tiers_config_invalid"
   );

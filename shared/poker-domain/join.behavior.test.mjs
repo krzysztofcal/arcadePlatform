@@ -59,7 +59,7 @@ function withLockedState(args, { validateStateForStorage = () => true } = {}) {
     ? Number(args.progressionBalance)
     : configuredBuyIn + Math.ceil(configuredBuyIn / 10);
   const progressionEnv = args?.progressionEnv || {
-    POKER_BUY_IN_TIERS_JSON: JSON.stringify([100, 120, 140, 150, 180, 200, 250, 500, 999])
+    POKER_BUY_IN_TIERS_JSON: JSON.stringify([100, 150, 200, 250, 300, 500, 1_000])
   };
   const beginSql = typeof originalBeginSql === "function"
     ? (fn) => originalBeginSql(async (tx) => {
@@ -782,7 +782,7 @@ test("new join replaces stale state-only seat occupants that conflict with the i
     requestId: "join-poison-new",
     autoSeat: true,
     preferredSeatNo: 1,
-    buyIn: 120,
+    buyIn: 100,
     postTransactionFn: async () => ({ ok: true })
   }));
 
@@ -791,11 +791,11 @@ test("new join replaces stale state-only seat occupants that conflict with the i
   assert.equal(result.seatNo, 4);
   assert.equal(result.snapshot.stateVersion, 6);
   assert.deepEqual(result.snapshot.seats.map((seat) => seat.userId), ["human_1", "bot_1", "bot_2", "human_2"]);
-  assert.equal(result.snapshot.stacks.human_2, 120);
+  assert.equal(result.snapshot.stacks.human_2, 100);
   assert.equal(result.snapshot.stacks.human_1, 100);
   assert.equal(result.snapshot.stacks.bot_1, 200);
   assert.equal(result.snapshot.stacks.bot_2, 200);
-  assert.deepEqual(store.stateRow.state.stacks, { human_1: 100, bot_1: 200, bot_2: 200, human_2: 120 });
+  assert.deepEqual(store.stateRow.state.stacks, { human_1: 100, bot_1: 200, bot_2: 200, human_2: 100 });
   assert.deepEqual(store.stateRow.state.seats.map((seat) => seat.userId), ["human_1", "bot_1", "bot_2", "human_2"]);
   assert.equal(Object.prototype.hasOwnProperty.call(store.stateRow.state.stacks, "ghost_human"), false);
 });
@@ -949,15 +949,15 @@ test("authoritative auto-seat respects preferred seat and initializes stack from
     requestId: "r7",
     autoSeat: true,
     preferredSeatNo: 2,
-    buyIn: 180,
+    buyIn: 200,
     postTransactionFn: async () => ({ ok: true })
   }));
 
   assert.equal(result.ok, true);
   assert.equal(result.seatNo, 3);
-  assert.equal(result.stack, 180);
+  assert.equal(result.stack, 200);
   assert.equal(writes.length, 1);
-  assert.equal(writes[0].stacks.u2, 180);
+  assert.equal(writes[0].stacks.u2, 200);
 }));
 
 test("authoritative auto-seat retries past stale seat conflicts and uses the next free seat", async () => withBotsDisabled(async () => {
@@ -1009,7 +1009,7 @@ test("authoritative auto-seat retries past stale seat conflicts and uses the nex
     requestId: "r7-retry",
     autoSeat: true,
     preferredSeatNo: 1,
-    buyIn: 140,
+    buyIn: 200,
     postTransactionFn: async () => ({ ok: true })
   }));
 
@@ -1064,7 +1064,7 @@ test("authoritative auto-seat retries when insert is skipped by unique conflict 
     requestId: "r7-retry-noabort",
     autoSeat: true,
     preferredSeatNo: 1,
-    buyIn: 140,
+    buyIn: 200,
     postTransactionFn: async () => ({ ok: true })
   }));
 
@@ -1139,7 +1139,7 @@ test("authoritative auto-seat reclaims inactive seat blockers before reporting t
     requestId: "r-inactive-reclaim",
     autoSeat: true,
     preferredSeatNo: 4,
-    buyIn: 140,
+    buyIn: 200,
     postTransactionFn: async () => ({ ok: true })
   }));
 

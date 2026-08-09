@@ -1,6 +1,7 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
+import { checkWsBuyInCapability } from "./_shared/poker-ws-runtime-notify.mjs";
 import { isConfiguredPokerBuyIn, readPokerProgression } from "../../shared/poker-domain/poker-progression.mjs";
-import { isCanonicalPokerStakes } from "../../shared/poker-domain/table-economy.mjs";
+import { DEFAULT_CASH_TABLE_BUY_IN_CHIPS, isCanonicalPokerStakes } from "../../shared/poker-domain/table-economy.mjs";
 
 const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
 
@@ -99,10 +100,29 @@ export async function handler(event) {
         : null;
       return { progression, rejoinableTableIds, tableAccess };
     });
+    let tableAccess = result.tableAccess;
+    if (tableAccess?.allowed === true
+      && tableAccess.rejoin !== true
+      && Number(tableAccess.buyIn) !== DEFAULT_CASH_TABLE_BUY_IN_CHIPS) {
+      const capability = await checkWsBuyInCapability({ klog });
+      if (!capability?.ok) {
+        klog("poker_progression_table_access_capability_unavailable", {
+          tableId: tableAccess.tableId,
+          buyIn: tableAccess.buyIn,
+          reason: capability?.reason || "unknown"
+        });
+        tableAccess = {
+          ...tableAccess,
+          allowed: false,
+          rejoin: false,
+          reason: "ws_buy_in_capability_unavailable"
+        };
+      }
+    }
     return {
       statusCode: 200,
       headers: mergeHeaders(cors),
-      body: JSON.stringify({ userId: auth.userId, ...result.progression, rejoinableTableIds: result.rejoinableTableIds, tableAccess: result.tableAccess })
+      body: JSON.stringify({ userId: auth.userId, ...result.progression, rejoinableTableIds: result.rejoinableTableIds, tableAccess })
     };
   } catch (error) {
     const code = error?.code === "poker_buy_in_tiers_config_invalid"

@@ -1,4 +1,4 @@
-import { calculateCanonicalPokerStakes, DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "./table-economy.mjs";
+import { calculateCanonicalPokerStakes, DEFAULT_CASH_TABLE_BUY_IN_CHIPS, isCanonicalPokerBuyIn } from "./table-economy.mjs";
 
 const BUY_IN_TIERS_ENV = "POKER_BUY_IN_TIERS_JSON";
 const POSTGRES_INTEGER_MAX = 2_147_483_647;
@@ -62,7 +62,7 @@ export function resolvePokerBuyInTiers(env = process.env) {
     try {
       const normalized = normalizePositiveSafeInteger(value, "poker_buy_in_tiers_config_invalid");
       if (normalized > POSTGRES_INTEGER_MAX) throw configError();
-      if (!calculateCanonicalPokerStakes(normalized)) throw configError();
+      if (!isCanonicalPokerBuyIn(normalized)) throw configError();
       return normalized;
     } catch {
       throw configError();

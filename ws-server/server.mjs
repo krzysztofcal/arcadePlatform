@@ -72,7 +72,11 @@ import {
   setPokerLogRuntimeAuditLogger
 } from "./poker/observability/poker-log-runtime-control.mjs";
 import { getBotConfig } from "./shared/poker-domain/bots.mjs";
-import { calculateCanonicalPokerStakes, DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../shared/poker-domain/table-economy.mjs";
+import {
+  calculateCanonicalPokerStakes,
+  DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
+  POKER_BUY_IN_MATERIALIZATION_CAPABILITY_VERSION
+} from "../shared/poker-domain/table-economy.mjs";
 import { createContinuousBotTableRepository } from "./poker/persistence/continuous-bot-table-repository.mjs";
 import { createContinuousBotTableSupervisor } from "./poker/runtime/continuous-bot-table-supervisor.mjs";
 import { handleContinuousBotRotationAtSettled } from "./poker/runtime/continuous-bot-table-rotation.mjs";
@@ -4036,7 +4040,7 @@ async function handleHttpRequest(req, res) {
   if (req.url === "/healthz") {
     res.writeHead(200, {
       "content-type": "text/plain",
-      "x-poker-buy-in-materialization": "1"
+      "x-poker-buy-in-materialization": POKER_BUY_IN_MATERIALIZATION_CAPABILITY_VERSION
     });
     res.end("ok");
     return;

@@ -14,7 +14,7 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ mode, queries, notifications = [], logs = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2 }) =>
+const makeHandler = ({ mode, queries, notifications = [], logs = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, checkWsBuyInCapability = async () => ({ ok: true }) }) =>
   loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -82,6 +82,7 @@ const makeHandler = ({ mode, queries, notifications = [], logs = [], balance = 1
       notifications.push(payload);
       return { ok: true };
     },
+    checkWsBuyInCapability,
     klog: (kind, data) => { logs.push({ kind, data }); },
   });
 
@@ -124,6 +125,24 @@ const run = async () => {
       "quick seat should bump table activity when recommending"
     );
     assert.equal(notifications.length, 0, "quick seat should not materialize runtime for an existing table recommendation");
+  }
+  {
+    const queries = [];
+    let capabilityChecks = 0;
+    const handler = makeHandler({
+      mode: "prefer_humans",
+      queries,
+      balance: 550,
+      candidateBuyIn: 500,
+      checkWsBuyInCapability: async () => {
+        capabilityChecks += 1;
+        return { ok: false, reason: "buy_in_capability_unavailable" };
+      }
+    });
+    const response = await callQuickSeat(handler, { maxPlayers: 6 });
+    assert.equal(response.statusCode, 503);
+    assert.deepEqual(JSON.parse(response.body), { error: "ws_buy_in_capability_unavailable" });
+    assert.equal(capabilityChecks, 1);
   }
   {
     const queries = [];
@@ -380,6 +399,24 @@ const run = async () => {
     } finally {
       process.env.CHIPS_ENABLED = "1";
     }
+  }
+  {
+    const queries = [];
+    let capabilityChecks = 0;
+    const handler = makeHandler({
+      mode: "create",
+      queries,
+      balance: 550,
+      checkWsBuyInCapability: async () => {
+        capabilityChecks += 1;
+        return { ok: false, reason: "buy_in_capability_unavailable" };
+      }
+    });
+    const response = await callQuickSeat(handler, { maxPlayers: 6 });
+    assert.equal(response.statusCode, 503);
+    assert.deepEqual(JSON.parse(response.body), { error: "ws_buy_in_capability_unavailable" });
+    assert.equal(capabilityChecks, 1);
+    assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")), false);
   }
 
 };

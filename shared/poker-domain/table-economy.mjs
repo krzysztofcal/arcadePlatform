@@ -1,5 +1,6 @@
 export const DEFAULT_CASH_TABLE_BUY_IN_CHIPS = 100;
 export const MAX_POKER_STAKE_CHIPS = 1_000_000;
+export const POKER_BUY_IN_MATERIALIZATION_CAPABILITY_VERSION = "2";
 
 export function isBotFundingAllowedForBuyIn(buyIn) {
   return Number(buyIn) === DEFAULT_CASH_TABLE_BUY_IN_CHIPS;
@@ -12,6 +13,12 @@ export function calculateCanonicalPokerStakes(buyIn) {
   const sb = Math.max(1, Math.floor(bb / 2));
   if (sb > MAX_POKER_STAKE_CHIPS || bb > MAX_POKER_STAKE_CHIPS) return null;
   return { sb, bb };
+}
+
+export function isCanonicalPokerBuyIn(buyIn) {
+  const normalizedBuyIn = Number(buyIn);
+  const canonical = calculateCanonicalPokerStakes(normalizedBuyIn);
+  return !!canonical && normalizedBuyIn === canonical.bb * 50;
 }
 
 export function isCanonicalPokerStakes(buyIn, stakes) {
