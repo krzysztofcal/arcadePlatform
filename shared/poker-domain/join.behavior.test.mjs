@@ -188,6 +188,103 @@ test("fresh join locks the bankroll row before posting the table buy-in", async 
   assert.equal(events.indexOf("postTransaction") > 0, true);
 }));
 
+test("fresh join rejects a 500 CH tier when bankroll is 549 CH", async () => withBotsDisabled(async () => {
+  const writes = [];
+  await assert.rejects(
+    () => executePokerJoinAuthoritative(withStorageValidator({
+      beginSql: async (fn) => fn({
+        unsafe: async (sql) => {
+          const text = String(sql);
+          if (text.includes("from public.poker_tables")) return [{ id: "t-tier-locked", status: "OPEN", max_players: 6, buy_in: 500 }];
+          if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc;")) return [];
+          if (text.includes("select version, state from public.poker_state")) return [{ version: 1, state: { tableId: "t-tier-locked", seats: [], stacks: {} } }];
+          if (text.includes("insert into public.poker_seats")) writes.push("insert_seat");
+          return [];
+        }
+      }),
+      tableId: "t-tier-locked",
+      userId: "u-tier-locked",
+      requestId: "join-tier-locked",
+      buyIn: 500,
+      progressionBalance: 549,
+      postTransactionFn: async () => { writes.push("ledger_buyin"); return { ok: true }; }
+    })),
+    (error) => {
+      assert.equal(error?.code, "buy_in_tier_locked");
+      assert.equal(error?.buyIn, 500);
+      assert.equal(error?.requiredBankroll, 550);
+      assert.equal(error?.balance, 549);
+      return true;
+    }
+  );
+  assert.deepEqual(writes, []);
+}));
+
+test("active rejoin succeeds below the current tier threshold without reading progression", async () => withBotsDisabled(async () => {
+  let progressionReads = 0;
+  const result = await executePokerJoinAuthoritative(withStorageValidator({
+    beginSql: async (fn) => fn({
+      unsafe: async (sql, params = []) => {
+        const text = String(sql);
+        if (text.includes("from public.poker_tables")) return [{ id: "t-rejoin-low-bankroll", status: "OPEN", max_players: 6, buy_in: 500 }];
+        if (text.includes("from public.chips_accounts")) {
+          progressionReads += 1;
+          return [{ balance: 0 }];
+        }
+        if (text.includes("from public.poker_seats") && text.includes("seat_no, stack")) return [{ seat_no: 1, stack: 500 }];
+        if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc;")) {
+          return [{ user_id: "u-rejoin-low-bankroll", seat_no: 1, status: "ACTIVE", stack: 500, is_bot: false, bot_profile: null, leave_after_hand: false }];
+        }
+        if (text.includes("select version, state from public.poker_state")) {
+          return [{ version: 1, state: { tableId: "t-rejoin-low-bankroll", seats: [{ userId: "u-rejoin-low-bankroll", seatNo: 1, status: "ACTIVE" }], stacks: { "u-rejoin-low-bankroll": 500 } } }];
+        }
+        return [];
+      }
+    }),
+    tableId: "t-rejoin-low-bankroll",
+    userId: "u-rejoin-low-bankroll",
+    requestId: "rejoin-low-bankroll",
+    buyIn: 500,
+    progressionBalance: 0,
+    postTransactionFn: async () => ({ ok: true })
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.rejoin, true);
+  assert.equal(result.stack, 500);
+  assert.equal(progressionReads, 0);
+}));
+
+test("active rejoin succeeds when its buy-in is absent from the current catalog", async () => withBotsDisabled(async () => {
+  const result = await executePokerJoinAuthoritative(withStorageValidator({
+    beginSql: async (fn) => fn({
+      unsafe: async (sql) => {
+        const text = String(sql);
+        if (text.includes("from public.poker_tables")) return [{ id: "t-rejoin-config-drift", status: "OPEN", max_players: 6, buy_in: 500 }];
+        if (text.includes("from public.poker_seats") && text.includes("seat_no, stack")) return [{ seat_no: 1, stack: 500 }];
+        if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc;")) {
+          return [{ user_id: "u-rejoin-config-drift", seat_no: 1, status: "ACTIVE", stack: 500, is_bot: false, bot_profile: null, leave_after_hand: false }];
+        }
+        if (text.includes("select version, state from public.poker_state")) {
+          return [{ version: 1, state: { tableId: "t-rejoin-config-drift", seats: [{ userId: "u-rejoin-config-drift", seatNo: 1, status: "ACTIVE" }], stacks: { "u-rejoin-config-drift": 500 } } }];
+        }
+        return [];
+      }
+    }),
+    tableId: "t-rejoin-config-drift",
+    userId: "u-rejoin-config-drift",
+    requestId: "rejoin-config-drift",
+    buyIn: 500,
+    progressionBalance: 0,
+    progressionEnv: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) },
+    postTransactionFn: async () => ({ ok: true })
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.rejoin, true);
+  assert.equal(result.stack, 500);
+}));
+
 test("rejects malformed stringified state with state_invalid", async () => {
   await assert.rejects(
     () => executePokerJoinAuthoritative(withLockedState({

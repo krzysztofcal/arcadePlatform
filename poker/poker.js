@@ -1678,8 +1678,8 @@
 
     function updateProgressionHighWaterMark(data){
       var key = progressionStorageKey(data);
-      var current = Number(data && data.highestUnlockedIndex);
-      if (!key || !Number.isInteger(current) || current < 0) return;
+      var current = Number(data && data.highestUnlockedBuyIn);
+      if (!key || !Number.isSafeInteger(current) || current <= 0) return;
       try {
         var storedRaw = window.localStorage.getItem(key);
         if (storedRaw == null){
@@ -1687,9 +1687,13 @@
           return;
         }
         var stored = Number(storedRaw);
-        if (!Number.isInteger(stored) || current > stored){
-          window.localStorage.setItem(key, String(Math.max(current, Number.isInteger(stored) ? stored : current)));
-          if (!Number.isInteger(stored) || current > stored) showProgressionCelebration(data);
+        if (!Number.isSafeInteger(stored) || stored <= 0){
+          window.localStorage.setItem(key, String(current));
+          return;
+        }
+        if (current > stored){
+          window.localStorage.setItem(key, String(current));
+          showProgressionCelebration(data);
         }
       } catch (_err){}
     }
@@ -1718,16 +1722,23 @@
         var tiers = data && Array.isArray(data.tiers) ? data.tiers : [];
         tiers.forEach(function(tier, index){
           var row = document.createElement('div');
-          row.className = 'poker-progression-row' + (tier.available ? ' poker-progression-row--available' : '') + (!tier.unlocked ? ' poker-progression-row--locked' : '');
+          var available = tier.available === true;
+          var unlocked = tier.unlocked === true;
+          row.className = 'poker-progression-row'
+            + (available ? ' poker-progression-row--available' : '')
+            + (!unlocked ? ' poker-progression-row--locked' : '')
+            + (unlocked && !available ? ' poker-progression-row--unavailable' : '');
           var label = document.createElement('span');
           label.className = 'poker-progression-row__tier';
-          label.textContent = (tier.unlocked ? '✅ ' : '🔒 ') + formatChips(tier.buyIn) + ' CH' + (index === Number(data.highestUnlockedIndex) ? ' (Current)' : '');
+          label.textContent = (available ? '✅ ' : (unlocked ? '🔓 ' : '🔒 ')) + formatChips(tier.buyIn) + ' CH' + (index === Number(data.highestUnlockedIndex) ? ' (Current)' : '');
           row.appendChild(label);
           var detail = document.createElement('span');
           detail.className = 'poker-progression-row__detail';
-          detail.textContent = tier.unlocked
+          detail.textContent = available
             ? 'Available'
-            : 'Requires ' + formatChips(tier.unlockBankroll) + ' CH · ' + formatChips(tier.progressPercent) + '%';
+            : unlocked
+              ? 'Unlocked · not currently available'
+              : 'Requires ' + formatChips(tier.unlockBankroll) + ' CH · ' + formatChips(tier.progressPercent) + '%';
           row.appendChild(detail);
           progressionRoadmap.appendChild(row);
         });

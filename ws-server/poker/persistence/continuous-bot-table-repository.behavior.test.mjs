@@ -103,6 +103,27 @@ test("reconcile creates at most two missing tables per sweep", async () => {
   assert.equal(result.remainingTableCount, 98);
 });
 
+test("reconcile rejects a buy-in catalog that cannot serve fixed 100 CH continuous tables", async () => {
+  let beginCalled = false;
+  const repository = createContinuousBotTableRepository({
+    env: {
+      SUPABASE_DB_URL: "postgres://example.invalid/db",
+      POKER_BOTS_ENABLED: "1",
+      POKER_BUY_IN_TIERS_JSON: "[500,1000]"
+    },
+    beginSql: async (run) => {
+      beginCalled = true;
+      return run({ unsafe: async () => [] });
+    }
+  });
+
+  const result = await repository.reconcile();
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "poker_buy_in_tiers_config_invalid");
+  assert.equal(beginCalled, false);
+});
+
 test("requestRetirement persists a due rotation for the exact managed table", async () => {
   const tableId = "00000000-0000-4000-8000-000000000807";
   const queries = [];

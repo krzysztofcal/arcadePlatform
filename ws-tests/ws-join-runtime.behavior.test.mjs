@@ -375,6 +375,7 @@ function runtimeJoinEnv({ secret, filePath }) {
     WS_AUTH_REQUIRED: "1",
     WS_AUTH_TEST_SECRET: secret,
     WS_PERSISTED_STATE_FILE: filePath,
+    POKER_BUY_IN_TIERS_JSON: JSON.stringify([100, 150, 500, 1_000]),
     WS_AUTHORITATIVE_JOIN_ENABLED: "1",
     POKER_BOTS_ENABLED: "1",
     POKER_BOTS_MAX_PER_TABLE: "2",
@@ -391,6 +392,7 @@ test("authoritative WS table_join returns a fully seated stacked snapshot and ke
   const secret = "auth-join-runtime-secret";
   const tableId = "table_auth_join_runtime";
   const store = {
+    accounts: [{ user_id: "runtime_human", account_type: "USER", balance: 1_000 }],
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 150 },
@@ -500,10 +502,54 @@ test("authoritative WS table_join returns a fully seated stacked snapshot and ke
   }
 });
 
+test("authoritative WS join preserves buy-in tier metadata in the rejected commandResult", async () => {
+  const secret = "auth-join-tier-locked-secret";
+  const tableId = "table_auth_join_tier_locked";
+  const store = {
+    accounts: [{ user_id: "locked_human", account_type: "USER", balance: 549 }],
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 500 },
+        seatRows: [],
+        stateRow: { version: 0, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const { port, child } = await createServer({ env: runtimeJoinEnv({ secret, filePath }) });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "locked_human" }), "auth-tier-locked");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "join-tier-locked-runtime",
+      ts: "2026-02-28T06:15:00Z",
+      payload: { tableId, seatNo: 1, buyIn: 500 }
+    });
+    const result = await nextCommandResultForRequest(ws, "join-tier-locked-runtime");
+    assert.equal(result.payload.status, "rejected");
+    assert.equal(result.payload.reason, "buy_in_tier_locked");
+    assert.equal(result.payload.buyIn, 500);
+    assert.equal(result.payload.requiredBankroll, 550);
+    assert.equal(result.payload.balance, 549);
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("authoritative WS table_join can progress through human act and bot timeout autoplay", async () => {
   const secret = "auth-join-act-secret";
   const tableId = "table_auth_join_act";
   const store = {
+    accounts: [{ user_id: "act_human", account_type: "USER", balance: 1_000 }],
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 150 },
@@ -634,6 +680,7 @@ test("authoritative repeated and replayed table_join keep bot seating stable and
   const secret = "auth-join-replay-secret";
   const tableId = "table_auth_join_replay";
   const store = {
+    accounts: [{ user_id: "replay_human", account_type: "USER", balance: 1_000 }],
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 150 },

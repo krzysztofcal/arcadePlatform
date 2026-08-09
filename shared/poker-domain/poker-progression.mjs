@@ -64,7 +64,9 @@ export function resolvePokerBuyInTiers(env = process.env) {
       throw configError();
     }
   });
-  return [...new Set(tiers)].sort((left, right) => left - right);
+  const normalizedTiers = [...new Set(tiers)].sort((left, right) => left - right);
+  if (!normalizedTiers.includes(DEFAULT_CASH_TABLE_BUY_IN_CHIPS)) throw configError();
+  return normalizedTiers;
 }
 
 export function calculateUnlockBankroll(buyIn) {
