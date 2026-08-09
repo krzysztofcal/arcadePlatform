@@ -255,7 +255,7 @@ export async function handler(event) {
         const recommendation = await recommendSeatAtTable(tx, {
           tableId: existingRows[0].id,
           userId: auth.userId,
-          maxPlayers,
+          maxPlayers: existingRows[0].max_players,
           buyIn: existingRows[0].buy_in,
           tableStakes: existingRows[0].stakes,
           allowCreateFallback: false

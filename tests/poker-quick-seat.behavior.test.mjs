@@ -14,7 +14,7 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ mode, queries, notifications = [], logs = [], balance = 110, balanceError = false, candidateBuyIn = 100 }) =>
+const makeHandler = ({ mode, queries, notifications = [], logs = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2 }) =>
   loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -57,7 +57,7 @@ const makeHandler = ({ mode, queries, notifications = [], logs = [], balance = 1
           }
 
           if (text.includes("where table_id = $1 and user_id = $2") && text.includes("limit 1")) {
-            if (mode === "already_seated") return [{ seat_no: 2 }];
+            if (mode === "already_seated") return [{ seat_no: activeSeatNo }];
             return [];
           }
 
@@ -146,10 +146,10 @@ const run = async () => {
   {
     const queries = [];
     const notifications = [];
-    const handler = makeHandler({ mode: "already_seated", queries, notifications, balance: 0 });
-    const res = await callQuickSeat(handler, { maxPlayers: 6 });
+    const handler = makeHandler({ mode: "already_seated", queries, notifications, balance: 0, activeSeatNo: 6 });
+    const res = await callQuickSeat(handler, { maxPlayers: 2 });
     assert.equal(res.statusCode, 200);
-    assert.equal(JSON.parse(res.body).seatNo, 2);
+    assert.equal(JSON.parse(res.body).seatNo, 6);
     assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("account_type = 'user'")), false);
   }
 

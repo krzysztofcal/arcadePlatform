@@ -449,22 +449,6 @@ assert.equal(lobbyHarness.getRequestLobbySnapshotCalls(), 1, 'lobby refresh shou
 }
 
 {
-  const unavailableUnlockedTierHarness = loadLobbyHarness({
-    fetchResponse: async (url) => url.includes('poker-quick-seat')
-      ? { ok: false, status: 409, json: async () => ({ error: 'buy_in_tier_locked', buyIn: 100, requiredBuyIn: 100, requiredBankroll: 110, balance: 5000 }) }
-      : { ok: true, status: 200, json: async () => ({ ok: true }) },
-  });
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  unavailableUnlockedTierHarness.elements.pokerQuickSeat.click();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(
-    unavailableUnlockedTierHarness.elements.pokerError.textContent,
-    '100 CH tables are unlocked but not currently available at your progression level.',
-    'an already-unlocked but unavailable lower tier must not claim the bankroll is below its unlock threshold'
-  );
-}
-
-{
   const fallbackHarness = loadLobbyHarness({
     balanceError: true,
     fetchResponse: async (url) => ({

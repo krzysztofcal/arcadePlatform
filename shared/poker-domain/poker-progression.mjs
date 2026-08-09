@@ -62,6 +62,7 @@ export function resolvePokerBuyInTiers(env = process.env) {
     try {
       const normalized = normalizePositiveSafeInteger(value, "poker_buy_in_tiers_config_invalid");
       if (normalized > POSTGRES_INTEGER_MAX) throw configError();
+      if (!calculateCanonicalPokerStakes(normalized)) throw configError();
       return normalized;
     } catch {
       throw configError();

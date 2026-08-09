@@ -1,4 +1,4 @@
-const MAX_STAKES = 1_000_000;
+import { MAX_POKER_STAKE_CHIPS } from "../../../shared/poker-domain/table-economy.mjs";
 
 const isPlainObject = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
@@ -25,7 +25,7 @@ const validateStakes = (stakes) => {
   if (sb < 0) return invalid("sb_negative");
   if (bb <= 0) return invalid("bb_non_positive");
   if (sb >= bb) return invalid("sb_not_less_than_bb");
-  if (sb > MAX_STAKES || bb > MAX_STAKES) return invalid("stakes_too_large", { max: MAX_STAKES });
+  if (sb > MAX_POKER_STAKE_CHIPS || bb > MAX_POKER_STAKE_CHIPS) return invalid("stakes_too_large", { max: MAX_POKER_STAKE_CHIPS });
   return { ok: true, value: { sb, bb } };
 };
 

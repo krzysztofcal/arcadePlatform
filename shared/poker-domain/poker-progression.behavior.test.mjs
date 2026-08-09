@@ -12,6 +12,7 @@ test("canonical poker stakes keep every tier at a 50 BB starting stack", () => {
   assert.deepEqual(calculateCanonicalPokerStakes(100), { sb: 1, bb: 2 });
   assert.deepEqual(calculateCanonicalPokerStakes(1_000), { sb: 10, bb: 20 });
   assert.deepEqual(calculateCanonicalPokerStakes(10_000_000), { sb: 100_000, bb: 200_000 });
+  assert.equal(calculateCanonicalPokerStakes(100_000_000), null);
 });
 
 test("progression resolves the default catalog and unlocks only the highest tier plus one fallback", () => {
@@ -39,6 +40,10 @@ test("progression accepts a sorted deduplicated configured catalog and rejects i
   );
   assert.throws(
     () => resolvePokerBuyInTiers({ POKER_BUY_IN_TIERS_JSON: "[100, 2147483648]" }),
+    (error) => error?.code === "poker_buy_in_tiers_config_invalid"
+  );
+  assert.throws(
+    () => resolvePokerBuyInTiers({ POKER_BUY_IN_TIERS_JSON: "[100, 100000000]" }),
     (error) => error?.code === "poker_buy_in_tiers_config_invalid"
   );
 });

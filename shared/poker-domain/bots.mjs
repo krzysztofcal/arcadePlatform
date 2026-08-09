@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
+import { MAX_POKER_STAKE_CHIPS } from "./table-economy.mjs";
 
 const TRUE_SET = new Set(["1", "true", "yes"]);
 const FALSE_SET = new Set(["0", "false", "no"]);
-const MAX_STAKES = 1_000_000;
 
 function normalizeString(value) {
   return String(value == null ? "" : value).trim();
@@ -64,7 +64,7 @@ function parseStakes(raw) {
   if (isPlainObject(raw)) {
     const sb = normalizeInt(raw.sb);
     const bb = normalizeInt(raw.bb);
-    if (sb == null || bb == null || sb < 0 || bb <= 0 || sb >= bb || sb > MAX_STAKES || bb > MAX_STAKES) {
+    if (sb == null || bb == null || sb < 0 || bb <= 0 || sb >= bb || sb > MAX_POKER_STAKE_CHIPS || bb > MAX_POKER_STAKE_CHIPS) {
       return { ok: false, error: "invalid_stakes" };
     }
     return { ok: true, value: { sb, bb } };

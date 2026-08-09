@@ -52,8 +52,49 @@ Set these as Netlify environment variables (Site settings -> Environment variabl
 - `POKER_BUY_IN_TIERS_JSON` (shared ordered buy-in tier catalog; omitted uses the built-in catalog)
 
 Operational notes:
-- Before production rollout, verify every active table buy-in is present in the initial catalog: `select distinct buy_in from public.poker_tables where status <> 'CLOSED';`.
-- The configured catalog must include `100` CH while continuous tables use their fixed `100` CH buy-in; values must fit the PostgreSQL `integer` range.
+- Before production rollout, run a read-only preflight for every active table's `buy_in` + `stakes` pair. List the complete set with:
+
+  ```sql
+  select id, buy_in, stakes, lifecycle_kind, managed_profile_key
+  from public.poker_tables
+  where status <> 'CLOSED'
+  order by buy_in, id;
+  ```
+
+  Then run this mismatch query and stop the rollout if it returns any row:
+
+  ```sql
+  with expected as (
+    select id, buy_in, stakes, lifecycle_kind, managed_profile_key,
+      greatest(2, round(buy_in::numeric / 50))::bigint as expected_bb
+    from public.poker_tables
+    where status <> 'CLOSED'
+  ), normalized as (
+    select id, buy_in, stakes, lifecycle_kind, managed_profile_key,
+      greatest(1, floor(expected_bb / 2))::bigint as expected_sb,
+      expected_bb,
+      case when jsonb_typeof(stakes) = 'object' and stakes->>'sb' ~ '^[0-9]+$'
+        then (stakes->>'sb')::bigint end as actual_sb,
+      case when jsonb_typeof(stakes) = 'object' and stakes->>'bb' ~ '^[0-9]+$'
+        then (stakes->>'bb')::bigint end as actual_bb
+    from expected
+  )
+  select id, buy_in, stakes,
+    jsonb_build_object('sb', expected_sb, 'bb', expected_bb) as canonical_stakes
+  from normalized
+  where actual_sb is distinct from expected_sb
+     or actual_bb is distinct from expected_bb;
+  ```
+
+  Every returned pair must be repaired or the table lifecycle must be consciously resolved before enabling enforcement. Also verify the continuous-table profile remains canonical:
+
+  ```sql
+  select profile_key, small_blind, big_blind
+  from public.poker_managed_table_profiles
+  where profile_key = 'CONTINUOUS_BOT_DEFAULT';
+  ```
+
+  It must be `1/2`. The configured catalog must include every active table `buy_in` and `100` CH while continuous tables use their fixed `100` CH buy-in; values must fit the PostgreSQL `integer` range and generate blinds no larger than `1,000,000` CH.
 - Roll out the Netlify and WS revisions together; run the non-default-tier smoke only after both revisions report the same release SHA.
 - Bot runtime is guarded by `POKER_BOTS_ENABLED`.
 - Initial humans, initial bots, manual rebuys, and replacement bots use the table's persisted `buy_in` value. The retired `POKER_BOT_BUYIN_BB` setting is ignored so table stakes or bot-only configuration cannot make stacks diverge from the table buy-in.
