@@ -395,7 +395,7 @@ test("authoritative WS table_join returns a fully seated stacked snapshot and ke
     accounts: [{ user_id: "runtime_human", account_type: "USER", balance: 1_000 }],
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 150 },
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":3}', buy_in: 150 },
         seatRows: [],
         stateRow: { version: 0, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
       }
@@ -509,7 +509,7 @@ test("authoritative WS join preserves buy-in tier metadata in the rejected comma
     accounts: [{ user_id: "locked_human", account_type: "USER", balance: 549 }],
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 500 },
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":5,"bb":10}', buy_in: 500 },
         seatRows: [],
         stateRow: { version: 0, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
       }
@@ -552,7 +552,7 @@ test("authoritative WS table_join can progress through human act and bot timeout
     accounts: [{ user_id: "act_human", account_type: "USER", balance: 1_000 }],
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 150 },
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":3}', buy_in: 150 },
         seatRows: [],
         stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
       }
@@ -683,7 +683,7 @@ test("authoritative repeated and replayed table_join keep bot seating stable and
     accounts: [{ user_id: "replay_human", account_type: "USER", balance: 1_000 }],
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 150 },
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":3}', buy_in: 150 },
         seatRows: [],
         stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
       }
