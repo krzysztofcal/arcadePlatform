@@ -103,6 +103,43 @@ test("reconcile creates at most two missing tables per sweep", async () => {
   assert.equal(result.remainingTableCount, 98);
 });
 
+test("preview profile with desired count five creates canonical 100 CH tables", async () => {
+  const tableIds = [
+    "00000000-0000-4000-8000-000000000823",
+    "00000000-0000-4000-8000-000000000824"
+  ];
+  let createIndex = 0;
+  let tableInsertParams = null;
+  const repository = createContinuousBotTableRepository({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db", POKER_BOTS_ENABLED: "1" },
+    maxDesiredTables: 100,
+    beginSql: async (run) => run({
+      unsafe: async (sql, params) => {
+        if (sql.includes("from public.poker_managed_table_profiles")) {
+          return [{ ...PROFILE, enabled: true, desired_table_count: 5, min_bot_count: 0, target_bot_count: 0, max_bot_count: 0 }];
+        }
+        if (sql.includes("from public.poker_tables") && sql.includes("for update")) return [];
+        if (sql.includes("insert into public.poker_tables")) {
+          tableInsertParams = params;
+          return [{ id: tableIds[createIndex++] }];
+        }
+        if (sql.includes("select state from public.poker_state")) return [{ state: { tableId: tableIds[createIndex - 1], phase: "INIT", seats: [], stacks: {} } }];
+        if (sql.includes("update public.poker_state")) return [{ table_id: tableIds[createIndex - 1] }];
+        if (sql.includes("insert into public.chips_accounts")) return [{ id: "escrow-id" }];
+        return [];
+      }
+    })
+  });
+
+  const result = await repository.reconcile();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.profile.desiredTableCount, 5);
+  assert.deepEqual(result.createdTableIds, tableIds);
+  assert.equal(tableInsertParams?.[1], 100);
+  assert.deepEqual(JSON.parse(tableInsertParams?.[0]), { sb: 1, bb: 2 });
+});
+
 test("reconcile rejects a buy-in catalog that cannot serve fixed 100 CH continuous tables", async () => {
   let beginCalled = false;
   const repository = createContinuousBotTableRepository({

@@ -100,7 +100,7 @@ Operational notes:
 - Initial humans, initial bots, manual rebuys, and replacement bots use the table's persisted `buy_in` value. The retired `POKER_BOT_BUYIN_BB` setting is ignored so table stakes or bot-only configuration cannot make stacks diverge from the table buy-in.
 - Values above are Netlify runtime config env vars (not secrets unless explicitly sensitive).
 - Bot/gameplay orchestration runs server-side in WS runtime (no client-side bot scripts).
-- Bot replacement funding continues to use the existing configured source (default `TREASURY`); it adds no account, migration, environment variable, balance move, or manual replenishment step.
+- Bot replacement funding continues to use the existing configured source (default `TREASURY`); the runtime path adds no account, environment variable, balance move, or manual replenishment step. The separate managed-profile correction migration only restores `CONTINUOUS_BOT_DEFAULT` to canonical `1/2` blinds and preserves its other settings.
 - Replacement funding is an internal `SYSTEM -> ESCROW` transaction with `created_by = NULL` and closed bot/replacement metadata. It does not depend on `POKER_SYSTEM_ACTOR_USER_ID`. Terminal bot cash-out resolves the destination SYSTEM account from that actual funding provenance instead of using an actor identity or creating a USER account for the bot UUID.
 - A replacement funding failure leaves the table in `SETTLED`, retries with bounded fast backoff, then retries at most once per minute until the same generation succeeds or changes. Monitor `ws_settled_rollover_persist_failed` for the controlled reason, requested replacement count, and total delta.
 
@@ -170,7 +170,8 @@ Continuous bot tables are controlled by the single database profile
 The migration seeds it disabled with `desired_table_count = 0`; deployment alone
 does not create a table. There are no continuous-table ENV settings.
 
-The V1 foundation supports at most two six-seat tables. Profile constraints and
+Production supports at most two six-seat tables; Preview allows up to 100 so a
+reviewed Stage profile can run five non-stop tables. Profile constraints and
 runtime validation bound desired count, bot counts, stakes and timing values.
 The supervisor polls the profile, serializes create/retire decisions with a
 database advisory transaction lock and retains the last valid profile across a
@@ -185,15 +186,19 @@ rebuy contracts.
 
 Preview rollout:
 
-1. Apply `20260729100000_poker_managed_table_profiles.sql` to stage.
+1. Apply `20260729100000_poker_managed_table_profiles.sql` and
+   `20260809224000_poker_managed_table_profiles_canonical_stakes.sql` to stage.
 2. Deploy the exact PR SHA with manual `WS Preview Deploy`.
 3. Verify release metadata, `ws_artifact_start`, local/public `/healthz` and no supervisor failure.
-4. Confirm the seeded profile is disabled and no managed table was created.
-5. In one reviewed database update set `enabled = true`, `desired_table_count = 1` and `updated_at = now()`.
-6. Verify exactly one `CONTINUOUS_BOT` table, three initial bots, one escrow account, three seed funding transactions and one playable persisted hand.
-7. Join as a real player through normal quick-seat/direct join; verify actions, settlement, reconnect, rebuy and leave.
-8. Verify settled rollover, bot replacement/top-up idempotency and absence of accounting/persistence failures.
-9. Set the valid profile to `enabled = false`, `desired_table_count = 0`; verify the table waits for `SETTLED`, never removes a human, then closes once through terminal accounting with escrow `0`.
+4. Confirm `CONTINUOUS_BOT_DEFAULT` has canonical `small_blind = 1`,
+   `big_blind = 2`; set Preview to `enabled = true`,
+   `desired_table_count = 5` through the existing maintenance operation.
+5. Verify exactly five `CONTINUOUS_BOT` tables, each with `buy_in = 100`,
+   `1/2` stakes, three initial bots, one escrow account, three seed funding
+   transactions and a playable persisted hand. Production remains capped at two.
+6. Join as a real player through normal quick-seat/direct join; verify actions, settlement, reconnect, rebuy and leave.
+7. Verify settled rollover, bot replacement/top-up idempotency and absence of accounting/persistence failures.
+8. Set the valid profile to `enabled = false`, `desired_table_count = 0`; verify the tables wait for `SETTLED`, never remove a human, then close once through terminal accounting with escrow `0`.
 
 Do not change stakes or `max_seats` on an active production profile without
 expecting graceful retirement. Existing tables keep their persisted stakes and
