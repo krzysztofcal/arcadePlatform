@@ -117,7 +117,7 @@ function persistedBootstrapFixturesEnv(fixtures) {
 }
 
 
-async function writePersistedStateFile(fixtures) {
+async function writePersistedStateFile(fixtures, { accounts = [] } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ws-protocol-persist-"));
   const filePath = path.join(dir, "persisted-state.json");
   const tables = {};
@@ -128,7 +128,10 @@ async function writePersistedStateFile(fixtures) {
       stateRow: fixture.stateRow || null,
     };
   }
-  await fs.writeFile(filePath, `${JSON.stringify({ tables })}
+  await fs.writeFile(filePath, `${JSON.stringify({
+    tables,
+    ...(Array.isArray(accounts) && accounts.length > 0 ? { accounts } : {})
+  })}
 `, "utf8");
   return { dir, filePath };
 }
@@ -1974,7 +1977,9 @@ test("real authoritative join with historical non-ACTIVE seat retries to the nex
       stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
     }
   };
-  const { dir, filePath } = await writePersistedStateFile(fixtures);
+  const { dir, filePath } = await writePersistedStateFile(fixtures, {
+    accounts: [{ user_id: "historical_proto_user", account_type: "USER", balance: 110 }]
+  });
   const { port, child } = await createServer({
     env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PERSISTED_STATE_FILE: filePath, WS_AUTHORITATIVE_JOIN_ENABLED: "1" }
   });
