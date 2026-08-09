@@ -29,6 +29,10 @@ test("progression accepts a sorted deduplicated configured catalog and rejects i
     () => resolvePokerBuyInTiers({ POKER_BUY_IN_TIERS_JSON: "[500, 1000]" }),
     (error) => error?.code === "poker_buy_in_tiers_config_invalid"
   );
+  assert.throws(
+    () => resolvePokerBuyInTiers({ POKER_BUY_IN_TIERS_JSON: "[100, 2147483648]" }),
+    (error) => error?.code === "poker_buy_in_tiers_config_invalid"
+  );
 });
 
 test("authoritative bankroll reads can lock the account row for the join transaction", async () => {

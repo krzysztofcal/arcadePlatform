@@ -53,6 +53,7 @@ Set these as Netlify environment variables (Site settings -> Environment variabl
 
 Operational notes:
 - Before production rollout, verify every active table buy-in is present in the initial catalog: `select distinct buy_in from public.poker_tables where status <> 'CLOSED';`.
+- The configured catalog must include `100` CH while continuous tables use their fixed `100` CH buy-in; values must fit the PostgreSQL `integer` range.
 - Roll out the Netlify and WS revisions together; run the non-default-tier smoke only after both revisions report the same release SHA.
 - Bot runtime is guarded by `POKER_BOTS_ENABLED`.
 - Initial humans, initial bots, manual rebuys, and replacement bots use the table's persisted `buy_in` value. The retired `POKER_BOT_BUYIN_BB` setting is ignored so table stakes or bot-only configuration cannot make stacks diverge from the table buy-in.

@@ -8466,6 +8466,7 @@ test("authoritative join with historical non-ACTIVE seat retries to the next sea
   const secret = "auth-join-historical-seat-secret";
   const tableId = "table_auth_join_historical_non_active";
   const store = {
+    accounts: [{ user_id: "historical_user", account_type: "USER", balance: 110 }],
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", buy_in: 100 },
@@ -8516,6 +8517,7 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
   const secret = "auth-join-bots-secret";
   const tableId = "table_auth_join_bots";
   const store = {
+    accounts: [{ user_id: "bot_seed_human", account_type: "USER", balance: 110 }],
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 100 },

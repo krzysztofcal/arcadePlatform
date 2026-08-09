@@ -1478,6 +1478,7 @@
     var progressionBankroll = document.getElementById('pokerProgressBankroll');
     var progressionCelebration = document.getElementById('pokerProgressCelebration');
     var progressionInFlight = null;
+    var progressionRefreshQueued = false;
     var progressionState = null;
     var progressionCelebrationTimer = null;
 
@@ -1759,7 +1760,10 @@
 
     async function refreshProgression(){
       if (!progressionRoadmap && !progressionBankroll) return null;
-      if (progressionInFlight) return progressionInFlight;
+      if (progressionInFlight){
+        progressionRefreshQueued = true;
+        return progressionInFlight;
+      }
       progressionInFlight = apiGet(PROGRESSION_URL).then(function(data){
         renderProgression(data);
         return data;
@@ -1768,6 +1772,10 @@
         return null;
       }).finally(function(){
         progressionInFlight = null;
+        if (progressionRefreshQueued){
+          progressionRefreshQueued = false;
+          refreshProgression();
+        }
       });
       return progressionInFlight;
     }

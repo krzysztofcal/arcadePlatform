@@ -1,6 +1,7 @@
 import { DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "./table-economy.mjs";
 
 const BUY_IN_TIERS_ENV = "POKER_BUY_IN_TIERS_JSON";
+const POSTGRES_INTEGER_MAX = 2_147_483_647;
 
 export const DEFAULT_POKER_BUY_IN_TIERS = Object.freeze([
   DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
@@ -59,7 +60,9 @@ export function resolvePokerBuyInTiers(env = process.env) {
   if (!Array.isArray(parsed) || parsed.length === 0) throw configError();
   const tiers = parsed.map((value) => {
     try {
-      return normalizePositiveSafeInteger(value, "poker_buy_in_tiers_config_invalid");
+      const normalized = normalizePositiveSafeInteger(value, "poker_buy_in_tiers_config_invalid");
+      if (normalized > POSTGRES_INTEGER_MAX) throw configError();
+      return normalized;
     } catch {
       throw configError();
     }
