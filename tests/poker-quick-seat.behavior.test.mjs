@@ -14,13 +14,14 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ mode, queries, notifications = [], logs = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, checkWsBuyInCapability = async () => ({ ok: true }) }) =>
+const makeHandler = ({ mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, checkWsBuyInCapability = async () => ({ ok: true }) }) =>
   loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     beginSql: async (fn) => {
+      events.push("beginSql");
       return fn({
         unsafe: async (query, params) => {
           queries.push({ query: String(query), params });
@@ -417,6 +418,30 @@ const run = async () => {
     assert.deepEqual(JSON.parse(response.body), { error: "ws_buy_in_capability_unavailable" });
     assert.equal(capabilityChecks, 1);
     assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")), false);
+  }
+  {
+    const queries = [];
+    const events = [];
+    let resolveCapability;
+    const capabilityPending = new Promise((resolve) => { resolveCapability = resolve; });
+    const handler = makeHandler({
+      mode: "create",
+      queries,
+      events,
+      balance: 550,
+      checkWsBuyInCapability: async () => {
+        events.push("capability");
+        return capabilityPending;
+      }
+    });
+    const pendingResponse = callQuickSeat(handler, { maxPlayers: 6 });
+    await Promise.resolve();
+    assert.deepEqual(events, ["capability"], "capability probe must complete before Quick Seat opens its DB transaction");
+    assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("pg_advisory_xact_lock")), false);
+    resolveCapability({ ok: false, reason: "buy_in_capability_unavailable" });
+    const response = await pendingResponse;
+    assert.equal(response.statusCode, 503);
+    assert.equal(events.indexOf("capability") < events.indexOf("beginSql"), true);
   }
 
 };

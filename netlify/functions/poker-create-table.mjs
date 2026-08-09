@@ -102,6 +102,22 @@ export async function handler(event) {
   }
   const stakesJson = formatStakes(canonicalStakes);
 
+  let wsBuyInCapability = { ok: true, skipped: true };
+  if (buyIn !== DEFAULT_CASH_TABLE_BUY_IN_CHIPS) {
+    wsBuyInCapability = await checkWsBuyInCapability({ klog });
+    if (!wsBuyInCapability?.ok) {
+      klog("poker_create_table_buy_in_capability_unavailable", {
+        buyIn,
+        reason: wsBuyInCapability?.reason || "unknown"
+      });
+      return {
+        statusCode: 503,
+        headers: mergeHeaders(cors),
+        body: JSON.stringify({ error: "ws_buy_in_capability_unavailable" })
+      };
+    }
+  }
+
   let transactionResult = null;
   try {
     transactionResult = await beginSql(async (tx) => {
@@ -115,16 +131,6 @@ export async function handler(event) {
           requiredBankroll: tier?.unlockBankroll ?? calculateUnlockBankroll(buyIn),
           balance: progression.balance
         };
-      }
-      if (buyIn !== DEFAULT_CASH_TABLE_BUY_IN_CHIPS) {
-        const capability = await checkWsBuyInCapability({ klog });
-        if (!capability?.ok) {
-          klog("poker_create_table_buy_in_capability_unavailable", {
-            buyIn,
-            reason: capability?.reason || "unknown"
-          });
-          return { kind: "ws_buy_in_capability_unavailable", buyIn };
-        }
       }
       const created = await createPokerTableWithState(tx, { userId: auth.userId, maxPlayers, stakesJson, buyIn });
       return { kind: "created", tableId: created.tableId };
@@ -147,14 +153,6 @@ export async function handler(event) {
       })
     };
   }
-  if (transactionResult?.kind === "ws_buy_in_capability_unavailable") {
-    return {
-      statusCode: 503,
-      headers: mergeHeaders(cors),
-      body: JSON.stringify({ error: "ws_buy_in_capability_unavailable" })
-    };
-  }
-
   const tableId = transactionResult?.kind === "created" ? transactionResult.tableId : null;
   if (!tableId) {
     klog("poker_create_table_error", { message: "invalid_transaction_result" });

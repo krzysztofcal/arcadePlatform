@@ -257,11 +257,10 @@ export async function handler(event) {
     return { statusCode: 401, headers: mergeHeaders(cors), body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
   }
 
-  let wsBuyInCapabilityPromise = null;
+  const wsBuyInCapability = await checkWsBuyInCapability({ klog });
   const ensureWsBuyInCapability = async (buyIn) => {
     if (Number(buyIn) === DEFAULT_CASH_TABLE_BUY_IN_CHIPS) return { ok: true, skipped: true };
-    if (!wsBuyInCapabilityPromise) wsBuyInCapabilityPromise = checkWsBuyInCapability({ klog });
-    return wsBuyInCapabilityPromise;
+    return wsBuyInCapability;
   };
 
   try {
@@ -339,18 +338,6 @@ export async function handler(event) {
       return createdRecommendation;
     });
 
-    if (result?.kind === "ws_buy_in_capability_unavailable") {
-      klog("poker_quick_seat_buy_in_capability_unavailable", {
-        buyIn: result.buyIn,
-        maxPlayers,
-        reason: "buy_in_capability_unavailable"
-      });
-      return {
-        statusCode: 503,
-        headers: mergeHeaders(cors),
-        body: JSON.stringify({ error: "ws_buy_in_capability_unavailable" })
-      };
-    }
     if (result?.kind === "recommended" && result.requiresWsBuyInCapability) {
       const capability = await ensureWsBuyInCapability(result.buyIn);
       if (!capability?.ok) {
@@ -365,6 +352,18 @@ export async function handler(event) {
           body: JSON.stringify({ error: "ws_buy_in_capability_unavailable" })
         };
       }
+    }
+    if (result?.kind === "ws_buy_in_capability_unavailable") {
+      klog("poker_quick_seat_buy_in_capability_unavailable", {
+        buyIn: result.buyIn,
+        maxPlayers,
+        reason: "buy_in_capability_unavailable"
+      });
+      return {
+        statusCode: 503,
+        headers: mergeHeaders(cors),
+        body: JSON.stringify({ error: "ws_buy_in_capability_unavailable" })
+      };
     }
     if (result?.kind === "buy_in_tier_locked") {
       klog("poker_quick_seat_buy_in_tier_locked", {

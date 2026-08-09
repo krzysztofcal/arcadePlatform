@@ -183,7 +183,7 @@ const runLockedBuyIn = async () => {
     requiredBankroll: 550,
     balance: 500
   });
-  assert.equal(capabilityChecks, 0, "locked buy-in should be rejected before the WS capability check");
+  assert.equal(capabilityChecks, 1, "custom buy-in capability should be checked before the DB transaction");
   assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")), false);
 };
 
