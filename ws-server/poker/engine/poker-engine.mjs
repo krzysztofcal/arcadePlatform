@@ -8,6 +8,7 @@ import {
 } from "../shared/poker-primitives.mjs";
 import { applyAction as applyPokerAction } from "../shared/poker-action-reducer.mjs";
 import { decideTurnTimeout, stampTurnDeadline } from "../shared/poker-turn-timeout.mjs";
+import { isBotFundingAllowedForBuyIn } from "../../../shared/poker-domain/table-economy.mjs";
 
 const MIN_PLAYERS_TO_BOOTSTRAP = 2;
 const ENGINE_ACTIONS = new Set(["FOLD", "CHECK", "CALL", "BET", "RAISE"]);
@@ -292,6 +293,9 @@ export function topUpManagedBotsForNextHand({
     || minimum < 0 || minimum > target || target > maximum) {
     return { ok: false, reason: "invalid_managed_top_up_config", coreState, settledState, topUpFundings: [] };
   }
+  if (!isBotFundingAllowedForBuyIn(normalizedBuyIn)) {
+    return { ok: true, coreState, settledState, topUpFundings: [] };
+  }
   const members = orderedSeatMembers(coreState);
   const details = coreState.seatDetailsByUserId && typeof coreState.seatDetailsByUserId === "object"
     ? coreState.seatDetailsByUserId
@@ -376,6 +380,9 @@ export function replaceBrokeBotsForNextHand({ coreState, settledState, nextVersi
   const normalizedBuyIn = Number(buyIn);
   if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) {
     return { ok: false, reason: "invalid_replacement_buy_in", coreState, settledState, replacementFundings: [] };
+  }
+  if (!isBotFundingAllowedForBuyIn(normalizedBuyIn)) {
+    return { ok: true, coreState, settledState, replacementFundings: [] };
   }
 
   const currentMembers = orderedSeatMembers(coreState);

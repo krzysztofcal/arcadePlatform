@@ -1251,7 +1251,7 @@ test("authoritative join rejects explicit and preferred seat numbers below 1", a
   );
 });
 
-test("first human authoritative join validates the same randomized bot target that it seeds", async () => withBotEnv(async () => {
+test("first human authoritative join still seeds and funds bots at the 100 CH table tier", async () => withBotEnv(async () => {
   process.env.POKER_BOTS_MAX_PER_TABLE = "5";
   const originalRandom = Math.random;
   let randomCalls = 0;
@@ -1260,7 +1260,7 @@ test("first human authoritative join validates the same randomized bot target th
     return randomCalls === 1 ? 0 : 0.999999;
   };
   const store = {
-    table: { id: "t-bots", status: "OPEN", max_players: 6, buy_in: 500, stakes: '{"sb":5,"bb":10}' },
+    table: { id: "t-bots", status: "OPEN", max_players: 6, buy_in: 100, stakes: '{"sb":1,"bb":2}' },
     seatRows: [],
     stateRow: { version: 3, state: { tableId: "t-bots", seats: [], stacks: {} } },
     ledgerCalls: []
@@ -1317,7 +1317,7 @@ test("first human authoritative join validates the same randomized bot target th
     userId: "human_1",
     requestId: "join-bots-1",
     seatNo: 1,
-    buyIn: 500,
+    buyIn: 100,
     postTransactionFn: async (payload) => {
       store.ledgerCalls.push(payload);
       return { ok: true };
@@ -1332,19 +1332,89 @@ test("first human authoritative join validates the same randomized bot target th
       { seatNo: 2, botProfile: "NORMAL", leaveAfterHand: false },
       { seatNo: 3, botProfile: "NORMAL", leaveAfterHand: false }
     ]);
-    assert.equal(result.snapshot.stacks.human_1, 500);
-    assert.deepEqual(Object.values(result.snapshot.stacks), [500, 500, 500]);
+    assert.equal(result.snapshot.stacks.human_1, 100);
+    assert.deepEqual(Object.values(result.snapshot.stacks), [100, 100, 100]);
     assert.equal(result.snapshot.stateVersion, 4);
     assert.equal(store.stateRow.version, 4);
     assert.equal(store.seatRows.filter((seat) => seat.is_bot).length, 2);
     assert.equal(store.ledgerCalls.length, 3);
-    assert.equal(store.ledgerCalls.every((call) => call.entries.some((entry) => entry.accountType === "ESCROW" && entry.amount === 500)), true);
-    assert.equal(store.ledgerCalls.filter((call) => call.entries.some((entry) => entry.accountType === "USER" && entry.amount === -500)).length, 1);
-    assert.equal(store.ledgerCalls.filter((call) => call.entries.some((entry) => entry.accountType === "SYSTEM" && entry.amount === -500)).length, 2);
+    assert.equal(store.ledgerCalls.every((call) => call.entries.some((entry) => entry.accountType === "ESCROW" && entry.amount === 100)), true);
+    assert.equal(store.ledgerCalls.filter((call) => call.entries.some((entry) => entry.accountType === "USER" && entry.amount === -100)).length, 1);
+    assert.equal(store.ledgerCalls.filter((call) => call.entries.some((entry) => entry.accountType === "SYSTEM" && entry.amount === -100)).length, 2);
     assert.equal(randomCalls, 1);
   } finally {
     Math.random = originalRandom;
   }
+}));
+
+test("first human authoritative join on a higher tier remains human-only", async () => withBotEnv(async () => {
+  const store = {
+    table: { id: "t-human-only", status: "OPEN", max_players: 6, buy_in: 500, stakes: '{"sb":5,"bb":10}' },
+    seatRows: [],
+    stateRow: { version: 3, state: { tableId: "t-human-only", seats: [], stacks: {} } },
+    ledgerCalls: []
+  };
+
+  const result = await executePokerJoinAuthoritative(withLockedState({
+    beginSql: async (fn) => fn({
+      unsafe: async (sql, params = []) => {
+        if (sql.includes("from public.poker_tables")) return [store.table];
+        if (sql.includes("from public.poker_seats") && sql.includes("user_id = $2") && sql.includes("limit 1")) {
+          const row = store.seatRows.find((seat) => seat.user_id === params[1] && String(seat.status || "ACTIVE").toUpperCase() === "ACTIVE");
+          return row ? [{ seat_no: row.seat_no, stack: row.stack }] : [];
+        }
+        if (sql.includes("from public.poker_seats") && sql.includes("order by seat_no asc;")) {
+          if (sql.includes("status = 'ACTIVE'")) {
+            return store.seatRows.filter((seat) => String(seat.status || "ACTIVE").toUpperCase() === "ACTIVE").map((seat) => ({ seat_no: seat.seat_no }));
+          }
+          return store.seatRows.map((seat) => ({ ...seat }));
+        }
+        if (sql.includes("insert into public.poker_seats")) {
+          const isBot = sql.includes("is_bot");
+          store.seatRows.push({
+            user_id: params[1],
+            seat_no: params[2],
+            status: "ACTIVE",
+            is_bot: isBot,
+            bot_profile: isBot ? params[3] : null,
+            leave_after_hand: false,
+            stack: isBot ? params[4] : 0
+          });
+          return [{ seat_no: params[2] }];
+        }
+        if (sql.includes("select version, state from public.poker_state")) return [store.stateRow];
+        if (sql.includes("update public.poker_state set state")) {
+          store.stateRow.state = params[1];
+          store.stateRow.version += 1;
+          return [{ version: store.stateRow.version }];
+        }
+        if (sql.includes("update public.poker_seats set stack")) {
+          const row = store.seatRows.find((seat) => seat.user_id === params[1] && seat.seat_no === params[2]);
+          if (row) row.stack = params[3];
+          return [];
+        }
+        if (sql.includes("update public.poker_tables set last_activity_at")) return [];
+        return [];
+      }
+    }),
+    tableId: "t-human-only",
+    userId: "human_1",
+    requestId: "join-human-only",
+    seatNo: 1,
+    buyIn: 500,
+    postTransactionFn: async (payload) => {
+      store.ledgerCalls.push(payload);
+      return { ok: true };
+    }
+  }));
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.seededBots, []);
+  assert.equal(result.snapshot.seats.length, 1);
+  assert.equal(store.seatRows.filter((seat) => seat.is_bot).length, 0);
+  assert.equal(store.ledgerCalls.length, 1);
+  assert.equal(store.ledgerCalls[0].entries.some((entry) => entry.accountType === "USER" && entry.amount === -500), true);
+  assert.equal(store.ledgerCalls.some((call) => call.entries.some((entry) => entry.accountType === "SYSTEM")), false);
 }));
 
 test("same-request authoritative join replay becomes rejoin without duplicate seat, stack, or buy-in", async () => withBotEnv(async () => {
@@ -1412,7 +1482,7 @@ test("same-request authoritative join replay becomes rejoin without duplicate se
     userId: "human_replay",
     requestId,
     seatNo: 1,
-    buyIn: 120,
+    buyIn: 100,
     postTransactionFn: async (payload) => {
       state.ledgerCalls.push(payload);
       return { ok: true };
@@ -1435,7 +1505,7 @@ test("same-request authoritative join replay becomes rejoin without duplicate se
   assert.equal(second.snapshot.seats.filter((seat) => seat.isBot).length, 2);
   assert.equal(second.snapshot.stacks.existing_bot, 200);
   assert.equal(state.seatRows.filter((seat) => seat.user_id === "human_replay").length, 1);
-  assert.equal(state.stateRow.state.stacks.human_replay, 120);
+  assert.equal(state.stateRow.state.stacks.human_replay, 100);
   assert.equal(state.seatRows.filter((seat) => seat.is_bot).length, 2);
   assert.equal(state.ledgerCalls.filter((payload) => payload.txType === "TABLE_BUY_IN").length, 2);
 }));

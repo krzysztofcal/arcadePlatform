@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { MAX_POKER_STAKE_CHIPS } from "./table-economy.mjs";
+import { isBotFundingAllowedForBuyIn, MAX_POKER_STAKE_CHIPS } from "./table-economy.mjs";
 
 const TRUE_SET = new Set(["1", "true", "yes"]);
 const FALSE_SET = new Set(["0", "false", "no"]);
@@ -226,6 +226,7 @@ async function seedBotsForJoin({
   if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) {
     throw new Error("invalid_bot_buy_in");
   }
+  if (!isBotFundingAllowedForBuyIn(normalizedBuyIn)) return [];
   const stakesParsed = parseStakes(tableStakes);
   if (!stakesParsed.ok) {
     klog("poker_join_bot_seed_skip_invalid_stakes", { tableId, stakes: tableStakes ?? null });

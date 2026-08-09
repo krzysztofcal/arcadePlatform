@@ -392,10 +392,10 @@ test("authoritative WS table_join returns a fully seated stacked snapshot and ke
   const secret = "auth-join-runtime-secret";
   const tableId = "table_auth_join_runtime";
   const store = {
-    accounts: [{ user_id: "runtime_human", account_type: "USER", balance: 1_000 }],
+    accounts: [{ user_id: "runtime_human", account_type: "USER", balance: 120 }],
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":3}', buy_in: 150 },
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 100 },
         seatRows: [],
         stateRow: { version: 0, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
       }
@@ -417,7 +417,7 @@ test("authoritative WS table_join returns a fully seated stacked snapshot and ke
       type: "table_join",
       requestId: "join-runtime",
       ts: "2026-02-28T06:10:00Z",
-      payload: { tableId, seatNo: 1, buyIn: 150 }
+      payload: { tableId, seatNo: 1, buyIn: 100 }
     });
     const joinAck = await nextCommandResultForRequest(ws, "join-runtime");
     assert.equal(joinAck.payload.status, "accepted");
@@ -549,10 +549,10 @@ test("authoritative WS table_join can progress through human act and bot timeout
   const secret = "auth-join-act-secret";
   const tableId = "table_auth_join_act";
   const store = {
-    accounts: [{ user_id: "act_human", account_type: "USER", balance: 1_000 }],
+    accounts: [{ user_id: "act_human", account_type: "USER", balance: 120 }],
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":3}', buy_in: 150 },
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 100 },
         seatRows: [],
         stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
       }
@@ -572,7 +572,7 @@ test("authoritative WS table_join can progress through human act and bot timeout
       type: "table_join",
       requestId: "join-act-runtime",
       ts: "2026-02-28T06:20:00Z",
-      payload: { tableId, seatNo: 1, buyIn: 150 }
+      payload: { tableId, seatNo: 1, buyIn: 100 }
     });
     const joinAck = await nextCommandResultForRequest(ws, "join-act-runtime");
     assert.equal(joinAck.payload.status, "accepted");
@@ -680,10 +680,10 @@ test("authoritative repeated and replayed table_join keep bot seating stable and
   const secret = "auth-join-replay-secret";
   const tableId = "table_auth_join_replay";
   const store = {
-    accounts: [{ user_id: "replay_human", account_type: "USER", balance: 1_000 }],
+    accounts: [{ user_id: "replay_human", account_type: "USER", balance: 120 }],
     tables: {
       [tableId]: {
-        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":3}', buy_in: 150 },
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 100 },
         seatRows: [],
         stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
       }
@@ -705,7 +705,7 @@ test("authoritative repeated and replayed table_join keep bot seating stable and
       type: "table_join",
       requestId: "join-replay-runtime",
       ts: "2026-02-28T06:30:00Z",
-      payload: { tableId, seatNo: 1, buyIn: 150 }
+      payload: { tableId, seatNo: 1, buyIn: 100 }
     });
     const firstAck = await nextCommandResultForRequest(ws, "join-replay-runtime");
     assert.equal(firstAck.payload.status, "accepted");
@@ -715,7 +715,7 @@ test("authoritative repeated and replayed table_join keep bot seating stable and
       type: "table_join",
       requestId: "join-replay-runtime",
       ts: "2026-02-28T06:30:01Z",
-      payload: { tableId, seatNo: 1, buyIn: 150 }
+      payload: { tableId, seatNo: 1, buyIn: 100 }
     });
     sendFrame(ws, {
       version: "1.0",
@@ -743,7 +743,7 @@ test("authoritative repeated and replayed table_join keep bot seating stable and
       type: "table_join",
       requestId: "join-repeat-runtime",
       ts: "2026-02-28T06:30:02Z",
-      payload: { tableId, seatNo: 1, buyIn: 150 }
+      payload: { tableId, seatNo: 1, buyIn: 100 }
     });
     const repeatAck = await nextCommandResultForRequest(ws, "join-repeat-runtime");
     assert.equal(repeatAck.payload.status, "accepted");

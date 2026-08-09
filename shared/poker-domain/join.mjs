@@ -1,6 +1,6 @@
 import { asSeatSnapshot, computeTargetBotCount, getBotConfig, loadSeatRows, seedBotsForJoin, shouldSeedBotsOnJoin } from "./bots.mjs";
 import { evaluatePokerBuyInAccess, readPokerBankroll, resolvePokerBuyInTiers } from "./poker-progression.mjs";
-import { isCanonicalPokerStakes } from "./table-economy.mjs";
+import { isBotFundingAllowedForBuyIn, isCanonicalPokerStakes } from "./table-economy.mjs";
 import { postUserTableBuyIn } from "./table-buy-in.mjs";
 
 const BUY_IN_IDEMPOTENCY_CONSTRAINT = "chips_transactions_idempotency_key_unique";
@@ -896,7 +896,8 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
 
       const botCfg = getBotConfig(process.env);
       const humanCountAfterJoin = activeSeatRows(seatRows).filter((row) => !row?.is_bot).length + 1;
-      const targetBotCount = botCfg.enabled && shouldSeedBotsOnJoin({ humanCount: humanCountAfterJoin })
+      const targetBotCount = isBotFundingAllowedForBuyIn(authoritativeBuyIn)
+        && botCfg.enabled && shouldSeedBotsOnJoin({ humanCount: humanCountAfterJoin })
         ? computeTargetBotCount({
           maxPlayers,
           humanCount: humanCountAfterJoin,

@@ -53,7 +53,7 @@ test("managed settled top-up fills vacant bot seats deterministically without ch
     coreState,
     settledState,
     nextVersion: 8,
-    buyIn: 500,
+    buyIn: 100,
     minBotCount: 2,
     targetBotCount: 3,
     maxBotCount: 3
@@ -65,7 +65,7 @@ test("managed settled top-up fills vacant bot seats deterministically without ch
   assert.equal(result.settledState.stacks.human_a, 250);
   assert.equal(result.coreState.publicStacks.human_a, 250);
   assert.equal(result.coreState.members.length, 4);
-  assert.equal(result.topUpFundings.every((entry) => entry.targetStack === 500 && entry.fundingDelta === 500), true);
+  assert.equal(result.topUpFundings.every((entry) => entry.targetStack === 100 && entry.fundingDelta === 100), true);
 });
 
 test("managed settled top-up never displaces humans when capacity cannot reach target", () => {
@@ -90,7 +90,7 @@ test("managed settled top-up never displaces humans when capacity cannot reach t
     },
     settledState: { handId: "hand_capacity", phase: "SETTLED", stacks },
     nextVersion: 3,
-    buyIn: 500,
+    buyIn: 100,
     minBotCount: 2,
     targetBotCount: 3,
     maxBotCount: 3
@@ -100,6 +100,33 @@ test("managed settled top-up never displaces humans when capacity cannot reach t
   assert.equal(result.topUpFundings.length, 1);
   assert.equal(result.topUpFundings[0].seatNo, 6);
   assert.deepEqual(result.coreState.members.filter((member) => member.userId.startsWith("human_")), members.slice(0, 4));
+});
+
+test("managed settled top-up does not fund bots above the 100 CH table tier", () => {
+  const coreState = {
+    roomId: "table_managed_high_tier",
+    version: 4,
+    maxSeats: 6,
+    members: [{ userId: "human_a", seat: 1 }],
+    seats: { human_a: 1 },
+    publicStacks: { human_a: 500 },
+    seatDetailsByUserId: { human_a: { isBot: false } }
+  };
+  const settledState = { handId: "hand_managed_high_tier", phase: "SETTLED", stacks: { human_a: 500 } };
+  const result = topUpManagedBotsForNextHand({
+    coreState,
+    settledState,
+    nextVersion: 5,
+    buyIn: 500,
+    minBotCount: 1,
+    targetBotCount: 2,
+    maxBotCount: 3
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.topUpFundings, []);
+  assert.equal(result.coreState, coreState);
+  assert.equal(result.settledState, settledState);
 });
 
 function initialCore() {
@@ -370,7 +397,7 @@ test("replaceBrokeBotsForNextHand swaps too-short bot only after settlement", ()
     coreState,
     settledState,
     nextVersion: 31,
-    buyIn: 500
+    buyIn: 100
   });
 
   assert.notEqual(recycled.coreState, coreState);
@@ -381,17 +408,47 @@ test("replaceBrokeBotsForNextHand swaps too-short bot only after settlement", ()
   assert.notEqual(replacementBot.userId, "bot_old");
   assert.match(replacementBot.userId, UUID_RE);
   assert.equal(recycled.coreState.seatDetailsByUserId[replacementBot.userId].isBot, true);
-  assert.equal(recycled.settledState.stacks[replacementBot.userId], 500);
+  assert.equal(recycled.settledState.stacks[replacementBot.userId], 100);
   assert.equal("bot_old" in recycled.settledState.stacks, false);
   assert.deepEqual(recycled.replacementFundings, [{
     seatNo: 2,
     oldBotUserId: "bot_old",
     replacementBotUserId: replacementBot.userId,
     oldStack: 1,
-    targetStack: 500,
-    fundingDelta: 499,
+    targetStack: 100,
+    fundingDelta: 99,
     settledHandId: "settled_bot_replace",
     fromStateVersion: 30,
     toStateVersion: 31
   }]);
+});
+
+test("replaceBrokeBotsForNextHand leaves a broke bot unfunded above the 100 CH table tier", () => {
+  const coreState = {
+    roomId: "table_engine_high_tier",
+    version: 30,
+    seats: { human_a: 1, bot_old: 2 },
+    members: [{ userId: "human_a", seat: 1 }, { userId: "bot_old", seat: 2 }],
+    seatDetailsByUserId: {
+      human_a: { isBot: false },
+      bot_old: { isBot: true, botProfile: "NORMAL" }
+    },
+    publicStacks: { human_a: 500, bot_old: 0 }
+  };
+  const settledState = {
+    handId: "settled_high_tier",
+    phase: "SETTLED",
+    stacks: { human_a: 500, bot_old: 0 }
+  };
+  const result = replaceBrokeBotsForNextHand({
+    coreState,
+    settledState,
+    nextVersion: 31,
+    buyIn: 500
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.replacementFundings, []);
+  assert.equal(result.coreState, coreState);
+  assert.equal(result.settledState, settledState);
 });

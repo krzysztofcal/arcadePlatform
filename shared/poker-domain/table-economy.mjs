@@ -1,6 +1,10 @@
 export const DEFAULT_CASH_TABLE_BUY_IN_CHIPS = 100;
 export const MAX_POKER_STAKE_CHIPS = 1_000_000;
 
+export function isBotFundingAllowedForBuyIn(buyIn) {
+  return Number(buyIn) === DEFAULT_CASH_TABLE_BUY_IN_CHIPS;
+}
+
 export function calculateCanonicalPokerStakes(buyIn) {
   const normalizedBuyIn = Number(buyIn);
   if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) return null;
