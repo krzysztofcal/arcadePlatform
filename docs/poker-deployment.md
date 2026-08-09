@@ -86,7 +86,23 @@ Operational notes:
      or actual_bb is distinct from expected_bb;
   ```
 
-  Every returned pair must be repaired or the table lifecycle must be consciously resolved before enabling enforcement. Also verify the continuous-table profile remains canonical:
+  Every returned pair must be repaired or the table lifecycle must be consciously resolved before enabling enforcement. Also verify that no active bot seat remains on a non-default tier:
+
+  ```sql
+  select t.id, t.buy_in, t.stakes, t.lifecycle_kind, t.managed_profile_key,
+    count(*) filter (where s.status = 'ACTIVE' and s.is_bot = true) as active_bot_seats
+  from public.poker_tables t
+  left join public.poker_seats s on s.table_id = t.id
+  where t.status <> 'CLOSED'
+  group by t.id, t.buy_in, t.stakes, t.lifecycle_kind, t.managed_profile_key
+  having t.buy_in <> 100
+     and count(*) filter (where s.status = 'ACTIVE' and s.is_bot = true) > 0
+  order by t.buy_in, t.id;
+  ```
+
+  Stop the rollout if this query returns a row. Resolve each table through the existing graceful retirement/terminal cleanup path at a settled boundary, without changing table state, stakes, stacks, or ledgers with direct SQL; continue only after the table is closed and its escrow is `0`. Do not interrupt a table with an active human hand.
+
+  Then verify the continuous-table profile remains canonical:
 
   ```sql
   select profile_key, small_blind, big_blind
@@ -97,7 +113,7 @@ Operational notes:
   It must be `1/2`. The configured catalog must include every active table `buy_in` and `100` CH while continuous tables use their fixed `100` CH buy-in; values must fit the PostgreSQL `integer` range and generate blinds no larger than `1,000,000` CH.
 - Roll out the Netlify and WS revisions together; run the non-default-tier smoke only after both revisions report the same release SHA.
 - Bot runtime is guarded by `POKER_BOTS_ENABLED`.
-- Initial humans, initial bots, manual rebuys, and replacement bots use the table's persisted `buy_in` value. The retired `POKER_BOT_BUYIN_BB` setting is ignored so table stakes or bot-only configuration cannot make stacks diverge from the table buy-in.
+- Initial humans and manual rebuys use the table's persisted `buy_in` value. Initial bot seed funding, replacement funding, and managed top-ups remain temporarily allowed only for the authoritative `100` CH tier; higher tiers are human-only. The retired `POKER_BOT_BUYIN_BB` setting is ignored so table stakes or bot-only configuration cannot make stacks diverge from the table buy-in.
 - Values above are Netlify runtime config env vars (not secrets unless explicitly sensitive).
 - Bot/gameplay orchestration runs server-side in WS runtime (no client-side bot scripts).
 - Bot replacement funding continues to use the existing configured source (default `TREASURY`); the runtime path adds no account, environment variable, balance move, or manual replenishment step. The separate managed-profile correction migration only restores `CONTINUOUS_BOT_DEFAULT` to canonical `1/2` blinds and preserves its other settings.
@@ -198,7 +214,12 @@ Preview rollout:
    transactions and a playable persisted hand. Production remains capped at two.
 6. Join as a real player through normal quick-seat/direct join; verify actions, settlement, reconnect, rebuy and leave.
 7. Verify settled rollover, bot replacement/top-up idempotency and absence of accounting/persistence failures.
-8. Set the valid profile to `enabled = false`, `desired_table_count = 0`; verify the tables wait for `SETTLED`, never remove a human, then close once through terminal accounting with escrow `0`.
+8. **Rollback only:** if the preview service must be disabled, set the valid profile to
+   `enabled = false`, `desired_table_count = 0`; verify the tables wait for
+   `SETTLED`, never remove a human, then close once through terminal accounting
+   with escrow `0`. A completed rollout must leave the profile
+   `enabled = true`, `desired_table_count = 5`; do not execute this rollback step
+   as part of normal Preview operation.
 
 Do not change stakes or `max_seats` on an active production profile without
 expecting graceful retirement. Existing tables keep their persisted stakes and

@@ -423,7 +423,7 @@ test("replaceBrokeBotsForNextHand swaps too-short bot only after settlement", ()
   }]);
 });
 
-test("replaceBrokeBotsForNextHand leaves a broke bot unfunded above the 100 CH table tier", () => {
+test("replacement planning never funds a legacy high-tier bot above 100 CH", () => {
   const coreState = {
     roomId: "table_engine_high_tier",
     version: 30,

@@ -200,6 +200,7 @@
   var reconnectSeatNo = null;
   var lastKnownCurrentSeatNo = null;
   var liveModeGeneration = 0;
+  var authenticatedPreflightGeneration = 0;
   var snapshotRecoveryTimer = null;
   var snapshotRecoveryAttempts = 0;
   var snapshotRecoveryTimedOut = false;
@@ -668,9 +669,15 @@
     return 'This table tier is not available for your current bankroll.';
   }
 
-  function preflightAuthenticatedLiveMode(token){
+  function preflightAuthenticatedLiveMode(token, preflightGeneration){
+    function isCurrentPreflight(){
+      return preflightGeneration === authenticatedPreflightGeneration;
+    }
     return fetchTableAccess(token).then(function(access){
+      if (!isCurrentPreflight()) return false;
       if (access.allowed !== true) {
+        currentAccessToken = null;
+        stopLiveMode();
         state.statusText = LIVE_STATUS_COPY.error;
         setError(tableAccessDeniedMessage(access));
         markBootReady();
@@ -682,6 +689,7 @@
       startLiveMode(token);
       return true;
     }).catch(function(error){
+      if (!isCurrentPreflight()) return false;
       klog('poker_table_access_preflight_failed', { code: error && (error.message || error.code) ? (error.message || error.code) : 'unknown' });
       if (error && error.allowWsFallback === true){
         currentAccessToken = token;
@@ -4941,6 +4949,7 @@
 
   function stopLiveMode(){
     liveModeGeneration += 1;
+    authenticatedPreflightGeneration += 1;
     stopSnapshotRecoveryTimer();
     stopTurnClock();
     clearReactionControlTimer();
@@ -4991,14 +5000,36 @@
   }
 
   function restartAuthenticatedLiveMode(token){
-    if (!tableId || !token) return;
+    if (!tableId || !token){
+      currentAccessToken = null;
+      stopLiveMode();
+      return;
+    }
     var nextUserId = getUserIdFromToken(token);
+    var previousUserId = state && state.currentUserId ? String(state.currentUserId) : getUserIdFromToken(currentAccessToken);
+    var userChanged = !!(nextUserId && previousUserId && nextUserId !== previousUserId);
     syncSocialPreferencesIdentity(nextUserId);
-    if (nextUserId && state.currentUserId && nextUserId !== state.currentUserId) clearRebuyOperation();
+    if (userChanged) clearRebuyOperation();
     isGuestMode = false;
     currentGuestSession = null;
     clearGuestSession();
-    preflightAuthenticatedLiveMode(token);
+    var preservingState = !userChanged && !!(state && state.mode === 'live'
+      && state.hasAppliedAuthoritativeSnapshot
+      && state.tableId && state.tableId === tableId);
+    if (preservingState && rebuyOperation && rebuyOperation.phase === 'pending'){
+      rebuyOperation.preserveOnTechnicalRestart = true;
+      rebuyOperation.resumeAttempted = false;
+      persistPendingRebuy();
+    }
+    currentAccessToken = null;
+    stopLiveMode();
+    if (userChanged){
+      state = createEmptyLiveState(tableId, nextUserId);
+      state.statusText = LIVE_STATUS_COPY.connecting;
+      render();
+    }
+    var preflightGeneration = authenticatedPreflightGeneration;
+    preflightAuthenticatedLiveMode(token, preflightGeneration);
   }
 
   function startLiveMode(token){
