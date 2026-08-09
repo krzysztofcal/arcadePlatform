@@ -29,7 +29,7 @@ const makeHandler = ({ mode, queries, notifications = [], logs = [], balance = 1
           if (text.includes("pg_advisory_xact_lock")) return [];
 
           if (text.includes("join public.poker_seats s") && text.includes("s.user_id = $1")) {
-            if (mode === "already_seated") return [{ id: "table-human", max_players: 6, buy_in: candidateBuyIn }];
+            if (mode === "already_seated") return [{ id: "table-human", max_players: 6, buy_in: candidateBuyIn, stakes: candidateBuyIn === 500 ? { sb: 5, bb: 10 } : { sb: 1, bb: 2 } }];
             return [];
           }
 
@@ -42,21 +42,21 @@ const makeHandler = ({ mode, queries, notifications = [], logs = [], balance = 1
             text.includes("from public.poker_tables t") &&
             text.includes("where t.status = 'open'") &&
             text.includes("t.max_players = $1") &&
-            text.includes("t.stakes = $2::jsonb")
+            text.includes("t.buy_in = any($4::int[])")
           ) {
-            const requireHuman = params?.[2] === true;
+            const requireHuman = params?.[1] === true;
             if (mode === "prefer_humans" || mode === "already_seated") {
-              if (requireHuman) return [{ id: "table-human", max_players: 6, buy_in: candidateBuyIn }];
+              if (requireHuman) return [{ id: "table-human", max_players: 6, buy_in: candidateBuyIn, stakes: candidateBuyIn === 500 ? { sb: 5, bb: 10 } : { sb: 1, bb: 2 } }];
               return [];
             }
             if (mode === "any_open") {
               if (requireHuman) return [];
-              return [{ id: "table-any", max_players: 6, buy_in: candidateBuyIn }];
+              return [{ id: "table-any", max_players: 6, buy_in: candidateBuyIn, stakes: candidateBuyIn === 500 ? { sb: 5, bb: 10 } : { sb: 1, bb: 2 } }];
             }
             return [];
           }
 
-          if (text.includes("where table_id = $1 and user_id = $2 limit 1")) {
+          if (text.includes("where table_id = $1 and user_id = $2") && text.includes("limit 1")) {
             if (mode === "already_seated") return [{ seat_no: 2 }];
             return [];
           }
@@ -99,7 +99,7 @@ const run = async () => {
     const queries = [];
     const notifications = [];
     const handler = makeHandler({ mode: "prefer_humans", queries, notifications, balance: 550, candidateBuyIn: 500 });
-    const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
+    const res = await callQuickSeat(handler, { maxPlayers: 6 });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
@@ -111,10 +111,10 @@ const run = async () => {
       "quick seat should prefer tables with at least one human"
     );
     assert.ok(
-      queries.some((entry) => entry.query.toLowerCase().includes("last_seen_at") && entry.query.toLowerCase().includes("$4::timestamptz")),
+      queries.some((entry) => entry.query.toLowerCase().includes("last_seen_at") && entry.query.toLowerCase().includes("$3::timestamptz")),
       "quick seat should exclude tables with stale active human seats"
     );
-    assertCanonicalLockKey(queries, "quickseat:6:1:2");
+    assertCanonicalLockKey(queries, "quickseat:6");
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 order by seat_no asc")),
       "quick seat should read occupied seats to suggest a reusable seat"
@@ -130,7 +130,7 @@ const run = async () => {
     const notifications = [];
     const logs = [];
     const handler = makeHandler({ mode: "prefer_humans", queries, notifications, logs, balance: 99 });
-    const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
+    const res = await callQuickSeat(handler, { maxPlayers: 6 });
     assert.equal(res.statusCode, 409);
     assert.deepEqual(JSON.parse(res.body), { error: "buy_in_tier_locked", buyIn: 100, requiredBuyIn: 100, requiredBankroll: 110, balance: 99 });
     assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables")), false);
@@ -147,7 +147,7 @@ const run = async () => {
     const queries = [];
     const notifications = [];
     const handler = makeHandler({ mode: "already_seated", queries, notifications, balance: 0 });
-    const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
+    const res = await callQuickSeat(handler, { maxPlayers: 6 });
     assert.equal(res.statusCode, 200);
     assert.equal(JSON.parse(res.body).seatNo, 2);
     assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("account_type = 'user'")), false);
@@ -156,7 +156,7 @@ const run = async () => {
   {
     const queries = [];
     const handler = makeHandler({ mode: "any_open", queries, balanceError: true });
-    const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
+    const res = await callQuickSeat(handler, { maxPlayers: 6 });
     assert.equal(res.statusCode, 500);
     assert.equal(JSON.parse(res.body).error, "server_error");
   }
@@ -165,14 +165,14 @@ const run = async () => {
     const queries = [];
     const notifications = [];
     const handler = makeHandler({ mode: "any_open", queries, notifications });
-    const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
+    const res = await callQuickSeat(handler, { maxPlayers: 6 });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
     assert.equal(body.tableId, "table-any");
     assert.equal(body.seatNo, 2);
     assert.ok(body.seatNo >= 1 && body.seatNo <= 6);
-    assertCanonicalLockKey(queries, "quickseat:6:1:2");
+    assertCanonicalLockKey(queries, "quickseat:6");
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 order by seat_no asc")),
       "quick seat should read occupied seats before returning a recommendation"
@@ -200,15 +200,15 @@ const run = async () => {
     const queries = [];
     const notifications = [];
     const handler = makeHandler({ mode: "already_seated", queries, notifications });
-    const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
+    const res = await callQuickSeat(handler, { maxPlayers: 6 });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
     assert.equal(body.tableId, "table-human");
     assert.equal(body.seatNo, 2);
-    assertCanonicalLockKey(queries, "quickseat:6:1:2");
+    assertCanonicalLockKey(queries, "quickseat:6");
     assert.ok(
-      queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 and user_id = $2 limit 1")),
+      queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 and user_id = $2 and status = 'active' limit 1")),
       "quick seat should check existing seat for idempotency"
     );
     assert.ok(
@@ -222,14 +222,14 @@ const run = async () => {
     const queries = [];
     const notifications = [];
     const handler = makeHandler({ mode: "create", queries, notifications });
-    const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
+    const res = await callQuickSeat(handler, { maxPlayers: 6 });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
     assert.equal(body.tableId, "table-new");
     assert.equal(body.seatNo, 1);
     assert.ok(body.seatNo >= 1 && body.seatNo <= 6);
-    assertCanonicalLockKey(queries, "quickseat:6:1:2");
+    assertCanonicalLockKey(queries, "quickseat:6");
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")),
       "quick seat should create a table when none is available"
@@ -288,12 +288,24 @@ const run = async () => {
       klog: () => {},
     });
 
-    const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
+    const res = await callQuickSeat(handler, { maxPlayers: 6 });
     const body = JSON.parse(res.body);
     assert.equal(res.statusCode, 200);
     assert.equal(body.tableId, "table-slow-notify");
     assert.equal(notifyCalled, true, "quick seat should trigger runtime notify");
     resolveNotify({ ok: true });
+  }
+  {
+    const queries = [];
+    const notifications = [];
+    const handler = makeHandler({ mode: "create", queries, notifications, balance: 550 });
+    const res = await callQuickSeat(handler, { maxPlayers: 6 });
+    assert.equal(res.statusCode, 200);
+    const createCall = queries.find((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables"));
+    assert.equal(createCall?.params?.[1], 500);
+    assert.deepEqual(JSON.parse(createCall?.params?.[0]), { sb: 5, bb: 10 });
+    assert.equal(notifications[0]?.buyIn, 500);
+    assert.deepEqual(notifications[0]?.stakes, { sb: 5, bb: 10 });
   }
   {
     const queries = [];
@@ -316,9 +328,9 @@ const run = async () => {
               text.includes("from public.poker_tables t") &&
               text.includes("where t.status = 'open'") &&
               text.includes("t.max_players = $1") &&
-              text.includes("t.stakes = $2::jsonb")
+              text.includes("t.buy_in = any($4::int[])")
             ) {
-              if (state.created) return [{ id: "table-created", max_players: 6, buy_in: 100 }];
+              if (state.created) return [{ id: "table-created", max_players: 6, buy_in: 100, stakes: { sb: 1, bb: 2 } }];
               return [];
             }
 
@@ -338,12 +350,12 @@ const run = async () => {
       klog: () => {},
     });
 
-    const first = await callQuickSeat(handler, { stakes: { bb: 2, sb: 1 }, maxPlayers: 6 });
+    const first = await callQuickSeat(handler, { maxPlayers: 6 });
     const firstBody = JSON.parse(first.body);
     assert.equal(first.statusCode, 200);
     assert.equal(firstBody.tableId, "table-created");
 
-    const second = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
+    const second = await callQuickSeat(handler, { maxPlayers: 6 });
     const secondBody = JSON.parse(second.body);
     assert.equal(second.statusCode, 200);
     assert.equal(secondBody.tableId, "table-created");
@@ -353,15 +365,15 @@ const run = async () => {
 
     const lockCalls = queries.filter((entry) => entry.query.toLowerCase().includes("pg_advisory_xact_lock(hashtext($1))"));
     assert.equal(lockCalls.length, 2);
-    assert.equal(lockCalls[0]?.params?.[0], "quickseat:6:1:2");
-    assert.equal(lockCalls[1]?.params?.[0], "quickseat:6:1:2");
+    assert.equal(lockCalls[0]?.params?.[0], "quickseat:6");
+    assert.equal(lockCalls[1]?.params?.[0], "quickseat:6");
   }
   {
     const queries = [];
     const handler = makeHandler({ mode: "create", queries });
     process.env.CHIPS_ENABLED = "0";
     try {
-      const response = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
+      const response = await callQuickSeat(handler, { maxPlayers: 6 });
       assert.equal(response.statusCode, 404);
       assert.deepEqual(JSON.parse(response.body), { error: "not_found" });
       assert.equal(queries.length, 0);

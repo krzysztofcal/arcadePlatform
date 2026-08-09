@@ -49,9 +49,9 @@ const runMissingStakes = async () => {
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     body: JSON.stringify({ maxPlayers: 6 }),
   });
-  assert.equal(response.statusCode, 400);
-  assert.equal(JSON.parse(response.body).error, "invalid_stakes");
-  assert.equal(queries.length, 0);
+  assert.equal(response.statusCode, 200);
+  const insertCall = queries.find((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables"));
+  assert.deepEqual(JSON.parse(insertCall.params?.[0]), { sb: 1, bb: 2 });
 };
 
 const runInvalidStakes = async () => {
@@ -62,9 +62,9 @@ const runInvalidStakes = async () => {
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     body: JSON.stringify({ maxPlayers: 6, stakes: { sb: 2, bb: 2 } }),
   });
-  assert.equal(response.statusCode, 400);
-  assert.equal(JSON.parse(response.body).error, "invalid_stakes");
-  assert.equal(queries.length, 0);
+  assert.equal(response.statusCode, 200);
+  const insertCall = queries.find((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables"));
+  assert.deepEqual(JSON.parse(insertCall.params?.[0]), { sb: 1, bb: 2 });
 };
 
 const runInvalidBuyIn = async () => {
@@ -138,8 +138,10 @@ const runCustomBuyIn = async () => {
   const insertCall = queries.find((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables"));
   assert.ok(insertCall, "expected insert into poker_tables");
   assert.equal(insertCall.params?.[1], 500);
+  assert.deepEqual(JSON.parse(insertCall.params?.[0]), { sb: 5, bb: 10 });
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0]?.buyIn, 500);
+  assert.deepEqual(notifications[0]?.stakes, { sb: 5, bb: 10 });
 };
 
 const runCustomBuyInRolloutGuard = async () => {

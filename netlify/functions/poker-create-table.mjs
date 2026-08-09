@@ -1,8 +1,8 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { formatStakes, parseStakes } from "./_shared/poker-stakes.mjs";
+import { formatStakes } from "./_shared/poker-stakes.mjs";
 import { createPokerTableWithState } from "./_shared/poker-table-init.mjs";
 import { checkWsBuyInCapability, notifyWsLobbyMaterialize } from "./_shared/poker-ws-runtime-notify.mjs";
-import { DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../../shared/poker-domain/table-economy.mjs";
+import { calculateCanonicalPokerStakes, DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../../shared/poker-domain/table-economy.mjs";
 import { isConfiguredPokerBuyIn, resolvePokerBuyInTiers } from "../../shared/poker-domain/poker-progression.mjs";
 
 const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
@@ -96,12 +96,11 @@ export async function handler(event) {
     return { statusCode: 401, headers: mergeHeaders(cors), body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
   }
 
-  const stakesParsed = parseStakes(payload?.stakes);
-  if (!stakesParsed.ok) {
-    klog("poker_create_table_invalid_stakes", { reason: stakesParsed.details?.reason || "stakes_invalid" });
-    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_stakes" }) };
+  const canonicalStakes = calculateCanonicalPokerStakes(buyIn);
+  if (!canonicalStakes) {
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_buy_in" }) };
   }
-  const stakesJson = formatStakes(stakesParsed.value);
+  const stakesJson = formatStakes(canonicalStakes);
 
   if (buyIn !== DEFAULT_CASH_TABLE_BUY_IN_CHIPS) {
     const capability = await checkWsBuyInCapability({ klog });
@@ -136,7 +135,7 @@ export async function handler(event) {
   }
 
   const escrowSystemKey = `POKER_TABLE:${tableId}`;
-  triggerWsLobbyMaterialize({ tableId, maxPlayers, stakes: stakesParsed.value, buyIn, klog });
+  triggerWsLobbyMaterialize({ tableId, maxPlayers, stakes: canonicalStakes, buyIn, klog });
   return {
     statusCode: 200,
     headers: mergeHeaders(cors),

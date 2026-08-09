@@ -1,5 +1,6 @@
 import { asSeatSnapshot, computeTargetBotCount, getBotConfig, loadSeatRows, seedBotsForJoin, shouldSeedBotsOnJoin } from "./bots.mjs";
 import { evaluatePokerBuyInAccess, readPokerBankroll, resolvePokerBuyInTiers } from "./poker-progression.mjs";
+import { isCanonicalPokerStakes } from "./table-economy.mjs";
 import { postUserTableBuyIn } from "./table-buy-in.mjs";
 
 const BUY_IN_IDEMPOTENCY_CONSTRAINT = "chips_transactions_idempotency_key_unique";
@@ -121,6 +122,13 @@ function normalizePositiveInt(value) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) return null;
   return parsed;
+}
+
+function normalizeTableStakes(value) {
+  if (typeof value === "string") {
+    try { return JSON.parse(value); } catch { return null; }
+  }
+  return value;
 }
 
 function isBuyInIdempotencyDuplicate(error) {
@@ -762,6 +770,10 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
             stateVersion: snapshotVersion
           })
         };
+      }
+
+      if (!isCanonicalPokerStakes(authoritativeBuyIn, normalizeTableStakes(table.stakes))) {
+        throw makeError("invalid_buy_in");
       }
 
       const tiers = resolvePokerBuyInTiers(env);

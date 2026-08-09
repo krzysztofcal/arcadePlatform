@@ -29,7 +29,7 @@ import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../../netlify/fu
 import { deriveCommunityCards, deriveRemainingDeck } from "../../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { store as upstashStore, isMemoryStore as upstashIsMemoryStore } from "../../netlify/functions/_shared/store-upstash.mjs";
 import { executePokerLeave } from "../../shared/poker-domain/leave.mjs";
-import { DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../../shared/poker-domain/table-economy.mjs";
+import { calculateCanonicalPokerStakes, isCanonicalPokerStakes, DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../../shared/poker-domain/table-economy.mjs";
 import {
   calculateUnlockBankroll,
   evaluatePokerBuyInAccess,
@@ -149,6 +149,8 @@ export const loadPokerHandler = (filePath, mocks) => {
     "readPokerProgression",
     "resolvePokerBuyInTiers",
     "DEFAULT_CASH_TABLE_BUY_IN_CHIPS",
+    "calculateCanonicalPokerStakes",
+    "isCanonicalPokerStakes",
     "notifyWsLobbyMaterialize",
     "checkWsBuyInCapability",
     "PRESENCE_TTL_SEC",
@@ -213,6 +215,8 @@ return handler;`
       readPokerProgression,
       resolvePokerBuyInTiers,
       DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
+      calculateCanonicalPokerStakes,
+      isCanonicalPokerStakes,
       notifyWsLobbyMaterialize,
       checkWsBuyInCapability,
       computeTargetBotCount,

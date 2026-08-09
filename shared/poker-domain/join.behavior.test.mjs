@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { executePokerJoinAuthoritative } from "./join.mjs";
+import { calculateCanonicalPokerStakes } from "./table-economy.mjs";
 import { isStateStorageValid } from "../../ws-server/poker/snapshot-runtime/poker-state-utils.mjs";
 
 function withBotEnv(fn) {
@@ -66,7 +67,15 @@ function withLockedState(args, { validateStateForStorage = () => true } = {}) {
         wrappedTx.unsafe = async (sql, params = []) => {
           const rows = await tx.unsafe(sql, params);
           if (String(sql).includes("from public.poker_tables") && Array.isArray(rows)) {
-            return rows.map((row) => row && row.buy_in == null ? { ...row, buy_in: configuredBuyIn } : row);
+            return rows.map((row) => {
+              if (!row) return row;
+              const buyIn = row.buy_in == null ? configuredBuyIn : Number(row.buy_in);
+              return {
+                ...row,
+                buy_in: row.buy_in == null ? configuredBuyIn : row.buy_in,
+                stakes: row.stakes == null ? calculateCanonicalPokerStakes(buyIn) : row.stakes
+              };
+            });
           }
           if (String(sql).includes("from public.chips_accounts") && String(sql).includes("account_type = 'USER'") && Array.isArray(rows) && rows.length === 0) {
             return [{ balance: progressionBalance }];
@@ -278,6 +287,65 @@ test("active rejoin succeeds when its buy-in is absent from the current catalog"
     progressionBalance: 0,
     progressionEnv: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) },
     postTransactionFn: async () => ({ ok: true })
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.rejoin, true);
+  assert.equal(result.stack, 500);
+}));
+
+test("fresh join rejects a table whose persisted stakes do not match its buy-in", async () => withBotsDisabled(async () => {
+  await assert.rejects(
+    () => executePokerJoinAuthoritative(withStorageValidator({
+      beginSql: async (fn) => fn({
+        unsafe: async (sql) => {
+          const text = String(sql);
+          if (text.includes("from public.poker_tables")) {
+            return [{ id: "t-noncanonical-economy", status: "OPEN", max_players: 6, buy_in: 500, stakes: { sb: 1, bb: 2 } }];
+          }
+          if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc;")) return [];
+          if (text.includes("select version, state from public.poker_state")) {
+            return [{ version: 1, state: { tableId: "t-noncanonical-economy", seats: [], stacks: {} } }];
+          }
+          return [];
+        }
+      }),
+      tableId: "t-noncanonical-economy",
+      userId: "u-noncanonical-economy",
+      requestId: "join-noncanonical-economy",
+      buyIn: 500,
+      progressionBalance: 550,
+      postTransactionFn: async () => { throw new Error("ledger must not run"); }
+    })),
+    (error) => error?.code === "invalid_buy_in"
+  );
+}));
+
+test("active rejoin remains allowed for a table whose persisted stakes drifted", async () => withBotsDisabled(async () => {
+  const result = await executePokerJoinAuthoritative(withStorageValidator({
+    beginSql: async (fn) => fn({
+      unsafe: async (sql) => {
+        const text = String(sql);
+        if (text.includes("from public.poker_tables")) {
+          return [{ id: "t-rejoin-noncanonical-economy", status: "OPEN", max_players: 6, buy_in: 500, stakes: { sb: 1, bb: 2 } }];
+        }
+        if (text.includes("from public.poker_seats") && text.includes("seat_no, stack")) return [{ seat_no: 1, stack: 500 }];
+        if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc;")) {
+          return [{ user_id: "u-rejoin-noncanonical-economy", seat_no: 1, status: "ACTIVE", stack: 500, is_bot: false, bot_profile: null, leave_after_hand: false }];
+        }
+        if (text.includes("select version, state from public.poker_state")) {
+          return [{ version: 1, state: { tableId: "t-rejoin-noncanonical-economy", seats: [{ userId: "u-rejoin-noncanonical-economy", seatNo: 1, status: "ACTIVE" }], stacks: { "u-rejoin-noncanonical-economy": 500 } } }];
+        }
+        return [];
+      }
+    }),
+    tableId: "t-rejoin-noncanonical-economy",
+    userId: "u-rejoin-noncanonical-economy",
+    requestId: "rejoin-noncanonical-economy",
+    buyIn: 500,
+    progressionBalance: 0,
+    progressionEnv: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) },
+    postTransactionFn: async () => { throw new Error("rejoin must not debit"); }
   }));
 
   assert.equal(result.ok, true);
@@ -1192,7 +1260,7 @@ test("first human authoritative join validates the same randomized bot target th
     return randomCalls === 1 ? 0 : 0.999999;
   };
   const store = {
-    table: { id: "t-bots", status: "OPEN", max_players: 6, buy_in: 500, stakes: '{"sb":1,"bb":2}' },
+    table: { id: "t-bots", status: "OPEN", max_players: 6, buy_in: 500, stakes: '{"sb":5,"bb":10}' },
     seatRows: [],
     stateRow: { version: 3, state: { tableId: "t-bots", seats: [], stacks: {} } },
     ledgerCalls: []
@@ -1374,7 +1442,7 @@ test("same-request authoritative join replay becomes rejoin without duplicate se
 
 test("fresh authoritative join starting from version 0 returns the persisted post-mutation version", async () => withBotEnv(async () => {
   const store = {
-    table: { id: "t-fresh-version", status: "OPEN", max_players: 6, stakes: '{"sb":1,"bb":2}' },
+    table: { id: "t-fresh-version", status: "OPEN", max_players: 6, stakes: '{"sb":1,"bb":3}' },
     seatRows: [],
     stateRow: { version: 0, state: { tableId: "t-fresh-version", seats: [], stacks: {}, phase: "INIT", pot: 0 } },
     updateVersions: []

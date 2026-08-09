@@ -1,4 +1,4 @@
-import { DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "./table-economy.mjs";
+import { calculateCanonicalPokerStakes, DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "./table-economy.mjs";
 
 const BUY_IN_TIERS_ENV = "POKER_BUY_IN_TIERS_JSON";
 const POSTGRES_INTEGER_MAX = 2_147_483_647;
@@ -97,6 +97,7 @@ export function evaluatePokerProgression({ balance, tiers }) {
       : Math.max(0, Math.min(99, Math.round((normalizedBalance / unlockBankroll) * 100)));
     return {
       buyIn,
+      stakes: calculateCanonicalPokerStakes(buyIn),
       unlockBankroll,
       unlocked,
       available: false,

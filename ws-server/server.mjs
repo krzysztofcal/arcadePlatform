@@ -71,7 +71,8 @@ import {
   pokerLogRuntimeControl,
   setPokerLogRuntimeAuditLogger
 } from "./poker/observability/poker-log-runtime-control.mjs";
-import { getBotConfig, parseStakes } from "./shared/poker-domain/bots.mjs";
+import { getBotConfig } from "./shared/poker-domain/bots.mjs";
+import { calculateCanonicalPokerStakes, DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../shared/poker-domain/table-economy.mjs";
 import { createContinuousBotTableRepository } from "./poker/persistence/continuous-bot-table-repository.mjs";
 import { createContinuousBotTableSupervisor } from "./poker/runtime/continuous-bot-table-supervisor.mjs";
 import { handleContinuousBotRotationAtSettled } from "./poker/runtime/continuous-bot-table-rotation.mjs";
@@ -3999,14 +4000,14 @@ async function handleInternalLobbyMaterialize(req, res) {
     res.end(JSON.stringify({ error: "invalid_max_players" }));
     return;
   }
-  const stakesParsed = parseStakes(payload?.stakes);
-  if (!stakesParsed?.ok) {
+  const buyIn = payload?.buyIn == null ? DEFAULT_CASH_TABLE_BUY_IN_CHIPS : Number(payload.buyIn);
+  if (!Number.isSafeInteger(buyIn) || buyIn <= 0) {
     res.writeHead(400, { "content-type": "application/json" });
-    res.end(JSON.stringify({ error: "invalid_stakes" }));
+    res.end(JSON.stringify({ error: "invalid_buy_in" }));
     return;
   }
-  const buyIn = payload?.buyIn == null ? null : Number(payload.buyIn);
-  if (buyIn !== null && (!Number.isSafeInteger(buyIn) || buyIn <= 0)) {
+  const canonicalStakes = calculateCanonicalPokerStakes(buyIn);
+  if (!canonicalStakes) {
     res.writeHead(400, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "invalid_buy_in" }));
     return;
@@ -4015,8 +4016,8 @@ async function handleInternalLobbyMaterialize(req, res) {
     tableId,
     tableMeta: {
       maxPlayers,
-      stakes: stakesParsed.value,
-      ...(buyIn === null ? {} : { buyIn })
+      buyIn,
+      stakes: canonicalStakes
     },
     nowMs: Date.now()
   });

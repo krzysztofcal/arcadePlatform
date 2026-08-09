@@ -169,6 +169,7 @@
   var state = cloneState(demoState);
   var searchParams = null;
   var tableId = readTableId();
+  var PROGRESSION_URL = '/.netlify/functions/poker-progression';
   var wsClient = null;
   var currentAccessToken = null;
   var currentGuestSession = null;
@@ -627,6 +628,55 @@
     var bridge = window.SupabaseAuthBridge;
     if (!bridge || typeof bridge.getAccessToken !== 'function') return Promise.resolve(null);
     return Promise.resolve().then(function(){ return bridge.getAccessToken(); }).catch(function(){ return null; });
+  }
+
+  function fetchTableAccess(token){
+    if (!token || !tableId) return Promise.reject(new Error('table_access_unauthorized'));
+    var url = PROGRESSION_URL + '?tableId=' + encodeURIComponent(tableId);
+    return fetch(url, {
+      method: 'GET',
+      headers: { Authorization: 'Bearer ' + token }
+    }).then(function(response){
+      return response.json().catch(function(){ return {}; }).then(function(body){
+        if (!response.ok) throw new Error(body && (body.error || body.reason) || 'table_access_failed');
+        return body;
+      });
+    }).then(function(body){
+      var access = body && body.tableAccess;
+      if (!access || access.tableId !== tableId) throw new Error('table_access_unavailable');
+      return access;
+    });
+  }
+
+  function tableAccessDeniedMessage(access){
+    if (access && access.reason === 'table_not_found') return 'This table is no longer available. Return to the lobby.';
+    if (access && access.reason === 'table_closed') return 'This table is closed. Return to the lobby.';
+    if (access && access.reason === 'table_not_open') return 'This table is not available. Return to the lobby.';
+    if (access && access.reason === 'invalid_table_economy') return 'This table has an invalid buy-in and blinds configuration.';
+    return 'This table tier is not available for your current bankroll.';
+  }
+
+  function preflightAuthenticatedLiveMode(token){
+    return fetchTableAccess(token).then(function(access){
+      if (access.allowed !== true) {
+        state.statusText = LIVE_STATUS_COPY.error;
+        setError(tableAccessDeniedMessage(access));
+        markBootReady();
+        render();
+        return false;
+      }
+      currentAccessToken = token;
+      if (Number.isSafeInteger(Number(access.buyIn)) && Number(access.buyIn) > 0) state.buyIn = Number(access.buyIn);
+      startLiveMode(token);
+      return true;
+    }).catch(function(error){
+      klog('poker_table_access_preflight_failed', { code: error && (error.message || error.code) ? (error.message || error.code) : 'unknown' });
+      state.statusText = LIVE_STATUS_COPY.error;
+      setError('This table is not available. Return to the lobby.');
+      markBootReady();
+      render();
+      return false;
+    });
   }
 
   function getAuthApi(){
@@ -4323,7 +4373,16 @@
     var code = autoJoinErrorCode(error);
     if (code === 'buy_in_tier_locked') {
       var requiredBankroll = Number(error && error.requiredBankroll);
+      var balance = Number(error && error.balance);
       var tableBuyIn = Number(error && error.buyIn);
+      var alreadyUnlocked = Number.isSafeInteger(balance) && balance >= 0
+        && Number.isSafeInteger(requiredBankroll) && requiredBankroll > 0
+        && balance >= requiredBankroll;
+      if (alreadyUnlocked){
+        return Number.isSafeInteger(tableBuyIn) && tableBuyIn > 0
+          ? formatNumber(tableBuyIn) + ' CH tables are unlocked but not currently available at your progression level.'
+          : 'This table tier is unlocked but not currently available at your progression level.';
+      }
       if (Number.isSafeInteger(requiredBankroll) && requiredBankroll > 0){
         var tierLabel = Number.isSafeInteger(tableBuyIn) && tableBuyIn > 0 ? (' to unlock ' + formatNumber(tableBuyIn) + ' CH tables') : '';
         return 'You need at least ' + formatNumber(requiredBankroll) + ' CH' + tierLabel + '.';
@@ -4894,7 +4953,7 @@
     render();
   }
 
-  function applyAuthenticatedPendingState(user){
+  function applyAuthenticatedPendingState(user, options){
     if (!user || !state.currentUserId || String(user.id || '') !== String(state.currentUserId)) clearRebuyOperation();
     syncReactionHistoryContext(tableId, user && user.id ? String(user.id) : null);
     syncSocialPreferencesIdentity(user && user.id ? String(user.id) : null);
@@ -4905,7 +4964,7 @@
     state = createEmptyLiveState(tableId, user && user.id ? String(user.id) : null);
     state.statusText = LIVE_STATUS_COPY.connecting;
     render();
-    markBootReady();
+    if (!(options && options.keepBootSplash === true)) markBootReady();
   }
 
   function restartLiveMode(token){
@@ -4922,7 +4981,7 @@
     isGuestMode = false;
     currentGuestSession = null;
     clearGuestSession();
-    restartLiveMode(token);
+    preflightAuthenticatedLiveMode(token);
   }
 
   function startLiveMode(token){
@@ -5176,6 +5235,7 @@
   function applyInitialIdentity(identity, guestSessionCandidate){
     if (identity.token){
       stopAuthWatch();
+      applyAuthenticatedPendingState(identity.user || { id: getUserIdFromToken(identity.token) }, { keepBootSplash: true });
       restartAuthenticatedLiveMode(identity.token);
       return;
     }

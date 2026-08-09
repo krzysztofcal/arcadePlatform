@@ -3262,13 +3262,14 @@ test("public profile failure and timeout return initials fallback without reject
 });
 
 test("materialized table keeps its configured buy-in immutable", () => {
-  const tableManager = createTableManager({ maxSeats: 6 });
+  const tableManager = createTableManager({ maxSeats: 6, defaultBuyIn: null });
   const first = tableManager.materializeLobbyTable({
     tableId: "table-buy-in-immutable",
-    tableMeta: { maxPlayers: 6, buyIn: 500 }
+    tableMeta: { maxPlayers: 6, buyIn: 500, stakes: { sb: 1, bb: 2 } }
   });
   assert.equal(first.ok, true);
   assert.equal(tableManager.tableMeta("table-buy-in-immutable").buyIn, 500);
+  assert.deepEqual(tableManager.tableMeta("table-buy-in-immutable").stakes, { sb: 5, bb: 10 });
 
   const changed = tableManager.materializeLobbyTable({
     tableId: "table-buy-in-immutable",

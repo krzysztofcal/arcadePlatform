@@ -306,12 +306,19 @@ function createHarness(options = {}){
       createElement(tag){ return makeElement(tag); }
     },
     URLSearchParams,
+    fetch: options.fetch || (async (url) => {
+      const query = String(url).split("?")[1] || "";
+      const requestedTableId = new URLSearchParams(query).get("tableId") || "table-1";
+      const access = options.tableAccess || { tableId: requestedTableId, buyIn: 100, allowed: true, rejoin: false, reason: "available" };
+      return { ok: true, status: 200, json: async () => ({ tableAccess: { ...access, tableId: access.tableId || requestedTableId } }) };
+    }),
     Date: FakeDate,
     atob(value){ return Buffer.from(String(value), 'base64').toString('binary'); },
     Buffer,
     console
   };
   sandbox.window.document = sandbox.document;
+  sandbox.window.fetch = sandbox.fetch;
   sandbox.window.sessionStorage = sandbox.sessionStorage;
   sandbox.window.localStorage = sandbox.localStorage;
   if (Object.prototype.hasOwnProperty.call(options, 'authUser')) {
@@ -332,6 +339,12 @@ function createHarness(options = {}){
   vm.runInContext(source, sandbox, { filename: 'poker/poker-v2.js' });
 
 async function flush(){
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
@@ -2890,6 +2903,31 @@ test('poker v2 renders insufficient funds as controlled non-retryable buy-in cop
   harness.advanceTime(5000);
   await harness.flush();
   assert.equal(harness.joinPayloads.length, 1, 'insufficient funds must not schedule auto-join retry');
+});
+
+test('poker v2 does not claim an already-unlocked lower tier needs more bankroll', async () => {
+  const harness = createHarness({
+    search: '?tableId=table-1&seatNo=4&autoJoin=1',
+    sendJoin(){
+      const error = new Error('buy_in_tier_locked');
+      error.code = 'buy_in_tier_locked';
+      error.buyIn = 100;
+      error.requiredBankroll = 110;
+      error.balance = 5000;
+      return Promise.reject(error);
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  sendInitialTableSnapshot(harness);
+  await harness.flush();
+  await waitFor(() => harness.joinPayloads.length === 1);
+
+  assert.equal(harness.elements.pokerV2ErrorText.textContent, '100 CH tables are unlocked but not currently available at your progression level.');
+  assert.equal(harness.elements.pokerV2ErrorText.hidden, false);
+  harness.advanceTime(5000);
+  await harness.flush();
+  assert.equal(harness.joinPayloads.length, 1, 'an unavailable unlocked tier must not schedule auto-join retry');
 });
 
 test('poker v2 safely rejoins the same authoritative seat after a socket reconnect', async () => {
