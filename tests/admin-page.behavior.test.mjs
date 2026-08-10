@@ -150,6 +150,9 @@ function createElement(tagName, id = null) {
       if (attributes.has(name)) return attributes.get(name);
       return null;
     },
+    removeAttribute(name) {
+      attributes.delete(name);
+    },
     closest(selector) {
       let current = node;
       while (current) {
@@ -246,6 +249,13 @@ function createForm(document, id) {
       }
       field.value = "";
     });
+  };
+  form.querySelector = function querySelector(selector) {
+    if (selector === 'button[type="submit"]') {
+      return (form.children || []).find((child) => child.tagName === "BUTTON" && child.type === "submit") || null;
+    }
+    const nameMatch = String(selector || "").match(/^\[name="([^"]+)"\]$/);
+    return nameMatch ? formField(form, nameMatch[1]) || null : null;
   };
   return form;
 }
@@ -372,6 +382,9 @@ function createAdminDom() {
   addField(bonusCampaignForm, { name: "claimPolicy", value: "once" });
   addField(bonusCampaignForm, { name: "maxTotalClaims", value: "" });
   addField(bonusCampaignForm, { name: "eligibilityConfig", value: "{}" });
+  const adminAdjustForm = createForm(document, "adminAdjustForm");
+  addField(adminAdjustForm, { name: "amount", value: "" });
+  addField(adminAdjustForm, { name: "reason", value: "" });
   const pokerAuditFilters = createForm(document, "adminPokerAuditFilters");
   addField(pokerAuditFilters, { name: "tableId", value: "" });
   addField(pokerAuditFilters, { name: "handId", value: "" });
@@ -413,10 +426,13 @@ function buildContext(options = {}) {
   const opts = options || {};
   const { document, tabs, panels } = createAdminDom();
   const fetchCalls = [];
+  const mutationCalls = [];
   var vpsMetricsCalls = 0;
   const fetch = async (url, options) => {
     fetchCalls.push(String(url || ""));
     const text = String(url || "");
+    const method = options && options.method ? String(options.method).toUpperCase() : "GET";
+    if (method !== "GET") mutationCalls.push({ method, url: text });
     if (text.includes("/.netlify/functions/admin-me")) {
       if (opts.meUnavailable){
         return { ok: false, status: 503, json: async () => ({ error: "server_error" }) };
@@ -435,11 +451,27 @@ function buildContext(options = {}) {
     if (text.includes("/.netlify/functions/admin-users-list")) {
       return { ok: true, json: async () => ({ items: [], pagination: null }) };
     }
+    if (text.includes("/.netlify/functions/admin-user-details")) {
+      return { ok: true, json: async () => ({
+        user: { userId: "user-adjust", email: "adjust@example.test", activeTableCount: 0 },
+        balance: { balance: 1000 },
+        recentLedger: { items: [] },
+        activeTables: [],
+        recentPokerActivity: [],
+        activeSeats: [],
+      }) };
+    }
     if (text.includes("/.netlify/functions/admin-tables-list")) {
       return { ok: true, json: async () => ({ items: [], pagination: null }) };
     }
     if (text.includes("/.netlify/functions/admin-ledger-list")) {
       return { ok: true, json: async () => ({ items: [], pagination: null }) };
+    }
+    if (text.includes("/.netlify/functions/admin-ledger-adjust")) {
+      if (method === "POST" && typeof opts.waitForLedgerAdjustment === "function"){
+        await opts.waitForLedgerAdjustment();
+      }
+      return { ok: true, json: async () => ({ ok: true }) };
     }
     if (text.includes("/.netlify/functions/admin-bonus-campaigns")) {
       return { ok: true, json: async () => ({
@@ -686,7 +718,7 @@ function buildContext(options = {}) {
     Math,
     Date,
   });
-  return { context, document, tabs, panels, fetchCalls };
+  return { context, document, tabs, panels, fetchCalls, mutationCalls };
 }
 
 test("admin page tabs switch panels on click and keep ARIA state in sync", async () => {
@@ -1006,6 +1038,60 @@ test("admin bonus campaign form explains invalid campaign codes before sending a
   assert.match(document.getElementById("adminStatus").textContent, /lowercase letter or digit/);
   assert.match(document.getElementById("adminStatus").textContent, /daily-active-2026/);
   assert.equal(fetchCalls.some((url) => url.includes("/.netlify/functions/admin-bonus-campaigns")), false);
+});
+
+test("ADMIN_ADJUST ignores repeats while pending and allows a deliberate next action", async () => {
+  const mutationWaiters = [];
+  const { context, document, mutationCalls } = buildContext({
+    waitForLedgerAdjustment: () => {
+      if (!mutationWaiters.length) return new Promise((resolve) => mutationWaiters.push(resolve));
+      return Promise.resolve();
+    },
+  });
+  vm.runInContext(source, context, { filename: "js/admin-page.js" });
+
+  await flush();
+  const detailsButton = createElement("button");
+  detailsButton.setAttribute("data-user-action", "details");
+  detailsButton.setAttribute("data-user-id", "user-adjust");
+  document.dispatchEvent({ type: "click", target: detailsButton, preventDefault() {} });
+  for (let index = 0; index < 3; index += 1) await flush();
+
+  const form = document.getElementById("adminAdjustForm");
+  const amountInput = formField(form, "amount");
+  const reasonInput = formField(form, "reason");
+  const submitButton = createElement("button");
+  submitButton.type = "submit";
+  submitButton.textContent = "Apply adjustment";
+  form.appendChild(submitButton);
+  const fillValidAdjustment = () => {
+    amountInput.value = "100";
+    reasonInput.value = "test adjustment";
+  };
+
+  fillValidAdjustment();
+  document.dispatchEvent({ type: "submit", target: form, submitter: submitButton, preventDefault() {} });
+  assert.equal(submitButton.disabled, true);
+  assert.equal(submitButton.textContent, "Applying…");
+  assert.equal(submitButton.getAttribute("aria-busy"), "true");
+
+  document.dispatchEvent({ type: "submit", target: form, submitter: submitButton, preventDefault() {} });
+  await flush();
+  assert.equal(mutationCalls.filter(({ url }) => url.includes("/.netlify/functions/admin-ledger-adjust")).length, 1);
+
+  const releaseFirst = mutationWaiters.shift();
+  assert.ok(releaseFirst, "the first mutation should be waiting on the test gate");
+  releaseFirst();
+  for (let index = 0; index < 5; index += 1) await flush();
+
+  assert.equal(submitButton.disabled, false);
+  assert.equal(submitButton.textContent, "Apply adjustment");
+  assert.equal(submitButton.getAttribute("aria-busy"), null);
+
+  fillValidAdjustment();
+  document.dispatchEvent({ type: "submit", target: form, submitter: submitButton, preventDefault() {} });
+  for (let index = 0; index < 5; index += 1) await flush();
+  assert.equal(mutationCalls.filter(({ url }) => url.includes("/.netlify/functions/admin-ledger-adjust")).length, 2);
 });
 
 test("admin page poker audit search renders hand timeline and settlement summary", async () => {
