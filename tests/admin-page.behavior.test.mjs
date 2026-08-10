@@ -250,6 +250,13 @@ function createForm(document, id) {
       field.value = "";
     });
   };
+  form.querySelector = function querySelector(selector) {
+    if (selector === 'button[type="submit"]') {
+      return (form.children || []).find((child) => child.tagName === "BUTTON" && child.type === "submit") || null;
+    }
+    const nameMatch = String(selector || "").match(/^\[name="([^"]+)"\]$/);
+    return nameMatch ? formField(form, nameMatch[1]) || null : null;
+  };
   return form;
 }
 
@@ -375,6 +382,9 @@ function createAdminDom() {
   addField(bonusCampaignForm, { name: "claimPolicy", value: "once" });
   addField(bonusCampaignForm, { name: "maxTotalClaims", value: "" });
   addField(bonusCampaignForm, { name: "eligibilityConfig", value: "{}" });
+  const adminAdjustForm = createForm(document, "adminAdjustForm");
+  addField(adminAdjustForm, { name: "amount", value: "" });
+  addField(adminAdjustForm, { name: "reason", value: "" });
   const pokerAuditFilters = createForm(document, "adminPokerAuditFilters");
   addField(pokerAuditFilters, { name: "tableId", value: "" });
   addField(pokerAuditFilters, { name: "handId", value: "" });
@@ -441,16 +451,29 @@ function buildContext(options = {}) {
     if (text.includes("/.netlify/functions/admin-users-list")) {
       return { ok: true, json: async () => ({ items: [], pagination: null }) };
     }
+    if (text.includes("/.netlify/functions/admin-user-details")) {
+      return { ok: true, json: async () => ({
+        user: { userId: "user-adjust", email: "adjust@example.test", activeTableCount: 0 },
+        balance: { balance: 1000 },
+        recentLedger: { items: [] },
+        activeTables: [],
+        recentPokerActivity: [],
+        activeSeats: [],
+      }) };
+    }
     if (text.includes("/.netlify/functions/admin-tables-list")) {
       return { ok: true, json: async () => ({ items: [], pagination: null }) };
     }
     if (text.includes("/.netlify/functions/admin-ledger-list")) {
       return { ok: true, json: async () => ({ items: [], pagination: null }) };
     }
-    if (text.includes("/.netlify/functions/admin-bonus-campaigns")) {
-      if (method === "POST" && typeof opts.waitForBonusMutation === "function"){
-        await opts.waitForBonusMutation();
+    if (text.includes("/.netlify/functions/admin-ledger-adjust")) {
+      if (method === "POST" && typeof opts.waitForLedgerAdjustment === "function"){
+        await opts.waitForLedgerAdjustment();
       }
+      return { ok: true, json: async () => ({ ok: true }) };
+    }
+    if (text.includes("/.netlify/functions/admin-bonus-campaigns")) {
       return { ok: true, json: async () => ({
         items: [
           {
@@ -1017,10 +1040,10 @@ test("admin bonus campaign form explains invalid campaign codes before sending a
   assert.equal(fetchCalls.some((url) => url.includes("/.netlify/functions/admin-bonus-campaigns")), false);
 });
 
-test("admin mutation buttons ignore repeats while pending and allow a deliberate next action", async () => {
+test("ADMIN_ADJUST ignores repeats while pending and allows a deliberate next action", async () => {
   const mutationWaiters = [];
   const { context, document, mutationCalls } = buildContext({
-    waitForBonusMutation: () => {
+    waitForLedgerAdjustment: () => {
       if (!mutationWaiters.length) return new Promise((resolve) => mutationWaiters.push(resolve));
       return Promise.resolve();
     },
@@ -1028,44 +1051,47 @@ test("admin mutation buttons ignore repeats while pending and allow a deliberate
   vm.runInContext(source, context, { filename: "js/admin-page.js" });
 
   await flush();
-  const form = document.getElementById("adminBonusCampaignForm");
-  const saveButton = createElement("button");
-  saveButton.textContent = "Save campaign";
-  form.appendChild(saveButton);
-  const fillValidDraft = () => {
-    formField(form, "code").value = "async-campaign";
-    formField(form, "title").value = "Async campaign";
-    formField(form, "campaignType").value = "daily";
-    formField(form, "amount").value = "20";
-    formField(form, "startsAt").value = "2026-07-10T12:00";
-    formField(form, "eligibilityType").value = "all_accounts";
-    formField(form, "claimPolicy").value = "once";
-    formField(form, "eligibilityConfig").value = "{}";
+  const detailsButton = createElement("button");
+  detailsButton.setAttribute("data-user-action", "details");
+  detailsButton.setAttribute("data-user-id", "user-adjust");
+  document.dispatchEvent({ type: "click", target: detailsButton, preventDefault() {} });
+  for (let index = 0; index < 3; index += 1) await flush();
+
+  const form = document.getElementById("adminAdjustForm");
+  const amountInput = formField(form, "amount");
+  const reasonInput = formField(form, "reason");
+  const submitButton = createElement("button");
+  submitButton.type = "submit";
+  submitButton.textContent = "Apply adjustment";
+  form.appendChild(submitButton);
+  const fillValidAdjustment = () => {
+    amountInput.value = "100";
+    reasonInput.value = "test adjustment";
   };
 
-  fillValidDraft();
-  form.dispatchEvent({ type: "submit", target: form, submitter: saveButton, preventDefault() {} });
-  assert.equal(saveButton.disabled, true);
-  assert.equal(saveButton.textContent, "Saving…");
-  assert.equal(saveButton.getAttribute("aria-busy"), "true");
+  fillValidAdjustment();
+  document.dispatchEvent({ type: "submit", target: form, submitter: submitButton, preventDefault() {} });
+  assert.equal(submitButton.disabled, true);
+  assert.equal(submitButton.textContent, "Applying…");
+  assert.equal(submitButton.getAttribute("aria-busy"), "true");
 
-  form.dispatchEvent({ type: "submit", target: form, submitter: saveButton, preventDefault() {} });
+  document.dispatchEvent({ type: "submit", target: form, submitter: submitButton, preventDefault() {} });
   await flush();
-  assert.equal(mutationCalls.filter(({ url }) => url.includes("/.netlify/functions/admin-bonus-campaigns")).length, 1);
+  assert.equal(mutationCalls.filter(({ url }) => url.includes("/.netlify/functions/admin-ledger-adjust")).length, 1);
 
   const releaseFirst = mutationWaiters.shift();
   assert.ok(releaseFirst, "the first mutation should be waiting on the test gate");
   releaseFirst();
   for (let index = 0; index < 5; index += 1) await flush();
 
-  assert.equal(saveButton.disabled, false);
-  assert.equal(saveButton.textContent, "Save campaign");
-  assert.equal(saveButton.getAttribute("aria-busy"), null);
+  assert.equal(submitButton.disabled, false);
+  assert.equal(submitButton.textContent, "Apply adjustment");
+  assert.equal(submitButton.getAttribute("aria-busy"), null);
 
-  fillValidDraft();
-  form.dispatchEvent({ type: "submit", target: form, submitter: saveButton, preventDefault() {} });
+  fillValidAdjustment();
+  document.dispatchEvent({ type: "submit", target: form, submitter: submitButton, preventDefault() {} });
   for (let index = 0; index < 5; index += 1) await flush();
-  assert.equal(mutationCalls.filter(({ url }) => url.includes("/.netlify/functions/admin-bonus-campaigns")).length, 2);
+  assert.equal(mutationCalls.filter(({ url }) => url.includes("/.netlify/functions/admin-ledger-adjust")).length, 2);
 });
 
 test("admin page poker audit search renders hand timeline and settlement summary", async () => {

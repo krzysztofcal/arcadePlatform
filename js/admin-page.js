@@ -50,13 +50,10 @@
       botReaction: null,
       botReactionError: null,
       botReactionMessage: "",
-      botReactionPending: false,
       pokerLogControl: null,
       pokerLogControlError: null,
       pokerLogControlMessage: "",
-      pokerLogControlPending: false,
-      pokerLogDisablePendingIndex: null,
-      pokerLogDisableErrorIndex: null,
+      pokerLogDisableErrorKey: null,
       pokerLogTables: [],
       pokerLogTablesError: null,
       pokerLogClockBaseMs: null,
@@ -65,7 +62,6 @@
       pokerLogCountdownTimer: null,
       pokerMaintenance: null,
       pokerMaintenanceError: null,
-      pokerMaintenancePending: false,
       vpsMetrics: null,
       vpsMetricsError: null,
       vpsMetricsStale: false,
@@ -332,6 +328,22 @@
       }
       button.textContent = original.text;
     };
+  }
+
+  function getPokerMaintenanceActionKey(operation, extra){
+    var options = extra || {};
+    if (operation === "set_desired_state" || operation === "reconcile") return "poker-maintenance-supervisor";
+    if (operation === "cleanup") return "poker-maintenance-cleanup";
+    if (operation === "request_rotation"){
+      return "poker-maintenance-rotation-" + encodeURIComponent(String(options.tableId || ""));
+    }
+    return "poker-maintenance-" + String(operation || "action");
+  }
+
+  function getPokerLogDisableActionKey(item){
+    return ["poker-debug-disable", item && item.scope, item && item.category || "", item && item.tableId || ""]
+      .map(function(value){ return encodeURIComponent(String(value || "")); })
+      .join(":");
   }
 
   function getAuthBridge(){
@@ -1571,7 +1583,10 @@
   function renderBotReactionControl(){
     var value = state.ops.botReaction;
     var errorCode = state.ops.botReactionError;
-    var pending = state.ops.botReactionPending === true;
+    var overridePending = isPendingAction("bot-reaction-override");
+    var defaultPending = isPendingAction("bot-reaction-default");
+    var policyPending = isPendingAction("bot-reaction-policy");
+    var pending = overridePending || defaultPending || policyPending;
     var unavailable = state.maintenance || errorCode === "maintenance" || errorCode === "preview_only" || errorCode === "ws_preview_unavailable" || errorCode === "ws_preview_timeout";
     if (nodes.opsBotReactionSummary){
       if (value){
@@ -1602,26 +1617,26 @@
         nodes.opsBotReactionSummary.innerHTML = '<p class="admin-empty">Loading WS Preview timing…</p>';
       }
     }
-    if (nodes.opsBotReactionDelay && value && !pending){
+    if (nodes.opsBotReactionDelay && value && !overridePending){
       nodes.opsBotReactionDelay.value = String(value.active && value.active.minMs != null ? value.active.minMs : 500);
     }
-    if (nodes.opsBotReactionDelay) nodes.opsBotReactionDelay.disabled = pending || unavailable;
-    if (nodes.opsBotReactionEnabled && value && !pending) nodes.opsBotReactionEnabled.checked = value.reactionSettings?.enabled !== false;
-    if (nodes.opsBotReactionFrequency && value && !pending) nodes.opsBotReactionFrequency.value = String(value.reactionSettings?.frequencyPercent || 100);
+    if (nodes.opsBotReactionDelay) nodes.opsBotReactionDelay.disabled = overridePending || unavailable;
+    if (nodes.opsBotReactionEnabled && value && !policyPending) nodes.opsBotReactionEnabled.checked = value.reactionSettings?.enabled !== false;
+    if (nodes.opsBotReactionFrequency && value && !policyPending) nodes.opsBotReactionFrequency.value = String(value.reactionSettings?.frequencyPercent || 100);
     if (nodes.opsBotReactionFrequencyValue) nodes.opsBotReactionFrequencyValue.textContent = String(Number(nodes.opsBotReactionFrequency?.value || 100)) + "%";
-    if (nodes.opsBotReactionEnabled) nodes.opsBotReactionEnabled.disabled = pending || unavailable;
-    if (nodes.opsBotReactionFrequency) nodes.opsBotReactionFrequency.disabled = pending || unavailable;
-    if (nodes.opsBotReactionPolicyApply) nodes.opsBotReactionPolicyApply.disabled = pending || unavailable;
+    if (nodes.opsBotReactionEnabled) nodes.opsBotReactionEnabled.disabled = policyPending || unavailable;
+    if (nodes.opsBotReactionFrequency) nodes.opsBotReactionFrequency.disabled = policyPending || unavailable;
+    if (nodes.opsBotReactionPolicyApply) nodes.opsBotReactionPolicyApply.disabled = policyPending || unavailable;
     if (nodes.opsBotReactionApply){
-      nodes.opsBotReactionApply.disabled = pending || unavailable;
-      nodes.opsBotReactionApply.textContent = pending ? "Applying…" : "Apply delay";
+      nodes.opsBotReactionApply.disabled = overridePending || unavailable;
+      nodes.opsBotReactionApply.textContent = overridePending ? "Applying…" : "Apply delay";
     }
     if (nodes.opsBotReactionDefault){
-      nodes.opsBotReactionDefault.disabled = pending || unavailable || !value || value.mode !== "override";
-      nodes.opsBotReactionDefault.textContent = pending ? "Applying…" : "Set default";
+      nodes.opsBotReactionDefault.disabled = defaultPending || unavailable || !value || value.mode !== "override";
+      nodes.opsBotReactionDefault.textContent = defaultPending ? "Applying…" : "Set default";
     }
     if (nodes.opsBotReactionPolicyApply){
-      nodes.opsBotReactionPolicyApply.textContent = pending ? "Applying…" : "Apply reaction settings";
+      nodes.opsBotReactionPolicyApply.textContent = policyPending ? "Applying…" : "Apply reaction settings";
     }
     if (nodes.opsBotReactionStatus){
       var localError = errorCode && !unavailable ? errorCode : "";
@@ -1699,11 +1714,13 @@
         : item.scope === "category"
           ? "Category: " + item.category
           : "Table: " + shortTableId(item.tableId);
+      var actionKey = getPokerLogDisableActionKey(item);
+      var pending = isPendingAction(actionKey);
       return [
         '<div class="admin-list__item">',
         '<div class="admin-list__title"><span title="' + escapeHtml(item.tableId || item.category || "global") + '">' + escapeHtml(label) + "</span>",
-        '<button class="admin-btn admin-btn--ghost" type="button" data-poker-log-disable="' + String(index) + '"' + (state.ops.pokerLogControlPending || state.ops.pokerLogDisablePendingIndex === index ? " disabled" : "") + ">" + (state.ops.pokerLogDisablePendingIndex === index ? "Disabling…" : "Disable") + "</button></div>",
-        '<div class="admin-list__meta">' + escapeHtml(formatRemaining(item.expiresAt)) + (state.ops.pokerLogDisableErrorIndex === index ? " · Could not disable DEBUG." : "") + "</div>",
+        '<button class="admin-btn admin-btn--ghost" type="button" data-poker-log-disable="' + String(index) + '"' + (pending ? " disabled" : "") + ">" + (pending ? "Disabling…" : "Disable") + "</button></div>",
+        '<div class="admin-list__meta">' + escapeHtml(formatRemaining(item.expiresAt)) + (state.ops.pokerLogDisableErrorKey === actionKey ? " · Could not disable DEBUG." : "") + "</div>",
         "</div>"
       ].join("");
     }).join("") + "</div>";
@@ -1738,8 +1755,9 @@
 
   function renderPokerLogControl(){
     var snapshot = state.ops.pokerLogControl;
-    var pending = state.ops.pokerLogControlPending === true;
-    var disablePending = state.ops.pokerLogDisablePendingIndex != null;
+    var enablePending = isPendingAction("poker-debug-enable");
+    var overrides = snapshot && Array.isArray(snapshot.overrides) ? snapshot.overrides : [];
+    var disablePending = overrides.some(function(item){ return isPendingAction(getPokerLogDisableActionKey(item)); });
     var scope = nodes.opsPokerLogScope ? nodes.opsPokerLogScope.value || "table" : "table";
     if (nodes.opsPokerLogSummary){
       nodes.opsPokerLogSummary.innerHTML = snapshot
@@ -1778,12 +1796,12 @@
       }
     }
     if (nodes.opsPokerLogEnable){
-      nodes.opsPokerLogEnable.disabled = pending || disablePending || !snapshot;
-      nodes.opsPokerLogEnable.textContent = pending ? "Applying…" : "Enable DEBUG";
+      nodes.opsPokerLogEnable.disabled = enablePending || !snapshot;
+      nodes.opsPokerLogEnable.textContent = enablePending ? "Applying…" : "Enable DEBUG";
     }
-    if (nodes.opsPokerLogRefresh) nodes.opsPokerLogRefresh.disabled = pending || disablePending;
-    if (nodes.opsPokerLogTablesRefresh) nodes.opsPokerLogTablesRefresh.disabled = pending || disablePending;
-    if (nodes.opsPokerLogStatus) nodes.opsPokerLogStatus.textContent = pending || disablePending ? "Updating DEBUG control…" : state.ops.pokerLogControlMessage || state.ops.pokerLogControlError || "";
+    if (nodes.opsPokerLogRefresh) nodes.opsPokerLogRefresh.disabled = false;
+    if (nodes.opsPokerLogTablesRefresh) nodes.opsPokerLogTablesRefresh.disabled = false;
+    if (nodes.opsPokerLogStatus) nodes.opsPokerLogStatus.textContent = enablePending || disablePending ? "Updating DEBUG control…" : state.ops.pokerLogControlMessage || state.ops.pokerLogControlError || "";
     renderPokerLogOverrides();
   }
 
@@ -1807,7 +1825,8 @@
   function renderPokerMaintenance(){
     if (!nodes.opsMaintenance) return;
     var snapshot = state.ops.pokerMaintenance;
-    var pending = state.ops.pokerMaintenancePending === true;
+    var supervisorPending = isPendingAction("poker-maintenance-supervisor");
+    var cleanupPending = isPendingAction("poker-maintenance-cleanup");
     if (!snapshot){
       nodes.opsMaintenance.innerHTML = '<p class="admin-empty">' + escapeHtml(state.ops.pokerMaintenanceError ? "Continuous maintenance unavailable: " + state.ops.pokerMaintenanceError : "Loading continuous maintenance…") + "</p>";
     } else {
@@ -1819,8 +1838,9 @@
       var cleanup = snapshot.cleanup || {};
       var lastRun = cleanup.lastRun || {};
       var tableItems = (Array.isArray(continuous.tables) ? continuous.tables : []).map(function(table){
+        var rotationPending = isPendingAction(getPokerMaintenanceActionKey("request_rotation", { tableId: table.tableId }));
         var rotationButton = table.status === "OPEN"
-          ? '<button class="admin-btn admin-btn--ghost" type="button" data-maintenance-rotate="' + escapeHtml(table.tableId || "") + '">Request rotation</button>'
+          ? '<button class="admin-btn admin-btn--ghost" type="button" data-maintenance-rotate="' + escapeHtml(table.tableId || "") + '"' + (rotationPending ? " disabled" : "") + ">" + (rotationPending ? "Running…" : "Request rotation") + "</button>"
           : "";
         return {
           title: '<span class="admin-mono">' + escapeHtml(shortTableId(table.tableId)) + "</span> " + pill(table.status || "unknown", table.status === "OPEN" ? "success" : "info") + rotationButton,
@@ -1882,26 +1902,31 @@
       nodes.opsMaintenanceEnabled.value = continuous.maintenanceEnabled ? "true" : "false";
       nodes.opsMaintenanceCount.value = continuous.desiredTableCount == null ? "0" : String(continuous.desiredTableCount);
     }
-    var disabled = pending || state.maintenance;
-    if (nodes.opsMaintenanceEnabled) nodes.opsMaintenanceEnabled.disabled = disabled;
-    if (nodes.opsMaintenanceCount) nodes.opsMaintenanceCount.disabled = disabled;
+    var supervisorDisabled = supervisorPending || state.maintenance;
+    var cleanupDisabled = cleanupPending || state.maintenance;
+    if (nodes.opsMaintenanceEnabled) nodes.opsMaintenanceEnabled.disabled = supervisorDisabled;
+    if (nodes.opsMaintenanceCount) nodes.opsMaintenanceCount.disabled = supervisorDisabled;
     if (nodes.opsMaintenanceApply){
-      nodes.opsMaintenanceApply.disabled = disabled;
-      nodes.opsMaintenanceApply.textContent = pending ? "Applying…" : "Apply maintenance state";
+      nodes.opsMaintenanceApply.disabled = supervisorDisabled;
+      nodes.opsMaintenanceApply.textContent = supervisorPending ? "Applying…" : "Apply maintenance state";
     }
     if (nodes.opsMaintenanceStop){
-      nodes.opsMaintenanceStop.disabled = disabled;
-      nodes.opsMaintenanceStop.textContent = pending ? "Stopping…" : "Stop continuous tables";
+      nodes.opsMaintenanceStop.disabled = supervisorDisabled;
+      nodes.opsMaintenanceStop.textContent = supervisorPending ? "Stopping…" : "Stop continuous tables";
     }
     if (nodes.opsMaintenanceReconcile){
-      nodes.opsMaintenanceReconcile.disabled = disabled;
-      nodes.opsMaintenanceReconcile.textContent = pending ? "Running…" : "Reconcile now";
+      nodes.opsMaintenanceReconcile.disabled = supervisorDisabled;
+      nodes.opsMaintenanceReconcile.textContent = supervisorPending ? "Running…" : "Reconcile now";
     }
     if (nodes.opsMaintenanceCleanup){
-      nodes.opsMaintenanceCleanup.disabled = disabled;
-      nodes.opsMaintenanceCleanup.textContent = pending ? "Running…" : "Run cleanup now";
+      nodes.opsMaintenanceCleanup.disabled = cleanupDisabled;
+      nodes.opsMaintenanceCleanup.textContent = cleanupPending ? "Running…" : "Run cleanup now";
     }
-    if (nodes.opsMaintenanceStatus) nodes.opsMaintenanceStatus.textContent = pending ? "Updating poker maintenance…" : state.ops.pokerMaintenanceError || "";
+    if (nodes.opsMaintenanceStatus) nodes.opsMaintenanceStatus.textContent = supervisorPending
+      ? "Updating poker maintenance…"
+      : cleanupPending
+        ? "Running cleanup…"
+        : state.ops.pokerMaintenanceError || "";
   }
 
   function closestEventTarget(target, selector){
@@ -2489,7 +2514,6 @@
 
   async function submitPokerLogOverride(event){
     event.preventDefault();
-    if (state.ops.pokerLogControlPending || state.ops.pokerLogDisablePendingIndex != null) return;
     var snapshot = state.ops.pokerLogControl;
     if (!snapshot) return;
     var scope = nodes.opsPokerLogScope ? nodes.opsPokerLogScope.value : "table";
@@ -2512,7 +2536,8 @@
       && typeof window.confirm === "function"
       && !window.confirm("Enable Global DEBUG on Production for " + Math.ceil(ttlMs / 60000) + " minutes?")
     ) return;
-    state.ops.pokerLogControlPending = true;
+    var pending = beginPendingAction("poker-debug-enable", resolveActionButton(event, event && event.target), "Applying…");
+    if (!pending) return;
     state.ops.pokerLogControlMessage = "";
     renderPokerLogControl();
     try {
@@ -2527,17 +2552,19 @@
       state.ops.pokerLogControlError = err && err.code ? err.code : "request_failed";
       state.ops.pokerLogControlMessage = "Could not enable DEBUG.";
     } finally {
-      state.ops.pokerLogControlPending = false;
+      pending();
       renderPokerLogControl();
     }
   }
 
-  async function disablePokerLogOverride(index){
+  async function disablePokerLogOverride(index, button){
     var snapshot = state.ops.pokerLogControl;
     var item = snapshot && snapshot.overrides && snapshot.overrides[index];
-    if (!item || state.ops.pokerLogControlPending || state.ops.pokerLogDisablePendingIndex != null) return;
-    state.ops.pokerLogDisablePendingIndex = index;
-    state.ops.pokerLogDisableErrorIndex = null;
+    if (!item) return;
+    var actionKey = getPokerLogDisableActionKey(item);
+    var pending = beginPendingAction(actionKey, button, "Disabling…");
+    if (!pending) return;
+    state.ops.pokerLogDisableErrorKey = null;
     state.ops.pokerLogControlMessage = "";
     renderPokerLogControl();
     try {
@@ -2552,14 +2579,14 @@
       });
       setPokerLogSnapshot(result);
       state.ops.pokerLogControlError = null;
-      state.ops.pokerLogDisableErrorIndex = null;
+      state.ops.pokerLogDisableErrorKey = null;
       state.ops.pokerLogControlMessage = "DEBUG override disabled.";
     } catch (err){
       state.ops.pokerLogControlError = err && err.code ? err.code : "request_failed";
-      state.ops.pokerLogDisableErrorIndex = index;
+      state.ops.pokerLogDisableErrorKey = actionKey;
       state.ops.pokerLogControlMessage = "Could not disable DEBUG.";
     } finally {
-      state.ops.pokerLogDisablePendingIndex = null;
+      pending();
       renderPokerLogControl();
     }
   }
@@ -2665,12 +2692,11 @@
     var target = closestEventTarget(event && event.target, "[data-poker-log-disable]");
     if (!target) return;
     var index = Number(target.getAttribute("data-poker-log-disable"));
-    if (Number.isInteger(index) && index >= 0) disablePokerLogOverride(index);
+    if (Number.isInteger(index) && index >= 0) disablePokerLogOverride(index, target);
   }
 
   async function submitBotReactionOverride(event){
     event.preventDefault();
-    if (state.ops.botReactionPending) return;
     if (state.maintenance){
       setStatus("CH and poker mutations are disabled during maintenance.", "error");
       return;
@@ -2682,7 +2708,8 @@
       renderBotReactionControl();
       return;
     }
-    state.ops.botReactionPending = true;
+    var pending = beginPendingAction("bot-reaction-override", resolveActionButton(event, event && event.target), "Applying…");
+    if (!pending) return;
     state.ops.botReactionError = null;
     state.ops.botReactionMessage = "";
     renderBotReactionControl();
@@ -2696,18 +2723,18 @@
     } catch (err){
       handleBotReactionError(err, "Could not apply the override.");
     } finally {
-      state.ops.botReactionPending = false;
+      pending();
       renderBotReactionControl();
     }
   }
 
-  async function clearBotReactionOverride(){
-    if (state.ops.botReactionPending) return;
+  async function clearBotReactionOverride(event){
     if (state.maintenance){
       setStatus("CH and poker mutations are disabled during maintenance.", "error");
       return;
     }
-    state.ops.botReactionPending = true;
+    var pending = beginPendingAction("bot-reaction-default", resolveActionButton(event), "Applying…");
+    if (!pending) return;
     state.ops.botReactionError = null;
     state.ops.botReactionMessage = "";
     renderBotReactionControl();
@@ -2721,14 +2748,13 @@
     } catch (err){
       handleBotReactionError(err, "Could not restore the default range.");
     } finally {
-      state.ops.botReactionPending = false;
+      pending();
       renderBotReactionControl();
     }
   }
 
   async function submitBotReactionPolicy(event){
     event.preventDefault();
-    if (state.ops.botReactionPending) return;
     var frequencyPercent = Number(nodes.opsBotReactionFrequency && nodes.opsBotReactionFrequency.value);
     if (!Number.isInteger(frequencyPercent) || frequencyPercent < 1 || frequencyPercent > 100){
       state.ops.botReactionError = "invalid_reaction_settings";
@@ -2736,7 +2762,8 @@
       renderBotReactionControl();
       return;
     }
-    state.ops.botReactionPending = true;
+    var pending = beginPendingAction("bot-reaction-policy", resolveActionButton(event, event && event.target), "Applying…");
+    if (!pending) return;
     state.ops.botReactionError = null;
     state.ops.botReactionMessage = "";
     renderBotReactionControl();
@@ -2753,7 +2780,7 @@
     } catch (err){
       handleBotReactionError(err, "Could not apply bot reaction settings.");
     } finally {
-      state.ops.botReactionPending = false;
+      pending();
       renderBotReactionControl();
     }
   }
@@ -2790,13 +2817,20 @@
     }
   }
 
-  async function runPokerMaintenance(operation, extra){
-    if (state.ops.pokerMaintenancePending) return;
+  async function runPokerMaintenance(operation, extra, button){
     if (state.maintenance){
       setStatus("CH and poker mutations are disabled during maintenance.", "error");
       return;
     }
-    state.ops.pokerMaintenancePending = true;
+    var actionKey = getPokerMaintenanceActionKey(operation, extra);
+    var pendingLabel = operation === "set_desired_state"
+      && button
+      && typeof button.getAttribute === "function"
+      && button.getAttribute("data-maintenance-stop") != null
+      ? "Stopping…"
+      : operation === "set_desired_state" ? "Applying…" : "Running…";
+    var pending = beginPendingAction(actionKey, button, pendingLabel);
+    if (!pending) return;
     state.ops.pokerMaintenanceError = null;
     renderPokerMaintenance();
     try {
@@ -2820,14 +2854,14 @@
         handleApiError(err, "Could not update poker maintenance.");
       }
     } finally {
-      state.ops.pokerMaintenancePending = false;
+      pending();
       renderPokerMaintenance();
     }
   }
 
   function submitPokerMaintenance(event){
     event.preventDefault();
-    if (state.ops.pokerMaintenancePending) return;
+    if (isPendingAction("poker-maintenance-supervisor")) return;
     var enabled = nodes.opsMaintenanceEnabled && nodes.opsMaintenanceEnabled.value === "true";
     var desiredTableCount = Number(nodes.opsMaintenanceCount && nodes.opsMaintenanceCount.value);
     var continuous = state.ops.pokerMaintenance && state.ops.pokerMaintenance.continuous;
@@ -2842,11 +2876,11 @@
     if (desiredTableCount > 10 && typeof window !== "undefined"
       && typeof window.confirm === "function"
       && !window.confirm("This is a high-volume Preview stress test. Continue with " + String(desiredTableCount) + " desired tables?")) return;
-    runPokerMaintenance("set_desired_state", { enabled: enabled, desiredTableCount: desiredTableCount });
+    runPokerMaintenance("set_desired_state", { enabled: enabled, desiredTableCount: desiredTableCount }, resolveActionButton(event, event && event.target));
   }
 
-  function stopContinuousTables(){
-    if (state.ops.pokerMaintenancePending) return;
+  function stopContinuousTables(button){
+    if (isPendingAction("poker-maintenance-supervisor")) return;
     var continuous = state.ops.pokerMaintenance && state.ops.pokerMaintenance.continuous;
     var desiredTableCount = continuous && Number.isInteger(continuous.desiredTableCount)
       ? continuous.desiredTableCount
@@ -2854,7 +2888,7 @@
     if (typeof window !== "undefined"
       && typeof window.confirm === "function"
       && !window.confirm("Stop continuous tables? Continuous maintenance will be disabled. No new managed tables will be created. Existing managed tables will retire gracefully after their current hand. Tables with active human presence may remain alive until they can safely retire.")) return;
-    runPokerMaintenance("set_desired_state", { enabled: false, desiredTableCount: desiredTableCount });
+    runPokerMaintenance("set_desired_state", { enabled: false, desiredTableCount: desiredTableCount }, button);
   }
 
   function handleApiError(err, fallback){
@@ -3165,20 +3199,20 @@
       }
       var maintenanceRotateButton = closestEventTarget(event.target, "[data-maintenance-rotate]");
       if (maintenanceRotateButton){
-        runPokerMaintenance("request_rotation", { tableId: maintenanceRotateButton.getAttribute("data-maintenance-rotate") });
+        runPokerMaintenance("request_rotation", { tableId: maintenanceRotateButton.getAttribute("data-maintenance-rotate") }, maintenanceRotateButton);
         return;
       }
       var maintenanceStopButton = closestEventTarget(event.target, "[data-maintenance-stop]");
       if (maintenanceStopButton){
-        stopContinuousTables();
+        stopContinuousTables(maintenanceStopButton);
         return;
       }
       if (event.target && event.target.id === "adminOpsMaintenanceReconcile"){
-        runPokerMaintenance("reconcile");
+        runPokerMaintenance("reconcile", null, event.target);
         return;
       }
       if (event.target && event.target.id === "adminOpsMaintenanceCleanup"){
-        runPokerMaintenance("cleanup");
+        runPokerMaintenance("cleanup", null, event.target);
         return;
       }
       var auditButton = closestEventTarget(event.target, "[data-audit-action]");
@@ -3224,8 +3258,8 @@
         submitPokerMaintenance(event);
       }
     });
-    if (nodes.opsMaintenanceReconcile) nodes.opsMaintenanceReconcile.addEventListener("click", function(){ runPokerMaintenance("reconcile"); });
-    if (nodes.opsMaintenanceCleanup) nodes.opsMaintenanceCleanup.addEventListener("click", function(){ runPokerMaintenance("cleanup"); });
+    if (nodes.opsMaintenanceReconcile) nodes.opsMaintenanceReconcile.addEventListener("click", function(event){ runPokerMaintenance("reconcile", null, event.currentTarget || nodes.opsMaintenanceReconcile); });
+    if (nodes.opsMaintenanceCleanup) nodes.opsMaintenanceCleanup.addEventListener("click", function(event){ runPokerMaintenance("cleanup", null, event.currentTarget || nodes.opsMaintenanceCleanup); });
     doc.addEventListener("input", function(event){
       var target = event.target;
       if (target && (target.id === "adminAdjustAmount" || target.id === "adminAdjustReason") && state.users.detail && state.users.detail.user){
