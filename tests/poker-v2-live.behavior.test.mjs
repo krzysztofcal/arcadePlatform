@@ -255,7 +255,9 @@ function createHarness(options = {}){
       },
       KLog: { log(kind, data){ logs.push({ kind, data }); } },
       SupabaseAuthBridge: {
-        getAccessToken: async () => activeToken
+        getAccessToken: async () => typeof options.getAccessToken === 'function'
+          ? options.getAccessToken(activeToken)
+          : activeToken
       },
       PokerWsClient: {
         create(opts){
@@ -398,7 +400,11 @@ async function flush(){
     getCreateCount(){ return createCount; },
     getDestroyCount(){ return destroyCount; },
     setAuthToken(nextToken){ activeToken = nextToken; },
-    triggerAuthChange(user){ return authChangeHandler ? authChangeHandler('TOKEN_REFRESHED', user) : null; },
+    triggerAuthChange(user, session, event){
+      if (!authChangeHandler) return null;
+      if (arguments.length >= 2) return authChangeHandler(event || 'TOKEN_REFRESHED', user, session);
+      return authChangeHandler('TOKEN_REFRESHED', user);
+    },
     getIntervalCount(){ return intervalTimers.length; },
     getSessionStorage(key){ return sandbox.sessionStorage.getItem(key); },
     getLocalStorage(key){ return sandbox.localStorage.getItem(key); }
@@ -638,6 +644,57 @@ test('poker v2 tears down the previous user socket and ignores stale access pref
   await harness.flush();
   assert.equal(harness.getCreateCount(), 1, 'stale successful preflight must be ignored');
   assert.equal(harness.getDestroyCount(), 1, 'stale result must not restore the destroyed socket');
+});
+
+test('poker v2 ignores stale auth tokens and initial identity results', async () => {
+  const tokenFor = (userId) => `aaa.${Buffer.from(JSON.stringify({ sub: userId })).toString('base64')}.zzz`;
+  const pendingTokens = [];
+  const harness = createHarness({
+    token: tokenFor('user-a'),
+    authUser: { id: 'user-a' },
+    getAccessToken: () => new Promise((resolve) => pendingTokens.push(resolve))
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  assert.equal(pendingTokens.length, 1, 'initial identity should have one pending token read');
+
+  harness.triggerAuthChange({ id: 'user-b' });
+  harness.triggerAuthChange({ id: 'user-c' });
+  await harness.flush();
+  assert.equal(pendingTokens.length, 3, 'each auth event should capture its own token read');
+
+  pendingTokens[2](tokenFor('user-c'));
+  await harness.flush();
+  assert.equal(harness.getCreateCount(), 1, 'the newest auth event should start one socket');
+
+  pendingTokens[1](tokenFor('user-b'));
+  pendingTokens[0](tokenFor('user-a'));
+  await harness.flush();
+  assert.equal(harness.getCreateCount(), 1, 'stale auth and initial identity results must not start another socket');
+  assert.equal(harness.getDestroyCount(), 0, 'stale results must not tear down the current socket');
+
+  harness.triggerAuthChange(null);
+  await harness.flush();
+  assert.equal(pendingTokens.length, 4, 'signed-out fallback should capture its token read');
+  harness.triggerAuthChange({ id: 'user-c' }, { access_token: tokenFor('user-c') });
+  await harness.flush();
+  assert.equal(pendingTokens.length, 4, 'auth events with a session should use its token without another bridge read');
+  pendingTokens[3](null);
+  await harness.flush();
+  assert.equal(harness.getCreateCount(), 1, 'a stale signed-out result must not replace the current session');
+  assert.equal(harness.getDestroyCount(), 0, 'a stale signed-out result must not destroy the current socket');
+});
+
+test('poker v2 fails closed when table access preflight cannot decide', async () => {
+  for (const fetchImpl of [
+    () => Promise.reject(new Error('network_down')),
+    () => Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'progression_unavailable' }) })
+  ]) {
+    const harness = createHarness({ fetch: fetchImpl });
+    harness.fireDomContentLoaded();
+    await harness.flush();
+    assert.equal(harness.getCreateCount(), 0, 'WS must not start without a positive table-access decision');
+  }
 });
 
 test('poker v2 disables reactions for four seconds after an accepted reaction', async () => {

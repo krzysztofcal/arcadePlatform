@@ -201,6 +201,7 @@
   var lastKnownCurrentSeatNo = null;
   var liveModeGeneration = 0;
   var authenticatedPreflightGeneration = 0;
+  var authLifecycleGeneration = 0;
   var snapshotRecoveryTimer = null;
   var snapshotRecoveryAttempts = 0;
   var snapshotRecoveryTimedOut = false;
@@ -642,20 +643,14 @@
         if (!response.ok){
           var responseError = new Error(body && (body.error || body.reason) || 'table_access_failed');
           responseError.status = response.status;
-          responseError.allowWsFallback = response.status >= 500;
           throw responseError;
         }
         return body;
       });
-    }, function(error){
-      if (error && !Number.isInteger(error.status)) error.allowWsFallback = true;
-      throw error;
     }).then(function(body){
       var access = body && body.tableAccess;
       if (!access || access.tableId !== tableId){
-        var accessError = new Error('table_access_unavailable');
-        accessError.allowWsFallback = true;
-        throw accessError;
+        throw new Error('table_access_unavailable');
       }
       return access;
     });
@@ -691,11 +686,6 @@
     }).catch(function(error){
       if (!isCurrentPreflight()) return false;
       klog('poker_table_access_preflight_failed', { code: error && (error.message || error.code) ? (error.message || error.code) : 'unknown' });
-      if (error && error.allowWsFallback === true){
-        currentAccessToken = token;
-        startLiveMode(token);
-        return true;
-      }
       state.statusText = LIVE_STATUS_COPY.error;
       setError('This table is not available. Return to the lobby.');
       markBootReady();
@@ -726,6 +716,12 @@
         window.setTimeout(function(){ resolve(resolveInitialIdentity(retry + 1)); }, 150);
       });
     });
+  }
+
+  function getAuthSessionToken(session){
+    if (!session || typeof session !== 'object') return null;
+    var token = session.access_token || session.accessToken || session.token;
+    return typeof token === 'string' && token ? token : null;
   }
 
   function decodeBase64Url(str){
@@ -5256,8 +5252,13 @@
   function bindAuthLifecycle(){
     var authApi = getAuthApi();
     if (!authApi || typeof authApi.onAuthChange !== 'function') return;
-    authUnsubscribe = authApi.onAuthChange(function(_event, user){
-      getAccessToken().then(function(token){
+    authUnsubscribe = authApi.onAuthChange(function(_event, user, session){
+      var lifecycleGeneration = ++authLifecycleGeneration;
+      var tokenPromise = typeof session === 'undefined'
+        ? getAccessToken()
+        : Promise.resolve(getAuthSessionToken(session));
+      tokenPromise.then(function(token){
+        if (lifecycleGeneration !== authLifecycleGeneration) return;
         if (user && !token){
           currentAccessToken = null;
           applyAuthenticatedPendingState(user);
@@ -5273,6 +5274,7 @@
         stopAuthWatch();
         if (isGuestMode || token !== currentAccessToken || !isWsReady()) restartAuthenticatedLiveMode(token);
       }).catch(function(){
+        if (lifecycleGeneration !== authLifecycleGeneration) return;
         currentAccessToken = null;
         applySignedOutState();
         startAuthWatch();
@@ -5324,11 +5326,14 @@
       startDemoMode();
       return;
     }
+    var initialIdentityGeneration = ++authLifecycleGeneration;
     bindAuthLifecycle();
     var identityPromise = getAuthApi() ? resolveInitialIdentity() : getAccessToken();
     identityPromise.then(function(identity){
+      if (initialIdentityGeneration !== authLifecycleGeneration) return;
       applyInitialIdentity(getAuthApi() ? identity : { token: identity || null, user: null }, guestSessionCandidate);
     }).catch(function(){
+      if (initialIdentityGeneration !== authLifecycleGeneration) return;
       applySignedOutState();
       startAuthWatch();
     });
