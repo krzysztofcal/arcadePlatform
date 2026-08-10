@@ -53,6 +53,7 @@ Set these as Netlify environment variables (Site settings -> Environment variabl
 - `POKER_BUY_IN_TIERS_JSON` (shared ordered buy-in tier catalog; omitted uses the built-in catalog)
 
 Operational notes:
+- Before deploying the runtime to Stage, WS Preview, or production, apply `supabase/migrations/20260810100000_poker_bot_bankroll.sql` to that environment. It creates the active `SYSTEM/POKER_BOT_BANKROLL` account and performs the one-time idempotent `GENESIS -1,000,000` / `POKER_BOT_BANKROLL +1,000,000` allocation. Verify the account and seed transaction before enabling 500 CH bot funding; do not substitute `TREASURY` or edit balances directly.
 - Before production rollout, run a read-only preflight for every active table's `buy_in` + `stakes` pair. List the complete set with:
 
   ```sql
@@ -203,8 +204,12 @@ rebuy contracts.
 
 Preview rollout:
 
-1. Apply `20260729100000_poker_managed_table_profiles.sql` and
-   `20260809224000_poker_managed_table_profiles_canonical_stakes.sql` to stage.
+1. Apply `20260810100000_poker_bot_bankroll.sql`,
+   `20260729100000_poker_managed_table_profiles.sql`, and
+   `20260809224000_poker_managed_table_profiles_canonical_stakes.sql` to Stage.
+   The bankroll migration is required before any 500 CH bot seed, replacement,
+   or managed top-up; the two profile migrations are required for the
+   continuous-table reconciliation.
 2. Deploy the exact PR SHA with manual `WS Preview Deploy`.
 3. Verify release metadata, `ws_artifact_start`, local/public `/healthz` and no supervisor failure.
 4. Confirm `CONTINUOUS_BOT_DEFAULT` has canonical `small_blind = 1`,
