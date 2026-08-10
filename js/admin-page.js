@@ -78,6 +78,7 @@
       loaded: false,
     },
     draftIdempotencyKeys: {},
+    pendingActions: {},
   };
 
   function klog(kind, data){
@@ -283,6 +284,54 @@
 
   function resetDraftIdempotencyKey(kind){
     delete state.draftIdempotencyKeys[String(kind || "admin")];
+  }
+
+  function resolveActionButton(source, form){
+    var event = source && source.target ? source : null;
+    if (event && event.submitter) return event.submitter;
+    var target = event ? (event.target || event.currentTarget) : source;
+    if (target && target.nodeType === 1 && target.tagName === "BUTTON") return target;
+    if (target && typeof target.closest === "function"){
+      var button = target.closest("button");
+      if (button) return button;
+    }
+    if (form && typeof form.querySelector === "function"){
+      return form.querySelector('button[type="submit"]');
+    }
+    return null;
+  }
+
+  function isPendingAction(actionKey){
+    return state.pendingActions[String(actionKey || "admin")] === true;
+  }
+
+  function beginPendingAction(actionKey, button, pendingLabel){
+    var key = String(actionKey || "admin");
+    if (isPendingAction(key)) return null;
+    state.pendingActions[key] = true;
+    var original = button ? {
+      text: button.textContent,
+      disabled: button.disabled === true,
+      ariaBusy: typeof button.getAttribute === "function" ? button.getAttribute("aria-busy") : null,
+    } : null;
+    if (button){
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+      button.textContent = pendingLabel || "Working…";
+    }
+    return function endPendingAction(){
+      if (!isPendingAction(key)) return;
+      delete state.pendingActions[key];
+      if (!button) return;
+      button.disabled = original.disabled;
+      if (original.ariaBusy == null){
+        if (typeof button.removeAttribute === "function") button.removeAttribute("aria-busy");
+        else button.setAttribute("aria-busy", "false");
+      } else {
+        button.setAttribute("aria-busy", original.ariaBusy);
+      }
+      button.textContent = original.text;
+    };
   }
 
   function getAuthBridge(){
@@ -1563,8 +1612,17 @@
     if (nodes.opsBotReactionEnabled) nodes.opsBotReactionEnabled.disabled = pending || unavailable;
     if (nodes.opsBotReactionFrequency) nodes.opsBotReactionFrequency.disabled = pending || unavailable;
     if (nodes.opsBotReactionPolicyApply) nodes.opsBotReactionPolicyApply.disabled = pending || unavailable;
-    if (nodes.opsBotReactionApply) nodes.opsBotReactionApply.disabled = pending || unavailable;
-    if (nodes.opsBotReactionDefault) nodes.opsBotReactionDefault.disabled = pending || unavailable || !value || value.mode !== "override";
+    if (nodes.opsBotReactionApply){
+      nodes.opsBotReactionApply.disabled = pending || unavailable;
+      nodes.opsBotReactionApply.textContent = pending ? "Applying…" : "Apply delay";
+    }
+    if (nodes.opsBotReactionDefault){
+      nodes.opsBotReactionDefault.disabled = pending || unavailable || !value || value.mode !== "override";
+      nodes.opsBotReactionDefault.textContent = pending ? "Applying…" : "Set default";
+    }
+    if (nodes.opsBotReactionPolicyApply){
+      nodes.opsBotReactionPolicyApply.textContent = pending ? "Applying…" : "Apply reaction settings";
+    }
     if (nodes.opsBotReactionStatus){
       var localError = errorCode && !unavailable ? errorCode : "";
       nodes.opsBotReactionStatus.textContent = pending ? "Updating WS Preview…" : state.ops.botReactionMessage || localError;
@@ -1644,7 +1702,7 @@
       return [
         '<div class="admin-list__item">',
         '<div class="admin-list__title"><span title="' + escapeHtml(item.tableId || item.category || "global") + '">' + escapeHtml(label) + "</span>",
-        '<button class="admin-btn admin-btn--ghost" type="button" data-poker-log-disable="' + String(index) + '"' + (state.ops.pokerLogControlPending || state.ops.pokerLogDisablePendingIndex === index ? " disabled" : "") + ">Disable</button></div>",
+        '<button class="admin-btn admin-btn--ghost" type="button" data-poker-log-disable="' + String(index) + '"' + (state.ops.pokerLogControlPending || state.ops.pokerLogDisablePendingIndex === index ? " disabled" : "") + ">" + (state.ops.pokerLogDisablePendingIndex === index ? "Disabling…" : "Disable") + "</button></div>",
         '<div class="admin-list__meta">' + escapeHtml(formatRemaining(item.expiresAt)) + (state.ops.pokerLogDisableErrorIndex === index ? " · Could not disable DEBUG." : "") + "</div>",
         "</div>"
       ].join("");
@@ -1681,6 +1739,7 @@
   function renderPokerLogControl(){
     var snapshot = state.ops.pokerLogControl;
     var pending = state.ops.pokerLogControlPending === true;
+    var disablePending = state.ops.pokerLogDisablePendingIndex != null;
     var scope = nodes.opsPokerLogScope ? nodes.opsPokerLogScope.value || "table" : "table";
     if (nodes.opsPokerLogSummary){
       nodes.opsPokerLogSummary.innerHTML = snapshot
@@ -1718,10 +1777,13 @@
         nodes.opsPokerLogTtlHint.textContent = "Allowed: " + Math.ceil(snapshot.ttl.minMs / 60000) + "–" + Math.floor(snapshot.ttl.maxMs / 60000) + " minutes.";
       }
     }
-    if (nodes.opsPokerLogEnable) nodes.opsPokerLogEnable.disabled = pending || !snapshot;
-    if (nodes.opsPokerLogRefresh) nodes.opsPokerLogRefresh.disabled = pending;
-    if (nodes.opsPokerLogTablesRefresh) nodes.opsPokerLogTablesRefresh.disabled = pending;
-    if (nodes.opsPokerLogStatus) nodes.opsPokerLogStatus.textContent = pending ? "Updating DEBUG control…" : state.ops.pokerLogControlMessage || state.ops.pokerLogControlError || "";
+    if (nodes.opsPokerLogEnable){
+      nodes.opsPokerLogEnable.disabled = pending || disablePending || !snapshot;
+      nodes.opsPokerLogEnable.textContent = pending ? "Applying…" : "Enable DEBUG";
+    }
+    if (nodes.opsPokerLogRefresh) nodes.opsPokerLogRefresh.disabled = pending || disablePending;
+    if (nodes.opsPokerLogTablesRefresh) nodes.opsPokerLogTablesRefresh.disabled = pending || disablePending;
+    if (nodes.opsPokerLogStatus) nodes.opsPokerLogStatus.textContent = pending || disablePending ? "Updating DEBUG control…" : state.ops.pokerLogControlMessage || state.ops.pokerLogControlError || "";
     renderPokerLogOverrides();
   }
 
@@ -1823,10 +1885,22 @@
     var disabled = pending || state.maintenance;
     if (nodes.opsMaintenanceEnabled) nodes.opsMaintenanceEnabled.disabled = disabled;
     if (nodes.opsMaintenanceCount) nodes.opsMaintenanceCount.disabled = disabled;
-    if (nodes.opsMaintenanceApply) nodes.opsMaintenanceApply.disabled = disabled;
-    if (nodes.opsMaintenanceStop) nodes.opsMaintenanceStop.disabled = disabled;
-    if (nodes.opsMaintenanceReconcile) nodes.opsMaintenanceReconcile.disabled = disabled;
-    if (nodes.opsMaintenanceCleanup) nodes.opsMaintenanceCleanup.disabled = disabled;
+    if (nodes.opsMaintenanceApply){
+      nodes.opsMaintenanceApply.disabled = disabled;
+      nodes.opsMaintenanceApply.textContent = pending ? "Applying…" : "Apply maintenance state";
+    }
+    if (nodes.opsMaintenanceStop){
+      nodes.opsMaintenanceStop.disabled = disabled;
+      nodes.opsMaintenanceStop.textContent = pending ? "Stopping…" : "Stop continuous tables";
+    }
+    if (nodes.opsMaintenanceReconcile){
+      nodes.opsMaintenanceReconcile.disabled = disabled;
+      nodes.opsMaintenanceReconcile.textContent = pending ? "Running…" : "Reconcile now";
+    }
+    if (nodes.opsMaintenanceCleanup){
+      nodes.opsMaintenanceCleanup.disabled = disabled;
+      nodes.opsMaintenanceCleanup.textContent = pending ? "Running…" : "Run cleanup now";
+    }
     if (nodes.opsMaintenanceStatus) nodes.opsMaintenanceStatus.textContent = pending ? "Updating poker maintenance…" : state.ops.pokerMaintenanceError || "";
   }
 
@@ -1993,6 +2067,8 @@
         maxTotalClaims: data.maxTotalClaims,
       };
       if (!isUpdate) campaign.code = data.code;
+      var pending = beginPendingAction("bonus-campaign-save", resolveActionButton(event, event && event.target), "Saving…");
+      if (!pending) return;
       await apiFetch("/.netlify/functions/admin-bonus-campaigns", {
         method: "POST",
         body: JSON.stringify({
@@ -2007,15 +2083,21 @@
       await loadBonusCampaigns(1);
     } catch (err){
       handleApiError(err, bonusCampaignValidationMessage(err && err.code));
+    } finally {
+      if (pending) pending();
     }
   }
 
-  async function setBonusCampaignStatus(campaignId, status){
+  async function setBonusCampaignStatus(campaignId, status, button){
     var campaign = findBonusCampaign(campaignId);
     var label = campaign ? (campaign.code || campaign.title || campaignId) : campaignId;
+    var actionKey = "bonus-campaign-status-" + campaignId;
+    if (isPendingAction(actionKey)) return;
     if (typeof window.confirm === "function" && !window.confirm("Set bonus campaign " + label + " to " + status + "?")){
       return;
     }
+    var pending = beginPendingAction(actionKey, button, "Updating…");
+    if (!pending) return;
     setStatus("Updating bonus campaign...", "info");
     try {
       await apiFetch("/.netlify/functions/admin-bonus-campaigns", {
@@ -2030,6 +2112,8 @@
       await loadBonusCampaigns();
     } catch (err){
       handleApiError(err, "Could not update bonus campaign status.");
+    } finally {
+      pending();
     }
   }
 
@@ -2103,7 +2187,9 @@
     }
   }
 
-  async function runTableAction(tableId, action){
+  async function runTableAction(tableId, action, button){
+    var actionKey = "table-action-" + tableId;
+    if (isPendingAction(actionKey)) return;
     var reasonNode = doc.getElementById("adminTableReason");
     var customReason = reasonNode && typeof reasonNode.value === "string" ? reasonNode.value.trim() : "";
     var reason = customReason || "manual " + action;
@@ -2123,6 +2209,8 @@
         reason = "manual force close";
       }
     }
+    var pending = beginPendingAction(actionKey, button, "Running…");
+    if (!pending) return;
     setStatus(t("loading", "Loading..."), "info");
     try {
       if (action === "force_close"){
@@ -2155,6 +2243,8 @@
       loadOps();
     } catch (err){
       handleApiError(err, "Could not run table action.");
+    } finally {
+      pending();
     }
   }
 
@@ -2174,12 +2264,14 @@
     }
   }
 
-  async function executeBotRecovery(tableId){
+  async function executeBotRecovery(tableId, button){
     var recovery = state.tables.recovery;
     if (!recovery || recovery.tableId !== tableId || recovery.eligible !== true){
       setStatus("Run bot recovery analysis first.", "error");
       return;
     }
+    var actionKey = "bot-claims-recovery-" + tableId;
+    if (isPendingAction(actionKey)) return;
     if (typeof window.confirm === "function" && !window.confirm("Repair bot claims and permanently close table " + tableId + "?")){
       return;
     }
@@ -2193,9 +2285,11 @@
     var reasonNode = doc.getElementById("adminTableReason");
     var reason = reasonNode && typeof reasonNode.value === "string" ? reasonNode.value.trim() : "";
     if (!reason) reason = "approved Preview bot claims recovery";
+    var pending = beginPendingAction(actionKey, button, "Repairing…");
+    if (!pending) return;
     setStatus(t("loading", "Loading..."), "info");
     try {
-      var keyScope = "bot-claims-recovery-" + tableId;
+      var keyScope = actionKey;
       var result = await apiFetch("/.netlify/functions/admin-table-bot-claims-recovery", {
         method: "POST",
         body: JSON.stringify({
@@ -2228,6 +2322,8 @@
         return;
       }
       handleApiError(err, "Could not repair bot claims.");
+    } finally {
+      pending();
     }
   }
 
@@ -2317,9 +2413,13 @@
       return;
     }
     var preview = "Apply " + formatSignedAmount(amount) + " to " + (state.users.detail.user.email || state.users.detail.user.userId) + "?\nReason: " + reason;
+    var actionKey = "adjust-" + state.users.detail.user.userId;
+    if (isPendingAction(actionKey)) return;
     if (amount < 0 && window.confirm && !window.confirm(preview)){
       return;
     }
+    var pending = beginPendingAction(actionKey, resolveActionButton(event, form), "Applying…");
+    if (!pending) return;
     setStatus(t("loading", "Loading..."), "info");
     try {
       await apiFetch("/.netlify/functions/admin-ledger-adjust", {
@@ -2328,10 +2428,10 @@
           userId: state.users.detail.user.userId,
           amount: amount,
           reason: reason,
-          idempotencyKey: getDraftIdempotencyKey("adjust-" + state.users.detail.user.userId),
+          idempotencyKey: getDraftIdempotencyKey(actionKey),
         }),
       });
-      resetDraftIdempotencyKey("adjust-" + state.users.detail.user.userId);
+      resetDraftIdempotencyKey(actionKey);
       if (amountInput) amountInput.value = "";
       if (reasonInput) reasonInput.value = "";
       setStatus("Adjustment saved.", "success");
@@ -2341,6 +2441,8 @@
       }
     } catch (err){
       handleApiError(err, "Could not save the adjustment.");
+    } finally {
+      pending();
     }
   }
 
@@ -2387,6 +2489,7 @@
 
   async function submitPokerLogOverride(event){
     event.preventDefault();
+    if (state.ops.pokerLogControlPending || state.ops.pokerLogDisablePendingIndex != null) return;
     var snapshot = state.ops.pokerLogControl;
     if (!snapshot) return;
     var scope = nodes.opsPokerLogScope ? nodes.opsPokerLogScope.value : "table";
@@ -2567,6 +2670,7 @@
 
   async function submitBotReactionOverride(event){
     event.preventDefault();
+    if (state.ops.botReactionPending) return;
     if (state.maintenance){
       setStatus("CH and poker mutations are disabled during maintenance.", "error");
       return;
@@ -2598,6 +2702,7 @@
   }
 
   async function clearBotReactionOverride(){
+    if (state.ops.botReactionPending) return;
     if (state.maintenance){
       setStatus("CH and poker mutations are disabled during maintenance.", "error");
       return;
@@ -2623,6 +2728,7 @@
 
   async function submitBotReactionPolicy(event){
     event.preventDefault();
+    if (state.ops.botReactionPending) return;
     var frequencyPercent = Number(nodes.opsBotReactionFrequency && nodes.opsBotReactionFrequency.value);
     if (!Number.isInteger(frequencyPercent) || frequencyPercent < 1 || frequencyPercent > 100){
       state.ops.botReactionError = "invalid_reaction_settings";
@@ -2652,22 +2758,25 @@
     }
   }
 
-  async function runOpsAction(action){
+  async function runOpsAction(action, button){
     if (state.maintenance){
       setStatus("CH and poker mutations are disabled during maintenance.", "error");
       return;
     }
+    var actionKey = "ops-" + action;
+    var pending = beginPendingAction(actionKey, button, "Running…");
+    if (!pending) return;
     setStatus(t("loading", "Loading..."), "info");
     try {
       var payload = await apiFetch("/.netlify/functions/admin-ops-actions", {
         method: "POST",
         body: JSON.stringify({
           action: action,
-          idempotencyKey: getDraftIdempotencyKey("ops-" + action),
+          idempotencyKey: getDraftIdempotencyKey(actionKey),
           reason: "manual " + action,
         }),
       });
-      resetDraftIdempotencyKey("ops-" + action);
+      resetDraftIdempotencyKey(actionKey);
       if (nodes.opsActionResult){
         nodes.opsActionResult.innerHTML = '<div class="admin-surface"><div class="admin-list__title"><span>' + escapeHtml(action) + '</span>' + pill(payload.changedCount > 0 ? "changed" : "noop", payload.changedCount > 0 ? "success" : "info") + '</div><div class="admin-list__meta">Processed ' + escapeHtml(payload.processed) + " tables, changed " + escapeHtml(payload.changedCount) + ".</div></div>";
       }
@@ -2676,10 +2785,13 @@
       loadTables();
     } catch (err){
       handleApiError(err, "Could not run ops action.");
+    } finally {
+      pending();
     }
   }
 
   async function runPokerMaintenance(operation, extra){
+    if (state.ops.pokerMaintenancePending) return;
     if (state.maintenance){
       setStatus("CH and poker mutations are disabled during maintenance.", "error");
       return;
@@ -2715,6 +2827,7 @@
 
   function submitPokerMaintenance(event){
     event.preventDefault();
+    if (state.ops.pokerMaintenancePending) return;
     var enabled = nodes.opsMaintenanceEnabled && nodes.opsMaintenanceEnabled.value === "true";
     var desiredTableCount = Number(nodes.opsMaintenanceCount && nodes.opsMaintenanceCount.value);
     var continuous = state.ops.pokerMaintenance && state.ops.pokerMaintenance.continuous;
@@ -2733,6 +2846,7 @@
   }
 
   function stopContinuousTables(){
+    if (state.ops.pokerMaintenancePending) return;
     var continuous = state.ops.pokerMaintenance && state.ops.pokerMaintenance.continuous;
     var desiredTableCount = continuous && Number.isInteger(continuous.desiredTableCount)
       ? continuous.desiredTableCount
@@ -2836,7 +2950,7 @@
     }
   }
 
-  function handleTableAction(action, tableId){
+  function handleTableAction(action, tableId, button){
     if (action === "details"){
       setActiveTab("tables");
       loadTableDetail(tableId);
@@ -2854,11 +2968,11 @@
     }
     if (action === "execute_bot_recovery"){
       setActiveTab("tables");
-      executeBotRecovery(tableId);
+      executeBotRecovery(tableId, button);
       return;
     }
     setActiveTab("tables");
-    runTableAction(tableId, action);
+    runTableAction(tableId, action, button);
   }
 
   function handleAuditAction(action, tableId, handId){
@@ -2927,7 +3041,7 @@
     }
   }
 
-  function handleCampaignAction(action, campaignId, status){
+  function handleCampaignAction(action, campaignId, status, button){
     if (action === "edit" || action === "view"){
       var campaign = findBonusCampaign(campaignId);
       fillBonusCampaignForm(campaign);
@@ -2941,7 +3055,7 @@
       return;
     }
     if (action === "set_status"){
-      setBonusCampaignStatus(campaignId, status);
+      setBonusCampaignStatus(campaignId, status, button);
     }
   }
 
@@ -3026,8 +3140,8 @@
         loadLedger();
       });
     });
-    if (nodes.opsRunReconciler) nodes.opsRunReconciler.addEventListener("click", function(){ runOpsAction("open_table_reconciler"); });
-    if (nodes.opsRunStaleSweep) nodes.opsRunStaleSweep.addEventListener("click", function(){ runOpsAction("stale_seat_sweep"); });
+    if (nodes.opsRunReconciler) nodes.opsRunReconciler.addEventListener("click", function(){ runOpsAction("open_table_reconciler", nodes.opsRunReconciler); });
+    if (nodes.opsRunStaleSweep) nodes.opsRunStaleSweep.addEventListener("click", function(){ runOpsAction("stale_seat_sweep", nodes.opsRunStaleSweep); });
     doc.addEventListener("click", function(event){
       var pageButton = closestEventTarget(event.target, "[data-page-scope]");
       if (pageButton){
@@ -3046,7 +3160,7 @@
       }
       var tableButton = closestEventTarget(event.target, "[data-table-action]");
       if (tableButton){
-        handleTableAction(tableButton.getAttribute("data-table-action"), tableButton.getAttribute("data-table-id"));
+        handleTableAction(tableButton.getAttribute("data-table-action"), tableButton.getAttribute("data-table-id"), tableButton);
         return;
       }
       var maintenanceRotateButton = closestEventTarget(event.target, "[data-maintenance-rotate]");
@@ -3077,7 +3191,8 @@
         handleCampaignAction(
           campaignButton.getAttribute("data-campaign-action"),
           campaignButton.getAttribute("data-campaign-id"),
-          campaignButton.getAttribute("data-campaign-status")
+          campaignButton.getAttribute("data-campaign-status"),
+          campaignButton
         );
         return;
       }

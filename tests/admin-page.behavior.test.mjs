@@ -150,6 +150,9 @@ function createElement(tagName, id = null) {
       if (attributes.has(name)) return attributes.get(name);
       return null;
     },
+    removeAttribute(name) {
+      attributes.delete(name);
+    },
     closest(selector) {
       let current = node;
       while (current) {
@@ -413,10 +416,13 @@ function buildContext(options = {}) {
   const opts = options || {};
   const { document, tabs, panels } = createAdminDom();
   const fetchCalls = [];
+  const mutationCalls = [];
   var vpsMetricsCalls = 0;
   const fetch = async (url, options) => {
     fetchCalls.push(String(url || ""));
     const text = String(url || "");
+    const method = options && options.method ? String(options.method).toUpperCase() : "GET";
+    if (method !== "GET") mutationCalls.push({ method, url: text });
     if (text.includes("/.netlify/functions/admin-me")) {
       if (opts.meUnavailable){
         return { ok: false, status: 503, json: async () => ({ error: "server_error" }) };
@@ -442,6 +448,9 @@ function buildContext(options = {}) {
       return { ok: true, json: async () => ({ items: [], pagination: null }) };
     }
     if (text.includes("/.netlify/functions/admin-bonus-campaigns")) {
+      if (method === "POST" && typeof opts.waitForBonusMutation === "function"){
+        await opts.waitForBonusMutation();
+      }
       return { ok: true, json: async () => ({
         items: [
           {
@@ -686,7 +695,7 @@ function buildContext(options = {}) {
     Math,
     Date,
   });
-  return { context, document, tabs, panels, fetchCalls };
+  return { context, document, tabs, panels, fetchCalls, mutationCalls };
 }
 
 test("admin page tabs switch panels on click and keep ARIA state in sync", async () => {
@@ -1006,6 +1015,57 @@ test("admin bonus campaign form explains invalid campaign codes before sending a
   assert.match(document.getElementById("adminStatus").textContent, /lowercase letter or digit/);
   assert.match(document.getElementById("adminStatus").textContent, /daily-active-2026/);
   assert.equal(fetchCalls.some((url) => url.includes("/.netlify/functions/admin-bonus-campaigns")), false);
+});
+
+test("admin mutation buttons ignore repeats while pending and allow a deliberate next action", async () => {
+  const mutationWaiters = [];
+  const { context, document, mutationCalls } = buildContext({
+    waitForBonusMutation: () => {
+      if (!mutationWaiters.length) return new Promise((resolve) => mutationWaiters.push(resolve));
+      return Promise.resolve();
+    },
+  });
+  vm.runInContext(source, context, { filename: "js/admin-page.js" });
+
+  await flush();
+  const form = document.getElementById("adminBonusCampaignForm");
+  const saveButton = createElement("button");
+  saveButton.textContent = "Save campaign";
+  form.appendChild(saveButton);
+  const fillValidDraft = () => {
+    formField(form, "code").value = "async-campaign";
+    formField(form, "title").value = "Async campaign";
+    formField(form, "campaignType").value = "daily";
+    formField(form, "amount").value = "20";
+    formField(form, "startsAt").value = "2026-07-10T12:00";
+    formField(form, "eligibilityType").value = "all_accounts";
+    formField(form, "claimPolicy").value = "once";
+    formField(form, "eligibilityConfig").value = "{}";
+  };
+
+  fillValidDraft();
+  form.dispatchEvent({ type: "submit", target: form, submitter: saveButton, preventDefault() {} });
+  assert.equal(saveButton.disabled, true);
+  assert.equal(saveButton.textContent, "Saving…");
+  assert.equal(saveButton.getAttribute("aria-busy"), "true");
+
+  form.dispatchEvent({ type: "submit", target: form, submitter: saveButton, preventDefault() {} });
+  await flush();
+  assert.equal(mutationCalls.filter(({ url }) => url.includes("/.netlify/functions/admin-bonus-campaigns")).length, 1);
+
+  const releaseFirst = mutationWaiters.shift();
+  assert.ok(releaseFirst, "the first mutation should be waiting on the test gate");
+  releaseFirst();
+  for (let index = 0; index < 5; index += 1) await flush();
+
+  assert.equal(saveButton.disabled, false);
+  assert.equal(saveButton.textContent, "Save campaign");
+  assert.equal(saveButton.getAttribute("aria-busy"), null);
+
+  fillValidDraft();
+  form.dispatchEvent({ type: "submit", target: form, submitter: saveButton, preventDefault() {} });
+  for (let index = 0; index < 5; index += 1) await flush();
+  assert.equal(mutationCalls.filter(({ url }) => url.includes("/.netlify/functions/admin-bonus-campaigns")).length, 2);
 });
 
 test("admin page poker audit search renders hand timeline and settlement summary", async () => {
