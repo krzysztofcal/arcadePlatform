@@ -676,6 +676,7 @@
         state.statusText = LIVE_STATUS_COPY.error;
         setError(tableAccessDeniedMessage(access));
         markBootReady();
+        syncClosedTableRedirectFromSignal(access.reason);
         render();
         return false;
       }

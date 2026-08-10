@@ -697,6 +697,24 @@ test('poker v2 fails closed when table access preflight cannot decide', async ()
   }
 });
 
+test('poker v2 routes a closed-table preflight through the existing countdown redirect', async () => {
+  const harness = createHarness({
+    tableAccess: { tableId: 'table-1', buyIn: 100, allowed: false, rejoin: false, reason: 'table_closed' }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  assert.equal(harness.getCreateCount(), 0, 'closed table preflight must not start a WS');
+  assert.equal(harness.elements.pokerV2ClosedTableModal.hidden, false);
+  assert.equal(harness.elements.pokerV2ClosedTableCountdown.textContent, 'Returning to lobby in 5 seconds…');
+
+  for (let i = 0; i < 5; i += 1){
+    harness.advanceTime(1000);
+    await harness.flush();
+  }
+  assert.equal(harness.windowLocation.href, '/poker/');
+});
+
 test('poker v2 disables reactions for four seconds after an accepted reaction', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
