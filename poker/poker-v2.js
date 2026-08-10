@@ -169,6 +169,7 @@
   var state = cloneState(demoState);
   var searchParams = null;
   var tableId = readTableId();
+  var PROGRESSION_URL = '/.netlify/functions/poker-progression';
   var wsClient = null;
   var currentAccessToken = null;
   var currentGuestSession = null;
@@ -199,6 +200,8 @@
   var reconnectSeatNo = null;
   var lastKnownCurrentSeatNo = null;
   var liveModeGeneration = 0;
+  var authenticatedPreflightGeneration = 0;
+  var authLifecycleGeneration = 0;
   var snapshotRecoveryTimer = null;
   var snapshotRecoveryAttempts = 0;
   var snapshotRecoveryTimedOut = false;
@@ -629,6 +632,69 @@
     return Promise.resolve().then(function(){ return bridge.getAccessToken(); }).catch(function(){ return null; });
   }
 
+  function fetchTableAccess(token){
+    if (!token || !tableId) return Promise.reject(new Error('table_access_unauthorized'));
+    var url = PROGRESSION_URL + '?tableId=' + encodeURIComponent(tableId);
+    return fetch(url, {
+      method: 'GET',
+      headers: { Authorization: 'Bearer ' + token }
+    }).then(function(response){
+      return response.json().catch(function(){ return {}; }).then(function(body){
+        if (!response.ok){
+          var responseError = new Error(body && (body.error || body.reason) || 'table_access_failed');
+          responseError.status = response.status;
+          throw responseError;
+        }
+        return body;
+      });
+    }).then(function(body){
+      var access = body && body.tableAccess;
+      if (!access || access.tableId !== tableId){
+        throw new Error('table_access_unavailable');
+      }
+      return access;
+    });
+  }
+
+  function tableAccessDeniedMessage(access){
+    if (access && access.reason === 'table_not_found') return 'This table is no longer available. Return to the lobby.';
+    if (access && access.reason === 'table_closed') return 'This table is closed. Return to the lobby.';
+    if (access && access.reason === 'table_not_open') return 'This table is not available. Return to the lobby.';
+    if (access && access.reason === 'invalid_table_economy') return 'This table has an invalid buy-in and blinds configuration.';
+    return 'This table tier is not available for your current bankroll.';
+  }
+
+  function preflightAuthenticatedLiveMode(token, preflightGeneration){
+    function isCurrentPreflight(){
+      return preflightGeneration === authenticatedPreflightGeneration;
+    }
+    return fetchTableAccess(token).then(function(access){
+      if (!isCurrentPreflight()) return false;
+      if (access.allowed !== true) {
+        currentAccessToken = null;
+        stopLiveMode();
+        state.statusText = LIVE_STATUS_COPY.error;
+        setError(tableAccessDeniedMessage(access));
+        markBootReady();
+        syncClosedTableRedirectFromSignal(access.reason);
+        render();
+        return false;
+      }
+      currentAccessToken = token;
+      if (Number.isSafeInteger(Number(access.buyIn)) && Number(access.buyIn) > 0) state.buyIn = Number(access.buyIn);
+      startLiveMode(token);
+      return true;
+    }).catch(function(error){
+      if (!isCurrentPreflight()) return false;
+      klog('poker_table_access_preflight_failed', { code: error && (error.message || error.code) ? (error.message || error.code) : 'unknown' });
+      state.statusText = LIVE_STATUS_COPY.error;
+      setError('This table is not available. Return to the lobby.');
+      markBootReady();
+      render();
+      return false;
+    });
+  }
+
   function getAuthApi(){
     if (window.SupabaseAuth && typeof window.SupabaseAuth.onAuthChange === 'function'){
       return window.SupabaseAuth;
@@ -651,6 +717,12 @@
         window.setTimeout(function(){ resolve(resolveInitialIdentity(retry + 1)); }, 150);
       });
     });
+  }
+
+  function getAuthSessionToken(session){
+    if (!session || typeof session !== 'object') return null;
+    var token = session.access_token || session.accessToken || session.token;
+    return typeof token === 'string' && token ? token : null;
   }
 
   function decodeBase64Url(str){
@@ -4321,6 +4393,24 @@
 
   function joinErrorMessage(error){
     var code = autoJoinErrorCode(error);
+    if (code === 'buy_in_tier_locked') {
+      var requiredBankroll = Number(error && error.requiredBankroll);
+      var balance = Number(error && error.balance);
+      var tableBuyIn = Number(error && error.buyIn);
+      var alreadyUnlocked = Number.isSafeInteger(balance) && balance >= 0
+        && Number.isSafeInteger(requiredBankroll) && requiredBankroll > 0
+        && balance >= requiredBankroll;
+      if (alreadyUnlocked){
+        return Number.isSafeInteger(tableBuyIn) && tableBuyIn > 0
+          ? formatNumber(tableBuyIn) + ' CH tables are unlocked but not currently available at your progression level.'
+          : 'This table tier is unlocked but not currently available at your progression level.';
+      }
+      if (Number.isSafeInteger(requiredBankroll) && requiredBankroll > 0){
+        var tierLabel = Number.isSafeInteger(tableBuyIn) && tableBuyIn > 0 ? (' to unlock ' + formatNumber(tableBuyIn) + ' CH tables') : '';
+        return 'You need at least ' + formatNumber(requiredBankroll) + ' CH' + tierLabel + '.';
+      }
+      return 'This table tier is locked for your current bankroll.';
+    }
     if (code !== 'insufficient_funds' && code !== 'insufficient_chips') {
       return error && error.message ? error.message : 'Failed to join';
     }
@@ -4856,6 +4946,7 @@
 
   function stopLiveMode(){
     liveModeGeneration += 1;
+    authenticatedPreflightGeneration += 1;
     stopSnapshotRecoveryTimer();
     stopTurnClock();
     clearReactionControlTimer();
@@ -4885,7 +4976,7 @@
     render();
   }
 
-  function applyAuthenticatedPendingState(user){
+  function applyAuthenticatedPendingState(user, options){
     if (!user || !state.currentUserId || String(user.id || '') !== String(state.currentUserId)) clearRebuyOperation();
     syncReactionHistoryContext(tableId, user && user.id ? String(user.id) : null);
     syncSocialPreferencesIdentity(user && user.id ? String(user.id) : null);
@@ -4896,7 +4987,7 @@
     state = createEmptyLiveState(tableId, user && user.id ? String(user.id) : null);
     state.statusText = LIVE_STATUS_COPY.connecting;
     render();
-    markBootReady();
+    if (!(options && options.keepBootSplash === true)) markBootReady();
   }
 
   function restartLiveMode(token){
@@ -4906,14 +4997,36 @@
   }
 
   function restartAuthenticatedLiveMode(token){
-    if (!tableId || !token) return;
+    if (!tableId || !token){
+      currentAccessToken = null;
+      stopLiveMode();
+      return;
+    }
     var nextUserId = getUserIdFromToken(token);
+    var previousUserId = state && state.currentUserId ? String(state.currentUserId) : getUserIdFromToken(currentAccessToken);
+    var userChanged = !!(nextUserId && previousUserId && nextUserId !== previousUserId);
     syncSocialPreferencesIdentity(nextUserId);
-    if (nextUserId && state.currentUserId && nextUserId !== state.currentUserId) clearRebuyOperation();
+    if (userChanged) clearRebuyOperation();
     isGuestMode = false;
     currentGuestSession = null;
     clearGuestSession();
-    restartLiveMode(token);
+    var preservingState = !userChanged && !!(state && state.mode === 'live'
+      && state.hasAppliedAuthoritativeSnapshot
+      && state.tableId && state.tableId === tableId);
+    if (preservingState && rebuyOperation && rebuyOperation.phase === 'pending'){
+      rebuyOperation.preserveOnTechnicalRestart = true;
+      rebuyOperation.resumeAttempted = false;
+      persistPendingRebuy();
+    }
+    currentAccessToken = null;
+    stopLiveMode();
+    if (userChanged){
+      state = createEmptyLiveState(tableId, nextUserId);
+      state.statusText = LIVE_STATUS_COPY.connecting;
+      render();
+    }
+    var preflightGeneration = authenticatedPreflightGeneration;
+    preflightAuthenticatedLiveMode(token, preflightGeneration);
   }
 
   function startLiveMode(token){
@@ -5140,8 +5253,13 @@
   function bindAuthLifecycle(){
     var authApi = getAuthApi();
     if (!authApi || typeof authApi.onAuthChange !== 'function') return;
-    authUnsubscribe = authApi.onAuthChange(function(_event, user){
-      getAccessToken().then(function(token){
+    authUnsubscribe = authApi.onAuthChange(function(_event, user, session){
+      var lifecycleGeneration = ++authLifecycleGeneration;
+      var tokenPromise = typeof session === 'undefined'
+        ? getAccessToken()
+        : Promise.resolve(getAuthSessionToken(session));
+      tokenPromise.then(function(token){
+        if (lifecycleGeneration !== authLifecycleGeneration) return;
         if (user && !token){
           currentAccessToken = null;
           applyAuthenticatedPendingState(user);
@@ -5157,6 +5275,7 @@
         stopAuthWatch();
         if (isGuestMode || token !== currentAccessToken || !isWsReady()) restartAuthenticatedLiveMode(token);
       }).catch(function(){
+        if (lifecycleGeneration !== authLifecycleGeneration) return;
         currentAccessToken = null;
         applySignedOutState();
         startAuthWatch();
@@ -5167,6 +5286,7 @@
   function applyInitialIdentity(identity, guestSessionCandidate){
     if (identity.token){
       stopAuthWatch();
+      applyAuthenticatedPendingState(identity.user || { id: getUserIdFromToken(identity.token) }, { keepBootSplash: true });
       restartAuthenticatedLiveMode(identity.token);
       return;
     }
@@ -5207,11 +5327,14 @@
       startDemoMode();
       return;
     }
+    var initialIdentityGeneration = ++authLifecycleGeneration;
     bindAuthLifecycle();
     var identityPromise = getAuthApi() ? resolveInitialIdentity() : getAccessToken();
     identityPromise.then(function(identity){
+      if (initialIdentityGeneration !== authLifecycleGeneration) return;
       applyInitialIdentity(getAuthApi() ? identity : { token: identity || null, user: null }, guestSessionCandidate);
     }).catch(function(){
+      if (initialIdentityGeneration !== authLifecycleGeneration) return;
       applySignedOutState();
       startAuthWatch();
     });

@@ -7,7 +7,8 @@ import {
 } from "../../shared/poker-domain/bots.mjs";
 import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
-import { DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../../../shared/poker-domain/table-economy.mjs";
+import { calculateCanonicalPokerStakes, DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../../../shared/poker-domain/table-economy.mjs";
+import { resolvePokerBuyInTiers } from "../../../shared/poker-domain/poker-progression.mjs";
 
 export const CONTINUOUS_BOT_PROFILE_KEY = "CONTINUOUS_BOT_DEFAULT";
 const DEFAULT_MAX_DESIRED_TABLES = 2;
@@ -58,6 +59,8 @@ export function normalizeContinuousBotProfile(row, { maxDesiredTables = DEFAULT_
     || minBotCount > targetBotCount
     || targetBotCount > maxBotCount
     || maxBotCount >= maxSeats
+    || smallBlind !== calculateCanonicalPokerStakes(DEFAULT_CASH_TABLE_BUY_IN_CHIPS).sb
+    || bigBlind !== calculateCanonicalPokerStakes(DEFAULT_CASH_TABLE_BUY_IN_CHIPS).bb
   ) {
     return null;
   }
@@ -90,15 +93,18 @@ function rotationDueAtForTable(table, profile) {
 
 export function tableMatchesContinuousBotProfile(table, profile) {
   const stakes = canonicalStakes(table?.stakes);
+  const buyIn = Number(table?.buy_in ?? DEFAULT_CASH_TABLE_BUY_IN_CHIPS);
+  const canonical = calculateCanonicalPokerStakes(DEFAULT_CASH_TABLE_BUY_IN_CHIPS);
   return table?.managed_profile_key === profile.profileKey
     && Number(table?.max_players) === profile.maxSeats
-    && stakes?.sb === profile.smallBlind
-    && stakes?.bb === profile.bigBlind;
+    && buyIn === DEFAULT_CASH_TABLE_BUY_IN_CHIPS
+    && stakes?.sb === canonical.sb
+    && stakes?.bb === canonical.bb;
 }
 
 async function createManagedTable(tx, { profile, botConfig, klog }) {
-  const stakes = { sb: profile.smallBlind, bb: profile.bigBlind };
   const buyIn = DEFAULT_CASH_TABLE_BUY_IN_CHIPS;
+  const stakes = calculateCanonicalPokerStakes(buyIn);
   const rotationDueAt = new Date(Date.now() + profile.rotationIntervalSeconds * 1_000).toISOString();
   const created = await createPokerTableWithState(tx, {
     userId: null,
@@ -157,15 +163,19 @@ export function createContinuousBotTableRepository({
   let lastKnownProfile = null;
 
   async function reconcile() {
-    const botConfig = getBotConfig(env);
     try {
+      const configuredBuyIns = resolvePokerBuyInTiers(env);
+      if (!configuredBuyIns.includes(DEFAULT_CASH_TABLE_BUY_IN_CHIPS)) {
+        throw Object.assign(new Error("poker_buy_in_tiers_config_invalid"), { code: "poker_buy_in_tiers_config_invalid" });
+      }
+      const botConfig = getBotConfig(env);
       const result = await beginSql(async (tx) => {
         await tx.unsafe("select pg_advisory_xact_lock(hashtext($1));", ["poker:continuous-bot-supervisor:v1"]);
         const profileRows = await tx.unsafe(PROFILE_SELECT, [CONTINUOUS_BOT_PROFILE_KEY]);
         const profile = normalizeContinuousBotProfile(profileRows?.[0], { maxDesiredTables: desiredTableLimit });
         if (!profile) throw Object.assign(new Error("managed_profile_invalid"), { code: "managed_profile_invalid" });
         const tableRows = await tx.unsafe(
-          `select id, status, max_players, stakes, managed_profile_key, rotation_due_at, created_at
+          `select id, status, max_players, buy_in, stakes, managed_profile_key, rotation_due_at, created_at
              from public.poker_tables
             where status = 'OPEN' and lifecycle_kind = 'CONTINUOUS_BOT'
             order by created_at asc, id asc

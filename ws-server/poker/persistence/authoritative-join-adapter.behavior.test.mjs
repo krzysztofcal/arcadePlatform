@@ -93,13 +93,13 @@ test("authoritative join adapter forwards only shared-core supported args", asyn
   assert.equal(result.seatNo, 2);
   assert.equal(result.rejoin, false);
   assert.equal(result.stack, 100);
-  assert.deepEqual(Object.keys(captured || {}).sort(), ["beginSql", "klog", "loadStateForUpdate", "postTransactionFn", "requestId", "tableId", "updateStateLocked", "userId", "validateStateForStorage"]);
+  assert.deepEqual(Object.keys(captured || {}).sort(), ["beginSql", "env", "klog", "loadStateForUpdate", "postTransactionFn", "requestId", "tableId", "updateStateLocked", "userId", "validateStateForStorage"]);
   assert.equal(captured.validateStateForStorage, validateStateForStorage);
   assert.equal(Object.hasOwn(captured, "buyIn"), false);
   assert.equal(Object.hasOwn(captured, "autoSeat"), false);
   assert.equal(Object.hasOwn(captured, "preferredSeatNo"), false);
   assert.equal(Object.hasOwn(captured, "seatNo"), false);
-  assert.equal(Object.hasOwn(captured, "env"), false);
+  assert.equal(captured.env?.WS_DEFAULT_BUYIN, "25");
 });
 
 

@@ -1,9 +1,9 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { formatStakes, parseStakes } from "./_shared/poker-stakes.mjs";
+import { formatStakes } from "./_shared/poker-stakes.mjs";
 import { createPokerTableWithState } from "./_shared/poker-table-init.mjs";
-import { readPokerBuyInEligibility } from "./_shared/poker-buy-in-eligibility.mjs";
 import { checkWsBuyInCapability, notifyWsLobbyMaterialize } from "./_shared/poker-ws-runtime-notify.mjs";
-import { DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../../shared/poker-domain/table-economy.mjs";
+import { calculateCanonicalPokerStakes, DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../../shared/poker-domain/table-economy.mjs";
+import { calculateUnlockBankroll, isConfiguredPokerBuyIn, readPokerProgression, resolvePokerBuyInTiers } from "../../shared/poker-domain/poker-progression.mjs";
 
 const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
 
@@ -79,25 +79,36 @@ export async function handler(event) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_buy_in" }) };
   }
 
+  let tiers;
+  try {
+    tiers = resolvePokerBuyInTiers();
+  } catch (error) {
+    klog("poker_create_table_buy_in_config_invalid", { code: error?.code || "unknown_error" });
+    return { statusCode: 500, headers: mergeHeaders(cors), body: JSON.stringify({ error: "poker_buy_in_config_invalid" }) };
+  }
+  if (!isConfiguredPokerBuyIn(buyIn, tiers)) {
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_buy_in_tier" }) };
+  }
+
   const token = extractBearerToken(event.headers);
   const auth = await verifySupabaseJwt(token);
   if (!auth.valid || !auth.userId) {
     return { statusCode: 401, headers: mergeHeaders(cors), body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
   }
 
-  const stakesParsed = parseStakes(payload?.stakes);
-  if (!stakesParsed.ok) {
-    klog("poker_create_table_invalid_stakes", { reason: stakesParsed.details?.reason || "stakes_invalid" });
-    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_stakes" }) };
+  const canonicalStakes = calculateCanonicalPokerStakes(buyIn);
+  if (!canonicalStakes) {
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_buy_in" }) };
   }
-  const stakesJson = formatStakes(stakesParsed.value);
+  const stakesJson = formatStakes(canonicalStakes);
 
+  let wsBuyInCapability = { ok: true, skipped: true };
   if (buyIn !== DEFAULT_CASH_TABLE_BUY_IN_CHIPS) {
-    const capability = await checkWsBuyInCapability({ klog });
-    if (!capability?.ok) {
+    wsBuyInCapability = await checkWsBuyInCapability({ klog });
+    if (!wsBuyInCapability?.ok) {
       klog("poker_create_table_buy_in_capability_unavailable", {
         buyIn,
-        reason: capability?.reason || "unknown"
+        reason: wsBuyInCapability?.reason || "unknown"
       });
       return {
         statusCode: 503,
@@ -110,12 +121,16 @@ export async function handler(event) {
   let transactionResult = null;
   try {
     transactionResult = await beginSql(async (tx) => {
-      const eligibility = await readPokerBuyInEligibility(tx, {
-        userId: auth.userId,
-        requiredBuyIn: buyIn,
-      });
-      if (!eligibility.eligible) {
-        return { kind: "insufficient_chips", balance: eligibility.balance, requiredBuyIn: eligibility.requiredBuyIn };
+      const progression = await readPokerProgression(tx, { userId: auth.userId });
+      if (!progression.availableBuyIns.includes(buyIn)) {
+        const tier = progression.tiers.find((item) => item.buyIn === buyIn);
+        return {
+          kind: "buy_in_tier_locked",
+          buyIn,
+          requiredBuyIn: buyIn,
+          requiredBankroll: tier?.unlockBankroll ?? calculateUnlockBankroll(buyIn),
+          balance: progression.balance
+        };
       }
       const created = await createPokerTableWithState(tx, { userId: auth.userId, maxPlayers, stakesJson, buyIn });
       return { kind: "created", tableId: created.tableId };
@@ -125,15 +140,17 @@ export async function handler(event) {
     return { statusCode: 500, headers: mergeHeaders(cors), body: JSON.stringify({ error: "server_error" }) };
   }
 
-  if (transactionResult?.kind === "insufficient_chips") {
+  if (transactionResult?.kind === "buy_in_tier_locked") {
     return {
       statusCode: 409,
       headers: mergeHeaders(cors),
       body: JSON.stringify({
-        error: "insufficient_chips",
+        error: "buy_in_tier_locked",
+        buyIn: transactionResult.buyIn,
         requiredBuyIn: transactionResult.requiredBuyIn,
-        balance: transactionResult.balance,
-      }),
+        requiredBankroll: transactionResult.requiredBankroll,
+        balance: transactionResult.balance
+      })
     };
   }
   const tableId = transactionResult?.kind === "created" ? transactionResult.tableId : null;
@@ -143,7 +160,7 @@ export async function handler(event) {
   }
 
   const escrowSystemKey = `POKER_TABLE:${tableId}`;
-  triggerWsLobbyMaterialize({ tableId, maxPlayers, stakes: stakesParsed.value, buyIn, klog });
+  triggerWsLobbyMaterialize({ tableId, maxPlayers, stakes: canonicalStakes, buyIn, klog });
   return {
     statusCode: 200,
     headers: mergeHeaders(cors),

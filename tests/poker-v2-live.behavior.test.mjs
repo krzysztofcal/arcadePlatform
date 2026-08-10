@@ -163,6 +163,8 @@ function createHarness(options = {}){
   const reactionPayloads = [];
   const targetedReactionPayloads = [];
   let createOptions = null;
+  let createCount = 0;
+  let destroyCount = 0;
 
   const token = Object.prototype.hasOwnProperty.call(options, 'token')
     ? options.token
@@ -181,6 +183,7 @@ function createHarness(options = {}){
     },
     destroy(){
       this._ready = false;
+      destroyCount += 1;
       if (typeof options.onDestroy === 'function') options.onDestroy();
     },
     isReady(){ return this._ready; },
@@ -252,10 +255,13 @@ function createHarness(options = {}){
       },
       KLog: { log(kind, data){ logs.push({ kind, data }); } },
       SupabaseAuthBridge: {
-        getAccessToken: async () => activeToken
+        getAccessToken: async () => typeof options.getAccessToken === 'function'
+          ? options.getAccessToken(activeToken)
+          : activeToken
       },
       PokerWsClient: {
         create(opts){
+          createCount += 1;
           createOptions = opts;
           return wsClient;
         }
@@ -306,12 +312,19 @@ function createHarness(options = {}){
       createElement(tag){ return makeElement(tag); }
     },
     URLSearchParams,
+    fetch: options.fetch || (async (url) => {
+      const query = String(url).split("?")[1] || "";
+      const requestedTableId = new URLSearchParams(query).get("tableId") || "table-1";
+      const access = options.tableAccess || { tableId: requestedTableId, buyIn: 100, allowed: true, rejoin: false, reason: "available" };
+      return { ok: true, status: 200, json: async () => ({ tableAccess: { ...access, tableId: access.tableId || requestedTableId } }) };
+    }),
     Date: FakeDate,
     atob(value){ return Buffer.from(String(value), 'base64').toString('binary'); },
     Buffer,
     console
   };
   sandbox.window.document = sandbox.document;
+  sandbox.window.fetch = sandbox.fetch;
   sandbox.window.sessionStorage = sandbox.sessionStorage;
   sandbox.window.localStorage = sandbox.localStorage;
   if (Object.prototype.hasOwnProperty.call(options, 'authUser')) {
@@ -332,6 +345,12 @@ function createHarness(options = {}){
   vm.runInContext(source, sandbox, { filename: 'poker/poker-v2.js' });
 
 async function flush(){
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
@@ -378,8 +397,14 @@ async function flush(){
     flush,
     advanceTime,
     getCreateOptions(){ return createOptions; },
+    getCreateCount(){ return createCount; },
+    getDestroyCount(){ return destroyCount; },
     setAuthToken(nextToken){ activeToken = nextToken; },
-    triggerAuthChange(user){ return authChangeHandler ? authChangeHandler('TOKEN_REFRESHED', user) : null; },
+    triggerAuthChange(user, session, event){
+      if (!authChangeHandler) return null;
+      if (arguments.length >= 2) return authChangeHandler(event || 'TOKEN_REFRESHED', user, session);
+      return authChangeHandler('TOKEN_REFRESHED', user);
+    },
     getIntervalCount(){ return intervalTimers.length; },
     getSessionStorage(key){ return sandbox.sessionStorage.getItem(key); },
     getLocalStorage(key){ return sandbox.localStorage.getItem(key); }
@@ -562,6 +587,131 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(JSON.stringify(harness.startPayloads[0]), JSON.stringify({ tableId: 'table-1' }));
   assert.equal(harness.leavePayloads.length, 1);
   assert.equal(JSON.stringify(harness.leavePayloads[0]), JSON.stringify({ tableId: 'table-1' }));
+  assert.equal(harness.windowLocation.href, '/poker/');
+});
+
+test('poker v2 tears down the previous user socket and ignores stale access preflights', async () => {
+  const tokenFor = (userId) => `aaa.${Buffer.from(JSON.stringify({ sub: userId })).toString('base64')}.zzz`;
+  const pendingPreflights = [];
+  const harness = createHarness({
+    token: tokenFor('user-a'),
+    authUser: { id: 'user-a' },
+    fetch: (_url, request) => new Promise((resolve) => {
+      pendingPreflights.push({
+        authorization: request?.headers?.Authorization || null,
+        resolve
+      });
+    })
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  assert.equal(pendingPreflights.length, 1);
+  assert.equal(pendingPreflights[0].authorization, `Bearer ${tokenFor('user-a')}`);
+
+  pendingPreflights[0].resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ tableAccess: { tableId: 'table-1', buyIn: 100, allowed: true, rejoin: false, reason: 'available' } })
+  });
+  await harness.flush();
+  assert.equal(harness.getCreateCount(), 1, 'user A should have one live socket');
+
+  harness.setAuthToken(tokenFor('user-b'));
+  harness.triggerAuthChange({ id: 'user-b' });
+  await harness.flush();
+  assert.equal(harness.getDestroyCount(), 1, 'changing users must destroy user A socket immediately');
+  assert.equal(pendingPreflights.length, 2);
+
+  // Start a newer B preflight before the first B request resolves. The newer
+  // result denies access; the older successful result must not resurrect A/B.
+  harness.triggerAuthChange({ id: 'user-b' });
+  await harness.flush();
+  assert.equal(pendingPreflights.length, 3);
+  pendingPreflights[2].resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ tableAccess: { tableId: 'table-1', buyIn: 500, allowed: false, rejoin: false, reason: 'buy_in_tier_locked' } })
+  });
+  await harness.flush();
+  assert.equal(harness.getCreateCount(), 1, 'denied user B must not create a replacement socket');
+  assert.equal(harness.getDestroyCount(), 1, 'denial must leave the old socket destroyed');
+
+  pendingPreflights[1].resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ tableAccess: { tableId: 'table-1', buyIn: 100, allowed: true, rejoin: false, reason: 'available' } })
+  });
+  await harness.flush();
+  assert.equal(harness.getCreateCount(), 1, 'stale successful preflight must be ignored');
+  assert.equal(harness.getDestroyCount(), 1, 'stale result must not restore the destroyed socket');
+});
+
+test('poker v2 ignores stale auth tokens and initial identity results', async () => {
+  const tokenFor = (userId) => `aaa.${Buffer.from(JSON.stringify({ sub: userId })).toString('base64')}.zzz`;
+  const pendingTokens = [];
+  const harness = createHarness({
+    token: tokenFor('user-a'),
+    authUser: { id: 'user-a' },
+    getAccessToken: () => new Promise((resolve) => pendingTokens.push(resolve))
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  assert.equal(pendingTokens.length, 1, 'initial identity should have one pending token read');
+
+  harness.triggerAuthChange({ id: 'user-b' });
+  harness.triggerAuthChange({ id: 'user-c' });
+  await harness.flush();
+  assert.equal(pendingTokens.length, 3, 'each auth event should capture its own token read');
+
+  pendingTokens[2](tokenFor('user-c'));
+  await harness.flush();
+  assert.equal(harness.getCreateCount(), 1, 'the newest auth event should start one socket');
+
+  pendingTokens[1](tokenFor('user-b'));
+  pendingTokens[0](tokenFor('user-a'));
+  await harness.flush();
+  assert.equal(harness.getCreateCount(), 1, 'stale auth and initial identity results must not start another socket');
+  assert.equal(harness.getDestroyCount(), 0, 'stale results must not tear down the current socket');
+
+  harness.triggerAuthChange(null);
+  await harness.flush();
+  assert.equal(pendingTokens.length, 4, 'signed-out fallback should capture its token read');
+  harness.triggerAuthChange({ id: 'user-c' }, { access_token: tokenFor('user-c') });
+  await harness.flush();
+  assert.equal(pendingTokens.length, 4, 'auth events with a session should use its token without another bridge read');
+  pendingTokens[3](null);
+  await harness.flush();
+  assert.equal(harness.getCreateCount(), 1, 'a stale signed-out result must not replace the current session');
+  assert.equal(harness.getDestroyCount(), 0, 'a stale signed-out result must not destroy the current socket');
+});
+
+test('poker v2 fails closed when table access preflight cannot decide', async () => {
+  for (const fetchImpl of [
+    () => Promise.reject(new Error('network_down')),
+    () => Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'progression_unavailable' }) })
+  ]) {
+    const harness = createHarness({ fetch: fetchImpl });
+    harness.fireDomContentLoaded();
+    await harness.flush();
+    assert.equal(harness.getCreateCount(), 0, 'WS must not start without a positive table-access decision');
+  }
+});
+
+test('poker v2 routes a closed-table preflight through the existing countdown redirect', async () => {
+  const harness = createHarness({
+    tableAccess: { tableId: 'table-1', buyIn: 100, allowed: false, rejoin: false, reason: 'table_closed' }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  assert.equal(harness.getCreateCount(), 0, 'closed table preflight must not start a WS');
+  assert.equal(harness.elements.pokerV2ClosedTableModal.hidden, false);
+  assert.equal(harness.elements.pokerV2ClosedTableCountdown.textContent, 'Returning to lobby in 5 seconds…');
+
+  for (let i = 0; i < 5; i += 1){
+    harness.advanceTime(1000);
+    await harness.flush();
+  }
   assert.equal(harness.windowLocation.href, '/poker/');
 });
 

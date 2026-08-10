@@ -238,6 +238,17 @@ async function createRealPlayer(browser: Browser, room: PokerE2eRoom, name: stri
   await context.route('**/*supabase-js*', async (route) => {
     await route.fulfill({ status: 200, contentType: 'text/javascript', body: 'window.supabase = window.supabase || {};' });
   });
+  await context.route('**/.netlify/functions/poker-progression**', async (route) => {
+    const url = new URL(route.request().url());
+    const tableId = url.searchParams.get('tableId') || room.tableId;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        tableAccess: { tableId, buyIn: 100, allowed: true, rejoin: false, reason: 'available' },
+      }),
+    });
+  });
   await context.exposeBinding('__pokerE2eCommand', (source, payload) => room.handle(source, payload));
   await context.addInitScript(({ userId, name, token }) => {
     (window as any).__POKER_E2E_PLAYER__ = { userId, name };

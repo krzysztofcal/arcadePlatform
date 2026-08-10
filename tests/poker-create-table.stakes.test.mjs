@@ -1,23 +1,9 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 import { isStateStorageValid, normalizeJsonState } from "../netlify/functions/_shared/poker-state-utils.mjs";
-import { readPokerBuyInEligibility } from "../netlify/functions/_shared/poker-buy-in-eligibility.mjs";
 import { checkWsBuyInCapability } from "../netlify/functions/_shared/poker-ws-runtime-notify.mjs";
 
 process.env.CHIPS_ENABLED = "1";
-
-const genericEligibility = await readPokerBuyInEligibility(
-  { unsafe: async () => [{ balance: 999 }] },
-  { userId: "user-1", requiredBuyIn: 1000 }
-);
-assert.deepEqual(genericEligibility, { eligible: false, balance: 999, requiredBuyIn: 1000 });
-await assert.rejects(
-  readPokerBuyInEligibility(
-    { unsafe: async () => [{ balance: -1 }] },
-    { userId: "user-1", requiredBuyIn: 100 }
-  ),
-  /chips_balance_integrity_error/
-);
 
 const makeHandler = (queries, options = {}) =>
   loadPokerHandler("netlify/functions/poker-create-table.mjs", {
@@ -36,7 +22,7 @@ const makeHandler = (queries, options = {}) =>
           if (text.includes("account_type = 'user'")) {
             if (options.balanceError) throw new Error("balance_read_failed");
             if (options.missingAccount) return [];
-            return [{ balance: options.balance ?? 100 }];
+            return [{ balance: options.balance ?? 110 }];
           }
           if (text.includes("insert into public.poker_tables")) {
             return [{ id: "table-1" }];
@@ -63,9 +49,9 @@ const runMissingStakes = async () => {
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     body: JSON.stringify({ maxPlayers: 6 }),
   });
-  assert.equal(response.statusCode, 400);
-  assert.equal(JSON.parse(response.body).error, "invalid_stakes");
-  assert.equal(queries.length, 0);
+  assert.equal(response.statusCode, 200);
+  const insertCall = queries.find((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables"));
+  assert.deepEqual(JSON.parse(insertCall.params?.[0]), { sb: 1, bb: 2 });
 };
 
 const runInvalidStakes = async () => {
@@ -76,9 +62,9 @@ const runInvalidStakes = async () => {
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     body: JSON.stringify({ maxPlayers: 6, stakes: { sb: 2, bb: 2 } }),
   });
-  assert.equal(response.statusCode, 400);
-  assert.equal(JSON.parse(response.body).error, "invalid_stakes");
-  assert.equal(queries.length, 0);
+  assert.equal(response.statusCode, 200);
+  const insertCall = queries.find((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables"));
+  assert.deepEqual(JSON.parse(insertCall.params?.[0]), { sb: 1, bb: 2 });
 };
 
 const runInvalidBuyIn = async () => {
@@ -132,7 +118,7 @@ const runCustomBuyIn = async () => {
   const notifications = [];
   let capabilityChecks = 0;
   const handler = makeHandler(queries, {
-    balance: 500,
+    balance: 550,
     checkWsBuyInCapability: async () => {
       capabilityChecks += 1;
       return { ok: true };
@@ -152,14 +138,16 @@ const runCustomBuyIn = async () => {
   const insertCall = queries.find((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables"));
   assert.ok(insertCall, "expected insert into poker_tables");
   assert.equal(insertCall.params?.[1], 500);
+  assert.deepEqual(JSON.parse(insertCall.params?.[0]), { sb: 5, bb: 10 });
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0]?.buyIn, 500);
+  assert.deepEqual(notifications[0]?.stakes, { sb: 5, bb: 10 });
 };
 
 const runCustomBuyInRolloutGuard = async () => {
   const queries = [];
   const handler = makeHandler(queries, {
-    balance: 500,
+    balance: 550,
     checkWsBuyInCapability: async () => ({ ok: false, reason: "buy_in_capability_unavailable" })
   });
   const response = await handler({
@@ -169,7 +157,34 @@ const runCustomBuyInRolloutGuard = async () => {
   });
   assert.equal(response.statusCode, 503);
   assert.deepEqual(JSON.parse(response.body), { error: "ws_buy_in_capability_unavailable" });
-  assert.equal(queries.length, 0, "custom buy-in must not create a DB table while the WS is too old");
+  assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")), false, "custom buy-in must not create a DB table while the WS is too old");
+};
+
+const runLockedBuyIn = async () => {
+  const queries = [];
+  let capabilityChecks = 0;
+  const handler = makeHandler(queries, {
+    balance: 500,
+    checkWsBuyInCapability: async () => {
+      capabilityChecks += 1;
+      return { ok: true };
+    }
+  });
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ maxPlayers: 6, buyIn: 500 })
+  });
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(JSON.parse(response.body), {
+    error: "buy_in_tier_locked",
+    buyIn: 500,
+    requiredBuyIn: 500,
+    requiredBankroll: 550,
+    balance: 500
+  });
+  assert.equal(capabilityChecks, 1, "custom buy-in capability should be checked before the DB transaction");
+  assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")), false);
 };
 
 const runWsCapabilityHeaderCheck = async () => {
@@ -178,7 +193,7 @@ const runWsCapabilityHeaderCheck = async () => {
     fetchImpl: async () => ({
       ok: true,
       status: 200,
-      headers: { get: (name) => name === "x-poker-buy-in-materialization" ? "1" : null }
+      headers: { get: (name) => name === "x-poker-buy-in-materialization" ? "2" : null }
     })
   });
   assert.equal(supported.ok, true);
@@ -188,7 +203,7 @@ const runWsCapabilityHeaderCheck = async () => {
     fetchImpl: async () => ({
       ok: true,
       status: 200,
-      headers: { get: () => null }
+      headers: { get: () => "1" }
     })
   });
   assert.equal(legacy.ok, false);
@@ -236,57 +251,13 @@ const runMaintenanceGuard = async () => {
   }
 };
 
-const runInsufficientBalance = async () => {
-  const queries = [];
-  const notifications = [];
-  const handler = makeHandler(queries, {
-    balance: 99,
-    notifyWsLobbyMaterialize: async (payload) => { notifications.push(payload); },
-  });
-  const response = await handler({
-    httpMethod: "POST",
-    headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ maxPlayers: 6, stakes: "1/2" }),
-  });
-  assert.equal(response.statusCode, 409);
-  assert.deepEqual(JSON.parse(response.body), { error: "insufficient_chips", requiredBuyIn: 100, balance: 99 });
-  assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")), false);
-  assert.equal(notifications.length, 0);
-};
-
-const runMissingAccount = async () => {
-  const queries = [];
-  const handler = makeHandler(queries, { missingAccount: true });
-  const response = await handler({
-    httpMethod: "POST",
-    headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ maxPlayers: 6, stakes: "1/2" }),
-  });
-  assert.equal(response.statusCode, 409);
-  assert.deepEqual(JSON.parse(response.body), { error: "insufficient_chips", requiredBuyIn: 100, balance: 0 });
-};
-
-const runBalanceReadFailure = async () => {
-  const queries = [];
-  const handler = makeHandler(queries, { balanceError: true });
-  const response = await handler({
-    httpMethod: "POST",
-    headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ maxPlayers: 6, stakes: "1/2" }),
-  });
-  assert.equal(response.statusCode, 500);
-  assert.equal(JSON.parse(response.body).error, "server_error");
-};
-
 await runMissingStakes();
 await runInvalidStakes();
 await runInvalidBuyIn();
 await runSlashStakes();
 await runCustomBuyIn();
 await runCustomBuyInRolloutGuard();
+await runLockedBuyIn();
 await runWsCapabilityHeaderCheck();
 await runSlowNotifyDoesNotDelayResponse();
 await runMaintenanceGuard();
-await runInsufficientBalance();
-await runMissingAccount();
-await runBalanceReadFailure();

@@ -239,6 +239,9 @@ function loadLobbyHarness(options = {}){
     pokerRefresh: makeElement('pokerRefresh'),
     pokerQuickSeat: makeElement('pokerQuickSeat'),
     pokerCreate: makeElement('pokerCreate'),
+    pokerProgressRoadmap: makeElement('pokerProgressRoadmap'),
+    pokerProgressBankroll: makeElement('pokerProgressBankroll'),
+    pokerProgressCelebration: makeElement('pokerProgressCelebration'),
     pokerSb: makeElement('pokerSb'),
     pokerBb: makeElement('pokerBb'),
     pokerBuyIn: makeElement('pokerBuyIn'),
@@ -435,17 +438,6 @@ await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(lobbyHarness.getRequestLobbySnapshotCalls(), 1, 'lobby refresh should request a fresh websocket lobby snapshot');
 
 {
-  const insufficientHarness = loadLobbyHarness({ balanceResult: { balance: 99 } });
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  insufficientHarness.elements.pokerCreate.click();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(insufficientHarness.fetchCalls.some((url) => url.includes('poker-create-table')), false, 'confirmed insufficient balance should suppress create-table API');
-  assert.equal(insufficientHarness.elements.pokerError.textContent, 'You need at least 100 CH to join a table.');
-  assert.equal(insufficientHarness.elements.pokerCreate.disabled, false, 'create-table should leave loading state after local rejection');
-  assert.equal(insufficientHarness.getLobbyClient().client.isReady(), true, 'local buy-in rejection should keep the lobby active');
-}
-
-{
   const quickSeatGuardHarness = loadLobbyHarness({
     fetchResponse: async (url) => url.includes('poker-quick-seat')
       ? { ok: false, status: 409, json: async () => ({ error: 'insufficient_chips', requiredBuyIn: 100, balance: 99 }) }
@@ -462,11 +454,24 @@ assert.equal(lobbyHarness.getRequestLobbySnapshotCalls(), 1, 'lobby refresh shou
 {
   const fallbackHarness = loadLobbyHarness({
     balanceError: true,
-    fetchResponse: async (url) => ({
-      ok: true,
-      status: 200,
-      json: async () => url.includes('poker-create-table') ? { tableId: 'table-after-fallback' } : { ok: true },
-    }),
+    fetchResponse: async (url) => {
+      if (url.includes('poker-progression')) return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          userId: 'user-1',
+          balance: 110,
+          highestUnlockedBuyIn: 100,
+          availableBuyIns: [100],
+          tiers: [{ buyIn: 100, available: true, unlocked: true, stakes: { sb: 1, bb: 2 } }]
+        })
+      };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => url.includes('poker-create-table') ? { tableId: 'table-after-fallback' } : { ok: true }
+      };
+    },
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
   fallbackHarness.elements.pokerCreate.click();

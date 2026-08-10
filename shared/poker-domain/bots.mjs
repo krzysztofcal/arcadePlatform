@@ -1,8 +1,12 @@
 import { createHash } from "node:crypto";
+import {
+  getBotFundingSystemKeyForBuyIn,
+  isBotFundingAllowedForBuyIn,
+  MAX_POKER_STAKE_CHIPS
+} from "./table-economy.mjs";
 
 const TRUE_SET = new Set(["1", "true", "yes"]);
 const FALSE_SET = new Set(["0", "false", "no"]);
-const MAX_STAKES = 1_000_000;
 
 function normalizeString(value) {
   return String(value == null ? "" : value).trim();
@@ -64,7 +68,7 @@ function parseStakes(raw) {
   if (isPlainObject(raw)) {
     const sb = normalizeInt(raw.sb);
     const bb = normalizeInt(raw.bb);
-    if (sb == null || bb == null || sb < 0 || bb <= 0 || sb >= bb || sb > MAX_STAKES || bb > MAX_STAKES) {
+    if (sb == null || bb == null || sb < 0 || bb <= 0 || sb >= bb || sb > MAX_POKER_STAKE_CHIPS || bb > MAX_POKER_STAKE_CHIPS) {
       return { ok: false, error: "invalid_stakes" };
     }
     return { ok: true, value: { sb, bb } };
@@ -226,6 +230,11 @@ async function seedBotsForJoin({
   if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) {
     throw new Error("invalid_bot_buy_in");
   }
+  if (!isBotFundingAllowedForBuyIn(normalizedBuyIn)) return [];
+  const fundingSystemKey = getBotFundingSystemKeyForBuyIn(normalizedBuyIn, {
+    legacySystemKey: cfg.bankrollSystemKey
+  });
+  if (!fundingSystemKey) return [];
   const stakesParsed = parseStakes(tableStakes);
   if (!stakesParsed.ok) {
     klog("poker_join_bot_seed_skip_invalid_stakes", { tableId, stakes: tableStakes ?? null });
@@ -258,6 +267,7 @@ async function seedBotsForJoin({
     const botUserId = makeBotUserId(tableId, seatNo);
     const botSystemKey = makeBotSystemKey(tableId, seatNo);
     const botProfile = normalizeBotProfile(cfg.defaultProfile, random);
+    await tx.unsafe("savepoint poker_bot_seed_funding;");
     const insertRows = await tx.unsafe(
       `
 insert into public.poker_seats (table_id, user_id, seat_no, status, is_bot, bot_profile, leave_after_hand, stack, last_seen_at, joined_at)
@@ -267,7 +277,10 @@ returning seat_no;
       `,
       [tableId, botUserId, seatNo, botProfile, normalizedBuyIn]
     );
-    if (!insertRows?.length) continue;
+    if (!insertRows?.length) {
+      await tx.unsafe("release savepoint poker_bot_seed_funding;");
+      continue;
+    }
 
     try {
       await postTransaction({
@@ -284,12 +297,13 @@ returning seat_no;
           reason: fundingReason
         },
         entries: [
-          { accountType: "SYSTEM", systemKey: cfg.bankrollSystemKey, amount: -normalizedBuyIn },
+          { accountType: "SYSTEM", systemKey: fundingSystemKey, amount: -normalizedBuyIn },
           { accountType: "ESCROW", systemKey: escrowSystemKey, amount: normalizedBuyIn }
         ],
         createdBy: allowBotsOnly ? null : humanUserId,
         tx
       });
+      await tx.unsafe("release savepoint poker_bot_seed_funding;");
       seededBots.push({
         userId: botUserId,
         seatNo,
@@ -301,11 +315,16 @@ returning seat_no;
       });
       occupied.add(seatNo);
     } catch (error) {
+      await tx.unsafe("rollback to savepoint poker_bot_seed_funding;");
+      await tx.unsafe("release savepoint poker_bot_seed_funding;");
       await tx.unsafe(
         "delete from public.poker_seats where table_id = $1 and user_id = $2 and seat_no = $3 and coalesce(is_bot, false) = true;",
         [tableId, botUserId, seatNo]
       );
       klog("poker_join_bot_seed_failed", { tableId, seatNo, botUserId, reason: error?.code || error?.message || "unknown_error" });
+      const errorCode = String(error?.code || "").toLowerCase();
+      const errorMessage = String(error?.message || "").toLowerCase();
+      if (errorCode === "insufficient_funds" || errorMessage.includes("insufficient_funds")) break;
     }
   }
 

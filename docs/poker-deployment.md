@@ -47,17 +47,80 @@ Set these as Netlify environment variables (Site settings -> Environment variabl
 - `POKER_BOTS_ENABLED` (`0`/`1`)
 - `POKER_BOTS_MAX_PER_TABLE` (default: `2`)
 - `POKER_BOT_PROFILE_DEFAULT` (default: `TRIVIAL`)
-- `POKER_BOT_BANKROLL_SYSTEM_KEY` (default now: `TREASURY`; optional later: `POKER_BOT_BANKROLL`)
+- `POKER_BOT_BANKROLL_SYSTEM_KEY` (legacy 100 CH source override; default: `TREASURY`; it never overrides the fixed 500 CH source `POKER_BOT_BANKROLL`)
+- The fixed 500 CH bot bankroll is seeded once by migration with `1,000,000 CH` from `GENESIS` and is never automatically replenished.
 - Optional later: `POKER_BOTS_MAX_ACTIONS_PER_POLL`
+- `POKER_BUY_IN_TIERS_JSON` (shared ordered buy-in tier catalog; omitted uses the built-in catalog)
 
 Operational notes:
+- Before deploying the runtime to Stage, WS Preview, or production, apply `supabase/migrations/20260810100000_poker_bot_bankroll.sql` to that environment. It creates the active `SYSTEM/POKER_BOT_BANKROLL` account and performs the one-time idempotent `GENESIS -1,000,000` / `POKER_BOT_BANKROLL +1,000,000` allocation. Verify the account and seed transaction before enabling 500 CH bot funding; do not substitute `TREASURY` or edit balances directly.
+- Before production rollout, run a read-only preflight for every active table's `buy_in` + `stakes` pair. List the complete set with:
+
+  ```sql
+  select id, buy_in, stakes, lifecycle_kind, managed_profile_key
+  from public.poker_tables
+  where status <> 'CLOSED'
+  order by buy_in, id;
+  ```
+
+  Then run this mismatch query and stop the rollout if it returns any row:
+
+  ```sql
+  with expected as (
+    select id, buy_in, stakes, lifecycle_kind, managed_profile_key,
+      greatest(2, round(buy_in::numeric / 50))::bigint as expected_bb
+    from public.poker_tables
+    where status <> 'CLOSED'
+  ), normalized as (
+    select id, buy_in, stakes, lifecycle_kind, managed_profile_key,
+      greatest(1, floor(expected_bb / 2))::bigint as expected_sb,
+      expected_bb,
+      case when jsonb_typeof(stakes) = 'object' and stakes->>'sb' ~ '^[0-9]+$'
+        then (stakes->>'sb')::bigint end as actual_sb,
+      case when jsonb_typeof(stakes) = 'object' and stakes->>'bb' ~ '^[0-9]+$'
+        then (stakes->>'bb')::bigint end as actual_bb
+    from expected
+  )
+  select id, buy_in, stakes,
+    jsonb_build_object('sb', expected_sb, 'bb', expected_bb) as canonical_stakes
+  from normalized
+  where actual_sb is distinct from expected_sb
+     or actual_bb is distinct from expected_bb;
+  ```
+
+  Every returned pair must be repaired or the table lifecycle must be consciously resolved before enabling enforcement. Also verify that no active bot seat remains on a non-default tier:
+
+  ```sql
+  select t.id, t.buy_in, t.stakes, t.lifecycle_kind, t.managed_profile_key,
+    count(*) filter (where s.status = 'ACTIVE' and s.is_bot = true) as active_bot_seats
+  from public.poker_tables t
+  left join public.poker_seats s on s.table_id = t.id
+  where t.status <> 'CLOSED'
+  group by t.id, t.buy_in, t.stakes, t.lifecycle_kind, t.managed_profile_key
+  having t.buy_in <> 100
+     and count(*) filter (where s.status = 'ACTIVE' and s.is_bot = true) > 0
+  order by t.buy_in, t.id;
+  ```
+
+  Stop the rollout if this query returns a row. Resolve each table through the existing graceful retirement/terminal cleanup path at a settled boundary, without changing table state, stakes, stacks, or ledgers with direct SQL; continue only after the table is closed and its escrow is `0`. Do not interrupt a table with an active human hand.
+
+  Then verify the continuous-table profile remains canonical:
+
+  ```sql
+  select profile_key, small_blind, big_blind
+  from public.poker_managed_table_profiles
+  where profile_key = 'CONTINUOUS_BOT_DEFAULT';
+  ```
+
+  It must be `1/2`. The configured catalog must include every active table `buy_in` and `100` CH while continuous tables use their fixed `100` CH buy-in; values must fit the PostgreSQL `integer` range and generate blinds no larger than `1,000,000` CH.
+- Roll out the Netlify and WS revisions together; run the non-default-tier smoke only after both revisions report the same release SHA.
 - Bot runtime is guarded by `POKER_BOTS_ENABLED`.
-- Initial humans, initial bots, manual rebuys, and replacement bots use the table's persisted `buy_in` value. The retired `POKER_BOT_BUYIN_BB` setting is ignored so table stakes or bot-only configuration cannot make stacks diverge from the table buy-in.
+- Initial humans and manual rebuys use the table's persisted `buy_in` value. Initial bot seed funding, replacement funding, and managed top-ups use the legacy configured source at `100` CH and the fixed bounded `POKER_BOT_BANKROLL` source at `500` CH; every other tier is human-only. The retired `POKER_BOT_BUYIN_BB` setting is ignored so table stakes or bot-only configuration cannot make stacks diverge from the table buy-in.
 - Values above are Netlify runtime config env vars (not secrets unless explicitly sensitive).
 - Bot/gameplay orchestration runs server-side in WS runtime (no client-side bot scripts).
-- Bot replacement funding continues to use the existing configured source (default `TREASURY`); it adds no account, migration, environment variable, balance move, or manual replenishment step.
+- `100` CH bot replacement funding continues to use the existing configured source (default `TREASURY`); `500` CH replacement and managed top-up funding uses the fixed `POKER_BOT_BANKROLL` account seeded by the migration, with no automatic replenishment or `TREASURY` fallback. The separate managed-profile correction migration only restores `CONTINUOUS_BOT_DEFAULT` to canonical `1/2` blinds and preserves its other settings.
 - Replacement funding is an internal `SYSTEM -> ESCROW` transaction with `created_by = NULL` and closed bot/replacement metadata. It does not depend on `POKER_SYSTEM_ACTOR_USER_ID`. Terminal bot cash-out resolves the destination SYSTEM account from that actual funding provenance instead of using an actor identity or creating a USER account for the bot UUID.
-- A replacement funding failure leaves the table in `SETTLED`, retries with bounded fast backoff, then retries at most once per minute until the same generation succeeds or changes. Monitor `ws_settled_rollover_persist_failed` for the controlled reason, requested replacement count, and total delta.
+- A legacy-source replacement failure retains the existing bounded retry behavior. When the fixed `500` CH bankroll is exhausted, the runtime rolls back the funded candidate once, commits the same rollover without new bot funding when the engine can continue, and does not schedule a permanent retry loop. Monitor `ws_settled_rollover_persist_failed` and the bounded-bankroll fallback event for controlled failures.
 
 ### Local development
 
@@ -125,7 +188,8 @@ Continuous bot tables are controlled by the single database profile
 The migration seeds it disabled with `desired_table_count = 0`; deployment alone
 does not create a table. There are no continuous-table ENV settings.
 
-The V1 foundation supports at most two six-seat tables. Profile constraints and
+Production supports at most two six-seat tables; Preview allows up to 100 so a
+reviewed Stage profile can run five non-stop tables. Profile constraints and
 runtime validation bound desired count, bot counts, stakes and timing values.
 The supervisor polls the profile, serializes create/retire decisions with a
 database advisory transaction lock and retains the last valid profile across a
@@ -140,15 +204,28 @@ rebuy contracts.
 
 Preview rollout:
 
-1. Apply `20260729100000_poker_managed_table_profiles.sql` to stage.
+1. Apply `20260810100000_poker_bot_bankroll.sql`,
+   `20260729100000_poker_managed_table_profiles.sql`, and
+   `20260809224000_poker_managed_table_profiles_canonical_stakes.sql` to Stage.
+   The bankroll migration is required before any 500 CH bot seed, replacement,
+   or managed top-up; the two profile migrations are required for the
+   continuous-table reconciliation.
 2. Deploy the exact PR SHA with manual `WS Preview Deploy`.
 3. Verify release metadata, `ws_artifact_start`, local/public `/healthz` and no supervisor failure.
-4. Confirm the seeded profile is disabled and no managed table was created.
-5. In one reviewed database update set `enabled = true`, `desired_table_count = 1` and `updated_at = now()`.
-6. Verify exactly one `CONTINUOUS_BOT` table, three initial bots, one escrow account, three seed funding transactions and one playable persisted hand.
-7. Join as a real player through normal quick-seat/direct join; verify actions, settlement, reconnect, rebuy and leave.
-8. Verify settled rollover, bot replacement/top-up idempotency and absence of accounting/persistence failures.
-9. Set the valid profile to `enabled = false`, `desired_table_count = 0`; verify the table waits for `SETTLED`, never removes a human, then closes once through terminal accounting with escrow `0`.
+4. Confirm `CONTINUOUS_BOT_DEFAULT` has canonical `small_blind = 1`,
+   `big_blind = 2`; set Preview to `enabled = true`,
+   `desired_table_count = 5` through the existing maintenance operation.
+5. Verify exactly five `CONTINUOUS_BOT` tables, each with `buy_in = 100`,
+   `1/2` stakes, three initial bots, one escrow account, three seed funding
+   transactions and a playable persisted hand. Production remains capped at two.
+6. Join as a real player through normal quick-seat/direct join; verify actions, settlement, reconnect, rebuy and leave.
+7. Verify settled rollover, bot replacement/top-up idempotency and absence of accounting/persistence failures.
+8. **Rollback only:** if the preview service must be disabled, set the valid profile to
+   `enabled = false`, `desired_table_count = 0`; verify the tables wait for
+   `SETTLED`, never remove a human, then close once through terminal accounting
+   with escrow `0`. A completed rollout must leave the profile
+   `enabled = true`, `desired_table_count = 5`; do not execute this rollback step
+   as part of normal Preview operation.
 
 Do not change stakes or `max_seats` on an active production profile without
 expecting graceful retirement. Existing tables keep their persisted stakes and

@@ -186,21 +186,34 @@ test("continuous bot profile comparison accepts Postgres stringified jsonb stake
     max_bot_count: 3,
     rotation_interval_seconds: 900,
     postpone_interval_seconds: 300,
-    small_blind: 5,
-    big_blind: 10,
+    small_blind: 1,
+    big_blind: 2,
     max_seats: 6
   });
 
   assert.equal(tableMatchesContinuousBotProfile({
     managed_profile_key: "CONTINUOUS_BOT_DEFAULT",
     max_players: 6,
-    stakes: "{\"sb\":5,\"bb\":10}"
+    stakes: "{\"sb\":1,\"bb\":2}"
   }, profile), true);
   assert.equal(tableMatchesContinuousBotProfile({
     managed_profile_key: "CONTINUOUS_BOT_DEFAULT",
     max_players: 6,
-    stakes: "{\"sb\":1,\"bb\":2}"
+    stakes: "{\"sb\":5,\"bb\":10}"
   }, profile), false);
+  assert.equal(normalizeContinuousBotProfile({
+    profile_key: "CONTINUOUS_BOT_DEFAULT",
+    enabled: true,
+    desired_table_count: 1,
+    min_bot_count: 2,
+    target_bot_count: 3,
+    max_bot_count: 3,
+    rotation_interval_seconds: 900,
+    postpone_interval_seconds: 300,
+    small_blind: 5,
+    big_blind: 10,
+    max_seats: 6
+  }), null);
 });
 
 test("continuous bot supervisor coalesces overlapping sweeps and activates each table once", async () => {
@@ -2818,7 +2831,7 @@ test("server supports healthz and hello/helloAck smoke flow", async () => {
 
     const response = await fetch(`http://127.0.0.1:${port}/healthz`);
     assert.equal(response.status, 200);
-    assert.equal(response.headers.get("x-poker-buy-in-materialization"), "1");
+    assert.equal(response.headers.get("x-poker-buy-in-materialization"), "2");
     assert.equal(await response.text(), "ok");
   } finally {
     child.kill("SIGTERM");
@@ -4105,18 +4118,63 @@ function observeOnlyJoinEnv() {
   return { WS_OBSERVE_ONLY_JOIN: "1" };
 }
 
-async function materializeLobbyTableRuntime({ port, token, tableId, maxPlayers = 6, stakes = { sb: 1, bb: 2 } }) {
+async function materializeLobbyTableRuntime({ port, token, tableId, maxPlayers = 6, stakes = { sb: 1, bb: 2 }, buyIn = undefined }) {
   const response = await fetch(`http://127.0.0.1:${port}/internal/lobby/materialize-table`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${token}`,
       "content-type": "application/json"
     },
-    body: JSON.stringify({ tableId, maxPlayers, stakes })
+    body: JSON.stringify({ tableId, maxPlayers, stakes, ...(buyIn === undefined ? {} : { buyIn }) })
   });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { ok: true, tableId });
 }
+
+test("WS materialization derives canonical stakes from buy-in instead of client stakes", async () => {
+  const secret = "canonical-materialize-secret";
+  const internalToken = "canonical-materialize-token";
+  const tableId = "table-runtime-canonical-stakes";
+  const { port, child } = await createServer({
+    env: {
+      POKER_WS_INTERNAL_TOKEN: internalToken,
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      SUPABASE_DB_URL: ""
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    await materializeLobbyTableRuntime({
+      port,
+      token: internalToken,
+      tableId,
+      buyIn: 500,
+      stakes: { sb: 1, bb: 2 }
+    });
+    const lobby = await connectClient(port);
+    await hello(lobby);
+    assert.equal((await auth(lobby, makeHs256Jwt({ secret, sub: "canonical-lobby-user" }), "auth-canonical-materialize")).type, "authOk");
+    const snapshotPromise = nextMessage(lobby);
+    sendFrame(lobby, {
+      version: "1.0",
+      type: "lobby_subscribe",
+      requestId: "req-canonical-materialize",
+      ts: "2026-08-09T00:00:00Z",
+      payload: {}
+    });
+    const snapshot = await snapshotPromise;
+    assert.equal(snapshot.type, "lobby_snapshot", JSON.stringify(snapshot));
+    const table = snapshot.payload.tables.find((entry) => entry.tableId === tableId);
+    assert.equal(table.buyIn, 500);
+    assert.deepEqual(table.stakes, { sb: 5, bb: 10 });
+    lobby.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
 
 test("WS lobby_subscribe includes explicit runtime-materialized joinable tables before any player joins", async () => {
   const secret = "lobby-joinable-secret";
@@ -8466,6 +8524,7 @@ test("authoritative join with historical non-ACTIVE seat retries to the next sea
   const secret = "auth-join-historical-seat-secret";
   const tableId = "table_auth_join_historical_non_active";
   const store = {
+    accounts: [{ user_id: "historical_user", account_type: "USER", balance: 110 }],
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", buy_in: 100 },
@@ -8516,6 +8575,7 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
   const secret = "auth-join-bots-secret";
   const tableId = "table_auth_join_bots";
   const store = {
+    accounts: [{ user_id: "bot_seed_human", account_type: "USER", balance: 110 }],
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 100 },

@@ -41,7 +41,16 @@
   }
 
   function safeErrorCode(err){ return err && (err.code || err.message) ? (err.code || err.message) : 'unknown_error'; }
-  function createError(code, message){ var e = new Error(message || code || 'ws_error'); e.code = code || 'ws_error'; return e; }
+  function createError(code, message, details){
+    var e = new Error(message || code || 'ws_error');
+    e.code = code || 'ws_error';
+    var source = details && typeof details === 'object' ? details : null;
+    ['buyIn', 'requiredBankroll', 'balance'].forEach(function(key){
+      var value = source ? Number(source[key]) : NaN;
+      if (Number.isSafeInteger(value) && value >= 0) e[key] = value;
+    });
+    return e;
+  }
   function sanitizeText(value){
     if (value == null) return null;
     var text = String(value);
@@ -337,7 +346,7 @@
         entry.resolve(resolved);
         return;
       }
-      entry.reject(createError(payload.reason || 'rejected'));
+      entry.reject(createError(payload.reason || 'rejected', null, payload));
     }
 
     function handleMessage(frame){
@@ -400,7 +409,7 @@
             requestGameplaySnapshot();
             commandErrorHandled = true;
           } else {
-            pending.delete(rid); clearTimeout(entry.timer); entry.reject(createError(code));
+            pending.delete(rid); clearTimeout(entry.timer); entry.reject(createError(code, null, frame.payload));
             commandErrorHandled = true;
           }
         }

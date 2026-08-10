@@ -17,6 +17,11 @@ import {
 } from "../engine/poker-engine.mjs";
 import { deriveDeterministicRuntimeHandState } from "../shared/runtime-hand-state.mjs";
 import { stampTurnDeadline } from "../shared/poker-turn-timeout.mjs";
+import {
+  calculateCanonicalPokerStakes,
+  DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
+  isCanonicalPokerStakes
+} from "../../../shared/poker-domain/table-economy.mjs";
 
 const DEFAULT_PRESENCE_TTL_MS = 10_000;
 const DEFAULT_MAX_SEATS = 10;
@@ -610,6 +615,7 @@ export function createTableManager({
     }
     table.tableStatus = normalizeTableStatus(table.tableStatus);
     const configuredBuyIn = Number(table.tableMeta?.buyIn);
+    const hasConfiguredBuyIn = Number.isSafeInteger(configuredBuyIn) && configuredBuyIn > 0;
     const incomingBuyIn = tableMeta && Object.prototype.hasOwnProperty.call(tableMeta, "buyIn")
       ? Number(tableMeta.buyIn)
       : null;
@@ -617,11 +623,28 @@ export function createTableManager({
       && Number.isSafeInteger(incomingBuyIn) && incomingBuyIn > 0 && incomingBuyIn !== configuredBuyIn) {
       return { ok: false, code: "buy_in_immutable" };
     }
-    const nextTableMeta = { ...table.tableMeta, ...(tableMeta || {}) };
-    if (existed && Number.isSafeInteger(configuredBuyIn) && configuredBuyIn > 0
-      && (!Number.isSafeInteger(incomingBuyIn) || incomingBuyIn <= 0)) {
-      nextTableMeta.buyIn = configuredBuyIn;
+    const runtimeHasActivity = Number(table.coreState?.version) > 0
+      || (Array.isArray(table.coreState?.members) && table.coreState.members.length > 0)
+      || (table.presenceByUserId instanceof Map && table.presenceByUserId.size > 0)
+      || (table.subscribers instanceof Set && table.subscribers.size > 0);
+    if (existed && runtimeHasActivity && (!hasConfiguredBuyIn || !table.tableMeta?.stakes)) {
+      return { ok: false, code: "buy_in_immutable" };
     }
+    const resolvedBuyIn = hasConfiguredBuyIn
+      ? configuredBuyIn
+      : (Number.isSafeInteger(incomingBuyIn) && incomingBuyIn > 0 ? incomingBuyIn : DEFAULT_CASH_TABLE_BUY_IN_CHIPS);
+    const canonicalStakes = calculateCanonicalPokerStakes(resolvedBuyIn);
+    if (!canonicalStakes) return { ok: false, code: "invalid_buy_in" };
+    const existingStakes = table.tableMeta?.stakes;
+    if (existed && existingStakes && !isCanonicalPokerStakes(resolvedBuyIn, existingStakes)) {
+      return { ok: false, code: "stakes_immutable" };
+    }
+    const nextTableMeta = {
+      ...table.tableMeta,
+      ...(tableMeta || {}),
+      buyIn: resolvedBuyIn,
+      stakes: canonicalStakes
+    };
     table.tableMeta = normalizeTableMeta(nextTableMeta, table?.coreState?.maxSeats || maxSeats, {
       defaultCreatedAtMs: table?.tableMeta?.createdAtMs ?? nowMs,
       defaultLastActivityAtMs: nowMs
@@ -1162,7 +1185,8 @@ export function createTableManager({
     tableId,
     nowMs = Date.now(),
     allowManagedBotsOnly = false,
-    managedBotProfile = null
+    managedBotProfile = null,
+    allowBotFunding = true
   } = {}) {
     const table = tables.get(tableId);
     if (!table) {
@@ -1179,12 +1203,14 @@ export function createTableManager({
 
     const nextVersion = Number(table.coreState.version || 0) + 1;
     const tableBuyIn = Number(table.tableMeta?.buyIn);
-    const recycled = replaceBrokeBotsForNextHand({
-      coreState: table.coreState,
-      settledState,
-      nextVersion,
-      buyIn: tableBuyIn
-    });
+    const recycled = allowBotFunding === false
+      ? { ok: true, coreState: table.coreState, settledState, replacementFundings: [] }
+      : replaceBrokeBotsForNextHand({
+          coreState: table.coreState,
+          settledState,
+          nextVersion,
+          buyIn: tableBuyIn
+        });
     if (!recycled?.ok) {
       return {
         ok: false,
@@ -1196,7 +1222,7 @@ export function createTableManager({
     const managedBotsOnlyAllowed = allowManagedBotsOnly === true
       && table.tableMeta?.lifecycleKind === "CONTINUOUS_BOT"
       && table.tableMeta?.managedProfileKey === "CONTINUOUS_BOT_DEFAULT";
-    const toppedUp = managedBotsOnlyAllowed
+    const toppedUp = managedBotsOnlyAllowed && allowBotFunding !== false
       ? topUpManagedBotsForNextHand({
           coreState: recycled.coreState,
           settledState: recycled.settledState,

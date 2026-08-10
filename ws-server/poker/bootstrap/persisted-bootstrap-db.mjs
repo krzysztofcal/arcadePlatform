@@ -30,6 +30,7 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
   }
   const doc = await readFileStoreDoc(filePath);
   const tables = doc && typeof doc === "object" && doc.tables && typeof doc.tables === "object" ? doc.tables : {};
+  const accounts = Array.isArray(doc?.accounts) ? doc.accounts : [];
   let dirty = false;
 
   const tx = {
@@ -37,6 +38,15 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
       const sql = String(query).toLowerCase();
       const tableId = params?.[0];
       const table = tables?.[tableId] || null;
+
+      if (sql.includes("from public.chips_accounts") && sql.includes("account_type = 'user'")) {
+        const userId = params?.[0];
+        const account = accounts.find((candidate) => (
+          candidate?.user_id === userId
+          && String(candidate?.account_type || "USER").toUpperCase() === "USER"
+        ));
+        return account ? [{ balance: account.balance }] : [];
+      }
 
       if (sql.includes("from public.poker_seats s") && sql.includes("order by s.last_seen_at")) {
         const cutoffMs = Date.parse(String(params?.[0] || ""));
