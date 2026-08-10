@@ -1185,7 +1185,8 @@ export function createTableManager({
     tableId,
     nowMs = Date.now(),
     allowManagedBotsOnly = false,
-    managedBotProfile = null
+    managedBotProfile = null,
+    allowBotFunding = true
   } = {}) {
     const table = tables.get(tableId);
     if (!table) {
@@ -1202,12 +1203,14 @@ export function createTableManager({
 
     const nextVersion = Number(table.coreState.version || 0) + 1;
     const tableBuyIn = Number(table.tableMeta?.buyIn);
-    const recycled = replaceBrokeBotsForNextHand({
-      coreState: table.coreState,
-      settledState,
-      nextVersion,
-      buyIn: tableBuyIn
-    });
+    const recycled = allowBotFunding === false
+      ? { ok: true, coreState: table.coreState, settledState, replacementFundings: [] }
+      : replaceBrokeBotsForNextHand({
+          coreState: table.coreState,
+          settledState,
+          nextVersion,
+          buyIn: tableBuyIn
+        });
     if (!recycled?.ok) {
       return {
         ok: false,
@@ -1219,7 +1222,7 @@ export function createTableManager({
     const managedBotsOnlyAllowed = allowManagedBotsOnly === true
       && table.tableMeta?.lifecycleKind === "CONTINUOUS_BOT"
       && table.tableMeta?.managedProfileKey === "CONTINUOUS_BOT_DEFAULT";
-    const toppedUp = managedBotsOnlyAllowed
+    const toppedUp = managedBotsOnlyAllowed && allowBotFunding !== false
       ? topUpManagedBotsForNextHand({
           coreState: recycled.coreState,
           settledState: recycled.settledState,

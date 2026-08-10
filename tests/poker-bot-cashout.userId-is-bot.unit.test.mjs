@@ -39,6 +39,28 @@ async function verifyStrictSystemCashout() {
   assert.equal(calls[0].entries.some((entry) => entry.accountType === "USER"), false);
 }
 
+async function verifyBoundedBankrollCashoutUsesFundingProvenance() {
+  const calls = [];
+  await postTerminalBotCashout({
+    postTransaction: async (payload) => {
+      calls.push(payload);
+      return { transaction: { id: "tx-bounded-cashout" } };
+    },
+    tx: { unsafe: async () => [] },
+    tableId,
+    toStateVersion: 9,
+    botUserId: replacementBotUserId,
+    seatNo: 2,
+    amount: 500,
+    sourceAccountId,
+    sourceSystemKey: "POKER_BOT_BANKROLL",
+    fundingTransactionIds: ["tx-bounded-seed"]
+  });
+
+  assert.equal(calls[0].entries[1].systemKey, "POKER_BOT_BANKROLL");
+  assert.equal(calls[0].entries.some((entry) => entry.accountType === "USER"), false);
+}
+
 function verifyReplacementLineage() {
   const rows = [
     {
@@ -117,5 +139,6 @@ async function verifyClaimsMismatchFailsBeforeMutation() {
 }
 
 await verifyStrictSystemCashout();
+await verifyBoundedBankrollCashoutUsesFundingProvenance();
 verifyReplacementLineage();
 await verifyClaimsMismatchFailsBeforeMutation();

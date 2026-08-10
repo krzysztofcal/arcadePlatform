@@ -16,6 +16,8 @@ process.env.SUPABASE_DB_URL = dbUrl;
 
 const seedKey = "seed:treasury:v1";
 const seedAmount = 1000000;
+const botBankrollSeedKey = "seed:poker-bot-bankroll:v1";
+const botBankrollSeedAmount = 1000000;
 const primaryUserId = "00000000-0000-0000-0000-000000000001";
 const idempotentUserId = "00000000-0000-0000-0000-000000000002";
 const conflictUserId = "00000000-0000-0000-0000-000000000003";
@@ -63,6 +65,21 @@ const seedEntryCount = async (sql) => {
     from public.chips_entries e
     join public.chips_transactions t on t.id = e.transaction_id
     where t.idempotency_key = ${seedKey};
+  `;
+  return Number(rows?.[0]?.count ?? 0);
+};
+
+const botBankrollSeedTxCount = async (sql) => {
+  const rows = await sql`select count(*) as count from public.chips_transactions where idempotency_key = ${botBankrollSeedKey};`;
+  return Number(rows?.[0]?.count ?? 0);
+};
+
+const botBankrollSeedEntryCount = async (sql) => {
+  const rows = await sql`
+    select count(*) as count
+    from public.chips_entries e
+    join public.chips_transactions t on t.id = e.transaction_id
+    where t.idempotency_key = ${botBankrollSeedKey};
   `;
   return Number(rows?.[0]?.count ?? 0);
 };
@@ -115,7 +132,11 @@ if (seedMigrationContent.includes("raise_insufficient_funds")) {
   console.log("Seed migration depends on raise_insufficient_funds; aborting.");
   process.exit(1);
 }
-const migrationsWithoutSeed = migrationFiles.filter((file) => file !== seedMigration);
+const botBankrollMigration = migrationFiles.find((file) => file.includes("poker_bot_bankroll"));
+if (!botBankrollMigration) {
+  throw new Error("Bounded bot bankroll migration not found; cannot run tests.");
+}
+const migrationsWithoutBootstrapSeeds = migrationFiles.filter((file) => file !== seedMigration && file !== botBankrollMigration);
 
 const runMigration = async (sql, file) => {
   const content = fs.readFileSync(path.join(migrationsDir, file), "utf8");
@@ -126,6 +147,16 @@ const runMigrations = async (sql, files) => {
   for (const file of files) {
     await runMigration(sql, file);
   }
+};
+
+const ensureGenesisFixture = async (sql) => {
+  await sql`
+    insert into public.chips_accounts (account_type, system_key, status, balance, next_entry_seq)
+    select 'SYSTEM', 'GENESIS', 'active', 0, 1
+    where not exists (
+      select 1 from public.chips_accounts where account_type = 'SYSTEM' and system_key = 'GENESIS'
+    );
+  `;
 };
 
 const withLedger = async () => {
@@ -602,11 +633,30 @@ async function assertSeedSequencing(sql) {
     select system_key, next_entry_seq
     from public.chips_accounts
     where account_type = 'SYSTEM'
-      and system_key in ('GENESIS', 'TREASURY');
+      and system_key in ('GENESIS', 'TREASURY', 'POKER_BOT_BANKROLL');
   `;
   const seqByKey = new Map(accountRows.map((row) => [row.system_key, Number(row.next_entry_seq || 0)]));
-  assert.equal(seqByKey.get("GENESIS"), 2, "GENESIS next_entry_seq should advance after seed entry");
+  assert.equal(seqByKey.get("GENESIS"), 3, "GENESIS next_entry_seq should advance after both genesis allocations");
   assert.equal(seqByKey.get("TREASURY"), 2, "TREASURY next_entry_seq should advance after seed entry");
+  assert.equal(seqByKey.get("POKER_BOT_BANKROLL"), 2, "POKER_BOT_BANKROLL next_entry_seq should advance after its seed entry");
+}
+
+async function assertBotBankrollSeed(sql) {
+  assert.equal(await botBankrollSeedTxCount(sql), 1, "Bounded bot bankroll seed transaction should exist once");
+  assert.equal(await botBankrollSeedEntryCount(sql), 2, "Bounded bot bankroll seed must create two entries");
+  assert.equal(await systemBalances(sql, "POKER_BOT_BANKROLL"), botBankrollSeedAmount, "Bounded bot bankroll should start with 1,000,000 CH");
+  const rows = await sql`
+    select a.system_key, e.amount
+    from public.chips_entries e
+    join public.chips_transactions t on t.id = e.transaction_id
+    join public.chips_accounts a on a.id = e.account_id
+    where t.idempotency_key = ${botBankrollSeedKey}
+    order by a.system_key;
+  `;
+  assert.deepEqual(rows.map((row) => [row.system_key, Number(row.amount)]), [
+    ["GENESIS", -botBankrollSeedAmount],
+    ["POKER_BOT_BANKROLL", botBankrollSeedAmount]
+  ]);
 }
 
 async function assertBuyInSequencing(sql, expectedTreasurySeq) {
@@ -701,7 +751,8 @@ async function main() {
   const sql = postgres(dbUrl, { max: 1 });
   await dropAndRecreateSchema(sql);
 
-  await runMigrations(sql, migrationsWithoutSeed);
+  await runMigrations(sql, migrationsWithoutBootstrapSeeds);
+  await ensureGenesisFixture(sql);
   await expectNegativeBalanceGuard(sql);
   await expectInsufficientBuyIn(sql);
   await expectInvalidMetadata(sql);
@@ -710,6 +761,8 @@ async function main() {
   await expectInvalidEntryMetadataShape(sql);
 
   await runMigration(sql, seedMigration);
+  await runMigration(sql, botBankrollMigration);
+  await assertBotBankrollSeed(sql);
   const afterSeed = await systemBalances(sql, "TREASURY");
   assert.ok(afterSeed >= seedAmount, "Treasury should be funded after seed migration");
   assert.equal(await seedTxCount(sql), 1, "Seed transaction should be recorded once");
@@ -747,6 +800,8 @@ async function main() {
   assert.equal(afterRerun, expectedTreasuryBalance, "Treasury balance should remain unchanged on rerun");
   assert.equal(await accountNextSeq(sql, "TREASURY"), expectedTreasurySeq, "TREASURY sequence should remain stable on rerun");
   assert.equal(await seedEntryCount(sql), 2, "Seed rerun must not add or drop entries");
+  await runMigration(sql, botBankrollMigration);
+  await assertBotBankrollSeed(sql);
 
   await sql.end({ timeout: 5 });
   const adminModule = await import("../../netlify/functions/_shared/supabase-admin.mjs");

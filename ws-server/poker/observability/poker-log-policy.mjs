@@ -286,6 +286,7 @@ register("ERROR", "session", [
 register("ERROR", "settlement", [
   "poker_showdown_no_eligible",
   "ws_settled_reveal_pending_check_failed",
+  "ws_settled_rollover_bounded_bankroll_fallback_failed",
   "ws_settled_rollover_deferred_leave_failed",
   "ws_settled_rollover_persist_failed"
 ]);

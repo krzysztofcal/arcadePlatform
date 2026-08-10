@@ -102,7 +102,7 @@ test("managed settled top-up never displaces humans when capacity cannot reach t
   assert.deepEqual(result.coreState.members.filter((member) => member.userId.startsWith("human_")), members.slice(0, 4));
 });
 
-test("managed settled top-up does not fund bots above the 100 CH table tier", () => {
+test("managed settled top-up uses the 500 CH table tier target", () => {
   const coreState = {
     roomId: "table_managed_high_tier",
     version: 4,
@@ -124,9 +124,10 @@ test("managed settled top-up does not fund bots above the 100 CH table tier", ()
   });
 
   assert.equal(result.ok, true);
-  assert.deepEqual(result.topUpFundings, []);
-  assert.equal(result.coreState, coreState);
-  assert.equal(result.settledState, settledState);
+  assert.equal(result.topUpFundings.length, 2);
+  assert.equal(result.topUpFundings.every((funding) => funding.targetStack === 500 && funding.fundingDelta === 500), true);
+  assert.equal(result.coreState.members.length, 3);
+  assert.equal(result.settledState.stacks[result.topUpFundings[0].botUserId], 500);
 });
 
 function initialCore() {
@@ -423,7 +424,7 @@ test("replaceBrokeBotsForNextHand swaps too-short bot only after settlement", ()
   }]);
 });
 
-test("replacement planning never funds a legacy high-tier bot above 100 CH", () => {
+test("replacement planning uses the 500 CH table tier target", () => {
   const coreState = {
     roomId: "table_engine_high_tier",
     version: 30,
@@ -448,7 +449,10 @@ test("replacement planning never funds a legacy high-tier bot above 100 CH", () 
   });
 
   assert.equal(result.ok, true);
-  assert.deepEqual(result.replacementFundings, []);
-  assert.equal(result.coreState, coreState);
-  assert.equal(result.settledState, settledState);
+  assert.equal(result.replacementFundings.length, 1);
+  const replacement = result.replacementFundings[0];
+  assert.equal(replacement.targetStack, 500);
+  assert.equal(replacement.fundingDelta, 500);
+  assert.equal(result.settledState.stacks[replacement.replacementBotUserId], 500);
+  assert.equal(result.coreState.members.some((member) => member.userId === "bot_old"), false);
 });

@@ -917,6 +917,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       targetBotCount,
       klog
       });
+      const expectedBotCountAfterSeed = seededBots.length;
       const updatedStateRow = await syncStateSeatAndStack({
       tx,
       tableId,
@@ -929,7 +930,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       loadStateForUpdate,
       updateStateLocked,
       validateStateForStorage,
-      targetBotCount,
+      targetBotCount: expectedBotCountAfterSeed,
       markFreshJoinWaiting: true
       });
       await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);

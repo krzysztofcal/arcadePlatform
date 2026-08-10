@@ -6,13 +6,30 @@ import {
   readPokerBankroll,
   resolvePokerBuyInTiers
 } from "./poker-progression.mjs";
-import { calculateCanonicalPokerStakes } from "./table-economy.mjs";
+import {
+  calculateCanonicalPokerStakes,
+  getBotFundingSystemKeyForBuyIn,
+  HIGH_TIER_BOT_BANKROLL_SYSTEM_KEY,
+  isBotFundingAllowedForBuyIn
+} from "./table-economy.mjs";
 
 test("canonical poker stakes keep every tier at a 50 BB starting stack", () => {
   assert.deepEqual(calculateCanonicalPokerStakes(100), { sb: 1, bb: 2 });
   assert.deepEqual(calculateCanonicalPokerStakes(1_000), { sb: 10, bb: 20 });
   assert.deepEqual(calculateCanonicalPokerStakes(10_000_000), { sb: 100_000, bb: 200_000 });
   assert.equal(calculateCanonicalPokerStakes(100_000_000), null);
+});
+
+test("bot funding is allowlisted to 100 and 500 CH with separate sources", () => {
+  assert.equal(isBotFundingAllowedForBuyIn(100), true);
+  assert.equal(getBotFundingSystemKeyForBuyIn(100), "TREASURY");
+  assert.equal(getBotFundingSystemKeyForBuyIn(100, { legacySystemKey: "HOUSE" }), "HOUSE");
+  assert.equal(isBotFundingAllowedForBuyIn(500), true);
+  assert.equal(getBotFundingSystemKeyForBuyIn(500, { legacySystemKey: "HOUSE" }), HIGH_TIER_BOT_BANKROLL_SYSTEM_KEY);
+  for (const buyIn of [200, 750, 1_000, 10_000_000]) {
+    assert.equal(isBotFundingAllowedForBuyIn(buyIn), false);
+    assert.equal(getBotFundingSystemKeyForBuyIn(buyIn), null);
+  }
 });
 
 test("progression resolves the default catalog and unlocks only the highest tier plus one fallback", () => {

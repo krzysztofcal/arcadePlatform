@@ -75,6 +75,7 @@ import { getBotConfig } from "./shared/poker-domain/bots.mjs";
 import {
   calculateCanonicalPokerStakes,
   DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
+  getBotFundingSystemKeyForBuyIn,
   POKER_BUY_IN_MATERIALIZATION_CAPABILITY_VERSION
 } from "../shared/poker-domain/table-economy.mjs";
 import { createContinuousBotTableRepository } from "./poker/persistence/continuous-bot-table-repository.mjs";
@@ -333,7 +334,7 @@ persistedStateWriter = persistedStateWriteEnabled ? createPersistedStateWriter({
 const durableActionStore = hasSupabaseDbUrl && persistedStateWriter?.readDurableActionRequest
   ? persistedStateWriter
   : null;
-const botFundingSystemKey = getBotConfig(process.env).bankrollSystemKey;
+const legacyBotFundingSystemKey = getBotConfig(process.env).bankrollSystemKey;
 function continuousBotMaxDesiredTablesForRuntime() {
   return loadReleaseMetadata().environment === "preview" ? 100 : 2;
 }
@@ -2284,9 +2285,64 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     replacementFundings: prepared.replacementFundings,
     managedBotTopUps: prepared.managedBotTopUps,
     humanStackUpdates: prepared.humanStackUpdates,
-    replacementFundingSystemKey: botFundingSystemKey,
+    replacementFundingSystemKey: getBotFundingSystemKeyForBuyIn(tableMeta?.buyIn, {
+      legacySystemKey: legacyBotFundingSystemKey
+    }),
     deferRuntimeVersionUpdate: true
   });
+  if (persisted?.reason === "bot_bounded_bankroll_exhausted" && Number(tableMeta?.buyIn) === 500) {
+    clearSettledRolloverTimer(tableId);
+    const restoredAfterFundingFailure = await restoreTableFromPersisted(tableId);
+    if (!restoredAfterFundingFailure?.ok) {
+      return finishSettledRollover({ ok: false, changed: false, reason: "runtime_restore_failed", stateVersion: prepared.stateVersion });
+    }
+    const fallbackPrepared = tableManager.prepareSettledHandRollover({
+      tableId,
+      nowMs: Date.now(),
+      allowManagedBotsOnly: managedContinuousTable,
+      managedBotProfile,
+      allowBotFunding: false
+    });
+    if (!fallbackPrepared?.ok || !fallbackPrepared.changed) {
+      return finishSettledRollover(fallbackPrepared);
+    }
+    const fallbackPersisted = await persistMutatedState({
+      tableId,
+      expectedVersion: fallbackPrepared.expectedVersion,
+      mutationKind: "settled_rollover",
+      nextStateOverride: fallbackPrepared.nextCoreState?.pokerState,
+      privateStateForHoleCardsOverride: fallbackPrepared.nextCoreState?.pokerState,
+      replacementFundings: [],
+      managedBotTopUps: [],
+      humanStackUpdates: fallbackPrepared.humanStackUpdates,
+      replacementFundingSystemKey: null,
+      deferRuntimeVersionUpdate: true
+    });
+    if (!fallbackPersisted?.ok) {
+      klogSafe("ws_settled_rollover_bounded_bankroll_fallback_failed", {
+        tableId,
+        reason: fallbackPersisted?.reason || "persist_failed",
+        stateVersion: fallbackPrepared.stateVersion
+      });
+      return finishSettledRollover({ ok: false, changed: false, reason: fallbackPersisted?.reason || "persist_failed", stateVersion: fallbackPrepared.stateVersion });
+    }
+    const restoredFallback = await restoreTableFromPersisted(tableId);
+    if (!restoredFallback?.ok) {
+      return finishSettledRollover({ ok: false, changed: false, reason: "runtime_restore_failed", stateVersion: fallbackPrepared.stateVersion });
+    }
+    broadcastStateSnapshots(tableId);
+    try {
+      scheduleBotStep({ tableId, trigger: "settled_rollover_bounded_bankroll", requestId: null, frameTs: null });
+    } catch (error) {
+      klogSafe("ws_settled_rollover_bot_autoplay_failed", { tableId, message: error?.message || "unknown" });
+    }
+    return finishSettledRollover({
+      ok: true,
+      changed: true,
+      reason: "bounded_bankroll_exhausted_no_bot_funding",
+      stateVersion: fallbackPrepared.stateVersion
+    });
+  }
   if (!persisted?.ok || persisted.alreadyApplied) {
     const replacementSeatConflict = isManagedReplacementSeatProjectionConflict({
       managedContinuousTable,

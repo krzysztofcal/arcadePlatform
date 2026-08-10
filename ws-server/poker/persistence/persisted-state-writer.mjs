@@ -3,6 +3,7 @@ import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 import { writePersistedTableToFile } from "./persisted-state-file-store.mjs";
 import { projectDurableActionResult } from "../idempotency/action-command.mjs";
+import { HIGH_TIER_BOT_BANKROLL_SYSTEM_KEY } from "../../../shared/poker-domain/table-economy.mjs";
 
 const HAND_SETTLED_ACTION_TYPE = "HAND_SETTLED";
 const SETTLEMENT_AUDIT_VERSION = 2;
@@ -13,6 +14,12 @@ const MAX_MANAGED_BOT_TOP_UPS = 6;
 const MAX_HUMAN_STACK_UPDATES = 10;
 const DURABLE_ACTION_KIND = "ACT";
 const PAYLOAD_HASH_PATTERN = /^[a-f0-9]{64}$/;
+
+function isInsufficientFundsError(error) {
+  const code = String(error?.code || "").toLowerCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "insufficient_funds" || (code === "p0001" && message.includes("insufficient_funds")) || message.includes("insufficient_funds");
+}
 
 function normalizeJsonState(value) {
   if (!value) return {};
@@ -1169,10 +1176,15 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       });
       const stateConflict = error?.code === "durable_action_state_conflict";
       const replacementSeatProjectionConflict = error?.code === "replacement_seat_projection_conflict";
+      const boundedBankrollExhausted = (replacementFundingPlan.fundings.length > 0 || managedBotTopUpPlan.fundings.length > 0)
+        && botFundingSystemKey === HIGH_TIER_BOT_BANKROLL_SYSTEM_KEY
+        && isInsufficientFundsError(error);
       return {
         ok: false,
         ...(durableActionPlan.supplied ? { outcome: "failure" } : {}),
-        reason: replacementSeatProjectionConflict ? "replacement_seat_projection_conflict" : (stateConflict ? "conflict" : "db_error"),
+        reason: boundedBankrollExhausted
+          ? "bot_bounded_bankroll_exhausted"
+          : replacementSeatProjectionConflict ? "replacement_seat_projection_conflict" : (stateConflict ? "conflict" : "db_error"),
         message: error?.message || "unknown"
       };
     }

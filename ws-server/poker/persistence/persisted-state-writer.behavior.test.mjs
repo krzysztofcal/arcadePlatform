@@ -917,7 +917,7 @@ test("persisted state writer never projects human stack when state CAS conflicts
   assert.equal(queries.some((query) => query.includes("update public.poker_seats")), false);
 });
 
-function createReplacementFundingDbHarness({ tableId, version = 7, state, treasuryBalance = 1_000, escrowBalance = 50 } = {}) {
+function createReplacementFundingDbHarness({ tableId, version = 7, state, treasuryBalance = 1_000, escrowBalance = 50, sourceSystemKey = "TREASURY" } = {}) {
   const replacementSeat = {
     table_id: tableId,
     user_id: "00000000-0000-4000-8000-0000000000b2",
@@ -926,7 +926,7 @@ function createReplacementFundingDbHarness({ tableId, version = 7, state, treasu
     is_bot: true,
     stack: 1
   };
-  const sourceAccount = { id: "10000000-0000-4000-8000-000000000001", system_key: "TREASURY", account_type: "SYSTEM", status: "active", balance: treasuryBalance };
+  const sourceAccount = { id: "10000000-0000-4000-8000-000000000001", system_key: sourceSystemKey, account_type: "SYSTEM", status: "active", balance: treasuryBalance };
   const escrowAccount = { id: "10000000-0000-4000-8000-000000000002", system_key: `POKER_TABLE:${tableId}`, account_type: "ESCROW", status: "active", balance: escrowBalance };
   const durable = {
     version,
@@ -936,6 +936,7 @@ function createReplacementFundingDbHarness({ tableId, version = 7, state, treasu
     seats: new Map([[replacementSeat.seat_no, replacementSeat]]),
     ledgerInsertCount: 0,
     transactionInsertSql: null,
+    transactionMetadata: null,
     failFunding: false
   };
 
@@ -988,6 +989,7 @@ function createReplacementFundingDbHarness({ tableId, version = 7, state, treasu
         }
         if (text.includes("insert into public.chips_transactions")) {
           durable.transactionInsertSql = text;
+          durable.transactionMetadata = params[2];
           if (durable.failFunding) throw new Error("simulated_funding_failure");
           const idempotencyKey = params[3];
           if (working.transactions.has(idempotencyKey)) throw new Error("duplicate_idempotency_key");
@@ -1043,6 +1045,14 @@ function replacementFundingFixture({ tableId, expectedVersion = 7, oldStack = 1 
     fromStateVersion: expectedVersion,
     toStateVersion: expectedVersion + 1
   }];
+}
+
+function boundedReplacementFundingFixture({ tableId, expectedVersion = 7, oldStack = 1 } = {}) {
+  return replacementFundingFixture({ tableId, expectedVersion, oldStack }).map((funding) => ({
+    ...funding,
+    targetStack: 500,
+    fundingDelta: 500 - oldStack
+  }));
 }
 
 test("replacement funding without a configured human actor atomically increases escrow once and survives writer restart", async () => {
@@ -1117,7 +1127,13 @@ test("managed bot top-up atomically persists state, seat and SYSTEM funding with
   const tableId = "00000000-0000-4000-8000-0000000007a5";
   const previousState = { tableId, handId: "hand_managed_settled", phase: "SETTLED", stacks: {} };
   const nextState = { tableId, handId: "hand_managed_next", phase: "PREFLOP", stacks: {} };
-  const harness = createReplacementFundingDbHarness({ tableId, state: previousState, escrowBalance: 200 });
+  const harness = createReplacementFundingDbHarness({
+    tableId,
+    state: previousState,
+    escrowBalance: 200,
+    sourceSystemKey: "POKER_BOT_BANKROLL",
+    treasuryBalance: 1_000_000
+  });
   const writer = createPersistedStateWriter({
     env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
     beginSql: harness.beginSql,
@@ -1132,21 +1148,85 @@ test("managed bot top-up atomically persists state, seat and SYSTEM funding with
       seatNo: 3,
       botUserId: "00000000-0000-5000-8000-0000000000d3",
       botProfile: "NORMAL",
-      targetStack: 100,
-      fundingDelta: 100,
+      targetStack: 500,
+      fundingDelta: 500,
       settledHandId: "hand_managed_settled",
       fromStateVersion: 7,
       toStateVersion: 8
     }],
-    botFundingSystemKey: "TREASURY"
+    botFundingSystemKey: "POKER_BOT_BANKROLL"
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.managedBotTopUpCommitted, true);
   assert.equal(result.fundedManagedBotTopUps.length, 1);
   assert.equal(result.fundedManagedBotTopUps[0].seatNo, 3);
-  assert.equal(harness.balance(`POKER_TABLE:${tableId}`), escrowBefore + 100);
+  assert.equal(harness.balance(`POKER_TABLE:${tableId}`), escrowBefore + 500);
+  assert.equal(harness.balance("POKER_BOT_BANKROLL"), 1_000_000 - 500);
   assert.equal([...harness.durable.transactions.values()][0]?.created_by, null);
+});
+
+test("500 CH replacement funding uses the bounded bot bankroll and preserves its source for replay", async () => {
+  const tableId = "00000000-0000-4000-8000-0000000007a8";
+  const previousState = { tableId, handId: "hand_bounded_replacement", phase: "SETTLED", stacks: {} };
+  const nextState = { tableId, handId: "hand_bounded_next", phase: "PREFLOP", stacks: {} };
+  const harness = createReplacementFundingDbHarness({
+    tableId,
+    state: previousState,
+    sourceSystemKey: "POKER_BOT_BANKROLL",
+    treasuryBalance: 1_000_000,
+    escrowBalance: 50
+  });
+  const funding = boundedReplacementFundingFixture({ tableId });
+  const writer = createPersistedStateWriter({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: harness.beginSql,
+    klog: () => {}
+  });
+  const result = await writer.writeMutation({
+    tableId,
+    expectedVersion: 7,
+    nextState,
+    replacementFundings: funding,
+    botFundingSystemKey: "POKER_BOT_BANKROLL"
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.replacementFundingCommitted, true);
+  assert.equal(harness.balance("POKER_BOT_BANKROLL"), 1_000_000 - 499);
+  assert.equal(harness.balance("TREASURY"), undefined);
+  assert.equal(JSON.parse(harness.durable.transactionMetadata).sourceSystemKey, "POKER_BOT_BANKROLL");
+});
+
+test("500 CH replacement funding exhaustion rolls back without a Treasury fallback", async () => {
+  const tableId = "00000000-0000-4000-8000-0000000007a9";
+  const previousState = { tableId, handId: "hand_bounded_exhausted", phase: "SETTLED", stacks: {} };
+  const nextState = { tableId, handId: "hand_bounded_exhausted_next", phase: "PREFLOP", stacks: {} };
+  const harness = createReplacementFundingDbHarness({
+    tableId,
+    state: previousState,
+    sourceSystemKey: "POKER_BOT_BANKROLL",
+    treasuryBalance: 0,
+    escrowBalance: 50
+  });
+  const funding = boundedReplacementFundingFixture({ tableId });
+  const writer = createPersistedStateWriter({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: harness.beginSql,
+    klog: () => {}
+  });
+  const exhausted = await writer.writeMutation({
+    tableId,
+    expectedVersion: 7,
+    nextState,
+    replacementFundings: funding,
+    botFundingSystemKey: "POKER_BOT_BANKROLL"
+  });
+  assert.equal(exhausted.ok, false);
+  assert.equal(exhausted.reason, "bot_bounded_bankroll_exhausted");
+  assert.equal(harness.durable.version, 7);
+  assert.equal(harness.balance("POKER_BOT_BANKROLL"), 0);
+  assert.equal(harness.balance("TREASURY"), undefined);
 });
 
 test("replacement funding failure rolls back persisted state and escrow", async () => {
