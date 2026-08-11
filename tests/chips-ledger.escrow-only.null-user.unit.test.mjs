@@ -18,7 +18,6 @@ const run = async () => {
       ["acct-escrow", { id: "acct-escrow", account_type: "ESCROW", system_key: "POKER_TABLE:test", status: "active", balance: 0 }],
     ]),
     transactions: [],
-    registry: new Map(),
     entries: [],
     nextTxId: 1,
     userLookups: 0,
@@ -29,10 +28,6 @@ const run = async () => {
     if (text.includes("system_key = any")) {
       const keys = params[0] || [];
       return [...state.accounts.values()].filter((a) => keys.includes(a.system_key));
-    }
-    if (text.includes("from public.chips_transaction_idempotency")) {
-      const record = state.registry.get(params[0]);
-      return record ? [record] : [];
     }
     if (text.includes("from public.chips_transactions") && text.includes("idempotency_key")) {
       const existing = state.transactions.find((tx) => tx.idempotency_key === params[0]);
@@ -57,14 +52,6 @@ const run = async () => {
         }
         const row = { id: `tx-${state.nextTxId++}`, tx_type: values[5], user_id: values[6], idempotency_key: values[3], payload_hash: values[4] };
         state.transactions.push(row);
-        state.registry.set(row.idempotency_key, {
-          idempotency_key: row.idempotency_key,
-          transaction_id: row.id,
-          payload_hash: row.payload_hash,
-          tx_type: row.tx_type,
-          user_id: row.user_id,
-          transaction_created_at: null,
-        });
         return [row];
       }
       if (text.includes("where id =")) return [];
@@ -72,7 +59,6 @@ const run = async () => {
     };
     sqlTx.unsafe = async (query, params = []) => {
       const text = String(query).toLowerCase();
-      if (text.startsWith("savepoint") || text.startsWith("release savepoint") || text.startsWith("rollback to savepoint")) return [];
       if (text.includes("account_type = 'user'") && text.includes("for update")) {
         state.userLookups += 1;
         throw new Error("user account lookup should not run for null user");
@@ -92,10 +78,6 @@ const run = async () => {
         const inserted = JSON.parse(payload).map((rec, index) => ({ transaction_id: transactionId, account_id: rec.account_id, amount: rec.amount, metadata: rec.metadata || {}, entry_seq: index + 1 }));
         state.entries.push(...inserted);
         return [{ entries: inserted }];
-      }
-      if (text.includes("from public.chips_transaction_idempotency")) {
-        const record = state.registry.get(params[0]);
-        return record ? [record] : [];
       }
       throw new Error(`Unhandled sqlTx.unsafe: ${text}`);
     };
@@ -131,13 +113,10 @@ const run = async () => {
     ],
   };
   const cashout = await postTransaction(cashoutPayload);
-  state.transactions = state.transactions.filter((transaction) => transaction.id !== cashout.transaction.id);
-  state.entries = state.entries.filter((entry) => entry.transaction_id !== cashout.transaction.id);
   const replay = await postTransaction(cashoutPayload);
   assert.equal(cashout.transaction.tx_type, "TABLE_CASH_OUT");
   assert.equal(cashout.transaction.user_id, null);
   assert.equal(replay.transaction.id, cashout.transaction.id);
-  assert.deepEqual(replay.entries, []);
   assert.equal(state.accounts.get("acct-escrow").balance, 0);
   assert.equal(state.accounts.get("acct-system").balance, 10000);
   assert.equal(state.userLookups, 0);

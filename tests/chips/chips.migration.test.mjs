@@ -136,6 +136,10 @@ const botBankrollMigration = migrationFiles.find((file) => file.includes("poker_
 if (!botBankrollMigration) {
   throw new Error("Bounded bot bankroll migration not found; cannot run tests.");
 }
+const idempotencyGapMigration = migrationFiles.find((file) => file.includes("chips_transaction_idempotency_backfill_gap"));
+if (!idempotencyGapMigration) {
+  throw new Error("Idempotency gap migration not found; cannot run tests.");
+}
 const migrationsWithoutBootstrapSeeds = migrationFiles.filter((file) => file !== seedMigration && file !== botBankrollMigration);
 
 const runMigration = async (sql, file) => {
@@ -846,6 +850,8 @@ async function main() {
   assert.equal(await seedEntryCount(sql), 2, "Seed rerun must not add or drop entries");
   await runMigration(sql, botBankrollMigration);
   await assertBotBankrollSeed(sql);
+  await runMigration(sql, idempotencyGapMigration);
+  await assertIdempotencyRegistryParity(sql);
 
   await sql.end({ timeout: 5 });
   const adminModule = await import("../../netlify/functions/_shared/supabase-admin.mjs");

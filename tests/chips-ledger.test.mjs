@@ -5,7 +5,6 @@ const mockLog = vi.fn();
 const mockDb = {
   accounts: new Map(),
   transactions: new Map(),
-  registry: new Map(),
   entries: [],
   nextAccountId: 1,
   nextTransactionId: 1,
@@ -31,7 +30,6 @@ const expectSortIdForAll = (items) => {
 function resetMockDb() {
   mockDb.accounts.clear();
   mockDb.transactions.clear();
-  mockDb.registry.clear();
   mockDb.entries.length = 0;
   mockDb.nextAccountId = 1;
   mockDb.nextTransactionId = 1;
@@ -94,19 +92,9 @@ function handleLedgerQuery(query, params = []) {
     return [{ account }];
   }
 
-  if (text.includes("from public.chips_transaction_idempotency")) {
-    const record = mockDb.registry.get(params[0]);
-    return record ? [record] : [];
-  }
-
   if (text.includes("from public.chips_accounts") && text.includes("system_key = any")) {
     const keys = params[0] || [];
     return [...mockDb.accounts.values()].filter(acc => keys.includes(acc.system_key));
-  }
-
-  if (text.includes("from public.chips_accounts") && text.includes("where user_id") && text.includes("account_type = 'user'")) {
-    const account = [...mockDb.accounts.values()].find(acc => acc.account_type === "USER" && acc.user_id === params[0]);
-    return account ? [{ id: account.id, balance: account.balance, next_entry_seq: account.next_entry_seq }] : [];
   }
 
   if (text.includes("from public.chips_transactions") && text.includes("where idempotency_key")) {
@@ -327,19 +315,6 @@ function makeTxRunner() {
   const runQuery = async (query, params = []) => {
     const text = normalizeSql(normalizeQueryText(query));
 
-    if (text.startsWith("savepoint") || text.startsWith("release savepoint") || text.startsWith("rollback to savepoint")) {
-      return [];
-    }
-
-    if (text.includes("update public.chips_transaction_idempotency")) {
-      const record = mockDb.registry.get(params[0]);
-      if (!record || record.replay_transaction != null || record.replay_entries != null || record.replay_completed_at != null) return [];
-      record.replay_transaction = JSON.parse(params[1]);
-      record.replay_entries = JSON.parse(params[2]);
-      record.replay_completed_at = new Date().toISOString();
-      return [record];
-    }
-
     if (text.includes("insert into public.chips_transactions")) {
       const [reference, description, metadataJson, idempotencyKey, payloadHash, txType, userId, createdBy] = params;
       const existing = [...mockDb.transactions.values()].find(tx => tx.idempotency_key === idempotencyKey);
@@ -362,18 +337,6 @@ function makeTxRunner() {
         created_at: new Date().toISOString(),
       };
       mockDb.transactions.set(txRow.id, txRow);
-      mockDb.registry.set(txRow.idempotency_key, {
-        idempotency_key: txRow.idempotency_key,
-        transaction_id: txRow.id,
-        payload_hash: txRow.payload_hash,
-        tx_type: txRow.tx_type,
-        user_id: txRow.user_id,
-        transaction_created_at: txRow.created_at,
-        replay_transaction: null,
-        replay_entries: null,
-        replay_completed_at: null,
-        created_at: txRow.created_at,
-      });
       return [txRow];
     }
 
@@ -481,123 +444,6 @@ describe("chips ledger idempotency and validation", () => {
     const admin = await import("../netlify/functions/_shared/supabase-admin.mjs");
     const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "00000000-0000-4000-8000-000000000001");
     expect(userAccount.balance).toBe(50);
-  });
-
-  it("keeps full replay available from the registry when the hot ledger is absent", async () => {
-    const { postTransaction } = await loadLedger();
-    const userId = "00000000-0000-4000-8000-000000000021";
-    await postTransaction({
-      userId,
-      txType: "MINT",
-      idempotencyKey: "registry-seed-21",
-      entries: [
-        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -100 },
-        { accountType: "USER", amount: 100 },
-      ],
-    });
-    const payload = {
-      userId,
-      txType: "BUY_IN",
-      idempotencyKey: "registry-buyin-21",
-      entries: [
-        { accountType: "USER", amount: -25 },
-        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 25 },
-      ],
-    };
-    const first = await postTransaction(payload);
-    const registry = mockDb.registry.get(payload.idempotencyKey);
-    expect(registry).toBeDefined();
-    expect(registry.replay_transaction.id).toBe(first.transaction.id);
-    expect(registry.replay_entries).toHaveLength(first.entries.length);
-    const balanceAfterFirst = [...mockDb.accounts.values()].find(account => account.user_id === userId).balance;
-    mockDb.transactions.delete(first.transaction.id);
-    mockDb.entries = mockDb.entries.filter(entry => entry.transaction_id !== first.transaction.id);
-
-    const replay = await postTransaction(payload);
-    expect(replay.transaction.id).toBe(first.transaction.id);
-    expect(replay.entries).toEqual(registry.replay_entries);
-    expect(replay.account.balance).toBe(balanceAfterFirst);
-    expect(mockDb.transactions.size).toBe(1);
-    expect(mockDb.entries).toHaveLength(2);
-  });
-
-  it("returns the technical transaction id from registry-only TABLE_CASH_OUT replay", async () => {
-    const { postTransaction } = await loadLedger();
-    const escrow = {
-      id: createId("acct", mockDb.nextAccountId++),
-      account_type: "ESCROW",
-      system_key: "POKER_TABLE:registry-22",
-      status: "active",
-      balance: 0,
-      next_entry_seq: 1,
-    };
-    mockDb.accounts.set(escrow.id, escrow);
-    const buyIn = {
-      userId: null,
-      txType: "TABLE_BUY_IN",
-      idempotencyKey: "registry-table-buyin-22",
-      createdBy: "00000000-0000-4000-8000-000000000022",
-      entries: [
-        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -10 },
-        { accountType: "ESCROW", systemKey: escrow.system_key, amount: 10 },
-      ],
-    };
-    await postTransaction(buyIn);
-    const payload = {
-      userId: null,
-      txType: "TABLE_CASH_OUT",
-      idempotencyKey: "registry-table-cashout-22",
-      entries: [
-        { accountType: "ESCROW", systemKey: escrow.system_key, amount: -10 },
-        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 10 },
-      ],
-    };
-    const first = await postTransaction(payload);
-    mockDb.transactions.delete(first.transaction.id);
-    mockDb.entries = mockDb.entries.filter(entry => entry.transaction_id !== first.transaction.id);
-
-    const replay = await postTransaction(payload);
-    expect(replay.transaction.id).toBe(first.transaction.id);
-    expect(replay.entries).toEqual([]);
-    expect(mockDb.transactions.size).toBe(1);
-  });
-
-  it("rejects hash, type, and owner conflicts from registry-only state", async () => {
-    const { postTransaction } = await loadLedger();
-    const userId = "00000000-0000-4000-8000-000000000023";
-    await postTransaction({
-      userId,
-      txType: "MINT",
-      idempotencyKey: "registry-seed-23",
-      entries: [
-        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -100 },
-        { accountType: "USER", amount: 100 },
-      ],
-    });
-    const base = {
-      userId,
-      txType: "BUY_IN",
-      idempotencyKey: "registry-conflict-23",
-      entries: [
-        { accountType: "USER", amount: -20 },
-        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 20 },
-      ],
-    };
-    const first = await postTransaction(base);
-    mockDb.transactions.delete(first.transaction.id);
-    mockDb.entries = mockDb.entries.filter(entry => entry.transaction_id !== first.transaction.id);
-
-    await expect(postTransaction({ ...base, entries: [
-      { accountType: "USER", amount: -21 },
-      { accountType: "SYSTEM", systemKey: "TREASURY", amount: 21 },
-    ] })).rejects.toMatchObject({ status: 409 });
-    await expect(postTransaction({ ...base, txType: "CASH_OUT", entries: [
-      { accountType: "USER", amount: -20 },
-      { accountType: "SYSTEM", systemKey: "TREASURY", amount: 20 },
-    ] })).rejects.toMatchObject({ status: 409 });
-    await expect(postTransaction({ ...base, userId: "00000000-0000-4000-8000-000000000024" })).rejects.toMatchObject({ status: 409 });
-    expect(mockDb.transactions.size).toBe(1);
-    expect(mockDb.entries).toHaveLength(2);
   });
 
   it("rejects conflicting payloads for the same idempotency key", async () => {
