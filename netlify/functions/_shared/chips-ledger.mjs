@@ -119,6 +119,195 @@ const assertPlainObjectOrNull = (value, code) => {
   }
 };
 
+const FULL_REPLAY_TX_TYPES = new Set([
+  "BUY_IN",
+  "CASH_OUT",
+  "WELCOME_BONUS",
+  "PROMO_BONUS",
+  "ADMIN_ADJUST",
+]);
+
+const idempotencyError = (code, message, status = 503) => {
+  const error = new Error(message || code);
+  error.code = code;
+  error.status = status;
+  return error;
+};
+
+const normalizeIdempotencyUserId = (value) => {
+  const normalized = value == null ? "" : String(value).trim();
+  return normalized || null;
+};
+
+function assertIdempotencyMatch(record, { idempotencyKey, payloadUserId, txType, payloadHash }) {
+  const recordUserId = normalizeIdempotencyUserId(record?.user_id);
+  const expectedUserId = payloadUserId || null;
+  if (
+    recordUserId !== expectedUserId
+    || String(record?.tx_type || "") !== String(txType || "")
+    || String(record?.payload_hash || "") !== String(payloadHash || "")
+  ) {
+    klog("chips_idempotency_identity_mismatch", {
+      idempotencyKey,
+      expected_user_id: expectedUserId,
+      actual_user_id: recordUserId,
+      expected_tx_type: txType,
+      actual_tx_type: record?.tx_type || null,
+    });
+    throw idempotencyError("chips_idempotency_conflict", "Idempotency key already used with different identity", 409);
+  }
+}
+
+async function findIdempotencyRecord(idempotencyKey, tx = null) {
+  const query = `
+select idempotency_key, transaction_id, payload_hash, tx_type::text as tx_type, user_id,
+       transaction_created_at, replay_transaction, replay_entries, replay_completed_at, created_at
+from public.chips_transaction_idempotency
+where idempotency_key = $1
+limit 1;
+`;
+  const runner = tx ? (q, params) => tx.unsafe(q, params) : executeSql;
+  return (await runner(query, [idempotencyKey]))?.[0] || null;
+}
+
+async function fetchCurrentUserAccountSnapshot(userId, tx = null) {
+  const normalizedUserId = normalizeIdempotencyUserId(userId);
+  if (!normalizedUserId) return null;
+  const query = `
+select id, balance, next_entry_seq
+from public.chips_accounts
+where user_id = $1 and account_type = 'USER'
+limit 1;
+`;
+  const runner = tx ? (q, params) => tx.unsafe(q, params) : executeSql;
+  return (await runner(query, [normalizedUserId]))?.[0] || null;
+}
+
+const parseStoredJson = (value, label) => {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw idempotencyError("chips_idempotency_replay_unavailable", `Invalid ${label} replay snapshot`);
+  }
+};
+
+async function resolveIdempotentReplay(record, input, tx = null) {
+  assertIdempotencyMatch(record, input);
+  const hotSnapshot = await fetchTransactionSnapshotByTxId(
+    record.transaction_id,
+    normalizeIdempotencyUserId(input.payloadUserId),
+    tx,
+  );
+  const requiresFullReplay = FULL_REPLAY_TX_TYPES.has(String(record.tx_type || ""));
+  if (hotSnapshot?.transaction && (!requiresFullReplay || (Array.isArray(hotSnapshot.entries) && hotSnapshot.entries.length > 0))) {
+    return hotSnapshot;
+  }
+
+  if (!requiresFullReplay) {
+    return {
+      transaction: {
+        id: String(record.transaction_id),
+        idempotency_key: record.idempotency_key,
+        payload_hash: record.payload_hash,
+        tx_type: record.tx_type,
+        user_id: record.user_id || null,
+        created_at: asIso(record.transaction_created_at),
+      },
+      entries: [],
+      account: null,
+    };
+  }
+
+  const transaction = parseStoredJson(record.replay_transaction, "transaction");
+  const entries = parseStoredJson(record.replay_entries, "entries");
+  const snapshotUserId = normalizeIdempotencyUserId(transaction?.user_id);
+  if (
+    !isPlainObject(transaction)
+    || !Array.isArray(entries)
+    || !record.replay_completed_at
+    || String(transaction.id || "") !== String(record.transaction_id)
+    || String(transaction.idempotency_key || "") !== String(record.idempotency_key)
+    || String(transaction.payload_hash || "") !== String(record.payload_hash)
+    || String(transaction.tx_type || "") !== String(record.tx_type)
+    || snapshotUserId !== normalizeIdempotencyUserId(record.user_id)
+    || entries.length === 0
+  ) {
+    klog("chips_idempotency_replay_snapshot_missing", {
+      idempotencyKey: record.idempotency_key,
+      txType: record.tx_type,
+      transactionId: record.transaction_id,
+    });
+    throw idempotencyError("chips_idempotency_replay_unavailable", "Required idempotency replay snapshot is unavailable");
+  }
+  const account = await fetchCurrentUserAccountSnapshot(record.user_id || input.payloadUserId, tx);
+  if (record.user_id && !account) {
+    klog("chips_idempotency_replay_account_missing", {
+      idempotencyKey: record.idempotency_key,
+      userId: record.user_id,
+    });
+    throw idempotencyError("chips_idempotency_replay_unavailable", "Current account snapshot is unavailable");
+  }
+  return { transaction, entries, account };
+}
+
+async function storeIdempotencyReplay(record, result, tx) {
+  if (!FULL_REPLAY_TX_TYPES.has(String(record?.tx_type || ""))) return record;
+  if (!result?.transaction || !Array.isArray(result.entries)) {
+    throw idempotencyError("chips_idempotency_replay_unavailable", "Cannot store incomplete idempotency replay snapshot");
+  }
+  let transactionJson;
+  let entriesJson;
+  try {
+    transactionJson = JSON.stringify(result.transaction);
+    entriesJson = JSON.stringify(result.entries);
+  } catch {
+    throw idempotencyError("chips_idempotency_replay_unavailable", "Cannot serialize idempotency replay snapshot");
+  }
+  const transactionParam = typeof tx?.json === "function"
+    ? tx.json(JSON.parse(transactionJson))
+    : transactionJson;
+  const entriesParam = typeof tx?.json === "function"
+    ? tx.json(JSON.parse(entriesJson))
+    : entriesJson;
+  const rows = await tx.unsafe(`
+update public.chips_transaction_idempotency
+set replay_transaction = $2::jsonb,
+    replay_entries = $3::jsonb,
+    replay_completed_at = timezone('utc', now())
+where idempotency_key = $1
+  and replay_transaction is null
+  and replay_entries is null
+  and replay_completed_at is null
+returning idempotency_key, transaction_id, payload_hash, tx_type::text as tx_type, user_id,
+          transaction_created_at, replay_transaction, replay_entries, replay_completed_at, created_at;
+`, [record.idempotency_key, transactionParam, entriesParam]);
+  if (rows?.[0]) return rows[0];
+  klog("chips_idempotency_replay_store_failed", {
+    idempotencyKey: record.idempotency_key,
+    transactionId: record.transaction_id,
+    txType: record.tx_type,
+  });
+  throw idempotencyError("chips_idempotency_replay_unavailable", "Idempotency replay snapshot could not be stored");
+}
+
+function isIdempotencyUniqueError(error) {
+  const combined = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+  const constraint = (error?.constraint || "").toLowerCase();
+  const is23505 = error?.code === "23505";
+  const mentionsIdempotency =
+    constraint.includes("chips_transactions_idempotency_key")
+    || constraint.includes("chips_transaction_idempotency")
+    || combined.includes("idempotency")
+    || combined.includes("idempotency_key");
+  const looksUnique =
+    combined.includes("duplicate key value")
+    || combined.includes("duplicate key")
+    || combined.includes("violates unique constraint")
+    || combined.includes("duplicate");
+  return (is23505 && mentionsIdempotency) || (looksUnique && mentionsIdempotency);
+}
+
 async function getOrCreateUserAccount(userId, tx = null) {
   const query = `
 with existing as (
@@ -560,18 +749,6 @@ limit $3;
   };
 }
 
-async function findTransactionByKey(idempotencyKey, tx = null) {
-  const query = `
-select id, tx_type, payload_hash, idempotency_key, reference, description, created_at, user_id
-from public.chips_transactions
-where idempotency_key = $1
-limit 1;
-`;
-  const runner = tx ? (q, params) => tx.unsafe(q, params) : executeSql;
-  const rows = await runner(query, [idempotencyKey]);
-  return rows?.[0] || null;
-}
-
 async function fetchTransactionSnapshotByTxId(transactionId, userId = null, tx = null) {
   const query = `
 with txn as (
@@ -749,6 +926,39 @@ async function postTransaction({
     throw badRequest("invalid_metadata", "Metadata must be JSON-serializable");
   }
 
+  const hashableEntries = normalizedEntries.map((entry) => ({
+    kind: entry.kind,
+    userId: entry.kind === "USER" ? (entry.userId ?? null) : null,
+    systemKey: entry.systemKey ?? null,
+    amount: entry.amount,
+    metadata: entry.metadata ?? {},
+  }));
+
+  let payloadHash;
+  try {
+    payloadHash = hashPayload({
+      userId: payloadUserId || null,
+      txType,
+      idempotencyKey,
+      reference,
+      description,
+      metadata: safeMetadataNormalized,
+      entries: hashableEntries,
+    });
+  } catch (error) {
+    throw badRequest("invalid_entry_metadata", "Entry metadata must be JSON-serializable");
+  }
+
+  const existingIdempotency = await findIdempotencyRecord(idempotencyKey, tx);
+  if (existingIdempotency) {
+    return resolveIdempotentReplay(existingIdempotency, {
+      idempotencyKey,
+      payloadUserId,
+      txType,
+      payloadHash,
+    }, tx);
+  }
+
   const neededSystemKeys = normalizedEntries
     .filter(entry => entry.kind !== "USER" && entry.systemKey)
     .map(entry => entry.systemKey);
@@ -773,82 +983,61 @@ async function postTransaction({
     }
   }
 
-  const hashableEntries = normalizedEntries.map((entry) => ({
-    kind: entry.kind,
-    userId: entry.kind === "USER" ? (entry.userId ?? null) : null,
-    systemKey: entry.systemKey ?? null,
-    amount: entry.amount,
-    metadata: entry.metadata ?? {},
-  }));
-
-  let payloadHash;
-  try {
-    payloadHash = hashPayload({
-      userId: payloadUserId || null,
-      txType,
-      idempotencyKey,
-      reference,
-      description,
-      metadata: safeMetadataNormalized,
-      entries: hashableEntries,
-    });
-  } catch (error) {
-    throw badRequest("invalid_entry_metadata", "Entry metadata must be JSON-serializable");
-  }
-
   let result;
   let userAccount = null;
   const runInTx = async (sqlTx) => {
-    // IMPORTANT: inside this block use ONLY `sqlTx` for all SQL to keep it atomic.
-    const userEntryIds = [...new Set(normalizedEntries.filter((entry) => entry.kind === "USER").map((entry) => entry.userId).filter(Boolean))];
-    const userAccountById = new Map();
-    for (const userEntryId of userEntryIds) {
-      userAccountById.set(userEntryId, await getOrCreateUserAccount(userEntryId, sqlTx));
-    }
-
-    userAccount = payloadUserId ? (userAccountById.get(payloadUserId) || null) : null;
-
-    for (const entry of normalizedEntries) {
-      if (entry.kind === "USER" && !userAccountById.has(entry.userId)) {
-        throw badRequest("invalid_entry_user", "USER entry userId must resolve to a user account");
+    await sqlTx.unsafe("savepoint chips_idempotency_attempt;");
+    const runNewTransaction = async () => {
+      // IMPORTANT: inside this block use ONLY `sqlTx` for all SQL to keep it atomic.
+      const userEntryIds = [...new Set(normalizedEntries.filter((entry) => entry.kind === "USER").map((entry) => entry.userId).filter(Boolean))];
+      const userAccountById = new Map();
+      for (const userEntryId of userEntryIds) {
+        userAccountById.set(userEntryId, await getOrCreateUserAccount(userEntryId, sqlTx));
       }
-    }
 
-    const entryRecords = normalizedEntries.map(entry => {
-      if (entry.kind === "USER") {
+      userAccount = payloadUserId ? (userAccountById.get(payloadUserId) || null) : null;
+
+      for (const entry of normalizedEntries) {
+        if (entry.kind === "USER" && !userAccountById.has(entry.userId)) {
+          throw badRequest("invalid_entry_user", "USER entry userId must resolve to a user account");
+        }
+      }
+
+      const entryRecords = normalizedEntries.map(entry => {
+        if (entry.kind === "USER") {
+          const safeEntryMetadata = entry?.metadata ?? {};
+          return { account_id: userAccountById.get(entry.userId)?.id, amount: entry.amount, metadata: safeEntryMetadata };
+        }
+        const account = systemMap.get(entry.systemKey);
         const safeEntryMetadata = entry?.metadata ?? {};
-        return { account_id: userAccountById.get(entry.userId)?.id, amount: entry.amount, metadata: safeEntryMetadata };
+        return { account_id: account?.id, amount: entry.amount, metadata: safeEntryMetadata, system_key: entry.systemKey };
+      });
+
+      for (const rec of entryRecords) {
+        if (!rec.account_id) {
+          throw badRequest("missing_account", "Missing account for entry");
+        }
       }
-      const account = systemMap.get(entry.systemKey);
-      const safeEntryMetadata = entry?.metadata ?? {};
-      return { account_id: account?.id, amount: entry.amount, metadata: safeEntryMetadata, system_key: entry.systemKey };
-    });
 
-    for (const rec of entryRecords) {
-      if (!rec.account_id) {
-        throw badRequest("missing_account", "Missing account for entry");
+      let entriesPayload = "[]";
+      try {
+        entriesPayload = JSON.stringify(entryRecords);
+      } catch (error) {
+        throw badRequest("invalid_entry_metadata", "Entry metadata must be JSON-serializable");
       }
-    }
 
-    let entriesPayload = "[]";
-    try {
-      entriesPayload = JSON.stringify(entryRecords);
-    } catch (error) {
-      throw badRequest("invalid_entry_metadata", "Entry metadata must be JSON-serializable");
-    }
-
-    const txRows = await sqlTx`
+      const txRows = await sqlTx`
       insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, user_id, created_by)
       values (${reference}, ${description}, ${safeMetadataJson}::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${payloadUserId || null}, ${createdBy})
       returning *;
     `;
 
-    const transactionRow = txRows?.[0];
-    if (!transactionRow) {
-      throw new Error("Failed to insert transaction row");
-    }
+      const transactionRow = txRows?.[0];
+      if (!transactionRow) {
+        throw new Error("Failed to insert transaction row");
+      }
 
-    const applyResult = await sqlTx.unsafe(
+      const applyResult = await sqlTx.unsafe(
       `
 with input_entries as (
   select
@@ -902,28 +1091,28 @@ select
       [entriesPayload]
     );
 
-    const updatedAccounts = Number(applyResult?.[0]?.updated_accounts || 0);
-    const expectedAccounts = Number(applyResult?.[0]?.expected_accounts || 0);
-    if (updatedAccounts === 0 && expectedAccounts > 0) {
-      const failed = new Error("Failed to apply any account balances");
-      failed.code = "chips_apply_failed";
-      failed.status = 500;
-      throw failed;
-    }
-    if (expectedAccounts !== updatedAccounts) {
-      klog("chips_apply_mismatch", {
-        expectedAccounts,
-        updatedAccounts,
-        idempotencyKey,
-        txType,
-      });
-      const mismatch = new Error("Failed to apply expected account balances");
-      mismatch.code = "chips_apply_mismatch";
-      mismatch.status = 500;
-      throw mismatch;
-    }
+      const updatedAccounts = Number(applyResult?.[0]?.updated_accounts || 0);
+      const expectedAccounts = Number(applyResult?.[0]?.expected_accounts || 0);
+      if (updatedAccounts === 0 && expectedAccounts > 0) {
+        const failed = new Error("Failed to apply any account balances");
+        failed.code = "chips_apply_failed";
+        failed.status = 500;
+        throw failed;
+      }
+      if (expectedAccounts !== updatedAccounts) {
+        klog("chips_apply_mismatch", {
+          expectedAccounts,
+          updatedAccounts,
+          idempotencyKey,
+          txType,
+        });
+        const mismatch = new Error("Failed to apply expected account balances");
+        mismatch.code = "chips_apply_mismatch";
+        mismatch.status = 500;
+        throw mismatch;
+      }
 
-    const entriesResult = await sqlTx.unsafe(
+      const entriesResult = await sqlTx.unsafe(
       `
 with input_entries as (
   select
@@ -944,79 +1133,64 @@ from inserted i;
       [transactionRow.id, entriesPayload]
     );
 
-    const insertedEntries = Array.isArray(entriesResult?.[0]?.entries)
-      ? entriesResult[0].entries
-      : [];
-    if (Array.isArray(insertedEntries) && insertedEntries.length !== entryRecords.length) {
-      const mismatch = new Error("Inserted entries count mismatch");
-      mismatch.code = "chips_entries_mismatch";
-      mismatch.status = 500;
-      klog("chips_entries_mismatch", {
-        expected: entryRecords.length,
-        actual: insertedEntries.length,
-        idempotencyKey,
-      });
-      throw mismatch;
-    }
+      const insertedEntries = Array.isArray(entriesResult?.[0]?.entries)
+        ? entriesResult[0].entries
+        : [];
+      if (insertedEntries.length !== entryRecords.length) {
+        const mismatch = new Error("Inserted entries count mismatch");
+        mismatch.code = "chips_entries_mismatch";
+        mismatch.status = 500;
+        klog("chips_entries_mismatch", {
+          expected: entryRecords.length,
+          actual: insertedEntries.length,
+          idempotencyKey,
+        });
+        throw mismatch;
+      }
 
-    const shouldLoadUserAccountSnapshot = Boolean(payloadUserId && userAccount?.id);
-    const accountRows = shouldLoadUserAccountSnapshot
-      ? await sqlTx`
+      const shouldLoadUserAccountSnapshot = Boolean(payloadUserId && userAccount?.id);
+      const accountRows = shouldLoadUserAccountSnapshot
+        ? await sqlTx`
       select id, balance, next_entry_seq
       from public.chips_accounts
       where id = ${userAccount.id}
       limit 1;
     `
-      : [];
+        : [];
 
-    return {
-      transaction: transactionRow,
-      entries: insertedEntries,
-      account: accountRows?.[0] || null,
+      const freshResult = {
+        transaction: transactionRow,
+        entries: insertedEntries,
+        account: accountRows?.[0] || null,
+      };
+      const registryRecord = await findIdempotencyRecord(idempotencyKey, sqlTx);
+      if (!registryRecord) {
+        throw idempotencyError("chips_idempotency_registry_missing", "Transaction idempotency registry row is missing");
+      }
+      await storeIdempotencyReplay(registryRecord, freshResult, sqlTx);
+      return freshResult;
     };
+
+    try {
+      const freshResult = await runNewTransaction();
+      await sqlTx.unsafe("release savepoint chips_idempotency_attempt;");
+      return freshResult;
+    } catch (error) {
+      if (!isIdempotencyUniqueError(error)) throw error;
+      await sqlTx.unsafe("rollback to savepoint chips_idempotency_attempt;");
+      await sqlTx.unsafe("release savepoint chips_idempotency_attempt;");
+      const authoritativeRecord = await findIdempotencyRecord(idempotencyKey, sqlTx);
+      if (!authoritativeRecord) throw error;
+      return resolveIdempotentReplay(authoritativeRecord, {
+        idempotencyKey,
+        payloadUserId,
+        txType,
+        payloadHash,
+      }, sqlTx);
+    }
   };
 
-  try {
-    result = tx ? await runInTx(tx) : await beginSql(async sqlTx => runInTx(sqlTx));
-  } catch (error) {
-    const combined = `${error.message || ""} ${error.details || ""}`.toLowerCase();
-    const constraint = (error?.constraint || "").toLowerCase();
-    const is23505 = error?.code === "23505";
-    const mentionsIdempotency =
-      constraint.includes("chips_transactions_idempotency_key") ||
-      combined.includes("idempotency") ||
-      combined.includes("idempotency_key") ||
-      combined.includes("chips_transactions_idempotency_key_uidx");
-    const looksUnique =
-      combined.includes("duplicate key value") ||
-      combined.includes("duplicate key") ||
-      combined.includes("violates unique constraint") ||
-      combined.includes("duplicate");
-    const isIdempotencyUnique = (is23505 && mentionsIdempotency) || (looksUnique && mentionsIdempotency);
-    if (isIdempotencyUnique) {
-      const existingTx = await findTransactionByKey(idempotencyKey, tx);
-      if (existingTx) {
-        if (existingTx.user_id && existingTx.user_id !== userId) {
-          const conflict = new Error("Idempotency key already used by another user");
-          conflict.status = 409;
-          throw conflict;
-        }
-        if (existingTx.payload_hash !== payloadHash || existingTx.tx_type !== txType) {
-          const conflict = new Error("Idempotency key already used with different payload");
-          conflict.status = 409;
-          throw conflict;
-        }
-        const snapshot = await fetchTransactionSnapshotByTxId(existingTx.id, userId, tx);
-        if (snapshot?.transaction) {
-          return snapshot;
-        }
-      }
-      const conflict = new Error("Idempotency key conflict");
-      conflict.status = 409;
-      throw conflict;
-    }
-    throw error;
-  }
+  result = tx ? await runInTx(tx) : await beginSql(async sqlTx => runInTx(sqlTx));
 
   if (!result?.transaction) {
     klog("chips_tx_missing_rows", { idempotencyKey });

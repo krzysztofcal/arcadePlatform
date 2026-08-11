@@ -27,6 +27,88 @@ function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 }
 
+function idempotencyConflict(message = "Idempotency key already used with different identity") {
+  const error = new Error(message);
+  error.code = "chips_idempotency_conflict";
+  error.status = 409;
+  return error;
+}
+
+function isIdempotencyUniqueError(error) {
+  const combined = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+  const constraint = (error?.constraint || "").toLowerCase();
+  const mentionsIdempotency =
+    constraint.includes("chips_transactions_idempotency_key")
+    || constraint.includes("chips_transaction_idempotency")
+    || combined.includes("idempotency")
+    || combined.includes("idempotency_key");
+  return error?.code === "23505" && mentionsIdempotency;
+}
+
+async function findIdempotencyRecord(sqlTx, idempotencyKey) {
+  const rows = await sqlTx.unsafe(`
+select idempotency_key, transaction_id, payload_hash, tx_type::text as tx_type, user_id,
+       transaction_created_at
+from public.chips_transaction_idempotency
+where idempotency_key = $1
+limit 1;
+`, [idempotencyKey]);
+  return rows?.[0] || null;
+}
+
+async function fetchHotTransaction(sqlTx, transactionId, userId) {
+  const rows = await sqlTx.unsafe(`
+with txn as (
+  select * from public.chips_transactions where id = $1
+), entries as (
+  select e.* from public.chips_entries e
+  where e.transaction_id = (select id from txn)
+  order by e.entry_seq asc
+), account as (
+  select id, balance, next_entry_seq
+  from public.chips_accounts
+  where user_id = coalesce($2::uuid, (select user_id from txn))
+    and account_type = 'USER'
+  limit 1
+)
+select
+  (select row_to_json(txn) from txn) as transaction,
+  (select coalesce(jsonb_agg(e order by e.entry_seq), '[]'::jsonb) from entries e) as entries,
+  (select row_to_json(account) from account) as account;
+`, [transactionId, userId || null]);
+  return rows?.[0] || null;
+}
+
+async function resolveIdempotentReplay(sqlTx, record, { userId, txType, payloadHash }) {
+  const expectedUserId = userId || null;
+  const actualUserId = record.user_id || null;
+  if (actualUserId !== expectedUserId || record.tx_type !== txType || record.payload_hash !== payloadHash) {
+    klog("ws_chips_idempotency_identity_mismatch", {
+      idempotencyKey: record.idempotency_key,
+      expected_user_id: expectedUserId,
+      actual_user_id: actualUserId,
+      expected_tx_type: txType,
+      actual_tx_type: record.tx_type,
+    });
+    throw idempotencyConflict();
+  }
+  const hot = await fetchHotTransaction(sqlTx, record.transaction_id, userId);
+  if (hot?.transaction) return { ...hot, constraint: IDEMPOTENCY_CONSTRAINT };
+  return {
+    transaction: {
+      id: String(record.transaction_id),
+      idempotency_key: record.idempotency_key,
+      payload_hash: record.payload_hash,
+      tx_type: record.tx_type,
+      user_id: record.user_id || null,
+      created_at: record.transaction_created_at,
+    },
+    entries: [],
+    account: null,
+    constraint: IDEMPOTENCY_CONSTRAINT,
+  };
+}
+
 function validateEntries(entries, payloadUserId) {
   if (!Array.isArray(entries) || entries.length !== 2) {
     throw badRequest("invalid_entries", "TABLE_BUY_IN requires exactly two entries");
@@ -153,6 +235,20 @@ async function runTableBuyIn(sqlTx, {
 
   const payloadUserId = typeof userId === "string" && userId.trim() ? userId.trim() : null;
   const normalizedEntries = validateEntries(entries, payloadUserId);
+
+  const hashableEntries = normalizedEntries.map((entry) => ({
+    kind: entry.kind,
+    userId: entry.kind === "USER" ? entry.userId : null,
+    systemKey: entry.systemKey ?? null,
+    amount: entry.amount,
+    metadata: entry.metadata
+  }));
+  const payloadHash = hashPayload({ userId: payloadUserId, txType, idempotencyKey, reference, description, metadata, entries: hashableEntries });
+  const existingIdempotency = await findIdempotencyRecord(sqlTx, idempotencyKey);
+  if (existingIdempotency) {
+    return resolveIdempotentReplay(sqlTx, existingIdempotency, { userId: payloadUserId, txType, payloadHash });
+  }
+
   const uniqueSystemKeys = [...new Set(normalizedEntries.filter((entry) => entry.kind !== "USER").map((entry) => entry.systemKey))];
   const systemAccounts = await fetchSystemAccounts(sqlTx, uniqueSystemKeys);
   const systemMap = new Map(systemAccounts.map((account) => [account.system_key, account]));
@@ -167,34 +263,27 @@ async function runTableBuyIn(sqlTx, {
     }
   }
 
-  const userIds = [...new Set(normalizedEntries.filter((entry) => entry.kind === "USER").map((entry) => entry.userId))];
-  const userAccountById = new Map();
-  for (const accountUserId of userIds) {
-    userAccountById.set(accountUserId, await getOrCreateUserAccount(sqlTx, accountUserId));
-  }
-
-  const hashableEntries = normalizedEntries.map((entry) => ({
-    kind: entry.kind,
-    userId: entry.kind === "USER" ? entry.userId : null,
-    systemKey: entry.systemKey ?? null,
-    amount: entry.amount,
-    metadata: entry.metadata
-  }));
-  const payloadHash = hashPayload({ userId: payloadUserId, txType, idempotencyKey, reference, description, metadata, entries: hashableEntries });
-
-  const entryRecords = normalizedEntries.map((entry) => {
-    if (entry.kind === "USER") {
-      return { account_id: userAccountById.get(entry.userId)?.id, amount: entry.amount, metadata: entry.metadata };
+  await sqlTx.unsafe("savepoint chips_idempotency_attempt;");
+  const runNewTransaction = async () => {
+    const userIds = [...new Set(normalizedEntries.filter((entry) => entry.kind === "USER").map((entry) => entry.userId))];
+    const userAccountById = new Map();
+    for (const accountUserId of userIds) {
+      userAccountById.set(accountUserId, await getOrCreateUserAccount(sqlTx, accountUserId));
     }
-    return { account_id: systemMap.get(entry.systemKey)?.id, amount: entry.amount, metadata: entry.metadata };
-  });
 
-  if (entryRecords.some((entry) => !entry.account_id)) {
-    throw badRequest("missing_account", "Missing account for entry");
-  }
+    const entryRecords = normalizedEntries.map((entry) => {
+      if (entry.kind === "USER") {
+        return { account_id: userAccountById.get(entry.userId)?.id, amount: entry.amount, metadata: entry.metadata };
+      }
+      return { account_id: systemMap.get(entry.systemKey)?.id, amount: entry.amount, metadata: entry.metadata };
+    });
 
-  const safeMetadataJson = JSON.stringify(metadata);
-  const entriesPayload = JSON.stringify(entryRecords);
+    if (entryRecords.some((entry) => !entry.account_id)) {
+      throw badRequest("missing_account", "Missing account for entry");
+    }
+
+    const safeMetadataJson = JSON.stringify(metadata);
+    const entriesPayload = JSON.stringify(entryRecords);
 
   const txRows = await sqlTx.unsafe(
     `
@@ -299,10 +388,40 @@ from inserted i;
     throw error;
   }
 
-  return {
-    transaction: transactionRow,
-    entries: insertedEntries,
-    constraint: IDEMPOTENCY_CONSTRAINT
+    const registryRows = await sqlTx.unsafe(`
+select idempotency_key
+from public.chips_transaction_idempotency
+where idempotency_key = $1
+limit 1;
+`, [idempotencyKey]);
+    if (!registryRows?.[0]) {
+      const error = new Error("Transaction idempotency registry row is missing");
+      error.code = "chips_idempotency_registry_missing";
+      throw error;
+    }
+
+    return {
+      transaction: transactionRow,
+      entries: insertedEntries,
+      constraint: IDEMPOTENCY_CONSTRAINT
+    };
+  };
+
+  try {
+    const result = await runNewTransaction();
+    await sqlTx.unsafe("release savepoint chips_idempotency_attempt;");
+    return result;
+  } catch (error) {
+    if (!isIdempotencyUniqueError(error)) throw error;
+    await sqlTx.unsafe("rollback to savepoint chips_idempotency_attempt;");
+    await sqlTx.unsafe("release savepoint chips_idempotency_attempt;");
+    const authoritativeRecord = await findIdempotencyRecord(sqlTx, idempotencyKey);
+    if (!authoritativeRecord) throw error;
+    return resolveIdempotentReplay(sqlTx, authoritativeRecord, {
+      userId: payloadUserId,
+      txType,
+      payloadHash,
+    });
   };
 }
 
