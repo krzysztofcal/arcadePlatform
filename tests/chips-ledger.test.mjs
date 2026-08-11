@@ -11,6 +11,7 @@ const mockDb = {
   nextTransactionId: 1,
   nextEntryId: 1,
   clockMs: Date.parse("2026-02-06T19:00:00.000Z"),
+  jsonParamCalls: 0,
 };
 
 const createId = (prefix, counter) => `${prefix}-${counter}`;
@@ -37,6 +38,7 @@ function resetMockDb() {
   mockDb.nextTransactionId = 1;
   mockDb.nextEntryId = 1;
   mockDb.clockMs = Date.parse("2026-02-06T19:00:00.000Z");
+  mockDb.jsonParamCalls = 0;
   // bootstrap a treasury system account to satisfy ledger posts
   const treasury = {
     id: createId("acct", mockDb.nextAccountId++),
@@ -334,8 +336,9 @@ function makeTxRunner() {
     if (text.includes("update public.chips_transaction_idempotency")) {
       const record = mockDb.registry.get(params[0]);
       if (!record || record.replay_transaction != null || record.replay_entries != null || record.replay_completed_at != null) return [];
-      record.replay_transaction = JSON.parse(params[1]);
-      record.replay_entries = JSON.parse(params[2]);
+      const decodeJsonParam = value => value?.__fakeJson ?? (typeof value === "string" ? JSON.parse(value) : value);
+      record.replay_transaction = decodeJsonParam(params[1]);
+      record.replay_entries = decodeJsonParam(params[2]);
       record.replay_completed_at = new Date().toISOString();
       return [record];
     }
@@ -391,7 +394,11 @@ function makeTxRunner() {
   };
 
   const tx = (query, ...params) => runQuery(query, params);
-  tx.unsafe = runQuery;
+  tx.json = value => {
+    mockDb.jsonParamCalls += 1;
+    return { __fakeJson: value };
+  };
+  tx.unsafe = (query, params = []) => runQuery(query, params);
   return tx;
 }
 
@@ -507,6 +514,7 @@ describe("chips ledger idempotency and validation", () => {
     const first = await postTransaction(payload);
     const registry = mockDb.registry.get(payload.idempotencyKey);
     expect(registry).toBeDefined();
+    expect(mockDb.jsonParamCalls).toBe(2);
     expect(registry.replay_transaction.id).toBe(first.transaction.id);
     expect(registry.replay_entries).toHaveLength(first.entries.length);
     const balanceAfterFirst = [...mockDb.accounts.values()].find(account => account.user_id === userId).balance;

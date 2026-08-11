@@ -260,6 +260,12 @@ async function storeIdempotencyReplay(record, result, tx) {
   } catch {
     throw idempotencyError("chips_idempotency_replay_unavailable", "Cannot serialize idempotency replay snapshot");
   }
+  const transactionParam = typeof tx?.json === "function"
+    ? tx.json(JSON.parse(transactionJson))
+    : transactionJson;
+  const entriesParam = typeof tx?.json === "function"
+    ? tx.json(JSON.parse(entriesJson))
+    : entriesJson;
   const rows = await tx.unsafe(`
 update public.chips_transaction_idempotency
 set replay_transaction = $2::jsonb,
@@ -271,7 +277,7 @@ where idempotency_key = $1
   and replay_completed_at is null
 returning idempotency_key, transaction_id, payload_hash, tx_type::text as tx_type, user_id,
           transaction_created_at, replay_transaction, replay_entries, replay_completed_at, created_at;
-`, [record.idempotency_key, transactionJson, entriesJson]);
+`, [record.idempotency_key, transactionParam, entriesParam]);
   if (rows?.[0]) return rows[0];
   klog("chips_idempotency_replay_store_failed", {
     idempotencyKey: record.idempotency_key,
