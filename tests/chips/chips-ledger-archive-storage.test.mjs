@@ -7,7 +7,7 @@ import {
   buildExportRecord,
   buildManifest,
 } from "../../scripts/ops/chips-ledger-archive-export.mjs";
-import { ARCHIVE_BUCKET, ARCHIVE_MAX_BYTES, storeArchive } from "../../scripts/ops/chips-ledger-archive-store.mjs";
+import { ARCHIVE_BUCKET, ARCHIVE_MAX_BYTES, createManifestStore, storeArchive } from "../../scripts/ops/chips-ledger-archive-store.mjs";
 
 const TX_ID = "00000000-0000-4000-8000-000000000001";
 const USER_ID = "00000000-0000-4000-8000-000000000002";
@@ -142,6 +142,12 @@ try {
   assert.equal(firstStore.insertCount, 1);
   assert.equal(firstStore.commitCount, 1);
   assert.equal(firstStorage.calls.filter((call) => call.method === "POST" && call.path.includes("/object/")).length, 1);
+
+  const sqlCalls = [];
+  const sqlAdapter = createManifestStore({ unsafe: async (query, values) => { sqlCalls.push({ query, values }); return []; } });
+  await sqlAdapter.insertPending(firstStore.row);
+  assert.equal(typeof sqlCalls[0].values[12], "object");
+  assert.deepEqual(sqlCalls[0].values[12], firstStore.row.tx_types);
 
   const retryStore = makeStore({ ...firstStore.row, status: "pending" });
   const retry = await storeArchive({

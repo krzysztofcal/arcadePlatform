@@ -559,7 +559,7 @@ export function createManifestStore(sql) {
         on conflict (object_path) do nothing;`, [
         row.object_path, row.project_ref, row.format_version, row.cutoff, row.cursor_start_created_at, row.cursor_start_id,
         row.cursor_end_created_at, row.cursor_end_id, row.first_created_at, row.last_created_at, row.transaction_count,
-        row.entry_count, JSON.stringify(row.tx_types), row.raw_bytes, row.compressed_bytes, row.raw_sha256, row.compressed_sha256,
+        row.entry_count, row.tx_types, row.raw_bytes, row.compressed_bytes, row.raw_sha256, row.compressed_sha256,
         row.credits, row.debits, row.net_amount,
       ]);
     },
