@@ -25,9 +25,10 @@ original transaction timestamp, optional full replay snapshots, and creation
 time. It has no foreign keys to the ledger, accounts, or Auth users, so the row
 survives future ledger retention.
 
-The migration backfills exactly one row per existing transaction. Full replay
-snapshots are stored for `BUY_IN`, `CASH_OUT`, `WELCOME_BONUS`, `PROMO_BONUS`,
-and `ADMIN_ADJUST`; all entries are ordered by `entry_seq`. Other types retain
+The migration-only prerequisite in PR #881 backfills exactly one row per
+existing transaction. Full replay snapshots are stored for `BUY_IN`, `CASH_OUT`,
+`WELCOME_BONUS`, `PROMO_BONUS`, and `ADMIN_ADJUST`; all entries are ordered by
+`entry_seq`. Other types retain
 identity only.
 
 The migration fails if a full-replay transaction has no entries or is not
@@ -38,6 +39,15 @@ An `AFTER INSERT` trigger captures identity in the same database transaction.
 A registry guard rejects `DELETE`, identity changes, and any replacement or
 clearing of a completed replay snapshot. The only replay transition is empty to
 complete.
+
+## Rollout gate
+
+PR #880 is runtime-only and intentionally does not contain the registry
+migrations. The migration-only PR #881 must be applied and parity-verified on
+Stage, then merged and applied and parity-verified on Production, before #880
+may be merged. This ordering prevents the Netlify and WS runtime paths from
+reading a table that does not yet exist on Production. Stage smoke results do
+not satisfy the Production migration gate.
 
 ## Runtime contract
 
@@ -122,11 +132,14 @@ implement them.
 
 ## Scope boundary
 
-This PR does not modify the existing Stage 2B.2 Storage object or manifest,
+This PR does not contain a database migration and does not modify the existing
+Stage 2B.2 Storage object or manifest,
 does not upload or delete Storage objects, does not delete or prune ledger
 rows, and does not alter balances, conservation, entry sequencing, UI/API
 history, or browser code. There are no new persistent environment variables
-and no Production migration or rollout.
+and does not authorize or perform a Production migration or rollout. The
+runtime must remain unmerged until the migration-only rollout gate above is
+complete.
 
 Breaking impact is expected to be none: existing replay/conflict responses and
 the full results consumed by current callers remain unchanged.
