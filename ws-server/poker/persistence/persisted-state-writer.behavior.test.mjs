@@ -933,6 +933,7 @@ function createReplacementFundingDbHarness({ tableId, version = 7, state, treasu
     state: structuredClone(state),
     accounts: new Map([[sourceAccount.system_key, sourceAccount], [escrowAccount.system_key, escrowAccount]]),
     transactions: new Map(),
+    registry: new Map(),
     seats: new Map([[replacementSeat.seat_no, replacementSeat]]),
     ledgerInsertCount: 0,
     transactionInsertSql: null,
@@ -946,6 +947,7 @@ function createReplacementFundingDbHarness({ tableId, version = 7, state, treasu
       state: structuredClone(durable.state),
       accounts: new Map([...durable.accounts].map(([key, account]) => [key, { ...account }])),
       transactions: new Map([...durable.transactions].map(([key, transaction]) => [key, { ...transaction }])),
+      registry: new Map([...durable.registry].map(([key, record]) => [key, { ...record }])),
       seats: new Map([...durable.seats].map(([key, seat]) => [key, { ...seat }])),
       ledgerInsertCount: durable.ledgerInsertCount
     };
@@ -961,6 +963,11 @@ function createReplacementFundingDbHarness({ tableId, version = 7, state, treasu
         if (text.startsWith("select version, state from public.poker_state")) {
           return [{ version: working.version, state: structuredClone(working.state) }];
         }
+        if (text.includes("from public.chips_transaction_idempotency")) {
+          const record = working.registry.get(params[0]);
+          return record ? [{ ...record }] : [];
+        }
+        if (text.startsWith("savepoint") || text.startsWith("release savepoint") || text.startsWith("rollback to savepoint")) return [];
         if (text.includes("from public.chips_accounts") && text.includes("system_key = any")) {
           return params[0].map((key) => working.accounts.get(key)).filter(Boolean).map((account) => ({ ...account }));
         }
@@ -992,9 +999,22 @@ function createReplacementFundingDbHarness({ tableId, version = 7, state, treasu
           durable.transactionMetadata = params[2];
           if (durable.failFunding) throw new Error("simulated_funding_failure");
           const idempotencyKey = params[3];
-          if (working.transactions.has(idempotencyKey)) throw new Error("duplicate_idempotency_key");
-          const transaction = { id: `tx-${working.transactions.size + 1}`, idempotency_key: idempotencyKey, payload_hash: params[4], created_by: params[7] };
+          if (working.transactions.has(idempotencyKey)) {
+            const duplicate = new Error("duplicate_idempotency_key");
+            duplicate.code = "23505";
+            duplicate.constraint = "chips_transaction_idempotency_pkey";
+            throw duplicate;
+          }
+          const transaction = { id: `tx-${working.transactions.size + 1}`, idempotency_key: idempotencyKey, payload_hash: params[4], tx_type: params[5], user_id: params[6], created_by: params[7] };
           working.transactions.set(idempotencyKey, transaction);
+          working.registry.set(idempotencyKey, {
+            idempotency_key: idempotencyKey,
+            transaction_id: transaction.id,
+            payload_hash: transaction.payload_hash,
+            tx_type: transaction.tx_type,
+            user_id: transaction.user_id,
+            transaction_created_at: null,
+          });
           working.ledgerInsertCount += 1;
           return [{ ...transaction }];
         }
@@ -1019,6 +1039,7 @@ function createReplacementFundingDbHarness({ tableId, version = 7, state, treasu
     durable.state = working.state;
     durable.accounts = working.accounts;
     durable.transactions = working.transactions;
+    durable.registry = working.registry;
     durable.seats = working.seats;
     durable.ledgerInsertCount = working.ledgerInsertCount;
     return result;
