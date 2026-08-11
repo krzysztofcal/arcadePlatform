@@ -225,7 +225,8 @@ register("ERROR", "janitor", [
 ]);
 
 register("ERROR", "ledger", [
-  "chips_apply_mismatch"
+  "chips_apply_mismatch",
+  "ws_chips_idempotency_identity_mismatch"
 ]);
 
 register("ERROR", "persistence", [
