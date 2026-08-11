@@ -136,6 +136,10 @@ const botBankrollMigration = migrationFiles.find((file) => file.includes("poker_
 if (!botBankrollMigration) {
   throw new Error("Bounded bot bankroll migration not found; cannot run tests.");
 }
+const idempotencyGapMigration = migrationFiles.find((file) => file.includes("chips_transaction_idempotency_backfill_gap"));
+if (!idempotencyGapMigration) {
+  throw new Error("Idempotency gap migration not found; cannot run tests.");
+}
 const migrationsWithoutBootstrapSeeds = migrationFiles.filter((file) => file !== seedMigration && file !== botBankrollMigration);
 
 const runMigration = async (sql, file) => {
@@ -608,6 +612,16 @@ async function expectSuccessfulBuyIn(sql) {
   assert.equal(balance.balance, beforeUser.balance + amount, "User balance should increase by BUY_IN amount");
   const treasury = await systemBalances(sql, "TREASURY");
   assert.equal(treasury, beforeTreasury - amount, "Treasury should decrease by buy-in amount");
+  const registryRows = await sql`
+    select transaction_id, payload_hash, replay_transaction, replay_entries, replay_completed_at
+    from public.chips_transaction_idempotency
+    where idempotency_key = ${key};
+  `;
+  assert.equal(registryRows.length, 1, "New transaction must create one registry row atomically");
+  assert.equal(registryRows[0].transaction_id, result.transaction.id, "Registry must preserve transaction id");
+  assert.ok(registryRows[0].replay_transaction, "BUY_IN registry replay transaction must be complete");
+  assert.ok(registryRows[0].replay_entries, "BUY_IN registry replay entries must be complete");
+  assert.ok(registryRows[0].replay_completed_at, "BUY_IN registry replay completion timestamp is required");
   return { amountSpent: amount, treasurySeqDelta: 1 };
 }
 
@@ -657,6 +671,38 @@ async function assertBotBankrollSeed(sql) {
     ["GENESIS", -botBankrollSeedAmount],
     ["POKER_BOT_BANKROLL", botBankrollSeedAmount]
   ]);
+}
+
+async function assertIdempotencyRegistryParity(sql) {
+  const rows = await sql`
+    select
+      (select count(*) from public.chips_transactions) as transaction_count,
+      (select count(*) from public.chips_transaction_idempotency) as registry_count,
+      (select count(*)
+       from public.chips_transactions t
+       left join public.chips_transaction_idempotency r on r.idempotency_key = t.idempotency_key
+       where r.idempotency_key is null
+          or r.transaction_id <> t.id
+          or r.payload_hash <> t.payload_hash
+          or r.tx_type <> t.tx_type
+          or r.user_id is distinct from t.user_id
+          or r.transaction_created_at <> t.created_at) as mismatch_count,
+      (select count(*)
+       from public.chips_transaction_idempotency r
+       join public.chips_transactions t on t.id = r.transaction_id
+       where t.tx_type::text in ('BUY_IN', 'CASH_OUT', 'WELCOME_BONUS', 'PROMO_BONUS', 'ADMIN_ADJUST')
+         and (r.replay_transaction is null or r.replay_entries is null or r.replay_completed_at is null)) as incomplete_full_replay_count;
+  `;
+  const row = rows?.[0] || {};
+  assert.equal(Number(row.transaction_count), Number(row.registry_count), "Registry row count must match transaction row count");
+  assert.equal(Number(row.mismatch_count), 0, "Registry identity must match every transaction");
+  assert.equal(Number(row.incomplete_full_replay_count), 0, "Full-replay transaction types require complete snapshots");
+  return {
+    transactionCount: Number(row.transaction_count),
+    registryCount: Number(row.registry_count),
+    mismatchCount: Number(row.mismatch_count),
+    incompleteFullReplayCount: Number(row.incomplete_full_replay_count),
+  };
 }
 
 async function assertBuyInSequencing(sql, expectedTreasurySeq) {
@@ -763,6 +809,7 @@ async function main() {
   await runMigration(sql, seedMigration);
   await runMigration(sql, botBankrollMigration);
   await assertBotBankrollSeed(sql);
+  await assertIdempotencyRegistryParity(sql);
   const afterSeed = await systemBalances(sql, "TREASURY");
   assert.ok(afterSeed >= seedAmount, "Treasury should be funded after seed migration");
   assert.equal(await seedTxCount(sql), 1, "Seed transaction should be recorded once");
@@ -793,6 +840,7 @@ async function main() {
 
   const postSequenceTest = await expectAtomicSequenceAllocation(sql, expectedTreasurySeq);
   expectedTreasurySeq = postSequenceTest;
+  await assertIdempotencyRegistryParity(sql);
 
   await runMigration(sql, seedMigration);
   assert.equal(await seedTxCount(sql), 1, "Seed transaction should stay idempotent");
@@ -802,6 +850,8 @@ async function main() {
   assert.equal(await seedEntryCount(sql), 2, "Seed rerun must not add or drop entries");
   await runMigration(sql, botBankrollMigration);
   await assertBotBankrollSeed(sql);
+  await runMigration(sql, idempotencyGapMigration);
+  await assertIdempotencyRegistryParity(sql);
 
   await sql.end({ timeout: 5 });
   const adminModule = await import("../../netlify/functions/_shared/supabase-admin.mjs");
