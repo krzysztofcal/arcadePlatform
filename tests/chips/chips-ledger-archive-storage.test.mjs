@@ -52,7 +52,7 @@ function makeFetch({ initialObject = null, bucketInitiallyExists = false } = {})
       return responseJson(bucket(), 200);
     }
     if (requestUrl.pathname.includes(`/storage/v1/object/authenticated/${ARCHIVE_BUCKET}/`) && method === "GET") {
-      return object ? new Response(object, { status: 200 }) : new Response(null, { status: 404 });
+      return object ? new Response(object, { status: 200 }) : responseJson({ message: "not found" }, 400);
     }
     if (requestUrl.pathname.includes(`/storage/v1/object/${ARCHIVE_BUCKET}/`) && method === "POST") {
       assert.equal(new Headers(init.headers).get("x-upsert"), "false");

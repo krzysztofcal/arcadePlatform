@@ -349,7 +349,7 @@ async function readJsonResponse(response, operation) {
   }
 }
 
-async function isMissingBucketResponse(response) {
+async function isMissingStorageResponse(response) {
   if (response.status === 404) return true;
   if (response.status !== 400) return false;
   const body = await response.text().catch(() => "");
@@ -370,7 +370,7 @@ function verifyBucket(bucket) {
 
 export async function ensureArchiveBucket(storageTarget, deps = {}) {
   let response = await storageRequest(storageTarget, bucketRequestPath(), { method: "GET" }, deps);
-  if (await isMissingBucketResponse(response)) {
+  if (await isMissingStorageResponse(response)) {
     const createResponse = await storageRequest(storageTarget, "/storage/v1/bucket", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -471,7 +471,7 @@ export async function uploadOrVerifyObject(localArchive, storageTarget, deps = {
     const verified = verifyDownloadedBytes(localArchive, existing.downloaded);
     return { objectExisted, uploaded, uploadMs, downloadMs: initialDownloadMs, ...verified };
   }
-  if (existing.response.status !== 404) storageFailure("object lookup", existing.response);
+  if (!(await isMissingStorageResponse(existing.response))) storageFailure("object lookup", existing.response);
   if (deps.manifestStatus === "committed") fail("committed archive object is missing");
   const uploadStarted = Date.now();
   const uploadResponse = await storageRequest(storageTarget, objectRequestPath(localArchive.objectPath, ""), {
