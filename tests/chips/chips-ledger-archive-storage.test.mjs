@@ -45,7 +45,7 @@ function makeFetch({ initialObject = null, bucketInitiallyExists = false } = {})
     const method = init.method || "GET";
     calls.push({ method, path: requestUrl.pathname, headers: new Headers(init.headers || {}) });
     if (requestUrl.pathname === `/storage/v1/bucket/${ARCHIVE_BUCKET}` && method === "GET") {
-      return bucketExists ? responseJson(bucket()) : responseJson({ message: "not found" }, 404);
+      return bucketExists ? responseJson(bucket()) : responseJson({ message: "not found" }, 400);
     }
     if (requestUrl.pathname === "/storage/v1/bucket" && method === "POST") {
       bucketExists = true;

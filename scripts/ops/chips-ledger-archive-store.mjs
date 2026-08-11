@@ -349,6 +349,13 @@ async function readJsonResponse(response, operation) {
   }
 }
 
+async function isMissingBucketResponse(response) {
+  if (response.status === 404) return true;
+  if (response.status !== 400) return false;
+  const body = await response.text().catch(() => "");
+  return /not found|does not exist/i.test(body);
+}
+
 function verifyBucket(bucket) {
   if (!bucket || bucket.id !== ARCHIVE_BUCKET || bucket.name !== ARCHIVE_BUCKET) {
     fail("Storage archive bucket has an unexpected name");
@@ -363,7 +370,7 @@ function verifyBucket(bucket) {
 
 export async function ensureArchiveBucket(storageTarget, deps = {}) {
   let response = await storageRequest(storageTarget, bucketRequestPath(), { method: "GET" }, deps);
-  if (response.status === 404) {
+  if (await isMissingBucketResponse(response)) {
     const createResponse = await storageRequest(storageTarget, "/storage/v1/bucket", {
       method: "POST",
       headers: { "content-type": "application/json" },
