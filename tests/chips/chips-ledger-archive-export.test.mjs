@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   buildArchiveBytes,
   buildExportRecord,
+  buildManifest,
   evaluateTableEligibility,
   runExport,
   serializeRecords,
@@ -53,10 +54,11 @@ function entry(id, transactionId, amount, accountId) {
   };
 }
 
-function makeRecord(tx, firstEntryId = 1) {
+function makeRecord(tx, firstEntryId = 1, amount = 10) {
+  const positiveAmount = String(amount).replace(/^-/, "");
   return buildExportRecord(tx, [
-    entry(firstEntryId + 1, tx.id, -10, SYSTEM),
-    entry(firstEntryId, tx.id, 10, USER),
+    entry(firstEntryId + 1, tx.id, `-${positiveAmount}`, SYSTEM),
+    entry(firstEntryId, tx.id, positiveAmount, USER),
   ]);
 }
 
@@ -89,10 +91,31 @@ const validBatch = validateBatch({
 });
 assert.deepEqual(validBatch.txTypeCounts, { BUY_IN: 2 });
 assert.equal(validBatch.entryCount, 4);
+assert.equal(validBatch.credits, "20");
+assert.equal(validBatch.debits, "20");
+assert.equal(validBatch.netAmount, "0");
+const hugeBatch = validateBatch({
+  candidates: [candidateA],
+  records: [makeRecord(candidateA, 5, "9007199254740993")],
+  cutoff: "2026-02-01T00:00:00Z",
+});
+assert.equal(hugeBatch.credits, "9007199254740993");
+assert.equal(hugeBatch.debits, "9007199254740993");
+assert.equal(hugeBatch.netAmount, "0");
 const archiveOne = buildArchiveBytes(ordered);
 const archiveTwo = buildArchiveBytes(sortRecords([recordB, recordA]));
 assert.equal(archiveOne.rawSha256, archiveTwo.rawSha256);
 assert.equal(archiveOne.compressedSha256, archiveTwo.compressedSha256);
+const manifest = buildManifest({
+  target: "stage",
+  cutoff: "2026-02-01T00:00:00Z",
+  batchSize: 5000,
+  cursor: null,
+  records: ordered,
+  archive: archiveOne,
+  outputPath: "/private/chips-ledger-stage.jsonl.gz",
+});
+assert.deepEqual(manifest.amounts, { credits: "20", debits: "20", net: "0" });
 
 assert.throws(
   () => validateBatch({

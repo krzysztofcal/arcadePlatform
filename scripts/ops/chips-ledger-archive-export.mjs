@@ -370,6 +370,9 @@ export function validateBatch({ candidates, records, cutoff }) {
   const seenEntries = new Set();
   const txTypeCounts = {};
   let entryCount = 0;
+  let credits = 0n;
+  let debits = 0n;
+  let netAmount = 0n;
 
   records.forEach((record, index) => {
     const transaction = record?.transaction;
@@ -405,7 +408,11 @@ export function validateBatch({ candidates, records, cutoff }) {
       if (seenEntries.has(entryId)) fail(`duplicate entry in exported batch: ${entryId}`);
       seenEntries.add(entryId);
       if (text(entry.account_id) !== text(entry.account?.id)) fail(`entry account identity mismatch: ${entryId}`);
-      total += BigInt(toBigIntString(entry.amount, "entry.amount"));
+      const amount = BigInt(toBigIntString(entry.amount, "entry.amount"));
+      total += amount;
+      netAmount += amount;
+      if (amount > 0n) credits += amount;
+      if (amount < 0n) debits -= amount;
     }
     if (total !== 0n) fail(`transaction is not conserved: ${id}`);
     const txType = text(transaction.tx_type);
@@ -414,10 +421,15 @@ export function validateBatch({ candidates, records, cutoff }) {
     entryCount += record.entries.length;
   });
 
+  if (netAmount !== 0n || credits !== debits) fail("batch is not conserved");
+
   return {
     transactionCount: records.length,
     entryCount,
     txTypeCounts: Object.fromEntries(Object.entries(txTypeCounts).sort(([left], [right]) => compareText(left, right))),
+    credits: credits.toString(),
+    debits: debits.toString(),
+    netAmount: netAmount.toString(),
   };
 }
 
@@ -454,6 +466,11 @@ export function buildManifest({ target, cutoff, batchSize, cursor, records, arch
       transactions: validation.transactionCount,
       entries: validation.entryCount,
       tx_types: validation.txTypeCounts,
+    },
+    amounts: {
+      credits: validation.credits,
+      debits: validation.debits,
+      net: validation.netAmount,
     },
     time_range: {
       first_created_at: first?.created_at || null,
@@ -660,6 +677,7 @@ function outputMetrics(manifest, options) {
     time_range: manifest.time_range,
     cursor: manifest.cursor,
     tx_types: manifest.batch.tx_types,
+    amounts: manifest.amounts,
     raw_bytes: manifest.bytes.raw,
     compressed_bytes: manifest.bytes.compressed,
     compression_ratio_compressed_over_raw: manifest.bytes.compression_ratio_compressed_over_raw,
