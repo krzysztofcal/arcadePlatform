@@ -3,6 +3,7 @@ import {
   buildArchiveBytes,
   buildExportRecord,
   evaluateTableEligibility,
+  runExport,
   serializeRecords,
   resolveTarget,
   sortRecords,
@@ -65,6 +66,14 @@ const recordA = makeRecord(candidateA, 1);
 const recordB = makeRecord(candidateB, 3);
 
 assert.throws(() => resolveTarget("unknown", {}), /target must be exactly stage or prod/);
+await assert.rejects(
+  () => runExport({ argv: ["--target", "stage"], env: {}, cwd: "/tmp" }),
+  /--output is required/,
+);
+await assert.rejects(
+  () => runExport({ argv: ["--output", "/tmp/chips-ledger-review.jsonl.gz"], env: { LEDGER_ARCHIVE_TARGET: "prod" }, cwd: "/tmp" }),
+  /target must be exactly stage or prod/,
+);
 assert.equal(stringifyJson({ id: 123n, amount: -7n }), '{"id":"123","amount":"-7"}');
 assert.equal(recordA.entries[0].amount, "10");
 assert.equal(recordA.entries[1].amount, "-10");

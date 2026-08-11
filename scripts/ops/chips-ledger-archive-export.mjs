@@ -157,7 +157,7 @@ Selection:
   --after-id <uuid>               Resume cursor UUID tie-breaker.
 
 Output:
-  --output <path>                 Default: ./chips-ledger-archive-<target>.jsonl.gz
+  --output <path>                 Required; use a private path outside checkout.
   --manifest <path>               Default: <output>.manifest.json
 
 The selected database transaction is REPEATABLE READ and READ ONLY. The script
@@ -563,7 +563,8 @@ function resolveCursor(args) {
 }
 
 function resolveOptions(args, env, cwd, now) {
-  const target = resolveTarget(args.target || env.LEDGER_ARCHIVE_TARGET, env);
+  if (!args.output) fail("--output is required; use a private path outside the repository");
+  const target = resolveTarget(args.target, env);
   const cutoff = args.cutoff
     ? normalizeTimestamp(args.cutoff, "--cutoff")
     : (() => {
@@ -573,7 +574,7 @@ function resolveOptions(args, env, cwd, now) {
   const batchSize = args.batchSize == null
     ? DEFAULT_BATCH_SIZE
     : parseBoundedInteger(args.batchSize, "--batch-size", { min: 1, max: MAX_BATCH_SIZE });
-  const outputPath = path.resolve(cwd, args.output || `chips-ledger-archive-${target.target}.jsonl.gz`);
+  const outputPath = path.resolve(cwd, args.output);
   const manifestPath = path.resolve(cwd, args.manifest || `${outputPath}.manifest.json`);
   if (outputPath === manifestPath) fail("--output and --manifest must be different paths");
   if (fs.existsSync(outputPath)) fail(`refusing to overwrite existing artifact: ${outputPath}`);

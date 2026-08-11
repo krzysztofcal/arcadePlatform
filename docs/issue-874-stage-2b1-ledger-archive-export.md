@@ -49,8 +49,9 @@ run. Store the output outside the repository with restrictive permissions.
 - `--batch-size <integer>` — defaults to and is capped at `5000`.
 - `--after-created-at <timestamp>` and `--after-id <uuid>` — the pair is the
   keyset cursor for resuming a batch.
-- `--output <path>` — local `.jsonl.gz` artifact. Existing files are never
-  overwritten.
+- `--output <path>` — required local `.jsonl.gz` artifact path. Use a private
+  path outside the repository; there is no default artifact path. Existing
+  files are never overwritten.
 - `--manifest <path>` — local manifest; defaults to
   `<output>.manifest.json`. Existing files are never overwritten.
 
