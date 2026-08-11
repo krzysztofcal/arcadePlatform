@@ -194,7 +194,11 @@ const parseStoredJson = (value, label) => {
 
 async function resolveIdempotentReplay(record, input, tx = null) {
   assertIdempotencyMatch(record, input);
-  const hotSnapshot = await fetchTransactionSnapshotByTxId(record.transaction_id, input.payloadUserId, tx);
+  const hotSnapshot = await fetchTransactionSnapshotByTxId(
+    record.transaction_id,
+    normalizeIdempotencyUserId(input.payloadUserId),
+    tx,
+  );
   const requiresFullReplay = FULL_REPLAY_TX_TYPES.has(String(record.tx_type || ""));
   if (hotSnapshot?.transaction && (!requiresFullReplay || (Array.isArray(hotSnapshot.entries) && hotSnapshot.entries.length > 0))) {
     return hotSnapshot;

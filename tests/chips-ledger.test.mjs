@@ -12,6 +12,7 @@ const mockDb = {
   nextEntryId: 1,
   clockMs: Date.parse("2026-02-06T19:00:00.000Z"),
   jsonParamCalls: 0,
+  lastSnapshotUserId: null,
 };
 
 const createId = (prefix, counter) => `${prefix}-${counter}`;
@@ -39,6 +40,7 @@ function resetMockDb() {
   mockDb.nextEntryId = 1;
   mockDb.clockMs = Date.parse("2026-02-06T19:00:00.000Z");
   mockDb.jsonParamCalls = 0;
+  mockDb.lastSnapshotUserId = null;
   // bootstrap a treasury system account to satisfy ledger posts
   const treasury = {
     id: createId("acct", mockDb.nextAccountId++),
@@ -222,6 +224,7 @@ function handleLedgerQuery(query, params = []) {
 
   if (text.includes("with txn as") && text.includes("chips_entries")) {
     const [txId, userId] = params;
+    mockDb.lastSnapshotUserId = userId;
     const transaction = mockDb.transactions.get(txId) || null;
     const entries = mockDb.entries
       .filter(entry => entry.transaction_id === txId)
@@ -567,6 +570,7 @@ describe("chips ledger idempotency and validation", () => {
     const replay = await postTransaction(payload);
     expect(replay.transaction.id).toBe(first.transaction.id);
     expect(replay.entries).toEqual([]);
+    expect(mockDb.lastSnapshotUserId).toBeNull();
     expect(mockDb.transactions.size).toBe(1);
   });
 
