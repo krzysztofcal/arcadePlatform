@@ -1,14 +1,40 @@
 # Issue #874 — Stage 2A audit
 
-Audit date: 2026-08-10 UTC. Target: Production Supabase project
-`otbqfijerkieoxwpxjnm`. The catalog queries were read-only; no Production
-schema or ledger data was changed during the audit.
+Original audit date: 2026-08-10 UTC. Corrective snapshot: 2026-08-11 UTC.
+Target: Production Supabase project `otbqfijerkieoxwpxjnm`. The catalog
+queries were read-only; no Production schema or ledger data was changed.
+
+The 3,506,176-byte Production baseline in this document is real, but it is a
+small Production database: the corrective snapshot identified database
+`postgres` with 102 `chips_transactions` rows and 204 `chips_entries` rows.
+It must not be conflated with the approximately 59 MB / 31,878-transaction
+stress figures quoted in Issue #874. Those figures are not supported by the
+current Production catalog and are now treated as historical Stage/stress
+evidence pending independent source verification. The 63,553,536-byte
+before-snapshot below is explicitly Stage data, not Production data.
 
 The byte values below use the same functions as the existing #860 metrics:
 `pg_table_size`, `pg_indexes_size`, and `pg_total_relation_size`. Per-index
 sizes use `pg_relation_size`. `idx_scan` is supporting evidence only. The
 database reported `stats_reset = NULL`, so the scan counters are not treated
 as proof of non-use.
+
+## Corrected target snapshot before Production rollout
+
+This single read-only snapshot includes target identity, row counts, and all
+relation-size metrics. It was collected before any Production rollout.
+
+| Target | Project ref | Database | `chips_transactions` rows | `chips_entries` rows | Transactions table | Transactions indexes | Transactions total | Entries table | Entries indexes | Entries total | Combined total |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Production | `otbqfijerkieoxwpxjnm` | `postgres` | 102 | 204 | 737280 | 1425408 | 2162688 | 368640 | 974848 | 1343488 | 3506176 |
+| Stage, current post-migration snapshot | `krydukthwdvccggbyjfw` | `postgres` | 33908 | 67816 | 23330816 | 7938048 | 31268864 | 9084928 | 14188544 | 23273472 | 54542336 |
+
+The Production row counts and relation sizes above are the authoritative
+before values for a future Production rollout. If the same three confirmed
+redundant index relations are removed there, the directly observed
+per-index-sized overhead is 802816 bytes (about 0.8 MB / 0.77 MiB), subject to
+normal catalog-size variation. The larger 10,608,640-byte recovery belongs
+only to the historical Stage snapshot below.
 
 ## Production before
 
@@ -57,7 +83,7 @@ No `chips_entries` index was removed. `chips_entries_account_seq_idx` has
 not a redundant lookup index. The remaining indexes have query consumers and
 were left unchanged.
 
-### #860 before metrics
+### #860 Production before metrics
 
 | Relation | Table bytes | Index bytes | Total bytes |
 | --- | ---: | ---: | ---: |
@@ -98,13 +124,14 @@ all ledger rows and columns, all `chips_entries` indexes, append-only
 triggers, payload hashing, and accounting behavior. No archive/cold-storage
 work is included.
 
-## Safe-environment after verification
+## Safe-environment after verification (Stage, not Production)
 
 The migration was applied on the deploy-preview Stage project
 `krydukthwdvccggbyjfw` on 2026-08-10 UTC. Stage had the same ledger index
 layout as the Production audit before the migration. The migration history
-recorded version `20260810120000` and the existing stage migration smoke
-checks passed.
+recorded version `20260810120000` and the existing Stage migration smoke
+checks passed. These Stage values must not be reported as Production
+before/after metrics.
 
 ### #860 before/after comparison on Stage
 

@@ -86,7 +86,7 @@ function normalizeTimestampLabel(label) {
 function handleLedgerQuery(query, params = []) {
   const text = normalizeSql(normalizeQueryText(query));
 
-  if (text.includes("from public.chips_accounts") && text.includes("account_type = 'user'") && text.includes("user_id")) {
+  if (text.includes("from public.chips_accounts") && text.includes("account_type = 'user'") && text.includes("user_id") && text.includes("with existing as")) {
     const userId = params[0];
     const account = ensureUserAccount(userId);
     return [{ account }];
@@ -97,7 +97,7 @@ function handleLedgerQuery(query, params = []) {
     return [...mockDb.accounts.values()].filter(acc => keys.includes(acc.system_key));
   }
 
-  if (text.includes("from public.chips_transactions") && text.includes("idempotency_key")) {
+  if (text.includes("from public.chips_transactions") && text.includes("where idempotency_key")) {
     const key = params[0];
     const existing = [...mockDb.transactions.values()].find(tx => tx.idempotency_key === key);
     return existing ? [existing] : [];
@@ -321,7 +321,7 @@ function makeTxRunner() {
       if (existing) {
         const duplicate = new Error("duplicate key value violates unique constraint\n");
         duplicate.code = "23505";
-        duplicate.constraint = "chips_transactions_idempotency_key_uidx";
+        duplicate.constraint = "chips_transactions_idempotency_key_unique";
         throw duplicate;
       }
       const txRow = {
@@ -353,7 +353,7 @@ function makeTxRunner() {
     return handleLedgerQuery(text, params);
   };
 
-  const tx = (...args) => runQuery(...args);
+  const tx = (query, ...params) => runQuery(query, params);
   tx.unsafe = runQuery;
   return tx;
 }
