@@ -144,10 +144,14 @@ try {
   assert.equal(firstStorage.calls.filter((call) => call.method === "POST" && call.path.includes("/object/")).length, 1);
 
   const sqlCalls = [];
-  const sqlAdapter = createManifestStore({ unsafe: async (query, values) => { sqlCalls.push({ query, values }); return []; } });
+  const sqlAdapter = createManifestStore({
+    typed: (value, type) => ({ value, type }),
+    unsafe: async (query, values) => { sqlCalls.push({ query, values }); return []; },
+  });
   await sqlAdapter.insertPending(firstStore.row);
   assert.equal(typeof sqlCalls[0].values[12], "object");
   assert.deepEqual(sqlCalls[0].values[12], firstStore.row.tx_types);
+  assert.deepEqual(sqlCalls[0].values[3], { value: firstStore.row.cutoff, type: 25 });
 
   const retryStore = makeStore({ ...firstStore.row, status: "pending" });
   const retry = await storeArchive({

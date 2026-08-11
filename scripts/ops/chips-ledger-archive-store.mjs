@@ -540,6 +540,7 @@ function normalizeManifestRow(row) {
 
 export function createManifestStore(sql) {
   if (!sql || typeof sql.unsafe !== "function") fail("postgres manifest adapter is required");
+  const timestampParam = (value) => value == null || typeof sql.typed !== "function" ? value : sql.typed(value, 25);
   const get = async (objectPath) => {
     const rows = await sql.unsafe(selectManifestSql(), [objectPath]);
     return normalizeManifestRow(rows[0]);
@@ -557,8 +558,8 @@ export function createManifestStore(sql) {
                 $12::bigint, $13::jsonb, $14::bigint, $15::bigint, $16, $17,
                 $18::numeric, $19::numeric, $20::numeric, 'pending')
         on conflict (object_path) do nothing;`, [
-        row.object_path, row.project_ref, row.format_version, row.cutoff, row.cursor_start_created_at, row.cursor_start_id,
-        row.cursor_end_created_at, row.cursor_end_id, row.first_created_at, row.last_created_at, row.transaction_count,
+        row.object_path, row.project_ref, row.format_version, timestampParam(row.cutoff), timestampParam(row.cursor_start_created_at), row.cursor_start_id,
+        timestampParam(row.cursor_end_created_at), row.cursor_end_id, timestampParam(row.first_created_at), timestampParam(row.last_created_at), row.transaction_count,
         row.entry_count, row.tx_types, row.raw_bytes, row.compressed_bytes, row.raw_sha256, row.compressed_sha256,
         row.credits, row.debits, row.net_amount,
       ]);
