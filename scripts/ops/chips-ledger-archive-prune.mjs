@@ -388,6 +388,7 @@ function manifestSelectSql() {
 
 export function createPruneStore(sql) {
   if (!sql || typeof sql.unsafe !== "function" || typeof sql.begin !== "function") fail("PostgreSQL prune adapter is required");
+  const timestampParam = (value) => value == null || typeof sql.typed !== "function" ? value : sql.typed(value, 25);
   return {
     async getIdentity() {
       const rows = await sql.unsafe("select system_identifier::text as system_identifier from pg_catalog.pg_control_system();");
@@ -407,8 +408,8 @@ export function createPruneStore(sql) {
           $15::bigint, $16, $17, $18::numeric, $19::numeric, $20::numeric
         ) as result;`, [
           row.object_path, evidence.transactionIds, evidence.entryIds, row.project_ref,
-          row.format_version, row.cutoff, row.cursor_start_created_at, row.cursor_start_id,
-          row.cursor_end_created_at, row.cursor_end_id, row.first_created_at, row.last_created_at,
+          row.format_version, timestampParam(row.cutoff), timestampParam(row.cursor_start_created_at), row.cursor_start_id,
+          timestampParam(row.cursor_end_created_at), row.cursor_end_id, timestampParam(row.first_created_at), timestampParam(row.last_created_at),
           row.tx_types, row.raw_bytes, row.compressed_bytes, row.raw_sha256, row.compressed_sha256,
           row.credits, row.debits, row.net_amount,
         ]);

@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import postgres from "postgres";
+import { createPruneStore } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
 
 const dbUrl = process.env.CHIPS_MIGRATIONS_TEST_DB_URL;
 const allowDrop = process.env.CHIPS_MIGRATIONS_ALLOW_DROP === "1";
@@ -18,10 +19,10 @@ const seedKey = "seed:treasury:v1";
 const seedAmount = 1000000;
 const botBankrollSeedKey = "seed:poker-bot-bankroll:v1";
 const botBankrollSeedAmount = 1000000;
-const primaryUserId = "00000000-0000-0000-0000-000000000001";
-const idempotentUserId = "00000000-0000-0000-0000-000000000002";
-const conflictUserId = "00000000-0000-0000-0000-000000000003";
-const crossUserId = "00000000-0000-0000-0000-000000000004";
+const primaryUserId = "00000000-0000-4000-8000-000000000001";
+const idempotentUserId = "00000000-0000-4000-8000-000000000002";
+const conflictUserId = "00000000-0000-4000-8000-000000000003";
+const crossUserId = "00000000-0000-4000-8000-000000000004";
 const assertTestDatabase = async (sql) => {
   const rows = await sql`select current_database() as name;`;
   const name = rows?.[0]?.name || "";
@@ -837,6 +838,9 @@ async function assertArchivePrunerRoleContracts(sql) {
       "00000000-0000-4000-8000-00000000b403",
       "00000000-0000-4000-8000-00000000b404",
     ];
+    const cursorStartId = "00000000-0000-4000-8000-00000000b400";
+    const cutoff = "2026-02-01T00:00:00.123456Z";
+    const cursorStartCreatedAt = "2025-12-31T23:59:59.654321Z";
     const createdAt = ["2026-01-01T00:00:00.000001Z", "2026-01-01T00:00:00.000002Z"];
     await tx`insert into public.poker_tables (id, status) values (${tableId}, 'ACTIVE');`;
     await tx`
@@ -848,7 +852,7 @@ async function assertArchivePrunerRoleContracts(sql) {
         id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at
       ) values ($1::uuid, $2, $3::jsonb, $4, $5, $6, null, $7::timestamptz);`, [
         transactionIds[index], `table:${tableId}`, { tableId }, `archive-pruner-probe:${index}`,
-        (index === 0 ? "a" : "b").repeat(64), index === 0 ? "TABLE_BUY_IN" : "TABLE_CASH_OUT", createdAt[index],
+        (index === 0 ? "a" : "b").repeat(64), index === 0 ? "TABLE_BUY_IN" : "TABLE_CASH_OUT", sql.typed(createdAt[index], 25),
       ]);
     }
     const entryIds = [];
@@ -875,16 +879,19 @@ async function assertArchivePrunerRoleContracts(sql) {
     `;
     const compressedHash = "2".repeat(64);
     const manifestRows = await tx.unsafe(`insert into public.chips_ledger_archive_batches (
-      object_path, project_ref, format_version, cutoff, cursor_end_created_at, cursor_end_id,
+      object_path, project_ref, format_version, cutoff, cursor_start_created_at, cursor_start_id,
+      cursor_end_created_at, cursor_end_id,
       first_created_at, last_created_at, transaction_count, entry_count, tx_types,
       raw_bytes, compressed_bytes, raw_sha256, compressed_sha256, credits, debits,
       net_amount, status, committed_at
     ) values (
-      $1, 'krydukthwdvccggbyjfw', 1, '2026-02-01T00:00:00Z', $2::timestamptz, $3::uuid,
-      $4::timestamptz, $2::timestamptz, 2, 4, '{"TABLE_BUY_IN":1,"TABLE_CASH_OUT":1}'::jsonb,
-      100, 80, $5, $6, 20, 20, 0, 'committed', timezone('utc', now())
+      $1, 'krydukthwdvccggbyjfw', 1, $2::timestamptz, $3::timestamptz, $4::uuid,
+      $5::timestamptz, $6::uuid, $7::timestamptz, $5::timestamptz,
+      2, 4, '{"TABLE_BUY_IN":1,"TABLE_CASH_OUT":1}'::jsonb,
+      100, 80, $8, $9, 20, 20, 0, 'committed', timezone('utc', now())
     ) returning batch_id;`, [
-      `v1/sha256/${compressedHash}.jsonl.gz`, createdAt[1], transactionIds[1], createdAt[0], "1".repeat(64), compressedHash,
+      `v1/sha256/${compressedHash}.jsonl.gz`, sql.typed(cutoff, 25), sql.typed(cursorStartCreatedAt, 25), cursorStartId,
+      sql.typed(createdAt[1], 25), transactionIds[1], sql.typed(createdAt[0], 25), "1".repeat(64), compressedHash,
     ]);
     const batchId = String(manifestRows[0].batch_id);
     const objectPath = `v1/sha256/${compressedHash}.jsonl.gz`;
@@ -924,12 +931,25 @@ async function assertArchivePrunerRoleContracts(sql) {
     assert.equal(untouchedGuardState[0].pruned_at, null);
     assert.equal(Number(untouchedGuardState[0].mappings), 0);
 
-    const proofRows = await tx.unsafe(`select public.chips_register_archive_id_proof(
-      $1, $2::uuid[], $3::bigint[], 'krydukthwdvccggbyjfw', 1, '2026-02-01T00:00:00Z',
-      null, null, $4::timestamptz, $5::uuid, $6::timestamptz, $4::timestamptz,
-      '{"TABLE_BUY_IN":1,"TABLE_CASH_OUT":1}'::jsonb, 100, 80, $7, $8, 20, 20, 0
-    ) as result;`, [objectPath, transactionIds, entryIds, createdAt[1], transactionIds[1], createdAt[0], "1".repeat(64), compressedHash]);
-    assert.equal(proofRows[0].result.state, "proof_registered", "real proof function must pass through owner-role RLS");
+    const pruneStore = createPruneStore({
+      unsafe: (...args) => tx.unsafe(...args),
+      begin: async (callback) => callback({
+        unsafe: (query, parameters) => query === "set transaction isolation level repeatable read;"
+          ? Promise.resolve([])
+          : tx.unsafe(query, parameters),
+      }),
+      typed: (value, type) => sql.typed(value, type),
+    });
+    const adapterManifest = await pruneStore.getManifest(objectPath);
+    assert.deepEqual([
+      adapterManifest.cutoff, adapterManifest.cursor_start_created_at,
+      adapterManifest.cursor_end_created_at, adapterManifest.first_created_at, adapterManifest.last_created_at,
+    ], [
+      "2026-02-01 00:00:00.123456+00", "2025-12-31 23:59:59.654321+00",
+      "2026-01-01 00:00:00.000002+00", "2026-01-01 00:00:00.000001+00", "2026-01-01 00:00:00.000002+00",
+    ], "real PostgreSQL adapter must preserve manifest microseconds");
+    const proofResult = await pruneStore.registerProof(adapterManifest, { transactionIds, entryIds });
+    assert.equal(proofResult.state, "proof_registered", "real PostgreSQL adapter must preserve microseconds when registering proof");
 
     await expectSavepointError(tx, "archive_direct_receipt", () => tx.unsafe(`update public.chips_ledger_archive_batches
       set pruned_at = timezone('utc', now()),
