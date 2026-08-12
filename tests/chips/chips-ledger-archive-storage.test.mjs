@@ -7,7 +7,14 @@ import {
   buildExportRecord,
   buildManifest,
 } from "../../scripts/ops/chips-ledger-archive-export.mjs";
-import { ARCHIVE_BUCKET, ARCHIVE_MAX_BYTES, createManifestStore, storeArchive } from "../../scripts/ops/chips-ledger-archive-store.mjs";
+import {
+  ARCHIVE_BUCKET,
+  ARCHIVE_MAX_BYTES,
+  createManifestStore,
+  resolveStorageTarget,
+  storeArchive,
+  verifyArchiveBucket,
+} from "../../scripts/ops/chips-ledger-archive-store.mjs";
 
 const TX_ID = "00000000-0000-4000-8000-000000000001";
 const USER_ID = "00000000-0000-4000-8000-000000000002";
@@ -36,7 +43,7 @@ function bucket() {
   };
 }
 
-function makeFetch({ initialObject = null, bucketInitiallyExists = false } = {}) {
+function makeFetch({ initialObject = null, bucketInitiallyExists = false, bucketValue = bucket() } = {}) {
   let object = initialObject;
   let bucketExists = bucketInitiallyExists;
   const calls = [];
@@ -45,7 +52,7 @@ function makeFetch({ initialObject = null, bucketInitiallyExists = false } = {})
     const method = init.method || "GET";
     calls.push({ method, path: requestUrl.pathname, headers: new Headers(init.headers || {}) });
     if (requestUrl.pathname === `/storage/v1/bucket/${ARCHIVE_BUCKET}` && method === "GET") {
-      return bucketExists ? responseJson(bucket()) : responseJson({ message: "not found" }, 400);
+      return bucketExists ? responseJson(bucketValue) : responseJson({ message: "not found" }, 400);
     }
     if (requestUrl.pathname === "/storage/v1/bucket" && method === "POST") {
       bucketExists = true;
@@ -130,6 +137,20 @@ fs.writeFileSync(artifactPath, archive.compressedBytes, { mode: 0o600 });
 fs.writeFileSync(manifestPath, `${JSON.stringify(localManifest)}\n`, { mode: 0o600 });
 
 try {
+  const publicBucketStorage = makeFetch({
+    bucketInitiallyExists: true,
+    bucketValue: { ...bucket(), public: true },
+  });
+  await assert.rejects(
+    () => verifyArchiveBucket(resolveStorageTarget("stage", ENV), { fetch: publicBucketStorage.fetch }),
+    /must be private/,
+  );
+  assert.deepEqual(
+    publicBucketStorage.calls.map(({ method, path: requestPath }) => [method, requestPath]),
+    [["GET", `/storage/v1/bucket/${ARCHIVE_BUCKET}`]],
+    "read-only bucket verification must never create or update a bucket",
+  );
+
   const firstStorage = makeFetch();
   const firstStore = makeStore();
   const first = await storeArchive({

@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import postgres from "postgres";
+import { createPruneStore } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
 
 const dbUrl = process.env.CHIPS_MIGRATIONS_TEST_DB_URL;
 const allowDrop = process.env.CHIPS_MIGRATIONS_ALLOW_DROP === "1";
@@ -18,10 +19,10 @@ const seedKey = "seed:treasury:v1";
 const seedAmount = 1000000;
 const botBankrollSeedKey = "seed:poker-bot-bankroll:v1";
 const botBankrollSeedAmount = 1000000;
-const primaryUserId = "00000000-0000-0000-0000-000000000001";
-const idempotentUserId = "00000000-0000-0000-0000-000000000002";
-const conflictUserId = "00000000-0000-0000-0000-000000000003";
-const crossUserId = "00000000-0000-0000-0000-000000000004";
+const primaryUserId = "00000000-0000-4000-8000-000000000001";
+const idempotentUserId = "00000000-0000-4000-8000-000000000002";
+const conflictUserId = "00000000-0000-4000-8000-000000000003";
+const crossUserId = "00000000-0000-4000-8000-000000000004";
 const assertTestDatabase = async (sql) => {
   const rows = await sql`select current_database() as name;`;
   const name = rows?.[0]?.name || "";
@@ -705,6 +706,327 @@ async function assertIdempotencyRegistryParity(sql) {
   };
 }
 
+async function expectSavepointError(tx, savepoint, operation, expectedMessage) {
+  assert.match(savepoint, /^[a-z_]+$/);
+  await tx.unsafe(`savepoint ${savepoint};`);
+  let caught = null;
+  try {
+    await operation();
+  } catch (error) {
+    caught = error;
+  }
+  await tx.unsafe(`rollback to savepoint ${savepoint};`);
+  await tx.unsafe(`release savepoint ${savepoint};`);
+  assert.match(caught?.message || "", expectedMessage);
+}
+
+async function assertArchivePrunerRoleContracts(sql) {
+  const hashes = await sql`
+    select
+      public.chips_archive_uuid_ids_sha256(array[
+        '00000000-0000-4000-8000-00000000000a'::uuid,
+        '00000000-0000-4000-8000-00000000000b'::uuid
+      ]) as transaction_hash,
+      public.chips_archive_bigint_ids_sha256(array[1::bigint, 2, 10, 9007199254740993]) as entry_hash;
+  `;
+  assert.equal(hashes[0].transaction_hash, "726400e7a16ea9e7ca71ee707fb025934613059de29366a5ae7f626256b688fa");
+  assert.equal(hashes[0].entry_hash, "58eb8c6b6deb82261f809eb3277a61b010224ae0fe568f199ced00f51f7dd8ac");
+
+  const roleRows = await sql`
+    select rolsuper, rolcreatedb, rolcreaterole, rolreplication,
+           rolbypassrls, rolcanlogin, rolinherit
+      from pg_catalog.pg_roles
+      where rolname = 'chips_ledger_archive_pruner';
+  `;
+  assert.deepEqual(roleRows[0], {
+    rolsuper: false,
+    rolcreatedb: false,
+    rolcreaterole: false,
+    rolreplication: false,
+    rolbypassrls: false,
+    rolcanlogin: false,
+    rolinherit: false,
+  }, "archive pruner must remain a least-privilege NOLOGIN role");
+
+  const functionOwners = await sql`
+    select
+      pg_catalog.pg_get_userbyid((
+        select proowner from pg_catalog.pg_proc
+        where oid = 'public.chips_assert_archive_prune_stage()'::regprocedure
+      )) as gate_owner,
+      pg_catalog.pg_get_userbyid((
+        select proowner from pg_catalog.pg_proc
+        where oid = 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)'::regprocedure
+      )) as prune_owner,
+      pg_catalog.pg_get_userbyid((
+        select proowner from pg_catalog.pg_proc
+        where oid = 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)'::regprocedure
+      )) as prune_internal_owner,
+      (select proisstrict from pg_catalog.pg_proc
+       where oid = 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)'::regprocedure) as prune_internal_strict,
+      pg_catalog.to_regclass('public.chips_transaction_idempotency_archive_batch_idx') is not null as archive_mapping_index_exists,
+      exists (
+        select 1
+          from pg_catalog.pg_auth_members memberships
+          join pg_catalog.pg_roles granted_role on granted_role.oid = memberships.roleid
+          join pg_catalog.pg_roles member_role on member_role.oid = memberships.member
+          join pg_catalog.pg_roles grantor_role on grantor_role.oid = memberships.grantor
+          where granted_role.rolname = 'chips_ledger_archive_pruner'
+            and not (
+              member_role.rolname = 'postgres'
+              and grantor_role.rolname = 'supabase_admin'
+              and memberships.admin_option
+              and not memberships.inherit_option
+              and not memberships.set_option
+            )
+      ) as unsafe_membership,
+      pg_catalog.has_schema_privilege('chips_ledger_archive_pruner', 'public', 'usage') as public_schema_usage,
+      pg_catalog.has_schema_privilege('chips_ledger_archive_pruner', 'public', 'create') as public_schema_create;
+  `;
+  assert.equal(functionOwners[0].gate_owner, "postgres", "read-only Stage identity gate must retain its privileged owner");
+  assert.equal(functionOwners[0].prune_owner, "chips_ledger_archive_pruner", "destructive function must use the NOLOGIN owner");
+  assert.equal(functionOwners[0].prune_internal_owner, "chips_ledger_archive_pruner", "internal pruning implementation must use the NOLOGIN owner");
+  assert.equal(functionOwners[0].prune_internal_strict, true, "internal pruning implementation must never receive NULL arguments");
+  assert.equal(functionOwners[0].archive_mapping_index_exists, false, "initial pruning measurement must not add an archive mapping index");
+  assert.equal(functionOwners[0].unsafe_membership, false, "only the managed non-inheriting ADMIN membership may remain");
+  assert.equal(functionOwners[0].public_schema_usage, true, "pruner needs schema usage for qualified objects");
+  assert.equal(functionOwners[0].public_schema_create, false, "temporary schema CREATE must be revoked");
+
+  const acl = await sql`
+    select
+      has_function_privilege('service_role', 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)', 'execute') as service_role_execute,
+      has_function_privilege('anon', 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)', 'execute') as anon_execute,
+      has_function_privilege('authenticated', 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)', 'execute') as authenticated_execute,
+      has_function_privilege('service_role', 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)', 'execute') as service_role_internal_execute,
+      has_function_privilege('anon', 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)', 'execute') as anon_internal_execute,
+      has_function_privilege('authenticated', 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)', 'execute') as authenticated_internal_execute,
+      has_function_privilege('service_role', 'public.chips_register_archive_id_proof(text,uuid[],bigint[],text,integer,timestamptz,timestamptz,uuid,timestamptz,uuid,timestamptz,timestamptz,jsonb,bigint,bigint,text,text,numeric,numeric,numeric)', 'execute') as service_role_proof_execute,
+      exists (
+        select 1 from pg_catalog.pg_proc procedures
+        cross join lateral pg_catalog.aclexplode(coalesce(procedures.proacl, pg_catalog.acldefault('f', procedures.proowner))) privileges
+        where procedures.oid = 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)'::regprocedure
+          and privileges.grantee = 'postgres'::regrole::oid
+          and privileges.privilege_type = 'EXECUTE'
+      ) as postgres_execute,
+      exists (
+        select 1 from pg_catalog.pg_proc procedures
+        cross join lateral pg_catalog.aclexplode(coalesce(procedures.proacl, pg_catalog.acldefault('f', procedures.proowner))) privileges
+        where procedures.oid = 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)'::regprocedure
+          and privileges.grantee = 'postgres'::regrole::oid
+          and privileges.privilege_type = 'EXECUTE'
+      ) as postgres_internal_execute;
+  `;
+  assert.equal(acl[0].service_role_execute, false, "service_role must not execute the destructive function");
+  assert.equal(acl[0].anon_execute, false, "anon must not execute the destructive function");
+  assert.equal(acl[0].authenticated_execute, false, "authenticated must not execute the destructive function");
+  assert.equal(acl[0].service_role_internal_execute, false, "service_role must not execute the internal destructive function");
+  assert.equal(acl[0].anon_internal_execute, false, "anon must not execute the internal destructive function");
+  assert.equal(acl[0].authenticated_internal_execute, false, "authenticated must not execute the internal destructive function");
+  assert.equal(acl[0].service_role_proof_execute, false, "service_role must not register immutable archive proof");
+  assert.equal(acl[0].postgres_execute, true, "the explicit operations role must execute the destructive function");
+  assert.equal(acl[0].postgres_internal_execute, false, "the operations role must not bypass the NULL-safe wrapper");
+
+  const ROLLBACK = new Error("archive-pruner-probe-rollback");
+  await sql.begin(async (tx) => {
+    await tx.unsafe("set transaction isolation level serializable;");
+    await tx.unsafe(`create or replace function public.chips_assert_archive_prune_stage()
+      returns text language sql security definer set search_path = ''
+      as $override$ select '7656985631720456337'::text $override$;`);
+    const tableId = "00000000-0000-4000-8000-00000000b401";
+    const escrowId = "00000000-0000-4000-8000-00000000b402";
+    const transactionIds = [
+      "00000000-0000-4000-8000-00000000b403",
+      "00000000-0000-4000-8000-00000000b404",
+    ];
+    const cursorStartId = "00000000-0000-4000-8000-00000000b400";
+    const cutoff = "2026-02-01T00:00:00.123456Z";
+    const cursorStartCreatedAt = "2025-12-31T23:59:59.654321Z";
+    const createdAt = ["2026-01-01T00:00:00.000001Z", "2026-01-01T00:00:00.000002Z"];
+    await tx`insert into public.poker_tables (id, status) values (${tableId}, 'ACTIVE');`;
+    await tx`
+      insert into public.chips_accounts (id, account_type, system_key, status)
+      values (${escrowId}, 'ESCROW', ${`POKER_TABLE:${tableId}`}, 'active');
+    `;
+    for (let index = 0; index < transactionIds.length; index += 1) {
+      await tx.unsafe(`insert into public.chips_transactions (
+        id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at
+      ) values ($1::uuid, $2, $3::jsonb, $4, $5, $6, null, $7::timestamptz);`, [
+        transactionIds[index], `table:${tableId}`, { tableId }, `archive-pruner-probe:${index}`,
+        (index === 0 ? "a" : "b").repeat(64), index === 0 ? "TABLE_BUY_IN" : "TABLE_CASH_OUT", sql.typed(createdAt[index], 25),
+      ]);
+    }
+    const entryIds = [];
+    for (let index = 0; index < transactionIds.length; index += 1) {
+      const entryRows = await tx.unsafe(`with accounts as (
+        select id, system_key from public.chips_accounts
+        where (account_type = 'SYSTEM' and system_key = 'GENESIS') or id = $2::uuid
+      )
+      insert into public.chips_entries (transaction_id, account_id, amount, metadata)
+      select $1::uuid, id,
+             case
+               when $3::boolean and system_key = 'GENESIS' then -10
+               when $3::boolean then 10
+               when system_key = 'GENESIS' then 10
+               else -10
+             end,
+             '{}'::jsonb
+      from accounts order by system_key returning id;`, [transactionIds[index], escrowId, index === 0]);
+      entryIds.push(...entryRows.map((row) => String(row.id)).sort((left, right) => BigInt(left) < BigInt(right) ? -1 : 1));
+    }
+    const accountsBefore = await tx`
+      select id, balance, next_entry_seq from public.chips_accounts
+      where system_key in ('GENESIS', ${`POKER_TABLE:${tableId}`}) order by id;
+    `;
+    const compressedHash = "2".repeat(64);
+    const manifestRows = await tx.unsafe(`insert into public.chips_ledger_archive_batches (
+      object_path, project_ref, format_version, cutoff, cursor_start_created_at, cursor_start_id,
+      cursor_end_created_at, cursor_end_id,
+      first_created_at, last_created_at, transaction_count, entry_count, tx_types,
+      raw_bytes, compressed_bytes, raw_sha256, compressed_sha256, credits, debits,
+      net_amount, status, committed_at
+    ) values (
+      $1, 'krydukthwdvccggbyjfw', 1, $2::timestamptz, $3::timestamptz, $4::uuid,
+      $5::timestamptz, $6::uuid, $7::timestamptz, $5::timestamptz,
+      2, 4, '{"TABLE_BUY_IN":1,"TABLE_CASH_OUT":1}'::jsonb,
+      100, 80, $8, $9, 20, 20, 0, 'committed', timezone('utc', now())
+    ) returning batch_id;`, [
+      `v1/sha256/${compressedHash}.jsonl.gz`, sql.typed(cutoff, 25), sql.typed(cursorStartCreatedAt, 25), cursorStartId,
+      sql.typed(createdAt[1], 25), transactionIds[1], sql.typed(createdAt[0], 25), "1".repeat(64), compressedHash,
+    ]);
+    const batchId = String(manifestRows[0].batch_id);
+    const objectPath = `v1/sha256/${compressedHash}.jsonl.gz`;
+    const generatedHashes = await tx.unsafe(`select
+      public.chips_archive_uuid_ids_sha256($1::uuid[]) as transaction_hash,
+      public.chips_archive_bigint_ids_sha256($2::bigint[]) as entry_hash;`, [transactionIds, entryIds]);
+    const transactionHash = generatedHashes[0].transaction_hash;
+    const entryHash = generatedHashes[0].entry_hash;
+
+    await expectSavepointError(tx, "archive_direct_proof", () => tx.unsafe(`update public.chips_ledger_archive_batches
+      set archived_transaction_ids_sha256 = $2,
+          archived_entry_ids_sha256 = $3,
+          archive_proof_verified_at = timezone('utc', now())
+      where batch_id = $1;`, [batchId, transactionHash, entryHash]), /proof may only be written by the archive pruner/i);
+    await expectSavepointError(tx, "archive_direct_mapping", () => tx.unsafe(`update public.chips_transaction_idempotency
+      set archive_batch_id = $2
+      where transaction_id = $1::uuid;`, [transactionIds[0], batchId]), /mapping may only be written by the archive pruner/i);
+    await expectSavepointError(tx, "archive_combined_transition", async () => {
+      await tx.unsafe("set local role chips_ledger_archive_pruner;");
+      await tx.unsafe(`update public.chips_ledger_archive_batches
+        set archived_transaction_ids_sha256 = $2,
+            archived_entry_ids_sha256 = $3,
+            archive_proof_verified_at = timezone('utc', now()),
+            pruned_at = timezone('utc', now()),
+            pruned_transaction_count = 2,
+            pruned_entry_count = 4,
+            pruned_transaction_ids_sha256 = $2,
+            pruned_entry_ids_sha256 = $3
+        where batch_id = $1;`, [batchId, transactionHash, entryHash]);
+    }, /proof and prune receipt require separate transitions/i);
+
+    const untouchedGuardState = await tx.unsafe(`select
+      (select archive_proof_verified_at from public.chips_ledger_archive_batches where batch_id = $1) as proof_at,
+      (select pruned_at from public.chips_ledger_archive_batches where batch_id = $1) as pruned_at,
+      (select count(*) from public.chips_transaction_idempotency where archive_batch_id = $1) as mappings;`, [batchId]);
+    assert.equal(untouchedGuardState[0].proof_at, null);
+    assert.equal(untouchedGuardState[0].pruned_at, null);
+    assert.equal(Number(untouchedGuardState[0].mappings), 0);
+
+    const pruneStore = createPruneStore({
+      unsafe: (...args) => tx.unsafe(...args),
+      begin: async (callback) => callback({
+        unsafe: (query, parameters) => query === "set transaction isolation level repeatable read;"
+          ? Promise.resolve([])
+          : tx.unsafe(query, parameters),
+      }),
+      typed: (value, type) => sql.typed(value, type),
+    });
+    const adapterManifest = await pruneStore.getManifest(objectPath);
+    assert.deepEqual([
+      adapterManifest.cutoff, adapterManifest.cursor_start_created_at,
+      adapterManifest.cursor_end_created_at, adapterManifest.first_created_at, adapterManifest.last_created_at,
+    ], [
+      "2026-02-01 00:00:00.123456+00", "2025-12-31 23:59:59.654321+00",
+      "2026-01-01 00:00:00.000002+00", "2026-01-01 00:00:00.000001+00", "2026-01-01 00:00:00.000002+00",
+    ], "real PostgreSQL adapter must preserve manifest microseconds");
+    const proofResult = await pruneStore.registerProof(adapterManifest, { transactionIds, entryIds });
+    assert.equal(proofResult.state, "proof_registered", "real PostgreSQL adapter must preserve microseconds when registering proof");
+
+    await expectSavepointError(tx, "archive_direct_receipt", () => tx.unsafe(`update public.chips_ledger_archive_batches
+      set pruned_at = timezone('utc', now()),
+          pruned_transaction_count = 2,
+          pruned_entry_count = 4,
+          pruned_transaction_ids_sha256 = $2,
+          pruned_entry_ids_sha256 = $3
+      where batch_id = $1;`, [batchId, transactionHash, entryHash]), /receipt may only be written by the archive pruner/i);
+
+    await tx.unsafe("savepoint archive_active_table_probe;");
+    let activeTableError = null;
+    try {
+      await tx.unsafe(
+        "select public.chips_prune_committed_archive_batch($1, $2::uuid[], $3::bigint[], false) as result;",
+        [objectPath, transactionIds, entryIds],
+      );
+    } catch (error) {
+      activeTableError = error;
+    }
+    await tx.unsafe("rollback to savepoint archive_active_table_probe;");
+    await tx.unsafe("release savepoint archive_active_table_probe;");
+    assert.match(activeTableError?.message || "", /active table or non-zero\/missing escrow/i);
+    await tx`update public.poker_tables set status = 'CLOSED' where id = ${tableId};`;
+
+    await expectSavepointError(tx, "archive_null_execute", () => tx.unsafe(
+      "select public.chips_prune_committed_archive_batch($1, $2::uuid[], $3::bigint[], $4::boolean) as result;",
+      [objectPath, transactionIds, entryIds, null],
+    ), /execute flag must not be NULL/i);
+    const nullExecuteState = await tx.unsafe(`select
+      (select count(*) from public.chips_transactions where id = any($1::uuid[])) as hot_transactions,
+      (select count(*) from public.chips_entries where id = any($2::bigint[])) as hot_entries,
+      (select count(*) from public.chips_transaction_idempotency where transaction_id = any($1::uuid[]) and archive_batch_id is not null) as mappings,
+      (select pruned_at from public.chips_ledger_archive_batches where batch_id = $3) as pruned_at;`,
+      [transactionIds, entryIds, batchId]);
+    assert.equal(Number(nullExecuteState[0].hot_transactions), 2, "NULL execute must not delete transactions");
+    assert.equal(Number(nullExecuteState[0].hot_entries), 4, "NULL execute must not delete entries");
+    assert.equal(Number(nullExecuteState[0].mappings), 0, "NULL execute must not create archive mappings");
+    assert.equal(nullExecuteState[0].pruned_at, null, "NULL execute must not write a prune receipt");
+
+    const dryRows = await tx.unsafe(
+      "select public.chips_prune_committed_archive_batch($1, $2::uuid[], $3::bigint[], false) as result;",
+      [objectPath, transactionIds, entryIds],
+    );
+    assert.equal(dryRows[0].result.state, "ready", "validated batch must be ready before DELETE");
+    const executeRows = await tx.unsafe(
+      "select public.chips_prune_committed_archive_batch($1, $2::uuid[], $3::bigint[], true) as result;",
+      [objectPath, transactionIds, entryIds],
+    );
+    assert.equal(executeRows[0].result.state, "pruned", "real destructive function must pass through owner-role RLS");
+    await tx.unsafe("set constraints all immediate;");
+    const retryRows = await tx.unsafe(
+      "select public.chips_prune_committed_archive_batch($1, $2::uuid[], $3::bigint[], true) as result;",
+      [objectPath, transactionIds, entryIds],
+    );
+    assert.equal(retryRows[0].result.state, "already_pruned", "retry must not require deleted hot rows");
+
+    const accountsAfter = await tx`
+      select id, balance, next_entry_seq from public.chips_accounts
+      where system_key in ('GENESIS', ${`POKER_TABLE:${tableId}`}) order by id;
+    `;
+    assert.deepEqual(accountsAfter, accountsBefore, "pruning must preserve balances and account sequences exactly");
+    const receiptRows = await tx.unsafe(`select
+      (select count(*) from public.chips_transactions where id = any($1::uuid[])) as hot_transactions,
+      (select count(*) from public.chips_entries where id = any($2::bigint[])) as hot_entries,
+      (select count(*) from public.chips_transaction_idempotency where transaction_id = any($1::uuid[]) and archive_batch_id = $3) as mappings,
+      (select pruned_transaction_count from public.chips_ledger_archive_batches where batch_id = $3) as receipt_count;`,
+      [transactionIds, entryIds, batchId]);
+    assert.equal(Number(receiptRows[0].hot_transactions), 0);
+    assert.equal(Number(receiptRows[0].hot_entries), 0);
+    assert.equal(Number(receiptRows[0].mappings), 2);
+    assert.equal(Number(receiptRows[0].receipt_count), 2);
+    throw ROLLBACK;
+  }).catch((error) => {
+    if (error !== ROLLBACK) throw error;
+  });
+}
+
 async function assertBuyInSequencing(sql, expectedTreasurySeq) {
   const { getUserBalance, listUserLedger } = await withLedger();
   const userId = primaryUserId;
@@ -799,6 +1121,7 @@ async function main() {
 
   await runMigrations(sql, migrationsWithoutBootstrapSeeds);
   await ensureGenesisFixture(sql);
+  await assertArchivePrunerRoleContracts(sql);
   await expectNegativeBalanceGuard(sql);
   await expectInsufficientBuyIn(sql);
   await expectInvalidMetadata(sql);
