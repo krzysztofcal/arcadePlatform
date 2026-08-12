@@ -717,6 +717,22 @@ async function assertArchivePrunerRoleContracts(sql) {
   assert.equal(hashes[0].transaction_hash, "726400e7a16ea9e7ca71ee707fb025934613059de29366a5ae7f626256b688fa");
   assert.equal(hashes[0].entry_hash, "58eb8c6b6deb82261f809eb3277a61b010224ae0fe568f199ced00f51f7dd8ac");
 
+  const roleRows = await sql`
+    select rolsuper, rolcreatedb, rolcreaterole, rolreplication,
+           rolbypassrls, rolcanlogin, rolinherit
+      from pg_catalog.pg_roles
+      where rolname = 'chips_ledger_archive_pruner';
+  `;
+  assert.deepEqual(roleRows[0], {
+    rolsuper: false,
+    rolcreatedb: false,
+    rolcreaterole: false,
+    rolreplication: false,
+    rolbypassrls: false,
+    rolcanlogin: false,
+    rolinherit: false,
+  }, "archive pruner must remain a least-privilege NOLOGIN role");
+
   const acl = await sql`
     select
       has_function_privilege('service_role', 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)', 'execute') as service_role_execute,

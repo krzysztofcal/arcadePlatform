@@ -227,13 +227,21 @@ $$;
 do $$
 begin
   if not exists (select 1 from pg_catalog.pg_roles where rolname = 'chips_ledger_archive_pruner') then
-    create role chips_ledger_archive_pruner;
+    create role chips_ledger_archive_pruner nologin noinherit;
+  end if;
+  if exists (
+    select 1
+      from pg_catalog.pg_roles
+      where rolname = 'chips_ledger_archive_pruner'
+        and (
+          rolsuper or rolcreatedb or rolcreaterole or rolreplication
+          or rolbypassrls or rolcanlogin or rolinherit
+        )
+  ) then
+    raise exception 'chips_ledger_archive_pruner has unsafe role attributes';
   end if;
 end;
 $$;
-
-alter role chips_ledger_archive_pruner
-  nologin noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
 
 grant usage on schema public, extensions to chips_ledger_archive_pruner;
 grant execute on function pg_catalog.pg_control_system() to chips_ledger_archive_pruner;
