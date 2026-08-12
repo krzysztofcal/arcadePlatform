@@ -143,13 +143,13 @@ function verifyCursor(cursor, label) {
   return { created_at: text(cursor.created_at), id: text(cursor.id).toLowerCase() };
 }
 
-function verifyManifestShape(manifest, artifactPath, target) {
+function verifyManifestShape(manifest, artifactName, target) {
   if (!manifest || typeof manifest !== "object") fail("local manifest must be an object");
   if (manifest.schema_version !== EXPORT_SCHEMA_VERSION || manifest.artifact_type !== "chips_ledger_archive" || manifest.format !== "jsonl.gz") {
     fail("local manifest has an unsupported archive format");
   }
   if (manifest.target !== target.target) fail("local manifest target does not match --target");
-  if (manifest.artifact !== path.basename(artifactPath)) fail("local manifest artifact name does not match --artifact");
+  if (manifest.artifact !== artifactName) fail("local manifest artifact name does not match the archive");
   if (!manifest.cutoff || typeof manifest.cutoff.created_at !== "string") fail("local manifest cutoff is missing");
   timestampToMicros(manifest.cutoff.created_at);
   if (manifest.cutoff.rule !== "transaction.created_at < cutoff") fail("local manifest cutoff rule is unsupported");
@@ -274,16 +274,10 @@ export function buildObjectPath(manifestOrSha) {
   return `v1/sha256/${sha}.jsonl.gz`;
 }
 
-export function verifyLocalArchive({ artifactPath, manifestPath, target }) {
-  if (!artifactPath || !manifestPath) fail("--artifact and --manifest are required");
-  const artifact = path.resolve(artifactPath);
-  const manifestFile = path.resolve(manifestPath);
-  const stat = fs.statSync(artifact);
-  if (!stat.isFile()) fail("artifact must be a regular file");
-  if (stat.size > ARCHIVE_MAX_BYTES) fail("artifact exceeds the 6 MiB Storage limit");
-  const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
-  const { cursorStart, cursorEnd } = verifyManifestShape(manifest, artifact, target);
-  const compressedBytes = fs.readFileSync(artifact);
+export function verifyArchiveBytes({ compressedBytes: inputBytes, manifest, target, artifactName }) {
+  const compressedBytes = Buffer.from(inputBytes || []);
+  if (compressedBytes.length > ARCHIVE_MAX_BYTES) fail("artifact exceeds the 6 MiB Storage limit");
+  const { cursorStart, cursorEnd } = verifyManifestShape(manifest, artifactName, target);
   const compressedSha256 = crypto.createHash("sha256").update(compressedBytes).digest("hex");
   if (compressedBytes.length !== manifest.bytes.compressed || compressedSha256 !== manifest.sha256.compressed_artifact) {
     fail("local compressed artifact does not match its manifest");
@@ -303,8 +297,6 @@ export function verifyLocalArchive({ artifactPath, manifestPath, target }) {
   const expectedRatio = rawBytes.length === 0 ? null : Number((compressedBytes.length / rawBytes.length).toFixed(6));
   if (manifest.bytes.compression_ratio_compressed_over_raw !== expectedRatio) fail("local compression ratio does not match its manifest");
   return {
-    artifactPath: artifact,
-    manifestPath: manifestFile,
     manifest,
     compressedBytes,
     rawBytes,
@@ -313,6 +305,25 @@ export function verifyLocalArchive({ artifactPath, manifestPath, target }) {
     cursorStart,
     cursorEnd,
     summary,
+  };
+}
+
+export function verifyLocalArchive({ artifactPath, manifestPath, target }) {
+  if (!artifactPath || !manifestPath) fail("--artifact and --manifest are required");
+  const artifact = path.resolve(artifactPath);
+  const manifestFile = path.resolve(manifestPath);
+  const stat = fs.statSync(artifact);
+  if (!stat.isFile()) fail("artifact must be a regular file");
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+  return {
+    artifactPath: artifact,
+    manifestPath: manifestFile,
+    ...verifyArchiveBytes({
+      compressedBytes: fs.readFileSync(artifact),
+      manifest,
+      target,
+      artifactName: path.basename(artifact),
+    }),
   };
 }
 
@@ -457,6 +468,16 @@ async function downloadObject(localArchive, storageTarget, deps = {}) {
   const response = await storageRequest(storageTarget, objectRequestPath(localArchive.objectPath), { method: "GET" }, deps);
   if (!response.ok) return { response, downloaded: null };
   return { response, downloaded: Buffer.from(await response.arrayBuffer()) };
+}
+
+export async function downloadPrivateArchiveObject(storageTarget, objectPath, deps = {}) {
+  const startedAt = Date.now();
+  const response = await storageRequest(storageTarget, objectRequestPath(objectPath), { method: "GET" }, deps);
+  if (!response.ok) storageFailure("private object download", response);
+  return {
+    bytes: Buffer.from(await response.arrayBuffer()),
+    downloadMs: Date.now() - startedAt,
+  };
 }
 
 export async function uploadOrVerifyObject(localArchive, storageTarget, deps = {}) {

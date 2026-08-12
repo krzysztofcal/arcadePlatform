@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync, gzipSync } from "node:zlib";
 import postgres from "postgres";
+import { writeExclusiveFiles } from "./_shared/chips-ledger-archive-files.mjs";
 
 export const EXPORT_SCHEMA_VERSION = 1;
 export const DEFAULT_CUTOFF_DAYS = 30;
@@ -626,42 +627,11 @@ function groupEntries(rows, candidateIds) {
   return groups;
 }
 
-function writeExclusive(filePath, data) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  let descriptor = null;
-  let created = false;
-  try {
-    descriptor = fs.openSync(filePath, "wx", 0o600);
-    created = true;
-    fs.writeSync(descriptor, data);
-    fs.fsyncSync(descriptor);
-  } catch (error) {
-    if (created) {
-      try { fs.unlinkSync(filePath); } catch { /* best effort cleanup of our own partial artifact */ }
-    }
-    throw error;
-  } finally {
-    if (descriptor !== null) fs.closeSync(descriptor);
-  }
-}
-
 function writeOutput(options, archive, manifest) {
-  let artifactCreated = false;
-  let manifestCreated = false;
-  try {
-    writeExclusive(options.outputPath, archive.compressedBytes);
-    artifactCreated = true;
-    writeExclusive(options.manifestPath, `${stringifyJson(manifest)}\n`);
-    manifestCreated = true;
-  } catch (error) {
-    if (manifestCreated) {
-      try { fs.unlinkSync(options.manifestPath); } catch { /* best effort cleanup of our own artifact */ }
-    }
-    if (artifactCreated) {
-      try { fs.unlinkSync(options.outputPath); } catch { /* best effort cleanup of our own artifact */ }
-    }
-    throw error;
-  }
+  writeExclusiveFiles([
+    { path: options.outputPath, data: archive.compressedBytes },
+    { path: options.manifestPath, data: `${stringifyJson(manifest)}\n` },
+  ]);
 }
 
 function outputMetrics(manifest, options) {
