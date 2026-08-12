@@ -764,11 +764,15 @@ async function assertArchivePrunerRoleContracts(sql) {
     select
       has_function_privilege('service_role', 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)', 'execute') as service_role_execute,
       has_function_privilege('anon', 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)', 'execute') as anon_execute,
-      has_function_privilege('authenticated', 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)', 'execute') as authenticated_execute;
+      has_function_privilege('authenticated', 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)', 'execute') as authenticated_execute,
+      has_function_privilege('service_role', 'public.chips_register_archive_id_proof(text,uuid[],bigint[],text,integer,timestamptz,timestamptz,uuid,timestamptz,uuid,timestamptz,timestamptz,jsonb,bigint,bigint,text,text,numeric,numeric,numeric)', 'execute') as service_role_proof_execute,
+      has_function_privilege('postgres', 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)', 'execute') as postgres_execute;
   `;
   assert.equal(acl[0].service_role_execute, false, "service_role must not execute the destructive function");
   assert.equal(acl[0].anon_execute, false, "anon must not execute the destructive function");
   assert.equal(acl[0].authenticated_execute, false, "authenticated must not execute the destructive function");
+  assert.equal(acl[0].service_role_proof_execute, false, "service_role must not register immutable archive proof");
+  assert.equal(acl[0].postgres_execute, true, "the explicit operations role must execute the destructive function");
 
   const ROLLBACK = new Error("archive-pruner-probe-rollback");
   await sql.begin(async (tx) => {
