@@ -241,9 +241,12 @@ assert.deepEqual(localEvidence.txTypes, { TABLE_BUY_IN: 1, TABLE_CASH_OUT: 1 });
 
 const userRecords = structuredClone(records);
 userRecords[0].transaction.user_id = "00000000-0000-4000-8000-000000000099";
+userRecords[0].entries[0].account.account_type = "USER";
+userRecords[0].entries[0].account.user_id = userRecords[0].transaction.user_id;
+userRecords[0].entries[0].account.system_key = null;
 assert.throws(
   () => buildPruneEvidence({ records: userRecords, manifest: localManifest, summary: localEvidence }),
-  /cannot prune USER ledger history/,
+  /cannot prune USER ledger history \(user_transactions=1, user_entries=1, distinct_tables=1\)/,
 );
 
 process.stdout.write("chips-ledger-archive-pruning tests passed\n");

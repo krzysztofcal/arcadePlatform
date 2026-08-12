@@ -151,25 +151,30 @@ export function buildPruneEvidence(localArchive) {
 
     const systemEntries = record.entries.filter((entry) => text(entry?.account?.account_type).toUpperCase() === "SYSTEM");
     const escrowEntries = record.entries.filter((entry) => text(entry?.account?.account_type).toUpperCase() === "ESCROW");
-    userEntries += record.entries.filter((entry) => text(entry?.account?.account_type).toUpperCase() === "USER").length;
-    if (systemEntries.length !== 1 || escrowEntries.length !== 1 || userEntries !== 0) {
+    const recordUserEntries = record.entries.filter((entry) => text(entry?.account?.account_type).toUpperCase() === "USER").length;
+    userEntries += recordUserEntries;
+    if (escrowEntries.length !== 1 || (recordUserEntries === 0 && systemEntries.length !== 1)) {
       fail("technical archive transaction must contain one SYSTEM and one ESCROW entry and no USER entry");
     }
     if (text(escrowEntries[0].account.system_key) !== `POKER_TABLE:${tableId}`) {
       fail("archive escrow entry does not match its table marker");
     }
-    const systemAmount = BigInt(systemEntries[0].amount);
-    const escrowAmount = BigInt(escrowEntries[0].amount);
-    if (systemAmount + escrowAmount !== 0n) fail("technical archive transaction is not conserved");
-    if (txType === "TABLE_BUY_IN" && !(systemAmount < 0n && escrowAmount > 0n)) {
-      fail("TABLE_BUY_IN archive entry direction is invalid");
-    }
-    if (txType === "TABLE_CASH_OUT" && !(escrowAmount < 0n && systemAmount > 0n)) {
-      fail("TABLE_CASH_OUT archive entry direction is invalid");
+    if (recordUserEntries === 0) {
+      const systemAmount = BigInt(systemEntries[0].amount);
+      const escrowAmount = BigInt(escrowEntries[0].amount);
+      if (systemAmount + escrowAmount !== 0n) fail("technical archive transaction is not conserved");
+      if (txType === "TABLE_BUY_IN" && !(systemAmount < 0n && escrowAmount > 0n)) {
+        fail("TABLE_BUY_IN archive entry direction is invalid");
+      }
+      if (txType === "TABLE_CASH_OUT" && !(escrowAmount < 0n && systemAmount > 0n)) {
+        fail("TABLE_CASH_OUT archive entry direction is invalid");
+      }
     }
     txTypes[txType] = (txTypes[txType] || 0) + 1;
   }
-  if (userTransactions !== 0 || userEntries !== 0) fail("Stage 2B.4 cannot prune USER ledger history");
+  if (userTransactions !== 0 || userEntries !== 0) {
+    fail(`Stage 2B.4 cannot prune USER ledger history (user_transactions=${userTransactions}, user_entries=${userEntries}, distinct_tables=${tables.size})`);
+  }
   if (canonicalJson(txTypes) !== canonicalJson(localArchive.manifest.batch.tx_types)) fail("technical tx_type evidence differs from archive manifest");
   return {
     ...proofs,
