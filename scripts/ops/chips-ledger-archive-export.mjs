@@ -600,13 +600,14 @@ function resolveOptions(args, env, cwd, now) {
   return { ...target, cutoff, batchSize, cursor: resolveCursor(args), outputPath, manifestPath };
 }
 
-async function readSnapshot(sql, options) {
+export async function readSnapshot(sql, options) {
+  const timestampParam = (value) => value == null || typeof sql.typed !== "function" ? value : sql.typed(value, 25);
   return sql.begin(async (tx) => {
     await tx.unsafe("set transaction isolation level repeatable read, read only;");
     const candidates = await tx.unsafe(CANDIDATE_SQL, [
-      options.cutoff,
+      timestampParam(options.cutoff),
       options.batchSize,
-      options.cursor?.created_at || null,
+      timestampParam(options.cursor?.created_at || null),
       options.cursor?.id || null,
     ]);
     const ids = candidates.map((candidate) => text(candidate.id));

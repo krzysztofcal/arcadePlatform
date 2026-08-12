@@ -4,6 +4,7 @@ import {
   buildExportRecord,
   buildManifest,
   evaluateTableEligibility,
+  readSnapshot,
   runExport,
   serializeRecords,
   resolveTarget,
@@ -66,6 +67,39 @@ const candidateA = candidate(TX_A, "2026-01-01T00:00:00.000001Z");
 const candidateB = candidate(TX_B, "2026-01-01T00:00:00.000001Z");
 const recordA = makeRecord(candidateA, 1);
 const recordB = makeRecord(candidateB, 3);
+
+async function assertSnapshotTimestampBindings() {
+  const queries = [];
+  const sql = {
+    typed: (value, type) => ({ value, type }),
+    begin: async (callback) => callback({
+      unsafe: async (query, parameters = []) => {
+        queries.push({ query, parameters });
+        return [];
+      },
+    }),
+  };
+  const cutoff = "2026-08-07T03:32:29.388506Z";
+  const cursorCreatedAt = "2026-08-07T03:32:24.544123Z";
+  const cursor = { created_at: cursorCreatedAt, id: TX_A };
+
+  await readSnapshot(sql, { cutoff, batchSize: 2, cursor });
+  const boundPage = queries.find(({ parameters }) => parameters.length === 4);
+  assert.deepEqual(boundPage?.parameters, [
+    { value: cutoff, type: 25 },
+    2,
+    { value: cursorCreatedAt, type: 25 },
+    TX_A,
+  ]);
+
+  queries.length = 0;
+  await readSnapshot(sql, { cutoff, batchSize: 2, cursor: null });
+  const unboundedPage = queries.find(({ parameters }) => parameters.length === 4);
+  assert.equal(unboundedPage?.parameters[2], null);
+  assert.equal(unboundedPage?.parameters[3], null);
+}
+
+await assertSnapshotTimestampBindings();
 
 assert.throws(() => resolveTarget("unknown", {}), /target must be exactly stage or prod/);
 await assert.rejects(
