@@ -91,10 +91,17 @@ begin
       from pg_catalog.pg_auth_members memberships
       join pg_catalog.pg_roles granted_role on granted_role.oid = memberships.roleid
       join pg_catalog.pg_roles member_role on member_role.oid = memberships.member
+      join pg_catalog.pg_roles grantor_role on grantor_role.oid = memberships.grantor
       where granted_role.rolname = 'chips_ledger_archive_pruner'
-        and member_role.rolname = 'postgres'
+        and not (
+          member_role.rolname = 'postgres'
+          and grantor_role.rolname = 'supabase_admin'
+          and memberships.admin_option
+          and not memberships.inherit_option
+          and not memberships.set_option
+        )
   ) then
-    raise exception 'Temporary archive pruner membership was not revoked';
+    raise exception 'Unsafe archive pruner membership remains';
   end if;
 end;
 $$;

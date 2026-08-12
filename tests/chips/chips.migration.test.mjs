@@ -748,15 +748,22 @@ async function assertArchivePrunerRoleContracts(sql) {
           from pg_catalog.pg_auth_members memberships
           join pg_catalog.pg_roles granted_role on granted_role.oid = memberships.roleid
           join pg_catalog.pg_roles member_role on member_role.oid = memberships.member
+          join pg_catalog.pg_roles grantor_role on grantor_role.oid = memberships.grantor
           where granted_role.rolname = 'chips_ledger_archive_pruner'
-            and member_role.rolname = 'postgres'
-      ) as postgres_membership,
+            and not (
+              member_role.rolname = 'postgres'
+              and grantor_role.rolname = 'supabase_admin'
+              and memberships.admin_option
+              and not memberships.inherit_option
+              and not memberships.set_option
+            )
+      ) as unsafe_membership,
       pg_catalog.has_schema_privilege('chips_ledger_archive_pruner', 'public', 'usage') as public_schema_usage,
       pg_catalog.has_schema_privilege('chips_ledger_archive_pruner', 'public', 'create') as public_schema_create;
   `;
   assert.equal(functionOwners[0].gate_owner, "postgres", "read-only Stage identity gate must retain its privileged owner");
   assert.equal(functionOwners[0].prune_owner, "chips_ledger_archive_pruner", "destructive function must use the NOLOGIN owner");
-  assert.equal(functionOwners[0].postgres_membership, false, "temporary pruner membership must be revoked");
+  assert.equal(functionOwners[0].unsafe_membership, false, "only the managed non-inheriting ADMIN membership may remain");
   assert.equal(functionOwners[0].public_schema_usage, true, "pruner needs schema usage for qualified objects");
   assert.equal(functionOwners[0].public_schema_create, false, "temporary schema CREATE must be revoked");
 
