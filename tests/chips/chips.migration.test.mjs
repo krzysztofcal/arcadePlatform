@@ -733,6 +733,33 @@ async function assertArchivePrunerRoleContracts(sql) {
     rolinherit: false,
   }, "archive pruner must remain a least-privilege NOLOGIN role");
 
+  const functionOwners = await sql`
+    select
+      pg_catalog.pg_get_userbyid((
+        select proowner from pg_catalog.pg_proc
+        where oid = 'public.chips_assert_archive_prune_stage()'::regprocedure
+      )) as gate_owner,
+      pg_catalog.pg_get_userbyid((
+        select proowner from pg_catalog.pg_proc
+        where oid = 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)'::regprocedure
+      )) as prune_owner,
+      exists (
+        select 1
+          from pg_catalog.pg_auth_members memberships
+          join pg_catalog.pg_roles granted_role on granted_role.oid = memberships.roleid
+          join pg_catalog.pg_roles member_role on member_role.oid = memberships.member
+          where granted_role.rolname = 'chips_ledger_archive_pruner'
+            and member_role.rolname = 'postgres'
+      ) as postgres_membership,
+      pg_catalog.has_schema_privilege('chips_ledger_archive_pruner', 'public', 'usage') as public_schema_usage,
+      pg_catalog.has_schema_privilege('chips_ledger_archive_pruner', 'public', 'create') as public_schema_create;
+  `;
+  assert.equal(functionOwners[0].gate_owner, "postgres", "read-only Stage identity gate must retain its privileged owner");
+  assert.equal(functionOwners[0].prune_owner, "chips_ledger_archive_pruner", "destructive function must use the NOLOGIN owner");
+  assert.equal(functionOwners[0].postgres_membership, false, "temporary pruner membership must be revoked");
+  assert.equal(functionOwners[0].public_schema_usage, true, "pruner needs schema usage for qualified objects");
+  assert.equal(functionOwners[0].public_schema_create, false, "temporary schema CREATE must be revoked");
+
   const acl = await sql`
     select
       has_function_privilege('service_role', 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)', 'execute') as service_role_execute,

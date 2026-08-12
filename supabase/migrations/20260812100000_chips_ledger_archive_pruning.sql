@@ -244,7 +244,6 @@ end;
 $$;
 
 grant usage on schema public, extensions to chips_ledger_archive_pruner;
-grant execute on function pg_catalog.pg_control_system() to chips_ledger_archive_pruner;
 grant execute on function extensions.digest(bytea, text) to chips_ledger_archive_pruner;
 
 grant select on table
@@ -1068,9 +1067,11 @@ begin
 end;
 $$;
 
+grant chips_ledger_archive_pruner to postgres;
+grant create on schema public to chips_ledger_archive_pruner;
+
 alter function public.chips_archive_uuid_ids_sha256(uuid[]) owner to chips_ledger_archive_pruner;
 alter function public.chips_archive_bigint_ids_sha256(bigint[]) owner to chips_ledger_archive_pruner;
-alter function public.chips_assert_archive_prune_stage() owner to chips_ledger_archive_pruner;
 alter function public.chips_register_archive_id_proof(
   text, uuid[], bigint[], text, integer, timestamptz, timestamptz, uuid,
   timestamptz, uuid, timestamptz, timestamptz, jsonb, bigint, bigint,
@@ -1078,6 +1079,9 @@ alter function public.chips_register_archive_id_proof(
 ) owner to chips_ledger_archive_pruner;
 alter function public.chips_prune_committed_archive_batch(text, uuid[], bigint[], boolean)
   owner to chips_ledger_archive_pruner;
+
+revoke create on schema public from chips_ledger_archive_pruner;
+revoke chips_ledger_archive_pruner from postgres;
 
 revoke all on function public.chips_archive_uuid_ids_sha256(uuid[]) from public, anon, authenticated, service_role;
 revoke all on function public.chips_archive_bigint_ids_sha256(bigint[]) from public, anon, authenticated, service_role;
@@ -1090,6 +1094,8 @@ revoke all on function public.chips_register_archive_id_proof(
 revoke all on function public.chips_prune_committed_archive_batch(text, uuid[], bigint[], boolean)
   from public, anon, authenticated, service_role;
 
+grant execute on function public.chips_assert_archive_prune_stage()
+  to chips_ledger_archive_pruner;
 grant execute on function public.chips_register_archive_id_proof(
   text, uuid[], bigint[], text, integer, timestamptz, timestamptz, uuid,
   timestamptz, uuid, timestamptz, timestamptz, jsonb, bigint, bigint,
