@@ -9,6 +9,7 @@ import {
   buildObjectPath,
   downloadPrivateArchiveObject,
   resolveStorageTarget,
+  verifyArchiveBucket,
   verifyArchiveBytes,
 } from "./chips-ledger-archive-store.mjs";
 import {
@@ -530,7 +531,10 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
     idle_timeout: 30,
   }));
   const store = deps.pruneStore || createPruneStore(sql);
+  const verifyBucket = deps.verifyBucket
+    || ((storageTarget) => verifyArchiveBucket(storageTarget, deps));
   try {
+    await verifyBucket(target);
     const identity = await store.getIdentity();
     const row = await store.getManifest(args.objectPath);
     assertStageIdentity(identity, row);
@@ -589,6 +593,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
     let postCommitDownloadMs = null;
     if (args.execute) {
       try {
+        await verifyBucket(target);
         const postCommitDownload = deps.downloadArchive
           ? await deps.downloadArchive(target, row.object_path)
           : await downloadPrivateArchiveObject(target, row.object_path, deps);

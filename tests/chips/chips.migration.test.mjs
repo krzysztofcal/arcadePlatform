@@ -705,6 +705,20 @@ async function assertIdempotencyRegistryParity(sql) {
   };
 }
 
+async function expectSavepointError(tx, savepoint, operation, expectedMessage) {
+  assert.match(savepoint, /^[a-z_]+$/);
+  await tx.unsafe(`savepoint ${savepoint};`);
+  let caught = null;
+  try {
+    await operation();
+  } catch (error) {
+    caught = error;
+  }
+  await tx.unsafe(`rollback to savepoint ${savepoint};`);
+  await tx.unsafe(`release savepoint ${savepoint};`);
+  assert.match(caught?.message || "", expectedMessage);
+}
+
 async function assertArchivePrunerRoleContracts(sql) {
   const hashes = await sql`
     select
@@ -743,6 +757,13 @@ async function assertArchivePrunerRoleContracts(sql) {
         select proowner from pg_catalog.pg_proc
         where oid = 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)'::regprocedure
       )) as prune_owner,
+      pg_catalog.pg_get_userbyid((
+        select proowner from pg_catalog.pg_proc
+        where oid = 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)'::regprocedure
+      )) as prune_internal_owner,
+      (select proisstrict from pg_catalog.pg_proc
+       where oid = 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)'::regprocedure) as prune_internal_strict,
+      pg_catalog.to_regclass('public.chips_transaction_idempotency_archive_batch_idx') is not null as archive_mapping_index_exists,
       exists (
         select 1
           from pg_catalog.pg_auth_members memberships
@@ -763,6 +784,9 @@ async function assertArchivePrunerRoleContracts(sql) {
   `;
   assert.equal(functionOwners[0].gate_owner, "postgres", "read-only Stage identity gate must retain its privileged owner");
   assert.equal(functionOwners[0].prune_owner, "chips_ledger_archive_pruner", "destructive function must use the NOLOGIN owner");
+  assert.equal(functionOwners[0].prune_internal_owner, "chips_ledger_archive_pruner", "internal pruning implementation must use the NOLOGIN owner");
+  assert.equal(functionOwners[0].prune_internal_strict, true, "internal pruning implementation must never receive NULL arguments");
+  assert.equal(functionOwners[0].archive_mapping_index_exists, false, "initial pruning measurement must not add an archive mapping index");
   assert.equal(functionOwners[0].unsafe_membership, false, "only the managed non-inheriting ADMIN membership may remain");
   assert.equal(functionOwners[0].public_schema_usage, true, "pruner needs schema usage for qualified objects");
   assert.equal(functionOwners[0].public_schema_create, false, "temporary schema CREATE must be revoked");
@@ -772,14 +796,34 @@ async function assertArchivePrunerRoleContracts(sql) {
       has_function_privilege('service_role', 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)', 'execute') as service_role_execute,
       has_function_privilege('anon', 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)', 'execute') as anon_execute,
       has_function_privilege('authenticated', 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)', 'execute') as authenticated_execute,
+      has_function_privilege('service_role', 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)', 'execute') as service_role_internal_execute,
+      has_function_privilege('anon', 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)', 'execute') as anon_internal_execute,
+      has_function_privilege('authenticated', 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)', 'execute') as authenticated_internal_execute,
       has_function_privilege('service_role', 'public.chips_register_archive_id_proof(text,uuid[],bigint[],text,integer,timestamptz,timestamptz,uuid,timestamptz,uuid,timestamptz,timestamptz,jsonb,bigint,bigint,text,text,numeric,numeric,numeric)', 'execute') as service_role_proof_execute,
-      has_function_privilege('postgres', 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)', 'execute') as postgres_execute;
+      exists (
+        select 1 from pg_catalog.pg_proc procedures
+        cross join lateral pg_catalog.aclexplode(coalesce(procedures.proacl, pg_catalog.acldefault('f', procedures.proowner))) privileges
+        where procedures.oid = 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)'::regprocedure
+          and privileges.grantee = 'postgres'::regrole::oid
+          and privileges.privilege_type = 'EXECUTE'
+      ) as postgres_execute,
+      exists (
+        select 1 from pg_catalog.pg_proc procedures
+        cross join lateral pg_catalog.aclexplode(coalesce(procedures.proacl, pg_catalog.acldefault('f', procedures.proowner))) privileges
+        where procedures.oid = 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)'::regprocedure
+          and privileges.grantee = 'postgres'::regrole::oid
+          and privileges.privilege_type = 'EXECUTE'
+      ) as postgres_internal_execute;
   `;
   assert.equal(acl[0].service_role_execute, false, "service_role must not execute the destructive function");
   assert.equal(acl[0].anon_execute, false, "anon must not execute the destructive function");
   assert.equal(acl[0].authenticated_execute, false, "authenticated must not execute the destructive function");
+  assert.equal(acl[0].service_role_internal_execute, false, "service_role must not execute the internal destructive function");
+  assert.equal(acl[0].anon_internal_execute, false, "anon must not execute the internal destructive function");
+  assert.equal(acl[0].authenticated_internal_execute, false, "authenticated must not execute the internal destructive function");
   assert.equal(acl[0].service_role_proof_execute, false, "service_role must not register immutable archive proof");
   assert.equal(acl[0].postgres_execute, true, "the explicit operations role must execute the destructive function");
+  assert.equal(acl[0].postgres_internal_execute, false, "the operations role must not bypass the NULL-safe wrapper");
 
   const ROLLBACK = new Error("archive-pruner-probe-rollback");
   await sql.begin(async (tx) => {
@@ -844,12 +888,56 @@ async function assertArchivePrunerRoleContracts(sql) {
     ]);
     const batchId = String(manifestRows[0].batch_id);
     const objectPath = `v1/sha256/${compressedHash}.jsonl.gz`;
+    const generatedHashes = await tx.unsafe(`select
+      public.chips_archive_uuid_ids_sha256($1::uuid[]) as transaction_hash,
+      public.chips_archive_bigint_ids_sha256($2::bigint[]) as entry_hash;`, [transactionIds, entryIds]);
+    const transactionHash = generatedHashes[0].transaction_hash;
+    const entryHash = generatedHashes[0].entry_hash;
+
+    await expectSavepointError(tx, "archive_direct_proof", () => tx.unsafe(`update public.chips_ledger_archive_batches
+      set archived_transaction_ids_sha256 = $2,
+          archived_entry_ids_sha256 = $3,
+          archive_proof_verified_at = timezone('utc', now())
+      where batch_id = $1;`, [batchId, transactionHash, entryHash]), /proof may only be written by the archive pruner/i);
+    await expectSavepointError(tx, "archive_direct_mapping", () => tx.unsafe(`update public.chips_transaction_idempotency
+      set archive_batch_id = $2
+      where transaction_id = $1::uuid;`, [transactionIds[0], batchId]), /mapping may only be written by the archive pruner/i);
+    await expectSavepointError(tx, "archive_combined_transition", async () => {
+      await tx.unsafe("set local role chips_ledger_archive_pruner;");
+      await tx.unsafe(`update public.chips_ledger_archive_batches
+        set archived_transaction_ids_sha256 = $2,
+            archived_entry_ids_sha256 = $3,
+            archive_proof_verified_at = timezone('utc', now()),
+            pruned_at = timezone('utc', now()),
+            pruned_transaction_count = 2,
+            pruned_entry_count = 4,
+            pruned_transaction_ids_sha256 = $2,
+            pruned_entry_ids_sha256 = $3
+        where batch_id = $1;`, [batchId, transactionHash, entryHash]);
+    }, /proof and prune receipt require separate transitions/i);
+
+    const untouchedGuardState = await tx.unsafe(`select
+      (select archive_proof_verified_at from public.chips_ledger_archive_batches where batch_id = $1) as proof_at,
+      (select pruned_at from public.chips_ledger_archive_batches where batch_id = $1) as pruned_at,
+      (select count(*) from public.chips_transaction_idempotency where archive_batch_id = $1) as mappings;`, [batchId]);
+    assert.equal(untouchedGuardState[0].proof_at, null);
+    assert.equal(untouchedGuardState[0].pruned_at, null);
+    assert.equal(Number(untouchedGuardState[0].mappings), 0);
+
     const proofRows = await tx.unsafe(`select public.chips_register_archive_id_proof(
       $1, $2::uuid[], $3::bigint[], 'krydukthwdvccggbyjfw', 1, '2026-02-01T00:00:00Z',
       null, null, $4::timestamptz, $5::uuid, $6::timestamptz, $4::timestamptz,
       '{"TABLE_BUY_IN":1,"TABLE_CASH_OUT":1}'::jsonb, 100, 80, $7, $8, 20, 20, 0
     ) as result;`, [objectPath, transactionIds, entryIds, createdAt[1], transactionIds[1], createdAt[0], "1".repeat(64), compressedHash]);
     assert.equal(proofRows[0].result.state, "proof_registered", "real proof function must pass through owner-role RLS");
+
+    await expectSavepointError(tx, "archive_direct_receipt", () => tx.unsafe(`update public.chips_ledger_archive_batches
+      set pruned_at = timezone('utc', now()),
+          pruned_transaction_count = 2,
+          pruned_entry_count = 4,
+          pruned_transaction_ids_sha256 = $2,
+          pruned_entry_ids_sha256 = $3
+      where batch_id = $1;`, [batchId, transactionHash, entryHash]), /receipt may only be written by the archive pruner/i);
 
     await tx.unsafe("savepoint archive_active_table_probe;");
     let activeTableError = null;
@@ -865,6 +953,21 @@ async function assertArchivePrunerRoleContracts(sql) {
     await tx.unsafe("release savepoint archive_active_table_probe;");
     assert.match(activeTableError?.message || "", /active table or non-zero\/missing escrow/i);
     await tx`update public.poker_tables set status = 'CLOSED' where id = ${tableId};`;
+
+    await expectSavepointError(tx, "archive_null_execute", () => tx.unsafe(
+      "select public.chips_prune_committed_archive_batch($1, $2::uuid[], $3::bigint[], $4::boolean) as result;",
+      [objectPath, transactionIds, entryIds, null],
+    ), /execute flag must not be NULL/i);
+    const nullExecuteState = await tx.unsafe(`select
+      (select count(*) from public.chips_transactions where id = any($1::uuid[])) as hot_transactions,
+      (select count(*) from public.chips_entries where id = any($2::bigint[])) as hot_entries,
+      (select count(*) from public.chips_transaction_idempotency where transaction_id = any($1::uuid[]) and archive_batch_id is not null) as mappings,
+      (select pruned_at from public.chips_ledger_archive_batches where batch_id = $3) as pruned_at;`,
+      [transactionIds, entryIds, batchId]);
+    assert.equal(Number(nullExecuteState[0].hot_transactions), 2, "NULL execute must not delete transactions");
+    assert.equal(Number(nullExecuteState[0].hot_entries), 4, "NULL execute must not delete entries");
+    assert.equal(Number(nullExecuteState[0].mappings), 0, "NULL execute must not create archive mappings");
+    assert.equal(nullExecuteState[0].pruned_at, null, "NULL execute must not write a prune receipt");
 
     const dryRows = await tx.unsafe(
       "select public.chips_prune_committed_archive_batch($1, $2::uuid[], $3::bigint[], false) as result;",

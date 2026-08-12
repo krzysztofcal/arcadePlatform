@@ -379,6 +379,12 @@ function verifyBucket(bucket) {
   return bucket;
 }
 
+export async function verifyArchiveBucket(storageTarget, deps = {}) {
+  const response = await storageRequest(storageTarget, bucketRequestPath(), { method: "GET" }, deps);
+  if (!response.ok) storageFailure("bucket verification", response);
+  return verifyBucket(await readJsonResponse(response, "bucket verification"));
+}
+
 export async function ensureArchiveBucket(storageTarget, deps = {}) {
   let response = await storageRequest(storageTarget, bucketRequestPath(), { method: "GET" }, deps);
   if (await isMissingStorageResponse(response)) {

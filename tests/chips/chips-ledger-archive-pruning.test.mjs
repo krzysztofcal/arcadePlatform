@@ -183,13 +183,35 @@ await assert.rejects(
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-prune-test-"));
 const recoveryDir = path.join(tempRoot, "recovery");
 const store = fakeStore(manifestRow(), ["pruned", "already_pruned"]);
-const downloadArchive = async () => ({ bytes: archive.compressedBytes, downloadMs: 1 });
+let archiveDownloads = 0;
+let bucketChecks = 0;
+const downloadArchive = async () => {
+  archiveDownloads += 1;
+  return { bytes: archive.compressedBytes, downloadMs: 1 };
+};
+const verifyBucket = async () => { bucketChecks += 1; };
 
 try {
+  const bucketRejectedStore = fakeStore(manifestRow());
+  await assert.rejects(
+    () => pruneArchive({
+      argv: baseArgs.slice(0, -1),
+      env: ENV,
+      deps: {
+        pruneStore: bucketRejectedStore,
+        verifyBucket: async () => { throw new Error("Storage archive bucket must be private"); },
+        downloadArchive: async () => { throw new Error("archive download must not run"); },
+        emit: false,
+      },
+    }),
+    /must be private/,
+  );
+  assert.equal(bucketRejectedStore.pruneCalls, 0);
+
   const first = await pruneArchive({
     argv: [...baseArgs, "--recovery-dir", recoveryDir],
     env: ENV,
-    deps: { pruneStore: store, downloadArchive, emit: false },
+    deps: { pruneStore: store, downloadArchive, verifyBucket, emit: false },
   });
   assert.equal(first.state, "pruned");
   assert.equal(first.evidence.userTransactions, 0);
@@ -198,15 +220,19 @@ try {
   assert.equal(fs.statSync(recoveryDir).mode & 0o777, 0o700);
   assert.equal(fs.statSync(first.recoveryBundle.artifactPath).mode & 0o777, 0o600);
   assert.equal(fs.statSync(first.recoveryBundle.manifestPath).mode & 0o777, 0o600);
+  assert.equal(bucketChecks, 2, "execute must verify bucket configuration before and after commit");
+  assert.equal(archiveDownloads, 2, "execute must download the private archive before and after commit");
 
   const retry = await pruneArchive({
     argv: [...baseArgs, "--recovery-dir", recoveryDir],
     env: ENV,
-    deps: { pruneStore: store, downloadArchive, emit: false },
+    deps: { pruneStore: store, downloadArchive, verifyBucket, emit: false },
   });
   assert.equal(retry.state, "already_pruned");
   assert.equal(retry.recoveryBundle.reused, true);
   assert.equal(store.pruneCalls, 2);
+  assert.equal(bucketChecks, 4);
+  assert.equal(archiveDownloads, 4);
 
   const failedRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-prune-postcommit-"));
   const failedRecovery = path.join(failedRoot, "recovery");
@@ -217,6 +243,7 @@ try {
       env: ENV,
       deps: {
         pruneStore: fakeStore(manifestRow()),
+        verifyBucket,
         downloadArchive: async () => {
           downloads += 1;
           return { bytes: downloads === 1 ? archive.compressedBytes : Buffer.from("corrupt"), downloadMs: 1 };

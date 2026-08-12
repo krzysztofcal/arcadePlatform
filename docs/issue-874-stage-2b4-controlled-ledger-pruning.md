@@ -70,7 +70,9 @@ empty receipt together. Registry identity and replay snapshots remain online;
 runtime replay never needs Storage.
 
 Every execute call repeats the complete validation. A successful dry-run is
-diagnostic evidence, not authorization for a later execute.
+diagnostic evidence, not authorization for a later execute. The database
+rejects a `NULL` execute flag, and only literal `TRUE` can enter the mutation
+path.
 
 ## Eligibility and concurrency gates
 
@@ -119,6 +121,10 @@ The manifest guard blocks deletion, makes the original proof fields and
 `NULL -> complete` transition for both archive ID proof and prune receipt. The
 registry guard permits only one `NULL -> archive_batch_id` transition and
 continues to prohibit registry deletion and identity/replay replacement.
+Proof, receipt, and mapping transitions require
+`current_user = 'chips_ledger_archive_pruner'`; even the direct operations role
+cannot write them, and proof plus receipt cannot be set in one update. The
+initial measurement intentionally has no index on `archive_batch_id`.
 
 ## CLI and recovery copy
 
@@ -151,6 +157,11 @@ overwrite, per-file `fsync`, and parent-directory `fsync`. An exact existing
 bundle may be reused for an idempotent retry; a partial or different bundle
 fails closed. The CLI rechecks both local files, gzip, both archive hashes,
 counts, conservation, and ordered ID hashes before every database attempt.
+
+Before any database preflight and again after a successful destructive commit,
+the CLI reads (but never creates or updates) the Storage bucket configuration
+and requires the exact `chips-ledger-archive` name, `public=false`, only
+`application/gzip`, and the 6 MiB object limit.
 
 After commit, the CLI downloads the private Storage object again, verifies its
 compressed and raw hashes and full archive contract, and checks the database
