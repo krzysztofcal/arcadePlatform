@@ -279,4 +279,61 @@ assert.equal(durable.manifestGzipBytes.length > 0, true);
 assert.equal(durable.recoveryArchive.sha256, compressedSha);
 assert.equal(durable.recoveryManifest.sha256, crypto.createHash("sha256").update(durable.manifestGzipBytes).digest("hex"));
 
+const resumeCycleRow = {
+  ...recoveryRow,
+  status: "committed",
+  committed_at: "2026-08-13T00:00:00.000000Z",
+  archive_proof_verified_at: "2026-08-13T00:01:00.000000Z",
+  archived_transaction_ids_sha256: evidence.transactionIdsSha256,
+  archived_entry_ids_sha256: evidence.entryIdsSha256,
+  pruned_at: null,
+  pruned_transaction_count: null,
+  pruned_entry_count: null,
+  pruned_transaction_ids_sha256: null,
+  pruned_entry_ids_sha256: null,
+};
+const resumeCalls = [];
+const resumeSql = fakeSql({ ownRows: [resumeCycleRow] });
+const resumeResult = await runStageAutomation({
+  env: ENV,
+  deps: {
+    sql: resumeSql,
+    fetch,
+    storageTarget,
+    pruneStore: { getManifest: async () => resumeCycleRow },
+    verifyBucket: async () => {},
+    tempRoot: fs.mkdtempSync("/tmp/chips-ledger-stage-automation-resume-"),
+    pruneArchive: async ({ argv }) => {
+      const mode = argv.includes("--execute") ? "execute" : argv.includes("--register-proof") ? "register-proof" : "dry-run";
+      resumeCalls.push(mode);
+      if (mode === "register-proof") throw new Error("proof must not be re-registered on a proven resume");
+      return { state: "already_pruned", evidence };
+    },
+  },
+});
+assert.equal(resumeResult.state, "already_pruned");
+assert.deepEqual(resumeCalls, ["dry-run", "execute"]);
+
+const noRecoveryCalls = [];
+const noRecoverySql = fakeSql({ ownRows: [resumeCycleRow] });
+await assert.rejects(
+  runStageAutomation({
+    env: ENV,
+    deps: {
+      sql: noRecoverySql,
+      fetch: async () => response({ message: "not found" }, 404),
+      storageTarget,
+      pruneStore: { getManifest: async () => resumeCycleRow },
+      verifyBucket: async () => {},
+      tempRoot: fs.mkdtempSync("/tmp/chips-ledger-stage-automation-no-recovery-"),
+      pruneArchive: async () => {
+        noRecoveryCalls.push(true);
+        return { state: "ready", evidence };
+      },
+    },
+  }),
+  /no durable recovery/,
+);
+assert.equal(noRecoveryCalls.length, 0);
+
 process.stdout.write("chips-ledger-stage-automation tests passed\n");

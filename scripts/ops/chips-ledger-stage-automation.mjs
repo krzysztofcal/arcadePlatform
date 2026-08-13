@@ -349,7 +349,8 @@ async function runPruneStep({ row, mode, env, cwd, sql, pruneStore, storageTarge
   };
   if (downloadArchive) deps.downloadArchive = downloadArchive;
   if (verifyBucket) deps.verifyBucket = verifyBucket;
-  return pruneArchive({
+  const pruneRunner = storageDeps.pruneArchive || pruneArchive;
+  return pruneRunner({
     argv: pruneArgs(row, mode, mode === "execute" ? recoveryDir : null),
     env,
     cwd,
