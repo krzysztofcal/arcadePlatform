@@ -129,7 +129,7 @@ limit $2::int;
 // The manual exporter deliberately keeps its broad, lifecycle-safe selector.
 // Stage automation uses this independent selector so the JSONL itself is
 // prunable-only before Storage or proof state is created.
-const PRUNABLE_CANDIDATE_SQL = `
+export const PRUNABLE_CANDIDATE_SQL = `
 with base as (
   select t.*
   from public.chips_transactions t

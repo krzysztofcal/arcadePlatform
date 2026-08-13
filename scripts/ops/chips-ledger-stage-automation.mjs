@@ -508,7 +508,8 @@ export async function runStageAutomation({ env = process.env, now = new Date(), 
 
     const artifactPath = path.join(tempRoot, "archive.jsonl.gz");
     const manifestPath = path.join(tempRoot, "archive.manifest.json");
-    const exported = await runExport({
+    const exportArchive = deps.exportArchive || runExport;
+    const exported = await exportArchive({
       argv: [
         "--target", "stage",
         "--cutoff-days", String(STAGE_RETENTION_DAYS),
@@ -534,9 +535,11 @@ export async function runStageAutomation({ env = process.env, now = new Date(), 
       writeAggregateSummary(result);
       return result;
     }
-    await ensureArchiveBucket(storageTarget, deps);
+    const ensureBucket = deps.ensureArchiveBucket || ensureArchiveBucket;
+    await ensureBucket(storageTarget, deps);
     await assertAdvisoryLock(sql, lockSession);
-    const stored = await storeArchive({
+    const store = deps.storeArchive || storeArchive;
+    const stored = await store({
       argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
       env: moduleEnv,
       cwd: tempRoot,
@@ -550,7 +553,8 @@ export async function runStageAutomation({ env = process.env, now = new Date(), 
     const dry = await runPruneStep({ row, mode: "dry-run", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
     if (dry.state !== "ready") fail(`Stage automation dry-run did not become ready: ${dry.state}`);
     await assertAdvisoryLock(sql, lockSession);
-    const main = await downloadPrivateArchiveObject(storageTarget, row.object_path, deps);
+    const downloadMain = deps.downloadPrivateArchive || downloadPrivateArchiveObject;
+    const main = await downloadMain(storageTarget, row.object_path, deps);
     const durable = await persistDurableRecovery(storageTarget, row, identity, dry.evidence, main.bytes, deps);
     await assertAdvisoryLock(sql, lockSession);
     const executed = await executeVerifiedCycle({ row, identity, durable, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
