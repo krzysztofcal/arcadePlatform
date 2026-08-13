@@ -121,7 +121,7 @@ function writeAggregateSummary(result) {
 
 function emitAggregateError(error) {
   try {
-    writeAggregateSummary({ state: "error", reason: redactedError(error) });
+    writeAggregateSummary({ state: "error", reason: error });
   } catch {
     // Preserve the original orchestration error if reporting itself fails.
   }
@@ -622,11 +622,8 @@ export async function runStageAutomation({ env = process.env, now = new Date(), 
     if (lockSession && sql) {
       try {
         await releaseAdvisoryLock(sql);
-      } catch (error) {
-        if (!failed) {
-          failed = true;
-          failure = error;
-        }
+      } catch {
+        // Closing an owned client below releases the session-scoped lock; preserve the cycle result.
       }
     }
     if (sql && ownsSql) {

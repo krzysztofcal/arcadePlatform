@@ -29,7 +29,7 @@ function response(value, status = 200, headers = {}) {
   return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json", ...headers } });
 }
 
-function fakeSql() {
+function fakeSql({ unlockError = null } = {}) {
   const calls = [];
   const sql = {
     calls,
@@ -38,7 +38,10 @@ function fakeSql() {
       if (query.includes("pg_try_advisory_lock")) return [{ acquired: true, backend_pid: "stage-order-session" }];
       if (query.includes("pg_control_system")) return [{ system_identifier: STAGE_SYSTEM_IDENTIFIER }];
       if (query.includes("pg_backend_pid")) return [{ backend_pid: "stage-order-session" }];
-      if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
+      if (query.includes("pg_advisory_unlock")) {
+        if (unlockError) throw unlockError;
+        return [{ pg_advisory_unlock: true }];
+      }
       if (query.includes("from public.chips_ledger_archive_batches")) return [];
       throw new Error(`unexpected SQL: ${query}`);
     },
@@ -120,10 +123,12 @@ const fetch = async (url, init = {}) => {
 
 let rowState = { ...row };
 const pruneModes = [];
+const unlockError = new Error("advisory unlock failed after successful cycle");
+const cycleSql = fakeSql({ unlockError });
 const result = await runStageAutomation({
   env: ENV,
   deps: {
-    sql: fakeSql(),
+    sql: cycleSql,
     fetch,
     storageTarget,
     tempRoot: fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-order-")),
@@ -165,6 +170,7 @@ const result = await runStageAutomation({
 });
 
 assert.equal(result.state, "pruned");
+assert.equal(cycleSql.calls.filter(({ query }) => query.includes("pg_advisory_unlock")).length, 1);
 assert.deepEqual(pruneModes.map(({ mode }) => mode), ["register-proof", "dry-run", "execute"]);
 assert.equal(pruneModes.at(-1).argv.includes("--execute"), true);
 

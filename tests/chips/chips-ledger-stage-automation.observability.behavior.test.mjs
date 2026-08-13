@@ -178,6 +178,38 @@ assert.match(redacted, /\[redacted-supabase-secret\]/);
 assert.match(redacted, /\[redacted-token\]/);
 assert.match(redacted, /\[redacted-record\]/);
 
+const bearerStdout = [];
+const bearerOriginalStdoutWrite = process.stdout.write;
+const bearerOriginalSummaryPath = process.env.GITHUB_STEP_SUMMARY;
+process.stdout.write = (chunk) => {
+  bearerStdout.push(String(chunk));
+  return true;
+};
+delete process.env.GITHUB_STEP_SUMMARY;
+try {
+  const bearerSql = {
+    unsafe: async () => { throw new Error(sampleBearer); },
+    begin: async () => { throw new Error("unexpected DB transaction"); },
+  };
+  await assert.rejects(
+    runStageAutomation({
+      env: cleanEnv({ SUPABASE_STAGE_URL: `https://${STAGE_PROJECT_REF}.supabase.co` }),
+      deps: {
+        sql: bearerSql,
+        storageTarget: { target: "stage", projectRef: STAGE_PROJECT_REF, baseUrl: `https://${STAGE_PROJECT_REF}.supabase.co`, serviceKey: sampleSecret },
+        pruneStore: {},
+      },
+    }),
+    /Bearer/,
+  );
+} finally {
+  process.stdout.write = bearerOriginalStdoutWrite;
+  if (bearerOriginalSummaryPath === undefined) delete process.env.GITHUB_STEP_SUMMARY;
+  else process.env.GITHUB_STEP_SUMMARY = bearerOriginalSummaryPath;
+}
+const bearerReport = parseSingleAggregate(bearerStdout.join("")).report;
+assert.equal(bearerReport.reason, "Bearer [redacted]");
+
 const initFailureTemp = fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-observability-init-"));
 try {
   let capturedInitStdout = "";
