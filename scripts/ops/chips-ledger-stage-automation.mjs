@@ -60,22 +60,34 @@ function canonicalJson(value) {
   return JSON.stringify(value);
 }
 
-function redactedError(error) {
-  return text(error?.message || error)
-    .replace(/postgres(?:ql)?:\/\/[^\s]+/gi, "[redacted-db-url]")
-    .replace(/Bearer\s+[^\s]+/gi, "Bearer [redacted]")
-    .replace(/eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g, "[redacted-token]")
+export function redactedError(error) {
+  const message = text(error?.message || error);
+  return (message || "Stage automation failed")
+    .replace(/postgres(?:ql)?:\/\/[^\s"'`<>]+/gi, "[redacted-db-url]")
+    .replace(/\bBearer\s+[^\s,;)}\]"']+/gi, "Bearer [redacted]")
+    .replace(/\bsb_secret_[a-zA-Z0-9_-]+/gi, "[redacted-supabase-secret]")
+    .replace(/\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\b/g, "[redacted-token]")
+    .replace(/\b(?:password|passwd|secret|token|api[_-]?key|service[-_ ]?role[-_ ]?key)\s*[:=]\s*[^\s,;)}\]"']+/gi, "[redacted-secret]")
     .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, "[redacted-record-id]")
     .replace(/\b(?:entry|transaction|account|table)[-_ ]?\d+\b/gi, "[redacted-record]");
 }
 
-function writeAggregateSummary(result) {
-  const safe = stringifyJson({
+function aggregatePayload(result) {
+  const base = {
     event: "chips_ledger_stage_automation",
     target: "stage",
     project_ref: STAGE_PROJECT_REF,
     source_policy_id: STAGE_AUTOMATION_POLICY_ID,
     state: result.state,
+  };
+  if (result.state === "error") {
+    return {
+      ...base,
+      reason: redactedError(result.reason),
+    };
+  }
+  return {
+    ...base,
     mode: result.mode || null,
     transactions: result.transactions ?? null,
     entries: result.entries ?? null,
@@ -90,11 +102,28 @@ function writeAggregateSummary(result) {
     receipt: result.receipt || null,
     mappings: result.mappings ?? null,
     reason: result.reason || null,
-  });
+  };
+}
+
+function writeAggregateSummary(result) {
+  const safe = stringifyJson(aggregatePayload(result));
   process.stdout.write(`${safe}\n`);
   const summaryPath = text(process.env.GITHUB_STEP_SUMMARY);
   if (summaryPath) {
-    fs.appendFileSync(summaryPath, `\n\`\`\`json\n${safe}\n\`\`\`\n`, { mode: PRIVATE_FILE_MODE });
+    try {
+      fs.appendFileSync(summaryPath, `\n\`\`\`json\n${safe}\n\`\`\`\n`, { mode: PRIVATE_FILE_MODE });
+    } catch {
+      // Job Summary is best-effort; stdout remains the authoritative report.
+    }
+  }
+  return safe;
+}
+
+function emitAggregateError(error) {
+  try {
+    writeAggregateSummary({ state: "error", reason: error });
+  } catch {
+    // Preserve the original orchestration error if reporting itself fails.
   }
 }
 
@@ -449,148 +478,171 @@ async function resumeOwnCycle({ row, identity, env, tempRoot, sql, pruneStore, s
 }
 
 export async function runStageAutomation({ env = process.env, now = new Date(), deps = {} } = {}) {
-  const config = validateStageEnvironment(env);
-  const moduleEnv = config.moduleEnv;
-  const sql = deps.sql || postgres(config.dbUrl, {
-    max: 1,
-    prepare: false,
-    connect_timeout: 10,
-    idle_timeout: 0,
-  });
-  const tempRoot = deps.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-automation-"));
-  ensurePrivateDirectory(tempRoot);
-  const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
-  const pruneStore = deps.pruneStore || createPruneStore(sql);
-  const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
+  let sql = null;
   let lockSession = null;
+  let tempRoot = null;
+  let ownsSql = false;
+  let result = null;
+  let failed = false;
+  let failure = null;
+
   try {
+    const config = validateStageEnvironment(env);
+    const moduleEnv = config.moduleEnv;
+    const providedSql = deps.sql;
+    if (providedSql) {
+      sql = providedSql;
+    } else {
+      sql = postgres(config.dbUrl, {
+        max: 1,
+        prepare: false,
+        connect_timeout: 10,
+        idle_timeout: 0,
+      });
+      ownsSql = true;
+    }
+    tempRoot = deps.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-automation-"));
+    ensurePrivateDirectory(tempRoot);
+    const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
+    const pruneStore = deps.pruneStore || createPruneStore(sql);
+    const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
+
     lockSession = await acquireAdvisoryLock(sql);
     if (!lockSession) {
-      const result = { state: "no-op", reason: "advisory_lock_busy" };
-      writeAggregateSummary(result);
-      return result;
-    }
-    const identity = await assertIdentity(sql);
-    await assertAdvisoryLock(sql, lockSession);
-    await verifyBucket(storageTarget);
-    const ownRows = await loadOwnBatches(sql);
-    await assertAdvisoryLock(sql, lockSession);
-    const ownCycle = findOwnCycle(ownRows);
-    if (ownCycle.active) {
-      const result = await resumeOwnCycle({ row: await refreshRow(pruneStore, ownCycle.active.object_path), identity, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
+      result = { state: "no-op", reason: "advisory_lock_busy" };
+    } else {
+      const identity = await assertIdentity(sql);
       await assertAdvisoryLock(sql, lockSession);
-      const output = {
-        state: result.state,
-        mode: "resume",
-        transactions: result.evidence.transactionCount,
-        entries: result.evidence.entryCount,
-        txTypes: result.evidence.txTypes,
-        amounts: { credits: result.evidence.credits, debits: result.evidence.debits, net: result.evidence.net },
-        compressedSha256: ownCycle.active.compressed_sha256,
-      };
-      writeAggregateSummary(output);
-      return output;
-    }
-    if (ownCycle.latestCompleted) {
-      await verifyCompletedCycle({
-        row: await refreshRow(pruneStore, ownCycle.latestCompleted.object_path),
-        identity,
-        env: moduleEnv,
-        tempRoot,
-        sql,
-        pruneStore,
-        storageTarget,
-        verifyBucket,
-        storageDeps: deps,
-      });
+      await verifyBucket(storageTarget);
+      const ownRows = await loadOwnBatches(sql);
       await assertAdvisoryLock(sql, lockSession);
-    }
+      const ownCycle = findOwnCycle(ownRows);
+      if (ownCycle.active) {
+        const resumed = await resumeOwnCycle({ row: await refreshRow(pruneStore, ownCycle.active.object_path), identity, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
+        await assertAdvisoryLock(sql, lockSession);
+        result = {
+          state: resumed.state,
+          mode: "resume",
+          transactions: resumed.evidence.transactionCount,
+          entries: resumed.evidence.entryCount,
+          txTypes: resumed.evidence.txTypes,
+          amounts: { credits: resumed.evidence.credits, debits: resumed.evidence.debits, net: resumed.evidence.net },
+          compressedSha256: ownCycle.active.compressed_sha256,
+        };
+      } else {
+        if (ownCycle.latestCompleted) {
+          await verifyCompletedCycle({
+            row: await refreshRow(pruneStore, ownCycle.latestCompleted.object_path),
+            identity,
+            env: moduleEnv,
+            tempRoot,
+            sql,
+            pruneStore,
+            storageTarget,
+            verifyBucket,
+            storageDeps: deps,
+          });
+          await assertAdvisoryLock(sql, lockSession);
+        }
 
-    const artifactPath = path.join(tempRoot, "archive.jsonl.gz");
-    const manifestPath = path.join(tempRoot, "archive.manifest.json");
-    const exportArchive = deps.exportArchive || runExport;
-    const exported = await exportArchive({
-      argv: [
-        "--target", "stage",
-        "--cutoff-days", String(STAGE_RETENTION_DAYS),
-        "--batch-size", String(STAGE_MAX_BATCH_SIZE),
-        "--output", artifactPath,
-        "--manifest", manifestPath,
-      ],
-      env: moduleEnv,
-      cwd: tempRoot,
-      now,
-      deps: {
-        sql,
-        selector: "prunable",
-        sourcePolicyId: STAGE_AUTOMATION_POLICY_ID,
-        targetOptions: { singleTarget: true },
-        noCandidateIfEmpty: true,
-        emit: false,
-      },
-    });
-    await assertAdvisoryLock(sql, lockSession);
-    if (exported.noCandidate) {
-      const result = { state: "no-op", reason: "no_eligible_candidate" };
-      writeAggregateSummary(result);
-      return result;
+        const artifactPath = path.join(tempRoot, "archive.jsonl.gz");
+        const manifestPath = path.join(tempRoot, "archive.manifest.json");
+        const exportArchive = deps.exportArchive || runExport;
+        const exported = await exportArchive({
+          argv: [
+            "--target", "stage",
+            "--cutoff-days", String(STAGE_RETENTION_DAYS),
+            "--batch-size", String(STAGE_MAX_BATCH_SIZE),
+            "--output", artifactPath,
+            "--manifest", manifestPath,
+          ],
+          env: moduleEnv,
+          cwd: tempRoot,
+          now,
+          deps: {
+            sql,
+            selector: "prunable",
+            sourcePolicyId: STAGE_AUTOMATION_POLICY_ID,
+            targetOptions: { singleTarget: true },
+            noCandidateIfEmpty: true,
+            emit: false,
+          },
+        });
+        await assertAdvisoryLock(sql, lockSession);
+        if (exported.noCandidate) {
+          result = { state: "no-op", reason: "no_eligible_candidate" };
+        } else {
+          const ensureBucket = deps.ensureArchiveBucket || ensureArchiveBucket;
+          await ensureBucket(storageTarget, deps);
+          await assertAdvisoryLock(sql, lockSession);
+          const store = deps.storeArchive || storeArchive;
+          const stored = await store({
+            argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
+            env: moduleEnv,
+            cwd: tempRoot,
+            deps: { ...deps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
+          });
+          let row = await refreshRow(pruneStore, stored.objectPath);
+          await assertAdvisoryLock(sql, lockSession);
+          await runPruneStep({ row, mode: "register-proof", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
+          row = await refreshRow(pruneStore, row.object_path);
+          await assertAdvisoryLock(sql, lockSession);
+          const dry = await runPruneStep({ row, mode: "dry-run", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
+          if (dry.state !== "ready") fail(`Stage automation dry-run did not become ready: ${dry.state}`);
+          await assertAdvisoryLock(sql, lockSession);
+          const downloadMain = deps.downloadPrivateArchive || downloadPrivateArchiveObject;
+          const main = await downloadMain(storageTarget, row.object_path, deps);
+          const durable = await persistDurableRecovery(storageTarget, row, identity, dry.evidence, main.bytes, deps);
+          await assertAdvisoryLock(sql, lockSession);
+          const executed = await executeVerifiedCycle({ row, identity, durable, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
+          await assertAdvisoryLock(sql, lockSession);
+          result = {
+            state: executed.state,
+            mode: "new",
+            transactions: executed.evidence.transactionCount,
+            entries: executed.evidence.entryCount,
+            txTypes: executed.evidence.txTypes,
+            amounts: { credits: executed.evidence.credits, debits: executed.evidence.debits, net: executed.evidence.net },
+            rawBytes: exported.bytes?.raw || null,
+            compressedBytes: row.compressed_bytes,
+            compressedSha256: row.compressed_sha256,
+            recoveryArchiveSha256: durable.recoveryArchive.sha256,
+            recoveryManifestSha256: durable.recoveryManifest.sha256,
+            proof: executed.state === "pruned" ? "verified" : null,
+            receipt: executed.state,
+            mappings: executed.evidence.transactionCount,
+          };
+        }
+      }
     }
-    const ensureBucket = deps.ensureArchiveBucket || ensureArchiveBucket;
-    await ensureBucket(storageTarget, deps);
-    await assertAdvisoryLock(sql, lockSession);
-    const store = deps.storeArchive || storeArchive;
-    const stored = await store({
-      argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
-      env: moduleEnv,
-      cwd: tempRoot,
-      deps: { ...deps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
-    });
-    let row = await refreshRow(pruneStore, stored.objectPath);
-    await assertAdvisoryLock(sql, lockSession);
-    await runPruneStep({ row, mode: "register-proof", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
-    row = await refreshRow(pruneStore, row.object_path);
-    await assertAdvisoryLock(sql, lockSession);
-    const dry = await runPruneStep({ row, mode: "dry-run", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
-    if (dry.state !== "ready") fail(`Stage automation dry-run did not become ready: ${dry.state}`);
-    await assertAdvisoryLock(sql, lockSession);
-    const downloadMain = deps.downloadPrivateArchive || downloadPrivateArchiveObject;
-    const main = await downloadMain(storageTarget, row.object_path, deps);
-    const durable = await persistDurableRecovery(storageTarget, row, identity, dry.evidence, main.bytes, deps);
-    await assertAdvisoryLock(sql, lockSession);
-    const executed = await executeVerifiedCycle({ row, identity, durable, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
-    await assertAdvisoryLock(sql, lockSession);
-    const output = {
-      state: executed.state,
-      mode: "new",
-      transactions: executed.evidence.transactionCount,
-      entries: executed.evidence.entryCount,
-      txTypes: executed.evidence.txTypes,
-      amounts: { credits: executed.evidence.credits, debits: executed.evidence.debits, net: executed.evidence.net },
-      rawBytes: exported.bytes?.raw || null,
-      compressedBytes: row.compressed_bytes,
-      compressedSha256: row.compressed_sha256,
-      recoveryArchiveSha256: durable.recoveryArchive.sha256,
-      recoveryManifestSha256: durable.recoveryManifest.sha256,
-      proof: executed.state === "pruned" ? "verified" : null,
-      receipt: executed.state,
-      mappings: executed.evidence.transactionCount,
-    };
-    writeAggregateSummary(output);
-    return output;
   } catch (error) {
-    const result = { state: "error", reason: redactedError(error) };
-    writeAggregateSummary(result);
-    throw error;
+    failed = true;
+    failure = error;
   } finally {
-    if (lockSession) {
+    if (lockSession && sql) {
       try {
         await releaseAdvisoryLock(sql);
       } catch {
-        // The session ending releases the lock; do not retry a failed unlock.
+        // Closing an owned client below releases the session-scoped lock; preserve the cycle result.
       }
     }
-    if (!deps.sql) await sql.end({ timeout: 5 });
+    if (sql && ownsSql) {
+      try {
+        await sql.end({ timeout: 5 });
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          failure = error;
+        }
+      }
+    }
   }
+  if (failed) {
+    emitAggregateError(failure);
+    throw failure;
+  }
+  writeAggregateSummary(result);
+  return result;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
