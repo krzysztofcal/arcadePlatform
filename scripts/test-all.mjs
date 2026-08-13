@@ -51,6 +51,10 @@ run("node", ["tests/chips-ledger-pagination.behavior.test.mjs"], "chips-ledger-p
 run("node", ["tests/chips/chips-ledger-archive-export.test.mjs"], "chips-ledger-archive-export");
 run("node", ["tests/chips/chips-ledger-archive-storage.test.mjs"], "chips-ledger-archive-storage");
 run("node", ["tests/chips/chips-ledger-archive-pruning.test.mjs"], "chips-ledger-archive-pruning");
+run("node", ["tests/chips/chips-ledger-prunable-candidate-sql.behavior.test.mjs"], "chips-ledger-prunable-candidate-sql");
+run("node", ["tests/chips/chips-ledger-stage-automation.test.mjs"], "chips-ledger-stage-automation");
+run("node", ["tests/chips/chips-ledger-stage-automation.order.behavior.test.mjs"], "chips-ledger-stage-automation-order");
+run("node", ["tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs"], "chips-ledger-stage-automation-workflow");
 run("node", ["tests/welcome-bonus.behavior.test.mjs"], "welcome-bonus-behavior");
 run("node", ["tests/bonus-campaigns-endpoint.behavior.test.mjs"], "bonus-campaigns-endpoint-behavior");
 run("node", ["tests/bonus-campaigns-scheduler.behavior.test.mjs"], "bonus-campaigns-scheduler-behavior");

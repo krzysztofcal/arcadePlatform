@@ -298,15 +298,17 @@ function exporterManifestFromDatabase(row, target) {
     },
     sha256: { raw_jsonl: row.raw_sha256, compressed_artifact: row.compressed_sha256 },
     artifact: path.basename(row.object_path),
+    ...(row.source_policy_id ? { source_policy_id: row.source_policy_id } : {}),
   };
 }
 
-function recoveryManifest(row, identity, evidence, target) {
+export function buildRecoveryManifest(row, identity, evidence, target) {
   return {
     recovery_schema_version: 1,
     artifact_type: "chips_ledger_archive_prune_recovery",
     target: target.target,
     project_ref: row.project_ref,
+    source_policy_id: row.source_policy_id || null,
     postgres_system_identifier: identity,
     bucket: ARCHIVE_BUCKET,
     object_path: row.object_path,
@@ -343,7 +345,7 @@ export function writeRecoveryBundle({ recoveryDir, archiveBytes, row, identity, 
   const baseName = `chips-ledger-${row.compressed_sha256}`;
   const artifactPath = path.join(directory, `${baseName}.jsonl.gz`);
   const manifestPath = path.join(directory, `${baseName}.recovery.json`);
-  const manifest = recoveryManifest(row, identity, evidence, target);
+  const manifest = buildRecoveryManifest(row, identity, evidence, target);
   const manifestBytes = Buffer.from(`${stringifyJson(manifest)}\n`, "utf8");
   const artifactExists = fs.existsSync(artifactPath);
   const manifestExists = fs.existsSync(manifestPath);
@@ -372,7 +374,7 @@ export function verifyRecoveryBundle({ bundle, row, target, identity, expectedEv
   assertPrivateRegularFile(bundle.artifactPath);
   assertPrivateRegularFile(bundle.manifestPath);
   const manifest = JSON.parse(fs.readFileSync(bundle.manifestPath, "utf8"));
-  const expectedManifest = recoveryManifest(row, identity, expectedEvidence, target);
+  const expectedManifest = buildRecoveryManifest(row, identity, expectedEvidence, target);
   if (canonicalJson(manifest) !== canonicalJson(expectedManifest)) fail("recovery manifest no longer matches archive evidence");
   const verified = verifyArchiveBytes({
     compressedBytes: fs.readFileSync(bundle.artifactPath),
@@ -399,6 +401,7 @@ function manifestSelectSql() {
     compressed_bytes::text as compressed_bytes, raw_sha256, compressed_sha256,
     credits::text as credits, debits::text as debits, net_amount::text as net_amount,
     status, committed_at::text as committed_at,
+    source_policy_id,
     archived_transaction_ids_sha256, archived_entry_ids_sha256,
     archive_proof_verified_at::text as archive_proof_verified_at,
     pruned_at::text as pruned_at, pruned_transaction_count::text as pruned_transaction_count,
@@ -545,7 +548,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
   if (args.execute && !args.recoveryDir) fail("--recovery-dir is required with --execute");
   if (!args.execute && args.recoveryDir) fail("--recovery-dir is only valid with --execute");
 
-  const target = resolveStorageTarget(args.target, env);
+  const target = deps.storageTarget || resolveStorageTarget(args.target, env, deps.targetOptions || {});
   const sql = deps.sql || (deps.pruneStore ? null : postgres(target.dbUrl, {
     max: 1,
     prepare: false,
@@ -649,7 +652,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
     if (deps.emit !== false) outputResult(result);
     return result;
   } finally {
-    if (sql) await sql.end({ timeout: 5 });
+    if (sql && !deps.sql) await sql.end({ timeout: 5 });
   }
 }
 
