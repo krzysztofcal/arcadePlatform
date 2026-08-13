@@ -67,6 +67,14 @@ begin
 end;
 $$;
 
+-- Function replacement is owner-sensitive on hosted Postgres.  Temporarily
+-- delegate the migration session to the existing pruner owner, then remove
+-- the schema capability and temporary role grant before the transaction can
+-- commit.  A pre-existing managed non-inheriting membership is preserved.
+grant chips_ledger_archive_pruner to postgres;
+grant create on schema public to chips_ledger_archive_pruner;
+set role chips_ledger_archive_pruner;
+
 -- Patch the existing SECURITY DEFINER proof implementation in place so its
 -- owner, strictness, search_path, ACL, and immutable state machine remain
 -- unchanged while its identity check becomes target-aware.
@@ -172,11 +180,9 @@ begin
 end;
 $$;
 
-revoke all on function public.chips_assert_archive_prune_stage()
-  from public, anon, authenticated, service_role;
-grant execute on function public.chips_assert_archive_prune_stage()
-  to chips_ledger_archive_pruner;
-
+-- Reapply the function ACL while the pruner is the owner.  The internal
+-- implementation must not be explicitly executable by postgres; only the
+-- proof and public prune entry points receive that grant.
 revoke all on function public.chips_register_archive_id_proof(
   text, uuid[], bigint[], text, integer, timestamptz, timestamptz, uuid,
   timestamptz, uuid, timestamptz, timestamptz, jsonb, bigint, bigint,
@@ -188,9 +194,206 @@ grant execute on function public.chips_register_archive_id_proof(
   text, text, numeric, numeric, numeric
 ) to postgres;
 
-revoke all on function public.chips_prune_committed_archive_batch(text, uuid[], bigint[], boolean)
+revoke all on function public.chips_prune_committed_archive_batch_internal(
+  text, uuid[], bigint[], boolean
+) from public, anon, authenticated, service_role, postgres;
+
+revoke all on function public.chips_prune_committed_archive_batch(
+  text, uuid[], bigint[], boolean
+) from public, anon, authenticated, service_role;
+grant execute on function public.chips_prune_committed_archive_batch(
+  text, uuid[], bigint[], boolean
+) to postgres;
+
+reset role;
+revoke create on schema public from chips_ledger_archive_pruner;
+revoke chips_ledger_archive_pruner from postgres;
+
+revoke all on function public.chips_assert_archive_prune_stage()
   from public, anon, authenticated, service_role;
-grant execute on function public.chips_prune_committed_archive_batch(text, uuid[], bigint[], boolean)
-  to postgres;
+grant execute on function public.chips_assert_archive_prune_stage()
+  to chips_ledger_archive_pruner;
+
+do $$
+declare
+  function_owner text;
+begin
+  select pg_catalog.pg_get_userbyid(proowner)
+    into function_owner
+    from pg_catalog.pg_proc
+   where oid = 'public.chips_assert_archive_prune_target(text,bigint)'::pg_catalog.regprocedure;
+  if function_owner <> 'postgres' then
+    raise exception 'Archive target gate owner must remain postgres';
+  end if;
+
+  select pg_catalog.pg_get_userbyid(proowner)
+    into function_owner
+    from pg_catalog.pg_proc
+   where oid = 'public.chips_assert_archive_prune_stage()'::pg_catalog.regprocedure;
+  if function_owner <> 'postgres' then
+    raise exception 'Archive stage gate owner must remain postgres';
+  end if;
+
+  select pg_catalog.pg_get_userbyid(proowner)
+    into function_owner
+    from pg_catalog.pg_proc
+   where oid = 'public.chips_register_archive_id_proof(text,uuid[],bigint[],text,integer,timestamptz,timestamptz,uuid,timestamptz,uuid,timestamptz,timestamptz,jsonb,bigint,bigint,text,text,numeric,numeric,numeric)'::pg_catalog.regprocedure;
+  if function_owner <> 'chips_ledger_archive_pruner' then
+    raise exception 'Archive proof function owner must remain chips_ledger_archive_pruner';
+  end if;
+
+  select pg_catalog.pg_get_userbyid(proowner)
+    into function_owner
+    from pg_catalog.pg_proc
+   where oid = 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)'::pg_catalog.regprocedure;
+  if function_owner <> 'chips_ledger_archive_pruner' then
+    raise exception 'Internal archive prune function owner must remain chips_ledger_archive_pruner';
+  end if;
+
+  select pg_catalog.pg_get_userbyid(proowner)
+    into function_owner
+    from pg_catalog.pg_proc
+   where oid = 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)'::pg_catalog.regprocedure;
+  if function_owner <> 'chips_ledger_archive_pruner' then
+    raise exception 'Archive prune wrapper owner must remain chips_ledger_archive_pruner';
+  end if;
+
+  if exists (
+    select 1
+      from pg_catalog.pg_auth_members memberships
+      join pg_catalog.pg_roles granted_role on granted_role.oid = memberships.roleid
+      join pg_catalog.pg_roles member_role on member_role.oid = memberships.member
+      join pg_catalog.pg_roles grantor_role on grantor_role.oid = memberships.grantor
+     where granted_role.rolname = 'chips_ledger_archive_pruner'
+       and not (
+         member_role.rolname = 'postgres'
+         and grantor_role.rolname = 'supabase_admin'
+         and memberships.admin_option
+         and not memberships.inherit_option
+         and not memberships.set_option
+       )
+  ) then
+    raise exception 'Temporary archive pruner role membership must not remain after migration';
+  end if;
+
+  if pg_catalog.has_schema_privilege('chips_ledger_archive_pruner', 'public', 'create') then
+    raise exception 'Archive pruner schema CREATE must not remain after migration';
+  end if;
+
+  if pg_catalog.has_function_privilege(
+       'anon',
+       'public.chips_assert_archive_prune_stage()',
+       'execute'
+     )
+    or pg_catalog.has_function_privilege(
+       'authenticated',
+       'public.chips_assert_archive_prune_stage()',
+       'execute'
+     )
+    or pg_catalog.has_function_privilege(
+       'service_role',
+       'public.chips_assert_archive_prune_stage()',
+       'execute'
+     )
+    or pg_catalog.has_function_privilege(
+       'anon',
+       'public.chips_assert_archive_prune_target(text,bigint)',
+       'execute'
+     )
+    or pg_catalog.has_function_privilege(
+       'authenticated',
+       'public.chips_assert_archive_prune_target(text,bigint)',
+       'execute'
+     )
+    or pg_catalog.has_function_privilege(
+       'service_role',
+       'public.chips_assert_archive_prune_target(text,bigint)',
+       'execute'
+     )
+    or pg_catalog.has_function_privilege(
+       'anon',
+       'public.chips_register_archive_id_proof(text,uuid[],bigint[],text,integer,timestamptz,timestamptz,uuid,timestamptz,uuid,timestamptz,timestamptz,jsonb,bigint,bigint,text,text,numeric,numeric,numeric)',
+       'execute'
+     )
+    or pg_catalog.has_function_privilege(
+       'authenticated',
+       'public.chips_register_archive_id_proof(text,uuid[],bigint[],text,integer,timestamptz,timestamptz,uuid,timestamptz,uuid,timestamptz,timestamptz,jsonb,bigint,bigint,text,text,numeric,numeric,numeric)',
+       'execute'
+     )
+    or pg_catalog.has_function_privilege(
+       'service_role',
+       'public.chips_register_archive_id_proof(text,uuid[],bigint[],text,integer,timestamptz,timestamptz,uuid,timestamptz,uuid,timestamptz,timestamptz,jsonb,bigint,bigint,text,text,numeric,numeric,numeric)',
+       'execute'
+     )
+    or pg_catalog.has_function_privilege(
+       'anon',
+       'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)',
+       'execute'
+     )
+    or pg_catalog.has_function_privilege(
+       'authenticated',
+       'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)',
+       'execute'
+     )
+    or pg_catalog.has_function_privilege(
+       'service_role',
+       'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)',
+       'execute'
+     )
+    or pg_catalog.has_function_privilege(
+       'anon',
+       'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)',
+       'execute'
+     )
+    or pg_catalog.has_function_privilege(
+       'authenticated',
+       'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)',
+       'execute'
+     )
+    or pg_catalog.has_function_privilege(
+       'service_role',
+       'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)',
+       'execute'
+     ) then
+    raise exception 'Archive proof or prune functions remain executable by an API role';
+  end if;
+
+  if not exists (
+    select 1
+      from pg_catalog.pg_proc procedures
+      cross join lateral pg_catalog.aclexplode(
+        coalesce(procedures.proacl, pg_catalog.acldefault('f', procedures.proowner))
+      ) as privileges
+     where procedures.oid = 'public.chips_register_archive_id_proof(text,uuid[],bigint[],text,integer,timestamptz,timestamptz,uuid,timestamptz,uuid,timestamptz,timestamptz,jsonb,bigint,bigint,text,text,numeric,numeric,numeric)'::pg_catalog.regprocedure
+       and privileges.grantee = 'postgres'::pg_catalog.regrole::oid
+       and privileges.privilege_type = 'EXECUTE'
+  )
+    or not exists (
+    select 1
+      from pg_catalog.pg_proc procedures
+      cross join lateral pg_catalog.aclexplode(
+        coalesce(procedures.proacl, pg_catalog.acldefault('f', procedures.proowner))
+      ) as privileges
+     where procedures.oid = 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)'::pg_catalog.regprocedure
+       and privileges.grantee = 'postgres'::pg_catalog.regrole::oid
+       and privileges.privilege_type = 'EXECUTE'
+  ) then
+    raise exception 'Postgres must retain EXECUTE on public proof/prune entry points';
+  end if;
+
+  if exists (
+    select 1
+      from pg_catalog.pg_proc procedures
+      cross join lateral pg_catalog.aclexplode(
+        coalesce(procedures.proacl, pg_catalog.acldefault('f', procedures.proowner))
+      ) as privileges
+     where procedures.oid = 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)'::pg_catalog.regprocedure
+       and privileges.grantee = 'postgres'::pg_catalog.regrole::oid
+       and privileges.privilege_type = 'EXECUTE'
+  ) then
+    raise exception 'Postgres must not retain EXECUTE on internal archive prune';
+  end if;
+end;
+$$;
 
 commit;

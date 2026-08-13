@@ -2,7 +2,7 @@
 
 Stage 2B.4 adds a manual, bounded pruning path for one previously committed
 and verified archive. Stage remains capped at 5,000 transactions; the
-Production canary is capped at exactly 2 transactions. It removes only the exact hot transaction and
+Production canary is capped at at most 2 transactions. It removes only the exact hot transaction and
 entry IDs contained in that archive. A cutoff, timestamp range, or cursor is
 evidence checked against the archive manifest; none of them is a deletion
 selector.

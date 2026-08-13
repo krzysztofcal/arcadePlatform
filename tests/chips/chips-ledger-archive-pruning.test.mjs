@@ -304,7 +304,7 @@ try {
   assert.equal(JSON.parse(productionOutput).target, "prod");
   assert.equal(JSON.parse(fs.readFileSync(productionResult.recoveryBundle.manifestPath, "utf8")).target, "prod");
 
-  const thirdTx = candidate("00000000-0000-4000-8000-00000000000c", "2026-01-01T00:00:00.000003Z", { tx_type: "TABLE_BUY_IN" });
+  const thirdTx = candidate("00000000-0000-4000-8000-00000000000c", "2026-01-01T00:00:00.000003Z", "TABLE_BUY_IN");
   const threeRecords = [...records, record(thirdTx, 20, 10)];
   const threeArchive = buildArchiveBytes(threeRecords);
   const threeManifest = buildManifest({
