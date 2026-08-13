@@ -10,6 +10,7 @@ export const EXPORT_SCHEMA_VERSION = 1;
 export const DEFAULT_CUTOFF_DAYS = 30;
 export const DEFAULT_BATCH_SIZE = 5000;
 export const MAX_BATCH_SIZE = 5000;
+export const PRODUCTION_MAX_BATCH_SIZE = 2;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const INTEGER_RE = /^-?(?:0|[1-9][0-9]*)$/;
@@ -153,7 +154,7 @@ Required:
 Selection:
   --cutoff <timestamp>            Strict upper bound for transaction.created_at.
   --cutoff-days <integer>         Default: 30; ignored when --cutoff is set.
-  --batch-size <integer>          Default/max: 5000.
+  --batch-size <integer>          Stage default/max: 5000; Production max: 2.
   --after-created-at <timestamp>  Resume cursor timestamp.
   --after-id <uuid>               Resume cursor UUID tie-breaker.
 
@@ -531,6 +532,12 @@ function parseBoundedInteger(value, name, { min, max }) {
   return parsed;
 }
 
+export function maxBatchSizeForTarget(target) {
+  if (target === "stage") return MAX_BATCH_SIZE;
+  if (target === "prod") return PRODUCTION_MAX_BATCH_SIZE;
+  fail("target must be exactly stage or prod");
+}
+
 function deriveProjectRef(dbUrl) {
   let url;
   try {
@@ -589,9 +596,10 @@ function resolveOptions(args, env, cwd, now) {
         const days = args.cutoffDays == null ? DEFAULT_CUTOFF_DAYS : parseBoundedInteger(args.cutoffDays, "--cutoff-days", { min: 0, max: 36500 });
         return new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
       })();
+  const maxBatchSize = maxBatchSizeForTarget(target.target);
   const batchSize = args.batchSize == null
-    ? DEFAULT_BATCH_SIZE
-    : parseBoundedInteger(args.batchSize, "--batch-size", { min: 1, max: MAX_BATCH_SIZE });
+    ? Math.min(DEFAULT_BATCH_SIZE, maxBatchSize)
+    : parseBoundedInteger(args.batchSize, "--batch-size", { min: 1, max: maxBatchSize });
   const outputPath = path.resolve(cwd, args.output);
   const manifestPath = path.resolve(cwd, args.manifest || `${outputPath}.manifest.json`);
   if (outputPath === manifestPath) fail("--output and --manifest must be different paths");

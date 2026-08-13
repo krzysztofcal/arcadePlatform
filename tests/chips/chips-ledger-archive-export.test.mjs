@@ -110,6 +110,18 @@ await assert.rejects(
   () => runExport({ argv: ["--output", "/tmp/chips-ledger-review.jsonl.gz"], env: { LEDGER_ARCHIVE_TARGET: "prod" }, cwd: "/tmp" }),
   /target must be exactly stage or prod/,
 );
+await assert.rejects(
+  () => runExport({
+    argv: ["--target", "prod", "--batch-size", "3", "--output", "/tmp/chips-ledger-prod-too-large.jsonl.gz"],
+    env: {
+      EXPECTED_SUPABASE_STAGE_PROJECT_REF: "krydukthwdvccggbyjfw",
+      EXPECTED_SUPABASE_PROD_PROJECT_REF: "otbqfijerkieoxwpxjnm",
+      SUPABASE_PROD_DB_URL: "postgresql://postgres.otbqfijerkieoxwpxjnm@db.otbqfijerkieoxwpxjnm.supabase.co:5432/postgres",
+    },
+    cwd: "/tmp",
+  }),
+  /--batch-size must be between 1 and 2/,
+);
 assert.equal(stringifyJson({ id: 123n, amount: -7n }), '{"id":"123","amount":"-7"}');
 assert.equal(recordA.entries[0].amount, "10");
 assert.equal(recordA.entries[1].amount, "-10");
