@@ -7,6 +7,7 @@ import postgres from "postgres";
 import {
   EXPORT_SCHEMA_VERSION,
   compareTransactions,
+  maxBatchSizeForTarget,
   parseJsonl,
   resolveTarget,
   serializeRecords,
@@ -155,9 +156,11 @@ function verifyManifestShape(manifest, artifactName, target) {
   if (manifest.cutoff.rule !== "transaction.created_at < cutoff") fail("local manifest cutoff rule is unsupported");
 
   const batch = manifest.batch;
-  if (!batch || !Number.isSafeInteger(batch.limit) || batch.limit < 1 || batch.limit > 5000) fail("local manifest batch limit is invalid");
+  const maxBatchSize = maxBatchSizeForTarget(target.target);
+  if (!batch || !Number.isSafeInteger(batch.limit) || batch.limit < 1 || batch.limit > maxBatchSize) fail("local manifest batch limit is invalid for target");
   assertSafeInteger(batch.transactions, "batch.transactions");
   assertSafeInteger(batch.entries, "batch.entries");
+  if (batch.transactions > batch.limit) fail("local manifest transaction count exceeds target batch limit");
   if (!batch.tx_types || typeof batch.tx_types !== "object" || Array.isArray(batch.tx_types)) fail("local manifest tx_types is invalid");
   let txTypeTotal = 0;
   for (const [txType, count] of Object.entries(batch.tx_types)) {

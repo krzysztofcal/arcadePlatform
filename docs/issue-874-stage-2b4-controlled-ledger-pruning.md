@@ -1,7 +1,8 @@
-# Issue #874 — Stage 2B.4 controlled ledger pruning
+# Issue #874 — Stage 2B.4 controlled ledger pruning and Production canary
 
 Stage 2B.4 adds a manual, bounded pruning path for one previously committed
-and verified Stage archive. It removes only the exact hot transaction and
+and verified archive. Stage remains capped at 5,000 transactions; the
+Production canary is capped at exactly 2 transactions. It removes only the exact hot transaction and
 entry IDs contained in that archive. A cutoff, timestamp range, or cursor is
 evidence checked against the archive manifest; none of them is a deletion
 selector.
@@ -10,13 +11,13 @@ This first version is deliberately narrow. It accepts only technical
 `TABLE_BUY_IN` and `TABLE_CASH_OUT` transactions with `user_id IS NULL`, no
 entries for `USER` accounts, exactly one `SYSTEM` entry, exactly one `ESCROW`
 entry, and exactly one unambiguous table ID per transaction. It processes one
-all-or-nothing batch of at most 5,000 transactions. It does not prune user
-ledger history, upload or delete Storage objects, run on a schedule, or support
-Production.
+all-or-nothing batch of at most the target cap. It does not prune user ledger
+history, upload or delete Storage objects, or run on a schedule. Production is
+manual-canary only and is never selected implicitly.
 
 ## Immutable archive proof
 
-The CLI privately downloads the committed object, verifies the complete Stage
+The CLI privately downloads the committed object, verifies the complete target
 2B.1/2B.2 contract, and derives ordered ID proofs from the JSONL bytes. Proof
 registration is a separate, non-destructive database transaction. A committed
 manifest may transition once from no proof to a complete proof; the guard
@@ -97,14 +98,14 @@ and a local 120-second statement timeout. Execute retries at most three times,
 and only for a serialization failure or lock timeout. Other errors fail
 immediately. The whole batch is atomic.
 
-## Stage-only authorization
+## Target authorization
 
-Both the CLI and the database function require canonical Stage. The database
-function reads PostgreSQL's stable system identifier and accepts only
-`7656985631720456337`; it explicitly rejects Production identifier
-`7575202818581710058`. The committed manifest project ref must also be
-`krydukthwdvccggbyjfw`. The manifest value is a secondary consistency check,
-not the server identity gate.
+Both the CLI and the database functions require an explicit target and the
+matching canonical pair. Stage is
+`krydukthwdvccggbyjfw` / `7656985631720456337`; Production is
+`otbqfijerkieoxwpxjnm` / `7575202818581710058`. Any mixed pair or unknown
+system identifier fails closed. The database cap is 5,000 for Stage and 2 for
+Production; the CLI and committed-manifest validation enforce the same caps.
 
 The destructive function is `SECURITY DEFINER`, has an empty `search_path`,
 and is owned by the `NOLOGIN`, `NOINHERIT`, `NOBYPASSRLS` role
@@ -112,7 +113,7 @@ and is owned by the `NOLOGIN`, `NOINHERIT`, `NOBYPASSRLS` role
 The role has only the table, column, row-lock, and delete permissions needed by
 the operation, plus role-specific RLS policies. `PUBLIC`, `anon`,
 `authenticated`, and `service_role` cannot execute the proof or pruning
-functions. The CLI connects through the existing direct Stage PostgreSQL
+functions. The CLI connects through the existing target-specific PostgreSQL
 operations credential; Storage authorization is used only for private
 downloads.
 
@@ -128,7 +129,7 @@ initial measurement intentionally has no index on `archive_batch_id`.
 
 ## CLI and recovery copy
 
-The command has no Production or implicit execute mode:
+The command has no implicit target or execute mode. A Stage dry-run is:
 
 ```sh
 node scripts/ops/chips-ledger-archive-prune.mjs \
@@ -149,6 +150,12 @@ node scripts/ops/chips-ledger-archive-prune.mjs \
   --execute \
   --recovery-dir /private/recovery-directory
 ```
+
+The Production canary uses the same manual sequence with `--target prod` and
+the canonical Production project-bound credentials. It may contain at most two
+technical transactions; a third transaction is rejected by both CLI validation
+and the database function. No scheduler, automatic pruning, or Production
+candidate selection is provided by this change.
 
 Before opening the destructive database transaction, execute writes the
 verified `.jsonl.gz` and a recovery manifest to a real directory owned by the
@@ -183,7 +190,7 @@ reviewed.
 
 Record only aggregate evidence in Issue #874 and the PR:
 
-- exact PR HEAD, Stage project ref, and PostgreSQL system identifier;
+- exact PR HEAD, selected target project ref, and PostgreSQL system identifier;
 - bucket, object path, compressed SHA-256, and both ordered ID SHA-256 values;
 - cutoff, cursor, first/last timestamps, counts, `tx_types`, and amount totals;
 - user transaction count, USER entry count, and distinct table count;
@@ -198,7 +205,9 @@ Stage prune/retry cycles, exercise interruption recovery, prove stable user and
 admin runtime behavior, quantify history/API impact, verify idempotency parity
 after pruning, review database capacity effects including the still-linear
 registry, and obtain explicit approval for a Production migration and retention
-policy. The Production system identifier must remain rejected by this version.
+policy. A future Production canary must repeat the same proof, dry-run,
+recovery, and explicit prune approvals against the Production pair; this
+document does not authorize or execute that operation.
 
 ## Breaking impact and scope boundary
 
@@ -213,9 +222,9 @@ will no longer find the pruned rows in PostgreSQL; no cold-history API is added
 here. That loss must be accepted for each Stage candidate and separately
 designed before Production.
 
-This stage does not modify balances, upload or delete Storage objects, create
-new archives, prune user transactions, run on Production, add a scheduler,
+This operator path does not modify balances, upload or delete Storage objects,
+create new archives, prune user transactions, run automatically, add a scheduler,
 change runtime/WS/UI code, or add environment variables. It also does not make
 database growth fully bounded: `chips_transaction_idempotency` remains durable
 and grows linearly. Issue #874 therefore cannot be closed solely because one
-Stage 2B.4 batch succeeds.
+archive batch succeeds.

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import postgres from "postgres";
-import { stringifyJson } from "./chips-ledger-archive-export.mjs";
+import { maxBatchSizeForTarget, stringifyJson } from "./chips-ledger-archive-export.mjs";
 import {
   ARCHIVE_BUCKET,
   buildObjectPath,
@@ -25,13 +25,13 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const ENTRY_ID_RE = /^[1-9][0-9]*$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const ALLOWED_TX_TYPES = new Set(["TABLE_BUY_IN", "TABLE_CASH_OUT"]);
-const MAX_BATCH_SIZE = 5000;
+const MAX_BATCH_SIZE = maxBatchSizeForTarget("stage");
 const MAX_EXECUTE_ATTEMPTS = 3;
 
 const HELP = `Usage: node scripts/ops/chips-ledger-archive-prune.mjs [options]
 
 Required:
-  --target stage                 Canonical Stage only; Production is rejected.
+  --target stage|prod            Explicit canonical target; no default.
   --object-path <path>           Committed v1/sha256/<sha>.jsonl.gz object.
   --confirm-sha <sha256>         Explicit compressed object SHA-256 confirmation.
 
@@ -43,8 +43,9 @@ Modes (mutually exclusive):
 Execute-only:
   --recovery-dir <path>          Required private 0700 recovery directory.
 
-The command is Stage-only, processes one batch of at most 5000 transactions,
-never overwrites recovery files, never changes balances, and never mutates Storage.
+The command processes one batch of at most 5000 Stage or 2 Production
+transactions, never overwrites recovery files, never changes balances, and
+never mutates Storage.
 `;
 
 function fail(message, code = null) {
@@ -85,9 +86,9 @@ function hashCanonicalLines(values) {
   return sha256(Buffer.from(values.map((value) => `${value}\n`).join(""), "utf8"));
 }
 
-export function computeArchiveIdProofs(records) {
-  if (!Array.isArray(records) || records.length < 1 || records.length > MAX_BATCH_SIZE) {
-    fail("archive proof requires 1 to 5000 transaction records");
+export function computeArchiveIdProofs(records, { maxBatchSize = MAX_BATCH_SIZE } = {}) {
+  if (!Array.isArray(records) || records.length < 1 || records.length > maxBatchSize) {
+    fail(`archive proof requires 1 to ${maxBatchSize} transaction records`);
   }
   const transactionIds = [];
   const entryIds = [];
@@ -134,8 +135,8 @@ function tableIdForRecord(record) {
   return [...markers][0];
 }
 
-export function buildPruneEvidence(localArchive) {
-  const proofs = computeArchiveIdProofs(localArchive.records);
+export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE } = {}) {
+  const proofs = computeArchiveIdProofs(localArchive.records, { maxBatchSize });
   const txTypes = {};
   const tables = new Set();
   let userTransactions = 0;
@@ -144,7 +145,7 @@ export function buildPruneEvidence(localArchive) {
   for (const record of localArchive.records) {
     const transaction = record.transaction;
     const txType = text(transaction.tx_type);
-    if (!ALLOWED_TX_TYPES.has(txType)) fail(`archive tx_type is outside the Stage 2B.4 whitelist: ${txType}`);
+    if (!ALLOWED_TX_TYPES.has(txType)) fail(`archive tx_type is outside the technical whitelist: ${txType}`);
     if (transaction.user_id !== null) userTransactions += 1;
     const tableId = tableIdForRecord(record);
     tables.add(tableId);
@@ -174,7 +175,7 @@ export function buildPruneEvidence(localArchive) {
     txTypes[txType] = (txTypes[txType] || 0) + 1;
   }
   if (userTransactions !== 0 || userEntries !== 0) {
-    fail(`Stage 2B.4 cannot prune USER ledger history (user_transactions=${userTransactions}, user_entries=${userEntries}, distinct_tables=${tables.size})`);
+    fail(`cannot prune USER ledger history (user_transactions=${userTransactions}, user_entries=${userEntries}, distinct_tables=${tables.size})`);
   }
   if (canonicalJson(txTypes) !== canonicalJson(localArchive.manifest.batch.tx_types)) fail("technical tx_type evidence differs from archive manifest");
   return {
@@ -223,10 +224,30 @@ function parseArgs(argv) {
   return args;
 }
 
-function assertStageIdentity(identity, manifest) {
-  if (identity === PRODUCTION_SYSTEM_IDENTIFIER) fail("Production database is forbidden");
-  if (identity !== STAGE_SYSTEM_IDENTIFIER) fail("database is not canonical Stage");
-  if (manifest.project_ref !== "krydukthwdvccggbyjfw") fail("archive manifest is not canonical Stage");
+function targetPolicy(target) {
+  if (target === "stage") {
+    return {
+      target,
+      projectRef: "krydukthwdvccggbyjfw",
+      systemIdentifier: STAGE_SYSTEM_IDENTIFIER,
+      maxBatchSize: maxBatchSizeForTarget(target),
+    };
+  }
+  if (target === "prod") {
+    return {
+      target,
+      projectRef: "otbqfijerkieoxwpxjnm",
+      systemIdentifier: PRODUCTION_SYSTEM_IDENTIFIER,
+      maxBatchSize: maxBatchSizeForTarget(target),
+    };
+  }
+  fail("target must be exactly stage or prod");
+}
+
+function assertTargetIdentity(identity, manifest, target) {
+  const policy = targetPolicy(target.target);
+  if (identity !== policy.systemIdentifier) fail(`database is not canonical ${target.label}`);
+  if (manifest.project_ref !== policy.projectRef) fail(`archive manifest is not canonical ${target.label}`);
 }
 
 function parseManifestRow(row) {
@@ -257,7 +278,7 @@ function exporterManifestFromDatabase(row, target) {
     target: target.target,
     cutoff: { created_at: row.cutoff, rule: "transaction.created_at < cutoff" },
     batch: {
-      limit: MAX_BATCH_SIZE,
+      limit: targetPolicy(target.target).maxBatchSize,
       transactions: row.transaction_count,
       entries: row.entry_count,
       tx_types: row.tx_types,
@@ -280,11 +301,11 @@ function exporterManifestFromDatabase(row, target) {
   };
 }
 
-function recoveryManifest(row, identity, evidence) {
+function recoveryManifest(row, identity, evidence, target) {
   return {
     recovery_schema_version: 1,
     artifact_type: "chips_ledger_archive_prune_recovery",
-    target: "stage",
+    target: target.target,
     project_ref: row.project_ref,
     postgres_system_identifier: identity,
     bucket: ARCHIVE_BUCKET,
@@ -317,12 +338,12 @@ function recoveryManifest(row, identity, evidence) {
   };
 }
 
-export function writeRecoveryBundle({ recoveryDir, archiveBytes, row, identity, evidence }) {
+export function writeRecoveryBundle({ recoveryDir, archiveBytes, row, identity, evidence, target }) {
   const directory = ensurePrivateDirectory(recoveryDir);
   const baseName = `chips-ledger-${row.compressed_sha256}`;
   const artifactPath = path.join(directory, `${baseName}.jsonl.gz`);
   const manifestPath = path.join(directory, `${baseName}.recovery.json`);
-  const manifest = recoveryManifest(row, identity, evidence);
+  const manifest = recoveryManifest(row, identity, evidence, target);
   const manifestBytes = Buffer.from(`${stringifyJson(manifest)}\n`, "utf8");
   const artifactExists = fs.existsSync(artifactPath);
   const manifestExists = fs.existsSync(manifestPath);
@@ -351,7 +372,7 @@ export function verifyRecoveryBundle({ bundle, row, target, identity, expectedEv
   assertPrivateRegularFile(bundle.artifactPath);
   assertPrivateRegularFile(bundle.manifestPath);
   const manifest = JSON.parse(fs.readFileSync(bundle.manifestPath, "utf8"));
-  const expectedManifest = recoveryManifest(row, identity, expectedEvidence);
+  const expectedManifest = recoveryManifest(row, identity, expectedEvidence, target);
   if (canonicalJson(manifest) !== canonicalJson(expectedManifest)) fail("recovery manifest no longer matches archive evidence");
   const verified = verifyArchiveBytes({
     compressedBytes: fs.readFileSync(bundle.artifactPath),
@@ -359,7 +380,7 @@ export function verifyRecoveryBundle({ bundle, row, target, identity, expectedEv
     target,
     artifactName: path.basename(row.object_path),
   });
-  const evidence = buildPruneEvidence(verified);
+  const evidence = buildPruneEvidence(verified, { maxBatchSize: targetPolicy(target.target).maxBatchSize });
   if (evidence.transactionIdsSha256 !== expectedEvidence.transactionIdsSha256
     || evidence.entryIdsSha256 !== expectedEvidence.entryIdsSha256) {
     fail("recovery archive ID proof no longer matches");
@@ -487,7 +508,7 @@ function assertPostCommitVerification(verification, evidence) {
 function outputResult(result) {
   process.stdout.write(`${stringifyJson({
     event: "chips_ledger_archive_prune",
-    target: "stage",
+    target: result.target.target,
     project_ref: result.row.project_ref,
     postgres_system_identifier: result.identity,
     bucket: ARCHIVE_BUCKET,
@@ -517,7 +538,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
     process.stdout.write(HELP);
     return null;
   }
-  if (args.target !== "stage") fail("--target must be explicitly set to stage; Production is unsupported");
+  if (args.target !== "stage" && args.target !== "prod") fail("--target must be explicitly set to stage or prod");
   if (!args.objectPath) fail("--object-path is required");
   if (!SHA256_RE.test(text(args.confirmSha))) fail("--confirm-sha must be a lowercase SHA-256");
   if (args.objectPath !== buildObjectPath(args.confirmSha)) fail("--object-path does not match --confirm-sha");
@@ -538,7 +559,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
     await verifyBucket(target);
     const identity = await store.getIdentity();
     const row = await store.getManifest(args.objectPath);
-    assertStageIdentity(identity, row);
+    assertTargetIdentity(identity, row, target);
     if (row.status !== "committed" || !row.committed_at) fail("archive manifest is not committed");
     if (row.compressed_sha256 !== args.confirmSha) fail("--confirm-sha does not match committed manifest");
 
@@ -553,7 +574,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
       target,
       artifactName: path.basename(row.object_path),
     });
-    const evidence = buildPruneEvidence(localArchive);
+    const evidence = buildPruneEvidence(localArchive, { maxBatchSize: targetPolicy(target.target).maxBatchSize });
 
     if (args.registerProof) {
       const proof = await store.registerProof(row, evidence);
@@ -561,6 +582,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
         row,
         identity,
         evidence,
+        target,
         mode: "register-proof",
         state: proof?.state || "proof_registered",
         storageDownloadMs: downloaded.downloadMs,
@@ -578,6 +600,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
         row,
         identity,
         evidence,
+        target,
       });
     }
 
@@ -615,6 +638,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
     const result = {
       row,
       identity,
+      target,
       evidence,
       mode: args.execute ? "execute" : "dry-run",
       state: pruneResult?.state || "unknown",

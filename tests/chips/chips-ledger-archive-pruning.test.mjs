@@ -25,9 +25,11 @@ const ENV = {
   EXPECTED_SUPABASE_STAGE_PROJECT_REF: "krydukthwdvccggbyjfw",
   EXPECTED_SUPABASE_PROD_PROJECT_REF: "otbqfijerkieoxwpxjnm",
   SUPABASE_STAGE_DB_URL: "postgresql://postgres.krydukthwdvccggbyjfw@db.krydukthwdvccggbyjfw.supabase.co:5432/postgres",
+  SUPABASE_PROD_DB_URL: "postgresql://postgres.otbqfijerkieoxwpxjnm@db.otbqfijerkieoxwpxjnm.supabase.co:5432/postgres",
   SUPABASE_URL: "https://krydukthwdvccggbyjfw.supabase.co",
   SUPABASE_SERVICE_ROLE_KEY: "test-service-role-key",
 };
+const PROD_ENV = { ...ENV, SUPABASE_URL: "https://otbqfijerkieoxwpxjnm.supabase.co" };
 
 function candidate(id, createdAt, txType) {
   return {
@@ -102,33 +104,34 @@ const proof = computeArchiveIdProofs(records);
 assert.equal(proof.transactionIdsSha256, "726400e7a16ea9e7ca71ee707fb025934613059de29366a5ae7f626256b688fa");
 assert.equal(proof.entryIdsSha256, "58eb8c6b6deb82261f809eb3277a61b010224ae0fe568f199ced00f51f7dd8ac");
 
-function manifestRow(overrides = {}) {
+function manifestRow(overrides = {}, sourceManifest = localManifest, sourceProof = proof) {
+  const sourceObjectPath = buildObjectPath(sourceManifest);
   return {
-    object_path: objectPath,
+    object_path: sourceObjectPath,
     batch_id: "1",
     project_ref: "krydukthwdvccggbyjfw",
     format_version: 1,
-    cutoff: localManifest.cutoff.created_at,
+    cutoff: sourceManifest.cutoff.created_at,
     cursor_start_created_at: null,
     cursor_start_id: null,
-    cursor_end_created_at: localManifest.cursor.end.created_at,
-    cursor_end_id: localManifest.cursor.end.id,
-    first_created_at: localManifest.time_range.first_created_at,
-    last_created_at: localManifest.time_range.last_created_at,
-    transaction_count: localManifest.batch.transactions,
-    entry_count: localManifest.batch.entries,
-    tx_types: localManifest.batch.tx_types,
-    raw_bytes: localManifest.bytes.raw,
-    compressed_bytes: localManifest.bytes.compressed,
-    raw_sha256: localManifest.sha256.raw_jsonl,
-    compressed_sha256: localManifest.sha256.compressed_artifact,
-    credits: localManifest.amounts.credits,
-    debits: localManifest.amounts.debits,
-    net_amount: localManifest.amounts.net,
+    cursor_end_created_at: sourceManifest.cursor.end.created_at,
+    cursor_end_id: sourceManifest.cursor.end.id,
+    first_created_at: sourceManifest.time_range.first_created_at,
+    last_created_at: sourceManifest.time_range.last_created_at,
+    transaction_count: sourceManifest.batch.transactions,
+    entry_count: sourceManifest.batch.entries,
+    tx_types: sourceManifest.batch.tx_types,
+    raw_bytes: sourceManifest.bytes.raw,
+    compressed_bytes: sourceManifest.bytes.compressed,
+    raw_sha256: sourceManifest.sha256.raw_jsonl,
+    compressed_sha256: sourceManifest.sha256.compressed_artifact,
+    credits: sourceManifest.amounts.credits,
+    debits: sourceManifest.amounts.debits,
+    net_amount: sourceManifest.amounts.net,
     status: "committed",
     committed_at: "2026-01-02T00:00:00.000000Z",
-    archived_transaction_ids_sha256: proof.transactionIdsSha256,
-    archived_entry_ids_sha256: proof.entryIdsSha256,
+    archived_transaction_ids_sha256: sourceProof.transactionIdsSha256,
+    archived_entry_ids_sha256: sourceProof.entryIdsSha256,
     archive_proof_verified_at: "2026-01-02T00:01:00.000000Z",
     pruned_at: null,
     pruned_transaction_count: null,
@@ -139,14 +142,14 @@ function manifestRow(overrides = {}) {
   };
 }
 
-function fakeStore(row, states = ["pruned"]) {
+function fakeStore(row, states = ["pruned"], { identity = STAGE_SYSTEM_IDENTIFIER, expectedExecute = true } = {}) {
   let pruneCalls = 0;
   return {
-    getIdentity: async () => STAGE_SYSTEM_IDENTIFIER,
+    getIdentity: async () => identity,
     getManifest: async () => row,
     registerProof: async () => ({ state: "proof_registered" }),
     prune: async (_path, _evidence, execute) => {
-      assert.equal(execute, true);
+      assert.equal(execute, expectedExecute);
       const state = states[Math.min(pruneCalls, states.length - 1)];
       pruneCalls += 1;
       return { state };
@@ -170,10 +173,15 @@ const baseArgs = ["--target", "stage", "--object-path", objectPath, "--confirm-s
 await assert.rejects(
   () => pruneArchive({
     argv: ["--target", "prod", "--object-path", objectPath, "--confirm-sha", archive.compressedSha256],
-    env: ENV,
-    deps: { emit: false },
+    env: PROD_ENV,
+    deps: {
+      pruneStore: fakeStore(manifestRow(), ["ready"], { identity: STAGE_SYSTEM_IDENTIFIER, expectedExecute: false }),
+      verifyBucket: async () => {},
+      downloadArchive: async () => ({ bytes: archive.compressedBytes, downloadMs: 1 }),
+      emit: false,
+    },
   }),
-  /explicitly set to stage/,
+  /database is not canonical Production/,
 );
 await assert.rejects(
   () => pruneArchive({ argv: baseArgs, env: ENV, deps: { emit: false } }),
@@ -257,6 +265,73 @@ try {
   fs.rmSync(failedRoot, { recursive: true, force: true });
 } finally {
   fs.rmSync(tempRoot, { recursive: true, force: true });
+}
+
+const productionManifest = buildManifest({
+  target: "prod",
+  cutoff: localManifest.cutoff.created_at,
+  batchSize: 2,
+  cursor: null,
+  records,
+  archive,
+  outputPath: "/private/chips-ledger-prod.jsonl.gz",
+});
+const productionRow = manifestRow({
+  project_ref: "otbqfijerkieoxwpxjnm",
+}, productionManifest);
+const productionRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-prune-prod-test-"));
+const productionRecovery = path.join(productionRoot, "recovery");
+try {
+  const productionStore = fakeStore(productionRow, ["pruned"], {
+    identity: "7575202818581710058",
+    expectedExecute: true,
+  });
+  let productionOutput = "";
+  const originalWrite = process.stdout.write;
+  process.stdout.write = (chunk) => { productionOutput += String(chunk); return true; };
+  let productionResult;
+  try {
+    productionResult = await pruneArchive({
+      argv: ["--target", "prod", "--object-path", objectPath, "--confirm-sha", archive.compressedSha256, "--execute", "--recovery-dir", productionRecovery],
+      env: PROD_ENV,
+      deps: { pruneStore: productionStore, downloadArchive, verifyBucket },
+    });
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+  assert.equal(productionResult.state, "pruned");
+  assert.equal(productionResult.evidence.transactionCount, 2);
+  assert.equal(JSON.parse(productionOutput).target, "prod");
+  assert.equal(JSON.parse(fs.readFileSync(productionResult.recoveryBundle.manifestPath, "utf8")).target, "prod");
+
+  const thirdTx = candidate("00000000-0000-4000-8000-00000000000c", "2026-01-01T00:00:00.000003Z", { tx_type: "TABLE_BUY_IN" });
+  const threeRecords = [...records, record(thirdTx, 20, 10)];
+  const threeArchive = buildArchiveBytes(threeRecords);
+  const threeManifest = buildManifest({
+    target: "prod",
+    cutoff: localManifest.cutoff.created_at,
+    batchSize: 2,
+    cursor: null,
+    records: threeRecords,
+    archive: threeArchive,
+    outputPath: "/private/chips-ledger-prod-three.jsonl.gz",
+  });
+  const threeRow = manifestRow({ project_ref: "otbqfijerkieoxwpxjnm" }, threeManifest, computeArchiveIdProofs(threeRecords));
+  await assert.rejects(
+    () => pruneArchive({
+      argv: ["--target", "prod", "--object-path", buildObjectPath(threeManifest), "--confirm-sha", threeManifest.sha256.compressed_artifact],
+      env: PROD_ENV,
+      deps: {
+        pruneStore: fakeStore(threeRow, ["ready"], { identity: "7575202818581710058", expectedExecute: false }),
+        verifyBucket,
+        downloadArchive: async () => ({ bytes: threeArchive.compressedBytes, downloadMs: 1 }),
+        emit: false,
+      },
+    }),
+    /exceeds target batch limit|archive proof requires 1 to 2 transaction records/,
+  );
+} finally {
+  fs.rmSync(productionRoot, { recursive: true, force: true });
 }
 
 const localEvidence = buildPruneEvidence({ records, manifest: localManifest, summary: {

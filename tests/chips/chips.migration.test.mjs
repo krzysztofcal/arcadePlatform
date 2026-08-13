@@ -756,6 +756,10 @@ async function assertArchivePrunerRoleContracts(sql) {
       )) as gate_owner,
       pg_catalog.pg_get_userbyid((
         select proowner from pg_catalog.pg_proc
+        where oid = 'public.chips_assert_archive_prune_target(text,bigint)'::regprocedure
+      )) as target_gate_owner,
+      pg_catalog.pg_get_userbyid((
+        select proowner from pg_catalog.pg_proc
         where oid = 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)'::regprocedure
       )) as prune_owner,
       pg_catalog.pg_get_userbyid((
@@ -784,6 +788,7 @@ async function assertArchivePrunerRoleContracts(sql) {
       pg_catalog.has_schema_privilege('chips_ledger_archive_pruner', 'public', 'create') as public_schema_create;
   `;
   assert.equal(functionOwners[0].gate_owner, "postgres", "read-only Stage identity gate must retain its privileged owner");
+  assert.equal(functionOwners[0].target_gate_owner, "postgres", "target identity gate must retain a privileged owner");
   assert.equal(functionOwners[0].prune_owner, "chips_ledger_archive_pruner", "destructive function must use the NOLOGIN owner");
   assert.equal(functionOwners[0].prune_internal_owner, "chips_ledger_archive_pruner", "internal pruning implementation must use the NOLOGIN owner");
   assert.equal(functionOwners[0].prune_internal_strict, true, "internal pruning implementation must never receive NULL arguments");
@@ -801,6 +806,11 @@ async function assertArchivePrunerRoleContracts(sql) {
       has_function_privilege('anon', 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)', 'execute') as anon_internal_execute,
       has_function_privilege('authenticated', 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)', 'execute') as authenticated_internal_execute,
       has_function_privilege('service_role', 'public.chips_register_archive_id_proof(text,uuid[],bigint[],text,integer,timestamptz,timestamptz,uuid,timestamptz,uuid,timestamptz,timestamptz,jsonb,bigint,bigint,text,text,numeric,numeric,numeric)', 'execute') as service_role_proof_execute,
+      has_function_privilege('anon', 'public.chips_register_archive_id_proof(text,uuid[],bigint[],text,integer,timestamptz,timestamptz,uuid,timestamptz,uuid,timestamptz,timestamptz,jsonb,bigint,bigint,text,text,numeric,numeric,numeric)', 'execute') as anon_proof_execute,
+      has_function_privilege('authenticated', 'public.chips_register_archive_id_proof(text,uuid[],bigint[],text,integer,timestamptz,timestamptz,uuid,timestamptz,uuid,timestamptz,timestamptz,jsonb,bigint,bigint,text,text,numeric,numeric,numeric)', 'execute') as authenticated_proof_execute,
+      has_function_privilege('service_role', 'public.chips_assert_archive_prune_target(text,bigint)', 'execute') as service_role_target_gate_execute,
+      has_function_privilege('anon', 'public.chips_assert_archive_prune_target(text,bigint)', 'execute') as anon_target_gate_execute,
+      has_function_privilege('authenticated', 'public.chips_assert_archive_prune_target(text,bigint)', 'execute') as authenticated_target_gate_execute,
       exists (
         select 1 from pg_catalog.pg_proc procedures
         cross join lateral pg_catalog.aclexplode(coalesce(procedures.proacl, pg_catalog.acldefault('f', procedures.proowner))) privileges
@@ -823,6 +833,11 @@ async function assertArchivePrunerRoleContracts(sql) {
   assert.equal(acl[0].anon_internal_execute, false, "anon must not execute the internal destructive function");
   assert.equal(acl[0].authenticated_internal_execute, false, "authenticated must not execute the internal destructive function");
   assert.equal(acl[0].service_role_proof_execute, false, "service_role must not register immutable archive proof");
+  assert.equal(acl[0].anon_proof_execute, false, "anon must not register immutable archive proof");
+  assert.equal(acl[0].authenticated_proof_execute, false, "authenticated must not register immutable archive proof");
+  assert.equal(acl[0].service_role_target_gate_execute, false, "service_role must not call the target identity gate");
+  assert.equal(acl[0].anon_target_gate_execute, false, "anon must not call the target identity gate");
+  assert.equal(acl[0].authenticated_target_gate_execute, false, "authenticated must not call the target identity gate");
   assert.equal(acl[0].postgres_execute, true, "the explicit operations role must execute the destructive function");
   assert.equal(acl[0].postgres_internal_execute, false, "the operations role must not bypass the NULL-safe wrapper");
 
@@ -832,6 +847,18 @@ async function assertArchivePrunerRoleContracts(sql) {
     await tx.unsafe(`create or replace function public.chips_assert_archive_prune_stage()
       returns text language sql security definer set search_path = ''
       as $override$ select '7656985631720456337'::text $override$;`);
+    await tx.unsafe(`create or replace function public.chips_assert_archive_prune_target(p_project_ref text, p_transaction_count bigint)
+      returns text language plpgsql security definer set search_path = ''
+      as $override$
+      begin
+        if p_project_ref = 'krydukthwdvccggbyjfw' and p_transaction_count between 1 and 5000 then
+          return '7656985631720456337';
+        elsif p_project_ref = 'otbqfijerkieoxwpxjnm' and p_transaction_count between 1 and 2 then
+          return '7575202818581710058';
+        end if;
+        raise exception 'test target gate rejected request';
+      end
+      $override$;`);
     const tableId = "00000000-0000-4000-8000-00000000b401";
     const escrowId = "00000000-0000-4000-8000-00000000b402";
     const transactionIds = [
@@ -950,6 +977,42 @@ async function assertArchivePrunerRoleContracts(sql) {
     ], "real PostgreSQL adapter must preserve manifest microseconds");
     const proofResult = await pruneStore.registerProof(adapterManifest, { transactionIds, entryIds });
     assert.equal(proofResult.state, "proof_registered", "real PostgreSQL adapter must preserve microseconds when registering proof");
+
+    await tx`update public.poker_tables set status = 'CLOSED' where id = ${tableId};`;
+    const productionCompressedHash = "3".repeat(64);
+    const productionRawHash = "4".repeat(64);
+    const productionObjectPath = `v1/sha256/${productionCompressedHash}.jsonl.gz`;
+    await tx.unsafe(`insert into public.chips_ledger_archive_batches (
+      object_path, project_ref, format_version, cutoff, cursor_start_created_at, cursor_start_id,
+      cursor_end_created_at, cursor_end_id, first_created_at, last_created_at,
+      transaction_count, entry_count, tx_types, raw_bytes, compressed_bytes,
+      raw_sha256, compressed_sha256, credits, debits, net_amount, status, committed_at
+    ) values (
+      $1, 'otbqfijerkieoxwpxjnm', 1, $2::timestamptz, $3::timestamptz, $4::uuid,
+      $5::timestamptz, $6::uuid, $7::timestamptz, $5::timestamptz,
+      2, 4, '{"TABLE_BUY_IN":1,"TABLE_CASH_OUT":1}'::jsonb,
+      100, 80, $8, $9, 20, 20, 0, 'committed', timezone('utc', now())
+    );`, [
+      productionObjectPath, sql.typed(cutoff, 25), sql.typed(cursorStartCreatedAt, 25), cursorStartId,
+      sql.typed(createdAt[1], 25), transactionIds[1], sql.typed(createdAt[0], 25), productionRawHash, productionCompressedHash,
+    ]);
+    const productionManifest = await pruneStore.getManifest(productionObjectPath);
+    const productionProof = await pruneStore.registerProof(productionManifest, { transactionIds, entryIds });
+    assert.equal(productionProof.state, "proof_registered", "Production canary proof must work for two transactions");
+    const productionDryRows = await tx.unsafe(
+      "select public.chips_prune_committed_archive_batch($1, $2::uuid[], $3::bigint[], false) as result;",
+      [productionObjectPath, transactionIds, entryIds],
+    );
+    assert.equal(productionDryRows[0].result.state, "ready", "Production canary must accept exactly two transactions");
+    await expectSavepointError(tx, "production_three_transaction_cap", () => tx.unsafe(
+      "select public.chips_prune_committed_archive_batch($1, $2::uuid[], $3::bigint[], false) as result;",
+      [productionObjectPath, [...transactionIds, cursorStartId], entryIds],
+    ), /test target gate rejected request/);
+    await expectSavepointError(tx, "mixed_identity_pair", () => tx.unsafe(
+      "select public.chips_assert_archive_prune_target($1, 2);",
+      ["unknown-project-ref"],
+    ), /test target gate rejected request/);
+    await tx`update public.poker_tables set status = 'ACTIVE' where id = ${tableId};`;
 
     await expectSavepointError(tx, "archive_direct_receipt", () => tx.unsafe(`update public.chips_ledger_archive_batches
       set pruned_at = timezone('utc', now()),
