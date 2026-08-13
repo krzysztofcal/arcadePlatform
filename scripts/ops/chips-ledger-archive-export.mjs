@@ -11,6 +11,7 @@ export const DEFAULT_CUTOFF_DAYS = 30;
 export const DEFAULT_BATCH_SIZE = 5000;
 export const MAX_BATCH_SIZE = 5000;
 export const PRODUCTION_MAX_BATCH_SIZE = 2;
+export const STAGE_AUTOMATION_POLICY_ID = "stage-ledger-auto-retention-30d-v1";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const INTEGER_RE = /^-?(?:0|[1-9][0-9]*)$/;
@@ -122,6 +123,148 @@ where c.invalid_table_marker = false
   )
   and exists (select 1 from public.chips_entries e where e.transaction_id = c.id)
 order by c.created_at asc, c.id asc
+limit $2::int;
+`;
+
+// The manual exporter deliberately keeps its broad, lifecycle-safe selector.
+// Stage automation uses this independent selector so the JSONL itself is
+// prunable-only before Storage or proof state is created.
+const PRUNABLE_CANDIDATE_SQL = `
+with base as (
+  select t.*
+  from public.chips_transactions t
+  where t.created_at < $1::timestamptz
+    and (
+      $3::timestamptz is null
+      or t.created_at > $3::timestamptz
+      or (t.created_at = $3::timestamptz and t.id > $4::uuid)
+    )
+), markers as (
+  select b.id as transaction_id,
+         lower(nullif(btrim(b.metadata->>'tableId'), '')) as table_id
+  from base b
+  where nullif(btrim(b.metadata->>'tableId'), '') is not null
+
+  union all
+
+  select b.id,
+         case
+           when lower(b.reference) like 'table:%' then lower(nullif(btrim(split_part(b.reference, ':', 2)), ''))
+           when lower(b.reference) like 'poker-rebuy:%' then lower(nullif(btrim(split_part(b.reference, ':', 2)), ''))
+           else null
+         end
+  from base b
+  where lower(b.reference) like 'table:%'
+     or lower(b.reference) like 'poker-rebuy:%'
+
+  union all
+
+  select b.id,
+         lower(nullif(btrim(substring(a.system_key from 13)), ''))
+  from base b
+  join public.chips_entries e on e.transaction_id = b.id
+  join public.chips_accounts a on a.id = e.account_id
+  where a.account_type::text = 'ESCROW'
+    and upper(a.system_key) like 'POKER_TABLE:%'
+), marker_summary as (
+  select transaction_id,
+         array_agg(distinct table_id) filter (where table_id is not null) as table_ids,
+         bool_or(table_id is null or table_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') as invalid_table_marker
+  from markers
+  group by transaction_id
+), classified as (
+  select b.*,
+         coalesce(ms.table_ids, array[]::text[]) as table_ids,
+         coalesce(ms.invalid_table_marker, false) as invalid_table_marker
+  from base b
+  left join marker_summary ms on ms.transaction_id = b.id
+), eligible as (
+  select c.*,
+         p.id as table_row_id,
+         p.status::text as table_status,
+         ea.id::text as escrow_account_id,
+         ea.status::text as escrow_status,
+         ea.balance::text as escrow_balance
+  from classified c
+  left join public.poker_tables p on p.id::text = c.table_ids[1]
+  left join public.chips_accounts ea
+    on ea.account_type::text = 'ESCROW'
+   and ea.system_key = 'POKER_TABLE:' || c.table_ids[1]
+  where c.invalid_table_marker = false
+    and cardinality(c.table_ids) = 1
+    and c.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+    and c.user_id is null
+    and (p.id is null or upper(p.status::text) = 'CLOSED')
+    and ea.id is not null
+    and ea.status::text = 'active'
+    and ea.balance = 0
+), eligible_ids as (
+  select e.id
+  from eligible e
+  join public.chips_entries entries on entries.transaction_id = e.id
+  join public.chips_accounts accounts on accounts.id = entries.account_id
+  where exists (
+    select 1
+    from public.chips_transaction_idempotency registry
+    where registry.idempotency_key = e.idempotency_key
+      and registry.transaction_id = e.id
+      and registry.payload_hash = e.payload_hash
+      and registry.tx_type = e.tx_type
+      and registry.user_id is not distinct from e.user_id
+      and registry.transaction_created_at = e.created_at
+      and registry.archive_batch_id is null
+  )
+    and not exists (
+      select 1
+      from public.chips_transaction_idempotency mapped
+      where mapped.transaction_id = e.id
+        and mapped.archive_batch_id is not null
+    )
+  group by e.id, e.tx_type
+  having count(*) = 2
+     and count(*) filter (where accounts.account_type::text = 'USER') = 0
+     and count(*) filter (where accounts.account_type::text = 'SYSTEM') = 1
+     and count(*) filter (where accounts.account_type::text = 'ESCROW') = 1
+     and count(*) filter (
+       where accounts.account_type::text = 'ESCROW'
+         and accounts.system_key = 'POKER_TABLE:' || e.table_ids[1]
+     ) = 1
+     and bool_and(accounts.status::text = 'active')
+     and sum(entries.amount) = 0
+     and (
+       (e.tx_type::text = 'TABLE_BUY_IN'
+        and sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM') < 0
+        and sum(entries.amount) filter (where accounts.account_type::text = 'ESCROW') > 0)
+       or
+       (e.tx_type::text = 'TABLE_CASH_OUT'
+        and sum(entries.amount) filter (where accounts.account_type::text = 'ESCROW') < 0
+        and sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM') > 0)
+     )
+)
+select
+  e.id::text as id,
+  e.sequence::text as sequence,
+  e.tx_type::text as tx_type,
+  e.idempotency_key,
+  e.payload_hash,
+  e.user_id::text as user_id,
+  e.reference,
+  e.description,
+  e.metadata,
+  e.created_by::text as created_by,
+  e.created_at::text as created_at,
+  true as table_related,
+  e.table_ids[1] as table_id,
+  false as invalid_table_marker,
+  (e.table_row_id is not null) as table_exists,
+  e.table_status,
+  e.escrow_account_id,
+  e.escrow_status,
+  e.escrow_balance,
+  (select count(*)::text from public.chips_entries entries where entries.transaction_id = e.id) as entry_count
+from eligible e
+join eligible_ids ids on ids.id = e.id
+order by e.created_at asc, e.id asc
 limit $2::int;
 `;
 
@@ -435,7 +578,7 @@ export function validateBatch({ candidates, records, cutoff }) {
   };
 }
 
-export function buildManifest({ target, cutoff, batchSize, cursor, records, archive, outputPath }) {
+export function buildManifest({ target, cutoff, batchSize, cursor, records, archive, outputPath, sourcePolicyId = null }) {
   const validation = validateBatch({ candidates: records.map((record) => ({
     id: record.transaction.id,
     created_at: record.transaction.created_at,
@@ -459,6 +602,7 @@ export function buildManifest({ target, cutoff, batchSize, cursor, records, arch
     artifact_type: "chips_ledger_archive",
     format: "jsonl.gz",
     target,
+    ...(sourcePolicyId == null ? {} : { source_policy_id: sourcePolicyId }),
     cutoff: {
       created_at: cutoff,
       rule: "transaction.created_at < cutoff",
@@ -554,19 +698,22 @@ function deriveProjectRef(dbUrl) {
   return ref.toLowerCase();
 }
 
-export function resolveTarget(targetValue, env = process.env) {
+export function resolveTarget(targetValue, env = process.env, { singleTarget = false } = {}) {
   const target = text(targetValue);
   const config = TARGETS[target];
   if (!config) fail("target must be exactly stage or prod");
 
   const expectedRefs = {};
-  for (const [name, targetConfig] of Object.entries(TARGETS)) {
+  const targetEntries = singleTarget
+    ? [[target, config]]
+    : Object.entries(TARGETS);
+  for (const [name, targetConfig] of targetEntries) {
     const expected = text(env[targetConfig.expectedRefEnv] || env[targetConfig.legacyRefEnv]).toLowerCase();
     if (!PROJECT_REF_RE.test(expected)) fail(`${targetConfig.expectedRefEnv} is required and must be a project ref`);
     if (expected !== targetConfig.canonicalRef) fail(`${targetConfig.expectedRefEnv} does not match the versioned canonical ref`);
     expectedRefs[name] = expected;
   }
-  if (expectedRefs.stage === expectedRefs.prod) fail("stage and production project refs must differ");
+  if (!singleTarget && expectedRefs.stage === expectedRefs.prod) fail("stage and production project refs must differ");
 
   const dbUrl = text(env[config.dbEnv]);
   if (!dbUrl) fail(`${config.dbEnv} is required for target ${target}`);
@@ -587,9 +734,9 @@ function resolveCursor(args) {
   return { created_at: createdAt, id };
 }
 
-function resolveOptions(args, env, cwd, now) {
+function resolveOptions(args, env, cwd, now, targetOptions = {}) {
   if (!args.output) fail("--output is required; use a private path outside the repository");
-  const target = resolveTarget(args.target, env);
+  const target = resolveTarget(args.target, env, targetOptions);
   const cutoff = args.cutoff
     ? normalizeTimestamp(args.cutoff, "--cutoff")
     : (() => {
@@ -612,7 +759,13 @@ export async function readSnapshot(sql, options) {
   const timestampParam = (value) => value == null || typeof sql.typed !== "function" ? value : sql.typed(value, 25);
   return sql.begin(async (tx) => {
     await tx.unsafe("set transaction isolation level repeatable read, read only;");
-    const candidates = await tx.unsafe(CANDIDATE_SQL, [
+    const selector = options.selector || "standard";
+    const candidateSql = selector === "standard"
+      ? CANDIDATE_SQL
+      : selector === "prunable"
+        ? PRUNABLE_CANDIDATE_SQL
+        : fail("snapshot selector must be standard or prunable");
+    const candidates = await tx.unsafe(candidateSql, [
       timestampParam(options.cutoff),
       options.batchSize,
       timestampParam(options.cursor?.created_at || null),
@@ -665,14 +818,14 @@ function outputMetrics(manifest, options) {
   process.stdout.write(`${stringifyJson(summary)}\n`);
 }
 
-export async function runExport({ argv = process.argv.slice(2), env = process.env, cwd = process.cwd(), now = new Date() } = {}) {
+export async function runExport({ argv = process.argv.slice(2), env = process.env, cwd = process.cwd(), now = new Date(), deps = {} } = {}) {
   const args = parseArgs(argv);
   if (args.help) {
     process.stdout.write(HELP);
     return null;
   }
-  const options = resolveOptions(args, env, cwd, now);
-  const sql = postgres(options.dbUrl, {
+  const options = resolveOptions(args, env, cwd, now, deps.targetOptions || {});
+  const sql = deps.sql || postgres(options.dbUrl, {
     max: 1,
     prepare: false,
     connect_timeout: 10,
@@ -680,7 +833,10 @@ export async function runExport({ argv = process.argv.slice(2), env = process.en
   });
 
   try {
-    const snapshot = await readSnapshot(sql, options);
+    const snapshot = await readSnapshot(sql, { ...options, selector: deps.selector || "standard" });
+    if (deps.noCandidateIfEmpty && snapshot.candidates.length === 0) {
+      return { noCandidate: true, options };
+    }
     const candidateIds = new Set(snapshot.candidates.map((candidate) => text(candidate.id)));
     const entriesByTransaction = groupEntries(snapshot.entries, candidateIds);
     const records = sortRecords(snapshot.candidates.map((candidate) => buildExportRecord(
@@ -704,15 +860,16 @@ export async function runExport({ argv = process.argv.slice(2), env = process.en
       records,
       archive,
       outputPath: options.outputPath,
+      sourcePolicyId: deps.sourcePolicyId || null,
     });
     if (manifest.sha256.compressed_artifact !== crypto.createHash("sha256").update(archive.compressedBytes).digest("hex")) {
       fail("manifest checksum verification failed");
     }
     writeOutput(options, archive, manifest);
-    outputMetrics(manifest, options);
+    if (deps.emit !== false) outputMetrics(manifest, options);
     return manifest;
   } finally {
-    await sql.end({ timeout: 5 });
+    if (!deps.sql) await sql.end({ timeout: 5 });
   }
 }
 

@@ -9,6 +9,7 @@ import {
   compareTransactions,
   maxBatchSizeForTarget,
   parseJsonl,
+  STAGE_AUTOMATION_POLICY_ID,
   resolveTarget,
   serializeRecords,
   stringifyJson,
@@ -110,8 +111,8 @@ function parseArgs(argv) {
   return args;
 }
 
-export function resolveStorageTarget(targetValue, env = process.env) {
-  const target = resolveTarget(targetValue, env);
+export function resolveStorageTarget(targetValue, env = process.env, targetOptions = {}) {
+  const target = resolveTarget(targetValue, env, targetOptions);
   const rawUrl = text(env.SUPABASE_URL);
   if (!rawUrl) fail("SUPABASE_URL is required");
   let url;
@@ -150,6 +151,14 @@ function verifyManifestShape(manifest, artifactName, target) {
     fail("local manifest has an unsupported archive format");
   }
   if (manifest.target !== target.target) fail("local manifest target does not match --target");
+  if (manifest.source_policy_id !== undefined
+    && manifest.source_policy_id !== null
+    && manifest.source_policy_id !== STAGE_AUTOMATION_POLICY_ID) {
+    fail("local manifest source policy is unsupported");
+  }
+  if (manifest.source_policy_id === STAGE_AUTOMATION_POLICY_ID && target.target !== "stage") {
+    fail("Stage automation policy cannot be stored for a non-Stage target");
+  }
   if (manifest.artifact !== artifactName) fail("local manifest artifact name does not match the archive");
   if (!manifest.cutoff || typeof manifest.cutoff.created_at !== "string") fail("local manifest cutoff is missing");
   timestampToMicros(manifest.cutoff.created_at);
@@ -339,6 +348,18 @@ function objectRequestPath(objectPath, mode = "authenticated") {
   return `/storage/v1/object${accessSegment}/${encodeURIComponent(ARCHIVE_BUCKET)}/${objectPath.split("/").map(encodeURIComponent).join("/")}`;
 }
 
+export function buildRecoveryArchiveObjectPath(manifestOrSha) {
+  const sha = typeof manifestOrSha === "string" ? manifestOrSha : manifestOrSha?.sha256?.compressed_artifact;
+  assertSha(sha, "compressed_artifact SHA-256");
+  return `recovery/v1/sha256/${sha}.jsonl.gz`;
+}
+
+export function buildRecoveryManifestObjectPath(manifestOrSha) {
+  const sha = typeof manifestOrSha === "string" ? manifestOrSha : manifestOrSha?.sha256?.compressed_artifact;
+  assertSha(sha, "compressed_artifact SHA-256");
+  return `recovery/v1/sha256/${sha}.recovery.json.gz`;
+}
+
 async function storageRequest(storageTarget, requestPath, options = {}, deps = {}) {
   const fetchImpl = deps.fetch || fetch;
   return fetchImpl(`${storageTarget.baseUrl}${requestPath}`, {
@@ -433,6 +454,7 @@ function manifestRow(manifest, storageTarget, objectPath) {
     credits: manifest.amounts.credits,
     debits: manifest.amounts.debits,
     net_amount: manifest.amounts.net,
+    source_policy_id: manifest.source_policy_id || null,
     status: "pending",
   };
 }
@@ -440,7 +462,7 @@ function manifestRow(manifest, storageTarget, objectPath) {
 const IMMUTABLE_FIELDS = [
   "object_path", "project_ref", "format_version", "cutoff", "cursor_start_created_at", "cursor_start_id",
   "cursor_end_created_at", "cursor_end_id", "first_created_at", "last_created_at", "transaction_count",
-  "entry_count", "tx_types", "raw_bytes", "compressed_bytes", "raw_sha256", "compressed_sha256", "credits", "debits", "net_amount",
+  "entry_count", "tx_types", "raw_bytes", "compressed_bytes", "raw_sha256", "compressed_sha256", "credits", "debits", "net_amount", "source_policy_id",
 ];
 
 function assertSameManifest(existing, expected) {
@@ -486,6 +508,58 @@ export async function downloadPrivateArchiveObject(storageTarget, objectPath, de
   return {
     bytes: Buffer.from(await response.arrayBuffer()),
     downloadMs: Date.now() - startedAt,
+  };
+}
+
+export async function downloadPrivateObjectIfExists(storageTarget, objectPath, deps = {}) {
+  const response = await storageRequest(storageTarget, objectRequestPath(objectPath), { method: "GET" }, deps);
+  if (await isMissingStorageResponse(response)) return null;
+  if (!response.ok) storageFailure("private object download", response);
+  if ((response.headers.get("content-type") || "").split(";", 1)[0].trim() !== ARCHIVE_MIME_TYPE) {
+    fail(`private recovery object has an unexpected MIME type: ${objectPath}`);
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+
+export async function uploadOrVerifyPrivateObject({ storageTarget, objectPath, bytes, mimeType = ARCHIVE_MIME_TYPE, deps = {} }) {
+  const expected = Buffer.from(bytes || []);
+  if (expected.length < 1 || expected.length > ARCHIVE_MAX_BYTES) fail("private recovery object has an invalid size");
+  const initial = await storageRequest(storageTarget, objectRequestPath(objectPath), { method: "GET" }, deps);
+  let objectExisted = false;
+  let uploaded = false;
+  if (initial.ok) {
+    objectExisted = true;
+    if ((initial.headers.get("content-type") || "").split(";", 1)[0].trim() !== mimeType) {
+      fail(`private recovery object has an unexpected MIME type: ${objectPath}`);
+    }
+    const downloaded = Buffer.from(await initial.arrayBuffer());
+    if (!downloaded.equals(expected)) fail(`private recovery object differs: ${objectPath}`);
+  } else {
+    if (!(await isMissingStorageResponse(initial))) storageFailure("private recovery object lookup", initial);
+    const upload = await storageRequest(storageTarget, objectRequestPath(objectPath, ""), {
+      method: "POST",
+      headers: { "content-type": mimeType, "x-upsert": "false" },
+      body: expected,
+    }, deps);
+    if (!upload.ok && upload.status !== 400 && upload.status !== 409) {
+      storageFailure("private recovery object upload", upload);
+    }
+    uploaded = upload.ok;
+    objectExisted = !uploaded;
+  }
+  const verified = await storageRequest(storageTarget, objectRequestPath(objectPath), { method: "GET" }, deps);
+  if (!verified.ok) storageFailure("private recovery object verification", verified);
+  if ((verified.headers.get("content-type") || "").split(";", 1)[0].trim() !== mimeType) {
+    fail(`private recovery object verification has an unexpected MIME type: ${objectPath}`);
+  }
+  const downloaded = Buffer.from(await verified.arrayBuffer());
+  if (!downloaded.equals(expected)) fail(`private recovery object verification differs: ${objectPath}`);
+  return {
+    objectPath,
+    objectExisted,
+    uploaded,
+    bytes: downloaded.length,
+    sha256: crypto.createHash("sha256").update(downloaded).digest("hex"),
   };
 }
 
@@ -554,6 +628,7 @@ function selectManifestSql() {
     credits::text as credits,
     debits::text as debits,
     net_amount::text as net_amount,
+    source_policy_id,
     status
   from public.chips_ledger_archive_batches
   where object_path = $1;`;
@@ -572,6 +647,7 @@ function normalizeManifestRow(row) {
     credits: String(row.credits),
     debits: String(row.debits),
     net_amount: String(row.net_amount),
+    source_policy_id: row.source_policy_id || null,
   };
 }
 
@@ -589,16 +665,16 @@ export function createManifestStore(sql) {
         (object_path, project_ref, format_version, cutoff, cursor_start_created_at, cursor_start_id,
          cursor_end_created_at, cursor_end_id, first_created_at, last_created_at, transaction_count,
          entry_count, tx_types, raw_bytes, compressed_bytes, raw_sha256, compressed_sha256,
-         credits, debits, net_amount, status)
+         credits, debits, net_amount, source_policy_id, status)
         values ($1, $2, $3::integer, $4::timestamptz, $5::timestamptz, $6::uuid,
                 $7::timestamptz, $8::uuid, $9::timestamptz, $10::timestamptz, $11::bigint,
                 $12::bigint, $13::jsonb, $14::bigint, $15::bigint, $16, $17,
-                $18::numeric, $19::numeric, $20::numeric, 'pending')
+                $18::numeric, $19::numeric, $20::numeric, $21, 'pending')
         on conflict (object_path) do nothing;`, [
         row.object_path, row.project_ref, row.format_version, timestampParam(row.cutoff), timestampParam(row.cursor_start_created_at), row.cursor_start_id,
         timestampParam(row.cursor_end_created_at), row.cursor_end_id, timestampParam(row.first_created_at), timestampParam(row.last_created_at), row.transaction_count,
         row.entry_count, row.tx_types, row.raw_bytes, row.compressed_bytes, row.raw_sha256, row.compressed_sha256,
-        row.credits, row.debits, row.net_amount,
+        row.credits, row.debits, row.net_amount, row.source_policy_id,
       ]);
     },
     async markCommitted(objectPath) {
@@ -645,7 +721,7 @@ export async function storeArchive({ argv = process.argv.slice(2), env = process
   if (!args.target) fail("--target is required; no default target is allowed");
   if (!args.artifact) fail("--artifact is required; no default path is allowed");
   if (!args.manifest) fail("--manifest is required; no default path is allowed");
-  const storageTarget = resolveStorageTarget(args.target, env);
+  const storageTarget = deps.storageTarget || resolveStorageTarget(args.target, env, deps.targetOptions || {});
   const local = verifyLocalArchive({ artifactPath: path.resolve(cwd, args.artifact), manifestPath: path.resolve(cwd, args.manifest), target: storageTarget });
   const sql = deps.sql || (deps.manifestStore ? null : postgres(storageTarget.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 30 }));
   const manifestStore = deps.manifestStore || createManifestStore(sql);
@@ -667,7 +743,7 @@ export async function storeArchive({ argv = process.argv.slice(2), env = process
     if (deps.emit !== false) outputMetrics(result);
     return result;
   } finally {
-    if (sql) await sql.end({ timeout: 5 });
+    if (sql && !deps.sql) await sql.end({ timeout: 5 });
   }
 }
 
