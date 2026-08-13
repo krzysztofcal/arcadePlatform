@@ -141,10 +141,20 @@ export function validateStageEnvironment(env = process.env) {
 
 async function acquireAdvisoryLock(sql) {
   const rows = await sql.unsafe(
-    "select pg_catalog.pg_try_advisory_lock(pg_catalog.hashtextextended($1, 0)) as acquired;",
+    "select pg_catalog.pg_backend_pid()::text as backend_pid, pg_catalog.pg_try_advisory_lock(pg_catalog.hashtextextended($1, 0)) as acquired;",
     [STAGE_AUTOMATION_LOCK_KEY],
   );
-  return rows[0]?.acquired === true || rows[0]?.acquired === "t";
+  if (!(rows[0]?.acquired === true || rows[0]?.acquired === "t")) return null;
+  const backendPid = text(rows[0]?.backend_pid);
+  if (!backendPid) fail("Stage advisory lock session identity is unavailable");
+  return { backendPid };
+}
+
+async function assertAdvisoryLock(sql, lockSession) {
+  const rows = await sql.unsafe("select pg_catalog.pg_backend_pid()::text as backend_pid;");
+  if (text(rows[0]?.backend_pid) !== lockSession?.backendPid) {
+    fail("Stage advisory lock session was lost; aborting the cycle");
+  }
 }
 
 async function releaseAdvisoryLock(sql) {
@@ -329,8 +339,9 @@ function pruneArgs(row, mode, recoveryDir = null) {
   return args;
 }
 
-async function runPruneStep({ row, mode, env, cwd, sql, pruneStore, storageTarget, downloadArchive = null, recoveryDir = null, verifyBucket = null }) {
+async function runPruneStep({ row, mode, env, cwd, sql, pruneStore, storageTarget, downloadArchive = null, recoveryDir = null, verifyBucket = null, storageDeps = {} }) {
   const deps = {
+    ...storageDeps,
     sql,
     pruneStore,
     storageTarget,
@@ -346,8 +357,8 @@ async function runPruneStep({ row, mode, env, cwd, sql, pruneStore, storageTarge
   });
 }
 
-async function verifyCompletedCycle({ row, identity, env, tempRoot, sql, pruneStore, storageTarget, verifyBucket }) {
-  const durable = await inspectDurableRecovery(storageTarget, row);
+async function verifyCompletedCycle({ row, identity, env, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps = {} }) {
+  const durable = await inspectDurableRecovery(storageTarget, row, storageDeps);
   assertResumeRecoveryState(row, durable);
   if (!durable) fail("completed Stage automation cycle has no durable recovery copies");
   const dry = await runPruneStep({
@@ -359,6 +370,7 @@ async function verifyCompletedCycle({ row, identity, env, tempRoot, sql, pruneSt
     pruneStore,
     storageTarget,
     verifyBucket,
+    storageDeps,
     downloadArchive: async () => ({ bytes: durable.archiveBytes, downloadMs: 0 }),
   });
   if (dry.state !== "already_pruned") fail(`completed Stage automation cycle did not revalidate as already_pruned: ${dry.state}`);
@@ -375,7 +387,7 @@ async function refreshRow(pruneStore, objectPath) {
   return row;
 }
 
-async function executeVerifiedCycle({ row, identity, durable, env, tempRoot, sql, pruneStore, storageTarget, verifyBucket }) {
+async function executeVerifiedCycle({ row, identity, durable, env, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps = {} }) {
   assertDurableRecoveryReady(durable);
   const recoveryDir = path.join(tempRoot, "recovery");
   restoreLocalRecovery(recoveryDir, durable);
@@ -388,6 +400,7 @@ async function executeVerifiedCycle({ row, identity, durable, env, tempRoot, sql
     pruneStore,
     storageTarget,
     verifyBucket,
+    storageDeps,
     recoveryDir,
     downloadArchive: async () => ({ bytes: durable.archiveBytes, downloadMs: 0 }),
   });
@@ -397,11 +410,11 @@ async function executeVerifiedCycle({ row, identity, durable, env, tempRoot, sql
   return result;
 }
 
-async function resumeOwnCycle({ row, identity, env, tempRoot, sql, pruneStore, storageTarget, verifyBucket }) {
-  const durableBefore = await inspectDurableRecovery(storageTarget, row);
+async function resumeOwnCycle({ row, identity, env, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps = {} }) {
+  const durableBefore = await inspectDurableRecovery(storageTarget, row, storageDeps);
   assertResumeRecoveryState(row, durableBefore);
   if (!row.archive_proof_verified_at) {
-    await runPruneStep({ row, mode: "register-proof", env, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, downloadArchive: durableBefore ? async () => ({ bytes: durableBefore.archiveBytes, downloadMs: 0 }) : null });
+    await runPruneStep({ row, mode: "register-proof", env, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps, downloadArchive: durableBefore ? async () => ({ bytes: durableBefore.archiveBytes, downloadMs: 0 }) : null });
     row = await refreshRow(pruneStore, row.object_path);
   }
   const dry = await runPruneStep({
@@ -413,6 +426,7 @@ async function resumeOwnCycle({ row, identity, env, tempRoot, sql, pruneStore, s
     pruneStore,
     storageTarget,
     verifyBucket,
+    storageDeps,
     downloadArchive: durableBefore ? async () => ({ bytes: durableBefore.archiveBytes, downloadMs: 0 }) : null,
   });
   if (durableBefore) {
@@ -422,15 +436,15 @@ async function resumeOwnCycle({ row, identity, env, tempRoot, sql, pruneStore, s
     );
   }
   if (dry.state === "already_pruned") {
-    return executeVerifiedCycle({ row, identity, durable: durableBefore, env, tempRoot, sql, pruneStore, storageTarget, verifyBucket });
+    return executeVerifiedCycle({ row, identity, durable: durableBefore, env, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps });
   }
   if (dry.state !== "ready") fail(`Stage automation dry-run did not become ready: ${dry.state}`);
   let durable = durableBefore;
   if (!durable) {
-    const main = await downloadPrivateArchiveObject(storageTarget, row.object_path);
-    durable = await persistDurableRecovery(storageTarget, row, identity, dry.evidence, main.bytes);
+    const main = await downloadPrivateArchiveObject(storageTarget, row.object_path, storageDeps);
+    durable = await persistDurableRecovery(storageTarget, row, identity, dry.evidence, main.bytes, storageDeps);
   }
-  return executeVerifiedCycle({ row, identity, durable, env, tempRoot, sql, pruneStore, storageTarget, verifyBucket });
+  return executeVerifiedCycle({ row, identity, durable, env, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps });
 }
 
 export async function runStageAutomation({ env = process.env, now = new Date(), deps = {} } = {}) {
@@ -447,20 +461,23 @@ export async function runStageAutomation({ env = process.env, now = new Date(), 
   const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
   const pruneStore = deps.pruneStore || createPruneStore(sql);
   const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
-  let locked = false;
+  let lockSession = null;
   try {
-    locked = await acquireAdvisoryLock(sql);
-    if (!locked) {
+    lockSession = await acquireAdvisoryLock(sql);
+    if (!lockSession) {
       const result = { state: "no-op", reason: "advisory_lock_busy" };
       writeAggregateSummary(result);
       return result;
     }
     const identity = await assertIdentity(sql);
+    await assertAdvisoryLock(sql, lockSession);
     await verifyBucket(storageTarget);
     const ownRows = await loadOwnBatches(sql);
+    await assertAdvisoryLock(sql, lockSession);
     const ownCycle = findOwnCycle(ownRows);
     if (ownCycle.active) {
-      const result = await resumeOwnCycle({ row: await refreshRow(pruneStore, ownCycle.active.object_path), identity, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket });
+      const result = await resumeOwnCycle({ row: await refreshRow(pruneStore, ownCycle.active.object_path), identity, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
+      await assertAdvisoryLock(sql, lockSession);
       const output = {
         state: result.state,
         mode: "resume",
@@ -483,7 +500,9 @@ export async function runStageAutomation({ env = process.env, now = new Date(), 
         pruneStore,
         storageTarget,
         verifyBucket,
+        storageDeps: deps,
       });
+      await assertAdvisoryLock(sql, lockSession);
     }
 
     const artifactPath = path.join(tempRoot, "archive.jsonl.gz");
@@ -508,26 +527,33 @@ export async function runStageAutomation({ env = process.env, now = new Date(), 
         emit: false,
       },
     });
+    await assertAdvisoryLock(sql, lockSession);
     if (exported.noCandidate) {
       const result = { state: "no-op", reason: "no_eligible_candidate" };
       writeAggregateSummary(result);
       return result;
     }
     await ensureArchiveBucket(storageTarget, deps);
+    await assertAdvisoryLock(sql, lockSession);
     const stored = await storeArchive({
       argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
       env: moduleEnv,
       cwd: tempRoot,
-      deps: { sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
+      deps: { ...deps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
     });
     let row = await refreshRow(pruneStore, stored.objectPath);
-    await runPruneStep({ row, mode: "register-proof", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket });
+    await assertAdvisoryLock(sql, lockSession);
+    await runPruneStep({ row, mode: "register-proof", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
     row = await refreshRow(pruneStore, row.object_path);
-    const dry = await runPruneStep({ row, mode: "dry-run", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket });
+    await assertAdvisoryLock(sql, lockSession);
+    const dry = await runPruneStep({ row, mode: "dry-run", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
     if (dry.state !== "ready") fail(`Stage automation dry-run did not become ready: ${dry.state}`);
+    await assertAdvisoryLock(sql, lockSession);
     const main = await downloadPrivateArchiveObject(storageTarget, row.object_path, deps);
     const durable = await persistDurableRecovery(storageTarget, row, identity, dry.evidence, main.bytes, deps);
-    const executed = await executeVerifiedCycle({ row, identity, durable, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket });
+    await assertAdvisoryLock(sql, lockSession);
+    const executed = await executeVerifiedCycle({ row, identity, durable, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
+    await assertAdvisoryLock(sql, lockSession);
     const output = {
       state: executed.state,
       mode: "new",
@@ -551,7 +577,7 @@ export async function runStageAutomation({ env = process.env, now = new Date(), 
     writeAggregateSummary(result);
     throw error;
   } finally {
-    if (locked) {
+    if (lockSession) {
       try {
         await releaseAdvisoryLock(sql);
       } catch {
