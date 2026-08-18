@@ -329,7 +329,7 @@ begin
 
   if new.reference is not null
      and new.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):' then
-    marker := pg_catalog.lower(pg_catalog.btrim(pg_catalog.substring(new.reference from '^[^:]+:([^:]+)')));
+    marker := pg_catalog.lower(pg_catalog.btrim(pg_catalog.substring(new.reference, '^[^:]+:([^:]+)')));
     if marker = '' or marker !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then
       raise exception using errcode = 'P8902', message = 'TABLE reference marker is invalid';
     end if;
@@ -421,7 +421,7 @@ begin
 
   if transaction_row.reference is not null
      and transaction_row.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):' then
-    transaction_marker := pg_catalog.lower(pg_catalog.btrim(pg_catalog.substring(transaction_row.reference from '^[^:]+:([^:]+)')));
+    transaction_marker := pg_catalog.lower(pg_catalog.btrim(pg_catalog.substring(transaction_row.reference, '^[^:]+:([^:]+)')));
     if transaction_marker = ''
        or transaction_marker !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then
       raise exception using errcode = 'P8904', message = 'TABLE transaction reference marker is invalid';
@@ -1262,7 +1262,7 @@ begin
           or (transactions.metadata ? 'tableId'
               and pg_catalog.lower(pg_catalog.btrim(transactions.metadata->>'tableId')) <> p_table_id::text)
           or (transactions.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
-              and pg_catalog.lower(pg_catalog.substring(transactions.reference from '^[^:]+:([^:]+)')) <> p_table_id::text)
+              and pg_catalog.lower(pg_catalog.substring(transactions.reference, '^[^:]+:([^:]+)')) <> p_table_id::text)
           or count(*) <> 2
           or count(*) filter (where accounts.account_type::text = 'USER') <> 0
           or count(*) filter (where accounts.account_type::text = 'SYSTEM') <> 1
