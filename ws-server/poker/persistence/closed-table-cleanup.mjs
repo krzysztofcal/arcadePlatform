@@ -64,6 +64,7 @@ async function discoverCandidates({ tx, cutoff, batchSize, statementTimeoutMs })
        from public.poker_tables t
       where t.status = 'CLOSED'
         and t.updated_at < $1::timestamptz
+        and (t.has_human_participant is true or t.bot_only_retention_complete_at is not null)
         and exists (
               select 1 from public.poker_state ps
                where ps.table_id = t.id
@@ -113,6 +114,7 @@ async function deleteClaimed({ tx, cutoff, claimedIds, batchSize }) {
    where t.id = any($3::uuid[])
      and t.status = 'CLOSED'
      and t.updated_at < $1::timestamptz
+     and (t.has_human_participant is true or t.bot_only_retention_complete_at is not null)
      and exists (
            select 1 from public.poker_state ps
             where ps.table_id = t.id
@@ -363,6 +365,7 @@ export function createClosedTableCleanup({
              from public.poker_tables t
             where t.status = 'CLOSED'
               and t.updated_at < $1::timestamptz
+              and (t.has_human_participant is true or t.bot_only_retention_complete_at is not null)
               and exists (
                     select 1 from public.poker_state ps
                      where ps.table_id = t.id

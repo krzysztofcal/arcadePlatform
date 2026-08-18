@@ -11,6 +11,22 @@ function badRequest(code, message = code) {
   return error;
 }
 
+function mapTableLifecycleError(error) {
+  if (error?.code === "P8901" || error?.code === "P8902") {
+    const mapped = new Error("TABLE idempotency key or binding is invalid");
+    mapped.code = "invalid_table_binding";
+    mapped.status = 400;
+    mapped.cause = error;
+    return mapped;
+  }
+  if (error?.code !== "P8903" && error?.code !== "P8904") return error;
+  const mapped = new Error(error.code === "P8903" ? "TABLE table is closed" : "TABLE idempotency binding is retired");
+  mapped.code = error.code === "P8903" ? "table_closed" : "idempotency_retired";
+  mapped.status = 409;
+  mapped.cause = error;
+  return mapped;
+}
+
 function hashPayload(input) {
   return crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex");
 }
@@ -427,8 +443,12 @@ limit 1;
 
 export async function postTransaction(payload) {
   const sqlTx = payload?.tx;
-  if (sqlTx) {
-    return runTableBuyIn(sqlTx, payload);
+  try {
+    if (sqlTx) {
+      return await runTableBuyIn(sqlTx, payload);
+    }
+    return await beginSql((tx) => runTableBuyIn(tx, payload));
+  } catch (error) {
+    throw mapTableLifecycleError(error);
   }
-  return beginSql((tx) => runTableBuyIn(tx, payload));
 }

@@ -52,6 +52,7 @@ run("node", ["tests/chips/chips-ledger-archive-export.test.mjs"], "chips-ledger-
 run("node", ["tests/chips/chips-ledger-archive-storage.test.mjs"], "chips-ledger-archive-storage");
 run("node", ["tests/chips/chips-ledger-archive-pruning.test.mjs"], "chips-ledger-archive-pruning");
 run("node", ["tests/chips/chips-ledger-prunable-candidate-sql.behavior.test.mjs"], "chips-ledger-prunable-candidate-sql");
+run("node", ["tests/chips/chips-ledger-bot-only-retention.test.mjs"], "chips-ledger-bot-only-retention");
 run("node", ["tests/chips/chips-ledger-stage-automation.test.mjs"], "chips-ledger-stage-automation");
 run("node", ["tests/chips/chips-ledger-stage-automation.observability.behavior.test.mjs"], "chips-ledger-stage-automation-observability");
 run("node", ["tests/chips/chips-ledger-stage-automation.order.behavior.test.mjs"], "chips-ledger-stage-automation-order");
