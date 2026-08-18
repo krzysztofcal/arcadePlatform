@@ -153,7 +153,7 @@ begin
   if tg_op <> 'UPDATE'
      or old.control_id is distinct from new.control_id
      or current_user <> 'postgres'
-     or pg_catalog.current_setting('chips_table_fence_control', true) <> '1' then
+     or coalesce(pg_catalog.current_setting('chips_table_fence_control', true), '') <> '1' then
     raise exception 'TABLE fence activation must use the owner-controlled gate';
   end if;
   return new;
@@ -725,7 +725,7 @@ begin
        or new.has_human_participant is true
        or new.bot_only_proof_eligible is not true
        or current_user <> 'chips_ledger_archive_pruner'
-       or pg_catalog.current_setting('chips_bot_only_lifecycle', true) <> '1'
+       or coalesce(pg_catalog.current_setting('chips_bot_only_lifecycle', true), '') <> '1'
        or not exists (
          select 1
            from public.chips_ledger_archive_batches batches
@@ -832,23 +832,34 @@ begin
   if receipt_changed and cleanup_changed then
     raise exception 'Archive prune receipt and registry cleanup receipt require separate transitions';
   end if;
+  if receipt_changed
+     and new.format_version = 2
+     and (
+       coalesce(pg_catalog.current_setting('chips_bot_only_prune', true), '') <> '1'
+       or new.destructive_go_at is null
+       or new.destructive_go_batch_id is distinct from new.batch_id
+     ) then
+    raise exception using
+      errcode = 'P8911',
+      message = 'Schema-v2 bot-only batches require the exact lifecycle operator and batch GO';
+  end if;
   if (proof_changed or bot_proof_changed) and current_user <> 'chips_ledger_archive_pruner' then
     raise exception 'Archive proof may only be written by the archive pruner';
   end if;
   if bot_proof_changed
-     and pg_catalog.current_setting('chips_bot_only_proof', true) <> '1' then
+     and coalesce(pg_catalog.current_setting('chips_bot_only_proof', true), '') <> '1' then
     raise exception 'Bot-only proof may only be written by the lifecycle proof operator';
   end if;
   if (receipt_changed or cleanup_changed) and current_user <> 'chips_ledger_archive_pruner' then
     raise exception 'Archive receipt may only be written by the archive pruner';
   end if;
   if cleanup_changed
-     and pg_catalog.current_setting('chips_bot_cleanup_receipt', true) <> '1' then
+     and coalesce(pg_catalog.current_setting('chips_bot_cleanup_receipt', true), '') <> '1' then
     raise exception 'Bot-only cleanup receipt may only be written by the lifecycle cleanup operator';
   end if;
   if go_changed and not (
     current_user = 'postgres'
-    and pg_catalog.current_setting('chips_bot_only_go', true) = '1'
+    and coalesce(pg_catalog.current_setting('chips_bot_only_go', true), '') = '1'
   ) then
     raise exception 'Bot-only destructive GO may only be written by the exact authorization function';
   end if;
@@ -938,37 +949,9 @@ $$;
 
 -- Recreate the public wrapper so the unchanged 30-day pruner cannot be used
 -- to execute a schema-v2 bot-only batch without the lifecycle operator.
-set role chips_ledger_archive_pruner;
-create or replace function public.chips_prune_committed_archive_batch(
-  p_object_path text,
-  p_transaction_ids uuid[],
-  p_entry_ids bigint[],
-  p_execute boolean default false
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  target_project_ref text;
-  target_format_version integer;
-begin
-  if p_execute is null then raise exception 'Ledger archive pruning execute flag must not be NULL'; end if;
-  select batches.project_ref, batches.format_version
-    into target_project_ref, target_format_version
-    from public.chips_ledger_archive_batches batches
-   where batches.object_path = p_object_path
-   for update;
-  if not found then raise exception 'Committed archive manifest was not found'; end if;
-  if target_format_version = 2 then
-    raise exception using errcode = 'P8911', message = 'Schema-v2 bot-only batches require the bot-only lifecycle operator';
-  end if;
-  perform public.chips_assert_archive_prune_target(target_project_ref, pg_catalog.cardinality(p_transaction_ids));
-  return public.chips_prune_committed_archive_batch_internal(p_object_path, p_transaction_ids, p_entry_ids, p_execute is true);
-end;
-$$;
-reset role;
+-- The existing wrapper remains owned by the established pruner role.  The
+-- archive-batch guard above blocks its destructive schema-v2 path by code
+-- P8911; the existing 30-day path is unchanged.
 
 -- This gate is intentionally never called by automation in this change.  A
 -- future owner action must name the exact batch and use the exact confirmation
@@ -1415,6 +1398,7 @@ begin
     raise exception using errcode = 'P8923', message = 'Exact bot-only batch GO is required before destructive cleanup';
   end if;
 
+  perform pg_catalog.set_config('chips_bot_only_prune', '1', true);
   prune_result := public.chips_prune_committed_archive_batch_internal(p_object_path, p_transaction_ids, p_entry_ids, true);
   perform public.chips_assert_bot_only_table_lifecycle_gate(batch.bot_only_table_id, batch.batch_id, batch.cutoff, p_registry_keys);
   select count(*) into deleted_registry_count
