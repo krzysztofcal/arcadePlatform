@@ -938,6 +938,7 @@ $$;
 
 -- Recreate the public wrapper so the unchanged 30-day pruner cannot be used
 -- to execute a schema-v2 bot-only batch without the lifecycle operator.
+set role chips_ledger_archive_pruner;
 create or replace function public.chips_prune_committed_archive_batch(
   p_object_path text,
   p_transaction_ids uuid[],
@@ -967,6 +968,7 @@ begin
   return public.chips_prune_committed_archive_batch_internal(p_object_path, p_transaction_ids, p_entry_ids, p_execute is true);
 end;
 $$;
+reset role;
 
 -- This gate is intentionally never called by automation in this change.  A
 -- future owner action must name the exact batch and use the exact confirmation
