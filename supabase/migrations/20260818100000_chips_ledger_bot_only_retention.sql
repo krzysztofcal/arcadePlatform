@@ -927,6 +927,10 @@ create trigger chips_ledger_archive_batches_guard
 before update or delete on public.chips_ledger_archive_batches
 for each row execute function public.chips_guard_archive_batch_mutations();
 
+grant chips_ledger_archive_pruner to postgres;
+grant create on schema public to chips_ledger_archive_pruner;
+set role chips_ledger_archive_pruner;
+
 create or replace function public.chips_archive_text_ids_sha256(p_ids text[])
 returns text
 language plpgsql
@@ -946,6 +950,8 @@ begin
   return pg_catalog.encode(extensions.digest(pg_catalog.convert_to(payload, 'UTF8'), 'sha256'), 'hex');
 end;
 $$;
+
+reset role;
 
 -- Recreate the public wrapper so the unchanged 30-day pruner cannot be used
 -- to execute a schema-v2 bot-only batch without the lifecycle operator.
@@ -995,6 +1001,8 @@ begin
   return pg_catalog.jsonb_build_object('state', 'authorized', 'batch_id', batch.batch_id);
 end;
 $$;
+
+set role chips_ledger_archive_pruner;
 
 create or replace function public.chips_assert_bot_only_table_lifecycle_gate(
   p_table_id uuid,
@@ -1431,6 +1439,8 @@ begin
 end;
 $$;
 
+reset role;
+
 -- The existing archive-pruner role is reused; no second destructive role is
 -- introduced.  Column grants and RLS policies keep the new path narrow.
 grant select on public.chips_ledger_archive_batches, public.chips_transaction_idempotency, public.poker_tables to chips_ledger_archive_pruner;
@@ -1462,16 +1472,6 @@ create policy chips_archive_pruner_registry_delete
   for delete to chips_ledger_archive_pruner
   using (true);
 
-grant chips_ledger_archive_pruner to postgres;
-grant create on schema public to chips_ledger_archive_pruner;
-set role chips_ledger_archive_pruner;
-
-alter function public.chips_archive_text_ids_sha256(text[]) owner to chips_ledger_archive_pruner;
-alter function public.chips_register_bot_only_archive_proof(text, uuid[], bigint[], uuid, text[]) owner to chips_ledger_archive_pruner;
-alter function public.chips_prune_and_cleanup_bot_only_archive_batch(text, uuid[], bigint[], text[], uuid, boolean, bigint) owner to chips_ledger_archive_pruner;
-alter function public.chips_assert_bot_only_table_lifecycle_gate(uuid, bigint, timestamptz, text[]) owner to chips_ledger_archive_pruner;
-
-reset role;
 revoke create on schema public from chips_ledger_archive_pruner;
 revoke chips_ledger_archive_pruner from postgres;
 
