@@ -386,7 +386,11 @@ with table_rows as (
      and escrow.system_key = 'POKER_TABLE:' || registry.table_id::text
    join public.chips_entries entries on entries.transaction_id = transactions.id
    join public.chips_accounts accounts on accounts.id = entries.account_id
-   where $3::timestamptz is null
+   where (
+       $3::timestamptz is null
+       or transactions.created_at > $3::timestamptz
+       or (transactions.created_at = $3::timestamptz and transactions.id > $4::uuid)
+     )
      and transactions.created_at < $1::timestamptz
      and transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
      and transactions.user_id is null
@@ -435,6 +439,7 @@ with table_rows as (
             stats.newest_created_at, stats.identity_count, stats.eligible_count,
             stats.out_of_scope_keys_sha256
   having count(*) = 2
+     and count(distinct transactions.id) = stats.eligible_count
      and count(*) filter (where accounts.account_type::text = 'USER') = 0
      and count(*) filter (where accounts.account_type::text = 'SYSTEM') = 1
      and count(*) filter (where accounts.account_type::text = 'ESCROW') = 1
