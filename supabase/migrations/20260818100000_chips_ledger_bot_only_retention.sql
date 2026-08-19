@@ -1278,8 +1278,8 @@ begin
           or (
             transactions.metadata ? 'tableId'
             and (
-              pg_catalog.nullif(pg_catalog.btrim(transactions.metadata->>'tableId'), '') is null
-              or pg_catalog.nullif(pg_catalog.btrim(transactions.metadata->>'tableId'), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+              nullif(pg_catalog.btrim(transactions.metadata->>'tableId'), '') is null
+              or nullif(pg_catalog.btrim(transactions.metadata->>'tableId'), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
               or pg_catalog.lower(pg_catalog.btrim(transactions.metadata->>'tableId')) <> p_table_id::text
             )
           )
