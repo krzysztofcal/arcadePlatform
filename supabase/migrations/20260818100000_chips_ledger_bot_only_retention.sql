@@ -387,7 +387,7 @@ security definer
 set search_path = ''
 as $$
 declare
-  transaction_id uuid;
+  target_transaction_id uuid;
   transaction_row record;
   parsed jsonb;
   key_table_id uuid;
@@ -413,16 +413,16 @@ begin
     return new;
   end if;
   if tg_table_name = 'chips_transactions' then
-    transaction_id := new.id;
+    target_transaction_id := new.id;
   elsif tg_op = 'DELETE' then
-    transaction_id := old.transaction_id;
+    target_transaction_id := old.transaction_id;
   else
-    transaction_id := new.transaction_id;
+    target_transaction_id := new.transaction_id;
   end if;
   select transactions.*
     into transaction_row
     from public.chips_transactions as transactions
-   where transactions.id = transaction_id;
+   where transactions.id = target_transaction_id;
   if not found or transaction_row.tx_type::text not in ('TABLE_BUY_IN', 'TABLE_CASH_OUT') then
     if tg_op = 'DELETE' then
       return old;
@@ -479,12 +479,12 @@ begin
          user_identity_count, user_identity_mismatch_count
     from public.chips_entries as entries
     join public.chips_accounts as accounts on accounts.id = entries.account_id
-   where entries.transaction_id = transaction_id;
+   where entries.transaction_id = target_transaction_id;
 
   select count(*)
     into invalid_entry_marker_count
     from public.chips_entries as entries
-   where entries.transaction_id = transaction_id
+   where entries.transaction_id = target_transaction_id
      and (
        entries.metadata ? 'tableId'
        and (
@@ -501,14 +501,14 @@ begin
     and exists (
       select 1 from public.chips_entries entries
       join public.chips_accounts accounts on accounts.id = entries.account_id
-      where entries.transaction_id = transaction_id
+      where entries.transaction_id = target_transaction_id
         and accounts.account_type::text = 'ESCROW'
         and entries.amount > 0
     )
     and exists (
       select 1 from public.chips_entries entries
       join public.chips_accounts accounts on accounts.id = entries.account_id
-      where entries.transaction_id = transaction_id
+      where entries.transaction_id = target_transaction_id
         and accounts.account_type::text in ('USER', 'SYSTEM')
         and entries.amount < 0
     );
@@ -520,14 +520,14 @@ begin
     and exists (
       select 1 from public.chips_entries entries
       join public.chips_accounts accounts on accounts.id = entries.account_id
-      where entries.transaction_id = transaction_id
+      where entries.transaction_id = target_transaction_id
         and accounts.account_type::text = 'ESCROW'
         and entries.amount < 0
     )
     and exists (
       select 1 from public.chips_entries entries
       join public.chips_accounts accounts on accounts.id = entries.account_id
-      where entries.transaction_id = transaction_id
+      where entries.transaction_id = target_transaction_id
         and accounts.account_type::text in ('USER', 'SYSTEM')
         and entries.amount > 0
     );
