@@ -1523,6 +1523,6 @@ grant execute on function public.chips_archive_text_ids_sha256(text[]) to postgr
 revoke all on function public.chips_parse_table_idempotency_key(text) from public, anon, authenticated, service_role;
 grant execute on function public.chips_parse_table_idempotency_key(text) to postgres, chips_ledger_archive_pruner;
 revoke all on function public.chips_parse_table_reference(text) from public, anon, authenticated, service_role;
-grant execute on function public.chips_parse_table_reference(text) to postgres;
+grant execute on function public.chips_parse_table_reference(text) to postgres, chips_ledger_archive_pruner;
 
 commit;
