@@ -74,6 +74,7 @@ jobs:
           create table if not exists storage.objects (
             id bigint generated always as identity primary key
           );
+          create schema if not exists extensions;
           SQL
 
       - name: Apply migrations and run migration contracts
