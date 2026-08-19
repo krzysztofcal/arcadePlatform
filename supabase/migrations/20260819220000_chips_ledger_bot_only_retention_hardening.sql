@@ -620,6 +620,7 @@ begin
 end;
 $$;
 grant chips_ledger_archive_pruner to postgres;
+grant create on schema public to chips_ledger_archive_pruner;
 set role chips_ledger_archive_pruner;
 create or replace function public.chips_register_bot_only_archive_proof(
   p_object_path text,
@@ -936,9 +937,9 @@ begin
 end;
 $$;
 reset role;
+revoke create on schema public from chips_ledger_archive_pruner;
 revoke chips_ledger_archive_pruner from postgres;
 revoke all on function public.chips_parse_table_reference(text) from public, anon, authenticated, service_role;
 grant execute on function public.chips_parse_table_reference(text) to postgres, chips_ledger_archive_pruner;
 
 commit;
-
