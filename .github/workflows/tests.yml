@@ -36,7 +36,7 @@ jobs:
       - name: Install dependencies
         run: npm ci || npm i
 
-      - name: Bootstrap minimal Supabase auth schema
+      - name: Bootstrap minimal Supabase auth and storage schemas
         run: |
           psql "$CHIPS_MIGRATIONS_TEST_DB_URL" -v ON_ERROR_STOP=1 <<'SQL'
           do $$
@@ -63,6 +63,17 @@ jobs:
           as $$
             select null::uuid;
           $$;
+          create schema if not exists storage;
+          create table if not exists storage.buckets (
+            id text primary key,
+            name text not null,
+            public boolean not null default false,
+            file_size_limit bigint,
+            allowed_mime_types text[]
+          );
+          create table if not exists storage.objects (
+            id bigint generated always as identity primary key
+          );
           SQL
 
       - name: Apply migrations and run migration contracts
