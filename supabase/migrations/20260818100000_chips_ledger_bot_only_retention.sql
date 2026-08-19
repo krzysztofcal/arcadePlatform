@@ -849,6 +849,9 @@ begin
   go_changed := new.destructive_go_at is distinct from old.destructive_go_at
     or new.destructive_go_batch_id is distinct from old.destructive_go_batch_id;
 
+  if proof_changed and receipt_changed then
+    raise exception 'Archive proof and prune receipt require separate transitions';
+  end if;
   if receipt_changed and cleanup_changed then
     raise exception 'Archive prune receipt and registry cleanup receipt require separate transitions';
   end if;
