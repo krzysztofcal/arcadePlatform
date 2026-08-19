@@ -39,6 +39,19 @@ jobs:
       - name: Bootstrap minimal Supabase auth schema
         run: |
           psql "$CHIPS_MIGRATIONS_TEST_DB_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          begin
+            if not exists (select 1 from pg_roles where rolname = 'anon') then
+              create role anon noinherit;
+            end if;
+            if not exists (select 1 from pg_roles where rolname = 'authenticated') then
+              create role authenticated noinherit;
+            end if;
+            if not exists (select 1 from pg_roles where rolname = 'service_role') then
+              create role service_role noinherit;
+            end if;
+          end
+          $$;
           create schema if not exists auth;
           create table if not exists auth.users (
             id uuid primary key
