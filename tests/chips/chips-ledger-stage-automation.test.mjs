@@ -5,8 +5,11 @@ import { readSnapshot, STAGE_AUTOMATION_POLICY_ID } from "../../scripts/ops/chip
 import {
   assertDurableRecoveryReady,
   assertResumeRecoveryState,
+  botOnlyExportArgs,
+  botOnlyReport,
   findOwnCycle,
   persistDurableRecovery,
+  runBotOnlyStageAutomation,
   runStageAutomation,
   STAGE_PROJECT_REF,
   STAGE_SYSTEM_IDENTIFIER,
@@ -27,7 +30,11 @@ const ENV = {
 };
 
 const stageOrchestratorSource = fs.readFileSync("scripts/ops/chips-ledger-stage-automation.mjs", "utf8");
-assert.doesNotMatch(stageOrchestratorSource, /--after-(?:created-at|id)/);
+assert.match(stageOrchestratorSource, /resumePending[\s\S]*botOnlyExportArgs/);
+assert.doesNotMatch(
+  stageOrchestratorSource.slice(stageOrchestratorSource.indexOf("export async function runBotOnlyStageAutomation")),
+  /activeRows\[0\]\?\.status === "pending"\)\s*fail\(/,
+);
 
 function response(value, status = 200, headers = {}) {
   if (Buffer.isBuffer(value)) return new Response(value, { status, headers: { "content-type": "application/gzip", ...headers } });
@@ -189,6 +196,156 @@ assert.throws(
   /receipt is partial/,
 );
 assert.throws(() => findOwnCycle([{ ...completedRow, status: "pending" }]), /pending/);
+const pendingBotRow = {
+  status: "pending",
+  cutoff: "2026-08-12T00:00:00.000000Z",
+  cursor_start_created_at: "2026-07-01T00:00:00.000000Z",
+  cursor_start_id: "00000000-0000-4000-8000-000000000001",
+};
+assert.deepEqual(botOnlyExportArgs(pendingBotRow, "/tmp/bot.archive.gz", "/tmp/bot.manifest.json"), [
+  "--target", "stage",
+  "--cutoff", pendingBotRow.cutoff,
+  "--batch-size", "5000",
+  "--after-created-at", pendingBotRow.cursor_start_created_at,
+  "--after-id", pendingBotRow.cursor_start_id,
+  "--output", "/tmp/bot.archive.gz",
+  "--manifest", "/tmp/bot.manifest.json",
+]);
+const preparedBotReport = botOnlyReport({
+  row: {
+    ...pendingBotRow,
+    project_ref: STAGE_PROJECT_REF,
+    batch_id: "12",
+    object_path: "v1/sha256/" + "a".repeat(64) + ".jsonl.gz",
+    bot_only_table_id: "00000000-0000-4000-8000-000000000020",
+    bot_only_table_count: "1",
+    bot_only_identity_count: "2",
+    bot_only_eligible_count: "2",
+    bot_only_registry_keys_sha256: "b".repeat(64),
+    bot_only_out_of_scope_keys_sha256: "c".repeat(64),
+    compressed_sha256: "a".repeat(64),
+  },
+  identity: STAGE_SYSTEM_IDENTIFIER,
+  dry: { evidence: {
+    transactionCount: 2,
+    entryCount: 4,
+    txTypes: { TABLE_BUY_IN: 2 },
+    credits: "200",
+    debits: "200",
+    net: "0",
+    registryKeys: ["one", "two"],
+  } },
+  durable: {
+    recoveryArchive: { sha256: "d".repeat(64) },
+    recoveryManifest: { sha256: "e".repeat(64) },
+  },
+  state: "prepared",
+  mode: "prepare-only",
+});
+assert.deepEqual({
+  batchId: preparedBotReport.batchId,
+  objectPath: preparedBotReport.objectPath,
+  tableId: preparedBotReport.tableId,
+  registryKeyCount: preparedBotReport.registryKeyCount,
+  registryKeysSha256: preparedBotReport.registryKeysSha256,
+  stageSystemIdentifier: preparedBotReport.stageSystemIdentifier,
+  recoveryArchiveSha256: preparedBotReport.recoveryArchiveSha256,
+  recoveryManifestSha256: preparedBotReport.recoveryManifestSha256,
+}, {
+  batchId: "12",
+  objectPath: "v1/sha256/" + "a".repeat(64) + ".jsonl.gz",
+  tableId: "00000000-0000-4000-8000-000000000020",
+  registryKeyCount: 2,
+  registryKeysSha256: "b".repeat(64),
+  stageSystemIdentifier: STAGE_SYSTEM_IDENTIFIER,
+  recoveryArchiveSha256: "d".repeat(64),
+  recoveryManifestSha256: "e".repeat(64),
+});
+const storageTarget = {
+  target: "stage",
+  projectRef: STAGE_PROJECT_REF,
+  baseUrl: STAGE_URL,
+  serviceKey: "stage-test-key",
+};
+const pendingAutomationRow = {
+  status: "pending",
+  project_ref: STAGE_PROJECT_REF,
+  source_policy_id: "stage-ledger-bot-only-retention-7d-v1",
+  batch_id: "13",
+  object_path: "v1/sha256/" + "f".repeat(64) + ".jsonl.gz",
+  cutoff: "2026-08-12T00:00:00.000000Z",
+  cursor_start_created_at: "2026-07-01T00:00:00.000000Z",
+  cursor_start_id: "00000000-0000-4000-8000-000000000001",
+  bot_only_table_id: "00000000-0000-4000-8000-000000000020",
+  bot_only_table_count: "1",
+  bot_only_identity_count: "1",
+  bot_only_eligible_count: "1",
+  bot_only_registry_keys_sha256: "1".repeat(64),
+  bot_only_out_of_scope_keys_sha256: "2".repeat(64),
+  compressed_sha256: "f".repeat(64),
+  archive_proof_verified_at: "2026-08-13T00:00:00.000000Z",
+};
+const committedPendingRow = {
+  ...pendingAutomationRow,
+  status: "committed",
+  registry_cleaned_at: "2026-08-13T00:01:00.000000Z",
+};
+const botOnlySqlCalls = [];
+const botOnlySql = {
+  unsafe: async (query, values = []) => {
+    botOnlySqlCalls.push({ query, values });
+    if (query.includes("pg_try_advisory_lock")) return [{ acquired: true, backend_pid: "bot-only-session" }];
+    if (query.includes("pg_backend_pid")) return [{ backend_pid: "bot-only-session" }];
+    if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
+    if (query.includes("pg_control_system")) return [{ system_identifier: STAGE_SYSTEM_IDENTIFIER }];
+    if (query.includes("from public.chips_ledger_archive_batches")) return [pendingAutomationRow];
+    throw new Error(`unexpected bot-only SQL: ${query}`);
+  },
+};
+const pendingExportCalls = [];
+const pendingStoreCalls = [];
+const pendingPruneCalls = [];
+const pendingAutomationResult = await runBotOnlyStageAutomation({
+  env: ENV,
+  deps: {
+    sql: botOnlySql,
+    storageTarget,
+    tempRoot: fs.mkdtempSync("/tmp/chips-ledger-stage-bot-only-pending-"),
+    pruneStore: { getManifest: async () => committedPendingRow },
+    verifyBucket: async () => {},
+    exportArchive: async ({ argv }) => {
+      pendingExportCalls.push(argv);
+      return { noCandidate: false };
+    },
+    storeArchive: async (args) => {
+      pendingStoreCalls.push(args);
+      return { objectPath: pendingAutomationRow.object_path };
+    },
+    pruneArchive: async ({ argv }) => {
+      pendingPruneCalls.push(argv);
+      return {
+        state: "already_cleaned",
+        evidence: {
+          transactionCount: 1,
+          entryCount: 2,
+          txTypes: { TABLE_BUY_IN: 1 },
+          credits: "100",
+          debits: "100",
+          net: "0",
+        },
+      };
+    },
+  },
+});
+assert.equal(pendingAutomationResult.state, "already_cleaned");
+const expectedPendingArgs = botOnlyExportArgs(pendingAutomationRow, "artifact", "manifest");
+assert.deepEqual(pendingExportCalls[0].slice(0, 10), expectedPendingArgs.slice(0, 10));
+assert.equal(pendingExportCalls[0][10], "--output");
+assert.equal(pendingExportCalls[0][12], "--manifest");
+assert.equal(pendingStoreCalls.length, 1, "a pending bot-only batch must be retried through Storage");
+assert.equal(pendingStoreCalls[0].argv.includes("--artifact"), true);
+assert.equal(pendingPruneCalls.length, 1, "the retried committed batch must continue through the existing prune runner");
+assert.equal(botOnlySqlCalls.some(({ query }) => query.includes("pg_try_advisory_lock")), true);
 assert.throws(() => assertDurableRecoveryReady({ archiveBytes: Buffer.from("archive") }), /both durable recovery copies/);
 assert.throws(
   () => assertResumeRecoveryState({ archive_proof_verified_at: "now", pruned_at: null }, null),
@@ -239,12 +396,6 @@ const evidence = {
 };
 const durableObjects = new Map();
 const storageCalls = [];
-const storageTarget = {
-  target: "stage",
-  projectRef: STAGE_PROJECT_REF,
-  baseUrl: STAGE_URL,
-  serviceKey: "stage-test-key",
-};
 const fetch = async (url, init = {}) => {
   const requestUrl = new URL(url);
   const objectPath = decodeURIComponent(requestUrl.pathname.split(`/storage/v1/object/authenticated/${ARCHIVE_BUCKET}/`)[1] || requestUrl.pathname.split(`/storage/v1/object/${ARCHIVE_BUCKET}/`)[1] || "");

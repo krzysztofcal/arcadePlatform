@@ -51,26 +51,49 @@ with base as (
     )
 ), markers as (
   select b.id as transaction_id,
-         lower(nullif(btrim(b.metadata->>'tableId'), '')) as table_id
+         lower(nullif(btrim(b.metadata->>'tableId'), '')) as table_id,
+         (
+           b.metadata ? 'tableId'
+           and (
+             nullif(btrim(b.metadata->>'tableId'), '') is null
+             or nullif(btrim(b.metadata->>'tableId'), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+           )
+         ) as invalid_marker
   from base b
-  where nullif(btrim(b.metadata->>'tableId'), '') is not null
+  where b.metadata ? 'tableId'
+    and (
+      nullif(btrim(b.metadata->>'tableId'), '') is not null
+      or b.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+    )
 
   union all
 
   select b.id,
          case
-           when lower(b.reference) like 'table:%' then lower(nullif(btrim(split_part(b.reference, ':', 2)), ''))
-           when lower(b.reference) like 'poker-rebuy:%' then lower(nullif(btrim(split_part(b.reference, ':', 2)), ''))
+           when b.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
+             then lower(nullif(btrim(split_part(b.reference, ':', 2)), ''))
            else null
-         end
+         end,
+         (
+           b.reference is not null
+           and (
+             b.reference !~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
+             or nullif(btrim(split_part(b.reference, ':', 2)), '') is null
+             or nullif(btrim(split_part(b.reference, ':', 2)), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+           )
+         )
   from base b
-  where lower(b.reference) like 'table:%'
-     or lower(b.reference) like 'poker-rebuy:%'
+  where b.reference is not null
+    and (
+      b.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
+      or b.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+    )
 
   union all
 
   select b.id,
-         lower(nullif(btrim(substring(a.system_key from 13)), ''))
+         lower(nullif(btrim(substring(a.system_key from 13)), '')),
+         false
   from base b
   join public.chips_entries e on e.transaction_id = b.id
   join public.chips_accounts a on a.id = e.account_id
@@ -79,7 +102,7 @@ with base as (
 ), marker_summary as (
   select transaction_id,
          array_agg(distinct table_id) filter (where table_id is not null) as table_ids,
-         bool_or(table_id is null or table_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') as invalid_table_marker
+         bool_or(invalid_marker or table_id is null or table_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') as invalid_table_marker
   from markers
   group by transaction_id
 ), classified as (
@@ -145,26 +168,49 @@ with base as (
     )
 ), markers as (
   select b.id as transaction_id,
-         lower(nullif(btrim(b.metadata->>'tableId'), '')) as table_id
+         lower(nullif(btrim(b.metadata->>'tableId'), '')) as table_id,
+         (
+           b.metadata ? 'tableId'
+           and (
+             nullif(btrim(b.metadata->>'tableId'), '') is null
+             or nullif(btrim(b.metadata->>'tableId'), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+           )
+         ) as invalid_marker
   from base b
-  where nullif(btrim(b.metadata->>'tableId'), '') is not null
+  where b.metadata ? 'tableId'
+    and (
+      nullif(btrim(b.metadata->>'tableId'), '') is not null
+      or b.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+    )
 
   union all
 
   select b.id,
          case
-           when lower(b.reference) like 'table:%' then lower(nullif(btrim(split_part(b.reference, ':', 2)), ''))
-           when lower(b.reference) like 'poker-rebuy:%' then lower(nullif(btrim(split_part(b.reference, ':', 2)), ''))
+           when b.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
+             then lower(nullif(btrim(split_part(b.reference, ':', 2)), ''))
            else null
-         end
+         end,
+         (
+           b.reference is not null
+           and (
+             b.reference !~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
+             or nullif(btrim(split_part(b.reference, ':', 2)), '') is null
+             or nullif(btrim(split_part(b.reference, ':', 2)), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+           )
+         )
   from base b
-  where lower(b.reference) like 'table:%'
-     or lower(b.reference) like 'poker-rebuy:%'
+  where b.reference is not null
+    and (
+      b.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
+      or b.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+    )
 
   union all
 
   select b.id,
-         lower(nullif(btrim(substring(a.system_key from 13)), ''))
+         lower(nullif(btrim(substring(a.system_key from 13)), '')),
+         false
   from base b
   join public.chips_entries e on e.transaction_id = b.id
   join public.chips_accounts a on a.id = e.account_id
@@ -173,7 +219,7 @@ with base as (
 ), marker_summary as (
   select transaction_id,
          array_agg(distinct table_id) filter (where table_id is not null) as table_ids,
-         bool_or(table_id is null or table_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') as invalid_table_marker
+         bool_or(invalid_marker or table_id is null or table_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') as invalid_table_marker
   from markers
   group by transaction_id
 ), classified as (
@@ -344,6 +390,23 @@ with table_rows as (
      and transactions.created_at < $1::timestamptz
      and transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
      and transactions.user_id is null
+     and (
+       transactions.metadata is null
+       or not (transactions.metadata ? 'tableId')
+       or (
+         nullif(btrim(transactions.metadata->>'tableId'), '') is not null
+         and nullif(btrim(transactions.metadata->>'tableId'), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+         and lower(btrim(transactions.metadata->>'tableId')) = registry.table_id::text
+       )
+     )
+     and (
+       transactions.reference is null
+       or (
+         transactions.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
+         and nullif(btrim(split_part(transactions.reference, ':', 2)), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+         and lower(btrim(split_part(transactions.reference, ':', 2))) = registry.table_id::text
+       )
+     )
      and tables.status::text = 'CLOSED'
      and tables.has_human_participant is false
      and tables.bot_only_proof_eligible is true

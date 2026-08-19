@@ -28,6 +28,14 @@ const FORMATS = Object.freeze([
   ["poker:managed-bot-top-up:v1", 3, "poker:managed-bot-top-up:v1"],
 ]);
 
+const REFERENCE_PREFIXES = Object.freeze([
+  "table",
+  "poker-rebuy",
+  "BOT_SEED_BUY_IN",
+  "BOT_REPLACEMENT_BUY_IN",
+  "MANAGED_BOT_TOP_UP",
+]);
+
 function invalid(message) {
   const error = new Error(message);
   error.code = "invalid_table_idempotency_key";
@@ -66,20 +74,24 @@ export function tryParseTableIdempotencyKey(value) {
 }
 
 export function parseTableReference(value) {
-  const reference = typeof value === "string" ? value.trim() : "";
-  if (!reference) return null;
-  const match = /^(?:table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):([^:]+)(?::|$)/i.exec(reference);
-  if (!match) return null;
-  const tableId = match[1].toLowerCase();
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") throw invalid("TABLE reference must be a string");
+  const reference = value.trim();
+  if (!reference) throw invalid("TABLE reference is empty");
+  const normalized = reference.toLowerCase();
+  const prefix = REFERENCE_PREFIXES.find((candidate) => normalized.startsWith(`${candidate.toLowerCase()}:`));
+  if (!prefix) throw invalid("TABLE reference format is not supported");
+  const tableId = reference.slice(prefix.length + 1).split(":", 1)[0].trim().toLowerCase();
   if (!UUID_RE.test(tableId)) throw invalid("TABLE reference has an invalid table id");
   return tableId;
 }
 
 export function tableBindingFromMetadata(metadata) {
   if (metadata == null || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+  if (!Object.prototype.hasOwnProperty.call(metadata, "tableId")) return null;
   const value = metadata.tableId;
-  if (value == null || String(value).trim() === "") return null;
-  const tableId = String(value).trim().toLowerCase();
+  if (typeof value !== "string" || value.trim() === "") throw invalid("TABLE metadata.tableId is invalid");
+  const tableId = value.trim().toLowerCase();
   if (!UUID_RE.test(tableId)) throw invalid("TABLE metadata.tableId is invalid");
   return tableId;
 }
@@ -88,9 +100,9 @@ export function assertTableBinding({ idempotencyKey, metadata = null, reference 
   const parsed = parseTableIdempotencyKey(idempotencyKey);
   const bindings = new Set([parsed.tableId]);
   const metadataTableId = tableBindingFromMetadata(metadata);
-  if (metadataTableId) bindings.add(metadataTableId);
+  if (metadataTableId !== null) bindings.add(metadataTableId);
   const referenceTableId = parseTableReference(reference);
-  if (referenceTableId) bindings.add(referenceTableId);
+  if (referenceTableId !== null) bindings.add(referenceTableId);
   if (bindings.size !== 1) throw invalid("TABLE metadata/reference binding does not match idempotency key");
   return parsed;
 }

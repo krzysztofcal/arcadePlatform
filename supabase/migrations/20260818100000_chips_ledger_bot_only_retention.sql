@@ -294,6 +294,34 @@ $$;
 
 alter function public.chips_parse_table_idempotency_key(text) owner to postgres;
 
+create or replace function public.chips_parse_table_reference(p_reference text)
+returns uuid
+language plpgsql
+immutable
+strict
+security definer
+set search_path = ''
+as $$
+declare
+  reference_value text := pg_catalog.btrim(p_reference);
+  marker text;
+begin
+  if reference_value = ''
+     or reference_value !~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):' then
+    raise exception using errcode = 'P8902', message = 'TABLE reference format is not supported';
+  end if;
+  marker := pg_catalog.lower(pg_catalog.btrim(pg_catalog.split_part(reference_value, ':', 2)));
+  if marker is null
+     or marker = ''
+     or marker !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then
+    raise exception using errcode = 'P8902', message = 'TABLE reference marker is invalid';
+  end if;
+  return marker::uuid;
+end;
+$$;
+
+alter function public.chips_parse_table_reference(text) owner to postgres;
+
 create or replace function public.chips_table_transaction_before_insert()
 returns trigger
 language plpgsql
@@ -319,7 +347,9 @@ begin
 
   if new.metadata ? 'tableId' then
     marker := pg_catalog.lower(pg_catalog.btrim(new.metadata->>'tableId'));
-    if marker = '' or marker !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    if marker is null
+       or marker = ''
+       or marker !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
        or marker::uuid <> key_table_id then
       raise exception using
         errcode = 'P8902',
@@ -327,13 +357,8 @@ begin
     end if;
   end if;
 
-  if new.reference is not null
-     and new.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):' then
-    marker := pg_catalog.lower(pg_catalog.btrim(pg_catalog.substring(new.reference, '^[^:]+:([^:]+)')));
-    if marker = '' or marker !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then
-      raise exception using errcode = 'P8902', message = 'TABLE reference marker is invalid';
-    end if;
-    reference_table_id := marker::uuid;
+  if new.reference is not null then
+    reference_table_id := public.chips_parse_table_reference(new.reference);
     if reference_table_id <> key_table_id then
       raise exception using errcode = 'P8902', message = 'TABLE reference does not match the idempotency key';
     end if;
@@ -410,7 +435,8 @@ begin
 
   if transaction_row.metadata ? 'tableId' then
     transaction_marker := pg_catalog.lower(pg_catalog.btrim(transaction_row.metadata->>'tableId'));
-    if transaction_marker = ''
+    if transaction_marker is null
+       or transaction_marker = ''
        or transaction_marker !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
        or transaction_marker::uuid <> key_table_id then
       raise exception using
@@ -419,14 +445,8 @@ begin
     end if;
   end if;
 
-  if transaction_row.reference is not null
-     and transaction_row.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):' then
-    transaction_marker := pg_catalog.lower(pg_catalog.btrim(pg_catalog.substring(transaction_row.reference, '^[^:]+:([^:]+)')));
-    if transaction_marker = ''
-       or transaction_marker !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then
-      raise exception using errcode = 'P8904', message = 'TABLE transaction reference marker is invalid';
-    end if;
-    reference_table_id := transaction_marker::uuid;
+  if transaction_row.reference is not null then
+    reference_table_id := public.chips_parse_table_reference(transaction_row.reference);
     if reference_table_id <> key_table_id then
       raise exception using errcode = 'P8904', message = 'TABLE transaction reference does not bind to its idempotency key';
     end if;
@@ -1252,10 +1272,18 @@ begin
       having transactions.tx_type::text not in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
           or transactions.user_id is not null
           or transactions.created_at >= batch.cutoff
-          or (transactions.metadata ? 'tableId'
-              and pg_catalog.lower(pg_catalog.btrim(transactions.metadata->>'tableId')) <> p_table_id::text)
-          or (transactions.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
-              and pg_catalog.lower(pg_catalog.substring(transactions.reference, '^[^:]+:([^:]+)')) <> p_table_id::text)
+          or (
+            transactions.metadata ? 'tableId'
+            and (
+              pg_catalog.nullif(pg_catalog.btrim(transactions.metadata->>'tableId'), '') is null
+              or pg_catalog.nullif(pg_catalog.btrim(transactions.metadata->>'tableId'), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+              or pg_catalog.lower(pg_catalog.btrim(transactions.metadata->>'tableId')) <> p_table_id::text
+            )
+          )
+          or (
+            transactions.reference is not null
+            and public.chips_parse_table_reference(transactions.reference) <> p_table_id
+          )
           or count(*) <> 2
           or count(*) filter (where accounts.account_type::text = 'USER') <> 0
           or count(*) filter (where accounts.account_type::text = 'SYSTEM') <> 1
@@ -1431,6 +1459,7 @@ begin
      and batches.registry_cleaned_at is null;
   if not found then raise exception using errcode = 'P8924', message = 'Bot-only cleanup receipt transition was not unique'; end if;
 
+  perform pg_catalog.set_config('chips_bot_only_lifecycle', '1', true);
   update public.poker_tables tables
      set bot_only_retention_complete_at = coalesce(tables.bot_only_retention_complete_at, pg_catalog.timezone('utc', pg_catalog.now()))
    where tables.id = batch.bot_only_table_id
@@ -1490,5 +1519,7 @@ revoke all on function public.chips_archive_text_ids_sha256(text[]) from public,
 grant execute on function public.chips_archive_text_ids_sha256(text[]) to postgres, chips_ledger_archive_pruner;
 revoke all on function public.chips_parse_table_idempotency_key(text) from public, anon, authenticated, service_role;
 grant execute on function public.chips_parse_table_idempotency_key(text) to postgres, chips_ledger_archive_pruner;
+revoke all on function public.chips_parse_table_reference(text) from public, anon, authenticated, service_role;
+grant execute on function public.chips_parse_table_reference(text) to postgres;
 
 commit;
