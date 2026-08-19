@@ -153,7 +153,7 @@ begin
   if tg_op <> 'UPDATE'
      or old.control_id is distinct from new.control_id
      or current_user <> 'postgres'
-     or coalesce(pg_catalog.current_setting('chips_table_fence_control', true), '') <> '1' then
+     or coalesce(pg_catalog.current_setting('chips.table_fence_control', true), '') <> '1' then
     raise exception 'TABLE fence activation must use the owner-controlled gate';
   end if;
   return new;
@@ -190,7 +190,7 @@ begin
   ) then
     raise exception using errcode = 'P8900', message = 'TABLE fence cannot be deactivated after bot-only cleanup begins';
   end if;
-  perform pg_catalog.set_config('chips_table_fence_control', '1', true);
+  perform pg_catalog.set_config('chips.table_fence_control', '1', true);
   update public.chips_table_fence_control
      set enforcement_active = next_active,
          activated_at = case when next_active then coalesce(activated_at, pg_catalog.timezone('utc', pg_catalog.now())) else activated_at end,
@@ -661,7 +661,7 @@ as $$
 begin
   if tg_op = 'DELETE' then
     if current_user = 'chips_ledger_archive_pruner'
-       and pg_catalog.current_setting('chips_bot_registry_cleanup', true) = '1' then
+       and pg_catalog.current_setting('chips.bot_registry_cleanup', true) = '1' then
       return old;
     end if;
     raise exception 'Idempotency registry rows are durable; DELETE is not permitted';
@@ -745,7 +745,7 @@ begin
        or new.has_human_participant is true
        or new.bot_only_proof_eligible is not true
        or current_user <> 'chips_ledger_archive_pruner'
-       or coalesce(pg_catalog.current_setting('chips_bot_only_lifecycle', true), '') <> '1'
+       or coalesce(pg_catalog.current_setting('chips.bot_only_lifecycle', true), '') <> '1'
        or not exists (
          select 1
            from public.chips_ledger_archive_batches batches
@@ -858,7 +858,7 @@ begin
   if receipt_changed
      and new.format_version = 2
      and (
-       coalesce(pg_catalog.current_setting('chips_bot_only_prune', true), '') <> '1'
+       coalesce(pg_catalog.current_setting('chips.bot_only_prune', true), '') <> '1'
        or new.destructive_go_at is null
        or new.destructive_go_batch_id is distinct from new.batch_id
      ) then
@@ -870,19 +870,19 @@ begin
     raise exception 'Archive proof may only be written by the archive pruner';
   end if;
   if bot_proof_changed
-     and coalesce(pg_catalog.current_setting('chips_bot_only_proof', true), '') <> '1' then
+     and coalesce(pg_catalog.current_setting('chips.bot_only_proof', true), '') <> '1' then
     raise exception 'Bot-only proof may only be written by the lifecycle proof operator';
   end if;
   if (receipt_changed or cleanup_changed) and current_user <> 'chips_ledger_archive_pruner' then
     raise exception 'Archive receipt may only be written by the archive pruner';
   end if;
   if cleanup_changed
-     and coalesce(pg_catalog.current_setting('chips_bot_cleanup_receipt', true), '') <> '1' then
+     and coalesce(pg_catalog.current_setting('chips.bot_cleanup_receipt', true), '') <> '1' then
     raise exception 'Bot-only cleanup receipt may only be written by the lifecycle cleanup operator';
   end if;
   if go_changed and not (
     current_user = 'postgres'
-    and coalesce(pg_catalog.current_setting('chips_bot_only_go', true), '') = '1'
+    and coalesce(pg_catalog.current_setting('chips.bot_only_go', true), '') = '1'
   ) then
     raise exception 'Bot-only destructive GO may only be written by the exact authorization function';
   end if;
@@ -1015,7 +1015,7 @@ begin
     raise exception using errcode = 'P8912', message = 'Only one exact committed Stage bot-only batch may be authorized';
   end if;
   perform public.chips_assert_archive_prune_target(batch.project_ref, batch.transaction_count);
-  perform pg_catalog.set_config('chips_bot_only_go', '1', true);
+  perform pg_catalog.set_config('chips.bot_only_go', '1', true);
   update public.chips_ledger_archive_batches
      set destructive_go_at = pg_catalog.timezone('utc', pg_catalog.now()),
          destructive_go_batch_id = batch.batch_id
@@ -1355,7 +1355,7 @@ begin
     return pg_catalog.jsonb_build_object('state', 'proof_exists', 'transactions', batch.transaction_count, 'entries', batch.entry_count);
   end if;
 
-  perform pg_catalog.set_config('chips_bot_only_proof', '1', true);
+  perform pg_catalog.set_config('chips.bot_only_proof', '1', true);
   update public.chips_ledger_archive_batches batches
      set archived_transaction_ids_sha256 = transaction_ids_sha256,
          archived_entry_ids_sha256 = entry_ids_sha256,
@@ -1437,7 +1437,7 @@ begin
     raise exception using errcode = 'P8923', message = 'Exact bot-only batch GO is required before destructive cleanup';
   end if;
 
-  perform pg_catalog.set_config('chips_bot_only_prune', '1', true);
+  perform pg_catalog.set_config('chips.bot_only_prune', '1', true);
   prune_result := public.chips_prune_committed_archive_batch_internal(p_object_path, p_transaction_ids, p_entry_ids, true);
   perform public.chips_assert_bot_only_table_lifecycle_gate(batch.bot_only_table_id, batch.batch_id, batch.cutoff, p_registry_keys);
   select count(*) into deleted_registry_count
@@ -1446,14 +1446,14 @@ begin
      and registry.idempotency_key = any(p_registry_keys);
   if deleted_registry_count <> pg_catalog.cardinality(p_registry_keys) then raise exception using errcode = 'P8924', message = 'Bot-only registry cleanup set is incomplete'; end if;
 
-  perform pg_catalog.set_config('chips_bot_registry_cleanup', '1', true);
+  perform pg_catalog.set_config('chips.bot_registry_cleanup', '1', true);
   delete from public.chips_transaction_idempotency registry
    where registry.archive_batch_id = batch.batch_id
      and registry.idempotency_key = any(p_registry_keys);
   get diagnostics deleted_registry_count = row_count;
   if deleted_registry_count <> pg_catalog.cardinality(p_registry_keys) then raise exception using errcode = 'P8924', message = 'Bot-only registry DELETE count mismatch'; end if;
 
-  perform pg_catalog.set_config('chips_bot_cleanup_receipt', '1', true);
+  perform pg_catalog.set_config('chips.bot_cleanup_receipt', '1', true);
   update public.chips_ledger_archive_batches batches
      set registry_cleaned_at = pg_catalog.timezone('utc', pg_catalog.now()),
          registry_cleaned_key_count = pg_catalog.cardinality(p_registry_keys),
@@ -1462,7 +1462,7 @@ begin
      and batches.registry_cleaned_at is null;
   if not found then raise exception using errcode = 'P8924', message = 'Bot-only cleanup receipt transition was not unique'; end if;
 
-  perform pg_catalog.set_config('chips_bot_only_lifecycle', '1', true);
+  perform pg_catalog.set_config('chips.bot_only_lifecycle', '1', true);
   update public.poker_tables tables
      set bot_only_retention_complete_at = coalesce(tables.bot_only_retention_complete_at, pg_catalog.timezone('utc', pg_catalog.now()))
    where tables.id = batch.bot_only_table_id
