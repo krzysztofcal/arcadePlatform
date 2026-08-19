@@ -75,6 +75,7 @@ jobs:
             id bigint generated always as identity primary key
           );
           create schema if not exists extensions;
+          create extension if not exists pgcrypto with schema extensions;
           SQL
 
       - name: Apply migrations and run migration contracts
