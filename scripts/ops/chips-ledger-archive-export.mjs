@@ -439,7 +439,6 @@ with table_rows as (
             stats.newest_created_at, stats.identity_count, stats.eligible_count,
             stats.out_of_scope_keys_sha256
   having count(*) = 2
-     and count(distinct transactions.id) = stats.eligible_count
      and count(*) filter (where accounts.account_type::text = 'USER') = 0
      and count(*) filter (where accounts.account_type::text = 'SYSTEM') = 1
      and count(*) filter (where accounts.account_type::text = 'ESCROW') = 1
@@ -462,6 +461,7 @@ with table_rows as (
   select key_table_id
     from eligible_transactions
    group by key_table_id
+   having count(*) = max(table_eligible_count)
    order by key_table_id
    limit 1
 )
