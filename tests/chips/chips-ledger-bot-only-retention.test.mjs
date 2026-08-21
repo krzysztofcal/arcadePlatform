@@ -488,10 +488,26 @@ async function ageBoundaryPostgresContract(sql) {
   );
   const rows = await sql.unsafe(BOT_ONLY_CANDIDATE_SQL, [cutoff, 5000, null, null]);
   assert.equal(rows.length, 0, "a table with 10-day and 6-day identities must remain untouched");
-  const blockers = await sql.unsafe(BOT_ONLY_BLOCKING_ANOMALY_SQL, [cutoff, 5000]);
+  const mixedIdentitySummary = await sql.unsafe(`
+    select
+      count(*)::text as identity_count,
+      count(*) filter (where transaction_created_at < $2::timestamptz)::text as eligible_count,
+      max(transaction_created_at)::text as newest_created_at
+      from public.chips_transaction_idempotency
+     where table_id = $1::uuid
+       and archive_batch_id is null;
+  `, [mixedTable.tableId, cutoff]);
+  assert.equal(Number(mixedIdentitySummary[0].identity_count), 2, "the mixed table must retain both registry identities");
+  assert.equal(Number(mixedIdentitySummary[0].eligible_count), 1, "only the older mixed-table identity is beyond the cutoff");
   assert.ok(
-    blockers.some((row) => row.blocker_code === "younger_table_identity" && Number(row.table_count) === 1),
-    "the mixed-age table must report the younger identity as a blocking anomaly",
+    new Date(mixedIdentitySummary[0].newest_created_at).getTime() >= new Date(cutoff).getTime(),
+    "the mixed table newest identity must remain at or after the cutoff",
+  );
+  const blockers = await sql.unsafe(BOT_ONLY_BLOCKING_ANOMALY_SQL, [cutoff, 5000]);
+  const youngerBlocker = blockers.find((row) => row.blocker_code === "younger_table_identity");
+  assert.ok(
+    youngerBlocker && Number(youngerBlocker.table_count) > 0 && Number(youngerBlocker.transaction_count) >= 2,
+    `the mixed-age table must report the younger identity as a blocking anomaly: ${JSON.stringify(blockers)}`,
   );
 
   const youngerCrossedCutoff = new Date(now - (5 * DAY_MS)).toISOString();
