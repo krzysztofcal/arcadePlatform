@@ -759,7 +759,7 @@ async function retryDestructiveOperatorPostgresContract(sql) {
           fixture.transaction.key,
           "e".repeat(64),
         ]);
-      }, "P8903", /closed or missing/);
+      }, "P8902", /does not match the idempotency key/);
       const afterReuse = await readAccountingSnapshot(tx, accountIds, transactionIds);
       assert.deepEqual(afterReuse.accounts, beforeReuse.accounts, "failed key reuse must not change balances or next_entry_seq");
       assert.equal(afterReuse.accountBalanceTotal, beforeReuse.accountBalanceTotal);
