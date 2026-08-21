@@ -6,6 +6,8 @@ import { gunzipSync } from "node:zlib";
 import postgres from "postgres";
 import {
   EXPORT_SCHEMA_VERSION,
+  BOT_ONLY_EXPORT_SCHEMA_VERSION,
+  BOT_ONLY_RETENTION_POLICY_ID,
   compareTransactions,
   maxBatchSizeForTarget,
   parseJsonl,
@@ -15,6 +17,7 @@ import {
   stringifyJson,
   timestampToMicros,
 } from "./chips-ledger-archive-export.mjs";
+import { assertTableBinding } from "./_shared/chips-table-idempotency.mjs";
 
 export const ARCHIVE_BUCKET = "chips-ledger-archive";
 export const ARCHIVE_MIME_TYPE = "application/gzip";
@@ -147,17 +150,26 @@ function verifyCursor(cursor, label) {
 
 function verifyManifestShape(manifest, artifactName, target) {
   if (!manifest || typeof manifest !== "object") fail("local manifest must be an object");
-  if (manifest.schema_version !== EXPORT_SCHEMA_VERSION || manifest.artifact_type !== "chips_ledger_archive" || manifest.format !== "jsonl.gz") {
+  if (![EXPORT_SCHEMA_VERSION, BOT_ONLY_EXPORT_SCHEMA_VERSION].includes(manifest.schema_version)
+    || manifest.artifact_type !== "chips_ledger_archive" || manifest.format !== "jsonl.gz") {
     fail("local manifest has an unsupported archive format");
   }
   if (manifest.target !== target.target) fail("local manifest target does not match --target");
   if (manifest.source_policy_id !== undefined
     && manifest.source_policy_id !== null
-    && manifest.source_policy_id !== STAGE_AUTOMATION_POLICY_ID) {
+    && manifest.source_policy_id !== STAGE_AUTOMATION_POLICY_ID
+    && manifest.source_policy_id !== BOT_ONLY_RETENTION_POLICY_ID) {
     fail("local manifest source policy is unsupported");
   }
   if (manifest.source_policy_id === STAGE_AUTOMATION_POLICY_ID && target.target !== "stage") {
     fail("Stage automation policy cannot be stored for a non-Stage target");
+  }
+  if (manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+    && (manifest.source_policy_id !== BOT_ONLY_RETENTION_POLICY_ID || target.target !== "stage")) {
+    fail("schema-v2 archive requires the Stage bot-only retention policy");
+  }
+  if (manifest.source_policy_id === BOT_ONLY_RETENTION_POLICY_ID && manifest.schema_version !== BOT_ONLY_EXPORT_SCHEMA_VERSION) {
+    fail("bot-only retention policy requires schema-v2 archive evidence");
   }
   if (manifest.artifact !== artifactName) fail("local manifest artifact name does not match the archive");
   if (!manifest.cutoff || typeof manifest.cutoff.created_at !== "string") fail("local manifest cutoff is missing");
@@ -177,6 +189,19 @@ function verifyManifestShape(manifest, artifactName, target) {
     txTypeTotal += count;
   }
   if (txTypeTotal !== batch.transactions) fail("local manifest tx_types count mismatch");
+
+  if (manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION) {
+    const botOnly = manifest.bot_only;
+    if (!botOnly || !UUID_RE.test(text(botOnly.table_id)) || botOnly.table_count !== 1
+      || !timestampValue(botOnly.newest_created_at)
+      || !SHA256_RE.test(text(botOnly.registry_keys_sha256))
+      || !SHA256_RE.test(text(botOnly.out_of_scope_keys_sha256))
+      || !Number.isSafeInteger(botOnly.identity_count) || botOnly.identity_count < 1
+      || botOnly.identity_count !== batch.transactions
+      || botOnly.eligible_count !== batch.transactions) {
+      fail("schema-v2 bot-only manifest evidence is incomplete");
+    }
+  }
 
   const amounts = manifest.amounts;
   if (!amounts) fail("local manifest amounts are missing");
@@ -202,6 +227,16 @@ function verifyManifestShape(manifest, artifactName, target) {
   return { cursorStart, cursorEnd };
 }
 
+function timestampValue(value) {
+  if (typeof value !== "string") return false;
+  try {
+    timestampToMicros(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function summarizeRecords(records, manifest) {
   if (!Array.isArray(records)) fail("JSONL artifact must contain records");
   const sorted = [...records].sort(compareTransactions);
@@ -218,7 +253,7 @@ function summarizeRecords(records, manifest) {
     if (record !== sorted[recordIndex]) fail("JSONL transaction order is not deterministic");
     const transaction = record?.transaction;
     const transactionId = text(transaction?.id).toLowerCase();
-    if (record?.schema_version !== EXPORT_SCHEMA_VERSION || record?.record_type !== "chips_transaction" || !UUID_RE.test(transactionId)) {
+    if (record?.schema_version !== manifest.schema_version || record?.record_type !== "chips_transaction" || !UUID_RE.test(transactionId)) {
       fail("JSONL artifact contains a malformed transaction");
     }
     if (seenTransactions.has(transactionId)) fail("JSONL artifact contains duplicate transactions");
@@ -230,6 +265,42 @@ function summarizeRecords(records, manifest) {
     txTypes[txType] = (txTypes[txType] || 0) + 1;
 
     if (!Array.isArray(record.entries)) fail(`JSONL artifact has no entries array for ${transactionId}`);
+    if (manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION) {
+      const context = record.table_context;
+      const proof = context?.bot_only_proof;
+      const summary = context?.table_identity_summary;
+      if (transaction.tx_type !== "TABLE_BUY_IN" && transaction.tx_type !== "TABLE_CASH_OUT") fail("schema-v2 artifact contains a non-TABLE transaction");
+      if (transaction.user_id != null || context?.table_exists !== true || context?.table_status !== "CLOSED"
+        || !context?.escrow_account_id || context?.escrow_status !== "active" || context?.escrow_balance !== "0"
+        || context?.table_id !== manifest.bot_only?.table_id) fail("schema-v2 artifact lifecycle evidence is invalid");
+      if (!proof || proof.has_human_participant !== false || proof.proof_eligible !== true
+        || proof.table_id_from_key !== context.table_id || proof.key_format_version !== 1 || !text(proof.key_format)) {
+        fail("schema-v2 artifact bot-only proof is invalid");
+      }
+      if (!summary || !timestampValue(summary.newest_created_at)
+        || !/^[0-9]+$/.test(text(summary.identity_count))
+        || !/^[0-9]+$/.test(text(summary.eligible_count))
+        || text(summary.identity_count) !== String(manifest.bot_only?.identity_count)
+        || text(summary.eligible_count) !== String(manifest.bot_only?.eligible_count)
+        || !SHA256_RE.test(text(summary.out_of_scope_keys_sha256))
+        || summary.newest_created_at !== manifest.bot_only?.newest_created_at) {
+        fail("schema-v2 artifact table summary is invalid");
+      }
+      const parsedBinding = assertTableBinding({
+        idempotencyKey: transaction.idempotency_key,
+        metadata: transaction.metadata,
+        reference: transaction.reference,
+      });
+      if (parsedBinding.tableId !== context.table_id || parsedBinding.format !== proof.key_format) fail("schema-v2 artifact idempotency binding is invalid");
+      const escrowEntries = record.entries.filter((entry) => entry.account?.account_type === "ESCROW");
+      const systemEntries = record.entries.filter((entry) => entry.account?.account_type === "SYSTEM");
+      if (escrowEntries.length !== 1 || systemEntries.length !== 1 || record.entries.some((entry) => entry.account?.account_type === "USER")
+        || escrowEntries[0]?.account?.system_key !== `POKER_TABLE:${context.table_id}`
+        || (transaction.tx_type === "TABLE_BUY_IN" && !(BigInt(escrowEntries[0].amount) > 0n && BigInt(systemEntries[0].amount) < 0n))
+        || (transaction.tx_type === "TABLE_CASH_OUT" && !(BigInt(escrowEntries[0].amount) < 0n && BigInt(systemEntries[0].amount) > 0n))) {
+        fail("schema-v2 artifact entry binding is invalid");
+      }
+    }
     const sortedEntries = [...record.entries].sort((left, right) => {
       const leftId = BigInt(assertIntegerString(left?.id, "entry.id", { nonNegative: true }));
       const rightId = BigInt(assertIntegerString(right?.id, "entry.id", { nonNegative: true }));
@@ -455,6 +526,13 @@ function manifestRow(manifest, storageTarget, objectPath) {
     debits: manifest.amounts.debits,
     net_amount: manifest.amounts.net,
     source_policy_id: manifest.source_policy_id || null,
+    bot_only_table_id: manifest.bot_only?.table_id || null,
+    bot_only_table_count: manifest.bot_only?.table_count == null ? null : String(manifest.bot_only.table_count),
+    bot_only_newest_created_at: manifest.bot_only?.newest_created_at || null,
+    bot_only_registry_keys_sha256: manifest.bot_only?.registry_keys_sha256 || null,
+    bot_only_out_of_scope_keys_sha256: manifest.bot_only?.out_of_scope_keys_sha256 || null,
+    bot_only_identity_count: manifest.bot_only?.identity_count == null ? null : String(manifest.bot_only.identity_count),
+    bot_only_eligible_count: manifest.bot_only?.eligible_count == null ? null : String(manifest.bot_only.eligible_count),
     status: "pending",
   };
 }
@@ -463,6 +541,8 @@ const IMMUTABLE_FIELDS = [
   "object_path", "project_ref", "format_version", "cutoff", "cursor_start_created_at", "cursor_start_id",
   "cursor_end_created_at", "cursor_end_id", "first_created_at", "last_created_at", "transaction_count",
   "entry_count", "tx_types", "raw_bytes", "compressed_bytes", "raw_sha256", "compressed_sha256", "credits", "debits", "net_amount", "source_policy_id",
+  "bot_only_table_id", "bot_only_table_count", "bot_only_newest_created_at", "bot_only_registry_keys_sha256",
+  "bot_only_out_of_scope_keys_sha256", "bot_only_identity_count", "bot_only_eligible_count",
 ];
 
 function assertSameManifest(existing, expected) {
@@ -629,6 +709,27 @@ function selectManifestSql() {
     debits::text as debits,
     net_amount::text as net_amount,
     source_policy_id,
+    batch_id::text as batch_id,
+    archived_transaction_ids_sha256,
+    archived_entry_ids_sha256,
+    archive_proof_verified_at::text as archive_proof_verified_at,
+    pruned_at::text as pruned_at,
+    pruned_transaction_count::text as pruned_transaction_count,
+    pruned_entry_count::text as pruned_entry_count,
+    pruned_transaction_ids_sha256,
+    pruned_entry_ids_sha256,
+    bot_only_table_id::text as bot_only_table_id,
+    bot_only_table_count::text as bot_only_table_count,
+    bot_only_newest_created_at::text as bot_only_newest_created_at,
+    bot_only_registry_keys_sha256,
+    bot_only_out_of_scope_keys_sha256,
+    bot_only_identity_count::text as bot_only_identity_count,
+    bot_only_eligible_count::text as bot_only_eligible_count,
+    registry_cleaned_at::text as registry_cleaned_at,
+    registry_cleaned_key_count::text as registry_cleaned_key_count,
+    registry_cleaned_keys_sha256,
+    destructive_go_at::text as destructive_go_at,
+    destructive_go_batch_id::text as destructive_go_batch_id,
     status
   from public.chips_ledger_archive_batches
   where object_path = $1;`;
@@ -648,6 +749,12 @@ function normalizeManifestRow(row) {
     debits: String(row.debits),
     net_amount: String(row.net_amount),
     source_policy_id: row.source_policy_id || null,
+    batch_id: row.batch_id == null ? null : String(row.batch_id),
+    bot_only_table_count: row.bot_only_table_count == null ? null : String(row.bot_only_table_count),
+    bot_only_identity_count: row.bot_only_identity_count == null ? null : String(row.bot_only_identity_count),
+    bot_only_eligible_count: row.bot_only_eligible_count == null ? null : String(row.bot_only_eligible_count),
+    registry_cleaned_key_count: row.registry_cleaned_key_count == null ? null : String(row.registry_cleaned_key_count),
+    destructive_go_batch_id: row.destructive_go_batch_id == null ? null : String(row.destructive_go_batch_id),
   };
 }
 
@@ -665,16 +772,23 @@ export function createManifestStore(sql) {
         (object_path, project_ref, format_version, cutoff, cursor_start_created_at, cursor_start_id,
          cursor_end_created_at, cursor_end_id, first_created_at, last_created_at, transaction_count,
          entry_count, tx_types, raw_bytes, compressed_bytes, raw_sha256, compressed_sha256,
-         credits, debits, net_amount, source_policy_id, status)
+         credits, debits, net_amount, source_policy_id,
+         bot_only_table_id, bot_only_table_count, bot_only_newest_created_at,
+         bot_only_registry_keys_sha256, bot_only_out_of_scope_keys_sha256,
+         bot_only_identity_count, bot_only_eligible_count, status)
         values ($1, $2, $3::integer, $4::timestamptz, $5::timestamptz, $6::uuid,
                 $7::timestamptz, $8::uuid, $9::timestamptz, $10::timestamptz, $11::bigint,
                 $12::bigint, $13::jsonb, $14::bigint, $15::bigint, $16, $17,
-                $18::numeric, $19::numeric, $20::numeric, $21, 'pending')
+                $18::numeric, $19::numeric, $20::numeric, $21,
+                $22::uuid, $23::bigint, $24::timestamptz, $25, $26, $27::bigint, $28::bigint, 'pending')
         on conflict (object_path) do nothing;`, [
         row.object_path, row.project_ref, row.format_version, timestampParam(row.cutoff), timestampParam(row.cursor_start_created_at), row.cursor_start_id,
         timestampParam(row.cursor_end_created_at), row.cursor_end_id, timestampParam(row.first_created_at), timestampParam(row.last_created_at), row.transaction_count,
         row.entry_count, row.tx_types, row.raw_bytes, row.compressed_bytes, row.raw_sha256, row.compressed_sha256,
         row.credits, row.debits, row.net_amount, row.source_policy_id,
+        row.bot_only_table_id, row.bot_only_table_count, timestampParam(row.bot_only_newest_created_at),
+        row.bot_only_registry_keys_sha256, row.bot_only_out_of_scope_keys_sha256,
+        row.bot_only_identity_count, row.bot_only_eligible_count,
       ]);
     },
     async markCommitted(objectPath) {

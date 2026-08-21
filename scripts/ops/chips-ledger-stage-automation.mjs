@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 import { gunzipSync, gzipSync } from "node:zlib";
 import postgres from "postgres";
 import {
+  BOT_ONLY_EXPORT_SCHEMA_VERSION,
+  BOT_ONLY_RETENTION_DAYS,
+  BOT_ONLY_RETENTION_POLICY_ID,
   runExport,
   STAGE_AUTOMATION_POLICY_ID,
   stringifyJson,
@@ -38,6 +41,7 @@ export const STAGE_RETENTION_DAYS = 30;
 export const STAGE_AUTOMATION_LOCK_KEY = `chips-ledger-stage-automation-v1:${STAGE_PROJECT_REF}`;
 
 const SHA256_RE = /^[0-9a-f]{64}$/;
+const COMMIT_SHA_RE = /^[0-9a-f]{40}$/i;
 const PRIVATE_FILE_MODE = 0o600;
 
 function fail(message) {
@@ -46,6 +50,14 @@ function fail(message) {
 
 function text(value) {
   return value == null ? "" : String(value).trim();
+}
+
+export function resolveDeployedCommitSha(env = process.env, { required = true } = {}) {
+  const rawCommitSha = text(env.DEPLOYED_COMMIT_SHA || env.GITHUB_SHA);
+  if (!rawCommitSha && !required) return null;
+  const commitSha = rawCommitSha.toLowerCase();
+  if (!COMMIT_SHA_RE.test(commitSha)) fail("a 40-character deployed commit SHA is required");
+  return commitSha;
 }
 
 function sha256(bytes) {
@@ -77,8 +89,9 @@ function aggregatePayload(result) {
     event: "chips_ledger_stage_automation",
     target: "stage",
     project_ref: STAGE_PROJECT_REF,
-    source_policy_id: STAGE_AUTOMATION_POLICY_ID,
+    source_policy_id: result.sourcePolicyId || STAGE_AUTOMATION_POLICY_ID,
     state: result.state,
+    deployed_commit_sha: result.deployedCommitSha || null,
   };
   if (result.state === "error") {
     return {
@@ -89,18 +102,42 @@ function aggregatePayload(result) {
   return {
     ...base,
     mode: result.mode || null,
+    batch_id: result.batchId ?? null,
+    format_version: result.formatVersion ?? null,
+    object_path: result.objectPath || null,
+    cutoff: result.cutoff || null,
+    cursor_start: result.cursorStart || null,
+    cursor_end: result.cursorEnd || null,
+    stage_system_identifier: result.stageSystemIdentifier || null,
+    table_id: result.tableId || null,
+    table_count: result.tableCount ?? null,
+    registry_key_count: result.registryKeyCount ?? null,
+    registry_keys_sha256: result.registryKeysSha256 || null,
+    out_of_scope_keys_sha256: result.outOfScopeKeysSha256 || null,
+    identity_count: result.identityCount ?? null,
+    eligible_count: result.eligibleCount ?? null,
     transactions: result.transactions ?? null,
     entries: result.entries ?? null,
     tx_types: result.txTypes || null,
     amounts: result.amounts || null,
     raw_bytes: result.rawBytes ?? null,
     compressed_bytes: result.compressedBytes ?? null,
+    raw_sha256: result.rawSha256 || null,
     compressed_sha256: result.compressedSha256 || null,
+    archive_proof_transaction_ids_sha256: result.archiveProofTransactionIdsSha256 || null,
+    archive_proof_entry_ids_sha256: result.archiveProofEntryIdsSha256 || null,
+    prune_receipt: result.pruneReceipt || null,
+    cleanup_receipt: result.cleanupReceipt || null,
     recovery_archive_sha256: result.recoveryArchiveSha256 || null,
     recovery_manifest_sha256: result.recoveryManifestSha256 || null,
+    recovery_archive_path: result.recoveryArchivePath || null,
+    recovery_manifest_path: result.recoveryManifestPath || null,
     proof: result.proof || null,
     receipt: result.receipt || null,
     mappings: result.mappings ?? null,
+    blocking_anomalies: result.blockingAnomalies || null,
+    destructive_go_batch_id: result.destructiveGoBatchId ?? null,
+    destructive_go_at: result.destructiveGoAt || null,
     reason: result.reason || null,
   };
 }
@@ -119,15 +156,15 @@ function writeAggregateSummary(result) {
   return safe;
 }
 
-function emitAggregateError(error) {
+function emitAggregateError(error, context = {}) {
   try {
-    writeAggregateSummary({ state: "error", reason: error });
+    writeAggregateSummary({ state: "error", reason: error, ...context });
   } catch {
     // Preserve the original orchestration error if reporting itself fails.
   }
 }
 
-export function validateStageEnvironment(env = process.env) {
+export function validateStageEnvironment(env = process.env, { requireCommitSha = false } = {}) {
   for (const key of Object.keys(env)) {
     if (/^SUPABASE_PROD_|^PRODUCTION_/.test(key)) fail("Production credentials are not accepted by the Stage orchestrator");
   }
@@ -135,6 +172,7 @@ export function validateStageEnvironment(env = process.env) {
   const apiUrl = text(env.SUPABASE_STAGE_URL);
   const serviceKey = text(env.SUPABASE_STAGE_SERVICE_ROLE_KEY);
   if (!dbUrl || !apiUrl || !serviceKey) fail("Stage DB URL, Supabase URL and service key are required");
+  const deployedCommitSha = resolveDeployedCommitSha(env, { required: requireCommitSha });
   let parsedDb;
   let parsedApi;
   try {
@@ -159,11 +197,13 @@ export function validateStageEnvironment(env = process.env) {
     dbUrl,
     apiUrl: parsedApi.origin,
     serviceKey,
+    deployedCommitSha,
     moduleEnv: {
       EXPECTED_SUPABASE_STAGE_PROJECT_REF: STAGE_PROJECT_REF,
       SUPABASE_STAGE_DB_URL: dbUrl,
       SUPABASE_URL: parsedApi.origin,
       SUPABASE_SERVICE_ROLE_KEY: serviceKey,
+      ...(deployedCommitSha ? { DEPLOYED_COMMIT_SHA: deployedCommitSha } : {}),
     },
   };
 }
@@ -200,12 +240,26 @@ async function assertIdentity(sql) {
   return identity;
 }
 
-async function loadOwnBatches(sql) {
+async function loadOwnBatches(sql, sourcePolicyId = STAGE_AUTOMATION_POLICY_ID) {
   return sql.unsafe(`select
     object_path,
     project_ref,
     source_policy_id,
     status,
+    batch_id::text as batch_id,
+    format_version::text as format_version,
+    cutoff::text as cutoff,
+    cursor_start_created_at::text as cursor_start_created_at,
+    cursor_start_id,
+    transaction_count::text as transaction_count,
+    entry_count::text as entry_count,
+    raw_bytes::text as raw_bytes,
+    compressed_bytes::text as compressed_bytes,
+    raw_sha256,
+    compressed_sha256,
+    credits::text as credits,
+    debits::text as debits,
+    net_amount::text as net_amount,
     committed_at::text as committed_at,
     archive_proof_verified_at::text as archive_proof_verified_at,
     archived_transaction_ids_sha256,
@@ -215,11 +269,121 @@ async function loadOwnBatches(sql) {
     pruned_entry_count::text as pruned_entry_count,
     pruned_transaction_ids_sha256,
     pruned_entry_ids_sha256,
-    compressed_sha256
+    bot_only_table_id,
+    bot_only_table_count::text as bot_only_table_count,
+    bot_only_newest_created_at::text as bot_only_newest_created_at,
+    bot_only_registry_keys_sha256,
+    bot_only_out_of_scope_keys_sha256,
+    bot_only_identity_count::text as bot_only_identity_count,
+    bot_only_eligible_count::text as bot_only_eligible_count,
+    registry_cleaned_at::text as registry_cleaned_at,
+    registry_cleaned_key_count::text as registry_cleaned_key_count,
+    registry_cleaned_keys_sha256,
+    destructive_go_at::text as destructive_go_at,
+    destructive_go_batch_id::text as destructive_go_batch_id
   from public.chips_ledger_archive_batches
   where project_ref = $1
     and source_policy_id = $2
-  order by created_at desc, object_path desc;`, [STAGE_PROJECT_REF, STAGE_AUTOMATION_POLICY_ID]);
+  order by created_at desc, object_path desc;`, [STAGE_PROJECT_REF, sourcePolicyId]);
+}
+
+export function botOnlyExportArgs(row, artifactPath, manifestPath) {
+  if (!row?.cutoff) fail("pending bot-only manifest has no immutable cutoff");
+  const args = [
+    "--target", "stage",
+    "--cutoff", row.cutoff,
+    "--batch-size", String(STAGE_MAX_BATCH_SIZE),
+    "--output", artifactPath,
+    "--manifest", manifestPath,
+  ];
+  if (row.cursor_start_created_at || row.cursor_start_id) {
+    if (!row.cursor_start_created_at || !row.cursor_start_id) fail("pending bot-only manifest has a partial cursor");
+    args.splice(6, 0, "--after-created-at", row.cursor_start_created_at, "--after-id", row.cursor_start_id);
+  }
+  return args;
+}
+
+export function botOnlyReport({ row, identity, dry, durable, state, mode, deployedCommitSha = null, blockingAnomalies = [] }) {
+  const evidence = dry?.evidence || null;
+  const recoveryArchiveSha256 = durable?.recoveryArchive?.sha256 || durable?.archiveSha256 || null;
+  const recoveryManifestSha256 = durable?.recoveryManifest?.sha256 || durable?.manifestSha256 || null;
+  return {
+    state,
+    mode,
+    sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
+    projectRef: row?.project_ref || STAGE_PROJECT_REF,
+    deployedCommitSha,
+    formatVersion: row?.format_version == null ? null : Number(row.format_version),
+    stageSystemIdentifier: identity,
+    batchId: row?.batch_id || null,
+    objectPath: row?.object_path || null,
+    cutoff: row?.cutoff || null,
+    cursorStart: row?.cursor_start_created_at || row?.cursor_start_id
+      ? { created_at: row.cursor_start_created_at || null, id: row.cursor_start_id || null }
+      : null,
+    cursorEnd: row?.cursor_end_created_at || row?.cursor_end_id
+      ? { created_at: row.cursor_end_created_at || null, id: row.cursor_end_id || null }
+      : null,
+    tableId: row?.bot_only_table_id || evidence?.tableId || null,
+    tableCount: row?.bot_only_table_count || (evidence?.tableId ? 1 : null),
+    transactions: evidence?.transactionCount ?? (row?.transaction_count == null ? null : Number(row.transaction_count)),
+    entries: evidence?.entryCount ?? (row?.entry_count == null ? null : Number(row.entry_count)),
+    txTypes: evidence?.txTypes || null,
+    amounts: evidence ? { credits: evidence.credits, debits: evidence.debits, net: evidence.net } : null,
+    identityCount: row?.bot_only_identity_count || null,
+    eligibleCount: row?.bot_only_eligible_count || null,
+    registryKeyCount: evidence?.registryKeys?.length ?? row?.bot_only_identity_count ?? null,
+    registryKeysSha256: row?.bot_only_registry_keys_sha256 || evidence?.registryKeysSha256 || null,
+    outOfScopeKeysSha256: row?.bot_only_out_of_scope_keys_sha256 || evidence?.outOfScopeKeysSha256 || null,
+    rawBytes: row?.raw_bytes == null ? null : Number(row.raw_bytes),
+    rawSha256: row?.raw_sha256 || null,
+    compressedBytes: row?.compressed_bytes == null ? null : Number(row.compressed_bytes),
+    compressedSha256: row?.compressed_sha256 || null,
+    archiveProofTransactionIdsSha256: row?.archived_transaction_ids_sha256 || null,
+    archiveProofEntryIdsSha256: row?.archived_entry_ids_sha256 || null,
+    pruneReceipt: row?.pruned_at ? {
+      at: row.pruned_at,
+      transaction_count: row.pruned_transaction_count,
+      entry_count: row.pruned_entry_count,
+      transaction_ids_sha256: row.pruned_transaction_ids_sha256,
+      entry_ids_sha256: row.pruned_entry_ids_sha256,
+    } : null,
+    cleanupReceipt: row?.registry_cleaned_at ? {
+      at: row.registry_cleaned_at,
+      key_count: row.registry_cleaned_key_count,
+      keys_sha256: row.registry_cleaned_keys_sha256,
+    } : null,
+    recoveryArchiveSha256,
+    recoveryManifestSha256,
+    recoveryArchivePath: durable?.archivePath || null,
+    recoveryManifestPath: durable?.manifestPath || null,
+    proof: row?.archive_proof_verified_at ? "verified" : null,
+    receipt: row?.registry_cleaned_at ? "cleaned" : state === "prepared" ? "prepare-only" : null,
+    destructiveGoBatchId: row?.destructive_go_batch_id || null,
+    destructiveGoAt: row?.destructive_go_at || null,
+    mappings: evidence?.transactionCount ?? null,
+    blockingAnomalies,
+  };
+}
+
+function botOnlyNoCandidateReport({ exported, identity, deployedCommitSha }) {
+  const blockingAnomalies = exported.blockingAnomalies || [];
+  return {
+    state: "no-op",
+    mode: "prepare-only",
+    sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
+    projectRef: exported.options?.projectRef || STAGE_PROJECT_REF,
+    deployedCommitSha,
+    formatVersion: BOT_ONLY_EXPORT_SCHEMA_VERSION,
+    stageSystemIdentifier: identity,
+    batchId: null,
+    objectPath: null,
+    cutoff: exported.options?.cutoff || null,
+    cursorStart: exported.options?.cursor || null,
+    cursorEnd: null,
+    blockingAnomalies,
+    reason: blockingAnomalies.length ? "blocking_anomalies" : "no_eligible_bot_only_table",
+  };
 }
 
 function receiptFieldCount(row) {
@@ -357,7 +521,7 @@ export function assertDurableRecoveryReady(durable) {
   return true;
 }
 
-function pruneArgs(row, mode, recoveryDir = null) {
+function pruneArgs(row, mode, recoveryDir = null, approvedBatchId = null) {
   const args = [
     "--target", "stage",
     "--object-path", row.object_path,
@@ -365,10 +529,11 @@ function pruneArgs(row, mode, recoveryDir = null) {
   ];
   if (mode === "register-proof") args.push("--register-proof");
   if (mode === "execute") args.push("--execute", "--recovery-dir", recoveryDir);
+  if (approvedBatchId != null) args.push("--approved-batch-id", String(approvedBatchId));
   return args;
 }
 
-async function runPruneStep({ row, mode, env, cwd, sql, pruneStore, storageTarget, downloadArchive = null, recoveryDir = null, verifyBucket = null, storageDeps = {} }) {
+async function runPruneStep({ row, mode, env, cwd, sql, pruneStore, storageTarget, downloadArchive = null, recoveryDir = null, approvedBatchId = null, verifyBucket = null, storageDeps = {} }) {
   const deps = {
     ...storageDeps,
     sql,
@@ -380,7 +545,7 @@ async function runPruneStep({ row, mode, env, cwd, sql, pruneStore, storageTarge
   if (verifyBucket) deps.verifyBucket = verifyBucket;
   const pruneRunner = storageDeps.pruneArchive || pruneArchive;
   return pruneRunner({
-    argv: pruneArgs(row, mode, mode === "execute" ? recoveryDir : null),
+    argv: pruneArgs(row, mode, mode === "execute" ? recoveryDir : null, approvedBatchId),
     env,
     cwd,
     deps,
@@ -411,13 +576,17 @@ async function verifyCompletedCycle({ row, identity, env, tempRoot, sql, pruneSt
   return { durable, dry };
 }
 
-async function refreshRow(pruneStore, objectPath) {
+async function refreshPolicyRow(pruneStore, objectPath, sourcePolicyId = STAGE_AUTOMATION_POLICY_ID) {
   const row = await pruneStore.getManifest(objectPath);
-  if (!row || row.source_policy_id !== STAGE_AUTOMATION_POLICY_ID) fail("Stage automation manifest policy mismatch");
+  if (!row || row.source_policy_id !== sourcePolicyId) fail("Stage automation manifest policy mismatch");
   return row;
 }
 
-async function executeVerifiedCycle({ row, identity, durable, env, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps = {} }) {
+async function refreshRow(pruneStore, objectPath) {
+  return refreshPolicyRow(pruneStore, objectPath, STAGE_AUTOMATION_POLICY_ID);
+}
+
+async function executeVerifiedCycle({ row, identity, durable, env, tempRoot, sql, pruneStore, storageTarget, approvedBatchId = null, verifyBucket, storageDeps = {} }) {
   assertDurableRecoveryReady(durable);
   const recoveryDir = path.join(tempRoot, "recovery");
   restoreLocalRecovery(recoveryDir, durable);
@@ -432,9 +601,10 @@ async function executeVerifiedCycle({ row, identity, durable, env, tempRoot, sql
     verifyBucket,
     storageDeps,
     recoveryDir,
+    approvedBatchId,
     downloadArchive: async () => ({ bytes: durable.archiveBytes, downloadMs: 0 }),
   });
-  if (result.state !== "pruned" && result.state !== "already_pruned") {
+  if (result.state !== "pruned" && result.state !== "already_pruned" && result.state !== "cleaned" && result.state !== "already_cleaned") {
     fail(`unexpected prune state: ${result.state}`);
   }
   return result;
@@ -483,11 +653,13 @@ export async function runStageAutomation({ env = process.env, now = new Date(), 
   let tempRoot = null;
   let ownsSql = false;
   let result = null;
+  let deployedCommitSha = null;
   let failed = false;
   let failure = null;
 
   try {
     const config = validateStageEnvironment(env);
+    deployedCommitSha = config.deployedCommitSha;
     const moduleEnv = config.moduleEnv;
     const providedSql = deps.sql;
     if (providedSql) {
@@ -638,20 +810,269 @@ export async function runStageAutomation({ env = process.env, now = new Date(), 
     }
   }
   if (failed) {
-    emitAggregateError(failure);
+    emitAggregateError(failure, { deployedCommitSha });
     throw failure;
   }
+  if (result && deployedCommitSha) result = { ...result, deployedCommitSha };
+  writeAggregateSummary(result);
+  return result;
+}
+
+// Issue #890 uses the same Stage runner, Storage bucket, proof store, prune
+// store, recovery copies, and advisory lock.  Its default is deliberately
+// prepare-only: no call reaches the destructive DB operator unless the caller
+// explicitly supplies one exact approved batch id and opts into execution.
+export async function runBotOnlyStageAutomation({
+  env = process.env,
+  now = new Date(),
+  deps = {},
+  prepareOnly = true,
+  approvedBatchId = null,
+} = {}) {
+  if (prepareOnly !== true && (approvedBatchId == null || !/^[1-9][0-9]*$/.test(String(approvedBatchId)))) {
+    fail("bot-only destructive execution requires one exact approved batch id");
+  }
+  if (prepareOnly !== true && text(env.CHIPS_LEDGER_BOT_ONLY_EXECUTE) !== "1") {
+    fail("bot-only destructive execution requires the explicit default-off execution gate");
+  }
+  if (prepareOnly === true && approvedBatchId != null) {
+    fail("approved bot-only batch id is only valid with destructive execution");
+  }
+  let sql = null;
+  let lockSession = null;
+  let tempRoot = null;
+  let ownsSql = false;
+  let result = null;
+  let deployedCommitSha = null;
+  let failed = false;
+  let failure = null;
+  try {
+    const config = validateStageEnvironment(env, { requireCommitSha: true });
+    deployedCommitSha = config.deployedCommitSha;
+    const moduleEnv = config.moduleEnv;
+    if (deps.sql) sql = deps.sql;
+    else {
+      sql = postgres(config.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 0 });
+      ownsSql = true;
+    }
+    tempRoot = deps.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-bot-only-"));
+    ensurePrivateDirectory(tempRoot);
+    const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
+    const pruneStore = deps.pruneStore || createPruneStore(sql);
+    const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
+    lockSession = await acquireAdvisoryLock(sql);
+    if (!lockSession) result = { state: "no-op", reason: "advisory_lock_busy", sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID };
+    else {
+      const identity = await assertIdentity(sql);
+      await assertAdvisoryLock(sql, lockSession);
+      await verifyBucket(storageTarget);
+      const ownRows = await loadOwnBatches(sql, BOT_ONLY_RETENTION_POLICY_ID);
+      const activeRows = ownRows.filter((row) => row.status === "pending" || (row.status === "committed" && !row.registry_cleaned_at));
+      if (activeRows.length > 1) fail("multiple incomplete bot-only Stage manifests; refusing to choose one");
+
+      const resumePending = async (row) => {
+        const artifactPath = path.join(tempRoot, "pending-bot-only.archive.jsonl.gz");
+        const manifestPath = path.join(tempRoot, "pending-bot-only.archive.manifest.json");
+        const exported = await (deps.exportArchive || runExport)({
+          argv: botOnlyExportArgs(row, artifactPath, manifestPath),
+          env: moduleEnv,
+          cwd: tempRoot,
+          now,
+          deps: {
+            sql,
+            selector: "bot-only-7d",
+            schemaVersion: BOT_ONLY_EXPORT_SCHEMA_VERSION,
+            sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
+            targetOptions: { singleTarget: true },
+            noCandidateIfEmpty: true,
+            emit: false,
+          },
+        });
+        if (exported.noCandidate) fail("pending bot-only Stage manifest cannot be reproduced at its immutable cutoff");
+        const stored = await (deps.storeArchive || storeArchive)({
+          argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
+          env: moduleEnv,
+          cwd: tempRoot,
+          deps: { ...deps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
+        });
+        if (stored.objectPath !== row.object_path) fail("pending bot-only manifest object path differs from the reproduced artifact");
+        const refreshed = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
+        if (refreshed.status !== "committed") fail("pending bot-only Stage manifest was not committed during retry");
+        return refreshed;
+      };
+
+      let activeRow = activeRows[0] || null;
+      if (activeRow?.status === "pending") {
+        activeRow = await resumePending(activeRow);
+        await assertAdvisoryLock(sql, lockSession);
+      }
+
+      const prepareExisting = async (row) => {
+        row = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
+        if (!row.archive_proof_verified_at) {
+          await runPruneStep({ row, mode: "register-proof", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
+          row = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
+        }
+        const dry = await runPruneStep({ row, mode: "dry-run", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
+        if (dry.state === "already_cleaned") return { row, dry, durable: null };
+        if (dry.state !== "ready") fail(`bot-only Stage dry-run did not become ready: ${dry.state}`);
+        const existing = await inspectDurableRecovery(storageTarget, row, deps);
+        assertResumeRecoveryState(row, existing);
+        let durable = existing;
+        if (!durable) {
+          const mainArchive = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, deps);
+          durable = await persistDurableRecovery(
+            storageTarget,
+            row,
+            identity,
+            dry.evidence,
+            mainArchive.bytes,
+            deps,
+          );
+        }
+        if (!prepareOnly) {
+          if (String(approvedBatchId) !== String(row.batch_id)) fail("approved bot-only batch id does not match the active manifest");
+          const executed = await executeVerifiedCycle({ row, identity, durable, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, approvedBatchId, storageDeps: deps });
+          return { row: await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID), dry, durable, executed };
+        }
+        return { row, dry, durable, executed: null };
+      };
+
+      if (activeRow) {
+        const cycle = await prepareExisting(activeRow);
+        result = botOnlyReport({
+          row: cycle.row,
+          identity,
+          dry: cycle.dry,
+          durable: cycle.durable,
+          state: cycle.executed?.state || (cycle.dry.state === "already_cleaned" ? "already_cleaned" : "prepared"),
+          mode: prepareOnly ? "prepare-only" : "execute",
+          deployedCommitSha,
+        });
+      } else {
+        const latestCompleted = ownRows.find((row) => row.status === "committed" && row.registry_cleaned_at);
+        if (latestCompleted) {
+          const completed = await runPruneStep({
+            row: await refreshPolicyRow(pruneStore, latestCompleted.object_path, BOT_ONLY_RETENTION_POLICY_ID),
+            mode: "dry-run",
+            env: moduleEnv,
+            cwd: tempRoot,
+            sql,
+            pruneStore,
+            storageTarget,
+            verifyBucket,
+            storageDeps: deps,
+          });
+          if (completed.state !== "already_cleaned") fail(`completed bot-only Stage cycle did not revalidate as already_cleaned: ${completed.state}`);
+        }
+        const artifactPath = path.join(tempRoot, "archive.jsonl.gz");
+        const manifestPath = path.join(tempRoot, "archive.manifest.json");
+        const exported = await (deps.exportArchive || runExport)({
+          argv: ["--target", "stage", "--cutoff-days", String(BOT_ONLY_RETENTION_DAYS), "--batch-size", String(STAGE_MAX_BATCH_SIZE), "--output", artifactPath, "--manifest", manifestPath],
+          env: moduleEnv,
+          cwd: tempRoot,
+          now,
+          deps: {
+            sql,
+            selector: "bot-only-7d",
+            schemaVersion: BOT_ONLY_EXPORT_SCHEMA_VERSION,
+            sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
+            targetOptions: { singleTarget: true },
+            noCandidateIfEmpty: true,
+            emit: false,
+          },
+        });
+        if (exported.noCandidate) {
+          result = botOnlyNoCandidateReport({ exported, identity, deployedCommitSha });
+        }
+        else {
+          await (deps.ensureArchiveBucket || ensureArchiveBucket)(storageTarget, deps);
+          const stored = await (deps.storeArchive || storeArchive)({
+            argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
+            env: moduleEnv,
+            cwd: tempRoot,
+            deps: { ...deps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
+          });
+          let row = await refreshPolicyRow(pruneStore, stored.objectPath, BOT_ONLY_RETENTION_POLICY_ID);
+          await runPruneStep({ row, mode: "register-proof", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
+          row = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
+          const dry = await runPruneStep({ row, mode: "dry-run", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
+          if (dry.state !== "ready") fail(`new bot-only Stage dry-run did not become ready: ${dry.state}`);
+          const main = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, deps);
+          const durable = await persistDurableRecovery(storageTarget, row, identity, dry.evidence, main.bytes, deps);
+          let executed = null;
+          if (!prepareOnly) {
+            if (String(approvedBatchId) !== String(row.batch_id)) fail("approved bot-only batch id does not match the new manifest");
+            executed = await executeVerifiedCycle({ row, identity, durable, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, approvedBatchId, storageDeps: deps });
+            row = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
+          }
+          result = botOnlyReport({
+            row,
+            identity,
+            dry,
+            durable,
+            state: executed?.state || "prepared",
+            mode: prepareOnly ? "prepare-only" : "execute",
+            deployedCommitSha,
+          });
+        }
+      }
+    }
+  } catch (error) {
+    failed = true;
+    failure = error;
+  } finally {
+    if (lockSession && sql) {
+      try { await releaseAdvisoryLock(sql); } catch { /* owned session close releases it */ }
+    }
+    if (sql && ownsSql) {
+      try { await sql.end({ timeout: 5 }); } catch (error) { if (!failed) { failed = true; failure = error; } }
+    }
+  }
+  if (failed) {
+    emitAggregateError(failure, { deployedCommitSha });
+    throw failure;
+  }
+  if (result && deployedCommitSha) result = { ...result, deployedCommitSha };
   writeAggregateSummary(result);
   return result;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  if (process.argv.slice(2).length !== 0) {
-    process.stderr.write("chips-ledger-stage-automation accepts no command-line options\n");
-    process.exitCode = 1;
-  } else {
+  const argv = process.argv.slice(2);
+  if (argv.length === 0) {
     runStageAutomation().catch(() => {
       process.exitCode = 1;
     });
+  } else if (argv[0] === "--policy" && argv[1] === "bot-only-7d") {
+    let prepareOnly = true;
+    let prepareOnlyRequested = false;
+    let executeRequested = false;
+    let approvedBatchId = null;
+    for (let index = 2; index < argv.length; index += 1) {
+      if (argv[index] === "--prepare-only") {
+        if (prepareOnlyRequested || executeRequested) throw new Error("--prepare-only and --execute are mutually exclusive or duplicated");
+        prepareOnlyRequested = true;
+        prepareOnly = true;
+      } else if (argv[index] === "--execute") {
+        if (executeRequested || prepareOnlyRequested) throw new Error("--prepare-only and --execute are mutually exclusive or duplicated");
+        executeRequested = true;
+        prepareOnly = false;
+      } else if (argv[index] === "--approved-batch-id") {
+        const value = argv[index + 1];
+        if (!value || value.startsWith("--")) throw new Error("--approved-batch-id requires a value");
+        if (approvedBatchId !== null) throw new Error("--approved-batch-id was supplied more than once");
+        approvedBatchId = value;
+        index += 1;
+      } else {
+        throw new Error(`unknown Stage bot-only option: ${argv[index]}`);
+      }
+    }
+    runBotOnlyStageAutomation({ prepareOnly, approvedBatchId }).catch(() => {
+      process.exitCode = 1;
+    });
+  } else {
+    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-automation.mjs [--policy bot-only-7d [--prepare-only|--execute --approved-batch-id <id>]]\n");
+    process.exitCode = 1;
   }
 }

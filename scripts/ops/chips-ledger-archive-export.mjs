@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { gunzipSync, gzipSync } from "node:zlib";
 import postgres from "postgres";
 import { writeExclusiveFiles } from "./_shared/chips-ledger-archive-files.mjs";
+import { assertTableBinding } from "./_shared/chips-table-idempotency.mjs";
 
 export const EXPORT_SCHEMA_VERSION = 1;
 export const DEFAULT_CUTOFF_DAYS = 30;
@@ -12,6 +13,9 @@ export const DEFAULT_BATCH_SIZE = 5000;
 export const MAX_BATCH_SIZE = 5000;
 export const PRODUCTION_MAX_BATCH_SIZE = 2;
 export const STAGE_AUTOMATION_POLICY_ID = "stage-ledger-auto-retention-30d-v1";
+export const BOT_ONLY_RETENTION_POLICY_ID = "stage-ledger-bot-only-retention-7d-v1";
+export const BOT_ONLY_EXPORT_SCHEMA_VERSION = 2;
+export const BOT_ONLY_RETENTION_DAYS = 7;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const INTEGER_RE = /^-?(?:0|[1-9][0-9]*)$/;
@@ -47,26 +51,49 @@ with base as (
     )
 ), markers as (
   select b.id as transaction_id,
-         lower(nullif(btrim(b.metadata->>'tableId'), '')) as table_id
+         lower(nullif(btrim(b.metadata->>'tableId'), '')) as table_id,
+         (
+           b.metadata ? 'tableId'
+           and (
+             nullif(btrim(b.metadata->>'tableId'), '') is null
+             or nullif(btrim(b.metadata->>'tableId'), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+           )
+         ) as invalid_marker
   from base b
-  where nullif(btrim(b.metadata->>'tableId'), '') is not null
+  where b.metadata ? 'tableId'
+    and (
+      nullif(btrim(b.metadata->>'tableId'), '') is not null
+      or b.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+    )
 
   union all
 
   select b.id,
          case
-           when lower(b.reference) like 'table:%' then lower(nullif(btrim(split_part(b.reference, ':', 2)), ''))
-           when lower(b.reference) like 'poker-rebuy:%' then lower(nullif(btrim(split_part(b.reference, ':', 2)), ''))
+           when b.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
+             then lower(nullif(btrim(split_part(b.reference, ':', 2)), ''))
            else null
-         end
+         end,
+         (
+           b.reference is not null
+           and (
+             b.reference !~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
+             or nullif(btrim(split_part(b.reference, ':', 2)), '') is null
+             or nullif(btrim(split_part(b.reference, ':', 2)), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+           )
+         )
   from base b
-  where lower(b.reference) like 'table:%'
-     or lower(b.reference) like 'poker-rebuy:%'
+  where b.reference is not null
+    and (
+      b.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
+      or b.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+    )
 
   union all
 
   select b.id,
-         lower(nullif(btrim(substring(a.system_key from 13)), ''))
+         lower(nullif(btrim(substring(a.system_key from 13)), '')),
+         false
   from base b
   join public.chips_entries e on e.transaction_id = b.id
   join public.chips_accounts a on a.id = e.account_id
@@ -75,7 +102,7 @@ with base as (
 ), marker_summary as (
   select transaction_id,
          array_agg(distinct table_id) filter (where table_id is not null) as table_ids,
-         bool_or(table_id is null or table_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') as invalid_table_marker
+         bool_or(invalid_marker or table_id is null or table_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') as invalid_table_marker
   from markers
   group by transaction_id
 ), classified as (
@@ -141,26 +168,49 @@ with base as (
     )
 ), markers as (
   select b.id as transaction_id,
-         lower(nullif(btrim(b.metadata->>'tableId'), '')) as table_id
+         lower(nullif(btrim(b.metadata->>'tableId'), '')) as table_id,
+         (
+           b.metadata ? 'tableId'
+           and (
+             nullif(btrim(b.metadata->>'tableId'), '') is null
+             or nullif(btrim(b.metadata->>'tableId'), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+           )
+         ) as invalid_marker
   from base b
-  where nullif(btrim(b.metadata->>'tableId'), '') is not null
+  where b.metadata ? 'tableId'
+    and (
+      nullif(btrim(b.metadata->>'tableId'), '') is not null
+      or b.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+    )
 
   union all
 
   select b.id,
          case
-           when lower(b.reference) like 'table:%' then lower(nullif(btrim(split_part(b.reference, ':', 2)), ''))
-           when lower(b.reference) like 'poker-rebuy:%' then lower(nullif(btrim(split_part(b.reference, ':', 2)), ''))
+           when b.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
+             then lower(nullif(btrim(split_part(b.reference, ':', 2)), ''))
            else null
-         end
+         end,
+         (
+           b.reference is not null
+           and (
+             b.reference !~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
+             or nullif(btrim(split_part(b.reference, ':', 2)), '') is null
+             or nullif(btrim(split_part(b.reference, ':', 2)), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+           )
+         )
   from base b
-  where lower(b.reference) like 'table:%'
-     or lower(b.reference) like 'poker-rebuy:%'
+  where b.reference is not null
+    and (
+      b.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
+      or b.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+    )
 
   union all
 
   select b.id,
-         lower(nullif(btrim(substring(a.system_key from 13)), ''))
+         lower(nullif(btrim(substring(a.system_key from 13)), '')),
+         false
   from base b
   join public.chips_entries e on e.transaction_id = b.id
   join public.chips_accounts a on a.id = e.account_id
@@ -169,7 +219,7 @@ with base as (
 ), marker_summary as (
   select transaction_id,
          array_agg(distinct table_id) filter (where table_id is not null) as table_ids,
-         bool_or(table_id is null or table_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') as invalid_table_marker
+         bool_or(invalid_marker or table_id is null or table_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') as invalid_table_marker
   from markers
   group by transaction_id
 ), classified as (
@@ -268,6 +318,407 @@ order by e.created_at asc, e.id asc
 limit $2::int;
 `;
 
+// Schema-v2 selection is table-complete.  A batch contains one table only;
+// this makes the lifecycle receipt and the final table marker independently
+// auditable and leaves an over-capacity table untouched.
+export const BOT_ONLY_CANDIDATE_SQL = `
+with table_rows as (
+  select registry.table_id,
+         max(registry.transaction_created_at) as newest_created_at,
+         count(*)::bigint as identity_count,
+         count(*) filter (
+           where registry.user_id is null
+             and registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+             and registry.transaction_created_at < $1::timestamptz
+             and registry.archive_batch_id is null
+         )::bigint as eligible_count,
+         public.chips_archive_text_ids_sha256(
+           coalesce(array_agg(registry.idempotency_key order by registry.idempotency_key)
+             filter (where registry.user_id is not null), array[]::text[])
+         ) as out_of_scope_keys_sha256
+    from public.chips_transaction_idempotency registry
+   where registry.table_id is not null
+   group by registry.table_id
+), eligible_transactions as (
+  select transactions.id,
+         transactions.sequence,
+         transactions.tx_type,
+         transactions.idempotency_key,
+         transactions.payload_hash,
+         transactions.user_id,
+         transactions.reference,
+         transactions.description,
+         transactions.metadata,
+         transactions.created_by,
+         transactions.created_at,
+         registry.table_id as key_table_id,
+         registry.key_format_version,
+         registry.key_format,
+         tables.id as table_row_id,
+         tables.status::text as table_status,
+         tables.has_human_participant,
+         tables.bot_only_proof_eligible,
+         escrow.id::text as escrow_account_id,
+         escrow.status::text as escrow_status,
+         escrow.balance::text as escrow_balance,
+         stats.newest_created_at as table_newest_created_at,
+         stats.identity_count as table_identity_count,
+         stats.eligible_count as table_eligible_count,
+         stats.out_of_scope_keys_sha256 as table_out_of_scope_keys_sha256,
+         count(entries.id)::text as entry_count
+    from public.chips_transactions transactions
+    join public.chips_transaction_idempotency registry
+      on registry.idempotency_key = transactions.idempotency_key
+     and registry.transaction_id = transactions.id
+     and registry.payload_hash = transactions.payload_hash
+     and registry.tx_type = transactions.tx_type
+     and registry.user_id is not distinct from transactions.user_id
+     and registry.transaction_created_at = transactions.created_at
+     and registry.table_id is not null
+     and registry.key_format_version = 1
+     and registry.key_format is not null
+     and registry.key_format = public.chips_parse_table_idempotency_key(transactions.idempotency_key)->>'format'
+     and registry.archive_batch_id is null
+    join table_rows stats on stats.table_id = registry.table_id
+    join public.poker_tables tables on tables.id = registry.table_id
+    join public.chips_accounts escrow
+      on escrow.account_type::text = 'ESCROW'
+     and escrow.system_key = 'POKER_TABLE:' || registry.table_id::text
+   join public.chips_entries entries on entries.transaction_id = transactions.id
+   join public.chips_accounts accounts on accounts.id = entries.account_id
+   where (
+       $3::timestamptz is null
+       or transactions.created_at > $3::timestamptz
+       or (transactions.created_at = $3::timestamptz and transactions.id > $4::uuid)
+     )
+     and transactions.created_at < $1::timestamptz
+     and transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+     and transactions.user_id is null
+     and (
+       transactions.metadata is null
+       or not (transactions.metadata ? 'tableId')
+       or (
+         nullif(btrim(transactions.metadata->>'tableId'), '') is not null
+         and nullif(btrim(transactions.metadata->>'tableId'), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+         and lower(btrim(transactions.metadata->>'tableId')) = registry.table_id::text
+       )
+     )
+     and (
+       transactions.reference is null
+       or (
+         transactions.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
+         and nullif(btrim(split_part(transactions.reference, ':', 2)), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+         and lower(btrim(split_part(transactions.reference, ':', 2))) = registry.table_id::text
+       )
+     )
+     and tables.status::text = 'CLOSED'
+     and tables.has_human_participant is false
+     and tables.bot_only_proof_eligible is true
+     and escrow.status::text = 'active'
+     and escrow.balance = 0
+     and stats.newest_created_at < $1::timestamptz
+     and stats.eligible_count > 0
+     and stats.eligible_count <= $2::int
+     and not exists (
+       select 1 from public.chips_transaction_idempotency unknown
+        where unknown.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+          and unknown.table_id is null
+     )
+     and not exists (
+       select 1 from table_rows blocked
+        where blocked.table_id = registry.table_id
+          and blocked.eligible_count <> blocked.identity_count
+     )
+   group by transactions.id, transactions.sequence, transactions.tx_type,
+            transactions.idempotency_key, transactions.payload_hash,
+            transactions.user_id, transactions.reference, transactions.description,
+            transactions.metadata, transactions.created_by, transactions.created_at,
+            registry.table_id, registry.key_format_version, registry.key_format,
+            tables.id, tables.status, tables.has_human_participant,
+            tables.bot_only_proof_eligible, escrow.id, escrow.status, escrow.balance,
+            stats.newest_created_at, stats.identity_count, stats.eligible_count,
+            stats.out_of_scope_keys_sha256
+  having count(*) = 2
+     and count(*) filter (where accounts.account_type::text = 'USER') = 0
+     and count(*) filter (where accounts.account_type::text = 'SYSTEM') = 1
+     and count(*) filter (where accounts.account_type::text = 'ESCROW') = 1
+     and count(*) filter (
+       where accounts.account_type::text = 'ESCROW'
+         and accounts.system_key = 'POKER_TABLE:' || registry.table_id::text
+     ) = 1
+     and bool_and(accounts.status::text = 'active')
+     and sum(entries.amount) = 0
+     and (
+       (transactions.tx_type::text = 'TABLE_BUY_IN'
+        and sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM') < 0
+        and sum(entries.amount) filter (where accounts.account_type::text = 'ESCROW') > 0)
+       or
+       (transactions.tx_type::text = 'TABLE_CASH_OUT'
+        and sum(entries.amount) filter (where accounts.account_type::text = 'ESCROW') < 0
+        and sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM') > 0)
+     )
+), selected_table as (
+  select key_table_id
+    from eligible_transactions
+   group by key_table_id
+   having count(*) = max(table_eligible_count)
+   order by key_table_id
+   limit 1
+)
+select eligible.id::text as id,
+       eligible.sequence::text as sequence,
+       eligible.tx_type::text as tx_type,
+       eligible.idempotency_key,
+       eligible.payload_hash,
+       eligible.user_id::text as user_id,
+       eligible.reference,
+       eligible.description,
+       eligible.metadata,
+       eligible.created_by::text as created_by,
+       eligible.created_at::text as created_at,
+       true as table_related,
+       eligible.key_table_id::text as table_id,
+       false as invalid_table_marker,
+       true as table_exists,
+       eligible.table_status,
+       eligible.escrow_account_id,
+       eligible.escrow_status,
+       eligible.escrow_balance,
+       eligible.entry_count,
+       eligible.has_human_participant,
+       eligible.bot_only_proof_eligible,
+       eligible.key_table_id::text,
+       eligible.key_format_version,
+       eligible.key_format,
+       eligible.table_newest_created_at::text,
+       eligible.table_identity_count,
+       eligible.table_eligible_count,
+       eligible.table_out_of_scope_keys_sha256
+  from eligible_transactions eligible
+  join selected_table on selected_table.key_table_id = eligible.key_table_id
+ order by eligible.created_at asc, eligible.id asc
+ limit $2::int;
+`;
+
+// A no-candidate result is not necessarily an empty database.  Keep the
+// diagnostic read-only and separate from the candidate selector so prepare-only
+// can explain which fail-closed condition prevented selection without relaxing
+// the selector itself.
+export const BOT_ONLY_BLOCKING_ANOMALY_SQL = `
+with table_rows as (
+  select registry.table_id,
+         max(registry.transaction_created_at) as newest_created_at,
+         count(*)::bigint as identity_count,
+         count(*) filter (
+           where registry.user_id is null
+             and registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+             and registry.transaction_created_at < $1::timestamptz
+             and registry.archive_batch_id is null
+         )::bigint as eligible_count
+    from public.chips_transaction_idempotency registry
+   where registry.table_id is not null
+   group by registry.table_id
+), table_context as (
+  select stats.table_id,
+         stats.newest_created_at,
+         stats.identity_count,
+         stats.eligible_count,
+         tables.status::text as table_status,
+         tables.has_human_participant,
+         tables.bot_only_proof_eligible,
+         escrow.id as escrow_account_id,
+         escrow.status::text as escrow_status,
+         escrow.balance as escrow_balance
+    from table_rows stats
+    left join public.poker_tables tables on tables.id = stats.table_id
+    left join public.chips_accounts escrow
+      on escrow.account_type::text = 'ESCROW'
+     and escrow.system_key = 'POKER_TABLE:' || stats.table_id::text
+), marker_issues as (
+  select transactions.id,
+         registry.table_id
+    from public.chips_transactions transactions
+    left join public.chips_transaction_idempotency registry
+      on registry.idempotency_key = transactions.idempotency_key
+     and registry.transaction_id = transactions.id
+   where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+     and (
+       (
+         transactions.metadata ? 'tableId'
+         and (
+           nullif(btrim(transactions.metadata->>'tableId'), '') is null
+           or nullif(btrim(transactions.metadata->>'tableId'), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+           or registry.table_id is null
+           or lower(btrim(transactions.metadata->>'tableId')) <> registry.table_id::text
+         )
+       )
+       or (
+         transactions.reference is not null
+         and (
+           transactions.reference !~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
+           or nullif(btrim(split_part(transactions.reference, ':', 2)), '') is null
+           or nullif(btrim(split_part(transactions.reference, ':', 2)), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+           or registry.table_id is null
+           or lower(btrim(split_part(transactions.reference, ':', 2))) <> registry.table_id::text
+         )
+       )
+     )
+), entry_shapes as (
+  select transactions.id,
+         registry.table_id,
+         transactions.tx_type::text as tx_type,
+         count(entries.id)::bigint as entry_count,
+         count(*) filter (where accounts.account_type::text = 'USER')::bigint as user_entry_count,
+         count(*) filter (where accounts.account_type::text = 'SYSTEM')::bigint as system_entry_count,
+         count(*) filter (where accounts.account_type::text = 'ESCROW')::bigint as escrow_entry_count,
+         count(*) filter (
+           where accounts.account_type::text = 'ESCROW'
+             and accounts.system_key = 'POKER_TABLE:' || registry.table_id::text
+         )::bigint as matching_escrow_count,
+         count(*) filter (where accounts.status::text = 'active')::bigint as active_entry_count,
+         coalesce(sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM'), 0)::numeric as system_amount,
+         coalesce(sum(entries.amount) filter (where accounts.account_type::text = 'ESCROW'), 0)::numeric as escrow_amount,
+         coalesce(sum(entries.amount), 0)::numeric as net_amount
+    from public.chips_transactions transactions
+    left join public.chips_transaction_idempotency registry
+      on registry.idempotency_key = transactions.idempotency_key
+     and registry.transaction_id = transactions.id
+    left join public.chips_entries entries on entries.transaction_id = transactions.id
+    left join public.chips_accounts accounts on accounts.id = entries.account_id
+   where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+   group by transactions.id, registry.table_id, transactions.tx_type
+), blockers as (
+  select 'unknown_table_identity'::text as blocker_code,
+         count(*)::bigint as transaction_count,
+         0::bigint as table_count
+    from public.chips_transaction_idempotency registry
+   where registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+     and registry.table_id is null
+
+  union all
+
+  select 'missing_registry_identity',
+         count(*)::bigint,
+         0::bigint
+    from public.chips_transactions transactions
+    left join public.chips_transaction_idempotency registry
+      on registry.idempotency_key = transactions.idempotency_key
+     and registry.transaction_id = transactions.id
+   where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+     and registry.idempotency_key is null
+
+  union all
+
+  select 'invalid_marker',
+         count(distinct marker_issues.id)::bigint,
+         count(distinct marker_issues.table_id)::bigint
+    from marker_issues
+
+  union all
+
+  select 'deferred_entry_binding',
+         count(*)::bigint,
+         count(distinct entry_shapes.table_id)::bigint
+    from entry_shapes
+   where entry_shapes.entry_count <> 2
+      or entry_shapes.user_entry_count <> 0
+      or entry_shapes.system_entry_count <> 1
+      or entry_shapes.escrow_entry_count <> 1
+      or entry_shapes.matching_escrow_count <> 1
+      or entry_shapes.active_entry_count <> 2
+      or entry_shapes.net_amount <> 0
+      or (
+        entry_shapes.tx_type = 'TABLE_BUY_IN'
+        and (entry_shapes.system_amount >= 0 or entry_shapes.escrow_amount <= 0)
+      )
+      or (
+        entry_shapes.tx_type = 'TABLE_CASH_OUT'
+        and (entry_shapes.escrow_amount >= 0 or entry_shapes.system_amount <= 0)
+      )
+
+  union all
+
+  select 'younger_table_identity',
+         coalesce(sum(context.identity_count), 0)::bigint,
+         count(*)::bigint
+    from table_context context
+   where context.newest_created_at >= $1::timestamptz
+
+  union all
+
+  select 'human_participant',
+         coalesce(sum(context.identity_count), 0)::bigint,
+         count(*)::bigint
+    from table_context context
+   where context.has_human_participant is true
+
+  union all
+
+  select 'human_participant_unknown',
+         coalesce(sum(context.identity_count), 0)::bigint,
+         count(*)::bigint
+    from table_context context
+   where context.has_human_participant is null
+
+  union all
+
+  select 'historically_uncertain',
+         coalesce(sum(context.identity_count), 0)::bigint,
+         count(*)::bigint
+    from table_context context
+   where context.bot_only_proof_eligible is not true
+
+  union all
+
+  select 'table_not_closed',
+         coalesce(sum(context.identity_count), 0)::bigint,
+         count(*)::bigint
+    from table_context context
+   where context.table_status is null
+      or upper(context.table_status) <> 'CLOSED'
+
+  union all
+
+  select 'escrow_not_active_or_zero',
+         coalesce(sum(context.identity_count), 0)::bigint,
+         count(*)::bigint
+    from table_context context
+   where context.escrow_account_id is null
+      or context.escrow_status <> 'active'
+      or context.escrow_balance <> 0
+
+  union all
+
+  select 'identity_set_incomplete',
+         coalesce(sum(context.identity_count), 0)::bigint,
+         count(*)::bigint
+    from table_context context
+   where context.eligible_count <> context.identity_count
+
+  union all
+
+  select 'no_eligible_identity',
+         coalesce(sum(context.identity_count), 0)::bigint,
+         count(*)::bigint
+    from table_context context
+   where context.eligible_count = 0
+
+  union all
+
+  select 'batch_over_capacity',
+         coalesce(sum(context.eligible_count), 0)::bigint,
+         count(*)::bigint
+    from table_context context
+   where context.eligible_count > $2::int
+)
+select blocker_code,
+       transaction_count::text,
+       table_count::text
+  from blockers
+ where transaction_count > 0 or table_count > 0
+ order by blocker_code;
+`;
+
 const ENTRIES_SQL = `
 select
   e.id::text as id,
@@ -327,6 +778,14 @@ export function toBigIntString(value, label = "bigint") {
 
 function nullableText(value) {
   return value == null ? null : text(value) || null;
+}
+
+function normalizeBlockingAnomalies(rows) {
+  return (rows || []).map((row) => ({
+    code: text(row.blocker_code),
+    transaction_count: toBigIntString(row.transaction_count, "blocking anomaly transaction_count"),
+    table_count: toBigIntString(row.table_count, "blocking anomaly table_count"),
+  }));
 }
 
 function normalizeJson(value) {
@@ -441,9 +900,9 @@ export function evaluateTableEligibility(candidate) {
   return { eligible: true, reason: tableExists ? "closed_table" : "retained_escrow_after_table_retention" };
 }
 
-function buildTableContext(candidate) {
+function buildTableContext(candidate, schemaVersion = EXPORT_SCHEMA_VERSION) {
   if (!candidate?.table_related && !candidate?.tableRelated && !candidate?.table_id && !candidate?.tableId) return null;
-  return {
+  const context = {
     table_id: text(candidate.table_id ?? candidate.tableId),
     table_exists: candidate.table_exists === true || candidate.tableExists === true,
     table_status: nullableText(candidate.table_status ?? candidate.tableStatus)?.toUpperCase() || null,
@@ -451,9 +910,29 @@ function buildTableContext(candidate) {
     escrow_status: nullableText(candidate.escrow_status ?? candidate.escrowStatus)?.toLowerCase() || null,
     escrow_balance: toBigIntString(candidate.escrow_balance ?? candidate.escrowBalance, "escrow.balance"),
   };
+  if (schemaVersion === BOT_ONLY_EXPORT_SCHEMA_VERSION) {
+    context.bot_only_proof = {
+      has_human_participant: candidate.has_human_participant === false
+        ? false
+        : candidate.has_human_participant === true ? true : null,
+      proof_eligible: candidate.bot_only_proof_eligible === true
+        ? true
+        : candidate.bot_only_proof_eligible === false ? false : null,
+      table_id_from_key: text(candidate.key_table_id ?? candidate.table_id ?? candidate.tableId),
+      key_format_version: Number(candidate.key_format_version),
+      key_format: text(candidate.key_format),
+    };
+    context.table_identity_summary = {
+      newest_created_at: normalizeTimestamp(candidate.table_newest_created_at, "table.newest_created_at"),
+      identity_count: toBigIntString(candidate.table_identity_count, "table.identity_count"),
+      eligible_count: toBigIntString(candidate.table_eligible_count, "table.eligible_count"),
+      out_of_scope_keys_sha256: text(candidate.table_out_of_scope_keys_sha256),
+    };
+  }
+  return context;
 }
 
-export function buildExportRecord(candidate, rawEntries) {
+export function buildExportRecord(candidate, rawEntries, { schemaVersion = EXPORT_SCHEMA_VERSION } = {}) {
   const transactionId = text(candidate?.id);
   if (!UUID_RE.test(transactionId)) fail("transaction.id is not a UUID");
   const entries = [...rawEntries].sort(compareEntries).map((entry) => ({
@@ -475,7 +954,7 @@ export function buildExportRecord(candidate, rawEntries) {
   }));
 
   return {
-    schema_version: EXPORT_SCHEMA_VERSION,
+    schema_version: schemaVersion,
     record_type: "chips_transaction",
     transaction: {
       id: transactionId,
@@ -490,7 +969,7 @@ export function buildExportRecord(candidate, rawEntries) {
       created_by: nullableText(candidate.created_by),
       created_at: normalizeTimestamp(candidate.created_at, "transaction.created_at"),
     },
-    table_context: buildTableContext(candidate),
+    table_context: buildTableContext(candidate, schemaVersion),
     entries,
   };
 }
@@ -499,7 +978,44 @@ function candidateId(candidate) {
   return text(candidate?.id);
 }
 
-export function validateBatch({ candidates, records, cutoff }) {
+function validateBotOnlyRecord(candidate, record) {
+  const transaction = record?.transaction;
+  const context = record?.table_context;
+  const proof = context?.bot_only_proof;
+  const summary = context?.table_identity_summary;
+  if (transaction?.tx_type !== "TABLE_BUY_IN" && transaction?.tx_type !== "TABLE_CASH_OUT") fail("bot-only archive contains a non-TABLE transaction");
+  if (transaction.user_id != null) fail("bot-only archive contains a USER transaction");
+  if (!context || context.table_exists !== true || context.table_status !== "CLOSED"
+    || !context.escrow_account_id || context.escrow_status !== "active" || context.escrow_balance !== "0") {
+    fail("bot-only archive table lifecycle evidence is incomplete");
+  }
+  if (candidate?.has_human_participant !== false || candidate?.bot_only_proof_eligible !== true) {
+    fail("bot-only candidate human-participant proof is not authoritative");
+  }
+  if (!proof || proof.has_human_participant !== false || proof.proof_eligible !== true) fail("bot-only archive human-participant proof is not authoritative");
+  if (proof.table_id_from_key !== context.table_id || proof.key_format_version !== 1 || !proof.key_format) fail("bot-only idempotency key binding evidence is incomplete");
+  if (!summary || BigInt(summary.identity_count) < 1n || BigInt(summary.eligible_count) < 1n || !/^[0-9a-f]{64}$/.test(summary.out_of_scope_keys_sha256)) fail("bot-only table completeness evidence is incomplete");
+  const parsedBinding = assertTableBinding({
+    idempotencyKey: transaction.idempotency_key,
+    metadata: transaction.metadata,
+    reference: transaction.reference,
+  });
+  if (parsedBinding.tableId !== context.table_id || parsedBinding.format !== proof.key_format) fail("bot-only idempotency key binding differs from the table context");
+  const tableEntries = record.entries || [];
+  if (tableEntries.length !== 2 || tableEntries.some((entry) => entry.account?.account_type === "USER")) fail("bot-only archive entry shape contains a USER entry");
+  const escrowEntries = tableEntries.filter((entry) => entry.account?.account_type === "ESCROW");
+  const systemEntries = tableEntries.filter((entry) => entry.account?.account_type === "SYSTEM");
+  if (escrowEntries.length !== 1 || systemEntries.length !== 1 || escrowEntries[0].account.system_key !== `POKER_TABLE:${context.table_id}`) {
+    fail("bot-only archive ESCROW binding is incomplete");
+  }
+  const escrowAmount = BigInt(escrowEntries[0].amount);
+  const systemAmount = BigInt(systemEntries[0].amount);
+  if (transaction.tx_type === "TABLE_BUY_IN" && !(escrowAmount > 0n && systemAmount < 0n)) fail("bot-only TABLE_BUY_IN direction is invalid");
+  if (transaction.tx_type === "TABLE_CASH_OUT" && !(escrowAmount < 0n && systemAmount > 0n)) fail("bot-only TABLE_CASH_OUT direction is invalid");
+  if (candidate?.key_table_id && text(candidate.key_table_id) !== context.table_id) fail("bot-only key-derived table id differs from metadata/ESCROW");
+}
+
+export function validateBatch({ candidates, records, cutoff, schemaVersion = EXPORT_SCHEMA_VERSION }) {
   if (!Array.isArray(candidates) || !Array.isArray(records)) fail("batch must contain arrays");
   if (candidates.length !== records.length) fail("batch transaction count mismatch");
 
@@ -522,7 +1038,7 @@ export function validateBatch({ candidates, records, cutoff }) {
   records.forEach((record, index) => {
     const transaction = record?.transaction;
     const id = text(transaction?.id);
-    if (record?.schema_version !== EXPORT_SCHEMA_VERSION || record?.record_type !== "chips_transaction") {
+    if (record?.schema_version !== schemaVersion || record?.record_type !== "chips_transaction") {
       fail("unsupported or malformed export record");
     }
     if (id !== expectedOrder[index]) fail("transaction order is not deterministic");
@@ -536,6 +1052,7 @@ export function validateBatch({ candidates, records, cutoff }) {
     }
     const eligibility = evaluateTableEligibility(candidate);
     if (!eligibility.eligible) fail(`ineligible poker transaction: ${eligibility.reason}`);
+    if (schemaVersion === BOT_ONLY_EXPORT_SCHEMA_VERSION) validateBotOnlyRecord(candidate, record);
 
     const expectedEntries = BigInt(toBigIntString(candidate.entry_count, "database entry count"));
     if (!Array.isArray(record.entries) || BigInt(record.entries.length) !== expectedEntries) {
@@ -578,7 +1095,7 @@ export function validateBatch({ candidates, records, cutoff }) {
   };
 }
 
-export function buildManifest({ target, cutoff, batchSize, cursor, records, archive, outputPath, sourcePolicyId = null }) {
+export function buildManifest({ target, cutoff, batchSize, cursor, records, archive, outputPath, sourcePolicyId = null, schemaVersion = EXPORT_SCHEMA_VERSION }) {
   const validation = validateBatch({ candidates: records.map((record) => ({
     id: record.transaction.id,
     created_at: record.transaction.created_at,
@@ -589,20 +1106,47 @@ export function buildManifest({ target, cutoff, batchSize, cursor, records, arch
     table_status: record.table_context?.table_status,
     escrow_account_id: record.table_context?.escrow_account_id,
     escrow_balance: record.table_context?.escrow_balance,
-  })), records, cutoff: null });
+    has_human_participant: record.table_context?.bot_only_proof?.has_human_participant,
+    bot_only_proof_eligible: record.table_context?.bot_only_proof?.proof_eligible,
+    key_table_id: record.table_context?.bot_only_proof?.table_id_from_key,
+    key_format_version: record.table_context?.bot_only_proof?.key_format_version,
+    key_format: record.table_context?.bot_only_proof?.key_format,
+    table_newest_created_at: record.table_context?.table_identity_summary?.newest_created_at,
+    table_identity_count: record.table_context?.table_identity_summary?.identity_count,
+    table_eligible_count: record.table_context?.table_identity_summary?.eligible_count,
+    table_out_of_scope_keys_sha256: record.table_context?.table_identity_summary?.out_of_scope_keys_sha256,
+  })), records, cutoff: null, schemaVersion });
   const first = records[0]?.transaction || null;
   const last = records.at(-1)?.transaction || null;
   const compressionRatio = archive.rawBytes.length === 0
     ? null
     : Number((archive.compressedBytes.length / archive.rawBytes.length).toFixed(6));
   const endCursor = last ? { created_at: last.created_at, id: last.id } : null;
+  const registryKeysSha256 = schemaVersion === BOT_ONLY_EXPORT_SCHEMA_VERSION
+    ? crypto.createHash("sha256").update(`${records.map((record) => text(record.transaction.idempotency_key)).sort().join("\n")}\n`).digest("hex")
+    : null;
 
   return {
-    schema_version: EXPORT_SCHEMA_VERSION,
+    schema_version: schemaVersion,
     artifact_type: "chips_ledger_archive",
     format: "jsonl.gz",
     target,
     ...(sourcePolicyId == null ? {} : { source_policy_id: sourcePolicyId }),
+    ...(schemaVersion === BOT_ONLY_EXPORT_SCHEMA_VERSION ? {
+      bot_only: {
+        table_id: records[0]?.table_context?.table_id || null,
+        table_count: 1,
+        newest_created_at: records[0]?.table_context?.table_identity_summary?.newest_created_at || null,
+        registry_keys_sha256: registryKeysSha256,
+        out_of_scope_keys_sha256: records[0]?.table_context?.table_identity_summary?.out_of_scope_keys_sha256 || null,
+        identity_count: records[0]?.table_context?.table_identity_summary?.identity_count == null
+          ? null
+          : Number(records[0].table_context.table_identity_summary.identity_count),
+        eligible_count: records[0]?.table_context?.table_identity_summary?.eligible_count == null
+          ? null
+          : Number(records[0].table_context.table_identity_summary.eligible_count),
+      },
+    } : {}),
     cutoff: {
       created_at: cutoff,
       rule: "transaction.created_at < cutoff",
@@ -764,7 +1308,9 @@ export async function readSnapshot(sql, options) {
       ? CANDIDATE_SQL
       : selector === "prunable"
         ? PRUNABLE_CANDIDATE_SQL
-        : fail("snapshot selector must be standard or prunable");
+        : selector === "bot-only-7d"
+          ? BOT_ONLY_CANDIDATE_SQL
+          : fail("snapshot selector must be standard, prunable, or bot-only-7d");
     const candidates = await tx.unsafe(candidateSql, [
       timestampParam(options.cutoff),
       options.batchSize,
@@ -773,7 +1319,13 @@ export async function readSnapshot(sql, options) {
     ]);
     const ids = candidates.map((candidate) => text(candidate.id));
     const entries = ids.length ? await tx.unsafe(ENTRIES_SQL, [ids]) : [];
-    return { candidates, entries };
+    const blockingAnomalies = selector === "bot-only-7d" && candidates.length === 0
+      ? normalizeBlockingAnomalies(await tx.unsafe(BOT_ONLY_BLOCKING_ANOMALY_SQL, [
+        timestampParam(options.cutoff),
+        options.batchSize,
+      ]))
+      : [];
+    return { candidates, entries, blockingAnomalies };
   });
 }
 
@@ -833,23 +1385,30 @@ export async function runExport({ argv = process.argv.slice(2), env = process.en
   });
 
   try {
-    const snapshot = await readSnapshot(sql, { ...options, selector: deps.selector || "standard" });
+    const selector = deps.selector || "standard";
+    const schemaVersion = deps.schemaVersion || (selector === "bot-only-7d" ? BOT_ONLY_EXPORT_SCHEMA_VERSION : EXPORT_SCHEMA_VERSION);
+    const snapshot = await readSnapshot(sql, { ...options, selector });
     if (deps.noCandidateIfEmpty && snapshot.candidates.length === 0) {
-      return { noCandidate: true, options };
+      return {
+        noCandidate: true,
+        options,
+        blockingAnomalies: snapshot.blockingAnomalies,
+      };
     }
     const candidateIds = new Set(snapshot.candidates.map((candidate) => text(candidate.id)));
     const entriesByTransaction = groupEntries(snapshot.entries, candidateIds);
     const records = sortRecords(snapshot.candidates.map((candidate) => buildExportRecord(
       candidate,
       entriesByTransaction.get(text(candidate.id)) || [],
+      { schemaVersion },
     )));
-    validateBatch({ candidates: snapshot.candidates, records, cutoff: options.cutoff });
+    validateBatch({ candidates: snapshot.candidates, records, cutoff: options.cutoff, schemaVersion });
 
     const archive = buildArchiveBytes(records);
     const roundTripRaw = gunzipSync(archive.compressedBytes);
     if (!roundTripRaw.equals(archive.rawBytes)) fail("gzip round-trip verification failed");
     const roundTripRecords = parseJsonl(roundTripRaw.toString("utf8"));
-    validateBatch({ candidates: snapshot.candidates, records: roundTripRecords, cutoff: options.cutoff });
+    validateBatch({ candidates: snapshot.candidates, records: roundTripRecords, cutoff: options.cutoff, schemaVersion });
     if (serializeRecords(roundTripRecords) !== archive.rawText) fail("JSONL round-trip verification failed");
 
     const manifest = buildManifest({
@@ -861,6 +1420,7 @@ export async function runExport({ argv = process.argv.slice(2), env = process.en
       archive,
       outputPath: options.outputPath,
       sourcePolicyId: deps.sourcePolicyId || null,
+      schemaVersion,
     });
     if (manifest.sha256.compressed_artifact !== crypto.createHash("sha256").update(archive.compressedBytes).digest("hex")) {
       fail("manifest checksum verification failed");

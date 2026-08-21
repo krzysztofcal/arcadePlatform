@@ -7,6 +7,89 @@ on:
   workflow_dispatch:
 
 jobs:
+  chips-retention-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: contractpass
+          POSTGRES_DB: chips_retention_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d chips_retention_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CHIPS_MIGRATIONS_TEST_DB_URL: postgresql://postgres:contractpass@127.0.0.1:5433/chips_retention_test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci || npm i
+
+      - name: Bootstrap minimal Supabase auth and storage schemas
+        run: |
+          psql "$CHIPS_MIGRATIONS_TEST_DB_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          begin
+            if not exists (select 1 from pg_roles where rolname = 'anon') then
+              create role anon noinherit;
+            end if;
+            if not exists (select 1 from pg_roles where rolname = 'authenticated') then
+              create role authenticated noinherit;
+            end if;
+            if not exists (select 1 from pg_roles where rolname = 'service_role') then
+              create role service_role noinherit;
+            end if;
+          end
+          $$;
+          create schema if not exists auth;
+          create table if not exists auth.users (
+            id uuid primary key
+          );
+          insert into auth.users (id) values
+            ('00000000-0000-4000-8000-000000000001'),
+            ('00000000-0000-4000-8000-000000000002'),
+            ('00000000-0000-4000-8000-000000000003'),
+            ('00000000-0000-4000-8000-000000000004')
+          on conflict (id) do nothing;
+          create or replace function auth.uid()
+          returns uuid
+          language sql
+          stable
+          as $$
+            select null::uuid;
+          $$;
+          create schema if not exists storage;
+          create table if not exists storage.buckets (
+            id text primary key,
+            name text not null,
+            public boolean not null default false,
+            file_size_limit bigint,
+            allowed_mime_types text[]
+          );
+          create table if not exists storage.objects (
+            id bigint generated always as identity primary key
+          );
+          create schema if not exists extensions;
+          create extension if not exists pgcrypto with schema extensions;
+          SQL
+
+      - name: Apply migrations and run migration contracts
+        run: node tests/chips/chips.migration.test.mjs
+
+      - name: Run PostgreSQL bot-only retention contracts
+        run: node tests/chips/chips-ledger-bot-only-retention.test.mjs
+
   tests:
     runs-on: ubuntu-latest
     services:

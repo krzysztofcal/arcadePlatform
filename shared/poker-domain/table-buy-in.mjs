@@ -20,12 +20,16 @@ export async function postUserTableBuyIn({
   if (!tableId || !userId || !idempotencyKey) throw makeError("invalid_buy_in");
   if (!Number.isInteger(normalizedAmount) || normalizedAmount <= 0) throw makeError("invalid_buy_in");
 
+  const normalizedTableId = String(tableId).trim();
+  const normalizedMetadata = metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? { ...metadata, tableId: metadata.tableId ?? normalizedTableId }
+    : { tableId: normalizedTableId };
   return postTransaction({
     userId,
     txType: "TABLE_BUY_IN",
     idempotencyKey,
-    reference,
-    metadata,
+    reference: reference ?? `table:${normalizedTableId}`,
+    metadata: normalizedMetadata,
     entries: [
       { accountType: "USER", amount: -normalizedAmount },
       { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: normalizedAmount }

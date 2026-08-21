@@ -37,10 +37,14 @@ async function ensureSchema(db) {
     create table if not exists public.poker_tables (
       id uuid primary key,
       status text not null default 'OPEN',
-      updated_at timestamptz not null default now()
+      updated_at timestamptz not null default now(),
+      has_human_participant boolean not null default true,
+      bot_only_retention_complete_at timestamptz
     );
     alter table public.poker_tables
-      add column if not exists updated_at timestamptz not null default now();
+      add column if not exists updated_at timestamptz not null default now(),
+      add column if not exists has_human_participant boolean not null default true,
+      add column if not exists bot_only_retention_complete_at timestamptz;
     create table if not exists public.poker_state (
       table_id uuid primary key,
       version bigint not null default 0,
