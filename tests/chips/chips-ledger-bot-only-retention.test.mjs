@@ -745,34 +745,54 @@ async function retryDestructiveOperatorPostgresContract(sql) {
 
     await sql.begin(async (tx) => {
       const substituted = await createDatabaseTable(tx, "OPEN");
-      const reusedTransactionId = randomUUID();
       const beforeReuse = await readAccountingSnapshot(tx, accountIds, transactionIds);
-      await expectDatabaseError(tx, "deleted_key_reuse", async () => {
+      const assertNoReuseEffects = async (label, transactionId) => {
+        const reuseRows = await tx.unsafe(`
+          select
+            (select count(*) from public.chips_transactions where id = $1::uuid) as transactions,
+            (select count(*) from public.chips_transaction_idempotency where idempotency_key = $2) as registry_rows,
+            (select count(*) from public.chips_entries where transaction_id = $1::uuid) as entries;
+        `, [transactionId, fixture.transaction.key]);
+        assert.equal(Number(reuseRows[0].transactions), 0, `${label}: must not create a transaction`);
+        assert.equal(Number(reuseRows[0].entries), 0, `${label}: must not create entries`);
+        assert.equal(Number(reuseRows[0].registry_rows), 0, `${label}: must not recreate the registry identity`);
+        const afterReuse = await readAccountingSnapshot(tx, accountIds, transactionIds);
+        assert.deepEqual(afterReuse.accounts, beforeReuse.accounts, `${label}: must not change balances or next_entry_seq`);
+        assert.equal(afterReuse.accountBalanceTotal, beforeReuse.accountBalanceTotal, `${label}: account total must be unchanged`);
+        assert.equal(afterReuse.conservation, beforeReuse.conservation, `${label}: conservation must be unchanged`);
+      };
+
+      const replacementTableReuseId = randomUUID();
+      await expectDatabaseError(tx, "deleted_key_reuse_replacement", async () => {
         await tx.unsafe(`
           insert into public.chips_transactions
             (id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id)
           values ($1::uuid, $2, $3::jsonb, $4, $5, 'TABLE_BUY_IN', null);
         `, [
-          reusedTransactionId,
+          replacementTableReuseId,
           `BOT_SEED_BUY_IN:${substituted.tableId}:reuse`,
           JSON.stringify({ tableId: substituted.tableId }),
           fixture.transaction.key,
           "e".repeat(64),
         ]);
       }, "P8902", /does not match the idempotency key/);
-      const afterReuse = await readAccountingSnapshot(tx, accountIds, transactionIds);
-      assert.deepEqual(afterReuse.accounts, beforeReuse.accounts, "failed key reuse must not change balances or next_entry_seq");
-      assert.equal(afterReuse.accountBalanceTotal, beforeReuse.accountBalanceTotal);
-      assert.equal(afterReuse.conservation, beforeReuse.conservation);
-      const reuseRows = await tx.unsafe(`
-        select
-          (select count(*) from public.chips_transactions where id = $1::uuid) as transactions,
-          (select count(*) from public.chips_transaction_idempotency where idempotency_key = $2) as registry_rows,
-          (select count(*) from public.chips_entries where transaction_id = $1::uuid) as entries;
-      `, [reusedTransactionId, fixture.transaction.key]);
-      assert.equal(Number(reuseRows[0].transactions), 0, "deleted key reuse must not create a transaction");
-      assert.equal(Number(reuseRows[0].entries), 0, "deleted key reuse must not create entries");
-      assert.equal(Number(reuseRows[0].registry_rows), 0, "deleted key reuse must not recreate the registry identity");
+      await assertNoReuseEffects("replacement table key reuse", replacementTableReuseId);
+
+      const closedTableReuseId = randomUUID();
+      await expectDatabaseError(tx, "deleted_key_reuse_closed", async () => {
+        await tx.unsafe(`
+          insert into public.chips_transactions
+            (id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id)
+          values ($1::uuid, $2, $3::jsonb, $4, $5, 'TABLE_BUY_IN', null);
+        `, [
+          closedTableReuseId,
+          `BOT_SEED_BUY_IN:${fixture.tableId}:reuse-closed`,
+          JSON.stringify({ tableId: fixture.tableId }),
+          fixture.transaction.key,
+          "f".repeat(64),
+        ]);
+      }, "P8903", /closed or missing/);
+      await assertNoReuseEffects("closed table key reuse", closedTableReuseId);
       throw DB_ROLLBACK;
     }).catch((error) => {
       if (error !== DB_ROLLBACK) throw error;

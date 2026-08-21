@@ -557,7 +557,7 @@ with table_rows as (
          and (
            transactions.reference !~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
            or nullif(btrim(split_part(transactions.reference, ':', 2)), '') is null
-           or nullif(btrim(split_part(transactions.reference, ':', 2)), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9]{3}-[89ab][0-9]{3}-[0-9a-f]{12}$'
+           or nullif(btrim(split_part(transactions.reference, ':', 2)), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
            or registry.table_id is null
            or lower(btrim(split_part(transactions.reference, ':', 2))) <> registry.table_id::text
          )
@@ -575,6 +575,9 @@ with table_rows as (
            where accounts.account_type::text = 'ESCROW'
              and accounts.system_key = 'POKER_TABLE:' || registry.table_id::text
          )::bigint as matching_escrow_count,
+         count(*) filter (where accounts.status::text = 'active')::bigint as active_entry_count,
+         coalesce(sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM'), 0)::numeric as system_amount,
+         coalesce(sum(entries.amount) filter (where accounts.account_type::text = 'ESCROW'), 0)::numeric as escrow_amount,
          coalesce(sum(entries.amount), 0)::numeric as net_amount
     from public.chips_transactions transactions
     left join public.chips_transaction_idempotency registry
@@ -622,7 +625,16 @@ with table_rows as (
       or entry_shapes.system_entry_count <> 1
       or entry_shapes.escrow_entry_count <> 1
       or entry_shapes.matching_escrow_count <> 1
+      or entry_shapes.active_entry_count <> 2
       or entry_shapes.net_amount <> 0
+      or (
+        entry_shapes.tx_type = 'TABLE_BUY_IN'
+        and (entry_shapes.system_amount >= 0 or entry_shapes.escrow_amount <= 0)
+      )
+      or (
+        entry_shapes.tx_type = 'TABLE_CASH_OUT'
+        and (entry_shapes.escrow_amount >= 0 or entry_shapes.system_amount <= 0)
+      )
 
   union all
 
