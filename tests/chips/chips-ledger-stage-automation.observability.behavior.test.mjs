@@ -25,6 +25,7 @@ function cleanEnv(overrides = {}) {
     ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^SUPABASE_PROD_|^PRODUCTION_/.test(key))),
     SUPABASE_STAGE_DB_URL: sampleDbUrl,
     SUPABASE_STAGE_SERVICE_ROLE_KEY: sampleSecret,
+    GITHUB_SHA: "f".repeat(40),
     ...overrides,
   };
 }
@@ -61,6 +62,7 @@ try {
   assert.equal(child.stderr, "");
   const { line, report } = parseSingleAggregate(child.stdout);
   assert.deepEqual(Object.keys(report).sort(), [
+    "deployed_commit_sha",
     "event",
     "project_ref",
     "reason",

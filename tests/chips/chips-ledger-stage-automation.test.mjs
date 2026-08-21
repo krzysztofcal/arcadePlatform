@@ -27,6 +27,7 @@ const ENV = {
   SUPABASE_STAGE_DB_URL: STAGE_DB_URL,
   SUPABASE_STAGE_URL: STAGE_URL,
   SUPABASE_STAGE_SERVICE_ROLE_KEY: "stage-test-key",
+  GITHUB_SHA: "f".repeat(40),
 };
 
 const stageOrchestratorSource = fs.readFileSync("scripts/ops/chips-ledger-stage-automation.mjs", "utf8");
@@ -241,6 +242,7 @@ const preparedBotReport = botOnlyReport({
   },
   state: "prepared",
   mode: "prepare-only",
+  deployedCommitSha: "f".repeat(40),
 });
 assert.deepEqual({
   batchId: preparedBotReport.batchId,
@@ -251,6 +253,7 @@ assert.deepEqual({
   stageSystemIdentifier: preparedBotReport.stageSystemIdentifier,
   recoveryArchiveSha256: preparedBotReport.recoveryArchiveSha256,
   recoveryManifestSha256: preparedBotReport.recoveryManifestSha256,
+  deployedCommitSha: preparedBotReport.deployedCommitSha,
 }, {
   batchId: "12",
   objectPath: "v1/sha256/" + "a".repeat(64) + ".jsonl.gz",
@@ -260,6 +263,7 @@ assert.deepEqual({
   stageSystemIdentifier: STAGE_SYSTEM_IDENTIFIER,
   recoveryArchiveSha256: "d".repeat(64),
   recoveryManifestSha256: "e".repeat(64),
+  deployedCommitSha: "f".repeat(40),
 });
 const storageTarget = {
   target: "stage",
@@ -346,6 +350,30 @@ assert.equal(pendingStoreCalls.length, 1, "a pending bot-only batch must be retr
 assert.equal(pendingStoreCalls[0].argv.includes("--artifact"), true);
 assert.equal(pendingPruneCalls.length, 1, "the retried committed batch must continue through the existing prune runner");
 assert.equal(botOnlySqlCalls.some(({ query }) => query.includes("pg_try_advisory_lock")), true);
+
+const noCandidateBotSql = fakeSql();
+const noCandidateBotOnly = await runBotOnlyStageAutomation({
+  env: ENV,
+  deps: {
+    sql: noCandidateBotSql,
+    storageTarget,
+    tempRoot: fs.mkdtempSync("/tmp/chips-ledger-stage-bot-only-no-candidate-"),
+    verifyBucket: async () => {},
+    exportArchive: async () => ({
+      noCandidate: true,
+      options: {
+        projectRef: STAGE_PROJECT_REF,
+        cutoff: "2026-08-14T00:00:00.000Z",
+        cursor: null,
+      },
+      blockingAnomalies: [{ code: "younger_table_identity", transaction_count: "2", table_count: "1" }],
+    }),
+  },
+});
+assert.equal(noCandidateBotOnly.reason, "blocking_anomalies");
+assert.deepEqual(noCandidateBotOnly.blockingAnomalies, [{ code: "younger_table_identity", transaction_count: "2", table_count: "1" }]);
+assert.equal(noCandidateBotOnly.cutoff, "2026-08-14T00:00:00.000Z");
+assert.equal(noCandidateBotOnly.deployedCommitSha, "f".repeat(40));
 assert.throws(() => assertDurableRecoveryReady({ archiveBytes: Buffer.from("archive") }), /both durable recovery copies/);
 assert.throws(
   () => assertResumeRecoveryState({ archive_proof_verified_at: "now", pruned_at: null }, null),

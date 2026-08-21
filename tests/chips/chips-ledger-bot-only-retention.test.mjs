@@ -4,6 +4,7 @@ import fs from "node:fs";
 import postgres from "postgres";
 
 import {
+  BOT_ONLY_BLOCKING_ANOMALY_SQL,
   BOT_ONLY_CANDIDATE_SQL,
   buildArchiveBytes,
   buildExportRecord,
@@ -167,6 +168,7 @@ function failClosedLifecycleContract() {
     SUPABASE_STAGE_DB_URL: "postgresql://postgres.krydukthwdvccggbyjfw@db.krydukthwdvccggbyjfw.supabase.co:5432/postgres",
     SUPABASE_STAGE_URL: "https://krydukthwdvccggbyjfw.supabase.co",
     SUPABASE_STAGE_SERVICE_ROLE_KEY: "stage-test",
+    GITHUB_SHA: "f".repeat(40),
     SUPABASE_PROD_DB_URL: "forbidden",
   }), /Production credentials/);
 }
@@ -347,6 +349,30 @@ async function historicalKeyAndEntryBindingPostgresContract(sql) {
       key_format_version: 1,
       key_format: "bot-seed-buyin",
     });
+    const baselineAccounting = await readAccountingSnapshot(
+      tx,
+      [fixture.systemAccountId, fixture.escrowAccountId],
+      [valid.transactionId],
+    );
+    const assertNoBindingEffects = async (label) => {
+      const counts = await tx.unsafe(`
+        select
+          (select count(*) from public.chips_transactions where id = $1::uuid) as transactions,
+          (select count(*) from public.chips_entries where transaction_id = $1::uuid) as entries,
+          (select count(*) from public.chips_transaction_idempotency where idempotency_key = $2) as registry_rows;
+      `, [valid.transactionId, valid.key]);
+      assert.equal(Number(counts[0].transactions), 1, `${label}: valid transaction must remain the only committed fixture transaction`);
+      assert.equal(Number(counts[0].entries), 2, `${label}: invalid binding must not add entries`);
+      assert.equal(Number(counts[0].registry_rows), 1, `${label}: invalid binding must not add registry rows`);
+      const accounting = await readAccountingSnapshot(
+        tx,
+        [fixture.systemAccountId, fixture.escrowAccountId],
+        [valid.transactionId],
+      );
+      assert.deepEqual(accounting.accounts, baselineAccounting.accounts, `${label}: balances and next_entry_seq must be unchanged`);
+      assert.equal(accounting.accountBalanceTotal, baselineAccounting.accountBalanceTotal, `${label}: account total must be unchanged`);
+      assert.equal(accounting.conservation, baselineAccounting.conservation, `${label}: conservation must be unchanged`);
+    };
 
     await expectDatabaseError(tx, "null_metadata_marker", async () => {
       await tx.unsafe(`
@@ -355,6 +381,7 @@ async function historicalKeyAndEntryBindingPostgresContract(sql) {
         values ($1::uuid, $2, '{"tableId":null}'::jsonb, $3, $4, 'TABLE_BUY_IN', null);
       `, [randomUUID(), `BOT_SEED_BUY_IN:${fixture.tableId}:1`, `bot-seed-buyin:${fixture.tableId}:bad-meta-${randomUUID()}`, "b".repeat(64)]);
     }, "P8902", /metadata\.tableId|metadata/);
+    await assertNoBindingEffects("null metadata marker");
 
     await expectDatabaseError(tx, "unknown_reference_marker", async () => {
       await tx.unsafe(`
@@ -369,6 +396,7 @@ async function historicalKeyAndEntryBindingPostgresContract(sql) {
         "c".repeat(64),
       ]);
     }, "P8902", /reference/);
+    await assertNoBindingEffects("unknown reference marker");
 
     const wrongEscrowId = randomUUID();
     await tx.unsafe(`
@@ -384,6 +412,7 @@ async function historicalKeyAndEntryBindingPostgresContract(sql) {
       });
       await tx.unsafe("set constraints all immediate;");
     }, "P8904", /ESCROW table|authoritative ESCROW/);
+    await assertNoBindingEffects("deferred ESCROW binding");
 
     throw DB_ROLLBACK;
   }).catch((error) => {
@@ -437,11 +466,11 @@ async function concurrencyInsertVersusClosePostgresContract(dbUrl) {
   }
 }
 
-async function createTimedBotTable(sql, createdAt) {
+async function createTimedBotTable(sql, createdAt, secondCreatedAt = createdAt) {
   return sql.begin(async (tx) => {
     const fixture = await createDatabaseTable(tx);
     await insertDatabaseTableTransaction(tx, fixture, { kind: "buyin", createdAt, keySuffix: "buyin" });
-    await insertDatabaseTableTransaction(tx, fixture, { kind: "cashout", createdAt, keySuffix: "cashout" });
+    await insertDatabaseTableTransaction(tx, fixture, { kind: "cashout", createdAt: secondCreatedAt, keySuffix: "cashout" });
     await tx.unsafe("set constraints all immediate;");
     await tx.unsafe("update public.poker_tables set status = 'CLOSED' where id = $1::uuid;", [fixture.tableId]);
     return fixture;
@@ -452,12 +481,65 @@ async function ageBoundaryPostgresContract(sql) {
   await enableTableFence(sql, true);
   const now = Date.now();
   const cutoff = new Date(now - (7 * DAY_MS)).toISOString();
-  const oldTable = await createTimedBotTable(sql, new Date(now - (10 * DAY_MS)).toISOString());
-  const recentTable = await createTimedBotTable(sql, new Date(now - (6 * DAY_MS)).toISOString());
+  const mixedTable = await createTimedBotTable(
+    sql,
+    new Date(now - (10 * DAY_MS)).toISOString(),
+    new Date(now - (6 * DAY_MS)).toISOString(),
+  );
   const rows = await sql.unsafe(BOT_ONLY_CANDIDATE_SQL, [cutoff, 5000, null, null]);
-  assert.equal(rows.length, 2, "the 10-day table should contribute its complete two-transaction batch");
-  assert.deepEqual(new Set(rows.map((row) => row.table_id)), new Set([oldTable.tableId]));
-  assert.equal(rows.some((row) => row.table_id === recentTable.tableId), false, "the 6-day table must remain untouched");
+  assert.equal(rows.length, 0, "a table with 10-day and 6-day identities must remain untouched");
+  const blockers = await sql.unsafe(BOT_ONLY_BLOCKING_ANOMALY_SQL, [cutoff, 5000]);
+  assert.ok(
+    blockers.some((row) => row.blocker_code === "younger_table_identity" && Number(row.table_count) === 1),
+    "the mixed-age table must report the younger identity as a blocking anomaly",
+  );
+
+  const youngerCrossedCutoff = new Date(now - (5 * DAY_MS)).toISOString();
+  const eligibleAfterCrossing = await sql.unsafe(BOT_ONLY_CANDIDATE_SQL, [youngerCrossedCutoff, 5000, null, null]);
+  assert.equal(eligibleAfterCrossing.length, 2, "the complete table becomes eligible only after the younger identity crosses seven days");
+  assert.deepEqual(new Set(eligibleAfterCrossing.map((row) => row.table_id)), new Set([mixedTable.tableId]));
+}
+
+async function readAccountingSnapshot(db, accountIds, transactionIds) {
+  const accounts = await db.unsafe(`
+    select id::text, balance::text, next_entry_seq::text
+      from public.chips_accounts
+     where id = any($1::uuid[])
+     order by id;
+  `, [accountIds]);
+  const totals = await db.unsafe(`
+    select
+      coalesce((select sum(balance) from public.chips_accounts), 0)::text as account_balance_total,
+      coalesce((select sum(amount) from public.chips_entries), 0)::text as conservation,
+      coalesce((select sum(amount) from public.chips_entries where transaction_id = any($1::uuid[])), 0)::text as selected_transaction_net;
+  `, [transactionIds]);
+  return {
+    accounts,
+    accountBalanceTotal: totals[0].account_balance_total,
+    conservation: totals[0].conservation,
+    selectedTransactionNet: totals[0].selected_transaction_net,
+  };
+}
+
+async function readTransactionIdentity(db, transactionId) {
+  const rows = await db.unsafe(`
+    select
+      transactions.id::text,
+      transactions.sequence::text,
+      transactions.idempotency_key,
+      transactions.payload_hash,
+      transactions.tx_type::text,
+      transactions.user_id::text,
+      transactions.created_at::text,
+      registry.table_id::text as table_id,
+      registry.key_format_version,
+      registry.key_format
+    from public.chips_transactions transactions
+    left join public.chips_transaction_idempotency registry
+      on registry.idempotency_key = transactions.idempotency_key
+   where transactions.id = $1::uuid;
+  `, [transactionId]);
+  return rows[0] || null;
 }
 
 async function retryDestructiveOperatorPostgresContract(sql) {
@@ -474,6 +556,12 @@ async function retryDestructiveOperatorPostgresContract(sql) {
   const transactionIds = [fixture.transaction.transactionId];
   const entryIds = fixture.transaction.entryIds;
   const registryKeys = [fixture.transaction.key];
+  const accountIds = [fixture.systemAccountId, fixture.escrowAccountId];
+  const accountingBefore = await readAccountingSnapshot(sql, accountIds, transactionIds);
+  const transactionIdentityBefore = await readTransactionIdentity(sql, fixture.transaction.transactionId);
+  assert.ok(transactionIdentityBefore, "the hot transaction identity must exist before cleanup");
+  assert.equal(accountingBefore.selectedTransactionNet, "0", "the hot transaction must conserve its entries");
+  assert.equal(accountingBefore.conservation, "0", "the ledger must conserve entries before cleanup");
   const hashes = await sql.unsafe(`
     select
       public.chips_archive_uuid_ids_sha256($1::uuid[]) as transaction_hash,
@@ -584,6 +672,10 @@ async function retryDestructiveOperatorPostgresContract(sql) {
       assert.equal(Number(inTransaction[0].hot_entries), 0);
       assert.equal(Number(inTransaction[0].registry_rows), 0);
       assert.ok(inTransaction[0].receipt_at);
+      const accountingInTransaction = await readAccountingSnapshot(tx, accountIds, transactionIds);
+      assert.deepEqual(accountingInTransaction.accounts, accountingBefore.accounts, "cleanup must not change balances or next_entry_seq");
+      assert.equal(accountingInTransaction.accountBalanceTotal, accountingBefore.accountBalanceTotal);
+      assert.equal(accountingInTransaction.conservation, accountingBefore.conservation);
       throw DB_ROLLBACK;
     }).catch((error) => {
       if (error !== DB_ROLLBACK) throw error;
@@ -602,6 +694,12 @@ async function retryDestructiveOperatorPostgresContract(sql) {
     assert.equal(Number(afterRollback[0].registry_rows), 1, "rollback must restore the registry row");
     assert.equal(afterRollback[0].pruned_at, null, "rollback must restore the prune receipt");
     assert.equal(afterRollback[0].cleaned_at, null, "rollback must restore the cleanup receipt");
+    assert.deepEqual(await readTransactionIdentity(sql, fixture.transaction.transactionId), transactionIdentityBefore, "rollback must restore transaction identity");
+    const accountingAfterRollback = await readAccountingSnapshot(sql, accountIds, transactionIds);
+    assert.deepEqual(accountingAfterRollback.accounts, accountingBefore.accounts, "rollback must restore balances and next_entry_seq");
+    assert.equal(accountingAfterRollback.accountBalanceTotal, accountingBefore.accountBalanceTotal);
+    assert.equal(accountingAfterRollback.conservation, accountingBefore.conservation);
+    assert.equal(accountingAfterRollback.selectedTransactionNet, accountingBefore.selectedTransactionNet);
 
     const execute = await sql.begin(async (tx) => {
       await tx.unsafe("set transaction isolation level serializable;");
@@ -621,6 +719,48 @@ async function retryDestructiveOperatorPostgresContract(sql) {
       `, [objectPath, transactionIds, entryIds, registryKeys, fixture.tableId, batchId]);
     });
     assert.equal(retry[0].result.state, "already_cleaned", "a retry must be idempotent after cleanup receipt commit");
+
+    const accountingAfterCleanup = await readAccountingSnapshot(sql, accountIds, transactionIds);
+    assert.deepEqual(accountingAfterCleanup.accounts, accountingBefore.accounts, "destructive cleanup must preserve balances and next_entry_seq");
+    assert.equal(accountingAfterCleanup.accountBalanceTotal, accountingBefore.accountBalanceTotal);
+    assert.equal(accountingAfterCleanup.conservation, accountingBefore.conservation);
+    assert.equal(accountingAfterCleanup.selectedTransactionNet, "0");
+    assert.equal(await readTransactionIdentity(sql, fixture.transaction.transactionId), null, "cleanup must remove only the hot transaction identity");
+
+    await sql.begin(async (tx) => {
+      const substituted = await createDatabaseTable(tx, "OPEN");
+      const reusedTransactionId = randomUUID();
+      const beforeReuse = await readAccountingSnapshot(tx, accountIds, transactionIds);
+      await expectDatabaseError(tx, "deleted_key_reuse", async () => {
+        await tx.unsafe(`
+          insert into public.chips_transactions
+            (id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id)
+          values ($1::uuid, $2, $3::jsonb, $4, $5, 'TABLE_BUY_IN', null);
+        `, [
+          reusedTransactionId,
+          `BOT_SEED_BUY_IN:${substituted.tableId}:reuse`,
+          JSON.stringify({ tableId: substituted.tableId }),
+          fixture.transaction.key,
+          "e".repeat(64),
+        ]);
+      }, "P8903", /closed or missing/);
+      const afterReuse = await readAccountingSnapshot(tx, accountIds, transactionIds);
+      assert.deepEqual(afterReuse.accounts, beforeReuse.accounts, "failed key reuse must not change balances or next_entry_seq");
+      assert.equal(afterReuse.accountBalanceTotal, beforeReuse.accountBalanceTotal);
+      assert.equal(afterReuse.conservation, beforeReuse.conservation);
+      const reuseRows = await tx.unsafe(`
+        select
+          (select count(*) from public.chips_transactions where id = $1::uuid) as transactions,
+          (select count(*) from public.chips_transaction_idempotency where idempotency_key = $2) as registry_rows,
+          (select count(*) from public.chips_entries where transaction_id = $1::uuid) as entries;
+      `, [reusedTransactionId, fixture.transaction.key]);
+      assert.equal(Number(reuseRows[0].transactions), 0, "deleted key reuse must not create a transaction");
+      assert.equal(Number(reuseRows[0].entries), 0, "deleted key reuse must not create entries");
+      assert.equal(Number(reuseRows[0].registry_rows), 0, "deleted key reuse must not recreate the registry identity");
+      throw DB_ROLLBACK;
+    }).catch((error) => {
+      if (error !== DB_ROLLBACK) throw error;
+    });
   } finally {
     await sql.unsafe(gateDefinitions[0].stage_definition);
     await sql.unsafe(gateDefinitions[0].target_definition);

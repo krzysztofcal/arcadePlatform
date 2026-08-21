@@ -41,6 +41,7 @@ export const STAGE_RETENTION_DAYS = 30;
 export const STAGE_AUTOMATION_LOCK_KEY = `chips-ledger-stage-automation-v1:${STAGE_PROJECT_REF}`;
 
 const SHA256_RE = /^[0-9a-f]{64}$/;
+const COMMIT_SHA_RE = /^[0-9a-f]{40}$/i;
 const PRIVATE_FILE_MODE = 0o600;
 
 function fail(message) {
@@ -49,6 +50,14 @@ function fail(message) {
 
 function text(value) {
   return value == null ? "" : String(value).trim();
+}
+
+export function resolveDeployedCommitSha(env = process.env, { required = true } = {}) {
+  const rawCommitSha = text(env.DEPLOYED_COMMIT_SHA || env.GITHUB_SHA);
+  if (!rawCommitSha && !required) return null;
+  const commitSha = rawCommitSha.toLowerCase();
+  if (!COMMIT_SHA_RE.test(commitSha)) fail("a 40-character deployed commit SHA is required");
+  return commitSha;
 }
 
 function sha256(bytes) {
@@ -82,6 +91,7 @@ function aggregatePayload(result) {
     project_ref: STAGE_PROJECT_REF,
     source_policy_id: result.sourcePolicyId || STAGE_AUTOMATION_POLICY_ID,
     state: result.state,
+    deployed_commit_sha: result.deployedCommitSha || null,
   };
   if (result.state === "error") {
     return {
@@ -125,6 +135,7 @@ function aggregatePayload(result) {
     proof: result.proof || null,
     receipt: result.receipt || null,
     mappings: result.mappings ?? null,
+    blocking_anomalies: result.blockingAnomalies || null,
     destructive_go_batch_id: result.destructiveGoBatchId ?? null,
     destructive_go_at: result.destructiveGoAt || null,
     reason: result.reason || null,
@@ -145,15 +156,15 @@ function writeAggregateSummary(result) {
   return safe;
 }
 
-function emitAggregateError(error) {
+function emitAggregateError(error, context = {}) {
   try {
-    writeAggregateSummary({ state: "error", reason: error });
+    writeAggregateSummary({ state: "error", reason: error, ...context });
   } catch {
     // Preserve the original orchestration error if reporting itself fails.
   }
 }
 
-export function validateStageEnvironment(env = process.env) {
+export function validateStageEnvironment(env = process.env, { requireCommitSha = false } = {}) {
   for (const key of Object.keys(env)) {
     if (/^SUPABASE_PROD_|^PRODUCTION_/.test(key)) fail("Production credentials are not accepted by the Stage orchestrator");
   }
@@ -161,6 +172,7 @@ export function validateStageEnvironment(env = process.env) {
   const apiUrl = text(env.SUPABASE_STAGE_URL);
   const serviceKey = text(env.SUPABASE_STAGE_SERVICE_ROLE_KEY);
   if (!dbUrl || !apiUrl || !serviceKey) fail("Stage DB URL, Supabase URL and service key are required");
+  const deployedCommitSha = resolveDeployedCommitSha(env, { required: requireCommitSha });
   let parsedDb;
   let parsedApi;
   try {
@@ -185,11 +197,13 @@ export function validateStageEnvironment(env = process.env) {
     dbUrl,
     apiUrl: parsedApi.origin,
     serviceKey,
+    deployedCommitSha,
     moduleEnv: {
       EXPECTED_SUPABASE_STAGE_PROJECT_REF: STAGE_PROJECT_REF,
       SUPABASE_STAGE_DB_URL: dbUrl,
       SUPABASE_URL: parsedApi.origin,
       SUPABASE_SERVICE_ROLE_KEY: serviceKey,
+      ...(deployedCommitSha ? { DEPLOYED_COMMIT_SHA: deployedCommitSha } : {}),
     },
   };
 }
@@ -289,7 +303,7 @@ export function botOnlyExportArgs(row, artifactPath, manifestPath) {
   return args;
 }
 
-export function botOnlyReport({ row, identity, dry, durable, state, mode }) {
+export function botOnlyReport({ row, identity, dry, durable, state, mode, deployedCommitSha = null, blockingAnomalies = [] }) {
   const evidence = dry?.evidence || null;
   const recoveryArchiveSha256 = durable?.recoveryArchive?.sha256 || durable?.archiveSha256 || null;
   const recoveryManifestSha256 = durable?.recoveryManifest?.sha256 || durable?.manifestSha256 || null;
@@ -298,6 +312,7 @@ export function botOnlyReport({ row, identity, dry, durable, state, mode }) {
     mode,
     sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
     projectRef: row?.project_ref || STAGE_PROJECT_REF,
+    deployedCommitSha,
     formatVersion: row?.format_version == null ? null : Number(row.format_version),
     stageSystemIdentifier: identity,
     batchId: row?.batch_id || null,
@@ -347,6 +362,27 @@ export function botOnlyReport({ row, identity, dry, durable, state, mode }) {
     destructiveGoBatchId: row?.destructive_go_batch_id || null,
     destructiveGoAt: row?.destructive_go_at || null,
     mappings: evidence?.transactionCount ?? null,
+    blockingAnomalies,
+  };
+}
+
+function botOnlyNoCandidateReport({ exported, identity, deployedCommitSha }) {
+  const blockingAnomalies = exported.blockingAnomalies || [];
+  return {
+    state: "no-op",
+    mode: "prepare-only",
+    sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
+    projectRef: exported.options?.projectRef || STAGE_PROJECT_REF,
+    deployedCommitSha,
+    formatVersion: BOT_ONLY_EXPORT_SCHEMA_VERSION,
+    stageSystemIdentifier: identity,
+    batchId: null,
+    objectPath: null,
+    cutoff: exported.options?.cutoff || null,
+    cursorStart: exported.options?.cursor || null,
+    cursorEnd: null,
+    blockingAnomalies,
+    reason: blockingAnomalies.length ? "blocking_anomalies" : "no_eligible_bot_only_table",
   };
 }
 
@@ -617,11 +653,13 @@ export async function runStageAutomation({ env = process.env, now = new Date(), 
   let tempRoot = null;
   let ownsSql = false;
   let result = null;
+  let deployedCommitSha = null;
   let failed = false;
   let failure = null;
 
   try {
     const config = validateStageEnvironment(env);
+    deployedCommitSha = config.deployedCommitSha;
     const moduleEnv = config.moduleEnv;
     const providedSql = deps.sql;
     if (providedSql) {
@@ -772,9 +810,10 @@ export async function runStageAutomation({ env = process.env, now = new Date(), 
     }
   }
   if (failed) {
-    emitAggregateError(failure);
+    emitAggregateError(failure, { deployedCommitSha });
     throw failure;
   }
+  if (result && deployedCommitSha) result = { ...result, deployedCommitSha };
   writeAggregateSummary(result);
   return result;
 }
@@ -804,10 +843,12 @@ export async function runBotOnlyStageAutomation({
   let tempRoot = null;
   let ownsSql = false;
   let result = null;
+  let deployedCommitSha = null;
   let failed = false;
   let failure = null;
   try {
-    const config = validateStageEnvironment(env);
+    const config = validateStageEnvironment(env, { requireCommitSha: true });
+    deployedCommitSha = config.deployedCommitSha;
     const moduleEnv = config.moduleEnv;
     if (deps.sql) sql = deps.sql;
     else {
@@ -906,6 +947,7 @@ export async function runBotOnlyStageAutomation({
           durable: cycle.durable,
           state: cycle.executed?.state || (cycle.dry.state === "already_cleaned" ? "already_cleaned" : "prepared"),
           mode: prepareOnly ? "prepare-only" : "execute",
+          deployedCommitSha,
         });
       } else {
         const latestCompleted = ownRows.find((row) => row.status === "committed" && row.registry_cleaned_at);
@@ -940,7 +982,9 @@ export async function runBotOnlyStageAutomation({
             emit: false,
           },
         });
-        if (exported.noCandidate) result = { state: "no-op", reason: "no_eligible_bot_only_table", sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID };
+        if (exported.noCandidate) {
+          result = botOnlyNoCandidateReport({ exported, identity, deployedCommitSha });
+        }
         else {
           await (deps.ensureArchiveBucket || ensureArchiveBucket)(storageTarget, deps);
           const stored = await (deps.storeArchive || storeArchive)({
@@ -969,6 +1013,7 @@ export async function runBotOnlyStageAutomation({
             durable,
             state: executed?.state || "prepared",
             mode: prepareOnly ? "prepare-only" : "execute",
+            deployedCommitSha,
           });
         }
       }
@@ -985,9 +1030,10 @@ export async function runBotOnlyStageAutomation({
     }
   }
   if (failed) {
-    emitAggregateError(failure);
+    emitAggregateError(failure, { deployedCommitSha });
     throw failure;
   }
+  if (result && deployedCommitSha) result = { ...result, deployedCommitSha };
   writeAggregateSummary(result);
   return result;
 }
