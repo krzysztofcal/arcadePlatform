@@ -90,6 +90,9 @@ jobs:
       - name: Run PostgreSQL bot-only retention contracts
         run: node tests/chips/chips-ledger-bot-only-retention.test.mjs
 
+      - name: Run PostgreSQL TABLE metadata fence regressions
+        run: node tests/chips/chips-ledger-table-metadata-fence.test.mjs
+
   tests:
     runs-on: ubuntu-latest
     services:

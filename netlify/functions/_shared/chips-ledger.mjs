@@ -1044,7 +1044,7 @@ async function postTransaction({
 
       const txRows = await sqlTx`
       insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, user_id, created_by)
-      values (${reference}, ${description}, ${safeMetadataJson}::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${payloadUserId || null}, ${createdBy})
+      values (${reference}, ${description}, (${safeMetadataJson}::text)::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${payloadUserId || null}, ${createdBy})
       returning *;
     `;
 
