@@ -330,15 +330,16 @@ async function main() {
   const databaseRows = await db`select current_database() as name;`;
   assert.ok(/(?:_test|reset_contract)$/i.test(databaseRows[0]?.name || ""), "metadata fence tests require a disposable database");
 
-  await setFence(false);
+  const fenceRows = await db`select public.chips_table_fence_is_active() as active;`;
+  const fenceWasActive = Boolean(fenceRows[0]?.active);
   const fixture = await createFixture();
-  await setFence(true);
+  if (!fenceWasActive) await setFence(true);
   try {
     await validProducerContract(fixture);
     await netlifyWrongMetadataContract(fixture);
     await directSqlMetadataContracts(fixture);
   } finally {
-    await setFence(false);
+    if (!fenceWasActive) await setFence(false);
     await db.end({ timeout: 5 });
     const adminModule = await import("../../netlify/functions/_shared/supabase-admin.mjs");
     if (adminModule?.closeSql) await adminModule.closeSql();
