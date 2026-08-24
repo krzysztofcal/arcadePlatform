@@ -1682,6 +1682,41 @@ export function validateBatch({ candidates, records, cutoff, schemaVersion = EXP
   };
 }
 
+function normalizeLegacyStageAllowlistManifest(legacyStageAllowlist) {
+  if (!legacyStageAllowlist || typeof legacyStageAllowlist !== "object" || Array.isArray(legacyStageAllowlist)) {
+    fail("legacy Stage allowlist archive manifest evidence is missing");
+  }
+  const required = [
+    "policy_id",
+    "proof_basis",
+    "allowlist_sha256",
+    "batch_table_ids",
+    "batch_table_ids_sha256",
+    "master_table_ids",
+    "master_table_count",
+    "batch_number",
+    "batch_table_count",
+    "source_run",
+    "query_sha256",
+    "generator_sha256",
+    "stage_system_identifier",
+    "master_manifest_sha256",
+    "batch_manifest_sha256",
+  ];
+  if (required.some((key) => !Object.hasOwn(legacyStageAllowlist, key))) {
+    fail("legacy Stage allowlist archive manifest evidence is incomplete");
+  }
+  if (!Array.isArray(legacyStageAllowlist.master_table_ids)
+    || !Array.isArray(legacyStageAllowlist.batch_table_ids)) {
+    fail("legacy Stage allowlist archive manifest table IDs are incomplete");
+  }
+  return {
+    ...legacyStageAllowlist,
+    master_table_ids: legacyStageAllowlist.master_table_ids.map((id) => text(id).toLowerCase()),
+    batch_table_ids: legacyStageAllowlist.batch_table_ids.map((id) => text(id).toLowerCase()),
+  };
+}
+
 export function buildManifest({ target, cutoff, batchSize, cursor, records, archive, outputPath, sourcePolicyId = null, schemaVersion = EXPORT_SCHEMA_VERSION, legacyStageAllowlist = null }) {
   const validation = validateBatch({ candidates: records.map((record) => ({
     id: record.transaction.id,
@@ -1743,12 +1778,7 @@ export function buildManifest({ target, cutoff, batchSize, cursor, records, arch
       },
     } : {}),
     ...(schemaVersion === BOT_ONLY_EXPORT_SCHEMA_VERSION && sourcePolicyId === LEGACY_STAGE_ALLOWLIST_POLICY_ID ? {
-      legacy_stage_allowlist: legacyStageAllowlist
-        ? {
-          ...legacyStageAllowlist,
-          master_table_ids: [...(legacyStageAllowlist.master_table_ids || [])].map((id) => text(id).toLowerCase()),
-        }
-        : records[0]?.table_context?.legacy_stage_allowlist || null,
+      legacy_stage_allowlist: normalizeLegacyStageAllowlistManifest(legacyStageAllowlist),
     } : {}),
     cutoff: {
       created_at: cutoff,

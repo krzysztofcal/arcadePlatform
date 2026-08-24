@@ -31,6 +31,14 @@ const NON_NEGATIVE_INTEGER_RE = /^(?:0|[1-9][0-9]*)$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CURSOR_ORDER = ["transaction.created_at ASC", "transaction.id ASC"];
+const LEGACY_STAGE_ALLOWLIST_FROZEN_SHA256 = "611ab69ba8ee160a4957f8fe9514c919b9f4129bc1ea7842778b04d28ea6ca05";
+const LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_IDS_SHA256 = "ded0a77efe84f56d2f4a9706f9d454a09179f6328098ad60ecf45639b4b75895";
+const LEGACY_STAGE_ALLOWLIST_QUERY_SHA256 = "9bd27ff7a2749a879707e823982f708e6abf86beffcdf8f97c5deac05f00ca09";
+const LEGACY_STAGE_ALLOWLIST_MASTER_MANIFEST_SHA256 = "eb5593bdf5bd7f3c985373e6037a861d999413eae5076b923165c7f8147a79e7";
+const LEGACY_STAGE_ALLOWLIST_BATCH_MANIFEST_SHA256 = "6011e3ceb819d2c8f21ed9cdf0904831d408b4b6fd1262c0905c6eeb9b4f59f9";
+const LEGACY_STAGE_ALLOWLIST_FREEZE_RUN_ID = "32771521144";
+const LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN = "32753223679";
+const LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256 = "aa82076e7e4d7fd1e027889be94868e5662652cc29ae2dc7b55a4196b260ed0e";
 
 const HELP = `Usage: node scripts/ops/chips-ledger-archive-store.mjs [options]
 
@@ -79,6 +87,10 @@ function assertIntegerString(value, label, { nonNegative = false } = {}) {
 function assertSha(value, label) {
   if (typeof value !== "string" || !SHA256_RE.test(value)) fail(`${label} must be a lowercase SHA-256`);
   return value;
+}
+
+function assertLegacyManifestEvidence(condition, code) {
+  if (!condition) fail(`legacy Stage allowlist manifest evidence is incomplete: ${code}`);
 }
 
 function hashCanonicalLines(values) {
@@ -218,35 +230,43 @@ function verifyManifestShape(manifest, artifactName, target) {
   }
   if (manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION && manifest.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
     const legacy = manifest.legacy_stage_allowlist;
-    const masterIds = Array.isArray(legacy?.master_table_ids)
+    assertLegacyManifestEvidence(legacy && typeof legacy === "object" && !Array.isArray(legacy), "missing");
+    assertLegacyManifestEvidence(legacy.policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID, "policy_id");
+    assertLegacyManifestEvidence(legacy.proof_basis === LEGACY_STAGE_ALLOWLIST_POLICY_ID, "proof_basis");
+    assertLegacyManifestEvidence(legacy.allowlist_sha256 === LEGACY_STAGE_ALLOWLIST_FROZEN_SHA256, "allowlist_sha256");
+    assertLegacyManifestEvidence(legacy.batch_table_ids_sha256 === LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_IDS_SHA256, "batch_table_ids_sha256");
+    assertLegacyManifestEvidence(legacy.query_sha256 === LEGACY_STAGE_ALLOWLIST_QUERY_SHA256, "query_sha256");
+    assertLegacyManifestEvidence(legacy.generator_sha256 === LEGACY_STAGE_ALLOWLIST_QUERY_SHA256, "generator_sha256");
+    assertLegacyManifestEvidence(legacy.source_run === LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN, "source_run");
+    assertLegacyManifestEvidence(legacy.stage_system_identifier === "7656985631720456337", "stage_system_identifier");
+    assertLegacyManifestEvidence(legacy.master_table_count === LEGACY_STAGE_ALLOWLIST_TABLE_COUNT, "master_table_count");
+    assertLegacyManifestEvidence(legacy.master_manifest_sha256 === LEGACY_STAGE_ALLOWLIST_MASTER_MANIFEST_SHA256, "master_manifest_sha256");
+    assertLegacyManifestEvidence(legacy.batch_manifest_sha256 === LEGACY_STAGE_ALLOWLIST_BATCH_MANIFEST_SHA256, "batch_manifest_sha256");
+    assertLegacyManifestEvidence(legacy.freeze_run_id === LEGACY_STAGE_ALLOWLIST_FREEZE_RUN_ID, "freeze_run_id");
+    assertLegacyManifestEvidence(legacy.diagnostic_source_run === LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN, "diagnostic_source_run");
+    assertLegacyManifestEvidence(legacy.diagnostic_source_run_sha256 === LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256, "diagnostic_source_run_sha256");
+
+    const masterIds = Array.isArray(legacy.master_table_ids)
       ? legacy.master_table_ids.map((id) => text(id).toLowerCase())
       : [];
-    const batchIds = Array.isArray(legacy?.batch_table_ids)
-      ? legacy.batch_table_ids.map((id) => text(id).toLowerCase())
-      : null;
-    if (!legacy || legacy.policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID
-      || !SHA256_RE.test(text(legacy.allowlist_sha256))
-      || !SHA256_RE.test(text(legacy.batch_table_ids_sha256))
-      || !SHA256_RE.test(text(legacy.query_sha256))
-      || legacy.source_run !== "32753223679"
-      || legacy.stage_system_identifier !== "7656985631720456337"
-      || legacy.master_table_count !== LEGACY_STAGE_ALLOWLIST_TABLE_COUNT
-      || masterIds.length !== LEGACY_STAGE_ALLOWLIST_TABLE_COUNT
-      || masterIds.some((id) => !UUID_RE.test(id))
-      || new Set(masterIds).size !== masterIds.length
-      || masterIds.some((id, index) => id !== [...masterIds].sort()[index])
-      || hashCanonicalLines(masterIds) !== legacy.allowlist_sha256
-      || !Number.isSafeInteger(legacy.batch_number) || legacy.batch_number < 1
-      || !Number.isSafeInteger(legacy.batch_table_count) || legacy.batch_table_count < 1
-      || legacy.batch_table_count > LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT
-      || (batchIds !== null && (batchIds.length !== legacy.batch_table_count
-        || batchIds.some((id) => !UUID_RE.test(id))
-        || new Set(batchIds).size !== batchIds.length
-        || batchIds.some((id, index) => id !== [...batchIds].sort()[index])
-        || batchIds.some((id) => !masterIds.includes(id))
-        || hashCanonicalLines(batchIds) !== legacy.batch_table_ids_sha256))) {
-      fail("legacy Stage allowlist manifest evidence is incomplete");
-    }
+    assertLegacyManifestEvidence(masterIds.length === LEGACY_STAGE_ALLOWLIST_TABLE_COUNT, "master_table_ids_count");
+    assertLegacyManifestEvidence(masterIds.every((id) => UUID_RE.test(id)), "master_table_ids_uuid");
+    assertLegacyManifestEvidence(new Set(masterIds).size === masterIds.length, "master_table_ids_unique");
+    const sortedMasterIds = [...masterIds].sort();
+    assertLegacyManifestEvidence(masterIds.every((id, index) => id === sortedMasterIds[index]), "master_table_ids_order");
+    assertLegacyManifestEvidence(hashCanonicalLines(masterIds) === legacy.allowlist_sha256, "master_table_ids_hash");
+
+    assertLegacyManifestEvidence(legacy.batch_number === 1, "batch_number");
+    assertLegacyManifestEvidence(legacy.batch_table_count === LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT, "batch_table_count");
+    assertLegacyManifestEvidence(Array.isArray(legacy.batch_table_ids), "batch_table_ids");
+    const batchIds = legacy.batch_table_ids.map((id) => text(id).toLowerCase());
+    assertLegacyManifestEvidence(batchIds.length === legacy.batch_table_count, "batch_table_ids_count");
+    assertLegacyManifestEvidence(batchIds.every((id) => UUID_RE.test(id)), "batch_table_ids_uuid");
+    assertLegacyManifestEvidence(new Set(batchIds).size === batchIds.length, "batch_table_ids_unique");
+    const sortedBatchIds = [...batchIds].sort();
+    assertLegacyManifestEvidence(batchIds.every((id, index) => id === sortedBatchIds[index]), "batch_table_ids_order");
+    assertLegacyManifestEvidence(batchIds.every((id) => masterIds.includes(id)), "batch_table_ids_membership");
+    assertLegacyManifestEvidence(hashCanonicalLines(batchIds) === legacy.batch_table_ids_sha256, "batch_table_ids_hash");
   }
 
   const amounts = manifest.amounts;

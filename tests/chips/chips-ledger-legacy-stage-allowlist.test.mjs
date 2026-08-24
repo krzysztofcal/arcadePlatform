@@ -31,7 +31,7 @@ import {
 } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist.mjs";
 import { runLegacyStageAllowlistFreeze } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-freeze.mjs";
 import { buildPruneEvidence } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
-import { verifyArchiveBytes } from "../../scripts/ops/chips-ledger-archive-store.mjs";
+import { storeArchive, verifyArchiveBytes, verifyLocalArchive } from "../../scripts/ops/chips-ledger-archive-store.mjs";
 
 const migrationPath = "supabase/migrations/20260824120000_chips_ledger_legacy_stage_allowlist.sql";
 const freezeMigrationPath = "supabase/migrations/20260824140000_chips_ledger_legacy_stage_allowlist_freeze_guard.sql";
@@ -46,17 +46,10 @@ function tableId(number) {
   return `00000000-0000-4000-8000-${number.toString(16).padStart(12, "0")}`;
 }
 
-const ids = Array.from({ length: LEGACY_STAGE_ALLOWLIST_TABLE_COUNT }, (_, index) => tableId(index + 1));
-
-const master = buildLegacyMasterManifest({
-  tableIds: ids,
-  cutoff: LEGACY_STAGE_ALLOWLIST_CUTOFF,
-  querySha256: legacyAllowlistQuerySha256(),
-  sourceRun: LEGACY_STAGE_ALLOWLIST_SOURCE_RUN,
-  stageSystemIdentifier: "7656985631720456337",
-  projectRef: "krydukthwdvccggbyjfw",
-});
-const batch = buildLegacyBatchManifest(master, { batchNumber: 1 });
+const frozenArtifacts = loadFrozenLegacyAllowlist({ cwd: process.cwd() });
+const ids = frozenArtifacts.masterTableIds;
+const master = frozenArtifacts.masterManifest;
+const batch = frozenArtifacts.batchManifest;
 const plan = buildLegacyPlan(master, batch);
 
 const fixtureCandidates = plan.batchTableIds.map((fixtureTableId, index) => ({
@@ -164,6 +157,27 @@ assert.deepEqual(fixtureEvidence.legacyTableIds, plan.batchTableIds);
 assert.equal(fixtureEvidence.legacyMasterTableIds.length, LEGACY_STAGE_ALLOWLIST_TABLE_COUNT);
 assert.equal(fixtureEvidence.legacyAllowlistSha256, plan.allowlistSha256);
 
+const frozenRunPlan = plan;
+const frozenRunTableId = frozenRunPlan.batchTableIds[0];
+const frozenRunCandidate = {
+  ...fixtureCandidates[0],
+  idempotency_key: `bot-seed-buyin:${frozenRunTableId}:legacy-fixture`,
+  reference: `BOT_SEED_BUY_IN:${frozenRunTableId}:1`,
+  table_id: frozenRunTableId,
+  key_table_id: frozenRunTableId,
+  legacy_allowlist_sha256: frozenRunPlan.allowlistSha256,
+  legacy_batch_table_ids_sha256: frozenRunPlan.batchTableIdsSha256,
+  legacy_source_run: frozenRunPlan.sourceRun,
+  legacy_query_sha256: frozenRunPlan.querySha256,
+  legacy_stage_system_identifier: frozenRunPlan.stageSystemIdentifier,
+  legacy_master_table_count: frozenRunPlan.masterTableCount,
+  legacy_batch_number: frozenRunPlan.batchNumber,
+  legacy_batch_table_count: frozenRunPlan.batchTableCount,
+};
+const frozenRunEntries = fixtureEntries.slice(0, 2).map((entry) => entry.account_type === "ESCROW"
+  ? { ...entry, account_system_key: `POKER_TABLE:${frozenRunTableId}` }
+  : entry);
+
 const runExportTemp = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-stage-run-export-test-"));
 try {
   const observedQueries = [];
@@ -174,8 +188,8 @@ try {
         async unsafe(query, parameters = []) {
           observedQueries.push({ query, parameters });
           if (/^\s*set transaction isolation level repeatable read, read only;/i.test(query)) return [];
-          if (query === LEGACY_STAGE_ALLOWLIST_CANDIDATE_SQL) return [fixtureCandidates[0]];
-          if (/from public\.chips_entries/i.test(query)) return fixtureEntries.slice(0, 2);
+          if (query === LEGACY_STAGE_ALLOWLIST_CANDIDATE_SQL) return [frozenRunCandidate];
+          if (/from public\.chips_entries/i.test(query)) return frozenRunEntries;
           throw new Error(`unexpected integration SQL: ${query.slice(0, 80)}`);
         },
       });
@@ -188,7 +202,7 @@ try {
   const integrationResult = await runExport({
     argv: [
       "--target", "stage",
-      "--cutoff", plan.cutoff,
+      "--cutoff", frozenRunPlan.cutoff,
       "--batch-size", "5000",
       "--output", "legacy.archive.jsonl.gz",
       "--manifest", "legacy.manifest.json",
@@ -200,33 +214,136 @@ try {
       selector: "legacy-stage-allowlist-v1",
       schemaVersion: 2,
       sourcePolicyId: LEGACY_STAGE_ALLOWLIST_POLICY_ID,
-      legacyStageAllowlistPlan: plan,
+      legacyStageAllowlistPlan: frozenRunPlan,
       targetOptions: { singleTarget: true },
       emit: false,
     },
   });
   const candidateQuery = observedQueries.find(({ query }) => query === LEGACY_STAGE_ALLOWLIST_CANDIDATE_SQL);
   assert.deepEqual(candidateQuery?.parameters, [
-    { value: plan.cutoff, type: 25 },
-    plan.batchTableIds,
+    { value: frozenRunPlan.cutoff, type: 25 },
+    frozenRunPlan.batchTableIds,
     5000,
-    plan.allowlistSha256,
-    plan.batchTableIdsSha256,
-    plan.sourceRun,
-    plan.querySha256,
-    plan.stageSystemIdentifier,
-    plan.masterTableCount,
-    plan.batchNumber,
-    plan.batchTableCount,
+    frozenRunPlan.allowlistSha256,
+    frozenRunPlan.batchTableIdsSha256,
+    frozenRunPlan.sourceRun,
+    frozenRunPlan.querySha256,
+    frozenRunPlan.stageSystemIdentifier,
+    frozenRunPlan.masterTableCount,
+    frozenRunPlan.batchNumber,
+    frozenRunPlan.batchTableCount,
     LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT,
   ], "runExport must bind the full immutable plan to the legacy selector");
   assert.equal(integrationResult.schema_version, 2);
-  assert.deepEqual(integrationResult.legacy_stage_allowlist, plan.archiveManifest);
+  assert.deepEqual(integrationResult.legacy_stage_allowlist, frozenRunPlan.archiveManifest);
   assert.deepEqual(
     JSON.parse(fs.readFileSync(path.join(runExportTemp, "legacy.manifest.json"), "utf8")),
     integrationResult,
     "runExport must create the manifest from the same plan used by the selector",
   );
+  const verifiedRunExport = verifyLocalArchive({
+    artifactPath: path.join(runExportTemp, "legacy.archive.jsonl.gz"),
+    manifestPath: path.join(runExportTemp, "legacy.manifest.json"),
+    target: { target: "stage" },
+  });
+  assert.equal(verifiedRunExport.manifest.legacy_stage_allowlist.allowlist_sha256, frozenRunPlan.allowlistSha256);
+
+  let storedBytes = null;
+  let storedManifestRow = null;
+  const storageCalls = [];
+  const storageTarget = {
+    target: "stage",
+    projectRef: "krydukthwdvccggbyjfw",
+    baseUrl: "https://krydukthwdvccggbyjfw.supabase.co",
+    serviceKey: "local-test-service-key",
+  };
+  const storageFetch = async (url, init = {}) => {
+    const requestUrl = new URL(url);
+    const method = init.method || "GET";
+    storageCalls.push({ method, path: requestUrl.pathname });
+    if (requestUrl.pathname === "/storage/v1/bucket/chips-ledger-archive" && method === "GET") {
+      return new Response(JSON.stringify({
+        id: "chips-ledger-archive",
+        name: "chips-ledger-archive",
+        public: false,
+        file_size_limit: 6 * 1024 * 1024,
+        allowed_mime_types: ["application/gzip"],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (requestUrl.pathname.includes("/storage/v1/object/authenticated/chips-ledger-archive/") && method === "GET") {
+      if (!storedBytes) return new Response(JSON.stringify({ message: "not found" }), { status: 400 });
+      return new Response(storedBytes, { status: 200, headers: { "content-type": "application/gzip" } });
+    }
+    if (requestUrl.pathname.includes("/storage/v1/object/chips-ledger-archive/") && method === "POST") {
+      assert.equal(new Headers(init.headers).get("x-upsert"), "false");
+      if (storedBytes) return new Response(JSON.stringify({ message: "Asset Already Exists" }), { status: 400 });
+      storedBytes = Buffer.from(init.body);
+      return new Response(JSON.stringify({ Key: requestUrl.pathname }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ message: "unexpected fake request" }), { status: 500 });
+  };
+  const manifestStore = {
+    async get() { return storedManifestRow; },
+    async insertPending(row) { storedManifestRow = { ...row }; },
+    async markCommitted() {
+      storedManifestRow = { ...storedManifestRow, status: "committed" };
+      return storedManifestRow;
+    },
+  };
+  const storedRunExport = await storeArchive({
+    argv: [
+      "--target", "stage",
+      "--artifact", path.join(runExportTemp, "legacy.archive.jsonl.gz"),
+      "--manifest", path.join(runExportTemp, "legacy.manifest.json"),
+    ],
+    cwd: runExportTemp,
+    deps: { storageTarget, fetch: storageFetch, manifestStore, emit: false },
+  });
+  assert.equal(storedRunExport.manifest.status, "committed");
+  assert.equal(storedRunExport.object.uploaded, true);
+  assert.equal(storedRunExport.local.manifest.legacy_stage_allowlist.allowlist_sha256, frozenRunPlan.allowlistSha256);
+  assert.equal(storageCalls.some(({ method, path: requestPath }) => method === "POST" && requestPath.includes("/object/chips-ledger-archive/")), true);
+
+  const validRunManifest = JSON.parse(fs.readFileSync(path.join(runExportTemp, "legacy.manifest.json"), "utf8"));
+  const manifestTamperCases = [
+    ["proof_basis", (legacy) => { delete legacy.proof_basis; }],
+    ["allowlist_sha256", (legacy) => { legacy.allowlist_sha256 = "0".repeat(64); }],
+    ["batch_table_ids_sha256", (legacy) => { legacy.batch_table_ids_sha256 = "0".repeat(64); }],
+    ["query_sha256", (legacy) => { legacy.query_sha256 = "0".repeat(64); }],
+    ["generator_sha256", (legacy) => { legacy.generator_sha256 = "0".repeat(64); }],
+    ["source_run", (legacy) => { legacy.source_run = "tampered"; }],
+    ["stage_system_identifier", (legacy) => { legacy.stage_system_identifier = "0"; }],
+    ["master_table_count", (legacy) => { delete legacy.master_table_count; }],
+    ["master_manifest_sha256", (legacy) => { legacy.master_manifest_sha256 = "0".repeat(64); }],
+    ["batch_manifest_sha256", (legacy) => { legacy.batch_manifest_sha256 = "0".repeat(64); }],
+    ["freeze_run_id", (legacy) => { delete legacy.freeze_run_id; }],
+    ["diagnostic_source_run", (legacy) => { legacy.diagnostic_source_run = "tampered"; }],
+    ["diagnostic_source_run_sha256", (legacy) => { legacy.diagnostic_source_run_sha256 = "0".repeat(64); }],
+    ["master_table_ids_count", (legacy) => { legacy.master_table_ids.pop(); }],
+    ["master_table_ids_uuid", (legacy) => { legacy.master_table_ids[0] = "not-a-uuid"; }],
+    ["master_table_ids_hash", (legacy) => { legacy.master_table_ids[0] = "00000000-0000-4000-8000-000000000000"; }],
+    ["batch_number", (legacy) => { legacy.batch_number = 2; }],
+    ["batch_table_count", (legacy) => { legacy.batch_table_count = 9; }],
+    ["batch_table_ids_count", (legacy) => { legacy.batch_table_ids.pop(); }],
+    ["batch_table_ids_uuid", (legacy) => { legacy.batch_table_ids[0] = "not-a-uuid"; }],
+    ["batch_table_ids_membership", (legacy) => { legacy.batch_table_ids[0] = "00000000-0000-4000-8000-000000000000"; }],
+    ["batch_table_ids_hash", (legacy) => { legacy.batch_table_ids[9] = legacy.master_table_ids[10]; }],
+  ];
+  for (const [code, mutate] of manifestTamperCases) {
+    const mutatedManifest = JSON.parse(JSON.stringify(validRunManifest));
+    mutate(mutatedManifest.legacy_stage_allowlist);
+    fs.writeFileSync(path.join(runExportTemp, "legacy.manifest.json"), `${JSON.stringify(mutatedManifest)}\n`, { mode: 0o600 });
+    assert.throws(
+      () => verifyLocalArchive({
+        artifactPath: path.join(runExportTemp, "legacy.archive.jsonl.gz"),
+        manifestPath: path.join(runExportTemp, "legacy.manifest.json"),
+        target: { target: "stage" },
+      }),
+      new RegExp(`legacy Stage allowlist manifest evidence is incomplete: ${code}`),
+      `manifest tamper must fail closed with ${code}`,
+    );
+    fs.writeFileSync(path.join(runExportTemp, "legacy.manifest.json"), `${JSON.stringify(validRunManifest)}\n`, { mode: 0o600 });
+  }
 
   const missingPlanSql = {
     async begin() {
@@ -235,7 +352,7 @@ try {
   };
   await assert.rejects(
     () => runExport({
-      argv: ["--target", "stage", "--cutoff", plan.cutoff, "--output", "missing.archive.gz"],
+      argv: ["--target", "stage", "--cutoff", frozenRunPlan.cutoff, "--output", "missing.archive.gz"],
       env: integrationEnv,
       cwd: runExportTemp,
       deps: {
@@ -251,12 +368,12 @@ try {
   );
 
   const substitutedPlan = {
-    ...plan,
-    batchTableIds: ["00000000-0000-4000-8000-000000000000", ...plan.batchTableIds.slice(1)],
+    ...frozenRunPlan,
+    batchTableIds: ["00000000-0000-4000-8000-000000000000", ...frozenRunPlan.batchTableIds.slice(1)],
   };
   await assert.rejects(
     () => runExport({
-      argv: ["--target", "stage", "--cutoff", plan.cutoff, "--output", "substituted.archive.gz"],
+      argv: ["--target", "stage", "--cutoff", frozenRunPlan.cutoff, "--output", "substituted.archive.gz"],
       env: integrationEnv,
       cwd: runExportTemp,
       deps: {
