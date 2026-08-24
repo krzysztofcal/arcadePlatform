@@ -54,6 +54,7 @@ jobs:
           printf 'sha=%s\n' "$checked_out_sha" >> "$GITHUB_OUTPUT"
 
       - name: Read-only Stage fence preflight
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-prepare-only' }}
         shell: bash
         run: |
           set -euo pipefail

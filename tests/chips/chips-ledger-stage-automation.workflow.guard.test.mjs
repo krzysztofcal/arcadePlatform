@@ -24,6 +24,14 @@ assert.match(workflow, /chips_table_fence_is_active/);
 assert.match(workflow, /chips_table_fence_control/);
 assert.match(workflow, /enforcement_active/);
 
+const preflightStep = workflow.match(
+  /- name: Read-only Stage fence preflight[\s\S]*?(?=\n\s+- name:)/,
+)[0];
+assert.match(
+  preflightStep,
+  /if: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.mode == 'bot-only-7d-prepare-only' \}\}/,
+);
+
 const existingRun = workflow.match(
   /- name: Run existing 30-day Stage automation[\s\S]*?(?=\n\s+- name:|\s*$)/,
 )[0];
@@ -31,6 +39,11 @@ assert.match(existingRun, /github\.event_name == 'schedule'/);
 assert.match(existingRun, /inputs\.mode == 'existing-30d'/);
 assert.match(existingRun, /run: node scripts\/ops\/chips-ledger-stage-automation\.mjs\s*$/m);
 assert.doesNotMatch(existingRun, /--policy|--prepare-only|--execute/);
+assert.doesNotMatch(existingRun, /Read-only Stage fence preflight|chips_table_fence|enforcement_active/);
+assert.doesNotMatch(
+  workflow.slice(0, workflow.indexOf("- name: Read-only Stage fence preflight")),
+  /chips_table_fence|enforcement_active/,
+);
 
 const botOnlyRun = workflow.match(
   /- name: Run bot-only 7-day prepare-only Stage automation[\s\S]*$/,
