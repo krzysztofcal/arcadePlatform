@@ -505,7 +505,7 @@ export async function runLegacyStagePrepareOnly({ env = process.env, cwd = proce
         selector: "legacy-stage-allowlist-v1",
         schemaVersion: BOT_ONLY_EXPORT_SCHEMA_VERSION,
         sourcePolicyId: LEGACY_STAGE_ALLOWLIST_POLICY_ID,
-        legacyStageAllowlist: plan.archiveManifest,
+        legacyStageAllowlistPlan: plan,
         targetOptions: { singleTarget: true },
         noCandidateIfEmpty: true,
         emit: false,

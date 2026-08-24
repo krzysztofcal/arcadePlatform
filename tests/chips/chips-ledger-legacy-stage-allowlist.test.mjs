@@ -14,6 +14,7 @@ import {
   buildArchiveBytes,
   buildExportRecord,
   buildManifest,
+  runExport,
 } from "../../scripts/ops/chips-ledger-archive-export.mjs";
 import {
   LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN,
@@ -162,6 +163,117 @@ assert.equal(fixtureEvidence.legacyTableIds.length, LEGACY_STAGE_ALLOWLIST_BATCH
 assert.deepEqual(fixtureEvidence.legacyTableIds, plan.batchTableIds);
 assert.equal(fixtureEvidence.legacyMasterTableIds.length, LEGACY_STAGE_ALLOWLIST_TABLE_COUNT);
 assert.equal(fixtureEvidence.legacyAllowlistSha256, plan.allowlistSha256);
+
+const runExportTemp = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-stage-run-export-test-"));
+try {
+  const observedQueries = [];
+  const integrationSql = {
+    typed: (value, type) => ({ value, type }),
+    async begin(callback) {
+      return callback({
+        async unsafe(query, parameters = []) {
+          observedQueries.push({ query, parameters });
+          if (/^\s*set transaction isolation level repeatable read, read only;/i.test(query)) return [];
+          if (query === LEGACY_STAGE_ALLOWLIST_CANDIDATE_SQL) return [fixtureCandidates[0]];
+          if (/from public\.chips_entries/i.test(query)) return fixtureEntries.slice(0, 2);
+          throw new Error(`unexpected integration SQL: ${query.slice(0, 80)}`);
+        },
+      });
+    },
+  };
+  const integrationEnv = {
+    EXPECTED_SUPABASE_STAGE_PROJECT_REF: "krydukthwdvccggbyjfw",
+    SUPABASE_STAGE_DB_URL: "postgresql://postgres.krydukthwdvccggbyjfw:test@db.krydukthwdvccggbyjfw.supabase.co:5432/postgres",
+  };
+  const integrationResult = await runExport({
+    argv: [
+      "--target", "stage",
+      "--cutoff", plan.cutoff,
+      "--batch-size", "5000",
+      "--output", "legacy.archive.jsonl.gz",
+      "--manifest", "legacy.manifest.json",
+    ],
+    env: integrationEnv,
+    cwd: runExportTemp,
+    deps: {
+      sql: integrationSql,
+      selector: "legacy-stage-allowlist-v1",
+      schemaVersion: 2,
+      sourcePolicyId: LEGACY_STAGE_ALLOWLIST_POLICY_ID,
+      legacyStageAllowlistPlan: plan,
+      targetOptions: { singleTarget: true },
+      emit: false,
+    },
+  });
+  const candidateQuery = observedQueries.find(({ query }) => query === LEGACY_STAGE_ALLOWLIST_CANDIDATE_SQL);
+  assert.deepEqual(candidateQuery?.parameters, [
+    { value: plan.cutoff, type: 25 },
+    plan.batchTableIds,
+    5000,
+    plan.allowlistSha256,
+    plan.batchTableIdsSha256,
+    plan.sourceRun,
+    plan.querySha256,
+    plan.stageSystemIdentifier,
+    plan.masterTableCount,
+    plan.batchNumber,
+    plan.batchTableCount,
+    LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT,
+  ], "runExport must bind the full immutable plan to the legacy selector");
+  assert.equal(integrationResult.schema_version, 2);
+  assert.deepEqual(integrationResult.legacy_stage_allowlist, plan.archiveManifest);
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(path.join(runExportTemp, "legacy.manifest.json"), "utf8")),
+    integrationResult,
+    "runExport must create the manifest from the same plan used by the selector",
+  );
+
+  const missingPlanSql = {
+    async begin() {
+      throw new Error("missing plan must fail before opening the snapshot transaction");
+    },
+  };
+  await assert.rejects(
+    () => runExport({
+      argv: ["--target", "stage", "--cutoff", plan.cutoff, "--output", "missing.archive.gz"],
+      env: integrationEnv,
+      cwd: runExportTemp,
+      deps: {
+        sql: missingPlanSql,
+        selector: "legacy-stage-allowlist-v1",
+        schemaVersion: 2,
+        sourcePolicyId: LEGACY_STAGE_ALLOWLIST_POLICY_ID,
+        targetOptions: { singleTarget: true },
+        emit: false,
+      },
+    }),
+    /requires an immutable plan/,
+  );
+
+  const substitutedPlan = {
+    ...plan,
+    batchTableIds: ["00000000-0000-4000-8000-000000000000", ...plan.batchTableIds.slice(1)],
+  };
+  await assert.rejects(
+    () => runExport({
+      argv: ["--target", "stage", "--cutoff", plan.cutoff, "--output", "substituted.archive.gz"],
+      env: integrationEnv,
+      cwd: runExportTemp,
+      deps: {
+        sql: missingPlanSql,
+        selector: "legacy-stage-allowlist-v1",
+        schemaVersion: 2,
+        sourcePolicyId: LEGACY_STAGE_ALLOWLIST_POLICY_ID,
+        legacyStageAllowlistPlan: substitutedPlan,
+        targetOptions: { singleTarget: true },
+        emit: false,
+      },
+    }),
+    /hash or count binding|not bound to the immutable legacy plan|immutable plan evidence/i,
+  );
+} finally {
+  fs.rmSync(runExportTemp, { recursive: true, force: true });
+}
 
 assert.equal(master.policy_id, LEGACY_STAGE_ALLOWLIST_POLICY_ID);
 assert.equal(master.proof_basis, LEGACY_STAGE_ALLOWLIST_POLICY_ID);
@@ -335,6 +447,8 @@ const prepareStart = runnerSource.indexOf("export async function runLegacyStageP
 assert.ok(prepareStart >= 0, "prepare runner must be present");
 assert.match(runnerSource.slice(prepareStart), /loadFrozenLegacyAllowlist/);
 assert.doesNotMatch(runnerSource.slice(prepareStart), /readLegacyAllowlist\(/);
+assert.match(runnerSource.slice(prepareStart), /legacyStageAllowlistPlan: plan/);
+assert.doesNotMatch(runnerSource.slice(prepareStart), /legacyStageAllowlist: plan\.archiveManifest/);
 assert.match(LEGACY_STAGE_ALLOWLIST_REPO_RELATIVE_DIR, /^data\/chips-ledger\/legacy-stage-allowlist-v1$/);
 
 process.stdout.write("chips-ledger-legacy-stage-allowlist contract passed\n");

@@ -26,6 +26,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const INTEGER_RE = /^-?(?:0|[1-9][0-9]*)$/;
 const PROJECT_REF_RE = /^[a-z0-9]{20}$/;
 const SQLSTATE_RE = /^[0-9A-Z]{5}$/;
+const SHA256_RE = /^[0-9a-f]{64}$/;
 
 // Keep these bindings in sync with scripts/ops/ch-economy-network-maintenance.sh.
 const TARGETS = Object.freeze({
@@ -1901,9 +1902,124 @@ function resolveOptions(args, env, cwd, now, targetOptions = {}) {
   return { ...target, cutoff, batchSize, cursor: resolveCursor(args), outputPath, manifestPath };
 }
 
+function hashCanonicalLegacyIds(ids) {
+  return crypto.createHash("sha256").update(`${ids.join("\n")}\n`, "utf8").digest("hex");
+}
+
+function canonicalLegacyPlanIds(value, label) {
+  if (!Array.isArray(value) || value.length === 0) fail(`${label} is missing from the immutable plan`);
+  const ids = value.map((id) => text(id));
+  if (ids.some((id) => !UUID_RE.test(id) || id !== id.toLowerCase())) fail(`${label} contains a non-canonical UUID`);
+  if (new Set(ids).size !== ids.length || ids.some((id, index) => index > 0 && ids[index - 1] >= id)) {
+    fail(`${label} is not a canonical UUID list`);
+  }
+  return ids;
+}
+
+function sameLegacyIdList(left, right, label) {
+  if (!Array.isArray(left) || !Array.isArray(right)
+    || left.length !== right.length
+    || left.some((value, index) => value !== right[index])) {
+    fail(`${label} is not bound to the immutable legacy plan`);
+  }
+}
+
+function assertLegacyStageAllowlistPlan(plan, cutoff) {
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) {
+    fail("legacy-stage-allowlist-v1 requires an immutable plan");
+  }
+  const required = [
+    "masterManifest",
+    "batchManifest",
+    "archiveManifest",
+    "masterTableIds",
+    "batchTableIds",
+    "allowlistSha256",
+    "batchTableIdsSha256",
+    "sourceRun",
+    "querySha256",
+    "stageSystemIdentifier",
+    "masterTableCount",
+    "batchNumber",
+    "batchTableCount",
+    "masterManifestSha256",
+    "batchManifestSha256",
+  ];
+  if (required.some((key) => !Object.hasOwn(plan, key))) {
+    fail("legacy-stage-allowlist-v1 requires the full immutable plan");
+  }
+
+  const master = plan.masterManifest;
+  const batch = plan.batchManifest;
+  const archive = plan.archiveManifest;
+  if (!master || typeof master !== "object" || !batch || typeof batch !== "object"
+    || !archive || typeof archive !== "object") {
+    fail("legacy-stage-allowlist-v1 immutable plan manifests are incomplete");
+  }
+
+  const masterTableIds = canonicalLegacyPlanIds(plan.masterTableIds, "immutable master table IDs");
+  const batchTableIds = canonicalLegacyPlanIds(plan.batchTableIds, "immutable batch table IDs");
+  sameLegacyIdList(masterTableIds, master.table_ids, "master table IDs");
+  sameLegacyIdList(batchTableIds, batch.batch_table_ids, "batch table IDs");
+  sameLegacyIdList(masterTableIds, archive.master_table_ids, "archive master table IDs");
+  sameLegacyIdList(batchTableIds, archive.batch_table_ids, "archive batch table IDs");
+
+  if (masterTableIds.length !== LEGACY_STAGE_ALLOWLIST_TABLE_COUNT
+    || batchTableIds.length !== LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT
+    || plan.masterTableCount !== master.table_count
+    || plan.batchNumber !== batch.batch_number
+    || plan.batchTableCount !== batch.batch_table_count
+    || plan.batchTableCount !== batchTableIds.length
+    || plan.allowlistSha256 !== master.allowlist_sha256
+    || plan.batchTableIdsSha256 !== batch.batch_table_ids_sha256
+    || plan.masterManifestSha256 !== master.manifest_sha256
+    || plan.batchManifestSha256 !== batch.manifest_sha256
+    || plan.allowlistSha256 !== hashCanonicalLegacyIds(masterTableIds)
+    || plan.batchTableIdsSha256 !== hashCanonicalLegacyIds(batchTableIds)) {
+    fail("legacy-stage-allowlist-v1 immutable plan hash or count binding is invalid");
+  }
+  if (plan.sourceRun !== master.source_run
+    || plan.querySha256 !== master.query_sha256
+    || plan.stageSystemIdentifier !== master.stage_system_identifier
+    || plan.cutoff !== batch.cutoff) {
+    fail("legacy-stage-allowlist-v1 immutable plan evidence is inconsistent");
+  }
+  if (text(cutoff) !== text(plan.cutoff)) fail("legacy-stage-allowlist-v1 cutoff is not bound to the immutable plan");
+
+  const archiveBindings = [
+    [archive.policy_id, LEGACY_STAGE_ALLOWLIST_POLICY_ID, "archive policy"],
+    [archive.proof_basis, LEGACY_STAGE_ALLOWLIST_POLICY_ID, "archive proof basis"],
+    [archive.allowlist_sha256, plan.allowlistSha256, "archive allowlist hash"],
+    [archive.batch_table_ids_sha256, plan.batchTableIdsSha256, "archive batch hash"],
+    [archive.source_run, plan.sourceRun, "archive source run"],
+    [archive.query_sha256, plan.querySha256, "archive query hash"],
+    [archive.stage_system_identifier, plan.stageSystemIdentifier, "archive Stage identity"],
+    [archive.master_table_count, plan.masterTableCount, "archive master count"],
+    [archive.batch_number, plan.batchNumber, "archive batch number"],
+    [archive.batch_table_count, plan.batchTableCount, "archive batch count"],
+    [archive.master_manifest_sha256, plan.masterManifestSha256, "archive master manifest hash"],
+    [archive.batch_manifest_sha256, plan.batchManifestSha256, "archive batch manifest hash"],
+  ];
+  if (archiveBindings.some(([actual, expected]) => actual !== expected)) {
+    fail("legacy-stage-allowlist-v1 archive manifest is not bound to the immutable plan");
+  }
+  if (!SHA256_RE.test(plan.allowlistSha256)
+    || !SHA256_RE.test(plan.batchTableIdsSha256)
+    || !SHA256_RE.test(plan.querySha256)
+    || !SHA256_RE.test(plan.masterManifestSha256)
+    || !SHA256_RE.test(plan.batchManifestSha256)) {
+    fail("legacy-stage-allowlist-v1 immutable plan contains an invalid hash");
+  }
+  return plan;
+}
+
 export async function readSnapshot(sql, options) {
   const timestampParam = (value) => value == null || typeof sql.typed !== "function" ? value : sql.typed(value, 25);
   const telemetry = options.telemetry;
+  const selector = options.selector || "standard";
+  const legacyStageAllowlistPlan = selector === "legacy-stage-allowlist-v1"
+    ? assertLegacyStageAllowlistPlan(options.legacyStageAllowlistPlan, options.cutoff)
+    : null;
   return sql.begin(async (tx) => {
     await observedQuery(tx, {
       phase: "snapshot.read_only_transaction",
@@ -1911,7 +2027,6 @@ export async function readSnapshot(sql, options) {
       query: "set transaction isolation level repeatable read, read only;",
       telemetry,
     });
-    const selector = options.selector || "standard";
     const candidateSql = selector === "standard"
       ? CANDIDATE_SQL
       : selector === "prunable"
@@ -1921,21 +2036,19 @@ export async function readSnapshot(sql, options) {
           : selector === "legacy-stage-allowlist-v1"
             ? LEGACY_STAGE_ALLOWLIST_CANDIDATE_SQL
             : fail("snapshot selector must be standard, prunable, bot-only-7d, or legacy-stage-allowlist-v1");
-    const legacyPlan = selector === "legacy-stage-allowlist-v1" ? options.legacyStageAllowlist : null;
-    if (selector === "legacy-stage-allowlist-v1" && !legacyPlan) fail("legacy-stage-allowlist-v1 requires an immutable plan");
     const candidateParameters = selector === "legacy-stage-allowlist-v1"
       ? [
         timestampParam(options.cutoff),
-        legacyPlan.batchTableIds,
+        legacyStageAllowlistPlan.batchTableIds,
         options.batchSize,
-        legacyPlan.allowlistSha256,
-        legacyPlan.batchTableIdsSha256,
-        legacyPlan.sourceRun,
-        legacyPlan.querySha256,
-        legacyPlan.stageSystemIdentifier,
-        legacyPlan.masterTableCount,
-        legacyPlan.batchNumber,
-        legacyPlan.batchTableCount,
+        legacyStageAllowlistPlan.allowlistSha256,
+        legacyStageAllowlistPlan.batchTableIdsSha256,
+        legacyStageAllowlistPlan.sourceRun,
+        legacyStageAllowlistPlan.querySha256,
+        legacyStageAllowlistPlan.stageSystemIdentifier,
+        legacyStageAllowlistPlan.masterTableCount,
+        legacyStageAllowlistPlan.batchNumber,
+        legacyStageAllowlistPlan.batchTableCount,
         LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT,
       ]
       : [
@@ -2041,7 +2154,15 @@ export async function runExport({ argv = process.argv.slice(2), env = process.en
   try {
     const selector = deps.selector || "standard";
     const schemaVersion = deps.schemaVersion || (selector === "bot-only-7d" ? BOT_ONLY_EXPORT_SCHEMA_VERSION : EXPORT_SCHEMA_VERSION);
-    const snapshot = await readSnapshot(sql, { ...options, selector, telemetry: deps.telemetry });
+    const legacyStageAllowlistPlan = selector === "legacy-stage-allowlist-v1"
+      ? deps.legacyStageAllowlistPlan
+      : null;
+    const snapshot = await readSnapshot(sql, {
+      ...options,
+      selector,
+      telemetry: deps.telemetry,
+      legacyStageAllowlistPlan,
+    });
     if (deps.noCandidateIfEmpty && snapshot.candidates.length === 0) {
       return {
         noCandidate: true,
@@ -2075,7 +2196,9 @@ export async function runExport({ argv = process.argv.slice(2), env = process.en
       outputPath: options.outputPath,
       sourcePolicyId: deps.sourcePolicyId || null,
       schemaVersion,
-      legacyStageAllowlist: deps.legacyStageAllowlist || null,
+      legacyStageAllowlist: selector === "legacy-stage-allowlist-v1"
+        ? legacyStageAllowlistPlan.archiveManifest
+        : null,
     });
     if (manifest.sha256.compressed_artifact !== crypto.createHash("sha256").update(archive.compressedBytes).digest("hex")) {
       fail("manifest checksum verification failed");
