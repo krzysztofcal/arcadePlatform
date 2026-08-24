@@ -318,14 +318,17 @@ async function insertDatabaseTableTransaction(tx, fixture, {
     ? `BOT_SEED_BUY_IN:${fixture.tableId}:1`
     : `table:${fixture.tableId}`);
   const payloadHash = "a".repeat(64);
+  const legacyMetadata = typeof metadata === "string";
+  const metadataSql = legacyMetadata ? "to_jsonb($3::text)" : "$3::jsonb";
+  const metadataValue = legacyMetadata ? metadata : JSON.stringify(metadata);
   await tx.unsafe(`
     insert into public.chips_transactions
       (id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at)
-    values ($1::uuid, $2, $3::jsonb, $4, $5, $6, null, $7::timestamptz);
+    values ($1::uuid, $2, ${metadataSql}, $4, $5, $6, null, $7::timestamptz);
   `, [
     transactionId,
     transactionReference,
-    JSON.stringify(metadata),
+    metadataValue,
     key,
     payloadHash,
     transactionType,
@@ -612,107 +615,114 @@ async function ageBoundaryPostgresContract(sql) {
 }
 
 async function archiveSelectorHistoricalIdentityAndMetadataPostgresContract(sql) {
-  await enableTableFence(sql, true);
-  const now = Date.now();
-  const cutoff = new Date(now - (7 * DAY_MS)).toISOString();
-  const createdAt = new Date(now - (10 * DAY_MS)).toISOString();
+  const scopeTableIds = [];
+  const scopeTransactions = [];
+  const legacyMetadataText = (tableId) => JSON.stringify({ tableId });
+  let rolledBack = false;
 
-  const legacyTable = await sql.begin(async (tx) => {
-    const fixture = await createDatabaseTable(tx, "OPEN", LEGACY_SELECTOR_TABLE_ID);
-    await insertDatabaseTableTransaction(tx, fixture, {
+  await sql.begin(async (tx) => {
+    await enableTableFence(tx, true);
+    const now = Date.now();
+    const cutoff = new Date(now - (7 * DAY_MS)).toISOString();
+    const createdAt = new Date(now - (10 * DAY_MS)).toISOString();
+    const rememberTable = (fixture) => {
+      scopeTableIds.push(fixture.tableId);
+      return fixture;
+    };
+    const rememberTransaction = (transaction) => {
+      scopeTransactions.push(transaction);
+      return transaction;
+    };
+
+    const legacyTable = rememberTable(await createDatabaseTable(tx, "OPEN", LEGACY_SELECTOR_TABLE_ID));
+    rememberTransaction(await insertDatabaseTableTransaction(tx, legacyTable, {
       kind: "buyin",
       createdAt,
-      metadata: JSON.stringify({ tableId: fixture.tableId }),
+      metadata: legacyMetadataText(legacyTable.tableId),
       keySuffix: "legacy-buyin",
-    });
-    await insertDatabaseTableTransaction(tx, fixture, {
+    }));
+    rememberTransaction(await insertDatabaseTableTransaction(tx, legacyTable, {
       kind: "cashout",
       createdAt,
-      metadata: JSON.stringify({ tableId: fixture.tableId }),
+      metadata: legacyMetadataText(legacyTable.tableId),
       keySuffix: "legacy-cashout",
-    });
+    }));
     await tx.unsafe("set constraints all immediate;");
-    await tx.unsafe("update public.poker_tables set status = 'CLOSED' where id = $1::uuid;", [fixture.tableId]);
-    return fixture;
-  });
+    await tx.unsafe("update public.poker_tables set status = 'CLOSED' where id = $1::uuid;", [legacyTable.tableId]);
 
-  const legacyRows = await sql.unsafe(BOT_ONLY_CANDIDATE_SQL, [cutoff, 5000, null, null]);
-  assert.ok(
-    legacyRows.length === 2 && legacyRows.every((row) => row.table_id === legacyTable.tableId),
-    `a valid legacy JSONB string must be candidate-eligible: ${JSON.stringify(legacyRows)}`,
-  );
-  const legacyTypes = await sql.unsafe(`
-    select jsonb_typeof(metadata) as metadata_type
-      from public.chips_transactions
-     where idempotency_key in ($1, $2)
-     order by idempotency_key;
-  `, [
-    `bot-seed-buyin:${legacyTable.tableId}:legacy-buyin`,
-    `poker:bot-terminal-cashout:v1:${legacyTable.tableId}:legacy-cashout`,
-  ]);
-  assert.deepEqual(legacyTypes.map((row) => row.metadata_type), ["string", "string"]);
+    const legacyKeys = [
+      `bot-seed-buyin:${legacyTable.tableId}:legacy-buyin`,
+      `poker:bot-terminal-cashout:v1:${legacyTable.tableId}:legacy-cashout`,
+    ];
+    const legacyMetadataProof = await tx.unsafe(`
+      select
+        jsonb_typeof(metadata) as metadata_type,
+        jsonb_typeof((metadata #>> '{}')::jsonb) as unpacked_type,
+        ((metadata #>> '{}')::jsonb ->> 'tableId') as metadata_table_id
+        from public.chips_transactions
+       where idempotency_key = any($1::text[])
+       order by idempotency_key;
+    `, [legacyKeys]);
+    assert.deepEqual(legacyMetadataProof, [
+      { metadata_type: "string", unpacked_type: "object", metadata_table_id: legacyTable.tableId },
+      { metadata_type: "string", unpacked_type: "object", metadata_table_id: legacyTable.tableId },
+    ], "legacy fixture must be one JSONB string containing one JSON object");
 
-  const independentAndTarget = await sql.begin(async (tx) => {
-    const independent = await createDatabaseTable(tx, "OPEN", UNKNOWN_SCOPE_INDEPENDENT_TABLE_ID);
-    await insertDatabaseTableTransaction(tx, independent, { kind: "buyin", createdAt, keySuffix: "known-buyin" });
-    await insertDatabaseTableTransaction(tx, independent, { kind: "cashout", createdAt, keySuffix: "known-cashout" });
+    const independent = rememberTable(await createDatabaseTable(tx, "OPEN", UNKNOWN_SCOPE_INDEPENDENT_TABLE_ID));
+    rememberTransaction(await insertDatabaseTableTransaction(tx, independent, { kind: "buyin", createdAt, keySuffix: "known-buyin" }));
+    rememberTransaction(await insertDatabaseTableTransaction(tx, independent, { kind: "cashout", createdAt, keySuffix: "known-cashout" }));
 
-    const target = await createDatabaseTable(tx, "OPEN", UNKNOWN_SCOPE_TARGET_TABLE_ID);
-    await insertDatabaseTableTransaction(tx, target, { kind: "buyin", createdAt, keySuffix: "known-buyin" });
-    await insertDatabaseTableTransaction(tx, target, { kind: "cashout", createdAt, keySuffix: "known-cashout" });
+    const target = rememberTable(await createDatabaseTable(tx, "OPEN", UNKNOWN_SCOPE_TARGET_TABLE_ID));
+    rememberTransaction(await insertDatabaseTableTransaction(tx, target, { kind: "buyin", createdAt, keySuffix: "known-buyin" }));
+    rememberTransaction(await insertDatabaseTableTransaction(tx, target, { kind: "cashout", createdAt, keySuffix: "known-cashout" }));
     await tx.unsafe("set constraints all immediate;");
     await tx.unsafe(`
       update public.poker_tables
          set status = 'CLOSED'
        where id = any($1::uuid[]);
     `, [[independent.tableId, target.tableId]]);
-    return { independent, target };
-  });
 
-  const historicalFixtures = await sql.begin(async (tx) => {
-    const mismatch = await createDatabaseTable(tx, "OPEN", INVALID_MARKER_MISMATCH_TABLE_ID);
-    const malformed = await createDatabaseTable(tx, "OPEN", INVALID_MARKER_MALFORMED_TABLE_ID);
-    const orphan = await createDatabaseTable(tx, "OPEN", UNKNOWN_SCOPE_ORPHAN_TABLE_ID);
-    return { mismatch, malformed, orphan };
-  });
+    const mismatch = rememberTable(await createDatabaseTable(tx, "OPEN", INVALID_MARKER_MISMATCH_TABLE_ID));
+    const malformed = rememberTable(await createDatabaseTable(tx, "OPEN", INVALID_MARKER_MALFORMED_TABLE_ID));
+    const orphan = rememberTable(await createDatabaseTable(tx, "OPEN", UNKNOWN_SCOPE_ORPHAN_TABLE_ID));
 
-  const unknownRows = await sql.begin(async (tx) => {
     await enableTableFence(tx, false);
-    const { mismatch, malformed, orphan } = historicalFixtures;
-    await insertDatabaseTableTransaction(tx, mismatch, {
+    const mismatchMetadata = legacyMetadataText(UNKNOWN_SCOPE_TARGET_TABLE_ID);
+    rememberTransaction(await insertDatabaseTableTransaction(tx, mismatch, {
       kind: "buyin",
       createdAt,
-      metadata: JSON.stringify({ tableId: UNKNOWN_SCOPE_TARGET_TABLE_ID }),
+      metadata: mismatchMetadata,
       keySuffix: "legacy-mismatch-buyin",
-    });
-    await insertDatabaseTableTransaction(tx, mismatch, {
+    }));
+    rememberTransaction(await insertDatabaseTableTransaction(tx, mismatch, {
       kind: "cashout",
       createdAt,
-      metadata: JSON.stringify({ tableId: UNKNOWN_SCOPE_TARGET_TABLE_ID }),
+      metadata: mismatchMetadata,
       keySuffix: "legacy-mismatch-cashout",
-    });
-    await insertDatabaseTableTransaction(tx, malformed, {
+    }));
+    const malformedMetadata = '{"tableId":';
+    rememberTransaction(await insertDatabaseTableTransaction(tx, malformed, {
       kind: "buyin",
       createdAt,
-      metadata: '{"tableId":',
+      metadata: malformedMetadata,
       keySuffix: "legacy-malformed-buyin",
-    });
-    await insertDatabaseTableTransaction(tx, malformed, {
+    }));
+    rememberTransaction(await insertDatabaseTableTransaction(tx, malformed, {
       kind: "cashout",
       createdAt,
-      metadata: '{"tableId":',
+      metadata: malformedMetadata,
       keySuffix: "legacy-malformed-cashout",
-    });
-    const linked = await insertUnsupportedDatabaseTableTransaction(tx, independentAndTarget.target, {
+    }));
+    const linked = rememberTransaction(await insertUnsupportedDatabaseTableTransaction(tx, target, {
       createdAt,
-      metadata: { tableId: independentAndTarget.target.tableId },
+      metadata: { tableId: target.tableId },
       keySuffix: "linked-to-target",
-    });
-    const unrelated = await insertUnsupportedDatabaseTableTransaction(tx, orphan, {
+    }));
+    const unrelated = rememberTransaction(await insertUnsupportedDatabaseTableTransaction(tx, orphan, {
       createdAt,
       metadata: {},
       keySuffix: "unrelated-history",
-    });
+    }));
     await tx.unsafe("set constraints all immediate;");
     await tx.unsafe(`
       update public.poker_tables
@@ -720,31 +730,100 @@ async function archiveSelectorHistoricalIdentityAndMetadataPostgresContract(sql)
        where id = any($1::uuid[]);
     `, [[mismatch.tableId, malformed.tableId]]);
     await enableTableFence(tx, true);
-    return { linked, unrelated };
+
+    const nullRegistryRows = await tx.unsafe(`
+      select idempotency_key, table_id::text
+        from public.chips_transaction_idempotency
+       where idempotency_key = any($1::text[])
+       order by idempotency_key;
+    `, [[linked.key, unrelated.key]]);
+    assert.deepEqual(nullRegistryRows.map((row) => row.table_id), [null, null], "historical unsupported identities must remain NULL");
+
+    const mismatchMetadataProof = await tx.unsafe(`
+      select
+        registry.table_id::text as registry_table_id,
+        jsonb_typeof(transactions.metadata) as metadata_type,
+        jsonb_typeof((transactions.metadata #>> '{}')::jsonb) as unpacked_type,
+        ((transactions.metadata #>> '{}')::jsonb ->> 'tableId') as metadata_table_id
+        from public.chips_transactions transactions
+        join public.chips_transaction_idempotency registry
+          on registry.transaction_id = transactions.id
+       where transactions.idempotency_key = any($1::text[])
+       order by transactions.idempotency_key;
+    `, [[
+      `bot-seed-buyin:${mismatch.tableId}:legacy-mismatch-buyin`,
+      `poker:bot-terminal-cashout:v1:${mismatch.tableId}:legacy-mismatch-cashout`,
+    ]]);
+    assert.equal(mismatchMetadataProof.length, 2);
+    for (const row of mismatchMetadataProof) {
+      assert.deepEqual(row, {
+        registry_table_id: mismatch.tableId,
+        metadata_type: "string",
+        unpacked_type: "object",
+        metadata_table_id: target.tableId,
+      }, "legacy mismatch must parse as an object before marker comparison");
+      assert.notEqual(row.metadata_table_id, row.registry_table_id, "legacy mismatch marker must differ from the registry table key");
+    }
+    const malformedMetadataProof = await tx.unsafe(`
+      select
+        jsonb_typeof(metadata) as metadata_type,
+        pg_catalog.pg_input_is_valid(metadata #>> '{}', 'jsonb'::text) as unpacked_json_valid
+        from public.chips_transactions
+       where idempotency_key = any($1::text[])
+       order by idempotency_key;
+    `, [[
+      `bot-seed-buyin:${malformed.tableId}:legacy-malformed-buyin`,
+      `poker:bot-terminal-cashout:v1:${malformed.tableId}:legacy-malformed-cashout`,
+    ]]);
+    assert.deepEqual(malformedMetadataProof, [
+      { metadata_type: "string", unpacked_json_valid: false },
+      { metadata_type: "string", unpacked_json_valid: false },
+    ], "malformed fixture must be one invalid JSONB string");
+
+    const selected = await tx.unsafe(BOT_ONLY_CANDIDATE_SQL, [cutoff, 5000, null, null]);
+    assert.equal(selected.length, 4, "only the valid legacy table and independent proof-eligible table should be selected");
+    assert.deepEqual(
+      [...new Set(selected.map((row) => row.table_id))].sort(),
+      [legacyTable.tableId, independent.tableId].sort(),
+      "unrelated NULL identities must not block independent tables, while invalid/target-linked identities remain excluded",
+    );
+    assert.equal(selected.filter((row) => row.table_id === legacyTable.tableId).length, 2, "valid legacy table must contribute both transactions");
+    assert.equal(selected.filter((row) => row.table_id === independent.tableId).length, 2, "independent proof-eligible table must contribute both transactions");
+
+    const blockers = await tx.unsafe(BOT_ONLY_BLOCKING_ANOMALY_SQL, [cutoff, 5000]);
+    const incomplete = blockers.find((row) => row.blocker_code === "identity_set_incomplete");
+    assert.ok(incomplete && Number(incomplete.table_count) >= 1, `target-linked NULL identity must be reported incomplete: ${JSON.stringify(blockers)}`);
+    const unknown = blockers.find((row) => row.blocker_code === "unknown_table_identity");
+    assert.ok(unknown && Number(unknown.transaction_count) >= 2, `historical NULL identities must remain observable: ${JSON.stringify(blockers)}`);
+    const invalidMarker = blockers.find((row) => row.blocker_code === "invalid_marker");
+    assert.equal(Number(invalidMarker?.transaction_count), 4, `legacy mismatch/malformed metadata must be invalid_marker: ${JSON.stringify(blockers)}`);
+    assert.equal(Number(invalidMarker?.table_count), 2, `legacy mismatch/malformed metadata must cover exactly two tables: ${JSON.stringify(blockers)}`);
+
+    throw DB_ROLLBACK;
+  }).catch((error) => {
+    if (error === DB_ROLLBACK) {
+      rolledBack = true;
+      return;
+    }
+    throw error;
   });
 
-  const nullRegistryRows = await sql.unsafe(`
-    select idempotency_key, table_id::text
-      from public.chips_transaction_idempotency
-     where idempotency_key = any($1::text[])
-     order by idempotency_key;
-  `, [[unknownRows.linked.key, unknownRows.unrelated.key]]);
-  assert.deepEqual(nullRegistryRows.map((row) => row.table_id), [null, null], "historical unsupported identities must remain NULL");
-
-  const selected = await sql.unsafe(BOT_ONLY_CANDIDATE_SQL, [cutoff, 5000, null, null]);
-  assert.equal(selected.length, 2, "an unrelated historical NULL identity must not force a global no-op");
-  assert.deepEqual(new Set(selected.map((row) => row.table_id)), new Set([independentAndTarget.independent.tableId]));
-  assert.notEqual(selected[0]?.table_id, independentAndTarget.target.tableId, "a NULL identity with target proof must block that target");
-  assert.notEqual(selected[0]?.table_id, INVALID_MARKER_MISMATCH_TABLE_ID, "a legacy tableId mismatch must be excluded");
-  assert.notEqual(selected[0]?.table_id, INVALID_MARKER_MALFORMED_TABLE_ID, "a malformed legacy string must be excluded");
-
-  const blockers = await sql.unsafe(BOT_ONLY_BLOCKING_ANOMALY_SQL, [cutoff, 5000]);
-  const incomplete = blockers.find((row) => row.blocker_code === "identity_set_incomplete");
-  assert.ok(incomplete && Number(incomplete.table_count) >= 1, `target-linked NULL identity must be reported incomplete: ${JSON.stringify(blockers)}`);
-  const unknown = blockers.find((row) => row.blocker_code === "unknown_table_identity");
-  assert.ok(unknown && Number(unknown.transaction_count) >= 2, `historical NULL identities must remain observable: ${JSON.stringify(blockers)}`);
-  const invalidMarker = blockers.find((row) => row.blocker_code === "invalid_marker");
-  assert.ok(invalidMarker && Number(invalidMarker.transaction_count) >= 4 && Number(invalidMarker.table_count) >= 2, `legacy mismatch/malformed metadata must be invalid_marker: ${JSON.stringify(blockers)}`);
+  assert.equal(rolledBack, true, "archive selector contract must rollback its entire fixture scope");
+  const scopeTransactionIds = scopeTransactions.map((transaction) => transaction.transactionId);
+  const scopeRegistryKeys = scopeTransactions.map((transaction) => transaction.key);
+  const leaked = await sql.unsafe(`
+    select
+      (select count(*) from public.poker_tables where id = any($1::uuid[]))::text as tables,
+      (select count(*) from public.chips_transactions where id = any($2::uuid[]))::text as transactions,
+      (select count(*) from public.chips_entries where transaction_id = any($2::uuid[]))::text as entries,
+      (select count(*) from public.chips_transaction_idempotency where idempotency_key = any($3::text[]))::text as registry;
+  `, [scopeTableIds, scopeTransactionIds, scopeRegistryKeys]);
+  assert.deepEqual(leaked[0], {
+    tables: "0",
+    transactions: "0",
+    entries: "0",
+    registry: "0",
+  }, "archive selector rollback must not leave qualifying tables or ledger rows for later contracts");
 }
 
 async function humanEntryShapeDiagnosticPostgresContract(sql) {
