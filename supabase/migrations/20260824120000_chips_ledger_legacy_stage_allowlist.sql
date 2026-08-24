@@ -229,6 +229,9 @@ security definer
 set search_path = ''
 as $$
 begin
+  if p_execute is null then
+    raise exception 'Ledger archive pruning execute flag must not be NULL';
+  end if;
   if exists (
     select 1 from public.chips_ledger_archive_batches batches
      where batches.object_path = p_object_path
