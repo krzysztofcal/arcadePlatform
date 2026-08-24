@@ -20,6 +20,7 @@ export const BOT_ONLY_RETENTION_DAYS = 7;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const INTEGER_RE = /^-?(?:0|[1-9][0-9]*)$/;
 const PROJECT_REF_RE = /^[a-z0-9]{20}$/;
+const SQLSTATE_RE = /^[0-9A-Z]{5}$/;
 
 // Keep these bindings in sync with scripts/ops/ch-economy-network-maintenance.sh.
 const TARGETS = Object.freeze({
@@ -907,6 +908,59 @@ function normalizeBlockingAnomalies(rows) {
   }));
 }
 
+function sqlState(error) {
+  const value = text(error?.code || error?.sqlState || error?.sqlstate).toUpperCase();
+  return SQLSTATE_RE.test(value) ? value : null;
+}
+
+function sqlSha256(query) {
+  return crypto.createHash("sha256").update(query).digest("hex");
+}
+
+function emitQueryTelemetry(telemetry, event) {
+  const payload = {
+    event: "chips_ledger_query",
+    phase: event.phase,
+    query_name: event.queryName,
+    sql_sha256: sqlSha256(event.query),
+    elapsed_ms: event.elapsedMs,
+    sqlstate: event.sqlstate,
+    read_only: true,
+  };
+  if (typeof telemetry === "function") {
+    telemetry(payload);
+    return;
+  }
+  process.stderr.write(`${stringifyJson(payload)}\n`);
+}
+
+async function observedQuery(tx, { phase, queryName, query, parameters = [], telemetry }) {
+  const startedAt = process.hrtime.bigint();
+  try {
+    const rows = await tx.unsafe(query, parameters);
+    emitQueryTelemetry(telemetry, {
+      phase,
+      queryName,
+      query,
+      elapsedMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
+      sqlstate: "00000",
+    });
+    return rows;
+  } catch (error) {
+    const phaseError = error instanceof Error ? error : new Error(text(error));
+    phaseError.chipsLedgerQueryPhase = phase;
+    phaseError.chipsLedgerQuerySqlState = sqlState(error);
+    emitQueryTelemetry(telemetry, {
+      phase,
+      queryName,
+      query,
+      elapsedMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
+      sqlstate: phaseError.chipsLedgerQuerySqlState,
+    });
+    throw phaseError;
+  }
+}
+
 function normalizeJson(value) {
   if (typeof value !== "string") return value ?? null;
   try {
@@ -1420,8 +1474,14 @@ function resolveOptions(args, env, cwd, now, targetOptions = {}) {
 
 export async function readSnapshot(sql, options) {
   const timestampParam = (value) => value == null || typeof sql.typed !== "function" ? value : sql.typed(value, 25);
+  const telemetry = options.telemetry;
   return sql.begin(async (tx) => {
-    await tx.unsafe("set transaction isolation level repeatable read, read only;");
+    await observedQuery(tx, {
+      phase: "snapshot.read_only_transaction",
+      queryName: "set_transaction_read_only",
+      query: "set transaction isolation level repeatable read, read only;",
+      telemetry,
+    });
     const selector = options.selector || "standard";
     const candidateSql = selector === "standard"
       ? CANDIDATE_SQL
@@ -1430,19 +1490,43 @@ export async function readSnapshot(sql, options) {
         : selector === "bot-only-7d"
           ? BOT_ONLY_CANDIDATE_SQL
           : fail("snapshot selector must be standard, prunable, or bot-only-7d");
-    const candidates = await tx.unsafe(candidateSql, [
-      timestampParam(options.cutoff),
-      options.batchSize,
-      timestampParam(options.cursor?.created_at || null),
-      options.cursor?.id || null,
-    ]);
-    const ids = candidates.map((candidate) => text(candidate.id));
-    const entries = ids.length ? await tx.unsafe(ENTRIES_SQL, [ids]) : [];
-    const blockingAnomalies = selector === "bot-only-7d" && candidates.length === 0
-      ? normalizeBlockingAnomalies(await tx.unsafe(BOT_ONLY_BLOCKING_ANOMALY_SQL, [
+    const candidates = await observedQuery(tx, {
+      phase: "snapshot.candidate_selector",
+      queryName: selector === "standard"
+        ? "standard_candidate_selector"
+        : selector === "prunable"
+          ? "prunable_candidate_selector"
+          : "bot_only_candidate_selector",
+      query: candidateSql,
+      parameters: [
         timestampParam(options.cutoff),
         options.batchSize,
-      ]))
+        timestampParam(options.cursor?.created_at || null),
+        options.cursor?.id || null,
+      ],
+      telemetry,
+    });
+    const ids = candidates.map((candidate) => text(candidate.id));
+    const entries = ids.length
+      ? await observedQuery(tx, {
+        phase: "snapshot.entries",
+        queryName: "snapshot_entries",
+        query: ENTRIES_SQL,
+        parameters: [ids],
+        telemetry,
+      })
+      : [];
+    const blockingAnomalies = selector === "bot-only-7d" && candidates.length === 0
+      ? normalizeBlockingAnomalies(await observedQuery(tx, {
+        phase: "snapshot.blocking_anomalies",
+        queryName: "bot_only_blocking_anomalies",
+        query: BOT_ONLY_BLOCKING_ANOMALY_SQL,
+        parameters: [
+          timestampParam(options.cutoff),
+          options.batchSize,
+        ],
+        telemetry,
+      }))
       : [];
     return { candidates, entries, blockingAnomalies };
   });
@@ -1506,7 +1590,7 @@ export async function runExport({ argv = process.argv.slice(2), env = process.en
   try {
     const selector = deps.selector || "standard";
     const schemaVersion = deps.schemaVersion || (selector === "bot-only-7d" ? BOT_ONLY_EXPORT_SCHEMA_VERSION : EXPORT_SCHEMA_VERSION);
-    const snapshot = await readSnapshot(sql, { ...options, selector });
+    const snapshot = await readSnapshot(sql, { ...options, selector, telemetry: deps.telemetry });
     if (deps.noCandidateIfEmpty && snapshot.candidates.length === 0) {
       return {
         noCandidate: true,

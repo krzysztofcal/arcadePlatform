@@ -96,6 +96,8 @@ function aggregatePayload(result) {
   if (result.state === "error") {
     return {
       ...base,
+      ...(result.phase ? { phase: result.phase } : {}),
+      ...(result.sqlstate ? { sqlstate: result.sqlstate } : {}),
       reason: redactedError(result.reason),
     };
   }
@@ -158,7 +160,13 @@ function writeAggregateSummary(result) {
 
 function emitAggregateError(error, context = {}) {
   try {
-    writeAggregateSummary({ state: "error", reason: error, ...context });
+    writeAggregateSummary({
+      state: "error",
+      reason: error,
+      phase: context.phase || error?.chipsLedgerQueryPhase || null,
+      sqlstate: context.sqlstate || error?.chipsLedgerQuerySqlState || null,
+      ...context,
+    });
   } catch {
     // Preserve the original orchestration error if reporting itself fails.
   }
@@ -240,8 +248,7 @@ async function assertIdentity(sql) {
   return identity;
 }
 
-async function loadOwnBatches(sql, sourcePolicyId = STAGE_AUTOMATION_POLICY_ID) {
-  return sql.unsafe(`select
+export const STAGE_OWN_BATCHES_SQL = `select
     object_path,
     project_ref,
     source_policy_id,
@@ -283,8 +290,11 @@ async function loadOwnBatches(sql, sourcePolicyId = STAGE_AUTOMATION_POLICY_ID) 
     destructive_go_batch_id::text as destructive_go_batch_id
   from public.chips_ledger_archive_batches
   where project_ref = $1
-    and source_policy_id = $2
-  order by created_at desc, object_path desc;`, [STAGE_PROJECT_REF, sourcePolicyId]);
+  and source_policy_id = $2
+  order by created_at desc, object_path desc;`;
+
+async function loadOwnBatches(sql, sourcePolicyId = STAGE_AUTOMATION_POLICY_ID) {
+  return sql.unsafe(STAGE_OWN_BATCHES_SQL, [STAGE_PROJECT_REF, sourcePolicyId]);
 }
 
 export function botOnlyExportArgs(row, artifactPath, manifestPath) {

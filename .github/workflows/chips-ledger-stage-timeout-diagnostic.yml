@@ -1,0 +1,47 @@
+name: Chips Ledger Stage Timeout Diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chips-ledger-stage-timeout-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  stage-timeout-diagnostic:
+    if: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_STAGE_DB_URL: ${{ secrets.SUPABASE_STAGE_DB_URL }}
+      SUPABASE_STAGE_URL: ${{ secrets.SUPABASE_STAGE_URL }}
+      SUPABASE_STAGE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_STAGE_SERVICE_ROLE_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve checked-out commit
+        id: checkout-sha
+        shell: bash
+        run: |
+          set -euo pipefail
+          checked_out_sha="$(git rev-parse HEAD)"
+          test "$checked_out_sha" = "$GITHUB_SHA"
+          printf 'sha=%s\n' "$checked_out_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Run read-only Stage timeout diagnostic
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+        run: node scripts/ops/chips-ledger-stage-timeout-diagnostic.mjs
