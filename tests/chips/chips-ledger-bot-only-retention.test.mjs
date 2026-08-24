@@ -709,9 +709,15 @@ async function archiveSelectorHistoricalIdentityAndMetadataPostgresContract(sql)
       metadata: malformedMetadata,
       keySuffix: "legacy-malformed-cashout",
     }));
+    const blockersBeforeUnknownReference = await tx.unsafe(BOT_ONLY_BLOCKING_ANOMALY_SQL, [cutoff, 5000]);
+    const invalidMarkerBeforeUnknownReference = Number(
+      blockersBeforeUnknownReference.find((row) => row.blocker_code === "invalid_marker")?.transaction_count || 0,
+    );
+    assert.equal(invalidMarkerBeforeUnknownReference, 4, "mismatch and malformed metadata establish the invalid_marker baseline");
     const linked = rememberTransaction(await insertUnsupportedDatabaseTableTransaction(tx, target, {
       createdAt,
-      metadata: { tableId: target.tableId },
+      metadata: {},
+      reference: `table:${target.tableId}`,
       keySuffix: "linked-to-target",
     }));
     const unrelated = rememberTransaction(await insertUnsupportedDatabaseTableTransaction(tx, orphan, {
@@ -735,6 +741,25 @@ async function archiveSelectorHistoricalIdentityAndMetadataPostgresContract(sql)
        order by idempotency_key;
     `, [[linked.key, unrelated.key]]);
     assert.deepEqual(nullRegistryRows.map((row) => row.table_id), [null, null], "historical unsupported identities must remain NULL");
+    const linkedReferenceProof = await tx.unsafe(`
+      select
+        registry.table_id::text as registry_table_id,
+        transactions.reference,
+        jsonb_typeof(transactions.metadata) as metadata_type,
+        jsonb_typeof((transactions.metadata #>> '{}')::jsonb) as unpacked_type,
+        transactions.metadata #>> '{}' as metadata_text
+        from public.chips_transactions transactions
+        join public.chips_transaction_idempotency registry
+          on registry.transaction_id = transactions.id
+       where transactions.idempotency_key = $1;
+    `, [linked.key]);
+    assert.deepEqual(linkedReferenceProof[0], {
+      registry_table_id: null,
+      reference: `table:${target.tableId}`,
+      metadata_type: "string",
+      unpacked_type: "object",
+      metadata_text: "{}",
+    }, "valid reference evidence must remain an unknown identity, not an invalid marker");
 
     const mismatchMetadataProof = await tx.unsafe(`
       select
@@ -784,6 +809,7 @@ async function archiveSelectorHistoricalIdentityAndMetadataPostgresContract(sql)
       [independent.tableId],
       "unrelated NULL identities must not block an independent proof-eligible table",
     );
+    assert.equal(selected.some((row) => row.table_id === target.tableId), false, "valid target reference evidence must block the target table");
     assert.equal(selected.filter((row) => row.table_id === independent.tableId).length, 2, "independent proof-eligible table must contribute both transactions");
 
     await tx.unsafe("update public.poker_tables set status = 'OPEN' where id = $1::uuid;", [independent.tableId]);
@@ -798,7 +824,7 @@ async function archiveSelectorHistoricalIdentityAndMetadataPostgresContract(sql)
     const unknown = blockers.find((row) => row.blocker_code === "unknown_table_identity");
     assert.ok(unknown && Number(unknown.transaction_count) >= 2, `historical NULL identities must remain observable: ${JSON.stringify(blockers)}`);
     const invalidMarker = blockers.find((row) => row.blocker_code === "invalid_marker");
-    assert.equal(Number(invalidMarker?.transaction_count), 4, `legacy mismatch/malformed metadata must be invalid_marker: ${JSON.stringify(blockers)}`);
+    assert.equal(Number(invalidMarker?.transaction_count), invalidMarkerBeforeUnknownReference, `valid NULL-registry reference evidence must not increase invalid_marker: ${JSON.stringify(blockers)}`);
     assert.equal(Number(invalidMarker?.table_count), 2, `legacy mismatch/malformed metadata must cover exactly two tables: ${JSON.stringify(blockers)}`);
 
     throw DB_ROLLBACK;

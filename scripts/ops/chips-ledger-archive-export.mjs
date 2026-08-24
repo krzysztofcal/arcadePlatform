@@ -672,8 +672,10 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, unknown_identity_counts as (
           transactions.reference !~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
           or nullif(pg_catalog.btrim(pg_catalog.split_part(transactions.reference, ':', 2)), '') is null
           or nullif(pg_catalog.btrim(pg_catalog.split_part(transactions.reference, ':', 2)), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-          or registry.table_id is null
-          or pg_catalog.lower(pg_catalog.btrim(pg_catalog.split_part(transactions.reference, ':', 2))) <> registry.table_id::text
+          or (
+            registry.table_id is not null
+            and pg_catalog.lower(pg_catalog.btrim(pg_catalog.split_part(transactions.reference, ':', 2))) <> registry.table_id::text
+          )
         )
       )
 ), entry_shapes as (
