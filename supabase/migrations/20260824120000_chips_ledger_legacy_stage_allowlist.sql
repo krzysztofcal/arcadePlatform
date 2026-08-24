@@ -217,6 +217,9 @@ $$;
 
 -- The normal wrapper cannot route a legacy policy into the normal schema-v2
 -- path.  The dedicated exact-batch function below is the only legacy pruner.
+grant chips_ledger_archive_pruner to postgres;
+set role chips_ledger_archive_pruner;
+
 create or replace function public.chips_prune_committed_archive_batch(
   p_object_path text,
   p_transaction_ids uuid[],
@@ -242,6 +245,8 @@ begin
   return public.chips_prune_committed_archive_batch_internal(p_object_path, p_transaction_ids, p_entry_ids, p_execute);
 end;
 $$;
+
+reset role;
 
 create or replace function public.chips_authorize_legacy_stage_allowlist_batch(
   p_batch_id bigint,
