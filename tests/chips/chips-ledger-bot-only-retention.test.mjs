@@ -29,6 +29,12 @@ const TX_ID = "00000000-0000-4000-8000-000000000021";
 const SYSTEM_ID = "00000000-0000-4000-8000-000000000022";
 const ESCROW_ID = "00000000-0000-4000-8000-000000000023";
 const KEY = `bot-seed-buyin:${TABLE_ID}:1`;
+const LEGACY_SELECTOR_TABLE_ID = "00000000-0000-4000-8000-000000000100";
+const INVALID_MARKER_MISMATCH_TABLE_ID = "00000000-0000-4000-8000-000000000098";
+const INVALID_MARKER_MALFORMED_TABLE_ID = "00000000-0000-4000-8000-000000000097";
+const UNKNOWN_SCOPE_INDEPENDENT_TABLE_ID = "00000000-0000-4000-8000-000000000099";
+const UNKNOWN_SCOPE_TARGET_TABLE_ID = "00000000-0000-4000-8000-000000000102";
+const UNKNOWN_SCOPE_ORPHAN_TABLE_ID = "00000000-0000-4000-8000-000000000103";
 
 function entry(id, amount, accountId, accountType, systemKey = null) {
   return {
@@ -94,6 +100,15 @@ function assertThrowsMessage(fn, pattern) {
 }
 
 function historicalKeyAndEntryBindingContract() {
+  assert.match(BOT_ONLY_CANDIDATE_SQL, /pg_catalog\.pg_input_is_valid/);
+  assert.match(BOT_ONLY_CANDIDATE_SQL, /unknown_target_identity/);
+  assert.doesNotMatch(
+    BOT_ONLY_CANDIDATE_SQL,
+    /from public\.chips_transaction_idempotency unknown\s+where unknown\.tx_type::text in \('TABLE_BUY_IN', 'TABLE_CASH_OUT'\)\s+and unknown\.table_id is null\s+\)/,
+  );
+  assert.match(BOT_ONLY_BLOCKING_ANOMALY_SQL, /transactions\.normalized_metadata/);
+  assert.match(BOT_ONLY_BLOCKING_ANOMALY_SQL, /entry_shapes\.user_id is null/);
+
   assert.deepEqual(parseTableIdempotencyKey(KEY), {
     version: 1,
     format: "bot-seed-buyin",
@@ -262,8 +277,8 @@ async function expectDatabaseError(tx, savepoint, operation, code, pattern) {
   assert.match(caught.message || "", pattern, `${savepoint} error message`);
 }
 
-async function createDatabaseTable(tx, status = "OPEN") {
-  const tableId = randomUUID();
+async function createDatabaseTable(tx, status = "OPEN", tableIdOverride = null) {
+  const tableId = tableIdOverride || randomUUID();
   const escrowAccountId = randomUUID();
   const systemRows = await tx.unsafe(`
     select id
@@ -331,6 +346,86 @@ async function insertDatabaseTableTransaction(tx, fixture, {
     key,
     createdAt: createdAt || new Date().toISOString(),
   };
+}
+
+async function insertUnsupportedDatabaseTableTransaction(tx, fixture, {
+  kind = "buyin",
+  createdAt,
+  metadata = {},
+  reference = null,
+  keySuffix = randomUUID(),
+} = {}) {
+  const transactionId = randomUUID();
+  const amount = 100;
+  const isBuyIn = kind === "buyin";
+  const transactionType = isBuyIn ? "TABLE_BUY_IN" : "TABLE_CASH_OUT";
+  const key = `legacy-unsupported-${kind}:${keySuffix}`;
+  const payloadHash = "d".repeat(64);
+  await tx.unsafe(`
+    insert into public.chips_transactions
+      (id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at)
+    values ($1::uuid, $2, $3::jsonb, $4, $5, $6, null, $7::timestamptz);
+  `, [
+    transactionId,
+    reference,
+    JSON.stringify(metadata),
+    key,
+    payloadHash,
+    transactionType,
+    createdAt || new Date().toISOString(),
+  ]);
+  const systemAmount = isBuyIn ? -amount : amount;
+  const escrowAmount = -systemAmount;
+  const entryRows = await tx.unsafe(`
+    insert into public.chips_entries (transaction_id, account_id, amount, metadata)
+    values
+      ($1::uuid, $2::uuid, $3::bigint, '{}'::jsonb),
+      ($1::uuid, $4::uuid, $5::bigint, '{}'::jsonb)
+    returning id;
+  `, [transactionId, fixture.systemAccountId, systemAmount, fixture.escrowAccountId, escrowAmount]);
+  return {
+    transactionId,
+    entryIds: entryRows.map((row) => String(row.id)),
+    key,
+  };
+}
+
+async function insertHumanUserEscrowTransaction(tx, fixture, { createdAt } = {}) {
+  const userRows = await tx.unsafe(`
+    select id
+      from auth.users
+     order by id
+     limit 1;
+  `);
+  assert.ok(userRows[0]?.id, "human USER/ESCROW fixture requires an auth user");
+  const userId = String(userRows[0].id);
+  const userAccountId = randomUUID();
+  await tx.unsafe(`
+    insert into public.chips_accounts (id, user_id, account_type, status, balance)
+    values ($1::uuid, $2::uuid, 'USER', 'active', 0);
+  `, [userAccountId, userId]);
+  const transactionId = randomUUID();
+  const key = `join-buyin:${fixture.tableId}:${randomUUID()}`;
+  await tx.unsafe(`
+    insert into public.chips_transactions
+      (id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at)
+    values ($1::uuid, $2, $3::jsonb, $4, $5, 'TABLE_BUY_IN', $6::uuid, $7::timestamptz);
+  `, [
+    transactionId,
+    `table:${fixture.tableId}`,
+    JSON.stringify({ tableId: fixture.tableId }),
+    key,
+    "e".repeat(64),
+    userId,
+    createdAt || new Date().toISOString(),
+  ]);
+  await tx.unsafe(`
+    insert into public.chips_entries (transaction_id, account_id, amount, metadata)
+    values
+      ($1::uuid, $2::uuid, -100, '{}'::jsonb),
+      ($1::uuid, $3::uuid, 100, '{}'::jsonb);
+  `, [transactionId, userAccountId, fixture.escrowAccountId]);
+  return { transactionId, userId, userAccountId };
 }
 
 async function historicalKeyAndEntryBindingPostgresContract(sql) {
@@ -514,6 +609,171 @@ async function ageBoundaryPostgresContract(sql) {
   const eligibleAfterCrossing = await sql.unsafe(BOT_ONLY_CANDIDATE_SQL, [youngerCrossedCutoff, 5000, null, null]);
   assert.equal(eligibleAfterCrossing.length, 2, "the complete table becomes eligible only after the younger identity crosses seven days");
   assert.deepEqual(new Set(eligibleAfterCrossing.map((row) => row.table_id)), new Set([mixedTable.tableId]));
+}
+
+async function archiveSelectorHistoricalIdentityAndMetadataPostgresContract(sql) {
+  await enableTableFence(sql, true);
+  const now = Date.now();
+  const cutoff = new Date(now - (7 * DAY_MS)).toISOString();
+  const createdAt = new Date(now - (10 * DAY_MS)).toISOString();
+
+  const legacyTable = await sql.begin(async (tx) => {
+    const fixture = await createDatabaseTable(tx, "OPEN", LEGACY_SELECTOR_TABLE_ID);
+    await insertDatabaseTableTransaction(tx, fixture, {
+      kind: "buyin",
+      createdAt,
+      metadata: JSON.stringify({ tableId: fixture.tableId }),
+      keySuffix: "legacy-buyin",
+    });
+    await insertDatabaseTableTransaction(tx, fixture, {
+      kind: "cashout",
+      createdAt,
+      metadata: JSON.stringify({ tableId: fixture.tableId }),
+      keySuffix: "legacy-cashout",
+    });
+    await tx.unsafe("set constraints all immediate;");
+    await tx.unsafe("update public.poker_tables set status = 'CLOSED' where id = $1::uuid;", [fixture.tableId]);
+    return fixture;
+  });
+
+  const legacyRows = await sql.unsafe(BOT_ONLY_CANDIDATE_SQL, [cutoff, 5000, null, null]);
+  assert.ok(
+    legacyRows.length === 2 && legacyRows.every((row) => row.table_id === legacyTable.tableId),
+    `a valid legacy JSONB string must be candidate-eligible: ${JSON.stringify(legacyRows)}`,
+  );
+  const legacyTypes = await sql.unsafe(`
+    select jsonb_typeof(metadata) as metadata_type
+      from public.chips_transactions
+     where idempotency_key in ($1, $2)
+     order by idempotency_key;
+  `, [
+    `bot-seed-buyin:${legacyTable.tableId}:legacy-buyin`,
+    `poker:bot-terminal-cashout:v1:${legacyTable.tableId}:legacy-cashout`,
+  ]);
+  assert.deepEqual(legacyTypes.map((row) => row.metadata_type), ["string", "string"]);
+
+  const independentAndTarget = await sql.begin(async (tx) => {
+    const independent = await createDatabaseTable(tx, "OPEN", UNKNOWN_SCOPE_INDEPENDENT_TABLE_ID);
+    await insertDatabaseTableTransaction(tx, independent, { kind: "buyin", createdAt, keySuffix: "known-buyin" });
+    await insertDatabaseTableTransaction(tx, independent, { kind: "cashout", createdAt, keySuffix: "known-cashout" });
+
+    const target = await createDatabaseTable(tx, "OPEN", UNKNOWN_SCOPE_TARGET_TABLE_ID);
+    await insertDatabaseTableTransaction(tx, target, { kind: "buyin", createdAt, keySuffix: "known-buyin" });
+    await insertDatabaseTableTransaction(tx, target, { kind: "cashout", createdAt, keySuffix: "known-cashout" });
+    await tx.unsafe("set constraints all immediate;");
+    await tx.unsafe(`
+      update public.poker_tables
+         set status = 'CLOSED'
+       where id = any($1::uuid[]);
+    `, [[independent.tableId, target.tableId]]);
+    return { independent, target };
+  });
+
+  const historicalFixtures = await sql.begin(async (tx) => {
+    const mismatch = await createDatabaseTable(tx, "OPEN", INVALID_MARKER_MISMATCH_TABLE_ID);
+    const malformed = await createDatabaseTable(tx, "OPEN", INVALID_MARKER_MALFORMED_TABLE_ID);
+    const orphan = await createDatabaseTable(tx, "OPEN", UNKNOWN_SCOPE_ORPHAN_TABLE_ID);
+    return { mismatch, malformed, orphan };
+  });
+
+  const unknownRows = await sql.begin(async (tx) => {
+    await enableTableFence(tx, false);
+    const { mismatch, malformed, orphan } = historicalFixtures;
+    await insertDatabaseTableTransaction(tx, mismatch, {
+      kind: "buyin",
+      createdAt,
+      metadata: JSON.stringify({ tableId: UNKNOWN_SCOPE_TARGET_TABLE_ID }),
+      keySuffix: "legacy-mismatch-buyin",
+    });
+    await insertDatabaseTableTransaction(tx, mismatch, {
+      kind: "cashout",
+      createdAt,
+      metadata: JSON.stringify({ tableId: UNKNOWN_SCOPE_TARGET_TABLE_ID }),
+      keySuffix: "legacy-mismatch-cashout",
+    });
+    await insertDatabaseTableTransaction(tx, malformed, {
+      kind: "buyin",
+      createdAt,
+      metadata: '{"tableId":',
+      keySuffix: "legacy-malformed-buyin",
+    });
+    await insertDatabaseTableTransaction(tx, malformed, {
+      kind: "cashout",
+      createdAt,
+      metadata: '{"tableId":',
+      keySuffix: "legacy-malformed-cashout",
+    });
+    const linked = await insertUnsupportedDatabaseTableTransaction(tx, independentAndTarget.target, {
+      createdAt,
+      metadata: { tableId: independentAndTarget.target.tableId },
+      keySuffix: "linked-to-target",
+    });
+    const unrelated = await insertUnsupportedDatabaseTableTransaction(tx, orphan, {
+      createdAt,
+      metadata: {},
+      keySuffix: "unrelated-history",
+    });
+    await tx.unsafe("set constraints all immediate;");
+    await tx.unsafe(`
+      update public.poker_tables
+         set status = 'CLOSED'
+       where id = any($1::uuid[]);
+    `, [[mismatch.tableId, malformed.tableId]]);
+    await enableTableFence(tx, true);
+    return { linked, unrelated };
+  });
+
+  const nullRegistryRows = await sql.unsafe(`
+    select idempotency_key, table_id::text
+      from public.chips_transaction_idempotency
+     where idempotency_key = any($1::text[])
+     order by idempotency_key;
+  `, [[unknownRows.linked.key, unknownRows.unrelated.key]]);
+  assert.deepEqual(nullRegistryRows.map((row) => row.table_id), [null, null], "historical unsupported identities must remain NULL");
+
+  const selected = await sql.unsafe(BOT_ONLY_CANDIDATE_SQL, [cutoff, 5000, null, null]);
+  assert.equal(selected.length, 2, "an unrelated historical NULL identity must not force a global no-op");
+  assert.deepEqual(new Set(selected.map((row) => row.table_id)), new Set([independentAndTarget.independent.tableId]));
+  assert.notEqual(selected[0]?.table_id, independentAndTarget.target.tableId, "a NULL identity with target proof must block that target");
+  assert.notEqual(selected[0]?.table_id, INVALID_MARKER_MISMATCH_TABLE_ID, "a legacy tableId mismatch must be excluded");
+  assert.notEqual(selected[0]?.table_id, INVALID_MARKER_MALFORMED_TABLE_ID, "a malformed legacy string must be excluded");
+
+  const blockers = await sql.unsafe(BOT_ONLY_BLOCKING_ANOMALY_SQL, [cutoff, 5000]);
+  const incomplete = blockers.find((row) => row.blocker_code === "identity_set_incomplete");
+  assert.ok(incomplete && Number(incomplete.table_count) >= 1, `target-linked NULL identity must be reported incomplete: ${JSON.stringify(blockers)}`);
+  const unknown = blockers.find((row) => row.blocker_code === "unknown_table_identity");
+  assert.ok(unknown && Number(unknown.transaction_count) >= 2, `historical NULL identities must remain observable: ${JSON.stringify(blockers)}`);
+  const invalidMarker = blockers.find((row) => row.blocker_code === "invalid_marker");
+  assert.ok(invalidMarker && Number(invalidMarker.transaction_count) >= 4 && Number(invalidMarker.table_count) >= 2, `legacy mismatch/malformed metadata must be invalid_marker: ${JSON.stringify(blockers)}`);
+}
+
+async function humanEntryShapeDiagnosticPostgresContract(sql) {
+  const now = Date.now();
+  const cutoff = new Date(now - (7 * DAY_MS)).toISOString();
+  const createdAt = new Date(now - (10 * DAY_MS)).toISOString();
+  const before = await sql.unsafe(BOT_ONLY_BLOCKING_ANOMALY_SQL, [cutoff, 5000]);
+  const beforeDeferred = Number(before.find((row) => row.blocker_code === "deferred_entry_binding")?.transaction_count || 0);
+  const fixture = await sql.begin(async (tx) => {
+    const value = await createDatabaseTable(tx, "OPEN");
+    await insertHumanUserEscrowTransaction(tx, value, { createdAt });
+    await tx.unsafe("set constraints all immediate;");
+    await tx.unsafe("update public.poker_tables set status = 'CLOSED' where id = $1::uuid;", [value.tableId]);
+    return value;
+  });
+  const after = await sql.unsafe(BOT_ONLY_BLOCKING_ANOMALY_SQL, [cutoff, 5000]);
+  const afterDeferred = Number(after.find((row) => row.blocker_code === "deferred_entry_binding")?.transaction_count || 0);
+  assert.equal(afterDeferred, beforeDeferred, "valid human USER/ESCROW must not be deferred_entry_binding");
+  const identity = await sql.unsafe(`
+    select transactions.user_id::text, count(*)::text as entries
+      from public.chips_transactions transactions
+      join public.chips_entries entries on entries.transaction_id = transactions.id
+     where transactions.tx_type::text = 'TABLE_BUY_IN'
+       and transactions.user_id is not null
+       and transactions.idempotency_key like $1
+     group by transactions.user_id;
+  `, [`join-buyin:${fixture.tableId}:%`]);
+  assert.equal(identity.length, 1);
+  assert.equal(Number(identity[0].entries), 2);
 }
 
 async function readAccountingSnapshot(db, accountIds, transactionIds) {
@@ -810,9 +1070,11 @@ async function runPostgresFundamentalContracts() {
     assert.ok(/(?:_test|reset_contract)$/i.test(databaseRows[0]?.name || ""), "bot-only PostgreSQL tests require a disposable database");
     await historicalKeyAndEntryBindingPostgresContract(sql);
     await concurrencyInsertVersusClosePostgresContract(POSTGRES_TEST_DB_URL);
+    await archiveSelectorHistoricalIdentityAndMetadataPostgresContract(sql);
+    await humanEntryShapeDiagnosticPostgresContract(sql);
     await ageBoundaryPostgresContract(sql);
     await retryDestructiveOperatorPostgresContract(sql);
-    process.stdout.write("chips-ledger-bot-only-retention PostgreSQL four fundamental contracts passed\n");
+    process.stdout.write("chips-ledger-bot-only-retention PostgreSQL selector and fundamental contracts passed\n");
   } finally {
     await sql.end({ timeout: 5 });
   }
