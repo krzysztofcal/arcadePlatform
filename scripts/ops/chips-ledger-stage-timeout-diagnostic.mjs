@@ -16,7 +16,7 @@ import {
   validateStageEnvironment,
 } from "./chips-ledger-stage-automation.mjs";
 
-const DIAGNOSTIC_PROBE_TIMEOUT_MS = 5000;
+const REPLAY_STATEMENT_TIMEOUT_MS = 120000;
 const SQLSTATE_RE = /^[0-9A-Z]{5}$/;
 
 const SETTINGS_SQL = `
@@ -133,11 +133,11 @@ async function explain(sql, queryName, query, parameters) {
   }
 }
 
-async function boundedProbe(sql, queryName, query, parameters) {
+async function replay(sql, queryName, query, parameters) {
   const startedAt = process.hrtime.bigint();
   try {
     await readOnlyTransaction(sql, async (tx) => {
-      await tx.unsafe(`set local statement_timeout = '${DIAGNOSTIC_PROBE_TIMEOUT_MS}ms';`);
+      await tx.unsafe(`set local statement_timeout = '${REPLAY_STATEMENT_TIMEOUT_MS}ms';`);
       await tx.unsafe(query, parameters);
     });
     return {
@@ -145,7 +145,9 @@ async function boundedProbe(sql, queryName, query, parameters) {
       sql_sha256: sqlSha256(query),
       elapsed_ms: Number(process.hrtime.bigint() - startedAt) / 1e6,
       sqlstate: "00000",
-      diagnostic_timeout_ms: DIAGNOSTIC_PROBE_TIMEOUT_MS,
+      statement_timeout_ms: REPLAY_STATEMENT_TIMEOUT_MS,
+      read_only: true,
+      output_rows: false,
     };
   } catch (error) {
     return {
@@ -153,7 +155,9 @@ async function boundedProbe(sql, queryName, query, parameters) {
       sql_sha256: sqlSha256(query),
       elapsed_ms: Number(process.hrtime.bigint() - startedAt) / 1e6,
       sqlstate: sqlState(error),
-      diagnostic_timeout_ms: DIAGNOSTIC_PROBE_TIMEOUT_MS,
+      statement_timeout_ms: REPLAY_STATEMENT_TIMEOUT_MS,
+      read_only: true,
+      output_rows: false,
     };
   }
 }
@@ -183,11 +187,12 @@ export async function runStageTimeoutDiagnostic({ env = process.env, now = new D
       await explain(sql, "snapshot.bot_only_candidate_selector", BOT_ONLY_CANDIDATE_SQL, candidateParameters),
       await explain(sql, "snapshot.bot_only_blocking_anomalies", BOT_ONLY_BLOCKING_ANOMALY_SQL, anomalyParameters),
     ];
-    const probes = [
-      await boundedProbe(sql, "stage.load_own_batches", STAGE_OWN_BATCHES_SQL, ownBatchParameters),
-      await boundedProbe(sql, "snapshot.bot_only_candidate_selector", BOT_ONLY_CANDIDATE_SQL, candidateParameters),
-      await boundedProbe(sql, "snapshot.bot_only_blocking_anomalies", BOT_ONLY_BLOCKING_ANOMALY_SQL, anomalyParameters),
-    ];
+    const selectorReplay = await replay(
+      sql,
+      "snapshot.bot_only_candidate_selector",
+      BOT_ONLY_CANDIDATE_SQL,
+      candidateParameters,
+    );
 
     return {
       event: "chips_ledger_stage_timeout_diagnostic",
@@ -198,12 +203,12 @@ export async function runStageTimeoutDiagnostic({ env = process.env, now = new D
       cutoff,
       statement_timeout: settings,
       explains,
-      bounded_probes: probes,
+      selector_replay: selectorReplay,
       read_only_contract: {
         transaction: "repeatable read, read only",
         explain: "EXPLAIN (FORMAT JSON, VERBOSE, COSTS, SETTINGS), without ANALYZE",
         writes: false,
-        diagnostic_probe_timeout_ms: DIAGNOSTIC_PROBE_TIMEOUT_MS,
+        replay_statement_timeout_ms: REPLAY_STATEMENT_TIMEOUT_MS,
         candidate_result_limit: STAGE_MAX_BATCH_SIZE,
         output_contains_sql_parameters: false,
         output_contains_rows: false,

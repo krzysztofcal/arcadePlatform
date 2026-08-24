@@ -328,7 +328,7 @@ limit $2::int;
 // input-validity check makes malformed legacy strings a row-level fail-closed
 // value instead of aborting the whole snapshot.
 export const BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE = `
-table_transaction_metadata as (
+table_transaction_metadata as materialized (
   select transactions.*,
          case
            when transactions.metadata is not null
@@ -345,7 +345,7 @@ table_transaction_metadata as (
          end as normalized_metadata
     from public.chips_transactions transactions
    where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
-), table_transactions as (
+), table_transaction_classification as materialized (
   select metadata.*,
          metadata.normalized_metadata is not null
            and pg_catalog.jsonb_typeof(metadata.normalized_metadata) = 'object'
@@ -365,11 +365,36 @@ table_transaction_metadata as (
            else null
          end as key_format_from_key
     from table_transaction_metadata metadata
-), unknown_identity_evidence as (
-  -- Only explicit, server-verifiable identity evidence may associate a
-  -- historical NULL registry row with a target.  Unsupported keys without
-  -- such evidence remain intentionally unbound and are not guessed here.
+), table_transactions as materialized (
+  select classified.*,
+         case
+           when classified.metadata_is_object
+             and classified.normalized_metadata ? 'tableId'
+             and nullif(pg_catalog.btrim(classified.normalized_metadata->>'tableId'), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+             then pg_catalog.lower(pg_catalog.btrim(classified.normalized_metadata->>'tableId'))
+           else null
+         end as metadata_table_id,
+         case
+           when classified.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(:.*)?$'
+             then pg_catalog.lower(pg_catalog.btrim(pg_catalog.split_part(classified.reference, ':', 2)))
+           else null
+         end as reference_table_id
+    from table_transaction_classification classified
+), registry_rows as materialized (
   select registry.idempotency_key,
+         registry.transaction_id,
+         registry.payload_hash,
+         registry.tx_type,
+         registry.user_id,
+         registry.transaction_created_at,
+         registry.archive_batch_id,
+         registry.table_id,
+         registry.key_format_version,
+         registry.key_format
+    from public.chips_transaction_idempotency registry
+), unknown_registry_transactions as materialized (
+  select registry.idempotency_key,
+         registry.transaction_id,
          case
            when registry.idempotency_key ~* '^(join-buyin|bot-seed-buyin|managed-bot-seed-buyin):[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[^:]+(:[^:]+)*$'
              then pg_catalog.lower(pg_catalog.btrim(pg_catalog.split_part(registry.idempotency_key, ':', 2)))
@@ -378,47 +403,35 @@ table_transaction_metadata as (
            when registry.idempotency_key ~* '^poker:(rebuy|deferred-leave|bot-terminal-cashout|human-terminal-cashout|bot-replacement-buyin|managed-bot-top-up):v1:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[^:]+(:[^:]+)*$'
              then pg_catalog.lower(pg_catalog.btrim(pg_catalog.split_part(registry.idempotency_key, ':', 4)))
            else null
-         end as table_id
-    from public.chips_transaction_idempotency registry
+         end as key_table_id_from_key,
+         transactions.metadata_table_id,
+         transactions.reference_table_id
+    from registry_rows registry
     join table_transactions transactions on transactions.id = registry.transaction_id
    where registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
      and registry.table_id is null
+), unknown_identity_evidence as (
+  select unknown.idempotency_key,
+         evidence.table_id
+    from unknown_registry_transactions unknown
+    cross join lateral (
+      values
+        (unknown.key_table_id_from_key),
+        (unknown.metadata_table_id),
+        (unknown.reference_table_id)
+    ) evidence(table_id)
+   where evidence.table_id is not null
 
   union all
 
-  select registry.idempotency_key,
-         pg_catalog.lower(pg_catalog.btrim(transactions.normalized_metadata->>'tableId'))
-    from public.chips_transaction_idempotency registry
-    join table_transactions transactions on transactions.id = registry.transaction_id
-   where registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
-     and registry.table_id is null
-     and transactions.metadata_is_object
-     and transactions.normalized_metadata ? 'tableId'
-     and pg_catalog.lower(pg_catalog.btrim(transactions.normalized_metadata->>'tableId')) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-
-  union all
-
-  select registry.idempotency_key,
-         pg_catalog.lower(pg_catalog.btrim(pg_catalog.split_part(transactions.reference, ':', 2)))
-    from public.chips_transaction_idempotency registry
-    join table_transactions transactions on transactions.id = registry.transaction_id
-   where registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
-     and registry.table_id is null
-     and transactions.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(:.*)?$'
-
-  union all
-
-  select distinct registry.idempotency_key,
+  select distinct unknown.idempotency_key,
          pg_catalog.lower(pg_catalog.btrim(pg_catalog.substring(accounts.system_key, 13)))
-    from public.chips_transaction_idempotency registry
-    join table_transactions transactions on transactions.id = registry.transaction_id
-    join public.chips_entries entries on entries.transaction_id = transactions.id
+    from unknown_registry_transactions unknown
+    join public.chips_entries entries on entries.transaction_id = unknown.transaction_id
     join public.chips_accounts accounts on accounts.id = entries.account_id
-   where registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
-     and registry.table_id is null
-     and accounts.account_type::text = 'ESCROW'
+   where accounts.account_type::text = 'ESCROW'
      and accounts.system_key ~* '^POKER_TABLE:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-), unknown_target_identity as (
+), unknown_target_identity as materialized (
   select distinct evidence.idempotency_key, evidence.table_id
     from unknown_identity_evidence evidence
    where evidence.table_id is not null
@@ -426,7 +439,7 @@ table_transaction_metadata as (
 `;
 
 export const BOT_ONLY_CANDIDATE_SQL = `
-with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as (
+with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as materialized (
   select registry.table_id,
          max(registry.transaction_created_at) as newest_created_at,
          count(*)::bigint as identity_count,
@@ -440,10 +453,10 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as (
            coalesce(array_agg(registry.idempotency_key order by registry.idempotency_key)
              filter (where registry.user_id is not null), array[]::text[])
          ) as out_of_scope_keys_sha256
-    from public.chips_transaction_idempotency registry
+    from registry_rows registry
    where registry.table_id is not null
    group by registry.table_id
-), eligible_transactions as (
+), candidate_transactions as materialized (
   select transactions.id,
          transactions.sequence,
          transactions.tx_type,
@@ -457,7 +470,51 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as (
          transactions.created_at,
          registry.table_id as key_table_id,
          registry.key_format_version,
-         registry.key_format,
+         registry.key_format
+    from table_transactions transactions
+    join registry_rows registry
+      on registry.idempotency_key = transactions.idempotency_key
+     and registry.transaction_id = transactions.id
+     and registry.payload_hash = transactions.payload_hash
+     and registry.tx_type = transactions.tx_type
+     and registry.user_id is not distinct from transactions.user_id
+     and registry.transaction_created_at = transactions.created_at
+     and registry.table_id is not null
+     and registry.key_format_version = 1
+     and registry.key_format is not null
+     and registry.key_format = transactions.key_format_from_key
+     and registry.archive_batch_id is null
+   where (
+       $3::timestamptz is null
+       or transactions.created_at > $3::timestamptz
+       or (transactions.created_at = $3::timestamptz and transactions.id > $4::uuid)
+     )
+     and transactions.created_at < $1::timestamptz
+     and transactions.user_id is null
+     and transactions.metadata_is_object
+     and (
+       not (transactions.normalized_metadata ? 'tableId')
+       or transactions.metadata_table_id = registry.table_id::text
+     )
+     and (
+       transactions.reference is null
+       or transactions.reference_table_id = registry.table_id::text
+     )
+), eligible_transactions as (
+  select transactions.id,
+         transactions.sequence,
+         transactions.tx_type,
+         transactions.idempotency_key,
+         transactions.payload_hash,
+         transactions.user_id,
+         transactions.reference,
+         transactions.description,
+         transactions.metadata,
+         transactions.created_by,
+         transactions.created_at,
+         transactions.key_table_id,
+         transactions.key_format_version,
+         transactions.key_format,
          tables.id as table_row_id,
          tables.status::text as table_status,
          tables.has_human_participant,
@@ -470,52 +527,15 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as (
          stats.eligible_count as table_eligible_count,
          stats.out_of_scope_keys_sha256 as table_out_of_scope_keys_sha256,
          count(entries.id)::text as entry_count
-    from table_transactions transactions
-    join public.chips_transaction_idempotency registry
-      on registry.idempotency_key = transactions.idempotency_key
-     and registry.transaction_id = transactions.id
-     and registry.payload_hash = transactions.payload_hash
-     and registry.tx_type = transactions.tx_type
-     and registry.user_id is not distinct from transactions.user_id
-     and registry.transaction_created_at = transactions.created_at
-     and registry.table_id is not null
-     and registry.key_format_version = 1
-     and registry.key_format is not null
-     and registry.key_format = transactions.key_format_from_key
-     and registry.archive_batch_id is null
-    join table_rows stats on stats.table_id = registry.table_id
-    join public.poker_tables tables on tables.id = registry.table_id
+    from candidate_transactions transactions
+    join table_rows stats on stats.table_id = transactions.key_table_id
+    join public.poker_tables tables on tables.id = transactions.key_table_id
     join public.chips_accounts escrow
       on escrow.account_type::text = 'ESCROW'
-     and escrow.system_key = 'POKER_TABLE:' || registry.table_id::text
-   join public.chips_entries entries on entries.transaction_id = transactions.id
-   join public.chips_accounts accounts on accounts.id = entries.account_id
-   where (
-       $3::timestamptz is null
-       or transactions.created_at > $3::timestamptz
-       or (transactions.created_at = $3::timestamptz and transactions.id > $4::uuid)
-     )
-     and transactions.created_at < $1::timestamptz
-     and transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
-     and transactions.user_id is null
-     and transactions.metadata_is_object
-     and (
-       not (transactions.normalized_metadata ? 'tableId')
-       or (
-         nullif(pg_catalog.btrim(transactions.normalized_metadata->>'tableId'), '') is not null
-         and nullif(pg_catalog.btrim(transactions.normalized_metadata->>'tableId'), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-         and pg_catalog.lower(pg_catalog.btrim(transactions.normalized_metadata->>'tableId')) = registry.table_id::text
-       )
-     )
-     and (
-       transactions.reference is null
-       or (
-         transactions.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
-         and nullif(btrim(split_part(transactions.reference, ':', 2)), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-         and lower(btrim(split_part(transactions.reference, ':', 2))) = registry.table_id::text
-       )
-     )
-     and tables.status::text = 'CLOSED'
+     and escrow.system_key = 'POKER_TABLE:' || transactions.key_table_id::text
+    join public.chips_entries entries on entries.transaction_id = transactions.id
+    join public.chips_accounts accounts on accounts.id = entries.account_id
+   where tables.status::text = 'CLOSED'
      and tables.has_human_participant is false
      and tables.bot_only_proof_eligible is true
      and escrow.status::text = 'active'
@@ -523,21 +543,22 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as (
      and stats.newest_created_at < $1::timestamptz
      and stats.eligible_count > 0
      and stats.eligible_count <= $2::int
-    and not exists (
-      select 1
-        from unknown_target_identity unknown
-       where unknown.table_id = registry.table_id::text
-    )
      and not exists (
-       select 1 from table_rows blocked
-        where blocked.table_id = registry.table_id
+       select 1
+         from unknown_target_identity unknown
+        where unknown.table_id = transactions.key_table_id::text
+     )
+     and not exists (
+       select 1
+         from table_rows blocked
+        where blocked.table_id = transactions.key_table_id
           and blocked.eligible_count <> blocked.identity_count
      )
    group by transactions.id, transactions.sequence, transactions.tx_type,
             transactions.idempotency_key, transactions.payload_hash,
             transactions.user_id, transactions.reference, transactions.description,
             transactions.metadata, transactions.created_by, transactions.created_at,
-            registry.table_id, registry.key_format_version, registry.key_format,
+            transactions.key_table_id, transactions.key_format_version, transactions.key_format,
             tables.id, tables.status, tables.has_human_participant,
             tables.bot_only_proof_eligible, escrow.id, escrow.status, escrow.balance,
             stats.newest_created_at, stats.identity_count, stats.eligible_count,
@@ -548,7 +569,7 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as (
      and count(*) filter (where accounts.account_type::text = 'ESCROW') = 1
      and count(*) filter (
        where accounts.account_type::text = 'ESCROW'
-         and accounts.system_key = 'POKER_TABLE:' || registry.table_id::text
+         and accounts.system_key = 'POKER_TABLE:' || transactions.key_table_id::text
      ) = 1
      and bool_and(accounts.status::text = 'active')
      and sum(entries.amount) = 0
@@ -614,7 +635,7 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, unknown_identity_counts as (
          count(distinct unknown.idempotency_key)::bigint as unknown_identity_count
     from unknown_target_identity unknown
    group by unknown.table_id
-), table_rows as (
+), table_rows as materialized (
   select registry.table_id,
          max(registry.transaction_created_at) as newest_created_at,
          count(*)::bigint as identity_count,
@@ -625,7 +646,7 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, unknown_identity_counts as (
              and registry.archive_batch_id is null
          )::bigint as eligible_count,
          coalesce(unknown.unknown_identity_count, 0)::bigint as unknown_identity_count
-    from public.chips_transaction_idempotency registry
+    from registry_rows registry
     left join unknown_identity_counts unknown
       on unknown.table_id = registry.table_id::text
    where registry.table_id is not null
@@ -651,7 +672,7 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, unknown_identity_counts as (
   select transactions.id,
          registry.table_id
     from table_transactions transactions
-    left join public.chips_transaction_idempotency registry
+    left join registry_rows registry
       on registry.idempotency_key = transactions.idempotency_key
      and registry.transaction_id = transactions.id
    where not transactions.metadata_is_object
@@ -659,27 +680,24 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, unknown_identity_counts as (
         transactions.metadata_is_object
         and transactions.normalized_metadata ? 'tableId'
         and (
-          nullif(pg_catalog.btrim(transactions.normalized_metadata->>'tableId'), '') is null
-          or nullif(pg_catalog.btrim(transactions.normalized_metadata->>'tableId'), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          transactions.metadata_table_id is null
           or (
             registry.table_id is not null
-            and pg_catalog.lower(pg_catalog.btrim(transactions.normalized_metadata->>'tableId')) <> registry.table_id::text
+            and transactions.metadata_table_id <> registry.table_id::text
           )
         )
       )
       or (
         transactions.reference is not null
         and (
-          transactions.reference !~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
-          or nullif(pg_catalog.btrim(pg_catalog.split_part(transactions.reference, ':', 2)), '') is null
-          or nullif(pg_catalog.btrim(pg_catalog.split_part(transactions.reference, ':', 2)), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          transactions.reference_table_id is null
           or (
             registry.table_id is not null
-            and pg_catalog.lower(pg_catalog.btrim(pg_catalog.split_part(transactions.reference, ':', 2))) <> registry.table_id::text
+            and transactions.reference_table_id <> registry.table_id::text
           )
         )
       )
-), entry_shapes as (
+), entry_shapes as materialized (
   select transactions.id,
          registry.table_id,
          transactions.tx_type::text as tx_type,
@@ -697,7 +715,7 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, unknown_identity_counts as (
          coalesce(sum(entries.amount) filter (where accounts.account_type::text = 'ESCROW'), 0)::numeric as escrow_amount,
          coalesce(sum(entries.amount), 0)::numeric as net_amount
     from table_transactions transactions
-    left join public.chips_transaction_idempotency registry
+    left join registry_rows registry
       on registry.idempotency_key = transactions.idempotency_key
      and registry.transaction_id = transactions.id
     left join public.chips_entries entries on entries.transaction_id = transactions.id
@@ -707,7 +725,7 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, unknown_identity_counts as (
   select 'unknown_table_identity'::text as blocker_code,
          count(*)::bigint as transaction_count,
          0::bigint as table_count
-    from public.chips_transaction_idempotency registry
+    from registry_rows registry
    where registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
      and registry.table_id is null
 
@@ -716,12 +734,11 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, unknown_identity_counts as (
   select 'missing_registry_identity',
          count(*)::bigint,
          0::bigint
-    from public.chips_transactions transactions
-    left join public.chips_transaction_idempotency registry
+    from table_transactions transactions
+    left join registry_rows registry
       on registry.idempotency_key = transactions.idempotency_key
      and registry.transaction_id = transactions.id
-   where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
-     and registry.idempotency_key is null
+   where registry.idempotency_key is null
 
   union all
 

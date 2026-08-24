@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import fs from "node:fs";
 import postgres from "postgres";
 
@@ -35,6 +36,147 @@ const INVALID_MARKER_MALFORMED_TABLE_ID = "00000000-0000-4000-8000-000000000097"
 const UNKNOWN_SCOPE_INDEPENDENT_TABLE_ID = "00000000-0000-4000-8000-000000000099";
 const UNKNOWN_SCOPE_TARGET_TABLE_ID = "00000000-0000-4000-8000-000000000102";
 const UNKNOWN_SCOPE_ORPHAN_TABLE_ID = "00000000-0000-4000-8000-000000000103";
+const PERFORMANCE_REGISTRY_ROW_COUNT = 65000;
+const PERFORMANCE_UNKNOWN_TABLE_ROW_COUNT = 2052;
+
+const REFERENCE_CANDIDATE_IDS_SQL = `
+with normalized as (
+  select transactions.*,
+         case
+           when transactions.metadata is not null
+             and jsonb_typeof(transactions.metadata) = 'object'
+             then transactions.metadata
+           when transactions.metadata is not null
+             and jsonb_typeof(transactions.metadata) = 'string'
+             and pg_catalog.pg_input_is_valid(transactions.metadata #>> '{}', 'jsonb'::text)
+             then (transactions.metadata #>> '{}')::jsonb
+           else null::jsonb
+         end as normalized_metadata
+    from public.chips_transactions transactions
+   where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+), table_stats as (
+  select registry.table_id,
+         max(registry.transaction_created_at) as newest_created_at,
+         count(*)::bigint as identity_count,
+         count(*) filter (
+           where registry.user_id is null
+             and registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+             and registry.transaction_created_at < $1::timestamptz
+             and registry.archive_batch_id is null
+         )::bigint as eligible_count
+    from public.chips_transaction_idempotency registry
+   where registry.table_id is not null
+   group by registry.table_id
+), eligible as (
+  select transactions.id,
+         transactions.created_at,
+         transactions.tx_type,
+         registry.table_id,
+         stats.newest_created_at,
+         stats.identity_count,
+         stats.eligible_count,
+         tables.status::text as table_status,
+         tables.has_human_participant,
+         tables.bot_only_proof_eligible,
+         escrow.status::text as escrow_status,
+         escrow.balance as escrow_balance,
+         count(entries.id) as entry_count,
+         count(*) filter (where accounts.account_type::text = 'USER') as user_entry_count,
+         count(*) filter (where accounts.account_type::text = 'SYSTEM') as system_entry_count,
+         count(*) filter (where accounts.account_type::text = 'ESCROW') as escrow_entry_count,
+         count(*) filter (
+           where accounts.account_type::text = 'ESCROW'
+             and accounts.system_key = 'POKER_TABLE:' || registry.table_id::text
+         ) as matching_escrow_count,
+         bool_and(accounts.status::text = 'active') as all_entries_active,
+         sum(entries.amount) as net_amount,
+         sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM') as system_amount,
+         sum(entries.amount) filter (where accounts.account_type::text = 'ESCROW') as escrow_amount
+    from normalized transactions
+    join public.chips_transaction_idempotency registry
+      on registry.idempotency_key = transactions.idempotency_key
+     and registry.transaction_id = transactions.id
+     and registry.payload_hash = transactions.payload_hash
+     and registry.tx_type = transactions.tx_type
+     and registry.user_id is not distinct from transactions.user_id
+     and registry.transaction_created_at = transactions.created_at
+     and registry.table_id is not null
+     and registry.key_format_version = 1
+     and registry.key_format = (public.chips_parse_table_idempotency_key(transactions.idempotency_key)->>'format')
+     and registry.archive_batch_id is null
+    join table_stats stats on stats.table_id = registry.table_id
+    join public.poker_tables tables on tables.id = registry.table_id
+    join public.chips_accounts escrow
+      on escrow.account_type::text = 'ESCROW'
+     and escrow.system_key = 'POKER_TABLE:' || registry.table_id::text
+    join public.chips_entries entries on entries.transaction_id = transactions.id
+    join public.chips_accounts accounts on accounts.id = entries.account_id
+   where transactions.created_at < $1::timestamptz
+     and transactions.user_id is null
+     and transactions.metadata is not null
+     and jsonb_typeof(transactions.metadata) in ('object', 'string')
+     and jsonb_typeof(transactions.normalized_metadata) = 'object'
+     and (
+       not (transactions.normalized_metadata ? 'tableId')
+       or (
+         nullif(btrim(transactions.normalized_metadata->>'tableId'), '') is not null
+         and nullif(btrim(transactions.normalized_metadata->>'tableId'), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+         and lower(btrim(transactions.normalized_metadata->>'tableId')) = registry.table_id::text
+       )
+     )
+     and (
+       transactions.reference is null
+       or (
+         transactions.reference ~* '^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):'
+         and nullif(btrim(split_part(transactions.reference, ':', 2)), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+         and lower(btrim(split_part(transactions.reference, ':', 2))) = registry.table_id::text
+       )
+     )
+     and tables.status::text = 'CLOSED'
+     and tables.has_human_participant is false
+     and tables.bot_only_proof_eligible is true
+     and escrow.status::text = 'active'
+     and escrow.balance = 0
+     and stats.newest_created_at < $1::timestamptz
+     and stats.eligible_count > 0
+     and stats.eligible_count <= $2::int
+   group by transactions.id, transactions.created_at, transactions.tx_type,
+            registry.table_id, stats.newest_created_at, stats.identity_count,
+            stats.eligible_count, tables.status, tables.has_human_participant,
+            tables.bot_only_proof_eligible, escrow.status, escrow.balance
+  having count(*) = 2
+     and count(*) filter (where accounts.account_type::text = 'USER') = 0
+     and count(*) filter (where accounts.account_type::text = 'SYSTEM') = 1
+     and count(*) filter (where accounts.account_type::text = 'ESCROW') = 1
+     and count(*) filter (
+       where accounts.account_type::text = 'ESCROW'
+         and accounts.system_key = 'POKER_TABLE:' || registry.table_id::text
+     ) = 1
+     and bool_and(accounts.status::text = 'active')
+     and sum(entries.amount) = 0
+     and (
+       (transactions.tx_type::text = 'TABLE_BUY_IN'
+        and sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM') < 0
+        and sum(entries.amount) filter (where accounts.account_type::text = 'ESCROW') > 0)
+       or
+       (transactions.tx_type::text = 'TABLE_CASH_OUT'
+        and sum(entries.amount) filter (where accounts.account_type::text = 'ESCROW') < 0
+        and sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM') > 0)
+     )
+), selected_table as (
+  select table_id
+    from eligible
+   group by table_id
+   having count(*) = max(eligible_count)
+   order by table_id
+   limit 1
+)
+select eligible.id::text as id,
+       eligible.table_id::text as table_id
+  from eligible
+  join selected_table on selected_table.table_id = eligible.table_id
+ order by eligible.created_at asc, eligible.id asc;
+`;
 
 function entry(id, amount, accountId, accountType, systemKey = null) {
   return {
@@ -97,6 +239,18 @@ function botRecord(candidate = botCandidate(), entries = [
 
 function assertThrowsMessage(fn, pattern) {
   assert.throws(fn, pattern);
+}
+
+function collectExplainPlanNodes(plan, nodes = []) {
+  if (!plan || typeof plan !== "object") return nodes;
+  if (plan["Node Type"]) nodes.push(plan);
+  for (const child of plan.Plans || []) collectExplainPlanNodes(child, nodes);
+  return nodes;
+}
+
+function explainPlanRoot(rows) {
+  const payload = rows[0]?.["QUERY PLAN"] || rows[0]?.["query plan"];
+  return payload?.[0]?.Plan || null;
 }
 
 function historicalKeyAndEntryBindingContract() {
@@ -883,6 +1037,115 @@ async function humanEntryShapeDiagnosticPostgresContract(sql) {
   assert.equal(Number(identity[0].entries), 2);
 }
 
+async function selectorResultEquivalenceAndPerformancePostgresContract(sql) {
+  let rolledBack = false;
+  let fixture = null;
+  await sql.begin(async (tx) => {
+    await enableTableFence(tx, true);
+    const now = Date.now();
+    const cutoff = new Date(now - (7 * DAY_MS)).toISOString();
+    const createdAt = new Date(now - (10 * DAY_MS)).toISOString();
+    fixture = await createDatabaseTable(tx, "OPEN");
+    await insertDatabaseTableTransaction(tx, fixture, { createdAt, keySuffix: "equivalence-buyin" });
+    await insertDatabaseTableTransaction(tx, fixture, { kind: "cashout", createdAt, keySuffix: "equivalence-cashout" });
+    await tx.unsafe("set constraints all immediate;");
+    await tx.unsafe("update public.poker_tables set status = 'CLOSED' where id = $1::uuid;", [fixture.tableId]);
+
+    const parameters = [cutoff, 5000, null, null];
+    const baselineBlockers = await tx.unsafe(BOT_ONLY_BLOCKING_ANOMALY_SQL, [cutoff, 5000]);
+    const optimized = await tx.unsafe(BOT_ONLY_CANDIDATE_SQL, parameters);
+    const reference = await tx.unsafe(REFERENCE_CANDIDATE_IDS_SQL, [cutoff, 5000]);
+    assert.deepEqual(
+      optimized.map((row) => ({ id: row.id, table_id: row.table_id })),
+      reference.map((row) => ({ id: row.id, table_id: row.table_id })),
+      "optimized selector must be result-equivalent to the independent semantic reference",
+    );
+    assert.deepEqual(
+      await tx.unsafe(BOT_ONLY_BLOCKING_ANOMALY_SQL, [cutoff, 5000]),
+      baselineBlockers,
+      "a valid equivalence fixture must not add blockers",
+    );
+
+    await tx.unsafe("set local statement_timeout = '30000ms';");
+    await tx.unsafe(`
+      insert into public.chips_transaction_idempotency
+        (idempotency_key, transaction_id, payload_hash, tx_type, user_id, transaction_created_at)
+      select 'perf-registry-' || g::text, gen_random_uuid(), repeat(md5(g::text), 2), 'BUY_IN', null,
+             timezone('utc', now()) - interval '10 days'
+        from generate_series(1, $1::int) g;
+    `, [PERFORMANCE_REGISTRY_ROW_COUNT]);
+    await tx.unsafe(`
+      insert into public.chips_transaction_idempotency
+        (idempotency_key, transaction_id, payload_hash, tx_type, user_id, transaction_created_at)
+      select 'perf-unknown-table-' || g::text, gen_random_uuid(), repeat(md5(('unknown-' || g)::text), 2), 'TABLE_BUY_IN', null,
+             timezone('utc', now()) - interval '10 days'
+        from generate_series(1, $1::int) g;
+    `, [PERFORMANCE_UNKNOWN_TABLE_ROW_COUNT]);
+
+    const candidateStarted = performance.now();
+    const performanceCandidates = await tx.unsafe(BOT_ONLY_CANDIDATE_SQL, parameters);
+    const candidateElapsedMs = performance.now() - candidateStarted;
+    const blockerStarted = performance.now();
+    const performanceBlockers = await tx.unsafe(BOT_ONLY_BLOCKING_ANOMALY_SQL, [cutoff, 5000]);
+    const blockerElapsedMs = performance.now() - blockerStarted;
+    assert.deepEqual(
+      performanceCandidates.map((row) => ({ id: row.id, table_id: row.table_id })),
+      reference.map((row) => ({ id: row.id, table_id: row.table_id })),
+      "registry volume must not change selector results",
+    );
+    assert.equal(
+      Number(performanceBlockers.find((row) => row.blocker_code === "unknown_table_identity")?.transaction_count),
+      Number(baselineBlockers.find((row) => row.blocker_code === "unknown_table_identity")?.transaction_count || 0)
+        + PERFORMANCE_UNKNOWN_TABLE_ROW_COUNT,
+    );
+    assert.ok(candidateElapsedMs < 10000, `candidate selector must remain bounded on the disposable Stage-sized fixture: ${candidateElapsedMs}ms`);
+    assert.ok(blockerElapsedMs < 10000, `blocker selector must remain bounded on the disposable Stage-sized fixture: ${blockerElapsedMs}ms`);
+
+    const candidatePlan = explainPlanRoot(await tx.unsafe(
+      `explain (format json, verbose true, costs true, settings true) ${BOT_ONLY_CANDIDATE_SQL}`,
+      parameters,
+    ));
+    const blockerPlan = explainPlanRoot(await tx.unsafe(
+      `explain (format json, verbose true, costs true, settings true) ${BOT_ONLY_BLOCKING_ANOMALY_SQL}`,
+      [cutoff, 5000],
+    ));
+    for (const [label, plan] of [["candidate", candidatePlan], ["blocker", blockerPlan]]) {
+      assert.ok(plan, `${label} EXPLAIN plan must be present`);
+      const nodes = collectExplainPlanNodes(plan);
+      assert.ok(
+        nodes.filter((node) => node["Node Type"] === "Seq Scan" && node["Relation Name"] === "chips_transaction_idempotency").length <= 1,
+        `${label} must physically scan chips_transaction_idempotency at most once`,
+      );
+      assert.ok(
+        nodes.filter((node) => node["Node Type"] === "Seq Scan" && node["Relation Name"] === "chips_transactions").length <= 1,
+        `${label} must physically scan chips_transactions at most once`,
+      );
+    }
+    throw DB_ROLLBACK;
+  }).catch((error) => {
+    if (error === DB_ROLLBACK) {
+      rolledBack = true;
+      return;
+    }
+    throw error;
+  });
+
+  assert.equal(rolledBack, true, "equivalence and performance fixture must rollback completely");
+  const leaked = await sql.unsafe(`
+    select
+      (select count(*) from public.poker_tables where id = $1::uuid)::text as tables,
+      (select count(*) from public.chips_transactions where id in (
+        select transaction_id from public.chips_transaction_idempotency where idempotency_key like 'perf-%'
+      ))::text as performance_transactions,
+      (select count(*) from public.chips_transaction_idempotency where idempotency_key like 'perf-%')::text as performance_registry;
+  `, [fixture.tableId]);
+  assert.deepEqual(leaked[0], {
+    tables: "0",
+    performance_transactions: "0",
+    performance_registry: "0",
+  }, "equivalence and performance fixture must not leak rows");
+}
+
 async function readAccountingSnapshot(db, accountIds, transactionIds) {
   const accounts = await db.unsafe(`
     select id::text, balance::text, next_entry_seq::text
@@ -1175,6 +1438,7 @@ async function runPostgresFundamentalContracts() {
   try {
     const databaseRows = await sql`select current_database() as name;`;
     assert.ok(/(?:_test|reset_contract)$/i.test(databaseRows[0]?.name || ""), "bot-only PostgreSQL tests require a disposable database");
+    await selectorResultEquivalenceAndPerformancePostgresContract(sql);
     await historicalKeyAndEntryBindingPostgresContract(sql);
     await concurrencyInsertVersusClosePostgresContract(POSTGRES_TEST_DB_URL);
     await archiveSelectorHistoricalIdentityAndMetadataPostgresContract(sql);

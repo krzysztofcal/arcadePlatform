@@ -7,7 +7,10 @@ const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-timeout-d
 assert.match(diagnostic, /set transaction isolation level repeatable read, read only/);
 assert.match(diagnostic, /explain \(format json, verbose true, costs true, settings true\)/i);
 assert.doesNotMatch(diagnostic, /EXPLAIN\s*\([^)]*ANALYZE/i);
-assert.match(diagnostic, /set local statement_timeout = '\$\{DIAGNOSTIC_PROBE_TIMEOUT_MS\}ms'/);
+assert.match(diagnostic, /set local statement_timeout = '\$\{REPLAY_STATEMENT_TIMEOUT_MS\}ms'/);
+assert.match(diagnostic, /selectorReplay/);
+assert.match(diagnostic, /statement_timeout_ms: REPLAY_STATEMENT_TIMEOUT_MS/);
+assert.doesNotMatch(diagnostic, /boundedProbe|DIAGNOSTIC_PROBE_TIMEOUT_MS/);
 assert.match(diagnostic, /candidate_result_limit: STAGE_MAX_BATCH_SIZE/);
 assert.match(diagnostic, /output_contains_sql_parameters: false/);
 assert.match(diagnostic, /output_contains_rows: false/);
