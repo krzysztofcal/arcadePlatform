@@ -348,7 +348,21 @@ table_transaction_metadata as (
   select metadata.*,
          metadata.normalized_metadata is not null
            and pg_catalog.jsonb_typeof(metadata.normalized_metadata) = 'object'
-           as metadata_is_object
+           as metadata_is_object,
+         case
+           when metadata.idempotency_key ~ '^join-buyin:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[^:]+(:[^:]+)*$' then 'join-buyin'
+           when metadata.idempotency_key ~ '^bot-seed-buyin:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[^:]+(:[^:]+)*$' then 'bot-seed-buyin'
+           when metadata.idempotency_key ~ '^managed-bot-seed-buyin:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[^:]+(:[^:]+)*$' then 'managed-bot-seed-buyin'
+           when metadata.idempotency_key ~ '^poker:leave:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[^:]+(:[^:]+)*$' then 'poker:leave'
+           when metadata.idempotency_key ~ '^poker:inactive_cleanup:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[^:]+(:[^:]+)*$' then 'poker:inactive_cleanup'
+           when metadata.idempotency_key ~ '^poker:rebuy:v1:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[^:]+(:[^:]+)*$' then 'poker:rebuy:v1'
+           when metadata.idempotency_key ~ '^poker:deferred-leave:v1:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[^:]+(:[^:]+)*$' then 'poker:deferred-leave:v1'
+           when metadata.idempotency_key ~ '^poker:bot-terminal-cashout:v1:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[^:]+(:[^:]+)*$' then 'poker:bot-terminal-cashout:v1'
+           when metadata.idempotency_key ~ '^poker:human-terminal-cashout:v1:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[^:]+(:[^:]+)*$' then 'poker:human-terminal-cashout:v1'
+           when metadata.idempotency_key ~ '^poker:bot-replacement-buyin:v1:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[^:]+(:[^:]+)*$' then 'poker:bot-replacement-buyin:v1'
+           when metadata.idempotency_key ~ '^poker:managed-bot-top-up:v1:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[^:]+(:[^:]+)*$' then 'poker:managed-bot-top-up:v1'
+           else null
+         end as key_format_from_key
     from table_transaction_metadata metadata
 ), unknown_identity_evidence as (
   -- Only explicit, server-verifiable identity evidence may associate a
@@ -394,7 +408,7 @@ table_transaction_metadata as (
   union all
 
   select distinct registry.idempotency_key,
-         pg_catalog.lower(pg_catalog.btrim(pg_catalog.substring(accounts.system_key from 13)))
+         pg_catalog.lower(pg_catalog.btrim(pg_catalog.substring(accounts.system_key, 13)))
     from public.chips_transaction_idempotency registry
     join table_transactions transactions on transactions.id = registry.transaction_id
     join public.chips_entries entries on entries.transaction_id = transactions.id
@@ -466,7 +480,7 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as (
      and registry.table_id is not null
      and registry.key_format_version = 1
      and registry.key_format is not null
-     and registry.key_format = public.chips_parse_table_idempotency_key(transactions.idempotency_key)->>'format'
+     and registry.key_format = transactions.key_format_from_key
      and registry.archive_batch_id is null
     join table_rows stats on stats.table_id = registry.table_id
     join public.poker_tables tables on tables.id = registry.table_id
@@ -646,8 +660,10 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, unknown_identity_counts as (
         and (
           nullif(pg_catalog.btrim(transactions.normalized_metadata->>'tableId'), '') is null
           or nullif(pg_catalog.btrim(transactions.normalized_metadata->>'tableId'), '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-          or registry.table_id is null
-          or pg_catalog.lower(pg_catalog.btrim(transactions.normalized_metadata->>'tableId')) <> registry.table_id::text
+          or (
+            registry.table_id is not null
+            and pg_catalog.lower(pg_catalog.btrim(transactions.normalized_metadata->>'tableId')) <> registry.table_id::text
+          )
         )
       )
       or (

@@ -648,6 +648,7 @@ async function archiveSelectorHistoricalIdentityAndMetadataPostgresContract(sql)
       keySuffix: "legacy-cashout",
     }));
     await tx.unsafe("set constraints all immediate;");
+    await tx.unsafe("set constraints all deferred;");
     await tx.unsafe("update public.poker_tables set status = 'CLOSED' where id = $1::uuid;", [legacyTable.tableId]);
 
     const legacyKeys = [
@@ -676,6 +677,7 @@ async function archiveSelectorHistoricalIdentityAndMetadataPostgresContract(sql)
     rememberTransaction(await insertDatabaseTableTransaction(tx, target, { kind: "buyin", createdAt, keySuffix: "known-buyin" }));
     rememberTransaction(await insertDatabaseTableTransaction(tx, target, { kind: "cashout", createdAt, keySuffix: "known-cashout" }));
     await tx.unsafe("set constraints all immediate;");
+    await tx.unsafe("set constraints all deferred;");
     await tx.unsafe(`
       update public.poker_tables
          set status = 'CLOSED'
@@ -724,6 +726,7 @@ async function archiveSelectorHistoricalIdentityAndMetadataPostgresContract(sql)
       keySuffix: "unrelated-history",
     }));
     await tx.unsafe("set constraints all immediate;");
+    await tx.unsafe("set constraints all deferred;");
     await tx.unsafe(`
       update public.poker_tables
          set status = 'CLOSED'
@@ -781,14 +784,19 @@ async function archiveSelectorHistoricalIdentityAndMetadataPostgresContract(sql)
     ], "malformed fixture must be one invalid JSONB string");
 
     const selected = await tx.unsafe(BOT_ONLY_CANDIDATE_SQL, [cutoff, 5000, null, null]);
-    assert.equal(selected.length, 4, "only the valid legacy table and independent proof-eligible table should be selected");
+    assert.equal(selected.length, 2, "the deterministic selector must choose one complete table per batch");
     assert.deepEqual(
       [...new Set(selected.map((row) => row.table_id))].sort(),
-      [legacyTable.tableId, independent.tableId].sort(),
-      "unrelated NULL identities must not block independent tables, while invalid/target-linked identities remain excluded",
+      [independent.tableId],
+      "unrelated NULL identities must not block an independent proof-eligible table",
     );
-    assert.equal(selected.filter((row) => row.table_id === legacyTable.tableId).length, 2, "valid legacy table must contribute both transactions");
     assert.equal(selected.filter((row) => row.table_id === independent.tableId).length, 2, "independent proof-eligible table must contribute both transactions");
+
+    await tx.unsafe("update public.poker_tables set status = 'OPEN' where id = $1::uuid;", [independent.tableId]);
+    const legacySelected = await tx.unsafe(BOT_ONLY_CANDIDATE_SQL, [cutoff, 5000, null, null]);
+    assert.equal(legacySelected.length, 2, "the valid legacy table must remain selectable when it is the next complete table");
+    assert.deepEqual([...new Set(legacySelected.map((row) => row.table_id))], [legacyTable.tableId], "valid legacy metadata must pass marker validation");
+    assert.equal(legacySelected.filter((row) => row.table_id === legacyTable.tableId).length, 2, "valid legacy table must contribute both transactions");
 
     const blockers = await tx.unsafe(BOT_ONLY_BLOCKING_ANOMALY_SQL, [cutoff, 5000]);
     const incomplete = blockers.find((row) => row.blocker_code === "identity_set_incomplete");
