@@ -31,6 +31,7 @@ import {
   writeLegacyPlanFiles,
 } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist.mjs";
 import { runLegacyStageAllowlistFreeze } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-freeze.mjs";
+import { runLegacyStageAllowlistExecute } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-execute.mjs";
 import { runLegacyStagePrepareOnly } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist.mjs";
 import { buildPruneEvidence } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
 import { storeArchive, verifyArchiveBytes, verifyLocalArchive } from "../../scripts/ops/chips-ledger-archive-store.mjs";
@@ -438,6 +439,7 @@ function makeLegacyRunnerAdapters() {
   let manifestInsertCalls = 0;
   let proofCalls = 0;
   let planUploadCalls = 0;
+  let executeCleanupCalls = 0;
 
   async function executeSql(query) {
     if (/^\s*set transaction isolation level repeatable read, read only;/i.test(query)) return [];
@@ -529,10 +531,41 @@ function makeLegacyRunnerAdapters() {
     },
     async registerLegacyStageAllowlistProof() {
       proofCalls += 1;
-      storedManifestRow = { ...storedManifestRow, archive_proof_verified_at: "2026-08-24T00:01:00.000000Z" };
+      storedManifestRow = {
+        ...storedManifestRow,
+        archive_proof_verified_at: "2026-08-24T00:01:00.000000Z",
+        archived_transaction_ids_sha256: fixtureEvidence.transactionIdsSha256,
+        archived_entry_ids_sha256: fixtureEvidence.entryIdsSha256,
+      };
       return { state: "proof_registered" };
     },
-    async cleanupLegacyStageAllowlist() { return { state: "ready" }; },
+    async cleanupLegacyStageAllowlist(_objectPath, evidence, execute, approvedBatchId) {
+      if (!execute) return { state: "ready" };
+      executeCleanupCalls += 1;
+      assert.equal(approvedBatchId, "9001");
+      storedManifestRow = {
+        ...storedManifestRow,
+        pruned_at: "2026-08-24T00:02:00.000000Z",
+        pruned_transaction_count: String(evidence.transactionCount),
+        pruned_entry_count: String(evidence.entryCount),
+        pruned_transaction_ids_sha256: evidence.transactionIdsSha256,
+        pruned_entry_ids_sha256: evidence.entryIdsSha256,
+      };
+      return { state: executeCleanupCalls === 1 ? "pruned" : "already_pruned" };
+    },
+    async verifyCommitted(_row, evidence) {
+      return {
+        pruned_at: "2026-08-24T00:02:00.000000Z",
+        pruned_transaction_count: String(evidence.transactionCount),
+        pruned_entry_count: String(evidence.entryCount),
+        pruned_transaction_ids_sha256: evidence.transactionIdsSha256,
+        pruned_entry_ids_sha256: evidence.entryIdsSha256,
+        mapping_count: String(evidence.transactionCount),
+        extra_mapping_count: "0",
+        hot_transaction_count: "0",
+        hot_entry_count: "0",
+      };
+    },
   };
 
   return {
@@ -545,6 +578,7 @@ function makeLegacyRunnerAdapters() {
     get manifestInsertCalls() { return manifestInsertCalls; },
     get proofCalls() { return proofCalls; },
     get planUploadCalls() { return planUploadCalls; },
+    get executeCleanupCalls() { return executeCleanupCalls; },
     incrementPlanUploadCalls() { planUploadCalls += 1; },
   };
 }
@@ -621,8 +655,93 @@ try {
   assertLegacyStageAllowlistEvidence(validRunnerContract.storedLocal.manifest.legacy_stage_allowlist, plan.archiveManifest);
   assert.equal(validRunnerContract.adapters.manifestInsertCalls, 1);
   assert.equal(validRunnerContract.adapters.proofCalls, 1);
+  assert.match(
+    validRunnerContract.result.humanGo.executeAfterAuthorization,
+    /^CHIPS_LEDGER_LEGACY_STAGE_ALLOWLIST_EXECUTE=1 node scripts\/ops\/chips-ledger-legacy-stage-allowlist-execute\.mjs --batch-id <exact batch_id> --object-path <exact object_path> --confirm-sha <exact compressed_sha256> --recovery-dir <private dir>$/,
+  );
 } finally {
   fs.rmSync(validRunnerContract.tempRoot, { recursive: true, force: true });
+}
+
+const executeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-stage-execute-contract-"));
+const executeRecoveryDir = path.join(executeRoot, "recovery");
+const executeEnv = {
+  ...runnerEnv,
+  CHIPS_LEDGER_LEGACY_STAGE_ALLOWLIST_EXECUTE: "1",
+};
+const executeArgs = [
+  "--batch-id", validRunnerContract.result.batchId,
+  "--object-path", validRunnerContract.result.objectPath,
+  "--confirm-sha", validRunnerContract.result.compressedSha256,
+  "--recovery-dir", executeRecoveryDir,
+];
+try {
+  await assert.rejects(
+    () => runLegacyStageAllowlistExecute({
+      argv: executeArgs,
+      env: runnerEnv,
+      cwd: process.cwd(),
+      deps: { storageTarget: runnerStorageTarget },
+    }),
+    /CHIPS_LEDGER_LEGACY_STAGE_ALLOWLIST_EXECUTE=1 is required/,
+    "execution runner must remain hard-gated",
+  );
+  await assert.rejects(
+    () => runLegacyStageAllowlistExecute({
+      argv: [
+        "--batch-id", validRunnerContract.result.batchId,
+        "--object-path", `${validRunnerContract.result.objectPath}.tampered`,
+        "--confirm-sha", validRunnerContract.result.compressedSha256,
+        "--recovery-dir", executeRecoveryDir,
+      ],
+      env: executeEnv,
+      cwd: process.cwd(),
+      deps: { storageTarget: runnerStorageTarget },
+    }),
+    /--object-path does not match --confirm-sha/,
+    "execution runner must reject an object path that is not bound to the supplied archive hash",
+  );
+
+  const executeDeps = {
+    storageTarget: runnerStorageTarget,
+    pruneStore: validRunnerContract.adapters.pruneStore,
+    verifyBucket: async () => {},
+    downloadArchive: async (_storageTarget, objectPath) => ({
+      bytes: validRunnerContract.adapters.storageObjects.get(objectPath),
+      downloadMs: 1,
+    }),
+  };
+  const firstExecute = await runLegacyStageAllowlistExecute({
+    argv: executeArgs,
+    env: executeEnv,
+    cwd: process.cwd(),
+    deps: executeDeps,
+  });
+  assert.equal(firstExecute.state, "pruned");
+  assert.equal(firstExecute.mode, "execute");
+  assert.equal(firstExecute.batchId, validRunnerContract.result.batchId);
+  assert.equal(firstExecute.objectPath, validRunnerContract.result.objectPath);
+  assert.equal(firstExecute.compressedSha256, validRunnerContract.result.compressedSha256);
+  assert.equal(firstExecute.allowlistSha256, plan.allowlistSha256);
+  assert.equal(firstExecute.transactions, fixtureEvidence.transactionCount);
+  assert.equal(firstExecute.entries, fixtureEvidence.entryCount);
+  assert.deepEqual(firstExecute.proof, {
+    transactionIdsSha256: fixtureEvidence.transactionIdsSha256,
+    entryIdsSha256: fixtureEvidence.entryIdsSha256,
+  });
+  assert.equal(firstExecute.recovery.reused, false);
+
+  const retryExecute = await runLegacyStageAllowlistExecute({
+    argv: executeArgs,
+    env: executeEnv,
+    cwd: process.cwd(),
+    deps: executeDeps,
+  });
+  assert.equal(retryExecute.state, "already_pruned");
+  assert.equal(retryExecute.recovery.reused, true);
+  assert.equal(validRunnerContract.adapters.executeCleanupCalls, 2, "identical execute must be idempotent on retry");
+} finally {
+  fs.rmSync(executeRoot, { recursive: true, force: true });
 }
 
 for (const mutate of [
@@ -809,12 +928,18 @@ assert.match(freezeWorkflow, /actions\/upload-artifact@v4/);
 assert.doesNotMatch(freezeWorkflow, /--prepare-only|--execute|CHIPS_LEDGER_BOT_ONLY_EXECUTE|SUPABASE_PROD_|PRODUCTION/);
 
 const runnerSource = fs.readFileSync("scripts/ops/chips-ledger-legacy-stage-allowlist.mjs", "utf8");
+const executeRunnerSource = fs.readFileSync("scripts/ops/chips-ledger-legacy-stage-allowlist-execute.mjs", "utf8");
 const prepareStart = runnerSource.indexOf("export async function runLegacyStagePrepareOnly");
 assert.ok(prepareStart >= 0, "prepare runner must be present");
 assert.match(runnerSource.slice(prepareStart), /loadFrozenLegacyAllowlist/);
 assert.doesNotMatch(runnerSource.slice(prepareStart), /readLegacyAllowlist\(/);
 assert.match(runnerSource.slice(prepareStart), /legacyStageAllowlistPlan: plan/);
 assert.doesNotMatch(runnerSource.slice(prepareStart), /legacyStageAllowlist: plan\.archiveManifest/);
+assert.match(executeRunnerSource, /loadFrozenLegacyAllowlist/);
+assert.match(executeRunnerSource, /legacyStageAllowlistPlan: plan/);
+assert.match(executeRunnerSource, /--approved-batch-id/);
+assert.match(executeRunnerSource, /--object-path does not match --confirm-sha/);
+assert.match(executeRunnerSource, /CHIPS_LEDGER_LEGACY_STAGE_ALLOWLIST_EXECUTE/);
 assert.match(LEGACY_STAGE_ALLOWLIST_REPO_RELATIVE_DIR, /^data\/chips-ledger\/legacy-stage-allowlist-v1$/);
 
 process.stdout.write("chips-ledger-legacy-stage-allowlist contract passed\n");

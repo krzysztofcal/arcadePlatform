@@ -639,7 +639,7 @@ export async function runLegacyStagePrepareOnly({ env = process.env, cwd = proce
         function: "public.chips_authorize_legacy_stage_allowlist_batch(bigint,text,text)",
         confirmation: `GO ${row.batch_id}`,
         allowlistSha256: plan.allowlistSha256,
-        executeAfterAuthorization: "node scripts/ops/chips-ledger-archive-prune.mjs --target stage --object-path <exact object_path> --confirm-sha <exact compressed_sha256> --execute --approved-batch-id <exact batch_id> --recovery-dir <private dir>",
+        executeAfterAuthorization: "CHIPS_LEDGER_LEGACY_STAGE_ALLOWLIST_EXECUTE=1 node scripts/ops/chips-ledger-legacy-stage-allowlist-execute.mjs --batch-id <exact batch_id> --object-path <exact object_path> --confirm-sha <exact compressed_sha256> --recovery-dir <private dir>",
       },
     };
   } finally {

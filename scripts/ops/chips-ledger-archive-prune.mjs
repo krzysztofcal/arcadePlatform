@@ -878,8 +878,8 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
 
     const pruneResult = row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
       ? row.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID
-        ? await store.cleanupLegacyStageAllowlist(row.object_path, evidence, Boolean(args.execute), args.approvedBatchId == null ? null : Number(args.approvedBatchId))
-        : await store.cleanupBotOnly(row.object_path, evidence, Boolean(args.execute), args.approvedBatchId == null ? null : Number(args.approvedBatchId))
+        ? await store.cleanupLegacyStageAllowlist(row.object_path, evidence, Boolean(args.execute), args.approvedBatchId)
+        : await store.cleanupBotOnly(row.object_path, evidence, Boolean(args.execute), args.approvedBatchId)
       : await executeArchivePrune({
         store,
         objectPath: row.object_path,
