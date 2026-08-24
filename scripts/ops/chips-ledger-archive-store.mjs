@@ -12,6 +12,7 @@ import {
   LEGACY_STAGE_ALLOWLIST_POLICY_ID,
   LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT,
   LEGACY_STAGE_ALLOWLIST_TABLE_COUNT,
+  assertLegacyStageAllowlistEvidence,
   compareTransactions,
   maxBatchSizeForTarget,
   parseJsonl,
@@ -169,7 +170,7 @@ function verifyCursor(cursor, label) {
   return { created_at: text(cursor.created_at), id: text(cursor.id).toLowerCase() };
 }
 
-function verifyManifestShape(manifest, artifactName, target) {
+function verifyManifestShape(manifest, artifactName, target, expectedLegacyStageAllowlistEvidence = null) {
   if (!manifest || typeof manifest !== "object") fail("local manifest must be an object");
   if (![EXPORT_SCHEMA_VERSION, BOT_ONLY_EXPORT_SCHEMA_VERSION].includes(manifest.schema_version)
     || manifest.artifact_type !== "chips_ledger_archive" || manifest.format !== "jsonl.gz") {
@@ -269,6 +270,9 @@ function verifyManifestShape(manifest, artifactName, target) {
     assertLegacyManifestEvidence(batchIds.every((id, index) => id === sortedBatchIds[index]), "batch_table_ids_order");
     assertLegacyManifestEvidence(batchIds.every((id) => masterIds.includes(id)), "batch_table_ids_membership");
     assertLegacyManifestEvidence(hashCanonicalLines(batchIds) === legacy.batch_table_ids_sha256, "batch_table_ids_hash");
+    if (expectedLegacyStageAllowlistEvidence) {
+      assertLegacyStageAllowlistEvidence(legacy, expectedLegacyStageAllowlistEvidence);
+    }
   }
 
   const amounts = manifest.amounts;
@@ -464,10 +468,15 @@ export function buildObjectPath(manifestOrSha) {
   return `v1/sha256/${sha}.jsonl.gz`;
 }
 
-export function verifyArchiveBytes({ compressedBytes: inputBytes, manifest, target, artifactName }) {
+export function verifyArchiveBytes({ compressedBytes: inputBytes, manifest, target, artifactName, expectedLegacyStageAllowlistEvidence = null }) {
   const compressedBytes = Buffer.from(inputBytes || []);
   if (compressedBytes.length > ARCHIVE_MAX_BYTES) fail("artifact exceeds the 6 MiB Storage limit");
-  const { cursorStart, cursorEnd } = verifyManifestShape(manifest, artifactName, target);
+  const { cursorStart, cursorEnd } = verifyManifestShape(
+    manifest,
+    artifactName,
+    target,
+    expectedLegacyStageAllowlistEvidence,
+  );
   const compressedSha256 = crypto.createHash("sha256").update(compressedBytes).digest("hex");
   if (compressedBytes.length !== manifest.bytes.compressed || compressedSha256 !== manifest.sha256.compressed_artifact) {
     fail("local compressed artifact does not match its manifest");
@@ -498,13 +507,18 @@ export function verifyArchiveBytes({ compressedBytes: inputBytes, manifest, targ
   };
 }
 
-export function verifyLocalArchive({ artifactPath, manifestPath, target }) {
+export function verifyLocalArchive({ artifactPath, manifestPath, target, expectedLegacyStageAllowlistEvidence = null, requireLegacyStageAllowlistPlan = false }) {
   if (!artifactPath || !manifestPath) fail("--artifact and --manifest are required");
   const artifact = path.resolve(artifactPath);
   const manifestFile = path.resolve(manifestPath);
   const stat = fs.statSync(artifact);
   if (!stat.isFile()) fail("artifact must be a regular file");
   const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+  if (requireLegacyStageAllowlistPlan
+    && manifest.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID
+    && !expectedLegacyStageAllowlistEvidence) {
+    fail("legacy Stage allowlist manifest evidence is incomplete: immutable_plan");
+  }
   return {
     artifactPath: artifact,
     manifestPath: manifestFile,
@@ -513,6 +527,7 @@ export function verifyLocalArchive({ artifactPath, manifestPath, target }) {
       manifest,
       target,
       artifactName: path.basename(artifact),
+      expectedLegacyStageAllowlistEvidence,
     }),
   };
 }
@@ -973,7 +988,16 @@ export async function storeArchive({ argv = process.argv.slice(2), env = process
   if (!args.artifact) fail("--artifact is required; no default path is allowed");
   if (!args.manifest) fail("--manifest is required; no default path is allowed");
   const storageTarget = deps.storageTarget || resolveStorageTarget(args.target, env, deps.targetOptions || {});
-  const local = verifyLocalArchive({ artifactPath: path.resolve(cwd, args.artifact), manifestPath: path.resolve(cwd, args.manifest), target: storageTarget });
+  const expectedLegacyStageAllowlistEvidence = deps.legacyStageAllowlistPlan?.archiveManifest
+    ? structuredClone(deps.legacyStageAllowlistPlan.archiveManifest)
+    : null;
+  const local = verifyLocalArchive({
+    artifactPath: path.resolve(cwd, args.artifact),
+    manifestPath: path.resolve(cwd, args.manifest),
+    target: storageTarget,
+    expectedLegacyStageAllowlistEvidence,
+    requireLegacyStageAllowlistPlan: true,
+  });
   const sql = deps.sql || (deps.manifestStore ? null : postgres(storageTarget.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 30 }));
   const manifestStore = deps.manifestStore || createManifestStore(sql);
   const adapterDeps = { ...deps, manifestStore };

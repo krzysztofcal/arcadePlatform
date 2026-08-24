@@ -28,6 +28,27 @@ const PROJECT_REF_RE = /^[a-z0-9]{20}$/;
 const SQLSTATE_RE = /^[0-9A-Z]{5}$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
 
+export const LEGACY_STAGE_ALLOWLIST_EVIDENCE_FIELDS = Object.freeze([
+  "policy_id",
+  "proof_basis",
+  "allowlist_sha256",
+  "batch_table_ids",
+  "batch_table_ids_sha256",
+  "master_table_ids",
+  "master_table_count",
+  "batch_number",
+  "batch_table_count",
+  "source_run",
+  "query_sha256",
+  "generator_sha256",
+  "stage_system_identifier",
+  "master_manifest_sha256",
+  "batch_manifest_sha256",
+  "freeze_run_id",
+  "diagnostic_source_run",
+  "diagnostic_source_run_sha256",
+]);
+
 // Keep these bindings in sync with scripts/ops/ch-economy-network-maintenance.sh.
 const TARGETS = Object.freeze({
   stage: Object.freeze({
@@ -1717,6 +1738,71 @@ function normalizeLegacyStageAllowlistManifest(legacyStageAllowlist) {
   };
 }
 
+function canonicalEvidenceJson(value) {
+  if (value === undefined) return "undefined";
+  if (Array.isArray(value)) return `[${value.map(canonicalEvidenceJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalEvidenceJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function evidenceType(value) {
+  if (value === undefined) return "undefined";
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+function evidenceSha256(value) {
+  return crypto.createHash("sha256").update(canonicalEvidenceJson(value), "utf8").digest("hex");
+}
+
+export function diagnoseLegacyStageAllowlistEvidence(actual, expected) {
+  const actualObject = actual && typeof actual === "object" && !Array.isArray(actual) ? actual : null;
+  const expectedObject = expected && typeof expected === "object" && !Array.isArray(expected) ? expected : null;
+  const fieldNames = [
+    ...LEGACY_STAGE_ALLOWLIST_EVIDENCE_FIELDS,
+    ...(expectedObject ? Object.keys(expectedObject).filter((field) => !LEGACY_STAGE_ALLOWLIST_EVIDENCE_FIELDS.includes(field)).sort() : []),
+  ];
+  const fields = fieldNames.map((field) => {
+    const actualExists = actualObject !== null && Object.hasOwn(actualObject, field);
+    const expectedExists = expectedObject !== null && Object.hasOwn(expectedObject, field);
+    return {
+      field,
+      exists: actualExists,
+      type: evidenceType(actualObject?.[field]),
+      matches: actualExists === expectedExists
+        && (!expectedExists || canonicalEvidenceJson(actualObject[field]) === canonicalEvidenceJson(expectedObject[field])),
+    };
+  });
+  const knownFields = new Set(LEGACY_STAGE_ALLOWLIST_EVIDENCE_FIELDS);
+  if (actualObject !== null) {
+    for (const field of Object.keys(actualObject).sort()) {
+      if (!knownFields.has(field)) {
+        fields.push({ field, exists: true, type: evidenceType(actualObject[field]), matches: false });
+      }
+    }
+  }
+  return {
+    matches: actualObject !== null
+      && expectedObject !== null
+      && fields.every((field) => field.matches),
+    fields,
+    actualSha256: evidenceSha256(actual),
+    expectedSha256: evidenceSha256(expected),
+  };
+}
+
+export function assertLegacyStageAllowlistEvidence(actual, expected) {
+  const diagnosis = diagnoseLegacyStageAllowlistEvidence(actual, expected);
+  if (!diagnosis.matches) {
+    const firstFailure = diagnosis.fields.find((field) => !field.matches);
+    fail(`legacy Stage allowlist manifest evidence is incomplete: ${firstFailure?.field || "object"}`);
+  }
+  return diagnosis;
+}
+
 export function buildManifest({ target, cutoff, batchSize, cursor, records, archive, outputPath, sourcePolicyId = null, schemaVersion = EXPORT_SCHEMA_VERSION, legacyStageAllowlist = null }) {
   const validation = validateBatch({ candidates: records.map((record) => ({
     id: record.transaction.id,
@@ -2193,6 +2279,9 @@ export async function runExport({ argv = process.argv.slice(2), env = process.en
       telemetry: deps.telemetry,
       legacyStageAllowlistPlan,
     });
+    const immutableLegacyStageAllowlistEvidence = selector === "legacy-stage-allowlist-v1"
+      ? structuredClone(legacyStageAllowlistPlan.archiveManifest)
+      : null;
     if (deps.noCandidateIfEmpty && snapshot.candidates.length === 0) {
       return {
         noCandidate: true,
@@ -2227,13 +2316,20 @@ export async function runExport({ argv = process.argv.slice(2), env = process.en
       sourcePolicyId: deps.sourcePolicyId || null,
       schemaVersion,
       legacyStageAllowlist: selector === "legacy-stage-allowlist-v1"
-        ? legacyStageAllowlistPlan.archiveManifest
+        ? immutableLegacyStageAllowlistEvidence
         : null,
     });
+    if (selector === "legacy-stage-allowlist-v1") {
+      assertLegacyStageAllowlistEvidence(manifest.legacy_stage_allowlist, immutableLegacyStageAllowlistEvidence);
+    }
     if (manifest.sha256.compressed_artifact !== crypto.createHash("sha256").update(archive.compressedBytes).digest("hex")) {
       fail("manifest checksum verification failed");
     }
     writeOutput(options, archive, manifest);
+    if (selector === "legacy-stage-allowlist-v1") {
+      const writtenManifest = JSON.parse(fs.readFileSync(options.manifestPath, "utf8"));
+      assertLegacyStageAllowlistEvidence(writtenManifest.legacy_stage_allowlist, immutableLegacyStageAllowlistEvidence);
+    }
     if (deps.emit !== false) outputMetrics(manifest, options);
     return manifest;
   } finally {

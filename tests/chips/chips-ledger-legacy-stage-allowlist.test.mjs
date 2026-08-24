@@ -11,6 +11,7 @@ import {
   LEGACY_STAGE_ALLOWLIST_SOURCE_RUN,
   LEGACY_STAGE_ALLOWLIST_TABLE_COUNT,
   LEGACY_STAGE_ALLOWLIST_CANDIDATE_SQL,
+  assertLegacyStageAllowlistEvidence,
   buildArchiveBytes,
   buildExportRecord,
   buildManifest,
@@ -30,6 +31,7 @@ import {
   writeLegacyPlanFiles,
 } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist.mjs";
 import { runLegacyStageAllowlistFreeze } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-freeze.mjs";
+import { runLegacyStagePrepareOnly } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist.mjs";
 import { buildPruneEvidence } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
 import { storeArchive, verifyArchiveBytes, verifyLocalArchive } from "../../scripts/ops/chips-ledger-archive-store.mjs";
 
@@ -148,6 +150,7 @@ const verifiedFixture = verifyArchiveBytes({
   manifest: fixtureManifest,
   target: { target: "stage" },
   artifactName: "legacy-stage-batch-001.archive.jsonl.gz",
+  expectedLegacyStageAllowlistEvidence: plan.archiveManifest,
 });
 const fixtureEvidence = buildPruneEvidence(verifiedFixture);
 assert.equal(fixtureManifest.schema_version, 2);
@@ -245,6 +248,7 @@ try {
     artifactPath: path.join(runExportTemp, "legacy.archive.jsonl.gz"),
     manifestPath: path.join(runExportTemp, "legacy.manifest.json"),
     target: { target: "stage" },
+    expectedLegacyStageAllowlistEvidence: frozenRunPlan.archiveManifest,
   });
   assert.equal(verifiedRunExport.manifest.legacy_stage_allowlist.allowlist_sha256, frozenRunPlan.allowlistSha256);
 
@@ -297,7 +301,13 @@ try {
       "--manifest", path.join(runExportTemp, "legacy.manifest.json"),
     ],
     cwd: runExportTemp,
-    deps: { storageTarget, fetch: storageFetch, manifestStore, emit: false },
+    deps: {
+      storageTarget,
+      fetch: storageFetch,
+      manifestStore,
+      legacyStageAllowlistPlan: frozenRunPlan,
+      emit: false,
+    },
   });
   assert.equal(storedRunExport.manifest.status, "committed");
   assert.equal(storedRunExport.object.uploaded, true);
@@ -338,6 +348,7 @@ try {
         artifactPath: path.join(runExportTemp, "legacy.archive.jsonl.gz"),
         manifestPath: path.join(runExportTemp, "legacy.manifest.json"),
         target: { target: "stage" },
+        expectedLegacyStageAllowlistEvidence: frozenRunPlan.archiveManifest,
       }),
       new RegExp(`legacy Stage allowlist manifest evidence is incomplete: ${code}`),
       `manifest tamper must fail closed with ${code}`,
@@ -352,6 +363,7 @@ try {
       artifactPath: path.join(runExportTemp, "legacy.archive.jsonl.gz"),
       manifestPath: path.join(runExportTemp, "legacy.manifest.json"),
       target: { target: "stage" },
+      expectedLegacyStageAllowlistEvidence: frozenRunPlan.archiveManifest,
     }),
     /legacy Stage allowlist manifest evidence is incomplete: cutoff/,
     "root cutoff tamper must fail closed",
@@ -403,6 +415,230 @@ try {
   );
 } finally {
   fs.rmSync(runExportTemp, { recursive: true, force: true });
+}
+
+const runnerEnv = {
+  SUPABASE_STAGE_DB_URL: "postgresql://postgres.krydukthwdvccggbyjfw:test@db.krydukthwdvccggbyjfw.supabase.co:5432/postgres",
+  SUPABASE_STAGE_URL: "https://krydukthwdvccggbyjfw.supabase.co",
+  SUPABASE_STAGE_SERVICE_ROLE_KEY: "runner-test-service-key",
+  DEPLOYED_COMMIT_SHA: "a".repeat(40),
+};
+
+const runnerStorageTarget = {
+  target: "stage",
+  projectRef: "krydukthwdvccggbyjfw",
+  baseUrl: "https://krydukthwdvccggbyjfw.supabase.co",
+  serviceKey: "runner-test-service-key",
+};
+
+function makeLegacyRunnerAdapters() {
+  const storageObjects = new Map();
+  const storageCalls = [];
+  let storedManifestRow = null;
+  let manifestInsertCalls = 0;
+  let proofCalls = 0;
+  let planUploadCalls = 0;
+
+  async function executeSql(query) {
+    if (/^\s*set transaction isolation level repeatable read, read only;/i.test(query)) return [];
+    if (/pg_control_system/i.test(query)) return [{ system_identifier: "7656985631720456337" }];
+    if (/chips_table_fence_is_active/i.test(query)) return [{ active: true }];
+    if (/chips_table_fence_control/i.test(query)) return [{ enforcement_active: true }];
+    if (query === LEGACY_STAGE_ALLOWLIST_CANDIDATE_SQL) return fixtureCandidates;
+    if (/from public\.chips_entries/i.test(query)) return fixtureEntries;
+    throw new Error(`unexpected runner SQL: ${query.slice(0, 80)}`);
+  }
+
+  const sql = {
+    typed: (value, type) => ({ value, type }),
+    async begin(callback) {
+      return callback({ unsafe: executeSql });
+    },
+    async unsafe(query) {
+      if (/pg_try_advisory_lock/i.test(query)) return [{ backend_pid: "7001", acquired: true }];
+      if (/pg_backend_pid/i.test(query)) return [{ backend_pid: "7001" }];
+      if (/pg_advisory_unlock/i.test(query)) return [{ unlocked: true }];
+      return executeSql(query);
+    },
+  };
+
+  function objectPathFromRequest(pathname, prefix) {
+    return decodeURIComponent(pathname.slice(prefix.length));
+  }
+
+  const fetch = async (url, init = {}) => {
+    const requestUrl = new URL(url);
+    const method = init.method || "GET";
+    const pathname = requestUrl.pathname;
+    storageCalls.push({ method, kind: pathname.includes("/bucket/") ? "bucket" : "object" });
+    if (pathname === "/storage/v1/bucket/chips-ledger-archive" && method === "GET") {
+      return new Response(JSON.stringify({
+        id: "chips-ledger-archive",
+        name: "chips-ledger-archive",
+        public: false,
+        file_size_limit: 6 * 1024 * 1024,
+        allowed_mime_types: ["application/gzip"],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    const downloadPrefix = "/storage/v1/object/authenticated/chips-ledger-archive/";
+    const uploadPrefix = "/storage/v1/object/chips-ledger-archive/";
+    if (pathname.startsWith(downloadPrefix) && method === "GET") {
+      const objectPath = objectPathFromRequest(pathname, downloadPrefix);
+      const bytes = storageObjects.get(objectPath);
+      if (!bytes) return new Response(JSON.stringify({ message: "not found" }), { status: 400 });
+      return new Response(bytes, { status: 200, headers: { "content-type": "application/gzip" } });
+    }
+    if (pathname.startsWith(uploadPrefix) && method === "POST") {
+      const objectPath = objectPathFromRequest(pathname, uploadPrefix);
+      if (storageObjects.has(objectPath)) return new Response(JSON.stringify({ message: "Asset Already Exists" }), { status: 400 });
+      storageObjects.set(objectPath, Buffer.from(init.body));
+      return new Response(JSON.stringify({ Key: objectPath }), { status: 200 });
+    }
+    throw new Error(`unexpected runner Storage request: ${method} ${pathname}`);
+  };
+
+  const manifestStore = {
+    async get() { return storedManifestRow; },
+    async insertPending(row) {
+      manifestInsertCalls += 1;
+      storedManifestRow = { ...row, batch_id: "9001" };
+    },
+    async markCommitted() {
+      storedManifestRow = {
+        ...storedManifestRow,
+        status: "committed",
+        committed_at: "2026-08-24T00:00:00.000000Z",
+      };
+      return storedManifestRow;
+    },
+  };
+
+  const pruneStore = {
+    async getIdentity() { return "7656985631720456337"; },
+    async getManifest() {
+      return storedManifestRow
+        ? {
+          ...storedManifestRow,
+          format_version: Number(storedManifestRow.format_version),
+          transaction_count: Number(storedManifestRow.transaction_count),
+          entry_count: Number(storedManifestRow.entry_count),
+          raw_bytes: Number(storedManifestRow.raw_bytes),
+          compressed_bytes: Number(storedManifestRow.compressed_bytes),
+        }
+        : null;
+    },
+    async registerLegacyStageAllowlistProof() {
+      proofCalls += 1;
+      storedManifestRow = { ...storedManifestRow, archive_proof_verified_at: "2026-08-24T00:01:00.000000Z" };
+      return { state: "proof_registered" };
+    },
+    async cleanupLegacyStageAllowlist() { return { state: "ready" }; },
+  };
+
+  return {
+    sql,
+    fetch,
+    manifestStore,
+    pruneStore,
+    storageObjects,
+    storageCalls,
+    get manifestInsertCalls() { return manifestInsertCalls; },
+    get proofCalls() { return proofCalls; },
+    get planUploadCalls() { return planUploadCalls; },
+    incrementPlanUploadCalls() { planUploadCalls += 1; },
+  };
+}
+
+async function runRealLegacyRunnerContract(mutateManifest = null) {
+  const adapters = makeLegacyRunnerAdapters();
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-stage-runner-contract-"));
+  let exportedManifest = null;
+  let storedLocal = null;
+  let result = null;
+  let error = null;
+  try {
+    result = await runLegacyStagePrepareOnly({
+      env: runnerEnv,
+      cwd: process.cwd(),
+      deps: {
+        sql: adapters.sql,
+        tempRoot,
+        storageTarget: runnerStorageTarget,
+        verifyBucket: async () => {},
+        fetch: adapters.fetch,
+        manifestStore: adapters.manifestStore,
+        pruneStore: adapters.pruneStore,
+        uploadPlan: async ({ objectPath }) => {
+          adapters.incrementPlanUploadCalls();
+          return { objectPath };
+        },
+        exportArchive: async (options) => {
+          exportedManifest = await runExport(options);
+          if (mutateManifest) {
+            const manifestPath = options.argv.at(-1);
+            const mutated = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+            mutateManifest(mutated.legacy_stage_allowlist);
+            fs.writeFileSync(manifestPath, `${JSON.stringify(mutated)}\n`, { mode: 0o600 });
+          }
+          return exportedManifest;
+        },
+        storeArchive: async (options) => {
+          const stored = await storeArchive(options);
+          storedLocal = stored.local;
+          return stored;
+        },
+        downloadArchive: async (_storageTarget, objectPath) => ({
+          bytes: adapters.storageObjects.get(objectPath),
+          downloadMs: 1,
+        }),
+        emit: false,
+      },
+    });
+  } catch (caught) {
+    error = caught;
+  }
+  return {
+    adapters,
+    tempRoot,
+    exportedManifest,
+    storedLocal,
+    result,
+    error,
+  };
+}
+
+const validRunnerContract = await runRealLegacyRunnerContract();
+try {
+  assert.equal(validRunnerContract.error, null);
+  assert.equal(validRunnerContract.result.state, "prepared");
+  assert.equal(validRunnerContract.exportedManifest.legacy_stage_allowlist.proof_basis, LEGACY_STAGE_ALLOWLIST_POLICY_ID);
+  const runnerManifestPath = path.join(validRunnerContract.tempRoot, "legacy-stage-batch-001.archive.manifest.json");
+  const runnerFileManifest = JSON.parse(fs.readFileSync(runnerManifestPath, "utf8"));
+  assert.equal(runnerFileManifest.legacy_stage_allowlist.proof_basis, LEGACY_STAGE_ALLOWLIST_POLICY_ID);
+  assert.equal(validRunnerContract.storedLocal.manifest.legacy_stage_allowlist.proof_basis, LEGACY_STAGE_ALLOWLIST_POLICY_ID);
+  assertLegacyStageAllowlistEvidence(validRunnerContract.exportedManifest.legacy_stage_allowlist, plan.archiveManifest);
+  assertLegacyStageAllowlistEvidence(runnerFileManifest.legacy_stage_allowlist, plan.archiveManifest);
+  assertLegacyStageAllowlistEvidence(validRunnerContract.storedLocal.manifest.legacy_stage_allowlist, plan.archiveManifest);
+  assert.equal(validRunnerContract.adapters.manifestInsertCalls, 1);
+  assert.equal(validRunnerContract.adapters.proofCalls, 1);
+} finally {
+  fs.rmSync(validRunnerContract.tempRoot, { recursive: true, force: true });
+}
+
+for (const mutate of [
+  (legacy) => { delete legacy.proof_basis; },
+  (legacy) => { legacy.proof_basis = "tampered"; },
+]) {
+  const tamperedRunnerContract = await runRealLegacyRunnerContract(mutate);
+  try {
+    assert.match(tamperedRunnerContract.error?.message || "", /legacy Stage allowlist manifest evidence is incomplete: proof_basis/);
+    assert.equal(tamperedRunnerContract.adapters.planUploadCalls, 0);
+    assert.equal(tamperedRunnerContract.adapters.manifestInsertCalls, 0);
+    assert.equal(tamperedRunnerContract.adapters.proofCalls, 0);
+    assert.equal(tamperedRunnerContract.adapters.storageCalls.length, 0);
+  } finally {
+    fs.rmSync(tamperedRunnerContract.tempRoot, { recursive: true, force: true });
+  }
 }
 
 assert.equal(master.policy_id, LEGACY_STAGE_ALLOWLIST_POLICY_ID);

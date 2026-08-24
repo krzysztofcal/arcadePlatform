@@ -8,6 +8,7 @@ import {
   BOT_ONLY_RETENTION_POLICY_ID,
   LEGACY_STAGE_ALLOWLIST_POLICY_ID,
   LEGACY_STAGE_ALLOWLIST_TABLE_COUNT,
+  assertLegacyStageAllowlistEvidence,
   maxBatchSizeForTarget,
   stringifyJson,
 } from "./chips-ledger-archive-export.mjs";
@@ -345,10 +346,39 @@ function parseManifestRow(row) {
   };
 }
 
-function exporterManifestFromDatabase(row, target) {
+function legacyStageAllowlistEvidenceFromDatabaseRow(row, expectedEvidence) {
+  if (!expectedEvidence || typeof expectedEvidence !== "object" || Array.isArray(expectedEvidence)) {
+    fail("legacy Stage allowlist manifest evidence is incomplete: immutable_plan");
+  }
+  const reconstructed = {
+    ...structuredClone(expectedEvidence),
+    // The database persists these fields. They must agree with the immutable
+    // plan; proof_basis is derived from the persisted policy identity, never
+    // supplied as a default.
+    policy_id: row.source_policy_id,
+    proof_basis: row.source_policy_id,
+    allowlist_sha256: row.legacy_allowlist_sha256,
+    batch_table_ids_sha256: row.legacy_batch_table_ids_sha256,
+    master_table_ids: row.legacy_master_table_ids,
+    master_table_count: Number(row.legacy_master_table_count),
+    batch_number: Number(row.legacy_batch_number),
+    batch_table_count: Number(row.legacy_batch_table_count),
+    source_run: row.legacy_source_run,
+    query_sha256: row.legacy_query_sha256,
+    stage_system_identifier: row.legacy_stage_system_identifier,
+  };
+  assertLegacyStageAllowlistEvidence(reconstructed, expectedEvidence);
+  return reconstructed;
+}
+
+function exporterManifestFromDatabase(row, target, legacyStageAllowlistPlan = null) {
   const ratio = row.raw_bytes === 0 ? null : Number((row.compressed_bytes / row.raw_bytes).toFixed(6));
   const cursorStart = row.cursor_start_created_at ? { created_at: row.cursor_start_created_at, id: row.cursor_start_id } : null;
   const cursorEnd = row.cursor_end_created_at ? { created_at: row.cursor_end_created_at, id: row.cursor_end_id } : null;
+  const legacyStageAllowlist = row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+    && row.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID
+    ? legacyStageAllowlistEvidenceFromDatabaseRow(row, legacyStageAllowlistPlan?.archiveManifest)
+    : null;
   return {
     schema_version: row.format_version,
     artifact_type: "chips_ledger_archive",
@@ -391,18 +421,7 @@ function exporterManifestFromDatabase(row, target) {
     } : {}),
     ...(row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
       && row.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID ? {
-      legacy_stage_allowlist: {
-        policy_id: LEGACY_STAGE_ALLOWLIST_POLICY_ID,
-        allowlist_sha256: row.legacy_allowlist_sha256,
-        batch_table_ids_sha256: row.legacy_batch_table_ids_sha256,
-        master_table_ids: row.legacy_master_table_ids,
-        source_run: row.legacy_source_run,
-        query_sha256: row.legacy_query_sha256,
-        stage_system_identifier: row.legacy_stage_system_identifier,
-        master_table_count: Number(row.legacy_master_table_count),
-        batch_number: Number(row.legacy_batch_number),
-        batch_table_count: Number(row.legacy_batch_table_count),
-      },
+      legacy_stage_allowlist: legacyStageAllowlist,
     } : {}),
   };
 }
@@ -814,12 +833,13 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
       ? await deps.downloadArchive(target, row.object_path)
       : await downloadPrivateArchiveObject(target, row.object_path, deps);
     const archiveBytes = Buffer.from(downloaded.bytes);
-    const archiveManifest = exporterManifestFromDatabase(row, target);
+    const archiveManifest = exporterManifestFromDatabase(row, target, deps.legacyStageAllowlistPlan);
     const localArchive = verifyArchiveBytes({
       compressedBytes: archiveBytes,
       manifest: archiveManifest,
       target,
       artifactName: path.basename(row.object_path),
+      expectedLegacyStageAllowlistEvidence: deps.legacyStageAllowlistPlan?.archiveManifest || null,
     });
     const evidence = buildPruneEvidence(localArchive, { maxBatchSize: targetPolicy(target.target).maxBatchSize });
 

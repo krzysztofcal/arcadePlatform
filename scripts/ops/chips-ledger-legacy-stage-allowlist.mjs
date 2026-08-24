@@ -11,6 +11,7 @@ import {
   LEGACY_STAGE_ALLOWLIST_POLICY_ID,
   LEGACY_STAGE_ALLOWLIST_SOURCE_RUN,
   LEGACY_STAGE_ALLOWLIST_TABLE_COUNT,
+  assertLegacyStageAllowlistEvidence,
   LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT,
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
   runExport,
@@ -24,6 +25,7 @@ import {
   resolveStorageTarget,
   storeArchive,
   uploadOrVerifyPrivateObject,
+  verifyLocalArchive,
   verifyArchiveBucket,
 } from "./chips-ledger-archive-store.mjs";
 import {
@@ -529,6 +531,15 @@ export async function runLegacyStagePrepareOnly({ env = process.env, cwd = proce
         batchManifestSha256: plan.batchManifestSha256,
       };
     }
+    const immutableLegacyStageAllowlistEvidence = structuredClone(plan.archiveManifest);
+    assertLegacyStageAllowlistEvidence(exported.legacy_stage_allowlist, immutableLegacyStageAllowlistEvidence);
+    verifyLocalArchive({
+      artifactPath,
+      manifestPath,
+      target: storageTarget,
+      expectedLegacyStageAllowlistEvidence: immutableLegacyStageAllowlistEvidence,
+      requireLegacyStageAllowlistPlan: true,
+    });
     await (deps.ensureBucket || ensureArchiveBucket)(storageTarget, deps);
     const planObjects = [];
     for (const object of planStorageObjects(plan, localPlan.files)) {
@@ -544,21 +555,44 @@ export async function runLegacyStagePrepareOnly({ env = process.env, cwd = proce
       argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
       env: moduleEnv,
       cwd: tempRoot,
-      deps: { ...deps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
+      deps: {
+        ...deps,
+        sql,
+        storageTarget,
+        targetOptions: { singleTarget: true },
+        legacyStageAllowlistPlan: plan,
+        emit: false,
+      },
     });
     let row = await pruneStore.getManifest(stored.objectPath);
     const registered = await (deps.pruneArchive || pruneArchive)({
       argv: ["--target", "stage", "--object-path", row.object_path, "--confirm-sha", row.compressed_sha256, "--register-proof"],
       env: moduleEnv,
       cwd: tempRoot,
-      deps: { ...deps, sql, pruneStore, storageTarget, verifyBucket: deps.verifyBucket, emit: false },
+      deps: {
+        ...deps,
+        sql,
+        pruneStore,
+        storageTarget,
+        verifyBucket: deps.verifyBucket,
+        legacyStageAllowlistPlan: plan,
+        emit: false,
+      },
     });
     row = await pruneStore.getManifest(row.object_path);
     const dryRun = await (deps.pruneArchive || pruneArchive)({
       argv: ["--target", "stage", "--object-path", row.object_path, "--confirm-sha", row.compressed_sha256],
       env: moduleEnv,
       cwd: tempRoot,
-      deps: { ...deps, sql, pruneStore, storageTarget, verifyBucket: deps.verifyBucket, emit: false },
+      deps: {
+        ...deps,
+        sql,
+        pruneStore,
+        storageTarget,
+        verifyBucket: deps.verifyBucket,
+        legacyStageAllowlistPlan: plan,
+        emit: false,
+      },
     });
     if (dryRun.state !== "ready") fail(`legacy Stage allowlist dry-run returned ${dryRun.state}`);
     const main = await (deps.downloadArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, deps);
