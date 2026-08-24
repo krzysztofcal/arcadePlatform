@@ -218,6 +218,7 @@ $$;
 -- The normal wrapper cannot route a legacy policy into the normal schema-v2
 -- path.  The dedicated exact-batch function below is the only legacy pruner.
 grant chips_ledger_archive_pruner to postgres;
+grant create on schema public to chips_ledger_archive_pruner;
 set role chips_ledger_archive_pruner;
 
 create or replace function public.chips_prune_committed_archive_batch(
