@@ -452,6 +452,30 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as materialized (
     from registry_rows registry
    where registry.table_id is not null
    group by registry.table_id
+), candidate_table_rows as materialized (
+  select stats.table_id,
+         stats.newest_created_at,
+         stats.identity_count,
+         stats.eligible_count
+    from table_rows stats
+    join public.poker_tables tables on tables.id = stats.table_id
+    join public.chips_accounts escrow
+      on escrow.account_type::text = 'ESCROW'
+     and escrow.system_key = 'POKER_TABLE:' || stats.table_id::text
+   where tables.status::text = 'CLOSED'
+     and tables.has_human_participant is false
+     and tables.bot_only_proof_eligible is true
+     and escrow.status::text = 'active'
+     and escrow.balance = 0
+     and stats.newest_created_at < $1::timestamptz
+     and stats.eligible_count > 0
+     and stats.eligible_count <= $2::int
+     and stats.eligible_count = stats.identity_count
+     and not exists (
+       select 1
+         from unknown_target_identity unknown
+        where unknown.table_id = stats.table_id::text
+     )
 ), candidate_transactions as materialized (
   select transactions.id,
          transactions.sequence,
@@ -480,6 +504,8 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as materialized (
      and registry.key_format is not null
      and registry.key_format = transactions.key_format_from_key
      and registry.archive_batch_id is null
+    join candidate_table_rows candidate_tables
+      on candidate_tables.table_id = registry.table_id
    where (
        $3::timestamptz is null
        or transactions.created_at > $3::timestamptz
@@ -495,6 +521,39 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as materialized (
      and (
        transactions.reference is null
        or transactions.reference_table_id = registry.table_id::text
+     )
+), candidate_entry_shapes as materialized (
+  select transactions.id,
+         transactions.idempotency_key,
+         transactions.tx_type::text as tx_type,
+         transactions.key_table_id,
+         count(entries.id)::text as entry_count
+    from candidate_transactions transactions
+    join public.chips_entries entries on entries.transaction_id = transactions.id
+    join public.chips_accounts accounts on accounts.id = entries.account_id
+   group by transactions.id, transactions.idempotency_key, transactions.tx_type, transactions.key_table_id
+  having count(*) = 2
+     and count(*) filter (where accounts.account_type::text = 'USER') = 0
+     and count(*) filter (where accounts.account_type::text = 'SYSTEM') = 1
+     and count(*) filter (where accounts.account_type::text = 'ESCROW') = 1
+     and count(*) filter (
+       where accounts.account_type::text = 'ESCROW'
+         and accounts.system_key = 'POKER_TABLE:' || transactions.key_table_id::text
+     ) = 1
+     and bool_and(accounts.status::text = 'active')
+     and sum(entries.amount) = 0
+     and (
+       (
+         transactions.tx_type::text = 'TABLE_BUY_IN'
+         and sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM') < 0
+         and sum(entries.amount) filter (where accounts.account_type::text = 'ESCROW') > 0
+       )
+       or
+       (
+         transactions.tx_type::text = 'TABLE_CASH_OUT'
+         and sum(entries.amount) filter (where accounts.account_type::text = 'ESCROW') < 0
+         and sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM') > 0
+       )
      )
 ), eligible_transactions as (
   select transactions.id,
@@ -521,61 +580,16 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as materialized (
          stats.newest_created_at as table_newest_created_at,
          stats.identity_count as table_identity_count,
          stats.eligible_count as table_eligible_count,
-         count(entries.id)::text as entry_count
+         shapes.entry_count
     from candidate_transactions transactions
-    join table_rows stats on stats.table_id = transactions.key_table_id
+    join candidate_entry_shapes shapes
+      on shapes.id = transactions.id
+     and shapes.idempotency_key = transactions.idempotency_key
+    join candidate_table_rows stats on stats.table_id = transactions.key_table_id
     join public.poker_tables tables on tables.id = transactions.key_table_id
     join public.chips_accounts escrow
       on escrow.account_type::text = 'ESCROW'
      and escrow.system_key = 'POKER_TABLE:' || transactions.key_table_id::text
-    join public.chips_entries entries on entries.transaction_id = transactions.id
-    join public.chips_accounts accounts on accounts.id = entries.account_id
-   where tables.status::text = 'CLOSED'
-     and tables.has_human_participant is false
-     and tables.bot_only_proof_eligible is true
-     and escrow.status::text = 'active'
-     and escrow.balance = 0
-     and stats.newest_created_at < $1::timestamptz
-     and stats.eligible_count > 0
-     and stats.eligible_count <= $2::int
-     and not exists (
-       select 1
-         from unknown_target_identity unknown
-        where unknown.table_id = transactions.key_table_id::text
-     )
-     and not exists (
-       select 1
-         from table_rows blocked
-        where blocked.table_id = transactions.key_table_id
-          and blocked.eligible_count <> blocked.identity_count
-     )
-   group by transactions.id, transactions.sequence, transactions.tx_type,
-            transactions.idempotency_key, transactions.payload_hash,
-            transactions.user_id, transactions.reference, transactions.description,
-            transactions.metadata, transactions.created_by, transactions.created_at,
-            transactions.key_table_id, transactions.key_format_version, transactions.key_format,
-            tables.id, tables.status, tables.has_human_participant,
-            tables.bot_only_proof_eligible, escrow.id, escrow.status, escrow.balance,
-            stats.newest_created_at, stats.identity_count, stats.eligible_count
-  having count(*) = 2
-     and count(*) filter (where accounts.account_type::text = 'USER') = 0
-     and count(*) filter (where accounts.account_type::text = 'SYSTEM') = 1
-     and count(*) filter (where accounts.account_type::text = 'ESCROW') = 1
-     and count(*) filter (
-       where accounts.account_type::text = 'ESCROW'
-         and accounts.system_key = 'POKER_TABLE:' || transactions.key_table_id::text
-     ) = 1
-     and bool_and(accounts.status::text = 'active')
-     and sum(entries.amount) = 0
-     and (
-       (transactions.tx_type::text = 'TABLE_BUY_IN'
-        and sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM') < 0
-        and sum(entries.amount) filter (where accounts.account_type::text = 'ESCROW') > 0)
-       or
-       (transactions.tx_type::text = 'TABLE_CASH_OUT'
-        and sum(entries.amount) filter (where accounts.account_type::text = 'ESCROW') < 0
-        and sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM') > 0)
-     )
 ), selected_table as (
   select key_table_id
     from eligible_transactions
