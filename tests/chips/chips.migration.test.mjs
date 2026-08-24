@@ -708,18 +708,35 @@ async function assertIdempotencyRegistryParity(sql) {
 
 async function expectFrozenLegacyAllowlistHashGuard(sql) {
   const canonicalHash = "611ab69ba8ee160a4957f8fe9514c919b9f4129bc1ea7842778b04d28ea6ca05";
+  const allowlistPath = path.join(
+    process.cwd(),
+    "data/chips-ledger/legacy-stage-allowlist-v1/legacy-stage-allowlist-v1.master.ids",
+  );
+  const masterIds = fs.readFileSync(allowlistPath, "utf8").trim().split(/\r?\n/);
+  assert.equal(masterIds.length, 974, "DB hash regression must use all frozen master UUIDs");
+  const canonicalRows = await sql.unsafe(
+    "select public.chips_archive_uuid_ids_sha256($1::uuid[]) as hash;",
+    [masterIds],
+  );
+  assert.equal(canonicalRows[0]?.hash, canonicalHash, "checked-in UUID list must match the frozen DB hash");
   const accepted = await sql.unsafe(
     "select public.chips_assert_legacy_stage_allowlist_master_hash($1) as accepted;",
-    [canonicalHash],
+    [canonicalRows[0].hash],
   );
   assert.equal(accepted[0]?.accepted, true, "canonical frozen allowlist hash must be accepted by DB");
 
-  const replacedUuidHash = crypto.createHash("sha256").update("legacy-allowlist-one-uuid-replaced").digest("hex");
+  const replacedIds = [...masterIds];
+  replacedIds[replacedIds.length - 1] = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  const replacedRows = await sql.unsafe(
+    "select public.chips_archive_uuid_ids_sha256($1::uuid[]) as hash;",
+    [replacedIds],
+  );
+  assert.notEqual(replacedRows[0]?.hash, canonicalHash, "one UUID replacement must change the DB-computed hash");
   let caught = null;
   try {
     await sql.unsafe(
       "select public.chips_assert_legacy_stage_allowlist_master_hash($1) as accepted;",
-      [replacedUuidHash],
+      [replacedRows[0].hash],
     );
   } catch (error) {
     caught = error;
