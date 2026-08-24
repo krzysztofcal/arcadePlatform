@@ -448,11 +448,7 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as materialized (
              and registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
              and registry.transaction_created_at < $1::timestamptz
              and registry.archive_batch_id is null
-         )::bigint as eligible_count,
-         public.chips_archive_text_ids_sha256(
-           coalesce(array_agg(registry.idempotency_key order by registry.idempotency_key)
-             filter (where registry.user_id is not null), array[]::text[])
-         ) as out_of_scope_keys_sha256
+         )::bigint as eligible_count
     from registry_rows registry
    where registry.table_id is not null
    group by registry.table_id
@@ -525,7 +521,6 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as materialized (
          stats.newest_created_at as table_newest_created_at,
          stats.identity_count as table_identity_count,
          stats.eligible_count as table_eligible_count,
-         stats.out_of_scope_keys_sha256 as table_out_of_scope_keys_sha256,
          count(entries.id)::text as entry_count
     from candidate_transactions transactions
     join table_rows stats on stats.table_id = transactions.key_table_id
@@ -561,8 +556,7 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as materialized (
             transactions.key_table_id, transactions.key_format_version, transactions.key_format,
             tables.id, tables.status, tables.has_human_participant,
             tables.bot_only_proof_eligible, escrow.id, escrow.status, escrow.balance,
-            stats.newest_created_at, stats.identity_count, stats.eligible_count,
-            stats.out_of_scope_keys_sha256
+            stats.newest_created_at, stats.identity_count, stats.eligible_count
   having count(*) = 2
      and count(*) filter (where accounts.account_type::text = 'USER') = 0
      and count(*) filter (where accounts.account_type::text = 'SYSTEM') = 1
@@ -589,6 +583,15 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as materialized (
    having count(*) = max(table_eligible_count)
    order by key_table_id
    limit 1
+), selected_table_evidence as materialized (
+  select selected.key_table_id,
+         public.chips_archive_text_ids_sha256(
+           coalesce(array_agg(registry.idempotency_key order by registry.idempotency_key)
+             filter (where registry.user_id is not null), array[]::text[])
+         ) as table_out_of_scope_keys_sha256
+    from selected_table selected
+    join registry_rows registry on registry.table_id = selected.key_table_id
+   group by selected.key_table_id
 )
 select eligible.id::text as id,
        eligible.sequence::text as sequence,
@@ -618,9 +621,10 @@ select eligible.id::text as id,
        eligible.table_newest_created_at::text,
        eligible.table_identity_count,
        eligible.table_eligible_count,
-       eligible.table_out_of_scope_keys_sha256
+       evidence.table_out_of_scope_keys_sha256
   from eligible_transactions eligible
   join selected_table on selected_table.key_table_id = eligible.key_table_id
+  join selected_table_evidence evidence on evidence.key_table_id = eligible.key_table_id
  order by eligible.created_at asc, eligible.id asc
  limit $2::int;
 `;
