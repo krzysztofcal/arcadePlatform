@@ -1,7 +1,16 @@
 name: Chips Ledger Stage Automation
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Stage automation mode
+        required: true
+        default: existing-30d
+        type: choice
+        options:
+          - existing-30d
+          - bot-only-7d-prepare-only
   schedule:
     - cron: "17 2 * * *"
 
@@ -23,6 +32,7 @@ jobs:
       SUPABASE_STAGE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_STAGE_SERVICE_ROLE_KEY }}
     steps:
       - name: Checkout
+        id: checkout
         uses: actions/checkout@v4
 
       - name: Setup Node.js
@@ -34,5 +44,75 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run one Stage automation cycle
+      - name: Resolve checked-out commit
+        id: checkout-sha
+        shell: bash
+        run: |
+          set -euo pipefail
+          checked_out_sha="$(git rev-parse HEAD)"
+          test "$checked_out_sha" = "$GITHUB_SHA"
+          printf 'sha=%s\n' "$checked_out_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Read-only Stage fence preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import postgres from "postgres";
+
+          const EXPECTED_SYSTEM_IDENTIFIER = "7656985631720456337";
+          const isTrue = (value) => value === true || value === "t";
+          const sql = postgres(process.env.SUPABASE_STAGE_DB_URL, {
+            max: 1,
+            prepare: false,
+            connect_timeout: 10,
+            idle_timeout: 0,
+          });
+
+          try {
+            await sql.begin(async (tx) => {
+              await tx.unsafe("set transaction read only");
+
+              const identityRows = await tx.unsafe(
+                "select system_identifier::text as system_identifier from pg_catalog.pg_control_system();",
+              );
+              if (identityRows[0]?.system_identifier !== EXPECTED_SYSTEM_IDENTIFIER) {
+                throw new Error("Stage system identifier preflight mismatch");
+              }
+
+              const activeRows = await tx.unsafe(
+                "select public.chips_table_fence_is_active() as active;",
+              );
+              if (!isTrue(activeRows[0]?.active)) {
+                throw new Error("Stage TABLE fence is not active");
+              }
+
+              const controlRows = await tx.unsafe(
+                "select enforcement_active from public.chips_table_fence_control where control_id is true;",
+              );
+              if (controlRows.length !== 1 || !isTrue(controlRows[0]?.enforcement_active)) {
+                throw new Error("Stage TABLE fence control is not active");
+              }
+            });
+          } finally {
+            await sql.end({ timeout: 5 });
+          }
+
+          process.stdout.write("Stage read-only fence preflight passed\n");
+          NODE
+
+      - name: Run existing 30-day Stage automation
+        if: ${{ github.event_name == 'schedule' || inputs.mode == '' || inputs.mode == 'existing-30d' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
         run: node scripts/ops/chips-ledger-stage-automation.mjs
+
+      - name: Run bot-only 7-day prepare-only Stage automation
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-prepare-only' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+        run: |
+          set -euo pipefail
+          node scripts/ops/chips-ledger-stage-automation.mjs \
+            --policy bot-only-7d \
+            --prepare-only
