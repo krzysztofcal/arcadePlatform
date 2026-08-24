@@ -700,6 +700,8 @@ begin
 end;
 $$;
 
+reset role;
+
 alter function public.chips_assert_legacy_stage_allowlist_batch(
   text, uuid[], bigint[], uuid[], uuid[], text, text, bigint, bigint, text, text, text, timestamptz
 ) owner to chips_ledger_archive_pruner;
