@@ -344,6 +344,19 @@ try {
     );
     fs.writeFileSync(path.join(runExportTemp, "legacy.manifest.json"), `${JSON.stringify(validRunManifest)}\n`, { mode: 0o600 });
   }
+  const cutoffTamperedManifest = JSON.parse(JSON.stringify(validRunManifest));
+  cutoffTamperedManifest.cutoff.created_at = "2026-08-17T16:51:28.075Z";
+  fs.writeFileSync(path.join(runExportTemp, "legacy.manifest.json"), `${JSON.stringify(cutoffTamperedManifest)}\n`, { mode: 0o600 });
+  assert.throws(
+    () => verifyLocalArchive({
+      artifactPath: path.join(runExportTemp, "legacy.archive.jsonl.gz"),
+      manifestPath: path.join(runExportTemp, "legacy.manifest.json"),
+      target: { target: "stage" },
+    }),
+    /legacy Stage allowlist manifest evidence is incomplete: cutoff/,
+    "root cutoff tamper must fail closed",
+  );
+  fs.writeFileSync(path.join(runExportTemp, "legacy.manifest.json"), `${JSON.stringify(validRunManifest)}\n`, { mode: 0o600 });
 
   const missingPlanSql = {
     async begin() {

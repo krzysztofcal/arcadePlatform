@@ -8,6 +8,7 @@ import {
   EXPORT_SCHEMA_VERSION,
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
   BOT_ONLY_RETENTION_POLICY_ID,
+  LEGACY_STAGE_ALLOWLIST_CUTOFF,
   LEGACY_STAGE_ALLOWLIST_POLICY_ID,
   LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT,
   LEGACY_STAGE_ALLOWLIST_TABLE_COUNT,
@@ -230,6 +231,7 @@ function verifyManifestShape(manifest, artifactName, target) {
   }
   if (manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION && manifest.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
     const legacy = manifest.legacy_stage_allowlist;
+    assertLegacyManifestEvidence(sameTimestamp(manifest.cutoff.created_at, LEGACY_STAGE_ALLOWLIST_CUTOFF), "cutoff");
     assertLegacyManifestEvidence(legacy && typeof legacy === "object" && !Array.isArray(legacy), "missing");
     assertLegacyManifestEvidence(legacy.policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID, "policy_id");
     assertLegacyManifestEvidence(legacy.proof_basis === LEGACY_STAGE_ALLOWLIST_POLICY_ID, "proof_basis");
