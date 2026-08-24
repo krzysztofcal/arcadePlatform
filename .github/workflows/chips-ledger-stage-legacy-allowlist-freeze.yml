@@ -2,6 +2,9 @@ name: Chips Ledger Stage Legacy Allowlist Freeze
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - agent/issue-890-bot-only-retention
 
 concurrency:
   group: chips-ledger-stage-legacy-allowlist-freeze
@@ -12,7 +15,7 @@ permissions:
 
 jobs:
   freeze:
-    if: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' }}
+    if: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/agent/issue-890-bot-only-retention')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
