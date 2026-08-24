@@ -6,6 +6,8 @@ import postgres from "postgres";
 import {
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
   BOT_ONLY_RETENTION_POLICY_ID,
+  LEGACY_STAGE_ALLOWLIST_POLICY_ID,
+  LEGACY_STAGE_ALLOWLIST_TABLE_COUNT,
   maxBatchSizeForTarget,
   stringifyJson,
 } from "./chips-ledger-archive-export.mjs";
@@ -158,7 +160,9 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
     if (transaction.user_id !== null) userTransactions += 1;
     const tableId = tableIdForRecord(record);
     tables.add(tableId);
-    if (localArchive.manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION) {
+    const isLegacyAllowlist = localArchive.manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+      && localArchive.manifest.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID;
+    if (localArchive.manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION && !isLegacyAllowlist) {
       const parsedBinding = assertTableBinding({
         idempotencyKey: transaction.idempotency_key,
         metadata: transaction.metadata,
@@ -172,6 +176,18 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
         fail("schema-v2 archive is not proven bot-only");
       }
       registryKeys.push(text(transaction.idempotency_key));
+      tableIds.add(tableId);
+    } else if (isLegacyAllowlist) {
+      const proof = record.table_context?.legacy_stage_allowlist;
+      if (!proof || proof.policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID
+        || proof.allowlist_sha256 !== localArchive.manifest.legacy_stage_allowlist?.allowlist_sha256
+        || proof.batch_table_ids_sha256 !== localArchive.manifest.legacy_stage_allowlist?.batch_table_ids_sha256
+        || proof.source_run !== "32753223679"
+        || proof.stage_system_identifier !== "7656985631720456337"
+        || proof.master_table_count !== 974
+        || transaction.user_id !== null) {
+        fail("schema-v2 legacy allowlist proof is incomplete");
+      }
       tableIds.add(tableId);
     }
     if (record.entries.length !== 2) fail("technical archive transaction must contain exactly two entries");
@@ -203,6 +219,21 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
     fail(`cannot prune USER ledger history (user_transactions=${userTransactions}, user_entries=${userEntries}, distinct_tables=${tables.size})`);
   }
   if (canonicalJson(txTypes) !== canonicalJson(localArchive.manifest.batch.tx_types)) fail("technical tx_type evidence differs from archive manifest");
+  if (localArchive.manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+    && localArchive.manifest.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
+    const legacy = localArchive.manifest.legacy_stage_allowlist;
+    const masterIds = [...(legacy?.master_table_ids || [])].sort();
+    if (masterIds.length !== LEGACY_STAGE_ALLOWLIST_TABLE_COUNT
+      || new Set(masterIds).size !== masterIds.length
+      || masterIds.some((id) => !UUID_RE.test(id))) {
+      fail("legacy allowlist master identity set is incomplete");
+    }
+    const masterHash = hashCanonicalLines(masterIds);
+    if (masterHash !== text(legacy.allowlist_sha256)) fail("legacy allowlist master identity hash differs from the manifest");
+    if (tables.size < 1 || tables.size !== [...tableIds].length) fail("legacy allowlist batch table set is empty");
+    const batchHash = hashCanonicalLines([...tableIds].sort());
+    if (batchHash !== text(legacy.batch_table_ids_sha256)) fail("legacy allowlist batch table identity hash differs from the manifest");
+  }
   return {
     ...proofs,
     transactionCount: proofs.transactionIds.length,
@@ -214,11 +245,21 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
     credits: localArchive.summary.credits,
     debits: localArchive.summary.debits,
     net: localArchive.summary.netAmount,
-    ...(localArchive.manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION ? {
+    ...(localArchive.manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+      && localArchive.manifest.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID ? {
       registryKeys: [...registryKeys].sort(),
       registryKeysSha256: hashCanonicalLines([...registryKeys].sort()),
       tableId: tableIds.size === 1 ? [...tableIds][0] : null,
       outOfScopeKeysSha256: text(localArchive.manifest.bot_only?.out_of_scope_keys_sha256),
+    } : {}),
+    ...(localArchive.manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+      && localArchive.manifest.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID ? {
+      legacyTableIds: [...tableIds].sort(),
+      legacyTableIdsSha256: hashCanonicalLines([...tableIds].sort()),
+      legacyMasterTableIds: [...(localArchive.manifest.legacy_stage_allowlist?.master_table_ids || [])].sort(),
+      legacyMasterTableIdsSha256: hashCanonicalLines([...(localArchive.manifest.legacy_stage_allowlist?.master_table_ids || [])].sort()),
+      legacyAllowlistSha256: text(localArchive.manifest.legacy_stage_allowlist?.allowlist_sha256),
+      legacyBatchTableIdsSha256: text(localArchive.manifest.legacy_stage_allowlist?.batch_table_ids_sha256),
     } : {}),
   };
 }
@@ -336,7 +377,8 @@ function exporterManifestFromDatabase(row, target) {
     sha256: { raw_jsonl: row.raw_sha256, compressed_artifact: row.compressed_sha256 },
     artifact: path.basename(row.object_path),
     ...(row.source_policy_id ? { source_policy_id: row.source_policy_id } : {}),
-    ...(row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION ? {
+    ...(row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+      && row.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID ? {
       bot_only: {
         table_id: row.bot_only_table_id,
         table_count: Number(row.bot_only_table_count),
@@ -345,6 +387,21 @@ function exporterManifestFromDatabase(row, target) {
         out_of_scope_keys_sha256: row.bot_only_out_of_scope_keys_sha256,
         identity_count: Number(row.bot_only_identity_count),
         eligible_count: Number(row.bot_only_eligible_count),
+      },
+    } : {}),
+    ...(row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+      && row.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID ? {
+      legacy_stage_allowlist: {
+        policy_id: LEGACY_STAGE_ALLOWLIST_POLICY_ID,
+        allowlist_sha256: row.legacy_allowlist_sha256,
+        batch_table_ids_sha256: row.legacy_batch_table_ids_sha256,
+        master_table_ids: row.legacy_master_table_ids,
+        source_run: row.legacy_source_run,
+        query_sha256: row.legacy_query_sha256,
+        stage_system_identifier: row.legacy_stage_system_identifier,
+        master_table_count: Number(row.legacy_master_table_count),
+        batch_number: Number(row.legacy_batch_number),
+        batch_table_count: Number(row.legacy_batch_table_count),
       },
     } : {}),
   };
@@ -385,13 +442,30 @@ export function buildRecoveryManifest(row, identity, evidence, target) {
       transaction_ids_sha256: evidence.transactionIdsSha256,
       entry_ids_sha256: evidence.entryIdsSha256,
     },
-    ...(row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION ? {
+    ...(row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+      && row.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID ? {
       bot_only: {
         table_id: row.bot_only_table_id || evidence.tableId,
         table_count: row.bot_only_table_count || 1,
         registry_keys_sha256: row.bot_only_registry_keys_sha256 || evidence.registryKeysSha256,
         registry_key_count: evidence.registryKeys?.length || 0,
         out_of_scope_keys_sha256: row.bot_only_out_of_scope_keys_sha256 || evidence.outOfScopeKeysSha256,
+      },
+    } : {}),
+    ...(row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+      && row.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID ? {
+      legacy_stage_allowlist: {
+        policy_id: LEGACY_STAGE_ALLOWLIST_POLICY_ID,
+        allowlist_sha256: row.legacy_allowlist_sha256 || evidence.legacyAllowlistSha256,
+        batch_table_ids_sha256: row.legacy_batch_table_ids_sha256 || evidence.legacyBatchTableIdsSha256,
+        master_table_ids: row.legacy_master_table_ids || evidence.legacyMasterTableIds,
+        master_table_ids_sha256: evidence.legacyMasterTableIdsSha256,
+        source_run: row.legacy_source_run,
+        query_sha256: row.legacy_query_sha256,
+        stage_system_identifier: row.legacy_stage_system_identifier,
+        master_table_count: Number(row.legacy_master_table_count),
+        batch_number: Number(row.legacy_batch_number),
+        batch_table_count: Number(row.legacy_batch_table_count),
       },
     } : {}),
   };
@@ -524,6 +598,30 @@ export function createPruneStore(sql) {
         return rows[0]?.result;
       });
     },
+    async registerLegacyStageAllowlistProof(row, evidence) {
+      return sql.begin(async (tx) => {
+        await tx.unsafe("set transaction isolation level repeatable read;");
+        const rows = await tx.unsafe(`select public.chips_register_legacy_stage_allowlist_proof(
+          $1, $2::uuid[], $3::bigint[], $4::uuid[], $5::uuid[], $6::text, $7::text,
+          $8::bigint, $9::bigint, $10::text, $11::text, $12::text, $13::timestamptz
+        ) as result;`, [
+          row.object_path,
+          evidence.transactionIds,
+          evidence.entryIds,
+          evidence.legacyTableIds,
+          evidence.legacyMasterTableIds,
+          evidence.legacyAllowlistSha256,
+          evidence.legacyBatchTableIdsSha256,
+          Number(row.legacy_master_table_count),
+          Number(row.legacy_batch_number),
+          row.legacy_source_run,
+          row.legacy_query_sha256,
+          row.legacy_stage_system_identifier,
+          timestampParam(row.cutoff),
+        ]);
+        return rows[0]?.result;
+      });
+    },
     async prune(objectPath, evidence, execute) {
       return sql.begin(async (tx) => {
         await tx.unsafe("set transaction isolation level serializable;");
@@ -548,6 +646,27 @@ export function createPruneStore(sql) {
           evidence.entryIds,
           evidence.registryKeys,
           evidence.tableId,
+          execute,
+          approvedBatchId,
+        ]);
+        return rows[0]?.result;
+      });
+    },
+    async cleanupLegacyStageAllowlist(objectPath, evidence, execute, approvedBatchId = null) {
+      return sql.begin(async (tx) => {
+        await tx.unsafe("set transaction isolation level serializable;");
+        await tx.unsafe("set local lock_timeout = '5s';");
+        await tx.unsafe("set local statement_timeout = '120s';");
+        const rows = await tx.unsafe(`select public.chips_prune_legacy_stage_allowlist_batch(
+          $1, $2::uuid[], $3::bigint[], $4::uuid[], $5::text, $6::text,
+          $7::boolean, $8::bigint
+        ) as result;`, [
+          objectPath,
+          evidence.transactionIds,
+          evidence.entryIds,
+          evidence.legacyTableIds,
+          evidence.legacyAllowlistSha256,
+          evidence.legacyBatchTableIdsSha256,
           execute,
           approvedBatchId,
         ]);
@@ -706,7 +825,9 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
 
     if (args.registerProof) {
       const proof = row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
-        ? await store.registerBotOnlyProof(row, evidence)
+        ? row.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID
+          ? await store.registerLegacyStageAllowlistProof(row, evidence)
+          : await store.registerBotOnlyProof(row, evidence)
         : await store.registerProof(row, evidence);
       const refreshedRow = await store.getManifest(row.object_path);
       const result = {
@@ -736,7 +857,9 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
     }
 
     const pruneResult = row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
-      ? await store.cleanupBotOnly(row.object_path, evidence, Boolean(args.execute), args.approvedBatchId == null ? null : Number(args.approvedBatchId))
+      ? row.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID
+        ? await store.cleanupLegacyStageAllowlist(row.object_path, evidence, Boolean(args.execute), args.approvedBatchId == null ? null : Number(args.approvedBatchId))
+        : await store.cleanupBotOnly(row.object_path, evidence, Boolean(args.execute), args.approvedBatchId == null ? null : Number(args.approvedBatchId))
       : await executeArchivePrune({
         store,
         objectPath: row.object_path,
@@ -762,9 +885,11 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
           artifactName: path.basename(row.object_path),
         });
         const verification = row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+          && row.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID
           ? await store.verifyBotOnlyCommitted(row, evidence)
           : await store.verifyCommitted(row, evidence);
-        if (row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION) {
+        if (row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+          && row.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
           if (!verification?.pruned_at
             || Number(verification.pruned_transaction_count) !== evidence.transactionCount
             || Number(verification.pruned_entry_count) !== evidence.entryCount

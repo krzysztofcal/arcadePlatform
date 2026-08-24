@@ -1,0 +1,82 @@
+name: Chips Ledger Stage Legacy Allowlist Prepare
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: chips-ledger-stage-legacy-allowlist
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    if: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_STAGE_DB_URL: ${{ secrets.SUPABASE_STAGE_DB_URL }}
+      SUPABASE_STAGE_URL: ${{ secrets.SUPABASE_STAGE_URL }}
+      SUPABASE_STAGE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_STAGE_SERVICE_ROLE_KEY }}
+    steps:
+      - name: Checkout exact workflow SHA
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Confirm checkout SHA
+        id: checkout-sha
+        shell: bash
+        run: |
+          set -euo pipefail
+          checked_out_sha="$(git rev-parse HEAD)"
+          test "$checked_out_sha" = "$GITHUB_SHA"
+          echo "sha=$checked_out_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Read-only Stage legacy fence preflight
+        shell: bash
+        env:
+          SUPABASE_STAGE_DB_URL: ${{ secrets.SUPABASE_STAGE_DB_URL }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import postgres from "postgres";
+
+          const sql = postgres(process.env.SUPABASE_STAGE_DB_URL, {
+            max: 1,
+            prepare: false,
+            connect_timeout: 10,
+            idle_timeout: 30,
+          });
+          try {
+            await sql.begin(async (tx) => {
+              await tx.unsafe("set transaction isolation level repeatable read, read only;");
+              const identity = await tx.unsafe("select system_identifier::text as system_identifier from pg_catalog.pg_control_system();");
+              const active = await tx.unsafe("select public.chips_table_fence_is_active() as active;");
+              const control = await tx.unsafe("select enforcement_active from public.chips_table_fence_control where control_id is true;");
+              const identityOk = String(identity[0]?.system_identifier || "") === "7656985631720456337";
+              const activeOk = active[0]?.active === true || active[0]?.active === "t";
+              const controlOk = control[0]?.enforcement_active === true || control[0]?.enforcement_active === "t";
+              if (!identityOk || !activeOk || !controlOk) throw new Error("canonical Stage legacy fence preflight failed");
+            });
+          } finally {
+            await sql.end({ timeout: 5 });
+          }
+          NODE
+
+      - name: Run legacy allowlist prepare-only
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_STAGE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_STAGE_SERVICE_ROLE_KEY }}
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+        run: node scripts/ops/chips-ledger-legacy-stage-allowlist.mjs

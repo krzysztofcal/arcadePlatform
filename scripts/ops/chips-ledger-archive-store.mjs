@@ -8,6 +8,9 @@ import {
   EXPORT_SCHEMA_VERSION,
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
   BOT_ONLY_RETENTION_POLICY_ID,
+  LEGACY_STAGE_ALLOWLIST_POLICY_ID,
+  LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT,
+  LEGACY_STAGE_ALLOWLIST_TABLE_COUNT,
   compareTransactions,
   maxBatchSizeForTarget,
   parseJsonl,
@@ -78,6 +81,10 @@ function assertSha(value, label) {
   return value;
 }
 
+function hashCanonicalLines(values) {
+  return crypto.createHash("sha256").update(`${values.join("\n")}\n`, "utf8").digest("hex");
+}
+
 function sameTimestamp(left, right) {
   if (left == null || right == null) return left == null && right == null;
   return timestampToMicros(left) === timestampToMicros(right);
@@ -86,6 +93,7 @@ function sameTimestamp(left, right) {
 function sameValue(left, right, field) {
   if (field.endsWith("_at") || field === "cutoff") return sameTimestamp(left, right);
   if (field === "tx_types") return canonicalJson(left) === canonicalJson(right);
+  if (field === "legacy_master_table_ids") return canonicalJson(left) === canonicalJson(right);
   return String(left ?? "") === String(right ?? "");
 }
 
@@ -158,18 +166,24 @@ function verifyManifestShape(manifest, artifactName, target) {
   if (manifest.source_policy_id !== undefined
     && manifest.source_policy_id !== null
     && manifest.source_policy_id !== STAGE_AUTOMATION_POLICY_ID
-    && manifest.source_policy_id !== BOT_ONLY_RETENTION_POLICY_ID) {
+    && manifest.source_policy_id !== BOT_ONLY_RETENTION_POLICY_ID
+    && manifest.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
     fail("local manifest source policy is unsupported");
   }
   if (manifest.source_policy_id === STAGE_AUTOMATION_POLICY_ID && target.target !== "stage") {
     fail("Stage automation policy cannot be stored for a non-Stage target");
   }
   if (manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
-    && (manifest.source_policy_id !== BOT_ONLY_RETENTION_POLICY_ID || target.target !== "stage")) {
+    && (![BOT_ONLY_RETENTION_POLICY_ID, LEGACY_STAGE_ALLOWLIST_POLICY_ID].includes(manifest.source_policy_id)
+      || target.target !== "stage")) {
     fail("schema-v2 archive requires the Stage bot-only retention policy");
   }
   if (manifest.source_policy_id === BOT_ONLY_RETENTION_POLICY_ID && manifest.schema_version !== BOT_ONLY_EXPORT_SCHEMA_VERSION) {
     fail("bot-only retention policy requires schema-v2 archive evidence");
+  }
+  if (manifest.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID
+    && (manifest.schema_version !== BOT_ONLY_EXPORT_SCHEMA_VERSION || target.target !== "stage")) {
+    fail("legacy Stage allowlist policy requires a Stage schema-v2 archive");
   }
   if (manifest.artifact !== artifactName) fail("local manifest artifact name does not match the archive");
   if (!manifest.cutoff || typeof manifest.cutoff.created_at !== "string") fail("local manifest cutoff is missing");
@@ -190,7 +204,7 @@ function verifyManifestShape(manifest, artifactName, target) {
   }
   if (txTypeTotal !== batch.transactions) fail("local manifest tx_types count mismatch");
 
-  if (manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION) {
+  if (manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION && manifest.source_policy_id === BOT_ONLY_RETENTION_POLICY_ID) {
     const botOnly = manifest.bot_only;
     if (!botOnly || !UUID_RE.test(text(botOnly.table_id)) || botOnly.table_count !== 1
       || !timestampValue(botOnly.newest_created_at)
@@ -200,6 +214,38 @@ function verifyManifestShape(manifest, artifactName, target) {
       || botOnly.identity_count !== batch.transactions
       || botOnly.eligible_count !== batch.transactions) {
       fail("schema-v2 bot-only manifest evidence is incomplete");
+    }
+  }
+  if (manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION && manifest.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
+    const legacy = manifest.legacy_stage_allowlist;
+    const masterIds = Array.isArray(legacy?.master_table_ids)
+      ? legacy.master_table_ids.map((id) => text(id).toLowerCase())
+      : [];
+    const batchIds = Array.isArray(legacy?.batch_table_ids)
+      ? legacy.batch_table_ids.map((id) => text(id).toLowerCase())
+      : null;
+    if (!legacy || legacy.policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID
+      || !SHA256_RE.test(text(legacy.allowlist_sha256))
+      || !SHA256_RE.test(text(legacy.batch_table_ids_sha256))
+      || !SHA256_RE.test(text(legacy.query_sha256))
+      || legacy.source_run !== "32753223679"
+      || legacy.stage_system_identifier !== "7656985631720456337"
+      || legacy.master_table_count !== LEGACY_STAGE_ALLOWLIST_TABLE_COUNT
+      || masterIds.length !== LEGACY_STAGE_ALLOWLIST_TABLE_COUNT
+      || masterIds.some((id) => !UUID_RE.test(id))
+      || new Set(masterIds).size !== masterIds.length
+      || masterIds.some((id, index) => id !== [...masterIds].sort()[index])
+      || hashCanonicalLines(masterIds) !== legacy.allowlist_sha256
+      || !Number.isSafeInteger(legacy.batch_number) || legacy.batch_number < 1
+      || !Number.isSafeInteger(legacy.batch_table_count) || legacy.batch_table_count < 1
+      || legacy.batch_table_count > LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT
+      || (batchIds !== null && (batchIds.length !== legacy.batch_table_count
+        || batchIds.some((id) => !UUID_RE.test(id))
+        || new Set(batchIds).size !== batchIds.length
+        || batchIds.some((id, index) => id !== [...batchIds].sort()[index])
+        || batchIds.some((id) => !masterIds.includes(id))
+        || hashCanonicalLines(batchIds) !== legacy.batch_table_ids_sha256))) {
+      fail("legacy Stage allowlist manifest evidence is incomplete");
     }
   }
 
@@ -265,7 +311,46 @@ function summarizeRecords(records, manifest) {
     txTypes[txType] = (txTypes[txType] || 0) + 1;
 
     if (!Array.isArray(record.entries)) fail(`JSONL artifact has no entries array for ${transactionId}`);
-    if (manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION) {
+    const isLegacyAllowlist = manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+      && manifest.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID;
+    if (isLegacyAllowlist) {
+      const context = record.table_context;
+      const proof = context?.legacy_stage_allowlist;
+      const legacy = manifest.legacy_stage_allowlist;
+      const tableId = text(context?.table_id).toLowerCase();
+      const masterIds = legacy.master_table_ids.map((id) => text(id).toLowerCase());
+      const batchIds = Array.isArray(legacy.batch_table_ids)
+        ? legacy.batch_table_ids.map((id) => text(id).toLowerCase())
+        : null;
+      if (transaction.tx_type !== "TABLE_BUY_IN" && transaction.tx_type !== "TABLE_CASH_OUT") fail("legacy Stage artifact contains a non-TABLE transaction");
+      if (!UUID_RE.test(tableId) || !masterIds.includes(tableId)
+        || (batchIds !== null && !batchIds.includes(tableId))
+        || transaction.user_id != null
+        || context?.table_exists !== true || context?.table_status !== "CLOSED"
+        || !context?.escrow_account_id || context?.escrow_status !== "active" || context?.escrow_balance !== "0"
+        || context?.bot_only_proof?.has_human_participant !== false
+        || context?.bot_only_proof?.proof_eligible === true
+        || !proof || proof.policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID
+        || proof.allowlist_sha256 !== legacy.allowlist_sha256
+        || proof.batch_table_ids_sha256 !== legacy.batch_table_ids_sha256
+        || proof.source_run !== legacy.source_run
+        || proof.query_sha256 !== legacy.query_sha256
+        || proof.stage_system_identifier !== legacy.stage_system_identifier
+        || proof.master_table_count !== legacy.master_table_count
+        || proof.batch_number !== legacy.batch_number
+        || proof.batch_table_count !== legacy.batch_table_count) {
+        fail("legacy Stage artifact proof or lifecycle evidence is invalid");
+      }
+      const escrowEntries = record.entries.filter((entry) => entry.account?.account_type === "ESCROW");
+      const systemEntries = record.entries.filter((entry) => entry.account?.account_type === "SYSTEM");
+      if (record.entries.length !== 2 || escrowEntries.length !== 1 || systemEntries.length !== 1
+        || record.entries.some((entry) => entry.account?.account_type === "USER")
+        || escrowEntries[0]?.account?.system_key !== `POKER_TABLE:${tableId}`
+        || (transaction.tx_type === "TABLE_BUY_IN" && !(BigInt(escrowEntries[0].amount) > 0n && BigInt(systemEntries[0].amount) < 0n))
+        || (transaction.tx_type === "TABLE_CASH_OUT" && !(BigInt(escrowEntries[0].amount) < 0n && BigInt(systemEntries[0].amount) > 0n))) {
+        fail("legacy Stage artifact entry binding is invalid");
+      }
+    } else if (manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION) {
       const context = record.table_context;
       const proof = context?.bot_only_proof;
       const summary = context?.table_identity_summary;
@@ -533,6 +618,15 @@ function manifestRow(manifest, storageTarget, objectPath) {
     bot_only_out_of_scope_keys_sha256: manifest.bot_only?.out_of_scope_keys_sha256 || null,
     bot_only_identity_count: manifest.bot_only?.identity_count == null ? null : String(manifest.bot_only.identity_count),
     bot_only_eligible_count: manifest.bot_only?.eligible_count == null ? null : String(manifest.bot_only.eligible_count),
+    legacy_allowlist_sha256: manifest.legacy_stage_allowlist?.allowlist_sha256 || null,
+    legacy_batch_table_ids_sha256: manifest.legacy_stage_allowlist?.batch_table_ids_sha256 || null,
+    legacy_master_table_ids: manifest.legacy_stage_allowlist?.master_table_ids || null,
+    legacy_master_table_count: manifest.legacy_stage_allowlist?.master_table_count == null ? null : String(manifest.legacy_stage_allowlist.master_table_count),
+    legacy_batch_number: manifest.legacy_stage_allowlist?.batch_number == null ? null : String(manifest.legacy_stage_allowlist.batch_number),
+    legacy_batch_table_count: manifest.legacy_stage_allowlist?.batch_table_count == null ? null : String(manifest.legacy_stage_allowlist.batch_table_count),
+    legacy_source_run: manifest.legacy_stage_allowlist?.source_run || null,
+    legacy_query_sha256: manifest.legacy_stage_allowlist?.query_sha256 || null,
+    legacy_stage_system_identifier: manifest.legacy_stage_allowlist?.stage_system_identifier || null,
     status: "pending",
   };
 }
@@ -543,6 +637,8 @@ const IMMUTABLE_FIELDS = [
   "entry_count", "tx_types", "raw_bytes", "compressed_bytes", "raw_sha256", "compressed_sha256", "credits", "debits", "net_amount", "source_policy_id",
   "bot_only_table_id", "bot_only_table_count", "bot_only_newest_created_at", "bot_only_registry_keys_sha256",
   "bot_only_out_of_scope_keys_sha256", "bot_only_identity_count", "bot_only_eligible_count",
+  "legacy_allowlist_sha256", "legacy_batch_table_ids_sha256", "legacy_master_table_ids", "legacy_master_table_count", "legacy_batch_number",
+  "legacy_batch_table_count", "legacy_source_run", "legacy_query_sha256", "legacy_stage_system_identifier",
 ];
 
 function assertSameManifest(existing, expected) {
@@ -725,6 +821,15 @@ function selectManifestSql() {
     bot_only_out_of_scope_keys_sha256,
     bot_only_identity_count::text as bot_only_identity_count,
     bot_only_eligible_count::text as bot_only_eligible_count,
+    legacy_allowlist_sha256,
+    legacy_batch_table_ids_sha256,
+    legacy_master_table_ids,
+    legacy_master_table_count::text as legacy_master_table_count,
+    legacy_batch_number::text as legacy_batch_number,
+    legacy_batch_table_count::text as legacy_batch_table_count,
+    legacy_source_run,
+    legacy_query_sha256,
+    legacy_stage_system_identifier,
     registry_cleaned_at::text as registry_cleaned_at,
     registry_cleaned_key_count::text as registry_cleaned_key_count,
     registry_cleaned_keys_sha256,
@@ -753,6 +858,9 @@ function normalizeManifestRow(row) {
     bot_only_table_count: row.bot_only_table_count == null ? null : String(row.bot_only_table_count),
     bot_only_identity_count: row.bot_only_identity_count == null ? null : String(row.bot_only_identity_count),
     bot_only_eligible_count: row.bot_only_eligible_count == null ? null : String(row.bot_only_eligible_count),
+    legacy_master_table_count: row.legacy_master_table_count == null ? null : String(row.legacy_master_table_count),
+    legacy_batch_number: row.legacy_batch_number == null ? null : String(row.legacy_batch_number),
+    legacy_batch_table_count: row.legacy_batch_table_count == null ? null : String(row.legacy_batch_table_count),
     registry_cleaned_key_count: row.registry_cleaned_key_count == null ? null : String(row.registry_cleaned_key_count),
     destructive_go_batch_id: row.destructive_go_batch_id == null ? null : String(row.destructive_go_batch_id),
   };
@@ -775,12 +883,16 @@ export function createManifestStore(sql) {
          credits, debits, net_amount, source_policy_id,
          bot_only_table_id, bot_only_table_count, bot_only_newest_created_at,
          bot_only_registry_keys_sha256, bot_only_out_of_scope_keys_sha256,
-         bot_only_identity_count, bot_only_eligible_count, status)
+         bot_only_identity_count, bot_only_eligible_count,
+         legacy_allowlist_sha256, legacy_batch_table_ids_sha256, legacy_master_table_ids,
+         legacy_master_table_count, legacy_batch_number, legacy_batch_table_count, legacy_source_run, legacy_query_sha256,
+         legacy_stage_system_identifier, status)
         values ($1, $2, $3::integer, $4::timestamptz, $5::timestamptz, $6::uuid,
                 $7::timestamptz, $8::uuid, $9::timestamptz, $10::timestamptz, $11::bigint,
                 $12::bigint, $13::jsonb, $14::bigint, $15::bigint, $16, $17,
                 $18::numeric, $19::numeric, $20::numeric, $21,
-                $22::uuid, $23::bigint, $24::timestamptz, $25, $26, $27::bigint, $28::bigint, 'pending')
+                $22::uuid, $23::bigint, $24::timestamptz, $25, $26, $27::bigint, $28::bigint,
+                $29, $30, $31::uuid[], $32::bigint, $33::bigint, $34::bigint, $35, $36, $37, 'pending')
         on conflict (object_path) do nothing;`, [
         row.object_path, row.project_ref, row.format_version, timestampParam(row.cutoff), timestampParam(row.cursor_start_created_at), row.cursor_start_id,
         timestampParam(row.cursor_end_created_at), row.cursor_end_id, timestampParam(row.first_created_at), timestampParam(row.last_created_at), row.transaction_count,
@@ -789,6 +901,9 @@ export function createManifestStore(sql) {
         row.bot_only_table_id, row.bot_only_table_count, timestampParam(row.bot_only_newest_created_at),
         row.bot_only_registry_keys_sha256, row.bot_only_out_of_scope_keys_sha256,
         row.bot_only_identity_count, row.bot_only_eligible_count,
+        row.legacy_allowlist_sha256, row.legacy_batch_table_ids_sha256, row.legacy_master_table_ids,
+        row.legacy_master_table_count, row.legacy_batch_number, row.legacy_batch_table_count,
+        row.legacy_source_run, row.legacy_query_sha256, row.legacy_stage_system_identifier,
       ]);
     },
     async markCommitted(objectPath) {

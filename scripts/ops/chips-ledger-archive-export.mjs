@@ -14,8 +14,13 @@ export const MAX_BATCH_SIZE = 5000;
 export const PRODUCTION_MAX_BATCH_SIZE = 2;
 export const STAGE_AUTOMATION_POLICY_ID = "stage-ledger-auto-retention-30d-v1";
 export const BOT_ONLY_RETENTION_POLICY_ID = "stage-ledger-bot-only-retention-7d-v1";
+export const LEGACY_STAGE_ALLOWLIST_POLICY_ID = "legacy_stage_allowlist_v1";
 export const BOT_ONLY_EXPORT_SCHEMA_VERSION = 2;
 export const BOT_ONLY_RETENTION_DAYS = 7;
+export const LEGACY_STAGE_ALLOWLIST_TABLE_COUNT = 974;
+export const LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT = 10;
+export const LEGACY_STAGE_ALLOWLIST_SOURCE_RUN = "32753223679";
+export const LEGACY_STAGE_ALLOWLIST_CUTOFF = "2026-08-17T16:51:28.074Z";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const INTEGER_RE = /^-?(?:0|[1-9][0-9]*)$/;
@@ -436,6 +441,324 @@ table_transaction_metadata as materialized (
     from unknown_identity_evidence evidence
    where evidence.table_id is not null
 )
+`;
+
+// Legacy allowlist generation is a fixed historical proof basis. It is
+// intentionally separate from BOT_ONLY_CANDIDATE_SQL: the normal seven-day
+// policy must continue to reject tables without authoritative proof.
+export const LEGACY_STAGE_ALLOWLIST_TABLE_STATS_CTE = `
+legacy_registry as materialized (
+  select registry.idempotency_key,
+         registry.transaction_id,
+         registry.payload_hash,
+         registry.tx_type,
+         registry.user_id,
+         registry.transaction_created_at,
+         registry.archive_batch_id,
+         registry.table_id,
+         registry.key_format_version,
+         registry.key_format
+    from registry_rows registry
+   where registry.table_id is not null
+     and registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+), legacy_entry_shapes as materialized (
+  select transactions.id,
+         registry.table_id,
+         transactions.tx_type::text as tx_type,
+         transactions.user_id,
+         count(entries.id)::bigint as entry_count,
+         count(*) filter (where accounts.account_type::text = 'USER')::bigint as user_entry_count,
+         count(*) filter (where accounts.account_type::text = 'SYSTEM')::bigint as system_entry_count,
+         count(*) filter (where accounts.account_type::text = 'ESCROW')::bigint as escrow_entry_count,
+         count(*) filter (
+           where accounts.account_type::text = 'ESCROW'
+             and accounts.system_key = 'POKER_TABLE:' || registry.table_id::text
+         )::bigint as matching_escrow_count,
+         count(*) filter (where accounts.status::text = 'active')::bigint as active_entry_count,
+         coalesce(sum(entries.amount), 0)::numeric as net_amount,
+         coalesce(sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM'), 0)::numeric as system_amount,
+         coalesce(sum(entries.amount) filter (where accounts.account_type::text = 'ESCROW'), 0)::numeric as escrow_amount
+    from table_transactions transactions
+    join legacy_registry registry
+      on registry.idempotency_key = transactions.idempotency_key
+     and registry.transaction_id = transactions.id
+     and registry.payload_hash = transactions.payload_hash
+     and registry.tx_type = transactions.tx_type
+     and registry.user_id is not distinct from transactions.user_id
+     and registry.transaction_created_at = transactions.created_at
+    left join public.chips_entries entries on entries.transaction_id = transactions.id
+    left join public.chips_accounts accounts on accounts.id = entries.account_id
+   group by transactions.id, registry.table_id, transactions.tx_type, transactions.user_id
+), legacy_marker_issues as materialized (
+  select distinct transactions.id, registry.table_id
+    from table_transactions transactions
+    join legacy_registry registry
+      on registry.idempotency_key = transactions.idempotency_key
+     and registry.transaction_id = transactions.id
+   where not transactions.metadata_is_object
+      or (
+        transactions.metadata_is_object
+        and transactions.normalized_metadata ? 'tableId'
+        and (
+          transactions.metadata_table_id is null
+          or transactions.metadata_table_id <> registry.table_id::text
+        )
+      )
+      or (
+        transactions.reference is not null
+        and (
+          transactions.reference_table_id is null
+          or transactions.reference_table_id <> registry.table_id::text
+        )
+      )
+), legacy_table_stats as materialized (
+  select registry.table_id,
+         max(registry.transaction_created_at) as newest_created_at,
+         count(*)::bigint as identity_count,
+         count(*) filter (
+           where registry.user_id is null
+             and registry.transaction_created_at < $1::timestamptz
+             and registry.archive_batch_id is null
+         )::bigint as eligible_count,
+         count(*) filter (
+           where shapes.entry_count = 2
+             and shapes.user_id is null
+             and shapes.user_entry_count = 0
+             and shapes.system_entry_count = 1
+             and shapes.escrow_entry_count = 1
+             and shapes.matching_escrow_count = 1
+             and shapes.active_entry_count = 2
+             and shapes.net_amount = 0
+             and (
+               (shapes.tx_type = 'TABLE_BUY_IN'
+                and shapes.system_amount < 0
+                and shapes.escrow_amount > 0)
+               or
+               (shapes.tx_type = 'TABLE_CASH_OUT'
+                and shapes.escrow_amount < 0
+                and shapes.system_amount > 0)
+             )
+         )::bigint as valid_entry_transaction_count,
+         count(*) filter (where markers.id is not null)::bigint as marker_issue_transaction_count
+    from legacy_registry registry
+    left join legacy_entry_shapes shapes
+      on shapes.id = registry.transaction_id
+     and shapes.table_id = registry.table_id
+    left join legacy_marker_issues markers
+      on markers.id = registry.transaction_id
+     and markers.table_id = registry.table_id
+   group by registry.table_id
+)
+`;
+
+export const LEGACY_STAGE_ALLOWLIST_GENERATOR_SQL = `
+with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, ${LEGACY_STAGE_ALLOWLIST_TABLE_STATS_CTE}, eligible_tables as (
+  select stats.table_id,
+         stats.newest_created_at,
+         stats.identity_count,
+         stats.eligible_count,
+         stats.valid_entry_transaction_count,
+         stats.marker_issue_transaction_count
+    from legacy_table_stats stats
+    join public.poker_tables tables on tables.id = stats.table_id
+    join public.chips_accounts escrow
+      on escrow.account_type::text = 'ESCROW'
+     and escrow.system_key = 'POKER_TABLE:' || stats.table_id::text
+   where tables.status::text = 'CLOSED'
+     and tables.has_human_participant is false
+     and tables.bot_only_proof_eligible is not true
+     and escrow.status::text = 'active'
+     and escrow.balance = 0
+     and stats.newest_created_at < $1::timestamptz
+     and stats.identity_count > 0
+     and stats.eligible_count = stats.identity_count
+     and stats.valid_entry_transaction_count = stats.identity_count
+     and stats.marker_issue_transaction_count = 0
+)
+select table_id::text as table_id,
+       newest_created_at::text as newest_created_at,
+       identity_count::text as identity_count,
+       eligible_count::text as eligible_count
+  from eligible_tables
+ order by table_id asc;
+`;
+
+export const LEGACY_STAGE_ALLOWLIST_CANDIDATE_SQL = `
+with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, ${LEGACY_STAGE_ALLOWLIST_TABLE_STATS_CTE}, selected_table_ids as materialized (
+  select table_id
+    from pg_catalog.unnest($2::uuid[]) as selected(table_id)
+), candidate_table_rows as materialized (
+  select stats.table_id,
+         stats.newest_created_at,
+         stats.identity_count,
+         stats.eligible_count
+    from legacy_table_stats stats
+    join selected_table_ids selected on selected.table_id = stats.table_id
+    join public.poker_tables tables on tables.id = stats.table_id
+    join public.chips_accounts escrow
+      on escrow.account_type::text = 'ESCROW'
+     and escrow.system_key = 'POKER_TABLE:' || stats.table_id::text
+   where tables.status::text = 'CLOSED'
+     and tables.has_human_participant is false
+     and tables.bot_only_proof_eligible is not true
+     and escrow.status::text = 'active'
+     and escrow.balance = 0
+     and stats.newest_created_at < $1::timestamptz
+     and stats.identity_count > 0
+     and stats.eligible_count = stats.identity_count
+     and stats.valid_entry_transaction_count = stats.identity_count
+     and stats.marker_issue_transaction_count = 0
+), candidate_transactions as materialized (
+  select transactions.id,
+         transactions.sequence,
+         transactions.tx_type,
+         transactions.idempotency_key,
+         transactions.payload_hash,
+         transactions.user_id,
+         transactions.reference,
+         transactions.description,
+         transactions.metadata,
+         transactions.created_by,
+         transactions.created_at,
+         registry.table_id as key_table_id,
+         registry.key_format_version,
+         registry.key_format,
+         stats.newest_created_at as table_newest_created_at,
+         stats.identity_count as table_identity_count,
+         stats.eligible_count as table_eligible_count
+    from table_transactions transactions
+    join legacy_registry registry
+      on registry.idempotency_key = transactions.idempotency_key
+     and registry.transaction_id = transactions.id
+     and registry.payload_hash = transactions.payload_hash
+     and registry.tx_type = transactions.tx_type
+     and registry.user_id is not distinct from transactions.user_id
+     and registry.transaction_created_at = transactions.created_at
+     and registry.archive_batch_id is null
+    join candidate_table_rows stats on stats.table_id = registry.table_id
+   where transactions.created_at < $1::timestamptz
+     and transactions.user_id is null
+     and transactions.metadata_is_object
+     and (
+       not (transactions.normalized_metadata ? 'tableId')
+       or transactions.metadata_table_id = registry.table_id::text
+     )
+     and (
+       transactions.reference is null
+       or transactions.reference_table_id = registry.table_id::text
+     )
+), candidate_entry_shapes as materialized (
+  select transactions.id,
+         transactions.idempotency_key,
+         transactions.tx_type::text as tx_type,
+         transactions.key_table_id,
+         count(entries.id)::bigint as entry_count
+    from candidate_transactions transactions
+    join public.chips_entries entries on entries.transaction_id = transactions.id
+    join public.chips_accounts accounts on accounts.id = entries.account_id
+   group by transactions.id, transactions.idempotency_key, transactions.tx_type, transactions.key_table_id
+  having count(*) = 2
+     and count(*) filter (where accounts.account_type::text = 'USER') = 0
+     and count(*) filter (where accounts.account_type::text = 'SYSTEM') = 1
+     and count(*) filter (where accounts.account_type::text = 'ESCROW') = 1
+     and count(*) filter (
+       where accounts.account_type::text = 'ESCROW'
+         and accounts.system_key = 'POKER_TABLE:' || transactions.key_table_id::text
+     ) = 1
+     and bool_and(accounts.status::text = 'active')
+     and sum(entries.amount) = 0
+     and (
+       (transactions.tx_type::text = 'TABLE_BUY_IN'
+        and sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM') < 0
+        and sum(entries.amount) filter (where accounts.account_type::text = 'ESCROW') > 0)
+       or
+       (transactions.tx_type::text = 'TABLE_CASH_OUT'
+        and sum(entries.amount) filter (where accounts.account_type::text = 'ESCROW') < 0
+        and sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM') > 0)
+     )
+), eligible_transactions as (
+  select transactions.id,
+         transactions.sequence,
+         transactions.tx_type,
+         transactions.idempotency_key,
+         transactions.payload_hash,
+         transactions.user_id,
+         transactions.reference,
+         transactions.description,
+         transactions.metadata,
+         transactions.created_by,
+         transactions.created_at,
+         transactions.key_table_id,
+         transactions.key_format_version,
+         transactions.key_format,
+         tables.status::text as table_status,
+         tables.has_human_participant,
+         tables.bot_only_proof_eligible,
+         escrow.id::text as escrow_account_id,
+         escrow.status::text as escrow_status,
+         escrow.balance::text as escrow_balance,
+         transactions.table_newest_created_at,
+         transactions.table_identity_count,
+         transactions.table_eligible_count,
+         shapes.entry_count
+    from candidate_transactions transactions
+    join candidate_entry_shapes shapes
+      on shapes.id = transactions.id
+     and shapes.idempotency_key = transactions.idempotency_key
+    join candidate_table_rows stats on stats.table_id = transactions.key_table_id
+    join public.poker_tables tables on tables.id = transactions.key_table_id
+    join public.chips_accounts escrow
+      on escrow.account_type::text = 'ESCROW'
+     and escrow.system_key = 'POKER_TABLE:' || transactions.key_table_id::text
+), batch_gate as materialized (
+  select count(distinct eligible.key_table_id)::bigint as table_count,
+         count(*)::bigint as transaction_count
+    from eligible_transactions eligible
+)
+select eligible.id::text as id,
+       eligible.sequence::text as sequence,
+       eligible.tx_type::text as tx_type,
+       eligible.idempotency_key,
+       eligible.payload_hash,
+       eligible.user_id::text as user_id,
+       eligible.reference,
+       eligible.description,
+       eligible.metadata,
+       eligible.created_by::text as created_by,
+       eligible.created_at::text as created_at,
+       true as table_related,
+       eligible.key_table_id::text as table_id,
+       false as invalid_table_marker,
+       true as table_exists,
+       eligible.table_status,
+       eligible.escrow_account_id,
+       eligible.escrow_status,
+       eligible.escrow_balance,
+       eligible.entry_count,
+       eligible.has_human_participant,
+       eligible.bot_only_proof_eligible,
+       eligible.key_table_id::text as key_table_id,
+       eligible.key_format_version,
+       eligible.key_format,
+       eligible.table_newest_created_at::text,
+       eligible.table_identity_count,
+       eligible.table_eligible_count,
+       $4::text as legacy_allowlist_sha256,
+       $5::text as legacy_batch_table_ids_sha256,
+       $6::text as legacy_source_run,
+       $7::text as legacy_query_sha256,
+       $8::text as legacy_stage_system_identifier,
+       $9::bigint as legacy_master_table_count,
+       $10::bigint as legacy_batch_number,
+       $11::bigint as legacy_batch_table_count
+  from eligible_transactions eligible
+ cross join batch_gate gate
+ where gate.table_count = pg_catalog.cardinality($2::uuid[])
+   and gate.table_count > 0
+   and gate.table_count <= $12::int
+   and gate.transaction_count > 0
+   and gate.transaction_count <= $3::int
+ order by eligible.created_at asc, eligible.id asc;
 `;
 
 export const BOT_ONLY_CANDIDATE_SQL = `
@@ -1136,6 +1459,19 @@ function buildTableContext(candidate, schemaVersion = EXPORT_SCHEMA_VERSION) {
       eligible_count: toBigIntString(candidate.table_eligible_count, "table.eligible_count"),
       out_of_scope_keys_sha256: text(candidate.table_out_of_scope_keys_sha256),
     };
+    if (candidate.legacy_allowlist_sha256) {
+      context.legacy_stage_allowlist = {
+        policy_id: LEGACY_STAGE_ALLOWLIST_POLICY_ID,
+        allowlist_sha256: text(candidate.legacy_allowlist_sha256),
+        batch_table_ids_sha256: text(candidate.legacy_batch_table_ids_sha256),
+        source_run: text(candidate.legacy_source_run),
+        query_sha256: text(candidate.legacy_query_sha256),
+        stage_system_identifier: text(candidate.legacy_stage_system_identifier),
+        master_table_count: Number(candidate.legacy_master_table_count),
+        batch_number: Number(candidate.legacy_batch_number),
+        batch_table_count: Number(candidate.legacy_batch_table_count),
+      };
+    }
   }
   return context;
 }
@@ -1223,7 +1559,43 @@ function validateBotOnlyRecord(candidate, record) {
   if (candidate?.key_table_id && text(candidate.key_table_id) !== context.table_id) fail("bot-only key-derived table id differs from metadata/ESCROW");
 }
 
-export function validateBatch({ candidates, records, cutoff, schemaVersion = EXPORT_SCHEMA_VERSION }) {
+function validateLegacyStageAllowlistRecord(candidate, record) {
+  const transaction = record?.transaction;
+  const context = record?.table_context;
+  const proof = context?.legacy_stage_allowlist;
+  if (transaction?.tx_type !== "TABLE_BUY_IN" && transaction?.tx_type !== "TABLE_CASH_OUT") fail("legacy allowlist archive contains a non-TABLE transaction");
+  if (transaction.user_id != null || candidate?.has_human_participant !== false) fail("legacy allowlist archive contains human evidence");
+  if (!context || context.table_exists !== true || context.table_status !== "CLOSED"
+    || !context.escrow_account_id || context.escrow_status !== "active" || context.escrow_balance !== "0") {
+    fail("legacy allowlist table lifecycle evidence is incomplete");
+  }
+  if (candidate?.bot_only_proof_eligible === true) fail("legacy allowlist archive unexpectedly contains an authoritative bot-only table");
+  if (!proof || proof.policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID
+    || !/^[0-9a-f]{64}$/.test(proof.allowlist_sha256)
+    || !/^[0-9a-f]{64}$/.test(proof.batch_table_ids_sha256)
+    || !/^[0-9a-f]{64}$/.test(proof.query_sha256)
+    || proof.source_run !== LEGACY_STAGE_ALLOWLIST_SOURCE_RUN
+    || proof.stage_system_identifier !== "7656985631720456337"
+    || proof.master_table_count !== LEGACY_STAGE_ALLOWLIST_TABLE_COUNT
+    || proof.batch_number < 1
+    || proof.batch_table_count < 1
+    || proof.batch_table_count > LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT) {
+    fail("legacy allowlist proof basis is incomplete");
+  }
+  const tableEntries = record.entries || [];
+  if (tableEntries.length !== 2 || tableEntries.some((entry) => entry.account?.account_type === "USER")) fail("legacy allowlist archive entry shape contains a USER entry");
+  const escrowEntries = tableEntries.filter((entry) => entry.account?.account_type === "ESCROW");
+  const systemEntries = tableEntries.filter((entry) => entry.account?.account_type === "SYSTEM");
+  if (escrowEntries.length !== 1 || systemEntries.length !== 1 || escrowEntries[0].account.system_key !== `POKER_TABLE:${context.table_id}`) {
+    fail("legacy allowlist archive ESCROW binding is incomplete");
+  }
+  const escrowAmount = BigInt(escrowEntries[0].amount);
+  const systemAmount = BigInt(systemEntries[0].amount);
+  if (transaction.tx_type === "TABLE_BUY_IN" && !(escrowAmount > 0n && systemAmount < 0n)) fail("legacy TABLE_BUY_IN direction is invalid");
+  if (transaction.tx_type === "TABLE_CASH_OUT" && !(escrowAmount < 0n && systemAmount > 0n)) fail("legacy TABLE_CASH_OUT direction is invalid");
+}
+
+export function validateBatch({ candidates, records, cutoff, schemaVersion = EXPORT_SCHEMA_VERSION, sourcePolicyId = null }) {
   if (!Array.isArray(candidates) || !Array.isArray(records)) fail("batch must contain arrays");
   if (candidates.length !== records.length) fail("batch transaction count mismatch");
 
@@ -1260,7 +1632,13 @@ export function validateBatch({ candidates, records, cutoff, schemaVersion = EXP
     }
     const eligibility = evaluateTableEligibility(candidate);
     if (!eligibility.eligible) fail(`ineligible poker transaction: ${eligibility.reason}`);
-    if (schemaVersion === BOT_ONLY_EXPORT_SCHEMA_VERSION) validateBotOnlyRecord(candidate, record);
+    if (schemaVersion === BOT_ONLY_EXPORT_SCHEMA_VERSION) {
+      if (sourcePolicyId === LEGACY_STAGE_ALLOWLIST_POLICY_ID || record?.table_context?.legacy_stage_allowlist) {
+        validateLegacyStageAllowlistRecord(candidate, record);
+      } else {
+        validateBotOnlyRecord(candidate, record);
+      }
+    }
 
     const expectedEntries = BigInt(toBigIntString(candidate.entry_count, "database entry count"));
     if (!Array.isArray(record.entries) || BigInt(record.entries.length) !== expectedEntries) {
@@ -1303,7 +1681,7 @@ export function validateBatch({ candidates, records, cutoff, schemaVersion = EXP
   };
 }
 
-export function buildManifest({ target, cutoff, batchSize, cursor, records, archive, outputPath, sourcePolicyId = null, schemaVersion = EXPORT_SCHEMA_VERSION }) {
+export function buildManifest({ target, cutoff, batchSize, cursor, records, archive, outputPath, sourcePolicyId = null, schemaVersion = EXPORT_SCHEMA_VERSION, legacyStageAllowlist = null }) {
   const validation = validateBatch({ candidates: records.map((record) => ({
     id: record.transaction.id,
     created_at: record.transaction.created_at,
@@ -1323,7 +1701,15 @@ export function buildManifest({ target, cutoff, batchSize, cursor, records, arch
     table_identity_count: record.table_context?.table_identity_summary?.identity_count,
     table_eligible_count: record.table_context?.table_identity_summary?.eligible_count,
     table_out_of_scope_keys_sha256: record.table_context?.table_identity_summary?.out_of_scope_keys_sha256,
-  })), records, cutoff: null, schemaVersion });
+    legacy_allowlist_sha256: record.table_context?.legacy_stage_allowlist?.allowlist_sha256,
+    legacy_batch_table_ids_sha256: record.table_context?.legacy_stage_allowlist?.batch_table_ids_sha256,
+    legacy_source_run: record.table_context?.legacy_stage_allowlist?.source_run,
+    legacy_query_sha256: record.table_context?.legacy_stage_allowlist?.query_sha256,
+    legacy_stage_system_identifier: record.table_context?.legacy_stage_allowlist?.stage_system_identifier,
+    legacy_master_table_count: record.table_context?.legacy_stage_allowlist?.master_table_count,
+    legacy_batch_number: record.table_context?.legacy_stage_allowlist?.batch_number,
+    legacy_batch_table_count: record.table_context?.legacy_stage_allowlist?.batch_table_count,
+  })), records, cutoff: null, schemaVersion, sourcePolicyId });
   const first = records[0]?.transaction || null;
   const last = records.at(-1)?.transaction || null;
   const compressionRatio = archive.rawBytes.length === 0
@@ -1340,7 +1726,7 @@ export function buildManifest({ target, cutoff, batchSize, cursor, records, arch
     format: "jsonl.gz",
     target,
     ...(sourcePolicyId == null ? {} : { source_policy_id: sourcePolicyId }),
-    ...(schemaVersion === BOT_ONLY_EXPORT_SCHEMA_VERSION ? {
+    ...(schemaVersion === BOT_ONLY_EXPORT_SCHEMA_VERSION && sourcePolicyId === BOT_ONLY_RETENTION_POLICY_ID ? {
       bot_only: {
         table_id: records[0]?.table_context?.table_id || null,
         table_count: 1,
@@ -1354,6 +1740,14 @@ export function buildManifest({ target, cutoff, batchSize, cursor, records, arch
           ? null
           : Number(records[0].table_context.table_identity_summary.eligible_count),
       },
+    } : {}),
+    ...(schemaVersion === BOT_ONLY_EXPORT_SCHEMA_VERSION && sourcePolicyId === LEGACY_STAGE_ALLOWLIST_POLICY_ID ? {
+      legacy_stage_allowlist: legacyStageAllowlist
+        ? {
+          ...legacyStageAllowlist,
+          master_table_ids: [...(legacyStageAllowlist.master_table_ids || [])].map((id) => text(id).toLowerCase()),
+        }
+        : records[0]?.table_context?.legacy_stage_allowlist || null,
     } : {}),
     cutoff: {
       created_at: cutoff,
@@ -1524,21 +1918,43 @@ export async function readSnapshot(sql, options) {
         ? PRUNABLE_CANDIDATE_SQL
         : selector === "bot-only-7d"
           ? BOT_ONLY_CANDIDATE_SQL
-          : fail("snapshot selector must be standard, prunable, or bot-only-7d");
+          : selector === "legacy-stage-allowlist-v1"
+            ? LEGACY_STAGE_ALLOWLIST_CANDIDATE_SQL
+            : fail("snapshot selector must be standard, prunable, bot-only-7d, or legacy-stage-allowlist-v1");
+    const legacyPlan = selector === "legacy-stage-allowlist-v1" ? options.legacyStageAllowlist : null;
+    if (selector === "legacy-stage-allowlist-v1" && !legacyPlan) fail("legacy-stage-allowlist-v1 requires an immutable plan");
+    const candidateParameters = selector === "legacy-stage-allowlist-v1"
+      ? [
+        timestampParam(options.cutoff),
+        legacyPlan.batchTableIds,
+        options.batchSize,
+        legacyPlan.allowlistSha256,
+        legacyPlan.batchTableIdsSha256,
+        legacyPlan.sourceRun,
+        legacyPlan.querySha256,
+        legacyPlan.stageSystemIdentifier,
+        legacyPlan.masterTableCount,
+        legacyPlan.batchNumber,
+        legacyPlan.batchTableCount,
+        LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT,
+      ]
+      : [
+        timestampParam(options.cutoff),
+        options.batchSize,
+        timestampParam(options.cursor?.created_at || null),
+        options.cursor?.id || null,
+      ];
     const candidates = await observedQuery(tx, {
       phase: "snapshot.candidate_selector",
       queryName: selector === "standard"
         ? "standard_candidate_selector"
         : selector === "prunable"
           ? "prunable_candidate_selector"
-          : "bot_only_candidate_selector",
+          : selector === "bot-only-7d"
+            ? "bot_only_candidate_selector"
+            : "legacy_stage_allowlist_candidate_selector",
       query: candidateSql,
-      parameters: [
-        timestampParam(options.cutoff),
-        options.batchSize,
-        timestampParam(options.cursor?.created_at || null),
-        options.cursor?.id || null,
-      ],
+      parameters: candidateParameters,
       telemetry,
     });
     const ids = candidates.map((candidate) => text(candidate.id));
@@ -1640,13 +2056,13 @@ export async function runExport({ argv = process.argv.slice(2), env = process.en
       entriesByTransaction.get(text(candidate.id)) || [],
       { schemaVersion },
     )));
-    validateBatch({ candidates: snapshot.candidates, records, cutoff: options.cutoff, schemaVersion });
+    validateBatch({ candidates: snapshot.candidates, records, cutoff: options.cutoff, schemaVersion, sourcePolicyId: deps.sourcePolicyId || null });
 
     const archive = buildArchiveBytes(records);
     const roundTripRaw = gunzipSync(archive.compressedBytes);
     if (!roundTripRaw.equals(archive.rawBytes)) fail("gzip round-trip verification failed");
     const roundTripRecords = parseJsonl(roundTripRaw.toString("utf8"));
-    validateBatch({ candidates: snapshot.candidates, records: roundTripRecords, cutoff: options.cutoff, schemaVersion });
+    validateBatch({ candidates: snapshot.candidates, records: roundTripRecords, cutoff: options.cutoff, schemaVersion, sourcePolicyId: deps.sourcePolicyId || null });
     if (serializeRecords(roundTripRecords) !== archive.rawText) fail("JSONL round-trip verification failed");
 
     const manifest = buildManifest({
@@ -1659,6 +2075,7 @@ export async function runExport({ argv = process.argv.slice(2), env = process.en
       outputPath: options.outputPath,
       sourcePolicyId: deps.sourcePolicyId || null,
       schemaVersion,
+      legacyStageAllowlist: deps.legacyStageAllowlist || null,
     });
     if (manifest.sha256.compressed_artifact !== crypto.createHash("sha256").update(archive.compressedBytes).digest("hex")) {
       fail("manifest checksum verification failed");
