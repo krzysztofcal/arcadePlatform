@@ -394,14 +394,8 @@ async function insertUnsupportedDatabaseTableTransaction(tx, fixture, {
 }
 
 async function insertHumanUserEscrowTransaction(tx, fixture, { createdAt } = {}) {
-  const userRows = await tx.unsafe(`
-    select id
-      from auth.users
-     order by id
-     limit 1;
-  `);
-  assert.ok(userRows[0]?.id, "human USER/ESCROW fixture requires an auth user");
-  const userId = String(userRows[0].id);
+  const userId = randomUUID();
+  await tx.unsafe("insert into auth.users (id) values ($1::uuid);", [userId]);
   const userAccountId = randomUUID();
   await tx.unsafe(`
     insert into public.chips_accounts (id, user_id, account_type, status, balance)
