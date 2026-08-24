@@ -25,6 +25,7 @@ with configured as (
          unnest(coalesce(rolconfig, array[]::text[])) as config
     from pg_catalog.pg_roles
    where rolname = current_user
+  union all
   select case
            when setrole = 0 then 'database'
            when setdatabase = 0 then 'role'
