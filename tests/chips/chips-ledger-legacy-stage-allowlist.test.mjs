@@ -16,20 +16,28 @@ import {
   buildManifest,
 } from "../../scripts/ops/chips-ledger-archive-export.mjs";
 import {
+  LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN,
+  LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256,
+  LEGACY_STAGE_ALLOWLIST_REPO_RELATIVE_DIR,
   buildLegacyBatchManifest,
   buildLegacyMasterManifest,
   buildLegacyPlan,
   legacyAllowlistQuerySha256,
+  loadFrozenLegacyAllowlist,
   readLegacyAllowlist,
+  validateFrozenLegacyAllowlistArtifacts,
   writeLegacyPlanFiles,
 } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist.mjs";
+import { runLegacyStageAllowlistFreeze } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-freeze.mjs";
 import { buildPruneEvidence } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
 import { verifyArchiveBytes } from "../../scripts/ops/chips-ledger-archive-store.mjs";
 
 const migrationPath = "supabase/migrations/20260824120000_chips_ledger_legacy_stage_allowlist.sql";
 const workflowPath = ".github/workflows/chips-ledger-stage-legacy-allowlist.yml";
+const freezeWorkflowPath = ".github/workflows/chips-ledger-stage-legacy-allowlist-freeze.yml";
 const migration = fs.readFileSync(migrationPath, "utf8");
 const workflow = fs.readFileSync(workflowPath, "utf8");
+const freezeWorkflow = fs.readFileSync(freezeWorkflowPath, "utf8");
 
 function tableId(number) {
   return `00000000-0000-4000-8000-${number.toString(16).padStart(12, "0")}`;
@@ -47,6 +55,20 @@ const master = buildLegacyMasterManifest({
 });
 const batch = buildLegacyBatchManifest(master, { batchNumber: 1 });
 const plan = buildLegacyPlan(master, batch);
+
+const frozenMaster = buildLegacyMasterManifest({
+  tableIds: ids,
+  cutoff: LEGACY_STAGE_ALLOWLIST_CUTOFF,
+  querySha256: legacyAllowlistQuerySha256(),
+  sourceRun: LEGACY_STAGE_ALLOWLIST_SOURCE_RUN,
+  stageSystemIdentifier: "7656985631720456337",
+  projectRef: "krydukthwdvccggbyjfw",
+  freezeRunId: "32770000001",
+  diagnosticSourceRun: LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN,
+  diagnosticSourceRunSha256: LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256,
+});
+const frozenBatch = buildLegacyBatchManifest(frozenMaster, { batchNumber: 1 });
+const frozenPlan = buildLegacyPlan(frozenMaster, frozenBatch);
 
 const fixtureCandidates = plan.batchTableIds.map((fixtureTableId, index) => ({
   id: tableId(0xf001 + index),
@@ -197,6 +219,80 @@ assert.equal(generated.masterManifest.table_count, 974);
 assert.equal(generated.batchManifest.batch_table_count, 10);
 assert.equal(generated.querySha256, legacyAllowlistQuerySha256());
 
+const frozenTemp = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-allowlist-frozen-test-"));
+try {
+  writeLegacyPlanFiles(frozenTemp, frozenPlan);
+  const loaded = loadFrozenLegacyAllowlist({ directory: frozenTemp });
+  assert.equal(loaded.masterManifest.freeze_run_id, "32770000001");
+  assert.equal(loaded.masterManifest.generator_sha256, legacyAllowlistQuerySha256());
+  assert.equal(loaded.masterManifest.diagnostic_source_run_sha256, LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256);
+  assert.deepEqual(loaded.masterTableIds, ids);
+
+  const mutatedIds = [...ids];
+  mutatedIds[mutatedIds.length - 1] = tableId(975);
+  assert.throws(
+    () => validateFrozenLegacyAllowlistArtifacts({
+      masterIds: mutatedIds,
+      masterManifest: loaded.masterManifest,
+      batchIds: loaded.batchTableIds,
+      batchManifest: loaded.batchManifest,
+    }),
+    /master manifest evidence|does not match the UUID file/i,
+    "runner must reject a one-UUID replacement even when the count remains 974",
+  );
+} finally {
+  fs.rmSync(frozenTemp, { recursive: true, force: true });
+}
+
+const freezeTemp = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-allowlist-freeze-test-"));
+try {
+  let readAllowlistCalls = 0;
+  const freezeEnv = {
+    SUPABASE_STAGE_DB_URL: "postgresql://postgres.krydukthwdvccggbyjfw:secret@db.krydukthwdvccggbyjfw.supabase.co:5432/postgres",
+    SUPABASE_STAGE_URL: "https://krydukthwdvccggbyjfw.supabase.co",
+    SUPABASE_STAGE_SERVICE_ROLE_KEY: "test-service-role",
+    DEPLOYED_COMMIT_SHA: "a".repeat(40),
+    FREEZE_RUN_ID: "32770000002",
+    FREEZE_OUTPUT_DIR: freezeTemp,
+  };
+  const freezeResult = await runLegacyStageAllowlistFreeze({
+    env: freezeEnv,
+    deps: {
+      sql: {},
+      preflight: async () => ({ readOnly: true, fenceActive: true, enforcementActive: true }),
+      readAllowlist: async (_sql, options) => {
+        readAllowlistCalls += 1;
+        assert.equal(options.freezeRunId, "32770000002");
+        assert.equal(options.diagnosticSourceRunSha256, LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256);
+        const runMaster = buildLegacyMasterManifest({
+          tableIds: ids,
+          freezeRunId: options.freezeRunId,
+          diagnosticSourceRun: options.diagnosticSourceRun,
+          diagnosticSourceRunSha256: options.diagnosticSourceRunSha256,
+        });
+        const runBatch = buildLegacyBatchManifest(runMaster, { batchNumber: 1 });
+        return { masterManifest: runMaster, batchManifest: runBatch };
+      },
+    },
+  });
+  assert.equal(readAllowlistCalls, 1, "freeze must execute the generator exactly once");
+  assert.equal(freezeResult.readOnly, true);
+  assert.equal(freezeResult.databaseWrites, false);
+  assert.equal(freezeResult.archiveWrites, false);
+  assert.equal(freezeResult.proofWrites, false);
+  assert.deepEqual(
+    fs.readdirSync(freezeTemp).sort(),
+    [
+      "legacy-stage-allowlist-v1.batch-001.ids",
+      "legacy-stage-allowlist-v1.batch-001.manifest.json",
+      "legacy-stage-allowlist-v1.master.ids",
+      "legacy-stage-allowlist-v1.master.manifest.json",
+    ],
+  );
+} finally {
+  fs.rmSync(freezeTemp, { recursive: true, force: true });
+}
+
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-allowlist-test-"));
 try {
   const files = writeLegacyPlanFiles(temp, plan);
@@ -230,5 +326,21 @@ assert.match(workflow, /enforcement_active/);
 assert.match(workflow, /DEPLOYED_COMMIT_SHA: \$\{\{ steps\.checkout-sha\.outputs\.sha \}\}/);
 assert.match(workflow, /node scripts\/ops\/chips-ledger-legacy-stage-allowlist\.mjs/);
 assert.doesNotMatch(workflow, /--execute|CHIPS_LEDGER_BOT_ONLY_EXECUTE|SUPABASE_PROD_|PRODUCTION|inputs:/);
+
+assert.match(freezeWorkflow, /^on:\n\s+workflow_dispatch:/m);
+assert.doesNotMatch(freezeWorkflow, /^\s+- cron:/m);
+assert.match(freezeWorkflow, /CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1'/);
+assert.match(freezeWorkflow, /FREEZE_RUN_ID: \$\{\{ github\.run_id \}\}/);
+assert.match(freezeWorkflow, /FREEZE_OUTPUT_DIR/);
+assert.match(freezeWorkflow, /chips-ledger-legacy-stage-allowlist-freeze\.mjs/);
+assert.match(freezeWorkflow, /actions\/upload-artifact@v4/);
+assert.doesNotMatch(freezeWorkflow, /--prepare-only|--execute|CHIPS_LEDGER_BOT_ONLY_EXECUTE|SUPABASE_PROD_|PRODUCTION/);
+
+const runnerSource = fs.readFileSync("scripts/ops/chips-ledger-legacy-stage-allowlist.mjs", "utf8");
+const prepareStart = runnerSource.indexOf("export async function runLegacyStagePrepareOnly");
+assert.ok(prepareStart >= 0, "prepare runner must be present");
+assert.match(runnerSource.slice(prepareStart), /loadFrozenLegacyAllowlist/);
+assert.doesNotMatch(runnerSource.slice(prepareStart), /readLegacyAllowlist\(/);
+assert.match(LEGACY_STAGE_ALLOWLIST_REPO_RELATIVE_DIR, /^data\/chips-ledger\/legacy-stage-allowlist-v1$/);
 
 process.stdout.write("chips-ledger-legacy-stage-allowlist contract passed\n");

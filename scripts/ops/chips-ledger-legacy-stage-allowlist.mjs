@@ -45,6 +45,11 @@ const SHA256_RE = /^[0-9a-f]{64}$/;
 const COMMIT_SHA_RE = /^[0-9a-f]{40}$/;
 const PLAN_OBJECT_PREFIX = `plan/v1/${LEGACY_STAGE_ALLOWLIST_POLICY_ID}`;
 
+export const LEGACY_STAGE_ALLOWLIST_REPO_RELATIVE_DIR = "data/chips-ledger/legacy-stage-allowlist-v1";
+export const LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN = "32753223679";
+export const LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256 =
+  "aa82076e7e4d7fd1e027889be94868e5662652cc29ae2dc7b55a4196b260ed0e";
+
 function fail(message) {
   throw new Error(message);
 }
@@ -94,6 +99,9 @@ export function buildLegacyMasterManifest({
   sourceRun = LEGACY_STAGE_ALLOWLIST_SOURCE_RUN,
   stageSystemIdentifier = STAGE_SYSTEM_IDENTIFIER,
   projectRef = STAGE_PROJECT_REF,
+  freezeRunId = null,
+  diagnosticSourceRun = null,
+  diagnosticSourceRunSha256 = null,
 }) {
   const ids = canonicalUuidList(tableIds, "legacy master table IDs");
   if (ids.length !== LEGACY_STAGE_ALLOWLIST_TABLE_COUNT) {
@@ -106,6 +114,14 @@ export function buildLegacyMasterManifest({
     || querySha256 !== legacyAllowlistQuerySha256()) {
     fail("legacy master manifest source proof is invalid");
   }
+  if (freezeRunId !== null && !/^\d+$/.test(text(freezeRunId))) {
+    fail("legacy master manifest freeze run ID is invalid");
+  }
+  if (freezeRunId !== null
+    && (diagnosticSourceRun !== LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN
+      || diagnosticSourceRunSha256 !== LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256)) {
+    fail("legacy master manifest diagnostic source proof is invalid");
+  }
   const manifest = {
     manifest_version: 1,
     archive_schema_version: BOT_ONLY_EXPORT_SCHEMA_VERSION,
@@ -116,11 +132,17 @@ export function buildLegacyMasterManifest({
     stage_system_identifier: stageSystemIdentifier,
     source_run: sourceRun,
     query_sha256: querySha256,
+    generator_sha256: querySha256,
     cutoff,
     table_count: ids.length,
     table_ids: ids,
     allowlist_sha256: hashCanonicalIds(ids),
   };
+  if (freezeRunId !== null) {
+    manifest.freeze_run_id = text(freezeRunId);
+    manifest.diagnostic_source_run = diagnosticSourceRun;
+    manifest.diagnostic_source_run_sha256 = diagnosticSourceRunSha256;
+  }
   return {
     ...manifest,
     manifest_sha256: hashCanonicalJson(manifest),
@@ -149,6 +171,7 @@ export function buildLegacyBatchManifest(masterManifest, { batchNumber = 1 } = {
     stage_system_identifier: masterManifest.stage_system_identifier,
     source_run: masterManifest.source_run,
     query_sha256: masterManifest.query_sha256,
+    generator_sha256: masterManifest.generator_sha256,
     cutoff: masterManifest.cutoff,
     batch_number: batchNumber,
     batch_table_count: tableIds.length,
@@ -158,6 +181,11 @@ export function buildLegacyBatchManifest(masterManifest, { batchNumber = 1 } = {
     master_allowlist_sha256: masterManifest.allowlist_sha256,
     master_manifest_sha256: masterManifest.manifest_sha256,
   };
+  if (masterManifest.freeze_run_id !== undefined) {
+    manifest.freeze_run_id = masterManifest.freeze_run_id;
+    manifest.diagnostic_source_run = masterManifest.diagnostic_source_run;
+    manifest.diagnostic_source_run_sha256 = masterManifest.diagnostic_source_run_sha256;
+  }
   return {
     ...manifest,
     manifest_sha256: hashCanonicalJson(manifest),
@@ -175,7 +203,7 @@ export function buildLegacyPlan(masterManifest, batchManifest) {
     || batchManifest.batch_table_ids_sha256 !== hashCanonicalIds(batchTableIds)) {
     fail("legacy batch manifest is not bound to the master manifest");
   }
-  return {
+  const plan = {
     ...batchManifest,
     masterManifest,
     batchManifest,
@@ -208,11 +236,18 @@ export function buildLegacyPlan(masterManifest, batchManifest) {
       batch_table_count: batchManifest.batch_table_count,
       source_run: masterManifest.source_run,
       query_sha256: masterManifest.query_sha256,
+      generator_sha256: masterManifest.generator_sha256,
       stage_system_identifier: masterManifest.stage_system_identifier,
       master_manifest_sha256: masterManifest.manifest_sha256,
       batch_manifest_sha256: batchManifest.manifest_sha256,
     },
   };
+  if (masterManifest.freeze_run_id !== undefined) {
+    plan.archiveManifest.freeze_run_id = masterManifest.freeze_run_id;
+    plan.archiveManifest.diagnostic_source_run = masterManifest.diagnostic_source_run;
+    plan.archiveManifest.diagnostic_source_run_sha256 = masterManifest.diagnostic_source_run_sha256;
+  }
+  return plan;
 }
 
 export async function readLegacyAllowlist(sql, {
@@ -220,6 +255,9 @@ export async function readLegacyAllowlist(sql, {
   sourceRun = LEGACY_STAGE_ALLOWLIST_SOURCE_RUN,
   expectedProjectRef = STAGE_PROJECT_REF,
   expectedSystemIdentifier = STAGE_SYSTEM_IDENTIFIER,
+  freezeRunId = null,
+  diagnosticSourceRun = null,
+  diagnosticSourceRunSha256 = null,
 } = {}) {
   if (!sql || typeof sql.begin !== "function") fail("PostgreSQL adapter is required");
   return sql.begin(async (tx) => {
@@ -239,6 +277,9 @@ export async function readLegacyAllowlist(sql, {
       sourceRun,
       stageSystemIdentifier,
       projectRef: expectedProjectRef,
+      freezeRunId,
+      diagnosticSourceRun,
+      diagnosticSourceRunSha256,
     });
     const batchManifest = buildLegacyBatchManifest(masterManifest, { batchNumber: 1 });
     return {
@@ -252,6 +293,88 @@ export async function readLegacyAllowlist(sql, {
       generatorRows: rows,
     };
   });
+}
+
+function readCanonicalIdsFile(filePath, label) {
+  const raw = fs.readFileSync(filePath, "utf8");
+  const lines = raw.split(/\r?\n/);
+  if (lines[lines.length - 1] === "") lines.pop();
+  if (lines.some((line) => line.length === 0)) fail(`${label} contains a blank line`);
+  return canonicalUuidList(lines, label);
+}
+
+function assertSameJson(left, right, message) {
+  if (canonicalJson(left) !== canonicalJson(right)) fail(message);
+}
+
+export function validateFrozenLegacyAllowlistArtifacts({
+  masterIds,
+  masterManifest,
+  batchIds,
+  batchManifest,
+}) {
+  const ids = canonicalUuidList(masterIds, "frozen legacy master table IDs");
+  const batchTableIds = canonicalUuidList(batchIds, "frozen legacy batch table IDs");
+  if (!masterManifest || typeof masterManifest !== "object" || Array.isArray(masterManifest)) {
+    fail("frozen legacy master manifest must be an object");
+  }
+  if (!batchManifest || typeof batchManifest !== "object" || Array.isArray(batchManifest)) {
+    fail("frozen legacy batch manifest must be an object");
+  }
+  if (masterManifest.freeze_run_id == null || !/^\d+$/.test(text(masterManifest.freeze_run_id))) {
+    fail("frozen legacy master manifest must contain the actual freeze run ID");
+  }
+  if (masterManifest.generator_sha256 !== legacyAllowlistQuerySha256()
+    || masterManifest.query_sha256 !== masterManifest.generator_sha256) {
+    fail("frozen legacy master manifest generator hash differs from the checked-in generator");
+  }
+  if (masterManifest.diagnostic_source_run !== LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN
+    || masterManifest.diagnostic_source_run_sha256 !== LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256) {
+    fail("frozen legacy master manifest diagnostic source proof is invalid");
+  }
+  if (masterManifest.cutoff !== LEGACY_STAGE_ALLOWLIST_CUTOFF
+    || masterManifest.source_run !== LEGACY_STAGE_ALLOWLIST_SOURCE_RUN
+    || masterManifest.target !== "stage"
+    || masterManifest.project_ref !== STAGE_PROJECT_REF
+    || masterManifest.stage_system_identifier !== STAGE_SYSTEM_IDENTIFIER
+    || masterManifest.policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID
+    || masterManifest.proof_basis !== LEGACY_STAGE_ALLOWLIST_POLICY_ID
+    || masterManifest.table_count !== LEGACY_STAGE_ALLOWLIST_TABLE_COUNT
+    || masterManifest.allowlist_sha256 !== hashCanonicalIds(ids)) {
+    fail("frozen legacy master manifest evidence is invalid");
+  }
+  assertSameJson(masterManifest.table_ids, ids, "frozen legacy master manifest does not match the UUID file");
+  const masterBody = { ...masterManifest };
+  delete masterBody.manifest_sha256;
+  if (masterManifest.manifest_sha256 !== hashCanonicalJson(masterBody)) {
+    fail("frozen legacy master manifest hash is invalid");
+  }
+
+  const expectedBatch = buildLegacyBatchManifest(masterManifest, { batchNumber: 1 });
+  assertSameJson(batchManifest, expectedBatch, "frozen legacy batch manifest differs from the master manifest");
+  assertSameJson(batchManifest.batch_table_ids, batchTableIds, "frozen legacy batch manifest does not match the UUID file");
+  return {
+    masterManifest,
+    batchManifest,
+    masterTableIds: ids,
+    batchTableIds,
+    allowlistSha256: masterManifest.allowlist_sha256,
+  };
+}
+
+export function loadFrozenLegacyAllowlist({ cwd = process.cwd(), directory = null } = {}) {
+  const root = path.resolve(directory || path.join(cwd, LEGACY_STAGE_ALLOWLIST_REPO_RELATIVE_DIR));
+  const masterIds = readCanonicalIdsFile(path.join(root, "legacy-stage-allowlist-v1.master.ids"), "frozen legacy master UUID file");
+  const batchIds = readCanonicalIdsFile(path.join(root, "legacy-stage-allowlist-v1.batch-001.ids"), "frozen legacy batch UUID file");
+  const masterManifest = JSON.parse(fs.readFileSync(
+    path.join(root, "legacy-stage-allowlist-v1.master.manifest.json"),
+    "utf8",
+  ));
+  const batchManifest = JSON.parse(fs.readFileSync(
+    path.join(root, "legacy-stage-allowlist-v1.batch-001.manifest.json"),
+    "utf8",
+  ));
+  return validateFrozenLegacyAllowlistArtifacts({ masterIds, masterManifest, batchIds, batchManifest });
 }
 
 function jsonBytes(value) {
@@ -355,12 +478,7 @@ export async function runLegacyStagePrepareOnly({ env = process.env, cwd = proce
     if (!lockPid) return { state: "no-op", reason: "advisory_lock_busy", deployedCommitSha, preflight };
     await assertLock(sql, lockPid);
     await (deps.verifyBucket || verifyArchiveBucket)(storageTarget, deps);
-    const generated = await (deps.readAllowlist || readLegacyAllowlist)(sql, {
-      cutoff: LEGACY_STAGE_ALLOWLIST_CUTOFF,
-      sourceRun: LEGACY_STAGE_ALLOWLIST_SOURCE_RUN,
-      expectedProjectRef: STAGE_PROJECT_REF,
-      expectedSystemIdentifier: STAGE_SYSTEM_IDENTIFIER,
-    });
+    const generated = (deps.readFrozenAllowlist || loadFrozenLegacyAllowlist)({ cwd });
     const plan = buildLegacyPlan(
       generated.masterManifest,
       generated.batchManifest,
@@ -399,6 +517,9 @@ export async function runLegacyStagePrepareOnly({ env = process.env, cwd = proce
         cutoff: plan.cutoff,
         sourceRun: plan.sourceRun,
         querySha256: plan.querySha256,
+        freezeRunId: plan.masterManifest.freeze_run_id,
+        diagnosticSourceRun: plan.masterManifest.diagnostic_source_run,
+        diagnosticSourceRunSha256: plan.masterManifest.diagnostic_source_run_sha256,
         allowlistSha256: plan.allowlistSha256,
         batchTableIdsSha256: plan.batchTableIdsSha256,
         masterManifestSha256: plan.masterManifestSha256,
@@ -448,6 +569,9 @@ export async function runLegacyStagePrepareOnly({ env = process.env, cwd = proce
       sourceRun: plan.sourceRun,
       cutoff: plan.cutoff,
       querySha256: plan.querySha256,
+      freezeRunId: plan.masterManifest.freeze_run_id,
+      diagnosticSourceRun: plan.masterManifest.diagnostic_source_run,
+      diagnosticSourceRunSha256: plan.masterManifest.diagnostic_source_run_sha256,
       allowlistSha256: plan.allowlistSha256,
       batchTableIdsSha256: plan.batchTableIdsSha256,
       masterManifestSha256: plan.masterManifestSha256,
