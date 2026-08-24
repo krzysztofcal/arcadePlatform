@@ -5,9 +5,9 @@ const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-automatio
 
 assert.match(
   workflow,
-  /workflow_dispatch:\n\s+inputs:\n\s+mode:\n\s+description: Stage automation mode\n\s+required: true\n\s+default: existing-30d\n\s+type: choice\n\s+options:\n\s+- existing-30d\n\s+- bot-only-7d-prepare-only/,
+  /workflow_dispatch:\n\s+inputs:\n\s+mode:\n\s+description: Stage automation mode\n\s+required: true\n\s+default: existing-30d\n\s+type: choice\n\s+options:\n\s+- existing-30d\n\s+- bot-only-7d-prepare-only\n\s+- legacy-stage-allowlist-prepare-only/,
 );
-assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only)$/gm) || []).length, 2);
+assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|legacy-stage-allowlist-prepare-only)$/gm) || []).length, 3);
 assert.equal((workflow.match(/- cron:/g) || []).length, 1);
 assert.match(workflow, /cancel-in-progress:\s*false/);
 assert.match(workflow, /CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1'/);
@@ -44,9 +44,10 @@ assert.doesNotMatch(
   workflow.slice(0, workflow.indexOf("- name: Read-only Stage fence preflight")),
   /chips_table_fence|enforcement_active/,
 );
+assert.doesNotMatch(preflightStep, /legacy-stage-allowlist/);
 
 const botOnlyRun = workflow.match(
-  /- name: Run bot-only 7-day prepare-only Stage automation[\s\S]*$/,
+  /- name: Run bot-only 7-day prepare-only Stage automation[\s\S]*?(?=\n\s+- name:|\s*$)/,
 )[0];
 assert.match(botOnlyRun, /github\.event_name == 'workflow_dispatch'/);
 assert.match(botOnlyRun, /inputs\.mode == 'bot-only-7d-prepare-only'/);
@@ -55,5 +56,17 @@ assert.match(
   /node scripts\/ops\/chips-ledger-stage-automation\.mjs \\\n+\s+--policy bot-only-7d \\\n+\s+--prepare-only/,
 );
 assert.doesNotMatch(workflow, /--execute|CHIPS_LEDGER_BOT_ONLY_EXECUTE/);
+
+const legacyRun = workflow.match(
+  /- name: Run legacy Stage allowlist prepare-only[\s\S]*$/,
+)[0];
+assert.match(legacyRun, /github\.event_name == 'workflow_dispatch'/);
+assert.match(legacyRun, /inputs\.mode == 'legacy-stage-allowlist-prepare-only'/);
+assert.match(legacyRun, /run: node scripts\/ops\/chips-ledger-legacy-stage-allowlist\.mjs\s*$/m);
+assert.doesNotMatch(legacyRun, /\\|--|stage-automation|execute/i);
+assert.equal((workflow.match(/node scripts\/ops\/chips-ledger-legacy-stage-allowlist\.mjs/g) || []).length, 1);
+assert.doesNotMatch(existingRun, /legacy-stage-allowlist/);
+assert.doesNotMatch(botOnlyRun, /legacy-stage-allowlist/);
+assert.doesNotMatch(workflow.match(/- cron:[\s\S]*?(?=\n\s*concurrency:)/)[0], /legacy-stage-allowlist/);
 
 process.stdout.write("chips-ledger-stage-automation workflow guard passed\n");

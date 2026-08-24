@@ -11,6 +11,7 @@ on:
         options:
           - existing-30d
           - bot-only-7d-prepare-only
+          - legacy-stage-allowlist-prepare-only
   schedule:
     - cron: "17 2 * * *"
 
@@ -117,3 +118,9 @@ jobs:
           node scripts/ops/chips-ledger-stage-automation.mjs \
             --policy bot-only-7d \
             --prepare-only
+
+      - name: Run legacy Stage allowlist prepare-only
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'legacy-stage-allowlist-prepare-only' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+        run: node scripts/ops/chips-ledger-legacy-stage-allowlist.mjs
