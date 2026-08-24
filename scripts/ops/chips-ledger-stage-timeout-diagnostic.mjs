@@ -78,7 +78,7 @@ function sqlSha256(query) {
 }
 
 function stringify(value) {
-  return JSON.stringify(value, (_key, nested) => (typeof nested === "bigint" ? nested.toString() : nested));
+  return JSON.stringify(value, (_key, nested) => (typeof nested === "bigint" ? nested.toString() : nested), 2);
 }
 
 async function readOnlyTransaction(sql, callback) {
