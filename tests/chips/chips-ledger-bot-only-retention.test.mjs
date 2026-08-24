@@ -663,7 +663,7 @@ async function archiveSelectorHistoricalIdentityAndMetadataPostgresContract(sql)
        where idempotency_key = any($1::text[])
        order by idempotency_key;
     `, [legacyKeys]);
-    assert.deepEqual(legacyMetadataProof, [
+    assert.deepEqual([...legacyMetadataProof], [
       { metadata_type: "string", unpacked_type: "object", metadata_table_id: legacyTable.tableId },
       { metadata_type: "string", unpacked_type: "object", metadata_table_id: legacyTable.tableId },
     ], "legacy fixture must be one JSONB string containing one JSON object");
@@ -775,7 +775,7 @@ async function archiveSelectorHistoricalIdentityAndMetadataPostgresContract(sql)
       `bot-seed-buyin:${malformed.tableId}:legacy-malformed-buyin`,
       `poker:bot-terminal-cashout:v1:${malformed.tableId}:legacy-malformed-cashout`,
     ]]);
-    assert.deepEqual(malformedMetadataProof, [
+    assert.deepEqual([...malformedMetadataProof], [
       { metadata_type: "string", unpacked_json_valid: false },
       { metadata_type: "string", unpacked_json_valid: false },
     ], "malformed fixture must be one invalid JSONB string");
