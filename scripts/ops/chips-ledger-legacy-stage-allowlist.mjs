@@ -46,6 +46,8 @@ const COMMIT_SHA_RE = /^[0-9a-f]{40}$/;
 const PLAN_OBJECT_PREFIX = `plan/v1/${LEGACY_STAGE_ALLOWLIST_POLICY_ID}`;
 
 export const LEGACY_STAGE_ALLOWLIST_REPO_RELATIVE_DIR = "data/chips-ledger/legacy-stage-allowlist-v1";
+export const LEGACY_STAGE_ALLOWLIST_FROZEN_SHA256 =
+  "611ab69ba8ee160a4957f8fe9514c919b9f4129bc1ea7842778b04d28ea6ca05";
 export const LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN = "32753223679";
 export const LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256 =
   "aa82076e7e4d7fd1e027889be94868e5662652cc29ae2dc7b55a4196b260ed0e";
@@ -340,7 +342,8 @@ export function validateFrozenLegacyAllowlistArtifacts({
     || masterManifest.policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID
     || masterManifest.proof_basis !== LEGACY_STAGE_ALLOWLIST_POLICY_ID
     || masterManifest.table_count !== LEGACY_STAGE_ALLOWLIST_TABLE_COUNT
-    || masterManifest.allowlist_sha256 !== hashCanonicalIds(ids)) {
+    || masterManifest.allowlist_sha256 !== hashCanonicalIds(ids)
+    || masterManifest.allowlist_sha256 !== LEGACY_STAGE_ALLOWLIST_FROZEN_SHA256) {
     fail("frozen legacy master manifest evidence is invalid");
   }
   assertSameJson(masterManifest.table_ids, ids, "frozen legacy master manifest does not match the UUID file");

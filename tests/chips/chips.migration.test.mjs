@@ -706,6 +706,28 @@ async function assertIdempotencyRegistryParity(sql) {
   };
 }
 
+async function expectFrozenLegacyAllowlistHashGuard(sql) {
+  const canonicalHash = "611ab69ba8ee160a4957f8fe9514c919b9f4129bc1ea7842778b04d28ea6ca05";
+  const accepted = await sql.unsafe(
+    "select public.chips_assert_legacy_stage_allowlist_master_hash($1) as accepted;",
+    [canonicalHash],
+  );
+  assert.equal(accepted[0]?.accepted, true, "canonical frozen allowlist hash must be accepted by DB");
+
+  const replacedUuidHash = crypto.createHash("sha256").update("legacy-allowlist-one-uuid-replaced").digest("hex");
+  let caught = null;
+  try {
+    await sql.unsafe(
+      "select public.chips_assert_legacy_stage_allowlist_master_hash($1) as accepted;",
+      [replacedUuidHash],
+    );
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(caught, "DB must reject a master hash produced after replacing one UUID");
+  assert.equal(caught?.code, "P8936", "wrong frozen allowlist hash must raise P8936");
+}
+
 async function expectSavepointError(tx, savepoint, operation, expectedMessage) {
   assert.match(savepoint, /^[a-z_]+$/);
   await tx.unsafe(`savepoint ${savepoint};`);
@@ -1183,6 +1205,7 @@ async function main() {
   await dropAndRecreateSchema(sql);
 
   await runMigrations(sql, migrationsWithoutBootstrapSeeds);
+  await expectFrozenLegacyAllowlistHashGuard(sql);
   await ensureGenesisFixture(sql);
   await assertArchivePrunerRoleContracts(sql);
   await expectNegativeBalanceGuard(sql);

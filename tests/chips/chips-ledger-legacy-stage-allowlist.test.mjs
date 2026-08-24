@@ -33,9 +33,11 @@ import { buildPruneEvidence } from "../../scripts/ops/chips-ledger-archive-prune
 import { verifyArchiveBytes } from "../../scripts/ops/chips-ledger-archive-store.mjs";
 
 const migrationPath = "supabase/migrations/20260824120000_chips_ledger_legacy_stage_allowlist.sql";
+const freezeMigrationPath = "supabase/migrations/20260824140000_chips_ledger_legacy_stage_allowlist_freeze_guard.sql";
 const workflowPath = ".github/workflows/chips-ledger-stage-legacy-allowlist.yml";
 const freezeWorkflowPath = ".github/workflows/chips-ledger-stage-legacy-allowlist-freeze.yml";
 const migration = fs.readFileSync(migrationPath, "utf8");
+const freezeMigration = fs.readFileSync(freezeMigrationPath, "utf8");
 const workflow = fs.readFileSync(workflowPath, "utf8");
 const freezeWorkflow = fs.readFileSync(freezeWorkflowPath, "utf8");
 
@@ -55,20 +57,6 @@ const master = buildLegacyMasterManifest({
 });
 const batch = buildLegacyBatchManifest(master, { batchNumber: 1 });
 const plan = buildLegacyPlan(master, batch);
-
-const frozenMaster = buildLegacyMasterManifest({
-  tableIds: ids,
-  cutoff: LEGACY_STAGE_ALLOWLIST_CUTOFF,
-  querySha256: legacyAllowlistQuerySha256(),
-  sourceRun: LEGACY_STAGE_ALLOWLIST_SOURCE_RUN,
-  stageSystemIdentifier: "7656985631720456337",
-  projectRef: "krydukthwdvccggbyjfw",
-  freezeRunId: "32770000001",
-  diagnosticSourceRun: LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN,
-  diagnosticSourceRunSha256: LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256,
-});
-const frozenBatch = buildLegacyBatchManifest(frozenMaster, { batchNumber: 1 });
-const frozenPlan = buildLegacyPlan(frozenMaster, frozenBatch);
 
 const fixtureCandidates = plan.batchTableIds.map((fixtureTableId, index) => ({
   id: tableId(0xf001 + index),
@@ -219,30 +207,25 @@ assert.equal(generated.masterManifest.table_count, 974);
 assert.equal(generated.batchManifest.batch_table_count, 10);
 assert.equal(generated.querySha256, legacyAllowlistQuerySha256());
 
-const frozenTemp = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-allowlist-frozen-test-"));
-try {
-  writeLegacyPlanFiles(frozenTemp, frozenPlan);
-  const loaded = loadFrozenLegacyAllowlist({ directory: frozenTemp });
-  assert.equal(loaded.masterManifest.freeze_run_id, "32770000001");
-  assert.equal(loaded.masterManifest.generator_sha256, legacyAllowlistQuerySha256());
-  assert.equal(loaded.masterManifest.diagnostic_source_run_sha256, LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256);
-  assert.deepEqual(loaded.masterTableIds, ids);
+const checkedInFrozen = loadFrozenLegacyAllowlist({ cwd: process.cwd() });
+assert.equal(checkedInFrozen.masterManifest.freeze_run_id, "32771521144");
+assert.equal(checkedInFrozen.masterManifest.generator_sha256, legacyAllowlistQuerySha256());
+assert.equal(checkedInFrozen.masterManifest.diagnostic_source_run_sha256, LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256);
+assert.equal(checkedInFrozen.masterManifest.allowlist_sha256, "611ab69ba8ee160a4957f8fe9514c919b9f4129bc1ea7842778b04d28ea6ca05");
+assert.equal(checkedInFrozen.masterManifest.table_count, LEGACY_STAGE_ALLOWLIST_TABLE_COUNT);
 
-  const mutatedIds = [...ids];
-  mutatedIds[mutatedIds.length - 1] = tableId(975);
-  assert.throws(
-    () => validateFrozenLegacyAllowlistArtifacts({
-      masterIds: mutatedIds,
-      masterManifest: loaded.masterManifest,
-      batchIds: loaded.batchTableIds,
-      batchManifest: loaded.batchManifest,
-    }),
-    /master manifest evidence|does not match the UUID file/i,
-    "runner must reject a one-UUID replacement even when the count remains 974",
-  );
-} finally {
-  fs.rmSync(frozenTemp, { recursive: true, force: true });
-}
+const mutatedIds = [...checkedInFrozen.masterTableIds];
+mutatedIds[mutatedIds.length - 1] = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+assert.throws(
+  () => validateFrozenLegacyAllowlistArtifacts({
+    masterIds: mutatedIds,
+    masterManifest: checkedInFrozen.masterManifest,
+    batchIds: checkedInFrozen.batchTableIds,
+    batchManifest: checkedInFrozen.batchManifest,
+  }),
+  /master manifest evidence|does not match the UUID file/i,
+  "runner must reject a one-UUID replacement even when the count remains 974",
+);
 
 const freezeTemp = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-allowlist-freeze-test-"));
 try {
@@ -312,6 +295,17 @@ assert.match(migration, /chips_authorize_legacy_stage_allowlist_batch/);
 assert.match(migration, /Exact legacy Stage batch GO/);
 assert.match(migration, /chips_prune_legacy_stage_allowlist_batch/);
 assert.match(migration, /P8902/);
+assert.match(freezeMigration, /chips_assert_legacy_stage_allowlist_master_hash/);
+assert.match(freezeMigration, /611ab69ba8ee160a4957f8fe9514c919b9f4129bc1ea7842778b04d28ea6ca05/);
+assert.match(freezeMigration, /P8936/);
+assert.match(freezeMigration, /chips_ledger_archive_batches_legacy_master_allowlist_sha256_check/);
+assert.match(freezeMigration, /chips_legacy_stage_allowlist_proofs_master_allowlist_sha256_check/);
+
+assert.equal(checkedInFrozen.masterManifest.diagnostic_source_run, "32753223679");
+assert.equal(
+  checkedInFrozen.masterManifest.diagnostic_source_run_sha256,
+  "aa82076e7e4d7fd1e027889be94868e5662652cc29ae2dc7b55a4196b260ed0e",
+);
 
 assert.match(workflow, /^on:\n\s+workflow_dispatch:/m);
 assert.doesNotMatch(workflow, /^\s+- cron:/m);
