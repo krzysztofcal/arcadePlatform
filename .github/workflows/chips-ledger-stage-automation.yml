@@ -109,7 +109,7 @@ jobs:
         run: node scripts/ops/chips-ledger-stage-automation.mjs
 
       - name: Run bot-only 7-day prepare-only Stage automation
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-prepare-only' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-prepare-only' && github.ref != 'refs/heads/agent/issue-890-explain-analyze-a5b4ac27' }}
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
         run: |
@@ -117,3 +117,9 @@ jobs:
           node scripts/ops/chips-ledger-stage-automation.mjs \
             --policy bot-only-7d \
             --prepare-only
+
+      - name: Run one temporary read-only EXPLAIN ANALYZE
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-prepare-only' && github.ref == 'refs/heads/agent/issue-890-explain-analyze-a5b4ac27' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+        run: node scripts/ops/chips-ledger-stage-explain-analyze-temporary.mjs
