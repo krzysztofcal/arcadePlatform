@@ -1387,7 +1387,7 @@ async function assertLegacyUnprunedRegistrySelectorContract(sql) {
   const transactionIds = Array.from({ length: 60 }, (_, index) =>
     `00000000-0000-4000-8000-${String(0xe701 + index).padStart(12, "0")}`);
   const registryKeys = transactionIds.map((_, index) =>
-    `legacy-unpruned-selector:${tableIds[index % tableIds.length]}:${String(index).padStart(2, "0")}`);
+    `bot-seed-buyin:${tableIds[index % tableIds.length]}:legacy-unpruned-${String(index).padStart(2, "0")}`);
   const ROLLBACK = new Error("legacy-unpruned-registry-selector-rollback");
 
   await sql.begin(async (tx) => {
