@@ -19,6 +19,9 @@ export const BOT_ONLY_EXPORT_SCHEMA_VERSION = 2;
 export const BOT_ONLY_RETENTION_DAYS = 7;
 export const LEGACY_STAGE_ALLOWLIST_TABLE_COUNT = 974;
 export const LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT = 10;
+export const LEGACY_STAGE_ALLOWLIST_BATCH_COUNT = Math.ceil(
+  LEGACY_STAGE_ALLOWLIST_TABLE_COUNT / LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT,
+);
 export const LEGACY_STAGE_ALLOWLIST_SOURCE_RUN = "32753223679";
 export const LEGACY_STAGE_ALLOWLIST_CUTOFF = "2026-08-17T16:51:28.074Z";
 
@@ -2081,7 +2084,11 @@ function assertLegacyStageAllowlistPlan(plan, cutoff) {
   sameLegacyIdList(batchTableIds, archive.batch_table_ids, "archive batch table IDs");
 
   if (masterTableIds.length !== LEGACY_STAGE_ALLOWLIST_TABLE_COUNT
-    || batchTableIds.length !== LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT
+    || batchTableIds.length < 1
+    || batchTableIds.length > LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT
+    || !Number.isSafeInteger(plan.batchNumber)
+    || plan.batchNumber < 1
+    || plan.batchNumber > LEGACY_STAGE_ALLOWLIST_BATCH_COUNT
     || plan.masterTableCount !== master.table_count
     || plan.batchNumber !== batch.batch_number
     || plan.batchTableCount !== batch.batch_table_count

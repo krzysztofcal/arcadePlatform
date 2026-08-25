@@ -623,7 +623,7 @@ export async function ensureArchiveBucket(storageTarget, deps = {}) {
   return verifyBucket(await readJsonResponse(response, "bucket verification/creation"));
 }
 
-function manifestRow(manifest, storageTarget, objectPath) {
+function manifestRow(manifest, storageTarget, objectPath, legacyStageAllowlistPlan = null) {
   const start = manifest.cursor.start;
   const end = manifest.cursor.end;
   return {
@@ -664,6 +664,8 @@ function manifestRow(manifest, storageTarget, objectPath) {
     legacy_source_run: manifest.legacy_stage_allowlist?.source_run || null,
     legacy_query_sha256: manifest.legacy_stage_allowlist?.query_sha256 || null,
     legacy_stage_system_identifier: manifest.legacy_stage_allowlist?.stage_system_identifier || null,
+    legacy_run_id: legacyStageAllowlistPlan?.runId == null ? null : String(legacyStageAllowlistPlan.runId),
+    legacy_plan_sha256: legacyStageAllowlistPlan?.runPlanSha256 || null,
     status: "pending",
   };
 }
@@ -676,6 +678,7 @@ const IMMUTABLE_FIELDS = [
   "bot_only_out_of_scope_keys_sha256", "bot_only_identity_count", "bot_only_eligible_count",
   "legacy_allowlist_sha256", "legacy_batch_table_ids_sha256", "legacy_master_table_ids", "legacy_master_table_count", "legacy_batch_number",
   "legacy_batch_table_count", "legacy_source_run", "legacy_query_sha256", "legacy_stage_system_identifier",
+  "legacy_run_id", "legacy_plan_sha256",
 ];
 
 function assertSameManifest(existing, expected) {
@@ -690,7 +693,12 @@ function assertSameManifest(existing, expected) {
 export async function loadOrCreatePendingBatch(localArchive, storageTarget, deps = {}) {
   const store = deps.manifestStore;
   if (!store || typeof store.get !== "function" || typeof store.insertPending !== "function") fail("manifest store adapter is required");
-  const expected = manifestRow(localArchive.manifest, storageTarget, localArchive.objectPath);
+  const expected = manifestRow(
+    localArchive.manifest,
+    storageTarget,
+    localArchive.objectPath,
+    deps.legacyStageAllowlistPlan || null,
+  );
   const existing = await store.get(expected.object_path);
   if (existing) return { row: assertSameManifest(existing, expected), created: false, expected };
   await store.insertPending(expected);
@@ -867,6 +875,8 @@ function selectManifestSql() {
     legacy_source_run,
     legacy_query_sha256,
     legacy_stage_system_identifier,
+    legacy_run_id::text as legacy_run_id,
+    legacy_plan_sha256,
     registry_cleaned_at::text as registry_cleaned_at,
     registry_cleaned_key_count::text as registry_cleaned_key_count,
     registry_cleaned_keys_sha256,
@@ -898,6 +908,8 @@ function normalizeManifestRow(row) {
     legacy_master_table_count: row.legacy_master_table_count == null ? null : String(row.legacy_master_table_count),
     legacy_batch_number: row.legacy_batch_number == null ? null : String(row.legacy_batch_number),
     legacy_batch_table_count: row.legacy_batch_table_count == null ? null : String(row.legacy_batch_table_count),
+    legacy_run_id: row.legacy_run_id == null ? null : String(row.legacy_run_id),
+    legacy_plan_sha256: row.legacy_plan_sha256 == null ? null : String(row.legacy_plan_sha256),
     registry_cleaned_key_count: row.registry_cleaned_key_count == null ? null : String(row.registry_cleaned_key_count),
     destructive_go_batch_id: row.destructive_go_batch_id == null ? null : String(row.destructive_go_batch_id),
   };
@@ -923,13 +935,13 @@ export function createManifestStore(sql) {
          bot_only_identity_count, bot_only_eligible_count,
          legacy_allowlist_sha256, legacy_batch_table_ids_sha256, legacy_master_table_ids,
          legacy_master_table_count, legacy_batch_number, legacy_batch_table_count, legacy_source_run, legacy_query_sha256,
-         legacy_stage_system_identifier, status)
+         legacy_stage_system_identifier, legacy_run_id, legacy_plan_sha256, status)
         values ($1, $2, $3::integer, $4::timestamptz, $5::timestamptz, $6::uuid,
                 $7::timestamptz, $8::uuid, $9::timestamptz, $10::timestamptz, $11::bigint,
                 $12::bigint, $13::jsonb, $14::bigint, $15::bigint, $16, $17,
                 $18::numeric, $19::numeric, $20::numeric, $21,
                 $22::uuid, $23::bigint, $24::timestamptz, $25, $26, $27::bigint, $28::bigint,
-                $29, $30, $31::uuid[], $32::bigint, $33::bigint, $34::bigint, $35, $36, $37, 'pending')
+                $29, $30, $31::uuid[], $32::bigint, $33::bigint, $34::bigint, $35, $36, $37, $38::bigint, $39, 'pending')
         on conflict (object_path) do nothing;`, [
         row.object_path, row.project_ref, row.format_version, timestampParam(row.cutoff), timestampParam(row.cursor_start_created_at), row.cursor_start_id,
         timestampParam(row.cursor_end_created_at), row.cursor_end_id, timestampParam(row.first_created_at), timestampParam(row.last_created_at), row.transaction_count,
@@ -941,6 +953,7 @@ export function createManifestStore(sql) {
         row.legacy_allowlist_sha256, row.legacy_batch_table_ids_sha256, row.legacy_master_table_ids,
         row.legacy_master_table_count, row.legacy_batch_number, row.legacy_batch_table_count,
         row.legacy_source_run, row.legacy_query_sha256, row.legacy_stage_system_identifier,
+        row.legacy_run_id, row.legacy_plan_sha256,
       ]);
     },
     async markCommitted(objectPath) {

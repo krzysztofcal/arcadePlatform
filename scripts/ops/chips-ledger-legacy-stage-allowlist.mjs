@@ -50,9 +50,21 @@ const PLAN_OBJECT_PREFIX = `plan/v1/${LEGACY_STAGE_ALLOWLIST_POLICY_ID}`;
 export const LEGACY_STAGE_ALLOWLIST_REPO_RELATIVE_DIR = "data/chips-ledger/legacy-stage-allowlist-v1";
 export const LEGACY_STAGE_ALLOWLIST_FROZEN_SHA256 =
   "611ab69ba8ee160a4957f8fe9514c919b9f4129bc1ea7842778b04d28ea6ca05";
+export const LEGACY_STAGE_ALLOWLIST_FROZEN_MASTER_MANIFEST_SHA256 =
+  "eb5593bdf5bd7f3c985373e6037a861d999413eae5076b923165c7f8147a79e7";
+export const LEGACY_STAGE_ALLOWLIST_REMAINING_TABLE_IDS_SHA256 =
+  "a7bd1aea6bfe0435609cce6ccbe78f9ba55cab062e3cf55fd933fade5f029fc8";
 export const LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN = "32753223679";
 export const LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256 =
   "aa82076e7e4d7fd1e027889be94868e5662652cc29ae2dc7b55a4196b260ed0e";
+export const LEGACY_STAGE_ALLOWLIST_BATCH_COUNT = Math.ceil(
+  LEGACY_STAGE_ALLOWLIST_TABLE_COUNT / LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT,
+);
+export const LEGACY_STAGE_ALLOWLIST_REMAINING_FIRST_BATCH = 2;
+export const LEGACY_STAGE_ALLOWLIST_REMAINING_LAST_BATCH = LEGACY_STAGE_ALLOWLIST_BATCH_COUNT;
+export const LEGACY_STAGE_ALLOWLIST_REMAINING_TABLE_COUNT =
+  LEGACY_STAGE_ALLOWLIST_TABLE_COUNT - LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT;
+export const LEGACY_STAGE_ALLOWLIST_MAX_BATCHES_PER_RUN = 10;
 
 function fail(message) {
   throw new Error(message);
@@ -80,6 +92,10 @@ function hashCanonicalJson(value) {
 
 function hashCanonicalIds(ids) {
   return sha256(Buffer.from(`${ids.join("\n")}\n`, "utf8"));
+}
+
+export function hashLegacyStageAllowlistIds(ids) {
+  return hashCanonicalIds(canonicalUuidList(ids, "legacy Stage allowlist IDs"));
 }
 
 function canonicalUuidList(values, label) {
@@ -159,7 +175,11 @@ export function buildLegacyBatchManifest(masterManifest, { batchNumber = 1 } = {
   }
   const masterIds = canonicalUuidList(masterManifest.table_ids, "legacy master table IDs");
   if (masterIds.length !== LEGACY_STAGE_ALLOWLIST_TABLE_COUNT) fail("legacy master manifest count is invalid");
-  if (!Number.isSafeInteger(batchNumber) || batchNumber < 1) fail("legacy batch number is invalid");
+  if (!Number.isSafeInteger(batchNumber)
+    || batchNumber < 1
+    || batchNumber > LEGACY_STAGE_ALLOWLIST_BATCH_COUNT) {
+    fail("legacy batch number is invalid");
+  }
   const start = (batchNumber - 1) * LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT;
   const tableIds = masterIds.slice(start, start + LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT);
   if (tableIds.length < 1 || (batchNumber === 1 && tableIds.length !== LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT)) {
@@ -196,16 +216,29 @@ export function buildLegacyBatchManifest(masterManifest, { batchNumber = 1 } = {
   };
 }
 
-export function buildLegacyPlan(masterManifest, batchManifest) {
-  if (batchManifest.batch_number !== 1 || batchManifest.batch_table_count !== LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT) {
-    fail("only deterministic legacy batch 1 is supported by this prepare-only workflow");
-  }
+export function buildLegacyPlan(masterManifest, batchManifest, { runId = null, runPlanSha256 = null } = {}) {
   const masterTableIds = canonicalUuidList(masterManifest.table_ids, "legacy master table IDs");
   const batchTableIds = canonicalUuidList(batchManifest.batch_table_ids, "legacy batch table IDs");
+  if (!Number.isSafeInteger(batchManifest.batch_number)
+    || batchManifest.batch_number < 1
+    || batchManifest.batch_number > LEGACY_STAGE_ALLOWLIST_BATCH_COUNT) {
+    fail("legacy batch manifest order is invalid");
+  }
+  const expectedBatchManifest = buildLegacyBatchManifest(masterManifest, { batchNumber: batchManifest.batch_number });
   if (batchManifest.master_allowlist_sha256 !== masterManifest.allowlist_sha256
     || batchManifest.master_manifest_sha256 !== masterManifest.manifest_sha256
     || batchManifest.batch_table_ids_sha256 !== hashCanonicalIds(batchTableIds)) {
     fail("legacy batch manifest is not bound to the master manifest");
+  }
+  if (expectedBatchManifest.batch_table_ids_sha256 !== batchManifest.batch_table_ids_sha256
+    || expectedBatchManifest.manifest_sha256 !== batchManifest.manifest_sha256) {
+    fail("legacy batch manifest is not in the canonical frozen order");
+  }
+  if (runId != null || runPlanSha256 != null) {
+    const expectedRun = buildLegacyStageAllowlistRunContract(masterManifest);
+    if (runId == null || runPlanSha256 !== expectedRun.planSha256) {
+      fail("legacy batch plan is not bound to the canonical orchestration contract");
+    }
   }
   const plan = {
     ...batchManifest,
@@ -228,6 +261,8 @@ export function buildLegacyPlan(masterManifest, batchManifest) {
     allowlistSha256: masterManifest.allowlist_sha256,
     batchManifestSha256: batchManifest.manifest_sha256,
     masterManifestSha256: masterManifest.manifest_sha256,
+    runId: runId == null ? null : String(runId),
+    runPlanSha256: runPlanSha256 || null,
     archiveManifest: {
       policy_id: LEGACY_STAGE_ALLOWLIST_POLICY_ID,
       proof_basis: LEGACY_STAGE_ALLOWLIST_POLICY_ID,
@@ -252,6 +287,72 @@ export function buildLegacyPlan(masterManifest, batchManifest) {
     plan.archiveManifest.diagnostic_source_run_sha256 = masterManifest.diagnostic_source_run_sha256;
   }
   return plan;
+}
+
+function runPlanBindingValues(contract) {
+  return [
+    contract.version,
+    contract.policyId,
+    contract.projectRef,
+    contract.systemIdentifier,
+    contract.cutoff,
+    contract.masterAllowlistSha256,
+    contract.masterManifestSha256,
+    contract.remainingTableIdsSha256,
+    contract.remainingTableCount,
+    contract.firstBatchNumber,
+    contract.lastBatchNumber,
+    contract.batchCount,
+  ].map((value) => String(value)).join("\n");
+}
+
+export function legacyStageAllowlistRunPlanSha256(contract) {
+  return sha256(Buffer.from(`${runPlanBindingValues(contract)}\n`, "utf8"));
+}
+
+export function buildLegacyStageAllowlistRunContract(masterManifest, {
+  firstBatchNumber = LEGACY_STAGE_ALLOWLIST_REMAINING_FIRST_BATCH,
+  lastBatchNumber = LEGACY_STAGE_ALLOWLIST_REMAINING_LAST_BATCH,
+} = {}) {
+  if (!masterManifest || masterManifest.policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
+    fail("legacy orchestration requires the canonical master manifest");
+  }
+  const masterTableIds = canonicalUuidList(masterManifest.table_ids, "legacy master table IDs");
+  if (masterTableIds.length !== LEGACY_STAGE_ALLOWLIST_TABLE_COUNT
+    || firstBatchNumber !== LEGACY_STAGE_ALLOWLIST_REMAINING_FIRST_BATCH
+    || lastBatchNumber !== LEGACY_STAGE_ALLOWLIST_REMAINING_LAST_BATCH) {
+    fail("legacy orchestration range is not the frozen remaining allowlist");
+  }
+  const remainingTableIds = masterTableIds.slice(
+    (firstBatchNumber - 1) * LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT,
+    lastBatchNumber * LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT,
+  );
+  const contract = {
+    version: 1,
+    policyId: LEGACY_STAGE_ALLOWLIST_POLICY_ID,
+    projectRef: masterManifest.project_ref,
+    systemIdentifier: masterManifest.stage_system_identifier,
+    cutoff: masterManifest.cutoff,
+    masterAllowlistSha256: masterManifest.allowlist_sha256,
+    masterManifestSha256: masterManifest.manifest_sha256,
+    remainingTableIdsSha256: hashCanonicalIds(remainingTableIds),
+    remainingTableCount: remainingTableIds.length,
+    firstBatchNumber,
+    lastBatchNumber,
+    batchCount: lastBatchNumber - firstBatchNumber + 1,
+  };
+  if (contract.masterAllowlistSha256 !== LEGACY_STAGE_ALLOWLIST_FROZEN_SHA256
+    || masterManifest.manifest_sha256 !== LEGACY_STAGE_ALLOWLIST_FROZEN_MASTER_MANIFEST_SHA256
+    || masterManifest.cutoff !== LEGACY_STAGE_ALLOWLIST_CUTOFF
+    || masterManifest.allowlist_sha256 !== hashCanonicalIds(masterTableIds)
+    || contract.projectRef !== STAGE_PROJECT_REF
+    || contract.systemIdentifier !== STAGE_SYSTEM_IDENTIFIER
+    || contract.remainingTableCount !== LEGACY_STAGE_ALLOWLIST_REMAINING_TABLE_COUNT
+    || contract.remainingTableIdsSha256 !== LEGACY_STAGE_ALLOWLIST_REMAINING_TABLE_IDS_SHA256
+    || contract.batchCount !== LEGACY_STAGE_ALLOWLIST_BATCH_COUNT - 1) {
+    fail("legacy orchestration contract is not canonical Stage evidence");
+  }
+  return { ...contract, planSha256: legacyStageAllowlistRunPlanSha256(contract), remainingTableIds };
 }
 
 export async function readLegacyAllowlist(sql, {
@@ -396,25 +497,27 @@ function gzipPlan(bytes) {
 
 export function writeLegacyPlanFiles(directory, plan) {
   ensurePrivateDirectory(directory);
+  const batchName = `batch-${String(plan.batchNumber).padStart(3, "0")}`;
   const files = [
     { name: "legacy-stage-allowlist-v1.master.ids", data: idsBytes(plan.masterTableIds) },
     { name: "legacy-stage-allowlist-v1.master.manifest.json", data: jsonBytes(plan.masterManifest) },
-    { name: "legacy-stage-allowlist-v1.batch-001.ids", data: idsBytes(plan.batchTableIds) },
-    { name: "legacy-stage-allowlist-v1.batch-001.manifest.json", data: jsonBytes(plan.batchManifest) },
+    { name: `legacy-stage-allowlist-v1.${batchName}.ids`, data: idsBytes(plan.batchTableIds) },
+    { name: `legacy-stage-allowlist-v1.${batchName}.manifest.json`, data: jsonBytes(plan.batchManifest) },
   ];
   const paths = files.map(({ name }) => path.join(directory, name));
   writeExclusiveFiles(files.map(({ name, data }) => ({ path: path.join(directory, name), data })));
   return { paths, files };
 }
 
-function planStorageObjects(plan, files) {
-  const base = `${PLAN_OBJECT_PREFIX}/${plan.allowlistSha256}/batch-001`;
+export function legacyPlanStorageObjects(plan, files) {
+  const batchName = `batch-${String(plan.batchNumber).padStart(3, "0")}`;
+  const base = `${PLAN_OBJECT_PREFIX}/${plan.allowlistSha256}/${batchName}`;
   const byName = new Map(files.map((file) => [file.name, file.data]));
   return [
     { objectPath: `${base}/master.ids.gz`, bytes: gzipPlan(byName.get("legacy-stage-allowlist-v1.master.ids")) },
     { objectPath: `${base}/master.manifest.json.gz`, bytes: gzipPlan(byName.get("legacy-stage-allowlist-v1.master.manifest.json")) },
-    { objectPath: `${base}/batch-001.ids.gz`, bytes: gzipPlan(byName.get("legacy-stage-allowlist-v1.batch-001.ids")) },
-    { objectPath: `${base}/batch-001.manifest.json.gz`, bytes: gzipPlan(byName.get("legacy-stage-allowlist-v1.batch-001.manifest.json")) },
+    { objectPath: `${base}/${batchName}.ids.gz`, bytes: gzipPlan(byName.get(`legacy-stage-allowlist-v1.${batchName}.ids`)) },
+    { objectPath: `${base}/${batchName}.manifest.json.gz`, bytes: gzipPlan(byName.get(`legacy-stage-allowlist-v1.${batchName}.manifest.json`)) },
   ];
 }
 
@@ -464,7 +567,13 @@ function assertCommit(env) {
   return sha;
 }
 
-export async function runLegacyStagePrepareOnly({ env = process.env, cwd = process.cwd(), deps = {} } = {}) {
+export async function runLegacyStagePrepareOnly({
+  env = process.env,
+  cwd = process.cwd(),
+  deps = {},
+  batchNumber = 1,
+  orchestration = null,
+} = {}) {
   if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
     && process.argv.slice(2).length !== 0) fail("legacy Stage allowlist runner accepts no arguments");
   const config = validateStageEnvironment(env, { requireCommitSha: true });
@@ -479,22 +588,23 @@ export async function runLegacyStagePrepareOnly({ env = process.env, cwd = proce
   let lockPid = null;
   try {
     const preflight = await (deps.preflight || readOnlyStagePreflight)(sql);
-    lockPid = await acquireLock(sql);
+    lockPid = deps.lockAlreadyHeld || await acquireLock(sql);
     if (!lockPid) return { state: "no-op", reason: "advisory_lock_busy", deployedCommitSha, preflight };
     await assertLock(sql, lockPid);
     await (deps.verifyBucket || verifyArchiveBucket)(storageTarget, deps);
     const generated = (deps.readFrozenAllowlist || loadFrozenLegacyAllowlist)({ cwd });
-    const plan = buildLegacyPlan(
-      generated.masterManifest,
-      generated.batchManifest,
-    );
+    const batchManifest = buildLegacyBatchManifest(generated.masterManifest, { batchNumber });
+    const plan = buildLegacyPlan(generated.masterManifest, batchManifest, {
+      runId: orchestration?.runId,
+      runPlanSha256: orchestration?.planSha256,
+    });
     plan.masterManifest = generated.masterManifest;
-    plan.batchManifest = generated.batchManifest;
     const localPlan = writeLegacyPlanFiles(tempRoot, plan);
     await assertLock(sql, lockPid);
 
-    const artifactPath = path.join(tempRoot, "legacy-stage-batch-001.archive.jsonl.gz");
-    const manifestPath = path.join(tempRoot, "legacy-stage-batch-001.archive.manifest.json");
+    const batchName = `batch-${String(plan.batchNumber).padStart(3, "0")}`;
+    const artifactPath = path.join(tempRoot, `legacy-stage-${batchName}.archive.jsonl.gz`);
+    const manifestPath = path.join(tempRoot, `legacy-stage-${batchName}.archive.manifest.json`);
     const exported = await (deps.exportArchive || runExport)({
       argv: [
         "--target", "stage", "--cutoff", plan.cutoff,
@@ -542,7 +652,7 @@ export async function runLegacyStagePrepareOnly({ env = process.env, cwd = proce
     });
     await (deps.ensureBucket || ensureArchiveBucket)(storageTarget, deps);
     const planObjects = [];
-    for (const object of planStorageObjects(plan, localPlan.files)) {
+    for (const object of legacyPlanStorageObjects(plan, localPlan.files)) {
       planObjects.push(await (deps.uploadPlan || uploadOrVerifyPrivateObject)({
         storageTarget,
         objectPath: object.objectPath,
@@ -600,7 +710,7 @@ export async function runLegacyStagePrepareOnly({ env = process.env, cwd = proce
     return {
       state: "prepared",
       mode: "prepare-only",
-      reason: "legacy_batch_ready_for_human_go",
+      reason: plan.runId ? "legacy_batch_ready_for_orchestrated_execution" : "legacy_batch_ready_for_human_go",
       deployedCommitSha,
       preflight,
       sourceRun: plan.sourceRun,
@@ -617,6 +727,10 @@ export async function runLegacyStagePrepareOnly({ env = process.env, cwd = proce
       batchNumber: plan.batchNumber,
       batchTableIds: plan.batchTableIds,
       batchTableCount: plan.batchTableCount,
+      orchestration: plan.runId ? {
+        runId: plan.runId,
+        planSha256: plan.runPlanSha256,
+      } : null,
       batchId: row.batch_id,
       objectPath: row.object_path,
       tableCount: dryRun.evidence.legacyTableIds?.length || plan.batchTableCount,
@@ -635,15 +749,15 @@ export async function runLegacyStagePrepareOnly({ env = process.env, cwd = proce
         archiveSha256: durable.recoveryArchive.sha256,
         manifestSha256: durable.recoveryManifest.sha256,
       },
-      humanGo: {
+      ...(plan.batchNumber === 1 && !plan.runId ? { humanGo: {
         function: "public.chips_authorize_legacy_stage_allowlist_batch(bigint,text,text)",
         confirmation: `GO ${row.batch_id}`,
         allowlistSha256: plan.allowlistSha256,
         executeAfterAuthorization: "CHIPS_LEDGER_LEGACY_STAGE_ALLOWLIST_EXECUTE=1 node scripts/ops/chips-ledger-legacy-stage-allowlist-execute.mjs --batch-id <exact batch_id> --object-path <exact object_path> --confirm-sha <exact compressed_sha256> --recovery-dir <private dir>",
-      },
+      } } : {}),
     };
   } finally {
-    if (lockPid) {
+    if (lockPid && !deps.lockAlreadyHeld) {
       try { await releaseLock(sql); } catch { /* connection close releases the advisory lock */ }
     }
     if (ownsSql) await sql.end({ timeout: 5 });

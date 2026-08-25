@@ -11,7 +11,9 @@ on:
         options:
           - existing-30d
           - bot-only-7d-prepare-only
+          - bot-only-7d-automatic
           - legacy-stage-allowlist-prepare-only
+          - legacy-stage-allowlist-orchestrate
           - audit-batch-13
           - execute-batch-13
   schedule:
@@ -57,7 +59,7 @@ jobs:
           printf 'sha=%s\n' "$checked_out_sha" >> "$GITHUB_OUTPUT"
 
       - name: Read-only Stage fence preflight
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-prepare-only' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'bot-only-7d-prepare-only' || inputs.mode == 'bot-only-7d-automatic') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -121,11 +123,24 @@ jobs:
             --policy bot-only-7d \
             --prepare-only
 
+      - name: Run activated bot-only 7-day Stage automation
+        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-automatic') }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+          CHIPS_LEDGER_BOT_ONLY_AUTOMATIC: "1"
+        run: node scripts/ops/chips-ledger-stage-automation.mjs --policy bot-only-7d --automatic
+
       - name: Run legacy Stage allowlist prepare-only
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'legacy-stage-allowlist-prepare-only' }}
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
         run: node scripts/ops/chips-ledger-legacy-stage-allowlist.mjs
+
+      - name: Run legacy Stage allowlist orchestrator
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'legacy-stage-allowlist-orchestrate' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+        run: node scripts/ops/chips-ledger-legacy-stage-allowlist-orchestrator.mjs
 
       - name: Audit legacy Stage allowlist batch 13
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'audit-batch-13' }}

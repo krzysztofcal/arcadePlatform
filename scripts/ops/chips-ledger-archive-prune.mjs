@@ -291,8 +291,8 @@ function parseArgs(argv) {
       args.help = true;
       continue;
     }
-    if (token === "--register-proof" || token === "--execute") {
-      const key = token === "--register-proof" ? "registerProof" : "execute";
+    if (token === "--register-proof" || token === "--execute" || token === "--automatic") {
+      const key = token === "--register-proof" ? "registerProof" : token === "--execute" ? "execute" : "automatic";
       if (args[key]) fail(`${token} was supplied more than once`);
       args[key] = true;
       continue;
@@ -306,6 +306,7 @@ function parseArgs(argv) {
     index += 1;
   }
   if (args.registerProof && args.execute) fail("--register-proof and --execute are mutually exclusive");
+  if (args.automatic && !args.execute) fail("--automatic is only valid with --execute");
   return args;
 }
 
@@ -356,6 +357,7 @@ function parseManifestRow(row) {
     legacy_master_table_count: row.legacy_master_table_count == null ? null : Number(row.legacy_master_table_count),
     legacy_batch_number: row.legacy_batch_number == null ? null : Number(row.legacy_batch_number),
     legacy_batch_table_count: row.legacy_batch_table_count == null ? null : Number(row.legacy_batch_table_count),
+    legacy_run_id: row.legacy_run_id == null ? null : String(row.legacy_run_id),
     destructive_go_batch_id: row.destructive_go_batch_id == null ? null : Number(row.destructive_go_batch_id),
   };
 }
@@ -590,6 +592,8 @@ function manifestSelectSql() {
     legacy_source_run,
     legacy_query_sha256,
     legacy_stage_system_identifier,
+    legacy_run_id::text as legacy_run_id,
+    legacy_plan_sha256,
     destructive_go_at::text as destructive_go_at,
     destructive_go_batch_id::text as destructive_go_batch_id
   from public.chips_ledger_archive_batches where object_path = $1;`;
@@ -675,44 +679,70 @@ export function createPruneStore(sql) {
         return rows[0]?.result;
       });
     },
-    async cleanupBotOnly(objectPath, evidence, execute, approvedBatchId = null) {
+    async cleanupBotOnly(objectPath, evidence, execute, approvedBatchId = null, automatic = false) {
       return sql.begin(async (tx) => {
         await tx.unsafe("set transaction isolation level serializable;");
         await tx.unsafe("set local lock_timeout = '5s';");
         await tx.unsafe("set local statement_timeout = '120s';");
-        const rows = await tx.unsafe(`select public.chips_prune_and_cleanup_bot_only_archive_batch(
-          $1, $2::uuid[], $3::bigint[], $4::text[], $5::uuid, $6::boolean, $7::bigint
-        ) as result;`, [
-          objectPath,
-          evidence.transactionIds,
-          evidence.entryIds,
-          evidence.registryKeys,
-          evidence.tableId,
-          execute,
-          approvedBatchId,
-        ]);
+        const rows = automatic
+          ? await tx.unsafe(`select public.chips_auto_prune_and_cleanup_bot_only_archive_batch(
+            $1, $2::uuid[], $3::bigint[], $4::text[], $5::uuid
+          ) as result;`, [
+            objectPath,
+            evidence.transactionIds,
+            evidence.entryIds,
+            evidence.registryKeys,
+            evidence.tableId,
+          ])
+          : await tx.unsafe(`select public.chips_prune_and_cleanup_bot_only_archive_batch(
+            $1, $2::uuid[], $3::bigint[], $4::text[], $5::uuid, $6::boolean, $7::bigint
+          ) as result;`, [
+            objectPath,
+            evidence.transactionIds,
+            evidence.entryIds,
+            evidence.registryKeys,
+            evidence.tableId,
+            execute,
+            approvedBatchId,
+          ]);
         return rows[0]?.result;
       });
     },
-    async cleanupLegacyStageAllowlist(objectPath, evidence, execute, approvedBatchId = null) {
+    async cleanupLegacyStageAllowlist(objectPath, evidence, execute, approvedBatchId = null, orchestration = null) {
       return sql.begin(async (tx) => {
         await tx.unsafe("set transaction isolation level serializable;");
         await tx.unsafe("set local lock_timeout = '5s';");
         await tx.unsafe("set local statement_timeout = '120s';");
-        const rows = await tx.unsafe(`select public.chips_prune_legacy_stage_allowlist_batch(
-          $1, $2::uuid[], $3::bigint[], $4::uuid[], $5::text, $6::text, $7::text[],
-          $8::boolean, $9::bigint
-        ) as result;`, [
-          objectPath,
-          evidence.transactionIds,
-          evidence.entryIds,
-          evidence.legacyTableIds,
-          evidence.legacyAllowlistSha256,
-          evidence.legacyBatchTableIdsSha256,
-          evidence.registryKeys,
-          execute,
-          approvedBatchId,
-        ]);
+        const rows = orchestration
+          ? await tx.unsafe(`select public.chips_prune_legacy_stage_allowlist_orchestrated_batch(
+            $1::bigint, $2, $3, $4::uuid[], $5::bigint[], $6::uuid[], $7::text, $8::text[],
+            $9::text[], $10::boolean
+          ) as result;`, [
+            orchestration.runId,
+            orchestration.planSha256,
+            objectPath,
+            evidence.transactionIds,
+            evidence.entryIds,
+            evidence.legacyTableIds,
+            evidence.legacyAllowlistSha256,
+            evidence.legacyBatchTableIdsSha256,
+            evidence.registryKeys,
+            execute,
+          ])
+          : await tx.unsafe(`select public.chips_prune_legacy_stage_allowlist_batch(
+            $1, $2::uuid[], $3::bigint[], $4::uuid[], $5::text, $6::text, $7::text[],
+            $8::boolean, $9::bigint
+          ) as result;`, [
+            objectPath,
+            evidence.transactionIds,
+            evidence.entryIds,
+            evidence.legacyTableIds,
+            evidence.legacyAllowlistSha256,
+            evidence.legacyBatchTableIdsSha256,
+            evidence.registryKeys,
+            execute,
+            approvedBatchId,
+          ]);
         return rows[0]?.result;
       });
     },
@@ -857,6 +887,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
   if (!args.execute && args.recoveryDir) fail("--recovery-dir is only valid with --execute");
   if (args.approvedBatchId != null && !args.execute) fail("--approved-batch-id is only valid with --execute");
   if (args.approvedBatchId != null && !/^[1-9][0-9]*$/.test(args.approvedBatchId)) fail("--approved-batch-id must be a positive integer");
+  if (args.automatic && args.approvedBatchId != null) fail("--automatic cannot be combined with --approved-batch-id");
 
   const target = deps.storageTarget || resolveStorageTarget(args.target, env, deps.targetOptions || {});
   const sql = deps.sql || (deps.pruneStore ? null : postgres(target.dbUrl, {
@@ -889,6 +920,11 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
       expectedLegacyStageAllowlistEvidence: deps.legacyStageAllowlistPlan?.archiveManifest || null,
     });
     const evidence = buildPruneEvidence(localArchive, { maxBatchSize: targetPolicy(target.target).maxBatchSize });
+
+    if (args.automatic && (row.format_version !== BOT_ONLY_EXPORT_SCHEMA_VERSION
+      || row.source_policy_id !== "stage-ledger-bot-only-retention-7d-v1")) {
+      fail("--automatic is only valid for the Stage bot-only 7-day policy");
+    }
 
     if (args.registerProof) {
       const proof = row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
@@ -928,8 +964,14 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
 
     const pruneResult = row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
       ? row.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID
-        ? await store.cleanupLegacyStageAllowlist(row.object_path, evidence, Boolean(args.execute), args.approvedBatchId)
-        : await store.cleanupBotOnly(row.object_path, evidence, Boolean(args.execute), args.approvedBatchId)
+        ? await store.cleanupLegacyStageAllowlist(
+          row.object_path,
+          evidence,
+          Boolean(args.execute),
+          args.approvedBatchId,
+          deps.legacyStageAllowlistOrchestration || null,
+        )
+        : await store.cleanupBotOnly(row.object_path, evidence, Boolean(args.execute), args.approvedBatchId, Boolean(args.automatic))
       : await executeArchivePrune({
         store,
         objectPath: row.object_path,
