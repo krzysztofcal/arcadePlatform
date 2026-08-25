@@ -38,10 +38,12 @@ import { storeArchive, verifyArchiveBytes, verifyLocalArchive } from "../../scri
 
 const migrationPath = "supabase/migrations/20260824120000_chips_ledger_legacy_stage_allowlist.sql";
 const freezeMigrationPath = "supabase/migrations/20260824140000_chips_ledger_legacy_stage_allowlist_freeze_guard.sql";
+const cleanupMigrationPath = "supabase/migrations/20260825100000_chips_ledger_legacy_stage_allowlist_cleanup_hardening.sql";
 const workflowPath = ".github/workflows/chips-ledger-stage-legacy-allowlist.yml";
 const freezeWorkflowPath = ".github/workflows/chips-ledger-stage-legacy-allowlist-freeze.yml";
 const migration = fs.readFileSync(migrationPath, "utf8");
 const freezeMigration = fs.readFileSync(freezeMigrationPath, "utf8");
+const cleanupMigration = fs.readFileSync(cleanupMigrationPath, "utf8");
 const workflow = fs.readFileSync(workflowPath, "utf8");
 const freezeWorkflow = fs.readFileSync(freezeWorkflowPath, "utf8");
 
@@ -550,8 +552,16 @@ function makeLegacyRunnerAdapters() {
         pruned_entry_count: String(evidence.entryCount),
         pruned_transaction_ids_sha256: evidence.transactionIdsSha256,
         pruned_entry_ids_sha256: evidence.entryIdsSha256,
+        registry_cleaned_at: "2026-08-24T00:02:00.000000Z",
+        registry_cleaned_key_count: String(evidence.registryKeys.length),
+        registry_cleaned_keys_sha256: evidence.registryKeysSha256,
       };
-      return { state: executeCleanupCalls === 1 ? "pruned" : "already_pruned" };
+      return {
+        state: executeCleanupCalls === 1 ? "pruned" : "already_pruned",
+        registry_keys: evidence.registryKeys.length,
+        registry_keys_sha256: evidence.registryKeysSha256,
+        remaining_registry_count: 0,
+      };
     },
     async verifyCommitted(_row, evidence) {
       return {
@@ -560,8 +570,12 @@ function makeLegacyRunnerAdapters() {
         pruned_entry_count: String(evidence.entryCount),
         pruned_transaction_ids_sha256: evidence.transactionIdsSha256,
         pruned_entry_ids_sha256: evidence.entryIdsSha256,
-        mapping_count: String(evidence.transactionCount),
+        registry_cleaned_at: "2026-08-24T00:02:00.000000Z",
+        registry_cleaned_key_count: String(evidence.registryKeys.length),
+        registry_cleaned_keys_sha256: evidence.registryKeysSha256,
+        mapping_count: "0",
         extra_mapping_count: "0",
+        remaining_mapping_count: "0",
         hot_transaction_count: "0",
         hot_entry_count: "0",
       };
@@ -705,12 +719,39 @@ try {
   const executeDeps = {
     storageTarget: runnerStorageTarget,
     pruneStore: validRunnerContract.adapters.pruneStore,
+    preflight: async () => ({
+      projectRef: "krydukthwdvccggbyjfw",
+      systemIdentifier: "7656985631720456337",
+      fenceActive: true,
+      enforcementActive: true,
+      readOnly: true,
+    }),
     verifyBucket: async () => {},
     downloadArchive: async (_storageTarget, objectPath) => ({
       bytes: validRunnerContract.adapters.storageObjects.get(objectPath),
       downloadMs: 1,
     }),
   };
+  await assert.rejects(
+    () => runLegacyStageAllowlistExecute({
+      argv: executeArgs,
+      env: executeEnv,
+      cwd: process.cwd(),
+      deps: {
+        ...executeDeps,
+        preflight: async () => ({
+          projectRef: "krydukthwdvccggbyjfw",
+          systemIdentifier: "7656985631720456337",
+          fenceActive: false,
+          enforcementActive: false,
+          readOnly: true,
+        }),
+      },
+    }),
+    /active TABLE fence/i,
+    "execution runner must fail closed before entering the pruner when the TABLE fence is inactive",
+  );
+  assert.equal(validRunnerContract.adapters.executeCleanupCalls, 0);
   const firstExecute = await runLegacyStageAllowlistExecute({
     argv: executeArgs,
     env: executeEnv,
@@ -723,6 +764,8 @@ try {
   assert.equal(firstExecute.objectPath, validRunnerContract.result.objectPath);
   assert.equal(firstExecute.compressedSha256, validRunnerContract.result.compressedSha256);
   assert.equal(firstExecute.allowlistSha256, plan.allowlistSha256);
+  assert.equal(firstExecute.preflight.fenceActive, true);
+  assert.equal(firstExecute.preflight.enforcementActive, true);
   assert.equal(firstExecute.transactions, fixtureEvidence.transactionCount);
   assert.equal(firstExecute.entries, fixtureEvidence.entryCount);
   assert.deepEqual(firstExecute.proof, {
@@ -892,6 +935,15 @@ assert.match(migration, /chips_authorize_legacy_stage_allowlist_batch/);
 assert.match(migration, /Exact legacy Stage batch GO/);
 assert.match(migration, /chips_prune_legacy_stage_allowlist_batch/);
 assert.match(migration, /P8902/);
+assert.match(cleanupMigration, /drop function public\.chips_prune_legacy_stage_allowlist_batch/);
+assert.match(cleanupMigration, /p_registry_keys text\[\]/);
+assert.match(cleanupMigration, /chips_table_fence_is_active/);
+assert.match(cleanupMigration, /chips_lock_table_fence_for_legacy_cleanup/);
+assert.match(cleanupMigration, /P8937/);
+assert.match(cleanupMigration, /chips\.legacy_stage_cleanup/);
+assert.match(cleanupMigration, /chips\.bot_registry_cleanup/);
+assert.match(cleanupMigration, /remaining_registry_count/);
+assert.match(cleanupMigration, /source_policy_id = 'legacy_stage_allowlist_v1'/);
 assert.match(freezeMigration, /chips_assert_legacy_stage_allowlist_master_hash/);
 assert.match(freezeMigration, /611ab69ba8ee160a4957f8fe9514c919b9f4129bc1ea7842778b04d28ea6ca05/);
 assert.match(freezeMigration, /P8936/);

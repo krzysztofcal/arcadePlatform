@@ -189,6 +189,7 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
         || transaction.user_id !== null) {
         fail("schema-v2 legacy allowlist proof is incomplete");
       }
+      registryKeys.push(text(transaction.idempotency_key));
       tableIds.add(tableId);
     }
     if (record.entries.length !== 2) fail("technical archive transaction must contain exactly two entries");
@@ -255,6 +256,8 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
     } : {}),
     ...(localArchive.manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
       && localArchive.manifest.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID ? {
+      registryKeys: [...registryKeys].sort(),
+      registryKeysSha256: hashCanonicalLines([...registryKeys].sort()),
       legacyTableIds: [...tableIds].sort(),
       legacyTableIdsSha256: hashCanonicalLines([...tableIds].sort()),
       legacyMasterTableIds: [...(localArchive.manifest.legacy_stage_allowlist?.master_table_ids || [])].sort(),
@@ -342,6 +345,9 @@ function parseManifestRow(row) {
     bot_only_identity_count: row.bot_only_identity_count == null ? null : Number(row.bot_only_identity_count),
     bot_only_eligible_count: row.bot_only_eligible_count == null ? null : Number(row.bot_only_eligible_count),
     registry_cleaned_key_count: row.registry_cleaned_key_count == null ? null : Number(row.registry_cleaned_key_count),
+    legacy_master_table_count: row.legacy_master_table_count == null ? null : Number(row.legacy_master_table_count),
+    legacy_batch_number: row.legacy_batch_number == null ? null : Number(row.legacy_batch_number),
+    legacy_batch_table_count: row.legacy_batch_table_count == null ? null : Number(row.legacy_batch_table_count),
     destructive_go_batch_id: row.destructive_go_batch_id == null ? null : Number(row.destructive_go_batch_id),
   };
 }
@@ -567,6 +573,15 @@ function manifestSelectSql() {
     registry_cleaned_at::text as registry_cleaned_at,
     registry_cleaned_key_count::text as registry_cleaned_key_count,
     registry_cleaned_keys_sha256,
+    legacy_allowlist_sha256,
+    legacy_batch_table_ids_sha256,
+    legacy_master_table_ids,
+    legacy_master_table_count::text as legacy_master_table_count,
+    legacy_batch_number::text as legacy_batch_number,
+    legacy_batch_table_count::text as legacy_batch_table_count,
+    legacy_source_run,
+    legacy_query_sha256,
+    legacy_stage_system_identifier,
     destructive_go_at::text as destructive_go_at,
     destructive_go_batch_id::text as destructive_go_batch_id
   from public.chips_ledger_archive_batches where object_path = $1;`;
@@ -677,8 +692,8 @@ export function createPruneStore(sql) {
         await tx.unsafe("set local lock_timeout = '5s';");
         await tx.unsafe("set local statement_timeout = '120s';");
         const rows = await tx.unsafe(`select public.chips_prune_legacy_stage_allowlist_batch(
-          $1, $2::uuid[], $3::bigint[], $4::uuid[], $5::text, $6::text,
-          $7::boolean, $8::bigint
+          $1, $2::uuid[], $3::bigint[], $4::uuid[], $5::text, $6::text, $7::text[],
+          $8::boolean, $9::bigint
         ) as result;`, [
           objectPath,
           evidence.transactionIds,
@@ -686,6 +701,7 @@ export function createPruneStore(sql) {
           evidence.legacyTableIds,
           evidence.legacyAllowlistSha256,
           evidence.legacyBatchTableIdsSha256,
+          evidence.registryKeys,
           execute,
           approvedBatchId,
         ]);
@@ -699,10 +715,15 @@ export function createPruneStore(sql) {
         batches.pruned_entry_count::text as pruned_entry_count,
         batches.pruned_transaction_ids_sha256,
         batches.pruned_entry_ids_sha256,
+        batches.registry_cleaned_at::text as registry_cleaned_at,
+        batches.registry_cleaned_key_count::text as registry_cleaned_key_count,
+        batches.registry_cleaned_keys_sha256,
         (select count(*)::text from public.chips_transaction_idempotency registry
           where registry.transaction_id = any($2::uuid[]) and registry.archive_batch_id = batches.batch_id) as mapping_count,
         (select count(*)::text from public.chips_transaction_idempotency registry
           where registry.archive_batch_id = batches.batch_id and not (registry.transaction_id = any($2::uuid[]))) as extra_mapping_count,
+        (select count(*)::text from public.chips_transaction_idempotency registry
+          where registry.archive_batch_id = batches.batch_id) as remaining_mapping_count,
         (select count(*)::text from public.chips_transactions transactions where transactions.id = any($2::uuid[])) as hot_transaction_count,
         (select count(*)::text from public.chips_entries entries
           where entries.transaction_id = any($2::uuid[]) or entries.id = any($3::bigint[])) as hot_entry_count
@@ -766,6 +787,24 @@ function assertPostCommitVerification(verification, evidence) {
     || Number(verification.hot_transaction_count) !== 0
     || Number(verification.hot_entry_count) !== 0) {
     fail("post-commit database verification failed", "post_commit_verification_failed");
+  }
+}
+
+function assertLegacyPostCommitVerification(verification, evidence) {
+  if (!verification?.pruned_at
+    || Number(verification.pruned_transaction_count) !== evidence.transactionCount
+    || Number(verification.pruned_entry_count) !== evidence.entryCount
+    || verification.pruned_transaction_ids_sha256 !== evidence.transactionIdsSha256
+    || verification.pruned_entry_ids_sha256 !== evidence.entryIdsSha256
+    || !verification.registry_cleaned_at
+    || Number(verification.registry_cleaned_key_count) !== evidence.registryKeys.length
+    || verification.registry_cleaned_keys_sha256 !== evidence.registryKeysSha256
+    || Number(verification.mapping_count) !== 0
+    || Number(verification.extra_mapping_count) !== 0
+    || Number(verification.remaining_mapping_count) !== 0
+    || Number(verification.hot_transaction_count) !== 0
+    || Number(verification.hot_entry_count) !== 0) {
+    fail("post-commit legacy cleanup verification failed", "post_commit_verification_failed");
   }
 }
 
@@ -923,6 +962,9 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
             || Number(verification.hot_entry_count) !== 0) {
             fail("post-commit bot-only cleanup verification failed", "post_commit_verification_failed");
           }
+        } else if (row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+          && row.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
+          assertLegacyPostCommitVerification(verification, evidence);
         } else {
           assertPostCommitVerification(verification, evidence);
         }

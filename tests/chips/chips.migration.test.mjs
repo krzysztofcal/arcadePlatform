@@ -1129,6 +1129,221 @@ async function assertArchivePrunerRoleContracts(sql) {
   });
 }
 
+async function assertLegacyAllowlistCleanupContracts(sql) {
+  const masterIds = fs.readFileSync(
+    path.join(process.cwd(), "data/chips-ledger/legacy-stage-allowlist-v1/legacy-stage-allowlist-v1.master.ids"),
+    "utf8",
+  ).trim().split("\n").map((value) => value.trim()).filter(Boolean).sort();
+  assert.equal(masterIds.length, 974, "legacy cleanup contract must use the frozen master allowlist");
+  const tableId = masterIds[0];
+  const escrowId = "00000000-0000-4000-8000-00000000c402";
+  const transactionIds = [
+    "00000000-0000-4000-8000-00000000c403",
+    "00000000-0000-4000-8000-00000000c404",
+  ];
+  const replayTransactionId = "00000000-0000-4000-8000-00000000c405";
+  const cursorStartId = "00000000-0000-4000-8000-00000000c400";
+  const cutoff = "2026-08-17T16:51:28.074Z";
+  const cursorStartCreatedAt = "2026-08-16T23:59:59.000001Z";
+  const createdAt = ["2026-08-17T00:00:00.000001Z", "2026-08-17T00:00:00.000002Z"];
+  const registryKeys = [
+    `join-buyin:${tableId}:legacy-cleanup:0`,
+    `poker:bot-terminal-cashout:v1:${tableId}:legacy-cleanup-1`,
+  ].sort();
+  const ROLLBACK = new Error("legacy-allowlist-cleanup-rollback");
+
+  await sql.begin(async (tx) => {
+    await tx.unsafe("set transaction isolation level serializable;");
+    await tx.unsafe(`create or replace function public.chips_assert_archive_prune_stage()
+      returns text language sql security definer set search_path = ''
+      as $override$ select '7656985631720456337'::text $override$;`);
+    await tx.unsafe(`create or replace function public.chips_assert_archive_prune_target(p_project_ref text, p_transaction_count bigint)
+      returns text language plpgsql security definer set search_path = ''
+      as $override$
+      begin
+        if p_project_ref = 'krydukthwdvccggbyjfw' and p_transaction_count between 1 and 5000 then
+          return '7656985631720456337';
+        end if;
+        raise exception 'legacy cleanup target gate rejected request';
+      end
+      $override$;`);
+
+    await tx.unsafe("select public.chips_set_table_fence_active(false);");
+    await tx.unsafe(`insert into public.poker_tables (id, status, has_human_participant, bot_only_proof_eligible)
+      values ($1::uuid, 'OPEN', false, false);`, [tableId]);
+    await tx.unsafe(`insert into public.chips_accounts (id, account_type, system_key, status, balance, next_entry_seq)
+      values ($1::uuid, 'ESCROW', $2, 'active', 0, 1);`, [escrowId, `POKER_TABLE:${tableId}`]);
+
+    for (let index = 0; index < transactionIds.length; index += 1) {
+      await tx.unsafe(`insert into public.chips_transactions (
+        id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at
+      ) values ($1::uuid, $2, $3::jsonb, $4, $5, $6, null, $7::timestamptz);`, [
+        transactionIds[index],
+        `table:${tableId}`,
+        { tableId },
+        registryKeys[index],
+        (index === 0 ? "c" : "d").repeat(64),
+        index === 0 ? "TABLE_BUY_IN" : "TABLE_CASH_OUT",
+        sql.typed(createdAt[index], 25),
+      ]);
+    }
+    const entryIds = [];
+    for (let index = 0; index < transactionIds.length; index += 1) {
+      const entryRows = await tx.unsafe(`with accounts as (
+        select id, system_key from public.chips_accounts
+        where (account_type = 'SYSTEM' and system_key = 'GENESIS') or id = $2::uuid
+      )
+      insert into public.chips_entries (transaction_id, account_id, amount, metadata)
+      select $1::uuid, id,
+             case
+               when $3::boolean and system_key = 'GENESIS' then -10
+               when $3::boolean then 10
+               when system_key = 'GENESIS' then 10
+               else -10
+             end,
+             '{}'::jsonb
+      from accounts order by system_key returning id;`, [transactionIds[index], escrowId, index === 0]);
+      entryIds.push(...entryRows.map((row) => String(row.id)).sort((left, right) => BigInt(left) < BigInt(right) ? -1 : 1));
+    }
+    await tx.unsafe("set constraints all immediate;");
+    await tx.unsafe("select public.chips_set_table_fence_active(true);");
+    await tx.unsafe("update public.poker_tables set status = 'CLOSED' where id = $1::uuid;", [tableId]);
+
+    const batchHashRows = await tx.unsafe(
+      "select public.chips_archive_uuid_ids_sha256($1::uuid[]) as hash;",
+      [[tableId]],
+    );
+    const batchTableIdsSha256 = batchHashRows[0].hash;
+    const compressedHash = "c".repeat(64);
+    const rawHash = "b".repeat(64);
+    const objectPath = `v1/sha256/${compressedHash}.jsonl.gz`;
+    const manifestRows = await tx.unsafe(`insert into public.chips_ledger_archive_batches (
+      object_path, project_ref, format_version, source_policy_id, cutoff,
+      cursor_start_created_at, cursor_start_id, cursor_end_created_at, cursor_end_id,
+      first_created_at, last_created_at, transaction_count, entry_count, tx_types,
+      raw_bytes, compressed_bytes, raw_sha256, compressed_sha256, credits, debits, net_amount,
+      status, committed_at, legacy_allowlist_sha256, legacy_batch_table_ids_sha256,
+      legacy_master_table_ids, legacy_master_table_count, legacy_batch_number,
+      legacy_batch_table_count, legacy_source_run, legacy_query_sha256,
+      legacy_stage_system_identifier
+    ) values (
+      $1, 'krydukthwdvccggbyjfw', 2, 'legacy_stage_allowlist_v1', $2::timestamptz,
+      $3::timestamptz, $4::uuid, $5::timestamptz, $6::uuid,
+      $7::timestamptz, $8::timestamptz, 2, 4, '{"TABLE_BUY_IN":1,"TABLE_CASH_OUT":1}'::jsonb,
+      100, 80, $9, $10, 20, 20, 0, 'committed', timezone('utc', now()),
+      '611ab69ba8ee160a4957f8fe9514c919b9f4129bc1ea7842778b04d28ea6ca05', $11,
+      $12::uuid[], 974, 1, 1, '32753223679',
+      '9bd27ff7a2749a879707e823982f708e6abf86beffcdf8f97c5deac05f00ca09',
+      '7656985631720456337'
+    ) returning batch_id;`, [
+      objectPath,
+      sql.typed(cutoff, 25),
+      sql.typed(cursorStartCreatedAt, 25),
+      cursorStartId,
+      sql.typed(createdAt[1], 25),
+      transactionIds[1],
+      sql.typed(createdAt[0], 25),
+      sql.typed(createdAt[1], 25),
+      rawHash,
+      compressedHash,
+      batchTableIdsSha256,
+      masterIds,
+    ]);
+    const batchId = String(manifestRows[0].batch_id);
+    const pruneStore = createPruneStore({
+      unsafe: (...args) => tx.unsafe(...args),
+      begin: async (callback) => callback({
+        unsafe: (query, parameters = []) => /^\s*set (transaction|local) /i.test(query)
+          ? Promise.resolve([])
+          : tx.unsafe(query, parameters),
+      }),
+      typed: (value, type) => sql.typed(value, type),
+    });
+    const adapterManifest = await pruneStore.getManifest(objectPath);
+    const evidence = {
+      transactionIds,
+      entryIds,
+      registryKeys,
+      legacyTableIds: [tableId],
+      legacyMasterTableIds: masterIds,
+      legacyAllowlistSha256: "611ab69ba8ee160a4957f8fe9514c919b9f4129bc1ea7842778b04d28ea6ca05",
+      legacyBatchTableIdsSha256: batchTableIdsSha256,
+    };
+    const proofResult = await pruneStore.registerLegacyStageAllowlistProof(adapterManifest, evidence);
+    assert.equal(proofResult.state, "proof_registered", "legacy proof must register before cleanup");
+
+    const idProofRows = await tx.unsafe(`select
+      archived_transaction_ids_sha256, archived_entry_ids_sha256, archive_proof_verified_at
+      from public.chips_ledger_archive_batches where batch_id = $1;`, [batchId]);
+    assert.ok(idProofRows[0].archive_proof_verified_at, "legacy proof must create the immutable archive ID receipt");
+
+    const authorizationRows = await tx.unsafe(
+      "select public.chips_authorize_legacy_stage_allowlist_batch($1::bigint, $2, $3) as result;",
+      [batchId, `GO ${batchId}`, evidence.legacyAllowlistSha256],
+    );
+    assert.equal(authorizationRows[0].result.state, "authorized");
+    await tx.unsafe("select set_config('chips.bot_only_go', '', true);");
+
+    const balancesBefore = await tx.unsafe(`select id, balance, next_entry_seq
+      from public.chips_accounts where id = $1::uuid or system_key = 'GENESIS' order by id;`, [escrowId]);
+    await tx.unsafe("select public.chips_set_table_fence_active(false);");
+    await expectSavepointError(tx, "legacy_fence_off", () => pruneStore.cleanupLegacyStageAllowlist(
+      objectPath, evidence, true, batchId,
+    ), /Active TABLE fence is required|active TABLE fence/i);
+    const fenceOffState = await tx.unsafe(`select
+      (select count(*) from public.chips_transactions where id = any($1::uuid[])) as hot_transactions,
+      (select count(*) from public.chips_entries where transaction_id = any($1::uuid[])) as hot_entries,
+      (select count(*) from public.chips_transaction_idempotency where idempotency_key = any($2::text[])) as registry_rows,
+      (select pruned_at from public.chips_ledger_archive_batches where batch_id = $3) as pruned_at;`, [transactionIds, registryKeys, batchId]);
+    assert.equal(Number(fenceOffState[0].hot_transactions), 2);
+    assert.equal(Number(fenceOffState[0].hot_entries), 4);
+    assert.equal(Number(fenceOffState[0].registry_rows), 2);
+    assert.equal(fenceOffState[0].pruned_at, null);
+    await tx.unsafe("select public.chips_set_table_fence_active(true);");
+    const cleanupResult = await pruneStore.cleanupLegacyStageAllowlist(objectPath, evidence, true, batchId);
+    assert.equal(cleanupResult.state, "pruned");
+    assert.equal(Number(cleanupResult.registry_keys), 2);
+    assert.equal(cleanupResult.remaining_registry_count, 0);
+
+    const postRows = await tx.unsafe(`select
+      (select count(*) from public.chips_transactions where id = any($1::uuid[])) as hot_transactions,
+      (select count(*) from public.chips_entries where transaction_id = any($1::uuid[])) as hot_entries,
+      (select count(*) from public.chips_transaction_idempotency where archive_batch_id = $2) as remaining_registry,
+      (select count(*) from public.chips_transaction_idempotency where idempotency_key = any($3::text[])) as replay_keys,
+      (select registry_cleaned_key_count from public.chips_ledger_archive_batches where batch_id = $2) as receipt_count,
+      (select registry_cleaned_keys_sha256 from public.chips_ledger_archive_batches where batch_id = $2) as receipt_hash;`,
+      [transactionIds, batchId, registryKeys]);
+    assert.equal(Number(postRows[0].hot_transactions), 0);
+    assert.equal(Number(postRows[0].hot_entries), 0);
+    assert.equal(Number(postRows[0].remaining_registry), 0);
+    assert.equal(Number(postRows[0].replay_keys), 0);
+    assert.equal(Number(postRows[0].receipt_count), 2);
+    assert.equal(postRows[0].receipt_hash, cleanupResult.registry_keys_sha256);
+
+    await expectSavepointError(tx, "legacy_replay_old_key", () => tx.unsafe(`insert into public.chips_transactions (
+      id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at
+    ) values ($1::uuid, $2, $3::jsonb, $4, $5, 'TABLE_BUY_IN', null, $6::timestamptz);`, [
+      replayTransactionId,
+      `table:${tableId}`,
+      { tableId },
+      registryKeys[0],
+      "e".repeat(64),
+      sql.typed("2026-08-17T00:00:00.000003Z", 25),
+    ]), /P8903|closed or missing/i);
+
+    const retryResult = await pruneStore.cleanupLegacyStageAllowlist(objectPath, evidence, true, batchId);
+    assert.equal(retryResult.state, "already_pruned", "legacy cleanup retry must be idempotent");
+    assert.equal(Number(retryResult.remaining_registry_count), 0);
+    const balancesAfter = await tx.unsafe(`select id, balance, next_entry_seq
+      from public.chips_accounts where id = $1::uuid or system_key = 'GENESIS' order by id;`, [escrowId]);
+    assert.deepEqual(balancesAfter, balancesBefore, "legacy cleanup must not change balances or next_entry_seq");
+
+    throw ROLLBACK;
+  }).catch((error) => {
+    if (error !== ROLLBACK) throw error;
+  });
+}
+
 async function assertBuyInSequencing(sql, expectedTreasurySeq) {
   const { getUserBalance, listUserLedger } = await withLedger();
   const userId = primaryUserId;
@@ -1225,6 +1440,7 @@ async function main() {
   await expectFrozenLegacyAllowlistHashGuard(sql);
   await ensureGenesisFixture(sql);
   await assertArchivePrunerRoleContracts(sql);
+  await assertLegacyAllowlistCleanupContracts(sql);
   await expectNegativeBalanceGuard(sql);
   await expectInsufficientBuyIn(sql);
   await expectInvalidMetadata(sql);

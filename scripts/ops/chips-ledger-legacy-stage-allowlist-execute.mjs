@@ -1,5 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import postgres from "postgres";
 
 import {
   stringifyJson,
@@ -12,6 +13,7 @@ import { pruneArchive as runArchivePrune } from "./chips-ledger-archive-prune.mj
 import {
   buildLegacyPlan,
   loadFrozenLegacyAllowlist,
+  readOnlyStagePreflight,
 } from "./chips-ledger-legacy-stage-allowlist.mjs";
 import { validateStageEnvironment } from "./chips-ledger-stage-automation.mjs";
 
@@ -83,7 +85,7 @@ function buildFrozenPlan(cwd, deps) {
   return plan;
 }
 
-function summarizeExecution({ result, args, plan, deployedCommitSha }) {
+function summarizeExecution({ result, args, plan, deployedCommitSha, preflight }) {
   return {
     state: result.state,
     mode: result.mode,
@@ -92,6 +94,7 @@ function summarizeExecution({ result, args, plan, deployedCommitSha }) {
     target: "stage",
     projectRef: result.target?.projectRef || null,
     postgresSystemIdentifier: result.identity || null,
+    preflight,
     batchId: args.batchId,
     objectPath: args.objectPath,
     compressedSha256: args.confirmSha,
@@ -127,31 +130,52 @@ export async function runLegacyStageAllowlistExecute({
   const plan = buildFrozenPlan(cwd, deps);
   const storageTarget = deps.storageTarget
     || resolveStorageTarget("stage", config.moduleEnv, { singleTarget: true });
-  const result = await (deps.pruneArchive || runArchivePrune)({
-    argv: [
-      "--target", "stage",
-      "--object-path", args.objectPath,
-      "--confirm-sha", args.confirmSha,
-      "--execute",
-      "--approved-batch-id", args.batchId,
-      "--recovery-dir", args.recoveryDir,
-    ],
-    env: config.moduleEnv,
-    cwd,
-    deps: {
-      ...deps,
-      storageTarget,
-      targetOptions: { singleTarget: true },
-      legacyStageAllowlistPlan: plan,
-      emit: false,
-    },
-  });
-  return summarizeExecution({
-    result,
-    args,
-    plan,
-    deployedCommitSha: config.deployedCommitSha,
-  });
+  let sql = deps.sql || null;
+  let ownsSql = false;
+  if (!sql && !deps.preflight) {
+    sql = postgres(config.dbUrl, {
+      max: 1,
+      prepare: false,
+      connect_timeout: 10,
+      idle_timeout: 30,
+    });
+    ownsSql = true;
+  }
+  try {
+    const preflight = await (deps.preflight || readOnlyStagePreflight)(sql);
+    if (preflight?.fenceActive !== true || preflight?.enforcementActive !== true) {
+      fail("legacy Stage execution requires the active TABLE fence");
+    }
+    const result = await (deps.pruneArchive || runArchivePrune)({
+      argv: [
+        "--target", "stage",
+        "--object-path", args.objectPath,
+        "--confirm-sha", args.confirmSha,
+        "--execute",
+        "--approved-batch-id", args.batchId,
+        "--recovery-dir", args.recoveryDir,
+      ],
+      env: config.moduleEnv,
+      cwd,
+      deps: {
+        ...deps,
+        ...(sql ? { sql } : {}),
+        storageTarget,
+        targetOptions: { singleTarget: true },
+        legacyStageAllowlistPlan: plan,
+        emit: false,
+      },
+    });
+    return summarizeExecution({
+      result,
+      args,
+      plan,
+      deployedCommitSha: config.deployedCommitSha,
+      preflight,
+    });
+  } finally {
+    if (ownsSql) await sql.end({ timeout: 5 });
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
