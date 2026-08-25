@@ -13,6 +13,7 @@ on:
           - bot-only-7d-prepare-only
           - legacy-stage-allowlist-prepare-only
           - audit-batch-13
+          - execute-batch-13
   schedule:
     - cron: "17 2 * * *"
 
@@ -131,3 +132,153 @@ jobs:
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
         run: node scripts/ops/chips-ledger-legacy-stage-allowlist-audit.mjs
+
+      - name: Execute approved legacy Stage batch 13
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'execute-batch-13' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+          CHIPS_LEDGER_LEGACY_STAGE_ALLOWLIST_EXECUTE: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          node --input-type=module <<'NODE'
+          import crypto from "node:crypto";
+          import postgres from "postgres";
+
+          const EXPECTED = Object.freeze({
+            projectRef: "krydukthwdvccggbyjfw",
+            systemIdentifier: "7656985631720456337",
+            batchId: "13",
+            objectPath: "v1/sha256/a7ff21fef10b1d22b963793d3cf6efd667319a7211ee47c7e6f755f293155e60.jsonl.gz",
+            archiveSha256: "a7ff21fef10b1d22b963793d3cf6efd667319a7211ee47c7e6f755f293155e60",
+            cutoff: "2026-08-17 16:51:28.074+00",
+            sourcePolicyId: "legacy_stage_allowlist_v1",
+            sourceRun: "32753223679",
+            querySha256: "9bd27ff7a2749a879707e823982f708e6abf86beffcdf8f97c5deac05f00ca09",
+            masterAllowlistSha256: "611ab69ba8ee160a4957f8fe9514c919b9f4129bc1ea7842778b04d28ea6ca05",
+            batchTableIdsSha256: "ded0a77efe84f56d2f4a9706f9d454a09179f6328098ad60ecf45639b4b75895",
+            transactionIdsSha256: "23572e092abe6dee44e3537b8552cab3eb663e69370435c6205864c62f2bf9da",
+            entryIdsSha256: "793e1993e45c198c476e1b5926c252542219c1cb7038e09ae96d440600d29a79",
+            registryKeysSha256: "621e2d102ee65813e9554cbd3e2c4c79cc5ad1cbcc71c0c10cb8e948182ee81b",
+            transactionCount: 60,
+            entryCount: 120,
+            registryCount: 60,
+          });
+
+          const fail = (message) => { throw new Error(`execute-batch-13 preflight: ${message}`); };
+          const text = (value) => value == null ? "" : String(value).trim();
+          const hashLines = (values) => crypto.createHash("sha256").update(`${values.join("\n")}\n`).digest("hex");
+          const sql = postgres(process.env.SUPABASE_STAGE_DB_URL, {
+            max: 1,
+            prepare: false,
+            connect_timeout: 10,
+            idle_timeout: 0,
+          });
+
+          try {
+            await sql.begin(async (tx) => {
+              await tx.unsafe("set transaction isolation level repeatable read, read only;");
+              const identity = await tx.unsafe("select system_identifier::text as system_identifier from pg_catalog.pg_control_system();");
+              if (text(identity[0]?.system_identifier) !== EXPECTED.systemIdentifier) fail("system identifier mismatch");
+              const active = await tx.unsafe("select public.chips_table_fence_is_active() as active;");
+              if (!(active[0]?.active === true || active[0]?.active === "t")) fail("TABLE fence is not active");
+              const control = await tx.unsafe("select enforcement_active from public.chips_table_fence_control where control_id is true;");
+              if (control.length !== 1 || !(control[0]?.enforcement_active === true || control[0]?.enforcement_active === "t")) fail("fence enforcement is not active");
+
+              const batches = await tx.unsafe(`
+                select
+                  object_path, batch_id::text as batch_id, project_ref, source_policy_id,
+                  format_version::text as format_version, cutoff::text as cutoff,
+                  transaction_count::text as transaction_count, entry_count::text as entry_count,
+                  compressed_sha256, legacy_allowlist_sha256, legacy_batch_table_ids_sha256,
+                  archived_transaction_ids_sha256, archived_entry_ids_sha256,
+                  status, committed_at::text as committed_at,
+                  destructive_go_at::text as destructive_go_at,
+                  destructive_go_batch_id::text as destructive_go_batch_id,
+                  pruned_at::text as pruned_at, registry_cleaned_at::text as registry_cleaned_at
+                from public.chips_ledger_archive_batches
+                where batch_id = 13
+                  and object_path = 'v1/sha256/a7ff21fef10b1d22b963793d3cf6efd667319a7211ee47c7e6f755f293155e60.jsonl.gz';
+              `);
+              if (batches.length !== 1) fail("batch identity is missing or duplicated");
+              const batch = batches[0];
+              for (const [field, expected] of Object.entries({
+                batch_id: EXPECTED.batchId,
+                object_path: EXPECTED.objectPath,
+                project_ref: EXPECTED.projectRef,
+                source_policy_id: EXPECTED.sourcePolicyId,
+                format_version: "2",
+                cutoff: EXPECTED.cutoff,
+                transaction_count: String(EXPECTED.transactionCount),
+                entry_count: String(EXPECTED.entryCount),
+                compressed_sha256: EXPECTED.archiveSha256,
+                legacy_allowlist_sha256: EXPECTED.masterAllowlistSha256,
+                legacy_batch_table_ids_sha256: EXPECTED.batchTableIdsSha256,
+                archived_transaction_ids_sha256: EXPECTED.transactionIdsSha256,
+                archived_entry_ids_sha256: EXPECTED.entryIdsSha256,
+                status: "committed",
+              })) {
+                if (text(batch[field]) !== expected) fail(`${field} mismatch`);
+              }
+              if (!batch.committed_at || !batch.destructive_go_at || text(batch.destructive_go_batch_id) !== EXPECTED.batchId) {
+                fail("exact persisted batch GO is missing");
+              }
+              if (batch.pruned_at !== null || batch.registry_cleaned_at !== null) fail("batch was already executed");
+
+              const proofs = await tx.unsafe(`
+                select
+                  batch_id::text as batch_id, object_path, project_ref, source_policy_id,
+                  cutoff::text as cutoff, source_run, query_sha256,
+                  postgres_system_identifier, master_table_count::text as master_table_count,
+                  master_table_ids_sha256, batch_number::text as batch_number,
+                  batch_table_count::text as batch_table_count, batch_table_ids_sha256
+                from public.chips_legacy_stage_allowlist_proofs
+                where batch_id = 13
+                  and object_path = 'v1/sha256/a7ff21fef10b1d22b963793d3cf6efd667319a7211ee47c7e6f755f293155e60.jsonl.gz';
+              `);
+              if (proofs.length !== 1) fail("immutable proof is missing or duplicated");
+              const proof = proofs[0];
+              for (const [field, expected] of Object.entries({
+                batch_id: EXPECTED.batchId,
+                object_path: EXPECTED.objectPath,
+                project_ref: EXPECTED.projectRef,
+                source_policy_id: EXPECTED.sourcePolicyId,
+                cutoff: EXPECTED.cutoff,
+                source_run: EXPECTED.sourceRun,
+                query_sha256: EXPECTED.querySha256,
+                postgres_system_identifier: EXPECTED.systemIdentifier,
+                master_table_count: "974",
+                master_table_ids_sha256: EXPECTED.masterAllowlistSha256,
+                batch_number: "1",
+                batch_table_count: "10",
+                batch_table_ids_sha256: EXPECTED.batchTableIdsSha256,
+              })) {
+                if (text(proof[field]) !== expected) fail(`proof ${field} mismatch`);
+              }
+
+              const registry = await tx.unsafe(`
+                select idempotency_key
+                from public.chips_transaction_idempotency
+                where archive_batch_id = 13
+                order by idempotency_key;
+              `);
+              if (registry.length !== EXPECTED.registryCount) fail("registry count mismatch");
+              if (hashLines(registry.map((row) => text(row.idempotency_key))) !== EXPECTED.registryKeysSha256) {
+                fail("registry proof hash mismatch");
+              }
+            });
+          } finally {
+            await sql.end({ timeout: 5 });
+          }
+          process.stdout.write("execute-batch-13 read-only preflight passed\n");
+          NODE
+
+          recovery_dir="${RUNNER_TEMP}/chips-ledger-legacy-stage-allowlist-execute-${GITHUB_RUN_ID}"
+          test ! -e "$recovery_dir"
+          mkdir -p "$recovery_dir"
+          node scripts/ops/chips-ledger-legacy-stage-allowlist-execute.mjs \
+            --batch-id 13 \
+            --object-path v1/sha256/a7ff21fef10b1d22b963793d3cf6efd667319a7211ee47c7e6f755f293155e60.jsonl.gz \
+            --confirm-sha a7ff21fef10b1d22b963793d3cf6efd667319a7211ee47c7e6f755f293155e60 \
+            --recovery-dir "$recovery_dir"
