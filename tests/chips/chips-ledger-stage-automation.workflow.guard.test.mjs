@@ -5,9 +5,9 @@ const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-automatio
 
 assert.match(
   workflow,
-  /workflow_dispatch:\n\s+inputs:\n\s+mode:\n\s+description: Stage automation mode\n\s+required: true\n\s+default: existing-30d\n\s+type: choice\n\s+options:\n\s+- existing-30d\n\s+- bot-only-7d-prepare-only\n\s+- legacy-stage-allowlist-prepare-only/,
+  /workflow_dispatch:\n\s+inputs:\n\s+mode:\n\s+description: Stage automation mode\n\s+required: true\n\s+default: existing-30d\n\s+type: choice\n\s+options:\n\s+- existing-30d\n\s+- bot-only-7d-prepare-only\n\s+- legacy-stage-allowlist-prepare-only\n\s+- audit-batch-13/,
 );
-assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|legacy-stage-allowlist-prepare-only)$/gm) || []).length, 3);
+assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|legacy-stage-allowlist-prepare-only|audit-batch-13)$/gm) || []).length, 4);
 assert.equal((workflow.match(/- cron:/g) || []).length, 1);
 assert.match(workflow, /cancel-in-progress:\s*false/);
 assert.match(workflow, /CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1'/);
@@ -58,7 +58,7 @@ assert.match(
 assert.doesNotMatch(workflow, /--execute|CHIPS_LEDGER_BOT_ONLY_EXECUTE/);
 
 const legacyRun = workflow.match(
-  /- name: Run legacy Stage allowlist prepare-only[\s\S]*$/,
+  /- name: Run legacy Stage allowlist prepare-only[\s\S]*?(?=\n\s+- name:|\s*$)/,
 )[0];
 assert.match(legacyRun, /github\.event_name == 'workflow_dispatch'/);
 assert.match(legacyRun, /inputs\.mode == 'legacy-stage-allowlist-prepare-only'/);
@@ -68,5 +68,19 @@ assert.equal((workflow.match(/node scripts\/ops\/chips-ledger-legacy-stage-allow
 assert.doesNotMatch(existingRun, /legacy-stage-allowlist/);
 assert.doesNotMatch(botOnlyRun, /legacy-stage-allowlist/);
 assert.doesNotMatch(workflow.match(/- cron:[\s\S]*?(?=\n\s*concurrency:)/)[0], /legacy-stage-allowlist/);
+assert.doesNotMatch(workflow.match(/- cron:[\s\S]*?(?=\n\s*concurrency:)/)[0], /audit-batch-13/);
+
+const auditRun = workflow.match(
+  /- name: Audit legacy Stage allowlist batch 13[\s\S]*$/,
+)[0];
+assert.match(auditRun, /github\.event_name == 'workflow_dispatch'/);
+assert.match(auditRun, /inputs\.mode == 'audit-batch-13'/);
+assert.match(auditRun, /run: node scripts\/ops\/chips-ledger-legacy-stage-allowlist-audit\.mjs\s*$/m);
+assert.doesNotMatch(auditRun, /--|execute|freeze|prepare-only/i);
+assert.doesNotMatch(auditRun, /inputs\.[a-z-]+.*\$\{|github\.event\.inputs/);
+assert.equal((workflow.match(/node scripts\/ops\/chips-ledger-legacy-stage-allowlist-audit\.mjs/g) || []).length, 1);
+assert.doesNotMatch(existingRun, /audit-batch-13/);
+assert.doesNotMatch(botOnlyRun, /audit-batch-13/);
+assert.doesNotMatch(legacyRun, /audit-batch-13/);
 
 process.stdout.write("chips-ledger-stage-automation workflow guard passed\n");

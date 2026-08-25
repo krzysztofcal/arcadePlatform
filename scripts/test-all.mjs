@@ -59,6 +59,7 @@ run("node", ["tests/chips/chips-ledger-stage-automation.test.mjs"], "chips-ledge
 run("node", ["tests/chips/chips-ledger-stage-automation.observability.behavior.test.mjs"], "chips-ledger-stage-automation-observability");
 run("node", ["tests/chips/chips-ledger-stage-automation.order.behavior.test.mjs"], "chips-ledger-stage-automation-order");
 run("node", ["tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs"], "chips-ledger-stage-automation-workflow");
+run("node", ["tests/chips/chips-ledger-legacy-stage-allowlist-audit.test.mjs"], "chips-ledger-legacy-stage-allowlist-audit");
 run("node", ["tests/chips/chips-ledger-stage-timeout-diagnostic.guard.test.mjs"], "chips-ledger-stage-timeout-diagnostic");
 run("node", ["tests/welcome-bonus.behavior.test.mjs"], "welcome-bonus-behavior");
 run("node", ["tests/bonus-campaigns-endpoint.behavior.test.mjs"], "bonus-campaigns-endpoint-behavior");

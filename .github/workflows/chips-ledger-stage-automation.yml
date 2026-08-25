@@ -12,6 +12,7 @@ on:
           - existing-30d
           - bot-only-7d-prepare-only
           - legacy-stage-allowlist-prepare-only
+          - audit-batch-13
   schedule:
     - cron: "17 2 * * *"
 
@@ -124,3 +125,9 @@ jobs:
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
         run: node scripts/ops/chips-ledger-legacy-stage-allowlist.mjs
+
+      - name: Audit legacy Stage allowlist batch 13
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'audit-batch-13' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+        run: node scripts/ops/chips-ledger-legacy-stage-allowlist-audit.mjs
