@@ -735,7 +735,7 @@ async function verifyBatch13PostExecute(sql, plan, before, evidence) {
   });
 }
 
-async function replayOldRegistryKey(sql, evidence, before, replayPair, plan) {
+export async function replayOldRegistryKey(sql, evidence, before, replayPair, plan) {
   const pair = assertReplayPair(replayPair, plan, evidence);
   return sql.begin(async (tx) => {
     await tx.unsafe("set transaction isolation level repeatable read;");
@@ -763,6 +763,9 @@ async function replayOldRegistryKey(sql, evidence, before, replayPair, plan) {
         "f".repeat(64),
         "2026-08-17T00:00:00.000003Z",
       ]);
+      // The table binding is a deferred constraint trigger in the deployed schema.
+      // Flush it inside the savepoint so the expected P8903 reaches this catch.
+      await tx.unsafe("set constraints all immediate;");
     } catch (error) {
       rejection = error;
       await tx.unsafe("rollback to savepoint legacy_stage_batch_13_replay;");

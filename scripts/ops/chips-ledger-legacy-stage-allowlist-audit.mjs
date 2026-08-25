@@ -142,7 +142,12 @@ export const LEGACY_STAGE_ALLOWLIST_AUDIT_SQL = Object.freeze({
     legacy_batch_number::text as legacy_batch_number,
     legacy_batch_table_count::text as legacy_batch_table_count,
     legacy_source_run, legacy_query_sha256, legacy_stage_system_identifier,
-    destructive_go_at::text as destructive_go_at, destructive_go_batch_id::text as destructive_go_batch_id
+    destructive_go_at::text as destructive_go_at, destructive_go_batch_id::text as destructive_go_batch_id,
+    pruned_transaction_count::text as pruned_transaction_count,
+    pruned_entry_count::text as pruned_entry_count,
+    pruned_transaction_ids_sha256, pruned_entry_ids_sha256,
+    registry_cleaned_key_count::text as registry_cleaned_key_count,
+    registry_cleaned_keys_sha256
   from public.chips_ledger_archive_batches where batch_id = $1;`,
   proof: `select
     batch_id::text as batch_id, object_path, project_ref, source_policy_id, cutoff::text as cutoff,
@@ -222,6 +227,15 @@ export const LEGACY_STAGE_ALLOWLIST_AUDIT_SQL = Object.freeze({
     coalesce(sum(-amount) filter (where amount < 0), 0)::text as debits,
     coalesce(sum(amount), 0)::text as net
   from public.chips_entries where transaction_id = any($1::uuid[]);`,
+  prunedHotRows: `select
+    (select count(*) from public.chips_transactions
+      where id = any($1::uuid[]))::text as hot_transaction_count,
+    (select count(*) from public.chips_entries
+      where transaction_id = any($1::uuid[]) or id = any($2::bigint[]))::text as hot_entry_count,
+    (select count(*) from public.chips_transaction_idempotency
+      where idempotency_key = any($3::text[]))::text as hot_registry_count,
+    (select count(*) from public.chips_transaction_idempotency
+      where archive_batch_id = 13)::text as remaining_registry_count;`,
 });
 
 function fail(code, detail = code) {
@@ -329,6 +343,12 @@ function parseBatchRow(row) {
     legacy_master_table_count: numberValue(row.legacy_master_table_count, "legacy_master_table_count"),
     legacy_batch_number: numberValue(row.legacy_batch_number, "legacy_batch_number"),
     legacy_batch_table_count: numberValue(row.legacy_batch_table_count, "legacy_batch_table_count"),
+    pruned_transaction_count: row.pruned_transaction_count === null
+      ? null : numberValue(row.pruned_transaction_count, "pruned_transaction_count"),
+    pruned_entry_count: row.pruned_entry_count === null
+      ? null : numberValue(row.pruned_entry_count, "pruned_entry_count"),
+    registry_cleaned_key_count: row.registry_cleaned_key_count === null
+      ? null : numberValue(row.registry_cleaned_key_count, "registry_cleaned_key_count"),
   };
 }
 
@@ -391,6 +411,57 @@ export function assertLegacyStageAuditPlan(plan) {
   return { masterIds, batchIds };
 }
 
+export function assertLegacyStageAuditBatchState(row) {
+  const expected = LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13;
+  const noGo = row.destructive_go_at === null && row.destructive_go_batch_id === null;
+  const exactGo = row.destructive_go_at !== null
+    && Boolean(row.destructive_go_at)
+    && row.destructive_go_batch_id === expected.batchId;
+  if (!noGo && !exactGo) fail("destructive_go");
+
+  const unpruned = row.pruned_at === null && row.registry_cleaned_at === null;
+  const pruned = row.pruned_at !== null && row.registry_cleaned_at !== null;
+  if (!unpruned && !pruned) fail("cleanup_receipts");
+
+  const receiptFields = [
+    row.pruned_transaction_count,
+    row.pruned_entry_count,
+    row.pruned_transaction_ids_sha256,
+    row.pruned_entry_ids_sha256,
+    row.registry_cleaned_key_count,
+    row.registry_cleaned_keys_sha256,
+  ];
+  if (unpruned) {
+    if (receiptFields.some((value) => value !== null)) fail("cleanup_receipts");
+    return {
+      cleanupState: "authorized-but-unpruned",
+      authorizationState: exactGo ? "exact-batch-13-go" : "no-go",
+      exactGo,
+    };
+  }
+
+  if (!exactGo) fail("pruned_destructive_go");
+  if (!row.pruned_at || !sameTimestamp(row.pruned_at, row.pruned_at)
+    || !row.registry_cleaned_at || !sameTimestamp(row.registry_cleaned_at, row.registry_cleaned_at)) {
+    fail("pruned_receipt_timestamps");
+  }
+  for (const [field, expectedValue] of Object.entries({
+    pruned_transaction_count: expected.transactionCount,
+    pruned_entry_count: expected.entryCount,
+    pruned_transaction_ids_sha256: expected.txIdsSha256,
+    pruned_entry_ids_sha256: expected.entryIdsSha256,
+    registry_cleaned_key_count: expected.registryCount,
+    registry_cleaned_keys_sha256: expected.registryKeysSha256,
+  })) {
+    if (text(row[field]) !== String(expectedValue)) fail(`pruned_receipt_${field}`);
+  }
+  return {
+    cleanupState: "pruned-and-cleaned",
+    authorizationState: "exact-batch-13-go",
+    exactGo,
+  };
+}
+
 export function assertLegacyStageAuditBatchRow(rowInput, plan) {
   const row = parseBatchRow(rowInput);
   const expected = LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13;
@@ -414,12 +485,6 @@ export function assertLegacyStageAuditBatchRow(rowInput, plan) {
   assertValue(row.status, "committed", "batch_status");
   if (!row.committed_at) fail("batch_committed_at");
   if (!row.archive_proof_verified_at) fail("archive_proof_verified_at");
-  const noGo = row.destructive_go_at === null && row.destructive_go_batch_id === null;
-  const exactGo = row.destructive_go_at !== null
-    && Boolean(row.destructive_go_at)
-    && row.destructive_go_batch_id === expected.batchId;
-  if (!noGo && !exactGo) fail("destructive_go");
-  if (row.pruned_at !== null || row.registry_cleaned_at !== null) fail("cleanup_receipts");
   assertValue(row.source_policy_id, LEGACY_STAGE_ALLOWLIST_POLICY_ID, "batch_policy");
   assertValue(row.legacy_allowlist_sha256, expected.masterAllowlistSha256, "batch_master_hash");
   assertValue(row.legacy_batch_table_ids_sha256, expected.batchTableIdsSha256, "batch_table_hash");
@@ -432,7 +497,7 @@ export function assertLegacyStageAuditBatchRow(rowInput, plan) {
   const { masterIds, batchIds } = assertLegacyStageAuditPlan(plan);
   sameIdList(row.legacy_master_table_ids, masterIds, "batch_master_ids");
   if (batchIds.length !== LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT) fail("batch_table_count");
-  return row;
+  return { ...row, ...assertLegacyStageAuditBatchState(row) };
 }
 
 export function assertLegacyStageAuditProofRow(rowInput, plan) {
@@ -758,21 +823,54 @@ async function auditDatabase(tx, { plan, storageTarget, fetchImpl, cwd }) {
   const recoveryManifest = JSON.parse(gunzipSync(recoveryManifestBytes).toString("utf8"));
   const expectedRecoveryManifest = buildRecoveryManifest(row, identity, evidence, { target: "stage" });
   if (canonicalJson(recoveryManifest) !== canonicalJson(expectedRecoveryManifest)) fail("recovery_manifest_evidence");
-  const txRows = await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.transactions, [evidence.transactionIds]);
-  const txIdsSha256 = assertExactTransactionRows(txRows, localArchive.records);
-  if (txIdsSha256 !== evidence.transactionIdsSha256) fail("transaction_ids_hash");
-  const entryRows = await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.entries, [evidence.transactionIds]);
-  const entryIdsSha256 = assertExactEntryRows(entryRows, localArchive.records);
-  if (entryIdsSha256 !== evidence.entryIdsSha256) fail("entry_ids_hash");
-  assertEntryShapeRows(
-    await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.entryShapes, [evidence.transactionIds]),
-    localArchive.records,
-  );
-  const registryRows = await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, [
-    planIds,
-  ]);
-  const registryKeysSha256 = assertExactRegistryRows(registryRows, localArchive.records, planIds);
-  if (registryRows.length !== expected.registryCount || registryKeysSha256 !== evidence.registryKeysSha256) fail("registry_keys_hash");
+  let txIdsSha256 = evidence.transactionIdsSha256;
+  let entryIdsSha256 = evidence.entryIdsSha256;
+  let registryKeysSha256 = evidence.registryKeysSha256;
+  let hotRows;
+  let conservation;
+  if (row.cleanupState === "authorized-but-unpruned") {
+    const txRows = await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.transactions, [evidence.transactionIds]);
+    txIdsSha256 = assertExactTransactionRows(txRows, localArchive.records);
+    if (txIdsSha256 !== evidence.transactionIdsSha256) fail("transaction_ids_hash");
+    const entryRows = await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.entries, [evidence.transactionIds]);
+    entryIdsSha256 = assertExactEntryRows(entryRows, localArchive.records);
+    if (entryIdsSha256 !== evidence.entryIdsSha256) fail("entry_ids_hash");
+    assertEntryShapeRows(
+      await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.entryShapes, [evidence.transactionIds]),
+      localArchive.records,
+    );
+    const registryRows = await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, [planIds]);
+    registryKeysSha256 = assertExactRegistryRows(registryRows, localArchive.records, planIds);
+    if (registryRows.length !== expected.registryCount || registryKeysSha256 !== evidence.registryKeysSha256) {
+      fail("registry_keys_hash");
+    }
+    hotRows = {
+      transactions: txRows.length,
+      entries: entryRows.length,
+      registryRows: registryRows.length,
+    };
+    conservation = assertConservation(
+      (await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.conservation, [evidence.transactionIds]))[0],
+    );
+  } else if (row.cleanupState === "pruned-and-cleaned") {
+    const hot = (await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.prunedHotRows, [
+      evidence.transactionIds,
+      evidence.entryIds,
+      evidence.registryKeys,
+    ]))[0] || {};
+    for (const field of ["hot_transaction_count", "hot_entry_count", "hot_registry_count", "remaining_registry_count"]) {
+      if (text(hot[field]) !== "0") fail(`pruned_${field}`);
+    }
+    hotRows = { transactions: 0, entries: 0, registryRows: 0 };
+    conservation = assertConservation({
+      entry_count: row.entry_count,
+      credits: row.credits,
+      debits: row.debits,
+      net: row.net_amount,
+    });
+  } else {
+    fail("cleanup_state");
+  }
   const tableSnapshot = assertTableRows(await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.tables, [planIds]), planIds);
   const accountIds = [...new Set(localArchive.records.flatMap((record) => record.entries.map((entry) => text(entry.account_id).toLowerCase())))];
   const accountSnapshot = assertAccountRows(
@@ -780,14 +878,14 @@ async function auditDatabase(tx, { plan, storageTarget, fetchImpl, cwd }) {
     accountIds,
     localArchive.records,
   );
-  const conservation = assertConservation((await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.conservation, [evidence.transactionIds]))[0]);
   return {
     identity, projectRef: storageTarget.projectRef, fenceActive, enforcementActive: true,
     migration: { ...LEGACY_STAGE_ALLOWLIST_AUDIT_MIGRATION, sha256: migration.sha256 },
     overloads,
     row, proof, planIds, manifest, manifestSha256: sha256(Buffer.from(canonicalJson(manifest), "utf8")),
     bucket, archiveObject, recoveryArchiveBytes, recoveryManifestBytes, recoveryManifest,
-    localArchive, evidence, tableSnapshot, accountSnapshot, conservation, txIdsSha256, entryIdsSha256, registryKeysSha256,
+    localArchive, evidence, tableSnapshot, accountSnapshot, conservation, txIdsSha256, entryIdsSha256,
+    registryKeysSha256, batchState: row.cleanupState, authorizationState: row.authorizationState, hotRows,
   };
 }
 
@@ -805,6 +903,13 @@ function auditResult(snapshot, deployedCommitSha) {
       tableIds: snapshot.planIds,
     },
     transactions: row.transaction_count, entries: row.entry_count, registryRows: snapshot.evidence.registryKeys.length,
+    batchState: snapshot.batchState,
+    authorization: {
+      state: snapshot.authorizationState,
+      destructiveGoAt: row.destructive_go_at,
+      destructiveGoBatchId: row.destructive_go_batch_id,
+    },
+    hotRows: snapshot.hotRows,
     proof: {
       status: "committed", objectPath: proof.object_path, sourceRun: proof.source_run, querySha256: proof.query_sha256,
       masterTableIdsSha256: proof.master_table_ids_sha256, batchTableIdsSha256: proof.batch_table_ids_sha256,
@@ -829,11 +934,25 @@ function auditResult(snapshot, deployedCommitSha) {
       archiveSha256: sha256(recoveryArchiveBytes.bytes), manifestObjectPath: buildRecoveryManifestObjectPath(expected.compressedSha256),
       manifestBytes: recoveryManifestBytes.length, manifestSha256: sha256(recoveryManifestBytes),
     },
-    dryRun: { state: "ready", readOnly: true, destructiveGoAt: row.destructive_go_at, prunedAt: row.pruned_at, registryCleanedAt: row.registry_cleaned_at },
+    receipt: snapshot.batchState === "pruned-and-cleaned" ? {
+      prunedAt: row.pruned_at,
+      registryCleanedAt: row.registry_cleaned_at,
+      prunedTransactionCount: row.pruned_transaction_count,
+      prunedEntryCount: row.pruned_entry_count,
+      registryCleanedKeyCount: row.registry_cleaned_key_count,
+      transactionIdsSha256: row.pruned_transaction_ids_sha256,
+      entryIdsSha256: row.pruned_entry_ids_sha256,
+      registryKeysSha256: row.registry_cleaned_keys_sha256,
+      remainingRegistryCount: 0,
+    } : null,
+    dryRun: {
+      state: "ready", batchState: snapshot.batchState, readOnly: true,
+      destructiveGoAt: row.destructive_go_at, prunedAt: row.pruned_at, registryCleanedAt: row.registry_cleaned_at,
+    },
     snapshot: {
       balances: snapshot.accountSnapshot,
       nextEntrySeq: snapshot.accountSnapshot.map((account) => ({ accountId: account.accountId, nextEntrySeq: account.nextEntrySeq })),
-      conservation: snapshot.conservation, tables: snapshot.tableSnapshot,
+      conservation: snapshot.conservation, tables: snapshot.tableSnapshot, hotRows: snapshot.hotRows,
     },
     preflight: {
       projectRef: snapshot.projectRef, systemIdentifier: snapshot.identity, fence: snapshot.fenceActive,

@@ -11,6 +11,7 @@ import {
   LEGACY_STAGE_ALLOWLIST_AUDIT_READ_ONLY_TRANSACTION_SQL,
   LEGACY_STAGE_ALLOWLIST_AUDIT_SQL,
   assertLegacyStageAuditBatchRow,
+  assertLegacyStageAuditBatchState,
   assertLegacyStageAuditPlan,
   assertLegacyStageAuditProofRow,
   assertPrunerOverloads,
@@ -25,6 +26,10 @@ import {
 } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-audit.mjs";
 import { buildLegacyPlan, loadFrozenLegacyAllowlist } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist.mjs";
 import { computeArchiveIdProofs } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
+import {
+  collectExecutionSnapshot,
+  replayOldRegistryKey,
+} from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-execute.mjs";
 import {
   assertLegacyStageAllowlistRegistryRows,
   hashLegacyStageAllowlistRegistryKeys,
@@ -107,6 +112,12 @@ function validBatchRow() {
     legacy_stage_system_identifier: expected.systemIdentifier,
     destructive_go_at: null,
     destructive_go_batch_id: null,
+    pruned_transaction_count: null,
+    pruned_entry_count: null,
+    pruned_transaction_ids_sha256: null,
+    pruned_entry_ids_sha256: null,
+    registry_cleaned_key_count: null,
+    registry_cleaned_keys_sha256: null,
   };
 }
 
@@ -130,7 +141,9 @@ function validProofRow() {
   };
 }
 
-assert.doesNotThrow(() => assertLegacyStageAuditBatchRow(validBatchRow(), plan));
+const validUnprunedBatch = assertLegacyStageAuditBatchRow(validBatchRow(), plan);
+assert.equal(validUnprunedBatch.cleanupState, "authorized-but-unpruned");
+assert.equal(validUnprunedBatch.authorizationState, "no-go");
 assert.doesNotThrow(() => assertLegacyStageAuditProofRow(validProofRow(), plan));
 
 const authorizedBatchRow = validBatchRow();
@@ -140,6 +153,39 @@ assert.doesNotThrow(
   () => assertLegacyStageAuditBatchRow(authorizedBatchRow, plan),
   "audit must accept an exact batch 13 GO while the batch remains unpruned",
 );
+
+const prunedBatchRow = {
+  ...validBatchRow(),
+  destructive_go_at: "2026-08-25T16:08:01.000000Z",
+  destructive_go_batch_id: expected.batchId,
+  pruned_at: "2026-08-25T17:00:01.000000Z",
+  registry_cleaned_at: "2026-08-25T17:00:01.000000Z",
+  pruned_transaction_count: "60",
+  pruned_entry_count: "120",
+  pruned_transaction_ids_sha256: expected.txIdsSha256,
+  pruned_entry_ids_sha256: expected.entryIdsSha256,
+  registry_cleaned_key_count: "60",
+  registry_cleaned_keys_sha256: expected.registryKeysSha256,
+};
+const validPrunedBatch = assertLegacyStageAuditBatchRow(prunedBatchRow, plan);
+assert.equal(validPrunedBatch.cleanupState, "pruned-and-cleaned");
+assert.equal(validPrunedBatch.authorizationState, "exact-batch-13-go");
+assert.deepEqual(assertLegacyStageAuditBatchState(validPrunedBatch), {
+  cleanupState: "pruned-and-cleaned",
+  authorizationState: "exact-batch-13-go",
+  exactGo: true,
+});
+for (const [code, mutate] of [
+  ["cleanup_receipts", (candidate) => { candidate.registry_cleaned_at = null; }],
+  ["destructive_go", (candidate) => { candidate.destructive_go_batch_id = null; }],
+  ["pruned_receipt_pruned_transaction_count", (candidate) => { candidate.pruned_transaction_count = "59"; }],
+  ["pruned_receipt_pruned_entry_ids_sha256", (candidate) => { candidate.pruned_entry_ids_sha256 = "0".repeat(64); }],
+  ["pruned_receipt_pruned_transaction_count", (candidate) => { candidate.pruned_transaction_count = null; }],
+]) {
+  const candidate = structuredClone(prunedBatchRow);
+  mutate(candidate);
+  assert.throws(() => assertLegacyStageAuditBatchRow(candidate, plan), (error) => error.code === code, code);
+}
 
 const batchTamperCases = [
   ["batch_object_path", "object_path", `${expected.objectPath}.tampered`],
@@ -417,7 +463,96 @@ async function runPostgresPrunerOverloadContract() {
   }
 }
 
+async function runPostgresReplaySavepointContract() {
+  const dbUrl = process.env.CHIPS_MIGRATIONS_TEST_DB_URL;
+  if (!dbUrl) {
+    if (process.env.CI === "true") throw new Error("legacy Stage replay savepoint PostgreSQL contract requires CHIPS_MIGRATIONS_TEST_DB_URL in CI");
+    console.log("Skipping legacy Stage replay savepoint PostgreSQL contract: CHIPS_MIGRATIONS_TEST_DB_URL not set.");
+    return;
+  }
+
+  const sql = postgres(dbUrl, { max: 1, prepare: false, idle_timeout: 5 });
+  const tableId = plan.batchTableIds[0];
+  const accountIds = Array.from({ length: 10 }, () => crypto.randomUUID());
+  const replayTransactionId = "00000000-0000-4000-8000-00000000d313";
+  const idempotencyKey = `bot-seed-buyin:${tableId}:replay-savepoint-contract`;
+  let fenceWasActive = false;
+  try {
+    const databaseRows = await sql`select current_database() as name;`;
+    assert.ok(
+      /(?:_test|reset_contract)$/i.test(databaseRows[0]?.name || ""),
+      "legacy replay savepoint contract requires a disposable database",
+    );
+    const existingTable = await sql.unsafe("select id from public.poker_tables where id = $1::uuid;", [tableId]);
+    assert.equal(existingTable.length, 0, "replay savepoint fixture table must be disposable and unused");
+    const existingAccounts = await sql.unsafe(
+      "select id from public.chips_accounts where system_key = any($1::text[]);",
+      [plan.batchTableIds.map((id) => `POKER_TABLE:${id}`)],
+    );
+    assert.equal(existingAccounts.length, 0, "replay savepoint fixture accounts must be disposable and unused");
+    const existingRegistry = await sql.unsafe(
+      "select count(*)::text as count from public.chips_transaction_idempotency where archive_batch_id = 13;",
+    );
+    assert.equal(existingRegistry[0]?.count, "0", "replay savepoint fixture requires no cleaned registry rows");
+
+    const fenceRows = await sql.unsafe("select public.chips_table_fence_is_active() as active;");
+    fenceWasActive = fenceRows[0]?.active === true || fenceRows[0]?.active === "t";
+    await sql.unsafe("select public.chips_set_table_fence_active(true);");
+    await sql.unsafe(`
+      insert into public.poker_tables (id, status, has_human_participant, bot_only_proof_eligible)
+      values ($1::uuid, 'CLOSED', false, false);
+    `, [tableId]);
+    for (let index = 0; index < accountIds.length; index += 1) {
+      await sql.unsafe(`
+        insert into public.chips_accounts (id, account_type, system_key, status, balance, next_entry_seq)
+        values ($1::uuid, 'ESCROW', $2, 'active', 0, 7);
+      `, [accountIds[index], `POKER_TABLE:${plan.batchTableIds[index]}`]);
+    }
+
+    const accountRows = await sql.unsafe(`
+      select id::text as id
+      from public.chips_accounts where id = any($1::uuid[]);
+    `, [accountIds]);
+    assert.equal(accountRows.length, accountIds.length, "replay savepoint fixture accounts must be complete");
+    const before = await sql.begin(async (tx) => collectExecutionSnapshot(tx, plan, accountIds, "pruned"));
+    const replayPair = {
+      idempotencyKey,
+      tableId,
+      transactionId: crypto.randomUUID(),
+    };
+    const evidence = {
+      registryKeys: [idempotencyKey],
+      legacyTableIds: [tableId],
+      transactionIds: [replayPair.transactionId],
+      replayPair,
+    };
+    const result = await replayOldRegistryKey(sql, evidence, before, replayPair, plan);
+    assert.deepEqual(result, { rejected: true, sqlstate: "P8903" });
+
+    const usable = await sql`select 1 as usable;`;
+    assert.equal(usable[0]?.usable, 1, "the postgres client must remain usable after replay rollback");
+    const replayRows = await sql.unsafe(
+      "select count(*)::text as count from public.chips_transactions where id = $1::uuid;",
+      [replayTransactionId],
+    );
+    assert.equal(replayRows[0]?.count, "0", "replay savepoint rollback must leave no transaction row");
+    const replayRegistryRows = await sql.unsafe(
+      "select count(*)::text as count from public.chips_transaction_idempotency where idempotency_key = $1;",
+      [idempotencyKey],
+    );
+    assert.equal(replayRegistryRows[0]?.count, "0", "replay savepoint rollback must leave no registry row");
+  } finally {
+    await sql.unsafe("delete from public.chips_transaction_idempotency where idempotency_key = $1;", [idempotencyKey]);
+    await sql.unsafe("delete from public.chips_transactions where id = $1::uuid;", [replayTransactionId]);
+    await sql.unsafe("delete from public.chips_accounts where id = any($1::uuid[]);", [accountIds]);
+    await sql.unsafe("delete from public.poker_tables where id = $1::uuid;", [tableId]);
+    await sql.unsafe("select public.chips_set_table_fence_active($1::boolean);", [fenceWasActive]);
+    await sql.end({ timeout: 5 });
+  }
+}
+
 await runPostgresPrunerOverloadContract();
+await runPostgresReplaySavepointContract();
 
 assert.equal(assertReadOnlyStorageRequest(), "GET");
 for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
@@ -432,6 +567,7 @@ assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.batch, /batch_id = \$1/);
 assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.entries, /transaction_id = any\(\$1::uuid\[\]\)/);
 assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, /table_id = any\(\$1::uuid\[\]\)/);
 assert.doesNotMatch(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, /or transaction_id = any/);
+assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.prunedHotRows, /archive_batch_id = 13/);
 
 const auditSource = fs.readFileSync("scripts/ops/chips-ledger-legacy-stage-allowlist-audit.mjs", "utf8");
 assert.match(auditSource, /row\.archive_batch_id !== null/);
@@ -441,6 +577,8 @@ assert.doesNotMatch(auditSource, /method:\s*["'](?:POST|PUT|PATCH|DELETE)["']/i)
 assert.match(auditSource, /set local statement_timeout/);
 assert.match(auditSource, /Promise\.race/);
 assert.match(auditSource, new RegExp(`version: "${LEGACY_STAGE_ALLOWLIST_AUDIT_MIGRATION.version}"`));
+const executeSource = fs.readFileSync("scripts/ops/chips-ledger-legacy-stage-allowlist-execute.mjs", "utf8");
+assert.match(executeSource, /set constraints all immediate/);
 
 await assert.rejects(
   () => runLegacyStageAllowlistAudit({ argv: ["--batch-id", "14"] }),
