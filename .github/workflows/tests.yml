@@ -87,6 +87,9 @@ jobs:
       - name: Apply migrations and run migration contracts
         run: node tests/chips/chips.migration.test.mjs
 
+      - name: Run PostgreSQL legacy Stage allowlist audit contracts
+        run: node tests/chips/chips-ledger-legacy-stage-allowlist-audit.test.mjs
+
       - name: Run PostgreSQL bot-only retention contracts
         run: node tests/chips/chips-ledger-bot-only-retention.test.mjs
 

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import postgres from "postgres";
 
 import {
   LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13,
@@ -314,6 +315,50 @@ assert.throws(
   }),
   (error) => error.code === "pruner_overload",
 );
+
+async function runPostgresPrunerOverloadContract() {
+  const dbUrl = process.env.CHIPS_MIGRATIONS_TEST_DB_URL;
+  if (!dbUrl) {
+    console.log("Skipping legacy Stage allowlist PostgreSQL overload contract: CHIPS_MIGRATIONS_TEST_DB_URL not set.");
+    return;
+  }
+
+  const sql = postgres(dbUrl, { max: 1, prepare: false, idle_timeout: 5 });
+  try {
+    const databaseRows = await sql`select current_database() as name;`;
+    assert.ok(
+      /(?:_test|reset_contract)$/i.test(databaseRows[0]?.name || ""),
+      "legacy Stage allowlist overload contract requires a disposable database",
+    );
+
+    const [row] = await sql.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.overloads);
+    const overloads = assertPrunerOverloads(row);
+    assert.equal(overloads.overloadCount, 1);
+    assert.equal(overloads.legacyOid, null);
+
+    const [actual] = await sql.unsafe(`
+      select
+        p.oid::text as actual_oid,
+        pg_catalog.to_regprocedure($1)::oid::text as resolved_oid,
+        pg_catalog.pg_get_function_identity_arguments(p.oid) as identity_args
+        from pg_catalog.pg_proc p
+        join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public'
+         and p.oid = pg_catalog.to_regprocedure($1)::oid;
+    `, [LEGACY_STAGE_ALLOWLIST_AUDIT_PRUNER_SIGNATURE]);
+    assert.equal(actual?.actual_oid, row.expected_oid, "catalog OID must match to_regprocedure OID");
+    assert.equal(actual?.resolved_oid, row.expected_oid, "to_regprocedure must return the numeric OID text");
+    assert.equal(
+      actual?.identity_args,
+      "p_object_path text, p_transaction_ids uuid[], p_entry_ids bigint[], p_batch_table_ids uuid[], p_allowlist_sha256 text, p_batch_table_ids_sha256 text, p_registry_keys text[], p_execute boolean, p_approved_batch_id bigint",
+      "PostgreSQL identity arguments must retain the named-parameter format",
+    );
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
+
+await runPostgresPrunerOverloadContract();
 
 assert.equal(assertReadOnlyStorageRequest(), "GET");
 for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {

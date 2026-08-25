@@ -97,8 +97,8 @@ export const LEGACY_STAGE_ALLOWLIST_AUDIT_SQL = Object.freeze({
     (select sha256 from supabase_migrations.schema_migration_files where version = $1 limit 1) as sha256;`,
   overloads: `with expected as (
     select
-      pg_catalog.to_regprocedure('${LEGACY_STAGE_ALLOWLIST_AUDIT_PRUNER_SIGNATURE}') as expected_oid,
-      pg_catalog.to_regprocedure('${LEGACY_STAGE_ALLOWLIST_AUDIT_OLD_PRUNER_SIGNATURE}') as legacy_oid
+      pg_catalog.to_regprocedure('${LEGACY_STAGE_ALLOWLIST_AUDIT_PRUNER_SIGNATURE}')::oid::text as expected_oid,
+      pg_catalog.to_regprocedure('${LEGACY_STAGE_ALLOWLIST_AUDIT_OLD_PRUNER_SIGNATURE}')::oid::text as legacy_oid
   ), observed as (
     select p.oid, pg_catalog.pg_get_function_identity_arguments(p.oid) as identity_args
       from pg_catalog.pg_proc p
@@ -109,8 +109,8 @@ export const LEGACY_STAGE_ALLOWLIST_AUDIT_SQL = Object.freeze({
   select expected.expected_oid::text as expected_oid,
     expected.legacy_oid::text as legacy_oid,
     count(observed.oid)::text as overload_count,
-    count(observed.oid) filter (where observed.oid = expected.expected_oid)::text as expected_count,
-    count(observed.oid) filter (where observed.oid = expected.legacy_oid)::text as legacy_count,
+    count(observed.oid) filter (where observed.oid::text = expected.expected_oid)::text as expected_count,
+    count(observed.oid) filter (where observed.oid::text = expected.legacy_oid)::text as legacy_count,
     coalesce(pg_catalog.jsonb_agg(
       pg_catalog.jsonb_build_object(
         'oid', observed.oid::text,
