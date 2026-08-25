@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 
 const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-automation.yml", "utf8");
@@ -129,6 +130,10 @@ assert.match(executeRun, /complete pruned batch is missing exact batch 13 GO/);
 assert.match(executeRun, /complete pruned batch still has registry rows/);
 assert.match(executeRun, /node scripts\/ops\/chips-ledger-legacy-stage-allowlist-execute\.mjs/);
 assert.match(executeRun, /--recovery-dir "\$recovery_dir"/);
+assert.match(executeRun, /mkdir -m 0700 -- "\$recovery_dir"/);
+assert.match(executeRun, /test "\$\(stat -c '%a' "\$recovery_dir"\)" = "700"/);
+assert.doesNotMatch(executeRun, /mkdir -p "\$recovery_dir"/);
+assert.doesNotMatch(executeRun, /\bchmod\b/);
 assert.doesNotMatch(executeRun, /github\.event\.inputs|inputs\.(?!mode)[a-zA-Z0-9_-]+/);
 assert.doesNotMatch(executeRun, /SUPABASE_PROD_|PRODUCTION|--target\s+prod/i);
 assert.doesNotMatch(executeRun, /CHIPS_LEDGER_BOT_ONLY_EXECUTE/);
@@ -172,5 +177,42 @@ assert.match(executeRunner, /POKER_TABLE:/);
 assert.match(executeRunner, /set transaction isolation level repeatable read, read only/);
 assert.match(executeRunner, /set transaction isolation level repeatable read;/);
 assert.match(executeRunner, /EXECUTE_BATCH_13/);
+
+const recoveryModeRegression = spawnSync(
+  "bash",
+  ["-c", String.raw`
+set -eu
+umask 0022
+test "$(umask)" = "0022"
+root="$(mktemp -d)"
+trap 'rm -rf -- "$root"' EXIT
+good="$root/good"
+bad="$root/bad"
+mkdir -m 0700 -- "$good"
+test "$(stat -c '%a' "$good")" = "700"
+mkdir -m 0755 -- "$bad"
+test "$(stat -c '%a' "$bad")" = "755"
+GOOD_DIR="$good" BAD_DIR="$bad" node --input-type=module <<'NODE'
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import { ensurePrivateDirectory } from "./scripts/ops/_shared/chips-ledger-archive-files.mjs";
+
+const mode = (directory) => fs.statSync(directory).mode & 0o777;
+assert.equal(mode(process.env.GOOD_DIR), 0o700);
+assert.equal(ensurePrivateDirectory(process.env.GOOD_DIR), process.env.GOOD_DIR);
+assert.equal(mode(process.env.BAD_DIR), 0o755);
+assert.throws(
+  () => ensurePrivateDirectory(process.env.BAD_DIR),
+  /recovery directory permissions must be 0700/,
+);
+NODE
+`],
+  { cwd: process.cwd(), encoding: "utf8" },
+);
+assert.equal(
+  recoveryModeRegression.status,
+  0,
+  `recovery mode regression failed:\n${recoveryModeRegression.stderr || recoveryModeRegression.stdout}`,
+);
 
 process.stdout.write("chips-ledger-stage-automation workflow guard passed\n");

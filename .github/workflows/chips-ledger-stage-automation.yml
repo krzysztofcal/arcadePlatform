@@ -325,7 +325,8 @@ jobs:
 
           recovery_dir="${RUNNER_TEMP}/chips-ledger-legacy-stage-allowlist-execute-${GITHUB_RUN_ID}"
           test ! -e "$recovery_dir"
-          mkdir -p "$recovery_dir"
+          mkdir -m 0700 -- "$recovery_dir"
+          test "$(stat -c '%a' "$recovery_dir")" = "700"
           node scripts/ops/chips-ledger-legacy-stage-allowlist-execute.mjs \
             --batch-id 13 \
             --object-path v1/sha256/a7ff21fef10b1d22b963793d3cf6efd667319a7211ee47c7e6f755f293155e60.jsonl.gz \
