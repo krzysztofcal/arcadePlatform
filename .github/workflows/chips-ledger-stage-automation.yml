@@ -222,10 +222,11 @@ jobs:
               })) {
                 if (text(batch[field]) !== expected) fail(`${field} mismatch`);
               }
-              if (!batch.committed_at || !batch.archive_proof_verified_at
-                || batch.destructive_go_at !== null
-                || batch.destructive_go_batch_id !== null) {
-                fail("batch 13 already has a GO; a new exact authorization is required");
+              const noGo = batch.destructive_go_at === null && batch.destructive_go_batch_id === null;
+              const exactGo = batch.destructive_go_at !== null
+                && text(batch.destructive_go_batch_id) === EXPECTED.batchId;
+              if (!batch.committed_at || !batch.archive_proof_verified_at || (!noGo && !exactGo)) {
+                fail("batch 13 GO is partial or not bound to the exact batch");
               }
               if (batch.pruned_at !== null || batch.registry_cleaned_at !== null) fail("batch was already executed");
 

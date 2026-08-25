@@ -1294,10 +1294,12 @@ async function assertLegacyAllowlistCleanupContracts(sql) {
 
     const balancesBefore = await tx.unsafe(`select id, balance, next_entry_seq
       from public.chips_accounts where id = $1::uuid or system_key = 'GENESIS' order by id;`, [escrowId]);
+    const scopedAccountIds = balancesBefore.map((row) => row.id);
     const economicsBefore = await tx.unsafe(`select
-      coalesce((select sum(balance) from public.chips_accounts), 0)::text as balance_total,
-      coalesce((select sum(next_entry_seq) from public.chips_accounts), 0)::text as next_entry_seq_total,
-      coalesce((select sum(amount) from public.chips_entries), 0)::text as conservation;`);
+      coalesce((select sum(balance) from public.chips_accounts where id = any($1::uuid[])), 0)::text as balance_total,
+      coalesce((select sum(next_entry_seq) from public.chips_accounts where id = any($1::uuid[])), 0)::text as next_entry_seq_total,
+      coalesce((select sum(amount) from public.chips_entries where transaction_id = any($2::uuid[])), 0)::text as conservation;`,
+      [scopedAccountIds, transactionIds]);
     await tx.unsafe("select public.chips_set_table_fence_active(false);");
     await expectSavepointError(tx, "legacy_fence_off", () => pruneStore.cleanupLegacyStageAllowlist(
       objectPath, evidence, true, batchId,
@@ -1362,15 +1364,79 @@ async function assertLegacyAllowlistCleanupContracts(sql) {
       from public.chips_accounts where id = $1::uuid or system_key = 'GENESIS' order by id;`, [escrowId]);
     assert.deepEqual(balancesAfter, balancesBefore, "legacy cleanup must not change balances or next_entry_seq");
     const economicsAfter = await tx.unsafe(`select
-      coalesce((select sum(balance) from public.chips_accounts), 0)::text as balance_total,
-      coalesce((select sum(next_entry_seq) from public.chips_accounts), 0)::text as next_entry_seq_total,
-      coalesce((select sum(amount) from public.chips_entries), 0)::text as conservation;`);
+      coalesce((select sum(balance) from public.chips_accounts where id = any($1::uuid[])), 0)::text as balance_total,
+      coalesce((select sum(next_entry_seq) from public.chips_accounts where id = any($1::uuid[])), 0)::text as next_entry_seq_total,
+      coalesce((select sum(amount) from public.chips_entries where transaction_id = any($2::uuid[])), 0)::text as conservation;`,
+      [scopedAccountIds, transactionIds]);
     assert.deepEqual(economicsAfter, economicsBefore, "legacy cleanup must preserve economic snapshot");
 
     throw ROLLBACK;
   }).catch((error) => {
     if (error !== ROLLBACK) throw error;
   });
+}
+
+async function assertScopedSnapshotIgnoresParallelUnrelatedActivity(sql) {
+  const snapshotSql = postgres(dbUrl, { max: 1 });
+  const activitySql = postgres(dbUrl, { max: 1 });
+  let scopedAccountId = null;
+  let unrelatedAccountId = null;
+  try {
+    const accountRows = await sql`
+      insert into public.chips_accounts (account_type, status, balance, next_entry_seq)
+      values ('ESCROW', 'active', 100, 7), ('ESCROW', 'active', 200, 11)
+      returning id::text as id;
+    `;
+    [scopedAccountId, unrelatedAccountId] = accountRows.map((row) => row.id);
+    const scopedIds = [scopedAccountId];
+    const result = await snapshotSql.begin(async (tx) => {
+      await tx.unsafe("set transaction isolation level repeatable read, read only;");
+      const before = await tx.unsafe(`
+        select id::text as id, balance::text as balance, next_entry_seq::text as next_entry_seq
+        from public.chips_accounts
+        where id = any($1::uuid[])
+        order by id;
+      `, [scopedIds]);
+      const beforeConservation = await tx.unsafe(`
+        select coalesce(sum(amount), 0)::text as entry_sum
+        from public.chips_entries
+        where account_id = any($1::uuid[]);
+      `, [scopedIds]);
+      await activitySql`
+        update public.chips_accounts
+        set balance = balance + 1, next_entry_seq = next_entry_seq + 1
+        where id = ${unrelatedAccountId}::uuid;
+      `;
+      const after = await tx.unsafe(`
+        select id::text as id, balance::text as balance, next_entry_seq::text as next_entry_seq
+        from public.chips_accounts
+        where id = any($1::uuid[])
+        order by id;
+      `, [scopedIds]);
+      const afterConservation = await tx.unsafe(`
+        select coalesce(sum(amount), 0)::text as entry_sum
+        from public.chips_entries
+        where account_id = any($1::uuid[]);
+      `, [scopedIds]);
+      return { before, after, beforeConservation, afterConservation };
+    });
+    assert.deepEqual(result.after, result.before, "unrelated account activity must not change scoped account snapshots");
+    assert.deepEqual(result.afterConservation, result.beforeConservation, "unrelated activity must not change scoped conservation");
+    const unrelated = await sql`
+      select balance::text as balance, next_entry_seq::text as next_entry_seq
+      from public.chips_accounts where id = ${unrelatedAccountId}::uuid;
+    `;
+    assert.deepEqual(unrelated[0], { balance: "201", next_entry_seq: "12" });
+  } finally {
+    if (scopedAccountId && unrelatedAccountId) {
+      await sql`
+        delete from public.chips_accounts
+        where id in (${scopedAccountId}::uuid, ${unrelatedAccountId}::uuid);
+      `;
+    }
+    await snapshotSql.end({ timeout: 5 });
+    await activitySql.end({ timeout: 5 });
+  }
 }
 
 async function assertBuyInSequencing(sql, expectedTreasurySeq) {
@@ -1470,6 +1536,7 @@ async function main() {
   await ensureGenesisFixture(sql);
   await assertArchivePrunerRoleContracts(sql);
   await assertLegacyAllowlistCleanupContracts(sql);
+  await assertScopedSnapshotIgnoresParallelUnrelatedActivity(sql);
   await expectNegativeBalanceGuard(sql);
   await expectInsufficientBuyIn(sql);
   await expectInvalidMetadata(sql);

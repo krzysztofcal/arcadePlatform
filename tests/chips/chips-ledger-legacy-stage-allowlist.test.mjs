@@ -745,7 +745,13 @@ try {
     legacyAllowlistSha256: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.masterAllowlistSha256,
     legacyBatchTableIdsSha256: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.batchTableIdsSha256,
   };
+  const replayPair = {
+    idempotencyKey: executeEvidence.registryKeys[17],
+    tableId: plan.batchTableIds[4],
+    transactionId: executeEvidence.transactionIds[17],
+  };
   const beforeExecuteSnapshot = {
+    accountIds: [tableId(0xe001), tableId(0xe002)],
     transactionCount: 60,
     entryCount: 120,
     registryCount: 60,
@@ -773,6 +779,10 @@ try {
         fenceActive: true,
         enforcementActive: true,
         readOnly: true,
+        destructiveGoAt: null,
+        destructiveGoBatchId: null,
+        replayPair,
+        replayTransactionIdCollision: false,
       };
     },
     verifyBucket: async () => {},
@@ -827,10 +837,11 @@ try {
         },
       };
     },
-    replayOldRegistryKey: async (_sql, evidence, before) => {
+    replayOldRegistryKey: async (_sql, evidence, before, pair) => {
       lifecycle.push("replay");
       assert.equal(evidence, executeEvidence);
       assert.equal(before, beforeExecuteSnapshot);
+      assert.deepEqual(pair, replayPair);
       return { rejected: true, sqlstate: "P8903" };
     },
   };
@@ -854,6 +865,33 @@ try {
     "execution runner must fail closed before entering the pruner when the TABLE fence is inactive",
   );
   assert.equal(validRunnerContract.adapters.executeCleanupCalls, 0);
+  for (const invalidGo of [
+    { destructiveGoAt: "2026-08-25T00:00:00.000000Z", destructiveGoBatchId: null },
+    { destructiveGoAt: "2026-08-25T00:00:00.000000Z", destructiveGoBatchId: "12" },
+  ]) {
+    await assert.rejects(
+      () => runLegacyStageAllowlistExecute({
+        argv: executeArgs,
+        env: executeEnv,
+        cwd: process.cwd(),
+        deps: {
+          ...executeDeps,
+          preflight: async () => ({
+            projectRef: "krydukthwdvccggbyjfw",
+            systemIdentifier: "7656985631720456337",
+            fenceActive: true,
+            enforcementActive: true,
+            readOnly: true,
+            ...invalidGo,
+            replayPair,
+            replayTransactionIdCollision: false,
+          }),
+        },
+      }),
+      /partial or not bound to batch 13/i,
+      "partial or foreign GO must fail closed before authorization",
+    );
+  }
   const firstExecute = await runLegacyStageAllowlistExecute({
     argv: executeArgs,
     env: executeEnv,
@@ -885,6 +923,118 @@ try {
   assert.deepEqual(lifecycle, [
     "preflight", "authorize", "snapshot", "prune", "post-verify", "prune", "snapshot", "replay",
   ]);
+
+  const resumeBefore = {
+    ...beforeExecuteSnapshot,
+    unrelatedAccount: { balance: "700", nextEntrySeq: "9" },
+  };
+  const resumeAfter = {
+    ...afterExecuteSnapshot,
+    unrelatedAccount: { balance: "701", nextEntrySeq: "10" },
+  };
+  const goState = { destructiveGoAt: null, destructiveGoBatchId: null };
+  let resumeAuthorizeCalls = 0;
+  let resumePruneCalls = 0;
+  let resumeSnapshotCalls = 0;
+  const resumeDeps = {
+    storageTarget: runnerStorageTarget,
+    preflight: async () => ({
+      projectRef: "krydukthwdvccggbyjfw",
+      systemIdentifier: "7656985631720456337",
+      fenceActive: true,
+      enforcementActive: true,
+      readOnly: true,
+      ...goState,
+      replayPair,
+      replayTransactionIdCollision: false,
+    }),
+    authorize: async () => {
+      resumeAuthorizeCalls += 1;
+      goState.destructiveGoAt = "2026-08-25T00:02:00.000000Z";
+      goState.destructiveGoBatchId = "13";
+      return {
+        result: { state: "authorized", batch_id: "13" },
+        destructiveGoAt: goState.destructiveGoAt,
+        destructiveGoBatchId: goState.destructiveGoBatchId,
+      };
+    },
+    readExecutionSnapshot: async () => {
+      resumeSnapshotCalls += 1;
+      return resumeSnapshotCalls <= 2 ? resumeBefore : resumeAfter;
+    },
+    pruneArchive: async () => {
+      resumePruneCalls += 1;
+      if (resumePruneCalls === 1) throw new Error("simulated crash after authorization");
+      return {
+        state: resumePruneCalls === 2 ? "pruned" : "already_pruned",
+        mode: "execute",
+        evidence: executeEvidence,
+        recoveryBundle: { artifactPath: executeRecoveryDir, manifestPath: `${executeRecoveryDir}/manifest.json` },
+      };
+    },
+    verifyPostExecute: async () => ({
+      state: "verified",
+      snapshot: resumeAfter,
+      receipt: { remainingRegistryCount: 0 },
+    }),
+    replayOldRegistryKey: async (_sql, evidence, before, pair) => {
+      assert.equal(evidence, executeEvidence);
+      assert.equal(before, resumeBefore);
+      assert.deepEqual(pair, replayPair);
+      return { rejected: true, sqlstate: "P8903" };
+    },
+  };
+  await assert.rejects(
+    () => runLegacyStageAllowlistExecute({ argv: executeArgs, env: executeEnv, cwd: process.cwd(), deps: resumeDeps }),
+    /simulated crash after authorization/,
+    "a failure after authorization must leave an exact durable GO for resume",
+  );
+  assert.equal(resumeAuthorizeCalls, 1);
+  assert.deepEqual(goState, {
+    destructiveGoAt: "2026-08-25T00:02:00.000000Z",
+    destructiveGoBatchId: "13",
+  });
+  const resumedExecute = await runLegacyStageAllowlistExecute({
+    argv: executeArgs,
+    env: executeEnv,
+    cwd: process.cwd(),
+    deps: resumeDeps,
+  });
+  assert.equal(resumedExecute.authorization.resumed, true, "resume must reuse the exact existing GO");
+  assert.equal(resumeAuthorizeCalls, 1, "resume must not authorize a second time");
+  assert.equal(resumePruneCalls, 3, "resumed execute must perform one prune and one retry");
+  assert.equal(resumedExecute.replay.sqlstate, "P8903");
+  assert.equal(resumeAfter.unrelatedAccount.balance, "701", "unrelated activity fixture must differ");
+
+  let collisionPruneCalls = 0;
+  await assert.rejects(
+    () => runLegacyStageAllowlistExecute({
+      argv: executeArgs,
+      env: executeEnv,
+      cwd: process.cwd(),
+      deps: {
+        ...resumeDeps,
+        preflight: async () => ({
+          projectRef: "krydukthwdvccggbyjfw",
+          systemIdentifier: "7656985631720456337",
+          fenceActive: true,
+          enforcementActive: true,
+          readOnly: true,
+          destructiveGoAt: null,
+          destructiveGoBatchId: null,
+          replayPair,
+          replayTransactionIdCollision: true,
+        }),
+        pruneArchive: async () => {
+          collisionPruneCalls += 1;
+          return { state: "pruned", evidence: executeEvidence };
+        },
+      },
+    }),
+    /replay transaction ID collision/i,
+    "a deterministic replay transaction ID collision must fail before cleanup",
+  );
+  assert.equal(collisionPruneCalls, 0, "replay ID collision must not enter the pruner");
 } finally {
   fs.rmSync(executeRoot, { recursive: true, force: true });
 }
