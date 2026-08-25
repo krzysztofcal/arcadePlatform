@@ -748,36 +748,34 @@ export async function replayOldRegistryKey(sql, evidence, before, replayPair, pl
       fail("replay transaction ID collision");
     }
     const beforeReplay = await collectExecutionSnapshot(tx, plan, before.accountIds, "pruned");
-    await tx.unsafe("savepoint legacy_stage_batch_13_replay;");
     let rejection = null;
     try {
-      await tx.unsafe(`
-        insert into public.chips_transactions (
-          id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at
-        ) values ($1::uuid, $2, $3::jsonb, $4, $5, 'TABLE_BUY_IN', null, $6::timestamptz);
-      `, [
-        REPLAY_TRANSACTION_ID,
-        `table:${pair.tableId}`,
-        { tableId: pair.tableId },
-        pair.idempotencyKey,
-        "f".repeat(64),
-        "2026-08-17T00:00:00.000003Z",
-      ]);
-      // The table binding is a deferred constraint trigger in the deployed schema.
-      // Flush it inside the savepoint so the expected P8903 reaches this catch.
-      await tx.unsafe("set constraints all immediate;");
+      await tx.savepoint("legacy_stage_batch_13_replay", async (replayTx) => {
+        await replayTx.unsafe(`
+          insert into public.chips_transactions (
+            id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at
+          ) values ($1::uuid, $2, $3::jsonb, $4, $5, 'TABLE_BUY_IN', null, $6::timestamptz);
+        `, [
+          REPLAY_TRANSACTION_ID,
+          `table:${pair.tableId}`,
+          { tableId: pair.tableId },
+          pair.idempotencyKey,
+          "f".repeat(64),
+          "2026-08-17T00:00:00.000003Z",
+        ]);
+        // Flush any deferred trigger in the same nested scope so an expected
+        // P8903 cannot escape the local savepoint catch at transaction commit.
+        await replayTx.unsafe("set constraints all immediate;");
+      });
     } catch (error) {
       rejection = error;
-      await tx.unsafe("rollback to savepoint legacy_stage_batch_13_replay;");
     }
     if (!rejection) {
-      await tx.unsafe("rollback to savepoint legacy_stage_batch_13_replay;");
       fail("legacy registry key replay was accepted");
     }
     if (rejection.code !== "P8903") {
       fail(`legacy registry key replay returned unexpected SQLSTATE ${rejection.code || "unknown"}`);
     }
-    await tx.unsafe("release savepoint legacy_stage_batch_13_replay;");
     const afterReplay = await collectExecutionSnapshot(tx, plan, beforeReplay.accountIds, "pruned");
     assertEconomicSnapshotUnchanged(beforeReplay, afterReplay, "legacy replay");
     if (afterReplay.transactionCount !== 0 || afterReplay.entryCount !== 0 || afterReplay.registryCount !== 0) {
