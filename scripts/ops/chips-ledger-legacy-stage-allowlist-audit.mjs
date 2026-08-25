@@ -25,7 +25,11 @@ import {
   verifyArchiveBucket,
   verifyArchiveBytes,
 } from "./chips-ledger-archive-store.mjs";
-import { buildPruneEvidence, buildRecoveryManifest } from "./chips-ledger-archive-prune.mjs";
+import {
+  buildPruneEvidence,
+  buildRecoveryManifest,
+  computeArchiveIdProofs,
+} from "./chips-ledger-archive-prune.mjs";
 import { buildLegacyPlan, loadFrozenLegacyAllowlist } from "./chips-ledger-legacy-stage-allowlist.mjs";
 import {
   STAGE_PROJECT_REF,
@@ -136,15 +140,49 @@ export const LEGACY_STAGE_ALLOWLIST_AUDIT_SQL = Object.freeze({
   from public.chips_entries
   where transaction_id = any($1::uuid[]) order by id;`,
   registry: `select
-    idempotency_key, transaction_id::text as transaction_id, payload_hash, tx_type::text as tx_type,
+    idempotency_key, transaction_id::text as transaction_id, table_id::text as table_id,
+    payload_hash, tx_type::text as tx_type,
     user_id::text as user_id, transaction_created_at::text as transaction_created_at,
     archive_batch_id::text as archive_batch_id
   from public.chips_transaction_idempotency
-  where transaction_id = any($1::uuid[]) or idempotency_key = any($2::text[])
+  where (table_id = any($3::uuid[])
+         and tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT'))
+     or transaction_id = any($1::uuid[])
+     or idempotency_key = any($2::text[])
   order by idempotency_key;`,
+  entryShapes: `with selected as materialized (
+    select transactions.*
+      from public.chips_transactions transactions
+     where transactions.id = any($1::uuid[])
+  ), registry as materialized (
+    select registry.*
+      from public.chips_transaction_idempotency registry
+     where registry.transaction_id = any($1::uuid[])
+  )
+  select selected.id::text as transaction_id,
+    selected.tx_type::text as tx_type, selected.user_id::text as user_id,
+    registry.table_id::text as table_id,
+    count(entries.id)::text as entry_count,
+    count(*) filter (where accounts.account_type::text = 'USER')::text as user_entry_count,
+    count(*) filter (where accounts.account_type::text = 'SYSTEM')::text as system_entry_count,
+    count(*) filter (where accounts.account_type::text = 'ESCROW')::text as escrow_entry_count,
+    count(*) filter (where accounts.account_type::text = 'ESCROW'
+                     and accounts.system_key = 'POKER_TABLE:' || registry.table_id::text)::text as matching_escrow_count,
+    count(*) filter (where accounts.status::text = 'active')::text as active_entry_count,
+    coalesce(sum(entries.amount), 0)::text as net_amount,
+    coalesce(sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM'), 0)::text as system_amount,
+    coalesce(sum(entries.amount) filter (where accounts.account_type::text = 'ESCROW'), 0)::text as escrow_amount
+    from selected
+    join registry on registry.transaction_id = selected.id
+    left join public.chips_entries entries on entries.transaction_id = selected.id
+    left join public.chips_accounts accounts on accounts.id = entries.account_id
+   group by selected.id, selected.tx_type, selected.user_id, registry.table_id
+   order by selected.id;`,
   tables: `select
     tables.id::text as table_id, upper(tables.status) as status, tables.has_human_participant,
-    accounts.id::text as escrow_account_id, accounts.status::text as escrow_status,
+    tables.bot_only_proof_eligible,
+    accounts.id::text as escrow_account_id, accounts.account_type::text as escrow_account_type,
+    accounts.system_key as escrow_system_key, accounts.status::text as escrow_status,
     accounts.balance::text as escrow_balance, accounts.next_entry_seq::text as escrow_next_entry_seq
   from public.poker_tables tables
   left join public.chips_accounts accounts
@@ -209,6 +247,18 @@ function numberValue(value, code) {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed)) fail(code);
   return parsed;
+}
+
+function integerValue(value, code) {
+  const normalized = text(value);
+  if (!/^-?[0-9]+$/.test(normalized)) fail(code);
+  try { return BigInt(normalized); } catch { fail(code); }
+}
+
+function countValue(value, code) {
+  const parsed = integerValue(value, code);
+  if (parsed < 0n || parsed > BigInt(Number.MAX_SAFE_INTEGER)) fail(code);
+  return Number(parsed);
 }
 
 function parseJsonb(value, code) {
@@ -398,7 +448,11 @@ function assertNoSecondBatch(row) {
   if (numberValue(row.target_batch_count, "duplicate_query") !== 1) fail("duplicate_batch_id");
 }
 
-function assertExactTransactionRows(rows, records) {
+function archiveProofsInArchiveOrder(records) {
+  return computeArchiveIdProofs(records, { maxBatchSize: maxBatchSizeForTarget("stage") });
+}
+
+export function assertExactTransactionRows(rows, records) {
   if (rows.length !== records.length) fail("transaction_rows_count");
   const expected = new Map(records.map((record) => [text(record.transaction.id).toLowerCase(), record.transaction]));
   for (const row of rows) {
@@ -410,10 +464,10 @@ function assertExactTransactionRows(rows, records) {
     if (!sameJson(row.metadata, transaction.metadata)) fail("transaction_metadata");
     if (!sameTimestamp(row.created_at, transaction.created_at)) fail("transaction_created_at");
   }
-  return hashCanonicalLines([...expected.keys()].sort());
+  return archiveProofsInArchiveOrder(records).transactionIdsSha256;
 }
 
-function assertExactEntryRows(rows, records) {
+export function assertExactEntryRows(rows, records) {
   const expected = new Map(records.flatMap((record) => record.entries).map((entry) => [text(entry.id), entry]));
   if (rows.length !== expected.size) fail("entry_rows_count");
   for (const row of rows) {
@@ -425,15 +479,27 @@ function assertExactEntryRows(rows, records) {
     if (!sameJson(row.metadata, entry.metadata)) fail("entry_metadata");
     if (!sameTimestamp(row.created_at, entry.created_at)) fail("entry_created_at");
   }
-  return hashCanonicalLines([...expected.keys()].sort((left, right) => BigInt(left) < BigInt(right) ? -1 : 1));
+  return archiveProofsInArchiveOrder(records).entryIdsSha256;
 }
 
-function assertExactRegistryRows(rows, records) {
-  const expected = new Map(records.map((record) => [record.transaction.idempotency_key, record.transaction]));
+export function assertExactRegistryRows(rows, records, batchIds) {
+  const expected = new Map(records.map((record) => [record.transaction.idempotency_key, {
+    transaction: record.transaction,
+    tableId: text(record.table_context?.table_id).toLowerCase(),
+  }]));
+  const expectedTableIds = new Set([...expected.values()].map((value) => value.tableId));
+  const allowedTableIds = new Set((batchIds || []).map((value) => text(value).toLowerCase()));
+  if (expectedTableIds.size !== allowedTableIds.size || [...expectedTableIds].some((id) => !allowedTableIds.has(id))) {
+    fail("registry_table_id_set");
+  }
   if (rows.length !== expected.size) fail("registry_rows_count");
   for (const row of rows) {
-    const transaction = expected.get(row.idempotency_key);
-    if (!transaction) fail("registry_key_set");
+    const expectedRow = expected.get(row.idempotency_key);
+    if (!expectedRow) fail("registry_key_set");
+    const transaction = expectedRow.transaction;
+    const tableId = text(row.table_id).toLowerCase();
+    if (!allowedTableIds.has(tableId)) fail("registry_table_id_set");
+    if (tableId !== expectedRow.tableId) fail("registry_table_id");
     if (text(row.transaction_id).toLowerCase() !== text(transaction.id).toLowerCase()) fail("registry_transaction_id");
     if (row.payload_hash !== transaction.payload_hash) fail("registry_payload_hash");
     if (row.tx_type !== transaction.tx_type) fail("registry_tx_type");
@@ -444,15 +510,53 @@ function assertExactRegistryRows(rows, records) {
   return hashCanonicalLines([...expected.keys()].sort());
 }
 
-function assertTableRows(rows, batchIds) {
+export function assertEntryShapeRows(rows, records) {
+  if (rows.length !== records.length) fail("entry_shape_rows_count");
+  const expected = new Map(records.map((record) => [
+    text(record.transaction.id).toLowerCase(), record,
+  ]));
+  for (const row of rows) {
+    const record = expected.get(text(row.transaction_id).toLowerCase());
+    if (!record) fail("entry_shape_transaction_id");
+    const transaction = record.transaction;
+    const tableId = text(record.table_context?.table_id).toLowerCase();
+    if (text(row.tx_type) !== text(transaction.tx_type)
+      || row.user_id !== null
+      || text(row.table_id).toLowerCase() !== tableId) {
+      fail("entry_shape_identity");
+    }
+    if (countValue(row.entry_count, "entry_shape_entry_count") !== 2
+      || countValue(row.user_entry_count, "entry_shape_user_entry_count") !== 0
+      || countValue(row.system_entry_count, "entry_shape_system_entry_count") !== 1
+      || countValue(row.escrow_entry_count, "entry_shape_escrow_entry_count") !== 1
+      || countValue(row.matching_escrow_count, "entry_shape_matching_escrow_count") !== 1
+      || countValue(row.active_entry_count, "entry_shape_active_entry_count") !== 2
+      || integerValue(row.net_amount, "entry_shape_net_amount") !== 0n) {
+      fail("entry_shape");
+    }
+    const systemAmount = integerValue(row.system_amount, "entry_shape_system_amount");
+    const escrowAmount = integerValue(row.escrow_amount, "entry_shape_escrow_amount");
+    if ((transaction.tx_type === "TABLE_BUY_IN" && (systemAmount >= 0n || escrowAmount <= 0n))
+      || (transaction.tx_type === "TABLE_CASH_OUT" && (escrowAmount >= 0n || systemAmount <= 0n))) {
+      fail("entry_shape_direction");
+    }
+  }
+}
+
+export function assertTableRows(rows, batchIds) {
   if (rows.length !== batchIds.length) fail("table_rows_count");
+  const normalizedIds = batchIds.map((id) => text(id).toLowerCase());
   const byId = new Map(rows.map((row) => [text(row.table_id).toLowerCase(), row]));
-  for (const tableId of batchIds) {
+  if (byId.size !== normalizedIds.length) fail("table_id_set");
+  for (const tableId of normalizedIds) {
     const row = byId.get(tableId);
     if (!row) fail("table_id_set");
     if (row.status !== "CLOSED") fail("table_status");
     if (row.has_human_participant !== false) fail("table_human_participant");
+    if (row.bot_only_proof_eligible !== false) fail("table_bot_only_proof_eligible");
     if (!row.escrow_account_id) fail("escrow_missing");
+    if (row.escrow_account_type !== "ESCROW") fail("escrow_account_type");
+    if (row.escrow_system_key !== `POKER_TABLE:${tableId}`) fail("escrow_system_key");
     if (row.escrow_status !== "active") fail("escrow_status");
     if (text(row.escrow_balance) !== "0") fail("escrow_balance");
   }
@@ -465,14 +569,37 @@ function assertTableRows(rows, batchIds) {
   })).sort((left, right) => left.tableId.localeCompare(right.tableId));
 }
 
-function assertAccountRows(rows, accountIds) {
+export function assertAccountRows(rows, accountIds, records = null) {
   if (rows.length !== accountIds.length) fail("account_snapshot_count");
   const expected = new Set(accountIds.map((id) => id.toLowerCase()));
+  const evidence = new Map();
+  if (records) {
+    for (const entry of records.flatMap((record) => record.entries)) {
+      const account = entry.account;
+      const accountId = text(account?.id || entry.account_id).toLowerCase();
+      if (!accountId || !account) fail("account_snapshot_evidence");
+      const projection = {
+        userId: text(account.user_id), accountType: text(account.account_type),
+        systemKey: text(account.system_key), status: text(account.status),
+      };
+      const previous = evidence.get(accountId);
+      if (previous && canonicalJson(previous) !== canonicalJson(projection)) fail("account_snapshot_evidence");
+      evidence.set(accountId, projection);
+    }
+  }
   const snapshot = rows.map((row) => {
     const accountId = text(row.account_id).toLowerCase();
     if (!expected.has(accountId)) fail("account_snapshot_set");
+    const expectedAccount = evidence.get(accountId);
+    if (records && !expectedAccount) fail("account_snapshot_evidence");
+    if (expectedAccount) {
+      if (text(row.user_id) !== expectedAccount.userId) fail("account_snapshot_user_id");
+      if (text(row.account_type) !== expectedAccount.accountType) fail("account_snapshot_account_type");
+      if (text(row.system_key) !== expectedAccount.systemKey) fail("account_snapshot_system_key");
+      if (text(row.status) !== expectedAccount.status) fail("account_snapshot_status");
+    }
     return {
-      accountId, accountType: row.account_type, systemKey: row.system_key, status: row.status,
+      accountId, userId: text(row.user_id), accountType: row.account_type, systemKey: row.system_key, status: row.status,
       balance: text(row.balance), nextEntrySeq: text(row.next_entry_seq),
     };
   }).sort((left, right) => left.accountId.localeCompare(right.accountId));
@@ -580,12 +707,22 @@ async function auditDatabase(tx, { plan, storageTarget, fetchImpl, cwd }) {
   const entryRows = await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.entries, [evidence.transactionIds]);
   const entryIdsSha256 = assertExactEntryRows(entryRows, localArchive.records);
   if (entryIdsSha256 !== evidence.entryIdsSha256) fail("entry_ids_hash");
-  const registryRows = await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, [evidence.transactionIds, evidence.registryKeys]);
-  const registryKeysSha256 = assertExactRegistryRows(registryRows, localArchive.records);
+  assertEntryShapeRows(
+    await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.entryShapes, [evidence.transactionIds]),
+    localArchive.records,
+  );
+  const registryRows = await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, [
+    evidence.transactionIds, evidence.registryKeys, planIds,
+  ]);
+  const registryKeysSha256 = assertExactRegistryRows(registryRows, localArchive.records, planIds);
   if (registryRows.length !== expected.registryCount || registryKeysSha256 !== evidence.registryKeysSha256) fail("registry_keys_hash");
   const tableSnapshot = assertTableRows(await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.tables, [planIds]), planIds);
   const accountIds = [...new Set(localArchive.records.flatMap((record) => record.entries.map((entry) => text(entry.account_id).toLowerCase())))];
-  const accountSnapshot = assertAccountRows(await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.accounts, [accountIds]), accountIds);
+  const accountSnapshot = assertAccountRows(
+    await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.accounts, [accountIds]),
+    accountIds,
+    localArchive.records,
+  );
   const conservation = assertConservation((await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.conservation, [evidence.transactionIds]))[0]);
   return {
     identity, projectRef: storageTarget.projectRef, fenceActive, enforcementActive: true,

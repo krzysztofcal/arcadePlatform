@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
@@ -9,10 +10,17 @@ import {
   assertLegacyStageAuditBatchRow,
   assertLegacyStageAuditPlan,
   assertLegacyStageAuditProofRow,
+  assertAccountRows,
+  assertEntryShapeRows,
+  assertExactEntryRows,
+  assertExactRegistryRows,
+  assertExactTransactionRows,
+  assertTableRows,
   assertReadOnlyStorageRequest,
   runLegacyStageAllowlistAudit,
 } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-audit.mjs";
 import { buildLegacyPlan, loadFrozenLegacyAllowlist } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist.mjs";
+import { computeArchiveIdProofs } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
 
 const frozen = loadFrozenLegacyAllowlist({ cwd: process.cwd() });
 const plan = buildLegacyPlan(frozen.masterManifest, frozen.batchManifest);
@@ -154,6 +162,124 @@ for (const [code, field, value] of proofTamperCases) {
   row[field] = value;
   assert.throws(() => assertLegacyStageAuditProofRow(row, plan), (error) => error.code === code, code);
 }
+
+assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, /table_id::text as table_id/);
+assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, /table_id = any\(\$3::uuid\[\]\)/);
+assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, /TABLE_BUY_IN.*TABLE_CASH_OUT/s);
+assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.entryShapes, /matching_escrow_count/);
+assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.entryShapes, /active_entry_count/);
+assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.tables, /bot_only_proof_eligible/);
+assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.accounts, /account_type/);
+
+function makeAuditRecord({ id, tableId, txType, entryIds, index }) {
+  const systemAccountId = `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
+  const escrowAccountId = `20000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
+  const createdAt = `2026-08-17T00:00:0${index}.000000Z`;
+  const systemAmount = txType === "TABLE_BUY_IN" ? "-100" : "100";
+  const escrowAmount = txType === "TABLE_BUY_IN" ? "100" : "-100";
+  const transaction = {
+    id, sequence: String(index + 1), tx_type: txType,
+    idempotency_key: `legacy-fixture:${tableId}:${index}`,
+    payload_hash: "a".repeat(64), user_id: null,
+    reference: `BOT_SEED_BUY_IN:${tableId}:${index}`,
+    description: null, metadata: { tableId }, created_by: null, created_at: createdAt,
+  };
+  return {
+    transaction,
+    table_context: {
+      table_id: tableId, table_exists: true, table_status: "CLOSED",
+      escrow_account_id: escrowAccountId, escrow_status: "active", escrow_balance: "0",
+    },
+    entries: [
+      {
+        id: entryIds[0], transaction_id: id, account_id: systemAccountId, entry_seq: "1",
+        amount: systemAmount, metadata: {}, created_at: createdAt,
+        account: { id: systemAccountId, account_type: "SYSTEM", user_id: null, system_key: `SYSTEM_FIXTURE:${index}`, status: "active" },
+      },
+      {
+        id: entryIds[1], transaction_id: id, account_id: escrowAccountId, entry_seq: "1",
+        amount: escrowAmount, metadata: {}, created_at: createdAt,
+        account: { id: escrowAccountId, account_type: "ESCROW", user_id: null, system_key: `POKER_TABLE:${tableId}`, status: "active" },
+      },
+    ],
+  };
+}
+
+const fixtureTableIds = plan.batchTableIds.slice(0, 2);
+const archiveOrderRecords = [
+  makeAuditRecord({
+    id: "f0000000-0000-4000-8000-000000000001", tableId: fixtureTableIds[0],
+    txType: "TABLE_BUY_IN", entryIds: ["900", "901"], index: 0,
+  }),
+  makeAuditRecord({
+    id: "00000000-0000-4000-8000-000000000002", tableId: fixtureTableIds[1],
+    txType: "TABLE_CASH_OUT", entryIds: ["2", "3"], index: 1,
+  }),
+];
+const archiveOrderProofs = computeArchiveIdProofs(archiveOrderRecords);
+const hashLines = (values) => crypto.createHash("sha256").update(`${values.join("\n")}\n`).digest("hex");
+assert.notEqual(archiveOrderProofs.transactionIdsSha256, hashLines([...archiveOrderProofs.transactionIds].sort()));
+assert.notEqual(archiveOrderProofs.entryIdsSha256, hashLines([...archiveOrderProofs.entryIds].sort()));
+assert.equal(
+  assertExactTransactionRows(archiveOrderRecords.slice().reverse().map(({ transaction }) => transaction), archiveOrderRecords),
+  archiveOrderProofs.transactionIdsSha256,
+);
+assert.equal(
+  assertExactEntryRows(archiveOrderRecords.slice().reverse().flatMap(({ entries }) => entries), archiveOrderRecords),
+  archiveOrderProofs.entryIdsSha256,
+);
+
+const registryRows = archiveOrderRecords.slice().reverse().map(({ transaction, table_context }) => ({
+  idempotency_key: transaction.idempotency_key, transaction_id: transaction.id,
+  table_id: table_context.table_id, payload_hash: transaction.payload_hash,
+  tx_type: transaction.tx_type, user_id: null, transaction_created_at: transaction.created_at,
+  archive_batch_id: null,
+}));
+assert.doesNotThrow(() => assertExactRegistryRows(registryRows, archiveOrderRecords, fixtureTableIds));
+assert.throws(
+  () => assertExactRegistryRows([
+    ...registryRows,
+    { ...registryRows[0], idempotency_key: `extra:${fixtureTableIds[0]}` },
+  ], archiveOrderRecords, fixtureTableIds),
+  (error) => error.code === "registry_rows_count",
+);
+
+const tableRows = archiveOrderRecords.map(({ table_context }) => ({
+  table_id: table_context.table_id, status: "CLOSED", has_human_participant: false,
+  bot_only_proof_eligible: false, escrow_account_id: table_context.escrow_account_id,
+  escrow_account_type: "ESCROW", escrow_system_key: `POKER_TABLE:${table_context.table_id}`,
+  escrow_status: "active", escrow_balance: "0", escrow_next_entry_seq: "2",
+}));
+assert.doesNotThrow(() => assertTableRows(tableRows, fixtureTableIds));
+assert.throws(
+  () => assertTableRows([{ ...tableRows[0], bot_only_proof_eligible: true }, tableRows[1]], fixtureTableIds),
+  (error) => error.code === "table_bot_only_proof_eligible",
+);
+
+const accountRows = archiveOrderRecords.flatMap(({ entries }) => entries).map((entry) => ({
+  account_id: entry.account.id, user_id: null, account_type: entry.account.account_type,
+  system_key: entry.account.system_key, balance: "0", next_entry_seq: "2", status: "active",
+}));
+const accountIds = accountRows.map((row) => row.account_id);
+assert.doesNotThrow(() => assertAccountRows(accountRows, accountIds, archiveOrderRecords));
+assert.throws(
+  () => assertAccountRows([{ ...accountRows[0], account_type: "ESCROW" }, ...accountRows.slice(1)], accountIds, archiveOrderRecords),
+  (error) => error.code === "account_snapshot_account_type",
+);
+
+const entryShapeRows = archiveOrderRecords.map(({ transaction, table_context }) => ({
+  transaction_id: transaction.id, tx_type: transaction.tx_type, user_id: null,
+  table_id: table_context.table_id, entry_count: "2", user_entry_count: "0",
+  system_entry_count: "1", escrow_entry_count: "1", matching_escrow_count: "1",
+  active_entry_count: "2", net_amount: "0",
+  system_amount: transaction.tx_type === "TABLE_BUY_IN" ? "-100" : "100",
+  escrow_amount: transaction.tx_type === "TABLE_BUY_IN" ? "100" : "-100",
+}));
+assert.doesNotThrow(() => assertEntryShapeRows(entryShapeRows, archiveOrderRecords));
+assert.throws(
+  () => assertEntryShapeRows([{ ...entryShapeRows[0], matching_escrow_count: "0" }, entryShapeRows[1]], archiveOrderRecords),
+  (error) => error.code === "entry_shape",
+);
 
 assert.equal(assertReadOnlyStorageRequest(), "GET");
 for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
