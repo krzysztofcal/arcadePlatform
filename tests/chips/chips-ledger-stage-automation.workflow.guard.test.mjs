@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-automation.yml", "utf8");
+const executeRunner = fs.readFileSync("scripts/ops/chips-ledger-legacy-stage-allowlist-execute.mjs", "utf8");
 
 assert.match(
   workflow,
@@ -109,6 +110,9 @@ assert.match(executeRun, /registry_cleaned_at/);
 assert.match(executeRun, /destructive_go_batch_id/);
 assert.match(executeRun, /public\.chips_legacy_stage_allowlist_proofs/);
 assert.match(executeRun, /public\.chips_transaction_idempotency/);
+assert.match(executeRun, /archive_proof_verified_at/);
+assert.match(executeRun, /destructive_go_at !== null/);
+assert.match(executeRun, /destructive_go_batch_id !== null/);
 assert.match(executeRun, /node scripts\/ops\/chips-ledger-legacy-stage-allowlist-execute\.mjs/);
 assert.match(executeRun, /--recovery-dir "\$recovery_dir"/);
 assert.doesNotMatch(executeRun, /github\.event\.inputs|inputs\.(?!mode)[a-zA-Z0-9_-]+/);
@@ -121,5 +125,18 @@ assert.doesNotMatch(botOnlyRun, /execute-batch-13|--execute|LEGACY_STAGE_ALLOWLI
 assert.doesNotMatch(legacyRun, /execute-batch-13|--execute|LEGACY_STAGE_ALLOWLIST_EXECUTE/);
 assert.doesNotMatch(auditRun, /execute-batch-13|--execute|LEGACY_STAGE_ALLOWLIST_EXECUTE/);
 assert.doesNotMatch(workflow.match(/- cron:[\s\S]*?(?=\n\s*concurrency:)/)[0], /execute-batch-13|--execute|LEGACY_STAGE_ALLOWLIST_EXECUTE/);
+
+assert.match(executeRunner, /chips_authorize_legacy_stage_allowlist_batch\(13, 'GO 13', '611ab69ba8ee160a4957f8fe9514c919b9f4129bc1ea7842778b04d28ea6ca05'\)/);
+assert.match(executeRunner, /readOnlyBatch13Preflight/);
+assert.match(executeRunner, /beforeExecuteSnapshot/);
+assert.match(executeRunner, /verifyBatch13PostExecute/);
+assert.match(executeRunner, /already_pruned/);
+assert.match(executeRunner, /replayOldRegistryKey/);
+assert.match(executeRunner, /P8903/);
+assert.match(executeRunner, /remaining_registry_count/);
+assert.match(executeRunner, /REPLAY_TRANSACTION_ID/);
+assert.match(executeRunner, /set transaction isolation level repeatable read, read only/);
+assert.match(executeRunner, /set transaction isolation level repeatable read;/);
+assert.match(executeRunner, /EXECUTE_BATCH_13/);
 
 process.stdout.write("chips-ledger-stage-automation workflow guard passed\n");

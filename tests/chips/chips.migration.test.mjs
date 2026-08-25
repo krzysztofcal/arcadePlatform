@@ -1282,10 +1282,20 @@ async function assertLegacyAllowlistCleanupContracts(sql) {
       [batchId, `GO ${batchId}`, evidence.legacyAllowlistSha256],
     );
     assert.equal(authorizationRows[0].result.state, "authorized");
+    const authorizationReceipt = await tx.unsafe(`select
+      destructive_go_at,
+      destructive_go_batch_id::text as destructive_go_batch_id
+      from public.chips_ledger_archive_batches where batch_id = $1;`, [batchId]);
+    assert.ok(authorizationReceipt[0].destructive_go_at, "authorization must persist destructive_go_at");
+    assert.equal(authorizationReceipt[0].destructive_go_batch_id, batchId, "authorization must persist the exact batch ID");
     await tx.unsafe("select set_config('chips.bot_only_go', '', true);");
 
     const balancesBefore = await tx.unsafe(`select id, balance, next_entry_seq
       from public.chips_accounts where id = $1::uuid or system_key = 'GENESIS' order by id;`, [escrowId]);
+    const economicsBefore = await tx.unsafe(`select
+      coalesce((select sum(balance) from public.chips_accounts), 0)::text as balance_total,
+      coalesce((select sum(next_entry_seq) from public.chips_accounts), 0)::text as next_entry_seq_total,
+      coalesce((select sum(amount) from public.chips_entries), 0)::text as conservation;`);
     await tx.unsafe("select public.chips_set_table_fence_active(false);");
     await expectSavepointError(tx, "legacy_fence_off", () => pruneStore.cleanupLegacyStageAllowlist(
       objectPath, evidence, true, batchId,
@@ -1310,6 +1320,12 @@ async function assertLegacyAllowlistCleanupContracts(sql) {
       (select count(*) from public.chips_entries where transaction_id = any($1::uuid[])) as hot_entries,
       (select count(*) from public.chips_transaction_idempotency where archive_batch_id = $2) as remaining_registry,
       (select count(*) from public.chips_transaction_idempotency where idempotency_key = any($3::text[])) as replay_keys,
+      (select pruned_at from public.chips_ledger_archive_batches where batch_id = $2) as pruned_at,
+      (select registry_cleaned_at from public.chips_ledger_archive_batches where batch_id = $2) as registry_cleaned_at,
+      (select pruned_transaction_count from public.chips_ledger_archive_batches where batch_id = $2) as pruned_transaction_count,
+      (select pruned_entry_count from public.chips_ledger_archive_batches where batch_id = $2) as pruned_entry_count,
+      (select pruned_transaction_ids_sha256 from public.chips_ledger_archive_batches where batch_id = $2) as pruned_transaction_ids_sha256,
+      (select pruned_entry_ids_sha256 from public.chips_ledger_archive_batches where batch_id = $2) as pruned_entry_ids_sha256,
       (select registry_cleaned_key_count from public.chips_ledger_archive_batches where batch_id = $2) as receipt_count,
       (select registry_cleaned_keys_sha256 from public.chips_ledger_archive_batches where batch_id = $2) as receipt_hash;`,
       [transactionIds, batchId, registryKeys]);
@@ -1317,6 +1333,12 @@ async function assertLegacyAllowlistCleanupContracts(sql) {
     assert.equal(Number(postRows[0].hot_entries), 0);
     assert.equal(Number(postRows[0].remaining_registry), 0);
     assert.equal(Number(postRows[0].replay_keys), 0);
+    assert.ok(postRows[0].pruned_at, "cleanup must write pruned_at");
+    assert.ok(postRows[0].registry_cleaned_at, "cleanup must write registry_cleaned_at");
+    assert.equal(Number(postRows[0].pruned_transaction_count), 2);
+    assert.equal(Number(postRows[0].pruned_entry_count), 4);
+    assert.equal(postRows[0].pruned_transaction_ids_sha256, transactionHash);
+    assert.equal(postRows[0].pruned_entry_ids_sha256, entryHash);
     assert.equal(Number(postRows[0].receipt_count), 2);
     assert.equal(postRows[0].receipt_hash, cleanupResult.registry_keys_sha256);
 
@@ -1337,6 +1359,11 @@ async function assertLegacyAllowlistCleanupContracts(sql) {
     const balancesAfter = await tx.unsafe(`select id, balance, next_entry_seq
       from public.chips_accounts where id = $1::uuid or system_key = 'GENESIS' order by id;`, [escrowId]);
     assert.deepEqual(balancesAfter, balancesBefore, "legacy cleanup must not change balances or next_entry_seq");
+    const economicsAfter = await tx.unsafe(`select
+      coalesce((select sum(balance) from public.chips_accounts), 0)::text as balance_total,
+      coalesce((select sum(next_entry_seq) from public.chips_accounts), 0)::text as next_entry_seq_total,
+      coalesce((select sum(amount) from public.chips_entries), 0)::text as conservation;`);
+    assert.deepEqual(economicsAfter, economicsBefore, "legacy cleanup must preserve economic snapshot");
 
     throw ROLLBACK;
   }).catch((error) => {

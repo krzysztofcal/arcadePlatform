@@ -32,6 +32,7 @@ import {
 } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist.mjs";
 import { runLegacyStageAllowlistFreeze } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-freeze.mjs";
 import { runLegacyStageAllowlistExecute } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-execute.mjs";
+import { LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13 } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-audit.mjs";
 import { runLegacyStagePrepareOnly } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist.mjs";
 import { buildPruneEvidence } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
 import { storeArchive, verifyArchiveBytes, verifyLocalArchive } from "../../scripts/ops/chips-ledger-archive-store.mjs";
@@ -684,9 +685,9 @@ const executeEnv = {
   CHIPS_LEDGER_LEGACY_STAGE_ALLOWLIST_EXECUTE: "1",
 };
 const executeArgs = [
-  "--batch-id", validRunnerContract.result.batchId,
-  "--object-path", validRunnerContract.result.objectPath,
-  "--confirm-sha", validRunnerContract.result.compressedSha256,
+  "--batch-id", LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.batchId,
+  "--object-path", LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.objectPath,
+  "--confirm-sha", LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.compressedSha256,
   "--recovery-dir", executeRecoveryDir,
 ];
 try {
@@ -703,9 +704,9 @@ try {
   await assert.rejects(
     () => runLegacyStageAllowlistExecute({
       argv: [
-        "--batch-id", validRunnerContract.result.batchId,
-        "--object-path", `${validRunnerContract.result.objectPath}.tampered`,
-        "--confirm-sha", validRunnerContract.result.compressedSha256,
+        "--batch-id", LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.batchId,
+        "--object-path", `${LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.objectPath}.tampered`,
+        "--confirm-sha", LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.compressedSha256,
         "--recovery-dir", executeRecoveryDir,
       ],
       env: executeEnv,
@@ -715,22 +716,123 @@ try {
     /--object-path does not match --confirm-sha/,
     "execution runner must reject an object path that is not bound to the supplied archive hash",
   );
+  await assert.rejects(
+    () => runLegacyStageAllowlistExecute({
+      argv: [
+        "--batch-id", "12",
+        "--object-path", LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.objectPath,
+        "--confirm-sha", LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.compressedSha256,
+        "--recovery-dir", executeRecoveryDir,
+      ],
+      env: executeEnv,
+      cwd: process.cwd(),
+      deps: { storageTarget: runnerStorageTarget },
+    }),
+    /approved batch 13/,
+    "execution runner must reject every batch other than hardcoded batch 13",
+  );
 
+  const executeEvidence = {
+    transactionIds: Array.from({ length: 60 }, (_, index) => tableId(0xd400 + index)),
+    entryIds: Array.from({ length: 120 }, (_, index) => String(5000 + index)),
+    registryKeys: Array.from({ length: 60 }, (_, index) => `legacy-batch-13-key-${String(index).padStart(2, "0")}`),
+    legacyTableIds: plan.batchTableIds,
+    transactionCount: 60,
+    entryCount: 120,
+    transactionIdsSha256: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.txIdsSha256,
+    entryIdsSha256: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.entryIdsSha256,
+    registryKeysSha256: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.registryKeysSha256,
+    legacyAllowlistSha256: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.masterAllowlistSha256,
+    legacyBatchTableIdsSha256: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.batchTableIdsSha256,
+  };
+  const beforeExecuteSnapshot = {
+    transactionCount: 60,
+    entryCount: 120,
+    registryCount: 60,
+    balances: { accountCount: 20, total: "1000000", sha256: "1".repeat(64) },
+    nextEntrySeq: { total: "240", sha256: "2".repeat(64) },
+    conservation: { entryCount: 120, entrySum: "0" },
+  };
+  const afterExecuteSnapshot = {
+    ...beforeExecuteSnapshot,
+    transactionCount: 0,
+    entryCount: 0,
+    registryCount: 0,
+  };
+  let pruneCalls = 0;
+  let snapshotCalls = 0;
+  const lifecycle = [];
   const executeDeps = {
     storageTarget: runnerStorageTarget,
     pruneStore: validRunnerContract.adapters.pruneStore,
-    preflight: async () => ({
-      projectRef: "krydukthwdvccggbyjfw",
-      systemIdentifier: "7656985631720456337",
-      fenceActive: true,
-      enforcementActive: true,
-      readOnly: true,
-    }),
+    preflight: async () => {
+      lifecycle.push("preflight");
+      return {
+        projectRef: "krydukthwdvccggbyjfw",
+        systemIdentifier: "7656985631720456337",
+        fenceActive: true,
+        enforcementActive: true,
+        readOnly: true,
+      };
+    },
     verifyBucket: async () => {},
     downloadArchive: async (_storageTarget, objectPath) => ({
       bytes: validRunnerContract.adapters.storageObjects.get(objectPath),
       downloadMs: 1,
     }),
+    authorize: async () => {
+      lifecycle.push("authorize");
+      return {
+        result: { state: "authorized", batch_id: "13" },
+        destructiveGoAt: "2026-08-25T00:00:00.000000Z",
+        destructiveGoBatchId: "13",
+      };
+    },
+    readExecutionSnapshot: async () => {
+      lifecycle.push("snapshot");
+      snapshotCalls += 1;
+      return snapshotCalls === 1 ? beforeExecuteSnapshot : afterExecuteSnapshot;
+    },
+    pruneArchive: async () => {
+      lifecycle.push("prune");
+      pruneCalls += 1;
+      return {
+        state: pruneCalls === 1 ? "pruned" : "already_pruned",
+        mode: "execute",
+        evidence: executeEvidence,
+        recoveryBundle: {
+          artifactPath: executeRecoveryDir,
+          manifestPath: `${executeRecoveryDir}/manifest.json`,
+          reused: pruneCalls > 1,
+        },
+      };
+    },
+    verifyPostExecute: async (_sql, before, evidence) => {
+      lifecycle.push("post-verify");
+      assert.deepEqual(before, beforeExecuteSnapshot);
+      assert.deepEqual(evidence, executeEvidence);
+      return {
+        state: "verified",
+        snapshot: afterExecuteSnapshot,
+        receipt: {
+          prunedAt: "2026-08-25T00:01:00.000000Z",
+          registryCleanedAt: "2026-08-25T00:01:00.000000Z",
+          prunedTransactionCount: 60,
+          prunedEntryCount: 120,
+          registryCleanedKeyCount: 60,
+          remainingRegistryCount: 0,
+          transactionIdsSha256: executeEvidence.transactionIdsSha256,
+          entryIdsSha256: executeEvidence.entryIdsSha256,
+          registryKeysSha256: executeEvidence.registryKeysSha256,
+        },
+      };
+    },
+    replayOldRegistryKey: async (_sql, evidence, before) => {
+      lifecycle.push("replay");
+      assert.equal(evidence, executeEvidence);
+      assert.equal(before, beforeExecuteSnapshot);
+      return { rejected: true, sqlstate: "P8903" };
+    },
   };
   await assert.rejects(
     () => runLegacyStageAllowlistExecute({
@@ -760,29 +862,29 @@ try {
   });
   assert.equal(firstExecute.state, "pruned");
   assert.equal(firstExecute.mode, "execute");
-  assert.equal(firstExecute.batchId, validRunnerContract.result.batchId);
-  assert.equal(firstExecute.objectPath, validRunnerContract.result.objectPath);
-  assert.equal(firstExecute.compressedSha256, validRunnerContract.result.compressedSha256);
+  assert.equal(firstExecute.batchId, LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.batchId);
+  assert.equal(firstExecute.objectPath, LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.objectPath);
+  assert.equal(firstExecute.compressedSha256, LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.compressedSha256);
   assert.equal(firstExecute.allowlistSha256, plan.allowlistSha256);
   assert.equal(firstExecute.preflight.fenceActive, true);
   assert.equal(firstExecute.preflight.enforcementActive, true);
-  assert.equal(firstExecute.transactions, fixtureEvidence.transactionCount);
-  assert.equal(firstExecute.entries, fixtureEvidence.entryCount);
+  assert.equal(firstExecute.transactions, 60);
+  assert.equal(firstExecute.entries, 120);
   assert.deepEqual(firstExecute.proof, {
-    transactionIdsSha256: fixtureEvidence.transactionIdsSha256,
-    entryIdsSha256: fixtureEvidence.entryIdsSha256,
+    transactionIdsSha256: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.txIdsSha256,
+    entryIdsSha256: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.entryIdsSha256,
   });
   assert.equal(firstExecute.recovery.reused, false);
-
-  const retryExecute = await runLegacyStageAllowlistExecute({
-    argv: executeArgs,
-    env: executeEnv,
-    cwd: process.cwd(),
-    deps: executeDeps,
-  });
-  assert.equal(retryExecute.state, "already_pruned");
-  assert.equal(retryExecute.recovery.reused, true);
-  assert.equal(validRunnerContract.adapters.executeCleanupCalls, 2, "identical execute must be idempotent on retry");
+  assert.equal(firstExecute.authorization.destructiveGoBatchId, "13");
+  assert.equal(firstExecute.postExecute.receipt.remainingRegistryCount, 0);
+  assert.equal(firstExecute.retry.state, "already_pruned");
+  assert.equal(firstExecute.retry.recovery.reused, true);
+  assert.equal(firstExecute.replay.rejected, true);
+  assert.equal(firstExecute.replay.sqlstate, "P8903");
+  assert.equal(pruneCalls, 2, "execute path must perform exactly one idempotent retry");
+  assert.deepEqual(lifecycle, [
+    "preflight", "authorize", "snapshot", "prune", "post-verify", "prune", "snapshot", "replay",
+  ]);
 } finally {
   fs.rmSync(executeRoot, { recursive: true, force: true });
 }

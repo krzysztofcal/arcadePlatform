@@ -193,6 +193,7 @@ jobs:
                   transaction_count::text as transaction_count, entry_count::text as entry_count,
                   compressed_sha256, legacy_allowlist_sha256, legacy_batch_table_ids_sha256,
                   archived_transaction_ids_sha256, archived_entry_ids_sha256,
+                  archive_proof_verified_at::text as archive_proof_verified_at,
                   status, committed_at::text as committed_at,
                   destructive_go_at::text as destructive_go_at,
                   destructive_go_batch_id::text as destructive_go_batch_id,
@@ -221,8 +222,10 @@ jobs:
               })) {
                 if (text(batch[field]) !== expected) fail(`${field} mismatch`);
               }
-              if (!batch.committed_at || !batch.destructive_go_at || text(batch.destructive_go_batch_id) !== EXPECTED.batchId) {
-                fail("exact persisted batch GO is missing");
+              if (!batch.committed_at || !batch.archive_proof_verified_at
+                || batch.destructive_go_at !== null
+                || batch.destructive_go_batch_id !== null) {
+                fail("batch 13 already has a GO; a new exact authorization is required");
               }
               if (batch.pruned_at !== null || batch.registry_cleaned_at !== null) fail("batch was already executed");
 
