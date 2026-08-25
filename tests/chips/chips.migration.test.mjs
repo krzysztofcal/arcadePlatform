@@ -1383,8 +1383,9 @@ async function assertScopedSnapshotIgnoresParallelUnrelatedActivity(sql) {
   let unrelatedAccountId = null;
   try {
     const accountRows = await sql`
-      insert into public.chips_accounts (account_type, status, balance, next_entry_seq)
-      values ('ESCROW', 'active', 100, 7), ('ESCROW', 'active', 200, 11)
+      insert into public.chips_accounts (account_type, system_key, status, balance, next_entry_seq)
+      values ('ESCROW', 'parallel-snapshot-scoped', 'active', 100, 7),
+             ('ESCROW', 'parallel-snapshot-unrelated', 'active', 200, 11)
       returning id::text as id;
     `;
     [scopedAccountId, unrelatedAccountId] = accountRows.map((row) => row.id);
