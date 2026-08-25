@@ -173,7 +173,7 @@ for (const [code, field, value] of proofTamperCases) {
 }
 
 assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, /table_id::text as table_id/);
-assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, /table_id = any\(\$3::uuid\[\]\)/);
+assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, /table_id = any\(\$1::uuid\[\]\)/);
 assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, /TABLE_BUY_IN.*TABLE_CASH_OUT/s);
 assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.entryShapes, /matching_escrow_count/);
 assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.entryShapes, /active_entry_count/);
@@ -420,7 +420,7 @@ assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.fence, /chips_table_fence_is_activ
 assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.enforcement, /enforcement_active/);
 assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.batch, /batch_id = \$1/);
 assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.entries, /transaction_id = any\(\$1::uuid\[\]\)/);
-assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, /table_id = any\(\$3::uuid\[\]\)/);
+assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, /table_id = any\(\$1::uuid\[\]\)/);
 assert.doesNotMatch(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, /or transaction_id = any/);
 
 const auditSource = fs.readFileSync("scripts/ops/chips-ledger-legacy-stage-allowlist-audit.mjs", "utf8");

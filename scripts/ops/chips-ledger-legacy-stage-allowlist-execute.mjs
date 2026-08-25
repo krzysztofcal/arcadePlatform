@@ -576,7 +576,7 @@ async function collectExecutionSnapshot(tx, plan, accountIds = null, batchState 
     ? "archive_batch_id = 13"
     : legacyStageAllowlistRegistryPredicate("$2");
   const registryParameters = batchState === "pruned"
-    ? [scopedAccountIds]
+    ? []
     : [scopedAccountIds, plan.batchTableIds];
   const counts = await tx.unsafe(`
     with registry as (

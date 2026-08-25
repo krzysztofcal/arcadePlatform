@@ -9,6 +9,7 @@ import {
   hashLegacyStageAllowlistRegistryKeys,
   legacyStageAllowlistRegistryPredicate,
 } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-registry.mjs";
+import { LEGACY_STAGE_ALLOWLIST_AUDIT_SQL } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-audit.mjs";
 
 const dbUrl = process.env.CHIPS_MIGRATIONS_TEST_DB_URL;
 const allowDrop = process.env.CHIPS_MIGRATIONS_ALLOW_DROP === "1";
@@ -1443,6 +1444,21 @@ async function assertLegacyUnprunedRegistrySelectorContract(sql) {
     assert.equal(selection.keysSha256, expectedKeysSha256);
     assert.equal(new Set(rows.map((row) => row.table_id)).size, 10);
     assert.ok(rows.every((row) => row.archive_batch_id === null));
+
+    // Execute the production audit query against disposable PostgreSQL with
+    // its actual one-parameter binding. This must not be reduced to a mock.
+    const auditRows = await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, [tableIds]);
+    assert.equal(auditRows.length, 60, "audit registry query must return all 60 rows");
+    assert.deepEqual(
+      auditRows.map((row) => row.idempotency_key),
+      rows.map((row) => row.idempotency_key),
+      "audit registry query must use the same exact table selector",
+    );
+    assertLegacyStageAllowlistRegistryRows(auditRows, {
+      tableIds,
+      expectedCount: 60,
+      expectedKeysSha256,
+    });
     throw ROLLBACK;
   }).catch((error) => {
     if (error !== ROLLBACK) throw error;

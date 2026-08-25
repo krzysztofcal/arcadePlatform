@@ -148,6 +148,14 @@ assert.match(executeRunner, /already_pruned/);
 assert.match(executeRunner, /replayOldRegistryKey/);
 assert.match(executeRunner, /P8903/);
 assert.match(executeRunner, /remaining_registry_count/);
+assert.match(
+  executeRunner,
+  /const registryScope = batchState === "pruned"[\s\S]*?legacyStageAllowlistRegistryPredicate\("\$2"\)/,
+);
+assert.match(
+  executeRunner,
+  /const registryParameters = batchState === "pruned"\s+\? \[\]\s+: \[scopedAccountIds, plan\.batchTableIds\]/,
+);
 assert.match(executeRunner, /REPLAY_TRANSACTION_ID/);
 assert.match(executeRunner, /replayPair/);
 assert.match(executeRunner, /replay transaction ID collision/);

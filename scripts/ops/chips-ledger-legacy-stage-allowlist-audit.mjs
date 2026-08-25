@@ -172,7 +172,7 @@ export const LEGACY_STAGE_ALLOWLIST_AUDIT_SQL = Object.freeze({
     user_id::text as user_id, transaction_created_at::text as transaction_created_at,
     archive_batch_id::text as archive_batch_id
   from public.chips_transaction_idempotency registry
-  where ${legacyStageAllowlistRegistryPredicate("$3")}
+  where ${legacyStageAllowlistRegistryPredicate("$1")}
   order by idempotency_key;`,
   entryShapes: `with selected as materialized (
     select transactions.*
@@ -765,7 +765,7 @@ async function auditDatabase(tx, { plan, storageTarget, fetchImpl, cwd }) {
     localArchive.records,
   );
   const registryRows = await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, [
-    evidence.transactionIds, evidence.registryKeys, planIds,
+    planIds,
   ]);
   const registryKeysSha256 = assertExactRegistryRows(registryRows, localArchive.records, planIds);
   if (registryRows.length !== expected.registryCount || registryKeysSha256 !== evidence.registryKeysSha256) fail("registry_keys_hash");
