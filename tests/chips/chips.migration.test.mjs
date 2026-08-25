@@ -1293,7 +1293,7 @@ async function assertLegacyAllowlistCleanupContracts(sql) {
     await tx.unsafe("select set_config('chips.bot_only_go', '', true);");
 
     const balancesBefore = await tx.unsafe(`select id, balance, next_entry_seq
-      from public.chips_accounts where id = $1::uuid or system_key = 'GENESIS' order by id;`, [escrowId]);
+      from public.chips_accounts where id = $1::uuid;`, [escrowId]);
     const scopedAccountIds = balancesBefore.map((row) => row.id);
     const economicsBefore = await tx.unsafe(`select
       coalesce((select sum(balance) from public.chips_accounts where id = any($1::uuid[])), 0)::text as balance_total,
@@ -1361,7 +1361,7 @@ async function assertLegacyAllowlistCleanupContracts(sql) {
     assert.equal(retryResult.state, "already_pruned", "legacy cleanup retry must be idempotent");
     assert.equal(Number(retryResult.remaining_registry_count), 0);
     const balancesAfter = await tx.unsafe(`select id, balance, next_entry_seq
-      from public.chips_accounts where id = $1::uuid or system_key = 'GENESIS' order by id;`, [escrowId]);
+      from public.chips_accounts where id = $1::uuid;`, [escrowId]);
     assert.deepEqual(balancesAfter, balancesBefore, "legacy cleanup must not change balances or next_entry_seq");
     const economicsAfter = await tx.unsafe(`select
       coalesce((select sum(balance) from public.chips_accounts where id = any($1::uuid[])), 0)::text as balance_total,
@@ -1380,16 +1380,23 @@ async function assertScopedSnapshotIgnoresParallelUnrelatedActivity(sql) {
   const snapshotSql = postgres(dbUrl, { max: 1 });
   const activitySql = postgres(dbUrl, { max: 1 });
   let scopedAccountId = null;
-  let unrelatedAccountId = null;
+  let genesisBefore = null;
+  const parallelTableId = "00000000-0000-4000-8000-00000000cafe";
   try {
     const accountRows = await sql`
       insert into public.chips_accounts (account_type, system_key, status, balance, next_entry_seq)
-      values ('ESCROW', 'parallel-snapshot-scoped', 'active', 100, 7),
-             ('ESCROW', 'parallel-snapshot-unrelated', 'active', 200, 11)
+      values ('ESCROW', ${`POKER_TABLE:${parallelTableId}`}, 'active', 100, 7)
       returning id::text as id;
     `;
-    [scopedAccountId, unrelatedAccountId] = accountRows.map((row) => row.id);
+    scopedAccountId = accountRows[0].id;
     const scopedIds = [scopedAccountId];
+    const genesisRows = await sql`
+      select balance::text as balance, next_entry_seq::text as next_entry_seq
+      from public.chips_accounts
+      where account_type = 'SYSTEM' and system_key = 'GENESIS';
+    `;
+    assert.equal(genesisRows.length, 1, "GENESIS fixture must exist for scoped snapshot regression");
+    genesisBefore = genesisRows[0];
     const result = await snapshotSql.begin(async (tx) => {
       await tx.unsafe("set transaction isolation level repeatable read, read only;");
       const before = await tx.unsafe(`
@@ -1406,7 +1413,7 @@ async function assertScopedSnapshotIgnoresParallelUnrelatedActivity(sql) {
       await activitySql`
         update public.chips_accounts
         set balance = balance + 1, next_entry_seq = next_entry_seq + 1
-        where id = ${unrelatedAccountId}::uuid;
+        where account_type = 'SYSTEM' and system_key = 'GENESIS';
       `;
       const after = await tx.unsafe(`
         select id::text as id, balance::text as balance, next_entry_seq::text as next_entry_seq
@@ -1423,16 +1430,26 @@ async function assertScopedSnapshotIgnoresParallelUnrelatedActivity(sql) {
     });
     assert.deepEqual(result.after, result.before, "unrelated account activity must not change scoped account snapshots");
     assert.deepEqual(result.afterConservation, result.beforeConservation, "unrelated activity must not change scoped conservation");
-    const unrelated = await sql`
+    const genesisChanged = await sql`
       select balance::text as balance, next_entry_seq::text as next_entry_seq
-      from public.chips_accounts where id = ${unrelatedAccountId}::uuid;
+      from public.chips_accounts
+      where account_type = 'SYSTEM' and system_key = 'GENESIS';
     `;
-    assert.deepEqual(unrelated[0], { balance: "201", next_entry_seq: "12" });
+    assert.deepEqual(genesisChanged[0], {
+      balance: String(Number(genesisBefore.balance) + 1),
+      next_entry_seq: String(Number(genesisBefore.next_entry_seq) + 1),
+    });
   } finally {
-    if (scopedAccountId && unrelatedAccountId) {
+    if (genesisBefore) {
       await sql`
-        delete from public.chips_accounts
-        where id in (${scopedAccountId}::uuid, ${unrelatedAccountId}::uuid);
+        update public.chips_accounts
+        set balance = ${genesisBefore.balance}, next_entry_seq = ${genesisBefore.next_entry_seq}
+        where account_type = 'SYSTEM' and system_key = 'GENESIS';
+      `;
+    }
+    if (scopedAccountId) {
+      await sql`
+        delete from public.chips_accounts where id = ${scopedAccountId}::uuid;
       `;
     }
     await snapshotSql.end({ timeout: 5 });

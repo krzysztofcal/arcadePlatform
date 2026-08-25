@@ -95,9 +95,16 @@ function assertReplayPair(pair, plan, evidence = null) {
     fail("legacy replay pair is not bound to the immutable batch");
   }
   if (evidence) {
-    if (!evidence.registryKeys?.includes(idempotencyKey)
+    const boundPairs = Array.isArray(evidence.replayPairs) && evidence.replayPairs.length > 0
+      ? evidence.replayPairs
+      : evidence.replayPair ? [evidence.replayPair] : [];
+    const bound = boundPairs.some((candidate) => text(candidate?.idempotencyKey) === idempotencyKey
+      && text(candidate?.tableId).toLowerCase() === tableId
+      && text(candidate?.transactionId).toLowerCase() === transactionId);
+    const notPresentInEvidence = !evidence.registryKeys?.includes(idempotencyKey)
       || !evidence.legacyTableIds?.some((id) => text(id).toLowerCase() === tableId)
-      || !evidence.transactionIds?.some((id) => text(id).toLowerCase() === transactionId)) {
+      || !evidence.transactionIds?.some((id) => text(id).toLowerCase() === transactionId);
+    if (boundPairs.length > 0 ? !bound : notPresentInEvidence) {
       fail("legacy replay pair is not present in immutable archive evidence");
     }
   }
@@ -114,6 +121,15 @@ function existingBatchAuthorization(preflight) {
     && destructiveGoBatchId === EXECUTE_BATCH_13.batchId;
   if (!noGo && !exactGo) fail("preflight GO is partial or not bound to batch 13");
   return exactGo ? { destructiveGoAt, destructiveGoBatchId } : null;
+}
+
+function assertEscrowAccountScope(accountIds) {
+  if (!Array.isArray(accountIds) || accountIds.length !== 10
+    || new Set(accountIds.map((id) => text(id).toLowerCase())).size !== 10
+    || accountIds.some((id) => !UUID_RE.test(text(id).toLowerCase()))) {
+    fail("preflight did not provide the exact ten-account ESCROW scope");
+  }
+  return accountIds.map((id) => text(id).toLowerCase());
 }
 
 function assertBatch13Plan(plan) {
@@ -172,6 +188,21 @@ function assertBatch13Evidence(evidence) {
     || evidence.legacyBatchTableIdsSha256 !== expected.batchTableIdsSha256) {
     fail("archive evidence is not the immutable batch 13 evidence");
   }
+}
+
+function assertBatch13PrunedReceipt(receipt) {
+  const expected = EXECUTE_BATCH_13;
+  if (!receipt || !text(receipt.prunedAt) || !text(receipt.registryCleanedAt)
+    || number(receipt.prunedTransactionCount, "pruned_transaction_count") !== expected.transactionCount
+    || number(receipt.prunedEntryCount, "pruned_entry_count") !== expected.entryCount
+    || number(receipt.registryCleanedKeyCount, "registry_cleaned_key_count") !== expected.registryCount
+    || receipt.transactionIdsSha256 !== expected.txIdsSha256
+    || receipt.entryIdsSha256 !== expected.entryIdsSha256
+    || receipt.registryKeysSha256 !== expected.registryKeysSha256
+    || (receipt.remainingRegistryCount != null && number(receipt.remainingRegistryCount, "remaining_registry_count") !== 0)) {
+    fail("preflight pruned batch receipt is not the immutable batch 13 receipt");
+  }
+  return receipt;
 }
 
 function parseArgs(argv) {
@@ -236,7 +267,12 @@ async function readOnlyBatch13Preflight(sql, plan) {
         status, committed_at::text as committed_at,
         destructive_go_at::text as destructive_go_at,
         destructive_go_batch_id::text as destructive_go_batch_id,
-        pruned_at::text as pruned_at, registry_cleaned_at::text as registry_cleaned_at
+        pruned_at::text as pruned_at, registry_cleaned_at::text as registry_cleaned_at,
+        pruned_transaction_count::text as pruned_transaction_count,
+        pruned_entry_count::text as pruned_entry_count,
+        pruned_transaction_ids_sha256, pruned_entry_ids_sha256,
+        registry_cleaned_key_count::text as registry_cleaned_key_count,
+        registry_cleaned_keys_sha256
       from public.chips_ledger_archive_batches
       where batch_id = 13
         and object_path = 'v1/sha256/a7ff21fef10b1d22b963793d3cf6efd667319a7211ee47c7e6f755f293155e60.jsonl.gz';
@@ -263,15 +299,29 @@ async function readOnlyBatch13Preflight(sql, plan) {
       const actual = field === "cutoff" ? normalizeTimestamp(batch[field]) : text(batch[field]);
       if (actual !== expectedValue) fail(`preflight batch ${field} mismatch`);
     }
-    if (!batch.committed_at || !batch.archive_proof_verified_at
-      || batch.pruned_at !== null
-      || batch.registry_cleaned_at !== null) {
-      fail("preflight batch is not committed and unpruned");
+    if (!batch.committed_at || !batch.archive_proof_verified_at) {
+      fail("preflight batch is not committed and proof-verified");
     }
+    const unpruned = batch.pruned_at === null && batch.registry_cleaned_at === null;
+    const pruned = batch.pruned_at !== null && batch.registry_cleaned_at !== null;
+    if (!unpruned && !pruned) fail("preflight batch has a partial prune receipt");
     const noGo = batch.destructive_go_at === null && batch.destructive_go_batch_id === null;
     const exactGo = batch.destructive_go_at !== null
       && text(batch.destructive_go_batch_id) === expected.batchId;
     if (!noGo && !exactGo) fail("preflight GO is partial or not bound to batch 13");
+    if (pruned && !exactGo) fail("preflight pruned batch is missing the exact batch 13 GO");
+    if (pruned) {
+      for (const [field, expectedValue] of Object.entries({
+        pruned_transaction_count: String(expected.transactionCount),
+        pruned_entry_count: String(expected.entryCount),
+        pruned_transaction_ids_sha256: expected.txIdsSha256,
+        pruned_entry_ids_sha256: expected.entryIdsSha256,
+        registry_cleaned_key_count: String(expected.registryCount),
+        registry_cleaned_keys_sha256: expected.registryKeysSha256,
+      })) {
+        if (text(batch[field]) !== expectedValue) fail(`preflight receipt ${field} mismatch`);
+      }
+    }
 
     const proofs = await tx.unsafe(`
       select
@@ -310,7 +360,28 @@ async function readOnlyBatch13Preflight(sql, plan) {
       fail("preflight proof batch table IDs mismatch");
     }
 
-    const registry = await tx.unsafe(`
+    const escrowAccounts = await tx.unsafe(`
+      select id::text as account_id, account_type::text as account_type,
+             system_key, status::text as status, balance::text as balance
+      from public.chips_accounts
+      where account_type::text = 'ESCROW'
+        and system_key = any($1::text[])
+      order by system_key;
+    `, [plan.batchTableIds.map((tableId) => `POKER_TABLE:${tableId}`)]);
+    if (escrowAccounts.length !== plan.batchTableIds.length
+      || escrowAccounts.some((row) => text(row.account_type).toUpperCase() !== "ESCROW"
+        || text(row.status).toLowerCase() !== "active"
+        || text(row.balance) !== "0"
+        || !plan.batchTableIds.includes(text(row.system_key).slice("POKER_TABLE:".length)))) {
+      fail("preflight ESCROW account scope is incomplete or changed");
+    }
+    const escrowAccountIds = escrowAccounts.map((row) => text(row.account_id).toLowerCase());
+    if (new Set(escrowAccountIds).size !== plan.batchTableIds.length
+      || escrowAccountIds.some((id) => !UUID_RE.test(id))) {
+      fail("preflight ESCROW account identity is incomplete");
+    }
+
+    const registry = pruned ? [] : await tx.unsafe(`
       select
         registry.idempotency_key,
         registry.table_id::text as table_id,
@@ -324,8 +395,8 @@ async function readOnlyBatch13Preflight(sql, plan) {
       where registry.archive_batch_id = 13
       order by registry.idempotency_key;
     `);
-    if (registry.length !== expected.registryCount
-      || hashLines(registry.map((row) => text(row.idempotency_key))) !== expected.registryKeysSha256) {
+    if (!pruned && (registry.length !== expected.registryCount
+      || hashLines(registry.map((row) => text(row.idempotency_key))) !== expected.registryKeysSha256)) {
       fail("preflight registry proof mismatch");
     }
     const batchTableIds = new Set(plan.batchTableIds.map((id) => text(id).toLowerCase()));
@@ -350,7 +421,7 @@ async function readOnlyBatch13Preflight(sql, plan) {
         }
       }
     }
-    const replayPair = assertReplayPair({
+    const replayPair = pruned ? null : assertReplayPair({
       idempotencyKey: registry[0]?.idempotency_key,
       tableId: registry[0]?.table_id,
       transactionId: registry[0]?.transaction_id,
@@ -377,9 +448,16 @@ async function readOnlyBatch13Preflight(sql, plan) {
           where exists (select 1 from registry where registry.transaction_id = entries.transaction_id))::text as entry_count;
     `);
     const countsRow = counts[0];
-    if (text(countsRow?.registry_count) !== String(expected.registryCount)
-      || text(countsRow?.transaction_count) !== String(expected.transactionCount)
-      || text(countsRow?.entry_count) !== String(expected.entryCount)) {
+    const expectedCounts = pruned
+      ? { registry: "0", transactions: "0", entries: "0" }
+      : {
+        registry: String(expected.registryCount),
+        transactions: String(expected.transactionCount),
+        entries: String(expected.entryCount),
+      };
+    if (text(countsRow?.registry_count) !== expectedCounts.registry
+      || text(countsRow?.transaction_count) !== expectedCounts.transactions
+      || text(countsRow?.entry_count) !== expectedCounts.entries) {
       fail("preflight hot row counts mismatch");
     }
     return {
@@ -388,10 +466,23 @@ async function readOnlyBatch13Preflight(sql, plan) {
         committedAt: batch.committed_at,
         destructiveGoAt: batch.destructive_go_at,
         destructiveGoBatchId: batch.destructive_go_batch_id,
+        state: pruned ? "pruned" : "unpruned",
+        receipt: pruned ? {
+          prunedAt: batch.pruned_at,
+          registryCleanedAt: batch.registry_cleaned_at,
+          prunedTransactionCount: number(batch.pruned_transaction_count, "preflight receipt transaction_count"),
+          prunedEntryCount: number(batch.pruned_entry_count, "preflight receipt entry_count"),
+          registryCleanedKeyCount: number(batch.registry_cleaned_key_count, "preflight receipt registry_count"),
+          remainingRegistryCount: 0,
+          transactionIdsSha256: batch.pruned_transaction_ids_sha256,
+          entryIdsSha256: batch.pruned_entry_ids_sha256,
+          registryKeysSha256: batch.registry_cleaned_keys_sha256,
+        } : null,
       },
       proof: { sourceRun: proof.source_run, querySha256: proof.query_sha256 },
       replayPair,
       replayTransactionIdCollision: false,
+      escrowAccountIds,
       counts: {
         transactions: number(countsRow.transaction_count, "preflight transaction_count"),
         entries: number(countsRow.entry_count, "preflight entry_count"),
@@ -406,6 +497,9 @@ async function readOnlyBatch13Preflight(sql, plan) {
     destructiveGoBatchId: details.batch.destructiveGoBatchId == null
       ? null
       : text(details.batch.destructiveGoBatchId),
+    batchState: details.batch.state,
+    prunedReceipt: details.batch.receipt,
+    escrowAccountIds: details.escrowAccountIds,
     replayPair: details.replayPair,
     replayTransactionIdCollision: details.replayTransactionIdCollision,
     readOnlyEvidence: details,
@@ -443,30 +537,27 @@ async function authorizeBatch13(sql) {
 }
 
 async function collectExecutionSnapshot(tx, accountIds = null) {
-  const scopedAccountIds = accountIds == null
-    ? (await tx.unsafe(`
-      with batch_transactions as (
-        select transaction_id
-        from public.chips_transaction_idempotency
-        where archive_batch_id = 13
-      )
-      select distinct entries.account_id::text as id
-      from public.chips_entries entries
-      join batch_transactions on batch_transactions.transaction_id = entries.transaction_id
-      order by id;
-    `)).map((row) => text(row.id).toLowerCase())
-    : accountIds.map((id) => text(id).toLowerCase());
+  if (!Array.isArray(accountIds)) fail("batch economic snapshot requires the immutable ESCROW account scope");
+  const scopedAccountIds = accountIds.map((id) => text(id).toLowerCase());
   if (new Set(scopedAccountIds).size !== scopedAccountIds.length
+    || scopedAccountIds.length !== 10
     || scopedAccountIds.some((id) => !UUID_RE.test(id))) {
-    fail("batch account scope is not a canonical UUID set");
+    fail("batch economic snapshot scope is not the exact ten-account ESCROW set");
   }
   const accountRows = await tx.unsafe(`
-    select id::text as id, balance::text as balance, next_entry_seq::text as next_entry_seq
+    select id::text as id, account_type::text as account_type,
+           system_key, status::text as status,
+           balance::text as balance, next_entry_seq::text as next_entry_seq
     from public.chips_accounts
     where id = any($1::uuid[])
     order by id;
   `, [scopedAccountIds]);
-  if (accountRows.length !== scopedAccountIds.length) fail("batch account scope is incomplete");
+  if (accountRows.length !== scopedAccountIds.length
+    || accountRows.some((row) => text(row.account_type).toUpperCase() !== "ESCROW"
+      || text(row.status).toLowerCase() !== "active"
+      || !/^POKER_TABLE:[0-9a-f-]{36}$/i.test(text(row.system_key)))) {
+    fail("batch economic snapshot contains a non-ESCROW account");
+  }
   const counts = await tx.unsafe(`
     with registry as (
       select transaction_id
@@ -509,6 +600,7 @@ async function collectExecutionSnapshot(tx, accountIds = null) {
   }));
   return {
     accountIds: scopedAccountIds,
+    accountScope: "ESCROW_TABLES",
     transactionCount: number(countsRow.transaction_count, "snapshot transaction_count"),
     entryCount: number(countsRow.entry_count, "snapshot entry_count"),
     registryCount: number(countsRow.registry_count, "snapshot registry_count"),
@@ -536,7 +628,9 @@ async function readExecutionSnapshot(sql, _plan, accountIds = null) {
 }
 
 function assertEconomicSnapshotUnchanged(before, after, label) {
-  if (canonicalHash(before.accountIds || []) !== canonicalHash(after.accountIds || [])
+  if (before.accountScope !== "ESCROW_TABLES"
+    || after.accountScope !== "ESCROW_TABLES"
+    || canonicalHash(before.accountIds || []) !== canonicalHash(after.accountIds || [])
     || before.balances.accountCount !== after.balances.accountCount
     || before.balances.total !== after.balances.total
     || before.balances.sha256 !== after.balances.sha256
@@ -759,9 +853,25 @@ export async function runLegacyStageAllowlistExecute({
       fail("legacy Stage execution requires the active TABLE fence");
     }
     const existingAuthorization = existingBatchAuthorization(preflight);
-    const replayPair = assertReplayPair(preflight?.replayPair, plan);
+    const batchState = preflight?.batchState
+      || preflight?.readOnlyEvidence?.batch?.state
+      || "unpruned";
+    if (batchState !== "unpruned" && batchState !== "pruned") {
+      fail("preflight batch state is not fail-closed");
+    }
+    const escrowAccountIds = assertEscrowAccountScope(preflight?.escrowAccountIds);
+    let replayPair = preflight?.replayPair
+      ? assertReplayPair(preflight.replayPair, plan)
+      : null;
+    if (!replayPair && batchState !== "pruned") {
+      fail("preflight replay pair is missing for an unpruned batch");
+    }
     if (preflight?.replayTransactionIdCollision !== false) {
       fail("preflight replay transaction ID collision check is incomplete");
+    }
+    if (batchState === "pruned") assertBatch13PrunedReceipt(preflight?.prunedReceipt);
+    if (batchState === "pruned" && !existingAuthorization) {
+      fail("preflight pruned batch requires the exact existing batch 13 GO");
     }
     const authorization = existingAuthorization
       ? {
@@ -776,11 +886,16 @@ export async function runLegacyStageAllowlistExecute({
       fail("legacy Stage batch 13 authorization receipt is incomplete");
     }
     const readSnapshot = deps.readExecutionSnapshot || readExecutionSnapshot;
-    const beforeExecuteSnapshot = await readSnapshot(sql, plan);
-    if (beforeExecuteSnapshot.transactionCount !== EXECUTE_BATCH_13.transactionCount
+    const beforeExecuteSnapshot = await readSnapshot(sql, plan, escrowAccountIds);
+    if (batchState === "unpruned" && (beforeExecuteSnapshot.transactionCount !== EXECUTE_BATCH_13.transactionCount
       || beforeExecuteSnapshot.entryCount !== EXECUTE_BATCH_13.entryCount
-      || beforeExecuteSnapshot.registryCount !== EXECUTE_BATCH_13.registryCount) {
+      || beforeExecuteSnapshot.registryCount !== EXECUTE_BATCH_13.registryCount)) {
       fail("batch 13 pre-execute snapshot counts are not exact");
+    }
+    if (batchState === "pruned" && (beforeExecuteSnapshot.transactionCount !== 0
+      || beforeExecuteSnapshot.entryCount !== 0
+      || beforeExecuteSnapshot.registryCount !== 0)) {
+      fail("preflight pruned batch still has hot rows");
     }
     const prune = deps.pruneArchive || runArchivePrune;
     const pruneArgs = {
@@ -800,10 +915,22 @@ export async function runLegacyStageAllowlistExecute({
         storageTarget,
         targetOptions: { singleTarget: true },
         legacyStageAllowlistPlan: plan,
+        beforeCleanup: async ({ evidence }) => {
+          const candidate = replayPair || evidence?.replayPair;
+          replayPair = assertReplayPair(candidate, plan, evidence);
+        },
         emit: false,
       },
     };
     const result = await prune(pruneArgs);
+    if (batchState === "unpruned" && result?.state !== "pruned") {
+      fail(`batch 13 execute returned ${result?.state || "unknown"}, expected pruned`);
+    }
+    if (batchState === "pruned" && result?.state !== "already_pruned") {
+      fail(`batch 13 resume returned ${result?.state || "unknown"}, expected already_pruned`);
+    }
+    assertBatch13Evidence(result.evidence);
+    replayPair = assertReplayPair(replayPair || result.evidence.replayPair, plan, result.evidence);
     const postExecute = await (deps.verifyPostExecute || verifyBatch13PostExecute)(
       sql,
       beforeExecuteSnapshot,
@@ -814,6 +941,7 @@ export async function runLegacyStageAllowlistExecute({
       fail(`batch 13 retry returned ${retryResult?.state || "unknown"}, expected already_pruned`);
     }
     assertBatch13Evidence(retryResult.evidence || result.evidence);
+    replayPair = assertReplayPair(replayPair, plan, retryResult.evidence || result.evidence);
     const retrySnapshot = await readSnapshot(sql, plan, beforeExecuteSnapshot.accountIds);
     if (retrySnapshot.transactionCount !== 0
       || retrySnapshot.entryCount !== 0

@@ -153,6 +153,7 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
   let userEntries = 0;
   const registryKeys = [];
   const tableIds = new Set();
+  const replayPairs = [];
 
   for (const record of localArchive.records) {
     const transaction = record.transaction;
@@ -191,6 +192,11 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
       }
       registryKeys.push(text(transaction.idempotency_key));
       tableIds.add(tableId);
+      replayPairs.push({
+        idempotencyKey: text(transaction.idempotency_key),
+        tableId,
+        transactionId: text(transaction.id),
+      });
     }
     if (record.entries.length !== 2) fail("technical archive transaction must contain exactly two entries");
 
@@ -264,6 +270,8 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
       legacyMasterTableIdsSha256: hashCanonicalLines([...(localArchive.manifest.legacy_stage_allowlist?.master_table_ids || [])].sort()),
       legacyAllowlistSha256: text(localArchive.manifest.legacy_stage_allowlist?.allowlist_sha256),
       legacyBatchTableIdsSha256: text(localArchive.manifest.legacy_stage_allowlist?.batch_table_ids_sha256),
+      replayPairs,
+      replayPair: replayPairs[0] || null,
     } : {}),
   };
 }
@@ -913,6 +921,9 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
         evidence,
         target,
       });
+    }
+    if (args.execute && typeof deps.beforeCleanup === "function") {
+      await deps.beforeCleanup({ row, evidence, identity, target, recoveryBundle });
     }
 
     const pruneResult = row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION

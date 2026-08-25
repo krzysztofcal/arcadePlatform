@@ -197,7 +197,12 @@ jobs:
                   status, committed_at::text as committed_at,
                   destructive_go_at::text as destructive_go_at,
                   destructive_go_batch_id::text as destructive_go_batch_id,
-                  pruned_at::text as pruned_at, registry_cleaned_at::text as registry_cleaned_at
+                  pruned_at::text as pruned_at, registry_cleaned_at::text as registry_cleaned_at,
+                  pruned_transaction_count::text as pruned_transaction_count,
+                  pruned_entry_count::text as pruned_entry_count,
+                  pruned_transaction_ids_sha256, pruned_entry_ids_sha256,
+                  registry_cleaned_key_count::text as registry_cleaned_key_count,
+                  registry_cleaned_keys_sha256
                 from public.chips_ledger_archive_batches
                 where batch_id = 13
                   and object_path = 'v1/sha256/a7ff21fef10b1d22b963793d3cf6efd667319a7211ee47c7e6f755f293155e60.jsonl.gz';
@@ -228,7 +233,28 @@ jobs:
               if (!batch.committed_at || !batch.archive_proof_verified_at || (!noGo && !exactGo)) {
                 fail("batch 13 GO is partial or not bound to the exact batch");
               }
-              if (batch.pruned_at !== null || batch.registry_cleaned_at !== null) fail("batch was already executed");
+              const unpruned = batch.pruned_at === null && batch.registry_cleaned_at === null;
+              const pruned = batch.pruned_at !== null && batch.registry_cleaned_at !== null;
+              if (!unpruned && !pruned) fail("batch has a partial prune receipt");
+              if (pruned) {
+                if (!exactGo) fail("complete pruned batch is missing exact batch 13 GO");
+                for (const [field, expected] of Object.entries({
+                  pruned_transaction_count: String(EXPECTED.transactionCount),
+                  pruned_entry_count: String(EXPECTED.entryCount),
+                  pruned_transaction_ids_sha256: EXPECTED.transactionIdsSha256,
+                  pruned_entry_ids_sha256: EXPECTED.entryIdsSha256,
+                  registry_cleaned_key_count: String(EXPECTED.registryCount),
+                  registry_cleaned_keys_sha256: EXPECTED.registryKeysSha256,
+                })) {
+                  if (text(batch[field]) !== expected) fail(`receipt ${field} mismatch`);
+                }
+                const remaining = await tx.unsafe(`
+                  select count(*)::text as registry_count
+                  from public.chips_transaction_idempotency
+                  where archive_batch_id = 13;
+                `);
+                if (text(remaining[0]?.registry_count) !== "0") fail("complete pruned batch still has registry rows");
+              }
 
               const proofs = await tx.unsafe(`
                 select
@@ -261,14 +287,14 @@ jobs:
                 if (text(proof[field]) !== expected) fail(`proof ${field} mismatch`);
               }
 
-              const registry = await tx.unsafe(`
+              const registry = pruned ? [] : await tx.unsafe(`
                 select idempotency_key
                 from public.chips_transaction_idempotency
                 where archive_batch_id = 13
                 order by idempotency_key;
               `);
-              if (registry.length !== EXPECTED.registryCount) fail("registry count mismatch");
-              if (hashLines(registry.map((row) => text(row.idempotency_key))) !== EXPECTED.registryKeysSha256) {
+              if (!pruned && registry.length !== EXPECTED.registryCount) fail("registry count mismatch");
+              if (!pruned && hashLines(registry.map((row) => text(row.idempotency_key))) !== EXPECTED.registryKeysSha256) {
                 fail("registry proof hash mismatch");
               }
             });

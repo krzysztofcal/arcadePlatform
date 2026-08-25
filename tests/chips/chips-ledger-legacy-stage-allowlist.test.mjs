@@ -750,8 +750,12 @@ try {
     tableId: plan.batchTableIds[4],
     transactionId: executeEvidence.transactionIds[17],
   };
+  const escrowAccountIds = Array.from({ length: 10 }, (_, index) => tableId(0xe001 + index));
+  executeEvidence.replayPairs = [replayPair];
+  executeEvidence.replayPair = replayPair;
   const beforeExecuteSnapshot = {
-    accountIds: [tableId(0xe001), tableId(0xe002)],
+    accountIds: escrowAccountIds,
+    accountScope: "ESCROW_TABLES",
     transactionCount: 60,
     entryCount: 120,
     registryCount: 60,
@@ -781,6 +785,7 @@ try {
         readOnly: true,
         destructiveGoAt: null,
         destructiveGoBatchId: null,
+        escrowAccountIds,
         replayPair,
         replayTransactionIdCollision: false,
       };
@@ -803,9 +808,10 @@ try {
       snapshotCalls += 1;
       return snapshotCalls === 1 ? beforeExecuteSnapshot : afterExecuteSnapshot;
     },
-    pruneArchive: async () => {
+    pruneArchive: async (pruneArgs) => {
       lifecycle.push("prune");
       pruneCalls += 1;
+      await pruneArgs.deps.beforeCleanup({ evidence: executeEvidence });
       return {
         state: pruneCalls === 1 ? "pruned" : "already_pruned",
         mode: "execute",
@@ -945,6 +951,7 @@ try {
       enforcementActive: true,
       readOnly: true,
       ...goState,
+      escrowAccountIds,
       replayPair,
       replayTransactionIdCollision: false,
     }),
@@ -962,9 +969,10 @@ try {
       resumeSnapshotCalls += 1;
       return resumeSnapshotCalls <= 2 ? resumeBefore : resumeAfter;
     },
-    pruneArchive: async () => {
+    pruneArchive: async (pruneArgs) => {
       resumePruneCalls += 1;
       if (resumePruneCalls === 1) throw new Error("simulated crash after authorization");
+      await pruneArgs.deps.beforeCleanup({ evidence: executeEvidence });
       return {
         state: resumePruneCalls === 2 ? "pruned" : "already_pruned",
         mode: "execute",
@@ -1006,6 +1014,94 @@ try {
   assert.equal(resumedExecute.replay.sqlstate, "P8903");
   assert.equal(resumeAfter.unrelatedAccount.balance, "701", "unrelated activity fixture must differ");
 
+  const prunedSnapshot = {
+    ...afterExecuteSnapshot,
+    accountIds: escrowAccountIds,
+    accountScope: "ESCROW_TABLES",
+  };
+  let prunedAuthorizeCalls = 0;
+  let prunedPruneCalls = 0;
+  let prunedPostVerifyCalls = 0;
+  const prunedDeps = {
+    storageTarget: runnerStorageTarget,
+    preflight: async () => ({
+      projectRef: "krydukthwdvccggbyjfw",
+      systemIdentifier: "7656985631720456337",
+      fenceActive: true,
+      enforcementActive: true,
+      readOnly: true,
+      batchState: "pruned",
+      destructiveGoAt: "2026-08-25T00:03:00.000000Z",
+      destructiveGoBatchId: "13",
+      escrowAccountIds,
+      replayPair: null,
+      replayTransactionIdCollision: false,
+      prunedReceipt: {
+        prunedAt: "2026-08-25T00:02:00.000000Z",
+        registryCleanedAt: "2026-08-25T00:02:00.000000Z",
+        prunedTransactionCount: 60,
+        prunedEntryCount: 120,
+        registryCleanedKeyCount: 60,
+        transactionIdsSha256: executeEvidence.transactionIdsSha256,
+        entryIdsSha256: executeEvidence.entryIdsSha256,
+        registryKeysSha256: executeEvidence.registryKeysSha256,
+      },
+    }),
+    authorize: async () => {
+      prunedAuthorizeCalls += 1;
+      throw new Error("complete pruned batch must not authorize again");
+    },
+    readExecutionSnapshot: async () => prunedSnapshot,
+    pruneArchive: async (pruneArgs) => {
+      prunedPruneCalls += 1;
+      await pruneArgs.deps.beforeCleanup({ evidence: executeEvidence });
+      return {
+        state: "already_pruned",
+        mode: "execute",
+        evidence: executeEvidence,
+        recoveryBundle: { artifactPath: executeRecoveryDir, manifestPath: `${executeRecoveryDir}/manifest.json`, reused: true },
+      };
+    },
+    verifyPostExecute: async (_sql, before, evidence) => {
+      prunedPostVerifyCalls += 1;
+      assert.equal(before, prunedSnapshot);
+      assert.equal(evidence, executeEvidence);
+      return {
+        state: "verified",
+        snapshot: prunedSnapshot,
+        receipt: {
+          prunedAt: "2026-08-25T00:02:00.000000Z",
+          registryCleanedAt: "2026-08-25T00:02:00.000000Z",
+          prunedTransactionCount: 60,
+          prunedEntryCount: 120,
+          registryCleanedKeyCount: 60,
+          remainingRegistryCount: 0,
+          transactionIdsSha256: executeEvidence.transactionIdsSha256,
+          entryIdsSha256: executeEvidence.entryIdsSha256,
+          registryKeysSha256: executeEvidence.registryKeysSha256,
+        },
+      };
+    },
+    replayOldRegistryKey: async (_sql, evidence, before, pair) => {
+      assert.equal(evidence, executeEvidence);
+      assert.equal(before, prunedSnapshot);
+      assert.deepEqual(pair, replayPair);
+      return { rejected: true, sqlstate: "P8903" };
+    },
+  };
+  const prunedExecute = await runLegacyStageAllowlistExecute({
+    argv: executeArgs,
+    env: executeEnv,
+    cwd: process.cwd(),
+    deps: prunedDeps,
+  });
+  assert.equal(prunedExecute.state, "already_pruned");
+  assert.equal(prunedExecute.authorization.resumed, true);
+  assert.equal(prunedAuthorizeCalls, 0);
+  assert.equal(prunedPruneCalls, 2, "pruned resume must perform the retry and its idempotent retry");
+  assert.equal(prunedPostVerifyCalls, 1);
+  assert.equal(prunedExecute.replay.sqlstate, "P8903");
+
   let collisionPruneCalls = 0;
   await assert.rejects(
     () => runLegacyStageAllowlistExecute({
@@ -1022,6 +1118,7 @@ try {
           readOnly: true,
           destructiveGoAt: null,
           destructiveGoBatchId: null,
+          escrowAccountIds,
           replayPair,
           replayTransactionIdCollision: true,
         }),
