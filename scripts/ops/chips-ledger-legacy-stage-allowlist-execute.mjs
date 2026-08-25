@@ -544,7 +544,7 @@ async function authorizeBatch13(sql) {
   });
 }
 
-async function collectExecutionSnapshot(tx, plan, accountIds = null, batchState = "pruned") {
+export async function collectExecutionSnapshot(tx, plan, accountIds = null, batchState = "pruned") {
   if (!Array.isArray(accountIds)) fail("batch economic snapshot requires the immutable ESCROW account scope");
   if (batchState !== "unpruned" && batchState !== "pruned") {
     fail("batch economic snapshot requires an exact batch state");
@@ -574,10 +574,10 @@ async function collectExecutionSnapshot(tx, plan, accountIds = null, batchState 
   }
   const registryScope = batchState === "pruned"
     ? "archive_batch_id = 13"
-    : legacyStageAllowlistRegistryPredicate("$2");
+    : legacyStageAllowlistRegistryPredicate("$1");
   const registryParameters = batchState === "pruned"
     ? []
-    : [scopedAccountIds, plan.batchTableIds];
+    : [plan.batchTableIds];
   const counts = await tx.unsafe(`
     with registry as (
       select transaction_id

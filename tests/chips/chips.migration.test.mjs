@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import postgres from "postgres";
 import { createPruneStore } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
+import { collectExecutionSnapshot } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-execute.mjs";
 import {
   assertLegacyStageAllowlistRegistryRows,
   hashLegacyStageAllowlistRegistryKeys,
@@ -1421,6 +1422,36 @@ async function assertLegacyUnprunedRegistrySelectorContract(sql) {
       ]);
     }
     await tx.unsafe("select public.chips_set_table_fence_active(true);");
+
+    // Exercise the exact production snapshot queries on disposable PostgreSQL.
+    // The fixture transaction is rollback-only; production wraps this helper in
+    // REPEATABLE READ, READ ONLY before using either state.
+    const escrowAccountIds = tableIds.map((_, index) =>
+      `00000000-0000-4000-8000-${String(0xe801 + index).padStart(12, "0")}`);
+    const snapshotPlan = { batchTableIds: tableIds };
+    const unprunedSnapshot = await collectExecutionSnapshot(
+      tx,
+      snapshotPlan,
+      escrowAccountIds,
+      "unpruned",
+    );
+    assert.equal(unprunedSnapshot.registryCount, 60);
+    assert.equal(unprunedSnapshot.transactionCount, 60);
+    assert.equal(unprunedSnapshot.entryCount, 0);
+    assert.equal(unprunedSnapshot.conservation.entryCount, 0);
+    assert.equal(unprunedSnapshot.conservation.entrySum, "0");
+
+    const prunedSnapshot = await collectExecutionSnapshot(
+      tx,
+      snapshotPlan,
+      escrowAccountIds,
+      "pruned",
+    );
+    assert.equal(prunedSnapshot.registryCount, 0);
+    assert.equal(prunedSnapshot.transactionCount, 0);
+    assert.equal(prunedSnapshot.entryCount, 0);
+    assert.equal(prunedSnapshot.conservation.entryCount, 0);
+    assert.equal(prunedSnapshot.conservation.entrySum, "0");
 
     const rows = await tx.unsafe(`
       select

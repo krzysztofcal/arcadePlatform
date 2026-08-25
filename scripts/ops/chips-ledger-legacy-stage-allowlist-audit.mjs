@@ -414,7 +414,11 @@ export function assertLegacyStageAuditBatchRow(rowInput, plan) {
   assertValue(row.status, "committed", "batch_status");
   if (!row.committed_at) fail("batch_committed_at");
   if (!row.archive_proof_verified_at) fail("archive_proof_verified_at");
-  if (row.destructive_go_at !== null || row.destructive_go_batch_id !== null) fail("destructive_go");
+  const noGo = row.destructive_go_at === null && row.destructive_go_batch_id === null;
+  const exactGo = row.destructive_go_at !== null
+    && Boolean(row.destructive_go_at)
+    && row.destructive_go_batch_id === expected.batchId;
+  if (!noGo && !exactGo) fail("destructive_go");
   if (row.pruned_at !== null || row.registry_cleaned_at !== null) fail("cleanup_receipts");
   assertValue(row.source_policy_id, LEGACY_STAGE_ALLOWLIST_POLICY_ID, "batch_policy");
   assertValue(row.legacy_allowlist_sha256, expected.masterAllowlistSha256, "batch_master_hash");

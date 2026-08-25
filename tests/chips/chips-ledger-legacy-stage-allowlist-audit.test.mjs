@@ -133,6 +133,14 @@ function validProofRow() {
 assert.doesNotThrow(() => assertLegacyStageAuditBatchRow(validBatchRow(), plan));
 assert.doesNotThrow(() => assertLegacyStageAuditProofRow(validProofRow(), plan));
 
+const authorizedBatchRow = validBatchRow();
+authorizedBatchRow.destructive_go_at = "2026-08-25T16:08:01.000000Z";
+authorizedBatchRow.destructive_go_batch_id = expected.batchId;
+assert.doesNotThrow(
+  () => assertLegacyStageAuditBatchRow(authorizedBatchRow, plan),
+  "audit must accept an exact batch 13 GO while the batch remains unpruned",
+);
+
 const batchTamperCases = [
   ["batch_object_path", "object_path", `${expected.objectPath}.tampered`],
   ["batch_id", "batch_id", "14"],
@@ -146,6 +154,8 @@ const batchTamperCases = [
   ["batch_entry_ids_hash", "archived_entry_ids_sha256", "0".repeat(64)],
   ["batch_status", "status", "pending"],
   ["destructive_go", "destructive_go_at", "2026-08-25T00:00:00Z"],
+  ["destructive_go", "destructive_go_batch_id", expected.batchId],
+  ["destructive_go", "destructive_go_batch_id", "14"],
   ["cleanup_receipts", "pruned_at", "2026-08-25T00:00:00Z"],
   ["batch_master_hash", "legacy_allowlist_sha256", "0".repeat(64)],
   ["batch_table_hash", "legacy_batch_table_ids_sha256", "0".repeat(64)],
