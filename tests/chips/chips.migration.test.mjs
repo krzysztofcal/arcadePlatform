@@ -1276,6 +1276,8 @@ async function assertLegacyAllowlistCleanupContracts(sql) {
       archived_transaction_ids_sha256, archived_entry_ids_sha256, archive_proof_verified_at
       from public.chips_ledger_archive_batches where batch_id = $1;`, [batchId]);
     assert.ok(idProofRows[0].archive_proof_verified_at, "legacy proof must create the immutable archive ID receipt");
+    const legacyTransactionHash = idProofRows[0].archived_transaction_ids_sha256;
+    const legacyEntryHash = idProofRows[0].archived_entry_ids_sha256;
 
     const authorizationRows = await tx.unsafe(
       "select public.chips_authorize_legacy_stage_allowlist_batch($1::bigint, $2, $3) as result;",
@@ -1337,8 +1339,8 @@ async function assertLegacyAllowlistCleanupContracts(sql) {
     assert.ok(postRows[0].registry_cleaned_at, "cleanup must write registry_cleaned_at");
     assert.equal(Number(postRows[0].pruned_transaction_count), 2);
     assert.equal(Number(postRows[0].pruned_entry_count), 4);
-    assert.equal(postRows[0].pruned_transaction_ids_sha256, transactionHash);
-    assert.equal(postRows[0].pruned_entry_ids_sha256, entryHash);
+    assert.equal(postRows[0].pruned_transaction_ids_sha256, legacyTransactionHash);
+    assert.equal(postRows[0].pruned_entry_ids_sha256, legacyEntryHash);
     assert.equal(Number(postRows[0].receipt_count), 2);
     assert.equal(postRows[0].receipt_hash, cleanupResult.registry_keys_sha256);
 
