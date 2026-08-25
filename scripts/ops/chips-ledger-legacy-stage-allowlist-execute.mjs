@@ -17,6 +17,10 @@ import {
   loadFrozenLegacyAllowlist,
   readOnlyStagePreflight,
 } from "./chips-ledger-legacy-stage-allowlist.mjs";
+import {
+  assertLegacyStageAllowlistRegistryRows,
+  legacyStageAllowlistRegistryPredicate,
+} from "./chips-ledger-legacy-stage-allowlist-registry.mjs";
 import { validateStageEnvironment } from "./chips-ledger-stage-automation.mjs";
 
 const EXECUTE_GATE = "CHIPS_LEDGER_LEGACY_STAGE_ALLOWLIST_EXECUTE";
@@ -58,10 +62,6 @@ function normalizeTimestamp(value) {
 
 function canonicalHash(value) {
   return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
-}
-
-function hashLines(values) {
-  return crypto.createHash("sha256").update(`${values.join("\n")}\n`).digest("hex");
 }
 
 function parseJsonb(value, field) {
@@ -386,25 +386,31 @@ async function readOnlyBatch13Preflight(sql, plan) {
         registry.idempotency_key,
         registry.table_id::text as table_id,
         registry.transaction_id::text as transaction_id,
-        transactions.tx_type::text as tx_type,
+        registry.tx_type::text as tx_type,
+        transactions.tx_type::text as transaction_tx_type,
         transactions.user_id::text as user_id,
         transactions.metadata,
-        transactions.reference
+        transactions.reference,
+        registry.archive_batch_id::text as archive_batch_id
       from public.chips_transaction_idempotency registry
       join public.chips_transactions transactions on transactions.id = registry.transaction_id
-      where registry.archive_batch_id = 13
+      where ${legacyStageAllowlistRegistryPredicate("$1")}
       order by registry.idempotency_key;
-    `);
-    if (!pruned && (registry.length !== expected.registryCount
-      || hashLines(registry.map((row) => text(row.idempotency_key))) !== expected.registryKeysSha256)) {
-      fail("preflight registry proof mismatch");
+    `, [plan.batchTableIds]);
+    if (!pruned) {
+      assertLegacyStageAllowlistRegistryRows(registry, {
+        tableIds: plan.batchTableIds,
+        expectedCount: expected.registryCount,
+        expectedKeysSha256: expected.registryKeysSha256,
+        fail: (code) => fail(`preflight ${code}`),
+      });
     }
     const batchTableIds = new Set(plan.batchTableIds.map((id) => text(id).toLowerCase()));
     for (const row of registry) {
       const tableId = text(row.table_id).toLowerCase();
       if (!UUID_RE.test(tableId) || !batchTableIds.has(tableId)
         || !UUID_RE.test(text(row.transaction_id).toLowerCase())
-        || !["TABLE_BUY_IN", "TABLE_CASH_OUT"].includes(text(row.tx_type))
+        || text(row.transaction_tx_type) !== text(row.tx_type)
         || row.user_id !== null) {
         fail("preflight replay pair identity is incomplete");
       }
@@ -437,8 +443,10 @@ async function readOnlyBatch13Preflight(sql, plan) {
     const counts = await tx.unsafe(`
       with registry as (
         select transaction_id
-        from public.chips_transaction_idempotency
-        where archive_batch_id = 13
+        from public.chips_transaction_idempotency registry
+        where ${pruned
+          ? "archive_batch_id = 13"
+          : legacyStageAllowlistRegistryPredicate("$1")}
       )
       select
         (select count(*) from registry)::text as registry_count,
@@ -446,7 +454,7 @@ async function readOnlyBatch13Preflight(sql, plan) {
           where exists (select 1 from registry where registry.transaction_id = transactions.id))::text as transaction_count,
         (select count(*) from public.chips_entries entries
           where exists (select 1 from registry where registry.transaction_id = entries.transaction_id))::text as entry_count;
-    `);
+    `, pruned ? [] : [plan.batchTableIds]);
     const countsRow = counts[0];
     const expectedCounts = pruned
       ? { registry: "0", transactions: "0", entries: "0" }
@@ -536,8 +544,14 @@ async function authorizeBatch13(sql) {
   });
 }
 
-async function collectExecutionSnapshot(tx, accountIds = null) {
+async function collectExecutionSnapshot(tx, plan, accountIds = null, batchState = "pruned") {
   if (!Array.isArray(accountIds)) fail("batch economic snapshot requires the immutable ESCROW account scope");
+  if (batchState !== "unpruned" && batchState !== "pruned") {
+    fail("batch economic snapshot requires an exact batch state");
+  }
+  if (batchState === "unpruned" && !Array.isArray(plan?.batchTableIds)) {
+    fail("unpruned batch economic snapshot requires the immutable table scope");
+  }
   const scopedAccountIds = accountIds.map((id) => text(id).toLowerCase());
   if (new Set(scopedAccountIds).size !== scopedAccountIds.length
     || scopedAccountIds.length !== 10
@@ -558,11 +572,17 @@ async function collectExecutionSnapshot(tx, accountIds = null) {
       || !/^POKER_TABLE:[0-9a-f-]{36}$/i.test(text(row.system_key)))) {
     fail("batch economic snapshot contains a non-ESCROW account");
   }
+  const registryScope = batchState === "pruned"
+    ? "archive_batch_id = 13"
+    : legacyStageAllowlistRegistryPredicate("$2");
+  const registryParameters = batchState === "pruned"
+    ? [scopedAccountIds]
+    : [scopedAccountIds, plan.batchTableIds];
   const counts = await tx.unsafe(`
     with registry as (
       select transaction_id
-      from public.chips_transaction_idempotency
-      where archive_batch_id = 13
+      from public.chips_transaction_idempotency registry
+      where ${registryScope}
     )
     select
       (select count(*) from registry)::text as registry_count,
@@ -570,19 +590,19 @@ async function collectExecutionSnapshot(tx, accountIds = null) {
         where exists (select 1 from registry where registry.transaction_id = transactions.id))::text as transaction_count,
       (select count(*) from public.chips_entries entries
         where exists (select 1 from registry where registry.transaction_id = entries.transaction_id))::text as entry_count;
-  `);
+  `, registryParameters);
   const conservationRows = await tx.unsafe(`
     with batch_transactions as (
       select transaction_id
-      from public.chips_transaction_idempotency
-      where archive_batch_id = 13
+      from public.chips_transaction_idempotency registry
+      where ${registryScope}
     )
     select
       count(entries.id)::text as entry_count,
       coalesce(sum(entries.amount), 0)::text as entry_sum
     from public.chips_entries entries
     join batch_transactions on batch_transactions.transaction_id = entries.transaction_id;
-  `);
+  `, registryParameters);
   const scopedEconomics = await tx.unsafe(`
     select
       coalesce(sum(balance), 0)::text as balance_total,
@@ -620,10 +640,10 @@ async function collectExecutionSnapshot(tx, accountIds = null) {
   };
 }
 
-async function readExecutionSnapshot(sql, _plan, accountIds = null) {
+async function readExecutionSnapshot(sql, plan, accountIds = null, batchState = "pruned") {
   return sql.begin(async (tx) => {
     await tx.unsafe("set transaction isolation level repeatable read, read only;");
-    return collectExecutionSnapshot(tx, accountIds);
+    return collectExecutionSnapshot(tx, plan, accountIds, batchState);
   });
 }
 
@@ -641,12 +661,12 @@ function assertEconomicSnapshotUnchanged(before, after, label) {
   }
 }
 
-async function verifyBatch13PostExecute(sql, before, evidence) {
+async function verifyBatch13PostExecute(sql, plan, before, evidence) {
   const expected = EXECUTE_BATCH_13;
   assertBatch13Evidence(evidence);
   return sql.begin(async (tx) => {
     await tx.unsafe("set transaction isolation level repeatable read, read only;");
-    const snapshot = await collectExecutionSnapshot(tx, before.accountIds);
+    const snapshot = await collectExecutionSnapshot(tx, plan, before.accountIds, "pruned");
     if (snapshot.transactionCount !== 0 || snapshot.entryCount !== 0 || snapshot.registryCount !== 0) {
       fail("post-execute hot rows or registry mappings remain");
     }
@@ -727,7 +747,7 @@ async function replayOldRegistryKey(sql, evidence, before, replayPair, plan) {
     if (text(collisionRows[0]?.collision_count) !== "0") {
       fail("replay transaction ID collision");
     }
-    const beforeReplay = await collectExecutionSnapshot(tx, before.accountIds);
+    const beforeReplay = await collectExecutionSnapshot(tx, plan, before.accountIds, "pruned");
     await tx.unsafe("savepoint legacy_stage_batch_13_replay;");
     let rejection = null;
     try {
@@ -755,7 +775,7 @@ async function replayOldRegistryKey(sql, evidence, before, replayPair, plan) {
       fail(`legacy registry key replay returned unexpected SQLSTATE ${rejection.code || "unknown"}`);
     }
     await tx.unsafe("release savepoint legacy_stage_batch_13_replay;");
-    const afterReplay = await collectExecutionSnapshot(tx, beforeReplay.accountIds);
+    const afterReplay = await collectExecutionSnapshot(tx, plan, beforeReplay.accountIds, "pruned");
     assertEconomicSnapshotUnchanged(beforeReplay, afterReplay, "legacy replay");
     if (afterReplay.transactionCount !== 0 || afterReplay.entryCount !== 0 || afterReplay.registryCount !== 0) {
       fail("legacy replay changed hot rows or registry mappings");
@@ -886,7 +906,7 @@ export async function runLegacyStageAllowlistExecute({
       fail("legacy Stage batch 13 authorization receipt is incomplete");
     }
     const readSnapshot = deps.readExecutionSnapshot || readExecutionSnapshot;
-    const beforeExecuteSnapshot = await readSnapshot(sql, plan, escrowAccountIds);
+    const beforeExecuteSnapshot = await readSnapshot(sql, plan, escrowAccountIds, batchState);
     if (batchState === "unpruned" && (beforeExecuteSnapshot.transactionCount !== EXECUTE_BATCH_13.transactionCount
       || beforeExecuteSnapshot.entryCount !== EXECUTE_BATCH_13.entryCount
       || beforeExecuteSnapshot.registryCount !== EXECUTE_BATCH_13.registryCount)) {
@@ -933,6 +953,7 @@ export async function runLegacyStageAllowlistExecute({
     replayPair = assertReplayPair(replayPair || result.evidence.replayPair, plan, result.evidence);
     const postExecute = await (deps.verifyPostExecute || verifyBatch13PostExecute)(
       sql,
+      plan,
       beforeExecuteSnapshot,
       result.evidence,
     );
@@ -942,7 +963,7 @@ export async function runLegacyStageAllowlistExecute({
     }
     assertBatch13Evidence(retryResult.evidence || result.evidence);
     replayPair = assertReplayPair(replayPair, plan, retryResult.evidence || result.evidence);
-    const retrySnapshot = await readSnapshot(sql, plan, beforeExecuteSnapshot.accountIds);
+    const retrySnapshot = await readSnapshot(sql, plan, beforeExecuteSnapshot.accountIds, "pruned");
     if (retrySnapshot.transactionCount !== 0
       || retrySnapshot.entryCount !== 0
       || retrySnapshot.registryCount !== 0) {

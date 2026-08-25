@@ -823,7 +823,7 @@ try {
         },
       };
     },
-    verifyPostExecute: async (_sql, before, evidence) => {
+    verifyPostExecute: async (_sql, _plan, before, evidence) => {
       lifecycle.push("post-verify");
       assert.deepEqual(before, beforeExecuteSnapshot);
       assert.deepEqual(evidence, executeEvidence);
@@ -1062,7 +1062,7 @@ try {
         recoveryBundle: { artifactPath: executeRecoveryDir, manifestPath: `${executeRecoveryDir}/manifest.json`, reused: true },
       };
     },
-    verifyPostExecute: async (_sql, before, evidence) => {
+    verifyPostExecute: async (_sql, _plan, before, evidence) => {
       prunedPostVerifyCalls += 1;
       assert.equal(before, prunedSnapshot);
       assert.equal(evidence, executeEvidence);

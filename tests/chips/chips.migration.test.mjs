@@ -4,6 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 import postgres from "postgres";
 import { createPruneStore } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
+import {
+  assertLegacyStageAllowlistRegistryRows,
+  hashLegacyStageAllowlistRegistryKeys,
+  legacyStageAllowlistRegistryPredicate,
+} from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-registry.mjs";
 
 const dbUrl = process.env.CHIPS_MIGRATIONS_TEST_DB_URL;
 const allowDrop = process.env.CHIPS_MIGRATIONS_ALLOW_DROP === "1";
@@ -1376,6 +1381,74 @@ async function assertLegacyAllowlistCleanupContracts(sql) {
   });
 }
 
+async function assertLegacyUnprunedRegistrySelectorContract(sql) {
+  const tableIds = Array.from({ length: 10 }, (_, index) =>
+    `00000000-0000-4000-8000-${String(0xe601 + index).padStart(12, "0")}`);
+  const transactionIds = Array.from({ length: 60 }, (_, index) =>
+    `00000000-0000-4000-8000-${String(0xe701 + index).padStart(12, "0")}`);
+  const registryKeys = transactionIds.map((_, index) =>
+    `legacy-unpruned-selector:${tableIds[index % tableIds.length]}:${String(index).padStart(2, "0")}`);
+  const ROLLBACK = new Error("legacy-unpruned-registry-selector-rollback");
+
+  await sql.begin(async (tx) => {
+    await tx.unsafe("set transaction isolation level serializable;");
+    await tx.unsafe("select public.chips_set_table_fence_active(false);");
+    for (let index = 0; index < tableIds.length; index += 1) {
+      const tableId = tableIds[index];
+      await tx.unsafe(`insert into public.poker_tables (
+        id, status, has_human_participant, bot_only_proof_eligible
+      ) values ($1::uuid, 'CLOSED', false, false);`, [tableId]);
+      await tx.unsafe(`insert into public.chips_accounts (
+        id, account_type, system_key, status, balance, next_entry_seq
+      ) values ($1::uuid, 'ESCROW', $2, 'active', 0, 1);`, [
+        `00000000-0000-4000-8000-${String(0xe801 + index).padStart(12, "0")}`,
+        `POKER_TABLE:${tableId}`,
+      ]);
+    }
+    for (let index = 0; index < transactionIds.length; index += 1) {
+      const tableId = tableIds[index % tableIds.length];
+      await tx.unsafe(`insert into public.chips_transactions (
+        id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at
+      ) values ($1::uuid, $2, $3::jsonb, $4, $5, $6, null, $7::timestamptz);`, [
+        transactionIds[index],
+        `BOT_SEED_BUY_IN:${tableId}:${index}`,
+        { tableId },
+        registryKeys[index],
+        crypto.createHash("sha256").update(registryKeys[index]).digest("hex"),
+        index % 2 === 0 ? "TABLE_BUY_IN" : "TABLE_CASH_OUT",
+        sql.typed(`2026-08-17T00:00:${String(index % 60).padStart(2, "0")}.000001Z`, 25),
+      ]);
+    }
+    await tx.unsafe("select public.chips_set_table_fence_active(true);");
+
+    const rows = await tx.unsafe(`
+      select
+        registry.idempotency_key,
+        registry.transaction_id::text as transaction_id,
+        registry.table_id::text as table_id,
+        registry.tx_type::text as tx_type,
+        registry.user_id::text as user_id,
+        registry.archive_batch_id::text as archive_batch_id
+      from public.chips_transaction_idempotency registry
+      where ${legacyStageAllowlistRegistryPredicate("$1")}
+      order by registry.idempotency_key;
+    `, [tableIds]);
+    assert.equal(rows.length, 60, "unpruned selector must return all 60 registry rows");
+    const expectedKeysSha256 = hashLegacyStageAllowlistRegistryKeys([...registryKeys].sort());
+    const selection = assertLegacyStageAllowlistRegistryRows(rows, {
+      tableIds,
+      expectedCount: 60,
+      expectedKeysSha256,
+    });
+    assert.equal(selection.keysSha256, expectedKeysSha256);
+    assert.equal(new Set(rows.map((row) => row.table_id)).size, 10);
+    assert.ok(rows.every((row) => row.archive_batch_id === null));
+    throw ROLLBACK;
+  }).catch((error) => {
+    if (error !== ROLLBACK) throw error;
+  });
+}
+
 async function assertScopedSnapshotIgnoresParallelUnrelatedActivity(sql) {
   const snapshotSql = postgres(dbUrl, { max: 1 });
   const activitySql = postgres(dbUrl, { max: 1 });
@@ -1554,6 +1627,7 @@ async function main() {
   await ensureGenesisFixture(sql);
   await assertArchivePrunerRoleContracts(sql);
   await assertLegacyAllowlistCleanupContracts(sql);
+  await assertLegacyUnprunedRegistrySelectorContract(sql);
   await assertScopedSnapshotIgnoresParallelUnrelatedActivity(sql);
   await expectNegativeBalanceGuard(sql);
   await expectInsufficientBuyIn(sql);

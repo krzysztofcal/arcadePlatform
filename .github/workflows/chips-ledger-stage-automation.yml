@@ -143,8 +143,12 @@ jobs:
           set -euo pipefail
           test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
           node --input-type=module <<'NODE'
-          import crypto from "node:crypto";
           import postgres from "postgres";
+          import {
+            assertLegacyStageAllowlistRegistryRows,
+            hashLegacyStageAllowlistRegistryKeys,
+            legacyStageAllowlistRegistryPredicate,
+          } from "./scripts/ops/chips-ledger-legacy-stage-allowlist-registry.mjs";
 
           const EXPECTED = Object.freeze({
             projectRef: "krydukthwdvccggbyjfw",
@@ -168,7 +172,6 @@ jobs:
 
           const fail = (message) => { throw new Error(`execute-batch-13 preflight: ${message}`); };
           const text = (value) => value == null ? "" : String(value).trim();
-          const hashLines = (values) => crypto.createHash("sha256").update(`${values.join("\n")}\n`).digest("hex");
           const sql = postgres(process.env.SUPABASE_STAGE_DB_URL, {
             max: 1,
             prepare: false,
@@ -262,7 +265,7 @@ jobs:
                   cutoff::text as cutoff, source_run, query_sha256,
                   postgres_system_identifier, master_table_count::text as master_table_count,
                   master_table_ids_sha256, batch_number::text as batch_number,
-                  batch_table_count::text as batch_table_count, batch_table_ids_sha256
+                  batch_table_count::text as batch_table_count, batch_table_ids, batch_table_ids_sha256
                 from public.chips_legacy_stage_allowlist_proofs
                 where batch_id = 13
                   and object_path = 'v1/sha256/a7ff21fef10b1d22b963793d3cf6efd667319a7211ee47c7e6f755f293155e60.jsonl.gz';
@@ -286,16 +289,32 @@ jobs:
               })) {
                 if (text(proof[field]) !== expected) fail(`proof ${field} mismatch`);
               }
+              const batchTableIds = proof.batch_table_ids;
+              if (!Array.isArray(batchTableIds)
+                || batchTableIds.length !== 10
+                || hashLegacyStageAllowlistRegistryKeys(batchTableIds) !== EXPECTED.batchTableIdsSha256) {
+                fail("proof batch table IDs are not the immutable ten-table set");
+              }
 
               const registry = pruned ? [] : await tx.unsafe(`
-                select idempotency_key
-                from public.chips_transaction_idempotency
-                where archive_batch_id = 13
+                select
+                  registry.idempotency_key,
+                  registry.transaction_id::text as transaction_id,
+                  registry.table_id::text as table_id,
+                  registry.tx_type::text as tx_type,
+                  registry.user_id::text as user_id,
+                  registry.archive_batch_id::text as archive_batch_id
+                from public.chips_transaction_idempotency registry
+                where ${legacyStageAllowlistRegistryPredicate("$1")}
                 order by idempotency_key;
-              `);
-              if (!pruned && registry.length !== EXPECTED.registryCount) fail("registry count mismatch");
-              if (!pruned && hashLines(registry.map((row) => text(row.idempotency_key))) !== EXPECTED.registryKeysSha256) {
-                fail("registry proof hash mismatch");
+              `, [batchTableIds]);
+              if (!pruned) {
+                assertLegacyStageAllowlistRegistryRows(registry, {
+                  tableIds: batchTableIds,
+                  expectedCount: EXPECTED.registryCount,
+                  expectedKeysSha256: EXPECTED.registryKeysSha256,
+                  fail: (code) => fail(`registry ${code}`),
+                });
               }
             });
           } finally {

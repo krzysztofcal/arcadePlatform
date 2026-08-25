@@ -3,6 +3,7 @@ import fs from "node:fs";
 
 const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-automation.yml", "utf8");
 const executeRunner = fs.readFileSync("scripts/ops/chips-ledger-legacy-stage-allowlist-execute.mjs", "utf8");
+const registrySelector = fs.readFileSync("scripts/ops/chips-ledger-legacy-stage-allowlist-registry.mjs", "utf8");
 
 assert.match(
   workflow,
@@ -110,6 +111,12 @@ assert.match(executeRun, /registry_cleaned_at/);
 assert.match(executeRun, /destructive_go_batch_id/);
 assert.match(executeRun, /public\.chips_legacy_stage_allowlist_proofs/);
 assert.match(executeRun, /public\.chips_transaction_idempotency/);
+assert.match(executeRun, /legacyStageAllowlistRegistryPredicate/);
+assert.match(executeRun, /assertLegacyStageAllowlistRegistryRows/);
+assert.match(registrySelector, /TABLE_BUY_IN.*TABLE_CASH_OUT/s);
+assert.match(registrySelector, /archive_batch_id !== null/);
+assert.match(registrySelector, /expectedCount/);
+assert.match(registrySelector, /expectedKeysSha256/);
 assert.match(executeRun, /archive_proof_verified_at/);
 assert.match(executeRun, /destructive_go_at !== null/);
 assert.match(executeRun, /destructive_go_batch_id === null/);

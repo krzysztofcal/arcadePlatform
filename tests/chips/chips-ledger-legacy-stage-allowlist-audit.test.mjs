@@ -25,6 +25,11 @@ import {
 } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-audit.mjs";
 import { buildLegacyPlan, loadFrozenLegacyAllowlist } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist.mjs";
 import { computeArchiveIdProofs } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
+import {
+  assertLegacyStageAllowlistRegistryRows,
+  hashLegacyStageAllowlistRegistryKeys,
+  legacyStageAllowlistRegistryPredicate,
+} from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-registry.mjs";
 
 const frozen = loadFrozenLegacyAllowlist({ cwd: process.cwd() });
 const plan = buildLegacyPlan(frozen.masterManifest, frozen.batchManifest);
@@ -253,6 +258,50 @@ assert.throws(
   (error) => error.code === "registry_rows_count",
 );
 
+assert.match(legacyStageAllowlistRegistryPredicate("$1"), /table_id = any\(\$1::uuid\[\]\)/);
+assert.match(legacyStageAllowlistRegistryPredicate("$1"), /TABLE_BUY_IN.*TABLE_CASH_OUT/s);
+assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, /archive_batch_id::text as archive_batch_id/);
+
+// This mirrors the approved unpruned batch shape: all 60 TABLE_* registry
+// rows belong to the exact ten tables and remain unassigned to an archive.
+const unprunedRegistryRows = Array.from({ length: 60 }, (_, index) => ({
+  idempotency_key: `batch-13-unpruned:${plan.batchTableIds[index % 10]}:${String(index).padStart(2, "0")}`,
+  transaction_id: `00000000-0000-4000-8000-${String(0xd600 + index).padStart(12, "0")}`,
+  table_id: plan.batchTableIds[index % 10],
+  tx_type: index % 2 === 0 ? "TABLE_BUY_IN" : "TABLE_CASH_OUT",
+  user_id: null,
+  archive_batch_id: null,
+}));
+const unprunedRegistryHash = hashLegacyStageAllowlistRegistryKeys(
+  unprunedRegistryRows.map((row) => row.idempotency_key).sort(),
+);
+assert.doesNotThrow(() => assertLegacyStageAllowlistRegistryRows(unprunedRegistryRows, {
+  tableIds: plan.batchTableIds,
+  expectedCount: 60,
+  expectedKeysSha256: unprunedRegistryHash,
+}));
+assert.throws(
+  () => assertLegacyStageAllowlistRegistryRows(
+    unprunedRegistryRows.map((row, index) => index === 0 ? { ...row, archive_batch_id: 13 } : row),
+    { tableIds: plan.batchTableIds, expectedCount: 60, expectedKeysSha256: unprunedRegistryHash },
+  ),
+  (error) => error.code === "registry_archive_batch_id",
+);
+assert.throws(
+  () => assertLegacyStageAllowlistRegistryRows(
+    [...unprunedRegistryRows, { ...unprunedRegistryRows[0], idempotency_key: "batch-13-extra" }],
+    { tableIds: plan.batchTableIds, expectedCount: 60, expectedKeysSha256: unprunedRegistryHash },
+  ),
+  (error) => error.code === "registry_rows_count",
+);
+assert.throws(
+  () => assertLegacyStageAllowlistRegistryRows(
+    unprunedRegistryRows.map((row, index) => index === 0 ? { ...row, idempotency_key: "batch-13-replaced" } : row),
+    { tableIds: plan.batchTableIds, expectedCount: 60, expectedKeysSha256: unprunedRegistryHash },
+  ),
+  (error) => error.code === "registry_keys_hash",
+);
+
 const tableRows = archiveOrderRecords.map(({ table_context }) => ({
   table_id: table_context.table_id, status: "CLOSED", has_human_participant: false,
   bot_only_proof_eligible: false, escrow_account_id: table_context.escrow_account_id,
@@ -371,9 +420,11 @@ assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.fence, /chips_table_fence_is_activ
 assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.enforcement, /enforcement_active/);
 assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.batch, /batch_id = \$1/);
 assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.entries, /transaction_id = any\(\$1::uuid\[\]\)/);
-assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, /transaction_id = any\(\$1::uuid\[\]\)/);
+assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, /table_id = any\(\$3::uuid\[\]\)/);
+assert.doesNotMatch(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, /or transaction_id = any/);
 
 const auditSource = fs.readFileSync("scripts/ops/chips-ledger-legacy-stage-allowlist-audit.mjs", "utf8");
+assert.match(auditSource, /row\.archive_batch_id !== null/);
 assert.doesNotMatch(auditSource, /runLegacyStagePrepareOnly|storeArchive|pruneArchive|--execute|CHIPS_LEDGER_BOT_ONLY_EXECUTE/);
 assert.doesNotMatch(auditSource, /\b(?:insert|update|delete)\s+into\b/i);
 assert.doesNotMatch(auditSource, /method:\s*["'](?:POST|PUT|PATCH|DELETE)["']/i);

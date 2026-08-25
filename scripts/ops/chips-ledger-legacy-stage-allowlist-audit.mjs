@@ -36,6 +36,10 @@ import {
   STAGE_SYSTEM_IDENTIFIER,
   validateStageEnvironment,
 } from "./chips-ledger-stage-automation.mjs";
+import {
+  assertLegacyStageAllowlistRegistryRows,
+  legacyStageAllowlistRegistryPredicate,
+} from "./chips-ledger-legacy-stage-allowlist-registry.mjs";
 
 export const LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13 = Object.freeze({
   batchId: "13",
@@ -167,11 +171,8 @@ export const LEGACY_STAGE_ALLOWLIST_AUDIT_SQL = Object.freeze({
     payload_hash, tx_type::text as tx_type,
     user_id::text as user_id, transaction_created_at::text as transaction_created_at,
     archive_batch_id::text as archive_batch_id
-  from public.chips_transaction_idempotency
-  where (table_id = any($3::uuid[])
-         and tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT'))
-     or transaction_id = any($1::uuid[])
-     or idempotency_key = any($2::text[])
+  from public.chips_transaction_idempotency registry
+  where ${legacyStageAllowlistRegistryPredicate("$3")}
   order by idempotency_key;`,
   entryShapes: `with selected as materialized (
     select transactions.*
@@ -540,7 +541,12 @@ export function assertExactRegistryRows(rows, records, batchIds) {
   if (expectedTableIds.size !== allowedTableIds.size || [...expectedTableIds].some((id) => !allowedTableIds.has(id))) {
     fail("registry_table_id_set");
   }
-  if (rows.length !== expected.size) fail("registry_rows_count");
+  assertLegacyStageAllowlistRegistryRows(rows, {
+    tableIds: [...allowedTableIds],
+    expectedCount: expected.size,
+    expectedKeysSha256: hashCanonicalLines([...expected.keys()].sort()),
+    fail: (code) => fail(code),
+  });
   for (const row of rows) {
     const expectedRow = expected.get(row.idempotency_key);
     if (!expectedRow) fail("registry_key_set");
