@@ -79,6 +79,10 @@ export const LEGACY_STAGE_ALLOWLIST_AUDIT_STORAGE_TIMEOUT_MS = 20000;
 export const LEGACY_STAGE_ALLOWLIST_AUDIT_STATEMENT_TIMEOUT = "120s";
 export const LEGACY_STAGE_ALLOWLIST_AUDIT_READ_ONLY_TRANSACTION_SQL =
   "set transaction isolation level repeatable read, read only;";
+export const LEGACY_STAGE_ALLOWLIST_AUDIT_PRUNER_SIGNATURE =
+  "public.chips_prune_legacy_stage_allowlist_batch(text,uuid[],bigint[],uuid[],text,text,text[],boolean,bigint)";
+export const LEGACY_STAGE_ALLOWLIST_AUDIT_OLD_PRUNER_SIGNATURE =
+  "public.chips_prune_legacy_stage_allowlist_batch(text,uuid[],bigint[],uuid[],text,text,boolean,bigint)";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const COMMIT_SHA_RE = /^[0-9a-f]{40}$/;
@@ -91,12 +95,31 @@ export const LEGACY_STAGE_ALLOWLIST_AUDIT_SQL = Object.freeze({
     (select count(*) from supabase_migrations.schema_migrations where version = $1)::text as applied_count,
     (select count(*) from supabase_migrations.schema_migration_files where version = $1)::text as hash_count,
     (select sha256 from supabase_migrations.schema_migration_files where version = $1 limit 1) as sha256;`,
-  overloads: `select pg_catalog.pg_get_function_identity_arguments(p.oid) as args
-    from pg_catalog.pg_proc p
-    join pg_catalog.pg_namespace n on n.oid = p.pronamespace
-   where n.nspname = 'public'
-     and p.proname = 'chips_prune_legacy_stage_allowlist_batch'
-   order by p.oid;`,
+  overloads: `with expected as (
+    select
+      pg_catalog.to_regprocedure('${LEGACY_STAGE_ALLOWLIST_AUDIT_PRUNER_SIGNATURE}') as expected_oid,
+      pg_catalog.to_regprocedure('${LEGACY_STAGE_ALLOWLIST_AUDIT_OLD_PRUNER_SIGNATURE}') as legacy_oid
+  ), observed as (
+    select p.oid, pg_catalog.pg_get_function_identity_arguments(p.oid) as identity_args
+      from pg_catalog.pg_proc p
+      join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.proname = 'chips_prune_legacy_stage_allowlist_batch'
+  )
+  select expected.expected_oid::text as expected_oid,
+    expected.legacy_oid::text as legacy_oid,
+    count(observed.oid)::text as overload_count,
+    count(observed.oid) filter (where observed.oid = expected.expected_oid)::text as expected_count,
+    count(observed.oid) filter (where observed.oid = expected.legacy_oid)::text as legacy_count,
+    coalesce(pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'oid', observed.oid::text,
+        'identity_args', observed.identity_args
+      ) order by observed.oid
+    ) filter (where observed.oid is not null), '[]'::jsonb) as overloads
+    from expected
+    left join observed on true
+   group by expected.expected_oid, expected.legacy_oid;`,
   batch: `select
     object_path, batch_id::text as batch_id, project_ref,
     format_version::text as format_version, cutoff::text as cutoff,
@@ -264,6 +287,31 @@ function countValue(value, code) {
 function parseJsonb(value, code) {
   if (typeof value !== "string") return value;
   try { return JSON.parse(value); } catch { fail(code); }
+}
+
+export function assertPrunerOverloads(rowInput) {
+  const row = rowInput || {};
+  const expectedOid = text(row.expected_oid);
+  const overloads = parseJsonb(row.overloads, "pruner_overload");
+  if (!/^[1-9][0-9]*$/.test(expectedOid)
+    || row.legacy_oid !== null
+    || countValue(row.overload_count, "pruner_overload") !== 1
+    || countValue(row.expected_count, "pruner_overload") !== 1
+    || countValue(row.legacy_count, "pruner_overload") !== 0
+    || !Array.isArray(overloads)
+    || overloads.length !== 1) {
+    fail("pruner_overload");
+  }
+  const observed = overloads[0];
+  if (text(observed?.oid) !== expectedOid || typeof observed?.identity_args !== "string" || !observed.identity_args.trim()) {
+    fail("pruner_overload");
+  }
+  return {
+    expectedOid,
+    legacyOid: row.legacy_oid,
+    overloadCount: countValue(row.overload_count, "pruner_overload"),
+    overloads,
+  };
 }
 
 function parseBatchRow(row) {
@@ -656,10 +704,9 @@ async function auditDatabase(tx, { plan, storageTarget, fetchImpl, cwd }) {
   const migration = (await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.migration, [LEGACY_STAGE_ALLOWLIST_AUDIT_MIGRATION.version]))[0];
   if (text(migration?.applied_count) !== "1" || text(migration?.hash_count) !== "1"
     || migration.sha256 !== expectedMigrationSha256(cwd)) fail("migration");
-  const overloads = await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.overloads);
-  const newOverload = "text, uuid[], bigint[], uuid[], text, text, text[], boolean, bigint";
-  const oldOverload = "text, uuid[], bigint[], uuid[], text, text, boolean, bigint";
-  if (overloads.filter((row) => row.args === newOverload).length !== 1 || overloads.some((row) => row.args === oldOverload)) fail("pruner_overload");
+  const overloads = assertPrunerOverloads(
+    (await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.overloads))[0],
+  );
 
   const batchRows = await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.batch, [LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.batchId]);
   if (batchRows.length !== 1) fail(batchRows.length === 0 ? "batch_missing" : "batch_duplicate");
@@ -727,7 +774,7 @@ async function auditDatabase(tx, { plan, storageTarget, fetchImpl, cwd }) {
   return {
     identity, projectRef: storageTarget.projectRef, fenceActive, enforcementActive: true,
     migration: { ...LEGACY_STAGE_ALLOWLIST_AUDIT_MIGRATION, sha256: migration.sha256 },
-    overloads: { legacyEightArgumentPresent: false, hardenedNineArgumentPresent: true },
+    overloads,
     row, proof, planIds, manifest, manifestSha256: sha256(Buffer.from(canonicalJson(manifest), "utf8")),
     bucket, archiveObject, recoveryArchiveBytes, recoveryManifestBytes, recoveryManifest,
     localArchive, evidence, tableSnapshot, accountSnapshot, conservation, txIdsSha256, entryIdsSha256, registryKeysSha256,
@@ -780,7 +827,8 @@ function auditResult(snapshot, deployedCommitSha) {
     },
     preflight: {
       projectRef: snapshot.projectRef, systemIdentifier: snapshot.identity, fence: snapshot.fenceActive,
-      enforcementActive: snapshot.enforcementActive, migration: snapshot.migration, readOnly: true,
+      enforcementActive: snapshot.enforcementActive, migration: snapshot.migration,
+      prunerOverloads: snapshot.overloads, readOnly: true,
     },
     writes: { database: false, storage: false, storageMethods: ["GET"], archive: false, proofRegistration: false, prune: false },
   };

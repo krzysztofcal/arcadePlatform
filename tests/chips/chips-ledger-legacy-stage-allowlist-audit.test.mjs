@@ -5,11 +5,14 @@ import fs from "node:fs";
 import {
   LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13,
   LEGACY_STAGE_ALLOWLIST_AUDIT_MIGRATION,
+  LEGACY_STAGE_ALLOWLIST_AUDIT_OLD_PRUNER_SIGNATURE,
+  LEGACY_STAGE_ALLOWLIST_AUDIT_PRUNER_SIGNATURE,
   LEGACY_STAGE_ALLOWLIST_AUDIT_READ_ONLY_TRANSACTION_SQL,
   LEGACY_STAGE_ALLOWLIST_AUDIT_SQL,
   assertLegacyStageAuditBatchRow,
   assertLegacyStageAuditPlan,
   assertLegacyStageAuditProofRow,
+  assertPrunerOverloads,
   assertAccountRows,
   assertEntryShapeRows,
   assertExactEntryRows,
@@ -170,6 +173,11 @@ assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.entryShapes, /matching_escrow_coun
 assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.entryShapes, /active_entry_count/);
 assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.tables, /bot_only_proof_eligible/);
 assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.accounts, /account_type/);
+assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.overloads, /to_regprocedure/);
+assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.overloads, /pg_get_function_identity_arguments/);
+assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.overloads, /jsonb_agg/);
+assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.overloads, new RegExp(LEGACY_STAGE_ALLOWLIST_AUDIT_PRUNER_SIGNATURE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+assert.match(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.overloads, new RegExp(LEGACY_STAGE_ALLOWLIST_AUDIT_OLD_PRUNER_SIGNATURE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
 function makeAuditRecord({ id, tableId, txType, entryIds, index }) {
   const systemAccountId = `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
@@ -279,6 +287,32 @@ assert.doesNotThrow(() => assertEntryShapeRows(entryShapeRows, archiveOrderRecor
 assert.throws(
   () => assertEntryShapeRows([{ ...entryShapeRows[0], matching_escrow_count: "0" }, entryShapeRows[1]], archiveOrderRecords),
   (error) => error.code === "entry_shape",
+);
+
+const postgresNamedIdentityArgs = "p_object_path text, p_transaction_ids uuid[], p_entry_ids bigint[], p_batch_table_ids uuid[], p_allowlist_sha256 text, p_batch_table_ids_sha256 text, p_registry_keys text[], p_execute boolean, p_approved_batch_id bigint";
+const validPrunerOverloads = assertPrunerOverloads({
+  expected_oid: "123456",
+  legacy_oid: null,
+  overload_count: "1",
+  expected_count: "1",
+  legacy_count: "0",
+  overloads: JSON.stringify([{ oid: "123456", identity_args: postgresNamedIdentityArgs }]),
+});
+assert.equal(validPrunerOverloads.expectedOid, "123456");
+assert.equal(validPrunerOverloads.overloads[0].identity_args, postgresNamedIdentityArgs);
+assert.throws(
+  () => assertPrunerOverloads({
+    expected_oid: "123456", legacy_oid: null, overload_count: "2", expected_count: "1", legacy_count: "0",
+    overloads: [{ oid: "123456", identity_args: postgresNamedIdentityArgs }, { oid: "123457", identity_args: "extra text" }],
+  }),
+  (error) => error.code === "pruner_overload",
+);
+assert.throws(
+  () => assertPrunerOverloads({
+    expected_oid: "123456", legacy_oid: "123455", overload_count: "2", expected_count: "1", legacy_count: "1",
+    overloads: [{ oid: "123455", identity_args: "legacy args" }, { oid: "123456", identity_args: postgresNamedIdentityArgs }],
+  }),
+  (error) => error.code === "pruner_overload",
 );
 
 assert.equal(assertReadOnlyStorageRequest(), "GET");
