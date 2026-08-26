@@ -13,7 +13,11 @@ import {
   evaluateTableEligibility,
   validateBatch,
 } from "../../scripts/ops/chips-ledger-archive-export.mjs";
-import { buildPruneEvidence, buildRecoveryManifest } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
+import {
+  buildPruneEvidence,
+  buildRecoveryManifest,
+  createPruneStore,
+} from "../../scripts/ops/chips-ledger-archive-prune.mjs";
 import { verifyArchiveBytes } from "../../scripts/ops/chips-ledger-archive-store.mjs";
 import {
   assertTableBinding,
@@ -330,6 +334,8 @@ function failClosedLifecycleContract() {
   assert.match(migration, /has_human_participant is true and new\.has_human_participant is not true/);
   assert.match(migration, /new\.bot_only_proof_eligible is not true/);
   assert.match(migration, /p_confirmation is distinct from \('GO ' \|\| p_batch_id::text\)/);
+  assert.match(migration, /revoke all on function public\.chips_authorize_bot_only_archive_batch\(bigint, text\) from public, anon, authenticated, service_role/);
+  assert.match(migration, /grant execute on function public\.chips_authorize_bot_only_archive_batch\(bigint, text\) to postgres/);
   assert.match(migration, /source_policy_id <> 'stage-ledger-bot-only-retention-7d-v1'/);
   assert.match(migration, /Production authorization|canonical Stage schema-v2 batch/);
   assert.match(closedTableCleanup, /has_human_participant is true or t\.bot_only_retention_complete_at is not null/);
@@ -1280,14 +1286,9 @@ async function retryDestructiveOperatorPostgresContract(sql) {
       `, [objectPath, transactionIds, entryIds, fixture.tableId, registryKeys]);
     });
     assert.equal(proof[0].result.state, "proof_registered");
-    const go = await sql.begin(async (tx) => {
-      await tx.unsafe("set transaction isolation level serializable;");
-      return tx.unsafe(
-        "select public.chips_authorize_bot_only_archive_batch($1::bigint, $2) as result;",
-        [batchId, `GO ${batchId}`],
-      );
-    });
-    assert.equal(go[0].result.state, "authorized");
+    const pruneStore = createPruneStore(sql);
+    const authorization = await pruneStore.authorizeBotOnlyBatch(batchId, `GO ${batchId}`);
+    assert.equal(authorization.state, "authorized");
 
     const dry = await sql.begin(async (tx) => {
       await tx.unsafe("set transaction isolation level serializable;");

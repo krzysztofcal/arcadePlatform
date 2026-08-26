@@ -17,11 +17,11 @@ canonical Stage project `krydukthwdvccggbyjfw` and PostgreSQL system identifier
   table per batch for an atomic lifecycle receipt; the bounded schedule
   provides a theoretical 2,400-table/day ceiling, above the observed Stage
   bot-table creation rate.
-- The first bot-only canary is a two-run Actions sequence: dispatch
-  `bot-only-7d-prepare-only`, record its exact committed `batch_id`, then
-  dispatch `bot-only-7d-execute` with that `approved_batch_id`. The execute
-  path remains behind `CHIPS_LEDGER_BOT_ONLY_EXECUTE=1` and the exact-batch
-  checks in the database.
+- The first bot-only canary is an explicit prepare/authorize/execute sequence:
+  dispatch `bot-only-7d-prepare-only`, record the exact committed `batch_id`,
+  then dispatch `bot-only-7d-execute` with both `approved_batch_id` and the
+  exact human confirmation `GO <approved_batch_id>`. The execute dispatch must
+  also carry `CHIPS_LEDGER_BOT_ONLY_EXECUTE=1`.
 - Selection starts at the beginning of `(created_at, id)` on every new cycle and
   chooses the oldest currently hot, unmapped, prunable technical rows. Manual
   manifests without `source_policy_id` never drive the cursor.
@@ -31,6 +31,41 @@ The JSONL is produced by the prunable-only exporter mode. The manual exporter
 mode remains unchanged. The database pruner repeats the complete technical,
 registry, conservation, table, escrow, proof, receipt and mapping checks before
 any delete.
+
+## Exact canary authorization
+
+The first canary is intentionally bound to one prepared batch and never picks
+the next candidate during execute:
+
+1. Actions runs `bot-only-7d-prepare-only`. This may export, store, register
+   the immutable proof, validate the archive, and persist the two durable
+   recovery copies, but it does not write a destructive GO or prune rows.
+2. The reviewer copies the committed `batch_id` from the aggregate result and
+   enters that ID in `approved_batch_id` on a new `bot-only-7d-execute`
+   dispatch. The second input must be exactly `GO <batch_id>` in
+   `approved_batch_confirmation`.
+3. Before any execute-side export, Storage write, proof registration, or new
+   manifest, the runner reads only that `batch_id` and fail-closed checks Stage
+   identity, policy, schema v2, committed status, proof, recovery, object/SHA,
+   receipts, and active-manifest equality.
+4. If the exact batch is committed and unpruned without a GO, the owner-only
+   database call
+   `public.chips_authorize_bot_only_archive_batch(batch_id, 'GO <batch_id>')`
+   persists `destructive_go_at` and `destructive_go_batch_id`. The runner
+   reads the manifest again and refuses to execute unless both values are
+   present and bound to the same batch. An existing exact GO is reused without
+   creating another one.
+5. Execute then passes that same ID to the proof-bound cleanup function. A
+   retry of a completely pruned-and-cleaned exact batch verifies its receipts,
+   returns `already_cleaned`, and does not export, prepare, or select another
+   batch. A wrong/nonexistent/inactive ID, wrong confirmation, partial or
+   foreign GO, missing proof/recovery, or object/hash/policy mismatch fails
+   closed.
+
+The canary path is distinct from the activated automatic policy. The 15-minute
+schedule is the only automatic 7-day trigger; the existing 30-day policy keeps
+its once-daily schedule. Automatic cleanup remains bounded at 25 batches per
+run, which is at most 2,400 complete tables per day.
 
 ## Recovery durability
 

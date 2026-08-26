@@ -21,6 +21,10 @@ on:
         description: Exact committed bot-only 7d batch_id prepared by a prior run (required for bot-only-7d-execute)
         required: false
         type: string
+      approved_batch_confirmation:
+        description: Exact human confirmation GO <approved_batch_id> (required for bot-only-7d-execute)
+        required: false
+        type: string
   schedule:
     - cron: "17 2 * * *"
     - cron: "*/15 * * * *"
@@ -135,6 +139,7 @@ jobs:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
           CHIPS_LEDGER_BOT_ONLY_EXECUTE: "1"
           APPROVED_BATCH_ID: ${{ inputs.approved_batch_id }}
+          APPROVED_BATCH_CONFIRMATION: ${{ inputs.approved_batch_confirmation }}
         shell: bash
         run: |
           set -euo pipefail
@@ -142,10 +147,15 @@ jobs:
             echo "approved_batch_id must be a positive integer" >&2
             exit 1
           fi
+          if [[ "$APPROVED_BATCH_CONFIRMATION" != "GO $APPROVED_BATCH_ID" ]]; then
+            echo "approved_batch_confirmation must be exactly GO <approved_batch_id>" >&2
+            exit 1
+          fi
           node scripts/ops/chips-ledger-stage-automation.mjs \
             --policy bot-only-7d \
             --execute \
-            --approved-batch-id "$APPROVED_BATCH_ID"
+            --approved-batch-id "$APPROVED_BATCH_ID" \
+            --approved-batch-confirmation "$APPROVED_BATCH_CONFIRMATION"
 
       - name: Run activated bot-only 7-day Stage automation
         if: ${{ (github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-automatic') }}

@@ -299,6 +299,54 @@ export const STAGE_OWN_BATCHES_SQL = `select
   and source_policy_id = $2
   order by created_at desc, object_path desc;`;
 
+export const STAGE_EXACT_BATCH_SQL = `select
+    object_path,
+    project_ref,
+    source_policy_id,
+    status,
+    batch_id::text as batch_id,
+    format_version::text as format_version,
+    cutoff::text as cutoff,
+    cursor_start_created_at::text as cursor_start_created_at,
+    cursor_start_id::text as cursor_start_id,
+    cursor_end_created_at::text as cursor_end_created_at,
+    cursor_end_id::text as cursor_end_id,
+    first_created_at::text as first_created_at,
+    last_created_at::text as last_created_at,
+    transaction_count::text as transaction_count,
+    entry_count::text as entry_count,
+    tx_types::text as tx_types,
+    raw_bytes::text as raw_bytes,
+    compressed_bytes::text as compressed_bytes,
+    raw_sha256,
+    compressed_sha256,
+    credits::text as credits,
+    debits::text as debits,
+    net_amount::text as net_amount,
+    committed_at::text as committed_at,
+    archive_proof_verified_at::text as archive_proof_verified_at,
+    archived_transaction_ids_sha256,
+    archived_entry_ids_sha256,
+    pruned_at::text as pruned_at,
+    pruned_transaction_count::text as pruned_transaction_count,
+    pruned_entry_count::text as pruned_entry_count,
+    pruned_transaction_ids_sha256,
+    pruned_entry_ids_sha256,
+    bot_only_table_id,
+    bot_only_table_count::text as bot_only_table_count,
+    bot_only_newest_created_at::text as bot_only_newest_created_at,
+    bot_only_registry_keys_sha256,
+    bot_only_out_of_scope_keys_sha256,
+    bot_only_identity_count::text as bot_only_identity_count,
+    bot_only_eligible_count::text as bot_only_eligible_count,
+    registry_cleaned_at::text as registry_cleaned_at,
+    registry_cleaned_key_count::text as registry_cleaned_key_count,
+    registry_cleaned_keys_sha256,
+    destructive_go_at::text as destructive_go_at,
+    destructive_go_batch_id::text as destructive_go_batch_id
+  from public.chips_ledger_archive_batches
+  where batch_id = $1;`;
+
 async function loadOwnBatches(sql, sourcePolicyId = STAGE_AUTOMATION_POLICY_ID) {
   return sql.unsafe(STAGE_OWN_BATCHES_SQL, [STAGE_PROJECT_REF, sourcePolicyId]);
 }
@@ -418,6 +466,173 @@ function proofFieldCount(row) {
     row.archived_transaction_ids_sha256,
     row.archived_entry_ids_sha256,
   ].filter((value) => value != null).length;
+}
+
+const BOT_ONLY_PROOF_FIELDS = [
+  "bot_only_table_id",
+  "bot_only_table_count",
+  "bot_only_newest_created_at",
+  "bot_only_registry_keys_sha256",
+  "bot_only_out_of_scope_keys_sha256",
+  "bot_only_identity_count",
+  "bot_only_eligible_count",
+];
+
+const BOT_ONLY_EXECUTE_MANIFEST_FIELDS = [
+  "object_path",
+  "project_ref",
+  "source_policy_id",
+  "status",
+  "batch_id",
+  "format_version",
+  "cutoff",
+  "cursor_start_created_at",
+  "cursor_start_id",
+  "cursor_end_created_at",
+  "cursor_end_id",
+  "first_created_at",
+  "last_created_at",
+  "transaction_count",
+  "entry_count",
+  "tx_types",
+  "raw_bytes",
+  "compressed_bytes",
+  "raw_sha256",
+  "compressed_sha256",
+  "credits",
+  "debits",
+  "net_amount",
+  "committed_at",
+  "archive_proof_verified_at",
+  "archived_transaction_ids_sha256",
+  "archived_entry_ids_sha256",
+  ...BOT_ONLY_PROOF_FIELDS,
+  "pruned_at",
+  "pruned_transaction_count",
+  "pruned_entry_count",
+  "pruned_transaction_ids_sha256",
+  "pruned_entry_ids_sha256",
+  "registry_cleaned_at",
+  "registry_cleaned_key_count",
+  "registry_cleaned_keys_sha256",
+  "destructive_go_at",
+  "destructive_go_batch_id",
+];
+
+function nonNullFieldCount(row, fields) {
+  return fields.filter((field) => row?.[field] != null).length;
+}
+
+function validSha256(value) {
+  return SHA256_RE.test(text(value));
+}
+
+function assertExactReceiptFields(row, batchId) {
+  const receiptCount = receiptFieldCount(row);
+  if (receiptCount !== 0 && receiptCount !== 5) {
+    fail(`exact bot-only batch ${batchId} has a partial prune receipt`);
+  }
+  if (receiptCount === 5) {
+    if (Number(row.pruned_transaction_count) !== Number(row.transaction_count)
+      || Number(row.pruned_entry_count) !== Number(row.entry_count)
+      || row.pruned_transaction_ids_sha256 !== row.archived_transaction_ids_sha256
+      || row.pruned_entry_ids_sha256 !== row.archived_entry_ids_sha256) {
+      fail(`exact bot-only batch ${batchId} has a mismatched prune receipt`);
+    }
+  }
+
+  const cleanupCount = cleanupReceiptFieldCount(row);
+  if (cleanupCount !== 0 && cleanupCount !== 3) {
+    fail(`exact bot-only batch ${batchId} has a partial registry cleanup receipt`);
+  }
+  if (cleanupCount === 3 && (receiptCount !== 5
+    || Number(row.registry_cleaned_key_count) !== Number(row.transaction_count)
+    || row.registry_cleaned_keys_sha256 !== row.bot_only_registry_keys_sha256)) {
+    fail(`exact bot-only batch ${batchId} has an invalid registry cleanup receipt`);
+  }
+  return { receiptCount, cleanupCount };
+}
+
+export function assertBotOnlyExecuteBatch(row, approvedBatchId, identity = STAGE_SYSTEM_IDENTIFIER) {
+  const batchId = String(approvedBatchId);
+  if (!row) fail(`exact approved bot-only batch ${batchId} was not found`);
+  if (text(row.batch_id) !== batchId) fail(`exact approved bot-only batch ${batchId} identity mismatch`);
+  if (text(identity) !== STAGE_SYSTEM_IDENTIFIER) fail("exact bot-only batch Stage identity mismatch");
+  if (text(row.project_ref) !== STAGE_PROJECT_REF) fail("exact bot-only batch project mismatch");
+  if (text(row.source_policy_id) !== BOT_ONLY_RETENTION_POLICY_ID) fail("exact bot-only batch policy mismatch");
+  if (Number(row.format_version) !== BOT_ONLY_EXPORT_SCHEMA_VERSION) fail("exact bot-only batch schema version mismatch");
+  if (text(row.status) !== "committed" || !text(row.committed_at)) fail("exact bot-only batch is not committed");
+  if (!validSha256(row.raw_sha256) || !validSha256(row.compressed_sha256)) fail("exact bot-only batch has an invalid archive hash");
+  if (text(row.object_path) !== `v1/sha256/${text(row.compressed_sha256)}.jsonl.gz`) {
+    fail("exact bot-only batch object path does not match its compressed hash");
+  }
+  if (Number(row.transaction_count) < 1 || Number(row.transaction_count) > STAGE_MAX_BATCH_SIZE
+    || Number(row.entry_count) < 1) {
+    fail("exact bot-only batch has invalid archive counts");
+  }
+
+  if (proofFieldCount(row) !== 3
+    || !validSha256(row.archived_transaction_ids_sha256)
+    || !validSha256(row.archived_entry_ids_sha256)) {
+    fail(`exact bot-only batch ${batchId} is missing a complete archive proof`);
+  }
+  if (nonNullFieldCount(row, BOT_ONLY_PROOF_FIELDS) !== BOT_ONLY_PROOF_FIELDS.length
+    || text(row.bot_only_table_id) === ""
+    || Number(row.bot_only_table_count) !== 1
+    || !text(row.bot_only_newest_created_at)
+    || !validSha256(row.bot_only_registry_keys_sha256)
+    || !validSha256(row.bot_only_out_of_scope_keys_sha256)
+    || Number(row.bot_only_identity_count) !== Number(row.transaction_count)
+    || Number(row.bot_only_eligible_count) !== Number(row.transaction_count)) {
+    fail(`exact bot-only batch ${batchId} has incomplete or invalid schema-v2 proof`);
+  }
+
+  const receipts = assertExactReceiptFields(row, batchId);
+  const goCount = nonNullFieldCount(row, ["destructive_go_at", "destructive_go_batch_id"]);
+  if (goCount !== 0 && goCount !== 2) fail(`exact bot-only batch ${batchId} has a partial destructive GO`);
+  if (goCount === 2 && text(row.destructive_go_batch_id) !== batchId) {
+    fail(`exact bot-only batch ${batchId} has a foreign destructive GO`);
+  }
+  if (receipts.receiptCount === 5 && goCount !== 2) {
+    fail(`exact bot-only batch ${batchId} is pruned without its exact destructive GO`);
+  }
+  return { ...receipts, hasExactGo: goCount === 2 };
+}
+
+function normalizedManifestValue(field, value) {
+  if (value == null) return null;
+  if (field === "tx_types") {
+    try {
+      return canonicalJson(typeof value === "string" ? JSON.parse(value) : value);
+    } catch {
+      return text(value);
+    }
+  }
+  return String(value);
+}
+
+export function assertBotOnlyActiveManifestMatch(exactRow, activeRow, approvedBatchId) {
+  for (const field of BOT_ONLY_EXECUTE_MANIFEST_FIELDS) {
+    if (normalizedManifestValue(field, exactRow?.[field]) !== normalizedManifestValue(field, activeRow?.[field])) {
+      fail(`exact approved bot-only batch ${approvedBatchId} does not match the active manifest (${field})`);
+    }
+  }
+  return true;
+}
+
+async function loadExactBatch(sql, approvedBatchId) {
+  const readExact = async (tx) => {
+    await tx.unsafe("set transaction isolation level repeatable read, read only;");
+    return tx.unsafe(STAGE_EXACT_BATCH_SQL, [approvedBatchId]);
+  };
+  const rows = typeof sql.begin === "function"
+    ? await sql.begin(readExact)
+    : await sql.unsafe(STAGE_EXACT_BATCH_SQL, [approvedBatchId]);
+  if (rows.length !== 1) {
+    if (rows.length === 0) fail(`exact approved bot-only batch ${approvedBatchId} was not found`);
+    fail(`exact approved bot-only batch ${approvedBatchId} is duplicated`);
+  }
+  return rows[0];
 }
 
 export function findOwnCycle(rows) {
@@ -655,6 +870,111 @@ async function executeVerifiedCycle({
   return result;
 }
 
+async function executeApprovedBotOnlyCanary({
+  approvedBatchId,
+  approvedBatchConfirmation,
+  identity,
+  env,
+  tempRoot,
+  sql,
+  pruneStore,
+  storageTarget,
+  verifyBucket,
+  storageDeps = {},
+  assertLock,
+}) {
+  // Execute mode never enumerates own batches and never invokes the exporter.
+  // The dispatch-selected ID is the only possible input to this path.
+  const exactRow = await loadExactBatch(sql, approvedBatchId);
+  assertBotOnlyExecuteBatch(exactRow, approvedBatchId, identity);
+  let row = await refreshPolicyRow(pruneStore, exactRow.object_path, BOT_ONLY_RETENTION_POLICY_ID);
+  assertBotOnlyExecuteBatch(row, approvedBatchId, identity);
+  assertBotOnlyActiveManifestMatch(exactRow, row, approvedBatchId);
+  await assertLock();
+
+  // The dry-run is read-only: it validates the primary object and immutable
+  // proof/receipt evidence without registering proof or deleting anything.
+  await verifyBucket(storageTarget);
+  const dry = await runPruneStep({
+    row,
+    mode: "dry-run",
+    env,
+    cwd: tempRoot,
+    sql,
+    pruneStore,
+    storageTarget,
+    verifyBucket,
+    storageDeps,
+  });
+  if (dry.state !== "ready" && dry.state !== "already_cleaned") {
+    fail(`exact bot-only Stage dry-run did not become ready: ${dry.state}`);
+  }
+  await assertLock();
+
+  row = await refreshPolicyRow(pruneStore, exactRow.object_path, BOT_ONLY_RETENTION_POLICY_ID);
+  assertBotOnlyExecuteBatch(row, approvedBatchId, identity);
+  const durable = await (storageDeps.inspectDurableRecovery || inspectDurableRecovery)(storageTarget, row, storageDeps);
+  assertResumeRecoveryState(row, durable);
+  assertDurableRecoveryReady(durable);
+  assertRecoveryManifestMatches(
+    durable.manifest,
+    buildRecoveryManifest(row, identity, dry.evidence, { target: "stage" }),
+  );
+
+  if (dry.state === "already_cleaned") {
+    if (cleanupReceiptFieldCount(row) !== 3) {
+      fail(`exact bot-only batch ${approvedBatchId} did not verify a complete cleanup receipt`);
+    }
+    return { row, dry, durable, executed: null };
+  }
+
+  const state = assertBotOnlyExecuteBatch(row, approvedBatchId, identity);
+  if (state.cleanupCount !== 0 || state.receiptCount !== 0) {
+    fail(`exact bot-only batch ${approvedBatchId} has an unexpected partial lifecycle state`);
+  }
+
+  if (!state.hasExactGo) {
+    const authorize = pruneStore.authorizeBotOnlyBatch;
+    if (typeof authorize !== "function") fail("owner-only bot-only batch authorization adapter is unavailable");
+    await assertLock();
+    const authorization = await authorize.call(pruneStore, approvedBatchId, approvedBatchConfirmation);
+    if (!authorization
+      || text(authorization.state) !== "authorized"
+      || text(authorization.batch_id) !== String(approvedBatchId)) {
+      fail(`owner-only authorization did not persist exact bot-only batch ${approvedBatchId}`);
+    }
+    await assertLock();
+    row = await refreshPolicyRow(pruneStore, exactRow.object_path, BOT_ONLY_RETENTION_POLICY_ID);
+    const authorized = assertBotOnlyExecuteBatch(row, approvedBatchId, identity);
+    if (!authorized.hasExactGo) {
+      fail(`exact bot-only batch ${approvedBatchId} authorization did not persist destructive_go_at and destructive_go_batch_id`);
+    }
+  }
+
+  if (text(row.destructive_go_batch_id) !== String(approvedBatchId) || !text(row.destructive_go_at)) {
+    fail(`exact bot-only batch ${approvedBatchId} is missing its persisted destructive GO`);
+  }
+  await assertLock();
+  const executeCycle = storageDeps.executeVerifiedCycle || executeVerifiedCycle;
+  const executed = await executeCycle({
+    row,
+    identity,
+    durable,
+    env,
+    tempRoot,
+    sql,
+    pruneStore,
+    storageTarget,
+    approvedBatchId,
+    verifyBucket,
+    storageDeps,
+  });
+  await assertLock();
+  row = await refreshPolicyRow(pruneStore, exactRow.object_path, BOT_ONLY_RETENTION_POLICY_ID);
+  assertBotOnlyExecuteBatch(row, approvedBatchId, identity);
+  return { row, dry, durable, executed };
+}
+
 async function resumeOwnCycle({ row, identity, env, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps = {} }) {
   const durableBefore = await inspectDurableRecovery(storageTarget, row, storageDeps);
   assertResumeRecoveryState(row, durableBefore);
@@ -873,21 +1193,28 @@ export async function runBotOnlyStageAutomation({
   deps = {},
   prepareOnly = true,
   approvedBatchId = null,
+  approvedBatchConfirmation = null,
   automatic = false,
 } = {}) {
   if (automatic) {
     if (prepareOnly !== false) fail("automatic bot-only retention requires destructive execution mode");
     if (approvedBatchId != null) fail("automatic bot-only retention does not accept a per-batch human GO");
+    if (approvedBatchConfirmation != null) fail("automatic bot-only retention does not accept a per-batch human confirmation");
     return runAutomaticBotOnlyStageAutomation({ env, now, deps });
   }
-  if (prepareOnly !== true && (approvedBatchId == null || !/^[1-9][0-9]*$/.test(String(approvedBatchId)))) {
+  const approvedBatchIdText = approvedBatchId == null ? null : String(approvedBatchId);
+  const approvedBatchConfirmationText = approvedBatchConfirmation == null ? null : String(approvedBatchConfirmation);
+  if (prepareOnly !== true && (approvedBatchIdText == null || !/^[1-9][0-9]*$/.test(approvedBatchIdText))) {
     fail("bot-only destructive execution requires one exact approved batch id");
   }
   if (prepareOnly !== true && text(env.CHIPS_LEDGER_BOT_ONLY_EXECUTE) !== "1") {
     fail("bot-only destructive execution requires the explicit default-off execution gate");
   }
-  if (prepareOnly === true && approvedBatchId != null) {
-    fail("approved bot-only batch id is only valid with destructive execution");
+  if (prepareOnly !== true && approvedBatchConfirmationText !== `GO ${approvedBatchIdText}`) {
+    fail("bot-only destructive execution requires the exact GO <batch_id> confirmation");
+  }
+  if (prepareOnly === true && (approvedBatchId != null || approvedBatchConfirmation != null)) {
+    fail("approved bot-only batch id and confirmation are only valid with destructive execution");
   }
   let sql = null;
   let lockSession = null;
@@ -911,15 +1238,41 @@ export async function runBotOnlyStageAutomation({
     const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
     const pruneStore = deps.pruneStore || createPruneStore(sql);
     const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
+    const inspectRecovery = deps.inspectDurableRecovery || inspectDurableRecovery;
+    const persistRecovery = deps.persistDurableRecovery || persistDurableRecovery;
     lockSession = await acquireAdvisoryLock(sql);
     if (!lockSession) result = { state: "no-op", reason: "advisory_lock_busy", sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID };
     else {
       const identity = await assertIdentity(sql);
       await assertAdvisoryLock(sql, lockSession);
-      await verifyBucket(storageTarget);
-      const ownRows = await loadOwnBatches(sql, BOT_ONLY_RETENTION_POLICY_ID);
-      const activeRows = ownRows.filter((row) => row.status === "pending" || (row.status === "committed" && !row.registry_cleaned_at));
-      if (activeRows.length > 1) fail("multiple incomplete bot-only Stage manifests; refusing to choose one");
+      if (!prepareOnly) {
+        const cycle = await executeApprovedBotOnlyCanary({
+          approvedBatchId: approvedBatchIdText,
+          approvedBatchConfirmation: approvedBatchConfirmationText,
+          identity,
+          env: moduleEnv,
+          tempRoot,
+          sql,
+          pruneStore,
+          storageTarget,
+          verifyBucket,
+          storageDeps: deps,
+          assertLock: () => assertAdvisoryLock(sql, lockSession),
+        });
+        result = botOnlyReport({
+          row: cycle.row,
+          identity,
+          dry: cycle.dry,
+          durable: cycle.durable,
+          state: cycle.executed?.state || "already_cleaned",
+          mode: "execute",
+          deployedCommitSha,
+        });
+      } else {
+        await verifyBucket(storageTarget);
+        const ownRows = await loadOwnBatches(sql, BOT_ONLY_RETENTION_POLICY_ID);
+        const activeRows = ownRows.filter((row) => row.status === "pending" || (row.status === "committed" && !row.registry_cleaned_at));
+        if (activeRows.length > 1) fail("multiple incomplete bot-only Stage manifests; refusing to choose one");
 
       const resumePending = async (row) => {
         const artifactPath = path.join(tempRoot, "pending-bot-only.archive.jsonl.gz");
@@ -967,12 +1320,12 @@ export async function runBotOnlyStageAutomation({
         const dry = await runPruneStep({ row, mode: "dry-run", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
         if (dry.state === "already_cleaned") return { row, dry, durable: null };
         if (dry.state !== "ready") fail(`bot-only Stage dry-run did not become ready: ${dry.state}`);
-        const existing = await inspectDurableRecovery(storageTarget, row, deps);
+        const existing = await inspectRecovery(storageTarget, row, deps);
         assertResumeRecoveryState(row, existing);
         let durable = existing;
         if (!durable) {
           const mainArchive = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, deps);
-          durable = await persistDurableRecovery(
+          durable = await persistRecovery(
             storageTarget,
             row,
             identity,
@@ -980,11 +1333,6 @@ export async function runBotOnlyStageAutomation({
             mainArchive.bytes,
             deps,
           );
-        }
-        if (!prepareOnly) {
-          if (String(approvedBatchId) !== String(row.batch_id)) fail("approved bot-only batch id does not match the active manifest");
-          const executed = await executeVerifiedCycle({ row, identity, durable, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, approvedBatchId, storageDeps: deps });
-          return { row: await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID), dry, durable, executed };
         }
         return { row, dry, durable, executed: null };
       };
@@ -997,7 +1345,7 @@ export async function runBotOnlyStageAutomation({
           dry: cycle.dry,
           durable: cycle.durable,
           state: cycle.executed?.state || (cycle.dry.state === "already_cleaned" ? "already_cleaned" : "prepared"),
-          mode: prepareOnly ? "prepare-only" : "execute",
+          mode: "prepare-only",
           deployedCommitSha,
         });
       } else {
@@ -1051,22 +1399,17 @@ export async function runBotOnlyStageAutomation({
           if (dry.state !== "ready") fail(`new bot-only Stage dry-run did not become ready: ${dry.state}`);
           const main = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, deps);
           const durable = await persistDurableRecovery(storageTarget, row, identity, dry.evidence, main.bytes, deps);
-          let executed = null;
-          if (!prepareOnly) {
-            if (String(approvedBatchId) !== String(row.batch_id)) fail("approved bot-only batch id does not match the new manifest");
-            executed = await executeVerifiedCycle({ row, identity, durable, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, approvedBatchId, storageDeps: deps });
-            row = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
-          }
           result = botOnlyReport({
             row,
             identity,
             dry,
             durable,
-            state: executed?.state || "prepared",
-            mode: prepareOnly ? "prepare-only" : "execute",
+            state: "prepared",
+            mode: "prepare-only",
             deployedCommitSha,
           });
         }
+      }
       }
     }
   } catch (error) {
@@ -1440,6 +1783,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     let executeRequested = false;
     let automaticRequested = false;
     let approvedBatchId = null;
+    let approvedBatchConfirmation = null;
     for (let index = 2; index < argv.length; index += 1) {
       if (argv[index] === "--prepare-only") {
         if (prepareOnlyRequested || executeRequested || automaticRequested) throw new Error("--prepare-only, --execute and --automatic are mutually exclusive or duplicated");
@@ -1450,7 +1794,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         executeRequested = true;
         prepareOnly = false;
       } else if (argv[index] === "--automatic") {
-        if (automaticRequested || prepareOnlyRequested || executeRequested || approvedBatchId !== null) {
+        if (automaticRequested || prepareOnlyRequested || executeRequested || approvedBatchId !== null || approvedBatchConfirmation !== null) {
           throw new Error("--automatic is a standalone automatic execution mode");
         }
         automaticRequested = true;
@@ -1461,15 +1805,23 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         if (approvedBatchId !== null || automaticRequested) throw new Error("--approved-batch-id is not valid for automatic execution");
         approvedBatchId = value;
         index += 1;
+      } else if (argv[index] === "--approved-batch-confirmation") {
+        const value = argv[index + 1];
+        if (!value || value.startsWith("--")) throw new Error("--approved-batch-confirmation requires a value");
+        if (approvedBatchConfirmation !== null || automaticRequested) {
+          throw new Error("--approved-batch-confirmation is not valid for automatic execution");
+        }
+        approvedBatchConfirmation = value;
+        index += 1;
       } else {
         throw new Error(`unknown Stage bot-only option: ${argv[index]}`);
       }
     }
-    runBotOnlyStageAutomation({ prepareOnly, approvedBatchId, automatic: automaticRequested }).catch(() => {
+    runBotOnlyStageAutomation({ prepareOnly, approvedBatchId, approvedBatchConfirmation, automatic: automaticRequested }).catch(() => {
       process.exitCode = 1;
     });
   } else {
-    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-automation.mjs [--policy bot-only-7d [--prepare-only|--execute --approved-batch-id <id>|--automatic]]\n");
+    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-automation.mjs [--policy bot-only-7d [--prepare-only|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>'|--automatic]]\n");
     process.exitCode = 1;
   }
 }

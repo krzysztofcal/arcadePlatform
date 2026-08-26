@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
-import { readSnapshot, STAGE_AUTOMATION_POLICY_ID } from "../../scripts/ops/chips-ledger-archive-export.mjs";
 import {
+  BOT_ONLY_EXPORT_SCHEMA_VERSION,
+  BOT_ONLY_RETENTION_POLICY_ID,
+  readSnapshot,
+  STAGE_AUTOMATION_POLICY_ID,
+} from "../../scripts/ops/chips-ledger-archive-export.mjs";
+import {
+  assertBotOnlyActiveManifestMatch,
+  assertBotOnlyExecuteBatch,
   assertDurableRecoveryReady,
   assertResumeRecoveryState,
   botOnlyExportArgs,
@@ -20,6 +27,7 @@ import {
   buildRecoveryArchiveObjectPath,
   buildRecoveryManifestObjectPath,
 } from "../../scripts/ops/chips-ledger-archive-store.mjs";
+import { buildRecoveryManifest } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
 
 const STAGE_DB_URL = "postgresql://postgres.krydukthwdvccggbyjfw@db.krydukthwdvccggbyjfw.supabase.co:5432/postgres";
 const STAGE_URL = "https://krydukthwdvccggbyjfw.supabase.co";
@@ -374,6 +382,281 @@ assert.equal(noCandidateBotOnly.reason, "blocking_anomalies");
 assert.deepEqual(noCandidateBotOnly.blockingAnomalies, [{ code: "younger_table_identity", transaction_count: "2", table_count: "1" }]);
 assert.equal(noCandidateBotOnly.cutoff, "2026-08-14T00:00:00.000Z");
 assert.equal(noCandidateBotOnly.deployedCommitSha, "f".repeat(40));
+
+const canaryEvidence = {
+  transactionIdsSha256: "b".repeat(64),
+  entryIdsSha256: "c".repeat(64),
+  transactionCount: 1,
+  entryCount: 2,
+  txTypes: { TABLE_BUY_IN: 1 },
+  credits: "100",
+  debits: "100",
+  net: "0",
+  tableId: "00000000-0000-4000-8000-000000000020",
+  registryKeys: ["bot-seed-buyin:00000000-0000-4000-8000-000000000020:1"],
+  registryKeysSha256: "d".repeat(64),
+  outOfScopeKeysSha256: "e".repeat(64),
+};
+const canaryArchiveBytes = Buffer.from("exact bot-only canary recovery archive");
+const canaryCompressedSha = crypto.createHash("sha256").update(canaryArchiveBytes).digest("hex");
+
+function makeCanaryRow({ go = false, cleaned = false, partialGo = false } = {}) {
+  return {
+    object_path: `v1/sha256/${canaryCompressedSha}.jsonl.gz`,
+    project_ref: STAGE_PROJECT_REF,
+    source_policy_id: BOT_ONLY_RETENTION_POLICY_ID,
+    status: "committed",
+    batch_id: "42",
+    format_version: BOT_ONLY_EXPORT_SCHEMA_VERSION,
+    cutoff: "2026-08-12T00:00:00.000000Z",
+    cursor_start_created_at: null,
+    cursor_start_id: null,
+    cursor_end_created_at: "2026-07-01T00:00:00.000000Z",
+    cursor_end_id: "00000000-0000-4000-8000-000000000021",
+    first_created_at: "2026-07-01T00:00:00.000000Z",
+    last_created_at: "2026-07-01T00:00:00.000000Z",
+    transaction_count: 1,
+    entry_count: 2,
+    tx_types: { TABLE_BUY_IN: 1 },
+    raw_bytes: 100,
+    compressed_bytes: canaryArchiveBytes.length,
+    raw_sha256: "a".repeat(64),
+    compressed_sha256: canaryCompressedSha,
+    credits: "100",
+    debits: "100",
+    net_amount: "0",
+    committed_at: "2026-08-13T00:00:00.000000Z",
+    archive_proof_verified_at: "2026-08-13T00:01:00.000000Z",
+    archived_transaction_ids_sha256: canaryEvidence.transactionIdsSha256,
+    archived_entry_ids_sha256: canaryEvidence.entryIdsSha256,
+    bot_only_table_id: canaryEvidence.tableId,
+    bot_only_table_count: 1,
+    bot_only_newest_created_at: "2026-07-01T00:00:00.000000Z",
+    bot_only_registry_keys_sha256: canaryEvidence.registryKeysSha256,
+    bot_only_out_of_scope_keys_sha256: canaryEvidence.outOfScopeKeysSha256,
+    bot_only_identity_count: 1,
+    bot_only_eligible_count: 1,
+    pruned_at: cleaned ? "2026-08-13T00:02:00.000000Z" : null,
+    pruned_transaction_count: cleaned ? 1 : null,
+    pruned_entry_count: cleaned ? 2 : null,
+    pruned_transaction_ids_sha256: cleaned ? canaryEvidence.transactionIdsSha256 : null,
+    pruned_entry_ids_sha256: cleaned ? canaryEvidence.entryIdsSha256 : null,
+    registry_cleaned_at: cleaned ? "2026-08-13T00:03:00.000000Z" : null,
+    registry_cleaned_key_count: cleaned ? 1 : null,
+    registry_cleaned_keys_sha256: cleaned ? canaryEvidence.registryKeysSha256 : null,
+    destructive_go_at: go || partialGo ? "2026-08-13T00:02:30.000000Z" : null,
+    destructive_go_batch_id: go ? "42" : null,
+  };
+}
+
+function makeCanaryHarness(row, { exactBatch = true } = {}) {
+  const calls = { auth: 0, execute: 0, export: 0, store: 0, proof: 0, verifyBucket: 0 };
+  const pruneCalls = [];
+  const durable = {
+    archiveBytes: canaryArchiveBytes,
+    manifestGzipBytes: Buffer.from("compressed recovery manifest"),
+    manifestBytes: Buffer.from("recovery manifest"),
+    manifest: buildRecoveryManifest(row, STAGE_SYSTEM_IDENTIFIER, canaryEvidence, { target: "stage" }),
+    archivePath: buildRecoveryArchiveObjectPath(canaryCompressedSha),
+    manifestPath: buildRecoveryManifestObjectPath(canaryCompressedSha),
+    recoveryArchive: { sha256: canaryCompressedSha },
+    recoveryManifest: { sha256: "f".repeat(64) },
+  };
+  const sqlCalls = [];
+  const session = { backendPid: "exact-canary-session" };
+  const sql = {
+    calls: sqlCalls,
+    unsafe: async (query, values = []) => {
+      sqlCalls.push({ query, values });
+      if (query.includes("pg_try_advisory_lock")) return [{ acquired: true, backend_pid: session.backendPid }];
+      if (query.includes("pg_backend_pid")) return [{ backend_pid: session.backendPid }];
+      if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
+      if (query.includes("pg_control_system")) return [{ system_identifier: STAGE_SYSTEM_IDENTIFIER }];
+      if (query.includes("where batch_id = $1")) return exactBatch ? [row] : [];
+      if (query.includes("where project_ref = $1")) return [row];
+      throw new Error(`unexpected exact canary SQL: ${query}`);
+    },
+    begin: async (callback) => callback({
+      unsafe: async (query, values = []) => {
+        if (query.startsWith("set transaction")) return [];
+        return sql.unsafe(query, values);
+      },
+    }),
+  };
+  const pruneStore = {
+    getManifest: async () => row,
+    async authorizeBotOnlyBatch(batchId, confirmation) {
+      calls.auth += 1;
+      assert.equal(String(batchId), "42");
+      assert.equal(confirmation, "GO 42");
+      row.destructive_go_at = "2026-08-13T00:02:30.000000Z";
+      row.destructive_go_batch_id = "42";
+      return { state: "authorized", batch_id: "42" };
+    },
+  };
+  const deps = {
+    sql,
+    storageTarget,
+    tempRoot: fs.mkdtempSync("/tmp/chips-ledger-stage-bot-only-exact-"),
+    pruneStore,
+    verifyBucket: async () => { calls.verifyBucket += 1; },
+    inspectDurableRecovery: async () => durable,
+    exportArchive: async () => { calls.export += 1; throw new Error("exact execute must not export"); },
+    ensureArchiveBucket: async () => { calls.store += 1; throw new Error("exact execute must not prepare Storage"); },
+    storeArchive: async () => { calls.store += 1; throw new Error("exact execute must not store a new manifest"); },
+    pruneArchive: async ({ argv }) => {
+      const execute = argv.includes("--execute");
+      pruneCalls.push({ argv: [...argv], execute });
+      if (!execute) {
+        return {
+          state: row.registry_cleaned_at ? "already_cleaned" : "ready",
+          evidence: canaryEvidence,
+        };
+      }
+      calls.execute += 1;
+      row.pruned_at = "2026-08-13T00:02:00.000000Z";
+      row.pruned_transaction_count = 1;
+      row.pruned_entry_count = 2;
+      row.pruned_transaction_ids_sha256 = canaryEvidence.transactionIdsSha256;
+      row.pruned_entry_ids_sha256 = canaryEvidence.entryIdsSha256;
+      row.registry_cleaned_at = "2026-08-13T00:03:00.000000Z";
+      row.registry_cleaned_key_count = 1;
+      row.registry_cleaned_keys_sha256 = canaryEvidence.registryKeysSha256;
+      return { state: "cleaned", evidence: canaryEvidence };
+    },
+  };
+  return { deps, calls, pruneCalls, durable };
+}
+
+const preparedCanaryRow = makeCanaryRow();
+const preparedHarness = makeCanaryHarness(preparedCanaryRow);
+const preparedCanary = await runBotOnlyStageAutomation({
+  env: ENV,
+  deps: preparedHarness.deps,
+  prepareOnly: true,
+});
+assert.equal(preparedCanary.state, "prepared", "prepare-only must produce the exact canary input");
+assert.equal(preparedHarness.calls.auth, 0, "prepare-only must not write a destructive GO");
+assert.equal(preparedHarness.calls.execute, 0, "prepare-only must not execute cleanup");
+
+const exactCanary = await runBotOnlyStageAutomation({
+  env: { ...ENV, CHIPS_LEDGER_BOT_ONLY_EXECUTE: "1" },
+  deps: preparedHarness.deps,
+  prepareOnly: false,
+  approvedBatchId: "42",
+  approvedBatchConfirmation: "GO 42",
+});
+assert.equal(exactCanary.state, "cleaned");
+assert.equal(preparedHarness.calls.auth, 1, "first exact execute must persist one owner-only GO");
+assert.equal(preparedHarness.calls.execute, 1, "first exact execute must prune the approved batch");
+assert.equal(preparedHarness.pruneCalls.at(-1).argv.includes("--approved-batch-id"), true);
+assert.equal(preparedHarness.pruneCalls.at(-1).argv.includes("42"), true);
+assert.equal(preparedCanaryRow.destructive_go_at != null, true);
+assert.equal(preparedCanaryRow.destructive_go_batch_id, "42");
+assert.equal(preparedHarness.calls.export, 0, "exact execute must not export a candidate");
+assert.equal(preparedHarness.calls.store, 0, "exact execute must not write Storage or a new manifest");
+
+const exactGoRow = makeCanaryRow({ go: true });
+const exactGoHarness = makeCanaryHarness(exactGoRow);
+const exactGoResume = await runBotOnlyStageAutomation({
+  env: { ...ENV, CHIPS_LEDGER_BOT_ONLY_EXECUTE: "1" },
+  deps: exactGoHarness.deps,
+  prepareOnly: false,
+  approvedBatchId: "42",
+  approvedBatchConfirmation: "GO 42",
+});
+assert.equal(exactGoResume.state, "cleaned");
+assert.equal(exactGoHarness.calls.auth, 0, "an existing exact GO must be reused");
+assert.equal(exactGoHarness.calls.execute, 1, "an existing exact GO must resume the exact batch");
+
+const cleanedRow = makeCanaryRow({ go: true, cleaned: true });
+const cleanedHarness = makeCanaryHarness(cleanedRow);
+const cleanedRetry = await runBotOnlyStageAutomation({
+  env: { ...ENV, CHIPS_LEDGER_BOT_ONLY_EXECUTE: "1" },
+  deps: cleanedHarness.deps,
+  prepareOnly: false,
+  approvedBatchId: "42",
+  approvedBatchConfirmation: "GO 42",
+});
+assert.equal(cleanedRetry.state, "already_cleaned", "a completed exact batch must be idempotent");
+assert.equal(cleanedHarness.calls.auth, 0);
+assert.equal(cleanedHarness.calls.execute, 0, "completed retry must not execute or choose a next candidate");
+assert.equal(cleanedHarness.calls.export, 0);
+assert.equal(cleanedHarness.calls.store, 0);
+
+const wrongIdHarness = makeCanaryHarness(makeCanaryRow(), { exactBatch: false });
+await assert.rejects(
+  runBotOnlyStageAutomation({
+    env: { ...ENV, CHIPS_LEDGER_BOT_ONLY_EXECUTE: "1" },
+    deps: wrongIdHarness.deps,
+    prepareOnly: false,
+    approvedBatchId: "999",
+    approvedBatchConfirmation: "GO 999",
+  }),
+  /was not found/,
+);
+assert.deepEqual(wrongIdHarness.calls, { auth: 0, execute: 0, export: 0, store: 0, proof: 0, verifyBucket: 0 });
+
+const wrongConfirmationHarness = makeCanaryHarness(makeCanaryRow());
+await assert.rejects(
+  runBotOnlyStageAutomation({
+    env: { ...ENV, CHIPS_LEDGER_BOT_ONLY_EXECUTE: "1" },
+    deps: wrongConfirmationHarness.deps,
+    prepareOnly: false,
+    approvedBatchId: "42",
+    approvedBatchConfirmation: "GO 41",
+  }),
+  /exact GO <batch_id>/,
+);
+assert.deepEqual(wrongConfirmationHarness.calls, { auth: 0, execute: 0, export: 0, store: 0, proof: 0, verifyBucket: 0 });
+
+const partialGoHarness = makeCanaryHarness(makeCanaryRow({ partialGo: true }));
+await assert.rejects(
+  runBotOnlyStageAutomation({
+    env: { ...ENV, CHIPS_LEDGER_BOT_ONLY_EXECUTE: "1" },
+    deps: partialGoHarness.deps,
+    prepareOnly: false,
+    approvedBatchId: "42",
+    approvedBatchConfirmation: "GO 42",
+  }),
+  /partial destructive GO/,
+);
+assert.deepEqual(partialGoHarness.calls, { auth: 0, execute: 0, export: 0, store: 0, proof: 0, verifyBucket: 0 });
+const missingRecoveryHarness = makeCanaryHarness(makeCanaryRow());
+missingRecoveryHarness.deps.inspectDurableRecovery = async () => null;
+await assert.rejects(
+  runBotOnlyStageAutomation({
+    env: { ...ENV, CHIPS_LEDGER_BOT_ONLY_EXECUTE: "1" },
+    deps: missingRecoveryHarness.deps,
+    prepareOnly: false,
+    approvedBatchId: "42",
+    approvedBatchConfirmation: "GO 42",
+  }),
+  /no durable recovery/,
+);
+assert.equal(missingRecoveryHarness.calls.auth, 0, "missing recovery must block authorization");
+assert.equal(missingRecoveryHarness.calls.execute, 0, "missing recovery must block execute");
+assert.throws(
+  () => assertBotOnlyExecuteBatch({ ...makeCanaryRow(), source_policy_id: STAGE_AUTOMATION_POLICY_ID }, "42"),
+  /policy mismatch/,
+);
+assert.throws(
+  () => assertBotOnlyActiveManifestMatch(makeCanaryRow(), { ...makeCanaryRow(), compressed_sha256: "9".repeat(64) }, "42"),
+  /active manifest.*compressed_sha256/,
+);
+assert.throws(
+  () => assertBotOnlyExecuteBatch({ ...makeCanaryRow(), archived_entry_ids_sha256: null }, "42"),
+  /complete archive proof/,
+);
+assert.throws(
+  () => assertBotOnlyExecuteBatch({ ...makeCanaryRow(), object_path: "v1/sha256/" + "9".repeat(64) + ".jsonl.gz" }, "42"),
+  /object path/,
+);
+assert.throws(
+  () => assertBotOnlyExecuteBatch({ ...makeCanaryRow(), registry_cleaned_at: "now" }, "42"),
+  /partial registry cleanup receipt/,
+);
+
 assert.throws(() => assertDurableRecoveryReady({ archiveBytes: Buffer.from("archive") }), /both durable recovery copies/);
 assert.throws(
   () => assertResumeRecoveryState({ archive_proof_verified_at: "now", pruned_at: null }, null),

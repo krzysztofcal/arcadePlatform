@@ -644,6 +644,21 @@ export function createPruneStore(sql) {
         return rows[0]?.result;
       });
     },
+    // The database function is deliberately owner-only (EXECUTE is granted to
+    // postgres only).  Keep the authorization as a separate transaction from
+    // the later prune call so the persisted GO receipt is independently
+    // observable and can be safely reused by an exact-batch retry.
+    async authorizeBotOnlyBatch(batchId, confirmation) {
+      return sql.begin(async (tx) => {
+        await tx.unsafe("set transaction isolation level serializable;");
+        await tx.unsafe("set local lock_timeout = '5s';");
+        await tx.unsafe("set local statement_timeout = '120s';");
+        const rows = await tx.unsafe(`select public.chips_authorize_bot_only_archive_batch(
+          $1::bigint, $2::text
+        ) as result;`, [batchId, confirmation]);
+        return rows[0]?.result;
+      });
+    },
     async registerLegacyStageAllowlistProof(row, evidence) {
       return sql.begin(async (tx) => {
         await tx.unsafe("set transaction isolation level repeatable read;");

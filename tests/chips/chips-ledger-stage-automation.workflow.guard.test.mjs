@@ -3,6 +3,8 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 
 const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-automation.yml", "utf8");
+const stageOrchestrator = fs.readFileSync("scripts/ops/chips-ledger-stage-automation.mjs", "utf8");
+const pruneAdapter = fs.readFileSync("scripts/ops/chips-ledger-archive-prune.mjs", "utf8");
 const executeRunner = fs.readFileSync("scripts/ops/chips-ledger-legacy-stage-allowlist-execute.mjs", "utf8");
 const registrySelector = fs.readFileSync("scripts/ops/chips-ledger-legacy-stage-allowlist-registry.mjs", "utf8");
 
@@ -11,6 +13,7 @@ assert.match(
   /workflow_dispatch:\n\s+inputs:\n\s+mode:\n\s+description: Stage automation mode\n\s+required: true\n\s+default: existing-30d\n\s+type: choice\n\s+options:\n\s+- existing-30d\n\s+- bot-only-7d-prepare-only\n\s+- bot-only-7d-execute\n\s+- bot-only-7d-automatic\n\s+- legacy-stage-allowlist-prepare-only\n\s+- legacy-stage-allowlist-orchestrate\n\s+- audit-batch-13\n\s+- execute-batch-13/,
 );
 assert.match(workflow, /approved_batch_id:\n\s+description: Exact committed bot-only 7d batch_id prepared by a prior run[\s\S]*?required: false\n\s+type: string/);
+assert.match(workflow, /approved_batch_confirmation:\n\s+description: Exact human confirmation GO <approved_batch_id> \(required for bot-only-7d-execute\)[\s\S]*?required: false\n\s+type: string/);
 assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|legacy-stage-allowlist-prepare-only|audit-batch-13|execute-batch-13)$/gm) || []).length, 5);
 assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|bot-only-7d-execute|legacy-stage-allowlist-prepare-only|audit-batch-13|execute-batch-13)$/gm) || []).length, 6);
 assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|bot-only-7d-execute|bot-only-7d-automatic|legacy-stage-allowlist-prepare-only|legacy-stage-allowlist-orchestrate|audit-batch-13|execute-batch-13)$/gm) || []).length, 8);
@@ -72,10 +75,20 @@ const canaryRun = workflow.match(
 )[0];
 assert.match(canaryRun, /if: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.mode == 'bot-only-7d-execute' \}\}/);
 assert.match(canaryRun, /APPROVED_BATCH_ID: \$\{\{ inputs\.approved_batch_id \}\}/);
+assert.match(canaryRun, /APPROVED_BATCH_CONFIRMATION: \$\{\{ inputs\.approved_batch_confirmation \}\}/);
 assert.match(canaryRun, /CHIPS_LEDGER_BOT_ONLY_EXECUTE: "1"/);
 assert.match(canaryRun, /approved_batch_id must be a positive integer/);
-assert.match(canaryRun, /--execute \\\n+\s+--approved-batch-id "\$APPROVED_BATCH_ID"/);
+assert.match(canaryRun, /approved_batch_confirmation must be exactly GO <approved_batch_id>/);
+assert.match(canaryRun, /--execute \\\n+\s+--approved-batch-id "\$APPROVED_BATCH_ID" \\\n+\s+--approved-batch-confirmation "\$APPROVED_BATCH_CONFIRMATION"/);
 assert.doesNotMatch(botOnlyRun, /CHIPS_LEDGER_BOT_ONLY_EXECUTE|--execute/);
+assert.match(stageOrchestrator, /STAGE_EXACT_BATCH_SQL/);
+assert.match(stageOrchestrator, /set transaction isolation level repeatable read, read only/);
+assert.match(stageOrchestrator, /assertBotOnlyActiveManifestMatch/);
+assert.match(stageOrchestrator, /authorizeBotOnlyBatch/);
+assert.match(stageOrchestrator, /destructive_go_at/);
+assert.match(stageOrchestrator, /destructive_go_batch_id/);
+assert.match(pruneAdapter, /public\.chips_authorize_bot_only_archive_batch/);
+assert.match(pruneAdapter, /set transaction isolation level serializable/);
 
 const legacyRun = workflow.match(
   /- name: Run legacy Stage allowlist prepare-only[\s\S]*?(?=\n\s+- name:|\s*$)/,
