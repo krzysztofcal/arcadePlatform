@@ -10,7 +10,10 @@ import {
 import {
   ARCHIVE_BUCKET,
   ARCHIVE_MAX_BYTES,
+  TABLE_IDENTITY_SUMMARY_ERROR_CODES,
+  assertTableIdentitySummary,
   createManifestStore,
+  diagnoseTableIdentitySummary,
   resolveStorageTarget,
   storeArchive,
   verifyArchiveBucket,
@@ -135,6 +138,59 @@ const localManifest = buildManifest({
 });
 fs.writeFileSync(artifactPath, archive.compressedBytes, { mode: 0o600 });
 fs.writeFileSync(manifestPath, `${JSON.stringify(localManifest)}\n`, { mode: 0o600 });
+
+const validSummary = {
+  newest_created_at: "2026-07-01T00:00:00.000000Z",
+  identity_count: "1",
+  eligible_count: "1",
+  out_of_scope_keys_sha256: "b".repeat(64),
+};
+const validBotOnlyManifest = {
+  newest_created_at: "2026-07-01T00:00:00.000000Z",
+  identity_count: 1,
+  eligible_count: 1,
+};
+assert.equal(diagnoseTableIdentitySummary(validSummary, validBotOnlyManifest).ok, true);
+assert.deepEqual(
+  [
+    [null, TABLE_IDENTITY_SUMMARY_ERROR_CODES.MISSING],
+    [{ ...validSummary, newest_created_at: "invalid" }, TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_INVALID],
+    [{ ...validSummary, identity_count: "not-a-count" }, TABLE_IDENTITY_SUMMARY_ERROR_CODES.IDENTITY_COUNT_INVALID],
+    [validSummary, TABLE_IDENTITY_SUMMARY_ERROR_CODES.IDENTITY_COUNT_MISMATCH],
+    [{ ...validSummary, eligible_count: "not-a-count" }, TABLE_IDENTITY_SUMMARY_ERROR_CODES.ELIGIBLE_COUNT_INVALID],
+    [validSummary, TABLE_IDENTITY_SUMMARY_ERROR_CODES.ELIGIBLE_COUNT_MISMATCH],
+    [{ ...validSummary, out_of_scope_keys_sha256: "B".repeat(64) }, TABLE_IDENTITY_SUMMARY_ERROR_CODES.OUT_OF_SCOPE_KEYS_SHA256_INVALID],
+    [{ ...validSummary, newest_created_at: "2026-07-01T00:00:01.000000Z" }, TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_MISMATCH],
+  ].map(([summaryValue, code], index) => {
+    const manifestValue = index === 3
+      ? { ...validBotOnlyManifest, identity_count: 2 }
+      : index === 5
+        ? { ...validBotOnlyManifest, eligible_count: 2 }
+        : validBotOnlyManifest;
+    return [diagnoseTableIdentitySummary(summaryValue, manifestValue).code, code];
+  }),
+  [
+    [TABLE_IDENTITY_SUMMARY_ERROR_CODES.MISSING, TABLE_IDENTITY_SUMMARY_ERROR_CODES.MISSING],
+    [TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_INVALID, TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_INVALID],
+    [TABLE_IDENTITY_SUMMARY_ERROR_CODES.IDENTITY_COUNT_INVALID, TABLE_IDENTITY_SUMMARY_ERROR_CODES.IDENTITY_COUNT_INVALID],
+    [TABLE_IDENTITY_SUMMARY_ERROR_CODES.IDENTITY_COUNT_MISMATCH, TABLE_IDENTITY_SUMMARY_ERROR_CODES.IDENTITY_COUNT_MISMATCH],
+    [TABLE_IDENTITY_SUMMARY_ERROR_CODES.ELIGIBLE_COUNT_INVALID, TABLE_IDENTITY_SUMMARY_ERROR_CODES.ELIGIBLE_COUNT_INVALID],
+    [TABLE_IDENTITY_SUMMARY_ERROR_CODES.ELIGIBLE_COUNT_MISMATCH, TABLE_IDENTITY_SUMMARY_ERROR_CODES.ELIGIBLE_COUNT_MISMATCH],
+    [TABLE_IDENTITY_SUMMARY_ERROR_CODES.OUT_OF_SCOPE_KEYS_SHA256_INVALID, TABLE_IDENTITY_SUMMARY_ERROR_CODES.OUT_OF_SCOPE_KEYS_SHA256_INVALID],
+    [TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_MISMATCH, TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_MISMATCH],
+  ],
+);
+const equivalentTimestampDiagnosis = diagnoseTableIdentitySummary(
+  validSummary,
+  { ...validBotOnlyManifest, newest_created_at: "2026-07-01 00:00:00.000000+00" },
+);
+assert.equal(equivalentTimestampDiagnosis.ok, true);
+assert.equal(equivalentTimestampDiagnosis.strict_timestamp_equal, false);
+assert.equal(equivalentTimestampDiagnosis.semantic_timestamp_equal, true);
+assert.throws(
+  () => assertTableIdentitySummary(validSummary, { ...validBotOnlyManifest, newest_created_at: "2026-07-01 00:00:00.000000+00" }),
+  (error) => error?.code === TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_MISMATCH,
+);
 
 try {
   const publicBucketStorage = makeFetch({

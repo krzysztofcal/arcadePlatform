@@ -28,6 +28,17 @@ export const ARCHIVE_BUCKET = "chips-ledger-archive";
 export const ARCHIVE_MIME_TYPE = "application/gzip";
 export const ARCHIVE_MAX_BYTES = 6 * 1024 * 1024;
 
+export const TABLE_IDENTITY_SUMMARY_ERROR_CODES = Object.freeze({
+  MISSING: "TABLE_IDENTITY_SUMMARY_MISSING",
+  NEWEST_CREATED_AT_INVALID: "TABLE_IDENTITY_SUMMARY_NEWEST_CREATED_AT_INVALID",
+  IDENTITY_COUNT_INVALID: "TABLE_IDENTITY_SUMMARY_IDENTITY_COUNT_INVALID",
+  IDENTITY_COUNT_MISMATCH: "TABLE_IDENTITY_SUMMARY_IDENTITY_COUNT_MISMATCH",
+  ELIGIBLE_COUNT_INVALID: "TABLE_IDENTITY_SUMMARY_ELIGIBLE_COUNT_INVALID",
+  ELIGIBLE_COUNT_MISMATCH: "TABLE_IDENTITY_SUMMARY_ELIGIBLE_COUNT_MISMATCH",
+  OUT_OF_SCOPE_KEYS_SHA256_INVALID: "TABLE_IDENTITY_SUMMARY_OUT_OF_SCOPE_KEYS_SHA256_INVALID",
+  NEWEST_CREATED_AT_MISMATCH: "TABLE_IDENTITY_SUMMARY_NEWEST_CREATED_AT_MISMATCH",
+});
+
 const INTEGER_RE = /^-?(?:0|[1-9][0-9]*)$/;
 const NON_NEGATIVE_INTEGER_RE = /^(?:0|[1-9][0-9]*)$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
@@ -54,8 +65,10 @@ verifies a private download, and records pending -> committed metadata. It
 does not modify ledger rows and never deletes Storage objects.
 `;
 
-function fail(message) {
-  throw new Error(message);
+function fail(message, code = null) {
+  const error = new Error(code ? `${message}: ${code}` : message);
+  if (code) error.code = code;
+  throw error;
 }
 
 function text(value) {
@@ -99,7 +112,7 @@ function hashCanonicalLines(values) {
   return crypto.createHash("sha256").update(`${values.join("\n")}\n`, "utf8").digest("hex");
 }
 
-function sameTimestamp(left, right) {
+export function sameTimestamp(left, right) {
   if (left == null || right == null) return left == null && right == null;
   return timestampToMicros(left) === timestampToMicros(right);
 }
@@ -309,6 +322,88 @@ function timestampValue(value) {
   }
 }
 
+function summaryFailure(checks, field, code, details = {}) {
+  return {
+    ok: false,
+    code,
+    field,
+    checks: [...checks, { field, code, ok: false }],
+    ...details,
+  };
+}
+
+export function diagnoseTableIdentitySummary(summary, manifestBotOnly) {
+  const checks = [];
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) {
+    return summaryFailure(checks, "summary", TABLE_IDENTITY_SUMMARY_ERROR_CODES.MISSING);
+  }
+  checks.push({ field: "summary", code: TABLE_IDENTITY_SUMMARY_ERROR_CODES.MISSING, ok: true });
+
+  if (!timestampValue(summary.newest_created_at)) {
+    return summaryFailure(checks, "newest_created_at", TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_INVALID);
+  }
+  checks.push({ field: "newest_created_at.format", code: TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_INVALID, ok: true });
+
+  if (!/^[0-9]+$/.test(text(summary.identity_count))) {
+    return summaryFailure(checks, "identity_count.format", TABLE_IDENTITY_SUMMARY_ERROR_CODES.IDENTITY_COUNT_INVALID);
+  }
+  checks.push({ field: "identity_count.format", code: TABLE_IDENTITY_SUMMARY_ERROR_CODES.IDENTITY_COUNT_INVALID, ok: true });
+  if (text(summary.identity_count) !== String(manifestBotOnly?.identity_count)) {
+    return summaryFailure(checks, "identity_count", TABLE_IDENTITY_SUMMARY_ERROR_CODES.IDENTITY_COUNT_MISMATCH);
+  }
+  checks.push({ field: "identity_count", code: TABLE_IDENTITY_SUMMARY_ERROR_CODES.IDENTITY_COUNT_MISMATCH, ok: true });
+
+  if (!/^[0-9]+$/.test(text(summary.eligible_count))) {
+    return summaryFailure(checks, "eligible_count.format", TABLE_IDENTITY_SUMMARY_ERROR_CODES.ELIGIBLE_COUNT_INVALID);
+  }
+  checks.push({ field: "eligible_count.format", code: TABLE_IDENTITY_SUMMARY_ERROR_CODES.ELIGIBLE_COUNT_INVALID, ok: true });
+  if (text(summary.eligible_count) !== String(manifestBotOnly?.eligible_count)) {
+    return summaryFailure(checks, "eligible_count", TABLE_IDENTITY_SUMMARY_ERROR_CODES.ELIGIBLE_COUNT_MISMATCH);
+  }
+  checks.push({ field: "eligible_count", code: TABLE_IDENTITY_SUMMARY_ERROR_CODES.ELIGIBLE_COUNT_MISMATCH, ok: true });
+
+  if (!SHA256_RE.test(text(summary.out_of_scope_keys_sha256))) {
+    return summaryFailure(checks, "out_of_scope_keys_sha256", TABLE_IDENTITY_SUMMARY_ERROR_CODES.OUT_OF_SCOPE_KEYS_SHA256_INVALID);
+  }
+  checks.push({ field: "out_of_scope_keys_sha256", code: TABLE_IDENTITY_SUMMARY_ERROR_CODES.OUT_OF_SCOPE_KEYS_SHA256_INVALID, ok: true });
+
+  const strictTimestampEqual = summary.newest_created_at === manifestBotOnly?.newest_created_at;
+  let semanticTimestampEqual = false;
+  try {
+    semanticTimestampEqual = sameTimestamp(summary.newest_created_at, manifestBotOnly?.newest_created_at);
+  } catch {
+    semanticTimestampEqual = false;
+  }
+  if (!semanticTimestampEqual) {
+    return summaryFailure(checks, "newest_created_at", TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_MISMATCH, {
+      strict_timestamp_equal: strictTimestampEqual,
+      semantic_timestamp_equal: false,
+    });
+  }
+  checks.push({ field: "newest_created_at", code: TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_MISMATCH, ok: true });
+  return {
+    ok: true,
+    code: null,
+    field: null,
+    checks,
+    strict_timestamp_equal: strictTimestampEqual,
+    semantic_timestamp_equal: true,
+  };
+}
+
+export function assertTableIdentitySummary(summary, manifestBotOnly, { allowEquivalentTimestamp = false } = {}) {
+  const diagnosis = diagnoseTableIdentitySummary(summary, manifestBotOnly);
+  const strictTimestampMismatch = diagnosis.semantic_timestamp_equal === true
+    && diagnosis.strict_timestamp_equal === false;
+  if (!diagnosis.ok || (strictTimestampMismatch && !allowEquivalentTimestamp)) {
+    const code = diagnosis.ok
+      ? TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_MISMATCH
+      : diagnosis.code;
+    fail("schema-v2 artifact table summary is invalid", code);
+  }
+  return diagnosis;
+}
+
 function summarizeRecords(records, manifest) {
   if (!Array.isArray(records)) fail("JSONL artifact must contain records");
   const sorted = [...records].sort(compareTransactions);
@@ -388,15 +483,7 @@ function summarizeRecords(records, manifest) {
         || proof.table_id_from_key !== context.table_id || proof.key_format_version !== 1 || !text(proof.key_format)) {
         fail("schema-v2 artifact bot-only proof is invalid");
       }
-      if (!summary || !timestampValue(summary.newest_created_at)
-        || !/^[0-9]+$/.test(text(summary.identity_count))
-        || !/^[0-9]+$/.test(text(summary.eligible_count))
-        || text(summary.identity_count) !== String(manifest.bot_only?.identity_count)
-        || text(summary.eligible_count) !== String(manifest.bot_only?.eligible_count)
-        || !SHA256_RE.test(text(summary.out_of_scope_keys_sha256))
-        || summary.newest_created_at !== manifest.bot_only?.newest_created_at) {
-        fail("schema-v2 artifact table summary is invalid");
-      }
+      assertTableIdentitySummary(summary, manifest.bot_only);
       const parsedBinding = assertTableBinding({
         idempotencyKey: transaction.idempotency_key,
         metadata: transaction.metadata,

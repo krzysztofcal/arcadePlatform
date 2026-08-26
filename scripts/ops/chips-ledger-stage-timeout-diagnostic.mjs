@@ -1,12 +1,24 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import postgres from "postgres";
+import { gunzipSync } from "node:zlib";
 
 import {
   BOT_ONLY_BLOCKING_ANOMALY_SQL,
   BOT_ONLY_CANDIDATE_SQL,
   BOT_ONLY_RETENTION_DAYS,
   BOT_ONLY_RETENTION_POLICY_ID,
+  BOT_ONLY_EXPORT_SCHEMA_VERSION,
+  parseJsonl,
+  runExport,
 } from "./chips-ledger-archive-export.mjs";
+import {
+  diagnoseTableIdentitySummary,
+  resolveStorageTarget,
+  verifyLocalArchive,
+} from "./chips-ledger-archive-store.mjs";
 import {
   redactedError,
   STAGE_MAX_BATCH_SIZE,
@@ -79,6 +91,16 @@ function sqlSha256(query) {
 
 function stringify(value) {
   return JSON.stringify(value, (_key, nested) => (typeof nested === "bigint" ? nested.toString() : nested), 2);
+}
+
+function boundedReadOnlySql(sql) {
+  return {
+    typed: typeof sql.typed === "function" ? (value, type) => sql.typed(value, type) : undefined,
+    begin: (callback) => sql.begin(async (tx) => {
+      await tx.unsafe(`set local statement_timeout = '${REPLAY_STATEMENT_TIMEOUT_MS}ms';`);
+      return callback(tx);
+    }),
+  };
 }
 
 async function readOnlyTransaction(sql, callback) {
@@ -162,6 +184,129 @@ async function replay(sql, queryName, query, parameters) {
   }
 }
 
+function tableSummaryFailure(diagnosis, recordIndex) {
+  if (!diagnosis) return null;
+  if (!diagnosis.ok) {
+    return {
+      code: diagnosis.code,
+      field: diagnosis.field,
+      record_index: recordIndex,
+      strict_timestamp_equal: diagnosis.strict_timestamp_equal ?? null,
+      semantic_timestamp_equal: diagnosis.semantic_timestamp_equal ?? null,
+    };
+  }
+  if (diagnosis.strict_timestamp_equal === false) {
+    return {
+      code: "TABLE_IDENTITY_SUMMARY_NEWEST_CREATED_AT_MISMATCH",
+      field: "newest_created_at",
+      record_index: recordIndex,
+      strict_timestamp_equal: false,
+      semantic_timestamp_equal: true,
+      representation_only: true,
+    };
+  }
+  return null;
+}
+
+export async function runBotOnlyTableIdentitySummaryDiagnostic({ config, sql, cutoff }) {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-table-summary-diagnostic-"));
+  fs.chmodSync(tempRoot, 0o700);
+  const artifactPath = path.join(tempRoot, "bot-only.archive.jsonl.gz");
+  const manifestPath = path.join(tempRoot, "bot-only.archive.manifest.json");
+  const boundedSql = boundedReadOnlySql(sql);
+  try {
+    const exported = await runExport({
+      argv: [
+        "--target", "stage",
+        "--cutoff", cutoff,
+        "--batch-size", String(STAGE_MAX_BATCH_SIZE),
+        "--output", artifactPath,
+        "--manifest", manifestPath,
+      ],
+      env: config.moduleEnv,
+      cwd: tempRoot,
+      now: new Date(cutoff),
+      deps: {
+        sql: boundedSql,
+        selector: "bot-only-7d",
+        schemaVersion: BOT_ONLY_EXPORT_SCHEMA_VERSION,
+        sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
+        targetOptions: { singleTarget: true },
+        noCandidateIfEmpty: true,
+        emit: false,
+      },
+    });
+    if (exported?.noCandidate) {
+      return {
+        state: "no_candidate",
+        records: 0,
+        entries: 0,
+        first_failure: null,
+        local_archive_store_validation: { state: "not_run", error_code: null },
+      };
+    }
+
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    const rawBytes = gunzipSync(fs.readFileSync(artifactPath));
+    const records = parseJsonl(rawBytes.toString("utf8"));
+    let representative = null;
+    let firstFailure = null;
+    for (const [recordIndex, record] of records.entries()) {
+      const diagnosis = diagnoseTableIdentitySummary(record?.table_context?.table_identity_summary, manifest.bot_only);
+      if (!representative) representative = diagnosis;
+      const failure = tableSummaryFailure(diagnosis, recordIndex);
+      if (failure) {
+        firstFailure = failure;
+        break;
+      }
+    }
+
+    let localValidation = { state: "pass", error_code: null };
+    try {
+      verifyLocalArchive({
+        artifactPath,
+        manifestPath,
+        target: resolveStorageTarget("stage", config.moduleEnv, { singleTarget: true }),
+      });
+    } catch (error) {
+      localValidation = {
+        state: "blocked",
+        error_code: error?.code || null,
+        error_class: "local_archive_store_validation_failed",
+      };
+    }
+
+    return {
+      state: firstFailure || localValidation.state !== "pass" ? "blocked" : "pass",
+      records: records.length,
+      entries: records.reduce((total, record) => total + (Array.isArray(record?.entries) ? record.entries.length : 0), 0),
+      first_failure: firstFailure,
+      checks: representative?.checks || [],
+      strict_timestamp_equal: representative?.strict_timestamp_equal ?? null,
+      semantic_timestamp_equal: representative?.semantic_timestamp_equal ?? null,
+      local_archive_store_validation: localValidation,
+      read_only_contract: {
+        transaction: "repeatable read, read only",
+        statement_timeout_ms: REPLAY_STATEMENT_TIMEOUT_MS,
+        writes: false,
+        storage_access: false,
+        output_contains_rows: false,
+      },
+    };
+  } catch (error) {
+    return {
+      state: "error",
+      records: null,
+      entries: null,
+      first_failure: null,
+      error_code: error?.code || null,
+      error_class: "bounded_table_summary_diagnostic_failed",
+    };
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
 export async function runStageTimeoutDiagnostic({ env = process.env, now = new Date() } = {}) {
   const config = validateStageEnvironment(env, { requireCommitSha: true });
   const sql = postgres(config.dbUrl, {
@@ -193,6 +338,11 @@ export async function runStageTimeoutDiagnostic({ env = process.env, now = new D
       BOT_ONLY_CANDIDATE_SQL,
       candidateParameters,
     );
+    const tableIdentitySummary = await runBotOnlyTableIdentitySummaryDiagnostic({
+      config,
+      sql,
+      cutoff,
+    });
 
     return {
       event: "chips_ledger_stage_timeout_diagnostic",
@@ -204,6 +354,7 @@ export async function runStageTimeoutDiagnostic({ env = process.env, now = new D
       statement_timeout: settings,
       explains,
       selector_replay: selectorReplay,
+      bot_only_table_identity_summary: tableIdentitySummary,
       read_only_contract: {
         transaction: "repeatable read, read only",
         explain: "EXPLAIN (FORMAT JSON, VERBOSE, COSTS, SETTINGS), without ANALYZE",
