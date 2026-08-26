@@ -27,6 +27,7 @@ import {
 import { validateStageEnvironment } from "../../scripts/ops/chips-ledger-stage-automation.mjs";
 
 const migration = fs.readFileSync("supabase/migrations/20260818100000_chips_ledger_bot_only_retention.sql", "utf8");
+const lifecycleGateMigration = fs.readFileSync("supabase/migrations/20260826100000_chips_ledger_bot_only_lifecycle_gate_scope.sql", "utf8");
 const closedTableCleanup = fs.readFileSync("ws-server/poker/persistence/closed-table-cleanup.mjs", "utf8");
 
 const TABLE_ID = "00000000-0000-4000-8000-000000000020";
@@ -348,6 +349,17 @@ function failClosedLifecycleContract() {
   }), /Production credentials/);
 }
 
+function lifecycleGateScopeContract() {
+  assert.match(lifecycleGateMigration, /create or replace function public\.chips_assert_bot_only_table_lifecycle_gate\(/);
+  assert.match(lifecycleGateMigration, /language plpgsql\s+set search_path = ''/);
+  assert.match(lifecycleGateMigration, /pg_catalog\.pg_input_is_valid/);
+  assert.match(lifecycleGateMigration, /unknown_registry_identity_evidence/);
+  assert.match(lifecycleGateMigration, /hot_identity_evidence/);
+  assert.match(lifecycleGateMigration, /accounts\.system_key ~\* '\^POKER_TABLE:/);
+  assert.doesNotMatch(lifecycleGateMigration, /chips_parse_table_idempotency_key/);
+  assert.doesNotMatch(lifecycleGateMigration, /\b(?:alter|grant|revoke)\s+(?:function|all)/i);
+}
+
 function retryAndAccountingContract() {
   const candidate = botCandidate();
   const record = botRecord(candidate);
@@ -551,6 +563,139 @@ async function insertUnsupportedDatabaseTableTransaction(tx, fixture, {
     entryIds: entryRows.map((row) => String(row.id)),
     key,
   };
+}
+
+async function insertUnknownDatabaseTableTransaction(tx, {
+  key,
+  createdAt,
+  metadata = {},
+  reference = null,
+} = {}) {
+  const transactionId = randomUUID();
+  const legacyMetadata = typeof metadata === "string";
+  const metadataSql = legacyMetadata ? "to_jsonb($3::text)" : "$3::jsonb";
+  const metadataValue = legacyMetadata ? metadata : JSON.stringify(metadata);
+  await tx.unsafe(`
+    insert into public.chips_transactions
+      (id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at)
+    values ($1::uuid, $2, ${metadataSql}, $4, $5, 'TABLE_BUY_IN', null, $6::timestamptz);
+  `, [
+    transactionId,
+    reference,
+    metadataValue,
+    key,
+    "f".repeat(64),
+    createdAt || new Date().toISOString(),
+  ]);
+  return { transactionId, key };
+}
+
+async function insertUnknownDatabaseRegistryRow(tx, {
+  key,
+  createdAt,
+  transactionId = randomUUID(),
+} = {}) {
+  await tx.unsafe(`
+    insert into public.chips_transaction_idempotency
+      (idempotency_key, transaction_id, payload_hash, tx_type, user_id, transaction_created_at)
+    values ($1, $2::uuid, $3, 'TABLE_BUY_IN', null, $4::timestamptz);
+  `, [key, transactionId, "e".repeat(64), createdAt || new Date().toISOString()]);
+  return { transactionId, key };
+}
+
+async function insertMissingRegistryDatabaseTableTransaction(tx, {
+  key,
+  createdAt,
+  metadata = {},
+  reference = null,
+} = {}) {
+  const transactionId = randomUUID();
+  const legacyMetadata = typeof metadata === "string";
+  const metadataSql = legacyMetadata ? "to_jsonb($3::text)" : "$3::jsonb";
+  const metadataValue = legacyMetadata ? metadata : JSON.stringify(metadata);
+  await tx.unsafe("set local session_replication_role = 'replica';");
+  await tx.unsafe(`
+    insert into public.chips_transactions
+      (id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at)
+    values ($1::uuid, $2, ${metadataSql}, $4, $5, 'TABLE_BUY_IN', null, $6::timestamptz);
+  `, [
+    transactionId,
+    reference,
+    metadataValue,
+    key,
+    "d".repeat(64),
+    createdAt || new Date().toISOString(),
+  ]);
+  await tx.unsafe("set local session_replication_role = 'origin';");
+  return { transactionId, key };
+}
+
+async function insertBotOnlyLifecycleBatch(tx, fixture, transaction, cutoff) {
+  const transactionIds = [transaction.transactionId];
+  const entryIds = transaction.entryIds;
+  const registryKeys = [transaction.key];
+  const hashes = await tx.unsafe(`
+    select
+      public.chips_archive_uuid_ids_sha256($1::uuid[]) as transaction_hash,
+      public.chips_archive_bigint_ids_sha256($2::bigint[]) as entry_hash,
+      public.chips_archive_text_ids_sha256($3::text[]) as registry_hash,
+      public.chips_archive_text_ids_sha256(array[]::text[]) as empty_hash;
+  `, [transactionIds, entryIds, registryKeys]);
+  const hash = hashes[0];
+  const objectPath = `v1/sha256/${"2".repeat(64)}.jsonl.gz`;
+  const rows = await tx.unsafe(`
+    insert into public.chips_ledger_archive_batches (
+      object_path, project_ref, format_version, cutoff, cursor_end_created_at, cursor_end_id,
+      first_created_at, last_created_at, transaction_count, entry_count, tx_types,
+      raw_bytes, compressed_bytes, raw_sha256, compressed_sha256, credits, debits, net_amount,
+      source_policy_id, bot_only_table_id, bot_only_table_count, bot_only_newest_created_at,
+      bot_only_registry_keys_sha256, bot_only_out_of_scope_keys_sha256,
+      bot_only_identity_count, bot_only_eligible_count, status, committed_at
+    ) values (
+      $1, 'krydukthwdvccggbyjfw', 2, $2::timestamptz, $3::timestamptz, $4::uuid,
+      $3::timestamptz, $3::timestamptz, 1, 2, '{"TABLE_BUY_IN":1}'::jsonb,
+      100, 80, $5, $6, 100, 100, 0,
+      'stage-ledger-bot-only-retention-7d-v1', $7::uuid, 1, $3::timestamptz,
+      $8, $9, 1, 1, 'committed', timezone('utc', now())
+    ) returning batch_id::text;
+  `, [
+    objectPath,
+    cutoff,
+    transaction.createdAt,
+    transaction.transactionId,
+    "1".repeat(64),
+    "2".repeat(64),
+    fixture.tableId,
+    hash.registry_hash,
+    hash.empty_hash,
+  ]);
+  return {
+    batchId: rows[0].batch_id,
+    objectPath,
+    transactionIds,
+    entryIds,
+    registryKeys,
+  };
+}
+
+async function overrideArchiveIdentityGates(tx) {
+  await tx.unsafe(`
+    create or replace function public.chips_assert_archive_prune_stage()
+    returns text language sql security definer set search_path = ''
+    as $bot_only_scope_test_stage$ select '7656985631720456337'::text $bot_only_scope_test_stage$;
+  `);
+  await tx.unsafe(`
+    create or replace function public.chips_assert_archive_prune_target(p_project_ref text, p_transaction_count bigint)
+    returns text language plpgsql security definer set search_path = ''
+    as $bot_only_scope_test_target$
+    begin
+      if p_project_ref = 'krydukthwdvccggbyjfw' and p_transaction_count between 1 and 5000 then
+        return '7656985631720456337';
+      end if;
+      raise exception 'test target gate rejected request';
+    end
+    $bot_only_scope_test_target$;
+  `);
 }
 
 async function insertHumanUserEscrowTransaction(tx, fixture, { createdAt } = {}) {
@@ -1014,6 +1159,295 @@ async function archiveSelectorHistoricalIdentityAndMetadataPostgresContract(sql)
   }, "archive selector rollback must not leave qualifying tables or ledger rows for later contracts");
 }
 
+async function lifecycleGateForeignNullIdentityPostgresContract(sql) {
+  let rolledBack = false;
+  let scopeTableIds = [];
+  let scopeTransactionIds = [];
+  let scopeRegistryKeys = [];
+  let scopeObjectPath = null;
+
+  await sql.begin(async (tx) => {
+    await enableTableFence(tx, true);
+    const now = Date.now();
+    const cutoff = new Date(now - (7 * DAY_MS)).toISOString();
+    const createdAt = new Date(now - (10 * DAY_MS)).toISOString();
+    const target = await createDatabaseTable(tx);
+    const foreign = await createDatabaseTable(tx);
+    const valid = await insertDatabaseTableTransaction(tx, target, { createdAt, keySuffix: "lifecycle-valid" });
+    await tx.unsafe("set constraints all immediate;");
+    await tx.unsafe("update public.poker_tables set status = 'CLOSED' where id = any($1::uuid[]);", [[target.tableId, foreign.tableId]]);
+    const batch = await insertBotOnlyLifecycleBatch(tx, target, valid, cutoff);
+
+    await enableTableFence(tx, false);
+    const foreignUnknown = await insertUnknownDatabaseTableTransaction(tx, {
+      key: `bot-seed-buyin:${foreign.tableId}:foreign-history`,
+      createdAt,
+      metadata: { tableId: foreign.tableId },
+      reference: `table:${foreign.tableId}`,
+    });
+    await tx.unsafe("set constraints all immediate;");
+    await enableTableFence(tx, true);
+
+    const gate = await tx.unsafe(`
+      select public.chips_assert_bot_only_table_lifecycle_gate($1::uuid, $2::bigint, $3::timestamptz, $4::text[]) as result;
+    `, [target.tableId, batch.batchId, cutoff, batch.registryKeys]);
+    assert.equal(gate[0].result.state, "table_complete", "a foreign NULL identity must not block the target lifecycle gate");
+    assert.equal(gate[0].result.unknown_registry, 0);
+    assert.equal(gate[0].result.unknown_hot, 0);
+
+    await overrideArchiveIdentityGates(tx);
+    const proof = await tx.unsafe(`
+      select public.chips_register_bot_only_archive_proof($1, $2::uuid[], $3::bigint[], $4::uuid, $5::text[]) as result;
+    `, [batch.objectPath, batch.transactionIds, batch.entryIds, target.tableId, batch.registryKeys]);
+    assert.equal(proof[0].result.state, "proof_registered", "proof must pass with only a foreign NULL identity present");
+
+    scopeTableIds = [target.tableId, foreign.tableId];
+    scopeTransactionIds = [valid.transactionId, foreignUnknown.transactionId];
+    scopeRegistryKeys = [valid.key, foreignUnknown.key];
+    scopeObjectPath = batch.objectPath;
+    throw DB_ROLLBACK;
+  }).catch((error) => {
+    if (error === DB_ROLLBACK) {
+      rolledBack = true;
+      return;
+    }
+    throw error;
+  });
+
+  assert.equal(rolledBack, true, "foreign NULL identity lifecycle fixture must rollback completely");
+  const leaked = await sql.unsafe(`
+    select
+      (select count(*) from public.poker_tables where id = any($1::uuid[]))::text as tables,
+      (select count(*) from public.chips_transactions where id = any($2::uuid[]))::text as transactions,
+      (select count(*) from public.chips_entries where transaction_id = any($2::uuid[]))::text as entries,
+      (select count(*) from public.chips_transaction_idempotency where idempotency_key = any($3::text[]))::text as registry,
+      (select count(*) from public.chips_ledger_archive_batches where object_path = $4) ::text as batches;
+  `, [scopeTableIds, scopeTransactionIds, scopeRegistryKeys, scopeObjectPath]);
+  assert.deepEqual(leaked[0], {
+    tables: "0",
+    transactions: "0",
+    entries: "0",
+    registry: "0",
+    batches: "0",
+  }, "foreign NULL identity proof fixture must not leak rows");
+}
+
+async function lifecycleGateTargetEvidencePostgresContract(sql) {
+  let rolledBack = false;
+  let scopeTableIds = [];
+  let scopeTransactionIds = [];
+  let scopeRegistryKeys = [];
+  let scopeObjectPath = null;
+
+  await sql.begin(async (tx) => {
+    await enableTableFence(tx, true);
+    const now = Date.now();
+    const cutoff = new Date(now - (7 * DAY_MS)).toISOString();
+    const createdAt = new Date(now - (10 * DAY_MS)).toISOString();
+    const target = await createDatabaseTable(tx);
+    const other = await createDatabaseTable(tx);
+    const valid = await insertDatabaseTableTransaction(tx, target, { createdAt, keySuffix: "lifecycle-target" });
+    await tx.unsafe("set constraints all immediate;");
+    await tx.unsafe("update public.poker_tables set status = 'CLOSED' where id = $1::uuid;", [target.tableId]);
+    const batch = await insertBotOnlyLifecycleBatch(tx, target, valid, cutoff);
+    const gateArgs = [target.tableId, batch.batchId, cutoff, batch.registryKeys];
+
+    const evidenceCases = [
+      {
+        name: "key",
+        insert: () => insertUnknownDatabaseRegistryRow(tx, {
+          key: `bot-seed-buyin:${target.tableId}:target-key-${randomUUID()}`,
+          createdAt,
+        }),
+      },
+      {
+        name: "missing_registry_key",
+        insert: () => insertMissingRegistryDatabaseTableTransaction(tx, {
+          key: `bot-seed-buyin:${target.tableId}:missing-registry-${randomUUID()}`,
+          createdAt,
+          metadata: {},
+        }),
+      },
+      {
+        name: "metadata_object",
+        insert: () => insertUnknownDatabaseTableTransaction(tx, {
+          key: `legacy-unsupported-metadata-${randomUUID()}`,
+          createdAt,
+          metadata: { tableId: target.tableId },
+        }),
+      },
+      {
+        name: "metadata_legacy_json_string",
+        insert: () => insertUnknownDatabaseTableTransaction(tx, {
+          key: `legacy-unsupported-legacy-json-${randomUUID()}`,
+          createdAt,
+          metadata: JSON.stringify({ tableId: target.tableId }),
+        }),
+      },
+      {
+        name: "reference",
+        insert: () => insertUnknownDatabaseTableTransaction(tx, {
+          key: `legacy-unsupported-reference-${randomUUID()}`,
+          createdAt,
+          metadata: {},
+          reference: `table:${target.tableId}`,
+        }),
+      },
+      {
+        name: "escrow",
+        insert: () => insertUnsupportedDatabaseTableTransaction(tx, target, {
+          createdAt,
+          metadata: {},
+          reference: null,
+          keySuffix: `target-escrow-${randomUUID()}`,
+        }),
+      },
+      {
+        name: "conflicting",
+        insert: async () => {
+          const transaction = await insertMissingRegistryDatabaseTableTransaction(tx, {
+            key: `bot-seed-buyin:${target.tableId}:conflicting-${randomUUID()}`,
+            createdAt,
+            metadata: { tableId: other.tableId },
+          });
+          return insertUnknownDatabaseRegistryRow(tx, {
+            key: transaction.key,
+            transactionId: transaction.transactionId,
+            createdAt,
+          });
+        },
+      },
+      {
+        name: "malformed",
+        insert: async () => {
+          const transaction = await insertMissingRegistryDatabaseTableTransaction(tx, {
+            key: `bot-seed-buyin:${target.tableId}:malformed-${randomUUID()}`,
+            createdAt,
+            metadata: '{"tableId":',
+          });
+          return insertUnknownDatabaseRegistryRow(tx, {
+            key: transaction.key,
+            transactionId: transaction.transactionId,
+            createdAt,
+          });
+        },
+      },
+    ];
+
+    for (const evidenceCase of evidenceCases) {
+      await expectDatabaseError(tx, `target_evidence_${evidenceCase.name}`, async () => {
+        await enableTableFence(tx, false);
+        await evidenceCase.insert();
+        await tx.unsafe("set constraints all immediate;");
+        await enableTableFence(tx, true);
+        await tx.unsafe(`
+          select public.chips_assert_bot_only_table_lifecycle_gate($1::uuid, $2::bigint, $3::timestamptz, $4::text[]) as result;
+        `, gateArgs);
+      }, "P8914", /Unknown TABLE identity blocks/);
+    }
+
+    const accountingBefore = await readAccountingSnapshot(tx, [target.systemAccountId, target.escrowAccountId], [valid.transactionId]);
+    await tx.unsafe("savepoint lifecycle_proof_failure;");
+    await enableTableFence(tx, false);
+    const malformed = await insertMissingRegistryDatabaseTableTransaction(tx, {
+      key: `bot-seed-buyin:${target.tableId}:proof-malformed-${randomUUID()}`,
+      createdAt,
+      metadata: '{"tableId":',
+    });
+    await insertUnknownDatabaseRegistryRow(tx, {
+      key: malformed.key,
+      transactionId: malformed.transactionId,
+      createdAt,
+    });
+    await tx.unsafe("set constraints all immediate;");
+    await enableTableFence(tx, true);
+    await overrideArchiveIdentityGates(tx);
+    await tx.unsafe("savepoint lifecycle_proof_call;");
+    let proofError = null;
+    try {
+      await tx.unsafe(`
+        select public.chips_register_bot_only_archive_proof($1, $2::uuid[], $3::bigint[], $4::uuid, $5::text[]) as result;
+      `, [batch.objectPath, batch.transactionIds, batch.entryIds, target.tableId, batch.registryKeys]);
+    } catch (error) {
+      proofError = error;
+    }
+    await tx.unsafe("rollback to savepoint lifecycle_proof_call;");
+    await tx.unsafe("release savepoint lifecycle_proof_call;");
+    assert.ok(proofError, "proof must fail closed when target evidence is malformed");
+    assert.equal(proofError.code, "P8914");
+
+    const batchState = await tx.unsafe(`
+      select
+        (archive_proof_verified_at is null
+          and archived_transaction_ids_sha256 is null
+          and archived_entry_ids_sha256 is null) as proof_empty,
+        (pruned_at is null
+          and pruned_transaction_count is null
+          and pruned_entry_count is null
+          and pruned_transaction_ids_sha256 is null
+          and pruned_entry_ids_sha256 is null) as prune_empty,
+        (registry_cleaned_at is null
+          and registry_cleaned_key_count is null
+          and registry_cleaned_keys_sha256 is null) as cleanup_empty,
+        (destructive_go_at is null and destructive_go_batch_id is null) as go_empty
+        from public.chips_ledger_archive_batches
+       where batch_id = $1::bigint;
+    `, [batch.batchId]);
+    assert.deepEqual(batchState[0], { proof_empty: true, prune_empty: true, cleanup_empty: true, go_empty: true }, "failed proof must not write proof or receipts");
+    const sideEffects = await tx.unsafe(`
+      select
+        (select count(*) from public.chips_transactions where id = $1::uuid) as valid_transactions,
+        (select count(*) from public.chips_entries where transaction_id = $1::uuid) as valid_entries,
+        (select count(*) from public.chips_transaction_idempotency where idempotency_key = $2) as valid_registry,
+        (select count(*) from public.chips_transactions where id = $3::uuid) as malformed_transactions,
+        (select count(*) from public.chips_transaction_idempotency where idempotency_key = $4) as malformed_registry,
+        (select bot_only_retention_complete_at is null from public.poker_tables where id = $5::uuid) as table_marker_empty;
+    `, [valid.transactionId, valid.key, malformed.transactionId, malformed.key, target.tableId]);
+    assert.deepEqual(sideEffects[0], {
+      valid_transactions: "1",
+      valid_entries: "2",
+      valid_registry: "1",
+      malformed_transactions: "1",
+      malformed_registry: "1",
+      table_marker_empty: true,
+    }, "failed proof must not create or remove ledger, registry, or lifecycle state");
+    const accountingAfter = await readAccountingSnapshot(tx, [target.systemAccountId, target.escrowAccountId], [valid.transactionId]);
+    assert.deepEqual(accountingAfter, accountingBefore, "failed proof must preserve balances and conservation");
+
+    await tx.unsafe("rollback to savepoint lifecycle_proof_failure;");
+    await tx.unsafe("release savepoint lifecycle_proof_failure;");
+
+    scopeTableIds = [target.tableId, other.tableId];
+    scopeTransactionIds = [valid.transactionId];
+    scopeRegistryKeys = [valid.key];
+    scopeObjectPath = batch.objectPath;
+    throw DB_ROLLBACK;
+  }).catch((error) => {
+    if (error === DB_ROLLBACK) {
+      rolledBack = true;
+      return;
+    }
+    throw error;
+  });
+
+  assert.equal(rolledBack, true, "target evidence lifecycle fixture must rollback completely");
+  const leaked = await sql.unsafe(`
+    select
+      (select count(*) from public.poker_tables where id = any($1::uuid[]))::text as tables,
+      (select count(*) from public.chips_transactions where id = any($2::uuid[]))::text as transactions,
+      (select count(*) from public.chips_entries where transaction_id = any($2::uuid[]))::text as entries,
+      (select count(*) from public.chips_transaction_idempotency where idempotency_key = any($3::text[]))::text as registry,
+      (select count(*) from public.chips_ledger_archive_batches where object_path = $4)::text as batches;
+  `, [scopeTableIds, scopeTransactionIds, scopeRegistryKeys, scopeObjectPath]);
+  assert.deepEqual(leaked[0], {
+    tables: "0",
+    transactions: "0",
+    entries: "0",
+    registry: "0",
+    batches: "0",
+  }, "target evidence fixture must not leak rows");
+}
+
 async function humanEntryShapeDiagnosticPostgresContract(sql) {
   const now = Date.now();
   const cutoff = new Date(now - (7 * DAY_MS)).toISOString();
@@ -1443,6 +1877,8 @@ async function runPostgresFundamentalContracts() {
     await historicalKeyAndEntryBindingPostgresContract(sql);
     await concurrencyInsertVersusClosePostgresContract(POSTGRES_TEST_DB_URL);
     await archiveSelectorHistoricalIdentityAndMetadataPostgresContract(sql);
+    await lifecycleGateForeignNullIdentityPostgresContract(sql);
+    await lifecycleGateTargetEvidencePostgresContract(sql);
     await humanEntryShapeDiagnosticPostgresContract(sql);
     await ageBoundaryPostgresContract(sql);
     await retryDestructiveOperatorPostgresContract(sql);
@@ -1455,6 +1891,7 @@ async function runPostgresFundamentalContracts() {
 historicalKeyAndEntryBindingContract();
 concurrencyAndScopeContract();
 failClosedLifecycleContract();
+lifecycleGateScopeContract();
 retryAndAccountingContract();
 
 if (POSTGRES_TEST_DB_URL) {

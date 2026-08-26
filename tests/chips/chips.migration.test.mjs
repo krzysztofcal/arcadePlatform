@@ -800,6 +800,21 @@ async function assertArchivePrunerRoleContracts(sql) {
         select proowner from pg_catalog.pg_proc
         where oid = 'public.chips_assert_archive_prune_stage()'::regprocedure
       )) as gate_owner,
+      (
+        select pg_catalog.pg_get_function_identity_arguments(procedures.oid)
+          from pg_catalog.pg_proc procedures
+         where procedures.oid = 'public.chips_assert_bot_only_table_lifecycle_gate(uuid,bigint,timestamptz,text[])'::regprocedure
+      ) as lifecycle_gate_arguments,
+      (
+        select coalesce(array_to_string(procedures.proacl, ','), '<default>')
+          from pg_catalog.pg_proc procedures
+         where procedures.oid = 'public.chips_assert_bot_only_table_lifecycle_gate(uuid,bigint,timestamptz,text[])'::regprocedure
+      ) as lifecycle_gate_acl,
+      (
+        select coalesce(array_to_string(procedures.proconfig, ','), '<none>')
+          from pg_catalog.pg_proc procedures
+         where procedures.oid = 'public.chips_assert_bot_only_table_lifecycle_gate(uuid,bigint,timestamptz,text[])'::regprocedure
+      ) as lifecycle_gate_config,
       pg_catalog.pg_get_userbyid((
         select proowner from pg_catalog.pg_proc
         where oid = 'public.chips_assert_archive_prune_target(text,bigint)'::regprocedure
@@ -834,6 +849,9 @@ async function assertArchivePrunerRoleContracts(sql) {
       pg_catalog.has_schema_privilege('chips_ledger_archive_pruner', 'public', 'create') as public_schema_create;
   `;
   assert.equal(functionOwners[0].gate_owner, "postgres", "read-only Stage identity gate must retain its privileged owner");
+  assert.equal(functionOwners[0].lifecycle_gate_arguments, "p_table_id uuid, p_batch_id bigint, p_cutoff timestamp with time zone, p_registry_keys text[]", "lifecycle gate signature must remain unchanged");
+  assert.equal(functionOwners[0].lifecycle_gate_acl, "chips_ledger_archive_pruner=X/chips_ledger_archive_pruner", "lifecycle gate ACL must remain pruner-only");
+  assert.equal(functionOwners[0].lifecycle_gate_config, "search_path=\"\"", "lifecycle gate search_path must remain empty");
   assert.equal(functionOwners[0].target_gate_owner, "postgres", "target identity gate must retain a privileged owner");
   assert.equal(functionOwners[0].prune_owner, "chips_ledger_archive_pruner", "destructive function must use the NOLOGIN owner");
   assert.equal(functionOwners[0].prune_internal_owner, "chips_ledger_archive_pruner", "internal pruning implementation must use the NOLOGIN owner");
