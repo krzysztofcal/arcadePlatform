@@ -11,6 +11,7 @@ on:
         options:
           - existing-30d
           - bot-only-7d-summary-diagnostic
+          - bot-only-7d-repair-recovery-batch-15
           - bot-only-7d-prepare-only
           - bot-only-7d-execute
           - bot-only-7d-automatic
@@ -70,7 +71,7 @@ jobs:
           printf 'sha=%s\n' "$checked_out_sha" >> "$GITHUB_OUTPUT"
 
       - name: Read-only Stage fence preflight
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'bot-only-7d-summary-diagnostic' || inputs.mode == 'bot-only-7d-prepare-only' || inputs.mode == 'bot-only-7d-execute' || inputs.mode == 'bot-only-7d-automatic') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'bot-only-7d-summary-diagnostic' || inputs.mode == 'bot-only-7d-repair-recovery-batch-15' || inputs.mode == 'bot-only-7d-prepare-only' || inputs.mode == 'bot-only-7d-execute' || inputs.mode == 'bot-only-7d-automatic') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -135,6 +136,21 @@ jobs:
           test -z "${CHIPS_LEDGER_BOT_ONLY_EXECUTE:-}"
           test -z "${CHIPS_LEDGER_BOT_ONLY_AUTOMATIC:-}"
           node scripts/ops/chips-ledger-stage-timeout-diagnostic.mjs --summary-only
+
+      - name: Repair exact bot-only 7-day recovery for batch 15
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-repair-recovery-batch-15' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          test -z "${CHIPS_LEDGER_BOT_ONLY_EXECUTE:-}"
+          test -z "${CHIPS_LEDGER_BOT_ONLY_AUTOMATIC:-}"
+          node scripts/ops/chips-ledger-stage-automation.mjs \
+            --policy bot-only-7d \
+            --repair-recovery \
+            --batch-id 15
 
       - name: Run bot-only 7-day prepare-only Stage automation
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-prepare-only' }}

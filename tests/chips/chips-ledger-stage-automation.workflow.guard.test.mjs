@@ -11,13 +11,13 @@ const registrySelector = fs.readFileSync("scripts/ops/chips-ledger-legacy-stage-
 
 assert.match(
   workflow,
-  /workflow_dispatch:\n\s+inputs:\n\s+mode:\n\s+description: Stage automation mode\n\s+required: true\n\s+default: existing-30d\n\s+type: choice\n\s+options:\n\s+- existing-30d\n\s+- bot-only-7d-summary-diagnostic\n\s+- bot-only-7d-prepare-only\n\s+- bot-only-7d-execute\n\s+- bot-only-7d-automatic\n\s+- legacy-stage-allowlist-prepare-only\n\s+- legacy-stage-allowlist-orchestrate\n\s+- audit-batch-13\n\s+- execute-batch-13/,
+  /workflow_dispatch:\n\s+inputs:\n\s+mode:\n\s+description: Stage automation mode\n\s+required: true\n\s+default: existing-30d\n\s+type: choice\n\s+options:\n\s+- existing-30d\n\s+- bot-only-7d-summary-diagnostic\n\s+- bot-only-7d-repair-recovery-batch-15\n\s+- bot-only-7d-prepare-only\n\s+- bot-only-7d-execute\n\s+- bot-only-7d-automatic\n\s+- legacy-stage-allowlist-prepare-only\n\s+- legacy-stage-allowlist-orchestrate\n\s+- audit-batch-13\n\s+- execute-batch-13/,
 );
 assert.match(workflow, /approved_batch_id:\n\s+description: Exact committed bot-only 7d batch_id prepared by a prior run[\s\S]*?required: false\n\s+type: string/);
 assert.match(workflow, /approved_batch_confirmation:\n\s+description: Exact human confirmation GO <approved_batch_id> \(required for bot-only-7d-execute\)[\s\S]*?required: false\n\s+type: string/);
 assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|legacy-stage-allowlist-prepare-only|audit-batch-13|execute-batch-13)$/gm) || []).length, 5);
 assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|bot-only-7d-execute|legacy-stage-allowlist-prepare-only|audit-batch-13|execute-batch-13)$/gm) || []).length, 6);
-assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-summary-diagnostic|bot-only-7d-prepare-only|bot-only-7d-execute|bot-only-7d-automatic|legacy-stage-allowlist-prepare-only|legacy-stage-allowlist-orchestrate|audit-batch-13|execute-batch-13)$/gm) || []).length, 9);
+assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-summary-diagnostic|bot-only-7d-repair-recovery-batch-15|bot-only-7d-prepare-only|bot-only-7d-execute|bot-only-7d-automatic|legacy-stage-allowlist-prepare-only|legacy-stage-allowlist-orchestrate|audit-batch-13|execute-batch-13)$/gm) || []).length, 10);
 assert.equal((workflow.match(/- cron:/g) || []).length, 2);
 assert.match(workflow, /- cron: "17 2 \* \* \*"/);
 assert.match(workflow, /- cron: "\*\/15 \* \* \* \*"/);
@@ -41,7 +41,7 @@ const preflightStep = workflow.match(
 )[0];
 assert.match(
   preflightStep,
-  /if: \$\{\{ github\.event_name == 'workflow_dispatch' && \(inputs\.mode == 'bot-only-7d-summary-diagnostic' \|\| inputs\.mode == 'bot-only-7d-prepare-only' \|\| inputs\.mode == 'bot-only-7d-execute' \|\| inputs\.mode == 'bot-only-7d-automatic'\) \}\}/,
+  /if: \$\{\{ github\.event_name == 'workflow_dispatch' && \(inputs\.mode == 'bot-only-7d-summary-diagnostic' \|\| inputs\.mode == 'bot-only-7d-repair-recovery-batch-15' \|\| inputs\.mode == 'bot-only-7d-prepare-only' \|\| inputs\.mode == 'bot-only-7d-execute' \|\| inputs\.mode == 'bot-only-7d-automatic'\) \}\}/,
 );
 
 const existingRun = workflow.match(
@@ -81,6 +81,16 @@ assert.match(summaryDiagnosticRun, /node scripts\/ops\/chips-ledger-stage-timeou
 assert.match(summaryDiagnosticRun, /CHIPS_LEDGER_BOT_ONLY_EXECUTE/);
 assert.match(summaryDiagnosticRun, /CHIPS_LEDGER_BOT_ONLY_AUTOMATIC/);
 assert.doesNotMatch(summaryDiagnosticRun, /--policy|--prepare-only|--execute|storeArchive|ensureArchiveBucket|uploadOrVerify|SUPABASE_PROD_|PRODUCTION|--target\s+prod/i);
+const recoveryRepairRun = workflow.match(
+  /- name: Repair exact bot-only 7-day recovery for batch 15[\s\S]*?(?=\n\s+- name:|\s*$)/,
+)[0];
+assert.match(recoveryRepairRun, /if: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.mode == 'bot-only-7d-repair-recovery-batch-15' \}\}/);
+assert.match(recoveryRepairRun, /DEPLOYED_COMMIT_SHA: \$\{\{ steps\.checkout-sha\.outputs\.sha \}\}/);
+assert.match(recoveryRepairRun, /test "\$DEPLOYED_COMMIT_SHA" = "\$GITHUB_SHA"/);
+assert.match(recoveryRepairRun, /--policy bot-only-7d \\\n+\s+--repair-recovery \\\n+\s+--batch-id 15/);
+assert.match(recoveryRepairRun, /CHIPS_LEDGER_BOT_ONLY_EXECUTE/);
+assert.match(recoveryRepairRun, /CHIPS_LEDGER_BOT_ONLY_AUTOMATIC/);
+assert.doesNotMatch(recoveryRepairRun, /--prepare-only|--execute|--automatic|--register-proof|--approved-batch|storeArchive|ensureArchiveBucket|Production|SUPABASE_PROD_/i);
 assert.match(summaryDiagnostic, /runBotOnlyTableIdentitySummaryDiagnostic/);
 assert.match(summaryDiagnostic, /transaction: "repeatable read, read only"/);
 assert.match(summaryDiagnostic, /storage_access: false/);

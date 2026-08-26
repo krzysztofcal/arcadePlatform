@@ -16,6 +16,7 @@ import {
   botOnlyReport,
   findOwnCycle,
   persistDurableRecovery,
+  runBotOnlyRecoveryRepair,
   runBotOnlyStageAutomation,
   runStageAutomation,
   STAGE_PROJECT_REF,
@@ -740,6 +741,101 @@ assert.equal(storageCalls.filter(({ method }) => method === "GET").length >= 6, 
 assert.equal(durable.manifestGzipBytes.length > 0, true);
 assert.equal(durable.recoveryArchive.sha256, compressedSha);
 assert.equal(durable.recoveryManifest.sha256, crypto.createHash("sha256").update(durable.manifestGzipBytes).digest("hex"));
+
+const repairRow = { ...makeCanaryRow(), batch_id: "15" };
+const repairObjects = new Map();
+const repairStorageCalls = [];
+const repairFetch = async (url, init = {}) => {
+  const requestUrl = new URL(url);
+  const objectPath = decodeURIComponent(
+    requestUrl.pathname.split(`/storage/v1/object/authenticated/${ARCHIVE_BUCKET}/`)[1]
+      || requestUrl.pathname.split(`/storage/v1/object/${ARCHIVE_BUCKET}/`)[1]
+      || "",
+  );
+  const method = init.method || "GET";
+  repairStorageCalls.push({ method, objectPath, headers: new Headers(init.headers || {}) });
+  if (method === "GET") {
+    if (objectPath === repairRow.object_path) return response(canaryArchiveBytes);
+    const value = repairObjects.get(objectPath);
+    return value ? response(value) : response({ message: "not found" }, 404);
+  }
+  if (method === "POST") {
+    assert.equal(new Headers(init.headers).get("x-upsert"), "false");
+    assert.equal(new Headers(init.headers).get("content-type"), "application/gzip");
+    repairObjects.set(objectPath, Buffer.from(init.body));
+    return response({ ok: true });
+  }
+  return response({ message: "unexpected" }, 500);
+};
+const repairSqlCalls = [];
+const repairSession = { backendPid: "recovery-repair-session" };
+const repairSql = {
+  typed: (value, type) => ({ value, type }),
+  unsafe: async (query, values = []) => {
+    repairSqlCalls.push({ query, values });
+    if (query.includes("pg_try_advisory_lock")) return [{ acquired: true, backend_pid: repairSession.backendPid }];
+    if (query.includes("pg_backend_pid")) return [{ backend_pid: repairSession.backendPid }];
+    if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
+    if (query.includes("pg_control_system")) return [{ system_identifier: STAGE_SYSTEM_IDENTIFIER }];
+    if (query.includes("where batch_id = $1")) return [repairRow];
+    throw new Error(`unexpected recovery repair SQL: ${query}`);
+  },
+  begin: async (callback) => callback({
+    unsafe: async (query, values = []) => {
+      if (query.startsWith("set transaction")) return [];
+      return repairSql.unsafe(query, values);
+    },
+  }),
+};
+const repairPruneCalls = [];
+const repairTempRoot = fs.mkdtempSync("/tmp/chips-ledger-stage-recovery-repair-");
+const repairDeps = {
+  sql: repairSql,
+  storageTarget,
+  tempRoot: repairTempRoot,
+  pruneStore: {
+    getIdentity: async () => STAGE_SYSTEM_IDENTIFIER,
+    getManifest: async () => repairRow,
+  },
+  verifyBucket: async () => {},
+  pruneArchive: async ({ argv }) => {
+    repairPruneCalls.push([...argv]);
+    assert.equal(argv.includes("--execute"), false);
+    assert.equal(argv.includes("--register-proof"), false);
+    assert.equal(argv.includes("--automatic"), false);
+    return { state: "ready", evidence: canaryEvidence };
+  },
+  fetch: repairFetch,
+};
+const repaired = await runBotOnlyRecoveryRepair({ env: ENV, deps: repairDeps, batchId: "15" });
+assert.equal(repaired.state, "recovery_repaired");
+assert.equal(repaired.batchId, "15");
+assert.equal(repaired.dryRun, "ready");
+assert.equal(repaired.initialRecoveryObjectsAbsent, true);
+assert.equal(repaired.recoveryVerified, true);
+assert.equal(repairObjects.has(buildRecoveryArchiveObjectPath(canaryCompressedSha)), true);
+assert.equal(repairObjects.has(buildRecoveryManifestObjectPath(canaryCompressedSha)), true);
+assert.equal(repairStorageCalls.filter(({ method }) => method === "POST").length, 2);
+assert.equal(repairPruneCalls.length, 1);
+assert.equal(repairSqlCalls.some(({ query }) => /\b(?:insert|update|delete|truncate)\b/i.test(query)), false);
+await assert.rejects(
+  runBotOnlyRecoveryRepair({ env: ENV, deps: repairDeps, batchId: "15" }),
+  /recovery already exists; refusing overwrite/,
+);
+assert.equal(repairStorageCalls.filter(({ method }) => method === "POST").length, 2);
+await assert.rejects(
+  runBotOnlyRecoveryRepair({ env: ENV, deps: repairDeps, batchId: "14" }),
+  /pinned to batch 15/,
+);
+await assert.rejects(
+  runBotOnlyRecoveryRepair({
+    env: { ...ENV, CHIPS_LEDGER_BOT_ONLY_EXECUTE: "1" },
+    deps: repairDeps,
+    batchId: "15",
+  }),
+  /cannot run with execute or automatic gates/,
+);
+fs.rmSync(repairTempRoot, { recursive: true, force: true });
 
 const resumeCycleRow = {
   ...recoveryRow,

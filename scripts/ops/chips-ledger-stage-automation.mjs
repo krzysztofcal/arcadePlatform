@@ -140,6 +140,9 @@ function aggregatePayload(result) {
     recovery_manifest_sha256: result.recoveryManifestSha256 || null,
     recovery_archive_path: result.recoveryArchivePath || null,
     recovery_manifest_path: result.recoveryManifestPath || null,
+    dry_run: result.dryRun || null,
+    initial_recovery_objects_absent: result.initialRecoveryObjectsAbsent ?? null,
+    recovery_verified: result.recoveryVerified ?? null,
     proof: result.proof || null,
     receipt: result.receipt || null,
     mappings: result.mappings ?? null,
@@ -731,6 +734,116 @@ export async function persistDurableRecovery(storageTarget, row, identity, evide
     recoveryArchive,
     recoveryManifest,
   };
+}
+
+export async function runBotOnlyRecoveryRepair({ env = process.env, deps = {}, batchId = "15" } = {}) {
+  const exactBatchId = String(batchId);
+  if (exactBatchId !== "15") fail("bot-only recovery repair is pinned to batch 15");
+  if (text(env.CHIPS_LEDGER_BOT_ONLY_EXECUTE) !== ""
+    || text(env.CHIPS_LEDGER_BOT_ONLY_AUTOMATIC) !== "") {
+    fail("bot-only recovery repair cannot run with execute or automatic gates");
+  }
+
+  let sql = null;
+  let lockSession = null;
+  let tempRoot = null;
+  let ownsSql = false;
+  let result = null;
+  let deployedCommitSha = null;
+  let failed = false;
+  let failure = null;
+
+  try {
+    const config = validateStageEnvironment(env, { requireCommitSha: true });
+    deployedCommitSha = config.deployedCommitSha;
+    const moduleEnv = config.moduleEnv;
+    if (deps.sql) sql = deps.sql;
+    else {
+      sql = postgres(config.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 0 });
+      ownsSql = true;
+    }
+    tempRoot = deps.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-recovery-repair-"));
+    ensurePrivateDirectory(tempRoot);
+    const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
+    const pruneStore = deps.pruneStore || createPruneStore(sql);
+    const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
+    const inspectRecovery = deps.inspectDurableRecovery || inspectDurableRecovery;
+    const persistRecovery = deps.persistDurableRecovery || persistDurableRecovery;
+
+    lockSession = await acquireAdvisoryLock(sql);
+    if (!lockSession) fail("bot-only batch 15 recovery repair requires the Stage advisory lock");
+
+    const identity = await assertIdentity(sql);
+    await assertAdvisoryLock(sql, lockSession);
+    const row = await loadExactBatch(sql, exactBatchId);
+    assertBotOnlyExecuteBatch(row, exactBatchId, identity);
+    if (row.pruned_at || row.registry_cleaned_at || row.destructive_go_at || row.destructive_go_batch_id) {
+      fail("bot-only batch 15 recovery repair requires an unpruned, uncleaned batch without destructive GO");
+    }
+
+    await verifyBucket(storageTarget);
+    const existing = await inspectRecovery(storageTarget, row, deps);
+    if (existing) fail("bot-only batch 15 recovery already exists; refusing overwrite");
+    await assertAdvisoryLock(sql, lockSession);
+
+    const dry = await runPruneStep({
+      row,
+      mode: "dry-run",
+      env: moduleEnv,
+      cwd: tempRoot,
+      sql,
+      pruneStore,
+      storageTarget,
+      verifyBucket,
+      storageDeps: deps,
+    });
+    if (dry.state !== "ready") fail(`bot-only batch 15 recovery archive verification did not become ready: ${dry.state}`);
+    await assertAdvisoryLock(sql, lockSession);
+
+    const main = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, deps);
+    const durable = await persistRecovery(storageTarget, row, identity, dry.evidence, main.bytes, deps);
+    if (durable.recoveryArchive?.uploaded !== true || durable.recoveryManifest?.uploaded !== true) {
+      fail("bot-only batch 15 recovery repair did not create both previously missing objects");
+    }
+    if (durable.archiveSha256 !== row.compressed_sha256
+      || durable.recoveryArchive.sha256 !== row.compressed_sha256
+      || durable.manifestSha256 !== durable.recoveryManifest.sha256) {
+      fail("bot-only batch 15 recovery repair checksum verification failed");
+    }
+    result = {
+      ...botOnlyReport({
+        row,
+        identity,
+        dry,
+        durable,
+        state: "prepared",
+        mode: "recovery-repair",
+        deployedCommitSha,
+      }),
+      state: "recovery_repaired",
+      receipt: "recovery-only",
+      dryRun: dry.state,
+      initialRecoveryObjectsAbsent: true,
+      recoveryVerified: true,
+    };
+  } catch (error) {
+    failed = true;
+    failure = error;
+  } finally {
+    if (lockSession && sql) {
+      try { await releaseAdvisoryLock(sql); } catch { /* owned session close releases it */ }
+    }
+    if (sql && ownsSql) {
+      try { await sql.end({ timeout: 5 }); } catch (error) { if (!failed) { failed = true; failure = error; } }
+    }
+  }
+  if (failed) {
+    emitAggregateError(failure, { deployedCommitSha, phase: "recovery-repair" });
+    throw failure;
+  }
+  if (result && deployedCommitSha) result = { ...result, deployedCommitSha };
+  writeAggregateSummary(result);
+  return result;
 }
 
 function restoreLocalRecovery(directory, durable) {
@@ -1777,6 +1890,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     runStageAutomation().catch(() => {
       process.exitCode = 1;
     });
+  } else if (argv[0] === "--policy" && argv[1] === "bot-only-7d" && argv[2] === "--repair-recovery") {
+    if (argv.length !== 5 || argv[3] !== "--batch-id" || argv[4] !== "15") {
+      throw new Error("--repair-recovery is pinned to --batch-id 15");
+    }
+    runBotOnlyRecoveryRepair({ batchId: "15" }).catch(() => {
+      process.exitCode = 1;
+    });
   } else if (argv[0] === "--policy" && argv[1] === "bot-only-7d") {
     let prepareOnly = true;
     let prepareOnlyRequested = false;
@@ -1821,7 +1941,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       process.exitCode = 1;
     });
   } else {
-    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-automation.mjs [--policy bot-only-7d [--prepare-only|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>'|--automatic]]\n");
+    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-automation.mjs [--policy bot-only-7d [--prepare-only|--repair-recovery --batch-id 15|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>'|--automatic]]\n");
     process.exitCode = 1;
   }
 }
