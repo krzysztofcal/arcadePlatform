@@ -11,13 +11,19 @@ on:
         options:
           - existing-30d
           - bot-only-7d-prepare-only
+          - bot-only-7d-execute
           - bot-only-7d-automatic
           - legacy-stage-allowlist-prepare-only
           - legacy-stage-allowlist-orchestrate
           - audit-batch-13
           - execute-batch-13
+      approved_batch_id:
+        description: Exact committed bot-only 7d batch_id prepared by a prior run (required for bot-only-7d-execute)
+        required: false
+        type: string
   schedule:
     - cron: "17 2 * * *"
+    - cron: "*/15 * * * *"
 
 concurrency:
   group: chips-ledger-stage-automation
@@ -59,7 +65,7 @@ jobs:
           printf 'sha=%s\n' "$checked_out_sha" >> "$GITHUB_OUTPUT"
 
       - name: Read-only Stage fence preflight
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'bot-only-7d-prepare-only' || inputs.mode == 'bot-only-7d-automatic') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'bot-only-7d-prepare-only' || inputs.mode == 'bot-only-7d-execute' || inputs.mode == 'bot-only-7d-automatic') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -108,7 +114,7 @@ jobs:
           NODE
 
       - name: Run existing 30-day Stage automation
-        if: ${{ github.event_name == 'schedule' || inputs.mode == '' || inputs.mode == 'existing-30d' }}
+        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '17 2 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'existing-30d') }}
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
         run: node scripts/ops/chips-ledger-stage-automation.mjs
@@ -123,8 +129,26 @@ jobs:
             --policy bot-only-7d \
             --prepare-only
 
+      - name: Execute approved bot-only 7-day Stage canary
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-execute' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+          CHIPS_LEDGER_BOT_ONLY_EXECUTE: "1"
+          APPROVED_BATCH_ID: ${{ inputs.approved_batch_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$APPROVED_BATCH_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "approved_batch_id must be a positive integer" >&2
+            exit 1
+          fi
+          node scripts/ops/chips-ledger-stage-automation.mjs \
+            --policy bot-only-7d \
+            --execute \
+            --approved-batch-id "$APPROVED_BATCH_ID"
+
       - name: Run activated bot-only 7-day Stage automation
-        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-automatic') }}
+        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-automatic') }}
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
           CHIPS_LEDGER_BOT_ONLY_AUTOMATIC: "1"

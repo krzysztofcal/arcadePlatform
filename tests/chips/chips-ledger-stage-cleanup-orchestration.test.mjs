@@ -292,6 +292,12 @@ async function schedulerContracts() {
   assert.deepEqual(enabledResult.processed.map((row) => row.retry), ["already_cleaned", "already_cleaned", "already_cleaned"]);
   assert.equal(enabled.state.storeCalls, 3);
 
+  const capacity = fakeScheduler({ enabled: true, candidateCount: BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN + 5 });
+  const capacityResult = await runAutomaticBotOnlyStageAutomation(capacity);
+  assert.equal(capacityResult.processed.length, BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN);
+  assert.equal(capacity.state.storeCalls, BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN);
+  assert.equal(capacityResult.stopReason, null, "the bounded run must use its full capacity when candidates remain");
+
   const anomaly = fakeScheduler({ enabled: true, candidateCount: 1, blockingAfter: 1 });
   await assert.rejects(
     runAutomaticBotOnlyStageAutomation(anomaly),
@@ -328,32 +334,44 @@ async function legacyOrchestratorContracts() {
     pruned_entry_ids_sha256: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.entryIdsSha256,
     registry_cleaned_keys_sha256: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.registryKeysSha256,
   };
-  const batch2 = {
-    object_path: "v1/sha256/" + "b".repeat(64) + ".jsonl.gz",
-    batch_id: "2002",
-    status: "committed",
-    source_policy_id: "legacy_stage_allowlist_v1",
-    legacy_run_id: "41",
-    legacy_plan_sha256: contract.planSha256,
-    legacy_batch_number: "2",
-    legacy_batch_table_count: "10",
-    legacy_allowlist_sha256: contract.masterAllowlistSha256,
-    legacy_batch_table_ids_sha256: "c".repeat(64),
-    archive_proof_verified_at: "2026-08-25T00:00:00Z",
-    archived_transaction_ids_sha256: "d".repeat(64),
-    archived_entry_ids_sha256: "e".repeat(64),
-    pruned_at: "2026-08-25T00:00:01Z",
-    registry_cleaned_at: "2026-08-25T00:00:02Z",
-    pruned_transaction_count: "1",
-    pruned_entry_count: "2",
-    registry_cleaned_key_count: "1",
-    pruned_transaction_ids_sha256: "d".repeat(64),
-    pruned_entry_ids_sha256: "e".repeat(64),
-    registry_cleaned_keys_sha256: "f".repeat(64),
-    compressed_sha256: "b".repeat(64),
-    compressed_bytes: "10",
+  const makeLegacyRow = (batchNumber, { complete = true } = {}) => {
+    const digest = `${batchNumber.toString(16).padStart(2, "0")}${"a".repeat(62)}`;
+    const row = {
+      object_path: `v1/sha256/${digest}.jsonl.gz`,
+      batch_id: String(2000 + batchNumber),
+      status: "committed",
+      source_policy_id: "legacy_stage_allowlist_v1",
+      legacy_run_id: "41",
+      legacy_plan_sha256: contract.planSha256,
+      legacy_batch_number: String(batchNumber),
+      legacy_batch_table_count: "10",
+      legacy_allowlist_sha256: contract.masterAllowlistSha256,
+      legacy_batch_table_ids_sha256: "c".repeat(64),
+      compressed_sha256: digest,
+      compressed_bytes: "10",
+    };
+    if (complete) {
+      Object.assign(row, {
+        archive_proof_verified_at: "2026-08-25T00:00:00Z",
+        archived_transaction_ids_sha256: "d".repeat(64),
+        archived_entry_ids_sha256: "e".repeat(64),
+        pruned_at: "2026-08-25T00:00:01Z",
+        registry_cleaned_at: "2026-08-25T00:00:02Z",
+        pruned_transaction_count: "1",
+        pruned_entry_count: "2",
+        registry_cleaned_key_count: "1",
+        pruned_transaction_ids_sha256: "d".repeat(64),
+        pruned_entry_ids_sha256: "e".repeat(64),
+        registry_cleaned_keys_sha256: "f".repeat(64),
+      });
+    }
+    return row;
   };
-  const rows = [batch2];
+  const rows = [
+    ...Array.from({ length: 10 }, (_, index) => makeLegacyRow(index + 2)),
+    makeLegacyRow(12, { complete: false }),
+  ];
+  const manifests = new Map(rows.map((row) => [row.object_path, row]));
   const sql = {
     begin: async (callback) => callback(sql),
     unsafe: async (query) => {
@@ -384,6 +402,14 @@ async function legacyOrchestratorContracts() {
     },
   };
   const calls = [];
+  const evidence = {
+    transactionCount: 1,
+    entryCount: 2,
+    txTypes: { TABLE_BUY_IN: 1 },
+    credits: "100",
+    debits: "100",
+    net: "0",
+  };
   const result = await runLegacyStageAllowlistOrchestrator({
     env: { ...ENV },
     cwd: root,
@@ -393,25 +419,56 @@ async function legacyOrchestratorContracts() {
       preflight: async () => ({ systemIdentifier: "7656985631720456337", enforcementActive: true }),
       storageTarget: { target: "stage", projectRef: "krydukthwdvccggbyjfw" },
       verifyBucket: async () => {},
-      pruneStore: { getManifest: async () => batch2 },
+      pruneStore: { getManifest: async (objectPath) => manifests.get(objectPath) || null },
+      inspectDurableRecovery: async () => null,
+      downloadPrivateArchive: async () => ({ bytes: Buffer.from("legacy archive"), downloadMs: 0 }),
+      persistDurableRecovery: async () => ({
+        archiveBytes: Buffer.from("legacy archive"),
+        manifestBytes: Buffer.from("{}"),
+        manifestGzipBytes: Buffer.from("gzip"),
+      }),
       pruneArchive: async ({ argv }) => {
         calls.push(argv);
-        assert.equal(argv.includes("--execute"), false, "completed batch skip must remain non-destructive");
-        return { state: "already_pruned" };
+        const objectPath = argv[argv.indexOf("--object-path") + 1];
+        const row = manifests.get(objectPath);
+        assert.ok(row, "legacy orchestrator must name a known manifest");
+        if (argv.includes("--register-proof")) {
+          row.archive_proof_verified_at = "2026-08-25T00:00:00Z";
+          row.archived_transaction_ids_sha256 = "d".repeat(64);
+          row.archived_entry_ids_sha256 = "e".repeat(64);
+          return { state: "proof_registered" };
+        }
+        if (argv.includes("--execute")) {
+          if (row.registry_cleaned_at) return { state: "already_pruned", evidence };
+          row.pruned_at = "2026-08-25T00:00:01Z";
+          row.registry_cleaned_at = "2026-08-25T00:00:02Z";
+          row.pruned_transaction_count = "1";
+          row.pruned_entry_count = "2";
+          row.registry_cleaned_key_count = "1";
+          row.pruned_transaction_ids_sha256 = "d".repeat(64);
+          row.pruned_entry_ids_sha256 = "e".repeat(64);
+          row.registry_cleaned_keys_sha256 = "f".repeat(64);
+          return { state: "pruned", evidence };
+        }
+        return row.legacy_batch_number === "12"
+          ? { state: "ready", evidence }
+          : { state: "already_pruned" };
       },
     },
   });
   assert.equal(result.batch13, "skipped-already-pruned-and-cleaned");
-  assert.deepEqual(result.processed.map((row) => row.batchNumber), [2]);
-  assert.equal(result.processed[0].state, "skipped");
-  assert.equal(result.remainingBatchCount, 96);
-  assert.equal(calls.length, 1);
+  assert.deepEqual(result.processed.map((row) => row.batchNumber), Array.from({ length: 11 }, (_, index) => index + 2));
+  assert.equal(result.processed.slice(0, 10).every((row) => row.state === "skipped"), true);
+  assert.equal(result.processed.at(-1).state, "pruned");
+  assert.equal(result.consumedBatchCount, 1);
+  assert.equal(result.remainingBatchCount, 86);
+  assert.equal(calls.filter((argv) => argv.includes("--execute")).length, 2, "batch 12 must execute and retry after completed batches are skipped");
 }
 
 function staticWorkflowContracts() {
   assert.match(workflow, /bot-only-7d-automatic/);
   assert.match(workflow, /legacy-stage-allowlist-orchestrate/);
-  assert.match(workflow, /github\.event_name == 'schedule' \|\| .*bot-only-7d-automatic/);
+  assert.match(workflow, /github\.event_name == 'schedule' && github\.event\.schedule == '\*\/15 \* \* \* \*'/);
   assert.match(workflow, /--policy bot-only-7d --automatic/);
   assert.match(workflow, /CHIPS_LEDGER_BOT_ONLY_AUTOMATIC: "1"/);
   assert.match(workflow, /node scripts\/ops\/chips-ledger-legacy-stage-allowlist-orchestrator\.mjs/);
@@ -420,7 +477,8 @@ function staticWorkflowContracts() {
   assert.match(orchestratorSource, /LEGACY_STAGE_ALLOWLIST_ORCHESTRATOR_MAX_BATCHES_PER_RUN/);
   assert.match(orchestratorSource, /assertLegacyBatchRows/);
   assert.match(orchestratorSource, /process\.argv\.slice\(2\)\.length !== 0/);
-  assert.match(automationSource, /BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN = 10/);
+  assert.match(automationSource, /BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN = 25/);
+  assert.match(workflow, /- cron: "\*\/15 \* \* \* \*"/);
   assert.match(automationSource, /automatic_policy_disabled/);
   assert.match(automationSource, /automatic bot-only Stage retention requires an active fence and enforcement/);
   assert.match(orchestrationMigration, /chips_authorize_legacy_stage_allowlist_run/);

@@ -8,11 +8,15 @@ const registrySelector = fs.readFileSync("scripts/ops/chips-ledger-legacy-stage-
 
 assert.match(
   workflow,
-  /workflow_dispatch:\n\s+inputs:\n\s+mode:\n\s+description: Stage automation mode\n\s+required: true\n\s+default: existing-30d\n\s+type: choice\n\s+options:\n\s+- existing-30d\n\s+- bot-only-7d-prepare-only\n\s+- bot-only-7d-automatic\n\s+- legacy-stage-allowlist-prepare-only\n\s+- legacy-stage-allowlist-orchestrate\n\s+- audit-batch-13\n\s+- execute-batch-13/,
+  /workflow_dispatch:\n\s+inputs:\n\s+mode:\n\s+description: Stage automation mode\n\s+required: true\n\s+default: existing-30d\n\s+type: choice\n\s+options:\n\s+- existing-30d\n\s+- bot-only-7d-prepare-only\n\s+- bot-only-7d-execute\n\s+- bot-only-7d-automatic\n\s+- legacy-stage-allowlist-prepare-only\n\s+- legacy-stage-allowlist-orchestrate\n\s+- audit-batch-13\n\s+- execute-batch-13/,
 );
+assert.match(workflow, /approved_batch_id:\n\s+description: Exact committed bot-only 7d batch_id prepared by a prior run[\s\S]*?required: false\n\s+type: string/);
 assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|legacy-stage-allowlist-prepare-only|audit-batch-13|execute-batch-13)$/gm) || []).length, 5);
-assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|bot-only-7d-automatic|legacy-stage-allowlist-prepare-only|legacy-stage-allowlist-orchestrate|audit-batch-13|execute-batch-13)$/gm) || []).length, 7);
-assert.equal((workflow.match(/- cron:/g) || []).length, 1);
+assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|bot-only-7d-execute|legacy-stage-allowlist-prepare-only|audit-batch-13|execute-batch-13)$/gm) || []).length, 6);
+assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|bot-only-7d-execute|bot-only-7d-automatic|legacy-stage-allowlist-prepare-only|legacy-stage-allowlist-orchestrate|audit-batch-13|execute-batch-13)$/gm) || []).length, 8);
+assert.equal((workflow.match(/- cron:/g) || []).length, 2);
+assert.match(workflow, /- cron: "17 2 \* \* \*"/);
+assert.match(workflow, /- cron: "\*\/15 \* \* \* \*"/);
 assert.match(workflow, /cancel-in-progress:\s*false/);
 assert.match(workflow, /CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1'/);
 assert.match(workflow, /SUPABASE_STAGE_DB_URL: \$\{\{ secrets\.SUPABASE_STAGE_DB_URL \}\}/);
@@ -33,14 +37,16 @@ const preflightStep = workflow.match(
 )[0];
 assert.match(
   preflightStep,
-  /if: \$\{\{ github\.event_name == 'workflow_dispatch' && \(inputs\.mode == 'bot-only-7d-prepare-only' \|\| inputs\.mode == 'bot-only-7d-automatic'\) \}\}/,
+  /if: \$\{\{ github\.event_name == 'workflow_dispatch' && \(inputs\.mode == 'bot-only-7d-prepare-only' \|\| inputs\.mode == 'bot-only-7d-execute' \|\| inputs\.mode == 'bot-only-7d-automatic'\) \}\}/,
 );
 
 const existingRun = workflow.match(
   /- name: Run existing 30-day Stage automation[\s\S]*?(?=\n\s+- name:|\s*$)/,
 )[0];
-assert.match(existingRun, /github\.event_name == 'schedule'/);
+assert.match(existingRun, /github\.event_name == 'schedule' && github\.event\.schedule == '17 2 \* \* \*'/);
+assert.match(existingRun, /github\.event_name == 'workflow_dispatch' && inputs\.mode == 'existing-30d'/);
 assert.match(existingRun, /inputs\.mode == 'existing-30d'/);
+assert.doesNotMatch(existingRun, /inputs\.mode == ''/);
 assert.match(existingRun, /run: node scripts\/ops\/chips-ledger-stage-automation\.mjs\s*$/m);
 assert.doesNotMatch(existingRun, /--policy|--prepare-only|--execute/);
 assert.doesNotMatch(existingRun, /Read-only Stage fence preflight|chips_table_fence|enforcement_active/);
@@ -59,7 +65,17 @@ assert.match(
   botOnlyRun,
   /node scripts\/ops\/chips-ledger-stage-automation\.mjs \\\n+\s+--policy bot-only-7d \\\n+\s+--prepare-only/,
 );
-assert.doesNotMatch(workflow, /CHIPS_LEDGER_BOT_ONLY_EXECUTE/);
+assert.match(workflow, /CHIPS_LEDGER_BOT_ONLY_EXECUTE: "1"/);
+
+const canaryRun = workflow.match(
+  /- name: Execute approved bot-only 7-day Stage canary[\s\S]*?(?=\n\s+- name:|\s*$)/,
+)[0];
+assert.match(canaryRun, /if: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.mode == 'bot-only-7d-execute' \}\}/);
+assert.match(canaryRun, /APPROVED_BATCH_ID: \$\{\{ inputs\.approved_batch_id \}\}/);
+assert.match(canaryRun, /CHIPS_LEDGER_BOT_ONLY_EXECUTE: "1"/);
+assert.match(canaryRun, /approved_batch_id must be a positive integer/);
+assert.match(canaryRun, /--execute \\\n+\s+--approved-batch-id "\$APPROVED_BATCH_ID"/);
+assert.doesNotMatch(botOnlyRun, /CHIPS_LEDGER_BOT_ONLY_EXECUTE|--execute/);
 
 const legacyRun = workflow.match(
   /- name: Run legacy Stage allowlist prepare-only[\s\S]*?(?=\n\s+- name:|\s*$)/,
@@ -138,14 +154,16 @@ assert.doesNotMatch(executeRun, /\bchmod\b/);
 assert.doesNotMatch(executeRun, /github\.event\.inputs|inputs\.(?!mode)[a-zA-Z0-9_-]+/);
 assert.doesNotMatch(executeRun, /SUPABASE_PROD_|PRODUCTION|--target\s+prod/i);
 assert.doesNotMatch(executeRun, /CHIPS_LEDGER_BOT_ONLY_EXECUTE/);
-assert.equal((workflow.match(/--execute/g) || []).length, 0);
+assert.equal((workflow.match(/--execute/g) || []).length, 1);
 assert.equal((workflow.match(/CHIPS_LEDGER_LEGACY_STAGE_ALLOWLIST_EXECUTE/g) || []).length, 1);
 assert.doesNotMatch(existingRun, /execute-batch-13|--execute|LEGACY_STAGE_ALLOWLIST_EXECUTE/);
 assert.doesNotMatch(botOnlyRun, /execute-batch-13|--execute|LEGACY_STAGE_ALLOWLIST_EXECUTE/);
+assert.doesNotMatch(canaryRun, /execute-batch-13|LEGACY_STAGE_ALLOWLIST_EXECUTE/);
 assert.doesNotMatch(legacyRun, /execute-batch-13|--execute|LEGACY_STAGE_ALLOWLIST_EXECUTE/);
 assert.doesNotMatch(auditRun, /execute-batch-13|--execute|LEGACY_STAGE_ALLOWLIST_EXECUTE/);
 assert.doesNotMatch(workflow.match(/- cron:[\s\S]*?(?=\n\s*concurrency:)/)[0], /execute-batch-13|--execute|LEGACY_STAGE_ALLOWLIST_EXECUTE/);
-assert.match(workflow, /github\.event_name == 'schedule' \|\| .*bot-only-7d-automatic/);
+assert.match(workflow, /github\.event_name == 'schedule' && github\.event\.schedule == '\*\/15 \* \* \* \*'/);
+assert.match(workflow, /inputs\.mode == 'bot-only-7d-automatic'/);
 assert.match(workflow, /CHIPS_LEDGER_BOT_ONLY_AUTOMATIC: "1"/);
 assert.match(workflow, /node scripts\/ops\/chips-ledger-legacy-stage-allowlist-orchestrator\.mjs/);
 

@@ -38,7 +38,12 @@ export const STAGE_PROJECT_REF = "krydukthwdvccggbyjfw";
 export const STAGE_SYSTEM_IDENTIFIER = "7656985631720456337";
 export const STAGE_MAX_BATCH_SIZE = 5000;
 export const STAGE_RETENTION_DAYS = 30;
-export const BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN = 10;
+// Schema-v2 keeps one complete table per archive batch so the lifecycle
+// receipt can prove and mark that table atomically.  The scheduler therefore
+// needs a bounded multi-batch run: 25 batches every 15 minutes gives a
+// theoretical 2,400-table/day ceiling, comfortably above the observed Stage
+// bot-table creation rate while keeping a single job within its timeout.
+export const BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN = 25;
 export const STAGE_AUTOMATION_LOCK_KEY = `chips-ledger-stage-automation-v1:${STAGE_PROJECT_REF}`;
 
 const SHA256_RE = /^[0-9a-f]{64}$/;

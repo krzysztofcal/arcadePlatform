@@ -325,12 +325,14 @@ async function executeLegacyBatch({
   }
   if (dryRun.state !== "ready") fail(`legacy batch ${plan.batchNumber} dry-run returned ${dryRun.state}`);
 
-  const durable = await inspectDurableRecovery(storageTarget, currentRow, deps);
+  const inspectRecovery = deps.inspectDurableRecovery || inspectDurableRecovery;
+  const persistRecovery = deps.persistDurableRecovery || persistDurableRecovery;
+  const durable = await inspectRecovery(storageTarget, currentRow, deps);
   if (hadProofBeforeResume || durable) assertResumeRecoveryState(currentRow, durable);
   let verifiedDurable = durable;
   if (!verifiedDurable) {
     const main = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, currentRow.object_path, deps);
-    verifiedDurable = await persistDurableRecovery(
+    verifiedDurable = await persistRecovery(
       storageTarget,
       currentRow,
       STAGE_SYSTEM_IDENTIFIER,
@@ -440,11 +442,12 @@ export async function runLegacyStageAllowlistOrchestrator({
       ? Math.min(Math.max(1, deps.maxBatchesPerRun), LEGACY_STAGE_ALLOWLIST_ORCHESTRATOR_MAX_BATCHES_PER_RUN)
       : LEGACY_STAGE_ALLOWLIST_ORCHESTRATOR_MAX_BATCHES_PER_RUN;
     const processed = [];
+    let consumedBatchCount = 0;
     let rows = await loadLegacyBatchRows(sql, run);
     assertLegacyBatchRows(rows);
     const planMaster = generated.masterManifest;
     for (let batchNumber = LEGACY_STAGE_ALLOWLIST_REMAINING_FIRST_BATCH;
-      batchNumber <= LEGACY_STAGE_ALLOWLIST_REMAINING_LAST_BATCH && processed.length < maxBatches;
+      batchNumber <= LEGACY_STAGE_ALLOWLIST_REMAINING_LAST_BATCH && consumedBatchCount < maxBatches;
       batchNumber += 1) {
       await assertOrchestratorLock(sql, lockPid);
       const plan = buildPlanForBatch(planMaster, contract, batchNumber);
@@ -468,6 +471,10 @@ export async function runLegacyStageAllowlistOrchestrator({
         continue;
       }
 
+      // A completed batch is only a verification/skip operation. It must not
+      // consume the bounded work budget, otherwise every resumed run can get
+      // trapped re-scanning the first maxBatchesPerRun completed batches.
+      consumedBatchCount += 1;
       let row = existing;
       if (!row) {
         const prepared = await runLegacyStagePrepareOnly({
@@ -505,7 +512,14 @@ export async function runLegacyStageAllowlistOrchestrator({
       rows = await loadLegacyBatchRows(sql, run);
       assertLegacyBatchRows(rows);
     }
-    const remaining = Math.max(0, contract.batchCount - processed.length);
+    const completedBatchNumbers = new Set(
+      rows
+        .filter((row) => isCompleteLegacyBatch(row))
+        .map((row) => Number(row.legacy_batch_number))
+        .filter((batchNumber) => batchNumber >= LEGACY_STAGE_ALLOWLIST_REMAINING_FIRST_BATCH
+          && batchNumber <= LEGACY_STAGE_ALLOWLIST_REMAINING_LAST_BATCH),
+    );
+    const remaining = Math.max(0, contract.batchCount - completedBatchNumbers.size);
     return {
       state: "completed",
       mode: "orchestrate",
@@ -524,6 +538,7 @@ export async function runLegacyStageAllowlistOrchestrator({
       batch13: "skipped-already-pruned-and-cleaned",
       processed,
       boundedBatchLimit: maxBatches,
+      consumedBatchCount,
       remainingBatchCount: remaining,
     };
   } finally {

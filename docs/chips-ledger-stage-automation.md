@@ -9,9 +9,19 @@ canonical Stage project `krydukthwdvccggbyjfw` and PostgreSQL system identifier
 
 - `CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED=1` is required; the variable is absent
   or disabled by default at merge.
-- The schedule runs once per day with a strict 30-day cutoff.
-- One run can create at most one batch of 5,000 transactions. It never drains a
-  backlog in a loop.
+- The existing 30-day Stage maintenance runs once per day with a strict
+  30-day cutoff.
+- After the separate bot-only policy is activated by its exact database GO, the
+  7-day cleanup schedule runs every 15 minutes and processes at most 25
+  complete-table batches per invocation. Schema-v2 intentionally keeps one
+  table per batch for an atomic lifecycle receipt; the bounded schedule
+  provides a theoretical 2,400-table/day ceiling, above the observed Stage
+  bot-table creation rate.
+- The first bot-only canary is a two-run Actions sequence: dispatch
+  `bot-only-7d-prepare-only`, record its exact committed `batch_id`, then
+  dispatch `bot-only-7d-execute` with that `approved_batch_id`. The execute
+  path remains behind `CHIPS_LEDGER_BOT_ONLY_EXECUTE=1` and the exact-batch
+  checks in the database.
 - Selection starts at the beginning of `(created_at, id)` on every new cycle and
   chooses the oldest currently hot, unmapped, prunable technical rows. Manual
   manifests without `source_policy_id` never drive the cursor.
