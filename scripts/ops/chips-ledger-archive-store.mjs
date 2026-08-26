@@ -36,7 +36,8 @@ export const TABLE_IDENTITY_SUMMARY_ERROR_CODES = Object.freeze({
   ELIGIBLE_COUNT_INVALID: "TABLE_IDENTITY_SUMMARY_ELIGIBLE_COUNT_INVALID",
   ELIGIBLE_COUNT_MISMATCH: "TABLE_IDENTITY_SUMMARY_ELIGIBLE_COUNT_MISMATCH",
   OUT_OF_SCOPE_KEYS_SHA256_INVALID: "TABLE_IDENTITY_SUMMARY_OUT_OF_SCOPE_KEYS_SHA256_INVALID",
-  NEWEST_CREATED_AT_MISMATCH: "TABLE_IDENTITY_SUMMARY_NEWEST_CREATED_AT_MISMATCH",
+  NEWEST_CREATED_AT_REPRESENTATION_ONLY_MISMATCH: "TABLE_IDENTITY_SUMMARY_NEWEST_CREATED_AT_REPRESENTATION_ONLY_MISMATCH",
+  NEWEST_CREATED_AT_SEMANTIC_MISMATCH: "TABLE_IDENTITY_SUMMARY_NEWEST_CREATED_AT_SEMANTIC_MISMATCH",
 });
 
 const INTEGER_RE = /^-?(?:0|[1-9][0-9]*)$/;
@@ -375,32 +376,34 @@ export function diagnoseTableIdentitySummary(summary, manifestBotOnly) {
     semanticTimestampEqual = false;
   }
   if (!semanticTimestampEqual) {
-    return summaryFailure(checks, "newest_created_at", TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_MISMATCH, {
+    return summaryFailure(checks, "newest_created_at", TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_SEMANTIC_MISMATCH, {
       strict_timestamp_equal: strictTimestampEqual,
       semantic_timestamp_equal: false,
     });
   }
-  checks.push({ field: "newest_created_at", code: TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_MISMATCH, ok: true });
+  const timestampCode = strictTimestampEqual
+    ? null
+    : TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_REPRESENTATION_ONLY_MISMATCH;
+  checks.push({
+    field: "newest_created_at",
+    code: timestampCode,
+    ok: true,
+    ...(timestampCode ? { representation_only: true } : {}),
+  });
   return {
     ok: true,
-    code: null,
-    field: null,
+    code: timestampCode,
+    field: timestampCode ? "newest_created_at" : null,
     checks,
     strict_timestamp_equal: strictTimestampEqual,
     semantic_timestamp_equal: true,
+    ...(timestampCode ? { representation_only: true } : {}),
   };
 }
 
-export function assertTableIdentitySummary(summary, manifestBotOnly, { allowEquivalentTimestamp = false } = {}) {
+export function assertTableIdentitySummary(summary, manifestBotOnly) {
   const diagnosis = diagnoseTableIdentitySummary(summary, manifestBotOnly);
-  const strictTimestampMismatch = diagnosis.semantic_timestamp_equal === true
-    && diagnosis.strict_timestamp_equal === false;
-  if (!diagnosis.ok || (strictTimestampMismatch && !allowEquivalentTimestamp)) {
-    const code = diagnosis.ok
-      ? TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_MISMATCH
-      : diagnosis.code;
-    fail("schema-v2 artifact table summary is invalid", code);
-  }
+  if (!diagnosis.ok) fail("schema-v2 artifact table summary is invalid", diagnosis.code);
   return diagnosis;
 }
 

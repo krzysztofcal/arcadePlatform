@@ -15,6 +15,7 @@ import {
   runExport,
 } from "./chips-ledger-archive-export.mjs";
 import {
+  TABLE_IDENTITY_SUMMARY_ERROR_CODES,
   diagnoseTableIdentitySummary,
   resolveStorageTarget,
   verifyLocalArchive,
@@ -208,16 +209,6 @@ function tableSummaryFailure(diagnosis, recordIndex) {
       semantic_timestamp_equal: diagnosis.semantic_timestamp_equal ?? null,
     };
   }
-  if (diagnosis.strict_timestamp_equal === false) {
-    return {
-      code: "TABLE_IDENTITY_SUMMARY_NEWEST_CREATED_AT_MISMATCH",
-      field: "newest_created_at",
-      record_index: recordIndex,
-      strict_timestamp_equal: false,
-      semantic_timestamp_equal: true,
-      representation_only: true,
-    };
-  }
   return null;
 }
 
@@ -264,9 +255,20 @@ export async function runBotOnlyTableIdentitySummaryDiagnostic({ config, sql, cu
     const records = parseJsonl(rawBytes.toString("utf8"));
     let representative = null;
     let firstFailure = null;
+    let representationOnlyMismatch = null;
     for (const [recordIndex, record] of records.entries()) {
       const diagnosis = diagnoseTableIdentitySummary(record?.table_context?.table_identity_summary, manifest.bot_only);
       if (!representative) representative = diagnosis;
+      if (!representationOnlyMismatch
+        && diagnosis.code === TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_REPRESENTATION_ONLY_MISMATCH) {
+        representationOnlyMismatch = {
+          code: diagnosis.code,
+          field: diagnosis.field,
+          record_index: recordIndex,
+          strict_timestamp_equal: diagnosis.strict_timestamp_equal,
+          semantic_timestamp_equal: diagnosis.semantic_timestamp_equal,
+        };
+      }
       const failure = tableSummaryFailure(diagnosis, recordIndex);
       if (failure) {
         firstFailure = failure;
@@ -294,6 +296,7 @@ export async function runBotOnlyTableIdentitySummaryDiagnostic({ config, sql, cu
       records: records.length,
       entries: records.reduce((total, record) => total + (Array.isArray(record?.entries) ? record.entries.length : 0), 0),
       first_failure: firstFailure,
+      representation_only_mismatch: representationOnlyMismatch,
       checks: representative?.checks || [],
       strict_timestamp_equal: representative?.strict_timestamp_equal ?? null,
       semantic_timestamp_equal: representative?.semantic_timestamp_equal ?? null,

@@ -6,6 +6,7 @@ import {
   buildArchiveBytes,
   buildExportRecord,
   buildManifest,
+  runExport,
 } from "../../scripts/ops/chips-ledger-archive-export.mjs";
 import {
   ARCHIVE_BUCKET,
@@ -17,6 +18,7 @@ import {
   resolveStorageTarget,
   storeArchive,
   verifyArchiveBucket,
+  verifyLocalArchive,
 } from "../../scripts/ops/chips-ledger-archive-store.mjs";
 
 const TX_ID = "00000000-0000-4000-8000-000000000001";
@@ -96,6 +98,74 @@ function makeStore(initial = null) {
   };
 }
 
+const BOT_TABLE_ID = "00000000-0000-4000-8000-000000000010";
+const BOT_TX_ID = "00000000-0000-4000-8000-000000000011";
+const BOT_SYSTEM_ID = "00000000-0000-4000-8000-000000000012";
+const BOT_ESCROW_ID = "00000000-0000-4000-8000-000000000013";
+const BOT_CREATED_AT = "2026-07-01T00:00:00.123456Z";
+
+function botExportCandidate() {
+  return {
+    id: BOT_TX_ID,
+    sequence: "1",
+    tx_type: "TABLE_BUY_IN",
+    idempotency_key: `bot-seed-buyin:${BOT_TABLE_ID}:1`,
+    payload_hash: "a".repeat(64),
+    user_id: null,
+    reference: `BOT_SEED_BUY_IN:${BOT_TABLE_ID}:1`,
+    description: "bot-only storage regression",
+    metadata: { tableId: BOT_TABLE_ID },
+    created_by: BOT_SYSTEM_ID,
+    created_at: BOT_CREATED_AT,
+    entry_count: "2",
+    table_related: true,
+    table_id: BOT_TABLE_ID,
+    table_exists: true,
+    table_status: "CLOSED",
+    escrow_account_id: BOT_ESCROW_ID,
+    escrow_status: "active",
+    escrow_balance: "0",
+    has_human_participant: false,
+    bot_only_proof_eligible: true,
+    key_table_id: BOT_TABLE_ID,
+    key_format_version: 1,
+    key_format: "bot-seed-buyin",
+    table_newest_created_at: BOT_CREATED_AT,
+    table_identity_count: "1",
+    table_eligible_count: "1",
+    table_out_of_scope_keys_sha256: "b".repeat(64),
+  };
+}
+
+function botExportEntries() {
+  return [
+    {
+      id: "1", transaction_id: BOT_TX_ID, account_id: BOT_ESCROW_ID, entry_seq: "1", amount: "100",
+      metadata: {}, created_at: BOT_CREATED_AT, account_row_id: BOT_ESCROW_ID, account_type: "ESCROW",
+      account_user_id: null, account_system_key: `POKER_TABLE:${BOT_TABLE_ID}`, account_status: "active", account_label: null,
+    },
+    {
+      id: "2", transaction_id: BOT_TX_ID, account_id: BOT_SYSTEM_ID, entry_seq: "2", amount: "-100",
+      metadata: {}, created_at: BOT_CREATED_AT, account_row_id: BOT_SYSTEM_ID, account_type: "SYSTEM",
+      account_user_id: null, account_system_key: "TREASURY", account_status: "active", account_label: null,
+    },
+  ];
+}
+
+function makeExportSql(candidateRow, entryRows) {
+  return {
+    typed: (value, type) => ({ value, type }),
+    begin: async (callback) => callback({
+      unsafe: async (query, parameters = []) => {
+        if (/set transaction isolation level repeatable read, read only/i.test(query)) return [];
+        if (parameters.length === 4) return [candidateRow];
+        if (parameters.length === 1 && Array.isArray(parameters[0])) return entryRows;
+        throw new Error(`unexpected runExport query: ${query}`);
+      },
+    }),
+  };
+}
+
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-storage-test-"));
 const artifactPath = path.join(tempDir, "chips-ledger-stage.jsonl.gz");
 const manifestPath = path.join(tempDir, "chips-ledger-stage.manifest.json");
@@ -160,7 +230,7 @@ assert.deepEqual(
     [{ ...validSummary, eligible_count: "not-a-count" }, TABLE_IDENTITY_SUMMARY_ERROR_CODES.ELIGIBLE_COUNT_INVALID],
     [validSummary, TABLE_IDENTITY_SUMMARY_ERROR_CODES.ELIGIBLE_COUNT_MISMATCH],
     [{ ...validSummary, out_of_scope_keys_sha256: "B".repeat(64) }, TABLE_IDENTITY_SUMMARY_ERROR_CODES.OUT_OF_SCOPE_KEYS_SHA256_INVALID],
-    [{ ...validSummary, newest_created_at: "2026-07-01T00:00:01.000000Z" }, TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_MISMATCH],
+    [{ ...validSummary, newest_created_at: "2026-07-01T00:00:01.000000Z" }, TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_SEMANTIC_MISMATCH],
   ].map(([summaryValue, code], index) => {
     const manifestValue = index === 3
       ? { ...validBotOnlyManifest, identity_count: 2 }
@@ -177,22 +247,92 @@ assert.deepEqual(
     [TABLE_IDENTITY_SUMMARY_ERROR_CODES.ELIGIBLE_COUNT_INVALID, TABLE_IDENTITY_SUMMARY_ERROR_CODES.ELIGIBLE_COUNT_INVALID],
     [TABLE_IDENTITY_SUMMARY_ERROR_CODES.ELIGIBLE_COUNT_MISMATCH, TABLE_IDENTITY_SUMMARY_ERROR_CODES.ELIGIBLE_COUNT_MISMATCH],
     [TABLE_IDENTITY_SUMMARY_ERROR_CODES.OUT_OF_SCOPE_KEYS_SHA256_INVALID, TABLE_IDENTITY_SUMMARY_ERROR_CODES.OUT_OF_SCOPE_KEYS_SHA256_INVALID],
-    [TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_MISMATCH, TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_MISMATCH],
+    [TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_SEMANTIC_MISMATCH, TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_SEMANTIC_MISMATCH],
   ],
 );
-const equivalentTimestampDiagnosis = diagnoseTableIdentitySummary(
-  validSummary,
-  { ...validBotOnlyManifest, newest_created_at: "2026-07-01 00:00:00.000000+00" },
+for (const [actual, expected] of [
+  ["2026-07-01T00:00:00Z", "2026-07-01T00:00:00Z"],
+  ["2026-07-01T00:00:00Z", "2026-07-01T00:00:00+00"],
+  ["2026-07-01T00:00:00.123456Z", "2026-07-01T00:00:00.123456+00"],
+]) {
+  const timestampDiagnosis = diagnoseTableIdentitySummary(
+    { ...validSummary, newest_created_at: actual },
+    { ...validBotOnlyManifest, newest_created_at: expected },
+  );
+  assert.equal(timestampDiagnosis.ok, true);
+  assert.equal(timestampDiagnosis.strict_timestamp_equal, actual === expected);
+  assert.equal(timestampDiagnosis.semantic_timestamp_equal, true);
+  if (actual !== expected) {
+    assert.equal(timestampDiagnosis.code, TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_REPRESENTATION_ONLY_MISMATCH);
+  }
+}
+assert.equal(
+  assertTableIdentitySummary(
+    { ...validSummary, newest_created_at: "2026-07-01T00:00:00.123456Z" },
+    { ...validBotOnlyManifest, newest_created_at: "2026-07-01 00:00:00.123456+00" },
+  ).semantic_timestamp_equal,
+  true,
 );
-assert.equal(equivalentTimestampDiagnosis.ok, true);
-assert.equal(equivalentTimestampDiagnosis.strict_timestamp_equal, false);
-assert.equal(equivalentTimestampDiagnosis.semantic_timestamp_equal, true);
 assert.throws(
-  () => assertTableIdentitySummary(validSummary, { ...validBotOnlyManifest, newest_created_at: "2026-07-01 00:00:00.000000+00" }),
-  (error) => error?.code === TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_MISMATCH,
+  () => assertTableIdentitySummary(validSummary, { ...validBotOnlyManifest, newest_created_at: "2026-07-01T00:00:01.000000Z" }),
+  (error) => error?.code === TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_SEMANTIC_MISMATCH,
 );
 
 try {
+  const flowDir = fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-export-local-verify-flow-"));
+  try {
+    const flowArtifactPath = path.join(flowDir, "bot-only.archive.jsonl.gz");
+    const flowManifestPath = path.join(flowDir, "bot-only.archive.manifest.json");
+    const flowCutoff = "2026-07-08T00:00:00.000000Z";
+    const exported = await runExport({
+      argv: [
+        "--target", "stage",
+        "--cutoff", flowCutoff,
+        "--batch-size", "5000",
+        "--output", flowArtifactPath,
+        "--manifest", flowManifestPath,
+      ],
+      env: ENV,
+      cwd: flowDir,
+      now: new Date(flowCutoff),
+      deps: {
+        sql: makeExportSql(botExportCandidate(), botExportEntries()),
+        selector: "bot-only-7d",
+        schemaVersion: 2,
+        sourcePolicyId: "stage-ledger-bot-only-retention-7d-v1",
+        targetOptions: { singleTarget: true },
+        emit: false,
+      },
+    });
+    assert.equal(exported.batch.transactions, 1);
+    assert.equal(exported.batch.entries, 2);
+
+    const equivalentManifest = JSON.parse(fs.readFileSync(flowManifestPath, "utf8"));
+    equivalentManifest.bot_only.newest_created_at = "2026-07-01 00:00:00.123456+00";
+    fs.writeFileSync(flowManifestPath, `${JSON.stringify(equivalentManifest)}\n`);
+    const verifiedEquivalent = verifyLocalArchive({
+      artifactPath: flowArtifactPath,
+      manifestPath: flowManifestPath,
+      target: resolveStorageTarget("stage", ENV),
+    });
+    assert.equal(verifiedEquivalent.records.length, 1);
+    assert.equal(verifiedEquivalent.summary.transactionCount, 1);
+    assert.equal(verifiedEquivalent.summary.entryCount, 2);
+
+    equivalentManifest.bot_only.newest_created_at = "2026-07-01T00:00:00.123457Z";
+    fs.writeFileSync(flowManifestPath, `${JSON.stringify(equivalentManifest)}\n`);
+    await assert.rejects(
+      () => Promise.resolve().then(() => verifyLocalArchive({
+        artifactPath: flowArtifactPath,
+        manifestPath: flowManifestPath,
+        target: resolveStorageTarget("stage", ENV),
+      })),
+      (error) => error?.code === TABLE_IDENTITY_SUMMARY_ERROR_CODES.NEWEST_CREATED_AT_SEMANTIC_MISMATCH,
+    );
+  } finally {
+    fs.rmSync(flowDir, { recursive: true, force: true });
+  }
+
   const publicBucketStorage = makeFetch({
     bucketInitiallyExists: true,
     bucketValue: { ...bucket(), public: true },
