@@ -1,6 +1,16 @@
 -- P1 fix: scope NULL TABLE identities to evidence that can bind them to the
 -- table currently being completed.  The original migration is already
 -- applied on shared Stage and remains immutable.
+begin;
+
+-- Hosted Postgres keeps this gate owned by the least-privilege archive
+-- pruner.  Hand the migration session to that existing owner only while the
+-- replacement is created; all temporary schema/role capability is removed
+-- before commit, leaving the function owner and ACL unchanged.
+grant chips_ledger_archive_pruner to postgres;
+grant create on schema public to chips_ledger_archive_pruner;
+set role chips_ledger_archive_pruner;
+
 create or replace function public.chips_assert_bot_only_table_lifecycle_gate(
   p_table_id uuid,
   p_batch_id bigint,
@@ -322,3 +332,8 @@ begin
   );
 end;
 $$;
+
+reset role;
+revoke create on schema public from chips_ledger_archive_pruner;
+revoke chips_ledger_archive_pruner from postgres;
+commit;

@@ -352,6 +352,8 @@ function failClosedLifecycleContract() {
 function lifecycleGateScopeContract() {
   assert.match(lifecycleGateMigration, /create or replace function public\.chips_assert_bot_only_table_lifecycle_gate\(/);
   assert.match(lifecycleGateMigration, /language plpgsql\s+set search_path = ''/);
+  assert.match(lifecycleGateMigration, /begin;[\s\S]*grant chips_ledger_archive_pruner to postgres;[\s\S]*set role chips_ledger_archive_pruner;/);
+  assert.match(lifecycleGateMigration, /reset role;[\s\S]*revoke create on schema public from chips_ledger_archive_pruner;[\s\S]*revoke chips_ledger_archive_pruner from postgres;[\s\S]*commit;/);
   assert.match(lifecycleGateMigration, /pg_catalog\.pg_input_is_valid/);
   assert.match(lifecycleGateMigration, /unknown_registry_identity_evidence/);
   assert.match(lifecycleGateMigration, /hot_identity_evidence/);
