@@ -97,8 +97,20 @@ function boundedReadOnlySql(sql) {
   return {
     typed: typeof sql.typed === "function" ? (value, type) => sql.typed(value, type) : undefined,
     begin: (callback) => sql.begin(async (tx) => {
-      await tx.unsafe(`set local statement_timeout = '${REPLAY_STATEMENT_TIMEOUT_MS}ms';`);
-      return callback(tx);
+      let timeoutConfigured = false;
+      const boundedTx = {
+        unsafe: async (query, parameters) => {
+          const result = parameters === undefined
+            ? await tx.unsafe(query)
+            : await tx.unsafe(query, parameters);
+          if (!timeoutConfigured && /^\s*set transaction\b/i.test(query)) {
+            await tx.unsafe(`set local statement_timeout = '${REPLAY_STATEMENT_TIMEOUT_MS}ms';`);
+            timeoutConfigured = true;
+          }
+          return result;
+        },
+      };
+      return callback(boundedTx);
     }),
   };
 }
@@ -106,6 +118,7 @@ function boundedReadOnlySql(sql) {
 async function readOnlyTransaction(sql, callback) {
   return sql.begin(async (tx) => {
     await tx.unsafe("set transaction isolation level repeatable read, read only;");
+    await tx.unsafe(`set local statement_timeout = '${REPLAY_STATEMENT_TIMEOUT_MS}ms';`);
     return callback(tx);
   });
 }
@@ -307,7 +320,7 @@ export async function runBotOnlyTableIdentitySummaryDiagnostic({ config, sql, cu
   }
 }
 
-export async function runStageTimeoutDiagnostic({ env = process.env, now = new Date() } = {}) {
+export async function runStageTimeoutDiagnostic({ env = process.env, now = new Date(), summaryOnly = false } = {}) {
   const config = validateStageEnvironment(env, { requireCommitSha: true });
   const sql = postgres(config.dbUrl, {
     max: 1,
@@ -324,6 +337,32 @@ export async function runStageTimeoutDiagnostic({ env = process.env, now = new D
     const identityAndFence = await readIdentityAndFence(sql);
     if (identityAndFence.system_identifier !== STAGE_SYSTEM_IDENTIFIER) {
       throw new Error("database is not canonical Stage");
+    }
+
+    if (summaryOnly) {
+      const tableIdentitySummary = await runBotOnlyTableIdentitySummaryDiagnostic({
+        config,
+        sql,
+        cutoff,
+      });
+      return {
+        event: "chips_ledger_stage_summary_diagnostic",
+        target: "stage",
+        mode: "bot-only-7d-summary-diagnostic",
+        project_ref: STAGE_PROJECT_REF,
+        deployed_commit_sha: config.deployedCommitSha,
+        stage_identity_and_fence: identityAndFence,
+        cutoff,
+        bot_only_table_identity_summary: tableIdentitySummary,
+        read_only_contract: {
+          transaction: "repeatable read, read only",
+          statement_timeout_ms: REPLAY_STATEMENT_TIMEOUT_MS,
+          writes: false,
+          storage_access: false,
+          output_contains_sql_parameters: false,
+          output_contains_rows: false,
+        },
+      };
     }
 
     const settings = await readSettings(sql);
@@ -371,10 +410,16 @@ export async function runStageTimeoutDiagnostic({ env = process.env, now = new D
 }
 
 if (process.argv[1] && process.argv[1].endsWith("chips-ledger-stage-timeout-diagnostic.mjs")) {
-  runStageTimeoutDiagnostic()
+  const argv = process.argv.slice(2);
+  if (argv.length > 1 || (argv.length === 1 && argv[0] !== "--summary-only")) {
+    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-timeout-diagnostic.mjs [--summary-only]\n");
+    process.exitCode = 1;
+  } else {
+    runStageTimeoutDiagnostic({ summaryOnly: argv[0] === "--summary-only" })
     .then((report) => process.stdout.write(`${stringify(report)}\n`))
     .catch((error) => {
       process.stderr.write(`chips-ledger-stage-timeout-diagnostic failed: ${redactedError(error)}\n`);
       process.exitCode = 1;
     });
+  }
 }
