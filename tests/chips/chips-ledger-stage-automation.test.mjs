@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { gunzipSync, gzipSync } from "node:zlib";
 import {
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
   BOT_ONLY_RETENTION_POLICY_ID,
   readSnapshot,
   STAGE_AUTOMATION_POLICY_ID,
+  stringifyJson,
 } from "../../scripts/ops/chips-ledger-archive-export.mjs";
 import {
   assertBotOnlyActiveManifestMatch,
@@ -14,6 +16,7 @@ import {
   assertResumeRecoveryState,
   botOnlyExportArgs,
   botOnlyReport,
+  BOT_ONLY_BATCH_15_RECOVERY_REPAIR,
   findOwnCycle,
   persistDurableRecovery,
   runBotOnlyRecoveryRepair,
@@ -742,7 +745,29 @@ assert.equal(durable.manifestGzipBytes.length > 0, true);
 assert.equal(durable.recoveryArchive.sha256, compressedSha);
 assert.equal(durable.recoveryManifest.sha256, crypto.createHash("sha256").update(durable.manifestGzipBytes).digest("hex"));
 
+function exactSqlTextRow(row) {
+  const textFields = [
+    "batch_id",
+    "format_version",
+    "transaction_count",
+    "entry_count",
+    "raw_bytes",
+    "compressed_bytes",
+    "bot_only_table_count",
+    "bot_only_identity_count",
+    "bot_only_eligible_count",
+    "registry_cleaned_key_count",
+    "destructive_go_batch_id",
+  ];
+  return {
+    ...row,
+    ...Object.fromEntries(textFields.map((field) => [field, row[field] == null ? null : String(row[field])])),
+    tx_types: JSON.stringify(row.tx_types),
+  };
+}
+
 const repairRow = { ...makeCanaryRow(), batch_id: "15" };
+const repairExactSqlRow = exactSqlTextRow(repairRow);
 const repairObjects = new Map();
 const repairStorageCalls = [];
 const repairFetch = async (url, init = {}) => {
@@ -777,7 +802,7 @@ const repairSql = {
     if (query.includes("pg_backend_pid")) return [{ backend_pid: repairSession.backendPid }];
     if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
     if (query.includes("pg_control_system")) return [{ system_identifier: STAGE_SYSTEM_IDENTIFIER }];
-    if (query.includes("where batch_id = $1")) return [repairRow];
+    if (query.includes("where batch_id = $1")) return [repairExactSqlRow];
     throw new Error(`unexpected recovery repair SQL: ${query}`);
   },
   begin: async (callback) => callback({
@@ -789,13 +814,17 @@ const repairSql = {
 };
 const repairPruneCalls = [];
 const repairTempRoot = fs.mkdtempSync("/tmp/chips-ledger-stage-recovery-repair-");
+let repairManifestReads = 0;
 const repairDeps = {
   sql: repairSql,
   storageTarget,
   tempRoot: repairTempRoot,
   pruneStore: {
     getIdentity: async () => STAGE_SYSTEM_IDENTIFIER,
-    getManifest: async () => repairRow,
+    getManifest: async () => {
+      repairManifestReads += 1;
+      return repairRow;
+    },
   },
   verifyBucket: async () => {},
   pruneArchive: async ({ argv }) => {
@@ -807,22 +836,20 @@ const repairDeps = {
   },
   fetch: repairFetch,
 };
-const repaired = await runBotOnlyRecoveryRepair({ env: ENV, deps: repairDeps, batchId: "15" });
-assert.equal(repaired.state, "recovery_repaired");
-assert.equal(repaired.batchId, "15");
-assert.equal(repaired.dryRun, "ready");
-assert.equal(repaired.initialRecoveryObjectsAbsent, true);
-assert.equal(repaired.recoveryVerified, true);
-assert.equal(repairObjects.has(buildRecoveryArchiveObjectPath(canaryCompressedSha)), true);
-assert.equal(repairObjects.has(buildRecoveryManifestObjectPath(canaryCompressedSha)), true);
-assert.equal(repairStorageCalls.filter(({ method }) => method === "POST").length, 2);
-assert.equal(repairPruneCalls.length, 1);
+await assert.rejects(
+  runBotOnlyRecoveryRepair({ env: ENV, deps: repairDeps, batchId: "15" }),
+  /target path or archive SHA is not approved/,
+);
+assert.equal(repairManifestReads, 1, "repair must read the normalized manifest after the exact SQL row");
+assert.equal(repairObjects.size, 0, "a foreign batch-15 target must not create recovery objects");
+assert.equal(repairStorageCalls.length, 0, "a foreign batch-15 target must fail before Storage");
+assert.equal(repairPruneCalls.length, 0, "a foreign batch-15 target must fail before prune");
 assert.equal(repairSqlCalls.some(({ query }) => /\b(?:insert|update|delete|truncate)\b/i.test(query)), false);
 await assert.rejects(
   runBotOnlyRecoveryRepair({ env: ENV, deps: repairDeps, batchId: "15" }),
-  /recovery already exists; refusing overwrite/,
+  /target path or archive SHA is not approved/,
 );
-assert.equal(repairStorageCalls.filter(({ method }) => method === "POST").length, 2);
+assert.equal(repairStorageCalls.length, 0);
 await assert.rejects(
   runBotOnlyRecoveryRepair({ env: ENV, deps: repairDeps, batchId: "14" }),
   /pinned to batch 15/,
@@ -835,6 +862,239 @@ await assert.rejects(
   }),
   /cannot run with execute or automatic gates/,
 );
+
+function gzipRecoveryManifestForTest(manifest) {
+  return gzipSync(Buffer.from(`${stringifyJson(manifest)}\n`, "utf8"), { level: 9, mtime: 0 });
+}
+
+const batch15Evidence = {
+  transactionIdsSha256: "0fb56b4c43ef22e40ce5809c4c77cda4647c994e5843836d5c69b109bbd58cad",
+  entryIdsSha256: "43d49cfe54188b518d72e2cf9b8965c90577f8e98da188f06ffa0f236343fd7a",
+  transactionCount: 6,
+  entryCount: 12,
+  txTypes: { TABLE_BUY_IN: 3, TABLE_CASH_OUT: 3 },
+  credits: "600",
+  debits: "600",
+  net: "0",
+  tableId: "0055442d-225f-44ce-bd97-d3edb4a4db35",
+  registryKeys: ["batch-15-key-1", "batch-15-key-2", "batch-15-key-3", "batch-15-key-4", "batch-15-key-5", "batch-15-key-6"],
+  registryKeysSha256: "b169f4aff0cc31ed1d5372c562821580224829d1df6438e35b400b22fff81c2a",
+  outOfScopeKeysSha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+};
+const batch15Row = {
+  ...makeCanaryRow(),
+  object_path: BOT_ONLY_BATCH_15_RECOVERY_REPAIR.objectPath,
+  batch_id: "15",
+  cutoff: "2026-08-19 12:08:30.872+00",
+  cursor_start_created_at: null,
+  cursor_start_id: null,
+  cursor_end_created_at: "2026-08-19 05:16:15.263652+00",
+  cursor_end_id: "b8705d34-8f4a-4d30-b29b-3454ea77085d",
+  first_created_at: "2026-08-19 05:00:39.619093+00",
+  last_created_at: "2026-08-19 05:16:15.263652+00",
+  transaction_count: 6,
+  entry_count: 12,
+  tx_types: { TABLE_BUY_IN: 3, TABLE_CASH_OUT: 3 },
+  raw_bytes: 13382,
+  compressed_bytes: 1757,
+  raw_sha256: "764e5cc7682e23be5692c574be97cfed0b08a98db336559e724773d8e7bae16e",
+  compressed_sha256: BOT_ONLY_BATCH_15_RECOVERY_REPAIR.archiveSha256,
+  archived_transaction_ids_sha256: batch15Evidence.transactionIdsSha256,
+  archived_entry_ids_sha256: batch15Evidence.entryIdsSha256,
+  credits: "600",
+  debits: "600",
+  net_amount: "0",
+  bot_only_table_id: batch15Evidence.tableId,
+  bot_only_table_count: 1,
+  bot_only_newest_created_at: "2026-08-19 05:16:15.263652+00",
+  bot_only_registry_keys_sha256: batch15Evidence.registryKeysSha256,
+  bot_only_out_of_scope_keys_sha256: batch15Evidence.outOfScopeKeysSha256,
+  bot_only_identity_count: 6,
+  bot_only_eligible_count: 6,
+};
+const batch15ExactSqlRow = {
+  ...exactSqlTextRow(batch15Row),
+  tx_types: '{"TABLE_BUY_IN": 3, "TABLE_CASH_OUT": 3}',
+};
+const knownBadBatch15Manifest = buildRecoveryManifest(
+  batch15ExactSqlRow,
+  STAGE_SYSTEM_IDENTIFIER,
+  batch15Evidence,
+  { target: "stage" },
+);
+const knownBadBatch15ManifestGzip = gzipRecoveryManifestForTest(knownBadBatch15Manifest);
+assert.equal(Object.hasOwn(knownBadBatch15Manifest, "bot_only"), false);
+assert.equal(
+  crypto.createHash("sha256").update(knownBadBatch15ManifestGzip).digest("hex"),
+  BOT_ONLY_BATCH_15_RECOVERY_REPAIR.currentRecoveryManifestSha256,
+);
+const correctedBatch15Manifest = buildRecoveryManifest(
+  batch15Row,
+  STAGE_SYSTEM_IDENTIFIER,
+  batch15Evidence,
+  { target: "stage" },
+);
+const correctedBatch15ManifestGzip = gzipRecoveryManifestForTest(correctedBatch15Manifest);
+assert.equal(
+  crypto.createHash("sha256").update(correctedBatch15ManifestGzip).digest("hex"),
+  BOT_ONLY_BATCH_15_RECOVERY_REPAIR.correctedRecoveryManifestSha256,
+);
+assert.equal(correctedBatch15Manifest.archive.format_version, 2);
+assert.equal(correctedBatch15Manifest.archive.transaction_count, 6);
+assert.equal(correctedBatch15Manifest.archive.entry_count, 12);
+assert.equal(correctedBatch15Manifest.archive.raw_bytes, 13382);
+assert.equal(correctedBatch15Manifest.archive.compressed_bytes, 1757);
+assert.deepEqual(correctedBatch15Manifest.archive.tx_types, batch15Evidence.txTypes);
+assert.deepEqual(correctedBatch15Manifest.bot_only, {
+  table_id: batch15Evidence.tableId,
+  table_count: 1,
+  registry_keys_sha256: batch15Evidence.registryKeysSha256,
+  registry_key_count: batch15Evidence.registryKeys.length,
+  out_of_scope_keys_sha256: batch15Evidence.outOfScopeKeysSha256,
+});
+
+const correctionArchiveBytes = Buffer.alloc(1757, 0x61);
+const correctionArchiveBefore = Buffer.from(correctionArchiveBytes);
+let correctionManifestGzipBytes = Buffer.from(knownBadBatch15ManifestGzip);
+let correctionSqlRow = batch15ExactSqlRow;
+let correctionActiveRow = batch15Row;
+const correctionStorageCalls = [];
+const correctionFetch = async (url, init = {}) => {
+  const requestUrl = new URL(url);
+  const authenticatedPrefix = `/storage/v1/object/authenticated/${ARCHIVE_BUCKET}/`;
+  const uploadPrefix = `/storage/v1/object/${ARCHIVE_BUCKET}/`;
+  const prefix = requestUrl.pathname.startsWith(authenticatedPrefix) ? authenticatedPrefix : uploadPrefix;
+  const objectPath = decodeURIComponent(requestUrl.pathname.slice(prefix.length));
+  const method = init.method || "GET";
+  correctionStorageCalls.push({ method, objectPath });
+  assert.equal(objectPath, BOT_ONLY_BATCH_15_RECOVERY_REPAIR.recoveryManifestPath);
+  if (method === "GET") return response(correctionManifestGzipBytes);
+  if (method === "PUT") {
+    correctionManifestGzipBytes = Buffer.from(init.body);
+    return response({ ok: true });
+  }
+  return response({ message: "unexpected correction method" }, 500);
+};
+const correctionInspectCalls = [];
+const inspectCorrection = async () => {
+  correctionInspectCalls.push(true);
+  const manifestBytes = gunzipSync(correctionManifestGzipBytes);
+  const manifest = JSON.parse(manifestBytes.toString("utf8"));
+  return {
+    archivePath: BOT_ONLY_BATCH_15_RECOVERY_REPAIR.recoveryArchivePath,
+    manifestPath: BOT_ONLY_BATCH_15_RECOVERY_REPAIR.recoveryManifestPath,
+    archiveBytes: correctionArchiveBytes,
+    manifestGzipBytes: correctionManifestGzipBytes,
+    manifestBytes,
+    manifest,
+    archiveSha256: BOT_ONLY_BATCH_15_RECOVERY_REPAIR.archiveSha256,
+    manifestSha256: crypto.createHash("sha256").update(correctionManifestGzipBytes).digest("hex"),
+  };
+};
+const correctionSqlCalls = [];
+const correctionSession = { backendPid: "batch-15-correction-session" };
+const correctionSql = {
+  typed: (value, type) => ({ value, type }),
+  unsafe: async (query, values = []) => {
+    correctionSqlCalls.push({ query, values });
+    if (query.includes("pg_try_advisory_lock")) return [{ acquired: true, backend_pid: correctionSession.backendPid }];
+    if (query.includes("pg_backend_pid")) return [{ backend_pid: correctionSession.backendPid }];
+    if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
+    if (query.includes("pg_control_system")) return [{ system_identifier: STAGE_SYSTEM_IDENTIFIER }];
+    if (query.includes("where batch_id = $1")) return [correctionSqlRow];
+    throw new Error(`unexpected batch 15 correction SQL: ${query}`);
+  },
+  begin: async (callback) => callback({
+    unsafe: async (query, values = []) => {
+      if (query.startsWith("set transaction")) return [];
+      return correctionSql.unsafe(query, values);
+    },
+  }),
+};
+let correctionManifestReads = 0;
+const correctionPruneCalls = [];
+const correctionTempRoot = fs.mkdtempSync("/tmp/chips-ledger-stage-batch-15-correction-");
+const correctionDeps = {
+  sql: correctionSql,
+  storageTarget,
+  tempRoot: correctionTempRoot,
+  pruneStore: {
+    getIdentity: async () => STAGE_SYSTEM_IDENTIFIER,
+    getManifest: async (objectPath) => {
+      correctionManifestReads += 1;
+      assert.equal(objectPath, correctionActiveRow.object_path);
+      return correctionActiveRow;
+    },
+  },
+  verifyBucket: async () => {},
+  inspectDurableRecovery: inspectCorrection,
+  pruneArchive: async ({ argv }) => {
+    correctionPruneCalls.push([...argv]);
+    assert.equal(argv.includes("--execute"), false);
+    assert.equal(argv.includes("--register-proof"), false);
+    assert.equal(argv.includes("--automatic"), false);
+    return { state: "ready", evidence: batch15Evidence };
+  },
+  fetch: correctionFetch,
+};
+const repairedBatch15 = await runBotOnlyRecoveryRepair({ env: ENV, deps: correctionDeps, batchId: "15" });
+assert.equal(repairedBatch15.state, "recovery_repaired");
+assert.equal(repairedBatch15.batchId, "15");
+assert.equal(repairedBatch15.receipt, "recovery-manifest-repair-only");
+assert.equal(repairedBatch15.initialRecoveryObjectsAbsent, false);
+assert.equal(repairedBatch15.recoveryVerified, true);
+assert.equal(repairedBatch15.recoveryManifestSha256, BOT_ONLY_BATCH_15_RECOVERY_REPAIR.correctedRecoveryManifestSha256);
+assert.equal(correctionManifestReads, 1);
+assert.equal(correctionInspectCalls.length, 3);
+assert.equal(correctionPruneCalls.length, 1);
+assert.deepEqual(correctionStorageCalls.map(({ method }) => method), ["GET", "PUT", "GET"]);
+assert.equal(correctionStorageCalls.filter(({ method }) => method === "PUT").length, 1);
+assert.equal(correctionStorageCalls.every(({ objectPath }) => objectPath === BOT_ONLY_BATCH_15_RECOVERY_REPAIR.recoveryManifestPath), true);
+assert.equal(correctionArchiveBytes.equals(correctionArchiveBefore), true);
+assert.equal(correctionSqlCalls.some(({ query }) => /\b(?:insert|update|delete|truncate)\b/i.test(query)), false);
+const repairedBatch15Manifest = JSON.parse(gunzipSync(correctionManifestGzipBytes).toString("utf8"));
+assert.deepEqual(repairedBatch15Manifest, correctedBatch15Manifest);
+assert.equal(
+  crypto.createHash("sha256").update(correctionManifestGzipBytes).digest("hex"),
+  BOT_ONLY_BATCH_15_RECOVERY_REPAIR.correctedRecoveryManifestSha256,
+);
+
+const foreignArchiveSha = "a".repeat(64);
+correctionManifestGzipBytes = Buffer.from(knownBadBatch15ManifestGzip);
+correctionSqlRow = exactSqlTextRow({
+  ...batch15Row,
+  object_path: `v1/sha256/${foreignArchiveSha}.jsonl.gz`,
+  compressed_sha256: foreignArchiveSha,
+});
+correctionActiveRow = {
+  ...batch15Row,
+  object_path: `v1/sha256/${foreignArchiveSha}.jsonl.gz`,
+  compressed_sha256: foreignArchiveSha,
+};
+const correctionPutCountBeforeForeignTarget = correctionStorageCalls.filter(({ method }) => method === "PUT").length;
+await assert.rejects(
+  runBotOnlyRecoveryRepair({ env: ENV, deps: correctionDeps, batchId: "15" }),
+  /target path or archive SHA is not approved/,
+);
+assert.equal(correctionStorageCalls.filter(({ method }) => method === "PUT").length, correctionPutCountBeforeForeignTarget);
+assert.equal(correctionArchiveBytes.equals(correctionArchiveBefore), true);
+
+correctionSqlRow = batch15ExactSqlRow;
+correctionActiveRow = batch15Row;
+const conflictingManifest = {
+  ...correctedBatch15Manifest,
+  archive: { ...correctedBatch15Manifest.archive, entry_count: 11 },
+};
+correctionManifestGzipBytes = gzipRecoveryManifestForTest(conflictingManifest);
+const correctionPutCountBeforeForeignContent = correctionStorageCalls.filter(({ method }) => method === "PUT").length;
+await assert.rejects(
+  runBotOnlyRecoveryRepair({ env: ENV, deps: correctionDeps, batchId: "15" }),
+  /current object content is not the approved known state/,
+);
+assert.equal(correctionStorageCalls.filter(({ method }) => method === "PUT").length, correctionPutCountBeforeForeignContent);
+assert.equal(correctionArchiveBytes.equals(correctionArchiveBefore), true);
+assert.equal(correctionSqlCalls.some(({ query }) => /\b(?:insert|update|delete|truncate)\b/i.test(query)), false);
+fs.rmSync(correctionTempRoot, { recursive: true, force: true });
 fs.rmSync(repairTempRoot, { recursive: true, force: true });
 
 const resumeCycleRow = {

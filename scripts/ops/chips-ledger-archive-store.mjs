@@ -874,6 +874,51 @@ export async function uploadOrVerifyPrivateObject({ storageTarget, objectPath, b
   };
 }
 
+export async function replaceVerifiedPrivateObject({
+  storageTarget,
+  objectPath,
+  expectedCurrentBytes,
+  bytes,
+  mimeType = ARCHIVE_MIME_TYPE,
+  deps = {},
+}) {
+  const expected = Buffer.from(expectedCurrentBytes || []);
+  const replacement = Buffer.from(bytes || []);
+  if (expected.length < 1 || expected.length > ARCHIVE_MAX_BYTES) fail("private object replacement precondition has an invalid size");
+  if (replacement.length < 1 || replacement.length > ARCHIVE_MAX_BYTES) fail("private object replacement has an invalid size");
+
+  const currentResponse = await storageRequest(storageTarget, objectRequestPath(objectPath), { method: "GET" }, deps);
+  if (await isMissingStorageResponse(currentResponse)) fail(`private object replacement target is missing: ${objectPath}`);
+  if (!currentResponse.ok) storageFailure("private object replacement lookup", currentResponse);
+  if ((currentResponse.headers.get("content-type") || "").split(";", 1)[0].trim() !== mimeType) {
+    fail(`private object replacement target has an unexpected MIME type: ${objectPath}`);
+  }
+  const current = Buffer.from(await currentResponse.arrayBuffer());
+  if (!current.equals(expected)) fail(`private object replacement precondition differs: ${objectPath}`);
+
+  const updateResponse = await storageRequest(storageTarget, objectRequestPath(objectPath, ""), {
+    method: "PUT",
+    headers: { "content-type": mimeType },
+    body: replacement,
+  }, deps);
+  if (!updateResponse.ok) storageFailure("private object replacement", updateResponse);
+
+  const verifiedResponse = await storageRequest(storageTarget, objectRequestPath(objectPath), { method: "GET" }, deps);
+  if (!verifiedResponse.ok) storageFailure("private object replacement verification", verifiedResponse);
+  if ((verifiedResponse.headers.get("content-type") || "").split(";", 1)[0].trim() !== mimeType) {
+    fail(`private object replacement verification has an unexpected MIME type: ${objectPath}`);
+  }
+  const verified = Buffer.from(await verifiedResponse.arrayBuffer());
+  if (!verified.equals(replacement)) fail(`private object replacement verification differs: ${objectPath}`);
+  return {
+    objectPath,
+    objectExisted: true,
+    replaced: true,
+    bytes: verified.length,
+    sha256: crypto.createHash("sha256").update(verified).digest("hex"),
+  };
+}
+
 export async function uploadOrVerifyObject(localArchive, storageTarget, deps = {}) {
   const initialDownloadStarted = Date.now();
   const existing = await downloadObject(localArchive, storageTarget, deps);

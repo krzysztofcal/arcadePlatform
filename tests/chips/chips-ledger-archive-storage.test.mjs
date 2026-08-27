@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -16,6 +17,7 @@ import {
   createManifestStore,
   diagnoseTableIdentitySummary,
   resolveStorageTarget,
+  replaceVerifiedPrivateObject,
   storeArchive,
   verifyArchiveBucket,
   verifyLocalArchive,
@@ -393,6 +395,51 @@ try {
   );
   assert.equal(mismatchStore.commitCount, 0);
   assert.equal(mismatchStore.row.status, "pending");
+
+  const replacementPath = "recovery/v1/sha256/" + "f".repeat(64) + ".recovery.json.gz";
+  const originalManifest = Buffer.from("original recovery manifest");
+  const correctedManifest = Buffer.from("corrected recovery manifest");
+  let replacementObject = originalManifest;
+  const replacementCalls = [];
+  const replacementFetch = async (url, init = {}) => {
+    const requestUrl = new URL(url);
+    const method = init.method || "GET";
+    const authenticatedPrefix = `/storage/v1/object/authenticated/${ARCHIVE_BUCKET}/`;
+    const uploadPrefix = `/storage/v1/object/${ARCHIVE_BUCKET}/`;
+    const prefix = requestUrl.pathname.startsWith(authenticatedPrefix) ? authenticatedPrefix : uploadPrefix;
+    const objectPath = decodeURIComponent(requestUrl.pathname.slice(prefix.length));
+    replacementCalls.push({ method, objectPath });
+    assert.equal(objectPath, replacementPath);
+    if (method === "GET") return new Response(replacementObject, { status: 200, headers: { "content-type": "application/gzip" } });
+    if (method === "PUT") {
+      assert.equal(new Headers(init.headers).get("content-type"), "application/gzip");
+      replacementObject = Buffer.from(init.body);
+      return responseJson({ ok: true });
+    }
+    return responseJson({ message: "unexpected replacement method" }, 500);
+  };
+  const replaced = await replaceVerifiedPrivateObject({
+    storageTarget: resolveStorageTarget("stage", ENV),
+    objectPath: replacementPath,
+    expectedCurrentBytes: originalManifest,
+    bytes: correctedManifest,
+    deps: { fetch: replacementFetch },
+  });
+  assert.equal(replaced.replaced, true);
+  assert.equal(replaced.sha256, crypto.createHash("sha256").update(correctedManifest).digest("hex"));
+  assert.equal(replacementObject.equals(correctedManifest), true);
+  assert.deepEqual(replacementCalls.map(({ method }) => method), ["GET", "PUT", "GET"]);
+  await assert.rejects(
+    () => replaceVerifiedPrivateObject({
+      storageTarget: resolveStorageTarget("stage", ENV),
+      objectPath: replacementPath,
+      expectedCurrentBytes: originalManifest,
+      bytes: Buffer.from("second replacement"),
+      deps: { fetch: replacementFetch },
+    }),
+    /precondition differs/,
+  );
+  assert.equal(replacementCalls.filter(({ method }) => method === "PUT").length, 1);
 } finally {
   fs.rmSync(tempDir, { recursive: true, force: true });
 }
