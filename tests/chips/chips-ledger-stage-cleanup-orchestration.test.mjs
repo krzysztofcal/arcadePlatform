@@ -695,6 +695,13 @@ async function registerCompleteCleanupReceipt(tx, fixture, { removeTable = false
   `, [fixture.objectPath]);
   assert.equal(proofRows.length, 1);
 
+  if (removeTable) {
+    const cleaned = await automaticCleanup(tx, fixture);
+    assert.equal(cleaned.state, "cleaned");
+    await tx.unsafe("delete from public.poker_tables where id = $1::uuid;", [fixture.tableId]);
+    return;
+  }
+
   await tx.unsafe("select set_config('chips.bot_only_go', '1', true);");
   await tx.unsafe(`
     update public.chips_ledger_archive_batches
@@ -723,9 +730,6 @@ async function registerCompleteCleanupReceipt(tx, fixture, { removeTable = false
            registry_cleaned_keys_sha256 = $2
      where object_path = $1;
   `, [fixture.objectPath, registryHash[0].hash]);
-  if (removeTable) {
-    await tx.unsafe("delete from public.poker_tables where id = $1::uuid;", [fixture.tableId]);
-  }
 }
 
 async function automaticCleanup(tx, fixture) {
