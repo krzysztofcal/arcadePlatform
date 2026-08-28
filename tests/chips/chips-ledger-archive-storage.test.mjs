@@ -436,6 +436,19 @@ try {
   assert.equal(replaced.sha256, crypto.createHash("sha256").update(correctedManifest).digest("hex"));
   assert.equal(replacementObject.equals(correctedManifest), true);
   assert.deepEqual(replacementCalls.map(({ method }) => method), ["GET", "PUT", "GET", "GET"]);
+  const alreadyReplaced = await replaceVerifiedPrivateObject({
+    storageTarget: resolveStorageTarget("stage", ENV),
+    objectPath: replacementPath,
+    expectedCurrentBytes: originalManifest,
+    bytes: correctedManifest,
+    deps: { fetch: replacementFetch },
+  });
+  assert.equal(alreadyReplaced.alreadyReplaced, true);
+  assert.equal(alreadyReplaced.replaced, false);
+  assert.equal(alreadyReplaced.bytes, correctedManifest.length);
+  assert.equal(alreadyReplaced.sha256, crypto.createHash("sha256").update(correctedManifest).digest("hex"));
+  assert.equal(alreadyReplaced.verifiedBytes.equals(correctedManifest), true);
+  assert.deepEqual(replacementCalls.slice(-1).map(({ method }) => method), ["GET"]);
   await assert.rejects(
     () => replaceVerifiedPrivateObject({
       storageTarget: resolveStorageTarget("stage", ENV),

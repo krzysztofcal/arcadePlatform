@@ -904,6 +904,18 @@ export async function replaceVerifiedPrivateObject({
 
   const current = await readObject("private object replacement target");
   if (!current) fail(`private object replacement target is missing: ${objectPath}`);
+  if (current.bytes.equals(replacement)) {
+    return {
+      objectPath,
+      objectExisted: true,
+      replaced: false,
+      alreadyReplaced: true,
+      bytes: current.bytes.length,
+      verifiedBytes: current.bytes,
+      sha256: current.sha256,
+      verificationGets: 0,
+    };
+  }
   if (!current.bytes.equals(expected)) {
     fail(`private object replacement precondition differs: ${objectPath}; observed SHA-256: ${current.sha256}`);
   }
@@ -927,6 +939,7 @@ export async function replaceVerifiedPrivateObject({
         objectPath,
         objectExisted: true,
         replaced: true,
+        alreadyReplaced: false,
         bytes: verified.bytes.length,
         verifiedBytes: verified.bytes,
         sha256: verified.sha256,

@@ -1013,6 +1013,8 @@ let correctionSqlRow = batch15ExactSqlRow;
 let correctionActiveRow = batch15Row;
 let correctionPutCompleted = false;
 let correctionVerificationResponses = [];
+let correctionPreconditionResponses = [];
+let correctionInspectManifestResponses = [];
 const correctionStorageCalls = [];
 const correctionFetch = async (url, init = {}) => {
   const requestUrl = new URL(url);
@@ -1024,6 +1026,9 @@ const correctionFetch = async (url, init = {}) => {
   correctionStorageCalls.push({ method, objectPath });
   assert.equal(objectPath, BOT_ONLY_BATCH_15_RECOVERY_REPAIR.recoveryManifestPath);
   if (method === "GET") {
+    if (!correctionPutCompleted && correctionPreconditionResponses.length > 0) {
+      return response(correctionPreconditionResponses.shift());
+    }
     if (correctionPutCompleted && correctionVerificationResponses.length > 0) {
       return response(correctionVerificationResponses.shift());
     }
@@ -1039,17 +1044,20 @@ const correctionFetch = async (url, init = {}) => {
 const correctionInspectCalls = [];
 const inspectCorrection = async () => {
   correctionInspectCalls.push(true);
-  const manifestBytes = gunzipSync(correctionManifestGzipBytes);
+  const inspectedManifestGzipBytes = correctionInspectManifestResponses.length > 0
+    ? Buffer.from(correctionInspectManifestResponses.shift())
+    : correctionManifestGzipBytes;
+  const manifestBytes = gunzipSync(inspectedManifestGzipBytes);
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
   return {
     archivePath: BOT_ONLY_BATCH_15_RECOVERY_REPAIR.recoveryArchivePath,
     manifestPath: BOT_ONLY_BATCH_15_RECOVERY_REPAIR.recoveryManifestPath,
     archiveBytes: correctionArchiveBytes,
-    manifestGzipBytes: correctionManifestGzipBytes,
+    manifestGzipBytes: inspectedManifestGzipBytes,
     manifestBytes,
     manifest,
     archiveSha256: BOT_ONLY_BATCH_15_RECOVERY_REPAIR.archiveSha256,
-    manifestSha256: crypto.createHash("sha256").update(correctionManifestGzipBytes).digest("hex"),
+    manifestSha256: crypto.createHash("sha256").update(inspectedManifestGzipBytes).digest("hex"),
   };
 };
 const correctionSqlCalls = [];
@@ -1126,6 +1134,7 @@ const correctedStorageCallCount = correctionStorageCalls.length;
 const correctedPutCount = correctionStorageCalls.filter(({ method }) => method === "PUT").length;
 correctionPutCompleted = false;
 correctionVerificationResponses = [];
+correctionInspectManifestResponses = [correctedBatch15ManifestGzip, knownBadBatch15ManifestGzip];
 const alreadyRepairedBatch15 = await runBotOnlyRecoveryRepair({ env: ENV, deps: correctionDeps, batchId: "15" });
 assert.equal(alreadyRepairedBatch15.state, "recovery_already_repaired");
 assert.equal(alreadyRepairedBatch15.receipt, "recovery-already-repaired-read-only");
@@ -1136,11 +1145,29 @@ assert.equal(correctionStorageCalls.filter(({ method }) => method === "PUT").len
 assert.equal(correctionPruneCalls.length, 2, "already corrected recovery must still run the read-only dry-run");
 assert.equal(correctionArchiveBytes.equals(correctionArchiveBefore), true);
 
+correctionManifestGzipBytes = Buffer.from(knownBadBatch15ManifestGzip);
+correctionPutCompleted = false;
+correctionVerificationResponses = [];
+correctionPreconditionResponses = [correctedBatch15ManifestGzip];
+correctionInspectManifestResponses = [knownBadBatch15ManifestGzip, knownBadBatch15ManifestGzip];
+const alreadyReplacedPutCount = correctionStorageCalls.filter(({ method }) => method === "PUT").length;
+const alreadyReplacedBatch15 = await runBotOnlyRecoveryRepair({ env: ENV, deps: correctionDeps, batchId: "15" });
+assert.equal(alreadyReplacedBatch15.state, "recovery_already_repaired");
+assert.equal(alreadyReplacedBatch15.receipt, "recovery-already-repaired-read-only");
+assert.equal(alreadyReplacedBatch15.storageModified, false);
+assert.equal(alreadyReplacedBatch15.recoveryVerified, true);
+assert.equal(alreadyReplacedBatch15.recoveryManifestSha256, BOT_ONLY_BATCH_15_RECOVERY_REPAIR.correctedRecoveryManifestSha256);
+assert.equal(correctionStorageCalls.filter(({ method }) => method === "PUT").length, alreadyReplacedPutCount);
+assert.deepEqual(correctionStorageCalls.slice(-1).map(({ method }) => method), ["GET"]);
+assert.equal(correctionArchiveBytes.equals(correctionArchiveBefore), true);
+
 const foreignManifest = gzipRecoveryManifestForTest({ foreign: true });
 const foreignManifestSha = crypto.createHash("sha256").update(foreignManifest).digest("hex");
 correctionManifestGzipBytes = Buffer.from(foreignManifest);
 correctionPutCompleted = false;
 correctionVerificationResponses = [];
+correctionPreconditionResponses = [];
+correctionInspectManifestResponses = [];
 const correctionPutCountBeforeForeignContent = correctionStorageCalls.filter(({ method }) => method === "PUT").length;
 await assert.rejects(
   runBotOnlyRecoveryRepair({ env: ENV, deps: correctionDeps, batchId: "15" }),

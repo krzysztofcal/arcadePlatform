@@ -989,8 +989,13 @@ export async function runBotOnlyRecoveryRepair({ env = process.env, deps = {}, b
         fail("bot-only batch 15 recovery repair changed the recovery archive while verifying the manifest");
       }
 
-      if (currentRecoveryState === "already_repaired") {
-        durable = assertCanonicalBotOnlyRecovery(current, canonical, exactBatchId);
+      const correctedRecovery = initialRecoveryState === "already_repaired"
+        ? existing
+        : currentRecoveryState === "already_repaired"
+          ? current
+          : null;
+      if (correctedRecovery) {
+        durable = assertCanonicalBotOnlyRecovery(correctedRecovery, canonical, exactBatchId);
         state = "recovery_already_repaired";
         receipt = "recovery-already-repaired-read-only";
       } else {
@@ -1001,13 +1006,18 @@ export async function runBotOnlyRecoveryRepair({ env = process.env, deps = {}, b
           bytes: canonical.manifestGzipBytes,
           deps,
         });
+        const replacementAlreadyReplaced = replacement.alreadyReplaced === true;
+        const replacementApplied = replacement.replaced === true;
         if (replacement.objectPath !== BOT_ONLY_BATCH_15_RECOVERY_REPAIR.recoveryManifestPath
-          || replacement.replaced !== true
-          || replacement.sha256 !== canonical.manifestSha256) {
+          || replacementAlreadyReplaced === replacementApplied
+          || !Buffer.isBuffer(replacement.verifiedBytes)
+          || replacement.bytes !== canonical.manifestGzipBytes.length
+          || replacement.sha256 !== canonical.manifestSha256
+          || !replacement.verifiedBytes.equals(canonical.manifestGzipBytes)) {
           fail("bot-only batch 15 recovery manifest replacement verification failed");
         }
         await assertAdvisoryLock(sql, lockSession);
-        const verifiedManifestGzipBytes = Buffer.from(replacement.verifiedBytes || canonical.manifestGzipBytes);
+        const verifiedManifestGzipBytes = Buffer.from(replacement.verifiedBytes);
         const verified = assertCanonicalBotOnlyRecovery({
           ...current,
           manifestGzipBytes: verifiedManifestGzipBytes,
@@ -1028,8 +1038,13 @@ export async function runBotOnlyRecoveryRepair({ env = process.env, deps = {}, b
             sha256: verified.manifestSha256,
           },
         };
-        storageModified = true;
-        receipt = "recovery-manifest-repair-only";
+        if (replacementAlreadyReplaced) {
+          state = "recovery_already_repaired";
+          receipt = "recovery-already-repaired-read-only";
+        } else {
+          storageModified = true;
+          receipt = "recovery-manifest-repair-only";
+        }
       }
     }
     result = {
