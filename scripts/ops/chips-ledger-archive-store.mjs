@@ -53,6 +53,7 @@ const LEGACY_STAGE_ALLOWLIST_BATCH_MANIFEST_SHA256 = "6011e3ceb819d2c8f21ed9cdf0
 const LEGACY_STAGE_ALLOWLIST_FREEZE_RUN_ID = "32771521144";
 const LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN = "32753223679";
 const LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256 = "aa82076e7e4d7fd1e027889be94868e5662652cc29ae2dc7b55a4196b260ed0e";
+const REPLACEMENT_VERIFICATION_MAX_GETS = 2;
 
 const HELP = `Usage: node scripts/ops/chips-ledger-archive-store.mjs [options]
 
@@ -887,14 +888,25 @@ export async function replaceVerifiedPrivateObject({
   if (expected.length < 1 || expected.length > ARCHIVE_MAX_BYTES) fail("private object replacement precondition has an invalid size");
   if (replacement.length < 1 || replacement.length > ARCHIVE_MAX_BYTES) fail("private object replacement has an invalid size");
 
-  const currentResponse = await storageRequest(storageTarget, objectRequestPath(objectPath), { method: "GET" }, deps);
-  if (await isMissingStorageResponse(currentResponse)) fail(`private object replacement target is missing: ${objectPath}`);
-  if (!currentResponse.ok) storageFailure("private object replacement lookup", currentResponse);
-  if ((currentResponse.headers.get("content-type") || "").split(";", 1)[0].trim() !== mimeType) {
-    fail(`private object replacement target has an unexpected MIME type: ${objectPath}`);
+  const readObject = async (operation) => {
+    const response = await storageRequest(storageTarget, objectRequestPath(objectPath), { method: "GET" }, deps);
+    if (await isMissingStorageResponse(response)) return null;
+    if (!response.ok) storageFailure(operation, response);
+    if ((response.headers.get("content-type") || "").split(";", 1)[0].trim() !== mimeType) {
+      fail(`${operation} has an unexpected MIME type: ${objectPath}`);
+    }
+    const readBytes = Buffer.from(await response.arrayBuffer());
+    return {
+      bytes: readBytes,
+      sha256: crypto.createHash("sha256").update(readBytes).digest("hex"),
+    };
+  };
+
+  const current = await readObject("private object replacement target");
+  if (!current) fail(`private object replacement target is missing: ${objectPath}`);
+  if (!current.bytes.equals(expected)) {
+    fail(`private object replacement precondition differs: ${objectPath}; observed SHA-256: ${current.sha256}`);
   }
-  const current = Buffer.from(await currentResponse.arrayBuffer());
-  if (!current.equals(expected)) fail(`private object replacement precondition differs: ${objectPath}`);
 
   const updateResponse = await storageRequest(storageTarget, objectRequestPath(objectPath, ""), {
     method: "PUT",
@@ -903,20 +915,30 @@ export async function replaceVerifiedPrivateObject({
   }, deps);
   if (!updateResponse.ok) storageFailure("private object replacement", updateResponse);
 
-  const verifiedResponse = await storageRequest(storageTarget, objectRequestPath(objectPath), { method: "GET" }, deps);
-  if (!verifiedResponse.ok) storageFailure("private object replacement verification", verifiedResponse);
-  if ((verifiedResponse.headers.get("content-type") || "").split(";", 1)[0].trim() !== mimeType) {
-    fail(`private object replacement verification has an unexpected MIME type: ${objectPath}`);
+  let observedSha256 = null;
+  for (let attempt = 1; attempt <= REPLACEMENT_VERIFICATION_MAX_GETS; attempt += 1) {
+    const verified = await readObject("private object replacement verification");
+    if (!verified) {
+      fail(`private object replacement did not become visible after ${attempt} read-only verification GET${attempt === 1 ? "" : "s"}; observed SHA-256: missing`);
+    }
+    observedSha256 = verified.sha256;
+    if (verified.bytes.equals(replacement)) {
+      return {
+        objectPath,
+        objectExisted: true,
+        replaced: true,
+        bytes: verified.bytes.length,
+        verifiedBytes: verified.bytes,
+        sha256: verified.sha256,
+        verificationGets: attempt,
+      };
+    }
+    if (!verified.bytes.equals(expected)) {
+      fail(`private object replacement verification returned unapproved content: ${objectPath}; observed SHA-256: ${observedSha256}`);
+    }
   }
-  const verified = Buffer.from(await verifiedResponse.arrayBuffer());
-  if (!verified.equals(replacement)) fail(`private object replacement verification differs: ${objectPath}`);
-  return {
-    objectPath,
-    objectExisted: true,
-    replaced: true,
-    bytes: verified.length,
-    sha256: crypto.createHash("sha256").update(verified).digest("hex"),
-  };
+
+  fail(`private object replacement did not become visible after ${REPLACEMENT_VERIFICATION_MAX_GETS} read-only verification GETs; observed SHA-256: ${observedSha256}`);
 }
 
 export async function uploadOrVerifyObject(localArchive, storageTarget, deps = {}) {

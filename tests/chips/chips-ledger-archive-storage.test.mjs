@@ -400,6 +400,7 @@ try {
   const originalManifest = Buffer.from("original recovery manifest");
   const correctedManifest = Buffer.from("corrected recovery manifest");
   let replacementObject = originalManifest;
+  let returnStaleReadAfterPut = true;
   const replacementCalls = [];
   const replacementFetch = async (url, init = {}) => {
     const requestUrl = new URL(url);
@@ -410,7 +411,13 @@ try {
     const objectPath = decodeURIComponent(requestUrl.pathname.slice(prefix.length));
     replacementCalls.push({ method, objectPath });
     assert.equal(objectPath, replacementPath);
-    if (method === "GET") return new Response(replacementObject, { status: 200, headers: { "content-type": "application/gzip" } });
+    if (method === "GET") {
+      if (replacementObject.equals(correctedManifest) && returnStaleReadAfterPut) {
+        returnStaleReadAfterPut = false;
+        return new Response(originalManifest, { status: 200, headers: { "content-type": "application/gzip" } });
+      }
+      return new Response(replacementObject, { status: 200, headers: { "content-type": "application/gzip" } });
+    }
     if (method === "PUT") {
       assert.equal(new Headers(init.headers).get("content-type"), "application/gzip");
       replacementObject = Buffer.from(init.body);
@@ -428,7 +435,7 @@ try {
   assert.equal(replaced.replaced, true);
   assert.equal(replaced.sha256, crypto.createHash("sha256").update(correctedManifest).digest("hex"));
   assert.equal(replacementObject.equals(correctedManifest), true);
-  assert.deepEqual(replacementCalls.map(({ method }) => method), ["GET", "PUT", "GET"]);
+  assert.deepEqual(replacementCalls.map(({ method }) => method), ["GET", "PUT", "GET", "GET"]);
   await assert.rejects(
     () => replaceVerifiedPrivateObject({
       storageTarget: resolveStorageTarget("stage", ENV),

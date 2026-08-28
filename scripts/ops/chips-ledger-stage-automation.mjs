@@ -153,6 +153,7 @@ function aggregatePayload(result) {
     dry_run: result.dryRun || null,
     initial_recovery_objects_absent: result.initialRecoveryObjectsAbsent ?? null,
     recovery_verified: result.recoveryVerified ?? null,
+    storage_modified: result.storageModified ?? null,
     proof: result.proof || null,
     receipt: result.receipt || null,
     mappings: result.mappings ?? null,
@@ -804,16 +805,55 @@ function assertKnownBatch15RecoveryBatch(row) {
 function assertKnownBatch15RecoveryRepairTarget(row, durable) {
   assertKnownBatch15RecoveryBatch(row);
   const expected = BOT_ONLY_BATCH_15_RECOVERY_REPAIR;
+  const manifestSha256 = durable?.manifestGzipBytes ? sha256(durable.manifestGzipBytes) : null;
   if (!durable
     || durable.archivePath !== expected.recoveryArchivePath
     || durable.manifestPath !== expected.recoveryManifestPath
     || durable.archiveSha256 !== expected.archiveSha256
     || !Buffer.isBuffer(durable.archiveBytes)
     || !Buffer.isBuffer(durable.manifestGzipBytes)
-    || sha256(durable.manifestGzipBytes) !== expected.currentRecoveryManifestSha256) {
-    fail("bot-only batch 15 recovery repair current object content is not the approved known state");
+    || ![expected.currentRecoveryManifestSha256, expected.correctedRecoveryManifestSha256].includes(manifestSha256)) {
+    fail(`bot-only batch 15 recovery repair current object content is not the approved known state; observed manifest SHA-256: ${manifestSha256 || "missing"}`);
   }
-  return true;
+  return manifestSha256 === expected.currentRecoveryManifestSha256 ? "needs_repair" : "already_repaired";
+}
+
+function assertCanonicalBotOnlyRecovery(durable, canonical, batchId) {
+  if (!durable
+    || !Buffer.isBuffer(durable.archiveBytes)
+    || !Buffer.isBuffer(durable.manifestGzipBytes)
+    || !Buffer.isBuffer(durable.manifestBytes)) {
+    fail(`exact bot-only batch ${batchId} recovery verification is incomplete`);
+  }
+
+  let manifestBytes;
+  try {
+    manifestBytes = gunzipSync(durable.manifestGzipBytes);
+  } catch {
+    fail(`exact bot-only batch ${batchId} recovery manifest is not valid gzip`);
+  }
+  if (!manifestBytes.equals(durable.manifestBytes)) {
+    fail(`exact bot-only batch ${batchId} recovery manifest bytes are inconsistent`);
+  }
+
+  let manifest;
+  try {
+    manifest = JSON.parse(manifestBytes.toString("utf8"));
+  } catch {
+    fail(`exact bot-only batch ${batchId} recovery manifest is invalid JSON`);
+  }
+  if (!durable.manifestGzipBytes.equals(canonical.manifestGzipBytes)
+    || !manifestBytes.equals(canonical.manifestBytes)) {
+    fail(`exact bot-only batch ${batchId} recovery manifest is not canonical`);
+  }
+  assertBotOnlyRecoveryManifest(manifest, batchId);
+  assertRecoveryManifestMatches(manifest, canonical.manifest);
+  return {
+    ...durable,
+    manifestBytes,
+    manifest,
+    manifestSha256: sha256(durable.manifestGzipBytes),
+  };
 }
 
 export async function persistDurableRecovery(storageTarget, row, identity, evidence, archiveBytes, deps = {}) {
@@ -899,8 +939,9 @@ export async function runBotOnlyRecoveryRepair({ env = process.env, deps = {}, b
 
     await verifyBucket(storageTarget);
     const existing = await inspectRecovery(storageTarget, row, deps);
-    const repairExistingManifest = existing !== null;
-    if (repairExistingManifest) assertKnownBatch15RecoveryRepairTarget(row, existing);
+    const initialRecoveryState = existing === null
+      ? null
+      : assertKnownBatch15RecoveryRepairTarget(row, existing);
     await assertAdvisoryLock(sql, lockSession);
 
     const dry = await runPruneStep({
@@ -918,54 +959,10 @@ export async function runBotOnlyRecoveryRepair({ env = process.env, deps = {}, b
     await assertAdvisoryLock(sql, lockSession);
 
     let durable;
-    if (repairExistingManifest) {
-      const canonical = gzipRecoveryManifest(
-        buildCanonicalBotOnlyRecoveryManifest(row, identity, dry.evidence, exactBatchId),
-      );
-      if (canonical.manifestSha256 !== BOT_ONLY_BATCH_15_RECOVERY_REPAIR.correctedRecoveryManifestSha256) {
-        fail("bot-only batch 15 recovery repair produced an unexpected canonical manifest SHA");
-      }
-
-      await assertAdvisoryLock(sql, lockSession);
-      const current = await inspectRecovery(storageTarget, row, deps);
-      assertKnownBatch15RecoveryRepairTarget(row, current);
-      const replacement = await replaceRecoveryManifest({
-        storageTarget,
-        objectPath: BOT_ONLY_BATCH_15_RECOVERY_REPAIR.recoveryManifestPath,
-        expectedCurrentBytes: current.manifestGzipBytes,
-        bytes: canonical.manifestGzipBytes,
-        deps,
-      });
-      if (replacement.objectPath !== BOT_ONLY_BATCH_15_RECOVERY_REPAIR.recoveryManifestPath
-        || replacement.replaced !== true
-        || replacement.sha256 !== canonical.manifestSha256) {
-        fail("bot-only batch 15 recovery manifest replacement verification failed");
-      }
-      await assertAdvisoryLock(sql, lockSession);
-      const verified = await inspectRecovery(storageTarget, row, deps);
-      if (!verified
-        || verified.archivePath !== BOT_ONLY_BATCH_15_RECOVERY_REPAIR.recoveryArchivePath
-        || verified.manifestPath !== BOT_ONLY_BATCH_15_RECOVERY_REPAIR.recoveryManifestPath
-        || verified.archiveSha256 !== BOT_ONLY_BATCH_15_RECOVERY_REPAIR.archiveSha256
-        || !Buffer.isBuffer(verified.archiveBytes)
-        || !verified.archiveBytes.equals(current.archiveBytes)
-        || verified.manifestSha256 !== canonical.manifestSha256) {
-        fail("bot-only batch 15 recovery repair changed or failed to verify the recovery objects");
-      }
-      assertBotOnlyRecoveryManifest(verified.manifest, exactBatchId);
-      assertRecoveryManifestMatches(verified.manifest, canonical.manifest);
-      durable = {
-        ...verified,
-        recoveryArchive: {
-          objectPath: verified.archivePath,
-          objectExisted: true,
-          uploaded: false,
-          bytes: verified.archiveBytes.length,
-          sha256: verified.archiveSha256,
-        },
-        recoveryManifest: replacement,
-      };
-    } else {
+    let state = "recovery_repaired";
+    let receipt = "recovery-only";
+    let storageModified = false;
+    if (initialRecoveryState === null) {
       const main = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, deps);
       durable = await persistRecovery(storageTarget, row, identity, dry.evidence, main.bytes, deps);
       if (durable.recoveryArchive?.uploaded !== true || durable.recoveryManifest?.uploaded !== true) {
@@ -975,6 +972,64 @@ export async function runBotOnlyRecoveryRepair({ env = process.env, deps = {}, b
         || durable.recoveryArchive.sha256 !== row.compressed_sha256
         || durable.manifestSha256 !== durable.recoveryManifest.sha256) {
         fail("bot-only batch 15 recovery repair checksum verification failed");
+      }
+      storageModified = true;
+    } else {
+      const canonical = gzipRecoveryManifest(
+        buildCanonicalBotOnlyRecoveryManifest(row, identity, dry.evidence, exactBatchId),
+      );
+      if (canonical.manifestSha256 !== BOT_ONLY_BATCH_15_RECOVERY_REPAIR.correctedRecoveryManifestSha256) {
+        fail("bot-only batch 15 recovery repair produced an unexpected canonical manifest SHA");
+      }
+
+      await assertAdvisoryLock(sql, lockSession);
+      const current = await inspectRecovery(storageTarget, row, deps);
+      const currentRecoveryState = assertKnownBatch15RecoveryRepairTarget(row, current);
+      if (!current.archiveBytes.equals(existing.archiveBytes)) {
+        fail("bot-only batch 15 recovery repair changed the recovery archive while verifying the manifest");
+      }
+
+      if (currentRecoveryState === "already_repaired") {
+        durable = assertCanonicalBotOnlyRecovery(current, canonical, exactBatchId);
+        state = "recovery_already_repaired";
+        receipt = "recovery-already-repaired-read-only";
+      } else {
+        const replacement = await replaceRecoveryManifest({
+          storageTarget,
+          objectPath: BOT_ONLY_BATCH_15_RECOVERY_REPAIR.recoveryManifestPath,
+          expectedCurrentBytes: current.manifestGzipBytes,
+          bytes: canonical.manifestGzipBytes,
+          deps,
+        });
+        if (replacement.objectPath !== BOT_ONLY_BATCH_15_RECOVERY_REPAIR.recoveryManifestPath
+          || replacement.replaced !== true
+          || replacement.sha256 !== canonical.manifestSha256) {
+          fail("bot-only batch 15 recovery manifest replacement verification failed");
+        }
+        await assertAdvisoryLock(sql, lockSession);
+        const verifiedManifestGzipBytes = Buffer.from(replacement.verifiedBytes || canonical.manifestGzipBytes);
+        const verified = assertCanonicalBotOnlyRecovery({
+          ...current,
+          manifestGzipBytes: verifiedManifestGzipBytes,
+          manifestBytes: gunzipSync(verifiedManifestGzipBytes),
+        }, canonical, exactBatchId);
+        durable = {
+          ...verified,
+          recoveryArchive: {
+            objectPath: verified.archivePath,
+            objectExisted: true,
+            uploaded: false,
+            bytes: verified.archiveBytes.length,
+            sha256: verified.archiveSha256,
+          },
+          recoveryManifest: {
+            ...replacement,
+            bytes: verified.manifestGzipBytes.length,
+            sha256: verified.manifestSha256,
+          },
+        };
+        storageModified = true;
+        receipt = "recovery-manifest-repair-only";
       }
     }
     result = {
@@ -987,11 +1042,12 @@ export async function runBotOnlyRecoveryRepair({ env = process.env, deps = {}, b
         mode: "recovery-repair",
         deployedCommitSha,
       }),
-      state: "recovery_repaired",
-      receipt: repairExistingManifest ? "recovery-manifest-repair-only" : "recovery-only",
+      state,
+      receipt,
       dryRun: dry.state,
-      initialRecoveryObjectsAbsent: !repairExistingManifest,
+      initialRecoveryObjectsAbsent: existing === null,
       recoveryVerified: true,
+      storageModified,
     };
   } catch (error) {
     failed = true;

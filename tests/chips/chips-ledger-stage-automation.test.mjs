@@ -953,11 +953,66 @@ assert.deepEqual(correctedBatch15Manifest.bot_only, {
   out_of_scope_keys_sha256: batch15Evidence.outOfScopeKeysSha256,
 });
 
+const futureBotArchiveBytes = Buffer.from("future bot-only recovery archive");
+const futureBotArchiveSha256 = crypto.createHash("sha256").update(futureBotArchiveBytes).digest("hex");
+const futureBotRow = {
+  ...batch15Row,
+  batch_id: "16",
+  object_path: `v1/sha256/${futureBotArchiveSha256}.jsonl.gz`,
+  compressed_sha256: futureBotArchiveSha256,
+  compressed_bytes: futureBotArchiveBytes.length,
+};
+const futureBotObjects = new Map();
+const futureBotStorageCalls = [];
+const futureBotFetch = async (url, init = {}) => {
+  const requestUrl = new URL(url);
+  const authenticatedPrefix = `/storage/v1/object/authenticated/${ARCHIVE_BUCKET}/`;
+  const uploadPrefix = `/storage/v1/object/${ARCHIVE_BUCKET}/`;
+  const prefix = requestUrl.pathname.startsWith(authenticatedPrefix) ? authenticatedPrefix : uploadPrefix;
+  const objectPath = decodeURIComponent(requestUrl.pathname.slice(prefix.length));
+  const method = init.method || "GET";
+  futureBotStorageCalls.push({ method, objectPath });
+  if (method === "GET") {
+    const value = futureBotObjects.get(objectPath);
+    return value ? response(value) : response({ message: "not found" }, 404);
+  }
+  if (method === "POST") {
+    futureBotObjects.set(objectPath, Buffer.from(init.body));
+    return response({ ok: true });
+  }
+  return response({ message: "unexpected future bot-only method" }, 500);
+};
+const futureBotDurable = await persistDurableRecovery(
+  storageTarget,
+  futureBotRow,
+  STAGE_SYSTEM_IDENTIFIER,
+  batch15Evidence,
+  futureBotArchiveBytes,
+  { fetch: futureBotFetch },
+);
+const futureBotManifest = JSON.parse(gunzipSync(futureBotDurable.manifestGzipBytes).toString("utf8"));
+assert.equal(typeof futureBotManifest.archive.format_version, "number");
+assert.equal(typeof futureBotManifest.archive.transaction_count, "number");
+assert.equal(typeof futureBotManifest.archive.entry_count, "number");
+assert.equal(typeof futureBotManifest.archive.raw_bytes, "number");
+assert.equal(typeof futureBotManifest.archive.compressed_bytes, "number");
+assert.deepEqual(futureBotManifest.archive.tx_types, futureBotRow.tx_types);
+assert.deepEqual(futureBotManifest.bot_only, {
+  table_id: batch15Evidence.tableId,
+  table_count: 1,
+  registry_keys_sha256: batch15Evidence.registryKeysSha256,
+  registry_key_count: batch15Evidence.registryKeys.length,
+  out_of_scope_keys_sha256: batch15Evidence.outOfScopeKeysSha256,
+});
+assert.equal(futureBotStorageCalls.filter(({ method }) => method === "POST").length, 2);
+
 const correctionArchiveBytes = Buffer.alloc(1757, 0x61);
 const correctionArchiveBefore = Buffer.from(correctionArchiveBytes);
 let correctionManifestGzipBytes = Buffer.from(knownBadBatch15ManifestGzip);
 let correctionSqlRow = batch15ExactSqlRow;
 let correctionActiveRow = batch15Row;
+let correctionPutCompleted = false;
+let correctionVerificationResponses = [];
 const correctionStorageCalls = [];
 const correctionFetch = async (url, init = {}) => {
   const requestUrl = new URL(url);
@@ -968,9 +1023,15 @@ const correctionFetch = async (url, init = {}) => {
   const method = init.method || "GET";
   correctionStorageCalls.push({ method, objectPath });
   assert.equal(objectPath, BOT_ONLY_BATCH_15_RECOVERY_REPAIR.recoveryManifestPath);
-  if (method === "GET") return response(correctionManifestGzipBytes);
+  if (method === "GET") {
+    if (correctionPutCompleted && correctionVerificationResponses.length > 0) {
+      return response(correctionVerificationResponses.shift());
+    }
+    return response(correctionManifestGzipBytes);
+  }
   if (method === "PUT") {
     correctionManifestGzipBytes = Buffer.from(init.body);
+    correctionPutCompleted = true;
     return response({ ok: true });
   }
   return response({ message: "unexpected correction method" }, 500);
@@ -1037,17 +1098,19 @@ const correctionDeps = {
   },
   fetch: correctionFetch,
 };
+correctionVerificationResponses = [knownBadBatch15ManifestGzip, correctedBatch15ManifestGzip];
 const repairedBatch15 = await runBotOnlyRecoveryRepair({ env: ENV, deps: correctionDeps, batchId: "15" });
 assert.equal(repairedBatch15.state, "recovery_repaired");
 assert.equal(repairedBatch15.batchId, "15");
 assert.equal(repairedBatch15.receipt, "recovery-manifest-repair-only");
 assert.equal(repairedBatch15.initialRecoveryObjectsAbsent, false);
 assert.equal(repairedBatch15.recoveryVerified, true);
+assert.equal(repairedBatch15.storageModified, true);
 assert.equal(repairedBatch15.recoveryManifestSha256, BOT_ONLY_BATCH_15_RECOVERY_REPAIR.correctedRecoveryManifestSha256);
 assert.equal(correctionManifestReads, 1);
-assert.equal(correctionInspectCalls.length, 3);
+assert.equal(correctionInspectCalls.length, 2);
 assert.equal(correctionPruneCalls.length, 1);
-assert.deepEqual(correctionStorageCalls.map(({ method }) => method), ["GET", "PUT", "GET"]);
+assert.deepEqual(correctionStorageCalls.map(({ method }) => method), ["GET", "PUT", "GET", "GET"]);
 assert.equal(correctionStorageCalls.filter(({ method }) => method === "PUT").length, 1);
 assert.equal(correctionStorageCalls.every(({ objectPath }) => objectPath === BOT_ONLY_BATCH_15_RECOVERY_REPAIR.recoveryManifestPath), true);
 assert.equal(correctionArchiveBytes.equals(correctionArchiveBefore), true);
@@ -1059,39 +1122,60 @@ assert.equal(
   BOT_ONLY_BATCH_15_RECOVERY_REPAIR.correctedRecoveryManifestSha256,
 );
 
-const foreignArchiveSha = "a".repeat(64);
-correctionManifestGzipBytes = Buffer.from(knownBadBatch15ManifestGzip);
-correctionSqlRow = exactSqlTextRow({
-  ...batch15Row,
-  object_path: `v1/sha256/${foreignArchiveSha}.jsonl.gz`,
-  compressed_sha256: foreignArchiveSha,
-});
-correctionActiveRow = {
-  ...batch15Row,
-  object_path: `v1/sha256/${foreignArchiveSha}.jsonl.gz`,
-  compressed_sha256: foreignArchiveSha,
-};
-const correctionPutCountBeforeForeignTarget = correctionStorageCalls.filter(({ method }) => method === "PUT").length;
+const correctedStorageCallCount = correctionStorageCalls.length;
+const correctedPutCount = correctionStorageCalls.filter(({ method }) => method === "PUT").length;
+correctionPutCompleted = false;
+correctionVerificationResponses = [];
+const alreadyRepairedBatch15 = await runBotOnlyRecoveryRepair({ env: ENV, deps: correctionDeps, batchId: "15" });
+assert.equal(alreadyRepairedBatch15.state, "recovery_already_repaired");
+assert.equal(alreadyRepairedBatch15.receipt, "recovery-already-repaired-read-only");
+assert.equal(alreadyRepairedBatch15.storageModified, false);
+assert.equal(alreadyRepairedBatch15.recoveryVerified, true);
+assert.equal(correctionStorageCalls.length, correctedStorageCallCount, "already corrected recovery must not access Storage for a PUT");
+assert.equal(correctionStorageCalls.filter(({ method }) => method === "PUT").length, correctedPutCount);
+assert.equal(correctionPruneCalls.length, 2, "already corrected recovery must still run the read-only dry-run");
+assert.equal(correctionArchiveBytes.equals(correctionArchiveBefore), true);
+
+const foreignManifest = gzipRecoveryManifestForTest({ foreign: true });
+const foreignManifestSha = crypto.createHash("sha256").update(foreignManifest).digest("hex");
+correctionManifestGzipBytes = Buffer.from(foreignManifest);
+correctionPutCompleted = false;
+correctionVerificationResponses = [];
+const correctionPutCountBeforeForeignContent = correctionStorageCalls.filter(({ method }) => method === "PUT").length;
 await assert.rejects(
   runBotOnlyRecoveryRepair({ env: ENV, deps: correctionDeps, batchId: "15" }),
-  /target path or archive SHA is not approved/,
+  new RegExp(`current object content is not the approved known state.*observed manifest SHA-256: ${foreignManifestSha}`),
 );
-assert.equal(correctionStorageCalls.filter(({ method }) => method === "PUT").length, correctionPutCountBeforeForeignTarget);
+assert.equal(correctionStorageCalls.filter(({ method }) => method === "PUT").length, correctionPutCountBeforeForeignContent);
 assert.equal(correctionArchiveBytes.equals(correctionArchiveBefore), true);
 
 correctionSqlRow = batch15ExactSqlRow;
 correctionActiveRow = batch15Row;
-const conflictingManifest = {
-  ...correctedBatch15Manifest,
-  archive: { ...correctedBatch15Manifest.archive, entry_count: 11 },
-};
-correctionManifestGzipBytes = gzipRecoveryManifestForTest(conflictingManifest);
-const correctionPutCountBeforeForeignContent = correctionStorageCalls.filter(({ method }) => method === "PUT").length;
+correctionManifestGzipBytes = Buffer.from(knownBadBatch15ManifestGzip);
+correctionPutCompleted = false;
+correctionVerificationResponses = [knownBadBatch15ManifestGzip, knownBadBatch15ManifestGzip];
+const correctionPutCountBeforeStale = correctionStorageCalls.filter(({ method }) => method === "PUT").length;
 await assert.rejects(
   runBotOnlyRecoveryRepair({ env: ENV, deps: correctionDeps, batchId: "15" }),
-  /current object content is not the approved known state/,
+  new RegExp(`did not become visible.*observed SHA-256: ${BOT_ONLY_BATCH_15_RECOVERY_REPAIR.currentRecoveryManifestSha256}`),
 );
-assert.equal(correctionStorageCalls.filter(({ method }) => method === "PUT").length, correctionPutCountBeforeForeignContent);
+assert.equal(correctionStorageCalls.filter(({ method }) => method === "PUT").length, correctionPutCountBeforeStale + 1);
+assert.equal(correctionStorageCalls.filter(({ method }) => method === "PUT").length, correctionPutCountBeforeStale + 1, "stale reads must never trigger a second PUT");
+assert.deepEqual(correctionStorageCalls.slice(-4).map(({ method }) => method), ["GET", "PUT", "GET", "GET"]);
+assert.equal(correctionArchiveBytes.equals(correctionArchiveBefore), true);
+
+const thirdManifest = gzipRecoveryManifestForTest({ third: true });
+const thirdManifestSha = crypto.createHash("sha256").update(thirdManifest).digest("hex");
+correctionManifestGzipBytes = Buffer.from(knownBadBatch15ManifestGzip);
+correctionPutCompleted = false;
+correctionVerificationResponses = [thirdManifest];
+const correctionPutCountBeforeThirdSha = correctionStorageCalls.filter(({ method }) => method === "PUT").length;
+await assert.rejects(
+  runBotOnlyRecoveryRepair({ env: ENV, deps: correctionDeps, batchId: "15" }),
+  new RegExp(`unapproved content.*observed SHA-256: ${thirdManifestSha}`),
+);
+assert.equal(correctionStorageCalls.filter(({ method }) => method === "PUT").length, correctionPutCountBeforeThirdSha + 1);
+assert.deepEqual(correctionStorageCalls.slice(-3).map(({ method }) => method), ["GET", "PUT", "GET"]);
 assert.equal(correctionArchiveBytes.equals(correctionArchiveBefore), true);
 assert.equal(correctionSqlCalls.some(({ query }) => /\b(?:insert|update|delete|truncate)\b/i.test(query)), false);
 fs.rmSync(correctionTempRoot, { recursive: true, force: true });
