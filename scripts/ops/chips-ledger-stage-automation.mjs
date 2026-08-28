@@ -31,6 +31,7 @@ import {
   pruneArchive,
 } from "./chips-ledger-archive-prune.mjs";
 import {
+  assertPrivateRegularFile,
   ensurePrivateDirectory,
   writeExclusiveFiles,
 } from "./_shared/chips-ledger-archive-files.mjs";
@@ -100,7 +101,7 @@ export function redactedError(error) {
     .replace(/\b(?:entry|transaction|account|table)[-_ ]?\d+\b/gi, "[redacted-record]");
 }
 
-function aggregatePayload(result) {
+export function aggregatePayload(result) {
   const base = {
     event: "chips_ledger_stage_automation",
     target: "stage",
@@ -112,6 +113,9 @@ function aggregatePayload(result) {
   if (result.state === "error") {
     return {
       ...base,
+      ...(result.mode ? { mode: result.mode } : {}),
+      ...(result.batchId != null ? { batch_id: result.batchId } : {}),
+      ...(result.objectPath ? { object_path: result.objectPath } : {}),
       ...(result.phase ? { phase: result.phase } : {}),
       ...(result.sqlstate ? { sqlstate: result.sqlstate } : {}),
       reason: redactedError(result.reason),
@@ -1084,20 +1088,46 @@ export async function runBotOnlyRecoveryRepair({ env = process.env, deps = {}, b
   return result;
 }
 
+function lstatRecoveryMember(filePath) {
+  try {
+    fs.lstatSync(filePath);
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
 function restoreLocalRecovery(directory, durable) {
   ensurePrivateDirectory(directory);
   const base = `chips-ledger-${sha256(durable.archiveBytes)}`;
   const artifactPath = path.join(directory, `${base}.jsonl.gz`);
   const manifestPath = path.join(directory, `${base}.recovery.json`);
-  writeExclusiveFiles([
-    { path: artifactPath, data: durable.archiveBytes },
-    { path: manifestPath, data: durable.manifestBytes },
-  ]);
+  const artifactExists = lstatRecoveryMember(artifactPath);
+  const manifestExists = lstatRecoveryMember(manifestPath);
+  if (artifactExists !== manifestExists) fail("local recovery bundle is partial; refusing to overwrite it");
+  if (!artifactExists) {
+    writeExclusiveFiles([
+      { path: artifactPath, data: durable.archiveBytes },
+      { path: manifestPath, data: durable.manifestBytes },
+    ], { createDirectories: false });
+  } else {
+    assertPrivateRegularFile(artifactPath);
+    assertPrivateRegularFile(manifestPath);
+    if (!fs.readFileSync(artifactPath).equals(durable.archiveBytes)
+      || !fs.readFileSync(manifestPath).equals(durable.manifestBytes)) {
+      fail("existing local recovery bundle differs from the verified recovery bytes");
+    }
+  }
+  assertPrivateRegularFile(artifactPath);
+  assertPrivateRegularFile(manifestPath);
   return { directory, artifactPath, manifestPath };
 }
 
 export function assertDurableRecoveryReady(durable) {
-  if (!durable?.archiveBytes || !durable?.manifestGzipBytes || !durable?.manifestBytes) {
+  if (!Buffer.isBuffer(durable?.archiveBytes)
+    || !Buffer.isBuffer(durable?.manifestGzipBytes)
+    || !Buffer.isBuffer(durable?.manifestBytes)) {
     fail("execute requires both durable recovery copies");
   }
   return true;
@@ -1183,7 +1213,7 @@ async function refreshRow(pruneStore, objectPath) {
   return refreshPolicyRow(pruneStore, objectPath, STAGE_AUTOMATION_POLICY_ID);
 }
 
-async function executeVerifiedCycle({
+export async function executeVerifiedCycle({
   row,
   identity,
   durable,
@@ -1846,6 +1876,18 @@ export async function runAutomaticBotOnlyStageAutomation({
   let deployedCommitSha = null;
   let failed = false;
   let failure = null;
+  const automaticErrorContext = {
+    sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
+    mode: "automatic",
+    phase: "automatic.preflight",
+    batchId: null,
+    objectPath: null,
+  };
+  const markAutomaticPhase = (phase, row = null) => {
+    automaticErrorContext.phase = phase;
+    automaticErrorContext.batchId = row?.batch_id ?? null;
+    automaticErrorContext.objectPath = row?.object_path ?? null;
+  };
   try {
     const config = validateStageEnvironment(env, { requireCommitSha: true });
     deployedCommitSha = config.deployedCommitSha;
@@ -1863,6 +1905,7 @@ export async function runAutomaticBotOnlyStageAutomation({
     const inspectRecovery = deps.inspectDurableRecovery || inspectDurableRecovery;
     const persistRecovery = deps.persistDurableRecovery || persistDurableRecovery;
     const executeCycle = deps.executeVerifiedCycle || executeVerifiedCycle;
+    markAutomaticPhase("automatic.lock");
     lockSession = await acquireAdvisoryLock(sql);
     if (!lockSession) {
       result = {
@@ -1872,10 +1915,14 @@ export async function runAutomaticBotOnlyStageAutomation({
         reason: "advisory_lock_busy",
       };
     } else {
+      markAutomaticPhase("automatic.identity");
       const identity = await assertIdentity(sql);
       await assertAdvisoryLock(sql, lockSession);
+      markAutomaticPhase("automatic.fence");
       await assertAutomaticStageFence(sql);
+      markAutomaticPhase("automatic.storage-preflight");
       await verifyBucket(storageTarget);
+      markAutomaticPhase("automatic.policy");
       const policyRows = await sql.unsafe(
         "select policy_id, enabled, activated_at::text as activated_at, canary_batch_id::text as canary_batch_id from public.chips_stage_bot_only_retention_policy where policy_id = $1;",
         [BOT_ONLY_RETENTION_POLICY_ID],
@@ -1894,11 +1941,14 @@ export async function runAutomaticBotOnlyStageAutomation({
         const processed = [];
         let stopReason = null;
         for (let index = 0; index < BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN; index += 1) {
+          markAutomaticPhase("automatic.select");
           await assertAdvisoryLock(sql, lockSession);
           const ownRows = await loadOwnBatches(sql, BOT_ONLY_RETENTION_POLICY_ID);
           let activeRow = assertAutomaticBotOnlyRows(ownRows);
+          if (activeRow) markAutomaticPhase("automatic.manifest", activeRow);
 
           const resumePending = async (row) => {
+            markAutomaticPhase("automatic.resume", row);
             const artifactPath = path.join(tempRoot, "pending-bot-only-" + String(index) + ".archive.jsonl.gz");
             const manifestPath = path.join(tempRoot, "pending-bot-only-" + String(index) + ".archive.manifest.json");
             const exported = await (deps.exportArchive || runExport)({
@@ -1935,9 +1985,12 @@ export async function runAutomaticBotOnlyStageAutomation({
           }
 
           const prepareAndExecute = async (row) => {
+            markAutomaticPhase("automatic.manifest", row);
             row = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
+            markAutomaticPhase("automatic.manifest", row);
             const hadProofBeforeResume = Boolean(row.archive_proof_verified_at);
             if (!row.archive_proof_verified_at) {
+              markAutomaticPhase("automatic.proof", row);
               await runPruneStep({
                 row,
                 mode: "register-proof",
@@ -1950,7 +2003,9 @@ export async function runAutomaticBotOnlyStageAutomation({
                 storageDeps: deps,
               });
               row = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
+              markAutomaticPhase("automatic.manifest", row);
             }
+            markAutomaticPhase("automatic.dry-run", row);
             const dry = await runPruneStep({
               row,
               mode: "dry-run",
@@ -1967,6 +2022,7 @@ export async function runAutomaticBotOnlyStageAutomation({
               return { row, dry, durable: null, executed: { state: "already_cleaned" }, retry: null };
             }
             if (dry.state !== "ready") fail("automatic bot-only Stage dry-run did not become ready: " + dry.state);
+            markAutomaticPhase("automatic.recovery", row);
             const existing = await inspectRecovery(storageTarget, row, deps);
             if (hadProofBeforeResume || existing) assertResumeRecoveryState(row, existing);
             let durable = existing;
@@ -1975,6 +2031,7 @@ export async function runAutomaticBotOnlyStageAutomation({
               durable = await persistRecovery(storageTarget, row, identity, dry.evidence, mainArchive.bytes, deps);
             }
             await assertAdvisoryLock(sql, lockSession);
+            markAutomaticPhase("automatic.execute", row);
             const executed = await executeCycle({
               row,
               identity,
@@ -1988,7 +2045,9 @@ export async function runAutomaticBotOnlyStageAutomation({
               verifyBucket,
               storageDeps: deps,
             });
+            markAutomaticPhase("automatic.execute-refresh", row);
             const refreshed = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
+            markAutomaticPhase("automatic.execute-retry", refreshed);
             const retry = await executeCycle({
               row: refreshed,
               identity,
@@ -2033,6 +2092,7 @@ export async function runAutomaticBotOnlyStageAutomation({
 
           const artifactPath = path.join(tempRoot, "automatic-" + String(index) + ".archive.jsonl.gz");
           const manifestPath = path.join(tempRoot, "automatic-" + String(index) + ".archive.manifest.json");
+          markAutomaticPhase("automatic.export");
           const exported = await (deps.exportArchive || runExport)({
             argv: [
               "--target", "stage", "--cutoff-days", String(BOT_ONLY_RETENTION_DAYS),
@@ -2058,6 +2118,7 @@ export async function runAutomaticBotOnlyStageAutomation({
             stopReason = "no_eligible_bot_only_table";
             break;
           }
+          markAutomaticPhase("automatic.storage");
           await (deps.ensureArchiveBucket || ensureArchiveBucket)(storageTarget, deps);
           const stored = await (deps.storeArchive || storeArchive)({
             argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
@@ -2066,6 +2127,7 @@ export async function runAutomaticBotOnlyStageAutomation({
             deps: { ...deps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
           });
           const row = await refreshPolicyRow(pruneStore, stored.objectPath, BOT_ONLY_RETENTION_POLICY_ID);
+          markAutomaticPhase("automatic.manifest", row);
           const cycle = await prepareAndExecute(row);
           processed.push({
             ...botOnlyReport({
@@ -2114,7 +2176,7 @@ export async function runAutomaticBotOnlyStageAutomation({
     }
   }
   if (failed) {
-    emitAggregateError(failure, { deployedCommitSha });
+    emitAggregateError(failure, { deployedCommitSha, ...automaticErrorContext });
     throw failure;
   }
   if (result && deployedCommitSha) result = { ...result, deployedCommitSha };

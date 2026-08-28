@@ -6,11 +6,15 @@ import os from "node:os";
 import path from "node:path";
 import tls from "node:tls";
 import {
+  aggregatePayload,
   redactedError,
   runStageAutomation,
   STAGE_PROJECT_REF,
 } from "../../scripts/ops/chips-ledger-stage-automation.mjs";
-import { STAGE_AUTOMATION_POLICY_ID } from "../../scripts/ops/chips-ledger-archive-export.mjs";
+import {
+  BOT_ONLY_RETENTION_POLICY_ID,
+  STAGE_AUTOMATION_POLICY_ID,
+} from "../../scripts/ops/chips-ledger-archive-export.mjs";
 
 const root = process.cwd();
 const cli = path.join(root, "scripts/ops/chips-ledger-stage-automation.mjs");
@@ -211,6 +215,22 @@ try {
 }
 const bearerReport = parseSingleAggregate(bearerStdout.join("")).report;
 assert.equal(bearerReport.reason, "Bearer [redacted]");
+
+const automaticError = aggregatePayload({
+  state: "error",
+  sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
+  mode: "automatic",
+  phase: "automatic.execute",
+  batchId: "16",
+  objectPath: "v1/sha256/" + "a".repeat(64) + ".jsonl.gz",
+  reason: new Error("EEXIST: local recovery bundle already exists"),
+  deployedCommitSha: "f".repeat(40),
+});
+assert.equal(automaticError.source_policy_id, BOT_ONLY_RETENTION_POLICY_ID);
+assert.equal(automaticError.mode, "automatic");
+assert.equal(automaticError.phase, "automatic.execute");
+assert.equal(automaticError.batch_id, "16");
+assert.equal(automaticError.object_path, "v1/sha256/" + "a".repeat(64) + ".jsonl.gz");
 
 const initFailureTemp = fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-observability-init-"));
 try {

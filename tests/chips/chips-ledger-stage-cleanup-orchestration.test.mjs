@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 
 import {
   BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN,
+  executeVerifiedCycle,
   runAutomaticBotOnlyStageAutomation,
 } from "../../scripts/ops/chips-ledger-stage-automation.mjs";
 import {
@@ -32,6 +34,10 @@ const orchestrationMigration = fs.readFileSync(
   "supabase/migrations/20260825120000_chips_ledger_stage_cleanup_orchestration.sql",
   "utf8",
 );
+const lifecycleReceiptMigration = fs.readFileSync(
+  "supabase/migrations/20260828100000_chips_ledger_bot_only_lifecycle_receipt_hardening.sql",
+  "utf8",
+);
 
 const ENV = Object.freeze({
   SUPABASE_STAGE_DB_URL: "postgresql://postgres.krydukthwdvccggbyjfw:password@aws-0.pooler.supabase.com:5432/postgres",
@@ -46,6 +52,7 @@ function fakeScheduler({
   candidateCount = 3,
   blockingAfter = null,
   failExecuteOnce = false,
+  realExecute = false,
 } = {}) {
   const manifests = new Map();
   const ownRows = [];
@@ -55,6 +62,8 @@ function fakeScheduler({
     candidateCalls: 0,
     storeCalls: 0,
     executeCalls: 0,
+    realExecuteCalls: 0,
+    destructiveSqlMutations: 0,
     failedOnce: false,
   };
 
@@ -170,6 +179,24 @@ function fakeScheduler({
         row.archive_proof_verified_at = "2026-08-25T00:00:00Z";
         return { state: "proof_registered" };
       }
+      if (argv.includes("--execute") && realExecute) {
+        state.realExecuteCalls += 1;
+        if (state.realExecuteCalls === 1) {
+          state.destructiveSqlMutations += 1;
+          row.pruned_at = "2026-08-25T00:00:01Z";
+          row.pruned_transaction_count = "1";
+          row.pruned_entry_count = "2";
+          row.pruned_transaction_ids_sha256 = row.archived_transaction_ids_sha256;
+          row.pruned_entry_ids_sha256 = row.archived_entry_ids_sha256;
+          row.registry_cleaned_at = "2026-08-25T00:00:02Z";
+          row.registry_cleaned_key_count = "1";
+          row.registry_cleaned_keys_sha256 = "1".repeat(64);
+          row.destructive_go_at = "2026-08-25T00:00:00Z";
+          row.destructive_go_batch_id = row.batch_id;
+          return { state: "cleaned", evidence: evidence(row.bot_only_table_id, "key:" + row.batch_id) };
+        }
+        return { state: "already_cleaned", evidence: evidence(row.bot_only_table_id, "key:" + row.batch_id) };
+      }
       return {
         state: "ready",
         evidence: evidence(row.bot_only_table_id, "key:" + row.batch_id),
@@ -190,7 +217,7 @@ function fakeScheduler({
       return value;
     },
     downloadPrivateArchive: async () => ({ bytes: Buffer.from("archive"), downloadMs: 0 }),
-    executeVerifiedCycle: async ({ row }) => {
+    executeVerifiedCycle: realExecute ? undefined : async ({ row }) => {
       state.executeCalls += 1;
       const count = (executionCounts.get(row.object_path) || 0) + 1;
       executionCounts.set(row.object_path, count);
@@ -216,7 +243,7 @@ function fakeScheduler({
     },
   };
 
-  return { env: { ...ENV }, deps, state, manifests, ownRows };
+  return { env: { ...ENV }, deps, state, manifests, durable, ownRows };
 }
 
 function staticOrchestrationContract() {
@@ -291,6 +318,64 @@ async function schedulerContracts() {
   assert.equal(enabledResult.boundedBatchLimit, BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN);
   assert.deepEqual(enabledResult.processed.map((row) => row.retry), ["already_cleaned", "already_cleaned", "already_cleaned"]);
   assert.equal(enabled.state.storeCalls, 3);
+
+  const realCycle = fakeScheduler({ enabled: true, candidateCount: 1, realExecute: true });
+  const realCycleTempRoot = fs.mkdtempSync("/tmp/chips-ledger-stage-automation-real-double-cycle-");
+  realCycle.deps.tempRoot = realCycleTempRoot;
+  try {
+    const realCycleResult = await runAutomaticBotOnlyStageAutomation(realCycle);
+    assert.equal(realCycleResult.processed.length, 1);
+    assert.equal(realCycleResult.processed[0].state, "cleaned");
+    assert.equal(realCycleResult.processed[0].retry, "already_cleaned");
+    assert.equal(realCycle.state.executeCalls, 0, "the regression contract must not use the fake executor");
+    assert.equal(realCycle.state.realExecuteCalls, 2, "both real execute cycles must reach the SQL runner");
+    assert.equal(realCycle.state.destructiveSqlMutations, 1, "only the first SQL cycle may mutate destructively");
+    assert.equal(realCycle.state.storeCalls, 1, "the idempotency cycle must not create a second Storage manifest");
+    assert.equal(fs.readdirSync(`${realCycleTempRoot}/recovery`).length, 2);
+
+    const realRow = realCycle.ownRows[0];
+    const realDurable = realCycle.durable.get(realRow.object_path);
+    const invokeRealCycle = (tempRoot) => executeVerifiedCycle({
+      row: realRow,
+      identity: "7656985631720456337",
+      durable: realDurable,
+      env: realCycle.env,
+      tempRoot,
+      sql: realCycle.deps.sql,
+      pruneStore: realCycle.deps.pruneStore,
+      storageTarget: realCycle.deps.storageTarget,
+      verifyBucket: realCycle.deps.verifyBucket,
+      automatic: true,
+      storageDeps: { pruneArchive: async () => { throw new Error("SQL runner must not be reached after local bundle rejection"); } },
+    });
+    const recoveryMembers = fs.readdirSync(`${realCycleTempRoot}/recovery`);
+    const manifestMember = recoveryMembers.find((name) => name.endsWith(".recovery.json"));
+    fs.unlinkSync(`${realCycleTempRoot}/recovery/${manifestMember}`);
+    await assert.rejects(
+      invokeRealCycle(realCycleTempRoot),
+      /local recovery bundle is partial/,
+    );
+
+    const differentTempRoot = fs.mkdtempSync("/tmp/chips-ledger-stage-automation-different-bundle-");
+    try {
+      const differentRecoveryDir = `${differentTempRoot}/recovery`;
+      fs.mkdirSync(differentRecoveryDir, { mode: 0o700 });
+      fs.chmodSync(differentRecoveryDir, 0o700);
+      const archiveSha = crypto.createHash("sha256").update(realDurable.archiveBytes).digest("hex");
+      fs.writeFileSync(`${differentRecoveryDir}/chips-ledger-${archiveSha}.jsonl.gz`, Buffer.from("different"));
+      fs.writeFileSync(`${differentRecoveryDir}/chips-ledger-${archiveSha}.recovery.json`, realDurable.manifestBytes);
+      fs.chmodSync(`${differentRecoveryDir}/chips-ledger-${archiveSha}.jsonl.gz`, 0o600);
+      fs.chmodSync(`${differentRecoveryDir}/chips-ledger-${archiveSha}.recovery.json`, 0o600);
+      await assert.rejects(
+        invokeRealCycle(differentTempRoot),
+        /existing local recovery bundle differs from the verified recovery bytes/,
+      );
+    } finally {
+      fs.rmSync(differentTempRoot, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(realCycleTempRoot, { recursive: true, force: true });
+  }
 
   const capacity = fakeScheduler({ enabled: true, candidateCount: BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN + 5 });
   const capacityResult = await runAutomaticBotOnlyStageAutomation(capacity);
@@ -486,6 +571,10 @@ function staticWorkflowContracts() {
   assert.match(orchestrationMigration, /chips_auto_prune_and_cleanup_bot_only_archive_batch/);
   assert.match(orchestrationMigration, /P894[0-6]/);
   assert.match(orchestrationMigration, /P895[0-6]/);
+  assert.match(lifecycleReceiptMigration, /create or replace function public\.chips_prune_and_cleanup_bot_only_archive_batch/);
+  assert.match(lifecycleReceiptMigration, /P8925/);
+  assert.match(lifecycleReceiptMigration, /already_cleaned[\s\S]*poker_tables/);
+  assert.match(lifecycleReceiptMigration, /lifecycle completion marker was not persisted/);
 }
 
 staticOrchestrationContract();
@@ -502,7 +591,7 @@ if (!dbUrl) {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ROLLBACK = new Error("stage-cleanup-orchestration-contract-rollback");
 
-async function disposableBotFixture(tx) {
+async function disposableBotFixture(tx, { objectHex = "9", lifecycleMarker = null } = {}) {
   await tx.unsafe("select public.chips_set_table_fence_active(true);");
   const systemRows = await tx.unsafe(
     "select id from public.chips_accounts where account_type::text = 'SYSTEM' and system_key = 'GENESIS' limit 1;",
@@ -510,10 +599,17 @@ async function disposableBotFixture(tx) {
   assert.ok(systemRows[0]?.id, "disposable fixture requires the GENESIS account");
   const tableId = randomUUID();
   const escrowAccountId = randomUUID();
-  await tx.unsafe(
-    "insert into public.poker_tables (id, status, has_human_participant, bot_only_proof_eligible) values ($1::uuid, 'OPEN', false, true);",
-    [tableId],
-  );
+  if (lifecycleMarker == null) {
+    await tx.unsafe(
+      "insert into public.poker_tables (id, status, has_human_participant, bot_only_proof_eligible) values ($1::uuid, 'OPEN', false, true);",
+      [tableId],
+    );
+  } else {
+    await tx.unsafe(
+      "insert into public.poker_tables (id, status, has_human_participant, bot_only_proof_eligible, bot_only_retention_complete_at) values ($1::uuid, 'OPEN', false, true, $2::timestamptz);",
+      [tableId, lifecycleMarker],
+    );
+  }
   await tx.unsafe(
     "insert into public.chips_accounts (id, account_type, system_key, status, balance) values ($1::uuid, 'ESCROW', $2, 'active', 0);",
     [escrowAccountId, `POKER_TABLE:${tableId}`],
@@ -562,7 +658,7 @@ async function disposableBotFixture(tx) {
       'committed', now()
     );
   `, [
-    "v1/sha256/" + "9".repeat(64) + ".jsonl.gz",
+    "v1/sha256/" + objectHex.repeat(64) + ".jsonl.gz",
     cutoff,
     createdAt,
     "a".repeat(64),
@@ -579,10 +675,66 @@ async function disposableBotFixture(tx) {
     transactionId,
     entryIds: entries.map((row) => String(row.id)),
     key,
-    objectPath: "v1/sha256/" + "9".repeat(64) + ".jsonl.gz",
-    compressedSha: "9".repeat(64),
+    objectPath: "v1/sha256/" + objectHex.repeat(64) + ".jsonl.gz",
+    compressedSha: objectHex.repeat(64),
     createdAt,
   };
+}
+
+async function registerCompleteCleanupReceipt(tx, fixture, { removeTable = false } = {}) {
+  const proof = await tx.unsafe(`
+    select public.chips_register_bot_only_archive_proof(
+      $1, $2::uuid[], $3::bigint[], $4::uuid, $5::text[]
+    ) as result;
+  `, [fixture.objectPath, [fixture.transactionId], fixture.entryIds, fixture.tableId, [fixture.key]]);
+  assert.equal(proof[0].result.state, "proof_registered");
+  const proofRows = await tx.unsafe(`
+    select archived_transaction_ids_sha256, archived_entry_ids_sha256
+      from public.chips_ledger_archive_batches
+     where object_path = $1;
+  `, [fixture.objectPath]);
+  assert.equal(proofRows.length, 1);
+
+  await tx.unsafe("select set_config('chips.bot_only_go', '1', true);");
+  await tx.unsafe(`
+    update public.chips_ledger_archive_batches
+       set destructive_go_at = now(), destructive_go_batch_id = batch_id
+     where object_path = $1;
+  `, [fixture.objectPath]);
+  await tx.unsafe("select set_config('chips.bot_only_prune', '1', true);");
+  await tx.unsafe(`
+    update public.chips_ledger_archive_batches
+       set pruned_at = now(),
+           pruned_transaction_count = 1,
+           pruned_entry_count = 2,
+           pruned_transaction_ids_sha256 = $2,
+           pruned_entry_ids_sha256 = $3
+     where object_path = $1;
+  `, [fixture.objectPath, proofRows[0].archived_transaction_ids_sha256, proofRows[0].archived_entry_ids_sha256]);
+  const registryHash = await tx.unsafe(
+    "select public.chips_archive_text_ids_sha256($1::text[]) as hash;",
+    [[fixture.key]],
+  );
+  await tx.unsafe("select set_config('chips.bot_cleanup_receipt', '1', true);");
+  await tx.unsafe(`
+    update public.chips_ledger_archive_batches
+       set registry_cleaned_at = now(),
+           registry_cleaned_key_count = 1,
+           registry_cleaned_keys_sha256 = $2
+     where object_path = $1;
+  `, [fixture.objectPath, registryHash[0].hash]);
+  if (removeTable) {
+    await tx.unsafe("delete from public.poker_tables where id = $1::uuid;", [fixture.tableId]);
+  }
+}
+
+async function automaticCleanup(tx, fixture) {
+  const rows = await tx.unsafe(`
+    select public.chips_auto_prune_and_cleanup_bot_only_archive_batch(
+      $1, $2::uuid[], $3::bigint[], $4::text[], $5::uuid
+    ) as result;
+  `, [fixture.objectPath, [fixture.transactionId], fixture.entryIds, [fixture.key], fixture.tableId]);
+  return rows[0].result;
 }
 
 async function accountingSnapshot(tx, fixture) {
@@ -743,6 +895,92 @@ async function disposablePostgresContract() {
         ) as result;
       `, [fixture.objectPath, [fixture.transactionId], fixture.entryIds, [fixture.key], fixture.tableId]);
       assert.equal(retry[0].result.state, "already_cleaned");
+
+      const missingTableFixture = await disposableBotFixture(tx, { objectHex: "a" });
+      await registerCompleteCleanupReceipt(tx, missingTableFixture, { removeTable: true });
+      assert.equal((await automaticCleanup(tx, missingTableFixture)).state, "already_cleaned");
+
+      const markedTableFixture = await disposableBotFixture(tx, {
+        objectHex: "b",
+        lifecycleMarker: "2026-08-28T00:00:00Z",
+      });
+      await registerCompleteCleanupReceipt(tx, markedTableFixture);
+      assert.equal((await automaticCleanup(tx, markedTableFixture)).state, "already_cleaned");
+
+      const emptyMarkerFixture = await disposableBotFixture(tx, { objectHex: "c" });
+      await registerCompleteCleanupReceipt(tx, emptyMarkerFixture);
+      await tx.unsafe("savepoint empty_lifecycle_marker_replay;");
+      let emptyMarkerError = null;
+      try {
+        await automaticCleanup(tx, emptyMarkerFixture);
+      } catch (error) {
+        emptyMarkerError = error;
+      }
+      await tx.unsafe("rollback to savepoint empty_lifecycle_marker_replay;");
+      await tx.unsafe("release savepoint empty_lifecycle_marker_replay;");
+      assert.equal(emptyMarkerError?.code, "P8925");
+
+      const rollbackFixture = await disposableBotFixture(tx, { objectHex: "d" });
+      const rollbackProof = await tx.unsafe(`
+        select public.chips_register_bot_only_archive_proof(
+          $1, $2::uuid[], $3::bigint[], $4::uuid, $5::text[]
+        ) as result;
+      `, [rollbackFixture.objectPath, [rollbackFixture.transactionId], rollbackFixture.entryIds, rollbackFixture.tableId, [rollbackFixture.key]]);
+      assert.equal(rollbackProof[0].result.state, "proof_registered");
+      const rollbackBatchRows = await tx.unsafe(
+        "select batch_id::text as batch_id from public.chips_ledger_archive_batches where object_path = $1;",
+        [rollbackFixture.objectPath],
+      );
+      const rollbackBatchId = rollbackBatchRows[0].batch_id;
+      const rollbackAuthorization = await tx.unsafe(
+        "select public.chips_authorize_bot_only_archive_batch($1::bigint, $2) as result;",
+        [rollbackBatchId, `GO ${rollbackBatchId}`],
+      );
+      assert.equal(rollbackAuthorization[0].result.state, "authorized");
+      await tx.unsafe(`
+        create or replace function public.chips_stage_cleanup_test_suppress_lifecycle()
+        returns trigger language plpgsql set search_path = ''
+        as $stage_cleanup_test_suppress$
+        begin
+          return null;
+        end
+        $stage_cleanup_test_suppress$;
+        drop trigger if exists aaa_stage_cleanup_test_suppress_lifecycle on public.poker_tables;
+        create trigger aaa_stage_cleanup_test_suppress_lifecycle
+        before update of bot_only_retention_complete_at on public.poker_tables
+        for each row execute function public.chips_stage_cleanup_test_suppress_lifecycle();
+      `);
+      await tx.unsafe("savepoint lifecycle_transition_rollback;");
+      let lifecycleTransitionError = null;
+      try {
+        await tx.unsafe(`
+          select public.chips_prune_and_cleanup_bot_only_archive_batch(
+            $1, $2::uuid[], $3::bigint[], $4::text[], $5::uuid, true, $6::bigint
+          ) as result;
+        `, [rollbackFixture.objectPath, [rollbackFixture.transactionId], rollbackFixture.entryIds, [rollbackFixture.key], rollbackFixture.tableId, rollbackBatchId]);
+      } catch (error) {
+        lifecycleTransitionError = error;
+      }
+      await tx.unsafe("rollback to savepoint lifecycle_transition_rollback;");
+      await tx.unsafe("release savepoint lifecycle_transition_rollback;");
+      assert.equal(lifecycleTransitionError?.code, "P8925");
+      const rollbackState = await tx.unsafe(`
+        select
+          (select count(*) from public.chips_transactions where id = $1::uuid) as hot_transactions,
+          (select count(*) from public.chips_entries where id = any($2::bigint[])) as hot_entries,
+          (select count(*) from public.chips_transaction_idempotency where idempotency_key = $3) as registry_rows,
+          (select pruned_at from public.chips_ledger_archive_batches where batch_id = $4::bigint) as pruned_at,
+          (select registry_cleaned_at from public.chips_ledger_archive_batches where batch_id = $4::bigint) as cleaned_at,
+          (select bot_only_retention_complete_at from public.poker_tables where id = $5::uuid) as lifecycle_marker;
+      `, [rollbackFixture.transactionId, rollbackFixture.entryIds, rollbackFixture.key, rollbackBatchId, rollbackFixture.tableId]);
+      assert.equal(Number(rollbackState[0].hot_transactions), 1);
+      assert.equal(Number(rollbackState[0].hot_entries), 2);
+      assert.equal(Number(rollbackState[0].registry_rows), 1);
+      assert.equal(rollbackState[0].pruned_at, null);
+      assert.equal(rollbackState[0].cleaned_at, null);
+      assert.equal(rollbackState[0].lifecycle_marker, null);
+      await tx.unsafe("drop trigger aaa_stage_cleanup_test_suppress_lifecycle on public.poker_tables;");
+      await tx.unsafe("drop function public.chips_stage_cleanup_test_suppress_lifecycle();");
 
       await tx.unsafe("savepoint replay_old_registry_key;");
       let replayError = null;
