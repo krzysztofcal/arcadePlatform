@@ -592,6 +592,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const ROLLBACK = new Error("stage-cleanup-orchestration-contract-rollback");
 
 async function disposableBotFixture(tx, { objectHex = "9", lifecycleMarker = null } = {}) {
+  await tx.unsafe("set constraints all deferred;");
   await tx.unsafe("select public.chips_set_table_fence_active(true);");
   const systemRows = await tx.unsafe(
     "select id from public.chips_accounts where account_type::text = 'SYSTEM' and system_key = 'GENESIS' limit 1;",
