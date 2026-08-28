@@ -617,6 +617,7 @@ async function disposableBotFixture(tx, { objectHex = "9", lifecycleMarker = nul
   );
   const transactionId = randomUUID();
   const key = `bot-seed-buyin:${tableId}:stage-cleanup-contract`;
+  const compressedSha = objectHex.repeat(64);
   const createdAt = new Date(Date.now() - (10 * DAY_MS)).toISOString();
   const cutoff = new Date().toISOString();
   await tx.unsafe(`
@@ -663,7 +664,7 @@ async function disposableBotFixture(tx, { objectHex = "9", lifecycleMarker = nul
     cutoff,
     createdAt,
     "a".repeat(64),
-    "9".repeat(64),
+    compressedSha,
     tableId,
     hashes[0].registry_hash,
     hashes[0].empty_hash,
@@ -677,7 +678,7 @@ async function disposableBotFixture(tx, { objectHex = "9", lifecycleMarker = nul
     entryIds: entries.map((row) => String(row.id)),
     key,
     objectPath: "v1/sha256/" + objectHex.repeat(64) + ".jsonl.gz",
-    compressedSha: objectHex.repeat(64),
+    compressedSha,
     createdAt,
   };
 }
@@ -754,7 +755,8 @@ async function accountingSnapshot(tx, fixture) {
 }
 
 async function insertCanary(tx) {
-  const canaryPath = "v1/sha256/" + "8".repeat(64) + ".jsonl.gz";
+  const canarySha = "8".repeat(64);
+  const canaryPath = "v1/sha256/" + canarySha + ".jsonl.gz";
   const keysHash = await tx.unsafe(
     "select public.chips_archive_text_ids_sha256(array['canary-key']::text[]) as hash;",
   );
@@ -782,7 +784,7 @@ async function insertCanary(tx) {
   `, [
     canaryPath,
     "1".repeat(64),
-    "2".repeat(64),
+    canarySha,
     randomUUID(),
     keysHash[0].hash,
     emptyHash[0].hash,
