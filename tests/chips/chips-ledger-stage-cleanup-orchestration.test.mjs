@@ -710,6 +710,7 @@ async function registerCompleteCleanupReceipt(tx, fixture, { removeTable = false
        set destructive_go_at = now(), destructive_go_batch_id = batch_id
      where object_path = $1;
   `, [fixture.objectPath]);
+  await tx.unsafe("set local role chips_ledger_archive_pruner;");
   await tx.unsafe("select set_config('chips.bot_only_prune', '1', true);");
   await tx.unsafe(`
     update public.chips_ledger_archive_batches
@@ -732,6 +733,7 @@ async function registerCompleteCleanupReceipt(tx, fixture, { removeTable = false
            registry_cleaned_keys_sha256 = $2
      where object_path = $1;
   `, [fixture.objectPath, registryHash[0].hash]);
+  await tx.unsafe("reset role;");
 }
 
 async function automaticCleanup(tx, fixture) {
