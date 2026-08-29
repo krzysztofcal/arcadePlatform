@@ -47,6 +47,7 @@ export const STAGE_RETENTION_DAYS = 30;
 // theoretical 768-table/day ceiling while keeping a single job within its
 // timeout margin.
 export const BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN = 8;
+export const BOT_ONLY_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS = 3;
 export const STAGE_AUTOMATION_LOCK_KEY = `chips-ledger-stage-automation-v1:${STAGE_PROJECT_REF}`;
 export const BOT_ONLY_BATCH_15_RECOVERY_REPAIR = Object.freeze({
   batchId: "15",
@@ -61,6 +62,7 @@ export const BOT_ONLY_BATCH_15_RECOVERY_REPAIR = Object.freeze({
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const COMMIT_SHA_RE = /^[0-9a-f]{40}$/i;
 const PRIVATE_FILE_MODE = 0o600;
+const AUTOMATIC_DRY_RUN_RETRYABLE_SQLSTATES = new Set(["40001", "55P03"]);
 
 function fail(message) {
   throw new Error(message);
@@ -139,6 +141,17 @@ function aggregateBatchPayload(batch) {
   }
   if (Object.hasOwn(batch, "retryState")) {
     payload.retry_state = batch.retryState || null;
+  }
+  if (Object.hasOwn(batch, "dryRunAttempts")) {
+    payload.dry_run_attempts = batch.dryRunAttempts ?? null;
+  }
+  if (Object.hasOwn(batch, "dryRunRetryCount")) {
+    payload.dry_run_retry_count = batch.dryRunRetryCount ?? null;
+  }
+  if (Object.hasOwn(batch, "dryRunSqlstates")) {
+    payload.dry_run_sqlstates = Array.isArray(batch.dryRunSqlstates)
+      ? [...batch.dryRunSqlstates]
+      : null;
   }
   return payload;
 }
@@ -532,6 +545,14 @@ function automaticStorageMutation({ archiveStorageModified, recoveryStorageModif
   };
 }
 
+function automaticDryRunObservability({ attempts = 0, retryCount = 0, sqlstates = [] } = {}) {
+  return {
+    dryRunAttempts: attempts,
+    dryRunRetryCount: retryCount,
+    dryRunSqlstates: Array.isArray(sqlstates) ? [...sqlstates] : [],
+  };
+}
+
 function automaticBatchProgress({
   row,
   identity,
@@ -545,6 +566,9 @@ function automaticBatchProgress({
   executeConfirmed = false,
   dbMutationConfirmed = false,
   retryState = null,
+  dryRunAttempts = 0,
+  dryRunRetryCount = 0,
+  dryRunSqlstates = [],
 }) {
   return {
     ...botOnlyReport({
@@ -561,6 +585,11 @@ function automaticBatchProgress({
     executeConfirmed,
     dbMutationConfirmed,
     retryState,
+    ...automaticDryRunObservability({
+      attempts: dryRunAttempts,
+      retryCount: dryRunRetryCount,
+      sqlstates: dryRunSqlstates,
+    }),
   };
 }
 
@@ -1493,6 +1522,77 @@ async function refreshPolicyRow(pruneStore, objectPath, sourcePolicyId = STAGE_A
   return row;
 }
 
+async function runAutomaticDryRunWithRetry({
+  row,
+  identity,
+  env,
+  cwd,
+  sql,
+  lockSession,
+  pruneStore,
+  storageTarget,
+  verifyBucket,
+  storageDeps = {},
+  onProgress = null,
+}) {
+  const dryRunSqlstates = [];
+  let attemptRow = row;
+  for (let attempt = 1; attempt <= BOT_ONLY_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS; attempt += 1) {
+    const observability = automaticDryRunObservability({
+      attempts: attempt,
+      retryCount: attempt - 1,
+      sqlstates: dryRunSqlstates,
+    });
+    try {
+      // Every retry starts from a fresh lock check and manifest read.  The
+      // prune step itself then performs its complete archive/evidence
+      // verification and opens a new SERIALIZABLE DB transaction.
+      await assertAdvisoryLock(sql, lockSession);
+      attemptRow = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
+      if (typeof onProgress === "function") onProgress({ row: attemptRow, dry: null, ...observability });
+      const batchId = text(attemptRow.batch_id);
+      assertBotOnlyExecuteBatch(attemptRow, batchId, identity);
+      const dry = await runPruneStep({
+        row: attemptRow,
+        mode: "dry-run",
+        env,
+        cwd,
+        sql,
+        pruneStore,
+        storageTarget,
+        verifyBucket,
+        storageDeps,
+      });
+      await assertAdvisoryLock(sql, lockSession);
+      const verifiedRow = dry?.row || attemptRow;
+      assertBotOnlyExecuteBatch(verifiedRow, batchId, identity);
+      assertAutomaticBotOnlyDryRunArchive(verifiedRow, dry, batchId);
+      assertAutomaticBotOnlyProofEvidence(verifiedRow, dry?.evidence, batchId);
+      return {
+        row: verifiedRow,
+        dry,
+        ...observability,
+      };
+    } catch (error) {
+      const sqlstate = sqlStateOf(error);
+      if (sqlstate) dryRunSqlstates.push(sqlstate);
+      const failedObservability = automaticDryRunObservability({
+        attempts: attempt,
+        retryCount: attempt - 1,
+        sqlstates: dryRunSqlstates,
+      });
+      if (typeof onProgress === "function") {
+        onProgress({ row: attemptRow, dry: null, ...failedObservability });
+      }
+      if (!AUTOMATIC_DRY_RUN_RETRYABLE_SQLSTATES.has(sqlstate)
+        || attempt === BOT_ONLY_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS) {
+        throw error;
+      }
+    }
+  }
+  fail("automatic bot-only dry-run retry budget was exhausted");
+}
+
 async function refreshRow(pruneStore, objectPath) {
   return refreshPolicyRow(pruneStore, objectPath, STAGE_AUTOMATION_POLICY_ID);
 }
@@ -2419,17 +2519,33 @@ export async function runAutomaticBotOnlyStageAutomation({
               });
             }
             markAutomaticPhase("automatic.dry-run", row);
-            const dry = await runPruneStep({
+            const dryRunResult = await runAutomaticDryRunWithRetry({
               row,
-              mode: "dry-run",
+              identity,
               env: moduleEnv,
               cwd: tempRoot,
               sql,
+              lockSession,
               pruneStore,
               storageTarget,
               verifyBucket,
               storageDeps: deps,
+              onProgress: ({ row: progressRow, dry: progressDry, ...dryRunProgress }) => {
+                currentBatch = automaticBatchProgress({
+                  row: progressRow,
+                  identity,
+                  dry: progressDry,
+                  durable: null,
+                  state: progressDry?.state === "already_cleaned" ? "already_cleaned" : "in_progress",
+                  deployedCommitSha,
+                  archiveStorageModified,
+                  recoveryStorageModified: false,
+                  ...dryRunProgress,
+                });
+              },
             });
+            row = dryRunResult.row;
+            const dry = dryRunResult.dry;
             currentBatch = automaticBatchProgress({
               row,
               identity,
@@ -2439,11 +2555,12 @@ export async function runAutomaticBotOnlyStageAutomation({
               deployedCommitSha,
               archiveStorageModified,
               recoveryStorageModified: false,
+              dryRunAttempts: dryRunResult.dryRunAttempts,
+              dryRunRetryCount: dryRunResult.dryRunRetryCount,
+              dryRunSqlstates: dryRunResult.dryRunSqlstates,
             });
             const batchId = text(row.batch_id);
             const lifecycle = assertBotOnlyExecuteBatch(row, batchId, identity);
-            assertAutomaticBotOnlyDryRunArchive(row, dry, batchId);
-            assertAutomaticBotOnlyProofEvidence(row, dry.evidence, batchId);
             if (dry.state === "already_cleaned") {
               if (lifecycle.cleanupCount !== 3) fail("automatic bot-only manifest has a partial completed receipt");
               markAutomaticPhase("automatic.recovery", row);
@@ -2464,6 +2581,9 @@ export async function runAutomaticBotOnlyStageAutomation({
                 deployedCommitSha,
                 archiveStorageModified,
                 recoveryStorageModified: false,
+                dryRunAttempts: dryRunResult.dryRunAttempts,
+                dryRunRetryCount: dryRunResult.dryRunRetryCount,
+                dryRunSqlstates: dryRunResult.dryRunSqlstates,
               });
               return {
                 row,
@@ -2471,6 +2591,9 @@ export async function runAutomaticBotOnlyStageAutomation({
                 durable,
                 executed: { state: "already_cleaned" },
                 retry: null,
+                dryRunAttempts: dryRunResult.dryRunAttempts,
+                dryRunRetryCount: dryRunResult.dryRunRetryCount,
+                dryRunSqlstates: dryRunResult.dryRunSqlstates,
                 archiveStorageModified,
                 storageMutation: automaticStorageMutation({
                   archiveStorageModified,
@@ -2513,6 +2636,9 @@ export async function runAutomaticBotOnlyStageAutomation({
                   deployedCommitSha,
                   archiveStorageModified,
                   recoveryStorageModified,
+                  dryRunAttempts: dryRunResult.dryRunAttempts,
+                  dryRunRetryCount: dryRunResult.dryRunRetryCount,
+                  dryRunSqlstates: dryRunResult.dryRunSqlstates,
                 });
                 throw error;
               }
@@ -2539,6 +2665,9 @@ export async function runAutomaticBotOnlyStageAutomation({
               state: "in_progress",
               deployedCommitSha,
               archiveStorageModified,
+              dryRunAttempts: dryRunResult.dryRunAttempts,
+              dryRunRetryCount: dryRunResult.dryRunRetryCount,
+              dryRunSqlstates: dryRunResult.dryRunSqlstates,
             });
             await assertAdvisoryLock(sql, lockSession);
             markAutomaticPhase("automatic.execute", row);
@@ -2563,6 +2692,9 @@ export async function runAutomaticBotOnlyStageAutomation({
               state: executed.state,
               deployedCommitSha,
               archiveStorageModified,
+              dryRunAttempts: dryRunResult.dryRunAttempts,
+              dryRunRetryCount: dryRunResult.dryRunRetryCount,
+              dryRunSqlstates: dryRunResult.dryRunSqlstates,
               executeState: executed.state,
               executeConfirmed: executed.state === "cleaned",
               dbMutationConfirmed: executed.state === "cleaned",
@@ -2577,6 +2709,9 @@ export async function runAutomaticBotOnlyStageAutomation({
               state: executed.state,
               deployedCommitSha,
               archiveStorageModified,
+              dryRunAttempts: dryRunResult.dryRunAttempts,
+              dryRunRetryCount: dryRunResult.dryRunRetryCount,
+              dryRunSqlstates: dryRunResult.dryRunSqlstates,
               executeState: executed.state,
               executeConfirmed: currentBatch.executeConfirmed,
               dbMutationConfirmed: currentBatch.dbMutationConfirmed,
@@ -2611,6 +2746,9 @@ export async function runAutomaticBotOnlyStageAutomation({
               state: executed.state,
               deployedCommitSha,
               archiveStorageModified,
+              dryRunAttempts: dryRunResult.dryRunAttempts,
+              dryRunRetryCount: dryRunResult.dryRunRetryCount,
+              dryRunSqlstates: dryRunResult.dryRunSqlstates,
               executeState: executed.state,
               executeConfirmed: currentBatch.executeConfirmed,
               dbMutationConfirmed: currentBatch.dbMutationConfirmed,
@@ -2622,6 +2760,9 @@ export async function runAutomaticBotOnlyStageAutomation({
               durable,
               executed,
               retry,
+              dryRunAttempts: dryRunResult.dryRunAttempts,
+              dryRunRetryCount: dryRunResult.dryRunRetryCount,
+              dryRunSqlstates: dryRunResult.dryRunSqlstates,
               archiveStorageModified,
               storageMutation: automaticStorageMutation({
                 archiveStorageModified,
@@ -2643,6 +2784,11 @@ export async function runAutomaticBotOnlyStageAutomation({
                 state: cycle.executed.state,
                 mode: "automatic",
                 deployedCommitSha,
+              }),
+              ...automaticDryRunObservability({
+                attempts: cycle.dryRunAttempts,
+                retryCount: cycle.dryRunRetryCount,
+                sqlstates: cycle.dryRunSqlstates,
               }),
               ...(cycle.storageMutation || automaticStorageMutation({
                 archiveStorageModified: cycle.archiveStorageModified,
@@ -2715,6 +2861,11 @@ export async function runAutomaticBotOnlyStageAutomation({
               state: cycle.executed.state,
               mode: "automatic",
               deployedCommitSha,
+            }),
+            ...automaticDryRunObservability({
+              attempts: cycle.dryRunAttempts,
+              retryCount: cycle.dryRunRetryCount,
+              sqlstates: cycle.dryRunSqlstates,
             }),
             ...(cycle.storageMutation || automaticStorageMutation({
               archiveStorageModified: cycle.archiveStorageModified,

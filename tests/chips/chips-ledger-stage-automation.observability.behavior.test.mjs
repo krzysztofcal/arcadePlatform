@@ -236,6 +236,9 @@ const automaticError = aggregatePayload({
     recoveryStorageModified: false,
     storageModified: true,
     dbMutationConfirmed: false,
+    dryRunAttempts: 2,
+    dryRunRetryCount: 1,
+    dryRunSqlstates: ["40001"],
   },
   processed: [{
     batchId: "17",
@@ -253,6 +256,9 @@ const automaticError = aggregatePayload({
     pruneReceipt: "prune-17",
     cleanupReceipt: "cleanup-17",
     destructiveGoBatchId: "17",
+    dryRunAttempts: 1,
+    dryRunRetryCount: 0,
+    dryRunSqlstates: [],
   }],
 });
 assert.equal(automaticError.source_policy_id, BOT_ONLY_RETENTION_POLICY_ID);
@@ -279,6 +285,9 @@ assert.deepEqual(automaticError.processed_batches, [{
   prune_receipt: "prune-17",
   cleanup_receipt: "cleanup-17",
   destructive_go_batch_id: "17",
+  dry_run_attempts: 1,
+  dry_run_retry_count: 0,
+  dry_run_sqlstates: [],
 }]);
 assert.equal(automaticError.current_batch.batch_id, "16");
 assert.equal(automaticError.current_batch.object_path, "v1/sha256/" + "a".repeat(64) + ".jsonl.gz");
@@ -289,6 +298,9 @@ assert.equal(automaticError.current_batch.archive_storage_modified, true);
 assert.equal(automaticError.current_batch.recovery_storage_modified, false);
 assert.equal(automaticError.current_batch.storage_modified, true);
 assert.equal(automaticError.current_batch.db_mutation_confirmed, false);
+assert.equal(automaticError.current_batch.dry_run_attempts, 2);
+assert.equal(automaticError.current_batch.dry_run_retry_count, 1);
+assert.deepEqual(automaticError.current_batch.dry_run_sqlstates, ["40001"]);
 
 const initFailureTemp = fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-observability-init-"));
 try {

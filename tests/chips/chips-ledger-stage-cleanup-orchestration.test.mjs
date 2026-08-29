@@ -7,6 +7,7 @@ import postgres from "postgres";
 
 import {
   BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN,
+  BOT_ONLY_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS,
   assertAutomaticBotOnlyRecoveryReconstructionState,
   executeVerifiedCycle,
   runAutomaticBotOnlyStageAutomation,
@@ -134,6 +135,7 @@ function fakeScheduler({
   initialArchiveBytes = new Map(),
   inspectRecovery = null,
   mainArchiveMode = "valid",
+  dryRunSqlstates = [],
 } = {}) {
   const manifests = new Map(initialRows.map((row) => [row.object_path, row]));
   const ownRows = [...initialRows];
@@ -147,8 +149,15 @@ function fakeScheduler({
     executeCalls: 0,
     realExecuteCalls: 0,
     destructiveSqlMutations: 0,
+    advisoryLockChecks: 0,
     failedOnce: false,
     mainArchiveDownloads: 0,
+    dryRunArchiveDownloads: 0,
+    dryRunManifestReads: 0,
+    dryRunCalls: 0,
+    activeDryRunArchiveDownloads: 0,
+    activeDryRunManifestReads: 0,
+    activeDryRunCalls: 0,
     persistCalls: 0,
     proofRegisterCalls: 0,
   };
@@ -172,7 +181,10 @@ function fakeScheduler({
   const sql = {
     unsafe: async (query) => {
       if (query.includes("pg_try_advisory_lock")) return [{ backend_pid: "100", acquired: true }];
-      if (query.includes("pg_backend_pid")) return [{ backend_pid: "100" }];
+      if (query.includes("pg_backend_pid")) {
+        state.advisoryLockChecks += 1;
+        return [{ backend_pid: "100" }];
+      }
       if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
       if (query.includes("pg_control_system")) return [{ system_identifier: "7656985631720456337" }];
       if (query.includes("chips_table_fence_is_active")) return [{ active: true }];
@@ -300,6 +312,38 @@ function fakeScheduler({
         row.archived_entry_ids_sha256 = "4".repeat(64);
         row.archive_proof_verified_at = "2026-08-25T00:00:00Z";
         return { state: "proof_registered" };
+      }
+      if (!argv.includes("--execute")) {
+        state.dryRunCalls += 1;
+        state.dryRunManifestReads += 1;
+        if (!row.registry_cleaned_at) {
+          state.activeDryRunCalls += 1;
+          state.activeDryRunManifestReads += 1;
+        }
+        const freshRow = await deps.pruneStore.getManifest(objectPath);
+        assert.equal(freshRow.object_path, objectPath);
+        const downloaded = await deps.downloadPrivateArchive(deps.storageTarget, objectPath);
+        state.dryRunArchiveDownloads += 1;
+        if (!row.registry_cleaned_at) state.activeDryRunArchiveDownloads += 1;
+        assert.equal(downloaded.sha256, crypto.createHash("sha256").update(downloaded.bytes).digest("hex"));
+        if (row.registry_cleaned_at) {
+          return {
+            state: "already_cleaned",
+            evidence: evidence(row.bot_only_table_id, "key:" + row.batch_id),
+            archiveSha256: downloaded.sha256,
+          };
+        }
+        const sqlstate = dryRunSqlstates[state.dryRunCalls - 1];
+        if (sqlstate) {
+          const error = new Error(`simulated dry-run ${sqlstate}`);
+          error.code = sqlstate;
+          throw error;
+        }
+        return {
+          state: "ready",
+          evidence: evidence(row.bot_only_table_id, "key:" + row.batch_id),
+          archiveSha256: downloaded.sha256,
+        };
       }
       if (argv.includes("--execute") && realExecute) {
         state.realExecuteCalls += 1;
@@ -475,6 +519,29 @@ function makeProvenAutomaticRow(batchId = "27", { lifecycle = "open" } = {}) {
   return { row, archiveBytes };
 }
 
+async function captureAutomaticFailure(scheduler) {
+  const originalStdoutWrite = process.stdout.write;
+  const originalSummaryPath = process.env.GITHUB_STEP_SUMMARY;
+  let output = "";
+  delete process.env.GITHUB_STEP_SUMMARY;
+  process.stdout.write = (chunk) => {
+    output += String(chunk);
+    return true;
+  };
+  let error = null;
+  try {
+    await runAutomaticBotOnlyStageAutomation(scheduler);
+  } catch (caught) {
+    error = caught;
+  } finally {
+    process.stdout.write = originalStdoutWrite;
+    if (originalSummaryPath === undefined) delete process.env.GITHUB_STEP_SUMMARY;
+    else process.env.GITHUB_STEP_SUMMARY = originalSummaryPath;
+  }
+  assert.ok(error, "automatic scheduler must fail");
+  return { error, report: JSON.parse(output.trim()) };
+}
+
 function staticOrchestrationContract() {
   const frozen = loadFrozenLegacyAllowlist({ cwd: root });
   const contract = buildLegacyStageAllowlistRunContract(frozen.masterManifest);
@@ -592,6 +659,81 @@ async function schedulerContracts() {
   assert.equal(legalRestartResult.processed[0].recoveryStorageModified, true);
   assert.equal(legalRestartResult.processed[0].storageModified, true);
 
+  for (const retryableSqlstate of ["40001", "55P03"]) {
+    const retryable = makeProvenAutomaticRow("27");
+    const retryableRun = fakeScheduler({
+      enabled: true,
+      candidateCount: 0,
+      initialRows: [retryable.row],
+      initialArchiveBytes: new Map([[retryable.row.object_path, retryable.archiveBytes]]),
+      dryRunSqlstates: [retryableSqlstate],
+    });
+    const retryableResult = await runAutomaticBotOnlyStageAutomation(retryableRun);
+    assert.equal(retryableResult.processed.length, 1);
+    assert.equal(retryableResult.processed[0].state, "cleaned");
+    assert.equal(retryableResult.processed[0].retry, "already_cleaned");
+    assert.equal(retryableResult.processed[0].dryRunAttempts, 2);
+    assert.equal(retryableResult.processed[0].dryRunRetryCount, 1);
+    assert.deepEqual(retryableResult.processed[0].dryRunSqlstates, [retryableSqlstate]);
+    assert.equal(retryableRun.state.activeDryRunCalls, 2);
+    assert.equal(retryableRun.state.activeDryRunManifestReads, 2, "each dry-run attempt must refresh its manifest");
+    assert.equal(retryableRun.state.activeDryRunArchiveDownloads, 2, "each dry-run attempt must download the archive");
+    assert.equal(retryableRun.state.advisoryLockChecks >= 4, true, "each dry-run attempt must recheck the advisory lock");
+    assert.equal(retryableRun.state.proofRegisterCalls, 0, "an existing proof must not be registered again");
+    assert.equal(retryableRun.state.persistCalls, 1, "recovery starts only after the retry succeeds");
+    assert.equal(retryableRun.state.executeCalls, 2, "execute remains the unchanged cleaned/already_cleaned double-cycle");
+  }
+
+  const exhaustedDryRun = makeProvenAutomaticRow("27");
+  const exhaustedDryRunRun = fakeScheduler({
+    enabled: true,
+    candidateCount: 0,
+    initialRows: [exhaustedDryRun.row],
+    initialArchiveBytes: new Map([[exhaustedDryRun.row.object_path, exhaustedDryRun.archiveBytes]]),
+    dryRunSqlstates: ["40001", "40001", "40001"],
+  });
+  const exhaustedFailure = await captureAutomaticFailure(exhaustedDryRunRun);
+  assert.equal(exhaustedFailure.error.code, "40001");
+  assert.equal(exhaustedDryRunRun.state.activeDryRunCalls, BOT_ONLY_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS);
+  assert.equal(exhaustedDryRunRun.state.activeDryRunManifestReads, BOT_ONLY_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS);
+  assert.equal(exhaustedDryRunRun.state.activeDryRunArchiveDownloads, BOT_ONLY_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS);
+  assert.equal(exhaustedDryRunRun.state.persistCalls, 0, "exhausted dry-run must not write recovery Storage");
+  assert.equal(exhaustedDryRunRun.state.executeCalls, 0, "exhausted dry-run must not execute DB cleanup");
+  assert.equal(exhaustedDryRunRun.state.destructiveSqlMutations, 0);
+  assert.equal(exhaustedDryRunRun.state.proofRegisterCalls, 0, "an existing proof must not be registered during dry-run retry");
+  assert.equal(exhaustedDryRunRun.state.storeCalls, 0);
+  assert.deepEqual(exhaustedFailure.report.processed_batches, []);
+  assert.equal(exhaustedFailure.report.current_batch.dry_run_attempts, 3);
+  assert.equal(exhaustedFailure.report.current_batch.dry_run_retry_count, 2);
+  assert.deepEqual(exhaustedFailure.report.current_batch.dry_run_sqlstates, ["40001", "40001", "40001"]);
+  assert.equal(exhaustedFailure.report.current_batch.dry_run, null);
+  assert.equal(exhaustedFailure.report.current_batch.archive_storage_modified, false);
+  assert.equal(exhaustedFailure.report.current_batch.recovery_storage_modified, false);
+  assert.equal(exhaustedFailure.report.current_batch.storage_modified, false);
+  assert.equal(exhaustedFailure.report.current_batch.execute_state, null);
+  assert.equal(exhaustedFailure.report.current_batch.execute_confirmed, false);
+  assert.equal(exhaustedFailure.report.current_batch.db_mutation_confirmed, false);
+
+  const foreignDryRun = makeProvenAutomaticRow("27");
+  const foreignDryRunRun = fakeScheduler({
+    enabled: true,
+    candidateCount: 0,
+    initialRows: [foreignDryRun.row],
+    initialArchiveBytes: new Map([[foreignDryRun.row.object_path, foreignDryRun.archiveBytes]]),
+    dryRunSqlstates: ["XX000"],
+  });
+  const foreignFailure = await captureAutomaticFailure(foreignDryRunRun);
+  assert.equal(foreignFailure.error.code, "XX000");
+  assert.equal(foreignDryRunRun.state.activeDryRunCalls, 1, "a non-retryable SQLSTATE must fail immediately");
+  assert.equal(foreignDryRunRun.state.activeDryRunManifestReads, 1);
+  assert.equal(foreignDryRunRun.state.activeDryRunArchiveDownloads, 1);
+  assert.equal(foreignDryRunRun.state.persistCalls, 0);
+  assert.equal(foreignDryRunRun.state.executeCalls, 0);
+  assert.equal(foreignDryRunRun.state.proofRegisterCalls, 0);
+  assert.equal(foreignFailure.report.current_batch.dry_run_attempts, 1);
+  assert.equal(foreignFailure.report.current_batch.dry_run_retry_count, 0);
+  assert.deepEqual(foreignFailure.report.current_batch.dry_run_sqlstates, ["XX000"]);
+
   const partialRecovery = makeProvenAutomaticRow("27");
   const partialRecoveryRun = fakeScheduler({
     enabled: true,
@@ -638,7 +780,7 @@ async function schedulerContracts() {
     runAutomaticBotOnlyStageAutomation(goWithoutRecoveryRun),
     /unpruned, uncleaned batch without destructive GO/,
   );
-  assert.equal(goWithoutRecoveryRun.state.mainArchiveDownloads, 0);
+  assert.equal(goWithoutRecoveryRun.state.mainArchiveDownloads, 1, "read-only dry-run may inspect the archive before the fail-closed lifecycle guard");
   assert.equal(goWithoutRecoveryRun.state.persistCalls, 0);
   assert.equal(goWithoutRecoveryRun.state.executeCalls, 0);
 
@@ -668,7 +810,7 @@ async function schedulerContracts() {
     });
     await assert.rejects(
       runAutomaticBotOnlyStageAutomation(unavailableMainRun),
-      mainArchiveMode === "missing" ? /simulated main archive download failure/ : /does not match the committed archive SHA/,
+      mainArchiveMode === "missing" ? /simulated main archive download failure/ : /dry-run archive checksum differs from the committed archive SHA/,
     );
     assert.equal(unavailableMainRun.state.persistCalls, 0);
     assert.equal(unavailableMainRun.state.executeCalls, 0);
@@ -805,7 +947,7 @@ async function schedulerContracts() {
   assert.equal(earlyFailureReport.current_batch.object_path, earlyRow.object_path);
   assert.equal(earlyFailureReport.current_batch.compressed_sha256, earlyRow.compressed_sha256);
   assert.equal(earlyFailureReport.current_batch.proof, "verified");
-  assert.equal(earlyFailureReport.current_batch.dry_run, "ready");
+  assert.equal(earlyFailureReport.current_batch.dry_run, null);
   assert.equal(earlyFailureReport.current_batch.archive_storage_modified, true);
   assert.equal(earlyFailureReport.current_batch.recovery_storage_modified, false);
   assert.equal(earlyFailureReport.current_batch.storage_modified, true);
