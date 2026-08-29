@@ -2239,24 +2239,38 @@ async function verifyAutomaticCompletedBatch({
   env,
   cwd,
   sql,
+  lockSession,
   pruneStore,
   storageTarget,
   verifyBucket,
   storageDeps,
   inspectRecovery,
+  onProgress = null,
 }) {
-  const refreshed = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
-  const dry = await runPruneStep({
-    row: refreshed,
-    mode: "dry-run",
+  const dryRunResult = await runAutomaticDryRunWithRetry({
+    row,
+    identity,
     env,
     cwd,
     sql,
+    lockSession,
     pruneStore,
     storageTarget,
     verifyBucket,
     storageDeps,
+    onProgress,
   });
+  const refreshed = dryRunResult.row;
+  const dry = dryRunResult.dry;
+  if (typeof onProgress === "function") {
+    onProgress({
+      row: refreshed,
+      dry,
+      dryRunAttempts: dryRunResult.dryRunAttempts,
+      dryRunRetryCount: dryRunResult.dryRunRetryCount,
+      dryRunSqlstates: dryRunResult.dryRunSqlstates,
+    });
+  }
   if (dry.state !== "already_cleaned") {
     fail(`automatic bot-only completed batch ${row.batch_id} did not revalidate as already_cleaned: ${dry.state}`);
   }
@@ -2274,7 +2288,14 @@ async function verifyAutomaticCompletedBatch({
     evidence: dry.evidence,
     durable,
   });
-  return { row: refreshed, dry, durable };
+  return {
+    row: refreshed,
+    dry,
+    durable,
+    dryRunAttempts: dryRunResult.dryRunAttempts,
+    dryRunRetryCount: dryRunResult.dryRunRetryCount,
+    dryRunSqlstates: dryRunResult.dryRunSqlstates,
+  };
 }
 
 async function assertAutomaticStageFence(sql) {
@@ -2388,13 +2409,28 @@ export async function runAutomaticBotOnlyStageAutomation({
               env: moduleEnv,
               cwd: tempRoot,
               sql,
+              lockSession,
               pruneStore,
               storageTarget,
               verifyBucket,
               storageDeps: deps,
               inspectRecovery,
+              onProgress: ({ row: progressRow, dry: progressDry, ...dryRunProgress }) => {
+                currentBatch = automaticBatchProgress({
+                  row: progressRow,
+                  identity,
+                  dry: progressDry,
+                  durable: null,
+                  state: progressDry?.state === "already_cleaned" ? "already_cleaned" : "in_progress",
+                  deployedCommitSha,
+                  archiveStorageModified: false,
+                  recoveryStorageModified: false,
+                  ...dryRunProgress,
+                });
+              },
             });
             completedRecoveryChecked.add(completedRow.object_path);
+            currentBatch = null;
           }
           let activeRow = assertAutomaticBotOnlyRows(ownRows);
           if (activeRow) markAutomaticPhase("automatic.manifest", activeRow);
