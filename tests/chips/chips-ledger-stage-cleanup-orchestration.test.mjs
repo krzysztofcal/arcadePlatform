@@ -38,6 +38,10 @@ const lifecycleReceiptMigration = fs.readFileSync(
   "supabase/migrations/20260828100000_chips_ledger_bot_only_lifecycle_receipt_hardening.sql",
   "utf8",
 );
+const lifecycleMissingTableMigration = fs.readFileSync(
+  "supabase/migrations/20260829100000_chips_ledger_bot_only_lifecycle_missing_table_hardening.sql",
+  "utf8",
+);
 
 const ENV = Object.freeze({
   SUPABASE_STAGE_DB_URL: "postgresql://postgres.krydukthwdvccggbyjfw:password@aws-0.pooler.supabase.com:5432/postgres",
@@ -575,6 +579,9 @@ function staticWorkflowContracts() {
   assert.match(lifecycleReceiptMigration, /P8925/);
   assert.match(lifecycleReceiptMigration, /already_cleaned[\s\S]*poker_tables/);
   assert.match(lifecycleReceiptMigration, /lifecycle completion marker was not persisted/);
+  assert.match(lifecycleMissingTableMigration, /create or replace function public\.chips_prune_and_cleanup_bot_only_archive_batch/);
+  assert.match(lifecycleMissingTableMigration, /if found and lifecycle_marker is null/);
+  assert.match(lifecycleMissingTableMigration, /if not found or lifecycle_marker is null/);
 }
 
 staticOrchestrationContract();
@@ -928,6 +935,75 @@ async function disposablePostgresContract() {
       await tx.unsafe("rollback to savepoint empty_lifecycle_marker_replay;");
       await tx.unsafe("release savepoint empty_lifecycle_marker_replay;");
       assert.equal(emptyMarkerError?.code, "P8925");
+
+      const vanishedTableFixture = await disposableBotFixture(tx, { objectHex: "e" });
+      const vanishedProof = await tx.unsafe(`
+        select public.chips_register_bot_only_archive_proof(
+          $1, $2::uuid[], $3::bigint[], $4::uuid, $5::text[]
+        ) as result;
+      `, [vanishedTableFixture.objectPath, [vanishedTableFixture.transactionId], vanishedTableFixture.entryIds, vanishedTableFixture.tableId, [vanishedTableFixture.key]]);
+      assert.equal(vanishedProof[0].result.state, "proof_registered");
+      const vanishedBatchRows = await tx.unsafe(
+        "select batch_id::text as batch_id from public.chips_ledger_archive_batches where object_path = $1;",
+        [vanishedTableFixture.objectPath],
+      );
+      const vanishedBatchId = vanishedBatchRows[0].batch_id;
+      const vanishedAuthorization = await tx.unsafe(
+        "select public.chips_authorize_bot_only_archive_batch($1::bigint, $2) as result;",
+        [vanishedBatchId, `GO ${vanishedBatchId}`],
+      );
+      assert.equal(vanishedAuthorization[0].result.state, "authorized");
+      await tx.unsafe(`
+        create or replace function public.chips_stage_cleanup_test_remove_table_after_receipt()
+        returns trigger language plpgsql security definer set search_path = ''
+        as $stage_cleanup_test_remove_table$
+        begin
+          delete from public.poker_tables
+           where id = pg_catalog.current_setting('chips.stage_cleanup_test_table')::uuid;
+          return new;
+        end
+        $stage_cleanup_test_remove_table$;
+        drop trigger if exists aaa_stage_cleanup_test_remove_table_after_receipt on public.chips_ledger_archive_batches;
+        create trigger aaa_stage_cleanup_test_remove_table_after_receipt
+        after update of registry_cleaned_at on public.chips_ledger_archive_batches
+        for each row
+        when (new.registry_cleaned_at is distinct from old.registry_cleaned_at)
+        execute function public.chips_stage_cleanup_test_remove_table_after_receipt();
+      `);
+      await tx.unsafe("savepoint lifecycle_missing_table_rollback;");
+      await tx.unsafe("select set_config('chips.stage_cleanup_test_table', $1, true);", [vanishedTableFixture.tableId]);
+      let vanishedTableError = null;
+      try {
+        await tx.unsafe(`
+          select public.chips_prune_and_cleanup_bot_only_archive_batch(
+            $1, $2::uuid[], $3::bigint[], $4::text[], $5::uuid, true, $6::bigint
+          ) as result;
+        `, [vanishedTableFixture.objectPath, [vanishedTableFixture.transactionId], vanishedTableFixture.entryIds, [vanishedTableFixture.key], vanishedTableFixture.tableId, vanishedBatchId]);
+      } catch (error) {
+        vanishedTableError = error;
+      }
+      await tx.unsafe("rollback to savepoint lifecycle_missing_table_rollback;");
+      await tx.unsafe("release savepoint lifecycle_missing_table_rollback;");
+      assert.equal(vanishedTableError?.code, "P8925");
+      const vanishedState = await tx.unsafe(`
+        select
+          (select count(*) from public.poker_tables where id = $1::uuid) as table_exists,
+          (select count(*) from public.chips_transactions where id = $2::uuid) as hot_transactions,
+          (select count(*) from public.chips_entries where id = any($3::bigint[])) as hot_entries,
+          (select count(*) from public.chips_transaction_idempotency where idempotency_key = $4) as registry_rows,
+          (select pruned_at from public.chips_ledger_archive_batches where batch_id = $5::bigint) as pruned_at,
+          (select registry_cleaned_at from public.chips_ledger_archive_batches where batch_id = $5::bigint) as cleaned_at,
+          (select bot_only_retention_complete_at from public.poker_tables where id = $1::uuid) as lifecycle_marker;
+      `, [vanishedTableFixture.tableId, vanishedTableFixture.transactionId, vanishedTableFixture.entryIds, vanishedTableFixture.key, vanishedBatchId]);
+      assert.equal(Number(vanishedState[0].table_exists), 1);
+      assert.equal(Number(vanishedState[0].hot_transactions), 1);
+      assert.equal(Number(vanishedState[0].hot_entries), 2);
+      assert.equal(Number(vanishedState[0].registry_rows), 1);
+      assert.equal(vanishedState[0].pruned_at, null);
+      assert.equal(vanishedState[0].cleaned_at, null);
+      assert.equal(vanishedState[0].lifecycle_marker, null);
+      await tx.unsafe("drop trigger aaa_stage_cleanup_test_remove_table_after_receipt on public.chips_ledger_archive_batches;");
+      await tx.unsafe("drop function public.chips_stage_cleanup_test_remove_table_after_receipt();");
 
       const rollbackFixture = await disposableBotFixture(tx, { objectHex: "d" });
       const rollbackProof = await tx.unsafe(`
