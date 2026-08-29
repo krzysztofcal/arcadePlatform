@@ -102,6 +102,43 @@ export function redactedError(error) {
     .replace(/\b(?:entry|transaction|account|table)[-_ ]?\d+\b/gi, "[redacted-record]");
 }
 
+function aggregateBatchPayload(batch) {
+  const payload = {
+    batch_id: batch.batchId ?? null,
+    state: batch.state ?? null,
+    retry: batch.retry ?? null,
+    object_path: batch.objectPath || null,
+    transactions: batch.transactions ?? null,
+    entries: batch.entries ?? null,
+    compressed_sha256: batch.compressedSha256 || null,
+    recovery_archive_sha256: batch.recoveryArchiveSha256 || null,
+    recovery_manifest_sha256: batch.recoveryManifestSha256 || null,
+    storage_modified: batch.storageModified ?? null,
+    prune_receipt: batch.pruneReceipt || null,
+    cleanup_receipt: batch.cleanupReceipt || null,
+    destructive_go_batch_id: batch.destructiveGoBatchId ?? null,
+  };
+  if (Object.hasOwn(batch, "recoveryArchivePath")) {
+    payload.recovery_archive_path = batch.recoveryArchivePath || null;
+  }
+  if (Object.hasOwn(batch, "recoveryManifestPath")) {
+    payload.recovery_manifest_path = batch.recoveryManifestPath || null;
+  }
+  if (Object.hasOwn(batch, "executeState")) {
+    payload.execute_state = batch.executeState || null;
+  }
+  if (Object.hasOwn(batch, "executeConfirmed")) {
+    payload.execute_confirmed = batch.executeConfirmed === true;
+  }
+  if (Object.hasOwn(batch, "dbMutationConfirmed")) {
+    payload.db_mutation_confirmed = batch.dbMutationConfirmed === true;
+  }
+  if (Object.hasOwn(batch, "retryState")) {
+    payload.retry_state = batch.retryState || null;
+  }
+  return payload;
+}
+
 export function aggregatePayload(result) {
   const base = {
     event: "chips_ledger_stage_automation",
@@ -121,22 +158,9 @@ export function aggregatePayload(result) {
       ...(result.phase ? { phase: result.phase } : {}),
       ...(sqlstate ? { sqlstate } : {}),
       ...(Array.isArray(result.processed) ? {
-        processed_batches: result.processed.map((batch) => ({
-          batch_id: batch.batchId ?? null,
-          state: batch.state ?? null,
-          retry: batch.retry ?? null,
-          object_path: batch.objectPath || null,
-          transactions: batch.transactions ?? null,
-          entries: batch.entries ?? null,
-          compressed_sha256: batch.compressedSha256 || null,
-          recovery_archive_sha256: batch.recoveryArchiveSha256 || null,
-          recovery_manifest_sha256: batch.recoveryManifestSha256 || null,
-          storage_modified: batch.storageModified ?? null,
-          prune_receipt: batch.pruneReceipt || null,
-          cleanup_receipt: batch.cleanupReceipt || null,
-          destructive_go_batch_id: batch.destructiveGoBatchId ?? null,
-        })),
+        processed_batches: result.processed.map(aggregateBatchPayload),
       } : {}),
+      ...(result.currentBatch ? { current_batch: aggregateBatchPayload(result.currentBatch) } : {}),
       reason: redactedError(result.reason),
     };
   }
@@ -464,6 +488,42 @@ export function botOnlyReport({ row, identity, dry, durable, state, mode, deploy
     destructiveGoAt: row?.destructive_go_at || null,
     mappings: evidence?.transactionCount ?? null,
     blockingAnomalies,
+  };
+}
+
+function automaticRecoveryStorageModified(durable) {
+  return durable?.recoveryArchive?.uploaded === true
+    || durable?.recoveryManifest?.uploaded === true;
+}
+
+function automaticBatchProgress({
+  row,
+  identity,
+  dry,
+  durable,
+  state,
+  deployedCommitSha,
+  storageModified,
+  executeState = null,
+  executeConfirmed = false,
+  dbMutationConfirmed = false,
+  retryState = null,
+}) {
+  return {
+    ...botOnlyReport({
+      row,
+      identity,
+      dry,
+      durable,
+      state,
+      mode: "automatic",
+      deployedCommitSha,
+    }),
+    storageModified,
+    executeState,
+    executeConfirmed,
+    dbMutationConfirmed,
+    retryState,
   };
 }
 
@@ -1896,6 +1956,7 @@ export async function runAutomaticBotOnlyStageAutomation({
   let failed = false;
   let failure = null;
   const processed = [];
+  let currentBatch = null;
   const automaticErrorContext = {
     sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
     mode: "automatic",
@@ -2049,6 +2110,15 @@ export async function runAutomaticBotOnlyStageAutomation({
               const mainArchive = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, deps);
               durable = await persistRecovery(storageTarget, row, identity, dry.evidence, mainArchive.bytes, deps);
             }
+            currentBatch = automaticBatchProgress({
+              row,
+              identity,
+              dry,
+              durable,
+              state: "in_progress",
+              deployedCommitSha,
+              storageModified: automaticRecoveryStorageModified(durable),
+            });
             await assertAdvisoryLock(sql, lockSession);
             markAutomaticPhase("automatic.execute", row);
             const executed = await executeCycle({
@@ -2064,8 +2134,32 @@ export async function runAutomaticBotOnlyStageAutomation({
               verifyBucket,
               storageDeps: deps,
             });
+            currentBatch = automaticBatchProgress({
+              row,
+              identity,
+              dry,
+              durable,
+              state: executed.state,
+              deployedCommitSha,
+              storageModified: currentBatch.storageModified,
+              executeState: executed.state,
+              executeConfirmed: executed.state === "cleaned",
+              dbMutationConfirmed: executed.state === "cleaned",
+            });
             markAutomaticPhase("automatic.execute-refresh", row);
             const refreshed = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
+            currentBatch = automaticBatchProgress({
+              row: refreshed,
+              identity,
+              dry,
+              durable,
+              state: executed.state,
+              deployedCommitSha,
+              storageModified: currentBatch.storageModified,
+              executeState: executed.state,
+              executeConfirmed: currentBatch.executeConfirmed,
+              dbMutationConfirmed: currentBatch.dbMutationConfirmed,
+            });
             markAutomaticPhase("automatic.execute-retry", refreshed);
             const retry = await executeCycle({
               row: refreshed,
@@ -2080,11 +2174,29 @@ export async function runAutomaticBotOnlyStageAutomation({
               verifyBucket,
               storageDeps: deps,
             });
+            currentBatch = {
+              ...currentBatch,
+              retryState: retry.state,
+            };
             if (retry.state !== "already_cleaned") {
               fail("automatic bot-only retry did not return already_cleaned");
             }
+            const finalRow = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
+            currentBatch = automaticBatchProgress({
+              row: finalRow,
+              identity,
+              dry,
+              durable,
+              state: executed.state,
+              deployedCommitSha,
+              storageModified: currentBatch.storageModified,
+              executeState: executed.state,
+              executeConfirmed: currentBatch.executeConfirmed,
+              dbMutationConfirmed: currentBatch.dbMutationConfirmed,
+              retryState: retry.state,
+            });
             return {
-              row: await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID),
+              row: finalRow,
               dry,
               durable,
               executed,
@@ -2104,8 +2216,10 @@ export async function runAutomaticBotOnlyStageAutomation({
                 mode: "automatic",
                 deployedCommitSha,
               }),
+              storageModified: automaticRecoveryStorageModified(cycle.durable),
               retry: cycle.retry?.state || null,
             });
+            currentBatch = null;
             continue;
           }
 
@@ -2158,8 +2272,10 @@ export async function runAutomaticBotOnlyStageAutomation({
               mode: "automatic",
               deployedCommitSha,
             }),
+            storageModified: automaticRecoveryStorageModified(cycle.durable),
             retry: cycle.retry?.state || null,
           });
+          currentBatch = null;
         }
         result = {
           state: "completed",
@@ -2195,7 +2311,7 @@ export async function runAutomaticBotOnlyStageAutomation({
     }
   }
   if (failed) {
-    emitAggregateError(failure, { deployedCommitSha, ...automaticErrorContext, processed });
+    emitAggregateError(failure, { deployedCommitSha, ...automaticErrorContext, processed, currentBatch });
     throw failure;
   }
   if (result && deployedCommitSha) result = { ...result, deployedCommitSha };

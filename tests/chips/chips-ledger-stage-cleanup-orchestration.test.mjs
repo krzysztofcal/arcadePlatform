@@ -208,14 +208,18 @@ function fakeScheduler({
     },
     inspectDurableRecovery: async (_target, row) => durable.get(row.object_path) || null,
     persistDurableRecovery: async (_target, row, _identity, _evidence, archiveBytes) => {
+      const recoveryArchivePath = `recovery/v1/sha256/${row.compressed_sha256}.jsonl.gz`;
+      const recoveryManifestPath = `recovery/v1/sha256/${row.compressed_sha256}.recovery.json.gz`;
       const value = {
         archiveBytes,
         manifestBytes: Buffer.from("{}"),
         manifestGzipBytes: Buffer.from("gzip"),
+        archivePath: recoveryArchivePath,
+        manifestPath: recoveryManifestPath,
         archiveSha256: row.compressed_sha256,
         manifestSha256: "5".repeat(64),
-        recoveryArchive: { sha256: row.compressed_sha256 },
-        recoveryManifest: { sha256: "5".repeat(64) },
+        recoveryArchive: { objectPath: recoveryArchivePath, uploaded: true, sha256: row.compressed_sha256 },
+        recoveryManifest: { objectPath: recoveryManifestPath, uploaded: true, sha256: "5".repeat(64) },
       };
       durable.set(row.object_path, value);
       return value;
@@ -323,6 +327,99 @@ async function schedulerContracts() {
   assert.deepEqual(enabledResult.processed.map((row) => row.retry), ["already_cleaned", "already_cleaned", "already_cleaned"]);
   assert.equal(enabled.state.storeCalls, 3);
 
+  const controlCycleFailure = fakeScheduler({ enabled: true, candidateCount: 1 });
+  const originalControlExecuteCycle = controlCycleFailure.deps.executeVerifiedCycle;
+  let controlExecuteCalls = 0;
+  controlCycleFailure.deps.executeVerifiedCycle = async (args) => {
+    controlExecuteCalls += 1;
+    if (controlExecuteCalls === 2) {
+      const error = new Error("control cycle failed after first cleanup");
+      error.code = "XX000";
+      throw error;
+    }
+    return originalControlExecuteCycle(args);
+  };
+  const controlOriginalStdoutWrite = process.stdout.write;
+  const controlOriginalSummaryPath = process.env.GITHUB_STEP_SUMMARY;
+  let controlFailureOutput = "";
+  delete process.env.GITHUB_STEP_SUMMARY;
+  process.stdout.write = (chunk) => {
+    controlFailureOutput += String(chunk);
+    return true;
+  };
+  try {
+    await assert.rejects(
+      runAutomaticBotOnlyStageAutomation(controlCycleFailure),
+      (error) => error?.code === "XX000",
+    );
+  } finally {
+    process.stdout.write = controlOriginalStdoutWrite;
+    if (controlOriginalSummaryPath === undefined) delete process.env.GITHUB_STEP_SUMMARY;
+    else process.env.GITHUB_STEP_SUMMARY = controlOriginalSummaryPath;
+  }
+  const controlFailureReport = JSON.parse(controlFailureOutput.trim());
+  assert.equal(controlFailureReport.processed_batches.length, 0, "the in-progress batch must not be marked processed before already_cleaned");
+  assert.equal(controlFailureReport.current_batch.batch_id, "100");
+  assert.equal(controlFailureReport.current_batch.state, "cleaned");
+  assert.equal(controlFailureReport.current_batch.execute_state, "cleaned");
+  assert.equal(controlFailureReport.current_batch.execute_confirmed, true);
+  assert.equal(controlFailureReport.current_batch.db_mutation_confirmed, true);
+  assert.equal(controlFailureReport.current_batch.retry_state, null);
+  assert.equal(controlFailureReport.current_batch.storage_modified, true);
+  assert.equal(controlFailureReport.current_batch.recovery_archive_sha256, "a".repeat(64));
+  assert.equal(controlFailureReport.current_batch.recovery_manifest_sha256, "5".repeat(64));
+  assert.equal(controlFailureReport.current_batch.destructive_go_batch_id, "100");
+  assert.deepEqual(controlFailureReport.current_batch.prune_receipt, {
+    at: "2026-08-25T00:00:01Z",
+    transaction_count: "1",
+    entry_count: "2",
+    transaction_ids_sha256: "3".repeat(64),
+    entry_ids_sha256: "4".repeat(64),
+  });
+  assert.deepEqual(controlFailureReport.current_batch.cleanup_receipt, {
+    at: "2026-08-25T00:00:02Z",
+    key_count: "1",
+    keys_sha256: "1".repeat(64),
+  });
+
+  const recoveryBeforeExecuteFailure = fakeScheduler({ enabled: true, candidateCount: 1, failExecuteOnce: true });
+  const recoveryOriginalStdoutWrite = process.stdout.write;
+  const recoveryOriginalSummaryPath = process.env.GITHUB_STEP_SUMMARY;
+  let recoveryFailureOutput = "";
+  delete process.env.GITHUB_STEP_SUMMARY;
+  process.stdout.write = (chunk) => {
+    recoveryFailureOutput += String(chunk);
+    return true;
+  };
+  try {
+    await assert.rejects(
+      runAutomaticBotOnlyStageAutomation(recoveryBeforeExecuteFailure),
+      /simulated interruption between batches/,
+    );
+  } finally {
+    process.stdout.write = recoveryOriginalStdoutWrite;
+    if (recoveryOriginalSummaryPath === undefined) delete process.env.GITHUB_STEP_SUMMARY;
+    else process.env.GITHUB_STEP_SUMMARY = recoveryOriginalSummaryPath;
+  }
+  const recoveryFailureReport = JSON.parse(recoveryFailureOutput.trim());
+  assert.equal(recoveryFailureReport.processed_batches.length, 0);
+  assert.equal(recoveryFailureReport.current_batch.batch_id, "100");
+  assert.equal(recoveryFailureReport.current_batch.state, "in_progress");
+  assert.equal(recoveryFailureReport.current_batch.execute_state, null);
+  assert.equal(recoveryFailureReport.current_batch.execute_confirmed, false);
+  assert.equal(recoveryFailureReport.current_batch.db_mutation_confirmed, false);
+  assert.equal(recoveryFailureReport.current_batch.storage_modified, true);
+  assert.equal(recoveryFailureReport.current_batch.recovery_archive_sha256, "a".repeat(64));
+  assert.equal(recoveryFailureReport.current_batch.recovery_manifest_sha256, "5".repeat(64));
+  assert.equal(
+    recoveryFailureReport.current_batch.recovery_archive_path,
+    "recovery/v1/sha256/" + "a".repeat(64) + ".jsonl.gz",
+  );
+  assert.equal(
+    recoveryFailureReport.current_batch.recovery_manifest_path,
+    "recovery/v1/sha256/" + "a".repeat(64) + ".recovery.json.gz",
+  );
+
   const laterBatchFailure = fakeScheduler({ enabled: true, candidateCount: 2 });
   const originalExecuteCycle = laterBatchFailure.deps.executeVerifiedCycle;
   let laterExecuteCalls = 0;
@@ -359,7 +456,7 @@ async function schedulerContracts() {
   assert.equal(laterFailureReport.processed_batches[0].batch_id, "100");
   assert.equal(laterFailureReport.processed_batches[0].recovery_archive_sha256, "a".repeat(64));
   assert.equal(laterFailureReport.processed_batches[0].recovery_manifest_sha256, "5".repeat(64));
-  assert.equal(laterFailureReport.processed_batches[0].storage_modified, null);
+  assert.equal(laterFailureReport.processed_batches[0].storage_modified, true);
 
   const realCycle = fakeScheduler({ enabled: true, candidateCount: 1, realExecute: true });
   const realCycleTempRoot = fs.mkdtempSync("/tmp/chips-ledger-stage-automation-real-double-cycle-");
