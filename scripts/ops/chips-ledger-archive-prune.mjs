@@ -36,6 +36,8 @@ const SHA256_RE = /^[0-9a-f]{64}$/;
 const ALLOWED_TX_TYPES = new Set(["TABLE_BUY_IN", "TABLE_CASH_OUT"]);
 const MAX_BATCH_SIZE = maxBatchSizeForTarget("stage");
 const MAX_EXECUTE_ATTEMPTS = 3;
+export const MAX_AUTOMATIC_CLEANUP_ATTEMPTS = 3;
+const RETRYABLE_CLEANUP_SQLSTATES = new Set(["40001", "55P03"]);
 
 const HELP = `Usage: node scripts/ops/chips-ledger-archive-prune.mjs [options]
 
@@ -66,6 +68,22 @@ function fail(message, code = null) {
 
 function text(value) {
   return value == null ? "" : String(value).trim();
+}
+
+export function sqlStateOf(error) {
+  const candidates = [
+    error?.code,
+    error?.sqlstate,
+    error?.sqlState,
+    error?.cause?.code,
+    error?.cause?.sqlstate,
+    error?.cause?.sqlState,
+  ];
+  for (const candidate of candidates) {
+    const value = text(candidate).toUpperCase();
+    if (/^[0-9A-Z]{5}$/.test(value)) return value;
+  }
+  return null;
 }
 
 function canonicalJson(value) {
@@ -861,6 +879,47 @@ function assertLegacyPostCommitVerification(verification, evidence) {
   }
 }
 
+async function executeBotOnlyCleanupWithRetry({
+  store,
+  row,
+  evidence,
+  target,
+  identity,
+  recoveryBundle,
+  approvedBatchId = null,
+  execute,
+  automatic,
+}) {
+  const attempts = automatic && execute ? MAX_AUTOMATIC_CLEANUP_ATTEMPTS : 1;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    if (recoveryBundle) {
+      verifyRecoveryBundle({
+        bundle: recoveryBundle,
+        row,
+        target,
+        identity,
+        expectedEvidence: evidence,
+      });
+    }
+    try {
+      return await store.cleanupBotOnly(
+        row.object_path,
+        evidence,
+        execute,
+        approvedBatchId,
+        automatic,
+      );
+    } catch (error) {
+      if (!automatic
+        || attempt === attempts
+        || !RETRYABLE_CLEANUP_SQLSTATES.has(sqlStateOf(error))) {
+        throw error;
+      }
+    }
+  }
+  fail("automatic bot-only cleanup retry budget was exhausted");
+}
+
 function outputResult(result) {
   process.stdout.write(`${stringifyJson({
     event: "chips_ledger_archive_prune",
@@ -984,9 +1043,19 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
           evidence,
           Boolean(args.execute),
           args.approvedBatchId,
-          deps.legacyStageAllowlistOrchestration || null,
-        )
-        : await store.cleanupBotOnly(row.object_path, evidence, Boolean(args.execute), args.approvedBatchId, Boolean(args.automatic))
+            deps.legacyStageAllowlistOrchestration || null,
+          )
+        : await executeBotOnlyCleanupWithRetry({
+          store,
+          row,
+          evidence,
+          target,
+          identity,
+          recoveryBundle,
+          approvedBatchId: args.approvedBatchId,
+          execute: Boolean(args.execute),
+          automatic: Boolean(args.automatic),
+        })
       : await executeArchivePrune({
         store,
         objectPath: row.object_path,

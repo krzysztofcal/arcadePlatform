@@ -29,6 +29,7 @@ import {
   buildRecoveryManifest,
   createPruneStore,
   pruneArchive,
+  sqlStateOf,
 } from "./chips-ledger-archive-prune.mjs";
 import {
   assertPrivateRegularFile,
@@ -111,13 +112,31 @@ export function aggregatePayload(result) {
     deployed_commit_sha: result.deployedCommitSha || null,
   };
   if (result.state === "error") {
+    const sqlstate = result.sqlstate || sqlStateOf(result.reason);
     return {
       ...base,
       ...(result.mode ? { mode: result.mode } : {}),
       ...(result.batchId != null ? { batch_id: result.batchId } : {}),
       ...(result.objectPath ? { object_path: result.objectPath } : {}),
       ...(result.phase ? { phase: result.phase } : {}),
-      ...(result.sqlstate ? { sqlstate: result.sqlstate } : {}),
+      ...(sqlstate ? { sqlstate } : {}),
+      ...(Array.isArray(result.processed) ? {
+        processed_batches: result.processed.map((batch) => ({
+          batch_id: batch.batchId ?? null,
+          state: batch.state ?? null,
+          retry: batch.retry ?? null,
+          object_path: batch.objectPath || null,
+          transactions: batch.transactions ?? null,
+          entries: batch.entries ?? null,
+          compressed_sha256: batch.compressedSha256 || null,
+          recovery_archive_sha256: batch.recoveryArchiveSha256 || null,
+          recovery_manifest_sha256: batch.recoveryManifestSha256 || null,
+          storage_modified: batch.storageModified ?? null,
+          prune_receipt: batch.pruneReceipt || null,
+          cleanup_receipt: batch.cleanupReceipt || null,
+          destructive_go_batch_id: batch.destructiveGoBatchId ?? null,
+        })),
+      } : {}),
       reason: redactedError(result.reason),
     };
   }
@@ -188,7 +207,7 @@ function emitAggregateError(error, context = {}) {
       state: "error",
       reason: error,
       phase: context.phase || error?.chipsLedgerQueryPhase || null,
-      sqlstate: context.sqlstate || error?.chipsLedgerQuerySqlState || null,
+      sqlstate: context.sqlstate || error?.chipsLedgerQuerySqlState || sqlStateOf(error),
       ...context,
     });
   } catch {
@@ -1876,6 +1895,7 @@ export async function runAutomaticBotOnlyStageAutomation({
   let deployedCommitSha = null;
   let failed = false;
   let failure = null;
+  const processed = [];
   const automaticErrorContext = {
     sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
     mode: "automatic",
@@ -1938,7 +1958,6 @@ export async function runAutomaticBotOnlyStageAutomation({
           reason: "automatic_policy_disabled",
         };
       } else {
-        const processed = [];
         let stopReason = null;
         for (let index = 0; index < BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN; index += 1) {
           markAutomaticPhase("automatic.select");
@@ -2176,7 +2195,7 @@ export async function runAutomaticBotOnlyStageAutomation({
     }
   }
   if (failed) {
-    emitAggregateError(failure, { deployedCommitSha, ...automaticErrorContext });
+    emitAggregateError(failure, { deployedCommitSha, ...automaticErrorContext, processed });
     throw failure;
   }
   if (result && deployedCommitSha) result = { ...result, deployedCommitSha };

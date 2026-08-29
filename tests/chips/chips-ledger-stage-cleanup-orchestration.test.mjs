@@ -323,6 +323,44 @@ async function schedulerContracts() {
   assert.deepEqual(enabledResult.processed.map((row) => row.retry), ["already_cleaned", "already_cleaned", "already_cleaned"]);
   assert.equal(enabled.state.storeCalls, 3);
 
+  const laterBatchFailure = fakeScheduler({ enabled: true, candidateCount: 2 });
+  const originalExecuteCycle = laterBatchFailure.deps.executeVerifiedCycle;
+  let laterExecuteCalls = 0;
+  laterBatchFailure.deps.executeVerifiedCycle = async (args) => {
+    laterExecuteCalls += 1;
+    if (laterExecuteCalls === 3) {
+      const error = new Error("serialization failure in later batch");
+      error.code = "40001";
+      throw error;
+    }
+    return originalExecuteCycle(args);
+  };
+  const originalAutomaticStdoutWrite = process.stdout.write;
+  const originalAutomaticSummaryPath = process.env.GITHUB_STEP_SUMMARY;
+  let automaticFailureOutput = "";
+  delete process.env.GITHUB_STEP_SUMMARY;
+  process.stdout.write = (chunk) => {
+    automaticFailureOutput += String(chunk);
+    return true;
+  };
+  try {
+    await assert.rejects(
+      runAutomaticBotOnlyStageAutomation(laterBatchFailure),
+      (error) => error?.code === "40001",
+    );
+  } finally {
+    process.stdout.write = originalAutomaticStdoutWrite;
+    if (originalAutomaticSummaryPath === undefined) delete process.env.GITHUB_STEP_SUMMARY;
+    else process.env.GITHUB_STEP_SUMMARY = originalAutomaticSummaryPath;
+  }
+  const laterFailureReport = JSON.parse(automaticFailureOutput.trim());
+  assert.equal(laterFailureReport.sqlstate, "40001");
+  assert.equal(laterFailureReport.processed_batches.length, 1, "completed batch observability must survive a later failure");
+  assert.equal(laterFailureReport.processed_batches[0].batch_id, "100");
+  assert.equal(laterFailureReport.processed_batches[0].recovery_archive_sha256, "a".repeat(64));
+  assert.equal(laterFailureReport.processed_batches[0].recovery_manifest_sha256, "5".repeat(64));
+  assert.equal(laterFailureReport.processed_batches[0].storage_modified, null);
+
   const realCycle = fakeScheduler({ enabled: true, candidateCount: 1, realExecute: true });
   const realCycleTempRoot = fs.mkdtempSync("/tmp/chips-ledger-stage-automation-real-double-cycle-");
   realCycle.deps.tempRoot = realCycleTempRoot;

@@ -223,14 +223,43 @@ const automaticError = aggregatePayload({
   phase: "automatic.execute",
   batchId: "16",
   objectPath: "v1/sha256/" + "a".repeat(64) + ".jsonl.gz",
-  reason: new Error("EEXIST: local recovery bundle already exists"),
+  reason: Object.assign(new Error("serialization failure"), { code: "40001" }),
   deployedCommitSha: "f".repeat(40),
+  processed: [{
+    batchId: "17",
+    state: "cleaned",
+    retry: "already_cleaned",
+    objectPath: "v1/sha256/" + "b".repeat(64) + ".jsonl.gz",
+    compressedSha256: "c".repeat(64),
+    recoveryArchiveSha256: "d".repeat(64),
+    recoveryManifestSha256: "e".repeat(64),
+    storageModified: true,
+    pruneReceipt: "prune-17",
+    cleanupReceipt: "cleanup-17",
+    destructiveGoBatchId: "17",
+  }],
 });
 assert.equal(automaticError.source_policy_id, BOT_ONLY_RETENTION_POLICY_ID);
 assert.equal(automaticError.mode, "automatic");
 assert.equal(automaticError.phase, "automatic.execute");
 assert.equal(automaticError.batch_id, "16");
 assert.equal(automaticError.object_path, "v1/sha256/" + "a".repeat(64) + ".jsonl.gz");
+assert.equal(automaticError.sqlstate, "40001");
+assert.deepEqual(automaticError.processed_batches, [{
+  batch_id: "17",
+  state: "cleaned",
+  retry: "already_cleaned",
+  object_path: "v1/sha256/" + "b".repeat(64) + ".jsonl.gz",
+  transactions: null,
+  entries: null,
+  compressed_sha256: "c".repeat(64),
+  recovery_archive_sha256: "d".repeat(64),
+  recovery_manifest_sha256: "e".repeat(64),
+  storage_modified: true,
+  prune_receipt: "prune-17",
+  cleanup_receipt: "cleanup-17",
+  destructive_go_batch_id: "17",
+}]);
 
 const initFailureTemp = fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-observability-init-"));
 try {
