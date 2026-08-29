@@ -7,6 +7,7 @@ import postgres from "postgres";
 
 import {
   BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN,
+  assertAutomaticBotOnlyRecoveryReconstructionState,
   executeVerifiedCycle,
   runAutomaticBotOnlyStageAutomation,
 } from "../../scripts/ops/chips-ledger-stage-automation.mjs";
@@ -20,7 +21,10 @@ import {
 } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist.mjs";
 import { runLegacyStageAllowlistOrchestrator } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-orchestrator.mjs";
 import { LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13 } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-audit.mjs";
-import { buildRecoveryManifest } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
+import {
+  buildRecoveryManifest,
+  createPruneStore,
+} from "../../scripts/ops/chips-ledger-archive-prune.mjs";
 
 const root = process.cwd();
 const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-automation.yml", "utf8");
@@ -52,6 +56,71 @@ const ENV = Object.freeze({
   DEPLOYED_COMMIT_SHA: "f".repeat(40),
   CHIPS_LEDGER_BOT_ONLY_AUTOMATIC: "1",
 });
+
+function manifestSelectRowFromSchedulerRow(row) {
+  const asText = (value) => value == null ? null : String(value);
+  return {
+    object_path: row.object_path,
+    batch_id: asText(row.batch_id),
+    project_ref: row.project_ref,
+    format_version: asText(row.format_version),
+    cutoff: asText(row.cutoff),
+    cursor_start_created_at: asText(row.cursor_start_created_at),
+    cursor_start_id: asText(row.cursor_start_id),
+    cursor_end_created_at: asText(row.cursor_end_created_at),
+    cursor_end_id: asText(row.cursor_end_id),
+    first_created_at: asText(row.first_created_at),
+    last_created_at: asText(row.last_created_at),
+    transaction_count: asText(row.transaction_count),
+    entry_count: asText(row.entry_count),
+    tx_types: row.tx_types == null
+      ? null
+      : typeof row.tx_types === "string" ? row.tx_types : JSON.stringify(row.tx_types),
+    raw_bytes: asText(row.raw_bytes),
+    compressed_bytes: asText(row.compressed_bytes),
+    raw_sha256: row.raw_sha256,
+    compressed_sha256: row.compressed_sha256,
+    credits: asText(row.credits),
+    debits: asText(row.debits),
+    net_amount: asText(row.net_amount),
+    status: row.status,
+    committed_at: asText(row.committed_at),
+    source_policy_id: row.source_policy_id,
+    archived_transaction_ids_sha256: row.archived_transaction_ids_sha256,
+    archived_entry_ids_sha256: row.archived_entry_ids_sha256,
+    archive_proof_verified_at: asText(row.archive_proof_verified_at),
+    pruned_at: asText(row.pruned_at),
+    pruned_transaction_count: asText(row.pruned_transaction_count),
+    pruned_entry_count: asText(row.pruned_entry_count),
+    pruned_transaction_ids_sha256: row.pruned_transaction_ids_sha256,
+    pruned_entry_ids_sha256: row.pruned_entry_ids_sha256,
+    bot_only_table_id: asText(row.bot_only_table_id),
+    bot_only_table_count: asText(row.bot_only_table_count),
+    bot_only_newest_created_at: asText(row.bot_only_newest_created_at),
+    bot_only_registry_keys_sha256: row.bot_only_registry_keys_sha256,
+    bot_only_out_of_scope_keys_sha256: row.bot_only_out_of_scope_keys_sha256,
+    bot_only_identity_count: asText(row.bot_only_identity_count),
+    bot_only_eligible_count: asText(row.bot_only_eligible_count),
+    registry_cleaned_at: asText(row.registry_cleaned_at),
+    registry_cleaned_key_count: asText(row.registry_cleaned_key_count),
+    registry_cleaned_keys_sha256: row.registry_cleaned_keys_sha256,
+    bot_only_table_exists: row.bot_only_table_exists === true,
+    bot_only_retention_complete_at: asText(row.bot_only_retention_complete_at),
+    legacy_allowlist_sha256: row.legacy_allowlist_sha256,
+    legacy_batch_table_ids_sha256: row.legacy_batch_table_ids_sha256,
+    legacy_master_table_ids: row.legacy_master_table_ids ?? null,
+    legacy_master_table_count: asText(row.legacy_master_table_count),
+    legacy_batch_number: asText(row.legacy_batch_number),
+    legacy_batch_table_count: asText(row.legacy_batch_table_count),
+    legacy_source_run: row.legacy_source_run,
+    legacy_query_sha256: row.legacy_query_sha256,
+    legacy_stage_system_identifier: row.legacy_stage_system_identifier,
+    legacy_run_id: asText(row.legacy_run_id),
+    legacy_plan_sha256: row.legacy_plan_sha256,
+    destructive_go_at: asText(row.destructive_go_at),
+    destructive_go_batch_id: asText(row.destructive_go_batch_id),
+  };
+}
 
 function fakeScheduler({
   enabled = true,
@@ -118,8 +187,25 @@ function fakeScheduler({
     },
   };
 
+  const manifestSql = {
+    unsafe: async (query, values) => {
+      if (!query.includes("from public.chips_ledger_archive_batches batches")) {
+        throw new Error(`unexpected fake manifest SQL: ${query}`);
+      }
+      assert.match(
+        query,
+        /exists\s*\(\s*select 1\s+from public\.poker_tables tables\s+where tables\.id = batches\.bot_only_table_id\s*\)\s+as bot_only_table_exists/s,
+      );
+      assert.match(query, /where tables\.id = batches\.bot_only_table_id/);
+      assert.match(query, /where batches\.object_path = \$1/);
+      const row = manifests.get(values?.[0]);
+      return row ? [manifestSelectRowFromSchedulerRow(row)] : [];
+    },
+    begin: async (callback) => callback(manifestSql),
+  };
+  const productionPruneStore = createPruneStore(manifestSql);
   const pruneStore = {
-    getManifest: async (objectPath) => manifests.get(objectPath) || null,
+    getManifest: async (objectPath) => productionPruneStore.getManifest(objectPath),
   };
 
   const deps = {
@@ -285,29 +371,30 @@ function fakeScheduler({
       };
     },
     executeVerifiedCycle: realExecute ? undefined : async ({ row }) => {
+      const storedRow = manifests.get(row.object_path) || row;
       state.executeCalls += 1;
-      const count = (executionCounts.get(row.object_path) || 0) + 1;
-      executionCounts.set(row.object_path, count);
+      const count = (executionCounts.get(storedRow.object_path) || 0) + 1;
+      executionCounts.set(storedRow.object_path, count);
       if (failExecuteOnce && !state.failedOnce) {
         state.failedOnce = true;
-        executionCounts.set(row.object_path, count - 1);
+        executionCounts.set(storedRow.object_path, count - 1);
         throw new Error("simulated interruption between batches");
       }
       if (count === 1) {
-        row.pruned_at = "2026-08-25T00:00:01Z";
-        row.pruned_transaction_count = "1";
-        row.pruned_entry_count = "2";
-        row.pruned_transaction_ids_sha256 = row.archived_transaction_ids_sha256;
-        row.pruned_entry_ids_sha256 = row.archived_entry_ids_sha256;
-        row.registry_cleaned_at = "2026-08-25T00:00:02Z";
-        row.registry_cleaned_key_count = "1";
-        row.registry_cleaned_keys_sha256 = "1".repeat(64);
-        row.bot_only_retention_complete_at = "2026-08-25T00:00:03Z";
-        row.destructive_go_at = "2026-08-25T00:00:00Z";
-        row.destructive_go_batch_id = row.batch_id;
-        return { state: "cleaned", evidence: evidence(row.bot_only_table_id, "key:" + row.batch_id) };
+        storedRow.pruned_at = "2026-08-25T00:00:01Z";
+        storedRow.pruned_transaction_count = "1";
+        storedRow.pruned_entry_count = "2";
+        storedRow.pruned_transaction_ids_sha256 = storedRow.archived_transaction_ids_sha256;
+        storedRow.pruned_entry_ids_sha256 = storedRow.archived_entry_ids_sha256;
+        storedRow.registry_cleaned_at = "2026-08-25T00:00:02Z";
+        storedRow.registry_cleaned_key_count = "1";
+        storedRow.registry_cleaned_keys_sha256 = "1".repeat(64);
+        storedRow.bot_only_retention_complete_at = "2026-08-25T00:00:03Z";
+        storedRow.destructive_go_at = "2026-08-25T00:00:00Z";
+        storedRow.destructive_go_batch_id = storedRow.batch_id;
+        return { state: "cleaned", evidence: evidence(storedRow.bot_only_table_id, "key:" + storedRow.batch_id) };
       }
-      return { state: "already_cleaned", evidence: evidence(row.bot_only_table_id, "key:" + row.batch_id) };
+      return { state: "already_cleaned", evidence: evidence(storedRow.bot_only_table_id, "key:" + storedRow.batch_id) };
     },
   };
 
@@ -468,6 +555,30 @@ async function schedulerContracts() {
     initialRows: [proven.row],
     initialArchiveBytes: new Map([[proven.row.object_path, proven.archiveBytes]]),
   });
+  const refreshedProven = await legalRestart.deps.pruneStore.getManifest(proven.row.object_path);
+  assert.equal(refreshedProven.bot_only_table_exists, true);
+  assert.equal(refreshedProven.bot_only_retention_complete_at, null);
+  assert.equal(assertAutomaticBotOnlyRecoveryReconstructionState({
+    row: refreshedProven,
+    identity: "7656985631720456337",
+    evidence: {
+      transactionCount: refreshedProven.transaction_count,
+      entryCount: refreshedProven.entry_count,
+      transactionIdsSha256: refreshedProven.archived_transaction_ids_sha256,
+      entryIdsSha256: refreshedProven.archived_entry_ids_sha256,
+      txTypes: refreshedProven.tx_types,
+      credits: refreshedProven.credits,
+      debits: refreshedProven.debits,
+      net: refreshedProven.net_amount,
+      registryKeys: ["key:27"],
+      registryKeysSha256: refreshedProven.bot_only_registry_keys_sha256,
+      tableId: refreshedProven.bot_only_table_id,
+      distinctTables: 1,
+      outOfScopeKeysSha256: refreshedProven.bot_only_out_of_scope_keys_sha256,
+    },
+    dryRunState: "ready",
+    durable: null,
+  }), true);
   const legalRestartResult = await runAutomaticBotOnlyStageAutomation(legalRestart);
   assert.equal(legalRestartResult.processed.length, 1);
   assert.equal(legalRestartResult.processed[0].batchId, "27");
@@ -610,7 +721,7 @@ async function schedulerContracts() {
   assert.equal(controlFailureReport.current_batch.storage_modified, true);
   assert.equal(controlFailureReport.current_batch.recovery_archive_sha256, controlDurable.archiveSha256);
   assert.equal(controlFailureReport.current_batch.recovery_manifest_sha256, controlDurable.manifestSha256);
-  assert.equal(controlFailureReport.current_batch.destructive_go_batch_id, "100");
+  assert.equal(controlFailureReport.current_batch.destructive_go_batch_id, 100);
   assert.deepEqual(controlFailureReport.current_batch.prune_receipt, {
     at: "2026-08-25T00:00:01Z",
     transaction_count: "1",
@@ -620,7 +731,7 @@ async function schedulerContracts() {
   });
   assert.deepEqual(controlFailureReport.current_batch.cleanup_receipt, {
     at: "2026-08-25T00:00:02Z",
-    key_count: "1",
+    key_count: 1,
     keys_sha256: "1".repeat(64),
   });
 
@@ -1293,6 +1404,41 @@ async function disposablePostgresContract() {
         [fixture.key],
       ]);
       assert.equal(proof[0].result.state, "proof_registered");
+
+      const manifestStore = createPruneStore({
+        unsafe: (...args) => tx.unsafe(...args),
+        begin: async (callback) => callback(tx),
+      });
+      const refreshedManifest = await manifestStore.getManifest(fixture.objectPath);
+      assert.equal(refreshedManifest.bot_only_table_exists, true);
+      assert.equal(refreshedManifest.bot_only_retention_complete_at, null);
+      const hashLines = (values) => crypto.createHash("sha256")
+        .update(values.map((value) => `${value}\n`).join(""), "utf8")
+        .digest("hex");
+      const reconstructionEvidence = {
+        transactionCount: refreshedManifest.transaction_count,
+        entryCount: refreshedManifest.entry_count,
+        transactionIdsSha256: hashLines([fixture.transactionId]),
+        entryIdsSha256: hashLines(fixture.entryIds),
+        txTypes: refreshedManifest.tx_types,
+        credits: refreshedManifest.credits,
+        debits: refreshedManifest.debits,
+        net: refreshedManifest.net_amount,
+        registryKeys: [fixture.key],
+        registryKeysSha256: refreshedManifest.bot_only_registry_keys_sha256,
+        tableId: refreshedManifest.bot_only_table_id,
+        distinctTables: 1,
+        outOfScopeKeysSha256: refreshedManifest.bot_only_out_of_scope_keys_sha256,
+      };
+      assert.equal(refreshedManifest.archived_transaction_ids_sha256, reconstructionEvidence.transactionIdsSha256);
+      assert.equal(refreshedManifest.archived_entry_ids_sha256, reconstructionEvidence.entryIdsSha256);
+      assert.equal(assertAutomaticBotOnlyRecoveryReconstructionState({
+        row: refreshedManifest,
+        identity: "7656985631720456337",
+        evidence: reconstructionEvidence,
+        dryRunState: "ready",
+        durable: null,
+      }), true);
 
       const automatic = await tx.unsafe(`
         select public.chips_auto_prune_and_cleanup_bot_only_archive_batch(

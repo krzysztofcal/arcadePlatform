@@ -601,9 +601,14 @@ function manifestSelectSql() {
     registry_cleaned_at::text as registry_cleaned_at,
     registry_cleaned_key_count::text as registry_cleaned_key_count,
     registry_cleaned_keys_sha256,
+    exists (
+      select 1
+        from public.poker_tables tables
+       where tables.id = batches.bot_only_table_id
+    ) as bot_only_table_exists,
     (select tables.bot_only_retention_complete_at::text
        from public.poker_tables tables
-      where tables.id = bot_only_table_id) as bot_only_retention_complete_at,
+      where tables.id = batches.bot_only_table_id) as bot_only_retention_complete_at,
     legacy_allowlist_sha256,
     legacy_batch_table_ids_sha256,
     legacy_master_table_ids,
@@ -617,7 +622,7 @@ function manifestSelectSql() {
     legacy_plan_sha256,
     destructive_go_at::text as destructive_go_at,
     destructive_go_batch_id::text as destructive_go_batch_id
-  from public.chips_ledger_archive_batches where object_path = $1;`;
+  from public.chips_ledger_archive_batches batches where batches.object_path = $1;`;
 }
 
 export function createPruneStore(sql) {
