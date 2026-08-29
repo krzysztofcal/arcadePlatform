@@ -12,6 +12,7 @@ import {
 import {
   ARCHIVE_BUCKET,
   ARCHIVE_MAX_BYTES,
+  downloadPrivateArchiveObject,
   TABLE_IDENTITY_SUMMARY_ERROR_CODES,
   assertTableIdentitySummary,
   createManifestStore,
@@ -19,6 +20,7 @@ import {
   resolveStorageTarget,
   replaceVerifiedPrivateObject,
   storeArchive,
+  uploadOrVerifyPrivateObject,
   verifyArchiveBucket,
   verifyLocalArchive,
 } from "../../scripts/ops/chips-ledger-archive-store.mjs";
@@ -66,7 +68,9 @@ function makeFetch({ initialObject = null, bucketInitiallyExists = false, bucket
       return responseJson(bucket(), 200);
     }
     if (requestUrl.pathname.includes(`/storage/v1/object/authenticated/${ARCHIVE_BUCKET}/`) && method === "GET") {
-      return object ? new Response(object, { status: 200 }) : responseJson({ message: "not found" }, 400);
+      return object
+        ? new Response(object, { status: 200, headers: { "content-type": "application/gzip" } })
+        : responseJson({ message: "not found" }, 400);
     }
     if (requestUrl.pathname.includes(`/storage/v1/object/${ARCHIVE_BUCKET}/`) && method === "POST") {
       assert.equal(new Headers(init.headers).get("x-upsert"), "false");
@@ -347,6 +351,111 @@ try {
     publicBucketStorage.calls.map(({ method, path: requestPath }) => [method, requestPath]),
     [["GET", `/storage/v1/bucket/${ARCHIVE_BUCKET}`]],
     "read-only bucket verification must never create or update a bucket",
+  );
+
+  const privateObjectPath = `v1/sha256/${"a".repeat(64)}.jsonl.gz`;
+  const privateObjectBytes = Buffer.from("verified private archive");
+  const runPrivateGetScenario = async (outcomes) => {
+    const calls = [];
+    const sleeps = [];
+    const fetch = async (_url, init = {}) => {
+      const method = init.method || "GET";
+      calls.push({ method, headers: new Headers(init.headers || {}) });
+      const outcome = outcomes[calls.length - 1];
+      if (outcome instanceof Error) throw outcome;
+      if (outcome === 200) {
+        return new Response(privateObjectBytes, {
+          status: 200,
+          headers: { "content-type": "application/gzip" },
+        });
+      }
+      return new Response("temporary Storage failure", { status: outcome });
+    };
+    const value = await downloadPrivateArchiveObject(
+      resolveStorageTarget("stage", ENV),
+      privateObjectPath,
+      {
+        fetch,
+        sleep: (milliseconds) => { sleeps.push(milliseconds); },
+      },
+    );
+    return { value, calls, sleeps };
+  };
+
+  const recoveredAfter544 = await runPrivateGetScenario([544, 200]);
+  assert.equal(recoveredAfter544.calls.length, 2, "HTTP 544 may have one bounded retry");
+  assert.deepEqual(recoveredAfter544.sleeps, [50]);
+  assert.equal(recoveredAfter544.calls.every(({ method }) => method === "GET"), true);
+  assert.equal(recoveredAfter544.calls[0].headers.get("authorization"), `Bearer ${ENV.SUPABASE_SERVICE_ROLE_KEY}`);
+  assert.equal(recoveredAfter544.value.bytes.equals(privateObjectBytes), true);
+  assert.equal(recoveredAfter544.value.sha256, crypto.createHash("sha256").update(privateObjectBytes).digest("hex"));
+
+  const exhausted544Calls = [];
+  const exhausted544Sleeps = [];
+  await assert.rejects(
+    () => downloadPrivateArchiveObject(resolveStorageTarget("stage", ENV), privateObjectPath, {
+      fetch: async (_url, init = {}) => {
+        exhausted544Calls.push(init.method || "GET");
+        return new Response("persistent Storage failure", { status: 544 });
+      },
+      sleep: (milliseconds) => { exhausted544Sleeps.push(milliseconds); },
+    }),
+    /HTTP 544/,
+  );
+  assert.deepEqual(exhausted544Calls, ["GET", "GET", "GET"]);
+  assert.deepEqual(exhausted544Sleeps, [50, 100]);
+
+  for (const status of [400, 401, 402, 403, 404]) {
+    const calls = [];
+    const sleeps = [];
+    await assert.rejects(
+      () => downloadPrivateArchiveObject(resolveStorageTarget("stage", ENV), privateObjectPath, {
+        fetch: async (_url, init = {}) => {
+          calls.push(init.method || "GET");
+          return new Response("non-retryable Storage failure", { status });
+        },
+        sleep: (milliseconds) => { sleeps.push(milliseconds); },
+      }),
+      new RegExp(`HTTP ${status}`),
+    );
+    assert.deepEqual(calls, ["GET"]);
+    assert.deepEqual(sleeps, []);
+  }
+
+  const nonRetryableWriteCalls = [];
+  await assert.rejects(
+    () => uploadOrVerifyPrivateObject({
+      storageTarget: resolveStorageTarget("stage", ENV),
+      objectPath: `recovery/v1/sha256/${"b".repeat(64)}.jsonl.gz`,
+      bytes: privateObjectBytes,
+      deps: {
+        fetch: async (_url, init = {}) => {
+          const method = init.method || "GET";
+          nonRetryableWriteCalls.push(method);
+          if (method === "GET") return new Response("missing", { status: 404 });
+          return new Response("write failure", { status: 500 });
+        },
+        sleep: () => { throw new Error("Storage writes must never be retried"); },
+      },
+    }),
+    /HTTP 500/,
+  );
+  assert.deepEqual(nonRetryableWriteCalls, ["GET", "POST"]);
+
+  const transientNetworkError = Object.assign(new TypeError("temporary network failure"), { code: "ECONNRESET" });
+  const recoveredAfterNetwork = await runPrivateGetScenario([transientNetworkError, 200]);
+  assert.equal(recoveredAfterNetwork.calls.length, 2);
+  assert.deepEqual(recoveredAfterNetwork.sleeps, [50]);
+
+  await assert.rejects(
+    () => downloadPrivateArchiveObject(resolveStorageTarget("stage", ENV), privateObjectPath, {
+      fetch: async () => new Response(privateObjectBytes, {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      }),
+      sleep: () => { throw new Error("MIME verification must not retry"); },
+    }),
+    /unexpected MIME type/,
   );
 
   const firstStorage = makeFetch();

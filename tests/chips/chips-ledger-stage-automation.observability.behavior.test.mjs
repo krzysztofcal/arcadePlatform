@@ -225,6 +225,18 @@ const automaticError = aggregatePayload({
   objectPath: "v1/sha256/" + "a".repeat(64) + ".jsonl.gz",
   reason: Object.assign(new Error("serialization failure"), { code: "40001" }),
   deployedCommitSha: "f".repeat(40),
+  currentBatch: {
+    batchId: "16",
+    state: "in_progress",
+    objectPath: "v1/sha256/" + "a".repeat(64) + ".jsonl.gz",
+    compressedSha256: "a".repeat(64),
+    proof: "verified",
+    dryRun: "ready",
+    archiveStorageModified: true,
+    recoveryStorageModified: false,
+    storageModified: true,
+    dbMutationConfirmed: false,
+  },
   processed: [{
     batchId: "17",
     state: "cleaned",
@@ -233,6 +245,10 @@ const automaticError = aggregatePayload({
     compressedSha256: "c".repeat(64),
     recoveryArchiveSha256: "d".repeat(64),
     recoveryManifestSha256: "e".repeat(64),
+    proof: null,
+    dryRun: null,
+    archiveStorageModified: null,
+    recoveryStorageModified: null,
     storageModified: true,
     pruneReceipt: "prune-17",
     cleanupReceipt: "cleanup-17",
@@ -255,11 +271,24 @@ assert.deepEqual(automaticError.processed_batches, [{
   compressed_sha256: "c".repeat(64),
   recovery_archive_sha256: "d".repeat(64),
   recovery_manifest_sha256: "e".repeat(64),
+  proof: null,
+  dry_run: null,
+  archive_storage_modified: null,
+  recovery_storage_modified: null,
   storage_modified: true,
   prune_receipt: "prune-17",
   cleanup_receipt: "cleanup-17",
   destructive_go_batch_id: "17",
 }]);
+assert.equal(automaticError.current_batch.batch_id, "16");
+assert.equal(automaticError.current_batch.object_path, "v1/sha256/" + "a".repeat(64) + ".jsonl.gz");
+assert.equal(automaticError.current_batch.compressed_sha256, "a".repeat(64));
+assert.equal(automaticError.current_batch.proof, "verified");
+assert.equal(automaticError.current_batch.dry_run, "ready");
+assert.equal(automaticError.current_batch.archive_storage_modified, true);
+assert.equal(automaticError.current_batch.recovery_storage_modified, false);
+assert.equal(automaticError.current_batch.storage_modified, true);
+assert.equal(automaticError.current_batch.db_mutation_confirmed, false);
 
 const initFailureTemp = fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-observability-init-"));
 try {

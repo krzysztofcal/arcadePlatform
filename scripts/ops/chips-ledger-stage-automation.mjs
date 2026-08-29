@@ -43,10 +43,10 @@ export const STAGE_MAX_BATCH_SIZE = 5000;
 export const STAGE_RETENTION_DAYS = 30;
 // Schema-v2 keeps one complete table per archive batch so the lifecycle
 // receipt can prove and mark that table atomically.  The scheduler therefore
-// needs a bounded multi-batch run: 25 batches every 15 minutes gives a
-// theoretical 2,400-table/day ceiling, comfortably above the observed Stage
-// bot-table creation rate while keeping a single job within its timeout.
-export const BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN = 25;
+// needs a bounded multi-batch run: 8 batches every 15 minutes gives a
+// theoretical 768-table/day ceiling while keeping a single job within its
+// timeout margin.
+export const BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN = 8;
 export const STAGE_AUTOMATION_LOCK_KEY = `chips-ledger-stage-automation-v1:${STAGE_PROJECT_REF}`;
 export const BOT_ONLY_BATCH_15_RECOVERY_REPAIR = Object.freeze({
   batchId: "15",
@@ -113,6 +113,10 @@ function aggregateBatchPayload(batch) {
     compressed_sha256: batch.compressedSha256 || null,
     recovery_archive_sha256: batch.recoveryArchiveSha256 || null,
     recovery_manifest_sha256: batch.recoveryManifestSha256 || null,
+    proof: batch.proof || null,
+    dry_run: batch.dryRun || null,
+    archive_storage_modified: batch.archiveStorageModified ?? null,
+    recovery_storage_modified: batch.recoveryStorageModified ?? null,
     storage_modified: batch.storageModified ?? null,
     prune_receipt: batch.pruneReceipt || null,
     cleanup_receipt: batch.cleanupReceipt || null,
@@ -482,6 +486,7 @@ export function botOnlyReport({ row, identity, dry, durable, state, mode, deploy
     recoveryManifestSha256,
     recoveryArchivePath: durable?.archivePath || null,
     recoveryManifestPath: durable?.manifestPath || null,
+    dryRun: dry?.state || null,
     proof: row?.archive_proof_verified_at ? "verified" : null,
     receipt: row?.registry_cleaned_at ? "cleaned" : state === "prepared" ? "prepare-only" : null,
     destructiveGoBatchId: row?.destructive_go_batch_id || null,
@@ -496,6 +501,21 @@ function automaticRecoveryStorageModified(durable) {
     || durable?.recoveryManifest?.uploaded === true;
 }
 
+function automaticStorageMutation({ archiveStorageModified, recoveryStorageModified }) {
+  const archiveModified = archiveStorageModified == null ? null : archiveStorageModified === true;
+  const recoveryModified = recoveryStorageModified == null ? null : recoveryStorageModified === true;
+  const storageModified = archiveModified === true || recoveryModified === true
+    ? true
+    : archiveModified === false && recoveryModified === false
+      ? false
+      : null;
+  return {
+    archiveStorageModified: archiveModified,
+    recoveryStorageModified: recoveryModified,
+    storageModified,
+  };
+}
+
 function automaticBatchProgress({
   row,
   identity,
@@ -503,7 +523,8 @@ function automaticBatchProgress({
   durable,
   state,
   deployedCommitSha,
-  storageModified,
+  archiveStorageModified = false,
+  recoveryStorageModified = automaticRecoveryStorageModified(durable),
   executeState = null,
   executeConfirmed = false,
   dbMutationConfirmed = false,
@@ -519,7 +540,7 @@ function automaticBatchProgress({
       mode: "automatic",
       deployedCommitSha,
     }),
-    storageModified,
+    ...automaticStorageMutation({ archiveStorageModified, recoveryStorageModified }),
     executeState,
     executeConfirmed,
     dbMutationConfirmed,
@@ -946,27 +967,39 @@ export async function persistDurableRecovery(storageTarget, row, identity, evide
     : buildRecoveryManifest(row, identity, evidence, { target: "stage" });
   const manifestBytes = Buffer.from(`${stringifyJson(manifest)}\n`, "utf8");
   const manifestGzipBytes = gzipSync(manifestBytes, { level: 9, mtime: 0 });
-  const recoveryArchive = await uploadOrVerifyPrivateObject({
-    storageTarget,
-    objectPath: buildRecoveryArchiveObjectPath(row.compressed_sha256),
-    bytes: archiveBytes,
-    deps,
-  });
-  const recoveryManifest = await uploadOrVerifyPrivateObject({
-    storageTarget,
-    objectPath: buildRecoveryManifestObjectPath(row.compressed_sha256),
-    bytes: manifestGzipBytes,
-    deps,
-  });
-  const verified = await inspectDurableRecovery(storageTarget, row, deps);
-  if (!verified) fail("durable recovery copies disappeared after upload");
-  if (isBotOnlyRetentionBatch(row)) assertBotOnlyRecoveryManifest(verified.manifest, text(row.batch_id));
-  assertRecoveryManifestMatches(verified.manifest, manifest);
-  return {
-    ...verified,
-    recoveryArchive,
-    recoveryManifest,
-  };
+  let recoveryArchive = null;
+  let recoveryManifest = null;
+  try {
+    recoveryArchive = await uploadOrVerifyPrivateObject({
+      storageTarget,
+      objectPath: buildRecoveryArchiveObjectPath(row.compressed_sha256),
+      bytes: archiveBytes,
+      deps,
+    });
+    recoveryManifest = await uploadOrVerifyPrivateObject({
+      storageTarget,
+      objectPath: buildRecoveryManifestObjectPath(row.compressed_sha256),
+      bytes: manifestGzipBytes,
+      deps,
+    });
+    const verified = await inspectDurableRecovery(storageTarget, row, deps);
+    if (!verified) fail("durable recovery copies disappeared after upload");
+    if (isBotOnlyRetentionBatch(row)) assertBotOnlyRecoveryManifest(verified.manifest, text(row.batch_id));
+    assertRecoveryManifestMatches(verified.manifest, manifest);
+    return {
+      ...verified,
+      recoveryArchive,
+      recoveryManifest,
+    };
+  } catch (error) {
+    const recoveryStorageModified = recoveryArchive?.uploaded === true || recoveryManifest?.uploaded === true
+      ? true
+      : recoveryArchive && recoveryManifest
+        ? false
+        : null;
+    error.storageMutation = { recoveryStorageModified };
+    throw error;
+  }
 }
 
 export async function runBotOnlyRecoveryRepair({ env = process.env, deps = {}, batchId = "15" } = {}) {
@@ -2027,6 +2060,20 @@ export async function runAutomaticBotOnlyStageAutomation({
           let activeRow = assertAutomaticBotOnlyRows(ownRows);
           if (activeRow) markAutomaticPhase("automatic.manifest", activeRow);
 
+          let activeArchiveStorageModified = false;
+          if (activeRow) {
+            currentBatch = automaticBatchProgress({
+              row: activeRow,
+              identity,
+              dry: null,
+              durable: null,
+              state: "in_progress",
+              deployedCommitSha,
+              archiveStorageModified: false,
+              recoveryStorageModified: false,
+            });
+          }
+
           const resumePending = async (row) => {
             markAutomaticPhase("automatic.resume", row);
             const artifactPath = path.join(tempRoot, "pending-bot-only-" + String(index) + ".archive.jsonl.gz");
@@ -2054,6 +2101,17 @@ export async function runAutomaticBotOnlyStageAutomation({
               deps: { ...deps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
             });
             if (stored.objectPath !== row.object_path) fail("incomplete automatic bot-only manifest changed its object path");
+            activeArchiveStorageModified = stored.object?.uploaded === true;
+            currentBatch = automaticBatchProgress({
+              row: stored.manifest || row,
+              identity,
+              dry: null,
+              durable: null,
+              state: "in_progress",
+              deployedCommitSha,
+              archiveStorageModified: activeArchiveStorageModified,
+              recoveryStorageModified: false,
+            });
             const refreshed = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
             if (refreshed.status !== "committed") fail("incomplete automatic bot-only manifest was not committed");
             return refreshed;
@@ -2064,10 +2122,30 @@ export async function runAutomaticBotOnlyStageAutomation({
             await assertAdvisoryLock(sql, lockSession);
           }
 
-          const prepareAndExecute = async (row) => {
+          const prepareAndExecute = async (row, { archiveStorageModified = false } = {}) => {
             markAutomaticPhase("automatic.manifest", row);
+            currentBatch = automaticBatchProgress({
+              row,
+              identity,
+              dry: null,
+              durable: null,
+              state: "in_progress",
+              deployedCommitSha,
+              archiveStorageModified,
+              recoveryStorageModified: false,
+            });
             row = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
             markAutomaticPhase("automatic.manifest", row);
+            currentBatch = automaticBatchProgress({
+              row,
+              identity,
+              dry: null,
+              durable: null,
+              state: "in_progress",
+              deployedCommitSha,
+              archiveStorageModified,
+              recoveryStorageModified: false,
+            });
             const hadProofBeforeResume = Boolean(row.archive_proof_verified_at);
             if (!row.archive_proof_verified_at) {
               markAutomaticPhase("automatic.proof", row);
@@ -2084,6 +2162,16 @@ export async function runAutomaticBotOnlyStageAutomation({
               });
               row = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
               markAutomaticPhase("automatic.manifest", row);
+              currentBatch = automaticBatchProgress({
+                row,
+                identity,
+                dry: null,
+                durable: null,
+                state: "in_progress",
+                deployedCommitSha,
+                archiveStorageModified,
+                recoveryStorageModified: false,
+              });
             }
             markAutomaticPhase("automatic.dry-run", row);
             const dry = await runPruneStep({
@@ -2097,9 +2185,30 @@ export async function runAutomaticBotOnlyStageAutomation({
               verifyBucket,
               storageDeps: deps,
             });
+            currentBatch = automaticBatchProgress({
+              row,
+              identity,
+              dry,
+              durable: null,
+              state: dry.state === "already_cleaned" ? "already_cleaned" : "in_progress",
+              deployedCommitSha,
+              archiveStorageModified,
+              recoveryStorageModified: false,
+            });
             if (dry.state === "already_cleaned") {
               if (cleanupReceiptFieldCount(row) !== 3) fail("automatic bot-only manifest has a partial completed receipt");
-              return { row, dry, durable: null, executed: { state: "already_cleaned" }, retry: null };
+              return {
+                row,
+                dry,
+                durable: null,
+                executed: { state: "already_cleaned" },
+                retry: null,
+                archiveStorageModified,
+                storageMutation: automaticStorageMutation({
+                  archiveStorageModified,
+                  recoveryStorageModified: false,
+                }),
+              };
             }
             if (dry.state !== "ready") fail("automatic bot-only Stage dry-run did not become ready: " + dry.state);
             markAutomaticPhase("automatic.recovery", row);
@@ -2108,7 +2217,28 @@ export async function runAutomaticBotOnlyStageAutomation({
             let durable = existing;
             if (!durable) {
               const mainArchive = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, deps);
-              durable = await persistRecovery(storageTarget, row, identity, dry.evidence, mainArchive.bytes, deps);
+              if (!Buffer.isBuffer(mainArchive?.bytes)
+                || (mainArchive.sha256 != null && mainArchive.sha256 !== sha256(mainArchive.bytes))) {
+                fail("downloaded main archive checksum verification failed");
+              }
+              try {
+                durable = await persistRecovery(storageTarget, row, identity, dry.evidence, mainArchive.bytes, deps);
+              } catch (error) {
+                const recoveryStorageModified = Object.hasOwn(error?.storageMutation || {}, "recoveryStorageModified")
+                  ? error.storageMutation.recoveryStorageModified
+                  : null;
+                currentBatch = automaticBatchProgress({
+                  row,
+                  identity,
+                  dry,
+                  durable: null,
+                  state: "in_progress",
+                  deployedCommitSha,
+                  archiveStorageModified,
+                  recoveryStorageModified,
+                });
+                throw error;
+              }
             }
             currentBatch = automaticBatchProgress({
               row,
@@ -2117,7 +2247,7 @@ export async function runAutomaticBotOnlyStageAutomation({
               durable,
               state: "in_progress",
               deployedCommitSha,
-              storageModified: automaticRecoveryStorageModified(durable),
+              archiveStorageModified,
             });
             await assertAdvisoryLock(sql, lockSession);
             markAutomaticPhase("automatic.execute", row);
@@ -2141,7 +2271,7 @@ export async function runAutomaticBotOnlyStageAutomation({
               durable,
               state: executed.state,
               deployedCommitSha,
-              storageModified: currentBatch.storageModified,
+              archiveStorageModified,
               executeState: executed.state,
               executeConfirmed: executed.state === "cleaned",
               dbMutationConfirmed: executed.state === "cleaned",
@@ -2155,7 +2285,7 @@ export async function runAutomaticBotOnlyStageAutomation({
               durable,
               state: executed.state,
               deployedCommitSha,
-              storageModified: currentBatch.storageModified,
+              archiveStorageModified,
               executeState: executed.state,
               executeConfirmed: currentBatch.executeConfirmed,
               dbMutationConfirmed: currentBatch.dbMutationConfirmed,
@@ -2189,7 +2319,7 @@ export async function runAutomaticBotOnlyStageAutomation({
               durable,
               state: executed.state,
               deployedCommitSha,
-              storageModified: currentBatch.storageModified,
+              archiveStorageModified,
               executeState: executed.state,
               executeConfirmed: currentBatch.executeConfirmed,
               dbMutationConfirmed: currentBatch.dbMutationConfirmed,
@@ -2201,11 +2331,18 @@ export async function runAutomaticBotOnlyStageAutomation({
               durable,
               executed,
               retry,
+              archiveStorageModified,
+              storageMutation: automaticStorageMutation({
+                archiveStorageModified,
+                recoveryStorageModified: currentBatch.recoveryStorageModified,
+              }),
             };
           };
 
           if (activeRow) {
-            const cycle = await prepareAndExecute(activeRow);
+            const cycle = await prepareAndExecute(activeRow, {
+              archiveStorageModified: activeArchiveStorageModified,
+            });
             processed.push({
               ...botOnlyReport({
                 row: cycle.row,
@@ -2216,7 +2353,10 @@ export async function runAutomaticBotOnlyStageAutomation({
                 mode: "automatic",
                 deployedCommitSha,
               }),
-              storageModified: automaticRecoveryStorageModified(cycle.durable),
+              ...(cycle.storageMutation || automaticStorageMutation({
+                archiveStorageModified: cycle.archiveStorageModified,
+                recoveryStorageModified: automaticRecoveryStorageModified(cycle.durable),
+              })),
               retry: cycle.retry?.state || null,
             });
             currentBatch = null;
@@ -2259,9 +2399,22 @@ export async function runAutomaticBotOnlyStageAutomation({
             cwd: tempRoot,
             deps: { ...deps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
           });
+          const archiveStorageModified = stored.object?.uploaded === true;
+          if (stored.manifest) {
+            currentBatch = automaticBatchProgress({
+              row: stored.manifest,
+              identity,
+              dry: null,
+              durable: null,
+              state: "in_progress",
+              deployedCommitSha,
+              archiveStorageModified,
+              recoveryStorageModified: false,
+            });
+          }
           const row = await refreshPolicyRow(pruneStore, stored.objectPath, BOT_ONLY_RETENTION_POLICY_ID);
           markAutomaticPhase("automatic.manifest", row);
-          const cycle = await prepareAndExecute(row);
+          const cycle = await prepareAndExecute(row, { archiveStorageModified });
           processed.push({
             ...botOnlyReport({
               row: cycle.row,
@@ -2272,7 +2425,10 @@ export async function runAutomaticBotOnlyStageAutomation({
               mode: "automatic",
               deployedCommitSha,
             }),
-            storageModified: automaticRecoveryStorageModified(cycle.durable),
+            ...(cycle.storageMutation || automaticStorageMutation({
+              archiveStorageModified: cycle.archiveStorageModified,
+              recoveryStorageModified: automaticRecoveryStorageModified(cycle.durable),
+            })),
             retry: cycle.retry?.state || null,
           });
           currentBatch = null;

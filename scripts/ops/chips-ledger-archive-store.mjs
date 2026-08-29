@@ -54,6 +54,21 @@ const LEGACY_STAGE_ALLOWLIST_FREEZE_RUN_ID = "32771521144";
 const LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN = "32753223679";
 const LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256 = "aa82076e7e4d7fd1e027889be94868e5662652cc29ae2dc7b55a4196b260ed0e";
 const REPLACEMENT_VERIFICATION_MAX_GETS = 2;
+export const STORAGE_GET_MAX_ATTEMPTS = 3;
+export const STORAGE_GET_RETRY_BACKOFF_MS = Object.freeze([50, 100]);
+const TRANSIENT_STORAGE_NETWORK_ERROR_CODES = new Set([
+  "ECONNABORTED",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "EAI_AGAIN",
+  "ETIMEDOUT",
+  "ERR_SOCKET_TIMEOUT",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_SOCKET",
+]);
 
 const HELP = `Usage: node scripts/ops/chips-ledger-archive-store.mjs [options]
 
@@ -644,16 +659,50 @@ export function buildRecoveryManifestObjectPath(manifestOrSha) {
   return `recovery/v1/sha256/${sha}.recovery.json.gz`;
 }
 
+export function isTransientStorageNetworkError(error) {
+  const codes = [
+    error?.code,
+    error?.cause?.code,
+    error?.cause?.cause?.code,
+  ];
+  if (codes.some((code) => TRANSIENT_STORAGE_NETWORK_ERROR_CODES.has(code))) return true;
+  return error?.name === "TypeError"
+    && /fetch failed|network|socket|timed out|timeout|temporary/i.test(String(error?.message || ""));
+}
+
+async function waitForStorageGetRetry(deps, attempt) {
+  const sleep = deps.sleep || ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+  const delay = STORAGE_GET_RETRY_BACKOFF_MS[Math.min(attempt - 1, STORAGE_GET_RETRY_BACKOFF_MS.length - 1)];
+  await sleep(delay);
+}
+
 async function storageRequest(storageTarget, requestPath, options = {}, deps = {}) {
   const fetchImpl = deps.fetch || fetch;
-  return fetchImpl(`${storageTarget.baseUrl}${requestPath}`, {
+  const method = String(options.method || "GET").toUpperCase();
+  const request = {
     ...options,
     headers: {
       apikey: storageTarget.serviceKey,
       Authorization: `Bearer ${storageTarget.serviceKey}`,
       ...(options.headers || {}),
     },
-  });
+  };
+  const maxAttempts = method === "GET" ? STORAGE_GET_MAX_ATTEMPTS : 1;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetchImpl(`${storageTarget.baseUrl}${requestPath}`, request);
+      if (method !== "GET"
+        || response.status < 500
+        || response.status > 599
+        || attempt === maxAttempts) {
+        return response;
+      }
+    } catch (error) {
+      if (method !== "GET" || !isTransientStorageNetworkError(error) || attempt === maxAttempts) throw error;
+    }
+    await waitForStorageGetRetry(deps, attempt);
+  }
+  throw new Error("Storage GET retry loop exhausted unexpectedly");
 }
 
 function storageFailure(operation, response) {
@@ -810,6 +859,9 @@ function verifyDownloadedBytes(localArchive, downloaded) {
 async function downloadObject(localArchive, storageTarget, deps = {}) {
   const response = await storageRequest(storageTarget, objectRequestPath(localArchive.objectPath), { method: "GET" }, deps);
   if (!response.ok) return { response, downloaded: null };
+  if ((response.headers.get("content-type") || "").split(";", 1)[0].trim() !== ARCHIVE_MIME_TYPE) {
+    fail(`private archive object has an unexpected MIME type: ${localArchive.objectPath}`);
+  }
   return { response, downloaded: Buffer.from(await response.arrayBuffer()) };
 }
 
@@ -817,8 +869,13 @@ export async function downloadPrivateArchiveObject(storageTarget, objectPath, de
   const startedAt = Date.now();
   const response = await storageRequest(storageTarget, objectRequestPath(objectPath), { method: "GET" }, deps);
   if (!response.ok) storageFailure("private object download", response);
+  if ((response.headers.get("content-type") || "").split(";", 1)[0].trim() !== ARCHIVE_MIME_TYPE) {
+    fail(`private archive object has an unexpected MIME type: ${objectPath}`);
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
   return {
-    bytes: Buffer.from(await response.arrayBuffer()),
+    bytes,
+    sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
     downloadMs: Date.now() - startedAt,
   };
 }

@@ -12,11 +12,11 @@ canonical Stage project `krydukthwdvccggbyjfw` and PostgreSQL system identifier
 - The existing 30-day Stage maintenance runs once per day with a strict
   30-day cutoff.
 - After the separate bot-only policy is activated by its exact database GO, the
-  7-day cleanup schedule runs every 15 minutes and processes at most 25
+  7-day cleanup schedule runs every 15 minutes and processes at most 8
   complete-table batches per invocation. Schema-v2 intentionally keeps one
   table per batch for an atomic lifecycle receipt; the bounded schedule
-  provides a theoretical 2,400-table/day ceiling, above the observed Stage
-  bot-table creation rate.
+  provides a theoretical 768-table/day ceiling while preserving job timeout
+  margin.
 - The first bot-only canary is an explicit prepare/authorize/execute sequence:
   dispatch `bot-only-7d-prepare-only`, record the exact committed `batch_id`,
   then dispatch `bot-only-7d-execute` with both `approved_batch_id` and the
@@ -64,8 +64,8 @@ the next candidate during execute:
 
 The canary path is distinct from the activated automatic policy. The 15-minute
 schedule is the only automatic 7-day trigger; the existing 30-day policy keeps
-its once-daily schedule. Automatic cleanup remains bounded at 25 batches per
-run, which is at most 2,400 complete tables per day.
+its once-daily schedule. Automatic cleanup remains bounded at 8 batches per
+run, which is at most 768 complete tables per day.
 
 ## Recovery durability
 
@@ -84,6 +84,17 @@ the target identity, policy ID, archive metadata and immutable ID proof. Upload
 is followed by private download and byte/SHA verification for both objects.
 Execute is refused until both copies match the expected bytes. Restore uses
 these recovery objects and does not require the primary archive object.
+
+Authenticated Storage `GET` requests use at most three total attempts with a
+short backoff, and retry only 5xx responses or transient network failures.
+Client/auth/not-found responses are not retried, and Storage writes are never
+retried. Every successful download still requires the expected MIME type and
+byte/SHA-256 verification.
+
+Automatic error reports retain both completed `processed_batches` and the
+current in-progress batch. They distinguish `archive_storage_modified` from
+`recovery_storage_modified`; `storage_modified` is their explicitly known
+aggregate and is null when a partial operation leaves the outcome unknown.
 
 The local working bundle remains `0700` with `0600` files. A partial, different,
 or missing durable copy is fail-closed. After a post-commit runner failure,

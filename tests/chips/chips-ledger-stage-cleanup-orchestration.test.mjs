@@ -56,6 +56,7 @@ function fakeScheduler({
   candidateCount = 3,
   blockingAfter = null,
   failExecuteOnce = false,
+  failDownloadBeforeRecovery = false,
   realExecute = false,
 } = {}) {
   const manifests = new Map();
@@ -69,6 +70,7 @@ function fakeScheduler({
     realExecuteCalls: 0,
     destructiveSqlMutations: 0,
     failedOnce: false,
+    mainArchiveDownloads: 0,
   };
 
   const evidence = (tableId, key) => ({
@@ -172,7 +174,7 @@ function fakeScheduler({
       };
       manifests.set(objectPath, row);
       ownRows.unshift(row);
-      return { objectPath };
+      return { objectPath, manifest: row, object: { uploaded: true } };
     },
     pruneArchive: async ({ argv }) => {
       const objectPath = argv[argv.indexOf("--object-path") + 1];
@@ -224,7 +226,11 @@ function fakeScheduler({
       durable.set(row.object_path, value);
       return value;
     },
-    downloadPrivateArchive: async () => ({ bytes: Buffer.from("archive"), downloadMs: 0 }),
+    downloadPrivateArchive: async () => {
+      state.mainArchiveDownloads += 1;
+      if (failDownloadBeforeRecovery) throw new Error("simulated main archive download failure");
+      return { bytes: Buffer.from("archive"), downloadMs: 0 };
+    },
     executeVerifiedCycle: realExecute ? undefined : async ({ row }) => {
       state.executeCalls += 1;
       const count = (executionCounts.get(row.object_path) || 0) + 1;
@@ -365,6 +371,10 @@ async function schedulerContracts() {
   assert.equal(controlFailureReport.current_batch.execute_confirmed, true);
   assert.equal(controlFailureReport.current_batch.db_mutation_confirmed, true);
   assert.equal(controlFailureReport.current_batch.retry_state, null);
+  assert.equal(controlFailureReport.current_batch.proof, "verified");
+  assert.equal(controlFailureReport.current_batch.dry_run, "ready");
+  assert.equal(controlFailureReport.current_batch.archive_storage_modified, true);
+  assert.equal(controlFailureReport.current_batch.recovery_storage_modified, true);
   assert.equal(controlFailureReport.current_batch.storage_modified, true);
   assert.equal(controlFailureReport.current_batch.recovery_archive_sha256, "a".repeat(64));
   assert.equal(controlFailureReport.current_batch.recovery_manifest_sha256, "5".repeat(64));
@@ -408,6 +418,10 @@ async function schedulerContracts() {
   assert.equal(recoveryFailureReport.current_batch.execute_state, null);
   assert.equal(recoveryFailureReport.current_batch.execute_confirmed, false);
   assert.equal(recoveryFailureReport.current_batch.db_mutation_confirmed, false);
+  assert.equal(recoveryFailureReport.current_batch.proof, "verified");
+  assert.equal(recoveryFailureReport.current_batch.dry_run, "ready");
+  assert.equal(recoveryFailureReport.current_batch.archive_storage_modified, true);
+  assert.equal(recoveryFailureReport.current_batch.recovery_storage_modified, true);
   assert.equal(recoveryFailureReport.current_batch.storage_modified, true);
   assert.equal(recoveryFailureReport.current_batch.recovery_archive_sha256, "a".repeat(64));
   assert.equal(recoveryFailureReport.current_batch.recovery_manifest_sha256, "5".repeat(64));
@@ -419,6 +433,39 @@ async function schedulerContracts() {
     recoveryFailureReport.current_batch.recovery_manifest_path,
     "recovery/v1/sha256/" + "a".repeat(64) + ".recovery.json.gz",
   );
+
+  const earlyRecoveryFailure = fakeScheduler({ enabled: true, candidateCount: 1, failDownloadBeforeRecovery: true });
+  const earlyOriginalStdoutWrite = process.stdout.write;
+  const earlyOriginalSummaryPath = process.env.GITHUB_STEP_SUMMARY;
+  let earlyFailureOutput = "";
+  delete process.env.GITHUB_STEP_SUMMARY;
+  process.stdout.write = (chunk) => {
+    earlyFailureOutput += String(chunk);
+    return true;
+  };
+  try {
+    await assert.rejects(
+      runAutomaticBotOnlyStageAutomation(earlyRecoveryFailure),
+      /simulated main archive download failure/,
+    );
+  } finally {
+    process.stdout.write = earlyOriginalStdoutWrite;
+    if (earlyOriginalSummaryPath === undefined) delete process.env.GITHUB_STEP_SUMMARY;
+    else process.env.GITHUB_STEP_SUMMARY = earlyOriginalSummaryPath;
+  }
+  const earlyFailureReport = JSON.parse(earlyFailureOutput.trim());
+  assert.equal(earlyFailureReport.processed_batches.length, 0);
+  assert.equal(earlyFailureReport.current_batch.batch_id, "100");
+  assert.equal(earlyFailureReport.current_batch.object_path, "v1/sha256/" + "a".repeat(64) + ".jsonl.gz");
+  assert.equal(earlyFailureReport.current_batch.compressed_sha256, "a".repeat(64));
+  assert.equal(earlyFailureReport.current_batch.proof, "verified");
+  assert.equal(earlyFailureReport.current_batch.dry_run, "ready");
+  assert.equal(earlyFailureReport.current_batch.archive_storage_modified, true);
+  assert.equal(earlyFailureReport.current_batch.recovery_storage_modified, false);
+  assert.equal(earlyFailureReport.current_batch.storage_modified, true);
+  assert.equal(earlyFailureReport.current_batch.recovery_archive_sha256, null);
+  assert.equal(earlyFailureReport.current_batch.recovery_manifest_sha256, null);
+  assert.equal(earlyFailureReport.current_batch.db_mutation_confirmed, false);
 
   const laterBatchFailure = fakeScheduler({ enabled: true, candidateCount: 2 });
   const originalExecuteCycle = laterBatchFailure.deps.executeVerifiedCycle;
@@ -701,7 +748,8 @@ function staticWorkflowContracts() {
   assert.match(orchestratorSource, /LEGACY_STAGE_ALLOWLIST_ORCHESTRATOR_MAX_BATCHES_PER_RUN/);
   assert.match(orchestratorSource, /assertLegacyBatchRows/);
   assert.match(orchestratorSource, /process\.argv\.slice\(2\)\.length !== 0/);
-  assert.match(automationSource, /BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN = 25/);
+  assert.equal(BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN, 8);
+  assert.match(automationSource, /BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN = 8/);
   assert.match(workflow, /- cron: "\*\/15 \* \* \* \*"/);
   assert.match(automationSource, /automatic_policy_disabled/);
   assert.match(automationSource, /automatic bot-only Stage retention requires an active fence and enforcement/);
