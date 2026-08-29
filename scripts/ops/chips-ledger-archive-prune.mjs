@@ -601,6 +601,9 @@ function manifestSelectSql() {
     registry_cleaned_at::text as registry_cleaned_at,
     registry_cleaned_key_count::text as registry_cleaned_key_count,
     registry_cleaned_keys_sha256,
+    (select tables.bot_only_retention_complete_at::text
+       from public.poker_tables tables
+      where tables.id = bot_only_table_id) as bot_only_retention_complete_at,
     legacy_allowlist_sha256,
     legacy_batch_table_ids_sha256,
     legacy_master_table_ids,
@@ -985,6 +988,10 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
       ? await deps.downloadArchive(target, row.object_path)
       : await downloadPrivateArchiveObject(target, row.object_path, deps);
     const archiveBytes = Buffer.from(downloaded.bytes);
+    const archiveSha256 = crypto.createHash("sha256").update(archiveBytes).digest("hex");
+    if (downloaded.sha256 != null && downloaded.sha256 !== archiveSha256) {
+      fail("downloaded archive checksum is self-inconsistent");
+    }
     const archiveManifest = exporterManifestFromDatabase(row, target, deps.legacyStageAllowlistPlan);
     const localArchive = verifyArchiveBytes({
       compressedBytes: archiveBytes,
@@ -1015,6 +1022,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
         mode: "register-proof",
         state: proof?.state || "proof_registered",
         storageDownloadMs: downloaded.downloadMs,
+        archiveSha256,
       };
       if (deps.emit !== false) outputResult(result);
       return result;
@@ -1121,6 +1129,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
       storageDownloadMs: downloaded.downloadMs,
       postCommitDownloadMs,
       recoveryBundle,
+      archiveSha256,
     };
     if (deps.emit !== false) outputResult(result);
     return result;

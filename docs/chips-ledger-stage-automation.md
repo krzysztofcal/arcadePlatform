@@ -96,10 +96,15 @@ current in-progress batch. They distinguish `archive_storage_modified` from
 `recovery_storage_modified`; `storage_modified` is their explicitly known
 aggregate and is null when a partial operation leaves the outcome unknown.
 
-The local working bundle remains `0700` with `0600` files. A partial, different,
-or missing durable copy is fail-closed. After a post-commit runner failure,
-receipt/mappings and the normal `already_pruned` path are used; no blind retry or
-new batch is created.
+The local working bundle remains `0700` with `0600` files. A partial or
+different durable copy is fail-closed. Automatic mode may reconstruct a pair
+only for a canonical committed, proven, unpruned and uncleaned bot-only Stage
+batch with no destructive GO, a ready read-only dry-run, and both recovery
+objects explicitly confirmed absent. It re-downloads the primary object,
+requires byte/SHA equality with the dry-run and committed proof, generates the
+canonical manifest, and uses create-only uploads followed by full verification.
+After a post-commit runner failure, receipt/mappings and the normal
+`already_cleaned` path are used; no blind retry or new batch is created.
 
 ## Operator runbook
 
@@ -127,15 +132,15 @@ than one incomplete manifest, an invalid policy, or another ambiguous state:
    Storage objects untouched unless the owner approves a controlled recovery
    repair; the automation must continue to fail closed.
 
-### Missing or partial durable recovery
+### Partial or ambiguous durable recovery
 
-For a proven or pruned cycle, both recovery objects are mandatory. If either
-object is missing, has the wrong MIME type/size/SHA-256, cannot be privately
-downloaded, or the pair is otherwise partial:
+For a proven or pruned cycle, both recovery objects are mandatory. If exactly
+one object is present, either object has the wrong MIME type/size/SHA-256,
+cannot be privately downloaded, or the pair is otherwise partial:
 
 1. Do not run `--execute`, register a new proof, overwrite an existing object,
    or start a new archive batch. The primary archive object is not a substitute
-   for the recovery pair.
+   for a partial recovery pair.
 2. Preserve the manifest and the surviving object. Confirm that the expected
    paths are derived from the immutable compressed SHA-256 and that no object
    at either path differs from the expected bytes.
@@ -151,13 +156,16 @@ downloaded, or the pair is otherwise partial:
 
 ### Proven without recovery
 
-This is the state `archive_proof_verified_at` is complete while `pruned_at` is
-still null and no complete durable pair exists. It is not permission to retry
-the prune. Stop the run, preserve the immutable proof and primary manifest,
-repair/verify the two private recovery objects through the procedure above,
-and then let the normal cycle repeat its dry-run and all revalidation checks.
-The next allowed path is proof revalidation followed by recovery verification
-and only then execute; there is no operator shortcut.
+This is the state `archive_proof_verified_at` is complete while `pruned_at`,
+`registry_cleaned_at`, the destructive GO, and the TABLE lifecycle marker are
+still null and both recovery objects are absent. Automatic mode may recover
+this state only after a ready read-only dry-run revalidates the primary object
+and proves that its bytes and ID evidence match the committed SHA/proof. It
+then creates both deterministic recovery objects with `x-upsert:false` and
+rechecks their MIME, bytes, SHA-256, gzip, JSON, and canonical manifest before
+the normal double-cycle executes. A partial/ambiguous pair, any lifecycle
+receipt or GO, missing/foreign primary object, or any proof/manifest mismatch
+remains blocked and requires owner-approved recovery.
 
 ### Post-commit or already-pruned recovery
 
@@ -174,11 +182,13 @@ session advisory lock held for the entire cycle. A busy lock is a no-op; a lost
 lock session aborts the cycle. Pending, partial, mismatched or otherwise
 ambiguous own manifests stop the run and are reported in the aggregate Job
 Summary. A committed manifest with no proof can resume only through the normal
-proof/dry-run path. A proven manifest must have a complete durable recovery
-pair; with that pair it is fully revalidated before execute, while a missing or
-partial pair is fail-closed. A pruned manifest with a complete pair is
-rechecked through `already_pruned`. Every allowed resume repeats identity,
-policy, archive, recovery, proof, receipt and mapping verification.
+proof/dry-run path. A proven unpruned, uncleaned manifest with no GO may create
+its pair only through the constrained automatic reconstruction path above; all
+other proven manifests require a complete durable pair. With a pair it is
+fully revalidated before execute, while a missing or partial pair after prune,
+cleanup, GO, or an ambiguous Storage result is fail-closed. A completed
+manifest is rechecked through `already_cleaned`. Every allowed resume repeats
+identity, policy, archive, recovery, proof, receipt and mapping verification.
 
 Logs and Job Summary contain only aggregate counts, sizes, hashes and state. They
 never contain ledger records, credentials, DB URLs, service keys or recovery

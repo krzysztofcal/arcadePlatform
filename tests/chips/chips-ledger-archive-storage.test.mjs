@@ -442,6 +442,58 @@ try {
   );
   assert.deepEqual(nonRetryableWriteCalls, ["GET", "POST"]);
 
+  const racedObjectPath = `recovery/v1/sha256/${"c".repeat(64)}.jsonl.gz`;
+  const racedBytes = Buffer.from("recovery bytes written by the concurrent worker");
+  let racedObject = null;
+  const racedCalls = [];
+  const racedFetch = async (url, init = {}) => {
+    const method = init.method || "GET";
+    racedCalls.push({ method, headers: new Headers(init.headers || {}) });
+    if (method === "GET") {
+      return racedObject
+        ? new Response(racedObject, { status: 200, headers: { "content-type": "application/gzip" } })
+        : new Response("missing", { status: 404 });
+    }
+    assert.equal(method, "POST");
+    assert.equal(new Headers(init.headers).get("x-upsert"), "false");
+    racedObject = Buffer.from(init.body);
+    return responseJson({ message: "Asset Already Exists" }, 409);
+  };
+  const raced = await uploadOrVerifyPrivateObject({
+    storageTarget: resolveStorageTarget("stage", ENV),
+    objectPath: racedObjectPath,
+    bytes: racedBytes,
+    deps: { fetch: racedFetch },
+  });
+  assert.equal(raced.objectExisted, true, "a concurrent identical object is treated as pre-existing");
+  assert.equal(raced.uploaded, false, "a concurrent identical object is not reported as uploaded");
+  assert.equal(raced.sha256, crypto.createHash("sha256").update(racedBytes).digest("hex"));
+  assert.deepEqual(racedCalls.map(({ method }) => method), ["GET", "POST", "GET"]);
+
+  let foreignRacedObject = null;
+  const foreignRacedCalls = [];
+  const foreignRacedFetch = async (_url, init = {}) => {
+    const method = init.method || "GET";
+    foreignRacedCalls.push(method);
+    if (method === "GET") {
+      return foreignRacedObject
+        ? new Response(foreignRacedObject, { status: 200, headers: { "content-type": "application/gzip" } })
+        : new Response("missing", { status: 404 });
+    }
+    foreignRacedObject = Buffer.from("foreign recovery bytes");
+    return responseJson({ message: "Asset Already Exists" }, 409);
+  };
+  await assert.rejects(
+    () => uploadOrVerifyPrivateObject({
+      storageTarget: resolveStorageTarget("stage", ENV),
+      objectPath: `recovery/v1/sha256/${"d".repeat(64)}.jsonl.gz`,
+      bytes: racedBytes,
+      deps: { fetch: foreignRacedFetch },
+    }),
+    /verification differs/,
+  );
+  assert.deepEqual(foreignRacedCalls, ["GET", "POST", "GET"], "foreign race content must fail closed without a retry write");
+
   const transientNetworkError = Object.assign(new TypeError("temporary network failure"), { code: "ECONNRESET" });
   const recoveredAfterNetwork = await runPrivateGetScenario([transientNetworkError, 200]);
   assert.equal(recoveredAfterNetwork.calls.length, 2);

@@ -357,6 +357,14 @@ export const STAGE_OWN_BATCHES_SQL = `select
     registry_cleaned_at::text as registry_cleaned_at,
     registry_cleaned_key_count::text as registry_cleaned_key_count,
     registry_cleaned_keys_sha256,
+    exists (
+      select 1
+        from public.poker_tables tables
+       where tables.id = chips_ledger_archive_batches.bot_only_table_id
+    ) as bot_only_table_exists,
+    (select tables.bot_only_retention_complete_at::text
+       from public.poker_tables tables
+      where tables.id = chips_ledger_archive_batches.bot_only_table_id) as bot_only_retention_complete_at,
     destructive_go_at::text as destructive_go_at,
     destructive_go_batch_id::text as destructive_go_batch_id
   from public.chips_ledger_archive_batches
@@ -407,6 +415,14 @@ export const STAGE_EXACT_BATCH_SQL = `select
     registry_cleaned_at::text as registry_cleaned_at,
     registry_cleaned_key_count::text as registry_cleaned_key_count,
     registry_cleaned_keys_sha256,
+    exists (
+      select 1
+        from public.poker_tables tables
+       where tables.id = chips_ledger_archive_batches.bot_only_table_id
+    ) as bot_only_table_exists,
+    (select tables.bot_only_retention_complete_at::text
+       from public.poker_tables tables
+      where tables.id = chips_ledger_archive_batches.bot_only_table_id) as bot_only_retention_complete_at,
     destructive_go_at::text as destructive_go_at,
     destructive_go_batch_id::text as destructive_go_batch_id
   from public.chips_ledger_archive_batches
@@ -786,6 +802,162 @@ export function assertResumeRecoveryState(row, durable) {
     fail("Stage automation recovery exists without an immutable proof; refusing an ambiguous resume");
   }
   return true;
+}
+
+function assertAutomaticBotOnlyProofEvidence(row, evidence, batchId) {
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
+    fail(`automatic bot-only batch ${batchId} has no verified dry-run evidence`);
+  }
+  const evidenceShaFields = [
+    "transactionIdsSha256",
+    "entryIdsSha256",
+    "registryKeysSha256",
+    "outOfScopeKeysSha256",
+  ];
+  if (evidenceShaFields.some((field) => !validSha256(evidence[field]))) {
+    fail(`automatic bot-only batch ${batchId} dry-run evidence has incomplete SHA-256 proof`);
+  }
+  if (!["transactionCount", "entryCount", "distinctTables"].every((field) => Number.isSafeInteger(Number(evidence[field])))
+    || !Number.isSafeInteger(Number(row.transaction_count))
+    || !Number.isSafeInteger(Number(row.entry_count))
+    || !Number.isSafeInteger(Number(row.bot_only_identity_count))
+    || !Number.isSafeInteger(Number(row.bot_only_eligible_count))
+    || !evidence.txTypes
+    || typeof evidence.txTypes !== "object"
+    || Array.isArray(evidence.txTypes)
+    || !text(evidence.tableId)
+    || !Array.isArray(evidence.registryKeys)
+    || evidence.registryKeys.some((key) => typeof key !== "string")) {
+    fail(`automatic bot-only batch ${batchId} dry-run evidence is incomplete`);
+  }
+  const sortedRegistryKeys = [...evidence.registryKeys].sort();
+  if (canonicalJson(sortedRegistryKeys) !== canonicalJson(evidence.registryKeys)) {
+    fail(`automatic bot-only batch ${batchId} dry-run registry proof is not canonical`);
+  }
+  const mismatches = [];
+  if (row.archived_transaction_ids_sha256 !== evidence.transactionIdsSha256) mismatches.push("transaction ID proof");
+  if (row.archived_entry_ids_sha256 !== evidence.entryIdsSha256) mismatches.push("entry ID proof");
+  if (Number(row.transaction_count) !== Number(evidence.transactionCount)) mismatches.push("transaction count");
+  if (Number(row.entry_count) !== Number(evidence.entryCount)) mismatches.push("entry count");
+  if (canonicalJson(row.tx_types) !== canonicalJson(evidence.txTypes)) mismatches.push("transaction types");
+  if (text(row.credits) !== text(evidence.credits)) mismatches.push("credits");
+  if (text(row.debits) !== text(evidence.debits)) mismatches.push("debits");
+  if (text(row.net_amount) !== text(evidence.net)) mismatches.push("net amount");
+  if (text(row.bot_only_table_id).toLowerCase() !== text(evidence.tableId).toLowerCase()) mismatches.push("TABLE identity");
+  if (Number(row.bot_only_table_count) !== 1 || Number(evidence.distinctTables) !== 1) mismatches.push("TABLE count");
+  if (!Array.isArray(evidence.registryKeys)
+    || Number(row.bot_only_identity_count) !== evidence.registryKeys.length
+    || Number(row.bot_only_eligible_count) !== evidence.registryKeys.length) {
+    mismatches.push("registry identity count");
+  }
+  if (row.bot_only_registry_keys_sha256 !== evidence.registryKeysSha256) mismatches.push("registry key proof");
+  if (row.bot_only_out_of_scope_keys_sha256 !== evidence.outOfScopeKeysSha256) mismatches.push("out-of-scope key proof");
+  if (mismatches.length) {
+    fail(`automatic bot-only batch ${batchId} dry-run evidence differs from immutable proof: ${mismatches.join(", ")}`);
+  }
+  return true;
+}
+
+function assertAutomaticBotOnlyDryRunArchive(row, dry, batchId) {
+  if (!validSha256(dry?.archiveSha256) || dry.archiveSha256 !== row.compressed_sha256) {
+    fail(`automatic bot-only batch ${batchId} dry-run archive checksum differs from the committed archive SHA`);
+  }
+  return true;
+}
+
+export function assertAutomaticBotOnlyRecoveryReconstructionState({
+  row,
+  identity,
+  evidence,
+  dryRunState,
+  durable,
+} = {}) {
+  const batchId = text(row?.batch_id);
+  if (dryRunState !== "ready") {
+    fail(`automatic bot-only batch ${batchId} recovery reconstruction requires a ready dry-run`);
+  }
+  if (durable !== null) {
+    fail(`automatic bot-only batch ${batchId} recovery reconstruction requires both recovery objects to be confirmed absent`);
+  }
+  const lifecycle = assertBotOnlyExecuteBatch(row, batchId, identity);
+  if (lifecycle.receiptCount !== 0
+    || lifecycle.cleanupCount !== 0
+    || lifecycle.hasExactGo
+    || row.bot_only_table_exists !== true
+    || row.bot_only_retention_complete_at != null) {
+    fail(`automatic bot-only batch ${batchId} recovery reconstruction requires an unpruned, uncleaned batch without destructive GO`);
+  }
+  assertAutomaticBotOnlyProofEvidence(row, evidence, batchId);
+  return true;
+}
+
+function assertAutomaticBotOnlyDurableRecovery({ row, identity, evidence, durable }) {
+  const batchId = text(row?.batch_id);
+  if (durable === null || durable === undefined) {
+    fail(`automatic bot-only batch ${batchId} has no durable recovery copies`);
+  }
+  assertDurableRecoveryReady(durable);
+  const expectedArchivePath = buildRecoveryArchiveObjectPath(row.compressed_sha256);
+  const expectedManifestPath = buildRecoveryManifestObjectPath(row.compressed_sha256);
+  if (durable.archivePath !== expectedArchivePath || durable.manifestPath !== expectedManifestPath) {
+    fail(`automatic bot-only batch ${batchId} recovery paths are not derived from the committed archive SHA`);
+  }
+  const archiveSha256 = sha256(durable.archiveBytes);
+  if (archiveSha256 !== row.compressed_sha256
+    || durable.archiveSha256 !== archiveSha256
+    || (durable.recoveryArchive?.objectPath != null && durable.recoveryArchive.objectPath !== expectedArchivePath)
+    || (durable.recoveryArchive?.sha256 != null && durable.recoveryArchive.sha256 !== archiveSha256)) {
+    fail(`automatic bot-only batch ${batchId} recovery archive checksum differs`);
+  }
+
+  let manifestBytes;
+  try {
+    manifestBytes = gunzipSync(durable.manifestGzipBytes);
+  } catch {
+    fail(`automatic bot-only batch ${batchId} recovery manifest is not valid gzip`);
+  }
+  if (!manifestBytes.equals(durable.manifestBytes)) {
+    fail(`automatic bot-only batch ${batchId} recovery manifest bytes are inconsistent`);
+  }
+  let manifest;
+  try {
+    manifest = JSON.parse(manifestBytes.toString("utf8"));
+  } catch {
+    fail(`automatic bot-only batch ${batchId} recovery manifest is invalid JSON`);
+  }
+  const canonical = gzipRecoveryManifest(
+    buildCanonicalBotOnlyRecoveryManifest(row, identity, evidence, batchId),
+  );
+  if (!manifestBytes.equals(canonical.manifestBytes)
+    || !durable.manifestGzipBytes.equals(canonical.manifestGzipBytes)) {
+    fail(`automatic bot-only batch ${batchId} recovery manifest is not canonical`);
+  }
+  assertBotOnlyRecoveryManifest(manifest, batchId);
+  assertRecoveryManifestMatches(manifest, canonical.manifest);
+  const manifestSha256 = sha256(durable.manifestGzipBytes);
+  if (durable.manifestSha256 !== manifestSha256
+    || (durable.recoveryManifest?.objectPath != null && durable.recoveryManifest.objectPath !== expectedManifestPath)
+    || (durable.recoveryManifest?.sha256 != null && durable.recoveryManifest.sha256 !== manifestSha256)) {
+    fail(`automatic bot-only batch ${batchId} recovery manifest checksum differs`);
+  }
+  return durable;
+}
+
+function assertAutomaticBotOnlyMainArchive(row, mainArchive, dry, batchId) {
+  if (!Buffer.isBuffer(mainArchive?.bytes)) {
+    fail(`automatic bot-only batch ${batchId} main archive download is missing`);
+  }
+  const archiveSha256 = sha256(mainArchive.bytes);
+  if (mainArchive.sha256 != null && mainArchive.sha256 !== archiveSha256) {
+    fail(`automatic bot-only batch ${batchId} main archive download checksum is self-inconsistent`);
+  }
+  if (archiveSha256 !== row.compressed_sha256) {
+    fail(`automatic bot-only batch ${batchId} main archive does not match the committed archive SHA`);
+  }
+  if (dry?.archiveSha256 != null && dry.archiveSha256 !== archiveSha256) {
+    fail(`automatic bot-only batch ${batchId} main archive differs from the verified dry-run archive`);
+  }
+  return archiveSha256;
 }
 
 export async function inspectDurableRecovery(storageTarget, row, deps = {}) {
@@ -1961,6 +2133,50 @@ function assertAutomaticBotOnlyRows(rows) {
   return active[0] || null;
 }
 
+async function verifyAutomaticCompletedBatch({
+  row,
+  identity,
+  env,
+  cwd,
+  sql,
+  pruneStore,
+  storageTarget,
+  verifyBucket,
+  storageDeps,
+  inspectRecovery,
+}) {
+  const refreshed = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
+  const dry = await runPruneStep({
+    row: refreshed,
+    mode: "dry-run",
+    env,
+    cwd,
+    sql,
+    pruneStore,
+    storageTarget,
+    verifyBucket,
+    storageDeps,
+  });
+  if (dry.state !== "already_cleaned") {
+    fail(`automatic bot-only completed batch ${row.batch_id} did not revalidate as already_cleaned: ${dry.state}`);
+  }
+  assertBotOnlyExecuteBatch(refreshed, text(refreshed.batch_id), identity);
+  assertAutomaticBotOnlyDryRunArchive(refreshed, dry, text(refreshed.batch_id));
+  assertAutomaticBotOnlyProofEvidence(refreshed, dry.evidence, text(refreshed.batch_id));
+  if (refreshed.bot_only_table_exists === true && refreshed.bot_only_retention_complete_at == null) {
+    fail(`automatic bot-only completed batch ${refreshed.batch_id} has an empty TABLE lifecycle marker`);
+  }
+  const durable = await inspectRecovery(storageTarget, refreshed, storageDeps);
+  assertResumeRecoveryState(refreshed, durable);
+  assertAutomaticBotOnlyDurableRecovery({
+    row: refreshed,
+    identity,
+    evidence: dry.evidence,
+    durable,
+  });
+  return { row: refreshed, dry, durable };
+}
+
 async function assertAutomaticStageFence(sql) {
   const activeRows = await sql.unsafe("select public.chips_table_fence_is_active() as active;");
   const controlRows = await sql.unsafe(
@@ -2053,10 +2269,33 @@ export async function runAutomaticBotOnlyStageAutomation({
         };
       } else {
         let stopReason = null;
+        const completedRecoveryChecked = new Set();
         for (let index = 0; index < BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN; index += 1) {
           markAutomaticPhase("automatic.select");
           await assertAdvisoryLock(sql, lockSession);
           const ownRows = await loadOwnBatches(sql, BOT_ONLY_RETENTION_POLICY_ID);
+          // The query is newest-first and only the latest completed manifest can
+          // affect selection. Keep this recovery revalidation bounded; older
+          // completed manifests are immutable and never selected for execution.
+          const completedRow = ownRows.find((candidate) => candidate.status === "committed"
+            && receiptFieldCount(candidate) === 5
+            && cleanupReceiptFieldCount(candidate) === 3);
+          if (completedRow && !completedRecoveryChecked.has(completedRow.object_path)) {
+            markAutomaticPhase("automatic.completed-recovery", completedRow);
+            await verifyAutomaticCompletedBatch({
+              row: completedRow,
+              identity,
+              env: moduleEnv,
+              cwd: tempRoot,
+              sql,
+              pruneStore,
+              storageTarget,
+              verifyBucket,
+              storageDeps: deps,
+              inspectRecovery,
+            });
+            completedRecoveryChecked.add(completedRow.object_path);
+          }
           let activeRow = assertAutomaticBotOnlyRows(ownRows);
           if (activeRow) markAutomaticPhase("automatic.manifest", activeRow);
 
@@ -2146,8 +2385,14 @@ export async function runAutomaticBotOnlyStageAutomation({
               archiveStorageModified,
               recoveryStorageModified: false,
             });
-            const hadProofBeforeResume = Boolean(row.archive_proof_verified_at);
+            const proofWasPresentBeforeResume = Boolean(row.archive_proof_verified_at);
             if (!row.archive_proof_verified_at) {
+              markAutomaticPhase("automatic.recovery", row);
+              const recoveryBeforeProof = await inspectRecovery(storageTarget, row, deps);
+              if (recoveryBeforeProof === undefined) {
+                fail(`automatic bot-only batch ${row.batch_id} recovery absence was not confirmed by Storage`);
+              }
+              if (recoveryBeforeProof !== null) assertResumeRecoveryState(row, recoveryBeforeProof);
               markAutomaticPhase("automatic.proof", row);
               await runPruneStep({
                 row,
@@ -2195,12 +2440,35 @@ export async function runAutomaticBotOnlyStageAutomation({
               archiveStorageModified,
               recoveryStorageModified: false,
             });
+            const batchId = text(row.batch_id);
+            const lifecycle = assertBotOnlyExecuteBatch(row, batchId, identity);
+            assertAutomaticBotOnlyDryRunArchive(row, dry, batchId);
+            assertAutomaticBotOnlyProofEvidence(row, dry.evidence, batchId);
             if (dry.state === "already_cleaned") {
-              if (cleanupReceiptFieldCount(row) !== 3) fail("automatic bot-only manifest has a partial completed receipt");
+              if (lifecycle.cleanupCount !== 3) fail("automatic bot-only manifest has a partial completed receipt");
+              markAutomaticPhase("automatic.recovery", row);
+              const durable = await inspectRecovery(storageTarget, row, deps);
+              assertResumeRecoveryState(row, durable);
+              assertAutomaticBotOnlyDurableRecovery({
+                row,
+                identity,
+                evidence: dry.evidence,
+                durable,
+              });
+              currentBatch = automaticBatchProgress({
+                row,
+                identity,
+                dry,
+                durable,
+                state: "already_cleaned",
+                deployedCommitSha,
+                archiveStorageModified,
+                recoveryStorageModified: false,
+              });
               return {
                 row,
                 dry,
-                durable: null,
+                durable,
                 executed: { state: "already_cleaned" },
                 retry: null,
                 archiveStorageModified,
@@ -2213,14 +2481,23 @@ export async function runAutomaticBotOnlyStageAutomation({
             if (dry.state !== "ready") fail("automatic bot-only Stage dry-run did not become ready: " + dry.state);
             markAutomaticPhase("automatic.recovery", row);
             const existing = await inspectRecovery(storageTarget, row, deps);
-            if (hadProofBeforeResume || existing) assertResumeRecoveryState(row, existing);
+            if (existing === undefined) {
+              fail(`automatic bot-only batch ${batchId} recovery state was not confirmed by Storage`);
+            }
+            if (!proofWasPresentBeforeResume && existing !== null) {
+              fail(`automatic bot-only batch ${batchId} recovery appeared without an immutable proof`);
+            }
             let durable = existing;
-            if (!durable) {
+            if (existing === null) {
+              assertAutomaticBotOnlyRecoveryReconstructionState({
+                row,
+                identity,
+                evidence: dry.evidence,
+                dryRunState: dry.state,
+                durable: existing,
+              });
               const mainArchive = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, deps);
-              if (!Buffer.isBuffer(mainArchive?.bytes)
-                || (mainArchive.sha256 != null && mainArchive.sha256 !== sha256(mainArchive.bytes))) {
-                fail("downloaded main archive checksum verification failed");
-              }
+              assertAutomaticBotOnlyMainArchive(row, mainArchive, dry, batchId);
               try {
                 durable = await persistRecovery(storageTarget, row, identity, dry.evidence, mainArchive.bytes, deps);
               } catch (error) {
@@ -2239,6 +2516,20 @@ export async function runAutomaticBotOnlyStageAutomation({
                 });
                 throw error;
               }
+              assertAutomaticBotOnlyDurableRecovery({
+                row,
+                identity,
+                evidence: dry.evidence,
+                durable,
+              });
+            } else {
+              assertResumeRecoveryState(row, existing);
+              assertAutomaticBotOnlyDurableRecovery({
+                row,
+                identity,
+                evidence: dry.evidence,
+                durable: existing,
+              });
             }
             currentBatch = automaticBatchProgress({
               row,

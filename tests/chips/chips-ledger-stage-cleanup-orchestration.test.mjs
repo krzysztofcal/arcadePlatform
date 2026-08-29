@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import postgres from "postgres";
 
 import {
@@ -19,6 +20,7 @@ import {
 } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist.mjs";
 import { runLegacyStageAllowlistOrchestrator } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-orchestrator.mjs";
 import { LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13 } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-audit.mjs";
+import { buildRecoveryManifest } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
 
 const root = process.cwd();
 const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-automation.yml", "utf8");
@@ -58,10 +60,17 @@ function fakeScheduler({
   failExecuteOnce = false,
   failDownloadBeforeRecovery = false,
   realExecute = false,
+  initialRows = [],
+  initialDurable = new Map(),
+  initialArchiveBytes = new Map(),
+  inspectRecovery = null,
+  mainArchiveMode = "valid",
 } = {}) {
-  const manifests = new Map();
-  const ownRows = [];
-  const durable = new Map();
+  const manifests = new Map(initialRows.map((row) => [row.object_path, row]));
+  const ownRows = [...initialRows];
+  const durable = new Map(initialDurable);
+  const archiveBytesByPath = new Map();
+  for (const [objectPath, bytes] of initialArchiveBytes) archiveBytesByPath.set(objectPath, Buffer.from(bytes));
   const executionCounts = new Map();
   const state = {
     candidateCalls: 0,
@@ -71,11 +80,15 @@ function fakeScheduler({
     destructiveSqlMutations: 0,
     failedOnce: false,
     mainArchiveDownloads: 0,
+    persistCalls: 0,
+    proofRegisterCalls: 0,
   };
 
   const evidence = (tableId, key) => ({
     transactionCount: 1,
     entryCount: 2,
+    transactionIdsSha256: "3".repeat(64),
+    entryIdsSha256: "4".repeat(64),
     txTypes: { TABLE_BUY_IN: 1 },
     credits: "100",
     debits: "100",
@@ -83,6 +96,8 @@ function fakeScheduler({
     registryKeys: [key],
     registryKeysSha256: "1".repeat(64),
     tableId,
+    distinctTables: 1,
+    outOfScopeKeysSha256: "2".repeat(64),
   });
 
   const sql = {
@@ -134,8 +149,8 @@ function fakeScheduler({
     storeArchive: async () => {
       const index = state.storeCalls;
       state.storeCalls += 1;
-      const letter = String.fromCharCode(97 + index);
-      const compressedSha = letter.repeat(64);
+      const archiveBytes = Buffer.from(`archive-${index}`);
+      const compressedSha = crypto.createHash("sha256").update(archiveBytes).digest("hex");
       const objectPath = `v1/sha256/${compressedSha}.jsonl.gz`;
       const tableId = `00000000-0000-4000-8000-${String(200 + index).padStart(12, "0")}`;
       const row = {
@@ -144,14 +159,25 @@ function fakeScheduler({
         source_policy_id: "stage-ledger-bot-only-retention-7d-v1",
         status: "committed",
         batch_id: String(100 + index),
-        format_version: "2",
+        format_version: 2,
         cutoff: "2026-08-18T00:00:00.000Z",
-        transaction_count: "1",
-        entry_count: "2",
+        cursor_start_created_at: null,
+        cursor_start_id: null,
+        cursor_end_created_at: null,
+        cursor_end_id: null,
+        first_created_at: "2026-08-17T00:00:00.000Z",
+        last_created_at: "2026-08-17T00:00:00.000Z",
+        transaction_count: 1,
+        entry_count: 2,
+        tx_types: { TABLE_BUY_IN: 1 },
         compressed_sha256: compressedSha,
-        compressed_bytes: "10",
-        raw_bytes: "10",
+        compressed_bytes: archiveBytes.length,
+        raw_bytes: 10,
         raw_sha256: "d".repeat(64),
+        credits: "100",
+        debits: "100",
+        net_amount: "0",
+        committed_at: "2026-08-25T00:00:00Z",
         archived_transaction_ids_sha256: null,
         archived_entry_ids_sha256: null,
         archive_proof_verified_at: null,
@@ -164,15 +190,18 @@ function fakeScheduler({
         registry_cleaned_key_count: null,
         registry_cleaned_keys_sha256: null,
         bot_only_table_id: tableId,
-        bot_only_table_count: "1",
-        bot_only_identity_count: "1",
-        bot_only_eligible_count: "1",
+        bot_only_table_count: 1,
+        bot_only_newest_created_at: "2026-08-17T00:00:00.000Z",
+        bot_only_identity_count: 1,
+        bot_only_eligible_count: 1,
         bot_only_registry_keys_sha256: "1".repeat(64),
         bot_only_out_of_scope_keys_sha256: "2".repeat(64),
+        bot_only_table_exists: true,
         destructive_go_at: null,
         destructive_go_batch_id: null,
       };
       manifests.set(objectPath, row);
+      archiveBytesByPath.set(objectPath, archiveBytes);
       ownRows.unshift(row);
       return { objectPath, manifest: row, object: { uploaded: true } };
     },
@@ -180,6 +209,7 @@ function fakeScheduler({
       const objectPath = argv[argv.indexOf("--object-path") + 1];
       const row = manifests.get(objectPath);
       if (argv.includes("--register-proof")) {
+        state.proofRegisterCalls += 1;
         row.archived_transaction_ids_sha256 = "3".repeat(64);
         row.archived_entry_ids_sha256 = "4".repeat(64);
         row.archive_proof_verified_at = "2026-08-25T00:00:00Z";
@@ -197,39 +227,62 @@ function fakeScheduler({
           row.registry_cleaned_at = "2026-08-25T00:00:02Z";
           row.registry_cleaned_key_count = "1";
           row.registry_cleaned_keys_sha256 = "1".repeat(64);
+          row.bot_only_retention_complete_at = "2026-08-25T00:00:03Z";
           row.destructive_go_at = "2026-08-25T00:00:00Z";
           row.destructive_go_batch_id = row.batch_id;
           return { state: "cleaned", evidence: evidence(row.bot_only_table_id, "key:" + row.batch_id) };
         }
         return { state: "already_cleaned", evidence: evidence(row.bot_only_table_id, "key:" + row.batch_id) };
       }
+      if (row.registry_cleaned_at) {
+        return {
+          state: "already_cleaned",
+          evidence: evidence(row.bot_only_table_id, "key:" + row.batch_id),
+          archiveSha256: row.compressed_sha256,
+        };
+      }
       return {
         state: "ready",
         evidence: evidence(row.bot_only_table_id, "key:" + row.batch_id),
+        archiveSha256: row.compressed_sha256,
       };
     },
-    inspectDurableRecovery: async (_target, row) => durable.get(row.object_path) || null,
-    persistDurableRecovery: async (_target, row, _identity, _evidence, archiveBytes) => {
+    inspectDurableRecovery: inspectRecovery || (async (_target, row) => durable.get(row.object_path) || null),
+    persistDurableRecovery: async (_target, row, identity, rowEvidence, archiveBytes) => {
+      state.persistCalls += 1;
       const recoveryArchivePath = `recovery/v1/sha256/${row.compressed_sha256}.jsonl.gz`;
       const recoveryManifestPath = `recovery/v1/sha256/${row.compressed_sha256}.recovery.json.gz`;
+      const manifest = buildRecoveryManifest(row, identity, rowEvidence, { target: "stage" });
+      const manifestBytes = Buffer.from(`${JSON.stringify(manifest)}\n`);
+      const manifestGzipBytes = gzipSync(manifestBytes, { level: 9, mtime: 0 });
+      const manifestSha256 = crypto.createHash("sha256").update(manifestGzipBytes).digest("hex");
+      const archiveSha256 = crypto.createHash("sha256").update(archiveBytes).digest("hex");
       const value = {
         archiveBytes,
-        manifestBytes: Buffer.from("{}"),
-        manifestGzipBytes: Buffer.from("gzip"),
+        manifestBytes,
+        manifestGzipBytes,
+        manifest,
         archivePath: recoveryArchivePath,
         manifestPath: recoveryManifestPath,
-        archiveSha256: row.compressed_sha256,
-        manifestSha256: "5".repeat(64),
+        archiveSha256,
+        manifestSha256,
         recoveryArchive: { objectPath: recoveryArchivePath, uploaded: true, sha256: row.compressed_sha256 },
-        recoveryManifest: { objectPath: recoveryManifestPath, uploaded: true, sha256: "5".repeat(64) },
+        recoveryManifest: { objectPath: recoveryManifestPath, uploaded: true, sha256: manifestSha256 },
       };
       durable.set(row.object_path, value);
       return value;
     },
-    downloadPrivateArchive: async () => {
+    downloadPrivateArchive: async (_target, objectPath) => {
       state.mainArchiveDownloads += 1;
       if (failDownloadBeforeRecovery) throw new Error("simulated main archive download failure");
-      return { bytes: Buffer.from("archive"), downloadMs: 0 };
+      const bytes = archiveBytesByPath.get(objectPath);
+      if (!bytes) throw new Error("simulated main archive missing");
+      const downloadedBytes = mainArchiveMode === "foreign" ? Buffer.from("foreign main archive") : bytes;
+      return {
+        bytes: downloadedBytes,
+        sha256: crypto.createHash("sha256").update(downloadedBytes).digest("hex"),
+        downloadMs: 0,
+      };
     },
     executeVerifiedCycle: realExecute ? undefined : async ({ row }) => {
       state.executeCalls += 1;
@@ -249,6 +302,7 @@ function fakeScheduler({
         row.registry_cleaned_at = "2026-08-25T00:00:02Z";
         row.registry_cleaned_key_count = "1";
         row.registry_cleaned_keys_sha256 = "1".repeat(64);
+        row.bot_only_retention_complete_at = "2026-08-25T00:00:03Z";
         row.destructive_go_at = "2026-08-25T00:00:00Z";
         row.destructive_go_batch_id = row.batch_id;
         return { state: "cleaned", evidence: evidence(row.bot_only_table_id, "key:" + row.batch_id) };
@@ -258,6 +312,80 @@ function fakeScheduler({
   };
 
   return { env: { ...ENV }, deps, state, manifests, durable, ownRows };
+}
+
+function makeProvenAutomaticRow(batchId = "27", { lifecycle = "open" } = {}) {
+  const archiveBytes = Buffer.from(`proven-archive-${batchId}`);
+  const compressedSha = crypto.createHash("sha256").update(archiveBytes).digest("hex");
+  const tableId = `00000000-0000-4000-8000-${String(batchId).padStart(12, "0")}`;
+  const row = {
+    object_path: `v1/sha256/${compressedSha}.jsonl.gz`,
+    project_ref: "krydukthwdvccggbyjfw",
+    source_policy_id: "stage-ledger-bot-only-retention-7d-v1",
+    status: "committed",
+    batch_id: String(batchId),
+    format_version: 2,
+    cutoff: "2026-08-18T00:00:00.000Z",
+    cursor_start_created_at: null,
+    cursor_start_id: null,
+    cursor_end_created_at: null,
+    cursor_end_id: null,
+    first_created_at: "2026-08-17T00:00:00.000Z",
+    last_created_at: "2026-08-17T00:00:00.000Z",
+    transaction_count: 1,
+    entry_count: 2,
+    tx_types: { TABLE_BUY_IN: 1 },
+    raw_bytes: 10,
+    compressed_bytes: archiveBytes.length,
+    raw_sha256: "d".repeat(64),
+    compressed_sha256: compressedSha,
+    credits: "100",
+    debits: "100",
+    net_amount: "0",
+    committed_at: "2026-08-25T00:00:00Z",
+    archive_proof_verified_at: "2026-08-25T00:00:00Z",
+    archived_transaction_ids_sha256: "3".repeat(64),
+    archived_entry_ids_sha256: "4".repeat(64),
+    pruned_at: null,
+    pruned_transaction_count: null,
+    pruned_entry_count: null,
+    pruned_transaction_ids_sha256: null,
+    pruned_entry_ids_sha256: null,
+    bot_only_table_id: tableId,
+    bot_only_table_count: 1,
+    bot_only_newest_created_at: "2026-08-17T00:00:00.000Z",
+    bot_only_registry_keys_sha256: "1".repeat(64),
+    bot_only_out_of_scope_keys_sha256: "2".repeat(64),
+    bot_only_identity_count: 1,
+    bot_only_eligible_count: 1,
+    registry_cleaned_at: null,
+    registry_cleaned_key_count: null,
+    registry_cleaned_keys_sha256: null,
+    bot_only_table_exists: true,
+    bot_only_retention_complete_at: null,
+    destructive_go_at: null,
+    destructive_go_batch_id: null,
+  };
+  if (lifecycle === "go") {
+    row.destructive_go_at = "2026-08-25T00:00:00Z";
+    row.destructive_go_batch_id = row.batch_id;
+  }
+  if (lifecycle === "complete") {
+    Object.assign(row, {
+      pruned_at: "2026-08-25T00:00:01Z",
+      pruned_transaction_count: 1,
+      pruned_entry_count: 2,
+      pruned_transaction_ids_sha256: row.archived_transaction_ids_sha256,
+      pruned_entry_ids_sha256: row.archived_entry_ids_sha256,
+      registry_cleaned_at: "2026-08-25T00:00:02Z",
+      registry_cleaned_key_count: 1,
+      registry_cleaned_keys_sha256: row.bot_only_registry_keys_sha256,
+      bot_only_retention_complete_at: "2026-08-25T00:00:03Z",
+      destructive_go_at: "2026-08-25T00:00:00Z",
+      destructive_go_batch_id: row.batch_id,
+    });
+  }
+  return { row, archiveBytes };
 }
 
 function staticOrchestrationContract() {
@@ -333,6 +461,108 @@ async function schedulerContracts() {
   assert.deepEqual(enabledResult.processed.map((row) => row.retry), ["already_cleaned", "already_cleaned", "already_cleaned"]);
   assert.equal(enabled.state.storeCalls, 3);
 
+  const proven = makeProvenAutomaticRow("27");
+  const legalRestart = fakeScheduler({
+    enabled: true,
+    candidateCount: 0,
+    initialRows: [proven.row],
+    initialArchiveBytes: new Map([[proven.row.object_path, proven.archiveBytes]]),
+  });
+  const legalRestartResult = await runAutomaticBotOnlyStageAutomation(legalRestart);
+  assert.equal(legalRestartResult.processed.length, 1);
+  assert.equal(legalRestartResult.processed[0].batchId, "27");
+  assert.equal(legalRestartResult.processed[0].state, "cleaned");
+  assert.equal(legalRestartResult.processed[0].retry, "already_cleaned");
+  assert.equal(legalRestart.state.proofRegisterCalls, 0, "a complete proof must not be re-registered");
+  assert.equal(legalRestart.state.persistCalls, 1, "the missing recovery pair must be created once");
+  assert.equal(legalRestart.state.executeCalls, 2, "the restart must complete the destructive double-cycle");
+  assert.equal(legalRestart.ownRows[0].registry_cleaned_at !== null, true);
+  assert.equal(legalRestartResult.processed[0].archiveStorageModified, false);
+  assert.equal(legalRestartResult.processed[0].recoveryStorageModified, true);
+  assert.equal(legalRestartResult.processed[0].storageModified, true);
+
+  const partialRecovery = makeProvenAutomaticRow("27");
+  const partialRecoveryRun = fakeScheduler({
+    enabled: true,
+    candidateCount: 0,
+    initialRows: [partialRecovery.row],
+    initialArchiveBytes: new Map([[partialRecovery.row.object_path, partialRecovery.archiveBytes]]),
+    inspectRecovery: async () => { throw new Error("durable recovery copy is partial"); },
+  });
+  await assert.rejects(
+    runAutomaticBotOnlyStageAutomation(partialRecoveryRun),
+    /durable recovery copy is partial/,
+  );
+  assert.equal(partialRecoveryRun.state.persistCalls, 0, "partial recovery must fail before Storage writes");
+  assert.equal(partialRecoveryRun.state.executeCalls, 0, "partial recovery must fail before DB lifecycle writes");
+  assert.equal(partialRecoveryRun.state.proofRegisterCalls, 0);
+
+  const recoveryWithoutProof = makeProvenAutomaticRow("27");
+  recoveryWithoutProof.row.archive_proof_verified_at = null;
+  recoveryWithoutProof.row.archived_transaction_ids_sha256 = null;
+  recoveryWithoutProof.row.archived_entry_ids_sha256 = null;
+  const recoveryWithoutProofRun = fakeScheduler({
+    enabled: true,
+    candidateCount: 0,
+    initialRows: [recoveryWithoutProof.row],
+    initialDurable: new Map([[recoveryWithoutProof.row.object_path, {}]]),
+    initialArchiveBytes: new Map([[recoveryWithoutProof.row.object_path, recoveryWithoutProof.archiveBytes]]),
+  });
+  await assert.rejects(
+    runAutomaticBotOnlyStageAutomation(recoveryWithoutProofRun),
+    /without an immutable proof/,
+  );
+  assert.equal(recoveryWithoutProofRun.state.proofRegisterCalls, 0);
+  assert.equal(recoveryWithoutProofRun.state.persistCalls, 0);
+  assert.equal(recoveryWithoutProofRun.state.executeCalls, 0);
+
+  const goWithoutRecovery = makeProvenAutomaticRow("27", { lifecycle: "go" });
+  const goWithoutRecoveryRun = fakeScheduler({
+    enabled: true,
+    candidateCount: 0,
+    initialRows: [goWithoutRecovery.row],
+    initialArchiveBytes: new Map([[goWithoutRecovery.row.object_path, goWithoutRecovery.archiveBytes]]),
+  });
+  await assert.rejects(
+    runAutomaticBotOnlyStageAutomation(goWithoutRecoveryRun),
+    /unpruned, uncleaned batch without destructive GO/,
+  );
+  assert.equal(goWithoutRecoveryRun.state.mainArchiveDownloads, 0);
+  assert.equal(goWithoutRecoveryRun.state.persistCalls, 0);
+  assert.equal(goWithoutRecoveryRun.state.executeCalls, 0);
+
+  const completedWithoutRecovery = makeProvenAutomaticRow("27", { lifecycle: "complete" });
+  const completedWithoutRecoveryRun = fakeScheduler({
+    enabled: true,
+    candidateCount: 0,
+    initialRows: [completedWithoutRecovery.row],
+    initialArchiveBytes: new Map([[completedWithoutRecovery.row.object_path, completedWithoutRecovery.archiveBytes]]),
+  });
+  await assert.rejects(
+    runAutomaticBotOnlyStageAutomation(completedWithoutRecoveryRun),
+    /no durable recovery/,
+  );
+  assert.equal(completedWithoutRecoveryRun.state.persistCalls, 0);
+  assert.equal(completedWithoutRecoveryRun.state.executeCalls, 0);
+
+  for (const mainArchiveMode of ["missing", "foreign"]) {
+  const unavailableMain = makeProvenAutomaticRow("27");
+    const unavailableMainRun = fakeScheduler({
+      enabled: true,
+      candidateCount: 0,
+      initialRows: [unavailableMain.row],
+      initialArchiveBytes: new Map([[unavailableMain.row.object_path, unavailableMain.archiveBytes]]),
+      failDownloadBeforeRecovery: mainArchiveMode === "missing",
+      mainArchiveMode: mainArchiveMode === "foreign" ? "foreign" : "valid",
+    });
+    await assert.rejects(
+      runAutomaticBotOnlyStageAutomation(unavailableMainRun),
+      mainArchiveMode === "missing" ? /simulated main archive download failure/ : /does not match the committed archive SHA/,
+    );
+    assert.equal(unavailableMainRun.state.persistCalls, 0);
+    assert.equal(unavailableMainRun.state.executeCalls, 0);
+  }
+
   const controlCycleFailure = fakeScheduler({ enabled: true, candidateCount: 1 });
   const originalControlExecuteCycle = controlCycleFailure.deps.executeVerifiedCycle;
   let controlExecuteCalls = 0;
@@ -364,6 +594,8 @@ async function schedulerContracts() {
     else process.env.GITHUB_STEP_SUMMARY = controlOriginalSummaryPath;
   }
   const controlFailureReport = JSON.parse(controlFailureOutput.trim());
+  const controlRow = controlCycleFailure.ownRows[0];
+  const controlDurable = controlCycleFailure.durable.get(controlRow.object_path);
   assert.equal(controlFailureReport.processed_batches.length, 0, "the in-progress batch must not be marked processed before already_cleaned");
   assert.equal(controlFailureReport.current_batch.batch_id, "100");
   assert.equal(controlFailureReport.current_batch.state, "cleaned");
@@ -376,8 +608,8 @@ async function schedulerContracts() {
   assert.equal(controlFailureReport.current_batch.archive_storage_modified, true);
   assert.equal(controlFailureReport.current_batch.recovery_storage_modified, true);
   assert.equal(controlFailureReport.current_batch.storage_modified, true);
-  assert.equal(controlFailureReport.current_batch.recovery_archive_sha256, "a".repeat(64));
-  assert.equal(controlFailureReport.current_batch.recovery_manifest_sha256, "5".repeat(64));
+  assert.equal(controlFailureReport.current_batch.recovery_archive_sha256, controlDurable.archiveSha256);
+  assert.equal(controlFailureReport.current_batch.recovery_manifest_sha256, controlDurable.manifestSha256);
   assert.equal(controlFailureReport.current_batch.destructive_go_batch_id, "100");
   assert.deepEqual(controlFailureReport.current_batch.prune_receipt, {
     at: "2026-08-25T00:00:01Z",
@@ -412,6 +644,8 @@ async function schedulerContracts() {
     else process.env.GITHUB_STEP_SUMMARY = recoveryOriginalSummaryPath;
   }
   const recoveryFailureReport = JSON.parse(recoveryFailureOutput.trim());
+  const recoveryRow = recoveryBeforeExecuteFailure.ownRows[0];
+  const recoveryDurable = recoveryBeforeExecuteFailure.durable.get(recoveryRow.object_path);
   assert.equal(recoveryFailureReport.processed_batches.length, 0);
   assert.equal(recoveryFailureReport.current_batch.batch_id, "100");
   assert.equal(recoveryFailureReport.current_batch.state, "in_progress");
@@ -423,15 +657,15 @@ async function schedulerContracts() {
   assert.equal(recoveryFailureReport.current_batch.archive_storage_modified, true);
   assert.equal(recoveryFailureReport.current_batch.recovery_storage_modified, true);
   assert.equal(recoveryFailureReport.current_batch.storage_modified, true);
-  assert.equal(recoveryFailureReport.current_batch.recovery_archive_sha256, "a".repeat(64));
-  assert.equal(recoveryFailureReport.current_batch.recovery_manifest_sha256, "5".repeat(64));
+  assert.equal(recoveryFailureReport.current_batch.recovery_archive_sha256, recoveryDurable.archiveSha256);
+  assert.equal(recoveryFailureReport.current_batch.recovery_manifest_sha256, recoveryDurable.manifestSha256);
   assert.equal(
     recoveryFailureReport.current_batch.recovery_archive_path,
-    "recovery/v1/sha256/" + "a".repeat(64) + ".jsonl.gz",
+    recoveryDurable.archivePath,
   );
   assert.equal(
     recoveryFailureReport.current_batch.recovery_manifest_path,
-    "recovery/v1/sha256/" + "a".repeat(64) + ".recovery.json.gz",
+    recoveryDurable.manifestPath,
   );
 
   const earlyRecoveryFailure = fakeScheduler({ enabled: true, candidateCount: 1, failDownloadBeforeRecovery: true });
@@ -454,10 +688,11 @@ async function schedulerContracts() {
     else process.env.GITHUB_STEP_SUMMARY = earlyOriginalSummaryPath;
   }
   const earlyFailureReport = JSON.parse(earlyFailureOutput.trim());
+  const earlyRow = earlyRecoveryFailure.ownRows[0];
   assert.equal(earlyFailureReport.processed_batches.length, 0);
   assert.equal(earlyFailureReport.current_batch.batch_id, "100");
-  assert.equal(earlyFailureReport.current_batch.object_path, "v1/sha256/" + "a".repeat(64) + ".jsonl.gz");
-  assert.equal(earlyFailureReport.current_batch.compressed_sha256, "a".repeat(64));
+  assert.equal(earlyFailureReport.current_batch.object_path, earlyRow.object_path);
+  assert.equal(earlyFailureReport.current_batch.compressed_sha256, earlyRow.compressed_sha256);
   assert.equal(earlyFailureReport.current_batch.proof, "verified");
   assert.equal(earlyFailureReport.current_batch.dry_run, "ready");
   assert.equal(earlyFailureReport.current_batch.archive_storage_modified, true);
@@ -498,11 +733,13 @@ async function schedulerContracts() {
     else process.env.GITHUB_STEP_SUMMARY = originalAutomaticSummaryPath;
   }
   const laterFailureReport = JSON.parse(automaticFailureOutput.trim());
+  const laterRow = laterBatchFailure.ownRows.find((row) => row.batch_id === "100");
+  const laterDurable = laterBatchFailure.durable.get(laterRow.object_path);
   assert.equal(laterFailureReport.sqlstate, "40001");
   assert.equal(laterFailureReport.processed_batches.length, 1, "completed batch observability must survive a later failure");
   assert.equal(laterFailureReport.processed_batches[0].batch_id, "100");
-  assert.equal(laterFailureReport.processed_batches[0].recovery_archive_sha256, "a".repeat(64));
-  assert.equal(laterFailureReport.processed_batches[0].recovery_manifest_sha256, "5".repeat(64));
+  assert.equal(laterFailureReport.processed_batches[0].recovery_archive_sha256, laterDurable.archiveSha256);
+  assert.equal(laterFailureReport.processed_batches[0].recovery_manifest_sha256, laterDurable.manifestSha256);
   assert.equal(laterFailureReport.processed_batches[0].storage_modified, true);
 
   const realCycle = fakeScheduler({ enabled: true, candidateCount: 1, realExecute: true });
