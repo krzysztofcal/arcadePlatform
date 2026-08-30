@@ -134,6 +134,22 @@ const idempotencyError = (code, message, status = 503) => {
   return error;
 };
 
+const mapTableLifecycleError = (error) => {
+  if (error?.code === "P8901" || error?.code === "P8902") {
+    const mapped = new Error("TABLE idempotency key or binding is invalid");
+    mapped.code = "invalid_table_binding";
+    mapped.status = 400;
+    mapped.cause = error;
+    return mapped;
+  }
+  if (error?.code !== "P8903" && error?.code !== "P8904") return error;
+  const mapped = new Error(error.code === "P8903" ? "TABLE table is closed" : "TABLE idempotency binding is retired");
+  mapped.code = error.code === "P8903" ? "table_closed" : "idempotency_retired";
+  mapped.status = 409;
+  mapped.cause = error;
+  return mapped;
+};
+
 const normalizeIdempotencyUserId = (value) => {
   const normalized = value == null ? "" : String(value).trim();
   return normalized || null;
@@ -1028,7 +1044,7 @@ async function postTransaction({
 
       const txRows = await sqlTx`
       insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, user_id, created_by)
-      values (${reference}, ${description}, ${safeMetadataJson}::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${payloadUserId || null}, ${createdBy})
+      values (${reference}, ${description}, (${safeMetadataJson}::text)::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${payloadUserId || null}, ${createdBy})
       returning *;
     `;
 
@@ -1190,7 +1206,11 @@ from inserted i;
     }
   };
 
-  result = tx ? await runInTx(tx) : await beginSql(async sqlTx => runInTx(sqlTx));
+  try {
+    result = tx ? await runInTx(tx) : await beginSql(async sqlTx => runInTx(sqlTx));
+  } catch (error) {
+    throw mapTableLifecycleError(error);
+  }
 
   if (!result?.transaction) {
     klog("chips_tx_missing_rows", { idempotencyKey });

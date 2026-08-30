@@ -4,6 +4,13 @@ import fs from "node:fs";
 import path from "node:path";
 import postgres from "postgres";
 import { createPruneStore } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
+import { collectExecutionSnapshot } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-execute.mjs";
+import {
+  assertLegacyStageAllowlistRegistryRows,
+  hashLegacyStageAllowlistRegistryKeys,
+  legacyStageAllowlistRegistryPredicate,
+} from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-registry.mjs";
+import { LEGACY_STAGE_ALLOWLIST_AUDIT_SQL } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-audit.mjs";
 
 const dbUrl = process.env.CHIPS_MIGRATIONS_TEST_DB_URL;
 const allowDrop = process.env.CHIPS_MIGRATIONS_ALLOW_DROP === "1";
@@ -706,6 +713,45 @@ async function assertIdempotencyRegistryParity(sql) {
   };
 }
 
+async function expectFrozenLegacyAllowlistHashGuard(sql) {
+  const canonicalHash = "611ab69ba8ee160a4957f8fe9514c919b9f4129bc1ea7842778b04d28ea6ca05";
+  const allowlistPath = path.join(
+    process.cwd(),
+    "data/chips-ledger/legacy-stage-allowlist-v1/legacy-stage-allowlist-v1.master.ids",
+  );
+  const masterIds = fs.readFileSync(allowlistPath, "utf8").trim().split(/\r?\n/);
+  assert.equal(masterIds.length, 974, "DB hash regression must use all frozen master UUIDs");
+  const canonicalRows = await sql.unsafe(
+    "select public.chips_archive_uuid_ids_sha256($1::uuid[]) as hash;",
+    [masterIds],
+  );
+  assert.equal(canonicalRows[0]?.hash, canonicalHash, "checked-in UUID list must match the frozen DB hash");
+  const accepted = await sql.unsafe(
+    "select public.chips_assert_legacy_stage_allowlist_master_hash($1) as accepted;",
+    [canonicalRows[0].hash],
+  );
+  assert.equal(accepted[0]?.accepted, true, "canonical frozen allowlist hash must be accepted by DB");
+
+  const replacedIds = [...masterIds];
+  replacedIds[replacedIds.length - 1] = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  const replacedRows = await sql.unsafe(
+    "select public.chips_archive_uuid_ids_sha256($1::uuid[]) as hash;",
+    [replacedIds],
+  );
+  assert.notEqual(replacedRows[0]?.hash, canonicalHash, "one UUID replacement must change the DB-computed hash");
+  let caught = null;
+  try {
+    await sql.unsafe(
+      "select public.chips_assert_legacy_stage_allowlist_master_hash($1) as accepted;",
+      [replacedRows[0].hash],
+    );
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(caught, "DB must reject a master hash produced after replacing one UUID");
+  assert.equal(caught?.code, "P8936", "wrong frozen allowlist hash must raise P8936");
+}
+
 async function expectSavepointError(tx, savepoint, operation, expectedMessage) {
   assert.match(savepoint, /^[a-z_]+$/);
   await tx.unsafe(`savepoint ${savepoint};`);
@@ -754,6 +800,21 @@ async function assertArchivePrunerRoleContracts(sql) {
         select proowner from pg_catalog.pg_proc
         where oid = 'public.chips_assert_archive_prune_stage()'::regprocedure
       )) as gate_owner,
+      (
+        select pg_catalog.pg_get_function_identity_arguments(procedures.oid)
+          from pg_catalog.pg_proc procedures
+         where procedures.oid = 'public.chips_assert_bot_only_table_lifecycle_gate(uuid,bigint,timestamptz,text[])'::regprocedure
+      ) as lifecycle_gate_arguments,
+      (
+        select coalesce(array_to_string(procedures.proacl, ','), '<default>')
+          from pg_catalog.pg_proc procedures
+         where procedures.oid = 'public.chips_assert_bot_only_table_lifecycle_gate(uuid,bigint,timestamptz,text[])'::regprocedure
+      ) as lifecycle_gate_acl,
+      (
+        select coalesce(array_to_string(procedures.proconfig, ','), '<none>')
+          from pg_catalog.pg_proc procedures
+         where procedures.oid = 'public.chips_assert_bot_only_table_lifecycle_gate(uuid,bigint,timestamptz,text[])'::regprocedure
+      ) as lifecycle_gate_config,
       pg_catalog.pg_get_userbyid((
         select proowner from pg_catalog.pg_proc
         where oid = 'public.chips_assert_archive_prune_target(text,bigint)'::regprocedure
@@ -788,6 +849,9 @@ async function assertArchivePrunerRoleContracts(sql) {
       pg_catalog.has_schema_privilege('chips_ledger_archive_pruner', 'public', 'create') as public_schema_create;
   `;
   assert.equal(functionOwners[0].gate_owner, "postgres", "read-only Stage identity gate must retain its privileged owner");
+  assert.equal(functionOwners[0].lifecycle_gate_arguments, "p_table_id uuid, p_batch_id bigint, p_cutoff timestamp with time zone, p_registry_keys text[]", "lifecycle gate signature must remain unchanged");
+  assert.equal(functionOwners[0].lifecycle_gate_acl, "chips_ledger_archive_pruner=X/chips_ledger_archive_pruner", "lifecycle gate ACL must remain pruner-only");
+  assert.equal(functionOwners[0].lifecycle_gate_config, "search_path=\"\"", "lifecycle gate search_path must remain empty");
   assert.equal(functionOwners[0].target_gate_owner, "postgres", "target identity gate must retain a privileged owner");
   assert.equal(functionOwners[0].prune_owner, "chips_ledger_archive_pruner", "destructive function must use the NOLOGIN owner");
   assert.equal(functionOwners[0].prune_internal_owner, "chips_ledger_archive_pruner", "internal pruning implementation must use the NOLOGIN owner");
@@ -1090,6 +1154,447 @@ async function assertArchivePrunerRoleContracts(sql) {
   });
 }
 
+async function assertLegacyAllowlistCleanupContracts(sql) {
+  const masterIds = fs.readFileSync(
+    path.join(process.cwd(), "data/chips-ledger/legacy-stage-allowlist-v1/legacy-stage-allowlist-v1.master.ids"),
+    "utf8",
+  ).trim().split("\n").map((value) => value.trim()).filter(Boolean).sort();
+  assert.equal(masterIds.length, 974, "legacy cleanup contract must use the frozen master allowlist");
+  const tableId = masterIds[0];
+  const escrowId = "00000000-0000-4000-8000-00000000c402";
+  const transactionIds = [
+    "00000000-0000-4000-8000-00000000c403",
+    "00000000-0000-4000-8000-00000000c404",
+  ];
+  const replayTransactionId = "00000000-0000-4000-8000-00000000c405";
+  const cursorStartId = "00000000-0000-4000-8000-00000000c400";
+  const cutoff = "2026-08-17T16:51:28.074Z";
+  const cursorStartCreatedAt = "2026-08-16T23:59:59.000001Z";
+  const createdAt = ["2026-08-17T00:00:00.000001Z", "2026-08-17T00:00:00.000002Z"];
+  const registryKeys = [
+    `join-buyin:${tableId}:legacy-cleanup:0`,
+    `poker:bot-terminal-cashout:v1:${tableId}:legacy-cleanup-1`,
+  ].sort();
+  const ROLLBACK = new Error("legacy-allowlist-cleanup-rollback");
+
+  await sql.begin(async (tx) => {
+    await tx.unsafe("set transaction isolation level serializable;");
+    await tx.unsafe(`create or replace function public.chips_assert_archive_prune_stage()
+      returns text language sql security definer set search_path = ''
+      as $override$ select '7656985631720456337'::text $override$;`);
+    await tx.unsafe(`create or replace function public.chips_assert_archive_prune_target(p_project_ref text, p_transaction_count bigint)
+      returns text language plpgsql security definer set search_path = ''
+      as $override$
+      begin
+        if p_project_ref = 'krydukthwdvccggbyjfw' and p_transaction_count between 1 and 5000 then
+          return '7656985631720456337';
+        end if;
+        raise exception 'legacy cleanup target gate rejected request';
+      end
+      $override$;`);
+
+    await tx.unsafe("select public.chips_set_table_fence_active(false);");
+    await tx.unsafe(`insert into public.poker_tables (id, status, has_human_participant, bot_only_proof_eligible)
+      values ($1::uuid, 'OPEN', false, false);`, [tableId]);
+    await tx.unsafe(`insert into public.chips_accounts (id, account_type, system_key, status, balance, next_entry_seq)
+      values ($1::uuid, 'ESCROW', $2, 'active', 0, 1);`, [escrowId, `POKER_TABLE:${tableId}`]);
+
+    for (let index = 0; index < transactionIds.length; index += 1) {
+      await tx.unsafe(`insert into public.chips_transactions (
+        id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at
+      ) values ($1::uuid, $2, $3::jsonb, $4, $5, $6, null, $7::timestamptz);`, [
+        transactionIds[index],
+        `table:${tableId}`,
+        { tableId },
+        registryKeys[index],
+        (index === 0 ? "c" : "d").repeat(64),
+        index === 0 ? "TABLE_BUY_IN" : "TABLE_CASH_OUT",
+        sql.typed(createdAt[index], 25),
+      ]);
+    }
+    const entryIds = [];
+    for (let index = 0; index < transactionIds.length; index += 1) {
+      const entryRows = await tx.unsafe(`with accounts as (
+        select id, system_key from public.chips_accounts
+        where (account_type = 'SYSTEM' and system_key = 'GENESIS') or id = $2::uuid
+      )
+      insert into public.chips_entries (transaction_id, account_id, amount, metadata)
+      select $1::uuid, id,
+             case
+               when $3::boolean and system_key = 'GENESIS' then -10
+               when $3::boolean then 10
+               when system_key = 'GENESIS' then 10
+               else -10
+             end,
+             '{}'::jsonb
+      from accounts order by system_key returning id;`, [transactionIds[index], escrowId, index === 0]);
+      entryIds.push(...entryRows.map((row) => String(row.id)).sort((left, right) => BigInt(left) < BigInt(right) ? -1 : 1));
+    }
+    await tx.unsafe("set constraints all immediate;");
+    await tx.unsafe("select public.chips_set_table_fence_active(true);");
+    await tx.unsafe("update public.poker_tables set status = 'CLOSED' where id = $1::uuid;", [tableId]);
+
+    const batchHashRows = await tx.unsafe(
+      "select public.chips_archive_uuid_ids_sha256($1::uuid[]) as hash;",
+      [[tableId]],
+    );
+    const batchTableIdsSha256 = batchHashRows[0].hash;
+    const compressedHash = "c".repeat(64);
+    const rawHash = "b".repeat(64);
+    const objectPath = `v1/sha256/${compressedHash}.jsonl.gz`;
+    const manifestRows = await tx.unsafe(`insert into public.chips_ledger_archive_batches (
+      object_path, project_ref, format_version, source_policy_id, cutoff,
+      cursor_start_created_at, cursor_start_id, cursor_end_created_at, cursor_end_id,
+      first_created_at, last_created_at, transaction_count, entry_count, tx_types,
+      raw_bytes, compressed_bytes, raw_sha256, compressed_sha256, credits, debits, net_amount,
+      status, committed_at, legacy_allowlist_sha256, legacy_batch_table_ids_sha256,
+      legacy_master_table_ids, legacy_master_table_count, legacy_batch_number,
+      legacy_batch_table_count, legacy_source_run, legacy_query_sha256,
+      legacy_stage_system_identifier
+    ) values (
+      $1, 'krydukthwdvccggbyjfw', 2, 'legacy_stage_allowlist_v1', $2::timestamptz,
+      $3::timestamptz, $4::uuid, $5::timestamptz, $6::uuid,
+      $7::timestamptz, $8::timestamptz, 2, 4, '{"TABLE_BUY_IN":1,"TABLE_CASH_OUT":1}'::jsonb,
+      100, 80, $9, $10, 20, 20, 0, 'committed', timezone('utc', now()),
+      '611ab69ba8ee160a4957f8fe9514c919b9f4129bc1ea7842778b04d28ea6ca05', $11,
+      $12::uuid[], 974, 1, 1, '32753223679',
+      '9bd27ff7a2749a879707e823982f708e6abf86beffcdf8f97c5deac05f00ca09',
+      '7656985631720456337'
+    ) returning batch_id;`, [
+      objectPath,
+      sql.typed(cutoff, 25),
+      sql.typed(cursorStartCreatedAt, 25),
+      cursorStartId,
+      sql.typed(createdAt[1], 25),
+      transactionIds[1],
+      sql.typed(createdAt[0], 25),
+      sql.typed(createdAt[1], 25),
+      rawHash,
+      compressedHash,
+      batchTableIdsSha256,
+      masterIds,
+    ]);
+    const batchId = String(manifestRows[0].batch_id);
+    const pruneStore = createPruneStore({
+      unsafe: (...args) => tx.unsafe(...args),
+      begin: async (callback) => callback({
+        unsafe: (query, parameters = []) => /^\s*set (transaction|local) /i.test(query)
+          ? Promise.resolve([])
+          : tx.unsafe(query, parameters),
+      }),
+      typed: (value, type) => sql.typed(value, type),
+    });
+    const adapterManifest = await pruneStore.getManifest(objectPath);
+    const evidence = {
+      transactionIds,
+      entryIds,
+      registryKeys,
+      legacyTableIds: [tableId],
+      legacyMasterTableIds: masterIds,
+      legacyAllowlistSha256: "611ab69ba8ee160a4957f8fe9514c919b9f4129bc1ea7842778b04d28ea6ca05",
+      legacyBatchTableIdsSha256: batchTableIdsSha256,
+    };
+    const proofResult = await pruneStore.registerLegacyStageAllowlistProof(adapterManifest, evidence);
+    assert.equal(proofResult.state, "proof_registered", "legacy proof must register before cleanup");
+
+    const idProofRows = await tx.unsafe(`select
+      archived_transaction_ids_sha256, archived_entry_ids_sha256, archive_proof_verified_at
+      from public.chips_ledger_archive_batches where batch_id = $1;`, [batchId]);
+    assert.ok(idProofRows[0].archive_proof_verified_at, "legacy proof must create the immutable archive ID receipt");
+    const legacyTransactionHash = idProofRows[0].archived_transaction_ids_sha256;
+    const legacyEntryHash = idProofRows[0].archived_entry_ids_sha256;
+
+    const authorizationRows = await tx.unsafe(
+      "select public.chips_authorize_legacy_stage_allowlist_batch($1::bigint, $2, $3) as result;",
+      [batchId, `GO ${batchId}`, evidence.legacyAllowlistSha256],
+    );
+    assert.equal(authorizationRows[0].result.state, "authorized");
+    const authorizationReceipt = await tx.unsafe(`select
+      destructive_go_at,
+      destructive_go_batch_id::text as destructive_go_batch_id
+      from public.chips_ledger_archive_batches where batch_id = $1;`, [batchId]);
+    assert.ok(authorizationReceipt[0].destructive_go_at, "authorization must persist destructive_go_at");
+    assert.equal(authorizationReceipt[0].destructive_go_batch_id, batchId, "authorization must persist the exact batch ID");
+    await tx.unsafe("select set_config('chips.bot_only_go', '', true);");
+
+    const balancesBefore = await tx.unsafe(`select id, balance, next_entry_seq
+      from public.chips_accounts where id = $1::uuid;`, [escrowId]);
+    const scopedAccountIds = balancesBefore.map((row) => row.id);
+    const economicsBefore = await tx.unsafe(`select
+      coalesce((select sum(balance) from public.chips_accounts where id = any($1::uuid[])), 0)::text as balance_total,
+      coalesce((select sum(next_entry_seq) from public.chips_accounts where id = any($1::uuid[])), 0)::text as next_entry_seq_total,
+      coalesce((select sum(amount) from public.chips_entries where transaction_id = any($2::uuid[])), 0)::text as conservation;`,
+      [scopedAccountIds, transactionIds]);
+    await tx.unsafe("select public.chips_set_table_fence_active(false);");
+    await expectSavepointError(tx, "legacy_fence_off", () => pruneStore.cleanupLegacyStageAllowlist(
+      objectPath, evidence, true, batchId,
+    ), /Active TABLE fence is required|active TABLE fence/i);
+    const fenceOffState = await tx.unsafe(`select
+      (select count(*) from public.chips_transactions where id = any($1::uuid[])) as hot_transactions,
+      (select count(*) from public.chips_entries where transaction_id = any($1::uuid[])) as hot_entries,
+      (select count(*) from public.chips_transaction_idempotency where idempotency_key = any($2::text[])) as registry_rows,
+      (select pruned_at from public.chips_ledger_archive_batches where batch_id = $3) as pruned_at;`, [transactionIds, registryKeys, batchId]);
+    assert.equal(Number(fenceOffState[0].hot_transactions), 2);
+    assert.equal(Number(fenceOffState[0].hot_entries), 4);
+    assert.equal(Number(fenceOffState[0].registry_rows), 2);
+    assert.equal(fenceOffState[0].pruned_at, null);
+    await tx.unsafe("select public.chips_set_table_fence_active(true);");
+    const cleanupResult = await pruneStore.cleanupLegacyStageAllowlist(objectPath, evidence, true, batchId);
+    assert.equal(cleanupResult.state, "pruned");
+    assert.equal(Number(cleanupResult.registry_keys), 2);
+    assert.equal(cleanupResult.remaining_registry_count, 0);
+
+    const postRows = await tx.unsafe(`select
+      (select count(*) from public.chips_transactions where id = any($1::uuid[])) as hot_transactions,
+      (select count(*) from public.chips_entries where transaction_id = any($1::uuid[])) as hot_entries,
+      (select count(*) from public.chips_transaction_idempotency where archive_batch_id = $2) as remaining_registry,
+      (select count(*) from public.chips_transaction_idempotency where idempotency_key = any($3::text[])) as replay_keys,
+      (select pruned_at from public.chips_ledger_archive_batches where batch_id = $2) as pruned_at,
+      (select registry_cleaned_at from public.chips_ledger_archive_batches where batch_id = $2) as registry_cleaned_at,
+      (select pruned_transaction_count from public.chips_ledger_archive_batches where batch_id = $2) as pruned_transaction_count,
+      (select pruned_entry_count from public.chips_ledger_archive_batches where batch_id = $2) as pruned_entry_count,
+      (select pruned_transaction_ids_sha256 from public.chips_ledger_archive_batches where batch_id = $2) as pruned_transaction_ids_sha256,
+      (select pruned_entry_ids_sha256 from public.chips_ledger_archive_batches where batch_id = $2) as pruned_entry_ids_sha256,
+      (select registry_cleaned_key_count from public.chips_ledger_archive_batches where batch_id = $2) as receipt_count,
+      (select registry_cleaned_keys_sha256 from public.chips_ledger_archive_batches where batch_id = $2) as receipt_hash;`,
+      [transactionIds, batchId, registryKeys]);
+    assert.equal(Number(postRows[0].hot_transactions), 0);
+    assert.equal(Number(postRows[0].hot_entries), 0);
+    assert.equal(Number(postRows[0].remaining_registry), 0);
+    assert.equal(Number(postRows[0].replay_keys), 0);
+    assert.ok(postRows[0].pruned_at, "cleanup must write pruned_at");
+    assert.ok(postRows[0].registry_cleaned_at, "cleanup must write registry_cleaned_at");
+    assert.equal(Number(postRows[0].pruned_transaction_count), 2);
+    assert.equal(Number(postRows[0].pruned_entry_count), 4);
+    assert.equal(postRows[0].pruned_transaction_ids_sha256, legacyTransactionHash);
+    assert.equal(postRows[0].pruned_entry_ids_sha256, legacyEntryHash);
+    assert.equal(Number(postRows[0].receipt_count), 2);
+    assert.equal(postRows[0].receipt_hash, cleanupResult.registry_keys_sha256);
+
+    await expectSavepointError(tx, "legacy_replay_old_key", () => tx.unsafe(`insert into public.chips_transactions (
+      id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at
+    ) values ($1::uuid, $2, $3::jsonb, $4, $5, 'TABLE_BUY_IN', null, $6::timestamptz);`, [
+      replayTransactionId,
+      `table:${tableId}`,
+      { tableId },
+      registryKeys[0],
+      "e".repeat(64),
+      sql.typed("2026-08-17T00:00:00.000003Z", 25),
+    ]), /P8903|closed or missing/i);
+
+    const retryResult = await pruneStore.cleanupLegacyStageAllowlist(objectPath, evidence, true, batchId);
+    assert.equal(retryResult.state, "already_pruned", "legacy cleanup retry must be idempotent");
+    assert.equal(Number(retryResult.remaining_registry_count), 0);
+    const balancesAfter = await tx.unsafe(`select id, balance, next_entry_seq
+      from public.chips_accounts where id = $1::uuid;`, [escrowId]);
+    assert.deepEqual(balancesAfter, balancesBefore, "legacy cleanup must not change balances or next_entry_seq");
+    const economicsAfter = await tx.unsafe(`select
+      coalesce((select sum(balance) from public.chips_accounts where id = any($1::uuid[])), 0)::text as balance_total,
+      coalesce((select sum(next_entry_seq) from public.chips_accounts where id = any($1::uuid[])), 0)::text as next_entry_seq_total,
+      coalesce((select sum(amount) from public.chips_entries where transaction_id = any($2::uuid[])), 0)::text as conservation;`,
+      [scopedAccountIds, transactionIds]);
+    assert.deepEqual(economicsAfter, economicsBefore, "legacy cleanup must preserve economic snapshot");
+
+    throw ROLLBACK;
+  }).catch((error) => {
+    if (error !== ROLLBACK) throw error;
+  });
+}
+
+async function assertLegacyUnprunedRegistrySelectorContract(sql) {
+  const tableIds = Array.from({ length: 10 }, (_, index) =>
+    `00000000-0000-4000-8000-${String(0xe601 + index).padStart(12, "0")}`);
+  const transactionIds = Array.from({ length: 60 }, (_, index) =>
+    `00000000-0000-4000-8000-${String(0xe701 + index).padStart(12, "0")}`);
+  const registryKeys = transactionIds.map((_, index) =>
+    `bot-seed-buyin:${tableIds[index % tableIds.length]}:legacy-unpruned-${String(index).padStart(2, "0")}`);
+  const ROLLBACK = new Error("legacy-unpruned-registry-selector-rollback");
+
+  await sql.begin(async (tx) => {
+    await tx.unsafe("set transaction isolation level serializable;");
+    await tx.unsafe("select public.chips_set_table_fence_active(false);");
+    for (let index = 0; index < tableIds.length; index += 1) {
+      const tableId = tableIds[index];
+      await tx.unsafe(`insert into public.poker_tables (
+        id, status, has_human_participant, bot_only_proof_eligible
+      ) values ($1::uuid, 'CLOSED', false, false);`, [tableId]);
+      await tx.unsafe(`insert into public.chips_accounts (
+        id, account_type, system_key, status, balance, next_entry_seq
+      ) values ($1::uuid, 'ESCROW', $2, 'active', 0, 1);`, [
+        `00000000-0000-4000-8000-${String(0xe801 + index).padStart(12, "0")}`,
+        `POKER_TABLE:${tableId}`,
+      ]);
+    }
+    for (let index = 0; index < transactionIds.length; index += 1) {
+      const tableId = tableIds[index % tableIds.length];
+      await tx.unsafe(`insert into public.chips_transactions (
+        id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at
+      ) values ($1::uuid, $2, $3::jsonb, $4, $5, $6, null, $7::timestamptz);`, [
+        transactionIds[index],
+        `BOT_SEED_BUY_IN:${tableId}:${index}`,
+        { tableId },
+        registryKeys[index],
+        crypto.createHash("sha256").update(registryKeys[index]).digest("hex"),
+        index % 2 === 0 ? "TABLE_BUY_IN" : "TABLE_CASH_OUT",
+        sql.typed(`2026-08-17T00:00:${String(index % 60).padStart(2, "0")}.000001Z`, 25),
+      ]);
+    }
+    await tx.unsafe("select public.chips_set_table_fence_active(true);");
+
+    // Exercise the exact production snapshot queries on disposable PostgreSQL.
+    // The fixture transaction is rollback-only; production wraps this helper in
+    // REPEATABLE READ, READ ONLY before using either state.
+    const escrowAccountIds = tableIds.map((_, index) =>
+      `00000000-0000-4000-8000-${String(0xe801 + index).padStart(12, "0")}`);
+    const snapshotPlan = { batchTableIds: tableIds };
+    const unprunedSnapshot = await collectExecutionSnapshot(
+      tx,
+      snapshotPlan,
+      escrowAccountIds,
+      "unpruned",
+    );
+    assert.equal(unprunedSnapshot.registryCount, 60);
+    assert.equal(unprunedSnapshot.transactionCount, 60);
+    assert.equal(unprunedSnapshot.entryCount, 0);
+    assert.equal(unprunedSnapshot.conservation.entryCount, 0);
+    assert.equal(unprunedSnapshot.conservation.entrySum, "0");
+
+    const prunedSnapshot = await collectExecutionSnapshot(
+      tx,
+      snapshotPlan,
+      escrowAccountIds,
+      "pruned",
+    );
+    assert.equal(prunedSnapshot.registryCount, 0);
+    assert.equal(prunedSnapshot.transactionCount, 0);
+    assert.equal(prunedSnapshot.entryCount, 0);
+    assert.equal(prunedSnapshot.conservation.entryCount, 0);
+    assert.equal(prunedSnapshot.conservation.entrySum, "0");
+
+    const rows = await tx.unsafe(`
+      select
+        registry.idempotency_key,
+        registry.transaction_id::text as transaction_id,
+        registry.table_id::text as table_id,
+        registry.tx_type::text as tx_type,
+        registry.user_id::text as user_id,
+        registry.archive_batch_id::text as archive_batch_id
+      from public.chips_transaction_idempotency registry
+      where ${legacyStageAllowlistRegistryPredicate("$1")}
+      order by registry.idempotency_key;
+    `, [tableIds]);
+    assert.equal(rows.length, 60, "unpruned selector must return all 60 registry rows");
+    const expectedKeysSha256 = hashLegacyStageAllowlistRegistryKeys([...registryKeys].sort());
+    const selection = assertLegacyStageAllowlistRegistryRows(rows, {
+      tableIds,
+      expectedCount: 60,
+      expectedKeysSha256,
+    });
+    assert.equal(selection.keysSha256, expectedKeysSha256);
+    assert.equal(new Set(rows.map((row) => row.table_id)).size, 10);
+    assert.ok(rows.every((row) => row.archive_batch_id === null));
+
+    // Execute the production audit query against disposable PostgreSQL with
+    // its actual one-parameter binding. This must not be reduced to a mock.
+    const auditRows = await tx.unsafe(LEGACY_STAGE_ALLOWLIST_AUDIT_SQL.registry, [tableIds]);
+    assert.equal(auditRows.length, 60, "audit registry query must return all 60 rows");
+    assert.deepEqual(
+      auditRows.map((row) => row.idempotency_key),
+      rows.map((row) => row.idempotency_key),
+      "audit registry query must use the same exact table selector",
+    );
+    assertLegacyStageAllowlistRegistryRows(auditRows, {
+      tableIds,
+      expectedCount: 60,
+      expectedKeysSha256,
+    });
+    throw ROLLBACK;
+  }).catch((error) => {
+    if (error !== ROLLBACK) throw error;
+  });
+}
+
+async function assertScopedSnapshotIgnoresParallelUnrelatedActivity(sql) {
+  const snapshotSql = postgres(dbUrl, { max: 1 });
+  const activitySql = postgres(dbUrl, { max: 1 });
+  let scopedAccountId = null;
+  let genesisBefore = null;
+  const parallelTableId = "00000000-0000-4000-8000-00000000cafe";
+  try {
+    const accountRows = await sql`
+      insert into public.chips_accounts (account_type, system_key, status, balance, next_entry_seq)
+      values ('ESCROW', ${`POKER_TABLE:${parallelTableId}`}, 'active', 100, 7)
+      returning id::text as id;
+    `;
+    scopedAccountId = accountRows[0].id;
+    const scopedIds = [scopedAccountId];
+    const genesisRows = await sql`
+      select balance::text as balance, next_entry_seq::text as next_entry_seq
+      from public.chips_accounts
+      where account_type = 'SYSTEM' and system_key = 'GENESIS';
+    `;
+    assert.equal(genesisRows.length, 1, "GENESIS fixture must exist for scoped snapshot regression");
+    genesisBefore = genesisRows[0];
+    const result = await snapshotSql.begin(async (tx) => {
+      await tx.unsafe("set transaction isolation level repeatable read, read only;");
+      const before = await tx.unsafe(`
+        select id::text as id, balance::text as balance, next_entry_seq::text as next_entry_seq
+        from public.chips_accounts
+        where id = any($1::uuid[])
+        order by id;
+      `, [scopedIds]);
+      const beforeConservation = await tx.unsafe(`
+        select coalesce(sum(amount), 0)::text as entry_sum
+        from public.chips_entries
+        where account_id = any($1::uuid[]);
+      `, [scopedIds]);
+      await activitySql`
+        update public.chips_accounts
+        set balance = balance + 1, next_entry_seq = next_entry_seq + 1
+        where account_type = 'SYSTEM' and system_key = 'GENESIS';
+      `;
+      const after = await tx.unsafe(`
+        select id::text as id, balance::text as balance, next_entry_seq::text as next_entry_seq
+        from public.chips_accounts
+        where id = any($1::uuid[])
+        order by id;
+      `, [scopedIds]);
+      const afterConservation = await tx.unsafe(`
+        select coalesce(sum(amount), 0)::text as entry_sum
+        from public.chips_entries
+        where account_id = any($1::uuid[]);
+      `, [scopedIds]);
+      return { before, after, beforeConservation, afterConservation };
+    });
+    assert.deepEqual(result.after, result.before, "unrelated account activity must not change scoped account snapshots");
+    assert.deepEqual(result.afterConservation, result.beforeConservation, "unrelated activity must not change scoped conservation");
+    const genesisChanged = await sql`
+      select balance::text as balance, next_entry_seq::text as next_entry_seq
+      from public.chips_accounts
+      where account_type = 'SYSTEM' and system_key = 'GENESIS';
+    `;
+    assert.deepEqual(genesisChanged[0], {
+      balance: String(Number(genesisBefore.balance) + 1),
+      next_entry_seq: String(Number(genesisBefore.next_entry_seq) + 1),
+    });
+  } finally {
+    if (genesisBefore) {
+      await sql`
+        update public.chips_accounts
+        set balance = ${genesisBefore.balance}, next_entry_seq = ${genesisBefore.next_entry_seq}
+        where account_type = 'SYSTEM' and system_key = 'GENESIS';
+      `;
+    }
+    if (scopedAccountId) {
+      await sql`
+        delete from public.chips_accounts where id = ${scopedAccountId}::uuid;
+      `;
+    }
+    await snapshotSql.end({ timeout: 5 });
+    await activitySql.end({ timeout: 5 });
+  }
+}
+
 async function assertBuyInSequencing(sql, expectedTreasurySeq) {
   const { getUserBalance, listUserLedger } = await withLedger();
   const userId = primaryUserId;
@@ -1183,8 +1688,12 @@ async function main() {
   await dropAndRecreateSchema(sql);
 
   await runMigrations(sql, migrationsWithoutBootstrapSeeds);
+  await expectFrozenLegacyAllowlistHashGuard(sql);
   await ensureGenesisFixture(sql);
   await assertArchivePrunerRoleContracts(sql);
+  await assertLegacyAllowlistCleanupContracts(sql);
+  await assertLegacyUnprunedRegistrySelectorContract(sql);
+  await assertScopedSnapshotIgnoresParallelUnrelatedActivity(sql);
   await expectNegativeBalanceGuard(sql);
   await expectInsufficientBuyIn(sql);
   await expectInvalidMetadata(sql);

@@ -1,0 +1,59 @@
+name: Chips Ledger Stage Legacy Allowlist Freeze
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: chips-ledger-stage-legacy-allowlist-freeze
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  freeze:
+    if: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_STAGE_DB_URL: ${{ secrets.SUPABASE_STAGE_DB_URL }}
+      SUPABASE_STAGE_URL: ${{ secrets.SUPABASE_STAGE_URL }}
+      SUPABASE_STAGE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_STAGE_SERVICE_ROLE_KEY }}
+    steps:
+      - name: Checkout exact workflow SHA
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Confirm checkout SHA
+        id: checkout-sha
+        shell: bash
+        run: |
+          set -euo pipefail
+          checked_out_sha="$(git rev-parse HEAD)"
+          test "$checked_out_sha" = "$GITHUB_SHA"
+          echo "sha=$checked_out_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run one read-only legacy allowlist freeze
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+          FREEZE_RUN_ID: ${{ github.run_id }}
+          FREEZE_OUTPUT_DIR: ${{ runner.temp }}/chips-ledger-legacy-stage-allowlist-freeze
+        run: node scripts/ops/chips-ledger-legacy-stage-allowlist-freeze.mjs
+
+      - name: Upload freeze artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chips-ledger-legacy-stage-allowlist-freeze-${{ github.run_id }}
+          path: ${{ runner.temp }}/chips-ledger-legacy-stage-allowlist-freeze
+          if-no-files-found: error
+          retention-days: 7

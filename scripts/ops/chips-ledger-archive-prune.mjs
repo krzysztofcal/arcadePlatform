@@ -3,7 +3,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import postgres from "postgres";
-import { maxBatchSizeForTarget, stringifyJson } from "./chips-ledger-archive-export.mjs";
+import {
+  BOT_ONLY_EXPORT_SCHEMA_VERSION,
+  BOT_ONLY_RETENTION_POLICY_ID,
+  LEGACY_STAGE_ALLOWLIST_POLICY_ID,
+  LEGACY_STAGE_ALLOWLIST_TABLE_COUNT,
+  assertLegacyStageAllowlistEvidence,
+  maxBatchSizeForTarget,
+  stringifyJson,
+} from "./chips-ledger-archive-export.mjs";
 import {
   ARCHIVE_BUCKET,
   buildObjectPath,
@@ -17,6 +25,7 @@ import {
   ensurePrivateDirectory,
   writeExclusiveFiles,
 } from "./_shared/chips-ledger-archive-files.mjs";
+import { assertTableBinding } from "./_shared/chips-table-idempotency.mjs";
 
 export const STAGE_SYSTEM_IDENTIFIER = "7656985631720456337";
 export const PRODUCTION_SYSTEM_IDENTIFIER = "7575202818581710058";
@@ -27,6 +36,9 @@ const SHA256_RE = /^[0-9a-f]{64}$/;
 const ALLOWED_TX_TYPES = new Set(["TABLE_BUY_IN", "TABLE_CASH_OUT"]);
 const MAX_BATCH_SIZE = maxBatchSizeForTarget("stage");
 const MAX_EXECUTE_ATTEMPTS = 3;
+export const MAX_AUTOMATIC_CLEANUP_ATTEMPTS = 3;
+export const AUTOMATIC_CLEANUP_RETRY_BACKOFF_MS = Object.freeze([100, 250]);
+const RETRYABLE_CLEANUP_SQLSTATES = new Set(["40001", "55P03"]);
 
 const HELP = `Usage: node scripts/ops/chips-ledger-archive-prune.mjs [options]
 
@@ -39,6 +51,7 @@ Modes (mutually exclusive):
   default                        Validate Storage and run a database dry-run.
   --register-proof               Persist immutable ordered transaction/entry ID proof.
   --execute                      Prune exact proof-bound IDs after all checks.
+  --approved-batch-id <integer> Exact schema-v2 bot-only GO batch (execute only).
 
 Execute-only:
   --recovery-dir <path>          Required private 0700 recovery directory.
@@ -56,6 +69,22 @@ function fail(message, code = null) {
 
 function text(value) {
   return value == null ? "" : String(value).trim();
+}
+
+export function sqlStateOf(error) {
+  const candidates = [
+    error?.code,
+    error?.sqlstate,
+    error?.sqlState,
+    error?.cause?.code,
+    error?.cause?.sqlstate,
+    error?.cause?.sqlState,
+  ];
+  for (const candidate of candidates) {
+    const value = text(candidate).toUpperCase();
+    if (/^[0-9A-Z]{5}$/.test(value)) return value;
+  }
+  return null;
 }
 
 function canonicalJson(value) {
@@ -141,6 +170,9 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
   const tables = new Set();
   let userTransactions = 0;
   let userEntries = 0;
+  const registryKeys = [];
+  const tableIds = new Set();
+  const replayPairs = [];
 
   for (const record of localArchive.records) {
     const transaction = record.transaction;
@@ -149,6 +181,42 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
     if (transaction.user_id !== null) userTransactions += 1;
     const tableId = tableIdForRecord(record);
     tables.add(tableId);
+    const isLegacyAllowlist = localArchive.manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+      && localArchive.manifest.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID;
+    if (localArchive.manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION && !isLegacyAllowlist) {
+      const parsedBinding = assertTableBinding({
+        idempotencyKey: transaction.idempotency_key,
+        metadata: transaction.metadata,
+        reference: transaction.reference,
+      });
+      if (transaction.user_id !== null || record.table_context?.bot_only_proof?.has_human_participant !== false
+        || record.table_context?.bot_only_proof?.proof_eligible !== true
+        || record.table_context?.bot_only_proof?.table_id_from_key !== tableId
+        || parsedBinding.tableId !== tableId
+        || record.table_context?.bot_only_proof?.key_format !== parsedBinding.format) {
+        fail("schema-v2 archive is not proven bot-only");
+      }
+      registryKeys.push(text(transaction.idempotency_key));
+      tableIds.add(tableId);
+    } else if (isLegacyAllowlist) {
+      const proof = record.table_context?.legacy_stage_allowlist;
+      if (!proof || proof.policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID
+        || proof.allowlist_sha256 !== localArchive.manifest.legacy_stage_allowlist?.allowlist_sha256
+        || proof.batch_table_ids_sha256 !== localArchive.manifest.legacy_stage_allowlist?.batch_table_ids_sha256
+        || proof.source_run !== "32753223679"
+        || proof.stage_system_identifier !== "7656985631720456337"
+        || proof.master_table_count !== 974
+        || transaction.user_id !== null) {
+        fail("schema-v2 legacy allowlist proof is incomplete");
+      }
+      registryKeys.push(text(transaction.idempotency_key));
+      tableIds.add(tableId);
+      replayPairs.push({
+        idempotencyKey: text(transaction.idempotency_key),
+        tableId,
+        transactionId: text(transaction.id),
+      });
+    }
     if (record.entries.length !== 2) fail("technical archive transaction must contain exactly two entries");
 
     const systemEntries = record.entries.filter((entry) => text(entry?.account?.account_type).toUpperCase() === "SYSTEM");
@@ -178,6 +246,21 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
     fail(`cannot prune USER ledger history (user_transactions=${userTransactions}, user_entries=${userEntries}, distinct_tables=${tables.size})`);
   }
   if (canonicalJson(txTypes) !== canonicalJson(localArchive.manifest.batch.tx_types)) fail("technical tx_type evidence differs from archive manifest");
+  if (localArchive.manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+    && localArchive.manifest.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
+    const legacy = localArchive.manifest.legacy_stage_allowlist;
+    const masterIds = [...(legacy?.master_table_ids || [])].sort();
+    if (masterIds.length !== LEGACY_STAGE_ALLOWLIST_TABLE_COUNT
+      || new Set(masterIds).size !== masterIds.length
+      || masterIds.some((id) => !UUID_RE.test(id))) {
+      fail("legacy allowlist master identity set is incomplete");
+    }
+    const masterHash = hashCanonicalLines(masterIds);
+    if (masterHash !== text(legacy.allowlist_sha256)) fail("legacy allowlist master identity hash differs from the manifest");
+    if (tables.size < 1 || tables.size !== [...tableIds].length) fail("legacy allowlist batch table set is empty");
+    const batchHash = hashCanonicalLines([...tableIds].sort());
+    if (batchHash !== text(legacy.batch_table_ids_sha256)) fail("legacy allowlist batch table identity hash differs from the manifest");
+  }
   return {
     ...proofs,
     transactionCount: proofs.transactionIds.length,
@@ -189,6 +272,26 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
     credits: localArchive.summary.credits,
     debits: localArchive.summary.debits,
     net: localArchive.summary.netAmount,
+    ...(localArchive.manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+      && localArchive.manifest.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID ? {
+      registryKeys: [...registryKeys].sort(),
+      registryKeysSha256: hashCanonicalLines([...registryKeys].sort()),
+      tableId: tableIds.size === 1 ? [...tableIds][0] : null,
+      outOfScopeKeysSha256: text(localArchive.manifest.bot_only?.out_of_scope_keys_sha256),
+    } : {}),
+    ...(localArchive.manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+      && localArchive.manifest.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID ? {
+      registryKeys: [...registryKeys].sort(),
+      registryKeysSha256: hashCanonicalLines([...registryKeys].sort()),
+      legacyTableIds: [...tableIds].sort(),
+      legacyTableIdsSha256: hashCanonicalLines([...tableIds].sort()),
+      legacyMasterTableIds: [...(localArchive.manifest.legacy_stage_allowlist?.master_table_ids || [])].sort(),
+      legacyMasterTableIdsSha256: hashCanonicalLines([...(localArchive.manifest.legacy_stage_allowlist?.master_table_ids || [])].sort()),
+      legacyAllowlistSha256: text(localArchive.manifest.legacy_stage_allowlist?.allowlist_sha256),
+      legacyBatchTableIdsSha256: text(localArchive.manifest.legacy_stage_allowlist?.batch_table_ids_sha256),
+      replayPairs,
+      replayPair: replayPairs[0] || null,
+    } : {}),
   };
 }
 
@@ -198,6 +301,7 @@ function parseArgs(argv) {
     ["--object-path", "objectPath"],
     ["--confirm-sha", "confirmSha"],
     ["--recovery-dir", "recoveryDir"],
+    ["--approved-batch-id", "approvedBatchId"],
   ]);
   const args = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -206,8 +310,8 @@ function parseArgs(argv) {
       args.help = true;
       continue;
     }
-    if (token === "--register-proof" || token === "--execute") {
-      const key = token === "--register-proof" ? "registerProof" : "execute";
+    if (token === "--register-proof" || token === "--execute" || token === "--automatic") {
+      const key = token === "--register-proof" ? "registerProof" : token === "--execute" ? "execute" : "automatic";
       if (args[key]) fail(`${token} was supplied more than once`);
       args[key] = true;
       continue;
@@ -221,6 +325,7 @@ function parseArgs(argv) {
     index += 1;
   }
   if (args.registerProof && args.execute) fail("--register-proof and --execute are mutually exclusive");
+  if (args.automatic && !args.execute) fail("--automatic is only valid with --execute");
   return args;
 }
 
@@ -264,13 +369,51 @@ function parseManifestRow(row) {
     debits: String(row.debits),
     net_amount: String(row.net_amount),
     batch_id: String(row.batch_id),
+    bot_only_table_count: row.bot_only_table_count == null ? null : Number(row.bot_only_table_count),
+    bot_only_identity_count: row.bot_only_identity_count == null ? null : Number(row.bot_only_identity_count),
+    bot_only_eligible_count: row.bot_only_eligible_count == null ? null : Number(row.bot_only_eligible_count),
+    registry_cleaned_key_count: row.registry_cleaned_key_count == null ? null : Number(row.registry_cleaned_key_count),
+    legacy_master_table_count: row.legacy_master_table_count == null ? null : Number(row.legacy_master_table_count),
+    legacy_batch_number: row.legacy_batch_number == null ? null : Number(row.legacy_batch_number),
+    legacy_batch_table_count: row.legacy_batch_table_count == null ? null : Number(row.legacy_batch_table_count),
+    legacy_run_id: row.legacy_run_id == null ? null : String(row.legacy_run_id),
+    destructive_go_batch_id: row.destructive_go_batch_id == null ? null : Number(row.destructive_go_batch_id),
   };
 }
 
-function exporterManifestFromDatabase(row, target) {
+function legacyStageAllowlistEvidenceFromDatabaseRow(row, expectedEvidence) {
+  if (!expectedEvidence || typeof expectedEvidence !== "object" || Array.isArray(expectedEvidence)) {
+    fail("legacy Stage allowlist manifest evidence is incomplete: immutable_plan");
+  }
+  const reconstructed = {
+    ...structuredClone(expectedEvidence),
+    // The database persists these fields. They must agree with the immutable
+    // plan; proof_basis is derived from the persisted policy identity, never
+    // supplied as a default.
+    policy_id: row.source_policy_id,
+    proof_basis: row.source_policy_id,
+    allowlist_sha256: row.legacy_allowlist_sha256,
+    batch_table_ids_sha256: row.legacy_batch_table_ids_sha256,
+    master_table_ids: row.legacy_master_table_ids,
+    master_table_count: Number(row.legacy_master_table_count),
+    batch_number: Number(row.legacy_batch_number),
+    batch_table_count: Number(row.legacy_batch_table_count),
+    source_run: row.legacy_source_run,
+    query_sha256: row.legacy_query_sha256,
+    stage_system_identifier: row.legacy_stage_system_identifier,
+  };
+  assertLegacyStageAllowlistEvidence(reconstructed, expectedEvidence);
+  return reconstructed;
+}
+
+function exporterManifestFromDatabase(row, target, legacyStageAllowlistPlan = null) {
   const ratio = row.raw_bytes === 0 ? null : Number((row.compressed_bytes / row.raw_bytes).toFixed(6));
   const cursorStart = row.cursor_start_created_at ? { created_at: row.cursor_start_created_at, id: row.cursor_start_id } : null;
   const cursorEnd = row.cursor_end_created_at ? { created_at: row.cursor_end_created_at, id: row.cursor_end_id } : null;
+  const legacyStageAllowlist = row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+    && row.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID
+    ? legacyStageAllowlistEvidenceFromDatabaseRow(row, legacyStageAllowlistPlan?.archiveManifest)
+    : null;
   return {
     schema_version: row.format_version,
     artifact_type: "chips_ledger_archive",
@@ -299,6 +442,22 @@ function exporterManifestFromDatabase(row, target) {
     sha256: { raw_jsonl: row.raw_sha256, compressed_artifact: row.compressed_sha256 },
     artifact: path.basename(row.object_path),
     ...(row.source_policy_id ? { source_policy_id: row.source_policy_id } : {}),
+    ...(row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+      && row.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID ? {
+      bot_only: {
+        table_id: row.bot_only_table_id,
+        table_count: Number(row.bot_only_table_count),
+        newest_created_at: row.bot_only_newest_created_at,
+        registry_keys_sha256: row.bot_only_registry_keys_sha256,
+        out_of_scope_keys_sha256: row.bot_only_out_of_scope_keys_sha256,
+        identity_count: Number(row.bot_only_identity_count),
+        eligible_count: Number(row.bot_only_eligible_count),
+      },
+    } : {}),
+    ...(row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+      && row.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID ? {
+      legacy_stage_allowlist: legacyStageAllowlist,
+    } : {}),
   };
 }
 
@@ -337,6 +496,32 @@ export function buildRecoveryManifest(row, identity, evidence, target) {
       transaction_ids_sha256: evidence.transactionIdsSha256,
       entry_ids_sha256: evidence.entryIdsSha256,
     },
+    ...(row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+      && row.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID ? {
+      bot_only: {
+        table_id: row.bot_only_table_id || evidence.tableId,
+        table_count: row.bot_only_table_count || 1,
+        registry_keys_sha256: row.bot_only_registry_keys_sha256 || evidence.registryKeysSha256,
+        registry_key_count: evidence.registryKeys?.length || 0,
+        out_of_scope_keys_sha256: row.bot_only_out_of_scope_keys_sha256 || evidence.outOfScopeKeysSha256,
+      },
+    } : {}),
+    ...(row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+      && row.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID ? {
+      legacy_stage_allowlist: {
+        policy_id: LEGACY_STAGE_ALLOWLIST_POLICY_ID,
+        allowlist_sha256: row.legacy_allowlist_sha256 || evidence.legacyAllowlistSha256,
+        batch_table_ids_sha256: row.legacy_batch_table_ids_sha256 || evidence.legacyBatchTableIdsSha256,
+        master_table_ids: row.legacy_master_table_ids || evidence.legacyMasterTableIds,
+        master_table_ids_sha256: evidence.legacyMasterTableIdsSha256,
+        source_run: row.legacy_source_run,
+        query_sha256: row.legacy_query_sha256,
+        stage_system_identifier: row.legacy_stage_system_identifier,
+        master_table_count: Number(row.legacy_master_table_count),
+        batch_number: Number(row.legacy_batch_number),
+        batch_table_count: Number(row.legacy_batch_table_count),
+      },
+    } : {}),
   };
 }
 
@@ -406,8 +591,39 @@ function manifestSelectSql() {
     archive_proof_verified_at::text as archive_proof_verified_at,
     pruned_at::text as pruned_at, pruned_transaction_count::text as pruned_transaction_count,
     pruned_entry_count::text as pruned_entry_count, pruned_transaction_ids_sha256,
-    pruned_entry_ids_sha256
-  from public.chips_ledger_archive_batches where object_path = $1;`;
+    pruned_entry_ids_sha256,
+    bot_only_table_id::text as bot_only_table_id,
+    bot_only_table_count::text as bot_only_table_count,
+    bot_only_newest_created_at::text as bot_only_newest_created_at,
+    bot_only_registry_keys_sha256,
+    bot_only_out_of_scope_keys_sha256,
+    bot_only_identity_count::text as bot_only_identity_count,
+    bot_only_eligible_count::text as bot_only_eligible_count,
+    registry_cleaned_at::text as registry_cleaned_at,
+    registry_cleaned_key_count::text as registry_cleaned_key_count,
+    registry_cleaned_keys_sha256,
+    exists (
+      select 1
+        from public.poker_tables tables
+       where tables.id = batches.bot_only_table_id
+    ) as bot_only_table_exists,
+    (select tables.bot_only_retention_complete_at::text
+       from public.poker_tables tables
+      where tables.id = batches.bot_only_table_id) as bot_only_retention_complete_at,
+    legacy_allowlist_sha256,
+    legacy_batch_table_ids_sha256,
+    legacy_master_table_ids,
+    legacy_master_table_count::text as legacy_master_table_count,
+    legacy_batch_number::text as legacy_batch_number,
+    legacy_batch_table_count::text as legacy_batch_table_count,
+    legacy_source_run,
+    legacy_query_sha256,
+    legacy_stage_system_identifier,
+    legacy_run_id::text as legacy_run_id,
+    legacy_plan_sha256,
+    destructive_go_at::text as destructive_go_at,
+    destructive_go_batch_id::text as destructive_go_batch_id
+  from public.chips_ledger_archive_batches batches where batches.object_path = $1;`;
 }
 
 export function createPruneStore(sql) {
@@ -440,6 +656,60 @@ export function createPruneStore(sql) {
         return rows[0]?.result;
       });
     },
+    async registerBotOnlyProof(row, evidence) {
+      return sql.begin(async (tx) => {
+        await tx.unsafe("set transaction isolation level repeatable read;");
+        const rows = await tx.unsafe(`select public.chips_register_bot_only_archive_proof(
+          $1, $2::uuid[], $3::bigint[], $4::uuid, $5::text[]
+        ) as result;`, [
+          row.object_path,
+          evidence.transactionIds,
+          evidence.entryIds,
+          evidence.tableId,
+          evidence.registryKeys,
+        ]);
+        return rows[0]?.result;
+      });
+    },
+    // The database function is deliberately owner-only (EXECUTE is granted to
+    // postgres only).  Keep the authorization as a separate transaction from
+    // the later prune call so the persisted GO receipt is independently
+    // observable and can be safely reused by an exact-batch retry.
+    async authorizeBotOnlyBatch(batchId, confirmation) {
+      return sql.begin(async (tx) => {
+        await tx.unsafe("set transaction isolation level serializable;");
+        await tx.unsafe("set local lock_timeout = '5s';");
+        await tx.unsafe("set local statement_timeout = '120s';");
+        const rows = await tx.unsafe(`select public.chips_authorize_bot_only_archive_batch(
+          $1::bigint, $2::text
+        ) as result;`, [batchId, confirmation]);
+        return rows[0]?.result;
+      });
+    },
+    async registerLegacyStageAllowlistProof(row, evidence) {
+      return sql.begin(async (tx) => {
+        await tx.unsafe("set transaction isolation level repeatable read;");
+        const rows = await tx.unsafe(`select public.chips_register_legacy_stage_allowlist_proof(
+          $1, $2::uuid[], $3::bigint[], $4::uuid[], $5::uuid[], $6::text, $7::text,
+          $8::bigint, $9::bigint, $10::text, $11::text, $12::text, $13::timestamptz
+        ) as result;`, [
+          row.object_path,
+          evidence.transactionIds,
+          evidence.entryIds,
+          evidence.legacyTableIds,
+          evidence.legacyMasterTableIds,
+          evidence.legacyAllowlistSha256,
+          evidence.legacyBatchTableIdsSha256,
+          Number(row.legacy_master_table_count),
+          Number(row.legacy_batch_number),
+          row.legacy_source_run,
+          row.legacy_query_sha256,
+          row.legacy_stage_system_identifier,
+          timestampParam(row.cutoff),
+        ]);
+        return rows[0]?.result;
+      });
+    },
     async prune(objectPath, evidence, execute) {
       return sql.begin(async (tx) => {
         await tx.unsafe("set transaction isolation level serializable;");
@@ -451,6 +721,73 @@ export function createPruneStore(sql) {
         return rows[0]?.result;
       });
     },
+    async cleanupBotOnly(objectPath, evidence, execute, approvedBatchId = null, automatic = false) {
+      return sql.begin(async (tx) => {
+        await tx.unsafe("set transaction isolation level serializable;");
+        await tx.unsafe("set local lock_timeout = '5s';");
+        await tx.unsafe("set local statement_timeout = '120s';");
+        const rows = automatic
+          ? await tx.unsafe(`select public.chips_auto_prune_and_cleanup_bot_only_archive_batch(
+            $1, $2::uuid[], $3::bigint[], $4::text[], $5::uuid
+          ) as result;`, [
+            objectPath,
+            evidence.transactionIds,
+            evidence.entryIds,
+            evidence.registryKeys,
+            evidence.tableId,
+          ])
+          : await tx.unsafe(`select public.chips_prune_and_cleanup_bot_only_archive_batch(
+            $1, $2::uuid[], $3::bigint[], $4::text[], $5::uuid, $6::boolean, $7::bigint
+          ) as result;`, [
+            objectPath,
+            evidence.transactionIds,
+            evidence.entryIds,
+            evidence.registryKeys,
+            evidence.tableId,
+            execute,
+            approvedBatchId,
+          ]);
+        return rows[0]?.result;
+      });
+    },
+    async cleanupLegacyStageAllowlist(objectPath, evidence, execute, approvedBatchId = null, orchestration = null) {
+      return sql.begin(async (tx) => {
+        await tx.unsafe("set transaction isolation level serializable;");
+        await tx.unsafe("set local lock_timeout = '5s';");
+        await tx.unsafe("set local statement_timeout = '120s';");
+        const rows = orchestration
+          ? await tx.unsafe(`select public.chips_prune_legacy_stage_allowlist_orchestrated_batch(
+            $1::bigint, $2, $3, $4::uuid[], $5::bigint[], $6::uuid[], $7::text, $8::text[],
+            $9::text[], $10::boolean
+          ) as result;`, [
+            orchestration.runId,
+            orchestration.planSha256,
+            objectPath,
+            evidence.transactionIds,
+            evidence.entryIds,
+            evidence.legacyTableIds,
+            evidence.legacyAllowlistSha256,
+            evidence.legacyBatchTableIdsSha256,
+            evidence.registryKeys,
+            execute,
+          ])
+          : await tx.unsafe(`select public.chips_prune_legacy_stage_allowlist_batch(
+            $1, $2::uuid[], $3::bigint[], $4::uuid[], $5::text, $6::text, $7::text[],
+            $8::boolean, $9::bigint
+          ) as result;`, [
+            objectPath,
+            evidence.transactionIds,
+            evidence.entryIds,
+            evidence.legacyTableIds,
+            evidence.legacyAllowlistSha256,
+            evidence.legacyBatchTableIdsSha256,
+            evidence.registryKeys,
+            execute,
+            approvedBatchId,
+          ]);
+        return rows[0]?.result;
+      });
+    },
     async verifyCommitted(row, evidence) {
       const rows = await sql.unsafe(`select
         batches.pruned_at::text as pruned_at,
@@ -458,10 +795,35 @@ export function createPruneStore(sql) {
         batches.pruned_entry_count::text as pruned_entry_count,
         batches.pruned_transaction_ids_sha256,
         batches.pruned_entry_ids_sha256,
+        batches.registry_cleaned_at::text as registry_cleaned_at,
+        batches.registry_cleaned_key_count::text as registry_cleaned_key_count,
+        batches.registry_cleaned_keys_sha256,
         (select count(*)::text from public.chips_transaction_idempotency registry
           where registry.transaction_id = any($2::uuid[]) and registry.archive_batch_id = batches.batch_id) as mapping_count,
         (select count(*)::text from public.chips_transaction_idempotency registry
           where registry.archive_batch_id = batches.batch_id and not (registry.transaction_id = any($2::uuid[]))) as extra_mapping_count,
+        (select count(*)::text from public.chips_transaction_idempotency registry
+          where registry.archive_batch_id = batches.batch_id) as remaining_mapping_count,
+        (select count(*)::text from public.chips_transactions transactions where transactions.id = any($2::uuid[])) as hot_transaction_count,
+        (select count(*)::text from public.chips_entries entries
+          where entries.transaction_id = any($2::uuid[]) or entries.id = any($3::bigint[])) as hot_entry_count
+      from public.chips_ledger_archive_batches batches where batches.object_path = $1;`, [
+        row.object_path, evidence.transactionIds, evidence.entryIds,
+      ]);
+      return rows[0] || null;
+    },
+    async verifyBotOnlyCommitted(row, evidence) {
+      const rows = await sql.unsafe(`select
+        batches.pruned_at::text as pruned_at,
+        batches.pruned_transaction_count::text as pruned_transaction_count,
+        batches.pruned_entry_count::text as pruned_entry_count,
+        batches.pruned_transaction_ids_sha256,
+        batches.pruned_entry_ids_sha256,
+        batches.registry_cleaned_at::text as registry_cleaned_at,
+        batches.registry_cleaned_key_count::text as registry_cleaned_key_count,
+        batches.registry_cleaned_keys_sha256,
+        (select count(*)::text from public.chips_transaction_idempotency registry
+          where registry.archive_batch_id = batches.batch_id) as remaining_mapping_count,
         (select count(*)::text from public.chips_transactions transactions where transactions.id = any($2::uuid[])) as hot_transaction_count,
         (select count(*)::text from public.chips_entries entries
           where entries.transaction_id = any($2::uuid[]) or entries.id = any($3::bigint[])) as hot_entry_count
@@ -508,6 +870,157 @@ function assertPostCommitVerification(verification, evidence) {
   }
 }
 
+function assertLegacyPostCommitVerification(verification, evidence) {
+  if (!verification?.pruned_at
+    || Number(verification.pruned_transaction_count) !== evidence.transactionCount
+    || Number(verification.pruned_entry_count) !== evidence.entryCount
+    || verification.pruned_transaction_ids_sha256 !== evidence.transactionIdsSha256
+    || verification.pruned_entry_ids_sha256 !== evidence.entryIdsSha256
+    || !verification.registry_cleaned_at
+    || Number(verification.registry_cleaned_key_count) !== evidence.registryKeys.length
+    || verification.registry_cleaned_keys_sha256 !== evidence.registryKeysSha256
+    || Number(verification.mapping_count) !== 0
+    || Number(verification.extra_mapping_count) !== 0
+    || Number(verification.remaining_mapping_count) !== 0
+    || Number(verification.hot_transaction_count) !== 0
+    || Number(verification.hot_entry_count) !== 0) {
+    fail("post-commit legacy cleanup verification failed", "post_commit_verification_failed");
+  }
+}
+
+async function executeBotOnlyCleanupWithRetry({
+  store,
+  row,
+  evidence,
+  target,
+  identity,
+  recoveryBundle,
+  approvedBatchId = null,
+  execute,
+  automatic,
+  beforeRetry = null,
+  onProgress = null,
+  waitForRetry = null,
+}) {
+  const attempts = automatic && execute ? MAX_AUTOMATIC_CLEANUP_ATTEMPTS : 1;
+  let currentRow = row;
+  let currentEvidence = evidence;
+  let currentRecoveryBundle = recoveryBundle;
+  let executeAttempts = 0;
+  let executeRetryCount = 0;
+  const executeSqlstates = [];
+  const metrics = () => ({
+    executeAttempts,
+    executeRetryCount,
+    executeSqlstates: [...executeSqlstates],
+  });
+  const reportProgress = (extra = {}) => {
+    if (typeof onProgress === "function") onProgress({ ...metrics(), row: currentRow, ...extra });
+  };
+  const annotate = (error) => {
+    if (error && typeof error === "object") Object.assign(error, metrics());
+    return error;
+  };
+  const wait = waitForRetry || (async ({ delayMs }) => {
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+  });
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    if (attempt > 1) {
+      if (automatic && typeof beforeRetry !== "function") {
+        const error = new Error("automatic cleanup retry preflight is unavailable");
+        reportProgress({ error });
+        throw annotate(error);
+      }
+      if (typeof beforeRetry === "function") {
+        reportProgress({ retry_preflight: true });
+        let preflight;
+        try {
+          preflight = await beforeRetry({
+            attempt,
+            previousAttempts: executeAttempts,
+            executeRetryCount,
+            executeSqlstates: [...executeSqlstates],
+            row: currentRow,
+            evidence: currentEvidence,
+            recoveryBundle: currentRecoveryBundle,
+          });
+        } catch (error) {
+          reportProgress({ error });
+          throw annotate(error);
+        }
+        if (preflight?.state === "already_cleaned") {
+          reportProgress({ row: preflight.row || currentRow, result: preflight });
+          return { ...preflight, ...metrics() };
+        }
+        currentRow = preflight?.row || currentRow;
+        currentEvidence = preflight?.evidence || currentEvidence;
+        currentRecoveryBundle = preflight?.recoveryBundle || currentRecoveryBundle;
+      }
+    }
+
+    executeAttempts += 1;
+    reportProgress({ attempt });
+    if (currentRecoveryBundle) {
+      try {
+        verifyRecoveryBundle({
+          bundle: currentRecoveryBundle,
+          row: currentRow,
+          target,
+          identity,
+          expectedEvidence: currentEvidence,
+        });
+      } catch (error) {
+        reportProgress({ error });
+        throw annotate(error);
+      }
+    }
+    try {
+      const result = await store.cleanupBotOnly(
+        currentRow.object_path,
+        currentEvidence,
+        execute,
+        approvedBatchId,
+        automatic,
+      );
+      reportProgress({ result });
+      return {
+        ...result,
+        row: currentRow,
+        evidence: currentEvidence,
+        ...metrics(),
+      };
+    } catch (error) {
+      const sqlstate = sqlStateOf(error);
+      if (sqlstate) executeSqlstates.push(sqlstate);
+      reportProgress({ error });
+      if (!automatic
+        || attempt === attempts
+        || !RETRYABLE_CLEANUP_SQLSTATES.has(sqlstate)) {
+        throw annotate(error);
+      }
+      executeRetryCount += 1;
+      const delayMs = AUTOMATIC_CLEANUP_RETRY_BACKOFF_MS[Math.min(
+        executeRetryCount - 1,
+        AUTOMATIC_CLEANUP_RETRY_BACKOFF_MS.length - 1,
+      )];
+      reportProgress({ retry_wait: true, delayMs });
+      try {
+        await wait({
+          attempt,
+          nextAttempt: attempt + 1,
+          delayMs,
+          sqlstate,
+          ...metrics(),
+        });
+      } catch (waitError) {
+        throw annotate(waitError);
+      }
+    }
+  }
+  fail("automatic bot-only cleanup retry budget was exhausted");
+}
+
 function outputResult(result) {
   process.stdout.write(`${stringifyJson({
     event: "chips_ledger_archive_prune",
@@ -547,6 +1060,9 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
   if (args.objectPath !== buildObjectPath(args.confirmSha)) fail("--object-path does not match --confirm-sha");
   if (args.execute && !args.recoveryDir) fail("--recovery-dir is required with --execute");
   if (!args.execute && args.recoveryDir) fail("--recovery-dir is only valid with --execute");
+  if (args.approvedBatchId != null && !args.execute) fail("--approved-batch-id is only valid with --execute");
+  if (args.approvedBatchId != null && !/^[1-9][0-9]*$/.test(args.approvedBatchId)) fail("--approved-batch-id must be a positive integer");
+  if (args.automatic && args.approvedBatchId != null) fail("--automatic cannot be combined with --approved-batch-id");
 
   const target = deps.storageTarget || resolveStorageTarget(args.target, env, deps.targetOptions || {});
   const sql = deps.sql || (deps.pruneStore ? null : postgres(target.dbUrl, {
@@ -570,31 +1086,47 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
       ? await deps.downloadArchive(target, row.object_path)
       : await downloadPrivateArchiveObject(target, row.object_path, deps);
     const archiveBytes = Buffer.from(downloaded.bytes);
-    const archiveManifest = exporterManifestFromDatabase(row, target);
+    const archiveSha256 = crypto.createHash("sha256").update(archiveBytes).digest("hex");
+    if (downloaded.sha256 != null && downloaded.sha256 !== archiveSha256) {
+      fail("downloaded archive checksum is self-inconsistent");
+    }
+    const archiveManifest = exporterManifestFromDatabase(row, target, deps.legacyStageAllowlistPlan);
     const localArchive = verifyArchiveBytes({
       compressedBytes: archiveBytes,
       manifest: archiveManifest,
       target,
       artifactName: path.basename(row.object_path),
+      expectedLegacyStageAllowlistEvidence: deps.legacyStageAllowlistPlan?.archiveManifest || null,
     });
     const evidence = buildPruneEvidence(localArchive, { maxBatchSize: targetPolicy(target.target).maxBatchSize });
 
+    if (args.automatic && (row.format_version !== BOT_ONLY_EXPORT_SCHEMA_VERSION
+      || row.source_policy_id !== "stage-ledger-bot-only-retention-7d-v1")) {
+      fail("--automatic is only valid for the Stage bot-only 7-day policy");
+    }
+
     if (args.registerProof) {
-      const proof = await store.registerProof(row, evidence);
+      const proof = row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+        ? row.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID
+          ? await store.registerLegacyStageAllowlistProof(row, evidence)
+          : await store.registerBotOnlyProof(row, evidence)
+        : await store.registerProof(row, evidence);
+      const refreshedRow = await store.getManifest(row.object_path);
       const result = {
-        row,
+        row: refreshedRow,
         identity,
         evidence,
         target,
         mode: "register-proof",
         state: proof?.state || "proof_registered",
         storageDownloadMs: downloaded.downloadMs,
+        archiveSha256,
       };
       if (deps.emit !== false) outputResult(result);
       return result;
     }
 
-    if (args.execute) assertProofMatches(row, evidence);
+    if (args.execute) assertProofMatches(await store.getManifest(row.object_path), evidence);
     let recoveryBundle = null;
     if (args.execute) {
       recoveryBundle = writeRecoveryBundle({
@@ -606,32 +1138,84 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
         target,
       });
     }
+    if (args.execute && typeof deps.beforeCleanup === "function") {
+      await deps.beforeCleanup({ row, evidence, identity, target, recoveryBundle });
+    }
 
-    const pruneResult = await executeArchivePrune({
-      store,
-      objectPath: row.object_path,
-      evidence,
-      execute: Boolean(args.execute),
-      beforeAttempt: recoveryBundle
-        ? () => verifyRecoveryBundle({ bundle: recoveryBundle, row, target, identity, expectedEvidence: evidence })
-        : null,
-    });
+    const pruneResult = row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+      ? row.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID
+        ? await store.cleanupLegacyStageAllowlist(
+          row.object_path,
+          evidence,
+          Boolean(args.execute),
+          args.approvedBatchId,
+            deps.legacyStageAllowlistOrchestration || null,
+          )
+        : await executeBotOnlyCleanupWithRetry({
+          store,
+          row,
+          evidence,
+          target,
+          identity,
+          recoveryBundle,
+          approvedBatchId: args.approvedBatchId,
+          execute: Boolean(args.execute),
+          automatic: Boolean(args.automatic),
+          beforeRetry: deps.beforeExecuteRetry || null,
+          onProgress: deps.onExecuteProgress || null,
+          waitForRetry: deps.waitForExecuteRetry || null,
+        })
+      : await executeArchivePrune({
+        store,
+        objectPath: row.object_path,
+        evidence,
+        execute: Boolean(args.execute),
+        beforeAttempt: recoveryBundle
+          ? () => verifyRecoveryBundle({ bundle: recoveryBundle, row, target, identity, expectedEvidence: evidence })
+          : null,
+      });
 
+    const resultRow = pruneResult?.row || row;
+    const resultEvidence = pruneResult?.evidence || evidence;
     let postCommitDownloadMs = null;
     if (args.execute) {
       try {
         await verifyBucket(target);
         const postCommitDownload = deps.downloadArchive
-          ? await deps.downloadArchive(target, row.object_path)
-          : await downloadPrivateArchiveObject(target, row.object_path, deps);
+          ? await deps.downloadArchive(target, resultRow.object_path)
+          : await downloadPrivateArchiveObject(target, resultRow.object_path, deps);
         postCommitDownloadMs = postCommitDownload.downloadMs;
         verifyArchiveBytes({
           compressedBytes: postCommitDownload.bytes,
-          manifest: archiveManifest,
+          manifest: exporterManifestFromDatabase(resultRow, target, deps.legacyStageAllowlistPlan),
           target,
-          artifactName: path.basename(row.object_path),
+          artifactName: path.basename(resultRow.object_path),
         });
-        assertPostCommitVerification(await store.verifyCommitted(row, evidence), evidence);
+        const verification = resultRow.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+          && resultRow.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID
+          ? await store.verifyBotOnlyCommitted(resultRow, resultEvidence)
+          : await store.verifyCommitted(resultRow, resultEvidence);
+        if (resultRow.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+          && resultRow.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
+          if (!verification?.pruned_at
+            || Number(verification.pruned_transaction_count) !== resultEvidence.transactionCount
+            || Number(verification.pruned_entry_count) !== resultEvidence.entryCount
+            || verification.pruned_transaction_ids_sha256 !== resultEvidence.transactionIdsSha256
+            || verification.pruned_entry_ids_sha256 !== resultEvidence.entryIdsSha256
+            || !verification.registry_cleaned_at
+            || Number(verification.registry_cleaned_key_count) !== resultEvidence.registryKeys.length
+            || verification.registry_cleaned_keys_sha256 !== resultEvidence.registryKeysSha256
+            || Number(verification.remaining_mapping_count) !== 0
+            || Number(verification.hot_transaction_count) !== 0
+            || Number(verification.hot_entry_count) !== 0) {
+            fail("post-commit bot-only cleanup verification failed", "post_commit_verification_failed");
+          }
+        } else if (resultRow.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+          && resultRow.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
+          assertLegacyPostCommitVerification(verification, resultEvidence);
+        } else {
+          assertPostCommitVerification(verification, resultEvidence);
+        }
       } catch (error) {
         if (error?.code === "post_commit_verification_failed") throw error;
         fail(`post-commit verification failed: ${error?.message || error}`, "post_commit_verification_failed");
@@ -639,15 +1223,21 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
     }
 
     const result = {
-      row,
+      row: resultRow,
       identity,
       target,
-      evidence,
+      evidence: resultEvidence,
       mode: args.execute ? "execute" : "dry-run",
       state: pruneResult?.state || "unknown",
       storageDownloadMs: downloaded.downloadMs,
       postCommitDownloadMs,
       recoveryBundle,
+      archiveSha256,
+      executeAttempts: pruneResult?.executeAttempts ?? null,
+      executeRetryCount: pruneResult?.executeRetryCount ?? null,
+      executeSqlstates: Array.isArray(pruneResult?.executeSqlstates)
+        ? [...pruneResult.executeSqlstates]
+        : null,
     };
     if (deps.emit !== false) outputResult(result);
     return result;

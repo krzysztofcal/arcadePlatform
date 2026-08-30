@@ -3,12 +3,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  BOT_ONLY_RETENTION_POLICY_ID,
   buildArchiveBytes,
   buildExportRecord,
   buildManifest,
 } from "../../scripts/ops/chips-ledger-archive-export.mjs";
-import { buildObjectPath } from "../../scripts/ops/chips-ledger-archive-store.mjs";
 import {
+  buildObjectPath,
+  verifyArchiveBytes,
+} from "../../scripts/ops/chips-ledger-archive-store.mjs";
+import {
+  AUTOMATIC_CLEANUP_RETRY_BACKOFF_MS,
   STAGE_SYSTEM_IDENTIFIER,
   buildPruneEvidence,
   computeArchiveIdProofs,
@@ -139,6 +144,132 @@ function manifestRow(overrides = {}, sourceManifest = localManifest, sourceProof
     pruned_transaction_ids_sha256: null,
     pruned_entry_ids_sha256: null,
     ...overrides,
+  };
+}
+
+const BOT_TABLE_ID = "00000000-0000-4000-8000-000000000040";
+const BOT_TX_ID = "00000000-0000-4000-8000-000000000041";
+const BOT_SYSTEM_ID = "00000000-0000-4000-8000-000000000042";
+const BOT_ESCROW_ID = "00000000-0000-4000-8000-000000000043";
+const BOT_CREATED_AT = "2026-01-01T00:00:00.000003Z";
+
+function botOnlyFixture() {
+  const botCandidate = {
+    id: BOT_TX_ID,
+    sequence: "1",
+    tx_type: "TABLE_BUY_IN",
+    idempotency_key: `bot-seed-buyin:${BOT_TABLE_ID}:1`,
+    payload_hash: "b".repeat(64),
+    user_id: null,
+    reference: `BOT_SEED_BUY_IN:${BOT_TABLE_ID}:1`,
+    description: "automatic cleanup retry contract",
+    metadata: { tableId: BOT_TABLE_ID },
+    created_by: BOT_SYSTEM_ID,
+    created_at: BOT_CREATED_AT,
+    entry_count: "2",
+    table_related: true,
+    table_id: BOT_TABLE_ID,
+    table_exists: true,
+    table_status: "CLOSED",
+    escrow_account_id: BOT_ESCROW_ID,
+    escrow_status: "active",
+    escrow_balance: "0",
+    has_human_participant: false,
+    bot_only_proof_eligible: true,
+    key_table_id: BOT_TABLE_ID,
+    key_format_version: 1,
+    key_format: "bot-seed-buyin",
+    table_newest_created_at: BOT_CREATED_AT,
+    table_identity_count: "1",
+    table_eligible_count: "1",
+    table_out_of_scope_keys_sha256: "c".repeat(64),
+  };
+  const botRecord = buildExportRecord(botCandidate, [
+    {
+      id: "100", transaction_id: BOT_TX_ID, account_id: BOT_ESCROW_ID, entry_seq: "1", amount: "100",
+      metadata: {}, created_at: BOT_CREATED_AT, account_row_id: BOT_ESCROW_ID, account_type: "ESCROW",
+      account_user_id: null, account_system_key: `POKER_TABLE:${BOT_TABLE_ID}`, account_status: "active", account_label: null,
+    },
+    {
+      id: "101", transaction_id: BOT_TX_ID, account_id: BOT_SYSTEM_ID, entry_seq: "2", amount: "-100",
+      metadata: {}, created_at: BOT_CREATED_AT, account_row_id: BOT_SYSTEM_ID, account_type: "SYSTEM",
+      account_user_id: null, account_system_key: "TREASURY", account_status: "active", account_label: null,
+    },
+  ], { schemaVersion: 2 });
+  const botArchive = buildArchiveBytes([botRecord]);
+  const botManifest = buildManifest({
+    target: "stage",
+    cutoff: "2026-02-01T00:00:00.000000Z",
+    batchSize: 5000,
+    cursor: null,
+    records: [botRecord],
+    archive: botArchive,
+    outputPath: `/private/${botArchive.compressedSha256}.jsonl.gz`,
+    sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
+    schemaVersion: 2,
+  });
+  const botVerified = verifyArchiveBytes({
+    compressedBytes: botArchive.compressedBytes,
+    manifest: botManifest,
+    target: { target: "stage", projectRef: ENV.EXPECTED_SUPABASE_STAGE_PROJECT_REF },
+    artifactName: `${botArchive.compressedSha256}.jsonl.gz`,
+  });
+  const botEvidence = buildPruneEvidence(botVerified);
+  const botRow = manifestRow({
+    batch_id: "17",
+    format_version: 2,
+    source_policy_id: BOT_ONLY_RETENTION_POLICY_ID,
+    bot_only_table_id: botManifest.bot_only.table_id,
+    bot_only_table_count: botManifest.bot_only.table_count,
+    bot_only_newest_created_at: botManifest.bot_only.newest_created_at,
+    bot_only_registry_keys_sha256: botManifest.bot_only.registry_keys_sha256,
+    bot_only_out_of_scope_keys_sha256: botManifest.bot_only.out_of_scope_keys_sha256,
+    bot_only_identity_count: botManifest.bot_only.identity_count,
+    bot_only_eligible_count: botManifest.bot_only.eligible_count,
+  }, botManifest, botEvidence);
+  return { archive: botArchive, manifest: botManifest, evidence: botEvidence, row: botRow };
+}
+
+function fakeBotOnlyAutomaticStore(fixture, outcomes, { onCleanup = null } = {}) {
+  let cleanupCalls = 0;
+  let persistedMutations = 0;
+  let proofCalls = 0;
+  const verification = {
+    pruned_at: "2026-01-02T00:02:00.000000Z",
+    pruned_transaction_count: String(fixture.evidence.transactionCount),
+    pruned_entry_count: String(fixture.evidence.entryCount),
+    pruned_transaction_ids_sha256: fixture.evidence.transactionIdsSha256,
+    pruned_entry_ids_sha256: fixture.evidence.entryIdsSha256,
+    registry_cleaned_at: "2026-01-02T00:02:01.000000Z",
+    registry_cleaned_key_count: String(fixture.evidence.registryKeys.length),
+    registry_cleaned_keys_sha256: fixture.evidence.registryKeysSha256,
+    remaining_mapping_count: "0",
+    hot_transaction_count: "0",
+    hot_entry_count: "0",
+  };
+  return {
+    getIdentity: async () => STAGE_SYSTEM_IDENTIFIER,
+    getManifest: async () => fixture.row,
+    registerBotOnlyProof: async () => {
+      proofCalls += 1;
+      return { state: "proof_registered" };
+    },
+    cleanupBotOnly: async () => {
+      cleanupCalls += 1;
+      await onCleanup?.(cleanupCalls);
+      const sqlstate = outcomes[cleanupCalls - 1];
+      if (sqlstate) {
+        const error = new Error(`simulated cleanup failure (${sqlstate})`);
+        error.code = sqlstate;
+        throw error;
+      }
+      persistedMutations += 1;
+      return { state: "cleaned" };
+    },
+    verifyBotOnlyCommitted: async () => verification,
+    get cleanupCalls() { return cleanupCalls; },
+    get persistedMutations() { return persistedMutations; },
+    get proofCalls() { return proofCalls; },
   };
 }
 
@@ -332,6 +463,173 @@ try {
   );
 } finally {
   fs.rmSync(productionRoot, { recursive: true, force: true });
+}
+
+const botFixture = botOnlyFixture();
+const botRetryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-bot-only-retry-test-"));
+try {
+  for (const sqlstate of ["40001", "55P03"]) {
+    const recoveryDir = path.join(botRetryRoot, `recovery-${sqlstate}`);
+    const store = fakeBotOnlyAutomaticStore(botFixture, [sqlstate, null]);
+    const retryPreflights = [];
+    const retryWaits = [];
+    let storageReads = 0;
+    let bucketChecks = 0;
+    const result = await pruneArchive({
+      argv: [
+        "--target", "stage",
+        "--object-path", botFixture.row.object_path,
+        "--confirm-sha", botFixture.archive.compressedSha256,
+        "--execute", "--automatic", "--recovery-dir", recoveryDir,
+      ],
+      env: ENV,
+      deps: {
+        pruneStore: store,
+        verifyBucket: async () => { bucketChecks += 1; },
+        downloadArchive: async () => {
+          storageReads += 1;
+          return { bytes: botFixture.archive.compressedBytes, downloadMs: 1 };
+        },
+        beforeExecuteRetry: async (details) => {
+          retryPreflights.push(details);
+          return {};
+        },
+        waitForExecuteRetry: async (details) => {
+          retryWaits.push(details);
+        },
+        emit: false,
+      },
+    });
+    assert.equal(result.state, "cleaned");
+    assert.equal(store.cleanupCalls, 2, `${sqlstate} must retry the atomic cleanup once`);
+    assert.equal(store.persistedMutations, 1, `${sqlstate} must persist one successful cleanup`);
+    assert.equal(store.proofCalls, 0, `${sqlstate} retry must not repeat proof registration`);
+    assert.equal(storageReads, 2, `${sqlstate} retry must only perform initial and post-commit Storage reads`);
+    assert.equal(bucketChecks, 2, `${sqlstate} retry must not re-run Storage preflight per attempt`);
+    assert.equal(result.executeAttempts, 2);
+    assert.equal(result.executeRetryCount, 1);
+    assert.deepEqual(result.executeSqlstates, [sqlstate]);
+    assert.equal(retryPreflights.length, 1);
+    assert.equal(retryWaits.length, 1);
+    assert.equal(retryWaits[0].sqlstate, sqlstate);
+    assert.equal(retryWaits[0].delayMs, AUTOMATIC_CLEANUP_RETRY_BACKOFF_MS[0]);
+  }
+
+  const exhaustedStore = fakeBotOnlyAutomaticStore(botFixture, ["40001", "40001", "40001"]);
+  const exhaustedPreflights = [];
+  const exhaustedWaits = [];
+  let exhaustedReads = 0;
+  let exhaustedError;
+  await assert.rejects(
+    () => pruneArchive({
+      argv: [
+        "--target", "stage",
+        "--object-path", botFixture.row.object_path,
+        "--confirm-sha", botFixture.archive.compressedSha256,
+        "--execute", "--automatic", "--recovery-dir", path.join(botRetryRoot, "recovery-exhausted"),
+      ],
+      env: ENV,
+      deps: {
+        pruneStore: exhaustedStore,
+        verifyBucket: async () => {},
+        downloadArchive: async () => {
+          exhaustedReads += 1;
+          return { bytes: botFixture.archive.compressedBytes, downloadMs: 1 };
+        },
+        beforeExecuteRetry: async (details) => {
+          exhaustedPreflights.push(details);
+          return {};
+        },
+        waitForExecuteRetry: async (details) => {
+          exhaustedWaits.push(details);
+        },
+        emit: false,
+      },
+    }),
+    (error) => {
+      exhaustedError = error;
+      return error?.code === "40001";
+    },
+  );
+  assert.equal(exhaustedStore.cleanupCalls, 3, "automatic cleanup retry budget is exactly three attempts");
+  assert.equal(exhaustedStore.persistedMutations, 0, "exhausted cleanup must not report a persisted mutation");
+  assert.equal(exhaustedStore.proofCalls, 0, "exhausted cleanup must not repeat proof registration");
+  assert.equal(exhaustedReads, 1, "exhausted cleanup must not perform post-commit Storage verification");
+  assert.equal(exhaustedPreflights.length, 2);
+  assert.equal(exhaustedWaits.length, 2);
+  assert.deepEqual(exhaustedWaits.map((wait) => wait.delayMs), [...AUTOMATIC_CLEANUP_RETRY_BACKOFF_MS]);
+  assert.equal(exhaustedError.executeAttempts, 3);
+  assert.equal(exhaustedError.executeRetryCount, 2);
+  assert.deepEqual(exhaustedError.executeSqlstates, ["40001", "40001", "40001"]);
+
+  const recoveryDir = path.join(botRetryRoot, "recovery-tampered-between-attempts");
+  const tamperedManifestPath = path.join(
+    recoveryDir,
+    `chips-ledger-${botFixture.row.compressed_sha256}.recovery.json`,
+  );
+  const tamperedStore = fakeBotOnlyAutomaticStore(botFixture, ["40001", null], {
+    onCleanup: async (call) => {
+      if (call === 1) fs.writeFileSync(tamperedManifestPath, "{}\n");
+    },
+  });
+  let tamperedReads = 0;
+  await assert.rejects(
+    () => pruneArchive({
+      argv: [
+        "--target", "stage",
+        "--object-path", botFixture.row.object_path,
+        "--confirm-sha", botFixture.archive.compressedSha256,
+        "--execute", "--automatic", "--recovery-dir", recoveryDir,
+      ],
+      env: ENV,
+      deps: {
+        pruneStore: tamperedStore,
+        verifyBucket: async () => {},
+        downloadArchive: async () => {
+          tamperedReads += 1;
+          return { bytes: botFixture.archive.compressedBytes, downloadMs: 1 };
+        },
+        beforeExecuteRetry: async () => ({}),
+        waitForExecuteRetry: async () => {},
+        emit: false,
+      },
+    }),
+    /recovery manifest no longer matches archive evidence/,
+  );
+  assert.equal(tamperedStore.cleanupCalls, 1, "a changed recovery bundle must block the next SQL attempt");
+  assert.equal(tamperedStore.persistedMutations, 0);
+  assert.equal(tamperedStore.proofCalls, 0);
+  assert.equal(tamperedReads, 1, "a changed recovery bundle must block post-commit Storage verification");
+
+  const nonRetryableStore = fakeBotOnlyAutomaticStore(botFixture, ["23505"]);
+  let nonRetryableReads = 0;
+  await assert.rejects(
+    () => pruneArchive({
+      argv: [
+        "--target", "stage",
+        "--object-path", botFixture.row.object_path,
+        "--confirm-sha", botFixture.archive.compressedSha256,
+        "--execute", "--automatic", "--recovery-dir", path.join(botRetryRoot, "recovery-non-retryable"),
+      ],
+      env: ENV,
+      deps: {
+        pruneStore: nonRetryableStore,
+        verifyBucket: async () => {},
+        downloadArchive: async () => {
+          nonRetryableReads += 1;
+          return { bytes: botFixture.archive.compressedBytes, downloadMs: 1 };
+        },
+        emit: false,
+      },
+    }),
+    (error) => error?.code === "23505",
+  );
+  assert.equal(nonRetryableStore.cleanupCalls, 1, "non-retryable SQLSTATE must fail closed immediately");
+  assert.equal(nonRetryableStore.persistedMutations, 0);
+  assert.equal(nonRetryableStore.proofCalls, 0);
+  assert.equal(nonRetryableReads, 1, "non-retryable cleanup must not perform post-commit Storage verification");
+} finally {
+  fs.rmSync(botRetryRoot, { recursive: true, force: true });
 }
 
 const localEvidence = buildPruneEvidence({ records, manifest: localManifest, summary: {

@@ -287,6 +287,7 @@ returning seat_no;
         userId: null,
         txType: "TABLE_BUY_IN",
         idempotencyKey: `${idempotencyPrefix}:${tableId}:${seatNo}`,
+        reference: `BOT_SEED_BUY_IN:${tableId}:${seatNo}`,
         metadata: {
           actor: "BOT",
           botUserId,

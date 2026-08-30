@@ -173,6 +173,8 @@ const postHumanLeaveCashoutInTx = async ({
     userId,
     txType: "TABLE_CASH_OUT",
     idempotencyKey,
+    reference: `table:${tableId}`,
+    metadata: { tableId },
     entries: [
       { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -amount },
       { accountType: "USER", amount },
