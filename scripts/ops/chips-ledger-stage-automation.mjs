@@ -104,7 +104,7 @@ export function redactedError(error) {
     .replace(/\b(?:entry|transaction|account|table)[-_ ]?\d+\b/gi, "[redacted-record]");
 }
 
-function aggregateBatchPayload(batch) {
+function aggregateBatchPayload(batch, { automatic = false } = {}) {
   const payload = {
     batch_id: batch.batchId ?? null,
     state: batch.state ?? null,
@@ -130,28 +130,39 @@ function aggregateBatchPayload(batch) {
   if (Object.hasOwn(batch, "recoveryManifestPath")) {
     payload.recovery_manifest_path = batch.recoveryManifestPath || null;
   }
-  if (Object.hasOwn(batch, "executeState")) {
+  if (automatic || Object.hasOwn(batch, "executeState")) {
     payload.execute_state = batch.executeState || null;
   }
-  if (Object.hasOwn(batch, "executeConfirmed")) {
+  if (automatic || Object.hasOwn(batch, "executeConfirmed")) {
     payload.execute_confirmed = batch.executeConfirmed === true;
   }
-  if (Object.hasOwn(batch, "dbMutationConfirmed")) {
+  if (automatic || Object.hasOwn(batch, "dbMutationConfirmed")) {
     payload.db_mutation_confirmed = batch.dbMutationConfirmed === true;
   }
-  if (Object.hasOwn(batch, "retryState")) {
+  if (automatic || Object.hasOwn(batch, "retryState")) {
     payload.retry_state = batch.retryState || null;
   }
-  if (Object.hasOwn(batch, "dryRunAttempts")) {
+  if (automatic || Object.hasOwn(batch, "dryRunAttempts")) {
     payload.dry_run_attempts = batch.dryRunAttempts ?? null;
   }
-  if (Object.hasOwn(batch, "dryRunRetryCount")) {
+  if (automatic || Object.hasOwn(batch, "dryRunRetryCount")) {
     payload.dry_run_retry_count = batch.dryRunRetryCount ?? null;
   }
-  if (Object.hasOwn(batch, "dryRunSqlstates")) {
+  if (automatic || Object.hasOwn(batch, "dryRunSqlstates")) {
     payload.dry_run_sqlstates = Array.isArray(batch.dryRunSqlstates)
       ? [...batch.dryRunSqlstates]
       : null;
+  }
+  if (automatic || Object.hasOwn(batch, "executeAttempts")) {
+    payload.execute_attempts = batch.executeAttempts ?? 0;
+  }
+  if (automatic || Object.hasOwn(batch, "executeRetryCount")) {
+    payload.execute_retry_count = batch.executeRetryCount ?? 0;
+  }
+  if (automatic || Object.hasOwn(batch, "executeSqlstates")) {
+    payload.execute_sqlstates = Array.isArray(batch.executeSqlstates)
+      ? [...batch.executeSqlstates]
+      : [];
   }
   return payload;
 }
@@ -185,6 +196,11 @@ function aggregateAutomaticBatchPayload(batch) {
     execute_confirmed: batch.executeConfirmed === true,
     db_mutation_confirmed: batch.dbMutationConfirmed === true,
     retry_state: batch.retryState || batch.retry || null,
+    execute_attempts: batch.executeAttempts ?? 0,
+    execute_retry_count: batch.executeRetryCount ?? 0,
+    execute_sqlstates: Array.isArray(batch.executeSqlstates)
+      ? [...batch.executeSqlstates]
+      : [],
   };
 }
 
@@ -225,18 +241,35 @@ export function aggregatePayload(result) {
   };
   if (result.state === "error") {
     const sqlstate = result.sqlstate || sqlStateOf(result.reason);
+    const automatic = result.mode === "automatic";
+    const reason = redactedError(result.reason);
     return {
       ...base,
       ...(result.mode ? { mode: result.mode } : {}),
       ...(result.batchId != null ? { batch_id: result.batchId } : {}),
       ...(result.objectPath ? { object_path: result.objectPath } : {}),
-      ...(result.phase ? { phase: result.phase } : {}),
-      ...(sqlstate ? { sqlstate } : {}),
-      ...(Array.isArray(result.processed) ? {
-        processed_batches: result.processed.map(aggregateBatchPayload),
-      } : {}),
-      ...(result.currentBatch ? { current_batch: aggregateBatchPayload(result.currentBatch) } : {}),
-      reason: redactedError(result.reason),
+      ...(automatic
+        ? { phase: result.phase || null, sqlstate: sqlstate || null }
+        : {}),
+      ...(automatic
+        ? {
+          processed_batches: Array.isArray(result.processed)
+            ? result.processed.map((batch) => aggregateBatchPayload(batch, { automatic: true }))
+            : [],
+          current_batch: result.currentBatch
+            ? aggregateBatchPayload(result.currentBatch, { automatic: true })
+            : null,
+          stop_reason: result.stopReason || reason || null,
+        }
+        : {
+          ...(result.phase ? { phase: result.phase } : {}),
+          ...(sqlstate ? { sqlstate } : {}),
+          ...(Array.isArray(result.processed) ? {
+            processed_batches: result.processed.map(aggregateBatchPayload),
+          } : {}),
+          ...(result.currentBatch ? { current_batch: aggregateBatchPayload(result.currentBatch) } : {}),
+        }),
+      reason,
     };
   }
   if (result.mode === "automatic") return aggregateAutomaticSuccessPayload(result);
@@ -612,6 +645,14 @@ function automaticDryRunObservability({ attempts = 0, retryCount = 0, sqlstates 
   };
 }
 
+function automaticExecuteObservability({ attempts = 0, retryCount = 0, sqlstates = [] } = {}) {
+  return {
+    executeAttempts: attempts,
+    executeRetryCount: retryCount,
+    executeSqlstates: Array.isArray(sqlstates) ? [...sqlstates] : [],
+  };
+}
+
 function automaticBatchProgress({
   row,
   identity,
@@ -628,6 +669,9 @@ function automaticBatchProgress({
   dryRunAttempts = 0,
   dryRunRetryCount = 0,
   dryRunSqlstates = [],
+  executeAttempts = 0,
+  executeRetryCount = 0,
+  executeSqlstates = [],
 }) {
   return {
     ...botOnlyReport({
@@ -648,6 +692,11 @@ function automaticBatchProgress({
       attempts: dryRunAttempts,
       retryCount: dryRunRetryCount,
       sqlstates: dryRunSqlstates,
+    }),
+    ...automaticExecuteObservability({
+      attempts: executeAttempts,
+      retryCount: executeRetryCount,
+      sqlstates: executeSqlstates,
     }),
   };
 }
@@ -1669,10 +1718,92 @@ export async function executeVerifiedCycle({
   automatic = false,
   verifyBucket,
   storageDeps = {},
+  lockSession = null,
+  onExecuteProgress = null,
+  waitForExecuteRetry = null,
 }) {
   assertDurableRecoveryReady(durable);
   const recoveryDir = path.join(tempRoot, "recovery");
   restoreLocalRecovery(recoveryDir, durable);
+  const executeStorageDeps = automatic
+    ? {
+      ...storageDeps,
+      beforeExecuteRetry: async ({ row: retryRow }) => {
+        if (!lockSession) fail("automatic cleanup retry advisory lock session is unavailable");
+        await assertAdvisoryLock(sql, lockSession);
+        let refreshedRow = await refreshPolicyRow(
+          pruneStore,
+          retryRow?.object_path || row.object_path,
+          BOT_ONLY_RETENTION_POLICY_ID,
+        );
+        const batchId = text(refreshedRow.batch_id);
+        assertBotOnlyExecuteBatch(refreshedRow, batchId, identity);
+        // Re-run the complete read-only preflight so the retry receives a new
+        // manifest/evidence snapshot and a fresh SERIALIZABLE DB attempt.  It
+        // never exports, registers proof, or writes Storage.
+        const refreshedDry = await runPruneStep({
+          row: refreshedRow,
+          mode: "dry-run",
+          env,
+          cwd: tempRoot,
+          sql,
+          pruneStore,
+          storageTarget,
+          verifyBucket,
+          storageDeps,
+        });
+        if (refreshedDry.state !== "ready" && refreshedDry.state !== "already_cleaned") {
+          fail(`automatic bot-only batch ${batchId} retry preflight did not become ready: ${refreshedDry.state}`);
+        }
+        refreshedRow = refreshedDry.row || refreshedRow;
+        const refreshedEvidence = refreshedDry.evidence;
+        assertBotOnlyExecuteBatch(refreshedRow, batchId, identity);
+        assertAutomaticBotOnlyDryRunArchive(refreshedRow, refreshedDry, batchId);
+        assertAutomaticBotOnlyProofEvidence(refreshedRow, refreshedEvidence, batchId);
+        await assertAdvisoryLock(sql, lockSession);
+        const lifecycle = assertBotOnlyExecuteBatch(refreshedRow, batchId, identity);
+        if (lifecycle.receiptCount === 0 && lifecycle.cleanupCount === 0
+          && refreshedRow.bot_only_table_exists !== true) {
+          fail(`automatic bot-only batch ${batchId} has no live TABLE for a cleanup retry`);
+        }
+        if (lifecycle.receiptCount === 5 && lifecycle.cleanupCount === 3
+          && refreshedRow.bot_only_table_exists === true
+          && refreshedRow.bot_only_retention_complete_at == null) {
+          fail(`automatic bot-only batch ${batchId} has an incomplete TABLE lifecycle marker after cleanup retry`);
+        }
+        const inspectRecovery = storageDeps.inspectDurableRecovery || inspectDurableRecovery;
+        if (typeof verifyBucket === "function") await verifyBucket(storageTarget);
+        const refreshedDurable = await inspectRecovery(storageTarget, refreshedRow, storageDeps);
+        assertResumeRecoveryState(refreshedRow, refreshedDurable);
+        assertAutomaticBotOnlyDurableRecovery({
+          row: refreshedRow,
+          identity,
+          evidence: refreshedEvidence,
+          durable: refreshedDurable,
+        });
+        if (!Buffer.isBuffer(refreshedDurable.archiveBytes)
+          || !refreshedDurable.archiveBytes.equals(durable.archiveBytes)) {
+          fail(`automatic bot-only batch ${batchId} recovery archive changed between cleanup attempts`);
+        }
+
+        await assertAdvisoryLock(sql, lockSession);
+        if (lifecycle.receiptCount === 5 && lifecycle.cleanupCount === 3) {
+          return {
+            state: "already_cleaned",
+            row: refreshedRow,
+            evidence: refreshedEvidence,
+            durable: refreshedDurable,
+          };
+        }
+        if (lifecycle.receiptCount !== 0 || lifecycle.cleanupCount !== 0) {
+          fail(`automatic bot-only batch ${batchId} has an unexpected partial lifecycle after cleanup retry`);
+        }
+        return { row: refreshedRow, evidence: refreshedEvidence, durable: refreshedDurable };
+      },
+      ...(onExecuteProgress ? { onExecuteProgress } : {}),
+      ...(waitForExecuteRetry ? { waitForExecuteRetry } : {}),
+    }
+    : storageDeps;
   const result = await runPruneStep({
     row,
     mode: "execute",
@@ -1682,11 +1813,11 @@ export async function executeVerifiedCycle({
     pruneStore,
     storageTarget,
     verifyBucket,
-    storageDeps,
     recoveryDir,
     approvedBatchId,
     automatic,
     downloadArchive: async () => ({ bytes: durable.archiveBytes, downloadMs: 0 }),
+    storageDeps: executeStorageDeps,
   });
   if (result.state !== "pruned" && result.state !== "already_pruned" && result.state !== "cleaned" && result.state !== "already_cleaned") {
     fail(`unexpected prune state: ${result.state}`);
@@ -2775,6 +2906,36 @@ export async function runAutomaticBotOnlyStageAutomation({
               dryRunRetryCount: dryRunResult.dryRunRetryCount,
               dryRunSqlstates: dryRunResult.dryRunSqlstates,
             });
+            let executeProgress = automaticExecuteObservability();
+            const onExecuteProgress = ({
+              row: progressRow,
+              executeAttempts = 0,
+              executeRetryCount = 0,
+              executeSqlstates = [],
+            } = {}) => {
+              executeProgress = automaticExecuteObservability({
+                attempts: executeAttempts,
+                retryCount: executeRetryCount,
+                sqlstates: executeSqlstates,
+              });
+              currentBatch = automaticBatchProgress({
+                row: progressRow || row,
+                identity,
+                dry,
+                durable,
+                state: "in_progress",
+                deployedCommitSha,
+                archiveStorageModified,
+                recoveryStorageModified: currentBatch?.recoveryStorageModified
+                  ?? automaticRecoveryStorageModified(durable),
+                dryRunAttempts: dryRunResult.dryRunAttempts,
+                dryRunRetryCount: dryRunResult.dryRunRetryCount,
+                dryRunSqlstates: dryRunResult.dryRunSqlstates,
+                executeAttempts: executeProgress.executeAttempts,
+                executeRetryCount: executeProgress.executeRetryCount,
+                executeSqlstates: executeProgress.executeSqlstates,
+              });
+            };
             await assertAdvisoryLock(sql, lockSession);
             markAutomaticPhase("automatic.execute", row);
             const executed = await executeCycle({
@@ -2789,6 +2950,14 @@ export async function runAutomaticBotOnlyStageAutomation({
               automatic: true,
               verifyBucket,
               storageDeps: deps,
+              lockSession,
+              onExecuteProgress,
+              waitForExecuteRetry: deps.waitForExecuteRetry || null,
+            });
+            executeProgress = automaticExecuteObservability({
+              attempts: executed.executeAttempts ?? executeProgress.executeAttempts,
+              retryCount: executed.executeRetryCount ?? executeProgress.executeRetryCount,
+              sqlstates: executed.executeSqlstates ?? executeProgress.executeSqlstates,
             });
             currentBatch = automaticBatchProgress({
               row,
@@ -2804,6 +2973,9 @@ export async function runAutomaticBotOnlyStageAutomation({
               executeState: executed.state,
               executeConfirmed: executed.state === "cleaned",
               dbMutationConfirmed: executed.state === "cleaned",
+              executeAttempts: executeProgress.executeAttempts,
+              executeRetryCount: executeProgress.executeRetryCount,
+              executeSqlstates: executeProgress.executeSqlstates,
             });
             markAutomaticPhase("automatic.execute-refresh", row);
             const refreshed = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
@@ -2821,6 +2993,9 @@ export async function runAutomaticBotOnlyStageAutomation({
               executeState: executed.state,
               executeConfirmed: currentBatch.executeConfirmed,
               dbMutationConfirmed: currentBatch.dbMutationConfirmed,
+              executeAttempts: executeProgress.executeAttempts,
+              executeRetryCount: executeProgress.executeRetryCount,
+              executeSqlstates: executeProgress.executeSqlstates,
             });
             markAutomaticPhase("automatic.execute-retry", refreshed);
             const retry = await executeCycle({
@@ -2835,6 +3010,8 @@ export async function runAutomaticBotOnlyStageAutomation({
               automatic: true,
               verifyBucket,
               storageDeps: deps,
+              lockSession,
+              waitForExecuteRetry: deps.waitForExecuteRetry || null,
             });
             currentBatch = {
               ...currentBatch,
@@ -2858,6 +3035,9 @@ export async function runAutomaticBotOnlyStageAutomation({
               executeState: executed.state,
               executeConfirmed: currentBatch.executeConfirmed,
               dbMutationConfirmed: currentBatch.dbMutationConfirmed,
+              executeAttempts: executeProgress.executeAttempts,
+              executeRetryCount: executeProgress.executeRetryCount,
+              executeSqlstates: executeProgress.executeSqlstates,
               retryState: retry.state,
             });
             return {
@@ -2869,6 +3049,9 @@ export async function runAutomaticBotOnlyStageAutomation({
               dryRunAttempts: dryRunResult.dryRunAttempts,
               dryRunRetryCount: dryRunResult.dryRunRetryCount,
               dryRunSqlstates: dryRunResult.dryRunSqlstates,
+              executeAttempts: executeProgress.executeAttempts,
+              executeRetryCount: executeProgress.executeRetryCount,
+              executeSqlstates: executeProgress.executeSqlstates,
               archiveStorageModified,
               storageMutation: automaticStorageMutation({
                 archiveStorageModified,
@@ -2895,6 +3078,11 @@ export async function runAutomaticBotOnlyStageAutomation({
                 attempts: cycle.dryRunAttempts,
                 retryCount: cycle.dryRunRetryCount,
                 sqlstates: cycle.dryRunSqlstates,
+              }),
+              ...automaticExecuteObservability({
+                attempts: cycle.executeAttempts,
+                retryCount: cycle.executeRetryCount,
+                sqlstates: cycle.executeSqlstates,
               }),
               ...(cycle.storageMutation || automaticStorageMutation({
                 archiveStorageModified: cycle.archiveStorageModified,
@@ -2976,6 +3164,11 @@ export async function runAutomaticBotOnlyStageAutomation({
               attempts: cycle.dryRunAttempts,
               retryCount: cycle.dryRunRetryCount,
               sqlstates: cycle.dryRunSqlstates,
+            }),
+            ...automaticExecuteObservability({
+              attempts: cycle.executeAttempts,
+              retryCount: cycle.executeRetryCount,
+              sqlstates: cycle.executeSqlstates,
             }),
             ...(cycle.storageMutation || automaticStorageMutation({
               archiveStorageModified: cycle.archiveStorageModified,

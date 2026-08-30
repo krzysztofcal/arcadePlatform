@@ -136,6 +136,8 @@ function fakeScheduler({
   inspectRecovery = null,
   mainArchiveMode = "valid",
   dryRunSqlstates = [],
+  executeSqlstates = [],
+  executeAlreadyCleanedAfterFailure = false,
 } = {}) {
   const manifests = new Map(initialRows.map((row) => [row.object_path, row]));
   const ownRows = [...initialRows];
@@ -148,6 +150,9 @@ function fakeScheduler({
     storeCalls: 0,
     executeCalls: 0,
     realExecuteCalls: 0,
+    executeAttemptCalls: 0,
+    executeRetryPreflights: 0,
+    executeRetryWaits: 0,
     destructiveSqlMutations: 0,
     advisoryLockChecks: 0,
     failedOnce: false,
@@ -160,6 +165,7 @@ function fakeScheduler({
     activeDryRunCalls: 0,
     persistCalls: 0,
     proofRegisterCalls: 0,
+    recoveryInspections: 0,
   };
 
   const evidence = (tableId, key) => ({
@@ -303,7 +309,7 @@ function fakeScheduler({
       ownRows.unshift(row);
       return { objectPath, manifest: row, object: { uploaded: true } };
     },
-    pruneArchive: async ({ argv }) => {
+    pruneArchive: async ({ argv, deps: pruneDeps = {} }) => {
       const objectPath = argv[argv.indexOf("--object-path") + 1];
       const row = manifests.get(objectPath);
       if (argv.includes("--register-proof")) {
@@ -347,22 +353,96 @@ function fakeScheduler({
       }
       if (argv.includes("--execute") && realExecute) {
         state.realExecuteCalls += 1;
-        if (state.realExecuteCalls === 1) {
-          state.destructiveSqlMutations += 1;
-          row.pruned_at = "2026-08-25T00:00:01Z";
-          row.pruned_transaction_count = "1";
-          row.pruned_entry_count = "2";
-          row.pruned_transaction_ids_sha256 = row.archived_transaction_ids_sha256;
-          row.pruned_entry_ids_sha256 = row.archived_entry_ids_sha256;
-          row.registry_cleaned_at = "2026-08-25T00:00:02Z";
-          row.registry_cleaned_key_count = "1";
-          row.registry_cleaned_keys_sha256 = "1".repeat(64);
-          row.bot_only_retention_complete_at = "2026-08-25T00:00:03Z";
-          row.destructive_go_at = "2026-08-25T00:00:00Z";
-          row.destructive_go_batch_id = row.batch_id;
-          return { state: "cleaned", evidence: evidence(row.bot_only_table_id, "key:" + row.batch_id) };
+        let executeAttempts = 0;
+        let executeRetryCount = 0;
+        const executeSqlstatesSeen = [];
+        const metrics = () => ({
+          executeAttempts,
+          executeRetryCount,
+          executeSqlstates: [...executeSqlstatesSeen],
+        });
+        const annotate = (error) => Object.assign(error, metrics());
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          if (attempt > 1) {
+            state.executeRetryPreflights += 1;
+            const preflight = await pruneDeps.beforeExecuteRetry?.({
+              attempt,
+              previousAttempts: executeAttempts,
+              executeRetryCount,
+              executeSqlstates: [...executeSqlstatesSeen],
+              row,
+              evidence: evidence(row.bot_only_table_id, "key:" + row.batch_id),
+              recoveryBundle: null,
+            });
+            if (preflight?.state === "already_cleaned") {
+              return { ...preflight, ...metrics() };
+            }
+          }
+          executeAttempts += 1;
+          state.executeAttemptCalls += 1;
+          const sqlstate = executeSqlstates[state.executeAttemptCalls - 1];
+          if (sqlstate) {
+            executeSqlstatesSeen.push(sqlstate);
+            const error = new Error(`simulated execute ${sqlstate}`);
+            error.code = sqlstate;
+            pruneDeps.onExecuteProgress?.({ ...metrics(), error, row });
+            if (executeAlreadyCleanedAfterFailure && !row.registry_cleaned_at) {
+              state.destructiveSqlMutations += 1;
+              row.pruned_at = "2026-08-25T00:00:01Z";
+              row.pruned_transaction_count = "1";
+              row.pruned_entry_count = "2";
+              row.pruned_transaction_ids_sha256 = row.archived_transaction_ids_sha256;
+              row.pruned_entry_ids_sha256 = row.archived_entry_ids_sha256;
+              row.registry_cleaned_at = "2026-08-25T00:00:02Z";
+              row.registry_cleaned_key_count = "1";
+              row.registry_cleaned_keys_sha256 = "1".repeat(64);
+              row.bot_only_retention_complete_at = "2026-08-25T00:00:03Z";
+              row.destructive_go_at = "2026-08-25T00:00:00Z";
+              row.destructive_go_batch_id = row.batch_id;
+            }
+            if (!["40001", "55P03"].includes(sqlstate) || attempt === 3) {
+              throw annotate(error);
+            }
+            executeRetryCount += 1;
+            state.executeRetryWaits += 1;
+            await pruneDeps.waitForExecuteRetry?.({
+              attempt,
+              nextAttempt: attempt + 1,
+              delayMs: 0,
+              sqlstate,
+              ...metrics(),
+            });
+            continue;
+          }
+          const wasAlreadyCleaned = Boolean(row.registry_cleaned_at);
+          if (!wasAlreadyCleaned) {
+            state.destructiveSqlMutations += 1;
+            row.pruned_at = "2026-08-25T00:00:01Z";
+            row.pruned_transaction_count = "1";
+            row.pruned_entry_count = "2";
+            row.pruned_transaction_ids_sha256 = row.archived_transaction_ids_sha256;
+            row.pruned_entry_ids_sha256 = row.archived_entry_ids_sha256;
+            row.registry_cleaned_at = "2026-08-25T00:00:02Z";
+            row.registry_cleaned_key_count = "1";
+            row.registry_cleaned_keys_sha256 = "1".repeat(64);
+            row.bot_only_retention_complete_at = "2026-08-25T00:00:03Z";
+            row.destructive_go_at = "2026-08-25T00:00:00Z";
+            row.destructive_go_batch_id = row.batch_id;
+          }
+          const stateValue = wasAlreadyCleaned ? "already_cleaned" : "cleaned";
+          pruneDeps.onExecuteProgress?.({
+            ...metrics(),
+            row,
+            result: { state: stateValue },
+          });
+          return {
+            state: stateValue,
+            row,
+            evidence: evidence(row.bot_only_table_id, "key:" + row.batch_id),
+            ...metrics(),
+          };
         }
-        return { state: "already_cleaned", evidence: evidence(row.bot_only_table_id, "key:" + row.batch_id) };
+        throw new Error("fake execute retry loop exhausted");
       }
       if (row.registry_cleaned_at) {
         return {
@@ -377,7 +457,10 @@ function fakeScheduler({
         archiveSha256: row.compressed_sha256,
       };
     },
-    inspectDurableRecovery: inspectRecovery || (async (_target, row) => durable.get(row.object_path) || null),
+    inspectDurableRecovery: inspectRecovery || (async (_target, row) => {
+      state.recoveryInspections += 1;
+      return durable.get(row.object_path) || null;
+    }),
     persistDurableRecovery: async (_target, row, identity, rowEvidence, archiveBytes) => {
       state.persistCalls += 1;
       const recoveryArchivePath = `recovery/v1/sha256/${row.compressed_sha256}.jsonl.gz`;
@@ -436,9 +519,21 @@ function fakeScheduler({
         storedRow.bot_only_retention_complete_at = "2026-08-25T00:00:03Z";
         storedRow.destructive_go_at = "2026-08-25T00:00:00Z";
         storedRow.destructive_go_batch_id = storedRow.batch_id;
-        return { state: "cleaned", evidence: evidence(storedRow.bot_only_table_id, "key:" + storedRow.batch_id) };
+        return {
+          state: "cleaned",
+          evidence: evidence(storedRow.bot_only_table_id, "key:" + storedRow.batch_id),
+          executeAttempts: 1,
+          executeRetryCount: 0,
+          executeSqlstates: [],
+        };
       }
-      return { state: "already_cleaned", evidence: evidence(storedRow.bot_only_table_id, "key:" + storedRow.batch_id) };
+      return {
+        state: "already_cleaned",
+        evidence: evidence(storedRow.bot_only_table_id, "key:" + storedRow.batch_id),
+        executeAttempts: 1,
+        executeRetryCount: 0,
+        executeSqlstates: [],
+      };
     },
   };
 
@@ -1203,6 +1298,158 @@ async function schedulerContracts() {
     }
   } finally {
     fs.rmSync(realCycleTempRoot, { recursive: true, force: true });
+  }
+
+  for (const retryableSqlstate of ["40001", "55P03"]) {
+    const provenRetry = makeProvenAutomaticRow("27");
+    const provenRetryRun = fakeScheduler({
+      enabled: true,
+      candidateCount: 0,
+      realExecute: true,
+      executeSqlstates: [retryableSqlstate, null],
+      initialRows: [provenRetry.row],
+      initialDurable: new Map([[
+        provenRetry.row.object_path,
+        makeTestAutomaticDurableRecovery(provenRetry.row, provenRetry.archiveBytes),
+      ]]),
+      initialArchiveBytes: new Map([[provenRetry.row.object_path, provenRetry.archiveBytes]]),
+    });
+    const executeWaits = [];
+    provenRetryRun.deps.waitForExecuteRetry = async (details) => executeWaits.push(details);
+    const provenRetryTempRoot = fs.mkdtempSync(`/tmp/chips-ledger-stage-automation-execute-retry-${retryableSqlstate}-`);
+    provenRetryRun.deps.tempRoot = provenRetryTempRoot;
+    try {
+      const retryResult = await runAutomaticBotOnlyStageAutomation(provenRetryRun);
+      const report = retryResult.processed[0];
+      assert.equal(report.state, "cleaned");
+      assert.equal(report.executeAttempts, 2);
+      assert.equal(report.executeRetryCount, 1);
+      assert.deepEqual(report.executeSqlstates, [retryableSqlstate]);
+      assert.equal(report.dryRunAttempts, 1, "execute retry must not be folded into dry-run metrics");
+      assert.equal(report.dryRunRetryCount, 0);
+      assert.deepEqual(report.dryRunSqlstates, []);
+      assert.equal(report.retryState, "already_cleaned");
+      assert.equal(provenRetryRun.state.realExecuteCalls, 2, "the second idempotency cycle is separate from SQL retries");
+      assert.equal(provenRetryRun.state.executeAttemptCalls, 3, "two first-cycle attempts plus one idempotency check");
+      assert.equal(provenRetryRun.state.executeRetryPreflights, 1);
+      assert.equal(provenRetryRun.state.executeRetryWaits, 1);
+      assert.equal(executeWaits.length, 1);
+      assert.equal(executeWaits[0].sqlstate, retryableSqlstate);
+      assert.equal(provenRetryRun.state.recoveryInspections >= 2, true, "recovery must be revalidated before the retry");
+      assert.equal(provenRetryRun.state.proofRegisterCalls, 0, "a proven batch must not register proof again");
+      assert.equal(provenRetryRun.state.persistCalls, 0, "an existing recovery pair must not be rewritten");
+      assert.equal(provenRetryRun.state.storeCalls, 0, "an existing archive must not be rewritten");
+      assert.equal(provenRetryRun.state.destructiveSqlMutations, 1);
+    } finally {
+      fs.rmSync(provenRetryTempRoot, { recursive: true, force: true });
+    }
+  }
+
+  const exhaustedExecute = makeProvenAutomaticRow("27");
+  const exhaustedExecuteRun = fakeScheduler({
+    enabled: true,
+    candidateCount: 0,
+    realExecute: true,
+    executeSqlstates: ["40001", "40001", "40001"],
+    initialRows: [exhaustedExecute.row],
+    initialDurable: new Map([[
+      exhaustedExecute.row.object_path,
+      makeTestAutomaticDurableRecovery(exhaustedExecute.row, exhaustedExecute.archiveBytes),
+    ]]),
+    initialArchiveBytes: new Map([[exhaustedExecute.row.object_path, exhaustedExecute.archiveBytes]]),
+  });
+  const exhaustedExecuteWaits = [];
+  exhaustedExecuteRun.deps.waitForExecuteRetry = async (details) => exhaustedExecuteWaits.push(details);
+  const exhaustedExecuteTempRoot = fs.mkdtempSync("/tmp/chips-ledger-stage-automation-execute-exhausted-");
+  exhaustedExecuteRun.deps.tempRoot = exhaustedExecuteTempRoot;
+  try {
+    const failure = await captureAutomaticFailure(exhaustedExecuteRun);
+    assert.equal(failure.error.code, "40001");
+    assert.equal(exhaustedExecuteRun.state.executeAttemptCalls, 3);
+    assert.equal(exhaustedExecuteRun.state.executeRetryPreflights, 2);
+    assert.equal(exhaustedExecuteRun.state.executeRetryWaits, 2);
+    assert.equal(exhaustedExecuteWaits.length, 2);
+    assert.equal(exhaustedExecuteRun.state.dryRunCalls, 3, "each execute retry must run a fresh dry-run preflight");
+    assert.equal(exhaustedExecuteRun.state.dryRunManifestReads, 3);
+    assert.equal(exhaustedExecuteRun.state.dryRunArchiveDownloads, 3);
+    assert.equal(exhaustedExecuteRun.state.recoveryInspections, 3);
+    assert.equal(exhaustedExecuteRun.state.proofRegisterCalls, 0);
+    assert.equal(exhaustedExecuteRun.state.persistCalls, 0);
+    assert.equal(exhaustedExecuteRun.state.storeCalls, 0);
+    assert.equal(exhaustedExecuteRun.state.destructiveSqlMutations, 0);
+    assert.deepEqual(failure.report.processed_batches, []);
+    assert.equal(failure.report.phase, "automatic.execute");
+    assert.equal(failure.report.batch_id, "27");
+    assert.equal(failure.report.current_batch.execute_attempts, 3);
+    assert.equal(failure.report.current_batch.execute_retry_count, 2);
+    assert.deepEqual(failure.report.current_batch.execute_sqlstates, ["40001", "40001", "40001"]);
+    assert.equal(failure.report.current_batch.dry_run_attempts, 1);
+    assert.equal(failure.report.current_batch.dry_run_retry_count, 0);
+    assert.deepEqual(failure.report.current_batch.dry_run_sqlstates, []);
+  } finally {
+    fs.rmSync(exhaustedExecuteTempRoot, { recursive: true, force: true });
+  }
+
+  const nonRetryableExecute = makeProvenAutomaticRow("27");
+  const nonRetryableExecuteRun = fakeScheduler({
+    enabled: true,
+    candidateCount: 0,
+    realExecute: true,
+    executeSqlstates: ["23505"],
+    initialRows: [nonRetryableExecute.row],
+    initialDurable: new Map([[
+      nonRetryableExecute.row.object_path,
+      makeTestAutomaticDurableRecovery(nonRetryableExecute.row, nonRetryableExecute.archiveBytes),
+    ]]),
+    initialArchiveBytes: new Map([[nonRetryableExecute.row.object_path, nonRetryableExecute.archiveBytes]]),
+  });
+  const nonRetryableExecuteTempRoot = fs.mkdtempSync("/tmp/chips-ledger-stage-automation-execute-nonretryable-");
+  nonRetryableExecuteRun.deps.tempRoot = nonRetryableExecuteTempRoot;
+  try {
+    const failure = await captureAutomaticFailure(nonRetryableExecuteRun);
+    assert.equal(failure.error.code, "23505");
+    assert.equal(nonRetryableExecuteRun.state.executeAttemptCalls, 1);
+    assert.equal(nonRetryableExecuteRun.state.executeRetryPreflights, 0);
+    assert.equal(nonRetryableExecuteRun.state.executeRetryWaits, 0);
+    assert.equal(nonRetryableExecuteRun.state.destructiveSqlMutations, 0);
+    assert.equal(failure.report.current_batch.execute_attempts, 1);
+    assert.equal(failure.report.current_batch.execute_retry_count, 0);
+    assert.deepEqual(failure.report.current_batch.execute_sqlstates, ["23505"]);
+  } finally {
+    fs.rmSync(nonRetryableExecuteTempRoot, { recursive: true, force: true });
+  }
+
+  const alreadyCleanedAfterFailure = makeProvenAutomaticRow("27");
+  const alreadyCleanedAfterFailureRun = fakeScheduler({
+    enabled: true,
+    candidateCount: 0,
+    realExecute: true,
+    executeSqlstates: ["40001"],
+    executeAlreadyCleanedAfterFailure: true,
+    initialRows: [alreadyCleanedAfterFailure.row],
+    initialDurable: new Map([[
+      alreadyCleanedAfterFailure.row.object_path,
+      makeTestAutomaticDurableRecovery(alreadyCleanedAfterFailure.row, alreadyCleanedAfterFailure.archiveBytes),
+    ]]),
+    initialArchiveBytes: new Map([[
+      alreadyCleanedAfterFailure.row.object_path,
+      alreadyCleanedAfterFailure.archiveBytes,
+    ]]),
+  });
+  const alreadyCleanedTempRoot = fs.mkdtempSync("/tmp/chips-ledger-stage-automation-execute-already-cleaned-");
+  alreadyCleanedAfterFailureRun.deps.tempRoot = alreadyCleanedTempRoot;
+  try {
+    const result = await runAutomaticBotOnlyStageAutomation(alreadyCleanedAfterFailureRun);
+    assert.equal(result.processed[0].executeAttempts, 1);
+    assert.equal(result.processed[0].executeRetryCount, 1);
+    assert.deepEqual(result.processed[0].executeSqlstates, ["40001"]);
+    assert.equal(result.processed[0].executeState, "already_cleaned");
+    assert.equal(result.processed[0].retryState, "already_cleaned");
+    assert.equal(alreadyCleanedAfterFailureRun.state.executeRetryPreflights, 1);
+    assert.equal(alreadyCleanedAfterFailureRun.state.executeAttemptCalls, 2, "already_cleaned must avoid a retry cleanup but still run the idempotency check");
+    assert.equal(alreadyCleanedAfterFailureRun.state.destructiveSqlMutations, 1);
+  } finally {
+    fs.rmSync(alreadyCleanedTempRoot, { recursive: true, force: true });
   }
 
   const capacity = fakeScheduler({ enabled: true, candidateCount: BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN + 5 });

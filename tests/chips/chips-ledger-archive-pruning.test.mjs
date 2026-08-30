@@ -13,6 +13,7 @@ import {
   verifyArchiveBytes,
 } from "../../scripts/ops/chips-ledger-archive-store.mjs";
 import {
+  AUTOMATIC_CLEANUP_RETRY_BACKOFF_MS,
   STAGE_SYSTEM_IDENTIFIER,
   buildPruneEvidence,
   computeArchiveIdProofs,
@@ -470,6 +471,8 @@ try {
   for (const sqlstate of ["40001", "55P03"]) {
     const recoveryDir = path.join(botRetryRoot, `recovery-${sqlstate}`);
     const store = fakeBotOnlyAutomaticStore(botFixture, [sqlstate, null]);
+    const retryPreflights = [];
+    const retryWaits = [];
     let storageReads = 0;
     let bucketChecks = 0;
     const result = await pruneArchive({
@@ -487,6 +490,13 @@ try {
           storageReads += 1;
           return { bytes: botFixture.archive.compressedBytes, downloadMs: 1 };
         },
+        beforeExecuteRetry: async (details) => {
+          retryPreflights.push(details);
+          return {};
+        },
+        waitForExecuteRetry: async (details) => {
+          retryWaits.push(details);
+        },
         emit: false,
       },
     });
@@ -496,10 +506,20 @@ try {
     assert.equal(store.proofCalls, 0, `${sqlstate} retry must not repeat proof registration`);
     assert.equal(storageReads, 2, `${sqlstate} retry must only perform initial and post-commit Storage reads`);
     assert.equal(bucketChecks, 2, `${sqlstate} retry must not re-run Storage preflight per attempt`);
+    assert.equal(result.executeAttempts, 2);
+    assert.equal(result.executeRetryCount, 1);
+    assert.deepEqual(result.executeSqlstates, [sqlstate]);
+    assert.equal(retryPreflights.length, 1);
+    assert.equal(retryWaits.length, 1);
+    assert.equal(retryWaits[0].sqlstate, sqlstate);
+    assert.equal(retryWaits[0].delayMs, AUTOMATIC_CLEANUP_RETRY_BACKOFF_MS[0]);
   }
 
   const exhaustedStore = fakeBotOnlyAutomaticStore(botFixture, ["40001", "40001", "40001"]);
+  const exhaustedPreflights = [];
+  const exhaustedWaits = [];
   let exhaustedReads = 0;
+  let exhaustedError;
   await assert.rejects(
     () => pruneArchive({
       argv: [
@@ -516,15 +536,31 @@ try {
           exhaustedReads += 1;
           return { bytes: botFixture.archive.compressedBytes, downloadMs: 1 };
         },
+        beforeExecuteRetry: async (details) => {
+          exhaustedPreflights.push(details);
+          return {};
+        },
+        waitForExecuteRetry: async (details) => {
+          exhaustedWaits.push(details);
+        },
         emit: false,
       },
     }),
-    (error) => error?.code === "40001",
+    (error) => {
+      exhaustedError = error;
+      return error?.code === "40001";
+    },
   );
   assert.equal(exhaustedStore.cleanupCalls, 3, "automatic cleanup retry budget is exactly three attempts");
   assert.equal(exhaustedStore.persistedMutations, 0, "exhausted cleanup must not report a persisted mutation");
   assert.equal(exhaustedStore.proofCalls, 0, "exhausted cleanup must not repeat proof registration");
   assert.equal(exhaustedReads, 1, "exhausted cleanup must not perform post-commit Storage verification");
+  assert.equal(exhaustedPreflights.length, 2);
+  assert.equal(exhaustedWaits.length, 2);
+  assert.deepEqual(exhaustedWaits.map((wait) => wait.delayMs), [...AUTOMATIC_CLEANUP_RETRY_BACKOFF_MS]);
+  assert.equal(exhaustedError.executeAttempts, 3);
+  assert.equal(exhaustedError.executeRetryCount, 2);
+  assert.deepEqual(exhaustedError.executeSqlstates, ["40001", "40001", "40001"]);
 
   const recoveryDir = path.join(botRetryRoot, "recovery-tampered-between-attempts");
   const tamperedManifestPath = path.join(
@@ -553,6 +589,8 @@ try {
           tamperedReads += 1;
           return { bytes: botFixture.archive.compressedBytes, downloadMs: 1 };
         },
+        beforeExecuteRetry: async () => ({}),
+        waitForExecuteRetry: async () => {},
         emit: false,
       },
     }),

@@ -283,6 +283,9 @@ const automaticError = aggregatePayload({
     dryRunAttempts: 1,
     dryRunRetryCount: 0,
     dryRunSqlstates: [],
+    executeAttempts: 3,
+    executeRetryCount: 2,
+    executeSqlstates: ["40001", "40001", "55P03"],
   }],
 });
 assert.equal(automaticError.source_policy_id, BOT_ONLY_RETENTION_POLICY_ID);
@@ -291,6 +294,10 @@ assert.equal(automaticError.phase, "automatic.execute");
 assert.equal(automaticError.batch_id, "16");
 assert.equal(automaticError.object_path, "v1/sha256/" + "a".repeat(64) + ".jsonl.gz");
 assert.equal(automaticError.sqlstate, "40001");
+assert.equal(automaticError.stop_reason, "serialization failure");
+assert.deepEqual(automaticError.processed_batches[0].execute_sqlstates, ["40001", "40001", "55P03"]);
+assert.equal(automaticError.processed_batches[0].execute_attempts, 3);
+assert.equal(automaticError.processed_batches[0].execute_retry_count, 2);
 assert.deepEqual(automaticError.processed_batches, [{
   batch_id: "17",
   state: "cleaned",
@@ -312,6 +319,13 @@ assert.deepEqual(automaticError.processed_batches, [{
   dry_run_attempts: 1,
   dry_run_retry_count: 0,
   dry_run_sqlstates: [],
+  execute_state: null,
+  execute_confirmed: false,
+  db_mutation_confirmed: false,
+  retry_state: null,
+  execute_attempts: 3,
+  execute_retry_count: 2,
+  execute_sqlstates: ["40001", "40001", "55P03"],
 }]);
 assert.equal(automaticError.current_batch.batch_id, "16");
 assert.equal(automaticError.current_batch.object_path, "v1/sha256/" + "a".repeat(64) + ".jsonl.gz");
@@ -325,6 +339,16 @@ assert.equal(automaticError.current_batch.db_mutation_confirmed, false);
 assert.equal(automaticError.current_batch.dry_run_attempts, 2);
 assert.equal(automaticError.current_batch.dry_run_retry_count, 1);
 assert.deepEqual(automaticError.current_batch.dry_run_sqlstates, ["40001"]);
+assert.equal(automaticError.current_batch.execute_attempts, 0);
+assert.equal(automaticError.current_batch.execute_retry_count, 0);
+assert.deepEqual(automaticError.current_batch.execute_sqlstates, []);
+
+const capturedAutomaticError = captureAggregateSummary(automaticError);
+assert.equal(capturedAutomaticError.report.stop_reason, "serialization failure");
+assert.equal(capturedAutomaticError.summary.includes('"stop_reason":"serialization failure"'), true);
+for (const secret of [sampleDbUrl, samplePassword, sampleJwt, sampleSecret]) {
+  assert.equal(capturedAutomaticError.summary.includes(secret), false);
+}
 
 const automaticProcessedBatch = {
   batchId: "batch-a",
@@ -353,6 +377,9 @@ const automaticProcessedBatch = {
   dbMutationConfirmed: true,
   retryState: "already_cleaned",
   retry: "already_cleaned",
+  executeAttempts: 3,
+  executeRetryCount: 2,
+  executeSqlstates: ["40001", "40001", "55P03"],
   tableId: "00000000-0000-4000-8000-000000000001",
   amounts: { credits: "100", debits: "100" },
 };
@@ -412,7 +439,10 @@ assert.deepEqual(Object.keys(automaticSuccess.processed_batches[0]).sort(), [
   "dry_run_retry_count",
   "dry_run_sqlstates",
   "entries",
+  "execute_attempts",
   "execute_confirmed",
+  "execute_retry_count",
+  "execute_sqlstates",
   "execute_state",
   "object_path",
   "proof",
@@ -447,6 +477,9 @@ assert.equal(automaticSuccess.processed_batches[0].execute_state, "cleaned");
 assert.equal(automaticSuccess.processed_batches[0].execute_confirmed, true);
 assert.equal(automaticSuccess.processed_batches[0].db_mutation_confirmed, true);
 assert.equal(automaticSuccess.processed_batches[0].retry_state, "already_cleaned");
+assert.equal(automaticSuccess.processed_batches[0].execute_attempts, 3);
+assert.equal(automaticSuccess.processed_batches[0].execute_retry_count, 2);
+assert.deepEqual(automaticSuccess.processed_batches[0].execute_sqlstates, ["40001", "40001", "55P03"]);
 assert.equal(Object.hasOwn(automaticSuccess.processed_batches[0], "table_id"), false);
 assert.equal(Object.hasOwn(automaticSuccess.processed_batches[0], "amounts"), false);
 

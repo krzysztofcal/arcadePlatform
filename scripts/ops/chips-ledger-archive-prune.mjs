@@ -37,6 +37,7 @@ const ALLOWED_TX_TYPES = new Set(["TABLE_BUY_IN", "TABLE_CASH_OUT"]);
 const MAX_BATCH_SIZE = maxBatchSizeForTarget("stage");
 const MAX_EXECUTE_ATTEMPTS = 3;
 export const MAX_AUTOMATIC_CLEANUP_ATTEMPTS = 3;
+export const AUTOMATIC_CLEANUP_RETRY_BACKOFF_MS = Object.freeze([100, 250]);
 const RETRYABLE_CLEANUP_SQLSTATES = new Set(["40001", "55P03"]);
 
 const HELP = `Usage: node scripts/ops/chips-ledger-archive-prune.mjs [options]
@@ -897,31 +898,123 @@ async function executeBotOnlyCleanupWithRetry({
   approvedBatchId = null,
   execute,
   automatic,
+  beforeRetry = null,
+  onProgress = null,
+  waitForRetry = null,
 }) {
   const attempts = automatic && execute ? MAX_AUTOMATIC_CLEANUP_ATTEMPTS : 1;
+  let currentRow = row;
+  let currentEvidence = evidence;
+  let currentRecoveryBundle = recoveryBundle;
+  let executeAttempts = 0;
+  let executeRetryCount = 0;
+  const executeSqlstates = [];
+  const metrics = () => ({
+    executeAttempts,
+    executeRetryCount,
+    executeSqlstates: [...executeSqlstates],
+  });
+  const reportProgress = (extra = {}) => {
+    if (typeof onProgress === "function") onProgress({ ...metrics(), row: currentRow, ...extra });
+  };
+  const annotate = (error) => {
+    if (error && typeof error === "object") Object.assign(error, metrics());
+    return error;
+  };
+  const wait = waitForRetry || (async ({ delayMs }) => {
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+  });
+
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    if (recoveryBundle) {
-      verifyRecoveryBundle({
-        bundle: recoveryBundle,
-        row,
-        target,
-        identity,
-        expectedEvidence: evidence,
-      });
+    if (attempt > 1) {
+      if (automatic && typeof beforeRetry !== "function") {
+        const error = new Error("automatic cleanup retry preflight is unavailable");
+        reportProgress({ error });
+        throw annotate(error);
+      }
+      if (typeof beforeRetry === "function") {
+        reportProgress({ retry_preflight: true });
+        let preflight;
+        try {
+          preflight = await beforeRetry({
+            attempt,
+            previousAttempts: executeAttempts,
+            executeRetryCount,
+            executeSqlstates: [...executeSqlstates],
+            row: currentRow,
+            evidence: currentEvidence,
+            recoveryBundle: currentRecoveryBundle,
+          });
+        } catch (error) {
+          reportProgress({ error });
+          throw annotate(error);
+        }
+        if (preflight?.state === "already_cleaned") {
+          reportProgress({ row: preflight.row || currentRow, result: preflight });
+          return { ...preflight, ...metrics() };
+        }
+        currentRow = preflight?.row || currentRow;
+        currentEvidence = preflight?.evidence || currentEvidence;
+        currentRecoveryBundle = preflight?.recoveryBundle || currentRecoveryBundle;
+      }
+    }
+
+    executeAttempts += 1;
+    reportProgress({ attempt });
+    if (currentRecoveryBundle) {
+      try {
+        verifyRecoveryBundle({
+          bundle: currentRecoveryBundle,
+          row: currentRow,
+          target,
+          identity,
+          expectedEvidence: currentEvidence,
+        });
+      } catch (error) {
+        reportProgress({ error });
+        throw annotate(error);
+      }
     }
     try {
-      return await store.cleanupBotOnly(
-        row.object_path,
-        evidence,
+      const result = await store.cleanupBotOnly(
+        currentRow.object_path,
+        currentEvidence,
         execute,
         approvedBatchId,
         automatic,
       );
+      reportProgress({ result });
+      return {
+        ...result,
+        row: currentRow,
+        evidence: currentEvidence,
+        ...metrics(),
+      };
     } catch (error) {
+      const sqlstate = sqlStateOf(error);
+      if (sqlstate) executeSqlstates.push(sqlstate);
+      reportProgress({ error });
       if (!automatic
         || attempt === attempts
-        || !RETRYABLE_CLEANUP_SQLSTATES.has(sqlStateOf(error))) {
-        throw error;
+        || !RETRYABLE_CLEANUP_SQLSTATES.has(sqlstate)) {
+        throw annotate(error);
+      }
+      executeRetryCount += 1;
+      const delayMs = AUTOMATIC_CLEANUP_RETRY_BACKOFF_MS[Math.min(
+        executeRetryCount - 1,
+        AUTOMATIC_CLEANUP_RETRY_BACKOFF_MS.length - 1,
+      )];
+      reportProgress({ retry_wait: true, delayMs });
+      try {
+        await wait({
+          attempt,
+          nextAttempt: attempt + 1,
+          delayMs,
+          sqlstate,
+          ...metrics(),
+        });
+      } catch (waitError) {
+        throw annotate(waitError);
       }
     }
   }
@@ -1068,6 +1161,9 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
           approvedBatchId: args.approvedBatchId,
           execute: Boolean(args.execute),
           automatic: Boolean(args.automatic),
+          beforeRetry: deps.beforeExecuteRetry || null,
+          onProgress: deps.onExecuteProgress || null,
+          waitForRetry: deps.waitForExecuteRetry || null,
         })
       : await executeArchivePrune({
         store,
@@ -1079,44 +1175,46 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
           : null,
       });
 
+    const resultRow = pruneResult?.row || row;
+    const resultEvidence = pruneResult?.evidence || evidence;
     let postCommitDownloadMs = null;
     if (args.execute) {
       try {
         await verifyBucket(target);
         const postCommitDownload = deps.downloadArchive
-          ? await deps.downloadArchive(target, row.object_path)
-          : await downloadPrivateArchiveObject(target, row.object_path, deps);
+          ? await deps.downloadArchive(target, resultRow.object_path)
+          : await downloadPrivateArchiveObject(target, resultRow.object_path, deps);
         postCommitDownloadMs = postCommitDownload.downloadMs;
         verifyArchiveBytes({
           compressedBytes: postCommitDownload.bytes,
-          manifest: archiveManifest,
+          manifest: exporterManifestFromDatabase(resultRow, target, deps.legacyStageAllowlistPlan),
           target,
-          artifactName: path.basename(row.object_path),
+          artifactName: path.basename(resultRow.object_path),
         });
-        const verification = row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
-          && row.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID
-          ? await store.verifyBotOnlyCommitted(row, evidence)
-          : await store.verifyCommitted(row, evidence);
-        if (row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
-          && row.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
+        const verification = resultRow.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+          && resultRow.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID
+          ? await store.verifyBotOnlyCommitted(resultRow, resultEvidence)
+          : await store.verifyCommitted(resultRow, resultEvidence);
+        if (resultRow.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+          && resultRow.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
           if (!verification?.pruned_at
-            || Number(verification.pruned_transaction_count) !== evidence.transactionCount
-            || Number(verification.pruned_entry_count) !== evidence.entryCount
-            || verification.pruned_transaction_ids_sha256 !== evidence.transactionIdsSha256
-            || verification.pruned_entry_ids_sha256 !== evidence.entryIdsSha256
+            || Number(verification.pruned_transaction_count) !== resultEvidence.transactionCount
+            || Number(verification.pruned_entry_count) !== resultEvidence.entryCount
+            || verification.pruned_transaction_ids_sha256 !== resultEvidence.transactionIdsSha256
+            || verification.pruned_entry_ids_sha256 !== resultEvidence.entryIdsSha256
             || !verification.registry_cleaned_at
-            || Number(verification.registry_cleaned_key_count) !== evidence.registryKeys.length
-            || verification.registry_cleaned_keys_sha256 !== evidence.registryKeysSha256
+            || Number(verification.registry_cleaned_key_count) !== resultEvidence.registryKeys.length
+            || verification.registry_cleaned_keys_sha256 !== resultEvidence.registryKeysSha256
             || Number(verification.remaining_mapping_count) !== 0
             || Number(verification.hot_transaction_count) !== 0
             || Number(verification.hot_entry_count) !== 0) {
             fail("post-commit bot-only cleanup verification failed", "post_commit_verification_failed");
           }
-        } else if (row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
-          && row.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
-          assertLegacyPostCommitVerification(verification, evidence);
+        } else if (resultRow.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+          && resultRow.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
+          assertLegacyPostCommitVerification(verification, resultEvidence);
         } else {
-          assertPostCommitVerification(verification, evidence);
+          assertPostCommitVerification(verification, resultEvidence);
         }
       } catch (error) {
         if (error?.code === "post_commit_verification_failed") throw error;
@@ -1125,16 +1223,21 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
     }
 
     const result = {
-      row,
+      row: resultRow,
       identity,
       target,
-      evidence,
+      evidence: resultEvidence,
       mode: args.execute ? "execute" : "dry-run",
       state: pruneResult?.state || "unknown",
       storageDownloadMs: downloaded.downloadMs,
       postCommitDownloadMs,
       recoveryBundle,
       archiveSha256,
+      executeAttempts: pruneResult?.executeAttempts ?? null,
+      executeRetryCount: pruneResult?.executeRetryCount ?? null,
+      executeSqlstates: Array.isArray(pruneResult?.executeSqlstates)
+        ? [...pruneResult.executeSqlstates]
+        : null,
     };
     if (deps.emit !== false) outputResult(result);
     return result;
