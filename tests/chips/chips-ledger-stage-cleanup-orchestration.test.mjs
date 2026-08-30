@@ -654,7 +654,18 @@ async function schedulerContracts() {
   assert.equal(enabledResult.processed.length, 3);
   assert.equal(enabledResult.boundedBatchLimit, BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN);
   assert.deepEqual(enabledResult.processed.map((row) => row.retry), ["already_cleaned", "already_cleaned", "already_cleaned"]);
+  assert.deepEqual(enabledResult.processed.map((row) => row.executeState), ["cleaned", "cleaned", "cleaned"]);
+  assert.deepEqual(enabledResult.processed.map((row) => row.executeConfirmed), [true, true, true]);
+  assert.deepEqual(enabledResult.processed.map((row) => row.dbMutationConfirmed), [true, true, true]);
+  assert.deepEqual(enabledResult.processed.map((row) => row.retryState), ["already_cleaned", "already_cleaned", "already_cleaned"]);
+  assert.equal(enabledResult.stopReason, "no_eligible_bot_only_table");
   assert.equal(enabled.state.storeCalls, 3);
+
+  const noCandidate = fakeScheduler({ enabled: true, candidateCount: 0 });
+  const noCandidateResult = await runAutomaticBotOnlyStageAutomation(noCandidate);
+  assert.equal(noCandidateResult.state, "completed");
+  assert.deepEqual(noCandidateResult.processed, []);
+  assert.equal(noCandidateResult.stopReason, "no_eligible_bot_only_table");
 
   const proven = makeProvenAutomaticRow("27");
   const legalRestart = fakeScheduler({
@@ -692,6 +703,10 @@ async function schedulerContracts() {
   assert.equal(legalRestartResult.processed[0].batchId, "27");
   assert.equal(legalRestartResult.processed[0].state, "cleaned");
   assert.equal(legalRestartResult.processed[0].retry, "already_cleaned");
+  assert.equal(legalRestartResult.processed[0].executeState, "cleaned");
+  assert.equal(legalRestartResult.processed[0].executeConfirmed, true);
+  assert.equal(legalRestartResult.processed[0].dbMutationConfirmed, true);
+  assert.equal(legalRestartResult.processed[0].retryState, "already_cleaned");
   assert.equal(legalRestart.state.proofRegisterCalls, 0, "a complete proof must not be re-registered");
   assert.equal(legalRestart.state.persistCalls, 1, "the missing recovery pair must be created once");
   assert.equal(legalRestart.state.executeCalls, 2, "the restart must complete the destructive double-cycle");
@@ -699,6 +714,10 @@ async function schedulerContracts() {
   assert.equal(legalRestartResult.processed[0].archiveStorageModified, false);
   assert.equal(legalRestartResult.processed[0].recoveryStorageModified, true);
   assert.equal(legalRestartResult.processed[0].storageModified, true);
+  assert.equal(legalRestartResult.processed[0].recoveryArchivePath, legalRestart.durable.get(proven.row.object_path).archivePath);
+  assert.equal(legalRestartResult.processed[0].recoveryManifestPath, legalRestart.durable.get(proven.row.object_path).manifestPath);
+  assert.equal(legalRestartResult.processed[0].recoveryArchiveSha256, legalRestart.durable.get(proven.row.object_path).archiveSha256);
+  assert.equal(legalRestartResult.processed[0].recoveryManifestSha256, legalRestart.durable.get(proven.row.object_path).manifestSha256);
 
   for (const retryableSqlstate of ["40001", "55P03"]) {
     const retryable = makeProvenAutomaticRow("27");
@@ -1190,7 +1209,7 @@ async function schedulerContracts() {
   const capacityResult = await runAutomaticBotOnlyStageAutomation(capacity);
   assert.equal(capacityResult.processed.length, BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN);
   assert.equal(capacity.state.storeCalls, BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN);
-  assert.equal(capacityResult.stopReason, null, "the bounded run must use its full capacity when candidates remain");
+  assert.equal(capacityResult.stopReason, "batch_limit_reached", "the bounded run must report its full capacity");
 
   const anomaly = fakeScheduler({ enabled: true, candidateCount: 1, blockingAfter: 1 });
   await assert.rejects(

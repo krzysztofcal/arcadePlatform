@@ -156,6 +156,64 @@ function aggregateBatchPayload(batch) {
   return payload;
 }
 
+function aggregateAutomaticBatchPayload(batch) {
+  return {
+    batch_id: batch.batchId ?? null,
+    state: batch.state ?? null,
+    object_path: batch.objectPath || null,
+    transactions: batch.transactions ?? null,
+    entries: batch.entries ?? null,
+    compressed_sha256: batch.compressedSha256 || null,
+    recovery_archive_sha256: batch.recoveryArchiveSha256 || null,
+    recovery_manifest_sha256: batch.recoveryManifestSha256 || null,
+    recovery_archive_path: batch.recoveryArchivePath || null,
+    recovery_manifest_path: batch.recoveryManifestPath || null,
+    proof: batch.proof || null,
+    dry_run: batch.dryRun || null,
+    dry_run_attempts: batch.dryRunAttempts ?? null,
+    dry_run_retry_count: batch.dryRunRetryCount ?? null,
+    dry_run_sqlstates: Array.isArray(batch.dryRunSqlstates)
+      ? [...batch.dryRunSqlstates]
+      : [],
+    archive_storage_modified: batch.archiveStorageModified ?? null,
+    recovery_storage_modified: batch.recoveryStorageModified ?? null,
+    storage_modified: batch.storageModified ?? null,
+    prune_receipt: batch.pruneReceipt || null,
+    cleanup_receipt: batch.cleanupReceipt || null,
+    destructive_go_batch_id: batch.destructiveGoBatchId ?? null,
+    execute_state: batch.executeState || null,
+    execute_confirmed: batch.executeConfirmed === true,
+    db_mutation_confirmed: batch.dbMutationConfirmed === true,
+    retry_state: batch.retryState || batch.retry || null,
+  };
+}
+
+function aggregateAutomaticSuccessPayload(result) {
+  const processed = Array.isArray(result.processed) ? result.processed : [];
+  const policy = result.policy
+    ? {
+      enabled: result.policy.enabled === true || result.policy.enabled === "t",
+      canary_batch_id: result.policy.canaryBatchId ?? result.policy.canary_batch_id ?? null,
+      activated_at: result.policy.activatedAt ?? result.policy.activated_at ?? null,
+    }
+    : null;
+  return {
+    event: "chips_ledger_stage_automation",
+    target: "stage",
+    project_ref: STAGE_PROJECT_REF,
+    source_policy_id: result.sourcePolicyId || BOT_ONLY_RETENTION_POLICY_ID,
+    state: result.state,
+    mode: "automatic",
+    deployed_commit_sha: result.deployedCommitSha || null,
+    stage_system_identifier: result.stageSystemIdentifier || null,
+    policy,
+    bounded_batch_limit: result.boundedBatchLimit ?? BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN,
+    processed_batch_count: processed.length,
+    processed_batches: processed.map(aggregateAutomaticBatchPayload),
+    stop_reason: result.stopReason || result.reason || null,
+  };
+}
+
 export function aggregatePayload(result) {
   const base = {
     event: "chips_ledger_stage_automation",
@@ -181,6 +239,7 @@ export function aggregatePayload(result) {
       reason: redactedError(result.reason),
     };
   }
+  if (result.mode === "automatic") return aggregateAutomaticSuccessPayload(result);
   return {
     ...base,
     mode: result.mode || null,
@@ -228,7 +287,7 @@ export function aggregatePayload(result) {
   };
 }
 
-function writeAggregateSummary(result) {
+export function writeAggregateSummary(result) {
   const safe = stringifyJson(aggregatePayload(result));
   process.stdout.write(`${safe}\n`);
   const summaryPath = text(process.env.GITHUB_STEP_SUMMARY);
@@ -2363,6 +2422,9 @@ export async function runAutomaticBotOnlyStageAutomation({
         state: "no-op",
         mode: "automatic",
         sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
+        boundedBatchLimit: BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN,
+        processed: [],
+        stopReason: "advisory_lock_busy",
         reason: "advisory_lock_busy",
       };
     } else {
@@ -2386,6 +2448,14 @@ export async function runAutomaticBotOnlyStageAutomation({
           sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
           projectRef: STAGE_PROJECT_REF,
           stageSystemIdentifier: identity,
+          policy: {
+            enabled: false,
+            canaryBatchId: policyRows[0].canary_batch_id,
+            activatedAt: policyRows[0].activated_at,
+          },
+          boundedBatchLimit: BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN,
+          processed: [],
+          stopReason: "automatic_policy_disabled",
           reason: "automatic_policy_disabled",
         };
       } else {
@@ -2830,6 +2900,10 @@ export async function runAutomaticBotOnlyStageAutomation({
                 archiveStorageModified: cycle.archiveStorageModified,
                 recoveryStorageModified: automaticRecoveryStorageModified(cycle.durable),
               })),
+              executeState: cycle.executed?.state || null,
+              executeConfirmed: cycle.executed?.state === "cleaned",
+              dbMutationConfirmed: cycle.executed?.state === "cleaned",
+              retryState: cycle.retry?.state || null,
               retry: cycle.retry?.state || null,
             });
             currentBatch = null;
@@ -2907,10 +2981,15 @@ export async function runAutomaticBotOnlyStageAutomation({
               archiveStorageModified: cycle.archiveStorageModified,
               recoveryStorageModified: automaticRecoveryStorageModified(cycle.durable),
             })),
+            executeState: cycle.executed?.state || null,
+            executeConfirmed: cycle.executed?.state === "cleaned",
+            dbMutationConfirmed: cycle.executed?.state === "cleaned",
+            retryState: cycle.retry?.state || null,
             retry: cycle.retry?.state || null,
           });
           currentBatch = null;
         }
+        if (stopReason === null) stopReason = "batch_limit_reached";
         result = {
           state: "completed",
           mode: "automatic",
