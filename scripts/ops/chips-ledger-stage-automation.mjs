@@ -43,10 +43,10 @@ export const STAGE_MAX_BATCH_SIZE = 5000;
 export const STAGE_RETENTION_DAYS = 30;
 // Schema-v2 keeps one complete table per archive batch so the lifecycle
 // receipt can prove and mark that table atomically.  The scheduler therefore
-// needs a bounded multi-batch run: 8 batches every 15 minutes gives a
-// theoretical 768-table/day ceiling while keeping a single job within its
+// needs a bounded multi-batch run: 6 batches every 15 minutes gives a
+// theoretical 576-table/day ceiling while keeping a single job within its
 // timeout margin.
-export const BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN = 8;
+export const BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN = 6;
 export const BOT_ONLY_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS = 3;
 export const STAGE_AUTOMATION_LOCK_KEY = `chips-ledger-stage-automation-v1:${STAGE_PROJECT_REF}`;
 export const BOT_ONLY_BATCH_15_RECOVERY_REPAIR = Object.freeze({

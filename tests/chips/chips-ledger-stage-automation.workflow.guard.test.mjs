@@ -21,7 +21,16 @@ assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-summary-diagnost
 assert.equal((workflow.match(/- cron:/g) || []).length, 2);
 assert.match(workflow, /- cron: "17 2 \* \* \*"/);
 assert.match(workflow, /- cron: "\*\/15 \* \* \* \*"/);
-assert.match(workflow, /cancel-in-progress:\s*false/);
+assert.equal((workflow.match(/^\s+- cron: "\*\/15 \* \* \* \*"$/gm) || []).length, 1);
+const concurrencyBlock = workflow.match(
+  /^concurrency:\n(?:  [^\n]+\n)+(?=\n\S)/m,
+)[0];
+assert.equal((workflow.match(/^concurrency:$/gm) || []).length, 1);
+assert.equal((concurrencyBlock.match(/^  group:/gm) || []).length, 1);
+assert.match(concurrencyBlock, /^  group: chips-ledger-stage-automation$/m);
+assert.match(concurrencyBlock, /^  cancel-in-progress: false$/m);
+assert.match(concurrencyBlock, /^  queue: max$/m);
+assert.doesNotMatch(concurrencyBlock, /github\.ref|github\.event|inputs\./);
 assert.match(workflow, /CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1'/);
 assert.match(workflow, /SUPABASE_STAGE_DB_URL: \$\{\{ secrets\.SUPABASE_STAGE_DB_URL \}\}/);
 assert.match(workflow, /SUPABASE_STAGE_URL: \$\{\{ secrets\.SUPABASE_STAGE_URL \}\}/);
@@ -207,6 +216,13 @@ assert.match(workflow, /github\.event_name == 'schedule' && github\.event\.sched
 assert.match(workflow, /inputs\.mode == 'bot-only-7d-automatic'/);
 assert.match(workflow, /CHIPS_LEDGER_BOT_ONLY_AUTOMATIC: "1"/);
 assert.match(workflow, /node scripts\/ops\/chips-ledger-legacy-stage-allowlist-orchestrator\.mjs/);
+const automaticRun = workflow.match(
+  /- name: Run activated bot-only 7-day Stage automation[\s\S]*?(?=\n\s+- name:|\s*$)/,
+)[0];
+assert.match(automaticRun, /github\.event_name == 'schedule' && github\.event\.schedule == '\*\/15 \* \* \* \*'/);
+assert.match(automaticRun, /github\.event_name == 'workflow_dispatch' && inputs\.mode == 'bot-only-7d-automatic'/);
+assert.match(automaticRun, /node scripts\/ops\/chips-ledger-stage-automation\.mjs --policy bot-only-7d --automatic/);
+assert.doesNotMatch(automaticRun, /legacy-stage-allowlist|SUPABASE_PROD_|PRODUCTION|--target\s+prod/i);
 
 assert.match(executeRunner, /chips_authorize_legacy_stage_allowlist_batch\(13, 'GO 13', '611ab69ba8ee160a4957f8fe9514c919b9f4129bc1ea7842778b04d28ea6ca05'\)/);
 assert.match(executeRunner, /readOnlyBatch13Preflight/);

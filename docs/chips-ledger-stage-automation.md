@@ -1,21 +1,25 @@
 # Stage-only chips-ledger automation
 
 This workflow is related to closed Issue #874 and is intentionally unavailable
-for Production. The orchestrator has no target argument: it hardcodes the
+for Production. The legacy Stage allowlist orchestrator remains separate and
+untouched. The orchestrator has no target argument: it hardcodes the
 canonical Stage project `krydukthwdvccggbyjfw` and PostgreSQL system identifier
 `7656985631720456337`. The workflow passes only Stage credentials.
 
 ## Policy
 
-- `CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED=1` is required; the variable is absent
-  or disabled by default at merge.
+- Stage policy `stage-ledger-bot-only-retention-7d-v1` is active. Canary batch
+  15 completed and was used to activate the policy.
+- `CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED=1` is set. After this change is merged,
+  the workflow from the default branch automatically starts the 7-day cleanup
+  every 15 minutes. This is intentional: the merge is the operational GO for
+  the scheduler, not a request for another activation step.
 - The existing 30-day Stage maintenance runs once per day with a strict
   30-day cutoff.
-- After the separate bot-only policy is activated by its exact database GO, the
-  7-day cleanup schedule runs every 15 minutes and processes at most 8
+- The 7-day cleanup schedule runs every 15 minutes and processes at most 6
   complete-table batches per invocation. Schema-v2 intentionally keeps one
   table per batch for an atomic lifecycle receipt; the bounded schedule
-  provides a theoretical 768-table/day ceiling while preserving job timeout
+  provides a theoretical 576-table/day ceiling while preserving job timeout
   margin.
 - The first bot-only canary is an explicit prepare/authorize/execute sequence:
   dispatch `bot-only-7d-prepare-only`, record the exact committed `batch_id`,
@@ -64,8 +68,8 @@ the next candidate during execute:
 
 The canary path is distinct from the activated automatic policy. The 15-minute
 schedule is the only automatic 7-day trigger; the existing 30-day policy keeps
-its once-daily schedule. Automatic cleanup remains bounded at 8 batches per
-run, which is at most 768 complete tables per day.
+its once-daily schedule. Automatic cleanup remains bounded at 6 batches per
+run, which is at most 576 complete tables per day.
 
 ## Recovery durability
 
@@ -178,8 +182,11 @@ private download and byte/SHA verification.
 ## Resume and locking
 
 GitHub Actions concurrency is complemented by a target-specific PostgreSQL
-session advisory lock held for the entire cycle. A busy lock is a no-op; a lost
-lock session aborts the cycle. Pending, partial, mismatched or otherwise
+session advisory lock held for the entire cycle. All modes share the
+`chips-ledger-stage-automation` concurrency group with
+`cancel-in-progress: false` and `queue: max`, so scheduled and manual work
+remains serialized without replacing an older pending run. A busy lock is a
+no-op; a lost lock session aborts the cycle. Pending, partial, mismatched or otherwise
 ambiguous own manifests stop the run and are reported in the aggregate Job
 Summary. A committed manifest with no proof can resume only through the normal
 proof/dry-run path. A proven unpruned, uncleaned manifest with no GO may create

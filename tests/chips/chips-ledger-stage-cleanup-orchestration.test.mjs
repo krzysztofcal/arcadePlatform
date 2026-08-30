@@ -1637,8 +1637,8 @@ function staticWorkflowContracts() {
   assert.match(orchestratorSource, /LEGACY_STAGE_ALLOWLIST_ORCHESTRATOR_MAX_BATCHES_PER_RUN/);
   assert.match(orchestratorSource, /assertLegacyBatchRows/);
   assert.match(orchestratorSource, /process\.argv\.slice\(2\)\.length !== 0/);
-  assert.equal(BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN, 8);
-  assert.match(automationSource, /BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN = 8/);
+  assert.equal(BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN, 6);
+  assert.match(automationSource, /BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN = 6/);
   assert.match(workflow, /- cron: "\*\/15 \* \* \* \*"/);
   assert.match(automationSource, /automatic_policy_disabled/);
   assert.match(automationSource, /automatic bot-only Stage retention requires an active fence and enforcement/);

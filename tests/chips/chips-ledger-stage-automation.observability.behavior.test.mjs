@@ -395,7 +395,7 @@ const automaticSuccess = aggregatePayload({
     canaryBatchId: "canary-a",
     activatedAt: "2026-08-25T00:00:00Z",
   },
-  boundedBatchLimit: 8,
+  boundedBatchLimit: 6,
   processed: [automaticProcessedBatch, { ...automaticProcessedBatch, batchId: "batch-b" }],
   stopReason: "no_eligible_bot_only_table",
 });
@@ -423,7 +423,7 @@ assert.deepEqual(automaticSuccess.policy, {
   canary_batch_id: "canary-a",
   activated_at: "2026-08-25T00:00:00Z",
 });
-assert.equal(automaticSuccess.bounded_batch_limit, 8);
+assert.equal(automaticSuccess.bounded_batch_limit, 6);
 assert.equal(automaticSuccess.processed_batch_count, 2);
 assert.equal(automaticSuccess.stop_reason, "no_eligible_bot_only_table");
 assert.equal(Object.hasOwn(automaticSuccess, "current_batch"), false);
