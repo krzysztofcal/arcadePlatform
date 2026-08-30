@@ -1,8 +1,11 @@
 # Stage-only chips-ledger automation
 
 This workflow is related to closed Issue #874 and is intentionally unavailable
-for Production. The legacy Stage allowlist orchestrator remains separate and
-untouched. The orchestrator has no target argument: it hardcodes the
+for Production. The legacy Stage allowlist tooling is part of this PR but
+remains a separate, manual-only mode. The automatic bot-only 7-day cron never
+invokes it, and it was not operationally run during the bot-only rollout.
+Production has no scheduler path, and no Production operation was performed.
+The orchestrator has no target argument: it hardcodes the
 canonical Stage project `krydukthwdvccggbyjfw` and PostgreSQL system identifier
 `7656985631720456337`. The workflow passes only Stage credentials.
 
