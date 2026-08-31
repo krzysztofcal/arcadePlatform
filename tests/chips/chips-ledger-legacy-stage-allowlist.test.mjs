@@ -40,11 +40,15 @@ import { storeArchive, verifyArchiveBytes, verifyLocalArchive } from "../../scri
 const migrationPath = "supabase/migrations/20260824120000_chips_ledger_legacy_stage_allowlist.sql";
 const freezeMigrationPath = "supabase/migrations/20260824140000_chips_ledger_legacy_stage_allowlist_freeze_guard.sql";
 const cleanupMigrationPath = "supabase/migrations/20260825100000_chips_ledger_legacy_stage_allowlist_cleanup_hardening.sql";
+const lifecycleCompletionMigrationPath = "supabase/migrations/20260831120000_chips_ledger_legacy_stage_lifecycle_completion.sql";
+const normalRetentionHardeningMigrationPath = "supabase/migrations/20260819220000_chips_ledger_bot_only_retention_hardening.sql";
 const workflowPath = ".github/workflows/chips-ledger-stage-legacy-allowlist.yml";
 const freezeWorkflowPath = ".github/workflows/chips-ledger-stage-legacy-allowlist-freeze.yml";
 const migration = fs.readFileSync(migrationPath, "utf8");
 const freezeMigration = fs.readFileSync(freezeMigrationPath, "utf8");
 const cleanupMigration = fs.readFileSync(cleanupMigrationPath, "utf8");
+const lifecycleCompletionMigration = fs.readFileSync(lifecycleCompletionMigrationPath, "utf8");
+const normalRetentionHardeningMigration = fs.readFileSync(normalRetentionHardeningMigrationPath, "utf8");
 const workflow = fs.readFileSync(workflowPath, "utf8");
 const freezeWorkflow = fs.readFileSync(freezeWorkflowPath, "utf8");
 
@@ -1298,6 +1302,43 @@ assert.match(freezeMigration, /611ab69ba8ee160a4957f8fe9514c919b9f4129bc1ea78427
 assert.match(freezeMigration, /P8936/);
 assert.match(freezeMigration, /chips_ledger_archive_batches_legacy_master_allowlist_sha256_check/);
 assert.match(freezeMigration, /chips_legacy_stage_allowlist_proofs_master_allowlist_sha256_check/);
+
+assert.match(lifecycleCompletionMigration, /create or replace function public\.chips_guard_poker_table_mutations/);
+assert.match(lifecycleCompletionMigration, /source_policy_id = 'legacy_stage_allowlist_v1'/);
+assert.match(lifecycleCompletionMigration, /batch_id = 13/);
+assert.match(lifecycleCompletionMigration, /legacy_batch_number between 2 and 98/);
+assert.match(lifecycleCompletionMigration, /destructive_go_confirmation = 'GO legacy-stage-allowlist-v1 remaining 2-98 '/);
+assert.match(lifecycleCompletionMigration, /chips\.legacy_stage_cleanup/);
+assert.match(lifecycleCompletionMigration, /chips\.bot_only_lifecycle/);
+assert.match(lifecycleCompletionMigration, /chips\.legacy_registry_keys_sha256/);
+assert.match(lifecycleCompletionMigration, /public\.chips_table_fence_is_active\(\)/);
+assert.match(lifecycleCompletionMigration, /chips_lock_table_fence_for_legacy_cleanup/);
+assert.match(lifecycleCompletionMigration, /chips_archive_uuid_ids_sha256\(proofs\.batch_table_ids\)/);
+assert.match(lifecycleCompletionMigration, /create or replace function public\.chips_prune_legacy_stage_allowlist_batch/);
+assert.match(lifecycleCompletionMigration, /state', 'already_pruned'/);
+assert.match(lifecycleCompletionMigration, /if unmarked_table_count > 0/);
+assert.match(lifecycleCompletionMigration, /where tables\.id = any\(p_batch_table_ids\)/);
+assert.match(lifecycleCompletionMigration, /Legacy Stage lifecycle marker verification failed/);
+assert.doesNotMatch(lifecycleCompletionMigration, /delete\s+from\s+public\.poker_tables/i);
+assert.doesNotMatch(lifecycleCompletionMigration, /delete\s+from\s+public\.chips_accounts/i);
+const cleanupReceiptTransitionOffset = lifecycleCompletionMigration.indexOf(
+  "update public.chips_ledger_archive_batches batches\n     set registry_cleaned_at",
+);
+const lifecycleMarkerTransitionOffset = lifecycleCompletionMigration.indexOf(
+  "update public.poker_tables tables\n     set bot_only_retention_complete_at",
+);
+assert.ok(cleanupReceiptTransitionOffset >= 0, "legacy cleanup must persist the registry receipt");
+assert.ok(lifecycleMarkerTransitionOffset > cleanupReceiptTransitionOffset, "legacy lifecycle marker must follow the complete registry receipt");
+for (const normalContract of [
+  "current_setting('chips.bot_only_lifecycle', true)",
+  "source_policy_id = 'stage-ledger-bot-only-retention-7d-v1'",
+  "batches.archive_proof_verified_at is not null",
+  "batches.registry_cleaned_at is not null",
+  "registry_cleaned_keys_sha256 = batches.bot_only_registry_keys_sha256",
+]) {
+  assert.match(normalRetentionHardeningMigration, new RegExp(normalContract.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(lifecycleCompletionMigration, new RegExp(normalContract.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+}
 
 assert.equal(checkedInFrozen.masterManifest.diagnostic_source_run, "32753223679");
 assert.equal(

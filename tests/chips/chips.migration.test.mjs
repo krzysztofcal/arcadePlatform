@@ -1243,7 +1243,7 @@ async function assertLegacyAllowlistCleanupContracts(sql) {
     const rawHash = "b".repeat(64);
     const objectPath = `v1/sha256/${compressedHash}.jsonl.gz`;
     const manifestRows = await tx.unsafe(`insert into public.chips_ledger_archive_batches (
-      object_path, project_ref, format_version, source_policy_id, cutoff,
+      batch_id, object_path, project_ref, format_version, source_policy_id, cutoff,
       cursor_start_created_at, cursor_start_id, cursor_end_created_at, cursor_end_id,
       first_created_at, last_created_at, transaction_count, entry_count, tx_types,
       raw_bytes, compressed_bytes, raw_sha256, compressed_sha256, credits, debits, net_amount,
@@ -1251,8 +1251,8 @@ async function assertLegacyAllowlistCleanupContracts(sql) {
       legacy_master_table_ids, legacy_master_table_count, legacy_batch_number,
       legacy_batch_table_count, legacy_source_run, legacy_query_sha256,
       legacy_stage_system_identifier
-    ) values (
-      $1, 'krydukthwdvccggbyjfw', 2, 'legacy_stage_allowlist_v1', $2::timestamptz,
+    ) overriding system value values (
+      13, $1, 'krydukthwdvccggbyjfw', 2, 'legacy_stage_allowlist_v1', $2::timestamptz,
       $3::timestamptz, $4::uuid, $5::timestamptz, $6::uuid,
       $7::timestamptz, $8::timestamptz, 2, 4, '{"TABLE_BUY_IN":1,"TABLE_CASH_OUT":1}'::jsonb,
       100, 80, $9, $10, 20, 20, 0, 'committed', timezone('utc', now()),
