@@ -24,6 +24,7 @@ import {
   buildLegacyBatchManifest,
   buildLegacyMasterManifest,
   buildLegacyPlan,
+  buildLegacyStageAllowlistRunContract,
   legacyAllowlistQuerySha256,
   loadFrozenLegacyAllowlist,
   readLegacyAllowlist,
@@ -34,7 +35,7 @@ import { runLegacyStageAllowlistFreeze } from "../../scripts/ops/chips-ledger-le
 import { runLegacyStageAllowlistExecute } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-execute.mjs";
 import { LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13 } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist-audit.mjs";
 import { runLegacyStagePrepareOnly } from "../../scripts/ops/chips-ledger-legacy-stage-allowlist.mjs";
-import { buildPruneEvidence } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
+import { buildPruneEvidence, pruneArchive } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
 import { storeArchive, verifyArchiveBytes, verifyLocalArchive } from "../../scripts/ops/chips-ledger-archive-store.mjs";
 
 const migrationPath = "supabase/migrations/20260824120000_chips_ledger_legacy_stage_allowlist.sql";
@@ -447,6 +448,10 @@ function makeLegacyRunnerAdapters() {
   let proofCalls = 0;
   let planUploadCalls = 0;
   let executeCleanupCalls = 0;
+  let successfulCleanupCalls = 0;
+  let cleanupErrorSequence = [];
+  const cleanupOrchestrations = [];
+  let manifestReads = 0;
 
   async function executeSql(query) {
     if (/^\s*set transaction isolation level repeatable read, read only;/i.test(query)) return [];
@@ -525,6 +530,7 @@ function makeLegacyRunnerAdapters() {
   const pruneStore = {
     async getIdentity() { return "7656985631720456337"; },
     async getManifest() {
+      manifestReads += 1;
       return storedManifestRow
         ? {
           ...storedManifestRow,
@@ -546,10 +552,17 @@ function makeLegacyRunnerAdapters() {
       };
       return { state: "proof_registered" };
     },
-    async cleanupLegacyStageAllowlist(_objectPath, evidence, execute, approvedBatchId) {
+    async cleanupLegacyStageAllowlist(_objectPath, evidence, execute, approvedBatchId, orchestration) {
       if (!execute) return { state: "ready" };
       executeCleanupCalls += 1;
-      assert.equal(approvedBatchId, "9001");
+      cleanupOrchestrations.push(orchestration);
+      if (approvedBatchId != null) assert.equal(approvedBatchId, "9001");
+      const injectedError = cleanupErrorSequence.shift();
+      if (injectedError) {
+        const error = new Error(injectedError.message || `simulated cleanup failure (${injectedError.code})`);
+        error.code = injectedError.code;
+        throw error;
+      }
       storedManifestRow = {
         ...storedManifestRow,
         pruned_at: "2026-08-24T00:02:00.000000Z",
@@ -561,8 +574,9 @@ function makeLegacyRunnerAdapters() {
         registry_cleaned_key_count: String(evidence.registryKeys.length),
         registry_cleaned_keys_sha256: evidence.registryKeysSha256,
       };
+      successfulCleanupCalls += 1;
       return {
-        state: executeCleanupCalls === 1 ? "pruned" : "already_pruned",
+        state: successfulCleanupCalls === 1 ? "pruned" : "already_pruned",
         registry_keys: evidence.registryKeys.length,
         registry_keys_sha256: evidence.registryKeysSha256,
         remaining_registry_count: 0,
@@ -598,11 +612,14 @@ function makeLegacyRunnerAdapters() {
     get proofCalls() { return proofCalls; },
     get planUploadCalls() { return planUploadCalls; },
     get executeCleanupCalls() { return executeCleanupCalls; },
+    get cleanupOrchestrations() { return [...cleanupOrchestrations]; },
+    get manifestReads() { return manifestReads; },
     incrementPlanUploadCalls() { planUploadCalls += 1; },
+    setCleanupErrorSequence(errors) { cleanupErrorSequence = [...errors]; },
   };
 }
 
-async function runRealLegacyRunnerContract(mutateManifest = null) {
+async function runRealLegacyRunnerContract(mutateManifest = null, orchestration = null) {
   const adapters = makeLegacyRunnerAdapters();
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-stage-runner-contract-"));
   let exportedManifest = null;
@@ -613,6 +630,7 @@ async function runRealLegacyRunnerContract(mutateManifest = null) {
     result = await runLegacyStagePrepareOnly({
       env: runnerEnv,
       cwd: process.cwd(),
+      orchestration,
       deps: {
         sql: adapters.sql,
         tempRoot,
@@ -680,6 +698,112 @@ try {
   );
 } finally {
   fs.rmSync(validRunnerContract.tempRoot, { recursive: true, force: true });
+}
+
+const orchestratedLegacyTestRun = {
+  runId: "41",
+  planSha256: buildLegacyStageAllowlistRunContract(master).planSha256,
+};
+
+async function runLegacyExecutePruneContract(contract, recoveryDir) {
+  let archiveDownloads = 0;
+  const result = await pruneArchive({
+    argv: [
+      "--target", "stage",
+      "--object-path", contract.result.objectPath,
+      "--confirm-sha", contract.result.compressedSha256,
+      "--execute", "--recovery-dir", recoveryDir,
+    ],
+    env: runnerEnv,
+    cwd: process.cwd(),
+    deps: {
+      pruneStore: contract.adapters.pruneStore,
+      storageTarget: runnerStorageTarget,
+      legacyStageAllowlistPlan: plan,
+      legacyStageAllowlistOrchestration: orchestratedLegacyTestRun,
+      verifyBucket: async () => {},
+      downloadArchive: async (_target, objectPath) => {
+        archiveDownloads += 1;
+        return { bytes: contract.adapters.storageObjects.get(objectPath), downloadMs: 1 };
+      },
+      waitForExecuteRetry: async () => {},
+      emit: false,
+    },
+  });
+  return { result, archiveDownloads };
+}
+
+const retryableLegacyExecuteContract = await runRealLegacyRunnerContract(null, orchestratedLegacyTestRun);
+try {
+  assert.equal(retryableLegacyExecuteContract.error, null);
+  const initialCleanupCalls = retryableLegacyExecuteContract.adapters.executeCleanupCalls;
+  const initialManifestReads = retryableLegacyExecuteContract.adapters.manifestReads;
+  retryableLegacyExecuteContract.adapters.setCleanupErrorSequence([{ code: "40001" }]);
+  const retryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-stage-execute-retry-contract-"));
+  try {
+    const { result, archiveDownloads } = await runLegacyExecutePruneContract(
+      retryableLegacyExecuteContract,
+      path.join(retryRoot, "recovery"),
+    );
+    assert.equal(result.state, "pruned");
+    assert.equal(result.executeAttempts, 2);
+    assert.equal(result.executeRetryCount, 1);
+    assert.deepEqual(result.executeSqlstates, ["40001"]);
+    assert.equal(retryableLegacyExecuteContract.adapters.executeCleanupCalls, initialCleanupCalls + 2);
+    assert.equal(retryableLegacyExecuteContract.adapters.manifestReads >= initialManifestReads + 3, true);
+    assert.equal(archiveDownloads, 3, "legacy retry must revalidate the committed archive before the second SQL attempt");
+    assert.deepEqual(
+      retryableLegacyExecuteContract.adapters.cleanupOrchestrations,
+      [orchestratedLegacyTestRun, orchestratedLegacyTestRun],
+    );
+  } finally {
+    fs.rmSync(retryRoot, { recursive: true, force: true });
+  }
+} finally {
+  fs.rmSync(retryableLegacyExecuteContract.tempRoot, { recursive: true, force: true });
+}
+
+const nonRetryableLegacyExecuteContract = await runRealLegacyRunnerContract(null, orchestratedLegacyTestRun);
+try {
+  assert.equal(nonRetryableLegacyExecuteContract.error, null);
+  const initialCleanupCalls = nonRetryableLegacyExecuteContract.adapters.executeCleanupCalls;
+  nonRetryableLegacyExecuteContract.adapters.setCleanupErrorSequence([{ code: "23505" }]);
+  const nonRetryableRoot = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-stage-execute-non-retryable-contract-"));
+  let archiveDownloads = 0;
+  try {
+    await assert.rejects(
+      () => pruneArchive({
+        argv: [
+          "--target", "stage",
+          "--object-path", nonRetryableLegacyExecuteContract.result.objectPath,
+          "--confirm-sha", nonRetryableLegacyExecuteContract.result.compressedSha256,
+          "--execute", "--recovery-dir", path.join(nonRetryableRoot, "recovery"),
+        ],
+        env: runnerEnv,
+        cwd: process.cwd(),
+        deps: {
+          pruneStore: nonRetryableLegacyExecuteContract.adapters.pruneStore,
+          storageTarget: runnerStorageTarget,
+          legacyStageAllowlistPlan: plan,
+          legacyStageAllowlistOrchestration: orchestratedLegacyTestRun,
+          verifyBucket: async () => {},
+          downloadArchive: async (_target, objectPath) => {
+            archiveDownloads += 1;
+            return { bytes: nonRetryableLegacyExecuteContract.adapters.storageObjects.get(objectPath), downloadMs: 1 };
+          },
+          waitForExecuteRetry: async () => { throw new Error("non-retryable error must not wait"); },
+          emit: false,
+        },
+      }),
+      (error) => error?.code === "23505" && error.executeAttempts === 1,
+    );
+    assert.equal(nonRetryableLegacyExecuteContract.adapters.executeCleanupCalls, initialCleanupCalls + 1);
+    assert.equal(archiveDownloads, 1, "non-retryable legacy cleanup must fail before retry revalidation");
+  } finally {
+    fs.rmSync(nonRetryableRoot, { recursive: true, force: true });
+  }
+} finally {
+  fs.rmSync(nonRetryableLegacyExecuteContract.tempRoot, { recursive: true, force: true });
 }
 
 const executeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-stage-execute-contract-"));
