@@ -53,6 +53,10 @@ const legacyLifecycleCompletionMigration = fs.readFileSync(
   "supabase/migrations/20260831120000_chips_ledger_legacy_stage_lifecycle_completion.sql",
   "utf8",
 );
+const legacyLifecycleStageAssertionMigration = fs.readFileSync(
+  "supabase/migrations/20260831130000_chips_ledger_legacy_stage_lifecycle_stage_assertion.sql",
+  "utf8",
+);
 
 const ENV = Object.freeze({
   SUPABASE_STAGE_DB_URL: "postgresql://postgres.krydukthwdvccggbyjfw:password@aws-0.pooler.supabase.com:5432/postgres",
@@ -1757,6 +1761,16 @@ function staticWorkflowContracts() {
   assert.match(legacyLifecycleCompletionMigration, /source_policy_id = 'legacy_stage_allowlist_v1'/);
   assert.match(legacyLifecycleCompletionMigration, /bot_only_retention_complete_at/);
   assert.match(legacyLifecycleCompletionMigration, /state', 'already_pruned'/);
+  assert.match(legacyLifecycleStageAssertionMigration, /perform public\.chips_assert_archive_prune_stage\(\);/);
+  const repairAssertionOffset = legacyLifecycleStageAssertionMigration.indexOf(
+    "perform public.chips_assert_archive_prune_stage();",
+  );
+  const repairMarkerUpdateOffset = legacyLifecycleStageAssertionMigration.indexOf(
+    "update public.poker_tables tables",
+    repairAssertionOffset,
+  );
+  assert.ok(repairAssertionOffset >= 0, "legacy marker repair must assert the physical Stage identity");
+  assert.ok(repairMarkerUpdateOffset > repairAssertionOffset, "physical Stage assertion must precede the marker UPDATE");
 }
 
 staticOrchestrationContract();
@@ -2641,6 +2655,18 @@ async function disposablePostgresContract() {
           [tableId],
         );
       }
+      await tx.unsafe("savepoint legacy_stage_identity_repair;");
+      await tx.unsafe(gateRows[0].stage_definition);
+      let nonCanonicalRepairError = null;
+      try {
+        await legacyPrune(tx, legacyFixture);
+      } catch (error) {
+        nonCanonicalRepairError = error;
+      }
+      await tx.unsafe("rollback to savepoint legacy_stage_identity_repair;");
+      await tx.unsafe("release savepoint legacy_stage_identity_repair;");
+      assert.match(nonCanonicalRepairError?.message || "", /canonical database identity/i);
+      assert.equal(Number((await legacyState(tx, legacyFixture)).marked_tables), 0);
       const legacyRepair = await legacyPrune(tx, legacyFixture);
       assert.equal(legacyRepair.state, "already_pruned");
       assert.equal(Number((await legacyState(tx, legacyFixture)).marked_tables), 10);
