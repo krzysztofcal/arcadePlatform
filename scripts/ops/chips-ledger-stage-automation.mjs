@@ -1730,32 +1730,31 @@ export async function executeVerifiedCycle({
       ...storageDeps,
       beforeExecuteRetry: async ({ row: retryRow }) => {
         if (!lockSession) fail("automatic cleanup retry advisory lock session is unavailable");
-        await assertAdvisoryLock(sql, lockSession);
-        let refreshedRow = await refreshPolicyRow(
-          pruneStore,
-          retryRow?.object_path || row.object_path,
-          BOT_ONLY_RETENTION_POLICY_ID,
-        );
-        const batchId = text(refreshedRow.batch_id);
-        assertBotOnlyExecuteBatch(refreshedRow, batchId, identity);
-        // Re-run the complete read-only preflight so the retry receives a new
-        // manifest/evidence snapshot and a fresh SERIALIZABLE DB attempt.  It
-        // never exports, registers proof, or writes Storage.
-        const refreshedDry = await runPruneStep({
-          row: refreshedRow,
-          mode: "dry-run",
+        // Re-run the complete read-only preflight through the same bounded
+        // retry policy as the initial automatic dry-run.  Each attempt checks
+        // the lock, refreshes the manifest, validates the archive/evidence,
+        // and opens a fresh SERIALIZABLE DB transaction.  It never exports,
+        // registers proof, or writes Storage.  These attempts intentionally
+        // remain separate from execute retry observability.
+        const refreshedDryRun = await runAutomaticDryRunWithRetry({
+          row: retryRow || row,
+          identity,
           env,
           cwd: tempRoot,
           sql,
+          lockSession,
           pruneStore,
           storageTarget,
           verifyBucket,
           storageDeps,
         });
+        let refreshedRow = refreshedDryRun.row;
+        const refreshedDry = refreshedDryRun.dry;
+        const batchId = text(refreshedRow.batch_id);
+        assertBotOnlyExecuteBatch(refreshedRow, batchId, identity);
         if (refreshedDry.state !== "ready" && refreshedDry.state !== "already_cleaned") {
           fail(`automatic bot-only batch ${batchId} retry preflight did not become ready: ${refreshedDry.state}`);
         }
-        refreshedRow = refreshedDry.row || refreshedRow;
         const refreshedEvidence = refreshedDry.evidence;
         assertBotOnlyExecuteBatch(refreshedRow, batchId, identity);
         assertAutomaticBotOnlyDryRunArchive(refreshedRow, refreshedDry, batchId);
