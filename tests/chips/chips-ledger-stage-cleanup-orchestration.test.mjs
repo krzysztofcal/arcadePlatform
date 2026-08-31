@@ -33,7 +33,7 @@ import {
   buildRecoveryManifest,
   createPruneStore,
 } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
-import { verifyLocalArchive } from "../../scripts/ops/chips-ledger-archive-store.mjs";
+import { ARCHIVE_BUCKET, verifyLocalArchive } from "../../scripts/ops/chips-ledger-archive-store.mjs";
 
 const root = process.cwd();
 const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-automation.yml", "utf8");
@@ -2004,6 +2004,367 @@ async function legacyOrchestratorPrepareExportContract() {
   }
 }
 
+async function legacyOrchestratorBatchTempIsolationContract() {
+  const frozen = loadFrozenLegacyAllowlist({ cwd: root });
+  const contract = buildLegacyStageAllowlistRunContract(frozen.masterManifest);
+  const runId = "1";
+  const tempRoot = fs.mkdtempSync("/tmp/legacy-orchestrator-batch-isolation-");
+  const manifests = new Map();
+  const candidates = new Map();
+  const storedManifests = new Map();
+  const archiveBytesByObjectPath = new Map();
+  const durableObjects = new Map();
+  const planEvidence = new Map();
+  const prepareDirectories = new Map();
+  const dryRunCounts = new Map();
+  const pruneCalls = [];
+  const uuidFor = (number) => `00000000-0000-4000-8000-${String(number).padStart(12, "0")}`;
+  const batch13 = {
+    object_path: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.objectPath,
+    batch_id: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.batchId,
+    status: "committed",
+    source_policy_id: LEGACY_STAGE_ALLOWLIST_POLICY_ID,
+    legacy_allowlist_sha256: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.masterAllowlistSha256,
+    legacy_batch_number: "1",
+    legacy_batch_table_count: "10",
+    archive_proof_verified_at: "2026-08-18T00:00:00Z",
+    pruned_at: "2026-08-18T00:00:01Z",
+    registry_cleaned_at: "2026-08-18T00:00:02Z",
+    pruned_transaction_count: "60",
+    pruned_entry_count: "120",
+    registry_cleaned_key_count: "60",
+    pruned_transaction_ids_sha256: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.txIdsSha256,
+    pruned_entry_ids_sha256: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.entryIdsSha256,
+    registry_cleaned_keys_sha256: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.registryKeysSha256,
+  };
+
+  const makeCandidate = (batchNumber, parameters) => {
+    const tableId = parameters[1][0];
+    const transactionId = uuidFor(100 + batchNumber);
+    const systemAccountId = uuidFor(200 + batchNumber);
+    const escrowAccountId = uuidFor(300 + batchNumber);
+    const createdAt = `2026-07-${String(batchNumber).padStart(2, "0")}T00:00:00.000000Z`;
+    const candidate = {
+      id: transactionId,
+      sequence: "1",
+      tx_type: "TABLE_BUY_IN",
+      idempotency_key: `bot-seed-buyin:${tableId}:batch-${batchNumber}`,
+      payload_hash: `${String(batchNumber)}${"a".repeat(63)}`,
+      user_id: null,
+      reference: `BOT_SEED_BUY_IN:${tableId}:1`,
+      description: null,
+      metadata: { tableId },
+      created_by: systemAccountId,
+      created_at: createdAt,
+      table_related: true,
+      table_id: tableId,
+      table_exists: true,
+      table_status: "CLOSED",
+      escrow_account_id: escrowAccountId,
+      escrow_status: "active",
+      escrow_balance: "0",
+      entry_count: "2",
+      has_human_participant: false,
+      bot_only_proof_eligible: false,
+      key_table_id: tableId,
+      key_format_version: 1,
+      key_format: "bot-seed-buyin",
+      table_newest_created_at: createdAt,
+      table_identity_count: "1",
+      table_eligible_count: "1",
+      table_out_of_scope_keys_sha256: "b".repeat(64),
+      legacy_allowlist_sha256: parameters[3],
+      legacy_batch_table_ids_sha256: parameters[4],
+      legacy_source_run: parameters[5],
+      legacy_query_sha256: parameters[6],
+      legacy_stage_system_identifier: parameters[7],
+      legacy_master_table_count: parameters[8],
+      legacy_batch_number: parameters[9],
+      legacy_batch_table_count: parameters[10],
+    };
+    const entries = [
+      {
+        id: "1",
+        transaction_id: transactionId,
+        account_id: systemAccountId,
+        entry_seq: "1",
+        amount: "-100",
+        metadata: {},
+        created_at: createdAt,
+        account_row_id: systemAccountId,
+        account_type: "SYSTEM",
+        account_user_id: null,
+        account_system_key: "TREASURY",
+        account_status: "active",
+        account_label: null,
+      },
+      {
+        id: "2",
+        transaction_id: transactionId,
+        account_id: escrowAccountId,
+        entry_seq: "2",
+        amount: "100",
+        metadata: {},
+        created_at: createdAt,
+        account_row_id: escrowAccountId,
+        account_type: "ESCROW",
+        account_user_id: null,
+        account_system_key: `POKER_TABLE:${tableId}`,
+        account_status: "active",
+        account_label: null,
+      },
+    ];
+    candidates.set(transactionId, { candidate, entries });
+    return candidate;
+  };
+
+  const sql = {
+    typed: (value, type) => ({ value, type }),
+    async begin(callback) {
+      return callback({
+        async unsafe(query, parameters = []) {
+          if (query.includes("set transaction isolation level")) return [];
+          if (query === LEGACY_STAGE_ALLOWLIST_CANDIDATE_SQL) {
+            const batchNumber = Number(parameters[9]);
+            return [makeCandidate(batchNumber, parameters)];
+          }
+          if (query.includes("from public.chips_entries")) {
+            return (parameters[0] || []).flatMap((id) => candidates.get(id)?.entries || []);
+          }
+          if (query.includes("where batch_id = 13")) return [batch13];
+          if (query.includes("from public.chips_legacy_stage_allowlist_runs")) return [{
+            run_id: runId,
+            project_ref: "krydukthwdvccggbyjfw",
+            source_policy_id: LEGACY_STAGE_ALLOWLIST_POLICY_ID,
+            stage_system_identifier: "7656985631720456337",
+            cutoff: "2026-08-17T16:51:28.074Z",
+            master_allowlist_sha256: contract.masterAllowlistSha256,
+            master_manifest_sha256: contract.masterManifestSha256,
+            remaining_table_ids_sha256: contract.remainingTableIdsSha256,
+            remaining_table_count: String(contract.remainingTableCount),
+            first_batch_number: "2",
+            last_batch_number: "98",
+            batch_count: String(contract.batchCount),
+            plan_sha256: contract.planSha256,
+            status: "authorized",
+            destructive_go_at: "2026-08-31T17:51:48.672253Z",
+          }];
+          if (query.includes("from public.chips_ledger_archive_batches")) return [...manifests.values()];
+          throw new Error(`unexpected batch isolation SQL: ${query.slice(0, 100)}`);
+        },
+      });
+    },
+    async unsafe(query) {
+      if (query.includes("pg_try_advisory_lock")) return [{ backend_pid: "9001", acquired: true }];
+      if (query.includes("pg_backend_pid")) return [{ backend_pid: "9001" }];
+      if (query.includes("pg_advisory_unlock")) return [{ unlocked: true }];
+      throw new Error(`unexpected batch isolation top-level SQL: ${query.slice(0, 100)}`);
+    },
+  };
+
+  const evidenceFor = (batchNumber, plan, candidate) => ({
+    transactionIds: [candidate.id],
+    entryIds: ["1", "2"],
+    transactionCount: 1,
+    entryCount: 2,
+    txTypes: { TABLE_BUY_IN: 1 },
+    credits: "100",
+    debits: "100",
+    net: "0",
+    netAmount: "0",
+    transactionIdsSha256: `${batchNumber}${"d".repeat(63)}`,
+    entryIdsSha256: `${batchNumber}${"e".repeat(63)}`,
+    registryKeys: [`legacy-key-${batchNumber}`],
+    registryKeysSha256: `${batchNumber}${"f".repeat(63)}`,
+    legacyTableIds: plan.batchTableIds,
+    legacyMasterTableIds: plan.masterTableIds,
+    legacyMasterTableIdsSha256: plan.allowlistSha256,
+    legacyAllowlistSha256: plan.allowlistSha256,
+    legacyBatchTableIdsSha256: plan.batchTableIdsSha256,
+  });
+
+  try {
+    const result = await runLegacyStageAllowlistOrchestrator({
+      env: { ...ENV },
+      cwd: root,
+      deps: {
+        sql,
+        tempRoot,
+        maxBatchesPerRun: 2,
+        preflight: async () => ({ systemIdentifier: "7656985631720456337", enforcementActive: true }),
+        storageTarget: {
+          target: "stage",
+          projectRef: "krydukthwdvccggbyjfw",
+          baseUrl: ENV.SUPABASE_STAGE_URL,
+          serviceKey: ENV.SUPABASE_STAGE_SERVICE_ROLE_KEY,
+        },
+        verifyBucket: async () => {},
+        ensureBucket: async () => {},
+        uploadPlan: async ({ objectPath }) => ({ objectPath }),
+        exportArchive: async (options) => {
+          const batchNumber = Number(options.deps.legacyStageAllowlistPlan.batchNumber);
+          prepareDirectories.set(batchNumber, options.cwd);
+          const exported = await runExport(options);
+          return exported;
+        },
+        pruneStore: { getManifest: async (objectPath) => manifests.get(objectPath) || null },
+        storeArchive: async ({ argv, cwd, deps: storeDeps }) => {
+          const batchNumber = Number(storeDeps.legacyStageAllowlistPlan.batchNumber);
+          const artifactPath = argv[argv.indexOf("--artifact") + 1];
+          const manifestPath = argv[argv.indexOf("--manifest") + 1];
+          verifyLocalArchive({
+            artifactPath,
+            manifestPath,
+            target: { target: "stage" },
+            expectedLegacyStageAllowlistEvidence: storeDeps.legacyStageAllowlistPlan.archiveManifest,
+            requireLegacyStageAllowlistPlan: true,
+          });
+          const localManifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+          const compressedSha256 = localManifest.sha256.compressed_artifact;
+          const candidate = [...candidates.values()].find(
+            ({ candidate: value }) => Number(value.legacy_batch_number) === batchNumber,
+          ).candidate;
+          const evidence = evidenceFor(batchNumber, storeDeps.legacyStageAllowlistPlan, candidate);
+          const objectPath = `v1/sha256/${compressedSha256}.jsonl.gz`;
+          archiveBytesByObjectPath.set(objectPath, fs.readFileSync(artifactPath));
+          const row = {
+            object_path: objectPath,
+            batch_id: String(70 + batchNumber),
+            project_ref: "krydukthwdvccggbyjfw",
+            format_version: "2",
+            cutoff: storeDeps.legacyStageAllowlistPlan.cutoff,
+            cursor_start_created_at: null,
+            cursor_start_id: null,
+            cursor_end_created_at: candidate.created_at,
+            cursor_end_id: candidate.id,
+            first_created_at: candidate.created_at,
+            last_created_at: candidate.created_at,
+            transaction_count: "1",
+            entry_count: "2",
+            tx_types: { TABLE_BUY_IN: 1 },
+            raw_bytes: String(localManifest.bytes.raw),
+            compressed_bytes: String(localManifest.bytes.compressed),
+            raw_sha256: localManifest.sha256.raw_jsonl,
+            compressed_sha256: compressedSha256,
+            credits: "100",
+            debits: "100",
+            net_amount: "0",
+            status: "committed",
+            committed_at: "2026-08-31T00:00:00Z",
+            source_policy_id: LEGACY_STAGE_ALLOWLIST_POLICY_ID,
+            legacy_allowlist_sha256: storeDeps.legacyStageAllowlistPlan.allowlistSha256,
+            legacy_batch_table_ids_sha256: storeDeps.legacyStageAllowlistPlan.batchTableIdsSha256,
+            legacy_master_table_ids: storeDeps.legacyStageAllowlistPlan.masterTableIds,
+            legacy_master_table_count: String(storeDeps.legacyStageAllowlistPlan.masterTableCount),
+            legacy_batch_number: String(batchNumber),
+            legacy_batch_table_count: String(storeDeps.legacyStageAllowlistPlan.batchTableCount),
+            legacy_source_run: storeDeps.legacyStageAllowlistPlan.sourceRun,
+            legacy_query_sha256: storeDeps.legacyStageAllowlistPlan.querySha256,
+            legacy_stage_system_identifier: storeDeps.legacyStageAllowlistPlan.stageSystemIdentifier,
+            legacy_run_id: runId,
+            legacy_plan_sha256: storeDeps.legacyStageAllowlistPlan.runPlanSha256,
+          };
+          manifests.set(objectPath, row);
+          storedManifests.set(batchNumber, localManifest);
+          planEvidence.set(batchNumber, structuredClone(localManifest.legacy_stage_allowlist));
+          prepareDirectories.set(batchNumber, cwd);
+          return { objectPath };
+        },
+        pruneArchive: async ({ argv, deps: pruneDeps }) => {
+          const batchNumber = Number(pruneDeps.legacyStageAllowlistPlan.batchNumber);
+          const objectPath = argv[argv.indexOf("--object-path") + 1];
+          const row = manifests.get(objectPath);
+          const candidate = [...candidates.values()].find(
+            ({ candidate: value }) => Number(value.legacy_batch_number) === batchNumber,
+          ).candidate;
+          const evidence = evidenceFor(batchNumber, pruneDeps.legacyStageAllowlistPlan, candidate);
+          pruneCalls.push(argv);
+          assert.ok(row, `batch ${batchNumber} must have a stored manifest`);
+          if (argv.includes("--register-proof")) {
+            row.archive_proof_verified_at = `2026-08-31T00:00:0${batchNumber}Z`;
+            row.archived_transaction_ids_sha256 = evidence.transactionIdsSha256;
+            row.archived_entry_ids_sha256 = evidence.entryIdsSha256;
+            return { state: "proof_registered" };
+          }
+          if (argv.includes("--execute")) throw new Error("batch isolation test must not execute cleanup");
+          const dryRunCount = (dryRunCounts.get(batchNumber) || 0) + 1;
+          dryRunCounts.set(batchNumber, dryRunCount);
+          if (dryRunCount === 1) return { state: "ready", evidence };
+          Object.assign(row, {
+            pruned_at: `2026-08-31T00:00:1${batchNumber}Z`,
+            registry_cleaned_at: `2026-08-31T00:00:1${batchNumber}Z`,
+            pruned_transaction_count: "1",
+            pruned_entry_count: "2",
+            registry_cleaned_key_count: "1",
+            pruned_transaction_ids_sha256: evidence.transactionIdsSha256,
+            pruned_entry_ids_sha256: evidence.entryIdsSha256,
+            registry_cleaned_keys_sha256: evidence.registryKeysSha256,
+          });
+          return { state: "already_pruned", evidence };
+        },
+        downloadArchive: async (_storageTarget, objectPath) => ({
+          bytes: archiveBytesByObjectPath.get(objectPath),
+          downloadMs: 0,
+        }),
+        fetch: async (url, init = {}) => {
+          const requestUrl = new URL(url);
+          const authenticatedPrefix = `/storage/v1/object/authenticated/${ARCHIVE_BUCKET}/`;
+          const uploadPrefix = `/storage/v1/object/${ARCHIVE_BUCKET}/`;
+          const objectPath = decodeURIComponent(
+            requestUrl.pathname.split(authenticatedPrefix)[1]
+              || requestUrl.pathname.split(uploadPrefix)[1]
+              || "",
+          );
+          const method = init.method || "GET";
+          if (method === "GET") {
+            const bytes = durableObjects.get(objectPath);
+            return bytes
+              ? new Response(bytes, { status: 200, headers: { "content-type": "application/gzip" } })
+              : new Response(JSON.stringify({ message: "not found" }), {
+                status: 404,
+                headers: { "content-type": "application/json" },
+              });
+          }
+          if (method === "POST") {
+            const headers = new Headers(init.headers || {});
+            assert.equal(headers.get("x-upsert"), "false");
+            assert.equal(headers.get("content-type"), "application/gzip");
+            durableObjects.set(objectPath, Buffer.from(init.body));
+            return new Response(JSON.stringify({ ok: true }), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          return new Response(JSON.stringify({ message: "unexpected" }), { status: 500 });
+        },
+      },
+    });
+
+    assert.deepEqual(result.processed.map((row) => row.batchNumber), [2, 3]);
+    assert.equal(result.consumedBatchCount, 2);
+    assert.equal(prepareDirectories.size, 2);
+    assert.notEqual(prepareDirectories.get(2), prepareDirectories.get(3));
+    assert.ok([...prepareDirectories.values()].every((directory) => directory.startsWith(`${tempRoot}/`)));
+    assert.equal(pruneCalls.some((argv) => argv.includes("--execute")), false, "the test must not execute cleanup or retry");
+    for (const batchNumber of [2, 3]) {
+      const directoryEntries = fs.readdirSync(prepareDirectories.get(batchNumber)).sort();
+      assert.deepEqual(directoryEntries, [
+        `legacy-stage-allowlist-v1.batch-${String(batchNumber).padStart(3, "0")}.ids`,
+        `legacy-stage-allowlist-v1.batch-${String(batchNumber).padStart(3, "0")}.manifest.json`,
+        "legacy-stage-allowlist-v1.master.ids",
+        "legacy-stage-allowlist-v1.master.manifest.json",
+        `legacy-stage-batch-${String(batchNumber).padStart(3, "0")}.archive.jsonl.gz`,
+        `legacy-stage-batch-${String(batchNumber).padStart(3, "0")}.archive.manifest.json`,
+      ].sort());
+      assert.equal(storedManifests.get(batchNumber).legacy_stage_allowlist.batch_number, batchNumber);
+      assert.equal(planEvidence.get(batchNumber).batch_number, batchNumber);
+    }
+    assert.notEqual(planEvidence.get(2).batch_table_ids_sha256, planEvidence.get(3).batch_table_ids_sha256);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
 function staticWorkflowContracts() {
   assert.match(workflow, /bot-only-7d-automatic/);
   assert.match(workflow, /legacy-stage-allowlist-orchestrate/);
@@ -2053,6 +2414,7 @@ staticWorkflowContracts();
 await schedulerContracts();
 await legacyOrchestratedPruneArgumentTypesContract();
 await legacyOrchestratorPrepareExportContract();
+await legacyOrchestratorBatchTempIsolationContract();
 await legacyOrchestratorContracts();
 
 const dbUrl = process.env.CHIPS_MIGRATIONS_TEST_DB_URL;

@@ -477,6 +477,11 @@ export async function runLegacyStageAllowlistOrchestrator({
       consumedBatchCount += 1;
       let row = existing;
       if (!row) {
+        const batchTempRoot = fs.mkdtempSync(path.join(
+          tempRoot,
+          `legacy-stage-batch-${String(batchNumber).padStart(3, "0")}-`,
+        ));
+        ensurePrivateDirectory(batchTempRoot);
         const prepared = await runLegacyStagePrepareOnly({
           env,
           cwd,
@@ -485,7 +490,7 @@ export async function runLegacyStageAllowlistOrchestrator({
           deps: {
             ...deps,
             sql,
-            tempRoot,
+            tempRoot: batchTempRoot,
             storageTarget,
             pruneStore,
             verifyBucket,
