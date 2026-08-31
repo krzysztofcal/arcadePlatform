@@ -34,6 +34,14 @@ canonical Stage project `krydukthwdvccggbyjfw` and PostgreSQL system identifier
   manifests without `source_policy_id` never drive the cursor.
 - A missing candidate is a successful no-op.
 
+Legacy `legacy_stage_allowlist_v1` cleanup remains manual-only. Its exact-batch
+pruner now writes `poker_tables.bot_only_retention_complete_at` only after the
+complete archive, prune, and registry-cleanup receipts, in the same transaction
+as the ledger/registry deletion. Batch 13 retries may repair a missing marker;
+batches 2–98 require the authorized frozen run-level GO. This transition does
+not delete tables or ESCROW accounts: the existing closed-table cleaner owns
+table deletion, and ESCROW remains in the scope of #894.
+
 The JSONL is produced by the prunable-only exporter mode. The manual exporter
 mode remains unchanged. The database pruner repeats the complete technical,
 registry, conservation, table, escrow, proof, receipt and mapping checks before

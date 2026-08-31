@@ -49,6 +49,10 @@ const lifecycleMissingTableMigration = fs.readFileSync(
   "supabase/migrations/20260829100000_chips_ledger_bot_only_lifecycle_missing_table_hardening.sql",
   "utf8",
 );
+const legacyLifecycleCompletionMigration = fs.readFileSync(
+  "supabase/migrations/20260831120000_chips_ledger_legacy_stage_lifecycle_completion.sql",
+  "utf8",
+);
 
 const ENV = Object.freeze({
   SUPABASE_STAGE_DB_URL: "postgresql://postgres.krydukthwdvccggbyjfw:password@aws-0.pooler.supabase.com:5432/postgres",
@@ -1750,6 +1754,9 @@ function staticWorkflowContracts() {
   assert.match(lifecycleMissingTableMigration, /create or replace function public\.chips_prune_and_cleanup_bot_only_archive_batch/);
   assert.match(lifecycleMissingTableMigration, /if found and lifecycle_marker is null/);
   assert.match(lifecycleMissingTableMigration, /if not found or lifecycle_marker is null/);
+  assert.match(legacyLifecycleCompletionMigration, /source_policy_id = 'legacy_stage_allowlist_v1'/);
+  assert.match(legacyLifecycleCompletionMigration, /bot_only_retention_complete_at/);
+  assert.match(legacyLifecycleCompletionMigration, /state', 'already_pruned'/);
 }
 
 staticOrchestrationContract();
@@ -1856,6 +1863,163 @@ async function disposableBotFixture(tx, { objectHex = "9", lifecycleMarker = nul
     compressedSha,
     createdAt,
   };
+}
+
+async function disposableLegacyFixture(tx, { objectHex = "f", batchId = 13 } = {}) {
+  const frozen = loadFrozenLegacyAllowlist({ cwd: root });
+  const legacyPlan = buildLegacyPlan(
+    frozen.masterManifest,
+    buildLegacyBatchManifest(frozen.masterManifest, { batchNumber: 1 }),
+  );
+  const tableIds = legacyPlan.batchTableIds;
+  const masterTableIds = legacyPlan.masterTableIds;
+  const cutoff = legacyPlan.cutoff;
+  const systemAccountId = randomUUID();
+  const transactionIds = [];
+  const entryIds = [];
+  const keys = [];
+  const escrowAccountIds = [];
+  const createdAt = tableIds.map((_, index) => `2026-08-01T00:00:${String(index).padStart(2, "0")}.000Z`);
+
+  await tx.unsafe("set constraints all deferred;");
+  await tx.unsafe(
+    "insert into public.chips_accounts (id, account_type, system_key, status, balance) values ($1::uuid, 'SYSTEM', $2, 'active', 0);",
+    [systemAccountId, `LEGACY_STAGE_TEST_SYSTEM:${systemAccountId}`],
+  );
+
+  for (const [index, tableId] of tableIds.entries()) {
+    const escrowAccountId = randomUUID();
+    const transactionId = randomUUID();
+    const key = `bot-seed-buyin:${tableId}:legacy-lifecycle-contract-${index}`;
+    await tx.unsafe(
+      "insert into public.poker_tables (id, status, has_human_participant, bot_only_proof_eligible) values ($1::uuid, 'OPEN', false, false);",
+      [tableId],
+    );
+    await tx.unsafe(
+      "insert into public.chips_accounts (id, account_type, system_key, status, balance) values ($1::uuid, 'ESCROW', $2, 'active', 0);",
+      [escrowAccountId, `POKER_TABLE:${tableId}`],
+    );
+    await tx.unsafe(`
+      insert into public.chips_transactions
+        (id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at)
+      values ($1::uuid, $2, $3::jsonb, $4, $5, 'TABLE_BUY_IN', null, $6::timestamptz);
+    `, [
+      transactionId,
+      `BOT_SEED_BUY_IN:${tableId}:${index + 1}`,
+      JSON.stringify({ tableId }),
+      key,
+      `${"a".repeat(63)}${index.toString(16)}`,
+      createdAt[index],
+    ]);
+    const entries = await tx.unsafe(`
+      insert into public.chips_entries (transaction_id, account_id, amount, metadata)
+      values ($1::uuid, $2::uuid, -100, '{}'::jsonb), ($1::uuid, $3::uuid, 100, '{}'::jsonb)
+      returning id;
+    `, [transactionId, systemAccountId, escrowAccountId]);
+    await tx.unsafe("update public.poker_tables set status = 'CLOSED' where id = $1::uuid;", [tableId]);
+    await tx.unsafe(`
+      update public.chips_transaction_idempotency
+         set table_id = $2::uuid, key_format_version = 1, key_format = 'bot-seed-buyin'
+       where transaction_id = $1::uuid;
+    `, [transactionId, tableId]);
+    transactionIds.push(transactionId);
+    entryIds.push(...entries.map((row) => String(row.id)));
+    keys.push(key);
+    escrowAccountIds.push(escrowAccountId);
+  }
+  await tx.unsafe("set constraints all immediate;");
+
+  const compressedSha = objectHex.repeat(64);
+  const objectPath = `v1/sha256/${compressedSha}.jsonl.gz`;
+  await tx.unsafe(`
+    insert into public.chips_ledger_archive_batches (
+      batch_id, object_path, project_ref, format_version, cutoff,
+      first_created_at, last_created_at, cursor_end_created_at, cursor_end_id,
+      transaction_count, entry_count, tx_types, raw_bytes, compressed_bytes,
+      raw_sha256, compressed_sha256, credits, debits, net_amount, source_policy_id,
+      legacy_allowlist_sha256, legacy_batch_table_ids_sha256, legacy_master_table_ids,
+      legacy_master_table_count, legacy_batch_number, legacy_batch_table_count,
+      legacy_source_run, legacy_query_sha256, legacy_stage_system_identifier,
+      status, committed_at
+    ) overriding system value values (
+      $1::bigint, $2, 'krydukthwdvccggbyjfw', 2, $3::timestamptz,
+      $4::timestamptz, $5::timestamptz, $5::timestamptz, $6::uuid,
+      10, 20, '{"TABLE_BUY_IN":10}'::jsonb, 1000, 1000,
+      $7, $8, 1000, 1000, 0, 'legacy_stage_allowlist_v1',
+      $9, $10, $11::uuid[], 974, 1, 10, $12, $13,
+      '7656985631720456337', 'committed', now()
+    );
+  `, [
+    batchId,
+    objectPath,
+    cutoff,
+    createdAt[0],
+    createdAt[createdAt.length - 1],
+    transactionIds[transactionIds.length - 1],
+    "b".repeat(64),
+    compressedSha,
+    legacyPlan.allowlistSha256,
+    legacyPlan.batchTableIdsSha256,
+    masterTableIds,
+    legacyPlan.sourceRun,
+    legacyPlan.querySha256,
+  ]);
+
+  return {
+    batchId,
+    objectPath,
+    cutoff,
+    tableIds,
+    masterTableIds,
+    transactionIds,
+    entryIds,
+    keys: keys.sort(),
+    escrowAccountIds,
+    allowlistSha256: legacyPlan.allowlistSha256,
+    batchTableIdsSha256: legacyPlan.batchTableIdsSha256,
+    sourceRun: legacyPlan.sourceRun,
+    querySha256: legacyPlan.querySha256,
+    systemIdentifier: legacyPlan.stageSystemIdentifier,
+    systemAccountId,
+  };
+}
+
+async function legacyPrune(tx, fixture, {
+  batchTableIds = fixture.tableIds,
+  batchTableIdsSha256 = fixture.batchTableIdsSha256,
+  execute = true,
+  approvedBatchId = fixture.batchId,
+} = {}) {
+  const rows = await tx.unsafe(`
+    select public.chips_prune_legacy_stage_allowlist_batch(
+      $1, $2::uuid[], $3::bigint[], $4::uuid[], $5, $6, $7::text[], $8, $9::bigint
+    ) as result;
+  `, [
+    fixture.objectPath,
+    fixture.transactionIds,
+    fixture.entryIds,
+    batchTableIds,
+    fixture.allowlistSha256,
+    batchTableIdsSha256,
+    fixture.keys,
+    execute,
+    approvedBatchId,
+  ]);
+  return rows[0].result;
+}
+
+async function legacyState(tx, fixture) {
+  const rows = await tx.unsafe(`
+    select
+      (select count(*) from public.chips_transactions where id = any($1::uuid[])) as hot_transactions,
+      (select count(*) from public.chips_entries where id = any($2::bigint[])) as hot_entries,
+      (select count(*) from public.chips_transaction_idempotency where idempotency_key = any($3::text[])) as registry_rows,
+      (select count(*) from public.poker_tables where id = any($4::uuid[])) as table_rows,
+      (select count(*) from public.poker_tables where id = any($4::uuid[]) and bot_only_retention_complete_at is not null) as marked_tables,
+      (select pruned_at from public.chips_ledger_archive_batches where batch_id = $5::bigint) as pruned_at,
+      (select registry_cleaned_at from public.chips_ledger_archive_batches where batch_id = $5::bigint) as registry_cleaned_at;
+  `, [fixture.transactionIds, fixture.entryIds, fixture.keys, fixture.tableIds, fixture.batchId]);
+  return rows[0];
 }
 
 async function registerCompleteCleanupReceipt(tx, fixture, { removeTable = false } = {}) {
@@ -2026,6 +2190,14 @@ async function disposablePostgresContract() {
       assert.equal(sqlPlan[0].plan_sha256, buildLegacyStageAllowlistRunContract(loadFrozenLegacyAllowlist({ cwd: root }).masterManifest).planSha256);
       const inactive = await tx.unsafe("select public.chips_bot_only_retention_automatic_active() as active;");
       assert.equal(inactive[0].active, false, "automatic policy must be disabled before activation");
+      const legacyFixture = await disposableLegacyFixture(tx);
+      await tx.unsafe(`
+        select setval(
+          pg_get_serial_sequence('public.chips_ledger_archive_batches', 'batch_id'),
+          greatest(1000, (select coalesce(max(batch_id), 0) from public.chips_ledger_archive_batches)),
+          false
+        );
+      `);
       const canaryBatchId = await insertCanary(tx);
       const fixture = await disposableBotFixture(tx);
       const before = await accountingSnapshot(tx, fixture);
@@ -2291,6 +2463,200 @@ async function disposablePostgresContract() {
       await tx.unsafe("release savepoint replay_old_registry_key;");
       assert.equal(replayError?.code, "P8903");
       assert.match(replayError?.message || "", /closed or missing/);
+
+      const assertLegacyUnchanged = async (label) => {
+        const state = await legacyState(tx, legacyFixture);
+        assert.equal(Number(state.hot_transactions), 10, `${label}: transactions must remain hot`);
+        assert.equal(Number(state.hot_entries), 20, `${label}: entries must remain hot`);
+        assert.equal(Number(state.registry_rows), 10, `${label}: registry must remain`);
+        assert.equal(Number(state.table_rows), 10, `${label}: tables must remain`);
+        assert.equal(Number(state.marked_tables), 0, `${label}: no lifecycle marker may be left`);
+        assert.equal(state.pruned_at, null, `${label}: prune receipt must not be left`);
+        assert.equal(state.registry_cleaned_at, null, `${label}: registry receipt must not be left`);
+      };
+      const expectLegacyFailure = async (savepoint, action, code, label) => {
+        await tx.unsafe(`savepoint ${savepoint};`);
+        let failure = null;
+        try {
+          await action();
+        } catch (error) {
+          failure = error;
+        }
+        await tx.unsafe(`rollback to savepoint ${savepoint};`);
+        await tx.unsafe(`release savepoint ${savepoint};`);
+        assert.equal(failure?.code, code, `${label} must fail closed`);
+        await assertLegacyUnchanged(label);
+      };
+
+      await expectLegacyFailure(
+        "legacy_missing_proof",
+        () => legacyPrune(tx, legacyFixture),
+        "P8934",
+        "missing legacy proof",
+      );
+
+      const legacyProof = await tx.unsafe(`
+        select public.chips_register_legacy_stage_allowlist_proof(
+          $1, $2::uuid[], $3::bigint[], $4::uuid[], $5::uuid[], $6, $7,
+          974, 1, $8, $9, $10, $11::timestamptz
+        ) as result;
+      `, [
+        legacyFixture.objectPath,
+        legacyFixture.transactionIds,
+        legacyFixture.entryIds,
+        legacyFixture.tableIds,
+        legacyFixture.masterTableIds,
+        legacyFixture.allowlistSha256,
+        legacyFixture.batchTableIdsSha256,
+        legacyFixture.sourceRun,
+        legacyFixture.querySha256,
+        legacyFixture.systemIdentifier,
+        legacyFixture.cutoff,
+      ]);
+      assert.equal(legacyProof[0].result.state, "proof_registered");
+
+      await expectLegacyFailure(
+        "legacy_missing_go",
+        () => legacyPrune(tx, legacyFixture),
+        "P8935",
+        "missing legacy GO",
+      );
+
+      const legacyAuthorization = await tx.unsafe(
+        "select public.chips_authorize_legacy_stage_allowlist_batch($1::bigint, $2, $3) as result;",
+        [legacyFixture.batchId, `GO ${legacyFixture.batchId}`, legacyFixture.allowlistSha256],
+      );
+      assert.equal(legacyAuthorization[0].result.state, "authorized");
+
+      await expectLegacyFailure(
+        "legacy_open_table",
+        async () => {
+          await tx.unsafe("update public.poker_tables set status = 'OPEN' where id = $1::uuid;", [legacyFixture.tableIds[0]]);
+          await legacyPrune(tx, legacyFixture);
+        },
+        "P8930",
+        "OPEN legacy table",
+      );
+      await expectLegacyFailure(
+        "legacy_human_table",
+        async () => {
+          await tx.unsafe("update public.poker_tables set has_human_participant = true where id = $1::uuid;", [legacyFixture.tableIds[0]]);
+          await legacyPrune(tx, legacyFixture);
+        },
+        "P8930",
+        "human-participant legacy table",
+      );
+      await expectLegacyFailure(
+        "legacy_nonzero_escrow",
+        async () => {
+          await tx.unsafe("update public.chips_accounts set balance = 1 where id = $1::uuid;", [legacyFixture.escrowAccountIds[0]]);
+          await legacyPrune(tx, legacyFixture);
+        },
+        "P8930",
+        "non-zero legacy escrow",
+      );
+
+      const foreignTableIds = [randomUUID(), ...legacyFixture.tableIds.slice(1)];
+      await expectLegacyFailure(
+        "legacy_foreign_table",
+        () => legacyPrune(tx, legacyFixture, { batchTableIds: foreignTableIds }),
+        "P8938",
+        "foreign legacy table ID",
+      );
+
+      await expectLegacyFailure(
+        "legacy_hot_rows",
+        async () => {
+          const hotTransactionId = randomUUID();
+          const hotKey = `bot-seed-buyin:${legacyFixture.tableIds[0]}:legacy-hot-row`;
+          await tx.unsafe("set constraints all deferred;");
+          await tx.unsafe("update public.poker_tables set status = 'OPEN' where id = $1::uuid;", [legacyFixture.tableIds[0]]);
+          await tx.unsafe(`
+            insert into public.chips_transactions
+              (id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at)
+            values ($1::uuid, $2, $3::jsonb, $4, $5, 'TABLE_BUY_IN', null, '2026-08-01T00:00:30Z'::timestamptz);
+          `, [
+            hotTransactionId,
+            `BOT_SEED_BUY_IN:${legacyFixture.tableIds[0]}:hot`,
+            JSON.stringify({ tableId: legacyFixture.tableIds[0] }),
+            hotKey,
+            "e".repeat(64),
+          ]);
+          await tx.unsafe(`
+            insert into public.chips_entries (transaction_id, account_id, amount, metadata)
+            values ($1::uuid, $2::uuid, -100, '{}'::jsonb), ($1::uuid, $3::uuid, 100, '{}'::jsonb);
+          `, [hotTransactionId, legacyFixture.systemAccountId, legacyFixture.escrowAccountIds[0]]);
+          await tx.unsafe("update public.poker_tables set status = 'CLOSED' where id = $1::uuid;", [legacyFixture.tableIds[0]]);
+          await tx.unsafe("set constraints all immediate;");
+          await legacyPrune(tx, legacyFixture);
+        },
+        "P8930",
+        "remaining hot legacy rows",
+      );
+
+      const legacyAccountIds = [legacyFixture.systemAccountId, ...legacyFixture.escrowAccountIds];
+      const legacyAccountsBefore = await tx.unsafe(`
+        select id::text as id, balance::text as balance, next_entry_seq::text as next_entry_seq
+          from public.chips_accounts
+         where id = any($1::uuid[])
+         order by id;
+      `, [legacyAccountIds]);
+      const legacyExecute = await legacyPrune(tx, legacyFixture);
+      assert.equal(legacyExecute.state, "pruned");
+      assert.equal(Number(legacyExecute.lifecycle_table_count), 10);
+      const legacyAccountsAfter = await tx.unsafe(`
+        select id::text as id, balance::text as balance, next_entry_seq::text as next_entry_seq
+          from public.chips_accounts
+         where id = any($1::uuid[])
+         order by id;
+      `, [legacyAccountIds]);
+      assert.deepEqual(legacyAccountsAfter, legacyAccountsBefore, "legacy prune must preserve balances and next_entry_seq");
+      const legacyCompleteState = await legacyState(tx, legacyFixture);
+      assert.equal(Number(legacyCompleteState.hot_transactions), 0);
+      assert.equal(Number(legacyCompleteState.hot_entries), 0);
+      assert.equal(Number(legacyCompleteState.registry_rows), 0);
+      assert.equal(Number(legacyCompleteState.table_rows), 10);
+      assert.equal(Number(legacyCompleteState.marked_tables), 10);
+      assert.ok(legacyCompleteState.pruned_at);
+      assert.ok(legacyCompleteState.registry_cleaned_at);
+      const legacyReceipt = await tx.unsafe(`
+        select pruned_transaction_count, pruned_entry_count, registry_cleaned_key_count,
+               registry_cleaned_keys_sha256
+          from public.chips_ledger_archive_batches
+         where batch_id = $1::bigint;
+      `, [legacyFixture.batchId]);
+      const expectedLegacyRegistryHash = await tx.unsafe(
+        "select public.chips_archive_text_ids_sha256($1::text[]) as hash;",
+        [legacyFixture.keys],
+      );
+      assert.equal(Number(legacyReceipt[0].pruned_transaction_count), 10);
+      assert.equal(Number(legacyReceipt[0].pruned_entry_count), 20);
+      assert.equal(Number(legacyReceipt[0].registry_cleaned_key_count), 10);
+      assert.equal(legacyReceipt[0].registry_cleaned_keys_sha256, expectedLegacyRegistryHash[0].hash);
+
+      await tx.unsafe("delete from public.poker_tables where id = any($1::uuid[]);", [legacyFixture.tableIds]);
+      for (const tableId of legacyFixture.tableIds) {
+        await tx.unsafe(
+          "insert into public.poker_tables (id, status, has_human_participant, bot_only_proof_eligible) values ($1::uuid, 'CLOSED', false, false);",
+          [tableId],
+        );
+      }
+      const legacyRepair = await legacyPrune(tx, legacyFixture);
+      assert.equal(legacyRepair.state, "already_pruned");
+      assert.equal(Number((await legacyState(tx, legacyFixture)).marked_tables), 10);
+      const markersBeforeRetry = await tx.unsafe(
+        "select id::text as id, bot_only_retention_complete_at from public.poker_tables where id = any($1::uuid[]) order by id;",
+        [legacyFixture.tableIds],
+      );
+      const legacyIdempotentRetry = await legacyPrune(tx, legacyFixture);
+      assert.equal(legacyIdempotentRetry.state, "already_pruned");
+      const markersAfterRetry = await tx.unsafe(
+        "select id::text as id, bot_only_retention_complete_at from public.poker_tables where id = any($1::uuid[]) order by id;",
+        [legacyFixture.tableIds],
+      );
+      assert.deepEqual(markersAfterRetry, markersBeforeRetry, "marked legacy retry must be idempotent");
+      await tx.unsafe("delete from public.poker_tables where id = any($1::uuid[]);", [legacyFixture.tableIds]);
+      assert.equal((await legacyPrune(tx, legacyFixture)).state, "already_pruned");
 
       const policy = await tx.unsafe(
         "select public.chips_bot_only_retention_automatic_active() as active;",
