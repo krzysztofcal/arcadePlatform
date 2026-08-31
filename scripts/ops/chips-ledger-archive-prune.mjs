@@ -1190,6 +1190,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
           manifest: exporterManifestFromDatabase(resultRow, target, deps.legacyStageAllowlistPlan),
           target,
           artifactName: path.basename(resultRow.object_path),
+          expectedLegacyStageAllowlistEvidence: deps.legacyStageAllowlistPlan?.archiveManifest || null,
         });
         const verification = resultRow.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
           && resultRow.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID

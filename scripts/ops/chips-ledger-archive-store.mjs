@@ -262,19 +262,35 @@ function verifyManifestShape(manifest, artifactName, target, expectedLegacyStage
   }
   if (manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION && manifest.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
     const legacy = manifest.legacy_stage_allowlist;
+    const expectedBatchTableIdsSha256 = expectedLegacyStageAllowlistEvidence
+      && hasOwn(expectedLegacyStageAllowlistEvidence, "batch_table_ids_sha256")
+      ? expectedLegacyStageAllowlistEvidence.batch_table_ids_sha256
+      : LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_IDS_SHA256;
+    const expectedBatchManifestSha256 = expectedLegacyStageAllowlistEvidence
+      && hasOwn(expectedLegacyStageAllowlistEvidence, "batch_manifest_sha256")
+      ? expectedLegacyStageAllowlistEvidence.batch_manifest_sha256
+      : LEGACY_STAGE_ALLOWLIST_BATCH_MANIFEST_SHA256;
+    const expectedBatchNumber = expectedLegacyStageAllowlistEvidence
+      && hasOwn(expectedLegacyStageAllowlistEvidence, "batch_number")
+      ? expectedLegacyStageAllowlistEvidence.batch_number
+      : 1;
+    const expectedBatchTableCount = expectedLegacyStageAllowlistEvidence
+      && hasOwn(expectedLegacyStageAllowlistEvidence, "batch_table_count")
+      ? expectedLegacyStageAllowlistEvidence.batch_table_count
+      : LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT;
     assertLegacyManifestEvidence(sameTimestamp(manifest.cutoff.created_at, LEGACY_STAGE_ALLOWLIST_CUTOFF), "cutoff");
     assertLegacyManifestEvidence(legacy && typeof legacy === "object" && !Array.isArray(legacy), "missing");
     assertLegacyManifestEvidence(legacy.policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID, "policy_id");
     assertLegacyManifestEvidence(legacy.proof_basis === LEGACY_STAGE_ALLOWLIST_POLICY_ID, "proof_basis");
     assertLegacyManifestEvidence(legacy.allowlist_sha256 === LEGACY_STAGE_ALLOWLIST_FROZEN_SHA256, "allowlist_sha256");
-    assertLegacyManifestEvidence(legacy.batch_table_ids_sha256 === LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_IDS_SHA256, "batch_table_ids_sha256");
+    assertLegacyManifestEvidence(legacy.batch_table_ids_sha256 === expectedBatchTableIdsSha256, "batch_table_ids_sha256");
     assertLegacyManifestEvidence(legacy.query_sha256 === LEGACY_STAGE_ALLOWLIST_QUERY_SHA256, "query_sha256");
     assertLegacyManifestEvidence(legacy.generator_sha256 === LEGACY_STAGE_ALLOWLIST_QUERY_SHA256, "generator_sha256");
     assertLegacyManifestEvidence(legacy.source_run === LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN, "source_run");
     assertLegacyManifestEvidence(legacy.stage_system_identifier === "7656985631720456337", "stage_system_identifier");
     assertLegacyManifestEvidence(legacy.master_table_count === LEGACY_STAGE_ALLOWLIST_TABLE_COUNT, "master_table_count");
     assertLegacyManifestEvidence(legacy.master_manifest_sha256 === LEGACY_STAGE_ALLOWLIST_MASTER_MANIFEST_SHA256, "master_manifest_sha256");
-    assertLegacyManifestEvidence(legacy.batch_manifest_sha256 === LEGACY_STAGE_ALLOWLIST_BATCH_MANIFEST_SHA256, "batch_manifest_sha256");
+    assertLegacyManifestEvidence(legacy.batch_manifest_sha256 === expectedBatchManifestSha256, "batch_manifest_sha256");
     assertLegacyManifestEvidence(legacy.freeze_run_id === LEGACY_STAGE_ALLOWLIST_FREEZE_RUN_ID, "freeze_run_id");
     assertLegacyManifestEvidence(legacy.diagnostic_source_run === LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN, "diagnostic_source_run");
     assertLegacyManifestEvidence(legacy.diagnostic_source_run_sha256 === LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256, "diagnostic_source_run_sha256");
@@ -289,8 +305,8 @@ function verifyManifestShape(manifest, artifactName, target, expectedLegacyStage
     assertLegacyManifestEvidence(masterIds.every((id, index) => id === sortedMasterIds[index]), "master_table_ids_order");
     assertLegacyManifestEvidence(hashCanonicalLines(masterIds) === legacy.allowlist_sha256, "master_table_ids_hash");
 
-    assertLegacyManifestEvidence(legacy.batch_number === 1, "batch_number");
-    assertLegacyManifestEvidence(legacy.batch_table_count === LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT, "batch_table_count");
+    assertLegacyManifestEvidence(legacy.batch_number === expectedBatchNumber, "batch_number");
+    assertLegacyManifestEvidence(legacy.batch_table_count === expectedBatchTableCount, "batch_table_count");
     assertLegacyManifestEvidence(Array.isArray(legacy.batch_table_ids), "batch_table_ids");
     const batchIds = legacy.batch_table_ids.map((id) => text(id).toLowerCase());
     assertLegacyManifestEvidence(batchIds.length === legacy.batch_table_count, "batch_table_ids_count");
