@@ -1585,6 +1585,68 @@ async function schedulerContracts() {
   assert.equal(interrupted.state.storeCalls, 1, "resume must not create a second manifest");
 }
 
+async function legacyOrchestratedPruneArgumentTypesContract() {
+  const objectPath = "v1/sha256/orchestrated-legacy-prune.jsonl.gz";
+  const evidence = {
+    transactionIds: ["00000000-0000-4000-8000-000000000101"],
+    entryIds: [1],
+    legacyTableIds: ["00000000-0000-4000-8000-000000000102"],
+    legacyAllowlistSha256: "a".repeat(64),
+    legacyBatchTableIdsSha256: "b".repeat(64),
+    registryKeys: ["legacy-key"],
+  };
+  const calls = [];
+  const sql = {
+    async begin(callback) {
+      return callback({
+        async unsafe(query, parameters = []) {
+          calls.push({ query, parameters });
+          if (!query.includes("chips_prune_legacy_stage_allowlist_orchestrated_batch")) return [];
+          if (query.includes("$8::text[]")) {
+            const error = new Error(
+              "42883: public.chips_prune_legacy_stage_allowlist_orchestrated_batch(..., text[]) does not exist",
+            );
+            error.code = "42883";
+            throw error;
+          }
+          return [{ result: { state: "ready" } }];
+        },
+      });
+    },
+    async unsafe() {
+      throw new Error("unexpected top-level prune SQL");
+    },
+  };
+
+  const result = await createPruneStore(sql).cleanupLegacyStageAllowlist(
+    objectPath,
+    evidence,
+    false,
+    null,
+    { runId: 41, planSha256: "c".repeat(64) },
+  );
+  const pruneCall = calls.find(({ query }) => query.includes("chips_prune_legacy_stage_allowlist_orchestrated_batch"));
+
+  assert.ok(pruneCall, "the orchestrated legacy prune path must be called");
+  assert.deepEqual(pruneCall.parameters, [
+    41,
+    "c".repeat(64),
+    objectPath,
+    evidence.transactionIds,
+    evidence.entryIds,
+    evidence.legacyTableIds,
+    evidence.legacyAllowlistSha256,
+    evidence.legacyBatchTableIdsSha256,
+    evidence.registryKeys,
+    false,
+  ]);
+  assert.match(
+    pruneCall.query.replace(/\s+/g, " "),
+    /\$1::bigint, \$2, \$3, \$4::uuid\[\], \$5::bigint\[\], \$6::uuid\[\], \$7::text, \$8::text, \$9::text\[\], \$10::boolean/,
+  );
+  assert.deepEqual(result, { state: "ready" });
+}
+
 async function legacyOrchestratorContracts() {
   const frozen = loadFrozenLegacyAllowlist({ cwd: root });
   const contract = buildLegacyStageAllowlistRunContract(frozen.masterManifest);
@@ -1989,6 +2051,7 @@ function staticWorkflowContracts() {
 staticOrchestrationContract();
 staticWorkflowContracts();
 await schedulerContracts();
+await legacyOrchestratedPruneArgumentTypesContract();
 await legacyOrchestratorPrepareExportContract();
 await legacyOrchestratorContracts();
 

@@ -757,7 +757,7 @@ export function createPruneStore(sql) {
         await tx.unsafe("set local statement_timeout = '120s';");
         const rows = orchestration
           ? await tx.unsafe(`select public.chips_prune_legacy_stage_allowlist_orchestrated_batch(
-            $1::bigint, $2, $3, $4::uuid[], $5::bigint[], $6::uuid[], $7::text, $8::text[],
+            $1::bigint, $2, $3, $4::uuid[], $5::bigint[], $6::uuid[], $7::text, $8::text,
             $9::text[], $10::boolean
           ) as result;`, [
             orchestration.runId,
