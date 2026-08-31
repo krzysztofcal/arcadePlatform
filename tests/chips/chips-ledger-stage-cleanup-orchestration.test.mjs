@@ -1301,6 +1301,102 @@ async function schedulerContracts() {
   }
 
   for (const retryableSqlstate of ["40001", "55P03"]) {
+    const preflightRetry = makeProvenAutomaticRow("27");
+    const preflightRetryRun = fakeScheduler({
+      enabled: true,
+      candidateCount: 0,
+      realExecute: true,
+      // The initial dry-run succeeds; the first execute retry preflight
+      // fails once and then succeeds on its second bounded attempt.
+      dryRunSqlstates: [null, retryableSqlstate, null],
+      executeSqlstates: [retryableSqlstate, null],
+      initialRows: [preflightRetry.row],
+      initialDurable: new Map([[
+        preflightRetry.row.object_path,
+        makeTestAutomaticDurableRecovery(preflightRetry.row, preflightRetry.archiveBytes),
+      ]]),
+      initialArchiveBytes: new Map([[preflightRetry.row.object_path, preflightRetry.archiveBytes]]),
+    });
+    const preflightRetryWaits = [];
+    preflightRetryRun.deps.waitForExecuteRetry = async (details) => preflightRetryWaits.push(details);
+    const preflightRetryTempRoot = fs.mkdtempSync(`/tmp/chips-ledger-stage-automation-execute-preflight-${retryableSqlstate}-`);
+    preflightRetryRun.deps.tempRoot = preflightRetryTempRoot;
+    try {
+      const result = await runAutomaticBotOnlyStageAutomation(preflightRetryRun);
+      const report = result.processed[0];
+      assert.equal(report.state, "cleaned");
+      assert.equal(report.executeAttempts, 2);
+      assert.equal(report.executeRetryCount, 1);
+      assert.deepEqual(report.executeSqlstates, [retryableSqlstate]);
+      assert.equal(report.dryRunAttempts, 1, "execute retry preflight must remain separate from initial dry-run metrics");
+      assert.equal(report.dryRunRetryCount, 0);
+      assert.deepEqual(report.dryRunSqlstates, []);
+      assert.equal(report.retryState, "already_cleaned");
+      assert.equal(preflightRetryRun.state.dryRunCalls, 4, "a failed preflight must receive its own bounded retry");
+      assert.equal(preflightRetryRun.state.dryRunManifestReads, 4);
+      assert.equal(preflightRetryRun.state.dryRunArchiveDownloads, 4);
+      assert.equal(preflightRetryRun.state.realExecuteCalls, 2);
+      assert.equal(preflightRetryRun.state.executeAttemptCalls, 3, "the control cycle remains separate from SQL retries");
+      assert.equal(preflightRetryRun.state.executeRetryPreflights, 1);
+      assert.equal(preflightRetryRun.state.executeRetryWaits, 1);
+      assert.equal(preflightRetryWaits.length, 1);
+      assert.equal(preflightRetryWaits[0].sqlstate, retryableSqlstate);
+      assert.equal(preflightRetryRun.state.proofRegisterCalls, 0);
+      assert.equal(preflightRetryRun.state.persistCalls, 0);
+      assert.equal(preflightRetryRun.state.storeCalls, 0);
+      assert.equal(preflightRetryRun.state.destructiveSqlMutations, 1);
+    } finally {
+      fs.rmSync(preflightRetryTempRoot, { recursive: true, force: true });
+    }
+  }
+
+  const exhaustedPreflight = makeProvenAutomaticRow("27");
+  const exhaustedPreflightRun = fakeScheduler({
+    enabled: true,
+    candidateCount: 0,
+    realExecute: true,
+    // The initial dry-run succeeds; all three attempts of the execute retry
+    // preflight fail, so no second execute may begin.
+    dryRunSqlstates: [null, "40001", "40001", "40001"],
+    executeSqlstates: ["40001", null],
+    initialRows: [exhaustedPreflight.row],
+    initialDurable: new Map([[
+      exhaustedPreflight.row.object_path,
+      makeTestAutomaticDurableRecovery(exhaustedPreflight.row, exhaustedPreflight.archiveBytes),
+    ]]),
+    initialArchiveBytes: new Map([[exhaustedPreflight.row.object_path, exhaustedPreflight.archiveBytes]]),
+  });
+  const exhaustedPreflightWaits = [];
+  exhaustedPreflightRun.deps.waitForExecuteRetry = async (details) => exhaustedPreflightWaits.push(details);
+  const exhaustedPreflightTempRoot = fs.mkdtempSync("/tmp/chips-ledger-stage-automation-execute-preflight-exhausted-");
+  exhaustedPreflightRun.deps.tempRoot = exhaustedPreflightTempRoot;
+  try {
+    const failure = await captureAutomaticFailure(exhaustedPreflightRun);
+    assert.equal(failure.error.code, "40001");
+    assert.equal(exhaustedPreflightRun.state.dryRunCalls, 4, "preflight retry budget must be exactly three attempts");
+    assert.equal(exhaustedPreflightRun.state.dryRunManifestReads, 4);
+    assert.equal(exhaustedPreflightRun.state.dryRunArchiveDownloads, 4);
+    assert.equal(exhaustedPreflightRun.state.executeAttemptCalls, 1, "a failed preflight must block the next execute");
+    assert.equal(exhaustedPreflightRun.state.executeRetryPreflights, 1);
+    assert.equal(exhaustedPreflightRun.state.executeRetryWaits, 1);
+    assert.equal(exhaustedPreflightWaits.length, 1);
+    assert.equal(exhaustedPreflightRun.state.proofRegisterCalls, 0);
+    assert.equal(exhaustedPreflightRun.state.persistCalls, 0);
+    assert.equal(exhaustedPreflightRun.state.storeCalls, 0);
+    assert.equal(exhaustedPreflightRun.state.destructiveSqlMutations, 0);
+    assert.deepEqual(failure.report.processed_batches, []);
+    assert.equal(failure.report.phase, "automatic.execute");
+    assert.equal(failure.report.batch_id, "27");
+    assert.equal(failure.report.current_batch.execute_attempts, 1);
+    assert.deepEqual(failure.report.current_batch.execute_sqlstates, ["40001"]);
+    assert.equal(failure.report.current_batch.dry_run_attempts, 1, "execute preflight retry must not alter initial dry-run metrics");
+    assert.equal(failure.report.current_batch.dry_run_retry_count, 0);
+    assert.deepEqual(failure.report.current_batch.dry_run_sqlstates, []);
+  } finally {
+    fs.rmSync(exhaustedPreflightTempRoot, { recursive: true, force: true });
+  }
+
+  for (const retryableSqlstate of ["40001", "55P03"]) {
     const provenRetry = makeProvenAutomaticRow("27");
     const provenRetryRun = fakeScheduler({
       enabled: true,
