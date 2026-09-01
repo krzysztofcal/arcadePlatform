@@ -3502,23 +3502,17 @@ async function disposableLegacyDryRunConcurrencyContract(dbUrl) {
     if (readerPromise) await readerPromise.catch(() => {});
     if (fixture) {
       await setupSql.begin(async (tx) => {
-        await tx.unsafe("alter table public.chips_legacy_stage_allowlist_proofs disable trigger chips_legacy_stage_allowlist_proofs_guard;");
-        await tx.unsafe("alter table public.chips_transaction_idempotency disable trigger chips_transaction_idempotency_guard;");
-        await tx.unsafe("alter table public.chips_entries disable trigger chips_entries_block_deletes;");
-        await tx.unsafe("alter table public.chips_transactions disable trigger chips_transactions_block_deletes;");
-        await tx.unsafe("alter table public.chips_ledger_archive_batches disable trigger chips_ledger_archive_batches_guard;");
+        // This is a disposable database fixture.  Bypass its append-only
+        // teardown triggers only in this local cleanup transaction; the
+        // production path never changes session_replication_role.
+        await tx.unsafe("set local session_replication_role = 'replica';");
         await tx.unsafe("delete from public.chips_transaction_idempotency where transaction_id = any($1::uuid[]) or idempotency_key = any($2::text[]);", [fixture.transactionIds, fixture.keys]);
         await tx.unsafe("delete from public.chips_entries where id = any($1::bigint[]);", [fixture.entryIds]);
         await tx.unsafe("delete from public.chips_transactions where id = any($1::uuid[]);", [fixture.transactionIds]);
         await tx.unsafe("delete from public.chips_legacy_stage_allowlist_proofs where batch_id = $1::bigint;", [fixture.batchId]);
-        await tx.unsafe("alter table public.chips_legacy_stage_allowlist_proofs enable trigger chips_legacy_stage_allowlist_proofs_guard;");
-        await tx.unsafe("alter table public.chips_transaction_idempotency enable trigger chips_transaction_idempotency_guard;");
         await tx.unsafe("delete from public.chips_ledger_archive_batches where batch_id = $1::bigint;", [fixture.batchId]);
         await tx.unsafe("delete from public.chips_accounts where id = any($1::uuid[]);", [[fixture.systemAccountId, ...fixture.escrowAccountIds]]);
         await tx.unsafe("delete from public.poker_tables where id = any($1::uuid[]);", [fixture.tableIds]);
-        await tx.unsafe("alter table public.chips_ledger_archive_batches enable trigger chips_ledger_archive_batches_guard;");
-        await tx.unsafe("alter table public.chips_transactions enable trigger chips_transactions_block_deletes;");
-        await tx.unsafe("alter table public.chips_entries enable trigger chips_entries_block_deletes;");
       });
     }
     await Promise.all([
