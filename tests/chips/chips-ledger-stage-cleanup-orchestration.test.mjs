@@ -3503,11 +3503,13 @@ async function disposableLegacyDryRunConcurrencyContract(dbUrl) {
     if (fixture) {
       await setupSql.begin(async (tx) => {
         await tx.unsafe("alter table public.chips_legacy_stage_allowlist_proofs disable trigger chips_legacy_stage_allowlist_proofs_guard;");
+        await tx.unsafe("alter table public.chips_transaction_idempotency disable trigger chips_transaction_idempotency_guard;");
         await tx.unsafe("delete from public.chips_transaction_idempotency where transaction_id = any($1::uuid[]) or idempotency_key = any($2::text[]);", [fixture.transactionIds, fixture.keys]);
         await tx.unsafe("delete from public.chips_entries where id = any($1::bigint[]);", [fixture.entryIds]);
         await tx.unsafe("delete from public.chips_transactions where id = any($1::uuid[]);", [fixture.transactionIds]);
         await tx.unsafe("delete from public.chips_legacy_stage_allowlist_proofs where batch_id = $1::bigint;", [fixture.batchId]);
         await tx.unsafe("alter table public.chips_legacy_stage_allowlist_proofs enable trigger chips_legacy_stage_allowlist_proofs_guard;");
+        await tx.unsafe("alter table public.chips_transaction_idempotency enable trigger chips_transaction_idempotency_guard;");
         await tx.unsafe("delete from public.chips_ledger_archive_batches where batch_id = $1::bigint;", [fixture.batchId]);
         await tx.unsafe("delete from public.chips_accounts where id = any($1::uuid[]);", [[fixture.systemAccountId, ...fixture.escrowAccountIds]]);
         await tx.unsafe("delete from public.poker_tables where id = any($1::uuid[]);", [fixture.tableIds]);
