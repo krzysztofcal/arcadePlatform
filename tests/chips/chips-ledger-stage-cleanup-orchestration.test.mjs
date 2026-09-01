@@ -8,8 +8,10 @@ import postgres from "postgres";
 import {
   BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN,
   BOT_ONLY_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS,
+  DURABLE_RECOVERY_STATES,
   assertAutomaticBotOnlyRecoveryReconstructionState,
   executeVerifiedCycle,
+  inspectDurableRecoveryState,
   runAutomaticBotOnlyStageAutomation,
 } from "../../scripts/ops/chips-ledger-stage-automation.mjs";
 import {
@@ -33,7 +35,12 @@ import {
   buildRecoveryManifest,
   createPruneStore,
 } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
-import { ARCHIVE_BUCKET, verifyLocalArchive } from "../../scripts/ops/chips-ledger-archive-store.mjs";
+import {
+  ARCHIVE_BUCKET,
+  buildRecoveryArchiveObjectPath,
+  buildRecoveryManifestObjectPath,
+  verifyLocalArchive,
+} from "../../scripts/ops/chips-ledger-archive-store.mjs";
 
 const root = process.cwd();
 const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-automation.yml", "utf8");
@@ -163,6 +170,7 @@ function fakeScheduler({
   const executionCounts = new Map();
   const state = {
     candidateCalls: 0,
+    exportCalls: 0,
     storeCalls: 0,
     executeCalls: 0,
     realExecuteCalls: 0,
@@ -254,6 +262,7 @@ function fakeScheduler({
     verifyBucket: async () => {},
     ensureArchiveBucket: async () => {},
     exportArchive: async () => {
+      state.exportCalls += 1;
       if (state.candidateCalls >= candidateCount) {
         return {
           noCandidate: true,
@@ -671,6 +680,163 @@ function makeTestAutomaticDurableRecovery(row, archiveBytes) {
   };
 }
 
+async function durableRecoveryInspectionContracts() {
+  const proven = makeProvenAutomaticRow("28");
+  const durable = makeTestAutomaticDurableRecovery(proven.row, proven.archiveBytes);
+  const objects = new Map([
+    [durable.archivePath, durable.archiveBytes],
+    [durable.manifestPath, durable.manifestGzipBytes],
+  ]);
+  const storageDeps = {
+    fetch: async (url) => {
+      const pathname = new URL(url).pathname;
+      const prefix = `/storage/v1/object/authenticated/${ARCHIVE_BUCKET}/`;
+      const objectPath = pathname.startsWith(prefix)
+        ? pathname.slice(prefix.length).split("/").map(decodeURIComponent).join("/")
+        : null;
+      const bytes = objectPath == null ? null : objects.get(objectPath);
+      return bytes
+        ? new Response(bytes, { status: 200, headers: { "content-type": "application/gzip" } })
+        : new Response("not found", { status: 404 });
+    },
+  };
+  const complete = await inspectDurableRecoveryState(
+    { target: "stage", projectRef: "krydukthwdvccggbyjfw", baseUrl: "https://storage.example.test", serviceKey: "stage-test-key" },
+    proven.row,
+    storageDeps,
+  );
+  assert.equal(complete.state, DURABLE_RECOVERY_STATES.COMPLETE);
+  assert.equal(complete.durable.archiveSha256, proven.row.compressed_sha256);
+  assert.equal(complete.storage.archive.present, true);
+  assert.equal(complete.storage.manifest.present, true);
+  assert.equal(complete.storage.archive.size, proven.archiveBytes.length);
+
+  objects.clear();
+  const bothMissing = await inspectDurableRecoveryState(
+    { target: "stage", projectRef: "krydukthwdvccggbyjfw", baseUrl: "https://storage.example.test", serviceKey: "stage-test-key" },
+    proven.row,
+    storageDeps,
+  );
+  assert.equal(bothMissing.state, DURABLE_RECOVERY_STATES.BOTH_MISSING);
+  assert.equal(bothMissing.storage.archive.present, false);
+  assert.equal(bothMissing.storage.manifest.present, false);
+
+  objects.set(durable.archivePath, durable.archiveBytes);
+  const partial = await inspectDurableRecoveryState(
+    { target: "stage", projectRef: "krydukthwdvccggbyjfw", baseUrl: "https://storage.example.test", serviceKey: "stage-test-key" },
+    proven.row,
+    storageDeps,
+  );
+  assert.equal(partial.state, DURABLE_RECOVERY_STATES.PARTIAL);
+  assert.equal(partial.storage.archive.present, true);
+  assert.equal(partial.storage.manifest.present, false);
+
+  objects.set(durable.manifestPath, durable.manifestGzipBytes);
+  objects.set(durable.archivePath, Buffer.from("foreign recovery archive"));
+  const mismatch = await inspectDurableRecoveryState(
+    { target: "stage", projectRef: "krydukthwdvccggbyjfw", baseUrl: "https://storage.example.test", serviceKey: "stage-test-key" },
+    proven.row,
+    storageDeps,
+  );
+  assert.equal(mismatch.state, DURABLE_RECOVERY_STATES.MISMATCH);
+  assert.match(mismatch.error.message, /checksum or size differs/);
+
+  const legacyArchiveBytes = Buffer.from("verified legacy recovery archive");
+  const legacyArchiveSha256 = crypto.createHash("sha256").update(legacyArchiveBytes).digest("hex");
+  const legacyRow = {
+    object_path: `v1/sha256/${legacyArchiveSha256}.jsonl.gz`,
+    batch_id: "110",
+    project_ref: "krydukthwdvccggbyjfw",
+    format_version: BOT_ONLY_EXPORT_SCHEMA_VERSION,
+    cutoff: "2026-08-17T16:51:28.074Z",
+    cursor_start_created_at: null,
+    cursor_start_id: null,
+    cursor_end_created_at: "2026-08-17T16:50:00.000000Z",
+    cursor_end_id: "00000000-0000-4000-8000-000000000001",
+    first_created_at: "2026-08-17T16:40:00.000000Z",
+    last_created_at: "2026-08-17T16:50:00.000000Z",
+    transaction_count: 1,
+    entry_count: 2,
+    tx_types: { TABLE_BUY_IN: 1 },
+    raw_bytes: 123,
+    compressed_bytes: legacyArchiveBytes.length,
+    raw_sha256: "1".repeat(64),
+    compressed_sha256: legacyArchiveSha256,
+    credits: "100",
+    debits: "100",
+    net_amount: "0",
+    source_policy_id: LEGACY_STAGE_ALLOWLIST_POLICY_ID,
+    legacy_allowlist_sha256: "2".repeat(64),
+    legacy_batch_table_ids_sha256: "3".repeat(64),
+    legacy_master_table_ids: ["00000000-0000-4000-8000-000000000002"],
+    legacy_master_table_count: 1,
+    legacy_batch_number: 22,
+    legacy_batch_table_count: 1,
+    legacy_source_run: "32753223679",
+    legacy_query_sha256: "4".repeat(64),
+    legacy_stage_system_identifier: "7656985631720456337",
+    archived_transaction_ids_sha256: "5".repeat(64),
+    archived_entry_ids_sha256: "6".repeat(64),
+  };
+  const legacyEvidence = {
+    transactionIdsSha256: legacyRow.archived_transaction_ids_sha256,
+    entryIdsSha256: legacyRow.archived_entry_ids_sha256,
+    legacyMasterTableIdsSha256: legacyRow.legacy_allowlist_sha256,
+  };
+  const legacyManifest = buildRecoveryManifest(
+    legacyRow,
+    legacyRow.legacy_stage_system_identifier,
+    legacyEvidence,
+    { target: "stage" },
+  );
+  const legacyManifestBytes = Buffer.from(`${JSON.stringify(legacyManifest)}\n`);
+  const legacyManifestGzipBytes = gzipSync(legacyManifestBytes, { level: 9, mtime: 0 });
+  const legacyRecoveryObjects = new Map([
+    [buildRecoveryArchiveObjectPath(legacyRow.compressed_sha256), legacyArchiveBytes],
+    [buildRecoveryManifestObjectPath(legacyRow.compressed_sha256), legacyManifestGzipBytes],
+  ]);
+  const legacyStorageDeps = {
+    fetch: async (url) => {
+      const pathname = new URL(url).pathname;
+      const prefix = `/storage/v1/object/authenticated/${ARCHIVE_BUCKET}/`;
+      const objectPath = pathname.startsWith(prefix)
+        ? pathname.slice(prefix.length).split("/").map(decodeURIComponent).join("/")
+        : null;
+      const bytes = objectPath == null ? null : legacyRecoveryObjects.get(objectPath);
+      return bytes
+        ? new Response(bytes, { status: 200, headers: { "content-type": "application/gzip" } })
+        : new Response("not found", { status: 404 });
+    },
+  };
+  const legacyComplete = await inspectDurableRecoveryState(
+    { target: "stage", projectRef: "krydukthwdvccggbyjfw", baseUrl: "https://storage.example.test", serviceKey: "stage-test-key" },
+    legacyRow,
+    legacyStorageDeps,
+  );
+  assert.equal(legacyComplete.state, DURABLE_RECOVERY_STATES.COMPLETE);
+  assert.equal(legacyComplete.durable.manifest.legacy_stage_allowlist.batch_number, 22);
+  assert.equal(legacyComplete.durable.manifestSha256, crypto.createHash("sha256").update(legacyManifestGzipBytes).digest("hex"));
+
+  const alteredLegacyManifest = {
+    ...legacyManifest,
+    legacy_stage_allowlist: {
+      ...legacyManifest.legacy_stage_allowlist,
+      query_sha256: "7".repeat(64),
+    },
+  };
+  legacyRecoveryObjects.set(
+    buildRecoveryManifestObjectPath(legacyRow.compressed_sha256),
+    gzipSync(Buffer.from(`${JSON.stringify(alteredLegacyManifest)}\n`), { level: 9, mtime: 0 }),
+  );
+  const legacyMismatch = await inspectDurableRecoveryState(
+    { target: "stage", projectRef: "krydukthwdvccggbyjfw", baseUrl: "https://storage.example.test", serviceKey: "stage-test-key" },
+    legacyRow,
+    legacyStorageDeps,
+  );
+  assert.equal(legacyMismatch.state, DURABLE_RECOVERY_STATES.MISMATCH);
+  assert.match(legacyMismatch.error.message, /committed legacy evidence/);
+}
+
 async function captureAutomaticFailure(scheduler) {
   const originalStdoutWrite = process.stdout.write;
   const originalSummaryPath = process.env.GITHUB_STEP_SUMMARY;
@@ -770,6 +936,10 @@ async function schedulerContracts() {
   assert.deepEqual(enabledResult.processed.map((row) => row.dbMutationConfirmed), [true, true, true]);
   assert.deepEqual(enabledResult.processed.map((row) => row.retryState), ["already_cleaned", "already_cleaned", "already_cleaned"]);
   assert.equal(enabledResult.stopReason, "no_eligible_bot_only_table");
+  assert.equal(enabled.state.exportCalls, 4, "three fresh exports plus one bounded no-candidate probe");
+  assert.equal(enabled.state.exportCalls - enabled.state.storeCalls, 1, "each fresh automatic batch is exported exactly once");
+  assert.equal(enabled.state.proofRegisterCalls, 3, "fresh automatic batches register proof exactly once");
+  assert.equal(enabled.state.persistCalls, 3, "fresh automatic batches persist recovery exactly once");
   assert.equal(enabled.state.storeCalls, 3);
 
   const noCandidate = fakeScheduler({ enabled: true, candidateCount: 0 });
@@ -1668,13 +1838,15 @@ async function legacyOrchestratorContracts() {
     pruned_entry_ids_sha256: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.entryIdsSha256,
     registry_cleaned_keys_sha256: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.registryKeysSha256,
   };
+  const archiveBytesByObjectPath = new Map();
   const makeLegacyRow = (batchNumber, { complete = true } = {}) => {
-    const digest = `${batchNumber.toString(16).padStart(2, "0")}${"a".repeat(62)}`;
+    const archiveBytes = Buffer.from(`legacy archive ${batchNumber}`);
+    const digest = crypto.createHash("sha256").update(archiveBytes).digest("hex");
     const row = {
       object_path: `v1/sha256/${digest}.jsonl.gz`,
       batch_id: String(2000 + batchNumber),
       project_ref: "krydukthwdvccggbyjfw",
-      format_version: "2",
+      format_version: 2,
       status: "committed",
       cutoff: "2026-08-17T16:51:28.074Z",
       source_policy_id: "legacy_stage_allowlist_v1",
@@ -1685,12 +1857,15 @@ async function legacyOrchestratorContracts() {
       legacy_batch_table_count: "10",
       legacy_allowlist_sha256: contract.masterAllowlistSha256,
       legacy_batch_table_ids_sha256: "c".repeat(64),
+      legacy_master_table_ids: frozen.masterManifest.table_ids,
+      legacy_master_table_count: String(LEGACY_STAGE_ALLOWLIST_TABLE_COUNT),
       transaction_count: "1",
       entry_count: "2",
       compressed_sha256: digest,
-      compressed_bytes: "10",
+      compressed_bytes: String(archiveBytes.length),
       committed_at: "2026-08-25T00:00:00Z",
     };
+    archiveBytesByObjectPath.set(row.object_path, archiveBytes);
     if (complete) {
       Object.assign(row, {
         archive_proof_verified_at: "2026-08-25T00:00:00Z",
@@ -1747,6 +1922,8 @@ async function legacyOrchestratorContracts() {
   };
   const calls = [];
   let retryPreflightCalls = 0;
+  let recoveryInspectCalls = 0;
+  let recoveryPersistCalls = 0;
   const evidence = {
     transactionCount: 1,
     entryCount: 2,
@@ -1758,6 +1935,10 @@ async function legacyOrchestratorContracts() {
     entryIdsSha256: "e".repeat(64),
     registryKeys: ["legacy:registry:key"],
     registryKeysSha256: "f".repeat(64),
+    legacyMasterTableIds: frozen.masterManifest.table_ids,
+    legacyMasterTableIdsSha256: contract.masterAllowlistSha256,
+    legacyAllowlistSha256: contract.masterAllowlistSha256,
+    legacyBatchTableIdsSha256: "c".repeat(64),
   };
   const result = await runLegacyStageAllowlistOrchestrator({
     env: { ...ENV },
@@ -1769,13 +1950,34 @@ async function legacyOrchestratorContracts() {
       storageTarget: { target: "stage", projectRef: "krydukthwdvccggbyjfw" },
       verifyBucket: async () => {},
       pruneStore: { getManifest: async (objectPath) => manifests.get(objectPath) || null },
-      inspectDurableRecovery: async () => null,
-      downloadPrivateArchive: async () => ({ bytes: Buffer.from("legacy archive"), downloadMs: 0 }),
-      persistDurableRecovery: async () => ({
-        archiveBytes: Buffer.from("legacy archive"),
-        manifestBytes: Buffer.from("{}"),
-        manifestGzipBytes: Buffer.from("gzip"),
+      inspectDurableRecovery: async () => {
+        recoveryInspectCalls += 1;
+        return null;
+      },
+      downloadPrivateArchive: async (_target, objectPath) => ({
+        bytes: archiveBytesByObjectPath.get(objectPath),
+        downloadMs: 0,
       }),
+      persistDurableRecovery: async (_target, row, identity, rowEvidence, archiveBytes) => {
+        recoveryPersistCalls += 1;
+        const manifest = buildRecoveryManifest(row, identity, rowEvidence, { target: "stage" });
+        const manifestBytes = Buffer.from(`${JSON.stringify(manifest)}\n`);
+        const manifestGzipBytes = gzipSync(manifestBytes, { level: 9, mtime: 0 });
+        const recoveryArchivePath = `recovery/v1/sha256/${row.compressed_sha256}.jsonl.gz`;
+        const recoveryManifestPath = `recovery/v1/sha256/${row.compressed_sha256}.recovery.json.gz`;
+        return {
+          archiveBytes,
+          manifestBytes,
+          manifestGzipBytes,
+          manifest,
+          archivePath: recoveryArchivePath,
+          manifestPath: recoveryManifestPath,
+          archiveSha256: crypto.createHash("sha256").update(archiveBytes).digest("hex"),
+          manifestSha256: crypto.createHash("sha256").update(manifestGzipBytes).digest("hex"),
+          recoveryArchive: { objectPath: recoveryArchivePath, uploaded: true, sha256: row.compressed_sha256 },
+          recoveryManifest: { objectPath: recoveryManifestPath, uploaded: true, sha256: crypto.createHash("sha256").update(manifestGzipBytes).digest("hex") },
+        };
+      },
       pruneArchive: async ({ argv, deps: pruneDeps }) => {
         const batchNumber = Number(pruneDeps.legacyStageAllowlistPlan.batchNumber);
         calls.push(argv);
@@ -1819,6 +2021,11 @@ async function legacyOrchestratorContracts() {
   assert.equal(result.remainingBatchCount, 86);
   assert.equal(calls.filter((argv) => argv.includes("--execute")).length, 1, "batch 12 must execute once after completed batches are skipped");
   assert.equal(retryPreflightCalls, 1, "legacy execute retry must revalidate the run, batch, GO, receipt, and advisory lock");
+  assert.equal(recoveryInspectCalls, 1, "legacy recovery is inspected once before reconstruction");
+  assert.equal(recoveryPersistCalls, 1, "legacy recovery reconstruction writes once");
+  assert.equal(result.processed.at(-1).recoveryState, "reconstructed");
+  assert.equal(result.processed.at(-1).storageState, "complete");
+  assert.equal(result.processed.at(-1).recoveryAttempts, 2);
 }
 
 async function legacyOrchestratorPrepareExportContract() {
@@ -1972,6 +2179,7 @@ async function legacyOrchestratorPrepareExportContract() {
   let exported = null;
   let writtenManifest = null;
   let pruneCalls = 0;
+  let capturedError = null;
   try {
     await assert.rejects(
       () => runLegacyStageAllowlistOrchestrator({
@@ -2014,8 +2222,15 @@ async function legacyOrchestratorPrepareExportContract() {
           },
         },
       }),
-      /stop after legacy orchestrator prepare\/export contract/,
+      (error) => {
+        capturedError = error;
+        return /stop after legacy orchestrator prepare\/export contract/.test(error.message);
+      },
     );
+    assert.equal(capturedError.phase, "prepare/manifest");
+    assert.equal(capturedError.batch_number, batchNumber);
+    assert.equal(capturedError.attempts, 1);
+    assert.equal(capturedError.sqlstate, null);
     assert.equal(observedCandidateParameters.length, 1);
     assert.equal(observedCandidateParameters[0][4], plan.batchTableIdsSha256);
     assert.equal(exported.legacy_stage_allowlist.batch_table_ids_sha256, plan.archiveManifest.batch_table_ids_sha256);
@@ -2041,6 +2256,10 @@ async function legacyOrchestratorBatchTempIsolationContract() {
   const prepareDirectories = new Map();
   const dryRunCounts = new Map();
   const pruneCalls = [];
+  let exportCalls = 0;
+  let proofRegisterCalls = 0;
+  let storageGetCalls = 0;
+  let storagePostCalls = 0;
   const uuidFor = (number) => `00000000-0000-4000-8000-${String(number).padStart(12, "0")}`;
   const batch13 = {
     object_path: LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.objectPath,
@@ -2226,6 +2445,7 @@ async function legacyOrchestratorBatchTempIsolationContract() {
         ensureBucket: async () => {},
         uploadPlan: async ({ objectPath }) => ({ objectPath }),
         exportArchive: async (options) => {
+          exportCalls += 1;
           const batchNumber = Number(options.deps.legacyStageAllowlistPlan.batchNumber);
           prepareDirectories.set(batchNumber, options.cwd);
           const exported = await runExport(options);
@@ -2255,7 +2475,7 @@ async function legacyOrchestratorBatchTempIsolationContract() {
             object_path: objectPath,
             batch_id: String(70 + batchNumber),
             project_ref: "krydukthwdvccggbyjfw",
-            format_version: "2",
+            format_version: BOT_ONLY_EXPORT_SCHEMA_VERSION,
             cutoff: storeDeps.legacyStageAllowlistPlan.cutoff,
             cursor_start_created_at: null,
             cursor_start_id: null,
@@ -2305,26 +2525,29 @@ async function legacyOrchestratorBatchTempIsolationContract() {
           pruneCalls.push(argv);
           assert.ok(row, `batch ${batchNumber} must have a stored manifest`);
           if (argv.includes("--register-proof")) {
+            proofRegisterCalls += 1;
             row.archive_proof_verified_at = `2026-08-31T00:00:0${batchNumber}Z`;
             row.archived_transaction_ids_sha256 = evidence.transactionIdsSha256;
             row.archived_entry_ids_sha256 = evidence.entryIdsSha256;
             return { state: "proof_registered" };
           }
-          if (argv.includes("--execute")) throw new Error("batch isolation test must not execute cleanup");
+          if (argv.includes("--execute")) {
+            Object.assign(row, {
+              pruned_at: `2026-08-31T00:00:1${batchNumber}Z`,
+              registry_cleaned_at: `2026-08-31T00:00:1${batchNumber}Z`,
+              pruned_transaction_count: "1",
+              pruned_entry_count: "2",
+              registry_cleaned_key_count: "1",
+              pruned_transaction_ids_sha256: evidence.transactionIdsSha256,
+              pruned_entry_ids_sha256: evidence.entryIdsSha256,
+              registry_cleaned_keys_sha256: evidence.registryKeysSha256,
+            });
+            return { state: "pruned", evidence };
+          }
           const dryRunCount = (dryRunCounts.get(batchNumber) || 0) + 1;
           dryRunCounts.set(batchNumber, dryRunCount);
-          if (dryRunCount === 1) return { state: "ready", evidence };
-          Object.assign(row, {
-            pruned_at: `2026-08-31T00:00:1${batchNumber}Z`,
-            registry_cleaned_at: `2026-08-31T00:00:1${batchNumber}Z`,
-            pruned_transaction_count: "1",
-            pruned_entry_count: "2",
-            registry_cleaned_key_count: "1",
-            pruned_transaction_ids_sha256: evidence.transactionIdsSha256,
-            pruned_entry_ids_sha256: evidence.entryIdsSha256,
-            registry_cleaned_keys_sha256: evidence.registryKeysSha256,
-          });
-          return { state: "already_pruned", evidence };
+          if (dryRunCount <= 2) return { state: "ready", evidence };
+          throw new Error("batch isolation test must not dry-run a third time");
         },
         downloadArchive: async (_storageTarget, objectPath) => ({
           bytes: archiveBytesByObjectPath.get(objectPath),
@@ -2341,6 +2564,7 @@ async function legacyOrchestratorBatchTempIsolationContract() {
           );
           const method = init.method || "GET";
           if (method === "GET") {
+            storageGetCalls += 1;
             const bytes = durableObjects.get(objectPath);
             return bytes
               ? new Response(bytes, { status: 200, headers: { "content-type": "application/gzip" } })
@@ -2350,6 +2574,7 @@ async function legacyOrchestratorBatchTempIsolationContract() {
               });
           }
           if (method === "POST") {
+            storagePostCalls += 1;
             const headers = new Headers(init.headers || {});
             assert.equal(headers.get("x-upsert"), "false");
             assert.equal(headers.get("content-type"), "application/gzip");
@@ -2367,9 +2592,13 @@ async function legacyOrchestratorBatchTempIsolationContract() {
     assert.deepEqual(result.processed.map((row) => row.batchNumber), [2, 3]);
     assert.equal(result.consumedBatchCount, 2);
     assert.equal(prepareDirectories.size, 2);
+    assert.equal(exportCalls, 2, "fresh legacy batches export once each");
+    assert.equal(proofRegisterCalls, 2, "fresh legacy batches register proof once each");
+    assert.equal(storagePostCalls, 4, "fresh legacy prepare writes exactly two recovery objects per batch");
+    assert.equal(storageGetCalls, 16, "the execute hand-off reuses prepared durable recovery without a second inspect");
     assert.notEqual(prepareDirectories.get(2), prepareDirectories.get(3));
     assert.ok([...prepareDirectories.values()].every((directory) => directory.startsWith(`${tempRoot}/`)));
-    assert.equal(pruneCalls.some((argv) => argv.includes("--execute")), false, "the test must not execute cleanup or retry");
+    assert.equal(pruneCalls.filter((argv) => argv.includes("--execute")).length, 2, "fresh prepare must hand off to execute once per batch");
     for (const batchNumber of [2, 3]) {
       const directoryEntries = fs.readdirSync(prepareDirectories.get(batchNumber)).sort();
       assert.deepEqual(directoryEntries, [
@@ -2435,6 +2664,7 @@ function staticWorkflowContracts() {
 
 staticOrchestrationContract();
 staticWorkflowContracts();
+await durableRecoveryInspectionContracts();
 await schedulerContracts();
 await legacyOrchestratedPruneArgumentTypesContract();
 await legacyOrchestratorPrepareExportContract();

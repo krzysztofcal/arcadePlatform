@@ -897,13 +897,33 @@ export async function downloadPrivateArchiveObject(storageTarget, objectPath, de
 }
 
 export async function downloadPrivateObjectIfExists(storageTarget, objectPath, deps = {}) {
+  const object = await readPrivateObjectIfExists(storageTarget, objectPath, deps);
+  return object?.bytes || null;
+}
+
+export async function readPrivateObjectIfExists(storageTarget, objectPath, deps = {}) {
   const response = await storageRequest(storageTarget, objectRequestPath(objectPath), { method: "GET" }, deps);
   if (await isMissingStorageResponse(response)) return null;
   if (!response.ok) storageFailure("private object download", response);
-  if ((response.headers.get("content-type") || "").split(";", 1)[0].trim() !== ARCHIVE_MIME_TYPE) {
+  const mimeType = (response.headers.get("content-type") || "").split(";", 1)[0].trim();
+  if (mimeType !== ARCHIVE_MIME_TYPE) {
     fail(`private recovery object has an unexpected MIME type: ${objectPath}`);
   }
-  return Buffer.from(await response.arrayBuffer());
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const contentLengthHeader = response.headers.get("content-length");
+  const contentLength = contentLengthHeader == null ? null : Number(contentLengthHeader);
+  if (bytes.length < 1 || bytes.length > ARCHIVE_MAX_BYTES
+    || (contentLength != null && (!Number.isSafeInteger(contentLength) || contentLength !== bytes.length))) {
+    fail(`private recovery object has an invalid size: ${objectPath}`);
+  }
+  return {
+    objectPath,
+    mimeType,
+    bytes,
+    size: bytes.length,
+    contentLength: Number.isSafeInteger(contentLength) ? contentLength : null,
+    sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
+  };
 }
 
 export async function uploadOrVerifyPrivateObject({ storageTarget, objectPath, bytes, mimeType = ARCHIVE_MIME_TYPE, deps = {} }) {
@@ -932,19 +952,36 @@ export async function uploadOrVerifyPrivateObject({ storageTarget, objectPath, b
     uploaded = upload.ok;
     objectExisted = !uploaded;
   }
-  const verified = await storageRequest(storageTarget, objectRequestPath(objectPath), { method: "GET" }, deps);
-  if (!verified.ok) storageFailure("private recovery object verification", verified);
-  if ((verified.headers.get("content-type") || "").split(";", 1)[0].trim() !== mimeType) {
-    fail(`private recovery object verification has an unexpected MIME type: ${objectPath}`);
+  const verificationReadAttempts = initial.ok ? 1 : STORAGE_GET_MAX_ATTEMPTS;
+  let verified = null;
+  for (let attempt = 1; attempt <= verificationReadAttempts; attempt += 1) {
+    const response = await storageRequest(storageTarget, objectRequestPath(objectPath), { method: "GET" }, deps);
+    if (await isMissingStorageResponse(response)) {
+      if (attempt < verificationReadAttempts) {
+        await waitForStorageGetRetry(deps, attempt);
+        continue;
+      }
+      const error = new Error(`private recovery object verification is not visible after ${attempt} reads: ${objectPath}`);
+      error.storageState = "write_not_visible";
+      error.storageAttempts = attempt;
+      throw error;
+    }
+    if (!response.ok) storageFailure("private recovery object verification", response);
+    if ((response.headers.get("content-type") || "").split(";", 1)[0].trim() !== mimeType) {
+      fail(`private recovery object verification has an unexpected MIME type: ${objectPath}`);
+    }
+    const downloaded = Buffer.from(await response.arrayBuffer());
+    if (!downloaded.equals(expected)) fail(`private recovery object verification differs: ${objectPath}`);
+    verified = downloaded;
+    break;
   }
-  const downloaded = Buffer.from(await verified.arrayBuffer());
-  if (!downloaded.equals(expected)) fail(`private recovery object verification differs: ${objectPath}`);
+  if (!verified) fail(`private recovery object verification failed: ${objectPath}`);
   return {
     objectPath,
     objectExisted,
     uploaded,
-    bytes: downloaded.length,
-    sha256: crypto.createHash("sha256").update(downloaded).digest("hex"),
+    bytes: verified.length,
+    sha256: crypto.createHash("sha256").update(verified).digest("hex"),
   };
 }
 

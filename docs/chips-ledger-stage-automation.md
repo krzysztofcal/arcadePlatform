@@ -102,14 +102,20 @@ these recovery objects and does not require the primary archive object.
 
 Authenticated Storage `GET` requests use at most three total attempts with a
 short backoff, and retry only 5xx responses or transient network failures.
-Client/auth/not-found responses are not retried, and Storage writes are never
-retried. Every successful download still requires the expected MIME type and
-byte/SHA-256 verification.
+Client/auth/not-found responses are not retried during an ordinary read, except
+that a not-found result from the bounded post-create verification read may be
+rechecked for read-after-write visibility. The create-only Storage `POST` is
+never retried. Every successful download still requires the expected MIME type
+and byte/SHA-256 verification.
 
 Automatic error reports retain both completed `processed_batches` and the
 current in-progress batch. They distinguish `archive_storage_modified` from
 `recovery_storage_modified`; `storage_modified` is their explicitly known
 aggregate and is null when a partial operation leaves the outcome unknown.
+Legacy recovery failures are reported as phase `recovery` with the batch number,
+batch ID, recovery attempts, per-object Storage presence/MIME/size/SHA-256 and
+an explicit state such as `both_missing`, `partial`, `mismatch` or
+`write_not_visible`.
 
 The local working bundle remains `0700` with `0600` files. A partial or
 different durable copy is fail-closed. Automatic mode may reconstruct a pair

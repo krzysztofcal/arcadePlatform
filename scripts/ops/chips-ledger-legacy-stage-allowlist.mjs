@@ -29,9 +29,11 @@ import {
   verifyArchiveBucket,
 } from "./chips-ledger-archive-store.mjs";
 import {
+  LEGACY_STAGE_PHASES,
   buildRecoveryManifest,
   createPruneStore,
   pruneArchive,
+  sqlStateOf,
 } from "./chips-ledger-archive-prune.mjs";
 import {
   STAGE_AUTOMATION_LOCK_KEY,
@@ -72,6 +74,48 @@ function fail(message) {
 
 function text(value) {
   return value == null ? "" : String(value).trim();
+}
+
+function annotateLegacyPhaseError(error, {
+  phase,
+  row = null,
+  batchNumber = null,
+  attempts = 1,
+} = {}) {
+  if (!error || typeof error !== "object") return error;
+  const sqlstates = Array.isArray(error.sqlstates)
+    ? [...error.sqlstates]
+    : Array.isArray(error.executeSqlstates)
+      ? [...error.executeSqlstates]
+      : [];
+  const recoveryAttempts = error.recoveryAttempts ?? error.storageAttempts ?? null;
+  const storageMutation = error.storageMutation?.recoveryStorageModified;
+  Object.assign(error, {
+    batch_number: batchNumber ?? error.batch_number ?? null,
+    batch_id: row?.batch_id == null ? (error.batch_id ?? null) : text(row.batch_id),
+    phase: phase || error.phase || null,
+    attempts: phase === LEGACY_STAGE_PHASES.RECOVERY
+      ? recoveryAttempts ?? error.attempts ?? attempts
+      : error.attempts ?? attempts,
+    sqlstate: sqlStateOf(error) || sqlstates.at(-1) || null,
+    sqlstates,
+    recoveryAttempts,
+    storageAttempts: error.storageAttempts ?? null,
+    recoveryState: error.recoveryState || null,
+    storageState: error.storageState
+      || error.recoveryState
+      || (storageMutation === true ? "modified" : storageMutation === false ? "unchanged" : storageMutation === null ? "unknown" : null),
+    storage: error.storage || null,
+  });
+  return error;
+}
+
+async function runLegacyPhase(phase, operation, context = {}) {
+  try {
+    return await operation();
+  } catch (error) {
+    throw annotateLegacyPhaseError(error, { ...context, phase });
+  }
 }
 
 function sha256(value) {
@@ -573,6 +617,7 @@ export async function runLegacyStagePrepareOnly({
   deps = {},
   batchNumber = 1,
   orchestration = null,
+  returnDurableRecovery = false,
 } = {}) {
   if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
     && process.argv.slice(2).length !== 0) fail("legacy Stage allowlist runner accepts no arguments");
@@ -605,7 +650,7 @@ export async function runLegacyStagePrepareOnly({
     const batchName = `batch-${String(plan.batchNumber).padStart(3, "0")}`;
     const artifactPath = path.join(tempRoot, `legacy-stage-${batchName}.archive.jsonl.gz`);
     const manifestPath = path.join(tempRoot, `legacy-stage-${batchName}.archive.manifest.json`);
-    const exported = await (deps.exportArchive || runExport)({
+    const exported = await runLegacyPhase(LEGACY_STAGE_PHASES.PREPARE_MANIFEST, () => (deps.exportArchive || runExport)({
       argv: [
         "--target", "stage", "--cutoff", plan.cutoff,
         "--batch-size", "5000", "--output", artifactPath, "--manifest", manifestPath,
@@ -622,7 +667,7 @@ export async function runLegacyStagePrepareOnly({
         noCandidateIfEmpty: true,
         emit: false,
       },
-    });
+    }), { batchNumber });
     if (exported.noCandidate) {
       return {
         state: "no-op",
@@ -643,25 +688,25 @@ export async function runLegacyStagePrepareOnly({
     }
     const immutableLegacyStageAllowlistEvidence = structuredClone(plan.archiveManifest);
     assertLegacyStageAllowlistEvidence(exported.legacy_stage_allowlist, immutableLegacyStageAllowlistEvidence);
-    verifyLocalArchive({
+    await runLegacyPhase(LEGACY_STAGE_PHASES.PREPARE_MANIFEST, () => verifyLocalArchive({
       artifactPath,
       manifestPath,
       target: storageTarget,
       expectedLegacyStageAllowlistEvidence: immutableLegacyStageAllowlistEvidence,
       requireLegacyStageAllowlistPlan: true,
-    });
-    await (deps.ensureBucket || ensureArchiveBucket)(storageTarget, deps);
+    }), { batchNumber });
+    await runLegacyPhase(LEGACY_STAGE_PHASES.PREPARE_MANIFEST, () => (deps.ensureBucket || ensureArchiveBucket)(storageTarget, deps), { batchNumber });
     const planObjects = [];
     for (const object of legacyPlanStorageObjects(plan, localPlan.files)) {
-      planObjects.push(await (deps.uploadPlan || uploadOrVerifyPrivateObject)({
+      planObjects.push(await runLegacyPhase(LEGACY_STAGE_PHASES.PREPARE_MANIFEST, () => (deps.uploadPlan || uploadOrVerifyPrivateObject)({
         storageTarget,
         objectPath: object.objectPath,
         bytes: object.bytes,
         deps,
-      }));
+      }), { batchNumber }));
     }
     await assertLock(sql, lockPid);
-    const stored = await (deps.storeArchive || storeArchive)({
+    const stored = await runLegacyPhase(LEGACY_STAGE_PHASES.PREPARE_MANIFEST, () => (deps.storeArchive || storeArchive)({
       argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
       env: moduleEnv,
       cwd: tempRoot,
@@ -673,9 +718,9 @@ export async function runLegacyStagePrepareOnly({
         legacyStageAllowlistPlan: plan,
         emit: false,
       },
-    });
-    let row = await pruneStore.getManifest(stored.objectPath);
-    const registered = await (deps.pruneArchive || pruneArchive)({
+    }), { batchNumber });
+    let row = await runLegacyPhase(LEGACY_STAGE_PHASES.PREPARE_MANIFEST, () => pruneStore.getManifest(stored.objectPath), { batchNumber });
+    const registered = await runLegacyPhase(LEGACY_STAGE_PHASES.PROOF_REGISTRATION, () => (deps.pruneArchive || pruneArchive)({
       argv: ["--target", "stage", "--object-path", row.object_path, "--confirm-sha", row.compressed_sha256, "--register-proof"],
       env: moduleEnv,
       cwd: tempRoot,
@@ -688,9 +733,9 @@ export async function runLegacyStagePrepareOnly({
         legacyStageAllowlistPlan: plan,
         emit: false,
       },
-    });
-    row = await pruneStore.getManifest(row.object_path);
-    const dryRun = await (deps.pruneArchive || pruneArchive)({
+    }), { row, batchNumber });
+    row = await runLegacyPhase(LEGACY_STAGE_PHASES.PROOF_REGISTRATION, () => pruneStore.getManifest(row.object_path), { row, batchNumber });
+    const dryRun = await runLegacyPhase(LEGACY_STAGE_PHASES.DRY_RUN, () => (deps.pruneArchive || pruneArchive)({
       argv: ["--target", "stage", "--object-path", row.object_path, "--confirm-sha", row.compressed_sha256],
       env: moduleEnv,
       cwd: tempRoot,
@@ -703,11 +748,23 @@ export async function runLegacyStagePrepareOnly({
         legacyStageAllowlistPlan: plan,
         emit: false,
       },
-    });
-    if (dryRun.state !== "ready") fail(`legacy Stage allowlist dry-run returned ${dryRun.state}`);
-    const main = await (deps.downloadArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, deps);
-    const durable = await persistDurableRecovery(storageTarget, row, preflight.systemIdentifier, dryRun.evidence, main.bytes, deps);
-    return {
+    }), { row, batchNumber });
+    if (dryRun.state !== "ready") {
+      throw annotateLegacyPhaseError(
+        new Error(`legacy Stage allowlist dry-run returned ${dryRun.state}`),
+        { phase: LEGACY_STAGE_PHASES.DRY_RUN, row, batchNumber },
+      );
+    }
+    const main = await runLegacyPhase(LEGACY_STAGE_PHASES.RECOVERY, () => (deps.downloadArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, deps), { row, batchNumber });
+    const durable = await runLegacyPhase(LEGACY_STAGE_PHASES.RECOVERY, () => persistDurableRecovery(
+      storageTarget,
+      row,
+      preflight.systemIdentifier,
+      dryRun.evidence,
+      main.bytes,
+      deps,
+    ), { row, batchNumber });
+    const result = {
       state: "prepared",
       mode: "prepare-only",
       reason: plan.runId ? "legacy_batch_ready_for_orchestrated_execution" : "legacy_batch_ready_for_human_go",
@@ -749,6 +806,7 @@ export async function runLegacyStagePrepareOnly({
         archiveSha256: durable.recoveryArchive.sha256,
         manifestSha256: durable.recoveryManifest.sha256,
       },
+      ...(returnDurableRecovery ? { durableRecovery: durable } : {}),
       ...(plan.batchNumber === 1 && !plan.runId ? { humanGo: {
         function: "public.chips_authorize_legacy_stage_allowlist_batch(bigint,text,text)",
         confirmation: `GO ${row.batch_id}`,
@@ -756,6 +814,7 @@ export async function runLegacyStagePrepareOnly({
         executeAfterAuthorization: "CHIPS_LEDGER_LEGACY_STAGE_ALLOWLIST_EXECUTE=1 node scripts/ops/chips-ledger-legacy-stage-allowlist-execute.mjs --batch-id <exact batch_id> --object-path <exact object_path> --confirm-sha <exact compressed_sha256> --recovery-dir <private dir>",
       } } : {}),
     };
+    return result;
   } finally {
     if (lockPid && !deps.lockAlreadyHeld) {
       try { await releaseLock(sql); } catch { /* connection close releases the advisory lock */ }

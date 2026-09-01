@@ -470,6 +470,66 @@ try {
   assert.equal(raced.sha256, crypto.createHash("sha256").update(racedBytes).digest("hex"));
   assert.deepEqual(racedCalls.map(({ method }) => method), ["GET", "POST", "GET"]);
 
+  const readAfterWriteObjectPath = `recovery/v1/sha256/${"e".repeat(64)}.jsonl.gz`;
+  const readAfterWriteCalls = [];
+  const readAfterWriteSleeps = [];
+  let readAfterWriteObject = null;
+  let hideFirstVerificationRead = false;
+  const readAfterWriteFetch = async (url, init = {}) => {
+    const method = init.method || "GET";
+    readAfterWriteCalls.push({ method, path: new URL(url).pathname });
+    if (method === "GET") {
+      if (!readAfterWriteObject || hideFirstVerificationRead) {
+        hideFirstVerificationRead = false;
+        return new Response("missing", { status: 404 });
+      }
+      return new Response(readAfterWriteObject, {
+        status: 200,
+        headers: { "content-type": "application/gzip" },
+      });
+    }
+    assert.equal(method, "POST");
+    assert.equal(new Headers(init.headers).get("x-upsert"), "false");
+    readAfterWriteObject = Buffer.from(init.body);
+    hideFirstVerificationRead = true;
+    return responseJson({ Key: new URL(url).pathname }, 200);
+  };
+  const readAfterWrite = await uploadOrVerifyPrivateObject({
+    storageTarget: resolveStorageTarget("stage", ENV),
+    objectPath: readAfterWriteObjectPath,
+    bytes: racedBytes,
+    deps: {
+      fetch: readAfterWriteFetch,
+      sleep: (milliseconds) => { readAfterWriteSleeps.push(milliseconds); },
+    },
+  });
+  assert.equal(readAfterWrite.objectExisted, false);
+  assert.equal(readAfterWrite.uploaded, true);
+  assert.deepEqual(readAfterWriteCalls.map(({ method }) => method), ["GET", "POST", "GET", "GET"]);
+  assert.deepEqual(readAfterWriteSleeps, [50], "read-after-write visibility gets one bounded delay");
+
+  const notVisibleCalls = [];
+  const notVisibleSleeps = [];
+  await assert.rejects(
+    () => uploadOrVerifyPrivateObject({
+      storageTarget: resolveStorageTarget("stage", ENV),
+      objectPath: `recovery/v1/sha256/${"f".repeat(64)}.jsonl.gz`,
+      bytes: racedBytes,
+      deps: {
+        fetch: async (_url, init = {}) => {
+          notVisibleCalls.push(init.method || "GET");
+          if ((init.method || "GET") === "POST") return responseJson({ ok: true }, 200);
+          return new Response("not found", { status: 404 });
+        },
+        sleep: (milliseconds) => { notVisibleSleeps.push(milliseconds); },
+      },
+    }),
+    (error) => error?.storageState === "write_not_visible"
+      && error?.storageAttempts === 3,
+  );
+  assert.deepEqual(notVisibleCalls, ["GET", "POST", "GET", "GET", "GET"]);
+  assert.deepEqual(notVisibleSleeps, [50, 100]);
+
   let foreignRacedObject = null;
   const foreignRacedCalls = [];
   const foreignRacedFetch = async (_url, init = {}) => {

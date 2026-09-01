@@ -43,6 +43,7 @@ export const LEGACY_STAGE_PHASES = Object.freeze({
   PREPARE_MANIFEST: "prepare/manifest",
   PROOF_REGISTRATION: "proof registration",
   DRY_RUN: "dry-run",
+  RECOVERY: "recovery",
   EXECUTE: "execute",
 });
 const LEGACY_EXECUTE_RECEIPT_FIELDS = Object.freeze([
@@ -919,7 +920,8 @@ export async function executeArchivePrune({ store, objectPath, evidence, execute
     try {
       return await store.prune(objectPath, evidence, execute);
     } catch (error) {
-      if (!execute || attempt === attempts || (error?.code !== "40001" && error?.code !== "55P03")) throw error;
+      const sqlstate = sqlStateOf(error);
+      if (!execute || attempt === attempts || !RETRYABLE_CLEANUP_SQLSTATES.has(sqlstate)) throw error;
     }
   }
   fail("archive pruning retry budget was exhausted");
