@@ -39,6 +39,16 @@ const MAX_EXECUTE_ATTEMPTS = 3;
 export const MAX_AUTOMATIC_CLEANUP_ATTEMPTS = 3;
 export const AUTOMATIC_CLEANUP_RETRY_BACKOFF_MS = Object.freeze([100, 250]);
 const RETRYABLE_CLEANUP_SQLSTATES = new Set(["40001", "55P03"]);
+const LEGACY_EXECUTE_RECEIPT_FIELDS = Object.freeze([
+  "pruned_at",
+  "pruned_transaction_count",
+  "pruned_entry_count",
+  "pruned_transaction_ids_sha256",
+  "pruned_entry_ids_sha256",
+  "registry_cleaned_at",
+  "registry_cleaned_key_count",
+  "registry_cleaned_keys_sha256",
+]);
 
 const HELP = `Usage: node scripts/ops/chips-ledger-archive-prune.mjs [options]
 
@@ -554,7 +564,14 @@ export function writeRecoveryBundle({ recoveryDir, archiveBytes, row, identity, 
   return { directory, artifactPath, manifestPath, manifest, reused };
 }
 
-export function verifyRecoveryBundle({ bundle, row, target, identity, expectedEvidence }) {
+export function verifyRecoveryBundle({
+  bundle,
+  row,
+  target,
+  identity,
+  expectedEvidence,
+  expectedLegacyStageAllowlistEvidence = null,
+}) {
   ensurePrivateDirectory(bundle.directory);
   assertPrivateRegularFile(bundle.artifactPath);
   assertPrivateRegularFile(bundle.manifestPath);
@@ -563,9 +580,12 @@ export function verifyRecoveryBundle({ bundle, row, target, identity, expectedEv
   if (canonicalJson(manifest) !== canonicalJson(expectedManifest)) fail("recovery manifest no longer matches archive evidence");
   const verified = verifyArchiveBytes({
     compressedBytes: fs.readFileSync(bundle.artifactPath),
-    manifest: exporterManifestFromDatabase(row, target),
+    manifest: exporterManifestFromDatabase(row, target, expectedLegacyStageAllowlistEvidence
+      ? { archiveManifest: expectedLegacyStageAllowlistEvidence }
+      : null),
     target,
     artifactName: path.basename(row.object_path),
+    expectedLegacyStageAllowlistEvidence,
   });
   const evidence = buildPruneEvidence(verified, { maxBatchSize: targetPolicy(target.target).maxBatchSize });
   if (evidence.transactionIdsSha256 !== expectedEvidence.transactionIdsSha256
@@ -888,6 +908,205 @@ function assertLegacyPostCommitVerification(verification, evidence) {
   }
 }
 
+function legacyExecuteReceiptState(row) {
+  const present = LEGACY_EXECUTE_RECEIPT_FIELDS.filter((field) => row[field] != null).length;
+  if (present === 0) return "ready";
+  if (present === LEGACY_EXECUTE_RECEIPT_FIELDS.length) return "already_pruned";
+  fail("legacy execute retry found a partial cleanup receipt");
+}
+
+function assertLegacyExecuteRetryManifest(row, previousRow, target, identity) {
+  assertTargetIdentity(identity, row, target);
+  if (row.status !== "committed" || !row.committed_at) fail("legacy execute retry manifest is not committed");
+  if (row.format_version !== BOT_ONLY_EXPORT_SCHEMA_VERSION
+    || row.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
+    fail("legacy execute retry manifest policy changed");
+  }
+  const bindingFields = [
+    "object_path",
+    "batch_id",
+    "legacy_run_id",
+    "legacy_plan_sha256",
+    "legacy_batch_number",
+    "legacy_batch_table_count",
+    "legacy_allowlist_sha256",
+    "legacy_batch_table_ids_sha256",
+    "legacy_source_run",
+    "legacy_query_sha256",
+    "legacy_stage_system_identifier",
+    "archive_proof_verified_at",
+    "archived_transaction_ids_sha256",
+    "archived_entry_ids_sha256",
+    "compressed_sha256",
+  ];
+  for (const field of bindingFields) {
+    if (text(row[field]) !== text(previousRow[field])) fail(`legacy execute retry ${field} changed`);
+  }
+  if ((row.destructive_go_at == null) !== (row.destructive_go_batch_id == null)
+    || (row.destructive_go_at != null && text(row.destructive_go_batch_id) !== text(row.batch_id))) {
+    fail("legacy execute retry found a partial or foreign destructive GO");
+  }
+}
+
+async function revalidateLegacyExecuteAttempt({
+  store,
+  previousRow,
+  target,
+  identity,
+  recoveryBundle,
+  deps,
+}) {
+  const row = await store.getManifest(previousRow.object_path);
+  if (!row) fail("legacy execute retry manifest is missing");
+  assertLegacyExecuteRetryManifest(row, previousRow, target, identity);
+  const downloaded = deps.downloadArchive
+    ? await deps.downloadArchive(target, row.object_path)
+    : await downloadPrivateArchiveObject(target, row.object_path, deps);
+  if (!downloaded || downloaded.bytes == null) fail("legacy execute retry archive is unavailable");
+  const archiveBytes = Buffer.from(downloaded.bytes);
+  const archiveSha256 = crypto.createHash("sha256").update(archiveBytes).digest("hex");
+  if (downloaded.sha256 != null && downloaded.sha256 !== archiveSha256) {
+    fail("legacy execute retry archive checksum is self-inconsistent");
+  }
+  if (archiveSha256 !== row.compressed_sha256) fail("legacy execute retry archive differs from the committed manifest");
+  const archiveManifest = exporterManifestFromDatabase(row, target, deps.legacyStageAllowlistPlan);
+  const localArchive = verifyArchiveBytes({
+    compressedBytes: archiveBytes,
+    manifest: archiveManifest,
+    target,
+    artifactName: path.basename(row.object_path),
+    expectedLegacyStageAllowlistEvidence: deps.legacyStageAllowlistPlan?.archiveManifest || null,
+  });
+  const evidence = buildPruneEvidence(localArchive, { maxBatchSize: targetPolicy(target.target).maxBatchSize });
+  assertProofMatches(row, evidence);
+  if (!recoveryBundle) fail("legacy execute retry recovery bundle is unavailable");
+  verifyRecoveryBundle({
+    bundle: recoveryBundle,
+    row,
+    target,
+    identity,
+    expectedEvidence: evidence,
+    expectedLegacyStageAllowlistEvidence: deps.legacyStageAllowlistPlan?.archiveManifest || null,
+  });
+  if (!fs.readFileSync(recoveryBundle.artifactPath).equals(archiveBytes)) {
+    fail("legacy execute retry recovery archive differs from the committed archive");
+  }
+  const receiptState = legacyExecuteReceiptState(row);
+  if (receiptState === "already_pruned") {
+    if (typeof store.verifyCommitted !== "function") fail("legacy execute retry post-commit verifier is unavailable");
+    const verification = await store.verifyCommitted(row, evidence);
+    assertLegacyPostCommitVerification(verification, evidence);
+  }
+  return { state: receiptState, row, evidence };
+}
+
+async function executeLegacyStageAllowlistWithRetry({
+  store,
+  row,
+  evidence,
+  target,
+  identity,
+  recoveryBundle,
+  approvedBatchId = null,
+  orchestration = null,
+  deps,
+}) {
+  let currentRow = row;
+  let currentEvidence = evidence;
+  let currentRecoveryBundle = recoveryBundle;
+  let executeAttempts = 0;
+  let executeRetryCount = 0;
+  const executeSqlstates = [];
+  const metrics = () => ({
+    executeAttempts,
+    executeRetryCount,
+    executeSqlstates: [...executeSqlstates],
+  });
+  const reportProgress = (extra = {}) => {
+    if (typeof deps.onExecuteProgress === "function") {
+      deps.onExecuteProgress({ ...metrics(), row: currentRow, ...extra });
+    }
+  };
+  const annotate = (error) => {
+    if (error && typeof error === "object") Object.assign(error, metrics());
+    return error;
+  };
+  const wait = deps.waitForExecuteRetry || (async ({ delayMs }) => {
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+  });
+
+  for (let attempt = 1; attempt <= MAX_EXECUTE_ATTEMPTS; attempt += 1) {
+    if (attempt > 1) {
+      reportProgress({ retry_preflight: true });
+      let preflight;
+      try {
+        preflight = await revalidateLegacyExecuteAttempt({
+          store,
+          previousRow: currentRow,
+          target,
+          identity,
+          recoveryBundle: currentRecoveryBundle,
+          deps,
+        });
+      } catch (error) {
+        reportProgress({ error });
+        throw annotate(error);
+      }
+      if (preflight.state === "already_pruned") {
+        reportProgress({ row: preflight.row, result: preflight });
+        return { ...preflight, recoveryBundle: currentRecoveryBundle, ...metrics() };
+      }
+      currentRow = preflight.row;
+      currentEvidence = preflight.evidence;
+    }
+
+    executeAttempts += 1;
+    reportProgress({ attempt });
+    try {
+      const result = await store.cleanupLegacyStageAllowlist(
+        currentRow.object_path,
+        currentEvidence,
+        true,
+        approvedBatchId,
+        orchestration,
+      );
+      reportProgress({ result });
+      return {
+        ...result,
+        row: currentRow,
+        evidence: currentEvidence,
+        recoveryBundle: currentRecoveryBundle,
+        ...metrics(),
+      };
+    } catch (error) {
+      const sqlstate = sqlStateOf(error);
+      if (sqlstate) executeSqlstates.push(sqlstate);
+      reportProgress({ error });
+      if (attempt === MAX_EXECUTE_ATTEMPTS || !RETRYABLE_CLEANUP_SQLSTATES.has(sqlstate)) {
+        throw annotate(error);
+      }
+      executeRetryCount += 1;
+      const delayMs = AUTOMATIC_CLEANUP_RETRY_BACKOFF_MS[Math.min(
+        executeRetryCount - 1,
+        AUTOMATIC_CLEANUP_RETRY_BACKOFF_MS.length - 1,
+      )];
+      reportProgress({ retry_wait: true, delayMs });
+      try {
+        await wait({
+          attempt,
+          nextAttempt: attempt + 1,
+          delayMs,
+          sqlstate,
+          ...metrics(),
+        });
+      } catch (waitError) {
+        throw annotate(waitError);
+      }
+    }
+  }
+  fail("legacy Stage allowlist execute retry budget was exhausted");
+}
+
 async function executeBotOnlyCleanupWithRetry({
   store,
   row,
@@ -1144,11 +1363,23 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
 
     const pruneResult = row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
       ? row.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID
-        ? await store.cleanupLegacyStageAllowlist(
-          row.object_path,
-          evidence,
-          Boolean(args.execute),
-          args.approvedBatchId,
+        ? args.execute
+          ? await executeLegacyStageAllowlistWithRetry({
+            store,
+            row,
+            evidence,
+            target,
+            identity,
+            recoveryBundle,
+            approvedBatchId: args.approvedBatchId,
+            orchestration: deps.legacyStageAllowlistOrchestration || null,
+            deps,
+          })
+          : await store.cleanupLegacyStageAllowlist(
+            row.object_path,
+            evidence,
+            false,
+            args.approvedBatchId,
             deps.legacyStageAllowlistOrchestration || null,
           )
         : await executeBotOnlyCleanupWithRetry({
