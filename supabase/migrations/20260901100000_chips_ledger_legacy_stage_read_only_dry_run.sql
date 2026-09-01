@@ -93,11 +93,13 @@ begin
     '    result := public.chips_prune_committed_archive_batch_internal(p_object_path, p_transaction_ids, p_entry_ids, false);',
     '    null;'
   );
-  if pg_catalog.position(
-       '  result := public.chips_assert_legacy_stage_allowlist_batch(' in patched_definition
+  if pg_catalog.strpos(
+       patched_definition,
+       '  result := public.chips_assert_legacy_stage_allowlist_batch('
      ) = 0
-     or pg_catalog.position(
-       '    result := public.chips_prune_committed_archive_batch_internal(p_object_path, p_transaction_ids, p_entry_ids, false);' in patched_definition
+     or pg_catalog.strpos(
+       patched_definition,
+       '    result := public.chips_prune_committed_archive_batch_internal(p_object_path, p_transaction_ids, p_entry_ids, false);'
      ) <> 0 then
     raise exception 'legacy Stage batch read-only branch shape changed; refusing a blind migration';
   end if;
