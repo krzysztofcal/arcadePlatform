@@ -162,6 +162,16 @@ function annotateLegacyPhaseError(error, {
       || error.recoveryState
       || (storageMutation === true ? "modified" : storageMutation === false ? "unchanged" : storageMutation === null ? "unknown" : null),
     storage: storage || error.storage || null,
+    query_name: error.query_name || error.chipsLedgerQueryName || null,
+    query_point: error.query_point || error.chipsLedgerQueryPoint || null,
+    lock_point: error.lock_point || error.chipsLedgerLockPoint || error.query_point || error.chipsLedgerQueryPoint || null,
+    backend_pid: error.backend_pid || error.chipsLedgerBackendPid || null,
+    run_id: error.run_id || error.chipsLedgerRunId || null,
+    plan_sha256: error.plan_sha256 || error.chipsLedgerPlanSha256 || null,
+    attempt: error.attempt ?? error.chipsLedgerQueryAttempt ?? null,
+    detail: error.detail || error.details || null,
+    hint: error.hint || null,
+    context: error.where || error.context || null,
   });
   return error;
 }
@@ -203,6 +213,16 @@ function legacyErrorReport(error) {
     recoveryState: error?.recoveryState ?? null,
     storageState: error?.storageState ?? error?.recoveryState ?? null,
     storage: error?.storage || null,
+    query_name: error?.query_name || error?.chipsLedgerQueryName || null,
+    query_point: error?.query_point || error?.chipsLedgerQueryPoint || null,
+    lock_point: error?.lock_point || error?.chipsLedgerLockPoint || error?.query_point || error?.chipsLedgerQueryPoint || null,
+    backend_pid: error?.backend_pid || error?.chipsLedgerBackendPid || null,
+    run_id: error?.run_id || error?.chipsLedgerRunId || null,
+    plan_sha256: error?.plan_sha256 || error?.chipsLedgerPlanSha256 || null,
+    attempt: error?.attempt ?? error?.chipsLedgerQueryAttempt ?? null,
+    detail: error?.detail || error?.details || null,
+    hint: error?.hint || null,
+    context: error?.where || error?.context || null,
     reason: redactedError(error),
   };
 }
@@ -734,6 +754,17 @@ async function executeLegacyBatch({
       deps: {
         ...storageDeps,
         verifyBucket: deps.verifyBucket,
+        legacyStageQueryContext: {
+          phase: LEGACY_STAGE_PHASES.DRY_RUN,
+          queryName: "legacy_stage_pre_execute_dry_run",
+          queryPoint: "pre-execute.dry_run",
+          batchNumber: plan.batchNumber,
+          batchId: currentRow?.batch_id == null ? null : text(currentRow.batch_id),
+          runId: run.run_id,
+          planSha256: run.plan_sha256,
+          attempt: 1,
+          telemetry: deps.legacyStageQueryTelemetry,
+        },
       },
     });
   } catch (error) {
@@ -828,6 +859,17 @@ async function executeLegacyBatch({
           deps: {
             ...storageDeps,
             verifyBucket: deps.verifyBucket,
+            legacyStageQueryContext: {
+              phase: LEGACY_STAGE_PHASES.RECOVERY,
+              queryName: "legacy_stage_recovery_revalidation_dry_run",
+              queryPoint: "recovery.revalidation_dry_run",
+              batchNumber: plan.batchNumber,
+              batchId: currentRow?.batch_id == null ? null : text(currentRow.batch_id),
+              runId: run.run_id,
+              planSha256: run.plan_sha256,
+              attempt: recoveryAttempts || 1,
+              telemetry: deps.legacyStageQueryTelemetry,
+            },
           },
         });
         if (reconstructionDryRun.state !== "ready") {
@@ -903,6 +945,17 @@ async function executeLegacyBatch({
       deps: {
         ...storageDeps,
         verifyBucket: deps.verifyBucket,
+        legacyStageQueryContext: {
+          phase: LEGACY_STAGE_PHASES.EXECUTE,
+          queryName: "legacy_stage_execute",
+          queryPoint: "execute",
+          batchNumber: plan.batchNumber,
+          batchId: currentRow?.batch_id == null ? null : text(currentRow.batch_id),
+          runId: run.run_id,
+          planSha256: run.plan_sha256,
+          attempt: 1,
+          telemetry: deps.legacyStageQueryTelemetry,
+        },
         beforeExecuteRetry: ({ row: retryRow, evidence: retryEvidence }) => revalidateLegacyOrchestrationBeforeRetry({
           sql,
           lockPid,
@@ -949,6 +1002,16 @@ async function executeLegacyBatch({
     recoveryState,
     storageState,
     storage,
+    query_name: executeResult.query_name || "legacy_stage_execute",
+    query_point: executeResult.query_point || "execute",
+    lock_point: executeResult.lock_point || executeResult.query_point || "execute",
+    backend_pid: executeResult.backend_pid || null,
+    run_id: executeResult.run_id || run.run_id,
+    plan_sha256: executeResult.plan_sha256 || run.plan_sha256,
+    attempt: executeResult.attempt ?? executeResult.executeAttempts ?? 1,
+    detail: executeResult.detail || null,
+    hint: executeResult.hint || null,
+    context: executeResult.context || null,
     batch_number: plan.batchNumber,
     batch_id: currentRow.batch_id,
     batchNumber: plan.batchNumber,

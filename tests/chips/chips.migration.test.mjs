@@ -1179,6 +1179,17 @@ async function assertLegacyAllowlistCleanupContracts(sql) {
 
   await sql.begin(async (tx) => {
     await tx.unsafe("set transaction isolation level serializable;");
+    const dryRunDefinitions = await tx.unsafe(`
+      select
+        pg_catalog.pg_get_functiondef('public.chips_assert_legacy_stage_allowlist_batch(text,uuid[],bigint[],uuid[],uuid[],text,text,bigint,bigint,text,text,text,timestamptz)'::regprocedure) as assertion_definition,
+        pg_catalog.pg_get_functiondef('public.chips_prune_legacy_stage_allowlist_batch(text,uuid[],bigint[],uuid[],text,text,text[],boolean,bigint)'::regprocedure) as batch_definition,
+        pg_catalog.pg_get_functiondef('public.chips_prune_legacy_stage_allowlist_orchestrated_batch(bigint,text,text,uuid[],bigint[],uuid[],text,text,text[],boolean)'::regprocedure) as orchestrated_definition;
+    `);
+    assert.match(dryRunDefinitions[0].assertion_definition, /current_setting\('transaction_read_only'\)[\s\S]*for update;/i, "proof and execute must retain the assertion lock outside read-only transactions");
+    assert.match(dryRunDefinitions[0].batch_definition, /if p_execute then[\s\S]*for update;[\s\S]*else[\s\S]*select batches\.\* into batch[\s\S]*where batches\.object_path = p_object_path\s*;/i, "execute must retain the manifest lock while dry-run reads it");
+    assert.doesNotMatch(dryRunDefinitions[0].batch_definition, /chips_prune_committed_archive_batch_internal\([^;]*,\s*false\)/i, "dry-run must not call the lock-bearing generic pruner");
+    assert.match(dryRunDefinitions[0].orchestrated_definition, /if p_execute then[\s\S]*for share;[\s\S]*else[\s\S]*select runs\.\* into run_row[\s\S]*where runs\.run_id = p_run_id/i, "execute must retain the run lock while dry-run reads it");
+    assert.match(dryRunDefinitions[0].orchestrated_definition, /if p_execute then[\s\S]*for update;[\s\S]*else[\s\S]*select batches\.\* into batch[\s\S]*where batches\.object_path = p_object_path/i, "execute must retain the batch lock while dry-run reads it");
     await tx.unsafe(`create or replace function public.chips_assert_archive_prune_stage()
       returns text language sql security definer set search_path = ''
       as $override$ select '7656985631720456337'::text $override$;`);

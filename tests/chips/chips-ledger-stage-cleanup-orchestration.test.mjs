@@ -72,6 +72,10 @@ const legacyLifecycleStageAssertionMigration = fs.readFileSync(
   "supabase/migrations/20260831130000_chips_ledger_legacy_stage_lifecycle_stage_assertion.sql",
   "utf8",
 );
+const legacyReadOnlyDryRunMigration = fs.readFileSync(
+  "supabase/migrations/20260901100000_chips_ledger_legacy_stage_read_only_dry_run.sql",
+  "utf8",
+);
 
 const ENV = Object.freeze({
   SUPABASE_STAGE_DB_URL: "postgresql://postgres.krydukthwdvccggbyjfw:password@aws-0.pooler.supabase.com:5432/postgres",
@@ -1806,6 +1810,7 @@ async function legacyOrchestratedPruneArgumentTypesContract() {
   };
   const calls = [];
   const sql = {
+    async unsafe() { return []; },
     async begin(callback) {
       return callback({
         async unsafe(query, parameters = []) {
@@ -1854,6 +1859,164 @@ async function legacyOrchestratedPruneArgumentTypesContract() {
     /\$1::bigint, \$2, \$3, \$4::uuid\[\], \$5::bigint\[\], \$6::uuid\[\], \$7::text, \$8::text, \$9::text\[\], \$10::boolean/,
   );
   assert.deepEqual(result, { state: "ready" });
+}
+
+async function legacyReadOnlyDryRunPruneContract() {
+  const objectPath = "v1/sha256/read-only-legacy-prune.jsonl.gz";
+  const evidence = {
+    transactionIds: ["00000000-0000-4000-8000-000000000101"],
+    entryIds: [1],
+    legacyTableIds: ["00000000-0000-4000-8000-000000000102"],
+    legacyAllowlistSha256: "a".repeat(64),
+    legacyBatchTableIdsSha256: "b".repeat(64),
+    registryKeys: ["legacy-key"],
+  };
+  const calls = [];
+  const telemetry = [];
+  const sql = {
+    async unsafe() { return []; },
+    async begin(callback) {
+      return callback({
+        async unsafe(query, parameters = []) {
+          calls.push({ query, parameters });
+          if (query.includes("pg_backend_pid")) return [{ backend_pid: "8123" }];
+          if (query.includes("chips_prune_legacy_stage_allowlist_batch")) {
+            return [{ result: { state: "ready", transactions: 1, entries: 1 } }];
+          }
+          return [];
+        },
+      });
+    },
+  };
+
+  const result = await createPruneStore(sql).cleanupLegacyStageAllowlist(
+    objectPath,
+    evidence,
+    false,
+    null,
+    null,
+    {
+      phase: "dry-run",
+      queryName: "legacy_stage_prepare_dry_run",
+      queryPoint: "prepare.dry_run",
+      batchNumber: 56,
+      batchId: "156",
+      runId: "41",
+      planSha256: "c".repeat(64),
+      attempt: 1,
+      telemetry: (event) => telemetry.push(event),
+    },
+  );
+
+  assert.equal(result.state, "ready");
+  assert.equal(result.read_only, true);
+  assert.equal(result.query_name, "legacy_stage_prepare_dry_run");
+  assert.equal(result.query_point, "prepare.dry_run");
+  assert.equal(result.lock_point, "prepare.dry_run");
+  assert.equal(result.backend_pid, "8123");
+  assert.equal(result.batch_number, 56);
+  assert.equal(result.batch_id, "156");
+  assert.equal(calls[0].query, "set transaction isolation level repeatable read, read only;");
+  assert.equal(calls.some(({ query }) => /set local lock_timeout/i.test(query)), false);
+  assert.equal(calls.some(({ query }) => /for update|for share/i.test(query)), false);
+  assert.equal(calls.some(({ query }) => /insert|update|delete/i.test(query)), false);
+  assert.deepEqual(telemetry.map((event) => event.query_name), [
+    "legacy_stage_dry_run_transaction",
+    "legacy_stage_statement_timeout",
+    "legacy_stage_backend_pid",
+    "legacy_stage_prepare_dry_run",
+  ]);
+  assert.ok(telemetry.every((event) => event.read_only === true));
+  assert.equal(telemetry.at(-1).batch_number, 56);
+  assert.equal(telemetry.at(-1).batch_id, "156");
+  assert.equal(telemetry.at(-1).run_id, "41");
+  assert.equal(telemetry.at(-1).plan_sha256, "c".repeat(64));
+
+  const executeCalls = [];
+  const executeSql = {
+    async unsafe() { return []; },
+    async begin(callback) {
+      return callback({
+        async unsafe(query, parameters = []) {
+          executeCalls.push({ query, parameters });
+          if (query.includes("pg_backend_pid")) return [{ backend_pid: "8123" }];
+          if (query.includes("chips_prune_legacy_stage_allowlist_batch")) return [{ result: { state: "pruned" } }];
+          return [];
+        },
+      });
+    },
+  };
+  await createPruneStore(executeSql).cleanupLegacyStageAllowlist(
+    objectPath,
+    evidence,
+    true,
+    156,
+    null,
+    {
+      phase: "execute",
+      queryName: "legacy_stage_execute",
+      queryPoint: "execute",
+      attempt: 1,
+      telemetry: (event) => telemetry.push(event),
+    },
+  );
+  assert.equal(executeCalls[0].query, "set transaction isolation level serializable;");
+  assert.equal(executeCalls.some(({ query }) => /set local lock_timeout/i.test(query)), true);
+  assert.equal(telemetry.at(-1).read_only, false);
+
+  const failureTelemetry = [];
+  const failureSql = {
+    async unsafe() { return []; },
+    async begin(callback) {
+      return callback({
+        async unsafe(query) {
+          if (query.includes("pg_backend_pid")) return [{ backend_pid: "8124" }];
+          if (query.includes("chips_prune_legacy_stage_allowlist_batch")) {
+            const error = new Error("could not serialize access due to concurrent update");
+            Object.assign(error, {
+              code: "40001",
+              detail: "updated by concurrent runtime writer",
+              hint: "retry the read-only snapshot",
+              where: "PL/pgSQL function chips_prune_legacy_stage_allowlist_batch line 1",
+            });
+            throw error;
+          }
+          return [];
+        },
+      });
+    },
+  };
+  await assert.rejects(
+    () => createPruneStore(failureSql).cleanupLegacyStageAllowlist(
+      objectPath,
+      evidence,
+      false,
+      null,
+      null,
+      {
+        phase: "dry-run",
+        queryName: "legacy_stage_pre_execute_dry_run",
+        queryPoint: "pre-execute.dry_run",
+        batchNumber: 56,
+        batchId: "156",
+        attempt: 1,
+        telemetry: (event) => failureTelemetry.push(event),
+      },
+    ),
+    (error) => {
+      assert.equal(error.code, "40001");
+      assert.equal(error.query_name, "legacy_stage_pre_execute_dry_run");
+      assert.equal(error.query_point, "pre-execute.dry_run");
+      assert.equal(error.lock_point, "pre-execute.dry_run");
+      assert.equal(error.backend_pid, "8124");
+      assert.equal(error.detail, "updated by concurrent runtime writer");
+      assert.equal(error.hint, "retry the read-only snapshot");
+      assert.equal(error.context, "PL/pgSQL function chips_prune_legacy_stage_allowlist_batch line 1");
+      return true;
+    },
+  );
+  assert.equal(failureTelemetry.at(-1).sqlstate, "40001");
+  assert.equal(failureTelemetry.at(-1).detail, "updated by concurrent runtime writer");
 }
 
 async function legacyOrchestratorContracts({
@@ -2795,6 +2958,11 @@ function staticWorkflowContracts() {
   );
   assert.ok(repairAssertionOffset >= 0, "legacy marker repair must assert the physical Stage identity");
   assert.ok(repairMarkerUpdateOffset > repairAssertionOffset, "physical Stage assertion must precede the marker UPDATE");
+  assert.match(legacyReadOnlyDryRunMigration, /pg_get_functiondef/);
+  assert.match(legacyReadOnlyDryRunMigration, /REPEATABLE READ READ ONLY/);
+  assert.match(legacyReadOnlyDryRunMigration, /current_setting\('transaction_read_only'\)/);
+  assert.match(legacyReadOnlyDryRunMigration, /p_execute=false is lock-free read-only/);
+  assert.match(legacyReadOnlyDryRunMigration, /refusing a blind migration/);
 }
 
 staticOrchestrationContract();
@@ -2802,6 +2970,7 @@ staticWorkflowContracts();
 await durableRecoveryInspectionContracts();
 await schedulerContracts();
 await legacyOrchestratedPruneArgumentTypesContract();
+await legacyReadOnlyDryRunPruneContract();
 await legacyOrchestratorPrepareExportContract();
 await legacyOrchestratorBatchTempIsolationContract();
 await legacyOrchestratorContracts({ simulateLongStorage: true });
@@ -3188,6 +3357,168 @@ async function insertCanary(tx) {
   );
   assert.equal(activated[0].result.state, "active");
   return batchId;
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
+}
+
+async function disposableLegacyDryRunConcurrencyContract(dbUrl) {
+  const setupSql = postgres(dbUrl, { max: 1, prepare: false, idle_timeout: 5 });
+  const readerSql = postgres(dbUrl, { max: 1, prepare: false, idle_timeout: 5 });
+  const writerSql = postgres(dbUrl, { max: 1, prepare: false, idle_timeout: 5 });
+  let fixture = null;
+  let releaseWriter = () => {};
+  let releaseReader = () => {};
+  let writerPromise = null;
+  let readerPromise = null;
+  try {
+    fixture = await setupSql.begin(async (tx) => {
+      const objectHex = crypto.randomBytes(32).toString("hex");
+      const batchId = String(Date.now()) + String(Math.floor(Math.random() * 1000)).padStart(3, "0");
+      const created = await disposableLegacyFixture(tx, { objectHex, batchId });
+      const proof = await tx.unsafe(`
+        select public.chips_register_legacy_stage_allowlist_proof(
+          $1, $2::uuid[], $3::bigint[], $4::uuid[], $5::uuid[], $6, $7,
+          974, 1, $8, $9, $10, $11::timestamptz
+        ) as result;
+      `, [
+        created.objectPath,
+        created.transactionIds,
+        created.entryIds,
+        created.tableIds,
+        created.masterTableIds,
+        created.allowlistSha256,
+        created.batchTableIdsSha256,
+        created.sourceRun,
+        created.querySha256,
+        created.systemIdentifier,
+        created.cutoff,
+      ]);
+      assert.equal(proof[0].result.state, "proof_registered");
+      return created;
+    });
+
+    const writerReady = deferred();
+    const writerFailure = deferred();
+    const writerHold = deferred();
+    const readerSnapshotReady = deferred();
+    const readerDryRun = deferred();
+    const readerFinish = deferred();
+    releaseWriter = () => writerHold.resolve();
+    releaseReader = () => readerFinish.resolve();
+
+    writerPromise = writerSql.begin(async (tx) => {
+      try {
+        await tx.unsafe("update public.chips_ledger_archive_batches set raw_bytes = raw_bytes + 1 where batch_id = $1::bigint;", [fixture.batchId]);
+        await tx.unsafe("update public.poker_tables set status = status where id = any($1::uuid[]);", [fixture.tableIds]);
+        await tx.unsafe("update public.chips_accounts set balance = balance where id = any($1::uuid[]);", [[fixture.systemAccountId, ...fixture.escrowAccountIds]]);
+        await tx.unsafe("update public.chips_transaction_idempotency set idempotency_key = idempotency_key where idempotency_key = any($1::text[]);", [fixture.keys]);
+        await tx.unsafe("update public.chips_transactions set metadata = metadata where id = any($1::uuid[]);", [fixture.transactionIds]);
+        await tx.unsafe("update public.chips_entries set metadata = metadata where id = any($1::bigint[]);", [fixture.entryIds]);
+        writerReady.resolve();
+        await writerHold.promise;
+      } catch (error) {
+        writerFailure.reject(error);
+        throw error;
+      }
+    });
+    await Promise.race([
+      writerReady.promise,
+      writerFailure.promise.then((error) => { throw error; }),
+    ]);
+
+    readerPromise = readerSql.begin(async (tx) => {
+      await tx.unsafe("set transaction isolation level repeatable read, read only;");
+      await tx.unsafe("set local statement_timeout = '1500ms';");
+      const before = await tx.unsafe(
+        "select raw_bytes::text as raw_bytes from public.chips_ledger_archive_batches where batch_id = $1::bigint;",
+        [fixture.batchId],
+      );
+      readerSnapshotReady.resolve();
+      try {
+        const dryRun = await tx.unsafe(`
+          select public.chips_prune_legacy_stage_allowlist_batch(
+            $1, $2::uuid[], $3::bigint[], $4::uuid[], $5, $6, $7::text[], false, null
+          ) as result;
+        `, [
+          fixture.objectPath,
+          fixture.transactionIds,
+          fixture.entryIds,
+          fixture.tableIds,
+          fixture.allowlistSha256,
+          fixture.batchTableIdsSha256,
+          fixture.keys,
+        ]);
+        readerDryRun.resolve(dryRun[0].result);
+        await readerFinish.promise;
+        const after = await tx.unsafe(
+          "select raw_bytes::text as raw_bytes from public.chips_ledger_archive_batches where batch_id = $1::bigint;",
+          [fixture.batchId],
+        );
+        return { before, after, dryRun: dryRun[0].result };
+      } catch (error) {
+        readerDryRun.reject(error);
+        throw error;
+      }
+    });
+
+    await readerSnapshotReady.promise;
+    const dryRunOutcome = await Promise.race([
+      readerDryRun.promise.then((result) => ({ state: "complete", result }), (error) => ({ state: "error", error })),
+      new Promise((resolve) => setTimeout(() => resolve({ state: "timeout" }), 2000)),
+    ]);
+    if (dryRunOutcome.state === "timeout") {
+      releaseWriter();
+      await writerPromise;
+      releaseReader();
+      await readerPromise.catch(() => {});
+      assert.fail("read-only legacy dry-run blocked on a concurrent row update");
+    }
+    if (dryRunOutcome.state === "error") {
+      releaseWriter();
+      await writerPromise;
+      releaseReader();
+      await readerPromise.catch(() => {});
+      throw dryRunOutcome.error;
+    }
+    releaseWriter();
+    await writerPromise;
+    releaseReader();
+    const snapshot = await readerPromise;
+    assert.equal(snapshot.dryRun.state, "ready", "concurrent writers must not cause a dry-run serialization failure");
+    assert.equal(snapshot.before[0].raw_bytes, "1000", "dry-run must start from the pre-writer snapshot");
+    assert.equal(snapshot.after[0].raw_bytes, "1000", "repeatable-read dry-run must keep its snapshot after the writer commits");
+  } finally {
+    releaseWriter();
+    releaseReader();
+    if (writerPromise) await writerPromise.catch(() => {});
+    if (readerPromise) await readerPromise.catch(() => {});
+    if (fixture) {
+      await setupSql.begin(async (tx) => {
+        await tx.unsafe("alter table public.chips_legacy_stage_allowlist_proofs disable trigger chips_legacy_stage_allowlist_proofs_guard;");
+        await tx.unsafe("delete from public.chips_transaction_idempotency where transaction_id = any($1::uuid[]) or idempotency_key = any($2::text[]);", [fixture.transactionIds, fixture.keys]);
+        await tx.unsafe("delete from public.chips_entries where id = any($1::bigint[]);", [fixture.entryIds]);
+        await tx.unsafe("delete from public.chips_transactions where id = any($1::uuid[]);", [fixture.transactionIds]);
+        await tx.unsafe("delete from public.chips_legacy_stage_allowlist_proofs where batch_id = $1::bigint;", [fixture.batchId]);
+        await tx.unsafe("alter table public.chips_legacy_stage_allowlist_proofs enable trigger chips_legacy_stage_allowlist_proofs_guard;");
+        await tx.unsafe("delete from public.chips_ledger_archive_batches where batch_id = $1::bigint;", [fixture.batchId]);
+        await tx.unsafe("delete from public.chips_accounts where id = any($1::uuid[]);", [[fixture.systemAccountId, ...fixture.escrowAccountIds]]);
+        await tx.unsafe("delete from public.poker_tables where id = any($1::uuid[]);", [fixture.tableIds]);
+      });
+    }
+    await Promise.all([
+      setupSql.end({ timeout: 5 }),
+      readerSql.end({ timeout: 5 }),
+      writerSql.end({ timeout: 5 }),
+    ]);
+  }
 }
 
 async function disposablePostgresContract() {
@@ -3723,6 +4054,7 @@ async function disposablePostgresContract() {
     }).catch((error) => {
       if (error !== ROLLBACK) throw error;
     });
+    await disposableLegacyDryRunConcurrencyContract(dbUrl);
   } finally {
     await sql.unsafe(gateRows[0].stage_definition);
     await sql.unsafe(gateRows[0].target_definition);
