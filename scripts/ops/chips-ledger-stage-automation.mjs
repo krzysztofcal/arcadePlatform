@@ -9,16 +9,18 @@ import {
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
   BOT_ONLY_RETENTION_DAYS,
   BOT_ONLY_RETENTION_POLICY_ID,
+  LEGACY_STAGE_ALLOWLIST_POLICY_ID,
   runExport,
   STAGE_AUTOMATION_POLICY_ID,
   stringifyJson,
 } from "./chips-ledger-archive-export.mjs";
 import {
+  ARCHIVE_MAX_BYTES,
   buildRecoveryArchiveObjectPath,
   buildRecoveryManifestObjectPath,
   downloadPrivateArchiveObject,
-  downloadPrivateObjectIfExists,
   ensureArchiveBucket,
+  readPrivateObjectIfExists,
   replaceVerifiedPrivateObject,
   resolveStorageTarget,
   storeArchive,
@@ -49,6 +51,17 @@ export const STAGE_RETENTION_DAYS = 30;
 export const BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN = 6;
 export const BOT_ONLY_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS = 3;
 export const STAGE_AUTOMATION_LOCK_KEY = `chips-ledger-stage-automation-v1:${STAGE_PROJECT_REF}`;
+export const DURABLE_RECOVERY_STATES = Object.freeze({
+  COMPLETE: "complete",
+  BOTH_MISSING: "both_missing",
+  PARTIAL: "partial",
+  MISMATCH: "mismatch",
+  UNAVAILABLE: "unavailable",
+  WRITE_NOT_VISIBLE: "write_not_visible",
+  BLOCKED: "blocked",
+});
+export const DURABLE_RECOVERY_READ_MAX_ATTEMPTS = 3;
+export const DURABLE_RECOVERY_READ_RETRY_BACKOFF_MS = Object.freeze([50, 100]);
 export const BOT_ONLY_BATCH_15_RECOVERY_REPAIR = Object.freeze({
   batchId: "15",
   objectPath: "v1/sha256/6f441846a444110656db57993e49c82af778876841e0c93098b3bb79904f6919.jsonl.gz",
@@ -926,8 +939,115 @@ export function findOwnCycle(rows) {
   };
 }
 
-function assertRecoveryManifestMatches(actual, expected) {
-  if (canonicalJson(actual) !== canonicalJson(expected)) fail("durable recovery manifest differs from verified evidence");
+export function assertRecoveryManifestMatches(actual, expected) {
+  const normalize = (value) => value == null ? value : JSON.parse(JSON.stringify(value));
+  if (canonicalJson(normalize(actual)) !== canonicalJson(normalize(expected))) {
+    fail("durable recovery manifest differs from verified evidence");
+  }
+}
+
+const RECOVERY_ARCHIVE_FIELDS = Object.freeze([
+  "batch_id",
+  "format_version",
+  "cutoff",
+  "cursor_start_created_at",
+  "cursor_start_id",
+  "cursor_end_created_at",
+  "cursor_end_id",
+  "first_created_at",
+  "last_created_at",
+  "transaction_count",
+  "entry_count",
+  "tx_types",
+  "raw_bytes",
+  "compressed_bytes",
+  "raw_sha256",
+  "compressed_sha256",
+  "credits",
+  "debits",
+  "net_amount",
+]);
+
+function sameRecoveryValue(actual, expected) {
+  if (expected == null) return actual == null;
+  if (actual == null) return false;
+  if ((actual && typeof actual === "object") || (expected && typeof expected === "object")) {
+    return canonicalJson(actual) === canonicalJson(expected);
+  }
+  return String(actual) === String(expected);
+}
+
+function recoveryObjectSummary(objectPath, object) {
+  return {
+    object_path: objectPath,
+    present: Boolean(object),
+    mime: object?.mimeType || null,
+    size: object?.size ?? null,
+    content_length: object?.contentLength ?? null,
+    sha256: object?.sha256 || null,
+  };
+}
+
+function assertRecoveryManifestMatchesCommittedRow(manifest, row) {
+  const topLevel = [
+    ["target", "stage"],
+    ["project_ref", row?.project_ref],
+    ["source_policy_id", row?.source_policy_id || null],
+    ["object_path", row?.object_path],
+  ];
+  for (const [field, expected] of topLevel) {
+    if (!sameRecoveryValue(manifest?.[field], expected)) {
+      fail(`durable recovery manifest differs from committed manifest: ${field}`);
+    }
+  }
+
+  const archive = manifest?.archive;
+  if (!archive || typeof archive !== "object" || Array.isArray(archive)) {
+    fail("durable recovery manifest has no archive binding");
+  }
+  for (const field of RECOVERY_ARCHIVE_FIELDS) {
+    if (!sameRecoveryValue(archive[field], row?.[field])) {
+      fail(`durable recovery manifest differs from committed manifest: archive.${field}`);
+    }
+  }
+
+  const proof = manifest?.id_proof;
+  const hasCommittedProof = row?.archived_transaction_ids_sha256 != null
+    || row?.archived_entry_ids_sha256 != null;
+  if (hasCommittedProof
+    && (!sameRecoveryValue(proof?.transaction_ids_sha256, row?.archived_transaction_ids_sha256)
+      || !sameRecoveryValue(proof?.entry_ids_sha256, row?.archived_entry_ids_sha256))) {
+    fail("durable recovery manifest differs from committed archive proof");
+  }
+
+  const expectedSystemIdentifier = row?.legacy_stage_system_identifier;
+  if (expectedSystemIdentifier != null
+    && !sameRecoveryValue(manifest?.postgres_system_identifier, expectedSystemIdentifier)) {
+    fail("durable recovery manifest differs from committed Stage system identifier");
+  }
+
+  if (row?.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
+    const legacy = manifest?.legacy_stage_allowlist;
+    const expectedLegacy = {
+      policy_id: LEGACY_STAGE_ALLOWLIST_POLICY_ID,
+      allowlist_sha256: row.legacy_allowlist_sha256,
+      batch_table_ids_sha256: row.legacy_batch_table_ids_sha256,
+      master_table_ids: row.legacy_master_table_ids,
+      master_table_ids_sha256: row.legacy_allowlist_sha256,
+      source_run: row.legacy_source_run,
+      query_sha256: row.legacy_query_sha256,
+      stage_system_identifier: row.legacy_stage_system_identifier,
+      master_table_count: Number(row.legacy_master_table_count),
+      batch_number: Number(row.legacy_batch_number),
+      batch_table_count: Number(row.legacy_batch_table_count),
+    };
+    for (const [field, expected] of Object.entries(expectedLegacy)) {
+      if (!sameRecoveryValue(legacy?.[field], expected)) {
+        fail(`durable recovery manifest differs from committed legacy evidence: ${field}`);
+      }
+    }
+  }
+  return true;
 }
 
 export function assertResumeRecoveryState(row, durable) {
@@ -1097,40 +1217,132 @@ function assertAutomaticBotOnlyMainArchive(row, mainArchive, dry, batchId) {
   return archiveSha256;
 }
 
-export async function inspectDurableRecovery(storageTarget, row, deps = {}) {
+export async function inspectDurableRecoveryState(storageTarget, row, deps = {}) {
   const archivePath = buildRecoveryArchiveObjectPath(row.compressed_sha256);
   const manifestPath = buildRecoveryManifestObjectPath(row.compressed_sha256);
-  const [archiveBytes, manifestGzipBytes] = await Promise.all([
-    downloadPrivateObjectIfExists(storageTarget, archivePath, deps),
-    downloadPrivateObjectIfExists(storageTarget, manifestPath, deps),
-  ]);
-  if (archiveBytes == null && manifestGzipBytes == null) return null;
-  if (archiveBytes == null || manifestGzipBytes == null) fail("durable recovery copy is partial");
-  if (!SHA256_RE.test(row.compressed_sha256) || sha256(archiveBytes) !== row.compressed_sha256) {
-    fail("durable recovery archive copy checksum differs");
-  }
-  let manifestBytes;
-  try {
-    manifestBytes = gunzipSync(manifestGzipBytes);
-  } catch {
-    fail("durable recovery manifest is not valid gzip");
-  }
-  let manifest;
-  try {
-    manifest = JSON.parse(manifestBytes.toString("utf8"));
-  } catch {
-    fail("durable recovery manifest is invalid JSON");
-  }
-  return {
-    archivePath,
-    manifestPath,
-    archiveBytes,
-    manifestGzipBytes,
-    manifestBytes,
-    manifest,
-    archiveSha256: sha256(archiveBytes),
-    manifestSha256: sha256(manifestGzipBytes),
+  const read = async (objectPath) => {
+    try {
+      return { object: await readPrivateObjectIfExists(storageTarget, objectPath, deps), error: null };
+    } catch (error) {
+      return { object: null, error };
+    }
   };
+  const [archiveRead, manifestRead] = await Promise.all([
+    read(archivePath),
+    read(manifestPath),
+  ]);
+  const storage = {
+    state: null,
+    archive: recoveryObjectSummary(archivePath, archiveRead.object),
+    manifest: recoveryObjectSummary(manifestPath, manifestRead.object),
+  };
+  const attempts = 1;
+  const firstError = archiveRead.error || manifestRead.error;
+  if (firstError) {
+    const mismatch = /unexpected MIME|checksum|size|gzip|JSON|manifest differs/i.test(String(firstError.message || ""));
+    const state = mismatch ? DURABLE_RECOVERY_STATES.MISMATCH : DURABLE_RECOVERY_STATES.UNAVAILABLE;
+    storage.state = state;
+    Object.assign(firstError, {
+      recoveryState: state,
+      storageState: state,
+      recoveryAttempts: attempts,
+      storage,
+    });
+    return { state, durable: null, attempts, storage, error: firstError };
+  }
+
+  if (!archiveRead.object && !manifestRead.object) {
+    storage.state = DURABLE_RECOVERY_STATES.BOTH_MISSING;
+    return {
+      state: DURABLE_RECOVERY_STATES.BOTH_MISSING,
+      durable: null,
+      attempts,
+      storage,
+    };
+  }
+  if (!archiveRead.object || !manifestRead.object) {
+    storage.state = DURABLE_RECOVERY_STATES.PARTIAL;
+    const error = new Error("durable recovery copy is partial");
+    Object.assign(error, {
+      recoveryState: DURABLE_RECOVERY_STATES.PARTIAL,
+      storageState: DURABLE_RECOVERY_STATES.PARTIAL,
+      recoveryAttempts: attempts,
+      storage,
+    });
+    return {
+      state: DURABLE_RECOVERY_STATES.PARTIAL,
+      durable: null,
+      attempts,
+      storage,
+      error,
+    };
+  }
+
+  const archiveObject = archiveRead.object;
+  const manifestObject = manifestRead.object;
+  try {
+    if (!SHA256_RE.test(row.compressed_sha256)
+      || archiveObject.sha256 !== row.compressed_sha256
+      || (Number.isSafeInteger(Number(row.compressed_bytes))
+        && archiveObject.size !== Number(row.compressed_bytes))) {
+      fail("durable recovery archive copy checksum or size differs");
+    }
+    let manifestBytes;
+    try {
+      manifestBytes = gunzipSync(manifestObject.bytes);
+    } catch {
+      fail("durable recovery manifest is not valid gzip");
+    }
+    let manifest;
+    try {
+      manifest = JSON.parse(manifestBytes.toString("utf8"));
+    } catch {
+      fail("durable recovery manifest is invalid JSON");
+    }
+    assertRecoveryManifestMatchesCommittedRow(manifest, row);
+    storage.state = DURABLE_RECOVERY_STATES.COMPLETE;
+    const durable = {
+      archivePath,
+      manifestPath,
+      archiveBytes: archiveObject.bytes,
+      manifestGzipBytes: manifestObject.bytes,
+      manifestBytes,
+      manifest,
+      archiveSha256: archiveObject.sha256,
+      manifestSha256: manifestObject.sha256,
+      storage,
+    };
+    return {
+      state: DURABLE_RECOVERY_STATES.COMPLETE,
+      durable,
+      attempts,
+      storage,
+    };
+  } catch (error) {
+    const state = DURABLE_RECOVERY_STATES.MISMATCH;
+    storage.state = state;
+    Object.assign(error, {
+      recoveryState: state,
+      storageState: state,
+      recoveryAttempts: attempts,
+      storage,
+    });
+    return { state, durable: null, attempts, storage, error };
+  }
+}
+
+export async function inspectDurableRecovery(storageTarget, row, deps = {}) {
+  const inspected = await inspectDurableRecoveryState(storageTarget, row, deps);
+  if (inspected.state === DURABLE_RECOVERY_STATES.BOTH_MISSING) return null;
+  if (inspected.state !== DURABLE_RECOVERY_STATES.COMPLETE) {
+    throw inspected.error || Object.assign(new Error(`durable recovery state is ${inspected.state}`), {
+      recoveryState: inspected.state,
+      storageState: inspected.state,
+      recoveryAttempts: inspected.attempts,
+      storage: inspected.storage,
+    });
+  }
+  return inspected.durable;
 }
 
 function isBotOnlyRetentionBatch(row) {
@@ -1269,6 +1481,40 @@ function assertCanonicalBotOnlyRecovery(durable, canonical, batchId) {
   };
 }
 
+async function inspectDurableRecoveryAfterWrite(storageTarget, row, deps = {}) {
+  let lastInspection = null;
+  for (let attempt = 1; attempt <= DURABLE_RECOVERY_READ_MAX_ATTEMPTS; attempt += 1) {
+    const inspected = await inspectDurableRecoveryState(storageTarget, row, deps);
+    lastInspection = inspected;
+    if (inspected.state === DURABLE_RECOVERY_STATES.COMPLETE) {
+      return {
+        ...inspected.durable,
+        recoveryAttempts: attempt,
+      };
+    }
+    if (inspected.state !== DURABLE_RECOVERY_STATES.BOTH_MISSING) {
+      throw inspected.error || Object.assign(new Error(`durable recovery state is ${inspected.state}`), {
+        recoveryState: inspected.state,
+        storageState: inspected.state,
+        recoveryAttempts: attempt,
+        storage: inspected.storage,
+      });
+    }
+    if (attempt < DURABLE_RECOVERY_READ_MAX_ATTEMPTS) {
+      const sleep = deps.sleep || ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+      await sleep(DURABLE_RECOVERY_READ_RETRY_BACKOFF_MS[Math.min(attempt - 1, DURABLE_RECOVERY_READ_RETRY_BACKOFF_MS.length - 1)]);
+    }
+  }
+  const error = new Error("durable recovery copies are not visible after the create-only writes");
+  Object.assign(error, {
+    recoveryState: DURABLE_RECOVERY_STATES.WRITE_NOT_VISIBLE,
+    storageState: DURABLE_RECOVERY_STATES.WRITE_NOT_VISIBLE,
+    recoveryAttempts: DURABLE_RECOVERY_READ_MAX_ATTEMPTS,
+    storage: lastInspection?.storage || null,
+  });
+  throw error;
+}
+
 export async function persistDurableRecovery(storageTarget, row, identity, evidence, archiveBytes, deps = {}) {
   if (sha256(archiveBytes) !== row.compressed_sha256) fail("verified archive checksum differs before recovery copy");
   const manifest = isBotOnlyRetentionBatch(row)
@@ -1278,7 +1524,38 @@ export async function persistDurableRecovery(storageTarget, row, identity, evide
   const manifestGzipBytes = gzipSync(manifestBytes, { level: 9, mtime: 0 });
   let recoveryArchive = null;
   let recoveryManifest = null;
+  let recoveryWriteAttempted = false;
   try {
+    const existing = await inspectDurableRecoveryState(storageTarget, row, deps);
+    if (existing.state === DURABLE_RECOVERY_STATES.COMPLETE) {
+      const durable = assertDurableRecoveryForEvidence({
+        row,
+        identity,
+        evidence,
+        durable: existing.durable,
+      });
+      return {
+        ...durable,
+        recoveryArchive: {
+          objectPath: durable.archivePath,
+          objectExisted: true,
+          uploaded: false,
+          bytes: durable.archiveBytes.length,
+          sha256: durable.archiveSha256,
+        },
+        recoveryManifest: {
+          objectPath: durable.manifestPath,
+          objectExisted: true,
+          uploaded: false,
+          bytes: durable.manifestGzipBytes.length,
+          sha256: durable.manifestSha256,
+        },
+      };
+    }
+    if (existing.state !== DURABLE_RECOVERY_STATES.BOTH_MISSING) {
+      throw existing.error || new Error(`durable recovery state is ${existing.state}`);
+    }
+    recoveryWriteAttempted = true;
     recoveryArchive = await uploadOrVerifyPrivateObject({
       storageTarget,
       objectPath: buildRecoveryArchiveObjectPath(row.compressed_sha256),
@@ -1291,10 +1568,9 @@ export async function persistDurableRecovery(storageTarget, row, identity, evide
       bytes: manifestGzipBytes,
       deps,
     });
-    const verified = await inspectDurableRecovery(storageTarget, row, deps);
-    if (!verified) fail("durable recovery copies disappeared after upload");
+    const verified = await inspectDurableRecoveryAfterWrite(storageTarget, row, deps);
+    assertDurableRecoveryForEvidence({ row, identity, evidence, durable: verified });
     if (isBotOnlyRetentionBatch(row)) assertBotOnlyRecoveryManifest(verified.manifest, text(row.batch_id));
-    assertRecoveryManifestMatches(verified.manifest, manifest);
     return {
       ...verified,
       recoveryArchive,
@@ -1303,9 +1579,11 @@ export async function persistDurableRecovery(storageTarget, row, identity, evide
   } catch (error) {
     const recoveryStorageModified = recoveryArchive?.uploaded === true || recoveryManifest?.uploaded === true
       ? true
-      : recoveryArchive && recoveryManifest
-        ? false
-        : null;
+      : recoveryWriteAttempted ? null : false;
+    if (error.storageAttempts != null) {
+      error.recoveryAttempts = error.recoveryAttempts ?? error.storageAttempts;
+      error.attempts = error.attempts ?? error.storageAttempts;
+    }
     error.storageMutation = { recoveryStorageModified };
     throw error;
   }
@@ -1552,6 +1830,70 @@ export function assertDurableRecoveryReady(durable) {
     fail("execute requires both durable recovery copies");
   }
   return true;
+}
+
+export function assertDurableRecoveryForEvidence({
+  row,
+  identity,
+  evidence,
+  durable,
+  target = { target: "stage" },
+} = {}) {
+  const batchId = text(row?.batch_id) || "unknown";
+  assertDurableRecoveryReady(durable);
+  const expectedArchivePath = buildRecoveryArchiveObjectPath(row?.compressed_sha256);
+  const expectedManifestPath = buildRecoveryManifestObjectPath(row?.compressed_sha256);
+  if (durable.archivePath !== expectedArchivePath || durable.manifestPath !== expectedManifestPath) {
+    fail(`batch ${batchId} recovery paths are not derived from the committed archive SHA`);
+  }
+  const archiveSha256 = sha256(durable.archiveBytes);
+  if (!SHA256_RE.test(text(row?.compressed_sha256))
+    || archiveSha256 !== row.compressed_sha256
+    || durable.archiveSha256 !== archiveSha256
+    || (Number.isSafeInteger(Number(row.compressed_bytes))
+      && durable.archiveBytes.length !== Number(row.compressed_bytes))) {
+    fail(`batch ${batchId} recovery archive checksum or size differs from the committed archive`);
+  }
+  let manifestBytes;
+  try {
+    manifestBytes = gunzipSync(durable.manifestGzipBytes);
+  } catch {
+    fail(`batch ${batchId} recovery manifest is not valid gzip`);
+  }
+  if (!manifestBytes.equals(durable.manifestBytes)) {
+    fail(`batch ${batchId} recovery manifest bytes are inconsistent`);
+  }
+  let manifest;
+  try {
+    manifest = JSON.parse(manifestBytes.toString("utf8"));
+  } catch {
+    fail(`batch ${batchId} recovery manifest is invalid JSON`);
+  }
+  const normalizedDurableManifest = durable.manifest == null
+    ? null
+    : JSON.parse(JSON.stringify(durable.manifest));
+  if (normalizedDurableManifest && canonicalJson(normalizedDurableManifest) !== canonicalJson(manifest)) {
+    fail(`batch ${batchId} recovery manifest object differs from its bytes`);
+  }
+  assertRecoveryManifestMatchesCommittedRow(manifest, row);
+  assertRecoveryManifestMatches(manifest, buildRecoveryManifest(row, identity, evidence, target));
+  const manifestSha256 = sha256(durable.manifestGzipBytes);
+  if (durable.manifestSha256 !== manifestSha256) {
+    fail(`batch ${batchId} recovery manifest checksum differs from its bytes`);
+  }
+  if (durable.storage) {
+    for (const key of ["archive", "manifest"]) {
+      const object = durable.storage[key];
+      if (object && (object.present !== true
+        || object.mime !== "application/gzip"
+        || !Number.isSafeInteger(object.size)
+        || object.size < 1
+        || object.size > ARCHIVE_MAX_BYTES)) {
+        fail(`batch ${batchId} recovery ${key} Storage metadata is incomplete`);
+      }
+    }
+  }
+  return durable;
 }
 
 function pruneArgs(row, mode, recoveryDir = null, approvedBatchId = null, automatic = false) {

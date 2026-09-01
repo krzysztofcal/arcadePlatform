@@ -23,11 +23,13 @@ import {
   sqlStateOf,
 } from "./chips-ledger-archive-prune.mjs";
 import {
+  assertDurableRecoveryForEvidence,
   STAGE_AUTOMATION_LOCK_KEY,
   STAGE_PROJECT_REF,
   STAGE_SYSTEM_IDENTIFIER,
   assertResumeRecoveryState,
-  inspectDurableRecovery,
+  DURABLE_RECOVERY_STATES,
+  inspectDurableRecoveryState,
   persistDurableRecovery,
   redactedError,
   validateStageEnvironment,
@@ -130,6 +132,9 @@ function annotateLegacyPhaseError(error, {
   batchId = null,
   attempts = null,
   sqlstates = null,
+  recoveryAttempts = null,
+  recoveryState = null,
+  storage = null,
 } = {}) {
   if (!error || typeof error !== "object") return error;
   const observedSqlstates = Array.isArray(sqlstates)
@@ -138,13 +143,25 @@ function annotateLegacyPhaseError(error, {
       ? [...error.executeSqlstates]
       : [];
   const sqlstate = sqlStateOf(error) || observedSqlstates.at(-1) || null;
+  const observedRecoveryAttempts = recoveryAttempts ?? error.recoveryAttempts ?? error.storageAttempts ?? null;
+  const storageMutation = error.storageMutation?.recoveryStorageModified;
   Object.assign(error, {
     batch_number: batchNumber ?? batchNumberOf(row) ?? error.batch_number ?? null,
     batch_id: batchId ?? (row?.batch_id == null ? error.batch_id ?? null : text(row.batch_id)),
     phase: phase || error.phase || null,
-    attempts: attempts ?? error.attempts ?? error.executeAttempts ?? 0,
+    attempts: phase === LEGACY_STAGE_PHASES.RECOVERY
+      ? observedRecoveryAttempts ?? attempts ?? error.attempts ?? error.executeAttempts ?? 0
+      : attempts ?? error.attempts ?? error.storageAttempts ?? error.executeAttempts ?? 0,
     sqlstate,
     sqlstates: observedSqlstates,
+    recoveryAttempts: observedRecoveryAttempts,
+    storageAttempts: error.storageAttempts ?? null,
+    recoveryState: recoveryState || error.recoveryState || null,
+    storageState: error.storageState
+      || recoveryState
+      || error.recoveryState
+      || (storageMutation === true ? "modified" : storageMutation === false ? "unchanged" : storageMutation === null ? "unknown" : null),
+    storage: storage || error.storage || null,
   });
   return error;
 }
@@ -181,6 +198,11 @@ function legacyErrorReport(error) {
     executeSqlstates: Array.isArray(error?.executeSqlstates)
       ? [...error.executeSqlstates]
       : [],
+    recoveryAttempts: error?.recoveryAttempts ?? null,
+    storageAttempts: error?.storageAttempts ?? null,
+    recoveryState: error?.recoveryState ?? null,
+    storageState: error?.storageState ?? error?.recoveryState ?? null,
+    storage: error?.storage || null,
     reason: redactedError(error),
   };
 }
@@ -487,6 +509,65 @@ async function revalidateLegacyOrchestrationBeforeRetry({
   return { row: refreshedRow };
 }
 
+async function inspectLegacyRecovery({ storageTarget, row, deps }) {
+  if (typeof deps.inspectDurableRecoveryState === "function") {
+    return deps.inspectDurableRecoveryState(storageTarget, row, deps);
+  }
+  if (typeof deps.inspectDurableRecovery === "function") {
+    try {
+      const durable = await deps.inspectDurableRecovery(storageTarget, row, deps);
+      return {
+        state: durable ? DURABLE_RECOVERY_STATES.COMPLETE : DURABLE_RECOVERY_STATES.BOTH_MISSING,
+        durable: durable || null,
+        attempts: durable?.recoveryAttempts || 1,
+        storage: durable?.storage || null,
+      };
+    } catch (error) {
+      return {
+        state: error?.recoveryState || error?.storageState || DURABLE_RECOVERY_STATES.UNAVAILABLE,
+        durable: null,
+        attempts: error?.recoveryAttempts || 1,
+        storage: error?.storage || null,
+        error,
+      };
+    }
+  }
+  return inspectDurableRecoveryState(storageTarget, row, deps);
+}
+
+function assertLegacyRecoveryLifecycle(row, plan, run, evidence) {
+  const lifecycle = assertLegacyExecuteRetryBatch(row, plan, run, null, evidence);
+  if (lifecycle.receiptState !== "empty"
+    || row.destructive_go_at != null
+    || row.destructive_go_batch_id != null) {
+    fail(`legacy batch ${plan.batchNumber} recovery requires no destructive GO or cleanup receipt`);
+  }
+  return lifecycle;
+}
+
+async function revalidateLegacyRecoveryReconstruction({
+  sql,
+  lockPid,
+  contract,
+  run,
+  plan,
+  pruneStore,
+  previousRow,
+  evidence,
+}) {
+  await assertOrchestratorLock(sql, lockPid);
+  const refreshedRun = await loadAuthorization(sql, contract);
+  if (text(refreshedRun.run_id) !== text(run.run_id)
+    || text(refreshedRun.plan_sha256) !== text(run.plan_sha256)) {
+    fail(`legacy batch ${plan.batchNumber} recovery run binding changed`);
+  }
+  const refreshedRow = await pruneStore.getManifest(previousRow.object_path);
+  assertLegacyExecuteRetryBatch(refreshedRow, plan, refreshedRun, previousRow, evidence);
+  assertLegacyRecoveryLifecycle(refreshedRow, plan, refreshedRun, evidence);
+  await assertOrchestratorLock(sql, lockPid);
+  return { row: refreshedRow, run: refreshedRun };
+}
+
 function buildPlanForBatch(masterManifest, contract, batchNumber) {
   const batchManifest = buildLegacyBatchManifest(masterManifest, { batchNumber });
   return buildLegacyPlan(masterManifest, batchManifest, {
@@ -524,6 +605,7 @@ async function executeLegacyBatch({
   storageTarget,
   lockPid,
   deps,
+  preparedRecovery = null,
 }) {
   const storageDeps = pruneDependencies({ deps, sql, pruneStore, storageTarget, plan, run });
   let currentRow;
@@ -561,7 +643,6 @@ async function executeLegacyBatch({
   }
 
   const prune = deps.pruneArchive || pruneArchive;
-  const hadProofBeforeResume = Boolean(currentRow.archive_proof_verified_at);
   if (!currentRow.archive_proof_verified_at) {
     try {
       await prune({
@@ -654,21 +735,114 @@ async function executeLegacyBatch({
     });
   }
 
-  const inspectRecovery = deps.inspectDurableRecovery || inspectDurableRecovery;
   const persistRecovery = deps.persistDurableRecovery || persistDurableRecovery;
-  const durable = await inspectRecovery(storageTarget, currentRow, deps);
-  if (hadProofBeforeResume || durable) assertResumeRecoveryState(currentRow, durable);
-  let verifiedDurable = durable;
-  if (!verifiedDurable) {
-    const main = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, currentRow.object_path, deps);
-    verifiedDurable = await persistRecovery(
-      storageTarget,
-      currentRow,
-      STAGE_SYSTEM_IDENTIFIER,
-      dryRun.evidence,
-      main.bytes,
-      deps,
-    );
+  let verifiedDurable = preparedRecovery;
+  let recoveryAttempts = preparedRecovery?.recoveryAttempts || 0;
+  let recoveryState = preparedRecovery ? DURABLE_RECOVERY_STATES.COMPLETE : null;
+  let storageState = preparedRecovery ? DURABLE_RECOVERY_STATES.COMPLETE : null;
+  let storage = preparedRecovery?.storage || null;
+  try {
+    assertLegacyRecoveryLifecycle(currentRow, plan, run, dryRun.evidence);
+    await assertOrchestratorLock(sql, lockPid);
+    if (verifiedDurable) {
+      recoveryAttempts = Math.max(1, recoveryAttempts);
+      assertResumeRecoveryState(currentRow, verifiedDurable);
+      assertDurableRecoveryForEvidence({
+        row: currentRow,
+        identity: STAGE_SYSTEM_IDENTIFIER,
+        evidence: dryRun.evidence,
+        durable: verifiedDurable,
+      });
+    } else {
+      const inspected = await inspectLegacyRecovery({ storageTarget, row: currentRow, deps });
+      recoveryAttempts = inspected.attempts || 1;
+      storage = inspected.storage || null;
+      recoveryState = inspected.state;
+      storageState = inspected.state;
+      if (inspected.state === DURABLE_RECOVERY_STATES.COMPLETE) {
+        verifiedDurable = inspected.durable;
+        assertResumeRecoveryState(currentRow, verifiedDurable);
+        assertDurableRecoveryForEvidence({
+          row: currentRow,
+          identity: STAGE_SYSTEM_IDENTIFIER,
+          evidence: dryRun.evidence,
+          durable: verifiedDurable,
+        });
+      } else if (inspected.state === DURABLE_RECOVERY_STATES.BOTH_MISSING) {
+        const revalidated = await revalidateLegacyRecoveryReconstruction({
+          sql,
+          lockPid,
+          contract,
+          run,
+          plan,
+          pruneStore,
+          previousRow: currentRow,
+          evidence: dryRun.evidence,
+        });
+        currentRow = revalidated.row;
+        await assertOrchestratorLock(sql, lockPid);
+        const reconstructionDryRun = await prune({
+          argv: ["--target", "stage", "--object-path", currentRow.object_path, "--confirm-sha", currentRow.compressed_sha256],
+          env,
+          cwd,
+          deps: {
+            ...storageDeps,
+            verifyBucket: deps.verifyBucket,
+          },
+        });
+        if (reconstructionDryRun.state !== "ready") {
+          fail(`legacy batch ${plan.batchNumber} recovery revalidation returned ${reconstructionDryRun.state}`);
+        }
+        const postDryRunRow = await pruneStore.getManifest(currentRow.object_path);
+        assertLegacyExecuteRetryBatch(
+          postDryRunRow,
+          plan,
+          revalidated.run,
+          currentRow,
+          reconstructionDryRun.evidence,
+        );
+        assertLegacyRecoveryLifecycle(postDryRunRow, plan, revalidated.run, reconstructionDryRun.evidence);
+        currentRow = postDryRunRow;
+        await assertOrchestratorLock(sql, lockPid);
+        const main = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, currentRow.object_path, deps);
+        verifiedDurable = await persistRecovery(
+          storageTarget,
+          currentRow,
+          STAGE_SYSTEM_IDENTIFIER,
+          reconstructionDryRun.evidence,
+          main.bytes,
+          deps,
+        );
+        assertDurableRecoveryForEvidence({
+          row: currentRow,
+          identity: STAGE_SYSTEM_IDENTIFIER,
+          evidence: reconstructionDryRun.evidence,
+          durable: verifiedDurable,
+        });
+        recoveryState = "reconstructed";
+        storageState = DURABLE_RECOVERY_STATES.COMPLETE;
+        storage = verifiedDurable.storage || null;
+        recoveryAttempts += verifiedDurable.recoveryAttempts || 1;
+      } else {
+        throw inspected.error || new Error(`legacy batch ${plan.batchNumber} recovery state is ${inspected.state}`);
+      }
+    }
+    await assertOrchestratorLock(sql, lockPid);
+  } catch (error) {
+    const observedRecoveryAttempts = error?.recoveryAttempts
+      ?? error?.storageAttempts
+      ?? recoveryAttempts
+      ?? 1;
+    throw annotateLegacyPhaseError(error, {
+      phase: LEGACY_STAGE_PHASES.RECOVERY,
+      row: currentRow,
+      batchNumber: plan.batchNumber,
+      batchId: currentRow.batch_id,
+      attempts: error?.attempts ?? observedRecoveryAttempts,
+      recoveryAttempts: observedRecoveryAttempts,
+      recoveryState: error?.recoveryState || recoveryState || DURABLE_RECOVERY_STATES.BLOCKED,
+      storage: error?.storage || storage,
+    });
   }
 
   await assertOrchestratorLock(sql, lockPid);
@@ -732,6 +906,10 @@ async function executeLegacyBatch({
     executeAttempts: executeResult.executeAttempts ?? 1,
     executeRetryCount: executeResult.executeRetryCount ?? 0,
     executeSqlstates: executeResult.executeSqlstates || [],
+    recoveryAttempts,
+    recoveryState,
+    storageState,
+    storage,
     batch_number: plan.batchNumber,
     batch_id: currentRow.batch_id,
     batchNumber: plan.batchNumber,
@@ -837,6 +1015,7 @@ export async function runLegacyStageAllowlistOrchestrator({
       // trapped re-scanning the first maxBatchesPerRun completed batches.
       consumedBatchCount += 1;
       let row = existing;
+      let preparedRecovery = null;
       if (!row) {
         const batchTempRoot = fs.mkdtempSync(path.join(
           tempRoot,
@@ -850,6 +1029,7 @@ export async function runLegacyStageAllowlistOrchestrator({
             cwd,
             batchNumber,
             orchestration: { runId: run.run_id, planSha256: run.plan_sha256 },
+            returnDurableRecovery: true,
             deps: {
               ...deps,
               sql,
@@ -862,10 +1042,15 @@ export async function runLegacyStageAllowlistOrchestrator({
           });
         } catch (error) {
           throw annotateLegacyPhaseError(error, {
-            phase: LEGACY_STAGE_PHASES.PREPARE_MANIFEST,
+            phase: error?.phase || (error?.recoveryState
+              ? LEGACY_STAGE_PHASES.RECOVERY
+              : LEGACY_STAGE_PHASES.PREPARE_MANIFEST),
             row,
             batchNumber,
             attempts: 1,
+            recoveryAttempts: error?.recoveryAttempts || null,
+            recoveryState: error?.recoveryState || null,
+            storage: error?.storage || null,
           });
         }
         if (prepared.state !== "prepared") {
@@ -884,6 +1069,7 @@ export async function runLegacyStageAllowlistOrchestrator({
             attempts: 1,
           });
         }
+        preparedRecovery = prepared.durableRecovery || null;
       }
       if (!row) {
         phaseFailure(`legacy batch ${batchNumber} manifest is missing after preparation`, {
@@ -892,6 +1078,7 @@ export async function runLegacyStageAllowlistOrchestrator({
           attempts: 1,
         });
       }
+      activeBatch = { batchNumber, batchId: row.batch_id, row };
       const result = await executeLegacyBatch({
         row,
         plan,
@@ -905,6 +1092,7 @@ export async function runLegacyStageAllowlistOrchestrator({
         storageTarget,
         lockPid,
         deps: { ...deps, verifyBucket },
+        preparedRecovery,
       });
       processed.push(result);
       rows = await loadLegacyBatchRows(sql, run);
@@ -940,12 +1128,16 @@ export async function runLegacyStageAllowlistOrchestrator({
       remainingBatchCount: remaining,
     };
   } catch (error) {
+    const failurePhase = error?.phase || LEGACY_STAGE_PHASES.PREPARE_MANIFEST;
+    const failureAttempts = failurePhase === LEGACY_STAGE_PHASES.RECOVERY
+      ? error?.recoveryAttempts ?? error?.storageAttempts ?? error?.attempts ?? 1
+      : error?.executeAttempts ?? error?.attempts ?? 1;
     throw annotateLegacyPhaseError(error, {
-      phase: error?.phase || LEGACY_STAGE_PHASES.PREPARE_MANIFEST,
+      phase: failurePhase,
       row: activeBatch?.row || null,
       batchNumber: activeBatch?.batchNumber ?? null,
       batchId: activeBatch?.batchId ?? null,
-      attempts: error?.executeAttempts ?? error?.attempts ?? 1,
+      attempts: failureAttempts,
       sqlstates: error?.executeSqlstates || null,
     });
   } finally {

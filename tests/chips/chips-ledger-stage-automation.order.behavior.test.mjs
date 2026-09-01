@@ -185,13 +185,13 @@ const recoveryPaths = [
 ];
 assert.equal(recoveryUploads.length, 2);
 assert.deepEqual(recoveryUploads.map(({ objectPath }) => objectPath), recoveryPaths);
-assert.equal(recoveryDownloads.length, 6);
+assert.equal(recoveryDownloads.length, 8, "pre-write recovery inspection adds two read-only object checks");
 assert.equal(recoveryDownloads.every(({ private: isPrivate }) => isPrivate), true);
 assert.equal(new Set(recoveryDownloads.map(({ objectPath }) => objectPath)).size, 2);
 for (const objectPath of recoveryPaths) {
   const uploadIndex = events.findIndex(({ type, objectPath: pathValue }) => type === "recovery-upload" && pathValue === objectPath);
   const downloadIndexes = events.flatMap((event, index) => event.type === "recovery-download" && event.objectPath === objectPath ? [index] : []);
-  assert.equal(downloadIndexes.length, 3);
+  assert.equal(downloadIndexes.length, 4);
   assert.ok(uploadIndex >= 0);
   assert.equal(downloadIndexes.some((index) => index > uploadIndex && index < executeIndex), true);
   assert.equal(downloadIndexes.every((index) => index < executeIndex), true);
