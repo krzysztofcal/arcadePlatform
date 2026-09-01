@@ -250,6 +250,46 @@ async function releaseOrchestratorLock(sql) {
   );
 }
 
+function addReservedTransactionSupport(reserved) {
+  // postgres.js reserve() returns a scoped client; keep transaction control on
+  // that same reserved connection when the client does not expose begin().
+  if (typeof reserved.begin === "function") return reserved;
+  reserved.begin = async (options, callback) => {
+    if (typeof options === "function") {
+      callback = options;
+      options = "";
+    }
+    if (typeof callback !== "function") fail("reserved PostgreSQL session transaction callback is required");
+    const transactionOptions = typeof options === "string"
+      ? options.replace(/[^a-z ]/gi, "")
+      : "";
+    await reserved.unsafe(`begin ${transactionOptions}`.trim());
+    try {
+      const callbackResult = callback(reserved);
+      const result = Array.isArray(callbackResult)
+        ? await Promise.all(callbackResult)
+        : await callbackResult;
+      await reserved.unsafe("commit");
+      return result;
+    } catch (error) {
+      try { await reserved.unsafe("rollback"); } catch { /* preserve the transaction error */ }
+      throw error;
+    }
+  };
+  return reserved;
+}
+
+async function reserveOrchestratorSession(pool) {
+  if (!pool || typeof pool.reserve !== "function") {
+    fail("legacy allowlist orchestrator requires postgres.js reserve() for its advisory lock session");
+  }
+  const reserved = await pool.reserve();
+  if (!reserved || typeof reserved.unsafe !== "function" || typeof reserved.release !== "function") {
+    fail("legacy allowlist orchestrator reserved advisory lock session is invalid");
+  }
+  return addReservedTransactionSupport(reserved);
+}
+
 function assertBatch13AlreadyComplete(row) {
   if (!row
     || text(row.batch_id) !== LEGACY_STAGE_ALLOWLIST_AUDIT_BATCH_13.batchId
@@ -845,7 +885,6 @@ async function executeLegacyBatch({
     });
   }
 
-  await assertOrchestratorLock(sql, lockPid);
   const recoveryDir = path.join(tempRoot, `recovery-batch-${String(plan.batchNumber).padStart(3, "0")}`);
   ensurePrivateDirectory(recoveryDir);
   const executeArgs = [
@@ -931,21 +970,26 @@ export async function runLegacyStageAllowlistOrchestrator({
     fail("legacy Stage allowlist orchestrator accepts no arguments");
   }
   const config = validateStageEnvironment(env, { requireCommitSha: true });
-  const sql = deps.sql || postgres(config.dbUrl, {
+  const sqlPool = deps.sql || postgres(config.dbUrl, {
     max: 1,
     prepare: false,
     connect_timeout: 10,
-    idle_timeout: 30,
+    idle_timeout: 0,
+    max_lifetime: 0,
   });
   const ownsSql = !deps.sql;
   const tempRoot = deps.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-legacy-orchestrator-"));
   ensurePrivateDirectory(tempRoot);
   const storageTarget = deps.storageTarget || resolveStorageTarget("stage", config.moduleEnv, { singleTarget: true });
-  const pruneStore = deps.pruneStore || (await import("./chips-ledger-archive-prune.mjs")).createPruneStore(sql);
   const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
+  let sql = null;
+  let reservedSession = null;
   let lockPid = null;
   let activeBatch = null;
   try {
+    reservedSession = await reserveOrchestratorSession(sqlPool);
+    sql = reservedSession;
+    const pruneStore = deps.pruneStore || (await import("./chips-ledger-archive-prune.mjs")).createPruneStore(sql);
     const preflight = await (deps.preflight || readOnlyStagePreflight)(sql);
     lockPid = await acquireOrchestratorLock(sql);
     if (!lockPid) return { state: "no-op", reason: "advisory_lock_busy", deployedCommitSha: config.deployedCommitSha, preflight };
@@ -1141,10 +1185,13 @@ export async function runLegacyStageAllowlistOrchestrator({
       sqlstates: error?.executeSqlstates || null,
     });
   } finally {
-    if (lockPid) {
+    if (lockPid && sql) {
       try { await releaseOrchestratorLock(sql); } catch { /* closing the owned client releases the session lock */ }
     }
-    if (ownsSql) await sql.end({ timeout: 5 });
+    if (reservedSession) {
+      try { await reservedSession.release(); } catch { /* ending the owned pool closes the session */ }
+    }
+    if (ownsSql) await sqlPool.end({ timeout: 5 });
   }
 }
 
