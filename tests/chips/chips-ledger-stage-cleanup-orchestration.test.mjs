@@ -3416,12 +3416,42 @@ async function disposableLegacyDryRunConcurrencyContract(dbUrl) {
 
     writerPromise = writerSql.begin(async (tx) => {
       try {
-        await tx.unsafe("update public.chips_ledger_archive_batches set raw_bytes = raw_bytes + 1 where batch_id = $1::bigint;", [fixture.batchId]);
+        // These are legal no-op UPDATEs whose row locks model a runtime
+        // writer without changing the durable fixture.  The ledger tables
+        // are append-only, so exercise their rejected UPDATE path in a
+        // savepoint and then hold the same rows with SELECT FOR UPDATE.
+        await tx.unsafe("update public.chips_ledger_archive_batches set status = status where batch_id = $1::bigint;", [fixture.batchId]);
         await tx.unsafe("update public.poker_tables set status = status where id = any($1::uuid[]);", [fixture.tableIds]);
         await tx.unsafe("update public.chips_accounts set balance = balance where id = any($1::uuid[]);", [[fixture.systemAccountId, ...fixture.escrowAccountIds]]);
         await tx.unsafe("update public.chips_transaction_idempotency set idempotency_key = idempotency_key where idempotency_key = any($1::text[]);", [fixture.keys]);
-        await tx.unsafe("update public.chips_transactions set metadata = metadata where id = any($1::uuid[]);", [fixture.transactionIds]);
-        await tx.unsafe("update public.chips_entries set metadata = metadata where id = any($1::bigint[]);", [fixture.entryIds]);
+        for (const [name, statement, values, expectedMessage] of [
+          [
+            "transactions",
+            "update public.chips_transactions set metadata = metadata where id = any($1::uuid[]);",
+            [fixture.transactionIds],
+            "Ledger rows are append-only",
+          ],
+          [
+            "entries",
+            "update public.chips_entries set metadata = metadata where id = any($1::bigint[]);",
+            [fixture.entryIds],
+            "Ledger rows are append-only",
+          ],
+        ]) {
+          const savepoint = `writer_${name}_update`;
+          await tx.unsafe(`savepoint ${savepoint};`);
+          let updateError = null;
+          try {
+            await tx.unsafe(statement, values);
+          } catch (error) {
+            updateError = error;
+          }
+          await tx.unsafe(`rollback to savepoint ${savepoint};`);
+          await tx.unsafe(`release savepoint ${savepoint};`);
+          assert.match(updateError?.message ?? "", new RegExp(expectedMessage));
+        }
+        await tx.unsafe("select id from public.chips_transactions where id = any($1::uuid[]) for update;", [fixture.transactionIds]);
+        await tx.unsafe("select id from public.chips_entries where id = any($1::bigint[]) for update;", [fixture.entryIds]);
         writerReady.resolve();
         await writerHold.promise;
       } catch (error) {
