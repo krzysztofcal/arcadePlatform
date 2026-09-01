@@ -3438,16 +3438,12 @@ async function disposableLegacyDryRunConcurrencyContract(dbUrl) {
             "Ledger rows are append-only",
           ],
         ]) {
-          const savepoint = `writer_${name}_update`;
-          await tx.unsafe(`savepoint ${savepoint};`);
           let updateError = null;
-          try {
-            await tx.unsafe(statement, values);
-          } catch (error) {
+          await tx.savepoint(
+            (savepointTx) => savepointTx.unsafe(statement, values),
+          ).catch((error) => {
             updateError = error;
-          }
-          await tx.unsafe(`rollback to savepoint ${savepoint};`);
-          await tx.unsafe(`release savepoint ${savepoint};`);
+          });
           assert.match(updateError?.message ?? "", new RegExp(expectedMessage));
         }
         await tx.unsafe("select id from public.chips_transactions where id = any($1::uuid[]) for update;", [fixture.transactionIds]);
