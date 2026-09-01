@@ -81,6 +81,45 @@ const ENV = Object.freeze({
   CHIPS_LEDGER_BOT_ONLY_AUTOMATIC: "1",
 });
 
+async function attachReservedSql(pool) {
+  const state = {
+    reserveCalls: 0,
+    sessionQueries: 0,
+    releaseCalls: 0,
+    reserved: false,
+    idleElapsedMs: 0,
+    idleSessionLost: false,
+  };
+  let transaction = null;
+  await pool.begin(async (tx) => {
+    transaction = tx;
+  });
+  const reserved = {
+    typed: pool.typed,
+    async unsafe(query, parameters = [], options) {
+      if (/^\s*(begin|commit|rollback|set|reset)\b/i.test(query)) return [];
+      state.sessionQueries += 1;
+      return /pg_try_advisory_lock|pg_backend_pid|pg_advisory_unlock/i.test(query)
+        ? pool.unsafe(query, parameters, options)
+        : transaction.unsafe(query, parameters, options);
+    },
+    async release() {
+      state.releaseCalls += 1;
+      state.reserved = false;
+    },
+  };
+  state.advanceIdleMs = (milliseconds) => {
+    state.idleElapsedMs += milliseconds;
+    if (!state.reserved && state.idleElapsedMs > 30_000) state.idleSessionLost = true;
+  };
+  pool.reserve = async () => {
+    state.reserveCalls += 1;
+    state.reserved = true;
+    return reserved;
+  };
+  return state;
+}
+
 function manifestSelectRowFromSchedulerRow(row) {
   const asText = (value) => value == null ? null : String(value);
   return {
@@ -1817,7 +1856,11 @@ async function legacyOrchestratedPruneArgumentTypesContract() {
   assert.deepEqual(result, { state: "ready" });
 }
 
-async function legacyOrchestratorContracts() {
+async function legacyOrchestratorContracts({
+  forceSessionLoss = false,
+  resumeCompleteRecovery = false,
+  simulateLongStorage = false,
+} = {}) {
   const frozen = loadFrozenLegacyAllowlist({ cwd: root });
   const contract = buildLegacyStageAllowlistRunContract(frozen.masterManifest);
   const batch13 = {
@@ -1889,14 +1932,31 @@ async function legacyOrchestratorContracts() {
     ...Array.from({ length: 10 }, (_, index) => makeLegacyRow(index + 2)),
     makeLegacyRow(12, { complete: false }),
   ];
+  if (resumeCompleteRecovery) {
+    Object.assign(rows.at(-1), {
+      archive_proof_verified_at: "2026-08-25T00:00:00Z",
+      archived_transaction_ids_sha256: "d".repeat(64),
+      archived_entry_ids_sha256: "e".repeat(64),
+    });
+  }
   const manifests = new Map(rows.map((row) => [row.object_path, row]));
   const sql = {
     begin: async (callback) => callback(sql),
     unsafe: async (query) => {
       if (query.includes("set transaction")) return [];
-      if (query.includes("pg_try_advisory_lock")) return [{ backend_pid: "41", acquired: true }];
-      if (query.includes("pg_backend_pid")) return [{ backend_pid: "41", lock_held: true }];
-      if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
+      if (query.includes("pg_try_advisory_lock")) {
+        observedBackendPids.push("41");
+        return [{ backend_pid: "41", acquired: true }];
+      }
+      if (query.includes("pg_backend_pid")) {
+        const backendPid = sessionLost ? "lost-session" : "41";
+        observedBackendPids.push(backendPid);
+        return [{ backend_pid: backendPid, lock_held: true }];
+      }
+      if (query.includes("pg_advisory_unlock")) {
+        observedBackendPids.push(sessionLost ? "lost-session" : "41");
+        return [{ pg_advisory_unlock: true }];
+      }
       if (query.includes("from public.chips_legacy_stage_allowlist_runs")) return [{
         run_id: "41",
         project_ref: "krydukthwdvccggbyjfw",
@@ -1920,7 +1980,13 @@ async function legacyOrchestratorContracts() {
       throw new Error("unexpected legacy orchestrator SQL: " + query);
     },
   };
+  const sessionState = await attachReservedSql(sql);
+  let sessionLost = false;
+  let simulatedStorageDurationMs = 0;
+  const observedBackendPids = [];
   const calls = [];
+  let exportCalls = 0;
+  let proofRegisterCalls = 0;
   let retryPreflightCalls = 0;
   let recoveryInspectCalls = 0;
   let recoveryPersistCalls = 0;
@@ -1940,19 +2006,42 @@ async function legacyOrchestratorContracts() {
     legacyAllowlistSha256: contract.masterAllowlistSha256,
     legacyBatchTableIdsSha256: "c".repeat(64),
   };
-  const result = await runLegacyStageAllowlistOrchestrator({
-    env: { ...ENV },
-    cwd: root,
-    deps: {
+  let result = null;
+  let caughtError = null;
+  try {
+    result = await runLegacyStageAllowlistOrchestrator({
+      env: { ...ENV },
+      cwd: root,
+      deps: {
       sql,
       maxBatchesPerRun: 1,
       preflight: async () => ({ systemIdentifier: "7656985631720456337", enforcementActive: true }),
       storageTarget: { target: "stage", projectRef: "krydukthwdvccggbyjfw" },
       verifyBucket: async () => {},
       pruneStore: { getManifest: async (objectPath) => manifests.get(objectPath) || null },
-      inspectDurableRecovery: async () => {
+      inspectDurableRecovery: async (_target, row) => {
         recoveryInspectCalls += 1;
+        if (resumeCompleteRecovery) {
+          const archiveBytes = archiveBytesByObjectPath.get(row.object_path);
+          const manifest = buildRecoveryManifest(row, "7656985631720456337", evidence, { target: "stage" });
+          const manifestBytes = Buffer.from(`${JSON.stringify(manifest)}\n`);
+          const manifestGzipBytes = gzipSync(manifestBytes, { level: 9, mtime: 0 });
+          return {
+            archiveBytes,
+            manifestBytes,
+            manifestGzipBytes,
+            manifest,
+            archivePath: `recovery/v1/sha256/${row.compressed_sha256}.jsonl.gz`,
+            manifestPath: `recovery/v1/sha256/${row.compressed_sha256}.recovery.json.gz`,
+            archiveSha256: crypto.createHash("sha256").update(archiveBytes).digest("hex"),
+            manifestSha256: crypto.createHash("sha256").update(manifestGzipBytes).digest("hex"),
+          };
+        }
         return null;
+      },
+      exportArchive: async () => {
+        exportCalls += 1;
+        throw new Error("existing legacy resume must not export");
       },
       downloadPrivateArchive: async (_target, objectPath) => ({
         bytes: archiveBytesByObjectPath.get(objectPath),
@@ -1960,6 +2049,12 @@ async function legacyOrchestratorContracts() {
       }),
       persistDurableRecovery: async (_target, row, identity, rowEvidence, archiveBytes) => {
         recoveryPersistCalls += 1;
+        if (simulateLongStorage) {
+          simulatedStorageDurationMs = 31_000;
+          sessionState.advanceIdleMs(simulatedStorageDurationMs);
+          await Promise.resolve();
+        }
+        if (forceSessionLoss) sessionLost = true;
         const manifest = buildRecoveryManifest(row, identity, rowEvidence, { target: "stage" });
         const manifestBytes = Buffer.from(`${JSON.stringify(manifest)}\n`);
         const manifestGzipBytes = gzipSync(manifestBytes, { level: 9, mtime: 0 });
@@ -1985,6 +2080,7 @@ async function legacyOrchestratorContracts() {
         const row = manifests.get(objectPath);
         assert.ok(row, "legacy orchestrator must name a known manifest");
         if (argv.includes("--register-proof")) {
+          proofRegisterCalls += 1;
           row.archive_proof_verified_at = "2026-08-25T00:00:00Z";
           row.archived_transaction_ids_sha256 = "d".repeat(64);
           row.archived_entry_ids_sha256 = "e".repeat(64);
@@ -2011,8 +2107,25 @@ async function legacyOrchestratorContracts() {
           ? { state: "ready", evidence }
           : { state: "already_pruned" };
       },
-    },
-  });
+      },
+    });
+  } catch (error) {
+    caughtError = error;
+  }
+  if (forceSessionLoss) {
+    assert.ok(caughtError, "a lost reserved session must stop the run");
+    assert.match(caughtError.message, /advisory lock session was lost/);
+    assert.equal(caughtError.phase, "recovery");
+    assert.equal(caughtError.batch_number, 12);
+    assert.equal(caughtError.batch_id, "2012");
+    assert.equal(caughtError.executeAttempts ?? 0, 0);
+    assert.equal(calls.filter((argv) => argv.includes("--execute")).length, 0);
+    assert.equal(sessionState.reserveCalls, 1);
+    assert.equal(sessionState.releaseCalls, 1);
+    assert.ok(observedBackendPids.includes("lost-session"));
+    return;
+  }
+  if (caughtError) throw caughtError;
   assert.equal(result.batch13, "skipped-already-pruned-and-cleaned");
   assert.deepEqual(result.processed.map((row) => row.batchNumber), Array.from({ length: 11 }, (_, index) => index + 2));
   assert.equal(result.processed.slice(0, 10).every((row) => row.state === "skipped"), true);
@@ -2022,10 +2135,23 @@ async function legacyOrchestratorContracts() {
   assert.equal(calls.filter((argv) => argv.includes("--execute")).length, 1, "batch 12 must execute once after completed batches are skipped");
   assert.equal(retryPreflightCalls, 1, "legacy execute retry must revalidate the run, batch, GO, receipt, and advisory lock");
   assert.equal(recoveryInspectCalls, 1, "legacy recovery is inspected once before reconstruction");
-  assert.equal(recoveryPersistCalls, 1, "legacy recovery reconstruction writes once");
-  assert.equal(result.processed.at(-1).recoveryState, "reconstructed");
+  assert.equal(recoveryPersistCalls, resumeCompleteRecovery ? 0 : 1, "complete recovery must not be rewritten");
+  assert.equal(proofRegisterCalls, resumeCompleteRecovery ? 0 : 1, "complete proof must not be re-registered");
+  assert.equal(exportCalls, 0, "an existing legacy manifest must not be exported again");
+  assert.equal(result.processed.at(-1).recoveryState, resumeCompleteRecovery ? "complete" : "reconstructed");
   assert.equal(result.processed.at(-1).storageState, "complete");
-  assert.equal(result.processed.at(-1).recoveryAttempts, 2);
+  assert.equal(result.processed.at(-1).recoveryAttempts, resumeCompleteRecovery ? 1 : 2);
+  assert.equal(
+    resumeCompleteRecovery || simulatedStorageDurationMs > 30_000,
+    true,
+    "the long Storage operation must exceed the old idle timeout",
+  );
+  assert.equal(sessionState.idleSessionLost, false, "a reserved lock session must survive the long Storage operation");
+  assert.equal(sessionState.reserveCalls, 1, "the run must reserve one dedicated lock session");
+  assert.equal(sessionState.releaseCalls, 1, "the reserved lock session must be released once");
+  assert.equal(sessionState.sessionQueries > 0, true);
+  assert.equal(new Set(observedBackendPids).size, 1, "acquire/assert must observe one backend PID");
+  assert.equal(observedBackendPids[0], "41");
 }
 
 async function legacyOrchestratorPrepareExportContract() {
@@ -2175,6 +2301,7 @@ async function legacyOrchestratorPrepareExportContract() {
       throw new Error(`unexpected orchestrator SQL: ${query.slice(0, 100)}`);
     },
   };
+  const sessionState = await attachReservedSql(sql);
   const tempRoot = fs.mkdtempSync("/tmp/legacy-orchestrator-prepare-export-");
   let exported = null;
   let writtenManifest = null;
@@ -2237,6 +2364,8 @@ async function legacyOrchestratorPrepareExportContract() {
     assert.equal(writtenManifest.legacy_stage_allowlist.batch_table_ids_sha256, plan.archiveManifest.batch_table_ids_sha256);
     assert.equal(writtenManifest.legacy_stage_allowlist.batch_number, batchNumber);
     assert.equal(pruneCalls, 0, "the regression test must stop before cleanup/execute/retry");
+    assert.equal(sessionState.reserveCalls, 1, "prepare must run inside the reserved lock session");
+    assert.equal(sessionState.releaseCalls, 1, "the reserved lock session must close after an exception");
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -2404,6 +2533,7 @@ async function legacyOrchestratorBatchTempIsolationContract() {
       throw new Error(`unexpected batch isolation top-level SQL: ${query.slice(0, 100)}`);
     },
   };
+  const sessionState = await attachReservedSql(sql);
 
   const evidenceFor = (batchNumber, plan, candidate) => ({
     transactionIds: [candidate.id],
@@ -2613,6 +2743,8 @@ async function legacyOrchestratorBatchTempIsolationContract() {
       assert.equal(planEvidence.get(batchNumber).batch_number, batchNumber);
     }
     assert.notEqual(planEvidence.get(2).batch_table_ids_sha256, planEvidence.get(3).batch_table_ids_sha256);
+    assert.equal(sessionState.reserveCalls, 1, "the entire fresh prepare/execute run uses one reserved session");
+    assert.equal(sessionState.releaseCalls, 1, "the reserved session is released after the run");
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -2629,6 +2761,9 @@ function staticWorkflowContracts() {
   assert.match(orchestratorSource, /batch13: "skipped-already-pruned-and-cleaned"/);
   assert.match(orchestratorSource, /LEGACY_STAGE_ALLOWLIST_ORCHESTRATOR_MAX_BATCHES_PER_RUN/);
   assert.match(orchestratorSource, /assertLegacyBatchRows/);
+  assert.match(orchestratorSource, /reserveOrchestratorSession/);
+  assert.match(orchestratorSource, /idle_timeout: 0/);
+  assert.match(orchestratorSource, /max_lifetime: 0/);
   assert.match(orchestratorSource, /process\.argv\.slice\(2\)\.length !== 0/);
   assert.equal(BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN, 6);
   assert.match(automationSource, /BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN = 6/);
@@ -2669,7 +2804,9 @@ await schedulerContracts();
 await legacyOrchestratedPruneArgumentTypesContract();
 await legacyOrchestratorPrepareExportContract();
 await legacyOrchestratorBatchTempIsolationContract();
-await legacyOrchestratorContracts();
+await legacyOrchestratorContracts({ simulateLongStorage: true });
+await legacyOrchestratorContracts({ resumeCompleteRecovery: true });
+await legacyOrchestratorContracts({ forceSessionLoss: true });
 
 const dbUrl = process.env.CHIPS_MIGRATIONS_TEST_DB_URL;
 if (!dbUrl) {
