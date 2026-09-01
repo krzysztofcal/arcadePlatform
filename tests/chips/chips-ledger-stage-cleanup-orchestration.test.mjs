@@ -1673,16 +1673,23 @@ async function legacyOrchestratorContracts() {
     const row = {
       object_path: `v1/sha256/${digest}.jsonl.gz`,
       batch_id: String(2000 + batchNumber),
+      project_ref: "krydukthwdvccggbyjfw",
+      format_version: "2",
       status: "committed",
+      cutoff: "2026-08-17T16:51:28.074Z",
       source_policy_id: "legacy_stage_allowlist_v1",
+      legacy_stage_system_identifier: "7656985631720456337",
       legacy_run_id: "41",
       legacy_plan_sha256: contract.planSha256,
       legacy_batch_number: String(batchNumber),
       legacy_batch_table_count: "10",
       legacy_allowlist_sha256: contract.masterAllowlistSha256,
       legacy_batch_table_ids_sha256: "c".repeat(64),
+      transaction_count: "1",
+      entry_count: "2",
       compressed_sha256: digest,
       compressed_bytes: "10",
+      committed_at: "2026-08-25T00:00:00Z",
     };
     if (complete) {
       Object.assign(row, {
@@ -1697,6 +1704,8 @@ async function legacyOrchestratorContracts() {
         pruned_transaction_ids_sha256: "d".repeat(64),
         pruned_entry_ids_sha256: "e".repeat(64),
         registry_cleaned_keys_sha256: "f".repeat(64),
+        destructive_go_at: "2026-08-25T00:00:03Z",
+        destructive_go_batch_id: String(2000 + batchNumber),
       });
     }
     return row;
@@ -1711,7 +1720,7 @@ async function legacyOrchestratorContracts() {
     unsafe: async (query) => {
       if (query.includes("set transaction")) return [];
       if (query.includes("pg_try_advisory_lock")) return [{ backend_pid: "41", acquired: true }];
-      if (query.includes("pg_backend_pid")) return [{ backend_pid: "41" }];
+      if (query.includes("pg_backend_pid")) return [{ backend_pid: "41", lock_held: true }];
       if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
       if (query.includes("from public.chips_legacy_stage_allowlist_runs")) return [{
         run_id: "41",
@@ -1729,6 +1738,7 @@ async function legacyOrchestratorContracts() {
         plan_sha256: contract.planSha256,
         status: "authorized",
         destructive_go_at: "2026-08-25T00:00:00Z",
+        destructive_go_confirmation: `GO legacy-stage-allowlist-v1 remaining 2-98 ${contract.planSha256}`,
       }];
       if (query.includes("where batch_id = 13")) return [batch13];
       if (query.includes("from public.chips_ledger_archive_batches")) return rows;
@@ -1736,6 +1746,7 @@ async function legacyOrchestratorContracts() {
     },
   };
   const calls = [];
+  let retryPreflightCalls = 0;
   const evidence = {
     transactionCount: 1,
     entryCount: 2,
@@ -1743,6 +1754,10 @@ async function legacyOrchestratorContracts() {
     credits: "100",
     debits: "100",
     net: "0",
+    transactionIdsSha256: "d".repeat(64),
+    entryIdsSha256: "e".repeat(64),
+    registryKeys: ["legacy:registry:key"],
+    registryKeysSha256: "f".repeat(64),
   };
   const result = await runLegacyStageAllowlistOrchestrator({
     env: { ...ENV },
@@ -1761,7 +1776,8 @@ async function legacyOrchestratorContracts() {
         manifestBytes: Buffer.from("{}"),
         manifestGzipBytes: Buffer.from("gzip"),
       }),
-      pruneArchive: async ({ argv }) => {
+      pruneArchive: async ({ argv, deps: pruneDeps }) => {
+        const batchNumber = Number(pruneDeps.legacyStageAllowlistPlan.batchNumber);
         calls.push(argv);
         const objectPath = argv[argv.indexOf("--object-path") + 1];
         const row = manifests.get(objectPath);
@@ -1774,6 +1790,11 @@ async function legacyOrchestratorContracts() {
         }
         if (argv.includes("--execute")) {
           if (row.registry_cleaned_at) return { state: "already_pruned", evidence };
+          if (batchNumber === 12 && retryPreflightCalls === 0) {
+            retryPreflightCalls += 1;
+            const retryPreflight = await pruneDeps.beforeExecuteRetry({ row, evidence });
+            assert.equal(retryPreflight.row, row);
+          }
           row.pruned_at = "2026-08-25T00:00:01Z";
           row.registry_cleaned_at = "2026-08-25T00:00:02Z";
           row.pruned_transaction_count = "1";
@@ -1796,7 +1817,8 @@ async function legacyOrchestratorContracts() {
   assert.equal(result.processed.at(-1).state, "pruned");
   assert.equal(result.consumedBatchCount, 1);
   assert.equal(result.remainingBatchCount, 86);
-  assert.equal(calls.filter((argv) => argv.includes("--execute")).length, 2, "batch 12 must execute and retry after completed batches are skipped");
+  assert.equal(calls.filter((argv) => argv.includes("--execute")).length, 1, "batch 12 must execute once after completed batches are skipped");
+  assert.equal(retryPreflightCalls, 1, "legacy execute retry must revalidate the run, batch, GO, receipt, and advisory lock");
 }
 
 async function legacyOrchestratorPrepareExportContract() {
@@ -1931,6 +1953,7 @@ async function legacyOrchestratorPrepareExportContract() {
             plan_sha256: contract.planSha256,
             status: "authorized",
             destructive_go_at: "2026-08-25T00:00:00Z",
+            destructive_go_confirmation: `GO legacy-stage-allowlist-v1 remaining 2-98 ${contract.planSha256}`,
           }];
           if (query.includes("where batch_id = 13")) return [batch13];
           if (query.includes("from public.chips_ledger_archive_batches")) return [];
@@ -1940,7 +1963,7 @@ async function legacyOrchestratorPrepareExportContract() {
     },
     async unsafe(query) {
       if (query.includes("pg_try_advisory_lock")) return [{ backend_pid: "3342", acquired: true }];
-      if (query.includes("pg_backend_pid")) return [{ backend_pid: "3342" }];
+      if (query.includes("pg_backend_pid")) return [{ backend_pid: "3342", lock_held: true }];
       if (query.includes("pg_advisory_unlock")) return [{ unlocked: true }];
       throw new Error(`unexpected orchestrator SQL: ${query.slice(0, 100)}`);
     },
@@ -2148,6 +2171,7 @@ async function legacyOrchestratorBatchTempIsolationContract() {
             plan_sha256: contract.planSha256,
             status: "authorized",
             destructive_go_at: "2026-08-31T17:51:48.672253Z",
+            destructive_go_confirmation: `GO legacy-stage-allowlist-v1 remaining 2-98 ${contract.planSha256}`,
           }];
           if (query.includes("from public.chips_ledger_archive_batches")) return [...manifests.values()];
           throw new Error(`unexpected batch isolation SQL: ${query.slice(0, 100)}`);
@@ -2156,7 +2180,7 @@ async function legacyOrchestratorBatchTempIsolationContract() {
     },
     async unsafe(query) {
       if (query.includes("pg_try_advisory_lock")) return [{ backend_pid: "9001", acquired: true }];
-      if (query.includes("pg_backend_pid")) return [{ backend_pid: "9001" }];
+      if (query.includes("pg_backend_pid")) return [{ backend_pid: "9001", lock_held: true }];
       if (query.includes("pg_advisory_unlock")) return [{ unlocked: true }];
       throw new Error(`unexpected batch isolation top-level SQL: ${query.slice(0, 100)}`);
     },
