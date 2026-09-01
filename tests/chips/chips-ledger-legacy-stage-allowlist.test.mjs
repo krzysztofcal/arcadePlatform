@@ -450,6 +450,7 @@ function makeLegacyRunnerAdapters() {
   let executeCleanupCalls = 0;
   let successfulCleanupCalls = 0;
   let cleanupErrorSequence = [];
+  let cleanupMutation = null;
   const cleanupOrchestrations = [];
   let manifestReads = 0;
 
@@ -559,6 +560,7 @@ function makeLegacyRunnerAdapters() {
       if (approvedBatchId != null) assert.equal(approvedBatchId, "9001");
       const injectedError = cleanupErrorSequence.shift();
       if (injectedError) {
+        if (typeof cleanupMutation === "function") cleanupMutation({ attempt: executeCleanupCalls, row: storedManifestRow });
         const error = new Error(injectedError.message || `simulated cleanup failure (${injectedError.code})`);
         error.code = injectedError.code;
         throw error;
@@ -616,6 +618,7 @@ function makeLegacyRunnerAdapters() {
     get manifestReads() { return manifestReads; },
     incrementPlanUploadCalls() { planUploadCalls += 1; },
     setCleanupErrorSequence(errors) { cleanupErrorSequence = [...errors]; },
+    setCleanupMutation(mutation) { cleanupMutation = mutation; },
   };
 }
 
@@ -705,7 +708,7 @@ const orchestratedLegacyTestRun = {
   planSha256: buildLegacyStageAllowlistRunContract(master).planSha256,
 };
 
-async function runLegacyExecutePruneContract(contract, recoveryDir) {
+async function runLegacyExecutePruneContract(contract, recoveryDir, extraDeps = {}) {
   let archiveDownloads = 0;
   const result = await pruneArchive({
     argv: [
@@ -727,6 +730,7 @@ async function runLegacyExecutePruneContract(contract, recoveryDir) {
         return { bytes: contract.adapters.storageObjects.get(objectPath), downloadMs: 1 };
       },
       waitForExecuteRetry: async () => {},
+      ...extraDeps,
       emit: false,
     },
   });
@@ -763,6 +767,108 @@ try {
   fs.rmSync(retryableLegacyExecuteContract.tempRoot, { recursive: true, force: true });
 }
 
+const lockTimeoutLegacyExecuteContract = await runRealLegacyRunnerContract(null, orchestratedLegacyTestRun);
+try {
+  assert.equal(lockTimeoutLegacyExecuteContract.error, null);
+  const initialCleanupCalls = lockTimeoutLegacyExecuteContract.adapters.executeCleanupCalls;
+  lockTimeoutLegacyExecuteContract.adapters.setCleanupErrorSequence([{ code: "55P03" }]);
+  const retryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-stage-execute-lock-retry-contract-"));
+  try {
+    const { result, archiveDownloads } = await runLegacyExecutePruneContract(
+      lockTimeoutLegacyExecuteContract,
+      path.join(retryRoot, "recovery"),
+    );
+    assert.equal(result.state, "pruned");
+    assert.equal(result.phase, "execute");
+    assert.equal(result.attempts, 2);
+    assert.equal(result.sqlstate, "55P03");
+    assert.equal(result.executeAttempts, 2);
+    assert.equal(result.executeRetryCount, 1);
+    assert.deepEqual(result.executeSqlstates, ["55P03"]);
+    assert.equal(lockTimeoutLegacyExecuteContract.adapters.executeCleanupCalls, initialCleanupCalls + 2);
+    assert.equal(archiveDownloads, 3, "55P03 retry must revalidate the committed archive before the second SQL attempt");
+  } finally {
+    fs.rmSync(retryRoot, { recursive: true, force: true });
+  }
+} finally {
+  fs.rmSync(lockTimeoutLegacyExecuteContract.tempRoot, { recursive: true, force: true });
+}
+
+const exhaustedLegacyExecuteContract = await runRealLegacyRunnerContract(null, orchestratedLegacyTestRun);
+try {
+  assert.equal(exhaustedLegacyExecuteContract.error, null);
+  const initialCleanupCalls = exhaustedLegacyExecuteContract.adapters.executeCleanupCalls;
+  const initialProofCalls = exhaustedLegacyExecuteContract.adapters.proofCalls;
+  const initialPlanUploadCalls = exhaustedLegacyExecuteContract.adapters.planUploadCalls;
+  exhaustedLegacyExecuteContract.adapters.setCleanupErrorSequence([
+    { code: "40001" },
+    { code: "55P03" },
+    { code: "40001" },
+  ]);
+  const exhaustedRoot = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-stage-execute-retry-exhausted-contract-"));
+  let archiveDownloads = 0;
+  try {
+    await assert.rejects(
+      () => runLegacyExecutePruneContract(
+        exhaustedLegacyExecuteContract,
+        path.join(exhaustedRoot, "recovery"),
+        {
+          downloadArchive: async (_target, objectPath) => {
+            archiveDownloads += 1;
+            return { bytes: exhaustedLegacyExecuteContract.adapters.storageObjects.get(objectPath), downloadMs: 1 };
+          },
+        },
+      ),
+      (error) => error?.phase === "execute"
+        && error.batch_number === 1
+        && error.batch_id === "9001"
+        && error.attempts === 3
+        && error.sqlstate === "40001"
+        && error.executeAttempts === 3
+        && error.executeRetryCount === 2
+        && JSON.stringify(error.executeSqlstates) === JSON.stringify(["40001", "55P03", "40001"]),
+    );
+    assert.equal(exhaustedLegacyExecuteContract.adapters.executeCleanupCalls, initialCleanupCalls + 3);
+    assert.equal(exhaustedLegacyExecuteContract.adapters.proofCalls, initialProofCalls);
+    assert.equal(exhaustedLegacyExecuteContract.adapters.planUploadCalls, initialPlanUploadCalls);
+    assert.equal(archiveDownloads, 3, "retry exhaustion must only repeat read-only archive validation");
+  } finally {
+    fs.rmSync(exhaustedRoot, { recursive: true, force: true });
+  }
+} finally {
+  fs.rmSync(exhaustedLegacyExecuteContract.tempRoot, { recursive: true, force: true });
+}
+
+const changedBetweenRetriesLegacyExecuteContract = await runRealLegacyRunnerContract(null, orchestratedLegacyTestRun);
+try {
+  assert.equal(changedBetweenRetriesLegacyExecuteContract.error, null);
+  const initialCleanupCalls = changedBetweenRetriesLegacyExecuteContract.adapters.executeCleanupCalls;
+  changedBetweenRetriesLegacyExecuteContract.adapters.setCleanupErrorSequence([{ code: "40001" }]);
+  changedBetweenRetriesLegacyExecuteContract.adapters.setCleanupMutation(({ attempt, row }) => {
+    if (attempt === 1) row.compressed_sha256 = "b".repeat(64);
+  });
+  const changedRoot = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-stage-execute-retry-state-change-contract-"));
+  try {
+    await assert.rejects(
+      () => runLegacyExecutePruneContract(
+        changedBetweenRetriesLegacyExecuteContract,
+        path.join(changedRoot, "recovery"),
+      ),
+      (error) => error?.phase === "execute"
+        && error.batch_number === 1
+        && error.batch_id === "9001"
+        && error.attempts === 1
+        && error.sqlstate === "40001"
+        && /compressed_sha256 changed/.test(error.message),
+    );
+    assert.equal(changedBetweenRetriesLegacyExecuteContract.adapters.executeCleanupCalls, initialCleanupCalls + 1);
+  } finally {
+    fs.rmSync(changedRoot, { recursive: true, force: true });
+  }
+} finally {
+  fs.rmSync(changedBetweenRetriesLegacyExecuteContract.tempRoot, { recursive: true, force: true });
+}
+
 const nonRetryableLegacyExecuteContract = await runRealLegacyRunnerContract(null, orchestratedLegacyTestRun);
 try {
   assert.equal(nonRetryableLegacyExecuteContract.error, null);
@@ -795,7 +901,13 @@ try {
           emit: false,
         },
       }),
-      (error) => error?.code === "23505" && error.executeAttempts === 1,
+      (error) => error?.code === "23505"
+        && error.phase === "execute"
+        && error.batch_number === 1
+        && error.batch_id === "9001"
+        && error.attempts === 1
+        && error.sqlstate === "23505"
+        && error.executeAttempts === 1,
     );
     assert.equal(nonRetryableLegacyExecuteContract.adapters.executeCleanupCalls, initialCleanupCalls + 1);
     assert.equal(archiveDownloads, 1, "non-retryable legacy cleanup must fail before retry revalidation");

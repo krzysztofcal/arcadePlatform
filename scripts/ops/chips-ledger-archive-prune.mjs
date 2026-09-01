@@ -39,6 +39,12 @@ const MAX_EXECUTE_ATTEMPTS = 3;
 export const MAX_AUTOMATIC_CLEANUP_ATTEMPTS = 3;
 export const AUTOMATIC_CLEANUP_RETRY_BACKOFF_MS = Object.freeze([100, 250]);
 const RETRYABLE_CLEANUP_SQLSTATES = new Set(["40001", "55P03"]);
+export const LEGACY_STAGE_PHASES = Object.freeze({
+  PREPARE_MANIFEST: "prepare/manifest",
+  PROOF_REGISTRATION: "proof registration",
+  DRY_RUN: "dry-run",
+  EXECUTE: "execute",
+});
 const LEGACY_EXECUTE_RECEIPT_FIELDS = Object.freeze([
   "pruned_at",
   "pruned_transaction_count",
@@ -95,6 +101,57 @@ export function sqlStateOf(error) {
     if (/^[0-9A-Z]{5}$/.test(value)) return value;
   }
   return null;
+}
+
+function legacyBatchNumber(row) {
+  const value = text(row?.legacy_batch_number);
+  return /^\d+$/.test(value) ? Number(value) : null;
+}
+
+function phaseErrorFields(error) {
+  const sqlstates = Array.isArray(error?.sqlstates)
+    ? [...error.sqlstates]
+    : Array.isArray(error?.executeSqlstates)
+      ? [...error.executeSqlstates]
+      : [];
+  const sqlstate = sqlStateOf(error) || sqlstates.at(-1) || null;
+  return {
+    batch_number: error?.batch_number ?? null,
+    batch_id: error?.batch_id ?? null,
+    phase: error?.phase || null,
+    attempts: error?.attempts ?? error?.executeAttempts ?? 0,
+    sqlstate,
+    sqlstates,
+    executeAttempts: error?.executeAttempts ?? null,
+    executeRetryCount: error?.executeRetryCount ?? null,
+    executeSqlstates: Array.isArray(error?.executeSqlstates)
+      ? [...error.executeSqlstates]
+      : null,
+  };
+}
+
+function annotatePhaseError(error, {
+  row = null,
+  phase = null,
+  attempts = null,
+  sqlstates = null,
+} = {}) {
+  if (!error || typeof error !== "object") return error;
+  const observedSqlstates = Array.isArray(sqlstates)
+    ? [...sqlstates]
+    : Array.isArray(error.executeSqlstates)
+      ? [...error.executeSqlstates]
+      : [];
+  const sqlstate = sqlStateOf(error) || observedSqlstates.at(-1) || null;
+  Object.assign(error, {
+    batch_number: legacyBatchNumber(row) ?? error.batch_number ?? null,
+    batch_id: row?.batch_id == null ? (error.batch_id ?? null) : text(row.batch_id),
+    phase: phase || error.phase || null,
+    attempts: attempts ?? error.attempts ?? error.executeAttempts ?? 0,
+    sqlstate,
+    sqlstates: observedSqlstates,
+  });
+  return error;
 }
 
 function canonicalJson(value) {
@@ -1009,6 +1066,7 @@ async function executeLegacyStageAllowlistWithRetry({
   recoveryBundle,
   approvedBatchId = null,
   orchestration = null,
+  beforeRetry = null,
   deps,
 }) {
   let currentRow = row;
@@ -1024,11 +1082,29 @@ async function executeLegacyStageAllowlistWithRetry({
   });
   const reportProgress = (extra = {}) => {
     if (typeof deps.onExecuteProgress === "function") {
-      deps.onExecuteProgress({ ...metrics(), row: currentRow, ...extra });
+      deps.onExecuteProgress({
+        ...metrics(),
+        row: currentRow,
+        batch_number: legacyBatchNumber(currentRow),
+        batch_id: currentRow?.batch_id == null ? null : text(currentRow.batch_id),
+        phase: LEGACY_STAGE_PHASES.EXECUTE,
+        attempts: executeAttempts,
+        sqlstate: executeSqlstates.at(-1) || null,
+        sqlstates: [...executeSqlstates],
+        ...extra,
+      });
     }
   };
   const annotate = (error) => {
-    if (error && typeof error === "object") Object.assign(error, metrics());
+    if (error && typeof error === "object") {
+      Object.assign(error, metrics());
+      annotatePhaseError(error, {
+        row: currentRow,
+        phase: LEGACY_STAGE_PHASES.EXECUTE,
+        attempts: executeAttempts,
+        sqlstates: executeSqlstates,
+      });
+    }
     return error;
   };
   const wait = deps.waitForExecuteRetry || (async ({ delayMs }) => {
@@ -1037,15 +1113,47 @@ async function executeLegacyStageAllowlistWithRetry({
 
   for (let attempt = 1; attempt <= MAX_EXECUTE_ATTEMPTS; attempt += 1) {
     if (attempt > 1) {
+      const previousRow = currentRow;
       reportProgress({ retry_preflight: true });
+      let retryRecoveryBundle = currentRecoveryBundle;
+      if (typeof beforeRetry === "function") {
+        try {
+          const retryState = await beforeRetry({
+            attempt,
+            previousAttempts: executeAttempts,
+            executeRetryCount,
+            executeSqlstates: [...executeSqlstates],
+            row: currentRow,
+            evidence: currentEvidence,
+            recoveryBundle: currentRecoveryBundle,
+          });
+          if (retryState?.state === "already_pruned") {
+            reportProgress({ row: retryState.row || currentRow, result: retryState });
+            return {
+              ...retryState,
+              recoveryBundle: retryState.recoveryBundle || currentRecoveryBundle,
+              phase: LEGACY_STAGE_PHASES.EXECUTE,
+              batchNumber: legacyBatchNumber(retryState.row || currentRow),
+              batchId: (retryState.row || currentRow)?.batch_id == null
+                ? null
+                : text((retryState.row || currentRow).batch_id),
+              ...metrics(),
+            };
+          }
+          retryRecoveryBundle = retryState?.recoveryBundle || currentRecoveryBundle;
+        } catch (error) {
+          reportProgress({ error });
+          throw annotate(error);
+        }
+      }
       let preflight;
       try {
         preflight = await revalidateLegacyExecuteAttempt({
           store,
-          previousRow: currentRow,
+          previousRow,
           target,
           identity,
-          recoveryBundle: currentRecoveryBundle,
+          recoveryBundle: retryRecoveryBundle,
           deps,
         });
       } catch (error) {
@@ -1054,10 +1162,18 @@ async function executeLegacyStageAllowlistWithRetry({
       }
       if (preflight.state === "already_pruned") {
         reportProgress({ row: preflight.row, result: preflight });
-        return { ...preflight, recoveryBundle: currentRecoveryBundle, ...metrics() };
+        return {
+          ...preflight,
+          recoveryBundle: currentRecoveryBundle,
+          phase: LEGACY_STAGE_PHASES.EXECUTE,
+          batchNumber: legacyBatchNumber(preflight.row),
+          batchId: preflight.row?.batch_id == null ? null : text(preflight.row.batch_id),
+          ...metrics(),
+        };
       }
       currentRow = preflight.row;
       currentEvidence = preflight.evidence;
+      currentRecoveryBundle = retryRecoveryBundle;
     }
 
     executeAttempts += 1;
@@ -1076,6 +1192,9 @@ async function executeLegacyStageAllowlistWithRetry({
         row: currentRow,
         evidence: currentEvidence,
         recoveryBundle: currentRecoveryBundle,
+        phase: LEGACY_STAGE_PHASES.EXECUTE,
+        batchNumber: legacyBatchNumber(currentRow),
+        batchId: currentRow?.batch_id == null ? null : text(currentRow.batch_id),
         ...metrics(),
       };
     } catch (error) {
@@ -1248,7 +1367,13 @@ function outputResult(result) {
     postgres_system_identifier: result.identity,
     bucket: ARCHIVE_BUCKET,
     object_path: result.row.object_path,
+    batch_number: result.batchNumber ?? legacyBatchNumber(result.row),
+    batch_id: result.batchId ?? (result.row.batch_id == null ? null : text(result.row.batch_id)),
     mode: result.mode,
+    phase: result.phase || null,
+    attempts: result.attempts ?? 0,
+    sqlstate: result.sqlstate || null,
+    sqlstates: Array.isArray(result.sqlstates) ? [...result.sqlstates] : [],
     state: result.state,
     transactions: result.evidence.transactionCount,
     entries: result.evidence.entryCount,
@@ -1293,10 +1418,16 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
   const store = deps.pruneStore || createPruneStore(sql);
   const verifyBucket = deps.verifyBucket
     || ((storageTarget) => verifyArchiveBucket(storageTarget, deps));
+  let row = null;
+  const phase = args.registerProof
+    ? LEGACY_STAGE_PHASES.PROOF_REGISTRATION
+    : args.execute
+      ? LEGACY_STAGE_PHASES.EXECUTE
+      : LEGACY_STAGE_PHASES.DRY_RUN;
   try {
     await verifyBucket(target);
     const identity = await store.getIdentity();
-    const row = await store.getManifest(args.objectPath);
+    row = await store.getManifest(args.objectPath);
     assertTargetIdentity(identity, row, target);
     if (row.status !== "committed" || !row.committed_at) fail("archive manifest is not committed");
     if (row.compressed_sha256 !== args.confirmSha) fail("--confirm-sha does not match committed manifest");
@@ -1337,6 +1468,12 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
         evidence,
         target,
         mode: "register-proof",
+        phase,
+        attempts: 1,
+        sqlstate: null,
+        sqlstates: [],
+        batchNumber: legacyBatchNumber(refreshedRow || row),
+        batchId: (refreshedRow || row)?.batch_id == null ? null : text((refreshedRow || row).batch_id),
         state: proof?.state || "proof_registered",
         storageDownloadMs: downloaded.downloadMs,
         archiveSha256,
@@ -1373,6 +1510,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
             recoveryBundle,
             approvedBatchId: args.approvedBatchId,
             orchestration: deps.legacyStageAllowlistOrchestration || null,
+            beforeRetry: deps.beforeExecuteRetry || null,
             deps,
           })
           : await store.cleanupLegacyStageAllowlist(
@@ -1460,6 +1598,16 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
       target,
       evidence: resultEvidence,
       mode: args.execute ? "execute" : "dry-run",
+      phase,
+      attempts: args.execute ? (pruneResult?.executeAttempts ?? 1) : 1,
+      sqlstate: Array.isArray(pruneResult?.executeSqlstates)
+        ? pruneResult.executeSqlstates.at(-1) || null
+        : null,
+      sqlstates: Array.isArray(pruneResult?.executeSqlstates)
+        ? [...pruneResult.executeSqlstates]
+        : [],
+      batchNumber: legacyBatchNumber(resultRow),
+      batchId: resultRow?.batch_id == null ? null : text(resultRow.batch_id),
       state: pruneResult?.state || "unknown",
       storageDownloadMs: downloaded.downloadMs,
       postCommitDownloadMs,
@@ -1473,6 +1621,14 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
     };
     if (deps.emit !== false) outputResult(result);
     return result;
+  } catch (error) {
+    annotatePhaseError(error, {
+      row,
+      phase,
+      attempts: error?.executeAttempts ?? (args.execute ? 0 : 1),
+      sqlstates: error?.executeSqlstates || null,
+    });
+    throw error;
   } finally {
     if (sql && !deps.sql) await sql.end({ timeout: 5 });
   }
@@ -1480,7 +1636,12 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   pruneArchive().catch((error) => {
-    process.stderr.write(`chips-ledger-archive-prune failed: ${error?.message || error}\n`);
+    process.stderr.write(`${stringifyJson({
+      event: "chips_ledger_archive_prune",
+      state: "error",
+      reason: error?.message || String(error),
+      ...phaseErrorFields(error),
+    })}\n`);
     process.exitCode = 1;
   });
 }
