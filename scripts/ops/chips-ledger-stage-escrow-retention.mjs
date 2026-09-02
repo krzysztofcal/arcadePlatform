@@ -522,7 +522,7 @@ function completeRetirement(row) {
   return retirementReceiptState(row) === "complete";
 }
 
-async function readOnlyTransaction(sql, run, { phase, telemetry }) {
+async function sessionTransaction(sql, run, { phase, telemetry, readOnly, transactionName }) {
   if (typeof sql.begin === "function") return sql.begin(run);
   // postgres.js reserve() pins unsafe() to one connection and exposes release(),
   // but does not expose begin(). Never run this fallback on a pool object.
@@ -533,19 +533,20 @@ async function readOnlyTransaction(sql, run, { phase, telemetry }) {
     queryName,
     queryPoint: "transaction",
     attempt: 1,
-    readOnly: true,
+    readOnly,
   });
+  const queryName = (suffix) => `escrow_retention_${transactionName}_${suffix}`;
   let committed = false;
   try {
-    await observedQuery(sql, "begin;", [], transactionContext("escrow_retention_snapshot_begin"), telemetry);
+    await observedQuery(sql, "begin;", [], transactionContext(queryName("begin")), telemetry);
     const result = await run(sql);
-    await observedQuery(sql, "commit;", [], transactionContext("escrow_retention_snapshot_commit"), telemetry);
+    await observedQuery(sql, "commit;", [], transactionContext(queryName("commit")), telemetry);
     committed = true;
     return result;
   } catch (error) {
     if (!committed) {
       try {
-        await observedQuery(sql, "rollback;", [], transactionContext("escrow_retention_snapshot_rollback"), telemetry);
+        await observedQuery(sql, "rollback;", [], transactionContext(queryName("rollback")), telemetry);
       } catch (rollbackError) {
         Object.assign(error, {
           rollback_error: rollbackError?.message || String(rollbackError),
@@ -751,7 +752,12 @@ export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAG
     });
     return result;
   };
-  return readOnlyTransaction(sql, run, { phase, telemetry });
+  return sessionTransaction(sql, run, {
+    phase,
+    telemetry,
+    readOnly: true,
+    transactionName: "snapshot",
+  });
 }
 
 function accountSnapshot(account) {
@@ -1496,7 +1502,7 @@ export async function ensureAccountRecoveryObject({
 async function runRetirementDatabaseFunction({ sql, candidate, recovery, execute, confirmation, telemetry, attempt, backendPid, phase = null }) {
   const readOnly = !execute;
   const operationPhase = phase || (execute ? RETIREMENT_PHASES.EXECUTE : RETIREMENT_PHASES.PREPARE);
-  return sql.begin(async (tx) => {
+  return sessionTransaction(sql, async (tx) => {
     const isolation = readOnly
       ? "set transaction isolation level repeatable read, read only;"
       : "set transaction isolation level serializable;";
@@ -1562,6 +1568,11 @@ async function runRetirementDatabaseFunction({ sql, candidate, recovery, execute
       readOnly,
     }, telemetry);
     return { result: rows[0]?.result, backendPid: txBackendPid };
+  }, {
+    phase: operationPhase,
+    telemetry,
+    readOnly,
+    transactionName: execute ? "execute" : "prepare",
   }).catch((error) => {
     throw annotateQueryError(error, {
       phase: operationPhase,
@@ -2265,7 +2276,7 @@ export async function runStageEscrowAccountRetentionControl({
         expectedAccountIdsSha256,
       });
     }
-    const controlResult = await sql.begin(async (tx) => {
+    const controlResult = await sessionTransaction(sql, async (tx) => {
       await observedQuery(tx, "set transaction isolation level serializable;", [], {
         ...queryContext,
         queryName: "escrow_retention_control_transaction",
@@ -2299,7 +2310,7 @@ export async function runStageEscrowAccountRetentionControl({
       }, telemetry);
       await assertAdvisoryLock(tx, lockSession, { ...queryContext, telemetry });
       return rows[0]?.result || null;
-    });
+    }, { phase, telemetry, readOnly: false, transactionName: "control" });
     await assertAdvisoryLock(sql, lockSession, { ...queryContext, telemetry });
     return {
       state: text(controlResult?.state) || (isAuthorization ? "canary_authorized" : "active"),

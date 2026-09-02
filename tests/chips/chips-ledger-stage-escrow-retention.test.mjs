@@ -669,9 +669,24 @@ test("owner retention control keeps acquire, assertions, function and release on
   const queries = [];
   const events = [];
   let revalidated = null;
+  let transactionOpen = false;
   const session = {
     unsafe: async (query) => {
       queries.push(query);
+      if (/^begin\s*;/i.test(query.trim())) {
+        assert.equal(transactionOpen, false);
+        transactionOpen = true;
+        return [];
+      }
+      if (/^commit\s*;/i.test(query.trim())) {
+        assert.equal(transactionOpen, true);
+        transactionOpen = false;
+        return [];
+      }
+      if (/^rollback\s*;/i.test(query.trim())) {
+        transactionOpen = false;
+        return [];
+      }
       if (query.includes("pg_try_advisory_lock")) return [{ backend_pid: "42", acquired: true }];
       if (query.includes("pg_locks")) return [{ backend_pid: "42", lock_held: true }];
       if (query.includes("chips_authorize_stage_escrow_account_retirement_canary")) {
@@ -681,7 +696,7 @@ test("owner retention control keeps acquire, assertions, function and release on
       if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
       return [];
     },
-    begin: async (callback) => callback(session),
+    release: async () => {},
   };
   const result = await runStageEscrowAccountRetentionControl({
     mode: "authorize-canary",
@@ -707,5 +722,6 @@ test("owner retention control keeps acquire, assertions, function and release on
   assert.equal(revalidated.batchId, "101");
   assert.equal(revalidated.expectedAccountIdsSha256, HASH);
   assert.equal(revalidated.lockSession.backendPid, "42");
+  assert.equal(transactionOpen, false);
   assert.deepEqual(events, ["revalidate", "authorize"]);
 });
