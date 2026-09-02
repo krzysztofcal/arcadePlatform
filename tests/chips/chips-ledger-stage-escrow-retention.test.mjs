@@ -228,6 +228,42 @@ test("recovery verifier accepts a local file and derives its content-addressed o
   }
 });
 
+test("batch restore requires range-scoped confirmation rather than a single-account GO", async () => {
+  const recovery = serializeAccountRecovery(buildAccountRecoverySnapshot({
+    batch: completeBatch(),
+    tableIds: [TABLE_ID],
+    accounts: [account()],
+  }));
+  const hash = accountIdsSha256(recovery.snapshot.account_ids);
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "chips-account-recovery-confirmation-"));
+  const filePath = path.join(directory, "recovery.json.gz");
+  await fs.writeFile(filePath, recovery.compressedBytes, { mode: 0o600 });
+  try {
+    await assert.rejects(
+      () => runRecoveryVerifier({
+        argv: [
+          "--file", filePath,
+          "--restore", "--execute",
+          "--batch-id", "101",
+          "--account-ids-sha256", hash,
+          "--confirmation", `GO ${ACCOUNT_ID}`,
+        ],
+        env: {},
+      }),
+      /RESTORE <batch_id> <account_ids_sha256>/,
+    );
+    await assert.rejects(
+      () => runRecoveryVerifier({
+        argv: ["--file", filePath, "--restore", "--execute", "--go-account-id", ACCOUNT_ID],
+        env: {},
+      }),
+      /unknown recovery verifier option/,
+    );
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("multi-account recovery classifies absent, partial, identical and conflicting sets", () => {
   const secondTableId = "00000000-0000-4000-8000-000000000002";
   const expected = [account(), account(ACCOUNT_ID_2, secondTableId)];
@@ -287,12 +323,17 @@ test("multi-account recovery completes an identical partial set in one transacti
       postgres_system_identifier: "7656985631720456337",
       project_ref: "krydukthwdvccggbyjfw",
       archive_batch: { batch_id: "103", table_ids: [TABLE_ID, secondTableId] },
+      account_ids: accounts.map((item) => item.id).sort(),
       accounts,
     },
   };
   const result = await restoreAccountBatch({
     recovery,
-    args: { goAccountId: ACCOUNT_ID_2 },
+    args: {
+      batchId: "103",
+      accountIdsSha256: accountIdsSha256(accounts.map((item) => item.id)),
+      confirmation: `RESTORE 103 ${accountIdsSha256(accounts.map((item) => item.id))}`,
+    },
     config: { dbUrl: "postgres://stage.example.invalid/db" },
     env: { CHIPS_LEDGER_ESCROW_RECOVERY_RESTORE_EXECUTE: "1" },
     postgresImpl: () => pool,
@@ -509,12 +550,15 @@ test("advisory lock assertion requires the reserved session PID and the exact he
 
 test("owner retention control keeps acquire, assertions, function and release on one session", async () => {
   const queries = [];
+  const events = [];
+  let revalidated = null;
   const session = {
     unsafe: async (query) => {
       queries.push(query);
       if (query.includes("pg_try_advisory_lock")) return [{ backend_pid: "42", acquired: true }];
       if (query.includes("pg_locks")) return [{ backend_pid: "42", lock_held: true }];
       if (query.includes("chips_authorize_stage_escrow_account_retirement_canary")) {
+        events.push("authorize");
         return [{ result: { state: "canary_authorized", batch_id: "101", account_ids_sha256: HASH, confirmation: "GO 101" } }];
       }
       if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
@@ -532,6 +576,10 @@ test("owner retention control keeps acquire, assertions, function and release on
       sql: session,
       config: { dbUrl: "postgres://stage.example.invalid/db" },
       telemetry: false,
+      revalidateCanary: async (context) => {
+        events.push("revalidate");
+        revalidated = context;
+      },
     },
   });
   assert.equal(result.state, "canary_authorized");
@@ -539,4 +587,8 @@ test("owner retention control keeps acquire, assertions, function and release on
   assert.equal(queries.filter((query) => query.includes("pg_locks")).length, 6);
   assert.equal(queries.filter((query) => query.includes("chips_authorize_stage_escrow_account_retirement_canary")).length, 1);
   assert.equal(queries.filter((query) => query.includes("pg_advisory_unlock")).length, 1);
+  assert.equal(revalidated.batchId, "101");
+  assert.equal(revalidated.expectedAccountIdsSha256, HASH);
+  assert.equal(revalidated.lockSession.backendPid, "42");
+  assert.deepEqual(events, ["revalidate", "authorize"]);
 });

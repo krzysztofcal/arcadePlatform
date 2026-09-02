@@ -1764,6 +1764,32 @@ async function assertEscrowAccountRetirementContracts(sql) {
 
   const accountHashRows = await sql.unsafe("select public.chips_archive_uuid_ids_sha256($1::uuid[]) as hash;", [accountIds]);
   const accountHash = accountHashRows[0].hash;
+  await sql.unsafe(`create or replace function public.chips_assert_archive_prune_stage()
+    returns text language sql security definer set search_path = ''
+    as $escrow_stage_gate$ select '7656985631720456337'::text $escrow_stage_gate$;`);
+
+  const wrongCanaryHash = accountHash.startsWith("0")
+    ? `1${accountHash.slice(1)}`
+    : `0${accountHash.slice(1)}`;
+  let wrongCanaryError = null;
+  try {
+    await sql.begin(async (tx) => {
+      await tx.unsafe("set transaction isolation level serializable;");
+      await tx.unsafe("select public.chips_authorize_stage_escrow_account_retirement_canary($1::bigint, $2::text, $3::text);", [batchId, wrongCanaryHash, `GO ${batchId}`]);
+    });
+  } catch (error) {
+    wrongCanaryError = error;
+  }
+  assert.match(wrongCanaryError?.message || "", /does not match current candidate/);
+  assert.equal(wrongCanaryError?.code, "P8979");
+  const unauthorizedCanaryRows = await sql.unsafe(`select canary_batch_id::text as canary_batch_id,
+      canary_account_ids_sha256,
+      canary_confirmation
+    from public.chips_stage_escrow_account_retention_policy
+    where policy_id = 'stage-ledger-escrow-account-retention-v1';`);
+  assert.equal(unauthorizedCanaryRows[0].canary_batch_id, null, "a wrong hash must not immutably authorize the canary");
+  assert.equal(unauthorizedCanaryRows[0].canary_account_ids_sha256, null);
+  assert.equal(unauthorizedCanaryRows[0].canary_confirmation, null);
 
   let directDeleteError = null;
   try {
@@ -1792,9 +1818,6 @@ async function assertEscrowAccountRetirementContracts(sql) {
   }
   assert.match(directReceiptError?.message || "", /Account-retirement receipt requires the archive pruner function/);
 
-  await sql.unsafe(`create or replace function public.chips_assert_archive_prune_stage()
-    returns text language sql security definer set search_path = ''
-    as $escrow_stage_gate$ select '7656985631720456337'::text $escrow_stage_gate$;`);
   const readOnlySql = postgres(dbUrl, { max: 1, prepare: false });
   try {
     await sql.unsafe(`create table public.chips_escrow_retirement_unknown_fk_probe (

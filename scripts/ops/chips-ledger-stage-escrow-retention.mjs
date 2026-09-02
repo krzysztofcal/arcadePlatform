@@ -1305,6 +1305,8 @@ export async function verifyPrimaryArchiveAndDurableRecovery({
   cwd = process.cwd(),
   deps = {},
   telemetry = null,
+  phase = RETIREMENT_PHASES.RECOVERY,
+  attempt = 1,
 } = {}) {
   if (!row?.object_path || !SHA256_RE.test(text(row.compressed_sha256))) fail("archive batch has no valid compressed SHA-256");
   const batchId = text(row.batch_id);
@@ -1353,7 +1355,7 @@ export async function verifyPrimaryArchiveAndDurableRecovery({
     const error = new Error(`archive batch ${batchId} requires complete durable recovery before account retirement`);
     error.recoveryState = durableInspection?.state || "unavailable";
     error.storageState = durableInspection?.state || "unavailable";
-    error.phase = RETIREMENT_PHASES.RECOVERY;
+    error.phase = phase;
     throw error;
   }
   const durable = durableInspection.durable;
@@ -1367,13 +1369,13 @@ export async function verifyPrimaryArchiveAndDurableRecovery({
     durable,
   });
   emitTelemetry(telemetry, {
-    phase: RETIREMENT_PHASES.RECOVERY,
+    phase,
     queryName: "escrow_retention_recovery_verified",
     queryPoint: "primary_and_durable_recovery",
     batchNumber,
     batchId,
     backendPid: null,
-    attempt: 1,
+    attempt,
     sqlstate: "00000",
     readOnly: true,
     storageState: "complete",
@@ -1453,14 +1455,15 @@ export async function ensureAccountRecoveryObject({
   };
 }
 
-async function runRetirementDatabaseFunction({ sql, candidate, recovery, execute, confirmation, telemetry, attempt, backendPid }) {
+async function runRetirementDatabaseFunction({ sql, candidate, recovery, execute, confirmation, telemetry, attempt, backendPid, phase = null }) {
   const readOnly = !execute;
+  const operationPhase = phase || (execute ? RETIREMENT_PHASES.EXECUTE : RETIREMENT_PHASES.PREPARE);
   return sql.begin(async (tx) => {
     const isolation = readOnly
       ? "set transaction isolation level repeatable read, read only;"
       : "set transaction isolation level serializable;";
     await observedQuery(tx, isolation, [], {
-      phase: execute ? RETIREMENT_PHASES.EXECUTE : RETIREMENT_PHASES.PREPARE,
+      phase: operationPhase,
       queryName: execute ? "escrow_retirement_execute_transaction" : "escrow_retirement_prepare_transaction",
       queryPoint: "transaction",
       batchId: candidate.batchId,
@@ -1471,7 +1474,7 @@ async function runRetirementDatabaseFunction({ sql, candidate, recovery, execute
     }, telemetry);
     if (!readOnly) {
       await observedQuery(tx, "set local lock_timeout = '5s';", [], {
-        phase: RETIREMENT_PHASES.EXECUTE,
+        phase: operationPhase,
         queryName: "escrow_retirement_lock_timeout",
         queryPoint: "lock_timeout",
         batchId: candidate.batchId,
@@ -1480,7 +1483,7 @@ async function runRetirementDatabaseFunction({ sql, candidate, recovery, execute
         readOnly: false,
       }, telemetry);
       await observedQuery(tx, "set local statement_timeout = '30s';", [], {
-        phase: RETIREMENT_PHASES.EXECUTE,
+        phase: operationPhase,
         queryName: "escrow_retirement_statement_timeout",
         queryPoint: "statement_timeout",
         batchId: candidate.batchId,
@@ -1490,7 +1493,7 @@ async function runRetirementDatabaseFunction({ sql, candidate, recovery, execute
       }, telemetry);
     }
     const pidRows = await observedQuery(tx, "select pg_catalog.pg_backend_pid()::text as backend_pid;", [], {
-      phase: execute ? RETIREMENT_PHASES.EXECUTE : RETIREMENT_PHASES.PREPARE,
+      phase: operationPhase,
       queryName: "escrow_retirement_database_backend_pid",
       queryPoint: "backend_pid",
       batchId: candidate.batchId,
@@ -1510,7 +1513,7 @@ async function runRetirementDatabaseFunction({ sql, candidate, recovery, execute
       execute,
       confirmation,
     ], {
-      phase: execute ? RETIREMENT_PHASES.EXECUTE : RETIREMENT_PHASES.PREPARE,
+      phase: operationPhase,
       queryName: execute ? "escrow_retirement_execute" : "escrow_retirement_prepare",
       queryPoint: execute ? "validated_delete_and_receipt" : "read_only_validation",
       batchId: candidate.batchId,
@@ -1523,7 +1526,7 @@ async function runRetirementDatabaseFunction({ sql, candidate, recovery, execute
     return { result: rows[0]?.result, backendPid: txBackendPid };
   }).catch((error) => {
     throw annotateQueryError(error, {
-      phase: execute ? RETIREMENT_PHASES.EXECUTE : RETIREMENT_PHASES.PREPARE,
+      phase: operationPhase,
       queryName: execute ? "escrow_retirement_execute" : "escrow_retirement_prepare",
       queryPoint: execute ? "validated_delete_and_receipt" : "read_only_validation",
       batchId: candidate.batchId,
@@ -1618,10 +1621,12 @@ async function fullyRevalidateCandidate({
       cwd,
       deps: { ...deps, moduleEnv },
       telemetry,
+      phase,
+      attempt,
     });
   } catch (error) {
     Object.assign(error, {
-      phase: error?.phase || RETIREMENT_PHASES.RECOVERY,
+      phase: error?.phase || phase,
       batch_id: error?.batch_id || current.candidate.batchId,
       batch_number: error?.batch_number ?? current.candidate.batchNumber ?? null,
     });
@@ -1665,6 +1670,93 @@ async function fullyRevalidateCandidate({
     });
   }
   return { ...current, ...verified, recovery, audit };
+}
+
+async function revalidateCanaryAuthorization({
+  sql,
+  lockSession,
+  storageTarget,
+  moduleEnv,
+  cwd,
+  deps,
+  telemetry,
+  batchId,
+  expectedAccountIdsSha256,
+} = {}) {
+  const phase = RETENTION_CONTROL_PHASES.AUTHORIZE_CANARY;
+  if (typeof deps.revalidateCanary === "function") {
+    return deps.revalidateCanary({
+      sql,
+      lockSession,
+      storageTarget,
+      moduleEnv,
+      cwd,
+      telemetry,
+      batchId,
+      expectedAccountIdsSha256,
+    });
+  }
+  const audit = await readOnlyEscrowAudit({ sql, telemetry, phase });
+  if (audit.stageIdentity !== STAGE_SYSTEM_IDENTIFIER
+    || !audit.fenceActive
+    || !audit.fenceEnforcementActive) {
+    fail("canary authorization requires the canonical Stage identity and active TABLE fence");
+  }
+  const candidate = audit.candidates.find((item) => text(item.batchId) === text(batchId));
+  if (!candidate) fail(`exact canary batch ${batchId} is not a current safe candidate`);
+  const currentHash = accountIdsSha256(candidate.accountIds);
+  if (currentHash !== text(expectedAccountIdsSha256).toLowerCase()) {
+    fail(`escrow canary batch ${batchId} account ID SHA-256 changed during authorization revalidation`);
+  }
+  const current = await fullyRevalidateCandidate({
+    sql,
+    lockSession,
+    candidate,
+    storageTarget,
+    moduleEnv,
+    cwd,
+    deps,
+    telemetry,
+    expectedRecovery: null,
+    phase,
+    attempt: 1,
+  });
+  const storedRecovery = await ensureAccountRecoveryObject({
+    storageTarget,
+    recovery: current.recovery,
+    deps,
+    expectedSnapshot: current.recovery.snapshot,
+    expectedAccountIds: current.candidate.accountIds,
+    allowCreate: false,
+  });
+  emitTelemetry(telemetry, {
+    phase,
+    queryName: "escrow_retention_canary_recovery_verified",
+    queryPoint: "prepared_account_recovery",
+    batchNumber: current.candidate.batchNumber,
+    batchId: current.candidate.batchId,
+    accountIdsSha256: currentHash,
+    attempt: 1,
+    sqlstate: "00000",
+    readOnly: true,
+    storageState: storedRecovery.storageState,
+    storageWrites: 0,
+  });
+  const dry = await runRetirementDatabaseFunction({
+    sql,
+    candidate: current.candidate,
+    recovery: storedRecovery,
+    execute: false,
+    confirmation: null,
+    telemetry,
+    attempt: 1,
+    backendPid: lockSession.backendPid,
+    phase,
+  });
+  if (dry?.result?.state !== "eligible") {
+    fail(`escrow canary batch ${batchId} did not pass read-only authorization revalidation`);
+  }
+  return { candidate: current.candidate, recovery: storedRecovery };
 }
 
 export function limitRetirementCandidates(candidates, maxBatches = MAX_RETIREMENT_BATCHES_PER_RUN, maxAccounts = MAX_RETIREMENT_ACCOUNTS_PER_RUN) {
@@ -2075,6 +2167,7 @@ export async function runStageEscrowAccountRetentionControl({
   batchId = null,
   expectedAccountIdsSha256 = null,
   confirmation = null,
+  cwd = process.cwd(),
 } = {}) {
   const isAuthorization = mode === "authorize-canary";
   const isActivation = mode === "activate";
@@ -2093,6 +2186,7 @@ export async function runStageEscrowAccountRetentionControl({
     fail("activation requires the exact ACTIVATE ... CANARY <batch_id> <account_ids_sha256> confirmation");
   }
   const config = deps.config || validateStageEnvironment(env, { requireCommitSha: true });
+  const moduleEnv = deps.moduleEnv || moduleEnvironment(config);
   const pool = deps.pool || (deps.sql ? null : createStagePool(config, deps.postgres || postgres));
   const sql = deps.sql || (pool && typeof pool.reserve === "function" ? await pool.reserve() : pool);
   if (!sql) fail("Stage PostgreSQL session is required");
@@ -2115,6 +2209,24 @@ export async function runStageEscrowAccountRetentionControl({
       throw error;
     }
     await assertAdvisoryLock(sql, lockSession, { ...queryContext, telemetry });
+    if (isAuthorization) {
+      const storageTarget = deps.storageTarget || (typeof deps.revalidateCanary === "function"
+        ? null
+        : resolveStorageTarget("stage", moduleEnv, { singleTarget: true }));
+      if (storageTarget && deps.verifyBucket) await deps.verifyBucket(storageTarget);
+      else if (storageTarget) await verifyArchiveBucket(storageTarget, deps);
+      await revalidateCanaryAuthorization({
+        sql,
+        lockSession,
+        storageTarget,
+        moduleEnv,
+        cwd,
+        deps,
+        telemetry,
+        batchId,
+        expectedAccountIdsSha256,
+      });
+    }
     const controlResult = await sql.begin(async (tx) => {
       await observedQuery(tx, "set transaction isolation level serializable;", [], {
         ...queryContext,

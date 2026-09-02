@@ -67,7 +67,7 @@ permissions:
 
 jobs:
   stage-archive:
-    if: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-prepare-only' && inputs.mode != 'escrow-retention-authorize-canary' && inputs.mode != 'escrow-retention-execute' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'escrow-retention-activate') || (github.ref == 'refs/heads/main' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true)) }}
+    if: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-prepare-only' && inputs.mode != 'escrow-retention-authorize-canary' && inputs.mode != 'escrow-retention-execute' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'escrow-retention-activate') || (github.ref == 'refs/heads/main' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && (inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-prepare-only' || inputs.mode == 'escrow-retention-verify' || github.actor == github.repository_owner))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -259,6 +259,10 @@ jobs:
         run: |
           set -euo pipefail
           test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          if [[ "$GITHUB_ACTOR" != "$GITHUB_REPOSITORY_OWNER" ]]; then
+            echo "escrow-retention canary authorization requires the repository owner" >&2
+            exit 1
+          fi
           if [[ ! "$ESCROW_RETENTION_BATCH_ID" =~ ^[1-9][0-9]*$ ]]; then
             echo "escrow_retention_batch_id must be a positive integer" >&2
             exit 1
@@ -285,6 +289,10 @@ jobs:
         run: |
           set -euo pipefail
           test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          if [[ "$GITHUB_ACTOR" != "$GITHUB_REPOSITORY_OWNER" ]]; then
+            echo "escrow-retention canary authorization requires the repository owner" >&2
+            exit 1
+          fi
           if [[ ! "$ESCROW_RETENTION_BATCH_ID" =~ ^[1-9][0-9]*$ ]]; then
             echo "escrow_retention_batch_id must be a positive integer" >&2
             exit 1
@@ -319,6 +327,10 @@ jobs:
         run: |
           set -euo pipefail
           test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          if [[ "$GITHUB_ACTOR" != "$GITHUB_REPOSITORY_OWNER" ]]; then
+            echo "escrow-retention execute requires the repository owner" >&2
+            exit 1
+          fi
           if [[ ! "$ESCROW_RETENTION_BATCH_ID" =~ ^[1-9][0-9]*$ ]]; then
             echo "escrow_retention_batch_id must be a positive integer" >&2
             exit 1
@@ -380,6 +392,10 @@ jobs:
         run: |
           set -euo pipefail
           test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          if [[ "$GITHUB_ACTOR" != "$GITHUB_REPOSITORY_OWNER" ]]; then
+            echo "escrow-retention activation requires the repository owner" >&2
+            exit 1
+          fi
           test -z "$ESCROW_RETENTION_BATCH_ID"
           test -z "$ESCROW_RETENTION_ACCOUNT_IDS_SHA256"
           test -z "$ESCROW_RETENTION_RECOVERY_OBJECT_PATH"

@@ -8,6 +8,7 @@ import {
   ACCOUNT_RECOVERY_MIME_TYPE,
   ACCOUNT_RETIREMENT_REGISTRY_SQL,
   assertAdvisoryLock,
+  accountIdsSha256,
   classifyRecoveryAccountSet,
   sha256Hex,
   verifyAccountRetirementReceipt,
@@ -24,8 +25,6 @@ import {
   validateStageEnvironment,
 } from "./chips-ledger-stage-automation.mjs";
 
-const GO_PREFIX = "GO ";
-
 function text(value) {
   return value == null ? "" : String(value).trim();
 }
@@ -39,10 +38,10 @@ function recoveryObjectPathForBytes(bytes) {
 }
 
 function parseArgs(argv = process.argv.slice(2)) {
-  const args = { file: null, objectPath: null, dbUrl: null, restore: false, execute: false, goAccountId: null, confirmation: null };
+  const args = { file: null, objectPath: null, dbUrl: null, batchId: null, accountIdsSha256: null, confirmation: null, restore: false, execute: false };
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
-    if (token === "--file" || token === "--object-path" || token === "--db-url" || token === "--go-account-id" || token === "--confirmation") {
+    if (token === "--file" || token === "--object-path" || token === "--db-url" || token === "--batch-id" || token === "--account-ids-sha256" || token === "--confirmation") {
       const value = argv[index + 1];
       if (!value || value.startsWith("--")) fail(`${token} requires a value`);
       const key = token === "--file"
@@ -51,9 +50,11 @@ function parseArgs(argv = process.argv.slice(2)) {
           ? "objectPath"
           : token === "--db-url"
             ? "dbUrl"
-            : token === "--go-account-id"
-              ? "goAccountId"
-              : "confirmation";
+            : token === "--batch-id"
+              ? "batchId"
+              : token === "--account-ids-sha256"
+                ? "accountIdsSha256"
+                : "confirmation";
       if (args[key] !== null) fail(`${token} was supplied more than once`);
       args[key] = value;
       index += 1;
@@ -66,12 +67,15 @@ function parseArgs(argv = process.argv.slice(2)) {
     }
   }
   if (!args.file && !args.objectPath && !args.help) fail("--file or --object-path is required");
-  if (args.restore && (!args.execute || !args.goAccountId || args.confirmation !== `${GO_PREFIX}${args.goAccountId}`)) {
-    fail("restore requires --execute, --go-account-id and exact GO <account_id> confirmation");
+  if (args.restore && (!args.execute || !args.batchId || !args.accountIdsSha256
+    || args.confirmation !== `RESTORE ${args.batchId} ${args.accountIdsSha256}`)) {
+    fail("restore requires --execute, --batch-id, --account-ids-sha256 and exact RESTORE <batch_id> <account_ids_sha256> confirmation");
   }
-  if (!args.restore && (args.execute || args.goAccountId || args.confirmation)) {
-    fail("--execute/--go-account-id/--confirmation are only valid with --restore");
+  if (!args.restore && (args.execute || args.batchId || args.accountIdsSha256 || args.confirmation)) {
+    fail("--execute/--batch-id/--account-ids-sha256/--confirmation are only valid with --restore");
   }
+  if (args.batchId != null && !/^[1-9][0-9]*$/.test(args.batchId)) fail("restore batch ID is invalid");
+  if (args.accountIdsSha256 != null && !/^[0-9a-f]{64}$/.test(args.accountIdsSha256)) fail("restore account ID SHA-256 is invalid");
   return args;
 }
 
@@ -122,11 +126,16 @@ export async function restoreAccountBatch({ recovery, args, config, env, postgre
     || recovery.parsed.project_ref !== STAGE_PROJECT_REF) {
     fail("recovery object is not bound to canonical Stage");
   }
+  const batchId = text(args.batchId);
+  const expectedAccountIdsSha256 = text(args.accountIdsSha256).toLowerCase();
+  if (text(recovery.parsed.archive_batch.batch_id) !== batchId
+    || accountIdsSha256(recovery.parsed.account_ids) !== expectedAccountIdsSha256
+    || args.confirmation !== `RESTORE ${batchId} ${expectedAccountIdsSha256}`) {
+    fail("restore confirmation does not match the complete recovery batch and account set");
+  }
   const accounts = [...recovery.parsed.accounts].sort((left, right) => text(left.id).localeCompare(text(right.id)));
   const accountIds = accounts.map((item) => item.id);
   const tableIds = [...recovery.parsed.archive_batch.table_ids];
-  const account = accounts.find((item) => item.id === text(args.goAccountId).toLowerCase());
-  if (!account) fail("GO account ID is not present in the recovery object");
   for (const item of accounts) assertAccountShape(item);
   const pool = postgresImpl(config.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 0, max_lifetime: 0 });
   const sql = typeof pool.reserve === "function" ? await pool.reserve() : pool;
@@ -154,7 +163,7 @@ export async function restoreAccountBatch({ recovery, args, config, env, postgre
       const entryRows = await tx.unsafe("select 1 from public.chips_entries where account_id = any($1::uuid[]) limit 1;", [accountIds]);
       const snapshotRows = await tx.unsafe("select 1 from public.chips_account_snapshot where account_id = any($1::uuid[]) limit 1;", [accountIds]);
       if (entryRows.length || snapshotRows.length) fail("restore is blocked by hot entries or an account snapshot");
-      const registryRows = await tx.unsafe(ACCOUNT_RETIREMENT_REGISTRY_SQL, [recovery.parsed.archive_batch.batch_id, tableIds]);
+      const registryRows = await tx.unsafe(ACCOUNT_RETIREMENT_REGISTRY_SQL, [batchId, tableIds]);
       if (Number(registryRows[0]?.registry_count || 0) !== 0) fail("restore is blocked by surviving idempotency/table mappings");
       const existing = await tx.unsafe("select id::text as id, user_id::text as user_id, system_key, account_type::text as account_type, status::text as status, label, balance::text as balance, next_entry_seq::text as next_entry_seq, created_at::text as created_at, updated_at::text as updated_at from public.chips_accounts where id = any($1::uuid[]) order by id;", [accountIds]);
       const accountSet = classifyRecoveryAccountSet(existing, accounts);
@@ -204,7 +213,7 @@ export async function restoreAccountBatch({ recovery, args, config, env, postgre
 export async function runRecoveryVerifier({ argv = process.argv.slice(2), env = process.env } = {}) {
   const args = parseArgs(argv);
   if (args.help) {
-    return "Usage: node scripts/ops/chips-ledger-stage-escrow-account-recovery.mjs --file <path> [--object-path <content-addressed-path>] | --object-path <content-addressed-path> [--db-url <read-only-url>] [--restore --execute --go-account-id <uuid> --confirmation 'GO <uuid>']";
+    return "Usage: node scripts/ops/chips-ledger-stage-escrow-account-recovery.mjs --file <path> [--object-path <content-addressed-path>] | --object-path <content-addressed-path> [--db-url <read-only-url>] [--restore --execute --batch-id <batch_id> --account-ids-sha256 <sha256> --confirmation 'RESTORE <batch_id> <sha256>']";
   }
   const recoverySource = await loadRecovery(args, env);
   const recovery = await verifyRecoveryObject({
