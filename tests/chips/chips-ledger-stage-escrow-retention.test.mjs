@@ -19,6 +19,7 @@ import {
   limitRetirementCandidates,
   parseRetentionArgs,
   readOnlyEscrowAudit,
+  reportSummary,
   runWithRetirementRetry,
   runStageEscrowAccountRetention,
   runStageEscrowAccountRetentionControl,
@@ -40,7 +41,7 @@ function uuidIdsSha256(ids) {
   return crypto.createHash("sha256").update(`${ids.join("\n")}\n`, "utf8").digest("hex");
 }
 
-function reservedAuditSession({ failOn = null, policyEnabled = false } = {}) {
+function reservedAuditSession({ failOn = null, policyEnabled = false, batchRows = [], accountRows = [] } = {}) {
   const queries = [];
   let transactionOpen = false;
   let released = false;
@@ -75,6 +76,8 @@ function reservedAuditSession({ failOn = null, policyEnabled = false } = {}) {
       if (query.includes("chips_stage_escrow_account_retention_policy")) {
         return [{ policy_id: "stage-ledger-escrow-account-retention-v1", enabled: policyEnabled }];
       }
+      if (query.includes("from public.chips_ledger_archive_batches batches")) return batchRows;
+      if (query.includes("from public.chips_accounts accounts")) return accountRows;
       return [];
     },
     release: async () => { released = true; },
@@ -618,6 +621,61 @@ test("reserved audit rolls back after an audit error and leaves no open transact
   );
   assert.equal(session.transactionOpen, false);
   assert.equal(session.queries.some(({ query }) => /^rollback\s*;/i.test(query.trim())), true);
+});
+
+test("audit reports the first deterministically sorted bounded next candidate and hash", async () => {
+  const tableId2 = "00000000-0000-4000-8000-000000000002";
+  const firstBatch = completeBatch({ batch_id: "101", legacy_batch_number: "1" });
+  const secondBatch = completeBatch({
+    batch_id: "102",
+    bot_only_table_id: tableId2,
+    legacy_batch_number: "2",
+  });
+  const events = [];
+  const session = reservedAuditSession({
+    // Deliberately return rows in the opposite order; readOnlyEscrowAudit
+    // must report the first item from its verified sorted candidates list.
+    batchRows: [secondBatch, firstBatch],
+    accountRows: [account(ACCOUNT_ID_2, tableId2), account()],
+  });
+  const result = await readOnlyEscrowAudit({
+    sql: session,
+    expectedSystemIdentifier: "7656985631720456337",
+    telemetry: (event) => events.push(event),
+  });
+  const expected = {
+    batch_number: 1,
+    batch_id: "101",
+    source_policy_id: "stage-ledger-bot-only-retention-7d-v1",
+    table_count: 1,
+    account_count: 1,
+    account_ids_sha256: accountIdsSha256([ACCOUNT_ID]),
+  };
+  assert.deepEqual(result.nextCandidate, expected);
+  assert.deepEqual(events.find((event) => event.event === "chips_ledger_stage_escrow_retention_audit")?.next_candidate, expected);
+  const originalStdoutWrite = process.stdout.write;
+  let stdout = "";
+  process.stdout.write = (chunk) => {
+    stdout += String(chunk);
+    return true;
+  };
+  try {
+    reportSummary({ mode: "audit", state: "audit", nextCandidate: result.nextCandidate }, { GITHUB_STEP_SUMMARY: "" });
+  } finally {
+    process.stdout.write = originalStdoutWrite;
+  }
+  assert.deepEqual(JSON.parse(stdout.trim()).next_candidate, expected);
+});
+
+test("audit reports null next_candidate for an empty backlog", async () => {
+  const events = [];
+  const result = await readOnlyEscrowAudit({
+    sql: reservedAuditSession(),
+    expectedSystemIdentifier: "7656985631720456337",
+    telemetry: (event) => events.push(event),
+  });
+  assert.equal(result.nextCandidate, null);
+  assert.equal(events.find((event) => event.event === "chips_ledger_stage_escrow_retention_audit")?.next_candidate, null);
 });
 
 test("automatic disabled policy audits on the reserved session and releases its advisory lock", async () => {

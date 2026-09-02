@@ -711,6 +711,9 @@ export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAG
       })
       .filter(Boolean)
       .sort((left, right) => Number(left.batchId) - Number(right.batchId));
+    // Keep the audit output bounded while preserving the already verified,
+    // deterministic candidate order used by prepare/execute.
+    const nextCandidate = summarizeNextCandidate(candidates);
     if (unknownFks.length) skippedByReason.unknown_foreign_key = unknownFks.length;
     if (unknownDeleteTriggers.length) skippedByReason.unknown_delete_trigger = unknownDeleteTriggers.length;
     const result = {
@@ -725,6 +728,7 @@ export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAG
       runs: runRows,
       accounts,
       candidates,
+      nextCandidate,
       alreadyRetired,
       skippedByReason,
       unknownForeignKeys: unknownFks,
@@ -749,6 +753,7 @@ export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAG
       read_only: true,
       scanned_batches: result.scannedBatchCount,
       scanned_accounts: result.scannedAccountCount,
+      next_candidate: result.nextCandidate,
     });
     return result;
   };
@@ -1602,6 +1607,19 @@ function summarizeCandidate(candidate, row, recovery = null) {
   };
 }
 
+function summarizeNextCandidate(candidates) {
+  const candidate = Array.isArray(candidates) ? candidates[0] : null;
+  if (!candidate) return null;
+  return {
+    batch_number: candidate.batchNumber ?? null,
+    batch_id: candidate.batchId,
+    source_policy_id: candidate.sourcePolicyId,
+    table_count: candidate.tableIds.length,
+    account_count: candidate.accountIds.length,
+    account_ids_sha256: accountIdsSha256(candidate.accountIds),
+  };
+}
+
 function validateFreshCandidate(audit, candidate) {
   if (audit.stageIdentity !== STAGE_SYSTEM_IDENTIFIER) fail("escrow retention requires canonical Stage identity");
   if (!audit.fenceActive || !audit.fenceEnforcementActive) fail("escrow retention requires an active TABLE fence");
@@ -1820,7 +1838,7 @@ export function limitRetirementCandidates(candidates, maxBatches = MAX_RETIREMEN
   return selected;
 }
 
-function reportSummary(result, env = process.env) {
+export function reportSummary(result, env = process.env) {
   const safe = stringifyJson({
     event: "chips_ledger_stage_escrow_account_retention",
     target: "stage",
@@ -1854,6 +1872,7 @@ function reportSummary(result, env = process.env) {
     skipped_by_reason: result.skippedByReason || {},
     backlog_batches: result.backlogBatchCount ?? null,
     backlog_accounts: result.backlogAccountCount ?? null,
+    next_candidate: result.nextCandidate || null,
     duration_ms: result.durationMs ?? null,
     lock_backend_pid: result.lockBackendPid || null,
     batches: result.batches || [],
@@ -1936,6 +1955,7 @@ export async function runStageEscrowAccountRetention({
         skippedByReason: { advisory_lock_busy: 1 },
         backlogBatchCount: null,
         backlogAccountCount: null,
+        nextCandidate: null,
         durationMs: Date.now() - startedAt,
         lockBackendPid: null,
         batches: [],
@@ -1952,6 +1972,7 @@ export async function runStageEscrowAccountRetention({
       candidates: audit.candidateAccountCount,
       backlog_batches: audit.backlogBatchCount,
       backlog_accounts: audit.backlogAccountCount,
+      next_candidate: audit.nextCandidate,
       skipped_by_reason: audit.skippedByReason,
     });
     if (audit.stageIdentity !== STAGE_SYSTEM_IDENTIFIER) fail("escrow account retention is restricted to canonical Stage");
@@ -1973,6 +1994,7 @@ export async function runStageEscrowAccountRetention({
       skippedByReason: { ...audit.skippedByReason },
       backlogBatchCount: audit.backlogBatchCount,
       backlogAccountCount: audit.backlogAccountCount,
+      nextCandidate: audit.nextCandidate,
       durationMs: null,
       lockBackendPid: lockSession.backendPid,
       batches: [],
