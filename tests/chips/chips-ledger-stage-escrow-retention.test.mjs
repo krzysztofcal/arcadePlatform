@@ -18,7 +18,9 @@ import {
   isRetryableSqlState,
   limitRetirementCandidates,
   parseRetentionArgs,
+  readOnlyEscrowAudit,
   runWithRetirementRetry,
+  runStageEscrowAccountRetention,
   runStageEscrowAccountRetentionControl,
   serializeAccountRecovery,
   verifyAccountRecoveryBytes,
@@ -36,6 +38,48 @@ const HASH = "a".repeat(64);
 
 function uuidIdsSha256(ids) {
   return crypto.createHash("sha256").update(`${ids.join("\n")}\n`, "utf8").digest("hex");
+}
+
+function reservedAuditSession({ failOn = null, policyEnabled = false } = {}) {
+  const queries = [];
+  let transactionOpen = false;
+  let released = false;
+  const session = {
+    queries,
+    get transactionOpen() { return transactionOpen; },
+    get released() { return released; },
+    unsafe: async (query, parameters = []) => {
+      queries.push({ query, parameters });
+      if (failOn && failOn.test(query)) throw new Error("injected audit failure");
+      if (/^begin\s*;/i.test(query.trim())) {
+        assert.equal(transactionOpen, false);
+        transactionOpen = true;
+        return [];
+      }
+      if (/^commit\s*;/i.test(query.trim())) {
+        assert.equal(transactionOpen, true);
+        transactionOpen = false;
+        return [];
+      }
+      if (/^rollback\s*;/i.test(query.trim())) {
+        transactionOpen = false;
+        return [];
+      }
+      if (query.includes("pg_try_advisory_lock")) return [{ backend_pid: "42", acquired: true }];
+      if (query.includes("pg_locks")) return [{ backend_pid: "42", lock_held: true }];
+      if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
+      if (query.includes("pg_backend_pid")) return [{ backend_pid: "42" }];
+      if (query.includes("pg_control_system")) return [{ system_identifier: "7656985631720456337" }];
+      if (query.includes("chips_table_fence_is_active")) return [{ active: true }];
+      if (query.includes("chips_table_fence_control")) return [{ enforcement_active: true }];
+      if (query.includes("chips_stage_escrow_account_retention_policy")) {
+        return [{ policy_id: "stage-ledger-escrow-account-retention-v1", enabled: policyEnabled }];
+      }
+      return [];
+    },
+    release: async () => { released = true; },
+  };
+  return session;
 }
 
 function completeBatch(overrides = {}) {
@@ -546,6 +590,79 @@ test("advisory lock assertion requires the reserved session PID and the exact he
     () => assertAdvisoryLock(sql, { backendPid: "42" }, { batchId: "101", attempt: 2, telemetry: false }),
     /advisory lock session was lost/,
   );
+});
+
+test("reserved postgres.js audit adapter without begin uses one explicit read-only transaction", async () => {
+  const session = reservedAuditSession();
+  assert.equal(typeof session.begin, "undefined");
+  const result = await readOnlyEscrowAudit({
+    sql: session,
+    expectedSystemIdentifier: "7656985631720456337",
+    telemetry: false,
+  });
+  assert.equal(result.backendPid, "42");
+  assert.equal(session.transactionOpen, false);
+  assert.deepEqual(session.queries.filter(({ query }) => /^(begin|commit|rollback)\s*;/i.test(query.trim())).map(({ query }) => query), [
+    "begin;",
+    "commit;",
+  ]);
+  assert.ok(session.queries.some(({ query }) => /set transaction isolation level repeatable read, read only/i.test(query)));
+  assert.equal(session.queries.some(({ query }) => /^rollback\s*;/i.test(query.trim())), false);
+});
+
+test("reserved audit rolls back after an audit error and leaves no open transaction", async () => {
+  const session = reservedAuditSession({ failOn: /pg_control_system/ });
+  await assert.rejects(
+    () => readOnlyEscrowAudit({ sql: session, expectedSystemIdentifier: "7656985631720456337", telemetry: false }),
+    /injected audit failure/,
+  );
+  assert.equal(session.transactionOpen, false);
+  assert.equal(session.queries.some(({ query }) => /^rollback\s*;/i.test(query.trim())), true);
+});
+
+test("automatic disabled policy audits on the reserved session and releases its advisory lock", async () => {
+  const session = reservedAuditSession();
+  let poolEnded = false;
+  const pool = {
+    reserve: async () => session,
+    end: async () => { poolEnded = true; },
+  };
+  const result = await runStageEscrowAccountRetention({
+    mode: "automatic",
+    deps: {
+      pool,
+      config: { dbUrl: "postgres://stage.example.invalid/db" },
+      telemetry: false,
+    },
+  });
+  assert.equal(result.state, "disabled");
+  assert.equal(result.policyEnabled, false);
+  assert.equal(result.lockBackendPid, "42");
+  assert.equal(session.transactionOpen, false);
+  assert.equal(session.released, true);
+  assert.equal(poolEnded, true);
+  const acquireIndex = session.queries.findIndex(({ query }) => query.includes("pg_try_advisory_lock"));
+  const beginIndex = session.queries.findIndex(({ query }) => /^begin\s*;/i.test(query.trim()));
+  const commitIndex = session.queries.findIndex(({ query }) => /^commit\s*;/i.test(query.trim()));
+  const releaseIndex = session.queries.findIndex(({ query }) => query.includes("pg_advisory_unlock"));
+  assert.ok(acquireIndex >= 0 && acquireIndex < beginIndex);
+  assert.ok(beginIndex < commitIndex && commitIndex < releaseIndex);
+  assert.equal(session.queries.some(({ query }) => query.includes("pg_advisory_unlock")), true);
+});
+
+test("manual escrow-retention-audit completes on the reserved adapter", async () => {
+  const session = reservedAuditSession();
+  const result = await runStageEscrowAccountRetention({
+    mode: "audit",
+    deps: {
+      sql: session,
+      config: { dbUrl: "postgres://stage.example.invalid/db" },
+      telemetry: false,
+    },
+  });
+  assert.equal(result.state, "audit");
+  assert.equal(result.lockBackendPid, "42");
+  assert.equal(session.transactionOpen, false);
 });
 
 test("owner retention control keeps acquire, assertions, function and release on one session", async () => {

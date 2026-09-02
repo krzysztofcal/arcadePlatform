@@ -522,8 +522,46 @@ function completeRetirement(row) {
   return retirementReceiptState(row) === "complete";
 }
 
+async function readOnlyTransaction(sql, run, { phase, telemetry }) {
+  if (typeof sql.begin === "function") return sql.begin(run);
+  // postgres.js reserve() pins unsafe() to one connection and exposes release(),
+  // but does not expose begin(). Never run this fallback on a pool object.
+  if (typeof sql.release !== "function") fail("PostgreSQL audit adapter is required");
+
+  const transactionContext = (queryName) => ({
+    phase,
+    queryName,
+    queryPoint: "transaction",
+    attempt: 1,
+    readOnly: true,
+  });
+  let committed = false;
+  try {
+    await observedQuery(sql, "begin;", [], transactionContext("escrow_retention_snapshot_begin"), telemetry);
+    const result = await run(sql);
+    await observedQuery(sql, "commit;", [], transactionContext("escrow_retention_snapshot_commit"), telemetry);
+    committed = true;
+    return result;
+  } catch (error) {
+    if (!committed) {
+      try {
+        await observedQuery(sql, "rollback;", [], transactionContext("escrow_retention_snapshot_rollback"), telemetry);
+      } catch (rollbackError) {
+        Object.assign(error, {
+          rollback_error: rollbackError?.message || String(rollbackError),
+          rollback_sqlstate: sqlStateOf(rollbackError),
+        });
+      }
+    }
+    throw error;
+  }
+}
+
 export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAGE_SYSTEM_IDENTIFIER, telemetry = null, phase = RETIREMENT_PHASES.AUDIT } = {}) {
-  if (!sql || typeof sql.begin !== "function" || typeof sql.unsafe !== "function") fail("PostgreSQL audit adapter is required");
+  if (!sql || typeof sql.unsafe !== "function"
+    || (typeof sql.begin !== "function" && typeof sql.release !== "function")) {
+    fail("PostgreSQL audit adapter is required");
+  }
   const startedAt = Date.now();
   const run = async (tx) => {
     const context = (queryName, queryPoint = "read_only_snapshot") => ({
@@ -713,7 +751,7 @@ export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAG
     });
     return result;
   };
-  return sql.begin(run);
+  return readOnlyTransaction(sql, run, { phase, telemetry });
 }
 
 function accountSnapshot(account) {
