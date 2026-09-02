@@ -1710,6 +1710,9 @@ async function assertEscrowAccountRetirementContracts(sql) {
   const objectPath = `v1/sha256/${archiveSha}.jsonl.gz`;
   const recoveryPath = `account-recovery/v1/sha256/${recoverySha}.json.gz`;
   const accountIds = [accountId];
+  const stageGateRows = await sql.unsafe(
+    "select pg_catalog.pg_get_functiondef('public.chips_assert_archive_prune_stage()'::regprocedure) as definition;",
+  );
 
   const functionRows = await sql`
     select
@@ -1859,10 +1862,20 @@ async function assertEscrowAccountRetirementContracts(sql) {
   assert.equal(stateRows[0].recovery_sha, recoverySha);
   assert.equal(stateRows[0].snapshot_sha, snapshotSha);
 
-  // The fixture is intentionally committed only in this disposable database;
-  // it is removed by the next test-database recreate. This avoids disabling
-  // any production guard merely to clean up a destructive integration probe.
-  await sql.unsafe("select 1;\n-- escrow retirement contract fixture remains isolated in disposable DB");
+  // Remove only this disposable fixture.  The trigger bypass is confined to
+  // the local test transaction so the shared test database can run the
+  // existing bot-only contracts with the TABLE fence initially inactive.
+  await sql.begin(async (tx) => {
+    await tx.unsafe("set local session_replication_role = 'replica';");
+    await tx.unsafe(`update public.chips_stage_escrow_account_retention_policy
+      set canary_batch_id = null,
+          canary_account_ids_sha256 = null,
+          canary_confirmation = null
+      where policy_id = 'stage-ledger-escrow-account-retention-v1';`);
+    await tx.unsafe("delete from public.chips_ledger_archive_batches where batch_id = $1::bigint;", [batchId]);
+  });
+  await sql.unsafe(stageGateRows[0].definition);
+  await sql.unsafe("select public.chips_set_table_fence_active(false);");
 }
 
 async function assertEscrowDryRunReadOnlyConcurrency(sql) {
@@ -1902,8 +1915,14 @@ async function assertEscrowDryRunReadOnlyConcurrency(sql) {
   const writerFinished = deferred();
   const rollback = new Error("escrow dry-run concurrency rollback");
   let writerHasStarted = false;
+  const stageGateRows = await sql.unsafe(
+    "select pg_catalog.pg_get_functiondef('public.chips_assert_archive_prune_stage()'::regprocedure) as definition;",
+  );
 
   try {
+    await sql.unsafe(`create or replace function public.chips_assert_archive_prune_stage()
+      returns text language sql security definer set search_path = ''
+      as $escrow_concurrency_stage_gate$ select '7656985631720456337'::text $escrow_concurrency_stage_gate$;`);
     await sql`
       insert into public.chips_accounts (id, account_type, system_key, status, balance, next_entry_seq)
       values (${accountId}::uuid, 'ESCROW', ${`POKER_TABLE:${tableId}`}, 'active', 0, 23);
@@ -2051,6 +2070,8 @@ async function assertEscrowDryRunReadOnlyConcurrency(sql) {
       await tx.unsafe("delete from public.chips_accounts where id = $1::uuid;", [accountId]);
       await tx.unsafe("delete from public.poker_tables where id = $1::uuid;", [tableId]);
     });
+    await sql.unsafe(stageGateRows[0].definition);
+    await sql.unsafe("select public.chips_set_table_fence_active(false);");
   }
 }
 
