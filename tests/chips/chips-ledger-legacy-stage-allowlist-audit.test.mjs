@@ -543,6 +543,9 @@ async function runPostgresReplaySavepointContract() {
   } finally {
     await sql.unsafe("delete from public.chips_transaction_idempotency where idempotency_key = $1;", [idempotencyKey]);
     await sql.unsafe("delete from public.chips_transactions where id = $1::uuid;", [replayTransactionId]);
+    await sql.unsafe(`update public.chips_accounts
+      set account_type = 'SYSTEM', system_key = 'TEST_CLEANUP:' || id::text
+      where id = any($1::uuid[]);`, [accountIds]);
     await sql.unsafe("delete from public.chips_accounts where id = any($1::uuid[]);", [accountIds]);
     await sql.unsafe("delete from public.poker_tables where id = $1::uuid;", [tableId]);
     await sql.unsafe("select public.chips_set_table_fence_active($1::boolean);", [fenceWasActive]);

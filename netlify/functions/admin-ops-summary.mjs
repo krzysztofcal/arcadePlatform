@@ -34,6 +34,42 @@ with poker_escrow as (
   left join public.poker_tables t on t.id::text = e.table_id_text
   where e.balance > 0
     and (t.status = 'CLOSED' or t.id is null)
+), orphan_zero_balance_accounts as (
+  select e.table_id_text, e.balance, e.escrow_updated_at
+  from poker_escrow e
+  left join public.poker_tables t on t.id::text = e.table_id_text
+  where e.balance = 0
+    and t.id is null
+), completed_account_batches as (
+  select
+    batches.batch_id,
+    batches.account_retirement_at,
+    case
+      when batches.source_policy_id = 'stage-ledger-bot-only-retention-7d-v1'
+        then array[batches.bot_only_table_id]::uuid[]
+      else proofs.batch_table_ids
+    end as table_ids
+  from public.chips_ledger_archive_batches batches
+  left join public.chips_legacy_stage_allowlist_proofs proofs
+    on proofs.batch_id = batches.batch_id
+   and batches.source_policy_id = 'legacy_stage_allowlist_v1'
+  where batches.project_ref = 'krydukthwdvccggbyjfw'
+    and batches.status = 'committed'
+    and batches.format_version = 2
+    and batches.source_policy_id in ('stage-ledger-bot-only-retention-7d-v1', 'legacy_stage_allowlist_v1')
+    and batches.archive_proof_verified_at is not null
+    and batches.pruned_at is not null
+    and batches.registry_cleaned_at is not null
+    and batches.destructive_go_at is not null
+    and batches.destructive_go_batch_id = batches.batch_id
+    and (batches.source_policy_id <> 'legacy_stage_allowlist_v1' or proofs.batch_id is not null)
+), account_retirement_backlog as (
+  select distinct orphan.table_id_text
+  from orphan_zero_balance_accounts orphan
+  join completed_account_batches batches on true
+  cross join lateral unnest(batches.table_ids) as batch_table(table_id)
+  where orphan.table_id_text = batch_table.table_id::text
+    and batches.account_retirement_at is null
 ), limited_items as (
   select *
   from problem_residuals
@@ -48,6 +84,8 @@ select
   coalesce((select sum(balance)::bigint from problem_residuals where status = 'ORPHANED'), 0) as orphan_residual_chips,
   (select count(*)::bigint from problem_residuals) as problem_account_count,
   coalesce((select sum(balance)::bigint from problem_residuals), 0) as problem_chips,
+  (select count(*)::bigint from orphan_zero_balance_accounts) as orphan_zero_balance_escrow_account_count,
+  (select count(*)::bigint from account_retirement_backlog) as account_retirement_backlog_count,
   coalesce((select max(balance)::bigint from problem_residuals), 0) as largest_residual_chips,
   (select max(escrow_updated_at) from problem_residuals) as latest_escrow_update_at,
   coalesce(
@@ -64,7 +102,10 @@ select
   ) as items;
       `,
     );
-    const row = rows?.[0] || {};
+    if (!Array.isArray(rows) || rows.length !== 1 || !rows[0]) {
+      throw new Error("poker escrow summary returned no authoritative row");
+    }
+    const row = rows[0];
     return {
       available: true,
       totalAccountCount: Number(row.total_account_count || 0),
@@ -74,6 +115,8 @@ select
       orphanResidualChips: Number(row.orphan_residual_chips || 0),
       problemAccountCount: Number(row.problem_account_count || 0),
       problemChips: Number(row.problem_chips || 0),
+      orphanZeroBalanceEscrowAccountCount: Number(row.orphan_zero_balance_escrow_account_count || 0),
+      accountRetirementBacklogCount: Number(row.account_retirement_backlog_count || 0),
       largestResidualChips: Number(row.largest_residual_chips || 0),
       latestEscrowUpdateAt: row.latest_escrow_update_at || null,
       items: Array.isArray(row.items) ? row.items : [],
@@ -89,6 +132,8 @@ select
       orphanResidualChips: null,
       problemAccountCount: null,
       problemChips: null,
+      orphanZeroBalanceEscrowAccountCount: null,
+      accountRetirementBacklogCount: null,
       largestResidualChips: null,
       latestEscrowUpdateAt: null,
       items: [],
