@@ -19,12 +19,38 @@ on:
           - legacy-stage-allowlist-orchestrate
           - audit-batch-13
           - execute-batch-13
+          - escrow-retention-audit
+          - escrow-retention-prepare-only
+          - escrow-retention-authorize-canary
+          - escrow-retention-execute
+          - escrow-retention-verify
+          - escrow-retention-activate
       approved_batch_id:
         description: Exact committed bot-only 7d batch_id prepared by a prior run (required for bot-only-7d-execute)
         required: false
         type: string
       approved_batch_confirmation:
         description: Exact human confirmation GO <approved_batch_id> (required for bot-only-7d-execute)
+        required: false
+        type: string
+      escrow_retention_batch_id:
+        description: Exact Stage escrow-retirement archive batch_id (only for prepare/authorize/execute)
+        required: false
+        type: string
+      escrow_retention_account_ids_sha256:
+        description: Exact SHA-256 of the sorted escrow account IDs (only for authorize/execute)
+        required: false
+        type: string
+      escrow_retention_confirmation:
+        description: Exact GO <batch_id> or ACTIVATE ... CANARY ... confirmation (retention only)
+        required: false
+        type: string
+      escrow_retention_recovery_object_path:
+        description: Exact private account recovery object path (only for verify)
+        required: false
+        type: string
+      escrow_retention_recovery_confirmation:
+        description: Exact VERIFY <recovery_object_path> confirmation (only for verify)
         required: false
         type: string
   schedule:
@@ -41,7 +67,7 @@ permissions:
 
 jobs:
   stage-archive:
-    if: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' }}
+    if: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-prepare-only' && inputs.mode != 'escrow-retention-authorize-canary' && inputs.mode != 'escrow-retention-execute' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'escrow-retention-activate') || (github.ref == 'refs/heads/main' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -72,7 +98,7 @@ jobs:
           printf 'sha=%s\n' "$checked_out_sha" >> "$GITHUB_OUTPUT"
 
       - name: Read-only Stage fence preflight
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'bot-only-7d-summary-diagnostic' || inputs.mode == 'bot-only-7d-repair-recovery-batch-15' || inputs.mode == 'bot-only-7d-prepare-only' || inputs.mode == 'bot-only-7d-execute' || inputs.mode == 'bot-only-7d-automatic') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'bot-only-7d-summary-diagnostic' || inputs.mode == 'bot-only-7d-repair-recovery-batch-15' || inputs.mode == 'bot-only-7d-prepare-only' || inputs.mode == 'bot-only-7d-execute' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-prepare-only' || inputs.mode == 'escrow-retention-authorize-canary' || inputs.mode == 'escrow-retention-execute' || inputs.mode == 'escrow-retention-verify' || inputs.mode == 'escrow-retention-activate') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -199,6 +225,172 @@ jobs:
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
         run: node scripts/ops/chips-ledger-stage-escrow-retention.mjs --automatic
+
+      - name: Audit Stage escrow account retention
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'escrow-retention-audit' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+          ESCROW_RETENTION_BATCH_ID: ${{ inputs.escrow_retention_batch_id }}
+          ESCROW_RETENTION_ACCOUNT_IDS_SHA256: ${{ inputs.escrow_retention_account_ids_sha256 }}
+          ESCROW_RETENTION_CONFIRMATION: ${{ inputs.escrow_retention_confirmation }}
+          ESCROW_RETENTION_RECOVERY_OBJECT_PATH: ${{ inputs.escrow_retention_recovery_object_path }}
+          ESCROW_RETENTION_RECOVERY_CONFIRMATION: ${{ inputs.escrow_retention_recovery_confirmation }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          test -z "$ESCROW_RETENTION_BATCH_ID"
+          test -z "$ESCROW_RETENTION_ACCOUNT_IDS_SHA256"
+          test -z "$ESCROW_RETENTION_CONFIRMATION"
+          test -z "$ESCROW_RETENTION_RECOVERY_OBJECT_PATH"
+          test -z "$ESCROW_RETENTION_RECOVERY_CONFIRMATION"
+          node scripts/ops/chips-ledger-stage-escrow-retention.mjs --audit
+
+      - name: Prepare exact Stage escrow account-retention batch
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'escrow-retention-prepare-only' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+          ESCROW_RETENTION_BATCH_ID: ${{ inputs.escrow_retention_batch_id }}
+          ESCROW_RETENTION_ACCOUNT_IDS_SHA256: ${{ inputs.escrow_retention_account_ids_sha256 }}
+          ESCROW_RETENTION_CONFIRMATION: ${{ inputs.escrow_retention_confirmation }}
+          ESCROW_RETENTION_RECOVERY_OBJECT_PATH: ${{ inputs.escrow_retention_recovery_object_path }}
+          ESCROW_RETENTION_RECOVERY_CONFIRMATION: ${{ inputs.escrow_retention_recovery_confirmation }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          if [[ ! "$ESCROW_RETENTION_BATCH_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "escrow_retention_batch_id must be a positive integer" >&2
+            exit 1
+          fi
+          test -z "$ESCROW_RETENTION_ACCOUNT_IDS_SHA256"
+          test -z "$ESCROW_RETENTION_CONFIRMATION"
+          test -z "$ESCROW_RETENTION_RECOVERY_OBJECT_PATH"
+          test -z "$ESCROW_RETENTION_RECOVERY_CONFIRMATION"
+          node scripts/ops/chips-ledger-stage-escrow-retention.mjs \
+            --prepare-only \
+            --batch-id "$ESCROW_RETENTION_BATCH_ID"
+
+      - name: Authorize exact Stage escrow account-retention canary
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'escrow-retention-authorize-canary' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+          CHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_AUTHORIZE_CANARY: "1"
+          ESCROW_RETENTION_BATCH_ID: ${{ inputs.escrow_retention_batch_id }}
+          ESCROW_RETENTION_ACCOUNT_IDS_SHA256: ${{ inputs.escrow_retention_account_ids_sha256 }}
+          ESCROW_RETENTION_CONFIRMATION: ${{ inputs.escrow_retention_confirmation }}
+          ESCROW_RETENTION_RECOVERY_OBJECT_PATH: ${{ inputs.escrow_retention_recovery_object_path }}
+          ESCROW_RETENTION_RECOVERY_CONFIRMATION: ${{ inputs.escrow_retention_recovery_confirmation }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          if [[ ! "$ESCROW_RETENTION_BATCH_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "escrow_retention_batch_id must be a positive integer" >&2
+            exit 1
+          fi
+          if [[ ! "$ESCROW_RETENTION_ACCOUNT_IDS_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "escrow_retention_account_ids_sha256 must be a lowercase SHA-256" >&2
+            exit 1
+          fi
+          if [[ "$ESCROW_RETENTION_CONFIRMATION" != "GO $ESCROW_RETENTION_BATCH_ID" ]]; then
+            echo "escrow_retention_confirmation must be exactly GO <batch_id>" >&2
+            exit 1
+          fi
+          test -z "$ESCROW_RETENTION_RECOVERY_OBJECT_PATH"
+          test -z "$ESCROW_RETENTION_RECOVERY_CONFIRMATION"
+          node scripts/ops/chips-ledger-stage-escrow-retention.mjs \
+            --authorize-canary \
+            --batch-id "$ESCROW_RETENTION_BATCH_ID" \
+            --account-ids-sha256 "$ESCROW_RETENTION_ACCOUNT_IDS_SHA256" \
+            --confirmation "$ESCROW_RETENTION_CONFIRMATION"
+
+      - name: Execute exact Stage escrow account-retention canary
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'escrow-retention-execute' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+          CHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_EXECUTE: "1"
+          ESCROW_RETENTION_BATCH_ID: ${{ inputs.escrow_retention_batch_id }}
+          ESCROW_RETENTION_ACCOUNT_IDS_SHA256: ${{ inputs.escrow_retention_account_ids_sha256 }}
+          ESCROW_RETENTION_CONFIRMATION: ${{ inputs.escrow_retention_confirmation }}
+          ESCROW_RETENTION_RECOVERY_OBJECT_PATH: ${{ inputs.escrow_retention_recovery_object_path }}
+          ESCROW_RETENTION_RECOVERY_CONFIRMATION: ${{ inputs.escrow_retention_recovery_confirmation }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          if [[ ! "$ESCROW_RETENTION_BATCH_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "escrow_retention_batch_id must be a positive integer" >&2
+            exit 1
+          fi
+          if [[ ! "$ESCROW_RETENTION_ACCOUNT_IDS_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "escrow_retention_account_ids_sha256 must be a lowercase SHA-256" >&2
+            exit 1
+          fi
+          if [[ "$ESCROW_RETENTION_CONFIRMATION" != "GO $ESCROW_RETENTION_BATCH_ID" ]]; then
+            echo "escrow_retention_confirmation must be exactly GO <batch_id>" >&2
+            exit 1
+          fi
+          test -z "$ESCROW_RETENTION_RECOVERY_OBJECT_PATH"
+          test -z "$ESCROW_RETENTION_RECOVERY_CONFIRMATION"
+          node scripts/ops/chips-ledger-stage-escrow-retention.mjs \
+            --execute \
+            --batch-id "$ESCROW_RETENTION_BATCH_ID" \
+            --account-ids-sha256 "$ESCROW_RETENTION_ACCOUNT_IDS_SHA256" \
+            --confirmation "$ESCROW_RETENTION_CONFIRMATION"
+
+      - name: Verify Stage escrow account-retention recovery
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'escrow-retention-verify' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+          ESCROW_RETENTION_BATCH_ID: ${{ inputs.escrow_retention_batch_id }}
+          ESCROW_RETENTION_ACCOUNT_IDS_SHA256: ${{ inputs.escrow_retention_account_ids_sha256 }}
+          ESCROW_RETENTION_CONFIRMATION: ${{ inputs.escrow_retention_confirmation }}
+          ESCROW_RETENTION_RECOVERY_OBJECT_PATH: ${{ inputs.escrow_retention_recovery_object_path }}
+          ESCROW_RETENTION_RECOVERY_CONFIRMATION: ${{ inputs.escrow_retention_recovery_confirmation }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          test -z "$ESCROW_RETENTION_BATCH_ID"
+          test -z "$ESCROW_RETENTION_ACCOUNT_IDS_SHA256"
+          test -z "$ESCROW_RETENTION_CONFIRMATION"
+          if [[ ! "$ESCROW_RETENTION_RECOVERY_OBJECT_PATH" =~ ^account-recovery/v1/sha256/[0-9a-f]{64}\.json\.gz$ ]]; then
+            echo "escrow_retention_recovery_object_path must be an exact content-addressed path" >&2
+            exit 1
+          fi
+          if [[ "$ESCROW_RETENTION_RECOVERY_CONFIRMATION" != "VERIFY $ESCROW_RETENTION_RECOVERY_OBJECT_PATH" ]]; then
+            echo "escrow_retention_recovery_confirmation must be exactly VERIFY <recovery_object_path>" >&2
+            exit 1
+          fi
+          node scripts/ops/chips-ledger-stage-escrow-account-recovery.mjs \
+            --object-path "$ESCROW_RETENTION_RECOVERY_OBJECT_PATH"
+
+      - name: Activate Stage escrow account-retention automation
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'escrow-retention-activate' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+          CHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_ACTIVATE: "1"
+          ESCROW_RETENTION_BATCH_ID: ${{ inputs.escrow_retention_batch_id }}
+          ESCROW_RETENTION_ACCOUNT_IDS_SHA256: ${{ inputs.escrow_retention_account_ids_sha256 }}
+          ESCROW_RETENTION_CONFIRMATION: ${{ inputs.escrow_retention_confirmation }}
+          ESCROW_RETENTION_RECOVERY_OBJECT_PATH: ${{ inputs.escrow_retention_recovery_object_path }}
+          ESCROW_RETENTION_RECOVERY_CONFIRMATION: ${{ inputs.escrow_retention_recovery_confirmation }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          test -z "$ESCROW_RETENTION_BATCH_ID"
+          test -z "$ESCROW_RETENTION_ACCOUNT_IDS_SHA256"
+          test -z "$ESCROW_RETENTION_RECOVERY_OBJECT_PATH"
+          test -z "$ESCROW_RETENTION_RECOVERY_CONFIRMATION"
+          if [[ ! "$ESCROW_RETENTION_CONFIRMATION" =~ ^ACTIVATE\ stage-ledger-escrow-account-retention-v1\ CANARY\ [1-9][0-9]*\ [0-9a-f]{64}$ ]]; then
+            echo "escrow_retention_confirmation must be the exact ACTIVATE ... CANARY <batch_id> <account_ids_sha256> value" >&2
+            exit 1
+          fi
+          node scripts/ops/chips-ledger-stage-escrow-retention.mjs \
+            --activate \
+            --confirmation "$ESCROW_RETENTION_CONFIRMATION"
 
       - name: Run legacy Stage allowlist prepare-only
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'legacy-stage-allowlist-prepare-only' }}

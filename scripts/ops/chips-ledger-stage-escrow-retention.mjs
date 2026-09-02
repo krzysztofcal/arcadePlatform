@@ -68,6 +68,11 @@ const RETIREMENT_RECEIPT_FIELDS = Object.freeze([
 ]);
 const ALLOWED_POLICIES = new Set([BOT_ONLY_RETENTION_POLICY_ID, LEGACY_STAGE_ALLOWLIST_POLICY_ID]);
 const RETRYABLE_SQLSTATE_SET = new Set(RETRYABLE_RETIREMENT_SQLSTATES);
+const RETENTION_CONTROL_PHASES = Object.freeze({
+  AUTHORIZE_CANARY: "canary-authorization",
+  ACTIVATE: "activation",
+});
+const ACTIVATION_CONFIRMATION_RE = /^ACTIVATE stage-ledger-escrow-account-retention-v1 CANARY [1-9][0-9]* [0-9a-f]{64}$/;
 
 function text(value) {
   return value == null ? "" : String(value).trim();
@@ -1018,6 +1023,26 @@ from public.chips_transaction_idempotency registry
 where registry.archive_batch_id = $1::bigint
    or registry.table_id = any($2::uuid[]);`;
 
+export function classifyRecoveryAccountSet(existingAccounts, expectedAccounts) {
+  const expected = [...(expectedAccounts || [])].sort((left, right) => text(left?.id).localeCompare(text(right?.id)));
+  const expectedById = new Map(expected.map((account) => [text(account?.id).toLowerCase(), account]));
+  const existing = [...(existingAccounts || [])].sort((left, right) => text(left?.id).localeCompare(text(right?.id)));
+  const seen = new Set();
+  for (const account of existing) {
+    const id = text(account?.id).toLowerCase();
+    const expectedAccount = expectedById.get(id);
+    if (!id || seen.has(id) || !expectedAccount || canonicalJson(account) !== canonicalJson(expectedAccount)) {
+      return { state: "conflict", existingCount: existing.length, missingCount: null };
+    }
+    seen.add(id);
+  }
+  if (existing.length === 0) return { state: "absent", existingCount: 0, missingCount: expected.length };
+  if (existing.length === expected.length && seen.size === expected.length) {
+    return { state: "identical", existingCount: existing.length, missingCount: 0 };
+  }
+  return { state: "partial", existingCount: existing.length, missingCount: expected.length - existing.length };
+}
+
 export async function verifyAccountRetirementReceipt({ sql, recovery, expectedSystemIdentifier = STAGE_SYSTEM_IDENTIFIER } = {}) {
   if (!sql || typeof sql.begin !== "function" || !recovery?.parsed?.archive_batch) {
     fail("read-only database receipt verifier requires a recovery object and PostgreSQL adapter");
@@ -1044,8 +1069,8 @@ export async function verifyAccountRetirementReceipt({ sql, recovery, expectedSy
     }
     const accountRows = await tx.unsafe(ACCOUNT_RETIREMENT_ACCOUNT_SQL, [recovery.parsed.account_ids]);
     const expectedAccounts = [...recovery.parsed.accounts].sort((left, right) => text(left.id).localeCompare(text(right.id)));
-    const accountState = accountRows.length === 0 ? "absent" : "identical";
-    if (accountRows.length !== 0 && canonicalJson(accountRows) !== canonicalJson(expectedAccounts)) {
+    const accountSet = classifyRecoveryAccountSet(accountRows, expectedAccounts);
+    if (accountSet.state === "conflict") {
       fail("existing account does not exactly match the recovery snapshot");
     }
     const dependencyRows = await tx.unsafe(ACCOUNT_RETIREMENT_DEPENDENCY_SQL, [recovery.parsed.account_ids]);
@@ -1056,7 +1081,7 @@ export async function verifyAccountRetirementReceipt({ sql, recovery, expectedSy
     if (Number(registryRows[0]?.registry_count || 0) !== 0) {
       fail("account-retirement receipt has surviving idempotency/table mappings");
     }
-    return { state: "complete", row, account_state: accountState };
+    return { state: "complete", row, account_state: accountSet.state };
   });
 }
 
@@ -1208,12 +1233,12 @@ export async function assertAdvisoryLock(sql, lockSession, { phase = RETIREMENT_
   return backendPid;
 }
 
-async function releaseAdvisoryLock(sql, lockSession, telemetry) {
-  await assertAdvisoryLock(sql, lockSession, { phase: RETIREMENT_PHASES.EXECUTE, telemetry });
+async function releaseAdvisoryLock(sql, lockSession, telemetry, phase = RETIREMENT_PHASES.EXECUTE) {
+  await assertAdvisoryLock(sql, lockSession, { phase, telemetry });
   const rows = await observedQuery(sql,
     "select pg_catalog.pg_advisory_unlock(pg_catalog.hashtextextended($1, 0));",
     [STAGE_AUTOMATION_LOCK_KEY],
-    { phase: RETIREMENT_PHASES.EXECUTE, queryName: "escrow_retention_release_lock", queryPoint: "advisory_unlock", readOnly: false },
+    { phase, queryName: "escrow_retention_release_lock", queryPoint: "advisory_unlock", readOnly: false },
     telemetry);
   if (!(rows[0]?.pg_advisory_unlock === true || rows[0]?.pg_advisory_unlock === "t")) {
     fail("Stage advisory lock release was not confirmed");
@@ -1667,6 +1692,7 @@ function reportSummary(result, env = process.env) {
     phase: result.phase || null,
     batch_number: result.batchNumber ?? null,
     batch_id: result.batchId ?? null,
+    account_ids_sha256: result.accountIdsSha256 || result.canaryAccountIdsSha256 || null,
     query_name: result.queryName || null,
     query_point: result.queryPoint || null,
     attempt: result.attempt ?? null,
@@ -2042,11 +2068,132 @@ export async function runStageEscrowAccountRetention({
   }
 }
 
+export async function runStageEscrowAccountRetentionControl({
+  env = process.env,
+  deps = {},
+  mode,
+  batchId = null,
+  expectedAccountIdsSha256 = null,
+  confirmation = null,
+} = {}) {
+  const isAuthorization = mode === "authorize-canary";
+  const isActivation = mode === "activate";
+  if (!isAuthorization && !isActivation) fail(`unsupported escrow account-retention control mode: ${mode}`);
+  const phase = isAuthorization ? RETENTION_CONTROL_PHASES.AUTHORIZE_CANARY : RETENTION_CONTROL_PHASES.ACTIVATE;
+  const gate = isAuthorization
+    ? "CHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_AUTHORIZE_CANARY"
+    : "CHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_ACTIVATE";
+  if (env[gate] !== "1") fail(`${mode} requires ${gate}=1`);
+  if (isAuthorization && (!/^[1-9][0-9]*$/.test(text(batchId))
+    || !SHA256_RE.test(text(expectedAccountIdsSha256))
+    || confirmation !== `GO ${batchId}`)) {
+    fail("canary authorization requires an exact batch ID, account ID SHA-256 and GO <batch_id> confirmation");
+  }
+  if (isActivation && !ACTIVATION_CONFIRMATION_RE.test(text(confirmation))) {
+    fail("activation requires the exact ACTIVATE ... CANARY <batch_id> <account_ids_sha256> confirmation");
+  }
+  const config = deps.config || validateStageEnvironment(env, { requireCommitSha: true });
+  const pool = deps.pool || (deps.sql ? null : createStagePool(config, deps.postgres || postgres));
+  const sql = deps.sql || (pool && typeof pool.reserve === "function" ? await pool.reserve() : pool);
+  if (!sql) fail("Stage PostgreSQL session is required");
+  const telemetry = deps.telemetry === undefined ? undefined : deps.telemetry;
+  const queryContext = {
+    phase,
+    batchId: isAuthorization ? batchId : null,
+    attempt: 1,
+    readOnly: false,
+  };
+  let lockSession = null;
+  let failed = null;
+  try {
+    lockSession = await acquireAdvisoryLock(sql, telemetry);
+    if (!lockSession) {
+      const error = new Error("Stage automation advisory lock is busy; refusing escrow account-retention control change");
+      error.code = "stage_advisory_lock_busy";
+      error.phase = phase;
+      error.batch_id = isAuthorization ? batchId : null;
+      throw error;
+    }
+    await assertAdvisoryLock(sql, lockSession, { ...queryContext, telemetry });
+    const controlResult = await sql.begin(async (tx) => {
+      await observedQuery(tx, "set transaction isolation level serializable;", [], {
+        ...queryContext,
+        queryName: "escrow_retention_control_transaction",
+        queryPoint: "transaction",
+        backendPid: lockSession.backendPid,
+      }, telemetry);
+      await observedQuery(tx, "set local lock_timeout = '5s';", [], {
+        ...queryContext,
+        queryName: "escrow_retention_control_lock_timeout",
+        queryPoint: "lock_timeout",
+        backendPid: lockSession.backendPid,
+      }, telemetry);
+      await observedQuery(tx, "set local statement_timeout = '30s';", [], {
+        ...queryContext,
+        queryName: "escrow_retention_control_statement_timeout",
+        queryPoint: "statement_timeout",
+        backendPid: lockSession.backendPid,
+      }, telemetry);
+      await assertAdvisoryLock(tx, lockSession, { ...queryContext, telemetry });
+      const query = isAuthorization
+        ? "select public.chips_authorize_stage_escrow_account_retirement_canary($1::bigint, $2::text, $3::text) as result;"
+        : "select public.chips_activate_stage_escrow_account_retention($1::text) as result;";
+      const parameters = isAuthorization
+        ? [batchId, expectedAccountIdsSha256, confirmation]
+        : [confirmation];
+      const rows = await observedQuery(tx, query, parameters, {
+        ...queryContext,
+        queryName: isAuthorization ? "escrow_retention_authorize_canary" : "escrow_retention_activate",
+        queryPoint: "owner_control_function",
+        backendPid: lockSession.backendPid,
+      }, telemetry);
+      await assertAdvisoryLock(tx, lockSession, { ...queryContext, telemetry });
+      return rows[0]?.result || null;
+    });
+    await assertAdvisoryLock(sql, lockSession, { ...queryContext, telemetry });
+    return {
+      state: text(controlResult?.state) || (isAuthorization ? "canary_authorized" : "active"),
+      mode,
+      phase,
+      batchId: controlResult?.batch_id ?? controlResult?.canary_batch_id ?? (isAuthorization ? batchId : null),
+      accountIdsSha256: controlResult?.account_ids_sha256
+        ?? controlResult?.canary_account_ids_sha256
+        ?? (isAuthorization ? expectedAccountIdsSha256 : null),
+      confirmation: controlResult?.confirmation ?? null,
+      stageSystemIdentifier: STAGE_SYSTEM_IDENTIFIER,
+      lockBackendPid: lockSession.backendPid,
+    };
+  } catch (error) {
+    failed = error;
+    Object.assign(error, {
+      phase: error?.phase || phase,
+      batch_id: error?.batch_id || (isAuthorization ? batchId : null),
+      lockBackendPid: lockSession?.backendPid || null,
+    });
+    throw error;
+  } finally {
+    if (lockSession && sql) {
+      try {
+        await releaseAdvisoryLock(sql, lockSession, telemetry, phase);
+      } catch (releaseError) {
+        if (!failed) throw releaseError;
+      }
+    }
+    if (deps.sql == null && sql && typeof sql.release === "function") {
+      try { await sql.release(); } catch { /* connection close below is authoritative */ }
+    }
+    if (pool && typeof pool.end === "function") {
+      try { await pool.end({ timeout: 5 }); } catch { /* do not hide the operation result */ }
+    }
+  }
+}
+
 export function parseRetentionArgs(argv = process.argv.slice(2)) {
   const args = { mode: null, batchId: null, accountIdsSha256: null, confirmation: null };
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
-    if (token === "--automatic" || token === "--audit" || token === "--prepare-only" || token === "--execute") {
+    if (token === "--automatic" || token === "--audit" || token === "--prepare-only" || token === "--execute"
+      || token === "--authorize-canary" || token === "--activate") {
       if (args.mode) fail("retention mode was supplied more than once");
       args.mode = token.slice(2);
     } else if (token === "--batch-id" || token === "--account-ids-sha256" || token === "--confirmation") {
@@ -2069,11 +2216,18 @@ export function parseRetentionArgs(argv = process.argv.slice(2)) {
   if (args.mode === "audit" && (args.batchId || args.accountIdsSha256 || args.confirmation)) {
     fail("audit mode does not accept a batch authorization");
   }
-  if (args.mode === "prepare-only" && !args.batchId) {
-    fail("prepare-only requires an exact --batch-id");
+  if (args.mode === "prepare-only" && (!args.batchId || args.accountIdsSha256 || args.confirmation)) {
+    fail("prepare-only requires only an exact --batch-id");
   }
   if (args.mode === "execute" && (!args.batchId || !args.accountIdsSha256 || !args.confirmation)) {
     fail("execute requires --batch-id, --account-ids-sha256 and --confirmation 'GO <batch_id>'");
+  }
+  if (args.mode === "authorize-canary" && (!args.batchId || !args.accountIdsSha256 || !args.confirmation)) {
+    fail("authorize-canary requires --batch-id, --account-ids-sha256 and --confirmation 'GO <batch_id>'");
+  }
+  if (args.mode === "activate" && (!args.confirmation || !ACTIVATION_CONFIRMATION_RE.test(args.confirmation)
+    || args.batchId || args.accountIdsSha256)) {
+    fail("activate requires only the exact ACTIVATE ... CANARY <batch_id> <account_ids_sha256> confirmation");
   }
   if (args.batchId != null && !/^[1-9][0-9]*$/.test(args.batchId)) fail("retention batch ID is invalid");
   if (args.accountIdsSha256 != null && !SHA256_RE.test(args.accountIdsSha256)) fail("retention account ID SHA-256 is invalid");
@@ -2083,7 +2237,7 @@ export function parseRetentionArgs(argv = process.argv.slice(2)) {
   return args;
 }
 
-const HELP = `Usage: node scripts/ops/chips-ledger-stage-escrow-retention.mjs [--audit|--prepare-only|--automatic|--execute]\n\n--audit is read-only. --prepare-only requires --batch-id and only prepares that\nexact candidate. --execute additionally requires --batch-id,\n--account-ids-sha256, --confirmation "GO <batch_id>" and the explicit\nCHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_EXECUTE=1 gate. The scheduled\n--automatic mode is Stage-only and remains disabled until owner-controlled\ncanary activation.\n`;
+const HELP = `Usage: node scripts/ops/chips-ledger-stage-escrow-retention.mjs [--audit|--prepare-only|--automatic|--execute|--authorize-canary|--activate]\n\n--audit is read-only. --prepare-only requires --batch-id and only prepares that\nexact candidate. --execute additionally requires --batch-id,\n--account-ids-sha256, --confirmation "GO <batch_id>" and the explicit\nCHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_EXECUTE=1 gate. --authorize-canary uses\nthe same exact batch/hash/GO values and the owner-only\nCHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_AUTHORIZE_CANARY=1 gate. --activate\nrequires the exact owner confirmation\n"ACTIVATE stage-ledger-escrow-account-retention-v1 CANARY <batch_id> <account_ids_sha256>"\nand CHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_ACTIVATE=1. The scheduled\n--automatic mode is Stage-only and remains disabled until owner-controlled\ncanary activation.\n`;
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   let args;
@@ -2092,13 +2246,20 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (args.mode === "help") {
       process.stdout.write(HELP);
     } else {
-      const mode = args.mode === "prepare-only" ? "prepare-only" : args.mode;
-      runStageEscrowAccountRetention({
-        mode,
-        batchId: args.batchId,
-        expectedAccountIdsSha256: args.accountIdsSha256,
-        confirmation: args.confirmation,
-      }).then((result) => reportSummary(result)).catch((error) => {
+      const operation = args.mode === "authorize-canary" || args.mode === "activate"
+        ? runStageEscrowAccountRetentionControl({
+          mode: args.mode,
+          batchId: args.batchId,
+          expectedAccountIdsSha256: args.accountIdsSha256,
+          confirmation: args.confirmation,
+        })
+        : runStageEscrowAccountRetention({
+          mode: args.mode === "prepare-only" ? "prepare-only" : args.mode,
+          batchId: args.batchId,
+          expectedAccountIdsSha256: args.accountIdsSha256,
+          confirmation: args.confirmation,
+        });
+      operation.then((result) => reportSummary(result)).catch((error) => {
         reportSummary({
           mode: args.mode,
           state: "error",

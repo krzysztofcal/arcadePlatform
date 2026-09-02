@@ -17,7 +17,7 @@ assert.match(workflow, /approved_batch_id:\n\s+description: Exact committed bot-
 assert.match(workflow, /approved_batch_confirmation:\n\s+description: Exact human confirmation GO <approved_batch_id> \(required for bot-only-7d-execute\)[\s\S]*?required: false\n\s+type: string/);
 assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|legacy-stage-allowlist-prepare-only|audit-batch-13|execute-batch-13)$/gm) || []).length, 5);
 assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|bot-only-7d-execute|legacy-stage-allowlist-prepare-only|audit-batch-13|execute-batch-13)$/gm) || []).length, 6);
-assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-summary-diagnostic|bot-only-7d-repair-recovery-batch-15|bot-only-7d-prepare-only|bot-only-7d-execute|bot-only-7d-automatic|legacy-stage-allowlist-prepare-only|legacy-stage-allowlist-orchestrate|audit-batch-13|execute-batch-13)$/gm) || []).length, 10);
+assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-summary-diagnostic|bot-only-7d-repair-recovery-batch-15|bot-only-7d-prepare-only|bot-only-7d-execute|bot-only-7d-automatic|legacy-stage-allowlist-prepare-only|legacy-stage-allowlist-orchestrate|audit-batch-13|execute-batch-13|escrow-retention-audit|escrow-retention-prepare-only|escrow-retention-authorize-canary|escrow-retention-execute|escrow-retention-verify|escrow-retention-activate)$/gm) || []).length, 16);
 assert.equal((workflow.match(/- cron:/g) || []).length, 2);
 assert.match(workflow, /- cron: "17 2 \* \* \*"/);
 assert.match(workflow, /- cron: "\*\/15 \* \* \* \*"/);
@@ -52,7 +52,7 @@ const preflightStep = workflow.match(
 )[0];
 assert.match(
   preflightStep,
-  /if: \$\{\{ github\.event_name == 'workflow_dispatch' && \(inputs\.mode == 'bot-only-7d-summary-diagnostic' \|\| inputs\.mode == 'bot-only-7d-repair-recovery-batch-15' \|\| inputs\.mode == 'bot-only-7d-prepare-only' \|\| inputs\.mode == 'bot-only-7d-execute' \|\| inputs\.mode == 'bot-only-7d-automatic'\) \}\}/,
+  /if: \$\{\{ github\.event_name == 'workflow_dispatch' && \(inputs\.mode == 'bot-only-7d-summary-diagnostic' \|\| inputs\.mode == 'bot-only-7d-repair-recovery-batch-15' \|\| inputs\.mode == 'bot-only-7d-prepare-only' \|\| inputs\.mode == 'bot-only-7d-execute' \|\| inputs\.mode == 'bot-only-7d-automatic' \|\| inputs\.mode == 'escrow-retention-audit' \|\| inputs\.mode == 'escrow-retention-prepare-only' \|\| inputs\.mode == 'escrow-retention-authorize-canary' \|\| inputs\.mode == 'escrow-retention-execute' \|\| inputs\.mode == 'escrow-retention-verify' \|\| inputs\.mode == 'escrow-retention-activate'\) \}\}/,
 );
 
 const existingRun = workflow.match(
@@ -206,7 +206,7 @@ assert.doesNotMatch(executeRun, /\bchmod\b/);
 assert.doesNotMatch(executeRun, /github\.event\.inputs|inputs\.(?!mode)[a-zA-Z0-9_-]+/);
 assert.doesNotMatch(executeRun, /SUPABASE_PROD_|PRODUCTION|--target\s+prod/i);
 assert.doesNotMatch(executeRun, /CHIPS_LEDGER_BOT_ONLY_EXECUTE/);
-assert.equal((workflow.match(/--execute/g) || []).length, 1);
+assert.equal((workflow.match(/--execute/g) || []).length, 2);
 assert.equal((workflow.match(/CHIPS_LEDGER_LEGACY_STAGE_ALLOWLIST_EXECUTE/g) || []).length, 1);
 assert.doesNotMatch(existingRun, /execute-batch-13|--execute|LEGACY_STAGE_ALLOWLIST_EXECUTE/);
 assert.doesNotMatch(botOnlyRun, /execute-batch-13|--execute|LEGACY_STAGE_ALLOWLIST_EXECUTE/);

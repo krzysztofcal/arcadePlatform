@@ -6,9 +6,10 @@ import postgres from "postgres";
 
 import {
   ACCOUNT_RECOVERY_MIME_TYPE,
-  canonicalJson,
   ACCOUNT_RETIREMENT_REGISTRY_SQL,
   assertAdvisoryLock,
+  classifyRecoveryAccountSet,
+  sha256Hex,
   verifyAccountRetirementReceipt,
   verifyAccountRecoveryBytes,
 } from "./chips-ledger-stage-escrow-retention.mjs";
@@ -31,6 +32,10 @@ function text(value) {
 
 function fail(message) {
   throw new Error(message);
+}
+
+function recoveryObjectPathForBytes(bytes) {
+  return `account-recovery/v1/sha256/${sha256Hex(bytes)}.json.gz`;
 }
 
 function parseArgs(argv = process.argv.slice(2)) {
@@ -60,7 +65,6 @@ function parseArgs(argv = process.argv.slice(2)) {
       fail(`unknown recovery verifier option: ${token}`);
     }
   }
-  if (args.file && args.objectPath) fail("use either --file or --object-path");
   if (!args.file && !args.objectPath && !args.help) fail("--file or --object-path is required");
   if (args.restore && (!args.execute || !args.goAccountId || args.confirmation !== `${GO_PREFIX}${args.goAccountId}`)) {
     fail("restore requires --execute, --go-account-id and exact GO <account_id> confirmation");
@@ -74,8 +78,11 @@ function parseArgs(argv = process.argv.slice(2)) {
 async function loadRecovery(args, env) {
   if (args.file) {
     const bytes = await fs.readFile(path.resolve(args.file));
-    if (!args.objectPath) fail("--file also requires the content-addressed --object-path");
-    return { bytes, objectPath: args.objectPath, dbUrl: args.dbUrl || env.CHIPS_LEDGER_ESCROW_RECOVERY_DB_URL || env.CHIPS_MIGRATIONS_TEST_DB_URL || null };
+    return {
+      bytes,
+      objectPath: args.objectPath || recoveryObjectPathForBytes(bytes),
+      dbUrl: args.dbUrl || env.CHIPS_LEDGER_ESCROW_RECOVERY_DB_URL || env.CHIPS_MIGRATIONS_TEST_DB_URL || null,
+    };
   }
   const config = validateStageEnvironment(env, { requireCommitSha: true });
   const storageTarget = resolveStorageTarget("stage", {
@@ -107,7 +114,7 @@ export async function verifyRecoveryObject({ bytes, objectPath, expectedAccountI
   });
 }
 
-async function restoreAccount({ recovery, args, config, env }) {
+export async function restoreAccountBatch({ recovery, args, config, env, postgresImpl = postgres }) {
   if (env.CHIPS_LEDGER_ESCROW_RECOVERY_RESTORE_EXECUTE !== "1") {
     fail("restore requires CHIPS_LEDGER_ESCROW_RECOVERY_RESTORE_EXECUTE=1");
   }
@@ -115,10 +122,13 @@ async function restoreAccount({ recovery, args, config, env }) {
     || recovery.parsed.project_ref !== STAGE_PROJECT_REF) {
     fail("recovery object is not bound to canonical Stage");
   }
-  const account = recovery.parsed.accounts.find((item) => item.id === text(args.goAccountId).toLowerCase());
+  const accounts = [...recovery.parsed.accounts].sort((left, right) => text(left.id).localeCompare(text(right.id)));
+  const accountIds = accounts.map((item) => item.id);
+  const tableIds = [...recovery.parsed.archive_batch.table_ids];
+  const account = accounts.find((item) => item.id === text(args.goAccountId).toLowerCase());
   if (!account) fail("GO account ID is not present in the recovery object");
-  assertAccountShape(account);
-  const pool = postgres(config.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 0, max_lifetime: 0 });
+  for (const item of accounts) assertAccountShape(item);
+  const pool = postgresImpl(config.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 0, max_lifetime: 0 });
   const sql = typeof pool.reserve === "function" ? await pool.reserve() : pool;
   let lockHeld = false;
   let lockBackendPid = null;
@@ -139,28 +149,38 @@ async function restoreAccount({ recovery, args, config, env }) {
       if (text(identityRows[0]?.system_identifier) !== STAGE_SYSTEM_IDENTIFIER) fail("restore database is not canonical Stage");
       const fenceRows = await tx.unsafe("select public.chips_table_fence_is_active() as active;");
       if (!(fenceRows[0]?.active === true || fenceRows[0]?.active === "t")) fail("restore requires the active TABLE fence");
-      const tableId = account.system_key.slice("POKER_TABLE:".length);
-      const tableRows = await tx.unsafe("select 1 from public.poker_tables where id = $1::uuid;", [tableId]);
+      const tableRows = await tx.unsafe("select id::text as id from public.poker_tables where id = any($1::uuid[]) order by id;", [tableIds]);
       if (tableRows.length) fail("restore is blocked while the poker table exists");
-      const entryRows = await tx.unsafe("select 1 from public.chips_entries where account_id = $1::uuid limit 1;", [account.id]);
-      const snapshotRows = await tx.unsafe("select 1 from public.chips_account_snapshot where account_id = $1::uuid limit 1;", [account.id]);
+      const entryRows = await tx.unsafe("select 1 from public.chips_entries where account_id = any($1::uuid[]) limit 1;", [accountIds]);
+      const snapshotRows = await tx.unsafe("select 1 from public.chips_account_snapshot where account_id = any($1::uuid[]) limit 1;", [accountIds]);
       if (entryRows.length || snapshotRows.length) fail("restore is blocked by hot entries or an account snapshot");
-      const registryRows = await tx.unsafe(ACCOUNT_RETIREMENT_REGISTRY_SQL, [recovery.parsed.archive_batch.batch_id, recovery.parsed.archive_batch.table_ids]);
+      const registryRows = await tx.unsafe(ACCOUNT_RETIREMENT_REGISTRY_SQL, [recovery.parsed.archive_batch.batch_id, tableIds]);
       if (Number(registryRows[0]?.registry_count || 0) !== 0) fail("restore is blocked by surviving idempotency/table mappings");
-      const existing = await tx.unsafe("select id::text as id, user_id::text as user_id, system_key, account_type::text as account_type, status::text as status, label, balance::text as balance, next_entry_seq::text as next_entry_seq, created_at::text as created_at, updated_at::text as updated_at from public.chips_accounts where id = $1::uuid;", [account.id]);
-      if (existing.length) {
-        if (canonicalJson(existing[0]) !== canonicalJson(account)) fail("existing account conflicts with recovery snapshot");
-        return { state: "already_present", account_id: account.id };
+      const existing = await tx.unsafe("select id::text as id, user_id::text as user_id, system_key, account_type::text as account_type, status::text as status, label, balance::text as balance, next_entry_seq::text as next_entry_seq, created_at::text as created_at, updated_at::text as updated_at from public.chips_accounts where id = any($1::uuid[]) order by id;", [accountIds]);
+      const accountSet = classifyRecoveryAccountSet(existing, accounts);
+      if (accountSet.state === "conflict") fail("existing account conflicts with recovery snapshot");
+      if (accountSet.state === "identical") {
+        return { state: "already_present", account_ids: accountIds, account_count: accountIds.length, repaired_existing_accounts: 0 };
       }
-      const keyConflict = await tx.unsafe("select id::text as id from public.chips_accounts where system_key = $1::text and id <> $2::uuid;", [account.system_key, account.id]);
+      const existingIds = new Set(existing.map((item) => text(item.id).toLowerCase()));
+      const keyConflict = await tx.unsafe("select id::text as id from public.chips_accounts where system_key = any($1::text[]) and not (id = any($2::uuid[]));", [accounts.map((item) => item.system_key), accountIds]);
       if (keyConflict.length) fail("restore is blocked by an account with the same system key");
-      await tx.unsafe("insert into public.chips_accounts (id, user_id, system_key, account_type, status, label, balance, next_entry_seq, created_at, updated_at) values ($1::uuid, $2::uuid, $3::text, $4::public.chips_account_type, $5::public.chips_account_status, $6::text, $7::bigint, $8::bigint, $9::timestamptz, $10::timestamptz);", [
-        account.id, account.user_id, account.system_key, account.account_type, account.status,
-        account.label, account.balance, account.next_entry_seq, account.created_at, account.updated_at,
-      ]);
-      const inserted = await tx.unsafe("select id::text as id, system_key, balance::text as balance, next_entry_seq::text as next_entry_seq from public.chips_accounts where id = $1::uuid;", [account.id]);
-      if (inserted.length !== 1 || inserted[0].id !== account.id || inserted[0].system_key !== account.system_key || inserted[0].balance !== account.balance || inserted[0].next_entry_seq !== account.next_entry_seq) fail("restored account does not match recovery snapshot");
-      return { state: "restored", account_id: account.id };
+      for (const item of accounts) {
+        if (existingIds.has(item.id)) continue;
+        await tx.unsafe("insert into public.chips_accounts (id, user_id, system_key, account_type, status, label, balance, next_entry_seq, created_at, updated_at) values ($1::uuid, $2::uuid, $3::text, $4::public.chips_account_type, $5::public.chips_account_status, $6::text, $7::bigint, $8::bigint, $9::timestamptz, $10::timestamptz);", [
+          item.id, item.user_id, item.system_key, item.account_type, item.status,
+          item.label, item.balance, item.next_entry_seq, item.created_at, item.updated_at,
+        ]);
+      }
+      const inserted = await tx.unsafe("select id::text as id, user_id::text as user_id, system_key, account_type::text as account_type, status::text as status, label, balance::text as balance, next_entry_seq::text as next_entry_seq, created_at::text as created_at, updated_at::text as updated_at from public.chips_accounts where id = any($1::uuid[]) order by id;", [accountIds]);
+      const restoredSet = classifyRecoveryAccountSet(inserted, accounts);
+      if (restoredSet.state !== "identical") fail("restored account set does not match recovery snapshot");
+      return {
+        state: "restored",
+        account_ids: accountIds,
+        account_count: accountIds.length,
+        repaired_existing_accounts: accountSet.state === "partial" ? existing.length : 0,
+      };
     });
   } finally {
     if (lockHeld) {
@@ -184,7 +204,7 @@ async function restoreAccount({ recovery, args, config, env }) {
 export async function runRecoveryVerifier({ argv = process.argv.slice(2), env = process.env } = {}) {
   const args = parseArgs(argv);
   if (args.help) {
-    return "Usage: node scripts/ops/chips-ledger-stage-escrow-account-recovery.mjs --file <path> --object-path <content-addressed-path> [--db-url <read-only-url>] [--restore --execute --go-account-id <uuid> --confirmation 'GO <uuid>']";
+    return "Usage: node scripts/ops/chips-ledger-stage-escrow-account-recovery.mjs --file <path> [--object-path <content-addressed-path>] | --object-path <content-addressed-path> [--db-url <read-only-url>] [--restore --execute --go-account-id <uuid> --confirmation 'GO <uuid>']";
   }
   const recoverySource = await loadRecovery(args, env);
   const recovery = await verifyRecoveryObject({
@@ -209,7 +229,7 @@ export async function runRecoveryVerifier({ argv = process.argv.slice(2), env = 
     fail("restore requires a read-only database URL to verify the retirement receipt");
   }
   const result = args.restore
-    ? await restoreAccount({ recovery, args, config: recoverySource.config || validateStageEnvironment(env, { requireCommitSha: true }), env })
+    ? await restoreAccountBatch({ recovery, args, config: recoverySource.config || validateStageEnvironment(env, { requireCommitSha: true }), env })
     : {
       state: "verified",
       object_path: recovery.objectPath,

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -10,15 +13,21 @@ import {
   assertAdvisoryLock,
   buildAccountRecoverySnapshot,
   classifyEscrowAccount,
+  classifyRecoveryAccountSet,
   ensureAccountRecoveryObject,
   isRetryableSqlState,
   limitRetirementCandidates,
   parseRetentionArgs,
   runWithRetirementRetry,
+  runStageEscrowAccountRetentionControl,
   serializeAccountRecovery,
   verifyAccountRecoveryBytes,
 } from "../../scripts/ops/chips-ledger-stage-escrow-retention.mjs";
-import { verifyRecoveryObject } from "../../scripts/ops/chips-ledger-stage-escrow-account-recovery.mjs";
+import {
+  restoreAccountBatch,
+  runRecoveryVerifier,
+  verifyRecoveryObject,
+} from "../../scripts/ops/chips-ledger-stage-escrow-account-recovery.mjs";
 
 const TABLE_ID = "00000000-0000-4000-8000-000000000001";
 const ACCOUNT_ID = "00000000-0000-4000-8000-000000000101";
@@ -199,6 +208,102 @@ test("account recovery is canonical, content-addressed and restores exact ID/seq
   assert.throws(() => verifyAccountRecoveryBytes({ bytes: recovery.compressedBytes, objectPath: recovery.objectPath, expectedSnapshotSha256: "0".repeat(64) }), /SHA-256 differs/);
 });
 
+test("recovery verifier accepts a local file and derives its content-addressed object path", async () => {
+  const recovery = serializeAccountRecovery(buildAccountRecoverySnapshot({
+    batch: completeBatch(),
+    tableIds: [TABLE_ID],
+    accounts: [account()],
+  }));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "chips-account-recovery-"));
+  const filePath = path.join(directory, "recovery.json.gz");
+  await fs.writeFile(filePath, recovery.compressedBytes, { mode: 0o600 });
+  try {
+    const derived = await runRecoveryVerifier({ argv: ["--file", filePath], env: {} });
+    assert.equal(derived.state, "verified");
+    assert.equal(derived.object_path, recovery.objectPath);
+    const explicit = await runRecoveryVerifier({ argv: ["--file", filePath, "--object-path", recovery.objectPath], env: {} });
+    assert.equal(explicit.object_path, recovery.objectPath);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("multi-account recovery classifies absent, partial, identical and conflicting sets", () => {
+  const secondTableId = "00000000-0000-4000-8000-000000000002";
+  const expected = [account(), account(ACCOUNT_ID_2, secondTableId)];
+  const first = expected[0];
+  const second = expected[1];
+  assert.deepEqual(classifyRecoveryAccountSet([], expected), { state: "absent", existingCount: 0, missingCount: 2 });
+  assert.deepEqual(classifyRecoveryAccountSet([first], expected), { state: "partial", existingCount: 1, missingCount: 1 });
+  assert.deepEqual(classifyRecoveryAccountSet([second, first], expected), { state: "identical", existingCount: 2, missingCount: 0 });
+  assert.equal(classifyRecoveryAccountSet([{ ...first, balance: "1" }], expected).state, "conflict");
+});
+
+test("multi-account recovery completes an identical partial set in one transaction", async () => {
+  const secondTableId = "00000000-0000-4000-8000-000000000002";
+  const accounts = [account(), account(ACCOUNT_ID_2, secondTableId)];
+  const existing = [accounts[0]];
+  const queries = [];
+  const session = {
+    unsafe: async (query, parameters = []) => {
+      queries.push({ query, parameters });
+      if (query.includes("pg_try_advisory_lock")) return [{ backend_pid: "42", acquired: true }];
+      if (query.includes("pg_locks")) return [{ backend_pid: "42", lock_held: true }];
+      if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
+      if (query.includes("pg_control_system")) return [{ system_identifier: "7656985631720456337" }];
+      if (query.includes("chips_table_fence_is_active")) return [{ active: true }];
+      if (query.includes("from public.poker_tables")) return [];
+      if (query.includes("from public.chips_entries")) return [];
+      if (query.includes("from public.chips_account_snapshot")) return [];
+      if (query.includes("chips_transaction_idempotency")) return [{ registry_count: 0 }];
+      if (query.includes("system_key = any")) return [];
+      if (query.startsWith("insert into public.chips_accounts")) {
+        existing.push({
+          id: parameters[0],
+          user_id: parameters[1],
+          system_key: parameters[2],
+          account_type: parameters[3],
+          status: parameters[4],
+          label: parameters[5],
+          balance: String(parameters[6]),
+          next_entry_seq: String(parameters[7]),
+          created_at: parameters[8],
+          updated_at: parameters[9],
+        });
+        return [];
+      }
+      if (query.includes("from public.chips_accounts")) return [...existing].sort((left, right) => left.id.localeCompare(right.id));
+      return [];
+    },
+    begin: async (callback) => callback(session),
+    release: async () => {},
+  };
+  const pool = {
+    reserve: async () => session,
+    end: async () => {},
+  };
+  const recovery = {
+    parsed: {
+      postgres_system_identifier: "7656985631720456337",
+      project_ref: "krydukthwdvccggbyjfw",
+      archive_batch: { batch_id: "103", table_ids: [TABLE_ID, secondTableId] },
+      accounts,
+    },
+  };
+  const result = await restoreAccountBatch({
+    recovery,
+    args: { goAccountId: ACCOUNT_ID_2 },
+    config: { dbUrl: "postgres://stage.example.invalid/db" },
+    env: { CHIPS_LEDGER_ESCROW_RECOVERY_RESTORE_EXECUTE: "1" },
+    postgresImpl: () => pool,
+  });
+  assert.equal(result.state, "restored");
+  assert.equal(result.account_count, 2);
+  assert.equal(result.repaired_existing_accounts, 1);
+  assert.deepEqual(existing.map((item) => item.id).sort(), [ACCOUNT_ID, ACCOUNT_ID_2].sort());
+  assert.equal(queries.filter(({ query }) => query.startsWith("insert into public.chips_accounts")).length, 1);
+});
+
 test("create-only account recovery reuses equal object and never overwrites it", async () => {
   const recovery = serializeAccountRecovery(buildAccountRecoverySnapshot({ batch: completeBatch(), tableIds: [TABLE_ID], accounts: [account()] }));
   let stored = null;
@@ -358,6 +463,29 @@ test("manual rollout arguments require an exact batch, account hash and GO", () 
   assert.throws(() => parseRetentionArgs(["--prepare-only"]), /exact --batch-id/);
   assert.throws(() => parseRetentionArgs(["--execute", "--batch-id", "101", "--confirmation", "GO 101"]), /account-ids-sha256/);
   assert.throws(() => parseRetentionArgs(["--execute", "--batch-id", "101", "--account-ids-sha256", HASH, "--confirmation", "GO 102"]), /exactly GO/);
+  assert.deepEqual(parseRetentionArgs([
+    "--authorize-canary",
+    "--batch-id", "101",
+    "--account-ids-sha256", HASH,
+    "--confirmation", "GO 101",
+  ]), {
+    mode: "authorize-canary",
+    batchId: "101",
+    accountIdsSha256: HASH,
+    confirmation: "GO 101",
+  });
+  assert.deepEqual(parseRetentionArgs([
+    "--activate",
+    "--confirmation", `ACTIVATE stage-ledger-escrow-account-retention-v1 CANARY 101 ${HASH}`,
+  ]), {
+    mode: "activate",
+    batchId: null,
+    accountIdsSha256: null,
+    confirmation: `ACTIVATE stage-ledger-escrow-account-retention-v1 CANARY 101 ${HASH}`,
+  });
+  assert.throws(() => parseRetentionArgs(["--prepare-only", "--batch-id", "101", "--confirmation", "GO 101"]), /only an exact --batch-id/);
+  assert.throws(() => parseRetentionArgs(["--authorize-canary", "--batch-id", "101", "--account-ids-sha256", HASH, "--confirmation", "GO 102"]), /exactly GO/);
+  assert.throws(() => parseRetentionArgs(["--activate", "--confirmation", "GO 101"]), /exact ACTIVATE/);
 });
 
 test("advisory lock assertion requires the reserved session PID and the exact held lock", async () => {
@@ -377,4 +505,38 @@ test("advisory lock assertion requires the reserved session PID and the exact he
     () => assertAdvisoryLock(sql, { backendPid: "42" }, { batchId: "101", attempt: 2, telemetry: false }),
     /advisory lock session was lost/,
   );
+});
+
+test("owner retention control keeps acquire, assertions, function and release on one session", async () => {
+  const queries = [];
+  const session = {
+    unsafe: async (query) => {
+      queries.push(query);
+      if (query.includes("pg_try_advisory_lock")) return [{ backend_pid: "42", acquired: true }];
+      if (query.includes("pg_locks")) return [{ backend_pid: "42", lock_held: true }];
+      if (query.includes("chips_authorize_stage_escrow_account_retirement_canary")) {
+        return [{ result: { state: "canary_authorized", batch_id: "101", account_ids_sha256: HASH, confirmation: "GO 101" } }];
+      }
+      if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
+      return [];
+    },
+    begin: async (callback) => callback(session),
+  };
+  const result = await runStageEscrowAccountRetentionControl({
+    mode: "authorize-canary",
+    batchId: "101",
+    expectedAccountIdsSha256: HASH,
+    confirmation: "GO 101",
+    env: { CHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_AUTHORIZE_CANARY: "1" },
+    deps: {
+      sql: session,
+      config: { dbUrl: "postgres://stage.example.invalid/db" },
+      telemetry: false,
+    },
+  });
+  assert.equal(result.state, "canary_authorized");
+  assert.equal(result.lockBackendPid, "42");
+  assert.equal(queries.filter((query) => query.includes("pg_locks")).length, 6);
+  assert.equal(queries.filter((query) => query.includes("chips_authorize_stage_escrow_account_retirement_canary")).length, 1);
+  assert.equal(queries.filter((query) => query.includes("pg_advisory_unlock")).length, 1);
 });

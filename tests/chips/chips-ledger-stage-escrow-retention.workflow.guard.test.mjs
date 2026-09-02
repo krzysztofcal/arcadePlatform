@@ -13,7 +13,39 @@ test("scheduled automation invokes escrow retention without a new scheduler or i
   assert.doesNotMatch(step, /inputs\.mode|workflow_dispatch/);
   assert.match(step, /node scripts\/ops\/chips-ledger-stage-escrow-retention\.mjs --automatic/);
   assert.doesNotMatch(step, /workflow_dispatch:\s*inputs|--execute|--batch-id|GO/);
-  assert.equal((workflow.match(/chips-ledger-stage-escrow-retention\.mjs/g) || []).length, 1);
+  assert.equal((workflow.match(/chips-ledger-stage-escrow-retention\.mjs/g) || []).length, 6);
+});
+
+test("manual escrow retention rollout has exact, main-only workflow modes", () => {
+  for (const mode of [
+    "escrow-retention-audit",
+    "escrow-retention-prepare-only",
+    "escrow-retention-authorize-canary",
+    "escrow-retention-execute",
+    "escrow-retention-verify",
+    "escrow-retention-activate",
+  ]) {
+    assert.match(workflow, new RegExp(`- ${mode}`));
+    assert.match(workflow, new RegExp(`inputs\\.mode == '${mode}'`));
+  }
+  assert.match(workflow, /escrow_retention_batch_id:[\s\S]*?type: string/);
+  assert.match(workflow, /escrow_retention_account_ids_sha256:[\s\S]*?type: string/);
+  assert.match(workflow, /escrow_retention_confirmation:[\s\S]*?type: string/);
+  assert.match(workflow, /escrow_retention_recovery_object_path:[\s\S]*?type: string/);
+  assert.match(workflow, /escrow_retention_recovery_confirmation:[\s\S]*?type: string/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
+  assert.match(workflow, /github\.event\.repository\.fork != true/);
+  assert.match(workflow, /CHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_AUTHORIZE_CANARY: "1"/);
+  assert.match(workflow, /CHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_EXECUTE: "1"/);
+  assert.match(workflow, /CHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_ACTIVATE: "1"/);
+  assert.match(workflow, /--authorize-canary[\s\S]*?--account-ids-sha256/);
+  assert.match(workflow, /--execute[\s\S]*?--account-ids-sha256/);
+  assert.match(workflow, /--activate[\s\S]*?--confirmation/);
+  assert.match(workflow, /chips-ledger-stage-escrow-account-recovery\.mjs[\s\S]*?--object-path/);
+  assert.match(workflow, /VERIFY \$ESCROW_RETENTION_RECOVERY_OBJECT_PATH/);
+  assert.match(workflow, /ACTIVATE.*stage-ledger-escrow-account-retention-v1/);
+  assert.doesNotMatch(workflow.match(/- name: Run Stage escrow account retention[\s\S]*?(?=\n\s+- name:)/)?.[0] || "", /inputs\./);
 });
 
 test("retirement is Stage-only and disabled by default", () => {

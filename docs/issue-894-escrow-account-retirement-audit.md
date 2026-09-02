@@ -72,3 +72,34 @@ The intended rollout is read-only audit, exact canary prepare/recovery
 verification, owner authorization `GO <batch_id>`, canary execute, review of
 the complete receipt, and only then owner activation. Production identity is
 rejected by the existing Stage gate and by the new function.
+
+## GitHub Actions rollout path
+
+The scheduled `*/15` path remains only `--automatic`. The same trusted
+workflow now exposes separate `workflow_dispatch` modes:
+
+1. `escrow-retention-audit` — read-only audit;
+2. `escrow-retention-prepare-only` — prepare one exact `batch_id` and create or
+   reuse its account recovery object;
+3. `escrow-retention-authorize-canary` — owner-controlled `GO <batch_id>` with
+   the independently copied sorted-account-ID SHA-256;
+4. `escrow-retention-execute` — one exact canary execute with the same batch,
+   account-ID hash and `GO`;
+5. `escrow-retention-verify` — read-only verification of one exact recovery
+   path using `VERIFY <recovery_object_path>`;
+6. `escrow-retention-activate` — owner-controlled exact
+   `ACTIVATE stage-ledger-escrow-account-retention-v1 CANARY <batch_id> <account_ids_sha256>`.
+
+These six modes use inputs dedicated to account retention and are accepted
+only for the canonical repository's `main` ref. They cannot reuse the
+existing ledger-prune authorization input, and the workflow does not expose a
+restore mode.
+
+The recovery verifier accepts either a remote `--object-path` or a local
+`--file`. With only `--file`, it derives
+`account-recovery/v1/sha256/<compressed_sha256>.json.gz` from the local bytes;
+an optional `--object-path` must match that derived path. A legacy recovery
+object's exact `GO <account_id>` authorizes the whole batch restore atomically.
+If a crash or an older tool left a partial set, every existing row must first
+match its snapshot and only missing rows are inserted in the same transaction;
+conflicts, hot dependencies and table/registry state remain blockers.
