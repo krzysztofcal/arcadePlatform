@@ -104,6 +104,146 @@ export function sqlStateOf(error) {
   return null;
 }
 
+function postgresErrorField(error, ...names) {
+  for (const name of names) {
+    const value = error?.[name];
+    if (value != null && text(value) !== "") return text(value);
+  }
+  return null;
+}
+
+function sqlSha256(query) {
+  return crypto.createHash("sha256").update(query).digest("hex");
+}
+
+function legacyStageQueryFields(error) {
+  return {
+    query_name: error?.query_name || error?.chipsLedgerQueryName || null,
+    query_point: error?.query_point || error?.chipsLedgerQueryPoint || null,
+    lock_point: error?.lock_point || error?.chipsLedgerLockPoint || error?.query_point || error?.chipsLedgerQueryPoint || null,
+    backend_pid: error?.backend_pid || error?.chipsLedgerBackendPid || null,
+    run_id: error?.run_id || error?.chipsLedgerRunId || null,
+    plan_sha256: error?.plan_sha256 || error?.chipsLedgerPlanSha256 || null,
+    attempt: error?.attempt ?? error?.chipsLedgerQueryAttempt ?? null,
+    detail: postgresErrorField(error, "detail", "details"),
+    hint: postgresErrorField(error, "hint"),
+    context: postgresErrorField(error, "where", "context"),
+  };
+}
+
+function emitLegacyStageQueryTelemetry(telemetry, event) {
+  const payload = {
+    event: "chips_ledger_legacy_stage_query",
+    phase: event.phase,
+    query_name: event.queryName,
+    query_point: event.queryPoint,
+    lock_point: event.lockPoint || event.queryPoint,
+    sql_sha256: sqlSha256(event.query),
+    elapsed_ms: event.elapsedMs,
+    batch_number: event.batchNumber ?? null,
+    batch_id: event.batchId ?? null,
+    run_id: event.runId ?? null,
+    plan_sha256: event.planSha256 ?? null,
+    backend_pid: event.backendPid ?? null,
+    attempt: event.attempt ?? null,
+    sqlstate: event.sqlstate ?? null,
+    detail: event.detail ?? null,
+    hint: event.hint ?? null,
+    context: event.context ?? null,
+    read_only: event.readOnly === true,
+  };
+  if (typeof telemetry === "function") {
+    telemetry(payload);
+    return;
+  }
+  if (telemetry !== false) process.stderr.write(`${stringifyJson(payload)}\n`);
+}
+
+async function observedLegacyStageQuery(tx, {
+  phase,
+  queryName,
+  queryPoint,
+  query,
+  parameters = [],
+  telemetry,
+  batchNumber = null,
+  batchId = null,
+  runId = null,
+  planSha256 = null,
+  backendPid = null,
+  attempt = null,
+  readOnly = false,
+} = {}) {
+  const startedAt = process.hrtime.bigint();
+  try {
+    const rows = await tx.unsafe(query, parameters);
+    emitLegacyStageQueryTelemetry(telemetry, {
+      phase,
+      queryName,
+      queryPoint,
+      query,
+      elapsedMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
+      batchNumber,
+      batchId,
+      runId,
+      planSha256,
+      backendPid,
+      attempt,
+      sqlstate: "00000",
+      readOnly,
+    });
+    return rows;
+  } catch (error) {
+    const phaseError = error instanceof Error ? error : new Error(text(error));
+    const fields = {
+      query_name: queryName,
+      query_point: queryPoint,
+      lock_point: queryPoint,
+      backend_pid: backendPid,
+      run_id: runId,
+      plan_sha256: planSha256,
+      attempt,
+    };
+    Object.assign(phaseError, {
+      chipsLedgerQueryPhase: phase,
+      chipsLedgerQueryName: queryName,
+      chipsLedgerQueryPoint: queryPoint,
+      chipsLedgerLockPoint: queryPoint,
+      chipsLedgerQuerySqlState: sqlStateOf(error),
+      chipsLedgerBackendPid: backendPid,
+      chipsLedgerRunId: runId,
+      chipsLedgerPlanSha256: planSha256,
+      chipsLedgerQueryAttempt: attempt,
+      ...fields,
+    });
+    const errorFields = legacyStageQueryFields(phaseError);
+    Object.assign(phaseError, {
+      detail: errorFields.detail,
+      hint: errorFields.hint,
+      context: errorFields.context,
+    });
+    emitLegacyStageQueryTelemetry(telemetry, {
+      phase,
+      queryName,
+      queryPoint,
+      query,
+      elapsedMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
+      batchNumber,
+      batchId,
+      runId,
+      planSha256,
+      backendPid,
+      attempt,
+      sqlstate: errorFields.sqlstate || sqlStateOf(error),
+      detail: errorFields.detail,
+      hint: errorFields.hint,
+      context: errorFields.context,
+      readOnly,
+    });
+    throw phaseError;
+  }
+}
+
 function legacyBatchNumber(row) {
   const value = text(row?.legacy_batch_number);
   return /^\d+$/.test(value) ? Number(value) : null;
@@ -128,6 +268,7 @@ function phaseErrorFields(error) {
     executeSqlstates: Array.isArray(error?.executeSqlstates)
       ? [...error.executeSqlstates]
       : null,
+    ...legacyStageQueryFields(error),
   };
 }
 
@@ -151,6 +292,7 @@ function annotatePhaseError(error, {
     attempts: attempts ?? error.attempts ?? error.executeAttempts ?? 0,
     sqlstate,
     sqlstates: observedSqlstates,
+    ...legacyStageQueryFields(error),
   });
   return error;
 }
@@ -828,42 +970,127 @@ export function createPruneStore(sql) {
         return rows[0]?.result;
       });
     },
-    async cleanupLegacyStageAllowlist(objectPath, evidence, execute, approvedBatchId = null, orchestration = null) {
+    async cleanupLegacyStageAllowlist(
+      objectPath,
+      evidence,
+      execute,
+      approvedBatchId = null,
+      orchestration = null,
+      queryContext = null,
+    ) {
       return sql.begin(async (tx) => {
-        await tx.unsafe("set transaction isolation level serializable;");
-        await tx.unsafe("set local lock_timeout = '5s';");
-        await tx.unsafe("set local statement_timeout = '120s';");
+        const context = {
+          phase: queryContext?.phase || (execute ? LEGACY_STAGE_PHASES.EXECUTE : LEGACY_STAGE_PHASES.DRY_RUN),
+          queryName: queryContext?.queryName || (execute ? "legacy_stage_execute" : "legacy_stage_dry_run"),
+          queryPoint: queryContext?.queryPoint || (execute ? "execute" : "dry_run"),
+          batchNumber: queryContext?.batchNumber ?? null,
+          batchId: queryContext?.batchId ?? null,
+          runId: queryContext?.runId ?? orchestration?.runId ?? null,
+          planSha256: queryContext?.planSha256 ?? orchestration?.planSha256 ?? null,
+          attempt: queryContext?.attempt ?? 1,
+          telemetry: queryContext?.telemetry,
+        };
+        const readOnly = !execute;
+        const isolationQuery = readOnly
+          ? "set transaction isolation level repeatable read, read only;"
+          : "set transaction isolation level serializable;";
+        await observedLegacyStageQuery(tx, {
+          ...context,
+          query: isolationQuery,
+          queryName: readOnly ? "legacy_stage_dry_run_transaction" : "legacy_stage_execute_transaction",
+          queryPoint: "transaction",
+          readOnly,
+        });
+        if (!readOnly) await observedLegacyStageQuery(tx, {
+          ...context,
+          query: "set local lock_timeout = '5s';",
+          queryName: "legacy_stage_execute_lock_timeout",
+          queryPoint: "lock_timeout",
+          readOnly,
+        });
+        await observedLegacyStageQuery(tx, {
+          ...context,
+          query: "set local statement_timeout = '120s';",
+          queryName: "legacy_stage_statement_timeout",
+          queryPoint: "statement_timeout",
+          readOnly,
+        });
+        const backendRows = await observedLegacyStageQuery(tx, {
+          ...context,
+          query: "select pg_catalog.pg_backend_pid()::text as backend_pid;",
+          queryName: "legacy_stage_backend_pid",
+          queryPoint: "session",
+          readOnly,
+        });
+        const backendPid = text(backendRows[0]?.backend_pid) || null;
+        const queryArgs = { ...context, backendPid, readOnly };
         const rows = orchestration
-          ? await tx.unsafe(`select public.chips_prune_legacy_stage_allowlist_orchestrated_batch(
-            $1::bigint, $2, $3, $4::uuid[], $5::bigint[], $6::uuid[], $7::text, $8::text,
-            $9::text[], $10::boolean
-          ) as result;`, [
-            orchestration.runId,
-            orchestration.planSha256,
-            objectPath,
-            evidence.transactionIds,
-            evidence.entryIds,
-            evidence.legacyTableIds,
-            evidence.legacyAllowlistSha256,
-            evidence.legacyBatchTableIdsSha256,
-            evidence.registryKeys,
-            execute,
-          ])
-          : await tx.unsafe(`select public.chips_prune_legacy_stage_allowlist_batch(
-            $1, $2::uuid[], $3::bigint[], $4::uuid[], $5::text, $6::text, $7::text[],
-            $8::boolean, $9::bigint
-          ) as result;`, [
-            objectPath,
-            evidence.transactionIds,
-            evidence.entryIds,
-            evidence.legacyTableIds,
-            evidence.legacyAllowlistSha256,
-            evidence.legacyBatchTableIdsSha256,
-            evidence.registryKeys,
-            execute,
-            approvedBatchId,
-          ]);
-        return rows[0]?.result;
+          ? await observedLegacyStageQuery(tx, {
+            ...queryArgs,
+            query: `select public.chips_prune_legacy_stage_allowlist_orchestrated_batch(
+              $1::bigint, $2, $3, $4::uuid[], $5::bigint[], $6::uuid[], $7::text, $8::text,
+              $9::text[], $10::boolean
+            ) as result;`,
+            queryName: context.queryName || "legacy_stage_orchestrated_batch",
+            queryPoint: context.queryPoint || "orchestrated_batch",
+            parameters: [
+              orchestration.runId,
+              orchestration.planSha256,
+              objectPath,
+              evidence.transactionIds,
+              evidence.entryIds,
+              evidence.legacyTableIds,
+              evidence.legacyAllowlistSha256,
+              evidence.legacyBatchTableIdsSha256,
+              evidence.registryKeys,
+              execute,
+            ],
+          })
+          : await observedLegacyStageQuery(tx, {
+            ...queryArgs,
+            query: `select public.chips_prune_legacy_stage_allowlist_batch(
+              $1, $2::uuid[], $3::bigint[], $4::uuid[], $5::text, $6::text, $7::text[],
+              $8::boolean, $9::bigint
+            ) as result;`,
+            queryName: context.queryName || "legacy_stage_batch",
+            queryPoint: context.queryPoint || "batch",
+            parameters: [
+              objectPath,
+              evidence.transactionIds,
+              evidence.entryIds,
+              evidence.legacyTableIds,
+              evidence.legacyAllowlistSha256,
+              evidence.legacyBatchTableIdsSha256,
+              evidence.registryKeys,
+              execute,
+              approvedBatchId,
+            ],
+          });
+        const result = rows[0]?.result;
+        if (!result || typeof result !== "object" || Array.isArray(result) || !queryContext) return result;
+        return {
+          ...result,
+          batch_number: queryArgs.batchNumber,
+          batch_id: queryArgs.batchId,
+          query_name: queryArgs.queryName,
+          query_point: queryArgs.queryPoint,
+          lock_point: queryArgs.queryPoint,
+          backend_pid: backendPid,
+          run_id: queryArgs.runId,
+          plan_sha256: queryArgs.planSha256,
+          attempt: queryArgs.attempt,
+          read_only: readOnly,
+        };
+      }).catch((error) => {
+        const context = queryContext || {};
+        Object.assign(error, {
+          query_name: error?.query_name || context.queryName || (execute ? "legacy_stage_execute" : "legacy_stage_dry_run"),
+          query_point: error?.query_point || context.queryPoint || (execute ? "execute" : "dry_run"),
+          run_id: error?.run_id || context.runId || orchestration?.runId || null,
+          plan_sha256: error?.plan_sha256 || context.planSha256 || orchestration?.planSha256 || null,
+          attempt: error?.attempt ?? context.attempt ?? 1,
+        });
+        throw error;
       });
     },
     async verifyCommitted(row, evidence) {
@@ -1187,6 +1414,15 @@ async function executeLegacyStageAllowlistWithRetry({
         true,
         approvedBatchId,
         orchestration,
+        {
+          ...(deps.legacyStageQueryContext || {}),
+          phase: LEGACY_STAGE_PHASES.EXECUTE,
+          queryName: deps.legacyStageQueryContext?.queryName || "legacy_stage_execute",
+          queryPoint: deps.legacyStageQueryContext?.queryPoint || "execute",
+          batchNumber: legacyBatchNumber(currentRow),
+          batchId: currentRow?.batch_id == null ? null : text(currentRow.batch_id),
+          attempt: executeAttempts,
+        },
       );
       reportProgress({ result });
       return {
@@ -1376,6 +1612,24 @@ function outputResult(result) {
     attempts: result.attempts ?? 0,
     sqlstate: result.sqlstate || null,
     sqlstates: Array.isArray(result.sqlstates) ? [...result.sqlstates] : [],
+    executeAttempts: result.executeAttempts ?? null,
+    executeRetryCount: result.executeRetryCount ?? null,
+    executeSqlstates: Array.isArray(result.executeSqlstates) ? [...result.executeSqlstates] : [],
+    recoveryAttempts: result.recoveryAttempts ?? null,
+    storageAttempts: result.storageAttempts ?? null,
+    recoveryState: result.recoveryState || null,
+    storageState: result.storageState || null,
+    query_name: result.query_name || null,
+    query_point: result.query_point || null,
+    lock_point: result.lock_point || result.query_point || null,
+    backend_pid: result.backend_pid || null,
+    run_id: result.run_id || null,
+    plan_sha256: result.plan_sha256 || null,
+    attempt: result.attempt ?? null,
+    detail: result.detail || null,
+    hint: result.hint || null,
+    context: result.context || null,
+    read_only: result.read_only ?? null,
     state: result.state,
     transactions: result.evidence.transactionCount,
     entries: result.evidence.entryCount,
@@ -1521,6 +1775,14 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
             false,
             args.approvedBatchId,
             deps.legacyStageAllowlistOrchestration || null,
+            deps.legacyStageQueryContext || {
+              phase: LEGACY_STAGE_PHASES.DRY_RUN,
+              queryName: "legacy_stage_dry_run",
+              queryPoint: "dry_run",
+              batchNumber: legacyBatchNumber(row),
+              batchId: row?.batch_id == null ? null : text(row.batch_id),
+              telemetry: deps.legacyStageQueryTelemetry,
+            },
           )
         : await executeBotOnlyCleanupWithRetry({
           store,
@@ -1620,6 +1882,21 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
       executeSqlstates: Array.isArray(pruneResult?.executeSqlstates)
         ? [...pruneResult.executeSqlstates]
         : null,
+      recoveryAttempts: pruneResult?.recoveryAttempts ?? null,
+      storageAttempts: pruneResult?.storageAttempts ?? null,
+      recoveryState: pruneResult?.recoveryState ?? null,
+      storageState: pruneResult?.storageState ?? null,
+      query_name: pruneResult?.query_name || null,
+      query_point: pruneResult?.query_point || null,
+      lock_point: pruneResult?.lock_point || pruneResult?.query_point || null,
+      backend_pid: pruneResult?.backend_pid || null,
+      run_id: pruneResult?.run_id || deps.legacyStageAllowlistOrchestration?.runId || null,
+      plan_sha256: pruneResult?.plan_sha256 || deps.legacyStageAllowlistOrchestration?.planSha256 || null,
+      attempt: pruneResult?.attempt ?? (args.execute ? pruneResult?.executeAttempts ?? 1 : 1),
+      detail: pruneResult?.detail || null,
+      hint: pruneResult?.hint || null,
+      context: pruneResult?.context || null,
+      read_only: pruneResult?.read_only ?? (!args.execute),
     };
     if (deps.emit !== false) outputResult(result);
     return result;

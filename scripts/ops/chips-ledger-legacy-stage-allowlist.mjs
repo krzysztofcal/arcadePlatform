@@ -106,6 +106,16 @@ function annotateLegacyPhaseError(error, {
       || error.recoveryState
       || (storageMutation === true ? "modified" : storageMutation === false ? "unchanged" : storageMutation === null ? "unknown" : null),
     storage: error.storage || null,
+    query_name: error.query_name || error.chipsLedgerQueryName || null,
+    query_point: error.query_point || error.chipsLedgerQueryPoint || null,
+    lock_point: error.lock_point || error.chipsLedgerLockPoint || error.query_point || error.chipsLedgerQueryPoint || null,
+    backend_pid: error.backend_pid || error.chipsLedgerBackendPid || null,
+    run_id: error.run_id || error.chipsLedgerRunId || null,
+    plan_sha256: error.plan_sha256 || error.chipsLedgerPlanSha256 || null,
+    attempt: error.attempt ?? error.chipsLedgerQueryAttempt ?? null,
+    detail: error.detail || error.details || null,
+    hint: error.hint || null,
+    context: error.where || error.context || null,
   });
   return error;
 }
@@ -746,6 +756,17 @@ export async function runLegacyStagePrepareOnly({
         storageTarget,
         verifyBucket: deps.verifyBucket,
         legacyStageAllowlistPlan: plan,
+        legacyStageQueryContext: {
+          phase: LEGACY_STAGE_PHASES.DRY_RUN,
+          queryName: "legacy_stage_prepare_dry_run",
+          queryPoint: "prepare.dry_run",
+          batchNumber,
+          batchId: row?.batch_id == null ? null : text(row.batch_id),
+          runId: orchestration?.runId || null,
+          planSha256: orchestration?.planSha256 || null,
+          attempt: 1,
+          telemetry: deps.legacyStageQueryTelemetry,
+        },
         emit: false,
       },
     }), { row, batchNumber });
