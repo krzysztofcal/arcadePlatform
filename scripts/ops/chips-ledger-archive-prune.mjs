@@ -616,7 +616,7 @@ function legacyStageAllowlistEvidenceFromDatabaseRow(row, expectedEvidence) {
   return reconstructed;
 }
 
-function exporterManifestFromDatabase(row, target, legacyStageAllowlistPlan = null) {
+export function exporterManifestFromDatabase(row, target, legacyStageAllowlistPlan = null) {
   const ratio = row.raw_bytes === 0 ? null : Number((row.compressed_bytes / row.raw_bytes).toFixed(6));
   const cursorStart = row.cursor_start_created_at ? { created_at: row.cursor_start_created_at, id: row.cursor_start_id } : null;
   const cursorEnd = row.cursor_end_created_at ? { created_at: row.cursor_end_created_at, id: row.cursor_end_id } : null;

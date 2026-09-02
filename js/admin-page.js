@@ -1497,6 +1497,8 @@
             renderKvRow("All poker escrow accounts", formatAmount(escrow.totalAccountCount)),
             renderKvRow("Closed tables with residual", formatAmount(escrow.closedResidualTableCount) + " · " + formatAmount(escrow.closedResidualChips) + " CH"),
             renderKvRow("Orphan escrow accounts", formatAmount(escrow.orphanResidualAccountCount) + " · " + formatAmount(escrow.orphanResidualChips) + " CH"),
+            renderKvRow("Zero-balance orphan ESCROW", formatAmount(escrow.orphanZeroBalanceEscrowAccountCount)),
+            renderKvRow("Account-retirement backlog", formatAmount(escrow.accountRetirementBacklogCount)),
             renderKvRow("Problem escrow total", formatAmount(problemChips) + " CH"),
             renderKvRow("Largest residual", formatAmount(escrow.largestResidualChips) + " CH"),
             renderKvRow("Latest escrow update", formatTimestamp(escrow.latestEscrowUpdateAt)),

@@ -194,6 +194,12 @@ jobs:
           CHIPS_LEDGER_BOT_ONLY_AUTOMATIC: "1"
         run: node scripts/ops/chips-ledger-stage-automation.mjs --policy bot-only-7d --automatic
 
+      - name: Run Stage escrow account retention
+        if: ${{ github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+        run: node scripts/ops/chips-ledger-stage-escrow-retention.mjs --automatic
+
       - name: Run legacy Stage allowlist prepare-only
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'legacy-stage-allowlist-prepare-only' }}
         env:

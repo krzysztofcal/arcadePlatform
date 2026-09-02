@@ -1598,8 +1598,11 @@ async function assertScopedSnapshotIgnoresParallelUnrelatedActivity(sql) {
     }
     if (scopedAccountId) {
       await sql`
-        delete from public.chips_accounts where id = ${scopedAccountId}::uuid;
+        update public.chips_accounts
+        set account_type = 'SYSTEM', system_key = ${`TEST_CLEANUP:${scopedAccountId}`}
+        where id = ${scopedAccountId}::uuid;
       `;
+      await sql.unsafe("delete from public.chips_accounts where id = $1::uuid;", [scopedAccountId]);
     }
     await snapshotSql.end({ timeout: 5 });
     await activitySql.end({ timeout: 5 });
@@ -1694,6 +1697,363 @@ async function expectAtomicSequenceAllocation(sql, startingSeq) {
   return afterSeq;
 }
 
+async function assertEscrowAccountRetirementContracts(sql) {
+  const tableId = "00000000-0000-4000-8000-00000000d401";
+  const accountId = "00000000-0000-4000-8000-00000000d402";
+  const archiveSha = "9".repeat(64);
+  const rawSha = "8".repeat(64);
+  const proofTxSha = "7".repeat(64);
+  const proofEntrySha = "6".repeat(64);
+  const registrySha = "5".repeat(64);
+  const recoverySha = "4".repeat(64);
+  const snapshotSha = "3".repeat(64);
+  const objectPath = `v1/sha256/${archiveSha}.jsonl.gz`;
+  const recoveryPath = `account-recovery/v1/sha256/${recoverySha}.json.gz`;
+  const accountIds = [accountId];
+
+  const functionRows = await sql`
+    select
+      pg_catalog.pg_get_userbyid((select proowner from pg_catalog.pg_proc where oid = 'public.chips_retire_stage_escrow_accounts(bigint,uuid[],text,text,text,boolean,text)'::regprocedure)) as owner,
+      has_function_privilege('service_role', 'public.chips_retire_stage_escrow_accounts(bigint,uuid[],text,text,text,boolean,text)', 'execute') as service_role_execute,
+      has_table_privilege('chips_ledger_archive_pruner', 'public.chips_accounts', 'delete') as pruner_delete,
+      (select enabled from public.chips_stage_escrow_account_retention_policy where policy_id = 'stage-ledger-escrow-account-retention-v1') as enabled;
+  `;
+  assert.equal(functionRows[0].owner, "chips_ledger_archive_pruner");
+  assert.equal(functionRows[0].service_role_execute, false);
+  assert.equal(functionRows[0].pruner_delete, true, "the SQL function owner needs DELETE, but its guard must reject a direct DELETE");
+  assert.equal(functionRows[0].enabled, false, "account retirement must be disabled by default");
+
+  await sql`
+    insert into public.poker_tables (id, status, has_human_participant, bot_only_proof_eligible)
+    values (${tableId}::uuid, 'CLOSED', false, true);
+  `;
+  await sql`
+    insert into public.chips_accounts (id, account_type, system_key, status, balance, next_entry_seq)
+    values (${accountId}::uuid, 'ESCROW', ${`POKER_TABLE:${tableId}`}, 'active', 0, 19);
+  `;
+  const batchRows = await sql.unsafe(`
+    insert into public.chips_ledger_archive_batches (
+      object_path, project_ref, format_version, source_policy_id, cutoff, first_created_at, last_created_at,
+      transaction_count, entry_count, tx_types, raw_bytes, compressed_bytes, raw_sha256,
+      compressed_sha256, credits, debits, net_amount, status, committed_at,
+      archive_proof_verified_at, archived_transaction_ids_sha256, archived_entry_ids_sha256,
+      pruned_at, pruned_transaction_count, pruned_entry_count, pruned_transaction_ids_sha256,
+      pruned_entry_ids_sha256, registry_cleaned_at, registry_cleaned_key_count,
+      registry_cleaned_keys_sha256, bot_only_table_id, bot_only_table_count,
+      bot_only_newest_created_at, bot_only_registry_keys_sha256, bot_only_out_of_scope_keys_sha256,
+      bot_only_identity_count, bot_only_eligible_count
+    ) values (
+      $1, 'krydukthwdvccggbyjfw', 2, 'stage-ledger-bot-only-retention-7d-v1', $2::timestamptz, $2::timestamptz, $2::timestamptz,
+      1, 1, '{"TABLE_BUY_IN":1}'::jsonb, 1, 1, $3, $4, 0, 0, 0, 'committed', timezone('utc', now()),
+      timezone('utc', now()), $5, $6, timezone('utc', now()), 1, 1, $5, $6,
+      timezone('utc', now()), 1, $7, $8::uuid, 1, $2::timestamptz, $7, $9, 1, 1
+    ) returning batch_id::text as batch_id;
+  `, [objectPath, "2026-09-01T00:00:00.000Z", rawSha, archiveSha, proofTxSha, proofEntrySha, registrySha, tableId, "a".repeat(64)]);
+  const batchId = batchRows[0].batch_id;
+  await sql.begin(async (tx) => {
+    await tx.unsafe("select pg_catalog.set_config('chips.bot_only_go', '1', true);");
+    await tx.unsafe(`update public.chips_ledger_archive_batches
+      set destructive_go_at = timezone('utc', now()), destructive_go_batch_id = $1::bigint
+      where batch_id = $1::bigint;`, [batchId]);
+  });
+  await sql.unsafe("delete from public.poker_tables where id = $1::uuid;", [tableId]);
+  await sql.unsafe("select public.chips_set_table_fence_active(true);");
+
+  const accountHashRows = await sql.unsafe("select public.chips_archive_uuid_ids_sha256($1::uuid[]) as hash;", [accountIds]);
+  const accountHash = accountHashRows[0].hash;
+
+  let directDeleteError = null;
+  try {
+    await sql.unsafe("delete from public.chips_accounts where id = $1::uuid;", [accountId]);
+  } catch (error) {
+    directDeleteError = error;
+  }
+  assert.match(directDeleteError?.message || "", /Direct chips_accounts DELETE is forbidden/);
+
+  let directReceiptError = null;
+  try {
+    await sql.begin(async (tx) => {
+      await tx.unsafe("set local role chips_ledger_archive_pruner;");
+      await tx.unsafe("select pg_catalog.set_config('chips.escrow_account_retirement_receipt', '1', true);");
+      await tx.unsafe(`update public.chips_ledger_archive_batches
+        set account_retirement_at = timezone('utc', now()),
+            account_retirement_account_count = 1,
+            account_retirement_account_ids_sha256 = $1,
+            account_retirement_recovery_object_path = $2,
+            account_retirement_recovery_object_sha256 = $3,
+            account_retirement_snapshot_sha256 = $4
+        where batch_id = $5::bigint;`, [accountHash, recoveryPath, recoverySha, snapshotSha, batchId]);
+    });
+  } catch (error) {
+    directReceiptError = error;
+  }
+  assert.match(directReceiptError?.message || "", /Account-retirement receipt requires the archive pruner function/);
+
+  await sql.unsafe(`create or replace function public.chips_assert_archive_prune_stage()
+    returns text language sql security definer set search_path = ''
+    as $escrow_stage_gate$ select '7656985631720456337'::text $escrow_stage_gate$;`);
+  const readOnlySql = postgres(dbUrl, { max: 1, prepare: false });
+  try {
+    await sql.unsafe(`create table public.chips_escrow_retirement_unknown_fk_probe (
+      account_id uuid references public.chips_accounts(id)
+    );`);
+    let unknownFkError = null;
+    try {
+      await readOnlySql.begin(async (tx) => {
+        await tx.unsafe("set transaction isolation level repeatable read, read only;");
+        await tx.unsafe(`select public.chips_retire_stage_escrow_accounts(
+          $1::bigint, $2::uuid[], $3::text, $4::text, $5::text, false, null
+        ) as result;`, [batchId, accountIds, recoveryPath, recoverySha, snapshotSha]);
+      });
+    } catch (error) {
+      unknownFkError = error;
+    } finally {
+      await sql.unsafe("drop table public.chips_escrow_retirement_unknown_fk_probe;");
+    }
+    assert.match(unknownFkError?.message || "", /Unknown foreign key dependency/);
+
+    const dryRows = await readOnlySql.begin(async (tx) => {
+      await tx.unsafe("set transaction isolation level repeatable read, read only;");
+      return tx.unsafe(`select public.chips_retire_stage_escrow_accounts(
+        $1::bigint, $2::uuid[], $3::text, $4::text, $5::text, false, null
+      ) as result;`, [batchId, accountIds, recoveryPath, recoverySha, snapshotSha]);
+    });
+    assert.equal(dryRows[0].result.state, "eligible", "prepare must execute on a stable read-only snapshot");
+    assert.equal(dryRows[0].result.read_only, true);
+  } finally {
+    await readOnlySql.end({ timeout: 5 });
+  }
+
+  const lockKey = "chips-ledger-stage-automation-v1:krydukthwdvccggbyjfw";
+  const lockRows = await sql.unsafe(
+    "select pg_catalog.pg_backend_pid()::text as backend_pid, pg_catalog.pg_try_advisory_lock(pg_catalog.hashtextextended($1, 0)) as acquired;",
+    [lockKey],
+  );
+  assert.equal(lockRows[0].acquired, true, "execute contract must run while the Stage advisory lock is held");
+  const executeRows = await sql.begin(async (tx) => {
+    await tx.unsafe("set transaction isolation level serializable;");
+    await tx.unsafe("select public.chips_authorize_stage_escrow_account_retirement_canary($1::bigint, $2::text, $3::text);", [batchId, accountHash, `GO ${batchId}`]);
+    const retired = await tx.unsafe(`select public.chips_retire_stage_escrow_accounts(
+      $1::bigint, $2::uuid[], $3::text, $4::text, $5::text, true, $6::text
+    ) as result;`, [batchId, accountIds, recoveryPath, recoverySha, snapshotSha, `GO ${batchId}`]);
+    const replay = await tx.unsafe(`select public.chips_retire_stage_escrow_accounts(
+      $1::bigint, $2::uuid[], $3::text, $4::text, $5::text, true, $6::text
+    ) as result;`, [batchId, accountIds, recoveryPath, recoverySha, snapshotSha, `GO ${batchId}`]);
+    return { retired: retired[0].result, replay: replay[0].result };
+  });
+  await sql.unsafe("select pg_catalog.pg_advisory_unlock(pg_catalog.hashtextextended($1, 0));", [lockKey]);
+  assert.equal(executeRows.retired.state, "retired");
+  assert.equal(executeRows.replay.state, "already_retired");
+  const stateRows = await sql.unsafe(`select
+    (select count(*) from public.chips_accounts where id = $1::uuid) as account_count,
+    account_retirement_account_count::text as receipt_count,
+    account_retirement_account_ids_sha256 as receipt_hash,
+    account_retirement_recovery_object_path as recovery_path,
+    account_retirement_recovery_object_sha256 as recovery_sha,
+    account_retirement_snapshot_sha256 as snapshot_sha
+    from public.chips_ledger_archive_batches where batch_id = $2::bigint;`, [accountId, batchId]);
+  assert.equal(Number(stateRows[0].account_count), 0);
+  assert.equal(Number(stateRows[0].receipt_count), 1);
+  assert.equal(stateRows[0].receipt_hash, accountHash);
+  assert.equal(stateRows[0].recovery_path, recoveryPath);
+  assert.equal(stateRows[0].recovery_sha, recoverySha);
+  assert.equal(stateRows[0].snapshot_sha, snapshotSha);
+
+  // The fixture is intentionally committed only in this disposable database;
+  // it is removed by the next test-database recreate. This avoids disabling
+  // any production guard merely to clean up a destructive integration probe.
+  await sql.unsafe("select 1;\n-- escrow retirement contract fixture remains isolated in disposable DB");
+}
+
+async function assertEscrowDryRunReadOnlyConcurrency(sql) {
+  const tableId = "00000000-0000-4000-8000-00000000d411";
+  const accountId = "00000000-0000-4000-8000-00000000d412";
+  const secondTableId = "00000000-0000-4000-8000-00000000d413";
+  const archiveSha = "1".repeat(64);
+  const secondArchiveSha = "2".repeat(64);
+  const rawSha = "3".repeat(64);
+  const proofTxSha = "4".repeat(64);
+  const proofEntrySha = "5".repeat(64);
+  const registrySha = "6".repeat(64);
+  const recoverySha = "7".repeat(64);
+  const snapshotSha = "8".repeat(64);
+  const cutoff = "2026-09-01T00:00:00.000Z";
+  const recoveryPath = `account-recovery/v1/sha256/${recoverySha}.json.gz`;
+  const accountIds = [accountId];
+  let batchId;
+  let secondBatchId;
+  let readerSql;
+  let writerSql;
+  let observerSql;
+  let readerPromise;
+  let writerPromise;
+  const deferred = () => {
+    let resolve;
+    let reject;
+    const promise = new Promise((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    return { promise, resolve, reject };
+  };
+  const snapshotReady = deferred();
+  const writerStarted = deferred();
+  const readerDone = deferred();
+  const writerFinished = deferred();
+  const rollback = new Error("escrow dry-run concurrency rollback");
+  let writerHasStarted = false;
+
+  try {
+    await sql`
+      insert into public.chips_accounts (id, account_type, system_key, status, balance, next_entry_seq)
+      values (${accountId}::uuid, 'ESCROW', ${`POKER_TABLE:${tableId}`}, 'active', 0, 23);
+    `;
+    const batchRows = await sql.unsafe(`
+      insert into public.chips_ledger_archive_batches (
+        object_path, project_ref, format_version, source_policy_id, cutoff, first_created_at, last_created_at,
+        transaction_count, entry_count, tx_types, raw_bytes, compressed_bytes, raw_sha256,
+        compressed_sha256, credits, debits, net_amount, status, committed_at,
+        archive_proof_verified_at, archived_transaction_ids_sha256, archived_entry_ids_sha256,
+        pruned_at, pruned_transaction_count, pruned_entry_count, pruned_transaction_ids_sha256,
+        pruned_entry_ids_sha256, registry_cleaned_at, registry_cleaned_key_count,
+        registry_cleaned_keys_sha256, bot_only_table_id, bot_only_table_count,
+        bot_only_newest_created_at, bot_only_registry_keys_sha256, bot_only_out_of_scope_keys_sha256,
+        bot_only_identity_count, bot_only_eligible_count
+      ) values (
+        $1, 'krydukthwdvccggbyjfw', 2, 'stage-ledger-bot-only-retention-7d-v1', $2::timestamptz, $2::timestamptz, $2::timestamptz,
+        1, 1, '{"TABLE_BUY_IN":1}'::jsonb, 1, 1, $3, $4, 0, 0, 0, 'committed', timezone('utc', now()),
+        timezone('utc', now()), $5, $6, timezone('utc', now()), 1, 1, $5, $6,
+        timezone('utc', now()), 1, $7, $8::uuid, 1, $2::timestamptz, $7, $9, 1, 1
+      ) returning batch_id::text as batch_id;
+    `, [`v1/sha256/${archiveSha}.jsonl.gz`, cutoff, rawSha, archiveSha, proofTxSha, proofEntrySha, registrySha, tableId, "a".repeat(64)]);
+    batchId = batchRows[0].batch_id;
+    await sql.begin(async (tx) => {
+      await tx.unsafe("select pg_catalog.set_config('chips.bot_only_go', '1', true);");
+      await tx.unsafe(`update public.chips_ledger_archive_batches
+        set destructive_go_at = timezone('utc', now()), destructive_go_batch_id = $1::bigint
+        where batch_id = $1::bigint;`, [batchId]);
+    });
+    const secondBatchRows = await sql.unsafe(`
+      insert into public.chips_ledger_archive_batches (
+        object_path, project_ref, format_version, source_policy_id, cutoff, first_created_at, last_created_at,
+        transaction_count, entry_count, tx_types, raw_bytes, compressed_bytes, raw_sha256,
+        compressed_sha256, credits, debits, net_amount, status, committed_at,
+        archive_proof_verified_at, archived_transaction_ids_sha256, archived_entry_ids_sha256,
+        pruned_at, pruned_transaction_count, pruned_entry_count, pruned_transaction_ids_sha256,
+        pruned_entry_ids_sha256, registry_cleaned_at, registry_cleaned_key_count,
+        registry_cleaned_keys_sha256, bot_only_table_id, bot_only_table_count,
+        bot_only_newest_created_at, bot_only_registry_keys_sha256, bot_only_out_of_scope_keys_sha256,
+        bot_only_identity_count, bot_only_eligible_count
+      ) values (
+        $1, 'krydukthwdvccggbyjfw', 2, 'stage-ledger-bot-only-retention-7d-v1', $2::timestamptz, $2::timestamptz, $2::timestamptz,
+        1, 1, '{"TABLE_BUY_IN":1}'::jsonb, 1, 1, $3, $4, 0, 0, 0, 'committed', timezone('utc', now()),
+        timezone('utc', now()), $5, $6, timezone('utc', now()), 1, 1, $5, $6,
+        timezone('utc', now()), 1, $7, $8::uuid, 1, $2::timestamptz, $7, $9, 1, 1
+      ) returning batch_id::text as batch_id;
+    `, [`v1/sha256/${secondArchiveSha}.jsonl.gz`, cutoff, rawSha, secondArchiveSha, proofTxSha, proofEntrySha, registrySha, secondTableId, "b".repeat(64)]);
+    secondBatchId = secondBatchRows[0].batch_id;
+
+    await sql.unsafe("delete from public.poker_tables where id = $1::uuid;", [tableId]);
+    await sql.unsafe("select public.chips_set_table_fence_active(true);");
+
+    readerSql = postgres(dbUrl, { max: 1, prepare: false, idle_timeout: 0 });
+    writerSql = postgres(dbUrl, { max: 1, prepare: false, idle_timeout: 0 });
+    observerSql = postgres(dbUrl, { max: 1, prepare: false, idle_timeout: 0 });
+    readerPromise = readerSql.begin(async (tx) => {
+      await tx.unsafe("set transaction isolation level repeatable read, read only;");
+      const pidRows = await tx.unsafe("select pg_catalog.pg_backend_pid()::text as backend_pid;");
+      const backendPid = pidRows[0].backend_pid;
+      snapshotReady.resolve(backendPid);
+      await writerStarted.promise;
+      let outcome;
+      try {
+        const rows = await tx.unsafe(`select public.chips_retire_stage_escrow_accounts(
+          $1::bigint, $2::uuid[], $3::text, $4::text, $5::text, false, null
+        ) as result;`, [batchId, accountIds, recoveryPath, recoverySha, snapshotSha]);
+        outcome = { rows, error: null };
+      } catch (error) {
+        outcome = { rows: null, error };
+      }
+      readerDone.resolve({ backendPid, outcome });
+      await writerFinished.promise;
+      if (outcome.error) throw outcome.error;
+      return outcome.rows;
+    });
+
+    await snapshotReady.promise;
+    writerPromise = writerSql.begin(async (tx) => {
+      try {
+        await tx.unsafe("select pg_catalog.set_config('chips.bot_only_go', '1', true);");
+        await tx.unsafe(`update public.chips_ledger_archive_batches
+          set destructive_go_at = timezone('utc', now()), destructive_go_batch_id = $1::bigint
+          where batch_id = $1::bigint;`, [secondBatchId]);
+        await tx.unsafe("insert into public.poker_tables (id, status, has_human_participant, bot_only_proof_eligible) values ($1::uuid, 'OPEN', false, true);", [tableId]);
+        await tx.unsafe("update public.chips_accounts set balance = 1 where id = $1::uuid;", [accountId]);
+        const systemRows = await tx.unsafe(`select system_key, id::text as id
+          from public.chips_accounts where account_type::text = 'SYSTEM' and system_key in ('HOUSE', 'TREASURY');`);
+        const systemIds = new Map(systemRows.map((row) => [row.system_key, row.id]));
+        const transactionId = crypto.randomUUID();
+        await tx.unsafe(`insert into public.chips_transactions
+          (id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id)
+          values ($1::uuid, 'concurrent-dry-run', '{}'::jsonb, $2, $3, 'MINT', null);`, [
+          transactionId,
+          `concurrent-dry-run-${transactionId}`,
+          "d".repeat(64),
+        ]);
+        await tx.unsafe(`insert into public.chips_entries (transaction_id, account_id, amount, metadata)
+          values ($1::uuid, $2::uuid, 1, '{}'::jsonb), ($1::uuid, $3::uuid, -1, '{}'::jsonb);`, [
+          transactionId,
+          systemIds.get("HOUSE"),
+          systemIds.get("TREASURY"),
+        ]);
+        writerHasStarted = true;
+        writerStarted.resolve();
+        await readerDone.promise;
+        throw rollback;
+      } catch (error) {
+        if (!writerHasStarted) writerStarted.reject(error);
+        throw error;
+      }
+    }).catch((error) => {
+      if (error !== rollback) throw error;
+    }).finally(() => writerFinished.resolve());
+
+    const readerResult = await readerDone.promise;
+    const tupleLocks = await observerSql.unsafe(
+      "select count(*)::int as count from pg_catalog.pg_locks where pid = $1::integer and locktype = 'tuple';",
+      [readerResult.backendPid],
+    );
+    assert.equal(readerResult.outcome.error, null, `read-only dry-run must not fail (got ${readerResult.outcome.error?.code || readerResult.outcome.error?.message || "unknown"})`);
+    assert.equal(readerResult.outcome.rows[0].result.state, "eligible");
+    assert.equal(Number(tupleLocks[0].count), 0, "read-only dry-run must not retain tuple locks");
+    await writerPromise;
+    await readerPromise;
+  } finally {
+    // Resolve waiters during cleanup so a setup error cannot create an
+    // unhandled rejection that hides the original fixture failure.
+    snapshotReady.resolve(null);
+    writerStarted.resolve();
+    readerDone.resolve({});
+    writerFinished.resolve();
+    await Promise.all([
+      writerPromise?.catch(() => {}),
+      readerPromise?.catch(() => {}),
+    ]);
+    await Promise.all([
+      readerSql?.end({ timeout: 5 }),
+      writerSql?.end({ timeout: 5 }),
+      observerSql?.end({ timeout: 5 }),
+    ]);
+    await sql.begin(async (tx) => {
+      await tx.unsafe("set local session_replication_role = 'replica';");
+      if (batchId) await tx.unsafe("delete from public.chips_ledger_archive_batches where batch_id = $1::bigint;", [batchId]);
+      if (secondBatchId) await tx.unsafe("delete from public.chips_ledger_archive_batches where batch_id = $1::bigint;", [secondBatchId]);
+      await tx.unsafe("delete from public.chips_accounts where id = $1::uuid;", [accountId]);
+      await tx.unsafe("delete from public.poker_tables where id = $1::uuid;", [tableId]);
+    });
+  }
+}
+
 async function main() {
   const sql = postgres(dbUrl, { max: 1 });
   await dropAndRecreateSchema(sql);
@@ -1758,6 +2118,8 @@ async function main() {
   await assertBotBankrollSeed(sql);
   await runMigration(sql, idempotencyGapMigration);
   await assertIdempotencyRegistryParity(sql);
+  await assertEscrowAccountRetirementContracts(sql);
+  await assertEscrowDryRunReadOnlyConcurrency(sql);
 
   await sql.end({ timeout: 5 });
   const adminModule = await import("../../netlify/functions/_shared/supabase-admin.mjs");

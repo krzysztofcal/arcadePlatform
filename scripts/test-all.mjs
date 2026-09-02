@@ -59,6 +59,8 @@ run("node", ["tests/chips/chips-ledger-table-metadata-fence.test.mjs"], "chips-l
 run("node", ["tests/chips/chips-ledger-stage-automation.test.mjs"], "chips-ledger-stage-automation");
 run("node", ["tests/chips/chips-ledger-stage-automation.observability.behavior.test.mjs"], "chips-ledger-stage-automation-observability");
 run("node", ["tests/chips/chips-ledger-stage-automation.order.behavior.test.mjs"], "chips-ledger-stage-automation-order");
+run("node", ["tests/chips/chips-ledger-stage-escrow-retention.test.mjs"], "chips-ledger-stage-escrow-retention");
+run("node", ["tests/chips/chips-ledger-stage-escrow-retention.workflow.guard.test.mjs"], "chips-ledger-stage-escrow-retention-workflow");
 run("node", ["tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs"], "chips-ledger-stage-automation-workflow");
 run("node", ["tests/chips/chips-ledger-legacy-stage-allowlist-audit.test.mjs"], "chips-ledger-legacy-stage-allowlist-audit");
 run("node", ["tests/chips/chips-ledger-stage-timeout-diagnostic.guard.test.mjs"], "chips-ledger-stage-timeout-diagnostic");
