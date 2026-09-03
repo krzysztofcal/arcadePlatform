@@ -43,7 +43,7 @@ import {
 } from "../../scripts/ops/chips-ledger-archive-store.mjs";
 
 const root = process.cwd();
-const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-automation.yml", "utf8");
+const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-scheduled-automation.yml", "utf8");
 const orchestratorSource = fs.readFileSync(
   "scripts/ops/chips-ledger-legacy-stage-allowlist-orchestrator.mjs",
   "utf8",
