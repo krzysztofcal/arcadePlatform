@@ -906,7 +906,7 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as materialized (
 ), eligible_transactions as materialized (
   select transactions.id,
          transactions.key_table_id,
-         stats.table_eligible_count
+         stats.eligible_count as table_eligible_count
     from candidate_transactions transactions
     join candidate_entry_shapes shapes
       on shapes.id = transactions.id
