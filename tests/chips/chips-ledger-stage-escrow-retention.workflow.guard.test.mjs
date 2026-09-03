@@ -10,7 +10,7 @@ const canaryMigration = fs.readFileSync("supabase/migrations/20260902110000_chip
 
 test("scheduled automation invokes escrow retention without a new scheduler or input", () => {
   const step = workflow.match(/- name: Run Stage escrow account retention[\s\S]*?(?=\n\s+- name:)/)?.[0] || "";
-  assert.match(step, /github\.event_name == 'schedule' && github\.event\.schedule == '\*\/15 \* \* \* \*'/);
+  assert.match(step, /github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/);
   assert.doesNotMatch(step, /inputs\.mode|workflow_dispatch/);
   assert.match(step, /node scripts\/ops\/chips-ledger-stage-escrow-retention\.mjs --automatic/);
   assert.doesNotMatch(step, /workflow_dispatch:\s*inputs|--execute|--batch-id|GO/);

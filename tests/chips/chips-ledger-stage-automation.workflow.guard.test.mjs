@@ -20,8 +20,8 @@ assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|bot
 assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-summary-diagnostic|bot-only-7d-repair-recovery-batch-15|bot-only-7d-prepare-only|bot-only-7d-execute|bot-only-7d-automatic|legacy-stage-allowlist-prepare-only|legacy-stage-allowlist-orchestrate|audit-batch-13|execute-batch-13|escrow-retention-audit|escrow-retention-prepare-only|escrow-retention-authorize-canary|escrow-retention-execute|escrow-retention-verify|escrow-retention-activate)$/gm) || []).length, 16);
 assert.equal((workflow.match(/- cron:/g) || []).length, 2);
 assert.match(workflow, /- cron: "17 2 \* \* \*"/);
-assert.match(workflow, /- cron: "\*\/15 \* \* \* \*"/);
-assert.equal((workflow.match(/^\s+- cron: "\*\/15 \* \* \* \*"$/gm) || []).length, 1);
+assert.match(workflow, /- cron: "7,22,37,52 \* \* \* \*"/);
+assert.equal((workflow.match(/^\s+- cron: "7,22,37,52 \* \* \* \*"$/gm) || []).length, 1);
 const concurrencyBlock = workflow.match(
   /^concurrency:\n(?:  [^\n]+\n)+(?=\n\S)/m,
 )[0];
@@ -214,14 +214,14 @@ assert.doesNotMatch(canaryRun, /execute-batch-13|LEGACY_STAGE_ALLOWLIST_EXECUTE/
 assert.doesNotMatch(legacyRun, /execute-batch-13|--execute|LEGACY_STAGE_ALLOWLIST_EXECUTE/);
 assert.doesNotMatch(auditRun, /execute-batch-13|--execute|LEGACY_STAGE_ALLOWLIST_EXECUTE/);
 assert.doesNotMatch(workflow.match(/- cron:[\s\S]*?(?=\n\s*concurrency:)/)[0], /execute-batch-13|--execute|LEGACY_STAGE_ALLOWLIST_EXECUTE/);
-assert.match(workflow, /github\.event_name == 'schedule' && github\.event\.schedule == '\*\/15 \* \* \* \*'/);
+assert.match(workflow, /github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/);
 assert.match(workflow, /inputs\.mode == 'bot-only-7d-automatic'/);
 assert.match(workflow, /CHIPS_LEDGER_BOT_ONLY_AUTOMATIC: "1"/);
 assert.match(workflow, /node scripts\/ops\/chips-ledger-legacy-stage-allowlist-orchestrator\.mjs/);
 const automaticRun = workflow.match(
   /- name: Run activated bot-only 7-day Stage automation[\s\S]*?(?=\n\s+- name:|\s*$)/,
 )[0];
-assert.match(automaticRun, /github\.event_name == 'schedule' && github\.event\.schedule == '\*\/15 \* \* \* \*'/);
+assert.match(automaticRun, /github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/);
 assert.match(automaticRun, /github\.event_name == 'workflow_dispatch' && inputs\.mode == 'bot-only-7d-automatic'/);
 assert.match(automaticRun, /node scripts\/ops\/chips-ledger-stage-automation\.mjs --policy bot-only-7d --automatic/);
 assert.doesNotMatch(automaticRun, /legacy-stage-allowlist|SUPABASE_PROD_|PRODUCTION|--target\s+prod/i);

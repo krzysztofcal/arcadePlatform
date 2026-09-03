@@ -55,7 +55,7 @@ on:
         type: string
   schedule:
     - cron: "17 2 * * *"
-    - cron: "*/15 * * * *"
+    - cron: "7,22,37,52 * * * *"
 
 concurrency:
   group: chips-ledger-stage-automation
@@ -214,14 +214,14 @@ jobs:
             --approved-batch-confirmation "$APPROVED_BATCH_CONFIRMATION"
 
       - name: Run activated bot-only 7-day Stage automation
-        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-automatic') }}
+        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-automatic') }}
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
           CHIPS_LEDGER_BOT_ONLY_AUTOMATIC: "1"
         run: node scripts/ops/chips-ledger-stage-automation.mjs --policy bot-only-7d --automatic
 
       - name: Run Stage escrow account retention
-        if: ${{ github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *' }}
+        if: ${{ github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *' }}
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
         run: node scripts/ops/chips-ledger-stage-escrow-retention.mjs --automatic
