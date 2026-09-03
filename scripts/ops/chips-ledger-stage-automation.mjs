@@ -3442,10 +3442,11 @@ export async function runAutomaticBotOnlyStageAutomation({
           const artifactPath = path.join(tempRoot, "automatic-" + String(index) + ".archive.jsonl.gz");
           const manifestPath = path.join(tempRoot, "automatic-" + String(index) + ".archive.manifest.json");
           markAutomaticPhase("automatic.export");
-          // A read-only candidate selector timeout must not take down the whole
-          // scheduled run. Only a fresh-candidate export (no active or incomplete
-          // batch to resume) may stop early; resume, proof, recovery, dry-run,
-          // execute and cleanup stay fail-closed.
+          // A read-only timeout of exactly the bot-only candidate selector must
+          // not take down the whole scheduled run. Only a fresh-candidate export
+          // (no active or incomplete batch to resume) may stop early; timeouts
+          // anywhere else in export (entries, blocking anomalies) plus resume,
+          // proof, recovery, dry-run, execute and cleanup stay fail-closed.
           let exported;
           try {
             exported = await (deps.exportArchive || runExport)({
@@ -3467,7 +3468,11 @@ export async function runAutomaticBotOnlyStageAutomation({
               },
             });
           } catch (error) {
-            if (sqlStateOf(error) !== "57014") throw error;
+            if (sqlStateOf(error) !== "57014"
+              || error.chipsLedgerQueryPhase !== "snapshot.candidate_selector"
+              || error.chipsLedgerQueryName !== "bot_only_candidate_selector") {
+              throw error;
+            }
             stopReason = "candidate_selector_timeout";
             break;
           }

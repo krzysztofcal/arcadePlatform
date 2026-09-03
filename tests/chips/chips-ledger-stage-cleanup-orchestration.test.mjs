@@ -205,6 +205,8 @@ function fakeScheduler({
   executeSqlstates = [],
   executeAlreadyCleanedAfterFailure = false,
   exportSqlstate = null,
+  exportSqlstatePhase = null,
+  exportSqlstateQueryName = null,
 } = {}) {
   const manifests = new Map(initialRows.map((row) => [row.object_path, row]));
   const ownRows = [...initialRows];
@@ -310,6 +312,8 @@ function fakeScheduler({
       if (exportSqlstate) {
         const error = new Error(`simulated export ${exportSqlstate}`);
         error.code = exportSqlstate;
+        if (exportSqlstatePhase) error.chipsLedgerQueryPhase = exportSqlstatePhase;
+        if (exportSqlstateQueryName) error.chipsLedgerQueryName = exportSqlstateQueryName;
         throw error;
       }
       if (state.candidateCalls >= candidateCount) {
@@ -997,7 +1001,13 @@ async function schedulerContracts() {
   assert.deepEqual(noCandidateResult.processed, []);
   assert.equal(noCandidateResult.stopReason, "no_eligible_bot_only_table");
 
-  const selectorTimeout = fakeScheduler({ enabled: true, candidateCount: 0, exportSqlstate: "57014" });
+  const selectorTimeout = fakeScheduler({
+    enabled: true,
+    candidateCount: 0,
+    exportSqlstate: "57014",
+    exportSqlstatePhase: "snapshot.candidate_selector",
+    exportSqlstateQueryName: "bot_only_candidate_selector",
+  });
   const selectorTimeoutResult = await runAutomaticBotOnlyStageAutomation(selectorTimeout);
   assert.equal(selectorTimeoutResult.state, "completed");
   assert.equal(selectorTimeoutResult.stopReason, "candidate_selector_timeout");
@@ -1007,6 +1017,17 @@ async function schedulerContracts() {
   assert.equal(selectorTimeout.state.proofRegisterCalls, 0, "a candidate selector timeout must not register proof");
   assert.equal(selectorTimeout.state.persistCalls, 0, "a candidate selector timeout must not persist recovery");
   assert.equal(selectorTimeout.state.destructiveSqlMutations, 0, "a candidate selector timeout must not mutate the ledger");
+
+  const blockingAnomalyTimeout = fakeScheduler({
+    enabled: true,
+    candidateCount: 0,
+    exportSqlstate: "57014",
+    exportSqlstatePhase: "snapshot.blocking_anomalies",
+    exportSqlstateQueryName: "bot_only_blocking_anomalies",
+  });
+  const blockingAnomalyFailure = await captureAutomaticFailure(blockingAnomalyTimeout);
+  assert.match(blockingAnomalyFailure.error.message, /simulated export 57014/);
+  assert.match(blockingAnomalyFailure.report.phase, /automatic\.export/);
 
   const proven = makeProvenAutomaticRow("27");
   const legalRestart = fakeScheduler({

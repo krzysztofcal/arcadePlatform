@@ -1332,6 +1332,7 @@ async function observedQuery(tx, { phase, queryName, query, parameters = [], tel
   } catch (error) {
     const phaseError = error instanceof Error ? error : new Error(text(error));
     phaseError.chipsLedgerQueryPhase = phase;
+    phaseError.chipsLedgerQueryName = queryName;
     phaseError.chipsLedgerQuerySqlState = sqlState(error);
     emitQueryTelemetry(telemetry, {
       phase,
