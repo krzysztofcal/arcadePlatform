@@ -144,6 +144,16 @@ async function main() {
       measured.push(await readOnlyFragment(sql, { name: fragment.name, sql: fragmentSql, parameters }));
     }
 
+    const finalJoinNoEvidenceSql = `with ${allDefs.join(",\n")}
+      select count(*)::bigint as fragment_count
+        from eligible_transactions eligible
+        join selected_table on selected_table.key_table_id = eligible.key_table_id`;
+    measured.push(await readOnlyFragment(sql, {
+      name: "final_output_join_no_evidence",
+      sql: finalJoinNoEvidenceSql,
+      parameters: baseParameters.slice(0, maxParameterIndex(finalJoinNoEvidenceSql)),
+    }));
+
     const finalJoinSql = `with ${allDefs.join(",\n")}
       select count(*)::bigint as fragment_count
         from eligible_transactions eligible

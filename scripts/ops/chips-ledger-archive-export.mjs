@@ -903,7 +903,7 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as materialized (
          and sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM') > 0
        )
      )
-), eligible_transactions as materialized (
+), eligible_transactions as (
   select transactions.id,
          transactions.sequence,
          transactions.tx_type,
