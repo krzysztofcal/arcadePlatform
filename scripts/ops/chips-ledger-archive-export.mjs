@@ -903,7 +903,7 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as materialized (
          and sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM') > 0
        )
      )
-), eligible_transactions as (
+), eligible_transactions as materialized (
   select transactions.id,
          transactions.sequence,
          transactions.tx_type,
@@ -938,7 +938,7 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as materialized (
     join public.chips_accounts escrow
       on escrow.account_type::text = 'ESCROW'
      and escrow.system_key = 'POKER_TABLE:' || transactions.key_table_id::text
-), selected_table as (
+), selected_table as materialized (
   select key_table_id
     from eligible_transactions
    group by key_table_id
