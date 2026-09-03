@@ -903,16 +903,42 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as materialized (
          and sum(entries.amount) filter (where accounts.account_type::text = 'SYSTEM') > 0
        )
      )
-), eligible_transactions as materialized (
+), eligible_transactions as (
   select transactions.id,
+         transactions.sequence,
+         transactions.tx_type,
+         transactions.idempotency_key,
+         transactions.payload_hash,
+         transactions.user_id,
+         transactions.reference,
+         transactions.description,
+         transactions.metadata,
+         transactions.created_by,
+         transactions.created_at,
          transactions.key_table_id,
-         stats.eligible_count as table_eligible_count
+         transactions.key_format_version,
+         transactions.key_format,
+         tables.id as table_row_id,
+         tables.status::text as table_status,
+         tables.has_human_participant,
+         tables.bot_only_proof_eligible,
+         escrow.id::text as escrow_account_id,
+         escrow.status::text as escrow_status,
+         escrow.balance::text as escrow_balance,
+         stats.newest_created_at as table_newest_created_at,
+         stats.identity_count as table_identity_count,
+         stats.eligible_count as table_eligible_count,
+         shapes.entry_count
     from candidate_transactions transactions
     join candidate_entry_shapes shapes
       on shapes.id = transactions.id
      and shapes.idempotency_key = transactions.idempotency_key
     join candidate_table_rows stats on stats.table_id = transactions.key_table_id
-), selected_table as materialized (
+    join public.poker_tables tables on tables.id = transactions.key_table_id
+    join public.chips_accounts escrow
+      on escrow.account_type::text = 'ESCROW'
+     and escrow.system_key = 'POKER_TABLE:' || transactions.key_table_id::text
+), selected_table as (
   select key_table_id
     from eligible_transactions
    group by key_table_id
@@ -929,47 +955,39 @@ with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as materialized (
     join registry_rows registry on registry.table_id = selected.key_table_id
    group by selected.key_table_id
 )
-select transactions.id::text as id,
-       transactions.sequence::text as sequence,
-       transactions.tx_type::text as tx_type,
-       transactions.idempotency_key,
-       transactions.payload_hash,
-       transactions.user_id::text as user_id,
-       transactions.reference,
-       transactions.description,
-       transactions.metadata,
-       transactions.created_by::text as created_by,
-       transactions.created_at::text as created_at,
+select eligible.id::text as id,
+       eligible.sequence::text as sequence,
+       eligible.tx_type::text as tx_type,
+       eligible.idempotency_key,
+       eligible.payload_hash,
+       eligible.user_id::text as user_id,
+       eligible.reference,
+       eligible.description,
+       eligible.metadata,
+       eligible.created_by::text as created_by,
+       eligible.created_at::text as created_at,
        true as table_related,
-       transactions.key_table_id::text as table_id,
+       eligible.key_table_id::text as table_id,
        false as invalid_table_marker,
        true as table_exists,
-       tables.status::text as table_status,
-       escrow.id::text as escrow_account_id,
-       escrow.status::text as escrow_status,
-       escrow.balance::text as escrow_balance,
-       shapes.entry_count,
-       tables.has_human_participant,
-       tables.bot_only_proof_eligible,
-       transactions.key_table_id::text,
-       transactions.key_format_version,
-       transactions.key_format,
-       stats.newest_created_at::text as table_newest_created_at,
-       stats.identity_count as table_identity_count,
-       stats.eligible_count as table_eligible_count,
+       eligible.table_status,
+       eligible.escrow_account_id,
+       eligible.escrow_status,
+       eligible.escrow_balance,
+       eligible.entry_count,
+       eligible.has_human_participant,
+       eligible.bot_only_proof_eligible,
+       eligible.key_table_id::text,
+       eligible.key_format_version,
+       eligible.key_format,
+       eligible.table_newest_created_at::text,
+       eligible.table_identity_count,
+       eligible.table_eligible_count,
        evidence.table_out_of_scope_keys_sha256
-  from candidate_transactions transactions
-  join selected_table on selected_table.key_table_id = transactions.key_table_id
-  join candidate_entry_shapes shapes
-    on shapes.id = transactions.id
-   and shapes.idempotency_key = transactions.idempotency_key
-  join candidate_table_rows stats on stats.table_id = transactions.key_table_id
-  join public.poker_tables tables on tables.id = transactions.key_table_id
-  join public.chips_accounts escrow
-    on escrow.account_type::text = 'ESCROW'
-   and escrow.system_key = 'POKER_TABLE:' || transactions.key_table_id::text
-  join selected_table_evidence evidence on evidence.key_table_id = transactions.key_table_id
- order by transactions.created_at asc, transactions.id asc
+  from eligible_transactions eligible
+  join selected_table on selected_table.key_table_id = eligible.key_table_id
+  join selected_table_evidence evidence on evidence.key_table_id = eligible.key_table_id
+ order by eligible.created_at asc, eligible.id asc
  limit $2::int;
 `;
 
