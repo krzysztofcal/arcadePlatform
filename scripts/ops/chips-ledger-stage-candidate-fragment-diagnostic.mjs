@@ -91,6 +91,7 @@ async function readOnlyFragment(sql, fragment) {
       sql_sha256: sha256(fragment.sql),
       elapsed_ms: Number(process.hrtime.bigint() - startedAt) / 1e6,
       sqlstate: sqlState(error),
+      error_message: error?.message || null,
       read_only: true,
       row_count: null,
       statement_timeout_ms: REPLAY_STATEMENT_TIMEOUT_MS,
