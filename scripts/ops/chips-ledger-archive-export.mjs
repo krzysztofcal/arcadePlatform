@@ -810,10 +810,25 @@ candidate_table_ids as materialized (
          registry.key_format_version,
          registry.key_format
     from public.chips_transaction_idempotency registry
-    left join candidate_table_ids candidates
+    join candidate_table_ids candidates
       on candidates.table_id = registry.table_id
    where registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
-     and (registry.table_id is null or candidates.table_id is not null)
+
+  union all
+
+  select registry.idempotency_key,
+         registry.transaction_id,
+         registry.payload_hash,
+         registry.tx_type,
+         registry.user_id,
+         registry.transaction_created_at,
+         registry.archive_batch_id,
+         registry.table_id,
+         registry.key_format_version,
+         registry.key_format
+    from public.chips_transaction_idempotency registry
+   where registry.table_id is null
+     and registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
 ),
 
 table_transaction_metadata as materialized (
