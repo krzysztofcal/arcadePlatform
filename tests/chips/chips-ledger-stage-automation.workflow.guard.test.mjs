@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 
-const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-automation.yml", "utf8");
+const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-scheduled-automation.yml", "utf8");
 const stageOrchestrator = fs.readFileSync("scripts/ops/chips-ledger-stage-automation.mjs", "utf8");
 const summaryDiagnostic = fs.readFileSync("scripts/ops/chips-ledger-stage-timeout-diagnostic.mjs", "utf8");
 const pruneAdapter = fs.readFileSync("scripts/ops/chips-ledger-archive-prune.mjs", "utf8");
