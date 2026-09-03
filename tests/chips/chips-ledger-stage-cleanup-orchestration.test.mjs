@@ -2954,7 +2954,7 @@ async function legacyOrchestratorBatchTempIsolationContract() {
 function staticWorkflowContracts() {
   assert.match(workflow, /bot-only-7d-automatic/);
   assert.match(workflow, /legacy-stage-allowlist-orchestrate/);
-  assert.match(workflow, /github\.event_name == 'schedule' && github\.event\.schedule == '\*\/15 \* \* \* \*'/);
+  assert.match(workflow, /github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/);
   assert.match(workflow, /--policy bot-only-7d --automatic/);
   assert.match(workflow, /CHIPS_LEDGER_BOT_ONLY_AUTOMATIC: "1"/);
   assert.match(workflow, /node scripts\/ops\/chips-ledger-legacy-stage-allowlist-orchestrator\.mjs/);
@@ -2968,7 +2968,7 @@ function staticWorkflowContracts() {
   assert.match(orchestratorSource, /process\.argv\.slice\(2\)\.length !== 0/);
   assert.equal(BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN, 6);
   assert.match(automationSource, /BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN = 6/);
-  assert.match(workflow, /- cron: "\*\/15 \* \* \* \*"/);
+  assert.match(workflow, /- cron: "7,22,37,52 \* \* \* \*"/);
   assert.match(automationSource, /automatic_policy_disabled/);
   assert.match(automationSource, /automatic bot-only Stage retention requires an active fence and enforcement/);
   assert.match(orchestrationMigration, /chips_authorize_legacy_stage_allowlist_run/);
