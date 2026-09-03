@@ -144,6 +144,33 @@ async function main() {
       measured.push(await readOnlyFragment(sql, { name: fragment.name, sql: fragmentSql, parameters }));
     }
 
+    const finalJoinSql = `with ${allDefs.join(",\n")}
+      select count(*)::bigint as fragment_count
+        from eligible_transactions eligible
+        join selected_table on selected_table.key_table_id = eligible.key_table_id
+        join selected_table_evidence evidence on evidence.key_table_id = eligible.key_table_id`;
+    measured.push(await readOnlyFragment(sql, {
+      name: "final_output_join",
+      sql: finalJoinSql,
+      parameters: baseParameters.slice(0, maxParameterIndex(finalJoinSql)),
+    }));
+
+    const finalOrderedSql = `with ${allDefs.join(",\n")}
+      select count(*)::bigint as fragment_count
+        from (
+          select eligible.id
+            from eligible_transactions eligible
+            join selected_table on selected_table.key_table_id = eligible.key_table_id
+            join selected_table_evidence evidence on evidence.key_table_id = eligible.key_table_id
+           order by eligible.created_at asc, eligible.id asc
+           limit $2::int
+        ) limited`;
+    measured.push(await readOnlyFragment(sql, {
+      name: "final_output_ordered_limit",
+      sql: finalOrderedSql,
+      parameters: baseParameters.slice(0, maxParameterIndex(finalOrderedSql)),
+    }));
+
     const fullStartedAt = process.hrtime.bigint();
     let full;
     try {
