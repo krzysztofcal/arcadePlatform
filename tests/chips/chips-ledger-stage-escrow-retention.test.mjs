@@ -4,7 +4,26 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { gzipSync } from "node:zlib";
 
+import {
+  BOT_ONLY_RETENTION_POLICY_ID,
+  buildArchiveBytes,
+  buildExportRecord,
+  buildManifest,
+} from "../../scripts/ops/chips-ledger-archive-export.mjs";
+import {
+  buildObjectPath,
+  buildRecoveryArchiveObjectPath,
+  buildRecoveryManifestObjectPath,
+  verifyArchiveBytes,
+} from "../../scripts/ops/chips-ledger-archive-store.mjs";
+import {
+  buildPruneEvidence,
+  buildRecoveryManifest,
+  exporterManifestFromDatabase,
+  parseManifestRow,
+} from "../../scripts/ops/chips-ledger-archive-prune.mjs";
 import {
   ACCOUNT_RECOVERY_MIME_TYPE,
   RETIREMENT_PHASES,
@@ -25,6 +44,7 @@ import {
   runStageEscrowAccountRetentionControl,
   serializeAccountRecovery,
   verifyAccountRecoveryBytes,
+  verifyPrimaryArchiveAndDurableRecovery,
 } from "../../scripts/ops/chips-ledger-stage-escrow-retention.mjs";
 import {
   restoreAccountBatch,
@@ -782,4 +802,189 @@ test("owner retention control keeps acquire, assertions, function and release on
   assert.equal(revalidated.lockSession.backendPid, "42");
   assert.equal(transactionOpen, false);
   assert.deepEqual(events, ["revalidate", "authorize"]);
+});
+
+test("prepare archive verification accepts raw SQL text archive_batches rows", async () => {
+  // The chips_ledger_archive_batches.batches.* row is returned by postgres.js
+  // with bigint columns as strings.  exporterManifestFromDatabase expects the
+  // numeric normalization that parseManifestRow applies, so a raw row must not
+  // reach verifyArchiveBytes unparsed (regression for run 33689857907).
+  const SYSTEM_ID = "00000000-0000-4000-8000-00000000000e";
+  const BOT_TX_ID = "00000000-0000-4000-8000-0000000000f1";
+  const CREATED_AT = "2026-07-01T00:00:00.000000Z";
+  const CUTOFF = "2026-08-01T00:00:00.000000Z";
+  const OUT_OF_SCOPE_SHA = "f".repeat(64);
+  const batchId = "15";
+  const botCandidate = {
+    id: BOT_TX_ID,
+    sequence: "1",
+    tx_type: "TABLE_BUY_IN",
+    idempotency_key: `bot-seed-buyin:${TABLE_ID}:1`,
+    payload_hash: "b".repeat(64),
+    user_id: null,
+    reference: `BOT_SEED_BUY_IN:${TABLE_ID}:1`,
+    description: "escrow retention regression fixture",
+    metadata: { tableId: TABLE_ID },
+    created_by: SYSTEM_ID,
+    created_at: CREATED_AT,
+    entry_count: "2",
+    table_related: true,
+    table_id: TABLE_ID,
+    table_exists: true,
+    table_status: "CLOSED",
+    escrow_account_id: ACCOUNT_ID,
+    escrow_status: "active",
+    escrow_balance: "0",
+    has_human_participant: false,
+    bot_only_proof_eligible: true,
+    key_table_id: TABLE_ID,
+    key_format_version: 1,
+    key_format: "bot-seed-buyin",
+    table_newest_created_at: CREATED_AT,
+    table_identity_count: "1",
+    table_eligible_count: "1",
+    table_out_of_scope_keys_sha256: OUT_OF_SCOPE_SHA,
+  };
+  const entry = (id, accountId, accountType, systemKey, amount) => ({
+    id: String(id),
+    transaction_id: BOT_TX_ID,
+    account_id: accountId,
+    entry_seq: String(id),
+    amount: String(amount),
+    metadata: {},
+    created_at: CREATED_AT,
+    account_row_id: accountId,
+    account_type: accountType,
+    account_user_id: null,
+    account_system_key: systemKey,
+    account_status: "active",
+    account_label: null,
+  });
+  const record = buildExportRecord(botCandidate, [
+    entry(1, ACCOUNT_ID, "ESCROW", `POKER_TABLE:${TABLE_ID}`, 100),
+    entry(2, SYSTEM_ID, "SYSTEM", "TREASURY", -100),
+  ], { schemaVersion: 2 });
+  const archive = buildArchiveBytes([record]);
+  const canonicalManifest = buildManifest({
+    target: "stage",
+    cutoff: CUTOFF,
+    batchSize: 5000,
+    cursor: null,
+    records: [record],
+    archive,
+    outputPath: `/private/${archive.compressedSha256}.jsonl.gz`,
+    sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
+    schemaVersion: 2,
+  });
+  const objectPath = buildObjectPath(canonicalManifest);
+  const stageTarget = {
+    target: "stage",
+    label: "Stage",
+    projectRef: "krydukthwdvccggbyjfw",
+    systemIdentifier: "7656985631720456337",
+  };
+  const canonicalVerified = verifyArchiveBytes({
+    compressedBytes: archive.compressedBytes,
+    manifest: canonicalManifest,
+    target: { target: "stage", projectRef: "krydukthwdvccggbyjfw" },
+    artifactName: path.basename(objectPath),
+  });
+  const evidence = buildPruneEvidence(canonicalVerified, { maxBatchSize: 5000 });
+  const row = {
+    object_path: objectPath,
+    batch_id: batchId,
+    project_ref: "krydukthwdvccggbyjfw",
+    format_version: 2,
+    source_policy_id: BOT_ONLY_RETENTION_POLICY_ID,
+    status: "committed",
+    cutoff: canonicalManifest.cutoff.created_at,
+    cursor_start_created_at: null,
+    cursor_start_id: null,
+    cursor_end_created_at: canonicalManifest.cursor.end?.created_at || null,
+    cursor_end_id: canonicalManifest.cursor.end?.id || null,
+    first_created_at: canonicalManifest.time_range.first_created_at,
+    last_created_at: canonicalManifest.time_range.last_created_at,
+    transaction_count: String(canonicalManifest.batch.transactions),
+    entry_count: String(canonicalManifest.batch.entries),
+    tx_types: canonicalManifest.batch.tx_types,
+    raw_bytes: String(canonicalManifest.bytes.raw),
+    compressed_bytes: String(canonicalManifest.bytes.compressed),
+    raw_sha256: canonicalManifest.sha256.raw_jsonl,
+    compressed_sha256: canonicalManifest.sha256.compressed_artifact,
+    credits: canonicalManifest.amounts.credits,
+    debits: canonicalManifest.amounts.debits,
+    net_amount: canonicalManifest.amounts.net,
+    committed_at: "2026-08-02T00:00:00.000000Z",
+    archived_transaction_ids_sha256: evidence.transactionIdsSha256,
+    archived_entry_ids_sha256: evidence.entryIdsSha256,
+    archive_proof_verified_at: "2026-08-02T00:00:01.000000Z",
+    pruned_at: "2026-08-03T00:00:00.000000Z",
+    pruned_transaction_count: String(canonicalManifest.batch.transactions),
+    pruned_entry_count: String(canonicalManifest.batch.entries),
+    pruned_transaction_ids_sha256: evidence.transactionIdsSha256,
+    pruned_entry_ids_sha256: evidence.entryIdsSha256,
+    bot_only_table_id: TABLE_ID,
+    bot_only_table_count: "1",
+    bot_only_newest_created_at: CREATED_AT,
+    bot_only_registry_keys_sha256: evidence.registryKeysSha256,
+    bot_only_out_of_scope_keys_sha256: evidence.outOfScopeKeysSha256,
+    bot_only_identity_count: String(canonicalManifest.batch.transactions),
+    bot_only_eligible_count: String(canonicalManifest.batch.transactions),
+    registry_cleaned_at: "2026-08-04T00:00:00.000000Z",
+    registry_cleaned_key_count: String(evidence.registryKeys?.length),
+    registry_cleaned_keys_sha256: evidence.registryKeysSha256,
+    destructive_go_at: "2026-08-05T00:00:00.000000Z",
+    destructive_go_batch_id: batchId,
+  };
+
+  // Pre-fix behavior: the unparsed raw row is rejected by the manifest gate
+  // with the exact production error.
+  assert.throws(
+    () => verifyArchiveBytes({
+      compressedBytes: archive.compressedBytes,
+      manifest: exporterManifestFromDatabase(row, stageTarget, null),
+      target: stageTarget,
+      artifactName: path.basename(objectPath),
+    }),
+    /batch\.transactions must be a non-negative integer/,
+  );
+
+  // The fixed path normalizes the raw row before building the manifest.
+  const normalizedManifest = exporterManifestFromDatabase(parseManifestRow(row), stageTarget, null);
+  assert.equal(Number.isSafeInteger(normalizedManifest.batch.transactions), true);
+  assert.equal(Number.isSafeInteger(normalizedManifest.batch.entries), true);
+  assert.equal(Number.isSafeInteger(normalizedManifest.bytes.raw), true);
+  assert.equal(Number.isSafeInteger(normalizedManifest.bytes.compressed), true);
+
+  // Durable recovery copy shaped like inspectDurableRecoveryState reports it.
+  const recoveryManifest = buildRecoveryManifest(row, stageTarget.systemIdentifier, evidence, stageTarget);
+  const manifestBytes = Buffer.from(`${JSON.stringify(recoveryManifest)}\n`, "utf8");
+  const manifestGzipBytes = gzipSync(manifestBytes, { level: 9, mtime: 0 });
+  const durable = {
+    archivePath: buildRecoveryArchiveObjectPath(row.compressed_sha256),
+    manifestPath: buildRecoveryManifestObjectPath(row.compressed_sha256),
+    archiveBytes: archive.compressedBytes,
+    archiveSha256: archive.compressedSha256,
+    manifestBytes,
+    manifestGzipBytes,
+    manifestSha256: crypto.createHash("sha256").update(manifestGzipBytes).digest("hex"),
+    manifest: recoveryManifest,
+  };
+  const verified = await verifyPrimaryArchiveAndDurableRecovery({
+    sql: null,
+    storageTarget: {},
+    row,
+    identity: stageTarget.systemIdentifier,
+    cwd: process.cwd(),
+    deps: {
+      downloadArchive: async () => ({ bytes: archive.compressedBytes, sha256: archive.compressedSha256 }),
+      inspectDurableRecovery: async () => ({ state: "complete", durable }),
+    },
+    telemetry: false,
+    phase: RETIREMENT_PHASES.PREPARE,
+    attempt: 1,
+  });
+  assert.equal(verified.recoveryState, "complete");
+  assert.equal(verified.primary.archiveSha256, row.compressed_sha256);
+  assert.equal(verified.evidence.transactionIdsSha256, evidence.transactionIdsSha256);
 });

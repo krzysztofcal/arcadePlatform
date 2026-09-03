@@ -23,6 +23,7 @@ import {
 import {
   buildPruneEvidence,
   exporterManifestFromDatabase,
+  parseManifestRow,
   sqlStateOf,
 } from "./chips-ledger-archive-prune.mjs";
 import {
@@ -1377,7 +1378,11 @@ export async function verifyPrimaryArchiveAndDurableRecovery({
     projectRef: STAGE_PROJECT_REF,
     systemIdentifier: identity,
   };
-  const archiveManifest = exporterManifestFromDatabase(row, target, legacyPlan);
+  // The archive_batches row is read as raw SQL text (bigint columns arrive as
+  // strings), while exporterManifestFromDatabase expects the same numeric
+  // normalization that the prune store applies via parseManifestRow.
+  const manifestRow = parseManifestRow(row);
+  const archiveManifest = exporterManifestFromDatabase(manifestRow, target, legacyPlan);
   const verifiedArchive = verifyArchiveBytes({
     compressedBytes: primaryObject.bytes,
     manifest: archiveManifest,

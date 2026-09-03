@@ -565,7 +565,7 @@ function assertTargetIdentity(identity, manifest, target) {
   if (manifest.project_ref !== policy.projectRef) fail(`archive manifest is not canonical ${target.label}`);
 }
 
-function parseManifestRow(row) {
+export function parseManifestRow(row) {
   if (!row) fail("archive manifest was not found");
   return {
     ...row,
