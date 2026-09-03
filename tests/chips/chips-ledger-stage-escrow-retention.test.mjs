@@ -39,6 +39,7 @@ import {
   parseRetentionArgs,
   readOnlyEscrowAudit,
   reportSummary,
+  retirementReceiptState,
   runWithRetirementRetry,
   runStageEscrowAccountRetention,
   runStageEscrowAccountRetentionControl,
@@ -167,6 +168,24 @@ test("normal bot-only batch is classified as a safe candidate", () => {
   assert.equal(result.category, "SAFE_BOT_ONLY_CANDIDATE");
   assert.equal(archiveBatchEvidenceState(completeBatch()).complete, true);
   assert.equal(archiveBatchEvidenceState(completeBatch({ registry_cleaned_keys_sha256: "0".repeat(64) })).complete, false);
+});
+
+test("complete escrow retirement receipt still reports retired", () => {
+  // The archive_batches projection must keep the account retirement receipt
+  // columns; otherwise a finished batch reads as "empty" instead of "complete"
+  // and is never reported through alreadyRetired after the first execute.
+  const retired = completeBatch({
+    account_retirement_at: "2026-08-06T00:00:00.000000Z",
+    account_retirement_account_count: "1",
+    account_retirement_account_ids_sha256: "c".repeat(64),
+    account_retirement_recovery_object_path: `account-recovery/v1/sha256/${HASH}.json.gz`,
+    account_retirement_recovery_object_sha256: HASH,
+    account_retirement_snapshot_sha256: HASH,
+  });
+  assert.equal(retirementReceiptState(retired), "complete");
+  assert.equal(archiveBatchEvidenceState(retired).complete, true);
+  assert.equal(retirementReceiptState(completeBatch()), "empty");
+  assert.equal(retirementReceiptState(completeBatch({ account_retirement_at: "2026-08-06T00:00:00.000000Z" })), "partial");
 });
 
 test("legacy multi-table batch remains one bounded candidate unit", () => {

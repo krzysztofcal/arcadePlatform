@@ -417,7 +417,13 @@ select
   legacy_run_id::text as legacy_run_id,
   legacy_plan_sha256,
   destructive_go_at::text as destructive_go_at,
-  destructive_go_batch_id::text as destructive_go_batch_id
+  destructive_go_batch_id::text as destructive_go_batch_id,
+  account_retirement_at::text as account_retirement_at,
+  account_retirement_account_count::text as account_retirement_account_count,
+  account_retirement_account_ids_sha256,
+  account_retirement_recovery_object_path,
+  account_retirement_recovery_object_sha256,
+  account_retirement_snapshot_sha256
 from public.chips_ledger_archive_batches batches
 where batches.project_ref = $1
   and batches.source_policy_id = any($2::text[])
