@@ -83,3 +83,18 @@ test("scheduled module does not contain archive export, proof registration or ov
   assert.match(moduleSource, /uploadOrVerifyPrivateObject/);
   assert.match(storageSource, /x-upsert.*false/);
 });
+
+test("retention archive batch reads keep microsecond timestamp text precision", () => {
+  // The prune store projects archive rows with ::text so timestamps survive the
+  // postgres.js Date round-trip (which truncates to milliseconds).  Retention
+  // must do the same: ms-truncated bot_only_newest_created_at makes the
+  // schema-v2 artifact table summary check fail semantically (run 33735273784).
+  const batchesSql = moduleSource.match(/export const RETENTION_BATCHES_SQL = `[\s\S]*?`;/)?.[0] || "";
+  assert.doesNotMatch(batchesSql, /batches\.\*/);
+  assert.match(batchesSql, /cutoff::text as cutoff/);
+  assert.match(batchesSql, /first_created_at::text as first_created_at/);
+  assert.match(batchesSql, /last_created_at::text as last_created_at/);
+  assert.match(batchesSql, /bot_only_newest_created_at::text as bot_only_newest_created_at/);
+  assert.match(batchesSql, /transaction_count::text as transaction_count/);
+  assert.match(moduleSource, /row = parseManifestRow\(row\);/);
+});

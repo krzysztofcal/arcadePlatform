@@ -811,7 +811,7 @@ test("prepare archive verification accepts raw SQL text archive_batches rows", a
   // reach verifyArchiveBytes unparsed (regression for run 33689857907).
   const SYSTEM_ID = "00000000-0000-4000-8000-00000000000e";
   const BOT_TX_ID = "00000000-0000-4000-8000-0000000000f1";
-  const CREATED_AT = "2026-07-01T00:00:00.000000Z";
+  const CREATED_AT = "2026-07-01T00:00:00.123456Z";
   const CUTOFF = "2026-08-01T00:00:00.000000Z";
   const OUT_OF_SCOPE_SHA = "f".repeat(64);
   const batchId = "15";
@@ -925,7 +925,7 @@ test("prepare archive verification accepts raw SQL text archive_batches rows", a
     pruned_entry_ids_sha256: evidence.entryIdsSha256,
     bot_only_table_id: TABLE_ID,
     bot_only_table_count: "1",
-    bot_only_newest_created_at: CREATED_AT,
+    bot_only_newest_created_at: canonicalManifest.bot_only?.newest_created_at || CREATED_AT,
     bot_only_registry_keys_sha256: evidence.registryKeysSha256,
     bot_only_out_of_scope_keys_sha256: evidence.outOfScopeKeysSha256,
     bot_only_identity_count: String(canonicalManifest.batch.transactions),
@@ -956,8 +956,25 @@ test("prepare archive verification accepts raw SQL text archive_batches rows", a
   assert.equal(Number.isSafeInteger(normalizedManifest.bytes.raw), true);
   assert.equal(Number.isSafeInteger(normalizedManifest.bytes.compressed), true);
 
+  // Regression for run 33735273784: a timestamp truncated to milliseconds (as
+  // postgres.js Date parsing does) must not leak into the reconstructed schema-v2
+  // manifest, otherwise the artifact table summary check fails semantically.
+  const truncatedNewest = row.bot_only_newest_created_at.replace(/\.(\d{3})\d{3}Z$/, ".$1Z");
+  assert.notEqual(truncatedNewest, row.bot_only_newest_created_at);
+  assert.throws(
+    () => verifyArchiveBytes({
+      compressedBytes: archive.compressedBytes,
+      manifest: exporterManifestFromDatabase(parseManifestRow({ ...row, bot_only_newest_created_at: truncatedNewest }), stageTarget, null),
+      target: stageTarget,
+      artifactName: path.basename(objectPath),
+    }),
+    /TABLE_IDENTITY_SUMMARY_NEWEST_CREATED_AT_SEMANTIC_MISMATCH/,
+  );
+
   // Durable recovery copy shaped like inspectDurableRecoveryState reports it.
-  const recoveryManifest = buildRecoveryManifest(row, stageTarget.systemIdentifier, evidence, stageTarget);
+  // The prune store writes these from a parseManifestRow-normalized row, so the
+  // expected manifest must be derived from the same normalized representation.
+  const recoveryManifest = buildRecoveryManifest(parseManifestRow(row), stageTarget.systemIdentifier, evidence, stageTarget);
   const manifestBytes = Buffer.from(`${JSON.stringify(recoveryManifest)}\n`, "utf8");
   const manifestGzipBytes = gzipSync(manifestBytes, { level: 9, mtime: 0 });
   const durable = {
