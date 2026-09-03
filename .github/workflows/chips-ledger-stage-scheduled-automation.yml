@@ -54,6 +54,7 @@ on:
         required: false
         type: string
   schedule:
+    # Second cron runs Stage escrow retention every 15 minutes.
     - cron: "17 2 * * *"
     - cron: "7,22,37,52 * * * *"
 
