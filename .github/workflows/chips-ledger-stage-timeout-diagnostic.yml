@@ -44,4 +44,4 @@ jobs:
       - name: Run read-only Stage timeout diagnostic
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
-        run: node scripts/ops/chips-ledger-stage-timeout-diagnostic.mjs
+        run: node scripts/ops/chips-ledger-stage-candidate-fragment-diagnostic.mjs
