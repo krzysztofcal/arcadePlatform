@@ -113,7 +113,15 @@ async function main() {
     }
 
     const query = BOT_ONLY_CANDIDATE_SQL;
-    const finalSelectAt = query.indexOf("\nselect eligible.id::text");
+    const finalSelectCandidates = [
+      "\nselect eligible.id::text",
+      "\nselect transactions.id::text",
+    ];
+    let finalSelectAt = -1;
+    for (const needle of finalSelectCandidates) {
+      finalSelectAt = query.indexOf(needle);
+      if (finalSelectAt >= 0) break;
+    }
     if (finalSelectAt < 0) throw new Error("cannot locate final candidate select");
     const cteBody = query.slice(query.indexOf("with ") + 5, finalSelectAt).trim();
     const allDefs = splitTopLevelCtes(cteBody);
