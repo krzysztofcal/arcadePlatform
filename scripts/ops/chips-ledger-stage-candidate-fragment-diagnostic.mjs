@@ -45,6 +45,16 @@ function cteName(def) {
   return def.slice(0, def.indexOf(" as ")).trim();
 }
 
+function maxParameterIndex(sql) {
+  let max = 0;
+  const re = /\$(\d+)/g;
+  let match;
+  while ((match = re.exec(sql)) !== null) {
+    max = Math.max(max, Number(match[1]));
+  }
+  return max;
+}
+
 function buildFragmentSql(allDefs, targetName) {
   const defs = [];
   for (const def of allDefs) {
@@ -63,7 +73,8 @@ function readOnlyFragment(sql, fragment) {
     await tx.unsafe("set transaction isolation level repeatable read, read only;");
     await tx.unsafe(`set local statement_timeout = '${REPLAY_STATEMENT_TIMEOUT_MS}ms';`);
     try {
-      const rows = await tx.unsafe(fragment.sql);
+      const parameters = fragment.parameters.length ? fragment.parameters : undefined;
+      const rows = await tx.unsafe(fragment.sql, parameters);
       return {
         fragment: fragment.name,
         sql_sha256: sha256(fragment.sql),
@@ -116,6 +127,7 @@ async function main() {
     ];
     const now = new Date();
     const cutoff = new Date(now.getTime() - BOT_ONLY_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const baseParameters = [cutoff, STAGE_MAX_BATCH_SIZE, null, null];
 
     const measured = [];
     for (const fragment of fragments) {
@@ -128,7 +140,8 @@ async function main() {
         continue;
       }
       const fragmentSql = buildFragmentSql(allDefs, fragment.target);
-      measured.push(await readOnlyFragment(sql, { name: fragment.name, sql: fragmentSql }));
+      const parameters = baseParameters.slice(0, maxParameterIndex(fragmentSql));
+      measured.push(await readOnlyFragment(sql, { name: fragment.name, sql: fragmentSql, parameters }));
     }
 
     const fullStartedAt = process.hrtime.bigint();
