@@ -8,12 +8,12 @@ const storageSource = fs.readFileSync("scripts/ops/chips-ledger-archive-store.mj
 const migration = fs.readFileSync("supabase/migrations/20260902100000_chips_ledger_escrow_account_retirement.sql", "utf8");
 const canaryMigration = fs.readFileSync("supabase/migrations/20260902110000_chips_ledger_escrow_account_retention_canary_revalidation.sql", "utf8");
 
-test("scheduled automation invokes escrow retention without a new scheduler or input", () => {
+test("scheduled and external fallback invoke escrow retention without rollout inputs", () => {
   const step = workflow.match(/- name: Run Stage escrow account retention[\s\S]*?(?=\n\s+- name:)/)?.[0] || "";
   assert.match(step, /github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/);
-  assert.doesNotMatch(step, /inputs\.mode|workflow_dispatch/);
+  assert.match(step, /github\.event_name == 'workflow_dispatch' && inputs\.mode == 'external-scheduled-automatic'/);
   assert.match(step, /node scripts\/ops\/chips-ledger-stage-escrow-retention\.mjs --automatic/);
-  assert.doesNotMatch(step, /workflow_dispatch:\s*inputs|--execute|--batch-id|GO/);
+  assert.doesNotMatch(step, /workflow_dispatch:\s*inputs|--execute|--batch-id|GO|inputs\.escrow_retention_|inputs\.approved_/);
   assert.equal((workflow.match(/chips-ledger-stage-escrow-retention\.mjs/g) || []).length, 6);
 });
 
@@ -57,7 +57,7 @@ test("manual escrow retention rollout has exact, main-only workflow modes", () =
   assert.match(workflow, /chips-ledger-stage-escrow-account-recovery\.mjs[\s\S]*?--object-path/);
   assert.match(workflow, /VERIFY \$ESCROW_RETENTION_RECOVERY_OBJECT_PATH/);
   assert.match(workflow, /ACTIVATE.*stage-ledger-escrow-account-retention-v1/);
-  assert.doesNotMatch(workflow.match(/- name: Run Stage escrow account retention[\s\S]*?(?=\n\s+- name:)/)?.[0] || "", /inputs\./);
+  assert.doesNotMatch(workflow.match(/- name: Run Stage escrow account retention[\s\S]*?(?=\n\s+- name:)/)?.[0] || "", /inputs\.(?:escrow_retention_|approved_)/);
 });
 
 test("retirement is Stage-only and disabled by default", () => {

@@ -25,6 +25,7 @@ on:
           - escrow-retention-execute
           - escrow-retention-verify
           - escrow-retention-activate
+          - external-scheduled-automatic
       approved_batch_id:
         description: Exact committed bot-only 7d batch_id prepared by a prior run (required for bot-only-7d-execute)
         required: false
@@ -215,14 +216,14 @@ jobs:
             --approved-batch-confirmation "$APPROVED_BATCH_CONFIRMATION"
 
       - name: Run activated bot-only 7-day Stage automation
-        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-automatic') }}
+        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-automatic') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'external-scheduled-automatic') }}
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
           CHIPS_LEDGER_BOT_ONLY_AUTOMATIC: "1"
         run: node scripts/ops/chips-ledger-stage-automation.mjs --policy bot-only-7d --automatic
 
       - name: Run Stage escrow account retention
-        if: ${{ github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *' }}
+        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'external-scheduled-automatic') }}
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
         run: node scripts/ops/chips-ledger-stage-escrow-retention.mjs --automatic
