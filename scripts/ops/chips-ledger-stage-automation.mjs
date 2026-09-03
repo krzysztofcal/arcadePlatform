@@ -3442,24 +3442,40 @@ export async function runAutomaticBotOnlyStageAutomation({
           const artifactPath = path.join(tempRoot, "automatic-" + String(index) + ".archive.jsonl.gz");
           const manifestPath = path.join(tempRoot, "automatic-" + String(index) + ".archive.manifest.json");
           markAutomaticPhase("automatic.export");
-          const exported = await (deps.exportArchive || runExport)({
-            argv: [
-              "--target", "stage", "--cutoff-days", String(BOT_ONLY_RETENTION_DAYS),
-              "--batch-size", String(STAGE_MAX_BATCH_SIZE), "--output", artifactPath, "--manifest", manifestPath,
-            ],
-            env: moduleEnv,
-            cwd: tempRoot,
-            now,
-            deps: {
-              sql,
-              selector: "bot-only-7d",
-              schemaVersion: BOT_ONLY_EXPORT_SCHEMA_VERSION,
-              sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
-              targetOptions: { singleTarget: true },
-              noCandidateIfEmpty: true,
-              emit: false,
-            },
-          });
+          // A read-only timeout of exactly the bot-only candidate selector must
+          // not take down the whole scheduled run. Only a fresh-candidate export
+          // (no active or incomplete batch to resume) may stop early; timeouts
+          // anywhere else in export (entries, blocking anomalies) plus resume,
+          // proof, recovery, dry-run, execute and cleanup stay fail-closed.
+          let exported;
+          try {
+            exported = await (deps.exportArchive || runExport)({
+              argv: [
+                "--target", "stage", "--cutoff-days", String(BOT_ONLY_RETENTION_DAYS),
+                "--batch-size", String(STAGE_MAX_BATCH_SIZE), "--output", artifactPath, "--manifest", manifestPath,
+              ],
+              env: moduleEnv,
+              cwd: tempRoot,
+              now,
+              deps: {
+                sql,
+                selector: "bot-only-7d",
+                schemaVersion: BOT_ONLY_EXPORT_SCHEMA_VERSION,
+                sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
+                targetOptions: { singleTarget: true },
+                noCandidateIfEmpty: true,
+                emit: false,
+              },
+            });
+          } catch (error) {
+            if (sqlStateOf(error) !== "57014"
+              || error.chipsLedgerQueryPhase !== "snapshot.candidate_selector"
+              || error.chipsLedgerQueryName !== "bot_only_candidate_selector") {
+              throw error;
+            }
+            stopReason = "candidate_selector_timeout";
+            break;
+          }
           if (exported.noCandidate) {
             if ((exported.blockingAnomalies || []).length) {
               fail("automatic bot-only selector reported a blocking anomaly");
