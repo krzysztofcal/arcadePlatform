@@ -17,7 +17,7 @@ assert.match(workflow, /approved_batch_id:\n\s+description: Exact committed bot-
 assert.match(workflow, /approved_batch_confirmation:\n\s+description: Exact human confirmation GO <approved_batch_id> \(required for bot-only-7d-execute\)[\s\S]*?required: false\n\s+type: string/);
 assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|legacy-stage-allowlist-prepare-only|audit-batch-13|execute-batch-13)$/gm) || []).length, 5);
 assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|bot-only-7d-execute|legacy-stage-allowlist-prepare-only|audit-batch-13|execute-batch-13)$/gm) || []).length, 6);
-assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-summary-diagnostic|bot-only-7d-repair-recovery-batch-15|bot-only-7d-prepare-only|bot-only-7d-execute|bot-only-7d-automatic|legacy-stage-allowlist-prepare-only|legacy-stage-allowlist-orchestrate|audit-batch-13|execute-batch-13|escrow-retention-audit|escrow-retention-prepare-only|escrow-retention-authorize-canary|escrow-retention-execute|escrow-retention-verify|escrow-retention-activate)$/gm) || []).length, 16);
+assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-summary-diagnostic|bot-only-7d-repair-recovery-batch-15|bot-only-7d-prepare-only|bot-only-7d-execute|bot-only-7d-automatic|legacy-stage-allowlist-prepare-only|legacy-stage-allowlist-orchestrate|audit-batch-13|execute-batch-13|escrow-retention-audit|escrow-retention-prepare-only|escrow-retention-authorize-canary|escrow-retention-execute|escrow-retention-verify|escrow-retention-activate|external-scheduled-automatic)$/gm) || []).length, 17);
 assert.equal((workflow.match(/- cron:/g) || []).length, 2);
 assert.match(workflow, /- cron: "17 2 \* \* \*"/);
 assert.match(workflow, /- cron: "7,22,37,52 \* \* \* \*"/);
@@ -223,6 +223,7 @@ const automaticRun = workflow.match(
 )[0];
 assert.match(automaticRun, /github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/);
 assert.match(automaticRun, /github\.event_name == 'workflow_dispatch' && inputs\.mode == 'bot-only-7d-automatic'/);
+assert.match(automaticRun, /github\.event_name == 'workflow_dispatch' && inputs\.mode == 'external-scheduled-automatic'/);
 assert.match(automaticRun, /node scripts\/ops\/chips-ledger-stage-automation\.mjs --policy bot-only-7d --automatic/);
 assert.doesNotMatch(automaticRun, /legacy-stage-allowlist|SUPABASE_PROD_|PRODUCTION|--target\s+prod/i);
 
