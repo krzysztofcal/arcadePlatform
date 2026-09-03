@@ -67,35 +67,35 @@ function buildFragmentSql(allDefs, targetName) {
   return `with ${defs.join(",\n")} select count(*)::bigint as fragment_count from ${targetName}`;
 }
 
-function readOnlyFragment(sql, fragment) {
+async function readOnlyFragment(sql, fragment) {
   const startedAt = process.hrtime.bigint();
-  return sql.begin(async (tx) => {
-    await tx.unsafe("set transaction isolation level repeatable read, read only;");
-    await tx.unsafe(`set local statement_timeout = '${REPLAY_STATEMENT_TIMEOUT_MS}ms';`);
-    try {
+  try {
+    const rows = await sql.begin(async (tx) => {
+      await tx.unsafe("set transaction isolation level repeatable read, read only;");
+      await tx.unsafe(`set local statement_timeout = '${REPLAY_STATEMENT_TIMEOUT_MS}ms';`);
       const parameters = fragment.parameters.length ? fragment.parameters : undefined;
-      const rows = await tx.unsafe(fragment.sql, parameters);
-      return {
-        fragment: fragment.name,
-        sql_sha256: sha256(fragment.sql),
-        elapsed_ms: Number(process.hrtime.bigint() - startedAt) / 1e6,
-        sqlstate: "00000",
-        read_only: true,
-        row_count: Number(rows[0]?.fragment_count || 0),
-        statement_timeout_ms: REPLAY_STATEMENT_TIMEOUT_MS,
-      };
-    } catch (error) {
-      return {
-        fragment: fragment.name,
-        sql_sha256: sha256(fragment.sql),
-        elapsed_ms: Number(process.hrtime.bigint() - startedAt) / 1e6,
-        sqlstate: sqlState(error),
-        read_only: true,
-        row_count: null,
-        statement_timeout_ms: REPLAY_STATEMENT_TIMEOUT_MS,
-      };
-    }
-  });
+      return tx.unsafe(fragment.sql, parameters);
+    });
+    return {
+      fragment: fragment.name,
+      sql_sha256: sha256(fragment.sql),
+      elapsed_ms: Number(process.hrtime.bigint() - startedAt) / 1e6,
+      sqlstate: "00000",
+      read_only: true,
+      row_count: Number(rows[0]?.fragment_count || 0),
+      statement_timeout_ms: REPLAY_STATEMENT_TIMEOUT_MS,
+    };
+  } catch (error) {
+    return {
+      fragment: fragment.name,
+      sql_sha256: sha256(fragment.sql),
+      elapsed_ms: Number(process.hrtime.bigint() - startedAt) / 1e6,
+      sqlstate: sqlState(error),
+      read_only: true,
+      row_count: null,
+      statement_timeout_ms: REPLAY_STATEMENT_TIMEOUT_MS,
+    };
+  }
 }
 
 async function main() {
