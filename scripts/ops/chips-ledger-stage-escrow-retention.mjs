@@ -377,10 +377,53 @@ export async function runWithRetirementRetry({
 
 export const RETENTION_BATCHES_SQL = `
 select
-  batches.*,
+  object_path, batch_id::text as batch_id, project_ref, format_version::text as format_version,
+  cutoff::text as cutoff, cursor_start_created_at::text as cursor_start_created_at,
+  cursor_start_id::text as cursor_start_id, cursor_end_created_at::text as cursor_end_created_at,
+  cursor_end_id::text as cursor_end_id, first_created_at::text as first_created_at,
+  last_created_at::text as last_created_at, transaction_count::text as transaction_count,
+  entry_count::text as entry_count, tx_types, raw_bytes::text as raw_bytes,
+  compressed_bytes::text as compressed_bytes, raw_sha256, compressed_sha256,
+  credits::text as credits, debits::text as debits, net_amount::text as net_amount,
+  status, committed_at::text as committed_at,
+  source_policy_id,
+  archived_transaction_ids_sha256, archived_entry_ids_sha256,
+  archive_proof_verified_at::text as archive_proof_verified_at,
+  pruned_at::text as pruned_at, pruned_transaction_count::text as pruned_transaction_count,
+  pruned_entry_count::text as pruned_entry_count, pruned_transaction_ids_sha256,
+  pruned_entry_ids_sha256,
+  bot_only_table_id::text as bot_only_table_id,
+  bot_only_table_count::text as bot_only_table_count,
+  bot_only_newest_created_at::text as bot_only_newest_created_at,
+  bot_only_registry_keys_sha256,
+  bot_only_out_of_scope_keys_sha256,
+  bot_only_identity_count::text as bot_only_identity_count,
+  bot_only_eligible_count::text as bot_only_eligible_count,
+  registry_cleaned_at::text as registry_cleaned_at,
+  registry_cleaned_key_count::text as registry_cleaned_key_count,
+  registry_cleaned_keys_sha256,
   exists (select 1 from public.poker_tables tables where tables.id = batches.bot_only_table_id) as bot_only_table_exists,
   (select tables.status from public.poker_tables tables where tables.id = batches.bot_only_table_id) as bot_only_table_status,
-  (select tables.bot_only_retention_complete_at::text from public.poker_tables tables where tables.id = batches.bot_only_table_id) as bot_only_retention_complete_at
+  (select tables.bot_only_retention_complete_at::text from public.poker_tables tables where tables.id = batches.bot_only_table_id) as bot_only_retention_complete_at,
+  legacy_allowlist_sha256,
+  legacy_batch_table_ids_sha256,
+  legacy_master_table_ids,
+  legacy_master_table_count::text as legacy_master_table_count,
+  legacy_batch_number::text as legacy_batch_number,
+  legacy_batch_table_count::text as legacy_batch_table_count,
+  legacy_source_run,
+  legacy_query_sha256,
+  legacy_stage_system_identifier,
+  legacy_run_id::text as legacy_run_id,
+  legacy_plan_sha256,
+  destructive_go_at::text as destructive_go_at,
+  destructive_go_batch_id::text as destructive_go_batch_id,
+  account_retirement_at::text as account_retirement_at,
+  account_retirement_account_count::text as account_retirement_account_count,
+  account_retirement_account_ids_sha256,
+  account_retirement_recovery_object_path,
+  account_retirement_recovery_object_sha256,
+  account_retirement_snapshot_sha256
 from public.chips_ledger_archive_batches batches
 where batches.project_ref = $1
   and batches.source_policy_id = any($2::text[])
@@ -1359,6 +1402,11 @@ export async function verifyPrimaryArchiveAndDurableRecovery({
   attempt = 1,
 } = {}) {
   if (!row?.object_path || !SHA256_RE.test(text(row.compressed_sha256))) fail("archive batch has no valid compressed SHA-256");
+  // The archive_batches row is read as raw SQL text (bigint columns arrive as
+  // strings and timestamp columns must keep their microsecond text form), while
+  // the manifest and durable recovery checks need the same numeric and type
+  // normalization that the prune store applies via parseManifestRow.
+  row = parseManifestRow(row);
   const batchId = text(row.batch_id);
   const batchNumber = row.legacy_batch_number == null ? null : Number(row.legacy_batch_number);
   const legacyPlan = buildLegacyStagePlan(row, cwd);
@@ -1378,11 +1426,7 @@ export async function verifyPrimaryArchiveAndDurableRecovery({
     projectRef: STAGE_PROJECT_REF,
     systemIdentifier: identity,
   };
-  // The archive_batches row is read as raw SQL text (bigint columns arrive as
-  // strings), while exporterManifestFromDatabase expects the same numeric
-  // normalization that the prune store applies via parseManifestRow.
-  const manifestRow = parseManifestRow(row);
-  const archiveManifest = exporterManifestFromDatabase(manifestRow, target, legacyPlan);
+  const archiveManifest = exporterManifestFromDatabase(row, target, legacyPlan);
   const verifiedArchive = verifyArchiveBytes({
     compressedBytes: primaryObject.bytes,
     manifest: archiveManifest,
