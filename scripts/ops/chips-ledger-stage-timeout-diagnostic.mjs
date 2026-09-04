@@ -145,13 +145,16 @@ async function readIdentityAndFence(sql) {
   });
 }
 
-async function explain(sql, queryName, query, parameters) {
+async function explain(sql, queryName, query, parameters, { disableNestloop = false } = {}) {
   const startedAt = process.hrtime.bigint();
   try {
-    const rows = await readOnlyTransaction(sql, (tx) => tx.unsafe(
-      `explain (format json, verbose true, costs true, settings true) ${query}`,
-      parameters,
-    ));
+    const rows = await readOnlyTransaction(sql, async (tx) => {
+      if (disableNestloop) await tx.unsafe("set local enable_nestloop = off;");
+      return tx.unsafe(
+        `explain (format json, verbose true, costs true, settings true) ${query}`,
+        parameters,
+      );
+    });
     return {
       query_name: queryName,
       sql_sha256: sqlSha256(query),
@@ -374,28 +377,9 @@ export async function runStageTimeoutDiagnostic({ env = process.env, now = new D
 
     const settings = await readSettings(sql);
     const explains = [
-      await explain(sql, "stage.load_own_batches", STAGE_OWN_BATCHES_SQL, ownBatchParameters),
-      await explain(sql, "snapshot.bot_only_candidate_selector", BOT_ONLY_CANDIDATE_SQL, candidateParameters),
-      await explain(sql, "snapshot.closed_human_table_candidate_selector", CLOSED_HUMAN_TABLE_CANDIDATE_SQL, closedHumanCandidateParameters),
-      await explain(sql, "snapshot.bot_only_blocking_anomalies", BOT_ONLY_BLOCKING_ANOMALY_SQL, anomalyParameters),
+      await explain(sql, "snapshot.closed_human_table_candidate_selector.baseline", CLOSED_HUMAN_TABLE_CANDIDATE_SQL, closedHumanCandidateParameters),
+      await explain(sql, "snapshot.closed_human_table_candidate_selector.nestloop_off", CLOSED_HUMAN_TABLE_CANDIDATE_SQL, closedHumanCandidateParameters, { disableNestloop: true }),
     ];
-    const selectorReplay = await replay(
-      sql,
-      "snapshot.bot_only_candidate_selector",
-      BOT_ONLY_CANDIDATE_SQL,
-      candidateParameters,
-    );
-    const closedHumanSelectorReplay = await replay(
-      sql,
-      "snapshot.closed_human_table_candidate_selector",
-      CLOSED_HUMAN_TABLE_CANDIDATE_SQL,
-      closedHumanCandidateParameters,
-    );
-    const tableIdentitySummary = await runBotOnlyTableIdentitySummaryDiagnostic({
-      config,
-      sql,
-      cutoff,
-    });
 
     return {
       event: "chips_ledger_stage_timeout_diagnostic",
@@ -406,15 +390,11 @@ export async function runStageTimeoutDiagnostic({ env = process.env, now = new D
       cutoff,
       statement_timeout: settings,
       explains,
-      selector_replay: selectorReplay,
-      closed_human_selector_replay: closedHumanSelectorReplay,
-      bot_only_table_identity_summary: tableIdentitySummary,
       read_only_contract: {
         transaction: "repeatable read, read only",
         explain: "EXPLAIN (FORMAT JSON, VERBOSE, COSTS, SETTINGS), without ANALYZE",
         writes: false,
-        replay_statement_timeout_ms: REPLAY_STATEMENT_TIMEOUT_MS,
-        candidate_result_limit: STAGE_MAX_BATCH_SIZE,
+        planner_guard_comparison: "baseline and SET LOCAL enable_nestloop = off",
         output_contains_sql_parameters: false,
         output_contains_rows: false,
       },
