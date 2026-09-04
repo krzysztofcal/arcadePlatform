@@ -15,6 +15,7 @@ on:
           - bot-only-7d-summary-diagnostic
           - bot-only-7d-automatic
           - closed-human-30d-prepare
+          - closed-human-30d-canary
           - closed-human-30d-recovery-diagnostic
           - closed-human-30d-recovery-repair
           - escrow-retention-audit
@@ -22,6 +23,14 @@ on:
           - external-scheduled-automatic
       stage_30d_recovery_batch_id:
         description: Exact Stage 30-day recovery batch_id (optional for existing-30d-recovery-diagnostic; required for existing-30d-recovery-repair)
+        required: false
+        type: string
+      closed_human_canary_batch_id:
+        description: Exact closed-human Stage canary batch_id (execute only)
+        required: false
+        type: string
+      closed_human_canary_confirmation:
+        description: Exact GO <batch_id> confirmation for the closed-human Stage canary (execute only)
         required: false
         type: string
       escrow_retention_recovery_object_path:
@@ -47,7 +56,7 @@ permissions:
 
 jobs:
   stage-archive:
-    if: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'existing-30d-recovery-repair' && inputs.mode != 'closed-human-30d-recovery-repair') || (github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && ((github.ref == 'refs/heads/main' && (inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify' || inputs.mode == 'existing-30d-recovery-repair')) || inputs.mode == 'closed-human-30d-recovery-repair'))) }}
+    if: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'existing-30d-recovery-repair' && inputs.mode != 'closed-human-30d-recovery-repair' && inputs.mode != 'closed-human-30d-canary') || (github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && ((github.ref == 'refs/heads/main' && (inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'closed-human-30d-canary')) || inputs.mode == 'closed-human-30d-recovery-repair'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -78,7 +87,7 @@ jobs:
           printf 'sha=%s\n' "$checked_out_sha" >> "$GITHUB_OUTPUT"
 
       - name: Read-only Stage fence preflight
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'existing-30d-recovery-diagnostic' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'bot-only-7d-summary-diagnostic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'closed-human-30d-prepare' || inputs.mode == 'closed-human-30d-recovery-diagnostic' || inputs.mode == 'closed-human-30d-recovery-repair' || inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'existing-30d-recovery-diagnostic' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'bot-only-7d-summary-diagnostic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'closed-human-30d-prepare' || inputs.mode == 'closed-human-30d-canary' || inputs.mode == 'closed-human-30d-recovery-diagnostic' || inputs.mode == 'closed-human-30d-recovery-repair' || inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -253,6 +262,38 @@ jobs:
           set -euo pipefail
           test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
           node scripts/ops/chips-ledger-stage-automation.mjs --policy closed-human-table-30d --prepare-only
+
+      - name: Execute exact closed human-table 30-day Stage canary
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'closed-human-30d-canary' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+          CHIPS_LEDGER_CLOSED_HUMAN_EXECUTE: "1"
+          CLOSED_HUMAN_CANARY_BATCH_ID: ${{ inputs.closed_human_canary_batch_id }}
+          CLOSED_HUMAN_CANARY_CONFIRMATION: ${{ inputs.closed_human_canary_confirmation }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          test "$GITHUB_REPOSITORY" = "krzysztofcal/arcadePlatform"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_REPOSITORY_OWNER" = "krzysztofcal"
+          test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER"
+          test -z "${CHIPS_LEDGER_BOT_ONLY_EXECUTE:-}"
+          test -z "${CHIPS_LEDGER_BOT_ONLY_AUTOMATIC:-}"
+          test -z "${CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC:-}"
+          if [[ ! "$CLOSED_HUMAN_CANARY_BATCH_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "closed_human_canary_batch_id must be a positive integer" >&2
+            exit 1
+          fi
+          if [[ "$CLOSED_HUMAN_CANARY_CONFIRMATION" != "GO $CLOSED_HUMAN_CANARY_BATCH_ID" ]]; then
+            echo "closed_human_canary_confirmation must be exactly GO <batch_id>" >&2
+            exit 1
+          fi
+          node scripts/ops/chips-ledger-stage-automation.mjs \
+            --policy closed-human-table-30d \
+            --execute \
+            --approved-batch-id "$CLOSED_HUMAN_CANARY_BATCH_ID" \
+            --approved-batch-confirmation "$CLOSED_HUMAN_CANARY_CONFIRMATION"
 
       - name: Run activated bot-only 7-day Stage automation
         if: ${{ (github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-automatic') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'external-scheduled-automatic') }}

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const migration = fs.readFileSync("supabase/migrations/20260904100000_chips_ledger_closed_human_table_retention.sql", "utf8");
+const canaryMigration = fs.readFileSync("supabase/migrations/20260904180000_chips_ledger_closed_human_canary_execute.sql", "utf8");
 const cleanup = fs.readFileSync("ws-server/poker/persistence/closed-table-cleanup.mjs", "utf8");
 
 assert.match(migration, /human_retention_complete_at timestamptz/);
@@ -10,6 +11,18 @@ assert.match(migration, /stage-ledger-auto-retention-30d-v1/);
 assert.match(migration, /stage-ledger-closed-human-table-retention-30d-v1/);
 assert.doesNotMatch(migration, /replay_transaction/);
 assert.doesNotMatch(migration, /chips\.bot_registry_cleanup/);
+assert.match(canaryMigration, /chips_authorize_closed_human_table_retention_canary\(\s*p_batch_id bigint,\s*p_confirmation text/);
+assert.match(canaryMigration, /p_confirmation is distinct from \('GO ' \|\| p_batch_id::text\)/);
+assert.match(canaryMigration, /stage-ledger-closed-human-table-retention-30d-v1/);
+assert.match(canaryMigration, /chips\.closed_human_go/);
+assert.match(canaryMigration, /destructive_go_at/);
+assert.match(canaryMigration, /chips_prune_closed_human_table_archive_batch/);
+assert.match(canaryMigration, /chips_assert_closed_human_table_lifecycle_gate\(/);
+assert.match(canaryMigration, /policy\.enabled is true[\s\S]*policy\.activated_at is not null/);
+assert.match(canaryMigration, /p_approved_batch_id is distinct from batch\.batch_id/);
+assert.match(canaryMigration, /p_execute is false or prune_result->>'state' = 'already_pruned'/);
+assert.doesNotMatch(canaryMigration, /chips_complete_closed_human_table_retention/);
+assert.doesNotMatch(canaryMigration, /7575202818581710058/);
 assert.match(cleanup, /t\.has_human_participant is true and t\.human_retention_complete_at is not null/);
 assert.match(cleanup, /t\.has_human_participant is not true and t\.bot_only_retention_complete_at is not null/);
 
