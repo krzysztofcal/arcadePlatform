@@ -2151,6 +2151,19 @@ export async function readSnapshot(sql, options) {
       query: "set transaction isolation level repeatable read, read only;",
       telemetry,
     });
+    if (selector === "bot-only-7d") {
+      // Measured on Stage: the bot-only selector's eligible_transactions CTE joins
+      // materially under-estimated CTE scans as Nested Loop and exceeded the 120 s
+      // statement budget. Disabling nested loops for this one bounded snapshot lets
+      // PostgreSQL pick hash joins; EXPLAIN (ANALYZE, BUFFERS) dropped the full
+      // plan from timeout to ~17 s with no index or safety-guard change.
+      await observedQuery(tx, {
+        phase: "snapshot.read_only_transaction",
+        queryName: "set_bot_only_candidate_planner_guard",
+        query: "set local enable_nestloop = off;",
+        telemetry,
+      });
+    }
     const candidateSql = selector === "standard"
       ? CANDIDATE_SQL
       : selector === "prunable"

@@ -164,6 +164,7 @@ function makeExportSql(candidateRow, entryRows) {
     begin: async (callback) => callback({
       unsafe: async (query, parameters = []) => {
         if (/set transaction isolation level repeatable read, read only/i.test(query)) return [];
+        if (/set local enable_nestloop = off/i.test(query)) return [];
         if (parameters.length === 4) return [candidateRow];
         if (parameters.length === 1 && Array.isArray(parameters[0])) return entryRows;
         throw new Error(`unexpected runExport query: ${query}`);
