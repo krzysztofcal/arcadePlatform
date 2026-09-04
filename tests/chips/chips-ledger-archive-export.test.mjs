@@ -101,6 +101,42 @@ async function assertSnapshotTimestampBindings() {
 
 await assertSnapshotTimestampBindings();
 
+async function assertBotOnlyPlannerGuardScope() {
+  const cutoff = "2026-08-07T03:32:29.388506Z";
+  const runWith = async (selector) => {
+    const queries = [];
+    const sql = {
+      typed: (value, type) => ({ value, type }),
+      begin: async (callback) => callback({
+        unsafe: async (query, parameters = []) => {
+          queries.push({ query, parameters });
+          return [];
+        },
+      }),
+    };
+    await readSnapshot(sql, { cutoff, batchSize: 5000, selector });
+    return queries;
+  };
+
+  const botOnlyQueries = await runWith("bot-only-7d");
+  assert.equal(
+    botOnlyQueries.some(({ query }) => query === "set local enable_nestloop = off;"),
+    true,
+    "bot-only-7d snapshot must disable nested loops for the candidate selector",
+  );
+
+  for (const selector of ["standard", "prunable"]) {
+    const queries = await runWith(selector);
+    assert.equal(
+      queries.some(({ query }) => /enable_nestloop/i.test(query)),
+      false,
+      `${selector} snapshot must not apply the bot-only planner guard`,
+    );
+  }
+}
+
+await assertBotOnlyPlannerGuardScope();
+
 async function assertSnapshotQueryTelemetry() {
   const telemetry = [];
   const sql = {
