@@ -48,6 +48,34 @@ assert.match(workflow, /chips_table_fence_is_active/);
 assert.match(workflow, /chips_table_fence_control/);
 assert.match(workflow, /enforcement_active/);
 
+const stageJobIf = workflow.match(
+  /^jobs:\n\s+stage-archive:\n\s+if: .*$/m,
+)[0];
+assert.match(
+  stageJobIf,
+  /inputs\.mode != 'existing-30d-recovery-repair'/,
+);
+assert.match(
+  stageJobIf,
+  /github\.ref == 'refs\/heads\/main'/,
+);
+assert.match(
+  stageJobIf,
+  /github\.repository == 'krzysztofcal\/arcadePlatform'/,
+);
+assert.match(
+  stageJobIf,
+  /github\.event\.repository\.fork != true/,
+);
+assert.match(
+  stageJobIf,
+  /github\.actor == github\.repository_owner/,
+);
+assert.doesNotMatch(
+  stageJobIf,
+  /github\.event_name == 'schedule' && github\.event\.schedule == '17 2 \* \* \*'/,
+);
+
 const preflightStep = workflow.match(
   /- name: Read-only Stage fence preflight[\s\S]*?(?=\n\s+- name:)/,
 )[0];
