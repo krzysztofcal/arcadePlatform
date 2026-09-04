@@ -15,6 +15,8 @@ on:
           - bot-only-7d-summary-diagnostic
           - bot-only-7d-automatic
           - closed-human-30d-prepare
+          - closed-human-30d-recovery-diagnostic
+          - closed-human-30d-recovery-repair
           - escrow-retention-audit
           - escrow-retention-verify
           - external-scheduled-automatic
@@ -45,7 +47,7 @@ permissions:
 
 jobs:
   stage-archive:
-    if: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'existing-30d-recovery-repair') || (github.ref == 'refs/heads/main' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && (inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify' || github.actor == github.repository_owner))) }}
+    if: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'existing-30d-recovery-repair' && inputs.mode != 'closed-human-30d-recovery-repair') || (github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && ((github.ref == 'refs/heads/main' && (inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify' || inputs.mode == 'existing-30d-recovery-repair')) || inputs.mode == 'closed-human-30d-recovery-repair'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -76,7 +78,7 @@ jobs:
           printf 'sha=%s\n' "$checked_out_sha" >> "$GITHUB_OUTPUT"
 
       - name: Read-only Stage fence preflight
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'existing-30d-recovery-diagnostic' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'bot-only-7d-summary-diagnostic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'closed-human-30d-prepare' || inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'existing-30d-recovery-diagnostic' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'bot-only-7d-summary-diagnostic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'closed-human-30d-prepare' || inputs.mode == 'closed-human-30d-recovery-diagnostic' || inputs.mode == 'closed-human-30d-recovery-repair' || inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -177,6 +179,56 @@ jobs:
           fi
           node scripts/ops/chips-ledger-stage-automation.mjs \
             --policy stage-ledger-auto-retention-30d-v1 \
+            --repair-recovery \
+            --batch-id "$STAGE_30D_RECOVERY_BATCH_ID"
+
+      - name: Diagnose closed human-table 30-day durable recovery
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'closed-human-30d-recovery-diagnostic' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+          STAGE_30D_RECOVERY_BATCH_ID: ${{ inputs.stage_30d_recovery_batch_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          test -z "${CHIPS_LEDGER_BOT_ONLY_EXECUTE:-}"
+          test -z "${CHIPS_LEDGER_BOT_ONLY_AUTOMATIC:-}"
+          if [[ -n "$STAGE_30D_RECOVERY_BATCH_ID" ]]; then
+            if [[ ! "$STAGE_30D_RECOVERY_BATCH_ID" =~ ^[1-9][0-9]*$ ]]; then
+              echo "stage_30d_recovery_batch_id must be a positive integer" >&2
+              exit 1
+            fi
+            node scripts/ops/chips-ledger-stage-automation.mjs \
+              --policy stage-ledger-closed-human-table-retention-30d-v1 \
+              --diagnose-recovery \
+              --batch-id "$STAGE_30D_RECOVERY_BATCH_ID"
+          else
+            node scripts/ops/chips-ledger-stage-automation.mjs \
+              --policy stage-ledger-closed-human-table-retention-30d-v1 \
+              --diagnose-recovery
+          fi
+
+      - name: Repair exact closed human-table 30-day durable recovery
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'closed-human-30d-recovery-repair' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+          STAGE_30D_RECOVERY_BATCH_ID: ${{ inputs.stage_30d_recovery_batch_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          test -z "${CHIPS_LEDGER_BOT_ONLY_EXECUTE:-}"
+          test -z "${CHIPS_LEDGER_BOT_ONLY_AUTOMATIC:-}"
+          if [[ "$GITHUB_ACTOR" != "$GITHUB_REPOSITORY_OWNER" ]]; then
+            echo "closed human-table recovery repair requires the repository owner" >&2
+            exit 1
+          fi
+          if [[ ! "$STAGE_30D_RECOVERY_BATCH_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "stage_30d_recovery_batch_id must be a positive integer" >&2
+            exit 1
+          fi
+          node scripts/ops/chips-ledger-stage-automation.mjs \
+            --policy stage-ledger-closed-human-table-retention-30d-v1 \
             --repair-recovery \
             --batch-id "$STAGE_30D_RECOVERY_BATCH_ID"
 

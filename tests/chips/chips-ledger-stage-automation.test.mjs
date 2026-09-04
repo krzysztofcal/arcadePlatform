@@ -5,6 +5,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import {
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
   BOT_ONLY_RETENTION_POLICY_ID,
+  CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
   readSnapshot,
   STAGE_AUTOMATION_POLICY_ID,
   stringifyJson,
@@ -21,6 +22,7 @@ import {
   persistDurableRecovery,
   runBotOnlyRecoveryRepair,
   runBotOnlyStageAutomation,
+  runClosedHumanTableStagePrepare,
   runStageAutomation,
   runStageExactRecoveryRepair,
   runStageRecoveryDiagnostic,
@@ -1362,6 +1364,76 @@ assert.equal(stage30HappyHarness.row.pruned_at, null);
 assert.equal(stage30HappyHarness.row.registry_cleaned_at, null);
 assert.equal(stage30HappyHarness.row.destructive_go_at, null);
 
+const closedHumanStage30HappyHarness = makeStage30Harness({
+  row: makeStage30Row({ source_policy_id: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID }),
+});
+const closedHumanStage30Happy = await runStageExactRecoveryRepair({
+  env: ENV,
+  deps: closedHumanStage30HappyHarness.deps,
+  batchId: "33",
+  sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+});
+assert.equal(closedHumanStage30Happy.state, "recovery_repaired");
+assert.equal(closedHumanStage30Happy.sourcePolicyId, CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID);
+assert.equal(closedHumanStage30Happy.batchId, "33");
+assert.equal(closedHumanStage30Happy.objectPath, closedHumanStage30HappyHarness.row.object_path);
+assert.equal(closedHumanStage30Happy.initialRecoveryState, "both_missing");
+assert.equal(closedHumanStage30Happy.recoveryState, "complete");
+assert.equal(closedHumanStage30Happy.recoveryVerified, true);
+assert.equal(closedHumanStage30Happy.storageModified, true);
+assert.equal(closedHumanStage30HappyHarness.objects.has(buildRecoveryArchiveObjectPath(stage30CompressedSha)), true);
+assert.equal(closedHumanStage30HappyHarness.objects.has(buildRecoveryManifestObjectPath(stage30CompressedSha)), true);
+assert.equal(closedHumanStage30HappyHarness.storageCalls.filter(({ method }) => method === "POST").length, 2);
+assert.equal(closedHumanStage30HappyHarness.storageCalls.filter(({ method }) => method === "PUT").length, 0);
+assert.equal(closedHumanStage30HappyHarness.pruneCalls.length, 1);
+assert.equal(closedHumanStage30HappyHarness.pruneCalls[0].includes("--execute"), false);
+assert.equal(closedHumanStage30HappyHarness.row.pruned_at, null);
+assert.equal(closedHumanStage30HappyHarness.row.registry_cleaned_at, null);
+assert.equal(closedHumanStage30HappyHarness.row.destructive_go_at, null);
+
+const closedHumanWrongPolicyHarness = makeStage30Harness();
+await assert.rejects(
+  runStageExactRecoveryRepair({
+    env: ENV,
+    deps: closedHumanWrongPolicyHarness.deps,
+    batchId: "33",
+    sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  }),
+  /policy mismatch/,
+);
+assert.equal(closedHumanWrongPolicyHarness.storageCalls.length, 0);
+
+const closedHumanWrongBatchHarness = makeStage30Harness({
+  row: makeStage30Row({ source_policy_id: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID, batch_id: "34" }),
+});
+await assert.rejects(
+  runStageExactRecoveryRepair({
+    env: ENV,
+    deps: closedHumanWrongBatchHarness.deps,
+    batchId: "33",
+    sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  }),
+  /identity mismatch/,
+);
+assert.equal(closedHumanWrongBatchHarness.storageCalls.length, 0);
+
+const closedHumanWrongObjectHarness = makeStage30Harness({
+  row: makeStage30Row({
+    source_policy_id: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+    object_path: `v1/sha256/${"f".repeat(64)}.jsonl.gz`,
+  }),
+});
+await assert.rejects(
+  runStageExactRecoveryRepair({
+    env: ENV,
+    deps: closedHumanWrongObjectHarness.deps,
+    batchId: "33",
+    sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  }),
+  /object path does not match its compressed hash/,
+);
+assert.equal(closedHumanWrongObjectHarness.storageCalls.length, 0);
+
 const stage30PartialHarness = makeStage30Harness({
   objects: new Map([[buildRecoveryArchiveObjectPath(stage30CompressedSha), stage30ArchiveBytes]]),
 });
@@ -1509,6 +1581,39 @@ const resumeResult = await runStageAutomation({
 });
 assert.equal(resumeResult.state, "already_pruned");
 assert.deepEqual(resumeCalls, ["dry-run", "execute"]);
+
+const closedHumanResumeRow = {
+  ...resumeCycleRow,
+  source_policy_id: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+};
+durableObjects.set(
+  buildRecoveryManifestObjectPath(compressedSha),
+  gzipRecoveryManifestForTest(buildRecoveryManifest(closedHumanResumeRow, STAGE_SYSTEM_IDENTIFIER, evidence, { target: "stage" })),
+);
+const closedHumanResumeCalls = [];
+const closedHumanResumeResult = await runClosedHumanTableStagePrepare({
+  env: ENV,
+  deps: {
+    sql: fakeSql({ ownRows: [closedHumanResumeRow] }),
+    fetch,
+    storageTarget,
+    pruneStore: { getManifest: async () => closedHumanResumeRow },
+    verifyBucket: async () => {},
+    tempRoot: fs.mkdtempSync("/tmp/chips-ledger-stage-automation-closed-human-resume-"),
+    pruneArchive: async ({ argv }) => {
+      const mode = argv.includes("--execute") ? "execute" : argv.includes("--register-proof") ? "register-proof" : "dry-run";
+      closedHumanResumeCalls.push(mode);
+      assert.equal(mode, "dry-run");
+      return { state: "already_pruned", evidence };
+    },
+  },
+});
+assert.equal(closedHumanResumeResult.state, "prepared", "closed-human prepare must stay recovery-only while resuming an own cycle");
+assert.equal(closedHumanResumeResult.sourcePolicyId, CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID);
+assert.deepEqual(closedHumanResumeCalls, ["dry-run"]);
+assert.equal(closedHumanResumeRow.pruned_at, null);
+assert.equal(closedHumanResumeRow.registry_cleaned_at ?? null, null);
+assert.equal(closedHumanResumeRow.destructive_go_at ?? null, null);
 
 const noRecoveryCalls = [];
 const noRecoverySql = fakeSql({ ownRows: [resumeCycleRow] });
