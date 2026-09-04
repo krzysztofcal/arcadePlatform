@@ -64,6 +64,10 @@ export const DURABLE_RECOVERY_STATES = Object.freeze({
 });
 export const DURABLE_RECOVERY_READ_MAX_ATTEMPTS = 3;
 export const DURABLE_RECOVERY_READ_RETRY_BACKOFF_MS = Object.freeze([50, 100]);
+export const STAGE_RECOVERY_POLICY_IDS = Object.freeze([
+  STAGE_AUTOMATION_POLICY_ID,
+  CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+]);
 export const BOT_ONLY_BATCH_15_RECOVERY_REPAIR = Object.freeze({
   batchId: "15",
   objectPath: "v1/sha256/6f441846a444110656db57993e49c82af778876841e0c93098b3bb79904f6919.jsonl.gz",
@@ -85,6 +89,14 @@ function fail(message) {
 
 function text(value) {
   return value == null ? "" : String(value).trim();
+}
+
+function assertStageRecoveryPolicy(sourcePolicyId) {
+  const policyId = text(sourcePolicyId);
+  if (!STAGE_RECOVERY_POLICY_IDS.includes(policyId)) {
+    fail(`unsupported Stage 30-day recovery policy: ${policyId || "missing"}`);
+  }
+  return policyId;
 }
 
 export function resolveDeployedCommitSha(env = process.env, { required = true } = {}) {
@@ -1789,12 +1801,17 @@ export async function runBotOnlyRecoveryRepair({ env = process.env, deps = {}, b
   return result;
 }
 
-function assertStageRetentionRecoveryBatch(row, batchId, { requireProof = false, requireUnpruned = false } = {}) {
+function assertStageRetentionRecoveryBatch(row, batchId, {
+  requireProof = false,
+  requireUnpruned = false,
+  sourcePolicyId = STAGE_AUTOMATION_POLICY_ID,
+} = {}) {
   const id = String(batchId);
+  const recoveryPolicyId = assertStageRecoveryPolicy(sourcePolicyId);
   if (!row) fail(`exact Stage 30-day batch ${id} was not found`);
   if (text(row.batch_id) !== id) fail(`exact Stage 30-day batch ${id} identity mismatch`);
   if (text(row.project_ref) !== STAGE_PROJECT_REF) fail(`exact Stage 30-day batch ${id} project mismatch`);
-  if (text(row.source_policy_id) !== STAGE_AUTOMATION_POLICY_ID) fail(`exact Stage 30-day batch ${id} policy mismatch`);
+  if (text(row.source_policy_id) !== recoveryPolicyId) fail(`exact Stage 30-day batch ${id} policy mismatch`);
   if (Number(row.format_version) !== EXPORT_SCHEMA_VERSION) fail(`exact Stage 30-day batch ${id} schema version mismatch`);
   if (text(row.status) !== "committed" || !text(row.committed_at)) fail(`exact Stage 30-day batch ${id} is not committed`);
   if (!validSha256(row.raw_sha256) || !validSha256(row.compressed_sha256)) fail(`exact Stage 30-day batch ${id} has an invalid archive hash`);
@@ -1841,14 +1858,28 @@ export function assertStageRetentionActiveManifestMatch(exactRow, activeRow, app
   return true;
 }
 
-async function loadStageRetentionRepairTarget({ sql, pruneStore, batchId }) {
+async function loadStageRetentionRepairTarget({
+  sql,
+  pruneStore,
+  batchId,
+  sourcePolicyId = STAGE_AUTOMATION_POLICY_ID,
+}) {
   const exactBatchId = String(batchId);
+  const recoveryPolicyId = assertStageRecoveryPolicy(sourcePolicyId);
   const exactRow = await loadExactBatch(sql, exactBatchId, "Stage 30-day batch");
-  assertStageRetentionRecoveryBatch(exactRow, exactBatchId, { requireProof: true, requireUnpruned: true });
+  assertStageRetentionRecoveryBatch(exactRow, exactBatchId, {
+    requireProof: true,
+    requireUnpruned: true,
+    sourcePolicyId: recoveryPolicyId,
+  });
   const row = await pruneStore.getManifest(exactRow.object_path);
   if (!row) fail("Stage 30-day normalized manifest was not found");
   assertStageRetentionActiveManifestMatch(exactRow, row, exactBatchId);
-  assertStageRetentionRecoveryBatch(row, exactBatchId, { requireProof: true, requireUnpruned: true });
+  assertStageRetentionRecoveryBatch(row, exactBatchId, {
+    requireProof: true,
+    requireUnpruned: true,
+    sourcePolicyId: recoveryPolicyId,
+  });
   return row;
 }
 
@@ -1880,6 +1911,7 @@ function stageRetentionReport({
   state,
   mode,
   deployedCommitSha = null,
+  sourcePolicyId = STAGE_AUTOMATION_POLICY_ID,
   receipt = null,
   initialRecoveryState = null,
   recoveryState = null,
@@ -1894,7 +1926,7 @@ function stageRetentionReport({
   return {
     state,
     mode,
-    sourcePolicyId: STAGE_AUTOMATION_POLICY_ID,
+    sourcePolicyId,
     projectRef: row?.project_ref || STAGE_PROJECT_REF,
     deployedCommitSha,
     stageSystemIdentifier: identity,
@@ -1946,7 +1978,12 @@ function stageRetentionReport({
   };
 }
 
-export async function runStageRecoveryDiagnostic({ env = process.env, deps = {}, batchId = null } = {}) {
+export async function runStageRecoveryDiagnostic({
+  env = process.env,
+  deps = {},
+  batchId = null,
+  sourcePolicyId = STAGE_AUTOMATION_POLICY_ID,
+} = {}) {
   let sql = null;
   let ownsSql = false;
   let deployedCommitSha = null;
@@ -1956,6 +1993,7 @@ export async function runStageRecoveryDiagnostic({ env = process.env, deps = {},
     const config = validateStageEnvironment(env);
     deployedCommitSha = config.deployedCommitSha;
     const moduleEnv = config.moduleEnv;
+    const recoveryPolicyId = assertStageRecoveryPolicy(sourcePolicyId);
     if (deps.sql) sql = deps.sql;
     else {
       sql = postgres(config.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 0 });
@@ -1969,10 +2007,10 @@ export async function runStageRecoveryDiagnostic({ env = process.env, deps = {},
     let selection = null;
     const exactBatchId = batchId == null ? null : String(batchId);
     if (exactBatchId == null) {
-      const ownRows = await loadOwnBatches(sql);
+      const ownRows = await loadOwnBatches(sql, recoveryPolicyId);
       let ownCycle;
       try {
-        ownCycle = findOwnCycle(ownRows);
+        ownCycle = findOwnCycle(ownRows, recoveryPolicyId);
       } catch (error) {
         const incomplete = ownRows.filter((candidate) => candidate.status === "pending"
           || (candidate.status === "committed" && receiptFieldCount(candidate) !== 5));
@@ -1983,7 +2021,7 @@ export async function runStageRecoveryDiagnostic({ env = process.env, deps = {},
             target: "stage",
             mode: "recovery-diagnostic",
             project_ref: STAGE_PROJECT_REF,
-            source_policy_id: STAGE_AUTOMATION_POLICY_ID,
+            source_policy_id: recoveryPolicyId,
             deployed_commit_sha: deployedCommitSha,
             stage_system_identifier: identity,
             read_only: true,
@@ -2015,7 +2053,7 @@ export async function runStageRecoveryDiagnostic({ env = process.env, deps = {},
           target: "stage",
           mode: "recovery-diagnostic",
           project_ref: STAGE_PROJECT_REF,
-          source_policy_id: STAGE_AUTOMATION_POLICY_ID,
+          source_policy_id: recoveryPolicyId,
           deployed_commit_sha: deployedCommitSha,
           stage_system_identifier: identity,
           read_only: true,
@@ -2023,14 +2061,14 @@ export async function runStageRecoveryDiagnostic({ env = process.env, deps = {},
           reason: "no_30d_cycle_found",
         };
       }
-      if (text(selectedRow.source_policy_id) !== STAGE_AUTOMATION_POLICY_ID) {
+      if (text(selectedRow.source_policy_id) !== recoveryPolicyId) {
         fail("Stage 30-day recovery diagnostic policy mismatch");
       }
     } else {
       if (!/^[1-9][0-9]*$/.test(exactBatchId)) fail("Stage 30-day recovery diagnostic requires a positive integer batch id");
       exactRow = await loadExactBatch(sql, exactBatchId, "Stage 30-day batch");
       if (!exactRow) fail(`exact Stage 30-day batch ${exactBatchId} was not found`);
-      if (text(exactRow.source_policy_id) !== STAGE_AUTOMATION_POLICY_ID) {
+      if (text(exactRow.source_policy_id) !== recoveryPolicyId) {
         fail(`exact Stage 30-day batch ${exactBatchId} policy mismatch`);
       }
       selectedRow = exactRow;
@@ -2038,7 +2076,7 @@ export async function runStageRecoveryDiagnostic({ env = process.env, deps = {},
     }
     const row = await pruneStore.getManifest(selectedRow.object_path);
     if (!row) fail("Stage 30-day normalized manifest was not found");
-    if (text(row.source_policy_id) !== STAGE_AUTOMATION_POLICY_ID) fail("Stage 30-day recovery diagnostic policy mismatch");
+    if (text(row.source_policy_id) !== recoveryPolicyId) fail("Stage 30-day recovery diagnostic policy mismatch");
     if (exactRow) assertStageRetentionActiveManifestMatch(exactRow, row, exactBatchId);
 
     const recoveryArchivePath = buildRecoveryArchiveObjectPath(row.compressed_sha256);
@@ -2077,7 +2115,7 @@ export async function runStageRecoveryDiagnostic({ env = process.env, deps = {},
       target: "stage",
       mode: "recovery-diagnostic",
       project_ref: STAGE_PROJECT_REF,
-      source_policy_id: STAGE_AUTOMATION_POLICY_ID,
+      source_policy_id: recoveryPolicyId,
       deployed_commit_sha: deployedCommitSha,
       stage_system_identifier: identity,
       read_only: true,
@@ -2125,7 +2163,12 @@ export async function runStageRecoveryDiagnostic({ env = process.env, deps = {},
   throw new Error("unreachable Stage 30-day recovery diagnostic result");
 }
 
-export async function runStageExactRecoveryRepair({ env = process.env, deps = {}, batchId } = {}) {
+export async function runStageExactRecoveryRepair({
+  env = process.env,
+  deps = {},
+  batchId,
+  sourcePolicyId = STAGE_AUTOMATION_POLICY_ID,
+} = {}) {
   const exactBatchId = String(batchId ?? "");
   if (!/^[1-9][0-9]*$/.test(exactBatchId)) fail("Stage 30-day recovery repair requires one exact positive-integer batch id");
   if (text(env.CHIPS_LEDGER_BOT_ONLY_EXECUTE) !== ""
@@ -2144,6 +2187,7 @@ export async function runStageExactRecoveryRepair({ env = process.env, deps = {}
     const config = validateStageEnvironment(env, { requireCommitSha: true });
     deployedCommitSha = config.deployedCommitSha;
     const moduleEnv = config.moduleEnv;
+    const recoveryPolicyId = assertStageRecoveryPolicy(sourcePolicyId);
     if (deps.sql) sql = deps.sql;
     else {
       sql = postgres(config.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 0 });
@@ -2159,7 +2203,12 @@ export async function runStageExactRecoveryRepair({ env = process.env, deps = {}
     if (!lockSession) fail("Stage 30-day recovery repair requires the Stage advisory lock");
     const identity = await assertIdentity(sql);
     await assertAdvisoryLock(sql, lockSession);
-    let row = await loadStageRetentionRepairTarget({ sql, pruneStore, batchId: exactBatchId });
+    let row = await loadStageRetentionRepairTarget({
+      sql,
+      pruneStore,
+      batchId: exactBatchId,
+      sourcePolicyId: recoveryPolicyId,
+    });
     await assertAdvisoryLock(sql, lockSession);
 
     await verifyBucket(storageTarget);
@@ -2192,7 +2241,12 @@ export async function runStageExactRecoveryRepair({ env = process.env, deps = {}
     // contract immediately before the first possible Storage write.  The row
     // used by the dry-run is deliberately not trusted past this point; any
     // DB-side change since lock acquisition fails closed here.
-    row = await loadStageRetentionRepairTarget({ sql, pruneStore, batchId: exactBatchId });
+    row = await loadStageRetentionRepairTarget({
+      sql,
+      pruneStore,
+      batchId: exactBatchId,
+      sourcePolicyId: recoveryPolicyId,
+    });
     await assertAdvisoryLock(sql, lockSession);
     const beforeWrite = await inspectDurableRecoveryState(storageTarget, row, deps);
     if (beforeWrite.state !== DURABLE_RECOVERY_STATES.BOTH_MISSING) {
@@ -2235,6 +2289,7 @@ export async function runStageExactRecoveryRepair({ env = process.env, deps = {}
         state: "recovery_repaired",
         mode: "recovery-repair",
         deployedCommitSha,
+        sourcePolicyId: recoveryPolicyId,
         receipt: "recovery-only",
         initialRecoveryState: DURABLE_RECOVERY_STATES.BOTH_MISSING,
         recoveryState: DURABLE_RECOVERY_STATES.COMPLETE,
@@ -4091,7 +4146,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     runBotOnlyRecoveryRepair({ batchId: "15" }).catch(() => {
       process.exitCode = 1;
     });
-  } else if (argv[0] === "--policy" && argv[1] === STAGE_AUTOMATION_POLICY_ID && argv[2] === "--diagnose-recovery") {
+  } else if (argv[0] === "--policy" && STAGE_RECOVERY_POLICY_IDS.includes(argv[1]) && argv[2] === "--diagnose-recovery") {
     let diagnosticBatchId = null;
     if (argv.length === 5 && argv[3] === "--batch-id") {
       if (!/^[1-9][0-9]*$/.test(argv[4])) throw new Error("--batch-id must be a positive integer");
@@ -4099,17 +4154,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     } else if (argv.length !== 3) {
       throw new Error("--diagnose-recovery accepts at most an optional --batch-id <id>");
     }
-    runStageRecoveryDiagnostic({ batchId: diagnosticBatchId })
+    runStageRecoveryDiagnostic({ batchId: diagnosticBatchId, sourcePolicyId: argv[1] })
       .then((report) => process.stdout.write(`${stringifyJson(report)}\n`))
       .catch((error) => {
         process.stderr.write(`Stage 30-day recovery diagnostic failed: ${redactedError(error)}\n`);
         process.exitCode = 1;
       });
-  } else if (argv[0] === "--policy" && argv[1] === STAGE_AUTOMATION_POLICY_ID && argv[2] === "--repair-recovery") {
+  } else if (argv[0] === "--policy" && STAGE_RECOVERY_POLICY_IDS.includes(argv[1]) && argv[2] === "--repair-recovery") {
     if (argv.length !== 5 || argv[3] !== "--batch-id" || !/^[1-9][0-9]*$/.test(argv[4])) {
       throw new Error("Stage 30-day --repair-recovery requires one --batch-id <positive integer>");
     }
-    runStageExactRecoveryRepair({ batchId: argv[4] }).catch(() => {
+    runStageExactRecoveryRepair({ batchId: argv[4], sourcePolicyId: argv[1] }).catch(() => {
       process.exitCode = 1;
     });
   } else if (argv[0] === "--policy" && argv[1] === "bot-only-7d") {
@@ -4160,7 +4215,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       process.exitCode = 1;
     });
   } else {
-    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-automation.mjs [--policy stage-ledger-auto-retention-30d-v1 [--diagnose-recovery [--batch-id <id>]|--repair-recovery --batch-id <id>]|--policy bot-only-7d [--prepare-only|--repair-recovery --batch-id 15|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>'|--automatic]]\n");
+    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-automation.mjs [--policy stage-ledger-auto-retention-30d-v1|stage-ledger-closed-human-table-retention-30d-v1 [--diagnose-recovery [--batch-id <id>]|--repair-recovery --batch-id <id>]|--policy bot-only-7d [--prepare-only|--repair-recovery --batch-id 15|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>'|--automatic]]\n");
     process.exitCode = 1;
   }
 }

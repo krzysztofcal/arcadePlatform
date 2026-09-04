@@ -10,6 +10,8 @@ const RETAINED_MODES = [
   "bot-only-7d-summary-diagnostic",
   "bot-only-7d-automatic",
   "closed-human-30d-prepare",
+  "closed-human-30d-recovery-diagnostic",
+  "closed-human-30d-recovery-repair",
   "escrow-retention-audit",
   "escrow-retention-verify",
   "external-scheduled-automatic",
@@ -43,6 +45,8 @@ const RETAINED_STEPS = [
   "Repair exact existing 30-day durable recovery",
   "Run bot-only 7-day summary diagnostic",
   "Prepare closed human-table 30-day Stage retention",
+  "Diagnose closed human-table 30-day durable recovery",
+  "Repair exact closed human-table 30-day durable recovery",
   "Run activated bot-only 7-day Stage automation",
   "Run Stage escrow account retention",
   "Audit Stage escrow account retention",
@@ -127,6 +131,8 @@ for (const mode of [
   "bot-only-7d-summary-diagnostic",
   "bot-only-7d-automatic",
   "closed-human-30d-prepare",
+  "closed-human-30d-recovery-diagnostic",
+  "closed-human-30d-recovery-repair",
   "escrow-retention-audit",
   "escrow-retention-verify",
 ]) {
@@ -142,6 +148,7 @@ const stageJobIf = workflow.match(
 assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-audit'/);
 assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-verify'/);
 assert.match(stageJobIf, /inputs\.mode != 'existing-30d-recovery-repair'/);
+assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-recovery-repair'/);
 assert.match(stageJobIf, /github\.ref == 'refs\/heads\/main'/);
 assert.match(stageJobIf, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
 assert.match(stageJobIf, /github\.event\.repository\.fork != true/);
@@ -192,5 +199,25 @@ assert.match(repairRun, /GITHUB_ACTOR" != "\$GITHUB_REPOSITORY_OWNER"/);
 assert.match(repairRun, /stage_30d_recovery_batch_id must be a positive integer/);
 assert.match(repairRun, /--policy stage-ledger-auto-retention-30d-v1 \\\n\s+--repair-recovery \\\n\s+--batch-id "\$STAGE_30D_RECOVERY_BATCH_ID"/);
 assert.doesNotMatch(repairRun, /--diagnose-recovery|--prepare-only|--execute|--automatic|--register-proof|storeArchive|ensureArchiveBucket/);
+
+const closedHumanDiagnosticRun = workflow.match(
+  /- name: Diagnose closed human-table 30-day durable recovery[\s\S]*?(?=\n\s+- name:|\s*$)/,
+)[0];
+assert.match(closedHumanDiagnosticRun, /inputs\.mode == 'closed-human-30d-recovery-diagnostic'/);
+assert.match(closedHumanDiagnosticRun, /--policy stage-ledger-closed-human-table-retention-30d-v1/);
+assert.match(closedHumanDiagnosticRun, /--diagnose-recovery/);
+assert.match(closedHumanDiagnosticRun, /stage_30d_recovery_batch_id/);
+assert.doesNotMatch(closedHumanDiagnosticRun, /--repair-recovery|--execute|--automatic/);
+
+const closedHumanRepairRun = workflow.match(
+  /- name: Repair exact closed human-table 30-day durable recovery[\s\S]*?(?=\n\s+- name:|\s*$)/,
+)[0];
+assert.match(closedHumanRepairRun, /inputs\.mode == 'closed-human-30d-recovery-repair'/);
+assert.match(closedHumanRepairRun, /test "\$DEPLOYED_COMMIT_SHA" = "\$GITHUB_SHA"/);
+assert.match(closedHumanRepairRun, /test -z "\$\{CHIPS_LEDGER_BOT_ONLY_EXECUTE:-\}"/);
+assert.match(closedHumanRepairRun, /test -z "\$\{CHIPS_LEDGER_BOT_ONLY_AUTOMATIC:-\}"/);
+assert.match(closedHumanRepairRun, /GITHUB_ACTOR" != "\$GITHUB_REPOSITORY_OWNER"/);
+assert.match(closedHumanRepairRun, /--policy stage-ledger-closed-human-table-retention-30d-v1 \\\n\s+--repair-recovery \\\n\s+--batch-id "\$STAGE_30D_RECOVERY_BATCH_ID"/);
+assert.doesNotMatch(closedHumanRepairRun, /--diagnose-recovery|--prepare-only|--execute|--automatic|--register-proof|storeArchive|ensureArchiveBucket/);
 
 process.stdout.write("chips-ledger-stage-automation workflow guard passed\n");

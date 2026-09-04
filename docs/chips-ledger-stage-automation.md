@@ -40,6 +40,8 @@ ongoing operations:
 | `existing-30d-recovery-repair` | Owner-only, exact-batch recovery repair for a proven/unpruned 30-day batch with missing durable recovery |
 | `bot-only-7d-summary-diagnostic` | Read-only bot-only table identity summary diagnostic |
 | `bot-only-7d-automatic` | Run the activated bot-only 7-day automatic cleanup on demand |
+| `closed-human-30d-recovery-diagnostic` | Read-only diagnosis of the closed-human 30-day cycle or an exact batch |
+| `closed-human-30d-recovery-repair` | Owner-only, exact-batch recovery repair for a proven/unpruned closed-human batch with missing durable recovery |
 | `escrow-retention-audit` | Read-only Stage escrow retention audit |
 | `escrow-retention-verify` | Verify an existing account recovery object |
 | `external-scheduled-automatic` | External/VPS fallback for native bot-only + escrow automation |
@@ -90,11 +92,14 @@ different durable copy is fail-closed.
 
 ## 30-day controlled recovery diagnostic/repair
 
-The existing 30-day automation intentionally refuses a blind retry when a
-committed, proven, unpruned cycle has no durable recovery. The controlled
-operator path is:
+The existing and closed-human 30-day automations intentionally refuse a blind
+retry when a committed, proven, unpruned cycle has no durable recovery. The
+controlled operator path is:
 
-1. Run `existing-30d-recovery-diagnostic`.
+1. Run the matching read-only diagnostic:
+   - `existing-30d-recovery-diagnostic` for `stage-ledger-auto-retention-30d-v1`;
+   - `closed-human-30d-recovery-diagnostic` for
+     `stage-ledger-closed-human-table-retention-30d-v1`.
    - Without a batch ID it detects the current 30-day cycle.
    - If multiple incomplete cycles exist, it reports ambiguity with candidate
      batch IDs rather than choosing one.
@@ -106,8 +111,9 @@ operator path is:
    - `pruned_at` is null;
    - the main archive object exists and matches the committed SHA;
    - recovery state is exactly `BOTH_MISSING`;
-   then an owner may run `existing-30d-recovery-repair` with the exact
-   `stage_30d_recovery_batch_id`.
+   then an owner may run the matching `*-recovery-repair` mode with the exact
+   `stage_30d_recovery_batch_id`. The repair allowlist contains only the two
+   policies named above.
 3. The repair is recovery-only:
    - re-loads the exact batch from the DB after lock and again after dry-run;
    - revalidates policy, object path, SHA, proof, unpruned state, and
@@ -186,9 +192,8 @@ cycle continues. A partial/ambiguous pair, any lifecycle receipt or GO,
 missing/foreign primary object, or any proof/manifest mismatch remains blocked
 and requires owner-approved recovery.
 
-For the existing 30-day policy, use the controlled
-`existing-30d-recovery-diagnostic` + `existing-30d-recovery-repair` path rather
-than relying on automatic reconstruction. The 30-day automation remains
+For either 30-day policy, use its controlled diagnostic + exact repair path
+rather than relying on automatic reconstruction. The automation remains
 fail-closed until durable recovery is complete.
 
 ### Post-commit or already-pruned recovery
