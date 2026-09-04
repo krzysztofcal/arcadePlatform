@@ -6,6 +6,7 @@ import postgres from "postgres";
 import {
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
   BOT_ONLY_RETENTION_POLICY_ID,
+  CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
   LEGACY_STAGE_ALLOWLIST_POLICY_ID,
   LEGACY_STAGE_ALLOWLIST_TABLE_COUNT,
   assertLegacyStageAllowlistEvidence,
@@ -383,6 +384,7 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
   const registryKeys = [];
   const tableIds = new Set();
   const replayPairs = [];
+  const isClosedHumanPolicy = localArchive.manifest.source_policy_id === CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID;
 
   for (const record of localArchive.records) {
     const transaction = record.transaction;
@@ -433,7 +435,8 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
     const escrowEntries = record.entries.filter((entry) => text(entry?.account?.account_type).toUpperCase() === "ESCROW");
     const recordUserEntries = record.entries.filter((entry) => text(entry?.account?.account_type).toUpperCase() === "USER").length;
     userEntries += recordUserEntries;
-    if (escrowEntries.length !== 1 || (recordUserEntries === 0 && systemEntries.length !== 1)) {
+    if (escrowEntries.length !== 1 || (recordUserEntries === 0 && systemEntries.length !== 1)
+      || (recordUserEntries > 0 && systemEntries.length !== 0)) {
       fail("technical archive transaction must contain one SYSTEM and one ESCROW entry and no USER entry");
     }
     if (text(escrowEntries[0].account.system_key) !== `POKER_TABLE:${tableId}`) {
@@ -446,13 +449,27 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
       if (txType === "TABLE_BUY_IN" && !(systemAmount < 0n && escrowAmount > 0n)) {
         fail("TABLE_BUY_IN archive entry direction is invalid");
       }
+    } else if (isClosedHumanPolicy) {
+      const userEntry = record.entries.find((entry) => text(entry?.account?.account_type).toUpperCase() === "USER");
+      const userAmount = BigInt(userEntry.amount);
+      const escrowAmount = BigInt(escrowEntries[0].amount);
+      if (!text(transaction.user_id) || text(userEntry?.account?.user_id) !== text(transaction.user_id)
+        || userAmount + escrowAmount !== 0n) {
+        fail("closed-human TABLE archive USER binding is invalid");
+      }
+      if (txType === "TABLE_BUY_IN" && !(userAmount < 0n && escrowAmount > 0n)) {
+        fail("closed-human TABLE_BUY_IN direction is invalid");
+      }
+      if (txType === "TABLE_CASH_OUT" && !(escrowAmount < 0n && userAmount > 0n)) {
+        fail("closed-human TABLE_CASH_OUT direction is invalid");
+      }
       if (txType === "TABLE_CASH_OUT" && !(escrowAmount < 0n && systemAmount > 0n)) {
         fail("TABLE_CASH_OUT archive entry direction is invalid");
       }
     }
     txTypes[txType] = (txTypes[txType] || 0) + 1;
   }
-  if (userTransactions !== 0 || userEntries !== 0) {
+  if (!isClosedHumanPolicy && (userTransactions !== 0 || userEntries !== 0)) {
     fail(`cannot prune USER ledger history (user_transactions=${userTransactions}, user_entries=${userEntries}, distinct_tables=${tables.size})`);
   }
   if (canonicalJson(txTypes) !== canonicalJson(localArchive.manifest.batch.tx_types)) fail("technical tx_type evidence differs from archive manifest");
@@ -482,6 +499,11 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
     credits: localArchive.summary.credits,
     debits: localArchive.summary.debits,
     net: localArchive.summary.netAmount,
+    ...(isClosedHumanPolicy ? {
+      closedHumanTableId: tables.size === 1 ? [...tables][0] : null,
+      closedHumanUserTransactions: userTransactions,
+      closedHumanUserEntries: userEntries,
+    } : {}),
     ...(localArchive.manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
       && localArchive.manifest.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID ? {
       registryKeys: [...registryKeys].sort(),

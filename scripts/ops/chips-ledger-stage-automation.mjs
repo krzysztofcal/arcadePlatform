@@ -9,6 +9,7 @@ import {
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
   BOT_ONLY_RETENTION_DAYS,
   BOT_ONLY_RETENTION_POLICY_ID,
+  CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
   EXPORT_SCHEMA_VERSION,
   LEGACY_STAGE_ALLOWLIST_POLICY_ID,
   runExport,
@@ -2783,7 +2784,14 @@ async function resumeOwnCycle({ row, identity, env, tempRoot, sql, pruneStore, s
   return executeVerifiedCycle({ row, identity, durable, env, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps });
 }
 
-export async function runStageAutomation({ env = process.env, now = new Date(), deps = {} } = {}) {
+export async function runStageAutomation({
+  env = process.env,
+  now = new Date(),
+  deps = {},
+  selector = "prunable",
+  sourcePolicyId = STAGE_AUTOMATION_POLICY_ID,
+  execute = true,
+} = {}) {
   let sql = null;
   let lockSession = null;
   let tempRoot = null;
@@ -2822,7 +2830,7 @@ export async function runStageAutomation({ env = process.env, now = new Date(), 
       const identity = await assertIdentity(sql);
       await assertAdvisoryLock(sql, lockSession);
       await verifyBucket(storageTarget);
-      const ownRows = await loadOwnBatches(sql);
+      const ownRows = await loadOwnBatches(sql, sourcePolicyId);
       await assertAdvisoryLock(sql, lockSession);
       const ownCycle = findOwnCycle(ownRows);
       if (ownCycle.active) {
@@ -2869,8 +2877,8 @@ export async function runStageAutomation({ env = process.env, now = new Date(), 
           now,
           deps: {
             sql,
-            selector: "prunable",
-            sourcePolicyId: STAGE_AUTOMATION_POLICY_ID,
+            selector,
+            sourcePolicyId,
             targetOptions: { singleTarget: true },
             noCandidateIfEmpty: true,
             emit: false,
@@ -2902,7 +2910,9 @@ export async function runStageAutomation({ env = process.env, now = new Date(), 
           const main = await downloadMain(storageTarget, row.object_path, deps);
           const durable = await persistDurableRecovery(storageTarget, row, identity, dry.evidence, main.bytes, deps);
           await assertAdvisoryLock(sql, lockSession);
-          const executed = await executeVerifiedCycle({ row, identity, durable, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
+          const executed = execute
+            ? await executeVerifiedCycle({ row, identity, durable, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps })
+            : { state: "prepared", evidence: dry.evidence };
           await assertAdvisoryLock(sql, lockSession);
           result = {
             state: executed.state,
@@ -2952,6 +2962,17 @@ export async function runStageAutomation({ env = process.env, now = new Date(), 
   if (result && deployedCommitSha) result = { ...result, deployedCommitSha };
   writeAggregateSummary(result);
   return result;
+}
+
+// #923 intentionally starts prepare-only.  It reuses the original Stage
+// archive/proof/recovery runner but never reaches the destructive operator.
+export function runClosedHumanTableStagePrepare(options = {}) {
+  return runStageAutomation({
+    ...options,
+    selector: "closed-human-table-30d",
+    sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+    execute: false,
+  });
 }
 
 // Issue #890 uses the same Stage runner, Storage bucket, proof store, prune
@@ -4132,6 +4153,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       }
     }
     runBotOnlyStageAutomation({ prepareOnly, approvedBatchId, approvedBatchConfirmation, automatic: automaticRequested }).catch(() => {
+      process.exitCode = 1;
+    });
+  } else if (argv[0] === "--policy" && argv[1] === "closed-human-table-30d" && argv[2] === "--prepare-only" && argv.length === 3) {
+    runClosedHumanTableStagePrepare().catch(() => {
       process.exitCode = 1;
     });
   } else {

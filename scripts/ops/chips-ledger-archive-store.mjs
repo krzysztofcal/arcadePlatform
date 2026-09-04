@@ -8,6 +8,7 @@ import {
   EXPORT_SCHEMA_VERSION,
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
   BOT_ONLY_RETENTION_POLICY_ID,
+  CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
   LEGACY_STAGE_ALLOWLIST_CUTOFF,
   LEGACY_STAGE_ALLOWLIST_POLICY_ID,
   LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT,
@@ -211,11 +212,16 @@ function verifyManifestShape(manifest, artifactName, target, expectedLegacyStage
     && manifest.source_policy_id !== null
     && manifest.source_policy_id !== STAGE_AUTOMATION_POLICY_ID
     && manifest.source_policy_id !== BOT_ONLY_RETENTION_POLICY_ID
+    && manifest.source_policy_id !== CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID
     && manifest.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
     fail("local manifest source policy is unsupported");
   }
   if (manifest.source_policy_id === STAGE_AUTOMATION_POLICY_ID && target.target !== "stage") {
     fail("Stage automation policy cannot be stored for a non-Stage target");
+  }
+  if (manifest.source_policy_id === CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID
+    && (manifest.schema_version !== EXPORT_SCHEMA_VERSION || target.target !== "stage")) {
+    fail("closed-human-table retention requires a Stage schema-v1 archive");
   }
   if (manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
     && (![BOT_ONLY_RETENTION_POLICY_ID, LEGACY_STAGE_ALLOWLIST_POLICY_ID].includes(manifest.source_policy_id)

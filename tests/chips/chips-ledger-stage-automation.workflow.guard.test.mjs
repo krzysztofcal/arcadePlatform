@@ -9,6 +9,7 @@ const RETAINED_MODES = [
   "existing-30d-recovery-repair",
   "bot-only-7d-summary-diagnostic",
   "bot-only-7d-automatic",
+  "closed-human-30d-prepare",
   "escrow-retention-audit",
   "escrow-retention-verify",
   "external-scheduled-automatic",
@@ -41,6 +42,7 @@ const RETAINED_STEPS = [
   "Diagnose existing 30-day durable recovery",
   "Repair exact existing 30-day durable recovery",
   "Run bot-only 7-day summary diagnostic",
+  "Prepare closed human-table 30-day Stage retention",
   "Run activated bot-only 7-day Stage automation",
   "Run Stage escrow account retention",
   "Audit Stage escrow account retention",
@@ -124,6 +126,7 @@ for (const mode of [
   "existing-30d-recovery-repair",
   "bot-only-7d-summary-diagnostic",
   "bot-only-7d-automatic",
+  "closed-human-30d-prepare",
   "escrow-retention-audit",
   "escrow-retention-verify",
 ]) {

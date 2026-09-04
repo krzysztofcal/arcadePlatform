@@ -3,6 +3,9 @@ import {
   buildArchiveBytes,
   buildExportRecord,
   buildManifest,
+  CLOSED_HUMAN_TABLE_CANDIDATE_SQL,
+  CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  PRUNABLE_CANDIDATE_SQL,
   evaluateTableEligibility,
   readSnapshot,
   runExport,
@@ -267,5 +270,13 @@ assert.equal(evaluateTableEligibility({ ...tableCandidate, table_status: "CLOSED
 assert.equal(evaluateTableEligibility({ ...tableCandidate, table_exists: false, table_status: null }).eligible, true);
 assert.equal(evaluateTableEligibility({ ...tableCandidate, table_exists: false, escrow_balance: "1" }).eligible, false);
 assert.equal(evaluateTableEligibility({ table_related: false }).eligible, true);
+
+// #923 takes ownership only of authoritative existing human tables. Legacy
+// missing-table records retain the established generic-30d eligibility.
+assert.match(PRUNABLE_CANDIDATE_SQL, /not \(p\.id is not null and p\.has_human_participant is true\)/);
+assert.match(PRUNABLE_CANDIDATE_SQL, /p\.id is null or upper\(p\.status::text\) = 'CLOSED'/);
+assert.match(CLOSED_HUMAN_TABLE_CANDIDATE_SQL, /p\.has_human_participant is true/);
+assert.match(CLOSED_HUMAN_TABLE_CANDIDATE_SQL, /chips_transaction_idempotency/);
+assert.equal(CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID, "stage-ledger-closed-human-table-retention-30d-v1");
 
 process.stdout.write("chips-ledger-archive-export tests passed\n");

@@ -14,6 +14,7 @@ on:
           - existing-30d-recovery-repair
           - bot-only-7d-summary-diagnostic
           - bot-only-7d-automatic
+          - closed-human-30d-prepare
           - escrow-retention-audit
           - escrow-retention-verify
           - external-scheduled-automatic
@@ -75,7 +76,7 @@ jobs:
           printf 'sha=%s\n' "$checked_out_sha" >> "$GITHUB_OUTPUT"
 
       - name: Read-only Stage fence preflight
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'existing-30d-recovery-diagnostic' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'bot-only-7d-summary-diagnostic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'existing-30d-recovery-diagnostic' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'bot-only-7d-summary-diagnostic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'closed-human-30d-prepare' || inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -190,6 +191,16 @@ jobs:
           test -z "${CHIPS_LEDGER_BOT_ONLY_EXECUTE:-}"
           test -z "${CHIPS_LEDGER_BOT_ONLY_AUTOMATIC:-}"
           node scripts/ops/chips-ledger-stage-timeout-diagnostic.mjs --summary-only
+
+      - name: Prepare closed human-table 30-day Stage retention
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'closed-human-30d-prepare' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          node scripts/ops/chips-ledger-stage-automation.mjs --policy closed-human-table-30d --prepare-only
 
       - name: Run activated bot-only 7-day Stage automation
         if: ${{ (github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-automatic') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'external-scheduled-automatic') }}

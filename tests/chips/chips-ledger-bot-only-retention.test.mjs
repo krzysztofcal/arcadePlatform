@@ -339,7 +339,8 @@ function failClosedLifecycleContract() {
   assert.match(migration, /grant execute on function public\.chips_authorize_bot_only_archive_batch\(bigint, text\) to postgres/);
   assert.match(migration, /source_policy_id <> 'stage-ledger-bot-only-retention-7d-v1'/);
   assert.match(migration, /Production authorization|canonical Stage schema-v2 batch/);
-  assert.match(closedTableCleanup, /has_human_participant is true or t\.bot_only_retention_complete_at is not null/);
+  assert.match(closedTableCleanup, /has_human_participant is true and t\.human_retention_complete_at is not null/);
+  assert.match(closedTableCleanup, /has_human_participant is not true and t\.bot_only_retention_complete_at is not null/);
   assertThrowsMessage(() => validateStageEnvironment({
     SUPABASE_STAGE_DB_URL: "postgresql://postgres.krydukthwdvccggbyjfw@db.krydukthwdvccggbyjfw.supabase.co:5432/postgres",
     SUPABASE_STAGE_URL: "https://krydukthwdvccggbyjfw.supabase.co",

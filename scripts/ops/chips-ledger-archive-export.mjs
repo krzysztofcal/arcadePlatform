@@ -14,6 +14,7 @@ export const MAX_BATCH_SIZE = 5000;
 export const PRODUCTION_MAX_BATCH_SIZE = 2;
 export const STAGE_AUTOMATION_POLICY_ID = "stage-ledger-auto-retention-30d-v1";
 export const BOT_ONLY_RETENTION_POLICY_ID = "stage-ledger-bot-only-retention-7d-v1";
+export const CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID = "stage-ledger-closed-human-table-retention-30d-v1";
 export const LEGACY_STAGE_ALLOWLIST_POLICY_ID = "legacy_stage_allowlist_v1";
 export const BOT_ONLY_EXPORT_SCHEMA_VERSION = 2;
 export const BOT_ONLY_RETENTION_DAYS = 7;
@@ -275,6 +276,10 @@ with base as (
     and cardinality(c.table_ids) = 1
     and c.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
     and c.user_id is null
+    -- #923: an authoritative existing human table is owned by the closed
+    -- human-table lifecycle.  Do not change the legacy missing-table path:
+    -- those rows can be legal remnants of pre-marker closed-table cleanup.
+    and not (p.id is not null and p.has_human_participant is true)
     and (p.id is null or upper(p.status::text) = 'CLOSED')
     and ea.id is not null
     and ea.status::text = 'active'
@@ -347,6 +352,121 @@ from eligible e
 join eligible_ids ids on ids.id = e.id
 order by e.created_at asc, e.id asc
 limit $2::int;
+`;
+
+// #923 owns only authoritative, still-present human tables.  The complete
+// identity set is deliberately read from the durable idempotency registry;
+// already-pruned compatible identities are therefore not mistaken for a
+// missing part of the table.  This query returns only the remaining hot rows
+// for one table.  The database completion gate re-validates the full set at
+// prune time, including historical archive mappings.
+export const CLOSED_HUMAN_TABLE_CANDIDATE_SQL = `
+with table_identities as materialized (
+  select r.table_id,
+         max(r.transaction_created_at) as newest_created_at,
+         count(*)::bigint as identity_count,
+         count(*) filter (where r.archive_batch_id is null)::bigint as hot_identity_count
+    from public.chips_transaction_idempotency r
+   where r.table_id is not null
+     and r.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+   group by r.table_id
+), eligible_tables as materialized (
+  select p.id, i.newest_created_at, i.identity_count, i.hot_identity_count
+    from public.poker_tables p
+    join table_identities i on i.table_id = p.id
+    join public.chips_accounts escrow
+      on escrow.account_type::text = 'ESCROW'
+     and escrow.system_key = 'POKER_TABLE:' || p.id::text
+   where upper(p.status::text) = 'CLOSED'
+     and p.has_human_participant is true
+     and i.newest_created_at < $1::timestamptz
+     and i.hot_identity_count > 0
+     and escrow.status::text = 'active'
+     and escrow.balance = 0
+     and exists (
+       select 1 from public.poker_state ps
+        where ps.table_id = p.id
+          and jsonb_typeof(ps.state) = 'object'
+          and ps.state ->> 'phase' = 'HAND_DONE'
+          and jsonb_typeof(ps.state -> 'handId') = 'string'
+          and ps.state ->> 'handId' = ''
+     )
+     and not exists (
+       select 1 from public.poker_requests requests
+        where requests.table_id = p.id and requests.result_json is null
+     )
+   order by i.newest_created_at asc, p.id asc
+   limit 1
+), hot as materialized (
+  select t.*, r.table_id, tables.newest_created_at, tables.identity_count,
+         tables.hot_identity_count
+    from public.chips_transactions t
+    join public.chips_transaction_idempotency r
+      on r.transaction_id = t.id
+     and r.idempotency_key = t.idempotency_key
+     and r.payload_hash = t.payload_hash
+     and r.tx_type = t.tx_type
+     and r.user_id is not distinct from t.user_id
+     and r.transaction_created_at = t.created_at
+     and r.archive_batch_id is null
+    join eligible_tables tables on tables.id = r.table_id
+   where t.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+     and t.created_at < $1::timestamptz
+), shaped as materialized (
+  select h.id,
+         count(e.id)::bigint as entry_count,
+         count(*) filter (where a.account_type::text = 'USER') as user_entry_count,
+         count(*) filter (where a.account_type::text = 'SYSTEM') as system_entry_count,
+         count(*) filter (where a.account_type::text = 'ESCROW') as escrow_entry_count,
+         count(*) filter (where a.account_type::text = 'ESCROW'
+             and a.system_key = 'POKER_TABLE:' || h.table_id::text) as matching_escrow_count,
+         bool_and(a.status::text = 'active') as active_accounts,
+         sum(e.amount) as net_amount,
+         sum(e.amount) filter (where a.account_type::text = 'USER') as user_amount,
+         sum(e.amount) filter (where a.account_type::text = 'SYSTEM') as system_amount,
+         sum(e.amount) filter (where a.account_type::text = 'ESCROW') as escrow_amount,
+         count(*) filter (where a.account_type::text = 'USER' and a.user_id = h.user_id) as matching_user_count
+    from hot h
+    join public.chips_entries e on e.transaction_id = h.id
+    join public.chips_accounts a on a.id = e.account_id
+   group by h.id, h.table_id, h.user_id
+), eligible as (
+  select h.*
+    from hot h
+    join shaped s on s.id = h.id
+   where s.entry_count = 2
+     and s.escrow_entry_count = 1
+     and s.matching_escrow_count = 1
+     and s.active_accounts
+     and s.net_amount = 0
+     and (
+       (h.user_id is not null and s.user_entry_count = 1 and s.system_entry_count = 0 and s.matching_user_count = 1)
+       or (h.user_id is null and s.user_entry_count = 0 and s.system_entry_count = 1)
+     )
+     and ((h.tx_type::text = 'TABLE_BUY_IN' and s.escrow_amount > 0)
+       or (h.tx_type::text = 'TABLE_CASH_OUT' and s.escrow_amount < 0))
+), complete as (
+  select e.table_id
+    from eligible e
+   group by e.table_id
+  having count(*) = max(e.hot_identity_count)
+     and count(*) <= $2::int
+)
+select e.id::text as id, e.sequence::text as sequence, e.tx_type::text as tx_type,
+       e.idempotency_key, e.payload_hash, e.user_id::text as user_id, e.reference,
+       e.description, e.metadata, e.created_by::text as created_by, e.created_at::text as created_at,
+       true as table_related, e.table_id::text as table_id, false as invalid_table_marker,
+       true as table_exists, 'CLOSED'::text as table_status,
+       escrow.id::text as escrow_account_id, escrow.status::text as escrow_status,
+       escrow.balance::text as escrow_balance,
+       (select count(*)::text from public.chips_entries entries where entries.transaction_id = e.id) as entry_count
+  from eligible e
+  join complete c on c.table_id = e.table_id
+  join public.chips_accounts escrow
+    on escrow.account_type::text = 'ESCROW'
+   and escrow.system_key = 'POKER_TABLE:' || e.table_id::text
+ order by e.created_at asc, e.id asc
+ limit $2::int;
 `;
 
 // Schema-v2 selection is table-complete.  A batch contains one table only;
@@ -2170,9 +2290,11 @@ export async function readSnapshot(sql, options) {
         ? PRUNABLE_CANDIDATE_SQL
         : selector === "bot-only-7d"
           ? BOT_ONLY_CANDIDATE_SQL
+          : selector === "closed-human-table-30d"
+            ? CLOSED_HUMAN_TABLE_CANDIDATE_SQL
           : selector === "legacy-stage-allowlist-v1"
             ? LEGACY_STAGE_ALLOWLIST_CANDIDATE_SQL
-            : fail("snapshot selector must be standard, prunable, bot-only-7d, or legacy-stage-allowlist-v1");
+            : fail("snapshot selector must be standard, prunable, bot-only-7d, closed-human-table-30d, or legacy-stage-allowlist-v1");
     const candidateParameters = selector === "legacy-stage-allowlist-v1"
       ? [
         timestampParam(options.cutoff),
@@ -2188,7 +2310,9 @@ export async function readSnapshot(sql, options) {
         legacyStageAllowlistPlan.batchTableCount,
         LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT,
       ]
-      : [
+      : selector === "closed-human-table-30d"
+        ? [timestampParam(options.cutoff), options.batchSize]
+        : [
         timestampParam(options.cutoff),
         options.batchSize,
         timestampParam(options.cursor?.created_at || null),
@@ -2202,6 +2326,8 @@ export async function readSnapshot(sql, options) {
           ? "prunable_candidate_selector"
           : selector === "bot-only-7d"
             ? "bot_only_candidate_selector"
+            : selector === "closed-human-table-30d"
+              ? "closed_human_table_candidate_selector"
             : "legacy_stage_allowlist_candidate_selector",
       query: candidateSql,
       parameters: candidateParameters,
