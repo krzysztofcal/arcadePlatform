@@ -11,6 +11,7 @@ import {
   BOT_ONLY_RETENTION_DAYS,
   BOT_ONLY_RETENTION_POLICY_ID,
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
+  CLOSED_HUMAN_TABLE_CANDIDATE_SQL,
   parseJsonl,
   runExport,
 } from "./chips-ledger-archive-export.mjs";
@@ -24,6 +25,7 @@ import {
   redactedError,
   STAGE_MAX_BATCH_SIZE,
   STAGE_PROJECT_REF,
+  STAGE_RETENTION_DAYS,
   STAGE_SYSTEM_IDENTIFIER,
   STAGE_OWN_BATCHES_SQL,
   validateStageEnvironment,
@@ -332,7 +334,9 @@ export async function runStageTimeoutDiagnostic({ env = process.env, now = new D
     idle_timeout: 0,
   });
   const cutoff = new Date(now.getTime() - BOT_ONLY_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const closedHumanCutoff = new Date(now.getTime() - STAGE_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const candidateParameters = [cutoff, STAGE_MAX_BATCH_SIZE, null, null];
+  const closedHumanCandidateParameters = [closedHumanCutoff, STAGE_MAX_BATCH_SIZE];
   const anomalyParameters = [cutoff, STAGE_MAX_BATCH_SIZE];
   const ownBatchParameters = [STAGE_PROJECT_REF, BOT_ONLY_RETENTION_POLICY_ID];
 
@@ -372,6 +376,7 @@ export async function runStageTimeoutDiagnostic({ env = process.env, now = new D
     const explains = [
       await explain(sql, "stage.load_own_batches", STAGE_OWN_BATCHES_SQL, ownBatchParameters),
       await explain(sql, "snapshot.bot_only_candidate_selector", BOT_ONLY_CANDIDATE_SQL, candidateParameters),
+      await explain(sql, "snapshot.closed_human_table_candidate_selector", CLOSED_HUMAN_TABLE_CANDIDATE_SQL, closedHumanCandidateParameters),
       await explain(sql, "snapshot.bot_only_blocking_anomalies", BOT_ONLY_BLOCKING_ANOMALY_SQL, anomalyParameters),
     ];
     const selectorReplay = await replay(
@@ -379,6 +384,12 @@ export async function runStageTimeoutDiagnostic({ env = process.env, now = new D
       "snapshot.bot_only_candidate_selector",
       BOT_ONLY_CANDIDATE_SQL,
       candidateParameters,
+    );
+    const closedHumanSelectorReplay = await replay(
+      sql,
+      "snapshot.closed_human_table_candidate_selector",
+      CLOSED_HUMAN_TABLE_CANDIDATE_SQL,
+      closedHumanCandidateParameters,
     );
     const tableIdentitySummary = await runBotOnlyTableIdentitySummaryDiagnostic({
       config,
@@ -396,6 +407,7 @@ export async function runStageTimeoutDiagnostic({ env = process.env, now = new D
       statement_timeout: settings,
       explains,
       selector_replay: selectorReplay,
+      closed_human_selector_replay: closedHumanSelectorReplay,
       bot_only_table_identity_summary: tableIdentitySummary,
       read_only_contract: {
         transaction: "repeatable read, read only",
