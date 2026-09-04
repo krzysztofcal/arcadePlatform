@@ -3016,6 +3016,7 @@ export async function runStageAutomation({
     emitAggregateError(failure, { deployedCommitSha });
     throw failure;
   }
+  if (result && sourcePolicyId) result = { ...result, sourcePolicyId };
   if (result && deployedCommitSha) result = { ...result, deployedCommitSha };
   writeAggregateSummary(result);
   return result;

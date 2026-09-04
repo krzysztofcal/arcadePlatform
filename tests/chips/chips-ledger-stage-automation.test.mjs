@@ -1609,6 +1609,7 @@ const closedHumanResumeResult = await runClosedHumanTableStagePrepare({
   },
 });
 assert.equal(closedHumanResumeResult.state, "prepared", "closed-human prepare must stay recovery-only while resuming an own cycle");
+assert.equal(closedHumanResumeResult.sourcePolicyId, CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID);
 assert.deepEqual(closedHumanResumeCalls, ["dry-run"]);
 assert.equal(closedHumanResumeRow.pruned_at, null);
 assert.equal(closedHumanResumeRow.registry_cleaned_at ?? null, null);
