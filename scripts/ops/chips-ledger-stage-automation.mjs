@@ -921,17 +921,17 @@ async function loadExactBatch(sql, approvedBatchId, label = "approved bot-only b
   return rows[0];
 }
 
-export function findOwnCycle(rows) {
+export function findOwnCycle(rows, sourcePolicyId = STAGE_AUTOMATION_POLICY_ID) {
   const active = rows.filter((row) => row.status === "pending"
     || (row.status === "committed" && receiptFieldCount(row) !== 5));
   if (active.length > 1) fail("multiple incomplete Stage automation manifests; refusing to choose one");
   if (active[0]?.status === "pending") fail("Stage automation manifest is pending; refusing a blind resume");
-  if (active[0] && active[0].source_policy_id !== STAGE_AUTOMATION_POLICY_ID) {
+  if (active[0] && active[0].source_policy_id !== sourcePolicyId) {
     fail("Stage automation manifest policy mismatch");
   }
   for (const row of rows) {
     if (row.status !== "pending" && row.status !== "committed") fail("Stage automation manifest has an invalid state");
-    if (row.source_policy_id !== STAGE_AUTOMATION_POLICY_ID) fail("Stage automation manifest policy mismatch");
+    if (row.source_policy_id !== sourcePolicyId) fail("Stage automation manifest policy mismatch");
     if (receiptFieldCount(row) !== 0 && receiptFieldCount(row) !== 5) fail("Stage automation receipt is partial");
     if (proofFieldCount(row) !== 0 && proofFieldCount(row) !== 3) fail("Stage automation proof is partial");
   }
@@ -2832,7 +2832,7 @@ export async function runStageAutomation({
       await verifyBucket(storageTarget);
       const ownRows = await loadOwnBatches(sql, sourcePolicyId);
       await assertAdvisoryLock(sql, lockSession);
-      const ownCycle = findOwnCycle(ownRows);
+      const ownCycle = findOwnCycle(ownRows, sourcePolicyId);
       if (ownCycle.active) {
         const resumed = await resumeOwnCycle({ row: await refreshPolicyRow(pruneStore, ownCycle.active.object_path, sourcePolicyId), identity, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps, sourcePolicyId });
         await assertAdvisoryLock(sql, lockSession);
