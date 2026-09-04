@@ -54,7 +54,8 @@ async function createFixture() {
     );
     create table public.poker_tables (
       id uuid primary key,
-      status text not null
+      status text not null,
+      has_human_participant boolean not null default false
     );
   `);
   return db;
@@ -66,6 +67,8 @@ async function insertCandidate(db, {
   createdAt,
   tableId = uuid(number + 1000),
   tableStatus = "CLOSED",
+  tableExists = true,
+  hasHumanParticipant = false,
   escrowStatus = "active",
   escrowBalance = 0,
   userId = null,
@@ -90,7 +93,12 @@ async function insertCandidate(db, {
       : { tableId };
   const reference = marker === "ambiguous" ? `table:${uuid(number + 40000)}` : null;
 
-  await db.query("insert into public.poker_tables (id, status) values ($1, $2)", [tableId, tableStatus]);
+  if (tableExists) {
+    await db.query(
+      "insert into public.poker_tables (id, status, has_human_participant) values ($1, $2, $3)",
+      [tableId, tableStatus, hasHumanParticipant],
+    );
+  }
   await db.query(
     `insert into public.chips_accounts (id, user_id, system_key, account_type, status, balance)
      values ($1, null, $2, 'SYSTEM', 'active', 0),
@@ -175,6 +183,16 @@ try {
     number: 4,
     createdAt: "2026-08-03T00:00:00.000000Z",
   });
+  const legacyMissingTable = await insertCandidate(db, {
+    number: 5,
+    tableExists: false,
+    createdAt: "2026-08-04T00:00:00.000000Z",
+  });
+  await insertCandidate(db, {
+    number: 6,
+    hasHumanParticipant: true,
+    createdAt: "2026-08-04T00:00:01.000000Z",
+  });
 
   const rejected = [
     ["USER transaction", { number: 10, txType: "USER", userId: USER_ID, createdAt: "2026-08-04T00:00:00.000000Z" }],
@@ -196,8 +214,8 @@ try {
   for (const [, fixture] of rejected) await insertCandidate(db, fixture);
 
   const rows = await select(db);
-  assert.deepEqual(rows.map((row) => row.id), [validBuyIn, validCashOut, sameTimestampLow, sameTimestampHigh]);
-  assert.deepEqual(rows.map((row) => row.tx_type), ["TABLE_BUY_IN", "TABLE_CASH_OUT", "TABLE_BUY_IN", "TABLE_BUY_IN"]);
+  assert.deepEqual(rows.map((row) => row.id), [validBuyIn, validCashOut, sameTimestampLow, sameTimestampHigh, legacyMissingTable]);
+  assert.deepEqual(rows.map((row) => row.tx_type), ["TABLE_BUY_IN", "TABLE_CASH_OUT", "TABLE_BUY_IN", "TABLE_BUY_IN", "TABLE_BUY_IN"]);
 
   const limited = await select(db, { limit: 2 });
   assert.deepEqual(limited.map((row) => row.id), [validBuyIn, validCashOut]);
@@ -206,7 +224,7 @@ try {
     cursorCreatedAt: "2026-08-03T00:00:00.000000Z",
     cursorId: sameTimestampLow,
   });
-  assert.deepEqual(afterTieLow.map((row) => row.id), [sameTimestampHigh]);
+  assert.deepEqual(afterTieLow.map((row) => row.id), [sameTimestampHigh, legacyMissingTable]);
 } finally {
   await db.close();
 }
