@@ -104,7 +104,7 @@ async function assertSnapshotTimestampBindings() {
 
 await assertSnapshotTimestampBindings();
 
-async function assertBotOnlyPlannerGuardScope() {
+async function assertBoundedTablePlannerGuardScope() {
   const cutoff = "2026-08-07T03:32:29.388506Z";
   const runWith = async (selector) => {
     const queries = [];
@@ -121,24 +121,26 @@ async function assertBotOnlyPlannerGuardScope() {
     return queries;
   };
 
-  const botOnlyQueries = await runWith("bot-only-7d");
-  assert.equal(
-    botOnlyQueries.some(({ query }) => query === "set local enable_nestloop = off;"),
-    true,
-    "bot-only-7d snapshot must disable nested loops for the candidate selector",
-  );
+  for (const selector of ["bot-only-7d", "closed-human-table-30d"]) {
+    const queries = await runWith(selector);
+    assert.equal(
+      queries.some(({ query }) => query === "set local enable_nestloop = off;"),
+      true,
+      `${selector} snapshot must disable nested loops for the candidate selector`,
+    );
+  }
 
   for (const selector of ["standard", "prunable"]) {
     const queries = await runWith(selector);
     assert.equal(
       queries.some(({ query }) => /enable_nestloop/i.test(query)),
       false,
-      `${selector} snapshot must not apply the bot-only planner guard`,
+      `${selector} snapshot must not apply the bounded-table planner guard`,
     );
   }
 }
 
-await assertBotOnlyPlannerGuardScope();
+await assertBoundedTablePlannerGuardScope();
 
 async function assertSnapshotQueryTelemetry() {
   const telemetry = [];
