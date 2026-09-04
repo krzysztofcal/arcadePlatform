@@ -47,7 +47,7 @@ permissions:
 
 jobs:
   stage-archive:
-    if: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'existing-30d-recovery-repair' && inputs.mode != 'closed-human-30d-recovery-repair') || (github.ref == 'refs/heads/main' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && (inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify' || github.actor == github.repository_owner))) }}
+    if: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'existing-30d-recovery-repair' && inputs.mode != 'closed-human-30d-recovery-repair') || (github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && ((github.ref == 'refs/heads/main' && (inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify' || inputs.mode == 'existing-30d-recovery-repair')) || inputs.mode == 'closed-human-30d-recovery-repair'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:

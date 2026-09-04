@@ -149,6 +149,7 @@ assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-audit'/);
 assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-verify'/);
 assert.match(stageJobIf, /inputs\.mode != 'existing-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-recovery-repair'/);
+assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-recovery-repair'/);
 assert.match(stageJobIf, /github\.ref == 'refs\/heads\/main'/);
 assert.match(stageJobIf, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
 assert.match(stageJobIf, /github\.event\.repository\.fork != true/);
