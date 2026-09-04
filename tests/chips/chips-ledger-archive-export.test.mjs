@@ -276,6 +276,8 @@ assert.equal(evaluateTableEligibility({ table_related: false }).eligible, true);
 assert.match(PRUNABLE_CANDIDATE_SQL, /not \(p\.id is not null and p\.has_human_participant is true\)/);
 assert.match(PRUNABLE_CANDIDATE_SQL, /p\.id is null or upper\(p\.status::text\) = 'CLOSED'/);
 assert.match(CLOSED_HUMAN_TABLE_CANDIDATE_SQL, /p\.has_human_participant is true/);
+assert.match(CLOSED_HUMAN_TABLE_CANDIDATE_SQL, /candidate_human_tables as materialized/);
+assert.match(CLOSED_HUMAN_TABLE_CANDIDATE_SQL, /from public\.chips_transaction_idempotency r\s+join candidate_human_tables c on c\.id = r\.table_id/);
 assert.match(CLOSED_HUMAN_TABLE_CANDIDATE_SQL, /chips_transaction_idempotency/);
 assert.equal(CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID, "stage-ledger-closed-human-table-retention-30d-v1");
 

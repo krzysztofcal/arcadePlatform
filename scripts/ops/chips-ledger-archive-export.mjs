@@ -361,14 +361,47 @@ limit $2::int;
 // for one table.  The database completion gate re-validates the full set at
 // prune time, including historical archive mappings.
 export const CLOSED_HUMAN_TABLE_CANDIDATE_SQL = `
-with table_identities as materialized (
+with candidate_human_tables as materialized (
+  select p.id
+    from public.poker_tables p
+    join public.chips_accounts escrow
+      on escrow.account_type::text = 'ESCROW'
+     and escrow.system_key = 'POKER_TABLE:' || p.id::text
+   where upper(p.status::text) = 'CLOSED'
+     and p.has_human_participant is true
+     and escrow.status::text = 'active'
+     and escrow.balance = 0
+     and exists (
+       select 1 from public.poker_state ps
+        where ps.table_id = p.id
+          and jsonb_typeof(ps.state) = 'object'
+          and ps.state ->> 'phase' = 'HAND_DONE'
+          and jsonb_typeof(ps.state -> 'handId') = 'string'
+          and ps.state ->> 'handId' = ''
+     )
+     and not exists (
+       select 1 from public.poker_requests requests
+        where requests.table_id = p.id and requests.result_json is null
+     )
+), candidate_registry as materialized (
+  select r.table_id,
+         r.transaction_id,
+         r.idempotency_key,
+         r.payload_hash,
+         r.tx_type,
+         r.user_id,
+         r.transaction_created_at,
+         r.archive_batch_id
+    from public.chips_transaction_idempotency r
+    join candidate_human_tables c on c.id = r.table_id
+   where r.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type,
+                       'TABLE_CASH_OUT'::public.chips_tx_type)
+), table_identities as materialized (
   select r.table_id,
          max(r.transaction_created_at) as newest_created_at,
          count(*)::bigint as identity_count,
          count(*) filter (where r.archive_batch_id is null)::bigint as hot_identity_count
-    from public.chips_transaction_idempotency r
-   where r.table_id is not null
-     and r.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+    from candidate_registry r
    group by r.table_id
 ), eligible_tables as materialized (
   select p.id, i.newest_created_at, i.identity_count, i.hot_identity_count
@@ -400,17 +433,18 @@ with table_identities as materialized (
 ), hot as materialized (
   select t.*, r.table_id, tables.newest_created_at, tables.identity_count,
          tables.hot_identity_count
-    from public.chips_transactions t
-    join public.chips_transaction_idempotency r
-      on r.transaction_id = t.id
-     and r.idempotency_key = t.idempotency_key
-     and r.payload_hash = t.payload_hash
-     and r.tx_type = t.tx_type
-     and r.user_id is not distinct from t.user_id
-     and r.transaction_created_at = t.created_at
-     and r.archive_batch_id is null
+    from candidate_registry r
     join eligible_tables tables on tables.id = r.table_id
-   where t.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+    join public.chips_transactions t
+      on t.id = r.transaction_id
+     and t.idempotency_key = r.idempotency_key
+     and t.payload_hash = r.payload_hash
+     and t.tx_type = r.tx_type
+     and t.user_id is not distinct from r.user_id
+     and r.transaction_created_at = t.created_at
+   where r.archive_batch_id is null
+     and t.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type,
+                       'TABLE_CASH_OUT'::public.chips_tx_type)
      and t.created_at < $1::timestamptz
 ), shaped as materialized (
   select h.id,
