@@ -10,6 +10,8 @@ on:
         type: choice
         options:
           - existing-30d
+          - existing-30d-recovery-diagnostic
+          - existing-30d-recovery-repair
           - bot-only-7d-summary-diagnostic
           - bot-only-7d-repair-recovery-batch-15
           - bot-only-7d-prepare-only
@@ -32,6 +34,10 @@ on:
         type: string
       approved_batch_confirmation:
         description: Exact human confirmation GO <approved_batch_id> (required for bot-only-7d-execute)
+        required: false
+        type: string
+      stage_30d_recovery_batch_id:
+        description: Exact Stage 30-day recovery batch_id (optional for existing-30d-recovery-diagnostic; required for existing-30d-recovery-repair)
         required: false
         type: string
       escrow_retention_batch_id:
@@ -69,7 +75,7 @@ permissions:
 
 jobs:
   stage-archive:
-    if: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-prepare-only' && inputs.mode != 'escrow-retention-authorize-canary' && inputs.mode != 'escrow-retention-execute' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'escrow-retention-activate') || (github.ref == 'refs/heads/main' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && (inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-prepare-only' || inputs.mode == 'escrow-retention-verify' || github.actor == github.repository_owner))) }}
+    if: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-prepare-only' && inputs.mode != 'escrow-retention-authorize-canary' && inputs.mode != 'escrow-retention-execute' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'escrow-retention-activate' && inputs.mode != 'existing-30d-recovery-repair') || (github.ref == 'refs/heads/main' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && (inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-prepare-only' || inputs.mode == 'escrow-retention-verify' || github.actor == github.repository_owner))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -100,7 +106,7 @@ jobs:
           printf 'sha=%s\n' "$checked_out_sha" >> "$GITHUB_OUTPUT"
 
       - name: Read-only Stage fence preflight
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'bot-only-7d-summary-diagnostic' || inputs.mode == 'bot-only-7d-repair-recovery-batch-15' || inputs.mode == 'bot-only-7d-prepare-only' || inputs.mode == 'bot-only-7d-execute' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-prepare-only' || inputs.mode == 'escrow-retention-authorize-canary' || inputs.mode == 'escrow-retention-execute' || inputs.mode == 'escrow-retention-verify' || inputs.mode == 'escrow-retention-activate') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'existing-30d-recovery-diagnostic' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'bot-only-7d-summary-diagnostic' || inputs.mode == 'bot-only-7d-repair-recovery-batch-15' || inputs.mode == 'bot-only-7d-prepare-only' || inputs.mode == 'bot-only-7d-execute' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-prepare-only' || inputs.mode == 'escrow-retention-authorize-canary' || inputs.mode == 'escrow-retention-execute' || inputs.mode == 'escrow-retention-verify' || inputs.mode == 'escrow-retention-activate') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -153,6 +159,56 @@ jobs:
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
         run: node scripts/ops/chips-ledger-stage-automation.mjs
+
+      - name: Diagnose existing 30-day durable recovery
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'existing-30d-recovery-diagnostic' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+          STAGE_30D_RECOVERY_BATCH_ID: ${{ inputs.stage_30d_recovery_batch_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          test -z "${CHIPS_LEDGER_BOT_ONLY_EXECUTE:-}"
+          test -z "${CHIPS_LEDGER_BOT_ONLY_AUTOMATIC:-}"
+          if [[ -n "$STAGE_30D_RECOVERY_BATCH_ID" ]]; then
+            if [[ ! "$STAGE_30D_RECOVERY_BATCH_ID" =~ ^[1-9][0-9]*$ ]]; then
+              echo "stage_30d_recovery_batch_id must be a positive integer" >&2
+              exit 1
+            fi
+            node scripts/ops/chips-ledger-stage-automation.mjs \
+              --policy stage-ledger-auto-retention-30d-v1 \
+              --diagnose-recovery \
+              --batch-id "$STAGE_30D_RECOVERY_BATCH_ID"
+          else
+            node scripts/ops/chips-ledger-stage-automation.mjs \
+              --policy stage-ledger-auto-retention-30d-v1 \
+              --diagnose-recovery
+          fi
+
+      - name: Repair exact existing 30-day durable recovery
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'existing-30d-recovery-repair' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+          STAGE_30D_RECOVERY_BATCH_ID: ${{ inputs.stage_30d_recovery_batch_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          test -z "${CHIPS_LEDGER_BOT_ONLY_EXECUTE:-}"
+          test -z "${CHIPS_LEDGER_BOT_ONLY_AUTOMATIC:-}"
+          if [[ "$GITHUB_ACTOR" != "$GITHUB_REPOSITORY_OWNER" ]]; then
+            echo "existing 30-day recovery repair requires the repository owner" >&2
+            exit 1
+          fi
+          if [[ ! "$STAGE_30D_RECOVERY_BATCH_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "stage_30d_recovery_batch_id must be a positive integer" >&2
+            exit 1
+          fi
+          node scripts/ops/chips-ledger-stage-automation.mjs \
+            --policy stage-ledger-auto-retention-30d-v1 \
+            --repair-recovery \
+            --batch-id "$STAGE_30D_RECOVERY_BATCH_ID"
 
       - name: Run bot-only 7-day summary diagnostic
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-summary-diagnostic' }}

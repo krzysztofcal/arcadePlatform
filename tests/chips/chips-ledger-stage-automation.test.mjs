@@ -22,6 +22,8 @@ import {
   runBotOnlyRecoveryRepair,
   runBotOnlyStageAutomation,
   runStageAutomation,
+  runStageExactRecoveryRepair,
+  runStageRecoveryDiagnostic,
   STAGE_PROJECT_REF,
   STAGE_SYSTEM_IDENTIFIER,
   validateStageEnvironment,
@@ -1207,6 +1209,271 @@ assert.equal(correctionArchiveBytes.equals(correctionArchiveBefore), true);
 assert.equal(correctionSqlCalls.some(({ query }) => /\b(?:insert|update|delete|truncate)\b/i.test(query)), false);
 fs.rmSync(correctionTempRoot, { recursive: true, force: true });
 fs.rmSync(repairTempRoot, { recursive: true, force: true });
+
+// Stage 30-day proven/unpruned recovery repair (fundamental read-only repair cases).
+const stage30ArchiveBytes = Buffer.from("stage 30-day proven recovery archive");
+const stage30CompressedSha = crypto.createHash("sha256").update(stage30ArchiveBytes).digest("hex");
+
+function makeStage30Row(overrides = {}) {
+  return {
+    object_path: `v1/sha256/${stage30CompressedSha}.jsonl.gz`,
+    project_ref: STAGE_PROJECT_REF,
+    source_policy_id: STAGE_AUTOMATION_POLICY_ID,
+    status: "committed",
+    batch_id: "33",
+    format_version: 1,
+    cutoff: "2026-08-01T00:00:00.000000Z",
+    cursor_start_created_at: null,
+    cursor_start_id: null,
+    cursor_end_created_at: "2026-07-01T00:00:00.000000Z",
+    cursor_end_id: "00000000-0000-4000-8000-000000000033",
+    first_created_at: "2026-07-01T00:00:00.000000Z",
+    last_created_at: "2026-07-01T00:00:00.000000Z",
+    transaction_count: 1,
+    entry_count: 2,
+    tx_types: { TABLE_BUY_IN: 1 },
+    raw_bytes: 100,
+    compressed_bytes: stage30ArchiveBytes.length,
+    raw_sha256: "a".repeat(64),
+    compressed_sha256: stage30CompressedSha,
+    credits: "100",
+    debits: "100",
+    net_amount: "0",
+    committed_at: "2026-08-13T00:00:00.000000Z",
+    archive_proof_verified_at: "2026-08-13T00:01:00.000000Z",
+    archived_transaction_ids_sha256: evidence.transactionIdsSha256,
+    archived_entry_ids_sha256: evidence.entryIdsSha256,
+    pruned_at: null,
+    pruned_transaction_count: null,
+    pruned_entry_count: null,
+    pruned_transaction_ids_sha256: null,
+    pruned_entry_ids_sha256: null,
+    registry_cleaned_at: null,
+    registry_cleaned_key_count: null,
+    registry_cleaned_keys_sha256: null,
+    destructive_go_at: null,
+    destructive_go_batch_id: null,
+    ...overrides,
+  };
+}
+
+function makeStage30Harness({ row = makeStage30Row(), objects = new Map(), exactRows = undefined } = {}) {
+  const stage30Objects = objects;
+  const stage30StorageCalls = [];
+  const stage30PruneCalls = [];
+  const stage30SqlCalls = [];
+  const stage30Session = { backendPid: "stage-30d-recovery-session" };
+  const stage30Fetch = async (url, init = {}) => {
+    const requestUrl = new URL(url);
+    const authenticatedPrefix = `/storage/v1/object/authenticated/${ARCHIVE_BUCKET}/`;
+    const uploadPrefix = `/storage/v1/object/${ARCHIVE_BUCKET}/`;
+    const prefix = requestUrl.pathname.startsWith(authenticatedPrefix) ? authenticatedPrefix : uploadPrefix;
+    const objectPath = decodeURIComponent(requestUrl.pathname.slice(prefix.length));
+    const method = init.method || "GET";
+    stage30StorageCalls.push({ method, objectPath, headers: new Headers(init.headers || {}) });
+    if (method === "GET") {
+      if (objectPath === row.object_path) return response(stage30ArchiveBytes);
+      const value = stage30Objects.get(objectPath);
+      return value ? response(value) : response({ message: "not found" }, 404);
+    }
+    if (method === "POST") {
+      assert.equal(new Headers(init.headers).get("x-upsert"), "false");
+      assert.equal(new Headers(init.headers).get("content-type"), "application/gzip");
+      stage30Objects.set(objectPath, Buffer.from(init.body));
+      return response({ ok: true });
+    }
+    return response({ message: "unexpected stage-30d method" }, 500);
+  };
+  const exactReturn = exactRows === undefined ? [exactSqlTextRow(row)] : exactRows;
+  const stage30Sql = {
+    typed: (value, type) => ({ value, type }),
+    unsafe: async (query, values = []) => {
+      stage30SqlCalls.push({ query, values });
+      if (query.includes("pg_try_advisory_lock")) return [{ acquired: true, backend_pid: stage30Session.backendPid }];
+      if (query.includes("pg_backend_pid")) return [{ backend_pid: stage30Session.backendPid }];
+      if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
+      if (query.includes("pg_control_system")) return [{ system_identifier: STAGE_SYSTEM_IDENTIFIER }];
+      if (query.includes("where batch_id = $1")) return exactReturn;
+      throw new Error(`unexpected stage-30d SQL: ${query}`);
+    },
+    begin: async (callback) => callback({
+      unsafe: async (query, values = []) => {
+        if (query.startsWith("set transaction")) return [];
+        return stage30Sql.unsafe(query, values);
+      },
+    }),
+  };
+  const tempRoot = fs.mkdtempSync("/tmp/chips-ledger-stage-30d-repair-test-");
+  const stage30Deps = {
+    sql: stage30Sql,
+    storageTarget,
+    tempRoot,
+    pruneStore: {
+      getManifest: async () => row,
+    },
+    verifyBucket: async () => {},
+    pruneArchive: async ({ argv }) => {
+      stage30PruneCalls.push([...argv]);
+      assert.equal(argv.includes("--execute"), false);
+      assert.equal(argv.includes("--register-proof"), false);
+      assert.equal(argv.includes("--automatic"), false);
+      return { state: "ready", evidence, archiveSha256: stage30CompressedSha };
+    },
+    fetch: stage30Fetch,
+  };
+  return {
+    deps: stage30Deps,
+    row,
+    objects: stage30Objects,
+    storageCalls: stage30StorageCalls,
+    pruneCalls: stage30PruneCalls,
+    sqlCalls: stage30SqlCalls,
+    tempRoot,
+  };
+}
+
+const stage30HappyHarness = makeStage30Harness();
+const stage30Happy = await runStageExactRecoveryRepair({
+  env: ENV,
+  deps: stage30HappyHarness.deps,
+  batchId: "33",
+});
+assert.equal(stage30Happy.state, "recovery_repaired");
+assert.equal(stage30Happy.batchId, "33");
+assert.equal(stage30Happy.objectPath, stage30HappyHarness.row.object_path);
+assert.equal(stage30Happy.compressedSha256, stage30CompressedSha);
+assert.equal(stage30Happy.initialRecoveryState, "both_missing");
+assert.equal(stage30Happy.recoveryState, "complete");
+assert.equal(stage30Happy.recoveryVerified, true);
+assert.equal(stage30Happy.storageModified, true);
+assert.equal(stage30HappyHarness.objects.has(buildRecoveryArchiveObjectPath(stage30CompressedSha)), true);
+assert.equal(stage30HappyHarness.objects.has(buildRecoveryManifestObjectPath(stage30CompressedSha)), true);
+assert.equal(stage30HappyHarness.storageCalls.filter(({ method }) => method === "POST").length, 2);
+assert.equal(stage30HappyHarness.storageCalls.filter(({ method }) => method === "PUT").length, 0);
+assert.equal(stage30HappyHarness.pruneCalls.length, 1);
+assert.equal(stage30HappyHarness.pruneCalls[0].includes("--execute"), false);
+assert.equal(
+  stage30HappyHarness.sqlCalls.filter(({ query }) => query.includes("where batch_id = $1")).length,
+  2,
+  "repair must re-load the exact batch from DB after the dry-run and before the first Storage write",
+);
+assert.equal(stage30HappyHarness.sqlCalls.some(({ query }) => /\b(?:insert|update|delete|truncate)\b/i.test(query)), false);
+assert.equal(stage30HappyHarness.row.pruned_at, null);
+assert.equal(stage30HappyHarness.row.registry_cleaned_at, null);
+assert.equal(stage30HappyHarness.row.destructive_go_at, null);
+
+const stage30PartialHarness = makeStage30Harness({
+  objects: new Map([[buildRecoveryArchiveObjectPath(stage30CompressedSha), stage30ArchiveBytes]]),
+});
+await assert.rejects(
+  runStageExactRecoveryRepair({ env: ENV, deps: stage30PartialHarness.deps, batchId: "33" }),
+  /partial/,
+);
+assert.equal(stage30PartialHarness.pruneCalls.length, 0, "partial recovery must fail before dry-run");
+assert.equal(stage30PartialHarness.storageCalls.filter(({ method }) => method === "POST").length, 0);
+const stage30MismatchHarness = makeStage30Harness({
+  objects: new Map([
+    [buildRecoveryArchiveObjectPath(stage30CompressedSha), stage30ArchiveBytes],
+    [buildRecoveryManifestObjectPath(stage30CompressedSha), gzipRecoveryManifestForTest({ foreign: true })],
+  ]),
+});
+await assert.rejects(
+  runStageExactRecoveryRepair({ env: ENV, deps: stage30MismatchHarness.deps, batchId: "33" }),
+  /manifest differs|state is mismatch/,
+);
+assert.equal(stage30MismatchHarness.pruneCalls.length, 0, "mismatched recovery must fail before dry-run");
+assert.equal(stage30MismatchHarness.storageCalls.filter(({ method }) => method === "POST").length, 0);
+
+const stage30PrunedRow = makeStage30Row({
+  pruned_at: "2026-08-13T00:02:00.000000Z",
+  pruned_transaction_count: 1,
+  pruned_entry_count: 2,
+  pruned_transaction_ids_sha256: evidence.transactionIdsSha256,
+  pruned_entry_ids_sha256: evidence.entryIdsSha256,
+});
+const stage30PrunedHarness = makeStage30Harness({ row: stage30PrunedRow });
+await assert.rejects(
+  runStageExactRecoveryRepair({ env: ENV, deps: stage30PrunedHarness.deps, batchId: "33" }),
+  /requires an unpruned/,
+);
+assert.equal(stage30PrunedHarness.storageCalls.length, 0);
+assert.equal(stage30PrunedHarness.pruneCalls.length, 0);
+
+const stage30NotFoundHarness = makeStage30Harness({ exactRows: [] });
+await assert.rejects(
+  runStageExactRecoveryRepair({ env: ENV, deps: stage30NotFoundHarness.deps, batchId: "99" }),
+  /was not found/,
+);
+assert.equal(stage30NotFoundHarness.storageCalls.length, 0);
+const stage30WrongPolicyHarness = makeStage30Harness({
+  row: makeStage30Row({ source_policy_id: BOT_ONLY_RETENTION_POLICY_ID }),
+});
+await assert.rejects(
+  runStageExactRecoveryRepair({ env: ENV, deps: stage30WrongPolicyHarness.deps, batchId: "33" }),
+  /policy mismatch/,
+);
+assert.equal(stage30WrongPolicyHarness.storageCalls.length, 0);
+const stage30WrongShaHarness = makeStage30Harness({
+  row: makeStage30Row({ compressed_sha256: "f".repeat(64) }),
+});
+await assert.rejects(
+  runStageExactRecoveryRepair({ env: ENV, deps: stage30WrongShaHarness.deps, batchId: "33" }),
+  /object path does not match its compressed hash/,
+);
+assert.equal(stage30WrongShaHarness.storageCalls.length, 0);
+
+const stage30DiagnosticHarness = makeStage30Harness();
+const stage30Diagnostic = await runStageRecoveryDiagnostic({
+  env: ENV,
+  deps: stage30DiagnosticHarness.deps,
+  batchId: "33",
+});
+assert.equal(stage30Diagnostic.state, "diagnosed");
+assert.equal(stage30Diagnostic.batch_id, "33");
+assert.equal(stage30Diagnostic.compressed_sha256, stage30CompressedSha);
+assert.equal(stage30Diagnostic.recovery.state, "both_missing");
+assert.equal(stage30Diagnostic.recovery_archive_path, buildRecoveryArchiveObjectPath(stage30CompressedSha));
+assert.equal(stage30Diagnostic.recovery_manifest_path, buildRecoveryManifestObjectPath(stage30CompressedSha));
+assert.equal(stage30Diagnostic.main_archive.present, true);
+assert.equal(stage30Diagnostic.main_archive.sha256_matches, true);
+assert.equal(stage30Diagnostic.assert_resume_recovery_state.ok, false);
+assert.equal(stage30Diagnostic.read_only, true);
+assert.equal(stage30DiagnosticHarness.storageCalls.filter(({ method }) => method === "POST").length, 0);
+assert.equal(stage30DiagnosticHarness.storageCalls.filter(({ method }) => method === "PUT").length, 0);
+
+const ambiguousDiagnosticRows = [
+  makeStage30Row({ batch_id: "34" }),
+  makeStage30Row({ batch_id: "35" }),
+];
+const ambiguousDiagnosticSql = fakeSql({ ownRows: ambiguousDiagnosticRows });
+const ambiguousDiagnostic = await runStageRecoveryDiagnostic({
+  env: ENV,
+  deps: {
+    sql: ambiguousDiagnosticSql,
+    storageTarget,
+    pruneStore: {},
+    verifyBucket: async () => { throw new Error("ambiguous diagnostic must not access Storage"); },
+  },
+});
+assert.equal(ambiguousDiagnostic.state, "ambiguous");
+assert.equal(ambiguousDiagnostic.reason, "multiple_incomplete_30d_cycles");
+assert.deepEqual(ambiguousDiagnostic.batch_ids, ["34", "35"]);
+assert.equal(ambiguousDiagnostic.repair_target_suggested, false);
+assert.equal(ambiguousDiagnostic.candidate_batches.length, 2);
+assert.equal(ambiguousDiagnostic.read_only, true);
+
+for (const harness of [
+  stage30HappyHarness,
+  stage30PartialHarness,
+  stage30MismatchHarness,
+  stage30PrunedHarness,
+  stage30NotFoundHarness,
+  stage30WrongPolicyHarness,
+  stage30WrongShaHarness,
+  stage30DiagnosticHarness,
+]) {
+  fs.rmSync(harness.tempRoot, { recursive: true, force: true });
+}
 
 const resumeCycleRow = {
   ...recoveryRow,
