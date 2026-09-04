@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   BOT_ONLY_RETENTION_POLICY_ID,
+  CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
   buildArchiveBytes,
   buildExportRecord,
   buildManifest,
@@ -658,6 +659,41 @@ const localEvidence = buildPruneEvidence({ records, manifest: localManifest, sum
   netAmount: localManifest.amounts.net,
 } });
 assert.deepEqual(localEvidence.txTypes, { TABLE_BUY_IN: 1, TABLE_CASH_OUT: 1 });
+
+// Closed human tables retain compact idempotency evidence, not replay
+// snapshots. Both USER<->ESCROW directions must be admissible for pruning.
+const humanUserId = "00000000-0000-4000-8000-000000000098";
+const humanRecords = structuredClone(records);
+for (const humanRecord of humanRecords) {
+  humanRecord.transaction.user_id = humanUserId;
+  const systemEntry = humanRecord.entries.find((candidateEntry) => candidateEntry.account.account_type === "SYSTEM");
+  systemEntry.account.account_type = "USER";
+  systemEntry.account.user_id = humanUserId;
+  systemEntry.account.system_key = null;
+}
+const humanArchive = buildArchiveBytes(humanRecords);
+const humanManifest = buildManifest({
+  target: "stage",
+  cutoff: "2026-02-01T00:00:00.000000Z",
+  batchSize: 5000,
+  cursor: null,
+  records: humanRecords,
+  archive: humanArchive,
+  outputPath: `/private/${humanArchive.compressedSha256}.jsonl.gz`,
+  sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+});
+const humanEvidence = buildPruneEvidence({
+  records: humanRecords,
+  manifest: humanManifest,
+  summary: {
+    credits: humanManifest.amounts.credits,
+    debits: humanManifest.amounts.debits,
+    netAmount: humanManifest.amounts.net,
+  },
+});
+assert.deepEqual(humanEvidence.txTypes, { TABLE_BUY_IN: 1, TABLE_CASH_OUT: 1 });
+assert.equal(humanEvidence.userTransactions, 2);
+assert.equal(humanEvidence.userEntries, 2);
 
 const userRecords = structuredClone(records);
 userRecords[0].transaction.user_id = "00000000-0000-4000-8000-000000000099";

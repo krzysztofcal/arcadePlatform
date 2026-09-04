@@ -37,6 +37,16 @@ const DELETE_STATEMENT_TIMEOUT_MS = 10_000;
 // growth is bounded without requiring new env configuration. Set
 // WS_POKER_CLOSED_TABLE_RETENTION_MS=0 to disable.
 const DEFAULT_CLOSED_TABLE_RETENTION_MS = 7 * 86_400_000;
+const CANONICAL_STAGE_PROJECT_REF = "krydukthwdvccggbyjfw";
+
+function isCanonicalStage(env) {
+  try {
+    return new URL(String(env.SUPABASE_URL || "")).hostname
+      === `${CANONICAL_STAGE_PROJECT_REF}.supabase.co`;
+  } catch {
+    return false;
+  }
+}
 
 function resolveCutoff(retentionMs) {
   if (!Number.isFinite(retentionMs) || retentionMs <= 0) return null;
@@ -57,17 +67,14 @@ function postgresErrorDetails(error) {
 
 // Bounded discovery of candidate CLOSED table ids that currently satisfy the
 // DB eligibility predicates. Read-only (no row locks).
-async function discoverCandidates({ tx, cutoff, batchSize, statementTimeoutMs }) {
+async function discoverCandidates({ tx, cutoff, batchSize, statementTimeoutMs, lifecyclePredicate }) {
   await tx.unsafe("select set_config('statement_timeout', $1, true);", [`${statementTimeoutMs}ms`]);
   const rows = await tx.unsafe(
     `select t.id
        from public.poker_tables t
       where t.status = 'CLOSED'
         and t.updated_at < $1::timestamptz
-        and (
-          (t.has_human_participant is true and t.human_retention_complete_at is not null)
-          or (t.has_human_participant is not true and t.bot_only_retention_complete_at is not null)
-        )
+        and (${lifecyclePredicate})
         and exists (
               select 1 from public.poker_state ps
                where ps.table_id = t.id
@@ -104,7 +111,7 @@ async function discoverCandidates({ tx, cutoff, batchSize, statementTimeoutMs })
 // that stopped satisfying the guards between discovery and DELETE simply drops
 // out (DELETE returns nothing for it). FOR UPDATE SKIP LOCKED skips rows
 // locked by other transactions instead of waiting.
-async function deleteClaimed({ tx, cutoff, claimedIds, batchSize }) {
+async function deleteClaimed({ tx, cutoff, claimedIds, batchSize, lifecyclePredicate }) {
   if (!Array.isArray(claimedIds) || claimedIds.length === 0) {
     return { deleted: 0, ids: [] };
   }
@@ -117,10 +124,7 @@ async function deleteClaimed({ tx, cutoff, claimedIds, batchSize }) {
    where t.id = any($3::uuid[])
      and t.status = 'CLOSED'
      and t.updated_at < $1::timestamptz
-     and (
-       (t.has_human_participant is true and t.human_retention_complete_at is not null)
-       or (t.has_human_participant is not true and t.bot_only_retention_complete_at is not null)
-     )
+     and (${lifecyclePredicate})
      and exists (
            select 1 from public.poker_state ps
             where ps.table_id = t.id
@@ -194,6 +198,11 @@ export function createClosedTableCleanup({
     && maxSweepRounds <= MAX_SWEEP_ROUNDS
     ? maxSweepRounds
     : DEFAULT_MAX_SWEEP_ROUNDS;
+  // #923's human marker exists only on canonical Stage. Until #891 rolls it
+  // out to Production, retain the established human cleanup behavior there.
+  const lifecyclePredicate = isCanonicalStage(env)
+    ? "(t.has_human_participant is true and t.human_retention_complete_at is not null) or (t.has_human_participant is not true and t.bot_only_retention_complete_at is not null)"
+    : "t.has_human_participant is true or t.bot_only_retention_complete_at is not null";
 
   let sweepInProgress = false;
   let lastRun = null;
@@ -244,7 +253,8 @@ export function createClosedTableCleanup({
           tx,
           cutoff,
           batchSize,
-          statementTimeoutMs: DELETE_STATEMENT_TIMEOUT_MS
+          statementTimeoutMs: DELETE_STATEMENT_TIMEOUT_MS,
+          lifecyclePredicate
         }), { env });
 
         if (candidates.length === 0) break;
@@ -264,7 +274,8 @@ export function createClosedTableCleanup({
               tx,
               cutoff,
               claimedIds: safeClaimed,
-              batchSize
+              batchSize,
+              lifecyclePredicate
             }), { env });
             deletedTotal += outcome.deleted;
           } catch (error) {
@@ -371,10 +382,7 @@ export function createClosedTableCleanup({
              from public.poker_tables t
             where t.status = 'CLOSED'
               and t.updated_at < $1::timestamptz
-              and (
-                (t.has_human_participant is true and t.human_retention_complete_at is not null)
-                or (t.has_human_participant is not true and t.bot_only_retention_complete_at is not null)
-              )
+              and (${lifecyclePredicate})
               and exists (
                     select 1 from public.poker_state ps
                      where ps.table_id = t.id

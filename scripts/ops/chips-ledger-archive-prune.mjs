@@ -449,6 +449,9 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
       if (txType === "TABLE_BUY_IN" && !(systemAmount < 0n && escrowAmount > 0n)) {
         fail("TABLE_BUY_IN archive entry direction is invalid");
       }
+      if (txType === "TABLE_CASH_OUT" && !(escrowAmount < 0n && systemAmount > 0n)) {
+        fail("TABLE_CASH_OUT archive entry direction is invalid");
+      }
     } else if (isClosedHumanPolicy) {
       const userEntry = record.entries.find((entry) => text(entry?.account?.account_type).toUpperCase() === "USER");
       const userAmount = BigInt(userEntry.amount);
@@ -462,9 +465,6 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
       }
       if (txType === "TABLE_CASH_OUT" && !(escrowAmount < 0n && userAmount > 0n)) {
         fail("closed-human TABLE_CASH_OUT direction is invalid");
-      }
-      if (txType === "TABLE_CASH_OUT" && !(escrowAmount < 0n && systemAmount > 0n)) {
-        fail("TABLE_CASH_OUT archive entry direction is invalid");
       }
     }
     txTypes[txType] = (txTypes[txType] || 0) + 1;
