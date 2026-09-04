@@ -6,6 +6,8 @@ begin;
 -- join + TABLE_BUY_IN/TABLE_CASH_OUT filter.  The previous bot-only candidate
 -- selector index is intentionally not reused; this is a different, highly
 -- selective access pattern.
+set local statement_timeout = '600000';
+set local maintenance_work_mem = '128MB';
 create index if not exists chips_transaction_idempotency_closed_human_access_idx
   on public.chips_transaction_idempotency (table_id, tx_type, transaction_created_at);
 
