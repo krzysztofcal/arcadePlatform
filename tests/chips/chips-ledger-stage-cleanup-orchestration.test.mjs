@@ -3050,7 +3050,7 @@ async function disposableBotFixture(tx, { objectHex = "9", lifecycleMarker = nul
   );
   const transactionId = randomUUID();
   const key = `bot-seed-buyin:${tableId}:stage-cleanup-contract`;
-  const compressedSha = objectHex.repeat(64);
+  const compressedSha = objectHex.length === 64 ? objectHex : objectHex.repeat(64);
   const createdAt = new Date(Date.now() - (10 * DAY_MS)).toISOString();
   const cutoff = new Date().toISOString();
   await tx.unsafe(`
@@ -3418,7 +3418,7 @@ async function disposableLegacyDryRunConcurrencyContract(dbUrl) {
   let readerPromise = null;
   try {
     fixture = await setupSql.begin(async (tx) => {
-      const objectHex = crypto.randomBytes(1).toString("hex").slice(0, 1);
+      const objectHex = crypto.randomBytes(32).toString("hex");
       const batchId = String(Date.now()) + String(Math.floor(Math.random() * 1000)).padStart(3, "0");
       const created = await disposableLegacyFixture(tx, { objectHex, batchId });
       const proof = await tx.unsafe(`
