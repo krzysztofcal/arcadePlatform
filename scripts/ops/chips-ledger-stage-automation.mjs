@@ -2802,7 +2802,7 @@ async function executeApprovedBotOnlyCanary({
   return { row, dry, durable, executed };
 }
 
-async function resumeOwnCycle({ row, identity, env, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps = {}, sourcePolicyId = STAGE_AUTOMATION_POLICY_ID }) {
+async function resumeOwnCycle({ row, identity, env, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps = {}, sourcePolicyId = STAGE_AUTOMATION_POLICY_ID, execute = true }) {
   const durableBefore = await inspectDurableRecovery(storageTarget, row, storageDeps);
   assertResumeRecoveryState(row, durableBefore);
   if (!row.archive_proof_verified_at) {
@@ -2828,6 +2828,7 @@ async function resumeOwnCycle({ row, identity, env, tempRoot, sql, pruneStore, s
     );
   }
   if (dry.state === "already_pruned") {
+    if (!execute) return { state: "prepared", evidence: dry.evidence, durable: durableBefore };
     return executeVerifiedCycle({ row, identity, durable: durableBefore, env, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps });
   }
   if (dry.state !== "ready") fail(`Stage automation dry-run did not become ready: ${dry.state}`);
@@ -2836,6 +2837,7 @@ async function resumeOwnCycle({ row, identity, env, tempRoot, sql, pruneStore, s
     const main = await downloadPrivateArchiveObject(storageTarget, row.object_path, storageDeps);
     durable = await persistDurableRecovery(storageTarget, row, identity, dry.evidence, main.bytes, storageDeps);
   }
+  if (!execute) return { state: "prepared", evidence: dry.evidence, durable };
   return executeVerifiedCycle({ row, identity, durable, env, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps });
 }
 
@@ -2889,7 +2891,7 @@ export async function runStageAutomation({
       await assertAdvisoryLock(sql, lockSession);
       const ownCycle = findOwnCycle(ownRows, sourcePolicyId);
       if (ownCycle.active) {
-        const resumed = await resumeOwnCycle({ row: await refreshPolicyRow(pruneStore, ownCycle.active.object_path, sourcePolicyId), identity, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps, sourcePolicyId });
+        const resumed = await resumeOwnCycle({ row: await refreshPolicyRow(pruneStore, ownCycle.active.object_path, sourcePolicyId), identity, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps, sourcePolicyId, execute });
         await assertAdvisoryLock(sql, lockSession);
         result = {
           state: resumed.state,

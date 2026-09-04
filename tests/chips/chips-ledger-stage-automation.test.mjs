@@ -22,6 +22,7 @@ import {
   persistDurableRecovery,
   runBotOnlyRecoveryRepair,
   runBotOnlyStageAutomation,
+  runClosedHumanTableStagePrepare,
   runStageAutomation,
   runStageExactRecoveryRepair,
   runStageRecoveryDiagnostic,
@@ -1580,6 +1581,38 @@ const resumeResult = await runStageAutomation({
 });
 assert.equal(resumeResult.state, "already_pruned");
 assert.deepEqual(resumeCalls, ["dry-run", "execute"]);
+
+const closedHumanResumeRow = {
+  ...resumeCycleRow,
+  source_policy_id: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+};
+durableObjects.set(
+  buildRecoveryManifestObjectPath(compressedSha),
+  gzipRecoveryManifestForTest(buildRecoveryManifest(closedHumanResumeRow, STAGE_SYSTEM_IDENTIFIER, evidence, { target: "stage" })),
+);
+const closedHumanResumeCalls = [];
+const closedHumanResumeResult = await runClosedHumanTableStagePrepare({
+  env: ENV,
+  deps: {
+    sql: fakeSql({ ownRows: [closedHumanResumeRow] }),
+    fetch,
+    storageTarget,
+    pruneStore: { getManifest: async () => closedHumanResumeRow },
+    verifyBucket: async () => {},
+    tempRoot: fs.mkdtempSync("/tmp/chips-ledger-stage-automation-closed-human-resume-"),
+    pruneArchive: async ({ argv }) => {
+      const mode = argv.includes("--execute") ? "execute" : argv.includes("--register-proof") ? "register-proof" : "dry-run";
+      closedHumanResumeCalls.push(mode);
+      assert.equal(mode, "dry-run");
+      return { state: "already_pruned", evidence };
+    },
+  },
+});
+assert.equal(closedHumanResumeResult.state, "prepared", "closed-human prepare must stay recovery-only while resuming an own cycle");
+assert.deepEqual(closedHumanResumeCalls, ["dry-run"]);
+assert.equal(closedHumanResumeRow.pruned_at, null);
+assert.equal(closedHumanResumeRow.registry_cleaned_at ?? null, null);
+assert.equal(closedHumanResumeRow.destructive_go_at ?? null, null);
 
 const noRecoveryCalls = [];
 const noRecoverySql = fakeSql({ ownRows: [resumeCycleRow] });
