@@ -3180,7 +3180,7 @@ async function disposableLegacyFixture(tx, { objectHex = "f", batchId = 13 } = {
   }
   await tx.unsafe("set constraints all immediate;");
 
-  const compressedSha = objectHex.repeat(64);
+  const compressedSha = objectHex.length === 64 ? objectHex : objectHex.repeat(64);
   const objectPath = `v1/sha256/${compressedSha}.jsonl.gz`;
   await tx.unsafe(`
     insert into public.chips_ledger_archive_batches (
