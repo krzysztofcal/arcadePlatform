@@ -11,13 +11,14 @@ const registrySelector = fs.readFileSync("scripts/ops/chips-ledger-legacy-stage-
 
 assert.match(
   workflow,
-  /workflow_dispatch:\n\s+inputs:\n\s+mode:\n\s+description: Stage automation mode\n\s+required: true\n\s+default: existing-30d\n\s+type: choice\n\s+options:\n\s+- existing-30d\n\s+- bot-only-7d-summary-diagnostic\n\s+- bot-only-7d-repair-recovery-batch-15\n\s+- bot-only-7d-prepare-only\n\s+- bot-only-7d-execute\n\s+- bot-only-7d-automatic\n\s+- legacy-stage-allowlist-prepare-only\n\s+- legacy-stage-allowlist-orchestrate\n\s+- audit-batch-13\n\s+- execute-batch-13/,
+  /workflow_dispatch:\n\s+inputs:\n\s+mode:\n\s+description: Stage automation mode\n\s+required: true\n\s+default: existing-30d\n\s+type: choice\n\s+options:\n\s+- existing-30d\n\s+- existing-30d-recovery-diagnostic\n\s+- existing-30d-recovery-repair\n\s+- bot-only-7d-summary-diagnostic\n\s+- bot-only-7d-repair-recovery-batch-15\n\s+- bot-only-7d-prepare-only\n\s+- bot-only-7d-execute\n\s+- bot-only-7d-automatic\n\s+- legacy-stage-allowlist-prepare-only\n\s+- legacy-stage-allowlist-orchestrate\n\s+- audit-batch-13\n\s+- execute-batch-13/,
 );
 assert.match(workflow, /approved_batch_id:\n\s+description: Exact committed bot-only 7d batch_id prepared by a prior run[\s\S]*?required: false\n\s+type: string/);
 assert.match(workflow, /approved_batch_confirmation:\n\s+description: Exact human confirmation GO <approved_batch_id> \(required for bot-only-7d-execute\)[\s\S]*?required: false\n\s+type: string/);
+assert.match(workflow, /stage_30d_recovery_batch_id:\n\s+description: Exact Stage 30-day recovery batch_id[\s\S]*?required: false\n\s+type: string/);
 assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|legacy-stage-allowlist-prepare-only|audit-batch-13|execute-batch-13)$/gm) || []).length, 5);
 assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-prepare-only|bot-only-7d-execute|legacy-stage-allowlist-prepare-only|audit-batch-13|execute-batch-13)$/gm) || []).length, 6);
-assert.equal((workflow.match(/^\s+- (?:existing-30d|bot-only-7d-summary-diagnostic|bot-only-7d-repair-recovery-batch-15|bot-only-7d-prepare-only|bot-only-7d-execute|bot-only-7d-automatic|legacy-stage-allowlist-prepare-only|legacy-stage-allowlist-orchestrate|audit-batch-13|execute-batch-13|escrow-retention-audit|escrow-retention-prepare-only|escrow-retention-authorize-canary|escrow-retention-execute|escrow-retention-verify|escrow-retention-activate|external-scheduled-automatic)$/gm) || []).length, 17);
+assert.equal((workflow.match(/^\s+- (?:existing-30d|existing-30d-recovery-diagnostic|existing-30d-recovery-repair|bot-only-7d-summary-diagnostic|bot-only-7d-repair-recovery-batch-15|bot-only-7d-prepare-only|bot-only-7d-execute|bot-only-7d-automatic|legacy-stage-allowlist-prepare-only|legacy-stage-allowlist-orchestrate|audit-batch-13|execute-batch-13|escrow-retention-audit|escrow-retention-prepare-only|escrow-retention-authorize-canary|escrow-retention-execute|escrow-retention-verify|escrow-retention-activate|external-scheduled-automatic)$/gm) || []).length, 19);
 assert.equal((workflow.match(/- cron:/g) || []).length, 2);
 assert.match(workflow, /- cron: "17 2 \* \* \*"/);
 assert.match(workflow, /- cron: "7,22,37,52 \* \* \* \*"/);
@@ -52,7 +53,7 @@ const preflightStep = workflow.match(
 )[0];
 assert.match(
   preflightStep,
-  /if: \$\{\{ github\.event_name == 'workflow_dispatch' && \(inputs\.mode == 'bot-only-7d-summary-diagnostic' \|\| inputs\.mode == 'bot-only-7d-repair-recovery-batch-15' \|\| inputs\.mode == 'bot-only-7d-prepare-only' \|\| inputs\.mode == 'bot-only-7d-execute' \|\| inputs\.mode == 'bot-only-7d-automatic' \|\| inputs\.mode == 'escrow-retention-audit' \|\| inputs\.mode == 'escrow-retention-prepare-only' \|\| inputs\.mode == 'escrow-retention-authorize-canary' \|\| inputs\.mode == 'escrow-retention-execute' \|\| inputs\.mode == 'escrow-retention-verify' \|\| inputs\.mode == 'escrow-retention-activate'\) \}\}/,
+  /if: \$\{\{ github\.event_name == 'workflow_dispatch' && \(inputs\.mode == 'existing-30d-recovery-diagnostic' \|\| inputs\.mode == 'existing-30d-recovery-repair' \|\| inputs\.mode == 'bot-only-7d-summary-diagnostic' \|\| inputs\.mode == 'bot-only-7d-repair-recovery-batch-15' \|\| inputs\.mode == 'bot-only-7d-prepare-only' \|\| inputs\.mode == 'bot-only-7d-execute' \|\| inputs\.mode == 'bot-only-7d-automatic' \|\| inputs\.mode == 'escrow-retention-audit' \|\| inputs\.mode == 'escrow-retention-prepare-only' \|\| inputs\.mode == 'escrow-retention-authorize-canary' \|\| inputs\.mode == 'escrow-retention-execute' \|\| inputs\.mode == 'escrow-retention-verify' \|\| inputs\.mode == 'escrow-retention-activate'\) \}\}/,
 );
 
 const existingRun = workflow.match(
@@ -70,6 +71,33 @@ assert.doesNotMatch(
   /chips_table_fence|enforcement_active/,
 );
 assert.doesNotMatch(preflightStep, /legacy-stage-allowlist/);
+
+const existing30dDiagnosticRun = workflow.match(
+  /- name: Diagnose existing 30-day durable recovery[\s\S]*?(?=\n\s+- name:|\s*$)/,
+)[0];
+assert.match(existing30dDiagnosticRun, /if: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.mode == 'existing-30d-recovery-diagnostic' \}\}/);
+assert.match(existing30dDiagnosticRun, /DEPLOYED_COMMIT_SHA: \$\{\{ steps\.checkout-sha\.outputs\.sha \}\}/);
+assert.match(existing30dDiagnosticRun, /test "\$DEPLOYED_COMMIT_SHA" = "\$GITHUB_SHA"/);
+assert.match(existing30dDiagnosticRun, /test -z "\$\{CHIPS_LEDGER_BOT_ONLY_EXECUTE:-\}"/);
+assert.match(existing30dDiagnosticRun, /test -z "\$\{CHIPS_LEDGER_BOT_ONLY_AUTOMATIC:-\}"/);
+assert.match(existing30dDiagnosticRun, /--policy stage-ledger-auto-retention-30d-v1 \\\n\s+--diagnose-recovery/);
+assert.match(existing30dDiagnosticRun, /--batch-id "\$STAGE_30D_RECOVERY_BATCH_ID"/);
+assert.doesNotMatch(existing30dDiagnosticRun, /--repair-recovery|--prepare-only|--execute|--automatic|--register-proof|storeArchive|ensureArchiveBucket|SUPABASE_PROD_|PRODUCTION|--target\s+prod/i);
+assert.doesNotMatch(existing30dDiagnosticRun, /github\.event_name == 'schedule'/);
+
+const existing30dRepairRun = workflow.match(
+  /- name: Repair exact existing 30-day durable recovery[\s\S]*?(?=\n\s+- name:|\s*$)/,
+)[0];
+assert.match(existing30dRepairRun, /if: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.mode == 'existing-30d-recovery-repair' \}\}/);
+assert.match(existing30dRepairRun, /DEPLOYED_COMMIT_SHA: \$\{\{ steps\.checkout-sha\.outputs\.sha \}\}/);
+assert.match(existing30dRepairRun, /test "\$DEPLOYED_COMMIT_SHA" = "\$GITHUB_SHA"/);
+assert.match(existing30dRepairRun, /test -z "\$\{CHIPS_LEDGER_BOT_ONLY_EXECUTE:-\}"/);
+assert.match(existing30dRepairRun, /test -z "\$\{CHIPS_LEDGER_BOT_ONLY_AUTOMATIC:-\}"/);
+assert.match(existing30dRepairRun, /GITHUB_ACTOR" != "\$GITHUB_REPOSITORY_OWNER"/);
+assert.match(existing30dRepairRun, /stage_30d_recovery_batch_id must be a positive integer/);
+assert.match(existing30dRepairRun, /node scripts\/ops\/chips-ledger-stage-automation\.mjs \\\n\s+--policy stage-ledger-auto-retention-30d-v1 \\\n\s+--repair-recovery \\\n\s+--batch-id "\$STAGE_30D_RECOVERY_BATCH_ID"/);
+assert.doesNotMatch(existing30dRepairRun, /--diagnose-recovery|--prepare-only|--execute|--automatic|--register-proof|--approved-batch|storeArchive|ensureArchiveBucket|Production|SUPABASE_PROD_/i);
+assert.doesNotMatch(existing30dRepairRun, /github\.event_name == 'schedule'/);
 
 const botOnlyRun = workflow.match(
   /- name: Run bot-only 7-day prepare-only Stage automation[\s\S]*?(?=\n\s+- name:|\s*$)/,
