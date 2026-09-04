@@ -1,86 +1,55 @@
 # Stage-only chips-ledger automation
 
-This workflow is related to closed Issue #874 and is intentionally unavailable
-for Production. The legacy Stage allowlist tooling is part of this PR but
-remains a separate, manual-only mode. The automatic bot-only 7-day cron never
-invokes it, and it was not operationally run during the bot-only rollout.
-Production has no scheduler path, and no Production operation was performed.
-The orchestrator has no target argument: it hardcodes the
-canonical Stage project `krydukthwdvccggbyjfw` and PostgreSQL system identifier
-`7656985631720456337`. The workflow passes only Stage credentials.
+This workflow is Stage-only and intentionally unavailable for Production. It
+hardcodes the canonical Stage project `krydukthwdvccggbyjfw` and PostgreSQL
+system identifier `7656985631720456337`. The workflow passes only Stage
+credentials; there is no Production scheduler or Production operation path.
 
-## Policy
+## Active policies and schedules
 
-- Stage policy `stage-ledger-bot-only-retention-7d-v1` is active. Canary batch
-  15 completed and was used to activate the policy.
-- `CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED=1` is set. After this change is merged,
-  the workflow from the default branch automatically starts the 7-day cleanup
-  every 15 minutes. This is intentional: the merge is the operational GO for
-  the scheduler, not a request for another activation step.
-- The existing 30-day Stage maintenance runs once per day with a strict
-  30-day cutoff.
-- The 7-day cleanup schedule runs every 15 minutes and processes at most 6
-  complete-table batches per invocation. Schema-v2 intentionally keeps one
-  table per batch for an atomic lifecycle receipt; the bounded schedule
-  provides a theoretical 576-table/day ceiling while preserving job timeout
-  margin.
-- The first bot-only canary is an explicit prepare/authorize/execute sequence:
-  dispatch `bot-only-7d-prepare-only`, record the exact committed `batch_id`,
-  then dispatch `bot-only-7d-execute` with both `approved_batch_id` and the
-  exact human confirmation `GO <approved_batch_id>`. The execute dispatch must
-  also carry `CHIPS_LEDGER_BOT_ONLY_EXECUTE=1`.
-- Selection starts at the beginning of `(created_at, id)` on every new cycle and
-  chooses the oldest currently hot, unmapped, prunable technical rows. Manual
-  manifests without `source_policy_id` never drive the cursor.
-- A missing candidate is a successful no-op.
+- The existing 30-day Stage maintenance (`stage-ledger-auto-retention-30d-v1`)
+  runs once per day on the native cron:
+  - `17 2 * * *`
+- The bot-only 7-day retention policy
+  (`stage-ledger-bot-only-retention-7d-v1`) is active and runs every 15 minutes
+  on the native cron:
+  - `7,22,37,52 * * * *`
+- Stage escrow account retention is completed and active. It runs on the same
+  15-minute native cron.
+- `external-scheduled-automatic` is the VPS/external fallback dispatch mode for
+  the same bot-only 7-day and escrow account retention automatic steps. It does
+  not introduce a separate policy or batch limit.
+- The workflow concurrency group is `chips-ledger-stage-automation` with
+  `cancel-in-progress: false` and `queue: max`.
 
-Legacy `legacy_stage_allowlist_v1` cleanup remains manual-only. Its exact-batch
-pruner now writes `poker_tables.bot_only_retention_complete_at` only after the
-complete archive, prune, and registry-cleanup receipts, in the same transaction
-as the ledger/registry deletion. Batch 13 retries may repair a missing marker;
-batches 2–98 require the authorized frozen run-level GO. This transition does
-not delete tables or ESCROW accounts: the existing closed-table cleaner owns
-table deletion, and ESCROW remains in the scope of #894.
+The bot-only 7-day cleanup processes at most 6 complete-table batches per
+invocation. Schema-v2 intentionally keeps one table per batch for an atomic
+lifecycle receipt; the bounded schedule provides a theoretical 576-table/day
+ceiling while preserving job timeout margin. Escrow account retention is
+similarly bounded by its own script-level limits and fail-closed checks.
 
-The JSONL is produced by the prunable-only exporter mode. The manual exporter
-mode remains unchanged. The database pruner repeats the complete technical,
-registry, conservation, table, escrow, proof, receipt and mapping checks before
-any delete.
+## Supported dispatch modes
 
-## Exact canary authorization
+The remaining manual/operator modes are intentionally limited to supported
+ongoing operations:
 
-The first canary is intentionally bound to one prepared batch and never picks
-the next candidate during execute:
+| Mode | Purpose |
+| --- | --- |
+| `existing-30d` | Run the existing daily 30-day Stage automation cycle |
+| `existing-30d-recovery-diagnostic` | Read-only diagnosis of the current 30-day cycle or an exact 30-day batch |
+| `existing-30d-recovery-repair` | Owner-only, exact-batch recovery repair for a proven/unpruned 30-day batch with missing durable recovery |
+| `bot-only-7d-summary-diagnostic` | Read-only bot-only table identity summary diagnostic |
+| `bot-only-7d-automatic` | Run the activated bot-only 7-day automatic cleanup on demand |
+| `escrow-retention-audit` | Read-only Stage escrow retention audit |
+| `escrow-retention-verify` | Verify an existing account recovery object |
+| `external-scheduled-automatic` | External/VPS fallback for native bot-only + escrow automation |
 
-1. Actions runs `bot-only-7d-prepare-only`. This may export, store, register
-   the immutable proof, validate the archive, and persist the two durable
-   recovery copies, but it does not write a destructive GO or prune rows.
-2. The reviewer copies the committed `batch_id` from the aggregate result and
-   enters that ID in `approved_batch_id` on a new `bot-only-7d-execute`
-   dispatch. The second input must be exactly `GO <batch_id>` in
-   `approved_batch_confirmation`.
-3. Before any execute-side export, Storage write, proof registration, or new
-   manifest, the runner reads only that `batch_id` and fail-closed checks Stage
-   identity, policy, schema v2, committed status, proof, recovery, object/SHA,
-   receipts, and active-manifest equality.
-4. If the exact batch is committed and unpruned without a GO, the owner-only
-   database call
-   `public.chips_authorize_bot_only_archive_batch(batch_id, 'GO <batch_id>')`
-   persists `destructive_go_at` and `destructive_go_batch_id`. The runner
-   reads the manifest again and refuses to execute unless both values are
-   present and bound to the same batch. An existing exact GO is reused without
-   creating another one.
-5. Execute then passes that same ID to the proof-bound cleanup function. A
-   retry of a completely pruned-and-cleaned exact batch verifies its receipts,
-   returns `already_cleaned`, and does not export, prepare, or select another
-   batch. A wrong/nonexistent/inactive ID, wrong confirmation, partial or
-   foreign GO, missing proof/recovery, or object/hash/policy mismatch fails
-   closed.
-
-The canary path is distinct from the activated automatic policy. The 15-minute
-schedule is the only automatic 7-day trigger; the existing 30-day policy keeps
-its once-daily schedule. Automatic cleanup remains bounded at 6 batches per
-run, which is at most 576 complete tables per day.
+The rollout-only modes (first bot-only canary prepare/execute, bot-only batch 15
+recovery repair, legacy Stage allowlist prepare/orchestrate/batch-13 execute,
+and escrow retention canary prepare/authorize/execute/activate) are no longer
+exposed through the workflow. The underlying archive/recovery scripts remain in
+the repository where they are still needed for immutable evidence, audits, and
+controlled recovery operations.
 
 ## Recovery durability
 
@@ -108,32 +77,62 @@ rechecked for read-after-write visibility. The create-only Storage `POST` is
 never retried. Every successful download still requires the expected MIME type
 and byte/SHA-256 verification.
 
-Automatic error reports retain both completed `processed_batches` and the
-current in-progress batch. They distinguish `archive_storage_modified` from
+Automatic error reports retain completed batches and the current in-progress
+batch. They distinguish `archive_storage_modified` from
 `recovery_storage_modified`; `storage_modified` is their explicitly known
 aggregate and is null when a partial operation leaves the outcome unknown.
-Legacy recovery failures are reported as phase `recovery` with the batch number,
-batch ID, recovery attempts, per-object Storage presence/MIME/size/SHA-256 and
-an explicit state such as `both_missing`, `partial`, `mismatch` or
-`write_not_visible`.
+Recovery failures are reported with the batch number, batch ID, recovery
+attempts, per-object Storage presence/MIME/size/SHA-256 and an explicit state
+such as `both_missing`, `partial`, `mismatch` or `write_not_visible`.
 
 The local working bundle remains `0700` with `0600` files. A partial or
-different durable copy is fail-closed. Automatic mode may reconstruct a pair
-only for a canonical committed, proven, unpruned and uncleaned bot-only Stage
-batch with no destructive GO, a ready read-only dry-run, and both recovery
-objects explicitly confirmed absent. It re-downloads the primary object,
-requires byte/SHA equality with the dry-run and committed proof, generates the
-canonical manifest, and uses create-only uploads followed by full verification.
-After a post-commit runner failure, receipt/mappings and the normal
-`already_cleaned` path are used; no blind retry or new batch is created.
+different durable copy is fail-closed.
+
+## 30-day controlled recovery diagnostic/repair
+
+The existing 30-day automation intentionally refuses a blind retry when a
+committed, proven, unpruned cycle has no durable recovery. The controlled
+operator path is:
+
+1. Run `existing-30d-recovery-diagnostic`.
+   - Without a batch ID it detects the current 30-day cycle.
+   - If multiple incomplete cycles exist, it reports ambiguity with candidate
+     batch IDs rather than choosing one.
+   - It is read-only and reports batch identity, object path, SHA-256, proof and
+     prune timestamps, recovery paths, `inspectDurableRecoveryState()` results,
+     and whether the main immutable archive object exists and matches.
+2. If the report confirms exactly:
+   - batch is `proven`;
+   - `pruned_at` is null;
+   - the main archive object exists and matches the committed SHA;
+   - recovery state is exactly `BOTH_MISSING`;
+   then an owner may run `existing-30d-recovery-repair` with the exact
+   `stage_30d_recovery_batch_id`.
+3. The repair is recovery-only:
+   - re-loads the exact batch from the DB after lock and again after dry-run;
+   - revalidates policy, object path, SHA, proof, unpruned state, and
+     `BOTH_MISSING`;
+   - uses the already committed/proven archive to create both deterministic
+     recovery objects through `persistDurableRecovery(...)`;
+   - uses create-only Storage writes, canonical recovery manifest, and
+     read-after-write byte/SHA verification;
+   - never prunes, never writes a GO, never cleans registry state, and never
+     exports a new batch.
+4. Only after both recovery objects verify as `complete` may the normal 30-day
+   workflow resume.
+
+This repair is not a state-skipping mode: `assertResumeRecoveryState()` remains
+unchanged and the normal automation continues to fail closed whenever durable
+recovery is missing.
 
 ## Operator runbook
 
-The automation has no force, repair, or state-skipping mode. Do not invoke the
+The automation has no force, repair, or state-skipping mode beyond the
+controlled exact-batch recovery repair described above. Do not invoke the
 pruner with `--execute` by hand, edit an archive manifest, clear an idempotency
-mapping, delete a Storage object, or enable the kill switch to get past one of
-the states below. Keep the Stage cycle blocked and preserve all evidence until
-the condition is resolved.
+mapping, delete a Storage object, or enable a kill switch to get past a blocked
+state. Keep the Stage cycle blocked and preserve all evidence until the
+condition is resolved.
 
 ### Pending, partial, or ambiguous manifest
 
@@ -159,9 +158,9 @@ For a proven or pruned cycle, both recovery objects are mandatory. If exactly
 one object is present, either object has the wrong MIME type/size/SHA-256,
 cannot be privately downloaded, or the pair is otherwise partial:
 
-1. Do not run `--execute`, register a new proof, overwrite an existing object,
-   or start a new archive batch. The primary archive object is not a substitute
-   for a partial recovery pair.
+1. Do not run destructive cleanup, register a new proof, overwrite an existing
+   object, or start a new archive batch. The primary archive object is not a
+   substitute for a partial recovery pair.
 2. Preserve the manifest and the surviving object. Confirm that the expected
    paths are derived from the immutable compressed SHA-256 and that no object
    at either path differs from the expected bytes.
@@ -177,24 +176,28 @@ cannot be privately downloaded, or the pair is otherwise partial:
 
 ### Proven without recovery
 
-This is the state `archive_proof_verified_at` is complete while `pruned_at`,
-`registry_cleaned_at`, the destructive GO, and the TABLE lifecycle marker are
-still null and both recovery objects are absent. Automatic mode may recover
-this state only after a ready read-only dry-run revalidates the primary object
-and proves that its bytes and ID evidence match the committed SHA/proof. It
-then creates both deterministic recovery objects with `x-upsert:false` and
-rechecks their MIME, bytes, SHA-256, gzip, JSON, and canonical manifest before
-the normal double-cycle executes. A partial/ambiguous pair, any lifecycle
-receipt or GO, missing/foreign primary object, or any proof/manifest mismatch
-remains blocked and requires owner-approved recovery.
+This is the state where `archive_proof_verified_at` is complete, `pruned_at` is
+null, and both recovery objects are absent. Automatic mode may recover this
+state only after a ready read-only dry-run revalidates the primary object and
+proves that its bytes and ID evidence match the committed SHA/proof. It then
+creates both deterministic recovery objects with `x-upsert:false` and rechecks
+their MIME, bytes, SHA-256, gzip, JSON, and canonical manifest before the normal
+cycle continues. A partial/ambiguous pair, any lifecycle receipt or GO,
+missing/foreign primary object, or any proof/manifest mismatch remains blocked
+and requires owner-approved recovery.
+
+For the existing 30-day policy, use the controlled
+`existing-30d-recovery-diagnostic` + `existing-30d-recovery-repair` path rather
+than relying on automatic reconstruction. The 30-day automation remains
+fail-closed until durable recovery is complete.
 
 ### Post-commit or already-pruned recovery
 
-If the receipt and mappings are complete, the cycle is revalidated through
-`already_pruned`. It still requires the complete recovery pair and immutable
-proof. A missing or partial pair is an incident, not a reason to create a new
-batch. Keep the environment fail-closed until the pair is restored and passes
-private download and byte/SHA verification.
+If the receipt and mappings are complete, the cycle is revalidated through its
+already-completed state. It still requires the complete recovery pair and
+immutable proof. A missing or partial pair is an incident, not a reason to
+create a new batch. Keep the environment fail-closed until the pair is restored
+and passes private download and byte/SHA verification.
 
 ## Resume and locking
 
@@ -203,17 +206,16 @@ session advisory lock held for the entire cycle. All modes share the
 `chips-ledger-stage-automation` concurrency group with
 `cancel-in-progress: false` and `queue: max`, so scheduled and manual work
 remains serialized without replacing an older pending run. A busy lock is a
-no-op; a lost lock session aborts the cycle. Pending, partial, mismatched or otherwise
-ambiguous own manifests stop the run and are reported in the aggregate Job
-Summary. A committed manifest with no proof can resume only through the normal
-proof/dry-run path. A proven unpruned, uncleaned manifest with no GO may create
-its pair only through the constrained automatic reconstruction path above; all
-other proven manifests require a complete durable pair. With a pair it is
-fully revalidated before execute, while a missing or partial pair after prune,
-cleanup, GO, or an ambiguous Storage result is fail-closed. A completed
-manifest is rechecked through `already_cleaned`. Every allowed resume repeats
+no-op; a lost lock session aborts the cycle.
+
+Pending, partial, mismatched or otherwise ambiguous own manifests stop the run
+and are reported in the aggregate Job Summary. A committed manifest with no
+proof can resume only through the normal proof/dry-run path. A proven unpruned,
+uncleaned manifest with no GO may create its recovery pair only through the
+constrained reconstruction/repair paths described above; all other proven
+manifests require a complete durable pair. Every allowed resume repeats
 identity, policy, archive, recovery, proof, receipt and mapping verification.
 
-Logs and Job Summary contain only aggregate counts, sizes, hashes and state. They
-never contain ledger records, credentials, DB URLs, service keys or recovery
-contents. No Actions artifact is used for recovery.
+Logs and Job Summary contain only aggregate counts, sizes, hashes and state.
+They never contain ledger records, credentials, DB URLs, service keys or
+recovery contents. No Actions artifact is used for recovery.

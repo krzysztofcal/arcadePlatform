@@ -2953,11 +2953,11 @@ async function legacyOrchestratorBatchTempIsolationContract() {
 
 function staticWorkflowContracts() {
   assert.match(workflow, /bot-only-7d-automatic/);
-  assert.match(workflow, /legacy-stage-allowlist-orchestrate/);
+  assert.doesNotMatch(workflow, /legacy-stage-allowlist-orchestrate/);
   assert.match(workflow, /github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/);
   assert.match(workflow, /--policy bot-only-7d --automatic/);
   assert.match(workflow, /CHIPS_LEDGER_BOT_ONLY_AUTOMATIC: "1"/);
-  assert.match(workflow, /node scripts\/ops\/chips-ledger-legacy-stage-allowlist-orchestrator\.mjs/);
+  assert.doesNotMatch(workflow, /node scripts\/ops\/chips-ledger-legacy-stage-allowlist-orchestrator\.mjs/);
   assert.doesNotMatch(workflow, /SUPABASE_PROD_|PRODUCTION|--target\\s+prod/i);
   assert.match(orchestratorSource, /batch13: "skipped-already-pruned-and-cleaned"/);
   assert.match(orchestratorSource, /LEGACY_STAGE_ALLOWLIST_ORCHESTRATOR_MAX_BATCHES_PER_RUN/);
