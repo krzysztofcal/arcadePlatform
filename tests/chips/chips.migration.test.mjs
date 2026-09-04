@@ -1154,6 +1154,198 @@ async function assertArchivePrunerRoleContracts(sql) {
   });
 }
 
+async function assertClosedHumanPruneEvidence(sql) {
+  const closedHumanPolicyId = "stage-ledger-closed-human-table-retention-30d-v1";
+  const ROLLBACK = new Error("closed-human-prune-evidence-rollback");
+  await sql.begin(async (tx) => {
+    await tx.unsafe("set transaction isolation level serializable;");
+    await tx.unsafe(`create or replace function public.chips_assert_archive_prune_stage()
+      returns text language sql security definer set search_path = ''
+      as $override$ select '7656985631720456337'::text $override$;`);
+    await tx.unsafe(`create or replace function public.chips_assert_archive_prune_target(p_project_ref text, p_transaction_count bigint)
+      returns text language plpgsql security definer set search_path = ''
+      as $override$
+      begin
+        if p_project_ref = 'krydukthwdvccggbyjfw' and p_transaction_count between 1 and 5000 then
+          return '7656985631720456337';
+        elsif p_project_ref = 'otbqfijerkieoxwpxjnm' and p_transaction_count between 1 and 2 then
+          return '7575202818581710058';
+        end if;
+        raise exception 'test target gate rejected request';
+      end
+      $override$;`);
+
+    const tableId = "00000000-0000-4000-8000-00000000e401";
+    const userId = primaryUserId;
+    const userAccountId = "00000000-0000-4000-8000-00000000e402";
+    const escrowId = "00000000-0000-4000-8000-00000000e403";
+    const transactionIds = [
+      "00000000-0000-4000-8000-00000000e404",
+      "00000000-0000-4000-8000-00000000e405",
+    ];
+    const cutoff = "2026-08-01T00:00:00Z";
+    const createdAt = ["2026-07-01T00:00:00Z", "2026-07-02T00:00:00Z"];
+
+    await tx.unsafe(`insert into public.poker_tables (id, status, has_human_participant)
+      values ($1::uuid, 'CLOSED', true);`, [tableId]);
+    await tx.unsafe(`insert into public.chips_accounts (id, user_id, system_key, account_type, status, balance)
+      values ($1::uuid, $2::uuid, null, 'USER', 'active', 10);`, [userAccountId, userId]);
+    await tx.unsafe(`insert into public.chips_accounts (id, user_id, system_key, account_type, status, balance)
+      values ($1::uuid, null, $2, 'ESCROW', 'active', 0);`, [escrowId, `POKER_TABLE:${tableId}`]);
+
+    const entryIds = [];
+    for (let index = 0; index < transactionIds.length; index += 1) {
+      await tx.unsafe(`insert into public.chips_transactions (
+        id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at
+      ) values ($1::uuid, $2, $3::jsonb, $4, $5, $6, $7::uuid, $8::timestamptz);`, [
+        transactionIds[index],
+        `table:${tableId}`,
+        JSON.stringify({ tableId }),
+        `closed-human-prune-evidence:${index}`,
+        (index === 0 ? "a" : "b").repeat(64),
+        index === 0 ? "TABLE_BUY_IN" : "TABLE_CASH_OUT",
+        userId,
+        sql.typed(createdAt[index], 25),
+      ]);
+      const rows = await tx.unsafe(`with accounts as (
+        select id, account_type from public.chips_accounts
+        where id = $2::uuid or id = $3::uuid
+      )
+      insert into public.chips_entries (transaction_id, account_id, amount, metadata)
+      select $1::uuid, id,
+             case
+               when $4::boolean and account_type = 'USER' then -10
+               when $4::boolean and account_type = 'ESCROW' then 10
+               when not $4::boolean and account_type = 'USER' then 10
+               when not $4::boolean and account_type = 'ESCROW' then -10
+             end,
+             '{}'::jsonb
+      from accounts order by account_type returning id;`, [
+        transactionIds[index], userAccountId, escrowId, index === 0,
+      ]);
+      entryIds.push(...rows.map((row) => String(row.id)).sort((left, right) => (BigInt(left) < BigInt(right) ? -1 : 1)));
+    }
+
+    const compressedHash = "2".repeat(64);
+    const objectPath = `v1/sha256/${compressedHash}.jsonl.gz`;
+    await tx.unsafe(`insert into public.chips_ledger_archive_batches (
+      object_path, project_ref, format_version, source_policy_id, cutoff,
+      cursor_start_created_at, cursor_start_id, cursor_end_created_at, cursor_end_id,
+      first_created_at, last_created_at, transaction_count, entry_count, tx_types,
+      raw_bytes, compressed_bytes, raw_sha256, compressed_sha256, credits, debits,
+      net_amount, status, committed_at
+    ) values (
+      $1, 'krydukthwdvccggbyjfw', 1, $2, $3::timestamptz, $4::timestamptz, $5::uuid,
+      $6::timestamptz, $7::uuid, $8::timestamptz, $6::timestamptz,
+      2, 4, '{"TABLE_BUY_IN":1,"TABLE_CASH_OUT":1}'::jsonb,
+      100, 80, $9, $10, 20, 20, 0, 'committed', timezone('utc', now())
+    );`, [
+      objectPath, closedHumanPolicyId, sql.typed(cutoff, 25), sql.typed("2026-06-30T23:59:59Z", 25),
+      transactionIds[0], sql.typed(createdAt[1], 25), transactionIds[1],
+      sql.typed(createdAt[0], 25), "1".repeat(64), compressedHash,
+    ]);
+
+    const pruneStore = createPruneStore({
+      unsafe: (...args) => tx.unsafe(...args),
+      begin: async (callback) => callback({
+        unsafe: (query, parameters) => query === "set transaction isolation level repeatable read;"
+          ? Promise.resolve([])
+          : tx.unsafe(query, parameters),
+      }),
+      typed: (value, type) => sql.typed(value, type),
+    });
+    const manifest = await pruneStore.getManifest(objectPath);
+    assert.equal(manifest.source_policy_id, closedHumanPolicyId, "closed-human dry-run manifest must retain its source policy");
+    const proofResult = await pruneStore.registerProof(manifest, { transactionIds, entryIds });
+    assert.equal(proofResult.state, "proof_registered", "closed-human USER/ESCROW archive must register immutable proof");
+
+    const validDryRows = await tx.unsafe(
+      "select public.chips_prune_committed_archive_batch($1, $2::uuid[], $3::bigint[], false) as result;",
+      [objectPath, transactionIds, entryIds],
+    );
+    assert.equal(validDryRows[0].result.state, "ready", "closed-human USER/ESCROW BUY_IN + CASH_OUT must pass dry-run");
+    assert.equal(Number(validDryRows[0].result.user_transactions), 2, "closed-human dry-run must report two user transactions");
+    assert.equal(Number(validDryRows[0].result.user_entries), 2, "closed-human dry-run must report two USER entries");
+
+    const malformedTableId = "00000000-0000-4000-8000-00000000e411";
+    const malformedUserId = idempotentUserId;
+    const malformedUserAccountId = "00000000-0000-4000-8000-00000000e412";
+    const malformedEscrowId = "00000000-0000-4000-8000-00000000e413";
+    const malformedTransactionId = "00000000-0000-4000-8000-00000000e414";
+    const malformedCreatedAt = "2026-07-03T00:00:00Z";
+
+    await tx.unsafe(`insert into public.poker_tables (id, status, has_human_participant)
+      values ($1::uuid, 'CLOSED', true);`, [malformedTableId]);
+    await tx.unsafe(`insert into public.chips_accounts (id, user_id, system_key, account_type, status, balance)
+      values ($1::uuid, $2::uuid, null, 'USER', 'active', 10);`, [malformedUserAccountId, malformedUserId]);
+    await tx.unsafe(`insert into public.chips_accounts (id, user_id, system_key, account_type, status, balance)
+      values ($1::uuid, null, $2, 'ESCROW', 'active', 0);`, [malformedEscrowId, `POKER_TABLE:${malformedTableId}`]);
+    await tx.unsafe(`insert into public.chips_transactions (
+      id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at
+    ) values ($1::uuid, $2, $3::jsonb, $4, $5, $6, $7::uuid, $8::timestamptz);`, [
+      malformedTransactionId,
+      `table:${malformedTableId}`,
+      JSON.stringify({ tableId: malformedTableId }),
+      "closed-human-prune-malformed",
+      "c".repeat(64),
+      "TABLE_BUY_IN",
+      malformedUserId,
+      sql.typed(malformedCreatedAt, 25),
+    ]);
+    const malformedEntryRows = await tx.unsafe(`with accounts as (
+      select id, account_type from public.chips_accounts
+      where id = $2::uuid or id = $3::uuid
+    )
+    insert into public.chips_entries (transaction_id, account_id, amount, metadata)
+    select $1::uuid, id,
+           case when account_type = 'USER' then 10 else -10 end,
+           '{}'::jsonb
+    from accounts order by account_type returning id;`, [
+      malformedTransactionId, malformedUserAccountId, malformedEscrowId,
+    ]);
+    const malformedEntryIds = malformedEntryRows.map((row) => String(row.id))
+      .sort((left, right) => (BigInt(left) < BigInt(right) ? -1 : 1));
+    await tx.unsafe("update public.chips_accounts set balance = 0 where id = $1::uuid;", [malformedEscrowId]);
+    const malformedCompressedHash = "3".repeat(64);
+    const malformedObjectPath = `v1/sha256/${malformedCompressedHash}.jsonl.gz`;
+    await tx.unsafe(`insert into public.chips_ledger_archive_batches (
+      object_path, project_ref, format_version, source_policy_id, cutoff,
+      cursor_start_created_at, cursor_start_id, cursor_end_created_at, cursor_end_id,
+      first_created_at, last_created_at, transaction_count, entry_count, tx_types,
+      raw_bytes, compressed_bytes, raw_sha256, compressed_sha256, credits, debits,
+      net_amount, status, committed_at
+    ) values (
+      $1, 'krydukthwdvccggbyjfw', 1, $2, $3::timestamptz, $4::timestamptz, $5::uuid,
+      $6::timestamptz, $7::uuid, $6::timestamptz, $6::timestamptz,
+      1, 2, '{"TABLE_BUY_IN":1}'::jsonb,
+      100, 80, $8, $9, 10, 10, 0, 'committed', timezone('utc', now())
+    );`, [
+      malformedObjectPath, closedHumanPolicyId, sql.typed(cutoff, 25), sql.typed("2026-06-30T23:59:59Z", 25),
+      malformedTransactionId, sql.typed(malformedCreatedAt, 25), malformedTransactionId,
+      "4".repeat(64), malformedCompressedHash,
+    ]);
+    const malformedManifest = await pruneStore.getManifest(malformedObjectPath);
+    const malformedProof = await pruneStore.registerProof(malformedManifest, {
+      transactionIds: [malformedTransactionId],
+      entryIds: malformedEntryIds,
+    });
+    assert.equal(malformedProof.state, "proof_registered", "malformed closed-human archive must register proof before fail-closed dry-run");
+    await expectSavepointError(
+      tx,
+      "closed_human_malformed_shape",
+      () => tx.unsafe(
+        "select public.chips_prune_committed_archive_batch($1, $2::uuid[], $3::bigint[], false) as result;",
+        [malformedObjectPath, [malformedTransactionId], malformedEntryIds],
+      ),
+      /outside the technical TABLE_BUY_IN\/TABLE_CASH_OUT whitelist/,
+    );
+
+    throw ROLLBACK;
+  }).catch((error) => {
+    if (error !== ROLLBACK) throw error;
+  });
+}
+
 async function assertLegacyAllowlistCleanupContracts(sql) {
   const masterIds = fs.readFileSync(
     path.join(process.cwd(), "data/chips-ledger/legacy-stage-allowlist-v1/legacy-stage-allowlist-v1.master.ids"),
@@ -2106,6 +2298,7 @@ async function main() {
   await expectFrozenLegacyAllowlistHashGuard(sql);
   await ensureGenesisFixture(sql);
   await assertArchivePrunerRoleContracts(sql);
+  await assertClosedHumanPruneEvidence(sql);
   await assertLegacyAllowlistCleanupContracts(sql);
   await assertLegacyUnprunedRegistrySelectorContract(sql);
   await assertScopedSnapshotIgnoresParallelUnrelatedActivity(sql);
