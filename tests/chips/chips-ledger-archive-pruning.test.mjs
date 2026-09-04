@@ -19,6 +19,7 @@ import {
   computeArchiveIdProofs,
   pruneArchive,
 } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
+import { ensurePrivateDirectory } from "../../scripts/ops/_shared/chips-ledger-archive-files.mjs";
 
 const TX_A = "00000000-0000-4000-8000-00000000000a";
 const TX_B = "00000000-0000-4000-8000-00000000000b";
@@ -35,6 +36,25 @@ const ENV = {
   SUPABASE_SERVICE_ROLE_KEY: "test-service-role-key",
 };
 const PROD_ENV = { ...ENV, SUPABASE_URL: "https://otbqfijerkieoxwpxjnm.supabase.co" };
+
+{
+  const permissionTempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-archive-private-dir-"));
+  try {
+    const goodDirectory = path.join(permissionTempRoot, "good");
+    const badDirectory = path.join(permissionTempRoot, "bad");
+    fs.mkdirSync(goodDirectory, { mode: 0o700 });
+    fs.mkdirSync(badDirectory, { mode: 0o755 });
+    assert.equal(fs.statSync(goodDirectory).mode & 0o777, 0o700);
+    assert.equal(ensurePrivateDirectory(goodDirectory), path.resolve(goodDirectory));
+    assert.equal(fs.statSync(goodDirectory).mode & 0o777, 0o700);
+    assert.throws(
+      () => ensurePrivateDirectory(badDirectory),
+      /recovery directory permissions must be 0700/,
+    );
+  } finally {
+    fs.rmSync(permissionTempRoot, { recursive: true, force: true });
+  }
+}
 
 function candidate(id, createdAt, txType) {
   return {

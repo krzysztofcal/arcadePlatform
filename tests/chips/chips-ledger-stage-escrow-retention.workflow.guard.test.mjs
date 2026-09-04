@@ -14,49 +14,38 @@ test("scheduled and external fallback invoke escrow retention without rollout in
   assert.match(step, /github\.event_name == 'workflow_dispatch' && inputs\.mode == 'external-scheduled-automatic'/);
   assert.match(step, /node scripts\/ops\/chips-ledger-stage-escrow-retention\.mjs --automatic/);
   assert.doesNotMatch(step, /workflow_dispatch:\s*inputs|--execute|--batch-id|GO|inputs\.escrow_retention_|inputs\.approved_/);
-  assert.equal((workflow.match(/chips-ledger-stage-escrow-retention\.mjs/g) || []).length, 6);
+  assert.equal((workflow.match(/chips-ledger-stage-escrow-retention\.mjs/g) || []).length, 2);
 });
 
-test("manual escrow retention rollout has exact, main-only workflow modes", () => {
+test("manual escrow retention modes are audit/verify only with retained recovery inputs", () => {
   for (const mode of [
     "escrow-retention-audit",
-    "escrow-retention-prepare-only",
-    "escrow-retention-authorize-canary",
-    "escrow-retention-execute",
     "escrow-retention-verify",
-    "escrow-retention-activate",
   ]) {
     assert.match(workflow, new RegExp(`- ${mode}`));
     assert.match(workflow, new RegExp(`inputs\\.mode == '${mode}'`));
   }
-  assert.match(workflow, /escrow_retention_batch_id:[\s\S]*?type: string/);
-  assert.match(workflow, /escrow_retention_account_ids_sha256:[\s\S]*?type: string/);
-  assert.match(workflow, /escrow_retention_confirmation:[\s\S]*?type: string/);
+  for (const retired of [
+    "escrow-retention-prepare-only",
+    "escrow-retention-authorize-canary",
+    "escrow-retention-execute",
+    "escrow-retention-activate",
+  ]) {
+    assert.doesNotMatch(workflow, new RegExp(`- ${retired}`));
+    assert.doesNotMatch(workflow, new RegExp(`inputs\\.mode == '${retired}'`));
+  }
   assert.match(workflow, /escrow_retention_recovery_object_path:[\s\S]*?type: string/);
   assert.match(workflow, /escrow_retention_recovery_confirmation:[\s\S]*?type: string/);
+  assert.doesNotMatch(workflow, /escrow_retention_batch_id:|escrow_retention_account_ids_sha256:|escrow_retention_confirmation:/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
   assert.match(workflow, /github\.event\.repository\.fork != true/);
   assert.match(workflow, /github\.actor == github\.repository_owner/);
-  for (const [stepName, ownerMessage] of [
-    ["Authorize exact Stage escrow account-retention canary", "canary authorization requires the repository owner"],
-    ["Execute exact Stage escrow account-retention canary", "execute requires the repository owner"],
-    ["Activate Stage escrow account-retention automation", "activation requires the repository owner"],
-  ]) {
-    const step = workflow.match(new RegExp(`- name: ${stepName}[\\s\\S]*?(?=\\n\\s+- name:|\\s*$)`))?.[0] || "";
-    assert.match(step, /GITHUB_ACTOR/);
-    assert.match(step, /GITHUB_REPOSITORY_OWNER/);
-    assert.match(step, new RegExp(ownerMessage));
-  }
-  assert.match(workflow, /CHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_AUTHORIZE_CANARY: "1"/);
-  assert.match(workflow, /CHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_EXECUTE: "1"/);
-  assert.match(workflow, /CHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_ACTIVATE: "1"/);
-  assert.match(workflow, /--authorize-canary[\s\S]*?--account-ids-sha256/);
-  assert.match(workflow, /--execute[\s\S]*?--account-ids-sha256/);
-  assert.match(workflow, /--activate[\s\S]*?--confirmation/);
+  assert.doesNotMatch(workflow, /CHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_(AUTHORIZE_CANARY|EXECUTE|ACTIVATE): "1"/);
+  assert.doesNotMatch(workflow, /--authorize-canary|--activate|--account-ids-sha256/);
   assert.match(workflow, /chips-ledger-stage-escrow-account-recovery\.mjs[\s\S]*?--object-path/);
   assert.match(workflow, /VERIFY \$ESCROW_RETENTION_RECOVERY_OBJECT_PATH/);
-  assert.match(workflow, /ACTIVATE.*stage-ledger-escrow-account-retention-v1/);
+  assert.doesNotMatch(workflow, /ACTIVATE.*stage-ledger-escrow-account-retention-v1/);
   assert.doesNotMatch(workflow.match(/- name: Run Stage escrow account retention[\s\S]*?(?=\n\s+- name:)/)?.[0] || "", /inputs\.(?:escrow_retention_|approved_)/);
 });
 
