@@ -47,6 +47,12 @@ $function$;
 revoke all on function public.chips_bot_proof_metadata_table_id(jsonb) from public, anon, authenticated, service_role;
 grant execute on function public.chips_bot_proof_metadata_table_id(jsonb) to chips_ledger_archive_pruner;
 
+-- Index DDL must run as the migration owner because the archive pruner is not
+-- the owner of chips_transactions.  The helper already exists for the
+-- metadata expression and postgres inherits its temporary execute grant via
+-- the membership established above.
+reset role;
+
 -- The transaction-field fallbacks are still required proof evidence.  These
 -- narrow partial indexes let their independent UNION branches avoid the
 -- global TABLE_BUY_IN/TABLE_CASH_OUT scan that the historical OR caused.
@@ -65,6 +71,8 @@ create index if not exists chips_transactions_bot_proof_metadata_table_id_idx
     ))
   )
   where tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type);
+
+set role chips_ledger_archive_pruner;
 
 -- CREATE OR REPLACE FUNCTION public.chips_assert_bot_only_archive_proof_lifecycle_gate
 -- is executed from the guarded definition below so every non-target proof
