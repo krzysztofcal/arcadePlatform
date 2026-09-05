@@ -30,6 +30,7 @@ const migration = fs.readFileSync("supabase/migrations/20260818100000_chips_ledg
 const lifecycleGateMigration = fs.readFileSync("supabase/migrations/20260826100000_chips_ledger_bot_only_lifecycle_gate_scope.sql", "utf8");
 const proofPerformanceMigration = fs.readFileSync("supabase/migrations/20260905160000_chips_ledger_bot_only_proof_perf.sql", "utf8");
 const proofPerformanceFixMigration = fs.readFileSync("supabase/migrations/20260905161000_chips_ledger_bot_only_proof_perf_fix.sql", "utf8");
+const proofAccessPathMigration = fs.readFileSync("supabase/migrations/20260905170000_chips_ledger_retention_access_paths.sql", "utf8");
 const closedTableCleanup = fs.readFileSync("ws-server/poker/persistence/closed-table-cleanup.mjs", "utf8");
 
 const TABLE_ID = "00000000-0000-4000-8000-000000000020";
@@ -383,6 +384,20 @@ function proofPerformanceContract() {
   assert.match(proofPerformanceFixMigration, /unknown\.idempotency_key/);
   assert.match(proofPerformanceFixMigration, /unknown\.identity_key/);
   assert.match(proofPerformanceFixMigration, /refusing forward correction/);
+  assert.match(proofAccessPathMigration, /CREATE OR REPLACE FUNCTION public\.chips_assert_bot_only_archive_proof_lifecycle_gate/i);
+  assert.match(proofAccessPathMigration, /candidate_transaction_ids as \(/);
+  assert.match(proofAccessPathMigration, /transactions\.id = any\(coalesce\(p_transaction_ids/);
+  assert.match(proofAccessPathMigration, /registry\.table_id = p_table_id/);
+  assert.match(proofAccessPathMigration, /registry\.table_id is null/);
+  assert.match(proofAccessPathMigration, /entries\.transaction_id/);
+  assert.match(proofAccessPathMigration, /from candidate_transaction_ids candidates\s+join public\.chips_transactions transactions on transactions\.id = candidates\.id/s);
+  assert.match(proofAccessPathMigration, /chips_transactions_bot_proof_idempotency_prefix_idx/);
+  assert.match(proofAccessPathMigration, /chips_transactions_bot_proof_reference_prefix_idx/);
+  assert.match(proofAccessPathMigration, /chips_transactions_bot_proof_metadata_table_id_idx/);
+  assert.doesNotMatch(proofAccessPathMigration, /set local statement_timeout/i);
+  const replacement = proofAccessPathMigration.match(/replacement text := \$replacement\$([\s\S]*?)\$replacement\$/)?.[1] || "";
+  assert.ok((replacement.match(/\bunion\b/gi) || []).length >= 8, "candidate evidence must be unioned and deduplicated in PostgreSQL");
+  assert.doesNotMatch(replacement, /target_transactions\s+as\s*\([\s\S]*?from public\.chips_transactions transactions[\s\S]*?transactions\.id = any[\s\S]*?\bor\b[\s\S]*?public\.chips_entries/s);
 }
 
 function retryAndAccountingContract() {
