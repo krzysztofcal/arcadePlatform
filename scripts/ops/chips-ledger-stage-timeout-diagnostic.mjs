@@ -102,27 +102,24 @@ with candidate_transaction_ids as (
   select transactions.id
     from public.chips_transactions transactions
    where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
-     and pg_catalog.lower(pg_catalog.btrim(
-       public.chips_bot_proof_metadata_table_id(transactions.metadata)
-     )) = $2::text
-     and (
-       (
-         transactions.metadata is not null
-         and pg_catalog.jsonb_typeof(transactions.metadata) = 'object'
-         and transactions.metadata ? 'tableId'
-         and nullif(pg_catalog.btrim(transactions.metadata->>'tableId'), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-         and pg_catalog.lower(pg_catalog.btrim(transactions.metadata->>'tableId')) = $2::text
-       )
-       or (
-         transactions.metadata is not null
-         and pg_catalog.jsonb_typeof(transactions.metadata) = 'string'
-         and pg_catalog.pg_input_is_valid(transactions.metadata #>> '{}', 'jsonb'::text)
-         and pg_catalog.jsonb_typeof((transactions.metadata #>> '{}')::jsonb) = 'object'
-         and ((transactions.metadata #>> '{}')::jsonb) ? 'tableId'
-         and nullif(pg_catalog.btrim(((transactions.metadata #>> '{}')::jsonb)->>'tableId'), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-         and pg_catalog.lower(pg_catalog.btrim(((transactions.metadata #>> '{}')::jsonb)->>'tableId')) = $2::text
-       )
-     )
+     and transactions.metadata is not null
+     and pg_catalog.jsonb_typeof(transactions.metadata) = 'object'
+     and transactions.metadata ? 'tableId'
+     and nullif(pg_catalog.btrim(transactions.metadata->>'tableId'), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     and pg_catalog.lower(pg_catalog.btrim(transactions.metadata->>'tableId')) = $2::text
+
+  union
+
+  select transactions.id
+    from public.chips_transactions transactions
+   where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
+     and transactions.metadata is not null
+     and pg_catalog.jsonb_typeof(transactions.metadata) = 'string'
+     and pg_catalog.pg_input_is_valid(transactions.metadata #>> '{}', 'jsonb'::text)
+     and pg_catalog.jsonb_typeof((transactions.metadata #>> '{}')::jsonb) = 'object'
+     and ((transactions.metadata #>> '{}')::jsonb) ? 'tableId'
+     and nullif(pg_catalog.btrim(((transactions.metadata #>> '{}')::jsonb)->>'tableId'), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     and pg_catalog.lower(pg_catalog.btrim(((transactions.metadata #>> '{}')::jsonb)->>'tableId')) = $2::text
 
   union
 

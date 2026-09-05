@@ -391,11 +391,10 @@ function proofPerformanceContract() {
   assert.match(proofAccessPathMigration, /registry\.table_id is null/);
   assert.match(proofAccessPathMigration, /entries\.transaction_id/);
   assert.match(proofAccessPathMigration, /from candidate_transaction_ids candidates\s+join public\.chips_transactions transactions on transactions\.id = candidates\.id/s);
-  assert.match(proofAccessPathMigration, /chips_transactions_bot_proof_idempotency_prefix_idx/);
-  assert.match(proofAccessPathMigration, /chips_transactions_bot_proof_reference_prefix_idx/);
-  assert.match(proofAccessPathMigration, /chips_transactions_bot_proof_metadata_table_id_idx/);
-  assert.match(proofAccessPathMigration, /chips_bot_proof_metadata_table_id\(p_metadata jsonb\)[\s\S]*?immutable/);
-  assert.match(proofAccessPathMigration, /chips_bot_proof_metadata_table_id\(metadata\)/);
+  assert.match(proofAccessPathMigration, /chips_transactions_tx_type_created_idx/);
+  assert.match(proofAccessPathMigration, /jsonb_typeof\(transactions\.metadata\) = 'object'/);
+  assert.match(proofAccessPathMigration, /jsonb_typeof\(transactions\.metadata\) = 'string'/);
+  assert.doesNotMatch(proofAccessPathMigration, /create index[\s\S]*chips_transactions/i);
   assert.doesNotMatch(proofAccessPathMigration, /set local statement_timeout/i);
   const replacement = proofAccessPathMigration.match(/replacement text := \$replacement\$([\s\S]*?)\$replacement\$/)?.[1] || "";
   assert.ok((replacement.match(/\bunion\b/gi) || []).length >= 8, "candidate evidence must be unioned and deduplicated in PostgreSQL");

@@ -4,74 +4,13 @@
 -- changes how candidate transaction IDs are found before the PK join.
 begin;
 
--- Build the helper and replacement as the archive-pruner owner, following the
--- existing migration ACL pattern.  The migration runner is not assumed to be
--- able to SET ROLE until membership is granted in this transaction.
+-- Apply the replacement as the archive-pruner owner, following the existing
+-- migration ACL pattern.  No heavyweight index build is part of this forward
+-- correction; the proof branches use the existing ledger access paths.
+-- In particular, transaction-field branches retain the enum predicates needed
+-- by chips_transactions_tx_type_created_idx.
 grant chips_ledger_archive_pruner to postgres;
 grant create on schema public to chips_ledger_archive_pruner;
-set role chips_ledger_archive_pruner;
-
--- The legacy metadata-string representation can contain malformed JSON.  Keep
--- that historical fallback fail-closed while giving the index a truly
--- immutable, deterministic expression to evaluate.
-create or replace function public.chips_bot_proof_metadata_table_id(p_metadata jsonb)
-returns text
-language plpgsql
-immutable
-set search_path = ''
-as $function$
-declare
-  normalized jsonb;
-begin
-  if p_metadata is null then
-    return null;
-  end if;
-  if pg_catalog.jsonb_typeof(p_metadata) = 'object' then
-    return p_metadata->>'tableId';
-  end if;
-  if pg_catalog.jsonb_typeof(p_metadata) <> 'string' then
-    return null;
-  end if;
-  begin
-    normalized := (p_metadata #>> '{}')::jsonb;
-  exception when others then
-    return null;
-  end;
-  if pg_catalog.jsonb_typeof(normalized) = 'object' then
-    return normalized->>'tableId';
-  end if;
-  return null;
-end;
-$function$;
-
-revoke all on function public.chips_bot_proof_metadata_table_id(jsonb) from public, anon, authenticated, service_role;
-grant execute on function public.chips_bot_proof_metadata_table_id(jsonb) to chips_ledger_archive_pruner;
-
--- Index DDL must run as the migration owner because the archive pruner is not
--- the owner of chips_transactions.  The helper already exists for the
--- metadata expression and postgres inherits its temporary execute grant via
--- the membership established above.
-reset role;
-
--- The transaction-field fallbacks are still required proof evidence.  These
--- narrow partial indexes let their independent UNION branches avoid the
--- global TABLE_BUY_IN/TABLE_CASH_OUT scan that the historical OR caused.
-create index if not exists chips_transactions_bot_proof_idempotency_prefix_idx
-  on public.chips_transactions (pg_catalog.lower(idempotency_key) text_pattern_ops)
-  where tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type);
-
-create index if not exists chips_transactions_bot_proof_reference_prefix_idx
-  on public.chips_transactions (pg_catalog.lower(reference) text_pattern_ops)
-  where tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type);
-
-create index if not exists chips_transactions_bot_proof_metadata_table_id_idx
-  on public.chips_transactions (
-    pg_catalog.lower(pg_catalog.btrim(
-      public.chips_bot_proof_metadata_table_id(metadata)
-    ))
-  )
-  where tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type);
-
 set role chips_ledger_archive_pruner;
 
 -- CREATE OR REPLACE FUNCTION public.chips_assert_bot_only_archive_proof_lifecycle_gate
@@ -91,8 +30,9 @@ declare
 
     union
 
-    -- Transaction idempotency-key evidence remains an independent indexed
-    -- fallback path; the regex remains the authoritative exact validator.
+    -- Transaction idempotency-key evidence remains an independent fallback
+    -- path constrained by the existing tx_type access path; the regex remains
+    -- the authoritative exact validator.
     select transactions.id
       from public.chips_transactions transactions
      where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
@@ -131,36 +71,34 @@ declare
 
     union
 
-    -- Metadata tableId normalization is unchanged, but its expression is
-    -- indexed independently from the other transaction-field fallbacks.
+    -- Metadata tableId object evidence remains its own candidate path.
     select transactions.id
       from public.chips_transactions transactions
      where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
-       and pg_catalog.lower(pg_catalog.btrim(
-         public.chips_bot_proof_metadata_table_id(transactions.metadata)
-       )) = p_table_id::text
-       and (
-         (
-           transactions.metadata is not null
-           and pg_catalog.jsonb_typeof(transactions.metadata) = 'object'
-           and transactions.metadata ? 'tableId'
-           and nullif(pg_catalog.btrim(transactions.metadata->>'tableId'), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-           and pg_catalog.lower(pg_catalog.btrim(transactions.metadata->>'tableId')) = p_table_id::text
-         )
-         or (
-           transactions.metadata is not null
-           and pg_catalog.jsonb_typeof(transactions.metadata) = 'string'
-           and pg_catalog.pg_input_is_valid(transactions.metadata #>> '{}', 'jsonb'::text)
-           and pg_catalog.jsonb_typeof((transactions.metadata #>> '{}')::jsonb) = 'object'
-           and ((transactions.metadata #>> '{}')::jsonb) ? 'tableId'
-           and nullif(pg_catalog.btrim(((transactions.metadata #>> '{}')::jsonb)->>'tableId'), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-           and pg_catalog.lower(pg_catalog.btrim(((transactions.metadata #>> '{}')::jsonb)->>'tableId')) = p_table_id::text
-         )
-       )
+       and transactions.metadata is not null
+       and pg_catalog.jsonb_typeof(transactions.metadata) = 'object'
+       and transactions.metadata ? 'tableId'
+       and nullif(pg_catalog.btrim(transactions.metadata->>'tableId'), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+       and pg_catalog.lower(pg_catalog.btrim(transactions.metadata->>'tableId')) = p_table_id::text
 
     union
 
-    -- Reference evidence is a separate indexed prefix path with the old
+    -- String-encoded metadata keeps the historical safe JSON validation as a
+    -- separate path, so malformed values remain excluded without an evidence OR.
+    select transactions.id
+      from public.chips_transactions transactions
+     where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
+       and transactions.metadata is not null
+       and pg_catalog.jsonb_typeof(transactions.metadata) = 'string'
+       and pg_catalog.pg_input_is_valid(transactions.metadata #>> '{}', 'jsonb'::text)
+       and pg_catalog.jsonb_typeof((transactions.metadata #>> '{}')::jsonb) = 'object'
+       and ((transactions.metadata #>> '{}')::jsonb) ? 'tableId'
+       and nullif(pg_catalog.btrim(((transactions.metadata #>> '{}')::jsonb)->>'tableId'), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+       and pg_catalog.lower(pg_catalog.btrim(((transactions.metadata #>> '{}')::jsonb)->>'tableId')) = p_table_id::text
+
+    union
+
+    -- Reference evidence is a separate fallback path with the old
     -- case-insensitive reference grammar retained as the final check.
     select transactions.id
       from public.chips_transactions transactions
