@@ -273,6 +273,7 @@ async function explain(sql, queryName, query, parameters) {
       `explain (format json, verbose true, costs true, settings true) ${query}`,
       parameters,
     ));
+    const plan = rows[0]?.["QUERY PLAN"] || rows[0]?.["query plan"] || null;
     return {
       query_name: queryName,
       sql_sha256: sqlSha256(query),
@@ -280,7 +281,8 @@ async function explain(sql, queryName, query, parameters) {
       sqlstate: "00000",
       read_only: true,
       explain_analyze: false,
-      plan: rows[0]?.["QUERY PLAN"] || rows[0]?.["query plan"] || null,
+      plan_sha256: sqlSha256(JSON.stringify(plan)),
+      access_path: planAccessSummary(plan),
     };
   } catch (error) {
     return {
@@ -290,7 +292,8 @@ async function explain(sql, queryName, query, parameters) {
       sqlstate: sqlState(error),
       read_only: true,
       explain_analyze: false,
-      plan: null,
+      plan_sha256: null,
+      access_path: null,
       error_class: "explain_failed",
     };
   }
@@ -306,6 +309,9 @@ function planNodes(plan, nodes = []) {
     join_type: root["Join Type"] || null,
     strategy: root.Strategy || null,
     scan_direction: root["Scan Direction"] || null,
+    startup_cost: root["Startup Cost"] ?? null,
+    total_cost: root["Total Cost"] ?? null,
+    estimated_rows: root["Plan Rows"] ?? null,
   };
   nodes.push(node);
   for (const child of root.Plans || []) planNodes({ Plan: child }, nodes);
@@ -436,7 +442,7 @@ async function runExactBotOnlyProofDiagnostic({ config, sql, batchId, identityAn
       BOT_ONLY_PROOF_REGISTRY_KEY_COMPLETENESS_EXPLAIN_SQL,
       [evidence.tableId, row.cutoff, evidence.registryKeys],
     ),
-  ].map((result) => ({ ...result, access_path: planAccessSummary(result.plan) }));
+  ];
 
   return {
     batch_id: exactBatchId,
