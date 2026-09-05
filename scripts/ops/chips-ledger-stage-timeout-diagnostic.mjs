@@ -28,7 +28,6 @@ import {
   parseManifestRow,
 } from "./chips-ledger-archive-prune.mjs";
 import {
-  assertBotOnlyExecuteBatch,
   redactedError,
   STAGE_MAX_BATCH_SIZE,
   STAGE_PROJECT_REF,
@@ -40,6 +39,8 @@ import {
 
 const REPLAY_STATEMENT_TIMEOUT_MS = 120000;
 const SQLSTATE_RE = /^[0-9A-Z]{5}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SHA256_RE = /^[0-9a-f]{64}$/;
 const EXACT_BOT_ONLY_DIAGNOSTIC_BATCH_ID = "481";
 const BOT_ONLY_PROOF_FUNCTION_DEFINITION_SQL = `
 select pg_catalog.pg_get_functiondef(
@@ -336,6 +337,25 @@ async function readExactBotOnlyBatch(sql, batchId) {
   return parseManifestRow(rows[0]);
 }
 
+function assertExactBotOnlyDiagnosticBatch(row, batchId, systemIdentifier) {
+  if (!row || String(row.batch_id) !== batchId) throw new Error("exact bot-only diagnostic batch identity mismatch");
+  if (systemIdentifier !== STAGE_SYSTEM_IDENTIFIER) throw new Error("exact bot-only diagnostic Stage identity mismatch");
+  if (String(row.project_ref) !== STAGE_PROJECT_REF) throw new Error("exact bot-only diagnostic project mismatch");
+  if (String(row.source_policy_id) !== BOT_ONLY_RETENTION_POLICY_ID) throw new Error("exact bot-only diagnostic policy mismatch");
+  if (Number(row.format_version) !== BOT_ONLY_EXPORT_SCHEMA_VERSION || String(row.status) !== "committed") {
+    throw new Error("exact bot-only diagnostic batch is not a committed schema-v2 archive");
+  }
+  if (!UUID_RE.test(String(row.bot_only_table_id || ""))
+    || Number(row.bot_only_table_count) !== 1
+    || !SHA256_RE.test(String(row.raw_sha256 || ""))
+    || !SHA256_RE.test(String(row.compressed_sha256 || ""))
+    || String(row.object_path) !== `v1/sha256/${row.compressed_sha256}.jsonl.gz`
+    || Number(row.transaction_count) < 1
+    || Number(row.entry_count) < 1) {
+    throw new Error("exact bot-only diagnostic archive binding is incomplete");
+  }
+}
+
 async function readProofFunctionDefinition(sql) {
   const rows = await readOnlyTransaction(sql, (tx) => tx.unsafe(BOT_ONLY_PROOF_FUNCTION_DEFINITION_SQL));
   const definition = rows[0]?.definition;
@@ -351,7 +371,7 @@ async function runExactBotOnlyProofDiagnostic({ config, sql, batchId, identityAn
     throw new Error("exact bot-only proof diagnostic requires the active Stage TABLE fence");
   }
   const row = await readExactBotOnlyBatch(sql, exactBatchId);
-  assertBotOnlyExecuteBatch(row, exactBatchId, identityAndFence.system_identifier);
+  assertExactBotOnlyDiagnosticBatch(row, exactBatchId, identityAndFence.system_identifier);
 
   const storageTarget = resolveStorageTarget("stage", config.moduleEnv, { singleTarget: true });
   const downloaded = await downloadPrivateArchiveObject(storageTarget, row.object_path);
@@ -373,12 +393,19 @@ async function runExactBotOnlyProofDiagnostic({ config, sql, batchId, identityAn
   });
   const evidence = buildPruneEvidence(verified, { maxBatchSize: STAGE_MAX_BATCH_SIZE });
   if (evidence.tableId !== String(row.bot_only_table_id).toLowerCase()
-    || evidence.transactionIdsSha256 !== row.archived_transaction_ids_sha256
-    || evidence.entryIdsSha256 !== row.archived_entry_ids_sha256
     || evidence.registryKeysSha256 !== row.bot_only_registry_keys_sha256
     || evidence.transactionCount !== Number(row.transaction_count)
     || evidence.entryCount !== Number(row.entry_count)) {
     throw new Error("exact bot-only diagnostic archive evidence differs from the immutable batch proof");
+  }
+
+  const archiveProofComplete = Boolean(row.archive_proof_verified_at
+    && SHA256_RE.test(String(row.archived_transaction_ids_sha256 || ""))
+    && SHA256_RE.test(String(row.archived_entry_ids_sha256 || "")));
+  if (archiveProofComplete
+    && (evidence.transactionIdsSha256 !== row.archived_transaction_ids_sha256
+      || evidence.entryIdsSha256 !== row.archived_entry_ids_sha256)) {
+    throw new Error("exact bot-only diagnostic archive proof differs from the committed proof");
   }
 
   const explainInputs = {
@@ -423,7 +450,16 @@ async function runExactBotOnlyProofDiagnostic({ config, sql, batchId, identityAn
     registry_key_count: evidence.registryKeys.length,
     registry_keys_sha256: evidence.registryKeysSha256,
     archive_verified: true,
-    proof_evidence_verified: true,
+    proof: {
+      state: archiveProofComplete ? "complete" : "incomplete_in_database",
+      archive_bytes_verified: true,
+      transaction_ids_verified: true,
+      entry_ids_verified: true,
+      database_proof_fields_verified: archiveProofComplete,
+      database_transaction_ids_sha256: row.archived_transaction_ids_sha256 || null,
+      database_entry_ids_sha256: row.archived_entry_ids_sha256 || null,
+      archive_proof_verified_at: row.archive_proof_verified_at || null,
+    },
     proof_helper_definition: await readProofFunctionDefinition(sql),
     explain_inputs: explainInputs,
     explains,

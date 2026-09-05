@@ -21,7 +21,7 @@ assert.match(diagnostic, /--batch-id 481/);
 assert.match(diagnostic, /BOT_ONLY_PROOF_TARGET_TRANSACTIONS_EXPLAIN_SQL/);
 assert.match(diagnostic, /BOT_ONLY_PROOF_UNKNOWN_REGISTRY_EXPLAIN_SQL/);
 assert.match(diagnostic, /BOT_ONLY_PROOF_REGISTRY_KEY_COMPLETENESS_EXPLAIN_SQL/);
-assert.match(diagnostic, /assertBotOnlyExecuteBatch/);
+assert.match(diagnostic, /assertExactBotOnlyDiagnosticBatch/);
 assert.match(diagnostic, /downloadPrivateArchiveObject/);
 assert.match(diagnostic, /buildPruneEvidence/);
 assert.match(diagnostic, /proof_helper_definition/);
