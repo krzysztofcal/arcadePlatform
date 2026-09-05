@@ -1381,6 +1381,7 @@ async function assertClosedHumanPostPruneActivation(sql) {
   ];
   const entryIds = ["9000001", "9000002", "9000003", "9000004"];
   const cutoff = "2026-08-05 16:33:12.024+00";
+  const createdAt = "2026-08-04 00:00:00+00";
   const compressedSha = "a".repeat(64);
   const rawSha = "b".repeat(64);
   const objectPath = `v1/sha256/${compressedSha}.jsonl.gz`;
@@ -1430,10 +1431,10 @@ async function assertClosedHumanPostPruneActivation(sql) {
     ) overriding system value values (
       334, $1, 'krydukthwdvccggbyjfw', 1,
       'stage-ledger-closed-human-table-retention-30d-v1', $2::timestamptz,
-      $2::timestamptz, $2::timestamptz, 2, 4, '{"TABLE_BUY_IN":2}'::jsonb,
-      100, 80, $3, $4, 20, 20, 0, 'committed', timezone('utc', now()),
-      timezone('utc', now()), $5, $6
-    );`, [objectPath, cutoff, rawSha, compressedSha, transactionHash, entryHash]);
+      $3::timestamptz, $3::timestamptz, 2, 4, '{"TABLE_BUY_IN":2}'::jsonb,
+      100, 80, $4, $5, 20, 20, 0, 'committed', timezone('utc', now()),
+      timezone('utc', now()), $6, $7
+    );`, [objectPath, cutoff, createdAt, rawSha, compressedSha, transactionHash, entryHash]);
 
     for (let index = 0; index < transactionIds.length; index += 1) {
       await tx.unsafe(`insert into public.chips_transaction_idempotency (
@@ -1445,7 +1446,7 @@ async function assertClosedHumanPostPruneActivation(sql) {
         transactionIds[index],
         (index === 0 ? "c" : "d").repeat(64),
         primaryUserId,
-        cutoff,
+        createdAt,
         tableId,
       ]);
     }
