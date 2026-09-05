@@ -28,6 +28,8 @@ import { validateStageEnvironment } from "../../scripts/ops/chips-ledger-stage-a
 
 const migration = fs.readFileSync("supabase/migrations/20260818100000_chips_ledger_bot_only_retention.sql", "utf8");
 const lifecycleGateMigration = fs.readFileSync("supabase/migrations/20260826100000_chips_ledger_bot_only_lifecycle_gate_scope.sql", "utf8");
+const proofPerformanceMigration = fs.readFileSync("supabase/migrations/20260905160000_chips_ledger_bot_only_proof_perf.sql", "utf8");
+const proofPerformanceFixMigration = fs.readFileSync("supabase/migrations/20260905161000_chips_ledger_bot_only_proof_perf_fix.sql", "utf8");
 const closedTableCleanup = fs.readFileSync("ws-server/poker/persistence/closed-table-cleanup.mjs", "utf8");
 
 const TABLE_ID = "00000000-0000-4000-8000-000000000020";
@@ -361,6 +363,26 @@ function lifecycleGateScopeContract() {
   assert.match(lifecycleGateMigration, /accounts\.system_key ~\* '\^POKER_TABLE:/);
   assert.doesNotMatch(lifecycleGateMigration, /chips_parse_table_idempotency_key/);
   assert.doesNotMatch(lifecycleGateMigration, /\b(?:alter|grant|revoke)\s+(?:function|all)/i);
+}
+
+function proofPerformanceContract() {
+  assert.match(proofPerformanceMigration, /create index if not exists chips_transaction_idempotency_table_id_idx[\s\S]*where table_id is not null/i);
+  assert.match(proofPerformanceMigration, /create or replace function public\.chips_assert_bot_only_archive_proof_lifecycle_gate\(/);
+  assert.match(proofPerformanceMigration, /p_transaction_ids uuid\[\][\s\S]*p_registry_keys text\[\]/);
+  assert.match(proofPerformanceMigration, /target_transactions/);
+  assert.match(proofPerformanceMigration, /target_transaction_evidence/);
+  assert.match(proofPerformanceMigration, /unknown_registry_identity_evidence/);
+  assert.match(proofPerformanceMigration, /hot_identity_evidence/);
+  assert.match(proofPerformanceMigration, /chips_register_bot_only_archive_proof\(text,uuid\[\],bigint\[\],uuid,text\[\]\)/);
+  assert.match(proofPerformanceMigration, /p_transaction_ids, sorted_registry_keys/);
+  assert.doesNotMatch(proofPerformanceMigration, /set local statement_timeout/i);
+  assert.doesNotMatch(proofPerformanceMigration, /registry_rows as materialized/);
+  assert.doesNotMatch(proofPerformanceMigration, /table_transactions as materialized/);
+  assert.match(proofPerformanceMigration, /raise exception using errcode = 'P8914'/);
+  assert.match(proofPerformanceFixMigration, /chips_assert_bot_only_archive_proof_lifecycle_gate\(uuid,bigint,timestamptz,uuid\[\],text\[\]\)/);
+  assert.match(proofPerformanceFixMigration, /unknown\.idempotency_key/);
+  assert.match(proofPerformanceFixMigration, /unknown\.identity_key/);
+  assert.match(proofPerformanceFixMigration, /refusing forward correction/);
 }
 
 function retryAndAccountingContract() {
@@ -1895,6 +1917,7 @@ historicalKeyAndEntryBindingContract();
 concurrencyAndScopeContract();
 failClosedLifecycleContract();
 lifecycleGateScopeContract();
+proofPerformanceContract();
 retryAndAccountingContract();
 
 if (POSTGRES_TEST_DB_URL) {
