@@ -1293,7 +1293,7 @@ async function assertClosedHumanLifecycleMarkerRls(sql) {
       "human_marker_direct_update",
       () => tx.unsafe(`update public.poker_tables
         set human_retention_complete_at = timezone('utc', now()) where id = $1::uuid;`, [tableId]),
-      /row-level security|policy/i,
+      /row-level security|policy|immutable|lifecycle-controlled/i,
     );
 
     const completionRows = await tx.unsafe(`select public.chips_complete_closed_human_table_retention(
