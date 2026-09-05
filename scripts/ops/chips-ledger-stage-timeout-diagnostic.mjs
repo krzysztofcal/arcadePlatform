@@ -103,14 +103,7 @@ with candidate_transaction_ids as (
     from public.chips_transactions transactions
    where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
      and pg_catalog.lower(pg_catalog.btrim(
-       case
-         when pg_catalog.jsonb_typeof(transactions.metadata) = 'object'
-           then transactions.metadata->>'tableId'
-         when pg_catalog.jsonb_typeof(transactions.metadata) = 'string'
-           and pg_catalog.pg_input_is_valid(transactions.metadata #>> '{}', 'jsonb'::text)
-           then ((transactions.metadata #>> '{}')::jsonb)->>'tableId'
-         else null
-       end
+       public.chips_bot_proof_metadata_table_id(transactions.metadata)
      )) = $2::text
      and (
        (

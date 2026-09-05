@@ -394,6 +394,8 @@ function proofPerformanceContract() {
   assert.match(proofAccessPathMigration, /chips_transactions_bot_proof_idempotency_prefix_idx/);
   assert.match(proofAccessPathMigration, /chips_transactions_bot_proof_reference_prefix_idx/);
   assert.match(proofAccessPathMigration, /chips_transactions_bot_proof_metadata_table_id_idx/);
+  assert.match(proofAccessPathMigration, /chips_bot_proof_metadata_table_id\(p_metadata jsonb\)[\s\S]*?immutable/);
+  assert.match(proofAccessPathMigration, /chips_bot_proof_metadata_table_id\(metadata\)/);
   assert.doesNotMatch(proofAccessPathMigration, /set local statement_timeout/i);
   const replacement = proofAccessPathMigration.match(/replacement text := \$replacement\$([\s\S]*?)\$replacement\$/)?.[1] || "";
   assert.ok((replacement.match(/\bunion\b/gi) || []).length >= 8, "candidate evidence must be unioned and deduplicated in PostgreSQL");

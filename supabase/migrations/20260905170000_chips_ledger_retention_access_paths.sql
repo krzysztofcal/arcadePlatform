@@ -4,6 +4,43 @@
 -- changes how candidate transaction IDs are found before the PK join.
 begin;
 
+-- The legacy metadata-string representation can contain malformed JSON.  Keep
+-- that historical fallback fail-closed while giving the index a truly
+-- immutable, deterministic expression to evaluate.
+create or replace function public.chips_bot_proof_metadata_table_id(p_metadata jsonb)
+returns text
+language plpgsql
+immutable
+set search_path = ''
+as $function$
+declare
+  normalized jsonb;
+begin
+  if p_metadata is null then
+    return null;
+  end if;
+  if pg_catalog.jsonb_typeof(p_metadata) = 'object' then
+    return p_metadata->>'tableId';
+  end if;
+  if pg_catalog.jsonb_typeof(p_metadata) <> 'string' then
+    return null;
+  end if;
+  begin
+    normalized := (p_metadata #>> '{}')::jsonb;
+  exception when others then
+    return null;
+  end;
+  if pg_catalog.jsonb_typeof(normalized) = 'object' then
+    return normalized->>'tableId';
+  end if;
+  return null;
+end;
+$function$;
+
+alter function public.chips_bot_proof_metadata_table_id(jsonb) owner to chips_ledger_archive_pruner;
+revoke all on function public.chips_bot_proof_metadata_table_id(jsonb) from public, anon, authenticated, service_role;
+grant execute on function public.chips_bot_proof_metadata_table_id(jsonb) to chips_ledger_archive_pruner;
+
 -- The transaction-field fallbacks are still required proof evidence.  These
 -- narrow partial indexes let their independent UNION branches avoid the
 -- global TABLE_BUY_IN/TABLE_CASH_OUT scan that the historical OR caused.
@@ -18,14 +55,7 @@ create index if not exists chips_transactions_bot_proof_reference_prefix_idx
 create index if not exists chips_transactions_bot_proof_metadata_table_id_idx
   on public.chips_transactions (
     pg_catalog.lower(pg_catalog.btrim(
-      case
-        when pg_catalog.jsonb_typeof(metadata) = 'object'
-          then metadata->>'tableId'
-        when pg_catalog.jsonb_typeof(metadata) = 'string'
-          and pg_catalog.pg_input_is_valid(metadata #>> '{}', 'jsonb'::text)
-          then ((metadata #>> '{}')::jsonb)->>'tableId'
-        else null
-      end
+      public.chips_bot_proof_metadata_table_id(metadata)
     ))
   )
   where tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type);
@@ -97,14 +127,7 @@ declare
       from public.chips_transactions transactions
      where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
        and pg_catalog.lower(pg_catalog.btrim(
-         case
-           when pg_catalog.jsonb_typeof(transactions.metadata) = 'object'
-             then transactions.metadata->>'tableId'
-           when pg_catalog.jsonb_typeof(transactions.metadata) = 'string'
-             and pg_catalog.pg_input_is_valid(transactions.metadata #>> '{}', 'jsonb'::text)
-             then ((transactions.metadata #>> '{}')::jsonb)->>'tableId'
-           else null
-         end
+         public.chips_bot_proof_metadata_table_id(transactions.metadata)
        )) = p_table_id::text
        and (
          (
