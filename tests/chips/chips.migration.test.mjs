@@ -1247,7 +1247,10 @@ async function assertClosedHumanLifecycleMarkerRls(sql) {
         and privileges.privilege_type = 'EXECUTE'
       order by 1;`);
     assert.deepEqual(
-      lifecycleAclRows,
+      lifecycleAclRows.map((row) => ({
+        grantee: row.grantee,
+        privilege_type: row.privilege_type,
+      })),
       [
         { grantee: "chips_ledger_archive_pruner", privilege_type: "EXECUTE" },
         { grantee: "postgres", privilege_type: "EXECUTE" },
@@ -1265,7 +1268,10 @@ async function assertClosedHumanLifecycleMarkerRls(sql) {
       where rolname in ('anon', 'authenticated', 'service_role')
       order by rolname;`);
     assert.deepEqual(
-      apiExecuteRows,
+      apiExecuteRows.map((row) => ({
+        rolname: row.rolname,
+        can_execute: row.can_execute,
+      })),
       [
         { rolname: "anon", can_execute: false },
         { rolname: "authenticated", can_execute: false },
