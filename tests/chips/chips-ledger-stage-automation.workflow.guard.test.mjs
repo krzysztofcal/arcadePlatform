@@ -12,6 +12,7 @@ const RETAINED_MODES = [
   "closed-human-30d-prepare",
   "closed-human-30d-canary",
   "closed-human-30d-recovery-diagnostic",
+  "closed-human-policy-diagnostic",
   "closed-human-30d-recovery-repair",
   "escrow-retention-audit",
   "escrow-retention-verify",
@@ -48,6 +49,7 @@ const RETAINED_STEPS = [
   "Prepare closed human-table 30-day Stage retention",
   "Execute exact closed human-table 30-day Stage canary",
   "Diagnose closed human-table 30-day durable recovery",
+  "Diagnose closed-human retention policy",
   "Repair exact closed human-table 30-day durable recovery",
   "Run activated bot-only 7-day Stage automation",
   "Run Stage escrow account retention",
@@ -137,6 +139,7 @@ for (const mode of [
   "closed-human-30d-prepare",
   "closed-human-30d-canary",
   "closed-human-30d-recovery-diagnostic",
+  "closed-human-policy-diagnostic",
   "closed-human-30d-recovery-repair",
   "escrow-retention-audit",
   "escrow-retention-verify",
@@ -155,8 +158,10 @@ assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-verify'/);
 assert.match(stageJobIf, /inputs\.mode != 'existing-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-canary'/);
+assert.match(stageJobIf, /inputs\.mode != 'closed-human-policy-diagnostic'/);
 assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-canary'/);
+assert.match(stageJobIf, /inputs\.mode == 'closed-human-policy-diagnostic'/);
 assert.match(stageJobIf, /github\.ref == 'refs\/heads\/main'/);
 assert.match(stageJobIf, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
 assert.match(stageJobIf, /github\.event\.repository\.fork != true/);
@@ -216,6 +221,23 @@ assert.match(closedHumanDiagnosticRun, /--policy stage-ledger-closed-human-table
 assert.match(closedHumanDiagnosticRun, /--diagnose-recovery/);
 assert.match(closedHumanDiagnosticRun, /stage_30d_recovery_batch_id/);
 assert.doesNotMatch(closedHumanDiagnosticRun, /--repair-recovery|--execute|--automatic/);
+
+const closedHumanPolicyDiagnosticRun = workflow.match(
+  /- name: Diagnose closed-human retention policy[\s\S]*?(?=\n\s+- name:|\s*$)/,
+)[0];
+assert.match(closedHumanPolicyDiagnosticRun, /github\.event_name == 'workflow_dispatch' && inputs\.mode == 'closed-human-policy-diagnostic'/);
+assert.match(closedHumanPolicyDiagnosticRun, /test "\$DEPLOYED_COMMIT_SHA" = "\$GITHUB_SHA"/);
+assert.match(closedHumanPolicyDiagnosticRun, /test "\$GITHUB_REPOSITORY" = "krzysztofcal\/arcadePlatform"/);
+assert.match(closedHumanPolicyDiagnosticRun, /test "\$GITHUB_REF" = "refs\/heads\/main"/);
+assert.match(closedHumanPolicyDiagnosticRun, /test "\$GITHUB_REPOSITORY_OWNER" = "krzysztofcal"/);
+assert.match(closedHumanPolicyDiagnosticRun, /test "\$GITHUB_ACTOR" = "\$GITHUB_REPOSITORY_OWNER"/);
+assert.match(closedHumanPolicyDiagnosticRun, /CHIPS_LEDGER_BOT_ONLY_EXECUTE/);
+assert.match(closedHumanPolicyDiagnosticRun, /CHIPS_LEDGER_BOT_ONLY_AUTOMATIC/);
+assert.match(closedHumanPolicyDiagnosticRun, /CHIPS_LEDGER_CLOSED_HUMAN_EXECUTE/);
+assert.match(closedHumanPolicyDiagnosticRun, /CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC/);
+assert.match(closedHumanPolicyDiagnosticRun, /--policy stage-ledger-closed-human-table-retention-30d-v1/);
+assert.match(closedHumanPolicyDiagnosticRun, /--diagnose-policy/);
+assert.doesNotMatch(closedHumanPolicyDiagnosticRun, /github\.event_name == 'schedule'|--prepare-only|--execute|--automatic|--repair-recovery|--diagnose-recovery|UPDATE|INSERT|DELETE|prune/i);
 
 const closedHumanRepairRun = workflow.match(
   /- name: Repair exact closed human-table 30-day durable recovery[\s\S]*?(?=\n\s+- name:|\s*$)/,

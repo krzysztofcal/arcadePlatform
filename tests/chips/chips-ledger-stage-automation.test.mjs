@@ -17,6 +17,7 @@ import {
   assertClosedHumanExecuteBatch,
   assertDurableRecoveryReady,
   assertResumeRecoveryState,
+  aggregatePayload,
   botOnlyExportArgs,
   botOnlyReport,
   BOT_ONLY_BATCH_15_RECOVERY_REPAIR,
@@ -24,6 +25,7 @@ import {
   persistDurableRecovery,
   runBotOnlyRecoveryRepair,
   runBotOnlyStageAutomation,
+  runClosedHumanPolicyDiagnostic,
   runClosedHumanTableStageCanary,
   runClosedHumanTableStagePrepare,
   runStageAutomation,
@@ -123,6 +125,59 @@ const noCandidate = await runStageAutomation({
 assert.equal(noCandidate.state, "no-op");
 assert.equal(noCandidate.reason, "no_eligible_candidate");
 assert.equal(noCandidateSql.calls.some(({ query }) => query.includes("pg_try_advisory_lock")), true);
+
+const policyDiagnosticQueries = [];
+const policyDiagnosticSql = {
+  begin: async (callback) => callback({
+    unsafe: async (query, values = []) => {
+      policyDiagnosticQueries.push({ query, values });
+      if (query.startsWith("set transaction")) return [];
+      if (query.includes("pg_control_system")) return [{ system_identifier: STAGE_SYSTEM_IDENTIFIER }];
+      if (query.includes("from public.chips_stage_closed_human_table_retention_policy")) {
+        assert.deepEqual(values, [CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID]);
+        return [{
+          policy_id: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+          enabled: false,
+          activated_at: null,
+          canary_batch_id: null,
+          canary_confirmation: null,
+          created_at: "2026-09-04 16:00:00+00",
+          updated_at: "2026-09-04 16:00:00+00",
+        }];
+      }
+      throw new Error(`unexpected policy diagnostic SQL: ${query}`);
+    },
+  }),
+};
+const policyDiagnostic = await runClosedHumanPolicyDiagnostic({
+  env: ENV,
+  deps: { sql: policyDiagnosticSql },
+});
+assert.equal(policyDiagnostic.state, "diagnosed");
+assert.equal(policyDiagnostic.policyId, CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID);
+assert.equal(policyDiagnostic.enabled, false);
+assert.equal(policyDiagnostic.activatedAt, null);
+assert.equal(policyDiagnostic.canaryBatchId, null);
+assert.equal(policyDiagnostic.canaryConfirmation, null);
+assert.equal(policyDiagnostic.readOnly, true);
+const policyDiagnosticPayload = aggregatePayload(policyDiagnostic);
+assert.equal(policyDiagnosticPayload.policy_id, CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID);
+assert.equal(policyDiagnosticPayload.enabled, false);
+assert.equal(policyDiagnosticPayload.activated_at, null);
+assert.equal(policyDiagnosticPayload.canary_batch_id, null);
+assert.equal(policyDiagnosticPayload.canary_confirmation, null);
+assert.equal(policyDiagnosticPayload.read_only, true);
+assert.equal(policyDiagnosticPayload.writes, false);
+assert.equal(
+  policyDiagnosticQueries.filter(({ query }) => query.includes("from public.chips_stage_closed_human_table_retention_policy")).length,
+  1,
+);
+const policySelect = policyDiagnosticQueries.find(({ query }) => query.includes("from public.chips_stage_closed_human_table_retention_policy"));
+assert.match(policySelect.query, /where policy_id = \$1/);
+assert.equal(
+  policyDiagnosticQueries.some(({ query }) => /\b(?:insert|update|delete|truncate|alter|drop|create|grant|revoke)\b/i.test(query)),
+  false,
+);
 
 const lostSessionSql = fakeSql({ loseSession: true });
 await assert.rejects(
