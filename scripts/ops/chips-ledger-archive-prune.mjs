@@ -985,21 +985,42 @@ export function createPruneStore(sql) {
         return rows[0]?.result;
       });
     },
-    async cleanupClosedHuman(objectPath, evidence, execute, approvedBatchId = null) {
+    async cleanupClosedHuman(objectPath, evidence, execute, approvedBatchId = null, automatic = false) {
       return sql.begin(async (tx) => {
         await tx.unsafe("set transaction isolation level serializable;");
         await tx.unsafe("set local lock_timeout = '5s';");
         await tx.unsafe("set local statement_timeout = '120s';");
-        const rows = await tx.unsafe(`select public.chips_prune_closed_human_table_archive_batch(
-          $1, $2::uuid[], $3::bigint[], $4::uuid, $5::boolean, $6::bigint
-        ) as result;`, [
-          objectPath,
-          evidence.transactionIds,
-          evidence.entryIds,
-          evidence.closedHumanTableId,
-          execute,
-          approvedBatchId,
-        ]);
+        if (automatic) await tx.unsafe("set local chips.closed_human_automatic = '1';");
+        const rows = execute && automatic
+          ? await tx.unsafe(`select public.chips_auto_prune_closed_human_table_archive_batch(
+            $1, $2::uuid[], $3::bigint[], $4::uuid
+          ) as result;`, [
+            objectPath,
+            evidence.transactionIds,
+            evidence.entryIds,
+            evidence.closedHumanTableId,
+          ])
+          : await tx.unsafe(`select public.chips_prune_closed_human_table_archive_batch(
+            $1, $2::uuid[], $3::bigint[], $4::uuid, $5::boolean, $6::bigint
+          ) as result;`, [
+            objectPath,
+            evidence.transactionIds,
+            evidence.entryIds,
+            evidence.closedHumanTableId,
+            execute,
+            approvedBatchId,
+          ]);
+        return rows[0]?.result;
+      });
+    },
+    async activateClosedHumanPolicy(canaryBatchId, confirmation) {
+      return sql.begin(async (tx) => {
+        await tx.unsafe("set transaction isolation level serializable;");
+        await tx.unsafe("set local lock_timeout = '5s';");
+        await tx.unsafe("set local statement_timeout = '120s';");
+        const rows = await tx.unsafe(`select public.chips_activate_closed_human_table_retention_policy(
+          $1::bigint, $2::text
+        ) as result;`, [canaryBatchId, confirmation]);
         return rows[0]?.result;
       });
     },
@@ -1209,22 +1230,92 @@ export async function executeArchivePrune({
   execute,
   approvedBatchId = null,
   closedHuman = false,
+  automatic = false,
+  row = null,
   beforeAttempt = null,
+  beforeRetry = null,
+  onProgress = null,
+  waitForRetry = null,
 }) {
-  const attempts = execute ? MAX_EXECUTE_ATTEMPTS : 1;
+  const attempts = execute
+    ? automatic ? MAX_AUTOMATIC_CLEANUP_ATTEMPTS : MAX_EXECUTE_ATTEMPTS
+    : 1;
   const prune = closedHuman ? store.cleanupClosedHuman : store.prune;
   if (typeof prune !== "function") {
     fail(closedHuman
       ? "closed-human policy-aware prune adapter is unavailable"
       : "archive prune adapter is unavailable");
   }
+  let currentRow = row;
+  let currentObjectPath = objectPath;
+  let currentEvidence = evidence;
+  let currentApprovedBatchId = approvedBatchId;
+  const executeSqlstates = [];
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    if (beforeAttempt) await beforeAttempt();
+    if (beforeAttempt) await beforeAttempt({
+      attempt,
+      row: currentRow,
+      evidence: currentEvidence,
+    });
     try {
-      return await prune.call(store, objectPath, evidence, execute, approvedBatchId);
+      const result = await prune.call(
+        store,
+        currentObjectPath,
+        currentEvidence,
+        execute,
+        currentApprovedBatchId,
+        automatic,
+      );
+      if (typeof onProgress === "function") {
+        onProgress({
+          row: result?.row || currentRow,
+          executeAttempts: attempt,
+          executeRetryCount: attempt - 1,
+          executeSqlstates: [...executeSqlstates],
+        });
+      }
+      return result;
     } catch (error) {
       const sqlstate = sqlStateOf(error);
+      if (sqlstate) executeSqlstates.push(sqlstate);
       if (!execute || attempt === attempts || !RETRYABLE_CLEANUP_SQLSTATES.has(sqlstate)) throw error;
+      if (typeof beforeRetry === "function") {
+        const refreshed = await beforeRetry({
+          attempt: attempt + 1,
+          row: currentRow,
+          evidence: currentEvidence,
+          executeAttempts: attempt,
+          executeRetryCount: attempt - 1,
+          executeSqlstates: [...executeSqlstates],
+        });
+        if (refreshed?.state === "already_pruned"
+          || refreshed?.state === "already_cleaned") {
+          return refreshed;
+        }
+        if (refreshed?.row) currentRow = refreshed.row;
+        if (refreshed?.objectPath) currentObjectPath = refreshed.objectPath;
+        if (refreshed?.evidence) currentEvidence = refreshed.evidence;
+        if (refreshed && Object.hasOwn(refreshed, "approvedBatchId")) {
+          currentApprovedBatchId = refreshed.approvedBatchId;
+        }
+      }
+      if (typeof onProgress === "function") {
+        onProgress({
+          row: currentRow,
+          executeAttempts: attempt,
+          executeRetryCount: attempt,
+          executeSqlstates: [...executeSqlstates],
+        });
+      }
+      if (typeof waitForRetry === "function") {
+        await waitForRetry({
+          attempt: attempt + 1,
+          row: currentRow,
+          executeAttempts: attempt,
+          executeRetryCount: attempt,
+          executeSqlstates: [...executeSqlstates],
+        });
+      }
     }
   }
   fail("archive pruning retry budget was exhausted");
@@ -1789,9 +1880,13 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
       fail("closed-human execution requires the explicit default-off execution gate");
     }
 
-    if (args.automatic && (row.format_version !== BOT_ONLY_EXPORT_SCHEMA_VERSION
-      || row.source_policy_id !== "stage-ledger-bot-only-retention-7d-v1")) {
-      fail("--automatic is only valid for the Stage bot-only 7-day policy");
+    const closedHumanAutomatic = isClosedHumanPolicy
+      && text(env.CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC) === "1";
+    if (args.automatic && !(
+      row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+      && row.source_policy_id === "stage-ledger-bot-only-retention-7d-v1"
+    ) && !(isClosedHumanPolicy && closedHumanAutomatic)) {
+      fail("--automatic is only valid for an enabled Stage automatic policy");
     }
 
     if (args.registerProof) {
@@ -1888,9 +1983,14 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
         execute: Boolean(args.execute),
         approvedBatchId: args.approvedBatchId,
         closedHuman: isClosedHumanPolicy,
+        automatic: Boolean(args.automatic) || closedHumanAutomatic,
+        row,
         beforeAttempt: recoveryBundle
-          ? () => verifyRecoveryBundle({ bundle: recoveryBundle, row, target, identity, expectedEvidence: evidence })
+          ? ({ row: attemptRow = row, evidence: attemptEvidence = evidence } = {}) => verifyRecoveryBundle({ bundle: recoveryBundle, row: attemptRow, target, identity, expectedEvidence: attemptEvidence })
           : null,
+        beforeRetry: deps.beforeExecuteRetry || null,
+        onProgress: deps.onExecuteProgress || null,
+        waitForRetry: deps.waitForExecuteRetry || null,
       });
 
     const resultRow = pruneResult?.row || row;

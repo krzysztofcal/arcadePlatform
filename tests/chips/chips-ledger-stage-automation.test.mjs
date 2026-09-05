@@ -13,6 +13,7 @@ import {
 import {
   assertBotOnlyActiveManifestMatch,
   assertBotOnlyExecuteBatch,
+  assertClosedHumanAutomaticPolicy,
   assertClosedHumanActiveManifestMatch,
   assertClosedHumanExecuteBatch,
   assertDurableRecoveryReady,
@@ -21,12 +22,16 @@ import {
   botOnlyExportArgs,
   botOnlyReport,
   BOT_ONLY_BATCH_15_RECOVERY_REPAIR,
+  CLOSED_HUMAN_AUTOMATIC_ACTIVATION,
+  CLOSED_HUMAN_AUTOMATIC_MAX_BATCHES_PER_RUN,
   CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET,
   findOwnCycle,
   persistDurableRecovery,
+  runAutomaticClosedHumanStageAutomation,
   runBotOnlyRecoveryRepair,
   runBotOnlyStageAutomation,
   runClosedHumanPolicyDiagnostic,
+  runClosedHumanTableRetentionActivation,
   runClosedHumanTableLifecycleCompletion,
   runClosedHumanTableStageCanary,
   runClosedHumanTableStagePrepare,
@@ -2167,6 +2172,395 @@ for (const harness of [
   closedHumanWrongGoHarness,
   closedHumanMissingRecoveryHarness,
   closedHumanWrongConfirmationHarness,
+]) {
+  fs.rmSync(harness.deps.tempRoot, { recursive: true, force: true });
+}
+
+// Closed-human automatic Stage rollout is deliberately tested with a fully
+// mocked Stage boundary: the test proves orchestration order and exact gates
+// without activating policy or touching the shared Stage database.
+const automaticStageEnv = {
+  ...ENV,
+  GITHUB_EVENT_NAME: "schedule",
+  CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC: "1",
+};
+const automaticCanaryEvidence = {
+  ...closedHumanCanaryEvidence,
+  closedHumanTableId: CLOSED_HUMAN_AUTOMATIC_ACTIVATION.tableId,
+};
+const automaticCandidateArchiveBytes = Buffer.from("exact closed-human automatic candidate archive");
+const automaticCandidateCompressedSha = crypto.createHash("sha256")
+  .update(automaticCandidateArchiveBytes)
+  .digest("hex");
+const automaticCandidateEvidence = {
+  transactionIdsSha256: "3".repeat(64),
+  entryIdsSha256: "4".repeat(64),
+  transactionCount: 1,
+  entryCount: 2,
+  txTypes: { TABLE_BUY_IN: 1 },
+  credits: "100",
+  debits: "100",
+  net: "0",
+  distinctTables: 1,
+  closedHumanTableId: "00000000-0000-4000-8000-000000000035",
+  userTransactions: 1,
+  userEntries: 1,
+};
+
+function automaticDurable(row, evidenceForManifest, archiveBytes, { uploaded = false } = {}) {
+  const manifest = buildRecoveryManifest(row, STAGE_SYSTEM_IDENTIFIER, evidenceForManifest, { target: "stage" });
+  const manifestBytes = Buffer.from(`${stringifyJson(manifest)}\n`, "utf8");
+  const manifestGzipBytes = gzipRecoveryManifestForTest(manifest);
+  const archiveSha256 = crypto.createHash("sha256").update(archiveBytes).digest("hex");
+  const manifestSha256 = crypto.createHash("sha256").update(manifestGzipBytes).digest("hex");
+  return {
+    archiveBytes,
+    manifestGzipBytes,
+    manifestBytes,
+    manifest,
+    archivePath: buildRecoveryArchiveObjectPath(archiveSha256),
+    manifestPath: buildRecoveryManifestObjectPath(archiveSha256),
+    archiveSha256,
+    manifestSha256,
+    recoveryArchive: { objectPath: buildRecoveryArchiveObjectPath(archiveSha256), uploaded, sha256: archiveSha256 },
+    recoveryManifest: { objectPath: buildRecoveryManifestObjectPath(archiveSha256), uploaded, sha256: manifestSha256 },
+  };
+}
+
+function makeAutomaticClosedHumanHarness({ policyEnabled = true, invalidCandidateEvidence = false } = {}) {
+  const canaryRow = makeClosedHumanCanaryRow({
+    ...CLOSED_HUMAN_AUTOMATIC_ACTIVATION,
+    object_path: `v1/sha256/${closedHumanCanaryCompressedSha}.jsonl.gz`,
+    compressed_sha256: closedHumanCanaryCompressedSha,
+    pruned_at: "2026-08-13T00:04:00.000000Z",
+    pruned_transaction_count: 2,
+    pruned_entry_count: 4,
+    pruned_transaction_ids_sha256: automaticCanaryEvidence.transactionIdsSha256,
+    pruned_entry_ids_sha256: automaticCanaryEvidence.entryIdsSha256,
+    destructive_go_at: "2026-08-13T00:03:00.000000Z",
+    destructive_go_batch_id: "334",
+  });
+  const candidateRow = makeClosedHumanCanaryRow({
+    batch_id: "335",
+    object_path: `v1/sha256/${automaticCandidateCompressedSha}.jsonl.gz`,
+    cutoff: "2026-08-14T00:00:00.000000Z",
+    cursor_end_created_at: "2026-08-13T00:00:00.000000Z",
+    cursor_end_id: "00000000-0000-4000-8000-000000000035",
+    first_created_at: "2026-08-13T00:00:00.000000Z",
+    last_created_at: "2026-08-13T00:00:00.000000Z",
+    transaction_count: 1,
+    entry_count: 2,
+    tx_types: { TABLE_BUY_IN: 1 },
+    raw_bytes: 100,
+    compressed_bytes: automaticCandidateArchiveBytes.length,
+    raw_sha256: "5".repeat(64),
+    compressed_sha256: automaticCandidateCompressedSha,
+    credits: "100",
+    debits: "100",
+    net_amount: "0",
+    committed_at: "2026-08-14T00:01:00.000000Z",
+    archive_proof_verified_at: null,
+    archived_transaction_ids_sha256: null,
+    archived_entry_ids_sha256: null,
+    pruned_at: null,
+    pruned_transaction_count: null,
+    pruned_entry_count: null,
+    pruned_transaction_ids_sha256: null,
+    pruned_entry_ids_sha256: null,
+    registry_cleaned_at: null,
+    registry_cleaned_key_count: null,
+    registry_cleaned_keys_sha256: null,
+    destructive_go_at: null,
+    destructive_go_batch_id: null,
+  });
+  const canaryDurable = automaticDurable(canaryRow, automaticCanaryEvidence, closedHumanCanaryArchiveBytes);
+  const candidateDurable = automaticDurable(candidateRow, automaticCandidateEvidence, automaticCandidateArchiveBytes, { uploaded: true });
+  const state = {
+    candidateStored: false,
+    recoveryStored: false,
+    markers: new Map([[CLOSED_HUMAN_AUTOMATIC_ACTIVATION.tableId, "2026-09-05 00:00:00+00"]]),
+    exportCalls: 0,
+    storeCalls: 0,
+    proofCalls: 0,
+    executeCalls: 0,
+    lifecycleCalls: 0,
+    recoveryInspections: 0,
+    verifyBucketCalls: 0,
+    pruneCalls: [],
+    sqlCalls: [],
+  };
+  const policyRow = {
+    policy_id: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+    enabled: policyEnabled,
+    activation_go_at: policyEnabled ? "2026-09-05 00:00:00+00" : null,
+    activation_confirmation: policyEnabled ? CLOSED_HUMAN_AUTOMATIC_ACTIVATION.activationConfirmation : null,
+    activated_at: policyEnabled ? "2026-09-05 00:00:00+00" : null,
+    canary_batch_id: policyEnabled ? "334" : null,
+    canary_confirmation: policyEnabled ? "GO 334" : null,
+  };
+  const session = { backendPid: "closed-human-automatic-session" };
+  const ownRows = () => state.candidateStored ? [candidateRow, canaryRow] : [canaryRow];
+  const sql = {
+    calls: state.sqlCalls,
+    typed: (value, type) => ({ value, type }),
+    unsafe: async (query, values = []) => {
+      state.sqlCalls.push({ query, values });
+      if (query.includes("pg_try_advisory_lock")) return [{ acquired: true, backend_pid: session.backendPid }];
+      if (query.includes("pg_backend_pid")) return [{ backend_pid: session.backendPid }];
+      if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
+      if (query.includes("pg_control_system")) return [{ system_identifier: STAGE_SYSTEM_IDENTIFIER }];
+      if (query.includes("chips_table_fence_is_active")) return [{ active: true }];
+      if (query.includes("chips_table_fence_control")) return [{ enforcement_active: true }];
+      if (query.includes("where batch_id = $1")) return [exactSqlTextRow(canaryRow)];
+      if (query.includes("from public.chips_ledger_archive_batches")) return ownRows();
+      if (query.includes("from public.chips_stage_closed_human_table_retention_policy")) return [policyRow];
+      if (query.includes("from public.poker_tables")) {
+        const tableId = String(values[0]);
+        return [{ table_id: tableId, human_retention_complete_at: state.markers.get(tableId) || null }];
+      }
+      throw new Error(`unexpected closed-human automatic SQL: ${query}`);
+    },
+    begin: async (callback) => callback({
+      unsafe: async (query, values = []) => {
+        if (query.startsWith("set transaction")) return [];
+        return sql.unsafe(query, values);
+      },
+    }),
+  };
+  const pruneStore = {
+    getManifest: async (objectPath) => {
+      if (objectPath === canaryRow.object_path) return canaryRow;
+      if (objectPath === candidateRow.object_path) return candidateRow;
+      throw new Error(`unexpected manifest object path: ${objectPath}`);
+    },
+    async assertClosedHumanLifecycle(tableId, cutoff, batchId) {
+      assert.ok(tableId);
+      assert.ok(cutoff);
+      assert.ok(batchId);
+      return { state: "verified" };
+    },
+  };
+  const deps = {
+    sql,
+    storageTarget,
+    tempRoot: fs.mkdtempSync("/tmp/chips-ledger-stage-closed-human-automatic-test-"),
+    pruneStore,
+    verifyBucket: async () => { state.verifyBucketCalls += 1; },
+    inspectDurableRecovery: async (_target, row) => {
+      state.recoveryInspections += 1;
+      if (String(row?.batch_id) === "334") return canaryDurable;
+      return state.recoveryStored ? candidateDurable : null;
+    },
+    downloadPrivateArchive: async (_target, objectPath) => {
+      assert.equal(objectPath, candidateRow.object_path);
+      return { bytes: automaticCandidateArchiveBytes, downloadMs: 1 };
+    },
+    persistDurableRecovery: async () => {
+      state.recoveryStored = true;
+      return candidateDurable;
+    },
+    exportArchive: async () => {
+      state.exportCalls += 1;
+      return state.exportCalls === 1
+        ? { noCandidate: false }
+        : { noCandidate: true };
+    },
+    ensureArchiveBucket: async () => {},
+    storeArchive: async () => {
+      state.storeCalls += 1;
+      state.candidateStored = true;
+      return { objectPath: candidateRow.object_path, object: { uploaded: true } };
+    },
+    pruneArchive: async ({ argv }) => {
+      const objectPath = argv[argv.indexOf("--object-path") + 1];
+      const row = objectPath === canaryRow.object_path ? canaryRow : candidateRow;
+      const isExecute = argv.includes("--execute");
+      const isProof = argv.includes("--register-proof");
+      state.pruneCalls.push([...argv]);
+      assert.equal(argv.includes("--target") && argv.includes("stage"), true);
+      if (isProof) {
+        assert.equal(row, candidateRow);
+        state.proofCalls += 1;
+        candidateRow.archive_proof_verified_at = "2026-08-14T00:02:00.000000Z";
+        candidateRow.archived_transaction_ids_sha256 = automaticCandidateEvidence.transactionIdsSha256;
+        candidateRow.archived_entry_ids_sha256 = automaticCandidateEvidence.entryIdsSha256;
+        return { state: "proof_registered", row, evidence: automaticCandidateEvidence };
+      }
+      if (!isExecute) {
+        const evidenceForDry = row === candidateRow && invalidCandidateEvidence
+          ? { ...automaticCandidateEvidence, transactionIdsSha256: "9".repeat(64) }
+          : row === canaryRow ? automaticCanaryEvidence : automaticCandidateEvidence;
+        return {
+          state: row === canaryRow || candidateRow.pruned_at ? "already_pruned" : "ready",
+          evidence: evidenceForDry,
+          archiveSha256: row.compressed_sha256,
+        };
+      }
+      assert.equal(row, candidateRow);
+      assert.equal(argv.includes("--automatic"), true, "closed-human automatic execute must use the explicit automatic adapter");
+      assert.equal(argv.includes("--approved-batch-id"), false);
+      state.executeCalls += 1;
+      candidateRow.destructive_go_at = "2026-08-14T00:03:00.000000Z";
+      candidateRow.destructive_go_batch_id = "335";
+      candidateRow.pruned_at = "2026-08-14T00:04:00.000000Z";
+      candidateRow.pruned_transaction_count = 1;
+      candidateRow.pruned_entry_count = 2;
+      candidateRow.pruned_transaction_ids_sha256 = automaticCandidateEvidence.transactionIdsSha256;
+      candidateRow.pruned_entry_ids_sha256 = automaticCandidateEvidence.entryIdsSha256;
+      return { state: "pruned", row, evidence: automaticCandidateEvidence };
+    },
+    completeClosedHumanLifecycle: async ({ batchId, tableId, cutoff }) => {
+      state.lifecycleCalls += 1;
+      const markerBefore = state.markers.get(String(tableId)) || null;
+      const markerAfter = markerBefore || "2026-09-05 00:05:00+00";
+      state.markers.set(String(tableId), markerAfter);
+      return {
+        exactRow: candidateRow,
+        markerBefore,
+        markerAfter,
+        completion: { state: "human_retention_complete", batch_id: String(batchId), table_id: tableId, cutoff },
+      };
+    },
+  };
+  return { deps, state, canaryRow, candidateRow, canaryDurable, candidateDurable, policyRow };
+}
+
+const activePolicyContract = {
+  policy_id: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  enabled: true,
+  activation_go_at: "2026-09-05 00:00:00+00",
+  activated_at: "2026-09-05 00:00:00+00",
+  canary_batch_id: "334",
+  canary_confirmation: "GO 334",
+  activation_confirmation: CLOSED_HUMAN_AUTOMATIC_ACTIVATION.activationConfirmation,
+};
+assertClosedHumanAutomaticPolicy(activePolicyContract);
+assert.throws(
+  () => assertClosedHumanAutomaticPolicy({ ...activePolicyContract, canary_batch_id: "335" }),
+  /exact canary 334/,
+  "automatic policy activation must remain bound to canary 334",
+);
+
+const activationHarness = makeAutomaticClosedHumanHarness({ policyEnabled: false });
+let activationCalls = 0;
+activationHarness.deps.pruneStore.activateClosedHumanPolicy = async (batchId, confirmation) => {
+  activationCalls += 1;
+  assert.equal(String(batchId), "334");
+  assert.equal(confirmation, CLOSED_HUMAN_AUTOMATIC_ACTIVATION.activationConfirmation);
+  activationHarness.policyRow.enabled = true;
+  activationHarness.policyRow.activation_go_at = "2026-09-05 00:00:00+00";
+  activationHarness.policyRow.activated_at = "2026-09-05 00:00:00+00";
+  activationHarness.policyRow.canary_batch_id = "334";
+  activationHarness.policyRow.canary_confirmation = "GO 334";
+  activationHarness.policyRow.activation_confirmation = confirmation;
+  return { state: "active" };
+};
+const activationResult = await runClosedHumanTableRetentionActivation({
+  env: ENV,
+  deps: activationHarness.deps,
+  canaryBatchId: "334",
+  activationConfirmation: CLOSED_HUMAN_AUTOMATIC_ACTIVATION.activationConfirmation,
+});
+assert.equal(activationResult.state, "active");
+assert.equal(activationResult.batchId, "334");
+assert.equal(activationResult.tableId, CLOSED_HUMAN_AUTOMATIC_ACTIVATION.tableId);
+assert.equal(activationResult.proof, "verified");
+assert.equal(activationResult.dryRun, "already_pruned");
+assert.equal(activationResult.recoveryState, "complete");
+assert.equal(activationResult.writePerformed, true);
+assert.equal(activationCalls, 1, "activation must persist only after exact canary and marker evidence");
+
+const activationNoMarkerHarness = makeAutomaticClosedHumanHarness({ policyEnabled: false });
+activationNoMarkerHarness.state.markers.delete(CLOSED_HUMAN_AUTOMATIC_ACTIVATION.tableId);
+activationNoMarkerHarness.deps.pruneStore.activateClosedHumanPolicy = async () => {
+  throw new Error("activation must not write without the canary lifecycle marker");
+};
+await assert.rejects(
+  runClosedHumanTableRetentionActivation({
+    env: ENV,
+    deps: activationNoMarkerHarness.deps,
+    canaryBatchId: "334",
+    activationConfirmation: CLOSED_HUMAN_AUTOMATIC_ACTIVATION.activationConfirmation,
+  }),
+  /lifecycle marker is missing/,
+);
+
+await assert.rejects(
+  runClosedHumanTableRetentionActivation({
+    env: ENV,
+    deps: makeAutomaticClosedHumanHarness({ policyEnabled: false }).deps,
+    canaryBatchId: "335",
+    activationConfirmation: CLOSED_HUMAN_AUTOMATIC_ACTIVATION.activationConfirmation,
+  }),
+  /exact canary 334/,
+);
+
+const automaticHarness = makeAutomaticClosedHumanHarness();
+const automaticResult = await runAutomaticClosedHumanStageAutomation({
+  env: automaticStageEnv,
+  deps: automaticHarness.deps,
+});
+assert.equal(automaticResult.state, "completed");
+assert.equal(automaticResult.boundedBatchLimit, CLOSED_HUMAN_AUTOMATIC_MAX_BATCHES_PER_RUN);
+assert.equal(automaticResult.boundedBatchLimit, 1);
+assert.equal(automaticResult.processed.length, 1, "automatic closed-human Stage run must process one table maximum");
+assert.equal(automaticResult.processed[0].batchId, "335");
+assert.equal(automaticResult.processed[0].receipt, "pruned");
+assert.equal(automaticResult.processed[0].lifecycleState, "human_retention_complete");
+assert.equal(automaticResult.processed[0].lifecycleWritePerformed, true);
+assert.equal(automaticHarness.state.exportCalls, 1);
+assert.equal(automaticHarness.state.storeCalls, 1);
+assert.equal(automaticHarness.state.proofCalls, 1);
+assert.equal(automaticHarness.state.executeCalls, 1);
+assert.equal(automaticHarness.state.lifecycleCalls, 1);
+assert.equal(automaticHarness.state.pruneCalls.some((argv) => argv.includes("--execute")), true);
+assert.equal(automaticHarness.state.pruneCalls.some((argv) => argv.includes("--register-proof")), true);
+assert.equal(automaticHarness.candidateRow.registry_cleaned_at, null, "human idempotency registry must not be retired");
+assert.equal(automaticHarness.candidateRow.destructive_go_batch_id, "335");
+
+const automaticRetry = await runAutomaticClosedHumanStageAutomation({
+  env: automaticStageEnv,
+  deps: automaticHarness.deps,
+});
+assert.equal(automaticRetry.state, "completed");
+assert.equal(automaticRetry.processed.length, 0, "completed automatic retry must not process a second table");
+assert.equal(automaticRetry.stopReason, "no_eligible_closed_human_table");
+assert.equal(automaticHarness.state.executeCalls, 1, "automatic retry must be idempotent");
+assert.equal(automaticHarness.state.lifecycleCalls, 1, "automatic retry must not rewrite the lifecycle marker");
+
+const incompleteAutomaticHarness = makeAutomaticClosedHumanHarness({ invalidCandidateEvidence: true });
+await assert.rejects(
+  runAutomaticClosedHumanStageAutomation({ env: automaticStageEnv, deps: incompleteAutomaticHarness.deps }),
+  /differs from the immutable proof/,
+  "incomplete automatic evidence must fail before execute/lifecycle completion",
+);
+assert.equal(incompleteAutomaticHarness.state.executeCalls, 0);
+assert.equal(incompleteAutomaticHarness.state.lifecycleCalls, 0);
+assert.equal(incompleteAutomaticHarness.candidateRow.human_retention_complete_at ?? null, null);
+
+const manualOnlyAutomaticHarness = makeAutomaticClosedHumanHarness({ policyEnabled: false });
+await assert.rejects(
+  runAutomaticClosedHumanStageAutomation({ env: automaticStageEnv, deps: manualOnlyAutomaticHarness.deps }),
+  /not activated by the exact canary 334/,
+  "manual-only policy must fail closed for the scheduler",
+);
+assert.equal(manualOnlyAutomaticHarness.state.exportCalls, 0);
+assert.equal(manualOnlyAutomaticHarness.state.executeCalls, 0);
+await assert.rejects(
+  runAutomaticClosedHumanStageAutomation({
+    env: { ...automaticStageEnv, SUPABASE_PROD_DB_URL: "forbidden" },
+    deps: makeAutomaticClosedHumanHarness().deps,
+  }),
+  /Production credentials are not accepted/,
+  "Production credentials must fail closed",
+);
+
+for (const harness of [
+  activationHarness,
+  activationNoMarkerHarness,
+  automaticHarness,
+  incompleteAutomaticHarness,
+  manualOnlyAutomaticHarness,
 ]) {
   fs.rmSync(harness.deps.tempRoot, { recursive: true, force: true });
 }
