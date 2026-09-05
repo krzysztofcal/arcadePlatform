@@ -48,8 +48,8 @@ assert.match(lifecycleAclMigration, /grant execute on function public\.chips_com
 assert.match(lifecycleAclMigration, /chips_ledger_archive_pruner/);
 assert.doesNotMatch(lifecycleAclMigration, /grant\s+(insert|update|delete)\b|grant\s+[^;]*\bon\s+public\.(?:poker_tables|chips_ledger_archive_batches|chips_transaction_idempotency)/i);
 assert.doesNotMatch(lifecycleAclMigration, /to (public|anon|authenticated|service_role)/i);
-assert.match(automaticActivationMigration, /add column activation_go_at timestamptz/);
-assert.match(automaticActivationMigration, /add column activation_confirmation text/);
+assert.match(automaticActivationMigration, /add column(?: if not exists)? activation_go_at timestamptz/);
+assert.match(automaticActivationMigration, /add column(?: if not exists)? activation_confirmation text/);
 assert.match(automaticActivationMigration, /chips_stage_closed_human_retention_activation_check/);
 assert.match(automaticActivationMigration, /chips_guard_closed_human_retention_policy/);
 assert.match(automaticActivationMigration, /chips\.closed_human_policy_activation/);

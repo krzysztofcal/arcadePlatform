@@ -4,9 +4,19 @@ begin;
 -- canary and lifecycle marker are the durable activation evidence; no API role
 -- can write this state.
 alter table public.chips_stage_closed_human_table_retention_policy
-  add column activation_go_at timestamptz,
-  add column activation_confirmation text,
-  add constraint chips_stage_closed_human_retention_activation_check check (
+  add column if not exists activation_go_at timestamptz,
+  add column if not exists activation_confirmation text;
+
+do $constraint$
+begin
+  if not exists (
+    select 1
+      from pg_catalog.pg_constraint
+     where conrelid = 'public.chips_stage_closed_human_table_retention_policy'::pg_catalog.regclass
+       and conname = 'chips_stage_closed_human_retention_activation_check'
+  ) then
+    alter table public.chips_stage_closed_human_table_retention_policy
+      add constraint chips_stage_closed_human_retention_activation_check check (
     (
       enabled is false
       and activation_go_at is null
@@ -22,7 +32,10 @@ alter table public.chips_stage_closed_human_table_retention_policy
       and activated_at is not null
       and canary_batch_id is not null
     )
-  );
+      );
+  end if;
+end;
+$constraint$;
 
 create or replace function public.chips_guard_closed_human_retention_policy()
 returns trigger
@@ -88,6 +101,7 @@ do $patch$
 declare
   definition text;
   patched text;
+  before_execute_patch text;
 begin
   select pg_catalog.pg_get_functiondef(
     'public.chips_prune_closed_human_table_archive_batch(text,uuid[],bigint[],uuid,boolean,bigint)'::pg_catalog.regprocedure
@@ -96,9 +110,14 @@ begin
     raise exception 'closed-human prune wrapper is required before automatic activation';
   end if;
 
-  patched := pg_catalog.replace(
-    definition,
-    $needle$if not found
+  patched := definition;
+  if pg_catalog.strpos(
+    patched,
+    'Closed-human policy is not in the required manual-only or active automatic state'
+  ) = 0 then
+    patched := pg_catalog.replace(
+      patched,
+      $needle$if not found
      or policy.enabled is true
      or policy.activated_at is not null then
     raise exception using errcode = 'P9235', message = 'Closed-human canary policy is not manual-only';
@@ -114,14 +133,28 @@ begin
      ) then
     raise exception using errcode = 'P9235', message = 'Closed-human policy is not in the required manual-only or active automatic state';
   end if;$replacement$
-  );
-  if patched = definition or pg_catalog.strpos(patched, 'chips.closed_human_automatic') = 0 then
-    raise exception 'Closed-human prune wrapper policy gate shape changed; refusing an implicit migration';
+    );
+    if patched = definition
+       or pg_catalog.strpos(
+         patched,
+         'Closed-human policy is not in the required manual-only or active automatic state'
+       ) = 0 then
+      raise exception 'Closed-human prune wrapper policy gate shape changed; refusing an implicit migration';
+    end if;
   end if;
 
-  patched := pg_catalog.replace(
-    patched,
-    $needle$if p_execute is true then
+  if (
+    pg_catalog.length(patched)
+    - pg_catalog.length(pg_catalog.replace(
+        patched,
+        'policy.enabled is not true or policy.activated_at is null',
+        ''
+      ))
+  ) < 2 * pg_catalog.length('policy.enabled is not true or policy.activated_at is null') then
+    before_execute_patch := patched;
+    patched := pg_catalog.replace(
+      patched,
+      $needle$if p_execute is true then
     if p_approved_batch_id is distinct from batch.batch_id
        or policy.canary_batch_id is distinct from batch.batch_id
        or policy.canary_confirmation is distinct from ('GO ' || batch.batch_id::text)
@@ -130,7 +163,7 @@ begin
       raise exception using errcode = 'P9235', message = 'Exact closed-human batch GO is required before execute';
     end if;
   end if;$needle$,
-    $replacement$if p_execute is true then
+      $replacement$if p_execute is true then
     if p_approved_batch_id is distinct from batch.batch_id
        or batch.destructive_go_at is null
        or batch.destructive_go_batch_id is distinct from batch.batch_id
@@ -148,12 +181,37 @@ begin
       raise exception using errcode = 'P9235', message = 'Exact closed-human batch GO is required before execute';
     end if;
   end if;$replacement$
-  );
-  if pg_catalog.strpos(patched, 'current_setting(''chips.closed_human_automatic''') = 0
-     or pg_catalog.strpos(patched, 'policy.canary_batch_id is distinct from batch.batch_id') = 0 then
+    );
+    if patched = before_execute_patch
+       or (
+         pg_catalog.length(patched)
+         - pg_catalog.length(pg_catalog.replace(
+             patched,
+             'policy.enabled is not true or policy.activated_at is null',
+             ''
+           ))
+       ) < 2 * pg_catalog.length('policy.enabled is not true or policy.activated_at is null') then
+      raise exception 'Closed-human prune wrapper execute gate shape changed; refusing an implicit migration';
+    end if;
+  end if;
+
+  if pg_catalog.strpos(
+       patched,
+       'Closed-human policy is not in the required manual-only or active automatic state'
+     ) = 0
+     or (
+       pg_catalog.length(patched)
+       - pg_catalog.length(pg_catalog.replace(
+           patched,
+           'policy.enabled is not true or policy.activated_at is null',
+           ''
+         ))
+     ) < 2 * pg_catalog.length('policy.enabled is not true or policy.activated_at is null') then
     raise exception 'Closed-human prune wrapper execute gate shape changed; refusing an implicit migration';
   end if;
-  execute patched;
+  if patched <> definition then
+    execute patched;
+  end if;
 end;
 $patch$;
 reset role;
