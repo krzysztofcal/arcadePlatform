@@ -519,6 +519,11 @@ export function validateStageEnvironment(env = process.env, { requireCommitSha =
 }
 
 export async function acquireInitialAutomaticLock(createSql, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))) {
+  const { sql, value: lockSession } = await initializeStageConnection(createSql, acquireAdvisoryLock, sleep);
+  return { sql, lockSession };
+}
+
+export async function initializeStageConnection(createSql, initialize, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))) {
   const backoff = [250, 1000];
   const transientCodes = new Set([
     "CONNECT_TIMEOUT", "CONNECTION_CLOSED", "CONNECTION_ENDED", "CONNECTION_DESTROYED",
@@ -528,7 +533,7 @@ export async function acquireInitialAutomaticLock(createSql, sleep = (ms) => new
   for (let attempt = 0; ; attempt += 1) {
     const sql = createSql();
     try {
-      return { sql, lockSession: await acquireAdvisoryLock(sql) };
+      return { sql, value: await initialize(sql) };
     } catch (error) {
       // Dispose the failed session before retrying: it may have acquired a lock
       // whose response was lost. Never reuse it for subsequent work.

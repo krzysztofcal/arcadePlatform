@@ -32,6 +32,7 @@ import {
   STAGE_SYSTEM_IDENTIFIER,
   assertDurableRecoveryForEvidence,
   inspectDurableRecoveryState,
+  initializeStageConnection,
   validateStageEnvironment,
 } from "./chips-ledger-stage-automation.mjs";
 import {
@@ -2005,9 +2006,8 @@ export async function runStageEscrowAccountRetention({
   }
   const config = deps.config || validateStageEnvironment(env, { requireCommitSha: true });
   const moduleEnv = deps.moduleEnv || moduleEnvironment(config);
-  const pool = deps.pool || (deps.sql ? null : createStagePool(config, deps.postgres || postgres));
-  const sql = deps.sql || (pool && typeof pool.reserve === "function" ? await pool.reserve() : pool);
-  if (!sql) fail("Stage PostgreSQL session is required");
+  let pool = deps.pool || null;
+  let sql = deps.sql || null;
   const telemetry = deps.telemetry === undefined ? undefined : deps.telemetry;
   const log = deps.klog || klog;
   let lockSession = null;
@@ -2017,7 +2017,25 @@ export async function runStageEscrowAccountRetention({
   let currentBatchId = null;
   let currentBatchNumber = null;
   try {
-    lockSession = await acquireAdvisoryLock(sql, telemetry);
+    if (deps.sql || deps.pool) {
+      sql = deps.sql || (typeof pool.reserve === "function" ? await pool.reserve() : pool);
+      lockSession = await acquireAdvisoryLock(sql, telemetry);
+    } else {
+      const initial = await initializeStageConnection(
+        () => createStagePool(config, deps.postgres || postgres),
+        async (client) => {
+          // Establish the connection with a real query before reserve(). A cold
+          // reserve timeout can throw inside postgres.js queryError (no origin).
+          await client.unsafe("select 1;");
+          const session = await client.reserve();
+          return { session, lockSession: await acquireAdvisoryLock(session, telemetry) };
+        },
+        deps.sleep,
+      );
+      pool = initial.sql;
+      sql = initial.value.session;
+      lockSession = initial.value.lockSession;
+    }
     if (!lockSession) {
       result = {
         state: "busy",

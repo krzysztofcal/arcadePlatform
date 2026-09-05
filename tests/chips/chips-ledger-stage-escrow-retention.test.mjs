@@ -805,6 +805,58 @@ test("automatic disabled policy audits on the reserved session and releases its 
   assert.equal(session.queries.some(({ query }) => query.includes("pg_advisory_unlock")), true);
 });
 
+test("initial escrow connection retries a fresh client only for transient failures", async () => {
+  for (const code of ["CONNECT_TIMEOUT", "57014", "42501"]) {
+    const clients = [];
+    const delays = [];
+    const session = reservedAuditSession();
+    const run = () => runStageEscrowAccountRetention({
+      mode: "audit",
+      deps: {
+        config: { dbUrl: "postgres://stage.example.invalid/db" },
+        telemetry: false,
+        klog: () => {},
+        sleep: async (ms) => delays.push(ms),
+        postgres: () => {
+          assert.ok(clients.every((client) => client.closed));
+          const index = clients.length;
+          const client = {
+            closed: false,
+            connected: false,
+            unsafe: async (query) => {
+              assert.equal(query, "select 1;");
+              if (index === 0) throw Object.assign(new Error("initial connection failure"), { code });
+              client.connected = true;
+              return [{ "?column?": 1 }];
+            },
+            reserve: async () => {
+              assert.equal(client.connected, true, "reserve must never initiate the cold connection");
+              return session;
+            },
+            end: async () => { client.closed = true; },
+          };
+          clients.push(client);
+          return client;
+        },
+      },
+    });
+    if (code === "CONNECT_TIMEOUT") {
+      const result = await run();
+      assert.equal(result.state, "audit");
+      assert.equal(result.lockBackendPid, "42");
+      assert.equal(session.released, true);
+      assert.equal(clients.length, 2);
+      assert.deepEqual(delays, [250]);
+    } else {
+      await assert.rejects(run, { code });
+      assert.equal(clients.length, 1);
+      assert.deepEqual(delays, []);
+      assert.equal(session.queries.length, 0);
+    }
+    assert.ok(clients.every((client) => client.closed));
+  }
+});
+
 test("manual escrow-retention-audit completes on the reserved adapter", async () => {
   const session = reservedAuditSession();
   const result = await runStageEscrowAccountRetention({
