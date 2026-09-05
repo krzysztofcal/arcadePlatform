@@ -8,6 +8,7 @@ const lifecycleOwnerMigration = fs.readFileSync("supabase/migrations/20260905110
 const lifecycleMarkerRlsMigration = fs.readFileSync("supabase/migrations/20260905120000_chips_ledger_closed_human_lifecycle_marker_rls.sql", "utf8");
 const lifecycleAclMigration = fs.readFileSync("supabase/migrations/20260905130000_chips_ledger_closed_human_lifecycle_completion_acl.sql", "utf8");
 const automaticActivationMigration = fs.readFileSync("supabase/migrations/20260905140000_chips_ledger_closed_human_automatic_activation.sql", "utf8");
+const activationPostPruneMigration = fs.readFileSync("supabase/migrations/20260905150000_chips_ledger_closed_human_activation_post_prune.sql", "utf8");
 const cleanup = fs.readFileSync("ws-server/poker/persistence/closed-table-cleanup.mjs", "utf8");
 
 assert.match(migration, /human_retention_complete_at timestamptz/);
@@ -70,6 +71,12 @@ assert.doesNotMatch(automaticActivationMigration, /chips_complete_closed_human_t
 assert.doesNotMatch(automaticActivationMigration, /grant\s+(insert|update|delete)\b/i);
 assert.doesNotMatch(automaticActivationMigration, /to (public|anon|authenticated|service_role)/i);
 assert.doesNotMatch(automaticActivationMigration, /7575202818581710058/);
+assert.match(activationPostPruneMigration, /chips_activate_closed_human_table_retention_policy\(bigint,text\)/);
+assert.match(activationPostPruneMigration, /chips_transaction_idempotency as registry/);
+assert.match(activationPostPruneMigration, /exact_table_count/);
+assert.match(activationPostPruneMigration, /durable activation evidence/);
+assert.doesNotMatch(activationPostPruneMigration, /20260904160000|20260904170000/);
+assert.doesNotMatch(activationPostPruneMigration, /grant\s+(insert|update|delete)\b/i);
 assert.match(cleanup, /t\.has_human_participant is true and t\.human_retention_complete_at is not null/);
 assert.match(cleanup, /t\.has_human_participant is not true and t\.bot_only_retention_complete_at is not null/);
 

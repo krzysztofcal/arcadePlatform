@@ -303,6 +303,12 @@ assert.match(closedHumanAutomaticRun, /CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC: "1"/
 assert.match(closedHumanAutomaticRun, /node scripts\/ops\/chips-ledger-stage-automation\.mjs --policy closed-human-table-30d --automatic/);
 assert.doesNotMatch(closedHumanAutomaticRun, /github\.event_name == 'workflow_dispatch'|--approved-batch-id|--execute(?:\s|$)|\bACTIVATE\b|GO 334|Production|SUPABASE_PROD_/i);
 
+const closedHumanAutomaticRunStart = workflow.indexOf("- name: Run activated closed-human 30-day Stage automation");
+const escrowAutomaticRunStart = workflow.indexOf("- name: Run Stage escrow account retention");
+assert.ok(closedHumanAutomaticRunStart >= 0 && closedHumanAutomaticRunStart < escrowAutomaticRunStart);
+assert.doesNotMatch(closedHumanAutomaticRun, /continue-on-error/);
+assert.match(workflow.slice(closedHumanAutomaticRunStart, escrowAutomaticRunStart), /CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC: "1"/);
+
 const lifecycleRun = workflow.match(
   /- name: Complete exact closed-human table lifecycle[\s\S]*?(?=\n\s+- name:|\s*$)/,
 )[0];

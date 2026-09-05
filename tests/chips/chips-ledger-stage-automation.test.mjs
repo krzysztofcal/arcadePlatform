@@ -26,6 +26,7 @@ import {
   CLOSED_HUMAN_AUTOMATIC_MAX_BATCHES_PER_RUN,
   CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET,
   findOwnCycle,
+  isClosedHumanManualOnlyPolicy,
   persistDurableRecovery,
   runAutomaticClosedHumanStageAutomation,
   runBotOnlyRecoveryRepair,
@@ -2435,6 +2436,24 @@ const activePolicyContract = {
   activation_confirmation: CLOSED_HUMAN_AUTOMATIC_ACTIVATION.activationConfirmation,
 };
 assertClosedHumanAutomaticPolicy(activePolicyContract);
+assert.equal(isClosedHumanManualOnlyPolicy({
+  policy_id: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  enabled: false,
+  activation_go_at: null,
+  activation_confirmation: null,
+  activated_at: null,
+  canary_batch_id: "334",
+  canary_confirmation: "GO 334",
+}), true, "manual-only policy may retain the exact successful canary latch");
+assert.equal(isClosedHumanManualOnlyPolicy({
+  policy_id: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  enabled: false,
+  activation_go_at: "2026-09-05 00:00:00+00",
+  activation_confirmation: null,
+  activated_at: null,
+  canary_batch_id: "334",
+  canary_confirmation: "GO 334",
+}), false, "partial activation state is not manual-only");
 assert.throws(
   () => assertClosedHumanAutomaticPolicy({ ...activePolicyContract, canary_batch_id: "335" }),
   /exact canary 334/,
@@ -2539,13 +2558,36 @@ assert.equal(incompleteAutomaticHarness.state.lifecycleCalls, 0);
 assert.equal(incompleteAutomaticHarness.candidateRow.human_retention_complete_at ?? null, null);
 
 const manualOnlyAutomaticHarness = makeAutomaticClosedHumanHarness({ policyEnabled: false });
-await assert.rejects(
-  runAutomaticClosedHumanStageAutomation({ env: automaticStageEnv, deps: manualOnlyAutomaticHarness.deps }),
-  /not activated by the exact canary 334/,
-  "manual-only policy must fail closed for the scheduler",
-);
+manualOnlyAutomaticHarness.policyRow.canary_batch_id = "334";
+manualOnlyAutomaticHarness.policyRow.canary_confirmation = "GO 334";
+const manualOnlyAutomaticResult = await runAutomaticClosedHumanStageAutomation({
+  env: automaticStageEnv,
+  deps: manualOnlyAutomaticHarness.deps,
+});
+assert.equal(manualOnlyAutomaticResult.state, "no-op");
+assert.equal(manualOnlyAutomaticResult.stopReason, "closed_human_policy_manual_only");
+assert.equal(manualOnlyAutomaticResult.processed.length, 0);
 assert.equal(manualOnlyAutomaticHarness.state.exportCalls, 0);
+assert.equal(manualOnlyAutomaticHarness.state.storeCalls, 0);
+assert.equal(manualOnlyAutomaticHarness.state.proofCalls, 0);
 assert.equal(manualOnlyAutomaticHarness.state.executeCalls, 0);
+assert.equal(manualOnlyAutomaticHarness.state.lifecycleCalls, 0);
+assert.equal(manualOnlyAutomaticHarness.state.verifyBucketCalls, 0);
+
+const partialActiveAutomaticHarness = makeAutomaticClosedHumanHarness();
+partialActiveAutomaticHarness.policyRow.activation_confirmation = null;
+await assert.rejects(
+  runAutomaticClosedHumanStageAutomation({
+    env: automaticStageEnv,
+    deps: partialActiveAutomaticHarness.deps,
+  }),
+  /not activated by the exact canary 334/,
+  "partial active policy must fail closed before automatic work",
+);
+assert.equal(partialActiveAutomaticHarness.state.exportCalls, 0);
+assert.equal(partialActiveAutomaticHarness.state.storeCalls, 0);
+assert.equal(partialActiveAutomaticHarness.state.executeCalls, 0);
+assert.equal(partialActiveAutomaticHarness.state.lifecycleCalls, 0);
 await assert.rejects(
   runAutomaticClosedHumanStageAutomation({
     env: { ...automaticStageEnv, SUPABASE_PROD_DB_URL: "forbidden" },
@@ -2561,6 +2603,7 @@ for (const harness of [
   automaticHarness,
   incompleteAutomaticHarness,
   manualOnlyAutomaticHarness,
+  partialActiveAutomaticHarness,
 ]) {
   fs.rmSync(harness.deps.tempRoot, { recursive: true, force: true });
 }

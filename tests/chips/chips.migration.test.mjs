@@ -1372,6 +1372,150 @@ async function assertClosedHumanLifecycleMarkerRls(sql) {
   });
 }
 
+async function assertClosedHumanPostPruneActivation(sql) {
+  const tableId = "ec3f4897-c7bb-4d92-b63d-a38401e9a5c4";
+  const escrowId = "00000000-0000-4000-8000-00000000f402";
+  const transactionIds = [
+    "00000000-0000-4000-8000-00000000f403",
+    "00000000-0000-4000-8000-00000000f404",
+  ];
+  const entryIds = ["9000001", "9000002", "9000003", "9000004"];
+  const cutoff = "2026-08-05 16:33:12.024+00";
+  const compressedSha = "a".repeat(64);
+  const rawSha = "b".repeat(64);
+  const objectPath = `v1/sha256/${compressedSha}.jsonl.gz`;
+  const ROLLBACK = new Error("closed-human-post-prune-activation-rollback");
+
+  await sql.begin(async (tx) => {
+    await tx.unsafe("set transaction isolation level serializable;");
+    await tx.unsafe(`create or replace function public.chips_assert_archive_prune_stage()
+      returns text language sql security definer set search_path = ''
+      as $post_prune_stage_gate$ select '7656985631720456337'::text $post_prune_stage_gate$;`);
+    await tx.unsafe(`create or replace function public.chips_assert_archive_prune_target(p_project_ref text, p_transaction_count bigint)
+      returns text language plpgsql security definer set search_path = ''
+      as $post_prune_target_gate$
+      begin
+        if p_project_ref = 'krydukthwdvccggbyjfw' and p_transaction_count between 1 and 5000 then
+          return '7656985631720456337';
+        end if;
+        raise exception 'test target gate rejected request';
+      end
+      $post_prune_target_gate$;`);
+
+    await tx.unsafe(`insert into public.poker_tables (id, status, has_human_participant)
+      values ($1::uuid, 'CLOSED', true);`, [tableId]);
+    await tx.unsafe(`insert into public.chips_accounts (
+      id, account_type, system_key, status, balance, next_entry_seq
+    ) values ($1::uuid, 'ESCROW', $2, 'active', 0, 1);`, [
+      escrowId,
+      `POKER_TABLE:${tableId}`,
+    ]);
+    await tx.unsafe(`insert into public.poker_state (table_id, state)
+      values ($1::uuid, '{"phase":"HAND_DONE","handId":""}'::jsonb);`, [tableId]);
+
+    const hashRows = await tx.unsafe(
+      `select
+        public.chips_archive_uuid_ids_sha256($1::uuid[]) as transaction_hash,
+        public.chips_archive_bigint_ids_sha256($2::bigint[]) as entry_hash;`,
+      [transactionIds, entryIds],
+    );
+    const transactionHash = hashRows[0].transaction_hash;
+    const entryHash = hashRows[0].entry_hash;
+    await tx.unsafe(`insert into public.chips_ledger_archive_batches (
+      batch_id, object_path, project_ref, format_version, source_policy_id, cutoff,
+      first_created_at, last_created_at, transaction_count, entry_count, tx_types,
+      raw_bytes, compressed_bytes, raw_sha256, compressed_sha256, credits, debits,
+      net_amount, status, committed_at, archive_proof_verified_at,
+      archived_transaction_ids_sha256, archived_entry_ids_sha256
+    ) overriding system value values (
+      334, $1, 'krydukthwdvccggbyjfw', 1,
+      'stage-ledger-closed-human-table-retention-30d-v1', $2::timestamptz,
+      $2::timestamptz, $2::timestamptz, 2, 4, '{"TABLE_BUY_IN":2}'::jsonb,
+      100, 80, $3, $4, 20, 20, 0, 'committed', timezone('utc', now()),
+      timezone('utc', now()), $5, $6
+    );`, [objectPath, cutoff, rawSha, compressedSha, transactionHash, entryHash]);
+
+    for (let index = 0; index < transactionIds.length; index += 1) {
+      await tx.unsafe(`insert into public.chips_transaction_idempotency (
+        idempotency_key, transaction_id, payload_hash, tx_type, user_id,
+        transaction_created_at, archive_batch_id, table_id, key_format_version, key_format
+      ) values ($1, $2::uuid, $3, 'TABLE_BUY_IN', $4::uuid, $5::timestamptz,
+        334, $6::uuid, 1, 'table');`, [
+        `poker:closed-human-post-prune:${tableId}:${index}`,
+        transactionIds[index],
+        (index === 0 ? "c" : "d").repeat(64),
+        primaryUserId,
+        cutoff,
+        tableId,
+      ]);
+    }
+
+    const hotRows = await tx.unsafe(`select
+      (select count(*) from public.chips_transactions where id = any($1::uuid[])) as transactions,
+      (select count(*) from public.chips_entries where transaction_id = any($1::uuid[])) as entries,
+      (select count(*) from public.chips_transaction_idempotency where archive_batch_id = 334) as registry_rows;`, [transactionIds]);
+    assert.equal(Number(hotRows[0].transactions), 0, "post-prune canary must have no hot transactions");
+    assert.equal(Number(hotRows[0].entries), 0, "post-prune canary must have no hot entries");
+    assert.equal(Number(hotRows[0].registry_rows), 2, "post-prune canary must retain its registry");
+
+    const authorizationRows = await tx.unsafe(
+      `select public.chips_authorize_closed_human_table_retention_canary(
+        334, 'GO 334'
+      ) as result;`,
+    );
+    assert.equal(authorizationRows[0].result.state, "authorized");
+
+    await tx.unsafe("set local role chips_ledger_archive_pruner;");
+    await tx.unsafe(`update public.chips_ledger_archive_batches
+      set pruned_at = timezone('utc', now()),
+          pruned_transaction_count = 2,
+          pruned_entry_count = 4,
+          pruned_transaction_ids_sha256 = archived_transaction_ids_sha256,
+          pruned_entry_ids_sha256 = archived_entry_ids_sha256
+      where batch_id = 334;`);
+    await tx.unsafe("reset role;");
+
+    const lifecycleRows = await tx.unsafe(
+      `select public.chips_complete_closed_human_table_retention(
+        $1::uuid, $2::timestamptz
+      ) as result;`,
+      [tableId, cutoff],
+    );
+    assert.equal(lifecycleRows[0].result.state, "human_retention_complete");
+
+    const activationRows = await tx.unsafe(
+      `select public.chips_activate_closed_human_table_retention_policy(
+        334, 'ACTIVATE stage-ledger-closed-human-table-retention-30d-v1 CANARY 334'
+      ) as result;`,
+    );
+    assert.equal(activationRows[0].result.state, "active", "valid post-prune canary activation must pass");
+
+    const finalRows = await tx.unsafe(`select
+      enabled,
+      canary_batch_id::text as canary_batch_id,
+      canary_confirmation,
+      activated_at,
+      (select human_retention_complete_at from public.poker_tables where id = $1::uuid) as marker,
+      (select count(*) from public.chips_transactions where id = any($2::uuid[])) as hot_transactions,
+      (select count(*) from public.chips_entries where transaction_id = any($2::uuid[])) as hot_entries,
+      (select count(*) from public.chips_transaction_idempotency where archive_batch_id = 334) as registry_rows
+      from public.chips_stage_closed_human_table_retention_policy
+      where policy_id = 'stage-ledger-closed-human-table-retention-30d-v1';`, [tableId, transactionIds]);
+    assert.equal(finalRows[0].enabled, true);
+    assert.equal(finalRows[0].canary_batch_id, "334");
+    assert.equal(finalRows[0].canary_confirmation, "GO 334");
+    assert.ok(finalRows[0].activated_at);
+    assert.ok(finalRows[0].marker);
+    assert.equal(Number(finalRows[0].hot_transactions), 0);
+    assert.equal(Number(finalRows[0].hot_entries), 0);
+    assert.equal(Number(finalRows[0].registry_rows), 2);
+
+    throw ROLLBACK;
+  }).catch((error) => {
+    if (error !== ROLLBACK) throw error;
+  });
+}
+
 async function assertClosedHumanPruneEvidence(sql) {
   const closedHumanPolicyId = "stage-ledger-closed-human-table-retention-30d-v1";
   const ROLLBACK = new Error("closed-human-prune-evidence-rollback");
@@ -2528,6 +2672,7 @@ async function main() {
   await assertArchivePrunerRoleContracts(sql);
   await assertClosedHumanPolicyRls(sql);
   await assertClosedHumanLifecycleMarkerRls(sql);
+  await assertClosedHumanPostPruneActivation(sql);
   await assertClosedHumanPruneEvidence(sql);
   await assertLegacyAllowlistCleanupContracts(sql);
   await assertLegacyUnprunedRegistrySelectorContract(sql);

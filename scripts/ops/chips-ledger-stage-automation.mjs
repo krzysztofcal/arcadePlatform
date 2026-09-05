@@ -589,6 +589,18 @@ export function assertClosedHumanAutomaticPolicy(policy) {
   return policy;
 }
 
+export function isClosedHumanManualOnlyPolicy(policy) {
+  if (text(policy?.policy_id) !== CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID) return false;
+  const canaryUnset = policy.canary_batch_id == null && policy.canary_confirmation == null;
+  const canaryIsExact = text(policy.canary_batch_id) === CLOSED_HUMAN_AUTOMATIC_ACTIVATION.batchId
+    && text(policy.canary_confirmation) === CLOSED_HUMAN_AUTOMATIC_ACTIVATION.canaryConfirmation;
+  return (policy.enabled === false || policy.enabled === "f")
+    && policy.activation_go_at == null
+    && policy.activation_confirmation == null
+    && policy.activated_at == null
+    && (canaryUnset || canaryIsExact);
+}
+
 async function loadClosedHumanPolicyRow(sql) {
   const rows = await sql.unsafe(
     CLOSED_HUMAN_POLICY_AUTOMATIC_STATE_SQL,
@@ -4765,24 +4777,42 @@ export async function runAutomaticClosedHumanStageAutomation({
       await assertAdvisoryLock(sql, lockSession);
       markAutomaticPhase("automatic.fence");
       await assertAutomaticStageFence(sql, "automatic closed-human Stage retention");
-      markAutomaticPhase("automatic.storage-preflight");
-      await verifyBucket(storageTarget);
       markAutomaticPhase("automatic.policy");
       const policyRow = await loadClosedHumanPolicyRow(sql);
-      assertClosedHumanAutomaticPolicy(policyRow);
-      const canary = await verifyClosedHumanCanaryActivationPrerequisites({
-        identity,
-        env: moduleEnv,
-        tempRoot,
-        sql,
-        pruneStore,
-        storageTarget,
-        verifyBucket,
-        storageDeps: deps,
-        lockSession,
-        automatic: true,
-      });
-      await assertAdvisoryLock(sql, lockSession);
+      if (isClosedHumanManualOnlyPolicy(policyRow)) {
+        result = {
+          state: "no-op",
+          mode: "automatic",
+          sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+          projectRef: STAGE_PROJECT_REF,
+          stageSystemIdentifier: identity,
+          policy: {
+            enabled: false,
+            canaryBatchId: policyRow.canary_batch_id,
+            activatedAt: null,
+            activationConfirmation: null,
+          },
+          boundedBatchLimit: CLOSED_HUMAN_AUTOMATIC_MAX_BATCHES_PER_RUN,
+          processed: [],
+          stopReason: "closed_human_policy_manual_only",
+        };
+      } else {
+        assertClosedHumanAutomaticPolicy(policyRow);
+        markAutomaticPhase("automatic.storage-preflight");
+        await verifyBucket(storageTarget);
+        const canary = await verifyClosedHumanCanaryActivationPrerequisites({
+          identity,
+          env: moduleEnv,
+          tempRoot,
+          sql,
+          pruneStore,
+          storageTarget,
+          verifyBucket,
+          storageDeps: deps,
+          lockSession,
+          automatic: true,
+        });
+        await assertAdvisoryLock(sql, lockSession);
 
       const ownRows = await loadOwnBatches(sql, CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID);
       const ownCycle = findOwnCycle(ownRows, CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID);
@@ -4977,6 +5007,7 @@ export async function runAutomaticClosedHumanStageAutomation({
         processed,
         stopReason: stopReason || "processed_one_closed_human_table",
       };
+      }
     }
   } catch (error) {
     failed = true;
