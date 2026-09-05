@@ -3,8 +3,14 @@ begin;
 -- The canonical Stage workflow connects as postgres.  Keep the function
 -- SECURITY DEFINER owner as the archive pruner and grant only invocation ACL
 -- to the workflow caller; no table or API-role privileges are added.
+grant chips_ledger_archive_pruner to postgres;
+set role chips_ledger_archive_pruner;
+
 grant execute on function public.chips_complete_closed_human_table_retention(uuid, timestamptz)
   to postgres;
+
+reset role;
+revoke chips_ledger_archive_pruner from postgres;
 
 do $check$
 declare
