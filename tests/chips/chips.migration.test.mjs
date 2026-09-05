@@ -1154,6 +1154,62 @@ async function assertArchivePrunerRoleContracts(sql) {
   });
 }
 
+async function assertClosedHumanPolicyRls(sql) {
+  const policyTable = "public.chips_stage_closed_human_table_retention_policy";
+  const policyId = "stage-ledger-closed-human-table-retention-30d-v1";
+  const policyRows = await sql`
+    select policyname, roles::text as roles, cmd, qual, with_check
+      from pg_catalog.pg_policies
+     where schemaname = 'public'
+       and tablename = 'chips_stage_closed_human_table_retention_policy';
+  `;
+  assert.equal(policyRows.length, 1, "closed-human policy table must have exactly one RLS policy");
+  assert.equal(policyRows[0].policyname, "chips_stage_closed_human_table_retention_policy_pruner_select");
+  assert.equal(policyRows[0].roles, "{chips_ledger_archive_pruner}");
+  assert.equal(policyRows[0].cmd, "SELECT");
+  assert.match(policyRows[0].qual || "", new RegExp(`policy_id = '${policyId}'`));
+  assert.equal(policyRows[0].with_check, null);
+
+  const privileges = await sql`
+    select
+      has_table_privilege('chips_ledger_archive_pruner', ${policyTable}, 'select') as pruner_select,
+      has_table_privilege('anon', ${policyTable}, 'select') as anon_select,
+      has_table_privilege('authenticated', ${policyTable}, 'select') as authenticated_select,
+      has_table_privilege('service_role', ${policyTable}, 'select') as service_role_select,
+      (select relrowsecurity
+         from pg_catalog.pg_class
+        where oid = ${policyTable}::regclass) as rls_enabled;
+  `;
+  assert.equal(privileges[0].rls_enabled, true, "closed-human policy table must retain RLS");
+  assert.equal(privileges[0].pruner_select, true, "archive pruner must retain SELECT privilege");
+  assert.equal(privileges[0].anon_select, false, "anon must not read the closed-human policy table");
+  assert.equal(privileges[0].authenticated_select, false, "authenticated must not read the closed-human policy table");
+  assert.equal(privileges[0].service_role_select, false, "service_role must not read the closed-human policy table");
+
+  const prunerRows = await sql.begin(async (tx) => {
+    await tx.unsafe("set local role chips_ledger_archive_pruner;");
+    return tx.unsafe(`select policy_id from ${policyTable} order by policy_id;`);
+  });
+  assert.deepEqual(
+    prunerRows.map((row) => row.policy_id),
+    [policyId],
+    "archive pruner must see exactly the closed-human singleton",
+  );
+
+  for (const role of ["anon", "authenticated", "service_role"]) {
+    let caught = null;
+    try {
+      await sql.begin(async (tx) => {
+        await tx.unsafe(`set local role ${role};`);
+        await tx.unsafe(`select policy_id from ${policyTable};`);
+      });
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught, `${role} must not read the closed-human policy table`);
+  }
+}
+
 async function assertClosedHumanPruneEvidence(sql) {
   const closedHumanPolicyId = "stage-ledger-closed-human-table-retention-30d-v1";
   const ROLLBACK = new Error("closed-human-prune-evidence-rollback");
@@ -1192,6 +1248,8 @@ async function assertClosedHumanPruneEvidence(sql) {
       values ($1::uuid, $2::uuid, null, 'USER', 'active', 10);`, [userAccountId, userId]);
     await tx.unsafe(`insert into public.chips_accounts (id, user_id, system_key, account_type, status, balance)
       values ($1::uuid, null, $2, 'ESCROW', 'active', 0);`, [escrowId, `POKER_TABLE:${tableId}`]);
+    await tx.unsafe(`insert into public.poker_state (table_id, state)
+      values ($1::uuid, '{"phase":"HAND_DONE","handId":""}'::jsonb);`, [tableId]);
 
     const entryIds = [];
     for (let index = 0; index < transactionIds.length; index += 1) {
@@ -1201,7 +1259,7 @@ async function assertClosedHumanPruneEvidence(sql) {
         transactionIds[index],
         `table:${tableId}`,
         JSON.stringify({ tableId }),
-        `closed-human-prune-evidence:${index}`,
+        `poker:human-terminal-cashout:v1:${tableId}:closed-human-prune-evidence-${index}`,
         (index === 0 ? "a" : "b").repeat(64),
         index === 0 ? "TABLE_BUY_IN" : "TABLE_CASH_OUT",
         userId,
@@ -1266,6 +1324,14 @@ async function assertClosedHumanPruneEvidence(sql) {
     assert.equal(validDryRows[0].result.state, "ready", "closed-human USER/ESCROW BUY_IN + CASH_OUT must pass dry-run");
     assert.equal(Number(validDryRows[0].result.user_transactions), 2, "closed-human dry-run must report two user transactions");
     assert.equal(Number(validDryRows[0].result.user_entries), 2, "closed-human dry-run must report two USER entries");
+
+    const closedHumanDryRows = await tx.unsafe(
+      "select public.chips_prune_closed_human_table_archive_batch($1, $2::uuid[], $3::bigint[], $4::uuid, $5::boolean, $6::bigint) as result;",
+      [objectPath, transactionIds, entryIds, tableId, false, null],
+    );
+    assert.equal(closedHumanDryRows[0].result.state, "ready", "closed-human exact dry-run must pass the policy RLS gate");
+    assert.equal(closedHumanDryRows[0].result.policy_id, closedHumanPolicyId);
+    assert.equal(closedHumanDryRows[0].result.table_id, tableId);
 
     const malformedTableId = "00000000-0000-4000-8000-00000000e411";
     const malformedUserId = idempotentUserId;
@@ -2298,6 +2364,7 @@ async function main() {
   await expectFrozenLegacyAllowlistHashGuard(sql);
   await ensureGenesisFixture(sql);
   await assertArchivePrunerRoleContracts(sql);
+  await assertClosedHumanPolicyRls(sql);
   await assertClosedHumanPruneEvidence(sql);
   await assertLegacyAllowlistCleanupContracts(sql);
   await assertLegacyUnprunedRegistrySelectorContract(sql);
