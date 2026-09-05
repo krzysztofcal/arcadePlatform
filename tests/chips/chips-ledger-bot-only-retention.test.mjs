@@ -32,6 +32,7 @@ const proofPerformanceMigration = fs.readFileSync("supabase/migrations/202609051
 const proofPerformanceFixMigration = fs.readFileSync("supabase/migrations/20260905161000_chips_ledger_bot_only_proof_perf_fix.sql", "utf8");
 const proofAccessPathMigration = fs.readFileSync("supabase/migrations/20260905170000_chips_ledger_retention_access_paths.sql", "utf8");
 const proofTypeAccessPathMigration = fs.readFileSync("supabase/migrations/20260905171000_chips_ledger_bot_only_proof_type_access_path.sql", "utf8");
+const proofSeqscanGuardMigration = fs.readFileSync("supabase/migrations/20260905172000_chips_ledger_bot_only_proof_seqscan_guard.sql", "utf8");
 const closedTableCleanup = fs.readFileSync("ws-server/poker/persistence/closed-table-cleanup.mjs", "utf8");
 
 const TABLE_ID = "00000000-0000-4000-8000-000000000020";
@@ -407,6 +408,11 @@ function proofPerformanceContract() {
   assert.match(proofTypeAccessPathMigration, /from table_transaction_rows transactions/);
   assert.doesNotMatch(proofTypeAccessPathMigration, /set local statement_timeout/i);
   assert.doesNotMatch(proofTypeAccessPathMigration, /create index/i);
+  assert.match(proofSeqscanGuardMigration, /set_config\(''enable_seqscan'', ''off'', true\)/);
+  assert.match(proofSeqscanGuardMigration, /table_transaction_rows as \(/);
+  assert.match(proofSeqscanGuardMigration, /from candidate_transaction_ids candidates/);
+  assert.doesNotMatch(proofSeqscanGuardMigration, /set local statement_timeout/i);
+  assert.doesNotMatch(proofSeqscanGuardMigration, /create index/i);
 }
 
 function retryAndAccountingContract() {
