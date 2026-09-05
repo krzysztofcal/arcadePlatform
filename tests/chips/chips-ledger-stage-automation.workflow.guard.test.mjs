@@ -10,6 +10,7 @@ const RETAINED_MODES = [
   "bot-only-7d-summary-diagnostic",
   "bot-only-7d-automatic",
   "closed-human-30d-prepare",
+  "closed-human-30d-canary",
   "closed-human-30d-recovery-diagnostic",
   "closed-human-30d-recovery-repair",
   "escrow-retention-audit",
@@ -45,6 +46,7 @@ const RETAINED_STEPS = [
   "Repair exact existing 30-day durable recovery",
   "Run bot-only 7-day summary diagnostic",
   "Prepare closed human-table 30-day Stage retention",
+  "Execute exact closed human-table 30-day Stage canary",
   "Diagnose closed human-table 30-day durable recovery",
   "Repair exact closed human-table 30-day durable recovery",
   "Run activated bot-only 7-day Stage automation",
@@ -72,6 +74,8 @@ for (const retired of RETIRED_MODES) {
 assert.deepEqual([...inputNames].sort(), [
   "escrow_retention_recovery_confirmation",
   "escrow_retention_recovery_object_path",
+  "closed_human_canary_batch_id",
+  "closed_human_canary_confirmation",
   "mode",
   "stage_30d_recovery_batch_id",
 ].sort(), "exact retained dispatch inputs");
@@ -131,6 +135,7 @@ for (const mode of [
   "bot-only-7d-summary-diagnostic",
   "bot-only-7d-automatic",
   "closed-human-30d-prepare",
+  "closed-human-30d-canary",
   "closed-human-30d-recovery-diagnostic",
   "closed-human-30d-recovery-repair",
   "escrow-retention-audit",
@@ -149,7 +154,9 @@ assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-audit'/);
 assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-verify'/);
 assert.match(stageJobIf, /inputs\.mode != 'existing-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-recovery-repair'/);
+assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-canary'/);
 assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-recovery-repair'/);
+assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-canary'/);
 assert.match(stageJobIf, /github\.ref == 'refs\/heads\/main'/);
 assert.match(stageJobIf, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
 assert.match(stageJobIf, /github\.event\.repository\.fork != true/);
@@ -220,5 +227,22 @@ assert.match(closedHumanRepairRun, /test -z "\$\{CHIPS_LEDGER_BOT_ONLY_AUTOMATIC
 assert.match(closedHumanRepairRun, /GITHUB_ACTOR" != "\$GITHUB_REPOSITORY_OWNER"/);
 assert.match(closedHumanRepairRun, /--policy stage-ledger-closed-human-table-retention-30d-v1 \\\n\s+--repair-recovery \\\n\s+--batch-id "\$STAGE_30D_RECOVERY_BATCH_ID"/);
 assert.doesNotMatch(closedHumanRepairRun, /--diagnose-recovery|--prepare-only|--execute|--automatic|--register-proof|storeArchive|ensureArchiveBucket/);
+
+const closedHumanCanaryRun = workflow.match(
+  /- name: Execute exact closed human-table 30-day Stage canary[\s\S]*?(?=\n\s+- name:|\s*$)/,
+)[0];
+assert.match(closedHumanCanaryRun, /github\.event_name == 'workflow_dispatch' && inputs\.mode == 'closed-human-30d-canary'/);
+assert.match(closedHumanCanaryRun, /test "\$DEPLOYED_COMMIT_SHA" = "\$GITHUB_SHA"/);
+assert.match(closedHumanCanaryRun, /test "\$GITHUB_REPOSITORY" = "krzysztofcal\/arcadePlatform"/);
+assert.match(closedHumanCanaryRun, /test "\$GITHUB_REF" = "refs\/heads\/main"/);
+assert.match(closedHumanCanaryRun, /test "\$GITHUB_ACTOR" = "\$GITHUB_REPOSITORY_OWNER"/);
+assert.match(closedHumanCanaryRun, /CHIPS_LEDGER_CLOSED_HUMAN_EXECUTE: "1"/);
+assert.match(closedHumanCanaryRun, /closed_human_canary_batch_id/);
+assert.match(closedHumanCanaryRun, /closed_human_canary_confirmation/);
+assert.match(closedHumanCanaryRun, /closed_human_canary_confirmation must be exactly GO <batch_id>/);
+assert.match(closedHumanCanaryRun, /--policy closed-human-table-30d \\\n\s+--execute \\\n\s+--approved-batch-id "\$CLOSED_HUMAN_CANARY_BATCH_ID" \\\n\s+--approved-batch-confirmation "\$CLOSED_HUMAN_CANARY_CONFIRMATION"/);
+assert.doesNotMatch(closedHumanCanaryRun, /--prepare-only|--automatic|schedule/);
+assert.doesNotMatch(closedHumanCanaryRun, /Production|SUPABASE_PROD_/i);
+assert.doesNotMatch(workflow, /CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC: "1"/);
 
 process.stdout.write("chips-ledger-stage-automation workflow guard passed\n");

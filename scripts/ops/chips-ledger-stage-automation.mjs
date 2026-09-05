@@ -80,6 +80,7 @@ export const BOT_ONLY_BATCH_15_RECOVERY_REPAIR = Object.freeze({
 
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const COMMIT_SHA_RE = /^[0-9a-f]{40}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PRIVATE_FILE_MODE = 0o600;
 const AUTOMATIC_DRY_RUN_RETRYABLE_SQLSTATES = new Set(["40001", "55P03"]);
 
@@ -644,6 +645,56 @@ export function botOnlyReport({ row, identity, dry, durable, state, mode, deploy
   };
 }
 
+function closedHumanReport({ row, identity, dry, durable, state, mode, deployedCommitSha = null }) {
+  const evidence = dry?.evidence || null;
+  const recoveryArchiveSha256 = durable?.recoveryArchive?.sha256 || durable?.archiveSha256 || null;
+  const recoveryManifestSha256 = durable?.recoveryManifest?.sha256 || durable?.manifestSha256 || null;
+  return {
+    state,
+    mode,
+    sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+    projectRef: row?.project_ref || STAGE_PROJECT_REF,
+    deployedCommitSha,
+    formatVersion: row?.format_version == null ? null : Number(row.format_version),
+    stageSystemIdentifier: identity,
+    batchId: row?.batch_id || null,
+    objectPath: row?.object_path || null,
+    cutoff: row?.cutoff || null,
+    tableId: evidence?.closedHumanTableId || null,
+    tableCount: evidence?.distinctTables ?? null,
+    transactions: evidence?.transactionCount ?? (row?.transaction_count == null ? null : Number(row.transaction_count)),
+    entries: evidence?.entryCount ?? (row?.entry_count == null ? null : Number(row.entry_count)),
+    txTypes: evidence?.txTypes || null,
+    amounts: evidence ? { credits: evidence.credits, debits: evidence.debits, net: evidence.net } : null,
+    userTransactions: evidence?.userTransactions ?? evidence?.closedHumanUserTransactions ?? null,
+    userEntries: evidence?.userEntries ?? evidence?.closedHumanUserEntries ?? null,
+    rawBytes: row?.raw_bytes == null ? null : Number(row.raw_bytes),
+    rawSha256: row?.raw_sha256 || null,
+    compressedBytes: row?.compressed_bytes == null ? null : Number(row.compressed_bytes),
+    compressedSha256: row?.compressed_sha256 || null,
+    archiveProofTransactionIdsSha256: row?.archived_transaction_ids_sha256 || null,
+    archiveProofEntryIdsSha256: row?.archived_entry_ids_sha256 || null,
+    pruneReceipt: row?.pruned_at ? {
+      at: row.pruned_at,
+      transaction_count: row.pruned_transaction_count,
+      entry_count: row.pruned_entry_count,
+      transaction_ids_sha256: row.pruned_transaction_ids_sha256,
+      entry_ids_sha256: row.pruned_entry_ids_sha256,
+    } : null,
+    recoveryArchiveSha256,
+    recoveryManifestSha256,
+    recoveryArchivePath: durable?.archivePath || null,
+    recoveryManifestPath: durable?.manifestPath || null,
+    dryRun: dry?.state || null,
+    proof: row?.archive_proof_verified_at ? "verified" : null,
+    receipt: row?.pruned_at ? "pruned" : state === "prepared" ? "prepare-only" : null,
+    destructiveGoBatchId: row?.destructive_go_batch_id || null,
+    destructiveGoAt: row?.destructive_go_at || null,
+    humanIdempotencyRegistryPreserved: state === "pruned" || state === "already_pruned" ? true : null,
+    automaticActivation: false,
+  };
+}
+
 function automaticRecoveryStorageModified(durable) {
   return durable?.recoveryArchive?.uploaded === true
     || durable?.recoveryManifest?.uploaded === true;
@@ -825,6 +876,10 @@ function validSha256(value) {
   return SHA256_RE.test(text(value));
 }
 
+function validUuid(value) {
+  return UUID_RE.test(text(value));
+}
+
 function assertExactReceiptFields(row, batchId) {
   const receiptCount = receiptFieldCount(row);
   if (receiptCount !== 0 && receiptCount !== 5) {
@@ -916,6 +971,156 @@ export function assertBotOnlyActiveManifestMatch(exactRow, activeRow, approvedBa
     }
   }
   return true;
+}
+
+const CLOSED_HUMAN_EXECUTE_MANIFEST_FIELDS = [
+  "object_path",
+  "project_ref",
+  "source_policy_id",
+  "status",
+  "batch_id",
+  "format_version",
+  "cutoff",
+  "cursor_start_created_at",
+  "cursor_start_id",
+  "cursor_end_created_at",
+  "cursor_end_id",
+  "first_created_at",
+  "last_created_at",
+  "transaction_count",
+  "entry_count",
+  "tx_types",
+  "raw_bytes",
+  "compressed_bytes",
+  "raw_sha256",
+  "compressed_sha256",
+  "credits",
+  "debits",
+  "net_amount",
+  "committed_at",
+  "archive_proof_verified_at",
+  "archived_transaction_ids_sha256",
+  "archived_entry_ids_sha256",
+  "pruned_at",
+  "pruned_transaction_count",
+  "pruned_entry_count",
+  "pruned_transaction_ids_sha256",
+  "pruned_entry_ids_sha256",
+  "registry_cleaned_at",
+  "registry_cleaned_key_count",
+  "registry_cleaned_keys_sha256",
+  "destructive_go_at",
+  "destructive_go_batch_id",
+];
+
+function closedHumanReceiptFieldCount(row) {
+  return [
+    row?.pruned_at,
+    row?.pruned_transaction_count,
+    row?.pruned_entry_count,
+    row?.pruned_transaction_ids_sha256,
+    row?.pruned_entry_ids_sha256,
+  ].filter((value) => value != null).length;
+}
+
+function closedHumanGoFieldCount(row) {
+  return [row?.destructive_go_at, row?.destructive_go_batch_id]
+    .filter((value) => value != null).length;
+}
+
+export function assertClosedHumanExecuteBatch(row, approvedBatchId, identity = STAGE_SYSTEM_IDENTIFIER) {
+  const batchId = String(approvedBatchId);
+  if (!row) fail(`exact closed-human batch ${batchId} was not found`);
+  if (text(row.batch_id) !== batchId) fail(`exact closed-human batch ${batchId} identity mismatch`);
+  if (text(identity) !== STAGE_SYSTEM_IDENTIFIER) fail("exact closed-human batch Stage identity mismatch");
+  if (text(row.project_ref) !== STAGE_PROJECT_REF) fail("exact closed-human batch project mismatch");
+  if (text(row.source_policy_id) !== CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID) {
+    fail("exact closed-human batch policy mismatch");
+  }
+  if (Number(row.format_version) !== EXPORT_SCHEMA_VERSION) fail("exact closed-human batch schema version mismatch");
+  if (text(row.status) !== "committed" || !text(row.committed_at)) fail("exact closed-human batch is not committed");
+  if (!text(row.cutoff) || !validSha256(row.raw_sha256) || !validSha256(row.compressed_sha256)) {
+    fail(`exact closed-human batch ${batchId} has an invalid archive binding`);
+  }
+  if (text(row.object_path) !== `v1/sha256/${text(row.compressed_sha256)}.jsonl.gz`) {
+    fail(`exact closed-human batch ${batchId} object path does not match its compressed hash`);
+  }
+  if (!Number.isSafeInteger(Number(row.transaction_count))
+    || Number(row.transaction_count) < 1
+    || Number(row.transaction_count) > STAGE_MAX_BATCH_SIZE
+    || !Number.isSafeInteger(Number(row.entry_count))
+    || Number(row.entry_count) < 1) {
+    fail(`exact closed-human batch ${batchId} has invalid archive counts`);
+  }
+  if (proofFieldCount(row) !== 3
+    || !validSha256(row.archived_transaction_ids_sha256)
+    || !validSha256(row.archived_entry_ids_sha256)) {
+    fail(`exact closed-human batch ${batchId} is missing a complete archive proof`);
+  }
+
+  const receiptCount = closedHumanReceiptFieldCount(row);
+  if (receiptCount !== 0 && receiptCount !== 5) {
+    fail(`exact closed-human batch ${batchId} has a partial prune receipt`);
+  }
+  if (receiptCount === 5 && (
+    Number(row.pruned_transaction_count) !== Number(row.transaction_count)
+    || Number(row.pruned_entry_count) !== Number(row.entry_count)
+    || row.pruned_transaction_ids_sha256 !== row.archived_transaction_ids_sha256
+    || row.pruned_entry_ids_sha256 !== row.archived_entry_ids_sha256
+  )) {
+    fail(`exact closed-human batch ${batchId} has a mismatched prune receipt`);
+  }
+
+  const cleanupCount = [
+    row.registry_cleaned_at,
+    row.registry_cleaned_key_count,
+    row.registry_cleaned_keys_sha256,
+  ].filter((value) => value != null).length;
+  if (cleanupCount !== 0) fail(`exact closed-human batch ${batchId} has an unexpected registry cleanup receipt`);
+
+  const goCount = closedHumanGoFieldCount(row);
+  if (goCount !== 0 && goCount !== 2) fail(`exact closed-human batch ${batchId} has a partial destructive GO`);
+  if (goCount === 2 && text(row.destructive_go_batch_id) !== batchId) {
+    fail(`exact closed-human batch ${batchId} has a foreign destructive GO`);
+  }
+  if (receiptCount === 5 && goCount !== 2) {
+    fail(`exact closed-human batch ${batchId} is pruned without its exact destructive GO`);
+  }
+  return { receiptCount, goCount, hasExactGo: goCount === 2 };
+}
+
+export function assertClosedHumanActiveManifestMatch(exactRow, activeRow, approvedBatchId) {
+  for (const field of CLOSED_HUMAN_EXECUTE_MANIFEST_FIELDS) {
+    if (normalizedManifestValue(field, exactRow?.[field]) !== normalizedManifestValue(field, activeRow?.[field])) {
+      fail(`exact closed-human batch ${approvedBatchId} does not match the active manifest (${field})`);
+    }
+  }
+  return true;
+}
+
+function assertClosedHumanDryRunEvidence(row, dry, batchId) {
+  const evidence = dry?.evidence;
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
+    fail(`exact closed-human batch ${batchId} has no dry-run evidence`);
+  }
+  if (dry.archiveSha256 != null && dry.archiveSha256 !== row.compressed_sha256) {
+    fail(`exact closed-human batch ${batchId} dry-run archive checksum differs from the committed archive`);
+  }
+  if (Number(evidence.transactionCount) !== Number(row.transaction_count)
+    || Number(evidence.entryCount) !== Number(row.entry_count)
+    || normalizedManifestValue("tx_types", evidence.txTypes) !== normalizedManifestValue("tx_types", row.tx_types)
+    || text(evidence.credits) !== text(row.credits)
+    || text(evidence.debits) !== text(row.debits)
+    || text(evidence.net) !== text(row.net_amount)
+    || Number(evidence.distinctTables) !== 1
+    || !validUuid(evidence.closedHumanTableId)
+    || !validSha256(evidence.transactionIdsSha256)
+    || !validSha256(evidence.entryIdsSha256)
+    || evidence.transactionIdsSha256 !== row.archived_transaction_ids_sha256
+    || evidence.entryIdsSha256 !== row.archived_entry_ids_sha256) {
+    fail(`exact closed-human batch ${batchId} dry-run evidence differs from the immutable proof`);
+  }
+  return evidence;
 }
 
 async function loadExactBatch(sql, approvedBatchId, label = "approved bot-only batch") {
@@ -2802,6 +3007,123 @@ async function executeApprovedBotOnlyCanary({
   return { row, dry, durable, executed };
 }
 
+async function executeApprovedClosedHumanCanary({
+  approvedBatchId,
+  approvedBatchConfirmation,
+  identity,
+  env,
+  tempRoot,
+  sql,
+  pruneStore,
+  storageTarget,
+  verifyBucket,
+  storageDeps = {},
+  assertLock,
+}) {
+  // Execute mode never enumerates candidates and never invokes the exporter.
+  // The dispatch-selected ID is the only possible input to this path.
+  const exactRow = await loadExactBatch(sql, approvedBatchId, "approved closed-human canary batch");
+  assertClosedHumanExecuteBatch(exactRow, approvedBatchId, identity);
+  let row = await refreshPolicyRow(pruneStore, exactRow.object_path, CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID);
+  assertClosedHumanExecuteBatch(row, approvedBatchId, identity);
+  assertClosedHumanActiveManifestMatch(exactRow, row, approvedBatchId);
+  await assertLock();
+
+  // The dry-run re-downloads and verifies the committed archive, immutable
+  // proof and exact USER/ESCROW/SYSTEM whitelist before any authorization.
+  await verifyBucket(storageTarget);
+  const dry = await runPruneStep({
+    row,
+    mode: "dry-run",
+    env,
+    cwd: tempRoot,
+    sql,
+    pruneStore,
+    storageTarget,
+    verifyBucket,
+    storageDeps,
+  });
+  if (dry.state !== "ready" && dry.state !== "already_pruned") {
+    fail(`exact closed-human Stage dry-run did not become ready: ${dry.state}`);
+  }
+  const evidence = assertClosedHumanDryRunEvidence(row, dry, approvedBatchId);
+  await assertLock();
+
+  row = await refreshPolicyRow(pruneStore, exactRow.object_path, CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID);
+  const lifecycle = assertClosedHumanExecuteBatch(row, approvedBatchId, identity);
+  const durable = await (storageDeps.inspectDurableRecovery || inspectDurableRecovery)(storageTarget, row, storageDeps);
+  assertResumeRecoveryState(row, durable);
+  assertDurableRecoveryReady(durable);
+  assertDurableRecoveryForEvidence({
+    row,
+    identity,
+    evidence,
+    durable,
+    target: { target: "stage" },
+  });
+  assertRecoveryManifestMatches(
+    durable.manifest,
+    buildRecoveryManifest(row, identity, evidence, { target: "stage" }),
+  );
+
+  if (dry.state === "already_pruned") {
+    if (!lifecycle.hasExactGo) {
+      fail(`exact closed-human batch ${approvedBatchId} is already pruned without its exact destructive GO`);
+    }
+    const assertLifecycle = pruneStore.assertClosedHumanLifecycle;
+    if (typeof assertLifecycle !== "function") fail("closed-human lifecycle verifier is unavailable");
+    await assertLifecycle.call(pruneStore, evidence.closedHumanTableId, row.cutoff, approvedBatchId);
+    return { row, dry, durable, executed: null };
+  }
+  if (lifecycle.receiptCount !== 0) {
+    fail(`exact closed-human batch ${approvedBatchId} has an unexpected partial lifecycle state`);
+  }
+
+  if (!lifecycle.hasExactGo) {
+    const authorize = pruneStore.authorizeClosedHumanBatch;
+    if (typeof authorize !== "function") fail("owner-only closed-human batch authorization adapter is unavailable");
+    await assertLock();
+    const authorization = await authorize.call(pruneStore, approvedBatchId, approvedBatchConfirmation);
+    if (!authorization
+      || text(authorization.state) !== "authorized"
+      || text(authorization.batch_id) !== String(approvedBatchId)
+      || text(authorization.source_policy_id) !== CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID
+      || text(authorization.object_path) !== text(exactRow.object_path)) {
+      fail(`owner-only authorization did not persist exact closed-human batch ${approvedBatchId}`);
+    }
+    await assertLock();
+    row = await refreshPolicyRow(pruneStore, exactRow.object_path, CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID);
+  }
+
+  const authorized = assertClosedHumanExecuteBatch(row, approvedBatchId, identity);
+  if (!authorized.hasExactGo) {
+    fail(`exact closed-human batch ${approvedBatchId} is missing its persisted destructive GO`);
+  }
+  const assertLifecycle = pruneStore.assertClosedHumanLifecycle;
+  if (typeof assertLifecycle !== "function") fail("closed-human lifecycle verifier is unavailable");
+  await assertLifecycle.call(pruneStore, evidence.closedHumanTableId, row.cutoff, approvedBatchId);
+  await assertLock();
+
+  const executeCycle = storageDeps.executeVerifiedCycle || executeVerifiedCycle;
+  const executed = await executeCycle({
+    row,
+    identity,
+    durable,
+    env,
+    tempRoot,
+    sql,
+    pruneStore,
+    storageTarget,
+    approvedBatchId,
+    verifyBucket,
+    storageDeps,
+  });
+  await assertLock();
+  row = await refreshPolicyRow(pruneStore, exactRow.object_path, CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID);
+  assertClosedHumanExecuteBatch(row, approvedBatchId, identity);
+  return { row, dry, durable, executed };
+}
+
 async function resumeOwnCycle({ row, identity, env, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps = {}, sourcePolicyId = STAGE_AUTOMATION_POLICY_ID, execute = true }) {
   const durableBefore = await inspectDurableRecovery(storageTarget, row, storageDeps);
   assertResumeRecoveryState(row, durableBefore);
@@ -3031,6 +3353,118 @@ export function runClosedHumanTableStagePrepare(options = {}) {
     sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
     execute: false,
   });
+}
+
+// Issue #923 is an exact, owner-gated Stage canary.  It deliberately has no
+// automatic or candidate-enumerating execution path and shares the existing
+// archive/proof/recovery/prune machinery with the other Stage policies.
+export async function runClosedHumanTableStageCanary({
+  env = process.env,
+  deps = {},
+  approvedBatchId = null,
+  approvedBatchConfirmation = null,
+} = {}) {
+  const approvedBatchIdText = approvedBatchId == null ? null : String(approvedBatchId);
+  const approvedBatchConfirmationText = approvedBatchConfirmation == null ? null : String(approvedBatchConfirmation);
+  if (approvedBatchIdText == null || !/^[1-9][0-9]*$/.test(approvedBatchIdText)) {
+    fail("closed-human destructive execution requires one exact approved batch id");
+  }
+  if (text(env.CHIPS_LEDGER_CLOSED_HUMAN_EXECUTE) !== "1") {
+    fail("closed-human destructive execution requires the explicit default-off execution gate");
+  }
+  if (text(env.CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC) === "1") {
+    fail("closed-human retention has no automatic execution mode");
+  }
+  if (text(env.CHIPS_LEDGER_BOT_ONLY_EXECUTE) !== ""
+    || text(env.CHIPS_LEDGER_BOT_ONLY_AUTOMATIC) !== "") {
+    fail("closed-human execution cannot share a bot-only execution gate");
+  }
+  if (approvedBatchConfirmationText !== `GO ${approvedBatchIdText}`) {
+    fail("closed-human destructive execution requires the exact GO <batch_id> confirmation");
+  }
+
+  let sql = null;
+  let lockSession = null;
+  let tempRoot = null;
+  let ownsSql = false;
+  let result = null;
+  let deployedCommitSha = null;
+  let failed = false;
+  let failure = null;
+  try {
+    const config = validateStageEnvironment(env, { requireCommitSha: true });
+    deployedCommitSha = config.deployedCommitSha;
+    const moduleEnv = {
+      ...config.moduleEnv,
+      CHIPS_LEDGER_CLOSED_HUMAN_EXECUTE: "1",
+    };
+    if (deps.sql) sql = deps.sql;
+    else {
+      sql = postgres(config.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 0 });
+      ownsSql = true;
+    }
+    tempRoot = deps.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-closed-human-canary-"));
+    ensurePrivateDirectory(tempRoot);
+    const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
+    const pruneStore = deps.pruneStore || createPruneStore(sql);
+    const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
+    lockSession = await acquireAdvisoryLock(sql);
+    if (!lockSession) {
+      result = {
+        state: "no-op",
+        mode: "execute",
+        reason: "advisory_lock_busy",
+        sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+      };
+    } else {
+      const identity = await assertIdentity(sql);
+      await assertAdvisoryLock(sql, lockSession);
+      const cycle = await executeApprovedClosedHumanCanary({
+        approvedBatchId: approvedBatchIdText,
+        approvedBatchConfirmation: approvedBatchConfirmationText,
+        identity,
+        env: moduleEnv,
+        tempRoot,
+        sql,
+        pruneStore,
+        storageTarget,
+        verifyBucket,
+        storageDeps: deps,
+        assertLock: () => assertAdvisoryLock(sql, lockSession),
+      });
+      result = closedHumanReport({
+        row: cycle.row,
+        identity,
+        dry: cycle.dry,
+        durable: cycle.durable,
+        state: cycle.executed?.state || cycle.dry.state,
+        mode: "execute",
+        deployedCommitSha,
+      });
+    }
+  } catch (error) {
+    failed = true;
+    failure = error;
+  } finally {
+    if (lockSession && sql) {
+      try { await releaseAdvisoryLock(sql); } catch { /* owned session close releases it */ }
+    }
+    if (sql && ownsSql) {
+      try { await sql.end({ timeout: 5 }); } catch (error) {
+        if (!failed) {
+          failed = true;
+          failure = error;
+        }
+      }
+    }
+  }
+  if (failed) {
+    emitAggregateError(failure, { deployedCommitSha });
+    throw failure;
+  }
+  if (result && deployedCommitSha) result = { ...result, deployedCommitSha };
+  writeAggregateSummary(result);
+  return result;
 }
 
 // Issue #890 uses the same Stage runner, Storage bucket, proof store, prune
@@ -4217,8 +4651,43 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     runClosedHumanTableStagePrepare().catch(() => {
       process.exitCode = 1;
     });
+  } else if (argv[0] === "--policy" && argv[1] === "closed-human-table-30d") {
+    let executeRequested = false;
+    let approvedBatchId = null;
+    let approvedBatchConfirmation = null;
+    for (let index = 2; index < argv.length; index += 1) {
+      if (argv[index] === "--execute") {
+        if (executeRequested) throw new Error("--execute was supplied more than once");
+        executeRequested = true;
+      } else if (argv[index] === "--approved-batch-id") {
+        const value = argv[index + 1];
+        if (!value || value.startsWith("--") || approvedBatchId !== null) {
+          throw new Error("--approved-batch-id requires one value");
+        }
+        approvedBatchId = value;
+        index += 1;
+      } else if (argv[index] === "--approved-batch-confirmation") {
+        const value = argv[index + 1];
+        if (!value || value.startsWith("--") || approvedBatchConfirmation !== null) {
+          throw new Error("--approved-batch-confirmation requires one value");
+        }
+        approvedBatchConfirmation = value;
+        index += 1;
+      } else {
+        throw new Error(`unknown Stage closed-human option: ${argv[index]}`);
+      }
+    }
+    if (!executeRequested || approvedBatchId === null || approvedBatchConfirmation === null) {
+      throw new Error("closed-human canary requires --execute, --approved-batch-id and --approved-batch-confirmation");
+    }
+    runClosedHumanTableStageCanary({
+      approvedBatchId,
+      approvedBatchConfirmation,
+    }).catch(() => {
+      process.exitCode = 1;
+    });
   } else {
-    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-automation.mjs [--policy stage-ledger-auto-retention-30d-v1|stage-ledger-closed-human-table-retention-30d-v1 [--diagnose-recovery [--batch-id <id>]|--repair-recovery --batch-id <id>]|--policy bot-only-7d [--prepare-only|--repair-recovery --batch-id 15|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>'|--automatic]]\n");
+    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-automation.mjs [--policy stage-ledger-auto-retention-30d-v1|stage-ledger-closed-human-table-retention-30d-v1 [--diagnose-recovery [--batch-id <id>]|--repair-recovery --batch-id <id>]|--policy bot-only-7d [--prepare-only|--repair-recovery --batch-id 15|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>'|--automatic]|--policy closed-human-table-30d [--prepare-only|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>']]\n");
     process.exitCode = 1;
   }
 }

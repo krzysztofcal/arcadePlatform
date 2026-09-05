@@ -69,7 +69,7 @@ Modes (mutually exclusive):
   default                        Validate Storage and run a database dry-run.
   --register-proof               Persist immutable ordered transaction/entry ID proof.
   --execute                      Prune exact proof-bound IDs after all checks.
-  --approved-batch-id <integer> Exact schema-v2 bot-only GO batch (execute only).
+  --approved-batch-id <integer> Exact bot-only or closed-human GO batch (execute only).
 
 Execute-only:
   --recovery-dir <path>          Required private 0700 recovery directory.
@@ -928,6 +928,28 @@ export function createPruneStore(sql) {
         return rows[0]?.result;
       });
     },
+    async authorizeClosedHumanBatch(batchId, confirmation) {
+      return sql.begin(async (tx) => {
+        await tx.unsafe("set transaction isolation level serializable;");
+        await tx.unsafe("set local lock_timeout = '5s';");
+        await tx.unsafe("set local statement_timeout = '120s';");
+        const rows = await tx.unsafe(`select public.chips_authorize_closed_human_table_retention_canary(
+          $1::bigint, $2::text
+        ) as result;`, [batchId, confirmation]);
+        return rows[0]?.result;
+      });
+    },
+    async assertClosedHumanLifecycle(tableId, cutoff, batchId) {
+      return sql.begin(async (tx) => {
+        await tx.unsafe("set transaction isolation level serializable;");
+        await tx.unsafe("set local lock_timeout = '5s';");
+        await tx.unsafe("set local statement_timeout = '120s';");
+        await tx.unsafe(`select public.chips_assert_closed_human_table_lifecycle_gate(
+          $1::uuid, $2::timestamptz, $3::bigint
+        );`, [tableId, cutoff, batchId]);
+        return { state: "verified", table_id: tableId, batch_id: String(batchId) };
+      });
+    },
     async registerLegacyStageAllowlistProof(row, evidence) {
       return sql.begin(async (tx) => {
         await tx.unsafe("set transaction isolation level repeatable read;");
@@ -960,6 +982,24 @@ export function createPruneStore(sql) {
         const rows = await tx.unsafe(`select public.chips_prune_committed_archive_batch(
           $1, $2::uuid[], $3::bigint[], $4::boolean
         ) as result;`, [objectPath, evidence.transactionIds, evidence.entryIds, execute]);
+        return rows[0]?.result;
+      });
+    },
+    async cleanupClosedHuman(objectPath, evidence, execute, approvedBatchId = null) {
+      return sql.begin(async (tx) => {
+        await tx.unsafe("set transaction isolation level serializable;");
+        await tx.unsafe("set local lock_timeout = '5s';");
+        await tx.unsafe("set local statement_timeout = '120s';");
+        const rows = await tx.unsafe(`select public.chips_prune_closed_human_table_archive_batch(
+          $1, $2::uuid[], $3::bigint[], $4::uuid, $5::boolean, $6::bigint
+        ) as result;`, [
+          objectPath,
+          evidence.transactionIds,
+          evidence.entryIds,
+          evidence.closedHumanTableId,
+          execute,
+          approvedBatchId,
+        ]);
         return rows[0]?.result;
       });
     },
@@ -1162,12 +1202,26 @@ export function createPruneStore(sql) {
   };
 }
 
-export async function executeArchivePrune({ store, objectPath, evidence, execute, beforeAttempt = null }) {
+export async function executeArchivePrune({
+  store,
+  objectPath,
+  evidence,
+  execute,
+  approvedBatchId = null,
+  closedHuman = false,
+  beforeAttempt = null,
+}) {
   const attempts = execute ? MAX_EXECUTE_ATTEMPTS : 1;
+  const prune = closedHuman ? store.cleanupClosedHuman : store.prune;
+  if (typeof prune !== "function") {
+    fail(closedHuman
+      ? "closed-human policy-aware prune adapter is unavailable"
+      : "archive prune adapter is unavailable");
+  }
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     if (beforeAttempt) await beforeAttempt();
     try {
-      return await store.prune(objectPath, evidence, execute);
+      return await prune.call(store, objectPath, evidence, execute, approvedBatchId);
     } catch (error) {
       const sqlstate = sqlStateOf(error);
       if (!execute || attempt === attempts || !RETRYABLE_CLEANUP_SQLSTATES.has(sqlstate)) throw error;
@@ -1727,6 +1781,13 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
       expectedLegacyStageAllowlistEvidence: deps.legacyStageAllowlistPlan?.archiveManifest || null,
     });
     const evidence = buildPruneEvidence(localArchive, { maxBatchSize: targetPolicy(target.target).maxBatchSize });
+    const isClosedHumanPolicy = row.source_policy_id === CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID;
+    if (isClosedHumanPolicy && target.target !== "stage") {
+      fail("closed-human execution is only valid for canonical Stage");
+    }
+    if (isClosedHumanPolicy && args.execute && text(env.CHIPS_LEDGER_CLOSED_HUMAN_EXECUTE) !== "1") {
+      fail("closed-human execution requires the explicit default-off execution gate");
+    }
 
     if (args.automatic && (row.format_version !== BOT_ONLY_EXPORT_SCHEMA_VERSION
       || row.source_policy_id !== "stage-ledger-bot-only-retention-7d-v1")) {
@@ -1825,6 +1886,8 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
         objectPath: row.object_path,
         evidence,
         execute: Boolean(args.execute),
+        approvedBatchId: args.approvedBatchId,
+        closedHuman: isClosedHumanPolicy,
         beforeAttempt: recoveryBundle
           ? () => verifyRecoveryBundle({ bundle: recoveryBundle, row, target, identity, expectedEvidence: evidence })
           : null,
