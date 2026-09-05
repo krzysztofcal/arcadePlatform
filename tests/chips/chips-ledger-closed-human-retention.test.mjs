@@ -3,6 +3,7 @@ import fs from "node:fs";
 
 const migration = fs.readFileSync("supabase/migrations/20260904100000_chips_ledger_closed_human_table_retention.sql", "utf8");
 const canaryMigration = fs.readFileSync("supabase/migrations/20260904180000_chips_ledger_closed_human_canary_execute.sql", "utf8");
+const policyRlsMigration = fs.readFileSync("supabase/migrations/20260905100000_chips_ledger_closed_human_policy_rls_select.sql", "utf8");
 const cleanup = fs.readFileSync("ws-server/poker/persistence/closed-table-cleanup.mjs", "utf8");
 
 assert.match(migration, /human_retention_complete_at timestamptz/);
@@ -23,6 +24,13 @@ assert.match(canaryMigration, /p_approved_batch_id is distinct from batch\.batch
 assert.match(canaryMigration, /p_execute is false or prune_result->>'state' = 'already_pruned'/);
 assert.doesNotMatch(canaryMigration, /chips_complete_closed_human_table_retention/);
 assert.doesNotMatch(canaryMigration, /7575202818581710058/);
+assert.equal((policyRlsMigration.match(/\bcreate policy\b/gi) || []).length, 1);
+assert.match(policyRlsMigration, /create policy chips_stage_closed_human_table_retention_policy_pruner_select/);
+assert.match(policyRlsMigration, /on public\.chips_stage_closed_human_table_retention_policy/);
+assert.match(policyRlsMigration, /for select/);
+assert.match(policyRlsMigration, /to chips_ledger_archive_pruner/);
+assert.match(policyRlsMigration, /using \(policy_id = 'stage-ledger-closed-human-table-retention-30d-v1'\)/);
+assert.doesNotMatch(policyRlsMigration, /for (insert|update|delete)|with check|to (public|anon|authenticated|service_role)/i);
 assert.match(cleanup, /t\.has_human_participant is true and t\.human_retention_complete_at is not null/);
 assert.match(cleanup, /t\.has_human_participant is not true and t\.bot_only_retention_complete_at is not null/);
 
