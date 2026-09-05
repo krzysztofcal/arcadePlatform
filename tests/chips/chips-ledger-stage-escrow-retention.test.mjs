@@ -176,12 +176,21 @@ test("normal bot-only batch is classified as a safe candidate", () => {
 test("escrow registry queries merge table and batch matches without double counting", () => {
   assert.doesNotMatch(RETENTION_REGISTRY_TABLE_COUNTS_SQL, /\bor\s+archive_batch_id\s*=\s*any/i);
   assert.doesNotMatch(RETENTION_REGISTRY_BATCH_COUNTS_SQL, /\bor\s+table_id\s*=\s*any/i);
-  const rows = [
-    { idempotency_key: "shared", table_id: TABLE_ID, archive_batch_id: "101", count: "1" },
-    { idempotency_key: "table-only", table_id: TABLE_ID, archive_batch_id: null, count: "1" },
-    { idempotency_key: "batch-only", table_id: null, archive_batch_id: "101", count: "1" },
+  assert.match(RETENTION_REGISTRY_TABLE_COUNTS_SQL, /count\(\*\).*group by table_id, archive_batch_id/is);
+  assert.match(RETENTION_REGISTRY_BATCH_COUNTS_SQL, /count\(\*\).*group by table_id, archive_batch_id/is);
+  assert.match(RETENTION_REGISTRY_BATCH_COUNTS_SQL, /archive_batch_id\s*=\s*any\(\$1::bigint\[\]\)/i);
+  assert.match(RETENTION_REGISTRY_BATCH_COUNTS_SQL, /table_id is null or not \(table_id\s*=\s*any\(\$2::uuid\[\]\)\)/i);
+  const otherTableId = "00000000-0000-4000-8000-000000000002";
+  const tableRows = [
+    { table_id: TABLE_ID, archive_batch_id: "101", count: "1" },
+    { table_id: TABLE_ID, archive_batch_id: null, count: "1" },
   ];
-  assert.equal(registryCountFor(rows, TABLE_ID, "101"), 3);
+  const batchRows = [
+    { table_id: null, archive_batch_id: "101", count: "1" },
+    { table_id: otherTableId, archive_batch_id: "101", count: "1" },
+  ];
+  assert.equal(registryCountFor([...tableRows, ...batchRows], TABLE_ID, "101"), 4);
+  assert.equal(registryCountFor([...tableRows, ...batchRows, { ...tableRows[0] }], TABLE_ID, "101"), 4);
   const matchingBatchCount = [{ batch_id: "101", table_id: TABLE_ID }]
     .filter((row) => row.table_id === TABLE_ID && row.batch_id === "101").length;
   assert.equal(matchingBatchCount, 1, "a duplicate registry match must not change the exact batch match count");

@@ -473,20 +473,21 @@ where account_id = any($1::uuid[])
 group by account_id;`;
 
 export const RETENTION_REGISTRY_TABLE_COUNTS_SQL = `
-select idempotency_key::text as idempotency_key,
-       table_id::text as table_id,
+select table_id::text as table_id,
        archive_batch_id::text as archive_batch_id,
-       1::bigint as count
+       count(*)::text as count
 from public.chips_transaction_idempotency
-where table_id = any($1::uuid[]);`;
+where table_id = any($1::uuid[])
+group by table_id, archive_batch_id;`;
 
 export const RETENTION_REGISTRY_BATCH_COUNTS_SQL = `
-select idempotency_key::text as idempotency_key,
-       table_id::text as table_id,
+select table_id::text as table_id,
        archive_batch_id::text as archive_batch_id,
-       1::bigint as count
+       count(*)::text as count
 from public.chips_transaction_idempotency
-where archive_batch_id = any($1::bigint[]);`;
+where archive_batch_id = any($1::bigint[])
+  and (table_id is null or not (table_id = any($2::uuid[])))
+group by table_id, archive_batch_id;`;
 
 export const RETENTION_UNKNOWN_FK_SQL = `
 select
@@ -671,7 +672,7 @@ export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAG
       ? await read(RETENTION_REGISTRY_TABLE_COUNTS_SQL, [tableIds], "escrow_retention_registry_table_counts", "registry_dependency")
       : [];
     const registryBatchRows = batchIds.length
-      ? await read(RETENTION_REGISTRY_BATCH_COUNTS_SQL, [batchIds], "escrow_retention_registry_batch_counts", "registry_dependency")
+      ? await read(RETENTION_REGISTRY_BATCH_COUNTS_SQL, [batchIds, tableIds], "escrow_retention_registry_batch_counts", "registry_dependency")
       : [];
     const registry = [...registryTableRows, ...registryBatchRows];
     const unknownFks = await read(RETENTION_UNKNOWN_FK_SQL, [], "escrow_retention_unknown_foreign_keys", "catalog_guard");
