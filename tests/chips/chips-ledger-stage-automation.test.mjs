@@ -21,11 +21,13 @@ import {
   botOnlyExportArgs,
   botOnlyReport,
   BOT_ONLY_BATCH_15_RECOVERY_REPAIR,
+  CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET,
   findOwnCycle,
   persistDurableRecovery,
   runBotOnlyRecoveryRepair,
   runBotOnlyStageAutomation,
   runClosedHumanPolicyDiagnostic,
+  runClosedHumanTableLifecycleCompletion,
   runClosedHumanTableStageCanary,
   runClosedHumanTableStagePrepare,
   runStageAutomation,
@@ -49,6 +51,11 @@ const ENV = {
   SUPABASE_STAGE_URL: STAGE_URL,
   SUPABASE_STAGE_SERVICE_ROLE_KEY: "stage-test-key",
   GITHUB_SHA: "f".repeat(40),
+  GITHUB_EVENT_NAME: "workflow_dispatch",
+  GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+  GITHUB_REF: "refs/heads/main",
+  GITHUB_REPOSITORY_OWNER: "krzysztofcal",
+  GITHUB_ACTOR: "krzysztofcal",
 };
 
 const stageOrchestratorSource = fs.readFileSync("scripts/ops/chips-ledger-stage-automation.mjs", "utf8");
@@ -1950,6 +1957,207 @@ await assert.rejects(
 );
 assert.equal(closedHumanWrongConfirmationHarness.calls.authorization, 0);
 assert.equal(closedHumanWrongConfirmationHarness.calls.execute, 0);
+
+const lifecycleEvidence = {
+  ...closedHumanCanaryEvidence,
+  closedHumanTableId: CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET.tableId,
+};
+
+function makeClosedHumanLifecycleRow(overrides = {}) {
+  const row = makeClosedHumanCanaryRow({
+    cutoff: CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET.cutoff,
+    destructive_go_at: "2026-08-13T00:03:00.000000Z",
+    destructive_go_batch_id: "334",
+    pruned_at: "2026-08-13T00:04:00.000000Z",
+    pruned_transaction_count: 2,
+    pruned_entry_count: 4,
+    pruned_transaction_ids_sha256: lifecycleEvidence.transactionIdsSha256,
+    pruned_entry_ids_sha256: lifecycleEvidence.entryIdsSha256,
+    ...overrides,
+  });
+  return row;
+}
+
+function makeClosedHumanLifecycleHarness({ row = makeClosedHumanLifecycleRow(), recovery = true } = {}) {
+  const calls = {
+    completion: 0,
+    lifecycleGate: 0,
+    recoveryInspection: 0,
+    verifyBucket: 0,
+  };
+  const pruneCalls = [];
+  const state = { marker: null };
+  const manifest = buildRecoveryManifest(row, STAGE_SYSTEM_IDENTIFIER, lifecycleEvidence, { target: "stage" });
+  const manifestBytes = Buffer.from(`${stringifyJson(manifest)}\n`, "utf8");
+  const manifestGzipBytes = gzipRecoveryManifestForTest(manifest);
+  const compressedSha = row.compressed_sha256;
+  const durable = {
+    archiveBytes: closedHumanCanaryArchiveBytes,
+    manifestGzipBytes,
+    manifestBytes,
+    manifest,
+    archivePath: buildRecoveryArchiveObjectPath(compressedSha),
+    manifestPath: buildRecoveryManifestObjectPath(compressedSha),
+    archiveSha256: compressedSha,
+    manifestSha256: crypto.createHash("sha256").update(manifestGzipBytes).digest("hex"),
+    recoveryArchive: { sha256: compressedSha },
+    recoveryManifest: { sha256: crypto.createHash("sha256").update(manifestGzipBytes).digest("hex") },
+  };
+  const exactReturn = [exactSqlTextRow(row)];
+  const session = { backendPid: "closed-human-lifecycle-session" };
+  const sql = {
+    unsafe: async (query, values = []) => {
+      if (query.includes("pg_try_advisory_lock")) return [{ acquired: true, backend_pid: session.backendPid }];
+      if (query.includes("pg_backend_pid")) return [{ backend_pid: session.backendPid }];
+      if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
+      if (query.includes("pg_control_system")) return [{ system_identifier: STAGE_SYSTEM_IDENTIFIER }];
+      if (query.startsWith("set local")) return [];
+      if (query.includes("from public.chips_ledger_archive_batches")) return exactReturn;
+      if (query.includes("from public.poker_tables")) {
+        return [{ table_id: CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET.tableId, human_retention_complete_at: state.marker }];
+      }
+      if (query.includes("chips_assert_closed_human_table_lifecycle_gate")) {
+        calls.lifecycleGate += 1;
+        return [];
+      }
+      if (query.includes("chips_complete_closed_human_table_retention")) {
+        calls.completion += 1;
+        if (state.marker == null) state.marker = "2026-09-05 00:00:00+00";
+        return [{
+          result: {
+            state: "human_retention_complete",
+            table_id: CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET.tableId,
+          },
+        }];
+      }
+      throw new Error(`unexpected lifecycle completion SQL: ${query}`);
+    },
+    begin: async (callback) => callback({
+      unsafe: async (query, values = []) => {
+        if (query.startsWith("set transaction")) return [];
+        return sql.unsafe(query, values);
+      },
+    }),
+  };
+  const deps = {
+    sql,
+    storageTarget,
+    tempRoot: fs.mkdtempSync("/tmp/chips-ledger-stage-closed-human-lifecycle-test-"),
+    pruneStore: {
+      getManifest: async () => row,
+    },
+    verifyBucket: async () => { calls.verifyBucket += 1; },
+    inspectDurableRecovery: async () => {
+      calls.recoveryInspection += 1;
+      return recovery ? durable : null;
+    },
+    pruneArchive: async ({ argv }) => {
+      pruneCalls.push([...argv]);
+      assert.equal(argv.includes("--execute"), false);
+      assert.equal(argv.includes("--automatic"), false);
+      return {
+        state: "already_pruned",
+        evidence: lifecycleEvidence,
+        archiveSha256: compressedSha,
+      };
+    },
+  };
+  return { deps, row, durable, calls, pruneCalls, state };
+}
+
+const lifecycleHarness = makeClosedHumanLifecycleHarness();
+const lifecycleResult = await runClosedHumanTableLifecycleCompletion({
+  env: ENV,
+  deps: lifecycleHarness.deps,
+  ...CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET,
+});
+assert.equal(lifecycleResult.state, "completed");
+assert.equal(lifecycleResult.batchId, CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET.batchId);
+assert.equal(lifecycleResult.tableId, CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET.tableId);
+assert.equal(lifecycleResult.cutoff, CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET.cutoff);
+assert.equal(lifecycleResult.proof, "verified");
+assert.equal(lifecycleResult.dryRun, "already_pruned");
+assert.equal(lifecycleResult.recoveryState, "complete");
+assert.equal(lifecycleResult.lifecycleBefore, "passed");
+assert.equal(lifecycleResult.lifecycleAfter, "passed");
+assert.equal(lifecycleResult.markerBefore, null);
+assert.equal(lifecycleResult.markerAfter, lifecycleHarness.state.marker);
+assert.equal(lifecycleResult.writePerformed, true);
+assert.equal(lifecycleHarness.calls.completion, 1);
+assert.equal(lifecycleHarness.calls.lifecycleGate, 2);
+assert.equal(lifecycleHarness.calls.recoveryInspection, 1);
+assert.deepEqual(lifecycleHarness.pruneCalls.map((argv) => argv.includes("--execute")), [false]);
+
+const lifecycleRetryResult = await runClosedHumanTableLifecycleCompletion({
+  env: ENV,
+  deps: lifecycleHarness.deps,
+  ...CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET,
+});
+assert.equal(lifecycleRetryResult.state, "already_complete");
+assert.equal(lifecycleRetryResult.markerBefore, lifecycleHarness.state.marker);
+assert.equal(lifecycleRetryResult.markerAfter, lifecycleHarness.state.marker);
+assert.equal(lifecycleRetryResult.writePerformed, false);
+assert.equal(lifecycleRetryResult.retryIdempotent, true);
+assert.equal(lifecycleHarness.calls.completion, 2);
+assert.equal(lifecycleHarness.calls.lifecycleGate, 4);
+assert.deepEqual(lifecycleHarness.pruneCalls.map((argv) => argv.includes("--execute")), [false, false]);
+
+await assert.rejects(
+  runClosedHumanTableLifecycleCompletion({
+    env: ENV,
+    deps: makeClosedHumanLifecycleHarness().deps,
+    batchId: "335",
+    tableId: CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET.tableId,
+    cutoff: CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET.cutoff,
+  }),
+  /exact approved batch, table and cutoff/,
+);
+
+const lifecycleWrongPolicyHarness = makeClosedHumanLifecycleHarness({
+  row: makeClosedHumanLifecycleRow({ source_policy_id: BOT_ONLY_RETENTION_POLICY_ID }),
+});
+await assert.rejects(
+  runClosedHumanTableLifecycleCompletion({
+    env: ENV,
+    deps: lifecycleWrongPolicyHarness.deps,
+    ...CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET,
+  }),
+  /policy mismatch/,
+);
+assert.equal(lifecycleWrongPolicyHarness.calls.completion, 0);
+
+const lifecycleWrongTableHarness = makeClosedHumanLifecycleHarness();
+await assert.rejects(
+  runClosedHumanTableLifecycleCompletion({
+    env: ENV,
+    deps: lifecycleWrongTableHarness.deps,
+    ...CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET,
+    tableId: "00000000-0000-4000-8000-000000000099",
+  }),
+  /exact approved batch, table and cutoff/,
+);
+assert.equal(lifecycleWrongTableHarness.calls.completion, 0);
+
+const lifecycleMissingRecoveryHarness = makeClosedHumanLifecycleHarness({ recovery: false });
+await assert.rejects(
+  runClosedHumanTableLifecycleCompletion({
+    env: ENV,
+    deps: lifecycleMissingRecoveryHarness.deps,
+    ...CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET,
+  }),
+  /no durable recovery/,
+);
+assert.equal(lifecycleMissingRecoveryHarness.calls.completion, 0);
+assert.deepEqual(lifecycleMissingRecoveryHarness.pruneCalls.map((argv) => argv.includes("--execute")), [false]);
+
+for (const harness of [
+  lifecycleHarness,
+  lifecycleWrongPolicyHarness,
+  lifecycleWrongTableHarness,
+  lifecycleMissingRecoveryHarness,
+]) {
+  fs.rmSync(harness.deps.tempRoot, { recursive: true, force: true });
+}
 
 for (const harness of [
   closedHumanCanaryHarness,

@@ -1210,6 +1210,168 @@ async function assertClosedHumanPolicyRls(sql) {
   }
 }
 
+async function assertClosedHumanLifecycleMarkerRls(sql) {
+  const tableId = "00000000-0000-4000-8000-00000000e501";
+  const escrowId = "00000000-0000-4000-8000-00000000e502";
+  const transactionId = "00000000-0000-4000-8000-00000000e503";
+  const userId = primaryUserId;
+  const cutoff = "2026-08-01T00:00:00Z";
+  const createdAt = "2026-07-01T00:00:00Z";
+  const compressedSha = "a".repeat(64);
+  const proofTransactionSha = "b".repeat(64);
+  const proofEntrySha = "c".repeat(64);
+  const objectPath = `v1/sha256/${compressedSha}.jsonl.gz`;
+  const registryKey = `poker:human-lifecycle-rls:${tableId}`;
+  const ROLLBACK = new Error("closed-human-lifecycle-marker-rls-rollback");
+
+  await sql.begin(async (tx) => {
+    await tx.unsafe("set transaction isolation level serializable;");
+    const callerRows = await tx.unsafe(`select current_user::text as caller_name, session_user::text as session_name;`);
+    assert.equal(callerRows[0]?.caller_name, "postgres", "lifecycle integration must use the workflow DB caller without SET ROLE");
+    assert.equal(callerRows[0]?.session_name, "postgres", "lifecycle integration must use the canonical workflow session");
+
+    const lifecycleFunctionRows = await tx.unsafe(`select pg_catalog.pg_get_userbyid(proowner) as owner, prosecdef
+      from pg_catalog.pg_proc
+      where oid = 'public.chips_complete_closed_human_table_retention(uuid,timestamptz)'::pg_catalog.regprocedure;`);
+    assert.equal(lifecycleFunctionRows.length, 1);
+    assert.equal(lifecycleFunctionRows[0].owner, "chips_ledger_archive_pruner");
+    assert.equal(lifecycleFunctionRows[0].prosecdef, true, "lifecycle completion must remain SECURITY DEFINER");
+
+    const lifecycleAclRows = await tx.unsafe(`select coalesce(grantee.rolname, 'PUBLIC') as grantee, privileges.privilege_type
+      from pg_catalog.pg_proc functions
+      cross join lateral pg_catalog.aclexplode(
+        coalesce(functions.proacl, pg_catalog.acldefault('f', functions.proowner))
+      ) privileges
+      left join pg_catalog.pg_roles grantee on grantee.oid = privileges.grantee
+      where functions.oid = 'public.chips_complete_closed_human_table_retention(uuid,timestamptz)'::pg_catalog.regprocedure
+        and privileges.privilege_type = 'EXECUTE'
+      order by 1;`);
+    assert.deepEqual(
+      lifecycleAclRows.map((row) => ({
+        grantee: row.grantee,
+        privilege_type: row.privilege_type,
+      })),
+      [
+        { grantee: "chips_ledger_archive_pruner", privilege_type: "EXECUTE" },
+        { grantee: "postgres", privilege_type: "EXECUTE" },
+      ],
+      "lifecycle completion EXECUTE must be explicit for only the pruner and workflow caller",
+    );
+
+    const apiExecuteRows = await tx.unsafe(`select rolname,
+        pg_catalog.has_function_privilege(
+          rolname,
+          'public.chips_complete_closed_human_table_retention(uuid,timestamptz)',
+          'execute'
+        ) as can_execute
+      from pg_catalog.pg_roles
+      where rolname in ('anon', 'authenticated', 'service_role')
+      order by rolname;`);
+    assert.deepEqual(
+      apiExecuteRows.map((row) => ({
+        rolname: row.rolname,
+        can_execute: row.can_execute,
+      })),
+      [
+        { rolname: "anon", can_execute: false },
+        { rolname: "authenticated", can_execute: false },
+        { rolname: "service_role", can_execute: false },
+      ],
+      "API roles must not execute lifecycle completion",
+    );
+
+    await tx.unsafe(`create or replace function public.chips_assert_archive_prune_stage()
+      returns text language sql security definer set search_path = ''
+      as $override$ select '7656985631720456337'::text $override$;`);
+
+    const botPolicyBefore = await tx.unsafe(`select policyname, roles::text as roles, cmd, qual, with_check
+      from pg_catalog.pg_policies
+      where schemaname = 'public' and tablename = 'poker_tables'
+        and policyname = 'chips_archive_pruner_tables_marker_update';`);
+    assert.equal(botPolicyBefore.length, 1, "existing bot-only marker policy must remain present");
+    assert.equal(botPolicyBefore[0].roles, "{chips_ledger_archive_pruner}");
+    assert.equal(botPolicyBefore[0].cmd, "UPDATE");
+    assert.equal(botPolicyBefore[0].qual, "true");
+    assert.match(botPolicyBefore[0].with_check || "", /has_human_participant\s+is\s+not\s+true/i);
+    assert.match(botPolicyBefore[0].with_check || "", /bot_only_retention_complete_at\s+is\s+not\s+null/i);
+
+    const rlsRows = await tx.unsafe(`select relrowsecurity
+      from pg_catalog.pg_class where oid = 'public.poker_tables'::regclass;`);
+    assert.equal(rlsRows[0]?.relrowsecurity, true, "poker_tables RLS must be enabled");
+
+    await tx.unsafe(`insert into public.poker_tables (id, status, has_human_participant)
+      values ($1::uuid, 'CLOSED', true);`, [tableId]);
+    await tx.unsafe(`insert into public.chips_accounts (id, account_type, status, balance, next_entry_seq, system_key)
+      values ($1::uuid, 'ESCROW', 'active', 0, 1, $2);`, [escrowId, `POKER_TABLE:${tableId}`]);
+    await tx.unsafe(`insert into public.poker_state (table_id, state)
+      values ($1::uuid, '{"phase":"HAND_DONE","handId":""}'::jsonb);`, [tableId]);
+
+    const batchRows = await tx.unsafe(`insert into public.chips_ledger_archive_batches (
+      object_path, project_ref, format_version, source_policy_id, cutoff,
+      first_created_at, last_created_at, transaction_count, entry_count, tx_types,
+      raw_bytes, compressed_bytes, raw_sha256, compressed_sha256, credits, debits, net_amount,
+      status, committed_at, archive_proof_verified_at, archived_transaction_ids_sha256,
+      archived_entry_ids_sha256, pruned_at, pruned_transaction_count, pruned_entry_count,
+      pruned_transaction_ids_sha256, pruned_entry_ids_sha256
+    ) values (
+      $1, 'krydukthwdvccggbyjfw', 1, 'stage-ledger-closed-human-table-retention-30d-v1', $2::timestamptz,
+      $3::timestamptz, $3::timestamptz, 1, 2, '{"TABLE_BUY_IN":1}'::jsonb,
+      100, 80, $4, $5, 10, 10, 0, 'committed', timezone('utc', now()), timezone('utc', now()),
+      $6, $7, timezone('utc', now()), 1, 2, $6, $7
+    ) returning batch_id::text as batch_id;`, [
+      objectPath,
+      cutoff,
+      createdAt,
+      "d".repeat(64),
+      compressedSha,
+      proofTransactionSha,
+      proofEntrySha,
+    ]);
+    const batchId = batchRows[0].batch_id;
+    await tx.unsafe(`insert into public.chips_transaction_idempotency (
+      idempotency_key, transaction_id, payload_hash, tx_type, user_id,
+      transaction_created_at, archive_batch_id, table_id, key_format_version, key_format
+    ) values ($1, $2::uuid, $3, 'TABLE_BUY_IN', $4::uuid, $5::timestamptz, $6::bigint, $7::uuid, 1, 'table');`, [
+      registryKey,
+      transactionId,
+      "e".repeat(64),
+      userId,
+      createdAt,
+      batchId,
+      tableId,
+    ]);
+
+    await expectSavepointError(
+      tx,
+      "human_marker_direct_update",
+      () => tx.unsafe(`update public.poker_tables
+        set human_retention_complete_at = timezone('utc', now()) where id = $1::uuid;`, [tableId]),
+      /row-level security|policy|immutable|lifecycle-controlled/i,
+    );
+
+    const completionRows = await tx.unsafe(`select public.chips_complete_closed_human_table_retention(
+      $1::uuid, $2::timestamptz
+    ) as result;`, [tableId, cutoff]);
+    assert.equal(completionRows.length, 1);
+    assert.equal(completionRows[0].result.state, "human_retention_complete");
+    assert.equal(completionRows[0].result.table_id, tableId);
+
+    const markerRows = await tx.unsafe(`select human_retention_complete_at
+      from public.poker_tables where id = $1::uuid;`, [tableId]);
+    assert.ok(markerRows[0]?.human_retention_complete_at, "valid lifecycle function must persist the human marker");
+
+    const botPolicyAfter = await tx.unsafe(`select policyname, roles::text as roles, cmd, qual, with_check
+      from pg_catalog.pg_policies
+      where schemaname = 'public' and tablename = 'poker_tables'
+        and policyname = 'chips_archive_pruner_tables_marker_update';`);
+    assert.deepEqual(botPolicyAfter, botPolicyBefore, "human policy must not modify bot-only policy");
+
+    throw ROLLBACK;
+  }).catch((error) => {
+    if (error !== ROLLBACK) throw error;
+  });
+}
+
 async function assertClosedHumanPruneEvidence(sql) {
   const closedHumanPolicyId = "stage-ledger-closed-human-table-retention-30d-v1";
   const ROLLBACK = new Error("closed-human-prune-evidence-rollback");
@@ -2365,6 +2527,7 @@ async function main() {
   await ensureGenesisFixture(sql);
   await assertArchivePrunerRoleContracts(sql);
   await assertClosedHumanPolicyRls(sql);
+  await assertClosedHumanLifecycleMarkerRls(sql);
   await assertClosedHumanPruneEvidence(sql);
   await assertLegacyAllowlistCleanupContracts(sql);
   await assertLegacyUnprunedRegistrySelectorContract(sql);
