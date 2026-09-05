@@ -53,7 +53,23 @@ select pg_catalog.pg_get_functiondef(
 // probe on the same independent candidate-ID paths as the forward proof
 // migration; otherwise the diagnostic would explain the historical OR query.
 export const BOT_ONLY_PROOF_TARGET_TRANSACTIONS_EXPLAIN_SQL = `
-with candidate_transaction_ids as (
+with table_transaction_rows as (
+  select transactions.id,
+         transactions.idempotency_key,
+         transactions.reference,
+         transactions.metadata
+    from public.chips_transactions transactions
+   where transactions.tx_type = 'TABLE_BUY_IN'::public.chips_tx_type
+
+  union all
+
+  select transactions.id,
+         transactions.idempotency_key,
+         transactions.reference,
+         transactions.metadata
+    from public.chips_transactions transactions
+   where transactions.tx_type = 'TABLE_CASH_OUT'::public.chips_tx_type
+), candidate_transaction_ids as (
   select transactions.id
     from public.chips_transactions transactions
    where transactions.id = any(coalesce($1::uuid[], array[]::uuid[]))
@@ -62,9 +78,8 @@ with candidate_transaction_ids as (
   union
 
   select transactions.id
-    from public.chips_transactions transactions
-   where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
-     and pg_catalog.lower(transactions.idempotency_key) like any (array[
+    from table_transaction_rows transactions
+   where pg_catalog.lower(transactions.idempotency_key) like any (array[
        'join-buyin:' || $2::uuid::text || ':%',
        'bot-seed-buyin:' || $2::uuid::text || ':%',
        'managed-bot-seed-buyin:' || $2::uuid::text || ':%'
@@ -74,9 +89,8 @@ with candidate_transaction_ids as (
   union
 
   select transactions.id
-    from public.chips_transactions transactions
-   where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
-     and pg_catalog.lower(transactions.idempotency_key) like any (array[
+    from table_transaction_rows transactions
+   where pg_catalog.lower(transactions.idempotency_key) like any (array[
        'poker:leave:' || $2::uuid::text || ':%',
        'poker:inactive_cleanup:' || $2::uuid::text || ':%'
      ])
@@ -85,9 +99,8 @@ with candidate_transaction_ids as (
   union
 
   select transactions.id
-    from public.chips_transactions transactions
-   where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
-     and pg_catalog.lower(transactions.idempotency_key) like any (array[
+    from table_transaction_rows transactions
+   where pg_catalog.lower(transactions.idempotency_key) like any (array[
        'poker:rebuy:v1:' || $2::uuid::text || ':%',
        'poker:deferred-leave:v1:' || $2::uuid::text || ':%',
        'poker:bot-terminal-cashout:v1:' || $2::uuid::text || ':%',
@@ -100,9 +113,8 @@ with candidate_transaction_ids as (
   union
 
   select transactions.id
-    from public.chips_transactions transactions
-   where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
-     and transactions.metadata is not null
+    from table_transaction_rows transactions
+   where transactions.metadata is not null
      and pg_catalog.jsonb_typeof(transactions.metadata) = 'object'
      and transactions.metadata ? 'tableId'
      and nullif(pg_catalog.btrim(transactions.metadata->>'tableId'), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
@@ -111,9 +123,8 @@ with candidate_transaction_ids as (
   union
 
   select transactions.id
-    from public.chips_transactions transactions
-   where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
-     and transactions.metadata is not null
+    from table_transaction_rows transactions
+   where transactions.metadata is not null
      and pg_catalog.jsonb_typeof(transactions.metadata) = 'string'
      and pg_catalog.pg_input_is_valid(transactions.metadata #>> '{}', 'jsonb'::text)
      and pg_catalog.jsonb_typeof((transactions.metadata #>> '{}')::jsonb) = 'object'
@@ -124,9 +135,8 @@ with candidate_transaction_ids as (
   union
 
   select transactions.id
-    from public.chips_transactions transactions
-   where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
-     and pg_catalog.lower(transactions.reference) like any (array[
+    from table_transaction_rows transactions
+   where pg_catalog.lower(transactions.reference) like any (array[
        'table:' || $2::uuid::text || '%',
        'poker-rebuy:' || $2::uuid::text || '%',
        'bot_seed_buy_in:' || $2::uuid::text || '%',

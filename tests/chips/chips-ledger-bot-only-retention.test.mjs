@@ -31,6 +31,7 @@ const lifecycleGateMigration = fs.readFileSync("supabase/migrations/202608261000
 const proofPerformanceMigration = fs.readFileSync("supabase/migrations/20260905160000_chips_ledger_bot_only_proof_perf.sql", "utf8");
 const proofPerformanceFixMigration = fs.readFileSync("supabase/migrations/20260905161000_chips_ledger_bot_only_proof_perf_fix.sql", "utf8");
 const proofAccessPathMigration = fs.readFileSync("supabase/migrations/20260905170000_chips_ledger_retention_access_paths.sql", "utf8");
+const proofTypeAccessPathMigration = fs.readFileSync("supabase/migrations/20260905171000_chips_ledger_bot_only_proof_type_access_path.sql", "utf8");
 const closedTableCleanup = fs.readFileSync("ws-server/poker/persistence/closed-table-cleanup.mjs", "utf8");
 
 const TABLE_ID = "00000000-0000-4000-8000-000000000020";
@@ -399,6 +400,13 @@ function proofPerformanceContract() {
   const replacement = proofAccessPathMigration.match(/replacement text := \$replacement\$([\s\S]*?)\$replacement\$/)?.[1] || "";
   assert.ok((replacement.match(/\bunion\b/gi) || []).length >= 8, "candidate evidence must be unioned and deduplicated in PostgreSQL");
   assert.doesNotMatch(replacement, /target_transactions\s+as\s*\([\s\S]*?from public\.chips_transactions transactions[\s\S]*?transactions\.id = any[\s\S]*?\bor\b[\s\S]*?public\.chips_entries/s);
+  assert.match(proofTypeAccessPathMigration, /table_transaction_rows as \(/);
+  assert.match(proofTypeAccessPathMigration, /transactions\.tx_type = 'TABLE_BUY_IN'::public\.chips_tx_type/);
+  assert.match(proofTypeAccessPathMigration, /transactions\.tx_type = 'TABLE_CASH_OUT'::public\.chips_tx_type/);
+  assert.match(proofTypeAccessPathMigration, /source_branch_count <> 6/);
+  assert.match(proofTypeAccessPathMigration, /from table_transaction_rows transactions/);
+  assert.doesNotMatch(proofTypeAccessPathMigration, /set local statement_timeout/i);
+  assert.doesNotMatch(proofTypeAccessPathMigration, /create index/i);
 }
 
 function retryAndAccountingContract() {
