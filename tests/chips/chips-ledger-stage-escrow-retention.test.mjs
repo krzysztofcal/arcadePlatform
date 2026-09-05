@@ -65,7 +65,7 @@ function uuidIdsSha256(ids) {
   return crypto.createHash("sha256").update(`${ids.join("\n")}\n`, "utf8").digest("hex");
 }
 
-function reservedAuditSession({ failOn = null, policyEnabled = false, batchRows = [], accountRows = [] } = {}) {
+function reservedAuditSession({ failOn = null, policyEnabled = false, batchRows = [], accountRows = [], tableRows = [], registryRows = [] } = {}) {
   const queries = [];
   let transactionOpen = false;
   let released = false;
@@ -102,6 +102,8 @@ function reservedAuditSession({ failOn = null, policyEnabled = false, batchRows 
       }
       if (query.includes("from public.chips_ledger_archive_batches batches")) return batchRows;
       if (query.includes("from public.chips_accounts accounts")) return accountRows;
+      if (query.includes("from public.poker_tables")) return tableRows;
+      if (query === RETENTION_REGISTRY_TABLE_COUNTS_SQL) return registryRows;
       return [];
     },
     release: async () => { released = true; },
@@ -737,6 +739,31 @@ test("audit reports the first deterministically sorted bounded next candidate an
   assert.deepEqual(JSON.parse(stdout.trim()).next_candidate, expected);
 });
 
+test("registry scope excludes existing tables and preserves the missing-table residual guard", async () => {
+  const openId = "00000000-0000-4000-8000-000000000002";
+  const closedId = "00000000-0000-4000-8000-000000000003";
+  for (const missing of [false, true]) {
+    const session = reservedAuditSession({
+      batchRows: [completeBatch(), completeBatch({ batch_id: "102", bot_only_table_id: openId }), completeBatch({ batch_id: "103", bot_only_table_id: closedId })],
+      accountRows: [account(ACCOUNT_ID_2, openId), account("00000000-0000-4000-8000-000000000103", closedId), ...(missing ? [account()] : [])],
+      tableRows: [{ id: openId, status: "OPEN" }, { id: closedId, status: "CLOSED" }],
+      registryRows: [{ table_id: TABLE_ID, archive_batch_id: "101", count: "2" }],
+    });
+    const result = await readOnlyEscrowAudit({ sql: session, telemetry: false });
+    const tableQueries = session.queries.filter(({ query }) => query === RETENTION_REGISTRY_TABLE_COUNTS_SQL);
+    const batchQueries = session.queries.filter(({ query }) => query === RETENTION_REGISTRY_BATCH_COUNTS_SQL);
+    assert.equal(tableQueries.length, missing ? 1 : 0);
+    assert.equal(batchQueries.length, missing ? 1 : 0);
+    if (missing) {
+      assert.deepEqual(tableQueries[0].parameters, [[TABLE_ID]]);
+      assert.deepEqual(batchQueries[0].parameters, [["101"], [TABLE_ID]]);
+      const residual = result.accounts.find((row) => row.tableId === TABLE_ID);
+      assert.equal(residual.reason, "residual_idempotency_mapping");
+      assert.equal(residual.registryCount, 2);
+    }
+  }
+});
+
 test("audit reports null next_candidate for an empty backlog", async () => {
   const events = [];
   const result = await readOnlyEscrowAudit({
@@ -776,6 +803,58 @@ test("automatic disabled policy audits on the reserved session and releases its 
   assert.ok(acquireIndex >= 0 && acquireIndex < beginIndex);
   assert.ok(beginIndex < commitIndex && commitIndex < releaseIndex);
   assert.equal(session.queries.some(({ query }) => query.includes("pg_advisory_unlock")), true);
+});
+
+test("initial escrow connection retries a fresh client only for transient failures", async () => {
+  for (const code of ["CONNECT_TIMEOUT", "57014", "42501"]) {
+    const clients = [];
+    const delays = [];
+    const session = reservedAuditSession();
+    const run = () => runStageEscrowAccountRetention({
+      mode: "audit",
+      deps: {
+        config: { dbUrl: "postgres://stage.example.invalid/db" },
+        telemetry: false,
+        klog: () => {},
+        sleep: async (ms) => delays.push(ms),
+        postgres: () => {
+          assert.ok(clients.every((client) => client.closed));
+          const index = clients.length;
+          const client = {
+            closed: false,
+            connected: false,
+            unsafe: async (query) => {
+              assert.equal(query, "select 1;");
+              if (index === 0) throw Object.assign(new Error("initial connection failure"), { code });
+              client.connected = true;
+              return [{ "?column?": 1 }];
+            },
+            reserve: async () => {
+              assert.equal(client.connected, true, "reserve must never initiate the cold connection");
+              return session;
+            },
+            end: async () => { client.closed = true; },
+          };
+          clients.push(client);
+          return client;
+        },
+      },
+    });
+    if (code === "CONNECT_TIMEOUT") {
+      const result = await run();
+      assert.equal(result.state, "audit");
+      assert.equal(result.lockBackendPid, "42");
+      assert.equal(session.released, true);
+      assert.equal(clients.length, 2);
+      assert.deepEqual(delays, [250]);
+    } else {
+      await assert.rejects(run, { code });
+      assert.equal(clients.length, 1);
+      assert.deepEqual(delays, []);
+      assert.equal(session.queries.length, 0);
+    }
+    assert.ok(clients.every((client) => client.closed));
+  }
 });
 
 test("manual escrow-retention-audit completes on the reserved adapter", async () => {

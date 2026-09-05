@@ -518,6 +518,32 @@ export function validateStageEnvironment(env = process.env, { requireCommitSha =
   };
 }
 
+export async function acquireInitialAutomaticLock(createSql, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))) {
+  const { sql, value: lockSession } = await initializeStageConnection(createSql, acquireAdvisoryLock, sleep);
+  return { sql, lockSession };
+}
+
+export async function initializeStageConnection(createSql, initialize, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))) {
+  const backoff = [250, 1000];
+  const transientCodes = new Set([
+    "CONNECT_TIMEOUT", "CONNECTION_CLOSED", "CONNECTION_ENDED", "CONNECTION_DESTROYED",
+    "ECONNABORTED", "ECONNREFUSED", "ECONNRESET", "EHOSTUNREACH", "ENETUNREACH",
+    "EAI_AGAIN", "ETIMEDOUT", "ERR_SOCKET_TIMEOUT", "08001", "08003", "08006",
+  ]);
+  for (let attempt = 0; ; attempt += 1) {
+    const sql = createSql();
+    try {
+      return { sql, value: await initialize(sql) };
+    } catch (error) {
+      // Dispose the failed session before retrying: it may have acquired a lock
+      // whose response was lost. Never reuse it for subsequent work.
+      await sql.end({ timeout: 0 });
+      if (attempt >= backoff.length || !transientCodes.has(String(error?.code || error?.cause?.code || "").toUpperCase())) throw error;
+      await sleep(backoff[attempt]);
+    }
+  }
+}
+
 async function acquireAdvisoryLock(sql) {
   const rows = await sql.unsafe(
     "select pg_catalog.pg_backend_pid()::text as backend_pid, pg_catalog.pg_try_advisory_lock(pg_catalog.hashtextextended($1, 0)) as acquired;",
@@ -5431,21 +5457,25 @@ export async function runAutomaticBotOnlyStageAutomation({
     const config = validateStageEnvironment(env, { requireCommitSha: true });
     deployedCommitSha = config.deployedCommitSha;
     const moduleEnv = config.moduleEnv;
-    if (deps.sql) sql = deps.sql;
-    else {
-      sql = postgres(config.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 0 });
-      ownsSql = true;
-    }
     tempRoot = deps.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-bot-only-automatic-"));
     ensurePrivateDirectory(tempRoot);
     const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
-    const pruneStore = deps.pruneStore || createPruneStore(sql);
     const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
     const inspectRecovery = deps.inspectDurableRecovery || inspectDurableRecovery;
     const persistRecovery = deps.persistDurableRecovery || persistDurableRecovery;
     const executeCycle = deps.executeVerifiedCycle || executeVerifiedCycle;
     markAutomaticPhase("automatic.lock");
-    lockSession = await acquireAdvisoryLock(sql);
+    if (deps.sql) {
+      sql = deps.sql;
+      lockSession = await acquireAdvisoryLock(sql);
+    } else {
+      ({ sql, lockSession } = await acquireInitialAutomaticLock(
+        deps.createSql || (() => postgres(config.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 0 })),
+        deps.sleep,
+      ));
+      ownsSql = true;
+    }
+    const pruneStore = deps.pruneStore || createPruneStore(sql);
     if (!lockSession) {
       result = {
         state: "no-op",
