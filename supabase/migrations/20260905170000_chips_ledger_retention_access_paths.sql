@@ -4,6 +4,13 @@
 -- changes how candidate transaction IDs are found before the PK join.
 begin;
 
+-- Build the helper and replacement as the archive-pruner owner, following the
+-- existing migration ACL pattern.  The migration runner is not assumed to be
+-- able to SET ROLE until membership is granted in this transaction.
+grant chips_ledger_archive_pruner to postgres;
+grant create on schema public to chips_ledger_archive_pruner;
+set role chips_ledger_archive_pruner;
+
 -- The legacy metadata-string representation can contain malformed JSON.  Keep
 -- that historical fallback fail-closed while giving the index a truly
 -- immutable, deterministic expression to evaluate.
@@ -37,7 +44,6 @@ begin
 end;
 $function$;
 
-alter function public.chips_bot_proof_metadata_table_id(jsonb) owner to chips_ledger_archive_pruner;
 revoke all on function public.chips_bot_proof_metadata_table_id(jsonb) from public, anon, authenticated, service_role;
 grant execute on function public.chips_bot_proof_metadata_table_id(jsonb) to chips_ledger_archive_pruner;
 
@@ -59,10 +65,6 @@ create index if not exists chips_transactions_bot_proof_metadata_table_id_idx
     ))
   )
   where tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type);
-
-grant chips_ledger_archive_pruner to postgres;
-grant create on schema public to chips_ledger_archive_pruner;
-set role chips_ledger_archive_pruner;
 
 -- CREATE OR REPLACE FUNCTION public.chips_assert_bot_only_archive_proof_lifecycle_gate
 -- is executed from the guarded definition below so every non-target proof
