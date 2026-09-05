@@ -1238,8 +1238,8 @@ async function assertClosedHumanLifecycleMarkerRls(sql) {
     assert.equal(botPolicyBefore[0].roles, "{chips_ledger_archive_pruner}");
     assert.equal(botPolicyBefore[0].cmd, "UPDATE");
     assert.equal(botPolicyBefore[0].qual, "true");
-    assert.match(botPolicyBefore[0].with_check || "", /has_human_participant is not true/);
-    assert.match(botPolicyBefore[0].with_check || "", /bot_only_retention_complete_at is not null/);
+    assert.match(botPolicyBefore[0].with_check || "", /has_human_participant\s+is\s+not\s+true/i);
+    assert.match(botPolicyBefore[0].with_check || "", /bot_only_retention_complete_at\s+is\s+not\s+null/i);
 
     const rlsRows = await tx.unsafe(`select relrowsecurity
       from pg_catalog.pg_class where oid = 'public.poker_tables'::regclass;`);
