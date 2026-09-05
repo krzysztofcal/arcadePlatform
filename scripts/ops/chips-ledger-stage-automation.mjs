@@ -301,6 +301,23 @@ export function aggregatePayload(result) {
     };
   }
   if (result.mode === "automatic") return aggregateAutomaticSuccessPayload(result);
+  if (result.mode === "closed-human-policy-diagnostic") {
+    return {
+      ...base,
+      mode: result.mode,
+      policy_id: result.policyId || null,
+      enabled: result.enabled ?? null,
+      activated_at: result.activatedAt ?? null,
+      canary_batch_id: result.canaryBatchId ?? null,
+      canary_confirmation: result.canaryConfirmation ?? null,
+      created_at: result.createdAt ?? null,
+      updated_at: result.updatedAt ?? null,
+      stage_system_identifier: result.stageSystemIdentifier || null,
+      read_only: result.readOnly === true,
+      writes: false,
+      storage_access: false,
+    };
+  }
   return {
     ...base,
     mode: result.mode || null,
@@ -450,6 +467,77 @@ async function assertIdentity(sql) {
   const identity = text(rows[0]?.system_identifier);
   if (identity !== STAGE_SYSTEM_IDENTIFIER) fail("database is not canonical Stage");
   return identity;
+}
+
+const CLOSED_HUMAN_POLICY_DIAGNOSTIC_SQL = `select
+    policy_id,
+    enabled,
+    activated_at::text as activated_at,
+    canary_batch_id::text as canary_batch_id,
+    canary_confirmation,
+    created_at::text as created_at,
+    updated_at::text as updated_at
+  from public.chips_stage_closed_human_table_retention_policy
+ where policy_id = $1;`;
+
+export async function runClosedHumanPolicyDiagnostic({ env = process.env, deps = {} } = {}) {
+  if (text(env.CHIPS_LEDGER_BOT_ONLY_EXECUTE) === "1"
+    || text(env.CHIPS_LEDGER_BOT_ONLY_AUTOMATIC) === "1"
+    || text(env.CHIPS_LEDGER_CLOSED_HUMAN_EXECUTE) === "1"
+    || text(env.CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC) === "1") {
+    fail("closed-human policy diagnostic cannot run with execution or automatic gates");
+  }
+  let sql = null;
+  let ownsSql = false;
+  let result = null;
+  let failure = null;
+  try {
+    const config = validateStageEnvironment(env, { requireCommitSha: true });
+    if (deps.sql) sql = deps.sql;
+    else {
+      sql = postgres(config.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 0 });
+      ownsSql = true;
+    }
+    const diagnostic = await sql.begin(async (tx) => {
+      await tx.unsafe("set transaction isolation level repeatable read, read only;");
+      const identity = await assertIdentity(tx);
+      const rows = await tx.unsafe(CLOSED_HUMAN_POLICY_DIAGNOSTIC_SQL, [CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID]);
+      if (rows.length === 0) fail("closed-human policy row was not found");
+      if (rows.length !== 1) fail("closed-human policy row is not unique");
+      const row = rows[0];
+      if (text(row.policy_id) !== CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID) {
+        fail("closed-human policy diagnostic policy mismatch");
+      }
+      return { identity, row };
+    });
+    const row = diagnostic.row;
+    result = {
+      event: "chips_ledger_stage_automation",
+      target: "stage",
+      mode: "closed-human-policy-diagnostic",
+      sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+      projectRef: STAGE_PROJECT_REF,
+      deployedCommitSha: config.deployedCommitSha,
+      stageSystemIdentifier: diagnostic.identity,
+      state: "diagnosed",
+      policyId: text(row.policy_id),
+      enabled: row.enabled === true || row.enabled === "t",
+      activatedAt: row.activated_at ?? null,
+      canaryBatchId: row.canary_batch_id ?? null,
+      canaryConfirmation: row.canary_confirmation ?? null,
+      createdAt: row.created_at ?? null,
+      updatedAt: row.updated_at ?? null,
+      readOnly: true,
+    };
+  } catch (error) {
+    failure = error;
+  } finally {
+    if (sql && ownsSql) {
+      try { await sql.end({ timeout: 5 }); } catch (error) { if (!failure) failure = error; }
+    }
+  }
+  if (failure) throw failure;
+  return result;
 }
 
 export const STAGE_OWN_BATCHES_SQL = `select
@@ -4604,6 +4692,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     runStageExactRecoveryRepair({ batchId: argv[4], sourcePolicyId: argv[1] }).catch(() => {
       process.exitCode = 1;
     });
+  } else if (argv.length === 3
+    && argv[0] === "--policy"
+    && argv[1] === CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID
+    && argv[2] === "--diagnose-policy") {
+    runClosedHumanPolicyDiagnostic()
+      .then((report) => process.stdout.write(`${stringifyJson(aggregatePayload(report))}\n`))
+      .catch((error) => {
+        process.stderr.write(`Closed-human policy diagnostic failed: ${redactedError(error)}\n`);
+        process.exitCode = 1;
+      });
   } else if (argv[0] === "--policy" && argv[1] === "bot-only-7d") {
     let prepareOnly = true;
     let prepareOnlyRequested = false;
@@ -4687,7 +4785,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       process.exitCode = 1;
     });
   } else {
-    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-automation.mjs [--policy stage-ledger-auto-retention-30d-v1|stage-ledger-closed-human-table-retention-30d-v1 [--diagnose-recovery [--batch-id <id>]|--repair-recovery --batch-id <id>]|--policy bot-only-7d [--prepare-only|--repair-recovery --batch-id 15|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>'|--automatic]|--policy closed-human-table-30d [--prepare-only|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>']]\n");
+    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-automation.mjs [--policy stage-ledger-auto-retention-30d-v1|stage-ledger-closed-human-table-retention-30d-v1 [--diagnose-recovery [--batch-id <id>]|--repair-recovery --batch-id <id>]|--policy stage-ledger-closed-human-table-retention-30d-v1 --diagnose-policy|--policy bot-only-7d [--prepare-only|--repair-recovery --batch-id 15|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>'|--automatic]|--policy closed-human-table-30d [--prepare-only|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>']]\n");
     process.exitCode = 1;
   }
 }
