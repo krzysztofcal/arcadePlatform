@@ -6,6 +6,7 @@ const canaryMigration = fs.readFileSync("supabase/migrations/20260904180000_chip
 const policyRlsMigration = fs.readFileSync("supabase/migrations/20260905100000_chips_ledger_closed_human_policy_rls_select.sql", "utf8");
 const lifecycleOwnerMigration = fs.readFileSync("supabase/migrations/20260905110000_chips_ledger_closed_human_lifecycle_completion_owner.sql", "utf8");
 const lifecycleMarkerRlsMigration = fs.readFileSync("supabase/migrations/20260905120000_chips_ledger_closed_human_lifecycle_marker_rls.sql", "utf8");
+const lifecycleAclMigration = fs.readFileSync("supabase/migrations/20260905130000_chips_ledger_closed_human_lifecycle_completion_acl.sql", "utf8");
 const cleanup = fs.readFileSync("ws-server/poker/persistence/closed-table-cleanup.mjs", "utf8");
 
 assert.match(migration, /human_retention_complete_at timestamptz/);
@@ -42,6 +43,10 @@ assert.match(lifecycleMarkerRlsMigration, /on public\.poker_tables[\s\S]*for upd
 assert.match(lifecycleMarkerRlsMigration, /using \([\s\S]*has_human_participant is true[\s\S]*human_retention_complete_at is null[\s\S]*chips\.closed_human_lifecycle/);
 assert.match(lifecycleMarkerRlsMigration, /with check \([\s\S]*has_human_participant is true[\s\S]*human_retention_complete_at is not null[\s\S]*chips\.closed_human_lifecycle/);
 assert.doesNotMatch(lifecycleMarkerRlsMigration, /chips_archive_pruner_tables_marker_update|for (select|insert|delete)|to (public|anon|authenticated|service_role)/i);
+assert.match(lifecycleAclMigration, /grant execute on function public\.chips_complete_closed_human_table_retention\(uuid, timestamptz\)\s+to postgres/);
+assert.match(lifecycleAclMigration, /chips_ledger_archive_pruner/);
+assert.doesNotMatch(lifecycleAclMigration, /grant\s+(insert|update|delete)\b|grant\s+[^;]*\bon\s+public\.(?:poker_tables|chips_ledger_archive_batches|chips_transaction_idempotency)/i);
+assert.doesNotMatch(lifecycleAclMigration, /to (public|anon|authenticated|service_role)/i);
 assert.match(cleanup, /t\.has_human_participant is true and t\.human_retention_complete_at is not null/);
 assert.match(cleanup, /t\.has_human_participant is not true and t\.bot_only_retention_complete_at is not null/);
 

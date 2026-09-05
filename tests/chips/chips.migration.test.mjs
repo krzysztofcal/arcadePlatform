@@ -1226,6 +1226,54 @@ async function assertClosedHumanLifecycleMarkerRls(sql) {
 
   await sql.begin(async (tx) => {
     await tx.unsafe("set transaction isolation level serializable;");
+    const callerRows = await tx.unsafe(`select current_user::text as caller_name, session_user::text as session_name;`);
+    assert.equal(callerRows[0]?.caller_name, "postgres", "lifecycle integration must use the workflow DB caller without SET ROLE");
+    assert.equal(callerRows[0]?.session_name, "postgres", "lifecycle integration must use the canonical workflow session");
+
+    const lifecycleFunctionRows = await tx.unsafe(`select pg_catalog.pg_get_userbyid(proowner) as owner, prosecdef
+      from pg_catalog.pg_proc
+      where oid = 'public.chips_complete_closed_human_table_retention(uuid,timestamptz)'::pg_catalog.regprocedure;`);
+    assert.equal(lifecycleFunctionRows.length, 1);
+    assert.equal(lifecycleFunctionRows[0].owner, "chips_ledger_archive_pruner");
+    assert.equal(lifecycleFunctionRows[0].prosecdef, true, "lifecycle completion must remain SECURITY DEFINER");
+
+    const lifecycleAclRows = await tx.unsafe(`select coalesce(grantee.rolname, 'PUBLIC') as grantee, privileges.privilege_type
+      from pg_catalog.pg_proc functions
+      cross join lateral pg_catalog.aclexplode(
+        coalesce(functions.proacl, pg_catalog.acldefault('f', functions.proowner))
+      ) privileges
+      left join pg_catalog.pg_roles grantee on grantee.oid = privileges.grantee
+      where functions.oid = 'public.chips_complete_closed_human_table_retention(uuid,timestamptz)'::pg_catalog.regprocedure
+        and privileges.privilege_type = 'EXECUTE'
+      order by 1;`);
+    assert.deepEqual(
+      lifecycleAclRows,
+      [
+        { grantee: "chips_ledger_archive_pruner", privilege_type: "EXECUTE" },
+        { grantee: "postgres", privilege_type: "EXECUTE" },
+      ],
+      "lifecycle completion EXECUTE must be explicit for only the pruner and workflow caller",
+    );
+
+    const apiExecuteRows = await tx.unsafe(`select rolname,
+        pg_catalog.has_function_privilege(
+          rolname,
+          'public.chips_complete_closed_human_table_retention(uuid,timestamptz)',
+          'execute'
+        ) as can_execute
+      from pg_catalog.pg_roles
+      where rolname in ('anon', 'authenticated', 'service_role')
+      order by rolname;`);
+    assert.deepEqual(
+      apiExecuteRows,
+      [
+        { rolname: "anon", can_execute: false },
+        { rolname: "authenticated", can_execute: false },
+        { rolname: "service_role", can_execute: false },
+      ],
+      "API roles must not execute lifecycle completion",
+    );
+
     await tx.unsafe(`create or replace function public.chips_assert_archive_prune_stage()
       returns text language sql security definer set search_path = ''
       as $override$ select '7656985631720456337'::text $override$;`);
@@ -1287,7 +1335,6 @@ async function assertClosedHumanLifecycleMarkerRls(sql) {
       tableId,
     ]);
 
-    await tx.unsafe("set local role chips_ledger_archive_pruner;");
     await expectSavepointError(
       tx,
       "human_marker_direct_update",
@@ -1303,7 +1350,6 @@ async function assertClosedHumanLifecycleMarkerRls(sql) {
     assert.equal(completionRows[0].result.state, "human_retention_complete");
     assert.equal(completionRows[0].result.table_id, tableId);
 
-    await tx.unsafe("reset role;");
     const markerRows = await tx.unsafe(`select human_retention_complete_at
       from public.poker_tables where id = $1::uuid;`, [tableId]);
     assert.ok(markerRows[0]?.human_retention_complete_at, "valid lifecycle function must persist the human marker");
