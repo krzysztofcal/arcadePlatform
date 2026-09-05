@@ -57,13 +57,13 @@ with candidate_transaction_ids as (
   select transactions.id
     from public.chips_transactions transactions
    where transactions.id = any(coalesce($1::uuid[], array[]::uuid[]))
-     and transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+     and transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
 
   union
 
   select transactions.id
     from public.chips_transactions transactions
-   where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+   where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
      and pg_catalog.lower(transactions.idempotency_key) like any (array[
        'join-buyin:' || $2::uuid::text || ':%',
        'bot-seed-buyin:' || $2::uuid::text || ':%',
@@ -75,7 +75,7 @@ with candidate_transaction_ids as (
 
   select transactions.id
     from public.chips_transactions transactions
-   where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+   where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
      and pg_catalog.lower(transactions.idempotency_key) like any (array[
        'poker:leave:' || $2::uuid::text || ':%',
        'poker:inactive_cleanup:' || $2::uuid::text || ':%'
@@ -86,7 +86,7 @@ with candidate_transaction_ids as (
 
   select transactions.id
     from public.chips_transactions transactions
-   where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+   where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
      and pg_catalog.lower(transactions.idempotency_key) like any (array[
        'poker:rebuy:v1:' || $2::uuid::text || ':%',
        'poker:deferred-leave:v1:' || $2::uuid::text || ':%',
@@ -101,7 +101,7 @@ with candidate_transaction_ids as (
 
   select transactions.id
     from public.chips_transactions transactions
-   where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+   where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
      and pg_catalog.lower(pg_catalog.btrim(
        case
          when pg_catalog.jsonb_typeof(transactions.metadata) = 'object'
@@ -135,7 +135,7 @@ with candidate_transaction_ids as (
 
   select transactions.id
     from public.chips_transactions transactions
-   where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+   where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
      and pg_catalog.lower(transactions.reference) like any (array[
        'table:' || $2::uuid::text || '%',
        'poker-rebuy:' || $2::uuid::text || '%',
@@ -149,14 +149,14 @@ with candidate_transaction_ids as (
 
   select registry.transaction_id
     from public.chips_transaction_idempotency registry
-   where registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+   where registry.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
      and registry.table_id = $2::uuid
 
   union
 
   select registry.transaction_id
     from public.chips_transaction_idempotency registry
-   where registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+   where registry.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
      and registry.table_id is null
      and pg_catalog.lower(registry.idempotency_key) like any (array[
        'join-buyin:' || $2::uuid::text || ':%',
@@ -177,7 +177,7 @@ with candidate_transaction_ids as (
 
   select registry.transaction_id
     from public.chips_transaction_idempotency registry
-   where registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+   where registry.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
      and registry.table_id is null
      and pg_catalog.lower(registry.idempotency_key) like any (array[
        'poker:leave:' || $2::uuid::text || ':%',
@@ -189,7 +189,7 @@ with candidate_transaction_ids as (
 
   select registry.transaction_id
     from public.chips_transaction_idempotency registry
-   where registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+   where registry.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
      and registry.table_id is null
      and pg_catalog.lower(registry.idempotency_key) like any (array[
        'poker:rebuy:v1:' || $2::uuid::text || ':%',
@@ -236,7 +236,7 @@ with candidate_transaction_ids as (
                else null::jsonb
              end as normalized_metadata
     ) normalized
-   where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+   where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
 )
 select target.id, target.idempotency_key, target.reference, target.normalized_metadata, target.key_table_id
   from target_transactions target;`;

@@ -9,11 +9,11 @@ begin;
 -- global TABLE_BUY_IN/TABLE_CASH_OUT scan that the historical OR caused.
 create index if not exists chips_transactions_bot_proof_idempotency_prefix_idx
   on public.chips_transactions (pg_catalog.lower(idempotency_key) text_pattern_ops)
-  where tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT');
+  where tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type);
 
 create index if not exists chips_transactions_bot_proof_reference_prefix_idx
   on public.chips_transactions (pg_catalog.lower(reference) text_pattern_ops)
-  where tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT');
+  where tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type);
 
 create index if not exists chips_transactions_bot_proof_metadata_table_id_idx
   on public.chips_transactions (
@@ -28,7 +28,7 @@ create index if not exists chips_transactions_bot_proof_metadata_table_id_idx
       end
     ))
   )
-  where tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT');
+  where tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type);
 
 grant chips_ledger_archive_pruner to postgres;
 grant create on schema public to chips_ledger_archive_pruner;
@@ -47,7 +47,7 @@ declare
     select transactions.id
       from public.chips_transactions transactions
      where transactions.id = any(coalesce(p_transaction_ids, array[]::uuid[]))
-       and transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+       and transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
 
     union
 
@@ -55,7 +55,7 @@ declare
     -- fallback path; the regex remains the authoritative exact validator.
     select transactions.id
       from public.chips_transactions transactions
-     where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+     where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
        and pg_catalog.lower(transactions.idempotency_key) like any (array[
          'join-buyin:' || p_table_id::text || ':%',
          'bot-seed-buyin:' || p_table_id::text || ':%',
@@ -67,7 +67,7 @@ declare
 
     select transactions.id
       from public.chips_transactions transactions
-     where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+     where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
        and pg_catalog.lower(transactions.idempotency_key) like any (array[
          'poker:leave:' || p_table_id::text || ':%',
          'poker:inactive_cleanup:' || p_table_id::text || ':%'
@@ -78,7 +78,7 @@ declare
 
     select transactions.id
       from public.chips_transactions transactions
-     where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+     where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
        and pg_catalog.lower(transactions.idempotency_key) like any (array[
          'poker:rebuy:v1:' || p_table_id::text || ':%',
          'poker:deferred-leave:v1:' || p_table_id::text || ':%',
@@ -95,7 +95,7 @@ declare
     -- indexed independently from the other transaction-field fallbacks.
     select transactions.id
       from public.chips_transactions transactions
-     where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+     where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
        and pg_catalog.lower(pg_catalog.btrim(
          case
            when pg_catalog.jsonb_typeof(transactions.metadata) = 'object'
@@ -131,7 +131,7 @@ declare
     -- case-insensitive reference grammar retained as the final check.
     select transactions.id
       from public.chips_transactions transactions
-     where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+     where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
        and pg_catalog.lower(transactions.reference) like any (array[
          'table:' || p_table_id::text || '%',
          'poker-rebuy:' || p_table_id::text || '%',
@@ -146,7 +146,7 @@ declare
     -- Registry table binding is the selective indexed path.
     select registry.transaction_id
       from public.chips_transaction_idempotency registry
-     where registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+     where registry.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
        and registry.table_id = p_table_id
 
     union
@@ -155,7 +155,7 @@ declare
     -- the existing table/tx_type registry access path.
     select registry.transaction_id
       from public.chips_transaction_idempotency registry
-     where registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+     where registry.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
        and registry.table_id is null
        and pg_catalog.lower(registry.idempotency_key) like any (array[
          'join-buyin:' || p_table_id::text || ':%',
@@ -176,7 +176,7 @@ declare
 
     select registry.transaction_id
       from public.chips_transaction_idempotency registry
-     where registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+     where registry.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
        and registry.table_id is null
        and pg_catalog.lower(registry.idempotency_key) like any (array[
          'poker:leave:' || p_table_id::text || ':%',
@@ -188,7 +188,7 @@ declare
 
     select registry.transaction_id
       from public.chips_transaction_idempotency registry
-     where registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+     where registry.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
        and registry.table_id is null
        and pg_catalog.lower(registry.idempotency_key) like any (array[
          'poker:rebuy:v1:' || p_table_id::text || ':%',
@@ -239,7 +239,7 @@ declare
                  else null::jsonb
                end as normalized_metadata
       ) normalized
-     where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+     where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
 $replacement$;
   start_pos integer;
   marker_offset integer;
