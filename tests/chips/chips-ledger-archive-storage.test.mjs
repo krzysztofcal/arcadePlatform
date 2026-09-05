@@ -385,11 +385,17 @@ try {
 
   const recoveredAfter544 = await runPrivateGetScenario([544, 200]);
   assert.equal(recoveredAfter544.calls.length, 2, "HTTP 544 may have one bounded retry");
-  assert.deepEqual(recoveredAfter544.sleeps, [50]);
+  assert.deepEqual(recoveredAfter544.sleeps, [250]);
   assert.equal(recoveredAfter544.calls.every(({ method }) => method === "GET"), true);
   assert.equal(recoveredAfter544.calls[0].headers.get("authorization"), `Bearer ${ENV.SUPABASE_SERVICE_ROLE_KEY}`);
   assert.equal(recoveredAfter544.value.bytes.equals(privateObjectBytes), true);
   assert.equal(recoveredAfter544.value.sha256, crypto.createHash("sha256").update(privateObjectBytes).digest("hex"));
+
+  const recoveredAfter429 = await runPrivateGetScenario([429, 200]);
+  assert.equal(recoveredAfter429.calls.length, 2, "HTTP 429 may have one bounded read-only retry");
+  assert.deepEqual(recoveredAfter429.sleeps, [250]);
+  assert.equal(recoveredAfter429.calls.every(({ method }) => method === "GET"), true);
+  assert.equal(recoveredAfter429.value.bytes.equals(privateObjectBytes), true);
 
   const exhausted544Calls = [];
   const exhausted544Sleeps = [];
@@ -403,8 +409,8 @@ try {
     }),
     /HTTP 544/,
   );
-  assert.deepEqual(exhausted544Calls, ["GET", "GET", "GET"]);
-  assert.deepEqual(exhausted544Sleeps, [50, 100]);
+  assert.deepEqual(exhausted544Calls, ["GET", "GET", "GET", "GET"]);
+  assert.deepEqual(exhausted544Sleeps, [250, 1000, 2500]);
 
   for (const status of [400, 401, 402, 403, 404]) {
     const calls = [];
@@ -507,7 +513,7 @@ try {
   assert.equal(readAfterWrite.objectExisted, false);
   assert.equal(readAfterWrite.uploaded, true);
   assert.deepEqual(readAfterWriteCalls.map(({ method }) => method), ["GET", "POST", "GET", "GET"]);
-  assert.deepEqual(readAfterWriteSleeps, [50], "read-after-write visibility gets one bounded delay");
+  assert.deepEqual(readAfterWriteSleeps, [250], "read-after-write visibility gets one bounded delay");
 
   const notVisibleCalls = [];
   const notVisibleSleeps = [];
@@ -526,10 +532,10 @@ try {
       },
     }),
     (error) => error?.storageState === "write_not_visible"
-      && error?.storageAttempts === 3,
+      && error?.storageAttempts === 4,
   );
-  assert.deepEqual(notVisibleCalls, ["GET", "POST", "GET", "GET", "GET"]);
-  assert.deepEqual(notVisibleSleeps, [50, 100]);
+  assert.deepEqual(notVisibleCalls, ["GET", "POST", "GET", "GET", "GET", "GET"]);
+  assert.deepEqual(notVisibleSleeps, [250, 1000, 2500]);
 
   let foreignRacedObject = null;
   const foreignRacedCalls = [];
@@ -558,7 +564,7 @@ try {
   const transientNetworkError = Object.assign(new TypeError("temporary network failure"), { code: "ECONNRESET" });
   const recoveredAfterNetwork = await runPrivateGetScenario([transientNetworkError, 200]);
   assert.equal(recoveredAfterNetwork.calls.length, 2);
-  assert.deepEqual(recoveredAfterNetwork.sleeps, [50]);
+  assert.deepEqual(recoveredAfterNetwork.sleeps, [250]);
 
   await assert.rejects(
     () => downloadPrivateArchiveObject(resolveStorageTarget("stage", ENV), privateObjectPath, {

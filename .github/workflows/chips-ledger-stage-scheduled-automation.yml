@@ -118,41 +118,76 @@ jobs:
           import postgres from "postgres";
 
           const EXPECTED_SYSTEM_IDENTIFIER = "7656985631720456337";
+          const RETRYABLE_CONNECTION_CODES = new Set([
+            "CONNECT_TIMEOUT",
+            "ECONNABORTED",
+            "ECONNREFUSED",
+            "ECONNRESET",
+            "EHOSTUNREACH",
+            "ENETUNREACH",
+            "EAI_AGAIN",
+            "ETIMEDOUT",
+            "ERR_SOCKET_TIMEOUT",
+            "UND_ERR_CONNECT_TIMEOUT",
+            "UND_ERR_HEADERS_TIMEOUT",
+            "UND_ERR_SOCKET",
+          ]);
+          const CONNECT_RETRY_BACKOFF_MS = [250, 1000];
           const isTrue = (value) => value === true || value === "t";
-          const sql = postgres(process.env.SUPABASE_STAGE_DB_URL, {
-            max: 1,
-            prepare: false,
-            connect_timeout: 10,
-            idle_timeout: 0,
-          });
+          const isRetryableConnectionError = (error) => {
+            const code = String(error?.code || error?.cause?.code || "").toUpperCase();
+            const message = String(error?.message || "");
+            return RETRYABLE_CONNECTION_CODES.has(code)
+              || /connect(?:ion)?[_ ]timeout|connection reset|temporarily unavailable/i.test(message);
+          };
 
-          try {
-            await sql.begin(async (tx) => {
-              await tx.unsafe("set transaction read only");
-
-              const identityRows = await tx.unsafe(
-                "select system_identifier::text as system_identifier from pg_catalog.pg_control_system();",
-              );
-              if (identityRows[0]?.system_identifier !== EXPECTED_SYSTEM_IDENTIFIER) {
-                throw new Error("Stage system identifier preflight mismatch");
-              }
-
-              const activeRows = await tx.unsafe(
-                "select public.chips_table_fence_is_active() as active;",
-              );
-              if (!isTrue(activeRows[0]?.active)) {
-                throw new Error("Stage TABLE fence is not active");
-              }
-
-              const controlRows = await tx.unsafe(
-                "select enforcement_active from public.chips_table_fence_control where control_id is true;",
-              );
-              if (controlRows.length !== 1 || !isTrue(controlRows[0]?.enforcement_active)) {
-                throw new Error("Stage TABLE fence control is not active");
-              }
+          let preflightPassed = false;
+          for (let attempt = 1; attempt <= 3; attempt += 1) {
+            const sql = postgres(process.env.SUPABASE_STAGE_DB_URL, {
+              max: 1,
+              prepare: false,
+              connect_timeout: 10,
+              idle_timeout: 0,
             });
-          } finally {
-            await sql.end({ timeout: 5 });
+
+            try {
+              await sql.begin(async (tx) => {
+                await tx.unsafe("set transaction read only");
+
+                const identityRows = await tx.unsafe(
+                  "select system_identifier::text as system_identifier from pg_catalog.pg_control_system();",
+                );
+                if (identityRows[0]?.system_identifier !== EXPECTED_SYSTEM_IDENTIFIER) {
+                  throw new Error("Stage system identifier preflight mismatch");
+                }
+
+                const activeRows = await tx.unsafe(
+                  "select public.chips_table_fence_is_active() as active;",
+                );
+                if (!isTrue(activeRows[0]?.active)) {
+                  throw new Error("Stage TABLE fence is not active");
+                }
+
+                const controlRows = await tx.unsafe(
+                  "select enforcement_active from public.chips_table_fence_control where control_id is true;",
+                );
+                if (controlRows.length !== 1 || !isTrue(controlRows[0]?.enforcement_active)) {
+                  throw new Error("Stage TABLE fence control is not active");
+                }
+              });
+              preflightPassed = true;
+              break;
+            } catch (error) {
+              if (!isRetryableConnectionError(error) || attempt === 3) throw error;
+              process.stderr.write(`Stage fence preflight transient DB connection failure; retrying (${attempt + 1}/3)\n`);
+              await new Promise((resolve) => setTimeout(resolve, CONNECT_RETRY_BACKOFF_MS[attempt - 1]));
+            } finally {
+              await sql.end({ timeout: 5 });
+            }
+          }
+
+          if (!preflightPassed) {
+            throw new Error("Stage read-only fence preflight did not complete");
           }
 
           process.stdout.write("Stage read-only fence preflight passed\n");
@@ -395,6 +430,8 @@ jobs:
 
       - name: Run activated bot-only 7-day Stage automation
         if: ${{ (github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-automatic') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'external-scheduled-automatic') }}
+        id: bot_only_automatic
+        continue-on-error: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'external-scheduled-automatic') }}
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
           CHIPS_LEDGER_BOT_ONLY_AUTOMATIC: "1"
@@ -402,6 +439,8 @@ jobs:
 
       - name: Run activated closed-human 30-day Stage automation
         if: ${{ github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *' }}
+        id: closed_human_automatic
+        continue-on-error: ${{ github.event_name == 'schedule' }}
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
           CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC: "1"
@@ -409,9 +448,35 @@ jobs:
 
       - name: Run Stage escrow account retention
         if: ${{ (github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'external-scheduled-automatic') }}
+        id: escrow_automatic
+        continue-on-error: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'external-scheduled-automatic') }}
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
         run: node scripts/ops/chips-ledger-stage-escrow-retention.mjs --automatic
+
+      - name: Fail scheduled retention run after independent path failures
+        if: ${{ always() && ((github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'external-scheduled-automatic')) }}
+        env:
+          BOT_ONLY_OUTCOME: ${{ steps.bot_only_automatic.outcome }}
+          CLOSED_HUMAN_OUTCOME: ${{ steps.closed_human_automatic.outcome }}
+          ESCROW_OUTCOME: ${{ steps.escrow_automatic.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed_paths=()
+          if [[ "$BOT_ONLY_OUTCOME" == "failure" ]]; then
+            failed_paths+=("bot-only")
+          fi
+          if [[ "$CLOSED_HUMAN_OUTCOME" == "failure" ]]; then
+            failed_paths+=("closed-human")
+          fi
+          if [[ "$ESCROW_OUTCOME" == "failure" ]]; then
+            failed_paths+=("escrow")
+          fi
+          if ((${#failed_paths[@]} > 0)); then
+            printf 'independent retention path failure(s): %s\n' "${failed_paths[*]}" >&2
+            exit 1
+          fi
 
       - name: Audit Stage escrow account retention
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'escrow-retention-audit' }}

@@ -18,6 +18,7 @@ import {
   STAGE_SYSTEM_IDENTIFIER,
   buildPruneEvidence,
   computeArchiveIdProofs,
+  createPruneStore,
   pruneArchive,
 } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
 import { ensurePrivateDirectory } from "../../scripts/ops/_shared/chips-ledger-archive-files.mjs";
@@ -27,6 +28,27 @@ const TX_B = "00000000-0000-4000-8000-00000000000b";
 const TABLE_ID = "00000000-0000-4000-8000-000000000020";
 const SYSTEM_ID = "00000000-0000-4000-8000-000000000030";
 const ESCROW_ID = "00000000-0000-4000-8000-000000000031";
+
+{
+  const statements = [];
+  const sql = {
+    unsafe: async () => [],
+    begin: async (callback) => callback({
+      unsafe: async (query) => {
+        statements.push(query);
+        return [{ result: { state: "proof_registered" } }];
+      },
+    }),
+  };
+  const result = await createPruneStore(sql).registerBotOnlyProof(
+    { object_path: "v1/sha256/archive.jsonl.gz" },
+    { transactionIds: [], entryIds: [], tableId: TABLE_ID, registryKeys: [] },
+  );
+  assert.deepEqual(result, { state: "proof_registered" });
+  assert.equal(statements[0], "set transaction isolation level repeatable read;");
+  assert.equal(statements[1], "set local enable_nestloop = off;");
+  assert.match(statements[2], /select public\.chips_register_bot_only_archive_proof/);
+}
 
 const ENV = {
   EXPECTED_SUPABASE_STAGE_PROJECT_REF: "krydukthwdvccggbyjfw",
