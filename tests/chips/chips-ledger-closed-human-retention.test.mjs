@@ -7,6 +7,8 @@ const policyRlsMigration = fs.readFileSync("supabase/migrations/20260905100000_c
 const lifecycleOwnerMigration = fs.readFileSync("supabase/migrations/20260905110000_chips_ledger_closed_human_lifecycle_completion_owner.sql", "utf8");
 const lifecycleMarkerRlsMigration = fs.readFileSync("supabase/migrations/20260905120000_chips_ledger_closed_human_lifecycle_marker_rls.sql", "utf8");
 const lifecycleAclMigration = fs.readFileSync("supabase/migrations/20260905130000_chips_ledger_closed_human_lifecycle_completion_acl.sql", "utf8");
+const automaticActivationMigration = fs.readFileSync("supabase/migrations/20260905140000_chips_ledger_closed_human_automatic_activation.sql", "utf8");
+const activationPostPruneMigration = fs.readFileSync("supabase/migrations/20260905150000_chips_ledger_closed_human_activation_post_prune.sql", "utf8");
 const cleanup = fs.readFileSync("ws-server/poker/persistence/closed-table-cleanup.mjs", "utf8");
 
 assert.match(migration, /human_retention_complete_at timestamptz/);
@@ -47,6 +49,34 @@ assert.match(lifecycleAclMigration, /grant execute on function public\.chips_com
 assert.match(lifecycleAclMigration, /chips_ledger_archive_pruner/);
 assert.doesNotMatch(lifecycleAclMigration, /grant\s+(insert|update|delete)\b|grant\s+[^;]*\bon\s+public\.(?:poker_tables|chips_ledger_archive_batches|chips_transaction_idempotency)/i);
 assert.doesNotMatch(lifecycleAclMigration, /to (public|anon|authenticated|service_role)/i);
+assert.match(automaticActivationMigration, /add column(?: if not exists)? activation_go_at timestamptz/);
+assert.match(automaticActivationMigration, /add column(?: if not exists)? activation_confirmation text/);
+assert.match(automaticActivationMigration, /chips_stage_closed_human_retention_activation_check/);
+assert.match(automaticActivationMigration, /chips_guard_closed_human_retention_policy/);
+assert.match(automaticActivationMigration, /chips\.closed_human_policy_activation/);
+assert.match(automaticActivationMigration, /chips\.closed_human_go/);
+assert.match(automaticActivationMigration, /old\.canary_batch_id is not null/);
+assert.match(automaticActivationMigration, /ACTIVATE stage-ledger-closed-human-table-retention-30d-v1 CANARY/);
+assert.match(automaticActivationMigration, /canary_batch_id is distinct from 334/);
+assert.match(automaticActivationMigration, /coalesce\(pg_catalog\.current_setting\('chips\.closed_human_automatic', true\), ''\)/);
+assert.match(automaticActivationMigration, /chips_closed_human_retention_automatic_active/);
+assert.match(automaticActivationMigration, /chips_activate_closed_human_table_retention_policy\(\s+p_canary_batch_id bigint/);
+assert.match(automaticActivationMigration, /chips_auto_prune_closed_human_table_archive_batch\(\s+p_object_path text/);
+assert.match(automaticActivationMigration, /chips\.closed_human_automatic/);
+assert.match(automaticActivationMigration, /chips_assert_closed_human_table_lifecycle_gate\(/);
+assert.match(automaticActivationMigration, /grant execute on function public\.chips_auto_prune_closed_human_table_archive_batch/);
+assert.doesNotMatch(automaticActivationMigration, /20260904160000|20260904170000/);
+assert.doesNotMatch(automaticActivationMigration, /idempotency_retired/);
+assert.doesNotMatch(automaticActivationMigration, /chips_complete_closed_human_table_retention/);
+assert.doesNotMatch(automaticActivationMigration, /grant\s+(insert|update|delete)\b/i);
+assert.doesNotMatch(automaticActivationMigration, /to (public|anon|authenticated|service_role)/i);
+assert.doesNotMatch(automaticActivationMigration, /7575202818581710058/);
+assert.match(activationPostPruneMigration, /chips_activate_closed_human_table_retention_policy\(bigint,text\)/);
+assert.match(activationPostPruneMigration, /chips_transaction_idempotency as registry/);
+assert.match(activationPostPruneMigration, /exact_table_count/);
+assert.match(activationPostPruneMigration, /durable activation evidence/);
+assert.doesNotMatch(activationPostPruneMigration, /20260904160000|20260904170000/);
+assert.doesNotMatch(activationPostPruneMigration, /grant\s+(insert|update|delete)\b/i);
 assert.match(cleanup, /t\.has_human_participant is true and t\.human_retention_complete_at is not null/);
 assert.match(cleanup, /t\.has_human_participant is not true and t\.bot_only_retention_complete_at is not null/);
 

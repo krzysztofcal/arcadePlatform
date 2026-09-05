@@ -15,6 +15,7 @@ const RETAINED_MODES = [
   "closed-human-policy-diagnostic",
   "closed-human-30d-recovery-repair",
   "closed-human-30d-lifecycle-completion",
+  "closed-human-30d-activation",
   "escrow-retention-audit",
   "escrow-retention-verify",
   "external-scheduled-automatic",
@@ -53,7 +54,9 @@ const RETAINED_STEPS = [
   "Diagnose closed-human retention policy",
   "Repair exact closed human-table 30-day durable recovery",
   "Complete exact closed-human table lifecycle",
+  "Activate closed-human 30-day Stage automatic retention",
   "Run activated bot-only 7-day Stage automation",
+  "Run activated closed-human 30-day Stage automation",
   "Run Stage escrow account retention",
   "Audit Stage escrow account retention",
   "Verify Stage escrow account-retention recovery",
@@ -83,6 +86,8 @@ assert.deepEqual([...inputNames].sort(), [
   "closed_human_lifecycle_batch_id",
   "closed_human_lifecycle_table_id",
   "closed_human_lifecycle_cutoff",
+  "closed_human_activation_batch_id",
+  "closed_human_activation_confirmation",
   "mode",
   "stage_30d_recovery_batch_id",
 ].sort(), "exact retained dispatch inputs");
@@ -147,6 +152,7 @@ for (const mode of [
   "closed-human-policy-diagnostic",
   "closed-human-30d-recovery-repair",
   "closed-human-30d-lifecycle-completion",
+  "closed-human-30d-activation",
   "escrow-retention-audit",
   "escrow-retention-verify",
 ]) {
@@ -166,10 +172,12 @@ assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-canary'/);
 assert.match(stageJobIf, /inputs\.mode != 'closed-human-policy-diagnostic'/);
 assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-lifecycle-completion'/);
+assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-activation'/);
 assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-canary'/);
 assert.match(stageJobIf, /inputs\.mode == 'closed-human-policy-diagnostic'/);
 assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-lifecycle-completion'/);
+assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-activation'/);
 assert.match(stageJobIf, /github\.ref == 'refs\/heads\/main'/);
 assert.match(stageJobIf, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
 assert.match(stageJobIf, /github\.event\.repository\.fork != true/);
@@ -199,7 +207,7 @@ assert.match(escrowAutomaticRun, /github\.event_name == 'schedule' && github\.ev
 assert.match(escrowAutomaticRun, /inputs\.mode == 'external-scheduled-automatic'/);
 assert.match(escrowAutomaticRun, /node scripts\/ops\/chips-ledger-stage-escrow-retention\.mjs --automatic/);
 
-assert.equal((workflow.match(/github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/g) || []).length, 2);
+assert.equal((workflow.match(/github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/g) || []).length, 3);
 
 const diagnosticRun = workflow.match(
   /- name: Diagnose existing 30-day durable recovery[\s\S]*?(?=\n\s+- name:|\s*$)/,
@@ -273,7 +281,33 @@ assert.match(closedHumanCanaryRun, /closed_human_canary_confirmation must be exa
 assert.match(closedHumanCanaryRun, /--policy closed-human-table-30d \\\n\s+--execute \\\n\s+--approved-batch-id "\$CLOSED_HUMAN_CANARY_BATCH_ID" \\\n\s+--approved-batch-confirmation "\$CLOSED_HUMAN_CANARY_CONFIRMATION"/);
 assert.doesNotMatch(closedHumanCanaryRun, /--prepare-only|--automatic|schedule/);
 assert.doesNotMatch(closedHumanCanaryRun, /Production|SUPABASE_PROD_/i);
-assert.doesNotMatch(workflow, /CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC: "1"/);
+const closedHumanActivationRun = workflow.match(
+  /- name: Activate closed-human 30-day Stage automatic retention[\s\S]*?(?=\n\s+- name:|\s*$)/,
+)[0];
+assert.match(closedHumanActivationRun, /github\.event_name == 'workflow_dispatch' && inputs\.mode == 'closed-human-30d-activation'/);
+assert.match(closedHumanActivationRun, /test "\$GITHUB_REPOSITORY" = "krzysztofcal\/arcadePlatform"/);
+assert.match(closedHumanActivationRun, /test "\$GITHUB_REF" = "refs\/heads\/main"/);
+assert.match(closedHumanActivationRun, /test "\$GITHUB_ACTOR" = "\$GITHUB_REPOSITORY_OWNER"/);
+assert.match(closedHumanActivationRun, /closed_human_activation_batch_id/);
+assert.match(closedHumanActivationRun, /closed_human_activation_confirmation/);
+assert.match(closedHumanActivationRun, /test "\$CLOSED_HUMAN_ACTIVATION_BATCH_ID" = "334"/);
+assert.match(closedHumanActivationRun, /ACTIVATE stage-ledger-closed-human-table-retention-30d-v1 CANARY 334/);
+assert.match(closedHumanActivationRun, /--activate/);
+assert.doesNotMatch(closedHumanActivationRun, /github\.event_name == 'schedule'|--execute|--automatic|--prepare-only|--complete-lifecycle|Production|SUPABASE_PROD_/i);
+
+const closedHumanAutomaticRun = workflow.match(
+  /- name: Run activated closed-human 30-day Stage automation[\s\S]*?(?=\n\s+- name:|\s*$)/,
+)[0];
+assert.match(closedHumanAutomaticRun, /github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/);
+assert.match(closedHumanAutomaticRun, /CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC: "1"/);
+assert.match(closedHumanAutomaticRun, /node scripts\/ops\/chips-ledger-stage-automation\.mjs --policy closed-human-table-30d --automatic/);
+assert.doesNotMatch(closedHumanAutomaticRun, /github\.event_name == 'workflow_dispatch'|--approved-batch-id|--execute(?:\s|$)|\bACTIVATE\b|GO 334|Production|SUPABASE_PROD_/i);
+
+const closedHumanAutomaticRunStart = workflow.indexOf("- name: Run activated closed-human 30-day Stage automation");
+const escrowAutomaticRunStart = workflow.indexOf("- name: Run Stage escrow account retention");
+assert.ok(closedHumanAutomaticRunStart >= 0 && closedHumanAutomaticRunStart < escrowAutomaticRunStart);
+assert.doesNotMatch(closedHumanAutomaticRun, /continue-on-error/);
+assert.match(workflow.slice(closedHumanAutomaticRunStart, escrowAutomaticRunStart), /CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC: "1"/);
 
 const lifecycleRun = workflow.match(
   /- name: Complete exact closed-human table lifecycle[\s\S]*?(?=\n\s+- name:|\s*$)/,

@@ -53,11 +53,19 @@ export const STAGE_RETENTION_DAYS = 30;
 // timeout margin.
 export const BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN = 6;
 export const BOT_ONLY_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS = 3;
+export const CLOSED_HUMAN_AUTOMATIC_MAX_BATCHES_PER_RUN = 1;
+export const CLOSED_HUMAN_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS = 3;
 export const STAGE_AUTOMATION_LOCK_KEY = `chips-ledger-stage-automation-v1:${STAGE_PROJECT_REF}`;
 export const CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET = Object.freeze({
   batchId: "334",
   tableId: "ec3f4897-c7bb-4d92-b63d-a38401e9a5c4",
   cutoff: "2026-08-05 16:33:12.024+00",
+});
+export const CLOSED_HUMAN_AUTOMATIC_ACTIVATION = Object.freeze({
+  batchId: CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET.batchId,
+  tableId: CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET.tableId,
+  canaryConfirmation: "GO 334",
+  activationConfirmation: "ACTIVATE stage-ledger-closed-human-table-retention-30d-v1 CANARY 334",
 });
 export const DURABLE_RECOVERY_STATES = Object.freeze({
   COMPLETE: "complete",
@@ -202,7 +210,7 @@ function aggregateBatchPayload(batch, { automatic = false } = {}) {
 }
 
 function aggregateAutomaticBatchPayload(batch) {
-  return {
+  const payload = {
     batch_id: batch.batchId ?? null,
     state: batch.state ?? null,
     object_path: batch.objectPath || null,
@@ -236,6 +244,18 @@ function aggregateAutomaticBatchPayload(batch) {
       ? [...batch.executeSqlstates]
       : [],
   };
+  if (batch.automaticActivation === true
+    || batch.sourcePolicyId === CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID) {
+    Object.assign(payload, {
+      lifecycle_state: batch.lifecycleState || null,
+      lifecycle_before: batch.lifecycleBefore || null,
+      lifecycle_after: batch.lifecycleAfter || null,
+      human_retention_complete_at_before: batch.markerBefore || null,
+      human_retention_complete_at_after: batch.markerAfter || null,
+      lifecycle_write_performed: batch.lifecycleWritePerformed === true,
+    });
+  }
+  return payload;
 }
 
 function aggregateAutomaticSuccessPayload(result) {
@@ -247,6 +267,11 @@ function aggregateAutomaticSuccessPayload(result) {
       activated_at: result.policy.activatedAt ?? result.policy.activated_at ?? null,
     }
     : null;
+  if (policy && result.sourcePolicyId === CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID) {
+    policy.activation_confirmation = result.policy.activationConfirmation
+      ?? result.policy.activation_confirmation
+      ?? null;
+  }
   return {
     event: "chips_ledger_stage_automation",
     target: "stage",
@@ -349,6 +374,28 @@ export function aggregatePayload(result) {
       retry_idempotent: result.retryIdempotent === true,
       prune_executed: false,
       automatic_activation: false,
+      production_touched: false,
+    };
+  }
+  if (result.mode === "closed-human-30d-activation") {
+    return {
+      ...base,
+      mode: result.mode,
+      batch_id: result.batchId || null,
+      table_id: result.tableId || null,
+      object_path: result.objectPath || null,
+      proof: result.proof || null,
+      dry_run: result.dryRun || null,
+      recovery_state: result.recoveryState || null,
+      recovery_archive_sha256: result.recoveryArchiveSha256 || null,
+      recovery_manifest_sha256: result.recoveryManifestSha256 || null,
+      recovery_archive_path: result.recoveryArchivePath || null,
+      recovery_manifest_path: result.recoveryManifestPath || null,
+      canary_confirmation: result.canaryConfirmation || null,
+      activation_confirmation: result.activationConfirmation || null,
+      policy: result.policy || null,
+      write_performed: result.writePerformed === true,
+      automatic_activation: result.automaticActivation === true,
       production_touched: false,
     };
   }
@@ -513,6 +560,55 @@ const CLOSED_HUMAN_POLICY_DIAGNOSTIC_SQL = `select
     updated_at::text as updated_at
   from public.chips_stage_closed_human_table_retention_policy
  where policy_id = $1;`;
+
+const CLOSED_HUMAN_POLICY_AUTOMATIC_STATE_SQL = `select
+    policy_id,
+    enabled,
+    activation_go_at::text as activation_go_at,
+    activation_confirmation,
+    activated_at::text as activated_at,
+    canary_batch_id::text as canary_batch_id,
+    canary_confirmation,
+    created_at::text as created_at,
+    updated_at::text as updated_at
+  from public.chips_stage_closed_human_table_retention_policy
+ where policy_id = $1;`;
+
+export function assertClosedHumanAutomaticPolicy(policy) {
+  if (text(policy?.policy_id) !== CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID) {
+    fail("closed-human automatic Stage policy identity mismatch");
+  }
+  if (!(policy?.enabled === true || policy?.enabled === "t")
+    || !text(policy.activation_go_at)
+    || !text(policy.activated_at)
+    || text(policy.canary_batch_id) !== CLOSED_HUMAN_AUTOMATIC_ACTIVATION.batchId
+    || text(policy.canary_confirmation) !== CLOSED_HUMAN_AUTOMATIC_ACTIVATION.canaryConfirmation
+    || text(policy.activation_confirmation) !== CLOSED_HUMAN_AUTOMATIC_ACTIVATION.activationConfirmation) {
+    fail("closed-human automatic Stage policy is not activated by the exact canary 334");
+  }
+  return policy;
+}
+
+export function isClosedHumanManualOnlyPolicy(policy) {
+  if (text(policy?.policy_id) !== CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID) return false;
+  const canaryUnset = policy.canary_batch_id == null && policy.canary_confirmation == null;
+  const canaryIsExact = text(policy.canary_batch_id) === CLOSED_HUMAN_AUTOMATIC_ACTIVATION.batchId
+    && text(policy.canary_confirmation) === CLOSED_HUMAN_AUTOMATIC_ACTIVATION.canaryConfirmation;
+  return (policy.enabled === false || policy.enabled === "f")
+    && policy.activation_go_at == null
+    && policy.activation_confirmation == null
+    && policy.activated_at == null
+    && (canaryUnset || canaryIsExact);
+}
+
+async function loadClosedHumanPolicyRow(sql) {
+  const rows = await sql.unsafe(
+    CLOSED_HUMAN_POLICY_AUTOMATIC_STATE_SQL,
+    [CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID],
+  );
+  if (rows.length !== 1) fail("closed-human Stage policy row is missing or duplicated");
+  return rows[0];
+}
 
 export async function runClosedHumanPolicyDiagnostic({ env = process.env, deps = {} } = {}) {
   if (text(env.CHIPS_LEDGER_BOT_ONLY_EXECUTE) === "1"
@@ -767,7 +863,7 @@ export function botOnlyReport({ row, identity, dry, durable, state, mode, deploy
   };
 }
 
-function closedHumanReport({ row, identity, dry, durable, state, mode, deployedCommitSha = null }) {
+function closedHumanReport({ row, identity, dry, durable, state, mode, deployedCommitSha = null, automaticActivation = false }) {
   const evidence = dry?.evidence || null;
   const recoveryArchiveSha256 = durable?.recoveryArchive?.sha256 || durable?.archiveSha256 || null;
   const recoveryManifestSha256 = durable?.recoveryManifest?.sha256 || durable?.manifestSha256 || null;
@@ -813,7 +909,7 @@ function closedHumanReport({ row, identity, dry, durable, state, mode, deployedC
     destructiveGoBatchId: row?.destructive_go_batch_id || null,
     destructiveGoAt: row?.destructive_go_at || null,
     humanIdempotencyRegistryPreserved: state === "pruned" || state === "already_pruned" ? true : null,
-    automaticActivation: false,
+    automaticActivation,
   };
 }
 
@@ -888,6 +984,57 @@ function automaticBatchProgress({
     executeConfirmed,
     dbMutationConfirmed,
     retryState,
+    ...automaticDryRunObservability({
+      attempts: dryRunAttempts,
+      retryCount: dryRunRetryCount,
+      sqlstates: dryRunSqlstates,
+    }),
+    ...automaticExecuteObservability({
+      attempts: executeAttempts,
+      retryCount: executeRetryCount,
+      sqlstates: executeSqlstates,
+    }),
+  };
+}
+
+function closedHumanAutomaticProgress({
+  row,
+  identity,
+  dry,
+  durable,
+  state,
+  deployedCommitSha,
+  archiveStorageModified = false,
+  recoveryStorageModified = automaticRecoveryStorageModified(durable),
+  executeState = null,
+  executeConfirmed = false,
+  dbMutationConfirmed = false,
+  retryState = null,
+  dryRunAttempts = 0,
+  dryRunRetryCount = 0,
+  dryRunSqlstates = [],
+  executeAttempts = 0,
+  executeRetryCount = 0,
+  executeSqlstates = [],
+  lifecycleState = null,
+}) {
+  return {
+    ...closedHumanReport({
+      row,
+      identity,
+      dry,
+      durable,
+      state,
+      mode: "automatic",
+      deployedCommitSha,
+      automaticActivation: true,
+    }),
+    ...automaticStorageMutation({ archiveStorageModified, recoveryStorageModified }),
+    executeState,
+    executeConfirmed,
+    dbMutationConfirmed,
+    retryState,
+    lifecycleState,
     ...automaticDryRunObservability({
       attempts: dryRunAttempts,
       retryCount: dryRunRetryCount,
@@ -2763,7 +2910,7 @@ function pruneArgs(row, mode, recoveryDir = null, approvedBatchId = null, automa
   if (mode === "register-proof") args.push("--register-proof");
   if (mode === "execute") args.push("--execute", "--recovery-dir", recoveryDir);
   if (approvedBatchId != null) args.push("--approved-batch-id", String(approvedBatchId));
-  if (automatic) args.push("--automatic");
+  if (automatic && mode === "execute") args.push("--automatic");
   return args;
 }
 
@@ -2901,6 +3048,81 @@ async function runAutomaticDryRunWithRetry({
   fail("automatic bot-only dry-run retry budget was exhausted");
 }
 
+async function runClosedHumanAutomaticDryRunWithRetry({
+  row,
+  identity,
+  env,
+  cwd,
+  sql,
+  lockSession,
+  pruneStore,
+  storageTarget,
+  verifyBucket,
+  storageDeps = {},
+  onProgress = null,
+}) {
+  const dryRunSqlstates = [];
+  let attemptRow = row;
+  for (let attempt = 1; attempt <= CLOSED_HUMAN_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS; attempt += 1) {
+    const observability = automaticDryRunObservability({
+      attempts: attempt,
+      retryCount: attempt - 1,
+      sqlstates: dryRunSqlstates,
+    });
+    try {
+      await assertAdvisoryLock(sql, lockSession);
+      attemptRow = await refreshPolicyRow(
+        pruneStore,
+        row.object_path,
+        CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+      );
+      if (typeof onProgress === "function") onProgress({ row: attemptRow, dry: null, ...observability });
+      const batchId = text(attemptRow.batch_id);
+      assertClosedHumanExecuteBatch(attemptRow, batchId, identity);
+      const dry = await runPruneStep({
+        row: attemptRow,
+        mode: "dry-run",
+        env,
+        cwd,
+        sql,
+        pruneStore,
+        storageTarget,
+        verifyBucket,
+        automatic: true,
+        storageDeps,
+      });
+      await assertAdvisoryLock(sql, lockSession);
+      const verifiedRow = dry?.row || attemptRow;
+      assertClosedHumanExecuteBatch(verifiedRow, batchId, identity);
+      if (dry?.state !== "ready" && dry?.state !== "already_pruned") {
+        fail(`automatic closed-human batch ${batchId} dry-run did not become ready: ${dry?.state}`);
+      }
+      const evidence = assertClosedHumanDryRunEvidence(verifiedRow, dry, batchId);
+      return {
+        row: verifiedRow,
+        dry: { ...dry, evidence },
+        ...observability,
+      };
+    } catch (error) {
+      const sqlstate = sqlStateOf(error);
+      if (sqlstate) dryRunSqlstates.push(sqlstate);
+      const failedObservability = automaticDryRunObservability({
+        attempts: attempt,
+        retryCount: attempt - 1,
+        sqlstates: dryRunSqlstates,
+      });
+      if (typeof onProgress === "function") {
+        onProgress({ row: attemptRow, dry: null, ...failedObservability });
+      }
+      if (!AUTOMATIC_DRY_RUN_RETRYABLE_SQLSTATES.has(sqlstate)
+        || attempt === CLOSED_HUMAN_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS) {
+        throw error;
+      }
+    }
+  }
+  fail("automatic closed-human dry-run retry budget was exhausted");
+}
+
 async function refreshRow(pruneStore, objectPath) {
   return refreshPolicyRow(pruneStore, objectPath, STAGE_AUTOMATION_POLICY_ID);
 }
@@ -2925,7 +3147,7 @@ export async function executeVerifiedCycle({
   assertDurableRecoveryReady(durable);
   const recoveryDir = path.join(tempRoot, "recovery");
   restoreLocalRecovery(recoveryDir, durable);
-  const executeStorageDeps = automatic
+  const executeStorageDeps = automatic && isBotOnlyRetentionBatch(row)
     ? {
       ...storageDeps,
       beforeExecuteRetry: async ({ row: retryRow }) => {
@@ -3911,6 +4133,904 @@ export async function runClosedHumanTableLifecycleCompletion({
   return result;
 }
 
+async function verifyClosedHumanCanaryActivationPrerequisites({
+  identity,
+  env,
+  tempRoot,
+  sql,
+  pruneStore,
+  storageTarget,
+  verifyBucket,
+  storageDeps = {},
+  lockSession,
+  automatic = false,
+} = {}) {
+  const target = CLOSED_HUMAN_AUTOMATIC_ACTIVATION;
+  const exactRow = await loadExactBatch(sql, target.batchId, "closed-human automatic activation canary");
+  const binding = assertClosedHumanExecuteBatch(exactRow, target.batchId, identity);
+  if (!binding.hasExactGo) fail("closed-human automatic activation requires the exact successful canary GO 334");
+  let row = await refreshPolicyRow(
+    pruneStore,
+    exactRow.object_path,
+    CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  );
+  assertClosedHumanExecuteBatch(row, target.batchId, identity);
+  assertClosedHumanActiveManifestMatch(exactRow, row, target.batchId);
+  await assertAdvisoryLock(sql, lockSession);
+  await verifyBucket(storageTarget);
+  const dry = await runPruneStep({
+    row,
+    mode: "dry-run",
+    env,
+    cwd: tempRoot,
+    sql,
+    pruneStore,
+    storageTarget,
+    verifyBucket,
+    automatic,
+    storageDeps,
+  });
+  if (dry.state !== "already_pruned") {
+    fail(`closed-human automatic activation canary did not revalidate as already_pruned: ${dry.state}`);
+  }
+  const evidence = assertClosedHumanDryRunEvidence(row, dry, target.batchId);
+  if (text(evidence.closedHumanTableId).toLowerCase() !== target.tableId.toLowerCase()) {
+    fail("closed-human automatic activation canary table binding is not exact");
+  }
+  await assertAdvisoryLock(sql, lockSession);
+  row = await refreshPolicyRow(
+    pruneStore,
+    exactRow.object_path,
+    CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  );
+  assertClosedHumanExecuteBatch(row, target.batchId, identity);
+  assertClosedHumanActiveManifestMatch(exactRow, row, target.batchId);
+  const inspectRecovery = storageDeps.inspectDurableRecovery || inspectDurableRecovery;
+  const durable = await inspectRecovery(storageTarget, row, storageDeps);
+  assertResumeRecoveryState(row, durable);
+  assertDurableRecoveryForEvidence({
+    row,
+    identity,
+    evidence,
+    durable,
+    target: { target: "stage" },
+  });
+  assertRecoveryManifestMatches(
+    durable.manifest,
+    buildRecoveryManifest(row, identity, evidence, { target: "stage" }),
+  );
+  const marker = await readExactHumanRetentionMarker(sql, target.tableId);
+  if (!marker.human_retention_complete_at) {
+    fail("closed-human automatic activation canary lifecycle marker is missing");
+  }
+  if (typeof pruneStore.assertClosedHumanLifecycle !== "function") {
+    fail("closed-human automatic activation lifecycle verifier is unavailable");
+  }
+  await pruneStore.assertClosedHumanLifecycle.call(pruneStore, target.tableId, row.cutoff, target.batchId);
+  return { row, dry: { ...dry, evidence }, durable, marker, evidence };
+}
+
+async function completeClosedHumanAutomaticLifecycle({
+  sql,
+  row,
+  identity,
+  evidence,
+  deps,
+  lockSession,
+} = {}) {
+  const batchId = text(row?.batch_id);
+  const binding = assertClosedHumanExecuteBatch(row, batchId, identity);
+  if (binding.receiptCount !== 5) {
+    fail(`automatic closed-human batch ${batchId} cannot complete lifecycle before a complete prune receipt`);
+  }
+  const complete = deps.completeClosedHumanLifecycle || completeClosedHumanLifecycleInTransaction;
+  const lifecycle = await complete({
+    sql,
+    batchId,
+    tableId: evidence.closedHumanTableId,
+    cutoff: row.cutoff,
+    activeRow: row,
+    identity,
+  });
+  await assertAdvisoryLock(sql, lockSession);
+  if (!lifecycle?.markerAfter) fail(`automatic closed-human batch ${batchId} lifecycle marker was not persisted`);
+  return lifecycle;
+}
+
+function closedHumanAutomaticBatchReport({
+  row,
+  identity,
+  dry,
+  durable,
+  executed,
+  lifecycle,
+  deployedCommitSha,
+  archiveStorageModified = false,
+  recoveryStorageModified = automaticRecoveryStorageModified(durable),
+  dryRunAttempts = 0,
+  dryRunRetryCount = 0,
+  dryRunSqlstates = [],
+  executeAttempts = 0,
+  executeRetryCount = 0,
+  executeSqlstates = [],
+} = {}) {
+  const state = executed?.state || "already_pruned";
+  return {
+    ...closedHumanAutomaticProgress({
+      row,
+      identity,
+      dry,
+      durable,
+      state,
+      deployedCommitSha,
+      archiveStorageModified,
+      recoveryStorageModified,
+      executeState: state,
+      executeConfirmed: state === "pruned",
+      dbMutationConfirmed: state === "pruned",
+      dryRunAttempts,
+      dryRunRetryCount,
+      dryRunSqlstates,
+      executeAttempts,
+      executeRetryCount,
+      executeSqlstates,
+      lifecycleState: lifecycle?.completion?.state || "human_retention_complete",
+    }),
+    lifecycleBefore: "passed",
+    lifecycleAfter: "passed",
+    markerBefore: lifecycle?.markerBefore ?? null,
+    markerAfter: lifecycle?.markerAfter ?? null,
+    lifecycleState: lifecycle?.completion?.state || null,
+    lifecycleWritePerformed: lifecycle?.markerBefore == null,
+    lifecycleRetryIdempotent: lifecycle?.markerBefore != null,
+  };
+}
+
+async function verifyClosedHumanCompletedAutomaticCycle({
+  row,
+  identity,
+  env,
+  tempRoot,
+  sql,
+  lockSession,
+  pruneStore,
+  storageTarget,
+  verifyBucket,
+  storageDeps = {},
+} = {}) {
+  const exactRow = await refreshPolicyRow(
+    pruneStore,
+    row.object_path,
+    CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  );
+  const binding = assertClosedHumanExecuteBatch(exactRow, text(exactRow.batch_id), identity);
+  if (binding.receiptCount !== 5) fail("closed-human completed cycle does not have a complete prune receipt");
+  const dryRun = await runClosedHumanAutomaticDryRunWithRetry({
+    row: exactRow,
+    identity,
+    env,
+    cwd: tempRoot,
+    sql,
+    lockSession,
+    pruneStore,
+    storageTarget,
+    verifyBucket,
+    storageDeps,
+  });
+  if (dryRun.dry.state !== "already_pruned") {
+    fail(`closed-human completed cycle did not revalidate as already_pruned: ${dryRun.dry.state}`);
+  }
+  const inspectRecovery = storageDeps.inspectDurableRecovery || inspectDurableRecovery;
+  const durable = await inspectRecovery(storageTarget, dryRun.row, storageDeps);
+  assertResumeRecoveryState(dryRun.row, durable);
+  assertDurableRecoveryForEvidence({
+    row: dryRun.row,
+    identity,
+    evidence: dryRun.dry.evidence,
+    durable,
+    target: { target: "stage" },
+  });
+  const marker = await readExactHumanRetentionMarker(sql, dryRun.dry.evidence.closedHumanTableId);
+  return { row: dryRun.row, dry: dryRun.dry, durable, marker, dryRun };
+}
+
+async function processClosedHumanAutomaticCycle({
+  row,
+  identity,
+  env,
+  now,
+  tempRoot,
+  sql,
+  lockSession,
+  pruneStore,
+  storageTarget,
+  verifyBucket,
+  storageDeps = {},
+  deps,
+  deployedCommitSha,
+  archiveStorageModified = false,
+} = {}) {
+  const inspectRecovery = storageDeps.inspectDurableRecovery || inspectDurableRecovery;
+  const persistRecovery = storageDeps.persistDurableRecovery || persistDurableRecovery;
+  const executeCycle = storageDeps.executeVerifiedCycle || executeVerifiedCycle;
+  let currentRow = await refreshPolicyRow(
+    pruneStore,
+    row.object_path,
+    CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  );
+  const proofWasPresentBeforeResume = Boolean(currentRow.archive_proof_verified_at);
+  if (proofWasPresentBeforeResume) {
+    assertClosedHumanExecuteBatch(currentRow, text(currentRow.batch_id), identity);
+  } else {
+    assertStageRetentionRecoveryBatch(currentRow, text(currentRow.batch_id), {
+      sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+    });
+  }
+  if (!proofWasPresentBeforeResume) {
+    const recoveryBeforeProof = await inspectRecovery(storageTarget, currentRow, storageDeps);
+    if (recoveryBeforeProof === undefined) {
+      fail(`automatic closed-human batch ${currentRow.batch_id} recovery absence was not confirmed by Storage`);
+    }
+    if (recoveryBeforeProof !== null) assertResumeRecoveryState(currentRow, recoveryBeforeProof);
+    await runPruneStep({
+      row: currentRow,
+      mode: "register-proof",
+      env,
+      cwd: tempRoot,
+      sql,
+      pruneStore,
+      storageTarget,
+      verifyBucket,
+      storageDeps,
+    });
+    await assertAdvisoryLock(sql, lockSession);
+    currentRow = await refreshPolicyRow(
+      pruneStore,
+      currentRow.object_path,
+      CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+    );
+  }
+
+  const dryRunResult = await runClosedHumanAutomaticDryRunWithRetry({
+    row: currentRow,
+    identity,
+    env,
+    cwd: tempRoot,
+    sql,
+    lockSession,
+    pruneStore,
+    storageTarget,
+    verifyBucket,
+    storageDeps,
+  });
+  currentRow = dryRunResult.row;
+  const dry = dryRunResult.dry;
+  if (dry.state === "already_pruned") {
+    const durable = await inspectRecovery(storageTarget, currentRow, storageDeps);
+    assertResumeRecoveryState(currentRow, durable);
+    assertDurableRecoveryForEvidence({
+      row: currentRow,
+      identity,
+      evidence: dry.evidence,
+      durable,
+      target: { target: "stage" },
+    });
+    const lifecycle = await completeClosedHumanAutomaticLifecycle({
+      sql,
+      row: currentRow,
+      identity,
+      evidence: dry.evidence,
+      deps,
+      lockSession,
+    });
+    return {
+      row: lifecycle.exactRow || currentRow,
+      dry,
+      durable,
+      executed: { state: "already_pruned", evidence: dry.evidence },
+      lifecycle,
+      dryRunAttempts: dryRunResult.dryRunAttempts,
+      dryRunRetryCount: dryRunResult.dryRunRetryCount,
+      dryRunSqlstates: dryRunResult.dryRunSqlstates,
+      executeAttempts: 0,
+      executeRetryCount: 0,
+      executeSqlstates: [],
+      archiveStorageModified,
+      recoveryStorageModified: automaticRecoveryStorageModified(durable),
+    };
+  }
+  if (dry.state !== "ready") fail(`automatic closed-human Stage dry-run did not become ready: ${dry.state}`);
+
+  let durable = await inspectRecovery(storageTarget, currentRow, storageDeps);
+  if (durable === undefined) {
+    fail(`automatic closed-human batch ${currentRow.batch_id} recovery state was not confirmed by Storage`);
+  }
+  if (proofWasPresentBeforeResume && durable === null) {
+    fail(`automatic closed-human batch ${currentRow.batch_id} has immutable proof but no durable recovery`);
+  }
+  if (!proofWasPresentBeforeResume && durable !== null) {
+    fail(`automatic closed-human batch ${currentRow.batch_id} recovery appeared without an immutable proof`);
+  }
+  if (durable === null) {
+    const mainArchive = await (storageDeps.downloadPrivateArchive || downloadPrivateArchiveObject)(
+      storageTarget,
+      currentRow.object_path,
+      storageDeps,
+    );
+    assertStageRetentionMainArchive(currentRow, mainArchive, dry, text(currentRow.batch_id));
+    durable = await persistRecovery(
+      storageTarget,
+      currentRow,
+      identity,
+      dry.evidence,
+      mainArchive.bytes,
+      storageDeps,
+    );
+  }
+  assertDurableRecoveryForEvidence({
+    row: currentRow,
+    identity,
+    evidence: dry.evidence,
+    durable,
+    target: { target: "stage" },
+  });
+
+  let executeProgress = automaticExecuteObservability();
+  const executeStorageDeps = {
+    ...storageDeps,
+    beforeExecuteRetry: async ({ row: retryRow }) => {
+      await assertAdvisoryLock(sql, lockSession);
+      const refreshedRow = await refreshPolicyRow(
+        pruneStore,
+        retryRow?.object_path || currentRow.object_path,
+        CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+      );
+      const retryDryRun = await runClosedHumanAutomaticDryRunWithRetry({
+        row: refreshedRow,
+        identity,
+        env,
+        cwd: tempRoot,
+        sql,
+        lockSession,
+        pruneStore,
+        storageTarget,
+        verifyBucket,
+        storageDeps,
+      });
+      const retryDurable = await inspectRecovery(storageTarget, retryDryRun.row, storageDeps);
+      assertResumeRecoveryState(retryDryRun.row, retryDurable);
+      assertDurableRecoveryForEvidence({
+        row: retryDryRun.row,
+        identity,
+        evidence: retryDryRun.dry.evidence,
+        durable: retryDurable,
+        target: { target: "stage" },
+      });
+      if (!Buffer.isBuffer(retryDurable.archiveBytes)
+        || !retryDurable.archiveBytes.equals(durable.archiveBytes)) {
+        fail(`automatic closed-human batch ${retryDryRun.row.batch_id} recovery archive changed between execute attempts`);
+      }
+      if (retryDryRun.dry.state === "already_pruned") {
+        return {
+          state: "already_pruned",
+          row: retryDryRun.row,
+          evidence: retryDryRun.dry.evidence,
+          durable: retryDurable,
+        };
+      }
+      if (retryDryRun.dry.state !== "ready") {
+        fail(`automatic closed-human retry preflight did not become ready: ${retryDryRun.dry.state}`);
+      }
+      return {
+        row: retryDryRun.row,
+        evidence: retryDryRun.dry.evidence,
+        durable: retryDurable,
+      };
+    },
+    onExecuteProgress: (progress = {}) => {
+      executeProgress = automaticExecuteObservability({
+        attempts: progress.executeAttempts,
+        retryCount: progress.executeRetryCount,
+        sqlstates: progress.executeSqlstates,
+      });
+      if (typeof deps.onExecuteProgress === "function") deps.onExecuteProgress(progress);
+    },
+  };
+  await assertAdvisoryLock(sql, lockSession);
+  const executed = await executeCycle({
+    row: currentRow,
+    identity,
+    durable,
+    env,
+    tempRoot,
+    sql,
+    pruneStore,
+    storageTarget,
+    automatic: true,
+    verifyBucket,
+    storageDeps: executeStorageDeps,
+    lockSession,
+    onExecuteProgress: executeStorageDeps.onExecuteProgress,
+    waitForExecuteRetry: deps.waitForExecuteRetry || null,
+  });
+  await assertAdvisoryLock(sql, lockSession);
+  currentRow = await refreshPolicyRow(
+    pruneStore,
+    currentRow.object_path,
+    CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  );
+  assertClosedHumanExecuteBatch(currentRow, text(currentRow.batch_id), identity);
+  if (receiptFieldCount(currentRow) !== 5) {
+    fail(`automatic closed-human batch ${currentRow.batch_id} did not produce a complete prune receipt`);
+  }
+  const executeEvidence = executed.evidence || dry.evidence;
+  const lifecycle = await completeClosedHumanAutomaticLifecycle({
+    sql,
+    row: currentRow,
+    identity,
+    evidence: executeEvidence,
+    deps,
+    lockSession,
+  });
+  return {
+    row: lifecycle.exactRow || currentRow,
+    dry,
+    durable,
+    executed: { ...executed, evidence: executeEvidence },
+    lifecycle,
+    dryRunAttempts: dryRunResult.dryRunAttempts,
+    dryRunRetryCount: dryRunResult.dryRunRetryCount,
+    dryRunSqlstates: dryRunResult.dryRunSqlstates,
+    executeAttempts: executed.executeAttempts ?? executeProgress.executeAttempts,
+    executeRetryCount: executed.executeRetryCount ?? executeProgress.executeRetryCount,
+    executeSqlstates: executed.executeSqlstates ?? executeProgress.executeSqlstates,
+    archiveStorageModified,
+    recoveryStorageModified: automaticRecoveryStorageModified(durable),
+  };
+}
+
+export async function runClosedHumanTableRetentionActivation({
+  env = process.env,
+  deps = {},
+  canaryBatchId = null,
+  activationConfirmation = null,
+} = {}) {
+  assertCanonicalManualLifecycleOperator(env);
+  if (String(canaryBatchId) !== CLOSED_HUMAN_AUTOMATIC_ACTIVATION.batchId
+    || text(activationConfirmation) !== CLOSED_HUMAN_AUTOMATIC_ACTIVATION.activationConfirmation) {
+    fail("closed-human automatic activation requires the exact canary 334 confirmation");
+  }
+  let sql = null;
+  let lockSession = null;
+  let tempRoot = null;
+  let ownsSql = false;
+  let deployedCommitSha = null;
+  let result = null;
+  let failed = false;
+  let failure = null;
+  try {
+    const config = validateStageEnvironment(env, { requireCommitSha: true });
+    deployedCommitSha = config.deployedCommitSha;
+    const moduleEnv = config.moduleEnv;
+    sql = deps.sql || postgres(config.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 0 });
+    ownsSql = !deps.sql;
+    tempRoot = deps.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-closed-human-activation-"));
+    ensurePrivateDirectory(tempRoot);
+    const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
+    const pruneStore = deps.pruneStore || createPruneStore(sql);
+    const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
+    lockSession = await acquireAdvisoryLock(sql);
+    if (!lockSession) fail("closed-human automatic activation requires the Stage advisory lock");
+    const identity = await assertIdentity(sql);
+    await assertAdvisoryLock(sql, lockSession);
+    await verifyBucket(storageTarget);
+    const policyBefore = await loadClosedHumanPolicyRow(sql);
+    if (policyBefore.enabled === true || policyBefore.enabled === "t") {
+      assertClosedHumanAutomaticPolicy(policyBefore);
+    } else if (policyBefore.activation_go_at || policyBefore.activation_confirmation || policyBefore.activated_at) {
+      fail("closed-human automatic policy is neither manual-only nor validly active");
+    }
+    const preflightEnv = policyBefore.enabled === true || policyBefore.enabled === "t"
+      ? { ...moduleEnv, CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC: "1" }
+      : moduleEnv;
+    const prerequisites = await verifyClosedHumanCanaryActivationPrerequisites({
+      identity,
+      env: preflightEnv,
+      tempRoot,
+      sql,
+      pruneStore,
+      storageTarget,
+      verifyBucket,
+      storageDeps: deps,
+      lockSession,
+      automatic: policyBefore.enabled === true || policyBefore.enabled === "t",
+    });
+    const activate = pruneStore.activateClosedHumanPolicy;
+    if (typeof activate !== "function") fail("closed-human automatic activation adapter is unavailable");
+    await assertAdvisoryLock(sql, lockSession);
+    const activation = await activate.call(
+      pruneStore,
+      CLOSED_HUMAN_AUTOMATIC_ACTIVATION.batchId,
+      activationConfirmation,
+    );
+    await assertAdvisoryLock(sql, lockSession);
+    const policyAfter = await loadClosedHumanPolicyRow(sql);
+    assertClosedHumanAutomaticPolicy(policyAfter);
+    result = {
+      state: text(activation?.state) === "already_active" ? "already_active" : "active",
+      mode: "closed-human-30d-activation",
+      sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+      projectRef: STAGE_PROJECT_REF,
+      stageSystemIdentifier: identity,
+      batchId: CLOSED_HUMAN_AUTOMATIC_ACTIVATION.batchId,
+      tableId: CLOSED_HUMAN_AUTOMATIC_ACTIVATION.tableId,
+      objectPath: prerequisites.row.object_path,
+      proof: "verified",
+      dryRun: prerequisites.dry.state,
+      recoveryState: "complete",
+      recoveryArchiveSha256: prerequisites.durable.archiveSha256,
+      recoveryManifestSha256: prerequisites.durable.manifestSha256,
+      recoveryArchivePath: prerequisites.durable.archivePath,
+      recoveryManifestPath: prerequisites.durable.manifestPath,
+      canaryConfirmation: CLOSED_HUMAN_AUTOMATIC_ACTIVATION.canaryConfirmation,
+      activationConfirmation,
+      policy: policyAfter,
+      writePerformed: text(activation?.state) !== "already_active",
+      automaticActivation: true,
+    };
+  } catch (error) {
+    failed = true;
+    failure = error;
+  } finally {
+    if (lockSession && sql) {
+      try { await releaseAdvisoryLock(sql); } catch { /* owned session close releases it */ }
+    }
+    if (sql && ownsSql) {
+      try { await sql.end({ timeout: 5 }); } catch (error) {
+        if (!failed) { failed = true; failure = error; }
+      }
+    }
+  }
+  if (failed) {
+    emitAggregateError(failure, { deployedCommitSha, mode: "closed-human-30d-activation" });
+    throw failure;
+  }
+  if (result && deployedCommitSha) result = { ...result, deployedCommitSha };
+  writeAggregateSummary(result);
+  return result;
+}
+
+export async function runAutomaticClosedHumanStageAutomation({
+  env = process.env,
+  now = new Date(),
+  deps = {},
+} = {}) {
+  if (text(env.CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC) !== "1") {
+    fail("automatic closed-human retention requires the explicit default-off scheduler gate");
+  }
+  if (text(env.CHIPS_LEDGER_CLOSED_HUMAN_EXECUTE) === "1"
+    || text(env.CHIPS_LEDGER_BOT_ONLY_EXECUTE) === "1"
+    || text(env.CHIPS_LEDGER_BOT_ONLY_AUTOMATIC) === "1") {
+    fail("automatic closed-human retention cannot share a manual or bot-only execution gate");
+  }
+  if (text(env.GITHUB_EVENT_NAME) && text(env.GITHUB_EVENT_NAME) !== "schedule") {
+    fail("automatic closed-human retention is schedule-only");
+  }
+  if (text(env.GITHUB_REPOSITORY) && text(env.GITHUB_REPOSITORY) !== "krzysztofcal/arcadePlatform") {
+    fail("automatic closed-human retention requires the canonical repository");
+  }
+  if (text(env.GITHUB_REF) && text(env.GITHUB_REF) !== "refs/heads/main") {
+    fail("automatic closed-human retention requires the canonical main branch");
+  }
+
+  let sql = null;
+  let lockSession = null;
+  let tempRoot = null;
+  let ownsSql = false;
+  let result = null;
+  let deployedCommitSha = null;
+  let failed = false;
+  let failure = null;
+  let currentBatch = null;
+  const processed = [];
+  const automaticErrorContext = {
+    sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+    mode: "automatic",
+    phase: "automatic.preflight",
+    batchId: null,
+    objectPath: null,
+  };
+  const markAutomaticPhase = (phase, row = null) => {
+    automaticErrorContext.phase = phase;
+    automaticErrorContext.batchId = row?.batch_id ?? null;
+    automaticErrorContext.objectPath = row?.object_path ?? null;
+  };
+  try {
+    const config = validateStageEnvironment(env, { requireCommitSha: true });
+    deployedCommitSha = config.deployedCommitSha;
+    const moduleEnv = {
+      ...config.moduleEnv,
+      CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC: "1",
+      CHIPS_LEDGER_CLOSED_HUMAN_EXECUTE: "1",
+    };
+    sql = deps.sql || postgres(config.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 0 });
+    ownsSql = !deps.sql;
+    tempRoot = deps.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-closed-human-automatic-"));
+    ensurePrivateDirectory(tempRoot);
+    const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
+    const pruneStore = deps.pruneStore || createPruneStore(sql);
+    const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
+    const inspectRecovery = deps.inspectDurableRecovery || inspectDurableRecovery;
+    markAutomaticPhase("automatic.lock");
+    lockSession = await acquireAdvisoryLock(sql);
+    if (!lockSession) {
+      result = {
+        state: "no-op",
+        mode: "automatic",
+        sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+        boundedBatchLimit: CLOSED_HUMAN_AUTOMATIC_MAX_BATCHES_PER_RUN,
+        processed: [],
+        stopReason: "advisory_lock_busy",
+      };
+    } else {
+      const identity = await assertIdentity(sql);
+      await assertAdvisoryLock(sql, lockSession);
+      markAutomaticPhase("automatic.fence");
+      await assertAutomaticStageFence(sql, "automatic closed-human Stage retention");
+      markAutomaticPhase("automatic.policy");
+      const policyRow = await loadClosedHumanPolicyRow(sql);
+      if (isClosedHumanManualOnlyPolicy(policyRow)) {
+        result = {
+          state: "no-op",
+          mode: "automatic",
+          sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+          projectRef: STAGE_PROJECT_REF,
+          stageSystemIdentifier: identity,
+          policy: {
+            enabled: false,
+            canaryBatchId: policyRow.canary_batch_id,
+            activatedAt: null,
+            activationConfirmation: null,
+          },
+          boundedBatchLimit: CLOSED_HUMAN_AUTOMATIC_MAX_BATCHES_PER_RUN,
+          processed: [],
+          stopReason: "closed_human_policy_manual_only",
+        };
+      } else {
+        assertClosedHumanAutomaticPolicy(policyRow);
+        markAutomaticPhase("automatic.storage-preflight");
+        await verifyBucket(storageTarget);
+        const canary = await verifyClosedHumanCanaryActivationPrerequisites({
+          identity,
+          env: moduleEnv,
+          tempRoot,
+          sql,
+          pruneStore,
+          storageTarget,
+          verifyBucket,
+          storageDeps: deps,
+          lockSession,
+          automatic: true,
+        });
+        await assertAdvisoryLock(sql, lockSession);
+
+      const ownRows = await loadOwnBatches(sql, CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID);
+      const ownCycle = findOwnCycle(ownRows, CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID);
+      let stopReason = null;
+      if (ownCycle.active) {
+        markAutomaticPhase("automatic.resume", ownCycle.active);
+        currentBatch = closedHumanAutomaticProgress({
+          row: ownCycle.active,
+          identity,
+          dry: null,
+          durable: null,
+          state: "in_progress",
+          deployedCommitSha,
+        });
+        const cycle = await processClosedHumanAutomaticCycle({
+          row: ownCycle.active,
+          identity,
+          env: moduleEnv,
+          now,
+          tempRoot,
+          sql,
+          lockSession,
+          pruneStore,
+          storageTarget,
+          verifyBucket,
+          storageDeps: deps,
+          deps,
+          deployedCommitSha,
+        });
+        processed.push(closedHumanAutomaticBatchReport({
+          row: cycle.row,
+          identity,
+          dry: cycle.dry,
+          durable: cycle.durable,
+          executed: cycle.executed,
+          lifecycle: cycle.lifecycle,
+          deployedCommitSha,
+          archiveStorageModified: cycle.archiveStorageModified,
+          recoveryStorageModified: cycle.recoveryStorageModified,
+          dryRunAttempts: cycle.dryRunAttempts,
+          dryRunRetryCount: cycle.dryRunRetryCount,
+          dryRunSqlstates: cycle.dryRunSqlstates,
+          executeAttempts: cycle.executeAttempts,
+          executeRetryCount: cycle.executeRetryCount,
+          executeSqlstates: cycle.executeSqlstates,
+        }));
+        stopReason = "processed_one_closed_human_table";
+      } else if (ownCycle.latestCompleted) {
+        markAutomaticPhase("automatic.completed-recovery", ownCycle.latestCompleted);
+        const completed = await verifyClosedHumanCompletedAutomaticCycle({
+          row: ownCycle.latestCompleted,
+          identity,
+          env: moduleEnv,
+          tempRoot,
+          sql,
+          lockSession,
+          pruneStore,
+          storageTarget,
+          verifyBucket,
+          storageDeps: deps,
+        });
+        if (!completed.marker.human_retention_complete_at) {
+          const lifecycle = await completeClosedHumanAutomaticLifecycle({
+            sql,
+            row: completed.row,
+            identity,
+            evidence: completed.dry.evidence,
+            deps,
+            lockSession,
+          });
+          processed.push(closedHumanAutomaticBatchReport({
+            row: lifecycle.exactRow || completed.row,
+            identity,
+            dry: completed.dry,
+            durable: completed.durable,
+            executed: { state: "already_pruned", evidence: completed.dry.evidence },
+            lifecycle,
+            deployedCommitSha,
+            dryRunAttempts: completed.dryRun.dryRunAttempts,
+            dryRunRetryCount: completed.dryRun.dryRunRetryCount,
+            dryRunSqlstates: completed.dryRun.dryRunSqlstates,
+          }));
+          stopReason = "completed_pending_human_lifecycle";
+        }
+      }
+
+      if (stopReason === null) {
+        markAutomaticPhase("automatic.export");
+        const artifactPath = path.join(tempRoot, "closed-human-automatic.archive.jsonl.gz");
+        const manifestPath = path.join(tempRoot, "closed-human-automatic.archive.manifest.json");
+        const exported = await (deps.exportArchive || runExport)({
+          argv: [
+            "--target", "stage",
+            "--cutoff-days", String(STAGE_RETENTION_DAYS),
+            "--batch-size", String(STAGE_MAX_BATCH_SIZE),
+            "--output", artifactPath,
+            "--manifest", manifestPath,
+          ],
+          env: moduleEnv,
+          cwd: tempRoot,
+          now,
+          deps: {
+            sql,
+            selector: "closed-human-table-30d",
+            schemaVersion: EXPORT_SCHEMA_VERSION,
+            sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+            targetOptions: { singleTarget: true },
+            noCandidateIfEmpty: true,
+            emit: false,
+          },
+        });
+        await assertAdvisoryLock(sql, lockSession);
+        if (exported.noCandidate) {
+          stopReason = "no_eligible_closed_human_table";
+        } else {
+          markAutomaticPhase("automatic.storage");
+          await (deps.ensureArchiveBucket || ensureArchiveBucket)(storageTarget, deps);
+          await assertAdvisoryLock(sql, lockSession);
+          const stored = await (deps.storeArchive || storeArchive)({
+            argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
+            env: moduleEnv,
+            cwd: tempRoot,
+            deps: { ...deps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
+          });
+          const archiveStorageModified = stored.object?.uploaded === true;
+          const candidateRow = await refreshPolicyRow(
+            pruneStore,
+            stored.objectPath,
+            CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+          );
+          markAutomaticPhase("automatic.manifest", candidateRow);
+          currentBatch = closedHumanAutomaticProgress({
+            row: candidateRow,
+            identity,
+            dry: null,
+            durable: null,
+            state: "in_progress",
+            deployedCommitSha,
+            archiveStorageModified,
+            recoveryStorageModified: false,
+          });
+          const cycle = await processClosedHumanAutomaticCycle({
+            row: candidateRow,
+            identity,
+            env: moduleEnv,
+            now,
+            tempRoot,
+            sql,
+            lockSession,
+            pruneStore,
+            storageTarget,
+            verifyBucket,
+            storageDeps: deps,
+            deps,
+            deployedCommitSha,
+            archiveStorageModified,
+          });
+          processed.push(closedHumanAutomaticBatchReport({
+            row: cycle.row,
+            identity,
+            dry: cycle.dry,
+            durable: cycle.durable,
+            executed: cycle.executed,
+            lifecycle: cycle.lifecycle,
+            deployedCommitSha,
+            archiveStorageModified: cycle.archiveStorageModified,
+            recoveryStorageModified: cycle.recoveryStorageModified,
+            dryRunAttempts: cycle.dryRunAttempts,
+            dryRunRetryCount: cycle.dryRunRetryCount,
+            dryRunSqlstates: cycle.dryRunSqlstates,
+            executeAttempts: cycle.executeAttempts,
+            executeRetryCount: cycle.executeRetryCount,
+            executeSqlstates: cycle.executeSqlstates,
+          }));
+          stopReason = "processed_one_closed_human_table";
+        }
+      }
+      result = {
+        state: "completed",
+        mode: "automatic",
+        sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+        projectRef: STAGE_PROJECT_REF,
+        stageSystemIdentifier: identity,
+        policy: {
+          enabled: true,
+          canaryBatchId: policyRow.canary_batch_id,
+          activatedAt: policyRow.activated_at,
+          activationConfirmation: policyRow.activation_confirmation,
+        },
+        canaryBatchId: canary.row.batch_id,
+        boundedBatchLimit: CLOSED_HUMAN_AUTOMATIC_MAX_BATCHES_PER_RUN,
+        processed,
+        stopReason: stopReason || "processed_one_closed_human_table",
+      };
+      }
+    }
+  } catch (error) {
+    failed = true;
+    failure = error;
+  } finally {
+    if (lockSession && sql) {
+      try { await releaseAdvisoryLock(sql); } catch { /* owned session close releases it */ }
+    }
+    if (sql && ownsSql) {
+      try { await sql.end({ timeout: 5 }); } catch (error) {
+        if (!failed) { failed = true; failure = error; }
+      }
+    }
+  }
+  if (failed) {
+    emitAggregateError(failure, { deployedCommitSha, ...automaticErrorContext, processed, currentBatch });
+    throw failure;
+  }
+  if (result && deployedCommitSha) result = { ...result, deployedCommitSha };
+  writeAggregateSummary(result);
+  return result;
+}
+
 // Issue #890 uses the same Stage runner, Storage bucket, proof store, prune
 // store, recovery copies, and advisory lock.  Its default is deliberately
 // prepare-only: no call reaches the destructive DB operator unless the caller
@@ -4261,7 +5381,7 @@ async function verifyAutomaticCompletedBatch({
   };
 }
 
-async function assertAutomaticStageFence(sql) {
+async function assertAutomaticStageFence(sql, label = "automatic bot-only Stage retention") {
   const activeRows = await sql.unsafe("select public.chips_table_fence_is_active() as active;");
   const controlRows = await sql.unsafe(
     "select enforcement_active from public.chips_table_fence_control where control_id is true;",
@@ -4269,7 +5389,12 @@ async function assertAutomaticStageFence(sql) {
   const active = activeRows[0]?.active === true || activeRows[0]?.active === "t";
   const enforcement = controlRows.length === 1
     && (controlRows[0]?.enforcement_active === true || controlRows[0]?.enforcement_active === "t");
-  if (!active || !enforcement) fail("automatic bot-only Stage retention requires an active fence and enforcement");
+  if (!active || !enforcement) {
+    if (label === "automatic bot-only Stage retention") {
+      fail("automatic bot-only Stage retention requires an active fence and enforcement");
+    }
+    fail(`${label} requires an active fence and enforcement`);
+  }
 }
 
 export async function runAutomaticBotOnlyStageAutomation({
@@ -5107,6 +6232,32 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     });
   } else if (argv[0] === "--policy"
     && argv[1] === "closed-human-table-30d"
+    && argv[2] === "--activate") {
+    let canaryBatchId = null;
+    let activationConfirmation = null;
+    for (let index = 3; index < argv.length; index += 1) {
+      const option = argv[index];
+      const value = argv[index + 1];
+      if (!value || value.startsWith("--")) throw new Error(option + " requires one value");
+      if (option === "--canary-batch-id") {
+        if (canaryBatchId !== null) throw new Error("--canary-batch-id was supplied more than once");
+        canaryBatchId = value;
+      } else if (option === "--activation-confirmation") {
+        if (activationConfirmation !== null) throw new Error("--activation-confirmation was supplied more than once");
+        activationConfirmation = value;
+      } else {
+        throw new Error("unknown Stage closed-human activation option: " + option);
+      }
+      index += 1;
+    }
+    if (argv.length !== 7 || canaryBatchId === null || activationConfirmation === null) {
+      throw new Error("closed-human activation requires --canary-batch-id and --activation-confirmation");
+    }
+    runClosedHumanTableRetentionActivation({ canaryBatchId, activationConfirmation }).catch(() => {
+      process.exitCode = 1;
+    });
+  } else if (argv[0] === "--policy"
+    && argv[1] === "closed-human-table-30d"
     && argv[2] === "--complete-lifecycle") {
     let batchId = null;
     let tableId = null;
@@ -5137,22 +6288,28 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     });
   } else if (argv[0] === "--policy" && argv[1] === "closed-human-table-30d") {
     let executeRequested = false;
+    let automaticRequested = false;
     let approvedBatchId = null;
     let approvedBatchConfirmation = null;
     for (let index = 2; index < argv.length; index += 1) {
       if (argv[index] === "--execute") {
-        if (executeRequested) throw new Error("--execute was supplied more than once");
+        if (executeRequested || automaticRequested) throw new Error("--execute and --automatic are mutually exclusive or duplicated");
         executeRequested = true;
+      } else if (argv[index] === "--automatic") {
+        if (automaticRequested || executeRequested || approvedBatchId !== null || approvedBatchConfirmation !== null) {
+          throw new Error("--automatic is a standalone automatic execution mode");
+        }
+        automaticRequested = true;
       } else if (argv[index] === "--approved-batch-id") {
         const value = argv[index + 1];
-        if (!value || value.startsWith("--") || approvedBatchId !== null) {
+        if (!value || value.startsWith("--") || approvedBatchId !== null || automaticRequested) {
           throw new Error("--approved-batch-id requires one value");
         }
         approvedBatchId = value;
         index += 1;
       } else if (argv[index] === "--approved-batch-confirmation") {
         const value = argv[index + 1];
-        if (!value || value.startsWith("--") || approvedBatchConfirmation !== null) {
+        if (!value || value.startsWith("--") || approvedBatchConfirmation !== null || automaticRequested) {
           throw new Error("--approved-batch-confirmation requires one value");
         }
         approvedBatchConfirmation = value;
@@ -5161,6 +6318,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         throw new Error(`unknown Stage closed-human option: ${argv[index]}`);
       }
     }
+    if (automaticRequested) {
+      if (argv.length !== 3) throw new Error("closed-human automatic mode does not accept additional inputs");
+      runAutomaticClosedHumanStageAutomation().catch(() => {
+        process.exitCode = 1;
+      });
+    } else {
     if (!executeRequested || approvedBatchId === null || approvedBatchConfirmation === null) {
       throw new Error("closed-human canary requires --execute, --approved-batch-id and --approved-batch-confirmation");
     }
@@ -5170,8 +6333,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     }).catch(() => {
       process.exitCode = 1;
     });
+    }
   } else {
-    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-automation.mjs [--policy stage-ledger-auto-retention-30d-v1|stage-ledger-closed-human-table-retention-30d-v1 [--diagnose-recovery [--batch-id <id>]|--repair-recovery --batch-id <id>]|--policy stage-ledger-closed-human-table-retention-30d-v1 --diagnose-policy|--policy bot-only-7d [--prepare-only|--repair-recovery --batch-id 15|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>'|--automatic]|--policy closed-human-table-30d [--prepare-only|--complete-lifecycle --batch-id <id> --table-id <uuid> --cutoff <timestamp>|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>']]]\n");
+    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-automation.mjs [--policy stage-ledger-auto-retention-30d-v1|stage-ledger-closed-human-table-retention-30d-v1 [--diagnose-recovery [--batch-id <id>]|--repair-recovery --batch-id <id>]|--policy stage-ledger-closed-human-table-retention-30d-v1 --diagnose-policy|--policy bot-only-7d [--prepare-only|--repair-recovery --batch-id 15|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>'|--automatic]|--policy closed-human-table-30d [--prepare-only|--activate --canary-batch-id 334 --activation-confirmation 'ACTIVATE stage-ledger-closed-human-table-retention-30d-v1 CANARY 334'|--complete-lifecycle --batch-id <id> --table-id <uuid> --cutoff <timestamp>|--automatic|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>']]]\n");
     process.exitCode = 1;
   }
 }

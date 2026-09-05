@@ -42,7 +42,14 @@ test("manual escrow retention modes are audit/verify only with retained recovery
   assert.match(workflow, /github\.event\.repository\.fork != true/);
   assert.match(workflow, /github\.actor == github\.repository_owner/);
   assert.doesNotMatch(workflow, /CHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_(AUTHORIZE_CANARY|EXECUTE|ACTIVATE): "1"/);
-  assert.doesNotMatch(workflow, /--authorize-canary|--activate|--account-ids-sha256/);
+  assert.doesNotMatch(workflow, /--authorize-canary|--account-ids-sha256/);
+  for (const escrowStep of [
+    "Audit Stage escrow account retention",
+    "Verify Stage escrow account-retention recovery",
+  ]) {
+    const step = workflow.match(new RegExp(`- name: ${escrowStep}[\\s\\S]*?(?=\\n\\s+- name:|\\s*$)`))?.[0] || "";
+    assert.doesNotMatch(step, /--activate/);
+  }
   assert.match(workflow, /chips-ledger-stage-escrow-account-recovery\.mjs[\s\S]*?--object-path/);
   assert.match(workflow, /VERIFY \$ESCROW_RETENTION_RECOVERY_OBJECT_PATH/);
   assert.doesNotMatch(workflow, /ACTIVATE.*stage-ledger-escrow-account-retention-v1/);
