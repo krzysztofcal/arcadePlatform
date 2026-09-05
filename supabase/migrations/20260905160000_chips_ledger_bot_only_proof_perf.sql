@@ -287,7 +287,7 @@ begin
   )
   select
     (
-      select count(distinct unknown.identity_key)::bigint
+      select count(distinct unknown.idempotency_key)::bigint
         from unknown_registry_identity_evidence unknown
        where unknown.table_id = p_table_id::text
     ),
