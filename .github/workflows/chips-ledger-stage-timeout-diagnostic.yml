@@ -2,6 +2,11 @@ name: Chips Ledger Stage Timeout Diagnostic
 
 on:
   workflow_dispatch:
+    inputs:
+      bot_only_batch_id:
+        description: Exact bot-only batch for read-only proof EXPLAIN (currently pinned to 481)
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -44,4 +49,12 @@ jobs:
       - name: Run read-only Stage timeout diagnostic
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
-        run: node scripts/ops/chips-ledger-stage-timeout-diagnostic.mjs
+          BOT_ONLY_DIAGNOSTIC_BATCH_ID: ${{ inputs.bot_only_batch_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "${BOT_ONLY_DIAGNOSTIC_BATCH_ID:-}" ]; then
+            args+=(--batch-id "$BOT_ONLY_DIAGNOSTIC_BATCH_ID")
+          fi
+          node scripts/ops/chips-ledger-stage-timeout-diagnostic.mjs "${args[@]}"

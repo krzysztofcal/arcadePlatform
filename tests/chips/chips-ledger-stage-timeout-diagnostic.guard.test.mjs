@@ -16,8 +16,26 @@ assert.match(diagnostic, /diagnoseTableIdentitySummary/);
 assert.match(diagnostic, /statement_timeout_ms: REPLAY_STATEMENT_TIMEOUT_MS/);
 assert.doesNotMatch(diagnostic, /boundedProbe|DIAGNOSTIC_PROBE_TIMEOUT_MS/);
 assert.match(diagnostic, /candidate_result_limit: STAGE_MAX_BATCH_SIZE/);
+assert.match(diagnostic, /EXACT_BOT_ONLY_DIAGNOSTIC_BATCH_ID = "481"/);
+assert.match(diagnostic, /--batch-id 481/);
+assert.match(diagnostic, /BOT_ONLY_PROOF_TARGET_TRANSACTIONS_EXPLAIN_SQL/);
+assert.match(diagnostic, /BOT_ONLY_PROOF_UNKNOWN_REGISTRY_EXPLAIN_SQL/);
+assert.match(diagnostic, /BOT_ONLY_PROOF_REGISTRY_KEY_COMPLETENESS_EXPLAIN_SQL/);
+assert.match(diagnostic, /assertExactBotOnlyDiagnosticBatch/);
+assert.match(diagnostic, /downloadPrivateArchiveObject/);
+assert.match(diagnostic, /buildPruneEvidence/);
+assert.match(diagnostic, /proof_helper_definition/);
+assert.match(diagnostic, /explain_analyze: false/);
+assert.match(diagnostic, /plan_sha256: sqlSha256\(JSON\.stringify\(plan\)\)/);
+assert.match(diagnostic, /access_path: planAccessSummary\(plan\)/);
+assert.match(diagnostic, /startup_cost: root\["Startup Cost"\]/);
+assert.match(diagnostic, /total_cost: root\["Total Cost"\]/);
+assert.match(diagnostic, /estimated_rows: root\["Plan Rows"\]/);
+assert.doesNotMatch(diagnostic, /plan: rows\[0\]/);
 assert.match(diagnostic, /output_contains_sql_parameters: false/);
 assert.match(diagnostic, /output_contains_rows: false/);
+assert.match(diagnostic, /output_contains_transaction_ids: false/);
+assert.match(diagnostic, /output_contains_registry_keys: false/);
 assert.match(diagnostic, /storage_access: false/);
 assert.doesNotMatch(diagnostic, /\b(?:insert|update|delete|truncate|alter|drop)\s+(?:into\s+)?public\./i);
 
@@ -28,6 +46,10 @@ assert.match(workflow, /SUPABASE_STAGE_URL: \$\{\{ secrets\.SUPABASE_STAGE_URL \
 assert.match(workflow, /SUPABASE_STAGE_SERVICE_ROLE_KEY: \$\{\{ secrets\.SUPABASE_STAGE_SERVICE_ROLE_KEY \}\}/);
 assert.match(workflow, /DEPLOYED_COMMIT_SHA: \$\{\{ steps\.checkout-sha\.outputs\.sha \}\}/);
 assert.match(workflow, /node scripts\/ops\/chips-ledger-stage-timeout-diagnostic\.mjs/);
+assert.match(workflow, /bot_only_batch_id:/);
+assert.match(workflow, /BOT_ONLY_DIAGNOSTIC_BATCH_ID: \$\{\{ inputs\.bot_only_batch_id \}\}/);
+assert.match(workflow, /args=\(\)/);
+assert.match(workflow, /args\+=\(--batch-id/);
 assert.doesNotMatch(workflow, /--execute|CHIPS_LEDGER_BOT_ONLY_EXECUTE|SUPABASE_PROD_/);
 
 process.stdout.write("chips-ledger-stage-timeout-diagnostic guard passed\n");
