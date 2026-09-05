@@ -55,8 +55,8 @@ const LEGACY_STAGE_ALLOWLIST_FREEZE_RUN_ID = "32771521144";
 const LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN = "32753223679";
 const LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256 = "aa82076e7e4d7fd1e027889be94868e5662652cc29ae2dc7b55a4196b260ed0e";
 const REPLACEMENT_VERIFICATION_MAX_GETS = 2;
-export const STORAGE_GET_MAX_ATTEMPTS = 3;
-export const STORAGE_GET_RETRY_BACKOFF_MS = Object.freeze([50, 100]);
+export const STORAGE_GET_MAX_ATTEMPTS = 4;
+export const STORAGE_GET_RETRY_BACKOFF_MS = Object.freeze([250, 1000, 2500]);
 const TRANSIENT_STORAGE_NETWORK_ERROR_CODES = new Set([
   "ECONNABORTED",
   "ECONNREFUSED",
@@ -698,6 +698,10 @@ async function waitForStorageGetRetry(deps, attempt) {
   await sleep(delay);
 }
 
+function isRetryableStorageGetStatus(status) {
+  return status === 429 || (status >= 500 && status <= 599);
+}
+
 async function storageRequest(storageTarget, requestPath, options = {}, deps = {}) {
   const fetchImpl = deps.fetch || fetch;
   const method = String(options.method || "GET").toUpperCase();
@@ -713,10 +717,7 @@ async function storageRequest(storageTarget, requestPath, options = {}, deps = {
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       const response = await fetchImpl(`${storageTarget.baseUrl}${requestPath}`, request);
-      if (method !== "GET"
-        || response.status < 500
-        || response.status > 599
-        || attempt === maxAttempts) {
+      if (method !== "GET" || !isRetryableStorageGetStatus(response.status) || attempt === maxAttempts) {
         return response;
       }
     } catch (error) {

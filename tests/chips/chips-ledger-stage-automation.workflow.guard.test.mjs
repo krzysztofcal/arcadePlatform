@@ -183,6 +183,13 @@ assert.match(stageJobIf, /github\.repository == 'krzysztofcal\/arcadePlatform'/)
 assert.match(stageJobIf, /github\.event\.repository\.fork != true/);
 assert.match(stageJobIf, /github\.actor == github\.repository_owner/);
 
+assert.match(preflightStep, /for \(let attempt = 1; attempt <= 3; attempt \+= 1\)/);
+assert.match(preflightStep, /RETRYABLE_CONNECTION_CODES/);
+assert.match(preflightStep, /CONNECT_TIMEOUT/);
+assert.match(preflightStep, /CONNECT_RETRY_BACKOFF_MS/);
+assert.match(preflightStep, /set transaction read only/);
+assert.doesNotMatch(preflightStep, /set transaction read write|insert\s|update\s|delete\s/i);
+
 const existingRun = workflow.match(
   /- name: Run existing 30-day Stage automation[\s\S]*?(?=\n\s+- name:|\s*$)/,
 )[0];
@@ -194,6 +201,8 @@ assert.doesNotMatch(existingRun, /--policy|--prepare-only|--execute|--automatic/
 const botOnlyAutomaticRun = workflow.match(
   /- name: Run activated bot-only 7-day Stage automation[\s\S]*?(?=\n\s+- name:|\s*$)/,
 )[0];
+assert.match(botOnlyAutomaticRun, /id: bot_only_automatic/);
+assert.match(botOnlyAutomaticRun, /continue-on-error: \$\{\{ github\.event_name == 'schedule'/);
 assert.match(botOnlyAutomaticRun, /github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/);
 assert.match(botOnlyAutomaticRun, /inputs\.mode == 'bot-only-7d-automatic'/);
 assert.match(botOnlyAutomaticRun, /inputs\.mode == 'external-scheduled-automatic'/);
@@ -203,11 +212,13 @@ assert.match(botOnlyAutomaticRun, /node scripts\/ops\/chips-ledger-stage-automat
 const escrowAutomaticRun = workflow.match(
   /- name: Run Stage escrow account retention[\s\S]*?(?=\n\s+- name:|\s*$)/,
 )[0];
+assert.match(escrowAutomaticRun, /id: escrow_automatic/);
+assert.match(escrowAutomaticRun, /continue-on-error: \$\{\{ github\.event_name == 'schedule'/);
 assert.match(escrowAutomaticRun, /github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/);
 assert.match(escrowAutomaticRun, /inputs\.mode == 'external-scheduled-automatic'/);
 assert.match(escrowAutomaticRun, /node scripts\/ops\/chips-ledger-stage-escrow-retention\.mjs --automatic/);
 
-assert.equal((workflow.match(/github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/g) || []).length, 3);
+assert.equal((workflow.match(/github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/g) || []).length, 4);
 
 const diagnosticRun = workflow.match(
   /- name: Diagnose existing 30-day durable recovery[\s\S]*?(?=\n\s+- name:|\s*$)/,
@@ -298,6 +309,8 @@ assert.doesNotMatch(closedHumanActivationRun, /github\.event_name == 'schedule'|
 const closedHumanAutomaticRun = workflow.match(
   /- name: Run activated closed-human 30-day Stage automation[\s\S]*?(?=\n\s+- name:|\s*$)/,
 )[0];
+assert.match(closedHumanAutomaticRun, /id: closed_human_automatic/);
+assert.match(closedHumanAutomaticRun, /continue-on-error: \$\{\{ github\.event_name == 'schedule'/);
 assert.match(closedHumanAutomaticRun, /github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/);
 assert.match(closedHumanAutomaticRun, /CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC: "1"/);
 assert.match(closedHumanAutomaticRun, /node scripts\/ops\/chips-ledger-stage-automation\.mjs --policy closed-human-table-30d --automatic/);
@@ -306,8 +319,17 @@ assert.doesNotMatch(closedHumanAutomaticRun, /github\.event_name == 'workflow_di
 const closedHumanAutomaticRunStart = workflow.indexOf("- name: Run activated closed-human 30-day Stage automation");
 const escrowAutomaticRunStart = workflow.indexOf("- name: Run Stage escrow account retention");
 assert.ok(closedHumanAutomaticRunStart >= 0 && closedHumanAutomaticRunStart < escrowAutomaticRunStart);
-assert.doesNotMatch(closedHumanAutomaticRun, /continue-on-error/);
 assert.match(workflow.slice(closedHumanAutomaticRunStart, escrowAutomaticRunStart), /CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC: "1"/);
+
+const independentFailureAggregator = workflow.match(
+  /- name: Fail scheduled retention run after independent path failures[\s\S]*?(?=\n\s+- name:|\s*$)/,
+)[0];
+assert.match(independentFailureAggregator, /always\(\)/);
+assert.match(independentFailureAggregator, /steps\.bot_only_automatic\.outcome/);
+assert.match(independentFailureAggregator, /steps\.closed_human_automatic\.outcome/);
+assert.match(independentFailureAggregator, /steps\.escrow_automatic\.outcome/);
+assert.match(independentFailureAggregator, /exit 1/);
+assert.doesNotMatch(independentFailureAggregator, /--execute|--automatic|prune|Production|SUPABASE_PROD_/i);
 
 const lifecycleRun = workflow.match(
   /- name: Complete exact closed-human table lifecycle[\s\S]*?(?=\n\s+- name:|\s*$)/,
