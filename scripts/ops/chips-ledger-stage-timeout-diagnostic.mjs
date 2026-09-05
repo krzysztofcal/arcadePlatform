@@ -394,15 +394,10 @@ async function readIdentityAndFence(sql) {
 async function explain(sql, queryName, query, parameters) {
   const startedAt = process.hrtime.bigint();
   try {
-    const rows = await readOnlyTransaction(sql, async (tx) => {
-      if (queryName === "proof.target_transactions") {
-        await tx.unsafe("set local enable_seqscan = 'off';");
-      }
-      return tx.unsafe(
-        `explain (format json, verbose true, costs true, settings true) ${query}`,
-        parameters,
-      );
-    });
+    const rows = await readOnlyTransaction(sql, (tx) => tx.unsafe(
+      `explain (format json, verbose true, costs true, settings true) ${query}`,
+      parameters,
+    ));
     const plan = rows[0]?.["QUERY PLAN"] || rows[0]?.["query plan"] || null;
     return {
       query_name: queryName,
@@ -411,7 +406,6 @@ async function explain(sql, queryName, query, parameters) {
       sqlstate: "00000",
       read_only: true,
       explain_analyze: false,
-      planner_setting: queryName === "proof.target_transactions" ? "enable_seqscan=off" : null,
       plan_sha256: sqlSha256(JSON.stringify(plan)),
       access_path: planAccessSummary(plan),
     };
@@ -423,7 +417,6 @@ async function explain(sql, queryName, query, parameters) {
       sqlstate: sqlState(error),
       read_only: true,
       explain_analyze: false,
-      planner_setting: queryName === "proof.target_transactions" ? "enable_seqscan=off" : null,
       plan_sha256: null,
       access_path: null,
       error_class: "explain_failed",
