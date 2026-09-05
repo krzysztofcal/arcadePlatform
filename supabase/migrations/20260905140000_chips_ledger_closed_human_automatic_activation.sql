@@ -82,6 +82,7 @@ for each row execute function public.chips_guard_closed_human_retention_policy()
 -- It accepts the active policy only when this transaction carries the private
 -- automatic latch; manual/canary calls retain their manual-only contract.
 grant chips_ledger_archive_pruner to postgres;
+grant create on schema public to chips_ledger_archive_pruner;
 set role chips_ledger_archive_pruner;
 do $patch$
 declare
@@ -156,6 +157,7 @@ begin
 end;
 $patch$;
 reset role;
+revoke create on schema public from chips_ledger_archive_pruner;
 revoke chips_ledger_archive_pruner from postgres;
 
 create or replace function public.chips_closed_human_retention_automatic_active()
