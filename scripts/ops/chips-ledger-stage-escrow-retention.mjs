@@ -668,13 +668,6 @@ export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAG
     const tables = tableIds.length ? (await read(RETENTION_TABLES_SQL, [tableIds], "escrow_retention_tables", "table_binding")).map(normalizeRow) : [];
     const entries = accountsIds.length ? await read(RETENTION_ENTRY_COUNTS_SQL, [accountsIds], "escrow_retention_entry_counts", "entry_dependency") : [];
     const snapshots = accountsIds.length ? await read(RETENTION_SNAPSHOT_COUNTS_SQL, [accountsIds], "escrow_retention_snapshot_counts", "snapshot_dependency") : [];
-    const registryTableRows = tableIds.length
-      ? await read(RETENTION_REGISTRY_TABLE_COUNTS_SQL, [tableIds], "escrow_retention_registry_table_counts", "registry_dependency")
-      : [];
-    const registryBatchRows = batchIds.length
-      ? await read(RETENTION_REGISTRY_BATCH_COUNTS_SQL, [batchIds, tableIds], "escrow_retention_registry_batch_counts", "registry_dependency")
-      : [];
-    const registry = [...registryTableRows, ...registryBatchRows];
     const unknownFks = await read(RETENTION_UNKNOWN_FK_SQL, [], "escrow_retention_unknown_foreign_keys", "catalog_guard");
     const unknownDeleteTriggers = await read(RETENTION_UNKNOWN_DELETE_TRIGGER_SQL, [], "escrow_retention_unknown_delete_triggers", "catalog_guard");
     const identity = text(identityRows[0]?.system_identifier);
@@ -694,6 +687,22 @@ export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAG
         batchMatchesByTable.set(tableId, list);
       }
     }
+    // Existing tables and ambiguous archive bindings are classified before the
+    // registry guard. Read registry evidence only for missing, exactly bound tables.
+    const registryTableIds = [...new Set(accountRows.map((account) => accountTableIdFromSystemKey(account.system_key))
+      .filter((id) => id && !tableById.has(id) && batchMatchesByTable.get(id)?.length === 1))].sort();
+    const registryBatchIds = [...new Set(registryTableIds.map((id) => text(batchMatchesByTable.get(id)[0].row.batch_id)))].sort();
+    if (telemetry !== false) klog("chips_ledger_stage_escrow_registry_scope", {
+      registry_table_count: registryTableIds.length,
+      registry_batch_count: registryBatchIds.length,
+    });
+    const registryTableRows = registryTableIds.length
+      ? await read(RETENTION_REGISTRY_TABLE_COUNTS_SQL, [registryTableIds], "escrow_retention_registry_table_counts", "registry_dependency")
+      : [];
+    const registryBatchRows = registryBatchIds.length
+      ? await read(RETENTION_REGISTRY_BATCH_COUNTS_SQL, [registryBatchIds, registryTableIds], "escrow_retention_registry_batch_counts", "registry_dependency")
+      : [];
+    const registry = [...registryTableRows, ...registryBatchRows];
     const accounts = [];
     const candidatesByBatch = new Map();
     const alreadyRetired = [];

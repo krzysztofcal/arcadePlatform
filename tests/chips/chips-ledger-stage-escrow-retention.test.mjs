@@ -65,7 +65,7 @@ function uuidIdsSha256(ids) {
   return crypto.createHash("sha256").update(`${ids.join("\n")}\n`, "utf8").digest("hex");
 }
 
-function reservedAuditSession({ failOn = null, policyEnabled = false, batchRows = [], accountRows = [] } = {}) {
+function reservedAuditSession({ failOn = null, policyEnabled = false, batchRows = [], accountRows = [], tableRows = [], registryRows = [] } = {}) {
   const queries = [];
   let transactionOpen = false;
   let released = false;
@@ -102,6 +102,8 @@ function reservedAuditSession({ failOn = null, policyEnabled = false, batchRows 
       }
       if (query.includes("from public.chips_ledger_archive_batches batches")) return batchRows;
       if (query.includes("from public.chips_accounts accounts")) return accountRows;
+      if (query.includes("from public.poker_tables")) return tableRows;
+      if (query === RETENTION_REGISTRY_TABLE_COUNTS_SQL) return registryRows;
       return [];
     },
     release: async () => { released = true; },
@@ -735,6 +737,31 @@ test("audit reports the first deterministically sorted bounded next candidate an
     process.stdout.write = originalStdoutWrite;
   }
   assert.deepEqual(JSON.parse(stdout.trim()).next_candidate, expected);
+});
+
+test("registry scope excludes existing tables and preserves the missing-table residual guard", async () => {
+  const openId = "00000000-0000-4000-8000-000000000002";
+  const closedId = "00000000-0000-4000-8000-000000000003";
+  for (const missing of [false, true]) {
+    const session = reservedAuditSession({
+      batchRows: [completeBatch(), completeBatch({ batch_id: "102", bot_only_table_id: openId }), completeBatch({ batch_id: "103", bot_only_table_id: closedId })],
+      accountRows: [account(ACCOUNT_ID_2, openId), account("00000000-0000-4000-8000-000000000103", closedId), ...(missing ? [account()] : [])],
+      tableRows: [{ id: openId, status: "OPEN" }, { id: closedId, status: "CLOSED" }],
+      registryRows: [{ table_id: TABLE_ID, archive_batch_id: "101", count: "2" }],
+    });
+    const result = await readOnlyEscrowAudit({ sql: session, telemetry: false });
+    const tableQueries = session.queries.filter(({ query }) => query === RETENTION_REGISTRY_TABLE_COUNTS_SQL);
+    const batchQueries = session.queries.filter(({ query }) => query === RETENTION_REGISTRY_BATCH_COUNTS_SQL);
+    assert.equal(tableQueries.length, missing ? 1 : 0);
+    assert.equal(batchQueries.length, missing ? 1 : 0);
+    if (missing) {
+      assert.deepEqual(tableQueries[0].parameters, [[TABLE_ID]]);
+      assert.deepEqual(batchQueries[0].parameters, [["101"], [TABLE_ID]]);
+      const residual = result.accounts.find((row) => row.tableId === TABLE_ID);
+      assert.equal(residual.reason, "residual_idempotency_mapping");
+      assert.equal(residual.registryCount, 2);
+    }
+  }
 });
 
 test("audit reports null next_candidate for an empty backlog", async () => {

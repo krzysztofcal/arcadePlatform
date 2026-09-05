@@ -11,6 +11,7 @@ import {
   stringifyJson,
 } from "../../scripts/ops/chips-ledger-archive-export.mjs";
 import {
+  acquireInitialAutomaticLock,
   assertBotOnlyActiveManifestMatch,
   assertBotOnlyExecuteBatch,
   assertClosedHumanAutomaticPolicy,
@@ -2629,5 +2630,40 @@ await assert.rejects(
   /no durable recovery/,
 );
 assert.equal(noRecoveryCalls.length, 0);
+
+for (const scenario of ["transient", "busy", "exhausted", "sql-timeout"]) {
+  const sessions = [];
+  const delays = [];
+  const acquire = () => acquireInitialAutomaticLock(() => {
+    const index = sessions.length;
+    const session = {
+      closed: false,
+      unsafe: async (query) => {
+        assert.match(query, /pg_try_advisory_lock/);
+        if (scenario === "exhausted" || (scenario === "transient" && index === 0)) {
+          throw Object.assign(new Error("connect timeout"), { code: "CONNECT_TIMEOUT" });
+        }
+        if (scenario === "sql-timeout") throw Object.assign(new Error("statement timeout"), { code: "57014" });
+        return [{ backend_pid: "42", acquired: scenario !== "busy" }];
+      },
+      end: async () => { session.closed = true; },
+    };
+    assert.ok(sessions.every((previous) => previous.closed), "failed session must close before a fresh attempt");
+    sessions.push(session);
+    return session;
+  }, async (ms) => { delays.push(ms); });
+  if (scenario === "exhausted" || scenario === "sql-timeout") {
+    await assert.rejects(acquire, { code: scenario === "exhausted" ? "CONNECT_TIMEOUT" : "57014" });
+    assert.equal(sessions.length, scenario === "exhausted" ? 3 : 1);
+    assert.ok(sessions.every((session) => session.closed));
+  } else {
+    const result = await acquire();
+    assert.equal(result.sql, sessions.at(-1));
+    assert.deepEqual(result.lockSession, scenario === "busy" ? null : { backendPid: "42" });
+    assert.equal(sessions.length, scenario === "busy" ? 1 : 2);
+    assert.equal(result.sql.closed, false);
+  }
+  assert.deepEqual(delays, scenario === "exhausted" ? [250, 1000] : scenario === "transient" ? [250] : []);
+}
 
 process.stdout.write("chips-ledger-stage-automation tests passed\n");
