@@ -81,6 +81,8 @@ for each row execute function public.chips_guard_closed_human_retention_policy()
 -- The historical closed-human wrapper remains the only prune implementation.
 -- It accepts the active policy only when this transaction carries the private
 -- automatic latch; manual/canary calls retain their manual-only contract.
+grant chips_ledger_archive_pruner to postgres;
+set role chips_ledger_archive_pruner;
 do $patch$
 declare
   definition text;
@@ -153,6 +155,8 @@ begin
   execute patched;
 end;
 $patch$;
+reset role;
+revoke chips_ledger_archive_pruner from postgres;
 
 create or replace function public.chips_closed_human_retention_automatic_active()
 returns boolean
