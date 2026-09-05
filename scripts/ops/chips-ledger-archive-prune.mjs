@@ -901,10 +901,10 @@ export function createPruneStore(sql) {
     async registerBotOnlyProof(row, evidence) {
       return sql.begin(async (tx) => {
         await tx.unsafe("set transaction isolation level repeatable read;");
-        // The lifecycle proof performs global identity joins over the
-        // materialized hot-ledger/registry evidence.  Keep the Stage proof
-        // plan on the same hash-join path as the bounded selector; this is a
-        // transaction-local planner hint and does not alter proof semantics.
+        // The forward-only proof patch scopes lifecycle evidence to the exact
+        // batch/table IDs. Keep this secondary transaction-local planner hint
+        // for the remaining exact evidence predicates; it does not alter
+        // proof semantics or replace the SQL scope fix.
         await tx.unsafe("set local enable_nestloop = off;");
         const rows = await tx.unsafe(`select public.chips_register_bot_only_archive_proof(
           $1, $2::uuid[], $3::bigint[], $4::uuid, $5::text[]

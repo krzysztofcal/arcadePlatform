@@ -38,6 +38,9 @@ import {
   limitRetirementCandidates,
   parseRetentionArgs,
   readOnlyEscrowAudit,
+  registryCountFor,
+  RETENTION_REGISTRY_BATCH_COUNTS_SQL,
+  RETENTION_REGISTRY_TABLE_COUNTS_SQL,
   reportSummary,
   retirementReceiptState,
   runWithRetirementRetry,
@@ -168,6 +171,25 @@ test("normal bot-only batch is classified as a safe candidate", () => {
   assert.equal(result.category, "SAFE_BOT_ONLY_CANDIDATE");
   assert.equal(archiveBatchEvidenceState(completeBatch()).complete, true);
   assert.equal(archiveBatchEvidenceState(completeBatch({ registry_cleaned_keys_sha256: "0".repeat(64) })).complete, false);
+});
+
+test("escrow registry queries merge table and batch matches without double counting", () => {
+  assert.doesNotMatch(RETENTION_REGISTRY_TABLE_COUNTS_SQL, /\bor\s+archive_batch_id\s*=\s*any/i);
+  assert.doesNotMatch(RETENTION_REGISTRY_BATCH_COUNTS_SQL, /\bor\s+table_id\s*=\s*any/i);
+  const rows = [
+    { idempotency_key: "shared", table_id: TABLE_ID, archive_batch_id: "101", count: "1" },
+    { idempotency_key: "table-only", table_id: TABLE_ID, archive_batch_id: null, count: "1" },
+    { idempotency_key: "batch-only", table_id: null, archive_batch_id: "101", count: "1" },
+  ];
+  assert.equal(registryCountFor(rows, TABLE_ID, "101"), 3);
+  const matchingBatchCount = [{ batch_id: "101", table_id: TABLE_ID }]
+    .filter((row) => row.table_id === TABLE_ID && row.batch_id === "101").length;
+  assert.equal(matchingBatchCount, 1, "a duplicate registry match must not change the exact batch match count");
+  assert.equal(classifyEscrowAccount(account(), {
+    batch: completeBatch(),
+    matchingBatchCount,
+    registryCount: 0,
+  }).category, "SAFE_BOT_ONLY_CANDIDATE");
 });
 
 test("complete escrow retirement receipt still reports retired", () => {

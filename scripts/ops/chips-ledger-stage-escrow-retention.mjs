@@ -472,12 +472,21 @@ from public.chips_account_snapshot
 where account_id = any($1::uuid[])
 group by account_id;`;
 
-export const RETENTION_REGISTRY_COUNTS_SQL = `
-select table_id::text as table_id, archive_batch_id::text as archive_batch_id, count(*)::text as count
+export const RETENTION_REGISTRY_TABLE_COUNTS_SQL = `
+select idempotency_key::text as idempotency_key,
+       table_id::text as table_id,
+       archive_batch_id::text as archive_batch_id,
+       1::bigint as count
 from public.chips_transaction_idempotency
-where table_id = any($1::uuid[])
-   or archive_batch_id = any($2::bigint[])
-group by table_id, archive_batch_id;`;
+where table_id = any($1::uuid[]);`;
+
+export const RETENTION_REGISTRY_BATCH_COUNTS_SQL = `
+select idempotency_key::text as idempotency_key,
+       table_id::text as table_id,
+       archive_batch_id::text as archive_batch_id,
+       1::bigint as count
+from public.chips_transaction_idempotency
+where archive_batch_id = any($1::bigint[]);`;
 
 export const RETENTION_UNKNOWN_FK_SQL = `
 select
@@ -540,11 +549,18 @@ function mapCountBy(rows) {
   return result;
 }
 
-function registryCountFor(rows, tableId, batchId) {
+export function registryCountFor(rows, tableId, batchId) {
+  const seen = new Set();
   return (rows || []).reduce((total, row) => {
     const sameTable = tableId && text(row.table_id).toLowerCase() === text(tableId).toLowerCase();
     const sameBatch = batchId != null && text(row.archive_batch_id) === text(batchId);
-    return sameTable || sameBatch ? total + Number(row.count || 0) : total;
+    if (!sameTable && !sameBatch) return total;
+    const identity = row.idempotency_key != null
+      ? `key:${text(row.idempotency_key)}`
+      : `group:${text(row.table_id).toLowerCase()}:${text(row.archive_batch_id)}`;
+    if (seen.has(identity)) return total;
+    seen.add(identity);
+    return total + Number(row.count == null ? 1 : row.count);
   }, 0);
 }
 
@@ -651,9 +667,13 @@ export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAG
     const tables = tableIds.length ? (await read(RETENTION_TABLES_SQL, [tableIds], "escrow_retention_tables", "table_binding")).map(normalizeRow) : [];
     const entries = accountsIds.length ? await read(RETENTION_ENTRY_COUNTS_SQL, [accountsIds], "escrow_retention_entry_counts", "entry_dependency") : [];
     const snapshots = accountsIds.length ? await read(RETENTION_SNAPSHOT_COUNTS_SQL, [accountsIds], "escrow_retention_snapshot_counts", "snapshot_dependency") : [];
-    const registry = tableIds.length || batchIds.length
-      ? await read(RETENTION_REGISTRY_COUNTS_SQL, [tableIds, batchIds], "escrow_retention_registry_counts", "registry_dependency")
+    const registryTableRows = tableIds.length
+      ? await read(RETENTION_REGISTRY_TABLE_COUNTS_SQL, [tableIds], "escrow_retention_registry_table_counts", "registry_dependency")
       : [];
+    const registryBatchRows = batchIds.length
+      ? await read(RETENTION_REGISTRY_BATCH_COUNTS_SQL, [batchIds], "escrow_retention_registry_batch_counts", "registry_dependency")
+      : [];
+    const registry = [...registryTableRows, ...registryBatchRows];
     const unknownFks = await read(RETENTION_UNKNOWN_FK_SQL, [], "escrow_retention_unknown_foreign_keys", "catalog_guard");
     const unknownDeleteTriggers = await read(RETENTION_UNKNOWN_DELETE_TRIGGER_SQL, [], "escrow_retention_unknown_delete_triggers", "catalog_guard");
     const identity = text(identityRows[0]?.system_identifier);
