@@ -15,6 +15,7 @@ import {
   runExport,
   STAGE_AUTOMATION_POLICY_ID,
   stringifyJson,
+  timestampToMicros,
 } from "./chips-ledger-archive-export.mjs";
 import {
   ARCHIVE_MAX_BYTES,
@@ -53,6 +54,11 @@ export const STAGE_RETENTION_DAYS = 30;
 export const BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN = 6;
 export const BOT_ONLY_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS = 3;
 export const STAGE_AUTOMATION_LOCK_KEY = `chips-ledger-stage-automation-v1:${STAGE_PROJECT_REF}`;
+export const CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET = Object.freeze({
+  batchId: "334",
+  tableId: "ec3f4897-c7bb-4d92-b63d-a38401e9a5c4",
+  cutoff: "2026-08-05 16:33:12.024+00",
+});
 export const DURABLE_RECOVERY_STATES = Object.freeze({
   COMPLETE: "complete",
   BOTH_MISSING: "both_missing",
@@ -316,6 +322,34 @@ export function aggregatePayload(result) {
       read_only: result.readOnly === true,
       writes: false,
       storage_access: false,
+    };
+  }
+  if (result.mode === "closed-human-30d-lifecycle-completion") {
+    return {
+      ...base,
+      mode: result.mode,
+      batch_id: result.batchId || null,
+      table_id: result.tableId || null,
+      cutoff: result.cutoff || null,
+      object_path: result.objectPath || null,
+      proof: result.proof || null,
+      prune_receipt: result.pruneReceipt || null,
+      dry_run: result.dryRun || null,
+      lifecycle_before: result.lifecycleBefore || null,
+      lifecycle_after: result.lifecycleAfter || null,
+      recovery_state: result.recoveryState || null,
+      recovery_archive_sha256: result.recoveryArchiveSha256 || null,
+      recovery_manifest_sha256: result.recoveryManifestSha256 || null,
+      recovery_archive_path: result.recoveryArchivePath || null,
+      recovery_manifest_path: result.recoveryManifestPath || null,
+      human_retention_complete_at_before: result.markerBefore || null,
+      human_retention_complete_at_after: result.markerAfter || null,
+      completion_state: result.completionState || null,
+      write_performed: result.writePerformed === true,
+      retry_idempotent: result.retryIdempotent === true,
+      prune_executed: false,
+      automatic_activation: false,
+      production_touched: false,
     };
   }
   return {
@@ -3555,6 +3589,328 @@ export async function runClosedHumanTableStageCanary({
   return result;
 }
 
+const CLOSED_HUMAN_LIFECYCLE_BATCH_LOCK_SQL = `select batch_id::text as batch_id
+  from public.chips_ledger_archive_batches
+ where batch_id = $1
+ for update;`;
+
+const CLOSED_HUMAN_LIFECYCLE_MARKER_SQL = `select id::text as table_id,
+    human_retention_complete_at::text as human_retention_complete_at
+  from public.poker_tables
+ where id = $1`;
+
+const CLOSED_HUMAN_LIFECYCLE_GATE_SQL = `select public.chips_assert_closed_human_table_lifecycle_gate(
+    $1::uuid, $2::timestamptz, $3::bigint
+  );`;
+
+const CLOSED_HUMAN_LIFECYCLE_COMPLETE_SQL = `select public.chips_complete_closed_human_table_retention(
+    $1::uuid, $2::timestamptz
+  ) as result;`;
+
+function assertCanonicalManualLifecycleOperator(env) {
+  const exactValues = {
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REF: "refs/heads/main",
+    GITHUB_REPOSITORY_OWNER: "krzysztofcal",
+    GITHUB_ACTOR: "krzysztofcal",
+  };
+  for (const [key, expected] of Object.entries(exactValues)) {
+    if (text(env[key]) !== expected) {
+      fail(`closed-human lifecycle completion requires canonical owner workflow ${key}`);
+    }
+  }
+  for (const key of [
+    "CHIPS_LEDGER_BOT_ONLY_EXECUTE",
+    "CHIPS_LEDGER_BOT_ONLY_AUTOMATIC",
+    "CHIPS_LEDGER_CLOSED_HUMAN_EXECUTE",
+    "CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC",
+  ]) {
+    if (text(env[key]) === "1") fail("closed-human lifecycle completion cannot share an execute or automatic gate");
+  }
+}
+
+function assertExactClosedHumanLifecycleTarget({ batchId, tableId, cutoff }) {
+  const target = CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET;
+  const batchIdText = batchId == null ? null : String(batchId);
+  const tableIdText = tableId == null ? null : String(tableId);
+  const cutoffText = cutoff == null ? null : String(cutoff);
+  if (batchIdText !== target.batchId
+    || tableIdText !== target.tableId
+    || cutoffText !== target.cutoff) {
+    fail("closed-human lifecycle completion requires the exact approved batch, table and cutoff");
+  }
+  if (!/^[1-9][0-9]*$/.test(batchIdText) || !validUuid(tableIdText)) {
+    fail("closed-human lifecycle completion target identity is invalid");
+  }
+  try {
+    timestampToMicros(cutoffText);
+  } catch {
+    fail("closed-human lifecycle completion cutoff is invalid");
+  }
+  return { batchIdText, tableIdText, cutoffText };
+}
+
+function assertExactClosedHumanLifecycleCutoff(row, cutoff, batchId) {
+  try {
+    if (timestampToMicros(row?.cutoff) !== timestampToMicros(cutoff)) {
+      fail(`exact closed-human lifecycle batch ${batchId} cutoff mismatch`);
+    }
+  } catch (error) {
+    if (/cutoff mismatch/.test(text(error.message))) throw error;
+    fail(`exact closed-human lifecycle batch ${batchId} has an invalid cutoff`);
+  }
+}
+
+function parseJsonResult(value, label) {
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      fail(`${label} returned invalid JSON`);
+    }
+  }
+  return value;
+}
+
+async function readExactHumanRetentionMarker(tx, tableId, { forUpdate = false } = {}) {
+  const rows = await tx.unsafe(
+    `${CLOSED_HUMAN_LIFECYCLE_MARKER_SQL}${forUpdate ? " for update" : ""};`,
+    [tableId],
+  );
+  if (rows.length !== 1 || text(rows[0]?.table_id) !== String(tableId)) {
+    fail("exact closed-human lifecycle table is missing or not unique");
+  }
+  return rows[0];
+}
+
+async function completeClosedHumanLifecycleInTransaction({
+  sql,
+  batchId,
+  tableId,
+  cutoff,
+  activeRow,
+  identity,
+}) {
+  return sql.begin(async (tx) => {
+    await tx.unsafe("set transaction isolation level serializable;");
+    await tx.unsafe("set local lock_timeout = '5s';");
+    await tx.unsafe("set local statement_timeout = '120s';");
+
+    const lockedBatch = await tx.unsafe(CLOSED_HUMAN_LIFECYCLE_BATCH_LOCK_SQL, [batchId]);
+    if (lockedBatch.length !== 1) {
+      fail(`exact closed-human lifecycle batch ${batchId} was not found or is not unique`);
+    }
+    const exactRows = await tx.unsafe(STAGE_EXACT_BATCH_SQL, [batchId]);
+    if (exactRows.length !== 1) {
+      fail(`exact closed-human lifecycle batch ${batchId} was not found or is duplicated`);
+    }
+    const exactRow = exactRows[0];
+    const binding = assertClosedHumanExecuteBatch(exactRow, batchId, identity);
+    assertExactClosedHumanLifecycleCutoff(exactRow, cutoff, batchId);
+    assertClosedHumanActiveManifestMatch(exactRow, activeRow, batchId);
+    if (binding.receiptCount !== 5) {
+      fail(`exact closed-human lifecycle batch ${batchId} has no complete prune receipt`);
+    }
+
+    const markerBeforeRow = await readExactHumanRetentionMarker(tx, tableId, { forUpdate: true });
+    const markerBefore = markerBeforeRow.human_retention_complete_at ?? null;
+    await tx.unsafe(CLOSED_HUMAN_LIFECYCLE_GATE_SQL, [tableId, cutoff, batchId]);
+
+    const completionRows = await tx.unsafe(CLOSED_HUMAN_LIFECYCLE_COMPLETE_SQL, [tableId, cutoff]);
+    if (completionRows.length !== 1) fail("closed-human lifecycle completion did not return one result");
+    const completion = parseJsonResult(completionRows[0]?.result, "closed-human lifecycle completion");
+    if (text(completion?.state) !== "human_retention_complete"
+      || text(completion?.table_id) !== String(tableId)) {
+      fail("closed-human lifecycle completion returned an unexpected result");
+    }
+
+    await tx.unsafe(CLOSED_HUMAN_LIFECYCLE_GATE_SQL, [tableId, cutoff, batchId]);
+    const markerAfterRow = await readExactHumanRetentionMarker(tx, tableId);
+    const markerAfter = markerAfterRow.human_retention_complete_at ?? null;
+    if (!markerAfter) fail("closed-human lifecycle completion marker was not persisted");
+    if (markerBefore != null && text(markerAfter) !== text(markerBefore)) {
+      fail("closed-human lifecycle completion changed an existing immutable marker");
+    }
+
+    return {
+      exactRow,
+      binding,
+      markerBefore,
+      markerAfter,
+      completion,
+    };
+  });
+}
+
+// Issue #923 lifecycle completion is a separate, manual-only marker step. It
+// never calls prune/execute machinery; it only reuses that machinery's
+// read-only proof, receipt, archive and recovery verification before invoking
+// the existing database completion function.
+export async function runClosedHumanTableLifecycleCompletion({
+  env = process.env,
+  deps = {},
+  batchId = null,
+  tableId = null,
+  cutoff = null,
+} = {}) {
+  assertCanonicalManualLifecycleOperator(env);
+  const target = assertExactClosedHumanLifecycleTarget({ batchId, tableId, cutoff });
+  let sql = null;
+  let lockSession = null;
+  let tempRoot = null;
+  let ownsSql = false;
+  let result = null;
+  let deployedCommitSha = null;
+  let failed = false;
+  let failure = null;
+  try {
+    const config = validateStageEnvironment(env, { requireCommitSha: true });
+    deployedCommitSha = config.deployedCommitSha;
+    const moduleEnv = config.moduleEnv;
+    if (deps.sql) sql = deps.sql;
+    else {
+      sql = postgres(config.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 0 });
+      ownsSql = true;
+    }
+    tempRoot = deps.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-closed-human-lifecycle-"));
+    ensurePrivateDirectory(tempRoot);
+    const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
+    const pruneStore = deps.pruneStore || createPruneStore(sql);
+    const verifyBucket = deps.verifyBucket || ((targetValue) => verifyArchiveBucket(targetValue, deps));
+    lockSession = await acquireAdvisoryLock(sql);
+    if (!lockSession) fail("closed-human lifecycle completion advisory lock is busy");
+
+    const identity = await assertIdentity(sql);
+    await assertAdvisoryLock(sql, lockSession);
+    let exactRow = await loadExactBatch(sql, target.batchIdText, "closed-human lifecycle batch");
+    const initialBinding = assertClosedHumanExecuteBatch(exactRow, target.batchIdText, identity);
+    assertExactClosedHumanLifecycleCutoff(exactRow, target.cutoffText, target.batchIdText);
+    if (initialBinding.receiptCount !== 5) {
+      fail(`exact closed-human lifecycle batch ${target.batchIdText} has no complete prune receipt`);
+    }
+
+    const activeRow = await refreshPolicyRow(
+      pruneStore,
+      exactRow.object_path,
+      CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+    );
+    assertClosedHumanExecuteBatch(activeRow, target.batchIdText, identity);
+    assertExactClosedHumanLifecycleCutoff(activeRow, target.cutoffText, target.batchIdText);
+    assertClosedHumanActiveManifestMatch(exactRow, activeRow, target.batchIdText);
+    await assertAdvisoryLock(sql, lockSession);
+
+    // This is intentionally a dry-run-only call. Since batch 334 is already
+    // pruned, any state other than already_pruned is a fail-closed anomaly.
+    await verifyBucket(storageTarget);
+    const dry = await runPruneStep({
+      row: activeRow,
+      mode: "dry-run",
+      env: moduleEnv,
+      cwd: tempRoot,
+      sql,
+      pruneStore,
+      storageTarget,
+      verifyBucket,
+      storageDeps: deps,
+    });
+    if (dry.state !== "already_pruned") {
+      fail(`exact closed-human lifecycle batch ${target.batchIdText} requires a complete prune receipt: ${dry.state}`);
+    }
+    if (dry.archiveSha256 !== activeRow.compressed_sha256) {
+      fail(`exact closed-human lifecycle batch ${target.batchIdText} dry-run archive checksum differs from the committed archive`);
+    }
+    const evidence = assertClosedHumanDryRunEvidence(activeRow, dry, target.batchIdText);
+    if (text(evidence.closedHumanTableId).toLowerCase() !== target.tableIdText.toLowerCase()) {
+      fail(`exact closed-human lifecycle batch ${target.batchIdText} table binding mismatch`);
+    }
+
+    const inspectRecovery = deps.inspectDurableRecovery || inspectDurableRecovery;
+    const durable = await inspectRecovery(storageTarget, activeRow, deps);
+    assertResumeRecoveryState(activeRow, durable);
+    assertDurableRecoveryReady(durable);
+    assertDurableRecoveryForEvidence({
+      row: activeRow,
+      identity,
+      evidence,
+      durable,
+      target: { target: "stage" },
+    });
+    assertRecoveryManifestMatches(
+      durable.manifest,
+      buildRecoveryManifest(activeRow, identity, evidence, { target: "stage" }),
+    );
+    await assertAdvisoryLock(sql, lockSession);
+
+    const lifecycle = await completeClosedHumanLifecycleInTransaction({
+      sql,
+      batchId: target.batchIdText,
+      tableId: target.tableIdText,
+      cutoff: target.cutoffText,
+      activeRow,
+      identity,
+    });
+    await assertAdvisoryLock(sql, lockSession);
+    exactRow = lifecycle.exactRow;
+    result = {
+      state: lifecycle.markerBefore == null ? "completed" : "already_complete",
+      mode: "closed-human-30d-lifecycle-completion",
+      sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+      projectRef: STAGE_PROJECT_REF,
+      stageSystemIdentifier: identity,
+      batchId: target.batchIdText,
+      tableId: target.tableIdText,
+      cutoff: target.cutoffText,
+      objectPath: exactRow.object_path,
+      transactions: Number(evidence.transactionCount),
+      entries: Number(evidence.entryCount),
+      proof: "verified",
+      pruneReceipt: {
+        at: exactRow.pruned_at,
+        transaction_count: exactRow.pruned_transaction_count,
+        entry_count: exactRow.pruned_entry_count,
+        transaction_ids_sha256: exactRow.pruned_transaction_ids_sha256,
+        entry_ids_sha256: exactRow.pruned_entry_ids_sha256,
+      },
+      dryRun: dry.state,
+      recoveryState: "complete",
+      recoveryArchiveSha256: durable.archiveSha256,
+      recoveryManifestSha256: durable.manifestSha256,
+      recoveryArchivePath: durable.archivePath,
+      recoveryManifestPath: durable.manifestPath,
+      lifecycleBefore: "passed",
+      lifecycleAfter: "passed",
+      markerBefore: lifecycle.markerBefore,
+      markerAfter: lifecycle.markerAfter,
+      completionState: lifecycle.completion.state,
+      writePerformed: lifecycle.markerBefore == null,
+      retryIdempotent: lifecycle.markerBefore != null,
+    };
+  } catch (error) {
+    failed = true;
+    failure = error;
+  } finally {
+    if (lockSession && sql) {
+      try { await releaseAdvisoryLock(sql); } catch { /* owned session close releases it */ }
+    }
+    if (sql && ownsSql) {
+      try { await sql.end({ timeout: 5 }); } catch (error) {
+        if (!failed) {
+          failed = true;
+          failure = error;
+        }
+      }
+    }
+  }
+  if (failed) {
+    emitAggregateError(failure, { deployedCommitSha, mode: "closed-human-30d-lifecycle-completion" });
+    throw failure;
+  }
+  if (result && deployedCommitSha) result = { ...result, deployedCommitSha };
+  writeAggregateSummary(result);
+  return result;
+}
+
 // Issue #890 uses the same Stage runner, Storage bucket, proof store, prune
 // store, recovery copies, and advisory lock.  Its default is deliberately
 // prepare-only: no call reaches the destructive DB operator unless the caller
@@ -4749,6 +5105,36 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     runClosedHumanTableStagePrepare().catch(() => {
       process.exitCode = 1;
     });
+  } else if (argv[0] === "--policy"
+    && argv[1] === "closed-human-table-30d"
+    && argv[2] === "--complete-lifecycle") {
+    let batchId = null;
+    let tableId = null;
+    let cutoff = null;
+    for (let index = 3; index < argv.length; index += 1) {
+      const option = argv[index];
+      const value = argv[index + 1];
+      if (!value || value.startsWith("--")) throw new Error(option + " requires one value");
+      if (option === "--batch-id") {
+        if (batchId !== null) throw new Error("--batch-id was supplied more than once");
+        batchId = value;
+      } else if (option === "--table-id") {
+        if (tableId !== null) throw new Error("--table-id was supplied more than once");
+        tableId = value;
+      } else if (option === "--cutoff") {
+        if (cutoff !== null) throw new Error("--cutoff was supplied more than once");
+        cutoff = value;
+      } else {
+        throw new Error("unknown Stage closed-human lifecycle option: " + option);
+      }
+      index += 1;
+    }
+    if (argv.length !== 9 || batchId === null || tableId === null || cutoff === null) {
+      throw new Error("closed-human lifecycle completion requires --batch-id, --table-id and --cutoff");
+    }
+    runClosedHumanTableLifecycleCompletion({ batchId, tableId, cutoff }).catch(() => {
+      process.exitCode = 1;
+    });
   } else if (argv[0] === "--policy" && argv[1] === "closed-human-table-30d") {
     let executeRequested = false;
     let approvedBatchId = null;
@@ -4785,7 +5171,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       process.exitCode = 1;
     });
   } else {
-    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-automation.mjs [--policy stage-ledger-auto-retention-30d-v1|stage-ledger-closed-human-table-retention-30d-v1 [--diagnose-recovery [--batch-id <id>]|--repair-recovery --batch-id <id>]|--policy stage-ledger-closed-human-table-retention-30d-v1 --diagnose-policy|--policy bot-only-7d [--prepare-only|--repair-recovery --batch-id 15|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>'|--automatic]|--policy closed-human-table-30d [--prepare-only|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>']]\n");
+    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-automation.mjs [--policy stage-ledger-auto-retention-30d-v1|stage-ledger-closed-human-table-retention-30d-v1 [--diagnose-recovery [--batch-id <id>]|--repair-recovery --batch-id <id>]|--policy stage-ledger-closed-human-table-retention-30d-v1 --diagnose-policy|--policy bot-only-7d [--prepare-only|--repair-recovery --batch-id 15|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>'|--automatic]|--policy closed-human-table-30d [--prepare-only|--complete-lifecycle --batch-id <id> --table-id <uuid> --cutoff <timestamp>|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>']]]\n");
     process.exitCode = 1;
   }
 }

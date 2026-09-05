@@ -14,6 +14,7 @@ const RETAINED_MODES = [
   "closed-human-30d-recovery-diagnostic",
   "closed-human-policy-diagnostic",
   "closed-human-30d-recovery-repair",
+  "closed-human-30d-lifecycle-completion",
   "escrow-retention-audit",
   "escrow-retention-verify",
   "external-scheduled-automatic",
@@ -51,6 +52,7 @@ const RETAINED_STEPS = [
   "Diagnose closed human-table 30-day durable recovery",
   "Diagnose closed-human retention policy",
   "Repair exact closed human-table 30-day durable recovery",
+  "Complete exact closed-human table lifecycle",
   "Run activated bot-only 7-day Stage automation",
   "Run Stage escrow account retention",
   "Audit Stage escrow account retention",
@@ -78,6 +80,9 @@ assert.deepEqual([...inputNames].sort(), [
   "escrow_retention_recovery_object_path",
   "closed_human_canary_batch_id",
   "closed_human_canary_confirmation",
+  "closed_human_lifecycle_batch_id",
+  "closed_human_lifecycle_table_id",
+  "closed_human_lifecycle_cutoff",
   "mode",
   "stage_30d_recovery_batch_id",
 ].sort(), "exact retained dispatch inputs");
@@ -141,6 +146,7 @@ for (const mode of [
   "closed-human-30d-recovery-diagnostic",
   "closed-human-policy-diagnostic",
   "closed-human-30d-recovery-repair",
+  "closed-human-30d-lifecycle-completion",
   "escrow-retention-audit",
   "escrow-retention-verify",
 ]) {
@@ -159,9 +165,11 @@ assert.match(stageJobIf, /inputs\.mode != 'existing-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-canary'/);
 assert.match(stageJobIf, /inputs\.mode != 'closed-human-policy-diagnostic'/);
+assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-lifecycle-completion'/);
 assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-canary'/);
 assert.match(stageJobIf, /inputs\.mode == 'closed-human-policy-diagnostic'/);
+assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-lifecycle-completion'/);
 assert.match(stageJobIf, /github\.ref == 'refs\/heads\/main'/);
 assert.match(stageJobIf, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
 assert.match(stageJobIf, /github\.event\.repository\.fork != true/);
@@ -266,5 +274,25 @@ assert.match(closedHumanCanaryRun, /--policy closed-human-table-30d \\\n\s+--exe
 assert.doesNotMatch(closedHumanCanaryRun, /--prepare-only|--automatic|schedule/);
 assert.doesNotMatch(closedHumanCanaryRun, /Production|SUPABASE_PROD_/i);
 assert.doesNotMatch(workflow, /CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC: "1"/);
+
+const lifecycleRun = workflow.match(
+  /- name: Complete exact closed-human table lifecycle[\s\S]*?(?=\n\s+- name:|\s*$)/,
+)[0];
+assert.match(lifecycleRun, /github\.event_name == 'workflow_dispatch' && inputs\.mode == 'closed-human-30d-lifecycle-completion'/);
+assert.match(lifecycleRun, /test "\$GITHUB_REPOSITORY" = "krzysztofcal\/arcadePlatform"/);
+assert.match(lifecycleRun, /test "\$GITHUB_REF" = "refs\/heads\/main"/);
+assert.match(lifecycleRun, /test "\$GITHUB_ACTOR" = "\$GITHUB_REPOSITORY_OWNER"/);
+assert.match(lifecycleRun, /closed_human_lifecycle_batch_id/);
+assert.match(lifecycleRun, /closed_human_lifecycle_table_id/);
+assert.match(lifecycleRun, /closed_human_lifecycle_cutoff/);
+assert.match(lifecycleRun, /test "\$CLOSED_HUMAN_LIFECYCLE_BATCH_ID" = "334"/);
+assert.match(lifecycleRun, /test "\$CLOSED_HUMAN_LIFECYCLE_TABLE_ID" = "ec3f4897-c7bb-4d92-b63d-a38401e9a5c4"/);
+assert.match(lifecycleRun, /test "\$CLOSED_HUMAN_LIFECYCLE_CUTOFF" = "2026-08-05 16:33:12\.024\+00"/);
+assert.match(lifecycleRun, /--complete-lifecycle/);
+assert.match(lifecycleRun, /--batch-id "\$CLOSED_HUMAN_LIFECYCLE_BATCH_ID"/);
+assert.match(lifecycleRun, /--table-id "\$CLOSED_HUMAN_LIFECYCLE_TABLE_ID"/);
+assert.match(lifecycleRun, /--cutoff "\$CLOSED_HUMAN_LIFECYCLE_CUTOFF"/);
+assert.doesNotMatch(lifecycleRun, /github\.event_name == 'schedule'|--execute|--automatic|--prepare-only|--repair|--diagnose|prune|Production|SUPABASE_PROD_/i);
+assert.doesNotMatch(lifecycleRun, /CHIPS_LEDGER_CLOSED_HUMAN_EXECUTE: "1"/);
 
 process.stdout.write("chips-ledger-stage-automation workflow guard passed\n");
