@@ -16,21 +16,143 @@ import {
 } from "./chips-ledger-archive-export.mjs";
 import {
   TABLE_IDENTITY_SUMMARY_ERROR_CODES,
+  downloadPrivateArchiveObject,
   diagnoseTableIdentitySummary,
   resolveStorageTarget,
+  verifyArchiveBytes,
   verifyLocalArchive,
 } from "./chips-ledger-archive-store.mjs";
 import {
+  buildPruneEvidence,
+  exporterManifestFromDatabase,
+  parseManifestRow,
+} from "./chips-ledger-archive-prune.mjs";
+import {
+  assertBotOnlyExecuteBatch,
   redactedError,
   STAGE_MAX_BATCH_SIZE,
   STAGE_PROJECT_REF,
   STAGE_SYSTEM_IDENTIFIER,
+  STAGE_EXACT_BATCH_SQL,
   STAGE_OWN_BATCHES_SQL,
   validateStageEnvironment,
 } from "./chips-ledger-stage-automation.mjs";
 
 const REPLAY_STATEMENT_TIMEOUT_MS = 120000;
 const SQLSTATE_RE = /^[0-9A-Z]{5}$/;
+const EXACT_BOT_ONLY_DIAGNOSTIC_BATCH_ID = "481";
+const BOT_ONLY_PROOF_FUNCTION_DEFINITION_SQL = `
+select pg_catalog.pg_get_functiondef(
+  'public.chips_assert_bot_only_archive_proof_lifecycle_gate(uuid,bigint,timestamptz,uuid[],text[])'::pg_catalog.regprocedure
+) as definition;`;
+
+// These are read-only EXPLAIN probes of the expensive CTEs in the applied
+// proof helper.  The predicates intentionally mirror the helper; parameters
+// are populated only from the exact batch archive below.
+export const BOT_ONLY_PROOF_TARGET_TRANSACTIONS_EXPLAIN_SQL = `
+with target_transactions as (
+  select transactions.id,
+         transactions.idempotency_key,
+         transactions.reference,
+         normalized.normalized_metadata,
+         case
+           when transactions.idempotency_key ~* '^(join-buyin|bot-seed-buyin|managed-bot-seed-buyin):[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[^:]+(:[^:]+)*$'
+             then pg_catalog.lower(pg_catalog.btrim(pg_catalog.split_part(transactions.idempotency_key, ':', 2)))
+           when transactions.idempotency_key ~* '^poker:(leave|inactive_cleanup):[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[^:]+(:[^:]+)*$'
+             then pg_catalog.lower(pg_catalog.btrim(pg_catalog.split_part(transactions.idempotency_key, ':', 3)))
+           when transactions.idempotency_key ~* '^poker:(rebuy|deferred-leave|bot-terminal-cashout|human-terminal-cashout|bot-replacement-buyin|managed-bot-top-up):v1:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[^:]+(:[^:]+)*$'
+             then pg_catalog.lower(pg_catalog.btrim(pg_catalog.split_part(transactions.idempotency_key, ':', 4)))
+           else null
+         end as key_table_id
+    from public.chips_transactions transactions
+    cross join lateral (
+      select case
+               when transactions.metadata is not null
+                 and pg_catalog.jsonb_typeof(transactions.metadata) = 'object'
+                 then transactions.metadata
+               when transactions.metadata is not null
+                 and pg_catalog.jsonb_typeof(transactions.metadata) = 'string'
+                 and pg_catalog.pg_input_is_valid(transactions.metadata #>> '{}', 'jsonb'::text)
+                 then (transactions.metadata #>> '{}')::jsonb
+               else null::jsonb
+             end as normalized_metadata
+    ) normalized
+   where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+     and (
+       transactions.id = any(coalesce($1::uuid[], array[]::uuid[]))
+       or transactions.idempotency_key ~* ('^(join-buyin|bot-seed-buyin|managed-bot-seed-buyin):' || $2::uuid || ':[^:]+(:[^:]+)*$')
+       or transactions.idempotency_key ~* ('^poker:(leave|inactive_cleanup):' || $2::uuid || ':[^:]+(:[^:]+)*$')
+       or transactions.idempotency_key ~* ('^poker:(rebuy|deferred-leave|bot-terminal-cashout|human-terminal-cashout|bot-replacement-buyin|managed-bot-top-up):v1:' || $2::uuid || ':[^:]+(:[^:]+)*$')
+       or (
+         normalized.normalized_metadata is not null
+         and pg_catalog.jsonb_typeof(normalized.normalized_metadata) = 'object'
+         and normalized.normalized_metadata ? 'tableId'
+         and nullif(pg_catalog.btrim(normalized.normalized_metadata->>'tableId'), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+         and pg_catalog.lower(pg_catalog.btrim(normalized.normalized_metadata->>'tableId')) = $2::text
+       )
+       or transactions.reference ~* ('^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):' || $2::uuid || '(:.*)?$')
+       or exists (
+         select 1
+           from public.chips_transaction_idempotency registry
+          where registry.transaction_id = transactions.id
+            and registry.table_id is null
+            and (
+              registry.idempotency_key ~* ('^(join-buyin|bot-seed-buyin|managed-bot-seed-buyin):' || $2::uuid || ':[^:]+(:[^:]+)*$')
+              or registry.idempotency_key ~* ('^poker:(leave|inactive_cleanup):' || $2::uuid || ':[^:]+(:[^:]+)*$')
+              or registry.idempotency_key ~* ('^poker:(rebuy|deferred-leave|bot-terminal-cashout|human-terminal-cashout|bot-replacement-buyin|managed-bot-top-up):v1:' || $2::uuid || ':[^:]+(:[^:]+)*$')
+            )
+       )
+       or exists (
+         select 1
+           from public.chips_entries entries
+           join public.chips_accounts accounts on accounts.id = entries.account_id
+          where entries.transaction_id = transactions.id
+            and accounts.account_type::text = 'ESCROW'
+            and accounts.system_key = 'POKER_TABLE:' || $2::uuid::text
+       )
+     )
+)
+select target.id, target.idempotency_key, target.reference, target.normalized_metadata, target.key_table_id
+  from target_transactions target;`;
+
+export const BOT_ONLY_PROOF_UNKNOWN_REGISTRY_EXPLAIN_SQL = `
+select registry.idempotency_key, registry.transaction_id
+  from public.chips_transaction_idempotency registry
+ where registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+   and registry.table_id is null
+   and (
+     registry.transaction_id = any(coalesce($1::uuid[], array[]::uuid[]))
+     or registry.idempotency_key ~* ('^(join-buyin|bot-seed-buyin|managed-bot-seed-buyin):' || $2::uuid || ':[^:]+(:[^:]+)*$')
+     or registry.idempotency_key ~* ('^poker:(leave|inactive_cleanup):' || $2::uuid || ':[^:]+(:[^:]+)*$')
+     or registry.idempotency_key ~* ('^poker:(rebuy|deferred-leave|bot-terminal-cashout|human-terminal-cashout|bot-replacement-buyin|managed-bot-top-up):v1:' || $2::uuid || ':[^:]+(:[^:]+)*$')
+     or exists (
+       select 1
+         from public.chips_entries entries
+         join public.chips_accounts accounts on accounts.id = entries.account_id
+        where entries.transaction_id = registry.transaction_id
+          and accounts.account_type::text = 'ESCROW'
+          and accounts.system_key = 'POKER_TABLE:' || $2::uuid::text
+     )
+   );`;
+
+export const BOT_ONLY_PROOF_REGISTRY_KEY_COMPLETENESS_EXPLAIN_SQL = `
+select registry.idempotency_key, registry.transaction_id
+  from public.chips_transaction_idempotency registry
+ where registry.table_id = $1::uuid
+   and registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+   and registry.transaction_created_at < $2::timestamptz
+   and not (
+     registry.idempotency_key = any(coalesce($3::text[], array[]::text[]))
+     or exists (
+       select 1
+         from public.chips_ledger_archive_batches batches
+        where batches.batch_id = registry.archive_batch_id
+          and batches.format_version = 2
+          and batches.source_policy_id = 'stage-ledger-bot-only-retention-7d-v1'
+          and batches.pruned_at is not null
+          and batches.registry_cleaned_at is not null
+     )
+   );`;
 
 const SETTINGS_SQL = `
 with configured as (
@@ -155,6 +277,8 @@ async function explain(sql, queryName, query, parameters) {
       sql_sha256: sqlSha256(query),
       elapsed_ms: Number(process.hrtime.bigint() - startedAt) / 1e6,
       sqlstate: "00000",
+      read_only: true,
+      explain_analyze: false,
       plan: rows[0]?.["QUERY PLAN"] || rows[0]?.["query plan"] || null,
     };
   } catch (error) {
@@ -163,10 +287,156 @@ async function explain(sql, queryName, query, parameters) {
       sql_sha256: sqlSha256(query),
       elapsed_ms: Number(process.hrtime.bigint() - startedAt) / 1e6,
       sqlstate: sqlState(error),
+      read_only: true,
+      explain_analyze: false,
       plan: null,
       error_class: "explain_failed",
     };
   }
+}
+
+function planNodes(plan, nodes = []) {
+  const root = Array.isArray(plan) ? plan[0]?.Plan : plan?.Plan;
+  if (!root || typeof root !== "object") return nodes;
+  const node = {
+    node_type: root["Node Type"] || null,
+    relation: root["Relation Name"] || null,
+    index: root["Index Name"] || null,
+    join_type: root["Join Type"] || null,
+    strategy: root.Strategy || null,
+    scan_direction: root["Scan Direction"] || null,
+  };
+  nodes.push(node);
+  for (const child of root.Plans || []) planNodes({ Plan: child }, nodes);
+  return nodes;
+}
+
+function planAccessSummary(plan) {
+  const nodes = planNodes(plan);
+  return {
+    node_count: nodes.length,
+    sequential_scans: nodes.filter((node) => node.node_type === "Seq Scan"),
+    index_scans: nodes.filter((node) => node.node_type === "Index Scan" || node.node_type === "Index Only Scan"),
+    bitmap_scans: nodes.filter((node) => node.node_type === "Bitmap Heap Scan" || node.node_type === "Bitmap Index Scan"),
+    nodes,
+  };
+}
+
+function diagnosticBatchId(value) {
+  const batchId = String(value ?? "").trim();
+  if (batchId !== EXACT_BOT_ONLY_DIAGNOSTIC_BATCH_ID) {
+    throw new Error(`exact bot-only diagnostic is pinned to batch ${EXACT_BOT_ONLY_DIAGNOSTIC_BATCH_ID}`);
+  }
+  return batchId;
+}
+
+async function readExactBotOnlyBatch(sql, batchId) {
+  const rows = await readOnlyTransaction(sql, (tx) => tx.unsafe(STAGE_EXACT_BATCH_SQL, [batchId]));
+  if (rows.length !== 1) throw new Error(`exact bot-only diagnostic batch ${batchId} must resolve to one row`);
+  return parseManifestRow(rows[0]);
+}
+
+async function readProofFunctionDefinition(sql) {
+  const rows = await readOnlyTransaction(sql, (tx) => tx.unsafe(BOT_ONLY_PROOF_FUNCTION_DEFINITION_SQL));
+  const definition = rows[0]?.definition;
+  if (typeof definition !== "string" || definition.length < 1) {
+    throw new Error("bot-only proof helper definition was not found");
+  }
+  return { length: definition.length, sha256: sqlSha256(definition) };
+}
+
+async function runExactBotOnlyProofDiagnostic({ config, sql, batchId, identityAndFence }) {
+  const exactBatchId = diagnosticBatchId(batchId);
+  if (!identityAndFence?.fence_active || !identityAndFence?.enforcement_active) {
+    throw new Error("exact bot-only proof diagnostic requires the active Stage TABLE fence");
+  }
+  const row = await readExactBotOnlyBatch(sql, exactBatchId);
+  assertBotOnlyExecuteBatch(row, exactBatchId, identityAndFence.system_identifier);
+
+  const storageTarget = resolveStorageTarget("stage", config.moduleEnv, { singleTarget: true });
+  const downloaded = await downloadPrivateArchiveObject(storageTarget, row.object_path);
+  if (downloaded.sha256 !== row.compressed_sha256) {
+    throw new Error("exact bot-only diagnostic archive SHA differs from the committed batch");
+  }
+  const target = {
+    target: "stage",
+    projectRef: STAGE_PROJECT_REF,
+    systemIdentifier: STAGE_SYSTEM_IDENTIFIER,
+    maxBatchSize: STAGE_MAX_BATCH_SIZE,
+  };
+  const manifest = exporterManifestFromDatabase(row, target);
+  const verified = verifyArchiveBytes({
+    compressedBytes: downloaded.bytes,
+    manifest,
+    target,
+    artifactName: row.object_path.split("/").at(-1),
+  });
+  const evidence = buildPruneEvidence(verified, { maxBatchSize: STAGE_MAX_BATCH_SIZE });
+  if (evidence.tableId !== String(row.bot_only_table_id).toLowerCase()
+    || evidence.transactionIdsSha256 !== row.archived_transaction_ids_sha256
+    || evidence.entryIdsSha256 !== row.archived_entry_ids_sha256
+    || evidence.registryKeysSha256 !== row.bot_only_registry_keys_sha256
+    || evidence.transactionCount !== Number(row.transaction_count)
+    || evidence.entryCount !== Number(row.entry_count)) {
+    throw new Error("exact bot-only diagnostic archive evidence differs from the immutable batch proof");
+  }
+
+  const explainInputs = {
+    transaction_ids: evidence.transactionIds.length,
+    transaction_ids_sha256: evidence.transactionIdsSha256,
+    registry_keys: evidence.registryKeys.length,
+    registry_keys_sha256: evidence.registryKeysSha256,
+    table_id: evidence.tableId,
+    batch_id: exactBatchId,
+    cutoff: row.cutoff,
+  };
+  const explains = [
+    await explain(
+      sql,
+      "proof.target_transactions",
+      BOT_ONLY_PROOF_TARGET_TRANSACTIONS_EXPLAIN_SQL,
+      [evidence.transactionIds, evidence.tableId],
+    ),
+    await explain(
+      sql,
+      "proof.unknown_registry_rows",
+      BOT_ONLY_PROOF_UNKNOWN_REGISTRY_EXPLAIN_SQL,
+      [evidence.transactionIds, evidence.tableId],
+    ),
+    await explain(
+      sql,
+      "proof.incomplete_old_registry_rows",
+      BOT_ONLY_PROOF_REGISTRY_KEY_COMPLETENESS_EXPLAIN_SQL,
+      [evidence.tableId, row.cutoff, evidence.registryKeys],
+    ),
+  ].map((result) => ({ ...result, access_path: planAccessSummary(result.plan) }));
+
+  return {
+    batch_id: exactBatchId,
+    object_path: row.object_path,
+    compressed_sha256: row.compressed_sha256,
+    source_policy_id: row.source_policy_id,
+    bot_only_table_id: row.bot_only_table_id,
+    transaction_count: evidence.transactionCount,
+    entry_count: evidence.entryCount,
+    transaction_ids_sha256: evidence.transactionIdsSha256,
+    registry_key_count: evidence.registryKeys.length,
+    registry_keys_sha256: evidence.registryKeysSha256,
+    archive_verified: true,
+    proof_evidence_verified: true,
+    proof_helper_definition: await readProofFunctionDefinition(sql),
+    explain_inputs: explainInputs,
+    explains,
+    read_only_contract: {
+      transaction: "repeatable read, read only",
+      statement_timeout_ms: REPLAY_STATEMENT_TIMEOUT_MS,
+      explain: "EXPLAIN (FORMAT JSON, VERBOSE, COSTS, SETTINGS), without ANALYZE",
+      writes: false,
+      storage_access: "private archive GET only",
+      output_contains_transaction_ids: false,
+      output_contains_registry_keys: false,
+    },
+  };
 }
 
 async function replay(sql, queryName, query, parameters) {
@@ -323,7 +593,7 @@ export async function runBotOnlyTableIdentitySummaryDiagnostic({ config, sql, cu
   }
 }
 
-export async function runStageTimeoutDiagnostic({ env = process.env, now = new Date(), summaryOnly = false } = {}) {
+export async function runStageTimeoutDiagnostic({ env = process.env, now = new Date(), summaryOnly = false, batchId = null } = {}) {
   const config = validateStageEnvironment(env, { requireCommitSha: true });
   const sql = postgres(config.dbUrl, {
     max: 1,
@@ -340,6 +610,33 @@ export async function runStageTimeoutDiagnostic({ env = process.env, now = new D
     const identityAndFence = await readIdentityAndFence(sql);
     if (identityAndFence.system_identifier !== STAGE_SYSTEM_IDENTIFIER) {
       throw new Error("database is not canonical Stage");
+    }
+
+    if (batchId != null) {
+      if (summaryOnly) throw new Error("exact bot-only batch diagnostic cannot be combined with --summary-only");
+      return {
+        event: "chips_ledger_stage_exact_bot_only_proof_diagnostic",
+        target: "stage",
+        mode: "bot-only-7d-exact-proof-diagnostic",
+        project_ref: STAGE_PROJECT_REF,
+        deployed_commit_sha: config.deployedCommitSha,
+        stage_identity_and_fence: identityAndFence,
+        statement_timeout: await readSettings(sql),
+        exact_batch: await runExactBotOnlyProofDiagnostic({
+          config,
+          sql,
+          batchId,
+          identityAndFence,
+        }),
+        read_only_contract: {
+          transaction: "repeatable read, read only",
+          statement_timeout_ms: REPLAY_STATEMENT_TIMEOUT_MS,
+          writes: false,
+          storage_access: "private archive GET only",
+          output_contains_sql_parameters: false,
+          output_contains_rows: false,
+        },
+      };
     }
 
     if (summaryOnly) {
@@ -414,12 +711,28 @@ export async function runStageTimeoutDiagnostic({ env = process.env, now = new D
 
 if (process.argv[1] && process.argv[1].endsWith("chips-ledger-stage-timeout-diagnostic.mjs")) {
   const argv = process.argv.slice(2);
-  if (argv.length > 1 || (argv.length === 1 && argv[0] !== "--summary-only")) {
-    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-timeout-diagnostic.mjs [--summary-only]\n");
+  let summaryOnly = false;
+  let batchId = null;
+  let invalid = false;
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] === "--summary-only" && !summaryOnly) {
+      summaryOnly = true;
+      continue;
+    }
+    if (argv[index] === "--batch-id" && batchId === null && argv[index + 1] && !argv[index + 1].startsWith("--")) {
+      batchId = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    invalid = true;
+    break;
+  }
+  if (invalid || (summaryOnly && batchId !== null)) {
+    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-timeout-diagnostic.mjs [--summary-only | --batch-id 481]\n");
     process.exitCode = 1;
   } else {
-    runStageTimeoutDiagnostic({ summaryOnly: argv[0] === "--summary-only" })
-    .then((report) => process.stdout.write(`${stringify(report)}\n`))
+    runStageTimeoutDiagnostic({ summaryOnly, batchId })
+      .then((report) => process.stdout.write(`${stringify(report)}\n`))
     .catch((error) => {
       process.stderr.write(`chips-ledger-stage-timeout-diagnostic failed: ${redactedError(error)}\n`);
       process.exitCode = 1;

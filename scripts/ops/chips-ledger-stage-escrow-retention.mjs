@@ -487,7 +487,6 @@ select table_id::text as table_id,
        count(*)::text as count
 from public.chips_transaction_idempotency
 where archive_batch_id = any($1::bigint[])
-  and (table_id is null or not (table_id = any($2::uuid[])))
 group by table_id, archive_batch_id;`;
 
 export const RETENTION_UNKNOWN_FK_SQL = `
@@ -564,6 +563,30 @@ export function registryCountFor(rows, tableId, batchId) {
     seen.add(identity);
     return total + Number(row.count == null ? 1 : row.count);
   }, 0);
+}
+
+export function mergeRegistryAggregateRows(tableRows = [], batchRows = []) {
+  const merged = new Map();
+  for (const rows of [tableRows, batchRows]) {
+    for (const row of rows || []) {
+      const count = Number(row?.count);
+      if (!Number.isSafeInteger(count) || count < 0) fail("registry aggregate count is invalid");
+      const tableId = row?.table_id == null ? null : text(row.table_id).toLowerCase();
+      const batchId = row?.archive_batch_id == null ? null : text(row.archive_batch_id);
+      const key = `${tableId ?? "<null>"}:${batchId ?? "<null>"}`;
+      const existing = merged.get(key);
+      if (existing) {
+        if (Number(existing.count) !== count) fail("overlapping registry aggregates disagree");
+        continue;
+      }
+      merged.set(key, {
+        table_id: tableId,
+        archive_batch_id: batchId,
+        count: String(count),
+      });
+    }
+  }
+  return [...merged.values()];
 }
 
 function tableIdsForRows(rows, proofByBatch) {
@@ -701,9 +724,9 @@ export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAG
       ? await read(RETENTION_REGISTRY_TABLE_COUNTS_SQL, [registryTableIds], "escrow_retention_registry_table_counts", "registry_dependency")
       : [];
     const registryBatchRows = registryBatchIds.length
-      ? await read(RETENTION_REGISTRY_BATCH_COUNTS_SQL, [registryBatchIds, registryTableIds], "escrow_retention_registry_batch_counts", "registry_dependency")
+      ? await read(RETENTION_REGISTRY_BATCH_COUNTS_SQL, [registryBatchIds], "escrow_retention_registry_batch_counts", "registry_dependency")
       : [];
-    const registry = [...registryTableRows, ...registryBatchRows];
+    const registry = mergeRegistryAggregateRows(registryTableRows, registryBatchRows);
     const accounts = [];
     const candidatesByBatch = new Map();
     const alreadyRetired = [];
