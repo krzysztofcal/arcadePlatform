@@ -2229,7 +2229,12 @@ function automaticDurable(row, evidenceForManifest, archiveBytes, { uploaded = f
   };
 }
 
-function makeAutomaticClosedHumanHarness({ policyEnabled = true, invalidCandidateEvidence = false } = {}) {
+function makeAutomaticClosedHumanHarness({
+  policyEnabled = true,
+  invalidCandidateEvidence = false,
+  invalidCanaryDurableEvidence = false,
+  canaryTablePresent = true,
+} = {}) {
   const canaryRow = makeClosedHumanCanaryRow({
     ...CLOSED_HUMAN_AUTOMATIC_ACTIVATION,
     object_path: `v1/sha256/${closedHumanCanaryCompressedSha}.jsonl.gz`,
@@ -2281,6 +2286,7 @@ function makeAutomaticClosedHumanHarness({ policyEnabled = true, invalidCandidat
     candidateStored: false,
     recoveryStored: false,
     markers: new Map([[CLOSED_HUMAN_AUTOMATIC_ACTIVATION.tableId, "2026-09-05 00:00:00+00"]]),
+    liveTables: new Set(canaryTablePresent ? [CLOSED_HUMAN_AUTOMATIC_ACTIVATION.tableId] : []),
     exportCalls: 0,
     storeCalls: 0,
     proofCalls: 0,
@@ -2313,11 +2319,27 @@ function makeAutomaticClosedHumanHarness({ policyEnabled = true, invalidCandidat
       if (query.includes("pg_control_system")) return [{ system_identifier: STAGE_SYSTEM_IDENTIFIER }];
       if (query.includes("chips_table_fence_is_active")) return [{ active: true }];
       if (query.includes("chips_table_fence_control")) return [{ enforcement_active: true }];
+      if (query.includes("from public.chips_transaction_idempotency")) {
+        const batchId = String(values[0]);
+        const batch = batchId === "334" ? canaryRow : candidateRow;
+        const tableId = batchId === "334"
+          ? CLOSED_HUMAN_AUTOMATIC_ACTIVATION.tableId
+          : automaticCandidateEvidence.closedHumanTableId;
+        const invalid = batchId === "334" && invalidCanaryDurableEvidence;
+        return [{
+          registry_count: invalid ? "1" : String(batch.transaction_count),
+          distinct_table_count: "1",
+          null_table_count: "0",
+          exact_table_count: invalid ? "0" : String(batch.transaction_count),
+          registry_table_id: invalid ? "00000000-0000-4000-8000-000000000099" : tableId,
+        }];
+      }
       if (query.includes("where batch_id = $1")) return [exactSqlTextRow(canaryRow)];
       if (query.includes("from public.chips_ledger_archive_batches")) return ownRows();
       if (query.includes("from public.chips_stage_closed_human_table_retention_policy")) return [policyRow];
       if (query.includes("from public.poker_tables")) {
         const tableId = String(values[0]);
+        if (!state.liveTables.has(tableId)) return [];
         return [{ table_id: tableId, human_retention_complete_at: state.markers.get(tableId) || null }];
       }
       throw new Error(`unexpected closed-human automatic SQL: ${query}`);
@@ -2416,6 +2438,7 @@ function makeAutomaticClosedHumanHarness({ policyEnabled = true, invalidCandidat
       const markerBefore = state.markers.get(String(tableId)) || null;
       const markerAfter = markerBefore || "2026-09-05 00:05:00+00";
       state.markers.set(String(tableId), markerAfter);
+      state.liveTables.add(String(tableId));
       return {
         exactRow: candidateRow,
         markerBefore,
@@ -2505,6 +2528,23 @@ await assert.rejects(
   /lifecycle marker is missing/,
 );
 
+const activationMissingCanaryTableHarness = makeAutomaticClosedHumanHarness({
+  policyEnabled: false,
+  canaryTablePresent: false,
+});
+activationMissingCanaryTableHarness.deps.pruneStore.activateClosedHumanPolicy = async () => {
+  throw new Error("activation must not write without the authoritative canary table");
+};
+await assert.rejects(
+  runClosedHumanTableRetentionActivation({
+    env: ENV,
+    deps: activationMissingCanaryTableHarness.deps,
+    canaryBatchId: "334",
+    activationConfirmation: CLOSED_HUMAN_AUTOMATIC_ACTIVATION.activationConfirmation,
+  }),
+  /missing or not unique/,
+);
+
 await assert.rejects(
   runClosedHumanTableRetentionActivation({
     env: ENV,
@@ -2538,6 +2578,37 @@ assert.equal(automaticHarness.state.pruneCalls.some((argv) => argv.includes("--r
 assert.equal(automaticHarness.candidateRow.registry_cleaned_at, null, "human idempotency registry must not be retired");
 assert.equal(automaticHarness.candidateRow.destructive_go_batch_id, "335");
 
+const automaticWithoutCanaryTableHarness = makeAutomaticClosedHumanHarness({ canaryTablePresent: false });
+const automaticWithoutCanaryTableResult = await runAutomaticClosedHumanStageAutomation({
+  env: automaticStageEnv,
+  deps: automaticWithoutCanaryTableHarness.deps,
+});
+assert.equal(automaticWithoutCanaryTableResult.state, "completed");
+assert.equal(automaticWithoutCanaryTableResult.processed.length, 1);
+assert.equal(
+  automaticWithoutCanaryTableHarness.state.pruneCalls.some((argv) => argv.includes(automaticWithoutCanaryTableHarness.canaryRow.object_path)),
+  false,
+  "recurring canary verification must not invoke prune for batch 334",
+);
+assert.equal(
+  automaticWithoutCanaryTableHarness.state.sqlCalls.some(({ query }) => (
+    query.includes("from public.poker_tables") && query.includes("where id = $1")
+  )),
+  false,
+  "recurring canary verification must not read the live canary table",
+);
+
+const invalidDurableCanaryHarness = makeAutomaticClosedHumanHarness({ invalidCanaryDurableEvidence: true });
+await assert.rejects(
+  runAutomaticClosedHumanStageAutomation({
+    env: automaticStageEnv,
+    deps: invalidDurableCanaryHarness.deps,
+  }),
+  /durable registry binding is not exact/,
+);
+assert.equal(invalidDurableCanaryHarness.state.executeCalls, 0);
+assert.equal(invalidDurableCanaryHarness.state.lifecycleCalls, 0);
+
 const automaticRetry = await runAutomaticClosedHumanStageAutomation({
   env: automaticStageEnv,
   deps: automaticHarness.deps,
@@ -2547,6 +2618,36 @@ assert.equal(automaticRetry.processed.length, 0, "completed automatic retry must
 assert.equal(automaticRetry.stopReason, "no_eligible_closed_human_table");
 assert.equal(automaticHarness.state.executeCalls, 1, "automatic retry must be idempotent");
 assert.equal(automaticHarness.state.lifecycleCalls, 1, "automatic retry must not rewrite the lifecycle marker");
+
+automaticHarness.state.liveTables.delete(automaticCandidateEvidence.closedHumanTableId);
+automaticHarness.state.markers.delete(automaticCandidateEvidence.closedHumanTableId);
+const automaticAfterTableCleanup = await runAutomaticClosedHumanStageAutomation({
+  env: automaticStageEnv,
+  deps: automaticHarness.deps,
+});
+assert.equal(automaticAfterTableCleanup.state, "completed");
+assert.equal(automaticAfterTableCleanup.processed.length, 0);
+assert.equal(automaticHarness.state.lifecycleCalls, 1, "durable completed-cycle revalidation must not rewrite a cleaned-up table");
+
+const completedMissingDurableHarness = makeAutomaticClosedHumanHarness();
+await runAutomaticClosedHumanStageAutomation({ env: automaticStageEnv, deps: completedMissingDurableHarness.deps });
+completedMissingDurableHarness.state.liveTables.delete(automaticCandidateEvidence.closedHumanTableId);
+completedMissingDurableHarness.state.markers.delete(automaticCandidateEvidence.closedHumanTableId);
+completedMissingDurableHarness.state.recoveryStored = false;
+await assert.rejects(
+  runAutomaticClosedHumanStageAutomation({ env: automaticStageEnv, deps: completedMissingDurableHarness.deps }),
+  /no durable recovery copies/,
+);
+
+const completedMismatchedEvidenceHarness = makeAutomaticClosedHumanHarness();
+await runAutomaticClosedHumanStageAutomation({ env: automaticStageEnv, deps: completedMismatchedEvidenceHarness.deps });
+completedMismatchedEvidenceHarness.state.liveTables.delete(automaticCandidateEvidence.closedHumanTableId);
+completedMismatchedEvidenceHarness.state.markers.delete(automaticCandidateEvidence.closedHumanTableId);
+completedMismatchedEvidenceHarness.candidateRow.pruned_entry_ids_sha256 = "9".repeat(64);
+await assert.rejects(
+  runAutomaticClosedHumanStageAutomation({ env: automaticStageEnv, deps: completedMismatchedEvidenceHarness.deps }),
+  /mismatched prune receipt/,
+);
 
 const incompleteAutomaticHarness = makeAutomaticClosedHumanHarness({ invalidCandidateEvidence: true });
 await assert.rejects(
@@ -2601,7 +2702,12 @@ await assert.rejects(
 for (const harness of [
   activationHarness,
   activationNoMarkerHarness,
+  activationMissingCanaryTableHarness,
   automaticHarness,
+  automaticWithoutCanaryTableHarness,
+  invalidDurableCanaryHarness,
+  completedMissingDurableHarness,
+  completedMismatchedEvidenceHarness,
   incompleteAutomaticHarness,
   manualOnlyAutomaticHarness,
   partialActiveAutomaticHarness,

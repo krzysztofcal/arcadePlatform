@@ -1418,6 +1418,116 @@ function assertClosedHumanDryRunEvidence(row, dry, batchId) {
   return evidence;
 }
 
+const CLOSED_HUMAN_DURABLE_REGISTRY_BINDING_SQL = `select
+    count(*)::text as registry_count,
+    count(distinct registry.table_id)::text as distinct_table_count,
+    count(*) filter (where registry.table_id is null)::text as null_table_count,
+    count(*) filter (where registry.table_id = $2::uuid)::text as exact_table_count,
+    min(registry.table_id::text) as registry_table_id
+  from public.chips_transaction_idempotency registry
+ where registry.archive_batch_id = $1::bigint;`;
+
+async function readClosedHumanDurableRegistryBinding(sql, row, expectedTableId = null) {
+  const batchId = text(row?.batch_id);
+  if (!batchId) fail("closed-human durable registry binding requires an exact batch");
+  if (expectedTableId != null && !validUuid(expectedTableId)) {
+    fail(`exact closed-human batch ${batchId} durable table binding is invalid`);
+  }
+  const rows = await sql.unsafe(CLOSED_HUMAN_DURABLE_REGISTRY_BINDING_SQL, [batchId, expectedTableId]);
+  if (rows.length !== 1) {
+    fail(`exact closed-human batch ${batchId} durable registry binding is not unique`);
+  }
+  const result = rows[0];
+  const registryCount = Number(result.registry_count);
+  const distinctTableCount = Number(result.distinct_table_count);
+  const nullTableCount = Number(result.null_table_count);
+  const exactTableCount = Number(result.exact_table_count);
+  const registryTableId = text(result.registry_table_id).toLowerCase();
+  if (![registryCount, distinctTableCount, nullTableCount, exactTableCount].every(Number.isSafeInteger)
+    || registryCount !== Number(row.transaction_count)
+    || distinctTableCount !== 1
+    || nullTableCount !== 0
+    || exactTableCount !== registryCount
+    || !validUuid(registryTableId)
+    || (expectedTableId != null && registryTableId !== String(expectedTableId).toLowerCase())) {
+    fail(`exact closed-human batch ${batchId} durable registry binding is not exact`);
+  }
+  return {
+    registryCount,
+    distinctTableCount,
+    nullTableCount,
+    exactTableCount,
+    tableId: registryTableId,
+  };
+}
+
+function buildClosedHumanDurableEvidence(row, tableId, batchId) {
+  const evidence = {
+    transactionCount: Number(row.transaction_count),
+    entryCount: Number(row.entry_count),
+    txTypes: parseJsonResult(row.tx_types, `exact closed-human batch ${batchId} tx_types`),
+    credits: row.credits,
+    debits: row.debits,
+    net: row.net_amount,
+    distinctTables: 1,
+    closedHumanTableId: tableId,
+    transactionIdsSha256: row.archived_transaction_ids_sha256,
+    entryIdsSha256: row.archived_entry_ids_sha256,
+  };
+  return assertClosedHumanDryRunEvidence(
+    row,
+    { archiveSha256: row.compressed_sha256, evidence },
+    batchId,
+  );
+}
+
+async function verifyClosedHumanDurableEvidence({
+  row,
+  exactRow = null,
+  identity,
+  sql,
+  storageTarget,
+  storageDeps = {},
+  lockSession,
+  expectedTableId = null,
+} = {}) {
+  const batchId = text(row?.batch_id);
+  const binding = assertClosedHumanExecuteBatch(row, batchId, identity);
+  if (binding.receiptCount !== 5) {
+    fail(`closed-human batch ${batchId} requires a complete prune receipt`);
+  }
+  if (!binding.hasExactGo) {
+    fail(`closed-human batch ${batchId} requires its exact destructive GO`);
+  }
+  if (exactRow) assertClosedHumanActiveManifestMatch(exactRow, row, batchId);
+  await assertAdvisoryLock(sql, lockSession);
+  const registry = await readClosedHumanDurableRegistryBinding(sql, row, expectedTableId);
+  const evidence = buildClosedHumanDurableEvidence(row, registry.tableId, batchId);
+  const inspectRecovery = storageDeps.inspectDurableRecovery || inspectDurableRecovery;
+  const durable = await inspectRecovery(storageTarget, row, storageDeps);
+  assertResumeRecoveryState(row, durable);
+  assertDurableRecoveryForEvidence({
+    row,
+    identity,
+    evidence,
+    durable,
+    target: { target: "stage" },
+  });
+  await assertAdvisoryLock(sql, lockSession);
+  return {
+    row,
+    binding,
+    registry,
+    evidence,
+    durable,
+    dry: {
+      state: "already_pruned",
+      archiveSha256: row.compressed_sha256,
+      evidence,
+    },
+  };
+}
+
 async function loadExactBatch(sql, approvedBatchId, label = "approved bot-only batch") {
   const readExact = async (tx) => {
     await tx.unsafe("set transaction isolation level repeatable read, read only;");
@@ -4236,6 +4346,39 @@ async function verifyClosedHumanCanaryActivationPrerequisites({
   return { row, dry: { ...dry, evidence }, durable, marker, evidence };
 }
 
+async function verifyClosedHumanCanaryRecurringPrerequisites({
+  identity,
+  sql,
+  lockSession,
+  pruneStore,
+  storageTarget,
+  storageDeps = {},
+} = {}) {
+  const target = CLOSED_HUMAN_AUTOMATIC_ACTIVATION;
+  const exactRow = await loadExactBatch(sql, target.batchId, "closed-human automatic recurring canary");
+  const binding = assertClosedHumanExecuteBatch(exactRow, target.batchId, identity);
+  if (!binding.hasExactGo) fail("closed-human automatic recurring canary requires the exact successful GO 334");
+  const row = await refreshPolicyRow(
+    pruneStore,
+    exactRow.object_path,
+    CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  );
+  const durable = await verifyClosedHumanDurableEvidence({
+    row,
+    exactRow,
+    identity,
+    sql,
+    storageTarget,
+    storageDeps,
+    lockSession,
+    expectedTableId: target.tableId,
+  });
+  return {
+    ...durable,
+    marker: null,
+  };
+}
+
 async function completeClosedHumanAutomaticLifecycle({
   sql,
   row,
@@ -4315,13 +4458,10 @@ function closedHumanAutomaticBatchReport({
 async function verifyClosedHumanCompletedAutomaticCycle({
   row,
   identity,
-  env,
-  tempRoot,
   sql,
   lockSession,
   pruneStore,
   storageTarget,
-  verifyBucket,
   storageDeps = {},
 } = {}) {
   const exactRow = await refreshPolicyRow(
@@ -4329,35 +4469,36 @@ async function verifyClosedHumanCompletedAutomaticCycle({
     row.object_path,
     CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
   );
-  const binding = assertClosedHumanExecuteBatch(exactRow, text(exactRow.batch_id), identity);
-  if (binding.receiptCount !== 5) fail("closed-human completed cycle does not have a complete prune receipt");
-  const dryRun = await runClosedHumanAutomaticDryRunWithRetry({
+  const durableEvidence = await verifyClosedHumanDurableEvidence({
     row: exactRow,
     identity,
-    env,
-    cwd: tempRoot,
     sql,
     lockSession,
-    pruneStore,
     storageTarget,
-    verifyBucket,
     storageDeps,
   });
-  if (dryRun.dry.state !== "already_pruned") {
-    fail(`closed-human completed cycle did not revalidate as already_pruned: ${dryRun.dry.state}`);
+  const isActivationCanary = text(exactRow.batch_id) === CLOSED_HUMAN_AUTOMATIC_ACTIVATION.batchId;
+  const markerRows = isActivationCanary
+    ? []
+    : await sql.unsafe(CLOSED_HUMAN_LIFECYCLE_MARKER_SQL, [durableEvidence.evidence.closedHumanTableId]);
+  if (markerRows.length > 1
+    || (markerRows.length === 1
+      && text(markerRows[0]?.table_id) !== durableEvidence.evidence.closedHumanTableId)) {
+    fail(`closed-human completed cycle table marker is not unique for batch ${exactRow.batch_id}`);
   }
-  const inspectRecovery = storageDeps.inspectDurableRecovery || inspectDurableRecovery;
-  const durable = await inspectRecovery(storageTarget, dryRun.row, storageDeps);
-  assertResumeRecoveryState(dryRun.row, durable);
-  assertDurableRecoveryForEvidence({
-    row: dryRun.row,
-    identity,
-    evidence: dryRun.dry.evidence,
-    durable,
-    target: { target: "stage" },
-  });
-  const marker = await readExactHumanRetentionMarker(sql, dryRun.dry.evidence.closedHumanTableId);
-  return { row: dryRun.row, dry: dryRun.dry, durable, marker, dryRun };
+  const marker = markerRows[0] || null;
+  return {
+    row: durableEvidence.row,
+    dry: durableEvidence.dry,
+    durable: durableEvidence.durable,
+    marker,
+    tablePresent: marker != null,
+    dryRun: {
+      dryRunAttempts: 1,
+      dryRunRetryCount: 0,
+      dryRunSqlstates: [],
+    },
+  };
 }
 
 async function processClosedHumanAutomaticCycle({
@@ -4826,17 +4967,13 @@ export async function runAutomaticClosedHumanStageAutomation({
         assertClosedHumanAutomaticPolicy(policyRow);
         markAutomaticPhase("automatic.storage-preflight");
         await verifyBucket(storageTarget);
-        const canary = await verifyClosedHumanCanaryActivationPrerequisites({
+        const canary = await verifyClosedHumanCanaryRecurringPrerequisites({
           identity,
-          env: moduleEnv,
-          tempRoot,
           sql,
           pruneStore,
           storageTarget,
-          verifyBucket,
           storageDeps: deps,
           lockSession,
-          automatic: true,
         });
         await assertAdvisoryLock(sql, lockSession);
 
@@ -4891,16 +5028,13 @@ export async function runAutomaticClosedHumanStageAutomation({
         const completed = await verifyClosedHumanCompletedAutomaticCycle({
           row: ownCycle.latestCompleted,
           identity,
-          env: moduleEnv,
-          tempRoot,
           sql,
           lockSession,
           pruneStore,
           storageTarget,
-          verifyBucket,
           storageDeps: deps,
         });
-        if (!completed.marker.human_retention_complete_at) {
+        if (completed.tablePresent && !completed.marker.human_retention_complete_at) {
           const lifecycle = await completeClosedHumanAutomaticLifecycle({
             sql,
             row: completed.row,
