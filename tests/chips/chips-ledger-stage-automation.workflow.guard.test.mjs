@@ -125,8 +125,12 @@ assert.match(concurrencyBlock, /^  queue: max$/m);
 assert.doesNotMatch(concurrencyBlock, /github\.ref|github\.event|inputs\./);
 
 assert.match(workflow, /vars\.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1'/);
-assert.equal((workflow.match(/^    timeout-minutes: 60$/gm) || []).length, 1);
-assert.equal((workflow.match(/^    timeout-minutes: 30$/gm) || []).length, 0);
+const canonicalStageStart = workflow.indexOf("  stage-archive:");
+const validationJobStart = workflow.indexOf("\n  pr-937-escrow-audit:", canonicalStageStart);
+assert.ok(canonicalStageStart >= 0 && validationJobStart > canonicalStageStart);
+const canonicalStageJob = workflow.slice(canonicalStageStart, validationJobStart);
+assert.equal((canonicalStageJob.match(/^    timeout-minutes: 60$/gm) || []).length, 1);
+assert.equal((canonicalStageJob.match(/^    timeout-minutes: 30$/gm) || []).length, 0);
 assert.match(workflow, /SUPABASE_STAGE_DB_URL: \${{ secrets\.SUPABASE_STAGE_DB_URL }}/);
 assert.match(workflow, /SUPABASE_STAGE_URL: \${{ secrets\.SUPABASE_STAGE_URL }}/);
 assert.match(workflow, /SUPABASE_STAGE_SERVICE_ROLE_KEY: \${{ secrets\.SUPABASE_STAGE_SERVICE_ROLE_KEY }}/);
