@@ -7,6 +7,7 @@ const moduleSource = fs.readFileSync("scripts/ops/chips-ledger-stage-escrow-rete
 const storageSource = fs.readFileSync("scripts/ops/chips-ledger-archive-store.mjs", "utf8");
 const migration = fs.readFileSync("supabase/migrations/20260902100000_chips_ledger_escrow_account_retirement.sql", "utf8");
 const canaryMigration = fs.readFileSync("supabase/migrations/20260902110000_chips_ledger_escrow_account_retention_canary_revalidation.sql", "utf8");
+const executeGuardMigration = fs.readFileSync("supabase/migrations/20260906100000_chips_ledger_escrow_execute_candidate_access.sql", "utf8");
 
 test("scheduled and external fallback invoke escrow retention without rollout inputs", () => {
   const step = workflow.match(/- name: Run Stage escrow account retention[\s\S]*?(?=\n\s+- name:)/)?.[0] || "";
@@ -70,6 +71,41 @@ test("retirement is Stage-only and disabled by default", () => {
   assert.match(canaryMigration, /chips_archive_uuid_ids_sha256\(current_account_ids\)/);
   assert.match(canaryMigration, /Canary account ID SHA-256 does not match current candidate/);
   assert.match(canaryMigration, /account_retirement_snapshot_sha256/);
+});
+
+test("escrow execute guard keeps exact evidence while patching two candidate-ID guards", () => {
+  assert.match(executeGuardMigration, /create extension if not exists pg_trgm/i);
+  assert.equal(
+    (executeGuardMigration.match(/create index if not exists chips_transactions_[a-z_]+_trgm_idx/gi) || []).length,
+    3,
+    "the forward migration must add exactly three independent trigram indexes",
+  );
+  assert.match(executeGuardMigration, /lower\(coalesce\(reference, ''\)\)\) gin_trgm_ops/i);
+  assert.match(executeGuardMigration, /lower\(coalesce\(idempotency_key, ''\)\)\) gin_trgm_ops/i);
+  assert.match(executeGuardMigration, /lower\(coalesce\(metadata::text, ''\)\)\) gin_trgm_ops/i);
+  assert.match(executeGuardMigration, /chips_retire_stage_escrow_accounts\(bigint,uuid\[\],text,text,text,boolean,text\)/);
+  assert.match(executeGuardMigration, /occurrence_count integer/);
+  assert.match(executeGuardMigration, /occurrence_count <> 2/);
+  assert.match(executeGuardMigration, /pg_catalog\.replace\(definition, old_guard, replacement\)/);
+
+  const replacement = executeGuardMigration.match(/replacement text := \$replacement\$([\s\S]*?)\$replacement\$/)?.[1] || "";
+  assert.match(replacement, /from pg_catalog\.unnest\(table_ids\) as ids\(table_id\)/);
+  assert.equal((replacement.match(/^\s+cross join lateral \($/gim) || []).length, 3);
+  assert.equal((replacement.match(/^\s+union\s*$/gim) || []).length, 2);
+  assert.match(replacement, /candidate_transaction_ids as materialized/);
+  assert.match(replacement, /join public\.chips_transactions transactions\s+on transactions\.id = candidates\.id/i);
+  assert.match(replacement, /from wanted[\s\S]*?like '%' \|\| wanted\.table_id::text \|\| '%'/i);
+
+  assert.match(replacement, /pg_catalog\.lower\(coalesce\(transactions\.reference, ''\)\)\s+like/i);
+  assert.match(replacement, /pg_catalog\.lower\(coalesce\(transactions\.idempotency_key, ''\)\)\s+like/i);
+  assert.match(replacement, /pg_catalog\.lower\(coalesce\(transactions\.metadata::text, ''\)\)\s+like/i);
+  assert.match(replacement, /pg_catalog\.strpos\(pg_catalog\.lower\(coalesce\(transactions\.reference, ''\)\), wanted\.table_id::text\) > 0/i);
+  assert.match(replacement, /pg_catalog\.strpos\(pg_catalog\.lower\(transactions\.idempotency_key\), wanted\.table_id::text\) > 0/i);
+  assert.match(replacement, /pg_catalog\.strpos\(pg_catalog\.lower\(transactions\.metadata::text\), wanted\.table_id::text\) > 0/i);
+  assert.match(replacement, /from wanted\s+where pg_catalog\.strpos[\s\S]*?transactions\.metadata::text/i);
+  assert.doesNotMatch(replacement, /from public\.chips_transactions transactions\s+where exists/i);
+  assert.doesNotMatch(executeGuardMigration, /statement_timeout|enable_seqscan/i);
+  assert.doesNotMatch(executeGuardMigration, /chips_assert_bot_only_archive_proof|RETENTION_REGISTRY_/);
 });
 
 test("scheduled module does not contain archive export, proof registration or overwrite calls", () => {
