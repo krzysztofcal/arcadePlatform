@@ -376,8 +376,7 @@ export async function runWithRetirementRetry({
   fail("retirement retry loop exhausted");
 }
 
-export const RETENTION_BATCHES_SQL = `
-select
+const RETENTION_BATCH_PROJECTION = `
   object_path, batch_id::text as batch_id, project_ref, format_version::text as format_version,
   cutoff::text as cutoff, cursor_start_created_at::text as cursor_start_created_at,
   cursor_start_id::text as cursor_start_id, cursor_end_created_at::text as cursor_end_created_at,
@@ -403,9 +402,9 @@ select
   registry_cleaned_at::text as registry_cleaned_at,
   registry_cleaned_key_count::text as registry_cleaned_key_count,
   registry_cleaned_keys_sha256,
-  exists (select 1 from public.poker_tables tables where tables.id = batches.bot_only_table_id) as bot_only_table_exists,
-  (select tables.status from public.poker_tables tables where tables.id = batches.bot_only_table_id) as bot_only_table_status,
-  (select tables.bot_only_retention_complete_at::text from public.poker_tables tables where tables.id = batches.bot_only_table_id) as bot_only_retention_complete_at,
+  false as bot_only_table_exists,
+  null::text as bot_only_table_status,
+  null::text as bot_only_retention_complete_at,
   legacy_allowlist_sha256,
   legacy_batch_table_ids_sha256,
   legacy_master_table_ids,
@@ -424,16 +423,40 @@ select
   account_retirement_account_ids_sha256,
   account_retirement_recovery_object_path,
   account_retirement_recovery_object_sha256,
-  account_retirement_snapshot_sha256
+  account_retirement_snapshot_sha256`;
+
+// Only missing account-table identities reach this query.  Existing OPEN and
+// CLOSED tables are classified from the account/table snapshot and must not
+// cause an archive-history scan.
+export const RETENTION_BATCHES_SQL = `
+select
+${RETENTION_BATCH_PROJECTION}
 from public.chips_ledger_archive_batches batches
 where batches.project_ref = $1
-  and batches.source_policy_id = any($2::text[])
+  and batches.source_policy_id = $2
+  and batches.bot_only_table_id = any($3::uuid[])
 order by batches.created_at asc, batches.batch_id asc;`;
 
 export const RETENTION_PROOFS_SQL = `
 select proofs.*
 from public.chips_legacy_stage_allowlist_proofs proofs
 where proofs.batch_id = any($1::bigint[]);`;
+
+export const RETENTION_LEGACY_PROOFS_FOR_TABLES_SQL = `
+select proofs.*
+from public.chips_legacy_stage_allowlist_proofs proofs
+where proofs.project_ref = '${STAGE_PROJECT_REF}'
+  and proofs.source_policy_id = '${LEGACY_STAGE_ALLOWLIST_POLICY_ID}'
+  and proofs.batch_table_ids && $1::uuid[];`;
+
+export const RETENTION_LEGACY_BATCHES_SQL = `
+select
+${RETENTION_BATCH_PROJECTION}
+from public.chips_ledger_archive_batches batches
+where batches.project_ref = $1
+  and batches.source_policy_id = $2
+  and batches.batch_id = any($3::bigint[])
+order by batches.created_at asc, batches.batch_id asc;`;
 
 export const RETENTION_RUNS_SQL = `
 select runs.*
@@ -457,7 +480,8 @@ where accounts.system_key like 'POKER_TABLE%'
 order by accounts.id asc;`;
 
 export const RETENTION_TABLES_SQL = `
-select id::text as id, status, created_at::text as created_at, updated_at::text as updated_at
+select id::text as id, status, bot_only_retention_complete_at::text as bot_only_retention_complete_at,
+       created_at::text as created_at, updated_at::text as updated_at
 from public.poker_tables
 where id = any($1::uuid[]);`;
 
@@ -589,20 +613,6 @@ export function mergeRegistryAggregateRows(tableRows = [], batchRows = []) {
   return [...merged.values()];
 }
 
-function tableIdsForRows(rows, proofByBatch) {
-  const ids = new Set();
-  for (const row of rows) {
-    const proof = proofByBatch.get(text(row.batch_id));
-    try {
-      for (const id of archiveBatchTableIds(row, proof)) ids.add(id);
-    } catch {
-      // The account audit reports malformed batches as blockers; it does not
-      // turn an invalid historical row into a query-wide outage.
-    }
-  }
-  return [...ids].sort();
-}
-
 function completeRetirement(row) {
   return retirementReceiptState(row) === "complete";
 }
@@ -672,11 +682,27 @@ export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAG
       [ESCROW_ACCOUNT_RETENTION_POLICY_ID],
       "escrow_retention_policy",
     );
-    const batchRows = (await read(RETENTION_BATCHES_SQL, [STAGE_PROJECT_REF, [...ALLOWED_POLICIES]], "escrow_retention_archive_batches", "archive_batch")).map(normalizeRow);
-    const batchIds = batchRows.map((row) => text(row.batch_id)).filter(Boolean);
-    const proofRows = batchIds.length
-      ? (await read(RETENTION_PROOFS_SQL, [batchIds], "escrow_retention_legacy_proofs", "proof")).map(normalizeRow)
+    const accountRows = (await read(RETENTION_ACCOUNTS_SQL, [], "escrow_retention_accounts", "account")).map(normalizeRow);
+    const accountsIds = accountRows.map((row) => text(row.id).toLowerCase()).filter((id) => UUID_RE.test(id));
+    const accountTableIds = accountRows.map((row) => accountTableIdFromSystemKey(row.system_key)).filter(Boolean);
+    const tableIds = [...new Set(accountTableIds)].sort();
+    const tables = tableIds.length ? (await read(RETENTION_TABLES_SQL, [tableIds], "escrow_retention_tables", "table_binding")).map(normalizeRow) : [];
+    const tableById = mapBy(tables, "id");
+    const missingTableIds = tableIds.filter((tableId) => !tableById.has(tableId));
+    const botOnlyBatchRows = missingTableIds.length
+      ? (await read(RETENTION_BATCHES_SQL, [STAGE_PROJECT_REF, BOT_ONLY_RETENTION_POLICY_ID, missingTableIds], "escrow_retention_bot_only_archive_batches", "archive_batch")).map(normalizeRow)
       : [];
+    const legacyProofRows = missingTableIds.length
+      ? (await read(RETENTION_LEGACY_PROOFS_FOR_TABLES_SQL, [missingTableIds], "escrow_retention_legacy_proofs", "proof")).map(normalizeRow)
+      : [];
+    const legacyBatchIds = [...new Set(legacyProofRows
+      .map((row) => text(row.batch_id))
+      .filter((id) => /^[0-9]+$/.test(id)))].sort((left, right) => Number(left) - Number(right));
+    const legacyBatchRows = legacyBatchIds.length
+      ? (await read(RETENTION_LEGACY_BATCHES_SQL, [STAGE_PROJECT_REF, LEGACY_STAGE_ALLOWLIST_POLICY_ID, legacyBatchIds], "escrow_retention_legacy_archive_batches", "archive_batch")).map(normalizeRow)
+      : [];
+    const batchRows = [...botOnlyBatchRows, ...legacyBatchRows];
+    const proofRows = legacyProofRows;
     const proofByBatch = mapBy(proofRows, "batch_id");
     const runIds = batchRows
       .filter((row) => row.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID && row.legacy_run_id != null)
@@ -684,12 +710,6 @@ export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAG
       .filter((id) => /^[0-9]+$/.test(id));
     const runRows = runIds.length ? (await read(RETENTION_RUNS_SQL, [runIds], "escrow_retention_legacy_runs", "run_plan_binding")).map(normalizeRow) : [];
     const runById = mapBy(runRows, "run_id");
-    const batchTableIds = tableIdsForRows(batchRows, proofByBatch);
-    const accountRows = (await read(RETENTION_ACCOUNTS_SQL, [], "escrow_retention_accounts", "account")).map(normalizeRow);
-    const accountsIds = accountRows.map((row) => text(row.id).toLowerCase()).filter((id) => UUID_RE.test(id));
-    const accountTableIds = accountRows.map((row) => accountTableIdFromSystemKey(row.system_key)).filter(Boolean);
-    const tableIds = [...new Set([...batchTableIds, ...accountTableIds])].sort();
-    const tables = tableIds.length ? (await read(RETENTION_TABLES_SQL, [tableIds], "escrow_retention_tables", "table_binding")).map(normalizeRow) : [];
     const entries = accountsIds.length ? await read(RETENTION_ENTRY_COUNTS_SQL, [accountsIds], "escrow_retention_entry_counts", "entry_dependency") : [];
     const snapshots = accountsIds.length ? await read(RETENTION_SNAPSHOT_COUNTS_SQL, [accountsIds], "escrow_retention_snapshot_counts", "snapshot_dependency") : [];
     const unknownFks = await read(RETENTION_UNKNOWN_FK_SQL, [], "escrow_retention_unknown_foreign_keys", "catalog_guard");
@@ -697,7 +717,6 @@ export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAG
     const identity = text(identityRows[0]?.system_identifier);
     const fenceActive = fenceRows[0]?.active === true || fenceRows[0]?.active === "t";
     const fenceEnforcementActive = controlRows[0]?.enforcement_active === true || controlRows[0]?.enforcement_active === "t";
-    const tableById = mapBy(tables, "id");
     const entryCountByAccount = mapCountBy(entries);
     const snapshotCountByAccount = mapCountBy(snapshots);
     const batchMatchesByTable = new Map();

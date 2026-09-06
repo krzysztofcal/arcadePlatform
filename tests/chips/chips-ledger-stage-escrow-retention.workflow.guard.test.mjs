@@ -85,8 +85,17 @@ test("retention archive batch reads keep microsecond timestamp text precision", 
   // postgres.js Date round-trip (which truncates to milliseconds).  Retention
   // must do the same: ms-truncated bot_only_newest_created_at makes the
   // schema-v2 artifact table summary check fail semantically (run 33735273784).
-  const batchesSql = moduleSource.match(/export const RETENTION_BATCHES_SQL = `[\s\S]*?`;/)?.[0] || "";
+  const batchesSql = [
+    moduleSource.match(/const RETENTION_BATCH_PROJECTION = `[\s\S]*?`;/)?.[0] || "",
+    moduleSource.match(/export const RETENTION_BATCHES_SQL = `[\s\S]*?`;/)?.[0] || "",
+    moduleSource.match(/export const RETENTION_LEGACY_BATCHES_SQL = `[\s\S]*?`;/)?.[0] || "",
+  ].join("\n");
   assert.doesNotMatch(batchesSql, /batches\.\*/);
+  assert.match(moduleSource, /RETENTION_BATCHES_SQL[\s\S]*?bot_only_table_id = any\(\$3::uuid\[\]\)/);
+  assert.match(moduleSource, /RETENTION_LEGACY_PROOFS_FOR_TABLES_SQL[\s\S]*?batch_table_ids && \$1::uuid\[\]/);
+  assert.match(moduleSource, /RETENTION_LEGACY_BATCHES_SQL[\s\S]*?batch_id = any\(\$3::bigint\[\]\)/);
+  assert.doesNotMatch(batchesSql, /exists\s*\(\s*select 1 from public\.poker_tables/i);
+  assert.doesNotMatch(batchesSql, /bot_only_table_status[^\n]*select tables\./i);
   assert.match(batchesSql, /cutoff::text as cutoff/);
   assert.match(batchesSql, /first_created_at::text as first_created_at/);
   assert.match(batchesSql, /last_created_at::text as last_created_at/);

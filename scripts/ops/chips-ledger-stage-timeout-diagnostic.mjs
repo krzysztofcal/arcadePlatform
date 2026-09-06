@@ -49,9 +49,166 @@ select pg_catalog.pg_get_functiondef(
 
 // These are read-only EXPLAIN probes of the expensive CTEs in the applied
 // proof helper.  The predicates intentionally mirror the helper; parameters
-// are populated only from the exact batch archive below.
+// are populated only from the exact batch archive below.  Keep the target
+// probe on the same independent candidate-ID paths as the forward proof
+// migration; otherwise the diagnostic would explain the historical OR query.
 export const BOT_ONLY_PROOF_TARGET_TRANSACTIONS_EXPLAIN_SQL = `
-with target_transactions as (
+with table_transaction_rows as (
+  select transactions.id,
+         transactions.idempotency_key,
+         transactions.reference,
+         transactions.metadata
+    from public.chips_transactions transactions
+   where transactions.tx_type = 'TABLE_BUY_IN'::public.chips_tx_type
+
+  union all
+
+  select transactions.id,
+         transactions.idempotency_key,
+         transactions.reference,
+         transactions.metadata
+    from public.chips_transactions transactions
+   where transactions.tx_type = 'TABLE_CASH_OUT'::public.chips_tx_type
+), candidate_transaction_ids as (
+  select transactions.id
+    from public.chips_transactions transactions
+   where transactions.id = any(coalesce($1::uuid[], array[]::uuid[]))
+     and transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
+
+  union
+
+  select transactions.id
+    from table_transaction_rows transactions
+   where pg_catalog.lower(transactions.idempotency_key) like any (array[
+       'join-buyin:' || $2::uuid::text || ':%',
+       'bot-seed-buyin:' || $2::uuid::text || ':%',
+       'managed-bot-seed-buyin:' || $2::uuid::text || ':%'
+     ])
+     and transactions.idempotency_key ~* ('^(join-buyin|bot-seed-buyin|managed-bot-seed-buyin):' || $2::uuid || ':[^:]+(:[^:]+)*$')
+
+  union
+
+  select transactions.id
+    from table_transaction_rows transactions
+   where pg_catalog.lower(transactions.idempotency_key) like any (array[
+       'poker:leave:' || $2::uuid::text || ':%',
+       'poker:inactive_cleanup:' || $2::uuid::text || ':%'
+     ])
+     and transactions.idempotency_key ~* ('^poker:(leave|inactive_cleanup):' || $2::uuid || ':[^:]+(:[^:]+)*$')
+
+  union
+
+  select transactions.id
+    from table_transaction_rows transactions
+   where pg_catalog.lower(transactions.idempotency_key) like any (array[
+       'poker:rebuy:v1:' || $2::uuid::text || ':%',
+       'poker:deferred-leave:v1:' || $2::uuid::text || ':%',
+       'poker:bot-terminal-cashout:v1:' || $2::uuid::text || ':%',
+       'poker:human-terminal-cashout:v1:' || $2::uuid::text || ':%',
+       'poker:bot-replacement-buyin:v1:' || $2::uuid::text || ':%',
+       'poker:managed-bot-top-up:v1:' || $2::uuid::text || ':%'
+     ])
+     and transactions.idempotency_key ~* ('^poker:(rebuy|deferred-leave|bot-terminal-cashout|human-terminal-cashout|bot-replacement-buyin|managed-bot-top-up):v1:' || $2::uuid || ':[^:]+(:[^:]+)*$')
+
+  union
+
+  select transactions.id
+    from table_transaction_rows transactions
+   where transactions.metadata is not null
+     and pg_catalog.jsonb_typeof(transactions.metadata) = 'object'
+     and transactions.metadata ? 'tableId'
+     and nullif(pg_catalog.btrim(transactions.metadata->>'tableId'), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     and pg_catalog.lower(pg_catalog.btrim(transactions.metadata->>'tableId')) = $2::text
+
+  union
+
+  select transactions.id
+    from table_transaction_rows transactions
+   where transactions.metadata is not null
+     and pg_catalog.jsonb_typeof(transactions.metadata) = 'string'
+     and pg_catalog.pg_input_is_valid(transactions.metadata #>> '{}', 'jsonb'::text)
+     and pg_catalog.jsonb_typeof((transactions.metadata #>> '{}')::jsonb) = 'object'
+     and ((transactions.metadata #>> '{}')::jsonb) ? 'tableId'
+     and nullif(pg_catalog.btrim(((transactions.metadata #>> '{}')::jsonb)->>'tableId'), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     and pg_catalog.lower(pg_catalog.btrim(((transactions.metadata #>> '{}')::jsonb)->>'tableId')) = $2::text
+
+  union
+
+  select transactions.id
+    from table_transaction_rows transactions
+   where pg_catalog.lower(transactions.reference) like any (array[
+       'table:' || $2::uuid::text || '%',
+       'poker-rebuy:' || $2::uuid::text || '%',
+       'bot_seed_buy_in:' || $2::uuid::text || '%',
+       'bot_replacement_buy_in:' || $2::uuid::text || '%',
+       'managed_bot_top_up:' || $2::uuid::text || '%'
+     ])
+     and transactions.reference ~* ('^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):' || $2::uuid || '(:.*)?$')
+
+  union
+
+  select registry.transaction_id
+    from public.chips_transaction_idempotency registry
+   where registry.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
+     and registry.table_id = $2::uuid
+
+  union
+
+  select registry.transaction_id
+    from public.chips_transaction_idempotency registry
+   where registry.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
+     and registry.table_id is null
+     and pg_catalog.lower(registry.idempotency_key) like any (array[
+       'join-buyin:' || $2::uuid::text || ':%',
+       'bot-seed-buyin:' || $2::uuid::text || ':%',
+       'managed-bot-seed-buyin:' || $2::uuid::text || ':%',
+       'poker:leave:' || $2::uuid::text || ':%',
+       'poker:inactive_cleanup:' || $2::uuid::text || ':%',
+       'poker:rebuy:v1:' || $2::uuid::text || ':%',
+       'poker:deferred-leave:v1:' || $2::uuid::text || ':%',
+       'poker:bot-terminal-cashout:v1:' || $2::uuid::text || ':%',
+       'poker:human-terminal-cashout:v1:' || $2::uuid::text || ':%',
+       'poker:bot-replacement-buyin:v1:' || $2::uuid::text || ':%',
+       'poker:managed-bot-top-up:v1:' || $2::uuid::text || ':%'
+     ])
+     and registry.idempotency_key ~* ('^(join-buyin|bot-seed-buyin|managed-bot-seed-buyin):' || $2::uuid || ':[^:]+(:[^:]+)*$')
+
+  union
+
+  select registry.transaction_id
+    from public.chips_transaction_idempotency registry
+   where registry.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
+     and registry.table_id is null
+     and pg_catalog.lower(registry.idempotency_key) like any (array[
+       'poker:leave:' || $2::uuid::text || ':%',
+       'poker:inactive_cleanup:' || $2::uuid::text || ':%'
+     ])
+     and registry.idempotency_key ~* ('^poker:(leave|inactive_cleanup):' || $2::uuid || ':[^:]+(:[^:]+)*$')
+
+  union
+
+  select registry.transaction_id
+    from public.chips_transaction_idempotency registry
+   where registry.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
+     and registry.table_id is null
+     and pg_catalog.lower(registry.idempotency_key) like any (array[
+       'poker:rebuy:v1:' || $2::uuid::text || ':%',
+       'poker:deferred-leave:v1:' || $2::uuid::text || ':%',
+       'poker:bot-terminal-cashout:v1:' || $2::uuid::text || ':%',
+       'poker:human-terminal-cashout:v1:' || $2::uuid::text || ':%',
+       'poker:bot-replacement-buyin:v1:' || $2::uuid::text || ':%',
+       'poker:managed-bot-top-up:v1:' || $2::uuid::text || ':%'
+     ])
+     and registry.idempotency_key ~* ('^poker:(rebuy|deferred-leave|bot-terminal-cashout|human-terminal-cashout|bot-replacement-buyin|managed-bot-top-up):v1:' || $2::uuid || ':[^:]+(:[^:]+)*$')
+
+  union
+
+  select entries.transaction_id
+    from public.chips_entries entries
+    join public.chips_accounts accounts on accounts.id = entries.account_id
+   where accounts.account_type::text = 'ESCROW'
+     and accounts.system_key = 'POKER_TABLE:' || $2::uuid::text
+), target_transactions as (
   select transactions.id,
          transactions.idempotency_key,
          transactions.reference,
@@ -65,7 +222,8 @@ with target_transactions as (
              then pg_catalog.lower(pg_catalog.btrim(pg_catalog.split_part(transactions.idempotency_key, ':', 4)))
            else null
          end as key_table_id
-    from public.chips_transactions transactions
+    from candidate_transaction_ids candidates
+    join public.chips_transactions transactions on transactions.id = candidates.id
     cross join lateral (
       select case
                when transactions.metadata is not null
@@ -78,40 +236,7 @@ with target_transactions as (
                else null::jsonb
              end as normalized_metadata
     ) normalized
-   where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
-     and (
-       transactions.id = any(coalesce($1::uuid[], array[]::uuid[]))
-       or transactions.idempotency_key ~* ('^(join-buyin|bot-seed-buyin|managed-bot-seed-buyin):' || $2::uuid || ':[^:]+(:[^:]+)*$')
-       or transactions.idempotency_key ~* ('^poker:(leave|inactive_cleanup):' || $2::uuid || ':[^:]+(:[^:]+)*$')
-       or transactions.idempotency_key ~* ('^poker:(rebuy|deferred-leave|bot-terminal-cashout|human-terminal-cashout|bot-replacement-buyin|managed-bot-top-up):v1:' || $2::uuid || ':[^:]+(:[^:]+)*$')
-       or (
-         normalized.normalized_metadata is not null
-         and pg_catalog.jsonb_typeof(normalized.normalized_metadata) = 'object'
-         and normalized.normalized_metadata ? 'tableId'
-         and nullif(pg_catalog.btrim(normalized.normalized_metadata->>'tableId'), '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-         and pg_catalog.lower(pg_catalog.btrim(normalized.normalized_metadata->>'tableId')) = $2::text
-       )
-       or transactions.reference ~* ('^(table|poker-rebuy|BOT_SEED_BUY_IN|BOT_REPLACEMENT_BUY_IN|MANAGED_BOT_TOP_UP):' || $2::uuid || '(:.*)?$')
-       or exists (
-         select 1
-           from public.chips_transaction_idempotency registry
-          where registry.transaction_id = transactions.id
-            and registry.table_id is null
-            and (
-              registry.idempotency_key ~* ('^(join-buyin|bot-seed-buyin|managed-bot-seed-buyin):' || $2::uuid || ':[^:]+(:[^:]+)*$')
-              or registry.idempotency_key ~* ('^poker:(leave|inactive_cleanup):' || $2::uuid || ':[^:]+(:[^:]+)*$')
-              or registry.idempotency_key ~* ('^poker:(rebuy|deferred-leave|bot-terminal-cashout|human-terminal-cashout|bot-replacement-buyin|managed-bot-top-up):v1:' || $2::uuid || ':[^:]+(:[^:]+)*$')
-            )
-       )
-       or exists (
-         select 1
-           from public.chips_entries entries
-           join public.chips_accounts accounts on accounts.id = entries.account_id
-          where entries.transaction_id = transactions.id
-            and accounts.account_type::text = 'ESCROW'
-            and accounts.system_key = 'POKER_TABLE:' || $2::uuid::text
-       )
-     )
+   where transactions.tx_type in ('TABLE_BUY_IN'::public.chips_tx_type, 'TABLE_CASH_OUT'::public.chips_tx_type)
 )
 select target.id, target.idempotency_key, target.reference, target.normalized_metadata, target.key_table_id
   from target_transactions target;`;

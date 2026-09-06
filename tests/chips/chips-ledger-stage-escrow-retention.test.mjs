@@ -42,6 +42,9 @@ import {
   registryCountFor,
   RETENTION_REGISTRY_BATCH_COUNTS_SQL,
   RETENTION_REGISTRY_TABLE_COUNTS_SQL,
+  RETENTION_BATCHES_SQL,
+  RETENTION_LEGACY_BATCHES_SQL,
+  RETENTION_LEGACY_PROOFS_FOR_TABLES_SQL,
   reportSummary,
   retirementReceiptState,
   runWithRetirementRetry,
@@ -66,7 +69,7 @@ function uuidIdsSha256(ids) {
   return crypto.createHash("sha256").update(`${ids.join("\n")}\n`, "utf8").digest("hex");
 }
 
-function reservedAuditSession({ failOn = null, policyEnabled = false, batchRows = [], accountRows = [], tableRows = [], registryRows = [] } = {}) {
+function reservedAuditSession({ failOn = null, policyEnabled = false, batchRows = [], legacyBatchRows = [], legacyProofRows = [], accountRows = [], tableRows = [], registryRows = [] } = {}) {
   const queries = [];
   let transactionOpen = false;
   let released = false;
@@ -101,6 +104,9 @@ function reservedAuditSession({ failOn = null, policyEnabled = false, batchRows 
       if (query.includes("chips_stage_escrow_account_retention_policy")) {
         return [{ policy_id: "stage-ledger-escrow-account-retention-v1", enabled: policyEnabled }];
       }
+      if (query === RETENTION_BATCHES_SQL) return batchRows;
+      if (query === RETENTION_LEGACY_PROOFS_FOR_TABLES_SQL) return legacyProofRows;
+      if (query === RETENTION_LEGACY_BATCHES_SQL) return legacyBatchRows;
       if (query.includes("from public.chips_ledger_archive_batches batches")) return batchRows;
       if (query.includes("from public.chips_accounts accounts")) return accountRows;
       if (query.includes("from public.poker_tables")) return tableRows;
@@ -764,6 +770,13 @@ test("registry scope excludes existing tables and preserves the missing-table re
       registryRows: [{ table_id: TABLE_ID, archive_batch_id: "101", count: "2" }],
     });
     const result = await readOnlyEscrowAudit({ sql: session, telemetry: false });
+    const archiveBatchQueries = session.queries.filter(({ query }) => query === RETENTION_BATCHES_SQL);
+    assert.equal(archiveBatchQueries.length, missing ? 1 : 0, "archive lookup must be scoped to missing table IDs");
+    if (missing) assert.deepEqual(archiveBatchQueries[0].parameters, [
+      "krydukthwdvccggbyjfw",
+      "stage-ledger-bot-only-retention-7d-v1",
+      [TABLE_ID],
+    ]);
     const tableQueries = session.queries.filter(({ query }) => query === RETENTION_REGISTRY_TABLE_COUNTS_SQL);
     const batchQueries = session.queries.filter(({ query }) => query === RETENTION_REGISTRY_BATCH_COUNTS_SQL);
     assert.equal(tableQueries.length, missing ? 1 : 0);
@@ -776,6 +789,33 @@ test("registry scope excludes existing tables and preserves the missing-table re
       assert.equal(residual.registryCount, 2);
     }
   }
+});
+
+test("missing legacy tables use proof overlap before bounded batch and run lookups", async () => {
+  const legacyBatchId = "202";
+  const session = reservedAuditSession({
+    legacyProofRows: [{ batch_id: legacyBatchId, batch_table_ids: [TABLE_ID] }],
+    legacyBatchRows: [{ batch_id: legacyBatchId, source_policy_id: "legacy_stage_allowlist_v1" }],
+    accountRows: [account()],
+  });
+  await readOnlyEscrowAudit({ sql: session, telemetry: false });
+  const botBatchQueries = session.queries.filter(({ query }) => query === RETENTION_BATCHES_SQL);
+  assert.equal(botBatchQueries.length, 1);
+  assert.deepEqual(botBatchQueries[0].parameters, [
+    "krydukthwdvccggbyjfw",
+    "stage-ledger-bot-only-retention-7d-v1",
+    [TABLE_ID],
+  ]);
+  const proofQueries = session.queries.filter(({ query }) => query === RETENTION_LEGACY_PROOFS_FOR_TABLES_SQL);
+  assert.equal(proofQueries.length, 1);
+  assert.deepEqual(proofQueries[0].parameters, [[TABLE_ID]]);
+  const batchQueries = session.queries.filter(({ query }) => query === RETENTION_LEGACY_BATCHES_SQL);
+  assert.equal(batchQueries.length, 1);
+  assert.deepEqual(batchQueries[0].parameters, [
+    "krydukthwdvccggbyjfw",
+    "legacy_stage_allowlist_v1",
+    [legacyBatchId],
+  ]);
 });
 
 test("audit reports null next_candidate for an empty backlog", async () => {
