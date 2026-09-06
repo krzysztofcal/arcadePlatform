@@ -14,12 +14,13 @@ concurrency:
 
 jobs:
   apply-stage:
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: ubuntu-latest
+    # Only same-repository PR heads targeting this repository's main branch may
+    # reach the self-hosted runner. Fork PRs are skipped before runner allocation.
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main' }}
+    runs-on: [self-hosted, linux, x64, stage-db-ipv6]
     permissions:
       contents: read
     env:
-      SUPABASE_STAGE_DB_URL: ${{ secrets.SUPABASE_STAGE_DB_URL }}
       SUPABASE_STAGE_PROJECT_REF: ${{ secrets.SUPABASE_STAGE_PROJECT_REF }}
     steps:
       - name: Checkout PR head
@@ -32,6 +33,62 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - name: Read-only direct Stage identity preflight
+        env:
+          SUPABASE_STAGE_DB_URL: ${{ secrets.SUPABASE_STAGE_DIRECT_DB_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_STAGE_DB_URL"
+          node --input-type=module <<'NODE'
+          import { spawnSync } from "node:child_process";
+
+          const raw = process.env.SUPABASE_STAGE_DB_URL;
+          let url;
+          try {
+            url = new URL(raw);
+          } catch {
+            throw new Error("SUPABASE_STAGE_DIRECT_DB_URL is not a valid URL");
+          }
+
+          if (!["postgres:", "postgresql:"].includes(url.protocol)
+            || url.hostname !== "db.krydukthwdvccggbyjfw.supabase.co"
+            || url.port !== "5432"
+            || !url.username
+            || !url.password
+            || !url.pathname || url.pathname === "/") {
+            throw new Error("SUPABASE_STAGE_DIRECT_DB_URL must target the exact direct Stage host and port");
+          }
+          if (process.env.SUPABASE_STAGE_PROJECT_REF !== "krydukthwdvccggbyjfw") {
+            throw new Error("SUPABASE_STAGE_PROJECT_REF mismatch");
+          }
+
+          const env = { ...process.env };
+          delete env.SUPABASE_STAGE_DB_URL;
+          env.PGHOST = url.hostname;
+          env.PGPORT = url.port;
+          env.PGUSER = decodeURIComponent(url.username);
+          env.PGPASSWORD = decodeURIComponent(url.password);
+          env.PGDATABASE = decodeURIComponent(url.pathname.slice(1));
+          env.PGSSLMODE = "require";
+
+          const result = spawnSync("psql", [
+            "--no-psqlrc",
+            "-v", "ON_ERROR_STOP=1",
+            "-At",
+            "-c", "select 1 as connectivity, (select system_identifier::text from pg_catalog.pg_control_system()) as system_identifier;",
+          ], { encoding: "utf8", env });
+          if (result.status !== 0) {
+            throw new Error(`direct Stage read-only query failed with exit ${result.status}`);
+          }
+
+          const [connectivity, systemIdentifier] = result.stdout.trim().split("|");
+          if (connectivity !== "1" || systemIdentifier !== "7656985631720456337") {
+            throw new Error("direct Stage system identifier mismatch");
+          }
+          process.stdout.write("direct Stage read-only preflight passed; system identifier verified\n");
+          NODE
 
       - name: Detect migration changes
         id: changed
@@ -67,6 +124,8 @@ jobs:
 
       - name: Validate stage migration secrets
         if: ${{ steps.changed.outputs.count != '0' }}
+        env:
+          SUPABASE_STAGE_DB_URL: ${{ secrets.SUPABASE_STAGE_DIRECT_DB_URL }}
         shell: bash
         run: |
           set -euo pipefail
@@ -77,13 +136,12 @@ jobs:
             *) echo "SUPABASE_STAGE_DB_URL must target SUPABASE_STAGE_PROJECT_REF"; exit 1 ;;
           esac
 
-      - name: Install PostgreSQL client
+      - name: Verify PostgreSQL client
         if: ${{ steps.changed.outputs.count != '0' }}
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
+          psql --version
 
       - name: Validate migration files
         if: ${{ steps.changed.outputs.count != '0' }}
@@ -92,6 +150,7 @@ jobs:
       - name: Apply PR migrations to shared stage DB
         if: ${{ steps.changed.outputs.count != '0' }}
         env:
+          SUPABASE_STAGE_DB_URL: ${{ secrets.SUPABASE_STAGE_DIRECT_DB_URL }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: node scripts/stage-db-migrate.mjs --apply --changed-from "$PR_BASE_SHA"
 

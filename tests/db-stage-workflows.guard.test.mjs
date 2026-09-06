@@ -33,7 +33,9 @@ test("db stage apply PR is guarded to repo PRs and shared stage only", () => {
   assert.match(text, /group: db-stage/);
   assert.match(text, /cancel-in-progress: false/);
   assert.match(text, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
-  assert.match(text, /SUPABASE_STAGE_DB_URL: \$\{\{ secrets\.SUPABASE_STAGE_DB_URL \}\}/);
+  assert.match(text, /runs-on: \[self-hosted, linux, x64, stage-db-ipv6\]/);
+  assert.match(text, /SUPABASE_STAGE_DB_URL: \$\{\{ secrets\.SUPABASE_STAGE_DIRECT_DB_URL \}\}/);
+  assert.match(text, /SUPABASE_STAGE_DIRECT_DB_URL must target the exact direct Stage host and port/);
   assert.match(text, /SUPABASE_STAGE_PROJECT_REF: \$\{\{ secrets\.SUPABASE_STAGE_PROJECT_REF \}\}/);
   assert.match(text, /SUPABASE_STAGE_DB_URL must target SUPABASE_STAGE_PROJECT_REF/);
   assert.match(text, /PR_BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
@@ -52,6 +54,7 @@ test("db stage apply PR is guarded to repo PRs and shared stage only", () => {
   assert.match(text, /No supabase\/migrations changes detected; stage DB apply skipped\./);
   assert.doesNotMatch(text, /pull_request_target:/);
   assert.doesNotMatch(text, /github\.base_ref/);
+  assert.doesNotMatch(text, /secrets\.SUPABASE_STAGE_DB_URL/);
   assert.doesNotMatch(text, /SUPABASE_DB_URL: \$\{\{ secrets\.SUPABASE_DB_URL \}\}/);
   assert.doesNotMatch(text, /db reset|drop schema|drop database|supabase db reset/i);
 });
