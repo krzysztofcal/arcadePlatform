@@ -14,7 +14,20 @@ test("scheduled and external fallback invoke escrow retention without rollout in
   assert.match(step, /github\.event_name == 'workflow_dispatch' && inputs\.mode == 'external-scheduled-automatic'/);
   assert.match(step, /node scripts\/ops\/chips-ledger-stage-escrow-retention\.mjs --automatic/);
   assert.doesNotMatch(step, /workflow_dispatch:\s*inputs|--execute|--batch-id|GO|inputs\.escrow_retention_|inputs\.approved_/);
-  assert.equal((workflow.match(/chips-ledger-stage-escrow-retention\.mjs/g) || []).length, 2);
+  assert.equal((workflow.match(/chips-ledger-stage-escrow-retention\.mjs/g) || []).length, 3);
+});
+
+test("PR 937 escrow audit is an exact owner-only read-only path", () => {
+  const job = workflow.match(/  pr-937-escrow-audit:[\s\S]*$/)?.[0] || "";
+  assert.match(job, /github\.event_name == 'workflow_dispatch'/);
+  assert.match(job, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
+  assert.match(job, /github\.actor == github\.repository_owner/);
+  assert.match(job, /github\.ref == 'refs\/heads\/ops\/pr-937-escrow-audit'/);
+  assert.match(job, /TARGET_SHA: 5eb0494550f1432168c29c0a6c6a46a50e7a4cdc/);
+  assert.match(job, /SUPABASE_STAGE_DB_URL: \$\{\{ secrets\.SUPABASE_STAGE_DIRECT_DB_URL \}\}/);
+  assert.match(job, /runs-on: \[self-hosted, linux, x64, stage-db-ipv6\]/);
+  assert.match(job, /--audit/);
+  assert.doesNotMatch(job, /--automatic|--execute|--authorize-canary|--activate|--prepare-only|--batch-id|GO |ACTIVATE /);
 });
 
 test("manual escrow retention modes are audit/verify only with retained recovery inputs", () => {
