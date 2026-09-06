@@ -34,6 +34,7 @@ const proofAccessPathMigration = fs.readFileSync("supabase/migrations/2026090517
 const proofTypeAccessPathMigration = fs.readFileSync("supabase/migrations/20260905171000_chips_ledger_bot_only_proof_type_access_path.sql", "utf8");
 const proofSeqscanGuardMigration = fs.readFileSync("supabase/migrations/20260905172000_chips_ledger_bot_only_proof_seqscan_guard.sql", "utf8");
 const proofSeqscanGuardRemovalMigration = fs.readFileSync("supabase/migrations/20260905173000_chips_ledger_bot_only_proof_remove_seqscan_hint.sql", "utf8");
+const scopedCleanupLifecycleGateMigration = fs.readFileSync("supabase/migrations/20260906120000_chips_ledger_bot_only_scoped_cleanup_lifecycle_gate.sql", "utf8");
 const closedTableCleanup = fs.readFileSync("ws-server/poker/persistence/closed-table-cleanup.mjs", "utf8");
 
 const TABLE_ID = "00000000-0000-4000-8000-000000000020";
@@ -419,6 +420,30 @@ function proofPerformanceContract() {
   assert.match(proofSeqscanGuardRemovalMigration, /from candidate_transaction_ids candidates/);
   assert.doesNotMatch(proofSeqscanGuardRemovalMigration, /set local statement_timeout/i);
   assert.doesNotMatch(proofSeqscanGuardRemovalMigration, /create index/i);
+}
+
+function scopedCleanupLifecycleGateContract() {
+  const oldGate = "  perform public.chips_assert_bot_only_table_lifecycle_gate(batch.bot_only_table_id, batch.batch_id, batch.cutoff, p_registry_keys);";
+  const scopedGate = "  perform public.chips_assert_bot_only_archive_proof_lifecycle_gate(batch.bot_only_table_id, batch.batch_id, batch.cutoff, p_transaction_ids, p_registry_keys);";
+  assert.match(scopedCleanupLifecycleGateMigration, /chips_prune_and_cleanup_bot_only_archive_batch\(text,uuid\[\],bigint\[\],text\[\],uuid,boolean,bigint\)/);
+  assert.match(scopedCleanupLifecycleGateMigration, /occurrence_count <> 2/);
+  assert.match(scopedCleanupLifecycleGateMigration, /pg_catalog\.replace\(definition, old_gate, replacement\)/);
+  assert.match(scopedCleanupLifecycleGateMigration, /p_transaction_ids, p_registry_keys/);
+  assert.doesNotMatch(scopedCleanupLifecycleGateMigration, /set local statement_timeout/i);
+
+  const replacement = scopedCleanupLifecycleGateMigration.match(/replacement text := '([^']+)'/)?.[1] || "";
+  assert.equal(replacement, scopedGate);
+  assert.doesNotMatch(replacement, /chips_assert_bot_only_table_lifecycle_gate/);
+  assert.match(replacement, /chips_assert_bot_only_archive_proof_lifecycle_gate/);
+
+  const oldNeedle = scopedCleanupLifecycleGateMigration.match(/old_gate text := '([^']+)'/)?.[1] || "";
+  assert.equal(oldNeedle, oldGate);
+  assert.equal((scopedCleanupLifecycleGateMigration.match(/old_gate text :=/g) || []).length, 1);
+  assert.equal((scopedCleanupLifecycleGateMigration.match(/replacement text :=/g) || []).length, 1);
+
+  const patchedTwoSiteShape = `${oldGate}\n${oldGate}`.replaceAll(oldGate, scopedGate);
+  assert.equal(patchedTwoSiteShape.split(scopedGate).length - 1, 2);
+  assert.equal(patchedTwoSiteShape.includes(oldGate), false);
 }
 
 function retryAndAccountingContract() {
@@ -1954,6 +1979,7 @@ concurrencyAndScopeContract();
 failClosedLifecycleContract();
 lifecycleGateScopeContract();
 proofPerformanceContract();
+scopedCleanupLifecycleGateContract();
 retryAndAccountingContract();
 
 if (POSTGRES_TEST_DB_URL) {
