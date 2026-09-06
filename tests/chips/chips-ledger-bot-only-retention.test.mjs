@@ -35,6 +35,7 @@ const proofTypeAccessPathMigration = fs.readFileSync("supabase/migrations/202609
 const proofSeqscanGuardMigration = fs.readFileSync("supabase/migrations/20260905172000_chips_ledger_bot_only_proof_seqscan_guard.sql", "utf8");
 const proofSeqscanGuardRemovalMigration = fs.readFileSync("supabase/migrations/20260905173000_chips_ledger_bot_only_proof_remove_seqscan_hint.sql", "utf8");
 const scopedCleanupLifecycleGateMigration = fs.readFileSync("supabase/migrations/20260906120000_chips_ledger_bot_only_scoped_cleanup_lifecycle_gate.sql", "utf8");
+const transactionIdentityIndexMigration = fs.readFileSync("supabase/migrations/20260906130000_chips_transaction_idempotency_transaction_id_table_id_idx.sql", "utf8");
 const closedTableCleanup = fs.readFileSync("ws-server/poker/persistence/closed-table-cleanup.mjs", "utf8");
 
 const TABLE_ID = "00000000-0000-4000-8000-000000000020";
@@ -420,6 +421,21 @@ function proofPerformanceContract() {
   assert.match(proofSeqscanGuardRemovalMigration, /from candidate_transaction_ids candidates/);
   assert.doesNotMatch(proofSeqscanGuardRemovalMigration, /set local statement_timeout/i);
   assert.doesNotMatch(proofSeqscanGuardRemovalMigration, /create index/i);
+}
+
+function transactionIdentityIndexContract() {
+  assert.match(
+    transactionIdentityIndexMigration,
+    /create index if not exists chips_transaction_idempotency_transaction_id_table_id_idx/i,
+  );
+  assert.match(
+    transactionIdentityIndexMigration,
+    /on public\.chips_transaction_idempotency\s*\(transaction_id,\s*table_id\)/i,
+  );
+  assert.match(transactionIdentityIndexMigration, /set local statement_timeout = '600000'/i);
+  assert.match(transactionIdentityIndexMigration, /set local maintenance_work_mem = '128MB'/i);
+  assert.doesNotMatch(transactionIdentityIndexMigration, /create index concurrently/i);
+  assert.doesNotMatch(transactionIdentityIndexMigration, /drop index|create or replace function|chips_prune|production/i);
 }
 
 function scopedCleanupLifecycleGateContract() {
@@ -1979,6 +1995,7 @@ concurrencyAndScopeContract();
 failClosedLifecycleContract();
 lifecycleGateScopeContract();
 proofPerformanceContract();
+transactionIdentityIndexContract();
 scopedCleanupLifecycleGateContract();
 retryAndAccountingContract();
 
