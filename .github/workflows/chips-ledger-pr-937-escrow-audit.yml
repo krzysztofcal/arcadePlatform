@@ -1,0 +1,52 @@
+name: "Chips Ledger PR #937 Escrow Audit"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chips-ledger-stage-automation
+  cancel-in-progress: false
+
+jobs:
+  escrow-audit:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && github.ref == 'refs/heads/ops/pr-937-escrow-audit' }}
+    runs-on: [self-hosted, linux, x64, stage-db-ipv6]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      TARGET_SHA: 5eb0494550f1432168c29c0a6c6a46a50e7a4cdc
+      SUPABASE_STAGE_DB_URL: ${{ secrets.SUPABASE_STAGE_DIRECT_DB_URL }}
+      SUPABASE_STAGE_URL: ${{ secrets.SUPABASE_STAGE_URL }}
+      SUPABASE_STAGE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_STAGE_SERVICE_ROLE_KEY }}
+    steps:
+      - name: "Checkout exact PR #937 HEAD"
+        uses: actions/checkout@v4
+        with:
+          ref: 5eb0494550f1432168c29c0a6c6a46a50e7a4cdc
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact read-only target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "krzysztofcal/arcadePlatform"
+          test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER"
+          test "$GITHUB_REF" = "refs/heads/ops/pr-937-escrow-audit"
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          test -z "${CHIPS_LEDGER_BOT_ONLY_EXECUTE:-}"
+          test -z "${CHIPS_LEDGER_BOT_ONLY_AUTOMATIC:-}"
+          test -z "${CHIPS_LEDGER_CLOSED_HUMAN_EXECUTE:-}"
+          test -z "${CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC:-}"
+
+      - name: Install dependencies without project hooks
+        run: npm ci --ignore-scripts
+
+      - name: Run read-only escrow audit
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ env.TARGET_SHA }}
+        run: node scripts/ops/chips-ledger-stage-escrow-retention.mjs --audit
