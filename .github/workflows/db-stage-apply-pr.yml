@@ -87,7 +87,7 @@ jobs:
           if (connectivity !== "1" || systemIdentifier !== "7656985631720456337") {
             throw new Error("direct Stage system identifier mismatch");
           }
-          console.log("direct Stage read-only preflight passed; system identifier verified");
+          process.stdout.write("direct Stage read-only preflight passed; system identifier verified\n");
           NODE
 
       - name: Detect migration changes
