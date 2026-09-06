@@ -830,6 +830,14 @@ async function assertArchivePrunerRoleContracts(sql) {
       (select proisstrict from pg_catalog.pg_proc
        where oid = 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)'::regprocedure) as prune_internal_strict,
       pg_catalog.to_regclass('public.chips_transaction_idempotency_archive_batch_idx') is not null as archive_mapping_index_exists,
+      (
+        select pg_catalog.pg_get_indexdef(indexes.indexrelid)
+          from pg_catalog.pg_index indexes
+          join pg_catalog.pg_class relations on relations.oid = indexes.indexrelid
+          join pg_catalog.pg_namespace namespaces on namespaces.oid = relations.relnamespace
+         where namespaces.nspname = 'public'
+           and relations.relname = 'chips_transaction_idempotency_archive_batch_lookup_idx'
+      ) as archive_batch_lookup_index_definition,
       exists (
         select 1
           from pg_catalog.pg_auth_members memberships
@@ -857,6 +865,8 @@ async function assertArchivePrunerRoleContracts(sql) {
   assert.equal(functionOwners[0].prune_internal_owner, "chips_ledger_archive_pruner", "internal pruning implementation must use the NOLOGIN owner");
   assert.equal(functionOwners[0].prune_internal_strict, true, "internal pruning implementation must never receive NULL arguments");
   assert.equal(functionOwners[0].archive_mapping_index_exists, false, "initial pruning measurement must not add an archive mapping index");
+  assert.match(functionOwners[0].archive_batch_lookup_index_definition, /on public\.chips_transaction_idempotency using btree \(archive_batch_id\)/i, "durable archive-batch lookups must use the exact partial-index column");
+  assert.match(functionOwners[0].archive_batch_lookup_index_definition, /where \(archive_batch_id is not null\)/i, "durable archive-batch lookup index must remain partial");
   assert.equal(functionOwners[0].unsafe_membership, false, "only the managed non-inheriting ADMIN membership may remain");
   assert.equal(functionOwners[0].public_schema_usage, true, "pruner needs schema usage for qualified objects");
   assert.equal(functionOwners[0].public_schema_create, false, "temporary schema CREATE must be revoked");
