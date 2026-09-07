@@ -39,9 +39,11 @@ import {
   mergeRegistryAggregateRows,
   parseRetentionArgs,
   readOnlyEscrowAudit,
+  RETENTION_ACCOUNT_INVARIANTS_SQL,
   registryCountFor,
   RETENTION_REGISTRY_BATCH_COUNTS_SQL,
   RETENTION_REGISTRY_TABLE_COUNTS_SQL,
+  RETENTION_ACCOUNTS_SQL,
   RETENTION_BATCHES_SQL,
   RETENTION_LEGACY_BATCHES_SQL,
   RETENTION_LEGACY_PROOFS_FOR_TABLES_SQL,
@@ -69,7 +71,7 @@ function uuidIdsSha256(ids) {
   return crypto.createHash("sha256").update(`${ids.join("\n")}\n`, "utf8").digest("hex");
 }
 
-function reservedAuditSession({ failOn = null, policyEnabled = false, batchRows = [], legacyBatchRows = [], legacyProofRows = [], accountRows = [], tableRows = [], registryRows = [] } = {}) {
+function reservedAuditSession({ failOn = null, policyEnabled = false, batchRows = [], legacyBatchRows = [], legacyProofRows = [], accountRows = [], candidateAccountRows = null, candidateAccountRowsByBatchId = null, accountInvariantRows = null, tableRows = [], registryRows = [] } = {}) {
   const queries = [];
   let transactionOpen = false;
   let released = false;
@@ -103,6 +105,24 @@ function reservedAuditSession({ failOn = null, policyEnabled = false, batchRows 
       if (query.includes("chips_table_fence_control")) return [{ enforcement_active: true }];
       if (query.includes("chips_stage_escrow_account_retention_policy")) {
         return [{ policy_id: "stage-ledger-escrow-account-retention-v1", enabled: policyEnabled }];
+      }
+      if (query === RETENTION_ACCOUNT_INVARIANTS_SQL) {
+        return accountInvariantRows || [{
+          scanned_account_count: String(accountRows.length),
+          malformed_identity_or_status_count: "0",
+          open_table_account_count: String(tableRows.filter((row) => String(row.status).toUpperCase() === "OPEN").length),
+          closed_table_account_count: String(tableRows.filter((row) => String(row.status).toUpperCase() === "CLOSED").length),
+          ambiguous_table_status_account_count: "0",
+          missing_table_account_count: String(accountRows.length - tableRows.length),
+          missing_archive_binding_count: "0",
+          ambiguous_archive_binding_count: "0",
+        }];
+      }
+      if (query === RETENTION_ACCOUNTS_SQL) {
+        const requestedBatchId = parameters[2] == null ? null : String(parameters[2]);
+        return (requestedBatchId && candidateAccountRowsByBatchId?.[requestedBatchId])
+          || candidateAccountRows
+          || accountRows;
       }
       if (query === RETENTION_BATCHES_SQL) return batchRows;
       if (query === RETENTION_LEGACY_PROOFS_FOR_TABLES_SQL) return legacyProofRows;
@@ -221,6 +241,42 @@ test("escrow registry queries merge table and batch matches without double count
     matchingBatchCount,
     registryCount: 0,
   }).category, "SAFE_BOT_ONLY_CANDIDATE");
+});
+
+test("scheduled escrow audit aggregates global account invariants and bounds full account rows", () => {
+  assert.match(RETENTION_ACCOUNT_INVARIANTS_SQL, /count\(\*\).*scanned_account_count/is);
+  assert.match(RETENTION_ACCOUNT_INVARIANTS_SQL, /malformed_identity_or_status_count/);
+  assert.match(RETENTION_ACCOUNTS_SQL, /accounts\.system_key\s*=\s*'POKER_TABLE:'\s*\|\|\s*matches\.table_id::text/i);
+  assert.match(RETENTION_ACCOUNTS_SQL, /not exists\s*\(\s*select 1[\s\S]*from public\.poker_tables/is);
+  assert.match(RETENTION_ACCOUNTS_SQL, /not exists\s*\(\s*select 1[\s\S]*from public\.chips_entries/is);
+  assert.match(RETENTION_ACCOUNTS_SQL, /not exists\s*\(\s*select 1[\s\S]*from public\.chips_account_snapshot/is);
+  assert.match(RETENTION_ACCOUNTS_SQL, /not exists\s*\(\s*select 1[\s\S]*from public\.chips_transaction_idempotency/is);
+  assert.match(RETENTION_ACCOUNTS_SQL, /batch_rank\s*<=\s*\$1::integer/i);
+  assert.match(RETENTION_ACCOUNTS_SQL, /cumulative_account_count\s*<=\s*\$2::integer/i);
+  assert.match(RETENTION_ACCOUNTS_SQL, /join public\.chips_accounts accounts\s+on accounts\.id = candidates\.id/is);
+  assert.doesNotMatch(RETENTION_ACCOUNTS_SQL, /where accounts\.system_key\s+like\s+'POKER_TABLE%'/i);
+});
+
+test("exact escrow batch scope is applied before the scheduled candidate window", async () => {
+  const lateBatchId = "111";
+  const lateBatch = completeBatch({ batch_id: lateBatchId, destructive_go_batch_id: lateBatchId });
+  const session = reservedAuditSession({
+    batchRows: [lateBatch],
+    candidateAccountRows: [],
+    candidateAccountRowsByBatchId: { [lateBatchId]: [account()] },
+  });
+  const result = await readOnlyEscrowAudit({
+    sql: session,
+    expectedSystemIdentifier: "7656985631720456337",
+    candidateBatchId: lateBatchId,
+    telemetry: false,
+  });
+  const candidateQuery = session.queries.find(({ query }) => query === RETENTION_ACCOUNTS_SQL);
+  assert.deepEqual(candidateQuery.parameters, [10, 20, lateBatchId]);
+  assert.match(RETENTION_ACCOUNTS_SQL, /batches\.batch_id\s*=\s*\$3::bigint/i);
+  assert.equal(result.candidates.length, 1);
+  assert.equal(result.candidates[0].batchId, lateBatchId);
+  assert.equal(result.candidates[0].accountIds.length, 1);
 });
 
 test("complete escrow retirement receipt still reports retired", () => {
@@ -857,6 +913,33 @@ test("automatic disabled policy audits on the reserved session and releases its 
   assert.ok(acquireIndex >= 0 && acquireIndex < beginIndex);
   assert.ok(beginIndex < commitIndex && commitIndex < releaseIndex);
   assert.equal(session.queries.some(({ query }) => query.includes("pg_advisory_unlock")), true);
+});
+
+test("automatic empty escrow backlog skips Storage verification", async () => {
+  const session = reservedAuditSession({ policyEnabled: true });
+  let verifyBucketCalls = 0;
+  let storageReads = 0;
+  const result = await runStageEscrowAccountRetention({
+    mode: "automatic",
+    deps: {
+      sql: session,
+      config: { dbUrl: "postgres://stage.example.invalid/db" },
+      telemetry: false,
+      verifyBucket: async () => {
+        verifyBucketCalls += 1;
+        throw new Error("empty escrow backlog must not verify Storage");
+      },
+      readPrivateObjectIfExists: async () => {
+        storageReads += 1;
+        throw new Error("empty escrow backlog must not read Storage");
+      },
+    },
+  });
+  assert.equal(result.state, "complete");
+  assert.equal(result.policyEnabled, true);
+  assert.equal(result.eligible, 0);
+  assert.equal(verifyBucketCalls, 0);
+  assert.equal(storageReads, 0);
 });
 
 test("initial escrow connection retries a fresh client only for transient failures", async () => {

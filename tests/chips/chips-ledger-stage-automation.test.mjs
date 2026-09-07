@@ -2294,6 +2294,7 @@ function makeAutomaticClosedHumanHarness({
     lifecycleCalls: 0,
     recoveryInspections: 0,
     verifyBucketCalls: 0,
+    manifestReads: 0,
     pruneCalls: [],
     sqlCalls: [],
   };
@@ -2353,6 +2354,7 @@ function makeAutomaticClosedHumanHarness({
   };
   const pruneStore = {
     getManifest: async (objectPath) => {
+      state.manifestReads += 1;
       if (objectPath === canaryRow.object_path) return canaryRow;
       if (objectPath === candidateRow.object_path) return candidateRow;
       throw new Error(`unexpected manifest object path: ${objectPath}`);
@@ -2609,6 +2611,13 @@ await assert.rejects(
 assert.equal(invalidDurableCanaryHarness.state.executeCalls, 0);
 assert.equal(invalidDurableCanaryHarness.state.lifecycleCalls, 0);
 
+const verifyBucketCallsBeforeCompletedNoWork = automaticHarness.state.verifyBucketCalls;
+const recoveryInspectionsBeforeCompletedNoWork = automaticHarness.state.recoveryInspections;
+const manifestReadsBeforeCompletedNoWork = automaticHarness.state.manifestReads;
+assert.ok(
+  automaticHarness.state.markers.get(automaticCandidateEvidence.closedHumanTableId),
+  "completed no-work contract requires the lifecycle marker to be set",
+);
 const automaticRetry = await runAutomaticClosedHumanStageAutomation({
   env: automaticStageEnv,
   deps: automaticHarness.deps,
@@ -2618,6 +2627,21 @@ assert.equal(automaticRetry.processed.length, 0, "completed automatic retry must
 assert.equal(automaticRetry.stopReason, "no_eligible_closed_human_table");
 assert.equal(automaticHarness.state.executeCalls, 1, "automatic retry must be idempotent");
 assert.equal(automaticHarness.state.lifecycleCalls, 1, "automatic retry must not rewrite the lifecycle marker");
+assert.equal(
+  automaticHarness.state.verifyBucketCalls,
+  verifyBucketCallsBeforeCompletedNoWork,
+  "completed closed-human no-work retry must not verify Storage",
+);
+assert.equal(
+  automaticHarness.state.recoveryInspections,
+  recoveryInspectionsBeforeCompletedNoWork,
+  "completed closed-human no-work retry must not read Storage recovery",
+);
+assert.equal(
+  automaticHarness.state.manifestReads,
+  manifestReadsBeforeCompletedNoWork,
+  "completed closed-human no-work retry must not read the Storage manifest",
+);
 
 automaticHarness.state.liveTables.delete(automaticCandidateEvidence.closedHumanTableId);
 automaticHarness.state.markers.delete(automaticCandidateEvidence.closedHumanTableId);

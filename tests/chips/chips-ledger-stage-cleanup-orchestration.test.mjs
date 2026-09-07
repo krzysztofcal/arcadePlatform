@@ -225,6 +225,9 @@ function fakeScheduler({
     executeRetryPreflights: 0,
     executeRetryWaits: 0,
     destructiveSqlMutations: 0,
+    verifyBucketCalls: 0,
+    freshVerifyBucketCalls: 0,
+    events: [],
     advisoryLockChecks: 0,
     failedOnce: false,
     mainArchiveDownloads: 0,
@@ -306,7 +309,11 @@ function fakeScheduler({
       baseUrl: "https://storage.example.test",
       serviceKey: "stage-test-key",
     },
-    verifyBucket: async () => {},
+    verifyBucket: async (_target, options = {}) => {
+      state.verifyBucketCalls += 1;
+      state.events.push(options.fresh ? "fresh-bucket-verification" : "bucket-verification");
+      if (options.fresh) state.freshVerifyBucketCalls += 1;
+    },
     ensureArchiveBucket: async () => {},
     exportArchive: async () => {
       state.exportCalls += 1;
@@ -431,6 +438,7 @@ function fakeScheduler({
         };
       }
       if (argv.includes("--execute") && realExecute) {
+        await pruneDeps.verifyBucket?.(pruneDeps.storageTarget, { fresh: true });
         state.realExecuteCalls += 1;
         let executeAttempts = 0;
         let executeRetryCount = 0;
@@ -495,6 +503,7 @@ function fakeScheduler({
           }
           const wasAlreadyCleaned = Boolean(row.registry_cleaned_at);
           if (!wasAlreadyCleaned) {
+            state.events.push("destructive-mutation");
             state.destructiveSqlMutations += 1;
             row.pruned_at = "2026-08-25T00:00:01Z";
             row.pruned_transaction_count = "1";
@@ -1033,6 +1042,9 @@ async function schedulerContracts() {
   assert.equal(disabledResult.state, "no-op");
   assert.equal(disabledResult.reason, "automatic_policy_disabled");
   assert.equal(disabled.state.storeCalls, 0);
+  assert.equal(disabled.state.verifyBucketCalls, 0, "disabled policy must not preflight Storage");
+  assert.equal(disabled.state.recoveryInspections, 0, "disabled policy must not inspect Storage recovery");
+  assert.equal(disabled.state.mainArchiveDownloads, 0, "disabled policy must not download from Storage");
 
   const enabled = fakeScheduler({ enabled: true, candidateCount: 3 });
   const enabledResult = await runAutomaticBotOnlyStageAutomation(enabled);
@@ -1056,6 +1068,9 @@ async function schedulerContracts() {
   assert.equal(noCandidateResult.state, "completed");
   assert.deepEqual(noCandidateResult.processed, []);
   assert.equal(noCandidateResult.stopReason, "no_eligible_bot_only_table");
+  assert.equal(noCandidate.state.verifyBucketCalls, 0, "no-candidate scheduled run must not verify Storage");
+  assert.equal(noCandidate.state.recoveryInspections, 0, "no-candidate scheduled run must not inspect Storage recovery");
+  assert.equal(noCandidate.state.mainArchiveDownloads, 0, "no-candidate scheduled run must not download from Storage");
 
   const selectorTimeout = fakeScheduler({
     enabled: true,
@@ -1176,16 +1191,17 @@ async function schedulerContracts() {
       dryRunSqlstates: [retryableSqlstate],
     });
     const completedResult = await runAutomaticBotOnlyStageAutomation(completedRun);
-    assert.deepEqual(completedResult.processed, [], "completed batch revalidation must not add a second processed entry");
-    assert.equal(completedRun.state.dryRunCalls, 2);
-    assert.equal(completedRun.state.dryRunManifestReads, 2, "completed dry-run retry must refresh its manifest each time");
-    assert.equal(completedRun.state.dryRunArchiveDownloads, 2, "completed dry-run retry must download the archive each time");
-    assert.equal(completedRun.state.advisoryLockChecks >= 4, true, "completed dry-run retry must recheck the advisory lock");
+    assert.deepEqual(completedResult.processed, [], "completed batch must not add a second processed entry");
+    assert.equal(completedRun.state.dryRunCalls, 0, "completed batch must not revalidate on the hot scheduled path");
+    assert.equal(completedRun.state.dryRunManifestReads, 0, "completed batch must not reread its archive on the hot scheduled path");
+    assert.equal(completedRun.state.dryRunArchiveDownloads, 0, "completed batch must not download its archive on the hot scheduled path");
+    assert.equal(completedRun.state.recoveryInspections, 0, "completed batch must not reread durable recovery on the hot scheduled path");
     assert.equal(completedRun.state.persistCalls, 0, "completed revalidation must not write recovery Storage");
     assert.equal(completedRun.state.storeCalls, 0, "completed revalidation must not write the main archive");
     assert.equal(completedRun.state.executeCalls, 0, "completed revalidation must not execute prune or cleanup");
     assert.equal(completedRun.state.destructiveSqlMutations, 0);
     assert.equal(completedRun.state.proofRegisterCalls, 0, "completed revalidation must not register proof");
+    assert.equal(completedRun.state.verifyBucketCalls, 0, "completed batch must not touch Storage on the hot scheduled path");
     assert.equal(completedRun.ownRows[0].destructive_go_batch_id, "27");
     assert.equal(completedRun.ownRows[0].bot_only_retention_complete_at !== null, true);
   }
@@ -1239,70 +1255,6 @@ async function schedulerContracts() {
   assert.equal(foreignFailure.report.current_batch.dry_run_attempts, 1);
   assert.equal(foreignFailure.report.current_batch.dry_run_retry_count, 0);
   assert.deepEqual(foreignFailure.report.current_batch.dry_run_sqlstates, ["XX000"]);
-
-  const completedExhausted = makeProvenAutomaticRow("27", { lifecycle: "complete" });
-  const completedExhaustedRun = fakeScheduler({
-    enabled: true,
-    candidateCount: 0,
-    initialRows: [completedExhausted.row],
-    initialDurable: new Map([[
-      completedExhausted.row.object_path,
-      makeTestAutomaticDurableRecovery(completedExhausted.row, completedExhausted.archiveBytes),
-    ]]),
-    initialArchiveBytes: new Map([[completedExhausted.row.object_path, completedExhausted.archiveBytes]]),
-    dryRunSqlstates: ["40001", "40001", "40001"],
-  });
-  const completedExhaustedFailure = await captureAutomaticFailure(completedExhaustedRun);
-  assert.equal(completedExhaustedFailure.error.code, "40001");
-  assert.equal(completedExhaustedRun.state.dryRunCalls, BOT_ONLY_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS);
-  assert.equal(completedExhaustedRun.state.dryRunManifestReads, BOT_ONLY_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS);
-  assert.equal(completedExhaustedRun.state.dryRunArchiveDownloads, BOT_ONLY_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS);
-  assert.equal(completedExhaustedRun.state.persistCalls, 0);
-  assert.equal(completedExhaustedRun.state.storeCalls, 0);
-  assert.equal(completedExhaustedRun.state.executeCalls, 0);
-  assert.equal(completedExhaustedRun.state.destructiveSqlMutations, 0);
-  assert.equal(completedExhaustedRun.state.proofRegisterCalls, 0);
-  assert.deepEqual(completedExhaustedFailure.report.processed_batches, []);
-  assert.equal(completedExhaustedFailure.report.phase, "automatic.completed-recovery");
-  assert.equal(completedExhaustedFailure.report.batch_id, "27");
-  assert.equal(completedExhaustedFailure.report.current_batch.batch_id, "27");
-  assert.equal(completedExhaustedFailure.report.current_batch.dry_run_attempts, 3);
-  assert.equal(completedExhaustedFailure.report.current_batch.dry_run_retry_count, 2);
-  assert.deepEqual(completedExhaustedFailure.report.current_batch.dry_run_sqlstates, ["40001", "40001", "40001"]);
-  assert.equal(completedExhaustedFailure.report.current_batch.dry_run, null);
-  assert.equal(completedExhaustedFailure.report.current_batch.archive_storage_modified, false);
-  assert.equal(completedExhaustedFailure.report.current_batch.recovery_storage_modified, false);
-  assert.equal(completedExhaustedFailure.report.current_batch.storage_modified, false);
-  assert.equal(completedExhaustedFailure.report.current_batch.execute_state, null);
-  assert.equal(completedExhaustedFailure.report.current_batch.execute_confirmed, false);
-  assert.equal(completedExhaustedFailure.report.current_batch.db_mutation_confirmed, false);
-
-  const completedForeign = makeProvenAutomaticRow("27", { lifecycle: "complete" });
-  const completedForeignRun = fakeScheduler({
-    enabled: true,
-    candidateCount: 0,
-    initialRows: [completedForeign.row],
-    initialDurable: new Map([[
-      completedForeign.row.object_path,
-      makeTestAutomaticDurableRecovery(completedForeign.row, completedForeign.archiveBytes),
-    ]]),
-    initialArchiveBytes: new Map([[completedForeign.row.object_path, completedForeign.archiveBytes]]),
-    dryRunSqlstates: ["XX000"],
-  });
-  const completedForeignFailure = await captureAutomaticFailure(completedForeignRun);
-  assert.equal(completedForeignFailure.error.code, "XX000");
-  assert.equal(completedForeignRun.state.dryRunCalls, 1);
-  assert.equal(completedForeignRun.state.dryRunManifestReads, 1);
-  assert.equal(completedForeignRun.state.dryRunArchiveDownloads, 1);
-  assert.equal(completedForeignRun.state.persistCalls, 0);
-  assert.equal(completedForeignRun.state.storeCalls, 0);
-  assert.equal(completedForeignRun.state.executeCalls, 0);
-  assert.equal(completedForeignRun.state.proofRegisterCalls, 0);
-  assert.equal(completedForeignFailure.report.phase, "automatic.completed-recovery");
-  assert.equal(completedForeignFailure.report.batch_id, "27");
-  assert.equal(completedForeignFailure.report.current_batch.dry_run_attempts, 1);
-  assert.equal(completedForeignFailure.report.current_batch.dry_run_retry_count, 0);
-  assert.deepEqual(completedForeignFailure.report.current_batch.dry_run_sqlstates, ["XX000"]);
 
   const partialRecovery = makeProvenAutomaticRow("27");
   const partialRecoveryRun = fakeScheduler({
@@ -1361,10 +1313,11 @@ async function schedulerContracts() {
     initialRows: [completedWithoutRecovery.row],
     initialArchiveBytes: new Map([[completedWithoutRecovery.row.object_path, completedWithoutRecovery.archiveBytes]]),
   });
-  await assert.rejects(
-    runAutomaticBotOnlyStageAutomation(completedWithoutRecoveryRun),
-    /no durable recovery/,
-  );
+  const completedWithoutRecoveryResult = await runAutomaticBotOnlyStageAutomation(completedWithoutRecoveryRun);
+  assert.equal(completedWithoutRecoveryResult.processed.length, 0);
+  assert.equal(completedWithoutRecoveryResult.stopReason, "no_eligible_bot_only_table");
+  assert.equal(completedWithoutRecoveryRun.state.verifyBucketCalls, 0);
+  assert.equal(completedWithoutRecoveryRun.state.recoveryInspections, 0);
   assert.equal(completedWithoutRecoveryRun.state.persistCalls, 0);
   assert.equal(completedWithoutRecoveryRun.state.executeCalls, 0);
 
@@ -1575,7 +1528,13 @@ async function schedulerContracts() {
     assert.equal(realCycleResult.processed[0].retry, "already_cleaned");
     assert.equal(realCycle.state.executeCalls, 0, "the regression contract must not use the fake executor");
     assert.equal(realCycle.state.realExecuteCalls, 2, "both real execute cycles must reach the SQL runner");
+    assert.equal(realCycle.state.freshVerifyBucketCalls, 2, "each destructive execute cycle must fresh-verify Storage");
     assert.equal(realCycle.state.destructiveSqlMutations, 1, "only the first SQL cycle may mutate destructively");
+    assert.ok(
+      realCycle.state.events.indexOf("fresh-bucket-verification")
+        < realCycle.state.events.indexOf("destructive-mutation"),
+      "fresh Storage verification must precede the destructive mutation",
+    );
     assert.equal(realCycle.state.storeCalls, 1, "the idempotency cycle must not create a second Storage manifest");
     assert.equal(fs.readdirSync(`${realCycleTempRoot}/recovery`).length, 2);
 
@@ -1655,9 +1614,9 @@ async function schedulerContracts() {
       assert.equal(report.dryRunRetryCount, 0);
       assert.deepEqual(report.dryRunSqlstates, []);
       assert.equal(report.retryState, "already_cleaned");
-      assert.equal(preflightRetryRun.state.dryRunCalls, 4, "a failed preflight must receive its own bounded retry");
-      assert.equal(preflightRetryRun.state.dryRunManifestReads, 4);
-      assert.equal(preflightRetryRun.state.dryRunArchiveDownloads, 4);
+      assert.equal(preflightRetryRun.state.dryRunCalls, 3, "a failed preflight must receive its own bounded retry without completed-batch polling");
+      assert.equal(preflightRetryRun.state.dryRunManifestReads, 3);
+      assert.equal(preflightRetryRun.state.dryRunArchiveDownloads, 3);
       assert.equal(preflightRetryRun.state.realExecuteCalls, 2);
       assert.equal(preflightRetryRun.state.executeAttemptCalls, 3, "the control cycle remains separate from SQL retries");
       assert.equal(preflightRetryRun.state.executeRetryPreflights, 1);

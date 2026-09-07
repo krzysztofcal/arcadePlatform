@@ -464,7 +464,237 @@ select runs.*
 from public.chips_legacy_stage_allowlist_runs runs
 where runs.run_id = any($1::bigint[]);`;
 
+// The scheduled audit must prove the global identity/table invariants without
+// returning every valid escrow account to Node.  The ORDER BY/OFFSET keeps the
+// scope on the existing system-key access path while the aggregate still
+// returns exactly one row.
+export const RETENTION_ACCOUNT_INVARIANTS_SQL = `
+with scoped_accounts as (
+  select
+    accounts.id,
+    accounts.account_type::text as account_type,
+    accounts.user_id,
+    accounts.system_key,
+    accounts.status::text as status,
+    case
+      when accounts.system_key ~ '^POKER_TABLE:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      then substring(accounts.system_key from 13)::uuid
+      else null
+    end as table_id,
+    (
+      accounts.account_type::text = 'ESCROW'
+      and accounts.user_id is null
+      and accounts.system_key ~ '^POKER_TABLE:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      and lower(accounts.status::text) = 'active'
+    ) as canonical_active
+  from public.chips_accounts accounts
+  where accounts.system_key like 'POKER_TABLE%'
+  order by accounts.system_key
+  offset 0
+), valid_legacy_proofs as (
+  select proofs.*
+  from public.chips_legacy_stage_allowlist_proofs proofs
+  where proofs.project_ref = '${STAGE_PROJECT_REF}'
+    and proofs.source_policy_id = '${LEGACY_STAGE_ALLOWLIST_POLICY_ID}'
+    and pg_catalog.cardinality(proofs.batch_table_ids) between 1 and 10
+    and pg_catalog.array_position(proofs.batch_table_ids, null) is null
+    and (
+      select count(*)
+      from pg_catalog.unnest(proofs.batch_table_ids) ids(table_id)
+    ) = (
+      select count(distinct ids.table_id)
+      from pg_catalog.unnest(proofs.batch_table_ids) ids(table_id)
+    )
+    and proofs.batch_table_ids = (
+      select pg_catalog.array_agg(ids.table_id order by ids.table_id)
+      from pg_catalog.unnest(proofs.batch_table_ids) ids(table_id)
+    )
+), archive_matches as (
+  select
+    batches.batch_id,
+    batches.bot_only_table_id as table_id
+  from public.chips_ledger_archive_batches batches
+  where batches.project_ref = '${STAGE_PROJECT_REF}'
+    and batches.source_policy_id = '${BOT_ONLY_RETENTION_POLICY_ID}'
+  union all
+  select
+    batches.batch_id,
+    ids.table_id
+  from valid_legacy_proofs proofs
+  join public.chips_ledger_archive_batches batches on batches.batch_id = proofs.batch_id
+  cross join lateral unnest(proofs.batch_table_ids) ids(table_id)
+  where batches.project_ref = '${STAGE_PROJECT_REF}'
+    and batches.source_policy_id = '${LEGACY_STAGE_ALLOWLIST_POLICY_ID}'
+), archive_match_counts as (
+  select table_id, count(*)::bigint as match_count
+  from archive_matches
+  group by table_id
+), table_bindings as (
+  select
+    scoped.id,
+    scoped.table_id,
+    tables.status as table_status
+  from scoped_accounts scoped
+  join public.poker_tables tables on tables.id = scoped.table_id
+  where scoped.canonical_active
+)
+select
+  count(*)::text as scanned_account_count,
+  count(*) filter (where not scoped.canonical_active)::text as malformed_identity_or_status_count,
+  count(*) filter (where bindings.table_id is not null and upper(bindings.table_status) = 'OPEN')::text as open_table_account_count,
+  count(*) filter (where bindings.table_id is not null and upper(bindings.table_status) = 'CLOSED')::text as closed_table_account_count,
+  count(*) filter (
+    where bindings.table_id is not null
+      and (bindings.table_status is null or upper(bindings.table_status) not in ('OPEN', 'CLOSED'))
+  )::text as ambiguous_table_status_account_count,
+  count(*) filter (where scoped.canonical_active and bindings.table_id is null)::text as missing_table_account_count,
+  count(*) filter (
+    where scoped.canonical_active
+      and bindings.table_id is null
+      and archive_match_counts.match_count is null
+  )::text as missing_archive_binding_count,
+  count(*) filter (
+    where scoped.canonical_active
+      and bindings.table_id is null
+      and archive_match_counts.match_count <> 1
+  )::text as ambiguous_archive_binding_count
+from scoped_accounts scoped
+left join table_bindings bindings on bindings.id = scoped.id
+left join archive_match_counts on archive_match_counts.table_id = scoped.table_id;`;
+
+// This query begins at the small archive/proof scope and reaches an account by
+// its exact canonical system key.  It preserves the current fail-closed
+// archive-binding rule, all account dependency guards, and full batch-unit
+// selection while returning at most MAX_RETIREMENT_ACCOUNTS_PER_RUN rows.  An
+// exact batch scope is optional and is applied before the scheduled ranking.
 export const RETENTION_ACCOUNTS_SQL = `
+with valid_legacy_proofs as (
+  select proofs.*
+  from public.chips_legacy_stage_allowlist_proofs proofs
+  where proofs.project_ref = '${STAGE_PROJECT_REF}'
+    and proofs.source_policy_id = '${LEGACY_STAGE_ALLOWLIST_POLICY_ID}'
+    and pg_catalog.cardinality(proofs.batch_table_ids) between 1 and 10
+    and pg_catalog.array_position(proofs.batch_table_ids, null) is null
+    and (
+      select count(*)
+      from pg_catalog.unnest(proofs.batch_table_ids) ids(table_id)
+    ) = (
+      select count(distinct ids.table_id)
+      from pg_catalog.unnest(proofs.batch_table_ids) ids(table_id)
+    )
+    and proofs.batch_table_ids = (
+      select pg_catalog.array_agg(ids.table_id order by ids.table_id)
+      from pg_catalog.unnest(proofs.batch_table_ids) ids(table_id)
+    )
+    and ($3::bigint is null or proofs.batch_id = $3::bigint)
+), archive_matches as (
+  select
+    batches.batch_id,
+    batches.source_policy_id,
+    batches.bot_only_table_id as table_id,
+    array[batches.bot_only_table_id]::uuid[] as expected_table_ids,
+    batches.status,
+    pg_catalog.num_nonnulls(
+      batches.account_retirement_at,
+      batches.account_retirement_account_count,
+      batches.account_retirement_account_ids_sha256,
+      batches.account_retirement_recovery_object_path,
+      batches.account_retirement_recovery_object_sha256,
+      batches.account_retirement_snapshot_sha256
+    ) as retirement_receipt_fields
+  from public.chips_ledger_archive_batches batches
+  where batches.project_ref = '${STAGE_PROJECT_REF}'
+    and batches.source_policy_id = '${BOT_ONLY_RETENTION_POLICY_ID}'
+    and ($3::bigint is null or batches.batch_id = $3::bigint)
+  union all
+  select
+    batches.batch_id,
+    batches.source_policy_id,
+    ids.table_id,
+    proofs.batch_table_ids,
+    batches.status,
+    pg_catalog.num_nonnulls(
+      batches.account_retirement_at,
+      batches.account_retirement_account_count,
+      batches.account_retirement_account_ids_sha256,
+      batches.account_retirement_recovery_object_path,
+      batches.account_retirement_recovery_object_sha256,
+      batches.account_retirement_snapshot_sha256
+    ) as retirement_receipt_fields
+  from valid_legacy_proofs proofs
+  join public.chips_ledger_archive_batches batches on batches.batch_id = proofs.batch_id
+  cross join lateral unnest(proofs.batch_table_ids) ids(table_id)
+  where batches.project_ref = '${STAGE_PROJECT_REF}'
+    and batches.source_policy_id = '${LEGACY_STAGE_ALLOWLIST_POLICY_ID}'
+    and ($3::bigint is null or batches.batch_id = $3::bigint)
+), archive_match_counts as (
+  select table_id, count(*)::bigint as match_count
+  from archive_matches
+  group by table_id
+), candidate_keys as (
+  select
+    accounts.id,
+    matches.batch_id,
+    matches.source_policy_id,
+    matches.table_id,
+    matches.expected_table_ids
+  from archive_matches matches
+  join archive_match_counts counts
+    on counts.table_id = matches.table_id
+   and counts.match_count = 1
+  join public.chips_accounts accounts
+    on accounts.system_key = 'POKER_TABLE:' || matches.table_id::text
+   and accounts.account_type::text = 'ESCROW'
+   and accounts.user_id is null
+   and lower(accounts.status::text) = 'active'
+   and accounts.balance = 0
+  where matches.status = 'committed'
+    and matches.retirement_receipt_fields = 0
+    and not exists (
+      select 1
+      from public.poker_tables tables
+      where tables.id = matches.table_id
+    )
+    and not exists (
+      select 1
+      from public.chips_entries entries
+      where entries.account_id = accounts.id
+    )
+    and not exists (
+      select 1
+      from public.chips_account_snapshot snapshots
+      where snapshots.account_id = accounts.id
+    )
+    and not exists (
+      select 1
+      from public.chips_transaction_idempotency registry
+      where registry.table_id = matches.table_id
+         or registry.archive_batch_id = matches.batch_id
+    )
+), candidate_batches as (
+  select
+    batch_id,
+    source_policy_id,
+    max(pg_catalog.cardinality(expected_table_ids)) as expected_account_count,
+    count(*)::bigint as account_count
+  from candidate_keys
+  group by batch_id, source_policy_id
+  having count(*) = max(pg_catalog.cardinality(expected_table_ids))
+), ranked_batches as (
+  select
+    batches.*,
+    row_number() over (order by batches.batch_id) as batch_rank,
+    sum(batches.account_count) over (
+      order by batches.batch_id
+      rows between unbounded preceding and current row
+    ) as cumulative_account_count
+  from candidate_batches batches
+), selected_batches as (
+  select batch_id, source_policy_id
+  from ranked_batches
+  where batch_rank <= $1::integer
+    and cumulative_account_count <= $2::integer
+)
 select
   accounts.id::text as id,
   accounts.user_id::text as user_id,
@@ -475,10 +705,16 @@ select
   accounts.balance::text as balance,
   accounts.next_entry_seq::text as next_entry_seq,
   accounts.created_at::text as created_at,
-  accounts.updated_at::text as updated_at
-from public.chips_accounts accounts
-where accounts.system_key like 'POKER_TABLE%'
-order by accounts.id asc;`;
+  accounts.updated_at::text as updated_at,
+  candidates.batch_id::text as batch_id,
+  candidates.source_policy_id,
+  candidates.table_id::text as table_id
+from candidate_keys candidates
+join selected_batches selected
+  on selected.batch_id = candidates.batch_id
+ and selected.source_policy_id = candidates.source_policy_id
+join public.chips_accounts accounts on accounts.id = candidates.id
+order by candidates.batch_id asc, candidates.id asc;`;
 
 export const RETENTION_TABLES_SQL = `
 select id::text as id, status, bot_only_retention_complete_at::text as bot_only_retention_complete_at,
@@ -654,7 +890,7 @@ async function sessionTransaction(sql, run, { phase, telemetry, readOnly, transa
   }
 }
 
-export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAGE_SYSTEM_IDENTIFIER, telemetry = null, phase = RETIREMENT_PHASES.AUDIT } = {}) {
+export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAGE_SYSTEM_IDENTIFIER, telemetry = null, phase = RETIREMENT_PHASES.AUDIT, candidateBatchId = null } = {}) {
   if (!sql || typeof sql.unsafe !== "function"
     || (typeof sql.begin !== "function" && typeof sql.release !== "function")) {
     fail("PostgreSQL audit adapter is required");
@@ -683,7 +919,15 @@ export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAG
       [ESCROW_ACCOUNT_RETENTION_POLICY_ID],
       "escrow_retention_policy",
     );
-    const accountRows = (await read(RETENTION_ACCOUNTS_SQL, [], "escrow_retention_accounts", "account")).map(normalizeRow);
+    const invariantRows = (await read(RETENTION_ACCOUNT_INVARIANTS_SQL, [], "escrow_retention_account_invariants", "account_invariant")).map(normalizeRow);
+    if (invariantRows.length !== 1) fail("escrow retention account invariant summary is missing or ambiguous");
+    const invariant = invariantRows[0];
+    const accountRows = (await read(
+      RETENTION_ACCOUNTS_SQL,
+      [MAX_RETIREMENT_BATCHES_PER_RUN, MAX_RETIREMENT_ACCOUNTS_PER_RUN, candidateBatchId],
+      "escrow_retention_accounts",
+      "account_candidate",
+    )).map(normalizeRow);
     const accountsIds = accountRows.map((row) => text(row.id).toLowerCase()).filter((id) => UUID_RE.test(id));
     const accountTableIds = accountRows.map((row) => accountTableIdFromSystemKey(row.system_key)).filter(Boolean);
     const tableIds = [...new Set(accountTableIds)].sort();
@@ -751,6 +995,18 @@ export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAG
     const candidatesByBatch = new Map();
     const alreadyRetired = [];
     const skippedByReason = {};
+    const addSkipped = (reason, value) => {
+      const count = Number(value || 0);
+      if (Number.isSafeInteger(count) && count > 0) skippedByReason[reason] = (skippedByReason[reason] || 0) + count;
+    };
+    addSkipped("account_identity_or_status", invariant.malformed_identity_or_status_count);
+    addSkipped("table_open", invariant.open_table_account_count);
+    addSkipped("table_exists", invariant.closed_table_account_count);
+    addSkipped("table_status_ambiguous", invariant.ambiguous_table_status_account_count);
+    addSkipped(
+      "archive_binding_ambiguous",
+      Number(invariant.missing_archive_binding_count || 0) + Number(invariant.ambiguous_archive_binding_count || 0),
+    );
     for (const account of accountRows) {
       const tableId = accountTableIdFromSystemKey(account.system_key);
       const matches = tableId ? (batchMatchesByTable.get(tableId) || []) : [];
@@ -852,7 +1108,7 @@ export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAG
       unknownForeignKeys: unknownFks,
       unknownDeleteTriggers,
       scannedBatchCount: batchRows.length,
-      scannedAccountCount: accountRows.length,
+      scannedAccountCount: Number(invariant.scanned_account_count || 0),
       candidateAccountCount: candidates.reduce((sum, candidate) => sum + candidate.accountIds.length, 0),
       backlogBatchCount: candidates.length,
       backlogAccountCount: candidates.reduce((sum, candidate) => sum + candidate.accountIds.length, 0),
@@ -1799,7 +2055,7 @@ async function fullyRevalidateCandidate({
   attempt = 1,
 } = {}) {
   await assertAdvisoryLock(sql, lockSession, { phase, batchId: candidate.batchId, attempt, telemetry });
-  const audit = await readOnlyEscrowAudit({ sql, telemetry, phase });
+  const audit = await readOnlyEscrowAudit({ sql, telemetry, phase, candidateBatchId: candidate.batchId });
   const current = validateFreshCandidate(audit, candidate);
   let verified;
   try {
@@ -1886,7 +2142,7 @@ async function revalidateCanaryAuthorization({
       expectedAccountIdsSha256,
     });
   }
-  const audit = await readOnlyEscrowAudit({ sql, telemetry, phase });
+  const audit = await readOnlyEscrowAudit({ sql, telemetry, phase, candidateBatchId: batchId });
   if (audit.stageIdentity !== STAGE_SYSTEM_IDENTIFIER
     || !audit.fenceActive
     || !audit.fenceEnforcementActive) {
@@ -2115,7 +2371,7 @@ export async function runStageEscrowAccountRetention({
       return result;
     }
     currentPhase = RETIREMENT_PHASES.AUDIT;
-    const audit = await readOnlyEscrowAudit({ sql, telemetry, phase: currentPhase });
+    const audit = await readOnlyEscrowAudit({ sql, telemetry, phase: currentPhase, candidateBatchId: batchId });
     log("chips_ledger_stage_escrow_account_retention_audit", {
       stage_system_identifier: audit.stageIdentity,
       backend_pid: audit.backendPid,
@@ -2155,16 +2411,20 @@ export async function runStageEscrowAccountRetention({
       result = { ...base, state: mode === "audit" ? "audit" : "disabled", durationMs: Date.now() - startedAt };
       return result;
     }
-    if (audit.unknownForeignKeys?.length) fail("unknown foreign key dependency blocks escrow account retirement");
-    if (audit.unknownDeleteTriggers?.length) fail("unknown DELETE trigger dependency blocks escrow account retirement");
-    const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
-    await verifyBucket(storageTarget);
     const candidatePool = batchId
       ? audit.candidates.filter((candidate) => text(candidate.batchId) === text(batchId))
       : audit.candidates;
     if (batchId && candidatePool.length !== 1) {
       fail(`exact escrow account-retirement batch ${batchId} is not a current safe candidate`);
     }
+    if (candidatePool.length === 0) {
+      result = { ...base, state: "complete", durationMs: Date.now() - startedAt };
+      return result;
+    }
+    if (audit.unknownForeignKeys?.length) fail("unknown foreign key dependency blocks escrow account retirement");
+    if (audit.unknownDeleteTriggers?.length) fail("unknown DELETE trigger dependency blocks escrow account retirement");
+    const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
+    await verifyBucket(storageTarget);
     if (expectedAccountIdsSha256 && candidatePool.length === 1
       && accountIdsSha256(candidatePool[0].accountIds) !== text(expectedAccountIdsSha256).toLowerCase()) {
       fail(`escrow account-retirement batch ${batchId} account ID SHA-256 changed`);
@@ -2272,6 +2532,7 @@ export async function runStageEscrowAccountRetention({
             phase: RETIREMENT_PHASES.EXECUTE,
             attempt,
           });
+          await verifyBucket(storageTarget, { fresh: true });
           const returned = await runRetirementDatabaseFunction({
             sql,
             candidate: current.candidate,

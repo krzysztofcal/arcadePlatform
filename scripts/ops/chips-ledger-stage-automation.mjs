@@ -4131,6 +4131,37 @@ async function readExactHumanRetentionMarker(tx, tableId, { forUpdate = false } 
   return rows[0];
 }
 
+async function readClosedHumanCompletedLifecycleState({ row, identity, sql } = {}) {
+  const batchId = text(row?.batch_id);
+  const binding = assertClosedHumanExecuteBatch(row, batchId, identity);
+  if (binding.receiptCount !== 5) {
+    fail(`closed-human batch ${batchId} requires a complete prune receipt`);
+  }
+  if (!binding.hasExactGo) {
+    fail(`closed-human batch ${batchId} requires its exact destructive GO`);
+  }
+
+  // The activation canary has no automatic lifecycle-completion step here;
+  // its marker was required when the automatic policy was activated.  A real
+  // candidate still revalidates the canary through verifyCanary() below.
+  if (batchId === CLOSED_HUMAN_AUTOMATIC_ACTIVATION.batchId) {
+    return { tablePresent: false, marker: null, lifecycleComplete: true };
+  }
+
+  const registry = await readClosedHumanDurableRegistryBinding(sql, row);
+  const markerRows = await sql.unsafe(CLOSED_HUMAN_LIFECYCLE_MARKER_SQL, [registry.tableId]);
+  if (markerRows.length > 1
+    || (markerRows.length === 1 && text(markerRows[0]?.table_id) !== registry.tableId)) {
+    fail(`closed-human completed cycle table marker is not unique for batch ${batchId}`);
+  }
+  const marker = markerRows[0] || null;
+  return {
+    tablePresent: marker != null,
+    marker,
+    lifecycleComplete: marker != null && Boolean(marker.human_retention_complete_at),
+  };
+}
+
 async function completeClosedHumanLifecycleInTransaction({
   sql,
   batchId,
@@ -5055,157 +5086,37 @@ export async function runAutomaticClosedHumanStageAutomation({
         };
       } else {
         assertClosedHumanAutomaticPolicy(policyRow);
-        markAutomaticPhase("automatic.storage-preflight");
-        await verifyBucket(storageTarget);
-        const canary = await verifyClosedHumanCanaryRecurringPrerequisites({
-          identity,
-          sql,
-          pruneStore,
-          storageTarget,
-          storageDeps,
-          lockSession,
-        });
+        const ownRows = await loadOwnBatches(sql, CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID);
         await assertAdvisoryLock(sql, lockSession);
-
-      const ownRows = await loadOwnBatches(sql, CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID);
-      const ownCycle = findOwnCycle(ownRows, CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID);
-      let stopReason = null;
-      if (ownCycle.active) {
-        markAutomaticPhase("automatic.resume", ownCycle.active);
-        currentBatch = closedHumanAutomaticProgress({
-          row: ownCycle.active,
-          identity,
-          dry: null,
-          durable: null,
-          state: "in_progress",
-          deployedCommitSha,
-        });
-        const cycle = await processClosedHumanAutomaticCycle({
-          row: ownCycle.active,
-          identity,
-          env: moduleEnv,
-          now,
-          tempRoot,
-          sql,
-          lockSession,
-          pruneStore,
-          storageTarget,
-          verifyBucket,
-          storageDeps,
-          deps,
-          deployedCommitSha,
-        });
-        processed.push(closedHumanAutomaticBatchReport({
-          row: cycle.row,
-          identity,
-          dry: cycle.dry,
-          durable: cycle.durable,
-          executed: cycle.executed,
-          lifecycle: cycle.lifecycle,
-          deployedCommitSha,
-          archiveStorageModified: cycle.archiveStorageModified,
-          recoveryStorageModified: cycle.recoveryStorageModified,
-          dryRunAttempts: cycle.dryRunAttempts,
-          dryRunRetryCount: cycle.dryRunRetryCount,
-          dryRunSqlstates: cycle.dryRunSqlstates,
-          executeAttempts: cycle.executeAttempts,
-          executeRetryCount: cycle.executeRetryCount,
-          executeSqlstates: cycle.executeSqlstates,
-        }));
-        stopReason = "processed_one_closed_human_table";
-      } else if (ownCycle.latestCompleted) {
-        markAutomaticPhase("automatic.completed-recovery", ownCycle.latestCompleted);
-        const completed = await verifyClosedHumanCompletedAutomaticCycle({
-          row: ownCycle.latestCompleted,
-          identity,
-          sql,
-          lockSession,
-          pruneStore,
-          storageTarget,
-          storageDeps,
-        });
-        if (completed.tablePresent && !completed.marker.human_retention_complete_at) {
-          const lifecycle = await completeClosedHumanAutomaticLifecycle({
-            sql,
-            row: completed.row,
+        const ownCycle = findOwnCycle(ownRows, CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID);
+        let canary = null;
+        const verifyCanary = async () => {
+          markAutomaticPhase("automatic.canary-recovery");
+          canary = await verifyClosedHumanCanaryRecurringPrerequisites({
             identity,
-            evidence: completed.dry.evidence,
-            deps,
+            sql,
+            pruneStore,
+            storageTarget,
+            storageDeps,
             lockSession,
           });
-          processed.push(closedHumanAutomaticBatchReport({
-            row: lifecycle.exactRow || completed.row,
-            identity,
-            dry: completed.dry,
-            durable: completed.durable,
-            executed: { state: "already_pruned", evidence: completed.dry.evidence },
-            lifecycle,
-            deployedCommitSha,
-            dryRunAttempts: completed.dryRun.dryRunAttempts,
-            dryRunRetryCount: completed.dryRun.dryRunRetryCount,
-            dryRunSqlstates: completed.dryRun.dryRunSqlstates,
-          }));
-          stopReason = "completed_pending_human_lifecycle";
-        }
-      }
-
-      if (stopReason === null) {
-        markAutomaticPhase("automatic.export");
-        const artifactPath = path.join(tempRoot, "closed-human-automatic.archive.jsonl.gz");
-        const manifestPath = path.join(tempRoot, "closed-human-automatic.archive.manifest.json");
-        const exported = await (deps.exportArchive || runExport)({
-          argv: [
-            "--target", "stage",
-            "--cutoff-days", String(STAGE_RETENTION_DAYS),
-            "--batch-size", String(STAGE_MAX_BATCH_SIZE),
-            "--output", artifactPath,
-            "--manifest", manifestPath,
-          ],
-          env: moduleEnv,
-          cwd: tempRoot,
-          now,
-          deps: {
-            sql,
-            selector: "closed-human-table-30d",
-            schemaVersion: EXPORT_SCHEMA_VERSION,
-            sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
-            targetOptions: { singleTarget: true },
-            noCandidateIfEmpty: true,
-            emit: false,
-          },
-        });
-        await assertAdvisoryLock(sql, lockSession);
-        if (exported.noCandidate) {
-          stopReason = "no_eligible_closed_human_table";
-        } else {
-          markAutomaticPhase("automatic.storage");
-          await (deps.ensureArchiveBucket || ensureArchiveBucket)(storageTarget, storageDeps);
           await assertAdvisoryLock(sql, lockSession);
-          const stored = await (deps.storeArchive || storeArchive)({
-            argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
-            env: moduleEnv,
-            cwd: tempRoot,
-            deps: { ...storageDeps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
-          });
-          const archiveStorageModified = stored.object?.uploaded === true;
-          const candidateRow = await refreshPolicyRow(
-            pruneStore,
-            stored.objectPath,
-            CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
-          );
-          markAutomaticPhase("automatic.manifest", candidateRow);
+          return canary;
+        };
+        let stopReason = null;
+        if (ownCycle.active) {
+          await verifyCanary();
+          markAutomaticPhase("automatic.resume", ownCycle.active);
           currentBatch = closedHumanAutomaticProgress({
-            row: candidateRow,
+            row: ownCycle.active,
             identity,
             dry: null,
             durable: null,
             state: "in_progress",
             deployedCommitSha,
-            archiveStorageModified,
-            recoveryStorageModified: false,
           });
           const cycle = await processClosedHumanAutomaticCycle({
-            row: candidateRow,
+            row: ownCycle.active,
             identity,
             env: moduleEnv,
             now,
@@ -5218,7 +5129,6 @@ export async function runAutomaticClosedHumanStageAutomation({
             storageDeps,
             deps,
             deployedCommitSha,
-            archiveStorageModified,
           });
           processed.push(closedHumanAutomaticBatchReport({
             row: cycle.row,
@@ -5238,25 +5148,160 @@ export async function runAutomaticClosedHumanStageAutomation({
             executeSqlstates: cycle.executeSqlstates,
           }));
           stopReason = "processed_one_closed_human_table";
+        } else if (ownCycle.latestCompleted) {
+          const lifecycleState = await readClosedHumanCompletedLifecycleState({
+            row: ownCycle.latestCompleted,
+            identity,
+            sql,
+          });
+          await assertAdvisoryLock(sql, lockSession);
+          if (!lifecycleState.lifecycleComplete) {
+            await verifyCanary();
+            markAutomaticPhase("automatic.completed-recovery", ownCycle.latestCompleted);
+            const completed = await verifyClosedHumanCompletedAutomaticCycle({
+              row: ownCycle.latestCompleted,
+              identity,
+              sql,
+              lockSession,
+              pruneStore,
+              storageTarget,
+              storageDeps,
+            });
+            if (completed.tablePresent && !completed.marker.human_retention_complete_at) {
+              const lifecycle = await completeClosedHumanAutomaticLifecycle({
+                sql,
+                row: completed.row,
+                identity,
+                evidence: completed.dry.evidence,
+                deps,
+                lockSession,
+              });
+              processed.push(closedHumanAutomaticBatchReport({
+                row: lifecycle.exactRow || completed.row,
+                identity,
+                dry: completed.dry,
+                durable: completed.durable,
+                executed: { state: "already_pruned", evidence: completed.dry.evidence },
+                lifecycle,
+                deployedCommitSha,
+                dryRunAttempts: completed.dryRun.dryRunAttempts,
+                dryRunRetryCount: completed.dryRun.dryRunRetryCount,
+                dryRunSqlstates: completed.dryRun.dryRunSqlstates,
+              }));
+              stopReason = "completed_pending_human_lifecycle";
+            }
+          }
         }
-      }
-      result = {
-        state: "completed",
-        mode: "automatic",
-        sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
-        projectRef: STAGE_PROJECT_REF,
-        stageSystemIdentifier: identity,
-        policy: {
-          enabled: true,
-          canaryBatchId: policyRow.canary_batch_id,
-          activatedAt: policyRow.activated_at,
-          activationConfirmation: policyRow.activation_confirmation,
-        },
-        canaryBatchId: canary.row.batch_id,
-        boundedBatchLimit: CLOSED_HUMAN_AUTOMATIC_MAX_BATCHES_PER_RUN,
-        processed,
-        stopReason: stopReason || "processed_one_closed_human_table",
-      };
+
+        if (stopReason === null) {
+          markAutomaticPhase("automatic.export");
+          const artifactPath = path.join(tempRoot, "closed-human-automatic.archive.jsonl.gz");
+          const manifestPath = path.join(tempRoot, "closed-human-automatic.archive.manifest.json");
+          const exported = await (deps.exportArchive || runExport)({
+            argv: [
+              "--target", "stage",
+              "--cutoff-days", String(STAGE_RETENTION_DAYS),
+              "--batch-size", String(STAGE_MAX_BATCH_SIZE),
+              "--output", artifactPath,
+              "--manifest", manifestPath,
+            ],
+            env: moduleEnv,
+            cwd: tempRoot,
+            now,
+            deps: {
+              sql,
+              selector: "closed-human-table-30d",
+              schemaVersion: EXPORT_SCHEMA_VERSION,
+              sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+              targetOptions: { singleTarget: true },
+              noCandidateIfEmpty: true,
+              emit: false,
+            },
+          });
+          await assertAdvisoryLock(sql, lockSession);
+          if (exported.noCandidate) {
+            stopReason = "no_eligible_closed_human_table";
+          } else {
+            await verifyCanary();
+            markAutomaticPhase("automatic.storage");
+            await (deps.ensureArchiveBucket || ensureArchiveBucket)(storageTarget, storageDeps);
+            await assertAdvisoryLock(sql, lockSession);
+            const stored = await (deps.storeArchive || storeArchive)({
+              argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
+              env: moduleEnv,
+              cwd: tempRoot,
+              deps: { ...storageDeps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
+            });
+            const archiveStorageModified = stored.object?.uploaded === true;
+            const candidateRow = await refreshPolicyRow(
+              pruneStore,
+              stored.objectPath,
+              CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+            );
+            markAutomaticPhase("automatic.manifest", candidateRow);
+            currentBatch = closedHumanAutomaticProgress({
+              row: candidateRow,
+              identity,
+              dry: null,
+              durable: null,
+              state: "in_progress",
+              deployedCommitSha,
+              archiveStorageModified,
+              recoveryStorageModified: false,
+            });
+            const cycle = await processClosedHumanAutomaticCycle({
+              row: candidateRow,
+              identity,
+              env: moduleEnv,
+              now,
+              tempRoot,
+              sql,
+              lockSession,
+              pruneStore,
+              storageTarget,
+              verifyBucket,
+              storageDeps,
+              deps,
+              deployedCommitSha,
+              archiveStorageModified,
+            });
+            processed.push(closedHumanAutomaticBatchReport({
+              row: cycle.row,
+              identity,
+              dry: cycle.dry,
+              durable: cycle.durable,
+              executed: cycle.executed,
+              lifecycle: cycle.lifecycle,
+              deployedCommitSha,
+              archiveStorageModified: cycle.archiveStorageModified,
+              recoveryStorageModified: cycle.recoveryStorageModified,
+              dryRunAttempts: cycle.dryRunAttempts,
+              dryRunRetryCount: cycle.dryRunRetryCount,
+              dryRunSqlstates: cycle.dryRunSqlstates,
+              executeAttempts: cycle.executeAttempts,
+              executeRetryCount: cycle.executeRetryCount,
+              executeSqlstates: cycle.executeSqlstates,
+            }));
+            stopReason = "processed_one_closed_human_table";
+          }
+        }
+        result = {
+          state: "completed",
+          mode: "automatic",
+          sourcePolicyId: CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+          projectRef: STAGE_PROJECT_REF,
+          stageSystemIdentifier: identity,
+          policy: {
+            enabled: true,
+            canaryBatchId: policyRow.canary_batch_id,
+            activatedAt: policyRow.activated_at,
+            activationConfirmation: policyRow.activation_confirmation,
+          },
+          canaryBatchId: canary?.row?.batch_id ?? policyRow.canary_batch_id ?? null,
+          boundedBatchLimit: CLOSED_HUMAN_AUTOMATIC_MAX_BATCHES_PER_RUN,
+          processed,
+          stopReason: stopReason || "processed_one_closed_human_table",
+        };
       }
     }
   } catch (error) {
@@ -5566,71 +5611,6 @@ function assertAutomaticBotOnlyRows(rows) {
   return active[0] || null;
 }
 
-async function verifyAutomaticCompletedBatch({
-  row,
-  identity,
-  env,
-  cwd,
-  sql,
-  lockSession,
-  pruneStore,
-  storageTarget,
-  verifyBucket,
-  storageDeps,
-  inspectRecovery,
-  onProgress = null,
-}) {
-  const dryRunResult = await runAutomaticDryRunWithRetry({
-    row,
-    identity,
-    env,
-    cwd,
-    sql,
-    lockSession,
-    pruneStore,
-    storageTarget,
-    verifyBucket,
-    storageDeps,
-    onProgress,
-  });
-  const refreshed = dryRunResult.row;
-  const dry = dryRunResult.dry;
-  if (typeof onProgress === "function") {
-    onProgress({
-      row: refreshed,
-      dry,
-      dryRunAttempts: dryRunResult.dryRunAttempts,
-      dryRunRetryCount: dryRunResult.dryRunRetryCount,
-      dryRunSqlstates: dryRunResult.dryRunSqlstates,
-    });
-  }
-  if (dry.state !== "already_cleaned") {
-    fail(`automatic bot-only completed batch ${row.batch_id} did not revalidate as already_cleaned: ${dry.state}`);
-  }
-  assertBotOnlyExecuteBatch(refreshed, text(refreshed.batch_id), identity);
-  assertAutomaticBotOnlyDryRunArchive(refreshed, dry, text(refreshed.batch_id));
-  assertAutomaticBotOnlyProofEvidence(refreshed, dry.evidence, text(refreshed.batch_id));
-  if (refreshed.bot_only_table_exists === true && refreshed.bot_only_retention_complete_at == null) {
-    fail(`automatic bot-only completed batch ${refreshed.batch_id} has an empty TABLE lifecycle marker`);
-  }
-  const durable = await inspectRecovery(storageTarget, refreshed, storageDeps);
-  assertResumeRecoveryState(refreshed, durable);
-  assertAutomaticBotOnlyDurableRecovery({
-    row: refreshed,
-    identity,
-    evidence: dry.evidence,
-    durable,
-  });
-  return {
-    row: refreshed,
-    dry,
-    durable,
-    dryRunAttempts: dryRunResult.dryRunAttempts,
-    dryRunRetryCount: dryRunResult.dryRunRetryCount,
-    dryRunSqlstates: dryRunResult.dryRunSqlstates,
-  };
-}
-
 async function assertAutomaticStageFence(sql, label = "automatic bot-only Stage retention") {
   const activeRows = await sql.unsafe("select public.chips_table_fence_is_active() as active;");
   const controlRows = await sql.unsafe(
@@ -5716,8 +5696,6 @@ export async function runAutomaticBotOnlyStageAutomation({
       await assertAdvisoryLock(sql, lockSession);
       markAutomaticPhase("automatic.fence");
       await assertAutomaticStageFence(sql);
-      markAutomaticPhase("automatic.storage-preflight");
-      await verifyBucket(storageTarget);
       markAutomaticPhase("automatic.policy");
       const policyRows = await sql.unsafe(
         "select policy_id, enabled, activated_at::text as activated_at, canary_batch_id::text as canary_batch_id from public.chips_stage_bot_only_retention_policy where policy_id = $1;",
@@ -5743,48 +5721,10 @@ export async function runAutomaticBotOnlyStageAutomation({
         };
       } else {
         let stopReason = null;
-        const completedRecoveryChecked = new Set();
         for (let index = 0; index < BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN; index += 1) {
           markAutomaticPhase("automatic.select");
           await assertAdvisoryLock(sql, lockSession);
           const ownRows = await loadOwnBatches(sql, BOT_ONLY_RETENTION_POLICY_ID);
-          // The query is newest-first and only the latest completed manifest can
-          // affect selection. Keep this recovery revalidation bounded; older
-          // completed manifests are immutable and never selected for execution.
-          const completedRow = ownRows.find((candidate) => candidate.status === "committed"
-            && receiptFieldCount(candidate) === 5
-            && cleanupReceiptFieldCount(candidate) === 3);
-          if (completedRow && !completedRecoveryChecked.has(completedRow.object_path)) {
-            markAutomaticPhase("automatic.completed-recovery", completedRow);
-            await verifyAutomaticCompletedBatch({
-              row: completedRow,
-              identity,
-              env: moduleEnv,
-              cwd: tempRoot,
-              sql,
-              lockSession,
-              pruneStore,
-              storageTarget,
-              verifyBucket,
-              storageDeps,
-              inspectRecovery,
-              onProgress: ({ row: progressRow, dry: progressDry, ...dryRunProgress }) => {
-                currentBatch = automaticBatchProgress({
-                  row: progressRow,
-                  identity,
-                  dry: progressDry,
-                  durable: null,
-                  state: progressDry?.state === "already_cleaned" ? "already_cleaned" : "in_progress",
-                  deployedCommitSha,
-                  archiveStorageModified: false,
-                  recoveryStorageModified: false,
-                  ...dryRunProgress,
-                });
-              },
-            });
-            completedRecoveryChecked.add(completedRow.object_path);
-            currentBatch = null;
-          }
           let activeRow = assertAutomaticBotOnlyRows(ownRows);
           if (activeRow) markAutomaticPhase("automatic.manifest", activeRow);
 
