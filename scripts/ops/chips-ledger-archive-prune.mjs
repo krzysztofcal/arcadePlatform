@@ -1844,8 +1844,16 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
     idle_timeout: 30,
   }));
   const store = deps.pruneStore || createPruneStore(sql);
+  const storageVerificationContext = deps.storageVerificationContext || null;
   const verifyBucket = deps.verifyBucket
-    || ((storageTarget) => verifyArchiveBucket(storageTarget, deps));
+    || ((storageTarget, options = {}) => {
+      if (options.fresh || !storageVerificationContext?.verify) {
+        return options.fresh && storageVerificationContext?.verifyFresh
+          ? storageVerificationContext.verifyFresh(storageTarget, deps)
+          : verifyArchiveBucket(storageTarget, deps);
+      }
+      return storageVerificationContext.verify(storageTarget, deps);
+    });
   let row = null;
   const phase = args.registerProof
     ? LEGACY_STAGE_PHASES.PROOF_REGISTRATION
@@ -1893,6 +1901,12 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
     ) && !(isClosedHumanPolicy && closedHumanAutomatic)) {
       fail("--automatic is only valid for an enabled Stage automatic policy");
     }
+
+    // Keep an independent, fresh Storage boundary immediately before the
+    // destructive DB operation when this run has a reusable context. A direct
+    // prune invocation without a context already performed a fresh check at
+    // the start of this function.
+    if (args.execute && storageVerificationContext) await verifyBucket(target, { fresh: true });
 
     if (args.registerProof) {
       const proof = row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
@@ -2003,7 +2017,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
     let postCommitDownloadMs = null;
     if (args.execute) {
       try {
-        await verifyBucket(target);
+        await verifyBucket(target, { fresh: true });
         const postCommitDownload = deps.downloadArchive
           ? await deps.downloadArchive(target, resultRow.object_path)
           : await downloadPrivateArchiveObject(target, resultRow.object_path, deps);

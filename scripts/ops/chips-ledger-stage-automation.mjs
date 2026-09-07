@@ -21,6 +21,7 @@ import {
   ARCHIVE_MAX_BYTES,
   buildRecoveryArchiveObjectPath,
   buildRecoveryManifestObjectPath,
+  createStorageVerificationContext,
   downloadPrivateArchiveObject,
   ensureArchiveBucket,
   readPrivateObjectIfExists,
@@ -28,7 +29,6 @@ import {
   resolveStorageTarget,
   storeArchive,
   uploadOrVerifyPrivateObject,
-  verifyArchiveBucket,
 } from "./chips-ledger-archive-store.mjs";
 import {
   buildRecoveryManifest,
@@ -1841,12 +1841,87 @@ function assertAutomaticBotOnlyMainArchive(row, mainArchive, dry, batchId) {
   return archiveSha256;
 }
 
-export async function inspectDurableRecoveryState(storageTarget, row, deps = {}) {
+function durableRecoveryCacheKey(storageTarget, row) {
+  const objectPath = text(row?.object_path);
+  const committedSha = text(row?.compressed_sha256);
+  return [
+    storageTarget?.baseUrl || "",
+    storageTarget?.projectRef || "",
+    objectPath,
+    committedSha,
+    buildRecoveryArchiveObjectPath(committedSha),
+    buildRecoveryManifestObjectPath(committedSha),
+  ].join("\u0000");
+}
+
+export function createDurableRecoveryContext() {
+  let cacheKey = null;
+  let cachedInspection = null;
+  let pendingInspection = null;
+
+  const clear = () => {
+    cacheKey = null;
+    cachedInspection = null;
+    pendingInspection = null;
+  };
+
+  return {
+    invalidate(storageTarget = null, row = null) {
+      if (storageTarget == null && row == null) {
+        clear();
+        return;
+      }
+      if (cacheKey === durableRecoveryCacheKey(storageTarget, row)) clear();
+    },
+    inspect(storageTarget, row, deps = {}) {
+      const nextKey = durableRecoveryCacheKey(storageTarget, row);
+      if (cacheKey !== nextKey) {
+        cacheKey = nextKey;
+        cachedInspection = null;
+        pendingInspection = null;
+      }
+      if (cachedInspection) return Promise.resolve(cachedInspection);
+      if (pendingInspection) return pendingInspection;
+      const pending = inspectDurableRecoveryStateUncached(storageTarget, row, deps).then((inspection) => {
+        if (inspection.state === DURABLE_RECOVERY_STATES.COMPLETE
+          || inspection.state === DURABLE_RECOVERY_STATES.BOTH_MISSING) {
+          if (cacheKey === nextKey) cachedInspection = inspection;
+        }
+        if (pendingInspection === pending) pendingInspection = null;
+        return inspection;
+      }, (error) => {
+        if (pendingInspection === pending) pendingInspection = null;
+        throw error;
+      });
+      pendingInspection = pending;
+      return pending;
+    },
+  };
+}
+
+function createStageStorageDeps(deps = {}) {
+  const storageVerificationContext = deps.storageVerificationContext || createStorageVerificationContext();
+  const durableRecoveryContext = deps.durableRecoveryContext || createDurableRecoveryContext();
+  const storageDeps = {
+    ...deps,
+    storageVerificationContext,
+    durableRecoveryContext,
+  };
+  const verifyBucket = deps.verifyBucket || ((storageTarget, options = {}) => (
+    options.fresh
+      ? storageVerificationContext.verifyFresh(storageTarget, storageDeps)
+      : storageVerificationContext.verify(storageTarget, storageDeps)
+  ));
+  return { storageDeps, verifyBucket };
+}
+
+async function inspectDurableRecoveryStateUncached(storageTarget, row, deps = {}) {
   const archivePath = buildRecoveryArchiveObjectPath(row.compressed_sha256);
   const manifestPath = buildRecoveryManifestObjectPath(row.compressed_sha256);
+  const readPrivateObject = deps.readPrivateObjectIfExists || readPrivateObjectIfExists;
   const read = async (objectPath) => {
     try {
-      return { object: await readPrivateObjectIfExists(storageTarget, objectPath, deps), error: null };
+      return { object: await readPrivateObject(storageTarget, objectPath, deps), error: null };
     } catch (error) {
       return { object: null, error };
     }
@@ -1953,6 +2028,12 @@ export async function inspectDurableRecoveryState(storageTarget, row, deps = {})
     });
     return { state, durable: null, attempts, storage, error };
   }
+}
+
+export async function inspectDurableRecoveryState(storageTarget, row, deps = {}) {
+  const context = deps.durableRecoveryContext;
+  if (context?.inspect) return context.inspect(storageTarget, row, deps);
+  return inspectDurableRecoveryStateUncached(storageTarget, row, deps);
 }
 
 export async function inspectDurableRecovery(storageTarget, row, deps = {}) {
@@ -2108,6 +2189,7 @@ function assertCanonicalBotOnlyRecovery(durable, canonical, batchId) {
 async function inspectDurableRecoveryAfterWrite(storageTarget, row, deps = {}) {
   let lastInspection = null;
   for (let attempt = 1; attempt <= DURABLE_RECOVERY_READ_MAX_ATTEMPTS; attempt += 1) {
+    deps.durableRecoveryContext?.invalidate?.(storageTarget, row);
     const inspected = await inspectDurableRecoveryState(storageTarget, row, deps);
     lastInspection = inspected;
     if (inspected.state === DURABLE_RECOVERY_STATES.COMPLETE) {
@@ -2179,6 +2261,9 @@ export async function persistDurableRecovery(storageTarget, row, identity, evide
     if (existing.state !== DURABLE_RECOVERY_STATES.BOTH_MISSING) {
       throw existing.error || new Error(`durable recovery state is ${existing.state}`);
     }
+    // A missing-state inspection may be cached for the read-only part of the
+    // run, but it must never survive a possible Storage write.
+    deps.durableRecoveryContext?.invalidate?.(storageTarget, row);
     recoveryWriteAttempted = true;
     recoveryArchive = await uploadOrVerifyPrivateObject({
       storageTarget,
@@ -2186,12 +2271,14 @@ export async function persistDurableRecovery(storageTarget, row, identity, evide
       bytes: archiveBytes,
       deps,
     });
+    deps.durableRecoveryContext?.invalidate?.(storageTarget, row);
     recoveryManifest = await uploadOrVerifyPrivateObject({
       storageTarget,
       objectPath: buildRecoveryManifestObjectPath(row.compressed_sha256),
       bytes: manifestGzipBytes,
       deps,
     });
+    deps.durableRecoveryContext?.invalidate?.(storageTarget, row);
     const verified = await inspectDurableRecoveryAfterWrite(storageTarget, row, deps);
     assertDurableRecoveryForEvidence({ row, identity, evidence, durable: verified });
     if (isBotOnlyRetentionBatch(row)) assertBotOnlyRecoveryManifest(verified.manifest, text(row.batch_id));
@@ -2243,7 +2330,7 @@ export async function runBotOnlyRecoveryRepair({ env = process.env, deps = {}, b
     ensurePrivateDirectory(tempRoot);
     const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
     const pruneStore = deps.pruneStore || createPruneStore(sql);
-    const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
+    const { storageDeps, verifyBucket } = createStageStorageDeps(deps);
     const inspectRecovery = deps.inspectDurableRecovery || inspectDurableRecovery;
     const persistRecovery = deps.persistDurableRecovery || persistDurableRecovery;
     const replaceRecoveryManifest = deps.replaceVerifiedPrivateObject || replaceVerifiedPrivateObject;
@@ -2265,7 +2352,7 @@ export async function runBotOnlyRecoveryRepair({ env = process.env, deps = {}, b
     }
 
     await verifyBucket(storageTarget);
-    const existing = await inspectRecovery(storageTarget, row, deps);
+    const existing = await inspectRecovery(storageTarget, row, storageDeps);
     const initialRecoveryState = existing === null
       ? null
       : assertKnownBatch15RecoveryRepairTarget(row, existing);
@@ -2280,7 +2367,7 @@ export async function runBotOnlyRecoveryRepair({ env = process.env, deps = {}, b
       pruneStore,
       storageTarget,
       verifyBucket,
-      storageDeps: deps,
+      storageDeps,
     });
     if (dry.state !== "ready") fail(`bot-only batch 15 recovery archive verification did not become ready: ${dry.state}`);
     await assertAdvisoryLock(sql, lockSession);
@@ -2290,8 +2377,8 @@ export async function runBotOnlyRecoveryRepair({ env = process.env, deps = {}, b
     let receipt = "recovery-only";
     let storageModified = false;
     if (initialRecoveryState === null) {
-      const main = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, deps);
-      durable = await persistRecovery(storageTarget, row, identity, dry.evidence, main.bytes, deps);
+      const main = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, storageDeps);
+      durable = await persistRecovery(storageTarget, row, identity, dry.evidence, main.bytes, storageDeps);
       if (durable.recoveryArchive?.uploaded !== true || durable.recoveryManifest?.uploaded !== true) {
         fail("bot-only batch 15 recovery repair did not create both previously missing objects");
       }
@@ -2310,7 +2397,7 @@ export async function runBotOnlyRecoveryRepair({ env = process.env, deps = {}, b
       }
 
       await assertAdvisoryLock(sql, lockSession);
-      const current = await inspectRecovery(storageTarget, row, deps);
+      const current = await inspectRecovery(storageTarget, row, storageDeps);
       const currentRecoveryState = assertKnownBatch15RecoveryRepairTarget(row, current);
       if (!current.archiveBytes.equals(existing.archiveBytes)) {
         fail("bot-only batch 15 recovery repair changed the recovery archive while verifying the manifest");
@@ -2331,7 +2418,7 @@ export async function runBotOnlyRecoveryRepair({ env = process.env, deps = {}, b
           objectPath: BOT_ONLY_BATCH_15_RECOVERY_REPAIR.recoveryManifestPath,
           expectedCurrentBytes: current.manifestGzipBytes,
           bytes: canonical.manifestGzipBytes,
-          deps,
+          deps: storageDeps,
         });
         const replacementAlreadyReplaced = replacement.alreadyReplaced === true;
         const replacementApplied = replacement.replaced === true;
@@ -2611,6 +2698,7 @@ export async function runStageRecoveryDiagnostic({
     }
     const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
     const pruneStore = deps.pruneStore || createPruneStore(sql);
+    const { storageDeps, verifyBucket } = createStageStorageDeps(deps);
     const identity = await assertIdentity(sql);
     let exactRow = null;
     let selectedRow = null;
@@ -2691,9 +2779,8 @@ export async function runStageRecoveryDiagnostic({
 
     const recoveryArchivePath = buildRecoveryArchiveObjectPath(row.compressed_sha256);
     const recoveryManifestPath = buildRecoveryManifestObjectPath(row.compressed_sha256);
-    const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
     await verifyBucket(storageTarget);
-    const inspected = await inspectDurableRecoveryState(storageTarget, row, deps);
+    const inspected = await inspectDurableRecoveryState(storageTarget, row, storageDeps);
     let mainArchive = {
       object_path: row.object_path,
       present: false,
@@ -2703,7 +2790,7 @@ export async function runStageRecoveryDiagnostic({
       error: null,
     };
     try {
-      const object = await (deps.readPrivateObjectIfExists || readPrivateObjectIfExists)(storageTarget, row.object_path, deps);
+      const object = await (deps.readPrivateObjectIfExists || readPrivateObjectIfExists)(storageTarget, row.object_path, storageDeps);
       if (object) {
         const objectSha256 = object.sha256;
         mainArchive = {
@@ -2807,7 +2894,7 @@ export async function runStageExactRecoveryRepair({
     ensurePrivateDirectory(tempRoot);
     const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
     const pruneStore = deps.pruneStore || createPruneStore(sql);
-    const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
+    const { storageDeps, verifyBucket } = createStageStorageDeps(deps);
 
     lockSession = await acquireAdvisoryLock(sql);
     if (!lockSession) fail("Stage 30-day recovery repair requires the Stage advisory lock");
@@ -2822,7 +2909,7 @@ export async function runStageExactRecoveryRepair({
     await assertAdvisoryLock(sql, lockSession);
 
     await verifyBucket(storageTarget);
-    const existing = await inspectDurableRecoveryState(storageTarget, row, deps);
+    const existing = await inspectDurableRecoveryState(storageTarget, row, storageDeps);
     if (existing.state !== DURABLE_RECOVERY_STATES.BOTH_MISSING) {
       const error = existing.error || new Error(`Stage 30-day recovery repair requires both recovery objects to be missing; state is ${existing.state}`);
       error.recoveryState = existing.state;
@@ -2841,7 +2928,7 @@ export async function runStageExactRecoveryRepair({
       pruneStore,
       storageTarget,
       verifyBucket,
-      storageDeps: deps,
+      storageDeps,
     });
     if (dry.state !== "ready") fail(`Stage 30-day recovery dry-run did not become ready: ${dry.state}`);
     if (!dry.evidence || typeof dry.evidence !== "object") fail("Stage 30-day recovery dry-run evidence is missing");
@@ -2858,7 +2945,8 @@ export async function runStageExactRecoveryRepair({
       sourcePolicyId: recoveryPolicyId,
     });
     await assertAdvisoryLock(sql, lockSession);
-    const beforeWrite = await inspectDurableRecoveryState(storageTarget, row, deps);
+    storageDeps.durableRecoveryContext?.invalidate?.(storageTarget, row);
+    const beforeWrite = await inspectDurableRecoveryState(storageTarget, row, storageDeps);
     if (beforeWrite.state !== DURABLE_RECOVERY_STATES.BOTH_MISSING) {
       const error = new Error(`Stage 30-day recovery repair recovery state changed before write; state is ${beforeWrite.state}`);
       error.recoveryState = beforeWrite.state;
@@ -2867,7 +2955,7 @@ export async function runStageExactRecoveryRepair({
       throw error;
     }
 
-    const main = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, deps);
+    const main = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, storageDeps);
     assertStageRetentionMainArchive(row, main, dry, exactBatchId);
     const durable = await (deps.persistDurableRecovery || persistDurableRecovery)(
       storageTarget,
@@ -2875,7 +2963,7 @@ export async function runStageExactRecoveryRepair({
       identity,
       dry.evidence,
       main.bytes,
-      deps,
+      storageDeps,
     );
     if (durable.recoveryArchive?.uploaded !== true || durable.recoveryManifest?.uploaded !== true) {
       fail("Stage 30-day recovery repair did not create both previously missing objects");
@@ -3288,6 +3376,7 @@ export async function executeVerifiedCycle({
       ...storageDeps,
       beforeExecuteRetry: async ({ row: retryRow }) => {
         if (!lockSession) fail("automatic cleanup retry advisory lock session is unavailable");
+        storageDeps.durableRecoveryContext?.invalidate?.(storageTarget, retryRow || row);
         // Re-run the complete read-only preflight through the same bounded
         // retry policy as the initial automatic dry-run.  Each attempt checks
         // the lock, refreshes the manifest, validates the archive/evidence,
@@ -3329,7 +3418,7 @@ export async function executeVerifiedCycle({
           fail(`automatic bot-only batch ${batchId} has an incomplete TABLE lifecycle marker after cleanup retry`);
         }
         const inspectRecovery = storageDeps.inspectDurableRecovery || inspectDurableRecovery;
-        if (typeof verifyBucket === "function") await verifyBucket(storageTarget);
+        if (typeof verifyBucket === "function") await verifyBucket(storageTarget, { fresh: true });
         const refreshedDurable = await inspectRecovery(storageTarget, refreshedRow, storageDeps);
         assertResumeRecoveryState(refreshedRow, refreshedDurable);
         assertAutomaticBotOnlyDurableRecovery({
@@ -3680,7 +3769,7 @@ export async function runStageAutomation({
     ensurePrivateDirectory(tempRoot);
     const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
     const pruneStore = deps.pruneStore || createPruneStore(sql);
-    const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
+    const { storageDeps, verifyBucket } = createStageStorageDeps(deps);
 
     lockSession = await acquireAdvisoryLock(sql);
     if (!lockSession) {
@@ -3693,7 +3782,7 @@ export async function runStageAutomation({
       await assertAdvisoryLock(sql, lockSession);
       const ownCycle = findOwnCycle(ownRows, sourcePolicyId);
       if (ownCycle.active) {
-        const resumed = await resumeOwnCycle({ row: await refreshPolicyRow(pruneStore, ownCycle.active.object_path, sourcePolicyId), identity, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps, sourcePolicyId, execute });
+        const resumed = await resumeOwnCycle({ row: await refreshPolicyRow(pruneStore, ownCycle.active.object_path, sourcePolicyId), identity, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps, sourcePolicyId, execute });
         await assertAdvisoryLock(sql, lockSession);
         result = {
           state: resumed.state,
@@ -3715,7 +3804,7 @@ export async function runStageAutomation({
             pruneStore,
             storageTarget,
             verifyBucket,
-            storageDeps: deps,
+            storageDeps,
           });
           await assertAdvisoryLock(sql, lockSession);
         }
@@ -3748,29 +3837,29 @@ export async function runStageAutomation({
           result = { state: "no-op", reason: "no_eligible_candidate" };
         } else {
           const ensureBucket = deps.ensureArchiveBucket || ensureArchiveBucket;
-          await ensureBucket(storageTarget, deps);
+          await ensureBucket(storageTarget, storageDeps);
           await assertAdvisoryLock(sql, lockSession);
           const store = deps.storeArchive || storeArchive;
           const stored = await store({
             argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
             env: moduleEnv,
             cwd: tempRoot,
-            deps: { ...deps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
+            deps: { ...storageDeps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
           });
           let row = await refreshPolicyRow(pruneStore, stored.objectPath, sourcePolicyId);
           await assertAdvisoryLock(sql, lockSession);
-          await runPruneStep({ row, mode: "register-proof", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
+          await runPruneStep({ row, mode: "register-proof", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps });
           row = await refreshPolicyRow(pruneStore, row.object_path, sourcePolicyId);
           await assertAdvisoryLock(sql, lockSession);
-          const dry = await runPruneStep({ row, mode: "dry-run", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
+          const dry = await runPruneStep({ row, mode: "dry-run", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps });
           if (dry.state !== "ready") fail(`Stage automation dry-run did not become ready: ${dry.state}`);
           await assertAdvisoryLock(sql, lockSession);
           const downloadMain = deps.downloadPrivateArchive || downloadPrivateArchiveObject;
-          const main = await downloadMain(storageTarget, row.object_path, deps);
-          const durable = await persistDurableRecovery(storageTarget, row, identity, dry.evidence, main.bytes, deps);
+          const main = await downloadMain(storageTarget, row.object_path, storageDeps);
+          const durable = await persistDurableRecovery(storageTarget, row, identity, dry.evidence, main.bytes, storageDeps);
           await assertAdvisoryLock(sql, lockSession);
           const executed = execute
-            ? await executeVerifiedCycle({ row, identity, durable, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps })
+            ? await executeVerifiedCycle({ row, identity, durable, env: moduleEnv, tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps })
             : { state: "prepared", evidence: dry.evidence };
           await assertAdvisoryLock(sql, lockSession);
           result = {
@@ -3887,7 +3976,7 @@ export async function runClosedHumanTableStageCanary({
     ensurePrivateDirectory(tempRoot);
     const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
     const pruneStore = deps.pruneStore || createPruneStore(sql);
-    const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
+    const { storageDeps, verifyBucket } = createStageStorageDeps(deps);
     lockSession = await acquireAdvisoryLock(sql);
     if (!lockSession) {
       result = {
@@ -3909,7 +3998,7 @@ export async function runClosedHumanTableStageCanary({
         pruneStore,
         storageTarget,
         verifyBucket,
-        storageDeps: deps,
+        storageDeps,
         assertLock: () => assertAdvisoryLock(sql, lockSession),
       });
       result = closedHumanReport({
@@ -4135,7 +4224,7 @@ export async function runClosedHumanTableLifecycleCompletion({
     ensurePrivateDirectory(tempRoot);
     const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
     const pruneStore = deps.pruneStore || createPruneStore(sql);
-    const verifyBucket = deps.verifyBucket || ((targetValue) => verifyArchiveBucket(targetValue, deps));
+    const { storageDeps, verifyBucket } = createStageStorageDeps(deps);
     lockSession = await acquireAdvisoryLock(sql);
     if (!lockSession) fail("closed-human lifecycle completion advisory lock is busy");
 
@@ -4170,7 +4259,7 @@ export async function runClosedHumanTableLifecycleCompletion({
       pruneStore,
       storageTarget,
       verifyBucket,
-      storageDeps: deps,
+      storageDeps,
     });
     if (dry.state !== "already_pruned") {
       fail(`exact closed-human lifecycle batch ${target.batchIdText} requires a complete prune receipt: ${dry.state}`);
@@ -4184,7 +4273,7 @@ export async function runClosedHumanTableLifecycleCompletion({
     }
 
     const inspectRecovery = deps.inspectDurableRecovery || inspectDurableRecovery;
-    const durable = await inspectRecovery(storageTarget, activeRow, deps);
+    const durable = await inspectRecovery(storageTarget, activeRow, storageDeps);
     assertResumeRecoveryState(activeRow, durable);
     assertDurableRecoveryReady(durable);
     assertDurableRecoveryForEvidence({
@@ -4647,6 +4736,7 @@ async function processClosedHumanAutomaticCycle({
     ...storageDeps,
     beforeExecuteRetry: async ({ row: retryRow }) => {
       await assertAdvisoryLock(sql, lockSession);
+      storageDeps.durableRecoveryContext?.invalidate?.(storageTarget, retryRow || currentRow);
       const refreshedRow = await refreshPolicyRow(
         pruneStore,
         retryRow?.object_path || currentRow.object_path,
@@ -4785,7 +4875,7 @@ export async function runClosedHumanTableRetentionActivation({
     ensurePrivateDirectory(tempRoot);
     const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
     const pruneStore = deps.pruneStore || createPruneStore(sql);
-    const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
+    const { storageDeps, verifyBucket } = createStageStorageDeps(deps);
     lockSession = await acquireAdvisoryLock(sql);
     if (!lockSession) fail("closed-human automatic activation requires the Stage advisory lock");
     const identity = await assertIdentity(sql);
@@ -4808,7 +4898,7 @@ export async function runClosedHumanTableRetentionActivation({
       pruneStore,
       storageTarget,
       verifyBucket,
-      storageDeps: deps,
+      storageDeps,
       lockSession,
       automatic: policyBefore.enabled === true || policyBefore.enabled === "t",
     });
@@ -4926,7 +5016,7 @@ export async function runAutomaticClosedHumanStageAutomation({
     ensurePrivateDirectory(tempRoot);
     const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
     const pruneStore = deps.pruneStore || createPruneStore(sql);
-    const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
+    const { storageDeps, verifyBucket } = createStageStorageDeps(deps);
     const inspectRecovery = deps.inspectDurableRecovery || inspectDurableRecovery;
     markAutomaticPhase("automatic.lock");
     lockSession = await acquireAdvisoryLock(sql);
@@ -4972,7 +5062,7 @@ export async function runAutomaticClosedHumanStageAutomation({
           sql,
           pruneStore,
           storageTarget,
-          storageDeps: deps,
+          storageDeps,
           lockSession,
         });
         await assertAdvisoryLock(sql, lockSession);
@@ -5001,7 +5091,7 @@ export async function runAutomaticClosedHumanStageAutomation({
           pruneStore,
           storageTarget,
           verifyBucket,
-          storageDeps: deps,
+          storageDeps,
           deps,
           deployedCommitSha,
         });
@@ -5032,7 +5122,7 @@ export async function runAutomaticClosedHumanStageAutomation({
           lockSession,
           pruneStore,
           storageTarget,
-          storageDeps: deps,
+          storageDeps,
         });
         if (completed.tablePresent && !completed.marker.human_retention_complete_at) {
           const lifecycle = await completeClosedHumanAutomaticLifecycle({
@@ -5089,13 +5179,13 @@ export async function runAutomaticClosedHumanStageAutomation({
           stopReason = "no_eligible_closed_human_table";
         } else {
           markAutomaticPhase("automatic.storage");
-          await (deps.ensureArchiveBucket || ensureArchiveBucket)(storageTarget, deps);
+          await (deps.ensureArchiveBucket || ensureArchiveBucket)(storageTarget, storageDeps);
           await assertAdvisoryLock(sql, lockSession);
           const stored = await (deps.storeArchive || storeArchive)({
             argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
             env: moduleEnv,
             cwd: tempRoot,
-            deps: { ...deps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
+            deps: { ...storageDeps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
           });
           const archiveStorageModified = stored.object?.uploaded === true;
           const candidateRow = await refreshPolicyRow(
@@ -5125,7 +5215,7 @@ export async function runAutomaticClosedHumanStageAutomation({
             pruneStore,
             storageTarget,
             verifyBucket,
-            storageDeps: deps,
+            storageDeps,
             deps,
             deployedCommitSha,
             archiveStorageModified,
@@ -5245,7 +5335,7 @@ export async function runBotOnlyStageAutomation({
     ensurePrivateDirectory(tempRoot);
     const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
     const pruneStore = deps.pruneStore || createPruneStore(sql);
-    const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
+    const { storageDeps, verifyBucket } = createStageStorageDeps(deps);
     const inspectRecovery = deps.inspectDurableRecovery || inspectDurableRecovery;
     const persistRecovery = deps.persistDurableRecovery || persistDurableRecovery;
     lockSession = await acquireAdvisoryLock(sql);
@@ -5264,7 +5354,7 @@ export async function runBotOnlyStageAutomation({
           pruneStore,
           storageTarget,
           verifyBucket,
-          storageDeps: deps,
+          storageDeps,
           assertLock: () => assertAdvisoryLock(sql, lockSession),
         });
         result = botOnlyReport({
@@ -5305,7 +5395,7 @@ export async function runBotOnlyStageAutomation({
           argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
           env: moduleEnv,
           cwd: tempRoot,
-          deps: { ...deps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
+          deps: { ...storageDeps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
         });
         if (stored.objectPath !== row.object_path) fail("pending bot-only manifest object path differs from the reproduced artifact");
         const refreshed = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
@@ -5322,24 +5412,24 @@ export async function runBotOnlyStageAutomation({
       const prepareExisting = async (row) => {
         row = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
         if (!row.archive_proof_verified_at) {
-          await runPruneStep({ row, mode: "register-proof", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
+          await runPruneStep({ row, mode: "register-proof", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps });
           row = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
         }
-        const dry = await runPruneStep({ row, mode: "dry-run", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
+        const dry = await runPruneStep({ row, mode: "dry-run", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps });
         if (dry.state === "already_cleaned") return { row, dry, durable: null };
         if (dry.state !== "ready") fail(`bot-only Stage dry-run did not become ready: ${dry.state}`);
-        const existing = await inspectRecovery(storageTarget, row, deps);
+        const existing = await inspectRecovery(storageTarget, row, storageDeps);
         assertResumeRecoveryState(row, existing);
         let durable = existing;
         if (!durable) {
-          const mainArchive = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, deps);
+          const mainArchive = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, storageDeps);
           durable = await persistRecovery(
             storageTarget,
             row,
             identity,
             dry.evidence,
             mainArchive.bytes,
-            deps,
+            storageDeps,
           );
         }
         return { row, dry, durable, executed: null };
@@ -5368,7 +5458,7 @@ export async function runBotOnlyStageAutomation({
             pruneStore,
             storageTarget,
             verifyBucket,
-            storageDeps: deps,
+            storageDeps,
           });
           if (completed.state !== "already_cleaned") fail(`completed bot-only Stage cycle did not revalidate as already_cleaned: ${completed.state}`);
         }
@@ -5393,20 +5483,20 @@ export async function runBotOnlyStageAutomation({
           result = botOnlyNoCandidateReport({ exported, identity, deployedCommitSha });
         }
         else {
-          await (deps.ensureArchiveBucket || ensureArchiveBucket)(storageTarget, deps);
+          await (deps.ensureArchiveBucket || ensureArchiveBucket)(storageTarget, storageDeps);
           const stored = await (deps.storeArchive || storeArchive)({
             argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
             env: moduleEnv,
             cwd: tempRoot,
-            deps: { ...deps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
+            deps: { ...storageDeps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
           });
           let row = await refreshPolicyRow(pruneStore, stored.objectPath, BOT_ONLY_RETENTION_POLICY_ID);
-          await runPruneStep({ row, mode: "register-proof", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
+          await runPruneStep({ row, mode: "register-proof", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps });
           row = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
-          const dry = await runPruneStep({ row, mode: "dry-run", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps: deps });
+          const dry = await runPruneStep({ row, mode: "dry-run", env: moduleEnv, cwd: tempRoot, sql, pruneStore, storageTarget, verifyBucket, storageDeps });
           if (dry.state !== "ready") fail(`new bot-only Stage dry-run did not become ready: ${dry.state}`);
-          const main = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, deps);
-          const durable = await persistDurableRecovery(storageTarget, row, identity, dry.evidence, main.bytes, deps);
+          const main = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, storageDeps);
+          const durable = await persistDurableRecovery(storageTarget, row, identity, dry.evidence, main.bytes, storageDeps);
           result = botOnlyReport({
             row,
             identity,
@@ -5594,7 +5684,7 @@ export async function runAutomaticBotOnlyStageAutomation({
     tempRoot = deps.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-bot-only-automatic-"));
     ensurePrivateDirectory(tempRoot);
     const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
-    const verifyBucket = deps.verifyBucket || ((target) => verifyArchiveBucket(target, deps));
+    const { storageDeps, verifyBucket } = createStageStorageDeps(deps);
     const inspectRecovery = deps.inspectDurableRecovery || inspectDurableRecovery;
     const persistRecovery = deps.persistDurableRecovery || persistDurableRecovery;
     const executeCycle = deps.executeVerifiedCycle || executeVerifiedCycle;
@@ -5676,7 +5766,7 @@ export async function runAutomaticBotOnlyStageAutomation({
               pruneStore,
               storageTarget,
               verifyBucket,
-              storageDeps: deps,
+              storageDeps,
               inspectRecovery,
               onProgress: ({ row: progressRow, dry: progressDry, ...dryRunProgress }) => {
                 currentBatch = automaticBatchProgress({
@@ -5736,7 +5826,7 @@ export async function runAutomaticBotOnlyStageAutomation({
               argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
               env: moduleEnv,
               cwd: tempRoot,
-              deps: { ...deps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
+              deps: { ...storageDeps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
             });
             if (stored.objectPath !== row.object_path) fail("incomplete automatic bot-only manifest changed its object path");
             activeArchiveStorageModified = stored.object?.uploaded === true;
@@ -5787,7 +5877,7 @@ export async function runAutomaticBotOnlyStageAutomation({
             const proofWasPresentBeforeResume = Boolean(row.archive_proof_verified_at);
             if (!row.archive_proof_verified_at) {
               markAutomaticPhase("automatic.recovery", row);
-              const recoveryBeforeProof = await inspectRecovery(storageTarget, row, deps);
+              const recoveryBeforeProof = await inspectRecovery(storageTarget, row, storageDeps);
               if (recoveryBeforeProof === undefined) {
                 fail(`automatic bot-only batch ${row.batch_id} recovery absence was not confirmed by Storage`);
               }
@@ -5802,7 +5892,7 @@ export async function runAutomaticBotOnlyStageAutomation({
                 pruneStore,
                 storageTarget,
                 verifyBucket,
-                storageDeps: deps,
+                storageDeps,
               });
               row = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
               markAutomaticPhase("automatic.manifest", row);
@@ -5828,7 +5918,7 @@ export async function runAutomaticBotOnlyStageAutomation({
               pruneStore,
               storageTarget,
               verifyBucket,
-              storageDeps: deps,
+              storageDeps,
               onProgress: ({ row: progressRow, dry: progressDry, ...dryRunProgress }) => {
                 currentBatch = automaticBatchProgress({
                   row: progressRow,
@@ -5863,7 +5953,7 @@ export async function runAutomaticBotOnlyStageAutomation({
             if (dry.state === "already_cleaned") {
               if (lifecycle.cleanupCount !== 3) fail("automatic bot-only manifest has a partial completed receipt");
               markAutomaticPhase("automatic.recovery", row);
-              const durable = await inspectRecovery(storageTarget, row, deps);
+              const durable = await inspectRecovery(storageTarget, row, storageDeps);
               assertResumeRecoveryState(row, durable);
               assertAutomaticBotOnlyDurableRecovery({
                 row,
@@ -5902,7 +5992,7 @@ export async function runAutomaticBotOnlyStageAutomation({
             }
             if (dry.state !== "ready") fail("automatic bot-only Stage dry-run did not become ready: " + dry.state);
             markAutomaticPhase("automatic.recovery", row);
-            const existing = await inspectRecovery(storageTarget, row, deps);
+            const existing = await inspectRecovery(storageTarget, row, storageDeps);
             if (existing === undefined) {
               fail(`automatic bot-only batch ${batchId} recovery state was not confirmed by Storage`);
             }
@@ -5918,10 +6008,10 @@ export async function runAutomaticBotOnlyStageAutomation({
                 dryRunState: dry.state,
                 durable: existing,
               });
-              const mainArchive = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, deps);
+              const mainArchive = await (deps.downloadPrivateArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, storageDeps);
               assertAutomaticBotOnlyMainArchive(row, mainArchive, dry, batchId);
               try {
-                durable = await persistRecovery(storageTarget, row, identity, dry.evidence, mainArchive.bytes, deps);
+                durable = await persistRecovery(storageTarget, row, identity, dry.evidence, mainArchive.bytes, storageDeps);
               } catch (error) {
                 const recoveryStorageModified = Object.hasOwn(error?.storageMutation || {}, "recoveryStorageModified")
                   ? error.storageMutation.recoveryStorageModified
@@ -6011,7 +6101,7 @@ export async function runAutomaticBotOnlyStageAutomation({
               storageTarget,
               automatic: true,
               verifyBucket,
-              storageDeps: deps,
+              storageDeps,
               lockSession,
               onExecuteProgress,
               waitForExecuteRetry: deps.waitForExecuteRetry || null,
@@ -6071,7 +6161,7 @@ export async function runAutomaticBotOnlyStageAutomation({
               storageTarget,
               automatic: true,
               verifyBucket,
-              storageDeps: deps,
+              storageDeps,
               lockSession,
               waitForExecuteRetry: deps.waitForExecuteRetry || null,
             });
@@ -6205,12 +6295,12 @@ export async function runAutomaticBotOnlyStageAutomation({
             break;
           }
           markAutomaticPhase("automatic.storage");
-          await (deps.ensureArchiveBucket || ensureArchiveBucket)(storageTarget, deps);
+          await (deps.ensureArchiveBucket || ensureArchiveBucket)(storageTarget, storageDeps);
           const stored = await (deps.storeArchive || storeArchive)({
             argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
             env: moduleEnv,
             cwd: tempRoot,
-            deps: { ...deps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
+            deps: { ...storageDeps, sql, storageTarget, targetOptions: { singleTarget: true }, emit: false },
           });
           const archiveStorageModified = stored.object?.uploaded === true;
           if (stored.manifest) {

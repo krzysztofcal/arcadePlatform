@@ -12,6 +12,7 @@ import {
 import {
   ARCHIVE_BUCKET,
   ARCHIVE_MAX_BYTES,
+  createStorageVerificationContext,
   downloadPrivateArchiveObject,
   TABLE_IDENTITY_SUMMARY_ERROR_CODES,
   assertTableIdentitySummary,
@@ -352,6 +353,23 @@ try {
     publicBucketStorage.calls.map(({ method, path: requestPath }) => [method, requestPath]),
     [["GET", `/storage/v1/bucket/${ARCHIVE_BUCKET}`]],
     "read-only bucket verification must never create or update a bucket",
+  );
+
+  const runScopedBucketStorage = makeFetch({ bucketInitiallyExists: true });
+  const runScopedBucketContext = createStorageVerificationContext();
+  const runScopedTarget = resolveStorageTarget("stage", ENV);
+  await Promise.all([
+    runScopedBucketContext.verify(runScopedTarget, { fetch: runScopedBucketStorage.fetch }),
+    runScopedBucketContext.verify(runScopedTarget, { fetch: runScopedBucketStorage.fetch }),
+    runScopedBucketContext.verify(runScopedTarget, { fetch: runScopedBucketStorage.fetch }),
+  ]);
+  await runScopedBucketContext.verify(runScopedTarget, { fetch: runScopedBucketStorage.fetch });
+  assert.equal(
+    runScopedBucketStorage.calls.filter(({ method, path: requestPath }) => (
+      method === "GET" && requestPath === `/storage/v1/bucket/${ARCHIVE_BUCKET}`
+    )).length,
+    1,
+    "a run-scoped bucket context must coalesce repeated verification requests",
   );
 
   const privateObjectPath = `v1/sha256/${"a".repeat(64)}.jsonl.gz`;

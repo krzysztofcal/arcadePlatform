@@ -70,6 +70,7 @@ const TRANSIENT_STORAGE_NETWORK_ERROR_CODES = new Set([
   "UND_ERR_HEADERS_TIMEOUT",
   "UND_ERR_SOCKET",
 ]);
+const SAFE_STORAGE_ERROR_CODE_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 
 const HELP = `Usage: node scripts/ops/chips-ledger-archive-store.mjs [options]
 
@@ -698,6 +699,41 @@ async function waitForStorageGetRetry(deps, attempt) {
   await sleep(delay);
 }
 
+function klog(kind, data) {
+  process.stdout.write(`[klog] ${kind} ${JSON.stringify(data)}\n`);
+}
+
+function safeStorageErrorCodeValue(value) {
+  const candidate = value == null ? null : String(value);
+  return candidate && SAFE_STORAGE_ERROR_CODE_RE.test(candidate) ? candidate : null;
+}
+
+async function safeStorageErrorCode(response) {
+  for (const headerName of ["x-supabase-error-code", "x-supabase-api-error-code"]) {
+    const value = safeStorageErrorCodeValue(response?.headers?.get(headerName));
+    if (value) return value;
+  }
+  try {
+    const body = await response.clone().json();
+    return safeStorageErrorCodeValue(body?.code || body?.error_code || body?.error?.code);
+  } catch {
+    return null;
+  }
+}
+
+async function logFailedStorageGet(deps, { operation, response = null, attempt }) {
+  const log = deps.klog || klog;
+  const retryAfter = response?.headers?.get("retry-after") || null;
+  const supabaseErrorCode = response ? await safeStorageErrorCode(response) : null;
+  log("chips_ledger_storage_get_failed", {
+    operation,
+    status: response?.status ?? null,
+    attempt_count: attempt,
+    retry_after: retryAfter,
+    supabase_error_code: supabaseErrorCode,
+  });
+}
+
 function isRetryableStorageGetStatus(status) {
   return status === 429 || (status >= 500 && status <= 599);
 }
@@ -705,8 +741,11 @@ function isRetryableStorageGetStatus(status) {
 async function storageRequest(storageTarget, requestPath, options = {}, deps = {}) {
   const fetchImpl = deps.fetch || fetch;
   const method = String(options.method || "GET").toUpperCase();
+  const operation = options.storageOperation || `${method} ${requestPath}`;
+  const requestOptions = { ...options };
+  delete requestOptions.storageOperation;
   const request = {
-    ...options,
+    ...requestOptions,
     headers: {
       apikey: storageTarget.serviceKey,
       Authorization: `Bearer ${storageTarget.serviceKey}`,
@@ -718,10 +757,16 @@ async function storageRequest(storageTarget, requestPath, options = {}, deps = {
     try {
       const response = await fetchImpl(`${storageTarget.baseUrl}${requestPath}`, request);
       if (method !== "GET" || !isRetryableStorageGetStatus(response.status) || attempt === maxAttempts) {
+        if (method === "GET" && !response.ok) {
+          await logFailedStorageGet(deps, { operation, response, attempt });
+        }
         return response;
       }
     } catch (error) {
-      if (method !== "GET" || !isTransientStorageNetworkError(error) || attempt === maxAttempts) throw error;
+      if (method !== "GET" || !isTransientStorageNetworkError(error) || attempt === maxAttempts) {
+        if (method === "GET") await logFailedStorageGet(deps, { operation, attempt, error });
+        throw error;
+      }
     }
     await waitForStorageGetRetry(deps, attempt);
   }
@@ -759,17 +804,89 @@ function verifyBucket(bucket) {
   return bucket;
 }
 
+function storageTargetCacheKey(storageTarget) {
+  return [
+    storageTarget?.baseUrl || "",
+    storageTarget?.projectRef || "",
+    storageTarget?.serviceKey || "",
+    ARCHIVE_BUCKET,
+  ].join("\u0000");
+}
+
+export function createStorageVerificationContext() {
+  let targetKey = null;
+  let verifiedBucket = null;
+  let pendingVerification = null;
+
+  const clear = () => {
+    targetKey = null;
+    verifiedBucket = null;
+    pendingVerification = null;
+  };
+
+  return {
+    get(storageTarget) {
+      return targetKey === storageTargetCacheKey(storageTarget) ? verifiedBucket : null;
+    },
+    remember(storageTarget, bucket) {
+      targetKey = storageTargetCacheKey(storageTarget);
+      verifiedBucket = bucket;
+      pendingVerification = null;
+      return bucket;
+    },
+    invalidate(storageTarget = null) {
+      if (storageTarget == null || targetKey === storageTargetCacheKey(storageTarget)) clear();
+    },
+    verify(storageTarget, deps = {}) {
+      const nextKey = storageTargetCacheKey(storageTarget);
+      if (targetKey !== nextKey) {
+        targetKey = nextKey;
+        verifiedBucket = null;
+        pendingVerification = null;
+      }
+      if (verifiedBucket) return Promise.resolve(verifiedBucket);
+      if (pendingVerification) return pendingVerification;
+      const verification = verifyArchiveBucket(storageTarget, deps);
+      const pending = verification.then((bucket) => {
+        if (targetKey === nextKey) verifiedBucket = bucket;
+        if (pendingVerification === pending) pendingVerification = null;
+        return bucket;
+      }, (error) => {
+        if (pendingVerification === pending) pendingVerification = null;
+        if (targetKey === nextKey) verifiedBucket = null;
+        throw error;
+      });
+      pendingVerification = pending;
+      return pending;
+    },
+    async verifyFresh(storageTarget, deps = {}) {
+      const bucket = await verifyArchiveBucket(storageTarget, deps);
+      return this.remember(storageTarget, bucket);
+    },
+  };
+}
+
 export async function verifyArchiveBucket(storageTarget, deps = {}) {
-  const response = await storageRequest(storageTarget, bucketRequestPath(), { method: "GET" }, deps);
+  const response = await storageRequest(storageTarget, bucketRequestPath(), {
+    method: "GET",
+    storageOperation: "bucket verification",
+  }, deps);
   if (!response.ok) storageFailure("bucket verification", response);
   return verifyBucket(await readJsonResponse(response, "bucket verification"));
 }
 
 export async function ensureArchiveBucket(storageTarget, deps = {}) {
-  let response = await storageRequest(storageTarget, bucketRequestPath(), { method: "GET" }, deps);
+  const verificationContext = deps.storageVerificationContext;
+  const cached = verificationContext?.get?.(storageTarget);
+  if (cached) return cached;
+  let response = await storageRequest(storageTarget, bucketRequestPath(), {
+    method: "GET",
+    storageOperation: "bucket ensure lookup",
+  }, deps);
   if (await isMissingStorageResponse(response)) {
     const createResponse = await storageRequest(storageTarget, "/storage/v1/bucket", {
       method: "POST",
+      storageOperation: "bucket creation",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         id: ARCHIVE_BUCKET,
@@ -780,10 +897,15 @@ export async function ensureArchiveBucket(storageTarget, deps = {}) {
       }),
     }, deps);
     if (!createResponse.ok && createResponse.status !== 409) storageFailure("bucket creation", createResponse);
-    response = await storageRequest(storageTarget, bucketRequestPath(), { method: "GET" }, deps);
+    response = await storageRequest(storageTarget, bucketRequestPath(), {
+      method: "GET",
+      storageOperation: "bucket ensure verification",
+    }, deps);
   }
   if (!response.ok) storageFailure("bucket verification/creation", response);
-  return verifyBucket(await readJsonResponse(response, "bucket verification/creation"));
+  const verified = verifyBucket(await readJsonResponse(response, "bucket verification/creation"));
+  verificationContext?.remember?.(storageTarget, verified);
+  return verified;
 }
 
 function manifestRow(manifest, storageTarget, objectPath, legacyStageAllowlistPlan = null) {
@@ -880,7 +1002,10 @@ function verifyDownloadedBytes(localArchive, downloaded) {
 }
 
 async function downloadObject(localArchive, storageTarget, deps = {}) {
-  const response = await storageRequest(storageTarget, objectRequestPath(localArchive.objectPath), { method: "GET" }, deps);
+  const response = await storageRequest(storageTarget, objectRequestPath(localArchive.objectPath), {
+    method: "GET",
+    storageOperation: "archive object lookup",
+  }, deps);
   if (!response.ok) return { response, downloaded: null };
   if ((response.headers.get("content-type") || "").split(";", 1)[0].trim() !== ARCHIVE_MIME_TYPE) {
     fail(`private archive object has an unexpected MIME type: ${localArchive.objectPath}`);
@@ -890,7 +1015,10 @@ async function downloadObject(localArchive, storageTarget, deps = {}) {
 
 export async function downloadPrivateArchiveObject(storageTarget, objectPath, deps = {}) {
   const startedAt = Date.now();
-  const response = await storageRequest(storageTarget, objectRequestPath(objectPath), { method: "GET" }, deps);
+  const response = await storageRequest(storageTarget, objectRequestPath(objectPath), {
+    method: "GET",
+    storageOperation: "private archive object download",
+  }, deps);
   if (!response.ok) storageFailure("private object download", response);
   if ((response.headers.get("content-type") || "").split(";", 1)[0].trim() !== ARCHIVE_MIME_TYPE) {
     fail(`private archive object has an unexpected MIME type: ${objectPath}`);
@@ -909,7 +1037,10 @@ export async function downloadPrivateObjectIfExists(storageTarget, objectPath, d
 }
 
 export async function readPrivateObjectIfExists(storageTarget, objectPath, deps = {}) {
-  const response = await storageRequest(storageTarget, objectRequestPath(objectPath), { method: "GET" }, deps);
+  const response = await storageRequest(storageTarget, objectRequestPath(objectPath), {
+    method: "GET",
+    storageOperation: "private object lookup",
+  }, deps);
   if (await isMissingStorageResponse(response)) return null;
   if (!response.ok) storageFailure("private object download", response);
   const mimeType = (response.headers.get("content-type") || "").split(";", 1)[0].trim();
@@ -936,7 +1067,10 @@ export async function readPrivateObjectIfExists(storageTarget, objectPath, deps 
 export async function uploadOrVerifyPrivateObject({ storageTarget, objectPath, bytes, mimeType = ARCHIVE_MIME_TYPE, deps = {} }) {
   const expected = Buffer.from(bytes || []);
   if (expected.length < 1 || expected.length > ARCHIVE_MAX_BYTES) fail("private recovery object has an invalid size");
-  const initial = await storageRequest(storageTarget, objectRequestPath(objectPath), { method: "GET" }, deps);
+  const initial = await storageRequest(storageTarget, objectRequestPath(objectPath), {
+    method: "GET",
+    storageOperation: "private recovery object lookup",
+  }, deps);
   let objectExisted = false;
   let uploaded = false;
   if (initial.ok) {
@@ -950,6 +1084,7 @@ export async function uploadOrVerifyPrivateObject({ storageTarget, objectPath, b
     if (!(await isMissingStorageResponse(initial))) storageFailure("private recovery object lookup", initial);
     const upload = await storageRequest(storageTarget, objectRequestPath(objectPath, ""), {
       method: "POST",
+      storageOperation: "private recovery object upload",
       headers: { "content-type": mimeType, "x-upsert": "false" },
       body: expected,
     }, deps);
@@ -962,7 +1097,10 @@ export async function uploadOrVerifyPrivateObject({ storageTarget, objectPath, b
   const verificationReadAttempts = initial.ok ? 1 : STORAGE_GET_MAX_ATTEMPTS;
   let verified = null;
   for (let attempt = 1; attempt <= verificationReadAttempts; attempt += 1) {
-    const response = await storageRequest(storageTarget, objectRequestPath(objectPath), { method: "GET" }, deps);
+    const response = await storageRequest(storageTarget, objectRequestPath(objectPath), {
+      method: "GET",
+      storageOperation: "private recovery object verification",
+    }, deps);
     if (await isMissingStorageResponse(response)) {
       if (attempt < verificationReadAttempts) {
         await waitForStorageGetRetry(deps, attempt);
@@ -1006,7 +1144,10 @@ export async function replaceVerifiedPrivateObject({
   if (replacement.length < 1 || replacement.length > ARCHIVE_MAX_BYTES) fail("private object replacement has an invalid size");
 
   const readObject = async (operation) => {
-    const response = await storageRequest(storageTarget, objectRequestPath(objectPath), { method: "GET" }, deps);
+    const response = await storageRequest(storageTarget, objectRequestPath(objectPath), {
+      method: "GET",
+      storageOperation: operation,
+    }, deps);
     if (await isMissingStorageResponse(response)) return null;
     if (!response.ok) storageFailure(operation, response);
     if ((response.headers.get("content-type") || "").split(";", 1)[0].trim() !== mimeType) {
@@ -1088,6 +1229,7 @@ export async function uploadOrVerifyObject(localArchive, storageTarget, deps = {
   const uploadStarted = Date.now();
   const uploadResponse = await storageRequest(storageTarget, objectRequestPath(localArchive.objectPath, ""), {
     method: "POST",
+    storageOperation: "archive object upload",
     headers: { "content-type": ARCHIVE_MIME_TYPE, "x-upsert": "false" },
     body: localArchive.compressedBytes,
   }, deps);
