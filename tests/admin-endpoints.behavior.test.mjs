@@ -467,3 +467,30 @@ test("admin-user-ledger returns target user entries with cursor params", async (
   assert.equal(body.items.length, 1);
   assert.equal(body.nextCursor, "cursor-2");
 });
+
+test("admin-user-ledger uses the same runtime ledger-version resolver contract", async () => {
+  const versionFor = async (env) => {
+    const handler = createAdminUserLedgerHandler({
+      env: { CHIPS_ENABLED: "1", ...env },
+      requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+      listUserLedger: async () => ({ items: [], nextCursor: null }),
+    });
+    const response = await handler(event("GET", {
+      userId: "00000000-0000-4000-8000-000000000077",
+    }));
+    return response.headers["x-chips-ledger-version"];
+  };
+
+  assert.equal(
+    await versionFor({ COMMIT_REF: "  admin-commit  ", DEPLOY_ID: "admin-deploy", BUILD_ID: "admin-build" }),
+    "admin-commit",
+  );
+  assert.equal(
+    await versionFor({ COMMIT_REF: " ", DEPLOY_ID: "  admin-deploy  ", BUILD_ID: "admin-build" }),
+    "admin-deploy",
+  );
+  assert.equal(
+    await versionFor({ COMMIT_REF: "", DEPLOY_ID: " ", BUILD_ID: "  " }),
+    "unavailable",
+  );
+});
