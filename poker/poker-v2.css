@@ -381,6 +381,7 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 @media (min-width:480px){.poker-scene{height:min(76vh, 860px);} .poker-seat{width:126px;} .poker-hero-cards{bottom:136px;} .poker-card{width:50px; height:68px;}}
 
 @media (max-width:640px){.poker-live-actions{align-items:stretch;} .poker-live-input{width:calc(50% - 5px);} .poker-live-input input{width:100%;} .poker-action-bar{width:min(33vw, 156px); right:8px; bottom:8px; gap:6px; padding:6px; grid-template-columns:34px minmax(0, 1fr);} .poker-action-buttons{min-height:170px; gap:6px;} .poker-action-amount-input{height:170px;} .poker-action-amount-input input{height:106px; min-height:106px;} .poker-reaction-history{width:34px;} .poker-reaction-history__toggle{width:34px;} .poker-social-settings__toggle{width:34px;} .poker-reaction-history__panel,.poker-reaction-history__list{max-height:180px;}}
+@media (max-width:640px){.poker-reaction-anchor--left .poker-seat-reaction-bubble{left:0;} .poker-reaction-anchor--right .poker-seat-reaction-bubble{left:-4px;}}
 
 @media (max-width:479px){.poker-settlement-summary{width:min(36vw, 135px); max-height:132px; font-size:0.6rem;} .poker-settlement-summary__row{grid-template-columns:1fr; gap:2px;} .poker-settlement-summary__recipients{text-align:left;} .poker-seat-settlement-badge{max-width:112px;}}
 
