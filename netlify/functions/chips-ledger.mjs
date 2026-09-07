@@ -1,14 +1,18 @@
 import { baseHeaders, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { listUserLedger, listUserLedgerAfterSeq, listUserLedgerPage } from "./_shared/chips-ledger.mjs";
 
-const LEDGER_VERSION = process.env.COMMIT_REF || process.env.BUILD_ID || process.env.DEPLOY_ID || new Date().toISOString();
-
-function withLedgerVersion(headers) {
-  return { ...headers, "x-chips-ledger-version": LEDGER_VERSION };
+function resolveLedgerVersion(env) {
+  for (const key of ["COMMIT_REF", "DEPLOY_ID", "BUILD_ID"]) {
+    const value = typeof env?.[key] === "string" ? env[key].trim() : "";
+    if (value) return value;
+  }
+  return "unavailable";
 }
 
 export function createChipsLedgerHandler(deps = {}) {
   const env = deps.env || process.env;
+  const ledgerVersion = resolveLedgerVersion(env);
+  const withLedgerVersion = (headers) => ({ ...headers, "x-chips-ledger-version": ledgerVersion });
   const verifyJwt = deps.verifySupabaseJwt || verifySupabaseJwt;
   const listCursorPage = deps.listUserLedger || listUserLedger;
   const listLegacyPage = deps.listUserLedgerAfterSeq || listUserLedgerAfterSeq;

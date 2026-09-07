@@ -13,6 +13,16 @@ function event(queryStringParameters) {
   };
 }
 
+async function ledgerVersionFor(env) {
+  const handler = createChipsLedgerHandler({
+    env: { CHIPS_ENABLED: "1", ...env },
+    verifySupabaseJwt: async () => ({ valid: true, userId: USER_ID }),
+    listUserLedgerPage: async () => ({ items: [], pagination: {} }),
+  });
+  const response = await handler(event({ page: "1", limit: "10" }));
+  return response.headers["x-chips-ledger-version"];
+}
+
 test("chips-ledger forwards numbered pagination and returns total page metadata", async () => {
   let seen = null;
   const handler = createChipsLedgerHandler({
@@ -46,4 +56,23 @@ test("chips-ledger rejects invalid numbered pages", async () => {
   const response = await handler(event({ page: "0", limit: "10" }));
   assert.equal(response.statusCode, 400);
   assert.deepEqual(JSON.parse(response.body), { error: "invalid_page" });
+});
+
+test("chips-ledger resolves runtime version by deploy identity priority", async () => {
+  assert.equal(
+    await ledgerVersionFor({ COMMIT_REF: "  commit-sha  ", DEPLOY_ID: "deploy-id", BUILD_ID: "build-id" }),
+    "commit-sha",
+  );
+  assert.equal(
+    await ledgerVersionFor({ COMMIT_REF: "   ", DEPLOY_ID: "  deploy-id  ", BUILD_ID: "build-id" }),
+    "deploy-id",
+  );
+  assert.equal(
+    await ledgerVersionFor({ COMMIT_REF: "", DEPLOY_ID: " ", BUILD_ID: "  build-id  " }),
+    "build-id",
+  );
+});
+
+test("chips-ledger uses an explicit unavailable version without deploy identities", async () => {
+  assert.equal(await ledgerVersionFor({ COMMIT_REF: " ", DEPLOY_ID: "", BUILD_ID: "  " }), "unavailable");
 });
